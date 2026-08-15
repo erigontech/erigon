@@ -426,6 +426,16 @@ func zeroTipEmptyCoinbaseScenario() *testFinalizeScenario {
 	return s
 }
 
+// londonZeroTipEmptyCoinbaseScenario: the adjustment has two halves that can
+// move apart — an EIP-161 delete of the emptied coinbase and the burnt-fee
+// credit — so one can vanish between rounds while the other still matches.
+func londonZeroTipEmptyCoinbaseScenario() *testFinalizeScenario {
+	s := londonTransferScenario()
+	s.name = "london_zero_tip_empty_coinbase"
+	s.feeTipped = uint256.Int{}
+	return s
+}
+
 // senderIsCoinbaseScenario builds a scenario where the transaction sender is
 // also the fee recipient. Tests add the TxOut and CollectorWrites shapes they need.
 //
@@ -1961,6 +1971,42 @@ func TestFeeEntry_NilIsAbsent(t *testing.T) {
 	require.True(t, ws.IsEmpty(), "an absent entry has nothing to write")
 	require.True(t, absent.recordedIn(ws, state.Version{TxIndex: 3}),
 		"an address the adjustment does not touch must not hold the skip back")
+}
+
+// An absent entry is only absent from this round. What the recorded set holds
+// for its address decides whether the shape still matches.
+func TestFeeEntry_AbsentEntryMatchesOnlyAnAddressWithNoFeeWrite(t *testing.T) {
+	t.Parallel()
+	var absent *feeEntry
+	addr := fAddr("coinbase")
+	version := state.Version{TxIndex: 3, TxNum: 7}
+
+	require.True(t, absent.shapeRecordedIn(&state.WriteSet{}, version, addr),
+		"nothing recorded for the address is the shape a round emitting none has")
+
+	for _, tc := range []struct {
+		name  string
+		write func(ws *state.WriteSet)
+	}{
+		{"delete", func(ws *state.WriteSet) {
+			(&feeEntry{addr: addr, deleted: true}).writeTo(ws, version)
+		}},
+		{"credit", func(ws *state.WriteSet) {
+			(&feeEntry{addr: addr, acc: *fMakeAccount(5, 0)}).writeTo(ws, version)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := &state.WriteSet{}
+			tc.write(ws)
+			require.False(t, absent.shapeRecordedIn(ws, version, addr),
+				"a %s this round no longer emits must be taken back, not read as recorded", tc.name)
+		})
+	}
+
+	workerWrite := &state.WriteSet{}
+	(&feeEntry{addr: addr, deleted: true}).writeTo(workerWrite, state.Version{TxIndex: 3})
+	require.True(t, absent.shapeRecordedIn(workerWrite, version, addr),
+		"the worker's own delete carries no TxNum and is not the fee shape")
 }
 
 func TestFeeEntry_DeleteArmFencedByTxNum(t *testing.T) {

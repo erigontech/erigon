@@ -232,3 +232,57 @@ func TestRecordFeeMerge_RetractsVanishedCredit(t *testing.T) {
 	r.be.awaitMapReleases()
 	require.Equal(t, 0, merged.Count(), "the retracted merge product must be released")
 }
+
+// A Recorded round has nothing to do, and doing it anyway is not free: the
+// merge product would be rebuilt and the one it replaces released, so the
+// recorded set and the version map must come out of the round untouched.
+func TestRecordFeeMerge_RecordedRoundKeepsTheCredit(t *testing.T) {
+	t.Parallel()
+	s := zeroTipEmptyCoinbaseScenario()
+	r := newFeeCreditRound(t, s)
+	version := r.task.Version()
+
+	require.NotNil(t, r.run(t), "the first round must credit")
+	merged := r.recorded()
+	require.Same(t, merged, r.credited(), "the merge product is this version's credit")
+
+	require.Nil(t, r.run(t), "a set that already carries this exact credit is not re-credited")
+
+	require.Same(t, merged, r.recorded(), "a Recorded round must not replace the recorded set")
+	require.Same(t, merged, r.credited(), "nor drop the temp that says it is credited")
+	r.be.awaitMapReleases()
+	require.NotEqual(t, 0, merged.Count(), "nor release the maps the recorded set still holds")
+	_, _, ok := r.vm.ReadSelfDestruct(s.coinbase, version.TxIndex+1)
+	require.True(t, ok, "the credit must stay visible to later txs")
+}
+
+// One half of the adjustment can stop applying while the other still matches.
+// The half that still matches must not answer for the whole shape: a delete
+// left recorded after an earlier tx funded the coinbase removes a funded
+// account.
+func TestRecordFeeMerge_RetractsHalfOfVanishedCredit(t *testing.T) {
+	t.Parallel()
+	s := londonZeroTipEmptyCoinbaseScenario()
+	r := newFeeCreditRound(t, s)
+	version := r.task.Version()
+
+	first := r.run(t)
+	require.NotNil(t, first, "the first round must emit both halves")
+	sd, ok := first.GetSelfDestruct(s.coinbase)
+	require.True(t, ok, "an emptied coinbase is deleted")
+	require.True(t, sd.Val)
+	require.NotNil(t, findBalance(first, s.burntAddr), "London burns to the burnt contract")
+
+	// An earlier tx funds the coinbase, so this round no longer empties it. The
+	// burnt half is untouched and still matches what was recorded.
+	r.setPreCreditBalance(s.coinbase, 1)
+	require.NotNil(t, r.run(t),
+		"the delete stopped applying, so the round must rebuild the credit without it")
+
+	rebuilt := r.recorded()
+	_, ok = rebuilt.GetSelfDestruct(s.coinbase)
+	require.False(t, ok, "a stale delete would remove the funded coinbase")
+	require.NotNil(t, findBalance(rebuilt, s.burntAddr), "the half that still applies stays recorded")
+	_, _, ok = r.vm.ReadSelfDestruct(s.coinbase, version.TxIndex+1)
+	require.False(t, ok, "a delete the round no longer emits must not stay in the version map")
+}

@@ -2038,7 +2038,8 @@ func (result *execResult) calcFees(
 	}
 	// The credit only moves when a prior tx's writes moved under it, so most
 	// rounds would rebuild the set the tx already carries.
-	if coinbaseEntry.recordedIn(credited, taskVersion) && burntEntry.recordedIn(credited, taskVersion) {
+	if coinbaseEntry.shapeRecordedIn(credited, taskVersion, result.Coinbase) &&
+		burntEntry.shapeRecordedIn(credited, taskVersion, burntAddr) {
 		return nil, feeCreditRecorded, nil
 	}
 
@@ -2068,6 +2069,31 @@ type feeEntry struct {
 	acc     accounts.Account
 	reason  tracing.BalanceChangeReason
 	deleted bool
+}
+
+// shapeRecordedIn reports whether ws carries exactly what this round emits for
+// addr: the entry verbatim, or no fee write at all when the round emits none
+// for it. An entry that stopped applying must not read as recorded — the write
+// it left behind would keep a shape the adjustment no longer has.
+func (e *feeEntry) shapeRecordedIn(ws *state.WriteSet, version state.Version, addr accounts.Address) bool {
+	if e == nil {
+		return !hasFeeWrite(ws, version, addr)
+	}
+	return e.recordedIn(ws, version)
+}
+
+// hasFeeWrite reports whether ws carries a fee write for addr. The version tells
+// one apart from the worker's own write to the same address: the task version
+// carries a TxNum, a worker's own writes do not.
+func hasFeeWrite(ws *state.WriteSet, version state.Version, addr accounts.Address) bool {
+	if sd, ok := ws.GetSelfDestruct(addr); ok && sd.Version == version {
+		return true
+	}
+	if bw, ok := ws.GetBalance(addr); ok && bw.Version == version {
+		return true
+	}
+	aw, ok := ws.GetAddress(addr)
+	return ok && aw.Version == version
 }
 
 // recordedIn reports whether ws already carries this entry verbatim. The delete
@@ -2540,11 +2566,17 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 		merged = base.MergeInto(tipWrites)
 	}
 
+	var stale *state.WriteSet
 	if superseded && merged != temp.writes {
-		be.dropStaleVersionedWrites(txVersion, temp.writes, merged)
-		be.queueMapRelease(temp.writes)
+		stale = temp.writes
+		be.dropStaleVersionedWrites(txVersion, stale, merged)
 	}
+	// Record before releasing: until the replacement is recorded, a reader of
+	// this tx's writes still holds the superseded set the release clears.
 	be.blockIO.RecordWrites(txVersion, merged)
+	if stale != nil {
+		be.queueMapRelease(stale)
+	}
 	if outcome == feeCreditNew {
 		be.feeMergeTemp[txVersion.TxIndex] = feeMerge{writes: merged, base: base, version: txVersion}
 	} else {
