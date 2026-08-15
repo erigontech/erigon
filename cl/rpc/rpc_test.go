@@ -3,7 +3,9 @@ package rpc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
@@ -20,6 +22,40 @@ type blockResponseSentinel struct {
 	sentinelproto.SentinelClient
 	response   []byte
 	bannedPeer string
+}
+
+type contextRecordingSentinel struct {
+	sentinelproto.SentinelClient
+	deadline    time.Time
+	hasDeadline bool
+}
+
+func (s *contextRecordingSentinel) SendRequest(ctx context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	s.deadline, s.hasDeadline = ctx.Deadline()
+	return nil, errors.New("request stopped")
+}
+
+func (s *contextRecordingSentinel) SendPeerRequest(ctx context.Context, _ *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	s.deadline, s.hasDeadline = ctx.Deadline()
+	return nil, errors.New("request stopped")
+}
+
+func TestReqRespRequestsPreserveCallerDeadline(t *testing.T) {
+	deadline := time.Now().Add(time.Hour)
+	ctx, cancel := context.WithDeadline(t.Context(), deadline)
+	defer cancel()
+
+	for _, withPeer := range []bool{false, true} {
+		sentinel := &contextRecordingSentinel{}
+		client := &BeaconRpcP2P{sentinel: sentinel}
+		if withPeer {
+			_, _, _ = client.sendRequestWithPeer(ctx, "topic", nil, "peer", 0)
+		} else {
+			_, _, _ = client.sendRequest(ctx, "topic", nil, 0)
+		}
+		require.True(t, sentinel.hasDeadline)
+		require.Equal(t, deadline, sentinel.deadline)
+	}
 }
 
 func (s *blockResponseSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {

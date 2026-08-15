@@ -24,7 +24,6 @@ import (
 	"fmt"
 	"io"
 	"strings"
-	"time"
 
 	"github.com/c2h5oh/datasize"
 	"go.uber.org/zap/buffer"
@@ -420,8 +419,6 @@ func (b *BeaconRpcP2P) sendRequest(
 	reqPayload []byte,
 	maxResponseBytes uint64,
 ) ([]responseData, string, error) {
-	ctx, cn := context.WithTimeout(ctx, time.Second*2)
-	defer cn()
 	message, err := b.sentinel.SendRequest(ctx, &sentinelproto.RequestData{
 		Data:             reqPayload,
 		Topic:            topic,
@@ -440,8 +437,6 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	peerId string,
 	maxResponseBytes uint64,
 ) ([]responseData, string, error) {
-	ctx, cn := context.WithTimeout(ctx, time.Second*2)
-	defer cn()
 	message, err := b.sentinel.SendPeerRequest(ctx, &sentinelproto.RequestDataWithPeer{
 		Pid:              peerId,
 		Data:             reqPayload,
