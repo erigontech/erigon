@@ -110,7 +110,7 @@ func TestRecreateStorageClearedAcrossBlocks(t *testing.T) {
 			})
 			require.NoError(t, err)
 
-			for blk := 0; blk < 3; blk++ {
+			for blk := range 3 {
 				require.NoErrorf(t, m.InsertChain(chainPack.Slice(blk, blk+1)), "insert block %d", blk+1)
 			}
 
