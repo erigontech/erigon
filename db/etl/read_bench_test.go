@@ -141,7 +141,7 @@ func openMmap(b *testing.B, fname string) ([]byte, *os.File) {
 	if err != nil {
 		b.Fatal(err)
 	}
-	data, _, err := mmap.Mmap(f, int(fi.Size()))
+	data, err := mmap.OpenRo(f, int(fi.Size()))
 	if err != nil {
 		b.Fatal(err)
 	}
