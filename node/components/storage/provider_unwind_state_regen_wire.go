@@ -19,6 +19,7 @@ package storage
 import (
 	"context"
 	"fmt"
+	"os"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
@@ -119,7 +120,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 	tx kv.TemporalRwTx,
 	toBlock, lastTxNum uint64,
 	recompute *commitmentRecomputeResult,
-) (*pendingRegenState, error) {
+) (result *pendingRegenState, returnErr error) {
 	if p.Aggregator == nil {
 		return nil, nil // tests / tools without an Aggregator skip cleanly
 	}
@@ -165,6 +166,18 @@ func (p *Provider) regenerateBoundaryStepFiles(
 
 	pairs := make([]regenPair, 0, len(snapshot.AllDomains))
 	removals := make([]removalEntry, 0)
+	// On error return, unlink every .regen already written so we don't
+	// leak partial artifacts between Provider.Unwind failures.
+	// AbortUnwind only cleans pendingRegen.pairs, which is never set
+	// when this function returns an error.
+	defer func() {
+		if returnErr == nil {
+			return
+		}
+		for _, pr := range pairs {
+			_ = os.Remove(pr.regenPath)
+		}
+	}()
 	for _, sd := range snapshot.AllDomains {
 		kvDomain, ok := snapshotDomainToKVDomain(sd)
 		if !ok {

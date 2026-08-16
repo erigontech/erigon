@@ -1033,6 +1033,14 @@ func (a *Aggregator) BuildMissedAccessors(ctx context.Context, workers int, opts
 // txN 0-64, wrong by orders of magnitude).
 var v4KVFileNameRegex = regexp.MustCompile(`^v([4-9]|[1-9][0-9]+)\.(\d+)-([[:lower:]]+)\.(\d+)-(\d+)\.kv$`)
 
+// stepKVFileNameRegex parses a step-aligned `.kv` basename like
+// `v2.2-accounts.288-301.kv` — captures (version-major, version-minor,
+// domain-base-name, fromStep, toStep). Version-major MUST be < 4 —
+// v4+ names use raw-txN coords via v4KVFileNameRegex, and mis-parsing
+// their raw-txN as step-count would produce accessor paths at wildly
+// wrong coords.
+var stepKVFileNameRegex = regexp.MustCompile(`^v([1-3])\.(\d+)-([[:lower:]]+)\.(\d+)-(\d+)\.kv$`)
+
 // BuildKVAccessors builds the .bt/.kvei/.kvi sidecars a domain .kv
 // needs to be visible to state reads. Called by the mode-C v4 emit
 // functions (WriteStateBoundaryFileV4 / WriteCommitmentBoundaryFileV4)
@@ -1074,8 +1082,22 @@ func (a *Aggregator) BuildKVAccessors(ctx context.Context, domain kv.Domain, dat
 	}
 	d := a.d[domain]
 
-	fromTxN, toTxN, err := parseV4KVBaseName(filepath.Base(finalPath))
-	if err != nil {
+	base := filepath.Base(finalPath)
+	var (
+		btPath, kveiPath, kviPath string
+	)
+	if fromTxN, toTxN, err := parseV4KVBaseName(base); err == nil {
+		btPath = d.kvBtAccessorNewFilePathV4(fromTxN, toTxN)
+		kveiPath = d.kvExistenceIdxNewFilePathV4(fromTxN, toTxN)
+		kviPath = d.kviAccessorNewFilePathV4(fromTxN, toTxN)
+	} else if fromStep, toStep, sErr := parseStepKVBaseName(base); sErr == nil {
+		// Step-aligned finalPath — mode-C split-emit's aligned wide file
+		// lands here. Accessor coords come from the step form; the
+		// non-V4 helpers produce the same naming retire/merge would.
+		btPath = d.kvBtAccessorNewFilePath(fromStep, toStep)
+		kveiPath = d.kvExistenceIdxNewFilePath(fromStep, toStep)
+		kviPath = d.kviAccessorNewFilePath(fromStep, toStep)
+	} else {
 		return fmt.Errorf("BuildKVAccessors(%s): %w", domain, err)
 	}
 
@@ -1088,15 +1110,12 @@ func (a *Aggregator) BuildKVAccessors(ctx context.Context, domain kv.Domain, dat
 	ps := background.NewProgressSet()
 
 	if d.Accessors.Has(statecfg.AccessorBTree) {
-		btPath := d.kvBtAccessorNewFilePathV4(fromTxN, toTxN)
-		kveiPath := d.kvExistenceIdxNewFilePathV4(fromTxN, toTxN)
 		reader := seg.NewReader(dec.MakeGetter(), d.Compression)
 		if err := btindex.BuildBtreeIndexWithDecompressor(btPath, kveiPath, reader, ps, d.dirs.Tmp, *d.salt.Load(), d.logger, d.noFsync, d.Accessors); err != nil {
 			return fmt.Errorf("BuildKVAccessors(%s): build BT+existence: %w", domain, err)
 		}
 	}
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
-		kviPath := d.kviAccessorNewFilePathV4(fromTxN, toTxN)
 		if err := d.buildHashMapAccessorAt(ctx, kviPath, dec, ps); err != nil {
 			return fmt.Errorf("BuildKVAccessors(%s): build hash-map: %w", domain, err)
 		}
@@ -1124,6 +1143,25 @@ func parseV4KVBaseName(base string) (fromTxN, toTxN uint64, err error) {
 		return 0, 0, fmt.Errorf("parse toTxN from %q: %w", base, err)
 	}
 	return fromTxN, toTxN, nil
+}
+
+// parseStepKVBaseName extracts (fromStep, toStep) from a step-aligned
+// v1/v2/v3 .kv basename. Symmetric to parseV4KVBaseName for the
+// mode-C split-emit's aligned wide file (v2.2-accounts.288-301.kv shape).
+func parseStepKVBaseName(base string) (fromStep, toStep kv.Step, err error) {
+	m := stepKVFileNameRegex.FindStringSubmatch(base)
+	if m == nil {
+		return 0, 0, fmt.Errorf("not a step-aligned .kv basename: %q", base)
+	}
+	fs, err := strconv.ParseUint(m[4], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse fromStep from %q: %w", base, err)
+	}
+	ts, err := strconv.ParseUint(m[5], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse toStep from %q: %w", base, err)
+	}
+	return kv.Step(fs), kv.Step(ts), nil
 }
 
 type AggV3StaticFiles struct {

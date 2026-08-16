@@ -1117,19 +1117,61 @@ func TestAggregator_BuildKVAccessors_ProducesSidecarForHashMapDomain(t *testing.
 	}
 }
 
-// TestAggregator_BuildKVAccessors_RejectsLegacyBaseName: the parser
-// tightening (v4KVFileNameRegex requires version-major >= 4) ensures a
-// legacy step-form basename passed in error fails LOUDLY rather than
-// being misinterpreted as raw-txN coords (a step-form "0-64" naively
-// treated as txN would produce accessors at a nonsense range).
-func TestAggregator_BuildKVAccessors_RejectsLegacyBaseName(t *testing.T) {
+// TestAggregator_BuildKVAccessors_AcceptsStepAlignedBaseName pins the
+// 2026-08-16 SIGBUS fix's other half: mode-C split-emit's aligned wide
+// file uses a step-aligned name (v2.0-storage.288-301.kv shape).
+// BuildKVAccessors MUST accept that name and derive step-form accessor
+// paths — pre-fix, the v4-only parser rejected it and iter 4 mode_b
+// failed at the aligned emit's accessor-build step.
+func TestAggregator_BuildKVAccessors_AcceptsStepAlignedBaseName(t *testing.T) {
 	t.Parallel()
 	_, agg := testDbAndAggregatorv3(t, 1)
 	ctx := t.Context()
 
-	// Craft a legacy-versioned name; content doesn't matter, parser
-	// gates before opening the file.
-	finalPath := filepath.Join(agg.d[kv.StorageDomain].dirs.SnapDomain, "v2.0-storage.0-64.kv")
+	const fromStep, toStep = kv.Step(288), kv.Step(301)
+	finalPath := agg.DomainKVFilePath(kv.StorageDomain, fromStep, toStep)
+	dataPath := finalPath + ".regen"
+	tmpDir := t.TempDir()
+
+	comp, err := seg.NewCompressor(ctx, "test", dataPath, tmpDir, seg.DefaultCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	writer := seg.NewWriter(comp, agg.d[kv.StorageDomain].Compression)
+	for _, kv := range []struct{ k, v []byte }{
+		{[]byte("aaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa"), []byte("value-1")},
+		{[]byte("bbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"), []byte("value-2")},
+	} {
+		_, err = writer.Write(kv.k)
+		require.NoError(t, err)
+		_, err = writer.Write(kv.v)
+		require.NoError(t, err)
+	}
+	require.NoError(t, comp.Compress())
+	comp.Close()
+
+	require.NoError(t, agg.BuildKVAccessors(ctx, kv.StorageDomain, dataPath, finalPath))
+
+	btPath := agg.d[kv.StorageDomain].kvBtAccessorNewFilePath(fromStep, toStep)
+	kveiPath := agg.d[kv.StorageDomain].kvExistenceIdxNewFilePath(fromStep, toStep)
+	_, btErr := os.Stat(btPath)
+	require.NoError(t, btErr, "missing step-form .bt at %s", btPath)
+	_, kveiErr := os.Stat(kveiPath)
+	require.NoError(t, kveiErr, "missing step-form .kvei at %s", kveiPath)
+}
+
+// TestAggregator_BuildKVAccessors_RejectsUnparseableBaseName: the
+// parser accepts both v4.0 raw-txN names (mode-C stub emit) AND
+// step-aligned v1/v2/v3 names (mode-C split-emit's aligned wide file,
+// added 2026-08-16 as part of the SIGBUS fix). A basename that fits
+// neither shape must fail loudly rather than silently picking wrong
+// accessor coords.
+func TestAggregator_BuildKVAccessors_RejectsUnparseableBaseName(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+	ctx := t.Context()
+
+	// A malformed name — missing the version prefix. Content doesn't
+	// matter; the parser gates before opening the file.
+	finalPath := filepath.Join(agg.d[kv.StorageDomain].dirs.SnapDomain, "storage.0-64.kv")
 	err := agg.BuildKVAccessors(ctx, kv.StorageDomain, finalPath, finalPath)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "not a v4 .kv basename")
