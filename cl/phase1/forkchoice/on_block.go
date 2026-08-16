@@ -543,7 +543,7 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 	// Blobs are preverified so we skip verification, we just need to check if commitments checks out.
 	sidecars, foundOnDisk, err := f.blobStorage.ReadBlobSidecars(ctx, slot, blockRoot)
 	if err != nil {
-		return fmt.Errorf("cannot check data avaiability. failed to read blob sidecars: %w", err)
+		return fmt.Errorf("cannot check data availability. failed to read blob sidecars: %w", err)
 	}
 	if !foundOnDisk {
 		sidecars = f.hotSidecars[blockRoot] // take it from memory

@@ -106,7 +106,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 
 	err = val.DecodeSSZ(raw, int(version))
 	if err != nil {
-		return fmt.Errorf("enable to unmarshall message: %w", err)
+		return fmt.Errorf("unable to unmarshal message: %w", err)
 	}
 	return nil
 }
