@@ -21,7 +21,6 @@ package vm
 
 import (
 	"bytes"
-	"errors"
 	"fmt"
 	"math"
 
@@ -1011,7 +1010,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var suberr error
 	if evm.chainRules.IsAmsterdam {
 		preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
-		if suberr != nil && !errors.Is(suberr, ErrDepth) && !errors.Is(suberr, ErrInsufficientBalance) && !errors.Is(suberr, ErrNonceUintOverflow) {
+		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
 			return pc, nil, suberr
 		}
 	}
@@ -1034,7 +1033,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		forwarded = true
 		if !evm.chainRules.IsAmsterdam {
 			preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
-			if suberr != nil && !errors.Is(suberr, ErrDepth) && !errors.Is(suberr, ErrInsufficientBalance) && !errors.Is(suberr, ErrNonceUintOverflow) {
+			if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
 				returnGas = mdgas.MdGas{}
 			}
 		}
@@ -1063,7 +1062,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	// ignore this error and pretend the operation was successful.
 	var result uint256.Int
 	if suberr != nil {
-		if !evm.ChainRules().IsHomestead && errors.Is(suberr, ErrCodeStoreOutOfGas) {
+		if !evm.ChainRules().IsHomestead && suberr == ErrCodeStoreOutOfGas { //nolint:errorlint // intentional bare sentinel check
 			addrVal := addr.Value()
 			result.SetBytes(addrVal[:])
 		}
@@ -1072,7 +1071,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		result.SetBytes(addrVal[:])
 	}
 	scope.Stack.push(result)
-	if errors.Is(suberr, ErrExecutionReverted) {
+	if suberr == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
 		evm.returnData = res // set REVERT data to return data buffer
 		return pc, res, nil
 	}
@@ -1126,7 +1125,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	} else {
 		res.SetOne()
 	}
-	if err == nil || errors.Is(err, ErrExecutionReverted) {
+	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1180,7 +1179,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	} else {
 		res.SetOne()
 	}
-	if err == nil || errors.Is(err, ErrExecutionReverted) {
+	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1216,7 +1215,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	} else {
 		res.SetOne()
 	}
-	if err == nil || errors.Is(err, ErrExecutionReverted) {
+	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1262,7 +1261,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	} else {
 		res.SetOne()
 	}
-	if err == nil || errors.Is(err, ErrExecutionReverted) {
+	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
 
