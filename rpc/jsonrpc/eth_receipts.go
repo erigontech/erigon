@@ -251,7 +251,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
-	if err := api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
+	// Matching reads the log indices, retired with history rather than with receipts.
+	if err := api.BaseAPI.checkPruneHistory(ctx, tx, begin); err != nil {
 		return nil, err
 	}
 
@@ -557,7 +558,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	overlayTx := api.filters.WithOverlay(tx)
 
-	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -667,7 +668,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

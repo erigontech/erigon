@@ -53,7 +53,7 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 		if err != nil {
 			return nil, nil
 		}
-		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
+		err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNumber)
 		if err != nil {
 			return nil, err
 		}
@@ -147,7 +147,8 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("end (%d) > MaxUint32)", end), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	err := api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
+	// Matching reads the log indices, retired with history rather than with receipts.
+	err := api.BaseAPI.checkPruneHistory(ctx, tx, begin)
 	if err != nil {
 		return nil, err
 	}
@@ -221,7 +222,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
+	// Reads the log indices and re-executes: both need history, not receipts.
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, begin)
 	if err != nil {
 		return nil, err
 	}
@@ -402,7 +404,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}

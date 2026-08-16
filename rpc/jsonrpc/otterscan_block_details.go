@@ -53,7 +53,7 @@ func (api *OtterscanAPIImpl) GetBlockDetails(ctx context.Context, number rpc.Blo
 			}
 			return nil, err
 		}
-		if err := api.BaseAPI.checkPruneHistory(ctx, tx, blockNum); err != nil {
+		if err := api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
 		b, senders, err = api.getBlockWithSenders(ctx, rpc.BlockNumber(blockNum), tx)
@@ -84,7 +84,7 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 		return nil, fmt.Errorf("couldn't find block number for hash %v", hash[:])
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, *blockNumber)
 	if err != nil {
 		return nil, err
 	}

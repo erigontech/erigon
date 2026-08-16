@@ -287,7 +287,8 @@ func (api *OverlayAPIImpl) GetLogs(ctx context.Context, crit filters.FilterCrite
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin)
+	// Re-executes with overridden code, so stored receipts cannot answer for it.
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, begin)
 	if err != nil {
 		return nil, err
 	}

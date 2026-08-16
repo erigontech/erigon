@@ -462,17 +462,44 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	return nil
 }
 
-// checkReceiptsAvailable checks if receipts are available for the given block.
-// In case --prune.include-receipts which makes all historical receipts available even when state history is pruned.
+// checkReceiptsAvailable gates endpoints serving the receipts of a block. They come
+// from the receipt cache where it still covers the block, and otherwise from
+// re-executing it, which reaches only as far back as state history. Enabling the
+// cache says it exists on disk, not how much of it is kept: RCacheDomain is retired
+// on its own --prune.receipts.distance window when one is set, and alongside history
+// otherwise.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
-	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	persisted, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {
 		return err
 	}
-	if persistReceipts {
-		return nil
+	if !persisted {
+		return api.checkPruneHistory(ctx, tx, block)
 	}
-	return api.checkPruneHistory(ctx, tx, block)
+	p, err := api.pruneMode(tx)
+	if err != nil || p == nil {
+		return err
+	}
+	switch amount := p.ReceiptsAmount(); {
+	case amount == prune.KeepAllReceiptsPruneMode:
+		return nil
+	case p.ReceiptsFollowHistory():
+		return api.checkPruneHistory(ctx, tx, block)
+	default:
+		return api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
+	}
+}
+
+// checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.
+// Reading them needs the block body too: the stored receipt carries no TxHash, so
+// it is derived from the block's transaction, and the result is sized by the
+// transaction count. The blocks boundary therefore applies on top of receipt
+// availability.
+func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
+	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+		return err
+	}
+	return api.checkReceiptsAvailable(ctx, tx, block)
 }
 
 func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {
