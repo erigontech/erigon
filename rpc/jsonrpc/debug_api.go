@@ -530,6 +530,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	if err != nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
 	}
+	if startNum > latestBlock {
+		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
+	}
 
 	if endHash == nil {
 		// Single param: cover exactly block startNum.
