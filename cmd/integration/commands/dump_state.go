@@ -109,6 +109,10 @@ var dumpState = &cobra.Command{
 		}
 		defer chainDb.Close()
 
+		// A full-domain scan reads the files front to back, so readahead pays off. Only safe
+		// in CLI tools: app-level code serves random reads and would thrash it.
+		defer chainDb.Debug().EnableReadAhead().DisableReadAhead()
+
 		tx, err := chainDb.BeginTemporalRo(ctx)
 		if err != nil {
 			return fmt.Errorf("beginning temporal tx: %w", err)
