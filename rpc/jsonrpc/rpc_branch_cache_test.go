@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
@@ -82,10 +81,6 @@ func enableStateCacheForTest(t *testing.T) {
 
 func TestGetProofIgnoresSharedBranchCache(t *testing.T) {
 	enableStateCacheForTest(t)
-
-	previousSchema := statecfg.Schema
-	statecfg.EnableHistoricalCommitment()
-	t.Cleanup(func() { statecfg.Schema = previousSchema })
 
 	m, _, contractAddress, _ := chainWithDeployedContract(t)
 	assertPoisoned := poisonSharedBranchCache(t, m.DB)
