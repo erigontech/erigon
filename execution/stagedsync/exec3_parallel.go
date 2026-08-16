@@ -3425,92 +3425,66 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	tx := task.index
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
-		if res.Version().Incarnation > len(be.tasks) {
-			// Re-execution (read-consistency / validation churn) exhausted the
-			// incarnation budget. Surface through blockResult.Err (not (nil, err),
-			// which would race the apply loop's channel-close completeness check).
-			return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w: too many incarnations: %d, expected: %d", rules.ErrInvalidBlock, be.blockNum, res.Version().TxIndex, task.TxHash(), res.Err, res.Version().Incarnation, len(be.tasks))), nil
-		}
-		be.blockIO.RecordReads(res.Version(), res.TxIn)
-		be.indexReads(tx, res.TxIn)
-		// A sent error is genuine: a tx that read an in-flight or mid-execution
-		// changed value re-executes via result.Dep and is never sent. Reject the
-		// block only when this task ran against settled input and a post-hoc
-		// re-validation confirms its read-set is still current; otherwise the
-		// error may stem from a predecessor re-validated since dispatch — defer
-		// for re-execution.
-		if be.settledInput[tx] || be.frontier() >= tx-1 {
-			txVersion := res.Version()
-			validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-				func(readVersion, writtenVersion state.Version) state.VersionValidity {
-					if readVersion != writtenVersion {
-						return state.VersionInvalid
-					}
-					return state.VersionValid
-				}, false, "")
-			if validity == state.VersionValid {
-				return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), res.Err)), nil
-			}
-		}
-		be.execTasks.clearInProgress(tx)
-		be.execTasks.pushDeferred(tx)
-		be.execAborted[tx]++
-		be.txIncarnations[tx]++
-		be.cntAbort++
-	} else {
+		// The worker sends an error only after executing against the full
+		// committed prefix, so a sent error is authoritative: the block is
+		// invalid. Surface through blockResult.Err (not (nil, err), which would
+		// race the apply loop's channel-close completeness check).
 		txVersion := res.Version()
-
-		be.blockIO.RecordReads(txVersion, res.TxIn)
-		be.indexReads(tx, res.TxIn)
-
-		if res.Version().Incarnation == 0 {
-			be.blockIO.RecordWrites(txVersion, res.TxOut)
-		} else {
-			prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-			hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
-
-			// Remove entries that were previously written but are no longer
-			// written — res.TxOut.Has answers membership directly, no cmp map.
-			for h := range prevWrites.AllHeaders() {
-				if !res.TxOut.Has(h) {
-					hasWriteChange = true
-					be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
-				}
-			}
-
-			be.blockIO.RecordWrites(txVersion, res.TxOut)
-
-			if hasWriteChange {
-				// Defer dependent re-validation until this tx's new writes are
-				// flushed during validation (they aren't in the versionMap yet).
-				if _, ok := be.writeChangedPrev[tx]; !ok {
-					be.writeChangedPrev[tx] = prevWrites
-				}
-			}
-		}
-
-		tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
-
-		var trace bool
-		if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
-			fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", be.blockIO.WriteSet(txVersion.TxIndex).Count())
-			be.blockIO.ReadSet(txVersion.TxIndex).TraceReads(tracePrefix)
-			for h := range be.blockIO.WriteSet(txVersion.TxIndex).AllHeaders() {
-				fmt.Println(tracePrefix, "WRT", h.String())
-			}
-		}
-
-		be.validateTasks.pushPending(tx)
-		// A re-executed self-loop result (its worker signalled to re-run by the
-		// committed-dependent re-check) already has execTasks complete — only its
-		// validation was cleared. markComplete would panic on the non-in-progress
-		// task, so skip it; the re-validation below re-commits it.
-		if !be.execTasks.checkComplete(tx) {
-			be.execTasks.markComplete(tx)
-			be.execTasks.removeDependency(tx)
-		}
-		be.cntSuccess++
+		return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%d:%v]: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, txVersion.TxNum, task.TxHash(), res.Err)), nil
 	}
+
+	txVersion := res.Version()
+
+	be.blockIO.RecordReads(txVersion, res.TxIn)
+	be.indexReads(tx, res.TxIn)
+
+	if res.Version().Incarnation == 0 {
+		be.blockIO.RecordWrites(txVersion, res.TxOut)
+	} else {
+		prevWrites := be.blockIO.WriteSet(txVersion.TxIndex)
+		hasWriteChange := res.TxOut.HasNewWrite(prevWrites)
+
+		// Remove entries that were previously written but are no longer
+		// written — res.TxOut.Has answers membership directly, no cmp map.
+		for h := range prevWrites.AllHeaders() {
+			if !res.TxOut.Has(h) {
+				hasWriteChange = true
+				be.versionMap.Delete(h.Address, h.Path, h.Key, txVersion.TxIndex, true)
+			}
+		}
+
+		be.blockIO.RecordWrites(txVersion, res.TxOut)
+
+		if hasWriteChange {
+			// Defer dependent re-validation until this tx's new writes are
+			// flushed during validation (they aren't in the versionMap yet).
+			if _, ok := be.writeChangedPrev[tx]; !ok {
+				be.writeChangedPrev[tx] = prevWrites
+			}
+		}
+	}
+
+	tracePrefix := fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
+
+	var trace bool
+	if trace = dbg.TraceTransactionIO && dbg.TraceTx(be.blockNum, txVersion.TxIndex); trace {
+		fmt.Println(tracePrefix, "RD", be.blockIO.ReadSet(txVersion.TxIndex).Len(), "WRT", be.blockIO.WriteSet(txVersion.TxIndex).Count())
+		be.blockIO.ReadSet(txVersion.TxIndex).TraceReads(tracePrefix)
+		for h := range be.blockIO.WriteSet(txVersion.TxIndex).AllHeaders() {
+			fmt.Println(tracePrefix, "WRT", h.String())
+		}
+	}
+
+	be.validateTasks.pushPending(tx)
+	// A re-executed self-loop result (its worker signalled to re-run by the
+	// committed-dependent re-check) already has execTasks complete — only its
+	// validation was cleared. markComplete would panic on the non-in-progress
+	// task, so skip it; the re-validation below re-commits it.
+	if !be.execTasks.checkComplete(tx) {
+		be.execTasks.markComplete(tx)
+		be.execTasks.removeDependency(tx)
+	}
+	be.cntSuccess++
 
 	// do validations ...
 	var stateReader state.StateReader
