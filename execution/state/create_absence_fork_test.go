@@ -22,18 +22,14 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestCreateOverAbsenceConsumedBeforeDestructFlush pins the OCC invariant
-// that an execution which consumed an account's absence (e.g. for the
-// EIP-8037 new-account gas charge) must not silently adopt a destruct flushed
-// since: the attempt has to abort with ErrDependency or fail commit-time
-// validation, else its gas view forks from its state view. The
-// collisionCheckFirst variant interleaves the CREATE2 collision reads between
-// the probe and the account load — their destruct-wipe scan records a
-// SelfDestruct=true read that must not count as the absence having been
-// concluded from the destruct.
+// TestCreateOverAbsenceConsumedBeforeDestructFlush requires a direct dependency
+// when a destruct published mid-attempt changes a consumed absence into a live
+// EIP-8246 account. The collision-check variant also proves that a previously
+// memoized destruct probe does not hide the conflict.
 func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 	t.Parallel()
 	for _, collisionCheck := range []bool{false, true} {
@@ -43,63 +39,113 @@ func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 		}
 		t.Run(name, func(t *testing.T) {
 			t.Parallel()
-			_, tx, domains := NewTestRwTx(t)
-			vm := NewVersionMap(nil)
-			ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), vm)
-			defer ibs.Close()
-			ibs.SetTxContext(0, 1)
-			ibs.SetNoMaterialize(true)
-			ibs.SetVersion(0)
-			ibs.eip8246 = true
-			ibs.eip161 = true
-
-			addr := getAddress(8246)
-
-			// tx1's gas probe consumes the account's absence before tx0 flushes.
+			ibs, vm, addr := newAbsenceForkState(t)
 			empty, err := ibs.Empty(addr)
 			require.NoError(t, err)
 			require.True(t, empty)
 
-			// tx0's writes flush: CREATE2 whose constructor self-destructed to
-			// itself. EIP-8246 preserves the balance; the worker flush carries no
-			// AddressPath cell, so only the destruct probe can reveal the account
-			// to tx1.
-			writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000_000), true)
-			writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, uint64(1), true)
-			writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, uint64(0), true)
-			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, true, true)
-			writeFor(vm, addr, CreateContractPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, true, true)
+			// Publish only after Empty has populated the attempt's destruct memo.
+			destructVersion := Version{TxIndex: 0, Incarnation: 3}
+			writeAbsenceForkDestruct(vm, addr, destructVersion, 1_000_000, 1)
 
-			// The CREATE2 flow re-reads the account it is about to create over.
-			diverged := false
-			func() {
-				defer func() {
-					if r := recover(); r != nil {
-						if r == ErrDependency {
-							diverged = true
-							return
-						}
-						panic(r)
-					}
-				}()
-				if collisionCheck {
-					codeHash, err := ibs.GetCodeHash(addr)
-					require.NoError(t, err)
-					require.True(t, codeHash.IsEmpty() || codeHash.IsZero())
-					nonce, err := ibs.GetNonce(addr)
-					require.NoError(t, err)
-					require.Zero(t, nonce)
-				}
-				require.NoError(t, ibs.CreateAccount(addr, true))
-			}()
-
-			if !diverged {
-				io := NewVersionedIO(2)
-				io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
-				diverged = vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, "") != VersionValid
+			if collisionCheck {
+				codeHash, err := ibs.GetCodeHash(addr)
+				require.NoError(t, err)
+				require.Equal(t, accounts.EmptyCodeHash, codeHash)
+				nonce, err := ibs.GetNonce(addr)
+				require.NoError(t, err)
+				require.Zero(t, nonce)
 			}
-			require.True(t, diverged,
-				"consuming the account's absence and then adopting the flushed destruct forks the gas view from the state view")
+
+			require.PanicsWithValue(t, ErrDependency, func() {
+				_ = ibs.CreateAccount(addr, true)
+			})
+			require.Equal(t, destructVersion.TxIndex, ibs.DepTxIndex())
+
+			reads := ibs.VersionedReads()
+			addressRead, ok := reads.GetAddress(addr)
+			require.True(t, ok)
+			require.True(t, addressRead.Val == nil || addressRead.Val.Account() == nil)
+
+			destructRead, ok := reads.GetSelfDestruct(addr)
+			require.True(t, ok)
+			require.Equal(t, MapRead, destructRead.Source)
+			require.Equal(t, destructVersion, destructRead.Version)
+			require.True(t, destructRead.Val)
 		})
 	}
+}
+
+// TestCreateOverAbsenceConsumedBeforeEmptyDestructFlush verifies that no
+// dependency is raised when reconstruction agrees with the consumed absence.
+func TestCreateOverAbsenceConsumedBeforeEmptyDestructFlush(t *testing.T) {
+	t.Parallel()
+	ibs, vm, addr := newAbsenceForkState(t)
+	empty, err := ibs.Empty(addr)
+	require.NoError(t, err)
+	require.True(t, empty)
+
+	writeAbsenceForkDestruct(vm, addr, Version{TxIndex: 0, Incarnation: 3}, 0, 0)
+
+	require.NoError(t, ibs.CreateAccount(addr, true))
+	_, created := ibs.VersionedWrites().GetAddress(addr)
+	require.True(t, created)
+
+	io := NewVersionedIO(2)
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
+	require.Equal(t, VersionValid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""))
+}
+
+// TestDestructFlushAfterSlotReadReconstructsPreservedAccount requires the
+// account load to see a destruct published after an earlier slot read memoized
+// "no destruct": with no absence consumed, the preserved EIP-8246 account is
+// reconstructed and the attempt validates in one pass.
+func TestDestructFlushAfterSlotReadReconstructsPreservedAccount(t *testing.T) {
+	t.Parallel()
+	ibs, vm, addr := newAbsenceForkState(t)
+	slot, err := ibs.GetState(addr, accounts.InternKey(common.HexToHash("0x01")))
+	require.NoError(t, err)
+	require.True(t, slot.IsZero())
+
+	// Publish only after the slot read has populated the attempt's destruct
+	// memo, in the shape of a production destruct flush: SelfDestruct, Balance
+	// and Incarnation cells only.
+	destructVersion := Version{TxIndex: 0, Incarnation: 3}
+	writeFor(vm, addr, BalancePath, accounts.NilKey, destructVersion, *uint256.NewInt(1_000_000), true)
+	writeFor(vm, addr, IncarnationPath, accounts.NilKey, destructVersion, uint64(0), true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, destructVersion, true, true)
+
+	exist, err := ibs.Exist(addr)
+	require.NoError(t, err)
+	require.True(t, exist)
+
+	balance, err := ibs.GetBalance(addr)
+	require.NoError(t, err)
+	require.Equal(t, *uint256.NewInt(1_000_000), balance)
+
+	io := NewVersionedIO(2)
+	io.RecordReads(Version{TxIndex: 1, Incarnation: 0}, ibs.VersionedReads())
+	require.Equal(t, VersionValid, vm.ValidateVersion(1, io, validateEqualVersion, true, false, false, ""))
+}
+
+func newAbsenceForkState(t *testing.T) (*IntraBlockState, *VersionMap, accounts.Address) {
+	t.Helper()
+	_, tx, domains := NewTestRwTx(t)
+	vm := NewVersionMap(nil)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), vm)
+	t.Cleanup(ibs.Close)
+	ibs.SetTxContext(0, 1)
+	ibs.SetNoMaterialize(true)
+	ibs.SetVersion(0)
+	ibs.eip8246 = true
+	ibs.eip161 = true
+	return ibs, vm, getAddress(8246)
+}
+
+func writeAbsenceForkDestruct(vm *VersionMap, addr accounts.Address, version Version, balance, nonce uint64) {
+	writeFor(vm, addr, BalancePath, accounts.NilKey, version, *uint256.NewInt(balance), true)
+	writeFor(vm, addr, NoncePath, accounts.NilKey, version, nonce, true)
+	writeFor(vm, addr, IncarnationPath, accounts.NilKey, version, uint64(0), true)
+	writeFor(vm, addr, SelfDestructPath, accounts.NilKey, version, true, true)
+	writeFor(vm, addr, CreateContractPath, accounts.NilKey, version, true, true)
 }

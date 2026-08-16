@@ -1178,11 +1178,6 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	if sdb.versionMap == nil {
 		return nil, false
 	}
-	// A definitive nil record read means this tx already consumed the account's
-	// absence; synthesizing from cells flushed since would fork the tx's view of
-	// the address mid-execution and reconcile the fork out of validation's
-	// sight. Only a provisional (mid-load) probe may adopt fresh cells — the
-	// stale conclusion re-executes via commit-time validation instead.
 	if sdb.consumedAddressAbsence(addr) {
 		return nil, false
 	}
@@ -1239,9 +1234,10 @@ func (sdb *IntraBlockState) synthesizeCreatedAccountBase(addr accounts.Address) 
 	return acc, true
 }
 
-// consumedAddressAbsence reports whether this tx holds a definitive
-// (non-provisional) nil AddressPath read — it already concluded the account is
-// absent, so later loads must not adopt cells flushed since.
+// consumedAddressAbsence reports whether this attempt already recorded a
+// definitive nil AddressPath read. That absence may have affected gas or
+// control flow, so later loads must not replace it with an account assembled
+// from cells published mid-attempt.
 func (sdb *IntraBlockState) consumedAddressAbsence(addr accounts.Address) bool {
 	tr, ok := sdb.versionedReads.GetAddress(addr)
 	return ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil)
@@ -1336,20 +1332,12 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 	// covering both committed and in-block-created accounts — unless a later tx
 	// re-created it, in which case fall through to the normal read.
 	if sdb.eip8246 && readAccount == nil {
-		if destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && sdRes.Status() == MVReadResultDone && destructed {
-			// A definitive nil AddressPath read means this tx already consumed the
-			// account's absence, so reconstructing from cells flushed since would
-			// fork its view out of validation's sight — abort and re-execute.
-			// Exempt only an absence concluded from this destruct itself,
-			// recorded as a MapRead at the destruct cell's exact version.
-			if tr, ok := sdb.versionedReads.GetAddress(addr); ok && tr.Source != ProvisionalRead && (tr.Val == nil || tr.Val.Account() == nil) &&
-				!(tr.Source == MapRead && tr.Version.TxIndex == sdRes.DepIdx() && tr.Version.Incarnation == sdRes.Incarnation()) {
-				if sdRes.DepIdx() > sdb.dep {
-					sdb.dep = sdRes.DepIdx()
-				}
-				panic(ErrDependency)
-			}
-			destructTxIndex := sdRes.DepIdx()
+		consumedAbsence := sdb.consumedAddressAbsence(addr)
+		// Probe the map fresh: the memo may predate a destruct flushed
+		// mid-attempt, which this load must reconstruct from or conflict with.
+		destructed, sdRes, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex)
+		if ok && sdRes.Status() == MVReadResultDone && destructed {
+			destructVersion := sdRes.Version()
 			// Only a genuine re-creation (a later CreateAccount, which writes
 			// AddressPath) skips reconstruction. Later Balance/Nonce/CodeHash
 			// writes are updates to the still-preserved account, not a revival:
@@ -1357,7 +1345,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 			// balance, nonce and code hash, so e.g. an account funded after its
 			// SELFDESTRUCT still reads as existing — matching serial.
 			revived := false
-			if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, sdb.txIndex-1); ok && hi > destructTxIndex {
+			if hi, ok := sdb.versionMap.LatestTxIndex(addr, AddressPath, accounts.NilKey, sdb.txIndex-1); ok && hi > destructVersion.TxIndex {
 				revived = true
 			}
 			if !revived {
@@ -1369,11 +1357,15 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 					sdb.finalizeProvisionalAddressRead(addr)
 					return nil, StorageRead, UnknownVersion, nil
 				}
-				// The EVM consumes this conclusion: reconcile the provisional
-				// nil probe with the preserved account so a later flush
-				// conflicts with it instead of being silently adopted.
-				sdb.accountRead(addr, preserved, MapRead, Version{TxIndex: destructTxIndex})
-				return preserved, MapRead, Version{TxIndex: destructTxIndex}, nil
+				if consumedAbsence {
+					// A definitive nil read may already have affected gas or control flow.
+					if destructVersion.TxIndex > sdb.dep {
+						sdb.dep = destructVersion.TxIndex
+					}
+					panic(ErrDependency)
+				}
+				sdb.accountRead(addr, preserved, MapRead, destructVersion)
+				return preserved, MapRead, destructVersion, nil
 			}
 		}
 	}
