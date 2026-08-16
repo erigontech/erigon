@@ -273,7 +273,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			switch {
 			case splitEmit:
 				alignedPairEntry, stubPairEntry, err := p.emitSplitStraddler(
-					ctx, tx, kvDomain, fileEntry, kv.Step(stepBoundary), stepSize,
+					ctx, tx, kvDomain, fileEntry, stepSize,
 					lastTxNum, recompute, anchor, compression, oldPath, lookup,
 				)
 				if err != nil {
@@ -359,7 +359,6 @@ func (p *Provider) emitSplitStraddler(
 	tx kv.TemporalTx,
 	kvDomain kv.Domain,
 	fileEntry *snapshot.FileEntry,
-	stepBoundary kv.Step,
 	stepSize uint64,
 	lastTxNum uint64,
 	recompute *commitmentRecomputeResult,
@@ -374,13 +373,19 @@ func (p *Provider) emitSplitStraddler(
 	fromStep := kv.Step(fileEntry.FromStep)
 	fromTxN := uint64(fromStep) * stepSize
 	alignedTxN := recompute.alignedTxNum
+	// splitTxN is the first txN of the step containing lastTxN — the
+	// boundary the aligned file ends at (exclusive) and the stub file
+	// starts at (inclusive). Derived from alignedTxN so it stays in sync
+	// with the compute (alignedTxN = splitTxN - 1 by construction).
+	splitTxN := alignedTxN + 1
+	targetStep := kv.Step(splitTxN / stepSize)
 
-	// Aligned pair — step-aligned wide file naming.
-	alignedFinal := p.Aggregator.DomainKVFilePath(kvDomain, fromStep, stepBoundary)
+	// Aligned pair — step-aligned wide file naming, endStep = targetStep.
+	alignedFinal := p.Aggregator.DomainKVFilePath(kvDomain, fromStep, targetStep)
 	alignedRegen := alignedFinal + ".regen"
 
 	// Stub pair — v4.0 raw-txnum naming confined to the target's step.
-	stubFinal := p.Aggregator.DomainKVFilePathV4(kvDomain, uint64(stepBoundary)*stepSize, lastTxNum+1)
+	stubFinal := p.Aggregator.DomainKVFilePathV4(kvDomain, splitTxN, lastTxNum+1)
 	stubRegen := stubFinal + ".regen"
 
 	if kvDomain == kv.CommitmentDomain {
