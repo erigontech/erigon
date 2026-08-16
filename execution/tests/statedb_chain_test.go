@@ -271,8 +271,9 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 
 				// The transfer recreates the deleted account, so nonce 0. Parallel keeps
 				// the pre-destruct nonce when the deploy is in the same block — a
-				// writeset normalization divergence these readers do not decide. Pin it
-				// as it stands so the arm still fails when it moves.
+				// writeset normalization divergence these readers do not decide,
+				// tracked in erigontech/erigon#23206. Pin it as it stands so the arm
+				// still fails when it moves.
 				wantNonce := uint64(0)
 				if tc.parallel && !tc.preBlockDeploy {
 					wantNonce = 1

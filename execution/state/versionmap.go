@@ -435,11 +435,11 @@ func floorCell[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int) (int, *Wr
 // applySubFieldWrites layers the Balance/Nonce/Incarnation/CodeHash writes for
 // addr onto account, taking one entry lookup and one read lock where the
 // per-path ReadX primitives would take one of each. An Estimate cell counts the
-// same as a Done one — it holds the same latest in-block write, which finalize
-// reconstruction must consume rather than fall back to the pre-block DB value.
-// Its one exception is the cells an uncommitted destruct wrote: the wipe below
-// does not honour that destruct, so consuming its Balance and Incarnation would
-// compose a record out of two different states.
+// same as a Done one for the value — it holds the same latest in-block write,
+// which finalize reconstruction must consume rather than fall back to the
+// pre-block DB value — but never for the wipe, which honours no uncommitted
+// destruct and lets no uncommitted cell narrow its scan. Either would compose a
+// record out of two different states.
 func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, account *accounts.Account) {
 	if vm == nil {
 		return
@@ -456,8 +456,8 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	// Nonce and CodeHash are the two a destruct erases without leaving a cell of
 	// its own, so they need the scan; Balance and Incarnation are floored, per
 	// destructScanFloor.
-	nonceIdx, nonceCell := floorCell(e.Nonce, txIdx)
-	if _, wiped := selfDestructWipesLocked(e, NoncePath, nonceIdx, txIdx); wiped {
+	_, nonceCell := floorCell(e.Nonce, txIdx)
+	if _, wiped := selfDestructWipesLocked(e, NoncePath, doneFloorIdx(e.Nonce, txIdx), txIdx); wiped {
 		account.Nonce = 0
 	} else if nonceCell != nil {
 		account.Nonce = nonceCell.Value
@@ -465,8 +465,8 @@ func (vm *VersionMap) applySubFieldWrites(addr accounts.Address, txIdx int, acco
 	if _, cell := floorCellBelowDestruct(e, e.Incarnation, txIdx); cell != nil {
 		account.Incarnation = cell.Value
 	}
-	codeHashIdx, codeHashCell := floorCell(e.CodeHash, txIdx)
-	if _, wiped := selfDestructWipesLocked(e, CodeHashPath, codeHashIdx, txIdx); wiped {
+	_, codeHashCell := floorCell(e.CodeHash, txIdx)
+	if _, wiped := selfDestructWipesLocked(e, CodeHashPath, doneFloorIdx(e.CodeHash, txIdx), txIdx); wiped {
 		account.CodeHash = accounts.EmptyCodeHash
 	} else if codeHashCell != nil {
 		account.CodeHash = codeHashCell.Value

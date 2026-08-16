@@ -757,3 +757,20 @@ func TestApplySubFieldWrites_BlockBeginCodeHashKeepsOwnIndex(t *testing.T) {
 	vm.applySubFieldWrites(addr, 1, &acc)
 	require.Equal(t, code.Hash, acc.CodeHash, "the destroying tx's own code hash is what remains after it")
 }
+
+// The floor a destruct scan starts from is the latest committed cell, here as in
+// readFloorLive: an in-flight write above a committed destruct settles nothing,
+// and taking it would compose a nonce from one state with a code hash the same
+// destruct wiped in another.
+func TestApplySubFieldWrites_EstimateCellCannotHideDoneDestruct(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := getAddress(1)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+	vm.WriteBalance(addr, Version{TxIndex: 1}, uint256.Int{}, true)
+	vm.WriteNonce(addr, Version{TxIndex: 3}, 5, false)
+
+	var acc accounts.Account
+	vm.applySubFieldWrites(addr, 5, &acc)
+	require.Zero(t, acc.Nonce, "the committed destruct erased the account the nonce belonged to")
+	require.Equal(t, accounts.EmptyCodeHash, acc.CodeHash, "and the code hash on the same footing")
+}
