@@ -239,7 +239,12 @@ func fetchPayload(t testing.TB, blockTag string) []byte {
 		`{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":[%q,true]}`,
 		blockTag,
 	)
-	resp, err := http.Post(rpcEndpoint, "application/json", strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodPost, rpcEndpoint, strings.NewReader(body))
+	if err != nil {
+		t.Fatal(err)
+	}
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := http.DefaultClient.Do(req)
 	if err != nil {
 		t.Skipf("local node not reachable at %s: %v", rpcEndpoint, err)
 		return nil
