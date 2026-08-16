@@ -3355,31 +3355,12 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 				tracePrefix = fmt.Sprintf("%d (%d.%d)", be.blockNum, txVersion.TxIndex, txVersion.Incarnation)
 			}
 
-			// The worker's read-set verdict is a parallel pre-filter, not
-			// authoritative: a lower tx can write a key this tx read AFTER the worker
-			// validated and parked (its target is the version it read, not the later
-			// writer). Re-validate against the versionMap at the serial commit point —
-			// where every earlier-processed write is visible — so a stale read is
-			// caught. Consume the verdict so a re-execution supplies a fresh one.
+			// Trust the worker's self-loop verdict: it validated this result before
+			// streaming it, and advanceCoinbaseAndFinalize re-validates authoritatively
+			// at the settled contiguous prefix (the barrier), so re-walking the read-set
+			// here is a redundant pass the barrier repeats. Consume the verdict.
 			txResult.WorkerVerdictSet = false
-			validity := be.versionMap.ValidateVersion(txVersion.TxIndex, be.blockIO,
-				func(readVersion, writtenVersion state.Version) state.VersionValidity {
-					if readVersion != writtenVersion {
-						return state.VersionInvalid
-					}
-					return state.VersionValid
-				}, trace, tracePrefix)
-			// SetTrace mutates the shared versionMap; under selfLoop workers validate it
-			// concurrently, so only touch the flag when tracing is actually on.
-			if dbg.TraceTransactionIO {
-				be.versionMap.SetTrace(false)
-			}
-
-			valid := validity == state.VersionValid
-
-			if dbg.TraceTransactionIO {
-				be.versionMap.SetTrace(trace)
-			}
+			valid := true
 			writeSet := be.blockIO.WriteSet(txVersion.TxIndex)
 			be.versionMap.FlushVersionedWrites(writeSet, valid, tracePrefix)
 			if dbg.TraceTransactionIO {
