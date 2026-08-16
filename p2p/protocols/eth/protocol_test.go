@@ -385,8 +385,10 @@ func BenchmarkHashOrNumberEncodeRLP(b *testing.B) {
 	})
 }
 
-// TestHashOrNumberEncodeRLPPointerIsAllocFree pins the allocation win the pointer
-// form gives, and that both forms still produce identical bytes.
+// TestHashOrNumberEncodeRLPPointerIsAllocFree pins both EncodeRLP branches: the
+// hash branch encodes through a pointer and allocates nothing, the number branch
+// boxes a uint64 into any and allocates once above the runtime's 0-255 cache. It
+// also pins that the hash branch still produces the same bytes as the value form.
 func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
 	hn := &HashOrNumber{Hash: common.Hash{1, 2, 3}}
 
@@ -401,11 +403,12 @@ func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
 		t.Fatalf("value=%x pointer=%x", byValue.Bytes(), byPointer.Bytes())
 	}
 
-	// encBuffer is pooled, and sync.Pool deliberately drops values under the race
-	// detector, so the pooled path always allocates there and can't be measured.
+	// encBuffer is pooled, and sync.Pool drops a random quarter of the values put
+	// back under the race detector. That is enough to move mallocs/runs across the
+	// 0/1 truncation boundary in AllocsPerRun and flake the assertions below.
 	//goland:noinspection GoBoolExpressions
 	if race.Enabled {
-		t.Skip("sync.Pool does not pool under -race")
+		t.Skip("sync.Pool does not pool reliably under -race")
 	}
 
 	allocsPerEncode := func(encode func(io.Writer) error) float64 {
@@ -417,8 +420,26 @@ func TestHashOrNumberEncodeRLPPointerIsAllocFree(t *testing.T) {
 	}
 	valueAllocs := allocsPerEncode(func(w io.Writer) error { return rlp.Encode(w, hn.Hash) })
 	pointerAllocs := allocsPerEncode(hn.EncodeRLP)
-	t.Logf("allocs/op: byValue=%v byPointer=%v", valueAllocs, pointerAllocs)
+	t.Logf("hash branch allocs/op: byValue=%v byPointer=%v", valueAllocs, pointerAllocs)
 	if pointerAllocs != 0 {
-		t.Errorf("EncodeRLP should not allocate, got %v (value form: %v)", pointerAllocs, valueAllocs)
+		t.Errorf("EncodeRLP hash branch should not allocate, got %v (value form: %v)", pointerAllocs, valueAllocs)
+	}
+
+	// Boxing hn.Number into any allocates unless the runtime's staticuint64s cache
+	// serves it. Upper bounds rather than exact counts, so an encoder improvement
+	// does not turn the build red.
+	for _, tc := range []struct {
+		number    uint64
+		maxAllocs float64
+	}{
+		{number: 255, maxAllocs: 0},
+		{number: 256, maxAllocs: 1},
+	} {
+		byNumber := &HashOrNumber{Number: tc.number}
+		got := allocsPerEncode(byNumber.EncodeRLP)
+		t.Logf("number branch %d: allocs/op=%v", tc.number, got)
+		if got > tc.maxAllocs {
+			t.Errorf("EncodeRLP number branch %d allocs = %v, want <= %v", tc.number, got, tc.maxAllocs)
+		}
 	}
 }

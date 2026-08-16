@@ -608,13 +608,6 @@ func TestEncodeValueAndPointerAgree(t *testing.T) {
 // fields of a value boxed into an interface are not addressable, so every [N]byte
 // field costs a reflect.New copy that the pointer form avoids entirely.
 func TestEncodePointerAvoidsByteArrayCopies(t *testing.T) {
-	// encBuffer is pooled, and sync.Pool deliberately drops values under the race
-	// detector, so the pooled path always allocates there and can't be measured.
-	//goland:noinspection GoBoolExpressions
-	if race.Enabled {
-		t.Skip("sync.Pool does not pool under -race")
-	}
-
 	v := ptrTestOuter{Inners: []*ptrTestInner{{}}, Payload: make([]byte, 64)}
 
 	allocsPerEncode := func(val any) float64 {
@@ -631,7 +624,12 @@ func TestEncodePointerAvoidsByteArrayCopies(t *testing.T) {
 	if byValue <= byPointer {
 		t.Errorf("expected the value form to allocate more than the pointer form, got value=%v pointer=%v", byValue, byPointer)
 	}
-	if byPointer != 0 {
+	// encBuffer is pooled, and sync.Pool drops a random quarter of the values put
+	// back under the race detector, so the pooled path is not reliably zero there.
+	// The relative check above survives: its gap is the two reflect.New copies,
+	// which the pool does not touch.
+	//goland:noinspection GoBoolExpressions
+	if !race.Enabled && byPointer != 0 {
 		t.Errorf("pointer form should not allocate, got %v allocs/op", byPointer)
 	}
 }
