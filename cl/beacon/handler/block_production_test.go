@@ -789,27 +789,43 @@ func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
 func TestPayloadAttributesOmitFieldsTheChosenVersionCannotCarry(t *testing.T) {
 	root := common.Hash{0xaa}
 	withdrawals := []*types.Withdrawal{{Index: 1}}
+	slotNumber := hexutil.Uint64(64)
+	targetGasLimit := hexutil.Uint64(36_000_000)
 
 	for _, tc := range []struct {
 		version         clparams.StateVersion
 		wantWithdrawals bool
 		wantParentRoot  bool
+		wantGloasFields bool
 	}{
-		{clparams.BellatrixVersion, false, false},
-		{clparams.CapellaVersion, true, false},
-		{clparams.DenebVersion, true, true},
-		{clparams.FuluVersion, true, true},
-		{clparams.GloasVersion, true, true},
+		{clparams.BellatrixVersion, false, false, false},
+		{clparams.CapellaVersion, true, false, false},
+		{clparams.DenebVersion, true, true, false},
+		{clparams.FuluVersion, true, true, false},
+		{clparams.GloasVersion, true, true, true},
 	} {
 		t.Run(tc.version.String(), func(t *testing.T) {
-			attrs := payloadAttributes(tc.version, 1, common.Hash{0xbb}, common.Address{0xcc}, withdrawals, &root)
+			attrs := payloadAttributes(tc.version, 1, common.Hash{0xbb}, common.Address{0xcc},
+				withdrawals, &root, &slotNumber, &targetGasLimit)
 
-			// The forkchoice call is versioned: V1 and V2 reject a parent beacon block root, so
-			// sending one below Deneb fails the request rather than being ignored.
-			require.Equal(t, tc.wantParentRoot, attrs.ParentBeaconBlockRoot != nil)
+			// A version that does not define a field must not have it populated: V1 carries no
+			// withdrawals, V1 and V2 no parent beacon block root, and supplying one is rejected
+			// rather than ignored.
 			require.Equal(t, tc.wantWithdrawals, attrs.Withdrawals != nil)
-			require.Nil(t, attrs.SlotNumber, "only a Gloas proposal knows its slot number")
-			require.Nil(t, attrs.TargetGasLimit)
+			require.Equal(t, tc.wantParentRoot, attrs.ParentBeaconBlockRoot != nil)
+
+			// The values have to arrive, not merely be non-nil: dropping either Gloas field leaves
+			// every Gloas proposal rejected with -38003.
+			if tc.wantGloasFields {
+				require.Equal(t, &slotNumber, attrs.SlotNumber)
+				require.Equal(t, &targetGasLimit, attrs.TargetGasLimit)
+			} else {
+				require.Nil(t, attrs.SlotNumber)
+				require.Nil(t, attrs.TargetGasLimit)
+			}
+			require.Equal(t, hexutil.Uint64(1), attrs.Timestamp)
+			require.Equal(t, common.Hash{0xbb}, attrs.PrevRandao)
+			require.Equal(t, common.Address{0xcc}, attrs.SuggestedFeeRecipient)
 		})
 	}
 }

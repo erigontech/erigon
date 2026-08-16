@@ -227,10 +227,10 @@ func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconCha
 	}
 }
 
-// payloadAttributes builds the attributes for a version of the forkchoice call. The wire format is
-// versioned, so a field the chosen version does not carry has to be left out rather than sent and
-// ignored: V1 carries no withdrawals and V1 and V2 no parent beacon block root, and a strict
-// execution client rejects a request that includes them.
+// payloadAttributes builds the attributes for a version of the forkchoice call, which is the one
+// place that decides which fields each version carries. A field the chosen version does not define
+// is left unpopulated rather than filled in and ignored: V1 has no withdrawals and V1 and V2 no
+// parent beacon block root, and an execution client rejects a request that supplies them.
 func payloadAttributes(
 	version clparams.StateVersion,
 	timestamp hexutil.Uint64,
@@ -238,6 +238,7 @@ func payloadAttributes(
 	feeRecipient common.Address,
 	withdrawals []*types.Withdrawal,
 	parentRoot *common.Hash,
+	slotNumber, targetGasLimit *hexutil.Uint64,
 ) *engine_types.PayloadAttributes {
 	attrs := &engine_types.PayloadAttributes{
 		Timestamp:             timestamp,
@@ -249,6 +250,10 @@ func payloadAttributes(
 	}
 	if version.AfterOrEqual(clparams.DenebVersion) {
 		attrs.ParentBeaconBlockRoot = parentRoot
+	}
+	if version.AfterOrEqual(clparams.GloasVersion) {
+		attrs.SlotNumber = slotNumber
+		attrs.TargetGasLimit = targetGasLimit
 	}
 	return attrs
 }
@@ -1038,6 +1043,7 @@ func (a *ApiHandler) produceBeaconBody(
 			log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
 			return
 		}
+		slotNumber := hexutil.Uint64(targetSlot)
 		attrs := payloadAttributes(
 			stateVersion,
 			hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
@@ -1045,12 +1051,9 @@ func (a *ApiHandler) produceBeaconBody(
 			feeRecipient,
 			withdrawals,
 			(*common.Hash)(&blockRoot),
+			&slotNumber,
+			targetGasLimit,
 		)
-		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-			slotNumber := hexutil.Uint64(targetSlot)
-			attrs.SlotNumber = &slotNumber
-			attrs.TargetGasLimit = targetGasLimit
-		}
 		builderStartedAt := time.Now()
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
