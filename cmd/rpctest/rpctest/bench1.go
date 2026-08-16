@@ -46,21 +46,16 @@ func Bench1(erigonURL, gethURL string, needCompare bool, fullTest bool, blockFro
 	defer close(resultsCh)
 	go vegetaWrite(false, []string{"eth_getBlockByNumber", "debug_storageRangeAt"}, resultsCh)
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	resultsCh <- res
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %w", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
 	prevBn := blockFrom
 	storageCounter := 0
+	var res CallResult
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)

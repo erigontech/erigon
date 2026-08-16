@@ -63,18 +63,14 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 		go vegetaWrite(true, []string{"debug_getModifiedAccountsByNumber", "eth_getLogs"}, resultsCh)
 	}
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %w\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
+	var res CallResult
 
 	prevBn := blockFrom
 	rnd := rand.New(rand.NewSource(42)) // nolint:gosec
@@ -145,15 +141,10 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res := reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("could not get block number: %w", res.Err)
+	latestBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("error getting block number: %d %s", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	latestBlock := blockNumber.Number.Uint64()
 	log.Info("[ethGetLogsInvariants] starting", "blockFrom", blockFrom, "blockTo", blockTo, "latestBlock", latestBlock)
 	if blockFrom > latestBlock {
 		return fmt.Errorf("fromBlock(%d) > latestBlock(%d)", blockFrom, latestBlock)
@@ -353,15 +344,9 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 
 	reqGen := &RequestGenerator{}
 
-	var res CallResult
-
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %w\n", res.Err)
-	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
 
 	latencyLen := 1000
@@ -413,7 +398,7 @@ func BenchEthGetLogsRandomBlock(erigonURL string, concurentRequests int) error {
 
 	for {
 		bn := uint64(rand.Intn(
-			int(blockNumber.Number.Uint64()),
+			int(lastBlock),
 		))
 
 		reqQueue <- struct{}{}

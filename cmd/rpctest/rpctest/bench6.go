@@ -24,31 +24,20 @@ import (
 
 func Bench6(erigon_url string) error {
 
-	req_id := 0
+	setRoutes(erigon_url, "")
+	reqGen := &RequestGenerator{}
 
-	req_id++
-	template := `
-{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}
-`
-	var blockNumber EthBlockNumber
-	if err := post(client, erigon_url, fmt.Sprintf(template, req_id), &blockNumber); err != nil {
-		return fmt.Errorf("Could not get block number: %w\n", err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
 	accounts := make(map[common.Address]struct{})
-	firstBn := 100000
-	for bn := firstBn; bn <= int(lastBlock); bn++ {
-		req_id++
-		template := `
-{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}
-`
+	firstBn := uint64(100000)
+	for bn := firstBn; bn <= lastBlock; bn++ {
 		var b EthBlockByNumber
-		if err := post(client, erigon_url, fmt.Sprintf(template, bn, req_id), &b); err != nil {
-			return fmt.Errorf("Could not retrieve block %d: %w\n", bn, err)
+		if res := reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b); res.Err != nil {
+			return fmt.Errorf("Could not retrieve block %d: %w\n", bn, res.Err)
 		}
 		if b.Error != nil {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
@@ -60,14 +49,10 @@ func Bench6(erigon_url string) error {
 			if txn.To != nil {
 				accounts[*txn.To] = struct{}{}
 			}
-			req_id++
-			template = `
-{"jsonrpc":"2.0","method":"eth_getTransactionReceipt","params":["%s"],"id":%d}
-`
 			var receipt EthReceipt
-			if err := post(client, erigon_url, fmt.Sprintf(template, txn.Hash, req_id), &receipt); err != nil {
-				printRPCRequest(client, erigon_url, fmt.Sprintf(template, txn.Hash, req_id))
-				return fmt.Errorf("Count not get receipt: %s: %w\n", txn.Hash, err)
+			if res := reqGen.Erigon("eth_getTransactionReceipt", reqGen.getTransactionReceipt(txn.Hash), &receipt); res.Err != nil {
+				printRPCRequest(client, erigon_url, res.RequestBody)
+				return fmt.Errorf("Count not get receipt: %s: %w\n", txn.Hash, res.Err)
 			}
 			if receipt.Error != nil {
 				return fmt.Errorf("Error getting receipt: %d %s\n", receipt.Error.Code, receipt.Error.Message)
