@@ -2263,6 +2263,13 @@ func (hph *HexPatriciaHashed) resetAccountStorageRoot(hashedKey []byte) {
 	cell.hashLen = 0
 	cell.extLen = 0
 	cell.stateHashLen = 0
+	// A single-slot account is stored as one combined account+storage leaf, so the
+	// storage subtree has no branch for deleteStorageSubtreeBranches to drop. Strip
+	// the inline storage here so the account rebuilds with an empty storage root
+	// rather than folding the leftover slot back in.
+	cell.storageAddrLen = 0
+	cell.StorageLen = 0
+	cell.loaded &^= cellLoadStorage
 }
 
 // fetches cell by key and set touch/after maps. Requires that prefix to be already unfolded
