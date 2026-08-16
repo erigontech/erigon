@@ -1182,6 +1182,15 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 			jsonrpc.RunWitnessCacheBuilder(ctx, witnessBuilder, headCh)
 			return nil
 		})
+		// Say so when the request was reduced. The window a consumer gets is
+		// blocks x block time, so on a fast chain a silent clamp is the difference
+		// between a usable window and one that expires before a prover can start.
+		if jsonrpc.WitnessCacheClamped(httpRpcCfg.WitnessCacheBlocks) {
+			s.logger.Warn("[witness-cache] requested block count exceeds the ceiling — clamped",
+				"requested", httpRpcCfg.WitnessCacheBlocks,
+				"ceiling", jsonrpc.WitnessCacheMaxBlocks(),
+				"raiseWith", "ERIGON_WITNESS_CACHE_MAX_BLOCKS")
+		}
 		s.logger.Info("[witness-cache] eager witness cache enabled", "blocks", jsonrpc.WitnessCacheCapacity(httpRpcCfg.WitnessCacheBlocks), "headCapture", headCaptureMode)
 	}
 

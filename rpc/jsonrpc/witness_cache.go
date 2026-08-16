@@ -18,6 +18,8 @@ package jsonrpc
 
 import (
 	"math"
+	"os"
+	"strconv"
 	"sync"
 
 	lru "github.com/hashicorp/golang-lru/v2"
@@ -26,9 +28,39 @@ import (
 )
 
 const (
-	witnessCacheMaxBlocks = 96
-	bytesPerMB            = 1024 * 1024
+	// defaultWitnessCacheMaxBlocks is the ceiling on --witness.cache.blocks when
+	// nothing overrides it. It is a count, but what consumers actually need is a
+	// TIME window — blocks × block time — so the right ceiling is chain-specific.
+	// 96 blocks is ~19 minutes of mainnet but only 192 SECONDS on a 2s L2, which
+	// is shorter than some provers take to start up; such a consumer can then
+	// never fetch a witness before it ages out. Hence the override below.
+	defaultWitnessCacheMaxBlocks = 96
+
+	// witnessCacheMaxBlocksEnv raises (or lowers) that ceiling per process, so a
+	// deployment running fast chains can size the window to its own cadence
+	// without patching the binary. Memory stays bounded by --witness.cache.maxmb,
+	// which evicts on resident bytes regardless of the count.
+	witnessCacheMaxBlocksEnv = "ERIGON_WITNESS_CACHE_MAX_BLOCKS"
+
+	bytesPerMB = 1024 * 1024
 )
+
+// witnessCacheMaxBlocks is resolved once at init from the environment, falling
+// back to defaultWitnessCacheMaxBlocks. A malformed or zero value is ignored
+// rather than fatal: the cache is an optimisation, and refusing to boot over it
+// would be worse than using the default.
+var witnessCacheMaxBlocks = resolveWitnessCacheMaxBlocks(os.Getenv(witnessCacheMaxBlocksEnv))
+
+func resolveWitnessCacheMaxBlocks(env string) uint {
+	if env == "" {
+		return defaultWitnessCacheMaxBlocks
+	}
+	n, err := strconv.ParseUint(env, 10, 32)
+	if err != nil || n == 0 {
+		return defaultWitnessCacheMaxBlocks
+	}
+	return uint(n)
+}
 
 // witnessCacheMaxBytes converts a MB byte-cap to bytes, clamping to avoid int
 // overflow on 32-bit builds or absurd values. 0 stays 0 (byte cap disabled).
@@ -71,12 +103,24 @@ type witnessResultCache struct {
 
 // WitnessCacheCapacity is the number of witnesses the cache actually holds for a
 // requested block count, after clamping to witnessCacheMaxBlocks.
+//
+// WitnessCacheClamped reports whether that clamp bit, so callers can say so
+// rather than leaving the operator to infer it. The clamp being silent is a real
+// trap: asking for 8192 and getting 96 looks identical to the flag working, and
+// on a fast chain the difference is the whole usable window.
 func WitnessCacheCapacity(blocks uint) uint {
 	if blocks > witnessCacheMaxBlocks {
 		return witnessCacheMaxBlocks
 	}
 	return blocks
 }
+
+// WitnessCacheClamped reports whether a requested block count exceeds the ceiling
+// and would therefore be reduced by WitnessCacheCapacity.
+func WitnessCacheClamped(blocks uint) bool { return blocks > witnessCacheMaxBlocks }
+
+// WitnessCacheMaxBlocks exposes the resolved ceiling for logging and diagnostics.
+func WitnessCacheMaxBlocks() uint { return witnessCacheMaxBlocks }
 
 func newWitnessResultCache(blocks uint, maxBytes int, headCapture, cacheOnly bool) *witnessResultCache {
 	c := &witnessResultCache{
