@@ -675,8 +675,9 @@ func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destro
 // the destroying tx's own entry, matching read_paths.go, which applies the same
 // bump to Balance — no wipe scan here takes Balance, because a destruct either
 // writes it at its own index or (EIP-8246) means to keep the prior cell.
+// UnknownDep alone means no cell: -1 is the block-begin system tx's own index.
 func destructScanFloor(path AccountPath, floor int) int {
-	if floor < 0 {
+	if floor == UnknownDep {
 		return scanEverything
 	}
 	if path == CodeHashPath {

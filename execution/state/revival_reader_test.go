@@ -742,3 +742,18 @@ func TestSelfdestructRecordReadsBackWiped(t *testing.T) {
 		})
 	}
 }
+
+// -1 is the block-begin system tx's own index, not the missing-floor sentinel
+// floorCell returns. The CodeHash bump has to apply there too, or the destruct
+// at that index wipes the cell that same tx wrote.
+func TestApplySubFieldWrites_BlockBeginCodeHashKeepsOwnIndex(t *testing.T) {
+	vm := NewVersionMap(nil)
+	addr := getAddress(1)
+	code := accounts.NewCode([]byte{0x60, 0x00})
+	vm.WriteCodeHash(addr, Version{TxIndex: -1}, code.Hash, true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: -1}, true, true)
+
+	var acc accounts.Account
+	vm.applySubFieldWrites(addr, 1, &acc)
+	require.Equal(t, code.Hash, acc.CodeHash, "the destroying tx's own code hash is what remains after it")
+}
