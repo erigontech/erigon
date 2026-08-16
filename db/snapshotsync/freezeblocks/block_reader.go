@@ -868,8 +868,18 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).blockWithSenders(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
 	}
 
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+	// readFromDB is the MDBX fallback path. Two callers:
+	//   1. Global BlocksAvailable() says the block is past the frozen tip
+	//      → the block was never retired, only the DB has it.
+	//   2. Global says it should be in .seg but the tx's pinned view
+	//      doesn't include the covering .seg file (retire completed after
+	//      tx open, tx's file view is stale). The tx's MVCC view still
+	//      sees the block in MDBX because prune runs after retire commits
+	//      and the tx's snapshot predates prune. Falling through avoids
+	//      the silent nil-block that stalled recovery-exec on the leg-M
+	//      soak 2026-08-16 iter 1 mode_b (post-retire read of a block
+	//      whose covering .seg was published between tx-open and read).
+	readFromDB := func() (*types.Block, []common.Address, error) {
 		if tx == nil {
 			if dbgLogs {
 				log.Info(dbgPrefix + "RoTx is nil")
@@ -877,8 +887,8 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			return nil, nil, nil
 		}
 		if forceCanonical {
-			canonicalHash, ok, err := r.CanonicalHash(ctx, tx, blockHeight)
-			if err != nil {
+			canonicalHash, ok, cerr := r.CanonicalHash(ctx, tx, blockHeight)
+			if cerr != nil {
 				return nil, nil, fmt.Errorf("requested non-canonical hash %x. canonical=%x", hash, canonicalHash)
 			}
 			if !ok || canonicalHash != hash {
@@ -889,7 +899,7 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			}
 		}
 
-		block, senders, err = rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
+		block, senders, err := rawdb.ReadBlockWithSenders(tx, hash, blockHeight)
 		if err != nil {
 			return nil, nil, err
 		}
@@ -897,6 +907,11 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 			log.Info(dbgPrefix + fmt.Sprintf("found_in_db=%t", block != nil))
 		}
 		return block, senders, nil
+	}
+
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		return readFromDB()
 	}
 
 	if r.sn == nil {
@@ -909,9 +924,9 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	seg, ok, release := r.viewSingleFile(tx, snaptype2.Headers, blockHeight)
 	if !ok {
 		if dbgLogs {
-			log.Info(dbgPrefix + "no header files for this block num")
+			log.Info(dbgPrefix + "no header files for this block num — falling through to DB")
 		}
-		return
+		return readFromDB()
 	}
 	defer release()
 
@@ -936,9 +951,9 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	bodySeg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
 	if !ok {
 		if dbgLogs {
-			log.Info(dbgPrefix + "no bodies file for this block num")
+			log.Info(dbgPrefix + "no bodies file for this block num — falling through to DB")
 		}
-		return
+		return readFromDB()
 	}
 	defer release()
 
@@ -959,8 +974,10 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	if txCount != 0 {
 		txnSeg, ok, release := r.viewSingleFile(tx, snaptype2.Transactions, blockHeight)
 		if !ok {
-			err = fmt.Errorf("no transactions snapshot file for blockNum=%d, BlocksAvailable=%d", blockHeight, r.sn.BlocksAvailable())
-			return nil, nil, err
+			if dbgLogs {
+				log.Info(dbgPrefix + "no transactions file for this block num — falling through to DB")
+			}
+			return readFromDB()
 		}
 		defer release()
 		txs, senders, err = r.txsFromSnapshot(baseTxnId, txCount, txnSeg, buf)
