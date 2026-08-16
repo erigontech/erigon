@@ -131,7 +131,7 @@ func createTestFileU32(b *testing.B, tmpdir string, keySize, valSize, fileSize i
 	return f.Name()
 }
 
-func openMmap(b *testing.B, fname string) ([]byte, *os.File) {
+func openMmap(b *testing.B, fname string) (mmap.Ro, *os.File) {
 	b.Helper()
 	f, err := os.Open(fname)
 	if err != nil {
@@ -153,6 +153,7 @@ func benchMmapU16(b *testing.B, fname string) {
 	b.Helper()
 	data, f := openMmap(b, fname)
 	defer f.Close()
+	defer data.Unmap() //nolint
 
 	m := &mmapBytesReader{data: data, pos: 0}
 	for {
@@ -169,6 +170,7 @@ func benchMmapU32(b *testing.B, fname string) {
 	b.Helper()
 	data, f := openMmap(b, fname)
 	defer f.Close()
+	defer data.Unmap() //nolint
 
 	pos := 0
 	for pos+4 <= len(data) {

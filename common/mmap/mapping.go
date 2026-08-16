@@ -41,7 +41,10 @@ func OpenRo(f *os.File, size int) (Ro, error) {
 	if err != nil {
 		return nil, err
 	}
-	_ = MadviseRandom(m)
+	if err := MadviseRandom(m); err != nil { // ENOSYS is already tolerated inside
+		_ = m.Unmap()
+		return nil, err
+	}
 	return Ro(m), nil
 }
 
