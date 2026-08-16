@@ -73,7 +73,16 @@ func poisonSharedBranchCache(t *testing.T, db kv.TemporalRoDB) func() {
 	}
 }
 
+func enableStateCacheForTest(t *testing.T) {
+	t.Helper()
+	previous := dbg.UseStateCache
+	dbg.SetUseStateCache(true)
+	t.Cleanup(func() { dbg.SetUseStateCache(previous) })
+}
+
 func TestGetProofIgnoresSharedBranchCache(t *testing.T) {
+	enableStateCacheForTest(t)
+
 	previousSchema := statecfg.Schema
 	statecfg.EnableHistoricalCommitment()
 	t.Cleanup(func() { statecfg.Schema = previousSchema })
@@ -89,6 +98,8 @@ func TestGetProofIgnoresSharedBranchCache(t *testing.T) {
 }
 
 func TestSimulateV1IgnoresSharedBranchCache(t *testing.T) {
+	enableStateCacheForTest(t)
+
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	assertPoisoned := poisonSharedBranchCache(t, m.DB)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
@@ -111,9 +122,7 @@ func TestSimulateV1IgnoresSharedBranchCache(t *testing.T) {
 }
 
 func TestExecutionWitnessDomainsIgnoreSharedBranchCache(t *testing.T) {
-	previousUseStateCache := dbg.UseStateCache
-	dbg.SetUseStateCache(true)
-	t.Cleanup(func() { dbg.SetUseStateCache(previousUseStateCache) })
+	enableStateCacheForTest(t)
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	assertPoisoned := poisonSharedBranchCache(t, m.DB)
