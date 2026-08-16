@@ -611,6 +611,17 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 			return false
 		}
 	}
+	// EIP-8246: a self-destruct may preserve a non-zero balance (or leave a
+	// non-zero nonce), keeping the account alive as balance-only. That preserve is
+	// written in the destruct tx itself, so the strictly-above revival checks above
+	// miss it — the account is not net-absent, and a base read of it as absent is
+	// stale and must be invalidated.
+	if bal, _, ok := vm.ReadBalance(addr, txIndex); ok && !bal.IsZero() {
+		return false
+	}
+	if nonce, _, ok := vm.ReadNonce(addr, txIndex); ok && nonce != 0 {
+		return false
+	}
 	return true
 }
 
