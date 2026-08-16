@@ -134,13 +134,20 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
 		return apis.eth.GetCode(ctx, testAddr, &bnh)
 	}},
-	// Log matching runs over standalone inverted indices retired at the history
-	// cutoff, so these follow history whatever the receipt retention is.
-	{"eth_getLogs", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	// An unfiltered query reads receipts only. Filtering by address or topic adds a
+	// search over the standalone log indices, which are retired at the history
+	// cutoff whatever the receipt retention is.
+	{"eth_getLogs", gatedByReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetLogs(ctx, blockFilter(ref.num))
 	}},
-	{"erigon_getLogs", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	{"eth_getLogs_byAddress", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.eth.GetLogs(ctx, addressFilter(ref.num))
+	}},
+	{"erigon_getLogs", gatedByReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.erigon.GetLogs(ctx, blockFilter(ref.num))
+	}},
+	{"erigon_getLogs_byAddress", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.erigon.GetLogs(ctx, addressFilter(ref.num))
 	}},
 	{"erigon_getLatestLogs", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.erigon.GetLatestLogs(ctx, blockFilter(ref.num), filters.LogFilterOptions{LogCount: 10})
@@ -181,10 +188,17 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	}},
 }
 
-// blockFilter matches every log of a single block.
+// blockFilter matches every log of a single block, with no index lookup.
 func blockFilter(block uint64) filters.FilterCriteria {
 	n := new(big.Int).SetUint64(block)
 	return filters.FilterCriteria{FromBlock: n, ToBlock: n}
+}
+
+// addressFilter narrows the same block by address, which forces the log index search.
+func addressFilter(block uint64) filters.FilterCriteria {
+	c := blockFilter(block)
+	c.Addresses = []common.Address{testAddr}
+	return c
 }
 
 // pruneGatingConfigs mirrors the shapes of the named presets in

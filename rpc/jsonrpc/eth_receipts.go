@@ -251,9 +251,15 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
-	// Matching reads the log indices, retired with history rather than with receipts.
-	if err := api.BaseAPI.checkPruneHistory(ctx, tx, begin); err != nil {
+	if err := api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
 		return nil, err
+	}
+	// Filtering by address or topic reads the log indices, which are retired with
+	// history rather than with receipts; an unfiltered query only reads receipts.
+	if len(crit.Addresses) > 0 || len(crit.Topics) > 0 {
+		if err := api.BaseAPI.checkPruneHistory(ctx, tx, begin); err != nil {
+			return nil, err
+		}
 	}
 
 	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)
