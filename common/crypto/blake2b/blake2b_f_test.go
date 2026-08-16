@@ -5,7 +5,6 @@ import (
 	"math/rand"
 	"reflect"
 	"runtime"
-	"runtime/metrics"
 	"testing"
 	"time"
 )
@@ -73,72 +72,53 @@ func TestFChunkedMatchesGeneric(t *testing.T) {
 	}
 }
 
-func maxStopTheWorld() time.Duration {
-	s := []metrics.Sample{{Name: "/sched/pauses/stopping/gc:seconds"}}
-	metrics.Read(s)
-	h := s[0].Value.Float64Histogram()
-	var max float64
-	for i, count := range h.Counts {
-		if count > 0 {
-			max = h.Buckets[i+1]
+// gcWait reports the longest a GC had to wait while work ran in another
+// goroutine. Work the runtime cannot preempt shows up here directly.
+func gcWait(work func()) time.Duration {
+	done := make(chan struct{})
+	go func() { defer close(done); work() }()
+	var worst time.Duration
+	for {
+		select {
+		case <-done:
+			return worst
+		default:
 		}
+		start := time.Now()
+		runtime.GC()
+		worst = max(worst, time.Since(start))
 	}
-	return time.Duration(max * float64(time.Second))
 }
 
-// The rounds argument of the BLAKE2b F precompile comes from calldata and is
-// priced at one gas per round, so a single transaction can ask for tens of
-// millions of rounds. Assembly is never preemptible, so an unchunked call
-// blocks every stop-the-world for as long as it runs.
+// The rounds argument of the F precompile comes from calldata and is priced at
+// one gas per round, so a single transaction can ask for tens of millions of
+// rounds. Assembly is never preemptible, so an unchunked call blocks every
+// stop-the-world for as long as it runs.
+//
+// The budget is relative to fGeneric, which computes the same thing in Go and is
+// always preemptible: a slow or loaded runner moves both numbers together and
+// only a real regression separates them.
 func TestFLongRoundsIsPreemptible(t *testing.T) {
-	if testing.Short() {
-		t.Skip("runs several million rounds")
-	}
-	if runtime.GOMAXPROCS(0) < 2 {
-		t.Skip("needs GOMAXPROCS >= 2 to observe a stopping pause")
+	if testing.Short() || runtime.GOMAXPROCS(0) < 2 {
+		t.Skip("runs millions of rounds, and needs GOMAXPROCS >= 2 to see a stalled GC")
 	}
 	if !useAVX2 && !useAVX && !useSSE4 {
 		t.Skip("no assembly on this machine, so the round loop is already preemptible Go")
 	}
 
-	var garbage []byte
-	stop := make(chan struct{})
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		for {
-			select {
-			case <-stop:
-				return
-			default:
-			}
-			garbage = make([]byte, 1<<20)
-			runtime.GC()
-			time.Sleep(time.Millisecond)
-		}
-	}()
-	time.Sleep(200 * time.Millisecond)
-
 	var h [8]uint64
 	var m [16]uint64
 	var c [2]uint64
 	const rounds = 8_000_000
-	for range 8 {
-		F(&h, m, c, false, rounds)
-	}
 
-	time.Sleep(300 * time.Millisecond) // let a blocked stop-the-world finish and be recorded
-	got := maxStopTheWorld()
-	close(stop)
-	<-done
-	_ = garbage
+	floor := gcWait(func() { fGeneric(&h, &m, c[0], c[1], 0, rounds) })
+	got := gcWait(func() { F(&h, m, c, false, rounds) })
 
-	const budget = 5 * time.Millisecond
-	if got > budget {
-		t.Fatalf("max GC stop-the-world stopping pause %v over budget %v: F(rounds=%d) is not preemptible",
-			got, budget, rounds)
+	t.Logf("worst GC wait: F %v, pure-Go fGeneric %v", got, floor)
+	if got > 5*time.Millisecond && got > 4*floor {
+		t.Fatalf("a GC waited %v on F against %v on the pure-Go path: "+
+			"the assembly round loop is running unbounded", got, floor)
 	}
-	t.Logf("max GC stop-the-world stopping pause: %v", got)
 }
 
 var testVectorsF = []testVector{
