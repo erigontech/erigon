@@ -863,6 +863,10 @@ func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, comm
 	return api.buildWitnessResult(ctx, committedTx, hc, info, mode)
 }
 
+func newExecutionWitnessDomains(ctx context.Context, tx kv.TemporalTx) (*execctx.SharedDomains, error) {
+	return execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+}
+
 // buildWitnessResult runs the witness-building pipeline for an already-resolved block
 // against an open temporal tx: re-execute to record accesses, fold the commitment trie,
 // collect ancestor headers, verify statelessly, then append the legacy empty-storage node
@@ -900,7 +904,7 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	// Use the proof infrastructure from the commitment context.
 	// Witness generation requires the sequential HexPatriciaHashed (Witness()
 	// type-asserts it); the parallel trie cannot serve it.
-	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	domains, err := newExecutionWitnessDomains(ctx, tx)
 	if err != nil {
 		return nil, err
 	}

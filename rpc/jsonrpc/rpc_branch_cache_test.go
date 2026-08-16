@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -106,5 +107,40 @@ func TestSimulateV1IgnoresSharedBranchCache(t *testing.T) {
 	}, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
 	require.NoError(t, err)
 	require.Len(t, result, 1)
+	assertPoisoned()
+}
+
+func TestExecutionWitnessDomainsIgnoreSharedBranchCache(t *testing.T) {
+	previousUseStateCache := dbg.UseStateCache
+	dbg.SetUseStateCache(true)
+	t.Cleanup(func() { dbg.SetUseStateCache(previousUseStateCache) })
+
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	assertPoisoned := poisonSharedBranchCache(t, m.DB)
+	tx, err := m.DB.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, kv.Unlim)
+	require.NoError(t, err)
+	defer it.Close()
+	var branchKey, branchValue []byte
+	for it.HasNext() {
+		key, value, err := it.Next()
+		require.NoError(t, err)
+		if !bytes.Equal(key, commitment.KeyCommitmentState) && len(value) > 0 {
+			branchKey = bytes.Clone(key)
+			branchValue = bytes.Clone(value)
+			break
+		}
+	}
+	require.NotEmpty(t, branchKey)
+
+	domains, err := newExecutionWitnessDomains(t.Context(), tx)
+	require.NoError(t, err)
+	defer domains.Close()
+	got, _, err := domains.GetLatest(kv.CommitmentDomain, tx, branchKey)
+	require.NoError(t, err)
+	require.Equal(t, branchValue, got)
 	assertPoisoned()
 }
