@@ -377,3 +377,14 @@ func (g *RequestGenerator) Geth2(method, body string) CallResult {
 func (g *RequestGenerator) Erigon2(method, body string) CallResult {
 	return g.call2(Erigon, method, body)
 }
+
+func (g *RequestGenerator) latestBlockNumber() (uint64, error) {
+	var blockNumber EthBlockNumber
+	if res := g.Erigon("eth_blockNumber", g.blockNumber(), &blockNumber); res.Err != nil {
+		return 0, fmt.Errorf("could not get block number: %v", res.Err)
+	}
+	if blockNumber.Error != nil {
+		return 0, fmt.Errorf("error getting block number: %d %s", blockNumber.Error.Code, blockNumber.Error.Message)
+	}
+	return uint64(blockNumber.Number), nil
+}
