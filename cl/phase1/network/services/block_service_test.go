@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -45,6 +46,28 @@ type attesterSlashingErrorStore struct {
 
 func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing, bool) error {
 	return s.err
+}
+
+type dataUnavailableStore struct {
+	*mock_services.ForkChoiceStorageMock
+	onBlockCalls int
+}
+
+func (s *dataUnavailableStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+	s.onBlockCalls++
+	return forkchoice.ErrEIP7594ColumnDataNotAvailable
+}
+
+func newDataUnavailableBlockJob(t *testing.T) (*blockService, *dataUnavailableStore, *cltypes.SignedBeaconBlock) {
+	t.Helper()
+	store := &dataUnavailableStore{ForkChoiceStorageMock: mock_services.NewForkChoiceStorageMock(t)}
+	service := &blockService{
+		forkchoiceStore: store,
+		db:              memdb.NewTestDB(t, dbcfg.ChainDB),
+	}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	service.scheduleBlockForLaterProcessing(block)
+	return service, store, block
 }
 
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
@@ -164,6 +187,31 @@ func TestBlockServiceSuccess(t *testing.T) {
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 
 	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
+}
+
+func TestDataAvailabilityRetriesAreDelayed(t *testing.T) {
+	service, store, _ := newDataUnavailableBlockJob(t)
+	now := time.Now()
+	service.processScheduledBlocks(t.Context(), now)
+	service.processScheduledBlocks(t.Context(), now.Add(dataAvailabilityRetryInterval-time.Nanosecond))
+
+	require.Equal(t, 1, store.onBlockCalls)
+}
+
+func TestDataAvailabilityRetriesAreBounded(t *testing.T) {
+	const retryLimit = 4
+	service, store, block := newDataUnavailableBlockJob(t)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	now := time.Now()
+	for attempt := range retryLimit + 1 {
+		service.processScheduledBlocks(t.Context(), now.Add(time.Duration(attempt)*(dataAvailabilityRetryInterval+time.Nanosecond)))
+	}
+
+	require.Equal(t, retryLimit, store.onBlockCalls)
+	_, pending := service.blocksScheduledForLaterExecution.Load(blockRoot)
+	require.False(t, pending)
 }
 
 func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {

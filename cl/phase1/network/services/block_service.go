@@ -51,8 +51,10 @@ type proposerIndexAndSlot struct {
 }
 
 type blockJob struct {
-	block        *cltypes.SignedBeaconBlock
-	creationTime time.Time
+	block                    *cltypes.SignedBeaconBlock
+	creationTime             time.Time
+	retryAfter               time.Time
+	dataAvailabilityAttempts uint8
 }
 
 type blockService struct {
@@ -330,19 +332,33 @@ func (b *blockService) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
-			blockJob := value.(*blockJob)
-			// check if it has expired
-			if time.Since(blockJob.creationTime) > blockJobExpiry {
-				b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
-				log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
-				return true
-			}
+		b.processScheduledBlocks(ctx, time.Now())
+	}
+}
+
+func (b *blockService) processScheduledBlocks(ctx context.Context, now time.Time) {
+	b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
+		blockJob := value.(*blockJob)
+		if now.Sub(blockJob.creationTime) > blockJobExpiry {
 			b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
 			return true
-		})
-	}
+		}
+		if now.Before(blockJob.retryAfter) {
+			return true
+		}
+		if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
+			if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+				blockJob.dataAvailabilityAttempts++
+				if blockJob.dataAvailabilityAttempts >= maxDataAvailabilityRetries {
+					b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
+				} else {
+					blockJob.retryAfter = now.Add(dataAvailabilityRetryInterval)
+				}
+			}
+			log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
+			return true
+		}
+		b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
+		return true
+	})
 }

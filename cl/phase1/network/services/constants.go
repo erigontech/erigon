@@ -30,6 +30,8 @@ const (
 	operationSeenCacheSize        = 16_384
 	seenBlockCacheSize            = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
 	blockJobsIntervalTick         = 50 * time.Millisecond
+	dataAvailabilityRetryInterval = time.Second
+	maxDataAvailabilityRetries    = 4
 	blobJobsIntervalTick          = 5 * time.Millisecond
 	singleAttestationIntervalTick = 10 * time.Millisecond
 	attestationJobsIntervalTick   = 100 * time.Millisecond
