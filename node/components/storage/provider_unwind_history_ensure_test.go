@@ -53,8 +53,11 @@ func namesOf(items []snapcfg.PreverifiedItem) []string {
 // must include exactly those under history/, idx/, and accessor/ whose
 // step range overlaps (baselineStep, walkEndStep] — and exclude every
 // pre-baseline file plus every non-walked domain (tracesfrom, tracesto,
-// logaddrs, logtopics, receipt, rcache, commitment) plus every non-
-// history file (domain/*.kv, top-level block segs, chain.toml).
+// logaddrs, logtopics, rcache, commitment) plus every non-history file
+// (domain/*.kv, top-level block segs, chain.toml). Receipt IS in the
+// walked set as of 2026-08-16 — mode-C split-emit needs its history so
+// the aligned receipt file can be regenerated cleanly (see walkDomains
+// docstring).
 func TestNeededPreverifiedHistoryForWalk_FiltersByDomainAndOverlap(t *testing.T) {
 	t.Parallel()
 
@@ -67,6 +70,7 @@ func TestNeededPreverifiedHistoryForWalk_FiltersByDomainAndOverlap(t *testing.T)
 		"history/v2.0-accounts.286-287.v":    "aaa6",
 		"history/v2.0-storage.256-272.v":     "bbb2",
 		"history/v2.0-code.256-272.v":        "ccc2",
+		"history/v3.0-receipt.256-272.v":     "rcpt",
 		"idx/v3.0-accounts.256-272.ef":       "iii2",
 		"accessor/v1.1-accounts.256-272.vi":  "vvv2",
 		"accessor/v2.1-accounts.256-272.efi": "eff2",
@@ -77,7 +81,6 @@ func TestNeededPreverifiedHistoryForWalk_FiltersByDomainAndOverlap(t *testing.T)
 		"idx/v3.0-accounts.0-256.ef":      "iii1",
 		"accessor/v1.1-accounts.0-256.vi": "vvv1",
 		// Non-walked domains: EXCLUDE.
-		"history/v3.0-receipt.256-272.v":   "rcpt",
 		"idx/v3.0-logaddrs.256-272.ef":     "la",
 		"idx/v3.0-logtopics.256-272.ef":    "lt",
 		"idx/v3.0-tracesfrom.256-272.ef":   "tf",
@@ -103,6 +106,7 @@ func TestNeededPreverifiedHistoryForWalk_FiltersByDomainAndOverlap(t *testing.T)
 		"history/v2.0-accounts.286-287.v",
 		"history/v2.0-code.256-272.v",
 		"history/v2.0-storage.256-272.v",
+		"history/v3.0-receipt.256-272.v",
 		"idx/v3.0-accounts.256-272.ef",
 	}
 	require.Equal(t, want, got)
@@ -255,7 +259,7 @@ func TestIsWalkDomain(t *testing.T) {
 		"history/v2.0-code.256-272.v":        true,
 		"idx/v3.0-accounts.256-272.ef":       true,
 		"accessor/v2.1-accounts.256-272.efi": true,
-		"history/v3.0-receipt.256-272.v":     false,
+		"history/v3.0-receipt.256-272.v":     true,
 		"idx/v3.0-logaddrs.256-272.ef":       false,
 		"idx/v3.0-logtopics.256-272.ef":      false,
 		"idx/v3.0-tracesfrom.256-272.ef":     false,

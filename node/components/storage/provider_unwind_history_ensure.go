@@ -34,16 +34,27 @@ import (
 	"github.com/erigontech/erigon/db/version"
 )
 
-// walkDomains lists the state domains whose history the mode-B compute
-// walks via HistoryKeyTxNumRange to build the touch set (see
-// execution/commitment/commitmentdb/recompute_sdless.go). Non-history
-// files (block seg, tracesfrom/tracesto/logaddrs/logtopics, receipt/
-// rcache) are never consulted by the compute and are excluded from the
-// on-demand download set.
+// walkDomains lists the state domains whose history the mode-B unwind
+// needs on-disk. Two consumers:
+//
+//   - The commitment recompute walks accounts/storage/code history via
+//     HistoryKeyTxNumRange to build the touch set (see
+//     execution/commitment/commitmentdb/recompute_sdless.go).
+//   - The mode-C split-emit walks EVERY state domain's history with a
+//     wide straddling file (accounts/storage/code + receipt). Without
+//     receipt's history on disk, overrideActionForDomain deflects the
+//     receipt straddler to actionRemove and the old wide receipt file
+//     is deleted with no replacement, opening a permanent gap in the
+//     aggregator's visible-file set for that step range (leg-M iter 4
+//     mode_b 2026-08-16 recovery wedge).
+//
+// Non-history files (block seg, tracesfrom/tracesto/logaddrs/logtopics)
+// are never consulted by either consumer and stay excluded.
 var walkDomains = map[string]struct{}{
 	"accounts": {},
 	"storage":  {},
 	"code":     {},
+	"receipt":  {},
 }
 
 // ensureHistoryForUnwindWalk downloads any preverified history files
@@ -141,7 +152,7 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 		// (add an archive publisher) or the preverified registry is
 		// stale (LoadRemotePreverified didn't repopulate).
 		return noop, fmt.Errorf(
-			"history starvation: walk range (%d, %d] × {accounts,storage,code} is non-empty but the preverified registry has no history entries covering it (baseline=%d walkEnd=%d spanSteps=%d)",
+			"history starvation: walk range (%d, %d] × {accounts,storage,code,receipt} is non-empty but the preverified registry has no history entries covering it (baseline=%d walkEnd=%d spanSteps=%d)",
 			baselineStep, walkEndStep, baselineStep, walkEndStep, walkEndStep-baselineStep)
 	}
 
@@ -325,10 +336,11 @@ func localCommitmentBaselineStep(snapDir string, walkEndStep, stepSize uint64) (
 // caller should abort the unwind loudly instead of proceeding with a
 // partial download that would leave the compute short of touches.
 //
-// The domain assumption mirrors ensureHistoryForUnwindWalk: the mode-B
-// compute walks accounts, storage, and code history. Non-walked
-// domains (receipt, rcache) are excluded — their coverage is not the
-// mode-B compute's business.
+// The domain assumption mirrors ensureHistoryForUnwindWalk: both the
+// compute walk (accounts/storage/code) and the mode-C split-emit
+// (accounts/storage/code + receipt) require these histories on disk.
+// Non-walked domains (rcache) are excluded — their coverage is not
+// the mode-B unwind's business.
 func findStarvedCoverage(needed []snapcfg.PreverifiedItem, baselineStep, walkEndStep uint64) []string {
 	type key struct {
 		domain string
