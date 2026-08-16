@@ -214,7 +214,7 @@ func TestGzipMetricsSkipUncompressedResponses(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			inBefore, outBefore := gzipInBytes.GetValueUint64(), gzipOutBytes.GetValueUint64()
 
-			req := httptest.NewRequest(http.MethodPost, "/", nil)
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
 			if tc.accept != "" {
 				req.Header.Set("Accept-Encoding", tc.accept)
 			}
@@ -258,7 +258,7 @@ func TestHTTPHandlerStackCompressionDisabled(t *testing.T) {
 			srv := httptest.NewServer(NewHTTPHandlerStack(inner, nil, nil, tc.compression, 0, false))
 			defer srv.Close()
 
-			req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+			req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, nil)
 			req.Header.Set("Accept-Encoding", "gzip")
 			resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req)
 			require.NoError(t, err)

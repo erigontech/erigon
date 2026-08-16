@@ -138,7 +138,7 @@ func measureHandlerLatency(t testing.TB, payload []byte, wrap func(http.Handler)
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 
 	for range 10 {
-		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload)) //nolint:noctx
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		resp, _ := client.Do(req)
 		if resp != nil {
@@ -149,7 +149,7 @@ func measureHandlerLatency(t testing.TB, payload []byte, wrap func(http.Handler)
 
 	latencies := make([]time.Duration, 0, requests)
 	for range requests {
-		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload)) //nolint:noctx
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		start := time.Now()
 		resp, err := client.Do(req)
@@ -178,7 +178,7 @@ func measureRPCLatency(t testing.TB, endpoint, blockTag string) latencyStats {
 	// Warmup + fetch payload size
 	var payloadKB int
 	for i := range 10 {
-		req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body)) //nolint:noctx
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Encoding", "gzip")
 		resp, err := client.Do(req)
@@ -195,7 +195,7 @@ func measureRPCLatency(t testing.TB, endpoint, blockTag string) latencyStats {
 
 	latencies := make([]time.Duration, 0, requests)
 	for range requests {
-		req, _ := http.NewRequest(http.MethodPost, endpoint, strings.NewReader(body)) //nolint:noctx
+		req, _ := http.NewRequestWithContext(t.Context(), http.MethodPost, endpoint, strings.NewReader(body))
 		req.Header.Set("Content-Type", "application/json")
 		req.Header.Set("Accept-Encoding", "gzip")
 		start := time.Now()
@@ -239,7 +239,7 @@ func fetchPayload(t testing.TB, blockTag string) []byte {
 		`{"jsonrpc":"2.0","id":1,"method":"eth_getBlockByNumber","params":[%q,true]}`,
 		blockTag,
 	)
-	resp, err := http.Post(rpcEndpoint, "application/json", strings.NewReader(body)) //nolint:noctx
+	resp, err := http.Post(rpcEndpoint, "application/json", strings.NewReader(body))
 	if err != nil {
 		t.Skipf("local node not reachable at %s: %v", rpcEndpoint, err)
 		return nil
@@ -330,7 +330,7 @@ func benchmarkGzipHandler(b *testing.B, payload []byte, wrap func(http.Handler) 
 	client := &http.Client{Transport: &http.Transport{DisableCompression: true}}
 
 	for range 5 {
-		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload)) //nolint:noctx
+		req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		resp, _ := client.Do(req)
 		if resp != nil {
@@ -345,7 +345,7 @@ func benchmarkGzipHandler(b *testing.B, payload []byte, wrap func(http.Handler) 
 
 	var totalLatency time.Duration
 	for i := 0; i < b.N; i++ {
-		req, _ := http.NewRequest(http.MethodPost, srv.URL, bytes.NewReader(payload)) //nolint:noctx
+		req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, bytes.NewReader(payload))
 		req.Header.Set("Accept-Encoding", "gzip")
 		start := time.Now()
 		resp, err := client.Do(req)
@@ -424,7 +424,7 @@ func BenchmarkGzipOneShotThroughput(b *testing.B) {
 				b.RunParallel(func(pb *testing.PB) {
 					client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
 					for pb.Next() {
-						req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+						req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
 						req.Header.Set("Accept-Encoding", "gzip")
 						resp, err := client.Do(req)
 						if err != nil {
@@ -501,7 +501,7 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 					defer srv.Close()
 
 					// One warmup request to learn the uncompressed size for MB/s.
-					req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+					req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
 					req.Header.Set("Accept-Encoding", "gzip")
 					if resp, err := (&http.Client{Transport: &http.Transport{DisableCompression: true}}).Do(req); err == nil {
 						io.Copy(io.Discard, resp.Body) //nolint:errcheck
@@ -513,7 +513,7 @@ func BenchmarkGzipStreamingThroughput(b *testing.B) {
 					b.RunParallel(func(pb *testing.PB) {
 						client := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 64}}
 						for pb.Next() {
-							req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+							req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
 							req.Header.Set("Accept-Encoding", "gzip")
 							resp, err := client.Do(req)
 							if err != nil {
@@ -569,7 +569,7 @@ func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
 				wg.Go(func() {
 					c := &http.Client{Transport: &http.Transport{DisableCompression: true, MaxIdleConnsPerHost: 4}}
 					for range b.N {
-						req, _ := http.NewRequest(http.MethodPost, srv.URL, nil)
+						req, _ := http.NewRequestWithContext(b.Context(), http.MethodPost, srv.URL, nil)
 						req.Header.Set("Accept-Encoding", "gzip")
 						resp, err := c.Do(req)
 						if err != nil {
