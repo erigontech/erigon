@@ -49,7 +49,7 @@ func confirmStatusCode(t *testing.T, got, want int) {
 
 func confirmRequestValidationCode(t *testing.T, method, contentType, body string, expectedStatusCode int) {
 	t.Helper()
-	request := httptest.NewRequest(method, "http://url.com", strings.NewReader(body))
+	request := httptest.NewRequestWithContext(t.Context(), method, "http://url.com", strings.NewReader(body))
 	if len(contentType) > 0 {
 		request.Header.Set("Content-Type", contentType)
 	}
@@ -92,7 +92,7 @@ func confirmHTTPRequestYieldsStatusCode(t *testing.T, method, contentType, body 
 	ts := httptest.NewServer(&s)
 	defer ts.Close()
 
-	request, err := http.NewRequest(method, ts.URL, strings.NewReader(body))
+	request, err := http.NewRequestWithContext(t.Context(), method, ts.URL, strings.NewReader(body))
 	if err != nil {
 		t.Fatalf("failed to create a valid HTTP request: %v", err)
 	}
@@ -159,7 +159,10 @@ func TestHTTPBatchPreservesOrderWithStreaming(t *testing.T) {
 		`{"jsonrpc":"2.0","id":4,"method":"test_echo","params":["four",4,{"S":"y"}]}` +
 		`]`
 
-	resp, err := http.Post(ts.URL, "application/json", strings.NewReader(body))
+	req, err := http.NewRequestWithContext(t.Context(), "POST", ts.URL, strings.NewReader(body))
+	require.NoError(t, err)
+	req.Header.Set("Content-Type", "application/json")
+	resp, err := ts.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	raw, err := io.ReadAll(resp.Body)
@@ -256,7 +259,7 @@ func TestCheckJwtSecretAuthScheme(t *testing.T) {
 	}
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			r := httptest.NewRequest(http.MethodPost, "http://url.com", nil)
+			r := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "http://url.com", nil)
 			r.Header.Set("Authorization", tc.header)
 			require.Equal(t, tc.want, CheckJwtSecret(httptest.NewRecorder(), r, secret))
 		})

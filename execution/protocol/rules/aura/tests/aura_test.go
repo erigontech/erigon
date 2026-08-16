@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package aura_test
+package auratests
 
 import (
 	"context"
@@ -30,7 +30,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
@@ -45,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/rulesconfig"
@@ -56,14 +56,14 @@ import (
 func TestEmptyBlock(t *testing.T) {
 	require := require.New(t)
 	genesis := chainspec.GnosisGenesisBlock()
-	genesisBlock, ibs, err := genesiswrite.GenesisToBlock(t, genesis, datadir.New(t.TempDir()), log.Root())
+	genesisBlock, ibs, err := genesiswrite.GenesisToBlock(genesis, datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	defer ibs.Close()
 
 	genesis.Config.TerminalTotalDifficultyPassed = false
 
 	chainConfig := genesis.Config
-	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	auraDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithEngine(engine))
@@ -101,7 +101,7 @@ func TestAuRaSkipGasLimit(t *testing.T) {
 	genesis.Config.Aura.BlockGasLimitContractTransitions = map[uint64]common.Address{0: common.HexToAddress("0x4000000000000000000000000000000000000001")}
 
 	chainConfig := genesis.Config
-	auraDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	auraDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	engine, err := aura.NewAuRa(chainConfig.Aura, auraDB)
 	require.NoError(err)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithEngine(engine))
@@ -152,13 +152,13 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := testutil.TemporalDBWithDirs(t, dirs)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, dirs)
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 
 	// Replay genesis block the same way exec3 does (see txtask.go):
 	// GenesisToBlock populates an IntraBlockState with the alloc,
 	// then MakeWriteSet writes it into the real shared domains.
-	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(t, genesis, dirs, logger)
+	genesisBlock, genesisIbs, err := genesiswrite.GenesisToBlock(genesis, dirs, logger)
 	require.NoError(err)
 	defer genesisIbs.Close()
 	domainWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
