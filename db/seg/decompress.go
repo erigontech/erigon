@@ -719,6 +719,7 @@ func (v *SequentialView) MakeGetter() *Getter {
 		d:           v.d,
 		data:        v.data,
 		dataLen:     uint64(len(v.data)),
+		dataOffset:  uint64(v.d.size - int64(len(v.data))),
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
 	}
@@ -755,6 +756,8 @@ type Getter struct {
 	patternDict   *patternTable
 	d             *Decompressor
 	fName         string
+	dataOffset    uint64
+	literalWarmer func(*Getter, uint64, uint64)
 	trace         bool
 	residencyGate bool
 }
@@ -887,6 +890,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 		d:           d,
 		data:        data,
 		dataLen:     uint64(len(data)),
+		dataOffset:  uint64(d.size - int64(len(data))),
 		patternDict: d.dict,
 		fName:       d.FileName(),
 	}
@@ -951,16 +955,28 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	// Loop below fills in the patterns
 	// Tracking position in buf where to insert part of the word
 	bufPos := bufOffset
+	literalWarmer := g.literalWarmer
+	literalLen := wordLen
 	for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
 		pt := g.nextPattern()
 		copy(buf[bufPos:], pt)
+		if literalWarmer != nil {
+			if patternLen := uint64(len(pt)); patternLen <= literalLen {
+				literalLen -= patternLen
+			} else {
+				literalLen = 0
+			}
+		}
 	}
 	if g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
 	}
 	postLoopPos := g.dataP
+	if literalWarmer != nil && literalLen > 0 {
+		literalWarmer(g, g.dataOffset+postLoopPos, literalLen)
+	}
 	g.dataP = savePos
 	g.dataBit = 0
 	g.nextPosClean() // Reset the state of huffman reader
