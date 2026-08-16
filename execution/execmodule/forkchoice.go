@@ -302,8 +302,18 @@ func (e *ExecModule) unwindIfNeeded(
 	// Mark all new canonicals as canonicals
 	chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
 	for _, canonicalSegment := range newCanonicals {
-		b, _, _ := rawdb.ReadBody(tx, canonicalSegment.hash, canonicalSegment.number)
-		h := rawdb.ReadHeader(tx, canonicalSegment.hash, canonicalSegment.number)
+		// blockReader falls through DB↔files if the tx's file view is stale
+		// (retire published after tx-open) — raw rawdb.ReadBody/ReadHeader
+		// only checks MDBX and returns nil in that race, false-triggering
+		// "unexpected chain cap" for a block that IS on disk in .seg.
+		h, herr := e.blockReader.Header(ctx, tx, canonicalSegment.hash, canonicalSegment.number)
+		if herr != nil {
+			return nil, herr
+		}
+		b, _, berr := e.blockReader.Body(ctx, tx, canonicalSegment.hash, canonicalSegment.number)
+		if berr != nil {
+			return nil, berr
+		}
 		if b == nil || h == nil {
 			return nil, fmt.Errorf("unexpected chain cap: %d", canonicalSegment.number)
 		}

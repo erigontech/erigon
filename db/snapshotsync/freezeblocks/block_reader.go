@@ -810,18 +810,25 @@ func (r *BlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Has
 }
 
 func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, txCount uint32, err error) {
-	maxBlockNumInFiles := r.sn.BlocksAvailable()
-	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+	readFromDB := func() (*types.Body, uint32, error) {
 		if tx == nil {
 			return nil, 0, nil
 		}
-		body, _, txCount = rawdb.ReadBody(tx, hash, blockHeight)
+		body, _, txCount := rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txCount, nil
+	}
+
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		return readFromDB()
 	}
 
 	seg, ok, release := r.viewSingleFile(tx, snaptype2.Bodies, blockHeight)
 	if !ok {
-		return
+		// Same race the blockWithSenders fall-through handles: tx pinned
+		// its file view before retire published the covering .seg; the tx's
+		// MVCC DB view still has the block (prune commits after retire).
+		return readFromDB()
 	}
 	defer release()
 
