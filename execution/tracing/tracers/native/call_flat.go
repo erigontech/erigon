@@ -29,7 +29,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers"
 	"github.com/erigontech/erigon/execution/types"
@@ -121,7 +120,6 @@ type flatCallResultMarshaling struct {
 type flatCallTracer struct {
 	tracer            *callTracer
 	config            flatCallTracerConfig
-	chainConfig       *chain.Config
 	ctx               *tracers.Context   // Holds tracer context data
 	interrupt         atomic.Bool        // Atomic flag to signal execution interruption
 	activePrecompiles []accounts.Address // Updated on tx start based on given rules
@@ -300,10 +298,9 @@ func flatFromNested(input *callFrame, traceAddress []int, convertErrs bool, ctx 
 	}
 
 	output = append(output, *frame)
-	for i, childCall := range input.Calls {
+	for i := range input.Calls {
 		childAddr := childTraceAddress(traceAddress, i)
-		childCallCopy := childCall
-		flat, err := flatFromNested(&childCallCopy, childAddr, convertErrs, ctx)
+		flat, err := flatFromNested(&input.Calls[i], childAddr, convertErrs, ctx)
 		if err != nil {
 			return nil, err
 		}

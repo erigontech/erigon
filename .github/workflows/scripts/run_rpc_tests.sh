@@ -49,7 +49,7 @@ fi
 if [ "$TEST_TYPE" = "latest" ]; then
     OPTIONAL_FLAGS+=" --tests-on-latest-block"
     if [ -n "$REFERENCE_HOST" ]; then
-        NUM_OF_RETRIES=3
+        NUM_OF_RETRIES=5
     fi
 fi
 
@@ -157,6 +157,11 @@ while true; do
 
    if [ $retries -ge $NUM_OF_RETRIES ]; then
         break
+   fi
+
+   # rpc_int wipes the results dir at startup, so save this attempt's artifacts before retrying.
+   if [ -n "$RESULT_DIR" ]; then
+        cp -r "$WORKSPACE/rpc-tests/integration/$CHAIN/results" "$RESULT_DIR/results_attempt_$attempt"
    fi
 done
 

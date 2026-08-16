@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"math/big"
 	"sync"
 	"testing"
 
@@ -27,12 +28,15 @@ import (
 	"github.com/stretchr/testify/require"
 	"github.com/valyala/fastjson"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 )
 
@@ -62,14 +66,14 @@ func TestCallTraceOneByOne(t *testing.T) {
 		t.Skip("slow test")
 	}
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
 
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	// Insert blocks 1 by 1 to trigger possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
@@ -97,13 +101,13 @@ func TestCallTraceUnwind(t *testing.T) {
 	m := execmoduletester.New(t)
 	var chainA, chainB *blockgen.ChainPack
 	var err error
-	chainA, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chainA, err = m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate chainA: %v", err)
 	}
-	chainB, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, gen *blockgen.BlockGen) {
+	chainB, err = m.GenerateChain(20, func(i int, gen *blockgen.BlockGen) {
 		if i < 5 || i >= 10 {
 			gen.SetCoinbase(common.Address{1})
 		} else {
@@ -114,7 +118,7 @@ func TestCallTraceUnwind(t *testing.T) {
 		t.Fatalf("generate chainB: %v", err)
 	}
 
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	if err = m.InsertChain(chainA); err != nil {
 		t.Fatalf("inserting chainA: %v", err)
@@ -172,13 +176,13 @@ func TestFilterNoAddresses(t *testing.T) {
 		t.Skip("slow test")
 	}
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate chain: %v", err)
 	}
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 	// Insert blocks 1 by 1 to trigger possible "off by one" errors
 	for i := 0; i < chain.Length(); i++ {
 		if err = m.InsertChain(chain.Slice(i, i+1)); err != nil {
@@ -202,20 +206,21 @@ func TestFilterNoAddresses(t *testing.T) {
 
 func TestFilterAddressIntersection(t *testing.T) {
 	m := execmoduletester.New(t)
-	api := NewTraceAPI(newBaseApiForTest(m), m.DB, &httpcfg.HttpCfg{})
+	api := newTraceApiForTest(m)
 
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
 
 	once := new(sync.Once)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(15, func(i int, block *blockgen.BlockGen) {
 		once.Do(func() { block.SetCoinbase(common.Address{4}) })
 
 		var rcv common.Address
-		if i < 5 {
+		switch {
+		case i < 5:
 			rcv = toAddress1
-		} else if i < 10 {
+		case i < 10:
 			rcv = toAddress2
-		} else {
+		default:
 			rcv = other
 		}
 
@@ -284,4 +289,126 @@ func TestFilterAddressIntersection(t *testing.T) {
 		}
 		require.Empty(t, blockNumbersFromTraces(t, stream.Buffer()))
 	})
+}
+
+func TestFilterBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	const tipCap = 2
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	contractAddr, _, blockNumber, overrideBaseFee := c.setupBaseFeeOverrideCall(t, opGasprice, tipCap)
+	api := c.traceAPI()
+
+	n := rpc.BlockNumber(blockNumber)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToAddress: []*common.Address{&contractAddr},
+	}
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), traceConfigWithBaseFeeOverride(overrideBaseFee), stream)
+	require.NoError(t, err)
+
+	expectedGasPrice := new(uint256.Int).AddUint64(overrideBaseFee, tipCap)
+	expectedOutput := hexutil.Bytes(expectedGasPrice.PaddedBytes(32)).String()
+	require.Contains(t, string(stream.Buffer()), expectedOutput)
+}
+
+// TestFilterBlockOverridesOtherFieldsAffectOpcodes checks that filterV3's
+// per-transaction BlockContext picks up BlockOverrides fields other than
+// BaseFeePerGas too.
+func TestFilterBlockOverridesOtherFieldsAffectOpcodes(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	for _, tc := range blockOverrideOpcodeCases() {
+		t.Run(tc.name, func(t *testing.T) {
+			c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+			contractAddr := c.deployOpcodeContract(t, tc.opcode)
+			_, blockNumber, _ := c.callWithDynamicFee(t, contractAddr, 2, 1)
+			api := c.traceAPI()
+
+			n := rpc.BlockNumber(blockNumber)
+			traceReq := TraceFilterRequest{
+				FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+				ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+				ToAddress: []*common.Address{&contractAddr},
+			}
+
+			s := jsoniter.ConfigDefault.BorrowStream(nil)
+			defer jsoniter.ConfigDefault.ReturnStream(s)
+			stream := jsonstream.Wrap(s)
+			err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+				BlockOverrides: tc.override,
+			}, stream)
+			require.NoError(t, err)
+			require.Contains(t, string(stream.Buffer()), hexutil.Bytes(tc.expected).String())
+		})
+	}
+}
+
+// TestFilterRejectedBlockOverrideReturnsError checks that trace_filter
+// reports a rejected BlockOverrides field (here BeaconRoot, which Override
+// always rejects) as a normal RPC error instead of leaving lastRules unset
+// for the block's remaining transactions.
+func TestFilterRejectedBlockOverrideReturnsError(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, chain.AllProtocolChanges)
+	api := c.traceAPI()
+
+	n := rpc.BlockNumber(0)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+	}
+
+	beaconRoot := common.HexToHash("0x01")
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{BeaconRoot: &beaconRoot},
+	}, stream)
+	require.Error(t, err)
+}
+
+// TestFilterSignerReflectsBlockOverridesNumber is filterV3's analogue of
+// TestReplayTransactionSignerReflectsBlockOverridesNumber: filterV3 derives
+// fork rules (lastRules) from the overridden BlockContext but must also
+// recompute lastSigner from it, not from the block's real number. filterV3
+// reports per-transaction failures as an "error" field inside the stream
+// rather than as a Go error, so the assertion inspects the stream contents.
+func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	n := rpc.BlockNumber(3)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &n},
+		ToAddress: []*common.Address{&c.bankAddress},
+	}
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.Big)(big.NewInt(1))},
+	}, stream)
+	require.NoError(t, err)
+	require.Contains(t, string(stream.Buffer()), "protected txn is not supported by signer")
 }

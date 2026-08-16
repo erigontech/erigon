@@ -383,10 +383,10 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	proposerIndex, _ := validatorSet.GetByAddress(proposer)
 
 	signers := validatorSet.Signers()
-	for i := 0; i < len(signers); i++ {
+	for i := range signers {
 		tempIndex := i
 		if tempIndex < proposerIndex {
-			tempIndex = tempIndex + len(signers)
+			tempIndex += len(signers)
 		}
 
 		difficulties[signers[i]] = uint64(len(signers) - (tempIndex - proposerIndex))

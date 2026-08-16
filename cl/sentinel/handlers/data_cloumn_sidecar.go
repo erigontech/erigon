@@ -297,9 +297,6 @@ func dataColumnSidecarsRequestCost(slots, columns, maxSidecars uint64) int {
 	if slots > maxSidecars/columns {
 		return int(maxSidecars) - 1
 	}
-	sidecars := slots * columns
-	if sidecars > maxSidecars {
-		sidecars = maxSidecars
-	}
+	sidecars := min(slots*columns, maxSidecars)
 	return int(sidecars) - 1
 }

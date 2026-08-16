@@ -20,6 +20,7 @@
 package js
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -104,7 +105,6 @@ type jsTracer struct {
 	activePrecompiles []accounts.Address    // List of active precompiles at current block
 	traceStep         bool                  // True if tracer object exposes a `step()` method
 	traceFrame        bool                  // True if tracer object exposes the `enter()` and `exit()` methods
-	gasLimit          uint64                // Amount of gas bought for the whole tx
 	err               error                 // Any error that should stop tracing
 	obj               *goja.Object          // Trace object
 
@@ -364,7 +364,7 @@ func (t *jsTracer) OnEnter(depth int, typ byte, from accounts.Address, to accoun
 	t.frame.typ = vm.OpCode(typ).String()
 	t.frame.from = from
 	t.frame.to = to
-	t.frame.input = common.Copy(input)
+	t.frame.input = bytes.Clone(input)
 	t.frame.gas = uint(gas)
 	t.frame.value = nil
 	t.frame.value = value.ToBig()
@@ -391,7 +391,7 @@ func (t *jsTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, r
 	}
 
 	t.frameResult.gasUsed = uint(gasUsed)
-	t.frameResult.output = common.Copy(output)
+	t.frameResult.output = bytes.Clone(output)
 	t.frameResult.err = err
 
 	if _, err := t.exit(t.obj, t.frameResultValue); err != nil {
@@ -501,8 +501,8 @@ func (t *jsTracer) setBuiltinFunctions() {
 			vm.Interrupt(err)
 			return nil
 		}
-		code = common.Copy(code)
-		codeHash := accounts.InternCodeHash(crypto.HashData(code))
+		code = bytes.Clone(code)
+		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		contractAddr := types.CreateAddress2(addr, common.HexToHash(salt), codeHash)
 		b := contractAddr[:]
 		res, err := t.toBuf(vm, b)
@@ -856,7 +856,7 @@ func (co *contractObj) GetValue() goja.Value {
 }
 
 func (co *contractObj) GetInput() goja.Value {
-	input := common.Copy(co.scope.CallInput())
+	input := bytes.Clone(co.scope.CallInput())
 	res, err := co.toBuf(co.vm, input)
 	if err != nil {
 		co.vm.Interrupt(err)

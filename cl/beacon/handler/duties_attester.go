@@ -36,7 +36,7 @@ import (
 const maxEpochsLookaheadForDuties = 32
 
 func epochSlotOverflows(epoch, slotsPerEpoch uint64) bool {
-	return slotsPerEpoch > 0 && epoch > math.MaxUint64/slotsPerEpoch-1
+	return slotsPerEpoch > 0 && epoch >= math.MaxUint64/slotsPerEpoch
 }
 
 type attesterDutyResponse struct {
@@ -74,7 +74,7 @@ func (a *ApiHandler) getDependentRoot(epoch uint64, attester bool) (common.Hash,
 			return nil
 		}
 		maxIterations := int(maxEpochsLookaheadForDuties * 2 * a.beaconChainCfg.SlotsPerEpoch)
-		for i := 0; i < maxIterations; i++ {
+		for range maxIterations {
 			if dependentRootSlot > epoch*a.beaconChainCfg.SlotsPerEpoch {
 				return nil
 			}
@@ -122,7 +122,7 @@ func (a *ApiHandler) getHistoricalAttesterDependentRoot(tx kv.Tx, stateGetter st
 	}
 
 	maxIterations := int(maxEpochsLookaheadForDuties * 2 * a.beaconChainCfg.SlotsPerEpoch)
-	for i := 0; i < maxIterations; i++ {
+	for range maxIterations {
 		dependentRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, dependentRootSlot)
 		if err != nil {
 			return common.Hash{}, err
@@ -186,7 +186,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 			committeeCount := s.CommitteeCount(epoch)
 			// now start obtaining the committees from the head state
 			for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
-				for committeeIndex := uint64(0); committeeIndex < committeeCount; committeeIndex++ {
+				for committeeIndex := range committeeCount {
 					idxs, err := s.GetBeaconCommitee(currSlot, committeeIndex)
 					if err != nil {
 						return err
@@ -230,7 +230,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	if err != nil {
 		return nil, err
 	}
-	if (epoch)*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
+	if epoch*a.beaconChainCfg.SlotsPerEpoch >= stageStateProgress {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("attestation duties: epoch %d is not yet reconstructed", epoch))
 	}
 
@@ -250,7 +250,8 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	// finality case
 	activeIdxs, err := state_accessors.ReadActiveIndicies(
 		stateGetter,
-		epoch*a.beaconChainCfg.SlotsPerEpoch)
+		epoch*a.beaconChainCfg.SlotsPerEpoch,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -264,7 +265,7 @@ func (a *ApiHandler) getAttesterDuties(w http.ResponseWriter, r *http.Request) (
 	}
 
 	for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
-		for committeeIndex := uint64(0); committeeIndex < committeesPerSlot; committeeIndex++ {
+		for committeeIndex := range committeesPerSlot {
 			index := (currSlot%a.beaconChainCfg.SlotsPerEpoch)*committeesPerSlot + committeeIndex
 			committeeCount := committeesPerSlot * a.beaconChainCfg.SlotsPerEpoch
 			idxs, err := a.stateReader.ComputeCommittee(mix, activeIdxs, currSlot, committeeCount, index)

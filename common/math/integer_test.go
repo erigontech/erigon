@@ -89,3 +89,30 @@ func TestAbsoluteDifference(t *testing.T) {
 	assert.Equal(t, AbsoluteDifference(x1, x2), x1-x2)
 	assert.Equal(t, AbsoluteDifference(x2, x1), x1-x2)
 }
+
+func TestNextPowerOfTwo(t *testing.T) {
+	for _, tc := range []struct{ in, want uint64 }{
+		{0, 1}, {1, 1}, {2, 2}, {3, 4}, {4, 4}, {5, 8},
+		{1<<24 - 1, 1 << 24}, {1 << 24, 1 << 24},
+		{1 << 63, 1 << 63}, {1<<63 + 1, 0}, {^uint64(0), 0},
+	} {
+		assert.Equal(t, tc.want, NextPowerOfTwo(tc.in), "n=%d", tc.in)
+	}
+}
+
+func TestSafeSub(t *testing.T) {
+	for _, tc := range []struct {
+		x, y, want uint64
+		underflow  bool
+	}{
+		{9, 4, 5, false},
+		{4, 4, 0, false},
+		{0, 1, ^uint64(0), true},
+		{4, 9, ^uint64(0) - 4, true},
+		{^uint64(0), ^uint64(0), 0, false},
+	} {
+		got, underflow := SafeSub(tc.x, tc.y)
+		assert.Equal(t, tc.want, got, "%d-%d", tc.x, tc.y)
+		assert.Equal(t, tc.underflow, underflow, "%d-%d", tc.x, tc.y)
+	}
+}

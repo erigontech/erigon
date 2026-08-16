@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"fmt"
@@ -74,7 +75,12 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	}
 
 	bn := rawdb.ReadCurrentBlockNumber(tx)
-	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn)
+	if bn == nil {
+		return nil, errors.New("current block number not found")
+	}
+	// Min(bn+1) is the first txNum past bn — the state the latest-state account
+	// read above sees. Min(bn) would scan storage as of the end of bn-1.
+	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn+1)
 	if err != nil {
 		return nil, err
 	}
@@ -94,7 +100,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		if err != nil {
 			return nil, err
 		}
-		keys = append(keys, common.Copy(k[20:]))
+		keys = append(keys, bytes.Clone(k[20:]))
 	}
 	return keys, nil
 }

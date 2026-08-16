@@ -23,6 +23,7 @@ import (
 	"encoding/binary"
 	"io"
 	"reflect"
+	"slices"
 	"sync"
 
 	"github.com/holiman/uint256"
@@ -37,7 +38,7 @@ type encBuffer struct {
 
 // The global encBuffer pool.
 var encBufferPool = sync.Pool{
-	New: func() interface{} { return new(encBuffer) },
+	New: func() any { return new(encBuffer) },
 }
 
 func getEncBuffer() *encBuffer {
@@ -121,12 +122,13 @@ func (buf *encBuffer) writeBool(b bool) {
 }
 
 func (buf *encBuffer) writeUint64(i uint64) {
-	if i == 0 {
+	switch {
+	case i == 0:
 		buf.str = append(buf.str, EmptyStringCode)
-	} else if i < SingleByteThreshold {
+	case i < SingleByteThreshold:
 		// fits single byte
 		buf.str = append(buf.str, byte(i))
-	} else {
+	default:
 		s := putint(buf.sizebuf[1:], i)
 		buf.sizebuf[0] = EmptyStringCode + byte(s)
 		buf.str = append(buf.str, buf.sizebuf[:s+1]...)
@@ -181,7 +183,7 @@ func (buf *encBuffer) listEnd(index int) {
 	}
 }
 
-func (buf *encBuffer) encode(val interface{}) error {
+func (buf *encBuffer) encode(val any) error {
 	rval := reflect.ValueOf(val)
 	writer, err := cachedWriter(rval.Type())
 	if err != nil {
@@ -345,7 +347,7 @@ func (w *EncoderBuffer) ToBytes() []byte {
 // AppendToBytes appends the encoded bytes to dst.
 func (w *EncoderBuffer) AppendToBytes(dst []byte) []byte {
 	size := w.buf.size()
-	out := append(dst, make([]byte, size)...)
+	out := slices.Grow(dst, size)[:len(dst)+size]
 	w.buf.copyTo(out[len(dst):])
 	return out
 }

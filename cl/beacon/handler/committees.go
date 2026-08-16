@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state_accessors "github.com/erigontech/erigon/cl/persistence/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 )
 
 type committeeResponse struct {
@@ -61,12 +62,63 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 	}
 
+	buildResponse := func(s *state.CachingBeaconState, epoch uint64) ([]*committeeResponse, error) {
+		if epoch > state.Epoch(s)+maxEpochsLookaheadForDuties {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("sync committees duties: epoch %d is too far in the future", epoch))
+		}
+		resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
+		committeeCount := s.CommitteeCount(epoch)
+		for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
+			if slotFilter != nil && currSlot != *slotFilter {
+				continue
+			}
+			for committeeIndex := range committeeCount {
+				if index != nil && committeeIndex != *index {
+					continue
+				}
+				data := &committeeResponse{Index: committeeIndex, Slot: currSlot}
+				idxs, err := s.GetBeaconCommitee(currSlot, committeeIndex)
+				if err != nil {
+					return nil, err
+				}
+				for _, idx := range idxs {
+					data.Validators = append(data.Validators, strconv.FormatUint(idx, 10))
+				}
+				resp = append(resp, data)
+			}
+		}
+		return resp, nil
+	}
+
+	if blockId.Head() {
+		var response *beaconhttp.BeaconResponse
+		err = a.viewHeadStateWithIdentity(func(s *state.CachingBeaconState, root common.Hash, slot uint64) error {
+			epoch := slot / a.beaconChainCfg.SlotsPerEpoch
+			if epochReq != nil {
+				epoch = *epochReq
+			}
+			if slotFilter != nil && !(epoch*a.beaconChainCfg.SlotsPerEpoch <= *slotFilter && *slotFilter < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch) {
+				return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("slot %d is not in epoch %d", *slotFilter, epoch))
+			}
+			resp, err := buildResponse(s, epoch)
+			if err != nil {
+				return err
+			}
+			response = newBeaconResponse(resp).
+				WithFinalized(slot <= a.forkchoiceStore.FinalizedSlot()).
+				WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root))
+			return nil
+		})
+		if err != nil {
+			return nil, err
+		}
+		return response, nil
+	}
+
 	blockRoot, httpStatus, err := a.blockRootFromStateId(ctx, tx, blockId)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(httpStatus, err)
 	}
-
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	slotPtr, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, blockRoot)
 	if err != nil {
 		return nil, err
@@ -75,6 +127,7 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read block slot: %x", blockRoot))
 	}
 	slot := *slotPtr
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(blockRoot)
 	epoch := slot / a.beaconChainCfg.SlotsPerEpoch
 	if epochReq != nil {
 		epoch = *epochReq
@@ -83,41 +136,18 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	if slotFilter != nil && !(epoch*a.beaconChainCfg.SlotsPerEpoch <= *slotFilter && *slotFilter < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch) {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("slot %d is not in epoch %d", *slotFilter, epoch))
 	}
-	resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
 	isFinalized := slot <= a.forkchoiceStore.FinalizedSlot()
 	// s, cn := a.syncedData.HeadState()
 	// defer cn()
 
 	if a.forkchoiceStore.LowestAvailableSlot() <= slot {
 		// non-finality case
-		if err := a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
-			if epoch > state.Epoch(s)+maxEpochsLookaheadForDuties {
-				return beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("sync committees duties: epoch %d is too far in the future", epoch))
-			}
-			// get active validator indicies
-			committeeCount := s.CommitteeCount(epoch)
-			// now start obtaining the committees from the head state
-			for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
-				if slotFilter != nil && currSlot != *slotFilter {
-					continue
-				}
-				for committeeIndex := uint64(0); committeeIndex < committeeCount; committeeIndex++ {
-					if index != nil && committeeIndex != *index {
-						continue
-					}
-					data := &committeeResponse{Index: committeeIndex, Slot: currSlot}
-					idxs, err := s.GetBeaconCommitee(currSlot, committeeIndex)
-					if err != nil {
-						return err
-					}
-					for _, idx := range idxs {
-						data.Validators = append(data.Validators, strconv.FormatUint(idx, 10))
-					}
-					resp = append(resp, data)
-				}
-			}
-			return nil
-		}); err != nil {
+		var resp []*committeeResponse
+		err = a.syncedData.ViewHeadState(func(s *state.CachingBeaconState) error {
+			resp, err = buildResponse(s, epoch)
+			return err
+		})
+		if err != nil {
 			return nil, err
 		}
 
@@ -129,7 +159,8 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 	// finality case
 	activeIdxs, err := state_accessors.ReadActiveIndicies(
 		stateGetter,
-		epoch*a.beaconChainCfg.SlotsPerEpoch)
+		epoch*a.beaconChainCfg.SlotsPerEpoch,
+	)
 	if err != nil {
 		return nil, err
 	}
@@ -142,11 +173,12 @@ func (a *ApiHandler) getCommittees(w http.ResponseWriter, r *http.Request) (*bea
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not read randao mix: %v", err))
 	}
 
+	resp := make([]*committeeResponse, 0, a.beaconChainCfg.SlotsPerEpoch*a.beaconChainCfg.MaxCommitteesPerSlot)
 	for currSlot := epoch * a.beaconChainCfg.SlotsPerEpoch; currSlot < (epoch+1)*a.beaconChainCfg.SlotsPerEpoch; currSlot++ {
 		if slotFilter != nil && currSlot != *slotFilter {
 			continue
 		}
-		for committeeIndex := uint64(0); committeeIndex < committeesPerSlot; committeeIndex++ {
+		for committeeIndex := range committeesPerSlot {
 			if index != nil && committeeIndex != *index {
 				continue
 			}

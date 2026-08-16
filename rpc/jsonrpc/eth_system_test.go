@@ -80,7 +80,7 @@ func TestCapabilities(t *testing.T) {
 
 		// Generate and insert blocks so Execution stage progress is set.
 		signer := types.LatestSigner(gspec.Config)
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+		c, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
 			if txErr != nil {
@@ -127,7 +127,7 @@ func TestCapabilities(t *testing.T) {
 		}
 		m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 		signer := types.LatestSigner(gspec.Config)
-		c, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+		c, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 			b.SetCoinbase(common.Address{1})
 			tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(1), 21000, uint256.NewInt(uint64(i+1)*common.GWei), nil), *signer, key)
 			if txErr != nil {
@@ -222,7 +222,7 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
-		// --persist.receipts: receipts and logs available from genesis, not limited by state prune window.
+		// --prune.include-receipts: receipts and logs available from genesis, not limited by state prune window.
 		require.Equal(t, uint64(0), oldest(t, result.Receipts))
 		require.Nil(t, result.Receipts.DeleteStrategy)
 		require.Equal(t, uint64(0), oldest(t, result.Logs))
@@ -270,7 +270,7 @@ func TestCapabilities(t *testing.T) {
 	})
 
 	// Post-#21342 production FullMode: Blocks is a finite Distance (EIP-8252 retention window),
-	// not the KeepPostMergeBlocksPruneMode sentinel. Without --persist.receipts, receipts/logs are
+	// not the KeepPostMergeBlocksPruneMode sentinel. Without --prune.include-receipts, receipts/logs are
 	// bounded by max(stateOldest, blocksOldest) — equal here, so both report the prune window.
 	t.Run("full_eip8252_no_persist", func(t *testing.T) {
 		t.Parallel()
@@ -290,7 +290,7 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, testPruneDistance, window(t, result.Logs))
 	})
 
-	// full (EIP-8252) + --persist.receipts: persist.receipts widens past state history, but
+	// full (EIP-8252) + --prune.include-receipts: it widens past state history, but
 	// block bodies and log indexes are still pruned at prune.Blocks, so receipts/logs are
 	// bounded by blocksOldest, NOT genesis. This is the common pruned-archive config and the
 	// case a routing layer would misroute if oldestBlock were reported as 0.
@@ -309,8 +309,8 @@ func TestCapabilities(t *testing.T) {
 		require.Equal(t, pruned, oldest(t, result.Blocks))
 	})
 
-	// minimal + --persist.receipts: block bodies and log indexes are still pruned at the same
-	// distance as state, so persist.receipts cannot widen receipts/logs past blocksOldest —
+	// minimal + --prune.include-receipts: block bodies and log indexes are still pruned at the same
+	// distance as state, so it cannot widen receipts/logs past blocksOldest —
 	// eth_getBlockReceipts needs the body and getLogsV3 needs the log indexes.
 	t.Run("minimal_persist_receipts", func(t *testing.T) {
 		t.Parallel()
@@ -360,7 +360,7 @@ func TestCapabilities(t *testing.T) {
 		require.Nil(t, result.Logs.DeleteStrategy)
 	})
 
-	// full mode + --persist.receipts on a merge chain: pre-merge blocks were never downloaded,
+	// full mode + --prune.include-receipts on a merge chain: pre-merge blocks were never downloaded,
 	// so their receipts were never persisted. receipts/logs.oldestBlock must reflect the merge point.
 	t.Run("full_persist_receipts_merge_height", func(t *testing.T) {
 		t.Parallel()
@@ -663,7 +663,7 @@ func createGasPriceTestKV(t *testing.T, chainSize int) *execmoduletester.ExecMod
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
 	// Generate testing blocks
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, chainSize, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(chainSize, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		tx, txErr := types.SignTx(types.NewTransaction(b.TxNonce(addr), common.HexToAddress("deadbeef"), uint256.NewInt(100), 21000, uint256.NewInt(uint64(int64(i+1)*common.GWei)), nil), *signer, key)
 		if txErr != nil {

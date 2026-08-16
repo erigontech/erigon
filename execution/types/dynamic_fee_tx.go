@@ -20,6 +20,7 @@
 package types
 
 import (
+	"bytes"
 	"errors"
 	"io"
 
@@ -56,7 +57,7 @@ func (tx *DynamicFeeTransaction) copy() *DynamicFeeTransaction {
 			TransactionMisc: TransactionMisc{},
 			Nonce:           tx.Nonce,
 			To:              tx.To, // TODO: copy pointed-to address
-			Data:            common.Copy(tx.Data),
+			Data:            bytes.Clone(tx.Data),
 			GasLimit:        tx.GasLimit,
 			Value:           tx.Value,
 			V:               tx.V,
@@ -229,25 +230,25 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.ChainID); err != nil {
+	if err := s.ReadUint256(&tx.ChainID); err != nil {
 		return err
 	}
 	if tx.Nonce, err = s.Uint64(); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.TipCap); err != nil {
+	if err := s.ReadUint256(&tx.TipCap); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.FeeCap); err != nil {
+	if err := s.ReadUint256(&tx.FeeCap); err != nil {
 		return err
 	}
 	if tx.GasLimit, err = s.Uint64(); err != nil {
 		return err
 	}
-	if err = DecodeOptionalAddress(&tx.To, s); err != nil {
+	if err := DecodeOptionalAddress(&tx.To, s); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.Value); err != nil {
+	if err := s.ReadUint256(&tx.Value); err != nil {
 		return err
 	}
 	if tx.Data, err = s.Bytes(); err != nil {
@@ -255,17 +256,17 @@ func (tx *DynamicFeeTransaction) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode AccessList
 	tx.AccessList = AccessList{}
-	if err = decodeAccessList(&tx.AccessList, s); err != nil {
+	if err := decodeAccessList(&tx.AccessList, s); err != nil {
 		return err
 	}
 	// decode V
-	if err = s.ReadUint256(&tx.V); err != nil {
+	if err := s.ReadUint256(&tx.V); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.R); err != nil {
+	if err := s.ReadUint256(&tx.R); err != nil {
 		return err
 	}
-	if err = s.ReadUint256(&tx.S); err != nil {
+	if err := s.ReadUint256(&tx.S); err != nil {
 		return err
 	}
 	return s.ListEnd()

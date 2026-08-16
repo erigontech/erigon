@@ -22,15 +22,13 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 )
 
-var (
-	ErrNoGoodPeer = errors.New("no good peer found")
-)
+var ErrNoGoodPeer = errors.New("no good peer found")
 
 var (
 	peersCandidateRefreshInterval = time.Second * 15
 	allCustodyIndices             = func() map[uint64]bool {
 		indices := make(map[uint64]bool)
-		for i := uint64(0); i < 128; i++ {
+		for i := range uint64(128) {
 			indices[i] = true
 		}
 		return indices
@@ -173,12 +171,6 @@ func (c *columnDataPeers) simpleReuqest(ctx context.Context, pid string, topic s
 		return err
 	}
 	return nil
-}
-
-func (c *columnDataPeers) availablePeerCount() int {
-	c.peersMutex.RLock()
-	defer c.peersMutex.RUnlock()
-	return len(c.peersQueue)
 }
 
 func (c *columnDataPeers) pickPeerRoundRobin(

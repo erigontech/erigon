@@ -22,35 +22,29 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
-	"net"
 	"net/url"
 	"os"
 	"path/filepath"
 	"runtime"
 	"slices"
 	"strings"
-	"time"
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/missinggo/v2/panicif"
 	"github.com/anacrolix/torrent/metainfo"
 	"github.com/go-viper/mapstructure/v2"
-	"github.com/grpc-ecosystem/go-grpc-middleware/v2/interceptors/recovery"
 	"github.com/pelletier/go-toml/v2"
 	"github.com/spf13/cobra"
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 	"google.golang.org/grpc"
 	"google.golang.org/grpc/credentials"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
-	"google.golang.org/grpc/keepalive"
-	"google.golang.org/grpc/reflection"
 
 	"github.com/erigontech/erigon/cmd/utils/app"
 	"github.com/erigontech/erigon/db/downloader/webseeds"
 
 	"github.com/erigontech/erigon/cmd/downloader/downloadernat"
 	"github.com/erigontech/erigon/cmd/utils"
+	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
@@ -67,6 +61,7 @@ import (
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/node/debug"
 	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
+	"github.com/erigontech/erigon/node/gointerfaces/grpcutil"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
@@ -191,7 +186,7 @@ func init() {
 }
 
 func withDataDir(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&cobraFlagValues.datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
+	flags.DirVar(cmd.Flags(), &cobraFlagValues.datadir, utils.DataDirFlag.Name, paths.DefaultDataDir(), utils.DataDirFlag.Usage)
 	panicif.Err(cmd.MarkFlagRequired(utils.DataDirFlag.Name))
 	panicif.Err(cmd.MarkFlagDirname(utils.DataDirFlag.Name))
 }
@@ -253,7 +248,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	}
 
 	logger.Info(
-		"[snapshots] cli flags",
+		"[Downloader] cli flags",
 		"chain", chain,
 		"addr", downloaderApiAddr,
 		"datadir", dirs.DataDir,
@@ -318,14 +313,12 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 	manualDataVerification := verify || verifyFailfast || len(verifyFiles) > 0
 	cfg.ManualDataVerification = manualDataVerification
 
-	cfg.LogPrefix = "[snapshots] "
-
 	d, err := downloader.New(ctx, cfg, logger)
 	if err != nil {
 		return err
 	}
 	defer d.Close()
-	logger.Info("[snapshots] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
+	logger.Info("[Downloader] Start bittorrent server", "my_peer_id", fmt.Sprintf("%x", d.TorrentClient().PeerID()))
 
 	d.HandleTorrentClientStatus(nil)
 
@@ -345,7 +338,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		verifyFiles = strings.Split(_verifyFiles, ",")
 	}
 	if manualDataVerification { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
+		if err := d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
 		}
 		if verifyFailfast {
@@ -380,7 +373,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		}
 	}
 
-	grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil /* transportCredentials */, logger)
+	grpcServer, err := StartGrpc(ctx, bittorrentServer, downloaderApiAddr, nil /* transportCredentials */, logger)
 	if err != nil {
 		return err
 	}
@@ -761,57 +754,15 @@ func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
 	return nil
 }
 
-func StartGrpc(snServer *downloader.GrpcServer, addr string, creds *credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
-	lis, err := net.Listen("tcp", addr)
-	if err != nil {
-		return nil, fmt.Errorf("could not create listener: %w, addr=%s", err, addr)
-	}
-
-	var (
-		streamInterceptors = make([]grpc.StreamServerInterceptor, 0, 1)
-		unaryInterceptors  = make([]grpc.UnaryServerInterceptor, 0, 1)
-	)
-	streamInterceptors = append(streamInterceptors, recovery.StreamServerInterceptor())
-	unaryInterceptors = append(unaryInterceptors, recovery.UnaryServerInterceptor())
-
-	//if metrics.Enabled {
-	//	streamInterceptors = append(streamInterceptors, grpc_prometheus.StreamServerInterceptor)
-	//	unaryInterceptors = append(unaryInterceptors, grpc_prometheus.UnaryServerInterceptor)
-	//}
-
-	opts := []grpc.ServerOption{
-		// https://github.com/grpc/grpc-go/issues/3171#issuecomment-552796779
-		grpc.KeepaliveEnforcementPolicy(keepalive.EnforcementPolicy{
-			MinTime:             10 * time.Second,
-			PermitWithoutStream: true,
-		}),
-		grpc.ChainStreamInterceptor(streamInterceptors...),
-		grpc.ChainUnaryInterceptor(unaryInterceptors...),
-	}
-	if creds == nil {
-		// no specific opts
-	} else {
-		opts = append(opts, grpc.Creds(*creds))
-	}
-	grpcServer := grpc.NewServer(opts...)
-	reflection.Register(grpcServer) // Register reflection service on gRPC server.
+func StartGrpc(ctx context.Context, snServer *downloader.GrpcServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
+	grpcServer := grpcutil.NewServerWithOpts(creds)
 	if snServer != nil {
 		downloaderproto.RegisterDownloaderServer(grpcServer, snServer)
 	}
 
-	//if metrics.Enabled {
-	//	grpc_prometheus.Register(grpcServer)
-	//}
-
-	healthServer := health.NewServer()
-	grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-
-	go func() {
-		defer healthServer.Shutdown()
-		if err := grpcServer.Serve(lis); err != nil {
-			logger.Error("gRPC server stop", "err", err)
-		}
-	}()
+	if err := grpcutil.StartServer(ctx, grpcServer, addr, true, logger, "gRPC server stop"); err != nil {
+		return nil, err
+	}
 	logger.Info("Started gRPC server", "on", addr)
 	return grpcServer, nil
 }

@@ -23,6 +23,7 @@ import (
 	"math"
 	"os"
 	"path"
+	"slices"
 	"time"
 
 	"github.com/spf13/afero"
@@ -74,7 +75,7 @@ import (
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
-	"github.com/erigontech/erigon/db/downloader"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
@@ -206,7 +207,7 @@ func selectConsensusEngine(engineType string, logger log.Logger) consensus.Engin
 
 func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngine, config clparams.CaplinConfig,
 	dirs datadir.Dirs, eth1Getter snapshot_format.ExecutionBlockReaderByNumber,
-	snDownloader downloader.Client, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
+	snDownloader dbservices.DownloaderClient, creds credentials.TransportCredentials, snBuildSema *semaphore.Weighted) error {
 
 	var networkConfig *clparams.NetworkConfig
 	var beaconConfig *clparams.BeaconChainConfig
@@ -271,7 +272,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 
 		// If genesis state is provided and is hardcoded, use it
 		if initial_state.IsGenesisStateSupported(config.NetworkId) && !isGenesisDBInitialized {
-			genesisState, err = initial_state.GetGenesisState(config.NetworkId)
+			genesisState, err = initial_state.GetGenesisState(ctx, config.NetworkId)
 			if err != nil {
 				return err
 			}
@@ -285,12 +286,17 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 		config.NetworkId = clparams.NetworkType(beaconConfig.DepositNetworkID)
 	}
 
-	if len(config.BootstrapNodes) > 0 {
-		networkConfig.BootNodes = config.BootstrapNodes
+	config.ApplyNetworkOverrides(networkConfig)
+	discoveryNodes, directBootnodes, unsupportedBootnodes, err := clp2p.ParseBootstrapNodes(networkConfig.BootNodes)
+	if err != nil {
+		return err
 	}
-
-	if len(config.StaticPeers) > 0 {
-		networkConfig.StaticPeers = config.StaticPeers
+	for _, bootnode := range unsupportedBootnodes {
+		log.Warn("Ignoring unsupported Consensus bootstrap node", "bootnode", bootnode)
+	}
+	networkConfig.BootNodes = discoveryNodes
+	if len(directBootnodes) > 0 {
+		networkConfig.StaticPeers = slices.Concat(networkConfig.StaticPeers, directBootnodes)
 	}
 	if genesisState != nil {
 		genesisDb.Initialize(genesisState)
@@ -389,7 +395,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// state-transition, DA, and finality behaviour per chain type.
 	clConsensusEngine := selectConsensusEngine(config.ConsensusEngineType, logger)
 	forkChoice, err := forkchoice.NewForkChoiceStore(
-		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, emitters, clConsensusEngine),
+		ethClock, state, engine, pool, fork_graph.NewForkGraphDisk(state, syncedDataManager, fcuFs, config.BeaconAPIRouter, clConsensusEngine),
 		emitters, syncedDataManager, blobStorage, pksRegistry, validatorParameters, doLMDSampling, indexDB, clConsensusEngine)
 	if err != nil {
 		logger.Error("Could not create forkchoice", "err", err)
@@ -652,9 +658,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			payloadAttestationService,
 			proposerPreferencesService,
 		)
-		go beacon.ListenAndServe(&beacon.LayeredBeaconHandler{
-			ArchiveApi: apiHandler,
-		}, config.BeaconAPIRouter)
+		go func() {
+			if err := beacon.ListenAndServe(ctx, &beacon.LayeredBeaconHandler{
+				ArchiveApi: apiHandler,
+			}, config.BeaconAPIRouter); err != nil {
+				log.Warn("[Beacon API] error serving", "err", err)
+			}
+		}()
 		log.Info("Beacon API started", "addr", config.BeaconAPIRouter.Address)
 	}
 
@@ -689,7 +699,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// → on restart the EL is ahead of the CL anchor and rejects the backward fork-choice / unwinds. Runs
 	// after the loop exits (ctx cancelled = graceful stop); best-effort so a save failure never masks the
 	// real exit error.
-	if serr := stages.SaveHeadStateOnShutdown(stageCfg); serr != nil {
+	if serr := stages.SaveResumeStateOnShutdown(stageCfg); serr != nil {
 		logger.Warn("[Caplin] could not save head state on shutdown", "err", serr)
 	} else {
 		logger.Info("[Caplin] saved head state on shutdown")

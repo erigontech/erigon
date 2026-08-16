@@ -15,6 +15,12 @@ func InitGlobalStaticConfig(bcfg *BeaconChainConfig, ccfg *CaplinConfig) {
 	if ccfg == nil {
 		panic("cannot initialize globalCaplinConfig with nil")
 	}
+	// main's validation, kept. main's "already initialized" panics are NOT: a
+	// node hosting one Caplin per chain initialises this more than once by
+	// design, which is why the globals became atomic pointers.
+	if err := bcfg.ValidateExecutionRequestTypeConstants(); err != nil {
+		panic(err)
+	}
 	globalBeaconConfig.Store(bcfg)
 	globalCaplinConfig.Store(ccfg)
 }

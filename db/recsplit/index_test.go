@@ -46,7 +46,7 @@ func TestReWriteIndex(t *testing.T) {
 		t.Fatal(err)
 	}
 	defer rs.Close()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 			t.Fatal(err)
 		}
@@ -57,7 +57,7 @@ func TestReWriteIndex(t *testing.T) {
 	idx := MustOpen(indexFile)
 	defer idx.Close()
 	offsets := idx.ExtractOffsets()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		_, ok := offsets[uint64(i*17)]
 		require.True(t, ok)
 		offsets[uint64(i*17)] = uint64(i * 3965)
@@ -73,7 +73,7 @@ func TestReWriteIndex(t *testing.T) {
 	require.NoError(t, f.Close())
 	reidx := MustOpen(reindexFile)
 	defer reidx.Close()
-	for i := 0; i < 100; i++ {
+	for i := range 100 {
 		reader := NewIndexReader(reidx)
 		offset, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 		if offset != uint64(i*3965) {

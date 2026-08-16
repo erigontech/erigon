@@ -19,6 +19,7 @@ package tracers
 import (
 	"errors"
 	"fmt"
+	"math"
 
 	"github.com/holiman/uint256"
 )
@@ -32,6 +33,9 @@ const (
 func GetMemoryCopyPadded(m []byte, offset, size int64) ([]byte, error) {
 	if offset < 0 || size < 0 {
 		return nil, errors.New("offset or size must not be negative")
+	}
+	if size > math.MaxInt64-offset {
+		return nil, errors.New("offset and size overflow")
 	}
 	length := int64(len(m))
 	if offset+size < length { // slice fully inside memory

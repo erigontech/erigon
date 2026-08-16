@@ -24,6 +24,20 @@ import (
 )
 
 func (b *BeaconState) SetVersion(version clparams.StateVersion) {
+	if (b.version < clparams.GloasVersion) != (version < clparams.GloasVersion) {
+		b.validators.SetProgressiveHashing(version >= clparams.GloasVersion)
+		b.markLeaf(
+			ValidatorsLeafIndex,
+			BalancesLeafIndex,
+			PreviousEpochParticipationLeafIndex,
+			CurrentEpochParticipationLeafIndex,
+			InactivityScoresLeafIndex,
+			LatestBlockHashLeafIndex,
+			PendingDepositsLeafIndex,
+			PendingPartialWithdrawalsLeafIndex,
+			PendingConsolidationsLeafIndex,
+		)
+	}
 	b.version = version
 }
 
@@ -578,6 +592,7 @@ func (b *BeaconState) SetConsolidationBalanceToConsume(balance uint64) {
 	b.consolidationBalanceToConsume = balance
 	b.markLeaf(ConsolidationBalanceToConsumeLeafIndex)
 }
+
 func (b *BeaconState) SetEarlistConsolidationEpoch(epoch uint64) {
 	b.earliestConsolidationEpoch = epoch
 	b.markLeaf(EarliestConsolidationEpochLeafIndex)

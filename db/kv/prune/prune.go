@@ -8,7 +8,6 @@ import (
 	"math"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
@@ -136,7 +135,7 @@ func HashSeekingPrune(
 			if vtx := binary.BigEndian.Uint64(vv); vtx != binary.BigEndian.Uint64(txnm) {
 				return fmt.Errorf("prune history %s got invalid txNum: found %d != %d wanted", filenameBase, vtx, binary.BigEndian.Uint64(txnm))
 			}
-			if err = valDelCursor.DeleteCurrent(); err != nil {
+			if err := valDelCursor.DeleteCurrent(); err != nil {
 				return err
 			}
 		case DefaultStorageMode:
@@ -150,8 +149,8 @@ func HashSeekingPrune(
 		select {
 		case <-logEvery.C:
 			txNum := binary.BigEndian.Uint64(txnm)
-			logger.Info("[snapshots] prune index", "name", filenameBase, "pruned tx", stat.PruneCountTx,
-				"pruned values", stat.PruneCountValues,
+			logger.Info("[snapshots] prune index", "name", filenameBase, "prunedTx", stat.PruneCountTx,
+				"prunedValues", stat.PruneCountValues,
 				"steps", fmt.Sprintf("%.2f-%.2f", float64(txFrom)/float64(stepSize), float64(txNum)/float64(stepSize)))
 		default:
 		}
@@ -169,7 +168,7 @@ func HashSeekingPrune(
 				break
 			}
 			stat.PruneCountTx++
-			if err = keysCursor.Delete(txnb); err != nil {
+			if err := keysCursor.Delete(txnb); err != nil {
 				return nil, err
 			}
 		}
@@ -231,7 +230,7 @@ func TableScanningPrune(
 	}
 
 	if prevStat.KeyProgress != Done {
-		txnb := common.Copy(keyCursorPosition.StartKey)
+		txnb := bytes.Clone(keyCursorPosition.StartKey)
 		// This deletion iterator goes last to preserve invariant: if some `txNum=N` pruned - it's pruned Fully
 		for ; txnb != nil; txnb, _, err = keysCursor.NextNoDup() {
 			if err != nil {
@@ -239,7 +238,7 @@ func TableScanningPrune(
 			}
 			select {
 			case <-ctx.Done():
-				stat.LastPrunedKey = common.Copy(txnb)
+				stat.LastPrunedKey = bytes.Clone(txnb)
 				stat.KeyProgress = InProgress
 				return stat, nil
 			default:
@@ -253,7 +252,7 @@ func TableScanningPrune(
 				time.Sleep(*throttling)
 			}
 			//println("key", hex.EncodeToString(txnb), "value", hex.EncodeToString(val))
-			if err = keysCursor.DeleteCurrentDuplicates(); err != nil {
+			if err := keysCursor.DeleteCurrentDuplicates(); err != nil {
 				return nil, err
 			}
 		}
@@ -332,7 +331,7 @@ func tableScanningPrune(
 		}
 
 		if ctx.Err() != nil {
-			return common.Copy(val), nil
+			return bytes.Clone(val), nil
 		}
 
 		// Different storage modes have different dup-iteration orders:
@@ -415,7 +414,7 @@ func tableScanningPrune(
 				}
 				stat.MinTxNum = min(stat.MinTxNum, txNumDup)
 				stat.MaxTxNum = max(stat.MaxTxNum, txNumDup)
-				if err = valDelCursor.DeleteCurrent(); err != nil {
+				if err := valDelCursor.DeleteCurrent(); err != nil {
 					return nil, err
 				}
 				stat.PruneCountValues++
@@ -426,16 +425,16 @@ func tableScanningPrune(
 				time.Sleep(*throttling)
 			}
 			if ctx.Err() != nil {
-				stat.LastPrunedValue = common.Copy(val)
+				stat.LastPrunedValue = bytes.Clone(val)
 				stat.ValueProgress = InProgress
-				return common.Copy(val), nil
+				return bytes.Clone(val), nil
 			}
 		}
 	nextKey:
 
 		select {
 		case <-logEvery.C:
-			args := []interface{}{"name", filenameBase, "pruned values", stat.PruneCountValues}
+			args := []any{"name", filenameBase, "pruned values", stat.PruneCountValues}
 			if keysCursor != nil {
 				args = append(args, "pruned tx", stat.PruneCountTx)
 			}

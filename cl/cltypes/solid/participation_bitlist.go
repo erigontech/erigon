@@ -22,8 +22,8 @@ import (
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common/clonable"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
 )
 
@@ -99,7 +99,7 @@ func (u *ParticipationBitList) Range(fn func(index int, value byte, length int) 
 // Pop removes the first bit from the list, like when the Red Ranger takes the first hit.
 func (u *ParticipationBitList) Pop() (x byte) {
 	x, u.u = u.u[0], u.u[1:]
-	u.l = u.l - 1
+	u.l--
 	return x
 }
 
@@ -109,7 +109,7 @@ func (u *ParticipationBitList) Append(v byte) {
 		u.u = append(u.u, 0)
 	}
 	u.u[u.l] = v
-	u.l = u.l + 1
+	u.l++
 }
 
 // Get lets us peek at a bit in the list, like when the team uses their sensors to spot the monster.
@@ -144,7 +144,11 @@ func (u *ParticipationBitList) HashSSZ() ([32]byte, error) {
 		}
 	}
 	lengthRoot := merkle_tree.Uint64Root(uint64(u.l))
-	return utils.Sha256(baseRoot[:], lengthRoot[:]), nil
+	return crypto.Sha256(baseRoot[:], lengthRoot[:]), nil
+}
+
+func (u *ParticipationBitList) HashSSZProgressive() ([32]byte, error) {
+	return merkle_tree.ProgressiveBasicListRoot(u.Bytes(), uint64(u.l))
 }
 
 func (arr *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
@@ -154,7 +158,7 @@ func (arr *ParticipationBitList) getBaseHash(xs []byte, depth uint8) error {
 		elements = append(elements, make([]byte, offset-len(arr.u)+1)...)
 	}
 	elements = elements[:offset]
-	for i := uint8(0); i < depth; i++ {
+	for i := range depth {
 		// Sequential
 		layerLen := len(elements)
 		if layerLen%64 == 32 {

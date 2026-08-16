@@ -29,7 +29,6 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -40,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/mvcc"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -124,22 +124,23 @@ func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 // openList - main method to open list of files.
 // It's ok if some files was open earlier.
 // If some file already open: noop.
-// If some file already open but not in provided list: close and remove from `files` field.
-func (h *History) openList(idxFiles, histNames, accessorFiles []string) error {
-	if err := h.InvertedIndex.openList(idxFiles, accessorFiles); err != nil {
-		return err
+// An already-open file not in the provided list is retired (detached) and returned for deferred reclaim.
+func (h *History) openList(ctx context.Context, idxFiles, histNames, accessorFiles []string) (retiredFiles, error) {
+	retired, err := h.InvertedIndex.openList(ctx, idxFiles, accessorFiles)
+	if err != nil {
+		return retired, err
 	}
 
-	h.closeWhatNotInList(histNames)
+	retired = append(retired, h.retireFilesNotInList(histNames)...)
 	h.scanDirtyFiles(histNames)
-	if err := h.openDirtyFiles(histNames, accessorFiles); err != nil {
-		return fmt.Errorf("History(%s).openList: %w", h.FilenameBase, err)
+	if err := h.openDirtyFiles(ctx, histNames, accessorFiles); err != nil {
+		return retired, fmt.Errorf("History(%s).openList: %w", h.FilenameBase, err)
 	}
-	return nil
+	return retired, nil
 }
 
-func (h *History) openFolder(scanDirsRes *ScanDirsResult) error {
-	return h.openList(scanDirsRes.iiFiles, scanDirsRes.historyFiles, scanDirsRes.accessorFiles)
+func (h *History) openFolder(ctx context.Context, scanDirsRes *ScanDirsResult) (retiredFiles, error) {
+	return h.openList(ctx, scanDirsRes.iiFiles, scanDirsRes.historyFiles, scanDirsRes.accessorFiles)
 }
 
 func (h *History) scanDirtyFiles(fileNames []string) {
@@ -149,7 +150,7 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 	if h.stepSize == 0 {
 		panic("assert: empty `stepSize`")
 	}
-	for _, dirtyFile := range filterDirtyFiles(fileNames, h.stepSize, h.stepsInFrozenFile, h.FilenameBase, "v", h.logger) {
+	for _, dirtyFile := range filterDirtyFiles(fileNames, h.stepSize, h.FilenameBase, "v", h.logger) {
 		if _, has := h.dirtyFiles.Get(dirtyFile); !has {
 			h.dirtyFiles.Set(dirtyFile)
 		}
@@ -158,6 +159,10 @@ func (h *History) scanDirtyFiles(fileNames []string) {
 
 func (h *History) closeWhatNotInList(fNames []string) {
 	closeWhatNotInList(h.dirtyFiles, fNames)
+}
+
+func (h *History) retireFilesNotInList(fNames []string) retiredFiles {
+	return retireFilesNotInList(mvcc.RetireReasonWasDeletedFromDisk, h.dirtyFiles, fNames, h.FilenameBase, h.logger)
 }
 
 func (h *History) Tables() []string { return append(h.InvertedIndex.Tables(), h.ValuesTable) }
@@ -225,10 +230,18 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 	var histKey []byte
 	var valOffset uint64
 
-	defer hist.MadvSequential().DisableReadAhead()
-	defer efHist.MadvSequential().DisableReadAhead()
+	histView, err := hist.OpenSequentialView(true)
+	if err != nil {
+		return err
+	}
+	defer histView.Close()
+	efHistView, err := efHist.OpenSequentialView(true)
+	if err != nil {
+		return err
+	}
+	defer efHistView.Close()
 
-	iiReader := h.InvertedIndex.dataReader(efHist)
+	iiReader := seg.NewReader(efHistView.MakeGetter(), h.InvertedIndex.Compression)
 
 	var keyBuf, valBuf []byte
 	cnt := uint64(0)
@@ -243,7 +256,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 		}
 	}
 
-	histReader := h.dataReader(hist)
+	histReader := seg.NewReader(histView.MakeGetter(), h.Compression)
 
 	_, fName := filepath.Split(historyIdxPath)
 	p := ps.AddNew(fName, uint64(efHist.Count())/2)
@@ -293,7 +306,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					return err
 				}
 				histKey = historyKey(txNum, keyBuf, histKey[:0])
-				if err = rs.AddKey(histKey, valOffset); err != nil {
+				if err := rs.AddKey(histKey, valOffset); err != nil {
 					return err
 				}
 
@@ -344,13 +357,19 @@ func (h *History) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, p
 	}
 }
 
-func (h *History) Scan(toTxNum uint64) error {
+func (h *History) Scan(ctx context.Context, toTxNum uint64) error {
 	scanResult, err := scanDirs(h.dirs)
 	if err != nil {
 		return err
 	}
 
-	if err := h.openFolder(scanResult); err != nil {
+	retired, err := h.openFolder(ctx, scanResult)
+	// Standalone reload: no visible generation to attach to and no concurrent readers, so close
+	// the detached files in place — even on error, else already-retired files are leaked.
+	for _, item := range retired {
+		item.closeFiles()
+	}
+	if err != nil {
 		return err
 	}
 
@@ -694,7 +713,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		return HistoryCollation{}, err
 	}
 	if len(offsets) > 0 {
-		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
+		if err := loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return HistoryCollation{}, err
 		}
 	}
@@ -804,7 +823,7 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.FilenameBase, err)
 	}
 	{
-		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, h.InvertedIndex.dataReader(efHistoryDecomp), ps); err != nil {
+		if err := h.InvertedIndex.buildMapAccessor(ctx, step, step+1, efHistoryDecomp, ps); err != nil {
 			return HistoryFiles{}, fmt.Errorf("build %s .ef history idx: %w", h.FilenameBase, err)
 		}
 		if efHistoryIdx, err = h.InvertedIndex.openHashMapAccessor(h.InvertedIndex.efAccessorNewFilePath(step, step+1)); err != nil {
@@ -853,7 +872,7 @@ func (h *History) integrateDirtyFiles(sf HistoryFiles, txNumFrom, txNumTo uint64
 		existence: sf.efExistence,
 	}, txNumFrom, txNumTo)
 
-	fi := newFilesItem(txNumFrom, txNumTo, h.stepSize, h.stepsInFrozenFile)
+	fi := newFilesItem(txNumFrom, txNumTo)
 	fi.decompressor = sf.historyDecomp
 	fi.index = sf.historyIdx
 	h.dirtyFiles.Set(fi)
@@ -897,19 +916,16 @@ type HistoryRoTx struct {
 	h   *History
 	iit *InvertedIndexRoTx
 
-	files             visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
-	getters           []*seg.Reader
-	readers           []*recsplit.IndexReader
-	stepSize          uint64
-	stepsInFrozenFile uint64
-
-	trace bool
+	files    visibleFiles // have no garbage (canDelete=true, overlaps, etc...)
+	getters  []*seg.Reader
+	readers  []*recsplit.IndexReader
+	stepSize uint64
 
 	valsC    kv.Cursor
 	valsCDup kv.CursorDupSort
 
-	_bufTs           []byte
-	snappyReadBuffer []byte
+	_bufTs              []byte
+	blockCompressionBuf []byte
 }
 
 func (h *History) beginForTests() *HistoryRoTx {
@@ -926,13 +942,18 @@ func (h *History) BeginFilesRoForDebug() *HistoryRoTx {
 }
 
 func (h *History) beginFilesRo(files visibleFiles, iv *iiVisible) *HistoryRoTx {
-	return &HistoryRoTx{
-		h:                 h,
-		iit:               h.InvertedIndex.beginFilesRo(iv),
-		files:             files,
-		stepSize:          h.stepSize,
-		stepsInFrozenFile: h.stepsInFrozenFile,
-		trace:             false,
+	ht := &HistoryRoTx{}
+	h.initFilesRo(ht, &InvertedIndexRoTx{}, files, iv)
+	return ht
+}
+
+func (h *History) initFilesRo(ht *HistoryRoTx, iit *InvertedIndexRoTx, files visibleFiles, iv *iiVisible) {
+	h.InvertedIndex.initFilesRo(iit, iv)
+	*ht = HistoryRoTx{
+		h:        h,
+		iit:      iit,
+		files:    files,
+		stepSize: h.stepSize,
 	}
 }
 
@@ -963,45 +984,6 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 		ht.readers[i] = r
 	}
 	return r
-}
-
-func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
-	//defer func() {
-	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
-	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
-	//}()
-
-	if ht.h.SnapshotsDisabled {
-		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
-			return false, 0
-		}
-		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
-	} else {
-		canPruneIdx := ht.iit.CanPrune(tx, untilTx)
-		if !canPruneIdx {
-			return false, 0
-		}
-		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
-	}
-	minTxDB := ht.h.minTxNumInDB(tx)
-	delta := 0.0
-	if txTo > minTxDB {
-		delta = float64(txTo-minTxDB) / float64(ht.stepSize) //TODO: why this is happening?
-	}
-
-	switch ht.h.FilenameBase {
-	case "accounts":
-		mxPrunableHAcc.Set(delta)
-	case "storage":
-		mxPrunableHSto.Set(delta)
-	case "code":
-		mxPrunableHCode.Set(delta)
-	case "commitment":
-		mxPrunableHComm.Set(delta)
-	}
-
-	return minIdxTx < txTo, txTo
 }
 
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
@@ -1180,7 +1162,7 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	}
 
 	if compressedPageValuesCount > 1 {
-		v, ht.snappyReadBuffer = seg.GetFromPage(historyKey, v, ht.snappyReadBuffer, true)
+		v, ht.blockCompressionBuf = seg.GetFromPage(historyKey, v, ht.blockCompressionBuf, true)
 	}
 	return v, true, nil
 }
@@ -1504,37 +1486,6 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 	return nil
 }
 
-// CompactRange rebuilds the history files within the specified transaction range by performing a forced self-merge.
-// If the range contains existing static files, the method collects all files belonging to that span and merges them.
-func (ht *HistoryRoTx) CompactRange(ctx context.Context, fromTxNum, toTxNum uint64) error {
-	if len(ht.iit.files) == 0 {
-		return nil
-	}
-
-	mergeRange := NewHistoryRanges(
-		*NewMergeRange("", true, fromTxNum, toTxNum),
-		*NewMergeRange("", true, fromTxNum, toTxNum),
-	)
-
-	efFiles, vFiles, err := ht.staticFilesInRange(mergeRange)
-	if err != nil {
-		return err
-	}
-
-	for i := 0; i < len(efFiles); i++ {
-		mergeRange = NewHistoryRanges(
-			*NewMergeRange("", true, vFiles[i].startTxNum, vFiles[i].endTxNum),
-			*NewMergeRange("", true, efFiles[i].startTxNum, efFiles[i].endTxNum),
-		)
-
-		if err := ht.deduplicateFiles(ctx, []*FilesItem{efFiles[i]}, []*FilesItem{vFiles[i]}, mergeRange, background.NewProgressSet()); err != nil {
-			return err
-		}
-	}
-
-	return nil
-}
-
 func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc order.By, limit int, roTx kv.Tx) (stream.U64, error) {
 	if ht.h.HistoryLargeValues {
 		from := make([]byte, len(key)+8)
@@ -1544,7 +1495,7 @@ func (ht *HistoryRoTx) idxRangeOnDB(key []byte, startTxNum, endTxNum int, asc or
 			fromTxNum = uint64(startTxNum)
 		}
 		binary.BigEndian.PutUint64(from[len(key):], fromTxNum)
-		to := common.Copy(from)
+		to := bytes.Clone(from)
 		toTxNum := uint64(math.MaxUint64)
 		if endTxNum >= 0 {
 			toTxNum = uint64(endTxNum)

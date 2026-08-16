@@ -9,11 +9,15 @@ concurrency:
   group: hive-eest-tests-${{ github.run_id }}
   cancel-in-progress: false
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   test-hive-eest:
-    runs-on:
-      group: hive
-    name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.exec_mode }})
+    runs-on: ${{ matrix.runner == 'ubuntu-latest' && 'ubuntu-latest' || fromJSON('{"group":"hive"}') }}
+    timeout-minutes: 60
+    name: test-hive-eest (${{ matrix.shard }}, ${{ matrix.commitment_mode }})
     strategy:
       # In merge_group: cancel sibling shards on first failure so ci-gate's
       # `needs` reach terminal state quickly and the broken PR is evicted
@@ -22,105 +26,179 @@ jobs:
       # see the full failure picture across every shard.
       fail-fast: ${{ github.event_name == 'merge_group' }}
       matrix:
-        # Each shard runs twice — once with serial exec
-        # (ERIGON_EXEC3_PARALLEL=false) and once with parallel — so
-        # divergence between the two paths is caught on the PR. Matrix
-        # entries spawn separate `hive` group runners and run concurrently —
-        # wall-clock unchanged, runner-minutes doubled.
+        # Each shard runs twice — once with serial commitment
+        # (ERIGON_COMMITMENT_PARALLEL=false) and once with parallel — so
+        # divergence between the two paths is caught on the PR. Execution is
+        # parallel in both legs (default). Matrix entries spawn separate runners
+        # and run concurrently — wall-clock unchanged, runner-minutes doubled.
         include:
-          # consume-engine: split by fork for parallelism (61k+ tests total).
-          # Engine API tests only exist from Paris (The Merge) onwards.
+          # Stable consume-enginex: split by fork (~50k tests total).
+          # Engine API tests only exist from Paris (The Merge) onwards; the
+          # osaka shard also carries the BPO fork-transition fixtures.
           # Pattern format: "<suite-regex>/<test-regex>" — the leading ".*/""
-          # matches the suite name (eest/consume-engine) while the remainder
+          # matches the suite name (eest/consume-enginex) while the remainder
           # filters individual pytest test IDs by fork parameter.
-          # pool-size: --client.pool.size for hive's warm-daemon client pool.
-          # Tuned per shard from a trace-instrumented dispatch (run 24938677388);
-          # the LRU hit-rate curve plateaus at ~50% past size=4 on the long
-          # consume-engine shards (reuse is essentially depth-2 consecutive),
-          # so 4 captures all available reuse and 24+ buys nothing. paris+shanghai
-          # and consume-rlp have ~unique pre-state per test (0% hit at any size).
-          # glamsterdam-devnet is the exception — its curve keeps climbing past
-          # 24, so it gets a larger pool.
-          - sim: consume-engine
+          - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
-            pool-size: 0
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
-            exec_mode: serial
-          - sim: consume-engine
+            commitment_mode: serial
+          - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_(Paris|Shanghai)"
             shard: paris+shanghai
-            pool-size: 0
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
-            exec_mode: parallel
-          - sim: consume-engine
+            commitment_mode: parallel
+          - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
-            pool-size: 4
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
-            exec_mode: serial
-          - sim: consume-engine
+            commitment_mode: serial
+          - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_Cancun"
             shard: cancun
-            pool-size: 4
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
-            exec_mode: parallel
-          - sim: consume-engine
+            commitment_mode: parallel
+          - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_Prague"
             shard: prague
-            pool-size: 4
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
-            exec_mode: serial
-          - sim: consume-engine
+            commitment_mode: serial
+          - sim: consume-enginex
+            runner: ubuntu-latest
             sim-limit: ".*/.*fork_Prague"
             shard: prague
-            pool-size: 4
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
-            exec_mode: parallel
-          - sim: consume-engine
-            sim-limit: ".*/.*fork_Osaka"
+            commitment_mode: parallel
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_(Osaka|BPO)"
             shard: osaka
-            pool-size: 4
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
-            exec_mode: serial
-          - sim: consume-engine
-            sim-limit: ".*/.*fork_Osaka"
+            commitment_mode: serial
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_(Osaka|BPO)"
             shard: osaka
-            pool-size: 4
             fixtures-tarball: eest_stable
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
             max-failures: 0
-            exec_mode: parallel
+            commitment_mode: parallel
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*" # all tests take too long
             shard: rlp
-            pool-size: 0
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: serial
+            commitment_mode: serial
           - sim: consume-rlp
             sim-limit: ".*(eip2930_access_list|eip4844_blobs).*"
             shard: rlp
-            pool-size: 0
             fixtures-tarball: eest_stable
             max-failures: 0
-            exec_mode: parallel
-          # Glamsterdam devnet: BAL EIPs against devnet fixtures
-          - sim: consume-engine
-            sim-limit: ".*(7708|7778|7843|7928|7954|7976|7981|8024|8037).*"
+            commitment_mode: parallel
+          # Devnet consume-enginex: split by fork (~79k tests total). Each runs twice —
+          # serial and parallel commitment.
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_(Paris|Shanghai)"
+            shard: paris+shanghai-devnet
+            fixtures-tarball: eest_devnet
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
+            max-failures: 0
+            commitment_mode: serial
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_(Paris|Shanghai)"
+            shard: paris+shanghai-devnet
+            fixtures-tarball: eest_devnet
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
+            max-failures: 0
+            commitment_mode: parallel
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_Cancun"
+            shard: cancun-devnet
+            fixtures-tarball: eest_devnet
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
+            max-failures: 0
+            commitment_mode: serial
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_Cancun"
+            shard: cancun-devnet
+            fixtures-tarball: eest_devnet
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
+            max-failures: 0
+            commitment_mode: parallel
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_Prague"
+            shard: prague-devnet
+            fixtures-tarball: eest_devnet
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
+            max-failures: 0
+            commitment_mode: serial
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_Prague"
+            shard: prague-devnet
+            fixtures-tarball: eest_devnet
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
+            max-failures: 0
+            commitment_mode: parallel
+          # BPO2ToAmsterdam includes BAL validation and belongs with Amsterdam.
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
+            shard: osaka-devnet
+            fixtures-tarball: eest_devnet
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
+            max-failures: 0
+            commitment_mode: serial
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_(Osaka|BPO1ToBPO2|BPO2ToBPO3|BPO3ToBPO4)"
+            shard: osaka-devnet
+            fixtures-tarball: eest_devnet
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0"
+            max-failures: 0
+            commitment_mode: parallel
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_(Amsterdam|BPO2ToAmsterdam)"
             shard: glamsterdam-devnet
-            pool-size: 24
             fixtures-tarball: eest_devnet
             extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
-            erigon-extra-flags: "--experimental.bal"
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
             max-failures: 0
-            exec_mode: parallel
+            commitment_mode: serial
+          - sim: consume-enginex
+            runner: ubuntu-latest
+            sim-limit: ".*/.*fork_(Amsterdam|BPO2ToAmsterdam)"
+            shard: glamsterdam-devnet
+            fixtures-tarball: eest_devnet
+            extra-hive-flags: "--sim.loglevel=3 --client.checktimelimit=300s"
+            erigon-extra-flags: "--fcu.background.prune=false --fcu.timeout=0 --experimental.bal"
+            max-failures: 0
+            commitment_mode: parallel
     steps:
       - name: Clean docker system
         run: |
@@ -141,6 +219,7 @@ jobs:
         uses: actions/checkout@v7
         with:
           path: erigon-full
+          persist-credentials: false
 
       - name: Read pinned Hive ref
         id: hive-version
@@ -149,14 +228,10 @@ jobs:
       - name: Checkout Hive
         uses: actions/checkout@v7
         with:
-          # EXPERIMENT: pinned to erigontech/hive yperbasis/client-pool — the
-          # upstream-PR-ready warm-daemon client pool (ethereum/hive#1449), which
-          # now also carries local-fixtures support for the eels
-          # consume-engine/consume-rlp simulators (merged via erigontech/hive#2).
-          # Revert to ethereum/hive + steps.hive-version.outputs.ref once upstream.
-          repository: erigontech/hive
-          ref: 9afe5f15a37136fa57f2b2055d1d6c69c681aa16
+          repository: ethereum/hive
+          ref: ${{ steps.hive-version.outputs.ref }}
           path: hive
+          persist-credentials: false
 
       - name: Conditional Docker Login
         # Only login if we can. Workflow works without it but we want to avoid
@@ -175,7 +250,7 @@ jobs:
           password: ${{ secrets.DOCKERHUB_PULL_TOKEN }}
 
       - name: Setup go env and cache
-        uses: actions/setup-go@v6
+        uses: actions/setup-go@v7
         with:
           go-version: '>=1.25'
 
@@ -201,10 +276,10 @@ jobs:
 
       - name: Get dependencies and build hive
         env:
-          # Toggle dbg.Exec3Parallel inside the hive erigon container.
-          # Baked as an ENV directive into the client Dockerfile so every
-          # erigon instance hive launches inherits it.
-          ERIGON_EXEC3_PARALLEL: ${{ matrix.exec_mode == 'parallel' && 'true' || 'false' }}
+          # Toggle statecfg.ExperimentalParallelCommitment inside the hive
+          # erigon container. Baked as an ENV directive into the client
+          # Dockerfile so every erigon instance hive launches inherits it.
+          ERIGON_COMMITMENT_PARALLEL: ${{ matrix.commitment_mode == 'parallel' && 'true' || 'false' }}
         run: |
           cd hive
           retry() {
@@ -227,10 +302,10 @@ jobs:
             echo "ERROR: failed to repoint hive's erigon client Dockerfile at hive/erigon:cilocal"
             exit 1
           fi
-          # Inject ERIGON_EXEC3_PARALLEL into the runtime image so the
+          # Inject ERIGON_COMMITMENT_PARALLEL into the runtime image so the
           # erigon process inside hive picks it up. Append as the last layer
           # so it doesn't invalidate earlier build caches.
-          echo "ENV ERIGON_EXEC3_PARALLEL=${ERIGON_EXEC3_PARALLEL}" >> clients/erigon/Dockerfile
+          echo "ENV ERIGON_COMMITMENT_PARALLEL=${ERIGON_COMMITMENT_PARALLEL}" >> clients/erigon/Dockerfile
           erigon_extra_flags="${{ matrix.erigon-extra-flags }}"
           if [ -n "$erigon_extra_flags" ]; then
             echo "Patching erigon.sh with extra flags: $erigon_extra_flags"
@@ -245,8 +320,8 @@ jobs:
       # them every run. Restore the base-branch cache warmed by
       # cache-warming-eest-fixtures.yml (restore-only — never saved here); on a
       # miss, fetch via the hardened tools/test-fixtures.sh. Then stage the
-      # tarball into the sim build context, where the (local-fixtures) eels
-      # Dockerfile extracts it for `consume --input /fixtures`.
+      # tarball into the sim build context, where the eels image keeps it
+      # compressed until startup and runs `consume --input /fixtures`.
       - name: Restore EEST fixtures cache
         id: eest-cache
         uses: actions/cache/restore@v6
@@ -287,7 +362,7 @@ jobs:
             # image-build/registry/clone failure); a completed run is judged on its first result.
             local attempt=1 max_attempts=3
             while true; do
-              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=12 --client.pool.size=${{ matrix.pool-size }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures=/fixtures ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
+              ./hive -docker.output -docker.auth --sim ethereum/eels/"${1}" --sim.limit="${2}" --sim.parallelism=${{ matrix.runner == 'ubuntu-latest' && 4 || 12 }} --client erigon --docker.nocache=true --sim.limit.exact=false --sim.buildarg fixtures=/fixtures ${branch_arg} ${{ matrix.extra-hive-flags }} 2>&1 | tee output.log || true
               status_line=$(tail -2 output.log | head -1 | sed -r "s/\x1B\[[0-9;]*[a-zA-Z]//g")
               suites=$(echo "$status_line" | sed -n 's/.*suites=\([0-9]*\).*/\1/p')
               if [ -z "$suites" ]; then
@@ -324,9 +399,9 @@ jobs:
         if: always()
         uses: actions/upload-artifact@v7
         with:
-          # exec_mode in the artifact name keeps the two matrix entries from
+          # commitment_mode in the artifact name keeps the two matrix entries from
           # clobbering each other's logs on the same artifact key.
-          name: hive-workspace-log-${{ matrix.shard }}-${{ matrix.exec_mode }}
+          name: hive-workspace-log-${{ matrix.shard }}-${{ matrix.commitment_mode }}
           path: hive/workspace/logs
           if-no-files-found: ignore
       - name: Test Results

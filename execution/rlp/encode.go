@@ -62,7 +62,7 @@ type Encoder interface {
 // buffered.
 //
 // Please see package-level documentation of encoding rules.
-func Encode(w io.Writer, val interface{}) error {
+func Encode(w io.Writer, val any) error {
 	// Optimization: reuse *encBuffer when called by EncodeRLP.
 	if buf := encBufferFromWriter(w); buf != nil {
 		return buf.encode(val)
@@ -78,7 +78,7 @@ func Encode(w io.Writer, val interface{}) error {
 
 // EncodeToBytes returns the RLP encoding of val.
 // Please see package-level documentation for the encoding rules.
-func EncodeToBytes(val interface{}) ([]byte, error) {
+func EncodeToBytes(val any) ([]byte, error) {
 	buf := getEncBuffer()
 	defer encBufferPool.Put(buf)
 
@@ -93,7 +93,7 @@ func EncodeToBytes(val interface{}) ([]byte, error) {
 // data.
 //
 // Please see the documentation of Encode for the encoding rules.
-func EncodeToReader(val interface{}) (size int, r io.Reader, err error) {
+func EncodeToReader(val any) (size int, r io.Reader, err error) {
 	buf := getEncBuffer()
 	if err := buf.encode(val); err != nil {
 		encBufferPool.Put(buf)
@@ -278,7 +278,7 @@ func makeSliceWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 		// w.list is not called for them.
 		wfn = func(val reflect.Value, w *encBuffer) error {
 			vlen := val.Len()
-			for i := 0; i < vlen; i++ {
+			for i := range vlen {
 				if err := etypeinfo.writer(val.Index(i), w); err != nil {
 					return err
 				}
@@ -294,7 +294,7 @@ func makeSliceWriter(typ reflect.Type, ts rlpstruct.Tags) (writer, error) {
 				return nil
 			}
 			listOffset := w.list()
-			for i := 0; i < vlen; i++ {
+			for i := range vlen {
 				if err := etypeinfo.writer(val.Index(i), w); err != nil {
 					return err
 				}
@@ -643,7 +643,7 @@ func encodePrefix(size int, w io.Writer, buffer []byte, smallTag, largeTag byte)
 // StringListLen returns the RLP-encoded size of a [][]byte as a list of strings.
 func StringListLen(bb [][]byte) int {
 	size := 0
-	for i := 0; i < len(bb); i++ {
+	for i := range bb {
 		size += StringLen(bb[i])
 	}
 	return size + ListPrefixLen(size)
@@ -652,7 +652,7 @@ func StringListLen(bb [][]byte) int {
 // EncodeStringList encodes a [][]byte as an RLP list of strings via w.
 func EncodeStringList(bb [][]byte, w io.Writer, b []byte) error {
 	totalSize := 0
-	for i := 0; i < len(bb); i++ {
+	for i := range bb {
 		totalSize += StringLen(bb[i])
 	}
 
@@ -660,7 +660,7 @@ func EncodeStringList(bb [][]byte, w io.Writer, b []byte) error {
 		return err
 	}
 
-	for i := 0; i < len(bb); i++ {
+	for i := range bb {
 		if err := EncodeString(bb[i], w, b); err != nil {
 			return err
 		}

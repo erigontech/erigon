@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -113,6 +114,43 @@ func TestDomainRoTx_findMergeRange(t *testing.T) {
 		}
 	})
 
+}
+
+// TestHistoryStaticFilesInRange_DetectsGapInSourceFiles pins that a gap in
+// source files must reject the merge, not silently produce a shorter,
+// mislabeled result.
+func TestHistoryStaticFilesInRange_DetectsGapInSourceFiles(t *testing.T) {
+	t.Parallel()
+
+	d := emptyTestDomain(t, 1)
+	h := d.History
+	h.InvertedIndex.Accessors = 0
+	h.Accessors = 0
+
+	// gap: nothing covers [1,2) even though the claimed merge range is [0,3)
+	h.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.v",
+		"v1.0-accounts.2-3.v",
+	})
+	h.dirtyFiles.Scan(func(item *FilesItem) bool {
+		item.decompressor = &seg.Decompressor{}
+		return true
+	})
+	h.InvertedIndex.scanDirtyFiles([]string{
+		"v1.0-accounts.0-1.ef",
+		"v1.0-accounts.2-3.ef",
+	})
+	h.InvertedIndex.dirtyFiles.Scan(func(item *FilesItem) bool {
+		item.decompressor = &seg.Decompressor{}
+		return true
+	})
+
+	hc := h.beginForTests()
+	defer hc.Close()
+
+	r := NewHistoryRanges(*NewMergeRange("accounts", true, 0, 3), MergeRange{})
+	_, _, err := hc.staticFilesInRange(r)
+	require.Error(t, err, "staticFilesInRange must reject a merge range with a gap in source files")
 }
 
 func emptyTestInvertedIndex(t testing.TB, aggStep uint64) *InvertedIndex {
@@ -1021,7 +1059,9 @@ func Test_mergeEliasFano(t *testing.T) {
 	var merged multiencseq.SequenceReader
 	merged.Reset(0, menc)
 	require.EqualValues(t, len(uniq), merged.Count())
-	mergedLists := append(firstList, secondList...)
+	mergedLists := make([]int, 0, len(firstList)+len(secondList))
+	mergedLists = append(mergedLists, firstList...)
+	mergedLists = append(mergedLists, secondList...)
 	slices.Sort(mergedLists)
 	require.EqualValues(t, mergedLists[len(mergedLists)-1], merged.Max())
 
@@ -1046,7 +1086,7 @@ func TestCommitmentValTransformDomainPanicsWithNeedMergeFalse(t *testing.T) {
 	defer dc.Close()
 
 	require.Panics(t, func() {
-		dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil)
+		_, _ = dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil, false)
 	})
 }
 
@@ -1099,7 +1139,7 @@ func TestMergeFiles(t *testing.T) {
 	defer rwTx.Rollback()
 
 	dc = d.beginForTests()
-	defer dc.Close()
+	dc.Close()
 }
 
 func TestMergeFilesWithDependency(t *testing.T) {
@@ -1334,13 +1374,13 @@ func TestMergeFilesWithDependency(t *testing.T) {
 func TestHistoryAndIIAlignment(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
 	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)
 	t.Cleanup(agg.Close)
 	setup := func() (account *Domain) {
-		agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
+		require.NoError(t, agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger))
 		domain := agg.d[kv.AccountsDomain]
 		domain.History.InvertedIndex.Accessors = 0
 		domain.History.Accessors = 0
@@ -1433,7 +1473,7 @@ func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
 	defer tx.Rollback()
 
 	ps := background.NewProgressSet()
-	for step := kv.Step(0); step < kv.Step(numFiles); step++ {
+	for step := range kv.Step(numFiles) {
 		require.NoError(t, ii.collateBuildIntegrate(ctx, step, tx, ps))
 	}
 

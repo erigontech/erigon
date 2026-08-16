@@ -41,7 +41,6 @@ func GetDataColumnSidecars(
 	cellsAndKZGProofs []CellsAndKZGProofs,
 	cfg *clparams.BeaconChainConfig,
 ) ([]*cltypes.DataColumnSidecar, error) {
-
 	if len(cellsAndKZGProofs) != kzgCommitments.Len() {
 		return nil, fmt.Errorf("number of cells/proofs entries (%d) does not match number of KZG commitments (%d)", len(cellsAndKZGProofs), kzgCommitments.Len())
 	}

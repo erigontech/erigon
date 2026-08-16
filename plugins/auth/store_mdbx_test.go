@@ -27,13 +27,13 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/stretchr/testify/require"
 )
 
 func newTestDB(t *testing.T) kv.RwDB {
 	t.Helper()
-	db := mdbx.New(dbcfg.ConsensusDB, log.Root()).
-		InMem(t, t.TempDir()).
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ConsensusDB, log.Root()), t.TempDir()).
 		WithTableCfg(AuthTablesCfg).
 		MustOpen()
 	t.Cleanup(db.Close)

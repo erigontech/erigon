@@ -32,9 +32,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
@@ -69,14 +69,7 @@ type HistoricalTraceWorker struct {
 
 	taskGasPool *protocol.GasPool
 
-	// calculated by .changeBlock()
-	blockHash common.Hash
-	blockNum  uint64
-	header    *types.Header
-	blockCtx  *evmtypes.BlockContext
-	rules     *chain.Rules
-	signer    *types.Signer
-	vmCfg     *vm.Config
+	vmCfg *vm.Config
 }
 
 type TraceConsumer interface {
@@ -128,6 +121,7 @@ func (rw *HistoricalTraceWorker) Run() (err error) {
 		}
 	}()
 	defer rw.LogStats()
+	defer rw.ibs.Close()
 	for txTask, ok := rw.in.Next(rw.ctx); ok; txTask, ok = rw.in.Next(rw.ctx) {
 		result := rw.RunTxTask(txTask.(*TxTask))
 		if err := rw.out.Add(rw.ctx, result); err != nil {
@@ -177,10 +171,15 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 	case txTask.TxIndex == -1:
 		if txTask.BlockNumber() == 0 {
 			// Genesis block
-			_, ibs, err = genesiswrite.GenesisToBlock(nil, rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
+			var genesisIbs *state.IntraBlockState
+			_, genesisIbs, err = genesiswrite.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
+			// This state replaces rw.ibs for the genesis task only, so it needs its
+			// own close; rw.ibs stays owned by the worker.
+			defer genesisIbs.Close()
+			ibs = genesisIbs
 			// For Genesis, rules should be empty, so that empty accounts can be included
 			rules = &chain.Rules{} //nolint
 			break
@@ -316,7 +315,7 @@ func (rw *HistoricalTraceWorker) execAATxn(txTask *TxTask, tracer *calltracer.Ca
 	}
 
 	result.ExecutionResult.ReceiptGasUsed = gasUsed
-	result.ExecutionResult.BlockRegularGasUsed = gasUsed
+	result.ExecutionResult.BlockExecutionGasUsed = gasUsed
 	// Update the state with pending changes
 	rw.ibs.SoftFinalise()
 	result.Logs = rw.ibs.GetLogs(txTask.TxIndex, txTask.TxHash(), txTask.BlockNumber(), txTask.BlockHash())
@@ -344,7 +343,7 @@ func (rw *HistoricalTraceWorker) ResetTx(chainTx kv.TemporalTx) {
 type ExecArgs struct {
 	ChainDB     kv.TemporalRoDB
 	Genesis     *types.Genesis
-	BlockReader services.FullBlockReader
+	BlockReader dbservices.FullBlockReader
 	Engine      rules.Engine
 	Dirs        datadir.Dirs
 	ChainConfig *chain.Config
@@ -424,8 +423,7 @@ func doHistoryMap(ctx context.Context, consumer TraceConsumer, cfg *ExecArgs, in
 	mapGroup, ctx := errgroup.WithContext(ctx)
 	// we all errors in background workers (except ctx.Cancel), because applyLoop will detect this error anyway.
 	// and in applyLoop all errors are critical
-	for i := 0; i < workerCount; i++ {
-		i := i
+	for i := range workerCount {
 		workers[i] = NewHistoricalTraceWorker(ctx, consumer, in, out, true, cfg, logger)
 		mapGroup.Go(func() error {
 			return workers[i].Run()
@@ -484,24 +482,26 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 
 		if result.IsBlockEnd() {
 			if result.BlockNumber() > 0 {
-				chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
-				// End of block transaction in a block
-				reader := state.NewHistoryReaderV3(tx, outputTxNum)
-				ibs := state.New(reader)
-				defer ibs.Release(false)
-				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
-				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
-						Tracer: result.TracingHooks(),
-					})
-					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
-					return ret, err
-				}
+				func() {
+					chainReader := consensuschain.NewReader(cfg.ChainConfig, tx, cfg.BlockReader, logger)
+					// End of block transaction in a block
+					reader := state.NewHistoryReaderV3(tx, outputTxNum)
+					ibs := state.New(reader)
+					defer ibs.Close()
+					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
+					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
+						ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
+							Tracer: result.TracingHooks(),
+						})
+						result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
+						return ret, err
+					}
 
-				_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
-				if err != nil {
-					result.Err = err
-				}
+					_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
+					if err != nil {
+						result.Err = err
+					}
+				}()
 			}
 
 			p.blockResult.Complete = true
@@ -562,7 +562,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 		if err != nil {
 			return err
 		}
-		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%.1fm-%.1fm", float64(fromBlock)/1_000_000, float64(toBlock)/1_000_000), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
+		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%s-%s", common.PrettyExact(fromBlock), common.PrettyExact(toBlock)), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
 	}
 
 	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header, err error) {
@@ -663,7 +663,7 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	return nil
 }
 
-func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader services.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader dbservices.BlockReader, blockNum uint64) (b *types.Block, err error) {
 	select {
 	case <-ctx.Done():
 		return nil, ctx.Err()

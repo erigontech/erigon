@@ -36,7 +36,8 @@ func testSSZRoundTrip(t *testing.T, testDir string, version clparams.StateVersio
 	DecodeSSZ([]byte, int) error
 	EncodeSSZ([]byte) ([]byte, error)
 	HashSSZ() ([32]byte, error)
-}) {
+},
+) {
 	t.Helper()
 	fsys := os.DirFS(testDir)
 

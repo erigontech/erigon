@@ -33,13 +33,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
+	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -126,6 +127,7 @@ type EthAPI interface {
 	SendTransaction(_ context.Context, txObject any) (common.Hash, error)
 	Sign(ctx context.Context, _ common.Address, _ hexutil.Bytes) (hexutil.Bytes, error)
 	SignTransaction(_ context.Context, txObject any) (common.Hash, error)
+	FillTransaction(ctx context.Context, args ethapi.CallArgs) (*ethapi.SignTransactionResult, error)
 	GetProof(ctx context.Context, address common.Address, storageKeys []hexutil.Bytes, blockNr *rpc.BlockNumberOrHash) (*accounts.AccProofResult, error)
 	CreateAccessList(ctx context.Context, args ethapi.CallArgs, blockNrOrHash *rpc.BlockNumberOrHash, overrides *ethapi2.StateOverrides, optimizeGas *bool) (*accessListResult, error)
 
@@ -149,9 +151,9 @@ type BaseAPI struct {
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
 
-	_blockReader services.FullBlockReader
+	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
-	_txnReader   services.TxnReader
+	_txnReader   dbservices.TxnReader
 	_engine      rules.EngineReader
 
 	bridgeReader bridgeReader
@@ -159,31 +161,41 @@ type BaseAPI struct {
 	evmCallTimeout      time.Duration
 	blockRangeLimit     int
 	getLogsMaxResults   int
+	logQueryLimit       int
 	dirs                datadir.Dirs
 	receiptsGenerator   *receipts.Generator
 	borReceiptGenerator *receipts.BorGenerator
+	balRegenerator      *bal.Regenerator
+
+	// witnessCache serves recent legacy-mode debug_executionWitness results from
+	// memory, keyed by block hash; nil disables it (only the embedded node wires one).
+	// It is the single source of truth for head-capture/cache-only serving mode, read
+	// by both the debug and eth_getWitness serve paths.
+	witnessCache *witnessResultCache
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader services.FullBlockReader, singleNodeMode bool, evmCallTimeout time.Duration, engine rules.EngineReader, dirs datadir.Dirs, bridgeReader bridgeReader, rangeLimit int, getLogsMaxResults int) *BaseAPI {
-	var (
-		blocksLRUSize = 128 // ~32Mb
-	)
-	// A zero evmCallTimeout means "abort immediately" (context.WithTimeout with a
-	// 0 deadline), not "no limit" — it silently breaks every RPC that re-executes
-	// blocks (eth_getLogs receipt regeneration, eth_call, traces, simulation) with
-	// "execution aborted (timeout = 0s)". Embedders that build the http config
-	// without setting EvmCallTimeout (the zero value) would otherwise hit this, so
-	// treat non-positive as the default. See rpccfg.DefaultEvmCallTimeout.
-	if evmCallTimeout <= 0 {
-		evmCallTimeout = rpccfg.DefaultEvmCallTimeout
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *rpccfg.BaseApiConfig) *BaseAPI {
+	if conf == nil {
+		conf = &rpccfg.BaseApiConfig{}
 	}
+	blocksLRUSize := 128 // ~32Mb
 	// if RPCDaemon deployed as independent process: increase cache sizes
-	if !singleNodeMode {
+	if !conf.SingleNodeMode {
 		blocksLRUSize *= 5
 	}
 	blocksLRU, err := lru.New[common.Hash, *types.Block](blocksLRUSize)
 	if err != nil {
 		panic(err)
+	}
+
+	// A non-positive evmCallTimeout means "abort immediately" (context.WithTimeout
+	// with a 0 deadline), not "no limit" — it silently breaks every RPC that
+	// re-executes blocks (eth_getLogs receipt regeneration, eth_call, traces,
+	// simulation) with "execution aborted (timeout = 0s)". Embedders that build the
+	// http config without setting EvmCallTimeout would otherwise hit this.
+	evmCallTimeout := conf.EvmCallTimeout
+	if evmCallTimeout <= 0 {
+		evmCallTimeout = rpccfg.DefaultEvmCallTimeout
 	}
 
 	return &BaseAPI{
@@ -195,12 +207,14 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader serv
 		_txNumReader:        blockReader.TxnumReader(),
 		evmCallTimeout:      evmCallTimeout,
 		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(dirs, blockReader, engine, stateCache, evmCallTimeout, f),
+		receiptsGenerator:   receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
 		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache, f),
-		dirs:                dirs,
+		balRegenerator:      bal.NewRegenerator(blockReader, engine, log.Root()),
+		dirs:                conf.Dirs,
 		bridgeReader:        bridgeReader,
-		blockRangeLimit:     rangeLimit,
-		getLogsMaxResults:   getLogsMaxResults,
+		blockRangeLimit:     conf.BlockRangeLimit,
+		getLogsMaxResults:   conf.GetLogsMaxResults,
+		logQueryLimit:       conf.LogQueryLimit,
 	}
 }
 
@@ -255,6 +269,44 @@ func (api *BaseAPI) engine() rules.EngineReader {
 func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
 	overlayTx := api.filters.WithOverlay(tx)
 	return api._txnReader.TxnLookup(ctx, overlayTx, txnHash)
+}
+
+func (api *BaseAPI) txnLookupWithBorFallback(ctx context.Context, tx kv.Tx, txnHash common.Hash, chainConfig *chain.Config) (blockNum uint64, txNum uint64, isBorStateSyncTxn bool, ok bool, err error) {
+	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	if err != nil {
+		return 0, 0, false, false, err
+	}
+	if ok {
+		return blockNum, txNum, false, true, nil
+	}
+	if chainConfig.Bor == nil {
+		return 0, 0, false, false, nil
+	}
+	blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
+	if err != nil {
+		return 0, 0, false, false, err
+	}
+	if !ok {
+		return 0, 0, false, false, nil
+	}
+	return blockNum, txNum, true, true, nil
+}
+
+// txnIndexInBlock derives the in-block txn index from a global txNum. Bor state sync
+// txns are not part of the block body, so they yield the -1 sentinel and the consistency
+// check is skipped (their txNum comes from a missed lookup).
+func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txNum uint64, isBorStateSyncTxn bool) (int, error) {
+	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if isBorStateSyncTxn {
+		return -1, nil
+	}
+	if txNumMin+1 > txNum {
+		return 0, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
+	}
+	return int(txNum - txNumMin - 1), nil
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
@@ -319,7 +371,7 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header().Number.Uint64(), nil
+			return it.NumberU64(), nil
 		}
 	}
 	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
@@ -342,7 +394,7 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	}
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header(), isLatest, nil
+			return it.HeaderNoCopy(), isLatest, nil
 		}
 	}
 
@@ -363,7 +415,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(h); ok && it != nil {
-			return it.Header(), nil
+			return it.HeaderNoCopy(), nil
 		}
 	}
 	overlayTx := api.filters.WithOverlay(tx)
@@ -373,7 +425,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.Header(), nil
+			return it.HeaderNoCopy(), nil
 		}
 	}
 
@@ -425,7 +477,7 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 }
 
 // checkReceiptsAvailable checks if receipts are available for the given block.
-// In case --persist.receipts which makes all historical receipts available even when state history is pruned.
+// In case --prune.include-receipts which makes all historical receipts available even when state history is pruned.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {
@@ -498,20 +550,8 @@ type APIImpl struct {
 	logger                      log.Logger
 }
 
-// EthApiConfig defines the configurable parameters for EthAPI
-type EthApiConfig struct {
-	GasCap                      uint64
-	FeeCap                      float64
-	ReturnDataLimit             int
-	AllowUnprotectedTxs         bool
-	MaxGetProofRewindBlockCount int
-	SubscribeLogsChannelSize    int
-	RpcTxSyncDefaultTimeout     time.Duration
-	RpcTxSyncMaxTimeout         time.Duration
-}
-
 // NewEthAPI returns APIImpl instance
-func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, cfg *EthApiConfig, logger log.Logger) *APIImpl {
+func NewEthAPI(base *BaseAPI, db kv.TemporalRoDB, eth rpchelper.ApiBackend, txPool txpoolproto.TxpoolClient, mining txpoolproto.MiningClient, cfg *rpccfg.EthApiConfig, logger log.Logger) *APIImpl {
 	gascap := cfg.GasCap
 	if gascap == 0 {
 		gascap = uint64(math.MaxUint64 / 2)

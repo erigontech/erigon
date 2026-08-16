@@ -5,27 +5,32 @@ import (
 	"errors"
 	"fmt"
 	"os"
+	"path/filepath"
 	"runtime"
+	"slices"
 	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
@@ -52,7 +57,6 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		} else {
 			return 0, common.Hash{}, fmt.Errorf("failed to get head: %w", err)
 		}
-
 	}
 	// Observe the current slot and epoch in the monitor
 	monitor.ObserveCurrentSlot(headSlot)
@@ -85,7 +89,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 	if err2 := cfg.rpc.SetStatus(
 		cfg.forkChoice.FinalizedCheckpoint().Root,
 		cfg.forkChoice.FinalizedCheckpoint().Epoch,
-		headRoot, headSlot); err2 != nil {
+		headRoot, headSlot,
+	); err2 != nil {
 		logger.Warn("Could not set status", "err", err2)
 	}
 	return
@@ -151,8 +156,8 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 	}
 
 	// Mark the new canonical chain segments in reverse order
-	for i := len(reconnectionRoots) - 1; i >= 0; i-- {
-		if err := beacon_indicies.MarkRootCanonical(ctx, tx, reconnectionRoots[i].slot, reconnectionRoots[i].root); err != nil {
+	for _, reconnectionRoot := range slices.Backward(reconnectionRoots) {
+		if err := beacon_indicies.MarkRootCanonical(ctx, tx, reconnectionRoot.slot, reconnectionRoot.root); err != nil {
 			return fmt.Errorf("failed to mark root canonical: %w", err)
 		}
 	}
@@ -246,19 +251,11 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		log.Warn("failed to get proposer index", "err", err)
 		return err
 	}
-	withdrawals := []*types.Withdrawal{}
 	expWithdrawals, err := state.GetExpectedWithdrawals(s, epoch)
 	if err != nil {
 		return err
 	}
-	for _, w := range expWithdrawals.Withdrawals {
-		withdrawals = append(withdrawals, &types.Withdrawal{
-			Amount:    w.Amount,
-			Index:     w.Index,
-			Validator: w.Validator,
-			Address:   w.Address,
-		})
-	}
+	withdrawals := cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(expWithdrawals.Withdrawals)
 	payloadAttributes := engine_types.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(headPayloadHeader.Time + cfg.beaconCfg.SecondsPerSlot),
 		PrevRandao:            randaoMix,
@@ -287,59 +284,84 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 	return nil
 }
 
-// saveHeadStateOnDisk unconditionally encodes the head state and writes it to CaplinLatest, so a node
-// restart without checkpoint sync can re-anchor on it. Shared by the periodic path and the shutdown path.
-func saveHeadStateOnDisk(cfg *Cfg, headState *state.CachingBeaconState) error {
-	dat, err := utils.EncodeSSZSnappy(headState)
+// writeStateFile snappy-encodes st and replaces the named resume file under CaplinLatest via a
+// same-directory temp file and rename, so a crash mid-write can never leave a truncated file under
+// the final name. The rename is atomic on POSIX within one filesystem; on Windows it is best-effort.
+// The temp name is fixed rather than randomized so a crash before the rename leaves at most one
+// stale temp, reused by the next save.
+func writeStateFile(dirs datadir.Dirs, name string, st *state.CachingBeaconState) error {
+	dat, err := utils.EncodeSSZSnappy(st)
 	if err != nil {
 		return fmt.Errorf("failed to encode ssz snappy: %w", err)
 	}
-	// Write the head state to disk
-	fileToWriteTo := fmt.Sprintf("%s/%s", cfg.dirs.CaplinLatest, clparams.LatestStateFileName)
-
-	// Create the directory if it doesn't exist
-	if err := os.MkdirAll(cfg.dirs.CaplinLatest, 0755); err != nil {
+	if err := os.MkdirAll(dirs.CaplinLatest, 0o755); err != nil {
 		return fmt.Errorf("failed to create directory: %w", err)
 	}
-
-	// Write the data to the file
-	if err := os.WriteFile(fileToWriteTo, dat, 0644); err != nil {
-		return fmt.Errorf("failed to write head state to disk: %w", err)
+	tmpName := filepath.Join(dirs.CaplinLatest, name+".tmp")
+	tmp, err := os.OpenFile(tmpName, os.O_WRONLY|os.O_CREATE|os.O_TRUNC, 0o644)
+	if err != nil {
+		return fmt.Errorf("failed to create temp state file %s: %w", name, err)
+	}
+	defer func() { _ = dir.RemoveFile(tmpName) }()
+	if _, err := tmp.Write(dat); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to write state %s to disk: %w", name, err)
+	}
+	if err := tmp.Sync(); err != nil {
+		tmp.Close()
+		return fmt.Errorf("failed to sync temp state file %s: %w", name, err)
+	}
+	if err := tmp.Close(); err != nil {
+		return fmt.Errorf("failed to close temp state file %s: %w", name, err)
+	}
+	if err := os.Rename(tmpName, filepath.Join(dirs.CaplinLatest, name)); err != nil {
+		return fmt.Errorf("failed to rename state file %s: %w", name, err)
 	}
 	return nil
 }
 
-// smallValidatorSetForPerSlotSave gates the per-slot head-state save. At or below this validator count the
-// beacon state is small (tens of KB) so saving it every slot is negligible, AND such a network is a
-// dev/private/single-node setup with no peer to backfill a restart gap — so the durable head MUST track the
-// live head, or a warm restart re-anchors behind the execution head (backward fork-choice → wedge, or
-// unwind → silent history loss). Above it a network has peers to backfill on restart and a much larger
-// state, so the cheap 40-slot cadence is right. Physical (state-size) gate, not a mode flag. 128 to start
-// (dev runs 64 validators); tune as needed.
-const smallValidatorSetForPerSlotSave = 128
-
-// saveHeadStateOnDiskIfNeeded saves the head state on disk for eventual node restarts without checkpoint
-// sync — every slot for a small (dev/single-node) validator set, else every 40 slots. See the constant.
-func saveHeadStateOnDiskIfNeeded(cfg *Cfg, headState *state.CachingBeaconState) error {
-	epochFrequency := uint64(5)
-	everySlot := headState.ValidatorLength() < smallValidatorSetForPerSlotSave
-	if everySlot || headState.Slot()%(cfg.beaconCfg.SlotsPerEpoch*epochFrequency) == 0 {
-		return saveHeadStateOnDisk(cfg, headState)
-	}
-	return nil
+// writeFinalizedStateFile persists the finalized-state resume file.
+func writeFinalizedStateFile(dirs datadir.Dirs, st *state.CachingBeaconState) error {
+	return writeStateFile(dirs, clparams.LatestFinalizedStateFileName, st)
 }
 
-// SaveHeadStateOnShutdown persists the current head state on a graceful stop, so a warm restart resumes at
-// the EXACT head rather than the last periodic checkpoint (which lags — and a single-node dev node has no
-// peer to backfill the gap). Best-effort and safe to call after ctx cancellation: it is a pure in-memory
-// read of the head state plus a file write. Exported for the Caplin service to call as it winds down.
-func SaveHeadStateOnShutdown(cfg *Cfg) error {
-	if cfg == nil || cfg.syncedData == nil {
+// SaveResumeStateOnShutdown persists the resume anchor on a graceful stop, so a warm restart comes
+// up as close to the head as the anchor allows instead of at the last periodic save. Best-effort and
+// safe to call after ctx cancellation: it is an in-memory state read plus a file write. Exported for
+// the Caplin service to call as it winds down.
+//
+// This used to save the HEAD state to latest.ssz_snappy. Upstream moved the resume anchor to the
+// node's own most-recently-finalized state (reorg-immune, network-gated, staleness-horizoned) and
+// moved every reader with it, so a head-state file would now be written and never read. The gap
+// between the finalized anchor and the true head is closed on startup by replaySoleProducerToHead.
+func SaveResumeStateOnShutdown(cfg *Cfg) error {
+	if cfg == nil || cfg.forkChoice == nil {
 		return nil
 	}
-	return cfg.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
-		return saveHeadStateOnDisk(cfg, headState)
-	})
+	st, err := cfg.forkChoice.GetStateAtBlockRoot(cfg.forkChoice.FinalizedCheckpoint().Root, true)
+	if err != nil || st == nil {
+		return nil // best-effort: no finalized state to persist
+	}
+	return writeFinalizedStateFile(cfg.dirs, st)
+}
+
+// saveFinalizedStateOnDiskIfNeeded persists the node's own most-recently-finalized state so a
+// later restart can resume from a locally-provable, reorg-immune anchor. Fetching the finalized
+// state is best-effort: a miss or error is non-fatal.
+func saveFinalizedStateOnDiskIfNeeded(fc forkchoice.ForkChoiceStorageReader, beaconCfg *clparams.BeaconChainConfig, dirs datadir.Dirs, headSlot uint64) error {
+	epochFrequency := uint64(5)
+	if headSlot%(beaconCfg.SlotsPerEpoch*epochFrequency) != 0 {
+		return nil
+	}
+	st, err := fc.GetStateAtBlockRoot(fc.FinalizedCheckpoint().Root, true)
+	if err != nil {
+		log.Debug("[Caplin] could not fetch finalized state to persist (non-fatal)", "err", err)
+		return nil
+	}
+	if st == nil {
+		return nil
+	}
+	return writeFinalizedStateFile(dirs, st)
 }
 
 // postForkchoiceOperations performs the post fork choice operations such as updating the head state, producing and caching attestation data,
@@ -383,16 +405,14 @@ func postForkchoiceOperations(ctx context.Context, tx kv.RwTx, logger log.Logger
 			return fmt.Errorf("failed to dump beacon state on disk: %w", err)
 		}
 
-		// Save the head state on disk for eventual node restarts without checkpoint sync
-		if err := saveHeadStateOnDiskIfNeeded(cfg, headState); err != nil {
-			return fmt.Errorf("failed to save head state on disk: %w", err)
+		if err := saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, headState.Slot()); err != nil {
+			return fmt.Errorf("failed to save finalized state on disk: %w", err)
 		}
 
 		// Shuffle validator set for the next epoch
 		preCacheNextShuffledValidatorSet(ctx, logger, cfg, headState)
 		return nil
 	})
-
 }
 
 // doForkchoiceRoutine performs the fork choice routine by computing the new fork choice, updating the canonical chain in the database,
@@ -444,11 +464,12 @@ func preCacheNextShuffledValidatorSet(ctx context.Context, logger log.Logger, cf
 
 		// Pre-cache shuffled sets for epochs: current-2, current-1, current, and next
 		epochsToCache := []uint64{currentEpoch + 1}
-		if currentEpoch >= 2 {
+		switch {
+		case currentEpoch >= 2:
 			epochsToCache = append(epochsToCache, currentEpoch-2, currentEpoch-1, currentEpoch)
-		} else if currentEpoch >= 1 {
+		case currentEpoch >= 1:
 			epochsToCache = append(epochsToCache, currentEpoch-1, currentEpoch)
-		} else {
+		default:
 			epochsToCache = append(epochsToCache, currentEpoch)
 		}
 

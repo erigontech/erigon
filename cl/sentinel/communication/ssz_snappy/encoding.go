@@ -39,6 +39,11 @@ var writerPool = sync.Pool{
 	},
 }
 
+func putWriter(sw *snappy.Writer) {
+	sw.Reset(nil)
+	writerPool.Put(sw)
+}
+
 func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	enc := make([]byte, 0, val.EncodingSizeSSZ())
 	var err error
@@ -61,7 +66,7 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	sw.Reset(wr)
 	defer func() {
 		sw.Flush()
-		writerPool.Put(sw)
+		putWriter(sw)
 	}()
 	// Marshall and snap it
 	_, err = sw.Write(enc)

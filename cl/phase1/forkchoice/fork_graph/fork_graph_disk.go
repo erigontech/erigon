@@ -19,6 +19,7 @@ package fork_graph
 import (
 	"errors"
 	"fmt"
+	"slices"
 	"sync"
 	"sync/atomic"
 
@@ -26,7 +27,6 @@ import (
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -138,7 +138,6 @@ type forkGraphDisk struct {
 	sszSnappyReader *snappy.Reader
 
 	rcfg            beacon_router_configuration.RouterConfiguration
-	emitter         *beaconevents.EventEmitter
 	syncedData      synced_data.SyncedData
 	consensusEngine consensus.Engine
 
@@ -146,7 +145,7 @@ type forkGraphDisk struct {
 }
 
 // Initialize fork graph with a new state.
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, emitter *beaconevents.EventEmitter, engine ...consensus.Engine) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration, engine ...consensus.Engine) ForkGraph {
 	farthestExtendingPath := make(map[common.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
@@ -204,7 +203,6 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		anchorSlot:      anchorState.Slot(),
 		anchorRoot:      anchorRoot,
 		rcfg:            rcfg,
-		emitter:         emitter,
 		syncedData:      syncedData,
 		consensusEngine: ce,
 	}
@@ -268,7 +266,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 			currentStateRoot, _ = f.currentState.BlockRoot()
 			currentStateSlot = f.currentState.Slot()
 		}
-		log.Debug("AddChainSegment: missing segment",
+		log.Debug(
+			"AddChainSegment: missing segment",
 			"slot", block.Slot,
 			"blockRoot", common.Hash(blockRoot),
 			"parentRoot", block.ParentRoot,
@@ -297,6 +296,9 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		if err != nil {
 			log.Debug("Could not create light client update", "err", err)
 		} else {
+			// The caller emits the corresponding light client events: fork graph
+			// methods run under the fork choice store's lock, where event sends
+			// must not happen (a stalled subscriber would wedge the store).
 			f.newestLightClientUpdate.Store(lcUpdate)
 			period := f.beaconCfg.SyncCommitteePeriod(newState.Slot())
 			_, hasPeriod := f.lightClientUpdates.Load(period)
@@ -304,25 +306,6 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 				log.Info("Adding light client update", "period", period)
 				f.lightClientUpdates.Store(period, lcUpdate)
 			}
-			// light client events
-			f.emitter.State().SendLightClientFinalityUpdate(&beaconevents.LightClientFinalityUpdateData{
-				Version: block.Version().String(),
-				Data: cltypes.LightClientFinalityUpdate{
-					AttestedHeader:  lcUpdate.AttestedHeader,
-					FinalizedHeader: lcUpdate.FinalizedHeader,
-					FinalityBranch:  lcUpdate.FinalityBranch,
-					SyncAggregate:   lcUpdate.SyncAggregate,
-					SignatureSlot:   lcUpdate.SignatureSlot,
-				},
-			})
-			f.emitter.State().SendLightClientOptimisticUpdate(&beaconevents.LightClientOptimisticUpdateData{
-				Version: block.Version().String(),
-				Data: cltypes.LightClientOptimisticUpdate{
-					AttestedHeader: lcUpdate.AttestedHeader,
-					SyncAggregate:  lcUpdate.SyncAggregate,
-					SignatureSlot:  lcUpdate.SignatureSlot,
-				},
-			})
 		}
 	}
 
@@ -360,7 +343,8 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		// Detailed diagnostics: compare state header fields with block fields.
 		hdr := newState.LatestBlockHeader()
 		stateHashSSZ, _ := newState.HashSSZ()
-		log.Warn("AddChainSegment: BlockRoot MISMATCH after TransitionState",
+		log.Warn(
+			"AddChainSegment: BlockRoot MISMATCH after TransitionState",
 			"slot", block.Slot,
 			"expectedBlockRoot", common.Hash(blockRoot),
 			"computedBlockRoot", computedRoot,
@@ -436,6 +420,7 @@ func (f *forkGraphDisk) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBl
 
 	return obj.(*cltypes.SignedBeaconBlock), true
 }
+
 func (f *forkGraphDisk) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 	return f.getState(blockRoot, alwaysCopy, false)
 }
@@ -560,9 +545,12 @@ func (f *forkGraphDisk) getState(blockRoot common.Hash, alwaysCopy bool, addChai
 	}
 
 	// Traverse the blocks from top to bottom.
-	for i := len(blocksInTheWay) - 1; i >= 0; i-- {
+	for _, b := range slices.Backward(blocksInTheWay) {
+		// Replay through the chain's own consensus engine rather than the
+		// package-level transition, so an L2 rollup engine replays with its own
+		// rules instead of beacon-chain ones.
 		replayCvm := f.consensusEngine.Machine(false, nil)
-		if err := machine.TransitionState(replayCvm, copyReferencedState, blocksInTheWay[i]); err != nil {
+		if err := machine.TransitionState(replayCvm, copyReferencedState, b); err != nil {
 			if addChainSegment {
 				f.currentStateMu.Lock()
 				f.currentState = nil
@@ -624,7 +612,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 	f.currentIndicies.prune(pruneSlot / f.beaconCfg.SlotsPerEpoch)
 	f.previousIndicies.prune(pruneSlot / f.beaconCfg.SlotsPerEpoch)
 
-	f.lowestAvailableBlock.Store(pruneSlot + 1)
+	// Prune runs without the fork choice lock, so concurrent (or stale queued)
+	// calls may arrive out of order: only ever raise the marker.
+	for {
+		lowest := f.lowestAvailableBlock.Load()
+		if pruneSlot+1 <= lowest || f.lowestAvailableBlock.CompareAndSwap(lowest, pruneSlot+1) {
+			break
+		}
+	}
 	for _, root := range oldRoots {
 		f.badBlocks.Delete(root)
 		f.blocks.Delete(root)
@@ -723,7 +718,8 @@ func (f *forkGraphDisk) GetPreviousParticipationIndicies(epoch uint64) (*solid.P
 		return nil, nil
 	}
 	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
-	return out, out.DecodeSSZ(b, 0)
+	err := out.DecodeSSZ(b, 0)
+	return out, err
 }
 
 func (f *forkGraphDisk) GetCurrentParticipationIndicies(epoch uint64) (*solid.ParticipationBitList, error) {
@@ -741,7 +737,8 @@ func (f *forkGraphDisk) GetCurrentParticipationIndicies(epoch uint64) (*solid.Pa
 		return nil, nil
 	}
 	out := solid.NewParticipationBitList(0, int(f.beaconCfg.ValidatorRegistryLimit))
-	return out, out.DecodeSSZ(b, 0)
+	err := out.DecodeSSZ(b, 0)
+	return out, err
 }
 
 func (f *forkGraphDisk) GetValidatorSet(blockRoot common.Hash) (*solid.ValidatorSet, error) {

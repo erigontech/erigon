@@ -1,0 +1,369 @@
+name: Release-branch security scan
+
+# Weekly vulnerability scan of the maintained release branches. For each
+# release/N.N branch that saw a commit inside the activity window it builds the
+# release docker image exactly as release.yml does (same BUILDER_IMAGE /
+# TARGET_BASE_IMAGE, same Dockerfile — only single-arch + --load instead of
+# multi-arch + push) and scans the image with Trivy. Idle branches (no commit
+# in the window, e.g. release/3.3) are skipped.
+#
+# Every run publishes a per-branch findings table to the run's job summary, so
+# any run (green or not) is openable to see the full picture. Fixable findings
+# additionally open/update a tracking issue (label `trivy-scan`) and, when
+# DISCORD_WEBHOOK is set, post a Discord alert. A build/scan failure also pings
+# Discord. This is how the team learns about actionable regressions (e.g. a
+# bumpable grpc) landing on a release branch.
+#
+# ignore-unfixed defaults to true: the goal is actionable findings, not the
+# un-fixable base-OS CVEs that Debian carries with no upstream fix.
+#
+# Suppressing a known, consciously-accepted finding: add its ID (CVE-… / GHSA-…)
+# to the repo variable RELEASE_SCAN_TRIVY_IGNORE (Settings > Secrets and
+# variables > Actions > Variables). Editable instantly, with no repo footprint —
+# so nothing propagates into newly-cut release branches. Each run lists the
+# active suppressions in its job summary as the audit trail.
+
+on:
+  schedule:
+    # Wednesday 04:00 UTC = 05:00 CET / 06:00 CEST — early morning, and mid-week
+    # so the team has 2-3 working days to triage findings before the weekend.
+    # (Bi-weekly alternative, date-based since cron can't do every-other-weekday: '0 4 1,15 * *')
+    - cron: '0 4 * * 3'
+  workflow_dispatch:
+    inputs:
+      since_days:
+        description: 'Only scan release/N.N branches with a commit in the last N days'
+        default: '7'
+        type: string
+      force_all:
+        description: 'Scan every release/N.N branch regardless of recent activity'
+        default: false
+        type: boolean
+      ignore_unfixed:
+        description: 'Report only vulnerabilities that have a fix available'
+        default: true
+        type: boolean
+
+defaults:
+  run:
+    shell: bash
+
+concurrency:
+  group: release-branch-sec-scan
+  cancel-in-progress: false
+
+permissions: {}
+
+env:
+  APP_REPO: "erigontech/erigon"
+  # Mirror release.yml: the glibc-portable bases that actually ship, so the scan
+  # sees the released image rather than the Dockerfile's newer trixie defaults.
+  BUILDER_IMAGE: "golang:1.26-bookworm"
+  TARGET_BASE_IMAGE: "debian:12-slim"
+  BINARIES: "erigon"
+  TRIVY_SEVERITY: "HIGH,CRITICAL"
+
+jobs:
+
+  discover:
+    name: Discover active release branches
+    # Don't run the scheduled scan on forks.
+    if: github.repository == 'erigontech/erigon' || github.event_name != 'schedule'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read   # gh api reads branch/commit metadata
+    timeout-minutes: 10
+    outputs:
+      branches: ${{ steps.pick.outputs.branches }}
+      any: ${{ steps.pick.outputs.any }}
+      ignore_unfixed: ${{ steps.pick.outputs.ignore_unfixed }}
+    steps:
+      - name: Select release/N.N branches with recent activity
+        id: pick
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          SINCE_DAYS: ${{ inputs.since_days }}
+          FORCE_ALL: ${{ inputs.force_all }}
+          IGNORE_UNFIXED: ${{ inputs.ignore_unfixed }}
+        run: |
+          # workflow_dispatch inputs are empty on the schedule trigger — coalesce.
+          [ -z "${SINCE_DAYS}" ] && SINCE_DAYS=7
+          [ -z "${FORCE_ALL}" ] && FORCE_ALL=false
+          [ -z "${IGNORE_UNFIXED}" ] && IGNORE_UNFIXED=true
+          echo "ignore_unfixed=${IGNORE_UNFIXED}" >> "$GITHUB_OUTPUT"
+
+          SINCE=$(date -u -d "${SINCE_DAYS} days ago" +%Y-%m-%dT%H:%M:%SZ)
+          echo "Activity window: commits since ${SINCE} (last ${SINCE_DAYS} days). force_all=${FORCE_ALL}"
+
+          mapfile -t all < <(gh api "repos/${APP_REPO}/branches?per_page=100" --paginate \
+            --jq '.[].name' | grep -E '^release/[0-9]+\.[0-9]+$' | sort -V || true)
+
+          active=()
+          for b in "${all[@]}"; do
+            if [ "${FORCE_ALL}" = "true" ]; then
+              active+=("$b"); echo "include (force_all): $b"; continue
+            fi
+            cnt=$(gh api "repos/${APP_REPO}/commits?sha=${b}&since=${SINCE}&per_page=1" \
+              --jq 'length' 2>/dev/null || echo 0)
+            if [ "${cnt:-0}" -gt 0 ]; then
+              active+=("$b"); echo "active:      $b"
+            else
+              echo "skip (idle): $b"
+            fi
+          done
+
+          if [ "${#active[@]}" -gt 0 ]; then
+            branches=$(printf '%s\n' "${active[@]}" | jq -R . | jq -cs .)
+            echo "any=true" >> "$GITHUB_OUTPUT"
+          else
+            branches='[]'
+            echo "any=false" >> "$GITHUB_OUTPUT"
+          fi
+          echo "branches=${branches}" >> "$GITHUB_OUTPUT"
+          echo "Selected: ${branches}"
+
+  scan:
+    name: Build & scan ${{ matrix.branch }}
+    needs: discover
+    if: needs.discover.outputs.any == 'true'
+    runs-on: ubuntu-latest
+    environment: dockerhub-publish   # authenticated base-image pulls avoid Docker Hub rate limits
+    timeout-minutes: 90
+    permissions:
+      contents: read
+    strategy:
+      fail-fast: false   # one branch's build/scan failure must not cancel the others
+      matrix:
+        branch: ${{ fromJSON(needs.discover.outputs.branches) }}
+    steps:
+      - name: Checkout ${{ matrix.branch }}
+        uses: actions/checkout@v7
+        with:
+          persist-credentials: false
+          repository: ${{ env.APP_REPO }}
+          ref: ${{ matrix.branch }}
+          fetch-depth: 1
+
+      - name: Materialize Trivy ignore list
+        env:
+          TRIVY_IGNORE: ${{ vars.RELEASE_SCAN_TRIVY_IGNORE }}
+        run: |
+          # Suppressions live in the repo variable RELEASE_SCAN_TRIVY_IGNORE, not
+          # in the tree — instantly editable and never propagated into release
+          # branches. Written outside the checkout so it stays out of the build
+          # context. Unset variable => empty file => nothing suppressed.
+          printf '%s\n' "${TRIVY_IGNORE}" > "${RUNNER_TEMP}/trivyignore"
+          echo "Active suppression IDs:"
+          grep -vE '^[[:space:]]*(#|$)' "${RUNNER_TEMP}/trivyignore" || echo "(none)"
+
+      - name: Login to Docker Hub
+        uses: docker/login-action@b45d80f862d83dbcd57f89517bcf500b2ab88fb2  ## v4.0.0
+        with:
+          username: ${{ secrets.DOCKERHUB_PUSH_USERNAME }}
+          password: ${{ secrets.DOCKERHUB_PUSH_TOKEN }}
+
+      - name: Set up Docker Buildx
+        uses: docker/setup-buildx-action@4d04d5d9486b7bd6fa91e7baf45bbb4f8b9deedd  ## v4.0.0
+
+      - name: Build release docker image (single-arch, load for scanning)
+        env:
+          BRANCH: ${{ matrix.branch }}
+        run: |
+          SAFE_BRANCH="${BRANCH//\//-}"   # artifact names and image tags can't contain '/'
+          IMAGE_TAG="erigon-scan:${SAFE_BRANCH}"
+          echo "SAFE_BRANCH=${SAFE_BRANCH}" >> "$GITHUB_ENV"
+          echo "IMAGE_TAG=${IMAGE_TAG}" >> "$GITHUB_ENV"
+          echo "COMMIT=$(git rev-parse --short=7 HEAD)" >> "$GITHUB_ENV"
+          # Same build as release.yml (same Dockerfile + bases), reduced to a
+          # single loadable arch — Trivy scans image contents, which are
+          # arch-independent for OS packages and Go module findings.
+          docker buildx build \
+            --no-cache \
+            --load \
+            --platform linux/amd64 \
+            --build-arg BINARIES="${BINARIES}" \
+            --build-arg BUILDER_IMAGE="${BUILDER_IMAGE}" \
+            --build-arg TARGET_BASE_IMAGE="${TARGET_BASE_IMAGE}" \
+            --tag "${IMAGE_TAG}" \
+            .
+
+      - name: Scan image with Trivy
+        uses: aquasecurity/trivy-action@ed142fd0673e97e23eac54620cfb913e5ce36c25  ## v0.36.0
+        with:
+          scan-type: image
+          image-ref: ${{ env.IMAGE_TAG }}
+          format: json
+          output: result.json
+          severity: ${{ env.TRIVY_SEVERITY }}
+          ignore-unfixed: ${{ needs.discover.outputs.ignore_unfixed }}
+          trivyignores: ${{ runner.temp }}/trivyignore
+          vuln-type: os,library
+          scanners: vuln
+          exit-code: '0'   # reporting job decides alerting; a finding must not fail the leg
+
+      - name: Summarize findings
+        env:
+          BRANCH: ${{ matrix.branch }}
+        run: |
+          mkdir -p out
+          cp result.json out/result.json
+          crit=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="CRITICAL")] | length' result.json)
+          high=$(jq '[.Results[]?.Vulnerabilities[]? | select(.Severity=="HIGH")]     | length' result.json)
+          total=$((crit + high))
+          jq -n --arg branch "$BRANCH" --arg commit "$COMMIT" \
+                --argjson crit "$crit" --argjson high "$high" --argjson total "$total" \
+                '{branch:$branch, commit:$commit, critical:$crit, high:$high, total:$total}' \
+                > out/meta.json
+          {
+            echo "### \`${BRANCH}\` @ ${COMMIT} — ${total} HIGH/CRITICAL (CRITICAL: ${crit}, HIGH: ${high})"
+            if [ "$total" -gt 0 ]; then
+              echo
+              echo "| Severity | Package | Installed | Fixed | ID |"
+              echo "|---|---|---|---|---|"
+              jq -r '[.Results[]?.Vulnerabilities[]?]
+                       | sort_by(.Severity, .PkgName)
+                       | .[]
+                       | "| \(.Severity) | \(.PkgName) | \(.InstalledVersion) | \(.FixedVersion // "-") | \(.VulnerabilityID) |"' \
+                result.json
+            fi
+            echo
+          } > out/summary.md
+          cat out/summary.md
+
+      - name: Upload branch report
+        uses: actions/upload-artifact@043fb46d1a93c77aae656e7c1c64a875d1fc6a0a  ## v7.0.1
+        with:
+          name: trivy-${{ env.SAFE_BRANCH }}
+          path: out/
+          retention-days: 30
+          if-no-files-found: error
+
+  report:
+    name: Aggregate & notify
+    needs: [discover, scan]
+    # Runs whenever discover ran — so every run publishes a summary (green,
+    # idle, or failed), matching the "every run is openable" promise above.
+    if: >-
+      always() &&
+      ( needs.discover.result == 'success' || needs.discover.result == 'failure' )
+    runs-on: ubuntu-latest
+    permissions:
+      contents: read
+      issues: write   # open/update the trivy-scan tracking issue
+    timeout-minutes: 15
+    steps:
+      - name: Download branch reports
+        uses: actions/download-artifact@v8
+        continue-on-error: true   # a fully-failed scan produces no artifacts
+        with:
+          pattern: trivy-*
+          path: reports
+
+      - name: Aggregate & write run summary
+        id: agg
+        env:
+          SCAN_RESULT: ${{ needs.scan.result }}
+          ANY: ${{ needs.discover.outputs.any }}
+          IGNORE_UNFIXED: ${{ needs.discover.outputs.ignore_unfixed }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          TRIVY_IGNORE: ${{ vars.RELEASE_SCAN_TRIVY_IGNORE }}
+        run: |
+          grand=0
+          count=0
+          overview=overview.md
+          : > body.md
+          {
+            echo "| Branch | Commit | CRITICAL | HIGH | Total |"
+            echo "|---|---|---|---|---|"
+          } > "$overview"
+          shopt -s nullglob
+          for meta in reports/*/meta.json; do
+            count=$((count + 1))
+            b=$(jq -r .branch "$meta");  c=$(jq -r .commit "$meta")
+            cr=$(jq -r .critical "$meta"); hi=$(jq -r .high "$meta"); t=$(jq -r .total "$meta")
+            grand=$((grand + t))
+            echo "| \`$b\` | $c | $cr | $hi | $t |" >> "$overview"
+            cat "$(dirname "$meta")/summary.md" >> body.md
+          done
+          echo "grand_total=${grand}" >> "$GITHUB_OUTPUT"
+
+          {
+            echo "## Release-branch security scan"
+            echo
+            echo "Severity: \`${TRIVY_SEVERITY}\` · fixable-only: \`${IGNORE_UNFIXED}\` · scan result: \`${SCAN_RESULT}\`"
+            echo "Run: ${RUN_URL}"
+            echo
+            if printf '%s\n' "${TRIVY_IGNORE}" | grep -qE '^[[:space:]]*[^#[:space:]]'; then
+              echo "<details><summary>Active suppressions — repo variable <code>RELEASE_SCAN_TRIVY_IGNORE</code></summary>"
+              echo
+              echo '```'
+              printf '%s\n' "${TRIVY_IGNORE}"
+              echo '```'
+              echo "</details>"
+              echo
+            fi
+            if [ "$count" -gt 0 ]; then
+              cat "$overview"
+            elif [ "${ANY}" = "true" ]; then
+              echo "_No branch reports produced — build/scan failed for all selected branches._"
+            else
+              echo "_No release branches had activity in the window — nothing to scan this run._"
+            fi
+            echo
+            if [ "$grand" -gt 0 ]; then
+              echo "### Findings"
+              echo
+              cat body.md
+            fi
+          } > report.md
+
+          cat report.md >> "$GITHUB_STEP_SUMMARY"
+
+      - name: Open or update tracking issue
+        if: ${{ steps.agg.outputs.grand_total != '0' }}
+        env:
+          GH_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          REPO: ${{ github.repository }}
+        run: |
+          gh label create trivy-scan --color B60205 \
+            --description "HIGH/CRITICAL vulnerabilities found by the weekly release-branch security scan" \
+            --force --repo "$REPO" || true
+
+          title="Trivy: HIGH/CRITICAL vulnerabilities in maintained release branches"
+          num=$(gh issue list --repo "$REPO" --label trivy-scan --state open \
+            --json number --jq '.[0].number // empty')
+          if [ -n "$num" ]; then
+            gh issue comment "$num" --repo "$REPO" --body-file report.md
+            echo "Updated tracking issue #${num}"
+          else
+            gh issue create --repo "$REPO" --label trivy-scan \
+              --title "$title" --body-file report.md
+          fi
+
+      - name: Notify Discord
+        # Alert on fixable findings OR on a build/scan failure.
+        if: >-
+          ${{ always() &&
+              ( steps.agg.outputs.grand_total != '0' ||
+                needs.scan.result == 'failure' ||
+                needs.discover.result == 'failure' ) }}
+        env:
+          DISCORD_WEBHOOK: ${{ secrets.DISCORD_WEBHOOK }}
+          RUN_URL: ${{ github.server_url }}/${{ github.repository }}/actions/runs/${{ github.run_id }}
+          GRAND: ${{ steps.agg.outputs.grand_total }}
+          SCAN_RESULT: ${{ needs.scan.result }}
+          DISCOVER_RESULT: ${{ needs.discover.result }}
+        run: |
+          if [ -z "${DISCORD_WEBHOOK:-}" ]; then
+            echo "DISCORD_WEBHOOK not set — skipping Discord notification."
+            exit 0
+          fi
+          if [ "${SCAN_RESULT}" = "failure" ] || [ "${DISCOVER_RESULT}" = "failure" ]; then
+            msg=":x: **Release-branch security scan failed** (build/scan error). Some branches may be unscanned.\nRun: ${RUN_URL}"
+          else
+            msg=":warning: **Release-branch security scan** — ${GRAND} HIGH/CRITICAL finding(s) across maintained release branches.\nRun: ${RUN_URL}\nDetails in the \`trivy-scan\` tracking issue."
+          fi
+          payload=$(jq -n --arg c "$msg" '{content:$c}')
+          curl -sS -f -H "Content-Type: application/json" -d "$payload" "$DISCORD_WEBHOOK" \
+            && echo "Discord notified." \
+            || echo "::warning::Discord notification failed (webhook unreachable or invalid)."

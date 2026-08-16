@@ -51,7 +51,7 @@ func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Acc
 		return nil, nil
 	}
 	a := accounts.Account{}
-	if err = accounts.DeserialiseV3(&a, enc); err != nil {
+	if err := accounts.DeserialiseV3(&a, enc); err != nil {
 		return nil, err
 	}
 	return &a, nil
@@ -66,7 +66,9 @@ func (r *CachedReader3) ReadAccountDataForDebug(address accounts.Address) (*acco
 func (r *CachedReader3) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	addressValue := address.Value()
 	keyValue := key.Value()
-	compositeKey := append(addressValue[:], keyValue[:]...)
+	compositeKey := make([]byte, 0, len(addressValue)+len(keyValue))
+	compositeKey = append(compositeKey, addressValue[:]...)
+	compositeKey = append(compositeKey, keyValue[:]...)
 	enc, err := r.cache.Get(compositeKey)
 	if err != nil {
 		return uint256.Int{}, false, err

@@ -1,8 +1,9 @@
 package commitment
 
 import (
+	"bytes"
 	"context"
-	"sort"
+	"slices"
 	"testing"
 	"time"
 
@@ -11,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// preparedSplits holds one mounted HexPatriciaHashed per top-nibble split point.
 type preparedSplits struct {
 	base     *HexPatriciaHashed
 	splits   [16]*HexPatriciaHashed
@@ -22,7 +22,7 @@ type preparedSplits struct {
 func newPreparedSplits(t testing.TB, factory TrieContextFactory) *preparedSplits {
 	t.Helper()
 	base := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
-	bctx, bclean := factory()
+	bctx, bclean := factory(context.Background())
 	base.ResetContext(bctx)
 	base.branchEncoder.setDeferUpdates(true)
 	base.SetLeaveDeferredForCaller(true)
@@ -34,10 +34,10 @@ func newPreparedSplits(t testing.TB, factory TrieContextFactory) *preparedSplits
 	if bclean != nil {
 		ps.cleanups = append(ps.cleanups, bclean)
 	}
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		w := NewHexPatriciaHashed(length.Addr, nil, DefaultTrieConfig())
 		w.mountTo(base, i)
-		wctx, wclean := factory()
+		wctx, wclean := factory(context.Background())
 		w.ResetContext(wctx)
 		w.branchEncoder.setDeferUpdates(true)
 		w.SetLeaveDeferredForCaller(true)
@@ -58,7 +58,7 @@ func (ps *preparedSplits) touch(hk, pk []byte, upd *Update) error {
 func (ps *preparedSplits) process() ([]byte, error) {
 	ctx := context.Background()
 	var cells [16]cell
-	for i := 0; i < 16; i++ {
+	for i := range 16 {
 		if !ps.present[i] {
 			continue
 		}
@@ -69,7 +69,7 @@ func (ps *preparedSplits) process() ([]byte, error) {
 		cells[i] = c
 	}
 	base := ps.base
-	for nib := 0; nib < 16; nib++ {
+	for nib := range 16 {
 		if !ps.present[nib] {
 			continue
 		}
@@ -106,7 +106,6 @@ func (ps *preparedSplits) release() {
 	}
 }
 
-// sortedTriples returns triples sorted by hashed key, the order followAndUpdate requires.
 type triple struct {
 	hk, pk []byte
 	upd    *Update
@@ -117,14 +116,8 @@ func sortedTriples(pk [][]byte, upds []Update) []triple {
 	for i := range pk {
 		ts[i] = triple{hk: KeyToHexNibbleHash(pk[i]), pk: pk[i], upd: &upds[i]}
 	}
-	sort.Slice(ts, func(i, j int) bool {
-		a, b := ts[i].hk, ts[j].hk
-		for k := 0; k < len(a) && k < len(b); k++ {
-			if a[k] != b[k] {
-				return a[k] < b[k]
-			}
-		}
-		return len(a) < len(b)
+	slices.SortFunc(ts, func(a, b triple) int {
+		return bytes.Compare(a.hk, b.hk)
 	})
 	return ts
 }

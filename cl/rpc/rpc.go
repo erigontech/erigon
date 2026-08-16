@@ -46,6 +46,8 @@ import (
 
 const maxMessageLength = 18 * datasize.MB
 
+var errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
+
 // blobSidecarRawBytes is the fixed SSZ size of a BlobSidecar (the blob dominates; fork-independent).
 func blobSidecarRawBytes() int { return (&cltypes.BlobSidecar{}).EncodingSizeSSZ() }
 
@@ -88,6 +90,10 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 	return rpc
 }
 
+func (b *BeaconRpcP2P) MaxRequestPayloads() uint64 {
+	return b.beaconConfig.MaxRequestPayloadsLimit()
+}
+
 func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 	responses, pid, err := b.sendRequest(ctx, topic, reqData, maxResponseBytes)
 	if err != nil {
@@ -99,6 +105,10 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig, data.version)
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
+		}
+		if !b.beaconConfig.ForkSchemaMatchesSlot(responseChunk.Block.Slot, responseChunk.Version()) {
+			b.BanPeer(pid)
+			return nil, pid, fmt.Errorf("%w: slot %d, decoded version %s", errBlockForkSchemaSlotMismatch, responseChunk.Block.Slot, responseChunk.Version())
 		}
 		responsePacket = append(responsePacket, responseChunk)
 	}
@@ -157,41 +167,16 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	return ColumnSidecars, pid, nil
 }
 
-func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
-	ctx context.Context,
-	start, count uint64,
-	columns []uint64,
-) ([]*cltypes.DataColumnSidecar, string, error) {
-	req := cltypes.NewColumnSidecarsByRangeRequest(b.beaconConfig)
-	req.StartSlot = start
-	req.Count = count
-	for _, column := range columns {
-		req.Columns.Append(column)
-	}
-	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
-		return nil, "", err
-	}
-
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes(), communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), count*uint64(len(columns))))
-	if err != nil {
-		return nil, pid, err
-	}
-
-	ColumnSidecars := []*cltypes.DataColumnSidecar{}
-	for _, data := range responsePacket {
-		columnSidecar := cltypes.NewDataColumnSidecarWithVersion(data.version, b.beaconConfig)
-		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
-		}
-		ColumnSidecars = append(ColumnSidecars, columnSidecar)
-	}
-	return ColumnSidecars, pid, nil
-}
-
 // SendExecutionPayloadEnvelopesByRangeReq retrieves execution payload envelopes by slot range.
 // [New in Gloas:EIP7732]
 func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Context, start, count uint64) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+	maxRequestPayloads := b.MaxRequestPayloads()
+	if maxRequestPayloads == 0 {
+		return nil, "", errors.New("MAX_REQUEST_PAYLOADS is zero")
+	}
+	if count > maxRequestPayloads {
+		return nil, "", fmt.Errorf("execution payload envelopes by range count %d exceeds MAX_REQUEST_PAYLOADS %d", count, maxRequestPayloads)
+	}
 	var buf buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buf, &cltypes.ExecutionPayloadEnvelopesByRangeRequest{
 		StartSlot: start,
@@ -221,7 +206,14 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 // SendExecutionPayloadEnvelopesByRootReq retrieves execution payload envelopes by block root.
 // [New in Gloas:EIP7732]
 func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Context, roots [][32]byte) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
-	var req solid.HashListSSZ = solid.NewHashList(int(b.beaconConfig.MaxRequestBlocksDeneb))
+	maxRequestPayloads := b.MaxRequestPayloads()
+	if maxRequestPayloads == 0 {
+		return nil, "", errors.New("MAX_REQUEST_PAYLOADS is zero")
+	}
+	if len(roots) > int(maxRequestPayloads) {
+		return nil, "", fmt.Errorf("execution payload envelopes by root count %d exceeds MAX_REQUEST_PAYLOADS %d", len(roots), maxRequestPayloads)
+	}
+	var req solid.HashListSSZ = solid.NewHashList(int(maxRequestPayloads))
 	for _, root := range roots {
 		req.Append(root)
 	}

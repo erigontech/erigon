@@ -98,7 +98,7 @@ func (t *TransactionsSSZ) DecodeSSZ(buf []byte, _ int) error {
 	}
 	maxBytesPerTransaction := t.maxBytes()
 	t.underlying = make([][]byte, length)
-	for i := uint32(0); i < length; i++ {
+	for i := range length {
 		offsetPosition := i * 4
 		startTx := ssz.DecodeOffset(buf[offsetPosition:])
 		if startTx < firstOffset {
@@ -145,6 +145,18 @@ func (t *TransactionsSSZ) HashSSZ() ([32]byte, error) {
 	}
 	t.root, err = merkle_tree.TransactionsListRoot(t.underlying)
 	return t.root, err
+}
+
+func (t *TransactionsSSZ) HashSSZProgressive() ([32]byte, error) {
+	roots := make([][32]byte, len(t.underlying))
+	for i, transaction := range t.underlying {
+		root, err := merkle_tree.ProgressiveBasicListRoot(transaction, uint64(len(transaction)))
+		if err != nil {
+			return [32]byte{}, err
+		}
+		roots[i] = root
+	}
+	return merkle_tree.ProgressiveListRoot(roots, uint64(len(roots)))
 }
 
 func (t *TransactionsSSZ) EncodingSizeSSZ() (size int) {

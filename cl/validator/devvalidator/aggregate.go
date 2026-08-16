@@ -55,6 +55,8 @@ func (s *Service) submitAggregateAndProof(
 		Aggregate:       aggregate,
 		SelectionProof:  selectionProof,
 	}
+	version := s.cfg.GetCurrentStateVersion(slot / s.cfg.SlotsPerEpoch)
+	msg.SetVersion(version)
 	aggregatorSig, err := signAggregateAndProof(key, msg, slot, s.cfg, s.genesisValidatorsRoot)
 	if err != nil {
 		s.logger.Warn("[dev-validator] aggregate sign failed", "err", err)
@@ -64,7 +66,8 @@ func (s *Service) submitAggregateAndProof(
 		Message:   msg,
 		Signature: aggregatorSig,
 	}
-	if err := s.client.post(ctx, "/eth/v1/validator/aggregate_and_proofs", []interface{}{signed}); err != nil {
+	signed.SetVersion(version)
+	if err := s.client.post(ctx, "/eth/v1/validator/aggregate_and_proofs", []any{signed}); err != nil {
 		s.logger.Debug("[dev-validator] aggregate submit failed", "slot", slot, "err", err)
 	}
 }

@@ -18,10 +18,11 @@ package main
 
 import (
 	"cmp"
+	"context"
 	"fmt"
 	"os"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 
@@ -40,7 +41,7 @@ func main() {
 	var err error
 	common.WithProfilersMain(func() {
 		app := erigonapp.MakeApp("erigon", runErigon, erigoncli.DefaultFlags)
-		err = app.Run(os.Args)
+		err = app.Run(context.Background(), os.Args)
 		if err != nil {
 			_, printErr := fmt.Fprintln(os.Stderr, err)
 			if printErr != nil {
@@ -53,13 +54,13 @@ func main() {
 	}
 }
 
-func runErigon(cliCtx *cli.Context) (err error) {
-	logger, tracer, metricsMux, pprofMux, err := debug.Setup(cliCtx, true /* rootLogger */)
+func runErigon(ctx context.Context, cliCtx *cli.Command) (err error) {
+	logger, tracer, metricsMux, pprofMux, err := debug.Setup(ctx, cliCtx, true /* rootLogger */)
 	if err != nil {
 		return
 	}
 
-	syscheck.CheckKernelAllocationHints(cliCtx.Context, logger)
+	syscheck.CheckKernelAllocationHints(ctx, logger)
 
 	debugMux := cmp.Or(metricsMux, pprofMux)
 
@@ -69,7 +70,7 @@ func runErigon(cliCtx *cli.Context) (err error) {
 	// initializing the node and providing the current git commit there
 
 	logger.Info("Build info", "git_branch", version.GitBranch, "git_tag", version.GitTag, "git_commit", version.GitCommit)
-	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version="%s",commit="%s"}`, version.VersionNoMeta, version.GitCommit))
+	erigonInfoGauge := metrics.GetOrCreateGauge(fmt.Sprintf(`erigon_info{version=%q,commit=%q}`, version.VersionNoMeta, version.GitCommit))
 	erigonInfoGauge.Set(1)
 
 	nodeCfg, err := node.NewNodConfigUrfave(cliCtx, debugMux, logger)
@@ -80,9 +81,9 @@ func runErigon(cliCtx *cli.Context) (err error) {
 		return err
 	}
 
-	ethCfg := node.NewEthConfigUrfave(cliCtx, nodeCfg, logger)
+	ethCfg := node.NewEthConfigUrfave(ctx, cliCtx, nodeCfg, logger)
 
-	ethNode, err := node.New(cliCtx.Context, nodeCfg, ethCfg, logger, tracer)
+	ethNode, err := node.New(ctx, nodeCfg, ethCfg, logger, tracer)
 	if err != nil {
 		log.Error("Erigon startup", "err", err)
 		return err
