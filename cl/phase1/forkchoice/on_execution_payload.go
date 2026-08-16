@@ -369,13 +369,20 @@ func (f *ForkChoiceStore) refreshEnvelopeBlockLocked(beaconBlockRoot common.Hash
 	return blockState, block, nil
 }
 
+type missingEnvelopeMode bool
+
+const (
+	retryQueuedEnvelope  missingEnvelopeMode = false
+	queueMissingEnvelope missingEnvelopeMode = true
+)
+
 // applyEnvelope processes the envelope under f.mu: validates, verifies with CL and EL,
 // and persists the envelope to disk. No CL state transition is performed — the
 // execution effects are deferred to the next block's ProcessParentExecutionPayload.
 // Returns (true, nil) if the envelope was applied,
 // (false, nil) if it was skipped (already processed or block not yet known),
 // or (false, err) on failure.
-func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) (bool, error) {
+func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool, missingMode missingEnvelopeMode) (bool, error) {
 	if signedEnvelope.Message == nil {
 		log.Warn("[applyEnvelope] received signed envelope with nil message")
 		return false, fmt.Errorf("%w: signed envelope has nil message", errInvalidExecutionPayloadEnvelope)
@@ -384,14 +391,14 @@ func (f *ForkChoiceStore) applyEnvelope(ctx context.Context, signedEnvelope *clt
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	return f.applyEnvelopeCoordinated(ctx, signedEnvelope, checkBlobData, validatePayload)
+	return f.applyEnvelopeCoordinated(ctx, signedEnvelope, checkBlobData, validatePayload, missingMode)
 }
 
 // applyEnvelopeCoordinated temporarily yields the caller-held fork-choice lock during EL validation.
 // Returns (true, nil) if the envelope was applied,
 // (false, nil) if it was skipped (already processed or block not yet known),
 // or (false, err) on failure.
-func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) (bool, error) {
+func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool, missingMode missingEnvelopeMode) (bool, error) {
 	if signedEnvelope.Message == nil {
 		log.Warn("[applyEnvelopeCoordinated] received signed envelope with nil message")
 		return false, fmt.Errorf("%w: signed envelope has nil message", errInvalidExecutionPayloadEnvelope)
@@ -412,19 +419,20 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 		return false, fmt.Errorf("OnExecutionPayload: failed to get block state: %w", err)
 	}
 	if blockState == nil {
-		// Block hasn't arrived yet, queue envelope for later processing.
-		// Per spec: assert envelope.beacon_block_root in store.block_states
-		// Return an error so callers can distinguish "queued" from "applied".
-		f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
-		log.Trace("OnExecutionPayload: block not found, queuing envelope for later", "beaconBlockRoot", common.Hash(beaconBlockRoot))
+		if missingMode == queueMissingEnvelope {
+			f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+		}
+		log.Trace("OnExecutionPayload: block state not found", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block state not found for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
 
 	// Get the block to verify it exists
 	block, ok := f.forkGraph.GetBlock(beaconBlockRoot)
 	if !ok || block == nil {
-		f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
-		log.Trace("OnExecutionPayload: block not found in fork graph, queuing envelope", "beaconBlockRoot", common.Hash(beaconBlockRoot))
+		if missingMode == queueMissingEnvelope {
+			f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+		}
+		log.Trace("OnExecutionPayload: block not found in fork graph", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block not found in fork graph for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
 
@@ -550,7 +558,7 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 
 	// Process envelope under f.mu; DB index write happens after unlock to avoid
 	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
-	applied, err := f.applyEnvelope(ctx, signedEnvelope, checkBlobData, validatePayload)
+	applied, err := f.applyEnvelope(ctx, signedEnvelope, checkBlobData, validatePayload, queueMissingEnvelope)
 	if err != nil {
 		return err
 	}
@@ -584,7 +592,7 @@ func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signe
 	envelope := signedEnvelope.Message
 	beaconBlockRoot := envelope.BeaconBlockRoot
 
-	applied, err := f.applyLocalSelfBuildEnvelope(ctx, signedEnvelope)
+	applied, err := f.applyLocalSelfBuildEnvelope(ctx, signedEnvelope, queueMissingEnvelope)
 	if err != nil {
 		return err
 	}
@@ -674,7 +682,7 @@ func (f *ForkChoiceStore) writeExecutionPayloadEnvelopeIndices(ctx context.Conte
 }
 
 // applyLocalSelfBuildEnvelope coordinates fork-choice ownership around local envelope processing.
-func (f *ForkChoiceStore) applyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+func (f *ForkChoiceStore) applyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, missingMode missingEnvelopeMode) (bool, error) {
 	if signedEnvelope.Message == nil {
 		return false, fmt.Errorf("%w: signed envelope has nil message", errInvalidExecutionPayloadEnvelope)
 	}
@@ -682,11 +690,11 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelope(ctx context.Context, signe
 	f.mu.Lock()
 	defer f.mu.Unlock()
 
-	return f.applyLocalSelfBuildEnvelopeCoordinated(ctx, signedEnvelope)
+	return f.applyLocalSelfBuildEnvelopeCoordinated(ctx, signedEnvelope, missingMode)
 }
 
 // applyLocalSelfBuildEnvelopeCoordinated skips only BLS verification for locally produced envelopes.
-func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, missingMode missingEnvelopeMode) (bool, error) {
 	if signedEnvelope.Message == nil {
 		return false, errors.New("signed envelope has nil message")
 	}
@@ -703,15 +711,19 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to get block state: %w", err)
 	}
 	if blockState == nil {
-		f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
-		log.Trace("applyLocalSelfBuildEnvelopeCoordinated: block not found, queuing envelope for later", "beaconBlockRoot", common.Hash(beaconBlockRoot))
+		if missingMode == queueMissingEnvelope {
+			f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+		}
+		log.Trace("applyLocalSelfBuildEnvelopeCoordinated: block state not found", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block state not found for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
 
 	block, ok := f.forkGraph.GetBlock(beaconBlockRoot)
 	if !ok || block == nil {
-		f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
-		log.Trace("applyLocalSelfBuildEnvelopeCoordinated: block not found in fork graph, queuing envelope", "beaconBlockRoot", common.Hash(beaconBlockRoot))
+		if missingMode == queueMissingEnvelope {
+			f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+		}
+		log.Trace("applyLocalSelfBuildEnvelopeCoordinated: block not found in fork graph", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block not found in fork graph for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
 

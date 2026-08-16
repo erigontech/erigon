@@ -36,6 +36,7 @@ import (
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
@@ -114,6 +115,31 @@ type transientEnvelopeReadForkGraph struct {
 	fail atomic.Bool
 }
 
+type replacingPendingForkGraph struct {
+	fork_graph.ForkGraph
+	replace func()
+}
+
+type missingBlockForkGraph struct {
+	pendingRetryForkGraph
+	state *state2.CachingBeaconState
+}
+
+func (g replacingPendingForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+	g.replace()
+	return nil, nil
+}
+
+func (g replacingPendingForkGraph) HasEnvelope(common.Hash) bool { return false }
+
+func (g missingBlockForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+	return g.state, nil
+}
+
+func (g missingBlockForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	return nil, false
+}
+
 func (g *transientEnvelopeReadForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if g.fail.Load() {
 		return nil, errors.New("injected envelope read failure")
@@ -173,9 +199,11 @@ func TestApplyPendingEnvelopeDropsHardFailure(t *testing.T) {
 	require.False(t, pending.Contains(blockRoot))
 }
 
-func TestPendingEnvelopeRetriesTransientStorageFailure(t *testing.T) {
-	require.True(t, retryPendingEnvelopeError(errors.New("temporary disk failure")))
-	require.False(t, retryPendingEnvelopeError(fmt.Errorf("%w: bad signature", errInvalidExecutionPayloadEnvelope)))
+func TestPendingEnvelopeErrorClassification(t *testing.T) {
+	f := &ForkChoiceStore{}
+	require.True(t, f.retryPendingEnvelopeError(errors.New("temporary disk failure"), nil))
+	require.True(t, f.retryPendingEnvelopeError(ErrEIP7594ColumnDataNotAvailable, nil))
+	require.False(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: bad signature", errInvalidExecutionPayloadEnvelope), nil))
 }
 
 func TestRetryPendingExecutionPayloadEnvelopesCleansCompletedWork(t *testing.T) {
@@ -240,6 +268,218 @@ func TestRetryPendingExecutionPayloadEnvelopesRotatesFailures(t *testing.T) {
 	require.True(t, pending.Contains(roots[2]))
 	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 2)
 	require.False(t, pending.Contains(roots[2]))
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesDropsMissingBlockOlderThanFinality(t *testing.T) {
+	for _, localOrigin := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local=%t", localOrigin), func(t *testing.T) {
+			pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](3)
+			require.NoError(t, err)
+			local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](3)
+			require.NoError(t, err)
+			staleRoot := common.HexToHash("0x1234")
+			boundaryRoot := common.HexToHash("0x3456")
+			recentRoot := common.HexToHash("0x5678")
+			stale := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+			stale.Message.BeaconBlockRoot = staleRoot
+			stale.Message.Payload.SlotNumber = 63
+			boundary := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+			boundary.Message.BeaconBlockRoot = boundaryRoot
+			boundary.Message.Payload.SlotNumber = 64
+			recent := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+			recent.Message.BeaconBlockRoot = recentRoot
+			recent.Message.Payload.SlotNumber = 94
+			origin := pending
+			if localOrigin {
+				origin = local
+			}
+			origin.Add(staleRoot, stale)
+			origin.Add(boundaryRoot, boundary)
+			origin.Add(recentRoot, recent)
+			f := &ForkChoiceStore{
+				beaconCfg:                      &clparams.MainnetBeaconConfig,
+				forkGraph:                      pendingRetryForkGraph{},
+				pendingEnvelopes:               pending,
+				pendingLocalSelfBuildEnvelopes: local,
+			}
+			f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 2})
+
+			f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+			require.False(t, origin.Contains(staleRoot))
+			require.True(t, origin.Contains(boundaryRoot))
+			require.True(t, origin.Contains(recentRoot))
+			f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 2)
+			require.True(t, origin.Contains(boundaryRoot))
+			require.True(t, origin.Contains(recentRoot))
+
+			f.forkGraph = pendingRetryForkGraph{completed: recentRoot, completedEnvelope: recent}
+			f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 2)
+			require.True(t, origin.Contains(boundaryRoot))
+			require.False(t, origin.Contains(recentRoot))
+		})
+	}
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesDropsFarFutureSlot(t *testing.T) {
+	for _, localOrigin := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local=%t", localOrigin), func(t *testing.T) {
+			pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+			require.NoError(t, err)
+			local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+			require.NoError(t, err)
+			blockRoot := common.HexToHash("0x1234")
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+			envelope.Message.BeaconBlockRoot = blockRoot
+			clock := eth_clock.NewEthereumClock(0, common.Hash{}, &clparams.MainnetBeaconConfig)
+			envelope.Message.Payload.SlotNumber = clock.GetCurrentSlot() + (uint64(1) << 62)
+			origin := pending
+			if localOrigin {
+				origin = local
+			}
+			origin.Add(blockRoot, envelope)
+			f := &ForkChoiceStore{
+				beaconCfg:                      &clparams.MainnetBeaconConfig,
+				ethClock:                       clock,
+				forkGraph:                      pendingRetryForkGraph{},
+				pendingEnvelopes:               pending,
+				pendingLocalSelfBuildEnvelopes: local,
+			}
+			f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 2})
+
+			f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+			require.False(t, origin.Contains(blockRoot))
+		})
+	}
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesKeepsNextSlotWithinClockDisparity(t *testing.T) {
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+	require.NoError(t, err)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = blockRoot
+	envelope.Message.Payload.SlotNumber = 101
+	pending.Add(blockRoot, envelope)
+	clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+	clock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	clock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(101)).Return(true)
+	f := &ForkChoiceStore{
+		beaconCfg:                      &clparams.MainnetBeaconConfig,
+		ethClock:                       clock,
+		forkGraph:                      pendingRetryForkGraph{},
+		pendingEnvelopes:               pending,
+		pendingLocalSelfBuildEnvelopes: local,
+	}
+	f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 2})
+
+	f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+	require.True(t, pending.Contains(blockRoot))
+}
+
+func TestMissingBlockExecutionPayloadEnvelopeQueuesAtIngress(t *testing.T) {
+	for _, missingState := range []bool{false, true} {
+		for _, localOrigin := range []bool{false, true} {
+			t.Run(fmt.Sprintf("missing-state=%t/local=%t", missingState, localOrigin), func(t *testing.T) {
+				pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+				require.NoError(t, err)
+				local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+				require.NoError(t, err)
+				blockRoot := common.HexToHash("0x1234")
+				envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+				envelope.Message.BeaconBlockRoot = blockRoot
+				var graph fork_graph.ForkGraph = missingBlockForkGraph{state: state2.New(&clparams.MainnetBeaconConfig)}
+				if missingState {
+					graph = pendingRetryForkGraph{}
+				}
+				f := &ForkChoiceStore{
+					forkGraph:                      graph,
+					pendingEnvelopes:               pending,
+					pendingLocalSelfBuildEnvelopes: local,
+				}
+
+				if localOrigin {
+					require.ErrorIs(t, f.ApplyLocalSelfBuildEnvelope(context.Background(), envelope), ErrIgnore)
+					require.True(t, local.Contains(blockRoot))
+				} else {
+					require.ErrorIs(t, f.OnExecutionPayload(context.Background(), envelope, false, true), ErrIgnore)
+					require.True(t, pending.Contains(blockRoot))
+				}
+
+				f.forkGraph = pendingRetryForkGraph{completed: blockRoot, completedEnvelope: envelope}
+				f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+				require.False(t, local.Contains(blockRoot))
+				require.False(t, pending.Contains(blockRoot))
+			})
+		}
+	}
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesKeepsConcurrentReplacement(t *testing.T) {
+	for _, localOrigin := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local=%t", localOrigin), func(t *testing.T) {
+			pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+			require.NoError(t, err)
+			local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+			require.NoError(t, err)
+			blockRoot := common.HexToHash("0x1234")
+			stale := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+			stale.Message.BeaconBlockRoot = blockRoot
+			stale.Message.Payload.SlotNumber = 63
+			replacement := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+			replacement.Message.BeaconBlockRoot = blockRoot
+			replacement.Message.Payload.SlotNumber = 64
+			origin := pending
+			if localOrigin {
+				origin = local
+			}
+			origin.Add(blockRoot, stale)
+			f := &ForkChoiceStore{
+				beaconCfg:                      &clparams.MainnetBeaconConfig,
+				pendingEnvelopes:               pending,
+				pendingLocalSelfBuildEnvelopes: local,
+			}
+			f.forkGraph = replacingPendingForkGraph{replace: func() { origin.Add(blockRoot, replacement) }}
+			f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 2})
+
+			f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+			queued, ok := origin.Peek(blockRoot)
+			require.True(t, ok)
+			require.Same(t, replacement, queued)
+		})
+	}
+}
+
+func TestRetryPendingExecutionPayloadEnvelopesHandlesMalformedEnvelope(t *testing.T) {
+	for name, envelope := range map[string]*cltypes.SignedExecutionPayloadEnvelope{
+		"nil message": {},
+		"nil payload": {Message: &cltypes.ExecutionPayloadEnvelope{}},
+	} {
+		t.Run(name, func(t *testing.T) {
+			pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+			require.NoError(t, err)
+			local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
+			require.NoError(t, err)
+			blockRoot := common.HexToHash("0x1234")
+			if envelope.Message != nil {
+				envelope.Message.BeaconBlockRoot = blockRoot
+			}
+			pending.Add(blockRoot, envelope)
+			f := &ForkChoiceStore{
+				beaconCfg:                      &clparams.MainnetBeaconConfig,
+				forkGraph:                      pendingRetryForkGraph{},
+				pendingEnvelopes:               pending,
+				pendingLocalSelfBuildEnvelopes: local,
+			}
+			f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 2})
+
+			require.NotPanics(t, func() {
+				f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+			})
+			require.False(t, pending.Contains(blockRoot))
+		})
+	}
 }
 
 func TestPendingEnvelopeIndexWriteRetriesThroughOriginQueue(t *testing.T) {

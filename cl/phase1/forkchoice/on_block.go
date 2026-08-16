@@ -565,13 +565,13 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 	var applied bool
 	var err error
 	if local {
-		applied, err = f.applyLocalSelfBuildEnvelope(ctx, pending)
+		applied, err = f.applyLocalSelfBuildEnvelope(ctx, pending, retryQueuedEnvelope)
 	} else {
-		applied, err = f.applyEnvelope(ctx, pending, checkDataAvailability, true)
+		applied, err = f.applyEnvelope(ctx, pending, checkDataAvailability, true, retryQueuedEnvelope)
 	}
 	if err != nil {
 		log.Warn("OnBlock: failed to process pending envelope", "blockRoot", blockRoot, "local", local, "err", err)
-		if !retryPendingEnvelopeError(err) {
+		if !f.retryPendingEnvelopeError(err, pending) {
 			if local {
 				if current, ok := f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot); ok && current == pending {
 					f.pendingLocalSelfBuildEnvelopes.Remove(blockRoot)
@@ -611,8 +611,31 @@ func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot co
 	return pending.Message
 }
 
-func retryPendingEnvelopeError(err error) bool {
-	return !errors.Is(err, errInvalidExecutionPayloadEnvelope)
+func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.SignedExecutionPayloadEnvelope) bool {
+	if errors.Is(err, errInvalidExecutionPayloadEnvelope) {
+		return false
+	}
+	if !errors.Is(err, ErrIgnore) {
+		return true
+	}
+	if pending == nil || pending.Message == nil || pending.Message.Payload == nil {
+		return false
+	}
+	checkpoint := f.finalizedCheckpoint.Load()
+	if checkpoint == nil || f.beaconCfg == nil {
+		return true
+	}
+	payloadSlot := pending.Message.Payload.SlotNumber
+	if f.ethClock != nil {
+		currentSlot := f.ethClock.GetCurrentSlot()
+		if payloadSlot > currentSlot {
+			if payloadSlot-currentSlot > 1 || !f.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(payloadSlot) {
+				return false
+			}
+		}
+	}
+	finalizedSlot := f.computeStartSlotAtEpoch(checkpoint.(solid.Checkpoint).Epoch)
+	return payloadSlot >= finalizedSlot
 }
 
 func (f *ForkChoiceStore) addChainSegmentAndQueueLightClientEvents(block *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
