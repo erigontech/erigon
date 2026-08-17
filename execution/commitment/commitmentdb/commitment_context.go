@@ -39,7 +39,7 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
-	GetMemBatch() kv.TemporalMemBatch
+	GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, step, maxStep kv.Step, ok bool)
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
 	// read), tagged with source.
@@ -408,22 +408,28 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	}
 }
 
-// BranchChildCount returns the child count from the post-compute commitment view.
-// Modified branches come from memory; an unchanged branch falls back to the
-// installed reader, or to transaction-latest state when no reader is installed.
-func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
+// BranchChildCount returns a branch's child count from a complete post-compute view.
+func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte) (int, error) {
+	if sdc.stateReader == nil {
+		return 0, errors.New("BranchChildCount requires an installed state reader")
+	}
+	if sdc.stateReader.WithHistory() {
+		return 0, errors.New("BranchChildCount requires a reader that permits branch writes")
+	}
+	if sdc.pendingUpdate != nil {
+		return 0, errors.New("BranchChildCount cannot read while deferred branch updates are pending")
+	}
+
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, _, ok := sdc.sharedDomains.GetMemBatch().GetLatest(kv.CommitmentDomain, key)
+	enc, _, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(kv.CommitmentDomain, key)
 	if ok {
 		return commitment.BranchData(enc).ChildCount(), nil
 	}
-
-	var err error
-	if sdc.stateReader != nil {
-		enc, _, err = sdc.stateReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
-	} else {
-		enc, _, err = sdc.sharedDomains.AsGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	if maxStep != kv.NoStepBound {
+		return 0, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
 	}
+
+	enc, _, err := sdc.stateReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
 	if err != nil {
 		return 0, err
 	}

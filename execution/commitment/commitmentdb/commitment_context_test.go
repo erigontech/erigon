@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/stretchr/testify/require"
 )
@@ -37,11 +38,12 @@ type testStateReader struct {
 	readDomain   kv.Domain
 	readKey      []byte
 	readStepSize uint64
+	withHistory  bool
 }
 
 var _ StateReader = (*testStateReader)(nil)
 
-func (r *testStateReader) WithHistory() bool { return false }
+func (r *testStateReader) WithHistory() bool { return r.withHistory }
 
 func (r *testStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
 
@@ -89,6 +91,8 @@ type branchMemBatch struct {
 	kv.TemporalMemBatch
 	value []byte
 	ok    bool
+	bound bool
+	step  kv.Step
 	calls int
 	key   []byte
 }
@@ -97,44 +101,28 @@ func (m *branchMemBatch) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.Ste
 	m.calls++
 	m.key = append(m.key[:0], key...)
 	if domain != kv.CommitmentDomain || !m.ok {
+		if m.bound {
+			return nil, m.step, false
+		}
 		return nil, kv.NoStepBound, false
 	}
-	return m.value, 0, true
+	return m.value, m.step, true
 }
-
-type branchGetter struct {
-	value []byte
-	calls int
-	key   []byte
-}
-
-func (g *branchGetter) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.Step, error) {
-	g.calls++
-	g.key = append(g.key[:0], key...)
-	if domain != kv.CommitmentDomain {
-		return nil, 0, nil
-	}
-	return g.value, 0, nil
-}
-
-func (g *branchGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
-	return nil, nil, false, nil
-}
-
-func (g *branchGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 
 type branchChildCountDomains struct {
 	sd
-	mem    *branchMemBatch
-	getter *branchGetter
+	mem *branchMemBatch
 }
 
-func (d *branchChildCountDomains) AsGetter(kv.TemporalTx) kv.TemporalGetter {
-	return d.getter
+func (d *branchChildCountDomains) GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, step, maxStep kv.Step, ok bool) {
+	v, step, ok = d.mem.GetLatest(domain, key)
+	if ok {
+		return v, step, kv.NoStepBound, true
+	}
+	return nil, 0, step, false
 }
 
-func (d *branchChildCountDomains) GetMemBatch() kv.TemporalMemBatch { return d.mem }
-func (d *branchChildCountDomains) StepSize() uint64                 { return 1 }
+func (d *branchChildCountDomains) StepSize() uint64 { return 1 }
 
 func TestBranchChildCountReadsPostComputeView(t *testing.T) {
 	t.Parallel()
@@ -144,39 +132,82 @@ func TestBranchChildCountReadsPostComputeView(t *testing.T) {
 
 	t.Run("changed branch comes from memory", func(t *testing.T) {
 		mem := &branchMemBatch{value: []byte{0, 0, 0, 0b0000_0111}, ok: true}
-		getter := &branchGetter{value: mem.value}
 		reader := &testStateReader{branchData: []byte{0, 0, 0, 0b0000_0011}}
 		sdc := &SharedDomainsCommitmentContext{
-			sharedDomains: &branchChildCountDomains{mem: mem, getter: getter},
+			sharedDomains: &branchChildCountDomains{mem: mem},
 			stateReader:   reader,
 		}
 
-		count, err := sdc.BranchChildCount(nil, prefix)
+		count, err := sdc.BranchChildCount(prefix)
 		require.NoError(t, err)
 		require.Equal(t, 3, count)
 		require.Equal(t, 1, mem.calls)
 		require.Equal(t, compactKey, mem.key)
-		require.Zero(t, getter.calls)
 		require.Zero(t, reader.readStepSize)
 	})
 
 	t.Run("unchanged branch comes from installed reader", func(t *testing.T) {
 		mem := &branchMemBatch{}
-		getter := &branchGetter{value: []byte{0, 0, 0, 0b0000_0001}}
 		reader := &testStateReader{branchData: []byte{0, 0, 0, 0b0000_0011}}
 		sdc := &SharedDomainsCommitmentContext{
-			sharedDomains: &branchChildCountDomains{mem: mem, getter: getter},
+			sharedDomains: &branchChildCountDomains{mem: mem},
 			stateReader:   reader,
 		}
 
-		count, err := sdc.BranchChildCount(nil, prefix)
+		count, err := sdc.BranchChildCount(prefix)
 		require.NoError(t, err)
 		require.Equal(t, 2, count)
 		require.Equal(t, 1, mem.calls)
 		require.Equal(t, compactKey, mem.key)
-		require.Zero(t, getter.calls)
 		require.Equal(t, kv.CommitmentDomain, reader.readDomain)
 		require.Equal(t, compactKey, reader.readKey)
 		require.Equal(t, uint64(1), reader.readStepSize)
+	})
+}
+
+func TestBranchChildCountRejectsIncompleteComputedView(t *testing.T) {
+	t.Parallel()
+
+	prefix := []byte{0x0a}
+	branch := []byte{0, 0, 0, 0b0000_0011}
+
+	t.Run("missing state reader", func(t *testing.T) {
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{mem: &branchMemBatch{}},
+		}
+
+		_, err := sdc.BranchChildCount(prefix)
+		require.ErrorContains(t, err, "installed state reader")
+	})
+
+	t.Run("history reader suppresses branch writes", func(t *testing.T) {
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{mem: &branchMemBatch{}},
+			stateReader:   &testStateReader{branchData: branch, withHistory: true},
+		}
+
+		_, err := sdc.BranchChildCount(prefix)
+		require.ErrorContains(t, err, "reader that permits branch writes")
+	})
+
+	t.Run("deferred branch updates are pending", func(t *testing.T) {
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{mem: &branchMemBatch{}},
+			stateReader:   &testStateReader{branchData: branch},
+			pendingUpdate: &commitment.PendingCommitmentUpdate{},
+		}
+
+		_, err := sdc.BranchChildCount(prefix)
+		require.ErrorContains(t, err, "deferred branch updates are pending")
+	})
+
+	t.Run("staged unwind bounds the fallback", func(t *testing.T) {
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{mem: &branchMemBatch{bound: true, step: 1}},
+			stateReader:   &testStateReader{branchData: branch},
+		}
+
+		_, err := sdc.BranchChildCount(prefix)
+		require.ErrorContains(t, err, "staged unwind")
 	})
 }

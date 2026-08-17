@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/rpc"
@@ -116,7 +117,7 @@ func TestSimulateV1IgnoresSharedBranchCache(t *testing.T) {
 	assertPoisoned()
 }
 
-func TestExecutionWitnessDomainsIgnoreSharedBranchCache(t *testing.T) {
+func TestSnapshotCommitmentDomainsIgnoreSharedBranchCache(t *testing.T) {
 	enableStateCacheForTest(t)
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
@@ -140,7 +141,7 @@ func TestExecutionWitnessDomainsIgnoreSharedBranchCache(t *testing.T) {
 	}
 	require.NotEmpty(t, branchKey)
 
-	domains, err := newExecutionWitnessDomains(t.Context(), tx)
+	domains, err := newSnapshotCommitmentDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)
 	defer domains.Close()
 	got, _, err := domains.GetLatest(kv.CommitmentDomain, tx, branchKey)
