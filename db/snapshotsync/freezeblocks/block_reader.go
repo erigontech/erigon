@@ -1456,9 +1456,15 @@ func (r *BlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash common.Has
 }
 func (r *BlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) {
 	headHash := rawdb.ReadHeadBlockHash(db)
+	if headHash == (common.Hash{}) {
+		return nil, nil
+	}
 	headNumber, err := r.HeaderNumber(context.Background(), db, headHash)
 	if err != nil {
 		return nil, fmt.Errorf("failed HeaderNumber: %w", err)
+	}
+	if headNumber == nil {
+		return nil, nil
 	}
 	block, _, err := r.blockWithSenders(context.Background(), db, headHash, *headNumber, true)
 	return block, err

@@ -555,6 +555,20 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		currentBlockNumber *uint64
 		err                error
 	)
+	// readCurrentBlockNumber is the storage-aware form of
+	// rawdb.ReadCurrentBlockNumber: HeadHeaderHash is a small MDBX
+	// marker (never retired) but its hash→number lookup can miss in
+	// MDBX when the head briefly points at a retired block (setHead
+	// unwind, deep FCU). blockReader.HeaderNumber falls through to
+	// files. Returns nil when no head is set yet.
+	readCurrentBlockNumber := func(tx kv.Getter) (*uint64, error) {
+		headHash := rawdb.ReadHeadHeaderHash(tx)
+		if headHash == (common.Hash{}) {
+			return nil, nil
+		}
+		return e.blockReader.HeaderNumber(ctx, tx, headHash)
+	}
+
 	// Read header/body from the block overlay on currentContext if available
 	// (block data written by InsertBlocks hasn't been flushed to DB yet),
 	// falling back to a plain DB read otherwise.
@@ -575,7 +589,10 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 			return ValidationResult{}, err
 		}
 		e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
-		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
+		currentBlockNumber, err = readCurrentBlockNumber(overlay)
+		if err != nil {
+			return ValidationResult{}, err
+		}
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
 			header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
@@ -588,8 +605,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 				return err
 			}
 			e.readAheader.AddHeaderAndBody(ctx, e.db, header, body)
-			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
-			return nil
+			currentBlockNumber, err = readCurrentBlockNumber(tx)
+			return err
 		}); err != nil {
 			return ValidationResult{}, err
 		}
