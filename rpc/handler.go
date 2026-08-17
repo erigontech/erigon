@@ -95,8 +95,8 @@ func HandleError(err error, stream jsonstream.Stream) {
 		stream.WriteObjectField("error")
 		stream.WriteObjectStart()
 		stream.WriteObjectField("code")
-		ec, ok := err.(Error)
-		if ok {
+		var ec Error
+		if errors.As(err, &ec) {
 			stream.WriteInt(ec.ErrorCode())
 		} else {
 			stream.WriteInt(ErrCodeDefault)
@@ -104,8 +104,8 @@ func HandleError(err error, stream jsonstream.Stream) {
 		stream.WriteMore()
 		stream.WriteObjectField("message")
 		stream.WriteString(err.Error())
-		de, ok := err.(DataError)
-		if ok {
+		var de DataError
+		if errors.As(err, &de) {
 			stream.WriteMore()
 			stream.WriteObjectField("data")
 			data, derr := json.Marshal(de.ErrorData())

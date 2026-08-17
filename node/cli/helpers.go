@@ -21,6 +21,7 @@ package cli
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -57,7 +58,8 @@ func NewApp(desc string) *cli.Command {
 			return
 		}
 		// For cli.Exit errors, just exit with the code
-		if exitErr, ok := err.(cli.ExitCoder); ok {
+		var exitErr cli.ExitCoder
+		if errors.As(err, &exitErr) {
 			cli.OsExiter(exitErr.ExitCode())
 		} else {
 			// For other errors, print them and exit

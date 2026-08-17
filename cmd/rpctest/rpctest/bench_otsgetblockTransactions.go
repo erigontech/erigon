@@ -66,7 +66,7 @@ func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitA
 			}
 
 			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve transactions of block (Erigon) %d: %v\n", bn, res.Err)
+				return fmt.Errorf("Could not retrieve transactions of block (Erigon) %d: %w\n", bn, res.Err)
 			}
 
 			if b.Error != nil {
@@ -77,7 +77,7 @@ func BenchOtsGetBlockTransactions(erigonURL, gethURL string, needCompare, visitA
 				var bg OtsBlockTransactions
 				res = reqGen.Geth("ots_getBlockTransactions", reqGen.otsGetBlockTransactions(bn, pageCount, 10), &bg)
 				if res.Err != nil {
-					return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
+					return fmt.Errorf("Could not retrieve block (geth) %d: %w\n", bn, res.Err)
 				}
 				if bg.Error != nil {
 					return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
