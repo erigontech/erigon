@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -683,6 +684,28 @@ func TestLastMoreStage_LatestWinsWhenMultipleExhaust(t *testing.T) {
 	_, err := state.Run(nil, tx, true, false)
 	require.NoError(t, err)
 	assert.Equal(t, stages.Senders, state.LastMoreStage(), "later stage should win when multiple return ErrLoopExhausted")
+}
+
+// When exec3_parallel emits errors.Join(ErrLoopExhausted, ErrInvalidBlock)
+// on a mid-batch abort, runStage must propagate the invalid-block instead
+// of returning hasMore=true. Otherwise the chain-tip RunLoop retries on the
+// same SharedDomains and a fresh tx reads stale sd.mem writes.
+func TestRunStage_InvalidBlockUnmasksExhausted(t *testing.T) {
+	joined := errors.Join(&ErrLoopExhausted{From: 0, To: 10, Reason: "test"}, rules.ErrInvalidBlock)
+	s := []*Stage{
+		{
+			ID: stages.Headers,
+			Forward: func(badBlockUnwind bool, s *StageState, u Unwinder, sd *execctx.SharedDomains, tx kv.TemporalRwTx, logger log.Logger) error {
+				return joined
+			},
+		},
+	}
+	state := New(ethconfig.Defaults.Sync, s, nil, nil, log.New(), stages.ModeApplyingBlocks)
+	_, tx := temporaltest.NewTestTx(t)
+	more, err := state.Run(nil, tx, true, false)
+	assert.False(t, more, "hasMore must be false when invalid-block is present, even if exhausted is also present")
+	require.Error(t, err)
+	assert.True(t, errors.Is(err, rules.ErrInvalidBlock), "invalid-block must propagate: %v", err)
 }
 
 func TestLastMoreStage_ResetsAcrossRuns(t *testing.T) {

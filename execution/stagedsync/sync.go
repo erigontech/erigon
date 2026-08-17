@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -508,6 +509,14 @@ func (s *Sync) runStage(stage *Stage, doms *execctx.SharedDomains, rwTx kv.Tempo
 	}
 
 	if err = stage.Forward(badBlockUnwind, stageState, s, doms, rwTx, s.logger); err != nil {
+		// Invalid-block is a hard fail; never mask as "more work". The chain-tip
+		// !initialCycle path reuses SharedDomains across RunLoop iterations, so
+		// a retry reads sd.mem entries the aborted batch wrote and misreports a
+		// fresh tx as "nonce too low".
+		if errors.Is(err, rules.ErrInvalidBlock) {
+			s.logger.Debug(fmt.Sprintf("[%s] error while executing stage", s.LogPrefix()), "err", err)
+			return false, fmt.Errorf("[%s] %w", s.LogPrefix(), err)
+		}
 		var errExhausted *ErrLoopExhausted
 		if errors.As(err, &errExhausted) {
 			s.logger.Debug(fmt.Sprintf("[%s] loop exhausted", s.LogPrefix()), "msg", err.Error())
