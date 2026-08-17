@@ -5,10 +5,11 @@ import "testing"
 func TestPushSnapshotHotPathNoAllocs(t *testing.T) {
 	construct := testing.AllocsPerRun(200, func() {
 		ibs := New(nil)
-		_ = ibs
+		defer ibs.Close()
 	})
 	constructAndPush := testing.AllocsPerRun(200, func() {
 		ibs := New(nil)
+		defer ibs.Close()
 		var ids [16]int
 		for i := range ids {
 			ids[i] = ibs.PushSnapshot()
