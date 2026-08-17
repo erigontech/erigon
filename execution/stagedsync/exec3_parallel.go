@@ -755,7 +755,12 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					}
 					// This block's writes are now in the shared domain: drop it from
 					// the tail of the prev-block list so later blocks read it from the
-					// domain (fire-and-forget — readers never block on this).
+					// domain (fire-and-forget — readers never block on this). The tail
+					// must be exactly the block just committed; a mismatch means a
+					// push/remove desync that would drop the wrong overlay.
+					if tb, ok := pe.prevBlocks.TailBlockNum(); ok && tb != applyResult.BlockNum {
+						panic(fmt.Sprintf("prevBlocks tail block %d != committed block %d", tb, applyResult.BlockNum))
+					}
 					pe.prevBlocks.RemoveTail()
 					// StartChange + NotifyAccumulator must both run in the apply
 					// goroutine — keeps all accumulator access single-threaded
@@ -775,8 +780,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						pendingAccumulatorWrites = pendingAccumulatorWrites[:0]
 					}
 
-					// Cache flush happens in the execLoop (before blockResult is sent).
-					// sd.mem already has all TX writes when we reach here.
+					// The apply loop folded this block's TX writes into sd.mem just
+					// above (the sole sd.mem writer), so sd.mem holds the full block
+					// state here.
 
 					var blockValidatorWaiter *blockValidator
 					if applyResult.BlockNum > 0 && !applyResult.isPartial { //Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
@@ -1092,6 +1098,14 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop panic", "rec", rec, "stack", dbg.Stack())
+			// Propagate the panic as the loop's error; otherwise execLoopGroup.Wait
+			// returns nil and the apply-loop heuristics can mistake a hard panic on a
+			// block boundary for a resumable partial batch and spin. A loop panic is an
+			// internal invariant failure, not a consensus-invalid block, so surface it
+			// as a plain error rather than ErrInvalidBlock.
+			if err == nil {
+				err = fmt.Errorf("exec loop panic: %v", rec)
+			}
 		} else if err != nil && !errors.Is(err, context.Canceled) {
 			pe.logger.Warn("["+pe.logPrefix+"] exec loop error", "err", err)
 		} else {
@@ -1325,9 +1339,9 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				pe.scheduleNextPending(ctx)
 			}
 
-			// State writes and Flush happen in the execLoop (before the
-			// blockResult is sent). sd.mem is already up to date.
-			// No need to wait for the apply loop — it only does indexes.
+			// No need to wait for the apply loop before scheduling the next block:
+			// the next block's reads layer over the prev-block versionMap overlay
+			// until the apply loop (the sole sd.mem writer) folds this block's state.
 			pe.RLock()
 			blockExecutor, ok = pe.blockExecutors[blockResult.BlockNum+1]
 			pe.RUnlock()
@@ -2324,7 +2338,7 @@ func (result *execResult) finalizeSystemTx(
 	// may be stale if the system TX ran speculatively before all regular
 	// TXs completed — cached reads would return pre-block values instead
 	// of the post-block state needed by syscalls (withdrawal/consolidation).
-	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader))
+	ibs := state.New(state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader, txTask.Rules().IsAmsterdam))
 	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	ibs.SetVersion(txIncarnation)
@@ -2354,7 +2368,7 @@ func (result *execResult) calcFees(
 	// Read at txIndex (floor txIndex-1) — strictly prior tx, excluding this tx's
 	// own prior incarnations that would double-apply the tip on re-execution.
 	// WorkerContext writes for the current tx are picked up below via TxOut.
-	vsReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
+	vsReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader, chainRules.IsAmsterdam)
 
 	coinbaseAcc, err := vsReader.ReadAccountData(result.Coinbase)
 	if err != nil {
@@ -2569,7 +2583,7 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	txIndex := task.Version().TxIndex
 	chainRules := txTask.EvmBlockContext.Rules(txTask.Config)
 	execResult := result.ExecutionResult
-	cbReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader)
+	cbReader := state.NewVersionedStateReader(txIndex, state.ReadSet{}, vm, stateReader, chainRules.IsAmsterdam)
 	coinbase, err := cbReader.ReadAccountData(result.Coinbase)
 	if err != nil {
 		return err
@@ -2581,7 +2595,7 @@ func (result *execResult) runPostApplyMessageOnMinIBS(
 	if err != nil {
 		return err
 	}
-	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader))
+	ibs := state.New(state.NewVersionedStateReader(txIndex, result.TxIn, vm, stateReader, chainRules.IsAmsterdam))
 	defer ibs.Close()
 	ibs.SetTxContext(blockNum, txIndex)
 	postApplyMessageFunc(ibs, message.From(), result.Coinbase, &execResult, chainRules)
@@ -3724,8 +3738,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
-		// Send finalize txResult through the channel for index writes.
-		// State writes are already in the BlockStateCache.
+		// Send the finalize txResult through the channel; the apply loop folds its
+		// state writes (and writes its indexes) at block end.
 		if finalizeWrites != nil && !finalizeWrites.IsEmpty() {
 			lastResult := be.results[len(be.results)-1]
 			if err := be.sendResult(ctx, &txResult{

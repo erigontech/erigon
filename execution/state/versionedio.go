@@ -1637,10 +1637,15 @@ type versionedStateReader struct {
 	reads       ReadSet
 	versionMap  *VersionMap
 	stateReader StateReader
+	// eip8246 makes this whole-account reader honor an EIP-8246 balance-preserve:
+	// a self-destruct that keeps a non-zero balance/nonce reads as present (its
+	// preserved value), not absent. Set from the block's rules; the fork-agnostic
+	// IsNetAbsent verdict alone would drop the preserved balance.
+	eip8246 bool
 }
 
-func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader) *versionedStateReader {
-	return &versionedStateReader{txIndex, reads, versionMap, stateReader}
+func NewVersionedStateReader(txIndex int, reads ReadSet, versionMap *VersionMap, stateReader StateReader, eip8246 bool) *versionedStateReader {
+	return &versionedStateReader{txIndex, reads, versionMap, stateReader, eip8246}
 }
 
 func (vr *versionedStateReader) SetTrace(trace bool, tracePrefix string) {
@@ -1673,6 +1678,23 @@ func (vr *versionedStateReader) ReadAccountData(address accounts.Address) (*acco
 		// coinbase re-creates it, and we must surface the re-created
 		// account so finalize accumulates the prior cumulative value.
 		if vr.versionMap.IsNetAbsent(address, vr.txIndex) {
+			// EIP-8246: a self-destruct may preserve a non-zero balance/nonce, which
+			// the fork-agnostic IsNetAbsent reports as absent. On an Amsterdam+ block
+			// a fork-aware reader must reconstruct the preserved value from the
+			// versionMap cells; dropping it burns the balance on the state-root
+			// composition path (calcFees crediting the coinbase/burnt fee recipient).
+			// The base stateReader is stale here (it predates the in-block destruct),
+			// so reconstruct from the versionMap only.
+			if vr.eip8246 {
+				// Mirror IBS.eip8246PreservedAccount: an EIP-8246 preserve only survives
+				// with a non-zero balance (an empty account is EIP-161-removed), so
+				// reconstruct only then — keeping this reader's verdict identical to the
+				// IBS reference.
+				var synth accounts.Account
+				if updated := vr.applyVersionedUpdates(address, synth); !updated.Balance.IsZero() {
+					return &updated, nil
+				}
+			}
 			return nil, nil
 		}
 		if acc, ok := versionedUpdateAddress(vr.versionMap, address, vr.txIndex); ok && acc != nil {

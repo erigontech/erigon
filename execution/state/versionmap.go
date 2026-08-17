@@ -587,39 +587,6 @@ const (
 	LifecycleRevived
 )
 
-// latestDoneSelfDestruct returns the version of the highest Done SelfDestruct
-// write at TxIdx ≤ txIdx whose value == target, if any. Unlike latest-only
-// ReadSelfDestruct it finds a wiping SelfDestruct=true even when a later revival
-// (SelfDestruct=false) sits above it.
-func (vm *VersionMap) latestDoneSelfDestruct(addr accounts.Address, txIdx int, target bool) (Version, bool) {
-	if vm == nil {
-		return Version{}, false
-	}
-	e := vm.load(addr)
-	if e == nil {
-		return Version{}, false
-	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.SelfDestruct == nil {
-		return Version{}, false
-	}
-	var ver Version
-	found := false
-	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
-		if v.flag != FlagDone {
-			return true
-		}
-		if v.Value == target {
-			ver = Version{TxIndex: k, Incarnation: v.incarnation}
-			found = true
-			return false
-		}
-		return true
-	})
-	return ver, found
-}
-
 // AccountLifecycleAt resolves an account's lifecycle in one pass: the state, the
 // canonical version dependent reads must anchor on, and the destruct (wipe) TxIndex.
 //
@@ -632,27 +599,82 @@ func (vm *VersionMap) latestDoneSelfDestruct(addr accounts.Address, txIdx int, t
 // destroyedAt is the wiping SelfDestruct's TxIndex (found even when hidden under a
 // revival), for readers deciding whether a slot's last write predates the wipe.
 func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
-	wipe, wiped := vm.latestDoneSelfDestruct(addr, txIdx, true)
+	if vm == nil {
+		return LifecycleLive, Version{}, 0
+	}
+	e := vm.load(addr)
+	if e == nil {
+		return LifecycleLive, Version{}, 0
+	}
+	// The whole verdict must be resolved under a single RLock: a concurrent flush to
+	// this address is atomic under e.mu, so composing it from several separate reads
+	// could observe the account at different points in time and return an internally
+	// inconsistent lifecycle — the exact reader/validator divergence this resolver
+	// exists to prevent.
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.SelfDestruct == nil {
+		return LifecycleLive, Version{}, 0
+	}
+
+	// One descend of the SelfDestruct cells yields both the latest cell — which fixes
+	// canonicalVer, mirroring what the validator resolves via ReadSelfDestruct — and
+	// the highest Done wipe (destroyedAt), even when a later SelfDestruct=false revival
+	// hides the wipe.
+	var latest *WriteCell[bool]
+	var latestIdx, wipeInc int
+	haveLatest := false
+	wiped := false
+	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
+		if !haveLatest {
+			latest, latestIdx, haveLatest = v, k, true
+		}
+		if v.flag == FlagDone && v.Value {
+			destroyedAt, wipeInc, wiped = k, v.incarnation, true
+			return false
+		}
+		return true
+	})
 	if !wiped {
 		return LifecycleLive, Version{}, 0
 	}
-	destroyedAt = wipe.TxIndex
-	// canonicalVer = latest SD cell (what the validator resolves). Defaults to the
-	// wipe; a later revival (SelfDestruct=false) supersedes it.
-	canonicalVer = wipe
-	if _, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.Status() == MVReadResultDone {
-		canonicalVer = Version{TxIndex: sdRR.DepIdx(), Incarnation: sdRR.Incarnation()}
+	// canonicalVer = the latest SD cell when it is Done (a SelfDestruct=false revival
+	// above the wipe supersedes it); an in-flight estimate on top is not authoritative,
+	// so fall back to the wipe — exactly ReadSelfDestruct's Done/Dependency semantics.
+	if latest.flag == FlagDone {
+		canonicalVer = Version{TxIndex: latestIdx, Incarnation: latest.incarnation}
+	} else {
+		canonicalVer = Version{TxIndex: destroyedAt, Incarnation: wipeInc}
 	}
+
 	revivalLimit := txIdx - 1
-	if hi, ok := vm.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destroyedAt {
+	if hi, ok := highestBelow(e.Address, revivalLimit); ok && hi >= destroyedAt {
 		return LifecycleRevived, canonicalVer, destroyedAt
 	}
-	for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
-		if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destroyedAt {
-			return LifecycleRevived, canonicalVer, destroyedAt
-		}
+	if hi, ok := highestBelow(e.Balance, revivalLimit); ok && hi > destroyedAt {
+		return LifecycleRevived, canonicalVer, destroyedAt
+	}
+	if hi, ok := highestBelow(e.Nonce, revivalLimit); ok && hi > destroyedAt {
+		return LifecycleRevived, canonicalVer, destroyedAt
+	}
+	if hi, ok := highestBelow(e.CodeHash, revivalLimit); ok && hi > destroyedAt {
+		return LifecycleRevived, canonicalVer, destroyedAt
 	}
 	return LifecycleAbsent, canonicalVer, destroyedAt
+}
+
+// highestBelow returns the largest TxIndex ≤ limit present in cells, if any. The
+// caller must hold the owning AddressEntry's lock.
+func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int) (int, bool) {
+	if cells == nil {
+		return 0, false
+	}
+	hi, ok := 0, false
+	cells.Descend(limit, func(k int, _ *WriteCell[T]) bool {
+		hi, ok = k, true
+		return false
+	})
+	return hi, ok
 }
 
 // IsNetAbsent reports whether the account reads as gone at txIdx — LifecycleAbsent:

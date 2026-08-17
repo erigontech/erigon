@@ -31,6 +31,19 @@ type prevBlockNode struct {
 
 func NewPrevBlockList() *PrevBlockList { return &PrevBlockList{} }
 
+// TailBlockNum returns the oldest not-yet-committed block's number, or ok=false
+// when the list is empty. Lets the commit path assert it is dropping the block
+// it just committed (see RemoveTail) rather than silently dropping the wrong
+// overlay on any future push/remove desync.
+func (l *PrevBlockList) TailBlockNum() (uint64, bool) {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	if l.tail == nil {
+		return 0, false
+	}
+	return l.tail.blockNum, true
+}
+
 // PushHead adds a newly finished block at the head (newest). endTxNum is the
 // block's last txNum, so a reader can select the window by txNum (matching the
 // per-tx apply) rather than blockNum.

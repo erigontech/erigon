@@ -25,7 +25,11 @@ func layerVersionMaps(base StateReader, prevBlocks []*VersionMap) StateReader {
 		if vm == nil {
 			continue
 		}
-		r = NewVersionedStateReader(finalTxIdx, ReadSet{}, vm, r)
+		// eip8246=false: this is the exec base-read layer beneath the fork-aware IBS
+		// field path, which reconstructs an EIP-8246 balance-preserve itself. Only a
+		// direct whole-account reader with no IBS above it (e.g. calcFees) needs the
+		// fork-aware reconstruction.
+		r = NewVersionedStateReader(finalTxIdx, ReadSet{}, vm, r, false)
 	}
 	return r
 }
