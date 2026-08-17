@@ -714,6 +714,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
 		select {
 		case <-ctx.Done():
+			// Leaving with the lock held would stop every later pool operation, not just this one.
+			p.lock.Unlock()
 			return false, 0, ctx.Err()
 		default:
 			// continue
