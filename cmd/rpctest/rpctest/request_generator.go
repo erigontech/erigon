@@ -381,7 +381,7 @@ func (g *RequestGenerator) Erigon2(method, body string) CallResult {
 func (g *RequestGenerator) latestBlockNumber() (uint64, error) {
 	var blockNumber EthBlockNumber
 	if res := g.Erigon("eth_blockNumber", g.blockNumber(), &blockNumber); res.Err != nil {
-		return 0, fmt.Errorf("could not get block number: %v", res.Err)
+		return 0, fmt.Errorf("could not get block number: %w", res.Err)
 	}
 	if blockNumber.Error != nil {
 		return 0, fmt.Errorf("error getting block number: %d %s", blockNumber.Error.Code, blockNumber.Error.Message)
