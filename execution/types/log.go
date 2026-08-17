@@ -112,7 +112,7 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 	return nil
 }
 
-// UnmarshalJSON validates required fields and parses the Timestamp field.
+// UnmarshalJSON validates required fields and parses the BlockTimestamp field.
 func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	type flat struct {
 		Address        *common.Address `json:"address"`
