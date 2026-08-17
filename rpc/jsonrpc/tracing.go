@@ -391,20 +391,20 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	dbtx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
-		return fmt.Errorf("create ro transaction: %v", err)
+		return fmt.Errorf("create ro transaction: %w", err)
 	}
 	defer dbtx.Rollback()
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
-		return fmt.Errorf("read chain config: %v", err)
+		return fmt.Errorf("read chain config: %w", err)
 	}
 	engine := api.engine()
 
 	// nil filters: committed view — the replay below reads temporal data through this tx.
 	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, nil)
 	if err != nil {
-		return fmt.Errorf("get block number: %v", err)
+		return fmt.Errorf("get block number: %w", err)
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNumber)
@@ -424,11 +424,11 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, int(*config.TxIndex), api._txNumReader)
 	}
 	if err != nil {
-		return fmt.Errorf("create state reader: %v", err)
+		return fmt.Errorf("create state reader: %w", err)
 	}
 	header, err := api._blockReader.Header(ctx, dbtx, hash, blockNumber)
 	if err != nil {
-		return fmt.Errorf("could not fetch header %d(%x): %v", blockNumber, hash, err)
+		return fmt.Errorf("could not fetch header %d(%x): %w", blockNumber, hash, err)
 	}
 	if header == nil {
 		return fmt.Errorf("block %d(%x) not found", blockNumber, hash)
@@ -446,11 +446,11 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 
 	msg, err := args.ToMessage(api.GasCap, baseFee)
 	if err != nil {
-		return fmt.Errorf("convert args to msg: %v", err)
+		return fmt.Errorf("convert args to msg: %w", err)
 	}
 	transaction, err := args.ToTransaction(api.GasCap, baseFee)
 	if err != nil {
-		return fmt.Errorf("convert args to msg: %v", err)
+		return fmt.Errorf("convert args to msg: %w", err)
 	}
 
 	var precompiles vm.PrecompiledContracts

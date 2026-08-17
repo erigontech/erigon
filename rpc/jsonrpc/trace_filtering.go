@@ -364,6 +364,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
+	// The txnum index silently clamps a missing block to the last available
+	// txnum, so a not-yet-executed toBlock would be omitted without a trace.
+	if req.ToBlock != nil {
+		if err := rpchelper.CheckBlockExecuted(dbtx, toBlock); err != nil {
+			return err
+		}
+	}
+
 	// if we've pruned this history away for this block then just return early
 	// to save any red herring errors
 
