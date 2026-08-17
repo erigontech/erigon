@@ -14,13 +14,40 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package rawtemporaldb
+//go:build linux
 
-import "encoding/binary"
+package seg
 
-// ReceiptValueForTest is the value encoding, for assertions in tests.
-func ReceiptValueForTest(v uint64) []byte {
-	var buf [binary.MaxVarintLen64]byte
-	i := binary.PutUvarint(buf[:], v)
-	return buf[:i]
+import (
+	"math"
+
+	"github.com/erigontech/erigon/common/iouring"
+)
+
+func (g *Getter) EnableAsyncLiteralWarm() {
+	g.literalWarmer = (*Getter).warmLiteral
+}
+
+func shouldWarmLiteral(offset, length uint64) bool {
+	if length == 0 {
+		return false
+	}
+	end := offset + length
+	if end < offset {
+		return false
+	}
+	page := uint64(pageSize)
+	return offset/page != (end-1)/page
+}
+
+func (g *Getter) warmLiteral(offset, length uint64) {
+	if !shouldWarmLiteral(offset, length) || offset+length > math.MaxInt64 {
+		return
+	}
+	for length > 0 {
+		chunk := min(length, uint64(iouring.WarmBufSize))
+		iouring.WarmOne(int(g.d.f.Fd()), int64(offset), int(chunk))
+		offset += chunk
+		length -= chunk
+	}
 }

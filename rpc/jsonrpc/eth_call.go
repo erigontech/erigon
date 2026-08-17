@@ -728,7 +728,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
-		return nil, fmt.Errorf("error loading chain config: %v", err)
+		return nil, fmt.Errorf("error loading chain config: %w", err)
 	}
 	engine := api.engine()
 	fullEngine, ok := engine.(rules.Engine)

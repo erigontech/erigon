@@ -121,8 +121,8 @@ github.com/anacrolix/envpprof v1.5.0/go.mod h1:OQPV3SNK6uVAlXL4slcZVXv+xLcE0ybWg
 github.com/anacrolix/generics v0.0.0-20230113004304-d6428d516633/go.mod h1:ff2rHB/joTV03aMSSn/AZNnaIpUw0h3njetGsaXcMy8=
 github.com/anacrolix/generics v0.2.0 h1:gPwGOs14irokFN9kUP1i1A0Bn0FPT7/hWWD3hHKSKNw=
 github.com/anacrolix/generics v0.2.0/go.mod h1:NGehhfeXJPBujPx0s6cstSj8B+TERsTY32Xckfx5ftc=
-github.com/anacrolix/go-libutp v1.5.0 h1:s/aqt/KEg6jjfYspDP2YEbqLCIfSTXjMxRhGigcRAFM=
-github.com/anacrolix/go-libutp v1.5.0/go.mod h1:2XL3ViU/7+l/kB6poGICETXdEVRdTALyqQrKFBCkBc4=
+github.com/anacrolix/go-libutp v1.5.1-0.20260817025621-104d95cd4dc1 h1:HiTucG6jjmEZ7I6GYdaEGRcptHBYI5e+3Qlw/geg/HE=
+github.com/anacrolix/go-libutp v1.5.1-0.20260817025621-104d95cd4dc1/go.mod h1:2XL3ViU/7+l/kB6poGICETXdEVRdTALyqQrKFBCkBc4=
 github.com/anacrolix/log v0.3.0/go.mod h1:lWvLTqzAnCWPJA08T2HCstZi0L1y2Wyvm3FJgwU9jwU=
 github.com/anacrolix/log v0.6.0/go.mod h1:lWvLTqzAnCWPJA08T2HCstZi0L1y2Wyvm3FJgwU9jwU=
 github.com/anacrolix/log v0.14.2/go.mod h1:1OmJESOtxQGNMlUO5rcv96Vpp9mfMqXXbe2RdinFLdY=
@@ -330,8 +330,8 @@ github.com/erigontech/evmone_precompiles v0.0.0-20260414072133-b8b2bdc99de2 h1:B
 github.com/erigontech/evmone_precompiles v0.0.0-20260414072133-b8b2bdc99de2/go.mod h1:WQvAqmoairhdM5RFNFDKK9oT6dzuZEbWMJH+ZdRTjP0=
 github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268 h1:NHl4+DjblLuHBJradIg9KriKmtByjRvLqLhkVODibac=
 github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268/go.mod h1:CwJFJVKFVWpQyKSfRrQyY56IqV16sR5xnQoFThGHiZA=
-github.com/erigontech/mdbx-go v0.42.0 h1:ZXQ0UqtxZLC/wDZJL4ACBLuNznD1vJQKhayp2HD1JH4=
-github.com/erigontech/mdbx-go v0.42.0/go.mod h1:Ps2n0MMTlU+BgecMWznc/Z7oGJWDJX/EQk+gUCTSaRo=
+github.com/erigontech/mdbx-go v0.43.0 h1:km4NnoGZ3zieFGWE9K1btMhRMnduZNybW7oebFg0ZWQ=
+github.com/erigontech/mdbx-go v0.43.0/go.mod h1:Ps2n0MMTlU+BgecMWznc/Z7oGJWDJX/EQk+gUCTSaRo=
 github.com/erigontech/secp256k1 v1.4.0 h1:kQLdnJ5jLqkDTBup9PpWirUZw1u2F/nHskQSKbKA4f0=
 github.com/erigontech/secp256k1 v1.4.0/go.mod h1:CnigLRUsfobnTYoUzwdT/De67fw9OhTA0KTkxa+svik=
 github.com/ettle/strcase v0.2.0 h1:fGNiVF21fHXpX1niBgk0aROov1LagYsOwV/xqKDKR/Q=

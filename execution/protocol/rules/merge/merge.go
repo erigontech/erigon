@@ -229,7 +229,7 @@ func (s *Merge) Finalize(config *chain.Config, header *types.Header, state *stat
 			s.logsBufMu.Unlock()
 		}
 		if err != nil {
-			return nil, fmt.Errorf("error: could not parse requests logs: %v", err)
+			return nil, fmt.Errorf("error: could not parse requests logs: %w", err)
 		}
 		if depositReqs != nil {
 			rs = append(rs, *depositReqs)

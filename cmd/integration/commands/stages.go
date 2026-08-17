@@ -1248,7 +1248,8 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 
 	genesis := readGenesis(chain)
 	chainConfig, genesisBlock, genesisErr := genesiswrite.CommitGenesisBlock(db, genesis, chain, dirs, logger)
-	if _, ok := genesisErr.(*chain2.ConfigCompatError); genesisErr != nil && !ok {
+	var compatErr *chain2.ConfigCompatError
+	if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
 		panic(genesisErr)
 	}
 	//logger.Info("Initialised chain configuration", "config", chainConfig)

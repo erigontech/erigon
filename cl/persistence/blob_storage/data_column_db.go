@@ -172,7 +172,7 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 			if os.IsNotExist(err) {
 				continue // file does not exist, nothing to remove
 			}
-			return fmt.Errorf("failed to remove column sidecar: %v", err)
+			return fmt.Errorf("failed to remove column sidecar: %w", err)
 		}
 		log.Trace("removed data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", index)
 	}
