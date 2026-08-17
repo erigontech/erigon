@@ -222,7 +222,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
+		if isDataAvailabilityError(err) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
 			b.scheduleBlockForLaterProcessing(msg)
 			return nil
 		}
@@ -262,10 +262,16 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		return
 	}
 
+	now := b.currentTime()
 	b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, &blockJob{
 		block:        block,
-		creationTime: b.currentTime(),
+		creationTime: now,
+		retryAfter:   now.Add(blockRetryInterval),
 	})
+}
+
+func isDataAvailabilityError(err error) bool {
+	return errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
 }
 
 func (b *blockService) currentTime() time.Time {
@@ -354,15 +360,15 @@ func (b *blockService) processScheduledBlocks(ctx context.Context, now time.Time
 			return true
 		}
 		if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
-			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			if isDataAvailabilityError(err) {
 				blockJob.dataAvailabilityAttempts++
 				if blockJob.dataAvailabilityAttempts >= maxDataAvailabilityRetries {
 					b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
 				} else {
-					blockJob.retryAfter = b.currentTime().Add(dataAvailabilityRetryInterval)
+					blockJob.retryAfter = b.currentTime().Add(blockRetryInterval)
 				}
 			} else {
-				blockJob.retryAfter = b.currentTime().Add(dataAvailabilityRetryInterval)
+				blockJob.retryAfter = b.currentTime().Add(blockRetryInterval)
 			}
 			log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
 			return true

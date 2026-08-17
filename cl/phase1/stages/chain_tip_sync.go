@@ -199,6 +199,10 @@ func sendFetchError(ctx context.Context, errCh chan<- error, err error) {
 	}
 }
 
+func newChainTipBlockResponseChannel() chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock] {
+	return make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
+}
+
 // listenToIncomingBlocksUntilANewBlockIsReceived listens for incoming blocks until a new block with a slot greater than or equal to the target slot is received.
 // It processes blocks, checks their validity, and publishes them. It also handles context cancellation and logs progress periodically.
 func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
@@ -748,7 +752,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		"targetSlot", args.targetSlot,
 		"requestedSlots", totalRequest,
 	)
-	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
+	respCh := newChainTipBlockResponseChannel()
 	errCh := make(chan error)
 
 	// 25 seconds is a good timeout for this

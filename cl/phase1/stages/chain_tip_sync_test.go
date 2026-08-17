@@ -65,6 +65,23 @@ func TestSendFetchErrorReturnsAfterCancellation(t *testing.T) {
 	}
 }
 
+func TestChainTipBlockResponseQueueHoldsOneBatch(t *testing.T) {
+	responses := newChainTipBlockResponseChannel()
+	first := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{}
+	second := &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{}
+
+	select {
+	case responses <- first:
+	default:
+		t.Fatal("first block batch was not buffered")
+	}
+	select {
+	case responses <- second:
+		t.Fatal("more than one block batch was buffered")
+	default:
+	}
+}
+
 func TestChainTipSyncChecksFuluDataAvailability(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
