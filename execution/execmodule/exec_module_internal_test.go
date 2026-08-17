@@ -98,40 +98,31 @@ func TestNewDomainStateCacheRespectsUseStateCache(t *testing.T) {
 	scDefault.Close()
 }
 
-type frozenBlocksFrontier struct {
-	stateVersion uint64
-	visibleEnd   uint64
-}
-
-func (f frozenBlocksFrontier) StateVersion() uint64 { return f.stateVersion }
-
-func (f frozenBlocksFrontier) DomainVisibleEnd(kv.Domain) (uint64, bool) {
-	return f.visibleEnd, true
-}
-
-// Frozen-block processing must publish catch-up writes and revoke older views'
-// fill authority through the normal SharedDomains commit path.
-func TestFrozenBlocksSDWiredToStateCache(t *testing.T) {
+// Every SharedDomains used for frozen-block processing must publish catch-up
+// writes and revoke older views' fill authority through the normal commit path.
+func TestNewFrozenBlocksSDWiresStateCache(t *testing.T) {
 	t.Parallel()
 
 	ctx := t.Context()
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	sc := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
 	t.Cleanup(sc.Close)
-	sc.BindAggregator(db)
 	sc.Applier().Initialize(0)
 
 	addr := make([]byte, 20)
 	addr[0] = 1
 	stale := []byte{1}
-	preCatchup := sc.View(frozenBlocksFrontier{stateVersion: 0, visibleEnd: 10})
+	frontier := cache.FrontierWithStateVersion(cache.FrontierFunc(func(kv.Domain) (uint64, bool) {
+		return 10, true
+	}), 0)
+	preCatchup := sc.View(frontier)
 	preCatchup.Fill(kv.AccountsDomain, addr, stale, 5)
 
 	tx, err := db.BeginTemporalRw(ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
 	pe := &PipelineExecutor{logger: log.New()}
-	sd, err := pe.newFrozenBlocksSD(ctx, tx, sc, nil)
+	sd, err := pe.newFrozenBlocksSD(ctx, tx, sc)
 	require.NoError(t, err)
 	defer sd.Close()
 
@@ -142,12 +133,12 @@ func TestFrozenBlocksSDWiredToStateCache(t *testing.T) {
 
 	got, ok := sc.View(nil).Get(kv.AccountsDomain, addr)
 	require.True(t, ok)
-	require.Equal(t, fresh, got, "catchup applies must reach the cache")
+	require.Equal(t, fresh, got, "catch-up commits must reach the cache")
 
 	preCatchup.Fill(kv.AccountsDomain, addr, stale, 5)
 	got, ok = sc.View(nil).Get(kv.AccountsDomain, addr)
 	require.True(t, ok)
-	require.Equal(t, fresh, got, "a pre-catchup read view must not refill stale state")
+	require.Equal(t, fresh, got, "a pre-catch-up read view must not refill stale state")
 }
 
 func TestUnwindToCommonCanonicalReturnsCanonicalityError(t *testing.T) {

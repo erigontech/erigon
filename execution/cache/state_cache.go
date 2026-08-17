@@ -18,7 +18,6 @@ package cache
 
 import (
 	"bytes"
-	"fmt"
 	"math"
 	"strings"
 	"sync"
@@ -72,8 +71,6 @@ type StateCache struct {
 	// stored values and also advance on Clear; sharing them would make an
 	// ordinary Clear revoke otherwise valid read views.
 	readViewEpoch atomic.Uint64
-	// aggBound records activation of the aggregator visibility guard.
-	aggBound atomic.Bool
 	// disableFills (STATE_CACHE_FILLS=false) turns off every reader fill
 	// (including the content-addressed ones), leaving canonical publication as
 	// the only writer — an A/B lever and an operational kill switch.
@@ -204,7 +201,10 @@ func (c *StateCache) putCodeSizeByHash(codeHash []byte, size int, txNum uint64) 
 }
 
 // FillsEnabled reports whether reader fills are active (STATE_CACHE_FILLS).
-// Caches with fills disabled do not require the aggregator visibility guard.
+// Wire-up code uses it to decide whether the backing aggregator must forbid
+// visibility lowering: fill admission relies on view frontiers never
+// decreasing, and apply-only caches have nothing for a lowered frontier to
+// poison.
 func (c *StateCache) FillsEnabled() bool { return !c.disableFills }
 
 // getAddrCodeHash returns the Ethereum codeHash for addr without an
@@ -289,8 +289,8 @@ func (c *StateCache) fillCodeIfFresh(key []byte, value []byte, readTxNum, visibl
 	if len(value) == 0 {
 		return
 	}
+	codeHash := crypto.Keccak256(value)
 	cloned := bytes.Clone(value)
-	codeHash := crypto.Keccak256(cloned)
 	c.fillCodeWithHashIfFresh(key, cloned, codeHash, readTxNum, visibleEnd, accountsVisibleEnd, viewEpoch)
 }
 
@@ -409,54 +409,6 @@ func (c *StateCache) clearLocked() {
 		}
 	}
 }
-
-// absorbFilesExtension advances file-backed frontiers. If files expose state
-// beyond any published frontier, it clears all entries and revokes older views
-// so they cannot refill cleared values.
-func (c *StateCache) absorbFilesExtension(f Frontier) {
-	c.applierMu.Lock()
-	defer c.applierMu.Unlock()
-	c.admissionMu.Lock()
-	defer c.admissionMu.Unlock()
-	extended := false
-	for d := range kv.DomainLen {
-		domain := kv.Domain(d)
-		if c.caches[domain] == nil {
-			continue
-		}
-		if end, ok := f.DomainVisibleEnd(domain); ok && end > c.appliedEnd[domain] {
-			c.appliedEnd[domain] = end
-			extended = true
-		}
-	}
-	if extended {
-		c.readViewEpoch.Add(1)
-		c.clearLocked()
-	}
-}
-
-// BindAggregator prevents the DB's state-domain visibility from decreasing,
-// which fill admission requires for coherent frontiers. It is a no-op for nil
-// caches and caches with fills disabled, and it panics when the DB cannot provide
-// the guard.
-func (c *StateCache) BindAggregator(db kv.TemporalRwDB) {
-	if c == nil || !c.FillsEnabled() {
-		return
-	}
-	agg := db.Agg()
-	if agg == nil {
-		panic("assert: fill-enabled StateCache bound to a DB without an aggregator — the visibility-lowering guard would be silently dropped")
-	}
-	f, ok := agg.(interface{ ForbidVisibilityLowering() })
-	if !ok {
-		panic(fmt.Sprintf("assert: fill-enabled StateCache bound to a DB whose aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
-	}
-	f.ForbidVisibilityLowering()
-	c.aggBound.Store(true)
-}
-
-// AggregatorBound reports whether the aggregator visibility guard is active.
-func (c *StateCache) AggregatorBound() bool { return c != nil && c.aggBound.Load() }
 
 func (c *StateCache) resetForStateVersionLocked() {
 	// Clearing entries is not enough: views bound to the previous state could

@@ -178,22 +178,20 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 	return tx, sd, nil
 }
 
-// newFrozenBlocksSD wires catch-up commits to the module's state and code caches.
-func (pe *PipelineExecutor) newFrozenBlocksSD(ctx context.Context, tx kv.TemporalRwTx, stateCache *cache.StateCache, codeStore *cache.CodeStore) (*execctx.SharedDomains, error) {
+func (pe *PipelineExecutor) newFrozenBlocksSD(ctx context.Context, tx kv.TemporalRwTx, stateCache *cache.StateCache) (*execctx.SharedDomains, error) {
 	sd, err := execctx.NewSharedDomains(ctx, tx, pe.logger)
 	if err != nil {
 		return nil, err
 	}
 	sd.SetInMemHistoryReads(inMemHistoryReads)
 	sd.SetStateCache(stateCache)
-	sd.SetCodeStore(codeStore)
 	return sd, nil
 }
 
 // ProcessFrozenBlocks runs the pipeline over snapshot blocks at startup.
 // It downloads block files, then executes them in a hasMore loop until
 // all frozen blocks are processed.
-func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool, stateCache *cache.StateCache, codeStore *cache.CodeStore) error {
+func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stageloop.Hook, onlySnapDownload bool, stateCache *cache.StateCache) error {
 	sawZeroBlocksTimes := 0
 	tx, err := pe.db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -207,15 +205,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if err := pe.sync.RunSnapshots(nil, tx); err != nil {
 		return err
 	}
-	// Downloaded state files can advance visible state without a SharedDomains
-	// commit. Reconcile their frontiers before any cache-backed reads.
-	stateCache.Applier().AbsorbFilesExtension(cache.FrontierFunc(func(domain kv.Domain) (uint64, bool) {
-		dbgTx := tx.Debug()
-		if dbgTx == nil {
-			return 0, false
-		}
-		return dbgTx.DomainVisibleEnd(domain)
-	}))
 	if onlySnapDownload {
 		return nil
 	}
@@ -225,7 +214,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		return tx.Commit()
 	}
 
-	doms, err := pe.newFrozenBlocksSD(ctx, tx, stateCache, codeStore)
+	doms, err := pe.newFrozenBlocksSD(ctx, tx, stateCache)
 	if err != nil {
 		return err
 	}
@@ -245,11 +234,6 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	tx, doms, err = pe.RunLoop(ctx, doms, tx, RunLoopConfig{
 		InitialCycle: true,
 		PruneFn: func(ctx context.Context, initialCycle bool, rwtx kv.TemporalRwTx, sd *execctx.SharedDomains) error {
-			if codeStore != nil {
-				if err := codeStore.Evict(rwtx); err != nil {
-					return err
-				}
-			}
 			return pe.sync.RunPrune(ctx, rwtx, initialCycle, 0)
 		},
 		CommitCycle: func(ctx context.Context, hasMore bool, sd *execctx.SharedDomains) (kv.TemporalRwTx, *execctx.SharedDomains, error) {
@@ -273,7 +257,7 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 				return nil, nil, err
 			}
 			tx = newTx
-			newSD, err := pe.newFrozenBlocksSD(ctx, newTx, stateCache, codeStore)
+			newSD, err := pe.newFrozenBlocksSD(ctx, newTx, stateCache)
 			if err != nil {
 				return nil, nil, err
 			}

@@ -253,7 +253,7 @@ func NewExecModule(
 	stopNode func() error,
 ) *ExecModule {
 	domainCache := newDomainStateCache(stateCacheBudget)
-	domainCache.BindAggregator(db)
+	execctx.GuardAggregatorForCache(db, domainCache)
 	var codeStore *cache.CodeStore
 	if dbg.UseCodeStore {
 		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
@@ -703,7 +703,7 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}
 	defer e.semaphore.Release(1)
 
-	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart, e.stateCache, e.codeStore); err != nil {
+	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart, e.stateCache); err != nil {
 		if !errors.Is(err, context.Canceled) {
 			e.logger.Error("Could not start execution service", "err", err)
 		}

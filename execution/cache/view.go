@@ -242,7 +242,7 @@ func (v ReadView) fillCodeWithHash(addr, code, codeHash []byte, readTxNum uint64
 // CanFill reports whether this view carries an accepted frontier, i.e. Fill and
 // SeedAddrCodeHash can admit values through it.
 func (v ReadView) CanFill() bool {
-	if v.c == nil || v.c.disableFills || v.frontier == nil {
+	if v.c == nil || v.frontier == nil {
 		return false
 	}
 	_, rejected := v.frontier.(rejectedFrontier)
@@ -250,13 +250,14 @@ func (v ReadView) CanFill() bool {
 }
 
 // NeedsFrontier reports whether rebinding could make this view fill-eligible.
-func (v ReadView) NeedsFrontier() bool { return v.c != nil && !v.c.disableFills && v.frontier == nil }
+func (v ReadView) NeedsFrontier() bool { return v.c != nil && v.frontier == nil }
 
 // Fill offers a value read from this view without replacing an authoritative
 // entry. Admission is checked against the view's frontier for the domain;
 // views without an exact frontier skip the fill. A code fill also checks the
-// accounts frontier because address-keyed code derives from account state; a
-// view predating an account deletion must not refill it.
+// accounts frontier: an addr-keyed code entry derives from the account — an
+// account deletion drops it without advancing the code frontier — so a view
+// that predates the deletion must not refill it (mirrors SeedAddrCodeHash).
 func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uint64) {
 	if v.c == nil || v.c.disableFills || v.frontier == nil {
 		return
@@ -340,11 +341,11 @@ func (a Applier) Initialize(stateVersion uint64) {
 	a.c.initialize(stateVersion)
 }
 
-// Publish installs updates from one successful commit and advances the cache
-// from its source state version to the committed state version. Admission-gated
-// fills are disabled while the update batch is incomplete, but readers do not
-// wait for the batch. Source continuity lets unchanged entries survive even if
-// one commit advances the durable counter more than once.
+// Publish applies one successful commit and advances the cache from its source
+// state version to the committed state version. Admission-gated fills are
+// disabled while the update batch is incomplete, but readers do not wait for
+// the batch. Source continuity lets unchanged entries survive even if one
+// commit advances the durable counter more than once.
 func (a Applier) Publish(sourceStateVersion, committedStateVersion uint64, updates []StateUpdate) {
 	if a.c == nil {
 		return
@@ -360,18 +361,6 @@ func (a Applier) PublishUnwind(sourceStateVersion, committedStateVersion, unwind
 		return
 	}
 	a.c.publish(sourceStateVersion, committedStateVersion, unwindToTxNum, true, updates)
-}
-
-// AbsorbFilesExtension reconciles state exposed by files without a matching
-// cache publication. If files expose state beyond any published frontier, it
-// clears all entries, advances the affected frontiers, and revokes older views
-// so they cannot refill cleared values. It is a no-op when cache publications
-// already cover the files.
-func (a Applier) AbsorbFilesExtension(f Frontier) {
-	if a.c == nil || f == nil {
-		return
-	}
-	a.c.absorbFilesExtension(f)
 }
 
 // Unwind invalidates, across all caches, entries reflecting state above

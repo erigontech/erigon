@@ -300,91 +300,15 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	written[0] = 4
 	domains.SetTxNum(20)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, written, encAccount(2), 20, nil))
+	require.NoError(t, domains.Flush(ctx, rwTx))
 
-	// Commit must reset the memo after flushing so validation reads use the
-	// advanced frontier.
-	require.NoError(t, domains.Commit(ctx, rwTx, func(kv.RwTx) error {
-		missing := make([]byte, 20)
-		missing[0] = 5
-		value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
-		require.NoError(t, err)
-		require.Empty(t, value)
-		return nil
-	}))
+	missing := make([]byte, 20)
+	missing[0] = 5
+	value, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
+	require.NoError(t, err)
+	require.Empty(t, value)
 	require.Equal(t, uint64(2), debug.calls)
 	require.Greater(t, debug.last, initialEnd)
-}
-
-// Plain Flush remains valid without a StateCache but must fail loudly once one
-// is attached.
-func TestFlushRejectsCacheAttachedSD(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	db := newTestDb(t, 16)
-
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	require.NoError(t, domains.Flush(ctx, rwTx), "cache-less SDs may flush and commit themselves")
-
-	stateCache := newSmallStateCache()
-	t.Cleanup(stateCache.Close)
-	domains.BindStateCache(stateCache)
-	require.Panics(t, func() { _ = domains.Flush(ctx, rwTx) },
-		"a wiring bug must fail loudly, like the SetStateCache assert — an error can be swallowed")
-}
-
-// Allowing an externally committed Flush would advance durable state without
-// cache publication, leaving the old cached value visible.
-func TestFlushRejectionPreventsStaleCachedReads(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	db := newTestDb(t, 16)
-	stateCache := newSmallStateCache()
-	t.Cleanup(stateCache.Close)
-
-	slot := make([]byte, 52)
-	slot[0] = 1
-	v1, v2 := []byte{1}, []byte{2}
-
-	tx1, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer tx1.Rollback()
-	sd1, err := execctx.NewSharedDomains(ctx, tx1, log.New())
-	require.NoError(t, err)
-	defer sd1.Close()
-	sd1.BindStateCache(stateCache)
-	sd1.SetTxNum(10)
-	require.NoError(t, sd1.DomainPut(kv.StorageDomain, tx1, slot, v1, 10, nil))
-	require.NoError(t, sd1.Commit(ctx, tx1))
-	sd1.Close()
-
-	got, ok := stateCache.View(nil).Get(kv.StorageDomain, slot)
-	require.True(t, ok)
-	require.Equal(t, v1, got)
-
-	tx2, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer tx2.Rollback()
-	sd2, err := execctx.NewSharedDomains(ctx, tx2, log.New())
-	require.NoError(t, err)
-	defer sd2.Close()
-	sd2.BindStateCache(stateCache)
-	sd2.SetTxNum(20)
-	require.NoError(t, sd2.DomainPut(kv.StorageDomain, tx2, slot, v2, 20, nil))
-	require.Panics(t, func() { _ = sd2.Flush(ctx, tx2) },
-		"the step that would split the cache (v1) from MDBX (v2) must be rejected")
-
-	require.NoError(t, sd2.Commit(ctx, tx2))
-	got, ok = stateCache.View(nil).Get(kv.StorageDomain, slot)
-	require.True(t, ok)
-	require.Equal(t, v2, got, "Commit keeps the cache coherent with MDBX")
 }
 
 // During an in-flight unwind the mem overlay bounds reads of an affected key
@@ -800,139 +724,41 @@ type fakeForbidder struct{ called bool }
 
 func (f *fakeForbidder) ForbidVisibilityLowering() { f.called = true }
 
-// fakeTemporalDB embeds unused methods so BindAggregator can be tested in isolation.
-type fakeTemporalDB struct {
-	kv.TemporalRwDB
-	agg any
-}
+type fakeHasAgg struct{ f *fakeForbidder }
 
-func (d fakeTemporalDB) Agg() any { return d.agg }
+func (h fakeHasAgg) Agg() any { return h.f }
 
-// Fill admission requires monotonic frontiers. Binding must activate that guard
-// or panic; nil and fill-disabled caches need no guard.
-func TestBindAggregator(t *testing.T) {
+type fakeHasBadAgg struct{}
+
+func (fakeHasBadAgg) Agg() any { return struct{}{} }
+
+// The guard is load-bearing: for a fill-enabled cache it must either bind the
+// invariant or fail loudly — never silently drop it on a DB shape mismatch.
+// A nil or apply-only cache needs no guard at all.
+func TestGuardAggregatorForCache(t *testing.T) {
 	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
 	f := &fakeForbidder{}
-	sc.BindAggregator(fakeTemporalDB{agg: f})
+	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
 	require.True(t, f.called)
-	require.True(t, sc.AggregatorBound())
 
-	var nilCache *cache.StateCache
-	require.NotPanics(t, func() { nilCache.BindAggregator(fakeTemporalDB{}) },
-		"no cache, no invariant to bind — the aggregator is never consulted")
-	require.NotPanics(t, func() { require.False(t, nilCache.AggregatorBound()) },
-		"the query must be as nil-safe as the binding")
-	sc2 := newSmallStateCache()
-	t.Cleanup(sc2.Close)
-	require.Panics(t, func() { sc2.BindAggregator(fakeTemporalDB{agg: struct{}{}}) },
-		"an aggregator without ForbidVisibilityLowering must fail loudly, not drop the binding")
-	require.PanicsWithValue(t,
-		"assert: fill-enabled StateCache bound to a DB without an aggregator — the visibility-lowering guard would be silently dropped",
-		func() { sc2.BindAggregator(fakeTemporalDB{}) },
-		"a DB without an aggregator must name that case, not report a nil type mismatch")
+	require.NotPanics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, nil) },
+		"no cache, no invariant to bind — shape is irrelevant")
+	require.Panics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, sc) },
+		"a db that cannot produce its aggregator must fail loudly, not drop the guard")
+	require.Panics(t, func() { execctx.GuardAggregatorForCache(fakeHasBadAgg{}, sc) },
+		"an aggregator without ForbidVisibilityLowering must fail loudly, not drop the guard")
 }
 
-type nilDebugRwTx struct {
-	kv.TemporalRwTx
-}
-
-func (nilDebugRwTx) Debug() kv.TemporalDebugTx { return nil }
-
-// Without an exact frontier, reads still work but cannot populate the cache.
-func TestReadFill_NilDebugTxSkipsFills(t *testing.T) {
-	t.Parallel()
-
-	ctx := t.Context()
-	db := newTestDb(t, 16)
-
-	baseTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer baseTx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, baseTx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-	stateCache := newSmallStateCache()
-	t.Cleanup(stateCache.Close)
-	domains.BindStateCache(stateCache)
-
-	missing := make([]byte, 20)
-	missing[0] = 7
-	value, _, err := domains.GetLatest(kv.AccountsDomain, nilDebugRwTx{TemporalRwTx: baseTx}, missing)
-	require.NoError(t, err)
-	require.Empty(t, value)
-
-	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, missing)
-	require.False(t, ok, "no exact frontier means no fill")
-}
-
-// SetStateCache must reject a fill-enabled cache whose aggregator guard is not
-// active.
-func TestSetStateCacheRequiresBoundAggregator(t *testing.T) {
-	ctx := t.Context()
-	db := newTestDb(t, 16)
-	rwTx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer rwTx.Rollback()
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(t, err)
-	defer domains.Close()
-
-	unbound := newSmallStateCache()
-	t.Cleanup(unbound.Close)
-	require.Panics(t, func() { domains.SetStateCache(unbound) },
-		"wiring a fill-enabled cache without a bound aggregator must fail loudly")
-
-	bound := newSmallStateCache()
-	t.Cleanup(bound.Close)
-	f := &fakeForbidder{}
-	bound.BindAggregator(fakeTemporalDB{agg: f})
-	require.True(t, f.called)
-	require.NotPanics(t, func() { domains.SetStateCache(bound) })
-}
-
-// With reader fills disabled, a cache miss must not construct a frontier. Compare
-// with a cache-less read so unrelated miss-path allocations cancel out.
-func TestApplyOnlyMissPathBindsNoFrontier(t *testing.T) {
-	t.Setenv("STATE_CACHE_FILLS", "false")
-
-	ctx := t.Context()
-	db := newTestDb(t, 16)
-
-	missAllocs := func(withCache bool) float64 {
-		rwTx, err := db.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTx.Rollback()
-		domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-		require.NoError(t, err)
-		defer domains.Close()
-		if withCache {
-			stateCache := newSmallStateCache()
-			t.Cleanup(stateCache.Close)
-			domains.BindStateCache(stateCache)
-		}
-		missing := make([]byte, 20)
-		missing[0] = 7
-		return testing.AllocsPerRun(100, func() {
-			v, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, missing)
-			if err != nil || len(v) != 0 {
-				t.Fatalf("expected a clean negative read, got %x %v", v, err)
-			}
-		})
-	}
-
-	require.Equal(t, missAllocs(false), missAllocs(true),
-		"an apply-only cache must add no allocations to the miss path")
-}
-
-// A cache with reader fills disabled does not require monotonic frontiers.
-func TestBindAggregator_ApplyOnlySkips(t *testing.T) {
+// An apply-only cache (STATE_CACHE_FILLS=false) has no fills for a lowered
+// frontier to poison, so the guard must not constrain the aggregator.
+func TestGuardAggregatorForCache_ApplyOnlySkips(t *testing.T) {
 	t.Setenv("STATE_CACHE_FILLS", "false")
 	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
 	f := &fakeForbidder{}
-	sc.BindAggregator(fakeTemporalDB{agg: f})
+	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
 	require.False(t, f.called)
 }
