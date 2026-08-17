@@ -162,8 +162,8 @@ func (sd *SharedDomains) domainVisibleEnd(tx kv.TemporalTx, domain kv.Domain) (u
 	return debugDomainVisibleEnd(tx, domain)
 }
 
-// debugDomainVisibleEnd tolerates txs without a debug backend (MemoryMutation
-// over a nil db): no exact frontier means no fills, reads still work.
+// debugDomainVisibleEnd treats a missing debug backend as an inexact frontier.
+// Reads remain valid, but admission-gated fills from that view are skipped.
 func debugDomainVisibleEnd(tx kv.TemporalTx, domain kv.Domain) (uint64, bool) {
 	dbgTx := tx.Debug()
 	if dbgTx == nil {
@@ -936,10 +936,10 @@ func (sd *SharedDomains) GetCommitmentCtx() *commitmentdb.SharedDomainsCommitmen
 
 func (sd *SharedDomains) Logger() log.Logger { return sd.logger }
 
-// SetStateCache hands this SD the process-global state cache to manage:
-// Commit applies committed updates after a successful DB commit, Unwind
-// invalidates them, and the SD's reads populate it through admission-gated
-// fills. No-op when USE_STATE_CACHE is off or the cache is nil.
+// SetStateCache attaches the process-wide state cache. A fill-enabled cache must
+// already have its aggregator visibility guard active. Commits publish durable
+// updates, unwinds invalidate them, and reads populate it through admission-gated
+// fills. It is a no-op when USE_STATE_CACHE is off or the cache is nil.
 func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
@@ -1052,19 +1052,11 @@ func (sd *SharedDomains) Close() {
 	sd.sdCtx = nil
 }
 
-// SharedDomains owns the cache lifecycle for the account/storage StateCache
-// and the commitment BranchCache: population, invalidation and commit-gating
-// all happen here, and callers drive state through Flush / Commit /
-// GetLatest / DomainPut. The one exception is read-ahead warmup, which fills
-// the StateCache directly through its own ReadView, under the same
-// admission.
-
-// Flush writes the in-memory batch into tx without committing. It deliberately
-// does not touch the caches — the caller may still roll back. An SD with a
-// state cache must route every flush through Commit: a plain Flush would
-// leave the cache serving pre-flush values for the flushed keys forever, so
-// it panics here, like the SetStateCache assert for the neighbouring wiring
-// bug — an error return can be swallowed.
+// Flush writes the in-memory batch into tx without committing and does not
+// publish cache updates because the caller may still roll back. A SharedDomains
+// with a StateCache must use Commit; otherwise committing tx later would leave
+// the cache serving pre-flush values for the flushed keys. Flush therefore panics
+// when a StateCache is attached. Cache-less callers may commit tx themselves.
 func (sd *SharedDomains) Flush(ctx context.Context, tx kv.RwTx) error {
 	if sd.stateCache != nil {
 		panic("assert: SharedDomains with a state cache must flush through Commit")
@@ -1132,21 +1124,14 @@ func requireStateVersion(tx kv.Tx, expected uint64) error {
 	return nil
 }
 
-// Commit flushes the in-memory batch into tx, commits tx, and only then applies
-// the flushed domain bytes to the in-memory caches — CommitmentDomain to the
-// BranchCache, Accounts/Storage/Code to the StateCache. The flush is implicit in
-// committing the shared-domain state. Tying cache population to commit success
-// makes it impossible by construction for an aggregator-lifetime cache to hold a
-// value a failed commit rolled back — so no caller clears a cache or reaches into
-// the SD's internal caches after committing. Entries are stamped with the value's
-// per-key write txNum (delivered by the callback) as the unwind floor, so
-// invalidation is tx-precise: an unwind to a txNum inside the latest step drops
-// exactly the entries above it, not the whole step. All caches honor the
-// same (txNum, epoch) model. tx MUST be a flush-specific transaction: it is
-// committed here. Commit is terminal for this SharedDomains value; continue
-// with a new one on a fresh transaction. The domain flush advances
-// PlainStateVersion exactly once; Commit verifies both its starting version and
-// the version it will publish.
+// Commit flushes the in-memory batch into tx, runs the validation callbacks
+// against the flushed state, commits tx, and only then publishes cache updates.
+// Commitment updates go to BranchCache; account, storage, and code updates go to
+// StateCache. A flush, validation, or commit failure leaves both caches unchanged.
+// Entries retain their per-key write txNum so unwinds can invalidate them precisely.
+//
+// The flush advances PlainStateVersion exactly once. On success, Commit consumes
+// tx and is terminal for sd; continue with a new transaction and SharedDomains.
 func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...func(tx kv.RwTx) error) error {
 	defer mxFlushTook.ObserveDuration(time.Now())
 	sourceStateVersion, committedStateVersion, err := sd.stateVersionsForCommit(tx)
@@ -1495,8 +1480,9 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
-	// A bounded read observes a staged unwind, not stable committed state.
-	// Apply-only mode skips frontier binding for fills that cannot happen.
+	// A bounded read observes a staged unwind, not stable committed state, so it
+	// must not fill. A cache with reader fills disabled also skips frontier
+	// construction on the miss path.
 	if maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.FillsEnabled() && sd.stateCache.Caches(domain) {
 		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
 		fillView := view

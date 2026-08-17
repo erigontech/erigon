@@ -178,10 +178,7 @@ func (pe *PipelineExecutor) RunLoop(ctx context.Context, sd *execctx.SharedDomai
 	return tx, sd, nil
 }
 
-// newFrozenBlocksSD builds a SharedDomains for frozen-block processing wired
-// to the module's caches: its post-commit applies overwrite pre-catchup cache
-// entries and advance the admission frontier, so read views opened before
-// catchup cannot refill stale state.
+// newFrozenBlocksSD wires catch-up commits to the module's state and code caches.
 func (pe *PipelineExecutor) newFrozenBlocksSD(ctx context.Context, tx kv.TemporalRwTx, stateCache *cache.StateCache, codeStore *cache.CodeStore) (*execctx.SharedDomains, error) {
 	sd, err := execctx.NewSharedDomains(ctx, tx, pe.logger)
 	if err != nil {
@@ -210,8 +207,8 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 	if err := pe.sync.RunSnapshots(nil, tx); err != nil {
 		return err
 	}
-	// Downloaded state files publish without applies; reconcile the cache
-	// before anything reads through it.
+	// Downloaded state files can advance visible state without a SharedDomains
+	// commit. Reconcile their frontiers before any cache-backed reads.
 	stateCache.Applier().AbsorbFilesExtension(cache.FrontierFunc(func(domain kv.Domain) (uint64, bool) {
 		dbgTx := tx.Debug()
 		if dbgTx == nil {

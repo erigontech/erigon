@@ -72,20 +72,18 @@ type StateCache struct {
 	// stored values and also advance on Clear; sharing them would make an
 	// ordinary Clear revoke otherwise valid read views.
 	readViewEpoch atomic.Uint64
-	// aggBound records that BindAggregator ran; SetStateCache asserts it
-	// before wiring a fill-enabled cache.
+	// aggBound records activation of the aggregator visibility guard.
 	aggBound atomic.Bool
 	// disableFills (STATE_CACHE_FILLS=false) turns off every reader fill
 	// (including the content-addressed ones), leaving canonical publication as
 	// the only writer — an A/B lever and an operational kill switch.
 	disableFills bool
-	// The pad keeps the counters — RMWed by every fill — off the cache line
-	// of the read-mostly fields above, which every fill reads.
+	// Fill admission reads the fields above, while every counted attempt writes a
+	// counter. Keep them on separate cache lines to avoid invalidating read-mostly
+	// state.
 	_ [64]byte
-	// Fill-attempt outcomes, reported by PrintStatsAndReset — the lens on how
-	// much reader warming survives at a given commit cadence. noFrontier
-	// counts attempts dying on an inexact frontier (ok=false) before the
-	// admission compare; without it admitted+rejected undercounts attempts.
+	// Fill-attempt outcomes reported by PrintStatsAndReset. fillsNoFrontier counts
+	// attempts rejected before admission because the view has no exact frontier.
 	fillsAdmitted   atomic.Uint64
 	fillsRejected   atomic.Uint64
 	fillsNoFrontier atomic.Uint64
@@ -215,10 +213,7 @@ func (c *StateCache) putCodeSizeByHash(codeHash []byte, size int, txNum uint64) 
 }
 
 // FillsEnabled reports whether reader fills are active (STATE_CACHE_FILLS).
-// Wire-up code uses it to decide whether the backing aggregator must forbid
-// visibility lowering: fill admission relies on view frontiers never
-// decreasing, and apply-only caches have nothing for a lowered frontier to
-// poison.
+// Caches with fills disabled do not require the aggregator visibility guard.
 func (c *StateCache) FillsEnabled() bool { return !c.disableFills }
 
 // getAddrCodeHash returns the Ethereum codeHash for addr without an
@@ -430,11 +425,9 @@ func (c *StateCache) clearLocked() {
 	}
 }
 
-// absorbFilesExtension reconciles the cache with state published by files
-// rather than applies (snapshot download): entries invalidated that way are
-// never overwritten, so when visibility passes a domain's applied frontier,
-// drop every entry and advance the frontiers — pre-publication views cannot
-// refill what was dropped.
+// absorbFilesExtension advances file-backed frontiers. If files expose state
+// beyond any published frontier, it clears all entries and revokes older views
+// so they cannot refill cleared values.
 func (c *StateCache) absorbFilesExtension(f Frontier) {
 	c.applierMu.Lock()
 	defer c.applierMu.Unlock()
@@ -457,13 +450,10 @@ func (c *StateCache) absorbFilesExtension(f Frontier) {
 	}
 }
 
-// BindAggregator forbids visibility lowering on db's aggregator for a
-// fill-enabled cache: fill admission relies on view frontiers never
-// decreasing. SharedDomains.SetStateCache asserts this binding, so wiring
-// cannot forget it. The aggregator side is duck-typed (the concrete type
-// lives in db/state, above this package) but load-bearing: an aggregator
-// without the forbid fails loudly. A nil or apply-only cache needs no
-// binding.
+// BindAggregator prevents the DB's state-domain visibility from decreasing,
+// which fill admission requires for coherent frontiers. It is a no-op for nil
+// caches and caches with fills disabled, and it panics when the DB cannot provide
+// the guard.
 func (c *StateCache) BindAggregator(db kv.TemporalRwDB) {
 	if c == nil || !c.FillsEnabled() {
 		return
@@ -480,7 +470,7 @@ func (c *StateCache) BindAggregator(db kv.TemporalRwDB) {
 	c.aggBound.Store(true)
 }
 
-// AggregatorBound reports whether BindAggregator ran.
+// AggregatorBound reports whether the aggregator visibility guard is active.
 func (c *StateCache) AggregatorBound() bool { return c != nil && c.aggBound.Load() }
 
 func (c *StateCache) resetForStateVersionLocked() {

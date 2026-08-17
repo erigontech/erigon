@@ -658,8 +658,9 @@ type TemporalRwDB interface {
 	BeginTemporalRw(ctx context.Context) (TemporalRwTx, error)
 	BeginTemporalRwNosync(ctx context.Context) (TemporalRwTx, error)
 	UpdateTemporal(ctx context.Context, f func(tx TemporalRwTx) error) error
-	// Agg returns the DB's state-files aggregator as `any` (the concrete type
-	// lives above the kv layer); nil when the DB has none.
+	// Agg returns the state-files aggregator as an opaque value because its
+	// concrete type belongs above the kv layer. It returns nil when the DB has no
+	// aggregator.
 	Agg() any
 }
 

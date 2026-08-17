@@ -98,10 +98,6 @@ func TestNewDomainStateCacheRespectsUseStateCache(t *testing.T) {
 	scDefault.Close()
 }
 
-// Frozen-block startup processing must advance state through the cache like
-// every other writer: its post-commit applies overwrite pre-catchup entries
-// and advance the admission frontier, so a read view opened before catchup
-// cannot refill stale values (issue 22925).
 type frozenBlocksFrontier struct {
 	stateVersion uint64
 	visibleEnd   uint64
@@ -113,6 +109,8 @@ func (f frozenBlocksFrontier) DomainVisibleEnd(kv.Domain) (uint64, bool) {
 	return f.visibleEnd, true
 }
 
+// Frozen-block processing must publish catch-up writes and revoke older views'
+// fill authority through the normal SharedDomains commit path.
 func TestFrozenBlocksSDWiredToStateCache(t *testing.T) {
 	t.Parallel()
 

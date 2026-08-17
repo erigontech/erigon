@@ -32,10 +32,9 @@ func applyAllTestCache(t *testing.T) *StateCache {
 	return c
 }
 
-// Snapshot publication brings state that never flows through Apply, so
-// nothing can overwrite entries it invalidates. Absorbing the extension must
-// drop every entry and advance the admission frontiers, so pre-publication
-// views cannot refill what was just dropped.
+// State files can expose newer state without Commit publishing cache updates.
+// Absorbing that extension must clear cached entries, advance the domain
+// frontiers, and revoke older views so they cannot refill the cleared values.
 func TestAbsorbFilesExtension(t *testing.T) {
 	t.Parallel()
 
@@ -63,8 +62,8 @@ func TestAbsorbFilesExtension(t *testing.T) {
 	require.Equal(t, []byte{2}, got)
 }
 
-// An extension that does not pass the applied frontier (files built from
-// already-applied state) must not churn the cache.
+// If cache publication already covers the file frontiers, absorption must not
+// clear valid entries or otherwise churn the cache.
 func TestAbsorbFilesExtensionNoOpWhenCovered(t *testing.T) {
 	t.Parallel()
 
@@ -86,8 +85,7 @@ func TestAbsorbFilesExtensionNoOpWhenCovered(t *testing.T) {
 	require.Equal(t, []byte{1}, got)
 }
 
-// The admission counters distinguish surviving reader warming from rejected
-// stale fills.
+// Fill counters distinguish admitted, rejected, and inexact-frontier attempts.
 func TestFillAdmissionCounters(t *testing.T) {
 	t.Parallel()
 
@@ -121,10 +119,9 @@ func TestFillAdmissionCounters(t *testing.T) {
 	require.EqualValues(t, 2, c.fillsRejected.Load())
 }
 
-// Every fill RMWs the admission counters; every fill also reads appliedEnd
-// and disableFills. If they share a cache line, the counters invalidate it
-// for every concurrent fill — handing back the contention the batched apply
-// work bought.
+// Fill admission reads appliedEnd and disableFills, while every counted attempt
+// updates one of these counters. Separate cache lines prevent counter writes
+// from invalidating that read-mostly state.
 func TestFillCountersLiveOnTheirOwnCacheLine(t *testing.T) {
 	var c StateCache
 	const line = 64

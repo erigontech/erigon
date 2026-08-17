@@ -301,8 +301,7 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	domains.SetTxNum(20)
 	require.NoError(t, domains.DomainPut(kv.AccountsDomain, rwTx, written, encAccount(2), 20, nil))
 
-	// The memo must re-derive inside Commit's validate window (after the
-	// internal flush, before the tx commits): reads here already see the
+	// Commit must reset the memo after flushing so validation reads use the
 	// advanced frontier.
 	require.NoError(t, domains.Commit(ctx, rwTx, func(kv.RwTx) error {
 		missing := make([]byte, 20)
@@ -316,9 +315,8 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	require.Greater(t, debug.last, initialEnd)
 }
 
-// An SD with a state cache must route every flush through Commit: a plain
-// Flush neither applies nor invalidates, so the cache would keep serving
-// pre-flush values for the flushed keys forever.
+// Plain Flush remains valid without a StateCache but must fail loudly once one
+// is attached.
 func TestFlushRejectsCacheAttachedSD(t *testing.T) {
 	t.Parallel()
 
@@ -341,11 +339,8 @@ func TestFlushRejectsCacheAttachedSD(t *testing.T) {
 		"a wiring bug must fail loudly, like the SetStateCache assert — an error can be swallowed")
 }
 
-// The incoherence the Flush rejection prevents, end to end: after v1 is
-// committed (the cache holds it), flushing v2 through another cache-attached
-// SD and committing the tx would leave the cache serving v1 while MDBX holds
-// v2. The rejection fires at exactly that step; routing through Commit keeps
-// the cache coherent.
+// Allowing an externally committed Flush would advance durable state without
+// cache publication, leaving the old cached value visible.
 func TestFlushRejectionPreventsStaleCachedReads(t *testing.T) {
 	t.Parallel()
 
@@ -805,9 +800,7 @@ type fakeForbidder struct{ called bool }
 
 func (f *fakeForbidder) ForbidVisibilityLowering() { f.called = true }
 
-// fakeTemporalDB satisfies kv.TemporalRwDB by embedding (the interface now
-// carries Agg, so a DB shape without it no longer compiles); only Agg is
-// implemented — the guard must not touch anything else.
+// fakeTemporalDB embeds unused methods so BindAggregator can be tested in isolation.
 type fakeTemporalDB struct {
 	kv.TemporalRwDB
 	agg any
@@ -815,9 +808,8 @@ type fakeTemporalDB struct {
 
 func (d fakeTemporalDB) Agg() any { return d.agg }
 
-// The binding is load-bearing: for a fill-enabled cache it must either bind
-// the invariant or fail loudly — never silently drop it. A nil or apply-only
-// cache needs no binding at all.
+// Fill admission requires monotonic frontiers. Binding must activate that guard
+// or panic; nil and fill-disabled caches need no guard.
 func TestBindAggregator(t *testing.T) {
 	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
@@ -848,8 +840,7 @@ type nilDebugRwTx struct {
 
 func (nilDebugRwTx) Debug() kv.TemporalDebugTx { return nil }
 
-// A tx without a debug backend (MemoryMutation over a nil db) has no exact
-// frontier: reads must still work and simply never fill.
+// Without an exact frontier, reads still work but cannot populate the cache.
 func TestReadFill_NilDebugTxSkipsFills(t *testing.T) {
 	t.Parallel()
 
@@ -876,8 +867,8 @@ func TestReadFill_NilDebugTxSkipsFills(t *testing.T) {
 	require.False(t, ok, "no exact frontier means no fill")
 }
 
-// The binding is asserted at the real wiring point, so no future call site
-// can wire a fill-enabled cache while forgetting the aggregator guard.
+// SetStateCache must reject a fill-enabled cache whose aggregator guard is not
+// active.
 func TestSetStateCacheRequiresBoundAggregator(t *testing.T) {
 	ctx := t.Context()
 	db := newTestDb(t, 16)
@@ -901,10 +892,8 @@ func TestSetStateCacheRequiresBoundAggregator(t *testing.T) {
 	require.NotPanics(t, func() { domains.SetStateCache(bound) })
 }
 
-// Apply-only mode must not pay for fills it will never make: the plain miss
-// path used to box a frontier only for the fill to no-op. Asserted as a
-// difference against the cache-less read, so unrelated allocations elsewhere
-// in the read path cannot fail this test.
+// With reader fills disabled, a cache miss must not construct a frontier. Compare
+// with a cache-less read so unrelated miss-path allocations cancel out.
 func TestApplyOnlyMissPathBindsNoFrontier(t *testing.T) {
 	t.Setenv("STATE_CACHE_FILLS", "false")
 
@@ -937,8 +926,7 @@ func TestApplyOnlyMissPathBindsNoFrontier(t *testing.T) {
 		"an apply-only cache must add no allocations to the miss path")
 }
 
-// An apply-only cache (STATE_CACHE_FILLS=false) has no fills for a lowered
-// frontier to poison, so the binding must not constrain the aggregator.
+// A cache with reader fills disabled does not require monotonic frontiers.
 func TestBindAggregator_ApplyOnlySkips(t *testing.T) {
 	t.Setenv("STATE_CACHE_FILLS", "false")
 	sc := newSmallStateCache()

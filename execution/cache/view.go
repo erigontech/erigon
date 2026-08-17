@@ -23,12 +23,15 @@ import (
 )
 
 // Frontier reports the exclusive txNum bound of one transaction's read view
-// per domain. ok=false means the backend has no exact frontier for the domain
-// (remote, history-disabled); fills sourced from such a view are skipped.
+// per domain. ok=false means the view has no exact frontier for the domain
+// (remote or history-disabled backends, dependency-clamped values views);
+// fills sourced from such a view are skipped.
 //
-// An implementation may report a stale-low bound — that only over-rejects
-// fills — but must never overstate what its tx can currently read: admission
-// safety rests on that.
+// An implementation may report a stale-low bound only for a coherent,
+// monotonically extended view — then it merely over-rejects fills. A view
+// serving mixed-age reads has no exact frontier and must answer ok=false.
+// Overstating what the tx can currently read is never safe: admission rests
+// on that.
 type Frontier interface {
 	DomainVisibleEnd(domain kv.Domain) (visibleEnd uint64, ok bool)
 }
@@ -254,7 +257,8 @@ func (v ReadView) NeedsFrontier() bool { return v.c != nil && !v.c.disableFills 
 // Fill offers a value read from this view without replacing an authoritative
 // entry. Admission is checked against the view's frontier for the domain;
 // views without an exact frontier skip the fill. A code fill also checks the
-// accounts frontier — see fillCodeIfFresh for why.
+// accounts frontier because address-keyed code derives from account state; a
+// view predating an account deletion must not refill it.
 func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uint64) {
 	if v.c == nil || v.c.disableFills || v.frontier == nil {
 		return
@@ -341,11 +345,11 @@ func (a Applier) Initialize(stateVersion uint64) {
 	a.c.initialize(stateVersion)
 }
 
-// Publish applies one successful commit and advances the cache from its source
-// state version to the committed state version. Admission-gated fills are
-// disabled while the update batch is incomplete, but readers do not wait for
-// the batch. Source continuity lets unchanged entries survive even if one
-// commit advances the durable counter more than once.
+// Publish installs updates from one successful commit and advances the cache
+// from its source state version to the committed state version. Admission-gated
+// fills are disabled while the update batch is incomplete, but readers do not
+// wait for the batch. Source continuity lets unchanged entries survive even if
+// one commit advances the durable counter more than once.
 func (a Applier) Publish(sourceStateVersion, committedStateVersion uint64, updates []StateUpdate) {
 	if a.c == nil {
 		return
@@ -363,11 +367,11 @@ func (a Applier) PublishUnwind(sourceStateVersion, committedStateVersion, unwind
 	a.c.publish(sourceStateVersion, committedStateVersion, unwindToTxNum, true, updates)
 }
 
-// AbsorbFilesExtension reconciles the cache with state published by files
-// rather than applies (snapshot download): when visibility passes a domain's
-// applied frontier, every entry is dropped and the frontiers advance, so
-// pre-publication views cannot refill them. A no-op when visibility stays
-// within what applies covered.
+// AbsorbFilesExtension reconciles state exposed by files without a matching
+// cache publication. If files expose state beyond any published frontier, it
+// clears all entries, advances the affected frontiers, and revokes older views
+// so they cannot refill cleared values. It is a no-op when cache publications
+// already cover the files.
 func (a Applier) AbsorbFilesExtension(f Frontier) {
 	if a.c == nil || f == nil {
 		return
