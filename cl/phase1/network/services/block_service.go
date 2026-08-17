@@ -69,6 +69,7 @@ type blockService struct {
 	emitter                          *beaconevents.EventEmitter
 	blocksScheduledForLaterExecution sync.Map
 	db                               kv.RwDB
+	now                              func() time.Time
 }
 
 // NewBlockService creates a new block service
@@ -93,6 +94,7 @@ func NewBlockService(
 		seenBlocksCache: seenBlocksCache,
 		emitter:         emitter,
 		db:              db,
+		now:             time.Now,
 	}
 	go b.loop(ctx)
 	return b
@@ -159,7 +161,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		}
 		return err
 	}
-
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
 	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
 	if !ok {
@@ -217,6 +218,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		// i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
 		return ErrInvalidCommitmentsCount
 	}
+	b.seenBlocksCache.Add(seenCacheKey, struct{}{})
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
@@ -260,10 +262,17 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		return
 	}
 
-	b.blocksScheduledForLaterExecution.Store(blockRoot, &blockJob{
+	b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, &blockJob{
 		block:        block,
-		creationTime: time.Now(),
+		creationTime: b.currentTime(),
 	})
+}
+
+func (b *blockService) currentTime() time.Time {
+	if b.now == nil {
+		return time.Now()
+	}
+	return b.now()
 }
 
 // processAndStoreBlock processes and stores a block
@@ -330,7 +339,7 @@ func (b *blockService) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		b.processScheduledBlocks(ctx, time.Now())
+		b.processScheduledBlocks(ctx, b.currentTime())
 	}
 }
 
@@ -345,13 +354,15 @@ func (b *blockService) processScheduledBlocks(ctx context.Context, now time.Time
 			return true
 		}
 		if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
-			if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				blockJob.dataAvailabilityAttempts++
 				if blockJob.dataAvailabilityAttempts >= maxDataAvailabilityRetries {
 					b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
 				} else {
-					blockJob.retryAfter = now.Add(dataAvailabilityRetryInterval)
+					blockJob.retryAfter = b.currentTime().Add(dataAvailabilityRetryInterval)
 				}
+			} else {
+				blockJob.retryAfter = b.currentTime().Add(dataAvailabilityRetryInterval)
 			}
 			log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
 			return true

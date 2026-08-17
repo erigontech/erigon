@@ -50,17 +50,25 @@ func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing
 
 type dataUnavailableStore struct {
 	*mock_services.ForkChoiceStorageMock
-	onBlockCalls int
+	onBlockCalls  int
+	onBlockResult error
+	afterOnBlock  func()
 }
 
 func (s *dataUnavailableStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
 	s.onBlockCalls++
-	return forkchoice.ErrEIP7594ColumnDataNotAvailable
+	if s.afterOnBlock != nil {
+		s.afterOnBlock()
+	}
+	return s.onBlockResult
 }
 
 func newDataUnavailableBlockJob(t *testing.T) (*blockService, *dataUnavailableStore, *cltypes.SignedBeaconBlock) {
 	t.Helper()
-	store := &dataUnavailableStore{ForkChoiceStorageMock: mock_services.NewForkChoiceStorageMock(t)}
+	store := &dataUnavailableStore{
+		ForkChoiceStorageMock: mock_services.NewForkChoiceStorageMock(t),
+		onBlockResult:         forkchoice.ErrEIP7594ColumnDataNotAvailable,
+	}
 	service := &blockService{
 		forkchoiceStore: store,
 		db:              mdbxtest.NewTestDB(t, dbcfg.ChainDB),
@@ -178,7 +186,7 @@ func TestBlockServiceSuccess(t *testing.T) {
 
 	blocks, _, post := tests.GetBellatrixRandom()
 
-	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	blockServiceAPI, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
 	syncedData.OnHeadState(post)
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
@@ -186,7 +194,12 @@ func TestBlockServiceSuccess(t *testing.T) {
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 
-	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
+	require.NoError(t, blockServiceAPI.ProcessMessage(context.Background(), nil, blocks[1]))
+	service := blockServiceAPI.(*blockService)
+	require.True(t, service.seenBlocksCache.Contains(proposerIndexAndSlot{
+		proposerIndex: blocks[1].Block.ProposerIndex,
+		slot:          blocks[1].Block.Slot,
+	}))
 }
 
 func TestDataAvailabilityRetriesAreDelayed(t *testing.T) {
@@ -198,20 +211,58 @@ func TestDataAvailabilityRetriesAreDelayed(t *testing.T) {
 	require.Equal(t, 1, store.onBlockCalls)
 }
 
-func TestDataAvailabilityRetriesAreBounded(t *testing.T) {
-	const retryLimit = 4
+func TestDataAvailabilityRetryDelayStartsAfterAttempt(t *testing.T) {
 	service, store, block := newDataUnavailableBlockJob(t)
+	startedAt := time.Now()
+	finishedAt := startedAt.Add(2 * time.Second)
+	currentTime := startedAt
+	service.now = func() time.Time { return currentTime }
+	store.afterOnBlock = func() { currentTime = finishedAt }
+
+	service.processScheduledBlocks(t.Context(), startedAt)
+
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
+	value, ok := service.blocksScheduledForLaterExecution.Load(blockRoot)
+	require.True(t, ok)
+	require.Equal(t, finishedAt.Add(dataAvailabilityRetryInterval), value.(*blockJob).retryAfter)
+}
 
-	now := time.Now()
-	for attempt := range retryLimit + 1 {
-		service.processScheduledBlocks(t.Context(), now.Add(time.Duration(attempt)*(dataAvailabilityRetryInterval+time.Nanosecond)))
+func TestDataAvailabilityRetriesAreBounded(t *testing.T) {
+	const retryLimit = 4
+	for _, availabilityErr := range []error{
+		forkchoice.ErrEIP4844DataNotAvailable,
+		forkchoice.ErrEIP7594ColumnDataNotAvailable,
+	} {
+		t.Run(availabilityErr.Error(), func(t *testing.T) {
+			service, store, block := newDataUnavailableBlockJob(t)
+			store.onBlockResult = availabilityErr
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+
+			now := time.Now()
+			for attempt := range retryLimit + 1 {
+				service.processScheduledBlocks(t.Context(), now.Add(time.Duration(attempt)*(dataAvailabilityRetryInterval+time.Nanosecond)))
+			}
+
+			require.Equal(t, retryLimit, store.onBlockCalls)
+			_, pending := service.blocksScheduledForLaterExecution.Load(blockRoot)
+			require.False(t, pending)
+		})
 	}
+}
 
-	require.Equal(t, retryLimit, store.onBlockCalls)
-	_, pending := service.blocksScheduledForLaterExecution.Load(blockRoot)
-	require.False(t, pending)
+func TestSchedulingSameBlockPreservesDataAvailabilityRetryBudget(t *testing.T) {
+	service, _, block := newDataUnavailableBlockJob(t)
+	now := time.Now()
+	service.processScheduledBlocks(t.Context(), now)
+	service.scheduleBlockForLaterProcessing(block)
+
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	value, ok := service.blocksScheduledForLaterExecution.Load(blockRoot)
+	require.True(t, ok)
+	require.Equal(t, uint8(1), value.(*blockJob).dataAvailabilityAttempts)
 }
 
 func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {

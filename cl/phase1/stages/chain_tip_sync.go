@@ -178,8 +178,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		// Fetch blocks from the specified range
 		blocks, err := fetchBlocksFromReqResp(ctx, cfg, from, count)
 		if err != nil {
-			// Send error to the error channel and return
-			errCh <- err
+			sendFetchError(ctx, errCh, err)
 			return
 		}
 
@@ -190,6 +189,13 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 			return
 		case <-time.After(time.Second): // Take a short pause before the next iteration
 		}
+	}
+}
+
+func sendFetchError(ctx context.Context, errCh chan<- error, err error) {
+	select {
+	case errCh <- err:
+	case <-ctx.Done():
 	}
 }
 
@@ -206,6 +212,7 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 
 	// Map to keep track of seen block roots
 	seenBlockRoots := make(map[common.Hash]struct{})
+	dataAvailabilityRetryAfter := make(map[common.Hash]time.Time)
 MainLoop:
 	for {
 		select {
@@ -251,6 +258,9 @@ MainLoop:
 				if _, ok := seenBlockRoots[blockRoot]; ok {
 					continue
 				}
+				if retryAfter, ok := dataAvailabilityRetryAfter[blockRoot]; ok && time.Now().Before(retryAfter) {
+					continue
+				}
 
 				// [GLOAS] Apply parent's envelope before processBlock so that
 				// latestBlockHash is up-to-date for bid validation.
@@ -263,9 +273,23 @@ MainLoop:
 					}
 				}
 
-				// Require data availability before a chain-tip block enters fork choice.
-				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, true); err != nil {
+				if err := acquireRecentBlockDataAvailability(ctx, cfg, block); err != nil {
+					log.Debug("failed to acquire chain-tip data columns", "err", err, "blockSlot", block.Block.Slot)
+					if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+						dataAvailabilityRetryAfter[blockRoot] = time.Now().Add(time.Second)
+						continue
+					}
+					seenBlockRoots[blockRoot] = struct{}{}
+					continue
+				}
+
+				checkDataAvailability := block.Version() < clparams.GloasVersion
+				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, checkDataAvailability); err != nil {
 					log.Debug("failed to process chain-tip block", "err", err, "blockSlot", block.Block.Slot)
+					if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+						dataAvailabilityRetryAfter[blockRoot] = time.Now().Add(time.Second)
+						continue
+					}
 					seenBlockRoots[blockRoot] = struct{}{}
 					continue
 				}

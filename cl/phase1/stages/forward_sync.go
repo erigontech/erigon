@@ -62,14 +62,19 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
+		if err = acquireRecentBlockDataAvailability(ctx, cfg, block); err != nil {
+			if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot)
+				return newHighestBlockProcessed, nil
+			}
+			return newHighestBlockProcessed, err
+		}
+
 		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, false); err != nil {
+		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, requiresRecentBlockDataAvailability(cfg, block)); err != nil {
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot, "err", err)
-				if newHighestBlockProcessed == 0 {
-					return 0, nil
-				}
-				return newHighestBlockProcessed - 1, nil
+				return newHighestBlockProcessed, nil
 			}
 			if errors.Is(err, forkchoice.ErrMissingSegment) {
 				// Parent state not available — likely peer returned incomplete chain.

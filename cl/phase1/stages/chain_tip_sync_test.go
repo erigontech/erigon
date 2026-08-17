@@ -48,6 +48,23 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
+func TestSendFetchErrorReturnsAfterCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	done := make(chan struct{})
+	go func() {
+		sendFetchError(ctx, make(chan error), errors.New("fetch failed"))
+		close(done)
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("error sender blocked after cancellation")
+	}
+}
+
 func TestChainTipSyncChecksFuluDataAvailability(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
@@ -90,29 +107,30 @@ func TestChainTipSyncChecksFuluDataAvailability(t *testing.T) {
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	errCheckReached := errors.New("data availability check reached")
-	errCh := make(chan error, 1)
 	ctrl := gomock.NewController(t)
+	stageClock := eth_clock.NewMockEthereumClock(ctrl)
+	stageClock.EXPECT().GetCurrentSlot().Return(block.Block.Slot).AnyTimes()
 	peerDas := dasmock.NewMockPeerDas(ctrl)
-	peerDas.EXPECT().
-		IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).
-		DoAndReturn(func(uint64, common.Hash) (bool, error) {
-			errCh <- errCheckReached
-			return false, nil
-		})
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(false, nil)
+	peerDas.EXPECT().IsArchivedMode().Return(false)
+	peerDas.EXPECT().DownloadOnlyCustodyColumns(gomock.Any(), gomock.Any()).Return(nil)
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(false, nil)
 	store.InitPeerDas(peerDas)
 
 	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
 	respCh <- &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{block}}
-	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	errCh := make(chan error)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
 	defer cancel()
 
 	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), &Cfg{
 		beaconCfg:  &cfg,
+		ethClock:   stageClock,
 		forkChoice: store,
 		indiciesDB: db,
+		peerDas:    peerDas,
 	}, Args{targetSlot: block.Block.Slot}, respCh, errCh)
-	require.ErrorIs(t, err, errCheckReached)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
 	_, imported := store.GetHeader(common.Hash(blockRoot))
 	require.False(t, imported)
 }

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -50,6 +51,29 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
+
+func TestStoreProducedDataColumns(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.NumberOfColumns = 2
+	blockRoot := common.Hash{1}
+	columns := []*cltypes.DataColumnSidecar{{Index: 0}, {Index: 1}}
+
+	ctrl := gomock.NewController(t)
+	storage := blobstoragemock.NewMockDataColumnStorage(ctrl)
+	for _, column := range columns {
+		storage.EXPECT().WriteColumnSidecars(gomock.Any(), blockRoot, int64(column.Index), column).Return(nil)
+	}
+	require.NoError(t, storeProducedDataColumns(t.Context(), storage, &cfg, blockRoot, columns))
+}
+
+func TestStoreProducedDataColumnsRequiresEveryColumn(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.NumberOfColumns = 2
+	storage := blobstoragemock.NewMockDataColumnStorage(gomock.NewController(t))
+
+	err := storeProducedDataColumns(t.Context(), storage, &cfg, common.Hash{}, []*cltypes.DataColumnSidecar{{Index: 0}})
+	require.Error(t, err)
+}
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{

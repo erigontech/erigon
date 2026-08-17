@@ -17,6 +17,7 @@
 package das
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
@@ -28,6 +29,44 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/common"
 )
+
+func TestSyncColumnDataLaterStoresCompactFuluBlock(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	d := &peerdas{}
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, d.SyncColumnDataLater(block))
+
+	value, ok := d.blocksToCheckSync[common.Hash(blockRoot)]
+	require.True(t, ok)
+	queued, compact := value.block.(*deferredColumnSyncBlock)
+	require.True(t, compact)
+	require.Equal(t, block.Block.Slot, queued.slot)
+	require.Equal(t, common.Hash(blockRoot), queued.root)
+	require.Equal(t, block.Block.Body.BlobKzgCommitments.Len(), queued.commitments.Len())
+}
+
+func TestSyncColumnDataLaterBoundsQueue(t *testing.T) {
+	const queueLimit = maxDeferredColumnSyncBlocks
+	cfg := clparams.MainnetBeaconConfig
+	d := &peerdas{}
+	for slot := uint64(1); slot <= queueLimit+1; slot++ {
+		block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+		block.Block.Slot = slot
+		block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+		require.NoError(t, d.SyncColumnDataLater(block))
+	}
+
+	require.LessOrEqual(t, len(d.blocksToCheckSync), queueLimit)
+}
+
+func TestDownloadOnlyCustodyColumnsWithoutRPC(t *testing.T) {
+	d := &peerdas{}
+	require.Error(t, d.DownloadOnlyCustodyColumns(context.Background(), nil))
+}
 
 // initTestBeaconConfig installs cfg as the global config if no test has done so
 // yet. InitGlobalStaticConfig panics on a second call, so tests in this package
