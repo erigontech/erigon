@@ -725,6 +725,23 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
 
+	// sync.Cond has no notion of a context, so a caller that goes away while parked below would
+	// sleep until the next block broadcast the condition, or forever while the chain is stalled.
+	// Broadcasting on cancellation wakes it; every waiter rechecks its own condition anyway. The
+	// broadcast takes the lock so it cannot land between the check below and the wait, which is the
+	// window where a wakeup would be lost.
+	waitDone := make(chan struct{})
+	defer close(waitDone)
+	go func() {
+		select {
+		case <-ctx.Done():
+			p.lock.Lock()
+			p.lastSeenCond.Broadcast()
+			p.lock.Unlock()
+		case <-waitDone:
+		}
+	}()
+
 	p.lock.Lock()
 	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
 		select {
