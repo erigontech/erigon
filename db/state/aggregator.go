@@ -55,6 +55,7 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
@@ -96,6 +97,7 @@ type Aggregator struct {
 	// domains' visible ends while set; Close clears it (shutdown is not a
 	// fill window).
 	visibilityLoweringForbidden atomic.Bool
+	boundStateCache             *cache.StateCache
 	snapshotBuildSema           *semaphore.Weighted
 
 	disableHistory      bool
@@ -560,6 +562,25 @@ func (a *Aggregator) ForbidVisibilityLowering() {
 	a.visibilityLoweringForbidden.Store(true)
 }
 
+// BindStateCache reconciles a cache with current and future file visibility.
+func (a *Aggregator) BindStateCache(stateCache *cache.StateCache) {
+	if stateCache == nil {
+		return
+	}
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	if a.boundStateCache != nil && a.boundStateCache != stateCache {
+		panic("assert: aggregator already has a different StateCache")
+	}
+	if stateCache.FillsEnabled() {
+		a.visibilityLoweringForbidden.Store(true)
+	}
+	a.boundStateCache = stateCache
+	if visible := a.visible.Load(); visible != nil {
+		a.reconcileCachesLocked(visible)
+	}
+}
+
 func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
@@ -729,6 +750,7 @@ func (a *Aggregator) WaitForFiles() {
 func (a *Aggregator) Close() {
 	a.dirtyFilesLock.Lock()
 	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
+	a.boundStateCache = nil
 	a.dirtyFilesLock.Unlock()
 	a.WaitForFiles()
 	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
@@ -1920,6 +1942,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 			}
 		}
 	}
+	a.reconcileCachesLocked(next)
 
 	old := a.visible.Load()
 	old.retired = retired
@@ -1929,6 +1952,24 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
 	reclaimFiles(a.reclaimRetiredLocked())
+}
+
+// Cache reconciliation precedes visible.Store so readers cannot combine new
+// files with entries from the previous visibility generation.
+func (a *Aggregator) reconcileCachesLocked(visible *aggregatorVisible) {
+	if a.boundStateCache != nil {
+		a.boundStateCache.Applier().ReconcileFiles(cache.FrontierFunc(func(domain kv.Domain) (uint64, bool) {
+			domainVisible := visible.d[domain]
+			if domainVisible == nil {
+				return 0, false
+			}
+			return visibleFiles(domainVisible.files).EndTxNum(), true
+		}))
+	}
+	commitmentDomain := a.d[kv.CommitmentDomain]
+	if commitmentDomain != nil && commitmentDomain.branchCache != nil && visible.d[kv.CommitmentDomain] != nil {
+		commitmentDomain.branchCache.ReconcileFiles(visibleFiles(visible.d[kv.CommitmentDomain].files).EndTxNum())
+	}
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors

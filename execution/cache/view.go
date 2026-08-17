@@ -380,3 +380,21 @@ func (a Applier) Clear() {
 	}
 	a.c.clear()
 }
+
+// ReconcileFiles advances admission past state published through immutable
+// files and clears entries when the cache has not already applied that state.
+func (a Applier) ReconcileFiles(frontier Frontier) {
+	if a.c == nil || frontier == nil {
+		return
+	}
+	a.c.reconcileFiles(frontier)
+}
+
+// AdvanceCommit records that no domain updates were missed through txN without
+// changing the per-domain fill-admission frontiers.
+func (a Applier) AdvanceCommit(txN uint64) {
+	if a.c == nil {
+		return
+	}
+	a.c.advanceCommit(txN)
+}

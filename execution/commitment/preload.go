@@ -69,6 +69,7 @@ func (p *ContractTrunkPreload) Run(
 	if additionalBudgetBytes <= 0 {
 		return 0, len(p.queue) == 0, nil
 	}
+	cacheView := cache.View()
 
 	chunkUsedBytes := 0
 	chunkPinned := 0
@@ -94,7 +95,7 @@ func (p *ContractTrunkPreload) Run(
 		}
 		p.queue = p.queue[1:]
 
-		cache.PinEntry(prefix, v, step, p.pinTxNum)
+		cacheView.PinEntry(prefix, v, step, p.pinTxNum)
 		p.pinnedPrefixes = append(p.pinnedPrefixes, prefix)
 		chunkUsedBytes += entryCost
 		chunkPinned++

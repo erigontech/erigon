@@ -995,6 +995,62 @@ func TestStateCache_ReaderAheadOfApplyWindowCanFill(t *testing.T) {
 		"a reader ahead of appliedEnd is the normal commit-then-apply window, not a dead fork")
 }
 
+func TestStateCacheReconcileFilesClearsAndFencesOlderViews(t *testing.T) {
+	t.Setenv("STATE_CACHE_FILLS", "true")
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	older := sc.View(frontierAt(100))
+	older.Fill(kv.AccountsDomain, key, makeValue(1), 90)
+	_, ok := sc.get(kv.AccountsDomain, key)
+	require.True(t, ok)
+
+	sc.Applier().ReconcileFiles(frontierAt(150))
+	_, ok = sc.get(kv.AccountsDomain, key)
+	require.False(t, ok)
+
+	older.Fill(kv.AccountsDomain, key, makeValue(1), 90)
+	_, ok = sc.get(kv.AccountsDomain, key)
+	require.False(t, ok)
+
+	sc.View(frontierAt(150)).Fill(kv.AccountsDomain, key, makeValue(2), 140)
+	value, ok := sc.get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, makeValue(2), value)
+}
+
+func TestStateCacheReconcileFilesPreservesAppliedState(t *testing.T) {
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	key := makeAddr(1)
+	sc.apply(kv.AccountsDomain, key, makeValue(1), 50)
+	sc.Applier().AdvanceCommit(149)
+	sc.Applier().ReconcileFiles(frontierAt(150))
+
+	value, ok := sc.get(kv.AccountsDomain, key)
+	require.True(t, ok)
+	require.Equal(t, makeValue(1), value)
+}
+
+func TestStateCacheInitializePreservesFileFrontier(t *testing.T) {
+	t.Setenv("STATE_CACHE_FILLS", "true")
+	b := 1 * datasize.MB
+	sc := NewStateCache(b, b, b, b)
+	t.Cleanup(sc.Close)
+
+	sc.Applier().ReconcileFiles(frontierAt(150))
+	sc.Applier().Initialize(1)
+	key := makeAddr(1)
+	sc.View(frontierAtVersion(100, 1)).Fill(kv.AccountsDomain, key, makeValue(1), 90)
+
+	_, ok := sc.get(kv.AccountsDomain, key)
+	require.False(t, ok)
+}
+
 func TestStateCache_PreReorgViewCannotFillAfterUnwind(t *testing.T) {
 	b := 1 * datasize.MB
 	sc := NewStateCache(b, b, b, b)

@@ -19,6 +19,7 @@ package commitment
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"os"
 	"sync"
 	"sync/atomic"
@@ -76,7 +77,13 @@ type BranchCache struct {
 
 	putStripes [256]sync.Mutex
 
-	coh coherence.Gen
+	// appliedEnd gates read-sourced writes. coveredEnd also tracks quiet commits
+	// so locally built files do not churn the cache.
+	filesEnd   atomic.Uint64
+	appliedEnd atomic.Uint64
+	coveredEnd atomic.Uint64
+	fillEpoch  atomic.Uint64
+	coh        coherence.Gen
 }
 
 type branchCacheEntry struct {
@@ -84,6 +91,12 @@ type branchCacheEntry struct {
 	step  uint64 // on-disk file step; 0 = untracked
 	txN   uint64 // write txN, upper bound of validity; 0 = frozen/untracked
 	epoch uint32
+}
+
+// BranchCacheView binds read fills to one file-visibility generation.
+type BranchCacheView struct {
+	cache     *BranchCache
+	fillEpoch uint64
 }
 
 // MissCallback runs on the hot read path when lookup misses every tier that
@@ -504,8 +517,17 @@ func (c *BranchCache) store(prefix []byte, entry *branchCacheEntry) {
 	c.tailForWrite().Add(maphash.Hash(prefix), entry)
 }
 
-// PinEntry copies data; safe to mutate the input after the call.
+// PinEntry copies data. txN identifies the state view used to load the entry.
 func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
+	c.View().PinEntry(prefix, data, step, txN)
+}
+
+// PinEntry adds a pinned entry read through this view.
+func (v BranchCacheView) PinEntry(prefix []byte, data []byte, step, txN uint64) {
+	if v.cache == nil {
+		return
+	}
+	c := v.cache
 	if isCommitmentStateKey(prefix) {
 		return
 	}
@@ -515,6 +537,9 @@ func (c *BranchCache) PinEntry(prefix []byte, data []byte, step, txN uint64) {
 	stripe := c.putStripe(prefix)
 	stripe.Lock()
 	defer stripe.Unlock()
+	if c.closed.Load() || v.fillEpoch != c.fillEpoch.Load() || exclusiveTxEnd(txN) < c.appliedEnd.Load() {
+		return
+	}
 
 	entry := &branchCacheEntry{data: dataCopy, step: step, txN: txN, epoch: c.coh.Epoch()}
 	var nibBuf [4]byte
@@ -559,8 +584,36 @@ func (c *BranchCache) Get(prefix []byte) ([]byte, uint64, bool) {
 	return entry.data, entry.step, true
 }
 
-// Put copies the input data.
+// View returns a cache handle for one backing read view.
+func (c *BranchCache) View() BranchCacheView {
+	if c == nil {
+		return BranchCacheView{}
+	}
+	return BranchCacheView{cache: c, fillEpoch: c.fillEpoch.Load()}
+}
+
+func (v BranchCacheView) Get(prefix []byte) ([]byte, uint64, bool) {
+	if v.cache == nil {
+		return nil, 0, false
+	}
+	return v.cache.Get(prefix)
+}
+
+// Put applies an authoritative branch value and copies the input data.
 func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
+	c.put(prefix, data, step, txN, exclusiveTxEnd(txN), true, 0)
+}
+
+// Fill offers an entry read through this view. It is dropped if the view's
+// frontier or file-visibility generation is behind cache publication.
+func (v BranchCacheView) Fill(prefix []byte, data []byte, step, txN, visibleEnd uint64) {
+	if v.cache == nil {
+		return
+	}
+	v.cache.put(prefix, data, step, txN, visibleEnd, false, v.fillEpoch)
+}
+
+func (c *BranchCache) put(prefix []byte, data []byte, step, txN, sourceEnd uint64, authoritative bool, fillEpoch uint64) {
 	if isCommitmentStateKey(prefix) {
 		return
 	}
@@ -570,6 +623,15 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 	stripe := c.putStripe(prefix)
 	stripe.Lock()
 	defer stripe.Unlock()
+	if c.closed.Load() || !authoritative && fillEpoch != c.fillEpoch.Load() {
+		return
+	}
+	if sourceEnd < c.appliedEnd.Load() {
+		return
+	}
+	if authoritative {
+		c.advanceAppliedEnd(sourceEnd)
+	}
 
 	c.store(prefix, &branchCacheEntry{
 		data:  dataCopy,
@@ -577,6 +639,68 @@ func (c *BranchCache) Put(prefix []byte, data []byte, step, txN uint64) {
 		txN:   txN,
 		epoch: c.coh.Epoch(),
 	})
+}
+
+func exclusiveTxEnd(txN uint64) uint64 {
+	if txN == math.MaxUint64 {
+		return txN
+	}
+	return txN + 1
+}
+
+func (c *BranchCache) advanceAppliedEnd(end uint64) {
+	for current := c.appliedEnd.Load(); end > current; current = c.appliedEnd.Load() {
+		if c.appliedEnd.CompareAndSwap(current, end) {
+			break
+		}
+	}
+	c.advanceCoveredEnd(end)
+}
+
+func (c *BranchCache) advanceCoveredEnd(end uint64) {
+	for current := c.coveredEnd.Load(); end > current; current = c.coveredEnd.Load() {
+		if c.coveredEnd.CompareAndSwap(current, end) {
+			return
+		}
+	}
+}
+
+func (c *BranchCache) lowerAppliedEnd(end uint64) {
+	for current := c.appliedEnd.Load(); end < current; current = c.appliedEnd.Load() {
+		if c.appliedEnd.CompareAndSwap(current, end) {
+			break
+		}
+	}
+	for current := c.coveredEnd.Load(); end < current; current = c.coveredEnd.Load() {
+		if c.coveredEnd.CompareAndSwap(current, end) {
+			return
+		}
+	}
+}
+
+// AdvanceCommit records a successful authoritative commit without treating a
+// quiet range as a branch mutation.
+func (c *BranchCache) AdvanceCommit(txN uint64) {
+	if c == nil {
+		return
+	}
+	c.advanceCoveredEnd(exclusiveTxEnd(txN))
+}
+
+// Delete applies an authoritative branch deletion.
+func (c *BranchCache) Delete(prefix []byte, txN uint64) {
+	if c == nil || isCommitmentStateKey(prefix) {
+		return
+	}
+	end := exclusiveTxEnd(txN)
+	stripe := c.putStripe(prefix)
+	stripe.Lock()
+	defer stripe.Unlock()
+	if end < c.appliedEnd.Load() {
+		return
+	}
+	c.advanceAppliedEnd(end)
+	c.Invalidate(prefix)
 }
 
 func (c *BranchCache) Invalidate(prefix []byte) {
@@ -606,14 +730,42 @@ func (c *BranchCache) Invalidate(prefix []byte) {
 // Unwind is O(1) and scan-free: it bumps the epoch and lowers the unwind
 // floor, so stale entries drop lazily on their next Get.
 func (c *BranchCache) Unwind(unwindToTxN uint64) {
+	c.lockAllPutStripes()
+	defer c.unlockAllPutStripes()
+	c.fillEpoch.Add(1)
 	c.coh.Unwind(unwindToTxN)
+	c.lowerAppliedEnd(unwindToTxN)
+}
+
+// ReconcileFiles invalidates entries when visible files advance beyond the
+// latest authoritative state observed by this cache.
+func (c *BranchCache) ReconcileFiles(filesEnd uint64) {
+	if c == nil || c.closed.Load() || filesEnd == c.filesEnd.Load() {
+		return
+	}
+	c.lockAllPutStripes()
+	defer c.unlockAllPutStripes()
+	if c.closed.Load() || filesEnd == c.filesEnd.Load() {
+		return
+	}
+	if filesEnd < c.filesEnd.Load() || filesEnd > c.coveredEnd.Load() {
+		c.fillEpoch.Add(1)
+		c.clearLocked()
+		c.advanceAppliedEnd(filesEnd)
+	}
+	c.filesEnd.Store(filesEnd)
+	c.advanceCoveredEnd(filesEnd)
 }
 
 // Clear holds every writer stripe so a publication cannot cross generations.
 func (c *BranchCache) Clear() {
 	c.lockAllPutStripes()
 	defer c.unlockAllPutStripes()
+	c.fillEpoch.Add(1)
+	c.clearLocked()
+}
 
+func (c *BranchCache) clearLocked() {
 	c.root.Store(nil)
 	c.clearTrunk()
 	c.pinned.Store(nil)

@@ -132,6 +132,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 	if stepBudgetBytes <= 0 {
 		return 0, p.queueEmpty(), nil
 	}
+	cacheView := cache.View()
 	defer p.releaseScratch()
 
 	stepCap := p.usedBytes + stepBudgetBytes
@@ -148,7 +149,7 @@ func (p *ContractTrunkPreloadParallel) Run(
 		// source step, and the pinTxNum stamp already gives unwind coherence — the
 		// floor drops a preloaded pin before the cStep<=maxStep gate is consulted,
 		// so leaving step unset only keeps that gate trivially true for live pins.
-		cache.PinEntry(pk.key, v, 0, p.pinTxNum)
+		cacheView.PinEntry(pk.key, v, 0, p.pinTxNum)
 		p.pinnedPrefixes = append(p.pinnedPrefixes, pk.key)
 		p.usedBytes += cost
 		p.pinned++

@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/cache"
 )
 
 // generateStandaloneIIFile writes files with a hardcoded step size of 10.
@@ -259,4 +260,72 @@ func TestVisibilityLowering_GuardsHistoryIIEnd(t *testing.T) {
 
 	require.Panics(t, func() { agg.recalcVisibleFiles(nil) },
 		"lowering a history-II end while values ends stay put must trip the forbid assert")
+}
+
+func TestFilePublicationClearsStaleBranchCache(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	branchCache := agg.d[kv.CommitmentDomain].branchCache
+	require.NotNil(t, branchCache)
+	prefix := []byte{0x01}
+	branchCache.Put(prefix, []byte{0xbb}, 0, 5)
+	_, _, ok := branchCache.Get(prefix)
+	require.True(t, ok)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	_, _, ok = branchCache.Get(prefix)
+	require.False(t, ok)
+}
+
+func TestFilePublicationReconcilesStateCache(t *testing.T) {
+	t.Setenv("STATE_CACHE_FILLS", "true")
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	t.Cleanup(stateCache.Close)
+	agg.BindStateCache(stateCache)
+
+	key := make([]byte, 20)
+	key[0] = 1
+	older := stateCache.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 10, true }))
+	older.Fill(kv.AccountsDomain, key, []byte{1}, 5)
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.True(t, ok)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok)
+	older.Fill(kv.AccountsDomain, key, []byte{1}, 5)
+	_, ok = stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok)
+}
+
+func TestBindStateCacheReconcilesExistingFiles(t *testing.T) {
+	t.Setenv("STATE_CACHE_FILLS", "true")
+	_, agg := testDbAndAggregatorv3(t, alignStepSize)
+
+	generateStateFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateCommitmentFile(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	generateStandaloneIIFiles(t, agg.Dirs(), []testFileRange{{0, 1}, {1, 2}})
+	require.NoError(t, agg.OpenFolder())
+
+	stateCache := cache.NewStateCache(1<<20, 1<<20, 1<<20, 1<<20)
+	t.Cleanup(stateCache.Close)
+	agg.BindStateCache(stateCache)
+
+	key := make([]byte, 20)
+	key[0] = 1
+	stateCache.View(cache.FrontierFunc(func(kv.Domain) (uint64, bool) { return 10, true })).Fill(
+		kv.AccountsDomain, key, []byte{1}, 5)
+	_, ok := stateCache.View(nil).Get(kv.AccountsDomain, key)
+	require.False(t, ok)
 }

@@ -136,7 +136,7 @@ func (m *domainVisibleEndMemo) load(tx kv.TemporalTx, domain kv.Domain, viewID u
 		state = 0
 		m.viewID.Store(viewID)
 	}
-	end, ok := tx.Debug().DomainVisibleEnd(domain)
+	end, ok := debugDomainVisibleEnd(tx, domain)
 	m.ends[domain].Store(end)
 	state |= loadedBit
 	if ok {
@@ -159,7 +159,15 @@ func (sd *SharedDomains) domainVisibleEnd(tx kv.TemporalTx, domain kv.Domain) (u
 	if _, ok := tx.(kv.TemporalRwTx); ok {
 		return sd.visibleEnds.get(tx, domain)
 	}
-	return tx.Debug().DomainVisibleEnd(domain)
+	return debugDomainVisibleEnd(tx, domain)
+}
+
+func debugDomainVisibleEnd(tx kv.TemporalTx, domain kv.Domain) (uint64, bool) {
+	debugTx := tx.Debug()
+	if debugTx == nil {
+		return 0, false
+	}
+	return debugTx.DomainVisibleEnd(domain)
 }
 
 // sdFrontier adapts one (SharedDomains, tx) pair to cache.Frontier: writable
@@ -946,27 +954,22 @@ func (sd *SharedDomains) BindStateCache(stateCache *cache.StateCache) {
 	sd.cacheApplier.Initialize(sd.baseStateVersion)
 }
 
-// GuardAggregatorForCache forbids visibility lowering on db's aggregator when
-// sc is a fill-enabled StateCache: fill admission relies on view frontiers
-// never decreasing. This is the one place that binds the invariant — call it
-// wherever a fill-enabled cache is wired over a DB. Duck-typed so the storage
-// layer need not know the cache type (and vice versa) — but load-bearing, so
-// a db that cannot produce its aggregator fails loudly instead of silently
-// dropping the guard. A nil or apply-only cache needs no guard.
+// GuardAggregatorForCache binds a StateCache to immutable-file
+// publication. An incompatible DB panics because omitting this fence is unsafe.
 func GuardAggregatorForCache(db any, sc *cache.StateCache) {
-	if sc == nil || !sc.FillsEnabled() {
+	if sc == nil {
 		return
 	}
 	h, ok := db.(interface{ Agg() any })
 	if !ok {
-		panic(fmt.Sprintf("assert: fill-enabled StateCache wired over %T, which cannot produce its aggregator — the visibility-lowering guard would be silently dropped", db))
+		panic(fmt.Sprintf("assert: StateCache wired over %T, which cannot produce its aggregator — file-publication coherence would be silently dropped", db))
 	}
 	agg := h.Agg()
-	f, ok := agg.(interface{ ForbidVisibilityLowering() })
+	binder, ok := agg.(interface{ BindStateCache(*cache.StateCache) })
 	if !ok {
-		panic(fmt.Sprintf("assert: aggregator %T lacks ForbidVisibilityLowering — the visibility-lowering guard would be silently dropped", agg))
+		panic(fmt.Sprintf("assert: aggregator %T lacks BindStateCache — file-publication coherence would be silently dropped", agg))
 	}
-	f.ForbidVisibilityLowering()
+	binder.BindStateCache(sc)
 }
 
 // SetCodeStore sets the persistent codehash-keyed code cache.
@@ -1319,10 +1322,13 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	for i := range pendingBranches {
 		u := &pendingBranches[i]
 		if len(u.val) == 0 {
-			sd.branchCache.Invalidate(u.key)
+			sd.branchCache.Delete(u.key, u.txN)
 		} else {
 			sd.branchCache.Put(u.key, u.val, uint64(u.step), u.txN)
 		}
+	}
+	if sd.branchCache != nil {
+		sd.branchCache.AdvanceCommit(sd.txNum)
 	}
 	if sd.stateCache != nil {
 		if sd.cacheUnwind.pending {
@@ -1330,6 +1336,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 		} else {
 			sd.cacheApplier.Publish(sourceStateVersion, committedStateVersion, pendingState)
 		}
+		sd.cacheApplier.AdvanceCommit(sd.txNum)
 		sd.cacheUnwind = cacheUnwindState{}
 	}
 	return nil
@@ -1485,8 +1492,10 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	// branchCache sits between sd.mem/parent.mem and the aggTx files for
 	// CommitmentDomain only. Snapshot-isolated readers must disable it because
 	// concurrent commits can advance the cache beyond their transaction view.
+	var branchView commitment.BranchCacheView
 	if domain == kv.CommitmentDomain && sd.branchCache != nil {
-		if cv, cStepU64, ok := sd.branchCache.Get(k); ok {
+		branchView = sd.branchCache.View()
+		if cv, cStepU64, ok := branchView.Get(k); ok {
 			// Get returns the on-disk step index directly — do NOT divide by
 			// StepSize (that double-division collapsed cStep to ~0, defeating the
 			// gate).
@@ -1527,11 +1536,12 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			fillView.Fill(domain, k, v, readTxNum)
 		}
 	}
-	// Only cache a branch when the read's txN is known: a txN=0 entry would
-	// be treated as immortal by UnwindTo, so skip the Put rather than insert
-	// an entry that can never be unwind-evicted.
+	// Only cache a branch when its txN and the read view's exact frontier are
+	// known. Both are needed to fence unwinds and file publication.
 	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 && txNKnown {
-		sd.branchCache.Put(k, v, uint64(step), readTxN)
+		if visibleEnd, ok := sd.domainVisibleEnd(tx, domain); ok {
+			branchView.Fill(k, v, uint64(step), readTxN, visibleEnd)
+		}
 	}
 
 	return v, step, nil

@@ -61,13 +61,17 @@ type StateCache struct {
 	applierMu sync.Mutex
 	// admissionMu protects fill eligibility and publication identity.
 	// publishing disables admission-gated fills while an update is incomplete.
-	admissionMu       sync.RWMutex
-	publishing        bool
+	admissionMu sync.RWMutex
+	publishing  bool
+	// appliedEnd gates read fills after domain mutations. coveredEnd also tracks
+	// quiet commits, while filesEnd survives state-version resets.
 	appliedEnd        [kv.DomainLen]uint64
+	coveredEnd        [kv.DomainLen]uint64
+	filesEnd          [kv.DomainLen]uint64
 	stateVersion      uint64
 	stateVersionKnown bool
-	// readViewEpoch lets an unwind or state-version discontinuity revoke fill
-	// authority from all older ReadViews. Per-cache entry epochs instead stamp
+	// readViewEpoch lets an unwind, file publication, or state-version
+	// discontinuity revoke fill authority from older ReadViews. Entry epochs stamp
 	// stored values and also advance on Clear; sharing them would make an
 	// ordinary Clear revoke otherwise valid read views.
 	readViewEpoch atomic.Uint64
@@ -201,10 +205,8 @@ func (c *StateCache) putCodeSizeByHash(codeHash []byte, size int, txNum uint64) 
 }
 
 // FillsEnabled reports whether reader fills are active (STATE_CACHE_FILLS).
-// Wire-up code uses it to decide whether the backing aggregator must forbid
-// visibility lowering: fill admission relies on view frontiers never
-// decreasing, and apply-only caches have nothing for a lowered frontier to
-// poison.
+// The backing aggregator uses it to decide whether visibility lowering must be
+// forbidden; immutable-file publication is reconciled in either mode.
 func (c *StateCache) FillsEnabled() bool { return !c.disableFills }
 
 // getAddrCodeHash returns the Ethereum codeHash for addr without an
@@ -389,6 +391,9 @@ func (c *StateCache) noteApplied(domain kv.Domain, txNum uint64) {
 	if end > c.appliedEnd[domain] {
 		c.appliedEnd[domain] = end
 	}
+	if end > c.coveredEnd[domain] {
+		c.coveredEnd[domain] = end
+	}
 }
 
 // clear removes all mutable entries from all caches. The admission frontier
@@ -410,12 +415,60 @@ func (c *StateCache) clearLocked() {
 	}
 }
 
+func (c *StateCache) reconcileFiles(frontier Frontier) {
+	c.applierMu.Lock()
+	defer c.applierMu.Unlock()
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+
+	extended := false
+	for _, domain := range kv.StateDomains {
+		if c.caches[domain] == nil {
+			continue
+		}
+		end, ok := frontier.DomainVisibleEnd(domain)
+		if !ok {
+			continue
+		}
+		if end > c.coveredEnd[domain] {
+			c.coveredEnd[domain] = end
+			c.appliedEnd[domain] = max(c.appliedEnd[domain], end)
+			extended = true
+		}
+		c.filesEnd[domain] = end
+	}
+	if extended {
+		c.readViewEpoch.Add(1)
+		c.clearLocked()
+	}
+}
+
+func (c *StateCache) advanceCommit(txN uint64) {
+	c.applierMu.Lock()
+	defer c.applierMu.Unlock()
+	c.admissionMu.Lock()
+	defer c.admissionMu.Unlock()
+
+	end := txN
+	if end < math.MaxUint64 {
+		end++
+	}
+	for _, domain := range kv.StateDomains {
+		if c.caches[domain] != nil && end > c.coveredEnd[domain] {
+			c.coveredEnd[domain] = end
+		}
+	}
+}
+
 func (c *StateCache) resetForStateVersionLocked() {
 	// Clearing entries is not enough: views bound to the previous state could
 	// otherwise refill them after continuity was lost.
 	c.readViewEpoch.Add(1)
 	c.clearLocked()
-	clear(c.appliedEnd[:])
+	for i := range c.appliedEnd {
+		c.appliedEnd[i] = c.filesEnd[i]
+		c.coveredEnd[i] = c.filesEnd[i]
+	}
 }
 
 // Close releases every sub-cache's slot in the shared memory envelope so later
@@ -450,6 +503,7 @@ func (c *StateCache) unwindLocked(unwindToTxNum uint64) {
 	}
 	for i := range c.appliedEnd {
 		c.appliedEnd[i] = min(c.appliedEnd[i], unwindToTxNum)
+		c.coveredEnd[i] = min(c.coveredEnd[i], unwindToTxNum)
 	}
 }
 
