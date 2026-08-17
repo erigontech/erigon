@@ -92,7 +92,7 @@ func TestVerifyHeaderDifficulty(t *testing.T) {
 	mergeEngine := New(eth1Engine)
 
 	err := mergeEngine.verifyHeader(readerMock{}, header, parent)
-	if err != errInvalidDifficulty {
+	if !errors.Is(err, errInvalidDifficulty) {
 		if err != nil {
 			t.Fatalf("Merge engine should not accept non-zero difficulty, got %s", err.Error())
 		} else {
@@ -114,7 +114,7 @@ func TestVerifyHeaderNonce(t *testing.T) {
 	mergeEngine := New(eth1Engine)
 
 	err := mergeEngine.verifyHeader(readerMock{}, header, parent)
-	if err != errInvalidNonce {
+	if !errors.Is(err, errInvalidNonce) {
 		if err != nil {
 			t.Fatalf("Merge engine should not accept non-zero difficulty, got %s", err.Error())
 		} else {
