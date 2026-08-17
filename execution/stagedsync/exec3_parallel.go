@@ -882,6 +882,8 @@ func (pe *parallelExecutor) cancelAndDrainApplyLoop(warnAfter time.Duration, cau
 func (pe *parallelExecutor) LogExecution() {
 	pe.progress.LogExecution(pe.rs.StateV3, pe)
 	pe.doms.PrintCacheStats()
+	pe.logger.Info(fmt.Sprintf("[%s] compute-ahead", pe.logPrefix), "parallelCommit", computedAheadCount.Load(),
+		"commitComputeTotal", time.Duration(commitmentComputeNs.Load()))
 	if domainMetrics := pe.domains().LogMetrics(); len(domainMetrics) > 0 {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
