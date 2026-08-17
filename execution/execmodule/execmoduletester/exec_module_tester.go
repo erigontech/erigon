@@ -800,6 +800,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		readAheader,
 		func() error { return nil },
 	)
+	mock.ExecModule.FinishStartup()
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
 	mock.StreamWg.Add(1)

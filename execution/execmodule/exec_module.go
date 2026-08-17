@@ -184,11 +184,11 @@ type ExecModule struct {
 
 	// MDBX database
 	db kv.TemporalRwDB // main database
-	// semaphore is the module's single mutual-exclusion domain: it guards the
-	// pipeline Sync and all FCU state. Ops either TryAcquire and report Busy
-	// (retried by the CL) or block, and the background FCU commit/prune
-	// goroutines inherit the semaphore, releasing it only when their work is done.
+	// semaphore guards pipeline Sync and all FCU state. NewExecModule reserves
+	// its permit until startup completes; normal ops report Busy or block, and
+	// background FCU work retains the permit until cleanup completes.
 	semaphore        *semaphore.Weighted
+	startupOnce      sync.Once
 	forkValidator    *ForkValidator
 	pipelineExecutor *PipelineExecutor
 
@@ -259,6 +259,10 @@ func NewExecModule(
 		codeStore = cache.NewCodeStore(cache.DefaultCodeStoreMemBytes, cache.DefaultCodeStoreTableBytes)
 	}
 	forkValidator := newForkValidator(ctx, currentBlockNumber, pipelineExecutor, blockReader, syncCfg.MaxReorgDepth)
+	executionSemaphore := semaphore.NewWeighted(1)
+	if !executionSemaphore.TryAcquire(1) {
+		panic("assert: new execution semaphore rejected its startup reservation")
+	}
 
 	em := &ExecModule{
 		blockReader:             blockReader,
@@ -269,7 +273,7 @@ func NewExecModule(
 		builders:                make(map[uint64]*builder.BlockBuilder),
 		builderFunc:             builderFunc,
 		config:                  config,
-		semaphore:               semaphore.NewWeighted(1),
+		semaphore:               executionSemaphore,
 		hook:                    hook,
 		accum:                   accum,
 		engine:                  engine,
@@ -695,12 +699,10 @@ func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidH
 }
 
 func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
-	if err := e.semaphore.Acquire(ctx, 1); err != nil {
-		if !errors.Is(err, context.Canceled) {
-			e.logger.Error("Could not start execution service", "err", err)
-		}
-		return
-	}
+	e.startupOnce.Do(func() { e.start(ctx, hook) })
+}
+
+func (e *ExecModule) start(ctx context.Context, hook *stageloop.Hook) {
 	defer e.semaphore.Release(1)
 
 	if err := e.pipelineExecutor.ProcessFrozenBlocks(ctx, hook, e.onlySnapDownloadOnStart); err != nil {
@@ -732,6 +734,11 @@ func (e *ExecModule) Start(ctx context.Context, hook *stageloop.Hook) {
 	}); err != nil && !errors.Is(err, context.Canceled) {
 		e.logger.Warn("Could not notify fork validator of current height", "err", err)
 	}
+}
+
+// FinishStartup releases the reservation when this module does not run initial sync.
+func (e *ExecModule) FinishStartup() {
+	e.startupOnce.Do(func() { e.semaphore.Release(1) })
 }
 
 func (e *ExecModule) Ready(ctx context.Context) (bool, error) {

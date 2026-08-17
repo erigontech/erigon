@@ -1473,6 +1473,7 @@ func (s *Ethereum) Start() error {
 	// execution-P2P layer (message listener, peer tracker, publisher),
 	// and the peer-count logger. See node/components/sentry/provider.go.
 	if err := s.sentryProvider.Start(s.sentryCtx); err != nil {
+		s.execModule.FinishStartup()
 		return err
 	}
 
@@ -1487,10 +1488,11 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
-	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
+	switch {
+	case chainspec.IsChainPoS(s.chainConfig, currentTDProvider):
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		go s.execModule.Start(s.sentryCtx, hook)
-	} else if s.chainConfig.Bor != nil {
+	case s.chainConfig.Bor != nil:
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] exeuction server start goroutine completed")
@@ -1513,6 +1515,8 @@ func (s *Ethereum) Start() error {
 			}()
 			return err
 		})
+	default:
+		s.execModule.FinishStartup()
 	}
 
 	if s.txPool != nil {
