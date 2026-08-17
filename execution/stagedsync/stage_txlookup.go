@@ -160,10 +160,15 @@ func txnLookupIntegrity(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 		}
 		emptyHash := common.Hash{}
 		if blockHash != emptyHash {
-			blockHeader = rawdb.ReadHeader(tx, blockHash, i)
+			// blockReader is storage-aware (falls through DB↔files); rawdb
+			// would miss retired blocks for a post-retire-post-prune tx.
+			blockHeader, err = cfg.blockReader.Header(ctx, tx, blockHash, i)
+			if err != nil {
+				return fmt.Errorf("[%s] txnLookup integrity: read header block %d: %w", logPrefix, i, err)
+			}
 			if blockHeader == nil {
 				logger.Warn(fmt.Sprintf("[%s] txnLookup integrity: empty block %d", logPrefix, i))
-				return fmt.Errorf("[%s] txnLookup integrity: header not found in db block: %d", logPrefix, i)
+				return fmt.Errorf("[%s] txnLookup integrity: header not found in db or files block: %d", logPrefix, i)
 			}
 		} else {
 			return fmt.Errorf("[%s] txnLookup integrity: hash not found in db block: %d", logPrefix, i)

@@ -266,7 +266,13 @@ func (e *ExecModule) dispatchUnwindNotifications(ctx context.Context, currentHea
 		return fmt.Errorf("begin ro tx: %w", err)
 	}
 	defer tx.Rollback()
-	header := rawdb.ReadHeader(tx, targetHash, targetBlock)
+	// blockReader is storage-aware (falls through DB↔files) — retired
+	// targets would return nil from raw rawdb.ReadHeader even for a
+	// consistent post-retire tx.
+	header, err := e.blockReader.Header(ctx, tx, targetHash, targetBlock)
+	if err != nil {
+		return fmt.Errorf("read header for target %d hash %x: %w", targetBlock, targetHash, err)
+	}
 	if header == nil {
 		return fmt.Errorf("no header for target %d hash %x", targetBlock, targetHash)
 	}
