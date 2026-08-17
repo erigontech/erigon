@@ -46,17 +46,20 @@ import (
 //     wider pre-merge file at oldBroadPath co-existing with the
 //     narrower regen output is the 2026-06-25 union-cover wedge.
 //
-//   - Split-stub: mode-C emits two files per domain for a mid-step
-//     target — an aligned wide file (step-aligned name) and a stub v4
-//     (mid-step raw-txnum name confined to the target's step). Both
-//     replace the SAME old broad file. The aligned pair carries
-//     oldBroadPath (does the .old dance + retires the broad); the stub
-//     pair leaves oldBroadPath empty so FinalizeUnwind skips the retire
-//     and only lands the new file + Inventory entry. Without the split
-//     the single wide v4 spans multiple steps and overlaps with the
-//     retire that fires when forward-exec crosses the next step
-//     boundary, causing accessor/data-mmap mismatches (leg-M iter 4
-//     mode_a SIGBUS 2026-08-15).
+//   - Split-stub: mode-D (target in a merged/multi-step wide file) emits
+//     two files per domain — an aligned wide file (step-aligned name
+//     covering [FromStep, targetStep)) and a stub v4 (mid-step raw-txnum
+//     name confined to the target's step). Both replace the SAME old
+//     broad file. The aligned pair carries oldBroadPath (does the .old
+//     dance + retires the broad); the stub pair leaves oldBroadPath
+//     empty so FinalizeUnwind skips the retire and only lands the new
+//     file + Inventory entry. Without the split the single wide v4
+//     spans multiple steps and overlaps with the retire that fires
+//     when forward-exec crosses the next step boundary, causing
+//     accessor/data-mmap mismatches (leg-M iter 4 SIGBUS 2026-08-15).
+//     For mode-C (target in a per-step file) only the stub is emitted —
+//     the OLD file already spans one step, there's no wider range to
+//     preserve, and an aligned file would have a 0-width range.
 type regenPair struct {
 	regenPath    string // <snapDir>/domain/<truncatedName>.kv.regen
 	finalPath    string // <snapDir>/domain/<truncatedName>.kv  (truncated name when ToStep narrowed)
@@ -245,14 +248,21 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			// legacy flat-layout case.
 			oldPath := snapshot.ResolveExistingPath(p.snapDir, fileEntry.Name)
 
-			// Split-emit gate: mode-C for a mid-step target with an
-			// aligned compute in hand emits TWO files per straddler —
-			// aligned wide + stub v4 — so the stub is confined to the
-			// target's single step and the aligned peer plays by
-			// normal-merge rules. Non-commitment domains gate on the
-			// aligned compute's presence via commitment's alignedBranches
-			// (they all recompute in lockstep — see plan doc).
-			splitEmit := action == actionRegenTruncate && recompute.alignedBranches != nil
+			// Split-emit gate: mode-D (target in a merged/multi-step wide
+			// file) needs TWO files — aligned wide covering [fromStep,
+			// targetStep) + stub v4 for the head step. Detect mode-D
+			// as: mid-step target (alignedBranches non-nil) AND the OLD
+			// file's fromStep < targetStep (spans more than the target
+			// step alone). For mode-C (per-step straddler, fromStep ==
+			// targetStep) only the stub is needed; the plain v4 truncate
+			// path below handles that.
+			targetStepIdx := kv.Step(0)
+			if recompute.alignedBranches != nil {
+				targetStepIdx = kv.Step((recompute.alignedTxNum + 1) / stepSize)
+			}
+			splitEmit := action == actionRegenTruncate &&
+				recompute.alignedBranches != nil &&
+				kv.Step(fileEntry.FromStep) < targetStepIdx
 
 			// Mode-C boundary regen dispatch:
 			//   - Commitment truncate → WriteCommitmentBoundaryFileV4 (uses the
@@ -449,7 +459,7 @@ func (p *Provider) emitSplitStraddler(
 //   - actionRegenTruncate: file straddles a mid-step unwind target.
 //     Emit under a v4.0 raw-txnum-named path with endTxN = lastTxN+1
 //     so the file's advertised horizon matches its as-of-lastTxN
-//     content (the mode-C completeness invariant restored 2026-08-03).
+//     content (the mode-C/D completeness invariant restored 2026-08-03).
 //   - actionRegenInPlace (or anything else that reaches this helper):
 //     file's endStep already equals the unwind target's step boundary.
 //     Rewrite in place under its own step-aligned name.

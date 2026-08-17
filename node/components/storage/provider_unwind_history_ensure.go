@@ -40,13 +40,13 @@ import (
 //   - The commitment recompute walks accounts/storage/code history via
 //     HistoryKeyTxNumRange to build the touch set (see
 //     execution/commitment/commitmentdb/recompute_sdless.go).
-//   - The mode-C split-emit walks EVERY state domain's history with a
-//     wide straddling file (accounts/storage/code + receipt). Without
-//     receipt's history on disk, overrideActionForDomain deflects the
-//     receipt straddler to actionRemove and the old wide receipt file
-//     is deleted with no replacement, opening a permanent gap in the
-//     aggregator's visible-file set for that step range (leg-M iter 4
-//     mode_b 2026-08-16 recovery wedge).
+//   - The mode-C/D boundary-step emit walks EVERY state domain's
+//     history with a straddling file (accounts/storage/code + receipt).
+//     Without receipt's history on disk, overrideActionForDomain
+//     deflects the receipt straddler to actionRemove and the old wide
+//     receipt file is deleted with no replacement, opening a permanent
+//     gap in the aggregator's visible-file set for that step range
+//     (leg-M iter 4 mode-d recovery wedge 2026-08-16).
 //
 // Non-history files (block seg, tracesfrom/tracesto/logaddrs/logtopics)
 // are never consulted by either consumer and stay excluded.
@@ -337,7 +337,7 @@ func localCommitmentBaselineStep(snapDir string, walkEndStep, stepSize uint64) (
 // partial download that would leave the compute short of touches.
 //
 // The domain assumption mirrors ensureHistoryForUnwindWalk: both the
-// compute walk (accounts/storage/code) and the mode-C split-emit
+// compute walk (accounts/storage/code) and the mode-C/D boundary emit
 // (accounts/storage/code + receipt) require these histories on disk.
 // Non-walked domains (rcache) are excluded — their coverage is not
 // the mode-B unwind's business.

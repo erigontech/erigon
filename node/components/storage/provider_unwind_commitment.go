@@ -33,12 +33,13 @@ import (
 // lastTxNum, plus the branch collector the trie's Process emitted.
 // Apply drains `branches` into the writable shadow AND, in the same
 // pass, mirrors every (k, v) into `regenBranches` so the boundary-
-// step v4 emit (mode C) can iterate the identical set without
-// touching the OLD file. See node/components/storage/provider_unwind_state_regen_wire.go
-// for the commitment-v4 emit that consumes regenBranches.
+// step v4 emit (mode-C for per-step / mode-D for merged) can iterate
+// the identical set without touching the OLD file. See
+// node/components/storage/provider_unwind_state_regen_wire.go for the
+// commitment-v4 emit that consumes regenBranches.
 type commitmentRecomputeResult struct {
 	// Target compute — state as-of lastTxNum. Consumed by Apply (drain
-	// into writable shadow) and by the mode-C stub v4 emit.
+	// into writable shadow) and by the mode-C/D stub v4 emit.
 	lastTxNum        uint64
 	encodedTrieState []byte
 	branches         *etl.Collector // consumed by Apply
