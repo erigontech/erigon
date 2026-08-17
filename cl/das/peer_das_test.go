@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -63,9 +64,64 @@ func TestSyncColumnDataLaterBoundsQueue(t *testing.T) {
 	require.LessOrEqual(t, len(d.blocksToCheckSync), queueLimit)
 }
 
+func TestSyncColumnDataLaterUsesConfiguredFork(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 2
+	cfg.InitializeForkSchedule()
+
+	tests := []struct {
+		name           string
+		blockSlot      uint64
+		decodedVersion clparams.StateVersion
+		wantQueued     bool
+	}{
+		{name: "Fulu slot decoded as Electra", blockSlot: 2 * cfg.SlotsPerEpoch, decodedVersion: clparams.ElectraVersion, wantQueued: true},
+		{name: "Electra slot decoded as Fulu", blockSlot: cfg.SlotsPerEpoch, decodedVersion: clparams.FuluVersion},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &peerdas{beaconConfig: &cfg}
+			block := cltypes.NewSignedBeaconBlock(&cfg, tt.decodedVersion)
+			block.Block.Slot = tt.blockSlot
+			block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+
+			require.NoError(t, d.SyncColumnDataLater(block))
+			job, queued := d.blocksToCheckSync[common.Hash(blockRoot)]
+			require.Equal(t, tt.wantQueued, queued)
+			if tt.wantQueued {
+				require.Equal(t, clparams.FuluVersion, job.block.Version())
+			}
+		})
+	}
+}
+
 func TestDownloadOnlyCustodyColumnsWithoutRPC(t *testing.T) {
 	d := &peerdas{}
 	require.Error(t, d.DownloadOnlyCustodyColumns(context.Background(), nil))
+}
+
+func TestSyncDeferredColumnDataPrunesExpiredJobsWithoutRPC(t *testing.T) {
+	now := time.Now()
+	expiredRoot := common.Hash{1}
+	activeRoot := common.Hash{2}
+	d := &peerdas{blocksToCheckSync: map[common.Hash]deferredColumnSyncJob{
+		expiredRoot: {block: &deferredColumnSyncBlock{}, addedAt: now.Add(-deferredColumnSyncTTL - time.Second)},
+		activeRoot:  {block: &deferredColumnSyncBlock{}, addedAt: now},
+	}}
+
+	d.syncDeferredColumnData(t.Context())
+
+	jobs := d.deferredColumnSyncJobs()
+	require.NotContains(t, jobs, expiredRoot)
+	require.Contains(t, jobs, activeRoot)
 }
 
 // initTestBeaconConfig installs cfg as the global config if no test has done so

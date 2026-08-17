@@ -1123,7 +1123,11 @@ func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRoo
 }
 
 func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
-	if block.Version() < clparams.FuluVersion {
+	blockVersion := block.Version()
+	if d.beaconConfig != nil && d.beaconConfig.SlotsPerEpoch != 0 {
+		blockVersion = d.beaconConfig.GetCurrentStateVersion(block.Block.Slot / d.beaconConfig.SlotsPerEpoch)
+	}
+	if blockVersion < clparams.FuluVersion {
 		return nil
 	}
 	kzgCommitments := block.GetBlobKzgCommitments()
@@ -1137,7 +1141,7 @@ func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
 	queuedBlock := &deferredColumnSyncBlock{
 		slot:        block.Block.Slot,
 		root:        common.Hash(blockRoot),
-		version:     block.Version(),
+		version:     blockVersion,
 		commitments: kzgCommitments.ShallowCopy(),
 	}
 	d.storeDeferredColumnSyncJob(common.Hash(blockRoot), deferredColumnSyncJob{
@@ -1194,76 +1198,84 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 		case <-ctx.Done():
 			return
 		case <-ticker.C:
-			if d.rpc == nil {
-				log.Debug("[syncColumnDataWorker] PeerDAS RPC is not configured")
-				continue
-			}
-			if peersCount, err := d.rpc.Peers(); err != nil {
-				log.Warn("failed to get peers count", "err", err)
-				continue
-			} else if peersCount == 0 {
-				log.Info("[syncColumnDataWorker] no peers available, skipping sync")
-				continue
-			}
+			d.syncDeferredColumnData(ctx)
+		}
+	}
+}
 
-			blocks := []cltypes.ColumnSyncableSignedBlock{}
-			roots := []common.Hash{}
-			for root, job := range d.deferredColumnSyncJobs() {
-				block := job.block
-				if time.Since(job.addedAt) > deferredColumnSyncTTL {
-					d.deleteDeferredColumnSyncJob(root)
-					continue
-				}
-				curSlot := d.ethClock.GetCurrentSlot()
-				if block.GetSlot() > curSlot || curSlot-block.GetSlot() < 5 {
-					continue
-				}
-				available, err := d.IsDataAvailable(block.GetSlot(), root)
-				switch {
-				case err != nil:
-					log.Warn("failed to check if data is available", "err", err)
-				case available:
-					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
-					d.deleteDeferredColumnSyncJob(root)
-				default:
-					blocks = append(blocks, block)
-					roots = append(roots, root)
-				}
-			}
-			if len(blocks) == 0 {
-				continue
-			}
-			log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
-			downloadTimeout := time.Duration(d.beaconConfig.SecondsPerSlot) * time.Second
-			if downloadTimeout <= 0 {
-				downloadTimeout = time.Second
-			}
-			downloadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
-			if d.IsArchivedMode() {
-				if err := d.DownloadColumnsAndRecoverBlobs(downloadCtx, blocks); err != nil {
-					cancel()
-					log.Warn("failed to download columns and recover blobs", "err", err)
-					continue
-				}
-			} else {
-				if err := d.DownloadOnlyCustodyColumns(downloadCtx, blocks); err != nil {
-					cancel()
-					log.Warn("failed to download only custody columns", "err", err)
-					continue
-				}
-			}
+func (d *peerdas) syncDeferredColumnData(ctx context.Context) {
+	jobs := d.deferredColumnSyncJobs()
+	now := time.Now()
+	for root, job := range jobs {
+		if now.Sub(job.addedAt) > deferredColumnSyncTTL {
+			d.deleteDeferredColumnSyncJob(root)
+			delete(jobs, root)
+		}
+	}
+	if d.rpc == nil {
+		log.Debug("[syncColumnDataWorker] PeerDAS RPC is not configured")
+		return
+	}
+	if peersCount, err := d.rpc.Peers(); err != nil {
+		log.Warn("failed to get peers count", "err", err)
+		return
+	} else if peersCount == 0 {
+		log.Info("[syncColumnDataWorker] no peers available, skipping sync")
+		return
+	}
+
+	blocks := make([]cltypes.ColumnSyncableSignedBlock, 0, len(jobs))
+	roots := make([]common.Hash, 0, len(jobs))
+	curSlot := d.ethClock.GetCurrentSlot()
+	for root, job := range jobs {
+		block := job.block
+		if block.GetSlot() > curSlot || curSlot-block.GetSlot() < 5 {
+			continue
+		}
+		available, err := d.IsDataAvailable(block.GetSlot(), root)
+		switch {
+		case err != nil:
+			log.Warn("failed to check if data is available", "err", err)
+		case available:
+			log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
+			d.deleteDeferredColumnSyncJob(root)
+		default:
+			blocks = append(blocks, block)
+			roots = append(roots, root)
+		}
+	}
+	if len(blocks) == 0 {
+		return
+	}
+	log.Debug("[syncColumnDataWorker] syncing column data", "blocks_count", len(blocks))
+	downloadTimeout := time.Duration(d.beaconConfig.SecondsPerSlot) * time.Second
+	if downloadTimeout <= 0 {
+		downloadTimeout = time.Second
+	}
+	downloadCtx, cancel := context.WithTimeout(ctx, downloadTimeout)
+	if d.IsArchivedMode() {
+		if err := d.DownloadColumnsAndRecoverBlobs(downloadCtx, blocks); err != nil {
 			cancel()
-			for i, root := range roots {
-				available, err := d.IsDataAvailable(blocks[i].GetSlot(), root)
-				if err != nil {
-					log.Warn("failed to recheck data column availability", "slot", blocks[i].GetSlot(), "blockRoot", root, "err", err)
-					continue
-				}
-				if available {
-					d.deleteDeferredColumnSyncJob(root)
-					log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
-				}
-			}
+			log.Warn("failed to download columns and recover blobs", "err", err)
+			return
+		}
+	} else {
+		if err := d.DownloadOnlyCustodyColumns(downloadCtx, blocks); err != nil {
+			cancel()
+			log.Warn("failed to download only custody columns", "err", err)
+			return
+		}
+	}
+	cancel()
+	for i, root := range roots {
+		available, err := d.IsDataAvailable(blocks[i].GetSlot(), root)
+		if err != nil {
+			log.Warn("failed to recheck data column availability", "slot", blocks[i].GetSlot(), "blockRoot", root, "err", err)
+			continue
+		}
+		if available {
+			d.deleteDeferredColumnSyncJob(root)
+			log.Debug("[syncColumnDataWorker] column data is synced, removing from sync queue", "slot", blocks[i].GetSlot(), "blockRoot", root)
 		}
 	}
 }

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	dasmock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -81,4 +82,39 @@ func TestAcquireBlockDataAvailabilityInArchiveMode(t *testing.T) {
 	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(true, nil)
 
 	require.NoError(t, acquireBlockDataAvailability(t.Context(), peerDas, block))
+}
+
+func TestRequiresRecentBlockDataAvailabilityUsesConfiguredFork(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 2
+	cfg.InitializeForkSchedule()
+
+	tests := []struct {
+		name           string
+		blockSlot      uint64
+		decodedVersion clparams.StateVersion
+		want           bool
+	}{
+		{name: "Fulu slot decoded as Electra", blockSlot: 2 * cfg.SlotsPerEpoch, decodedVersion: clparams.ElectraVersion, want: true},
+		{name: "Electra slot decoded as Fulu", blockSlot: cfg.SlotsPerEpoch, decodedVersion: clparams.FuluVersion},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			clock := eth_clock.NewMockEthereumClock(gomock.NewController(t))
+			clock.EXPECT().GetCurrentSlot().Return(tt.blockSlot)
+			block := cltypes.NewSignedBeaconBlock(&cfg, tt.decodedVersion)
+			block.Block.Slot = tt.blockSlot
+
+			require.Equal(t, tt.want, requiresRecentBlockDataAvailability(&Cfg{
+				beaconCfg: &cfg,
+				ethClock:  clock,
+			}, block))
+		})
+	}
 }

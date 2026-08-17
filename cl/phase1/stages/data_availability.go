@@ -76,5 +76,9 @@ func acquireRecentBlockDataAvailability(ctx context.Context, cfg *Cfg, block *cl
 }
 
 func requiresRecentBlockDataAvailability(cfg *Cfg, block *cltypes.SignedBeaconBlock) bool {
-	return das.IsDataAvailabilityRequired(cfg.beaconCfg, cfg.ethClock.GetCurrentSlot(), block.Block.Slot, block.Version())
+	blockVersion := block.Version()
+	if cfg.beaconCfg.SlotsPerEpoch != 0 {
+		blockVersion = cfg.beaconCfg.GetCurrentStateVersion(block.Block.Slot / cfg.beaconCfg.SlotsPerEpoch)
+	}
+	return das.IsDataAvailabilityRequired(cfg.beaconCfg, cfg.ethClock.GetCurrentSlot(), block.Block.Slot, blockVersion)
 }
