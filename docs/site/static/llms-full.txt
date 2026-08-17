@@ -38,12 +38,15 @@ URL: https://docs.erigon.tech/get-started/why-using-erigon
 
 - [Integrated Consensus Layer (Caplin)](../fundamentals/caplin): Built-in consensus client — no need to run and manage separate software like Lighthouse. One binary handles both execution and consensus, simplifying setup for stakers and node runners.
 - [State Storage (Flat DB)](../fundamentals/optimizing-storage): Replaces the Merkle Patricia Trie with a flat key-value database. Faster reads and writes, and a smaller on-disk footprint for any node type.
-- [Immutable, Decentralised Data](../fundamentals/modules/downloader): Splits data processing into specialised stages, minimising random disk I/O and write amplification. Efficiently integrates large datasets into Erigon's flat DB.
+- [Immutable, Decentralised Data](../fundamentals/modules/downloader): Historical data lives in immutable files distributed via BitTorrent — up to 10× cheaper to backup, repair, and distribute. No double-disk usage, no complex serialisation.
+- [Staged Sync](../fundamentals/pruning-modes): Splits data processing into specialised stages, minimising random disk I/O and write amplification. Efficiently integrates large datasets into Erigon's flat DB.
 - [Predictable RPC Performance](../fundamentals/modules/rpc-daemon): No background compaction means no unpredictable resource spikes. RPC throughput stays stable and consistent — critical for providers and validators who cannot afford surprises.
 - [Modularity](../fundamentals/modules/): Core node, RPC Daemon, and TxPool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.
 - [OtterSync](../fundamentals/pruning-modes): Shifts initial sync from CPU-intensive transaction re-execution to network download — similar to BitTorrent for state data. Reduces sync time for both full and Archive nodes.
-- [Flexible Pruning](../fundamentals/optimizing-storage): Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.
+- [Flexible Pruning](../fundamentals/optimizing-storage): --prune.mode=minimal gives a smaller-than-full-node footprint that still satisfies all validator requirements. Right-size your storage without sacrificing functionality.
+- [RPC Providers & Large Stakers](../fundamentals/modules/rpc-daemon): Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.
 - [Home Users & Solo Stakers](../staking/): Run a full or archive node on a consumer SSD. Fast sync cuts setup from days to hours. No third-party servers — your node, your keys, your contribution to decentralisation.
+- [Developers](../interacting-with-erigon/): Full trace_ namespace, historical eth_getProof, historical blobs, and gRPC API. Modular components let you update, extend, or replace parts without rebuilding the whole stack.
 
 ---
 
