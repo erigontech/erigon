@@ -138,11 +138,11 @@ func operationProposerSlashingHandler(t *testing.T, root fs.FS, c spectest.TestC
 			state.GetEpochAtSlot(preState.BeaconConfig(), signedHeader.Header.Slot),
 		)
 		if err != nil {
-			return fmt.Errorf("unable to get domain: %v", err)
+			return fmt.Errorf("unable to get domain: %w", err)
 		}
 		signingRoot, err := fork.ComputeSigningRoot(signedHeader.Header, domain)
 		if err != nil {
-			return fmt.Errorf("unable to compute signing root: %v", err)
+			return fmt.Errorf("unable to compute signing root: %w", err)
 		}
 		pk := proposer.PublicKey()
 		valid, err := bls.Verify(signedHeader.Signature[:], signingRoot[:], pk[:])
