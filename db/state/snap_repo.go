@@ -353,6 +353,10 @@ func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 	iter := f.dirtyFiles.Iter()
 	for ok := iter.First(); ok; ok = iter.Next() {
 		item := iter.Item()
+		if item.isStaleOnDisk() {
+			f.logger.Debug("SnapshotRepo.openDirtyFiles: file replaced on disk since open, reopening", "f", item.decompressor.FileName())
+			item.closeFiles()
+		}
 		if item.decompressor == nil {
 			fPathGen, _ := p.DataFile(version.V1_0, RootNum(item.startTxNum), RootNum(item.endTxNum))
 			fPathMask, _ := version.ReplaceVersionWithMask(fPathGen)

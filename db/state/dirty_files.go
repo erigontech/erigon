@@ -224,6 +224,26 @@ func (i *FilesItem) closeFiles() {
 	i.existence = nil
 }
 
+// isStaleOnDisk reports whether the decompressor holds an mmap on a
+// file that has been replaced at the same path since it was opened.
+// Retire cutovers, downloader .part → final renames, and in-place
+// overwrites all produce this state; without detection, openDirtyFiles
+// skips reopening (item.decompressor != nil branch) and the old mmap
+// continues to serve pages from the unlinked inode, surfacing as torn
+// reads and decompressor SIGSEGV. Missing files are handled by the
+// existing invalidFileItems path — returning true here would double-
+// invalidate them, so a stat error returns false.
+func (i *FilesItem) isStaleOnDisk() bool {
+	if i == nil || i.decompressor == nil {
+		return false
+	}
+	st, err := os.Stat(i.decompressor.FilePath())
+	if err != nil {
+		return false
+	}
+	return st.Size() != i.decompressor.Size() || !st.ModTime().Equal(i.decompressor.ModTime())
+}
+
 func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
 	if i.decompressor != nil {
 		relativePaths = append(relativePaths, i.decompressor.FilePath())
@@ -396,6 +416,10 @@ func (d *Domain) openDirtyFiles(ctx context.Context, dirEntries []string) (err e
 		default:
 		}
 		item := iter.Item()
+		if item.isStaleOnDisk() {
+			d.logger.Debug("[agg] Domain.openDirtyFiles: file replaced on disk since open, reopening", "f", item.decompressor.FileName())
+			item.closeFiles()
+		}
 		if item.decompressor == nil {
 			fNameMask := d.kvFileNameMaskForItem(item)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dirEntries, d.dirs.SnapDomain)
@@ -494,6 +518,10 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 		}
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(h.stepSize)
+		if item.isStaleOnDisk() {
+			h.logger.Debug("[agg] History.openDirtyFiles: file replaced on disk since open, reopening", "f", item.decompressor.FileName())
+			item.closeFiles()
+		}
 		if item.decompressor == nil {
 			fNameMask := h.vFileNameMask(fromStep, toStep)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dataEntries, h.dirs.SnapHistory)
@@ -558,6 +586,10 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 		}
 		item := iter.Item()
 		fromStep, toStep := item.StepRange(ii.stepSize)
+		if item.isStaleOnDisk() {
+			ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file replaced on disk since open, reopening", "f", item.decompressor.FileName())
+			item.closeFiles()
+		}
 		if item.decompressor == nil {
 			fNameMask := ii.efFileNameMask(fromStep, toStep)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dataEntries, ii.dirs.SnapIdx)
