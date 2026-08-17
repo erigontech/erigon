@@ -886,7 +886,7 @@ func (pe *parallelExecutor) LogExecution() {
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
 	for domain, domainMetrics := range pe.domains().DomainLogMetrics() {
-		pe.logger.Debug(fmt.Sprintf("[%s] %s", pe.logPrefix, domain), domainMetrics...)
+		pe.logger.Info(fmt.Sprintf("[%s] domain=%s", pe.logPrefix, domain), domainMetrics...)
 	}
 }
 
@@ -897,7 +897,7 @@ func (pe *parallelExecutor) LogCommitments(committedTransactions uint64, stepsIn
 		pe.logger.Info(fmt.Sprintf("[%s] domain reads", pe.logPrefix), domainMetrics...)
 	}
 	for domain, domainMetrics := range pe.domains().DomainLogMetrics() {
-		pe.logger.Debug(fmt.Sprintf("[%s] %s", pe.logPrefix, domain), domainMetrics...)
+		pe.logger.Info(fmt.Sprintf("[%s] domain=%s", pe.logPrefix, domain), domainMetrics...)
 	}
 }
 
@@ -935,7 +935,7 @@ func (pe *parallelExecutor) LogComplete(stepsInDb float64) {
 		pe.logger.Info(fmt.Sprintf("[%s] domains", pe.logPrefix), domainMetrics...)
 	}
 	for domain, domainMetrics := range pe.domains().DomainLogMetrics() {
-		pe.logger.Debug(fmt.Sprintf("[%s] %s", pe.logPrefix, domain), domainMetrics...)
+		pe.logger.Info(fmt.Sprintf("[%s] domain=%s", pe.logPrefix, domain), domainMetrics...)
 	}
 }
 
