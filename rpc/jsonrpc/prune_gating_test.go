@@ -134,17 +134,25 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 		bnh := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(ref.num))
 		return apis.eth.GetCode(ctx, testAddr, &bnh)
 	}},
-	// An unfiltered query reads receipts only. Filtering by address or topic adds a
-	// search over the standalone log indices, which are retired at the history
-	// cutoff whatever the receipt retention is.
-	{"eth_getLogs", gatedByReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	// A query that searches no index is served from the receipts, which are derived
+	// from the block's transactions. Filtering by address or topic adds a search
+	// over the standalone log indices, retired at the history cutoff whatever the
+	// receipt retention is. A topic position that is empty matches any topic and
+	// searches nothing, so it stays on the first path.
+	{"eth_getLogs", gatedByBlockReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetLogs(ctx, blockFilter(ref.num))
+	}},
+	{"eth_getLogs_emptyTopicPosition", gatedByBlockReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.eth.GetLogs(ctx, emptyTopicFilter(ref.num))
 	}},
 	{"eth_getLogs_byAddress", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.eth.GetLogs(ctx, addressFilter(ref.num))
 	}},
-	{"erigon_getLogs", gatedByReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	{"erigon_getLogs", gatedByBlockReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.erigon.GetLogs(ctx, blockFilter(ref.num))
+	}},
+	{"erigon_getLogs_emptyTopicPosition", gatedByBlockReceipts, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+		return apis.erigon.GetLogs(ctx, emptyTopicFilter(ref.num))
 	}},
 	{"erigon_getLogs_byAddress", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.erigon.GetLogs(ctx, addressFilter(ref.num))
@@ -201,6 +209,14 @@ func addressFilter(block uint64) filters.FilterCriteria {
 	return c
 }
 
+// emptyTopicFilter carries a topic position that matches any topic, the shape a
+// caller writes as "topics": [null]. It narrows nothing and reads no index.
+func emptyTopicFilter(block uint64) filters.FilterCriteria {
+	c := blockFilter(block)
+	c.Topics = [][]common.Hash{{}}
+	return c
+}
+
 // pruneGatingConfigs mirrors the shapes of the named presets in
 // db/kv/prune/storage_mode.go with the finite distances scaled down so the
 // prune window falls inside the short test chain; full and minimal share one
@@ -220,6 +236,7 @@ var pruneGatingConfigs = []pruneGatingConfig{
 	{name: "full_legacy", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode}},
 	{name: "blocks_receipts_follow_history", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode}, persistReceipts: true},
 	{name: "blocks_receipts_keep_all", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode, Receipts: prune.KeepAllReceiptsPruneMode}, persistReceipts: true},
+	{name: "minimal_receipts_keep_all", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance, Receipts: prune.KeepAllReceiptsPruneMode}, persistReceipts: true},
 }
 
 // TestPruneModeEndpointGating pins, for every prune mode shape, that block-data
@@ -236,6 +253,8 @@ func TestPruneModeEndpointGating(t *testing.T) {
 	for _, cfg := range pruneGatingConfigs {
 		t.Run(cfg.name, func(t *testing.T) {
 			t.Parallel()
+			require.True(t, cfg.mode.ReceiptsFollowHistory() || cfg.mode.ReceiptsAmount() == prune.KeepAllReceiptsPruneMode,
+				"pruneGateFires does not resolve a receipt window of its own; pin that shape in TestReceiptsGateFollowsRetention")
 			apis, chainInfo := setupPruneGating(t, cfg)
 			legs := []struct {
 				name string
@@ -266,17 +285,13 @@ func pruneGateFires(boundary pruneGateBoundary, cfg pruneGatingConfig, blockNum,
 	case gatedByHistory:
 		amount = cfg.mode.History
 	case gatedByReceipts:
-		// The cache widens availability only where it outlives history: an
-		// explicit keep-all, or a window of its own.
-		amount = cfg.mode.History
-		if cfg.persistReceipts {
-			switch r := cfg.mode.ReceiptsAmount(); {
-			case r == prune.KeepAllReceiptsPruneMode:
-				return false
-			case !cfg.mode.ReceiptsFollowHistory():
-				amount = r
-			}
+		// The cache widens availability only where it outlives history. A window
+		// of its own is a boundary question that TestReceiptsGateFollowsRetention
+		// owns; this table stays on the two shapes an endpoint can tell apart.
+		if cfg.persistReceipts && cfg.mode.ReceiptsAmount() == prune.KeepAllReceiptsPruneMode {
+			return false
 		}
+		amount = cfg.mode.History
 	case gatedByBlockReceipts:
 		return pruneGateFires(gatedByBlocks, cfg, blockNum, head) ||
 			pruneGateFires(gatedByReceipts, cfg, blockNum, head)

@@ -136,6 +136,35 @@ func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
 	return false
 }
 
+// usesLogIndex reports whether the filter makes the query search LogAddrIdx or
+// LogTopicIdx. It tracks applyFiltersV3, which skips topic positions that are
+// empty because those match any topic.
+func usesLogIndex(crit filters.FilterCriteria) bool {
+	if len(crit.Addresses) > 0 {
+		return true
+	}
+	for _, position := range crit.Topics {
+		if len(position) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
+// checkLogsAvailable gates a log query on the data it reads: the receipts of the
+// range, which are derived from the block's transactions, plus the log indices when
+// the filter searches them. The indices are retired at the history cutoff whatever
+// the receipt retention is.
+func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, block); err != nil {
+		return err
+	}
+	if !usesLogIndex(crit) {
+		return nil
+	}
+	return api.checkPruneHistory(ctx, tx, block)
+}
+
 // resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
 // block; otherwise negative tags are resolved against the chain, defaulting to the
 // latest executed block. With checkFuture, ranges past the latest executed block are
@@ -251,15 +280,8 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
-	if err := api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
+	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, crit); err != nil {
 		return nil, err
-	}
-	// Filtering by address or topic reads the log indices, which are retired with
-	// history rather than with receipts; an unfiltered query only reads receipts.
-	if len(crit.Addresses) > 0 || len(crit.Topics) > 0 {
-		if err := api.BaseAPI.checkPruneHistory(ctx, tx, begin); err != nil {
-			return nil, err
-		}
 	}
 
 	erigonLogs, err := api.getLogsV3(ctx, tx, begin, end, crit, api.BaseAPI.blockRangeLimit, api.BaseAPI.getLogsMaxResults)

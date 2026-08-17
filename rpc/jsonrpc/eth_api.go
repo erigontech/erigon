@@ -486,7 +486,11 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 	case p.ReceiptsFollowHistory():
 		return api.checkPruneHistory(ctx, tx, block)
 	default:
-		return api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
+		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
+		if err == nil || !errors.Is(err, state.PrunedError) {
+			return err
+		}
+		return api.checkPruneHistory(ctx, tx, block)
 	}
 }
 

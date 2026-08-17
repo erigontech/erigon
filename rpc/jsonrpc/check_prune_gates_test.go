@@ -17,25 +17,30 @@
 package jsonrpc
 
 import (
+	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/rpc/filters"
 )
 
-// pruneGatingReceiptsDistance is a receipt-cache window narrower than the
-// history one, so a block can sit inside history and outside the receipts.
-const pruneGatingReceiptsDistance = prune.Distance(5)
+const (
+	// pruneGatingReceiptsNarrow is a receipt-cache window narrower than the history
+	// one: the cache stops covering a block that re-execution still reaches.
+	pruneGatingReceiptsNarrow = prune.Distance(5)
+	// pruneGatingReceiptsWide is a receipt-cache window wider than the history one:
+	// the cache is the only thing that can answer for the blocks in between.
+	pruneGatingReceiptsWide = prune.Distance(15)
+)
 
 // TestPruneGateBoundary pins the exact block where each gate flips and which
 // boundary its error names. The endpoint table probes blocks far from the
 // boundary, so an off-by-one there would pass unnoticed.
 func TestPruneGateBoundary(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
 	t.Parallel()
 
 	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
@@ -70,9 +75,6 @@ func TestPruneGateBoundary(t *testing.T) {
 // TestPruneGateArchive pins that an archive node never gates, including at
 // genesis: its distances are sentinels that report themselves as disabled.
 func TestPruneGateArchive(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
 	t.Parallel()
 
 	apis, _ := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
@@ -92,14 +94,13 @@ func TestPruneGateArchive(t *testing.T) {
 // retired on its own --prune.receipts.distance window when one is set, and on
 // the history window otherwise.
 func TestReceiptsGateFollowsRetention(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
 	t.Parallel()
 
 	historyOldest := pruneGatingDistance.PruneTo(pruneGatingChainLen)
-	receiptsOldest := pruneGatingReceiptsDistance.PruneTo(pruneGatingChainLen)
-	require.Greater(t, receiptsOldest, historyOldest, "the receipt window must be the narrower one")
+	narrowOldest := pruneGatingReceiptsNarrow.PruneTo(pruneGatingChainLen)
+	wideOldest := pruneGatingReceiptsWide.PruneTo(pruneGatingChainLen)
+	require.Greater(t, narrowOldest, historyOldest, "the narrow window must stop inside history")
+	require.Less(t, wideOldest, historyOldest, "the wide window must outlive history")
 
 	for _, tc := range []struct {
 		name    string
@@ -124,15 +125,27 @@ func TestReceiptsGateFollowsRetention(t *testing.T) {
 			refused: historyOldest - 1,
 		},
 		{
-			// Cache on with a narrower window of its own: receipts go
-			// before history does.
-			name: "cache_own_window",
+			// Cache on with a window of its own wider than history: for the
+			// blocks in between it is the only source, so it is what decides.
+			name: "cache_window_wider_than_history",
 			cfg: pruneGatingConfig{mode: prune.Mode{
 				Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
-				Receipts: pruneGatingReceiptsDistance,
+				Receipts: pruneGatingReceiptsWide,
 			}, persistReceipts: true},
-			served:  receiptsOldest,
-			refused: receiptsOldest - 1,
+			served:  wideOldest,
+			refused: wideOldest - 1,
+		},
+		{
+			// Cache on with a window narrower than history: past its cutoff the
+			// receipts are re-derived by re-executing, so history decides and the
+			// narrow cache costs the caller nothing.
+			name: "cache_window_narrower_than_history",
+			cfg: pruneGatingConfig{mode: prune.Mode{
+				Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+				Receipts: pruneGatingReceiptsNarrow,
+			}, persistReceipts: true},
+			served:  historyOldest,
+			refused: historyOldest - 1,
 		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
@@ -153,9 +166,6 @@ func TestReceiptsGateFollowsRetention(t *testing.T) {
 // widen availability: an explicit keep-all retires nothing, so receipts
 // outlive the history they would otherwise be re-derived from.
 func TestReceiptsGateKeepAll(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
 	t.Parallel()
 
 	apis, _ := setupPruneGating(t, pruneGatingConfig{
@@ -180,9 +190,6 @@ func TestReceiptsGateKeepAll(t *testing.T) {
 // receipts one would not: with the cache kept forever, only the missing body
 // stands between the caller and an answer.
 func TestBlockReceiptsGateCombinesBothBoundaries(t *testing.T) {
-	if testing.Short() {
-		t.Skip("long-running test")
-	}
 	t.Parallel()
 
 	for _, tc := range []struct {
@@ -229,6 +236,131 @@ func TestBlockReceiptsGateCombinesBothBoundaries(t *testing.T) {
 			err = apis.eth.checkBlockReceiptsAvailable(ctx, tx, chainInfo.old.num)
 			if tc.fires {
 				require.ErrorIs(t, err, state.PrunedError)
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestUsesLogIndex pins the predicate against getTopicsBitmapV3, which skips
+// empty topic positions: a criteria whose every position is empty matches any
+// topic and searches no index.
+func TestUsesLogIndex(t *testing.T) {
+	t.Parallel()
+
+	topicA := common.Hash{0x1}
+	for _, tc := range []struct {
+		name string
+		crit filters.FilterCriteria
+		want bool
+	}{
+		{"no_criteria", filters.FilterCriteria{}, false},
+		{"one_address", filters.FilterCriteria{Addresses: []common.Address{testAddr}}, true},
+		{"no_topic_position", filters.FilterCriteria{Topics: [][]common.Hash{}}, false},
+		{"one_empty_position", filters.FilterCriteria{Topics: [][]common.Hash{{}}}, false},
+		{"two_empty_positions", filters.FilterCriteria{Topics: [][]common.Hash{{}, {}}}, false},
+		{"one_filled_position", filters.FilterCriteria{Topics: [][]common.Hash{{topicA}}}, true},
+		{"filled_after_empty", filters.FilterCriteria{Topics: [][]common.Hash{{}, {topicA}}}, true},
+		{"address_with_empty_position", filters.FilterCriteria{
+			Addresses: []common.Address{testAddr}, Topics: [][]common.Hash{{}},
+		}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			require.Equal(t, tc.want, usesLogIndex(tc.crit))
+		})
+	}
+}
+
+// TestLogsGateTakesHistoryOnlyForIndexSearch pins that the history leg of the log
+// gate follows the index search and not the mere presence of a topics field. The
+// cache is kept forever here, so history is the only boundary that can reject.
+func TestLogsGateTakesHistoryOnlyForIndexSearch(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+			Receipts: prune.KeepAllReceiptsPruneMode,
+		},
+		persistReceipts: true,
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	topicA := common.Hash{0x1}
+	for _, tc := range []struct {
+		name  string
+		crit  filters.FilterCriteria
+		fires bool
+	}{
+		{"unfiltered", filters.FilterCriteria{}, false},
+		{"empty_topic_position", filters.FilterCriteria{Topics: [][]common.Hash{{}}}, false},
+		{"by_topic", filters.FilterCriteria{Topics: [][]common.Hash{{topicA}}}, true},
+		{"by_address", filters.FilterCriteria{Addresses: []common.Address{testAddr}}, true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, tc.crit)
+			if tc.fires {
+				require.ErrorIs(t, err, state.PrunedError)
+				require.Contains(t, err.Error(), "history is available")
+			} else {
+				require.NoError(t, err)
+			}
+		})
+	}
+}
+
+// TestLogsGateRequiresBlockBodies pins the blocks leg of the log gate: serving a
+// log means deriving its receipt from the block's transaction, so a pruned body
+// makes the query unanswerable however long the receipts are kept.
+func TestLogsGateRequiresBlockBodies(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance,
+			Receipts: prune.KeepAllReceiptsPruneMode,
+		},
+		persistReceipts: true,
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	err = apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, filters.FilterCriteria{})
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Contains(t, err.Error(), "blocks are available")
+}
+
+// TestCheckTxFee pins the fee cap: the fee is gasPrice*gas in wei, compared
+// against a cap expressed in ether, and a zero cap disables the check.
+func TestCheckTxFee(t *testing.T) {
+	t.Parallel()
+
+	oneEtherGasPrice := new(big.Int).Div(big.NewInt(common.Ether), big.NewInt(21000))
+	for _, tc := range []struct {
+		name     string
+		gasPrice *big.Int
+		gas      uint64
+		gasCap   float64
+		wantErr  bool
+	}{
+		{"no_cap", oneEtherGasPrice, 21000, 0, false},
+		{"under_cap", oneEtherGasPrice, 21000, 2, false},
+		{"at_cap", oneEtherGasPrice, 21000, 1, false},
+		{"over_cap", oneEtherGasPrice, 42000, 1, true},
+		{"zero_fee", big.NewInt(0), 21000, 1, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			err := checkTxFee(tc.gasPrice, tc.gas, tc.gasCap)
+			if tc.wantErr {
+				require.ErrorContains(t, err, "exceeds the configured cap")
 			} else {
 				require.NoError(t, err)
 			}
