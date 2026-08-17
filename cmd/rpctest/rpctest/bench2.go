@@ -25,26 +25,20 @@ import (
 
 func Bench2(erigon_url string) error {
 
-	req_id := 0
-	req_id++
-	blockNumTemplate := `{"jsonrpc":"2.0","method":"eth_blockNumber","params":[],"id":%d}`
-	var blockNumber EthBlockNumber
-	if err := post(client, erigon_url, fmt.Sprintf(blockNumTemplate, req_id), &blockNumber); err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", err)
+	setRoutes(erigon_url, "")
+	reqGen := &RequestGenerator{}
+
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
-	firstBn := 1720000 - 2
+	firstBn := uint64(1720000 - 2)
 	prevBn := firstBn
-	for bn := firstBn; bn <= int(lastBlock); bn++ {
-		req_id++
-		blockByNumTemplate := `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}` //nolint
+	for bn := firstBn; bn <= lastBlock; bn++ {
 		var b EthBlockByNumber
-		if err := post(client, erigon_url, fmt.Sprintf(blockByNumTemplate, bn, req_id), &b); err != nil {
-			return fmt.Errorf("Could not retrieve block %d: %v\n", bn, err)
+		if res := reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b); res.Err != nil {
+			return fmt.Errorf("Could not retrieve block %d: %w\n", bn, res.Err)
 		}
 		if b.Error != nil {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
@@ -54,15 +48,12 @@ func Bench2(erigon_url string) error {
 			txn := &b.Result.Transactions[i]
 			if txn.To != nil && txn.Gas.ToInt().Uint64() > 21000 {
 				// Request storage range
-				// blockHash common.Hash, txIndex int, contractAddress common.Address, keyStart hexutil.Bytes, maxResult int
-				req_id++
-				storageRangeTemplate := `{"jsonrpc":"2.0","method":"debug_storageRangeAt","params":["0x%x", %d,"0x%x","0x%x",%d],"id":%d}` //nolint
 				sm := make(map[common.Hash]storageEntry)
 				nextKey := &common.Hash{}
 				for nextKey != nil {
 					var sr DebugStorageRange
-					if err := post(client, erigon_url, fmt.Sprintf(storageRangeTemplate, b.Result.Hash, i, txn.To, *nextKey, 1024, req_id), &sr); err != nil {
-						return fmt.Errorf("Could not get storageRange: %x: %v\n", txn.Hash, err)
+					if res := reqGen.Erigon("debug_storageRangeAt", reqGen.storageRangeAt(b.Result.Hash, i, txn.To, *nextKey), &sr); res.Err != nil {
+						return fmt.Errorf("Could not get storageRange: %x: %w\n", txn.Hash, res.Err)
 					}
 					if sr.Error != nil {
 						fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
@@ -88,11 +79,9 @@ func Bench2(erigon_url string) error {
 
 		if prevBn < bn && bn%1000 == 0 {
 			// Checking modified accounts
-			req_id++
-			accountRangeTemplate := `{"jsonrpc":"2.0","method":"debug_getModifiedAccountsByNumber","params":[%d, %d],"id":%d}` //nolint
 			var ma DebugModifiedAccounts
-			if err := post(client, erigon_url, fmt.Sprintf(accountRangeTemplate, prevBn, bn, req_id), &ma); err != nil {
-				return fmt.Errorf("Could not get modified accounts: %v\n", err)
+			if res := reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &ma); res.Err != nil {
+				return fmt.Errorf("Could not get modified accounts: %w\n", res.Err)
 			}
 			if ma.Error != nil {
 				return fmt.Errorf("Error getting modified accounts: %d %s\n", ma.Error.Code, ma.Error.Message)

@@ -699,7 +699,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						// loop in a terminal mustDeliver send on a full applyResults and
 						// wedge pe.wait. No cancel: mirror the blockResult.Err path.
 						appliedBlocks[blockNum] = struct{}{}
-						fail.consider(blockNum, blockHash, true, fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, blockNum, err))
+						fail.consider(blockNum, blockHash, true, fmt.Errorf("%w, block=%d, %w", rules.ErrInvalidBlock, blockNum, err))
 						finalized = true
 						continue
 					}
@@ -1493,7 +1493,8 @@ func classifyApplyClose(sc *stopCause, startBlockNum, lastBlockNum, maxBlockNum 
 // preserving the real origErr as OriginError instead of the zero-value an
 // inline type-assertion would substitute on the failure branch.
 func wrapAsExecAbort(origErr error, depTxIndex int) error {
-	if _, ok := origErr.(protocol.ErrExecAbortError); ok {
+	var abortErr protocol.ErrExecAbortError
+	if errors.As(origErr, &abortErr) {
 		return origErr
 	}
 	return protocol.ErrExecAbortError{DependencyTxIndex: depTxIndex, OriginError: origErr}
@@ -2625,7 +2626,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if res.Operational {
 			return be.operationalBlockResult(fmt.Errorf("block=%d txIdx=%d: %w", be.number(), res.Version().TxIndex, res.Err)), nil
 		}
-		if execErr, ok := res.Err.(protocol.ErrExecAbortError); ok {
+		var execErr protocol.ErrExecAbortError
+		if errors.As(res.Err, &execErr) {
 			if r := be.retryLimitResult(tx, res.Version().TxIndex, res.Version().Incarnation, "incarnations", execErr.OriginError); r != nil {
 				return r, nil
 			}
@@ -3251,7 +3253,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return be.operationalBlockResult(fmt.Errorf("can't finalize block %d: state read: %w", be.number(), stateErr)), nil
 				}
 				if finalizeErr != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.number(), finalizeErr)), nil
+					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %w", rules.ErrInvalidBlock, be.number(), finalizeErr)), nil
 				}
 
 				be.blockIO.RecordReads(finalVersion, ibs.VersionedReads())

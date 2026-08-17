@@ -25,17 +25,17 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 // newTestMigrationsDB opens an in-memory migrations-tracking DB for use in tests.
 func newTestMigrationsDB(t *testing.T) kv.RwDB {
 	t.Helper()
-	return memdb.NewTestDB(t, dbcfg.MigrationsDB)
+	return mdbxtest.NewTestDB(t, dbcfg.MigrationsDB)
 }
 
 func TestApplyWithInit(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -101,7 +101,7 @@ func TestApplyWithInit(t *testing.T) {
 }
 
 func TestApplyWithoutInit(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -167,7 +167,7 @@ func TestApplyWithoutInit(t *testing.T) {
 }
 
 func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -231,7 +231,7 @@ func TestWhenNonFirstMigrationAlreadyApplied(t *testing.T) {
 }
 
 func TestValidation(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
@@ -282,7 +282,7 @@ func TestValidation(t *testing.T) {
 }
 
 func TestCommitCallRequired(t *testing.T) {
-	require, db := require.New(t), memdb.NewTestDB(t, dbcfg.ChainDB)
+	require, db := require.New(t), mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	migrationsDB := newTestMigrationsDB(t)
 	m := []Migration{
 		{
