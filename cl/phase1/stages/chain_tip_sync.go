@@ -106,9 +106,7 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 	}
 }
 
-// fetchBlocksFromReqResp retrieves blocks starting from a specified block number and continues for a given count.
-// It sends a request to fetch the blocks, verifies the associated blobs, and inserts them into the blob store.
-// It returns a PeeredObject containing the blocks and the peer ID, or an error if something goes wrong.
+// fetchBlocksFromReqResp requests a block range and returns the response sorted by slot.
 func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	for err != nil {
@@ -265,9 +263,9 @@ MainLoop:
 					}
 				}
 
-				// Chain-tip blocks must pass data availability before entering fork choice.
+				// Require data availability before a chain-tip block enters fork choice.
 				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, true); err != nil {
-					log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
+					log.Debug("failed to process chain-tip block", "err", err, "blockSlot", block.Block.Slot)
 					seenBlockRoots[blockRoot] = struct{}{}
 					continue
 				}

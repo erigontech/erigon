@@ -66,11 +66,9 @@ type blockService struct {
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
 
-	// blocks that should be scheduled for later execution (e.g missing blobs).
 	emitter                          *beaconevents.EventEmitter
 	blocksScheduledForLaterExecution sync.Map
-	// store the block in db
-	db kv.RwDB
+	db                               kv.RwDB
 }
 
 // NewBlockService creates a new block service
