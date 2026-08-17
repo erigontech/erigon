@@ -814,6 +814,16 @@ func (r *BlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, 
 		if tx == nil {
 			return nil, 0, nil
 		}
+		if hash == emptyHash {
+			canonicalHash, cerr := rawdb.ReadCanonicalHash(tx, blockHeight)
+			if cerr != nil {
+				return nil, 0, fmt.Errorf("failed ReadCanonicalHash: %w", cerr)
+			}
+			if canonicalHash == emptyHash {
+				return nil, 0, nil
+			}
+			hash = canonicalHash
+		}
 		body, _, txCount := rawdb.ReadBody(tx, hash, blockHeight)
 		return body, txCount, nil
 	}
@@ -882,16 +892,28 @@ func (r *BlockReader) blockWithSenders(ctx context.Context, tx kv.Getter, hash c
 	//      doesn't include the covering .seg file (retire completed after
 	//      tx open, tx's file view is stale). The tx's MVCC view still
 	//      sees the block in MDBX because prune runs after retire commits
-	//      and the tx's snapshot predates prune. Falling through avoids
-	//      the silent nil-block that stalled recovery-exec on the leg-M
-	//      soak 2026-08-16 iter 1 mode_b (post-retire read of a block
-	//      whose covering .seg was published between tx-open and read).
+	//      and the tx's snapshot predates prune.
+	// BlockByNumber/HeaderByNumber skip ReadCanonicalHash on the strength
+	// of the global view and pass emptyHash when they think the block is
+	// in files; if the tx's pinned view disagrees and this fallback fires,
+	// we must look the hash up here or ReadBlockWithSenders looks under
+	// (emptyHash, blockHeight) and returns nil.
 	readFromDB := func() (*types.Block, []common.Address, error) {
 		if tx == nil {
 			if dbgLogs {
 				log.Info(dbgPrefix + "RoTx is nil")
 			}
 			return nil, nil, nil
+		}
+		if hash == emptyHash {
+			canonicalHash, cerr := rawdb.ReadCanonicalHash(tx, blockHeight)
+			if cerr != nil {
+				return nil, nil, fmt.Errorf("failed ReadCanonicalHash: %w", cerr)
+			}
+			if canonicalHash == emptyHash {
+				return nil, nil, nil
+			}
+			hash = canonicalHash
 		}
 		if forceCanonical {
 			canonicalHash, ok, cerr := r.CanonicalHash(ctx, tx, blockHeight)

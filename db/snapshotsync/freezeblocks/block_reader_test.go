@@ -395,6 +395,48 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	assert.False(t, hasSenders) // should be false because genesis block does not have senders
 }
 
+// TestBlockAndBody_ReadFromDB_EmptyHashSelfHeal reproduces the retire-mid-tx
+// race that stalled recovery-exec: BlockByNumber/HeaderByNumber skip
+// ReadCanonicalHash when the global visible-set says "in files", passing
+// emptyHash to BlockWithSenders/Body; if the tx's pinned view disagrees
+// (the covering .seg was published between tx-open and the read), the
+// fallback to MDBX runs with emptyHash and rawdb.ReadBlockWithSenders
+// reads under the wrong key. The fallback must fetch the canonical hash
+// itself before hitting rawdb.
+func TestBlockAndBody_ReadFromDB_EmptyHashSelfHeal(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
+
+	const blockNum uint64 = 1
+
+	rwTx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	header := &types.Header{Number: *uint256.NewInt(blockNum)}
+	blockHash := header.Hash()
+	block := types.NewBlockWithHeader(header)
+	require.NoError(t, rawdb.WriteBlock(rwTx, block))
+	require.NoError(t, rawdb.WriteCanonicalHash(rwTx, blockHash, blockNum))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// blockWithSenders with emptyHash must find the block: the DB has a
+	// canonical hash + full block for blockNum, and the fallback must not
+	// query rawdb under emptyHash.
+	got, _, err := blockReader.blockWithSenders(context.Background(), tx, common.Hash{}, blockNum, false)
+	require.NoError(t, err)
+	require.NotNil(t, got, "blockWithSenders must self-heal emptyHash via ReadCanonicalHash before falling to rawdb")
+	assert.Equal(t, blockHash, got.Hash())
+
+	body, _, err := blockReader.Body(context.Background(), tx, common.Hash{}, blockNum)
+	require.NoError(t, err)
+	require.NotNil(t, body, "Body must self-heal emptyHash via ReadCanonicalHash before falling to rawdb")
+}
+
 func TestCanonicalHashCache_DBHit(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
