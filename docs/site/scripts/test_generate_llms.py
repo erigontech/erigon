@@ -221,6 +221,26 @@ class LandingSynthesisTests(unittest.TestCase):
             g.synthesize_landing(body)
         self.assertIn("dropped cards", str(ctx.exception))
 
+    def test_all_cards_malformed_raises_rather_than_falling_back(self):
+        """Total parser failure must not look like an ordinary prose page.
+
+        Returning None here would send the caller to strip_mdx, degrading the
+        page silently — the exact outcome the guard exists to prevent.
+        """
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+</Link>
+<Link className="lp-card" to="/b/">
+  <div className="lp-card-title">B</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 0 of 2", str(ctx.exception))
+
 
 class LeadingH1StripTests(unittest.TestCase):
     """The build() body-prep step strips a leading H1 to avoid duplicate headings."""

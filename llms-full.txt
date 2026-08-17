@@ -3930,16 +3930,18 @@ MCP connects a model to your **running node**. To let a model answer questions a
 | File | Contents | Use it when |
 |------|----------|-------------|
 | [llms.txt](https://docs.erigon.tech/llms.txt) | Page index with titles and descriptions | The model fetches pages on demand, or its context window is small |
-| [llms-full.txt](https://docs.erigon.tech/llms-full.txt) | Every documentation page, in full, as one plain-text file | You want the whole corpus in context, offline, with nothing scraped |
+| [llms-full.txt](https://docs.erigon.tech/llms-full.txt) | The text of every documentation page, as one plain-text file | You want the whole corpus in context, offline, with nothing scraped |
 
 Both are generated from the same Markdown source as this site by a script in the repository, and CI fails when a documentation change lands without regenerating them, so they cannot quietly go stale.
+
+The corpus is cleaned rather than copied verbatim: MDX components are stripped, and section index pages built as card grids are reduced to the list of links they present. Read it as the documentation's prose, not as a byte-for-byte mirror of the rendered site.
 
 ```bash
 # Give a local model the whole documentation, with no network access
 curl -sO https://docs.erigon.tech/llms-full.txt
 ```
 
-The full file is around 420 KB. If your model's context cannot hold it, use `llms.txt` to pick the pages you need, or slice the sections you want out of the full file — each page begins with a `# Title` heading.
+The full file is around 430 KB. If your model's context cannot hold it, use `llms.txt` to pick the pages you need, or slice the sections you want out of the full file — each page begins with a `# Title` heading.
 
 ---
 
