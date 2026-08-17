@@ -66,47 +66,50 @@ func TestOnBlockChecksDataAvailabilityWithoutNewPayload(t *testing.T) {
 	require.ErrorIs(t, err, ErrEIP7594ColumnDataNotAvailable)
 }
 
-func TestHasBlobDataForAllCommitmentsRejectsMissingBlob(t *testing.T) {
-	blobs := make([][]byte, 1)
-	proofs := [][][]byte{{{1}}}
-
-	if hasBlobDataForAllCommitments(blobs, proofs, 1) {
-		t.Fatal("missing blob must not report blob data as complete")
+func TestHasNonEmptyBlobsAndProofsForAllCommitments(t *testing.T) {
+	tests := []struct {
+		name          string
+		blobs         [][]byte
+		proofs        [][][]byte
+		expectedCount int
+		want          bool
+	}{
+		{
+			name:          "missing blob",
+			blobs:         make([][]byte, 1),
+			proofs:        [][][]byte{{{1}}},
+			expectedCount: 1,
+		},
+		{
+			name:          "missing proofs",
+			blobs:         [][]byte{{1}},
+			proofs:        make([][][]byte, 1),
+			expectedCount: 1,
+		},
+		{
+			name:          "empty proof",
+			blobs:         [][]byte{{1}},
+			proofs:        [][][]byte{{nil}},
+			expectedCount: 1,
+		},
+		{
+			name:          "unexpected count",
+			blobs:         [][]byte{{1}},
+			proofs:        [][][]byte{{{2}}},
+			expectedCount: 2,
+		},
+		{
+			name:          "non-empty entries",
+			blobs:         [][]byte{{1}, {2}},
+			proofs:        [][][]byte{{{3}}, {{4}}},
+			expectedCount: 2,
+			want:          true,
+		},
 	}
-}
 
-func TestHasBlobDataForAllCommitmentsRejectsMissingProofs(t *testing.T) {
-	blobs := [][]byte{{1}}
-	proofs := make([][][]byte, 1)
-
-	if hasBlobDataForAllCommitments(blobs, proofs, 1) {
-		t.Fatal("blob data without proofs must not report as complete")
-	}
-}
-
-func TestHasBlobDataForAllCommitmentsRejectsEmptyProof(t *testing.T) {
-	blobs := [][]byte{{1}}
-	proofs := [][][]byte{{nil}}
-
-	if hasBlobDataForAllCommitments(blobs, proofs, 1) {
-		t.Fatal("empty proof must not report blob data as complete")
-	}
-}
-
-func TestHasBlobDataForAllCommitmentsRejectsUnexpectedCount(t *testing.T) {
-	blobs := [][]byte{{1}}
-	proofs := [][][]byte{{{2}}}
-
-	if hasBlobDataForAllCommitments(blobs, proofs, 2) {
-		t.Fatal("partial blob data must not report as complete")
-	}
-}
-
-func TestHasBlobDataForAllCommitmentsAcceptsCompleteEntries(t *testing.T) {
-	blobs := [][]byte{{1}, {2}}
-	proofs := [][][]byte{{{3}}, {{4}}}
-
-	if !hasBlobDataForAllCommitments(blobs, proofs, 2) {
-		t.Fatal("complete blob data must be accepted")
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			require.Equal(t, tt.want, hasNonEmptyBlobsAndProofsForAllCommitments(tt.blobs, tt.proofs, tt.expectedCount))
+		})
 	}
 }
