@@ -38,26 +38,41 @@ import (
 	"github.com/erigontech/erigon/txnprovider"
 )
 
+// newTestModule builds a module whose builders run builderFunc. Every test needs the same fields,
+// and getting the config or the context wrong changes the builder's own deadline silently.
+func newTestModule(t *testing.T, builderFunc builder.BlockBuilderFunc) *ExecModule {
+	t.Helper()
+	return &ExecModule{
+		logger:              log.Root(),
+		config:              &chain.Config{},
+		semaphore:           semaphore.NewWeighted(1),
+		builders:            map[uint64]*builderEntry{},
+		buildersByTimestamp: map[uint64]uint64{},
+		bacgroundCtx:        t.Context(),
+		builderFunc:         builderFunc,
+	}
+}
+
+// testTimestamp is far enough ahead that buildDuration gives a builder a budget measured in slots.
+// A timestamp in the past takes the floor instead, which is seconds, and the max-build-time
+// watchdog then fires in the middle of a test.
+func testTimestamp(offset uint64) uint64 {
+	return uint64(time.Now().Add(time.Hour).Unix()) + offset
+}
+
 func TestAssembleBlockKeepsBuildersApartByTimestamp(t *testing.T) {
 	type runningBuilder struct {
 		id        uint64
 		interrupt *atomic.Bool
 	}
 	started := make(chan runningBuilder, 4)
-	module := &ExecModule{
-		semaphore:    semaphore.NewWeighted(1),
-		config:       &chain.Config{},
-		logger:       log.Root(),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(_ context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-			started <- runningBuilder{id: params.PayloadId, interrupt: interrupt}
-			for !interrupt.Load() {
-				time.Sleep(time.Millisecond)
-			}
-			return nil, errors.New("builder stopped")
-		},
-	}
+	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- runningBuilder{id: params.PayloadId, interrupt: interrupt}
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		return nil, errors.New("builder stopped")
+	})
 	t.Cleanup(func() {
 		for _, entry := range module.builders {
 			if entry != nil && entry.builder != nil {
@@ -84,26 +99,26 @@ func TestAssembleBlockKeepsBuildersApartByTimestamp(t *testing.T) {
 		return result.PayloadID, waitStarted()
 	}
 
-	firstID, first := assemble(100, common.Hash{0x01})
-	adjacentID, adjacent := assemble(101, common.Hash{0x02})
+	firstID, first := assemble(testTimestamp(0), common.Hash{0x01})
+	adjacentID, adjacent := assemble(testTimestamp(1), common.Hash{0x02})
 	require.NotEqual(t, firstID, adjacentID)
 
-	firstDuplicate, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	firstDuplicate, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x01}})
 	require.NoError(t, err)
 	require.Equal(t, firstID, firstDuplicate.PayloadID)
 
 	// Superseding hands the timestamp to a new builder and leaves the old ones running, so only the
 	// index moves. Timestamp 101 is a different proposal and is untouched throughout.
-	secondID, second := assemble(100, common.Hash{0x03})
+	secondID, second := assemble(testTimestamp(0), common.Hash{0x03})
 	require.NotEqual(t, firstID, secondID)
-	require.Equal(t, secondID, module.buildersByTimestamp[100])
-	require.Equal(t, adjacentID, module.buildersByTimestamp[101])
+	require.Equal(t, secondID, module.buildersByTimestamp[testTimestamp(0)])
+	require.Equal(t, adjacentID, module.buildersByTimestamp[testTimestamp(1)])
 
-	thirdID, third := assemble(100, common.Hash{0x04})
+	thirdID, third := assemble(testTimestamp(0), common.Hash{0x04})
 	require.NotEqual(t, secondID, thirdID)
-	require.Equal(t, thirdID, module.buildersByTimestamp[100])
+	require.Equal(t, thirdID, module.buildersByTimestamp[testTimestamp(0)])
 
-	duplicate, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x04}})
+	duplicate, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x04}})
 	require.NoError(t, err)
 	require.Equal(t, thirdID, duplicate.PayloadID)
 
@@ -111,21 +126,22 @@ func TestAssembleBlockKeepsBuildersApartByTimestamp(t *testing.T) {
 		require.False(t, running.interrupt.Load(), "builder %d must still be packing", running.id)
 	}
 
-	// Eviction is where a builder is actually stopped, and it takes the timestamp index with it.
-	// Removing entries puts them beyond the registered cleanup, so release them here instead of
-	// leaving two goroutines running until their watchdogs fire.
-	module.builders[firstID].builder.Discard()
-	module.builders[secondID].builder.Discard()
-	delete(module.builders, firstID)
-	delete(module.builders, secondID)
+	// Eviction is where a builder is actually stopped, and it goes by age. What a timestamp still
+	// resolves to is exempt whatever its age, because that is what a proposal for that timestamp is
+	// waiting on: first and second have been superseded, third and adjacent have not.
 	for id := thirdID + 1; len(module.builders) < engine_helpers.MaxBuilders; id++ {
 		module.builders[id] = nil
 	}
 	module.evictOldBuilders()
-	require.Eventually(t, adjacent.interrupt.Load, time.Second, time.Millisecond)
-	require.NotContains(t, module.builders, adjacentID)
-	require.NotContains(t, module.buildersByTimestamp, uint64(101))
-	require.False(t, third.interrupt.Load(), "the current builder for a timestamp must survive eviction")
+
+	require.NotContains(t, module.builders, firstID)
+	require.Eventually(t, first.interrupt.Load, time.Second, time.Millisecond)
+	require.Contains(t, module.builders, adjacentID, "the current builder for a timestamp must survive eviction")
+	require.Contains(t, module.builders, thirdID)
+	require.False(t, adjacent.interrupt.Load())
+	require.False(t, third.interrupt.Load())
+	require.Equal(t, thirdID, module.buildersByTimestamp[testTimestamp(0)])
+	require.Equal(t, adjacentID, module.buildersByTimestamp[testTimestamp(1)])
 }
 
 func TestEvictionReleasesABuilderBlockedOnItsProvider(t *testing.T) {
@@ -133,36 +149,34 @@ func TestEvictionReleasesABuilderBlockedOnItsProvider(t *testing.T) {
 	// is not read until it does. Only cancelling the build reaches it.
 	entered := make(chan struct{}, 1)
 	released := make(chan error, 1)
-	module := &ExecModule{
-		logger:       log.Root(),
-		config:       &chain.Config{},
-		semaphore:    semaphore.NewWeighted(1),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(ctx context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-			entered <- struct{}{}
-			select {
-			case <-ctx.Done():
-				released <- ctx.Err()
-				return nil, ctx.Err()
-			case <-time.After(time.Minute):
-				released <- errors.New("provider was never released")
-				return nil, errors.New("provider was never released")
-			}
-		},
-	}
+	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		entered <- struct{}{}
+		select {
+		case <-ctx.Done():
+			released <- ctx.Err()
+			return nil, ctx.Err()
+		case <-time.After(time.Minute):
+			released <- errors.New("provider was never released")
+			return nil, errors.New("provider was never released")
+		}
+	})
 
-	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	blocked, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x01}})
 	require.NoError(t, err)
 	<-entered
 
-	entry := module.builders[result.PayloadID]
+	// Superseded, so eviction is allowed to take it: what a timestamp still resolves to is exempt.
+	_, err = module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x02}})
+	require.NoError(t, err)
+	<-entered
+
+	entry := module.builders[blocked.PayloadID]
 	require.NotNil(t, entry)
-	for id := result.PayloadID + 1; len(module.builders) < engine_helpers.MaxBuilders; id++ {
+	for id := uint64(len(module.builders)) + 100; len(module.builders) < engine_helpers.MaxBuilders; id++ {
 		module.builders[id] = nil
 	}
 	module.evictOldBuilders()
-	require.NotContains(t, module.builders, result.PayloadID)
+	require.NotContains(t, module.builders, blocked.PayloadID)
 
 	// Observing the goroutine finish is the point: an evicted builder that merely has its flag set
 	// keeps its read view open until whatever it is blocked on gives up on its own.
@@ -177,33 +191,26 @@ func TestEvictionReleasesABuilderBlockedOnItsProvider(t *testing.T) {
 
 func TestSupersededBuilderKeepsPackingAndStaysRetrievable(t *testing.T) {
 	started := make(chan *atomic.Bool, 4)
-	module := &ExecModule{
-		logger:       log.Root(),
-		config:       &chain.Config{},
-		semaphore:    semaphore.NewWeighted(1),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-			started <- interrupt
-			for !interrupt.Load() {
-				time.Sleep(time.Millisecond)
-			}
-			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
-		},
-	}
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- interrupt
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+	})
 
-	first, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	first, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x01}})
 	require.NoError(t, err)
 	firstInterrupt := <-started
 
-	second, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x02}})
+	second, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x02}})
 	require.NoError(t, err)
 	require.NotEqual(t, first.PayloadID, second.PayloadID)
 	secondInterrupt := <-started
 
 	// The timestamp index moves to the new builder, so nothing reaches the old one by dedup. It is
 	// left running: freezing it would answer an id already handed out with a near-empty payload.
-	require.Equal(t, second.PayloadID, module.buildersByTimestamp[100])
+	require.Equal(t, second.PayloadID, module.buildersByTimestamp[testTimestamp(0)])
 	require.False(t, firstInterrupt.Load())
 
 	assembled, err := module.GetAssembledBlock(t.Context(), first.PayloadID)
@@ -215,23 +222,16 @@ func TestSupersededBuilderKeepsPackingAndStaysRetrievable(t *testing.T) {
 
 func TestCollectedPayloadIsHandedBackToARepeatedRequest(t *testing.T) {
 	started := make(chan struct{}, 4)
-	module := &ExecModule{
-		logger:       log.Root(),
-		config:       &chain.Config{},
-		semaphore:    semaphore.NewWeighted(1),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-			started <- struct{}{}
-			for !interrupt.Load() {
-				time.Sleep(time.Millisecond)
-			}
-			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
-		},
-	}
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- struct{}{}
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+	})
 
 	params := func() *builder.Parameters {
-		return &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}}
+		return &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x01}}
 	}
 	first, err := module.AssembleBlock(t.Context(), params())
 	require.NoError(t, err)
@@ -253,26 +253,19 @@ func TestAssembleBlockDoesNotReuseFailedBuilder(t *testing.T) {
 	var failNext atomic.Bool
 	failNext.Store(true)
 	started := make(chan struct{}, 4)
-	module := &ExecModule{
-		logger:       log.Root(),
-		config:       &chain.Config{},
-		semaphore:    semaphore.NewWeighted(1),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-			started <- struct{}{}
-			if failNext.Swap(false) {
-				return nil, errors.New("build failed")
-			}
-			for !interrupt.Load() {
-				time.Sleep(time.Millisecond)
-			}
-			return nil, errors.New("builder stopped")
-		},
-	}
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- struct{}{}
+		if failNext.Swap(false) {
+			return nil, errors.New("build failed")
+		}
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		return nil, errors.New("builder stopped")
+	})
 
 	params := func() *builder.Parameters {
-		return &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}}
+		return &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x01}}
 	}
 	first, err := module.AssembleBlock(t.Context(), params())
 	require.NoError(t, err)
@@ -290,18 +283,11 @@ func TestAssembleBlockDoesNotReuseFailedBuilder(t *testing.T) {
 }
 
 func TestGetAssembledBlockDropsFailedBuilder(t *testing.T) {
-	module := &ExecModule{
-		logger:       log.Root(),
-		config:       &chain.Config{},
-		semaphore:    semaphore.NewWeighted(1),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(_ context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
-			return nil, errors.New("build failed")
-		},
-	}
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, errors.New("build failed")
+	})
 
-	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x01}})
 	require.NoError(t, err)
 
 	_, err = module.GetAssembledBlock(t.Context(), result.PayloadID)
@@ -309,29 +295,22 @@ func TestGetAssembledBlockDropsFailedBuilder(t *testing.T) {
 
 	// The error is latched, so leaving the entry in place would keep serving it to every retry.
 	require.NotContains(t, module.builders, result.PayloadID)
-	require.NotContains(t, module.buildersByTimestamp, uint64(100))
+	require.NotContains(t, module.buildersByTimestamp, testTimestamp(0))
 }
 
 func TestGetAssembledBlockKeepsBuilderWhenTheCallerGivesUpMidStop(t *testing.T) {
 	interrupted := make(chan struct{})
 	release := make(chan struct{})
-	module := &ExecModule{
-		logger:       log.Root(),
-		config:       &chain.Config{},
-		semaphore:    semaphore.NewWeighted(1),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-			for !interrupt.Load() {
-				time.Sleep(time.Millisecond)
-			}
-			close(interrupted)
-			<-release
-			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
-		},
-	}
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		close(interrupted)
+		<-release
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+	})
 
-	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x01}})
 	require.NoError(t, err)
 
 	// Cancel while Stop is already waiting, which is the window a caller-side timeout actually
@@ -348,7 +327,7 @@ func TestGetAssembledBlockKeepsBuilderWhenTheCallerGivesUpMidStop(t *testing.T) 
 
 	// The builder was not dropped, so the payload it goes on to produce is still reachable.
 	require.Contains(t, module.builders, result.PayloadID)
-	require.Equal(t, result.PayloadID, module.buildersByTimestamp[100])
+	require.Equal(t, result.PayloadID, module.buildersByTimestamp[testTimestamp(0)])
 
 	close(release)
 	assembled, err := module.GetAssembledBlock(t.Context(), result.PayloadID)
@@ -374,24 +353,17 @@ func (m *mutableTxnProvider) ProvideTxns(context.Context, ...txnprovider.Provide
 
 func TestAssembleBlockNeverReusesABuilderWithACustomProvider(t *testing.T) {
 	started := make(chan struct{}, 4)
-	module := &ExecModule{
-		logger:       log.Root(),
-		config:       &chain.Config{},
-		semaphore:    semaphore.NewWeighted(1),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(ctx context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-			started <- struct{}{}
-			// Keep the provider busy for the whole test, which is when a comparison would read it.
-			for !interrupt.Load() && ctx.Err() == nil {
-				if params.CustomTxnProvider != nil {
-					_, _ = params.CustomTxnProvider.ProvideTxns(ctx)
-				}
-				time.Sleep(time.Millisecond)
+	module := newTestModule(t, func(ctx context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- struct{}{}
+		// Keep the provider busy for the whole test, which is when a comparison would read it.
+		for !interrupt.Load() && ctx.Err() == nil {
+			if params.CustomTxnProvider != nil {
+				_, _ = params.CustomTxnProvider.ProvideTxns(ctx)
 			}
-			return nil, errors.New("builder stopped")
-		},
-	}
+			time.Sleep(time.Millisecond)
+		}
+		return nil, errors.New("builder stopped")
+	})
 
 	withProvider := func() *builder.Parameters {
 		return &builder.Parameters{
@@ -423,21 +395,14 @@ func TestAssembleBlockOwnsParameters(t *testing.T) {
 	}
 	readParameters := make(chan struct{})
 	observed := make(chan observedParameters, 1)
-	module := &ExecModule{
-		semaphore:    semaphore.NewWeighted(1),
-		config:       &chain.Config{},
-		logger:       log.Root(),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(_ context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-			<-readParameters
-			observed <- observedParameters{parentRoot: *params.ParentBeaconBlockRoot, extraData: params.ExtraData[0]}
-			for !interrupt.Load() {
-				time.Sleep(time.Millisecond)
-			}
-			return nil, errors.New("builder stopped")
-		},
-	}
+	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-readParameters
+		observed <- observedParameters{parentRoot: *params.ParentBeaconBlockRoot, extraData: params.ExtraData[0]}
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		return nil, errors.New("builder stopped")
+	})
 	root := common.Hash{0xaa}
 	params := &builder.Parameters{
 		Timestamp:             100,
@@ -467,21 +432,14 @@ func TestAssembleBlockOwnsParameters(t *testing.T) {
 
 func TestAssembleBlockCanceledContextDoesNotSupersedeBuilder(t *testing.T) {
 	started := make(chan *atomic.Bool, 1)
-	module := &ExecModule{
-		semaphore:    semaphore.NewWeighted(1),
-		config:       &chain.Config{},
-		logger:       log.Root(),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
-			started <- interrupt
-			for !interrupt.Load() {
-				time.Sleep(time.Millisecond)
-			}
-			return nil, errors.New("builder stopped")
-		},
-	}
-	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- interrupt
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		return nil, errors.New("builder stopped")
+	})
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x01}})
 	require.NoError(t, err)
 	interrupt := <-started
 	t.Cleanup(func() {
@@ -490,42 +448,10 @@ func TestAssembleBlockCanceledContextDoesNotSupersedeBuilder(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(t.Context())
 	cancel()
-	_, err = module.AssembleBlock(ctx, &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x02}})
+	_, err = module.AssembleBlock(ctx, &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x02}})
 	require.ErrorIs(t, err, context.Canceled)
 	require.False(t, interrupt.Load())
-	require.Equal(t, result.PayloadID, module.buildersByTimestamp[100])
-}
-
-func TestCloneBuilderParametersPreservesRepresentations(t *testing.T) {
-	require.Nil(t, cloneBuilderParameters(nil))
-
-	empty := cloneBuilderParameters(&builder.Parameters{Withdrawals: []*types.Withdrawal{}, ExtraData: []byte{}})
-	require.NotNil(t, empty.Withdrawals)
-	require.NotNil(t, empty.ExtraData)
-
-	root := common.Hash{0x01}
-	slot := uint64(2)
-	gasLimit := uint64(3)
-	params := &builder.Parameters{
-		Withdrawals:           []*types.Withdrawal{nil, {Index: 4}},
-		ParentBeaconBlockRoot: &root,
-		SlotNumber:            &slot,
-		TargetGasLimit:        &gasLimit,
-		ExtraData:             []byte{5},
-	}
-	cloned := cloneBuilderParameters(params)
-	params.Withdrawals[1].Index = 40
-	root[0] = 10
-	slot = 20
-	gasLimit = 30
-	params.ExtraData[0] = 50
-
-	require.Nil(t, cloned.Withdrawals[0])
-	require.Equal(t, uint64(4), cloned.Withdrawals[1].Index)
-	require.Equal(t, common.Hash{0x01}, *cloned.ParentBeaconBlockRoot)
-	require.Equal(t, uint64(2), *cloned.SlotNumber)
-	require.Equal(t, uint64(3), *cloned.TargetGasLimit)
-	require.Equal(t, byte(5), cloned.ExtraData[0])
+	require.Equal(t, result.PayloadID, module.buildersByTimestamp[testTimestamp(0)])
 }
 
 func TestBuildDuration(t *testing.T) {
@@ -576,20 +502,13 @@ func TestBuildDurationCapsOverflowingTimestamp(t *testing.T) {
 }
 
 func TestGetAssembledBlockDropsABuildThatFailedWithAContextError(t *testing.T) {
-	module := &ExecModule{
-		logger:       log.Root(),
-		config:       &chain.Config{},
-		semaphore:    semaphore.NewWeighted(1),
-		builders:     map[uint64]*builderEntry{},
-		bacgroundCtx: t.Context(),
-		builderFunc: func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
-			// A transaction provider that gives up reports its own context error, which is a failed
-			// build rather than a caller that stopped waiting.
-			return nil, fmt.Errorf("issue while waiting for parent block: %w", context.DeadlineExceeded)
-		},
-	}
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		// A transaction provider that gives up reports its own context error, which is a failed
+		// build rather than a caller that stopped waiting.
+		return nil, fmt.Errorf("issue while waiting for parent block: %w", context.DeadlineExceeded)
+	})
 
-	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: 100, ParentHash: common.Hash{0x01}})
+	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x01}})
 	require.NoError(t, err)
 
 	_, err = module.GetAssembledBlock(t.Context(), result.PayloadID)
@@ -597,5 +516,46 @@ func TestGetAssembledBlockDropsABuildThatFailedWithAContextError(t *testing.T) {
 
 	// Keeping it would serve that latched error to every later retry of the same slot.
 	require.NotContains(t, module.builders, result.PayloadID)
-	require.NotContains(t, module.buildersByTimestamp, uint64(100))
+	require.NotContains(t, module.buildersByTimestamp, testTimestamp(0))
+}
+
+func TestGetAssembledBlockSaysWhenAPayloadIdIsUnknown(t *testing.T) {
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, errors.New("builder stopped")
+	})
+
+	// An id with no builder behind it can never produce anything. Reporting it as an ordinary empty
+	// result leaves a caller polling it for the rest of the slot.
+	assembled, err := module.GetAssembledBlock(t.Context(), 404)
+	require.NoError(t, err)
+	require.True(t, assembled.Unknown)
+	require.Nil(t, assembled.Block)
+}
+
+func TestEvictionSparesTheBuilderATimestampStillPointsAt(t *testing.T) {
+	started := make(chan struct{}, 1)
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		started <- struct{}{}
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		return nil, errors.New("builder stopped")
+	})
+
+	current, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: testTimestamp(0), ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+	<-started
+
+	// It is the oldest by id, so eviction would take it first, and it is also what a proposal for
+	// that timestamp is waiting on. Age says nothing about that.
+	for id := current.PayloadID + 1; len(module.builders) < engine_helpers.MaxBuilders+1; id++ {
+		module.builders[id] = nil
+	}
+	module.evictOldBuilders()
+
+	require.Contains(t, module.builders, current.PayloadID)
+	require.Equal(t, current.PayloadID, module.buildersByTimestamp[testTimestamp(0)])
+	require.False(t, module.builders[current.PayloadID].builder.Failed())
+
+	module.builders[current.PayloadID].builder.Discard()
 }

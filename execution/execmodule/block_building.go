@@ -17,7 +17,6 @@
 package execmodule
 
 import (
-	"bytes"
 	"context"
 	"reflect"
 	"time"
@@ -61,36 +60,6 @@ func buildDuration(payloadTimestamp uint64, now time.Time, secondsPerSlot uint64
 	return min(max(d, slot/4), 2*slot)
 }
 
-func cloneBuilderParameters(params *builder.Parameters) *builder.Parameters {
-	if params == nil {
-		return nil
-	}
-	cloned := *params
-	cloned.ExtraData = bytes.Clone(params.ExtraData)
-	if params.Withdrawals != nil {
-		cloned.Withdrawals = make([]*types.Withdrawal, len(params.Withdrawals))
-		for i, withdrawal := range params.Withdrawals {
-			if withdrawal != nil {
-				copy := *withdrawal
-				cloned.Withdrawals[i] = &copy
-			}
-		}
-	}
-	if params.ParentBeaconBlockRoot != nil {
-		copy := *params.ParentBeaconBlockRoot
-		cloned.ParentBeaconBlockRoot = &copy
-	}
-	if params.SlotNumber != nil {
-		copy := *params.SlotNumber
-		cloned.SlotNumber = &copy
-	}
-	if params.TargetGasLimit != nil {
-		copy := *params.TargetGasLimit
-		cloned.TargetGasLimit = &copy
-	}
-	return &cloned
-}
-
 // sameBuildRequest reports whether a request is asking for the payload another one is already
 // building. A custom transaction provider is never treated as the same request: it is stateful and
 // hands its transactions over once, so a second request carrying one is not asking for what the
@@ -102,39 +71,59 @@ func sameBuildRequest(previous, current *builder.Parameters) bool {
 	if previous.CustomTxnProvider != nil || current.CustomTxnProvider != nil {
 		return false
 	}
-	return reflect.DeepEqual(previous, current)
+	// The payload id is this module's to assign, so it is not part of the question, and comparing
+	// copies keeps the caller's parameters out of it.
+	withoutID := func(p *builder.Parameters) builder.Parameters {
+		stripped := *p
+		stripped.PayloadId = 0
+		return stripped
+	}
+	previousWithoutID, currentWithoutID := withoutID(previous), withoutID(current)
+	return reflect.DeepEqual(&previousWithoutID, &currentWithoutID)
 }
 
-// builderEntry keeps a builder with the parameters and timestamp it was created for, so the
-// three cannot drift apart and eviction can drop the timestamp index without scanning it.
+// builderEntry keeps a builder with the immutable parameters it was created for, so the two cannot
+// drift apart and eviction can drop the timestamp index without scanning it.
 type builderEntry struct {
-	builder   *builder.BlockBuilder
-	params    *builder.Parameters
-	timestamp uint64
+	builder *builder.BlockBuilder
+	params  *builder.Parameters
 }
 
+// isCurrentFor reports whether this entry is the one its timestamp resolves to, which is the one a
+// proposal for that timestamp is waiting on.
+func (e *ExecModule) isCurrentFor(id uint64, entry *builderEntry) bool {
+	return entry != nil && entry.params != nil && e.buildersByTimestamp[entry.params.Timestamp] == id
+}
+
+// dropBuilder removes a builder and releases whatever it is holding.
 func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
-	if e.buildersByTimestamp[entry.timestamp] == id {
-		delete(e.buildersByTimestamp, entry.timestamp)
+	if entry != nil {
+		if e.isCurrentFor(id, entry) {
+			delete(e.buildersByTimestamp, entry.params.Timestamp)
+		}
+		if entry.builder != nil {
+			entry.builder.Discard()
+		}
 	}
 	delete(e.builders, id)
 }
 
+// evictOldBuilders drops the oldest builders so that at most MaxBuilders - 1 remain, skipping any
+// that a timestamp still resolves to: those are what a proposal is waiting on, and being old by id
+// says nothing about that. If every remaining builder is current the count is left above the bound,
+// which is the safer of the two ways to be wrong.
 func (e *ExecModule) evictOldBuilders() {
-	ids := common.SortedKeys(e.builders)
-
-	// remove old builders so that at most MaxBuilders - 1 remain
-	for i := 0; i <= len(e.builders)-engine_helpers.MaxBuilders; i++ {
-		id := ids[i]
-		if old := e.builders[id]; old != nil {
-			if old.builder != nil {
-				old.builder.Discard()
-			}
-			if e.buildersByTimestamp[old.timestamp] == id {
-				delete(e.buildersByTimestamp, old.timestamp)
-			}
+	remaining := len(e.builders) - engine_helpers.MaxBuilders + 1
+	for _, id := range common.SortedKeys(e.builders) {
+		if remaining <= 0 {
+			return
 		}
-		delete(e.builders, id)
+		entry := e.builders[id]
+		if e.isCurrentFor(id, entry) {
+			continue
+		}
+		e.dropBuilder(id, entry)
+		remaining--
 	}
 }
 
@@ -157,7 +146,6 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	// exactly what a repeated request is asking for. Only a failed one has to be passed over.
 	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
 		if previous := e.builders[previousID]; previous != nil && previous.builder != nil && !previous.builder.Failed() {
-			params.PayloadId = previousID
 			if sameBuildRequest(previous.params, params) {
 				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 				return AssembleBlockResult{PayloadID: previousID}, nil
@@ -171,15 +159,11 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 
 	e.nextPayloadId++
 	params.PayloadId = e.nextPayloadId
-	ownedParams := cloneBuilderParameters(params)
+	ownedParams := params.Copy()
 
-	if e.buildersByTimestamp == nil {
-		e.buildersByTimestamp = make(map[uint64]uint64)
-	}
 	e.builders[e.nextPayloadId] = &builderEntry{
-		builder:   builder.NewBlockBuilder(e.bacgroundCtx, e.builderFunc, ownedParams, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot())),
-		params:    ownedParams,
-		timestamp: params.Timestamp,
+		builder: builder.NewBlockBuilder(e.bacgroundCtx, e.builderFunc, ownedParams, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot())),
+		params:  ownedParams,
 	}
 	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
@@ -214,7 +198,7 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 
 	entry, ok := e.builders[payloadID]
 	if !ok || entry == nil || entry.builder == nil {
-		return AssembledBlockResult{}, nil
+		return AssembledBlockResult{Unknown: true}, nil
 	}
 	blockWithReceipts, err := entry.builder.Stop(ctx)
 	if err != nil {

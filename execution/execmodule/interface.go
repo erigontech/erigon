@@ -93,10 +93,14 @@ type AssembleBlockResult struct {
 
 // AssembledBlockResult is the native return type for GetAssembledBlock.
 type AssembledBlockResult struct {
-	// Busy is true when the builder has not finished yet.
+	// Busy is true when the module was already occupied, not when the builder is still working:
+	// otherwise the call waits for the builder to finish.
 	Busy bool
+	// Unknown is true when no builder is held for the payload id, so nothing will ever arrive for
+	// it. A caller polling that id cannot otherwise tell it from a build still running.
+	Unknown bool
 	// Block holds the assembled block with receipts and requests.
-	// Nil when Busy is true or when no builder was found for the payload ID.
+	// Nil when Busy or Unknown is true, or when the builder produced nothing.
 	Block      *types.BlockWithReceipts
 	BlockValue *uint256.Int
 }

@@ -17,6 +17,8 @@
 package builder
 
 import (
+	"bytes"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
@@ -39,4 +41,37 @@ type Parameters struct {
 	CustomTxnProvider txnprovider.TxnProvider
 	// ExtraData overrides the builder's configured extra data when non-nil.
 	ExtraData []byte
+}
+
+// Copy returns parameters that no longer share anything mutable with the receiver, so a caller
+// cannot change what a builder was asked for after the fact. Reference-typed fields added to
+// Parameters have to be handled here; TestParametersCopyCoversEveryField fails if one is not.
+func (p *Parameters) Copy() *Parameters {
+	if p == nil {
+		return nil
+	}
+	copied := *p
+	copied.ExtraData = bytes.Clone(p.ExtraData)
+	if p.Withdrawals != nil {
+		copied.Withdrawals = make([]*types.Withdrawal, len(p.Withdrawals))
+		for i, withdrawal := range p.Withdrawals {
+			if withdrawal != nil {
+				w := *withdrawal
+				copied.Withdrawals[i] = &w
+			}
+		}
+	}
+	if p.ParentBeaconBlockRoot != nil {
+		root := *p.ParentBeaconBlockRoot
+		copied.ParentBeaconBlockRoot = &root
+	}
+	if p.SlotNumber != nil {
+		slot := *p.SlotNumber
+		copied.SlotNumber = &slot
+	}
+	if p.TargetGasLimit != nil {
+		limit := *p.TargetGasLimit
+		copied.TargetGasLimit = &limit
+	}
+	return &copied
 }

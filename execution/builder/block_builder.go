@@ -28,6 +28,11 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
+// buildStopGrace is how long a builder asked to stop is given to hand its block over. It is sized
+// against how often the build loop looks at the interrupt flag, not against the slot: a build that
+// is cooperating answers within one of those polls, and one that is not never will.
+const buildStopGrace = 500 * time.Millisecond
+
 // BlockBuilderFunc builds a payload. Its context ends when the payload is discarded, so anything
 // that can block - opening a read view, waiting on a transaction provider - has to honour it.
 type BlockBuilderFunc func(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
@@ -88,13 +93,19 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 		defer timer.Stop()
 		select {
 		case <-timer.C:
-			log.Warn("Stopping block builder due to max build time exceeded")
-			_, _ = builder.Stop(context.Background())
-			log.Debug("Stopped block builder due to max build time exceeded")
-			return
 		case <-builder.done:
 			return
 		}
+		// Ask for the block it has, which is what the budget was for, but do not wait on it
+		// indefinitely: a build parked somewhere that never reads the flag would hold its read view
+		// until the builder count forced it out, which on a quiet node is a very long time.
+		log.Warn("Stopping block builder due to max build time exceeded")
+		graceCtx, cancelGrace := context.WithTimeout(ctx, buildStopGrace)
+		defer cancelGrace()
+		if _, err := builder.Stop(graceCtx); err != nil {
+			builder.Discard()
+		}
+		log.Debug("Stopped block builder due to max build time exceeded")
 	}()
 
 	return builder

@@ -267,6 +267,7 @@ func NewExecModule(
 		forkValidator:           forkValidator,
 		pipelineExecutor:        pipelineExecutor,
 		builders:                make(map[uint64]*builderEntry),
+		buildersByTimestamp:     make(map[uint64]uint64),
 		builderFunc:             builderFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
