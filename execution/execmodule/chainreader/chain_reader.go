@@ -316,6 +316,9 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64)
 	if result.Busy {
 		return nil, nil, nil, nil, ErrExecutionBusy
 	}
+	if result.Unknown {
+		return nil, nil, nil, nil, ErrUnknownPayload
+	}
 	if result.Block == nil {
 		return nil, nil, nil, nil, nil
 	}

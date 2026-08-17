@@ -53,11 +53,11 @@ func newTestModule(t *testing.T, builderFunc builder.BlockBuilderFunc) *ExecModu
 	}
 }
 
-// testTimestamp is far enough ahead that buildDuration gives a builder a budget measured in slots.
-// A timestamp in the past takes the floor instead, which is seconds, and the max-build-time
-// watchdog then fires in the middle of a test.
+// testTimestamp is a slot that has not happened yet but is close enough to be one a proposal could
+// be waiting for. Far enough ahead that buildDuration gives a budget measured in slots, so the
+// max-build-time watchdog cannot fire mid-test, and near enough that the slot still counts as live.
 func testTimestamp(offset uint64) uint64 {
-	return uint64(time.Now().Add(time.Hour).Unix()) + offset
+	return uint64(time.Now().Add(10*time.Second).Unix()) + offset
 }
 
 func TestAssembleBlockKeepsBuildersApartByTimestamp(t *testing.T) {
@@ -558,4 +558,25 @@ func TestEvictionSparesTheBuilderATimestampStillPointsAt(t *testing.T) {
 	require.False(t, module.builders[current.PayloadID].builder.Failed())
 
 	module.builders[current.PayloadID].builder.Discard()
+}
+
+func TestEvictionKeepsTheBuilderCacheBounded(t *testing.T) {
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, errors.New("builder stopped")
+	})
+
+	// Ordinary traffic is one builder per slot, so every entry is the one its own timestamp
+	// resolves to. If being indexed were enough to protect an entry, nothing would ever be evicted
+	// and both maps would grow for the life of the process.
+	past := uint64(time.Now().Add(-time.Hour).Unix())
+	for i := range uint64(engine_helpers.MaxBuilders + 8) {
+		_, err := module.AssembleBlock(t.Context(), &builder.Parameters{
+			Timestamp:  past + i,
+			ParentHash: common.Hash{byte(i), byte(i >> 8)},
+		})
+		require.NoError(t, err)
+	}
+
+	require.LessOrEqual(t, len(module.builders), engine_helpers.MaxBuilders)
+	require.LessOrEqual(t, len(module.buildersByTimestamp), engine_helpers.MaxBuilders)
 }

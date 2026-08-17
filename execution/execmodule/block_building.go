@@ -89,16 +89,32 @@ type builderEntry struct {
 	params  *builder.Parameters
 }
 
-// isCurrentFor reports whether this entry is the one its timestamp resolves to, which is the one a
-// proposal for that timestamp is waiting on.
-func (e *ExecModule) isCurrentFor(id uint64, entry *builderEntry) bool {
+// isIndexedFor reports whether the timestamp index still resolves to this entry, which is what has
+// to be cleaned up when the entry goes.
+func (e *ExecModule) isIndexedFor(id uint64, entry *builderEntry) bool {
 	return entry != nil && entry.params != nil && e.buildersByTimestamp[entry.params.Timestamp] == id
+}
+
+// isLiveProposalTarget reports whether an entry is what a proposal is still waiting on: the builder
+// its timestamp resolves to, for a slot that has not passed. Being indexed is not enough on its own,
+// because every slot has its own timestamp and successful entries stay indexed: protecting all of
+// them would mean never evicting anything.
+func (e *ExecModule) isLiveProposalTarget(id uint64, entry *builderEntry, now time.Time) bool {
+	if !e.isIndexedFor(id, entry) {
+		return false
+	}
+	// Compared as seconds rather than times, so an implausible timestamp wraps into "not live"
+	// instead of overflowing into the past.
+	nowSeconds := uint64(max(now.Unix(), 0))
+	slotSeconds := e.config.SecondsPerSlot()
+	timestamp := entry.params.Timestamp
+	return timestamp+slotSeconds > nowSeconds && timestamp <= nowSeconds+2*slotSeconds
 }
 
 // dropBuilder removes a builder and releases whatever it is holding.
 func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
 	if entry != nil {
-		if e.isCurrentFor(id, entry) {
+		if e.isIndexedFor(id, entry) {
 			delete(e.buildersByTimestamp, entry.params.Timestamp)
 		}
 		if entry.builder != nil {
@@ -108,18 +124,21 @@ func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
 	delete(e.builders, id)
 }
 
-// evictOldBuilders drops the oldest builders so that at most MaxBuilders - 1 remain, skipping any
-// that a timestamp still resolves to: those are what a proposal is waiting on, and being old by id
-// says nothing about that. If every remaining builder is current the count is left above the bound,
-// which is the safer of the two ways to be wrong.
+// evictOldBuilders drops the oldest builders so that at most MaxBuilders - 1 remain, skipping only
+// those a proposal is still waiting on. Being old by id says nothing about that, and there are only
+// ever a couple of live targets, so the bound holds.
 func (e *ExecModule) evictOldBuilders() {
 	remaining := len(e.builders) - engine_helpers.MaxBuilders + 1
+	if remaining <= 0 {
+		return
+	}
+	now := time.Now()
 	for _, id := range common.SortedKeys(e.builders) {
 		if remaining <= 0 {
 			return
 		}
 		entry := e.builders[id]
-		if e.isCurrentFor(id, entry) {
+		if e.isLiveProposalTarget(id, entry, now) {
 			continue
 		}
 		e.dropBuilder(id, entry)
