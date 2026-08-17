@@ -372,7 +372,21 @@ if [[ -z "$DEPTHS" ]]; then
             echo "FAIL: randomized DEPTHS is empty"
             exit 1
         fi
+        # REGIMES parallels DEPTHS — regime index (1..4) per iter.
+        # The soak driver maps regime → mode-A/B/C/D for the CSV label:
+        #   regime 1 = mode-a (target in changeset, no unwind)
+        #   regime 2 = mode-b (target past changeset, in MDBX writable-shadow)
+        #   regime 3 = mode-c (target in a per-step retired .kv)
+        #   regime 4 = mode-d (target in a merged/multi-step .kv — split-emit case)
+        REGIMES=""
+        _iter=0
+        while read -r regime; do
+            [[ -z "$regime" ]] && continue
+            _iter=$((_iter + 1))
+            REGIMES="${REGIMES:+$REGIMES,}$regime"
+        done <<< "$SHUFFLED"
         echo "  DEPTHS=$DEPTHS (randomized, seed=$RANDOM_SEED)"
+        echo "  REGIMES=$REGIMES"
     else
         rm -f "$RD_OUT"
         if [[ -z "$DEPTHS" ]]; then
@@ -393,6 +407,14 @@ if [[ -z "$DEPTHS" ]]; then
             echo "  cycled $BASE_COUNT depths to fill ITER=$ITER"
         fi
         echo "  DEPTHS=$DEPTHS"
+        # REGIMES: base regime-depths emits regimes 1..BASE_COUNT in order.
+        # Same cycling as DEPTHS. See randomized branch above for mode-A/B/C/D
+        # mapping the soak driver applies.
+        REGIMES=""
+        for ((_i=0; _i<ITER; _i++)); do
+            REGIMES="${REGIMES:+$REGIMES,}$((_i % BASE_COUNT + 1))"
+        done
+        echo "  REGIMES=$REGIMES"
     fi
 fi
 
@@ -402,7 +424,8 @@ SOAK_OUT="/tmp/unwind-fresh-then-soak-$(date -u +%Y-%m-%dT%H%M%S).csv"
 SOAK_DRIVER_LOG="/tmp/unwind-fresh-then-soak-driver.log"
 set -o pipefail
 "$SOAK_CMD" --rpc "$RPC" --log "$LOG" --iter "$ITER" \
-    --depths "$DEPTHS" --snap-dir "$SNAP_DIR" --out "$SOAK_OUT" \
+    --depths "$DEPTHS" --regimes "${REGIMES:-}" \
+    --snap-dir "$SNAP_DIR" --out "$SOAK_OUT" \
     2>&1 | tee "$SOAK_DRIVER_LOG"
 SOAK_RC=${PIPESTATUS[0]}
 set +o pipefail

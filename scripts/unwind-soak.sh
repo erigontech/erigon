@@ -33,11 +33,11 @@ DEPTHS_CSV="${DEPTHS:-$DEPTHS_DEFAULT}"
 OUT_DEFAULT="/tmp/unwind-soak-$(date -u +%Y-%m-%dT%H%M%S).csv"
 OUT="${OUT:-$OUT_DEFAULT}"
 RECOVERY_WINDOW_BLOCKS=1000
-RECOVERY_TIMEOUT_SEC=1800   # default 30 min; mode_b scales by depth via recovery_timeout_for_depth
+RECOVERY_TIMEOUT_SEC=1800   # default 30 min; scenario 3 (mode_b/c/d) scales by depth via recovery_timeout_for_depth
 SETHEAD_BUSY_TIMEOUT_SEC=1800 # 30 min upper bound on retries-while-busy
 SETHEAD_CALL_TIMEOUT_SEC=1800 # 30 min per curl call (synchronous setHead)
 
-# recovery_timeout_for_depth scales the mode_b recovery window with
+# recovery_timeout_for_depth scales the scenario-3 recovery window with
 # unwind depth. Empirically (2026-06-28 hoodi soaks) the post-setHead
 # recovery splits roughly into:
 #   1. DownloadHistoricalBlocks  — refetches the gapped slots from CL
@@ -72,6 +72,7 @@ while [[ $# -gt 0 ]]; do
         --iter) ITER="$2"; shift 2 ;;
         --out) OUT="$2"; shift 2 ;;
         --depths) DEPTHS_CSV="$2"; shift 2 ;;
+        --regimes) REGIMES_CSV="$2"; shift 2 ;;
         --snap-dir) SNAP_DIR="$2"; shift 2 ;;
         --stress) STRESS_MODE=1; shift ;;
         --scenario2-depth) SCENARIO2_DEPTH="$2"; shift 2 ;;
@@ -88,6 +89,26 @@ if [[ ${#DEPTHS[@]} -lt ITER ]]; then
     echo "ERROR: --iter=$ITER but only ${#DEPTHS[@]} depths provided" >&2
     exit 2
 fi
+# REGIMES parallels DEPTHS. Each entry is 1..4 mapping to the target's
+# storage tier (see regime2mode below). Optional — when unset, the
+# scenario-3 CSV label falls back to "mode_bcd" (ambiguous).
+IFS=',' read -r -a REGIMES <<< "${REGIMES_CSV:-}"
+
+# regime2mode maps the regime index (from `integration regime-depths`)
+# to the mode-A/B/C/D taxonomy used in the CSV phase column:
+#   regime 1 → mode-a : target in retained changeset (no unwind)
+#   regime 2 → mode-b : target past changeset, still in MDBX writable-shadow
+#   regime 3 → mode-c : target lands in a per-step retired .kv
+#   regime 4 → mode-d : target lands in a merged/multi-step .kv (split-emit case)
+regime2mode() {
+    case "$1" in
+        1) echo mode_a ;;
+        2) echo mode_b ;;
+        3) echo mode_c ;;
+        4) echo mode_d ;;
+        *) echo mode_bcd ;; # unknown regime — ambiguous label
+    esac
+}
 
 rpc_call() {
     # rpc_call METHOD PARAMS_JSON
@@ -254,7 +275,12 @@ inventory_drift_names() {
 }
 
 # scenario_test: run one setHead test and write a CSV row. Args:
-#   $1 phase label (mode_a / mode_a2 / mode_b)
+#   $1 phase label — mode-A/B/C/D taxonomy:
+#      mode_a  target in retained changeset (no unwind)
+#      mode_b  target past changeset but in MDBX writable-shadow
+#      mode_c  target in a per-step retired .kv (mid-step regen, no split)
+#      mode_d  target in a merged/multi-step retired .kv (split emit fires)
+#      mode_bcd  regime unknown (fallback when --regimes not passed)
 #   $2 iter number
 #   $3 depth (blocks below current head)
 #   $4 sethead curl timeout (seconds)
@@ -373,7 +399,7 @@ scenario_test() {
         if [[ $((elapsed % 30)) -lt 6 ]]; then
             # Liveness signal = log byte growth since test start.
             # Replaces the granular dl/bc/ex/ct stack because shallow
-            # mode_a2 recoveries (depth ≤ 1000) go through the FCU
+            # scenario-2 (mode_a, depth ≤ 1000) recoveries go through the FCU
             # path and emit none of those specific markers for the
             # full ~3 min recovery window, even when the system is
             # actively re-executing. Any new bytes (mem stats, txpool
@@ -471,43 +497,49 @@ echo
 OVERALL_RC=0
 for ((i=1; i<=ITER; i++)); do
     DEPTH=${DEPTHS[$((i-1))]}
+    # Regime for scenario 3 comes from Phase 3.5 (regime-depths). Absent
+    # when --regimes wasn't passed — fall back to mode_bcd (ambiguous).
+    S3_REGIME=""
+    if [[ ${#REGIMES[@]} -ge $i ]]; then
+        S3_REGIME=${REGIMES[$((i-1))]}
+    fi
+    S3_MODE=$(regime2mode "$S3_REGIME")
 
-    # Scenario 1: within changeset (Mode-A path). Must succeed before
-    # any deeper test is meaningful — chaindata-only unwind is the
-    # safety baseline.
+    # Scenario 1: shallow depth (default 50) — target ~always in the
+    # retained changeset → mode-A code path (no unwind).
     scenario_test mode_a "$i" "$SCENARIO1_DEPTH" \
         "$SETHEAD_PREFLIGHT_TIMEOUT_SEC" "$PREFLIGHT_RECOVERY_TIMEOUT_SEC" 1
     if [[ $OVERALL_RC -ne 0 ]]; then
-        echo "iter $i: ABORTING — Mode-A (scenario 1) regression"
+        echo "iter $i: ABORTING — scenario 1 (mode_a) regression"
         break
     fi
 
-    # Scenario 2: past changeset, above frozen-blocks tip. Currently
-    # routes through setHeadModeB. The snapshot-trim subpath no-ops
-    # (no files past toBlock) but the commitment-recompute step
-    # inside setHead still runs when the pre/target span crosses a
-    # step boundary — mode_a2 can therefore take as long as a genuine
-    # deep Mode-B call. Use the same generous setHead timeout as
-    # scenario 3 instead of the shallow preflight budget, which
-    # caused iter-13 false-fails on runs where the trie recompute
-    # ran the RPC over its 120s limit.
-    scenario_test mode_a2 "$i" "$SCENARIO2_DEPTH" \
+    # Scenario 2: SCENARIO2_DEPTH (default 300) — target still in the
+    # retained changeset → also mode-A. Kept as a separate row because
+    # the commitment-recompute step inside setHead can take as long as
+    # a genuine mode-B/C/D unwind when the pre/target span crosses a
+    # step boundary, so it uses the full setHead timeout budget rather
+    # than the preflight budget (iter-13 false-fail 2026-07 fix).
+    scenario_test mode_a "$i" "$SCENARIO2_DEPTH" \
         "$SETHEAD_CALL_TIMEOUT_SEC" "$PREFLIGHT_RECOVERY_TIMEOUT_SEC" 1
     if [[ $OVERALL_RC -ne 0 ]]; then
-        echo "iter $i: ABORTING — scenario 2 (past-changeset, within-DB) regression"
+        echo "iter $i: ABORTING — scenario 2 (mode_a, past-changeset baseline) regression"
         break
     fi
 
-    # Scenario 3: within snapshots (Mode-B with full trim). Stress
+    # Scenario 3: regime-driven depth from Phase 3.5. Target may land
+    # in changeset / MDBX / per-step file / merged file — the CSV label
+    # (S3_MODE) reflects that. mode-D is the target-in-merged-file case
+    # that exercises the split emit (aligned wide + stub v4). Stress
     # mode uses a shorter recovery polling — the *eventual* recovery
     # gets verified at the end of the loop, after the next iter's
     # setHead has already fired.
     if [[ "$STRESS_MODE" == "1" ]]; then
-        scenario_test mode_b "$i" "$DEPTH" \
+        scenario_test "$S3_MODE" "$i" "$DEPTH" \
             "$SETHEAD_CALL_TIMEOUT_SEC" "$STRESS_INTER_ITER_SEC" 0
     else
         MODEB_RECOVERY_TIMEOUT=$(recovery_timeout_for_depth "$DEPTH")
-        scenario_test mode_b "$i" "$DEPTH" \
+        scenario_test "$S3_MODE" "$i" "$DEPTH" \
             "$SETHEAD_CALL_TIMEOUT_SEC" "$MODEB_RECOVERY_TIMEOUT" 1
     fi
 
