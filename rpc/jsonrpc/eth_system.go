@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"fmt"
 	"math"
@@ -26,9 +27,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
+	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -522,19 +525,29 @@ func (b *GasPriceOracleBackend) Fork(ctx context.Context) (gasprice.OracleBacken
 		nil
 }
 
-// CanonicalHash resolves on the pinned tx first: the block reader may resolve
-// on a live service (rpcdaemon mode), which would un-pin the fee-history cache
-// key. The reader is only the fallback for frozen blocks, whose canonical
-// mapping is immutable.
-func (b *GasPriceOracleBackend) CanonicalHash(ctx context.Context, number uint64) (common.Hash, bool, error) {
-	hash, err := rawdb.ReadCanonicalHash(b.tx, number)
+// CanonicalHashes scans the canonical markers of [from, to] on the pinned tx:
+// resolving through the block reader would hit a live service in rpcdaemon
+// mode, un-pinning the fee-history cache key, and a per-height read there is a
+// round trip each. Callers only ask for unfrozen heights, whose markers are
+// always in the db.
+func (b *GasPriceOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
+	hashes := make([]common.Hash, to-from+1)
+	it, err := b.tx.Range(kv.HeaderCanonical, hexutil.EncodeTs(from), hexutil.EncodeTs(to+1), order.Asc, kv.Unlim)
 	if err != nil {
-		return common.Hash{}, false, err
+		return nil, err
 	}
-	if hash != (common.Hash{}) {
-		return hash, true, nil
+	defer it.Close()
+	for it.HasNext() {
+		k, v, err := it.Next()
+		if err != nil {
+			return nil, err
+		}
+		if len(k) != 8 || len(v) != length.Hash {
+			continue
+		}
+		hashes[binary.BigEndian.Uint64(k)-from] = common.BytesToHash(v)
 	}
-	return b.baseApi._blockReader.CanonicalHash(ctx, b.tx, number)
+	return hashes, nil
 }
 
 // FrozenBlocks reads the Snapshots stage progress through the pinned tx — one

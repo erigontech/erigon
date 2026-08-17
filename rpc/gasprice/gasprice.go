@@ -47,9 +47,12 @@ type OracleBackend interface {
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 
-	// CanonicalHash returns the canonical block hash at the given height on
-	// the backend's view, or ok=false when the height is beyond the head.
-	CanonicalHash(ctx context.Context, number uint64) (common.Hash, bool, error)
+	// CanonicalHashes returns the canonical hashes of [from, to] on the
+	// backend's view, one entry per height. Heights the view has no canonical
+	// marker for (beyond the head, or pruned) get the zero hash. It resolves
+	// the whole range at once because a per-height lookup is a remote round
+	// trip in rpcdaemon mode.
+	CanonicalHashes(ctx context.Context, from, to uint64) ([]common.Hash, error)
 
 	// FrozenBlocks returns the frozen (snapshot) boundary: the canonical
 	// number-to-hash mapping at or below it is immutable.

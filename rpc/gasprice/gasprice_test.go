@@ -27,6 +27,8 @@ import (
 	"math"
 	"math/big"
 	"math/rand"
+	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -279,10 +281,12 @@ type mockOracleBackend struct {
 	head           *types.Header
 	frozen         uint64
 	canonicalErr   error
-	canonicalCalls atomic.Int32
 	headerCalls    atomic.Int32
 	safeBlock      uint64
 	finalizedBlock uint64
+
+	canonicalMu     sync.Mutex
+	canonicalRanges [][2]uint64
 }
 
 // mockHeightHash derives a distinct hash per height, honoring the "one hash
@@ -326,15 +330,24 @@ func (m *mockOracleBackend) PendingBlockAndReceipts() (*types.Block, types.Recei
 	return nil, nil
 }
 
-func (m *mockOracleBackend) CanonicalHash(_ context.Context, number uint64) (common.Hash, bool, error) {
-	m.canonicalCalls.Add(1)
+func (m *mockOracleBackend) CanonicalHashes(_ context.Context, from, to uint64) ([]common.Hash, error) {
+	m.canonicalMu.Lock()
+	m.canonicalRanges = append(m.canonicalRanges, [2]uint64{from, to})
+	m.canonicalMu.Unlock()
 	if m.canonicalErr != nil {
-		return common.Hash{}, false, m.canonicalErr
+		return nil, m.canonicalErr
 	}
-	if number > m.head.Number.Uint64() {
-		return common.Hash{}, false, nil
+	hashes := make([]common.Hash, to-from+1)
+	for number := from; number <= min(to, m.head.Number.Uint64()); number++ {
+		hashes[number-from] = mockHeightHash(number)
 	}
-	return mockHeightHash(number), true, nil
+	return hashes, nil
+}
+
+func (m *mockOracleBackend) resolvedRanges() [][2]uint64 {
+	m.canonicalMu.Lock()
+	defer m.canonicalMu.Unlock()
+	return slices.Clone(m.canonicalRanges)
 }
 
 func (m *mockOracleBackend) FrozenBlocks() (uint64, error) {
@@ -385,15 +398,42 @@ func TestFeeHistory_FrozenRangeCachesByNumberWithoutResolution(t *testing.T) {
 
 	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
 	require.NoError(t, err)
-	require.EqualValues(t, 0, backend.canonicalCalls.Load(),
+	require.Empty(t, backend.resolvedRanges(),
 		"the frozen range must not resolve hashes: the mapping is immutable")
 	fetchesAfterFirst := backend.headerCalls.Load()
 
 	_, _, _, _, _, _, err = oracle.FeeHistory(context.Background(), 4, rpc.LatestBlockNumber, nil)
 	require.NoError(t, err)
-	require.EqualValues(t, 0, backend.canonicalCalls.Load())
+	require.Empty(t, backend.resolvedRanges())
 	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
 		"the second request must be served from number-keyed cache entries")
+}
+
+// TestFeeHistory_HotRangeResolvedInOneScan pins the cost of the cache-key
+// resolution above the frozen boundary: one range resolution per request,
+// whatever the window size. Per-block resolution would turn a memoized
+// eth_feeHistory into one remote round trip per block in rpcdaemon mode.
+func TestFeeHistory_HotRangeResolvedInOneScan(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(20)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, _, _, _, _, err := oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Equal(t, [][2]uint64{{13, 20}}, backend.resolvedRanges(),
+		"the whole hot window must be resolved by a single scan")
+	fetchesAfterFirst := backend.headerCalls.Load()
+
+	_, _, _, _, _, _, err = oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Equal(t, [][2]uint64{{13, 20}, {13, 20}}, backend.resolvedRanges(),
+		"a warm request must not cost more than its one scan")
+	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
+		"the second request must be served from hash-keyed cache entries")
 }
 
 func TestFeeHistoryResolvesSafeAndFinalizedBlocks(t *testing.T) {

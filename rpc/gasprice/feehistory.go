@@ -373,6 +373,22 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 		}
 	}
 
+	// Unfrozen heights are cached by hash, so a reorged-out block can no longer
+	// be found under its number. The hashes come from one range scan per request
+	// — resolving them per block costs a remote round trip each in rpcdaemon
+	// mode, which the cache-hit path used to be free of. Heights left unresolved
+	// (scan error, beyond the head) are simply not cached.
+	var hotFrom uint64
+	var hotHashes []common.Hash
+	if oracle.historyCache != nil && lastBlock > frozenBound {
+		hotFrom = max(oldestBlock, frozenBound+1)
+		hotHashes, err = oracle.backend.CanonicalHashes(ctx, hotFrom, lastBlock)
+		if err != nil {
+			oracle.log.Debug("fee history: canonical range unresolved, serving uncached", "from", hotFrom, "to", lastBlock, "err", err)
+			hotHashes = nil
+		}
+	}
+
 	// Launch up to maxBlockFetchers goroutines. Each goroutine opens its own
 	// TemporalTx via Fork so MDBX transactions are never shared across goroutines.
 	// When Fork is not supported (returns nil backend), a single goroutine falls back
@@ -408,17 +424,15 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				idx := int(blockNumber - oldestBlock)
 
 				// The pending block comes from the mining cache and is rebuilt
-				// continuously, so its results are never memoized. Above the
-				// frozen boundary the key includes the canonical hash — one
-				// cheap lookup; a resolution error degrades the block to
-				// uncached instead of failing the request.
+				// continuously, so its results are never memoized.
 				isPending := pendingBlock != nil && blockNumber >= pendingBlock.NumberU64()
 				cacheable := !isPending && oracle.historyCache != nil
 				byHash := false
 				key := cacheKey{number: blockNumber, percentiles: percentileKey}
 				if cacheable && blockNumber > frozenBound {
-					if hash, ok, err := localBackend.CanonicalHash(fetchCtx, blockNumber); err == nil && ok {
-						key.hash = hash
+					hotIdx := int(blockNumber - hotFrom)
+					if hotIdx < len(hotHashes) && hotHashes[hotIdx] != (common.Hash{}) {
+						key.hash = hotHashes[hotIdx]
 						byHash = true
 					} else {
 						cacheable = false

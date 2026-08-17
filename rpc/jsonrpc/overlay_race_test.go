@@ -775,12 +775,13 @@ func TestGasPriceOracle_CanonicalHashUsesPinnedView(t *testing.T) {
 
 	sibling := publishSiblingOverlay(t, h)
 
-	hash, ok, err := backend.CanonicalHash(h.m.Ctx, h.overlayHeader.Number.Uint64())
+	overlayNumber := h.overlayHeader.Number.Uint64()
+	hashes, err := backend.CanonicalHashes(h.m.Ctx, overlayNumber, overlayNumber)
 	require.NoError(t, err)
-	require.True(t, ok)
-	require.NotEqual(t, sibling.Hash(), hash,
+	require.Len(t, hashes, 1)
+	require.NotEqual(t, sibling.Hash(), hashes[0],
 		"the cache key must not come from the live view the reader resolves on")
-	require.Equal(t, h.overlayHeader.Hash(), hash,
+	require.Equal(t, h.overlayHeader.Hash(), hashes[0],
 		"the cache key must resolve on the pinned view")
 }
 
