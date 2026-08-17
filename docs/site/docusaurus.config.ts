@@ -86,6 +86,27 @@ export default async function createConfig(): Promise<Config> {
         attributes: {},
         innerHTML: 'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()',
       },
+      // Machine-readable copies of this site (llmstxt.org convention). Advertised
+      // on every page so crawlers and agents can find them without guessing the
+      // path — they are static files, so nothing else links to them.
+      {
+        tagName: 'link',
+        attributes: {
+          rel: 'alternate',
+          type: 'text/plain',
+          href: 'https://docs.erigon.tech/llms.txt',
+          title: 'Erigon Documentation — page index for LLMs',
+        },
+      },
+      {
+        tagName: 'link',
+        attributes: {
+          rel: 'alternate',
+          type: 'text/plain',
+          href: 'https://docs.erigon.tech/llms-full.txt',
+          title: 'Erigon Documentation — full text for LLMs',
+        },
+      },
     ],
 
     plugins: [
@@ -150,6 +171,15 @@ export default async function createConfig(): Promise<Config> {
           changefreq: 'weekly',
           priority: 0.5,
           ignorePatterns: ['/search'],
+          // The llms.txt artifacts live in static/, so Docusaurus never routes
+          // them and the default sitemap omits them. Nothing else on the web
+          // links to them either, which leaves them unindexable and unreachable
+          // by search — append them explicitly.
+          createSitemapItems: async ({defaultCreateSitemapItems, ...rest}) => [
+            ...(await defaultCreateSitemapItems(rest)),
+            {url: 'https://docs.erigon.tech/llms.txt', changefreq: 'weekly', priority: 0.5},
+            {url: 'https://docs.erigon.tech/llms-full.txt', changefreq: 'weekly', priority: 0.5},
+          ],
         },
       } satisfies Preset.Options],
     ],
