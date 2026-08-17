@@ -102,6 +102,13 @@ func New(size int, key []byte) (hash.Hash, error) { return newDigest(size, key) 
 // schedule realigns at a chunk boundary.
 const maxAsmRounds = 4090
 
+// The assembly unrolls the ten distinct message permutations of the round
+// function and loops over that block, so a chunk boundary is only correct on a
+// multiple of ten. Enforced at compile time: the expression is 0 when the
+// remainder is 0, and a negative untyped constant otherwise, which cannot
+// convert to uint. Builds at 4090, fails at 4096.
+const _ uint = -(maxAsmRounds % 10)
+
 // F is a compression function for BLAKE2b. It takes as an argument the state
 // vector `h`, message block vector `m`, offset counter `t`, final block indicator
 // flag `f`, and number of rounds `rounds`. The state vector provided as the first

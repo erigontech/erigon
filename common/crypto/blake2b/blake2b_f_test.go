@@ -2,6 +2,7 @@ package blake2b
 
 import (
 	"fmt"
+	"math"
 	"math/rand"
 	"reflect"
 	"runtime"
@@ -99,8 +100,11 @@ func gcWait(work func()) time.Duration {
 // always preemptible: a slow or loaded runner moves both numbers together and
 // only a real regression separates them.
 func TestFLongRoundsIsPreemptible(t *testing.T) {
-	if testing.Short() || runtime.GOMAXPROCS(0) < 2 {
-		t.Skip("runs millions of rounds, and needs GOMAXPROCS >= 2 to see a stalled GC")
+	if testing.Short() {
+		t.Skip("runs millions of rounds")
+	}
+	if runtime.GOMAXPROCS(0) < 2 {
+		t.Skip("needs GOMAXPROCS >= 2 for a GC to overlap the call")
 	}
 	if !useAVX2 && !useAVX && !useSSE4 {
 		t.Skip("no assembly on this machine, so the round loop is already preemptible Go")
@@ -112,9 +116,18 @@ func TestFLongRoundsIsPreemptible(t *testing.T) {
 	const rounds = 8_000_000
 
 	floor := gcWait(func() { fGeneric(&h, &m, c[0], c[1], 0, rounds) })
-	got := gcWait(func() { F(&h, m, c, false, rounds) })
 
-	t.Logf("worst GC wait: F %v, pure-Go fGeneric %v", got, floor)
+	// Best of three F windows. The two measurements are disjoint and unequal --
+	// fGeneric runs several times longer than F -- so a CPU burst on a loaded
+	// runner can land in the F window alone and trip the budget with nothing
+	// wrong. An unbounded round loop stalls every window, so taking the minimum
+	// keeps the signal while one unlucky burst no longer fails the run.
+	got := time.Duration(math.MaxInt64)
+	for range 3 {
+		got = min(got, gcWait(func() { F(&h, m, c, false, rounds) }))
+	}
+
+	t.Logf("worst GC wait: F %v (best of 3), pure-Go fGeneric %v", got, floor)
 	if got > 5*time.Millisecond && got > 4*floor {
 		t.Fatalf("a GC waited %v on F against %v on the pure-Go path: "+
 			"the assembly round loop is running unbounded", got, floor)

@@ -50,6 +50,11 @@ func fRounds(v *[16]uint64, m *[16]uint64, rounds uint64) {
 
 func fLong(h *[8]uint64, m *[16]uint64, c0, c1 uint64, flag uint64, rounds uint64) {
 	if !useAVX2 {
+		// Deliberately not f(): fAVX and fSSE4 are one-shot, deriving the
+		// working vector from h and folding it back inside a single call, so
+		// they cannot be handed a chunk and have no bounded variant. Only
+		// fGeneric is safe here, being preemptible Go. Do not route this to
+		// f() without adding a chunked entry point for those two.
 		fGeneric(h, m, c0, c1, flag, rounds)
 		return
 	}
