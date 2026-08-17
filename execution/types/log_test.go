@@ -351,10 +351,10 @@ func TestErigonLogJSONBlockTimestamp(t *testing.T) {
 
 	el := &ErigonLog{
 		Log: Log{
-			Address: common.HexToAddress("0xecf8f87f810ecf450940c9f60066b4a7a501d6a7"),
-			Topics:  []common.Hash{common.HexToHash("0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef")},
-			Data:    hexutil.MustDecode("0x000000000000000000000000000000000000000000000001a055690d9db80000"),
-			TxHash:  common.HexToHash("0x3b198bfd5d2907285af009e9ae84a0ecd63677110d89d7e030251acb87f6487e"),
+			Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Topics:  []common.Hash{common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
+			Data:    hexutil.MustDecode("0x112233"),
+			TxHash:  common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
 		},
 		BlockTimestamp: hexutil.Uint64(1700000000),
 	}
@@ -376,34 +376,35 @@ func TestErigonLogJSONBlockTimestamp(t *testing.T) {
 func TestErigonLogUnmarshalJSONBlockTimestamp(t *testing.T) {
 	t.Parallel()
 
-	input := `{"address":"0xecf8f87f810ecf450940c9f60066b4a7a501d6a7","blockHash":"0x656c34545f90a730a19008c0e7a7cd4fb3895064b48d6d69761bd5abad681056","blockNumber":"0x1ecfa4","blockTimestamp":"0x57a53d3a","data":"0x00","logIndex":"0x2","topics":["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"],"transactionHash":"0x3b198bfd5d2907285af009e9ae84a0ecd63677110d89d7e030251acb87f6487e","transactionIndex":"0x3"}`
+	input := `{"address":"0x2222222222222222222222222222222222222222","blockHash":"0x222233334444555566667777888899990000aaaabbbbccccddddeeeeffff1111","blockNumber":"0x200000","blockTimestamp":"0x60000000","data":"0x4455","logIndex":"0x5","topics":["0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"transactionHash":"0x33334444555566667777888899990000aaaabbbbccccddddeeeeffff11112222","transactionIndex":"0x6"}`
 
 	var log ErigonLog
 	require.NoError(t, json.Unmarshal([]byte(input), &log))
-	require.Equal(t, hexutil.Uint64(0x57a53d3a), log.BlockTimestamp)
-	require.Equal(t, common.HexToAddress("0xecf8f87f810ecf450940c9f60066b4a7a501d6a7"), log.Address)
+	require.Equal(t, hexutil.Uint64(0x60000000), log.BlockTimestamp)
+	require.Equal(t, common.HexToAddress("0x2222222222222222222222222222222222222222"), log.Address)
 }
 
 func TestErigonLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
 	t.Parallel()
 
-	input := `{"address":"0xecf8f87f810ecf450940c9f60066b4a7a501d6a7","blockHash":"0x656c34545f90a730a19008c0e7a7cd4fb3895064b48d6d69761bd5abad681056","blockNumber":"0x1ecfa4","timestamp":"0x57a53d3a","data":"0x00","logIndex":"0x2","topics":["0xddf252ad1be2c89b69c2b068fc378daa952ba7f163c4a11628f55a4df523b3ef"],"transactionHash":"0x3b198bfd5d2907285af009e9ae84a0ecd63677110d89d7e030251acb87f6487e","transactionIndex":"0x3"}`
+	input := `{"address":"0x3333333333333333333333333333333333333333","blockHash":"0x4444555566667777888899990000aaaabbbbccccddddeeeeffff111122223333","blockNumber":"0x300000","timestamp":"0x70000000","data":"0x6677","logIndex":"0x8","topics":["0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],"transactionHash":"0x555566667777888899990000aaaabbbbccccddddeeeeffff1111222233334444","transactionIndex":"0x9"}`
 
 	var log ErigonLog
 	require.NoError(t, json.Unmarshal([]byte(input), &log))
 	require.Equal(t, hexutil.Uint64(0), log.BlockTimestamp)
+	require.Equal(t, common.HexToAddress("0x3333333333333333333333333333333333333333"), log.Address)
 }
 
 func TestErigonAndRPCLogTimestampConsistency(t *testing.T) {
 	t.Parallel()
 
 	log := Log{
-		Address: common.HexToAddress("0x1"),
-		Topics:  []common.Hash{common.HexToHash("0xaa")},
-		Data:    hexutil.Bytes{0x01},
-		TxHash:  common.HexToHash("0xbb"),
+		Address: common.HexToAddress("0x4444444444444444444444444444444444444444"),
+		Topics:  []common.Hash{common.HexToHash("0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")},
+		Data:    hexutil.Bytes{0x88, 0x99},
+		TxHash:  common.HexToHash("0x7777888899990000aaaabbbbccccddddeeeeffff111122223333444455556666"),
 	}
-	ts := hexutil.Uint64(1700000000)
+	ts := hexutil.Uint64(1800000000)
 
 	erigonB, err := json.Marshal(&ErigonLog{Log: log, BlockTimestamp: ts})
 	require.NoError(t, err)
