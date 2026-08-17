@@ -686,6 +686,7 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	// count to 0 and the seed becomes a no-op. Caplin's "headers only"
 	// path uses BlockHeadersReady, an earlier signal — unaffected.
 	toRequest := make([]*snapshot.FileEntry, 0, len(peerEntries))
+	inv := o.storage.Inventory()
 	o.peerMu.Lock()
 	for _, entry := range peerEntries {
 		eligibleForPhase1 := domain != "" || entry.Kind != snapshot.KindCaplin
@@ -693,6 +694,14 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 			if eligibleForPhase1 {
 				o.phase1Files[entry.Name] = struct{}{}
 			}
+			continue
+		}
+		// Local production is authoritative: skip files we removed with
+		// intent to rebuild. Otherwise the downloader's .part → final
+		// rename over an open reader mmap surfaces as a decompressor
+		// SIGSEGV mid-recovery-exec (checkpoint-2026-08-17-retire-race-
+		// fix-verified).
+		if inv != nil && inv.IsProducing(entry.Name) {
 			continue
 		}
 		role := fileRole(entry.Name)

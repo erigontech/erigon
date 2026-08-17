@@ -231,6 +231,14 @@ type Inventory struct {
 	// validation. See step_block_binding.go.
 	stepBlockBoundaries map[uint64]uint64
 
+	// producing names files the local node has removed with intent to
+	// rebuild — retire/FinalizeUnwind classifies past-boundary or
+	// merge-superseded files and unlinks them so recovery-exec can
+	// re-populate. Peer manifests may still declare these; the download
+	// orchestrator consults IsProducing to filter them out until AddFile
+	// clears the mark (file has been re-materialised locally).
+	producing map[string]struct{}
+
 	// nowFn lets tests inject deterministic timestamps. Production
 	// leaves this nil and time.Now() is used. Set via WithClock.
 	nowFn func() time.Time
@@ -242,7 +250,19 @@ func NewInventory() *Inventory {
 		domains:        make(map[Domain][]*FileEntry),
 		refcount:       make(map[string]int),
 		pendingDeletes: make(map[string]*FileEntry),
+		producing:      make(map[string]struct{}),
 	}
+}
+
+// IsProducing reports whether name is a file the local node has removed
+// with intent to rebuild. The download orchestrator uses this to skip
+// re-fetching what recovery-exec / retire / FinalizeUnwind will produce.
+// The mark is set by RemoveFile and cleared by AddFile.
+func (inv *Inventory) IsProducing(name string) bool {
+	inv.mu.RLock()
+	_, ok := inv.producing[name]
+	inv.mu.RUnlock()
+	return ok
 }
 
 // AddFile adds a file entry to the inventory. If an entry with the same name
@@ -298,6 +318,10 @@ func (inv *Inventory) AddFile(entry *FileEntry) error {
 	if entry.State >= LifecycleAdvertisable {
 		inv.recordTimingTransitionLocked(entry.Name, LifecycleAdvertisable, now)
 	}
+	// File is back in the authoritative set — clear any producing mark
+	// left by a prior RemoveFile so the download orchestrator can once
+	// again serve peer requests for this name.
+	delete(inv.producing, entry.Name)
 	switch entry.Kind {
 	case KindCaplin:
 		inv.caplin = replaceOrAppend(inv.caplin, entry)
@@ -343,6 +367,10 @@ func (inv *Inventory) RemoveFile(name string) {
 	for domain, entries := range inv.domains {
 		inv.domains[domain] = removeByName(entries, name)
 	}
+	// Record that the local node has removed this file with intent to
+	// rebuild. AddFile clears the mark once the file is back in the
+	// authoritative set. See IsProducing for the read side.
+	inv.producing[name] = struct{}{}
 	inv.mu.Unlock()
 	inv.notify(ChangeSet{Files: []string{name}})
 }
