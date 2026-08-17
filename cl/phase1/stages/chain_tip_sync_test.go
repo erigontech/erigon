@@ -45,7 +45,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func TestChainTipSyncChecksFuluDataAvailability(t *testing.T) {
@@ -64,7 +64,7 @@ func TestChainTipSyncChecksFuluDataAvailability(t *testing.T) {
 	anchorRoot, err := anchorState.BlockRoot()
 	require.NoError(t, err)
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	store, err := forkchoice.NewForkChoiceStore(
 		clock,

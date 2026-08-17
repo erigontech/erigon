@@ -63,6 +63,39 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	return d
 }
 
+func TestNextReportsPackedLiteral(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "literal.kv")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = ^uint64(0)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+
+	word := make([]byte, 6*os.Getpagesize())
+	for i := range word {
+		word[i] = byte(i)
+	}
+	require.NoError(t, c.AddWord(word))
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	require.Zero(t, d.dictWords)
+
+	g := d.MakeGetter()
+	var literalOffset, literalLength uint64
+	g.literalWarmer = func(_ *Getter, offset, length uint64) {
+		literalOffset, literalLength = offset, length
+	}
+	got, _ := g.Next(nil)
+
+	require.Equal(t, word, got)
+	require.Equal(t, uint64(len(word)), literalLength)
+	require.Equal(t, word, d.mmapHandle1[literalOffset:literalOffset+literalLength])
+}
+
 func TestDecompressSkip(t *testing.T) {
 	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)

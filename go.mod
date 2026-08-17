@@ -7,8 +7,8 @@ replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilte
 require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20260414072133-b8b2bdc99de2
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
-	github.com/erigontech/mdbx-go v0.42.0
-	github.com/erigontech/secp256k1 v1.3.0
+	github.com/erigontech/mdbx-go v0.43.0
+	github.com/erigontech/secp256k1 v1.4.0
 )
 
 require (
@@ -24,7 +24,7 @@ require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.2.0
-	github.com/anacrolix/go-libutp v1.5.0
+	github.com/anacrolix/go-libutp v1.5.1-0.20260817025621-104d95cd4dc1
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
 	github.com/anacrolix/missinggo/v2 v2.11.0
 	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1

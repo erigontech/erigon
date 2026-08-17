@@ -1,4 +1,4 @@
-// Copyright 2021 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,26 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package stream
+//go:build !linux
 
-import (
-	"fmt"
-)
+package seg
 
-// PairsWithErrorIter - return N, keys and then error
-type PairsWithErrorIter struct {
-	errorAt, i int
-}
-
-func PairsWithError(errorAt int) *PairsWithErrorIter {
-	return &PairsWithErrorIter{errorAt: errorAt}
-}
-func (m *PairsWithErrorIter) Close()        {}
-func (m *PairsWithErrorIter) HasNext() bool { return true }
-func (m *PairsWithErrorIter) Next() ([]byte, []byte, error) {
-	if m.i >= m.errorAt {
-		return nil, nil, fmt.Errorf("expected error at iteration: %d", m.errorAt)
-	}
-	m.i++
-	return fmt.Appendf(nil, "%x", m.i), fmt.Appendf(nil, "%x", m.i), nil
-}
+func (*Getter) EnableAsyncLiteralWarm() {}
