@@ -6,6 +6,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/stretchr/testify/require"
 )
 
@@ -82,4 +83,100 @@ func Test_TrieContext_BranchCopiesData(t *testing.T) {
 
 	branch[1] = 8
 	require.Equal(t, []byte{9, 2, 3}, reader.branchData)
+}
+
+type branchMemBatch struct {
+	kv.TemporalMemBatch
+	value []byte
+	ok    bool
+	calls int
+	key   []byte
+}
+
+func (m *branchMemBatch) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
+	m.calls++
+	m.key = append(m.key[:0], key...)
+	if domain != kv.CommitmentDomain || !m.ok {
+		return nil, kv.NoStepBound, false
+	}
+	return m.value, 0, true
+}
+
+type branchGetter struct {
+	value []byte
+	calls int
+	key   []byte
+}
+
+func (g *branchGetter) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.Step, error) {
+	g.calls++
+	g.key = append(g.key[:0], key...)
+	if domain != kv.CommitmentDomain {
+		return nil, 0, nil
+	}
+	return g.value, 0, nil
+}
+
+func (g *branchGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, error) {
+	return nil, nil, false, nil
+}
+
+func (g *branchGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
+
+type branchChildCountDomains struct {
+	sd
+	mem    *branchMemBatch
+	getter *branchGetter
+}
+
+func (d *branchChildCountDomains) AsGetter(kv.TemporalTx) kv.TemporalGetter {
+	return d.getter
+}
+
+func (d *branchChildCountDomains) GetMemBatch() kv.TemporalMemBatch { return d.mem }
+func (d *branchChildCountDomains) StepSize() uint64                 { return 1 }
+
+func TestBranchChildCountReadsPostComputeView(t *testing.T) {
+	t.Parallel()
+
+	prefix := []byte{0x0a}
+	compactKey := nibbles.HexToCompact(prefix)
+
+	t.Run("changed branch comes from memory", func(t *testing.T) {
+		mem := &branchMemBatch{value: []byte{0, 0, 0, 0b0000_0111}, ok: true}
+		getter := &branchGetter{value: mem.value}
+		reader := &testStateReader{branchData: []byte{0, 0, 0, 0b0000_0011}}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{mem: mem, getter: getter},
+			stateReader:   reader,
+		}
+
+		count, err := sdc.BranchChildCount(nil, prefix)
+		require.NoError(t, err)
+		require.Equal(t, 3, count)
+		require.Equal(t, 1, mem.calls)
+		require.Equal(t, compactKey, mem.key)
+		require.Zero(t, getter.calls)
+		require.Zero(t, reader.readStepSize)
+	})
+
+	t.Run("unchanged branch comes from installed reader", func(t *testing.T) {
+		mem := &branchMemBatch{}
+		getter := &branchGetter{value: []byte{0, 0, 0, 0b0000_0001}}
+		reader := &testStateReader{branchData: []byte{0, 0, 0, 0b0000_0011}}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{mem: mem, getter: getter},
+			stateReader:   reader,
+		}
+
+		count, err := sdc.BranchChildCount(nil, prefix)
+		require.NoError(t, err)
+		require.Equal(t, 2, count)
+		require.Equal(t, 1, mem.calls)
+		require.Equal(t, compactKey, mem.key)
+		require.Zero(t, getter.calls)
+		require.Equal(t, kv.CommitmentDomain, reader.readDomain)
+		require.Equal(t, compactKey, reader.readKey)
+		require.Equal(t, uint64(1), reader.readStepSize)
+	})
 }

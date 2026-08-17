@@ -39,6 +39,7 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
+	GetMemBatch() kv.TemporalMemBatch
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
 	// read), tagged with source.
@@ -407,11 +408,22 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	}
 }
 
-// BranchChildCount returns the child count of the branch at nibblePrefix, read
-// from the in-memory commitment domain (post-compute state).
+// BranchChildCount returns the child count from the post-compute commitment view.
+// Modified branches come from memory; an unchanged branch falls back to the
+// installed reader, or to transaction-latest state when no reader is installed.
 func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, _, err := sdc.sharedDomains.AsGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	enc, _, ok := sdc.sharedDomains.GetMemBatch().GetLatest(kv.CommitmentDomain, key)
+	if ok {
+		return commitment.BranchData(enc).ChildCount(), nil
+	}
+
+	var err error
+	if sdc.stateReader != nil {
+		enc, _, err = sdc.stateReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
+	} else {
+		enc, _, err = sdc.sharedDomains.AsGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	}
 	if err != nil {
 		return 0, err
 	}
