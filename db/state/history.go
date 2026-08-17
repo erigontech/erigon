@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type History struct {
@@ -384,6 +385,10 @@ func (h *History) Scan(ctx context.Context, toTxNum uint64) error {
 	return nil
 }
 
+// mdbx keeps a dupsort value as a key of the nested tree, so it is capped by keysize_max(pageSize),
+// which is pageSize/2 - 26. Here that budget is shared with the 8-byte txNum prefix.
+const maxHistoryValLen = int(ethconfig.DefaultChainDBPageSize)/2 - 26 - 8
+
 func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) (err error) {
 	if w.discard {
 		return nil
@@ -423,8 +428,8 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
 
-	if len(original) > 2048 {
-		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", len(w.historyKey)-8-len(k))
+	if len(original) > maxHistoryValLen {
+		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", maxHistoryValLen)
 		panic("History value is too large while largeValues=false")
 	}
 
