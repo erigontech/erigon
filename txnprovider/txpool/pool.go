@@ -730,16 +730,23 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	// Broadcasting on cancellation wakes it; every waiter rechecks its own condition anyway. The
 	// broadcast takes the lock so it cannot land between the check below and the wait, which is the
 	// window where a wakeup would be lost.
-	waitDone := make(chan struct{})
-	defer close(waitDone)
+	stopWatching, watcherDone := make(chan struct{}), make(chan struct{})
 	go func() {
+		defer close(watcherDone)
 		select {
 		case <-ctx.Done():
 			p.lock.Lock()
 			p.lastSeenCond.Broadcast()
 			p.lock.Unlock()
-		case <-waitDone:
+		case <-stopWatching:
 		}
+	}()
+	// Joined rather than merely told to stop: with the context already ended the watcher can pick
+	// either case, and one that picked cancellation would otherwise take the lock after this call
+	// had returned. Registered before the lock is taken, so it runs after the lock is released.
+	defer func() {
+		close(stopWatching)
+		<-watcherDone
 	}()
 
 	p.lock.Lock()
