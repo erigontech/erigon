@@ -352,6 +352,12 @@ func pollAssembledPayload(
 		log.Error("BlockProduction: failed to get payload", "slot", targetSlot, "failures", failures, "err", firstErr)
 	}()
 	for {
+		// Nothing is waiting for this payload any more, and starting another collection would stop
+		// the builder and could fail for reasons of its own - contention, most likely - which would
+		// then be reported against a slot nobody is waiting for.
+		if ctx.Err() != nil {
+			return nil, nil, nil, nil, false
+		}
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
 		if err != nil {

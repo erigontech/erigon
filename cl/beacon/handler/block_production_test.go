@@ -999,3 +999,24 @@ func TestFeeRecipientWarnsOncePerProposerUnderConcurrentRequests(t *testing.T) {
 
 	require.Equal(t, 1, strings.Count(logs(), "lvl=warn"))
 }
+
+func TestPollAssembledPayloadDoesNotCollectAfterTheCallerHasGone(t *testing.T) {
+	logs := captureProductionLogs(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	past := time.Now().Add(-time.Second)
+	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
+
+	calls := 0
+	_, _, _, _, ok := pollAssembledPayload(ctx, 10, window, time.Microsecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			// The execution module takes its semaphore before it looks at a context, so a request
+			// made after the caller has gone comes back as contention rather than cancellation.
+			return nil, nil, nil, nil, errors.New("execution module is busy")
+		})
+
+	require.False(t, ok)
+	require.Zero(t, calls, "collection must not be started for a caller that has gone")
+	require.NotContains(t, logs(), "lvl=eror")
+}
