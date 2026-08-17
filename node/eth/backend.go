@@ -381,7 +381,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
-		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
+		var compatErr *chain.ConfigCompatError
+		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
 			return genesisErr
 		}
 
@@ -850,6 +851,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}
 		backend.privateAPI, err = privateapi2.StartGrpc(
+			ctx,
 			backend.kvRPC,
 			backend.ethBackendRPC,
 			backend.txPoolGrpcServer,

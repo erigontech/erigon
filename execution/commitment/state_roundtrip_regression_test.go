@@ -25,10 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// requireRestartParity folds the batches through every engine with a node restart between
-// batches (runEngineBatches carries state via EncodeCurrentState/SetState) and requires
-// every batch root to match the sequential arm, whose final root must match the combined
-// single-batch oracle.
 func requireRestartParity(t *testing.T, batches []engineBatch, combinedK [][]byte, combinedU []Update) {
 	t.Helper()
 	oracle, _ := engineRoot(t, modeSeq, 0, combinedK, combinedU)
@@ -51,8 +47,6 @@ func requireRestartParity(t *testing.T, batches []engineBatch, combinedK [][]byt
 	}
 }
 
-// singleNibbleCorpus builds a trie whose accounts all hash under first nibble 7, so the
-// root row folds via propagate and no root branch record ever reaches disk.
 func singleNibbleCorpus() (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, kc [][]byte, uc []Update) {
 	var addrs []string
 	for i := range 6 {
@@ -93,20 +87,12 @@ func singleNibbleCorpus() (k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update, k
 	return k1, u1, k2, u2, kc, uc
 }
 
-// A trie whose accounts all hash under ONE first nibble folds its root row via propagate:
-// the root becomes an extension-topped cell and no root branch record exists on disk. The
-// persisted trie state must round-trip so the next block after a restart navigates through
-// the root cell's extension instead of demanding the absent root record.
 func TestStateRoundTrip_PropagateRootSingleNibble(t *testing.T) {
 	t.Parallel()
 	k1, u1, k2, u2, kc, uc := singleNibbleCorpus()
 	requireRestartParity(t, []engineBatch{{k1, u1}, {k2, u2}}, kc, uc)
 }
 
-// The same propagate-root shape with the collapsed extension starting at nibble ZERO and
-// running two nibbles deep: the engines' root probe key must tolerate an unfold that
-// consumes more of the extension than the probe's length instead of panicking on the
-// out-of-range read, and the top-nibble mount wall must stay at depth one.
 func TestStateRoundTrip_PropagateRootZeroNibblePrefix(t *testing.T) {
 	t.Parallel()
 	var addrs []string
@@ -141,10 +127,6 @@ func TestStateRoundTrip_PropagateRootZeroNibblePrefix(t *testing.T) {
 	requireRestartParity(t, []engineBatch{{k1, u1}, {k2, u2}}, kc, uc)
 }
 
-// A root row that WAS a branch collapses to one surviving first nibble when a block
-// deletes every account under the other nibbles: the propagate fold removes the root
-// branch record and leaves the collapsed shape only in the trie state. The restart
-// round-trip must survive the collapse and keep the survivors' untouched storage.
 func TestStateRoundTrip_DeleteCollapseToSingleNibble(t *testing.T) {
 	t.Parallel()
 	var gone, kept []string
@@ -182,9 +164,6 @@ func TestStateRoundTrip_DeleteCollapseToSingleNibble(t *testing.T) {
 	requireRestartParity(t, []engineBatch{{k1, u1}, {k2, u2}, {k3, u3}}, kc, uc)
 }
 
-// A sole account is a LEAF at the root — no hash, no extension, only the plain key. Its
-// navigation path must be re-derived on restore, or the wall probe sees an unfoldable
-// root and the next block's insert under a different first nibble overwrites the leaf.
 func TestStateRoundTrip_LeafRootNewNibbleInsert(t *testing.T) {
 	t.Parallel()
 	a := addrHex(findAddressForNibble(3, 4242))
@@ -203,9 +182,6 @@ func TestStateRoundTrip_LeafRootNewNibbleInsert(t *testing.T) {
 	requireRestartParity(t, []engineBatch{{k1, u1}, {k2, u2}}, kc, uc)
 }
 
-// A state blob written before propagate folds marked the root present carries
-// rootPresent=false for a non-empty root; restoring it must repair the flag instead of
-// letting the next unfold treat the carried subtree as deleted.
 func TestSetState_RepairsLegacyRootPresent(t *testing.T) {
 	t.Parallel()
 	k1, u1, k2, u2, kc, uc := singleNibbleCorpus()
@@ -238,9 +214,6 @@ func TestSetState_RepairsLegacyRootPresent(t *testing.T) {
 	require.Equal(t, oracle, got, "legacy rootPresent=false blob dropped the carried state")
 }
 
-// A fresh trie with NO carried state blob must still bootstrap from the on-disk branch
-// records alone when the root is a real branch — the rebuild/reset shape the blob-carrying
-// helpers no longer exercise.
 func TestFreshTrieBootstrapOverDiskState(t *testing.T) {
 	t.Parallel()
 	k1, u1 := buildMixedCorpus(31337, 120)

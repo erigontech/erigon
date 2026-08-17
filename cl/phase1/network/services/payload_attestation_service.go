@@ -173,7 +173,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	case s.validationAdmission <- struct{}{}:
 		defer func() { <-s.validationAdmission }()
 	case <-ctx.Done():
-		return fmt.Errorf("%w: payload attestation validation canceled: %v", ErrIgnore, ctx.Err())
+		return fmt.Errorf("%w: payload attestation validation canceled: %v", ErrIgnore, ctx.Err()) //nolint:errorlint // converting cancellation to IGNORE
 	}
 
 	// Process through forkchoice which handles:
@@ -184,7 +184,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 		// Preserve IGNORE vs REJECT distinction from forkchoice
 		// forkchoice.ErrIgnore != services.ErrIgnore, so we need to convert
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
-			return fmt.Errorf("%w: %v", ErrIgnore, err)
+			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: forkchoice.ErrIgnore must not stay matchable
 		}
 		return fmt.Errorf("forkchoice rejected payload attestation: %w", err)
 	}

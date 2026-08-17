@@ -191,15 +191,13 @@ func (sdb *IntraBlockState) committedCodeSizeDirect(addr accounts.Address) (int,
 type readPathOutcome uint8
 
 const (
-	outcomeUnset readPathOutcome = iota
-
-	outcomeLegacyStorage // versionMap == nil: typed wrapper does direct storage read on r.so
-	outcomeWriteSetHit   // r.vw is set; typed wrapper returns its Val*
-	outcomeMapDone       // versionMap hit; the path's typed map*Val field carries the value
-	outcomeReadSetHit    // a prior read matched; typed wrapper re-fetches it via GetX
-	outcomeStorageRead   // r.so resolved; wrapper does typed storage read + records r.hdr
-	outcomeReturnZero    // typed wrapper returns the path-typed zero value
-	outcomeReturnDefault // typed wrapper returns its caller-supplied defaultV
+	outcomeLegacyStorage readPathOutcome = iota // versionMap == nil: typed wrapper does direct storage read on r.so
+	outcomeWriteSetHit                          // r.vw is set; typed wrapper returns its Val*
+	outcomeMapDone                              // versionMap hit; the path's typed map*Val field carries the value
+	outcomeReadSetHit                           // a prior read matched; typed wrapper re-fetches it via GetX
+	outcomeStorageRead                          // r.so resolved; wrapper does typed storage read + records r.hdr
+	outcomeReturnZero                           // typed wrapper returns the path-typed zero value
+	outcomeReturnDefault                        // typed wrapper returns its caller-supplied defaultV
 )
 
 // readPathResult communicates the outcome of versionedReadCore to a

@@ -215,6 +215,27 @@ func TestDecodeBig(t *testing.T) {
 	}
 }
 
+// TestDecodeU256 runs DecodeU256 over DecodeBig's own table: the two must
+// accept and reject exactly the same inputs, so that swapping a caller from one
+// to the other cannot change which requests are valid.
+func TestDecodeU256(t *testing.T) {
+	for idx, test := range decodeBigTests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			dec, err := DecodeU256(test.input)
+			checkError(t, test.input, err, test.wantErr)
+
+			bigDec, bigErr := DecodeBig(test.input)
+			require.Equal(t, bigErr == nil, err == nil, "DecodeBig and DecodeU256 must agree on validity")
+			if test.want != nil {
+				require.Equal(t, test.want.(*big.Int).String(), dec.Dec())
+			}
+			if bigErr == nil {
+				require.Equal(t, bigDec.String(), dec.Dec(), "both decoders must yield the same value")
+			}
+		})
+	}
+}
+
 func TestEncodeUint64(t *testing.T) {
 	for idx, test := range encodeUint64Tests {
 		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {

@@ -510,7 +510,7 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			//fmt.Printf("txNum=%d, blockNum=%d, Genesis\n", txTask.TxNum, txTask.BlockNum)
 			if genesis != nil {
 				var genesisIbs *state.IntraBlockState
-				_, genesisIbs, err = genesiswrite.GenesisToBlock(nil, genesis, dirs, txTask.Logger)
+				_, genesisIbs, err = genesiswrite.GenesisToBlock(genesis, dirs, txTask.Logger)
 				if err != nil {
 					panic(err)
 				}
@@ -583,7 +583,8 @@ func (txTask *TxTask) Execute(evm *vm.EVM,
 			}
 
 			if applyErr != nil {
-				if _, ok := applyErr.(protocol.ErrExecAbortError); !ok {
+				var abortErr protocol.ErrExecAbortError
+				if !errors.As(applyErr, &abortErr) {
 					return evmtypes.ExecutionResult{}, protocol.ErrExecAbortError{DependencyTxIndex: ibs.DepTxIndex(), OriginError: applyErr}
 				}
 

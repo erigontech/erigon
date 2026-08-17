@@ -62,15 +62,38 @@ func TestWaitForSelectedHeadEnvelopeRequestsAndAppliesPeerEnvelope(t *testing.T)
 	require.True(t, store.HasEnvelope(headRoot))
 }
 
-func TestSelectedHeadEnvelopeRequestIsClaimedOncePerHead(t *testing.T) {
+func TestSelectedHeadEnvelopeRequestCanRetryAfterCompletion(t *testing.T) {
 	cfg := &Cfg{}
 	firstHead := common.HexToHash("0x1234")
 	secondHead := common.HexToHash("0x5678")
 
-	require.True(t, claimSelectedHeadEnvelopeRequest(cfg, firstHead))
-	require.False(t, claimSelectedHeadEnvelopeRequest(cfg, firstHead))
-	require.True(t, claimSelectedHeadEnvelopeRequest(cfg, secondHead))
-	require.True(t, claimSelectedHeadEnvelopeRequest(cfg, firstHead))
+	firstAttempt, ok := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.True(t, ok)
+	_, ok = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.False(t, ok)
+	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
+	secondAttempt, ok := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.True(t, ok)
+	secondHeadAttempt, ok := claimSelectedHeadEnvelopeRequest(cfg, secondHead)
+	require.True(t, ok)
+	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
+	_, ok = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.False(t, ok)
+	releaseSelectedHeadEnvelopeRequest(cfg, secondAttempt)
+	_, ok = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.True(t, ok)
+	releaseSelectedHeadEnvelopeRequest(cfg, secondHeadAttempt)
+}
+
+func TestGloasRecoveryCursorAdvancesAfterIncompleteFetch(t *testing.T) {
+	cfg := &Cfg{}
+	scanRoot := common.HexToHash("0x1234")
+
+	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, false)
+	require.Equal(t, scanRoot, cfg.gloasEnvelopeRecoveryCursor)
+
+	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, true)
+	require.Equal(t, common.Hash{}, cfg.gloasEnvelopeRecoveryCursor)
 }
 
 func TestBlockSupportsExecutionPayloadEnvelopeUsesBlockVersion(t *testing.T) {

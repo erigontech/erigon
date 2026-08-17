@@ -51,7 +51,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
@@ -303,13 +303,13 @@ func (b *ForkChoice) Run(t *testing.T, root fs.FS, c spectest.TestCase) (err err
 	anchorState, err := spectest.ReadBeaconState(root, c.Version(), "anchor_state.ssz_snappy")
 	require.NoError(t, err)
 
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	emitters := beaconevents.NewEventEmitter()
 	_, beaconConfig := clparams.GetConfigsByNetwork(chainspec.MainnetChainID)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), beaconConfig)
-	blobStorage := blob_storage.NewBlobStore(memdb.New(t, "/tmp", dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(mdbxtest.New(t, "/tmp", dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 	columnStorage := blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 1000, &clparams.MainnetBeaconConfig, ethClock, emitters)
 	peerDasState := peerdasstate.NewPeerDasState(&clparams.MainnetBeaconConfig, &clparams.NetworkConfig{})
 	peerDas := das.NewPeerDas(nil, &clparams.MainnetBeaconConfig, &clparams.CaplinConfig{}, columnStorage, blobStorage, nil, enode.ID{}, ethClock, peerDasState, nil, nil, nil)

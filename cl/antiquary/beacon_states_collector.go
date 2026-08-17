@@ -284,16 +284,16 @@ func (i *beaconStatesCollector) collectEffectiveBalancesDump(slot uint64, uncomp
 	return i.effectiveBalancesDumpCollector.Collect(base_encoding.Encode64ToBytes4(roundedSlot), i.buf.Bytes())
 }
 
-func (i *beaconStatesCollector) collectBalancesDump(slot uint64, uncompressed []byte) error {
+func (i *beaconStatesCollector) collectBalancesDump(ctx context.Context, slot uint64, uncompressed []byte) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateField(context.Background(), slot, uncompressed, i.buf, i.compressor, i.balancesDumpsCollector)
+	return antiquateField(ctx, slot, uncompressed, i.buf, i.compressor, i.balancesDumpsCollector)
 }
 
-func (i *beaconStatesCollector) collectPendingDepositsDump(slot uint64, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit]) error {
+func (i *beaconStatesCollector) collectPendingDepositsDump(ctx context.Context, slot uint64, pendingDeposits *solid.ListSSZ[*solid.PendingDeposit]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingDeposits, i.buf, i.compressor, i.pendingDepositsCollectorDump)
+	return antiquateListSSZ(ctx, slot, pendingDeposits, i.buf, i.compressor, i.pendingDepositsCollectorDump)
 }
 
 func (i *beaconStatesCollector) preStateTransitionHook(preState *state.CachingBeaconState) {
@@ -333,16 +333,16 @@ func (i *beaconStatesCollector) collectElectraQueuesDiffs(slot uint64, pendingDe
 	return i.pendingWithdrawalsCollector.Collect(base_encoding.Encode64ToBytes4(slot), i.buf.Bytes())
 }
 
-func (i *beaconStatesCollector) collectPendingConsolidationsDump(slot uint64, pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation]) error {
+func (i *beaconStatesCollector) collectPendingConsolidationsDump(ctx context.Context, slot uint64, pendingConsolidations *solid.ListSSZ[*solid.PendingConsolidation]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingConsolidations, i.buf, i.compressor, i.pendingConsolidationsCollectorDump)
+	return antiquateListSSZ(ctx, slot, pendingConsolidations, i.buf, i.compressor, i.pendingConsolidationsCollectorDump)
 }
 
-func (i *beaconStatesCollector) collectPendingWithdrawalsDump(slot uint64, pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
+func (i *beaconStatesCollector) collectPendingWithdrawalsDump(ctx context.Context, slot uint64, pendingWithdrawals *solid.ListSSZ[*solid.PendingPartialWithdrawal]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollectorDump)
+	return antiquateListSSZ(ctx, slot, pendingWithdrawals, i.buf, i.compressor, i.pendingWithdrawalsCollectorDump)
 }
 
 // -- gloas queue diffs --
@@ -378,22 +378,22 @@ func (i *beaconStatesCollector) collectGloasQueuesDiffs(
 
 // -- gloas dumps (SlotsPerDump boundary) --
 
-func (i *beaconStatesCollector) collectBuildersDump(slot uint64, builders *solid.ListSSZ[*cltypes.Builder]) error {
+func (i *beaconStatesCollector) collectBuildersDump(ctx context.Context, slot uint64, builders *solid.ListSSZ[*cltypes.Builder]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, builders, i.buf, i.compressor, i.buildersCollectorDump)
+	return antiquateListSSZ(ctx, slot, builders, i.buf, i.compressor, i.buildersCollectorDump)
 }
 
-func (i *beaconStatesCollector) collectBuilderPendingWithdrawalsDump(slot uint64, bpw *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) error {
+func (i *beaconStatesCollector) collectBuilderPendingWithdrawalsDump(ctx context.Context, slot uint64, bpw *solid.ListSSZ[*cltypes.BuilderPendingWithdrawal]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, bpw, i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump)
+	return antiquateListSSZ(ctx, slot, bpw, i.buf, i.compressor, i.builderPendingWithdrawalsCollectorDump)
 }
 
-func (i *beaconStatesCollector) collectPayloadExpectedWithdrawalsDump(slot uint64, pew *solid.ListSSZ[*cltypes.Withdrawal]) error {
+func (i *beaconStatesCollector) collectPayloadExpectedWithdrawalsDump(ctx context.Context, slot uint64, pew *solid.ListSSZ[*cltypes.Withdrawal]) error {
 	i.buf.Reset()
 	i.compressor.Reset(i.buf)
-	return antiquateListSSZ(context.Background(), slot, pew, i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump)
+	return antiquateListSSZ(ctx, slot, pew, i.buf, i.compressor, i.payloadExpectedWithdrawalsCollectorDump)
 }
 
 // -- gloas per-slot fields --

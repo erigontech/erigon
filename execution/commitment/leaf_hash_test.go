@@ -27,9 +27,6 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 )
 
-// writeLeafHeaderPerByte reproduces the header byte stream completeLeafHash emitted
-// before it assembled the header in one buffer: list prefix, key prefix, then the
-// compact key one byte per Write.
 func writeLeafHeaderPerByte(w io.Writer, totalLen, compactLen int, key []byte, compact0 byte, ni int) error {
 	var lenPrefix [4]byte
 	pl := rlp.EncodeListPrefixToBuf(totalLen, lenPrefix[:])
@@ -56,9 +53,6 @@ func writeLeafHeaderPerByte(w io.Writer, totalLen, compactLen int, key []byte, c
 	return nil
 }
 
-// Storage and account leaves at depth 0 produce the longest key completeLeafHash
-// ever compacts, which is where its single fixed header buffer would overflow or
-// truncate first.
 func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 	t.Parallel()
 
@@ -68,8 +62,7 @@ func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 	}
 	maxKey[64] = terminatorHexByte
 
-	// Storage keys reach an even length by starting deeper, never by dropping the
-	// terminator, which the call sites always append.
+	// even length by starting deeper, not by dropping the terminator
 	evenKey := maxKey[1:]
 
 	// accountLeafHashWithKey takes its longer compactLen (len/2+1 rather than
@@ -133,9 +126,6 @@ func TestCompleteLeafHashMatchesPerByteHeader(t *testing.T) {
 	}
 }
 
-// The table above pins named shapes; this sweeps every key length the nibble
-// arrays permit, so an undersized leafRlpBuf cannot pass by staying below the
-// longest key the buffer is sized for.
 func TestCompleteLeafHashAllKeyLengths(t *testing.T) {
 	t.Parallel()
 
@@ -185,9 +175,6 @@ func TestCompleteLeafHashAllKeyLengths(t *testing.T) {
 	}
 }
 
-// referenceLeafHash reproduces completeLeafHash as it behaved before the header was
-// assembled in one buffer. It writes through the same witness wrapper production uses,
-// so enabling witness tracing cannot make the reference and the real path diverge.
 func referenceLeafHash(ref *HexPatriciaHashed, key []byte, val rlp.RlpSerializable, account, singleton bool) ([]byte, error) {
 	compactLen, compact0, ni := compactKeyParams(key, account)
 	kp, kl := 0, 1
@@ -223,8 +210,6 @@ func referenceLeafHash(ref *HexPatriciaHashed, key []byte, val rlp.RlpSerializab
 	return hashBuf, nil
 }
 
-// compactKeyParams mirrors the compact-encoding decisions leafHashWithKeyVal and
-// accountLeafHashWithKey make before delegating to completeLeafHash.
 func compactKeyParams(key []byte, account bool) (compactLen int, compact0 byte, ni int) {
 	if account {
 		if nibbles.HasTerm(key) {

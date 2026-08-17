@@ -41,7 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 type failingUpdateDB struct {
@@ -493,7 +493,7 @@ func TestPendingEnvelopeIndexWriteRetriesThroughOriginQueue(t *testing.T) {
 	envelope.Message.Payload.BlockNumber = 42
 	envelope.Message.Payload.BlockHash = common.HexToHash("0xabcd")
 	pending.Add(blockRoot, envelope)
-	db := &failingUpdateDB{RwDB: memdb.NewTestDB(t, dbcfg.ChainDB), fail: true}
+	db := &failingUpdateDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB), fail: true}
 	f := &ForkChoiceStore{
 		forkGraph:                      pendingRetryForkGraph{completed: blockRoot, completedEnvelope: envelope},
 		pendingEnvelopes:               pending,
@@ -523,7 +523,7 @@ func TestIndexRepairFailureQueuesPersistedEnvelope(t *testing.T) {
 	f := &ForkChoiceStore{
 		forkGraph:        pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted},
 		pendingEnvelopes: pending,
-		db:               &failingUpdateDB{RwDB: memdb.NewTestDB(t, dbcfg.ChainDB), fail: true},
+		db:               &failingUpdateDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB), fail: true},
 	}
 
 	require.Error(t, f.OnExecutionPayload(context.Background(), redelivered, false, false))
@@ -546,7 +546,7 @@ func TestIndexRepairReadFailureQueuesRootRepair(t *testing.T) {
 	redelivered.Message.Payload.BlockHash = common.HexToHash("0xbbbb")
 	graph := &transientEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
 	graph.fail.Store(true)
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	f := &ForkChoiceStore{
 		forkGraph:                      graph,
 		pendingEnvelopes:               pending,
@@ -576,7 +576,7 @@ func TestOnExecutionPayloadRedeliveryRepairsMissingIndices(t *testing.T) {
 	envelope.Message.BeaconBlockRoot = blockRoot
 	envelope.Message.Payload.BlockNumber = 42
 	envelope.Message.Payload.BlockHash = executionHash
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	f := &ForkChoiceStore{
 		forkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: envelope},
 		db:        db,
@@ -601,7 +601,7 @@ func TestOnExecutionPayloadRedeliverySkipsExistingIndices(t *testing.T) {
 	envelope.Message.BeaconBlockRoot = blockRoot
 	envelope.Message.Payload.BlockNumber = 42
 	envelope.Message.Payload.BlockHash = executionHash
-	rwdb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	rwdb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	require.NoError(t, rwdb.Update(context.Background(), func(tx kv.RwTx) error {
 		return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, envelope.Message)
 	}))
@@ -620,7 +620,7 @@ func TestExecutionPayloadIndexWritesCollapseByRoot(t *testing.T) {
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 	envelope.Message.BeaconBlockRoot = blockRoot
 	db := &blockingUpdateDB{
-		RwDB:    memdb.NewTestDB(t, dbcfg.ChainDB),
+		RwDB:    mdbxtest.NewTestDB(t, dbcfg.ChainDB),
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
@@ -649,7 +649,7 @@ func TestExecutionPayloadIndexWriteCanceledLeaderDoesNotPoisonWaiter(t *testing.
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 	envelope.Message.BeaconBlockRoot = blockRoot
 	db := &blockingUpdateDB{
-		RwDB:    memdb.NewTestDB(t, dbcfg.ChainDB),
+		RwDB:    mdbxtest.NewTestDB(t, dbcfg.ChainDB),
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
@@ -678,7 +678,7 @@ func TestExecutionPayloadIndexWritePanicDoesNotReportSuccessToWaiter(t *testing.
 	blockRoot := common.HexToHash("0x1234")
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 	envelope.Message.BeaconBlockRoot = blockRoot
-	db := &panickingUpdateDB{RwDB: memdb.NewTestDB(t, dbcfg.ChainDB), started: make(chan struct{}), release: make(chan struct{})}
+	db := &panickingUpdateDB{RwDB: mdbxtest.NewTestDB(t, dbcfg.ChainDB), started: make(chan struct{}), release: make(chan struct{})}
 	f := &ForkChoiceStore{forkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: envelope}, db: db}
 	leaderDone := make(chan any, 1)
 	go func() {

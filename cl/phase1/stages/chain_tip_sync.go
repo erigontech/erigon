@@ -295,23 +295,17 @@ MainLoop:
 }
 
 // fetchAndApplyEnvelopes fetches missing execution payload envelopes from peers and applies them.
-func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) bool {
+func fetchAndApplyEnvelopes(ctx context.Context, cfg *Cfg, roots [][32]byte) {
 	envelopes, err := network.RequestEnvelopesFrantically(ctx, cfg.rpc, roots)
 	if err != nil {
 		log.Debug("[chainTipSync] failed to request GLOAS envelopes", "err", err)
-		return false
+		return
 	}
 	for _, env := range envelopes {
 		if err := cfg.forkChoice.OnExecutionPayload(ctx, env, true, canValidateGloasPayloads(cfg)); err != nil {
 			log.Debug("[chainTipSync] failed to apply recovered GLOAS envelope", "beaconBlockRoot", env.Message.BeaconBlockRoot, "err", err)
 		}
 	}
-	for _, root := range roots {
-		if !cfg.forkChoice.HasEnvelope(common.Hash(root)) {
-			return false
-		}
-	}
-	return true
 }
 
 // determineParentEnvelopeRoots identifies parent blocks that were FULL but missing their
@@ -500,17 +494,18 @@ func recoverMissingEnvelopes(ctx context.Context, cfg *Cfg) {
 			}
 		}
 	}
-	advanceCursor := true
 	if len(missingRoots) > 0 {
 		log.Info("[chainTipSync] envelope recovery: fetching missing envelopes", "count", len(missingRoots))
-		advanceCursor = fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
+		fetchAndApplyEnvelopes(ctx, cfg, missingRoots)
 	}
-	if advanceCursor {
-		if completedScan {
-			cfg.gloasEnvelopeRecoveryCursor = common.Hash{}
-		} else {
-			cfg.gloasEnvelopeRecoveryCursor = scanRoot
-		}
+	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, completedScan)
+}
+
+func advanceGloasEnvelopeRecoveryCursor(cfg *Cfg, scanRoot common.Hash, completedScan bool) {
+	if completedScan {
+		cfg.gloasEnvelopeRecoveryCursor = common.Hash{}
+	} else {
+		cfg.gloasEnvelopeRecoveryCursor = scanRoot
 	}
 }
 
@@ -570,12 +565,32 @@ func waitForSelectedHeadEnvelope(
 	}
 }
 
-func claimSelectedHeadEnvelopeRequest(cfg *Cfg, headRoot common.Hash) bool {
-	if cfg.gloasHeadEnvelopeRequestRoot == headRoot {
-		return false
+type selectedHeadEnvelopeRequestClaim struct {
+	root common.Hash
+	id   uint64
+}
+
+func claimSelectedHeadEnvelopeRequest(cfg *Cfg, headRoot common.Hash) (selectedHeadEnvelopeRequestClaim, bool) {
+	cfg.gloasHeadEnvelopeRequestMu.Lock()
+	defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+	if _, ok := cfg.gloasHeadEnvelopeRequests[headRoot]; ok {
+		return selectedHeadEnvelopeRequestClaim{}, false
 	}
-	cfg.gloasHeadEnvelopeRequestRoot = headRoot
-	return true
+	if cfg.gloasHeadEnvelopeRequests == nil {
+		cfg.gloasHeadEnvelopeRequests = make(map[common.Hash]uint64)
+	}
+	cfg.gloasHeadEnvelopeRequestID++
+	id := cfg.gloasHeadEnvelopeRequestID
+	cfg.gloasHeadEnvelopeRequests[headRoot] = id
+	return selectedHeadEnvelopeRequestClaim{root: headRoot, id: id}, true
+}
+
+func releaseSelectedHeadEnvelopeRequest(cfg *Cfg, claim selectedHeadEnvelopeRequestClaim) {
+	cfg.gloasHeadEnvelopeRequestMu.Lock()
+	defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+	if cfg.gloasHeadEnvelopeRequests[claim.root] == claim.id {
+		delete(cfg.gloasHeadEnvelopeRequests, claim.root)
+	}
 }
 
 func blockSupportsExecutionPayloadEnvelope(block *cltypes.SignedBeaconBlock) bool {
@@ -925,8 +940,9 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			}
 			headBlock, _ := cfg.forkChoice.GetBlock(headRoot)
 			if headRoot != (common.Hash{}) && blockSupportsExecutionPayloadEnvelope(headBlock) && !cfg.forkChoice.HasEnvelope(headRoot) {
-				requestFromPeer := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+				requestClaim, requestFromPeer := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
 				waitForSelectedHeadEnvelope(ctx, cfg.forkChoice, func(requestCtx context.Context, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+					defer releaseSelectedHeadEnvelopeRequest(cfg, requestClaim)
 					return network.RequestEnvelopesFrantically(requestCtx, cfg.rpc, roots)
 				}, headRoot, 2*time.Second, requestFromPeer, canValidateGloasPayloads(cfg))
 			}

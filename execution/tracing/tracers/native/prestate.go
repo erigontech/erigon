@@ -76,7 +76,6 @@ type prestateTracer struct {
 	post      state
 	create    bool
 	to        accounts.Address
-	gasLimit  uint64 // Amount of gas bought for the whole tx
 	config    prestateTracerConfig
 	interrupt atomic.Bool           // Atomic flag to signal execution interruption
 	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop

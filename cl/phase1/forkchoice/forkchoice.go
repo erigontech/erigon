@@ -575,14 +575,6 @@ func (f *ForkChoiceStore) getUnrealizedJustification(blockRoot common.Hash) (sol
 	return obj.(solid.Checkpoint), true
 }
 
-func (f *ForkChoiceStore) getUnrealizedFinalization(blockRoot common.Hash) (solid.Checkpoint, bool) {
-	obj, ok := f.unrealizedFinalizations.Load(blockRoot)
-	if !ok {
-		return solid.Checkpoint{}, false
-	}
-	return obj.(solid.Checkpoint), true
-}
-
 // FinalizedCheckpoint returns justified checkpoint
 func (f *ForkChoiceStore) FinalizedCheckpoint() solid.Checkpoint {
 	return f.finalizedCheckpoint.Load().(solid.Checkpoint)

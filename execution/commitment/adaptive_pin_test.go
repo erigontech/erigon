@@ -25,9 +25,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// A zero-value field means "unset", so the constructor's fallbacks must resolve
-// to DefaultAdaptivePinControllerConfig — one policy, not two that drift apart
-// when the defaults are tuned.
 func TestNewAdaptivePinController_ZeroConfigResolvesToDefaults(t *testing.T) {
 	c := NewAdaptivePinController(NewBranchCache(64), AdaptivePinControllerConfig{}, log.Root())
 	if want := DefaultAdaptivePinControllerConfig(); c.cfg != want {
@@ -35,7 +32,6 @@ func TestNewAdaptivePinController_ZeroConfigResolvesToDefaults(t *testing.T) {
 	}
 }
 
-// An explicitly-set field must survive the fallbacks.
 func TestNewAdaptivePinController_ExplicitConfigWins(t *testing.T) {
 	cfg := AdaptivePinControllerConfig{
 		PromoteThresholdMisses:    7,
@@ -51,9 +47,6 @@ func TestNewAdaptivePinController_ExplicitConfigWins(t *testing.T) {
 	}
 }
 
-// The trunk-preload counters are the only signal for how much work the adaptive
-// pin controller is doing, so promotion must feed them. Asserting the byte
-// counter is enough to prove recordPreload ran: nothing else writes it.
 func TestAdaptivePin_PromoteRecordsPreloadMetrics(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	resolve := fakeResolver(tree, nil, 100, "")
@@ -79,14 +72,10 @@ func TestAdaptivePin_PromoteRecordsPreloadMetrics(t *testing.T) {
 	}
 }
 
-// Extensions are the dominant preload path in a running node, so they must be
-// counted too, not just the one-off promote.
 func TestAdaptivePin_ExtendRecordsPreloadMetrics(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	resolve := fakeResolver(tree, nil, 100, "")
 
-	// Budget the initial view so the queue survives promotion and an extension
-	// has something left to pin.
 	cfg := AdaptivePinControllerConfig{InitialViewBudgetBytes: minEntryBytes + 1}
 	c := NewAdaptivePinController(NewBranchCache(64), cfg, log.Root())
 	var h [32]byte
@@ -113,10 +102,8 @@ func TestAdaptivePin_ExtendRecordsPreloadMetrics(t *testing.T) {
 	}
 }
 
-// The elapsed time cannot be asserted through a real preload: the work takes
-// microseconds, and a coarse platform timer rounds that to zero. Drive
-// recordPreload with a known elapsed time instead.
 func TestRecordPreload_RecordsElapsedAndBytes(t *testing.T) {
+	// Fabricated: a real preload is microseconds, below timer resolution.
 	const elapsed = 50 * time.Millisecond
 
 	for _, tc := range []struct {
@@ -125,7 +112,6 @@ func TestRecordPreload_RecordsElapsedAndBytes(t *testing.T) {
 		wantBytes   float64
 	}{
 		{"pinned bytes are counted", 4096, 4096},
-		// A rolled-back step reports the time it cost without the pins it lost.
 		{"a step that pinned nothing still counts its time", 0, 0},
 	} {
 		t.Run(tc.name, func(t *testing.T) {

@@ -332,14 +332,14 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 		log.Warn("validatePayloadWithEL: EL could not process payload (EL behind)",
 			"beaconBlockRoot", beaconBlockRoot, "blockHash", executionBlockHash, "err", validationErr)
 		if optErr := f.optimisticStore.AddOptimisticCandidate(beaconBlockRoot, block.Block); optErr != nil {
-			return fmt.Errorf("failed to add block to optimistic store: %v", optErr)
+			return fmt.Errorf("failed to add block to optimistic store: %w", optErr)
 		}
 		return errELBehind
 	case execution_client.PayloadStatusNotValidated:
 		log.Trace("validatePayloadWithEL: payload is not validated yet", "beaconBlockRoot", beaconBlockRoot)
 		// optimistic block candidate
 		if err := f.optimisticStore.AddOptimisticCandidate(beaconBlockRoot, block.Block); err != nil {
-			return fmt.Errorf("failed to add block to optimistic store: %v", err)
+			return fmt.Errorf("failed to add block to optimistic store: %w", err)
 		}
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", validationErr)
@@ -351,7 +351,7 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 	}
 
 	if validationErr != nil {
-		return fmt.Errorf("validatePayloadWithEL: newPayload failed: %v", validationErr)
+		return fmt.Errorf("validatePayloadWithEL: newPayload failed: %w", validationErr)
 	}
 
 	return nil
@@ -439,7 +439,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	// Validate envelope against block (bid matching + signature verification)
 	if validatePayload {
 		if err := f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState); err != nil {
-			return false, fmt.Errorf("%w: OnExecutionPayload: envelope validation failed: %v", errInvalidExecutionPayloadEnvelope, err)
+			return false, fmt.Errorf("%w: OnExecutionPayload: envelope validation failed: %w", errInvalidExecutionPayloadEnvelope, err)
 		}
 	}
 
@@ -451,7 +451,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	}
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
 	if err := transition.ValidatingMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
-		return false, fmt.Errorf("%w: OnExecutionPayload: failed to verify execution payload: %v", errInvalidExecutionPayloadEnvelope, err)
+		return false, fmt.Errorf("%w: OnExecutionPayload: failed to verify execution payload: %w", errInvalidExecutionPayloadEnvelope, err)
 	}
 
 	// Validate payload with EL
@@ -730,7 +730,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	// Skip validateEnvelopeAgainstBlock — we produced this envelope locally.
 	blockState.SetPreviousStateRoot(block.Block.StateRoot)
 	if err := transition.DefaultMachine.ProcessExecutionPayloadEnvelope(blockState, signedEnvelope); err != nil {
-		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to verify execution payload: %v", errInvalidExecutionPayloadEnvelope, err)
+		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to verify execution payload: %w", errInvalidExecutionPayloadEnvelope, err)
 	}
 
 	// Validate payload with EL (NewPayload).

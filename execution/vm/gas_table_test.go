@@ -36,20 +36,17 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -64,8 +61,8 @@ func TestMemoryGasCost(t *testing.T) {
 	}
 	for i, tt := range tests {
 		v, err := vm.MemoryGasCost(&vm.CallContext{}, tt.size)
-		if (err == vm.ErrGasUintOverflow) != tt.overflow {
-			t.Errorf("test %d: overflow mismatch: have %v, want %v", i, err == vm.ErrGasUintOverflow, tt.overflow)
+		if errors.Is(err, vm.ErrGasUintOverflow) != tt.overflow {
+			t.Errorf("test %d: overflow mismatch: have %v, want %v", i, errors.Is(err, vm.ErrGasUintOverflow), tt.overflow)
 		}
 		if v != tt.cost {
 			t.Errorf("test %d: gas cost mismatch: have %v, want %v", i, v, tt.cost)
@@ -724,7 +721,7 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	db := testutil.TemporalDB(t)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -737,8 +734,8 @@ func TestCreateGas(t *testing.T) {
 			require.NoError(t, err)
 			defer domains.Close()
 
-			stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
-			stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
+			stateReader := state.NewReaderV3(domains.AsGetter(tx))
+			stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
 
 			s := state.New(stateReader)
 			defer s.Close()
