@@ -601,6 +601,20 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 
+	// currentBlockNumber can be nil when HeadHeaderHash isn't set yet or
+	// its hash→number index is transiently missing (observed during
+	// setHead unwind's window between clearing the old head and setting
+	// the new one — leg-M verify6 2026-08-17 nil-ptr crash). Treat that
+	// as ExecutionStatusMissingSegment to bounce validation back to the
+	// caller instead of crashing; the downloader retries on next FCU
+	// after head is set.
+	if currentBlockNumber == nil {
+		return ValidationResult{
+			LatestValidHash:  common.Hash{},
+			ValidationStatus: ExecutionStatusMissingSegment,
+		}, nil
+	}
+
 	if math.AbsoluteDifference(*currentBlockNumber, blockNumber) >= e.syncCfg.MaxReorgDepth {
 		return ValidationResult{
 			ValidationStatus: ExecutionStatusTooFarAway,
