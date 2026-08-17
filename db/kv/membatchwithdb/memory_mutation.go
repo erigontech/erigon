@@ -1097,6 +1097,11 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 	return m.newReadViewMut(tx)
 }
 
+// IsOverlayReadView reports whether this mutation is a view created from an overlay.
+func (m *MemoryMutation) IsOverlayReadView() bool {
+	return m != nil && m.memDb == nil
+}
+
 // newReadViewMut is the internal constructor that returns the full
 // *MemoryMutation. Used by NewTemporalReadView which needs to embed it.
 func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {

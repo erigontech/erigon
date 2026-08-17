@@ -321,6 +321,41 @@ func TestGetRawHeader_PinsOverlayView(t *testing.T) {
 	require.NotNil(t, header)
 }
 
+func TestGetBlockNumberPreservesPinnedOverlayView(t *testing.T) {
+	base, m, firstHeader, events := newOverlayAheadTestAPIWithEvents(t)
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	pinnedTx := base.filters.WithOverlay(tx)
+
+	replacementTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer replacementTx.Rollback()
+	replacementDomains, err := execctx.NewSharedDomains(m.Ctx, replacementTx, m.Log)
+	require.NoError(t, err)
+	defer replacementDomains.Close()
+	require.NoError(t, replacementDomains.InitBlockOverlay(replacementTx, m.Dirs.Tmp))
+
+	replacementHeader := types.CopyHeader(firstHeader)
+	replacementHeader.Coinbase = common.Address{2}
+	replacementOverlay := replacementDomains.BlockOverlay()
+	require.NoError(t, rawdb.WriteHeader(replacementOverlay, replacementHeader))
+	require.NoError(t, rawdb.WriteCanonicalHash(replacementOverlay, replacementHeader.Hash(), replacementHeader.Number.Uint64()))
+	events.PublishOverlay(replacementDomains)
+	defer events.PublishOverlay(nil)
+
+	_, hash, _, err := rpchelper.GetBlockNumber(
+		m.Ctx,
+		rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(firstHeader.Number.Uint64())),
+		pinnedTx,
+		m.BlockReader,
+		base.filters,
+	)
+	require.NoError(t, err)
+	require.Equal(t, firstHeader.Hash(), hash)
+}
+
 // TestDebugAccountAt_OverlayHeadHash_CommittedView pins that debug_accountAt
 // resolves the block hash on the committed view: its GetAsOf history reads can
 // only see committed data, so an overlay-published head must read as an
