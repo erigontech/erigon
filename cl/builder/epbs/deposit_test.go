@@ -135,12 +135,27 @@ func (m *mockSyncedData) OnHeadStateWithBlockRoot(_ *state.CachingBeaconState, _
 	return nil
 }
 func (m *mockSyncedData) UnsetHeadState() {}
+func (m *mockSyncedData) SelectedHead() (common.Hash, uint64, bool) {
+	return common.Hash{}, 0, false
+}
+func (m *mockSyncedData) StateHead() (common.Hash, uint64, bool) {
+	return common.Hash{}, 0, false
+}
 func (m *mockSyncedData) ViewHeadState(fn synced_data.ViewHeadStateFn) error {
 	if m.err != nil {
 		return m.err
 	}
 	if m.state != nil {
 		return fn(m.state)
+	}
+	return nil
+}
+func (m *mockSyncedData) ViewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
+	if m.err != nil {
+		return m.err
+	}
+	if m.state != nil {
+		return fn(m.state, common.Hash{}, 0)
 	}
 	return nil
 }
