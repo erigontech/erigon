@@ -464,17 +464,6 @@ func (v PreReleaseValue) String() string {
 	return v.strValue
 }
 
-func newBuildValue(s string) (string, error) {
-
-	if len(s) == 0 {
-		return "", errors.New("build version is empty")
-	}
-	if !containsOnly(s, alphanum) {
-		return "", fmt.Errorf("invalid character(s) found in build meta data %q", s)
-	}
-	return s, nil
-}
-
 func containsOnly(s string, set string) bool {
 	return strings.IndexFunc(s, func(r rune) bool {
 		return !strings.ContainsRune(set, r)

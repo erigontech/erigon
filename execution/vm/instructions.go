@@ -1010,7 +1010,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	var suberr error
 	if evm.chainRules.IsAmsterdam {
 		preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
-		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow {
+		if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
 			return pc, nil, suberr
 		}
 	}
@@ -1033,7 +1033,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		forwarded = true
 		if !evm.chainRules.IsAmsterdam {
 			preparation, suberr = evm.prepareCreate(scope.Contract.Address(), address, value, true, false, true)
-			if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow {
+			if suberr != nil && suberr != ErrDepth && suberr != ErrInsufficientBalance && suberr != ErrNonceUintOverflow { //nolint:errorlint // intentional bare sentinel check
 				returnGas = mdgas.MdGas{}
 			}
 		}
@@ -1062,7 +1062,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 	// ignore this error and pretend the operation was successful.
 	var result uint256.Int
 	if suberr != nil {
-		if !evm.ChainRules().IsHomestead && suberr == ErrCodeStoreOutOfGas {
+		if !evm.ChainRules().IsHomestead && suberr == ErrCodeStoreOutOfGas { //nolint:errorlint // intentional bare sentinel check
 			addrVal := addr.Value()
 			result.SetBytes(addrVal[:])
 		}
@@ -1071,7 +1071,7 @@ func execCreate(pc uint64, evm *EVM, scope *CallContext, value uint256.Int, inpu
 		result.SetBytes(addrVal[:])
 	}
 	scope.Stack.push(result)
-	if suberr == ErrExecutionReverted {
+	if suberr == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
 		evm.returnData = res // set REVERT data to return data buffer
 		return pc, res, nil
 	}
@@ -1125,7 +1125,7 @@ func opCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
 	} else {
 		res.SetOne()
 	}
-	if err == nil || err == ErrExecutionReverted {
+	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1179,7 +1179,7 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	} else {
 		res.SetOne()
 	}
-	if err == nil || err == ErrExecutionReverted {
+	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1191,16 +1191,6 @@ func opCallCode(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error)
 	scope.Contract.selfBalanceCached = false
 	evm.returnData = ret
 	return pc, ret, nil
-}
-
-func stCallCode(_ uint64, scope *CallContext) string {
-	stack := &scope.Stack
-	addr, _, inOffset, inSize := stack.data[stack.top-2], stack.data[stack.top-3], stack.data[stack.top-4], stack.data[stack.top-5]
-	toAddr := common.Address(addr.Bytes20())
-	// Get the arguments from the memory.
-	args := scope.Memory.GetPtr(inOffset.Uint64(), inSize.Uint64())
-
-	return fmt.Sprintf("%s %x %x", CALLCODE.String(), toAddr, args)
 }
 
 func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, error) {
@@ -1225,7 +1215,7 @@ func opDelegateCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, er
 	} else {
 		res.SetOne()
 	}
-	if err == nil || err == ErrExecutionReverted {
+	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
 		ret = bytes.Clone(ret)
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
@@ -1271,7 +1261,7 @@ func opStaticCall(pc uint64, evm *EVM, scope *CallContext) (uint64, []byte, erro
 	} else {
 		res.SetOne()
 	}
-	if err == nil || err == ErrExecutionReverted {
+	if err == nil || err == ErrExecutionReverted { //nolint:errorlint // intentional bare sentinel check
 		scope.Memory.Set(retOffset, retSize, ret)
 	}
 

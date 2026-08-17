@@ -35,7 +35,9 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -43,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/types"
@@ -112,8 +113,8 @@ func TestExecute(t *testing.T) {
 
 func TestCall(t *testing.T) {
 	t.Parallel()
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 
 	state := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	defer state.Close()
@@ -227,8 +228,8 @@ func TestCreateRuntimeOutOfGasEmitsCallGasChanges(t *testing.T) {
 func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	defer statedb.Close()
 
@@ -252,8 +253,8 @@ func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
 func TestCallChargesAmsterdamDelegationTargetAccess(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	defer statedb.Close()
 
@@ -276,8 +277,8 @@ func TestCallChargesAmsterdamDelegationTargetAccess(t *testing.T) {
 func TestCallWarmsPragueDelegationTarget(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	defer statedb.Close()
 
@@ -348,8 +349,8 @@ func BenchmarkCall(b *testing.B) {
 		b.Fatal(err)
 	}
 	cfg := &Config{ChainConfig: &chain.Config{}, BlockNumber: 0, Time: 0, Value: *uint256.MustFromBig(big.NewInt(13377)), Difficulty: uint256.NewInt(0)}
-	db := testutil.TemporalDB(b)
-	tx, sd := testutil.TemporalTxSD(b, db)
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	tx, sd := temporaltest.NewTestTxSD(b, db)
 	//cfg.w = state.NewWriter(execctx, nil)
 	cfg.State = benchState(b, state.NewReaderV3(sd.AsGetter(tx)))
 	defer cfg.State.Close()
@@ -381,8 +382,8 @@ func BenchmarkCall(b *testing.B) {
 }
 
 func benchmarkEVM_Create(b *testing.B, code string) {
-	db := testutil.TemporalDB(b)
-	tx, domains := testutil.TemporalTxSD(b, db)
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(b, db)
 
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
@@ -457,8 +458,8 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 		return contract
 	}
 
-	db := testutil.TemporalDB(b)
-	tx, domains := testutil.TemporalTxSD(b, db)
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(b, db)
 
 	statedb := benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
 	defer statedb.Close()
@@ -643,8 +644,8 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 	b.Helper()
 	cfg := new(Config)
 	setDefaults(cfg)
-	db := testutil.TemporalDB(b)
-	tx, domains := testutil.TemporalTxSD(b, db)
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(b, db)
 
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
@@ -912,8 +913,8 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 		return contract
 	}
 
-	db := testutil.TemporalDB(b)
-	tx, domains := testutil.TemporalTxSD(b, db)
+	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(b, db)
 	state := benchState(b, state.NewReaderV3(domains.AsGetter(tx)))
 	defer state.Close()
 	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -943,8 +944,8 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	defer statedb.Close()
 
@@ -1002,8 +1003,8 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	defer statedb.Close()
 
@@ -1135,8 +1136,8 @@ func TestGasTracingNoUnderflowOnStateGas(t *testing.T) {
 func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
 	defer statedb.Close()
 
