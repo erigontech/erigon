@@ -289,6 +289,27 @@ func (a *ApiHandler) expectedWithdrawals(
 	return cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals), nil
 }
 
+// feeRecipientForProposal resolves the fee recipient, warning once per proposer when there is none:
+// building with the zero address gives that block's fees away.
+func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) common.Address {
+	feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
+	if registered {
+		return feeRecipient
+	}
+	// Claimed in one step, so requests for the same slot arriving together do not each decide they
+	// are the first. Without somewhere to remember them, reporting every time beats reporting never.
+	firstTime := true
+	if a.unregisteredProposers != nil {
+		alreadyWarned, _ := a.unregisteredProposers.ContainsOrAdd(proposerIndex, struct{}{})
+		firstTime = !alreadyWarned
+	}
+	if firstTime {
+		log.Warn("BlockProduction: no fee recipient from prepare_beacon_proposer, using zero address",
+			"proposerIndex", proposerIndex, "slot", targetSlot)
+	}
+	return common.Address{}
+}
+
 func shouldRetryGetPayload(now, deadline time.Time) bool {
 	return now.Before(deadline)
 }
@@ -297,6 +318,7 @@ func shouldRetryGetPayload(now, deadline time.Time) bool {
 // it returns a payload or the deadline passes; ok is false when no payload was produced in time.
 func pollAssembledPayload(
 	ctx context.Context,
+	targetSlot uint64,
 	window blockBuilderWindow,
 	retryTime time.Duration,
 	get func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error),
@@ -314,12 +336,36 @@ func pollAssembledPayload(
 	defer deadlineTimer.Stop()
 	retryTicker := time.NewTicker(retryTime)
 	defer retryTicker.Stop()
+
+	// Polling retries at the retry cadence, so one failing slot reported once per attempt buried
+	// everything else in it. Report when the window is over, and only if it ended without a
+	// payload: an attempt that fails and then succeeds is a healthy slot.
+	var (
+		failures  int
+		firstErr  error
+		collected bool
+	)
+	defer func() {
+		if collected || failures == 0 {
+			return
+		}
+		log.Error("BlockProduction: failed to get payload", "slot", targetSlot, "failures", failures, "err", firstErr)
+	}()
 	for {
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
 		if err != nil {
-			log.Error("BlockProduction: Failed to get payload", "err", err)
+			// The caller's own cancellation comes back through get. That is the slot ending, not
+			// the execution layer failing, and it is not worth reporting on a healthy node. A
+			// failure that happened before it still is.
+			if ctx.Err() == nil || !errors.Is(err, ctx.Err()) {
+				failures++
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
 		} else if payload != nil {
+			collected = true
 			return payload, bundles, requestsBundle, blockValue, true
 		}
 		select {
@@ -1037,7 +1083,7 @@ func (a *ApiHandler) produceBeaconBody(
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
 		}()
 		retryTime := 10 * time.Millisecond
-		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
+		feeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
 		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, stateVersion, targetSlot)
 		if err != nil {
 			log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
@@ -1073,7 +1119,7 @@ func (a *ApiHandler) produceBeaconBody(
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion)
-		payload, bundles, requestsBundle, blockValue, ok := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+		payload, bundles, requestsBundle, blockValue, ok := pollAssembledPayload(ctx, targetSlot, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})
 		if !ok {
