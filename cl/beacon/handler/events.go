@@ -118,10 +118,10 @@ func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Reque
 			w.(http.Flusher).Flush()
 		case err := <-stateSub.Err():
 			log.Warn("event error", "err", err)
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %v", err)).WriteTo(w)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %w", err)).WriteTo(w)
 		case err := <-opSub.Err():
 			log.Warn("event error", "err", err)
-			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %v", err)).WriteTo(w)
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, fmt.Errorf("event error %w", err)).WriteTo(w)
 			return
 		case <-r.Context().Done():
 			log.Info("Client disconnected from event stream")

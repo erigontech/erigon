@@ -588,7 +588,7 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 	defer zstdReader.Close()
 
 	currentList := make([]byte, validatorSetLength*8)
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && err != io.ErrUnexpectedEOF {
+	if _, err = io.ReadFull(zstdReader, currentList); err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 
@@ -672,7 +672,7 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	}
 	defer zstdReader.Close()
 	currentList := make([]byte, validatorSetLength*8)
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && err != io.ErrUnexpectedEOF {
+	if _, err = io.ReadFull(zstdReader, currentList); err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 
