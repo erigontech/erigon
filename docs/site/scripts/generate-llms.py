@@ -291,10 +291,15 @@ def strip_mdx(text):
 # `<code>`) fails to match locally, and the engine then scans forward and pairs
 # the title with the *next* card's description — silently swallowing the card in
 # between. Matching each <Link> block first makes a card boundary unrepresentable.
-_LANDING_LINK_RE = re.compile(
-    r'<Link\s[^>]*\bto=[\'"]([^\'"]+)[\'"][^>]*>(.*?)</Link>',
-    re.DOTALL,
-)
+#
+# The container match is also what the guard below counts. It deliberately keys
+# on `lp-card` — the wrapper — and not on any marker the parse itself consumes:
+# a count taken from `lp-card-title` would shrink in step with the very loss it
+# is supposed to detect, so a renamed title marker would drop its card in
+# silence. Attributes are matched order-independently; `to=` is read separately.
+_LANDING_CARD_LINK_RE = re.compile(
+    r'<Link\s([^>]*\blp-card\b[^>]*)>(.*?)</Link>', re.DOTALL)
+_LINK_TO_RE = re.compile(r'\bto=[\'"]([^\'"]+)[\'"]')
 _CARD_TITLE_RE = re.compile(
     r'<div[^>]*\blp-card-title\b[^>]*>(.*?)</div>', re.DOTALL)
 _CARD_DESC_RE = re.compile(
@@ -326,18 +331,19 @@ def synthesize_landing(raw_body):
     # ordinary prose page: the caller would fall back to strip_mdx and the guard
     # below would never run — silently degrading exactly the case it exists to
     # catch.
-    expected = raw_body.count('lp-card-title')
+    containers = _LANDING_CARD_LINK_RE.findall(raw_body)
+    expected = len(containers)
     if not expected:
         return None
 
     cards = []
-    for link in _LANDING_LINK_RE.finditer(raw_body):
-        href, block = link.group(1), link.group(2)
+    for attrs, block in containers:
+        href = _LINK_TO_RE.search(attrs)
         title = _CARD_TITLE_RE.search(block)
         desc = _CARD_DESC_RE.search(block)
-        if not title or not desc:
+        if not href or not title or not desc:
             continue
-        cards.append((href, _card_text(title.group(1)),
+        cards.append((href.group(1), _card_text(title.group(1)),
                       _card_text(desc.group(1))))
 
     # A card that parses to nothing is invisible in the output, and `--check`
@@ -346,7 +352,7 @@ def synthesize_landing(raw_body):
     if len(cards) != expected:
         raise SystemExit(
             f"synthesize_landing dropped cards: parsed {len(cards)} "
-            f"of {expected} lp-card-title occurrences"
+            f"of {expected} lp-card containers"
         )
 
     out = []
@@ -554,6 +560,14 @@ def build():
     lines.append("> Erigon is a high-performance Ethereum execution client known for its efficiency,")
     lines.append("> modularity, and minimal disk footprint. It features an integrated consensus layer")
     lines.append("> (Caplin), BitTorrent-based historical data distribution, and fast node synchronization.")
+    lines.append("")
+    # The only machine-readable route from this index to the full corpus. Pages
+    # advertise llms.txt via <link rel="describedby">, not llms-full.txt, so an
+    # agent that arrives here would otherwise have no way to reach it.
+    lines.append(
+        f"The full text of every page listed below is also available as a single "
+        f"file: [llms-full.txt]({BASE_URL}/llms-full.txt)"
+    )
     lines.append("")
 
     current_section = None
