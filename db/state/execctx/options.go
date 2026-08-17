@@ -41,8 +41,8 @@ func WithoutDeferredBranchUpdates() SharedDomainOption {
 }
 
 // WithoutSharedBranchCache disables the aggregator-scoped commitment branch cache
-// and its adaptive pin controller. Callers that require commitment reads to stay
-// within a transaction snapshot must use it because cache entries are not view-bound.
+// and its adaptive pin controller. Cache entries are not view-bound, so callers
+// whose reads can overlap cache writes from another transaction must use it.
 func WithoutSharedBranchCache() SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.useSharedBranchCache = false }
 }
