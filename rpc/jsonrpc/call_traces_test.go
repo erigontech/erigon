@@ -17,7 +17,9 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"sync"
 	"testing"
 
@@ -383,9 +385,9 @@ func TestFilterRejectedBlockOverrideReturnsError(t *testing.T) {
 // TestFilterSignerReflectsBlockOverridesNumber is filterV3's analogue of
 // TestReplayTransactionSignerReflectsBlockOverridesNumber: filterV3 derives
 // fork rules (lastRules) from the overridden BlockContext but must also
-// recompute lastSigner from it, not from the block's real number. filterV3
-// reports per-transaction failures as an "error" field inside the stream
-// rather than as a Go error, so the assertion inspects the stream contents.
+// recompute lastSigner from it, not from the block's real number. A
+// transaction that cannot be traced must fail the whole request instead of
+// mixing an error object into the result array.
 func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -408,6 +410,71 @@ func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	}, stream)
-	require.NoError(t, err)
-	require.Contains(t, string(stream.Buffer()), "protected txn is not supported by signer")
+	require.ErrorContains(t, err, "protected txn is not supported by signer")
+	require.Empty(t, string(stream.Buffer()))
+}
+
+// TestFilterErrorAfterExportedTracesKeepsValidJSON covers the other half of
+// filterV3's error contract: when a transaction fails after earlier traces were
+// already streamed, the request still fails, and the envelope stays valid JSON
+// whose result array holds only TraceEntry items. Filtering blocks 1-3 with no
+// address filter exports both empty blocks' reward traces before the protected
+// transaction in block 3 is rejected by the overridden pre-EIP-155 signer.
+// The envelope is assembled the way runMethod does it, since sealing the
+// half-written array is the handler's job, not filterV3's.
+func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	from, to := rpc.BlockNumber(1), rpc.BlockNumber(3)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+	}
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	stream.WriteObjectStart()
+	stream.WriteObjectField("jsonrpc")
+	stream.WriteString("2.0")
+	stream.WriteMore()
+	stream.WriteObjectField("id")
+	stream.WriteInt(1)
+	stream.WriteMore()
+	result := jsonstream.NewLazyFieldStream(stream, "result", false)
+
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
+	}, result)
+	require.ErrorContains(t, err, "protected txn is not supported by signer")
+	require.True(t, result.Written(), "test needs traces exported before the failure")
+
+	result.CloseIfOpen()
+	stream.WriteMore()
+	rpc.HandleError(err, stream)
+	stream.WriteObjectEnd()
+	require.NoError(t, stream.Flush())
+
+	var envelope map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &envelope), "envelope is not valid JSON: %s", buf.String())
+	require.Contains(t, envelope, "error")
+
+	var traces []json.RawMessage
+	require.NoError(t, json.Unmarshal(envelope["result"], &traces), "result array was left unsealed: %s", envelope["result"])
+	require.NotEmpty(t, traces)
+	for i, trace := range traces {
+		var entry map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(trace, &entry), "item %d is not a JSON object", i)
+		require.Contains(t, entry, "type", "item %d is not a TraceEntry", i)
+		if reason, ok := entry["error"]; ok {
+			var failure string
+			require.NoError(t, json.Unmarshal(reason, &failure),
+				"item %d: error must be a TraceEntry failure reason, not an RPC error object", i)
+		}
+	}
 }
