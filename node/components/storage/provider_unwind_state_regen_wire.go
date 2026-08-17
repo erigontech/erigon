@@ -19,8 +19,8 @@ package storage
 import (
 	"context"
 	"fmt"
-	"os"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -178,7 +178,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			return
 		}
 		for _, pr := range pairs {
-			_ = os.Remove(pr.regenPath)
+			_ = dir.RemoveFile(pr.regenPath)
 		}
 	}()
 	for _, sd := range snapshot.AllDomains {
