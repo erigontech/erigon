@@ -1,6 +1,6 @@
 # Erigon Documentation Site
 
-Built with [Docusaurus 3](https://docusaurus.io/). Deployed automatically to [docs.erigon.tech](https://docs.erigon.tech) via GitHub Actions on push to `release/3.5`.
+Built with [Docusaurus 3](https://docusaurus.io/). Deployed automatically to [docs.erigon.tech](https://docs.erigon.tech) via GitHub Actions on push to the branch named by the `DOCS_DEPLOY_BRANCH` repository variable.
 
 ## Local Development
 
@@ -16,7 +16,7 @@ npm run typecheck # TypeScript check without emit
 
 ## Deployment
 
-Deployment is handled automatically by the `docs-deploy.yml` workflow, which lives on the `release/3.5` branch (the deploy source) and runs on every push there. It is intentionally not present on `main`. Do not use manual `yarn deploy` — it is not configured for this site.
+Deployment is handled automatically by the `docs-deploy.yml` workflow, which lives on the release branches and publishes only from the one named by the `DOCS_DEPLOY_BRANCH` repository variable — every other ref builds and skips. Changing that variable is the whole cutover; the workflow is intentionally not present on `main`. Do not use manual `yarn deploy` — it is not configured for this site.
 
 ## Disk size data flow
 

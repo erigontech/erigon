@@ -17,8 +17,9 @@ const currentDocsVersion = {
 };
 
 // Releases carry a pre-release suffix without reliably setting the API's
-// `prerelease` flag, so tag shape is the load-bearing check.
-const PRERELEASE_TAG = /-(rc|alpha|beta|pre)/i;
+// `prerelease` flag, so tag shape is the load-bearing check. Semver identifiers
+// are arbitrary (-rc.1, -dev, -nightly), so reject any hyphen rather than a list.
+const PRERELEASE_TAG = /-/;
 
 type Release = {tag_name: string; prerelease: boolean; draft: boolean};
 
