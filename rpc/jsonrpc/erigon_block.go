@@ -259,7 +259,7 @@ func (api *ErigonImpl) GetBalanceChangesInBlock(ctx context.Context, blockNrOrHa
 
 		var oldAcc accounts.Account
 		if len(v) > 0 {
-			if err = accounts.DeserialiseV3(&oldAcc, v); err != nil {
+			if err := accounts.DeserialiseV3(&oldAcc, v); err != nil {
 				return nil, err
 			}
 		}

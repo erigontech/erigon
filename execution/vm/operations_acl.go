@@ -92,7 +92,9 @@ func makeGasSStoreFunc(clearingRefund uint64) gasFunc {
 		}
 		if !original.IsZero() {
 			if current.IsZero() { // recreate slot (2.2.1.1)
-				evm.IntraBlockState().SubRefund(clearRefund)
+				if err := evm.IntraBlockState().SubRefund(clearRefund); err != nil {
+					return mdgas.MdGas{}, err
+				}
 			} else if value.IsZero() { // delete slot (2.2.1.2)
 				evm.IntraBlockState().AddRefund(clearRefund)
 			}
@@ -273,12 +275,17 @@ func makeSelfdestructGasFn(refundsEnabled bool) gasFunc {
 			}
 		}
 
-		hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
-		if err != nil {
-			return mdgas.MdGas{}, err
-		}
-		if refundsEnabled && !hasSelfdestructed {
-			evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
+		// Probe the flag only when the refund can apply: the probe records a
+		// SelfDestructPath read, which under parallel execution races another
+		// tx's SELFDESTRUCT of the same contract for no observable effect.
+		if refundsEnabled {
+			hasSelfdestructed, err := evm.IntraBlockState().HasSelfdestructed(callContext.Address())
+			if err != nil {
+				return mdgas.MdGas{}, err
+			}
+			if !hasSelfdestructed {
+				evm.IntraBlockState().AddRefund(params.SelfdestructRefundGas)
+			}
 		}
 		return gas, nil
 	}

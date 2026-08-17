@@ -27,23 +27,12 @@ import (
 )
 
 const (
-	// tailStartCapacity is the entry count a tail is first sized to. It jump-grows
-	// (×tailGrowFactor) toward its max only while the shared budget allows, so a
-	// cache over a shallow trie stays at the start size.
 	tailStartCapacity = 512
 	tailGrowFactor    = 4
-	// tailEntryBytes is the assumed resident cost of one tail slot (freelru
-	// element + the branch payload it points at), used only for budget accounting.
-	tailEntryBytes = 512
+	tailEntryBytes    = 512
 )
 
-// tailLRU is the BranchCache LRU tail. It wraps a sharded freelru that is
-// jump-resized (allocate larger, copy the live entries over) as it fills,
-// bounded by the shared cachebudget envelope and a per-cache max. Reads and writes take no
-// tail-level lock — they load the current freelru atomically and rely on its own
-// per-shard locking; the resize mutex is held only during the rare grow. A write
-// racing a resize may land in the freelru about to be replaced and be dropped,
-// which is a benign cache miss (the branch is re-read from the authoritative DB).
+// Writes racing a resize may be dropped (benign cache miss; re-read from DB).
 type tailLRU struct {
 	cur    atomic.Pointer[freelru.ShardedLRU[uint64, *branchCacheEntry]]
 	maxCap uint32
@@ -57,7 +46,7 @@ func newTailLRU(maxCapacity uint32) *tailLRU {
 	start := min(uint32(tailStartCapacity), maxCapacity)
 	t := &tailLRU{maxCap: maxCapacity}
 	t.reserved = int64(start) * tailEntryBytes
-	cachebudget.Global.Take(t.reserved) // initial slice is small; take it unconditionally
+	cachebudget.Global.Take(t.reserved)
 	t.curCap.Store(start)
 	t.cur.Store(newTailShards(start))
 	return t
@@ -78,8 +67,7 @@ func (t *tailLRU) Get(key uint64) (*branchCacheEntry, bool) {
 
 func (t *tailLRU) Add(key uint64, entry *branchCacheEntry) {
 	lru := t.cur.Load()
-	// curCap < maxCap first: a fully-grown tail can never grow, so it must not
-	// pay lru.Len()'s per-shard locks on every insert.
+	// Avoid lru.Len() locks once fully grown.
 	if curCap := t.curCap.Load(); curCap < t.maxCap && lru.Len() >= int(curCap) {
 		t.maybeGrow()
 		lru = t.cur.Load()
@@ -87,9 +75,6 @@ func (t *tailLRU) Add(key uint64, entry *branchCacheEntry) {
 	lru.Add(key, entry)
 }
 
-// maybeGrow jump-resizes the tail one step larger when it is full, the per-cache
-// max hasn't been reached, and the shared budget has room. Otherwise the tail
-// keeps its size and freelru evicts LRU on the next insert.
 func (t *tailLRU) maybeGrow() {
 	t.resizeMu.Lock()
 	defer t.resizeMu.Unlock()
@@ -119,8 +104,6 @@ func (t *tailLRU) Remove(key uint64) {
 	t.cur.Load().Remove(key)
 }
 
-// reset shrinks the tail back to the start size and returns its budget, keeping
-// the cache adaptive across unwind/clear (it regrows on demand afterwards).
 func (t *tailLRU) reset() {
 	t.resizeMu.Lock()
 	defer t.resizeMu.Unlock()
@@ -135,8 +118,7 @@ func (t *tailLRU) Len() int {
 	return t.cur.Load().Len()
 }
 
-// Close returns the tail's envelope reservation. Call once (BranchCache.Close
-// guards against double-release with its closed CAS).
+// Call once; BranchCache.Close guards against double-release.
 func (t *tailLRU) Close() {
 	t.resizeMu.Lock()
 	defer t.resizeMu.Unlock()

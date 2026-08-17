@@ -79,7 +79,7 @@ func TestSelfDestructReceive(t *testing.T) {
 	// effectively turning it from contract account to a non-contract account
 	// The second block is empty and is only used to force the newly created blockchain object to reload the trie
 	// from the database.
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
 		var txn types.Transaction
 
 		if i == 0 {

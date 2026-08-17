@@ -55,11 +55,11 @@ func TestGzipHandlerBatchConcurrentStreamableFlush(t *testing.T) {
 	echoArg := strings.Repeat("x", 256) // large enough that the batch response exceeds minGzipBodySize
 	calls := make([]string, n)
 	for i := range calls {
-		calls[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":["%s"]}`, i+1, echoArg)
+		calls[i] = fmt.Sprintf(`{"jsonrpc":"2.0","id":%d,"method":"test_echo","params":[%q]}`, i+1, echoArg)
 	}
 	reqBody := "[" + strings.Join(calls, ",") + "]"
 
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(reqBody))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()

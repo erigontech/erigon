@@ -202,7 +202,7 @@ func pruneStateBatch(ctx context.Context, db kv.RwDB, table string, marker, boun
 			break
 		}
 		slot := base_encoding.Decode64FromBytes4(k)
-		if err = c.DeleteCurrent(); err != nil {
+		if err := c.DeleteCurrent(); err != nil {
 			return deleted, marker, err
 		}
 		deleted++
@@ -213,10 +213,10 @@ func pruneStateBatch(ctx context.Context, db kv.RwDB, table string, marker, boun
 		k, _, err = c.Next()
 	}
 	c.Close()
-	if err = state_accessors.SetStatePruneProgress(tx, table, newMarker); err != nil {
+	if err := state_accessors.SetStatePruneProgress(tx, table, newMarker); err != nil {
 		return deleted, marker, err
 	}
-	if err = tx.Commit(); err != nil {
+	if err := tx.Commit(); err != nil {
 		return deleted, marker, err
 	}
 	mxAntiquaryStatePruneBatchSeconds.ObserveDuration(start)

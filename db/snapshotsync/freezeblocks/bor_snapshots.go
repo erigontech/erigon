@@ -62,7 +62,7 @@ func (br *BlockRetire) retireBorBlocks(
 			continue
 		}
 
-		blockFrom, blockTo, ok := CanRetire(maxBlockNum, minSnapBlockNum, snap.Enum(), br.snCfg)
+		blockFrom, blockTo, ok := br.canRetire(maxBlockNum, minSnapBlockNum, snap.Enum())
 		if ok {
 			blocksRetired = true
 

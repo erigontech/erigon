@@ -557,34 +557,111 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 	return fk, true
 }
 
-// AccountLifecycle resolves an account's self-destruct/revival verdict at txIdx
-// from the synthetic lifecycle paths, using a single revival definition that all
-// consumers share (readers, validation, and the create decision) so they cannot
-// diverge. destroyed reports a Done SelfDestruct write at TxIdx ≤ txIdx with
-// value true; destroyedAt is that write's TxIndex. revived reports a re-creation
-// strictly after the destruct and before txIdx: AddressPath ≥ destroyedAt
-// (catches same-tx metamorphic SD+CREATE2, where both land at the same TxIdx) or
-// any of {Balance,Nonce,CodeHash} > destroyedAt. A destroyed-and-not-revived
-// account reads as gone.
-func (vm *VersionMap) AccountLifecycle(addr accounts.Address, txIdx int) (destroyed bool, destroyedAt int, revived bool) {
+// AccountLifecycleState enumerates an account's existence at a given txIdx,
+// resolved once from the SelfDestruct + revival signals so that every consumer
+// — readers, validation, the create decision — branches on the SAME verdict
+// instead of each re-deriving it from raw ReadSelfDestruct. The recurring bug
+// class this removes is a divergence: one site (a reader) records one lifecycle
+// version while another site (the validator) resolves a different one, so a valid
+// read can never re-validate and the tx livelocks to the incarnation cap.
+type AccountLifecycleState uint8
+
+const (
+	// LifecycleLive: no Done SelfDestruct=true in effect at txIdx — normal floor
+	// reads, no storage wipe.
+	LifecycleLive AccountLifecycleState = iota
+	// LifecycleAbsent: destroyed and net-absent — no revival above the destruct and
+	// no EIP-8246 balance/nonce preserved. The account reads as gone: every
+	// field/storage read is zero/absent, and a pre-block base read of it is NOT
+	// stale (must not be invalidated).
+	LifecycleAbsent
+	// LifecycleRevived: destroyed but re-created above the destruct — a live
+	// re-create (AddressPath ≥ destroyedAt, catching same-tx metamorphic SD+CREATE2)
+	// or a Balance/Nonce/CodeHash write > destroyedAt. The account exists with a
+	// fresh incarnation: storage written on/before the destruct is wiped
+	// (unwritten-since slots read zero) and stale base reads ARE invalidated.
+	//
+	// EIP-8246 balance-preserve is deliberately not resolved here: its cell
+	// signature is indistinguishable from a pre-Cancun credit to a doomed account,
+	// so only a fork-aware caller can decide whether it still exists.
+	LifecycleRevived
+)
+
+// latestDoneSelfDestruct returns the version of the highest Done SelfDestruct
+// write at TxIdx ≤ txIdx whose value == target, if any. Unlike latest-only
+// ReadSelfDestruct it finds a wiping SelfDestruct=true even when a later revival
+// (SelfDestruct=false) sits above it.
+func (vm *VersionMap) latestDoneSelfDestruct(addr accounts.Address, txIdx int, target bool) (Version, bool) {
 	if vm == nil {
-		return false, 0, false
+		return Version{}, false
 	}
-	d, sdRes, ok := vm.ReadSelfDestruct(addr, txIdx)
-	if !ok || sdRes.Status() != MVReadResultDone || !d {
-		return false, 0, false
+	e := vm.load(addr)
+	if e == nil {
+		return Version{}, false
 	}
-	destroyedAt = sdRes.DepIdx()
+	e.mu.RLock()
+	defer e.mu.RUnlock()
+	if e.SelfDestruct == nil {
+		return Version{}, false
+	}
+	var ver Version
+	found := false
+	e.SelfDestruct.Descend(txIdx-1, func(k int, v *WriteCell[bool]) bool {
+		if v.flag != FlagDone {
+			return true
+		}
+		if v.Value == target {
+			ver = Version{TxIndex: k, Incarnation: v.incarnation}
+			found = true
+			return false
+		}
+		return true
+	})
+	return ver, found
+}
+
+// AccountLifecycleAt resolves an account's lifecycle in one pass: the state, the
+// canonical version dependent reads must anchor on, and the destruct (wipe) TxIndex.
+//
+// canonicalVer is the single point of agreement between reader and validator: the
+// LATEST SelfDestruct cell (destruct, or the revival that flipped it) — exactly what
+// the validator's ReadStatus(SelfDestructPath) resolves. A reader that records a
+// storage-zero (or field-zero) dependency MUST use canonicalVer, never the wipe
+// version, or it will disagree with the validator once a revival sits above the wipe.
+//
+// destroyedAt is the wiping SelfDestruct's TxIndex (found even when hidden under a
+// revival), for readers deciding whether a slot's last write predates the wipe.
+func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
+	wipe, wiped := vm.latestDoneSelfDestruct(addr, txIdx, true)
+	if !wiped {
+		return LifecycleLive, Version{}, 0
+	}
+	destroyedAt = wipe.TxIndex
+	// canonicalVer = latest SD cell (what the validator resolves). Defaults to the
+	// wipe; a later revival (SelfDestruct=false) supersedes it.
+	canonicalVer = wipe
+	if _, sdRR, ok := vm.ReadSelfDestruct(addr, txIdx); ok && sdRR.Status() == MVReadResultDone {
+		canonicalVer = Version{TxIndex: sdRR.DepIdx(), Incarnation: sdRR.Incarnation()}
+	}
 	revivalLimit := txIdx - 1
 	if hi, ok := vm.LatestTxIndex(addr, AddressPath, accounts.NilKey, revivalLimit); ok && hi >= destroyedAt {
-		return true, destroyedAt, true
+		return LifecycleRevived, canonicalVer, destroyedAt
 	}
 	for _, p := range [...]AccountPath{BalancePath, NoncePath, CodeHashPath} {
 		if hi, ok := vm.LatestTxIndex(addr, p, accounts.NilKey, revivalLimit); ok && hi > destroyedAt {
-			return true, destroyedAt, true
+			return LifecycleRevived, canonicalVer, destroyedAt
 		}
 	}
-	return true, destroyedAt, false
+	return LifecycleAbsent, canonicalVer, destroyedAt
+}
+
+// IsNetAbsent reports whether the account reads as gone at txIdx — LifecycleAbsent:
+// a wiping SELFDESTRUCT with no revival above it and no EIP-8246 balance/nonce
+// preserved. The single "is it gone" verdict every reader and the create decision
+// share, so they cannot diverge (see AccountLifecycleAt for the full state model).
+func (vm *VersionMap) IsNetAbsent(addr accounts.Address, txIdx int) bool {
+	state, _, _ := vm.AccountLifecycleAt(addr, txIdx)
+	return state == LifecycleAbsent
 }
 
 // netAbsentDestruct reports whether a lower tx left addr net-ABSENT via a
@@ -623,71 +700,6 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 		return false
 	}
 	return true
-}
-
-// AnyDoneSelfDestructEquals reports whether any Done SelfDestruct write at
-// TxIdx ≤ txIdxLimit has value == target. Detects a prior in-block
-// SelfDestructPath=true write that a later revival flipped back to false
-// — a case Read alone (latest-only) misses.
-func (vm *VersionMap) AnyDoneSelfDestructEquals(addr accounts.Address, txIdxLimit int, target bool) bool {
-	if vm == nil {
-		return false
-	}
-	e := vm.load(addr)
-	if e == nil {
-		return false
-	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.SelfDestruct == nil {
-		return false
-	}
-	found := false
-	e.SelfDestruct.Descend(txIdxLimit, func(_ int, v *WriteCell[bool]) bool {
-		if v.flag != FlagDone {
-			return true
-		}
-		if v.Value == target {
-			found = true
-			return false
-		}
-		return true
-	})
-	return found
-}
-
-// FindDoneSelfDestructInRange returns the version of the highest Done
-// SelfDestruct write with lo <= TxIdx < hi whose value == target, if any.
-// Read-side mirror of AnyDoneSelfDestructEquals: it finds an in-block
-// SELFDESTRUCT even when a later revival (SelfDestruct=false) hides it from
-// latest-only ReadSelfDestruct.
-func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi int, target bool) (Version, bool) {
-	if vm == nil || hi <= lo {
-		return Version{}, false
-	}
-	e := vm.load(addr)
-	if e == nil {
-		return Version{}, false
-	}
-	e.mu.RLock()
-	defer e.mu.RUnlock()
-	if e.SelfDestruct == nil {
-		return Version{}, false
-	}
-	var ver Version
-	found := false
-	e.SelfDestruct.Descend(hi-1, func(k int, v *WriteCell[bool]) bool {
-		if k < lo {
-			return false
-		}
-		if v.flag == FlagDone && v.Value == target {
-			ver = Version{TxIndex: k, Incarnation: v.incarnation}
-			found = true
-			return false
-		}
-		return true
-	})
-	return ver, found
 }
 
 // FlushVersionedWrites atomically flushes all writes to the version map

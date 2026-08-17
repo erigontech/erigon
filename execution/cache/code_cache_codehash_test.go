@@ -62,6 +62,17 @@ func TestCodeCache_PutAddrCodeHashReplacesStaleEntry(t *testing.T) {
 	require.Equal(t, newHash, got)
 }
 
+func TestCodeCache_GetAddrCodeHashWithTxNumPreservesStamp(t *testing.T) {
+	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
+	addr := makeAddr(1)
+	codeHash := [32]byte{1}
+	c.PutAddrCodeHash(addr, codeHash, 42)
+	gotHash, gotTxNum, ok := c.GetAddrCodeHashWithTxNum(addr)
+	require.True(t, ok)
+	require.Equal(t, codeHash, gotHash)
+	require.Equal(t, uint64(42), gotTxNum)
+}
+
 func TestCodeCache_GetByCodeHash_HitAfterPut(t *testing.T) {
 	c := closeOnCleanup(t, NewCodeCache(1*datasize.MB, 1*datasize.MB))
 	addr := makeAddr(1)

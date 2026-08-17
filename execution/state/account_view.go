@@ -37,8 +37,7 @@ func (v *VersionedAccountView) destroyed() bool {
 	if v.vm == nil {
 		return false
 	}
-	d, _, revived := v.vm.AccountLifecycle(v.addr, v.txIdx)
-	return d && !revived
+	return v.vm.IsNetAbsent(v.addr, v.txIdx)
 }
 
 func (v *VersionedAccountView) ensureBase() {

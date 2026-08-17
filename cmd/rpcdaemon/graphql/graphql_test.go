@@ -29,7 +29,7 @@ func TestGraphQLQueryBlock(t *testing.T) {
 	// Probe the GraphQL endpoint itself (not just the TCP port) so the test skips
 	// cleanly unless a rpcdaemon with GraphQL enabled is actually answering.
 	const endpoint = "http://localhost:8545/graphql"
-	probe, err := (&http.Client{Timeout: time.Second}).Post(endpoint, "application/json", strings.NewReader(`{"query":"{chainID}","variables":null}`))
+	probe, err := (&http.Client{Timeout: time.Second}).Post(endpoint, "application/json", strings.NewReader(`{"query":"{chainID}","variables":null}`)) //nolint:noctx
 	if err != nil {
 		t.Skipf("requires a running rpcdaemon with GraphQL at %s: %v", endpoint, err)
 	}
@@ -146,7 +146,7 @@ func TestGraphQLQueryBlock(t *testing.T) {
 			},
 		*/
 	} {
-		resp, err := http.Post("http://localhost:8545/graphql", "application/json", strings.NewReader(tt.body))
+		resp, err := http.Post("http://localhost:8545/graphql", "application/json", strings.NewReader(tt.body)) //nolint:noctx
 		if err != nil {
 			t.Fatalf("could not post: %v", err)
 		}

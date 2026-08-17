@@ -60,6 +60,15 @@ func testDbAndAggregatorBench(b *testing.B, aggStep uint64) (kv.TemporalRwDB, *s
 	return db, db.(state.HasAgg).Agg().(*state.Aggregator)
 }
 
+func newSharedDomainsBench(b *testing.B, db kv.TemporalRoDB, tx kv.TemporalTx) *execctx.SharedDomains {
+	b.Helper()
+	domains, err := execctx.NewSharedDomains(b.Context(), tx, log.New())
+	require.NoError(b, err)
+	domains.EnableParaTrieDB(db)
+	require.Equal(b, execctx.PickTrieVariant(), domains.GetCommitmentCtx().Trie().Variant())
+	return domains
+}
+
 func composite(k, k2 []byte) []byte {
 	return append(bytes.Clone(k), k2...)
 }
@@ -73,8 +82,7 @@ func Benchmark_SharedDomains_GetLatest(t *testing.B) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
-	require.NoError(t, err)
+	domains := newSharedDomainsBench(t, db, rwTx)
 	defer domains.Close()
 	maxTx := stepSize * 258
 
@@ -156,8 +164,7 @@ func BenchmarkSharedDomains_ComputeCommitment(b *testing.B) {
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(b.Context(), rwTx, log.New())
-	require.NoError(b, err)
+	domains := newSharedDomainsBench(b, db, rwTx)
 	defer domains.Close()
 
 	maxTx := stepSize * 4
@@ -338,8 +345,7 @@ func BenchmarkPruneSmallBatches(b *testing.B) {
 	require.NoError(b, err)
 	defer rwTx.Rollback()
 
-	domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
-	require.NoError(b, err)
+	domains := newSharedDomainsBench(b, db, rwTx)
 
 	usedKeys := make(map[string]struct{}, keysCount*maxTx)
 	for txNum := uint64(1); txNum <= maxTx; txNum++ {

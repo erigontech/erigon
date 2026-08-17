@@ -89,6 +89,10 @@ func (g *Reader) MadvNormal() MadvDisabler {
 	g.d.MadvNormal()
 	return g
 }
+func (g *Reader) MadvSequential() MadvDisabler {
+	g.d.MadvSequential()
+	return g
+}
 func (g *Reader) DisableReadAhead() { g.d.DisableReadAhead() }
 func (g *Reader) FileName() string  { return g.Getter.FileName() }
 func (g *Reader) Next(buf []byte) ([]byte, uint64) {
@@ -237,10 +241,13 @@ func Decompressor2bufio(d *Decompressor) (*bufio.Reader, func()) {
 				return
 			}
 		}
-		wr.Flush()
-		pw.Close()
+		if err := wr.Flush(); err != nil {
+			pw.CloseWithError(err)
+			return
+		}
+		pw.Close() //nolint:errcheck
 	}()
-	return bufio.NewReaderSize(pr, int(128*datasize.MB)), func() { pr.Close() }
+	return bufio.NewReaderSize(pr, int(128*datasize.MB)), func() { _ = pr.Close() }
 }
 
 // Bufio2compressor reads uvarint-length-prefixed words from src and writes them to a Writer.

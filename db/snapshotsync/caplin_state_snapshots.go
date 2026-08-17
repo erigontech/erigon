@@ -151,11 +151,7 @@ type CaplinStateSnapshots struct {
 	dirtySegmentsLock   sync.RWMutex
 	visibleSegmentsLock sync.RWMutex
 
-	// BeaconBlocks *segments
-	// BlobSidecars *segments
-	// Segments      map[string]*segments
-	dirtyLock sync.RWMutex                            // guards `dirty` field
-	dirty     map[string]*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
+	dirty map[string]*btree.BTreeG[*DirtySegment] // ordered map `type.Enum()` -> DirtySegments
 
 	visibleLock sync.RWMutex // guards  `visible` field
 	visible     sync.Map

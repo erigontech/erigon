@@ -42,11 +42,12 @@ func newCallFromToBlockProvider(isBackwards bool, callFromProvider, callToProvid
 		}
 
 		var blockNum uint64
-		if !hasMoreFrom {
+		switch {
+		case !hasMoreFrom:
 			blockNum = nextTo
-		} else if !hasMoreTo {
+		case !hasMoreTo:
 			blockNum = nextFrom
-		} else {
+		default:
 			blockNum = nextFrom
 			if isBackwards {
 				if nextTo < nextFrom {

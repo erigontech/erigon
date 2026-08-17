@@ -160,6 +160,11 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	case blockBody.GetDeposits().Len() != 0:
 		return nil, nil, nil, errors.New("old-style deposits are not allowed after Fulu")
 	}
+	if s.Version() >= clparams.GloasVersion {
+		if err := validateGloasOperationCounts(blockBody, s.BeaconConfig()); err != nil {
+			return nil, nil, nil, err
+		}
+	}
 
 	// Process each proposer slashing
 	sigs, msgs, pubKeys, err := processProposerSlashings(impl, s, blockBody)
@@ -223,6 +228,27 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	}
 
 	return
+}
+
+func validateGloasOperationCounts(blockBody cltypes.GenericBeaconBody, cfg *clparams.BeaconChainConfig) error {
+	operationCounts := []struct {
+		name  string
+		count int
+		limit uint64
+	}{
+		{"proposer slashings", blockBody.GetProposerSlashings().Len(), cfg.MaxProposerSlashings},
+		{"attester slashings", blockBody.GetAttesterSlashings().Len(), cfg.MaxAttesterSlashingsElectra},
+		{"attestations", blockBody.GetAttestations().Len(), cfg.MaxAttestationsElectra},
+		{"voluntary exits", blockBody.GetVoluntaryExits().Len(), cfg.MaxVoluntaryExits},
+		{"BLS-to-execution changes", blockBody.GetExecutionChanges().Len(), cfg.MaxBlsToExecutionChanges},
+		{"payload attestations", blockBody.GetPayloadAttestations().Len(), cfg.MaxPayloadAttestations},
+	}
+	for _, operationCount := range operationCounts {
+		if uint64(operationCount.count) > operationCount.limit {
+			return fmt.Errorf("too many %s: %d > %d", operationCount.name, operationCount.count, operationCount.limit)
+		}
+	}
+	return nil
 }
 
 func forEachProcess[T solid.EncodableHashableSSZ](

@@ -137,7 +137,7 @@ func (s *MdbxStore) PutProcessedBlockInfo(ctx context.Context, info []ProcessedB
 
 	defer tx.Rollback()
 
-	if err = (txStore{tx}).PutProcessedBlockInfo(ctx, info); err != nil {
+	if err := (txStore{tx}).PutProcessedBlockInfo(ctx, info); err != nil {
 		return err
 	}
 
@@ -243,7 +243,7 @@ func (s *MdbxStore) PutEvents(ctx context.Context, events []*EventRecordWithTime
 	}
 	defer tx.Rollback()
 
-	if err = (txStore{tx}).PutEvents(ctx, events); err != nil {
+	if err := (txStore{tx}).PutEvents(ctx, events); err != nil {
 		return err
 	}
 
@@ -271,7 +271,7 @@ func (s *MdbxStore) PutBlockNumToEventId(ctx context.Context, blockNumToEventId 
 	}
 	defer tx.Rollback()
 
-	if err = (txStore{tx}).PutBlockNumToEventId(ctx, blockNumToEventId); err != nil {
+	if err := (txStore{tx}).PutBlockNumToEventId(ctx, blockNumToEventId); err != nil {
 		return err
 	}
 
@@ -510,11 +510,11 @@ func (s txStore) PutEvents(ctx context.Context, events []*EventRecordWithTime) e
 		evID := event.MarshallIdBytes()
 		evTime := event.MarshallTimeBytes()
 
-		if err = tx.Put(kv.BorEvents, evID, v); err != nil {
+		if err := tx.Put(kv.BorEvents, evID, v); err != nil {
 			return err
 		}
 
-		if err = tx.Put(kv.BorEventTimes, evTime, evID); err != nil {
+		if err := tx.Put(kv.BorEventTimes, evTime, evID); err != nil {
 			return err
 		}
 	}
@@ -733,7 +733,7 @@ func (s txStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteL
 			return deleted, err
 		}
 
-		if err = c1.DeleteCurrent(); err != nil {
+		if err := c1.DeleteCurrent(); err != nil {
 			return deleted, err
 		}
 
@@ -757,7 +757,7 @@ func (s txStore) PruneEvents(ctx context.Context, blocksTo uint64, blocksDeleteL
 			break
 		}
 
-		if err = epbCursor.DeleteCurrent(); err != nil {
+		if err := epbCursor.DeleteCurrent(); err != nil {
 			return deleted, err
 		}
 
@@ -803,7 +803,7 @@ func UnwindBlockNumToEventID(tx kv.RwTx, blockNum uint64) error {
 			break
 		}
 
-		if err = c.DeleteCurrent(); err != nil {
+		if err := c.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
@@ -838,7 +838,7 @@ func UnwindEventProcessedBlocks(tx kv.RwTx, blockNum uint64) error {
 			break
 		}
 
-		if err = c.DeleteCurrent(); err != nil {
+		if err := c.DeleteCurrent(); err != nil {
 			return err
 		}
 	}
@@ -862,7 +862,7 @@ func UnwindEventTxnToBlockNum(tx kv.RwTx, blockNum uint64) error {
 			break
 		}
 
-		if err = c.DeleteCurrent(); err != nil {
+		if err := c.DeleteCurrent(); err != nil {
 			return err
 		}
 	}

@@ -158,11 +158,13 @@ type HasDiff interface {
 	Diff() (*membatchwithdb.MemoryDiff, error)
 }
 
-// ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
-// if the payload extends the canonical chain, then we stack it in extendingFork without any unwind.
-// if the payload is a fork then we unwind to the point where the fork meets the canonical chain, and there we check whether it is valid.
-// if for any reason none of the actions above can be performed due to lack of information, we accept the payload and avoid validation.
-func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
+// ValidatePayload checks a payload against canonical state. It validates a
+// fork after staging an unwind to the common canonical ancestor and accepts a
+// payload when required chain data is unavailable. Before a fork unwind it
+// invokes ensureReadAheadSuspended, which must idempotently acquire a
+// caller-owned suspension lasting until validation stops reading staged state;
+// an acquisition error aborts validation before the unwind.
+func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, body *types.RawBody, ensureReadAheadSuspended func() error, logger log.Logger) (status engine_types.EngineStatus, latestValidHash common.Hash, validationError error, criticalError error) {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.executor == nil {
@@ -243,6 +245,11 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
+	}
+	if unwindPoint != 0 {
+		if criticalError = ensureReadAheadSuspended(); criticalError != nil {
+			return
+		}
 	}
 	if fv.sharedDom != nil {
 		fv.sharedDom.Close()

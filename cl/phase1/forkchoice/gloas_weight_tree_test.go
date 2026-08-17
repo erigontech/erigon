@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -87,6 +88,83 @@ func TestSetUnequivocatingInvalidatesHeadCache(t *testing.T) {
 
 	require.Equal(t, common.Hash{}, f.headHash)
 	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
+}
+
+func TestGetHeadPublishesCachedSelection(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	manager.OnSelectedHead(common.Hash{0xaa}, 100)
+	store := &ForkChoiceStore{
+		headHash:          common.Hash{0xbb},
+		headSlot:          99,
+		syncedDataManager: manager,
+	}
+
+	root, slot, err := store.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, common.Hash{0xbb}, root)
+	require.Equal(t, uint64(99), slot)
+	selectedRoot, selectedSlot, ok := manager.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, root, selectedRoot)
+	require.Equal(t, slot, selectedSlot)
+}
+
+func TestGetHeadPublishesAnchorFallback(t *testing.T) {
+	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	anchorRoot := common.Hash{0xaa}
+	store := &ForkChoiceStore{
+		beaconCfg:         &clparams.MainnetBeaconConfig,
+		forkGraph:         &getFinalizedExecutionHashForkGraph{anchorRoot: anchorRoot, anchorSlot: 10},
+		syncedDataManager: manager,
+	}
+	store.justifiedCheckpoint.Store(solid.Checkpoint{Root: common.Hash{0xbb}})
+
+	root, slot, err := store.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, anchorRoot, root)
+	require.Equal(t, uint64(10), slot)
+	selectedRoot, selectedSlot, ok := manager.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, root, selectedRoot)
+	require.Equal(t, slot, selectedSlot)
+}
+
+func TestGetHeadPublishesGloasSelection(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	manager := synced_data.NewSyncedDataManager(&cfg, true)
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			root: {Slot: 10},
+		},
+		blocks:           map[common.Hash]*cltypes.SignedBeaconBlock{},
+		currentJustified: checkpoint,
+	}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.syncedDataManager = manager
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
+
+	selectedRoot, selectedSlot, err := store.GetHead(nil)
+	require.NoError(t, err)
+	require.Equal(t, root, selectedRoot)
+	require.Equal(t, uint64(10), selectedSlot)
+	publishedRoot, publishedSlot, ok := manager.SelectedHead()
+	require.True(t, ok)
+	require.Equal(t, selectedRoot, publishedRoot)
+	require.Equal(t, selectedSlot, publishedSlot)
 }
 
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {

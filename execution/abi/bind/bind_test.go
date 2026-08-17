@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package bind
+package bind_test
 
 import (
 	"context"
@@ -29,6 +29,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/execution/abi/bind"
 )
 
 var bindTests = []struct {
@@ -2076,7 +2077,7 @@ func TestGolangBindings(t *testing.T) {
 			types = []string{tt.name}
 		}
 		// Generate the binding and create a Go source file in the workspace
-		bind, err := Bind(types, tt.abi, tt.bytecode, tt.fsigs, "bindtest", LangGo, tt.libs, tt.aliases)
+		bind, err := bind.Bind(types, tt.abi, tt.bytecode, tt.fsigs, "bindtest", bind.LangGo, tt.libs, tt.aliases)
 		if err != nil {
 			t.Fatalf("test %d: failed to generate binding: %v", i, err)
 		}
@@ -2510,7 +2511,7 @@ public class Test {
 		},
 	}
 	for i, c := range cases {
-		binding, err := Bind([]string{c.name}, []string{c.abi}, []string{c.bytecode}, nil, "bindtest", LangJava, nil, nil)
+		binding, err := bind.Bind([]string{c.name}, []string{c.abi}, []string{c.bytecode}, nil, "bindtest", bind.LangJava, nil, nil)
 		if err != nil {
 			t.Fatalf("test %d: failed to generate binding: %v", i, err)
 		}

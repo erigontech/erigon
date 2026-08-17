@@ -17,6 +17,7 @@
 package membatchwithdb_test
 
 import (
+	"errors"
 	"fmt"
 	"sync"
 	"testing"
@@ -29,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 )
 
 func initializeDbNonDupSort(rwTx kv.RwTx) {
@@ -505,17 +507,165 @@ func TestIncReadSequence(t *testing.T) {
 	_, rwTx := newTestTx(t)
 
 	initializeDbNonDupSort(rwTx)
+	require.NoError(t, rwTx.ResetSequence(kv.HeaderNumber, 7))
 
 	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
 	require.NoError(t, err)
 	defer batch.Close()
 
-	_, err = batch.IncrementSequence(kv.HeaderNumber, uint64(12))
+	previous, err := batch.IncrementSequence(kv.HeaderNumber, uint64(12))
 	require.NoError(t, err)
+	require.Equal(t, uint64(7), previous)
 
 	val, err := batch.ReadSequence(kv.HeaderNumber)
 	require.NoError(t, err)
-	require.Equal(t, uint64(12), val)
+	require.Equal(t, uint64(19), val)
+
+	require.NoError(t, batch.Flush(t.Context(), rwTx))
+	val, err = rwTx.ReadSequence(kv.HeaderNumber)
+	require.NoError(t, err)
+	require.Equal(t, uint64(19), val, "an explicitly changed sequence must be flushed")
+}
+
+func TestMemoryMutationUntouchedSequenceFollowsUpdatedTransaction(t *testing.T) {
+	db, seedTx := newTestTx(t)
+	ctx := t.Context()
+
+	_, err := rawdb.IncrementStateVersion(seedTx)
+	require.NoError(t, err)
+	require.NoError(t, seedTx.Commit())
+
+	initialTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer initialTx.Rollback()
+	batch, err := membatchwithdb.NewMemoryBatch(initialTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	advanceTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer advanceTx.Rollback()
+	_, err = rawdb.IncrementStateVersion(advanceTx)
+	require.NoError(t, err)
+	wantVersion, err := rawdb.GetStateVersion(advanceTx)
+	require.NoError(t, err)
+	require.NoError(t, advanceTx.Commit())
+
+	latestTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer latestTx.Rollback()
+	batch.UpdateTxn(latestTx)
+
+	gotVersion, err := rawdb.GetStateVersion(batch)
+	require.NoError(t, err)
+	require.Equal(t, wantVersion, gotVersion)
+}
+
+type nonTemporalTx struct{ kv.Tx }
+
+func TestMemoryMutationReadViewUsesPlainTx(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	require.NoError(t, rwTx.ResetSequence(kv.HeaderNumber, 7))
+	require.NoError(t, rwTx.Put(kv.HeaderNumber, []byte("key"), []byte("value")))
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	view := batch.NewReadView(nonTemporalTx{Tx: rwTx})
+	gotSequence, err := view.ReadSequence(kv.HeaderNumber)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), gotSequence)
+	gotValue, err := view.GetOne(kv.HeaderNumber, []byte("key"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("value"), gotValue)
+}
+
+func TestMemoryMutationDetachedReadViewUsesPlainTx(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	require.NoError(t, rwTx.ResetSequence(kv.HeaderNumber, 7))
+	require.NoError(t, rwTx.Put(kv.HeaderNumber, []byte("key"), []byte("value")))
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NotNil(t, batch.DetachDB())
+
+	view := batch.NewReadView(nonTemporalTx{Tx: rwTx})
+	gotSequence, err := view.ReadSequence(kv.HeaderNumber)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), gotSequence)
+	gotValue, err := view.GetOne(kv.HeaderNumber, []byte("key"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("value"), gotValue)
+}
+
+func TestMemoryMutationDetachedSequenceAccessRequiresReadView(t *testing.T) {
+	_, rwTx := newTestTx(t)
+	require.NoError(t, rwTx.ResetSequence(kv.HeaderNumber, 7))
+
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.ResetSequence(kv.EthTx, 9))
+	require.NotNil(t, batch.DetachDB())
+
+	_, err = batch.ReadSequence(kv.HeaderNumber)
+	require.ErrorContains(t, err, "no backing transaction")
+	_, err = batch.IncrementSequence(kv.HeaderNumber, 1)
+	require.ErrorContains(t, err, "no backing transaction")
+	previous, err := batch.IncrementSequence(kv.EthTx, 1)
+	require.NoError(t, err)
+	require.Equal(t, uint64(9), previous, "an explicitly written sequence needs no backing transaction")
+
+	view := batch.NewReadView(nonTemporalTx{Tx: rwTx})
+	got, err := view.ReadSequence(kv.HeaderNumber)
+	require.NoError(t, err)
+	require.Equal(t, uint64(7), got, "a failed increment must not create a zero-based sequence")
+}
+
+func TestMemoryMutationFlushDoesNotOverwriteUnchangedStateVersion(t *testing.T) {
+	db, seedTx := newTestTx(t)
+	ctx := t.Context()
+
+	_, err := rawdb.IncrementStateVersion(seedTx)
+	require.NoError(t, err)
+	require.NoError(t, seedTx.Commit())
+
+	snapshotTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer snapshotTx.Rollback()
+	batch, err := membatchwithdb.NewMemoryBatch(snapshotTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+	require.NoError(t, batch.Put(kv.HeaderNumber, []byte("overlay-key"), []byte("overlay-value")))
+
+	advanceTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer advanceTx.Rollback()
+	_, err = rawdb.IncrementStateVersion(advanceTx)
+	require.NoError(t, err)
+	wantVersion, err := rawdb.GetStateVersion(advanceTx)
+	require.NoError(t, err)
+	require.NoError(t, advanceTx.Commit())
+
+	flushTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer flushTx.Rollback()
+	require.NoError(t, batch.Flush(ctx, flushTx))
+	require.NoError(t, flushTx.Commit())
+
+	checkTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer checkTx.Rollback()
+	gotVersion, err := rawdb.GetStateVersion(checkTx)
+	require.NoError(t, err)
+	require.Equal(t, wantVersion, gotVersion,
+		"flushing an overlay must not replay the state-version value copied from its older snapshot")
+	overlayValue, err := checkTx.GetOne(kv.HeaderNumber, []byte("overlay-key"))
+	require.NoError(t, err)
+	require.Equal(t, []byte("overlay-value"), overlayValue,
+		"the overlay's explicit table writes must still be flushed")
 }
 
 func initializeDbDupSort(rwTx kv.RwTx) {
@@ -850,4 +1000,45 @@ func TestMemoryMutationConcurrentDeleteAndRead(t *testing.T) {
 	})
 
 	wg.Wait()
+}
+
+// erroringDomainReader fails every domain read, so a caller that swallows the
+// error is indistinguishable from a caller that saw no value at all.
+type erroringDomainReader struct{ err error }
+
+func (r erroringDomainReader) GetAsOf(kv.Domain, []byte, uint64) ([]byte, bool, error) {
+	return nil, false, r.err
+}
+
+func (r erroringDomainReader) HistorySeek(kv.Domain, []byte, uint64) ([]byte, bool, error) {
+	return nil, false, r.err
+}
+
+// TestDomainReadErrorsPropagate covers both overlay read views: a DomainReader
+// error must reach the caller rather than fall through to the committed tx,
+// which would silently answer with stale data.
+func TestDomainReadErrorsPropagate(t *testing.T) {
+	t.Parallel()
+
+	_, rwTx := newTestTx(t)
+	batch, err := membatchwithdb.NewMemoryBatch(rwTx, "", log.Root())
+	require.NoError(t, err)
+	defer batch.Close()
+
+	wantErr := errors.New("domain reader unavailable")
+	batch.DomainReader = erroringDomainReader{err: wantErr}
+
+	key := []byte{0x2}
+	for name, tx := range map[string]kv.TemporalTx{
+		"MemoryMutation":          batch,
+		"OverlayTemporalReadView": batch.NewTemporalReadView(rwTx),
+	} {
+		t.Run(name, func(t *testing.T) {
+			_, _, err := tx.GetAsOf(kv.ReceiptDomain, key, 1)
+			require.ErrorIs(t, err, wantErr, "GetAsOf must propagate the DomainReader error")
+
+			_, _, err = tx.HistorySeek(kv.ReceiptDomain, key, 1)
+			require.ErrorIs(t, err, wantErr, "HistorySeek must propagate the DomainReader error")
+		})
+	}
 }

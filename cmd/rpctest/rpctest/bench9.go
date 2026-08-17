@@ -28,21 +28,16 @@ import (
 func Bench9(erigonURL, gethURL string, needCompare, latest bool) error {
 	setRoutes(erigonURL, gethURL)
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	lastBlock := blockNumber.Number
 	fmt.Printf("Last block: %d\n", lastBlock)
+	var res CallResult
 	// Go back 256 blocks
-	bn := uint64(lastBlock) - 256
+	bn := lastBlock - 256
 	zeroAddr := common.Address{}
 	page := zeroAddr[:]
 

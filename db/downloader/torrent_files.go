@@ -143,7 +143,7 @@ func (tf *AtomicTorrentFS) CreateWithMetaInfo(info *metainfo.Info, additionalMet
 	if exists {
 		return false, nil
 	}
-	if err = tf.createFromMetaInfo(name, mi); err != nil {
+	if err := tf.createFromMetaInfo(name, mi); err != nil {
 		return false, err
 	}
 	return true, nil

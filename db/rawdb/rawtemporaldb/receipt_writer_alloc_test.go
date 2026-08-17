@@ -17,6 +17,7 @@
 package rawtemporaldb_test
 
 import (
+	"encoding/binary"
 	"fmt"
 	"testing"
 
@@ -76,9 +77,9 @@ func TestReceiptWriterAppendMetadataValuesAreDistinct(t *testing.T) {
 
 	require.NoError(t, w.AppendMetadata(putter, 7, 21000, 131072, 42))
 	require.Len(t, putter.puts, 3)
-	require.Equal(t, rawtemporaldb.ReceiptValueForTest(21000), putter.puts[0])
-	require.Equal(t, rawtemporaldb.ReceiptValueForTest(131072), putter.puts[1])
-	require.Equal(t, rawtemporaldb.ReceiptValueForTest(7), putter.puts[2])
+	require.Equal(t, receiptValueForTest(21000), putter.puts[0])
+	require.Equal(t, receiptValueForTest(131072), putter.puts[1])
+	require.Equal(t, receiptValueForTest(7), putter.puts[2])
 }
 
 func receiptFixture() *types.Receipt {
@@ -138,4 +139,11 @@ func BenchmarkPerTxReceiptWrite(b *testing.B) {
 			b.Fatal(err)
 		}
 	}
+}
+
+// receiptValueForTest is the value encoding, for assertions in tests.
+func receiptValueForTest(v uint64) []byte {
+	var buf [binary.MaxVarintLen64]byte
+	i := binary.PutUvarint(buf[:], v)
+	return buf[:i]
 }

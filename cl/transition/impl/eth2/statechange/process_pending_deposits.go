@@ -47,13 +47,14 @@ func ProcessPendingDeposits(s abstract.BeaconState) {
 			isValidatorWithdrawn = validator.WithdrawableEpoch() < nextEpoch
 		}
 
-		if isValidatorWithdrawn {
+		switch {
+		case isValidatorWithdrawn:
 			// Deposited balance will never become active. Increase balance but do not consume churn
 			applyPendingDeposit(s, d)
-		} else if isValidatorExited {
+		case isValidatorExited:
 			// Validator is exiting, postpone the deposit until after withdrawable epoch
 			depositToPostpone = append(depositToPostpone, d)
-		} else {
+		default:
 			// Check if deposit fits in the churn, otherwise, do no more deposit processing in this epoch.
 			isChurnLimitReached = processAmount+d.Amount > availableForProcessing
 			if isChurnLimitReached {

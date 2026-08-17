@@ -99,8 +99,8 @@ func newFlushTestHarness(t *testing.T, frozen uint64) *flushTestHarness {
 
 	h := &flushTestHarness{}
 	engine.EXPECT().FrozenBlocks(gomock.Any()).Return(frozen).AnyTimes()
-	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
-		func(_ context.Context, blocks []*types.Block, _ [][]byte) error {
+	engine.EXPECT().InsertBlocks(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, blocks []*types.Block) error {
 			h.inserted = append(h.inserted, blocks...)
 			return nil
 		},
@@ -153,7 +153,7 @@ func TestDecodeBlockRejectsShortPersistentValue(t *testing.T) {
 		"missing requests hash":    append([]byte{byte(clparams.ElectraVersion)}, make([]byte, 32)...),
 	} {
 		t.Run(name, func(t *testing.T) {
-			_, _, err := c.decodeBlock(utils.CompressSnappy(raw))
+			_, err := c.decodeBlock(utils.CompressSnappy(raw))
 			require.ErrorContains(t, err, "persistent block value too short")
 		})
 	}

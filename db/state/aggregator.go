@@ -85,11 +85,22 @@ type Aggregator struct {
 	// visible is CoW field updated only by `recalcVisibleFiles`.
 	visible atomic.Pointer[aggregatorVisible]
 	// oldestVisible head of linked-list of visibleFiles objects (oldest still-have-reader object). Mutated only under dirtyFilesLock.
-	oldestVisible     *aggregatorVisible
-	snapshotBuildSema *semaphore.Weighted
+	oldestVisible *aggregatorVisible
+	// unaligned entities are left out of the shared visible-file ceiling while tooling
+	// regenerates them. Guarded by dirtyFilesLock.
+	unalignedDomain [kv.DomainLen]bool
+	unalignedIdx    [kv.StandaloneIdxLen]bool
+	// visibilityLoweringForbidden: a fill-enabled StateCache is wired over
+	// this aggregator, and its fill admission relies on view frontiers never
+	// decreasing. recalcVisibleFiles refuses to lower the cached state
+	// domains' visible ends while set; Close clears it (shutdown is not a
+	// fill window).
+	visibilityLoweringForbidden atomic.Bool
+	snapshotBuildSema           *semaphore.Weighted
 
 	disableHistory      bool
 	branchCacheDisabled bool
+	skipFilesDBGapCheck bool
 	workers             workersCfg
 
 	// To keep DB small - need move data to small files ASAP.
@@ -497,9 +508,9 @@ func (a *Aggregator) EnableAllDependencies() {
 	if a.checker == nil {
 		return
 	}
-	a.checker.Enable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	a.checker.Enable()
 	a.recalcVisibleFiles(nil)
 }
 
@@ -507,9 +518,59 @@ func (a *Aggregator) DisableAllDependencies() {
 	if a.checker == nil {
 		return
 	}
-	a.checker.Disable()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	a.checker.Disable()
+	a.recalcVisibleFiles(nil)
+}
+
+// Unalign leaves a domain out of the shared visible-file ceiling while tooling regenerates
+// it: it stops clamping the others and stays clamped by them, so it can lag them and never
+// lead. Not persisted - an interrupted rebuild reopens aligned.
+//
+// Accounts, storage and code hold the state a rebuild reads: unaligning one panics.
+func (a *Aggregator) Unalign(d kv.Domain) (realign func()) {
+	switch d {
+	case kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain:
+		panic(fmt.Sprintf("assert: %s holds the state a rebuild reads, it can not lag it", d))
+	}
+	a.setUnalignedDomain(d, true)
+	return func() { a.setUnalignedDomain(d, false) }
+}
+
+// UnalignIdx is Unalign for a standalone index.
+func (a *Aggregator) UnalignIdx(name kv.InvertedIdx) (realign func()) {
+	for id, ii := range a.standaloneIIs() {
+		if ii.Name == name {
+			a.setUnalignedIdx(id, true)
+			return func() { a.setUnalignedIdx(id, false) }
+		}
+	}
+	return func() {}
+}
+
+// ForbidVisibilityLowering marks this aggregator as backing a fill-enabled
+// StateCache: from then on recalcVisibleFiles panics instead of lowering a
+// cached state domain's visible end, whichever entry point caused it.
+// Serialized with recalcVisibleFiles via dirtyFilesLock so "from then on"
+// holds against a recalculation already in flight.
+func (a *Aggregator) ForbidVisibilityLowering() {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.visibilityLoweringForbidden.Store(true)
+}
+
+func (a *Aggregator) setUnalignedDomain(d kv.Domain, v bool) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.unalignedDomain[d] = v
+	a.recalcVisibleFiles(nil)
+}
+
+func (a *Aggregator) setUnalignedIdx(id int, v bool) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.unalignedIdx[id] = v
 	a.recalcVisibleFiles(nil)
 }
 
@@ -517,22 +578,48 @@ func (a *Aggregator) DisableInterDomainDependencies() {
 	if a.checker == nil {
 		return
 	}
-	a.checker.DisableInterDomain()
 	a.dirtyFilesLock.Lock()
 	defer a.dirtyFilesLock.Unlock()
+	a.checker.DisableInterDomain()
 	a.recalcVisibleFiles(nil)
 }
 
 func (a *Aggregator) OpenFolder() error {
-	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
-	if err := a.reloadSalt(); err != nil {
+	if err := func() error {
+		a.dirtyFilesLock.Lock()
+		defer a.dirtyFilesLock.Unlock()
+		if err := a.reloadSalt(); err != nil {
+			return err
+		}
+		if err := a.openFolder(); err != nil {
+			return fmt.Errorf("OpenFolder: %w", err)
+		}
+		return nil
+	}(); err != nil {
 		return err
 	}
-	if err := a.openFolder(); err != nil {
-		return fmt.Errorf("OpenFolder: %w", err)
+	return a.checkFilesDBGap()
+}
+
+// checkFilesDBGap refuses to open a datadir where the DB was pruned past where the
+// snapshot files end (the hole `rm-state --latest` leaves without a reset — reads
+// below it silently return stale data). Skipped when SkipFilesDBGapCheck is set so
+// `--reset` tooling can open and fix it.
+func (a *Aggregator) checkFilesDBGap() error {
+	if a.skipFilesDBGapCheck || a.db == nil {
+		return nil
 	}
-	return nil
+	return a.db.View(context.Background(), func(tx kv.Tx) error {
+		at := a.BeginFilesRo()
+		defer at.Close()
+		if err := at.CheckFilesDBGap(tx); err != nil {
+			// The datadir is corrupt and can't be executed on; exit hard rather than
+			// let the error be swallowed/retried up the stack.
+			a.logger.Error("[snapshots] " + err.Error())
+			os.Exit(1)
+		}
+		return nil
+	})
 }
 
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
@@ -640,6 +727,9 @@ func (a *Aggregator) WaitForFiles() {
 }
 
 func (a *Aggregator) Close() {
+	a.dirtyFilesLock.Lock()
+	a.visibilityLoweringForbidden.Store(false) // shutdown is not a fill window
+	a.dirtyFilesLock.Unlock()
 	a.WaitForFiles()
 	if !a.background.BeginClose() { // idempotent: safe to call Close multiple times
 		return
@@ -1736,26 +1826,35 @@ func (a *Aggregator) FirstTxNumOfStep(step kv.Step) uint64 { // could have some 
 	return firstTxNumOfStep(step, a.StepSize())
 }
 
+// dirtyFilesEndTxNumMinimax is the ceiling shared by all visible files: no entity is visible
+// past a range another one misses. Left out: entities with no files at all (a fresh node, or
+// optional indexes never downloaded, would otherwise see nothing) and unaligned ones.
 func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
-	if a.d[kv.AccountsDomain] == nil || a.d[kv.StorageDomain] == nil || a.d[kv.CodeDomain] == nil {
+	// end == 0 means "entity has no files", it does not lower the ceiling
+	_min := func(ceiling, end uint64) uint64 {
+		if end == 0 {
+			return ceiling
+		}
+		return min(ceiling, end)
+	}
+
+	ceiling := uint64(math.MaxUint64)
+	for id, d := range a.d {
+		if d == nil || d.Disable || a.unalignedDomain[id] {
+			continue
+		}
+		ceiling = _min(ceiling, d.dirtyFilesEndTxNumMinimax())
+	}
+	for id, ii := range a.standaloneIIs() {
+		if ii == nil || ii.Disable || a.unalignedIdx[id] {
+			continue
+		}
+		ceiling = _min(ceiling, ii.dirtyFilesEndTxNumMinimax())
+	}
+	if ceiling == math.MaxUint64 {
 		return 0
 	}
-	m := min(
-		a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
-		a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
-		a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-		// a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
-	)
-	// TODO(awskii) have two different functions including commitment/without it
-	//  Usually its skipped because commitment either have MaxUint64 due to no history or equal to other domains
-
-	//log.Warn("dirtyFilesEndTxNumMinimax", "min", m,
-	//	"acc", a.d[kv.AccountsDomain].dirtyFilesEndTxNumMinimax(),
-	//	"sto", a.d[kv.StorageDomain].dirtyFilesEndTxNumMinimax(),
-	//	"cod", a.d[kv.CodeDomain].dirtyFilesEndTxNumMinimax(),
-	//	"com", a.d[kv.CommitmentDomain].dirtyFilesEndTxNumMinimax(),
-	//)
-	return m
+	return ceiling
 }
 
 // aggregatorVisible immutable visible-for-application files (no gaps, no overlaps, indexed)
@@ -1799,6 +1898,28 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 		next.iis[id] = ii.calcVisibleFiles(toTxNum)
 	}
 	next.minimaxTxNum = next.stateMinimaxTxNum()
+
+	if a.visibilityLoweringForbidden.Load() {
+		prev := a.visible.Load()
+		for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain} {
+			if prev.d[d] == nil || next.d[d] == nil {
+				continue
+			}
+			prevEnd := visibleFiles(prev.d[d].files).EndTxNum()
+			nextEnd := visibleFiles(next.d[d].files).EndTxNum()
+			if nextEnd < prevEnd {
+				panic(fmt.Sprintf("assert: %s visible end lowered %d -> %d while a fill-enabled StateCache is wired — fill admission relies on view frontiers never decreasing", d, prevEnd, nextEnd))
+			}
+			if prev.dhii[d] == nil || next.dhii[d] == nil {
+				continue
+			}
+			prevII := prev.dhii[d].files.EndTxNum()
+			nextII := next.dhii[d].files.EndTxNum()
+			if nextII < prevII {
+				panic(fmt.Sprintf("assert: %s history-II visible end lowered %d -> %d while a fill-enabled StateCache is wired — DomainVisibleEnd derives view frontiers from it", d, prevII, nextII))
+			}
+		}
+	}
 
 	old := a.visible.Load()
 	old.retired = retired
@@ -1943,8 +2064,8 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	// re-shortening (flag off, or flag on below threshold) need neither and run in parallel.
 	comVals := r.domain[kv.CommitmentDomain].values
 	commitmentRefsEnabled := at.a.referencesInCommitmentBranches()
-	// With referenced commitment files present, concurrent dereference does random reads; keep the shared
-	// mmap at MADV_NORMAL during merge instead of a separate sequential view that would evict those pages.
+	// With referenced commitment files present, concurrent dereference does random reads; read through
+	// the shared mmap instead of a separate sequential view that would evict those pages.
 	seqReadahead := !at.commitmentVisibleFilesReferenced()
 	needCommitmentTransform := comVals.needMerge &&
 		commitmentMergeNeedsTransform(files.d[kv.CommitmentDomain], commitmentRefsEnabled, at.StepSize(), comVals.from, comVals.to)
@@ -2376,6 +2497,29 @@ type AggregatorRoTx struct {
 	_leakID uint64 // set only if TRACE_AGG=true
 }
 
+// CheckFilesDBGap detects a gap between the snapshot files and the DB. It can arise from
+// snapshot/DB management operations — e.g. `seg rm-state --latest` and then starting
+// erigon without `integration stage_exec --reset`. Meant to run once at startup.
+func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
+	for _, dt := range at.d {
+		if dt == nil || dt.d.Disable {
+			continue
+		}
+		if err := dt.checkFilesDBGap(tx); err != nil {
+			return err
+		}
+	}
+	for _, iit := range at.iis {
+		if iit == nil || iit.ii.Disable {
+			continue
+		}
+		if err := iit.checkFilesDBGap(tx); err != nil {
+			return err
+		}
+	}
+	return nil
+}
+
 func (a *Aggregator) acquireVisibleFiles() (v *aggregatorVisible) {
 	// Load+Increment: is not atomic operation. Means: between them "existing last reader may End" (and close files)
 	// Means: must check that latest view didn't change
@@ -2544,6 +2688,21 @@ func (at *AggregatorRoTx) DomainProgress(name kv.Domain, tx kv.Tx) uint64 {
 	}
 	return at.d[name].ht.iit.Progress(tx)
 }
+func (at *AggregatorRoTx) DomainVisibleEnd(name kv.Domain, tx kv.Tx) (uint64, bool) {
+	d := at.d[name]
+	if d.d.HistoryDisabled {
+		return 0, false
+	}
+	// A dependency checker can clamp the values view below the history-II end.
+	// Such a view has no exact frontier: reads mix fresh DB-resident keys with
+	// older file values for the gap, and raising the dependent file's
+	// visibility later reveals state without any cache apply — a fill made
+	// during the clamp would never be invalidated.
+	if d.files.EndTxNum() < d.ht.iit.files.EndTxNum() {
+		return 0, false
+	}
+	return d.ht.iit.visibleEnd(tx), true
+}
 func (at *AggregatorRoTx) IIProgress(name kv.InvertedIdx, tx kv.Tx) uint64 {
 	return at.searchII(name).Progress(tx)
 }
@@ -2577,6 +2736,10 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 
 func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	return at.getLatest(domain, k, tx, maxStep, metrics, start)
+}
+
+func (at *AggregatorRoTx) GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx) (size int, ok bool, err error) {
+	return at.d[domain].GetLatestValSize(k, tx)
 }
 
 // MeteredGetLatestWithTxN returns the high-water txN alongside (value,

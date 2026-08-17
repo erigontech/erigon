@@ -675,7 +675,7 @@ func TestClientReconnect(t *testing.T) {
 	logger := log.New()
 	startServer := func(addr string) (*Server, net.Listener) {
 		srv := newTestServer(logger)
-		l, err := net.Listen("tcp", addr)
+		l, err := net.Listen("tcp", addr) //nolint:noctx
 		if err != nil {
 			t.Fatal("can't listen:", err)
 		}

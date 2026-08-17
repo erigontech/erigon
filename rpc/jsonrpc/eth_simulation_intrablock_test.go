@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -38,8 +39,7 @@ func TestSimulationIntraBlockHasStorageRAMBatch(t *testing.T) {
 
 	// Build an in-memory temporal DB (no files on disk).
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).
-		InMem(t, dirs.Chaindata).
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).
 		GrowthStep(32 * datasize.MB).
 		MapSize(2 * datasize.GB).
 		MustOpen()

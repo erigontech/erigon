@@ -837,9 +837,8 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
 			return false, times, err
 		}
-		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
-			return false, times, fmt.Errorf("writing plain state version: %w", err)
-		}
+		// The state version is bumped once by the SharedDomains flush on Commit for
+		// both executors; a second bump here double-counted it on the serial path.
 	}
 
 	if dbg.DiscardCommitment() {

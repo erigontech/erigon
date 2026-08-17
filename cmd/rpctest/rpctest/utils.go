@@ -264,7 +264,8 @@ func compareResults(trace, traceg *fastjson.Value) error {
 }
 
 func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName string, errCtx string, errs *bufio.Writer) error {
-	if errVal != nil && errValg == nil {
+	switch {
+	case errVal != nil && errValg == nil:
 		if errs != nil {
 			fmt.Printf("different results for method %s, errCtx: %s\n", methodName, errCtx)
 			fmt.Fprintf(errs, "Different results for method %s, errCtx: %s\n", methodName, errCtx)
@@ -273,7 +274,7 @@ func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName s
 		} else {
 			return fmt.Errorf("different result (Erigon) returns error code=%d message=%s, while G/OE returns OK", errVal.GetInt("code"), errVal.GetStringBytes("message"))
 		}
-	} else if errVal == nil && errValg != nil {
+	case errVal == nil && errValg != nil:
 		if errs != nil {
 			fmt.Printf("different results for method %s, errCtx: %s\n", methodName, errCtx)
 			fmt.Fprintf(errs, "Different results for method %s, errCtx: %s\n", methodName, errCtx)
@@ -282,7 +283,7 @@ func compareErrors(errVal *fastjson.Value, errValg *fastjson.Value, methodName s
 		} else {
 			return fmt.Errorf("different result (Erigon) returns OK, while G/OE returns error code=%d message=%s", errValg.GetInt("code"), errValg.GetStringBytes("message"))
 		}
-	} else {
+	default:
 		s1 := strings.ToUpper(string(errVal.GetStringBytes("message")))
 		s2 := strings.ToUpper(string(errValg.GetStringBytes("message")))
 		if strings.Compare(s1, s2) != 0 {
@@ -339,7 +340,7 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 					// Keep going
 				} else {
 					reqFile, _ := os.Create("request.json")                //nolint:errcheck
-					reqFile.Write([]byte(request))                         //nolint:errcheck
+					reqFile.WriteString(request)                           //nolint:errcheck
 					reqFile.Close()                                        //nolint:errcheck
 					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
 					erigonRespFile.Write(res.Response)                     //nolint:errcheck
@@ -394,7 +395,7 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 					// Keep going
 				} else {
 					reqFile, _ := os.Create("request.json")                //nolint:errcheck
-					reqFile.Write([]byte(requestA))                        //nolint:errcheck
+					reqFile.WriteString(requestA)                          //nolint:errcheck
 					reqFile.Close()                                        //nolint:errcheck
 					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
 					erigonRespFile.Write(res.Response)                     //nolint:errcheck
@@ -708,7 +709,7 @@ func post(client *http.Client, url, request string, response any) error {
 	//fmt.Printf("Request=%s\n", request)
 	//log.Info("Getting", "url", url, "request", request)
 	//start := time.Now()
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) //nolint:noctx
 	if err != nil {
 		return err
 	}
@@ -732,7 +733,7 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 	//fmt.Printf("Request=%s\n", request)
 	//log.Info("Getting", "url", url, "request", request)
 	//start := time.Now()
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) //nolint:noctx
 	if err != nil {
 		return nil, nil, err
 	}
@@ -754,8 +755,8 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 	return response, v, nil
 }
 
-func print(client *http.Client, url, request string) {
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+func printRPCRequest(client *http.Client, url, request string) {
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) //nolint:noctx
 	if err != nil {
 		fmt.Printf("Could not print: %v\n", err)
 		return

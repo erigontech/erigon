@@ -24,6 +24,7 @@ import (
 	"os"
 	"path/filepath"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -423,4 +424,28 @@ func TestCompressSamplingCoversWholeFile(t *testing.T) {
 	require.Greater(t, full, uint64(1))
 	require.Equal(t, full, windowCount(4))
 	require.Equal(t, full, windowCount(8))
+}
+
+// Close must reclaim the pattern workers NewCompressor started. A caller that
+// gives up between NewCompressor and Compress leaks one goroutine per worker,
+// each pinning its suffix-array buffers, for the lifetime of the parent context.
+func TestCompressorCloseReleasesWorkers(t *testing.T) {
+	logger := log.New()
+	tmpDir := t.TempDir()
+	c, err := NewCompressor(t.Context(), t.Name(), filepath.Join(tmpDir, "compressed"), tmpDir, DefaultCfg, log.LvlDebug, logger)
+	require.NoError(t, err)
+	require.NoError(t, c.AddWord([]byte("word")))
+
+	c.Close()
+
+	done := make(chan struct{})
+	go func() {
+		c.wg.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("Close() returned while pattern workers are still running")
+	}
 }

@@ -67,11 +67,19 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 	//	continue
 	//}
 
-	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals)
+	var blockAccessList []byte
 	// Only embed the BAL hash in the header for Amsterdam+ chains.
 	// For pre-Amsterdam chains with ExperimentalBAL, the BAL is computed
 	// and validated but NOT included in the block header.
 	if current.BlockAccessList != nil && cfg.chainConfig.IsEIPEnabled(7928, current.Header.Time) {
+		var err error
+		blockAccessList, err = types.EncodeBlockAccessListBytes(current.BlockAccessList)
+		if err != nil {
+			return fmt.Errorf("encode block access list: %w", err)
+		}
+	}
+	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals, blockAccessList)
+	if blockAccessList != nil {
 		hash := current.BlockAccessList.Hash()
 		block.HeaderNoCopy().BlockAccessListHash = &hash
 	}

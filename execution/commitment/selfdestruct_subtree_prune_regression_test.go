@@ -134,9 +134,6 @@ var sdEngineModes = []struct {
 }{
 	{"seq", modeSeq},
 	{"parallel", modeParallel},
-	{"streaming", modeStreaming},
-	{"streaming-scheduled", modeStreamingScheduled},
-	{"streaming-public", modeStreamingPublic},
 }
 
 // With the live-domain GC prefix-delete applied between blocks (the orphaned

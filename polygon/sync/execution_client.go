@@ -76,15 +76,7 @@ func (e *executionClient) Prepare(ctx context.Context) error {
 }
 
 func (e *executionClient) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	rawBlocks := make([]*types.RawBlock, len(blocks))
-	for i, blk := range blocks {
-		rawBlocks[i] = &types.RawBlock{
-			Header: blk.HeaderNoCopy(),
-			Body:   blk.RawBody(),
-		}
-	}
-
-	status, err := e.client.InsertBlocks(ctx, rawBlocks)
+	status, err := e.client.InsertBlocks(ctx, blocks)
 	if err != nil {
 		return err
 	}

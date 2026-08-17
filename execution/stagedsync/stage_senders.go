@@ -329,7 +329,7 @@ Loop:
 		}); err != nil {
 			return err
 		}
-		if err = s.Update(tx, to); err != nil {
+		if err := s.Update(tx, to); err != nil {
 			return err
 		}
 		log.Debug(fmt.Sprintf("[%s] Recovery done", logPrefix), "from", startFrom, "to", to, "blocks", to-startFrom+1, "took", time.Since(recoveryStart))
@@ -398,7 +398,7 @@ func recoverSenders(ctx context.Context, cryptoContext *secp256k1.Context, confi
 
 func UnwindSendersStage(u *UnwindState, tx kv.RwTx, cfg SendersCfg, ctx context.Context) (err error) {
 	u.UnwindPoint = max(u.UnwindPoint, cfg.blockReader.FrozenBlocks()) // protect from unwind behind files
-	if err = u.Done(tx); err != nil {
+	if err := u.Done(tx); err != nil {
 		return err
 	}
 	return nil

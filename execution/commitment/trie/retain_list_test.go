@@ -159,6 +159,6 @@ func TestProofRetainerConstruction(t *testing.T) {
 		defer func() { pr.proofs[4].storageValue = oldKey }()
 		accProof, err := pr.ProofResult()
 		require.NoError(t, err)
-		require.Equal(t, &hexutil.Big{}, accProof.StorageProof[0].Value)
+		require.Equal(t, &hexutil.U256{}, accProof.StorageProof[0].Value)
 	})
 }

@@ -205,7 +205,7 @@ func runBlockTest(ctx *cli.Command, fname string, filter testFilter) ([]testResu
 	}
 
 	var tests map[string]*testutil.BlockTest
-	if err = json.Unmarshal(src, &tests); err != nil {
+	if err := json.Unmarshal(src, &tests); err != nil {
 		return nil, err
 	}
 

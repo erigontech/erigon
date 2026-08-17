@@ -39,7 +39,7 @@ func TestBlockAccessListBytes(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			getter := &countingBlockAccessListGetter{data: test.storedBAL}
-			block := types.NewBlockFromStorage(common.Hash{}, &types.Header{BlockAccessListHash: test.hash}, nil, nil, nil)
+			block := types.NewBlockFromStorage(common.Hash{}, &types.Header{BlockAccessListHash: test.hash}, nil, nil, nil, nil)
 
 			got, err := blockAccessListBytes(getter, block, 1)
 			if err != nil {

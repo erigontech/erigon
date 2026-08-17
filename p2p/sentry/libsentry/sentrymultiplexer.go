@@ -323,7 +323,7 @@ CLIENTS:
 		return nil
 	})
 
-	if err = g.Wait(); err != nil {
+	if err := g.Wait(); err != nil {
 		return nil, err
 	}
 

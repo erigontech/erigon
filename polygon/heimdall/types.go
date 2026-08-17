@@ -539,7 +539,7 @@ func buildValueIndex(ctx context.Context, version version.Versions, sn snaptype.
 			nextPos, _ = g.Skip()
 			binary.BigEndian.PutUint64(key[:], i)
 			i++
-			if err = rs.AddKey(key[:], offset); err != nil {
+			if err := rs.AddKey(key[:], offset); err != nil {
 				return err
 			}
 			select {

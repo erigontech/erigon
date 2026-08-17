@@ -29,7 +29,48 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 
 	"github.com/davecgh/go-spew/spew"
+	"github.com/stretchr/testify/require"
 )
+
+func TestLogsCopyPreservesNilEntries(t *testing.T) {
+	logs := Logs{
+		nil,
+		{
+			Address: common.HexToAddress("0x1"),
+			Topics:  []common.Hash{common.HexToHash("0xaa")},
+			Data:    []byte{1, 2},
+		},
+		nil,
+	}
+	cp := logs.Copy()
+	require.Len(t, cp, 3)
+	require.Nil(t, cp[0])
+	require.Nil(t, cp[2])
+	require.NotSame(t, logs[1], cp[1])
+	require.Equal(t, logs[1], cp[1])
+
+	logs[1].Topics[0] = common.HexToHash("0xbb")
+	logs[1].Data[0] = 0xff
+	require.Equal(t, common.HexToHash("0xaa"), cp[1].Topics[0])
+	require.Equal(t, hexutil.Bytes{1, 2}, cp[1].Data)
+}
+
+// A LOG0 entry carries nil Topics. Both copy paths normalize that to an empty
+// slice, which is what keeps the JSON at `"topics":[]`.
+func TestLogCopyNormalizesNilTopics(t *testing.T) {
+	src := &Log{Address: common.HexToAddress("0x1"), Data: []byte{1}}
+	require.Nil(t, src.Topics)
+
+	for name, cp := range map[string]*Log{"Log.Copy": src.Copy(), "Logs.Copy": Logs{src}.Copy()[0]} {
+		t.Run(name, func(t *testing.T) {
+			require.NotNil(t, cp.Topics)
+			require.Empty(t, cp.Topics)
+			b, err := json.Marshal(cp)
+			require.NoError(t, err)
+			require.Contains(t, string(b), `"topics":[]`)
+		})
+	}
+}
 
 var unmarshalLogTests = map[string]struct {
 	input     string

@@ -66,8 +66,11 @@ func SetupSentinelCli(ctx *cli.Command) (*SentinelCliCfg, error) {
 	if ctx.String(sentinelflags.BootnodesFlag.Name) != "" {
 		cfg.Bootnodes = common.CliString2Array(ctx.String(sentinelflags.BootnodesFlag.Name))
 	}
-	if ctx.String(sentinelflags.SentinelStaticPeersFlag.Name) != "" {
+	if ctx.IsSet(sentinelflags.SentinelStaticPeersFlag.Name) {
 		cfg.StaticPeers = common.CliString2Array(ctx.String(sentinelflags.SentinelStaticPeersFlag.Name))
+		if cfg.StaticPeers == nil {
+			cfg.StaticPeers = []string{}
+		}
 	}
 	return cfg, nil
 }

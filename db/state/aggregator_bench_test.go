@@ -70,6 +70,8 @@ func BenchmarkAggregator_Processing(b *testing.B) {
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
 	require.NoError(b, err)
 	defer domains.Close()
+	domains.EnableParaTrieDB(db)
+	require.Equal(b, execctx.PickTrieVariant(), domains.GetCommitmentCtx().Trie().Variant())
 
 	b.ReportAllocs()
 
@@ -99,7 +101,7 @@ func queueKeys(ctx context.Context, seed, ofSize uint64) <-chan []byte {
 				break
 			}
 			bb := make([]byte, ofSize)
-			rnd.Read(bb)
+			_, _ = rnd.Read(bb)
 
 			keys <- bb
 		}
@@ -118,7 +120,7 @@ func Benchmark_BtreeIndex_Search(b *testing.B) {
 	logger := log.New()
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
-	defer dir.RemoveAll(tmp)
+	defer dir.RemoveAll(tmp) //nolint:errcheck
 
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bti")
 	comp := seg.CompressKeys | seg.CompressVals
@@ -154,7 +156,7 @@ func benchInitBtreeIndex(b *testing.B, params bTreeParameters, compression seg.F
 
 	logger := log.New()
 	tmp := b.TempDir()
-	b.Cleanup(func() { dir.RemoveAll(tmp) })
+	b.Cleanup(func() { _ = dir.RemoveAll(tmp) })
 
 	dataPath := generateKV(b, tmp, params.KeySize, params.ValueSize, params.KeyCount, logger, compression)
 	indexPath := filepath.Join(tmp, filepath.Base(dataPath)+".bt")
@@ -414,7 +416,7 @@ func Benchmark_Recsplit_Find_ExternalFile(b *testing.B) {
 	rnd := newRnd(uint64(time.Now().UnixNano()))
 	tmp := b.TempDir()
 
-	defer dir.RemoveAll(tmp)
+	defer dir.RemoveAll(tmp) //nolint:errcheck
 
 	indexPath := dataPath + "i"
 	idx, err := recsplit.OpenIndex(indexPath)

@@ -332,7 +332,9 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			if !isPrecompile && evm.chainRules.IsEIP161Enabled() && value.IsZero() {
 				return nil, gasRemaining, mdgas.MdGasUsage{}, nil
 			}
-			evm.intraBlockState.CreateAccount(addr, false)
+			if err := evm.intraBlockState.CreateAccount(addr, false); err != nil {
+				return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
 		}
 		// System calls use TouchAccount instead of Transfer to avoid
 		// spurious balance reads on the caller that would pollute the
@@ -367,13 +369,14 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}
 
 	// It is allowed to call precompiles, even via delegatecall
-	if isPrecompile {
+	switch {
+	case isPrecompile:
 		ret, gasRemaining.Execution, err = RunPrecompiledContract(p, input, gasRemaining.Execution, evm.Config().Tracer)
-	} else if len(code) == 0 {
+	case len(code) == 0:
 		// If the account has no code, we can abort here
 		// The depth-check is already done, and precompiles handled above
 		ret, err = nil, nil // gas is unchanged
-	} else {
+	default:
 		// Initialise a new contract and set the code that is to be used by the EVM.
 		// The contract is a scoped environment for this execution context only.
 		var codeHash accounts.CodeHash
@@ -382,7 +385,8 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			return nil, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 		var contract Contract
-		if typ == CALLCODE {
+		switch typ {
+		case CALLCODE:
 			contract = Contract{
 				caller:   caller,
 				addr:     caller,
@@ -390,7 +394,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Code:     code,
 				CodeHash: codeHash,
 			}
-		} else if typ == DELEGATECALL {
+		case DELEGATECALL:
 			contract = Contract{
 				caller:   callerAddress,
 				addr:     caller,
@@ -398,7 +402,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 				Code:     code,
 				CodeHash: codeHash,
 			}
-		} else {
+		default:
 			contract = Contract{
 				caller:   caller,
 				addr:     addr,
@@ -503,8 +507,8 @@ func (evm *EVM) prepareCreate(caller accounts.Address, address accounts.Address,
 		}
 		if nested {
 			preparation.incrementCallerNonce = true
-		} else {
-			evm.intraBlockState.SetNonce(caller, preparation.callerNonce+1, tracing.NonceChangeContractCreator)
+		} else if err := evm.intraBlockState.SetNonce(caller, preparation.callerNonce+1, tracing.NonceChangeContractCreator); err != nil {
+			return preparation, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
 		}
 	}
 	if evm.chainRules.IsBerlin {
@@ -589,7 +593,11 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		preparation = &prepared
 	}
 	if preparation.incrementCallerNonce {
-		evm.intraBlockState.SetNonce(caller, preparation.callerNonce+1, tracing.NonceChangeContractCreator)
+		if err = evm.intraBlockState.SetNonce(caller, preparation.callerNonce+1, tracing.NonceChangeContractCreator); err != nil {
+			gasRemaining = mdgas.MdGas{}
+			err = fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			return
+		}
 	}
 	var collision bool
 	collision, err = evm.hasCreateCollision(address)
@@ -609,9 +617,13 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 	snapshot := evm.intraBlockState.PushSnapshot()
 	defer evm.intraBlockState.PopSnapshot(snapshot)
 
-	evm.intraBlockState.CreateAccount(address, true)
+	if err := evm.intraBlockState.CreateAccount(address, true); err != nil {
+		return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+	}
 	if evm.chainRules.IsEIP161Enabled() {
-		evm.intraBlockState.SetNonce(address, 1, tracing.NonceChangeNewContract)
+		if err := evm.intraBlockState.SetNonce(address, 1, tracing.NonceChangeNewContract); err != nil {
+			return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+		}
 	}
 	if err := evm.Context.Transfer(evm.intraBlockState, caller, address, value, bailout, evm.chainRules); err != nil {
 		return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
@@ -673,7 +685,9 @@ func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *code
 		}
 
 		if stateGasOk && executionGasOk {
-			evm.intraBlockState.SetCode(address, ret, tracing.CodeChangeContractCreation)
+			if err := evm.intraBlockState.SetCode(address, ret, tracing.CodeChangeContractCreation); err != nil {
+				return nil, accounts.NilAddress, mdgas.MdGas{}, mdgas.MdGasUsage{}, fmt.Errorf("%w: %w", ErrIntraBlockStateFailed, err)
+			}
 			// EIP-8037: post-Run code-deposit state charge counts toward this
 			// frame's state-gas usage; its spilled portion propagates so an
 			// ancestor revert refills it from the right pool.

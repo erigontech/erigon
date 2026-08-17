@@ -565,6 +565,22 @@ func TestParseTransactionRejectsBlobCommitmentCountMismatch(t *testing.T) {
 	require.ErrorContains(t, err, "fewer commitments than blobs")
 }
 
+func TestParseTransactionsRejectsTrailingBlobWrapperBytes(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeV1WrappedBlobTxn(chainID)
+
+	wrapperBuf := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
+	malformed := append(wrapperBuf.Bytes(), 0x80)
+	packet := EncodeTransactions([][]byte{malformed}, nil)
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.WithSender(false)
+	var slots TxnSlots
+	_, err := ParseTransactions(packet, 0, ctx, &slots, nil)
+	require.ErrorContains(t, err, "trailing bytes after blobs wrapper")
+}
+
 func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	txnRlpHex := testdata.ValidSetCodeTxn1
 	// For authorizationList[0] in the above :-
@@ -573,9 +589,6 @@ func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	// expectedYParity := 0x1
 	// expectedR := "0x837da79f8b17c1db2371cdc4b2b134cd5aef1b588f811a5e3b4f2329c2107116"
 	// expectedS := "0x66aab6e4baa71dd601f4211e1bbf27c297e47dc845e73b9147ab1823064df2b9"
-
-	// Should match with (but commented for efficiency) -
-	// expectedSigner, err := setCodeTx.Authorizations[0].RecoverSigner(bytes.NewBuffer(nil), make([]byte, 32))
 
 	expectedChainId := 11155111 // Sepolia
 	expectedSigner := common.HexToAddress("0x7934d5340b1fa4e3d8f5cd62705feee3ece50ea3")

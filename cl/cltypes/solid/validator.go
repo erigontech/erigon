@@ -274,7 +274,6 @@ func (v Validator) MarshalJSON() ([]byte, error) {
 }
 
 func (v *Validator) UnmarshalJSON(input []byte) error {
-	var err error
 	var tmp struct {
 		PublicKey                  common.Bytes48 `json:"pubkey"`
 		WithdrawalCredentials      common.Hash    `json:"withdrawal_credentials"`
@@ -285,7 +284,7 @@ func (v *Validator) UnmarshalJSON(input []byte) error {
 		ExitEpoch                  uint64         `json:"exit_epoch,string"`
 		WithdrawableEpoch          uint64         `json:"withdrawable_epoch,string"`
 	}
-	if err = json.Unmarshal(input, &tmp); err != nil {
+	if err := json.Unmarshal(input, &tmp); err != nil {
 		return err
 	}
 	*v = NewValidatorFromParameters(tmp.PublicKey, tmp.WithdrawalCredentials, tmp.EffectiveBalance, tmp.Slashed, tmp.ActivationEligibilityEpoch, tmp.ActivationEpoch, tmp.ExitEpoch, tmp.WithdrawableEpoch)

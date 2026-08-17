@@ -32,7 +32,7 @@ import (
 )
 
 type StateChangeSet struct {
-	Diffs [kv.DomainLen]kv.DomainDiff // there are 4 domains of state changes
+	Diffs [kv.DomainLen]kv.DomainDiff
 }
 
 func (s *StateChangeSet) Copy() *StateChangeSet {
@@ -218,14 +218,15 @@ func MergeDiffSets(newer, older []kv.DomainEntryDiff) []kv.DomainEntryDiff {
 	i, j := 0, 0
 	for i < len(newer) && j < len(older) {
 		cmp := strings.Compare(older[j].Key, newer[i].Key)
-		if cmp < 0 {
+		switch {
+		case cmp < 0:
 			result = append(result, older[j])
 			j++
-		} else if cmp == 0 {
+		case cmp == 0:
 			result = append(result, older[j])
 			i++
 			j++
-		} else {
+		default:
 			result = append(result, newer[i])
 			i++
 		}
@@ -255,14 +256,15 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 				for _, entry := range diffSet {
 					address := entry.Key[:len(entry.Key)-8]
 					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-					if entry.Value != nil && len(entry.Value) > 0 {
+					switch {
+					case len(entry.Value) > 0:
 						var account accounts.Account
 						if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 							fmt.Printf("diffset (Block:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockNumber, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
 						}
-					} else if entry.Value == nil {
+					case entry.Value == nil:
 						fmt.Printf("diffset (Block:%d): acc %x: [different step], step: %d\n", blockNumber, address, keyStep)
-					} else {
+					default:
 						fmt.Printf("diffset (Block:%d): del acc: %x, step: %d\n", blockNumber, address, keyStep)
 					}
 				}
@@ -274,11 +276,12 @@ func (d *StateChangeSet) serializeKeys(out []byte, blockNumber uint64) []byte {
 					copy(address[:], entry.Key[:length.Addr])
 					copy(location[:], entry.Key[length.Addr:len(entry.Key)-8])
 					keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-					if entry.Value != nil && len(entry.Value) > 0 {
+					switch {
+					case len(entry.Value) > 0:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [%x]\n", blockNumber, address, location, entry.Value)
-					} else if entry.Value == nil {
+					case entry.Value == nil:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [different step], step: %d\n", blockNumber, address, location, keyStep)
-					} else {
+					default:
 						fmt.Printf("diffset (Block:%d): storage [%x %x] => [empty], step: %d\n", blockNumber, address, location, keyStep)
 					}
 				}

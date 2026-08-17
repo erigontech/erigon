@@ -40,7 +40,8 @@ func (s *multiBlockSource) next(ctx context.Context) (*types.Block, types.BlockA
 	}
 	b := s.blocks[s.i]
 	s.i++
-	return b, nil, b.NumberU64(), true, nil
+	num := b.NumberU64()
+	return b, nil, num, true, nil
 }
 
 func (s *multiBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {

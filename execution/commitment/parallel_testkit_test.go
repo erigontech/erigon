@@ -41,7 +41,6 @@ type whaleOpts struct {
 	tailAccounts     int
 }
 
-// addRandomSlot appends one random storage slot to account a, drawing loc then val.
 func addRandomSlot(ub *UpdateBuilder, rnd *rand.Rand, a string) {
 	loc := make([]byte, length.Hash)
 	rnd.Read(loc)
@@ -50,7 +49,6 @@ func addRandomSlot(ub *UpdateBuilder, rnd *rand.Rand, a string) {
 	ub.Storage(a, hex.EncodeToString(loc), hex.EncodeToString(val))
 }
 
-// addRandomAccount appends a random-address account (balance rnd.Uint64()+1) with slots storage slots.
 func addRandomAccount(ub *UpdateBuilder, rnd *rand.Rand, slots int) {
 	addr := make([]byte, length.Addr)
 	rnd.Read(addr)
@@ -61,7 +59,6 @@ func addRandomAccount(ub *UpdateBuilder, rnd *rand.Rand, slots int) {
 	}
 }
 
-// addNibbleAccount appends an account pinned to top nibble (balance rnd.Uint64()) with slots storage slots.
 func addNibbleAccount(ub *UpdateBuilder, rnd *rand.Rand, nibble, seed, slots int) {
 	a := hex.EncodeToString(findAddressForNibble(nibble, seed))
 	ub.Balance(a, rnd.Uint64())
@@ -105,9 +102,6 @@ type runMode int
 const (
 	modeSeq runMode = iota
 	modeParallel
-	modeStreaming
-	modeStreamingScheduled
-	modeStreamingPublic
 )
 
 func newSeqTrie(t *testing.T, ms *MockState) *HexPatriciaHashed {
@@ -123,34 +117,6 @@ func newParTrie(t *testing.T, ms *MockState, workers int) *ParallelPatriciaHashe
 	return tr
 }
 
-// Requires ms.SetConcurrentCommitment(true) already set.
-func newStreamCommitter(t *testing.T, ms *MockState, workers int, scheduler bool) *StreamingCommitter {
-	t.Helper()
-	sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-	sc.SetNumWorkers(workers)
-	if scheduler {
-		require.NoError(t, sc.StartScheduler(context.Background()))
-	}
-	return sc
-}
-
-// newStreamingFixture builds a concurrent MockState with keys/upds applied and a StreamingCommitter
-// wired to it. Pass scheduler=true to start the background scheduler before returning.
-func newStreamingFixture(t *testing.T, keys [][]byte, upds []Update, workers int, scheduler ...bool) (*StreamingCommitter, *MockState) {
-	t.Helper()
-	ms := NewMockState(t)
-	ms.SetConcurrentCommitment(true)
-	require.NoError(t, ms.applyPlainUpdates(keys, upds))
-	sc := newStreamCommitter(t, ms, workers, len(scheduler) > 0 && scheduler[0])
-	return sc, ms
-}
-
-func touchAll(sc *StreamingCommitter, keys [][]byte) {
-	for _, k := range keys {
-		sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-	}
-}
-
 func processRoot(t *testing.T, trie Trie, ut *Updates) []byte {
 	t.Helper()
 	root, err := trie.Process(context.Background(), ut, "", nil, WarmupConfig{})
@@ -164,14 +130,8 @@ func processModeBatch(t *testing.T, ms *MockState, mode runMode, workers int, ke
 	return root
 }
 
-// processModeBatchState folds one batch through the engine's production restart lifecycle:
-// the trie is restored from blob (the previous batch's EncodeCurrentState output, nil for
-// the first batch) before Process, and the new state blob is returned alongside the root.
-// State that never reaches a branch record — a propagate-folded root — survives batches
-// only through this blob.
 func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte) {
 	t.Helper()
-	ctx := context.Background()
 	require.NoError(t, ms.applyPlainUpdates(keys, upds))
 
 	encoded := func(tr *HexPatriciaHashed) []byte {
@@ -187,48 +147,10 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 		require.NoError(t, tr.RootTrie().SetState(blob))
 		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
 		defer ut.Close()
-		for i, k := range keys {
-			ks := string(k)
-			ut.TouchPlainKey(ks, nil, func(c *KeyUpdate, _ []byte) {
-				c.plainKey = ks
-				c.hashedKey = KeyToHexNibbleHash(k)
-				c.update = &upds[i]
-			})
+		for _, k := range keys {
+			ut.TouchPlainKey(string(k), nil, nil)
 		}
 		return processRoot(t, tr, ut), encoded(tr.RootTrie())
-	case modeStreaming, modeStreamingScheduled:
-		sc := NewStreamingCommitter(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
-		defer sc.Release()
-		sc.SetNumWorkers(workers)
-		tmpl := NewHexPatriciaHashed(length.Addr, ms, DefaultTrieConfig())
-		defer tmpl.Release()
-		require.NoError(t, tmpl.SetState(blob))
-		sc.SeedRootFrom(tmpl)
-		if mode == modeStreamingScheduled {
-			require.NoError(t, sc.StartScheduler(context.Background()))
-		}
-		for _, k := range keys {
-			sc.TouchKey(KeyToHexNibbleHash(k), k, nil)
-		}
-		r, err := sc.Process(ctx)
-		require.NoError(t, err)
-		sc.PromoteRootInto(tmpl)
-		return bytes.Clone(r), encoded(tmpl)
-	case modeStreamingPublic:
-		cfg := DefaultTrieConfig()
-		cfg.Variant = VariantStreamingHexPatricia
-		trie, ut := InitializeTrieAndUpdates(ModeDirect, t.TempDir(), cfg)
-		defer ut.Close()
-		defer trie.Release()
-		pt := trie.(*ParallelPatriciaHashed)
-		pt.SetNumWorkers(workers)
-		pt.SetTrieContextFactory(mockTrieCtxFactory(ms))
-		pt.ResetContext(ms)
-		require.NoError(t, pt.RootTrie().SetState(blob))
-		for _, key := range keys {
-			ut.TouchPlainKey(string(key), nil, ut.TouchAccount)
-		}
-		return processRoot(t, trie, ut), encoded(pt.RootTrie())
 	default:
 		tr := newSeqTrie(t, ms)
 		defer tr.Release()
@@ -237,6 +159,24 @@ func processModeBatchState(t *testing.T, ms *MockState, mode runMode, workers in
 		defer ut.Close()
 		return processRoot(t, tr, ut), encoded(tr)
 	}
+}
+
+func parallelBatchDeepFolds(t *testing.T, ms *MockState, workers int, keys [][]byte, upds []Update, blob []byte) ([]byte, []byte, uint64) {
+	t.Helper()
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, workers)
+	defer tr.Release()
+	require.NoError(t, tr.RootTrie().SetState(blob))
+	ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+	defer ut.Close()
+	for _, k := range keys {
+		ut.TouchPlainKey(string(k), nil, nil)
+	}
+	root := processRoot(t, tr, ut)
+	encoded, err := tr.RootTrie().EncodeCurrentState(nil)
+	require.NoError(t, err)
+	return root, encoded, tr.DeepLocalFolds()
 }
 
 func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []Update) ([]byte, *MockState) {
@@ -248,8 +188,11 @@ func engineRoot(t *testing.T, mode runMode, workers int, keys [][]byte, upds []U
 	return processModeBatch(t, ms, mode, workers, keys, upds), ms
 }
 
-// Folds two batches into one MockState so batch-1 branches become on-disk state for
-// batch-2, with the trie state blob carried across the batches (encode/restore cycle).
+func sequentialRoot(t *testing.T, keys [][]byte, upds []Update) ([]byte, *MockState) {
+	t.Helper()
+	return engineRoot(t, modeSeq, 0, keys, upds)
+}
+
 func incrementalRoot(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
 	ms := NewMockState(t)
@@ -279,18 +222,6 @@ func requireAllEnginesParity(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 		branchDiff(t, seqMs, parMs)
 	}
 	require.Equalf(t, seqRoot, parRoot, "parallel(workers=%d) vs sequential root mismatch", workers)
-
-	strRoot, strMs := incrementalRoot(t, modeStreaming, workers, k1, u1, k2, u2)
-	if !bytes.Equal(seqRoot, strRoot) {
-		branchDiff(t, seqMs, strMs)
-	}
-	require.Equalf(t, seqRoot, strRoot, "streaming(workers=%d) vs sequential root mismatch", workers)
-
-	schRoot, schMs := incrementalRoot(t, modeStreamingScheduled, workers, k1, u1, k2, u2)
-	if !bytes.Equal(seqRoot, schRoot) {
-		branchDiff(t, seqMs, schMs)
-	}
-	require.Equalf(t, seqRoot, schRoot, "streaming-scheduled(workers=%d) vs sequential root mismatch", workers)
 }
 
 func requireBranchParity(t *testing.T, seq, got *MockState) {
@@ -433,8 +364,6 @@ func build500KStorageHeavyCorpus(b testing.TB) ([][]byte, []Update) {
 	return ub.Build()
 }
 
-// buildWitnessCorpus builds accts accounts (balance i+1) each with slots sequential
-// storage slots, processes them into (ms, hph) and returns the account plain keys.
 func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, accts, slots int) [][]byte {
 	tb.Helper()
 	builder := NewUpdateBuilder()
@@ -453,8 +382,6 @@ func buildWitnessCorpus(tb testing.TB, ms *MockState, hph *HexPatriciaHashed, ac
 	return addrs
 }
 
-// touchAccountsSlots touches each account and its first `slots` storage slots into u
-// (slots == 0 touches accounts only).
 func touchAccountsSlots(u *Updates, addrs [][]byte, slots int) {
 	for _, a := range addrs {
 		u.TouchPlainKey(string(a), nil, u.TouchAccount)

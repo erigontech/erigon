@@ -1364,6 +1364,10 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 
 		branchData := commitment.BranchData(branchValue)
 
+		if branchData.IsTombstone() {
+			continue // tombstones kept across merges, not corruption
+		}
+
 		// Check completeness
 		if !branchData.IsComplete() {
 			touchMap := uint16(0)
@@ -1573,6 +1577,9 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
+		if branchData.IsTombstone() {
+			continue
+		}
 
 		if !branchData.IsComplete() {
 			touchMap := uint16(0)

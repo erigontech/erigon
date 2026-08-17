@@ -199,7 +199,7 @@ func (sdb *IntraBlockState) committedCodeSizeDirect(addr accounts.Address) (int,
 type readPathOutcome uint8
 
 const (
-	outcomeUnset readPathOutcome = iota
+	_ readPathOutcome = iota // unset (zero value)
 
 	outcomeLegacyStorage // versionMap == nil: typed wrapper does direct storage read on r.so
 	outcomeWriteSetHit   // r.vw is set; typed wrapper returns its Val*
@@ -534,16 +534,21 @@ reread:
 		// [cellIdx, txIdx) range for a Done SelfDestruct=true. Incarnation alone
 		// is insufficient: a pure CREATE bumps incarnation without wiping storage.
 		if path == StoragePath {
-			if sdVer, ok := s.versionMap.FindDoneSelfDestructInRange(addr, hdr.Version.TxIndex, s.txIndex, true); ok {
+			// A slot whose last write predates the wiping SELFDESTRUCT reads zero: the
+			// destruct wipes it and a recreate leaves it unwritten. Anchor the dependency
+			// on canonicalVer (the latest SD cell the validator resolves), never the wipe
+			// — a revival sitting above the wipe would otherwise make validation disagree
+			// forever and livelock. See VersionMap.AccountLifecycleAt.
+			if state, canonicalVer, destroyedAt := s.versionMap.AccountLifecycleAt(addr, s.txIndex); state != LifecycleLive && hdr.Version.TxIndex <= destroyedAt {
 				if !commited {
 					s.versionedReads.SetSelfDestruct(addr, VersionedRead[bool]{
-						ReadHeader: ReadHeader{Source: MapRead, Version: sdVer},
+						ReadHeader: ReadHeader{Source: MapRead, Version: canonicalVer},
 						Val:        true,
 					})
 				}
 				r.outcome = outcomeReturnZero
 				r.source = MapRead
-				r.version = sdVer
+				r.version = canonicalVer
 				return
 			}
 		}
@@ -889,7 +894,7 @@ func gateOriginAccount(s *IntraBlockState, addr accounts.Address, acc *accounts.
 	if acc == nil {
 		return nil
 	}
-	if destroyed, _, revived := s.versionMap.AccountLifecycle(addr, s.txIndex); destroyed && !revived {
+	if s.versionMap.IsNetAbsent(addr, s.txIndex) {
 		return nil
 	}
 	return acc

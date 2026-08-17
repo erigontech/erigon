@@ -17,26 +17,21 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 )
 
-// TestIsBuilderWithdrawalCredential_0x03 verifies that withdrawal credentials
-// with the 0x03 prefix are recognised as builder credentials.
-func TestIsBuilderWithdrawalCredential_0x03(t *testing.T) {
+func TestIsBuilderWithdrawalCredential(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 
 	var creds common.Hash
-	creds[0] = 0x03
+	creds[0] = byte(cfg.BuilderWithdrawalPrefix)
 	addr := common.HexToAddress("0xdeadbeef")
 	copy(creds[12:], addr[:])
 
-	require.True(t, state2.IsBuilderWithdrawalCredential(creds, &cfg),
-		"0x03 prefix must be recognised as builder withdrawal credential")
+	require.True(t, state2.IsBuilderWithdrawalCredential(creds, &cfg))
 }
 
-// TestIsBuilderWithdrawalCredential_NotBuilder tests that non-0x03 prefixes
-// are not classified as builder credentials.
 func TestIsBuilderWithdrawalCredential_NotBuilder(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 
-	for _, prefix := range []byte{0x00, 0x01, 0x02, 0x04, 0xFF} {
+	for _, prefix := range []byte{0x00, 0x01, 0x02, 0x03, 0xFF} {
 		var creds common.Hash
 		creds[0] = prefix
 		require.False(t, state2.IsBuilderWithdrawalCredential(creds, &cfg),
@@ -73,12 +68,6 @@ func TestGetProposerDependentRootRejectsUnderflow(t *testing.T) {
 	require.Error(t, err)
 }
 
-// TestApplyDepositForBuilder_NewBuilder_WithValidSignature verifies that a
-// new builder deposit with 0x03 credentials and a valid signature creates
-// a builder entry in the state registry.
-//
-// This covers the routing path: deposit with 0x03 prefix → ApplyDepositForBuilder
-// → IsValidDepositSignature → AddBuilderToRegistry.
 func TestApplyDepositForBuilder_NewBuilder_WithValidSignature(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 
@@ -89,7 +78,7 @@ func TestApplyDepositForBuilder_NewBuilder_WithValidSignature(t *testing.T) {
 	pubkey, creds, amount, sig := makeValidBuilderDeposit(t, &cfg)
 
 	// Pre-conditions.
-	require.Equal(t, byte(0x03), creds[0])
+	require.Equal(t, byte(cfg.BuilderWithdrawalPrefix), creds[0])
 	require.True(t, state2.IsBuilderWithdrawalCredential(creds, &cfg))
 
 	slot := uint64(100)
@@ -264,8 +253,9 @@ func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoc
 	s.SetBuilders(builders)
 
 	require.NoError(t, state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
-		PubKey: pubkey,
-		Amount: 25,
+		PubKey:                pubkey,
+		WithdrawalCredentials: common.Hash{byte(cfg.BuilderWithdrawalPrefix)},
+		Amount:                25,
 	}))
 
 	builder := s.GetBuilders().Get(0)
@@ -273,7 +263,7 @@ func TestApplyBuilderDepositRequestTopUpSweptExitedBuilderResetsWithdrawableEpoc
 	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
 }
 
-func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderResetsWithdrawableEpoch(t *testing.T) {
+func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderKeepsWithdrawableEpoch(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	s := state2.New(&cfg)
 	s.SetSlot(cfg.SlotsPerEpoch * 10)
@@ -288,13 +278,14 @@ func TestApplyBuilderDepositRequestTopUpUnsweptExitedBuilderResetsWithdrawableEp
 	s.SetBuilders(builders)
 
 	require.NoError(t, state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
-		PubKey: pubkey,
-		Amount: 25,
+		PubKey:                pubkey,
+		WithdrawalCredentials: common.Hash{byte(cfg.BuilderWithdrawalPrefix)},
+		Amount:                25,
 	}))
 
 	builder := s.GetBuilders().Get(0)
 	require.Equal(t, uint64(35), builder.Balance)
-	require.Equal(t, uint64(10)+cfg.MinBuilderWithdrawabilityDelay, builder.WithdrawableEpoch)
+	require.Equal(t, uint64(1), builder.WithdrawableEpoch)
 }
 
 func TestBuilderHelpersRejectHugeIndex(t *testing.T) {
@@ -325,8 +316,9 @@ func TestApplyBuilderDepositRequestDoesNotOverflowBalance(t *testing.T) {
 	s.SetBuilders(builders)
 
 	err := state2.ApplyBuilderDepositRequest(s, &solid.BuilderDepositRequest{
-		PubKey: pubkey,
-		Amount: 1,
+		PubKey:                pubkey,
+		WithdrawalCredentials: common.Hash{byte(cfg.BuilderWithdrawalPrefix)},
+		Amount:                1,
 	})
 
 	require.Error(t, err)
@@ -371,7 +363,6 @@ func makeValidBuilderDeposit(t *testing.T, cfg *clparams.BeaconChainConfig) (
 
 	feeRecipient := common.HexToAddress("0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb")
 
-	// Build withdrawal credentials: 0x03 + 11 zero bytes + 20-byte address.
 	withdrawalCredentials[0] = byte(cfg.BuilderWithdrawalPrefix)
 	copy(withdrawalCredentials[12:], feeRecipient[:])
 

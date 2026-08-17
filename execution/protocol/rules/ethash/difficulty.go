@@ -104,12 +104,13 @@ func calcDifficultyHomestead(time, parentTime uint64, parentDifficulty uint256.I
 
 	x := (time - parentTime) / 10 // (time - ptime) / 10)
 	var neg = true
-	if x == 0 {
+	switch {
+	case x == 0:
 		x = 1
 		neg = false
-	} else if x >= 100 {
+	case x >= 100:
 		x = 99
-	} else {
+	default:
 		x--
 	}
 	z := new(uint256.Int).SetUint64(x)

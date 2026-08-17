@@ -205,14 +205,15 @@ func (t *spanBlockProducersTracker) ObserveSpan(ctx context.Context, newSpan *Sp
 	isAmoyChain := t.chainConfig.ChainID.Uint64() == polygonchain.Amoy.Config.ChainID.Uint64()
 	for i := range increments {
 		sprintNum := spanStartSprintNum + uint64(i) + 1
-		if isAmoyChain && slices.Contains(amoySprintsToPatch, sprintNum) { // on the bad sprint (Amoy)
+		switch {
+		case isAmoyChain && slices.Contains(amoySprintsToPatch, sprintNum): // on the bad sprint (Amoy)
 			var emptyProducers []*Validator = nil
 			oldProducers = producers.Copy()
 			oldProducers.IncrementProposerPriority(1)
 			producers = GetUpdatedValidatorSet(producers, emptyProducers, t.logger)
-		} else if isAmoyChain && slices.Contains(amoySprintsToPatch, sprintNum-1) { // sprint after the bad sprint (Amoy)
+		case isAmoyChain && slices.Contains(amoySprintsToPatch, sprintNum-1): // sprint after the bad sprint (Amoy)
 			producers = GetUpdatedValidatorSet(producers, oldProducers.Validators, t.logger)
-		} else { // the normal case
+		default: // the normal case
 			producers = GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		}
 		producers.IncrementProposerPriority(1)
@@ -289,14 +290,15 @@ func (t *spanBlockProducersTracker) producers(ctx context.Context, blockNum uint
 	isAmoyChain := t.chainConfig.ChainID.Uint64() == polygonchain.Amoy.Config.ChainID.Uint64()
 	for i := range increments {
 		sprintNum := spanStartSprintNum + uint64(i) + 1
-		if isAmoyChain && slices.Contains(amoyPatchedSprints, sprintNum) { // on bad sprint
+		switch {
+		case isAmoyChain && slices.Contains(amoyPatchedSprints, sprintNum): // on bad sprint
 			var emptyProducers []*Validator = nil
 			oldProducers = producers.Copy()
 			oldProducers.IncrementProposerPriority(1)
 			producers = GetUpdatedValidatorSet(producers, emptyProducers, t.logger)
-		} else if isAmoyChain && slices.Contains(amoyPatchedSprints, sprintNum-1) { // sprint after the bad sprint
+		case isAmoyChain && slices.Contains(amoyPatchedSprints, sprintNum-1): // sprint after the bad sprint
 			producers = GetUpdatedValidatorSet(producers, oldProducers.Validators, t.logger)
-		} else { // normal case
+		default: // normal case
 			producers = GetUpdatedValidatorSet(producers, producers.Validators, t.logger)
 		}
 		producers.IncrementProposerPriority(1)

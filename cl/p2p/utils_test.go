@@ -22,9 +22,171 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/crypto"
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/p2p/enode"
 )
+
+const (
+	publicNodeChiadoENR       = "enr:-MK4QIw4k7aR8hxCa_3aWTmpaKuPMu8xG_R94Ue-xxwHtsWDU657Sc8ubff_vu51DfIf8NcESC4wnnEuTmzdqqPnGu-CBOWHYXR0bmV0c4gAAAADAAAAAINjZ2MEhGV0aDKQJfkUjgYAAG___________4JpZIJ2NIJpcISkmKNpg25mZIQAAAAAiXNlY3AyNTZrMaEC8I-uGch5hJkoAVCxlOvnwtRQjbN2XWttxP1ZXiFg7sqDdGNwgko4g3VkcIJF1w"
+	publicNodeChiadoMultiaddr = "/ip4/164.152.163.105/tcp/19000/p2p/16Uiu2HAmBciu61DBo623TByPbuBaGh9So6hRQfvHpCegCE71JNp9"
+)
+
+func TestParseStaticPeerAcceptsENRAndLibp2pMultiaddr(t *testing.T) {
+	t.Parallel()
+
+	for _, input := range []string{publicNodeChiadoENR, publicNodeChiadoMultiaddr} {
+		parsed, err := ParseStaticPeer(input)
+		require.NoError(t, err)
+		require.Equal(t, publicNodeChiadoMultiaddr, parsed.String())
+	}
+}
+
+func TestParseBootstrapNodesClassifiesLibp2pMultiaddrAsDirectPeer(t *testing.T) {
+	t.Parallel()
+
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{publicNodeChiadoMultiaddr})
+	require.NoError(t, err)
+	require.Empty(t, discoveryNodes)
+	require.Equal(t, []string{publicNodeChiadoMultiaddr}, directPeers)
+	require.Empty(t, unsupportedPeers)
+}
+
+func TestParseBootstrapNodesClassifiesMixedInputs(t *testing.T) {
+	t.Parallel()
+
+	secondDirectPeer := "/dns4/chiado.example/tcp/9000/p2p/16Uiu2HAmBciu61DBo623TByPbuBaGh9So6hRQfvHpCegCE71JNp9"
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{
+		publicNodeChiadoMultiaddr,
+		publicNodeChiadoENR,
+		secondDirectPeer,
+	})
+	require.NoError(t, err)
+	require.Equal(t, []string{publicNodeChiadoENR}, discoveryNodes)
+	require.Equal(t, []string{publicNodeChiadoMultiaddr, secondDirectPeer}, directPeers)
+	require.Empty(t, unsupportedPeers)
+}
+
+func TestParseBootstrapNodesAcceptsEmptyInput(t *testing.T) {
+	t.Parallel()
+
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes(nil)
+	require.NoError(t, err)
+	require.Empty(t, discoveryNodes)
+	require.Empty(t, directPeers)
+	require.Empty(t, unsupportedPeers)
+}
+
+func TestParseBootstrapNodesClassifiesUnsupportedTransport(t *testing.T) {
+	t.Parallel()
+
+	quicPeer := "/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT"
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{
+		publicNodeChiadoMultiaddr,
+		quicPeer,
+	})
+	require.NoError(t, err)
+	require.Empty(t, discoveryNodes)
+	require.Equal(t, []string{publicNodeChiadoMultiaddr}, directPeers)
+	require.Equal(t, []string{quicPeer}, unsupportedPeers)
+}
+
+func TestParseBootstrapNodesRejectsOnlyUnsupportedTransport(t *testing.T) {
+	t.Parallel()
+
+	quicPeer := "/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT"
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{quicPeer})
+	require.Error(t, err)
+	require.Nil(t, discoveryNodes)
+	require.Nil(t, directPeers)
+	require.Nil(t, unsupportedPeers)
+}
+
+func TestParseBootstrapNodesRejectsMalformedMixedInput(t *testing.T) {
+	t.Parallel()
+
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes([]string{
+		publicNodeChiadoENR,
+		"not-a-bootstrap-node",
+		publicNodeChiadoMultiaddr,
+	})
+	require.Error(t, err)
+	require.Nil(t, discoveryNodes)
+	require.Nil(t, directPeers)
+	require.Nil(t, unsupportedPeers)
+}
+
+func TestChiadoBootstrapNodesClassification(t *testing.T) {
+	t.Parallel()
+
+	network, _ := clparams.GetConfigsByNetwork(chainspec.ChiadoChainID)
+	discoveryNodes, directPeers, unsupportedPeers, err := ParseBootstrapNodes(network.BootNodes)
+	require.NoError(t, err)
+	require.Len(t, discoveryNodes, 8)
+	require.Len(t, directPeers, 9)
+	require.Equal(t, []string{
+		"/ip4/51.68.224.153/udp/9001/quic-v1/p2p/16Uiu2HAkxcBE3LK7zhnyZERguonkKmXLgYPRcuDPaF6C2vaigYuT",
+	}, unsupportedPeers)
+}
+
+func TestParseStaticPeerRejectsMultiaddrWithoutPeerID(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseStaticPeer("/ip4/192.0.2.1/tcp/9000")
+	require.Error(t, err)
+}
+
+func TestParseStaticPeerRejectsPeerIDWithoutDialAddress(t *testing.T) {
+	t.Parallel()
+
+	_, err := ParseStaticPeer("/p2p/16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA")
+	require.Error(t, err)
+}
+
+func TestParseStaticPeerRejectsUnsupportedTransports(t *testing.T) {
+	t.Parallel()
+
+	peerID := "16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA"
+	for _, input := range []string{
+		"/ip4/192.0.2.1/p2p/" + peerID,
+		"/ip4/192.0.2.1/udp/9000/quic-v1/p2p/" + peerID,
+		"/ip4/192.0.2.1/tcp/9000/ws/p2p/" + peerID,
+		"/ip4/192.0.2.1/tcp/9000/p2p/" + peerID + "/p2p-circuit/p2p/" + peerID,
+	} {
+		_, err := ParseStaticPeer(input)
+		require.Error(t, err)
+	}
+}
+
+func TestParseStaticPeerRejectsNonDialableTCPAddresses(t *testing.T) {
+	t.Parallel()
+
+	peerID := "16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA"
+	for _, input := range []string{
+		"/ip4/192.0.2.1/tcp/0/p2p/" + peerID,
+		"/ip4/0.0.0.0/tcp/9000/p2p/" + peerID,
+		"/ip6/::/tcp/9000/p2p/" + peerID,
+	} {
+		_, err := ParseStaticPeer(input)
+		require.Error(t, err)
+	}
+}
+
+func TestParseStaticPeerAcceptsSupportedTCPAddresses(t *testing.T) {
+	t.Parallel()
+
+	peerID := "16Uiu2HAmEG2vHsiGdask9Weg5qVCsxtrezWCde1WArakqSNCY1EA"
+	for _, input := range []string{
+		"/ip6/2001:db8::1/tcp/9000/p2p/" + peerID,
+		"/dns4/chiado.example/tcp/9000/p2p/" + peerID,
+		"/dns6/chiado.example/tcp/9000/p2p/" + peerID,
+	} {
+		parsed, err := ParseStaticPeer(input)
+		require.NoError(t, err)
+		require.Equal(t, input, parsed.String())
+	}
+}
 
 func TestConvertToSingleMultiAddrRejectsNodeWithoutTcpPort(t *testing.T) {
 	key, err := crypto.GenerateKey()

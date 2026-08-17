@@ -42,7 +42,6 @@ var (
 type Item struct {
 	id    peer.ID
 	score atomic.Int64
-	uses  int
 }
 
 func (i *Item) Id() peer.ID {

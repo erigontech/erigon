@@ -10,9 +10,7 @@ package commitment
 
 import "testing"
 
-// buildFullTree builds a full 16-ary storage subtree rooted at the contract's
-// 64-nibble path, fully populated down to leafDepth. The frontier at leafDepth
-// is 16^(leafDepth-64) nodes (depth 68 => 65536, matching production).
+// frontier size is 16^(leafDepth-64); depth 68 gives 65536, matching production.
 func buildFullTree(hash []byte, leafDepth int) syntheticTree {
 	tree := syntheticTree{}
 	var rec func(path []byte, depth int)
@@ -63,8 +61,6 @@ func benchmarkDrain(b *testing.B, leafDepth, stepBudget int) {
 func BenchmarkPreloadDrain_d67(b *testing.B) { benchmarkDrain(b, 67, 1_000_000) }
 func BenchmarkPreloadDrain_d68(b *testing.B) { benchmarkDrain(b, 68, 2_000_000) }
 
-// randomFrontier builds n unsorted pathKeys with pseudo-random deep (depth-69)
-// nibble paths under the contract root, so the sort has real work to do.
 func randomFrontier(hash []byte, n int) []pathKey {
 	root := hexNibbles(hash) // 64 nibbles
 	f := make([]pathKey, n)
@@ -83,15 +79,13 @@ func randomFrontier(hash []byte, n int) []pathKey {
 	return f
 }
 
-// benchmarkSortPartition isolates sortAndPartitionFrontier (the per-wave sort +
-// db/file split) at frontier size n — the production hot spot (~1M entries).
 func benchmarkSortPartition(b *testing.B, n int) {
 	hash := make([]byte, 32)
 	for i := range hash {
 		hash[i] = 0x42
 	}
 	base := randomFrontier(hash, n)
-	dbBranches := map[string][]byte{} // all file misses
+	dbBranches := map[string][]byte{}
 	p, err := NewContractTrunkPreloadParallel(hash)
 	if err != nil {
 		b.Fatal(err)
@@ -100,7 +94,7 @@ func benchmarkSortPartition(b *testing.B, n int) {
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		b.StopTimer()
-		p.frontier = append(p.frontier[:0], base...) // fresh unsorted copy each iter
+		p.frontier = append(p.frontier[:0], base...)
 		b.StartTimer()
 		p.sortAndPartitionFrontier(dbBranches)
 	}

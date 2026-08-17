@@ -64,7 +64,7 @@ func ValidateAATransaction(
 	}
 	validationGasUsed = preTxCost
 
-	if err = chargeGas(header, tx, gasPool, ibs, preTxCost); err != nil {
+	if err := chargeGas(header, tx, gasPool, ibs); err != nil {
 		return nil, 0, err
 	}
 
@@ -230,7 +230,7 @@ func paymasterValidation(tx *types.AccountAbstractionTransaction, header *types.
 		return nil, err
 	}
 
-	if err = validateValidityTimeRange(header.Time, paymasterValidity.ValidAfter.Uint64(), paymasterValidity.ValidUntil.Uint64()); err != nil {
+	if err := validateValidityTimeRange(header.Time, paymasterValidity.ValidAfter.Uint64(), paymasterValidity.ValidUntil.Uint64()); err != nil {
 		return nil, err
 	}
 
@@ -261,7 +261,7 @@ func ExecuteAATransaction(
 	if err != nil {
 		return 0, 0, err
 	}
-	if err = ibs.SetNonce(tx.SenderAddress, nonce+1, tracing.NonceChangeEoACall); err != nil {
+	if err := ibs.SetNonce(tx.SenderAddress, nonce+1, tracing.NonceChangeEoACall); err != nil {
 		return 0, 0, err
 	}
 
@@ -309,15 +309,19 @@ func ExecuteAATransaction(
 		log.Info("post op gas used", "gasUsed", applyRes.ReceiptGasUsed, "penalty", validationGasPenalty)
 	}
 
-	if err = refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
+	if err := refundGas(header, tx, ibs, gasUsed-gasRefund); err != nil {
 		return 0, 0, err
 	}
 
-	if err = payCoinbase(header, tx, ibs, gasUsed-gasRefund, evm.Context.Coinbase.Value()); err != nil {
+	if err := payCoinbase(header, tx, ibs, gasUsed-gasRefund, evm.Context.Coinbase.Value()); err != nil {
 		return 0, 0, err
 	}
 
-	gasPool.AddGas(params.TxAAGas + tx.ValidationGasLimit + tx.PaymasterValidationGasLimit + tx.GasLimit + tx.PostOpGasLimit - gasUsed)
+	totalGasLimit, ok := tx.TotalGasLimit(params.TxAAGas)
+	if !ok {
+		return 0, 0, fmt.Errorf("%w: RIP-7560 gas limits sum overflows uint64", protocol.ErrGasLimitReached)
+	}
+	gasPool.AddGas(totalGasLimit - gasUsed)
 
 	return executionStatus, gasUsed, nil
 }

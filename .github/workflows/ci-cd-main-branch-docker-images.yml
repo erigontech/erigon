@@ -6,7 +6,7 @@ env:
   APP_REPO: "erigontech/erigon"
   DOCKERHUB_REPOSITORY: "erigontech/erigon"
   BUILDER_IMAGE: "golang:1.26-trixie"
-  LABEL_DESCRIPTION: "[docker image built on a last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
+  LABEL_DESCRIPTION: "[docker image built on the last commit id from the main branch] Erigon is an implementation of Ethereum (execution layer with embeddable consensus layer), on the efficiency frontier. Archive Node by default."
 
 on:
   push:
@@ -21,7 +21,7 @@ on:
         required: false
         type: string
         default: ''
-        description: 'The branch to checkout and build artifacts from (in case of manual run). Important: the Docker image tag is generated automatically from the branch name by removing everything before the last slash. For example, for the branch "feature/user/my-cool-change", the tag will be "my-cool-change". Default is "" .'
+        description: 'The branch to checkout and build artifacts from (in case of a manual run). Important: the Docker image tag is generated automatically from the branch name by removing everything before the last slash. For example, for the branch "feature/user/my-cool-change", the tag will be "my-cool-change". Default is "".'
 
 permissions:
   contents: read
@@ -108,7 +108,7 @@ jobs:
         id: docker-buildx
         uses: docker/setup-buildx-action@v4
 
-      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ GITHUB.BASE_REF }} branch
+      - name: Build and push multi-platform docker image based on the commit id ${{ steps.getCommitId.outputs.short_commit_id }} in the ${{ inputs.checkout_ref == '' && github.ref_name || inputs.checkout_ref }} branch
         id: built_tag_export
         env:
           BUILD_VERSION: "${{ steps.def_docker_vars.outputs.tag_name }}-${{ steps.getCommitId.outputs.short_commit_id }}"
@@ -122,7 +122,6 @@ jobs:
           SHORT_COMMIT_ID: ${{ steps.getCommitId.outputs.short_commit_id }}
           REPO_OWNER: ${{ github.repository_owner }}
         run: |
-          echo "Create build cache directories in case it is not yet extracted from existing cache"
           echo "docker_build_tag=$BUILD_VERSION" >> $GITHUB_OUTPUT
           cd erigon
           docker buildx build \
@@ -173,11 +172,18 @@ jobs:
 
           DOCKER_JWT=$(jq -r .access_token ./resp1)
           rm -f ./resp1
+
+          # Registry delete-scoped token: the Hub JWT untags an image, but reclaiming
+          # storage requires deleting the manifests by digest via the registry API,
+          # which needs a token issued with 'delete' scope (PAT must allow deletion).
+          REG_TOKEN=$(curl -s -u "$DH_USERNAME:$DH_TOKEN" \
+            "https://auth.docker.io/token?service=registry.docker.io&scope=repository:${DOCKERHUB_REPOSITORY}:pull,delete" \
+            | jq -r .token)
           echo The following docker images have been published:
           echo "$DOCKERHUB_REPOSITORY:$BUILD_VERSION_LATEST"
           echo "$BUILD_VERSION_CONDITION (empty, if keep_images is 0)"
           echo
-          echo "Cleanup old docker images matching pattern tag ~= $TAG_KEY-XXXXXXX (where XXXXXXX is a short Commit IDs)"
+          echo "Cleanup old docker images matching pattern tag ~= $TAG_KEY-XXXXXXX (where XXXXXXX is a short commit id)"
           echo "Only last $KEEP_IMAGES images will be kept."
           curl_cmd="curl -s -H \"Authorization: Bearer ${DOCKER_JWT}\" "
           dockerhub_url='https://hub.docker.com/v2/namespaces/erigontech/repositories/erigon'
@@ -192,12 +198,38 @@ jobs:
               next_page=`$curl_cmd $next_page | jq '.next' | sed -e 's/^\"//' -e 's/\"$//'`
             done
             }
+          # A tag is just a pointer; a manifest still consumes storage until deleted by
+          # digest. A 403 means either the manifest is still referenced by another kept
+          # tag/image, or the token lacks the 'delete' scope.
+          delete_manifest () {
+            digest="$1"
+            if [ -z "$digest" ] || [ "$digest" = "null" ]; then
+              return 0
+            fi
+            code=$(curl --write-out %{http_code} --output curl-output.log \
+                  -s -X DELETE \
+                  -H "Authorization: Bearer ${REG_TOKEN}" \
+                  https://registry-1.docker.io/v2/${DOCKERHUB_REPOSITORY}/manifests/${digest})
+            case "$code" in
+              200|202) echo -n "manifest ${digest} deleted. " ;;
+              403)     echo -n "manifest ${digest} not deleted (403: still referenced or missing delete permission). " ;;
+              *)       echo "ERROR: failed to delete manifest ${digest} (HTTP $code): $(cat curl-output.log)." ;;
+            esac
+            }
             echo "DEBUG: full list of images:"
             my_list
             echo "DEBUG: end of the list."
-            my_list | tail -n+"$KEEP_IMAGES" | while read line; do
+            # Sort newest-first by push time (ISO-8601 sorts chronologically) so tail keeps
+            # the newest KEEP_IMAGES; the Hub tags API order is not contractually guaranteed.
+            my_list | sort -k2,2 -r | tail -n +"$((KEEP_IMAGES + 1))" | while read line; do
               echo -n "Removing docker image/published - $line "
               current_image=$(echo $line | sed -e "s/^\(${TAG_KEY}-.\{7\}\) .*/\1/")
+
+              # Collect the manifest digests behind this tag before untagging it.
+              meta=$(curl -s -H "Authorization: Bearer ${DOCKER_JWT}" "$dockerhub_url/tags/${current_image}")
+              index_digest=$(echo "$meta" | jq -r '.digest // empty')
+              image_digests=$(echo "$meta" | jq -r '.images[]?.digest // empty')
+
               output_code=$(curl --write-out %{http_code} --output curl-output.log \
                     -s -X DELETE -H "Accept: application/json" \
                     -H "Authorization: Bearer ${DOCKER_JWT}" \
@@ -205,9 +237,16 @@ jobs:
               if [ $output_code -ne 204 ]; then
                 echo "ERROR: failed to remove docker image erigon:${current_image}"
                 echo "ERROR: API response: $(cat curl-output.log)."
-              else
-                echo -n " - removed. "
+                continue
               fi
+              echo -n " - tag removed. "
+
+              # Delete the index first so its per-platform manifests become unreferenced
+              # and deletable, then delete those to actually reclaim storage.
+              delete_manifest "$index_digest"
+              for d in $image_digests; do
+                delete_manifest "$d"
+              done
               echo "Done."
             done
 

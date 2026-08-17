@@ -49,7 +49,7 @@ func TestRegeneratorReproducesCanonicalBlockAccessLists(t *testing.T) {
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
 	storingInitCode := []byte{0x60, 0x01, 0x60, 0x00, 0x55, 0x00} // PUSH1 1, PUSH1 0, SSTORE, STOP
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 4, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKey)
@@ -79,8 +79,8 @@ func TestRegeneratorReproducesCanonicalBlockAccessLists(t *testing.T) {
 	ttx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer ttx.Rollback()
-	for i, block := range chainPack.Blocks {
-		expected := chainPack.BlockAccessLists[i]
+	for _, block := range chainPack.Blocks {
+		expected := block.BlockAccessList()
 		require.NotEmpty(t, expected, "block %d should have a canonical BAL", block.NumberU64())
 		got, err := gen.GetBlockAccessListBytes(ctx, m.ChainConfig, ttx, block.Hash(), block.NumberU64())
 		require.NoError(t, err, "block %d", block.NumberU64())
@@ -132,7 +132,7 @@ func TestRegeneratorReturnsNilForPreAmsterdamBlocks(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(genesis), execmoduletester.WithKey(privKey))
 	signer := types.LatestSignerForChainID(m.ChainConfig.ChainID)
 	baseFee := uint256.NewInt(m.Genesis.BaseFee().Uint64())
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		txn, err := types.SignTx(types.NewTransaction(0, common.Address{1}, uint256.NewInt(10_000), 50_000, baseFee, nil), *signer, privKey)
 		require.NoError(t, err)
 		b.AddTx(txn)

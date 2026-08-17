@@ -16,6 +16,7 @@ Erigon use the following default port for each service:
 | Sentry    | `30303` | TCP & UDP | eth/69, eth/70, eth/71 peering | Public     |
 | Sentry    | `9091`  | TCP       | incoming gRPC Connections   | Private       |
 | RPC Daemon | `8545`  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+| RPC Daemon | `8908`  | TCP       | HTTPS (only when enabled)   | Private       |
 | mcp       | `8553`  | TCP       | MCP server (AI assistants)  | Private       |
 | shutter   | `23102` | TCP       | Peering                     | Public        |
 
@@ -47,6 +48,9 @@ Here is a comprehensive list of port-related options:
 
 * `--ws.port [value]`: WS-RPC server listening port (default: `8546`)
 * `--http.port [value]`: HTTP-RPC server listening port (default: `8545`)
+* `--https.port [value]`: HTTPS-RPC server listening port, used only when the HTTPS server is enabled (default: `0`, meaning `--http.port` + 363 — `8908` with a default `--http.port`)
+* `--http.url [value]` / `--https.url [value]`: Full listen URL that overrides the corresponding `addr` and `port` pair (`tcp://` or `unix://`)
+* `--socket.url [value]`: IPC server listen URL, used only when the IPC server is enabled (default: `unix:///var/run/erigon.sock`)
 
 ### Caplin
 

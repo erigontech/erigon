@@ -41,13 +41,13 @@ func Bench4(erigon_url string) error {
 		template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
 		var trace EthTxTrace
 		if err := post(client, erigon_url, fmt.Sprintf(template, txhash, req_id), &trace); err != nil {
-			print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
+			printRPCRequest(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 			return fmt.Errorf("Could not trace transaction %s: %v\n", txhash, err)
 		}
 		if trace.Error != nil {
 			fmt.Printf("Error tracing transaction: %d %s\n", trace.Error.Code, trace.Error.Message)
 		}
-		print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
+		printRPCRequest(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 	}
 	to := common.HexToAddress("0x8b3b3b624c3c0397d3da8fd861512393d51dcbac")
 	sm := make(map[common.Hash]storageEntry)

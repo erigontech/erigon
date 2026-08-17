@@ -24,7 +24,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -252,15 +251,37 @@ func (l *RPCLog) UnmarshalJSON(input []byte) error {
 
 type RPCLogs []*RPCLog
 
+// Copy deep-copies the logs into freshly allocated shared backing arrays.
+// Nil entries stay nil.
 func (logs Logs) Copy() Logs {
 	if logs == nil {
 		return nil
 	}
-	logsCopy := make(Logs, len(logs))
-	for i, log := range logs {
-		logsCopy[i] = log.Copy()
+	var totalTopics, totalData int
+	for _, l := range logs {
+		if l == nil {
+			continue
+		}
+		totalTopics += len(l.Topics)
+		totalData += len(l.Data)
 	}
-	return logsCopy
+	topics := make([]common.Hash, totalTopics)
+	data := make([]byte, totalData)
+	backing := make([]Log, len(logs))
+	out := make(Logs, len(logs))
+	for i, l := range logs {
+		if l == nil {
+			continue
+		}
+		dst := &backing[i]
+		nt, nd := len(l.Topics), len(l.Data)
+		// Capped so a later append to one copied log cannot bleed into the next.
+		dst.Topics, dst.Data = topics[:nt:nt], data[:nd:nd]
+		topics, data = topics[nt:], data[nd:]
+		l.copyTo(dst)
+		out[i] = dst
+	}
+	return out
 }
 
 // ToRPCTransactionLog converts types.Log in a RPCLog.
@@ -418,46 +439,47 @@ func (l *Log) DecodeRLP(s *rlp.Stream) error {
 	return err
 }
 
-// RlpHashLogs hashes the concatenation of the given log groups as one RLP list,
-// without flattening them into a single slice first.
-func RlpHashLogs(groups []Logs) common.Hash {
+// RlpHashLogs hashes the logs as one RLP list, encoding them through a shared
+// buffer rather than one per entry.
+func RlpHashLogs(logs Logs) common.Hash {
 	return rlpPayloadHash(func(w io.Writer, b []byte) error {
 		payloadSize := 0
-		for _, logs := range groups {
-			for _, l := range logs {
-				payloadSize += l.encodingSize()
-			}
+		for _, l := range logs {
+			payloadSize += l.encodingSize()
 		}
 		if err := rlp.EncodeListPrefix(payloadSize, w, b); err != nil {
 			return err
 		}
-		for _, logs := range groups {
-			for _, l := range logs {
-				if err := l.encodeRLP(w, b); err != nil {
-					return err
-				}
+		for _, l := range logs {
+			if err := l.encodeRLP(w, b); err != nil {
+				return err
 			}
 		}
 		return nil
 	})
 }
 
-// Copy creates a deep copy of the Log.
+// Copy creates a deep copy of the Log. Nil Topics and Data become empty, which
+// is what keeps a LOG0 entry marshalling as `"topics":[]`.
 func (l *Log) Copy() *Log {
 	if l == nil {
 		return nil
 	}
-	return &Log{
-		Address:     l.Address,
-		Topics:      slices.Clone(l.Topics),
-		Data:        slices.Clone(l.Data),
-		BlockNumber: l.BlockNumber,
-		TxHash:      l.TxHash,
-		TxIndex:     l.TxIndex,
-		BlockHash:   l.BlockHash,
-		Index:       l.Index,
-		Removed:     l.Removed,
+	dst := &Log{
+		Topics: make([]common.Hash, len(l.Topics)),
+		Data:   make(hexutil.Bytes, len(l.Data)),
 	}
+	l.copyTo(dst)
+	return dst
+}
+
+// copyTo overwrites dst, reusing its Topics/Data buffers. They must already be
+// long enough — anything beyond their length is dropped.
+func (l *Log) copyTo(dst *Log) {
+	t, d := dst.Topics, dst.Data
+	*dst = *l
+	dst.Topics = t[:copy(t, l.Topics)]
+	dst.Data = d[:copy(d, l.Data)]
 }
 
 // LogForStorage is a wrapper around a Log that flattens and parses the entire content of

@@ -77,5 +77,5 @@ func (s *SignedBLSToExecutionChange) HashSSZ() ([32]byte, error) {
 }
 
 func (s *SignedBLSToExecutionChange) EncodingSizeSSZ() int {
-	return 96 + s.Message.EncodingSizeSSZ()
+	return signedStaticSize(s.Message.EncodingSizeSSZ())
 }

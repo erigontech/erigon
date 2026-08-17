@@ -66,7 +66,7 @@ type DefaultTxBlockIndex struct{}
 
 func (d *DefaultTxBlockIndex) MaxTxNum(_ context.Context, tx kv.Tx, c kv.Cursor, blockNum uint64) (maxTxNum uint64, ok bool, err error) {
 	if c == nil {
-		c, err := tx.Cursor(kv.MaxTxNum)
+		c, err = tx.Cursor(kv.MaxTxNum)
 		if err != nil {
 			return 0, false, err
 		}
@@ -283,7 +283,7 @@ func (TxNumsReader) Truncate(tx kv.RwTx, blockNum uint64) (err error) {
 			currentBlockNum != blockNum /*to prevent first item error*/ {
 			return fmt.Errorf("bad block num: current num is %d but previous is %d", currentBlockNum, prevBlockNum)
 		}
-		if err = tx.Delete(kv.MaxTxNum, k); err != nil {
+		if err := tx.Delete(kv.MaxTxNum, k); err != nil {
 			return err
 		}
 		prevBlockNum = currentBlockNum

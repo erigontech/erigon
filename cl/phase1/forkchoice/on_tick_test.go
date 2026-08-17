@@ -82,6 +82,7 @@ func TestFinalizedCheckpointEmittedOutsideLock(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("OnTick did not finish")
 	}
+	requireOperationPrunerIdle(t, f)
 }
 
 type blockingPruneForkGraph struct {
@@ -151,4 +152,5 @@ func TestForkGraphPruneRunsOutsideLock(t *testing.T) {
 	case <-time.After(10 * time.Second):
 		t.Fatal("OnTick did not finish")
 	}
+	requireOperationPrunerIdle(t, f)
 }

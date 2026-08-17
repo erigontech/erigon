@@ -64,10 +64,10 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 	}
 
 	var dbBAL types.BlockAccessList
-	// Read BAL through blockTx (overlay or execRoTx) — do NOT open a separate
-	// db.View() as it can deadlock with the stageloop's RW transaction when
-	// BlockOverlay is active.
-	data, err := rawdb.ReadBlockAccessListBytes(s.blockTx, b.Hash(), blockNum)
+	// Prefer the payload-carried BAL; fall back to the DB sidecar via blockTx
+	// (overlay or execRoTx) — do NOT open a separate db.View() as it can deadlock
+	// with the stageloop's RW transaction when BlockOverlay is active.
+	data, err := blockAccessListBytes(s.blockTx, b, blockNum)
 	if err != nil {
 		return nil, nil, err
 	}

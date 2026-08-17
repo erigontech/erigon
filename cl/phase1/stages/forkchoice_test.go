@@ -12,11 +12,11 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	defer db.Close()
 
 	ctx := context.Background()
@@ -64,7 +64,7 @@ func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 }
 
 func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	defer db.Close()
 
 	ctx := context.Background()
@@ -112,7 +112,7 @@ func TestUpdateCanonicalChainReorgShorterFork(t *testing.T) {
 }
 
 func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	defer db.Close()
 
 	ctx := context.Background()
@@ -159,7 +159,7 @@ func TestUpdateCanonicalChainReorgLongerFork(t *testing.T) {
 }
 
 func TestUpdateCanonicalChainNoReorg(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	defer db.Close()
 
 	ctx := context.Background()
@@ -191,7 +191,7 @@ func TestUpdateCanonicalChainNoReorg(t *testing.T) {
 }
 
 func TestUpdateCanonicalChainReorgOneSlot(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	defer db.Close()
 
 	ctx := context.Background()

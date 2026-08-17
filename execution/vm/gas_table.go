@@ -179,7 +179,9 @@ func gasSStore(evm *EVM, callContext *CallContext, availableGas mdgas.MdGas, mem
 	}
 	if !original.IsZero() {
 		if current.IsZero() { // recreate slot (2.2.1.1)
-			evm.IntraBlockState().SubRefund(params.NetSstoreClearRefund)
+			if err := evm.IntraBlockState().SubRefund(params.NetSstoreClearRefund); err != nil {
+				return mdgas.MdGas{}, err
+			}
 		} else if value.IsZero() { // delete slot (2.2.1.2)
 			evm.IntraBlockState().AddRefund(params.NetSstoreClearRefund)
 		}
@@ -237,7 +239,9 @@ func gasSStoreEIP2200(evm *EVM, callContext *CallContext, availableGas mdgas.MdG
 	}
 	if !original.IsZero() {
 		if current.IsZero() { // recreate slot (2.2.1.1)
-			evm.IntraBlockState().SubRefund(params.SstoreClearsScheduleRefundEIP2200)
+			if err := evm.IntraBlockState().SubRefund(params.SstoreClearsScheduleRefundEIP2200); err != nil {
+				return mdgas.MdGas{}, err
+			}
 		} else if value.IsZero() { // delete slot (2.2.1.2)
 			evm.IntraBlockState().AddRefund(params.SstoreClearsScheduleRefundEIP2200)
 		}

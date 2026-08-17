@@ -901,19 +901,19 @@ func (s *Sync) Run(ctx context.Context) error {
 
 			switch event.Type {
 			case EventTypeNewMilestone:
-				if err = s.applyNewMilestoneOnTip(ctx, event.AsNewMilestone(), ccBuilder); err != nil {
+				if err := s.applyNewMilestoneOnTip(ctx, event.AsNewMilestone(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewBlock:
-				if err = s.applyNewBlockOnTip(ctx, event.AsNewBlock(), ccBuilder); err != nil {
+				if err := s.applyNewBlockOnTip(ctx, event.AsNewBlock(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewBlockBatch:
-				if err = s.applyNewBlockBatchOnTip(ctx, event.AsNewBlockBatch(), ccBuilder); err != nil {
+				if err := s.applyNewBlockBatchOnTip(ctx, event.AsNewBlockBatch(), ccBuilder); err != nil {
 					return err
 				}
 			case EventTypeNewBlockHashes:
-				if err = s.applyNewBlockHashesOnTip(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
+				if err := s.applyNewBlockHashesOnTip(ctx, event.AsNewBlockHashes(), ccBuilder); err != nil {
 					return err
 				}
 			default:

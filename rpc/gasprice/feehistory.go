@@ -253,7 +253,21 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 	}
 	if lastBlock == rpc.LatestBlockNumber {
 		lastBlock = headBlock
-	} else if pendingBlock == nil && lastBlock > headBlock {
+	} else if lastBlock < 0 {
+		// we have known reserved values for special block markers that can be negative
+		if lastBlock < rpc.LatestExecutedBlockNumber {
+			return nil, nil, 0, 0, fmt.Errorf("invalid block number %d", lastBlock)
+		}
+		lastBlockHeader, err := oracle.backend.HeaderByNumber(ctx, lastBlock)
+		if err != nil {
+			return nil, nil, 0, 0, err
+		}
+		if lastBlockHeader == nil {
+			return nil, nil, 0, 0, nil
+		}
+		lastBlock = rpc.BlockNumber(lastBlockHeader.Number.Uint64())
+	}
+	if pendingBlock == nil && lastBlock > headBlock {
 		return nil, nil, 0, 0, fmt.Errorf("%w: requested %d, head %d", ErrRequestBeyondHead, lastBlock, headBlock)
 	}
 	if maxHistory != 0 {
@@ -390,14 +404,15 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				}
 
 				fees := &blockFees{blockNumber: blockNumber}
-				if isPending {
+				switch {
+				case isPending:
 					fees.block, fees.receipts = pendingBlock, pendingReceipts
-				} else if len(rewardPercentiles) != 0 {
+				case len(rewardPercentiles) != 0:
 					fees.block, fees.err = localBackend.BlockByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
 					if fees.block != nil && fees.err == nil {
 						fees.receipts, fees.err = localBackend.GetReceiptsGasUsed(fetchCtx, fees.block)
 					}
-				} else {
+				default:
 					fees.header, fees.err = localBackend.HeaderByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
 				}
 				if fees.block != nil {
@@ -425,7 +440,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			}
 		})
 	}
-	if err = g.Wait(); err != nil {
+	if err := g.Wait(); err != nil {
 		return common.Big0, nil, nil, nil, nil, nil, err
 	}
 

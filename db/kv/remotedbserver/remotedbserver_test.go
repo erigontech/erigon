@@ -57,7 +57,7 @@ func TestKvServer_renew(t *testing.T) {
 			return err
 		}
 		var c, c2 kv.Cursor
-		if err = s.with(id, func(tx kv.TemporalTx) error {
+		if err := s.with(id, func(tx kv.TemporalTx) error {
 			c, err = tx.Cursor(kv.TblAccountVals)
 			return err
 		}); err != nil {
@@ -68,11 +68,11 @@ func TestKvServer_renew(t *testing.T) {
 		require.Equal([]byte{1}, k)
 		require.Equal([]byte{1}, v)
 
-		if err = s.renew(ctx, id); err != nil {
+		if err := s.renew(ctx, id); err != nil {
 			return err
 		}
 
-		if err = s.with(id, func(tx kv.TemporalTx) error {
+		if err := s.with(id, func(tx kv.TemporalTx) error {
 			c, err = tx.Cursor(kv.TblAccountVals) //nolint:gocritic
 			if err != nil {
 				return err

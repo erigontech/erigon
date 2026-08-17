@@ -92,7 +92,7 @@ func Bench3(erigon_url, geth_url string) error {
 			`
 		var trace EthTxTrace
 		if err := post(client, erigon_url, fmt.Sprintf(template, txhash, req_id), &trace); err != nil {
-			print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
+			printRPCRequest(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 			return fmt.Errorf("Could not trace transaction %s: %v\n", txhash, err)
 		}
 		if trace.Error != nil {
@@ -100,13 +100,13 @@ func Bench3(erigon_url, geth_url string) error {
 		}
 		var traceg EthTxTrace
 		if err := post(client, geth_url, fmt.Sprintf(template, txhash, req_id), &traceg); err != nil {
-			print(client, geth_url, fmt.Sprintf(template, txhash, req_id))
+			printRPCRequest(client, geth_url, fmt.Sprintf(template, txhash, req_id))
 			return fmt.Errorf("Could not trace transaction g %s: %v\n", txhash, err)
 		}
 		if traceg.Error != nil {
 			return fmt.Errorf("Error tracing transaction g: %d %s\n", traceg.Error.Code, traceg.Error.Message)
 		}
-		//print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
+		//printRPCRequest(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 		if !compareTraces(&trace, &traceg) {
 			return fmt.Errorf("Different traces block %d, txn %s\n", 1720000, txhash)
 		}

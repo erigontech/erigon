@@ -109,6 +109,13 @@ func TestBitvectorDecodeSSZ(t *testing.T) {
 	require.Equal([]int{2, 4, 9}, indices, "BitVector DecodeSSZ did not decode the bits correctly")
 }
 
+func TestBitvectorDecodeSSZRejectsInvalidSizeAndUnusedBits(t *testing.T) {
+	for _, data := range [][]byte{{1}, {1, 0, 0}, {0, 0xfc}} {
+		vector := NewBitVector(10)
+		require.Error(t, vector.DecodeSSZ(data, 0))
+	}
+}
+
 func TestBitvectorJson(t *testing.T) {
 	require := require.New(t)
 

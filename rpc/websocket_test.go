@@ -239,7 +239,7 @@ func wsPingTestServer(t *testing.T, sendPing <-chan struct{}) *http.Server {
 	})
 
 	// Start the server.
-	listener, err := net.Listen("tcp", "127.0.0.1:0")
+	listener, err := net.Listen("tcp", "127.0.0.1:0") //nolint:noctx
 	if err != nil {
 		t.Fatal("can't listen:", err)
 	}

@@ -715,7 +715,7 @@ func TestOpenFolder_UnrelatedFilesIgnored(t *testing.T) {
 	for _, f := range garbageFiles {
 		// Create zero-byte placeholder
 		if fp, err := os.Create(f); err == nil {
-			fp.Close()
+			require.NoError(t, fp.Close())
 		}
 	}
 
@@ -782,7 +782,7 @@ func TestOpenFolder_CorruptedDataFile(t *testing.T) {
 	corruptPath, _ := repo.schema.DataFile(version.V1_0, RootNum(repo.stepSize), RootNum(2*repo.stepSize))
 	f, err := os.Create(corruptPath)
 	require.NoError(t, err)
-	f.Close()
+	require.NoError(t, f.Close())
 
 	// OpenFolder must not crash on corrupted file
 	err = repo.OpenFolder()

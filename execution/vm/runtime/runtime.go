@@ -145,9 +145,13 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		rules   = vmenv.ChainRules()
 	)
 	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, address, vm.ActivePrecompiles(rules), nil)
-	cfg.State.CreateAccount(address, true)
+	if err := cfg.State.CreateAccount(address, true); err != nil {
+		return nil, nil, err
+	}
 	// set the receiver's (the executing contract) code for execution.
-	cfg.State.SetCode(address, code, tracing.CodeChangeUnspecified)
+	if err := cfg.State.SetCode(address, code, tracing.CodeChangeUnspecified); err != nil {
+		return nil, nil, err
+	}
 	// Call the code with the given configuration.
 	if cfg.EVMConfig.Tracer != nil && cfg.EVMConfig.Tracer.OnTxStart != nil {
 		cfg.EVMConfig.Tracer.OnTxStart(&tracing.VMContext{IntraBlockState: cfg.State}, nil, accounts.ZeroAddress)
@@ -180,7 +184,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		if err != nil {
 			return nil, [20]byte{}, mdgas.MdGas{}, err
 		}
-		defer dir.RemoveAll(tmp)
+		defer dir.RemoveAll(tmp) //nolint:errcheck
 
 		dirs := datadir.New(tmp)
 		db := temporaltest.NewTestDB(nil, dirs)
@@ -238,7 +242,9 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		code, createdAddress, leftOverGas, _, err = vmenv.Create(sender, input, leftOverGas, cfg.Value, nil, false)
 		protocol.RefillTopLevelGas(&leftOverGas, &topLevelGasUsed, cfg.EVMConfig.RestoreState, err)
 	} else if errors.Is(err, vm.ErrRuntimeOutOfGas) {
-		cfg.State.SetNonce(sender, nonce+1, tracing.NonceChangeContractCreator)
+		if nonceErr := cfg.State.SetNonce(sender, nonce+1, tracing.NonceChangeContractCreator); nonceErr != nil {
+			return nil, common.Address{}, mdgas.MdGas{}, nonceErr
+		}
 		leftOverGas = mdgas.MdGas{State: gas.State}
 		protocol.TraceTopLevelFailure(vmenv, vm.CREATE, sender, address, input, gas, leftOverGas, cfg.Value, err)
 	}

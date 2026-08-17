@@ -29,6 +29,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 
 	"github.com/erigontech/erigon/common/background"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream/streamtest"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -53,7 +55,7 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	dirs := datadir.New(tb.TempDir())
 	keysTable := "Keys"
 	indexTable := "Index"
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).WithTableCfg(func(defaultBuckets kv.TableCfg) kv.TableCfg {
 		return kv.TableCfg{
 			keysTable:             kv.TableCfgItem{Flags: kv.DupSort},
 			indexTable:            kv.TableCfgItem{Flags: kv.DupSort},
@@ -85,6 +87,32 @@ func testDbAndInvertedIndex(tb testing.TB, aggStep uint64, logger log.Logger) (k
 	ii.salt.Store(&salt)
 	ii.DisableFsync()
 	return db, ii
+}
+
+func TestInvertedIndexVisibleEnd(t *testing.T) {
+	db, ii := testDbAndInvertedIndex(t, 16, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	iit := ii.beginForTests()
+	defer iit.Close()
+	require.Zero(t, iit.Progress(tx))
+	require.Zero(t, iit.visibleEnd(tx))
+
+	var txNum [8]byte
+	require.NoError(t, tx.Put(ii.KeysTable, txNum[:], []byte{1}))
+	require.Zero(t, iit.Progress(tx))
+	require.Equal(t, uint64(1), iit.visibleEnd(tx))
+
+	binary.BigEndian.PutUint64(txNum[:], 100)
+	require.NoError(t, tx.Put(ii.KeysTable, txNum[:], []byte{1}))
+	require.Equal(t, uint64(100), iit.Progress(tx))
+	require.Equal(t, uint64(101), iit.visibleEnd(tx))
+
+	iit.files = visibleFiles{{endTxNum: 200}}
+	require.Equal(t, uint64(200), iit.Progress(tx))
+	require.Equal(t, uint64(200), iit.visibleEnd(tx))
 }
 
 func TestInvIndexPruningCorrectness(t *testing.T) {
@@ -748,33 +776,33 @@ func checkRanges(t *testing.T, db kv.RwDB, ii *InvertedIndex, txs uint64) {
 			reverseStream, err := ic.IdxRange(k[:], 976-1, 0, order.Desc, -1, nil)
 			require.NoError(t, err)
 			defer reverseStream.Close()
-			stream.ExpectEqualU64(t, stream.ReverseArray(values), reverseStream)
+			streamtest.ExpectEqualU64(t, stream.ReverseArray(values), reverseStream)
 		})
 		t.Run("unbounded asc", func(t *testing.T) {
 			forwardLimited, err := ic.IdxRange(k[:], -1, 976, order.Asc, 2, nil)
 			require.NoError(t, err)
 			defer forwardLimited.Close()
-			stream.ExpectEqualU64(t, stream.Array(values[:2]), forwardLimited)
+			streamtest.ExpectEqualU64(t, stream.Array(values[:2]), forwardLimited)
 		})
 		t.Run("unbounded desc", func(t *testing.T) {
 			reverseLimited, err := ic.IdxRange(k[:], 976-1, -1, order.Desc, 2, nil)
 			require.NoError(t, err)
 			defer reverseLimited.Close()
-			stream.ExpectEqualU64(t, stream.ReverseArray(values[len(values)-2:]), reverseLimited)
+			streamtest.ExpectEqualU64(t, stream.ReverseArray(values[len(values)-2:]), reverseLimited)
 		})
 		t.Run("tiny bound asc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 100, 102, order.Asc, -1, nil)
 			require.NoError(t, err)
 			defer it.Close()
 			expect := stream.FilterU64(stream.Array(values), func(k uint64) bool { return k >= 100 && k < 102 })
-			stream.ExpectEqualU64(t, expect, it)
+			streamtest.ExpectEqualU64(t, expect, it)
 		})
 		t.Run("tiny bound desc", func(t *testing.T) {
 			it, err := ic.IdxRange(k[:], 102, 100, order.Desc, -1, nil)
 			require.NoError(t, err)
 			defer it.Close()
 			expect := stream.FilterU64(stream.ReverseArray(values), func(k uint64) bool { return k <= 102 && k > 100 })
-			stream.ExpectEqualU64(t, expect, it)
+			streamtest.ExpectEqualU64(t, expect, it)
 		})
 	}
 	// Now check invertedIndex that require access to DB

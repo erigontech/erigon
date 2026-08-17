@@ -188,14 +188,15 @@ func (s *GrpcServer) Add(ctx context.Context, in *txpoolproto.AddRequest) (*txpo
 			}
 			return nil
 		}); err != nil {
-			slots.Resize(uint(j))                // remove erroneous transaction
-			if errors.Is(err, ErrAlreadyKnown) { // Noop, but need to handle to not count these
+			slots.Resize(uint(j)) // remove erroneous transaction
+			switch {
+			case errors.Is(err, ErrAlreadyKnown): // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.AlreadyKnown.String()
 				reply.Imported[i] = txpoolproto.ImportResult_ALREADY_EXISTS
-			} else if errors.Is(err, ErrRlpTooBig) { // Noop, but need to handle to not count these
+			case errors.Is(err, ErrRlpTooBig): // Noop, but need to handle to not count these
 				reply.Errors[i] = txpoolcfg.RLPTooLong.String()
 				reply.Imported[i] = txpoolproto.ImportResult_INVALID
-			} else {
+			default:
 				reply.Errors[i] = err.Error()
 				reply.Imported[i] = txpoolproto.ImportResult_INTERNAL_ERROR
 			}
@@ -318,7 +319,7 @@ func (s *GrpcServer) Nonce(ctx context.Context, in *txpoolproto.NonceRequest) (*
 // NewSlotsStreams - it's safe to use this class as non-pointer
 type NewSlotsStreams = grpcutil.StreamBroadcaster[txpoolproto.OnAddReply]
 
-func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.MiningServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
+func StartGrpc(ctx context.Context, txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.MiningServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
 	grpcServer := grpcutil.NewServerWithOpts(creds,
 		grpc.ReadBufferSize(0),  // reduce buffers to save mem
 		grpc.WriteBufferSize(0), // reduce buffers to save mem
@@ -330,7 +331,7 @@ func StartGrpc(txPoolServer txpoolproto.TxpoolServer, miningServer txpoolproto.M
 		txpoolproto.RegisterMiningServer(grpcServer, miningServer)
 	}
 
-	if err := grpcutil.StartServer(grpcServer, addr, true, logger, "txpool gRPC server fail"); err != nil {
+	if err := grpcutil.StartServer(ctx, grpcServer, addr, true, logger, "txpool gRPC server fail"); err != nil {
 		return nil, err
 	}
 	logger.Info("Started gRPC server", "on", addr)

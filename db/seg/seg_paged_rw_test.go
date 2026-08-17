@@ -459,7 +459,7 @@ func BenchmarkName(b *testing.B) {
 	buf := &multyBytesWriter{pageSize: 16}
 	w := NewPagedWriter(b.Context(), buf, false, 1)
 	for i := range 16 {
-		w.Add([]byte{byte(i)}, []byte{10 + byte(i)})
+		w.Add([]byte{byte(i)}, []byte{10 + byte(i)}) //nolint:errcheck
 	}
 	bts := buf.Bytes()[0]
 

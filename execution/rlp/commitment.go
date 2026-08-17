@@ -73,20 +73,21 @@ func generateByteArrayLen(buffer []byte, pos int, l int) int {
 }
 
 func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
-	if l < 55 {
+	switch {
+	case l < 55:
 		// After first wrapping, the length will be l + 1 < 56
 		buffer[pos] = byte(EmptyStringCode + l + 1)
 		pos++
 		buffer[pos] = byte(EmptyStringCode + l)
 		pos++
-	} else if l < 56 {
+	case l < 56:
 		buffer[pos] = multiByteHeaderPrefixOfLen(1)
 		pos++
 		buffer[pos] = byte(l + 1)
 		pos++
 		buffer[pos] = byte(EmptyStringCode + l)
 		pos++
-	} else if l < 254 {
+	case l < 254:
 		// After first wrapping, the length will be l + 2 < 256
 		buffer[pos] = multiByteHeaderPrefixOfLen(1)
 		pos++
@@ -96,7 +97,7 @@ func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 		pos++
 		buffer[pos] = byte(l)
 		pos++
-	} else if l < 256 {
+	case l < 256:
 		// First wrapping is 2 bytes, second wrapping 3 bytes
 		buffer[pos] = multiByteHeaderPrefixOfLen(2)
 		pos++
@@ -108,7 +109,7 @@ func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 		pos++
 		buffer[pos] = byte(l)
 		pos++
-	} else if l < 65533 {
+	case l < 65533:
 		// Both wrappings are 3 bytes
 		buffer[pos] = multiByteHeaderPrefixOfLen(2)
 		pos++
@@ -122,7 +123,7 @@ func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 		pos++
 		buffer[pos] = byte(l & 255)
 		pos++
-	} else if l < 65536 {
+	case l < 65536:
 		// First wrapping is 3 bytes, second wrapping is 4 bytes
 		buffer[pos] = multiByteHeaderPrefixOfLen(3)
 		pos++
@@ -138,7 +139,7 @@ func generateByteArrayLenDouble(buffer []byte, pos int, l int) int {
 		pos++
 		buffer[pos] = byte(l & 255)
 		pos++
-	} else {
+	default:
 		// Both wrappings are 4 bytes
 		buffer[pos] = multiByteHeaderPrefixOfLen(3)
 		pos++

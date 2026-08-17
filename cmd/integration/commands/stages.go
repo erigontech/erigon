@@ -58,6 +58,7 @@ import (
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/stats"
+	"github.com/erigontech/erigon/execution/blockreplay"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/cache"
 	chain2 "github.com/erigontech/erigon/execution/chain"
@@ -69,7 +70,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
-	"github.com/erigontech/erigon/execution/tests/blockreplay"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
@@ -134,7 +134,6 @@ var (
 	cmdStageExec        = makeStageCmd("stage_exec", stageExec, true, true, false)
 	cmdStageExecReplay  = makeStageCmd("stage_exec_replay", stageExecReplay, true, true, false)
 	cmdCaptureBlock     = makeStageCmd("capture_block", captureBlock, false, true, false)
-	cmdCaptureBlocks    = makeStageCmd("capture_blocks", captureBlocks, false, true, false)
 	cmdStageCustomTrace = makeStageCmd("stage_custom_trace", stageCustomTrace, true, true, false)
 	cmdStageTxLookup    = makeStageCmd("stage_tx_lookup", stageTxLookup, true, false, false)
 	cmdPrintStages      = makeStageCmd("print_stages", printAllStages, false, false, true)
@@ -326,10 +325,6 @@ func init() {
 	withBlock(cmdCaptureBlock)
 	rootCmd.AddCommand(cmdCaptureBlock)
 
-	withStageBase(cmdCaptureBlocks)
-	withBlock(cmdCaptureBlocks)
-	rootCmd.AddCommand(cmdCaptureBlocks)
-
 	withStageBase(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
@@ -485,10 +480,10 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 			}
 		}
 		// remove all canonical markers from this point
-		if err = rawdb.TruncateCanonicalHash(tx, progress+1, false /* markChainAsBad */); err != nil {
+		if err := rawdb.TruncateCanonicalHash(tx, progress+1, false /* markChainAsBad */); err != nil {
 			return err
 		}
-		if err = rawdb.TruncateTd(tx, progress+1); err != nil {
+		if err := rawdb.TruncateTd(tx, progress+1); err != nil {
 			return err
 		}
 		hash, ok, err := br.CanonicalHash(ctx, tx, progress-1)
@@ -498,7 +493,7 @@ func stageHeaders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 		if !ok {
 			return fmt.Errorf("canonical hash not found: %d", progress-1)
 		}
-		if err = rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
+		if err := rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 			return err
 		}
 
@@ -620,20 +615,21 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	}
 
 	cfg := stagedsync.StageSendersCfg(chainConfig, sync.Cfg(), false /* badBlockHalt */, tmpdir, pm, br, exec.NewBlockReadAheader())
-	if unwind > 0 {
+	switch {
+	case unwind > 0:
 		if unwind > s.BlockNumber {
 			return errors.New("cannot unwind past 0")
 		}
 
 		u := sync.NewUnwindState(stages.Senders, s.BlockNumber-unwind, s.BlockNumber, true, false)
-		if err = stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
+		if err := stagedsync.UnwindSendersStage(u, tx, cfg, ctx); err != nil {
 			return err
 		}
-	} else if pruneTo > 0 {
+	case pruneTo > 0:
 		//noop
 		return nil
-	} else {
-		if err = stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx, logger); err != nil {
+	default:
+		if err := stagedsync.SpawnRecoverSendersStage(cfg, s, sync, tx, block, ctx, logger); err != nil {
 			return err
 		}
 	}
@@ -857,6 +853,7 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	doms.SetInMemHistoryReads(false)
 	doms.SetStateCache(stateCache)
 	doms.SetCodeStore(codeStore)
+	execctx.GuardAggregatorForCache(db, stateCache)
 
 	s, err := st.StageState(stages.Execution, tx, initialCycle, false)
 	if err != nil {
@@ -911,52 +908,6 @@ func captureBlock(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	logger.Info("[capture_block] fixture written", "block", block, "path", out,
 		"accounts", len(fx.Accounts), "storageAccts", len(fx.Storage), "code", len(fx.Code),
 		"outAccounts", len(fx.Outputs.Accounts), "outStorage", len(fx.Outputs.Storage))
-	return nil
-}
-
-func captureBlocks(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	if block == 0 || unwind == 0 {
-		return fmt.Errorf("capture_blocks requires --block=<from> and --unwind=<count>")
-	}
-	from, to := block, block+unwind-1
-	dirs := datadir.New(datadirCli)
-	_, clean, engine, _, _ := newSync(ctx, db, nil /* miningConfig */, logger)
-	defer clean()
-	defer engine.Close()
-
-	chainConfig := fromdb.ChainConfig(db)
-	blockReader, _ := blocksIO(db, logger)
-
-	tx, err := db.BeginTemporalRo(ctx)
-	if err != nil {
-		return err
-	}
-	defer tx.Rollback()
-
-	rf := &blockreplay.RangeFixture{}
-	for n := from; n <= to; n++ {
-		fx, err := blockreplay.Capture(ctx, tx, blockReader, chainConfig, engine, n, logger)
-		if err != nil {
-			return fmt.Errorf("capture block %d: %w", n, err)
-		}
-		rf.Blocks = append(rf.Blocks, fx)
-	}
-	rf.Outputs, err = blockreplay.MergeRangeOutputs(ctx, tx, blockReader, rf.Blocks, to)
-	if err != nil {
-		return err
-	}
-	// Per-block Outputs are redundant once the range-final Outputs is captured;
-	// drop them so the fixture stays small.
-	for _, b := range rf.Blocks {
-		b.Outputs = nil
-	}
-
-	out := filepath.Join(dirs.DataDir, fmt.Sprintf("range-%d-%d.gob", from, to))
-	if err := rf.Save(out); err != nil {
-		return err
-	}
-	logger.Info("[capture_blocks] range fixture written", "from", from, "to", to, "path", out,
-		"blocks", len(rf.Blocks), "outAccounts", len(rf.Outputs.Accounts), "outStorage", len(rf.Outputs.Storage))
 	return nil
 }
 
@@ -1114,7 +1065,8 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 
 	br, _ := blocksIO(db, logger)
 	cfg := stagedsync.StageTxLookupCfg(pm, dirs.Tmp, br)
-	if unwind > 0 {
+	switch {
+	case unwind > 0:
 		if unwind > s.BlockNumber {
 			return errors.New("cannot unwind past 0")
 		}
@@ -1124,7 +1076,7 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 		if err != nil {
 			return err
 		}
-	} else if pruneTo > 0 {
+	case pruneTo > 0:
 		p, err := sync.PruneStageState(stages.TxLookup, s.BlockNumber, tx, true)
 		if err != nil {
 			return err
@@ -1133,7 +1085,7 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 		if err != nil {
 			return err
 		}
-	} else {
+	default:
 		err = stagedsync.SpawnTxLookup(s, tx, block, cfg, ctx, logger)
 		if err != nil {
 			return err
@@ -1206,6 +1158,9 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 			return
 		}
 		aggOpts := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings)
+		if reset {
+			aggOpts = aggOpts.SkipFilesDBGapCheck()
+		}
 		_aggSingleton = aggOpts.MustOpen(ctx, db)
 
 		_aggSingleton.SetProduceMod(snapCfg.ProduceE3)
@@ -1386,9 +1341,10 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 	var heimdallClient heimdall.Client
 	var bridgeClient bridge.Client
 	var rulesConfig any
-	if cc.Aura != nil {
+	switch {
+	case cc.Aura != nil:
 		rulesConfig = &config.Aura
-	} else if cc.Bor != nil {
+	case cc.Bor != nil:
 		rulesConfig = cc.Bor
 		config.HeimdallURL = HeimdallURL
 		if !config.WithoutHeimdall {
@@ -1422,7 +1378,7 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 			Logger:    logger,
 		})
 
-	} else {
+	default:
 		rulesConfig = &config.Ethash
 	}
 	return rulesconfig.CreateRulesEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, rulesConfig,

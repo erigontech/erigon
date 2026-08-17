@@ -124,7 +124,7 @@ type ExecutionModule interface {
 	// InsertBlocks stores one or more blocks in the execution layer.
 	// Returns ExecutionStatusSuccess on success or a non-success status on
 	// rejection (e.g. ExecutionStatusTooFarAway).
-	InsertBlocks(ctx context.Context, blocks []*types.RawBlock) (ExecutionStatus, error)
+	InsertBlocks(ctx context.Context, blocks []*types.Block) (ExecutionStatus, error)
 
 	// --- Chain validation -------------------------------------------------
 

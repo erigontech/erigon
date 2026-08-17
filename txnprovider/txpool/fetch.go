@@ -741,7 +741,7 @@ func (f *Fetch) receivePeer(sentryClient sentryproto.SentryClient) error {
 		if req == nil {
 			return nil
 		}
-		if err = f.handleNewPeer(req); err != nil {
+		if err := f.handleNewPeer(req); err != nil {
 			return err
 		}
 		if f.wg != nil {

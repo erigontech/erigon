@@ -204,7 +204,7 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 	}
 
 	// Get the beacon block root for this slot from fork choice
-	headRoot, headSlot, _, err := a.getHead()
+	headRoot, headSlot, _, err := a.getSelectedHead()
 	if err != nil {
 		return nil, err
 	}
@@ -1050,7 +1050,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeBySlot(w http.Resp
 func (a *ApiHandler) blockRootFromBlockId(blockId *beaconhttp.SegmentID) (common.Hash, error) {
 	switch {
 	case blockId.Head():
-		root, _, _, err := a.getHead()
+		root, _, _, err := a.getSelectedHead()
 		return root, err
 	case blockId.Finalized():
 		// Get finalized root from fork choice

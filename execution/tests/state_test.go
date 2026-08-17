@@ -86,7 +86,7 @@ func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
 						return sdErr
 					}
 					defer sd.Close()
-					_, _, err = test.Run(t, sd, tx, subtest, vmconfig, dirs)
+					_, _, err = test.Run(t, sd, tx, subtest, vmconfig)
 					tx.Rollback()
 					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors

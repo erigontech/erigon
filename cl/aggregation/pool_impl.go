@@ -84,7 +84,9 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 		defer p.aggregatesLock.Unlock()
 		att, ok := p.aggregates[hashRoot]
 		if !ok {
-			p.aggregates[hashRoot] = inAtt.Copy()
+			storedAttestation := inAtt.Copy()
+			storedAttestation.SetVersion(clversion)
+			p.aggregates[hashRoot] = storedAttestation
 			return nil
 		}
 
@@ -111,19 +113,21 @@ func (p *aggregationPoolImpl) AddAttestation(inAtt *solid.Attestation) error {
 			return err
 		}
 		// update attestation
-		p.aggregates[hashRoot] = &solid.Attestation{
+		mergedAttestation := &solid.Attestation{
 			AggregationBits: mergedBits,
 			Data:            att.Data,
 			Signature:       mergedSig,
 		}
+		mergedAttestation.SetVersion(clversion)
+		p.aggregates[hashRoot] = mergedAttestation
 	} else {
 		// Electra and after case, aggregate by committee
-		p.aggregateByCommittee(inAtt)
+		return p.aggregateByCommittee(inAtt, clversion)
 	}
 	return nil
 }
 
-func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation) error {
+func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation, version clparams.StateVersion) error {
 	indices := inAtt.CommitteeBits.GetOnIndices()
 	if len(indices) != 1 {
 		// it's composed of multiple committees, so ignore
@@ -140,7 +144,9 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation) err
 	}
 	att, exist := p.aggregatesInCommittee.Get(key)
 	if !exist {
-		p.aggregatesInCommittee.Add(key, inAtt)
+		storedAttestation := inAtt.Copy()
+		storedAttestation.SetVersion(version)
+		p.aggregatesInCommittee.Add(key, storedAttestation)
 		return nil
 	}
 
@@ -164,12 +170,14 @@ func (p *aggregationPoolImpl) aggregateByCommittee(inAtt *solid.Attestation) err
 	}
 	var mergedSig [96]byte
 	copy(mergedSig[:], merged)
-	p.aggregatesInCommittee.Add(key, &solid.Attestation{
+	mergedAttestation := &solid.Attestation{
 		AggregationBits: mergedAggrBits,
 		CommitteeBits:   att.CommitteeBits,
 		Data:            att.Data,
 		Signature:       mergedSig,
-	})
+	}
+	mergedAttestation.SetVersion(version)
+	p.aggregatesInCommittee.Add(key, mergedAttestation)
 	return nil
 }
 

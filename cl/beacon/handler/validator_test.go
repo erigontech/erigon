@@ -201,7 +201,7 @@ func (t *validatorTestSuite) TestGetEthV1ValidatorAggregateAttestation() {
 	for _, tc := range tests {
 		log.Printf("test case: %s", tc.name)
 		tc.mock()
-		req, err := http.NewRequest(tc.method, tc.url, nil)
+		req, err := http.NewRequestWithContext(t.T().Context(), tc.method, tc.url, nil)
 		t.NoError(err)
 		rr := httptest.NewRecorder()
 		t.apiHandler.ServeHTTP(rr, req)

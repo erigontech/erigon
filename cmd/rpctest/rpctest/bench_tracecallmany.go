@@ -36,18 +36,13 @@ func BenchTraceCallMany(erigonURL, oeURL string, needCompare bool, blockFrom uin
 	}
 	defer cleanup()
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		b, skip, err := fetchBlock(reqGen, bn, false, nil)
 		if err != nil {

@@ -161,13 +161,14 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, logger log.Logger) rules.Engine {
 	var consensusConfig any
 
-	if chainConfig.Aura != nil {
+	switch {
+	case chainConfig.Aura != nil:
 		consensusConfig = chainConfig.Aura
-	} else if chainConfig.Bor != nil {
+	case chainConfig.Bor != nil:
 		consensusConfig = chainConfig.Bor
-	} else if chainConfig.L2 != nil {
+	case chainConfig.L2 != nil:
 		consensusConfig = chainConfig.L2
-	} else {
+	default:
 		var ethashCfg ethashcfg.Config
 		ethashCfg.PowMode = ethashcfg.ModeFake
 		consensusConfig = &ethashCfg

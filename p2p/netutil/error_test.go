@@ -29,12 +29,14 @@ import (
 // errors that result from receiving a UDP packet larger
 // than the supplied receive buffer.
 func TestIsPacketTooBig(t *testing.T) {
-	listener, err := net.ListenPacket("udp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	listener, err := lc.ListenPacket(t.Context(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	sender, err := net.Dial("udp", listener.LocalAddr().String())
+	var dialer net.Dialer
+	sender, err := dialer.DialContext(t.Context(), "udp", listener.LocalAddr().String())
 	if err != nil {
 		t.Fatal(err)
 	}

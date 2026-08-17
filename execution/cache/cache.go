@@ -14,6 +14,26 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+// Package cache provides the process-global caches of latest committed state.
+//
+// StateCache holds the newest applied value per key for the accounts, storage
+// and code domains, so repeated GetLatest reads skip the file-accessor/MDBX
+// stack. It is not a snapshot and gives readers no isolation: a hit can be
+// newer than the reader's tx (snapshot-isolated caching is kvcache's job,
+// node/shards). In the forward direction its invariant is monotonicity:
+// content never regresses behind what has been applied. Unwinds invalidate
+// stored entries by a per-cache entry epoch and floor instead.
+//
+// StateCache itself has no data methods. A ReadView — bound to one tx's read
+// view and not outliving it — serves reads and fills (cache writes made on
+// behalf of a database reader after a miss); admission compares the view's
+// frontier — the exclusive txNum end of what its tx can see, so a view with
+// frontier N sees txNums < N — against the applied end. Publication disables
+// state fills while its authoritative update batch is incomplete, without
+// blocking cache reads or view binding.
+//
+// The Applier handle, held by the SharedDomains commit/unwind path, performs
+// the authoritative writes: post-commit publications, unwinds and clears.
 package cache
 
 // Cache is the interface for domain caches.
@@ -31,7 +51,7 @@ type Cache interface {
 	Put(key []byte, value []byte, txNum uint64)
 
 	// PutIfAbsent is Put except that a live entry for key is left untouched
-	// (a stale one is replaced) — for prefetch writers, whose snapshot may
+	// (a stale one is replaced) — for fill writers, whose read view may
 	// already be superseded by an authoritative Put.
 	PutIfAbsent(key []byte, value []byte, txNum uint64)
 

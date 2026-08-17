@@ -87,6 +87,17 @@ func convertExecutionWithdrawalsToConsensusWithdrawals(executionWithdrawal []*ty
 	return ret
 }
 
+// ConvertConsensusWithdrawalsToExecutionWithdrawals converts a withdrawal list to its execution
+// representation, in order and with no shared pointers. The result is never nil, which matters
+// because the execution layer rejects a nil list and an empty one under opposite conditions.
+func ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals []*Withdrawal) []*types.Withdrawal {
+	ret := make([]*types.Withdrawal, len(consensusWithdrawals))
+	for i, w := range consensusWithdrawals {
+		ret[i] = convertConsensusWithdrawalToExecutionWithdrawal(w)
+	}
+	return ret
+}
+
 // ExpectedWithdrawals represents the expected withdrawals for a beacon state
 type ExpectedWithdrawals struct {
 	Withdrawals                      []*Withdrawal `json:"withdrawals"`

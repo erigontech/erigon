@@ -32,6 +32,28 @@ func TestBuildAggregateAttestation(t *testing.T) {
 	require.Equal(t, testAttData().Slot, agg.Data.Slot)
 }
 
+func TestBuildAggregateAttestationUsesSlotForkVersion(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	single := &solid.SingleAttestation{
+		Data:      testAttData(),
+		Signature: common.Bytes96{0x01},
+	}
+
+	aggregate := buildAggregateAttestation(single, 0, 4, &cfg)
+	got, err := aggregate.HashSSZ()
+	require.NoError(t, err)
+	want, err := aggregate.HashSSZProgressive()
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
 // TestSignedAggregateAndProof_RoundTrip verifies a SignedAggregateAndProof
 // marshals to JSON that decodes back into the exact type the validator
 // aggregate_and_proofs endpoint expects.

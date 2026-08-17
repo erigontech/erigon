@@ -71,6 +71,10 @@ func (o *OperationPool[K, T]) Raw() []T {
 	return o.pool.Values()
 }
 
+func (o *OperationPool[K, T]) Len() int {
+	return o.pool.Len()
+}
+
 func (o *OperationPool[K, T]) Get(k K) (T, bool) {
 	return o.pool.Get(k)
 }

@@ -1968,13 +1968,28 @@ func (pe *parallelExecutor) dispatchRunSelfLoop(be *blockExecutor, tv *taskVersi
 			case <-pe.workersCtx.Done():
 			}
 		}
+		// A worker must never vanish on a fatal condition — a panic, or exhausting
+		// its re-execution incarnation budget without ever reaching a settled
+		// verdict. Either way the exec loop would wait forever for a result that
+		// never arrives (a whole-executor deadlock). Convert both into a fatal
+		// result so the block fails and the error propagates to the loop.
+		sendFatal := func(err error) {
+			send(&exec.TxResult{Task: tv, Err: err})
+		}
+		defer func() {
+			if rec := recover(); rec != nil {
+				sendFatal(fmt.Errorf("self-loop worker panic (block %d tx %d): %v\n%s",
+					be.blockNum, tv.index, rec, dbg.Stack()))
+			}
+		}()
 		if !acquire() {
 			return
 		}
 		bumpInc := func() bool {
 			tv.version.Incarnation++
 			if tv.version.Incarnation > len(be.tasks)+8 {
-				pe.logger.Warn("[self-loop] incarnation limit exceeded", "block", be.blockNum, "tx", tv.index, "inc", tv.version.Incarnation)
+				sendFatal(fmt.Errorf("%w: block %d tx %d exceeded the self-loop incarnation limit (%d) without a settled verdict",
+					rules.ErrInvalidBlock, be.blockNum, tv.index, len(be.tasks)+8))
 				return false
 			}
 			return true
@@ -2458,6 +2473,24 @@ func (result *execResult) calcFees(
 				},
 				Val: addrAcc,
 			})
+			// When the fee credit revives a coinbase absent from the committed
+			// domain (self-destructed earlier, no re-create), a CodeHashPath read
+			// resolves from its own cell, not the AddressPath account — so without
+			// this sibling it reads back as absent (NilCodeHash) instead of the
+			// revived account's EmptyCodeHash. Gated to the revival case
+			// (coinbaseAcc == nil): a coinbase present in the domain reads its code
+			// hash correctly there, and emitting a cell would add a spurious entry
+			// to the EIP-7928 block access list for an ordinary fee credit.
+			if coinbaseAcc == nil {
+				addWrites.SetCodeHash(result.Coinbase, &state.VersionedWrite[accounts.CodeHash]{
+					WriteHeader: state.WriteHeader{
+						Address: result.Coinbase,
+						Path:    state.CodeHashPath,
+						Version: taskVersion,
+					},
+					Val: addrAcc.CodeHash,
+				})
+			}
 		}
 	}
 	if hasBurnt && newBurntBalance != oldBurntBalance {
@@ -2908,21 +2941,6 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	}
 }
 
-// tooManyRetries returns an invalid-block result when tx has exceeded its
-// retry budget, otherwise nil. origin may be nil (validator-invalid path)
-// or carry the worker's underlying error.
-func (be *blockExecutor) tooManyRetries(tx, txIndex int, label string, origin error) *blockResult {
-	if be.txIncarnations[tx] <= len(be.tasks) {
-		return nil
-	}
-	if origin != nil {
-		return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w: too many %s retries: %d, expected: %d",
-			rules.ErrInvalidBlock, be.blockNum, txIndex, be.tasks[tx].TxHash(), origin, label, be.txIncarnations[tx], len(be.tasks)))
-	}
-	return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: too many %s retries: %d, expected: %d",
-		rules.ErrInvalidBlock, be.blockNum, txIndex, be.tasks[tx].TxHash(), label, be.txIncarnations[tx], len(be.tasks)))
-}
-
 // finalizeValidatedTx runs the in-order finalize tail for a validated tx:
 // receipt cumulative-gas offsets, block-gas accounting, finalize (receipt +
 // any system-tx writes), write normalization, and queueing for publish. The
@@ -2963,7 +2981,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 
 	if txn := txTask.Tx(); txn != nil {
 		regularContribution, stateContribution := protocol.InclusionContributions(txn.GetGasLimit(), txTask.Rules().IsAmsterdam)
-		if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution); err != nil {
+		if err := protocol.CheckBlockGasInclusion(be.gasPool, regularContribution, stateContribution, txn.GetBlobGas()); err != nil {
 			return be.invalidBlockResult(fmt.Errorf("%w: block gas used overflow at block=%d txIdx=%d: %w", rules.ErrInvalidBlock, be.blockNum, txVersion.TxIndex, err)), nil
 		}
 	}

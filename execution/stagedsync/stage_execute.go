@@ -305,7 +305,7 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 			if dbg.TraceUnwinds && dbg.TraceDomain(uint16(kv.AccountsDomain)) {
 				address := entry.Key[:len(entry.Key)-8]
 				keyStep := ^binary.BigEndian.Uint64([]byte(entry.Key[len(entry.Key)-8:]))
-				if entry.Value != nil && len(entry.Value) > 0 {
+				if entry.Value != nil && len(entry.Value) > 0 { //nolint:gocritic
 					var account accounts.Account
 					if err := accounts.DeserialiseV3(&account, entry.Value); err == nil {
 						fmt.Printf("unwind (Block:%d,Tx:%d): acc %x: {Balance: %d, Nonce: %d, Inc: %d, CodeHash: %x}, step: %d\n", blockUnwindTo, txUnwindTo, address, &account.Balance, account.Nonce, account.Incarnation, account.CodeHash, keyStep)
@@ -359,7 +359,7 @@ func stageProgress(tx kv.Tx, db kv.RoDB, stage stages.SyncStage) (prevStageProgr
 			return prevStageProgress, err
 		}
 	} else {
-		if err = db.View(context.Background(), func(tx kv.Tx) error {
+		if err := db.View(context.Background(), func(tx kv.Tx) error {
 			prevStageProgress, err = stages.GetStageProgress(tx, stage)
 			if err != nil {
 				return err
@@ -547,7 +547,7 @@ func UnwindExecutionStage(u *UnwindState, s *StageState, doms *execctx.SharedDom
 		return err
 	}
 
-	if err = u.Done(rwTx); err != nil {
+	if err := u.Done(rwTx); err != nil {
 		return err
 	}
 
@@ -692,7 +692,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 			"initialCycle", s.CurrentSyncCycle.IsInitialCycle,
 		)
 	}
-	if err = s.Done(tx); err != nil {
+	if err := s.Done(tx); err != nil {
 		return err
 	}
 	return nil

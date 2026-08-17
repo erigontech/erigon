@@ -350,7 +350,7 @@ func (req *requestGenerator) rpcClient(ctx context.Context) (*rpc.Client, error)
 func post(ctx context.Context, client *http.Client, url, method, request string, response any, logger log.Logger) error {
 	start := time.Now()
 
-	req, err := http.NewRequest("POST", url, strings.NewReader(request))
+	req, err := http.NewRequestWithContext(ctx, "POST", url, strings.NewReader(request))
 	if err != nil {
 		return err
 	}

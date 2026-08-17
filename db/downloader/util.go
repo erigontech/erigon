@@ -328,7 +328,7 @@ func savePeerID(db kv.RwDB, peerID torrent.PeerID) error {
 }
 
 func readPeerID(db kv.RoDB) (peerID []byte, err error) {
-	if err = db.View(context.Background(), func(tx kv.Tx) error {
+	if err := db.View(context.Background(), func(tx kv.Tx) error {
 		peerIDFromDB, err := tx.GetOne(kv.BittorrentInfo, []byte(kv.BittorrentPeerID))
 		if err != nil {
 			return fmt.Errorf("get peer id: %w", err)

@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 )
 
@@ -476,7 +476,7 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	slot := cfg.SlotsPerEpoch // = 32
 
 	// ---- Genesis state (mainnet has real validators) ----
-	genesisState, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	genesisState, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	numValidators := uint64(genesisState.ValidatorLength())
 
@@ -624,7 +624,7 @@ func TestReadHistoricalState_GloasFieldsReconstruction(t *testing.T) {
 	compressedPEW := compressRawSSZ(t, pewSSZ)
 
 	// ---- Populate memdb ----
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()

@@ -642,7 +642,7 @@ func (h *handshakeState) sealEIP8(msg any) ([]byte, error) {
 	binary.BigEndian.PutUint16(prefix, uint16(len(h.wbuf.data)+eciesOverhead))
 
 	enc, err := ecies.Encrypt(rand.Reader, h.remote, h.wbuf.data, nil, prefix)
-	return append(prefix, enc...), err
+	return append(prefix, enc...), err //nolint:makezero
 }
 
 // importPublicKey unmarshals 64 or 65 bytes long public keys.

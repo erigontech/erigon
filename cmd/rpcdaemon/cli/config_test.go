@@ -33,7 +33,7 @@ import (
 
 // TestIsWebsocket tests if an incoming websocket upgrade request is detected properly.
 func TestIsWebsocket(t *testing.T) {
-	r, _ := http.NewRequest("GET", "/", nil)
+	r, _ := http.NewRequestWithContext(t.Context(), "GET", "/", nil)
 
 	require.False(t, isWebsocket(r))
 	r.Header.Set("upgrade", "websocket")

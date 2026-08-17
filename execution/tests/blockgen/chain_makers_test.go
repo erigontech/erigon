@@ -69,7 +69,7 @@ func TestGenerateChain(t *testing.T) {
 	// each block and adds different features to gen based on the
 	// block index.
 	signer := types.LatestSignerForChainID(nil)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(5, func(i int, gen *blockgen.BlockGen) {
 		switch i {
 		case 0:
 			// In block 1, addr1 sends addr2 some ether.
@@ -203,4 +203,26 @@ func TestGenerateChain(t *testing.T) {
 		t.Errorf("block 2 receipt 2 cumulative gas: got %d, want 42000", block2Receipts[1].CumulativeGasUsed)
 	}
 
+}
+
+func TestGenerateChainAttachesBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
+
+	chainPack, err := m.GenerateChain(1, nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+
+	block := chainPack.TopBlock
+	if len(block.BlockAccessList()) == 0 {
+		t.Fatal("generated block does not carry its block access list")
+	}
+	bal, err := types.DecodeBlockAccessListBytes(block.BlockAccessList())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got, want := bal.Hash(), block.BlockAccessListHash(); want == nil || got != *want {
+		t.Fatalf("block access list hash mismatch: got %s, want %v", got, want)
+	}
 }

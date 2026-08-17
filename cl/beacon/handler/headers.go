@@ -132,7 +132,7 @@ func (a *ApiHandler) getHeader(w http.ResponseWriter, r *http.Request) (*beaconh
 
 	return newBeaconResponse(&headerResponse{
 		Root:      root,
-		Canonical: canonicalRoot == root,
+		Canonical: blockId.Head() || canonicalRoot == root,
 		Header:    signedHeader,
 	}).WithFinalized(canonicalRoot == root && signedHeader.Header.Slot <= a.forkchoiceStore.FinalizedSlot()).
 		WithOptimistic(a.forkchoiceStore.IsRootOptimistic(root)), nil

@@ -17,11 +17,13 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package chainspec
+package chainspec_test
 
 import (
 	"reflect"
 	"testing"
+
+	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 
 	"github.com/stretchr/testify/assert"
 
@@ -105,7 +107,7 @@ func TestCheckCompatible(t *testing.T) {
 }
 
 func TestMainnetBlobSchedule(t *testing.T) {
-	c := Mainnet.Config
+	c := chainspec.Mainnet.Config
 	// Original EIP-4844 values
 	time := *c.CancunTime
 	assert.Equal(t, uint64(6), c.GetMaxBlobsPerBlock(time))
@@ -120,7 +122,7 @@ func TestMainnetBlobSchedule(t *testing.T) {
 }
 
 func TestGnosisBlobSchedule(t *testing.T) {
-	c := Gnosis.Config
+	c := chainspec.Gnosis.Config
 
 	// Cancun values
 	time := *c.CancunTime
@@ -128,7 +130,7 @@ func TestGnosisBlobSchedule(t *testing.T) {
 	assert.Equal(t, uint64(1), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time))
 
-	// should remain the same in Pectra for Gnosis
+	// should remain the same in Pectra for chainspec.Gnosis
 	assert.Equal(t, uint64(2), c.GetMaxBlobsPerBlock(time))
 	assert.Equal(t, uint64(1), c.GetTargetBlobsPerBlock(time))
 	assert.Equal(t, uint64(1112826), c.GetBlobGasPriceUpdateFraction(time))

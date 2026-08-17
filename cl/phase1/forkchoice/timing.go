@@ -329,54 +329,6 @@ func (f *ForkChoiceStore) isHeadWeakWith(root common.Hash, checkpointState *chec
 	return weight < reorgThreshold
 }
 
-// isParentStrong returns true if the parent of the block with the given root has
-// sufficient attestation support (above the REORG_PARENT_WEIGHT_THRESHOLD).
-//
-// Spec (GLOAS fork-choice.md):
-//
-//	parent_threshold = calculate_committee_fraction(justified_state, REORG_PARENT_WEIGHT_THRESHOLD)
-//	block = store.blocks[root]
-//	parent_payload_status = get_parent_payload_status(store, block)
-//	parent_node = ForkChoiceNode(root=block.parent_root, payload_status=parent_payload_status)
-//	parent_weight = get_attestation_score(store, parent_node, justified_state)
-//	return parent_weight > parent_threshold
-//
-// [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) isParentStrong(root common.Hash) bool {
-	justifiedCheckpoint := f.JustifiedCheckpoint()
-	checkpointState, err := f.getCheckpointState(justifiedCheckpoint)
-	if err != nil || checkpointState == nil {
-		return false
-	}
-
-	// Calculate parent threshold: committee_weight * REORG_PARENT_WEIGHT_THRESHOLD / 100
-	committeeWeight := checkpointState.activeBalance / f.beaconCfg.SlotsPerEpoch
-	parentThreshold := committeeWeight * clparams.ReorgParentWeightThreshold / 100
-
-	// Get the block to determine parent payload status
-	block, ok := f.forkGraph.GetBlock(root)
-	if !ok || block == nil {
-		return false
-	}
-
-	// Get parent payload status and construct parent node
-	parentPayloadStatus := f.getParentPayloadStatus(block.Block)
-	parentNode := ForkChoiceNode{
-		Root:          block.Block.ParentRoot,
-		PayloadStatus: parentPayloadStatus,
-	}
-
-	// Get parent weight using WeightStore
-	ws := NewWeightStore(f)
-	parentWeight := ws.GetAttestationScore(parentNode)
-
-	return parentWeight > parentThreshold
-}
-
-func (f *ForkChoiceStore) isShufflingStable(slot uint64) bool {
-	return slot%f.beaconCfg.SlotsPerEpoch != 0
-}
-
 // getBlockTimeliness returns the timeliness vector for a block root.
 // Returns (timeliness, true) if found, or (zero value, false) if not tracked.
 func (f *ForkChoiceStore) getBlockTimeliness(root common.Hash) ([clparams.NumBlockTimelinessDeadlines]bool, bool) {

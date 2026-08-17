@@ -38,6 +38,39 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+func TestAggregateAndProofServiceRejectsMalformedNestedInput(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	service := &aggregateAndProofServiceImpl{beaconCfg: &cfg}
+
+	tests := []struct {
+		name  string
+		input *SignedAggregateAndProofForGossip
+	}{
+		{"nil wrapper", nil},
+		{"nil signed message", &SignedAggregateAndProofForGossip{}},
+		{"nil message", &SignedAggregateAndProofForGossip{SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{}}},
+		{"nil aggregate", &SignedAggregateAndProofForGossip{SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{Message: &cltypes.AggregateAndProof{}}}},
+		{"nil data", &SignedAggregateAndProofForGossip{SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{Message: &cltypes.AggregateAndProof{Aggregate: &solid.Attestation{}}}}},
+		{"nil aggregation bits", &SignedAggregateAndProofForGossip{SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{Message: &cltypes.AggregateAndProof{Aggregate: &solid.Attestation{Data: &solid.AttestationData{}}}}}},
+		{"nil committee bits", &SignedAggregateAndProofForGossip{SignedAggregateAndProof: &cltypes.SignedAggregateAndProof{Message: &cltypes.AggregateAndProof{Aggregate: &solid.Attestation{Data: &solid.AttestationData{}, AggregationBits: solid.NewBitList(0, 1)}}}}},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.NotPanics(t, func() {
+				require.Error(t, service.ProcessMessage(context.Background(), nil, test.input))
+			})
+		})
+	}
+}
+
 func getAggregateAndProofAndState(t *testing.T) (*SignedAggregateAndProofForGossip, *state.CachingBeaconState) {
 	_, _, s := tests.GetBellatrixRandom()
 	br, _ := s.BlockRoot()

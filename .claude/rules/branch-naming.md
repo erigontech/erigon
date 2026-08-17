@@ -3,7 +3,7 @@
 ## Release branches
 
 - `release/3.4` — Stable 3.4.x
-- `release/3.5` — Stable 3.5.x (current — v3.5.3 is the Latest release)
+- `release/3.5` — Stable 3.5.x (current — v3.5.5 is the Latest release)
 - `release/3.6` — Upcoming 3.6.x (release-candidate stage: v3.6.0-rc.1 is a draft)
 - `main` — Next feature release (3.7)
 

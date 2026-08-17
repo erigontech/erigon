@@ -31,7 +31,7 @@ func init() {
 	for _, v := range AllStages {
 		SyncMetrics[v] = metrics.GetOrCreateGauge(
 			fmt.Sprintf(
-				`sync{stage="%s"}`,
+				`sync{stage=%q}`,
 				xstrings.ToSnakeCase(string(v)),
 			),
 		)

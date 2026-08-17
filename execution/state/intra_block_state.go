@@ -494,6 +494,20 @@ func (sdb *IntraBlockState) AddLog(log *types.Log) {
 	sdb.logs[sdb.txIndex+1] = append(sdb.logs[sdb.txIndex+1], log)
 }
 
+// AllocLog returns a fresh log for addr pre-sized for numTopics topics and
+// dataSize data bytes; the LOG opcodes fill Topics/Data then call NotifyLog.
+func (sdb *IntraBlockState) AllocLog(addr common.Address, numTopics, dataSize int) *types.Log {
+	return &types.Log{
+		Address: addr,
+		Topics:  make([]common.Hash, numTopics),
+		Data:    make([]byte, dataSize),
+	}
+}
+
+func (sdb *IntraBlockState) NotifyLog(lp *types.Log) {
+	sdb.AddLog(lp)
+}
+
 func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumber uint64, blockHash common.Hash) types.Logs {
 	if txIndex+1 >= len(sdb.logs) {
 		return nil
@@ -524,9 +538,9 @@ func (sdb *IntraBlockState) Logs() types.Logs {
 	return logs
 }
 
-// LogsRlpHash is rlpHash of Logs, without building the flattened slice.
+// LogsRlpHash is rlpHash of Logs.
 func (sdb *IntraBlockState) LogsRlpHash() common.Hash {
-	return types.RlpHashLogs(sdb.logs)
+	return types.RlpHashLogs(sdb.Logs())
 }
 
 // AddRefund adds gas to the refund counter
@@ -573,8 +587,6 @@ func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 	return readAccount != nil, nil
 }
 
-var emptyAccount = accounts.NewAccount()
-
 // Empty returns whether the state object is either non-existent
 // or empty according to the EIP161 specification (balance = nonce = code = 0)
 func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error) {
@@ -603,7 +615,7 @@ func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error)
 		sdb.touchAccount(addr)
 		// Do NOT call accountRead here: versionedAccountBase already recorded
 		// the AddressPath read (via versionedReadCore) with Val=nil.  Calling
-		// accountRead(&emptyAccount) would overwrite that nil with a non-nil
+		// accountRead with an empty account would overwrite that nil with a non-nil
 		// pointer to an empty Account.  Downstream code (getBalance →
 		// versionedReadCore for BalancePath → recursive AddressPath lookup) treats
 		// non-nil as "account exists", creating a stateObject instead of going
@@ -1295,7 +1307,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 		// stale nonce/codeHash flows through the per-field refresh (which
 		// only overwrites fields a versionMap cell exists for), so Empty()
 		// returns false and the EVM misses CallNewAccountGas.
-		if destroyed, _, revived := sdb.versionMap.AccountLifecycle(addr, sdb.txIndex); destroyed && !revived {
+		if sdb.versionMap.IsNetAbsent(addr, sdb.txIndex) {
 			return nil, StorageRead, UnknownVersion, nil
 		}
 	}
@@ -3096,8 +3108,7 @@ func (sdb *IntraBlockState) accountLifecycle(addr accounts.Address) (destroyed b
 	if own, ok := sdb.versionedWriteSelfDestruct(addr); ok {
 		return own
 	}
-	d, _, revived := sdb.versionMap.AccountLifecycle(addr, sdb.txIndex)
-	return d && !revived
+	return sdb.versionMap.IsNetAbsent(addr, sdb.txIndex)
 }
 
 func (sdb *IntraBlockState) versionedWriteSelfDestruct(addr accounts.Address) (bool, bool) {

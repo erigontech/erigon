@@ -30,17 +30,18 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// maxFoldConcurrency caps the whale-storage fold fan-out at the CPUs the process
-// may run on. The account-mount and whale-storage fan-outs nest, so an unshared
-// per-level limit of numWorkers permits ~numWorkers² runnable leaf goroutines; one
-// shared budget of this size caps that product. GOMAXPROCS, not numWorkers, which
-// would starve cores when numWorkers < GOMAXPROCS and several whales fold at once.
+// hk is copied off the walk path; pk and upd still reference the caller's storage.
+type touchedKey struct {
+	hk  []byte
+	pk  []byte
+	upd *Update
+}
+
+// maxFoldConcurrency caps storage-leaf fold fan-out at the CPUs the process may run on.
 func maxFoldConcurrency() int { return max(1, runtime.GOMAXPROCS(0)) }
 
 func newFoldSem() *semaphore.Weighted { return semaphore.NewWeighted(int64(maxFoldConcurrency())) }
 
-// errStorageBaseNotBranch: no on-disk branch exactly at the account prefix (its
-// storage top is a deeper extension); callers fall back to streaming recursion.
 var errStorageBaseNotBranch = errors.New("streaming: storage base has no branch at account prefix")
 
 // Seed the base from the real on-disk branch, not a hand-seed, so untouched first-nibble subtrees survive instead of dropping and diverging the root from the sequential trie.
@@ -65,18 +66,17 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	seedEmptyStorageBase(base, accPrefix)
 	d := int16(len(accPrefix))
 
-	branch, err := base.branchFromCacheOrDB(nibbles.HexToCompact(accPrefix))
+	branch, err := base.branchFromCacheOrDB(nibbles.HexToCompactInto(base.compactKeyBuf[:], accPrefix))
 	if err != nil {
 		return err
 	}
 	if len(branch) == 0 {
 		return errStorageBaseNotBranch
 	}
-	// A stored branch is always >= 4 bytes (touchMap+afterMap); a shorter non-empty read is corrupt, not missing.
 	if len(branch) < 4 {
+		// A stored branch always carries touchMap+afterMap (4 bytes); shorter means corrupt, not missing.
 		return fmt.Errorf("unfoldStorageBase: corrupt branch record at %x: %d bytes", accPrefix, len(branch))
 	}
-	// A childless record is a collapse tombstone; rebuild from the account leaf, not this empty base.
 	if BranchData(branch).ChildCount() == 0 {
 		return errStorageBaseNotBranch
 	}
@@ -84,7 +84,6 @@ func unfoldStorageBase(base *HexPatriciaHashed, accPrefix []byte) error {
 	return base.decodeBranchIntoRow(0, d+1, branch[2:], false)
 }
 
-// Mounts the shared unfolded base so concurrent first-nibble workers fold against the same on-disk storage state.
 func foldStorageLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatriciaHashed, nib int, group []touchedKey) (cell, error) {
 	w.mountTo(base, nib)
 	for i := range group {
@@ -95,8 +94,6 @@ func foldStorageLeaf(ctx context.Context, w *HexPatriciaHashed, base *HexPatrici
 	return w.foldMounted(ctx, nib)
 }
 
-// isDeepStorageAccount reports whether node is an account leaf whose touched storage
-// is large and forked enough to fold concurrently.
 func isDeepStorageAccount(node *prefixNode, depth int) bool {
 	return depth == 64 && node.plainKey != nil &&
 		bits.OnesCount16(node.bitmap) >= 2 && node.subtreeCount > deepStorageThreshold
@@ -128,8 +125,6 @@ func dfsSubtreeDeep(w *HexPatriciaHashed, node *prefixNode, path []byte, storage
 		if !errors.Is(err, errStorageBaseNotBranch) {
 			return fmt.Errorf("storageRoot: %w", err)
 		}
-		// fall through to normal streaming recursion, which recovers the untouched
-		// on-disk siblings via per-key unfolds
 	}
 
 	childIdx := 0
@@ -158,9 +153,6 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 	base, releaseBase := newWorker(ctx)
 	defer releaseBase()
 
-	// Tag this account's storage-fold workers with its address so one account's
-	// fold can be grepped out of the interleaved parallel trace. Only paid for
-	// when tracing is on (base.traceW mirrors every worker's trace state).
 	var accTag string
 	if base.traceW != nil {
 		accID := node.plainKey
@@ -228,10 +220,6 @@ func foldStorageRoot(ctx context.Context, sem *semaphore.Weighted, newWorker fun
 	if deferred := base.TakeDeferredUpdates(); len(deferred) > 0 {
 		pu.appendDeferred(deferred)
 	}
-	// A storage-less account must leave the account leaf's storage-root hashLen at 0, not
-	// empty.RootHash: computeCellHash supplies empty.RootHash at hash time, so the root is the
-	// same, but a stored hash makes needUnfolding descend into a storage-root branch that was
-	// never written, failing a later storage re-touch with "empty branch data read during unfold".
 	if sr.IsEmpty() {
 		return cell{}, nil
 	}
@@ -256,30 +244,23 @@ func aggregateMountedStorageRoot(base *HexPatriciaHashed, children *[16]cell, bi
 		base.activeRows = 0
 		return cell{}, nil
 	}
-	// A single surviving first-nibble child is an extension/leaf storage root; base.fold() would
-	// misencode it by prepending the account prefix and returning the child hash, so build it directly.
 	if kind, _ := afterMapUpdateKind(base.afterMap[0]); kind == updateKindPropagate {
 		return storageRootFromSingleChild(base)
 	}
 	if err := base.fold(); err != nil {
 		return cell{}, err
 	}
-	// A multi-child storage root's subtree persists as branch records, so the account leaf references
-	// it by hash without an extension; a single-child collapse (handled above) carries one instead.
 	out := base.root
 	out.extLen = 0
 	return out, nil
 }
 
-// storageRootFromSingleChild builds the storage root for a single-surviving-child collapse — an
-// extension over a branch survivor, or the survivor leaf itself — without the account prefix.
 func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 	survNib := bits.TrailingZeros16(base.afterMap[0])
 	child := base.grid[0][survNib]
 
-	// The prior on-disk branch at the account prefix, if any, is now an extension: no branch record.
 	if base.branchBefore[0] {
-		if err := base.collectDeleteUpdate(nibbles.HexToCompact(base.currentKey[:base.currentKeyLen]), 0, true); err != nil {
+		if err := base.collectDeleteUpdate(nibbles.HexToCompactInto(base.compactKeyBuf[:], base.currentKey[:base.currentKeyLen]), 0); err != nil {
 			return cell{}, err
 		}
 	}
@@ -293,13 +274,11 @@ func storageRootFromSingleChild(base *HexPatriciaHashed) (cell, error) {
 		root.hashLen = child.hashLen
 		copy(root.hash[:], child.hash[:child.hashLen])
 	} else {
-		root = child // single storage leaf: rehashed from its full storage key at depth 64
+		root = child
 	}
 	return root, nil
 }
 
-// newDeferredStorageWorker yields a pooled trie worker for a deferring storage fold
-// and a release that returns it to the pool and frees its context.
 func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg TrieConfig, factory TrieContextFactory, traceW io.Writer) (*HexPatriciaHashed, func()) {
 	w := NewHexPatriciaHashed(accountKeyLen, nil, cfg)
 	wctx, cleanup := factory(ctx)
@@ -315,11 +294,28 @@ func newDeferredStorageWorker(ctx context.Context, accountKeyLen int16, cfg Trie
 	}
 }
 
-// collectSubtreeKeys walks a subtree in sorted order; it copies each key's hashed
-// nibbles off the reused walk path but leaves plainKey/update aliased.
+// keyArena copies walk-path nibbles into chunked buffers so each collected key gets a stable slice.
+type keyArena struct {
+	buf       []byte
+	remaining int
+}
+
+const keyArenaChunk = 64 * 1024
+
+func (a *keyArena) copy(hk []byte) []byte {
+	if len(hk) > cap(a.buf)-len(a.buf) {
+		want := len(hk) * max(a.remaining, 1)
+		a.buf = make([]byte, 0, max(min(want, keyArenaChunk), len(hk)))
+	}
+	a.remaining--
+	start := len(a.buf)
+	a.buf = append(a.buf, hk...)
+	return a.buf[start:len(a.buf):len(a.buf)]
+}
+
 func collectSubtreeKeys(node *prefixNode, path []byte) []touchedKey {
 	out := make([]touchedKey, 0, node.subtreeCount)
-	var arena keyArena
+	arena := keyArena{remaining: int(node.subtreeCount)}
 	_ = dfsSubtree(node, path, func(hk, pk []byte, upd *Update) error {
 		out = append(out, touchedKey{hk: arena.copy(hk), pk: pk, upd: upd})
 		return nil

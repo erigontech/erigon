@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 	"testing"
 	"time"
@@ -182,6 +183,124 @@ func buildTestChainHeader(t *testing.T, m *execmoduletester.ExecModuleTester, bl
 	})
 	require.NoError(t, err)
 	return hash, headerRLP
+}
+
+func TestWitnessCacheStorePublishes(t *testing.T) {
+	cache := newWitnessResultCache(96, 0, false, false)
+	api := &DebugAPIImpl{witnessCache: cache}
+
+	ch := cache.subscribe()
+	defer cache.unsubscribe(ch)
+
+	hash := hashN(0x42)
+	enc := json.RawMessage(`{"state":["0x01"],"codes":[],"keys":[],"headers":[]}`)
+	api.storeWitness(7, hash, enc)
+
+	cached, ok := cache.Get(hash)
+	require.True(t, ok, "storeWitness must insert into the cache")
+	require.True(t, bytes.Equal(enc, cached.cachedJSON), "cached bytes must be the stored bytes")
+
+	select {
+	case push := <-ch:
+		require.Equal(t, uint64(7), push.num)
+		require.Equal(t, hash, push.hash)
+		require.True(t, bytes.Equal(enc, push.json), "pushed bytes must be the identical cached bytes")
+	case <-time.After(time.Second):
+		t.Fatal("storeWitness must publish to the feed")
+	}
+}
+
+// TestCacheAddAloneDoesNotPublish names the bypass the build paths are exposed to: the
+// promoted LRU Add caches without publishing, so a path that reaches for it directly
+// serves witnesses and pushes nothing. store is what couples the two.
+func TestCacheAddAloneDoesNotPublish(t *testing.T) {
+	cache := newWitnessResultCache(96, 0, false, false)
+	ch := cache.subscribe()
+	defer cache.unsubscribe(ch)
+
+	hash := hashN(0x77)
+	enc := json.RawMessage(`{"state":["0x02"],"codes":[],"keys":[],"headers":[]}`)
+
+	cache.Add(hash, &ExecutionWitnessResult{cachedJSON: enc})
+	require.True(t, cache.Contains(hash), "Add caches")
+	require.Empty(t, ch, "Add alone must not publish")
+
+	cache.store(9, hash, enc)
+	require.Len(t, ch, 1, "store caches and publishes")
+}
+
+// TestBuildPathsPublish pins the feed hookup on both build paths, durable and
+// head-capture. Either one can be refactored to insert into the cache directly
+// instead of through store, which stops the push with nothing else failing.
+func TestBuildPathsPublish(t *testing.T) {
+	t.Run("durable", func(t *testing.T) {
+		previousSchema := statecfg.Schema
+		statecfg.EnableHistoricalCommitment()
+		t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+		m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		require.NoError(t, m.DB.Update(ctx, func(tx kv.RwTx) error {
+			return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+		}))
+
+		cache := newWitnessResultCache(96, 0, false, false)
+		builder := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+		builder.witnessCache = cache
+
+		ch := cache.subscribe()
+		defer cache.unsubscribe(ch)
+
+		headerCh := make(chan [][]byte, 8)
+		builderDone := make(chan struct{})
+		go func() { defer close(builderDone); RunWitnessCacheBuilder(ctx, builder, headerCh) }()
+		defer func() { cancel(); <-builderDone }()
+
+		const blockNum = uint64(3)
+		hash, headerRLP := buildTestChainHeader(t, m, blockNum)
+		headerCh <- [][]byte{headerRLP}
+
+		requireBuildPublished(t, ch, cache, blockNum, hash)
+	})
+
+	t.Run("head-capture", func(t *testing.T) {
+		ctx := context.Background()
+		const buildNum = uint64(6)
+		m, pin, hash := insertHeadCaptureChain(t, ctx, buildNum)
+
+		api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+		api.witnessCache = newWitnessResultCache(96, 0, true, true)
+
+		ch := api.witnessCache.subscribe()
+		defer api.witnessCache.unsubscribe(ch)
+
+		next := api.buildAndCacheHeadCapture(ctx, pin, buildNum, hash)
+		defer next.close()
+
+		requireBuildPublished(t, ch, api.witnessCache, buildNum, hash)
+	})
+}
+
+// requireBuildPublished asserts a build published (num, hash) exactly once carrying the
+// bytes it cached. A witness that lands in the cache with no push is the bypass this
+// guards: the insert went somewhere other than store.
+func requireBuildPublished(t *testing.T, ch chan witnessPush, cache *witnessResultCache, num uint64, hash common.Hash) {
+	t.Helper()
+	select {
+	case push := <-ch:
+		require.Equal(t, num, push.num)
+		require.Equal(t, hash, push.hash)
+		cached, ok := cache.Get(hash)
+		require.True(t, ok, "a published witness must also be cached")
+		require.True(t, bytes.Equal(cached.cachedJSON, push.json), "pushed bytes must be the cached bytes")
+		require.Empty(t, ch, "one build publishes exactly once")
+	case <-time.After(30 * time.Second):
+		if cache.Contains(hash) {
+			t.Fatal("build cached the witness but never published it: this path inserts without going through store")
+		}
+		t.Fatal("build path produced no witness at all")
+	}
 }
 
 func TestDecidePin(t *testing.T) {

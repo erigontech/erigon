@@ -2,7 +2,6 @@ package state
 
 import (
 	"bytes"
-	"encoding/binary"
 	"io"
 	"maps"
 	"slices"
@@ -13,7 +12,6 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
-	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	witnesstypes "github.com/erigontech/erigon/execution/commitment/witness"
@@ -317,35 +315,6 @@ func (tds *TrieDbState) BuildStorageReads() common.StorageKeys {
 	return storageTouches
 }
 
-// buildStorageWrites builds a sorted list of all storage key hashes that were modified within the
-// period for which we are aggregating updates. It skips the updates that
-// were nullified by subsequent updates - best example is the
-// self-destruction of a contract, which nullifies all previous
-// modifications of the contract's storage. In such case, no storage
-// item updates would be inclided.
-func (tds *TrieDbState) buildStorageWrites() (common.StorageKeys, [][]byte) {
-	storageTouches := common.StorageKeys{}
-	for addrHash, m := range tds.aggregateBuffer.storageUpdates {
-		for keyHash := range m {
-			var storageKey common.StorageKey
-			copy(storageKey[:], addrHash[:])
-			binary.BigEndian.PutUint64(storageKey[length.Hash:], tds.aggregateBuffer.storageIncarnation[addrHash])
-			copy(storageKey[length.Hash+length.Incarnation:], keyHash[:])
-			storageTouches = append(storageTouches, storageKey)
-		}
-	}
-	storageTouches.Sort()
-	var addrHash common.Hash
-	var keyHash common.Hash
-	var values = make([][]byte, len(storageTouches))
-	for i, storageKey := range storageTouches {
-		copy(addrHash[:], storageKey[:])
-		copy(keyHash[:], storageKey[length.Hash+length.Incarnation:])
-		values[i] = tds.aggregateBuffer.storageUpdates[addrHash][keyHash]
-	}
-	return storageTouches, values
-}
-
 // Populate pending block proof so that it will be sufficient for accessing all storage slots in storageTouches
 func (tds *TrieDbState) PopulateStorageBlockProof(storageTouches common.StorageKeys) error { //nolint
 	for _, storageKey := range storageTouches {
@@ -358,10 +327,6 @@ func (tds *TrieDbState) PopulateStorageBlockProof(storageTouches common.StorageK
 
 func (tds *TrieDbState) BuildCodeTouches() map[common.Hash]witnesstypes.CodeWithHash {
 	return tds.aggregateBuffer.codeReads
-}
-
-func (tds *TrieDbState) buildCodeSizeTouches() map[common.Hash]common.Hash {
-	return tds.aggregateBuffer.codeSizeReads
 }
 
 // BuildAccountReads builds a sorted list of all address hashes that were modified
@@ -419,45 +384,6 @@ func (tds *TrieDbState) buildAccountAddressReads() ([][]byte, [][]byte) {
 	}
 
 	return sortedAccountAddressHashes, sortedAccountAddresses
-}
-
-// buildAccountWrites builds a sorted list of all address hashes that were modified within the
-// period for which we are aggregating updates.
-func (tds *TrieDbState) buildAccountWrites() (common.Hashes, []*accounts.Account, [][]byte) {
-	accountTouches := common.Hashes{}
-	for addrHash := range tds.aggregateBuffer.accountUpdates {
-		if _, ok := tds.aggregateBuffer.deleted[addrHash]; ok {
-			// This adds an extra entry that wipes out the storage of the accout in the stream
-			accountTouches = append(accountTouches, addrHash)
-		} else if _, ok1 := tds.aggregateBuffer.created[addrHash]; ok1 {
-			// This adds an extra entry that wipes out the storage of the accout in the stream
-			accountTouches = append(accountTouches, addrHash)
-		}
-		accountTouches = append(accountTouches, addrHash)
-	}
-	accountTouches.Sort()
-	aValues := make([]*accounts.Account, len(accountTouches))
-	aCodes := make([][]byte, len(accountTouches))
-	for i, addrHash := range accountTouches {
-		if i < len(accountTouches)-1 && addrHash == accountTouches[i+1] {
-			aValues[i] = nil // Entry that would wipe out existing storage
-		} else {
-			a := tds.aggregateBuffer.accountUpdates[addrHash]
-			if a.Account != nil {
-				if _, ok := tds.aggregateBuffer.storageUpdates[addrHash]; ok {
-					var ac accounts.Account
-					ac.Copy(a.Account)
-					ac.Root = trie.EmptyRoot
-					a.Account = &ac
-				}
-			}
-			aValues[i] = a.Account
-			if code, ok := tds.aggregateBuffer.codeUpdates[addrHash]; ok {
-				aCodes[i] = code
-			}
-		}
-	}
-	return accountTouches, aValues, aCodes
 }
 
 func (tds *TrieDbState) PopulateAccountBlockProof(accountTouches common.Hashes) {

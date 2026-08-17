@@ -24,6 +24,7 @@ import (
 	"math/big"
 	"unsafe"
 
+	"github.com/holiman/uint256"
 	"google.golang.org/grpc"
 
 	"github.com/erigontech/erigon/common"
@@ -240,13 +241,14 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 
 	var feeCap *big.Int
-	if args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil) {
+	switch {
+	case args.GasPrice != nil && (args.MaxFeePerGas != nil || args.MaxPriorityFeePerGas != nil):
 		return 0, errors.New("both gasPrice and (maxFeePerGas or maxPriorityFeePerGas) specified")
-	} else if args.GasPrice != nil {
+	case args.GasPrice != nil:
 		feeCap = args.GasPrice.ToInt()
-	} else if args.MaxFeePerGas != nil {
+	case args.MaxFeePerGas != nil:
 		feeCap = args.MaxFeePerGas.ToInt()
-	} else {
+	default:
 		feeCap = common.Big0
 	}
 
@@ -406,12 +408,21 @@ func doCall(ctx context.Context, caller *transactions.ReusableCaller, gasLimit u
 		}
 		return true, nil, err
 	}
-	return result.Failed(), result, nil
+	failed := result.Failed()
+	return failed, result, nil
 }
 
 type StorageKeysInfo struct {
 	Hash      common.Hash
 	KeyLength int
+}
+
+func (s StorageKeysInfo) EncodeKey() string {
+	if s.KeyLength == 32 {
+		return hexutil.Encode(s.Hash[:])
+	}
+	u := s.Hash.U256()
+	return u.Hex()
 }
 
 // GetProof implements eth_getProof; historical blocks are supported as far back as the commitment history allows.
@@ -430,8 +441,17 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, api.filters)
+	// nil filters: the gate below and the commitment-history reads both go through
+	// this plain roTx, so the tag has to resolve on that same committed view.
+	requestedBlockNr, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
 	if err != nil {
+		return nil, err
+	}
+
+	// A canonical hash exists for blocks the header stage has downloaded but
+	// execution has not reached; the commitment history getProof needs is only
+	// written by execution.
+	if err := rpchelper.CheckBlockExecuted(roTx, uint64(requestedBlockNr)); err != nil {
 		return nil, err
 	}
 
@@ -449,22 +469,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 }
 
 func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address common.Address, storageKeys []StorageKeysInfo, blockNrOrHash rpc.BlockNumberOrHash, logger log.Logger) (*accounts.AccProofResult, error) {
-
-	// Output key encoding is a bit special: if the input was a 32-byte hash, it is
-	// returned as such. Otherwise, we apply the QUANTITY encoding mandated by the
-	// JSON-RPC spec for getProof. This behavior exists to preserve backwards
-	// compatibility with older client versions.
-	getKey := func(storageKey StorageKeysInfo) string {
-		var outputKey string
-
-		if storageKey.KeyLength != 32 {
-			outputKey = hexutil.EncodeBig(storageKey.Hash.Big())
-		} else {
-			outputKey = hexutil.Encode(storageKey.Hash[:])
-		}
-		return outputKey
-	}
-
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -525,7 +529,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	// set initial response fields
 	proof := &accounts.AccProofResult{
 		Address:      address,
-		Balance:      new(hexutil.Big),
+		Balance:      new(hexutil.U256),
 		Nonce:        hexutil.Uint64(0),
 		CodeHash:     common.Hash{},
 		StorageHash:  common.Hash{},
@@ -544,8 +548,8 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	if acc == nil {
 		for i, storageKey := range storageKeys {
 			proof.StorageProof[i] = accounts.StorProofResult{
-				Key:   getKey(storageKey),
-				Value: new(hexutil.Big),
+				Key:   storageKey.EncodeKey(),
+				Value: new(hexutil.U256),
 				Proof: []hexutil.Bytes{},
 			}
 		}
@@ -556,7 +560,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		return proof, nil
 	}
 
-	proof.Balance = (*hexutil.Big)(acc.Balance.ToBig())
+	proof.Balance = (*hexutil.U256)(new(uint256.Int).Set(&acc.Balance))
 	proof.Nonce = hexutil.Uint64(acc.Nonce)
 	proof.CodeHash = acc.CodeHash.Value()
 	proof.StorageHash = acc.Root
@@ -590,11 +594,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err := ctx.Err(); err != nil {
 			return nil, err
 		}
-		proof.StorageProof[i].Key = getKey(storageKey)
+		proof.StorageProof[i].Key = storageKey.EncodeKey()
 		// if we have simple non contract account just set values directly without requesting any key proof
 		if proof.StorageHash.Cmp(common.BytesToHash(empty.RootHash[:])) == 0 {
 			proof.StorageProof[i].Proof = []hexutil.Bytes{}
-			proof.StorageProof[i].Value = new(hexutil.Big)
+			proof.StorageProof[i].Value = new(hexutil.U256)
 			continue
 		}
 
@@ -615,7 +619,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		if err != nil {
 			logger.Warn(fmt.Sprintf("couldn't read account storage for the address %s\n", address.String()))
 		}
-		proof.StorageProof[i].Value = (*hexutil.Big)(res.ToBig())
+		proof.StorageProof[i].Value = (*hexutil.U256)(&res)
 
 		// 0x80 represents RLP encoding of an empty proof slice
 		proof.StorageProof[i].Proof = []hexutil.Bytes{[]byte{0x80}}
@@ -673,7 +677,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, errWitnessOutOfWindow
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, blockNr); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
 	}
 
@@ -1001,8 +1005,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		if uint64(len(args.AuthorizationList)) > gasCap/params.CallNewAccountGas {
 			return nil, errors.New("insufficient gas to process all authorizations")
 		}
-		var data bytes.Buffer
-		var buf [32]byte
 		rules := blockCtx.Rules(chainConfig)
 		for i := range args.AuthorizationList {
 			jsonAuth := &args.AuthorizationList[i]
@@ -1013,12 +1015,11 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			if (!auth.ChainID.IsZero() && auth.ChainID.Cmp(rules.ChainID) != 0) || auth.Nonce+1 < auth.Nonce {
 				continue
 			}
-			data.Reset()
-			authorityPtr, err := auth.RecoverSigner(&data, buf[:])
+			authority, err := auth.RecoverSigner()
 			if err != nil {
 				continue
 			}
-			excl[*authorityPtr] = struct{}{}
+			excl[authority] = struct{}{}
 		}
 	}
 

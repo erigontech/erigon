@@ -53,6 +53,12 @@ type IsMining interface {
 	IsMining() bool
 }
 
+// NoMining reports that this process never mines. The standalone txpool and
+// rpcdaemon run without a miner.
+type NoMining struct{}
+
+func (NoMining) IsMining() bool { return false }
+
 func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API, logger log.Logger) *MiningServer {
 	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi, logger: logger}
 }

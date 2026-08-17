@@ -24,19 +24,15 @@ import (
 func BenchEthGetBlockByNumber(erigonURL string) error {
 	setRoutes(erigonURL, erigonURL)
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
-	for bn := uint64(0); bn <= uint64(blockNumber.Number)/2; bn++ {
+	fmt.Printf("Last block: %d\n", lastBlock)
+	var res CallResult
+	for bn := uint64(0); bn <= lastBlock/2; bn++ {
 
 		res = reqGen.Erigon2("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, false /* withTxs */))
 		if res.Err != nil {
@@ -49,7 +45,7 @@ func BenchEthGetBlockByNumber(erigonURL string) error {
 			return fmt.Errorf("empty result: %s\n", res.Response)
 		}
 
-		bn1 := uint64(blockNumber.Number) - bn
+		bn1 := lastBlock - bn
 		res = reqGen.Erigon2("eth_getBlockByNumber", reqGen.getBlockByNumber(bn1, false /* withTxs */))
 		if res.Err != nil {
 			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn1, res.Err)

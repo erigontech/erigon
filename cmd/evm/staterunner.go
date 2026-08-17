@@ -24,15 +24,20 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
+	"maps"
 	"os"
+	"slices"
 	"sync"
 
+	"github.com/c2h5oh/datasize"
 	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tests/testutil"
@@ -61,6 +66,15 @@ var stateTestCommand = cli.Command{
 	},
 }
 
+func newStateTestSharedDomains(db kv.TemporalRoDB, tx kv.TemporalTx) (*execctx.SharedDomains, error) {
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	if err != nil {
+		return nil, err
+	}
+	sd.EnableParaTrieDB(db)
+	return sd, nil
+}
+
 func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 	machineFriendlyOutput := ctx.Bool(MachineFlag.Name)
 	if machineFriendlyOutput {
@@ -76,17 +90,20 @@ func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 		DisableStorage:   ctx.Bool(DisableStorageFlag.Name),
 		EnableReturnData: !ctx.Bool(DisableReturnDataFlag.Name),
 	}
-	cfg := vm.Config{}
-	if machineFriendlyOutput {
-		cfg.Tracer = logger.NewJSONLogger(config, os.Stderr).Tracer().Hooks
-	} else if ctx.Bool(DebugFlag.Name) {
-		cfg.Tracer = logger.NewStructLogger(config).Tracer().Hooks
-	}
-
 	workers := ctx.Uint64(WorkersFlag.Name)
 	if workers == 0 {
 		return fmt.Errorf("--%s must be >= 1", WorkersFlag.Name)
 	}
+
+	cfg := vm.Config{}
+	traceOut := newTraceSink(workers)
+	defer traceOut.flush()
+	if machineFriendlyOutput {
+		cfg.Tracer = logger.NewJSONLogger(config, traceOut).Tracer().Hooks
+	} else if ctx.Bool(DebugFlag.Name) {
+		cfg.Tracer = logger.NewStructLogger(config).Tracer().Hooks
+	}
+
 	filter, err := compileTestFilter(ctx.String(RunFlag.Name), ctx.StringSlice(ExcludeFlag.Name))
 	if err != nil {
 		return err
@@ -95,7 +112,7 @@ func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 	path := ctx.Args().First()
 	if len(path) != 0 {
 		collected := filter.filterFiles(collectFiles(path))
-		results, err := runStateTestsParallel(ctx, cfg, collected, workers, filter)
+		results, err := runStateTestsParallel(ctx, cfg, traceOut, collected, workers, filter)
 		if err != nil {
 			return err
 		}
@@ -103,26 +120,85 @@ func stateTestCmd(_ context.Context, ctx *cli.Command) error {
 		return nil
 	}
 	// Otherwise, read filenames from stdin and execute back-to-back.
+	env, err := newStateTestEnv()
+	if err != nil {
+		return err
+	}
+	defer env.Close()
 	scanner := bufio.NewScanner(os.Stdin)
 	for scanner.Scan() {
 		fname := scanner.Text()
 		if len(fname) == 0 {
 			return nil
 		}
-		results, err := runStateTest(ctx, cfg, fname, filter)
+		results, err := runStateTest(ctx, cfg, traceOut, env, fname, filter)
 		if err != nil {
 			return err
 		}
 		report(ctx, results)
 	}
-	return nil
+	return scanner.Err()
 }
 
-func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, workers uint64, filter testFilter) ([]testResult, error) {
+// traceSink receives the --json opcode trace and the per-test stateRoot line.
+// The tracer emits one line per opcode, so unbuffered stderr costs a write(2)
+// each; buffering is only safe while tests run sequentially, since with
+// workers > 1 every goroutine shares this writer.
+type traceSink struct {
+	io.Writer
+	buffered *bufio.Writer
+}
+
+func newTraceSink(workers uint64) *traceSink {
+	if workers > 1 {
+		return &traceSink{Writer: os.Stderr}
+	}
+	bw := bufio.NewWriterSize(os.Stderr, int(64*datasize.KB))
+	return &traceSink{Writer: bw, buffered: bw}
+}
+
+// flush is called once per subtest, so a consumer streaming stderr still sees
+// whole tests, in order, without waiting for the run to end.
+func (s *traceSink) flush() {
+	if s.buffered == nil {
+		return
+	}
+	if err := s.buffered.Flush(); err != nil {
+		log.Warn("Failed to flush stderr", "err", err)
+	}
+}
+
+// stateTestEnv is the scratch database the tests run against. Building one
+// costs an MDBX env plus a datadir tree, so it is created once and reused: no
+// test ever commits, so rolling back each subtest's tx leaves it empty again.
+type stateTestEnv struct {
+	db     kv.TemporalRwDB
+	tmpDir string
+}
+
+func newStateTestEnv() (*stateTestEnv, error) {
+	tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
+	if err != nil {
+		return nil, err
+	}
+	return &stateTestEnv{db: temporaltest.NewTestDB(nil, datadir.New(tmpDir)), tmpDir: tmpDir}, nil
+}
+
+func (e *stateTestEnv) Close() {
+	e.db.Close()
+	dir.RemoveAll(e.tmpDir)
+}
+
+func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, files []string, workers uint64, filter testFilter) ([]testResult, error) {
 	if workers == 1 {
+		env, err := newStateTestEnv()
+		if err != nil {
+			return nil, err
+		}
+		defer env.Close()
 		results := make([]testResult, 0, len(files)*4) // pre-allocate
 		for _, fname := range files {
-			r, err := runStateTest(ctx, cfg, fname, filter)
+			r, err := runStateTest(ctx, cfg, traceOut, env, fname, filter)
 			if err != nil {
 				return nil, err
 			}
@@ -148,8 +224,17 @@ func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, work
 
 	for range workers {
 		wg.Go(func() {
+			// One env per worker: a second concurrent rwtx on the same MDBX env would deadlock.
+			env, err := newStateTestEnv()
+			if err != nil {
+				for item := range fileCh {
+					resultCh <- fileResult{index: item.index, err: err}
+				}
+				return
+			}
+			defer env.Close()
 			for item := range fileCh {
-				r, err := runStateTest(ctx, cfg, item.fname, filter)
+				r, err := runStateTest(ctx, cfg, traceOut, env, item.fname, filter)
 				resultCh <- fileResult{index: item.index, results: r, err: err}
 			}
 		})
@@ -179,13 +264,13 @@ func runStateTestsParallel(ctx *cli.Command, cfg vm.Config, files []string, work
 }
 
 // runStateTest loads the state-test given by fname, and executes the test.
-func runStateTest(ctx *cli.Command, cfg vm.Config, fname string, filter testFilter) ([]testResult, error) {
+func runStateTest(ctx *cli.Command, cfg vm.Config, traceOut *traceSink, env *stateTestEnv, fname string, filter testFilter) ([]testResult, error) {
 	src, err := os.ReadFile(fname)
 	if err != nil {
 		return nil, err
 	}
 	var stateTests map[string]testutil.StateTest
-	if err = json.Unmarshal(src, &stateTests); err != nil {
+	if err := json.Unmarshal(src, &stateTests); err != nil {
 		return nil, err
 	}
 
@@ -196,18 +281,11 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, fname string, filter testFilt
 	// (e.g. goevmlab) that rely on per-test ordering.
 	emitStateRoot := ctx.Uint64(WorkersFlag.Name) == 1
 	results := make([]testResult, 0, len(stateTests))
+	db := env.db
 
-	// One temp datadir & DB per file; per-subtest isolation comes from tx rollback.
-	tmpDir, err := os.MkdirTemp("", "erigon-statetest-*")
-	if err != nil {
-		return nil, err
-	}
-	defer dir.RemoveAll(tmpDir)
-	dirs := datadir.New(tmpDir)
-	db := temporaltest.NewTestDB(nil, dirs)
-	defer db.Close()
-
-	for key := range stateTests {
+	// Sorted, not map order: a differential-fuzzing consumer needs the same
+	// sequence of results for the same file on every run.
+	for _, key := range slices.Sorted(maps.Keys(stateTests)) {
 		if !filter.includeCase(fname, key) {
 			continue
 		}
@@ -224,14 +302,14 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, fname string, filter testFilt
 				defer tx.Rollback()
 
 				// Per-subtest SD: closed without Flush so its writes never enter the branch cache.
-				sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+				sd, err := newStateTestSharedDomains(db, tx)
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
 					return
 				}
 				defer sd.Close()
 
-				statedb, root, err := test.Run(nil, sd, tx, st, cfg, dirs)
+				statedb, root, err := test.Run(nil, sd, tx, st, cfg)
 				if err != nil {
 					result.Pass, result.Error = false, err.Error()
 				}
@@ -239,7 +317,7 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, fname string, filter testFilt
 					h := common.Hash(root)
 					result.Root = &h
 					if emitStateRoot {
-						if _, printErr := fmt.Fprintf(os.Stderr, "{\"stateRoot\": \"%#x\"}\n", h[:]); printErr != nil {
+						if _, printErr := fmt.Fprintf(traceOut, "{\"stateRoot\": \"%#x\"}\n", h[:]); printErr != nil {
 							log.Warn("Failed to write to stderr", "err", printErr)
 						}
 					}
@@ -247,13 +325,14 @@ func runStateTest(ctx *cli.Command, cfg vm.Config, fname string, filter testFilt
 				if bench {
 					// Reuse the subtest's tx+sd: a second concurrent rwtx on the same env would deadlock.
 					_, stats, _ := timedExec(true, func() ([]byte, uint64, error) {
-						_, _, gasUsed, _ := test.RunNoVerify(nil, sd, tx, st, cfg, dirs)
+						_, _, gasUsed, _ := test.RunNoVerify(nil, sd, tx, st, cfg)
 						return nil, gasUsed, nil
 					})
 					result.Stats = &stats
 				}
 			}()
 
+			traceOut.flush()
 			results = append(results, *result)
 		}
 	}

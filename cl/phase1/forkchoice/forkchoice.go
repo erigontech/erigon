@@ -159,9 +159,14 @@ type ForkChoiceStore struct {
 
 	emitters *beaconevents.EventEmitter
 	// event sends queued under f.mu, emitted after release (see queueEmit)
-	queuedEmits  []func()
-	queuedPrunes []uint64
-	synced       atomic.Bool
+	queuedEmits           []func()
+	queuedPrunes          []uint64
+	queuedOperationPrunes []solid.Checkpoint
+	operationPruneMu      sync.Mutex
+	operationPruneTarget  solid.Checkpoint
+	operationPrunePending bool
+	operationPruneRunning bool
+	synced                atomic.Bool
 
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore
@@ -547,14 +552,6 @@ func (f *ForkChoiceStore) JustifiedSlot() uint64 {
 // (spec: store.unrealized_justifications[block_root])
 func (f *ForkChoiceStore) getUnrealizedJustification(blockRoot common.Hash) (solid.Checkpoint, bool) {
 	obj, ok := f.unrealizedJustifications.Load(blockRoot)
-	if !ok {
-		return solid.Checkpoint{}, false
-	}
-	return obj.(solid.Checkpoint), true
-}
-
-func (f *ForkChoiceStore) getUnrealizedFinalization(blockRoot common.Hash) (solid.Checkpoint, bool) {
-	obj, ok := f.unrealizedFinalizations.Load(blockRoot)
 	if !ok {
 		return solid.Checkpoint{}, false
 	}

@@ -98,12 +98,13 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 
 		intz := sliceSizeRegex.FindAllString(sliced, -1)
 
-		if len(intz) == 0 {
+		switch len(intz) {
+		case 0:
 			// is a slice
 			typ.T = SliceTy
 			typ.Elem = &embeddedType
 			typ.stringKind = embeddedType.stringKind + sliced
-		} else if len(intz) == 1 {
+		case 1:
 			// is an array
 			typ.T = ArrayTy
 			typ.Elem = &embeddedType
@@ -112,7 +113,7 @@ func NewType(t string, internalType string, components []ArgumentMarshaling) (ty
 				return Type{}, fmt.Errorf("abi: error parsing variable size: %w", err)
 			}
 			typ.stringKind = embeddedType.stringKind + sliced
-		} else {
+		default:
 			return Type{}, errors.New("invalid formatting of array type")
 		}
 		return typ, err

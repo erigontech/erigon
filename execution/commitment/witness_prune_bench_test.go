@@ -26,9 +26,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/trie"
 )
 
-// benchCapturedSuperset builds a trie of accts accounts each with slots storage
-// slots, then captures the witness superset (produceExclusionProofs) for the first
-// `touch` accounts, returning the captured nodes, the proved (fold) keys, and root.
 func benchCapturedSuperset(b *testing.B, accts, slots, touch int) (full, provedKeys [][]byte, root []byte) {
 	b.Helper()
 	ctx := context.Background()
@@ -46,8 +43,6 @@ func benchCapturedSuperset(b *testing.B, accts, slots, touch int) (full, provedK
 	return full, provedKeys, root
 }
 
-// BenchmarkWitnessPrune_RLPDecode measures the current prune: decode the whole
-// captured superset into a trie, then walk the proof paths (re-hashing each node).
 func BenchmarkWitnessPrune_RLPDecode(b *testing.B) {
 	full, provedKeys, _ := benchCapturedSuperset(b, 512, 8, 32)
 	b.Logf("captured superset nodes=%d provedKeys=%d", len(full), len(provedKeys))
@@ -68,9 +63,6 @@ func BenchmarkWitnessPrune_RLPDecode(b *testing.B) {
 	}
 }
 
-// BenchmarkBranchWitnessTotal measures the branch's full on-the-fly witness build —
-// capture (Witnesses) + prune (RLPDecode + WitnessNodesForKeys) — on the same fixture
-// as main's BenchmarkMainGenerateWitness, for a fresh main-vs-branch comparison.
 func BenchmarkBranchWitnessTotal(b *testing.B) {
 	ctx := context.Background()
 	ms := NewMockState(b)
@@ -92,8 +84,6 @@ func BenchmarkBranchWitnessTotal(b *testing.B) {
 	}
 }
 
-// BenchmarkWitnessPrune_ByHash measures the byHash-walk prune: index the captured
-// nodes by hash and decode only the proof-path nodes, emitting cached bytes.
 func BenchmarkWitnessPrune_ByHash(b *testing.B) {
 	full, provedKeys, _ := benchCapturedSuperset(b, 512, 8, 32)
 	b.ReportAllocs()
@@ -109,8 +99,6 @@ func BenchmarkWitnessPrune_ByHash(b *testing.B) {
 	}
 }
 
-// BenchmarkWitnessCapture measures the fold-time capture (Witnesses) for the same
-// workload, so the prune's share of total witness cost is visible.
 func BenchmarkWitnessCapture(b *testing.B) {
 	ctx := context.Background()
 	ms := NewMockState(b)

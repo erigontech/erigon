@@ -175,18 +175,18 @@ func (w *Writer) Build() error {
 	if _, err = w.data.BuildTo(fw); err != nil {
 		return fmt.Errorf("%s %w", w.filePath, err)
 	}
-	if err = fw.Flush(); err != nil {
+	if err := fw.Flush(); err != nil {
 		return err
 	}
 	if !w.noFsync {
-		if err = f.Sync(); err != nil {
+		if err := f.Sync(); err != nil {
 			return err
 		}
 	}
-	if err = f.Close(); err != nil {
+	if err := f.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(f.Name(), w.filePath); err != nil {
+	if err := os.Rename(f.Name(), w.filePath); err != nil {
 		return err
 	}
 	return nil
@@ -235,15 +235,15 @@ func (w *WriterSharded) Build() error {
 	if _, err = w.BuildTo(fw); err != nil {
 		return fmt.Errorf("%s %w", w.filePath, err)
 	}
-	if err = fw.Flush(); err != nil {
+	if err := fw.Flush(); err != nil {
 		return err
 	}
 	if !w.noFsync {
-		if err = f.Sync(); err != nil {
+		if err := f.Sync(); err != nil {
 			return err
 		}
 	}
-	if err = f.Close(); err != nil {
+	if err := f.Close(); err != nil {
 		return err
 	}
 	return os.Rename(f.Name(), w.filePath)
