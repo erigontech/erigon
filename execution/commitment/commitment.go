@@ -378,8 +378,9 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
-// Returns the number of updates written. putBranch must copy the slices it receives
-// rather than retain them: they are pooled and reused for a later, unrelated update.
+// Returns the number of updates written. putBranch must copy prefix and data rather than
+// retain them: they are pooled and reused for a later, unrelated update. prevData is
+// cloned per update and carries no such constraint.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
