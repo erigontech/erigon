@@ -321,6 +321,15 @@ def synthesize_landing(raw_body):
     Card hrefs that start with `/` are rewritten to absolute BASE_URL form so
     bullets remain useful when the body is read out of context.
     """
+    # Count first, parse second. Deciding "this is not a card grid" on an empty
+    # parse result would make total parser failure indistinguishable from an
+    # ordinary prose page: the caller would fall back to strip_mdx and the guard
+    # below would never run — silently degrading exactly the case it exists to
+    # catch.
+    expected = raw_body.count('lp-card-title')
+    if not expected:
+        return None
+
     cards = []
     for link in _LANDING_LINK_RE.finditer(raw_body):
         href, block = link.group(1), link.group(2)
@@ -330,13 +339,10 @@ def synthesize_landing(raw_body):
             continue
         cards.append((href, _card_text(title.group(1)),
                       _card_text(desc.group(1))))
-    if not cards:
-        return None
 
     # A card that parses to nothing is invisible in the output, and `--check`
     # only compares generated output against committed output — so a systematic
     # parser regression stays green in CI while the corpus quietly loses pages.
-    expected = raw_body.count('lp-card-title')
     if len(cards) != expected:
         raise SystemExit(
             f"synthesize_landing dropped cards: parsed {len(cards)} "
