@@ -230,12 +230,10 @@ func (v ReadView) fillCodeWithHash(addr, code, codeHash []byte, readTxNum uint64
 	}
 	visibleEnd, ok := v.frontier.DomainVisibleEnd(kv.CodeDomain)
 	if !ok {
-		v.c.fillsNoFrontier.Add(1)
 		return
 	}
 	accountsEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
 	if !ok {
-		v.c.fillsNoFrontier.Add(1)
 		return
 	}
 	v.c.fillCodeWithHashIfFresh(addr, code, codeHash, readTxNum, visibleEnd, accountsEnd, v.readViewEpoch)
@@ -265,13 +263,11 @@ func (v ReadView) Fill(domain kv.Domain, key []byte, value []byte, readTxNum uin
 	}
 	visibleEnd, ok := v.frontier.DomainVisibleEnd(domain)
 	if !ok {
-		v.c.fillsNoFrontier.Add(1)
 		return
 	}
 	if domain == kv.CodeDomain {
 		accountsEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
 		if !ok {
-			v.c.fillsNoFrontier.Add(1)
 			return
 		}
 		v.c.fillCodeIfFresh(key, value, readTxNum, visibleEnd, accountsEnd, v.readViewEpoch)
@@ -293,7 +289,6 @@ func (v ReadView) SeedAddrCodeHash(addr []byte, h [32]byte, txNum uint64) {
 	}
 	visibleEnd, ok := v.frontier.DomainVisibleEnd(kv.AccountsDomain)
 	if !ok {
-		v.c.fillsNoFrontier.Add(1)
 		return
 	}
 	// A negative mapping describes committed state observed by this view, not

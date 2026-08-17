@@ -78,15 +78,6 @@ type StateCache struct {
 	// (including the content-addressed ones), leaving canonical publication as
 	// the only writer — an A/B lever and an operational kill switch.
 	disableFills bool
-	// Fill admission reads the fields above, while every counted attempt writes a
-	// counter. Keep them on separate cache lines to avoid invalidating read-mostly
-	// state.
-	_ [64]byte
-	// Fill-attempt outcomes reported by PrintStatsAndReset. fillsNoFrontier counts
-	// attempts rejected before admission because the view has no exact frontier.
-	fillsAdmitted   atomic.Uint64
-	fillsRejected   atomic.Uint64
-	fillsNoFrontier atomic.Uint64
 }
 
 // NewStateCache creates a new StateCache with the specified byte capacities.
@@ -248,10 +239,8 @@ func (c *StateCache) seedAddrCodeHash(addr []byte, h [32]byte, txNum, visibleEnd
 	if c.publishing ||
 		viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[kv.AccountsDomain] {
-		c.fillsRejected.Add(1)
 		return
 	}
-	c.fillsAdmitted.Add(1)
 	cc.PutAddrCodeHash(addr, h, txNum)
 }
 
@@ -285,10 +274,8 @@ func (c *StateCache) fillIfFresh(domain kv.Domain, key []byte, value []byte, rea
 	if c.publishing ||
 		viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[domain] {
-		c.fillsRejected.Add(1)
 		return
 	}
-	c.fillsAdmitted.Add(1)
 	cache.PutIfAbsent(key, cloned, readTxNum)
 }
 
@@ -319,10 +306,8 @@ func (c *StateCache) fillCodeWithHashIfFresh(key, value, codeHash []byte, readTx
 		viewEpoch != c.readViewEpoch.Load() ||
 		visibleEnd < c.appliedEnd[kv.CodeDomain] ||
 		accountsVisibleEnd < c.appliedEnd[kv.AccountsDomain] {
-		c.fillsRejected.Add(1)
 		return
 	}
-	c.fillsAdmitted.Add(1)
 	codeCache.PutWithCodeHashIfAbsent(key, value, codeHash, readTxNum)
 }
 
@@ -605,10 +590,6 @@ func (c *StateCache) getCache(domain kv.Domain) Cache {
 func (c *StateCache) PrintStatsAndReset() {
 	if c == nil {
 		return
-	}
-	admitted, rejected, noFrontier := c.fillsAdmitted.Swap(0), c.fillsRejected.Swap(0), c.fillsNoFrontier.Swap(0)
-	if admitted+rejected+noFrontier > 0 {
-		log.Debug("[cache] fill admission", "admitted", admitted, "rejected", rejected, "noFrontier", noFrontier)
 	}
 	if acc, ok := c.caches[kv.AccountsDomain].(*DomainCache); ok {
 		acc.PrintStatsAndReset("Account")
