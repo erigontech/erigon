@@ -60,13 +60,12 @@ populated from a file written at an earlier read point, so this recurs for every
 within the range whose parent branch is touched by another shard. First contact, not a
 regression.
 
-Hex has the same structural exposure — same rebuild path, same lazy `TouchKey` read, also
-ordered by hashed key — but `HexPatriciaHashed.loadStateIfNeeded` has no `Deleted` check, so
-it hashes the dead leaf as an empty account/storage leaf and continues. Under EIP-8297, where
-absent and zero are the same state, that would be a root divergence rather than a cosmetic
-one. Whether the hex rebuild hits this in practice is unverified;
-`RebuildCommitmentFilesWithHistory` checks each root against the header root and would catch
-it, the plain path does not.
+This is bin-only. The hex rebuild runs the same sharded path over the same lazily-read update
+set and comes through inherited-range tombstones intact, so the removals pass is gated to the
+bin variant and hex keeps its existing behaviour and cost. `HexPatriciaHashed.loadStateIfNeeded`
+carries no `Deleted` check, which is why the two engines part here: hex tolerates the shape the
+bin fold refuses. What in the hex fold makes that safe is not established — `deleteCell` clears
+the child from `afterMap`, but that runs off the update stream, not off the lazy load.
 
 `WithoutCommitmentSeek` is bin-only but only skips restoring the DB-persisted trie-state blob,
 so it is not the difference.

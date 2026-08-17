@@ -1185,7 +1185,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			}
 
 			var removals func(*execctx.SharedDomains) (uint64, error)
-			if firstShard {
+			if firstShard && target.Variant == commitment.VariantBinPatriciaTrie {
 				removals = func(sd *execctx.SharedDomains) (uint64, error) {
 					from, to := r.FromTo()
 					return touchRangeRemovals(acRo, sd, from, to)
@@ -1309,12 +1309,11 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	return latestRoot, report, nil
 }
 
-// touchRangeRemovals feeds every key the range removes into the update set. A
-// removal is a zero-length record in the range's own domain files, and shards
-// walk those files in plain-key order while the trie is ordered by tree key, so
-// the shard holding a removal can come after the shard that has to re-hash the
-// branch holding its leaf. By then the value is gone at the range-end read point
-// and the fold, which only walks forward, can no longer drop the leaf.
+// touchRangeRemovals feeds every key the range removes, a zero-length record in
+// its own domain files, into the update set. Shards slice the range in plain-key
+// order while the trie is ordered by tree key, so a removal can land in a later
+// shard than the one re-hashing the branch that still names its leaf, where the
+// bin trie reads it absent and the forward-only fold can no longer drop it.
 func touchRangeRemovals(acRo *AggregatorRoTx, sd *execctx.SharedDomains, fromTxNum, toTxNum uint64) (uint64, error) {
 	var touched uint64
 	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
