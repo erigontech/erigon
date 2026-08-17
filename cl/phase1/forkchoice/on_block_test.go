@@ -33,8 +33,14 @@ import (
 func TestOnBlockChecksDataAvailabilityWithoutNewPayload(t *testing.T) {
 	store := buildExAnteStore(t)
 	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
 	cfg.FuluForkEpoch = 1
 	cfg.InitializeForkSchedule()
+	require.Equal(t, clparams.FuluVersion, cfg.GetCurrentStateVersion(cfg.FuluForkEpoch))
 	store.beaconCfg = &cfg
 
 	parentRoot, _, err := store.GetHead(nil)
@@ -43,7 +49,7 @@ func TestOnBlockChecksDataAvailabilityWithoutNewPayload(t *testing.T) {
 	block.Block.Slot = cfg.SlotsPerEpoch
 	block.Block.ParentRoot = parentRoot
 	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
-	store.OnTick(block.Block.Slot * cfg.SecondsPerSlot)
+	store.OnTick(store.genesisTime + block.Block.Slot*cfg.SecondsPerSlot)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
