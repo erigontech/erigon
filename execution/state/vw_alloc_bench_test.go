@@ -10,9 +10,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// BenchmarkSetBalance exercises the typed write-set Set path that the
-// IBS hot recordWriteBalance helper uses on every BalancePath emit.
-// Target: zero allocs/op (struct allocation aside).
 func BenchmarkSetBalance(b *testing.B) {
 	addr := accounts.InternAddress([20]byte{0x01})
 	v := *uint256.NewInt(0xdeadbeef)
@@ -83,9 +80,7 @@ func BenchmarkSetAddress(b *testing.B) {
 	}
 }
 
-// BenchmarkPoolCycle_* exercise the step-2 pool fast path: get from pool,
-// fill, insert, then release all on tx-finalize.  Target: 0 allocs/op
-// after warmup once the per-type sync.Pool has a steady supply.
+// BenchmarkPoolCycle_* expect 0 allocs/op after warmup, once the per-type sync.Pool has a steady supply.
 
 func BenchmarkPoolCycle_Balance(b *testing.B) {
 	addr := accounts.InternAddress([20]byte{0x01})
@@ -118,11 +113,8 @@ func BenchmarkPoolCycle_Storage(b *testing.B) {
 	}
 }
 
-// BenchmarkPoolCycle_TxBatch simulates a realistic per-tx mix: 1 sender
-// (balance + nonce) + 1 contract (many storage slots), single Reset.  This
-// matches sstore-bloated-no-slots's actual write pattern — writes
-// concentrate on ~1 contract address, so the per-addr inner-storage-map
-// cost amortizes across the full slot batch.
+// Mix mirrors real load: 1 sender write (balance+nonce) plus many storage writes concentrated on 1 contract,
+// so the per-address inner-storage-map cost amortizes across the batch.
 func BenchmarkPoolCycle_TxBatch(b *testing.B) {
 	const slotsPerTx = 50
 	sender := accounts.InternAddress([20]byte{0xaa})
@@ -141,7 +133,6 @@ func BenchmarkPoolCycle_TxBatch(b *testing.B) {
 	b.ReportAllocs()
 	b.ResetTimer()
 	for n := 0; n < b.N; n++ {
-		// One balance + one nonce write per tx (typical sender)
 		vwb := getVWBalance()
 		vwb.WriteHeader = WriteHeader{Address: sender, Path: BalancePath}
 		vwb.Val = bal
@@ -152,7 +143,6 @@ func BenchmarkPoolCycle_TxBatch(b *testing.B) {
 		vwn.Val = uint64(n)
 		s.SetNonce(sender, vwn)
 
-		// Many storage writes to a single contract
 		for i := range slotsPerTx {
 			vws := getVWStorage()
 			vws.WriteHeader = WriteHeader{Address: contract, Path: StoragePath, Key: keys[i]}
@@ -164,9 +154,7 @@ func BenchmarkPoolCycle_TxBatch(b *testing.B) {
 	}
 }
 
-// BenchmarkPoolCycle_Reuse exercises the "second write to same addr" path:
-// recordWrite* should reuse the existing entry in place (no alloc, no pool
-// op).
+// A second write to the same address must reuse the existing entry in place: no alloc, no pool op.
 func BenchmarkPoolCycle_Reuse(b *testing.B) {
 	addr := accounts.InternAddress([20]byte{0x03})
 	v1 := *uint256.NewInt(1)

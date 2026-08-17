@@ -10,10 +10,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// createObjectChange.revert must drop the account-record cells that createObject
-// emitted (AddressPath/CodeHashPath) so a reverted creation leaves no versioned
-// write behind on the noMaterialize path — the journal keeps the write-set in
-// step on its own, without dirties re-processing.
+// Reverting a creation must drop the AddressPath/CodeHashPath cells createObject emitted — the journal alone keeps the write-set in step.
 func TestNoMaterialize_CreateRevertDropsCells(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xc0, 0x11})
@@ -36,11 +33,7 @@ func TestNoMaterialize_CreateRevertDropsCells(t *testing.T) {
 	require.False(t, exist, "the account must not exist after the creation is reverted")
 }
 
-// resetObjectChange.revert must restore, via restoreCreateFields, the
-// account-record cells the recreation overwrote. createObject stamps the
-// CodeHashPath to EmptyCodeHash, so a CreateAccount over a live contract clears
-// its code hash; reverting must bring the prior hash back on the noMaterialize
-// path (the journal keeps the write-set in step on its own).
+// Reverting a recreate over a live contract must restore the code hash that createObject's CodeHashPath=empty stamp overwrote.
 func TestNoMaterialize_RecreateRevertRestoresPrior(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xc0, 0x22})
@@ -56,7 +49,7 @@ func TestNoMaterialize_RecreateRevertRestoresPrior(t *testing.T) {
 	ibs.SetVersion(0)
 
 	snap := ibs.PushSnapshot()
-	require.NoError(t, ibs.CreateAccount(addr, true)) // stamps CodeHashPath -> empty
+	require.NoError(t, ibs.CreateAccount(addr, true))
 	ch, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
 	require.Equal(t, accounts.EmptyCodeHash, ch, "recreation clears the code hash")

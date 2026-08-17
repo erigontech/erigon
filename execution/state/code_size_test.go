@@ -33,14 +33,9 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
+// TestReproduceCrash pins that setting two storage keys non-zero, then clearing both in the same block, does not crash.
 func TestReproduceCrash(t *testing.T) {
 	t.Parallel()
-	// This example was taken from Ropsten contract that used to cause a crash
-	// it is created in the block 598915 and then there are 3 transactions modifying
-	// its storage in the same block:
-	// 1. Setting storageKey 1 to a non-zero value
-	// 2. Setting storageKey 2 to a non-zero value
-	// 3. Setting both storageKey1 and storageKey2 to zero values
 	value0 := uint256.NewInt(0)
 	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
 	storageKey1 := accounts.InternKey(common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132541"))
@@ -56,23 +51,19 @@ func TestReproduceCrash(t *testing.T) {
 
 	intraBlockState := state.New(tsr)
 	defer intraBlockState.Close()
-	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	// Start the 2nd transaction
 	intraBlockState.SetState(contract, storageKey1, *value1)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	// Start the 3rd transaction
 	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	intraBlockState.SetState(contract, storageKey2, *value2)
 	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
 		t.Errorf("error finalising 1st tx: %v", err)
 	}
-	// Start the 4th transaction - clearing both storage cells
 	intraBlockState.SubBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
 	intraBlockState.SetState(contract, storageKey1, *value0)
 	intraBlockState.SetState(contract, storageKey2, *value0)
@@ -92,7 +83,6 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	r, tsw := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
-	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
@@ -104,7 +94,6 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	}
 	rh1, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
-	//t.Logf("stateRoot %x", rh1)
 
 	trieCode, tcErr := r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
@@ -130,8 +119,6 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 func TestCacheCodeSizeSeparately(t *testing.T) {
 	t.Parallel()
 	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
-	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
-
 	_, tx, sd := state.NewTestRwTx(t)
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
@@ -140,7 +127,6 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
-	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}
@@ -166,7 +152,6 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 // TestCacheCodeSizeInTrie makes sure that we don't just read from the DB all the time
 func TestCacheCodeSizeInTrie(t *testing.T) {
 	t.Parallel()
-	//t.Skip("switch to TG state readers/writers")
 	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
 	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
 
@@ -178,7 +163,6 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
-	// Start the 1st transaction
 	intraBlockState.CreateAccount(contract, true)
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}

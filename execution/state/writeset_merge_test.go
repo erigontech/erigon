@@ -107,16 +107,7 @@ func codeSizeWrite(addr accounts.Address, val int) *VersionedWrite[int] {
 	}
 }
 
-// Every path conflicts on address a — both sides write it with a different
-// value — so "next wins on a matched key" is exercised per-path instead of
-// passing vacuously. b is prev-only, c is next-only, and storage carries all
-// three shapes: k1 conflicts, k2 is prev-only, k3 is next-only.
-//
-// b's writes are the ones a merged set shares with prev, so they are what a
-// release test must assert. Its address and code writes make an accidental
-// release of a shared value fail deterministically: releaseVWAddress nils Val
-// and releaseVWCode clears the bytecode, while the other release funcs are
-// bare pool-Puts that leave the value readable until reuse.
+// a conflicts on every path, b is prev-only, c is next-only, same shape across storage keys k1/k2/k3.
 func mergeIntoFixture() (prev, next *WriteSet) {
 	a, b, c := mergeAddr(0xa1), mergeAddr(0xb2), mergeAddr(0xc3)
 	k1, k2, k3 := mergeKey(0x01), mergeKey(0x02), mergeKey(0x03)
@@ -156,8 +147,7 @@ func mergeIntoFixture() (prev, next *WriteSet) {
 	return prev, next
 }
 
-// writeKey is the identity a merge dedups on: (addr, path, key). Version is
-// excluded, so two writes to the same slot collide here.
+// writeKey excludes Version so two writes to the same (addr, path, key) collide, matching what a merge dedups on.
 type writeKey struct {
 	addr accounts.Address
 	key  accounts.StorageKey
@@ -181,8 +171,6 @@ func assertSameWrites(t *testing.T, want, got *WriteSet) {
 	}
 }
 
-// MergeInto must produce the same union as the cloning Merge: next wins on
-// (addr, path, key), prev fills the gaps.
 func TestWriteSetMergeInto_MatchesMergeOracle(t *testing.T) {
 	prevOracle, nextOracle := mergeIntoFixture()
 	oracle := prevOracle.Merge(nextOracle)
@@ -194,9 +182,7 @@ func TestWriteSetMergeInto_MatchesMergeOracle(t *testing.T) {
 	assertSameWrites(t, oracle, merged)
 }
 
-// A key held by both sides keeps next's write and drops prev's — that is the
-// merge policy, not a lost write: the merged set still holds every (addr,
-// path, key) either side wrote.
+// A matched key keeps next's write, not prev's, but the merged set still holds every key either side wrote.
 func TestWriteSetMergeInto_MatchedKeyKeepsNext(t *testing.T) {
 	prev, next := mergeIntoFixture()
 	prevKeys, nextKeys := writeKeysOf(prev), writeKeysOf(next)
@@ -230,9 +216,7 @@ func matchedKeys(a, b map[writeKey]bool) int {
 	return n
 }
 
-// prev is aliased by execResult.TxOut, which finalize later reads and mutates
-// (StripBalanceWrite deletes map entries). MergeInto must never touch prev's
-// maps, and deleting from prev afterwards must not affect the merged set.
+// prev may be aliased and mutated by the caller after merging, so MergeInto must never touch prev's own maps.
 func TestWriteSetMergeInto_PrevStaysIndependent(t *testing.T) {
 	a := mergeAddr(0xa1)
 	b := mergeAddr(0xb2)
@@ -246,7 +230,6 @@ func TestWriteSetMergeInto_PrevStaysIndependent(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, *uint256.NewInt(1), bw.Val, "prev's own value must survive")
 
-	// Simulate StripBalanceWrite on TxOut after the merge.
 	delete(prev.balance, b)
 	gotVW, ok := merged.balance[b]
 	require.True(t, ok, "merged set must keep entries deleted from prev")
@@ -263,8 +246,7 @@ func TestWriteSetMergeInto_EmptyEdges(t *testing.T) {
 	assert.Same(t, next, (*WriteSet)(nil).MergeInto(next), "nil prev returns next")
 }
 
-// Fee-merge shape from the parallel apply loop: prev is a full tx write set,
-// next is the small calcFees output.
+// Mirrors the parallel apply loop's fee merge: prev a full tx write set, next the small fee output.
 func buildMergeBenchSets(addrs, slots int) (*WriteSet, *WriteSet) {
 	prev := &WriteSet{}
 	for i := range addrs {
@@ -281,10 +263,7 @@ func buildMergeBenchSets(addrs, slots int) (*WriteSet, *WriteSet) {
 	return prev, next
 }
 
-// Both variants build their inputs inside the timed loop, since MergeInto
-// consumes next and cannot reuse one pair across iterations. That dilutes the
-// delta with the build cost, but it is the same cost on both sides - timing one
-// variant with a warm pair and the other with a fresh one measures the harness.
+// Inputs build inside the timed loop (MergeInto consumes next, so a pair can't be reused) — build cost is equal on both sides.
 func benchWriteSetMerge(b *testing.B, addrs, slots int, merge func(prev, next *WriteSet) *WriteSet) {
 	b.ReportAllocs()
 	for b.Loop() {
@@ -309,8 +288,7 @@ func BenchmarkWriteSetMergeInto(b *testing.B) {
 	}
 }
 
-// ReleaseMaps returns the map containers to their pools without touching the
-// VersionedWrite values, which may be shared with other sets after MergeInto.
+// ReleaseMaps returns containers to their pools but leaves VersionedWrite values untouched — they may still be shared after MergeInto.
 func TestWriteSetReleaseMaps(t *testing.T) {
 	a, b := mergeAddr(0xa1), mergeAddr(0xb2)
 	k2 := mergeKey(0x02)
@@ -321,8 +299,6 @@ func TestWriteSetReleaseMaps(t *testing.T) {
 	prev.ReleaseMaps()
 	assert.True(t, prev.IsEmpty(), "released set must be empty")
 
-	// The entries merged shares with prev are prev's non-conflicting ones —
-	// prev's writes on a lost the merge and never entered merged.
 	aw, ok := merged.address[b]
 	require.True(t, ok)
 	require.NotNil(t, aw.Val, "shared address write must not be released")
@@ -343,13 +319,11 @@ func TestWriteSetReleaseMaps(t *testing.T) {
 	require.True(t, ok)
 	assert.Equal(t, *uint256.NewInt(20), sw.Val)
 
-	// A released set must be reusable.
 	prev.SetBalance(a, balanceWrite(a, 7, 2))
 	bw, ok = prev.balance[a]
 	require.True(t, ok)
 	assert.Equal(t, *uint256.NewInt(7), bw.Val)
 
-	// Double release and nil-map release must not panic.
 	prev.ReleaseMaps()
 	prev.ReleaseMaps()
 }
@@ -362,22 +336,15 @@ func TestVersionedIOReleaseOutputMaps(t *testing.T) {
 	require.NotZero(t, io.WriteCount())
 	io.ReleaseOutputMaps()
 
-	// Read the slots directly: the accessors panic under assertions once the
-	// outputs are released, which is the point of the guard.
+	// Direct field access: the normal accessors panic once outputs are released.
 	for _, output := range io.outputs {
 		assert.True(t, output.IsEmpty(), "slots must be empty after release")
 	}
 
-	// Empty and already-released IO must not panic.
 	io.ReleaseOutputMaps()
 	NewVersionedIO(1).ReleaseOutputMaps()
 }
 
-// The apply-loop fee-merge pipeline around the merge itself: record the tx
-// write set into VersionedIO, merge the calcFees output, re-record, flush the
-// merged set into the VersionMap. Build cost of the inputs is identical in
-// both variants and included in the measured loop, since MergeInto consumes
-// next.
 func benchVersionedFeeMerge(b *testing.B, addrs, slots int, merge func(prev, next *WriteSet) *WriteSet) {
 	io := NewVersionedIO(1)
 	vm := NewVersionMap(nil)

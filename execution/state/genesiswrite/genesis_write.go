@@ -54,8 +54,6 @@ import (
 	polygonchain "github.com/erigontech/erigon/polygon/chain"
 )
 
-// GenesisMismatchError is raised when trying to overwrite an existing
-// genesis block with an incompatible one.
 type GenesisMismatchError struct {
 	Stored, New common.Hash
 }
@@ -75,19 +73,7 @@ func (e *GenesisMismatchError) Error() string {
 	return fmt.Sprintf("database contains genesis (have %x, new %x)", e.Stored, e.New) + advice
 }
 
-// CommitGenesisBlock writes or updates the genesis block in db.
-// The block that will be used is:
-//
-//	                     genesis == nil       genesis != nil
-//	                  +------------------------------------------
-//	db has no genesis |  main-net          |  genesis
-//	db has genesis    |  from DB           |  genesis (if compatible)
-//
-// The stored chain configuration will be updated if it is compatible (i.e. does not
-// specify a fork block below the local head block). In case of a conflict, the
-// error is a *params.ConfigCompatError and the new, unwritten config is returned.
-//
-// The returned chain configuration is never nil.
+// CommitGenesisBlock writes or updates the genesis block in db, keeping the stored block unless a compatible new genesis is given; a fork-order conflict returns *chain.ConfigCompatError with the new, unwritten config.
 func CommitGenesisBlock(db kv.RwDB, genesis *types.Genesis, chainName string, dirs datadir.Dirs, logger log.Logger) (*chain.Config, *types.Block, error) {
 	return CommitGenesisBlockWithOverride(db, genesis, chainName, nil, nil, false, dirs, logger)
 }
@@ -136,7 +122,6 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			return nil, nil, err
 		}
 	}
-	// Just commit the new block if there is no stored genesis block.
 	storedHash, storedErr := rawdb.ReadCanonicalHash(tx, 0)
 	if storedErr != nil {
 		return nil, nil, storedErr
@@ -169,7 +154,6 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		return genesis.Config, block, nil
 	}
 
-	// Check whether the genesis block is already written.
 	if genesis != nil {
 		block, ibs, err1 := GenesisToBlock(genesis, dirs, logger)
 		if err1 != nil {
@@ -189,7 +173,6 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			return genesis.Config, nil, err
 		}
 	}
-	// Get the existing chain configuration.
 	newCfg := configOrDefault(genesis, chainName, storedHash)
 	applyOverrides(newCfg)
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
@@ -207,19 +190,13 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		}
 		return newCfg, storedBlock, nil
 	}
-	// Special case: don't change the existing config of a private chain if no new
-	// config is supplied. This is useful, for example, to preserve DB config created by erigon init.
-	// In that case, only apply the overrides.
 	if genesis == nil {
 		if !keepStoredChainConfig {
 			spec, err := chainspec.ChainSpecByName(chainName)
 			if err != nil {
-				// Unknown chain name — always keep stored config
-				keepStoredChainConfig = true
+				keepStoredChainConfig = true // unknown chain name
 			} else if spec.GenesisHash != (common.Hash{}) && spec.GenesisHash != storedHash {
-				// Known chain name but genesis hash doesn't match (e.g. custom
-				// genesis with chainId 1 in Hive tests) — keep stored config
-				keepStoredChainConfig = true
+				keepStoredChainConfig = true // genesis hash doesn't match the named chain
 			}
 		}
 		if keepStoredChainConfig {
@@ -227,8 +204,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			applyOverrides(newCfg)
 		}
 	}
-	// Check config compatibility and write the config. Compatibility errors
-	// are returned to the caller unless we're already at block zero.
+	// compatibility errors are ignored at block zero, since there is nothing to rewind yet
 	height := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
 	if height != nil {
 		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height)
@@ -279,8 +255,6 @@ func MustCommitGenesis(g *types.Genesis, db kv.RwDB, dirs datadir.Dirs, logger l
 	return block
 }
 
-// Write writes the block and state of a genesis specification to the database.
-// The block is committed as the canonical head block.
 func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, error) {
 	block, err := WriteGenesisState(g, dirs, logger)
 	if err != nil {
@@ -290,8 +264,6 @@ func write(tx kv.RwTx, g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (
 	return block, err
 }
 
-// Write writes the block a genesis specification to the database.
-// The block is committed as the canonical head block.
 func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) error {
 	config := g.Config
 	if config == nil {
@@ -326,28 +298,17 @@ func WriteGenesisBesideState(block *types.Block, tx kv.RwTx, g *types.Genesis) e
 	return rawdb.WriteChainConfig(tx, block.Hash(), config)
 }
 
-// GenesisToBlock creates the genesis block and writes state of a genesis specification
-// to the given database (or discards it if nil).
 func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {
 	if dirs.SnapDomain == "" {
 		panic("empty `dirs` variable")
 	}
-	_ = g.Alloc //nil-check
+	_ = g.Alloc // clear panic here if g is nil, instead of a cryptic one deeper in the call chain
 
 	head, withdrawals := GenesisWithoutStateToBlock(g)
 
 	ctx := context.Background()
 
-	// some users creating > 1Gb custom genesis by `erigon init`.
-	// On Windows, MDBX file-mappings are backed by the paging file for their
-	// full map size, so a large reservation immediately exhausts the pagefile
-	// when parallel goroutines open multiple databases. On Linux/macOS the
-	// reservation is sparse, but each open env still eats from the process's
-	// finite virtual address space (~128 TB on x86-64) — enough to matter
-	// when many EngineApiTester instances are alive in one process. 16 GB
-	// keeps headroom for outsized custom genesis allocations while letting
-	// 100+ testers coexist. 1 GB on Windows because the pagefile minimum is
-	// 8 GB.
+	// Windows reserves the whole map size against the pagefile up front, so cap it small there; the reservation is sparse on Linux/macOS but still eats finite process address space when many DBs are open at once.
 	genesisMapSize := 16 * datasize.GB
 	if runtime.GOOS == "windows" {
 		genesisMapSize = 1 * datasize.GB
@@ -397,7 +358,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 
 func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.TemporalTx, sd *execctx.SharedDomains, head *types.Header) ([]byte, *state.IntraBlockState, error) {
 	blockNum := uint64(0)
-	txNum := uint64(1) // 2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
+	txNum := uint64(1) // first of 2 system txs; state writes attribute here, consensus changes to the second
 
 	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
@@ -474,7 +435,6 @@ func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.Tempo
 	return rh, statedb, nil
 }
 
-// GenesisWithoutStateToBlock creates the genesis block, assuming an empty state.
 func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawals []*types.Withdrawal) {
 	head = &types.Header{
 		Number:        *uint256.NewInt(g.Number),
@@ -556,7 +516,6 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 	}
 
-	// these fields need to be overridden for Bor running in a kurtosis devnet
 	if g.Config != nil && g.Config.Bor != nil && g.Config.ChainID.Uint64() == polygonchain.BorKurtosisDevnetChainId {
 		withdrawals = []*types.Withdrawal{}
 		head.BlobGasUsed = new(uint64)

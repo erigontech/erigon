@@ -25,11 +25,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Characterization of Empty() over the parallel (versionMap) path, pinning the
-// EIP-161 emptiness verdict across the cases that make Empty subtle — before
-// rationalizing the whole-account refresh it drives. Empty keys off AddressPath
-// existence and the {Balance,Nonce,CodeHash} fields; it never consults
-// Incarnation, and (EIP-6780) a same-tx self-destruct leaves the account alive.
+// Empty() keys off AddressPath existence and {Balance,Nonce,CodeHash}, never Incarnation; a same-tx
+// self-destruct (EIP-6780) leaves the account alive.
 func emptyCharIBS(reader *accountStateReader, vm *VersionMap, txIndex int) *IntraBlockState {
 	ibs := New(NewVersionedStateReader(txIndex, ReadSet{}, vm, reader))
 	ibs.SetTxContext(0, txIndex)
@@ -44,7 +41,7 @@ func TestEmpty_Characterization(t *testing.T) {
 	t.Run("warm non-empty (balance>0)", func(t *testing.T) {
 		t.Parallel()
 		addr := getAddress(1)
-		reader := newAccountStateReader(addr) // balance 100
+		reader := newAccountStateReader(addr)
 		empty, err := emptyCharIBS(reader, NewVersionMap(nil), 3).Empty(addr)
 		require.NoError(t, err)
 		require.False(t, empty)
@@ -54,7 +51,7 @@ func TestEmpty_Characterization(t *testing.T) {
 		t.Parallel()
 		addr := getAddress(2)
 		reader := &accountStateReader{accounts: map[accounts.Address]*accounts.Account{}}
-		zero := accounts.NewAccount() // balance 0, nonce 0, empty code hash
+		zero := accounts.NewAccount()
 		reader.accounts[addr] = &zero
 		empty, err := emptyCharIBS(reader, NewVersionMap(nil), 3).Empty(addr)
 		require.NoError(t, err)
@@ -77,7 +74,7 @@ func TestEmpty_Characterization(t *testing.T) {
 	t.Run("cross-tx self-destruct (no revival) is empty", func(t *testing.T) {
 		t.Parallel()
 		addr := getAddress(4)
-		reader := newAccountStateReader(addr) // balance 100 in DB
+		reader := newAccountStateReader(addr)
 		vm := NewVersionMap(nil)
 		writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 1}, true, true)
 		empty, err := emptyCharIBS(reader, vm, 3).Empty(addr)
@@ -88,10 +85,8 @@ func TestEmpty_Characterization(t *testing.T) {
 	t.Run("field write without AddressPath zeroes balance -> empty", func(t *testing.T) {
 		t.Parallel()
 		addr := getAddress(5)
-		reader := newAccountStateReader(addr) // balance 100 in DB
+		reader := newAccountStateReader(addr)
 		vm := NewVersionMap(nil)
-		// A prior tx wrote only BalancePath=0 (no AddressPath). Empty overlays
-		// the field on the base record: balance 0, nonce 0, empty code -> empty.
 		writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 1}, uint256.Int{}, true)
 		empty, err := emptyCharIBS(reader, vm, 3).Empty(addr)
 		require.NoError(t, err)

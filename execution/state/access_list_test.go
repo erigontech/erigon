@@ -30,7 +30,6 @@ import (
 
 func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 	t.Helper()
-	// convert to common.Address form
 	addresses := make([]accounts.Address, 0, len(astrings))
 	var addressMap = make(map[accounts.Address]struct{})
 	for _, astring := range astrings {
@@ -38,13 +37,11 @@ func verifyAddrs(t *testing.T, s *IntraBlockState, astrings ...string) {
 		addresses = append(addresses, address)
 		addressMap[address] = struct{}{}
 	}
-	// Check that the given addresses are in the access list
 	for _, address := range addresses {
 		if !s.AddressInAccessList(address) {
 			t.Fatalf("expected %x to be in access list", address)
 		}
 	}
-	// Check that only the expected addresses are present in the acesslist
 	for address := range s.accessList.addresses {
 		if _, exist := addressMap[address]; !exist {
 			t.Fatalf("extra address %x in access list", address)
@@ -65,13 +62,11 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 		slots = append(slots, s)
 		slotMap[s] = struct{}{}
 	}
-	// Check that the expected items are in the access list
 	for i, slot := range slots {
 		if _, slotPresent := s.SlotInAccessList(address, slot); !slotPresent {
 			t.Fatalf("input %d: scope missing slot %v (address %v)", i, slot, addrString)
 		}
 	}
-	// Check that no extra elements are in the access list
 	idx := s.accessList.addresses[address]
 	if idx >= 0 {
 		for s := range s.accessList.slots[idx] {
@@ -84,7 +79,6 @@ func verifySlots(t *testing.T, s *IntraBlockState, addrString string, slotString
 
 func TestAccessList(t *testing.T) {
 	t.Parallel()
-	// Some helpers
 	addr := func(a string) accounts.Address { return accounts.InternAddress(common.HexToAddress(a)) }
 	slot := func(s string) accounts.StorageKey { return accounts.InternKey(common.HexToHash(s)) }
 
@@ -98,9 +92,9 @@ func TestAccessList(t *testing.T) {
 
 	state.accessList.Reset()
 
-	state.AddAddressToAccessList(addr("aa"))          // 1
-	state.AddSlotToAccessList(addr("bb"), slot("01")) // 2,3
-	state.AddSlotToAccessList(addr("bb"), slot("02")) // 4
+	state.AddAddressToAccessList(addr("aa"))
+	state.AddSlotToAccessList(addr("bb"), slot("01"))
+	state.AddSlotToAccessList(addr("bb"), slot("02"))
 	verifyAddrs(t, state, "aa", "bb")
 	verifySlots(t, state, "bb", "01", "02")
 
@@ -121,10 +115,9 @@ func TestAccessList(t *testing.T) {
 	if exp, got := 4, state.journal.length(); exp != got {
 		t.Fatalf("journal length mismatch: have %d, want %d", got, exp)
 	}
-	// some new ones
-	state.AddSlotToAccessList(addr("bb"), slot("03")) // 5
-	state.AddSlotToAccessList(addr("aa"), slot("01")) // 6
-	state.AddSlotToAccessList(addr("cc"), slot("01")) // 7,8
+	state.AddSlotToAccessList(addr("bb"), slot("03"))
+	state.AddSlotToAccessList(addr("aa"), slot("01"))
+	state.AddSlotToAccessList(addr("cc"), slot("01"))
 	state.AddAddressToAccessList(addr("cc"))
 	if exp, got := 8, state.journal.length(); exp != got {
 		t.Fatalf("journal length mismatch: have %d, want %d", got, exp)
@@ -135,7 +128,6 @@ func TestAccessList(t *testing.T) {
 	verifySlots(t, state, "bb", "01", "02", "03")
 	verifySlots(t, state, "cc", "01")
 
-	// now start rolling back changes
 	state.journal.revert(state, 7)
 	if _, ok := state.SlotInAccessList(addr("cc"), slot("01")); ok {
 		t.Fatalf("slot present, expected missing")
@@ -243,14 +235,8 @@ func BenchmarkAccessListReset(b *testing.B) {
 	})
 }
 
-// BenchmarkAccessListSlots measures the per-opcode access-list traffic: every
-// SLOAD and SSTORE calls AddSlot, and a re-read of an already-warm slot is the
-// dominant case in storage-heavy contracts.
-//
-// runLen is how many consecutive storage ops target the same address before
-// execution moves to another one. A call frame only ever touches its own
-// storage, so runLen models frame length: 1 is a proxy chain doing one SLOAD
-// per frame, 64 is a loop inside a single contract.
+// BenchmarkAccessListSlots measures per-opcode access-list traffic (every SLOAD/SSTORE calls AddSlot).
+// runLen is how many consecutive ops hit the same address before moving on, modeling call-frame length.
 func BenchmarkAccessListSlots(b *testing.B) {
 	const nAddrs, nSlots = 4, 64
 	addrs := make([]accounts.Address, nAddrs)
@@ -283,8 +269,7 @@ func BenchmarkAccessListSlots(b *testing.B) {
 			}
 		})
 
-		// Same slot re-read for the whole run: a loop hammering one storage
-		// slot, the pattern SLOAD hot loops produce.
+		// re-reads the same slot for the whole run — the pattern a hot SLOAD loop produces
 		b.Run("warm-hit-hot/"+name, func(b *testing.B) {
 			al := populated()
 			b.ReportAllocs()
@@ -299,9 +284,7 @@ func BenchmarkAccessListSlots(b *testing.B) {
 			b.ReportAllocs()
 			b.ResetTimer()
 			for i := 0; i < b.N; i++ {
-				// Walk all nAddrs*nSlots pairs exactly once per Reset window,
-				// keeping runs of runLen ops on one address. Deriving the slot
-				// from i alone would repeat 64 pairs four times instead.
+				// walks all nAddrs*nSlots pairs once per Reset window, keeping runs of runLen ops per address — deriving the slot from i alone would repeat pairs across runs
 				w := i % (nAddrs * nSlots)
 				if w == 0 {
 					al.Reset()
@@ -321,12 +304,8 @@ func BenchmarkAccessListSlots(b *testing.B) {
 	}
 }
 
-// TestAccessListMemoDroppedOnSlotMapReuse pins the memo invalidation in
-// DeleteSlot. Emptying a slot map truncates it out of al.slots and marks the
-// address slotless, so a surviving memo would send the next AddSlot into a
-// detached map — and hand that map, carrying the stray slot, to whichever
-// address claims the freed slot next. Reads go through the memo too, so the
-// damage only shows once another address has displaced it.
+// TestAccessListMemoDroppedOnSlotMapReuse pins that DeleteSlot drops the memo: emptying a slot map truncates it from al.slots, so a surviving memo would
+// send the next AddSlot into a detached map that a later address then inherits, stray slot included.
 func TestAccessListMemoDroppedOnSlotMapReuse(t *testing.T) {
 	t.Parallel()
 	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
@@ -336,10 +315,10 @@ func TestAccessListMemoDroppedOnSlotMapReuse(t *testing.T) {
 	slot3 := accounts.InternKey(common.HexToHash("0x03"))
 
 	al := newAccessList()
-	al.AddSlot(addrA, slot1) // populates the memo for A
+	al.AddSlot(addrA, slot1)
 	al.DeleteSlot(addrA, slot1)
-	al.AddSlot(addrA, slot2) // must re-establish A's slot map, not reuse the detached one
-	al.AddSlot(addrB, slot3) // displaces the memo, so the reads below take the slow path
+	al.AddSlot(addrA, slot2)
+	al.AddSlot(addrB, slot3)
 
 	addrPresent, slotPresent := al.Contains(addrA, slot2)
 	require.True(t, addrPresent)
@@ -349,9 +328,8 @@ func TestAccessListMemoDroppedOnSlotMapReuse(t *testing.T) {
 	require.False(t, leaked, "addrA's slot leaked into addrB's reused slot map")
 }
 
-// TestAccessListWarmSlotMemoDroppedOnDelete pins lastWarmSlot invalidation for
-// a DeleteSlot that leaves the slot map non-empty (no truncation): the reverted
-// slot must not keep reading as warm through the memo.
+// TestAccessListWarmSlotMemoDroppedOnDelete pins that DeleteSlot drops lastWarmSlot even when the slot map survives (no truncation), so the deleted
+// slot can't keep reading as warm through the memo.
 func TestAccessListWarmSlotMemoDroppedOnDelete(t *testing.T) {
 	t.Parallel()
 	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
@@ -360,7 +338,7 @@ func TestAccessListWarmSlotMemoDroppedOnDelete(t *testing.T) {
 
 	al := newAccessList()
 	al.AddSlot(addrA, slot1)
-	al.AddSlot(addrA, slot2) // memoizes slot2 as the last warm slot
+	al.AddSlot(addrA, slot2)
 	al.DeleteSlot(addrA, slot2)
 
 	_, slotPresent := al.Contains(addrA, slot2)
@@ -370,9 +348,7 @@ func TestAccessListWarmSlotMemoDroppedOnDelete(t *testing.T) {
 	require.True(t, slotChange, "re-adding a reverted slot must report a change for the journal")
 }
 
-// TestAccessListMemoOnEmptyList pins the empty and reset states: NilAddress is
-// the zero value of the memo's address field, so matching on the address alone
-// would let a list with no memo answer as if it had one.
+// TestAccessListMemoOnEmptyList pins that an empty or reset list must not answer from the memo: NilAddress is the zero value of the memo's address field, so matching on address alone would be wrong.
 func TestAccessListMemoOnEmptyList(t *testing.T) {
 	t.Parallel()
 	addrA := accounts.InternAddress(common.HexToAddress("0xaa"))
@@ -409,8 +385,7 @@ func TestAccessListMemoOnEmptyList(t *testing.T) {
 	}
 }
 
-// TestSlotKnownWarmOnEmptyAccessList pins the same invariant at the gas-charge
-// entry point: nothing is warm before anything is added.
+// TestSlotKnownWarmOnEmptyAccessList pins the same NilAddress zero-value trap at the gas-charge entry point.
 func TestSlotKnownWarmOnEmptyAccessList(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)

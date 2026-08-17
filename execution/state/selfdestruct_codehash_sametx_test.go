@@ -10,12 +10,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// EIP-6780: a contract self-destructed in the CURRENT tx is alive until end-of-tx
-// cleanup, so EXTCODEHASH within the same tx must return its real code hash. On the
-// versioned path the self-destruct clears the CodeHashPath cell (for later-tx reads),
-// but the code is still present — GetCodeHash must recompute the real hash, else the
-// eip1052/eip6780 EXTCODEHASH-of-self-destructed-contract zkevm fixtures store the
-// empty hash and diverge (wrong BAL / state root).
+// EIP-6780: a same-tx self-destructed contract is alive until finalize, so EXTCODEHASH must still return the real
+// code hash — GetCodeHash must recompute it, since the versioned path clears the CodeHashPath cell for later-tx reads.
 func TestEIP6780_SelfdestructVersioned_CodeHashSameTx(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x82474"))
@@ -31,7 +27,7 @@ func TestEIP6780_SelfdestructVersioned_CodeHashSameTx(t *testing.T) {
 	want, err := ibs.GetCodeHash(addr)
 	require.NoError(t, err)
 
-	_, err = ibs.Selfdestruct(addr, true /* preserveBalance */)
+	_, err = ibs.Selfdestruct(addr, true)
 	require.NoError(t, err)
 
 	got, err := ibs.GetCodeHash(addr)

@@ -28,8 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// staticAccountReader returns a fixed account without allocating, so an
-// AllocsPerRun loop measures only the IntraBlockState path.
+// staticAccountReader returns a fixed account without allocating, keeping an AllocsPerRun loop limited to measuring the IntraBlockState path.
 type staticAccountReader struct {
 	emptyReader
 	addr accounts.Address
@@ -43,8 +42,7 @@ func (r *staticAccountReader) ReadAccountData(addr accounts.Address) (*accounts.
 	return nil, nil
 }
 
-// anyAccountReader answers every address with the same account, so a benchmark
-// can touch an arbitrary number of distinct accounts.
+// anyAccountReader answers every address with the same account, so a benchmark can touch an arbitrary number of distinct accounts.
 type anyAccountReader struct {
 	emptyReader
 	acc *accounts.Account
@@ -67,11 +65,7 @@ func startNoMaterializeTx(ibs *IntraBlockState, vm *VersionMap, txIndex int) {
 	ibs.SetTxContext(1, txIndex)
 }
 
-// TestTxBoundaryRewindsArenaWithoutReset pins that the rewind rides on the
-// journal clear rather than on Reset. The BAL block assembler sets noMaterialize
-// and never calls Reset — its per-tx boundary reaches clearJournalAndRefund
-// through FinalizeTx — so an arena rewound only by Reset would grow to its cap
-// there and hold every slot's account and code for the whole block.
+// TestTxBoundaryRewindsArenaWithoutReset pins that the arena rewinds on every per-tx boundary, not only on Reset — a caller that never calls Reset would otherwise grow the arena to its cap and hold every slot for the whole block.
 func TestTxBoundaryRewindsArenaWithoutReset(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
@@ -80,14 +74,11 @@ func TestTxBoundaryRewindsArenaWithoutReset(t *testing.T) {
 	first := ibs.allocStateObject()
 	require.True(t, first.arena)
 
-	ibs.SoftFinalise() // a transaction boundary, without Reset
+	ibs.SoftFinalise()
 
 	require.Same(t, first, ibs.allocStateObject(), "the transaction boundary must free the slot")
 }
 
-// TestNoMaterializeReadReusesArena pins that account reads on the parallel path
-// are served from the arena and that consecutive transactions reuse the same
-// slab instead of growing it.
 func TestNoMaterializeReadReusesArena(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xAB})
 	acc := accounts.NewAccount()
@@ -114,8 +105,6 @@ func TestNoMaterializeReadReusesArena(t *testing.T) {
 		"the arena must stop growing after the first transaction")
 }
 
-// TestNoMaterializeAllocStateObjectUsesArena pins the routing: the parallel path
-// takes arena slots, the materializing path takes pooled objects.
 func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
@@ -128,9 +117,7 @@ func TestNoMaterializeAllocStateObjectUsesArena(t *testing.T) {
 	assert.True(t, ibs.allocStateObject().arena, "parallel path must use the arena")
 }
 
-// TestNoMaterializeOverflowSkipsPool pins that once the arena is full the
-// parallel path allocates rather than draining the shared pool, since objects it
-// hands out are never released back.
+// TestNoMaterializeOverflowSkipsPool pins that once the arena is full, overflow allocates rather than draining the shared pool, since objects it hands out are never released back.
 func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 	ibs, _ := newNoMaterializeIBS(&emptyReader{})
 	defer ibs.Close()
@@ -140,16 +127,13 @@ func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 		require.True(t, ibs.allocStateObject().arena)
 	}
 
-	// Only a pool draw can hand a sentinel back. The reverse does not hold: a GC
-	// or a P migration between Put and Get empties the pool, so a drain can slip
-	// through - but a correct alloc can never fail this.
+	// A GC or P migration between Put and Get can empty the pool on its own, so this only proves alloc avoided the sentinels below, not that a drain can never happen.
 	sentinels := make([]*stateObject, 4)
 	for i := range sentinels {
 		sentinels[i] = newHeapObject()
 		stateObjectPool.Put(sentinels[i])
 	}
-	// stateObjectPool is package-global: drain what this test pushed so sibling
-	// tests do not run against a pool it primed.
+	// stateObjectPool is package-global: drain what this test pushed so other tests don't run against a primed pool.
 	t.Cleanup(func() {
 		for range sentinels {
 			stateObjectPool.Get()
@@ -165,9 +149,7 @@ func TestNoMaterializeOverflowSkipsPool(t *testing.T) {
 	require.Len(t, overflow.dirtyStorage, 1, "overflow object must be usable")
 }
 
-// TestNoMaterializeAccountReadAllocs guards against the stateObject allocation
-// coming back. The residual allocations belong to the per-transaction ReadSet,
-// not to the stateObject.
+// TestNoMaterializeAccountReadAllocs guards against the stateObject allocation coming back; residual allocs belong to the per-tx ReadSet, not the stateObject.
 func TestNoMaterializeAccountReadAllocs(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xAB})
 	acc := accounts.NewAccount()
@@ -184,19 +166,14 @@ func TestNoMaterializeAccountReadAllocs(t *testing.T) {
 		}
 	})
 
-	// Assert the arena served the read directly: the alloc bound alone would still
-	// pass if allocStateObject regressed to a pool draw, since a warm pool also
-	// costs nothing.
+	// the alloc bound alone can't tell a real arena hit from a regression to a warm pool draw, which also costs nothing — check the arena index directly
 	require.NotZero(t, ibs.stateObjectArena.idx, "the read must be served from the arena")
 
-	//goland:noinspection GoBoolExpressions
 	if !race.Enabled {
 		require.LessOrEqual(t, allocs, 5.0, "stateObject must not be heap-allocated per transaction")
 	}
 }
 
-// TestStateObjectArenaRecyclesSlots pins that reset hands the same backing
-// slots out again, carrying no state from their previous use.
 func TestStateObjectArenaRecyclesSlots(t *testing.T) {
 	var a stateObjectArena
 
@@ -226,9 +203,7 @@ func TestStateObjectArenaRecyclesSlots(t *testing.T) {
 	assert.True(t, reused.arena, "hand-out re-tags the slot")
 }
 
-// TestNoMaterializeIsStableWhileSlotsOutstanding pins the mutual exclusion: arena
-// slots are rewound per transaction, so the mode that decides whether an object is
-// cached for the block must not change while any are live.
+// TestNoMaterializeIsStableWhileSlotsOutstanding pins that noMaterialize can't flip while arena slots are live, since they're rewound per transaction under the mode active when drawn.
 func TestNoMaterializeIsStableWhileSlotsOutstanding(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = true
@@ -245,8 +220,7 @@ func TestNoMaterializeIsStableWhileSlotsOutstanding(t *testing.T) {
 	require.Panics(t, func() { ibs.SetNoMaterialize(false) }, "flipping with slots outstanding")
 }
 
-// TestStateObjectArenaFallsBackToHeap pins that the arena stops growing at its
-// cap and signals the caller to allocate instead.
+// TestStateObjectArenaFallsBackToHeap pins that the arena stops growing at its cap and signals the caller (a nil return) to allocate instead.
 func TestStateObjectArenaFallsBackToHeap(t *testing.T) {
 	var a stateObjectArena
 
@@ -259,8 +233,6 @@ func TestStateObjectArenaFallsBackToHeap(t *testing.T) {
 	require.NotNil(t, a.alloc(), "reset must make the arena usable again")
 }
 
-// TestStateObjectArenaPointersSurviveGrowth pins that a pointer handed out
-// before the arena grows still refers to the same object afterwards.
 func TestStateObjectArenaPointersSurviveGrowth(t *testing.T) {
 	var a stateObjectArena
 
@@ -274,8 +246,6 @@ func TestStateObjectArenaPointersSurviveGrowth(t *testing.T) {
 	assert.EqualValues(t, 42, first.data.Nonce, "growth must not relocate live slots")
 }
 
-// TestStateObjectArenaReleaseKeepsSlotOutOfPool pins that an arena slot reaching
-// release() is reset but not handed to the shared pool.
 func TestStateObjectArenaReleaseKeepsSlotOutOfPool(t *testing.T) {
 	var a stateObjectArena
 
@@ -288,8 +258,6 @@ func TestStateObjectArenaReleaseKeepsSlotOutOfPool(t *testing.T) {
 	require.Same(t, so, &a.slabs[0][0], "the slot stays owned by the arena")
 }
 
-// BenchmarkNoMaterializeTx models a parallel-exec transaction: reset, then read
-// the account fields of a set of distinct accounts.
 func BenchmarkNoMaterializeTx(b *testing.B) {
 	acc := accounts.NewAccount()
 	acc.Nonce = 3
@@ -314,9 +282,7 @@ func BenchmarkNoMaterializeTx(b *testing.B) {
 	}
 }
 
-// TestStateObjectArenaResetCoversVaryingHighWater pins that a slot is clean on
-// hand-out even when transactions consume different numbers of slots: a slot is
-// reset by every generation that handed it out.
+// TestStateObjectArenaResetCoversVaryingHighWater pins that a slot is clean on hand-out even when successive transactions consume different numbers of slots.
 func TestStateObjectArenaResetCoversVaryingHighWater(t *testing.T) {
 	var a stateObjectArena
 

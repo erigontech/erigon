@@ -147,8 +147,7 @@ func TestAllocConstructor(t *testing.T) {
 	require := require.New(t)
 	assert := assert.New(t)
 
-	// This deployment code initially sets contract's 0th storage to 0x2a
-	// and its 1st storage to 0x01c9.
+	// sets storage slot 0 to 0x2a and slot 1 to 0x01c9
 	deploymentCode := common.FromHex("602a5f556101c960015560048060135f395ff35f355f55")
 
 	funds := big.NewInt(1000000000)
@@ -168,7 +167,6 @@ func TestAllocConstructor(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	//TODO: support historyV3
 	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	state := state.New(reader)
@@ -216,14 +214,11 @@ func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 	require.NoError(err)
 	defer tx.Rollback()
 
-	// Ground truth for DomainDel's guard: the accounts domain must hold a
-	// non-empty entry for this address (not dangling storage under an absent account).
 	av := address.Value()
 	acc, _, err := tx.GetLatest(kv.AccountsDomain, av[:])
 	require.NoError(err)
 	require.NotEmpty(acc, "storage-bearing empty alloc must produce a present accounts-domain entry")
 
-	// High-level view agrees: account exists, storage is set, balance/nonce/code stay empty.
 	reader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(err)
 	st := state.New(reader)
@@ -245,7 +240,6 @@ func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 	assert.Equal(u256.U64(0x2a), got, "storage slot must be readable")
 }
 
-// See https://github.com/erigontech/erigon/pull/11264
 func TestDecodeBalance0(t *testing.T) {
 	genesisData, err := os.ReadFile("./genesis_test.json")
 	require.NoError(t, err)
@@ -314,10 +308,6 @@ func TestSetupGenesis(t *testing.T) {
 			wantConfig: customg.Config,
 		},
 		{
-			// Reproduces the hive EEST consume-rlp scenario:
-			// 1. `erigon init genesis.json` writes a custom genesis + config
-			// 2. `erigon --import` reopens the DB with genesis=nil, chainName="mainnet" (default)
-			// The custom config must be preserved, not overwritten with mainnet's.
 			name: "custom block in DB, genesis == nil, chainName mainnet",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
 				genesiswrite.MustCommitGenesis(&customg, db, datadir.New(tmpdir), logger)
@@ -348,11 +338,6 @@ func TestSetupGenesis(t *testing.T) {
 		{
 			name: "incompatible config in DB",
 			fn: func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error) {
-				//if ethconfig.EnableHistoryV4InTest {
-				//	t.Skip("fix me")
-				//}
-				// Commit the 'old' genesis block with Homestead transition at #2.
-				// Advance to block #4, past the homestead transition block of customg.
 				key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 				m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&oldcustomg), execmoduletester.WithKey(key))
 
@@ -363,7 +348,6 @@ func TestSetupGenesis(t *testing.T) {
 				if err := m.InsertChain(chainBlocks); err != nil {
 					return nil, nil, err
 				}
-				// This should return a compatibility error.
 				return genesiswrite.CommitGenesisBlock(m.DB, &customg, "", datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
@@ -384,7 +368,6 @@ func TestSetupGenesis(t *testing.T) {
 			db := temporaltest.NewTestDB(t, dirs)
 			blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
 			config, genesis, err := test.fn(t, db, tmpdir)
-			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
 				spew := spew.ConfigState{DisablePointerAddresses: true, DisableCapacities: true}
 				t.Fatalf("%s: returned error %#v, want %#v", test.name, spew.NewFormatter(err), spew.NewFormatter(test.wantErr))
@@ -405,7 +388,6 @@ func TestSetupGenesis(t *testing.T) {
 				t.Errorf("%s: returned hash %s, want %s", test.name, genesis.Hash().Hex(), test.wantHash.Hex())
 			} else if err == nil {
 				if dbErr := db.View(context.Background(), func(tx kv.Tx) error {
-					// Check database content.
 					stored, _, _ := blockReader.BlockWithSenders(context.Background(), tx, test.wantHash, 0)
 					if stored.Hash() != test.wantHash {
 						t.Errorf("%s: block in DB has hash %s, want %s", test.name, stored.Hash(), test.wantHash)

@@ -24,24 +24,18 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// Code, CodeHash and CodeSize always co-write (one code change bumps all
-// three) and validate in the SAME value class: each carries a tiebreaker, so a
-// cold StorageRead that collides with a concurrent worker's Done flush stays
-// valid when the flushed value matches what was read, and invalidates when it
-// differs. The unification is deliberate: a value-matching collision is not a
-// real conflict, and re-executing on it costs determinism on the BAL-fed path.
+// Code, CodeHash and CodeSize co-write and validate under one tiebreaker: a cold read colliding with
+// a flush stays valid when the flushed value matches (a value-matching collision isn't a real conflict).
 func TestCodeTrio_ValidationClassAsymmetry(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(80)
 	code := accounts.NewCode([]byte{0x60, 0x00, 0x60, 0x00, 0xf3})
 
 	vm := NewVersionMap(nil)
-	// A concurrent worker's Done flush of the trio lands at tx1.
 	vm.WriteCode(addr, Version{TxIndex: 1}, code, true)
 	vm.WriteCodeHash(addr, Version{TxIndex: 1}, code.Hash, true)
 	vm.WriteCodeSize(addr, Version{TxIndex: 1}, code.Len(), true)
 
-	// tx3's reads were served from storage (cold) and now collide with the flush.
 	readStorage := ReadHeader{Source: StorageRead, Version: Version{TxIndex: 3}}
 
 	ioHash := NewVersionedIO(4)

@@ -35,9 +35,6 @@ func (r *storageReader) ReadAccountStorage(addr accounts.Address, key accounts.S
 	return uint256.Int{}, false, nil
 }
 
-// TestStorageReadParallel_NoMaterialize verifies that a cold storage read on the
-// parallel (versionMap) path returns the committed value without
-// materializing/caching a stateObject.
 func TestStorageReadParallel_NoMaterialize(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
 	key := accounts.InternKey([32]byte{0x01})
@@ -59,15 +56,12 @@ func TestStorageReadParallel_NoMaterialize(t *testing.T) {
 	assert.Equal(t, uint256.NewInt(42), &v, "cold SLOAD must return the committed value")
 	assert.Empty(t, ibs.stateObjects, "cold parallel SLOAD must not materialize a stateObject")
 
-	// A repeat read hits the recorded ReadSet and must return the same value.
 	v2, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	assert.Equal(t, v, v2)
 	assert.Empty(t, ibs.stateObjects, "repeat SLOAD must still not materialize a stateObject")
 }
 
-// TestStorageReadParallel_CommittedRead verifies GetCommittedState on the
-// parallel path also avoids materialization.
 func TestStorageReadParallel_CommittedRead(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
 	key := accounts.InternKey([32]byte{0x02})

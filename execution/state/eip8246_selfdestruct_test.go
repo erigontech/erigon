@@ -12,17 +12,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// EIP-8246 removes the SELFDESTRUCT balance burn, leaving a destroyed account
-// alive as a balance-only account. These tests cover that behavior inside
-// IntraBlockState: reconstructing a preserved account on the versioned-read
-// path, resetting the in-memory object at end-of-tx so the block assembler's
-// shared IBS carries the preserved balance into a later tx, and keeping the
-// re-created incarnation aligned across execution modes.
+// EIP-8246 removes SELFDESTRUCT's balance burn; these tests cover the resulting balance-only preserved account in IntraBlockState.
 
-// A destroyed-preserved contract's deployed code hash and nonce must not reach
-// a later tx. Extraction drops nonce/code/codeHash for self-destructed
-// accounts, so nothing in the version map carries them: GetCodeHash serves
-// EmptyCodeHash through the preserved-account reconstruction fallback.
+// A destroyed-preserved account's nonce and code hash must not reach a later tx: extraction drops both, so GetCodeHash falls back to EmptyCodeHash.
 func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246B"))
@@ -59,10 +51,7 @@ func TestEIP8246_PreservedSD_ReadsAsEmptyCodeAccountInLaterTx(t *testing.T) {
 	require.True(t, exists, "the preserved account still exists")
 }
 
-// The block assembler runs every tx on one shared IBS (no per-tx Reset).
-// After a balance-preserving SELFDESTRUCT is finalized, a later tx's CREATE2 at
-// the same address must carry the preserved balance — i.e. FinalizeTx must not
-// leave a stale selfdestructed marker on the in-memory object.
+// The block assembler shares one IBS across all txs (no per-tx Reset), so FinalizeTx must not leave a stale selfdestruct marker after a preserving SD.
 func TestEIP8246_FinalizeTx_PreservedBalanceCarriesToLaterTxCreate(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246C"))
@@ -77,7 +66,7 @@ func TestEIP8246_FinalizeTx_PreservedBalanceCarriesToLaterTxCreate(t *testing.T)
 	defer ibs.Close()
 
 	ibs.SetTxContext(1, 0)
-	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
+	_, err := ibs.Selfdestruct(addr, true)
 	require.NoError(t, err)
 	require.NoError(t, ibs.FinalizeTx(rules, NewNoopWriter()))
 
@@ -88,22 +77,18 @@ func TestEIP8246_FinalizeTx_PreservedBalanceCarriesToLaterTxCreate(t *testing.T)
 	require.Equal(t, *uint256.NewInt(100), bal, "EIP-8246: preserved balance must carry into a later-tx CREATE2 on the assembler's shared IBS")
 }
 
-// getVersionedAccount must not treat a later Balance/Nonce/CodeHash write
-// as a revival. An in-block-created account that self-destructs (preserving
-// balance) and is then funded by a later tx must still be reconstructed — with
-// the later funding overlaid — so a concurrent reader sees it exist, matching
-// serial. Only a genuine re-creation (a later AddressPath) skips reconstruction.
+// getVersionedAccount must not mistake a later Balance/Nonce/CodeHash write for
+// a revival — only a later AddressPath write re-creates the account.
 func TestEIP8246_VersionedAccount_LaterBalanceWriteDoesNotSkipReconstruction(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246D"))
-	reader := newAccountStateReader() // in-block-created: no pre-block record
+	reader := newAccountStateReader()
 
 	vm := NewVersionMap(nil)
 	sdVer := Version{TxIndex: 0}
 	vm.WriteSelfDestruct(addr, sdVer, true, true)
 	vm.WriteBalance(addr, sdVer, *uint256.NewInt(1), true)
 	vm.WriteIncarnation(addr, sdVer, 1, true)
-	// A later tx funds the preserved account — a balance write only, no re-creation.
 	vm.WriteBalance(addr, Version{TxIndex: 1}, *uint256.NewInt(2), true)
 
 	ibs := New(reader)
@@ -121,12 +106,7 @@ func TestEIP8246_VersionedAccount_LaterBalanceWriteDoesNotSkipReconstruction(t *
 	require.Equal(t, *uint256.NewInt(2), bal, "reader must see the latest funded balance of the preserved account")
 }
 
-// The persisted balance-only record has incarnation 0, so a later CREATE2 over
-// a preserved account must compute incarnation 1 in every execution mode.
-// Selfdestruct publishes the pre-destruct IncarnationPath and extraction keeps
-// it even for self-destructed accounts; without a superseding write the
-// parallel worker's version map serves the stale value and the recreated
-// contract's domain record diverges from serial and from the next block.
+// The persisted preserved-balance record has incarnation 0, so a later CREATE2 must compute incarnation 1 consistently across execution modes.
 func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246E1"))
@@ -188,11 +168,7 @@ func TestEIP8246_CreateAfterPreservedSD_IncarnationAndBalanceAcrossModes(t *test
 	})
 }
 
-// Account-level reconstruction of a preserved account must agree with the
-// field-level reads: a later tx's Nonce/CodeHash map entries overlay the
-// reconstructed account exactly like a later balance write does, so a caller
-// materializing the account through getStateObject sees the same fields a
-// per-path read returns.
+// Account-level reconstruction of a preserved account must agree with field-level reads: later Nonce/CodeHash writes overlay both the same way.
 func TestEIP8246_PreservedAccount_OverlaysLaterFieldWrites(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246F"))

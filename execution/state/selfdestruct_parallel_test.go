@@ -26,9 +26,6 @@ func (r *sdAccountReader) ReadAccountData(addr accounts.Address) (*accounts.Acco
 	return nil, nil
 }
 
-// TestSelfdestructParallel_NoMaterialize verifies that on the parallel
-// (versionMap) path Selfdestruct records the self-destruct through
-// versioned-write cells without materializing/caching a stateObject.
 func TestSelfdestructParallel_NoMaterialize(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
 	acc := accounts.NewAccount()
@@ -58,10 +55,7 @@ func TestSelfdestructParallel_NoMaterialize(t *testing.T) {
 	assert.Empty(t, ibs.stateObjects, "parallel Selfdestruct must not materialize a stateObject")
 }
 
-// TestSelfdestructParallel_RepeatedSameTx verifies that a second SELFDESTRUCT of
-// the same account within a tx still proceeds (returns true and re-clears a
-// balance credited in between) — matching the serial object, whose deleted flag
-// stays false until finalize.
+// A second SELFDESTRUCT in the same tx must still proceed and re-clear balance — the serial object's deleted flag stays false until finalize.
 func TestSelfdestructParallel_RepeatedSameTx(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
 	acc := accounts.NewAccount()
@@ -89,8 +83,6 @@ func TestSelfdestructParallel_RepeatedSameTx(t *testing.T) {
 	assert.True(t, bal.Val.IsZero(), "balance credited between the two SELFDESTRUCTs must be re-cleared")
 }
 
-// TestSelfdestructParallel_AbsentAccount verifies that self-destructing an
-// account that does not exist returns false and records nothing.
 func TestSelfdestructParallel_AbsentAccount(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xBE, 0xEF})
 

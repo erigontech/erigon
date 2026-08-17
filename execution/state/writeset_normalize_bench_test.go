@@ -40,15 +40,8 @@ func countStorage(ws *WriteSet) (n int) {
 	return n
 }
 
-// benchStorageVal is the value a slot holds after the prior tx; a write-back of
-// the same value is what the no-op filter must drop.
 func benchStorageVal(slot int) uint256.Int { return *uint256.NewInt(uint64(slot + 1)) }
 
-// buildNormalizeInput builds one tx's write set at txIndex: addrs accounts with
-// balance+nonce writes and slots storage writes each, half of them written back
-// unchanged so the no-op filter has something to drop, plus contract code on
-// every third account and two storage-only addresses that miss all four account
-// fields and so exercise the fill loop.
 func buildNormalizeInput(addrs, slots, txIndex int) *WriteSet {
 	ws := &WriteSet{}
 	ver := Version{TxIndex: txIndex, Incarnation: 0}
@@ -77,7 +70,7 @@ func buildNormalizeInput(addrs, slots, txIndex int) *WriteSet {
 			k := benchKey(s)
 			val := benchStorageVal(s)
 			if s%2 == 1 {
-				val = *uint256.NewInt(uint64(s + 1000)) // changed: survives the filter
+				val = *uint256.NewInt(uint64(s + 1000))
 			}
 			ws.SetStorage(a, k, &VersionedWrite[uint256.Int]{
 				WriteHeader: WriteHeader{Address: a, Path: StoragePath, Key: k, Version: ver},
@@ -96,9 +89,7 @@ func buildNormalizeInput(addrs, slots, txIndex int) *WriteSet {
 	return ws
 }
 
-// seedPriorTx flushes a preceding tx's storage values into the version map, so
-// that the benchmarked tx's write-backs of those same values reach the no-op
-// filter's drop arm rather than falling through to the state reader.
+// Flushes a prior tx's storage into the versionMap so write-backs hit the no-op filter instead of falling through to the state reader.
 func seedPriorTx(vm *VersionMap, addrs, slots int) {
 	prior := &WriteSet{}
 	ver := Version{TxIndex: 0, Incarnation: 0}
@@ -124,8 +115,7 @@ func BenchmarkWriteSetNormalize(b *testing.B) {
 			seedPriorTx(vm, size.addrs, size.slots)
 			vm.FlushVersionedWrites(ws, true, "")
 			reader := &minimalStateReader{}
-			// Guard the shape the numbers describe: the no-op filter must
-			// actually drop writes, else a regression in it stays invisible.
+			// Guards the shape being measured: if the no-op filter stops dropping writes, these numbers would silently mean something else.
 			probe, err := ws.Normalize(vm, txIndex, 0, reader, nil, true, false, false)
 			if err != nil {
 				b.Fatal(err)

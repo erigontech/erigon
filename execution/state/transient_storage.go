@@ -24,15 +24,13 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// transientStorage is a representation of EIP-1153 "Transient Storage".
+// transientStorage implements EIP-1153 transient storage.
 type transientStorage map[accounts.Address]Storage
 
-// newTransientStorage creates a new instance of a transientStorage.
 func newTransientStorage() transientStorage {
 	return make(transientStorage)
 }
 
-// Set sets the transient-storage `value` for `key` at the given `addr`.
 func (t transientStorage) Set(addr accounts.Address, key accounts.StorageKey, value uint256.Int) {
 	slots, ok := t[addr]
 	if value.IsZero() {
@@ -50,7 +48,6 @@ func (t transientStorage) Set(addr accounts.Address, key accounts.StorageKey, va
 	slots[key] = value
 }
 
-// Get gets the transient storage for `key` at the given `addr`.
 func (t transientStorage) Get(addr accounts.Address, key accounts.StorageKey) uint256.Int {
 	val, ok := t[addr]
 	if !ok {

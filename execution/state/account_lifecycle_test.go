@@ -25,11 +25,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// AccountLifecycle is the single revival definition the scattered consumers
-// (getVersionedAccount, versionedStateReader, validateReadImpl, the create
-// decision) converge onto. Pin it against the cases those sites currently
-// compute ad-hoc — including the same-tx metamorphic SD+CREATE2 that only the
-// AddressPath >= arm catches.
+// AccountLifecycle is the single revival definition other call sites replicate ad-hoc; the AddressPath >= arm
+// also catches same-tx metamorphic SD+CREATE2.
 func TestAccountLifecycle(t *testing.T) {
 	t.Parallel()
 
@@ -101,9 +98,7 @@ func TestAccountLifecycle(t *testing.T) {
 	})
 }
 
-// accountLifecycle layers the tx's own field-level SelfDestruct write over the
-// versionMap floor, without the stateObject. Pin the layering: own write wins
-// (true after same-tx SD, false after same-tx recreate); else the floor verdict.
+// accountLifecycle layers the tx's own SelfDestruct write over the versionMap floor: own write wins, else the floor verdict applies.
 func TestAccountLifecycle_LayersOwnTxWrites(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
@@ -128,8 +123,8 @@ func TestAccountLifecycle_LayersOwnTxWrites(t *testing.T) {
 	t.Run("own-tx recreate (SD=false) wins", func(t *testing.T) {
 		ibs, vm := newIBS()
 		a := getAddress(2)
-		writeFor(vm, a, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true) // floor says destroyed
-		ownSD(ibs, a, false)                                                                // own recreate
+		writeFor(vm, a, SelfDestructPath, accounts.NilKey, Version{TxIndex: 2}, true, true)
+		ownSD(ibs, a, false)
 		require.False(t, ibs.accountLifecycle(a), "own recreate must override the floor destruct")
 	})
 	t.Run("no own write -> floor destroyed-no-revival", func(t *testing.T) {

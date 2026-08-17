@@ -8,15 +8,12 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// A touch of an existing empty account records a BalancePath=0 versioned write
-// paired only with a touchAccount journal entry whose revert is a no-op. If the
-// frame is reverted, the address leaves journal.dirties but the write must not
-// survive into the published write set — otherwise Normalize's EIP-161 pass would
-// delete an account whose touch was rolled back (the ripeMD wrong-root shape).
+// A reverted touch on an empty account must not publish its BalancePath=0 write, even though the address stays in
+// journal.dirties — else EIP-161 Normalize would delete an account whose touch was rolled back (the RIPEMD wrong-root case).
 func TestNoMaterialize_RevertedTouchNotPublished(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0x11, 0x22, 0x33})
-	empty := accounts.NewAccount() // existing but EIP-161-empty: nonce 0, balance 0, no code
+	empty := accounts.NewAccount()
 	reader := &fieldReader{addr: addr, account: &empty}
 
 	vm := NewVersionMap(nil)

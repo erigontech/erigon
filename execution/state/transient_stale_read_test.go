@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// fieldReader returns a fixed committed account (+ optional code) for one addr.
 type fieldReader struct {
 	emptyReader
 	addr    accounts.Address
@@ -44,22 +43,17 @@ func (r *fieldReader) ReadAccountCodeSize(addr accounts.Address) (int, error) {
 	return 0, nil
 }
 
-// TestTransientStale_FieldGettersPreferCells pins that, on the noMaterialize
-// (parallel) path, every account-field getter reads the per-field versionMap
-// cell — not the AddressPath account record, which a prior tx can publish stale
-// (its Nonce/CodeHash lagging the field cells). A later tx must see the cells.
+// Field getters on the noMaterialize path must read the versionMap's per-field cell, not a stale AddressPath record.
 func TestTransientStale_FieldGettersPreferCells(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x35, 0x85, 0x97, 0xa2})
 	delegationCode := types.AddressToDelegation(accounts.InternAddress([20]byte{0x55, 0xe5, 0xb3, 0x85}))
 	delegHash := accounts.InternCodeHash(crypto.Keccak256Hash(delegationCode))
 
-	committed := accounts.NewAccount() // committed EOA: nonce 0, no code
+	committed := accounts.NewAccount()
 	reader := &fieldReader{addr: addr, account: &committed}
 
 	vm := NewVersionMap(nil)
 
-	// tx1 (TxIndex=1) publishes a STALE AddressPath account record (nonce 0,
-	// empty codehash, zero balance) alongside NEWER per-field cells.
 	stale := accounts.NewAccount()
 	v1 := Version{TxIndex: 1, Incarnation: 0}
 	vm.WriteAddress(addr, v1, &stale, true)
@@ -100,28 +94,21 @@ func TestTransientStale_FieldGettersPreferCells(t *testing.T) {
 	assert.Equal(t, uint64(3), inc, "incarnation must come from the IncarnationPath cell")
 }
 
-// TestTransientStale_GetDelegatedDesignation is the warm-callcode consensus
-// regression. A prior tx published an AddressPath account record with an EMPTY
-// code hash (stale) alongside CodePath/CodeHashPath cells carrying a delegation.
-// GetDelegatedDesignation goes through getStateObject, which on the noMaterialize
-// path rebuilds a transient from the AddressPath record. It must reconcile the
-// transient's code with the CodePath cell — otherwise it sees empty code,
-// reports "not delegated", the EIP-7702 authorization is skipped, the delegation
-// persists, and a later CALL runs the delegated code and runs out of gas
-// (execution over-counts gas, producing a wrong receipt/trie root).
+// GetDelegatedDesignation must reconcile a transient rebuilt from a stale
+// AddressPath record with the CodePath cell, or it misses an active EIP-7702 delegation.
 func TestTransientStale_GetDelegatedDesignation(t *testing.T) {
 	authority := accounts.InternAddress([20]byte{0x35, 0x85, 0x97, 0xa2})
 	target := accounts.InternAddress([20]byte{0x55, 0xe5, 0xb3, 0x85})
 	delegationCode := types.AddressToDelegation(target)
 	delegHash := accounts.InternCodeHash(crypto.Keccak256Hash(delegationCode))
 
-	reader := &fieldReader{addr: authority, account: nil} // committed: absent
+	reader := &fieldReader{addr: authority, account: nil}
 
 	vm := NewVersionMap(nil)
 
 	stale := accounts.NewAccount()
 	stale.Nonce = 1
-	stale.CodeHash = accounts.EmptyCodeHash // stale — lags the CodeHashPath cell
+	stale.CodeHash = accounts.EmptyCodeHash
 	v1 := Version{TxIndex: 1, Incarnation: 0}
 	vm.WriteAddress(authority, v1, &stale, true)
 	vm.WriteNonce(authority, v1, uint64(1), true)
@@ -141,21 +128,15 @@ func TestTransientStale_GetDelegatedDesignation(t *testing.T) {
 	assert.Empty(t, ibs.stateObjects, "GetDelegatedDesignation must not materialize a stateObject")
 }
 
-// TestCrossTxSelfDestruct_CodeReadsEmpty pins that an account self-destructed by
-// a PRIOR tx reads empty CODE, consistent with its empty code hash. The
-// version-map self-destruct gate must cover CodePath as well as CodeHashPath;
-// excluding CodePath let a later tx read the stale committed code alongside the
-// (correctly) empty code hash — a CALL then executed the destroyed contract and
-// over-counted gas, producing a wrong trie root.
+// An account self-destructed by a prior tx must read empty code: the self-destruct gate must cover CodePath, not only CodeHashPath.
 func TestCrossTxSelfDestruct_CodeReadsEmpty(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x4d, 0x95, 0xfb, 0xaf})
-	code := []byte{0x60, 0x60, 0x60, 0x40, 0x52, 0x00} // non-empty committed code
+	code := []byte{0x60, 0x60, 0x60, 0x40, 0x52, 0x00}
 	committed := accounts.NewAccount()
 	committed.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	reader := &fieldReader{addr: addr, account: &committed, code: code}
 
 	vm := NewVersionMap(nil)
-	// tx1 self-destructs the account; no later revival.
 	vm.WriteSelfDestruct(addr, Version{TxIndex: 1, Incarnation: 0}, true, true)
 
 	ibs := NewWithVersionMap(reader, vm)
@@ -177,22 +158,16 @@ func TestCrossTxSelfDestruct_CodeReadsEmpty(t *testing.T) {
 	assert.Zero(t, sz, "code size must be 0")
 }
 
-// TestCrossTxIncarnationBump_CodeReadsEmpty pins that when a prior tx bumps an
-// account's Incarnation and clears its code hash but writes no CodePath cell, a
-// later tx reads empty code — not the stale committed code — consistent with the
-// empty code hash. The incarnation-zeroing gate must cover CodePath, not only
-// StoragePath; otherwise a CALL executes a destroyed contract and over-counts gas.
+// An incarnation bump that clears CodeHash but writes no CodePath cell must still read empty code, not the stale committed bytes.
 func TestCrossTxIncarnationBump_CodeReadsEmpty(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x4d, 0x95, 0xfb, 0xaf})
-	code := []byte{0x60, 0x60, 0x60, 0x40, 0x52, 0x00} // committed code from a prior block
+	code := []byte{0x60, 0x60, 0x60, 0x40, 0x52, 0x00}
 	committed := accounts.NewAccount()
 	committed.Incarnation = 1
 	committed.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
 	reader := &fieldReader{addr: addr, account: &committed, code: code}
 
 	vm := NewVersionMap(nil)
-	// tx1 bumps the incarnation and clears the code hash, but writes no CodePath
-	// cell (no revival).
 	v1 := Version{TxIndex: 1, Incarnation: 0}
 	vm.WriteIncarnation(addr, v1, uint64(2), true)
 	vm.WriteCodeHash(addr, v1, accounts.EmptyCodeHash, true)

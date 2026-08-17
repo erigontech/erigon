@@ -14,10 +14,6 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-// Package-level baseline tests for the 2-cache IBS refactor (issue #19623).
-// Phase 1: tests only, no production code changes.
-// These tests document current invariants and will catch regressions across
-// subsequent phases.
 package state
 
 import (
@@ -32,9 +28,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// writeIndex builds a lookup map from a WriteSet, keyed by (Path, Key) — the
-// address is not part of the key, so this assumes a single-address WriteSet
-// (use addrWriteIndex for multiple). Value is the typed Val field.
+// writeIndex indexes a WriteSet by (Path, Key), dropping Address — safe only
+// for a single-address WriteSet (see addrWriteIndex for multiple).
 func writeIndex(writes *WriteSet) map[AccountKey]any {
 	idx := make(map[AccountKey]any)
 	for h := range writes.AllHeaders() {
@@ -43,7 +38,6 @@ func writeIndex(writes *WriteSet) map[AccountKey]any {
 	return idx
 }
 
-// addrWriteIndex is like writeIndex but scoped to a single address.
 func addrWriteIndex(writes *WriteSet, addr accounts.Address) map[AccountKey]any {
 	idx := make(map[AccountKey]any)
 	for h := range writes.AllHeaders() {
@@ -54,12 +48,6 @@ func addrWriteIndex(writes *WriteSet, addr accounts.Address) map[AccountKey]any 
 	return idx
 }
 
-// TestVersionedWritesMatchStateObjects verifies that after a sequence of EVM
-// state operations every field in every stateObject is reflected in
-// VersionedWrites with the same value.
-//
-// This is the fundamental invariant that allows Phase 2 to derive StateUpdates
-// directly from VersionedWrites without reconstructing an IBS.
 func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	t.Parallel()
 
@@ -76,7 +64,6 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	key2 := accounts.InternKey(common.HexToHash("0x0002"))
 	code1 := []byte{0xde, 0xad, 0xbe, 0xef}
 
-	// addr1: balance + nonce + code + two storage slots
 	err := ibs.SetBalance(addr1, *uint256.NewInt(100), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
 	err = ibs.SetNonce(addr1, 7, tracing.NonceChangeUnspecified)
@@ -88,15 +75,13 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	err = ibs.SetState(addr1, key2, *uint256.NewInt(99))
 	require.NoError(t, err)
 
-	// addr2: CreateAccount + balance only
 	ibs.CreateAccount(addr2, true)
 	err = ibs.SetBalance(addr2, *uint256.NewInt(200), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
 
-	// Capture VersionedWrites BEFORE FinalizeTx (journal.dirties still intact).
+	// Capture writes before FinalizeTx: it clears journal.dirties.
 	writes := ibs.VersionedWrites()
 
-	// — addr1 checks —
 	idx1 := addrWriteIndex(writes, addr1)
 
 	wbal1, ok := idx1[AccountKey{Path: BalancePath, Key: accounts.NilKey}]
@@ -129,7 +114,6 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, stor2, wstor2.(uint256.Int), "addr1: storage[key2] mismatch between stateObject and VersionedWrites")
 
-	// — addr2 checks —
 	idx2 := addrWriteIndex(writes, addr2)
 
 	wbal2, ok := idx2[AccountKey{Path: BalancePath, Key: accounts.NilKey}]
@@ -139,13 +123,8 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	require.Equal(t, bal2, wbal2.(uint256.Int), "addr2: balance mismatch between stateObject and VersionedWrites")
 }
 
-// TestSnapshotRandomWithVersionMap extends the snapshot-revert correctness
-// check to the versionMap path. It verifies that after reverting to a
-// snapshot, both stateObject accessors and VersionedWrites agree on the
-// pre-snapshot values.
-//
-// In Phase 5 (remove stateObject), the stateObject side of this comparison
-// disappears; the VersionedWrites side must still pass.
+// TestSnapshotRandomWithVersionMap checks that stateObject accessors and
+// VersionedWrites agree after a snapshot revert.
 func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	t.Parallel()
 
@@ -160,7 +139,6 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
 
-	// Pre-snapshot state
 	err := ibs.SetBalance(addr, *uint256.NewInt(50), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
 	err = ibs.SetNonce(addr, 3, tracing.NonceChangeUnspecified)
@@ -170,7 +148,6 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 
 	snap := ibs.PushSnapshot()
 
-	// Post-snapshot modifications
 	err = ibs.SetBalance(addr, *uint256.NewInt(999), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
 	err = ibs.SetNonce(addr, 42, tracing.NonceChangeUnspecified)
@@ -178,11 +155,9 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	err = ibs.SetState(addr, key, *uint256.NewInt(77))
 	require.NoError(t, err)
 
-	// Revert to snapshot
 	ibs.RevertToSnapshot(snap, nil)
 	ibs.PopSnapshot(snap)
 
-	// stateObject accessors must reflect pre-snapshot values
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, uint256.NewInt(50), &bal, "balance should be reverted to pre-snapshot value")
@@ -195,7 +170,6 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint256.NewInt(11), &stor, "storage should be reverted to pre-snapshot value")
 
-	// VersionedWrites must reflect the same reverted values.
 	writes := ibs.VersionedWrites()
 	idx := addrWriteIndex(writes, addr)
 
@@ -212,16 +186,8 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	require.Equal(t, *uint256.NewInt(11), wstor.(uint256.Int), "VersionedWrites storage should reflect reverted value")
 }
 
-// TestCommittedStateWithVersionMap verifies that GetCommittedState returns the
-// pre-transaction value (the EIP-1283 "original value") when reading through
-// a versionMap.
-//
-// Concretely: tx0 writes val1 to (addr, key) and flushes to the versionMap;
-// tx1 then writes val2 to the same slot. A call to GetCommittedState from tx1
-// must return val1 (the value as seen at the start of tx1), not val2.
-//
-// This invariant is required for SSTORE gas calculation correctness and must
-// hold after all 2-cache refactor phases.
+// TestCommittedStateWithVersionMap checks GetCommittedState returns the
+// pre-tx value (EIP-1283 "original value") even after a later tx overwrites it.
 func TestCommittedStateWithVersionMap(t *testing.T) {
 	t.Parallel()
 
@@ -235,7 +201,6 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 	val1 := *uint256.NewInt(111)
 	val2 := *uint256.NewInt(222)
 
-	// — tx0 (txIndex 0) — writes val1, flushes to versionMap —
 	ibs0 := NewWithVersionMap(reader, mvhm)
 	defer ibs0.Close()
 	ibs0.SetTxContext(1, 0)
@@ -243,40 +208,31 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 	err := ibs0.SetState(addr, key, val1)
 	require.NoError(t, err)
 
-	// Capture and flush before FinalizeTx (journal.dirties still populated).
 	writes0 := ibs0.VersionedWrites()
 	mvhm.FlushVersionedWrites(writes0, true, "")
 
-	// — tx1 (txIndex 1) — reads committed state before modifying —
 	ibs1 := NewWithVersionMap(reader, mvhm)
 	defer ibs1.Close()
 	ibs1.SetTxContext(1, 1)
 
-	// Before tx1 writes anything, committed state must be val1.
 	committed, err := ibs1.GetCommittedState(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, val1, committed, "GetCommittedState must return pre-tx value (val1) before any tx1 write")
 
-	// tx1 now writes val2 to the same slot.
 	err = ibs1.SetState(addr, key, val2)
 	require.NoError(t, err)
 
-	// Even after writing val2, committed state must still be val1.
 	committed2, err := ibs1.GetCommittedState(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, val1, committed2, "GetCommittedState must continue to return val1 after tx1 writes val2")
 
-	// Current (non-committed) state must be val2.
 	current, err := ibs1.GetState(addr, key)
 	require.NoError(t, err)
 	require.Equal(t, val2, current, "GetState must return the current tx1 value (val2)")
 }
 
-// TestCrossBlockStateReadConsistency verifies that a new IBS created for
-// block N+1 correctly reads state written by block N through SharedDomains.
-//
-// This is the baseline cross-block read correctness test. It must pass
-// throughout all 2-cache refactor phases.
+// TestCrossBlockStateReadConsistency checks a new IBS for block N+1 reads
+// state block N committed to SharedDomains.
 func TestCrossBlockStateReadConsistency(t *testing.T) {
 	t.Parallel()
 
@@ -288,7 +244,6 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 	wantNonce := uint64(13)
 	wantStorage := *uint256.NewInt(555)
 
-	// — Block N: write state then commit to domains via Writer —
 	{
 		ibsN := New(NewReaderV3(domains.AsGetter(tx)))
 		defer ibsN.Close()
@@ -306,7 +261,6 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 		require.NoError(t, err)
 	}
 
-	// — Block N+1: fresh IBS reads state that block N wrote to domains —
 	ibsN1 := New(NewReaderV3(domains.AsGetter(tx)))
 	defer ibsN1.Close()
 
@@ -323,12 +277,8 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 	require.Equal(t, wantStorage, gotStorage, "block N+1 must read block N's committed storage")
 }
 
-// TestDomainApplyFromVersionedWrites verifies that applying VersionedWrites
-// through the existing round-trip path (ApplyVersionedWrites → IBS →
-// FinalizeTx → Writer) produces the correct domain state.
-//
-// This is the baseline that Phase 2's StateUpdatesFromVersionedWrites must
-// reproduce without the IBS round-trip.
+// TestDomainApplyFromVersionedWrites checks that replaying VersionedWrites
+// through ApplyVersionedWrites + FinalizeTx yields the same domain state.
 func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	t.Parallel()
 
@@ -342,7 +292,6 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	wantNonce := uint64(9)
 	wantStorage := *uint256.NewInt(456)
 
-	// — Step 1: produce VersionedWrites via a tx —
 	ibsTx := NewWithVersionMap(reader, mvhm)
 	defer ibsTx.Close()
 	ibsTx.SetTxContext(1, 0)
@@ -357,7 +306,6 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	writes := ibsTx.VersionedWrites()
 	require.NotEmpty(t, writes, "VersionedWrites must not be empty")
 
-	// — Step 2: apply VersionedWrites through existing round-trip path —
 	ibsApply := New(reader)
 	defer ibsApply.Close()
 	err = ibsApply.ApplyVersionedWrites(writes)
@@ -367,7 +315,6 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	err = ibsApply.FinalizeTx(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	// — Step 3: read back from domains, assert correct state —
 	ibsRead := New(NewReaderV3(domains.AsGetter(tx)))
 	defer ibsRead.Close()
 

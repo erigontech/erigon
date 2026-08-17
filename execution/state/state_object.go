@@ -49,8 +49,7 @@ func newHeapObject() *stateObject {
 
 type Storage map[accounts.StorageKey]uint256.Int
 
-// set allocates the map on first write, so an object that never writes keeps a
-// nil Storage.
+// set allocates the map on first write, so an object that never writes keeps a nil Storage.
 func (s *Storage) set(key accounts.StorageKey, value uint256.Int) {
 	if *s == nil {
 		*s = make(Storage)
@@ -71,43 +70,29 @@ func (s Storage) Copy() Storage {
 	return maps.Clone(s)
 }
 
-// stateObject represents an Ethereum account which is being modified.
-//
-// The usage pattern is as follows:
-// First you need to obtain a state object.
-// Account values can be accessed and modified through the object.
 type stateObject struct {
 	address  accounts.Address
 	data     accounts.Account
 	original accounts.Account
 	db       *IntraBlockState
 
-	// Write caches.
-	//trie Trie // storage trie, which becomes non-nil on first access
-	code accounts.Code // contract bytecode, hash + canonical bytes
+	code accounts.Code
 
-	originStorage Storage // Storage cache of original entries to dedup rewrites
-	// blockOriginStorage keeps the values of storage items at the beginning of the block
-	// Used to make decision on whether to make a write to the
-	// database (value != origin) or not (value == origin)
+	originStorage      Storage
 	blockOriginStorage Storage
-	dirtyStorage       Storage // Storage entries that need to be flushed to disk
-	fakeStorage        Storage // Fake storage which constructed by caller for debugging purpose.
+	dirtyStorage       Storage
+	fakeStorage        Storage // overrides all storage reads/writes, for debugging and call simulation
 
-	// Cache flags.
-	// When an object is marked selfdestructed it will be delete from the trie
-	// during the "update" phase of the state transition.
-	dirtyCode       bool // true if the code was updated
+	dirtyCode       bool
 	selfdestructed  bool
-	deleted         bool // true if account was deleted during the lifetime of this object
-	newlyCreated    bool // true if this object was created in the current transaction
-	createdContract bool // true if this object represents a newly created contract
+	deleted         bool
+	newlyCreated    bool
+	createdContract bool
 
 	// Set by stateObjectArena.alloc; keeps release from pooling a slot the arena owns.
 	arena bool
 }
 
-// newObject creates a state object from the arena or the pool.
 func newObject(db *IntraBlockState, address accounts.Address, data, original *accounts.Account) *stateObject {
 	so := db.allocStateObject()
 	so.db = db
@@ -151,7 +136,6 @@ func (so *stateObject) release() {
 	stateObjectPool.Put(so)
 }
 
-// EncodeRLP implements rlp.Encoder.
 func (so *stateObject) EncodeRLP(w io.Writer) error {
 	return rlp.Encode(w, &so.data)
 }
@@ -160,9 +144,7 @@ func (so *stateObject) markSelfdestructed() {
 	so.selfdestructed = true
 }
 
-// GetState returns a value from account storage.
 func (so *stateObject) GetState(key accounts.StorageKey) (uint256.Int, bool) {
-	// If the fake storage is set, only lookup the state here (in the debugging mode)
 	if so.fakeStorage != nil {
 		return so.fakeStorage[key], false
 	}
@@ -170,24 +152,19 @@ func (so *stateObject) GetState(key accounts.StorageKey) (uint256.Int, bool) {
 	if dirty {
 		return value, false
 	}
-	// Otherwise return the entry's original value
 	value, _ = so.GetCommittedState(key)
 	return value, true
 }
 
-// GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetOriginState(key accounts.StorageKey) (uint256.Int, bool) {
 	value, cached := so.originStorage[key]
 	return value, cached
 }
 
-// GetCommittedState retrieves a value from the committed account storage trie.
 func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, error) {
-	// If the fake storage is set, only lookup the state here (in the debugging mode)
 	if so.fakeStorage != nil {
 		return so.fakeStorage[key], nil
 	}
-	// If we have the original value cached, return that
 	{
 		value, cached := so.originStorage[key]
 		if cached {
@@ -201,7 +178,6 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 		}
 		return uint256.Int{}, nil
 	}
-	// Load from DB in case it is missing.
 	if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (so.db.trace || dbg.TraceAccount(so.address.Handle()))) {
 		so.db.stateReader.SetTrace(true, fmt.Sprintf("%d (%d.%d)", so.db.blockNum, so.db.txIndex, so.db.version))
 	}
@@ -230,32 +206,25 @@ func (so *stateObject) GetCommittedState(key accounts.StorageKey) (uint256.Int, 
 	return res, err
 }
 
-// SetState updates a value in account storage.
 func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, force bool) (_ bool, err error) {
-	// If the fake storage is set, put the temporary state update here.
 	if so.fakeStorage != nil {
 		so.db.journal.fakeStorageChange(so.address, key, so.fakeStorage[key])
 		so.fakeStorage[key] = value
 		return true, nil
 	}
-	// If the new value is the same as old, don't set
 	var prev uint256.Int
 	var commited bool
 	var source ReadSource
 
-	// we need to use versioned read here otherwise we will miss versionmap entries
+	// Must use a versioned read here, or version-map entries get missed.
 	prev, source, _, commited, err = readStateForSet(so.db, so.address, key)
 	if err != nil {
 		return false, err
 	}
 
-	// When versionedReadCore resolves the previous value from a cached read
-	// (ReadSetRead) or from the version map (MapRead), the readStorage
-	// callback is never called and commited stays at its zero-value (false).
-	// In both cases there is no versioned write for this key in the current
-	// transaction, so this IS the first write — commited must be true so
-	// that the storage-change revert deletes the versioned write instead of
-	// updating it to the prevalue.
+	// commited stays false when the previous value came from a cached read or the
+	// version map rather than the readStorage callback; force it true so a revert
+	// deletes the versioned write instead of restoring it to prevalue.
 	if source != WriteSetRead && source != UnknownSource && source != StorageRead {
 		commited = true
 	}
@@ -264,7 +233,6 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 		return false, nil
 	}
 
-	// New value is different, update and journal the change
 	so.db.journal.storageChange(so.address, key, prev, commited)
 
 	if so.db.tracingHooks != nil && so.db.tracingHooks.OnStorageChange != nil {
@@ -275,18 +243,10 @@ func (so *stateObject) SetState(key accounts.StorageKey, value uint256.Int, forc
 	return true, nil
 }
 
-// SetStorage replaces the entire state storage with the given one.
-//
-// After this function is called, all the original state will be ignored and state
-// lookup only happens in the fake state storage.
-//
-// Note this function should only be used for call/block simulation and debugging purpose.
 func (so *stateObject) SetStorage(storage Storage) {
-	// Allocate fake storage if it's nil.
 	if so.fakeStorage == nil {
 		so.fakeStorage = make(Storage)
 	}
-	// Set the fake storage through SetState to ensure journalling is done correctly.
 	for key, value := range storage {
 		so.SetState(key, value, false)
 	}
@@ -296,28 +256,18 @@ func (so *stateObject) setState(key accounts.StorageKey, value uint256.Int) {
 	so.dirtyStorage.set(key, value)
 }
 
-// updateStorage writes cached storage modifications into the object's storage trie.
-// useBlockOrigin selects which baseline to compare against when deciding whether to skip
-// a write: false → use originStorage (last value written to MDBX within this block,
-// correct for per-tx FinalizeTx writes); true → use blockOriginStorage (value at block
-// start, correct for CommitBlock's system-txNum write which must not be skipped even
-// when a slot returned to its block-start value mid-block).
 func (so *stateObject) updateStorage(stateWriter StateWriter, useBlockOrigin bool) error {
-	// When using full state override, only the fake storage matters (see also SetStorage)
 	if so.fakeStorage != nil {
-		// First, delete the account to wipe out the original storage
 		err := stateWriter.DeleteAccount(so.address, &so.original)
 		if err != nil {
 			return err
 		}
-		// Then, we need to apply the fake storage changes to compute the state root correctly
 		err = so.applyStorageChanges(stateWriter, so.fakeStorage, useBlockOrigin)
 		if err != nil {
 			return err
 		}
 		return nil
 	}
-	// Normal behaviour, apply the dirty storage changes
 	err := so.applyStorageChanges(stateWriter, so.dirtyStorage, useBlockOrigin)
 	if err != nil {
 		return err
@@ -327,17 +277,8 @@ func (so *stateObject) updateStorage(stateWriter StateWriter, useBlockOrigin boo
 
 func (so *stateObject) applyStorageChanges(stateWriter StateWriter, updatedStorage Storage, useBlockOrigin bool) error {
 	for key, value := range updatedStorage {
-		// Choose the baseline for the skip-if-unchanged check:
-		//
-		//   useBlockOrigin=false (FinalizeTx): use originStorage[key], the last value
-		//   written to MDBX within this block. This avoids a stale-MDBX bug when a
-		//   slot returns to its block-start value mid-block (A→B→A): blockOriginStorage
-		//   would falsely report "no change" while MDBX still holds B from an earlier tx.
-		//
-		//   useBlockOrigin=true (CommitBlock): use blockOriginStorage[key]. After all
-		//   FinalizeTx calls, originStorage[key] already equals the final dirty value, so
-		//   using it would always skip the write. The CommitBlock write at system_txNum is
-		//   required by ComputeCommitment and must not be skipped.
+		// CommitBlock must compare against blockOriginStorage, not originStorage: its
+		// system-txNum write is required by ComputeCommitment and must never be skipped.
 		var originValue uint256.Int
 		if useBlockOrigin {
 			originValue = so.blockOriginStorage[key]
@@ -376,23 +317,16 @@ func (so *stateObject) setBalance(amount uint256.Int) {
 	so.data.Balance = amount
 }
 
-// Return the gas back to the origin. Used by the Virtual machine or Closures
 func (so *stateObject) ReturnGas(gas *big.Int) {}
 
 func (so *stateObject) setIncarnation(incarnation uint64) {
 	so.data.SetIncarnation(incarnation)
 }
 
-//
-// Attribute accessors
-//
-
-// Returns the address of the contract/account
 func (so *stateObject) Address() accounts.Address {
 	return so.address
 }
 
-// Code returns the contract code associated with this object, if any.
 func (so *stateObject) Code() ([]byte, error) {
 	c, err := so.CodeTyped()
 	if err != nil {
@@ -401,9 +335,6 @@ func (so *stateObject) Code() ([]byte, error) {
 	return c.Bytes, nil
 }
 
-// CodeTyped returns the contract code as an accounts.Code carrying the
-// interned CodeHash alongside the bytes. Prefer this over Code() when the
-// caller needs the hash too — saves a Keccak.
 func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	if so.code.Bytes != nil {
 		return so.code, nil
@@ -412,9 +343,7 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 		return accounts.Code{Hash: so.data.CodeHash}, nil
 	}
 
-	// When a versionMap is present (parallel execution), check for CodePath
-	// entries from prior TXs (e.g. EIP-7702 SetCode). The versionMap has the
-	// synthetic code but the domain/stateReader does not.
+	// versionMap can hold synthetic code from a prior tx's EIP-7702 SetCode that the domain/stateReader doesn't have yet.
 	if so.db.versionMap != nil {
 		if c, rr, ok := so.db.versionMap.ReadCode(so.address, so.db.txIndex); ok && rr.Status() == MVReadResultDone {
 			so.code = c
@@ -438,10 +367,7 @@ func (so *stateObject) CodeTyped() (accounts.Code, error) {
 	if err != nil {
 		return accounts.Code{}, fmt.Errorf("can't read code for %x: %w", so.Address(), err)
 	}
-	// Trust the committed (CodeHash, bytes) pair rather than re-hashing on every
-	// load; the only case they disagree is codeHash-without-code state (empty
-	// bytes, non-empty hash), reported honestly as empty so SetCode's compare
-	// still heals it.
+	// Trusts the committed (CodeHash, bytes) pair over re-hashing; a codeHash-without-code mismatch reports as empty so SetCode's compare still heals it.
 	var c accounts.Code
 	if len(code) == 0 {
 		c = accounts.EmptyCode
@@ -458,8 +384,7 @@ func (so *stateObject) SetCode(code accounts.Code, wasCommited bool, reason trac
 		return false, err
 	}
 
-	// bytes.Equal confirm guards the codeHash-without-code case: a matching hash
-	// against empty prev bytes must still heal the CodeDomain, not skip.
+	// Guards the codeHash-without-code case: a hash match against empty prev bytes must still heal the CodeDomain, not skip.
 	if prev.Hash == code.Hash && bytes.Equal(prev.Bytes, code.Bytes) {
 		return false, nil
 	}
@@ -506,9 +431,7 @@ func (so *stateObject) IsDirty() bool {
 	return so.dirtyCode || len(so.dirtyStorage) > 0 || so.data != so.original
 }
 
-// Never called, but must be present to allow stateObject to be used
-// as a vm.Account interface that also satisfies the vm.ContractRef
-// interface. Interfaces are awesome.
+// Never called; required so stateObject satisfies both vm.Account and vm.ContractRef.
 func (so *stateObject) Value() *big.Int {
 	panic("Value on stateObject should never be called")
 }

@@ -16,19 +16,16 @@
 
 package state
 
-// The cap bounds the working set, not coverage: slots are handed out in
-// sequence, so an arena that outgrows L2 costs more in cache misses than the
-// allocations it saves. 2048 slots is 574 KB. Past the cap the caller
-// allocates, which is what every object did before the arena.
+// The cap bounds the working set to fit L2 (2048 slots = 574 KB); past it the
+// caller falls back to a normal allocation, as before the arena existed.
 const (
 	arenaSlabSize   = 64
 	arenaMaxSlabs   = 32
 	arenaMaxObjects = arenaSlabSize * arenaMaxSlabs
 )
 
-// stateObjectArena is a slab allocator for stateObjects that are never cached
-// and so die with the transaction that created them. Slabs are append-only, so
-// a pointer stays valid until reset.
+// stateObjectArena is a slab allocator for stateObjects that die with the tx.
+// Slabs are append-only, so a pointer stays valid until reset.
 type stateObjectArena struct {
 	slabs []*[arenaSlabSize]stateObject
 	slab  int
@@ -40,9 +37,7 @@ func (a *stateObjectArena) alloc() *stateObject {
 		return nil
 	}
 	so := &a.slabs[a.slab][a.idx]
-	// One store establishes every field, so what a caller gets never depends on
-	// the rewind having cleared the slot first. The arena tag rides along: it is
-	// slot identity, and release() must not hand a live slot to the shared pool.
+	// The full-struct store means a slot never depends on the prior rewind; the arena tag rides along so release() won't pool a live slot.
 	*so = stateObject{arena: true}
 	a.idx++
 	if a.idx == arenaSlabSize {
@@ -52,7 +47,6 @@ func (a *stateObjectArena) alloc() *stateObject {
 	return so
 }
 
-// empty reports whether no slot has been drawn since the last rewind.
 func (a *stateObjectArena) empty() bool { return a.slab == 0 && a.idx == 0 }
 
 func (a *stateObjectArena) grow() bool {
@@ -63,10 +57,7 @@ func (a *stateObjectArena) grow() bool {
 	return true
 }
 
-// reset makes every slot handed out since the last reset available again. Slots
-// are zeroed as well as rewound so a slot that is not reused stops retaining the
-// account and code it last held; alloc re-establishes the slot, so correctness
-// does not depend on this pass.
+// Zeroes every handed-out slot so it stops pinning old account/code data; alloc's full overwrite means correctness never depends on this cleanup.
 func (a *stateObjectArena) reset() {
 	for s := 0; s <= a.slab && s < len(a.slabs); s++ {
 		used := a.slabs[s][:]

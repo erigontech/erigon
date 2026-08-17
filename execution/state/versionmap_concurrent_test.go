@@ -10,10 +10,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// The parallel executor writes each committed tx's cells into a shared VersionMap
-// while other workers read and validate against it concurrently. This exercises
-// that surface with real goroutines so the race detector can catch unsynchronised
-// access to the per-address entries (run under -race in CI's race shards).
+// Uses real goroutines so `go test -race` can catch unsynchronized access to the shared VersionMap's per-address entries.
 func TestVersionMap_ConcurrentWriteReadValidate(t *testing.T) {
 	t.Parallel()
 	vm := NewVersionMap(nil)
@@ -24,8 +21,6 @@ func TestVersionMap_ConcurrentWriteReadValidate(t *testing.T) {
 	}
 
 	var wg sync.WaitGroup
-	// Writers: each publishes a balance cell for its own tx index, then a few
-	// shared addresses so writers and readers contend on the same entries.
 	for w := range workers {
 		wg.Add(1)
 		go func(txIdx int) {
@@ -36,7 +31,6 @@ func TestVersionMap_ConcurrentWriteReadValidate(t *testing.T) {
 			vm.WriteNonce(addrs[txIdx], v, uint64(txIdx), true)
 		}(w)
 	}
-	// Readers: concurrently read balances across all addresses at varying floors.
 	for r := range workers {
 		wg.Add(1)
 		go func(txIdx int) {
@@ -49,8 +43,7 @@ func TestVersionMap_ConcurrentWriteReadValidate(t *testing.T) {
 	}
 	wg.Wait()
 
-	// Each writer's own-address balance must be its published value (last writer
-	// wins per address; own addresses have a single writer).
+	// Only addrs[1:] have a single writer each, so their balance is deterministic; addrs[0] is shared and skipped.
 	for i := 1; i < workers; i++ {
 		got, res, ok := vm.ReadBalance(addrs[i], workers)
 		require.True(t, ok && res.Status() == MVReadResultDone)

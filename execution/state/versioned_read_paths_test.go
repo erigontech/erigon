@@ -12,31 +12,17 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// These tests pin the observable behavior of the versioned read across its
-// distinct branches (non-generic core + per-path read* wrappers) so a
-// restructure can be validated against an identical surface.
-
-// ------------------------------------------------------------------
-// Section A: versionMap == nil (legacy / serial path)
-// ------------------------------------------------------------------
-
-// legacy path with a backing stateObject returns the storage value.
 func TestVersionedRead_A1_LegacyWithStorage(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xa1})
 
-	// IBS without versionMap → legacy/serial path
 	ibs := New(&emptyReader{})
 	defer ibs.Close()
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
-	// emptyReader returns nil account → zero balance, no error
 	assert.True(t, bal.IsZero(), "legacy path with empty reader returns zero")
 }
 
-// legacy path, GetCode triggers the readStorage==nil branch.
-// (When versionMap is nil, getStateObject is consulted directly; readStorage
-// closure on CodePath is non-nil so this exercises the storage branch too.)
 func TestVersionedRead_A2_LegacyGetCodeReturnsEmpty(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress([20]byte{0xa2})
@@ -48,13 +34,7 @@ func TestVersionedRead_A2_LegacyGetCodeReturnsEmpty(t *testing.T) {
 	assert.Empty(t, code, "empty reader => empty code")
 }
 
-// ------------------------------------------------------------------
-// Section B: deleted stateObject short-circuit
-// ------------------------------------------------------------------
-
-// B: a deleted stateObject in the local map short-circuits to defaultV.
-// We trigger this by Selfdestruct-ing the address inside the same IBS,
-// then reading another field (which sees so.deleted in the local map).
+// Selfdestructing then reading another field triggers the local-map deleted short-circuit.
 func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -65,25 +45,16 @@ func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 	ibs.SetTxContext(1, 0)
 
 	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
-	// Create + selfdestruct → state object marked deleted at FinalizeTx
 	ibs.CreateAccount(addr, true)
 	err := ibs.SetBalance(addr, *uint256.NewInt(50), 0)
 	require.NoError(t, err)
 	_, err = ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
-	// After Selfdestruct, GetBalance on the same address returns zero per
-	// EIP semantics (deleted in this tx).
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.True(t, bal.IsZero(), "balance after selfdestruct is zero")
 }
 
-// ------------------------------------------------------------------
-// Section C: SelfDestruct active in versionMap
-// ------------------------------------------------------------------
-
-// a prior tx marked the address selfdestructed (in versionMap), then
-// GetCommittedState (committed=true) must return zero immediately.
 func TestVersionedRead_C5_DestructedCommittedReturnsZero(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -95,20 +66,14 @@ func TestVersionedRead_C5_DestructedCommittedReturnsZero(t *testing.T) {
 
 	addr := accounts.InternAddress([20]byte{0xc5})
 	key := accounts.InternKey([32]byte{0x01})
-	// tx 1 wrote a slot value
 	mvhm.WriteStorage(addr, key, Version{TxIndex: 1, Incarnation: 0}, *uint256.NewInt(99), true)
-	// tx 2 selfdestructed the account
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 2, Incarnation: 0}, true, true)
 
-	// Read at tx 5 with committed=true: must return zero, ignoring slot value.
 	v, err := ibs.GetCommittedState(addr, key)
 	require.NoError(t, err)
 	assert.True(t, v.IsZero(), "committed read past selfdestruct returns zero")
 }
 
-// a prior tx marked the address selfdestructed; non-committed read
-// at a path != CodePath records the SelfDestructPath dependency in the
-// readSet and returns zero.
 func TestVersionedRead_C6_DestructedRecordsDepAndReturnsZero(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -125,14 +90,11 @@ func TestVersionedRead_C6_DestructedRecordsDepAndReturnsZero(t *testing.T) {
 	require.NoError(t, err)
 	assert.True(t, bal.IsZero(), "non-committed balance read past selfdestruct returns zero")
 
-	// SelfDestructPath dep must be recorded in readSet.
 	_, ok := ibs.versionedReads.getHeader(addr, SelfDestructPath, accounts.NilKey)
 	assert.True(t, ok, "SelfDestructPath dependency must be recorded")
 }
 
-// CodePath is exempt from the SelfDestruct short-circuit. Even if SD
-// is active, a CodePath read must fall through to the actual code-read
-// branches rather than returning zero.
+// CodePath is exempt from the SelfDestruct short-circuit and must fall through to the real code-read branch.
 func TestVersionedRead_C4_CodePathBypassesSelfDestruct(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -145,8 +107,7 @@ func TestVersionedRead_C4_CodePathBypassesSelfDestruct(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xc4})
 	code := []byte{0x60, 0x42, 0x60, 0x00, 0x52, 0x60, 0x20, 0x60, 0x00, 0xf3}
 	mvhm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.NewCode(code), true)
-	// Selfdestruct at an EARLIER tx than the code write so the SD doesn't
-	// trump the code (the CodePath+SD trump check uses sdres.DepIdx).
+	// SD is earlier than the code write here, so it doesn't trump the code (trump check uses sdres.DepIdx).
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 1, Incarnation: 0}, true, true)
 
 	got, err := ibs.GetCode(addr)
@@ -154,9 +115,7 @@ func TestVersionedRead_C4_CodePathBypassesSelfDestruct(t *testing.T) {
 	assert.Equal(t, code, got, "CodePath should bypass SelfDestruct short-circuit")
 }
 
-// revival. After SelfDestruct, a later write to Balance / Nonce /
-// CodeHash at a higher txIndex revives the account. Subsequent reads must
-// see the revived value, not zero.
+// A write to Balance/Nonce/CodeHash after a SelfDestruct, at a higher txIndex, revives the account.
 func TestVersionedRead_C1_RevivalViaBalance(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -176,14 +135,8 @@ func TestVersionedRead_C1_RevivalViaBalance(t *testing.T) {
 	assert.Equal(t, *revivedBalance, bal, "balance after revival must be the revived value, not zero")
 }
 
-// Regression for the refresh* wrappers' missing outcomeReturnZero case: after a
-// self-destruct, the per-field refresh (refreshBalance/refreshNonce/
-// refreshIncarnation/refreshCodeHash, the per-field account refresh that rebuilds
-// an account) must return the typed ZERO, not the caller's stale pre-destruct
-// value. Returning the stale value gives the rebuilt account a phantom pre-SD
-// codeHash/balance, so the codeHash-change check compares the stale value
-// against itself and validation never catches the divergence — a silent wrong
-// state root.
+// After a self-destruct, refresh* must return the typed zero, not the stale pre-destruct
+// value — otherwise validation can't detect the divergence and the state root is silently wrong.
 func TestVersionedRead_C7_RefreshReturnsZeroPastSelfDestruct(t *testing.T) {
 	t.Parallel()
 
@@ -220,11 +173,6 @@ func TestVersionedRead_C7_RefreshReturnsZeroPastSelfDestruct(t *testing.T) {
 	assert.Equal(t, accounts.NilCodeHash, ch, "refreshCodeHash past SD must return the zero codeHash, not the phantom 0xab")
 }
 
-// ------------------------------------------------------------------
-// Section D: writeSet hit (intra-tx writes)
-// ------------------------------------------------------------------
-
-// a write in the current tx is read back via versionedWrites.
 func TestVersionedRead_D2_WriteSetHit(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -244,12 +192,6 @@ func TestVersionedRead_D2_WriteSetHit(t *testing.T) {
 	assert.Equal(t, *target, bal, "writeSet hit returns the intra-tx written value")
 }
 
-// ------------------------------------------------------------------
-// Section E: MVReadResultDone (versionMap has a definite value)
-// ------------------------------------------------------------------
-
-// versionMap MapRead hit on first call; second read at same tx hits
-// the readSet (via the pr.Version == vr.Version branch).
 func TestVersionedRead_E1_MapHitThenReadSetSameVersion(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -263,19 +205,16 @@ func TestVersionedRead_E1_MapHitThenReadSetSameVersion(t *testing.T) {
 	target := uint256.NewInt(42)
 	mvhm.WriteBalance(addr, Version{TxIndex: 1, Incarnation: 0}, *target, true)
 
-	// First read populates the readSet via MapRead.
 	bal1, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *target, bal1)
 
-	// Second read: same tx, same version → readSet hit.
 	bal2, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *target, bal2)
 }
 
-// a Done MVReadResult for CodePath is trumped if a SelfDestruct at
-// a >= DepIdx is also Done — return defaultV (nil code).
+// A SelfDestruct at DepIdx >= the code write's DepIdx trumps CodePath, returning nil code.
 func TestVersionedRead_E3a_CodePathTrumpedBySelfDestruct(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -287,7 +226,6 @@ func TestVersionedRead_E3a_CodePathTrumpedBySelfDestruct(t *testing.T) {
 
 	addr := accounts.InternAddress([20]byte{0xe3})
 	code := []byte{0xfe, 0xfe}
-	// Code at tx 2; SelfDestruct at tx 3 (strictly later → trumps code).
 	mvhm.WriteCode(addr, Version{TxIndex: 2, Incarnation: 0}, accounts.NewCode(code), true)
 	mvhm.WriteSelfDestruct(addr, Version{TxIndex: 3, Incarnation: 0}, true, true)
 
@@ -296,12 +234,6 @@ func TestVersionedRead_E3a_CodePathTrumpedBySelfDestruct(t *testing.T) {
 	assert.Empty(t, got, "CodePath trumped by SelfDestruct returns nil/empty code")
 }
 
-// ------------------------------------------------------------------
-// Section G: MVReadResultNone (no entry in versionMap for this key)
-// ------------------------------------------------------------------
-
-// readSet hit at MVReadResultNone (ReadSetRead source). Second read
-// of an unwritten slot hits readSet from the first read's record.
 func TestVersionedRead_G1_ReadSetReadOnSecondCall(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -314,25 +246,19 @@ func TestVersionedRead_G1_ReadSetReadOnSecondCall(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x91})
 	key := accounts.InternKey([32]byte{0x99})
 
-	// First read of an unwritten slot: versionMap None → storage fallback →
-	// records defaultV in readSet.
 	v1, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	assert.True(t, v1.IsZero())
 
-	// Second read: same tx, same key → readSet hit.
 	v2, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	assert.True(t, v2.IsZero())
 
-	// readSet must hold the StoragePath entry.
 	_, ok := ibs.versionedReads.getHeader(addr, StoragePath, key)
 	assert.True(t, ok, "StoragePath read must be recorded")
 }
 
-// StoragePath read on an unwritten slot with IncarnationPath written
-// by a prior tx → returns zero (account was created/destroyed this block,
-// all unwritten slots must be zero) and records the IncarnationPath dep.
+// An IncarnationPath rewrite means the account was created/destroyed this block, so unwritten slots must read zero.
 func TestVersionedRead_G6_StorageZeroOnIncarnationWritten(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -344,20 +270,16 @@ func TestVersionedRead_G6_StorageZeroOnIncarnationWritten(t *testing.T) {
 
 	addr := accounts.InternAddress([20]byte{0x96})
 	key := accounts.InternKey([32]byte{0xab})
-	// Prior tx wrote IncarnationPath (CreateAccount / Selfdestruct event)
 	mvhm.WriteIncarnation(addr, Version{TxIndex: 2, Incarnation: 0}, 1, true)
 
 	got, err := ibs.GetState(addr, key)
 	require.NoError(t, err)
 	assert.True(t, got.IsZero(), "unwritten slot reads zero after Incarnation rewrite")
 
-	// IncarnationPath dep must be recorded.
 	_, ok := ibs.versionedReads.getHeader(addr, IncarnationPath, accounts.NilKey)
 	assert.True(t, ok, "IncarnationPath dependency must be recorded")
 }
 
-// BalancePath read with no map/writeSet/readSet entry but a prior tx
-// wrote an AddressPath account → use that account's balance.
 func TestVersionedRead_G7_BalanceViaResolvedAddressPath(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -376,9 +298,6 @@ func TestVersionedRead_G7_BalanceViaResolvedAddressPath(t *testing.T) {
 	assert.Equal(t, *uint256.NewInt(555), bal, "balance resolved via AddressPath account")
 }
 
-// storage fallback. Empty reader + no prior writes/reads → falls through
-// to the readStorage callback (returns zero from emptyReader) and records
-// defaultV in readSet.
 func TestVersionedRead_G8_StorageFallbackEmptyReader(t *testing.T) {
 	t.Parallel()
 	mvhm := NewVersionMap(nil)
@@ -392,28 +311,11 @@ func TestVersionedRead_G8_StorageFallbackEmptyReader(t *testing.T) {
 	assert.True(t, bal.IsZero(), "empty reader storage fallback returns zero")
 }
 
-// refresh path: the legacy readStorage==nil branch for
-// BalancePath/NoncePath/CodeHashPath/IncarnationPath records the
-// caller-supplied defaultV (the "current" account field) into the
-// versionedReads ReadSet, with vr.Source = StorageRead.  ValidateVersion
-// and tiebreaker logic depend on the RECORDED value matching what
-// downstream tx readers will see — recording the typed zero instead of
-// the caller's currentBalance is a behavioral divergence that breaks
-// integration tests (wrong trie root in execution/engineapi).
-//
-// This test calls per-field-account-refresh-style scenarios by going
-// through getVersionedAccount which triggers refreshBalance/refreshNonce/
-// refreshCodeHash/refreshIncarnation with the storage-read account's
-// fields as defaultV.  Asserts that subsequent reads through the
-// versionedReads ReadSet see the same typed defaultV that the legacy
-// code recorded.
+// The legacy readStorage==nil refresh records the caller's defaultV in the ReadSet, not
+// the typed zero — ValidateVersion's tiebreaker depends on the recorded value matching what downstream reads see.
 func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	t.Parallel()
 
-	// emptyReader returns nil account — the per-field refresh won't
-	// run for nil-account paths.  We need a reader that returns a
-	// non-nil account so the per-field refresh*
-	// calls run with non-zero defaultV.
 	r := &refreshReader{
 		account: &accounts.Account{
 			Balance:     *uint256.NewInt(1234),
@@ -429,10 +331,7 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 
 	addr := accounts.InternAddress([20]byte{0xa4})
 
-	// Lean read footprint: GetBalance reads only the balance field from the
-	// cell pipeline — it no longer drags in a whole-account refresh, so nonce /
-	// incarnation / codeHash are NOT recorded. Balance is recorded because
-	// GetBalance genuinely read it.
+	// GetBalance has a lean read footprint: it records only BalancePath, not a whole-account refresh.
 	bal, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *uint256.NewInt(1234), bal,
@@ -451,9 +350,6 @@ func TestVersionedRead_G4_RefreshRecordsTypedDefaultInReadSet(t *testing.T) {
 	require.False(t, ok, "CodeHashPath must NOT be recorded by a balance-only read")
 }
 
-// refreshReader returns a fixed account for ReadAccountData and zero/empty
-// for everything else.  Used by TestVersionedRead_G4 to exercise the
-// refresh path with non-zero typed defaultVs.
 type refreshReader struct {
 	account *accounts.Account
 }
@@ -475,7 +371,6 @@ func (r *refreshReader) SetTrace(bool, string)                                  
 func (r *refreshReader) Trace() bool                                             { return false }
 func (r *refreshReader) TracePrefix() string                                     { return "" }
 
-// revival via NoncePath rewrite at a higher TxIdx than the SD.
 func TestVersionedRead_C2_RevivalViaNonce(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -494,7 +389,6 @@ func TestVersionedRead_C2_RevivalViaNonce(t *testing.T) {
 	assert.Equal(t, uint64(7), n, "nonce after revival via NoncePath rewrite")
 }
 
-// revival via CodeHashPath rewrite at a higher TxIdx than the SD.
 func TestVersionedRead_C3_RevivalViaCodeHash(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -514,9 +408,6 @@ func TestVersionedRead_C3_RevivalViaCodeHash(t *testing.T) {
 	assert.Equal(t, revivedHash, got, "codehash after revival via CodeHashPath rewrite")
 }
 
-// when the readSet already records a different Version than the current
-// versionMap value at MapRead, versionedRead panics with ErrDependency so
-// the executor knows to re-execute. Captured via recover().
 func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -527,20 +418,15 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	ibs.SetTxContext(1, 10)
 
 	addr := accounts.InternAddress([20]byte{0xe2})
-	// Two writes at different versions; the later version wins in versionMap.
 	mvhm.WriteBalance(addr, Version{TxIndex: 2, Incarnation: 0}, *uint256.NewInt(10), true)
 
-	// Manually seed readSet with a stale version (TxIndex 1).
 	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
 	})
 
-	// Read-once (Block-STM): a path already recorded this execution attempt is
-	// served from the read-set without re-probing the version map, so a repeat
-	// read no longer aborts eagerly. The stale read is caught at commit —
-	// ValidateVersion re-checks it against the newer version-map write (TxIndex 2)
-	// and returns VersionInvalid, which is what drives re-execution.
+	// Read-once (Block-STM): a path already recorded this attempt is served from the read-set
+	// without re-probing the version map; the stale read is instead caught at commit-time validation.
 	got, err := ibs.GetBalance(addr)
 	require.NoError(t, err)
 	assert.Equal(t, *uint256.NewInt(99), got, "read-once returns the recorded value")
@@ -556,10 +442,7 @@ func TestVersionedRead_E2_StaleMapReadCaughtAtCommit(t *testing.T) {
 	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the stale read")
 }
 
-// F: MVReadResultDependency status (versionMap saw an in-progress dep at a
-// higher TxIdx than the current tx) → panic ErrDependency. Triggered by
-// writing at our own txIndex's Done-but-Estimate state. Simplest reliable
-// trigger: an Estimate-status entry (complete=false) at a TxIdx <= ours.
+// An Estimate entry (complete=false) at a TxIdx <= ours reports MVReadResultDependency and panics with ErrDependency.
 func TestVersionedRead_F_MVReadResultDependencyPanics(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -570,7 +453,6 @@ func TestVersionedRead_F_MVReadResultDependencyPanics(t *testing.T) {
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xf0})
-	// Estimate entry (complete=false) at txIndex 2 < 5 → Dependency.
 	mvhm.WriteBalance(addr, Version{TxIndex: 2, Incarnation: 0}, *uint256.NewInt(50), false)
 
 	defer func() {
@@ -583,10 +465,7 @@ func TestVersionedRead_F_MVReadResultDependencyPanics(t *testing.T) {
 	_, _ = ibs.GetBalance(addr)
 }
 
-// writeSet hit at MVReadResultDone, but readSet has a stale version
-// → panic ErrDependency (a write was based on a stale read). The current
-// tx wrote, but the readSet for the same path holds a version older than
-// the versionMap's Done entry.
+// A writeSet hit whose readSet entry is older than the versionMap's Done write panics with ErrDependency.
 func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -597,17 +476,12 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 	ibs.SetTxContext(1, 5)
 
 	addr := accounts.InternAddress([20]byte{0xd1})
-	// versionMap Done at tx 3 — higher than the readSet's stale tx-1 entry.
 	mvhm.WriteBalance(addr, Version{TxIndex: 3, Incarnation: 0}, *uint256.NewInt(30), true)
 
-	// Seed a current-tx writeSet entry (intra-tx write) so the writeSet
-	// branch fires.
 	err := ibs.SetBalance(addr, *uint256.NewInt(77), 0)
 	require.NoError(t, err)
 
-	// Seed a stale readSet entry at a lower version AFTER the write:
-	// seeding it first would already panic inside SetBalance's account
-	// refresh, before the writeSet-hit branch under test is reached.
+	// Seeded after the write: seeding first would panic inside SetBalance's own account refresh before this branch runs.
 	ibs.versionedReads.SetBalance(addr, VersionedRead[uint256.Int]{
 		ReadHeader: ReadHeader{Source: MapRead, Version: Version{TxIndex: 1, Incarnation: 0}},
 		Val:        *uint256.NewInt(99),
@@ -622,9 +496,7 @@ func TestVersionedRead_D1_WriteSetHitWithStaleReadSetPanics(t *testing.T) {
 	_, _ = ibs.GetBalance(addr)
 }
 
-// The nil≡empty arm of readValueUnchanged carries the same gates as
-// validation's dead-equivalence: no equivalence pre-EIP-161, and none for
-// AuRa's retained SystemAddress.
+// nil≡empty in readValueUnchanged is gated like validation's dead-equivalence: none pre-EIP-161, none for AuRa's SystemAddress.
 func TestReadValueUnchanged_NilEmptyArmGated(t *testing.T) {
 	newIBS := func(addr accounts.Address, eip161 bool, isAura bool) *IntraBlockState {
 		ibs := NewWithVersionMap(&emptyReader{}, NewVersionMap(nil))

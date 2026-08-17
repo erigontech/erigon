@@ -26,53 +26,39 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// reset is the ownership boundary: everything handed out since the last one is
-// live, and reset takes it back. What the arena holds is therefore one caller's
-// unit of work — a transaction for the executor and the trace workers, a block
-// for the assembler and the tooling, which reset once it is built.
+// reset is the ownership boundary: what it hands out stays live until reclaimed — a transaction's worth or a block's, by caller.
 const (
 	// What one transaction's gas can buy, under the EIP-7825 cap.
-	maxLogsPerTxn     = int(params.MaxTxnGasLimit / params.LogGas)     // 44739
-	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas) // 2MB
+	maxLogsPerTxn     = int(params.MaxTxnGasLimit / params.LogGas)
+	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas)
 
-	// Fractions of those, because the pool never shrinks: the whole ceiling would
-	// park 13MB of entries per arena, while a tenth still holds the ~1700 logs of
-	// a p99 block that a caller resetting per block pools in one go.
+	// The pool never shrinks: the full ceiling would park 13MB per arena, a tenth covers a p99 block's ~1700 logs.
 	maxPooledLogEntries = maxLogsPerTxn / 10
 	maxPooledLogBytes   = maxLogBytesPerTxn / 2
 
-	// One large log must not take the whole budget and starve the small entries
-	// real traffic is made of, and a cap much lower would throw away the reuse
-	// that makes a block of large logs cheap.
+	// One large log must not take the whole budget from small entries, and a much lower cap would lose large-log reuse.
 	maxPooledLogDataCap = maxPooledLogBytes / 8
 
-	// Slots the arena keeps between resets. The run is a block for a caller that
-	// resets per block, so this is bounded by the memory it costs rather than by
-	// a transaction's budget: 32KB of pointers, holding a p99 block's ~1700.
+	// Bounded by memory (32KB of pointers), not by a transaction's budget: the run's size follows a block.
 	maxRetainedLogSlots = 32 * 1024 / 8
 )
 
-// logArena owns a block's log entries and recycles them through a pool, so what
-// it holds follows the largest transaction rather than the widest block.
+// logArena recycles a block's log entries through a pool, so memory use follows the largest transaction, not the widest block.
 type logArena struct {
-	entries      types.Logs   // the block so far, in order — one transaction, for a caller that resets per transaction
+	entries      types.Logs   // current run's entries, in allocation order
 	pool         []*types.Log // entries taken back at reset, for any transaction to reuse
 	poolBytes    int          // Data the pool holds
 	indexInBlock uint
 }
 
-// alloc journals the allocation for revertLast, then returns txIndex's next
-// entry sized for numTopics/dataSize. The caller must write every topic and data
-// byte; what it leaves unwritten is the previous transaction's. The arena owns
-// the entry, so it must never be handed out without copying.
+// alloc's entry keeps unwritten fields from the previous tx and must be copied before being retained past this call.
 func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, dataSize int) *types.Log {
 	j.addLogChange(txIndex)
 	logIdx := len(a.entries)
 	entries := slices.Grow(a.entries, 1)[:logIdx+1]
 	a.entries = entries
 
-	// Always take: reset and revertLast empty a slot before shrinking past it, so
-	// a slot that still held an entry would be one two transactions share.
+	// Always take: prior reset/revertLast already emptied this slot, so no live entry is ever double-issued.
 	lp := a.take()
 	entries[logIdx] = lp
 	lp.Address = addr
@@ -82,8 +68,7 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
 	lp.TxIndex = hexutil.Uint(txIndex)
 	lp.BlockNumber = 0 // non-consensus field, assigned by the caller
-	// Block-wide, not per-tx: receipts.DeriveFields reads Logs[0].Index to
-	// recover FirstLogIndexWithinBlock.
+	// Block-wide: receipts.DeriveFields reads Logs[0].Index for FirstLogIndexWithinBlock.
 	lp.Index = hexutil.Uint(a.indexInBlock)
 	a.indexInBlock++
 	return lp
@@ -101,8 +86,7 @@ func (a *logArena) take() *types.Log {
 	return lp
 }
 
-// put keeps an entry for the next transaction, dropping the Data it may not
-// hold. The entry itself is small enough to keep either way.
+// put pools the entry for reuse, dropping Data over budget; past the entry cap it drops the entry too.
 func (a *logArena) put(lp *types.Log) {
 	if len(a.pool) >= maxPooledLogEntries {
 		return
@@ -114,8 +98,7 @@ func (a *logArena) put(lp *types.Log) {
 	a.pool = append(a.pool, lp)
 }
 
-// reset takes back what was written: the entries return to the pool and the
-// block goes empty. It walks only what the caller wrote, not the block's width.
+// reset returns written entries to the pool, walking only what was written, not the block's full width.
 func (a *logArena) reset() {
 	a.indexInBlock = 0
 	entries := a.entries
@@ -133,7 +116,6 @@ func (a *logArena) reset() {
 	}
 }
 
-// revertLast drops the entry allocated last, returning it to the pool.
 func (a *logArena) revertLast(txIndex int) {
 	entries := a.entries
 	last := len(entries) - 1
@@ -148,16 +130,11 @@ func (a *logArena) revertLast(txIndex int) {
 	a.indexInBlock--
 }
 
-// forTx returns the entries txIndex emitted, owned by the arena. They are held
-// in one run rather than grouped, and a transaction's own are the tail of it, so
-// a transaction newer than the tail reads as empty and an older one panics.
+// forTx returns txIndex's entries, the run's tail: newer reads as empty (nothing emitted yet); older panics rather than returning a stale tail.
 func (a *logArena) forTx(txIndex int) types.Logs {
 	entries := a.entries
 	i := len(entries)
 	if i > 0 && txIndex < int(entries[i-1].TxIndex) {
-		// Newer than the tail is a transaction that emitted nothing, which is
-		// how most of them end. Older is a caller reading what it has left:
-		// answering empty would read as "emitted no logs", so say so instead.
 		panic(fmt.Sprintf("logs of tx %d asked for, the run has reached tx %d",
 			txIndex, int(entries[i-1].TxIndex)))
 	}

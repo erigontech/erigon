@@ -37,7 +37,6 @@ var journalPool = sync.Pool{
 	},
 }
 
-// entryKind discriminates the compact journal entry union below.
 type entryKind uint8
 
 const (
@@ -67,8 +66,6 @@ const (
 	flagSelfdestructHadBalance     uint8 = 1 << 3 // kindSelfdestruct: a versioned balance write predated the destruct
 )
 
-// journalExtra holds the fields needed only by the infrequent entry kinds,
-// kept out of line so the common entry stays small (see TestJournalEntrySize).
 type journalExtra struct {
 	prevObj              *stateObject         // kindResetObject
 	prevWrites           *createWriteSnapshot // kindResetObject
@@ -78,10 +75,6 @@ type journalExtra struct {
 	prevBalanceVersioned uint256.Int          // kindSelfdestruct, when flagSelfdestructHadBalance is set
 }
 
-// journalEntry is a compact tagged union stored inline in journal.entries.
-// Fields are reused across kinds: value holds the reverted uint256, aux the
-// reverted scalar (nonce/refund/log index/incarnation), flags the booleans,
-// extra only what the infrequent kinds need.
 type journalEntry struct {
 	account accounts.Address
 	key     accounts.StorageKey
@@ -92,20 +85,15 @@ type journalEntry struct {
 	flags   uint8
 }
 
-// journal contains the list of state modifications applied since the last state
-// commit. These are tracked to be able to be reverted in case of an execution
-// exception or revertal request.
 type journal struct {
-	dirties map[accounts.Address]int // Dirty accounts and the number of changes
-	entries []journalEntry           // Current changes tracked by the journal
+	dirties map[accounts.Address]int
+	entries []journalEntry
 }
 
-// newJournal gets a journal from the pool.
 func newJournal() *journal {
 	return journalPool.Get().(*journal)
 }
 
-// release returns the journal to the pool after resetting it.
 func (j *journal) release() {
 	j.Reset()
 	clear(j.entries[:cap(j.entries)]) // [:cap] because Reset already resliced to zero
@@ -116,18 +104,13 @@ func (j *journal) Reset() {
 	clear(j.dirties)
 }
 
-// revert undoes a batch of journalled modifications along with any reverted
-// dirty handling too.
 func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 	for i := len(j.entries) - 1; i >= snapshot; i-- {
-		// Undo the changes made by the operation. A revert error means a
-		// journalled account can no longer be loaded — the state would be left
-		// half-reverted, so fail loudly rather than continue corrupt.
+		// A revert error would leave state half-reverted, so panic instead of continuing with corrupt state.
 		if err := j.entries[i].revert(statedb); err != nil {
 			panic(fmt.Sprintf("journal: revert of kind %d failed: %v", j.entries[i].kind, err))
 		}
 
-		// Drop any dirty tracking induced by the change
 		if addr, isdirty := j.entries[i].dirtied(); isdirty {
 			if j.dirties[addr]--; j.dirties[addr] == 0 {
 				delete(j.dirties, addr)
@@ -137,15 +120,11 @@ func (j *journal) revert(statedb *IntraBlockState, snapshot int) {
 	j.entries = j.entries[:snapshot]
 }
 
-// dirty explicitly sets an address to dirty, even if the change entries would
-// otherwise suggest it as clean. This method is an ugly hack to handle the RIPEMD
-// precompile consensus exception; CreateAccount also uses it to keep a
-// resurrected address dirty across an intra-tx revert.
+// dirty force-marks an address dirty for the RIPEMD consensus exception and for a resurrected address across revert.
 func (j *journal) dirty(addr accounts.Address) {
 	j.dirties[addr]++
 }
 
-// length returns the current number of entries in the journal.
 func (j *journal) length() int {
 	return len(j.entries)
 }
@@ -158,13 +137,6 @@ func commitFlag(wasCommitted bool) uint8 {
 }
 
 func (je *journalEntry) committed() bool { return je.flags&flagCommitted != 0 }
-
-// --- entry constructors: one per modification kind ---
-//
-// Each updates dirties itself rather than deriving it from the entry: the kind
-// is fixed at the call site, and a shared helper that rediscovers it via
-// dirtied() measured materially slower. revert undoes the accounting through
-// dirtied(), so the two must agree on every kind.
 
 func (j *journal) createObjectChange(account accounts.Address) {
 	j.entries = append(j.entries, journalEntry{kind: kindCreateObject, account: account})
@@ -185,9 +157,6 @@ func (j *journal) selfdestructChange(account accounts.Address, prev bool, prevba
 	j.dirties[account]++
 }
 
-// selfdestructChangeVersioned records a self-destruct on the parallel path,
-// capturing the versioned balance/incarnation writes it overwrites so a revert
-// can restore them (see selfdestructChange.revert).
 func (j *journal) selfdestructChangeVersioned(account accounts.Address, prev bool, prevbalance uint256.Int, wasCommitted, hadIncarnation bool, prevIncarnation uint64, hadBalance bool, prevBalanceVersioned uint256.Int) {
 	flags := commitFlag(wasCommitted)
 	if prev {
@@ -264,10 +233,7 @@ func (j *journal) transientStorageChange(account accounts.Address, key accounts.
 	j.entries = append(j.entries, journalEntry{kind: kindTransientStorage, account: account, key: key, value: prevalue})
 }
 
-// dirtied returns the address modified by this entry, or (NilAddress, false) for
-// entries that don't imply a dirty account. kindCreateObject and kindResetObject
-// must both stay dirty: they place a stateObject at the same address, and
-// dropping either loses a recreated account from dirties, diverging the state root.
+// kindCreateObject and kindResetObject must both stay dirty: dropping either loses a recreated account and diverges the state root.
 func (je *journalEntry) dirtied() (accounts.Address, bool) {
 	switch je.kind {
 	case kindBalanceIncreaseTransfer, kindTransientStorage, kindRefund, kindAddLog, kindAccessListAddAccount, kindAccessListAddSlot:
@@ -280,7 +246,6 @@ func (je *journalEntry) dirtied() (accounts.Address, bool) {
 
 var ripemd = accounts.InternAddress(common.HexToAddress("0000000000000000000000000000000000000003"))
 
-// revert undoes the change recorded by this entry.
 func (je *journalEntry) revert(s *IntraBlockState) error {
 	switch je.kind {
 	case kindCreateObject:
@@ -289,11 +254,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		}
 		delete(s.stateObjects, je.account)
 		delete(s.stateObjectsDirty, je.account)
-		// The account did not exist before this create, so all of its versioned
-		// writes originate from the creation being reverted. Field-level entries
-		// (balance/nonce/…) prune themselves on revert; the account-record writes
-		// createObject emits (address/codeHash/…) have no field-level journal entry,
-		// so drop them here to keep versionedWrites in step with the journal.
+		// The account didn't exist before this create, so drop its account-record writes here — they have no field-level journal entry.
 		if s.versionMap != nil {
 			s.versionedWrites.deleteAddr(je.account)
 		}
@@ -309,9 +270,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		} else {
 			s.setStateObject(je.account, prev)
 		}
-		// Restore the account-record writes the recreation overwrote back to the
-		// snapshot taken before it ran, so versionedWrites reflects prev's state
-		// again (the field-level entries handle the fields creation doesn't write).
+		// Restores the account-record writes the recreation overwrote, so versionedWrites reflects prev again.
 		if s.versionMap != nil {
 			s.versionedWrites.restoreCreateFields(je.account, je.extra.prevWrites)
 		}
@@ -338,18 +297,13 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 			} else if _, ok := s.versionedWrites.GetSelfDestruct(je.account); ok {
 				s.versionedWrites.updateSelfDestruct(je.account, prev)
 			}
-			// The self-destruct records BalancePath=0; restore the pre-destruct
-			// versioned balance write, or drop the cell if the self-destruct created
-			// it. Gating this on committed (which describes SelfDestructPath, not
-			// BalancePath) deleted balance writes that predated the snapshot.
+			// Restores the pre-destruct balance write, or drops it if self-destruct created it; committed here means SelfDestructPath, not BalancePath.
 			if je.flags&flagSelfdestructHadBalance != 0 {
 				s.versionedWrites.updateBalance(je.account, je.extra.prevBalanceVersioned)
 			} else {
 				s.versionedWrites.DelBalance(je.account)
 			}
-			// selfdestructVersioned clears the incarnation cell on both paths. Restore
-			// it to its pre-destruct versioned value, or drop the write if the
-			// self-destruct created it.
+			// Same restore-or-drop pattern for the incarnation cell.
 			if je.flags&flagSelfdestructHadIncarnation != 0 {
 				s.versionedWrites.updateIncarnation(je.account, je.aux)
 			} else {
@@ -359,10 +313,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindBalance:
-		// Keep a materialized so.data in step (serial always has one; the parallel
-		// path only when the account was materialized for some other reason). Never
-		// materialize one just to revert on the parallel path — the cells below are
-		// authoritative there.
+		// Never materialize a stateObject just to revert on the parallel path — the versioned cells below are authoritative there.
 		if so, ok := s.stateObjects[je.account]; ok {
 			so.setBalance(je.value)
 		} else if s.versionMap == nil {
@@ -493,22 +444,8 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindTouch:
-		// Do NOT delete versionedReads here.  Even though the touch is being
-		// reverted (e.g. a CREATE that ran out of gas), the read that triggered
-		// the touch already happened — the tx observed the account's state and
-		// branched on it (e.g. Empty() returning true vs false).  Removing the
-		// read-set entry causes ValidateVersion to miss the dependency, allowing
-		// stale reads to pass validation and produce incorrect results.
-		//
-		// The touch's BalancePath=0 write must be undone, though: leaving it orphaned
-		// lets Normalize's EIP-161 pass delete an account whose touch was rolled back.
-		// Mirror kindBalance — drop the write if the touch created it, else restore
-		// the prior value.
-		//
-		// RIPEMD-160 is the exception: touchAccount bumps its dirty count so the
-		// touch outlives the revert and EIP-161 still sweeps it. Undoing the write
-		// here would drop that sweep on the versioned path only, leaving the
-		// account in the trie and diverging from serial's root.
+		// Keep versionedReads: the read already happened and influenced execution.
+		// Undo BalancePath except for RIPEMD-160, which EIP-161 must still sweep.
 		if s.versionMap != nil && je.account != ripemd {
 			if je.committed() {
 				s.versionedWrites.DelBalance(je.account)
@@ -519,15 +456,7 @@ func (je *journalEntry) revert(s *IntraBlockState) error {
 		return nil
 
 	case kindAccessListAddAccount:
-		/*
-			One important invariant here, is that whenever a (addr, slot) is added, if the
-			addr is not already present, the add causes two journal entries:
-			- one for the address,
-			- one for the (address,slot)
-			Therefore, when unrolling the change, we can always blindly delete the
-			(addr) at this point, since no storage adds can remain when come upon
-			a single (addr) change.
-		*/
+		// Adding a (addr, slot) whose addr is not yet present emits address then slot, so unrolling can blindly delete the address here.
 		s.accessList.DeleteAddress(je.account)
 		return nil
 

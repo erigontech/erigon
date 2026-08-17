@@ -9,8 +9,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// BenchmarkVersionedReadGetters measures per-call allocs for GetNonce/GetBalance/GetState
-// when the IBS is backed by a VersionMap (parallel execution path).
 func BenchmarkVersionedReadGetters(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	_ = tx
@@ -20,13 +18,11 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 	addr := accounts.InternAddress([20]byte{0x01})
 	key := accounts.InternKey([32]byte{0x01})
 
-	// Seed version map: tx 0 wrote nonce, balance, storage
 	v0 := Version{TxIndex: 0, Incarnation: 1}
 	mvhm.WriteNonce(addr, v0, uint64(42), true)
 	mvhm.WriteBalance(addr, v0, *uint256.NewInt(100), true)
 	mvhm.WriteStorage(addr, key, v0, *uint256.NewInt(123), true)
 
-	// tx 1 reads → hits MapRead path inside versionedRead
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 	s.txIndex = 1
@@ -53,10 +49,7 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 	})
 }
 
-// BenchmarkWarmExtCodeHash measures the warm EXTCODEHASH opcode sequence
-// (Empty + GetCodeHash) on the noMaterialize/versionMap path — the hot path of
-// the warm-extcodehash perf cell. After the first iteration the reads hit the
-// read-once fast-path, so this isolates the steady-state warm-read cost + allocs.
+// Isolates steady-state warm-read cost: after the first Empty+GetCodeHash the reads hit the read-once fast path.
 func BenchmarkWarmExtCodeHashSeq(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	mvhm := NewVersionMap(nil)
@@ -74,7 +67,6 @@ func BenchmarkWarmExtCodeHashSeq(b *testing.B) {
 	s := NewWithVersionMap(reader, mvhm)
 	s.SetNoMaterialize(true)
 	s.txIndex = 1
-	// warm the read-set (first EXTCODEHASH)
 	_, _ = s.Empty(addr)
 	_, _ = s.GetCodeHash(addr)
 

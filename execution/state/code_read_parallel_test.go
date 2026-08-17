@@ -12,12 +12,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestCodeReadParallel_NoMaterialize verifies that cold GetCode / GetCodeSize
-// reads on the parallel (versionMap) path return the committed code without
-// materializing/caching a stateObject.
 func TestCodeReadParallel_NoMaterialize(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
-	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01} // PUSH1 1 PUSH1 2 ADD
+	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01}
 
 	acc := accounts.NewAccount()
 	acc.Nonce = 1
@@ -39,29 +36,23 @@ func TestCodeReadParallel_NoMaterialize(t *testing.T) {
 	assert.Equal(t, len(code), sz, "cold GetCodeSize must return the committed size")
 	assert.Empty(t, ibs.stateObjects, "cold parallel GetCodeSize must not materialize a stateObject")
 
-	// Repeat reads hit the recorded ReadSet, still no materialization.
 	got2, err := ibs.GetCode(addr)
 	require.NoError(t, err)
 	assert.Equal(t, code, got2)
 	assert.Empty(t, ibs.stateObjects)
 }
 
-// TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode pins the codeHash gate on
-// the cold parallel code read. When a 7702 delegation is cleared the account's
-// codeHash becomes empty, but the address-keyed CodeDomain keeps the stale
-// delegation bytes (code is never deleted, only the codeHash pointer). The read
-// must honour the empty codeHash and report no code — otherwise GetDelegatedDesignation
-// sees the stale delegation and a plain transfer to the EOA is charged as a call
-// to delegated code, running out of gas and flipping the receipt status.
+// Clearing a 7702 delegation empties the codeHash, but the address-keyed
+// CodeDomain still holds the stale delegation bytes — the read must honor the empty codeHash and report no code.
 func TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0x30, 0x75, 0x76, 0xDd})
 	staleDelegation := types.AddressToDelegation(accounts.InternAddress([20]byte{0xfb, 0x77, 0x02}))
 
 	acc := accounts.NewAccount()
 	acc.Nonce = 594735
-	acc.CodeHash = accounts.EmptyCodeHash // delegation cleared: empty codehash...
+	acc.CodeHash = accounts.EmptyCodeHash
 
-	reader := &codeReader{addr: addr, account: &acc, code: staleDelegation} // ...but CodeDomain still holds the stale bytes
+	reader := &codeReader{addr: addr, account: &acc, code: staleDelegation}
 	ibs := NewWithVersionMap(reader, NewVersionMap(nil))
 	ibs.SetNoMaterialize(true)
 	ibs.SetTxContext(100, 5)
@@ -80,9 +71,8 @@ func TestCodeReadParallel_EmptyCodeHashIgnoresStaleCode(t *testing.T) {
 	assert.False(t, ok, "an empty-codehash account must not read as 7702-delegated")
 }
 
-// committedCodeIBS builds a noMaterialize IBS over one committed contract with
-// its CodePath read set warmed. accountHash, when set, makes the account record
-// disagree with the CodeDomain bytes.
+// committedCodeIBS builds a noMaterialize IBS over one committed contract;
+// accountHash, when set, makes the account record disagree with the CodeDomain bytes.
 func committedCodeIBS(tb testing.TB, codeLen int, accountHash *accounts.CodeHash) (*IntraBlockState, accounts.Address) {
 	tb.Helper()
 
@@ -113,8 +103,7 @@ func committedCodeIBS(tb testing.TB, codeLen int, accountHash *accounts.CodeHash
 	return ibs, addr
 }
 
-// BenchmarkGetStateObjectAfterCodeRead measures the rebuild every account-field
-// read falls through to. Cost growing with code size means the bytes are hashed.
+// Cost growing with code size means getStateObject's rebuild is hashing the code bytes.
 func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
 	for _, codeLen := range []int{32, 1024, 24576} {
 		b.Run(fmt.Sprintf("code=%dB", codeLen), func(b *testing.B) {
@@ -129,9 +118,8 @@ func BenchmarkGetStateObjectAfterCodeRead(b *testing.B) {
 	}
 }
 
-// TestCommittedCodeHashComesFromAccountRecord pins the account record as the
-// authority for committed code. The CodeDomain is keyed by address, so it can
-// hold bytes the account no longer owns — a cleared 7702 delegation leaves them.
+// The account record is authoritative for committed code; CodeDomain (keyed
+// by address) can hold bytes a cleared 7702 delegation no longer owns.
 func TestCommittedCodeHashComesFromAccountRecord(t *testing.T) {
 	t.Run("account hash agrees with the bytes", func(t *testing.T) {
 		ibs, addr := committedCodeIBS(t, 4096, nil)
@@ -159,8 +147,7 @@ func TestCommittedCodeHashComesFromAccountRecord(t *testing.T) {
 	})
 }
 
-// TestPriorTxCodeWriteHashComesFromTheCell pins the cell as the authority for a
-// prior-tx code write, so its hash is used rather than derived from its bytes.
+// A prior-tx code write's cell hash is authoritative — not keccak(bytes).
 func TestPriorTxCodeWriteHashComesFromTheCell(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
 	priorCode := []byte{0xef, 0x01, 0x00, 0x11, 0x22, 0x33}
@@ -188,9 +175,8 @@ func TestPriorTxCodeWriteHashComesFromTheCell(t *testing.T) {
 	require.Equal(t, cellHash, so.data.CodeHash)
 }
 
-// TestPriorTxCodeWriteHashSurvivesReadSetHit pins the same authority once the
-// read is already recorded. A dirty address bypasses the read-once gate, so the
-// rebuild re-probes the version map and lands on the read-set hit instead.
+// The cell's hash stays authoritative even when a dirty address forces the
+// rebuild to re-probe and land on the cached read-set hit instead.
 func TestPriorTxCodeWriteHashSurvivesReadSetHit(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
 	priorCode := []byte{0xef, 0x01, 0x00, 0x11, 0x22, 0x33}

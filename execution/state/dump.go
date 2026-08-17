@@ -44,7 +44,6 @@ type Dumper struct {
 	txNumsReader rawdbv3.TxNumsReader
 }
 
-// DumpAccount represents tan account in the state.
 type DumpAccount struct {
 	Balance   string            `json:"balance"`
 	Nonce     uint64            `json:"nonce"`
@@ -52,57 +51,46 @@ type DumpAccount struct {
 	CodeHash  hexutil.Bytes     `json:"codeHash"`
 	Code      hexutil.Bytes     `json:"code,omitempty"`
 	Storage   map[string]string `json:"storage,omitempty"`
-	Address   *common.Address   `json:"address,omitempty"` // Address only present in iterative (line-by-line) mode
-	SecureKey *hexutil.Bytes    `json:"key,omitempty"`     // If we don't have address, we can output the key
+	Address   *common.Address   `json:"address,omitempty"`
+	SecureKey *hexutil.Bytes    `json:"key,omitempty"`
 }
 
-// Dump represents the full dump in a collected format, as one large map.
 type Dump struct {
 	Root     string                         `json:"root"`
 	Accounts map[common.Address]DumpAccount `json:"accounts"`
 }
 
-// iterativeDump is a 'collector'-implementation which dump output line-by-line iteratively.
 type iterativeDump struct {
 	*json.Encoder
 }
 
-// IteratorDump is an implementation for iterating over data.
 type IteratorDump struct {
 	Root     string                         `json:"root"`
 	Accounts map[common.Address]DumpAccount `json:"accounts"`
 	Next     []byte                         `json:"next,omitempty"` // nil if no more accounts
 }
 
-// DumpCollector interface which the state trie calls during iteration
 type DumpCollector interface {
-	// OnRoot is called with the state root
 	OnRoot(common.Hash)
-	// OnAccount is called once for each account in the trie
 	OnAccount(common.Address, DumpAccount)
 }
 
-// OnRoot implements DumpCollector interface
 func (d *Dump) OnRoot(root common.Hash) {
 	d.Root = fmt.Sprintf("%x", root)
 }
 
-// OnAccount implements DumpCollector interface
 func (d *Dump) OnAccount(addr common.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
 
-// OnRoot implements DumpCollector interface
 func (d *IteratorDump) OnRoot(root common.Hash) {
 	d.Root = fmt.Sprintf("%x", root)
 }
 
-// OnAccount implements DumpCollector interface
 func (d *IteratorDump) OnAccount(addr common.Address, account DumpAccount) {
 	d.Accounts[addr] = account
 }
 
-// OnAccount implements DumpCollector interface
 func (d iterativeDump) OnAccount(addr common.Address, account DumpAccount) {
 	dumpAccount := &DumpAccount{
 		Balance:   account.Balance,
@@ -121,7 +109,6 @@ func (d iterativeDump) OnAccount(addr common.Address, account DumpAccount) {
 	_ = d.Encode(dumpAccount)
 }
 
-// OnRoot implements DumpCollector interface
 func (d iterativeDump) OnRoot(root common.Hash) {
 	//nolint:errcheck,errchkjson
 	_ = d.Encoder.Encode(struct {
@@ -150,7 +137,7 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 		maxResults = kv.Unlim
 	}
 
-	c.OnRoot(emptyHash) // We do not calculate the root
+	c.OnRoot(emptyHash)
 
 	ttx := d.tx
 	txNum, err := d.txNumsReader.Min(ctx, ttx, d.blockNumber+1)
@@ -160,7 +147,7 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 	txNumForStorage := txNum
 
 	var nextKey []byte
-	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) //unlim because need skip empty vals
+	it, err := ttx.RangeAsOf(kv.AccountsDomain, startAddress[:], nil, txNum, order.Asc, kv.Unlim) // unlim: must skip empty (tombstoned) values before the maxResults cutoff applies
 	if err != nil {
 		return nil, err
 	}
@@ -184,7 +171,7 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 		account := DumpAccount{
 			Balance:  acc.Balance.ToBig().String(),
 			Nonce:    acc.Nonce,
-			Root:     hexutil.Bytes(emptyHash[:]), // We cannot provide historical storage hash
+			Root:     hexutil.Bytes(emptyHash[:]),
 			CodeHash: hexutil.Bytes(empty.CodeHash[:]),
 			Storage:  make(map[string]string),
 		}
@@ -215,7 +202,7 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 			if err := func() error {
 				t := trie.New(common.Hash{})
 				nextAcc, _ := kv.NextSubtree(addr[:])
-				r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim) //unlim because need skip empty vals
+				r, err := ttx.RangeAsOf(kv.StorageDomain, addr[:], nextAcc, txNumForStorage, order.Asc, kv.Unlim)
 				if err != nil {
 					return fmt.Errorf("walking over storage for %x: %w", addr, err)
 				}
@@ -226,7 +213,7 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 						return fmt.Errorf("walking over storage for %x: %w", addr, err)
 					}
 					if len(vs) == 0 {
-						continue // Skip deleted entries
+						continue
 					}
 					loc := k[20:]
 					account.Storage[common.BytesToHash(loc).String()] = common.Bytes2Hex(vs)
@@ -250,7 +237,6 @@ func (d *Dumper) DumpToCollector(ctx context.Context, c DumpCollector, excludeCo
 	return nextKey, nil
 }
 
-// RawDump returns the entire state an a single large object
 func (d *Dumper) RawDump(excludeCode, excludeStorage bool) Dump {
 	dump := &Dump{
 		Accounts: make(map[common.Address]DumpAccount),
@@ -260,7 +246,6 @@ func (d *Dumper) RawDump(excludeCode, excludeStorage bool) Dump {
 	return *dump
 }
 
-// Dump returns a JSON string representing the entire state as a single json-object
 func (d *Dumper) Dump(excludeCode, excludeStorage bool) []byte {
 	dump := d.RawDump(excludeCode, excludeStorage)
 	json, err := json.MarshalIndent(dump, "", "    ")
@@ -270,13 +255,11 @@ func (d *Dumper) Dump(excludeCode, excludeStorage bool) []byte {
 	return json
 }
 
-// IterativeDump dumps out accounts as json-objects, delimited by linebreaks on stdout
 func (d *Dumper) IterativeDump(excludeCode, excludeStorage bool, output *json.Encoder) {
 	//nolint:errcheck
 	d.DumpToCollector(context.Background(), iterativeDump{output}, excludeCode, excludeStorage, common.Address{}, 0)
 }
 
-// IteratorDump dumps out a batch of accounts starts with the given start key
 func (d *Dumper) IteratorDump(excludeCode, excludeStorage bool, start common.Address, maxResults int) (IteratorDump, error) {
 	iterator := &IteratorDump{
 		Accounts: make(map[common.Address]DumpAccount),
@@ -290,7 +273,6 @@ func (d *Dumper) DefaultRawDump() Dump {
 	return d.RawDump(false, false)
 }
 
-// DefaultDump returns a JSON string representing the state with the default params
 func (d *Dumper) DefaultDump() []byte {
 	return d.Dump(false, false)
 }

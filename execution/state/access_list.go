@@ -25,34 +25,25 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// accessList tracks addresses and storage slots accessed during a transaction.
-// addresses maps each address to its index in slots (-1 if address-only, no slots).
-// This layout matches go-ethereum's design: the slots slice backing array is
-// reused across transactions via Reset, eliminating per-tx slot-map allocations.
+// accessList maps each address to its index in slots (-1 = address-only); the slots backing array is reused across transactions via Reset to avoid per-tx allocations.
 type accessList struct {
 	addresses map[accounts.Address]int
 	slots     []map[accounts.StorageKey]struct{}
 
-	// Memo of the last resolved (address -> slot set) and the last slot known
-	// warm within it: repeated AddSlot on the same addr skips the addresses
-	// lookup, and on the same (addr, slot) skips both map lookups.
-	// lastSlots == nil means no memo — lastAddr alone can't say, since its
-	// zero value NilAddress is a legal argument.
+	// Memo of the last resolved (addr -> slot set) and its last-known-warm slot, so repeated AddSlot on the same addr/slot skips the map lookups.
+	// lastSlots == nil means no memo; lastAddr alone can't say, since NilAddress is both a legal argument and that field's zero value.
 	lastAddr     accounts.Address
 	lastSlots    map[accounts.StorageKey]struct{}
 	lastWarmSlot accounts.StorageKey
 }
 
-// newAccessList creates a new accessList.
 func newAccessList() *accessList {
 	return &accessList{
 		addresses: make(map[accounts.Address]int),
 	}
 }
 
-// Reset clears the access list for reuse, keeping allocated memory.
-// The slots backing array is retained; cleared inner maps are reused by
-// subsequent AddSlot calls without new allocations.
+// Reset keeps the backing array and inner maps so subsequent AddSlot calls need no new allocations.
 func (al *accessList) Reset() {
 	for _, s := range al.slots {
 		clear(s)
@@ -68,14 +59,11 @@ func (al *accessList) dropMemo() {
 	al.lastWarmSlot = accounts.StorageKey{}
 }
 
-// ContainsAddress returns true if the address is in the access list.
 func (al *accessList) ContainsAddress(address accounts.Address) bool {
 	_, ok := al.addresses[address]
 	return ok
 }
 
-// Contains checks if a slot within an account is present in the access list, returning
-// separate flags for the presence of the account and the slot respectively.
 func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKey) (addressPresent bool, slotPresent bool) {
 	if al.lastSlots != nil && al.lastAddr == address {
 		if slot == al.lastWarmSlot {
@@ -95,7 +83,6 @@ func (al *accessList) Contains(address accounts.Address, slot accounts.StorageKe
 	return true, slotPresent
 }
 
-// Copy creates an independent copy of an accessList.
 func (al *accessList) Copy() *accessList {
 	cp := &accessList{
 		addresses: maps.Clone(al.addresses),
@@ -107,8 +94,6 @@ func (al *accessList) Copy() *accessList {
 	return cp
 }
 
-// AddAddress adds an address to the access list, and returns 'true' if the operation
-// caused a change (addr was not previously in the list).
 func (al *accessList) AddAddress(address accounts.Address) bool {
 	if _, present := al.addresses[address]; present {
 		return false
@@ -117,18 +102,13 @@ func (al *accessList) AddAddress(address accounts.Address) bool {
 	return true
 }
 
-// AddSlot adds the specified (addr, slot) combo to the access list.
-// Return values are:
-// - address added
-// - slot added
-// For any 'true' value returned, a corresponding journal entry must be made.
+// AddSlot returns which of address/slot are newly added; the journal must record an entry for each true result.
 func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
 	if al.lastSlots != nil && al.lastAddr == address {
 		if slot == al.lastWarmSlot {
 			return false, false
 		}
-		// Probe-then-insert: a plain read on the warm case beats mapassign's
-		// write bookkeeping, and warm re-reads dominate cold inserts.
+		// probe-then-insert: a plain read on the warm case beats mapassign's write bookkeeping, since warm re-reads dominate cold inserts
 		if _, ok := al.lastSlots[slot]; ok {
 			al.lastWarmSlot = slot
 			return false, false
@@ -143,8 +123,6 @@ func (al *accessList) AddSlot(address accounts.Address, slot accounts.StorageKey
 func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.StorageKey) (addrChange bool, slotChange bool) {
 	idx, addrPresent := al.addresses[address]
 	if !addrPresent || idx == -1 {
-		// Address not present, or addr present but no slots yet.
-		// Reuse a cleared slot map from the backing array if available.
 		newIdx := len(al.slots)
 		al.addresses[address] = newIdx
 		var slotmap map[accounts.StorageKey]struct{}
@@ -168,10 +146,7 @@ func (al *accessList) addSlotSlow(address accounts.Address, slot accounts.Storag
 	return false, true
 }
 
-// DeleteSlot removes an (address, slot)-tuple from the access list.
-// This operation needs to be performed in the same order as the addition happened.
-// This method is meant to be used by the journal, which maintains ordering of
-// operations.
+// DeleteSlot must be called in LIFO order matching the additions — it's meant for the journal's revert path only.
 func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.StorageKey) {
 	idx, addrOk := al.addresses[address]
 	if !addrOk {
@@ -183,8 +158,7 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 	slotmap := al.slots[idx]
 	delete(slotmap, slot)
 	al.dropMemo()
-	// Since additions and rollbacks are always in LIFO order, when a slot map
-	// becomes empty it must be the last one appended — truncate the slice.
+	// LIFO order guarantees an emptied slot map is always the last one appended, so truncating the slice is safe.
 	if len(slotmap) == 0 {
 		if idx != len(al.slots)-1 {
 			panic("reverting slot change, LIFO violation: emptied slot map is not the last element")
@@ -194,10 +168,6 @@ func (al *accessList) DeleteSlot(address accounts.Address, slot accounts.Storage
 	}
 }
 
-// DeleteAddress removes an address from the access list. This operation
-// needs to be performed in the same order as the addition happened.
-// This method is meant to be used by the journal, which maintains ordering of
-// operations.
 func (al *accessList) DeleteAddress(address accounts.Address) {
 	idx, addrOk := al.addresses[address]
 	if !addrOk {

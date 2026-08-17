@@ -11,12 +11,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite pins that reverting
-// a SELFDESTRUCT does not delete a balance write that predates the snapshot. The
-// self-destruct records BalancePath=0; the revert must restore the pre-destruct
-// versioned balance write rather than delete the cell outright (which would also
-// wipe a legitimate prior balance write and diverge the trie root / BAL). This
-// mirrors the pre-destruct incarnation-cell restore.
+// Revert must restore a pre-destruct balance write, not delete the cell outright, or a legitimate prior write is lost.
 func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x5DBA1"))
@@ -27,15 +22,13 @@ func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
 	ibs.SetVersion(0)
 	ibs.SetVersionMap(vm)
 
-	// Balance written BEFORE the snapshot; no prior SelfDestructPath write, so the
-	// revert takes the wasCommited branch that previously deleted the balance cell.
 	require.NoError(t, ibs.AddBalance(addr, *uint256.NewInt(1000), tracing.BalanceChangeUnspecified))
 	pre, ok := ibs.versionedWrites.GetBalance(addr)
 	require.True(t, ok, "precondition: a versioned balance write exists")
 	require.Equal(t, uint64(1000), pre.Val.Uint64())
 
 	snap := ibs.PushSnapshot()
-	_, err := ibs.Selfdestruct(addr, false /* burn balance */)
+	_, err := ibs.Selfdestruct(addr, false)
 	require.NoError(t, err)
 
 	ibs.RevertToSnapshot(snap, nil)
@@ -45,13 +38,7 @@ func TestSelfdestructVersioned_RevertPreservesPriorBalanceWrite(t *testing.T) {
 	require.Equal(t, uint64(1000), got.Val.Uint64(), "the pre-snapshot balance value must be restored")
 }
 
-// A same-tx-created contract bumps its nonce (e.g. it CREATEs a child) and then
-// SELFDESTRUCTs (EIP-8246 preserve-balance). The versioned self-destruct must
-// NOT clear the nonce/code cells: the account is alive until finalize, and a
-// same-tx re-creation at the address reads those cells for its collision check —
-// zeroing them there is invisible to the collision but zeroing the versioned
-// WRITE made the re-creation abort with a phantom collision. It must also survive
-// a revert with the bumped nonce intact.
+// EIP-8246: versioned self-destruct must not clear the nonce/code cells — a same-tx re-create reads them for its collision check.
 func TestEIP8246_SelfdestructVersioned_PreservesBumpedNonce(t *testing.T) {
 	t.Parallel()
 	addr := accounts.InternAddress(common.HexToAddress("0x8246F"))
@@ -68,7 +55,7 @@ func TestEIP8246_SelfdestructVersioned_PreservesBumpedNonce(t *testing.T) {
 	require.NoError(t, ibs.SetNonce(addr, 2, tracing.NonceChangeUnspecified))
 
 	snap := ibs.PushSnapshot()
-	_, err := ibs.Selfdestruct(addr, true /* preserveBalance */)
+	_, err := ibs.Selfdestruct(addr, true)
 	require.NoError(t, err)
 	n, err := ibs.GetNonce(addr)
 	require.NoError(t, err)

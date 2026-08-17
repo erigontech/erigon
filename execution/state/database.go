@@ -30,10 +30,8 @@ import (
 )
 
 const (
-	//FirstContractIncarnation - first incarnation for contract accounts. After 1 it increases by 1.
 	FirstContractIncarnation = 1
-	//NonContractIncarnation incarnation for non contracts
-	NonContractIncarnation = 0
+	NonContractIncarnation   = 0
 )
 
 type StateReader interface {

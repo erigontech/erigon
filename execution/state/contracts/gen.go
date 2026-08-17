@@ -16,49 +16,38 @@
 
 package contracts
 
-// changer.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build changer.sol
 //go:generate abigen -abi build/Changer.abi -bin build/Changer.bin -pkg contracts -type changer -out ./gen_changer.go
 
-// revive.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build revive.sol
 //go:generate abigen -abi build/Revive.abi -bin build/Revive.bin -pkg contracts -type revive -out ./gen_revive.go
 
-// selfdestruct.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build selfdestruct.sol
 //go:generate abigen -abi build/Selfdestruct.abi -bin build/Selfdestruct.bin -pkg contracts -type selfdestruct -out ./gen_selfdestruct.go
 
-// poly.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build poly.sol
 //go:generate abigen -abi build/Poly.abi -bin build/Poly.bin -pkg contracts -type poly -out ./gen_poly.go
 
-// revive2.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build revive2.sol
 //go:generate abigen -abi build/Revive2.abi -bin build/Revive2.bin -pkg contracts -type revive2 -out ./gen_revive2.go
 //go:generate abigen -abi build/Phoenix.abi -bin build/Phoenix.bin -pkg contracts -type phoenix -out ./gen_phoenix.go
 
-// disperse.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build disperse.sol
 //go:generate abigen -abi build/Disperse.abi -bin build/Disperse.bin -pkg contracts -type disperse -out ./gen_disperse.go
 
-// proxyfactory.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build proxyfactory.sol
 //go:generate abigen -abi build/Proxy.abi -bin build/Proxy.bin -pkg contracts -type proxy -out ./gen_proxy.go
 //go:generate abigen -abi build/ProxyFactory.abi -bin build/ProxyFactory.bin -pkg contracts -type proxyFactory -out ./gen_proxyfactory.go
 
-// statechurn.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build statechurn.sol
 //go:generate abigen -abi build/StateChurn.abi -bin build/StateChurn.bin -pkg contracts -type stateChurn -out ./gen_statechurn.go
 
-// observer.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build observer.sol
 //go:generate abigen -abi build/Observer.abi -bin build/Observer.bin -pkg contracts -type observer -out ./gen_observer.go
 
-// storeanddie.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build storeanddie.sol
 //go:generate abigen -abi build/StoreAndDie.abi -bin build/StoreAndDie.bin -pkg contracts -type storeAndDie -out ./gen_storeanddie.go
 
-// selfdestructfactory.sol
 //go:generate solc --allow-paths ., --abi --bin --overwrite --optimize -o build selfdestructfactory.sol
 //go:generate abigen -abi build/SelfDestructInConstructor.abi -bin build/SelfDestructInConstructor.bin -pkg contracts -type selfDestructInConstructor -out ./gen_selfdestructinconstructor.go
 //go:generate abigen -abi build/SelfDestructFactory.abi -bin build/SelfDestructFactory.bin -pkg contracts -type selfDestructFactory -out ./gen_selfdestructfactory.go

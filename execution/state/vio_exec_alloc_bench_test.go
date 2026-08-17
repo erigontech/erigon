@@ -33,8 +33,7 @@ var (
 	sinkBool bool
 )
 
-// BenchmarkVersionMapRead_Typed measures the typed ReadXxx primitives, which
-// return T directly with no interface box.
+// BenchmarkVersionMapRead_Typed measures the typed ReadXxx primitives, which avoid interface-boxing allocations.
 func BenchmarkVersionMapRead_Typed(b *testing.B) {
 	mvhm := NewVersionMap(nil)
 	addr := accounts.InternAddress([20]byte{0x01})
@@ -75,12 +74,7 @@ func BenchmarkVersionMapRead_Typed(b *testing.B) {
 	})
 }
 
-// BenchmarkVersionedExecReads drives the real IBS typed read path
-// (GetBalance/GetNonce/GetCodeHash/GetState) over a versionMap pre-populated by
-// prior "transactions", resetting per iteration to model the per-tx read
-// boundary the parallel executor enforces. allocs/op here is the per-tx
-// read-side garbage the typed-vio model aims to drive to zero; the non-storage
-// paths currently box via ReadResult.Value() any.
+// Drives the real IBS typed read path per tx-boundary reset; allocs/op is the read-side garbage the typed-vio model targets toward zero.
 func BenchmarkVersionedExecReads(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	mvhm := NewVersionMap(nil)
@@ -119,14 +113,8 @@ func BenchmarkVersionedExecReads(b *testing.B) {
 	}
 }
 
-// BenchmarkWarmExtCodeHash drives the Empty()+GetCodeHash opcode pattern. NOTE:
-// it does NOT reproduce the warm-extcodehash benchmarkoor cell's refresh path —
-// with only field cells and an empty reader, readAccount returns nil and Empty()
-// short-circuits on the absent path (getVersionedAccount returns before
-// the per-field account refresh). Making it hit refresh needs a populated reader, not
-// just versionMap cells; the real warm-refresh + SelfDestruct-probe cost of the
-// 20x outlier must be measured on the benchmarkoor cell (per the perf skill),
-// not here. Retained as an absent/existence-read + SD-probe alloc baseline.
+// Empty()+GetCodeHash here hits the absent-account path, not the warm-refresh
+// path its name suggests — treat this as an absent-read + SD-probe baseline only.
 func BenchmarkWarmExtCodeHash(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	mvhm := NewVersionMap(nil)

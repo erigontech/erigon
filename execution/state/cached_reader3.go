@@ -24,14 +24,11 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// CachedReader3 is a wrapper for an instance of type StateReader
-// This wrapper only makes calls to the underlying reader if the item is not in the cache
 type CachedReader3 struct {
 	cache kvcache.CacheView
 	db    kv.TemporalTx
 }
 
-// NewCachedReader3 wraps a given state reader into the cached reader
 func NewCachedReader3(cache kvcache.CacheView, tx kv.TemporalTx) *CachedReader3 {
 	return &CachedReader3{cache: cache, db: tx}
 }
@@ -40,7 +37,6 @@ func (r *CachedReader3) SetTrace(_ bool, _ string) {}
 func (r *CachedReader3) Trace() bool               { return false }
 func (r *CachedReader3) TracePrefix() string       { return "" }
 
-// ReadAccountData is called when an account needs to be fetched from the state
 func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	addressValue := address.Value()
 	enc, err := r.cache.Get(addressValue[:])
@@ -57,8 +53,6 @@ func (r *CachedReader3) ReadAccountData(address accounts.Address) (*accounts.Acc
 	return &a, nil
 }
 
-// ReadAccountDataForDebug - is like ReadAccountData, but without adding key to `readList`.
-// Used to get `prev` account balance
 func (r *CachedReader3) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return r.ReadAccountData(address)
 }

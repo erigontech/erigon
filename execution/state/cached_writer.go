@@ -23,13 +23,11 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 )
 
-// CachedWriter is a wrapper for an instance of type StateWriter
 type CachedWriter struct {
 	w     StateWriter
 	cache *shards.StateCache
 }
 
-// NewCachedWriter wraps a given state writer into a cached writer
 func NewCachedWriter(w StateWriter, cache *shards.StateCache) *CachedWriter {
 	return &CachedWriter{w: w, cache: cache}
 }

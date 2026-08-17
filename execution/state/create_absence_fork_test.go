@@ -25,15 +25,8 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestCreateOverAbsenceConsumedBeforeDestructFlush pins the OCC invariant
-// that an execution which consumed an account's absence (e.g. for the
-// EIP-8037 new-account gas charge) must not silently adopt a destruct flushed
-// since: the attempt has to abort with ErrDependency or fail commit-time
-// validation, else its gas view forks from its state view. The
-// collisionCheckFirst variant interleaves the CREATE2 collision reads between
-// the probe and the account load — their destruct-wipe scan records a
-// SelfDestruct=true read that must not count as the absence having been
-// concluded from the destruct.
+// An OCC read that consumed an account's absence (e.g. the EIP-8037 new-account gas charge) must not silently
+// adopt a destruct flushed afterward: it must abort with ErrDependency or fail validation, or gas view forks from state view.
 func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 	t.Parallel()
 	for _, collisionCheck := range []bool{false, true} {
@@ -55,22 +48,16 @@ func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 
 			addr := getAddress(8246)
 
-			// tx1's gas probe consumes the account's absence before tx0 flushes.
 			empty, err := ibs.Empty(addr)
 			require.NoError(t, err)
 			require.True(t, empty)
 
-			// tx0's writes flush: CREATE2 whose constructor self-destructed to
-			// itself. EIP-8246 preserves the balance; the worker flush carries no
-			// AddressPath cell, so only the destruct probe can reveal the account
-			// to tx1.
 			writeFor(vm, addr, BalancePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, *uint256.NewInt(1_000_000), true)
 			writeFor(vm, addr, NoncePath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, uint64(1), true)
 			writeFor(vm, addr, IncarnationPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, uint64(0), true)
 			writeFor(vm, addr, SelfDestructPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, true, true)
 			writeFor(vm, addr, CreateContractPath, accounts.NilKey, Version{TxIndex: 0, Incarnation: 0}, true, true)
 
-			// The CREATE2 flow re-reads the account it is about to create over.
 			diverged := false
 			func() {
 				defer func() {

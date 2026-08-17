@@ -58,9 +58,8 @@ func TestLogsRlpHash(t *testing.T) {
 	})
 }
 
-// A reused entry must not carry any field of the block that used it before.
-// Address is the sharpest one: it is a consensus field with no length the
-// caller has to honour, so AllocLog takes it rather than trusting the caller.
+// A reused entry must not carry the previous block's fields. AllocLog takes
+// Address itself rather than trust the caller to clear it.
 func TestAllocLogClearsReusedEntry(t *testing.T) {
 	t.Parallel()
 
@@ -84,8 +83,6 @@ func TestAllocLogClearsReusedEntry(t *testing.T) {
 	require.False(t, reused.Removed)
 }
 
-// Growing the run past its capacity must keep what earlier transactions wrote:
-// Logs and LogsRlpHash read the whole block.
 func TestAllocLogKeepsEarlierTxsAcrossGrowth(t *testing.T) {
 	t.Parallel()
 
@@ -131,8 +128,6 @@ func TestAddLogKeepsCallerTxAndBlockHash(t *testing.T) {
 	require.Equal(t, common.HexToHash("0xad"), logs[0].BlockHash)
 }
 
-// A reverted entry goes back to the pool, and Data past the per-entry cap does
-// not go with it.
 func TestRevertDropsOversizedLogData(t *testing.T) {
 	t.Parallel()
 
@@ -152,9 +147,6 @@ func TestRevertDropsOversizedLogData(t *testing.T) {
 	require.LessOrEqual(t, cap(lp.Data), maxPooledLogDataCap)
 }
 
-// Entries survive Reset for reuse, so retention belongs to the IntraBlockState
-// and not to one block: a burst of logs at a fresh tx index every block would
-// otherwise add a high-water mark per block. The pool is the whole of it.
 func TestResetBoundsRetainedLogMemory(t *testing.T) {
 	t.Parallel()
 
@@ -177,8 +169,8 @@ func TestResetBoundsRetainedLogMemory(t *testing.T) {
 	require.Zero(t, dataBytes)
 }
 
-// A transaction that fits the pool costs no entry the next time round. The pool
-// hands them back in its own order, so what is pinned is the set, not the place.
+// The pool hands entries back in its own order, so Reset pins the set of
+// reused entries, not their positions.
 func TestResetKeepsLogsWithinBudget(t *testing.T) {
 	t.Parallel()
 
@@ -200,8 +192,7 @@ func TestResetKeepsLogsWithinBudget(t *testing.T) {
 	}
 }
 
-// poolBytes is what the pool admits itself against, so it has to match the Data
-// the pooled entries actually hold, through emit, revert and reset.
+// poolBytes must equal the summed cap of the pooled entries' Data.
 func TestLogPoolBytesMatchPooledData(t *testing.T) {
 	t.Parallel()
 
@@ -232,8 +223,6 @@ func TestLogPoolBytesMatchPooledData(t *testing.T) {
 	}
 }
 
-// A block of large logs is what the pool is for: the transactions run one after
-// another, so one buffer serves them all instead of one per transaction.
 func TestLogPoolReusesLargeDataAcrossTxs(t *testing.T) {
 	t.Parallel()
 
@@ -254,8 +243,6 @@ func TestLogPoolReusesLargeDataAcrossTxs(t *testing.T) {
 	require.Len(t, ibs.logs.pool, 1)
 }
 
-// Data past the per-entry cap is not pooled: one buffer that size would take the
-// whole budget and leave nothing for the small entries.
 func TestLogPoolRejectsOversizedData(t *testing.T) {
 	t.Parallel()
 
@@ -269,7 +256,6 @@ func TestLogPoolRejectsOversizedData(t *testing.T) {
 	require.Nil(t, ibs.logs.pool[0].Data)
 }
 
-// An outlier must not leave the array that held it behind.
 func TestResetDropsOutsizedLogSlots(t *testing.T) {
 	t.Parallel()
 
@@ -315,9 +301,6 @@ func TestRevertKeepsNormalLogBufferForReuse(t *testing.T) {
 	require.Same(t, first, lp)
 }
 
-// The OnLog hook is exported, so a tracer outside this repo may retain the
-// pointer it is handed. The value must stay valid after the emit buffer is
-// reused by a later block.
 func TestOnLogValueSurvivesBufferReuse(t *testing.T) {
 	t.Parallel()
 
@@ -348,8 +331,6 @@ func TestOnLogValueSurvivesBufferReuse(t *testing.T) {
 	require.Equal(t, hexutil.Bytes{1, 2, 3}, retained.Data)
 }
 
-// Splits the cost of the stable OnLog value: the untraced path keeps reusing
-// the buffer entry, only a configured hook pays for the copy.
 func BenchmarkAddLog(b *testing.B) {
 	log := &types.Log{
 		Address: common.HexToAddress("0x1"),
@@ -374,8 +355,6 @@ func BenchmarkAddLog(b *testing.B) {
 
 var sinkLog *types.Log
 
-// One transaction spending MaxTxnGasLimit entirely on logs: the most an arena
-// can be asked to hold before it resets. Reports what survives the reset.
 func BenchmarkLogEmitWorstCaseTx(b *testing.B) {
 	addr := common.HexToAddress("0x1")
 	ibs := New(nil)
@@ -391,9 +370,6 @@ func BenchmarkLogEmitWorstCaseTx(b *testing.B) {
 	b.ReportMetric(float64(ibs.logs.poolBytes)/1024, "poolKB")
 }
 
-// Blocks whose transactions each emit a 64KB log — the shape an attack sends.
-// The size is fixed rather than tied to a budget, so runs stay comparable when
-// the budgets move.
 func BenchmarkLogEmitLargeDataPerTx(b *testing.B) {
 	log := &types.Log{
 		Address: common.HexToAddress("0x1"),
@@ -415,11 +391,6 @@ func BenchmarkLogEmitLargeDataPerTx(b *testing.B) {
 	}
 }
 
-// The parallel executor resets before every transaction, so a block costs one
-// Reset per transaction while the buffers hold the whole block's logs.
-// The assembler and the tooling reset once a block is built, so a whole block's
-// entries reach the pool in one go — the shape that decides how small the pool
-// may be. p99 mainnet is ~1700 logs.
 func BenchmarkLogEmitBlockLevelReset(b *testing.B) {
 	log := &types.Log{
 		Address: common.HexToAddress("0x1"),
@@ -440,10 +411,6 @@ func BenchmarkLogEmitBlockLevelReset(b *testing.B) {
 	b.ReportMetric(float64(len(ibs.logs.pool)), "pooled")
 }
 
-// Blocks do not repeat their shape: the same logs land at different tx indexes
-// from one block to the next. An arena keyed by tx index keeps a slot for every
-// shape it has seen, while what a reset-per-tx caller needs live is one
-// transaction. Reports what is retained, which ns/op cannot show.
 func BenchmarkLogEmitShiftingShape(b *testing.B) {
 	shapes := []struct{ txs, logsPerTx int }{{200, 3}, {60, 10}, {400, 1}, {120, 5}}
 	log := &types.Log{
@@ -521,9 +488,6 @@ func BenchmarkLogsRlpHash(b *testing.B) {
 	})
 }
 
-// TestAddLogOnLogHookCopyContract pins the OnLog contract on the AddLog path:
-// the hook sees the emitted contents during the callback, and a copy taken then
-// stays intact after the buffer entry is reused by later blocks.
 func TestAddLogOnLogHookCopyContract(t *testing.T) {
 	t.Parallel()
 
@@ -549,9 +513,6 @@ func TestAddLogOnLogHookCopyContract(t *testing.T) {
 	require.Equal(t, []byte{0x01}, []byte(copied[0].Data))
 }
 
-// TestNotifyLogHookGetsStableCopy pins the OnLog contract on the AllocLog path
-// the EVM's makeLog uses: the hook owns what it receives, so retaining it is
-// safe even though the buffer entry behind it is reused by a later block.
 func TestNotifyLogHookGetsStableCopy(t *testing.T) {
 	t.Parallel()
 
@@ -583,9 +544,6 @@ func TestNotifyLogHookGetsStableCopy(t *testing.T) {
 	require.Equal(t, []byte{0xde, 0xad}, []byte(handed[1].Data))
 }
 
-// TestAddLogKeepsCallerBlockNumber pins that BlockNumber stays a caller-assigned
-// field: execution/state does not know the block number, so a reused entry must
-// not carry the previous caller's value either.
 func TestAddLogKeepsCallerBlockNumber(t *testing.T) {
 	t.Parallel()
 
@@ -600,10 +558,6 @@ func TestAddLogKeepsCallerBlockNumber(t *testing.T) {
 	require.Zero(t, logs[1].BlockNumber, "an unset BlockNumber must not inherit the previous log's")
 }
 
-// TestAllocLogPreservesCapacityAcrossRevert pins that fully reverting a tx's
-// logs (which truncates the outer buffer) and then logging again reuses the
-// inner buffer's capacity instead of dropping it — the same capacity Reset
-// preserves.
 func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	t.Parallel()
 
@@ -624,10 +578,6 @@ func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
 	require.Equal(t, capBefore, cap(ibs.logs.entries), "the array survives revert+relog")
 }
 
-// TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:
-// receipts.DeriveFields derives FirstLogIndexWithinBlock from Logs[0].Index, so
-// the counter must run across transactions, roll back with a reverted log, and
-// restart at zero on Reset.
 func TestLogIndexIsBlockWide(t *testing.T) {
 	t.Parallel()
 
@@ -655,9 +605,6 @@ func TestLogIndexIsBlockWide(t *testing.T) {
 	require.Equal(t, hexutil.Uint(0), ibs.GetRawLogs(0)[0].Index, "next block restarts at zero")
 }
 
-// Reading a transaction the run has moved past would answer empty, which a
-// receipt records as "emitted no logs" - so it panics instead. A transaction that
-// simply emitted nothing is newer than the tail, not older, so it stays legal.
 func TestGetLogsOfPastTxPanics(t *testing.T) {
 	t.Parallel()
 
@@ -672,9 +619,7 @@ func TestGetLogsOfPastTxPanics(t *testing.T) {
 	require.Panics(t, func() { ibs.GetRawLogs(0) }, "the run has moved past tx 0")
 }
 
-// The past-transaction check guards production, not just assert builds: a caller
-// that reads what the run has left must not be handed the tail's logs as if they
-// were its own. Not parallel - it writes the global assert flag.
+// Not parallel: it mutates the global assert-enabled flag.
 func TestGetLogsOfPastTxPanicsWithoutAsserts(t *testing.T) {
 	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
 	dbg.AssertEnabled = false
@@ -686,10 +631,6 @@ func TestGetLogsOfPastTxPanicsWithoutAsserts(t *testing.T) {
 	require.Panics(t, func() { ibs.GetRawLogs(2) }, "tx 2 is older than the tail")
 }
 
-// Whatever the traffic looks like, one arena holds a bounded amount: the pool,
-// and the one array the run left behind. This is the invariant a shape-specific
-// leak breaks — logs parked per tx index, an array kept because one block was
-// wide, Data kept because one log was large.
 func TestArenaRetentionStaysBounded(t *testing.T) {
 	t.Parallel()
 

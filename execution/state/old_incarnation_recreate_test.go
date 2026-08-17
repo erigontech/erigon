@@ -10,8 +10,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// tx0 writes slot k=4; tx1 self-destructs (pre-Cancun full destruct);
-// tx2 recreates the address without touching k; tx3 reads k and must see 0.
+// tx0 writes k=4; tx1 selfdestructs (pre-Cancun); tx2 recreates without touching k; tx3 must read k=0.
 func TestOldIncarnationStorageMaskedAfterRecreate(t *testing.T) {
 	addr := accounts.InternAddress([20]byte{0xDE, 0xAD})
 	key := accounts.InternKey([32]byte{0x01})

@@ -45,7 +45,6 @@ func toAddr(a []byte) accounts.Address {
 	return accounts.InternAddress(common.BytesToAddress(a))
 }
 
-// recordingWriter wraps NoopWriter and captures WriteAccountStorage calls.
 type recordingWriter struct {
 	NoopWriter
 	storageWrites []struct{ orig, val uint256.Int }
@@ -56,14 +55,8 @@ func (rw *recordingWriter) WriteAccountStorage(_ accounts.Address, _ uint64, _ a
 	return nil
 }
 
-// TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin is a regression test for a bug
-// where FinalizeTx used blockOriginStorage (block-start value) instead of originStorage
-// (last-written value) to decide whether a storage write could be skipped.
-//
-// Scenario: slot starts at A. Tx1 writes A→B (FinalizeTx stores B in MDBX, sets
-// originStorage=B). Tx2 writes B→A (reverts to block-start). Old code compared
-// value(A) == blockOriginStorage(A) and skipped the write, leaving MDBX with B.
-// Fixed code compares value(A) != originStorage(B) and correctly writes A.
+// Regression: FinalizeTx must compare against originStorage (last write),
+// not blockOriginStorage (block-start value), or reverting A→B→A drops the write.
 func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	t.Parallel()
 
@@ -71,10 +64,9 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 
 	addr := toAddr([]byte("acct"))
 	key := accounts.ZeroKey
-	valA := *uint256.NewInt(1) // block-start value
+	valA := *uint256.NewInt(1)
 	valB := *uint256.NewInt(2)
 
-	// Write block-start state: account exists with slot=A.
 	txNum := uint64(1)
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
@@ -89,11 +81,9 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	err = setup.CommitBlock(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	// IBS for the next block — reads block-start state (slot=A) from domains.
 	ibs := New(NewReaderV3(domains.AsGetter(tx)))
 	defer ibs.Close()
 
-	// Tx1: A → B.
 	ibs.SetState(addr, key, valB)
 	rw1 := &recordingWriter{}
 	err = ibs.FinalizeTx(&chain.Rules{}, rw1)
@@ -101,14 +91,11 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.Len(t, rw1.storageWrites, 1, "tx1 must emit a storage write")
 	require.Equal(t, valB, rw1.storageWrites[0].val, "tx1 must write B")
 
-	// Tx2: B → A (reverts to the block-start value).
 	ibs.SetState(addr, key, valA)
 	rw2 := &recordingWriter{}
 	err = ibs.FinalizeTx(&chain.Rules{}, rw2)
 	require.NoError(t, err)
 
-	// Regression: old code used blockOriginStorage[key]==A as origin, saw
-	// value==A, and silently skipped the write, leaving MDBX with B.
 	require.Len(t, rw2.storageWrites, 1, "tx2 must emit a storage write (A→B→A must not be skipped)")
 	require.Equal(t, valA, rw2.storageWrites[0].val, "tx2 must write A")
 	require.Equal(t, valB, rw2.storageWrites[0].orig, "tx2 origin must be B (last written value)")
@@ -129,7 +116,6 @@ func TestNull(t *testing.T) {
 
 	address := accounts.InternAddress(common.HexToAddress("0x823140710bf13990e4500136726d8b55"))
 	state.CreateAccount(address, true)
-	//value := common.FromHex("0x823140710bf13990e4500136726d8b55")
 	var value uint256.Int
 
 	state.SetState(address, accounts.ZeroKey, value)
@@ -200,14 +186,11 @@ func TestSnapshot(t *testing.T) {
 	data1 := uint256.NewInt(42)
 	data2 := uint256.NewInt(43)
 
-	// snapshot the genesis state
 	genesis := state.PushSnapshot()
 
-	// set initial state object value
 	state.SetState(stateobjaddr, storageaddr, *data1)
 	snapshot := state.PushSnapshot()
 
-	// set a new state object value, revert it and ensure correct content
 	state.SetState(stateobjaddr, storageaddr, *data2)
 	state.RevertToSnapshot(snapshot, nil)
 	state.PopSnapshot(snapshot)
@@ -218,7 +201,6 @@ func TestSnapshot(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, uint256.Int{}, value)
 
-	// revert up to the genesis state and ensure correct content
 	state.RevertToSnapshot(genesis, nil)
 	state.PopSnapshot(genesis)
 	value, err = state.GetState(stateobjaddr, storageaddr)
@@ -245,8 +227,6 @@ func TestSnapshotEmpty(t *testing.T) {
 	state.PopSnapshot(snapshot)
 }
 
-// use testing instead of checker because checker does not support
-// printing/logging in tests (-check.vv does not work)
 func TestSnapshot2(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -270,7 +250,6 @@ func TestSnapshot2(t *testing.T) {
 	state.SetState(stateobjaddr0, storageaddr, *data0)
 	state.SetState(stateobjaddr1, storageaddr, *data1)
 
-	// db, trie are already non-empty values
 	so0, err := state.getStateObject(stateobjaddr0, true)
 	require.NoError(t, err)
 	so0.SetBalance(*uint256.NewInt(42), true, tracing.BalanceChangeUnspecified)
@@ -286,7 +265,6 @@ func TestSnapshot2(t *testing.T) {
 	err = state.CommitBlock(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	// and one with deleted == true
 	so1, err := state.getStateObject(stateobjaddr1, true)
 	require.NoError(t, err)
 	so1.SetBalance(*uint256.NewInt(52), true, tracing.BalanceChangeUnspecified)
@@ -308,13 +286,11 @@ func TestSnapshot2(t *testing.T) {
 
 	so0Restored, err := state.getStateObject(stateobjaddr0, true)
 	require.NoError(t, err)
-	// Update lazily-loaded values before comparing.
+	// Trigger lazy-loaded fields before comparing, or compareStateObjects sees stale values.
 	so0Restored.GetState(storageaddr)
 	so0Restored.Code()
-	// non-deleted is equal (restored)
 	compareStateObjects(so0Restored, so0, t)
 
-	// deleted should be nil, both before and after restore of state copy
 	so1Restored, err := state.getStateObject(stateobjaddr1, true)
 	require.NoError(t, err)
 	if so1Restored != nil && !so1Restored.deleted {
@@ -438,7 +414,6 @@ func TestDump(t *testing.T) {
 	st := New(NewReaderV3(domains.AsGetter(tx)))
 	defer st.Close()
 
-	// generate a few entries
 	obj1, err := st.GetOrNewStateObject(toAddr([]byte{0x01}))
 	require.NoError(t, err)
 	st.AddBalance(toAddr([]byte{0x01}), *uint256.NewInt(22), tracing.BalanceChangeUnspecified)
@@ -451,7 +426,6 @@ func TestDump(t *testing.T) {
 	obj3.SetBalance(*uint256.NewInt(44), true, tracing.BalanceChangeUnspecified)
 
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
-	// write some of them to the trie
 	err = w.UpdateAccountData(obj1.address, &obj1.data, new(accounts.Account))
 	require.NoError(t, err)
 	err = w.UpdateAccountData(obj2.address, &obj2.data, new(accounts.Account))
@@ -465,7 +439,6 @@ func TestDump(t *testing.T) {
 	err = domains.Flush(context.Background(), tx)
 	require.NoError(t, err)
 
-	// check that dump contains the state objects that are in trie
 	got := string(NewDumper(tx, rawdbv3.TxNums, 1).DefaultDump())
 	want := `{
     "root": "0000000000000000000000000000000000000000000000000000000000000000",

@@ -63,22 +63,13 @@ func TestSnapshotRandom(t *testing.T) {
 	}
 }
 
-// A snapshotTest checks that reverting IntraBlockState snapshots properly undoes all changes
-// captured by the snapshot. Instances of this test with pseudorandom content are created
-// by Generate.
-//
-// The test works as follows:
-//
-// A new state is created and all actions are applied to it. Several snapshots are taken
-// in between actions. The test then reverts each snapshot. For each snapshot the actions
-// leading up to it are replayed on a fresh, empty state. The behaviour of all public
-// accessor methods on the reverted state must match the return value of the equivalent
-// methods on the replayed state.
+// snapshotTest checks that reverting a snapshot exactly undoes the actions
+// recorded since it was taken; Generate produces randomized instances.
 type snapshotTest struct {
-	addrs     []accounts.Address // all account addresses
-	actions   []testAction       // modifications to the state
-	snapshots []int              // actions indexes at which snapshot is taken
-	err       error              // failure details are reported through this field
+	addrs     []accounts.Address
+	actions   []testAction
+	snapshots []int
+	err       error
 }
 
 type testAction struct {
@@ -88,7 +79,6 @@ type testAction struct {
 	noAddr bool
 }
 
-// newTestAction creates a random action that changes state.
 func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 	actions := []testAction{
 		{
@@ -199,10 +189,7 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 	return action
 }
 
-// Generate returns a new snapshot test of the given size. All randomness is
-// derived from r.
 func (*snapshotTest) Generate(r *rand.Rand, size int) reflect.Value {
-	// Generate random actions.
 	addrs := make([]accounts.Address, 50)
 	for i := range addrs {
 		addrs[i] = accounts.InternAddress(common.Address{byte(i)})
@@ -212,7 +199,6 @@ func (*snapshotTest) Generate(r *rand.Rand, size int) reflect.Value {
 		addr := addrs[r.Intn(len(addrs))]
 		actions[i] = newTestAction(addr, r)
 	}
-	// Generate snapshot indexes.
 	nsnapshots := int(math.Sqrt(float64(size)))
 	if size > 0 && nsnapshots == 0 {
 		nsnapshots = 1
@@ -220,7 +206,6 @@ func (*snapshotTest) Generate(r *rand.Rand, size int) reflect.Value {
 	snapshots := make([]int, nsnapshots)
 	snaplen := len(actions) / nsnapshots
 	for i := range snapshots {
-		// Try to place the snapshots some number of actions apart from each other.
 		snapshots[i] = (i * snaplen) + r.Intn(snaplen)
 	}
 	return reflect.ValueOf(&snapshotTest{addrs, actions, snapshots, nil})
@@ -260,8 +245,6 @@ func (test *snapshotTest) run(t *testing.T) bool {
 		}
 		action.fn(action, state)
 	}
-	// Revert all snapshots in reverse order. Each revert must yield a state
-	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
 		checkstate := New(NewReaderV3(tx))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
@@ -279,7 +262,6 @@ func (test *snapshotTest) run(t *testing.T) bool {
 	return true
 }
 
-// checkEqual checks that methods of state and checkstate return the same values.
 func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 	for _, addr := range test.addrs {
 		var err error
@@ -297,7 +279,6 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			}
 			return true
 		}
-		// Check basic accessor methods.
 		se, err := state.Exist(addr)
 		if err != nil {
 			return err
@@ -363,7 +344,6 @@ func (test *snapshotTest) checkEqual(state, checkstate *IntraBlockState) error {
 			return err
 		}
 		checkeq("GetCodeSize", scs, ccs)
-		// Check storage.
 		obj, err := state.getStateObject(addr, true)
 		if err != nil {
 			return err
@@ -414,13 +394,10 @@ func TestTransientStorage(t *testing.T) {
 	if exp, got := 1, state.journal.length(); exp != got {
 		t.Fatalf("journal length mismatch: have %d, want %d", got, exp)
 	}
-	// the retrieved value should equal what was set
 	if got := state.GetTransientState(addr, key); got != *value {
 		t.Fatalf("transient storage mismatch: have %x, want %x", got, value)
 	}
 
-	// revert the transient state being set and then check that the
-	// value is now the empty hash
 	state.journal.revert(state, 0)
 	if got, exp := state.GetTransientState(addr, key), (uint256.Int{}); exp != got {
 		t.Fatalf("transient storage mismatch: have %x, want %x", got, exp)
@@ -479,7 +456,6 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 
 	states := []*IntraBlockState{s}
 
-	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
 		defer sCopy.Close() //nolint:gocritic
@@ -492,18 +468,15 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	val := u256.U64(1)
 	balance := u256.U64(100)
 
-	// Tx0 read
 	v, err := states[0].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 
-	// Tx1 write
 	states[1].GetOrNewStateObject(addr)
 	states[1].SetState(addr, key, val)
 	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
-	// Tx1 read
 	v, err = states[1].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
@@ -511,7 +484,6 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 
-	// Tx2 read
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -519,27 +491,21 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 
-	// Tx3 delete. FinalizeTx below is the materialized-object commit path
-	// (serial/genesis/RPC); the parallel executor never runs it (see the
-	// IsVersioned guards in txtask.go) and instead commits via the write-set.
-	// Materialize explicitly here — as Tx1 does — so FinalizeTx's updateAccount
-	// marks the object deleted and the post-finalize read observes the wipe.
+	// Materialize explicitly: only the serial/genesis/RPC path calls
+	// FinalizeTx here; the parallel executor commits via the write-set instead.
 	states[3].GetOrNewStateObject(addr)
 	states[3].Selfdestruct(addr, false)
 
-	// Within Tx 3, the state should not change before finalize
 	v, err = states[3].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 
-	// After finalizing Tx 3, the state will change
 	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
 	v, err = states[3].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
 
-	// Tx4 read
 	v, err = states[4].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[4].GetBalance(addr)
@@ -560,7 +526,6 @@ func TestVersionMapRevert(t *testing.T) {
 
 	states := []*IntraBlockState{s}
 
-	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
 		defer sCopy.Close() //nolint:gocritic
@@ -573,13 +538,11 @@ func TestVersionMapRevert(t *testing.T) {
 	val := u256.U64(1)
 	balance := u256.U64(100)
 
-	// Tx0 write
 	states[0].GetOrNewStateObject(addr)
 	states[0].SetState(addr, key, val)
 	states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
-	// Tx1 perform some ops and then revert
 	snapshot := states[1].PushSnapshot()
 	states[1].AddBalance(addr, u256.U64(100), tracing.BalanceChangeUnspecified)
 	states[1].SetState(addr, key, u256.U64(1))
@@ -604,7 +567,6 @@ func TestVersionMapRevert(t *testing.T) {
 	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
-	// Tx2 check the state and balance
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -623,7 +585,6 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	defer s.Close()
 	states := []*IntraBlockState{s}
 
-	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
 		defer sCopy.Close() //nolint:gocritic
@@ -636,25 +597,21 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	val := u256.U64(1)
 	balance := u256.U64(100)
 
-	// Tx0 read
 	v, err := states[0].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 
-	// Tx0 write
 	states[0].SetState(addr, key, val)
 	v, err = states[0].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
-	// Tx1 write
 	states[1].GetOrNewStateObject(addr)
 	states[1].SetState(addr, key, val)
 	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
-	// Tx2 read
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err := states[2].GetBalance(addr)
@@ -662,16 +619,12 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
 
-	// Tx1 mark estimate
 	for h := range states[1].VersionedWrites().AllHeaders() {
 		mvhm.MarkEstimate(h.Address, h.Path, h.Key, 1)
 	}
 
-	// Read-once (Block-STM): states[2] already recorded its state/balance reads
-	// above, so the repeat reads are served from the read-set and no longer abort
-	// eagerly when Tx1's writes are marked ESTIMATE. The estimate dependency is
-	// caught at commit — ValidateVersion re-reads Tx1's now-Estimate balance cell
-	// (MVReadResultDependency) and returns VersionInvalid, which drives re-execution.
+	// Block-STM read-once: reads already recorded above are served from the
+	// read-set and don't abort on ESTIMATE; commit-time validation catches it.
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, u256.U64(1), v)
@@ -688,7 +641,6 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	}, true, false, false, "")
 	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the ESTIMATE dependency")
 
-	// Tx1 read again should get Tx0 vals
 	v, err = states[1].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
@@ -705,7 +657,6 @@ func TestVersionMapOverwrite(t *testing.T) {
 
 	states := []*IntraBlockState{s}
 
-	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
 		defer sCopy.Close() //nolint:gocritic
@@ -720,13 +671,11 @@ func TestVersionMapOverwrite(t *testing.T) {
 	val2 := u256.U64(2)
 	balance2 := u256.U64(200)
 
-	// Tx0 write
 	states[0].GetOrNewStateObject(addr)
 	states[0].SetState(addr, key, val1)
 	states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
-	// Tx1 write
 	states[1].SetState(addr, key, val2)
 	states[1].SetBalance(addr, balance2, tracing.BalanceChangeUnspecified)
 	v, err := states[1].GetState(addr, key)
@@ -738,7 +687,6 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, val2, v)
 	assert.Equal(t, balance2, b)
 
-	// Tx2 read should get Tx1's value
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[2].GetBalance(addr)
@@ -746,13 +694,11 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, val2, v)
 	assert.Equal(t, balance2, b)
 
-	// Tx1 delete
 	for h := range states[1].versionedWrites.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
 	}
 	states[1].versionedWrites = WriteSet{}
 
-	// Tx2 read should get Tx0's value
 	states[2].versionedReads = ReadSet{}
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
@@ -761,7 +707,6 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, val1, v)
 	assert.Equal(t, balance1, b)
 
-	// Tx1 read should get Tx0's value
 	v, err = states[1].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err = states[1].GetBalance(addr)
@@ -769,13 +714,11 @@ func TestVersionMapOverwrite(t *testing.T) {
 	assert.Equal(t, val1, v)
 	assert.Equal(t, balance1, b)
 
-	// Tx0 delete
 	for h := range states[0].versionedWrites.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 0, true)
 	}
 	states[0].versionedWrites = WriteSet{}
 
-	// Tx2 read again should get default vals
 	states[2].versionedReads = ReadSet{}
 	v, err = states[2].GetState(addr, key)
 	assert.NoError(t, err)
@@ -796,7 +739,6 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 
 	states := []*IntraBlockState{s}
 
-	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
 		defer sCopy.Close() //nolint:gocritic
@@ -811,43 +753,34 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	balance1 := u256.U64(100)
 	val2 := u256.U64(2)
 
-	// Tx0 write
 	states[0].GetOrNewStateObject(addr)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
-	// Tx2 write
 	states[2].SetState(addr, key2, val2)
 	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
 
-	// Tx1 write
 	tx1Snapshot := states[1].PushSnapshot()
 	states[1].SetState(addr, key1, val1)
 	states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
-	// Tx1 read
 	v, err := states[1].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
 	b, err := states[1].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
-	// Tx1 should see empty value in key2
 	v, err = states[1].GetState(addr, key2)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 
-	// Tx2 read
-	// Clear cached reads and state objects from Tx2's SetState call above —
-	// those reads were recorded when Tx1 hadn't flushed yet (Tx0's version).
-	// Now that Tx1 has flushed, re-reading without stale cache simulates a
-	// re-execution that the scheduler would trigger on dependency.
+	// Clear cached reads/objects recorded before Tx1 flushed; re-reading here
+	// simulates the scheduler's re-execution on a dependency conflict.
 	states[2].stateObjects = map[accounts.Address]*stateObject{}
 	states[2].versionedReads = ReadSet{}
 	v, err = states[2].GetState(addr, key2)
 	assert.NoError(t, err)
 	assert.Equal(t, val2, v)
-	// Tx2 should see values written by Tx1
 	v, err = states[2].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
@@ -855,7 +788,6 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
 
-	// Tx3 read
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
 	assert.Equal(t, val1, v)
@@ -866,13 +798,11 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
 
-	// Tx2 delete
 	for h := range states[2].versionedWrites.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 2, true)
 	}
 	states[2].versionedWrites = WriteSet{}
 
-	// Tx3 read
 	states[3].versionedReads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
@@ -880,23 +810,19 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	b, err = states[3].GetBalance(addr)
 	assert.NoError(t, err)
 	assert.Equal(t, balance1, b)
-	// Tx3 should see empty value in key2
 	v, err = states[3].GetState(addr, key2)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
 
-	// Tx1 revert
 	states[1].RevertToSnapshot(tx1Snapshot, nil)
 	states[1].PopSnapshot(tx1Snapshot)
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
-	// map deletes necessary here as they happen in scheduler not ibs
+	// The scheduler issues these deletes normally; done manually here for the test.
 	states[1].versionMap.Delete(addr, StoragePath, key1, 1, true)
 	states[1].versionMap.Delete(addr, StoragePath, key2, 1, true)
 	states[1].versionMap.Delete(addr, BalancePath, accounts.NilKey, 1, true)
 
-	// Tx3 read
-	// we need to flush the local state objects as we're not
-	// resetting the state - which is artificial for the test
+	// Flush cached state objects manually since the test doesn't reset state.
 	states[3].stateObjects = map[accounts.Address]*stateObject{}
 	states[3].versionedReads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
@@ -909,13 +835,11 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, b)
 
-	// Tx1 delete
 	for h := range states[1].versionedWrites.AllHeaders() {
 		mvhm.Delete(h.Address, h.Path, h.Key, 1, true)
 	}
 	states[1].versionedWrites = WriteSet{}
 
-	// Tx3 read
 	states[3].versionedReads = ReadSet{}
 	v, err = states[3].GetState(addr, key1)
 	assert.NoError(t, err)
@@ -943,7 +867,6 @@ func TestApplyVersionedWrites(t *testing.T) {
 
 	states := []*IntraBlockState{s}
 
-	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
 		defer sCopy.Close() //nolint:gocritic
@@ -962,7 +885,6 @@ func TestApplyVersionedWrites(t *testing.T) {
 	balance2 := uint256.NewInt(200)
 	code := []byte{1, 2, 3}
 
-	// Tx0 write
 	states[0].GetOrNewStateObject(addr1)
 	states[0].SetState(addr1, key1, val1)
 	states[0].SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified)
@@ -979,7 +901,6 @@ func TestApplyVersionedWrites(t *testing.T) {
 
 	sClean.ApplyVersionedWrites(states[0].VersionedWrites())
 
-	// Tx1 write
 	states[1].SetState(addr1, key2, val2)
 	states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
 	states[1].SetNonce(addr1, 1, tracing.NonceChangeUnspecified)
@@ -992,7 +913,6 @@ func TestApplyVersionedWrites(t *testing.T) {
 
 	sClean.ApplyVersionedWrites(states[1].VersionedWrites())
 
-	// Tx2 write
 	states[2].SetState(addr1, key1, val2)
 	states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
 	states[2].SetNonce(addr1, 2, tracing.NonceChangeUnspecified)
@@ -1005,7 +925,6 @@ func TestApplyVersionedWrites(t *testing.T) {
 
 	sClean.ApplyVersionedWrites(states[2].VersionedWrites())
 
-	// Tx3 write
 	states[3].Selfdestruct(addr2, false)
 	states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified)
 	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
@@ -1017,12 +936,8 @@ func TestApplyVersionedWrites(t *testing.T) {
 	sClean.ApplyVersionedWrites(states[3].VersionedWrites())
 }
 
-// TestMakeWriteSetClearsCodeDomainOnEmptyOverride pins that clearing an
-// account's code (e.g. an eth_simulateV1 stateOverride of "code":"0x") writes
-// through to the CodeDomain, keeping it consistent with the now-empty account
-// codeHash. Regression: gating the code write on a non-nil code slice skipped
-// the clear, leaving the CodeDomain holding stale code and tripping the
-// commitment codeHash-mismatch assert.
+// Regression: gating the code write on a non-nil slice skipped clearing
+// CodeDomain, leaving it inconsistent with the now-empty codeHash.
 func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	t.Parallel()
 

@@ -10,18 +10,14 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TestJournalEntrySize guards the compact union against accidental bloat,
-// e.g. inlining rare *stateObject/[]byte fields that belong in journalExtra.
+// Guards the compact union against accidental bloat from inlining rare fields that belong in journalExtra.
 func TestJournalEntrySize(t *testing.T) {
 	if got := unsafe.Sizeof(journalEntry{}); got > 72 {
 		t.Fatalf("journalEntry grew to %d B (want <= 72)", got)
 	}
 }
 
-// TestJournalDirtySymmetry pins every constructor's dirties accounting against
-// dirtied(), which revert uses to undo it. A kind the two disagree about leaves
-// the dirties refcount unbalanced — under-dirtying drops a modified account and
-// diverges the state root, over-dirtying leaks entries across the revert.
+// Pins each constructor's dirties accounting against dirtied(): a mismatch either drops a modified account or leaks entries.
 func TestJournalDirtySymmetry(t *testing.T) {
 	addr := accounts.InternAddress(common.HexToAddress("0x00000000000000000000000000000000000000aa"))
 	key := accounts.InternKey(common.HexToHash("0x01"))
@@ -68,8 +64,6 @@ func TestJournalDirtySymmetry(t *testing.T) {
 			if j.entries[0].kind != tc.kind {
 				t.Fatalf("appended kind %d, want %d", j.entries[0].kind, tc.kind)
 			}
-			// revert decrements exactly once, for exactly the address dirtied()
-			// names, so the constructor must have incremented exactly that.
 			wantAddr, wantDirty := j.entries[0].dirtied()
 			if !wantDirty {
 				if len(j.dirties) != 0 {
@@ -94,8 +88,7 @@ func TestJournalDirtySymmetry(t *testing.T) {
 	}
 }
 
-// BenchmarkJournalStorageChange measures the hot append path; it must stay at
-// zero allocs per op once the entries slice has warmed up.
+// Must stay at zero allocs/op once the entries slice has warmed up.
 func BenchmarkJournalStorageChange(b *testing.B) {
 	j := newJournal()
 	defer j.release()

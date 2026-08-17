@@ -50,7 +50,7 @@ func (m histMockTx) GetAsOf(domain kv.Domain, key []byte, ts uint64) ([]byte, bo
 func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	var acc accounts.Account
 	acc.Nonce = 1
-	accEnc := accounts.SerialiseV3(&acc) // valid encoding so ReadAccountData hits the deserialize path
+	accEnc := accounts.SerialiseV3(&acc)
 
 	r := NewReaderV3(fixedGetter{val: accEnc})
 	addr := accounts.InternAddress(common.Address{0x11})
@@ -68,21 +68,21 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		fn   func()
 	}{
 		{"ReaderV3.ReadAccountStorage", 0, func() { _, _, _ = r.ReadAccountStorage(addr, key) }},
-		{"ReaderV3.ReadAccountData", 1, func() { _, _ = r.ReadAccountData(addr) }}, // 1: returns *accounts.Account
+		{"ReaderV3.ReadAccountData", 1, func() { _, _ = r.ReadAccountData(addr) }},
 		{"ReaderV3.HasStorage", 0, func() { _, _ = r.HasStorage(addr) }},
 		{"ReaderV3.ReadAccountCode", 0, func() { _, _ = r.ReadAccountCode(addr) }},
 		{"ReaderV3.ReadAccountCodeSize", 0, func() { _, _ = r.ReadAccountCodeSize(addr) }},
-		{"ReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = r.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
+		{"ReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = r.ReadAccountDataForDebug(addr) }},
 		{"ReaderV3.ReadAccountIncarnation", 0, func() { _, _ = r.ReadAccountIncarnation(addr) }},
 
 		{"HistoryReaderV3.ReadAccountStorage", 0, func() { _, _, _ = hr.ReadAccountStorage(addr, key) }},
 		{"HistoryReaderV3.ReadAccountCode", 0, func() { _, _ = hr.ReadAccountCode(addr) }},
 		{"HistoryReaderV3.ReadAccountCodeSize", 0, func() { _, _ = hr.ReadAccountCodeSize(addr) }},
-		{"HistoryReaderV3.ReadAccountData", 1, func() { _, _ = hr.ReadAccountData(addr) }},                 // 1: returns *accounts.Account
-		{"HistoryReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = hr.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
+		{"HistoryReaderV3.ReadAccountData", 1, func() { _, _ = hr.ReadAccountData(addr) }},
+		{"HistoryReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = hr.ReadAccountDataForDebug(addr) }},
 
 		{"CachedReaderV3.ReadAccountStorage (cache hit)", 0, func() { _, _, _ = cr.ReadAccountStorage(addr, key) }},
-		{"CachedReaderV3.ReadAccountData (cache hit)", 1, func() { _, _ = cr.ReadAccountData(addr) }}, // 1: returns *accounts.Account
+		{"CachedReaderV3.ReadAccountData (cache hit)", 1, func() { _, _ = cr.ReadAccountData(addr) }},
 		{"CachedReaderV3.ReadAccountCode", 0, func() { _, _ = cr.ReadAccountCode(addr) }},
 		{"CachedReaderV3.ReadAccountCodeSize", 0, func() { _, _ = cr.ReadAccountCodeSize(addr) }},
 		{"CachedReaderV3.HasStorage", 0, func() { _, _ = cr.HasStorage(addr) }},
@@ -121,8 +121,7 @@ func TestCachedReaderV3_CurrentReadsCommittedWhenUnwritten(t *testing.T) {
 	require.NotSame(t, want, got, "the caller must not be able to mutate the cached account")
 }
 
-// A write this block shadows the committed view, and a nil write means the
-// account was destroyed — neither may fall through to the committed entry.
+// A block write shadows the committed view; a nil write means destroyed — neither may fall through to committed.
 func TestCachedReaderV3_CurrentPrefersBlockWrite(t *testing.T) {
 	t.Parallel()
 
@@ -155,8 +154,6 @@ func TestCachedReaderV3_CurrentReturnsNilForCommittedAbsence(t *testing.T) {
 	require.Nil(t, got)
 }
 
-// BenchmarkCachedReaderAccountRead prices one apply-loop account read that hits
-// the block state cache, on each of its two paths.
 func BenchmarkCachedReaderAccountRead(b *testing.B) {
 	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
 	acc := cacheReadTestAccount()

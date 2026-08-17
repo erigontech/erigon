@@ -22,13 +22,8 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-// CreateContractPath is not redundant with IncarnationPath: it is the signal a
-// contract (not a plain account) was created, and the apply path consumes it to
-// clear stale storage before re-creation (rw_v3 DomainDelPrefix, mirroring
-// Writer.CreateContract). This pins the distinct write-side signal — contract
-// creation records CreateContractPath, a plain account creation does not — so a
-// future "fold it into IncarnationPath" simplification can't silently drop the
-// storage-clear trigger.
+// CreateContractPath is not redundant with IncarnationPath: it signals contract (vs plain-account) creation
+// and drives the apply-side stale-storage clear before re-creation — don't fold it into IncarnationPath.
 func TestCreateContractPath_ContractOnlySignal(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
