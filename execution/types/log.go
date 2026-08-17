@@ -115,16 +115,16 @@ func (l *Log) UnmarshalJSON(input []byte) error {
 // UnmarshalJSON validates required fields and parses the Timestamp field.
 func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	type flat struct {
-		Address     *common.Address `json:"address"`
-		Topics      *[]common.Hash  `json:"topics"`
-		Data        *hexutil.Bytes  `json:"data"`
-		BlockNumber *hexutil.Uint64 `json:"blockNumber"`
-		TxHash      *common.Hash    `json:"transactionHash"`
-		TxIndex     *hexutil.Uint   `json:"transactionIndex"`
-		BlockHash   *common.Hash    `json:"blockHash"`
-		Index       *hexutil.Uint   `json:"logIndex"`
-		Removed     *bool           `json:"removed"`
-		Timestamp   *hexutil.Uint64 `json:"timestamp"`
+		Address        *common.Address `json:"address"`
+		Topics         *[]common.Hash  `json:"topics"`
+		Data           *hexutil.Bytes  `json:"data"`
+		BlockNumber    *hexutil.Uint64 `json:"blockNumber"`
+		TxHash         *common.Hash    `json:"transactionHash"`
+		TxIndex        *hexutil.Uint   `json:"transactionIndex"`
+		BlockHash      *common.Hash    `json:"blockHash"`
+		Index          *hexutil.Uint   `json:"logIndex"`
+		Removed        *bool           `json:"removed"`
+		BlockTimestamp *hexutil.Uint64 `json:"blockTimestamp"`
 	}
 	var dec flat
 	if err := json.Unmarshal(input, &dec); err != nil {
@@ -161,8 +161,8 @@ func (l *ErigonLog) UnmarshalJSON(input []byte) error {
 	if dec.Removed != nil {
 		l.Removed = *dec.Removed
 	}
-	if dec.Timestamp != nil {
-		l.Timestamp = *dec.Timestamp
+	if dec.BlockTimestamp != nil {
+		l.BlockTimestamp = *dec.BlockTimestamp
 	}
 	return nil
 }
@@ -171,7 +171,7 @@ type Logs []*Log
 
 type ErigonLog struct {
 	Log
-	Timestamp hexutil.Uint64 `json:"timestamp" codec:"-"`
+	BlockTimestamp hexutil.Uint64 `json:"blockTimestamp" codec:"-"`
 }
 
 type ErigonLogs []*ErigonLog
@@ -181,8 +181,8 @@ func (logs Logs) ToErigonLogs(timestamp uint64) ErigonLogs {
 	result := make(ErigonLogs, len(logs))
 	for i, l := range logs {
 		result[i] = &ErigonLog{
-			Log:       *l,
-			Timestamp: hexutil.Uint64(timestamp),
+			Log:            *l,
+			BlockTimestamp: hexutil.Uint64(timestamp),
 		}
 	}
 	return result
