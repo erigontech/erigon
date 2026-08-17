@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 )
 
@@ -187,7 +187,7 @@ func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint6
 		ctx:                    t.Context(),
 		beaconCfg:              &clparams.MainnetBeaconConfig,
 		rpc:                    boundaryPeerCounter(1),
-		indiciesDB:             memdb.NewTestDB(t, dbcfg.ChainDB),
+		indiciesDB:             mdbxtest.NewTestDB(t, dbcfg.ChainDB),
 		blockReader:            reader,
 		sn:                     boundarySnapshot(frozenBlobs),
 		syncedChecker:          boundarySyncedChecker(true),
