@@ -35,13 +35,15 @@ var (
 	CaplinSnapshotTypes = []Type{BeaconBlocks, BlobSidecars}
 )
 
-func IsCaplinType(t Enum) bool {
-
-	for _, ct := range CaplinSnapshotTypes {
-		if t == ct.Enum() {
-			return true
-		}
+func init() {
+	for _, typ := range CaplinSnapshotTypes {
+		RegisterCaplinType(typ.Enum(), typ.Name(), typ.Versions(), nil, typ.Indexes(), nil)
 	}
+	for _, typ := range CaplinStateSnapshotTypes {
+		RegisterCaplinType(typ.Enum(), typ.Name(), typ.Versions(), nil, typ.Indexes(), nil)
+	}
+}
 
-	return false
+func IsCaplinType(t Enum) bool {
+	return t >= MinCaplinEnum && t < MinBorEnum
 }

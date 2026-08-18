@@ -102,7 +102,7 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 
 	// Sanity: CurrentCachedReaderV3 (the reader used for non-historic
 	// blocks) sees the post-tx28 value.
-	curReader := NewCurrentCachedReaderV3(domains.AsGetter(tx), blockCache)
+	curReader := NewCurrentCachedReaderV3(domains.AsStateGetter(tx), blockCache)
 	curAcc, err := curReader.ReadAccountData(addr)
 	require.NoError(t, err)
 	require.NotNil(t, curAcc, "current-cached reader should see the blockCache write")

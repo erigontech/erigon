@@ -23,6 +23,7 @@ import (
 	"math/bits"
 	"math/rand"
 	"slices"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -768,6 +769,56 @@ func TestCollectDeferredUpdate_IsNewSkipsLookupAndMatchesNilPath(t *testing.T) {
 	require.Equal(t, ctxA.puts[0].prev, ctxB.puts[0].prev)
 }
 
+// TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply pins the
+// contract documented on getDeferredUpdate: putDeferredUpdate recycles the
+// prefix/raw backing arrays for a later, unrelated update, so a PutBranch
+// implementation that copies (as recordingCtx and every real implementation
+// do) must see its own copy stay correct across that recycle.
+// Not parallel: it swaps the global deferredUpdatePool for a deterministic one, since
+// sync.Pool may hand back a fresh object and leave the recycle unexercised.
+func TestCollectDeferredUpdate_PoolRecycleDoesNotCorruptEarlierApply(t *testing.T) {
+	seed := &DeferredBranchUpdate{}
+	saved := deferredUpdatePool
+	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { deferredUpdatePool = saved })
+
+	rowA, bmA := generateCellRow(t, 8)
+	cellsA := generateCellEncodeDataRow(t, rowA, bmA)
+	rowB, bmB := generateCellRow(t, 2)
+	cellsB := generateCellEncodeDataRow(t, rowB, bmB)
+
+	wantBE := NewBranchEncoder(1024)
+	rawA, err := wantBE.EncodeBranch(bmA, bmA, bmA, &cellsA)
+	require.NoError(t, err)
+	wantA := bytes.Clone([]byte(rawA))
+	rawB, err := wantBE.EncodeBranch(bmB, bmB, bmB, &cellsB)
+	require.NoError(t, err)
+	wantB := bytes.Clone([]byte(rawB))
+	require.NotEqual(t, wantA, wantB, "test rows must be distinctive")
+	require.Greater(t, len(wantA), len(wantB), "round A must be longer so a truncation bug on reuse is visible")
+
+	ctx := &recordingCtx{}
+	be := NewBranchEncoder(1024)
+	be.setDeferUpdates(true)
+
+	require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xAA, 0xAA}, bmA, bmA, bmA, &cellsA, true))
+	require.NoError(t, be.ApplyDeferredUpdates(1, ctx.PutBranch))
+	be.ClearDeferred() // recycles this round's DeferredBranchUpdate into the pool
+
+	require.Len(t, ctx.puts, 1)
+	require.Equal(t, wantA, ctx.puts[0].data)
+
+	// A shorter, distinctive second round reuses the pool's backing arrays.
+	require.NoError(t, be.CollectDeferredUpdate(ctx, []byte{0xBB, 0xBB}, bmB, bmB, bmB, &cellsB, true))
+	require.Same(t, seed, be.deferred[0], "second round must run on the recycled object, or it proves nothing")
+	require.NoError(t, be.ApplyDeferredUpdates(1, ctx.PutBranch))
+	be.ClearDeferred()
+
+	require.Len(t, ctx.puts, 2)
+	require.Equal(t, wantA, ctx.puts[0].data, "recycling the pool must not corrupt data already handed to PutBranch")
+	require.Equal(t, wantB, ctx.puts[1].data, "reused buffer must not retain stale bytes from the earlier, longer round")
+}
+
 func TestUpdates_TouchStorageClearsDeleteOnRewrite(t *testing.T) {
 	t.Parallel()
 
@@ -950,4 +1001,114 @@ func TestInitializeTrieAndUpdates_HexVariantUnchanged(t *testing.T) {
 	require.Equal(t, VariantHexPatriciaTrie, trie.Variant())
 	require.Equal(t, ModeDirect, upd.Mode())
 	require.Nil(t, upd.parallel)
+}
+
+// reuseBytes is what makes the pooled buffers reusable; sync.Pool itself guarantees
+// nothing, so the reuse is pinned here rather than through a pool round-trip.
+func TestReuseBytes(t *testing.T) {
+	dst := make([]byte, 0, 8)
+	got := reuseBytes(dst, []byte{1, 2, 3})
+	require.Equal(t, []byte{1, 2, 3}, got)
+	require.Same(t, &dst[:1][0], &got[0], "must write into dst's backing array")
+
+	require.Nil(t, reuseBytes(dst, nil), "nil src must yield nil, as bytes.Clone does")
+	require.Nil(t, reuseBytes(nil, nil))
+
+	// nil-ness must depend only on src, never on whether dst carries capacity
+	for _, d := range [][]byte{nil, make([]byte, 0, 8), make([]byte, 4)} {
+		require.NotNil(t, reuseBytes(d, []byte{}), "empty src must stay non-nil for any dst")
+		require.Empty(t, reuseBytes(d, []byte{}))
+	}
+
+	require.Equal(t, []byte{1, 2, 3, 4}, reuseBytes(make([]byte, 0, 1), []byte{1, 2, 3, 4}))
+}
+
+// prev is cloned rather than recycled precisely so its nil-ness follows the input; this
+// fails if it is ever switched to a pooled buffer. putDeferredUpdate clears prev, so a
+// warm buffer has to be seeded through the pool rather than by a Put/Get round trip.
+func TestGetDeferredUpdate_WarmPoolPreservesNilPrev(t *testing.T) {
+	seed := &DeferredBranchUpdate{prev: make([]byte, 0, 32)}
+	saved := deferredUpdatePool
+	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { deferredUpdatePool = saved })
+
+	upd := getDeferredUpdate([]byte{1}, []byte{2, 3}, nil)
+	defer putDeferredUpdate(upd)
+	require.Same(t, seed, upd)
+	require.Nil(t, upd.prev)
+}
+
+// Pins the production path, not the helper: sync.Pool may hand back a fresh object, so the
+// pool is swapped for one that always yields a known object with known backing arrays.
+func TestGetDeferredUpdate_WritesIntoPooledBacking(t *testing.T) {
+	seed := &DeferredBranchUpdate{
+		prefix: make([]byte, 0, 32),
+		raw:    make([]byte, 0, 32),
+		prev:   make([]byte, 0, 32),
+	}
+	prefixArr, rawArr := &seed.prefix[:1][0], &seed.raw[:1][0]
+
+	saved := deferredUpdatePool
+	deferredUpdatePool = &sync.Pool{New: func() any { return seed }}
+	t.Cleanup(func() { deferredUpdatePool = saved })
+
+	upd := getDeferredUpdate([]byte{1, 2}, []byte{3, 4, 5}, []byte{6})
+	require.Same(t, seed, upd)
+	require.Same(t, prefixArr, &upd.prefix[0], "prefix must be written into the pooled array")
+	require.Same(t, rawArr, &upd.raw[0], "raw must be written into the pooled array")
+}
+
+func TestCapLen(t *testing.T) {
+	t.Parallel()
+	require.Nil(t, capLen(nil))
+	big := make([]byte, 3, 64)
+	require.Equal(t, 3, cap(capLen(big)))
+	require.Equal(t, 0, cap(capLen(big[:0])))
+}
+
+// A callback must not see capacity left over from whichever update used the object before.
+// Driven through ApplyDeferredBranchUpdates rather than capLen, so dropping the clip at
+// either the serial or the parallel call site fails here.
+func TestApplyDeferred_CallbackSeesInputDerivedCapacity(t *testing.T) {
+	t.Parallel()
+
+	upd := func(prefix, raw byte) *DeferredBranchUpdate {
+		return &DeferredBranchUpdate{
+			prefix: append(make([]byte, 0, 64), prefix),
+			raw:    append(make(BranchData, 0, 64), raw),
+			prev:   make([]byte, 0, 64),
+		}
+	}
+	deferred := func(n int) []*DeferredBranchUpdate {
+		out := make([]*DeferredBranchUpdate, n)
+		for i := range out {
+			out[i] = upd(byte(i), byte(i+1))
+		}
+		return out
+	}
+
+	// numWorkers == 1 takes the serial path; 5 updates over 2 workers takes the parallel one.
+	for _, tc := range []struct {
+		name             string
+		updates, workers int
+	}{
+		{"serial", 2, 1},
+		{"parallel", 5, 2},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			var seen int
+			written, err := ApplyDeferredBranchUpdates(deferred(tc.updates), tc.workers,
+				func(prefix, data, prevData []byte) error {
+					seen++
+					require.Equal(t, len(prefix), cap(prefix), "prefix carries leftover pool capacity")
+					require.Equal(t, len(data), cap(data), "data carries leftover pool capacity")
+					require.Equal(t, len(prevData), cap(prevData), "prevData carries leftover pool capacity")
+					return nil
+				})
+			require.NoError(t, err)
+			require.Equal(t, tc.updates, written)
+			require.Equal(t, tc.updates, seen, "callback must run for every update")
+		})
+	}
 }
