@@ -213,6 +213,20 @@ func (s *CaplinStateSnapshots) BlocksAvailable() uint64 {
 	return min(s.SegmentsMax(), s.IndicesMax())
 }
 
+func (s *CaplinStateSnapshots) Close() {
+	if s == nil {
+		return
+	}
+	s.BaseRoSnapshots.Close()
+}
+
+func (s *CaplinStateSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
+	if s == nil {
+		return nil
+	}
+	return s.BaseRoSnapshots.RemoveOverlaps(onDelete)
+}
+
 func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 	if s == nil {
 		return 0
@@ -557,7 +571,7 @@ func (s *CaplinStateSnapshots) BuildMissingIndices(ctx context.Context, logger l
 		})
 		for _, df := range files {
 			if df.Decompressor == nil {
-				return fmt.Errorf("segment %s is not opened", df.FilePath())
+				return fmt.Errorf("segment %s is not opened", df.FileName())
 			}
 			if df.IsIndexed() {
 				continue
