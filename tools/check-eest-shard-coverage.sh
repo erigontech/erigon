@@ -3,7 +3,8 @@
 # can't silently drop tests. It targets the failures a normal test run does NOT
 # surface — a fork quietly dropped while the shard still runs enough tests to
 # look green. The partition is read from the live config and corpus
-# manifests (.meta/index.json); nothing is hard-coded:
+# manifests (.meta/index.json). It also guards manifest naming that controls
+# race-binary dispatch in the Makefile.
 #
 # The fork-split families each run every fork exactly once — spec race shards
 # (eest-spec-shards.yml `run` regexes) over blockchain_test, and stable/devnet
@@ -67,6 +68,20 @@ check_race_mode_parity() {
 			if (bad) { print "  => -sequential/-parallel of a fork must share one non-empty run regex" > "/dev/stderr"; exit 1 }
 		}'
 }
+check_transaction_race_shards() {
+	echo "==== transaction race shards ===="
+	local actual expected
+	actual=$(yq -o=json '.' "$shards" \
+		| jq -r '.[].shard | select(test("^transactiontests-(stable|devnet)(-race)?$"))' \
+		| sort)
+	expected=$'transactiontests-devnet-race\ntransactiontests-stable-race'
+	if [[ "$actual" != "$expected" ]]; then
+		echo "  expected stable and devnet transaction shards to use the -race suffix" >&2
+		printf '  found: %s\n' "${actual//$'\n'/, }" >&2
+		return 1
+	fi
+	printf '  ok  %s\n' "${actual//$'\n'/$'\n  ok  '}"
+}
 hive_consume_enginex_regexes() {
 	local fixture_set="$1"
 	yq -o=json '.jobs.test-hive-eest.strategy.matrix.include' "$hive" \
@@ -104,6 +119,8 @@ check_partition() {
 }
 
 rc=0
+check_transaction_race_shards || rc=1
+echo
 check_partition "spec race shards (blocktest --run)"  "$stable_index" blockchain_test        ""                     "$(race_regexes)" || rc=1
 echo
 check_race_mode_parity || rc=1
