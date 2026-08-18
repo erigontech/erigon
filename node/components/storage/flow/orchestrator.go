@@ -304,6 +304,35 @@ func (o *Orchestrator) recomputeCanonical() {
 			o.statePending--
 		}
 	}
+	// After cancels have freed the coverage those narrower files held,
+	// re-request added-to-canonical files that a fresh requestGapsFor
+	// would now admit. Handles the merge-transition case where the
+	// added wider file was previously skipped as covered by the
+	// narrower files sitting in pending.
+	inv := o.storage.Inventory()
+	var toRequest []*snapshot.FileEntry
+	for _, name := range added {
+		entry := next[name]
+		if entry == nil {
+			continue
+		}
+		if _, already := o.pending[name]; already {
+			continue
+		}
+		if o.haveLocally(entry.Domain, name) {
+			continue
+		}
+		if inv != nil && inv.IsProducing(name) {
+			continue
+		}
+		role := fileRole(name)
+		if o.coverageForRoleLocked(entry.Domain, role).IsComplete(entry.FromStep, entry.ToStep) {
+			continue
+		}
+		o.pending[name] = entry
+		o.statePending++
+		toRequest = append(toRequest, entry)
+	}
 	o.peerMu.Unlock()
 
 	if len(added) > 0 || len(removed) > 0 {
@@ -314,6 +343,14 @@ func (o *Orchestrator) recomputeCanonical() {
 	}
 	for _, name := range cancels {
 		o.bus.Publish(DownloadSuperseded{FileName: name, Reason: "not-in-canonical"})
+	}
+	for _, entry := range toRequest {
+		o.bus.Publish(DownloadRequested{
+			FileName: entry.Name,
+			InfoHash: entry.TorrentHash,
+			Domain:   entry.Domain,
+			Range:    entry.Range(),
+		})
 	}
 }
 
@@ -372,6 +409,27 @@ func collectSupersededPendingLocked(
 	}
 	sort.Strings(cancels)
 	return cancels
+}
+
+// isUnanimouslyAdvertisedLocked reports whether every peer whose manifest
+// we've seen currently advertises entry.Name with the same TorrentHash.
+// One divergent hash or one missing peer → false. Used by requestGapsFor
+// to gate downloads on live quorum without waiting for the debounced
+// canonical recompute.
+func isUnanimouslyAdvertisedLocked(entry *snapshot.FileEntry, peerManifests map[string]map[string]*snapshot.FileEntry) bool {
+	if entry == nil || len(peerManifests) == 0 {
+		return false
+	}
+	for _, files := range peerManifests {
+		other, ok := files[entry.Name]
+		if !ok {
+			return false
+		}
+		if other.TorrentHash != entry.TorrentHash {
+			return false
+		}
+	}
+	return true
 }
 
 // computeCanonicalLocked builds the canonical set from per-peer manifests.
@@ -932,13 +990,13 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	toRequest := make([]*snapshot.FileEntry, 0, len(peerEntries))
 	inv := o.storage.Inventory()
 	o.peerMu.Lock()
-	// Canonical gate: once quorum has formed (canonical is non-empty),
-	// only files IN canonical are eligible for download. Files a single
-	// peer advertises that others don't (rotation-window gap files) fall
-	// off. When canonical is empty (bootstrap — no manifests yet, or
-	// mid-quorum-break), fall back to additive behaviour so first-boot
-	// still makes progress until the first canonical forms.
-	gateOnCanonical := len(o.canonical) > 0
+	// Canonical gate against the LIVE intersection: file must be
+	// advertised by every trusted peer with matching hash. Using the
+	// live check (not the debounce-lagged o.canonical) admits merge-
+	// transition wider files the moment every peer has published them,
+	// without waiting for recompute. Bootstrap (zero peers with a
+	// manifest, first-time) still falls back to additive behaviour.
+	gateOnCanonical := len(o.peerManifests) > 0
 	for _, entry := range peerEntries {
 		eligibleForPhase1 := domain != "" || entry.Kind != snapshot.KindCaplin
 		if o.haveLocally(domain, entry.Name) {
@@ -947,18 +1005,15 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 			}
 			continue
 		}
-		// Local production is authoritative: skip files we removed with
-		// intent to rebuild. Otherwise the downloader's .part → final
+		// Local production is authoritative — skip files we removed
+		// with intent to rebuild. A concurrent downloader .part → final
 		// rename over an open reader mmap surfaces as a decompressor
-		// SIGSEGV mid-recovery-exec (checkpoint-2026-08-17-retire-race-
-		// fix-verified).
+		// SIGSEGV mid-recovery-exec (retire-race fix).
 		if inv != nil && inv.IsProducing(entry.Name) {
 			continue
 		}
-		if gateOnCanonical {
-			if _, ok := o.canonical[entry.Name]; !ok {
-				continue
-			}
+		if gateOnCanonical && !isUnanimouslyAdvertisedLocked(entry, o.peerManifests) {
+			continue
 		}
 		role := fileRole(entry.Name)
 		if o.coverageForRoleLocked(domain, role).IsComplete(entry.FromStep, entry.ToStep) {
