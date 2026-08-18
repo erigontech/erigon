@@ -743,43 +743,52 @@ func wsPutStorageOuter(m map[accounts.Address]map[accounts.StorageKey]*Versioned
 // writeSetPut lazily checks out a pooled map and inserts vw at addr.
 // First write per tx pays vwMapPool.Get (cheap); subsequent writes are
 // direct map insert.  ReleaseAndReset puts the map back on tx-finalize.
-func writeSetPut[T any](m *map[accounts.Address]*VersionedWrite[T], addr accounts.Address, vw *VersionedWrite[T], pool *vwMapPool[T]) {
+func writeSetPut[T any](s *WriteSet, m *map[accounts.Address]*VersionedWrite[T], addr accounts.Address, vw *VersionedWrite[T], pool *vwMapPool[T]) {
 	if *m == nil {
 		*m = pool.get()
+		s.revive()
 	}
 	(*m)[addr] = vw
 }
 
+// revive clears the released mark, so reads of the set are meaningful again.
+func (s *WriteSet) revive() {
+	if dbg.AssertEnabled {
+		s.released = false
+	}
+}
+
 func (s *WriteSet) SetAddress(addr accounts.Address, vw *VersionedWrite[*accounts.Account]) {
-	writeSetPut(&s.address, addr, vw, wsMapPoolAddress)
+	writeSetPut(s, &s.address, addr, vw, wsMapPoolAddress)
 }
 func (s *WriteSet) SetBalance(addr accounts.Address, vw *VersionedWrite[uint256.Int]) {
-	writeSetPut(&s.balance, addr, vw, wsMapPoolBalance)
+	writeSetPut(s, &s.balance, addr, vw, wsMapPoolBalance)
 }
 func (s *WriteSet) SetNonce(addr accounts.Address, vw *VersionedWrite[uint64]) {
-	writeSetPut(&s.nonce, addr, vw, wsMapPoolNonce)
+	writeSetPut(s, &s.nonce, addr, vw, wsMapPoolNonce)
 }
 func (s *WriteSet) SetIncarnation(addr accounts.Address, vw *VersionedWrite[uint64]) {
-	writeSetPut(&s.incarnation, addr, vw, wsMapPoolIncarnation)
+	writeSetPut(s, &s.incarnation, addr, vw, wsMapPoolIncarnation)
 }
 func (s *WriteSet) SetSelfDestruct(addr accounts.Address, vw *VersionedWrite[bool]) {
-	writeSetPut(&s.selfDestruct, addr, vw, wsMapPoolSelfDestruct)
+	writeSetPut(s, &s.selfDestruct, addr, vw, wsMapPoolSelfDestruct)
 }
 func (s *WriteSet) SetCreateContract(addr accounts.Address, vw *VersionedWrite[bool]) {
-	writeSetPut(&s.createContract, addr, vw, wsMapPoolCreateContract)
+	writeSetPut(s, &s.createContract, addr, vw, wsMapPoolCreateContract)
 }
 func (s *WriteSet) SetCode(addr accounts.Address, vw *VersionedWrite[accounts.Code]) {
-	writeSetPut(&s.code, addr, vw, wsMapPoolCode)
+	writeSetPut(s, &s.code, addr, vw, wsMapPoolCode)
 }
 func (s *WriteSet) SetCodeHash(addr accounts.Address, vw *VersionedWrite[accounts.CodeHash]) {
-	writeSetPut(&s.codeHash, addr, vw, wsMapPoolCodeHash)
+	writeSetPut(s, &s.codeHash, addr, vw, wsMapPoolCodeHash)
 }
 func (s *WriteSet) SetCodeSize(addr accounts.Address, vw *VersionedWrite[int]) {
-	writeSetPut(&s.codeSize, addr, vw, wsMapPoolCodeSize)
+	writeSetPut(s, &s.codeSize, addr, vw, wsMapPoolCodeSize)
 }
 func (s *WriteSet) SetStorage(addr accounts.Address, key accounts.StorageKey, vw *VersionedWrite[uint256.Int]) {
 	if s.storage == nil {
 		s.storage = wsGetStorageOuter()
+		s.revive()
 	}
 	inner := s.storage[addr]
 	if inner == nil {
@@ -1377,9 +1386,7 @@ func (s *WriteSet) ReleaseAndReset() {
 		}
 	}
 	s.ReleaseMaps()
-	if dbg.AssertEnabled {
-		s.released = false // a reset hands the set back for reuse
-	}
+	s.revive() // a reset hands the set back for reuse
 }
 
 // ReleaseMaps returns the map containers to their pools without releasing the
