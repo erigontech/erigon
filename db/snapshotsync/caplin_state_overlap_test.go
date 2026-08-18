@@ -149,7 +149,7 @@ func TestCaplinStateRemoveOverlaps(t *testing.T) {
 	require.True(t, hasDiskOverlap(t, dirs.SnapCaplin, table), "fixture must reproduce the on-disk overlap")
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
-	require.NoError(t, s.RemoveOverlaps())
+	require.NoError(t, s.RemoveOverlaps(nil))
 
 	require.NoFileExists(t, subSeg)
 	require.NoFileExists(t, subIdx)
@@ -175,27 +175,87 @@ func TestCaplinStateRemoveOverlapsSubsetMissingIndex(t *testing.T) {
 	require.NoError(t, dir2.RemoveFile(subIdx)) // subset .seg present, .idx missing
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
-	require.NoError(t, s.RemoveOverlaps())
+	require.NoError(t, s.RemoveOverlaps(nil))
 
 	require.NoFileExists(t, subSeg, "covered subset must be removed even without its index")
 	require.FileExists(t, supSeg)
 	require.False(t, hasDiskOverlap(t, dirs.SnapCaplin, table))
 }
 
-// A subset must be kept when no fully-present indexed superset covers it: deleting it
-// would drop data. Here the "superset" lacks its .idx, so it is not usable yet.
-func TestCaplinStateRemoveOverlapsKeepsSubsetWithoutIndexedSuperset(t *testing.T) {
+func TestCaplinStateRemoveOverlapsUnindexedSuperset(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
 	table := kv.PendingDepositsDump
 
-	supSeg, supIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
-	subSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
-	require.NoError(t, dir2.RemoveFile(supIdx)) // superset not indexed → not a valid cover
+	subSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	supSeg, supIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)
+	require.NoError(t, dir2.RemoveFile(supIdx))
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
-	require.NoError(t, s.RemoveOverlaps())
+	require.NoError(t, s.BuildMissingIndices(t.Context(), logger))
+	require.NoError(t, s.RemoveOverlaps(nil))
 
-	require.FileExists(t, subSeg, "subset must survive when its superset is not indexed")
+	require.NoFileExists(t, subSeg)
+	require.FileExists(t, supSeg, "the indexed covering segment must survive")
+	require.FileExists(t, supIdx)
+	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(table))
+}
+
+func TestCaplinStateRemoveOverlapsIgnoresUnknownType(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	segPath, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	unknownPath := filepath.Join(dirs.SnapCaplin, "v1.1-000000-000050-BlockProposers.seg")
+	require.NoError(t, os.WriteFile(unknownPath, []byte{0}, 0o644))
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.FileExists(t, segPath)
+	require.FileExists(t, unknownPath)
+	require.Equal(t, []Range{{from: 0, to: 50_000}}, s.coveredRangesForType(table))
+}
+
+func TestCaplinStateRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	supSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)
+	subSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	v := s.View()
+
+	require.NoError(t, s.RemoveOverlaps(nil))
+	require.FileExists(t, subSeg, "the open view must defer unlinking")
 	require.FileExists(t, supSeg)
+
+	v.Close()
+	require.NoFileExists(t, subSeg)
+}
+
+// Overlap removal has to survive several tables sharing a range: every other test here
+// configures one table, which keeps a type's own files adjacent no matter how the
+// directory listing is ordered.
+func TestCaplinStateRemoveOverlapsWithSeveralTables(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	tables := []string{kv.BlockRoot, kv.PendingDepositsDump, kv.StateRoot}
+
+	for _, table := range tables {
+		writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
+	}
+	subSeg, subIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, kv.BlockRoot, 100_000, 150_000, logger)
+
+	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.NoFileExists(t, subSeg, "a covered subset must be removed even when other tables share its range")
+	require.NoFileExists(t, subIdx)
+	for _, table := range tables {
+		require.Equal(t, []Range{{from: 0, to: 150_000}}, s.coveredRangesForType(table))
+	}
 }
