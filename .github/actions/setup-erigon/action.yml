@@ -228,8 +228,8 @@ runs:
           echo "::error::apt-get update failed or did not finish within 300s"
           exit 1
         fi
-        if ! sudo timeout 600 apt-get install -qq -y "${apt_opts[@]}" build-essential; then
-          echo "::error::apt-get install build-essential did not finish within 600s"
+        if ! sudo timeout --kill-after=10s 600 apt-get install -qq -y "${apt_opts[@]}" build-essential; then
+          echo "::error::apt-get install build-essential failed or did not finish within 600s"
           exit 1
         fi
 
