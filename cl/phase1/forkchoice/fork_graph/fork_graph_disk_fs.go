@@ -35,10 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// maxSSZObjectSize is a generous upper bound for any single SSZ object
-// (beacon state, envelope, etc.). Mainnet states with ~1.5M validators are
-// ~327 MB after decompression; 1 GiB leaves ample room for validator-set
-// growth while still catching clearly corrupt length fields before OOM.
+// maxSSZObjectSize leaves room for beacon-state growth while rejecting corrupt lengths before allocation.
 const maxSSZObjectSize = 1 << 30 // 1 GiB
 
 func getBeaconStateFilename(blockRoot common.Hash) string {
@@ -407,7 +404,7 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 		f.sszSnappyWriter.Reset(dumpedFile)
 	}
 
-	// Write the length
+	// Write the framing version and SSZ length.
 	length := make([]byte, 8)
 	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
 	if _, err := f.sszSnappyWriter.Write([]byte{byte(envelope.Message.Payload.Version())}); err != nil {

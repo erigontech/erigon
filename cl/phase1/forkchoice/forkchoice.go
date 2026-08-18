@@ -84,6 +84,11 @@ type preverifiedAppendListsSizes struct {
 	historicalSummariesLength uint64
 }
 
+type envelopeIndexRepairCall struct {
+	done chan struct{}
+	err  error
+}
+
 type ForkChoiceStore struct {
 	time            atomic.Uint64
 	highestSeen     atomic.Uint64
@@ -167,6 +172,8 @@ type ForkChoiceStore struct {
 	operationPrunePending bool
 	operationPruneRunning bool
 	synced                atomic.Bool
+	envelopeIndexRepairMu sync.Mutex
+	envelopeIndexRepairs  map[common.Hash]*envelopeIndexRepairCall
 
 	ethClock                eth_clock.EthereumClock
 	optimisticStore         optimistic.OptimisticStore

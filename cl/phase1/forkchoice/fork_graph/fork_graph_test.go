@@ -568,31 +568,30 @@ func TestDumpEnvelopeRejectsIncompleteInput(t *testing.T) {
 	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
 	root := common.HexToHash("0x1234")
 	addEnvelopeTestBlock(f, root, 1)
-	validMessage := cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
-	wrongPayloadVersion := cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
-	wrongPayloadVersion.BeaconBlockRoot = root
-	wrongPayloadVersion.Payload = cltypes.NewEth1Block(clparams.DenebVersion, &clparams.MainnetBeaconConfig)
-	wrongRequestsVersion := cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
-	wrongRequestsVersion.BeaconBlockRoot = root
+	validMessage := testEnvelopeWithTransaction(root, nil).Message
+	wrongPayloadVersion := testEnvelopeWithTransaction(root, nil).Message
+	wrongPayloadVersion.Payload = testEnvelopeWithVersion(root, nil, clparams.DenebVersion).Message.Payload
+	wrongPayloadVersion.Payload.BlockAccessList = solid.NewByteListSSZ(clparams.MainnetBeaconConfig.MaxBytesPerTransaction)
+	wrongRequestsVersion := testEnvelopeWithTransaction(root, nil).Message
 	wrongRequestsVersion.ExecutionRequests = cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
-	zeroRequests := cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
-	zeroRequests.BeaconBlockRoot = root
+	zeroRequests := testEnvelopeWithTransaction(root, nil).Message
 	zeroRequests.ExecutionRequests = &cltypes.ExecutionRequests{}
 
 	for _, tt := range []struct {
-		name     string
-		envelope *cltypes.SignedExecutionPayloadEnvelope
+		name      string
+		envelope  *cltypes.SignedExecutionPayloadEnvelope
+		wantError string
 	}{
-		{name: "nil envelope"},
-		{name: "nil message", envelope: &cltypes.SignedExecutionPayloadEnvelope{}},
-		{name: "nil payload", envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: validMessage.ExecutionRequests}}},
-		{name: "nil execution requests", envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{Payload: validMessage.Payload}}},
-		{name: "wrong payload version", envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: wrongPayloadVersion}},
-		{name: "wrong requests version", envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: wrongRequestsVersion}},
-		{name: "uninitialized requests", envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: zeroRequests}},
+		{name: "nil envelope", wantError: "nil execution payload envelope"},
+		{name: "nil message", envelope: &cltypes.SignedExecutionPayloadEnvelope{}, wantError: "nil execution payload envelope message"},
+		{name: "nil payload", envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{ExecutionRequests: validMessage.ExecutionRequests}}, wantError: "nil payload"},
+		{name: "nil execution requests", envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{Payload: validMessage.Payload}}, wantError: "nil execution requests"},
+		{name: "wrong payload version", envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: wrongPayloadVersion}, wantError: "execution payload version 4 predates Gloas"},
+		{name: "wrong requests version", envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: wrongRequestsVersion}, wantError: "execution requests version 5 predates Gloas"},
+		{name: "uninitialized requests", envelope: &cltypes.SignedExecutionPayloadEnvelope{Message: zeroRequests}, wantError: "execution requests version 5 predates Gloas"},
 	} {
 		t.Run(tt.name, func(t *testing.T) {
-			require.Error(t, f.DumpEnvelopeOnDisk(root, tt.envelope))
+			require.ErrorContains(t, f.DumpEnvelopeOnDisk(root, tt.envelope), tt.wantError)
 		})
 	}
 }
