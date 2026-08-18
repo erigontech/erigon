@@ -209,9 +209,6 @@ type DirtySegment struct {
 	frozen bool
 
 	canDelete atomic.Bool
-
-	// only caplin state
-	filePath string
 }
 
 func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
@@ -809,6 +806,10 @@ func (s *BaseRoSnapshots) MadvNormal() *BaseRoSnapshots {
 }
 
 func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
+	return truncateAtGap(buildVisibleSegments(dirtySegments))
+}
+
+func buildVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSegments {
 	newVisibleSegments := make(VisibleSegments, 0, dirtySegments.Len())
 	dirtySegments.Walk(func(segments []*DirtySegment) bool {
 		for _, sn := range segments {
@@ -850,19 +851,22 @@ func RecalcVisibleSegments(dirtySegments *btree.BTreeG[*DirtySegment]) VisibleSe
 		return true
 	})
 
+	return newVisibleSegments
+}
+
+func truncateAtGap(segments VisibleSegments) VisibleSegments {
 	// protect from gaps
-	if len(newVisibleSegments) > 0 {
-		prevEnd := newVisibleSegments[0].from
-		for i, seg := range newVisibleSegments {
+	if len(segments) > 0 {
+		prevEnd := segments[0].from
+		for i, seg := range segments {
 			if seg.from != prevEnd {
-				newVisibleSegments = newVisibleSegments[:i] //remove tail if see gap
-				break
+				return segments[:i]
 			}
 			prevEnd = seg.to
 		}
 	}
 
-	return newVisibleSegments
+	return segments
 }
 
 // recalcVisibleFiles publishes a fresh visible bundle from dirty and retires `retired`
@@ -1194,7 +1198,7 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 		seen[fName] = struct{}{}
 
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
-		if !ok || isState || snaptype.IsTorrentPartial(f.Ext) {
+		if !ok || isState || f.Type == nil || snaptype.IsTorrentPartial(f.Ext) {
 			continue
 		}
 		if !s.HasType(f.Type) {

@@ -18,9 +18,9 @@ package jsonrpc
 
 import (
 	"bytes"
-	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
@@ -104,7 +104,7 @@ func TestSimulateV1IgnoresSharedBranchCache(t *testing.T) {
 
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	value := (*hexutil.Big)(big.NewInt(100))
+	value := (*hexutil.U256)(uint256.NewInt(100))
 	gas := hexutil.Uint64(100_000)
 	result, err := api.SimulateV1(t.Context(), SimulationRequest{
 		BlockStateCalls: []SimulatedBlock{{Calls: []ethapi.CallArgs{{

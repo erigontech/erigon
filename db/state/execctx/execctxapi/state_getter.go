@@ -14,13 +14,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package rawtemporaldb
+package execctxapi
 
-import "encoding/binary"
+import "github.com/erigontech/erigon/db/kv"
 
-// ReceiptValueForTest is the value encoding, for assertions in tests.
-func ReceiptValueForTest(v uint64) []byte {
-	var buf [binary.MaxVarintLen64]byte
-	i := binary.PutUvarint(buf[:], v)
-	return buf[:i]
+// StateGetter provides execution-aware reads over temporal state.
+type StateGetter interface {
+	kv.TemporalGetter
+	// GetCode reports whether the address has non-empty code. It is read-only;
+	// writes must use GetLatest to resolve the previous CodeDomain value.
+	GetCode(addr []byte, txNum uint64) ([]byte, bool, error)
+	// GetCodeSize reports whether the address has non-empty code.
+	GetCodeSize(addr []byte, txNum uint64) (int, bool, error)
 }

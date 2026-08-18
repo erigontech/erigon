@@ -99,7 +99,7 @@ func New(label kv.Label, log log.Logger) MdbxOpts {
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Durable,
 		log:        log,
-		pageSize:   DefaultPageSize(),
+		pageSize:   defaultPageSize(),
 
 		mapSize:         DefaultMapSize,
 		growthStep:      DefaultGrowthStep,
@@ -257,6 +257,12 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		}
 	}
 
+	requestedPageSize := opts.pageSize
+	if requestedPageSize == 0 {
+		requestedPageSize = defaultPageSize()
+	}
+	var dirtySpace uint64
+
 	// erigon using big transactions
 	// increase "page measured" options. need do it after env.Open() because default are depend on pageSize known only after env.Open()
 	if !opts.HasFlag(mdbx.Readonly) {
@@ -287,11 +293,6 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 		// before env.Open() we don't know real pageSize. but will be implemented soon: https://gitflic.ru/project/erthink/libmdbx/issue/15
 		// but we want call all `SetOption` before env.Open(), because:
 		//   - after they will require rwtx-lock, which is not acceptable in ACCEDEE mode.
-		pageSize := opts.pageSize
-		if pageSize == 0 {
-			pageSize = DefaultPageSize()
-		}
-		var dirtySpace uint64
 		if opts.dirtySpace > 0 {
 			dirtySpace = opts.dirtySpace
 		} else {
@@ -307,7 +308,7 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 			}
 		}
 		//can't use real pagesize here - it will be known only after env.Open()
-		if err := env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/pageSize.Bytes()); err != nil {
+		if err := env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/requestedPageSize.Bytes()); err != nil {
 			return nil, err
 		}
 
@@ -331,6 +332,15 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 
 	opts.pageSize = datasize.ByteSize(in.PageSize)
 	opts.mapSize = datasize.ByteSize(in.MapSize)
+
+	// OptTxnDpLimit counts pages, but the budget we want is a byte one. mdbx keeps the pageSize of
+	// an existing db, so a stale limit would scale the dirty-page memory by the size ratio.
+	// Accede must stay lock-free here - SetOption after Open takes the rwtx-lock.
+	if dirtySpace > 0 && opts.pageSize != requestedPageSize && !opts.HasFlag(mdbx.Accede) {
+		if err := env.SetOption(mdbx.OptTxnDpLimit, dirtySpace/opts.pageSize.Bytes()); err != nil {
+			return nil, fmt.Errorf("%w, label: %s", err, opts.label)
+		}
+	}
 	if opts.label == dbcfg.ChainDB {
 		opts.log.Info("[db] open", "label", opts.label, "sizeLimit", opts.mapSize, "pageSize", opts.pageSize)
 	} else {

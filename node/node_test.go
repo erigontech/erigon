@@ -381,15 +381,16 @@ func TestLifecycleTerminationGuarantee(t *testing.T) {
 	}
 	// Stop the stack, verify failure and check all terminations
 	err = stack.Close()
-	if err, ok := err.(*StopError); !ok {
+	var stopErr *StopError
+	if !errors.As(err, &stopErr) {
 		t.Fatalf("termination failure mismatch: have %v, want StopError", err)
 	} else {
 		failer := reflect.TypeFor[*InstrumentedService]()
-		if !errors.Is(err.Services[failer], failure) {
-			t.Fatalf("failer termination failure mismatch: have %v, want %v", err.Services[failer], failure)
+		if !errors.Is(stopErr.Services[failer], failure) {
+			t.Fatalf("failer termination failure mismatch: have %v, want %v", stopErr.Services[failer], failure)
 		}
-		if len(err.Services) != 1 {
-			t.Fatalf("failure count mismatch: have %d, want %d", len(err.Services), 1)
+		if len(stopErr.Services) != 1 {
+			t.Fatalf("failure count mismatch: have %d, want %d", len(stopErr.Services), 1)
 		}
 	}
 	for id := range lifecycles {

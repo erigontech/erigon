@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -580,7 +581,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	// Committed genesis will be shared between download and mock sentry
 	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", datadir.New(tmpdir), mock.Log)
-	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
+	var compatErr *chain.ConfigCompatError
+	if err != nil && !errors.As(err, &compatErr) {
 		if tb != nil {
 			tb.Fatal(err)
 		} else {
@@ -1140,8 +1142,8 @@ func (emt *ExecModuleTester) NewHistoryStateReader(blockNum uint64, tx kv.Tempor
 	return r
 }
 
-func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalGetter) state.StateReader {
-	return state.NewReaderV3(tx)
+func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalTx) state.StateReader {
+	return state.NewReaderV3(execctx.NewTemporalTxStateGetter(tx))
 }
 
 func (emt *ExecModuleTester) BlocksIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {

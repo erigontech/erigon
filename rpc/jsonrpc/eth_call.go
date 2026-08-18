@@ -265,10 +265,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 		available := balance.ToBig()
 		if args.Value != nil {
-			if args.Value.ToInt().Cmp(available) >= 0 {
+			value := args.Value.ToInt()
+			if value.Cmp(available) >= 0 {
 				return 0, errors.New("insufficient funds for transfer")
 			}
-			available.Sub(available, args.Value.ToInt())
+			available.Sub(available, value)
 		}
 
 		allowance := new(big.Int).Div(available, feeCap)
@@ -277,7 +278,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if allowance.IsUint64() && hi > allowance.Uint64() {
 			transfer := args.Value
 			if transfer == nil {
-				transfer = new(hexutil.Big)
+				transfer = new(hexutil.U256)
 			}
 			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
 				"sent", transfer.ToInt(), "maxFeePerGas", feeCap, "fundable", allowance)
@@ -727,7 +728,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
-		return nil, fmt.Errorf("error loading chain config: %v", err)
+		return nil, fmt.Errorf("error loading chain config: %w", err)
 	}
 	engine := api.engine()
 	fullEngine, ok := engine.(rules.Engine)

@@ -105,7 +105,7 @@ func (r *RemoteCheckpointSync) GetLatestBeaconState(ctx context.Context) (*state
 		beaconState := state.New(r.beaconConfig)
 		err = beaconState.DecodeSSZ(marshaled, int(stateVersion))
 		if err != nil {
-			return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+			return nil, fmt.Errorf("checkpoint sync decode failed %w", err)
 		}
 		log.Info("[Checkpoint Sync] Beacon state retrieved", "slot", slot)
 		return beaconState, nil
