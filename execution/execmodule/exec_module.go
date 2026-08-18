@@ -188,9 +188,11 @@ type ExecModule struct {
 	// pipeline Sync and all FCU state. Ops either TryAcquire and report Busy
 	// (retried by the CL) or block, and the background FCU commit/prune
 	// goroutines inherit the semaphore, releasing it only when their work is done.
-	semaphore        *semaphore.Weighted
-	forkValidator    *ForkValidator
-	pipelineExecutor *PipelineExecutor
+	semaphore *semaphore.Weighted
+	// setHeadAcquireTimeout bounds SetHead's semaphore wait. Zero uses defaultAcquireTimeout.
+	setHeadAcquireTimeout time.Duration
+	forkValidator         *ForkValidator
+	pipelineExecutor      *PipelineExecutor
 
 	logger log.Logger
 	// Block building

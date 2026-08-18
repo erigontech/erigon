@@ -18,7 +18,6 @@ package chainreader
 
 import (
 	"context"
-	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -279,9 +278,10 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (
 	return c.executionModule.HasBlock(ctx, &hash, nil)
 }
 
-// ErrExecutionBusy reports that the execution module was already occupied, which settles on its
-// own, as opposed to a rejection that returns the same answer however many times it is asked.
-var ErrExecutionBusy = errors.New("execution module is busy")
+// ErrExecutionBusy aliases execmodule.ErrBusy.
+//
+// Deprecated: use execmodule.ErrBusy.
+var ErrExecutionBusy = execmodule.ErrBusy
 
 func (c ChainReaderWriterEth1) AssembleBlock(ctx context.Context, baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
 	params := &builder.Parameters{
@@ -299,7 +299,7 @@ func (c ChainReaderWriterEth1) AssembleBlock(ctx context.Context, baseHash commo
 		return 0, err
 	}
 	if result.Busy {
-		return 0, ErrExecutionBusy
+		return 0, execmodule.ErrBusy
 	}
 	return result.PayloadID, nil
 }
@@ -310,7 +310,7 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64)
 		return nil, nil, nil, nil, err
 	}
 	if result.Busy {
-		return nil, nil, nil, nil, ErrExecutionBusy
+		return nil, nil, nil, nil, execmodule.ErrBusy
 	}
 	if result.Block == nil {
 		return nil, nil, nil, nil, nil

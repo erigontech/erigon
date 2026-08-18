@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"time"
 
@@ -48,13 +49,26 @@ func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
 	return blockNum, nil
 }
 
+const defaultAcquireTimeout = 5 * time.Second
+
+// errAcquireTimedOut distinguishes the module's semaphore timeout from cancellation of the caller's
+// context. It stays private so a caller-supplied cause cannot be mistaken for ErrBusy.
+var errAcquireTimedOut = errors.New("timed out waiting for the execution module")
+
 // SetHead rewinds the local chain to the specified block number by unwinding
 // all staged sync stages. This is the core implementation used by debug_setHead.
 func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
-	acquireCtx, acquireCancel := context.WithTimeout(ctx, 5*time.Second)
+	acquireTimeout := e.setHeadAcquireTimeout
+	if acquireTimeout == 0 {
+		acquireTimeout = defaultAcquireTimeout
+	}
+	acquireCtx, acquireCancel := context.WithTimeoutCause(ctx, acquireTimeout, errAcquireTimedOut)
 	defer acquireCancel()
 	if err := e.semaphore.Acquire(acquireCtx, 1); err != nil {
-		return fmt.Errorf("execution module is busy: %w", err)
+		if errors.Is(context.Cause(acquireCtx), errAcquireTimedOut) {
+			return fmt.Errorf("set head: %w", ErrBusy)
+		}
+		return fmt.Errorf("set head: %w", err)
 	}
 	defer e.semaphore.Release(1)
 

@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 	"errors"
-	"fmt"
 	"reflect"
 	"time"
 
@@ -132,7 +131,7 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	blockWithReceipts, err := bldr.Stop(ctx)
 	if err != nil {
 		if errors.Is(err, builder.ErrStopAbandoned) {
-			return AssembledBlockResult{}, fmt.Errorf("%w: %w", ErrRequestAbandoned, err)
+			return AssembledBlockResult{}, RequestAbandonedError(err, nil)
 		}
 		e.logger.Error("Failed to build PoS block", "err", err)
 		return AssembledBlockResult{}, err
