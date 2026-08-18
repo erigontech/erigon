@@ -86,25 +86,19 @@ export default async function createConfig(): Promise<Config> {
         attributes: {},
         innerHTML: 'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()',
       },
-      // Machine-readable copies of this site (llmstxt.org convention). Advertised
-      // on every page so crawlers and agents can find them without guessing the
-      // path — they are static files, so nothing else links to them.
+      // Point every page at the llms.txt index that covers it. `describedby` is
+      // the relation the llmstxt.org proposal defines for exactly this; its
+      // `alternate` + `text/markdown` pairing is reserved for a *per-page*
+      // Markdown representation, which this site-wide index is not.
+      // llms-full.txt is deliberately not advertised here: it is not a
+      // description of any single page. It stays discoverable through llms.txt,
+      // the sitemap, and the MCP docs page.
       {
         tagName: 'link',
         attributes: {
-          rel: 'alternate',
-          type: 'text/plain',
+          rel: 'describedby',
           href: 'https://docs.erigon.tech/llms.txt',
           title: 'Erigon Documentation — page index for LLMs',
-        },
-      },
-      {
-        tagName: 'link',
-        attributes: {
-          rel: 'alternate',
-          type: 'text/plain',
-          href: 'https://docs.erigon.tech/llms-full.txt',
-          title: 'Erigon Documentation — full text for LLMs',
         },
       },
     ],
@@ -172,9 +166,9 @@ export default async function createConfig(): Promise<Config> {
           priority: 0.5,
           ignorePatterns: ['/search'],
           // The llms.txt artifacts live in static/, so Docusaurus never routes
-          // them and the default sitemap omits them. Nothing else on the web
-          // links to them either, which leaves them unindexable and unreachable
-          // by search — append them explicitly.
+          // them and the default sitemap omits them — which leaves them
+          // unindexable by search. Append them explicitly. This is also how
+          // llms-full.txt stays reachable, since it is not advertised in head.
           createSitemapItems: async ({defaultCreateSitemapItems, ...rest}) => [
             ...(await defaultCreateSitemapItems(rest)),
             {url: 'https://docs.erigon.tech/llms.txt', changefreq: 'weekly', priority: 0.5},
