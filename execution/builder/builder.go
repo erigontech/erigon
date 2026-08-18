@@ -189,13 +189,8 @@ func waitForBuilderResult(ctx context.Context, results <-chan *types.BlockWithRe
 	select {
 	case result := <-results:
 		return result, nil
-	default:
-	}
-
-	select {
-	case result := <-results:
-		return result, nil
 	case <-ctx.Done():
+		// Keep a payload that completed as cancellation arrived.
 		select {
 		case result := <-results:
 			return result, nil

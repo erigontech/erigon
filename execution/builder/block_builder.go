@@ -18,6 +18,7 @@ package builder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -32,13 +33,22 @@ import (
 // that can block - opening a read view, waiting on a transaction provider - has to honour it.
 type BlockBuilderFunc func(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
 
+// ErrDiscarded reports that the payload was abandoned before the build completed.
+var ErrDiscarded = errors.New("block builder discarded")
+
+const (
+	blockBuilderRunning uint32 = iota
+	blockBuilderCompleted
+	blockBuilderDiscarded
+)
+
 // BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining").
 //
 // It answers to two different requests. Interrupting asks for the block it has so far, which is how
 // a payload is collected. Discarding says the payload is not wanted at all, and cancels the work.
 type BlockBuilder struct {
 	interrupt atomic.Bool
-	discarded atomic.Bool
+	state     atomic.Uint32
 	discard   context.CancelFunc
 	mu        sync.Mutex
 	done      chan struct{}
@@ -68,6 +78,7 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 			builder.mu.Lock()
 			builder.result = result
 			builder.err = err
+			builder.state.CompareAndSwap(blockBuilderRunning, blockBuilderCompleted)
 			builder.mu.Unlock()
 			close(builder.done)
 			discard()
@@ -102,6 +113,9 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 		graceCtx, cancelGrace := context.WithTimeout(ctx, stopGrace)
 		defer cancelGrace()
 		if _, err := builder.Stop(graceCtx); err != nil {
+			if errors.Is(err, ErrDiscarded) {
+				return
+			}
 			select {
 			case <-builder.done:
 				// The build ended within the grace with an error of its own, logged where it happened.
@@ -119,6 +133,9 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 
 func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
 	b.interrupt.Store(true)
+	if b.Discarded() {
+		return nil, ErrDiscarded
+	}
 
 	select {
 	case <-ctx.Done():
@@ -128,20 +145,23 @@ func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, erro
 
 	b.mu.Lock()
 	defer b.mu.Unlock()
+	// Keep a payload that completed as discard arrived.
+	if b.state.Load() == blockBuilderDiscarded && (b.result == nil || b.err != nil) {
+		return nil, ErrDiscarded
+	}
 	return b.result, b.err
 }
 
-// Discard marks the build unusable and cancels its context. It does not wait for the work to unwind.
+// Discard cancels the build without waiting for it to return.
 func (b *BlockBuilder) Discard() {
 	b.interrupt.Store(true)
-	b.discarded.Store(true)
+	b.state.CompareAndSwap(blockBuilderRunning, blockBuilderDiscarded)
 	b.discard()
 }
 
-// Discarded reports the payload was abandoned. The work may still be winding down, but nothing will
-// come of it, so a discarded builder reads as gone at once.
+// Discarded reports whether discard won before the build completed.
 func (b *BlockBuilder) Discarded() bool {
-	return b.discarded.Load()
+	return b.state.Load() == blockBuilderDiscarded
 }
 
 // Failed reports whether the builder has finished and ended in an error, which a caller looking to

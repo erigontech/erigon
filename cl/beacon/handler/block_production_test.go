@@ -459,6 +459,25 @@ func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
 	}
 }
 
+func TestPollAssembledPayloadLogsUnknownPayload(t *testing.T) {
+	var output bytes.Buffer
+	root := log.Root()
+	previousHandler := root.GetHandler()
+	root.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	t.Cleanup(func() { root.SetHandler(previousHandler) })
+
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
+	_, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			return nil, nil, nil, nil, &engine_helpers.UnknownPayloadErr
+		})
+
+	require.False(t, ok)
+	require.Contains(t, output.String(), "BlockProduction: execution payload is unknown")
+	require.Contains(t, output.String(), "lvl=warn")
+}
+
 func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}

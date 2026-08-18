@@ -150,8 +150,8 @@ type ExecutionModule interface {
 
 	// --- Block building ---------------------------------------------------
 
-	// AssembleBlock initiates building a new block with the supplied
-	// parameters.  Returns the payload ID assigned to the build job.
+	// AssembleBlock initiates building a block. Busy reports that the execution module is occupied;
+	// otherwise PayloadID identifies the new build.
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)
 
 	// GetAssembledBlock stops and waits for payloadID's builder. Busy reports that the execution

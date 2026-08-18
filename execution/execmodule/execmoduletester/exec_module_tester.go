@@ -960,6 +960,9 @@ func (emt *ExecModuleTester) GetAssembledBlock(ctx context.Context, payloadID ui
 		if err != nil {
 			return nil, false, err
 		}
+		if result.Unknown {
+			return nil, false, chainreader.ErrUnknownPayload
+		}
 		if result.Block == nil {
 			return nil, result.Busy, nil
 		}

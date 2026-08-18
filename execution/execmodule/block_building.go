@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"reflect"
 	"time"
 
@@ -237,14 +238,8 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	if !ok || entry == nil || entry.builder == nil {
 		return AssembledBlockResult{Unknown: true}, nil
 	}
-	// Nothing comes of a discarded build, and waiting for its goroutine to notice would hold the
-	// caller for as long as whatever the build is blocked on.
-	if entry.builder.Discarded() {
-		e.dropBuilder(payloadID, entry)
-		return AssembledBlockResult{Unknown: true}, nil
-	}
 	blockWithReceipts, err := entry.builder.Stop(ctx)
-	if entry.builder.Discarded() {
+	if errors.Is(err, builder.ErrDiscarded) {
 		e.dropBuilder(payloadID, entry)
 		return AssembledBlockResult{Unknown: true}, nil
 	}

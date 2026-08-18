@@ -652,7 +652,11 @@ func TestGetAssembledBlockReportsDiscardDuringStopAsUnknown(t *testing.T) {
 		result, err := module.GetAssembledBlock(t.Context(), assembled.PayloadID)
 		collected <- response{result: result, err: err}
 	}()
-	<-stopObserved
+	select {
+	case <-stopObserved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("builder did not observe the collection request")
+	}
 	module.builders[assembled.PayloadID].builder.Discard()
 
 	result := <-collected
@@ -660,6 +664,69 @@ func TestGetAssembledBlockReportsDiscardDuringStopAsUnknown(t *testing.T) {
 	require.True(t, result.result.Unknown)
 	require.NotContains(t, module.builders, assembled.PayloadID)
 	require.NotContains(t, module.buildersByTimestamp, timestamp)
+}
+
+func TestGetAssembledBlockKeepsPayloadCompletedAsDiscardLands(t *testing.T) {
+	timestamp := newTestTimestamp()
+	stopObserved := make(chan struct{})
+	finish := make(chan struct{})
+	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		close(stopObserved)
+		<-finish
+		return want, nil
+	})
+
+	assembled, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+
+	type response struct {
+		result AssembledBlockResult
+		err    error
+	}
+	collected := make(chan response, 1)
+	go func() {
+		result, err := module.GetAssembledBlock(t.Context(), assembled.PayloadID)
+		collected <- response{result: result, err: err}
+	}()
+	select {
+	case <-stopObserved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("builder did not observe the collection request")
+	}
+	module.builders[assembled.PayloadID].builder.Discard()
+	close(finish)
+
+	select {
+	case result := <-collected:
+		require.NoError(t, result.err)
+		require.False(t, result.result.Unknown)
+		require.Same(t, want, result.result.Block)
+	case <-time.After(5 * time.Second):
+		t.Fatal("payload collection did not finish")
+	}
+}
+
+func TestGetAssembledBlockKeepsFailureCompletedBeforeDiscard(t *testing.T) {
+	timestamp := newTestTimestamp()
+	wantErr := errors.New("build failed")
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		return nil, wantErr
+	})
+
+	assembled, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+	entry := module.builders[assembled.PayloadID]
+	require.Eventually(t, entry.builder.Failed, 5*time.Second, time.Millisecond)
+	entry.builder.Discard()
+
+	result, err := module.GetAssembledBlock(t.Context(), assembled.PayloadID)
+	require.ErrorIs(t, err, wantErr)
+	require.False(t, result.Unknown)
+	require.NotContains(t, module.builders, assembled.PayloadID)
 }
 
 func TestEvictionTakesAFailedCurrentBuilderBeforeALiveSupersededOne(t *testing.T) {

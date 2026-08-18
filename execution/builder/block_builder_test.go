@@ -170,3 +170,21 @@ func TestBlockBuilderReleasesABuildThatWedgesAfterObservingTheStop(t *testing.T)
 		t.Fatal("wedged build outlived its grace without being released")
 	}
 }
+
+func TestBlockBuilderRemainsDiscardedWhenCanceledBuildReturnsPayload(t *testing.T) {
+	t.Parallel()
+
+	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-ctx.Done()
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+	}, &Parameters{}, time.Minute, time.Minute)
+
+	b.Discard()
+	select {
+	case <-b.done:
+	case <-time.After(5 * time.Second):
+		t.Fatal("discarded builder did not finish")
+	}
+
+	require.True(t, b.Discarded())
+}

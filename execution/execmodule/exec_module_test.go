@@ -129,6 +129,17 @@ type delayedSealEngine struct {
 	release chan struct{}
 }
 
+type doneObservedContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
 func (e *delayedSealEngine) Seal(_ rules.ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
 	close(e.started)
 	go func() {
@@ -640,6 +651,14 @@ func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m
 	}
 }
 
+func TestExecModuleTesterReportsUnknownPayload(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+
+	block, err := m.GetAssembledBlock(t.Context(), 404)
+	require.ErrorIs(t, err, chainreader.ErrUnknownPayload)
+	require.Nil(t, block)
+}
+
 func TestAssembleBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -685,6 +704,7 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 		started: make(chan struct{}),
 		release: make(chan struct{}),
 	}
+	t.Cleanup(func() { close(engine.release) })
 	m := execmoduletester.New(t,
 		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
 		execmoduletester.WithEngine(engine),
@@ -707,26 +727,29 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 	}, time.Minute, time.Minute)
 
 	stopped := make(chan error, 1)
+	stopObserved := make(chan struct{})
+	stopCtx := &doneObservedContext{Context: context.Background(), observed: stopObserved}
 	go func() {
-		_, stopErr := payloadBuilder.Stop(context.Background())
+		_, stopErr := payloadBuilder.Stop(stopCtx)
 		stopped <- stopErr
 	}()
 
 	select {
 	case <-engine.started:
 	case <-time.After(10 * time.Second):
-		close(engine.release)
 		t.Fatal("builder did not reach sealing")
+	}
+	select {
+	case <-stopObserved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not begin waiting for the builder")
 	}
 	payloadBuilder.Discard()
 
 	select {
 	case err := <-stopped:
-		close(engine.release)
-		require.ErrorIs(t, err, context.Canceled)
-	case <-time.After(time.Second):
-		close(engine.release)
-		<-stopped
+		require.ErrorIs(t, err, builder.ErrDiscarded)
+	case <-time.After(5 * time.Second):
 		t.Fatal("discarded builder remained blocked waiting for a seal result")
 	}
 }
