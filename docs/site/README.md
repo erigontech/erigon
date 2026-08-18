@@ -16,7 +16,23 @@ npm run typecheck # TypeScript check without emit
 
 ## Deployment
 
-Deployment is handled automatically by the `docs-deploy.yml` workflow, which lives on the release branches and publishes only from the one named by the `DOCS_DEPLOY_BRANCH` repository variable — every other ref builds and skips. Changing that variable is the whole cutover; the workflow is intentionally not present on `main`. Do not use manual `yarn deploy` — it is not configured for this site.
+Deployment is handled automatically by the `docs-deploy.yml` workflow, which lives on the release branches and publishes only from the one named by the `DOCS_DEPLOY_BRANCH` repository variable — every other ref builds and skips. The workflow is intentionally not present on `main`. Do not use manual `yarn deploy` — it is not configured for this site.
+
+### Cutting over to a new branch
+
+Two steps, not one: GitHub emits no event when a repository variable changes, so
+setting it starts nothing.
+
+1. Set `DOCS_DEPLOY_BRANCH` to the new branch (Settings → Secrets and variables →
+   Actions → Variables).
+2. Dispatch the deploy against that branch:
+   `gh workflow run docs-deploy.yml --ref <branch>` — or push any `docs/site/**`
+   change to it.
+
+Skipping step 2 is not fatal, only slow: `docs-deploy-cron.yml` on `main` wakes
+at 06:20 UTC and dispatches whichever branch the variable names, so production
+would otherwise stay on the previous branch for up to 24 hours. That cron reads
+the same variable, so step 1 is the only place the branch is named.
 
 ## Disk size data flow
 

@@ -16,12 +16,13 @@ const currentDocsVersion = {
   badge: false,
 };
 
-// Releases carry a pre-release suffix without reliably setting the API's
-// `prerelease` flag, so tag shape is the load-bearing check. Semver identifiers
-// are arbitrary (-rc.1, -dev, -nightly), so reject any hyphen rather than a list.
-const PRERELEASE_TAG = /-/;
-
 type Release = {tag_name: string; prerelease: boolean; draft: boolean};
+
+// Stable-release selection lives in its own CommonJS module so its ordering
+// rules are testable without booting Docusaurus (src/releases.test.js). The
+// GitHub API orders releases by publish date, so every selector there sorts by
+// semantic version instead of trusting that order.
+const {installableVersion, latestStableInSeries} = require('./src/releases.js');
 
 function githubHeaders(): Record<string, string> {
   const headers: Record<string, string> = {Accept: 'application/vnd.github.v3+json'};
@@ -43,37 +44,6 @@ async function fetchReleases(): Promise<Release[]> {
     throw new Error(`Release lookup failed: ${res.status} ${res.statusText}.${hint}`);
   }
   return await res.json() as Release[];
-}
-
-const isStable = (r: Release) =>
-  !r.draft && !r.prerelease && !PRERELEASE_TAG.test(r.tag_name);
-
-// Scoped by series because the repo-wide "latest" is ordered by release date,
-// not by version, so a back-port or pre-release could win it.
-function stableInSeries(releases: Release[], series: string): Release | undefined {
-  return releases.find((r) => isStable(r) && r.tag_name.startsWith(`${series}.`));
-}
-
-function latestStableInSeries(releases: Release[], series: string): string {
-  const match = stableInSeries(releases, series);
-  if (!match) {
-    throw new Error(
-      `No stable ${series} release found in the newest 100 releases. ` +
-      'If that series predates the newest 100 releases, fetchReleases() needs pagination.',
-    );
-  }
-  return match.tag_name.replace(/^v/, '');
-}
-
-// Version pasted into the install commands. Falls back to the newest stable
-// release of any series while this one has none, since that is what a reader can
-// actually install; throwing is deliberate when nothing resolves at all.
-function installableVersion(releases: Release[], series: string): string {
-  const match = stableInSeries(releases, series) ?? releases.find(isStable);
-  if (!match) {
-    throw new Error('No stable release found in the newest 100 releases.');
-  }
-  return match.tag_name.replace(/^v/, '');
 }
 
 export default async function createConfig(): Promise<Config> {
