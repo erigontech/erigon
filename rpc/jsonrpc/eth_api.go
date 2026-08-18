@@ -503,7 +503,46 @@ func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, b
 	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
 		return err
 	}
-	return api.checkReceiptsAvailable(ctx, tx, block)
+	err := api.checkReceiptsAvailable(ctx, tx, block)
+	if err == nil || !errors.Is(err, state.PrunedError) {
+		return err
+	}
+	if empty, emptyErr := api.blockHasNoReceipts(ctx, tx, block); emptyErr == nil && empty {
+		return nil
+	}
+	return err
+}
+
+// blockHasNoReceipts reports whether the block has no receipt to read at all, in
+// which case its transaction count is the whole answer and neither the receipt
+// cache nor state history is consulted. Bor never qualifies: its state sync
+// receipt is reconstructed from state history even where the body is empty.
+func (api *BaseAPI) blockHasNoReceipts(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	if chainConfig.Bor != nil {
+		return false, nil
+	}
+	header, err := api._blockReader.HeaderByNumber(ctx, tx, block)
+	if err != nil || header == nil {
+		return false, err
+	}
+	body, txCount, err := api._blockReader.Body(ctx, tx, header.Hash(), block)
+	if err != nil || body == nil {
+		return false, err
+	}
+	return txCount == 0, nil
+}
+
+// checkBlockHistoryAvailable gates endpoints that re-execute a block: they read its
+// transactions from the body and start from the state history preceding it.
+func (api *BaseAPI) checkBlockHistoryAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
+	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+		return err
+	}
+	return api.checkPruneHistory(ctx, tx, block)
 }
 
 func (api *BaseAPI) pruneMode(tx kv.Tx) (*prune.Mode, error) {

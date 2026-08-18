@@ -550,45 +550,29 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 	defer tx.Rollback()
 
-	var blockNum, txNum uint64
-	var ok bool
-
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	// A Bor state sync txn is in no block body, so only the bridge can place it.
+	// Resolving it first is what lets the gate below measure its real block.
+	blockNum, txNum, isBorStateSyncTx, ok, err := api.txnLookupWithBorFallback(ctx, tx, txnHash, chainConfig)
 	if err != nil {
 		return nil, err
 	}
-	if !ok && chainConfig.Bor == nil {
+	if !ok {
 		return nil, nil
 	}
-
-	overlayTx := api.filters.WithOverlay(tx)
 
 	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	// Private API returns 0 if transaction is not found.
-	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
-
+	overlayTx := api.filters.WithOverlay(tx)
 	txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum, isBorStateSyncTx)
 	if err != nil {
 		return nil, err
-	}
-
-	if isBorStateSyncTx {
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if !ok {
-		return nil, nil
 	}
 
 	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)

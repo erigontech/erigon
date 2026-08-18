@@ -220,8 +220,8 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 		return nil, &rpc.CustomError{Message: fmt.Sprintf("%s: %d", errExceedBlockRange, api.blockRangeLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
-	// Reads the log indices and re-executes: both need history, not receipts.
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, begin)
+	// Searches the log indices and re-executes, so stored receipts cannot answer for it.
+	err = api.BaseAPI.checkBlockHistoryAvailable(ctx, tx, begin)
 	if err != nil {
 		return nil, err
 	}

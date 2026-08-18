@@ -41,6 +41,9 @@ const (
 	pruneGatingChainLen    = 20
 	pruneGatingDistance    = prune.Distance(10)
 	pruneGatingOldBlockIdx = 3
+	// pruneGatingEmptyBlockIdx is left without transactions: the receipts of such a
+	// block are answerable from its body alone, whatever the receipt retention is.
+	pruneGatingEmptyBlockIdx = 4
 )
 
 // pruneGateBoundary declares which prune boundary an endpoint must gate its
@@ -53,6 +56,7 @@ const (
 	gatedByHistory                                // Mode.History via checkPruneHistory
 	gatedByReceipts                               // Mode.Receipts-unless-following-history via checkReceiptsAvailable
 	gatedByBlockReceipts                          // both of the above via checkBlockReceiptsAvailable
+	gatedByBlockHistory                           // Mode.Blocks and Mode.History via checkBlockHistoryAvailable
 )
 
 // pruneGatingAPIs holds the implementations the table drives. They share a
@@ -73,8 +77,8 @@ type pruneGatingRef struct {
 }
 
 type pruneGatingChain struct {
-	head        uint64
-	old, recent pruneGatingRef
+	head               uint64
+	old, recent, empty pruneGatingRef
 }
 
 type pruneGatingEndpoint struct {
@@ -157,10 +161,12 @@ var pruneGatingEndpoints = []pruneGatingEndpoint{
 	{"erigon_getLogs_byAddress", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.erigon.GetLogs(ctx, addressFilter(ref.num))
 	}},
-	{"erigon_getLatestLogs", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	// These two re-execute the range, so they read every transaction of a block on
+	// top of the state history the replay starts from.
+	{"erigon_getLatestLogs", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.erigon.GetLatestLogs(ctx, blockFilter(ref.num), filters.LogFilterOptions{LogCount: 10})
 	}},
-	{"overlay_getLogs", gatedByHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
+	{"overlay_getLogs", gatedByBlockHistory, func(ctx context.Context, apis pruneGatingAPIs, ref pruneGatingRef) (any, error) {
 		return apis.overlay.GetLogs(ctx, blockFilter(ref.num), nil, nil)
 	}},
 	// These two serve the receipts of one block and can take either path.
@@ -295,6 +301,9 @@ func pruneGateFires(boundary pruneGateBoundary, cfg pruneGatingConfig, blockNum,
 	case gatedByBlockReceipts:
 		return pruneGateFires(gatedByBlocks, cfg, blockNum, head) ||
 			pruneGateFires(gatedByReceipts, cfg, blockNum, head)
+	case gatedByBlockHistory:
+		return pruneGateFires(gatedByBlocks, cfg, blockNum, head) ||
+			pruneGateFires(gatedByHistory, cfg, blockNum, head)
 	}
 	return amount.Enabled() && blockNum < amount.PruneTo(head)
 }
@@ -311,11 +320,13 @@ func setupPruneGating(t *testing.T, cfg pruneGatingConfig) (pruneGatingAPIs, pru
 
 	signer := types.LatestSignerForChainID(nil)
 	c, err := m.GenerateChain(pruneGatingChainLen, func(i int, block *blockgen.BlockGen) {
-		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{}, uint256.NewInt(1), 21000, nil, nil), *signer, testKey)
-		if err != nil {
-			panic(err)
+		if i != pruneGatingEmptyBlockIdx {
+			txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{}, uint256.NewInt(1), 21000, nil, nil), *signer, testKey)
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
 		}
-		block.AddTx(txn)
 		// Both legs need an ommer so the uncle endpoints assert on a real
 		// result instead of passing vacuously on nil.
 		switch i {
@@ -356,9 +367,12 @@ func setupPruneGating(t *testing.T, cfg pruneGatingConfig) (pruneGatingAPIs, pru
 	otsBase := newBaseApiForTest(m)
 	apis.ots = NewOtterscanAPI(otsBase, m.DB, 25)
 	apis.overlay = NewOverlayAPI(otsBase, m.DB, &rpccfg.OverlayApiConfig{GasCap: 1_000_000}, apis.ots)
+	empty := c.Blocks[pruneGatingEmptyBlockIdx]
+	require.Empty(t, empty.Transactions(), "the empty-block leg needs a block without transactions")
 	return apis, pruneGatingChain{
 		head:   pruneGatingChainLen,
 		old:    ref(pruneGatingOldBlockIdx),
 		recent: ref(pruneGatingChainLen - 1),
+		empty:  pruneGatingRef{num: empty.NumberU64(), hash: empty.Hash()},
 	}
 }

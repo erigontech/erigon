@@ -17,15 +17,25 @@
 package jsonrpc
 
 import (
+	"fmt"
 	"math/big"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/polygon/bor/borcfg"
+	bortypes "github.com/erigontech/erigon/polygon/bor/types"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
+	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
 const (
@@ -335,6 +345,222 @@ func TestLogsGateRequiresBlockBodies(t *testing.T) {
 	err = apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, filters.FilterCriteria{})
 	require.ErrorIs(t, err, state.PrunedError)
 	require.Contains(t, err.Error(), "blocks are available")
+}
+
+// TestBlockHistoryGateCombinesBothBoundaries pins that the composed gate rejects on
+// either leg and names the one that rejected, including the boundary block itself.
+// Each leg is measured with the other kept in full, so neither can mask the other.
+func TestBlockHistoryGateCombinesBothBoundaries(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name     string
+		mode     prune.Mode
+		boundary string
+	}{
+		{
+			name:     "both_legs_pass",
+			mode:     prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: prune.KeepAllBlocksPruneMode},
+			boundary: "",
+		},
+		{
+			name:     "blocks_leg_rejects",
+			mode:     prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: pruneGatingDistance},
+			boundary: "blocks are available",
+		},
+		{
+			name:     "history_leg_rejects",
+			mode:     prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode},
+			boundary: "history is available",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: tc.mode})
+			ctx := t.Context()
+			tx, err := apis.eth.db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			err = apis.eth.checkBlockHistoryAvailable(ctx, tx, chainInfo.old.num)
+			if tc.boundary == "" {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, state.PrunedError)
+			require.Contains(t, err.Error(), tc.boundary, "the error must name the leg that rejected")
+
+			oldest := pruneGatingDistance.PruneTo(chainInfo.head)
+			require.NoError(t, apis.eth.checkBlockHistoryAvailable(ctx, tx, oldest),
+				"the oldest retained block is served")
+		})
+	}
+}
+
+// TestReplayLogEndpointsRequireBlockBodies pins the blocks leg of the log
+// endpoints that re-execute: they read each transaction to replay it, so a
+// pruned body leaves them answering with a silently incomplete result.
+func TestReplayLogEndpointsRequireBlockBodies(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: pruneGatingDistance,
+		},
+	})
+	ctx := t.Context()
+
+	for _, tc := range []struct {
+		name string
+		call func(block uint64) (any, error)
+	}{
+		{"erigon_getLatestLogs", func(block uint64) (any, error) {
+			return apis.erigon.GetLatestLogs(ctx, blockFilter(block), filters.LogFilterOptions{LogCount: 10})
+		}},
+		{"overlay_getLogs", func(block uint64) (any, error) {
+			return apis.overlay.GetLogs(ctx, blockFilter(block), nil, nil)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.call(chainInfo.old.num)
+			require.ErrorIs(t, err, state.PrunedError)
+			require.Contains(t, err.Error(), "blocks are available")
+
+			_, err = tc.call(chainInfo.recent.num)
+			require.NoError(t, err, "a retained body is served even with history kept in full")
+		})
+	}
+}
+
+// TestBlockReceiptsGateServesEmptyBlocks pins that a block with no transactions
+// is served from its body: it has no receipt to read, so neither the receipt
+// cache nor state history is consulted.
+func TestBlockReceiptsGateServesEmptyBlocks(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+		},
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require.NoError(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, chainInfo.empty.num))
+
+	err = apis.eth.checkBlockReceiptsAvailable(ctx, tx, chainInfo.old.num)
+	require.ErrorIs(t, err, state.PrunedError, "a block carrying transactions still needs its receipts")
+
+	receipts, err := apis.eth.GetBlockReceipts(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.empty.num)))
+	require.NoError(t, err)
+	require.Empty(t, receipts)
+}
+
+// borStateSyncChainConfig mirrors TestChainBerlinConfig with Bor enabled, which is
+// what puts the state sync txn lookup on the bridge instead of the block bodies.
+// The rules name stays ethash to match the faker the tester picks for Bor.
+func borStateSyncChainConfig() *chain.Config {
+	return &chain.Config{
+		ChainID:               uint256.NewInt(1337),
+		Rules:                 chain.EtHashRules,
+		HomesteadBlock:        common.NewUint64(0),
+		TangerineWhistleBlock: common.NewUint64(0),
+		SpuriousDragonBlock:   common.NewUint64(0),
+		ByzantiumBlock:        common.NewUint64(0),
+		ConstantinopleBlock:   common.NewUint64(0),
+		PetersburgBlock:       common.NewUint64(0),
+		IstanbulBlock:         common.NewUint64(0),
+		MuirGlacierBlock:      common.NewUint64(0),
+		BerlinBlock:           common.NewUint64(0),
+		Ethash:                new(chain.EthashConfig),
+		Bor:                   &borcfg.BorConfig{},
+	}
+}
+
+// setupBorStateSyncGating builds a Bor chain and an eth API whose bridge resolves
+// one state sync txn hash to stateSyncBlock. Such a txn is not part of any block
+// body, so the regular txn lookup misses it and only the bridge can place it.
+func setupBorStateSyncGating(t *testing.T, mode prune.Mode, stateSyncBlock uint64) (*APIImpl, pruneGatingChain) {
+	t.Helper()
+	m := execmoduletester.New(t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: borStateSyncChainConfig(),
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	c, err := m.GenerateChain(pruneGatingChainLen, func(i int, block *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(c))
+
+	tx, err := m.DB.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	_, err = prune.EnsureNotChanged(tx, mode)
+	require.NoError(t, err)
+	require.NoError(t, tx.Commit())
+
+	bridge := mockBridgeReader{stateSyncBlock: stateSyncBlock, stateSyncFound: true}
+	base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, bridge, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	ref := func(idx int) pruneGatingRef {
+		b := c.Blocks[idx]
+		return pruneGatingRef{num: b.NumberU64(), hash: b.Hash()}
+	}
+	return newEthApiForTest(base, m.DB, nil, nil), pruneGatingChain{
+		head:   pruneGatingChainLen,
+		old:    ref(pruneGatingOldBlockIdx),
+		recent: ref(pruneGatingChainLen - 1),
+	}
+}
+
+// TestEmptyBlockBypassExcludesBor pins the Bor exclusion of the empty-block bypass:
+// a state sync receipt is reconstructed from state history, so a Bor block carrying
+// no transactions is still unanswerable below the history boundary.
+func TestEmptyBlockBypassExcludesBor(t *testing.T) {
+	t.Parallel()
+
+	api, chainInfo := setupBorStateSyncGating(t, prune.Mode{
+		Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+	}, pruneGatingChainLen)
+	ctx := t.Context()
+	tx, err := api.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	empty, err := api.blockHasNoReceipts(ctx, tx, chainInfo.old.num)
+	require.NoError(t, err)
+	require.False(t, empty, "the chain carries no transactions at all; only Bor keeps the gate on")
+
+	err = api.checkBlockReceiptsAvailable(ctx, tx, chainInfo.old.num)
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Contains(t, err.Error(), "history is available")
+}
+
+// TestTransactionReceiptGatesResolvedBorStateSyncBlock pins that the gate runs on
+// the block the state sync txn actually belongs to. Its hash is absent from every
+// body, so gating before the bridge resolves it measures the genesis block and
+// refuses every state sync receipt on a body-pruned node.
+func TestTransactionReceiptGatesResolvedBorStateSyncBlock(t *testing.T) {
+	t.Parallel()
+
+	mode := prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: pruneGatingDistance}
+
+	t.Run("retained_block_is_served", func(t *testing.T) {
+		t.Parallel()
+		api, chainInfo := setupBorStateSyncGating(t, mode, pruneGatingChainLen-1)
+		_, err := api.GetTransactionReceipt(t.Context(), bortypes.ComputeBorTxHash(chainInfo.recent.num, chainInfo.recent.hash))
+		require.NotErrorIs(t, err, state.PrunedError)
+	})
+
+	t.Run("pruned_block_names_itself", func(t *testing.T) {
+		t.Parallel()
+		api, chainInfo := setupBorStateSyncGating(t, mode, uint64(pruneGatingOldBlockIdx+1))
+		_, err := api.GetTransactionReceipt(t.Context(), bortypes.ComputeBorTxHash(chainInfo.old.num, chainInfo.old.hash))
+		require.ErrorIs(t, err, state.PrunedError)
+		require.Contains(t, err.Error(), fmt.Sprintf("requested block %d", chainInfo.old.num))
+	})
 }
 
 // TestCheckTxFee pins the fee cap: the fee is gasPrice*gas in wei, compared
