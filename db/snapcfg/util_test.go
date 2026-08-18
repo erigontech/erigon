@@ -212,3 +212,22 @@ func TestNameToParts(t *testing.T) {
 		})
 	}
 }
+
+func TestMergeLimitCaplinTypesSkipPreverifiedScan(t *testing.T) {
+	cfg := newCfg("mainnet", Preverified{Items: PreverifiedItems{
+		{Name: "v1.0-000000-000500-headers.seg"},
+		{Name: "v1.0-000000-000500-bodies.seg"},
+		{Name: "v1.0-000000-000500-transactions.seg"},
+	}})
+	require.NotEmpty(t, cfg.PreverifiedParsed, "the scan must have something to scan for this to mean anything")
+
+	for _, typ := range append(snaptype.CaplinSnapshotTypes, snaptype.CaplinStateSnapshotTypes...) {
+		e := typ.Enum()
+		require.True(t, snaptype.IsCaplinType(e), typ.Name())
+		require.Equal(t, uint64(snaptype.CaplinMergeLimit), cfg.MergeLimit(e, 0), typ.Name())
+		require.Equal(t, uint64(snaptype.CaplinMergeLimit), cfg.MergeLimit(e, 1_000_000), typ.Name())
+	}
+
+	require.Equal(t, uint64(snaptype.Erigon2MergeLimit), cfg.MergeLimit(snaptype.MinCoreEnum, 0),
+		"core types must still resolve through the preverified scan")
+}
