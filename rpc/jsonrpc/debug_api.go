@@ -242,7 +242,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		return state.IteratorDump{}, errors.New("accountRange for pending block not supported")
 	}
 
-	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}

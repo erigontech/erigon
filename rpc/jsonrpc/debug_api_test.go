@@ -939,11 +939,28 @@ func TestAccountRangeBlockTags(t *testing.T) {
 		require.NotEqual(t, safeResult.Root, finalizedResult.Root)
 	})
 
-	t.Run("latest tag succeeds", func(t *testing.T) {
+	t.Run("latest tag matches forkchoice head", func(t *testing.T) {
 		latestTag := rpc.LatestBlockNumber
-		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, addr[:], 10, true, true, nil)
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
-		require.NotEmpty(t, result.Accounts)
+
+		concreteNum := rpc.BlockNumber(headBlock.NumberU64())
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
+	})
+
+	t.Run("latestExecuted tag matches execution head", func(t *testing.T) {
+		latestExecutedTag := rpc.LatestExecutedBlockNumber
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestExecutedTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		concreteNum := rpc.BlockNumber(chainPack.Blocks[len(chainPack.Blocks)-1].NumberU64())
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
 	})
 
 	t.Run("pending tag is rejected", func(t *testing.T) {
