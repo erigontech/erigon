@@ -73,3 +73,15 @@ func TestBlockBuilderStopPrefersPayloadCompletedDuringSelection(t *testing.T) {
 		require.Same(t, want, result)
 	}
 }
+
+func TestBlockBuilderStopMarksAbandonedWait(t *testing.T) {
+	b := &BlockBuilder{done: make(chan struct{})}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	result, err := b.Stop(ctx)
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, ErrStopAbandoned)
+	require.ErrorIs(t, err, context.Canceled)
+}

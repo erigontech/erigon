@@ -18,6 +18,7 @@ package execmodule
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/holiman/uint256"
@@ -90,6 +91,10 @@ type AssembleBlockResult struct {
 	Busy      bool
 	PayloadID uint64
 }
+
+// ErrRequestAbandoned reports that an execution call ended because its caller stopped waiting,
+// rather than because the execution operation failed. Its error chain retains the reason.
+var ErrRequestAbandoned = errors.New("execution request abandoned")
 
 // AssembledBlockResult is the native return type for GetAssembledBlock.
 type AssembledBlockResult struct {
