@@ -73,7 +73,6 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/nat"
 	"github.com/erigontech/erigon/p2p/netutil"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/gasprice/gaspricecfg"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
@@ -872,28 +871,6 @@ var (
 		Value: "",
 	}
 
-	HeimdallURLFlag = cli.StringFlag{
-		Name:  "bor.heimdall",
-		Usage: "URL of Heimdall service",
-		Value: "http://localhost:1317",
-	}
-
-	// WithoutHeimdallFlag no heimdall (for testing purpose)
-	WithoutHeimdallFlag = cli.BoolFlag{
-		Name:  "bor.withoutheimdall",
-		Usage: "Run without Heimdall service (for testing purposes)",
-	}
-
-	BorBlockPeriodFlag = cli.BoolFlag{
-		Name:  "bor.period",
-		Usage: "Override the bor block period (for testing purposes)",
-	}
-
-	BorBlockSizeFlag = cli.BoolFlag{
-		Name:  "bor.minblocksize",
-		Usage: "Ignore the bor block period and wait for 'blocksize' transactions (for testing purposes)",
-	}
-
 	AAFlag = cli.BoolFlag{
 		Name:  "aa",
 		Usage: "Enable AA transactions",
@@ -1144,17 +1121,10 @@ var (
 		Name:  "shutter.p2p.listen.port",
 		Usage: "Use to override the default p2p listen port (defaults to 23102)",
 	}
-	PolygonPosSingleSlotFinalityFlag = cli.BoolFlag{
-		Name:  "polygon.pos.ssf",
-		Usage: "Enabling Polygon PoS Single Slot Finality",
-	}
-	PolygonPosSingleSlotFinalityBlockAtFlag = cli.Uint64Flag{
-		Name:  "polygon.pos.ssf.block",
-		Usage: "Enabling Polygon PoS Single Slot Finality since block",
-	}
-	PolygonPosWitProtocolFlag = cli.BoolFlag{
-		Name:  "polygon.wit-protocol",
-		Usage: "Enable WIT protocol for stateless witness data exchange (auto-enabled for Bor chains)",
+	WitProtocolFlag = cli.BoolFlag{
+		Name:    "wit-protocol",
+		Aliases: []string{"polygon.wit-protocol"},
+		Usage:   "Enable WIT protocol for stateless witness data exchange",
 	}
 	// ExperimentalParallelCommitmentFlag selects ParallelPatriciaHashed
 	// (ModeParallel) for commitment computation. Default off; flip to compare
@@ -1555,7 +1525,7 @@ func SetP2PConfig(ctx *cli.Command, cfg *p2p.Config, nodeName, datadir string, l
 	setBoolIfSet(&cfg.DiscoveryV4, &DiscoveryV4Flag)
 	setBoolIfSet(&cfg.DiscoveryV5, &DiscoveryV5Flag)
 	setBoolIfSet(&cfg.MetricsEnabled, &MetricsEnabledFlag)
-	setBoolIfSet(&cfg.EnableWitProtocol, &PolygonPosWitProtocolFlag)
+	setBoolIfSet(&cfg.EnableWitProtocol, &WitProtocolFlag)
 
 	logger.Info("Maximum peer count", "total", cfg.MaxPeers)
 
@@ -1779,25 +1749,6 @@ func SetupMinerCobra(cmd *cobra.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.Etherbase = common.HexToAddress(etherbase)
 }
 
-func setBorConfig(ctx *cli.Command, cfg *ethconfig.Config, nodeConfig *nodecfg.Config, logger log.Logger) {
-	cfg.HeimdallURL = ctx.String(HeimdallURLFlag.Name)
-	cfg.WithoutHeimdall = ctx.Bool(WithoutHeimdallFlag.Name)
-
-	heimdall.RecordWayPoints(true)
-
-	spec, _ := chainspec.ChainSpecByName(ctx.String(ChainFlag.Name))
-	if !spec.IsEmpty() && spec.Config.Bor != nil && !ctx.IsSet(MaxPeersFlag.Name) { // IsBor?
-		// override default max devp2p peers for polygon as per
-		// https://forum.polygon.technology/t/introducing-our-new-dns-discovery-for-polygon-pos-faster-smarter-more-connected/19871
-		// which encourages high peer count
-		nodeConfig.P2P.MaxPeers = 100
-		logger.Info("Maximum peer count default sanitizing for bor", "total", nodeConfig.P2P.MaxPeers)
-	}
-
-	cfg.PolygonPosSingleSlotFinality = ctx.Bool(PolygonPosSingleSlotFinalityFlag.Name)
-	cfg.PolygonPosSingleSlotFinalityBlockAt = ctx.Uint64(PolygonPosSingleSlotFinalityBlockAtFlag.Name)
-}
-
 func setBuilder(ctx *cli.Command, cfg *buildercfg.BuilderConfig) {
 	cfg.EnabledPOS = !ctx.IsSet(ProposingDisableFlag.Name)
 
@@ -2009,7 +1960,7 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	chain := resolveChainName(ctx)
 	if ctx.IsSet(NetworkIdFlag.Name) {
 		cfg.NetworkID = ctx.Uint64(NetworkIdFlag.Name)
-	} else if chain != networkname.Dev && chain != networkname.BorDevnet {
+	} else if chain != networkname.Dev {
 		spec, err := chainspec.ChainSpecByName(chain)
 		if err != nil {
 			Fatalf("chain name is not recognized: %s", chain)
@@ -2044,7 +1995,6 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	setEthash(ctx, nodeConfig.Dirs.DataDir, cfg)
 	setBuilder(ctx, &cfg.Builder)
 	setWhitelist(ctx, cfg)
-	setBorConfig(ctx, cfg, nodeConfig, logger)
 	if err := setBeaconAPI(ctx, cfg); err != nil {
 		log.Error("Failed to set beacon API", "err", err)
 	}

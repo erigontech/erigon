@@ -66,7 +66,6 @@ func InitMiner(
 	dirName string,
 	genesis *types.Genesis,
 	privKey *ecdsa.PrivateKey,
-	withoutHeimdall bool,
 ) (_ *node.Node, _ *eth.Ethereum, err error) {
 	// Define the basic configurations for the Ethereum node
 
@@ -143,13 +142,12 @@ func InitMiner(
 			GasLimit:   &genesis.GasLimit,
 			EnabledPOS: true,
 		},
-		Sync:            ethconfig.Defaults.Sync,
-		Downloader:      downloaderConfig,
-		WithoutHeimdall: withoutHeimdall,
-		RPCGasCap:       50000000,
-		RPCTxFeeCap:     1, // 1 ether
-		Snapshot:        ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
-		StateStream:     true,
+		Sync:        ethconfig.Defaults.Sync,
+		Downloader:  downloaderConfig,
+		RPCGasCap:   50000000,
+		RPCTxFeeCap: 1, // 1 ether
+		Snapshot:    ethconfig.BlocksFreezing{NoDownloader: true, ChainName: genesis.Config.ChainName},
+		StateStream: true,
 	}
 	ethCfg.TxPool.DBDir = nodeCfg.Dirs.TxPool
 	ethCfg.TxPool.CommitEvery = 15 * time.Second

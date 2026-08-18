@@ -71,7 +71,7 @@ func init() {
 	rootCmd.Flags().IntVar(&maxPendPeers, utils.MaxPendingPeersFlag.Name, utils.MaxPendingPeersFlag.Value, utils.MaxPendingPeersFlag.Usage)
 	rootCmd.Flags().BoolVar(&healthCheck, utils.HealthCheckFlag.Name, false, utils.HealthCheckFlag.Usage)
 	rootCmd.Flags().BoolVar(&metrics, utils.MetricsEnabledFlag.Name, false, utils.MetricsEnabledFlag.Usage)
-	rootCmd.Flags().BoolVar(&witProtocol, utils.PolygonPosWitProtocolFlag.Name, false, utils.PolygonPosWitProtocolFlag.Usage)
+	rootCmd.Flags().BoolVar(&witProtocol, utils.WitProtocolFlag.Name, false, utils.WitProtocolFlag.Usage)
 
 	if err := rootCmd.MarkFlagDirname(utils.DataDirFlag.Name); err != nil {
 		panic(err)
