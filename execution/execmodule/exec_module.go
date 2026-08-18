@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/cache"
@@ -129,9 +130,11 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 		context = c.publishedSD()
 	}
 
-	view := &CacheView{context: context, getter: tx}
+	var view *CacheView
 	if context != nil {
-		view.getter = context.AsGetter(tx)
+		view = &CacheView{context: context, getter: context.AsStateGetter(tx)}
+	} else {
+		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
 	return view, nil
 }
@@ -146,7 +149,7 @@ type CacheView struct {
 	context *execctx.SharedDomains
 	// getter is built once per view: it carries the per-tx cache ReadView, so
 	// per-read getter construction would cost an allocation on every call.
-	getter kv.TemporalGetter
+	getter execctxapi.StateGetter
 }
 
 func (c *CacheView) Get(k []byte) ([]byte, error) {
