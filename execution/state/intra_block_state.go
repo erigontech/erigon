@@ -522,6 +522,8 @@ func (sdb *IntraBlockState) GetLogs(txIndex int, txnHash common.Hash, blockNumbe
 
 // GetRawLogs - is like GetLogs, but allow postpone calculation of `txn.Hash()`.
 // Example: if you need filter logs and only then set `txn.Hash()` for filtered logs - then no reason to calc for all transactions.
+// It returns everything txIndex has emitted so far, not the delta since the
+// last call, so a caller that reads it repeatedly must not accumulate results.
 func (sdb *IntraBlockState) GetRawLogs(txIndex int) types.Logs {
 	return sdb.logs.forTx(txIndex).Copy()
 }
