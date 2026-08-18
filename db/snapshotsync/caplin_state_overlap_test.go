@@ -235,3 +235,26 @@ func TestCaplinStateRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
 	v.Close()
 	require.NoFileExists(t, subSeg)
 }
+
+// Overlap removal has to survive several tables sharing a range: every other test here
+// configures one table, which keeps a type's own files adjacent no matter how the
+// directory listing is ordered.
+func TestCaplinStateRemoveOverlapsWithSeveralTables(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	tables := []string{kv.BlockRoot, kv.PendingDepositsDump, kv.StateRoot}
+
+	for _, table := range tables {
+		writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
+	}
+	subSeg, subIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, kv.BlockRoot, 100_000, 150_000, logger)
+
+	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.NoFileExists(t, subSeg, "a covered subset must be removed even when other tables share its range")
+	require.NoFileExists(t, subIdx)
+	for _, table := range tables {
+		require.Equal(t, []Range{{from: 0, to: 150_000}}, s.coveredRangesForType(table))
+	}
+}
