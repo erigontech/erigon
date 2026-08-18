@@ -92,13 +92,29 @@ type AssembleBlockResult struct {
 	PayloadID uint64
 }
 
+// ErrBusy reports that the execution module was already occupied. It settles on its own, unlike a
+// rejection, which returns the same answer however many times it is asked.
+//
+// It may be joined with ErrRequestAbandoned to retain contention as diagnostic context. Code that
+// retries ErrBusy must check ErrRequestAbandoned first because a joined error matches both.
+var ErrBusy = errors.New("execution module is busy")
+
 // ErrRequestAbandoned reports that an execution call ended because its caller stopped waiting,
 // rather than because the execution operation failed. Its error chain retains the reason.
 var ErrRequestAbandoned = errors.New("execution request abandoned")
 
+// RequestAbandonedError retains the cancellation cause and an optional final-attempt error.
+func RequestAbandonedError(cause, lastAttempt error) error {
+	if lastAttempt == nil {
+		return fmt.Errorf("%w: %w", ErrRequestAbandoned, cause)
+	}
+	return fmt.Errorf("%w: %w (last attempt: %w)", ErrRequestAbandoned, cause, lastAttempt)
+}
+
 // AssembledBlockResult is the native return type for GetAssembledBlock.
 type AssembledBlockResult struct {
-	// Busy is true when the builder has not finished yet.
+	// Busy is true when the module was already occupied, not when the builder is still working:
+	// a call that finds its builder waits for it to finish.
 	Busy bool
 	// Block holds the assembled block with receipts and requests.
 	// Nil when Busy is true or when no builder was found for the payload ID.
@@ -156,7 +172,9 @@ type ExecutionModule interface {
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)
 
 	// GetAssembledBlock retrieves the block that was assembled under the
-	// given payloadID.  The result is Busy when the builder has not finished.
+	// given payloadID.  The result is Busy when the module was already occupied; otherwise the
+	// call waits for that payload's builder to finish. An unknown payloadID returns an empty
+	// result right away, not an error.
 	GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error)
 
 	// --- Header / body queries --------------------------------------------

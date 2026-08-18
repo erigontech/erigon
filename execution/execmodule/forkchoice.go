@@ -139,7 +139,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 			return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
 		}
 		e.logger.Debug("forkChoiceUpdate cancelled")
-		return ForkChoiceResult{}, ctx.Err()
+		return ForkChoiceResult{}, fmt.Errorf("%w: %w", ErrRequestAbandoned, ctx.Err())
 	}
 }
 

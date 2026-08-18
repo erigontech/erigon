@@ -164,29 +164,27 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 	)
 	for attempt := range attempts {
 		if ctxErr := ctx.Err(); ctxErr != nil {
-			return 0, ctxErr
+			return 0, execmodule.RequestAbandonedError(ctxErr, err)
 		}
 		if id, err = assemble(ctx); err == nil {
 			return id, nil
 		}
-		if !errors.Is(err, chainreader.ErrExecutionBusy) {
+		if errors.Is(err, execmodule.ErrRequestAbandoned) {
+			return 0, err
+		}
+		if !errors.Is(err, execmodule.ErrBusy) {
 			return 0, err
 		}
 		if attempt+1 == attempts {
 			break
 		}
-		timer := time.NewTimer(delay)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return 0, ctx.Err()
-		case <-timer.C:
+		if sleepErr := common.Sleep(ctx, delay); sleepErr != nil {
+			return 0, execmodule.RequestAbandonedError(sleepErr, err)
 		}
+	}
+	// The last attempt can itself have used up the caller, and there is no wait left to notice it.
+	if ctxErr := ctx.Err(); ctxErr != nil {
+		return 0, execmodule.RequestAbandonedError(ctxErr, err)
 	}
 	return 0, err
 }
