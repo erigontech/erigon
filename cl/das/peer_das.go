@@ -70,6 +70,7 @@ var numOfBlobRecoveryWorkers = 8
 const (
 	maxDeferredColumnSyncBlocks = 64
 	deferredColumnSyncTTL       = 30 * time.Minute
+	maxConcurrentColumnRequests = 4
 )
 
 type deferredColumnSyncJob struct {
@@ -101,17 +102,18 @@ func (b *deferredColumnSyncBlock) GetBlobKzgCommitments() *solid.ListSSZ[*cltype
 }
 
 type peerdas struct {
-	state             *peerdasstate.PeerDasState
-	nodeID            enode.ID
-	rpc               *rpc.BeaconRpcP2P
-	beaconConfig      *clparams.BeaconChainConfig
-	caplinConfig      *clparams.CaplinConfig
-	columnStorage     blob_storage.DataColumnStorage
-	blobStorage       blob_storage.BlobStorage
-	sentinel          sentinelproto.SentinelClient
-	ethClock          eth_clock.EthereumClock
-	gossipManager     gossipmgr.Gossip
-	recoverBlobsQueue chan recoverBlobsRequest
+	state              *peerdasstate.PeerDasState
+	nodeID             enode.ID
+	rpc                *rpc.BeaconRpcP2P
+	beaconConfig       *clparams.BeaconChainConfig
+	caplinConfig       *clparams.CaplinConfig
+	columnStorage      blob_storage.DataColumnStorage
+	blobStorage        blob_storage.BlobStorage
+	sentinel           sentinelproto.SentinelClient
+	ethClock           eth_clock.EthereumClock
+	gossipManager      gossipmgr.Gossip
+	recoverBlobsQueue  chan recoverBlobsRequest
+	columnRequestSlots chan struct{}
 
 	recoveringMutex     sync.Mutex
 	isRecovering        map[common.Hash]bool
@@ -143,17 +145,18 @@ func NewPeerDas(
 	kzg.InitKZGCtx()
 	gloasDataCache, _ := lru.New[common.Hash, *gloasBlockData]("gloasDataCache", 128)
 	p := &peerdas{
-		state:             peerDasState,
-		nodeID:            nodeID,
-		rpc:               rpc,
-		beaconConfig:      beaconConfig,
-		caplinConfig:      caplinConfig,
-		columnStorage:     columnStorage,
-		blobStorage:       blobStorage,
-		sentinel:          sentinel,
-		ethClock:          ethClock,
-		gossipManager:     gossipManager,
-		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
+		state:              peerDasState,
+		nodeID:             nodeID,
+		rpc:                rpc,
+		beaconConfig:       beaconConfig,
+		caplinConfig:       caplinConfig,
+		columnStorage:      columnStorage,
+		blobStorage:        blobStorage,
+		sentinel:           sentinel,
+		ethClock:           ethClock,
+		gossipManager:      gossipManager,
+		recoverBlobsQueue:  make(chan recoverBlobsRequest, 128),
+		columnRequestSlots: make(chan struct{}, maxConcurrentColumnRequests),
 
 		recoveringMutex:   sync.Mutex{},
 		isRecovering:      make(map[common.Hash]bool),
@@ -783,8 +786,6 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 	defer close(stopChan)
 	resultChan := make(chan resultData, 64)
 	go func(req *downloadRequest) {
-		// send the request in a loop with a ticker to avoid overwhelming the peer
-		// keep trying until the request is done
 		ticker := time.NewTicker(100 * time.Millisecond)
 		defer ticker.Stop()
 		wg := sync.WaitGroup{}
@@ -794,7 +795,13 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 			case <-stopChan:
 				break loop
 			case <-ticker.C:
+				select {
+				case d.columnRequestSlots <- struct{}{}:
+				default:
+					continue
+				}
 				wg.Go(func() {
+					defer func() { <-d.columnRequestSlots }()
 					cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
 					ids := req.requestData()

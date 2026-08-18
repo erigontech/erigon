@@ -21,6 +21,7 @@ import (
 	"context"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -53,6 +54,12 @@ type maliciousColumnSentinel struct {
 	metadataReady chan struct{}
 	banOnce       sync.Once
 	banned        chan struct{}
+
+	blockColumnRequests  bool
+	activeColumnRequests atomic.Int32
+	maxColumnRequests    atomic.Int32
+	columnLimitOnce      sync.Once
+	columnLimitReached   chan struct{}
 }
 
 func (s *maliciousColumnSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
@@ -64,13 +71,90 @@ func (s *maliciousColumnSentinel) BanPeer(context.Context, *sentinelproto.Peer, 
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
-func (s *maliciousColumnSentinel) SendPeerRequest(_ context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+func (s *maliciousColumnSentinel) SendPeerRequest(ctx context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	peer := &sentinelproto.Peer{Pid: "malicious-peer"}
 	if strings.Contains(req.Topic, "metadata") {
 		s.metadataOnce.Do(func() { close(s.metadataReady) })
 		return &sentinelproto.ResponseData{Data: s.metadataResponse, Peer: peer}, nil
 	}
+	if s.blockColumnRequests {
+		active := s.activeColumnRequests.Add(1)
+		for maxActive := s.maxColumnRequests.Load(); active > maxActive; maxActive = s.maxColumnRequests.Load() {
+			if s.maxColumnRequests.CompareAndSwap(maxActive, active) {
+				break
+			}
+		}
+		if active == maxConcurrentColumnRequests && s.columnLimitReached != nil {
+			s.columnLimitOnce.Do(func() { close(s.columnLimitReached) })
+		}
+		defer s.activeColumnRequests.Add(-1)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return &sentinelproto.ResponseData{Data: s.columnResponse, Peer: peer}, nil
+}
+
+func TestRunDownloadBoundsConcurrentRequestsAcrossDownloads(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	initTestBeaconConfig(&cfg)
+
+	currentSlot := (cfg.FuluForkEpoch + 1) * cfg.SlotsPerEpoch
+	genesisTime := uint64(time.Now().Unix()) - currentSlot*cfg.SecondsPerSlot
+	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &cfg)
+
+	cgc := cfg.NumberOfColumns
+	syncnets := [1]byte{}
+	metadata := &cltypes.Metadata{Syncnets: &syncnets, CustodyGroupCount: &cgc}
+	var metadataWire bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&metadataWire, metadata))
+
+	sentinel := &maliciousColumnSentinel{
+		metadataResponse:    metadataWire.Bytes(),
+		metadataReady:       make(chan struct{}),
+		banned:              make(chan struct{}),
+		blockColumnRequests: true,
+		columnLimitReached:  make(chan struct{}),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil)
+
+	select {
+	case <-sentinel.metadataReady:
+	case <-time.After(30 * time.Second):
+		t.Fatal("test peer was not added to the custody-peer queue")
+	}
+
+	d := &peerdas{
+		rpc:                rpcClient,
+		beaconConfig:       &cfg,
+		state:              peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:      blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 0, &cfg, clock, beaconevents.NewEventEmitter()),
+		columnRequestSlots: make(chan struct{}, maxConcurrentColumnRequests),
+	}
+	done := make(chan error, 2)
+	for i := byte(1); i <= 2; i++ {
+		req := &downloadRequest{
+			beaconConfig: &cfg,
+			downloadTable: map[downloadTableEntry]map[uint64]bool{
+				{blockRoot: common.BytesToHash([]byte{i}), slot: currentSlot}: {0: true},
+			},
+		}
+		go func() { done <- d.runDownload(ctx, req, false) }()
+	}
+
+	select {
+	case <-sentinel.columnLimitReached:
+	case <-time.After(5 * time.Second):
+		t.Fatal("column requests did not reach the concurrency limit")
+	}
+	time.Sleep(300 * time.Millisecond)
+	maxColumnRequests := sentinel.maxColumnRequests.Load()
+	cancel()
+	require.NoError(t, <-done)
+	require.NoError(t, <-done)
+	require.Equal(t, int32(maxConcurrentColumnRequests), maxColumnRequests)
 }
 
 // A peer selects the response fork digest, so it can serve a Gloas-schema
@@ -133,11 +217,12 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 	gloasDataCache, err := lru.New[common.Hash, *gloasBlockData]("gloasDataCacheTest", 8)
 	require.NoError(t, err)
 	d := &peerdas{
-		rpc:            rpcClient,
-		beaconConfig:   &cfg,
-		state:          peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
-		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 0, &cfg, clock, beaconevents.NewEventEmitter()),
-		gloasDataCache: gloasDataCache,
+		rpc:                rpcClient,
+		beaconConfig:       &cfg,
+		state:              peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
+		columnStorage:      blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 0, &cfg, clock, beaconevents.NewEventEmitter()),
+		columnRequestSlots: make(chan struct{}, maxConcurrentColumnRequests),
+		gloasDataCache:     gloasDataCache,
 	}
 	req := &downloadRequest{
 		beaconConfig: &cfg,
