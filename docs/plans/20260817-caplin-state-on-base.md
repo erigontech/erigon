@@ -552,13 +552,13 @@ green when Task 9 moves lifecycle ownership to `BaseRoSnapshots`.
 **Files:**
 - Modify: `db/snapshotsync/caplin_state_lifecycle_test.go`
 
-- [ ] the existing helper `openTestCaplinStateSnapshots`
+- [x] the existing helper `openTestCaplinStateSnapshots`
   (`caplin_state_overlap_test.go:105-115`) is single-table. Add a multi-table
   helper here. Pick its tables freely: Task 9 derives `baseSegType` from the
   types passed in, so it is a member of the list by construction and
   `newRoSnapshots`'s membership panic (`snapshots.go:586-588`) is unreachable.
   Do not hardcode a particular table to satisfy it.
-- [ ] write a test with two tables at equal height asserting the **exact**
+- [x] write a test with two tables at equal height asserting the **exact**
   `BlocksAvailable()` value with `require.Equal(t, uint64(N), ...)`, not a
   relative claim. Today's value is `min(segmentsMax, idxMax)` where `idxMax` is
   min-over-types of `to` with no `-1` (`caplin_state_snapshots.go:560-575`). The
@@ -569,17 +569,21 @@ green when Task 9 moves lifecycle ownership to `BaseRoSnapshots`.
   `VisibleSegment(slot, kv.StateEvents)` for a slot a shorter table does not
   cover and hard-errors at `:148-149`. Reproduce min-over-types with no `-1`;
   do not "fix" this with a ±1.
-- [ ] write a test where one table is frozen lower than the other, again
+- [x] write a test where one table is frozen lower than the other, again
   asserting the exact value, so a change from min-over-types to `enums[0]` or to
   a max is caught
-- [ ] write a test asserting a table with zero segments drives it to 0
-- [ ] write the fixture that reproduces mainnet: N tables configured, N-1 with
+- [x] write a test asserting a table with zero segments drives it to 0
+- [x] write the fixture that reproduces mainnet: N tables configured, N-1 with
   files, one with none — the 33-configured / 23-published shape from Ground
   truth. Assert the resulting `BlocksAvailable()` explicitly. This is the case
   no other fixture in this plan covers and the one a real download-only node
   runs in; whichever way the decision goes, the test is where it gets recorded.
-- [ ] run `go test ./db/snapshotsync/ -run CaplinState` — these must pass before
-  task 9
+- [x] run `go test ./db/snapshotsync/ -run CaplinState` — the Task 8 availability
+  tests pass; the intentionally red Task 7 pinning test remains until task 9
+
+Task 8 validation note: the broader `-run CaplinState` selector still reports
+the Task 7 live-view failure documented above; the focused Task 8 selector is
+green, as are lint and the Erigon build.
 
 ---
 

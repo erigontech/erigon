@@ -26,6 +26,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/chain/networkname"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func caplinStateVisibleRanges(segments VisibleSegments) []Range {
@@ -34,6 +36,21 @@ func caplinStateVisibleRanges(segments VisibleSegments) []Range {
 		ranges = append(ranges, segment.Range)
 	}
 	return ranges
+}
+
+func openTestCaplinStateSnapshotsWithTables(t *testing.T, dirs datadir.Dirs, tables []string, logger log.Logger) *CaplinStateSnapshots {
+	t.Helper()
+	types := SnapshotTypes{
+		KeyValueGetters: make(map[string]KeyValueGetter, len(tables)),
+		Compression:     map[string]bool{},
+	}
+	for _, table := range tables {
+		types.KeyValueGetters[table] = nil
+	}
+	s := NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, logger)
+	t.Cleanup(s.Close)
+	require.NoError(t, s.OpenFolder())
+	return s
 }
 
 func TestCaplinStateViewPinsVisibleSegments(t *testing.T) {
@@ -87,4 +104,90 @@ func TestCaplinStateOpenListRecalculateRace(t *testing.T) {
 	for err := range errs {
 		require.NoError(t, err)
 	}
+}
+
+func TestCaplinStateBlocksAvailableEqualHeight(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	tables := []string{kv.BlockRoot, kv.PendingDepositsDump}
+	const to = uint64(100_000)
+
+	for _, table := range tables {
+		writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, to, logger)
+	}
+
+	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
+	require.Equal(t, to-1, s.BlocksAvailable())
+}
+
+func TestCaplinStateBlocksAvailableUsesLowestTable(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	tables := []string{kv.BlockRoot, kv.PendingDepositsDump}
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.BlockRoot, 0, 50_000, logger)
+	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.PendingDepositsDump, 0, 100_000, logger)
+
+	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
+	require.Equal(t, uint64(50_000), s.BlocksAvailable())
+}
+
+func TestCaplinStateBlocksAvailableZeroWhenTableHasNoSegments(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	tables := []string{kv.BlockRoot, kv.PendingDepositsDump}
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, kv.BlockRoot, 0, 50_000, logger)
+
+	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
+	require.Equal(t, uint64(0), s.BlocksAvailable())
+}
+
+func TestCaplinStateBlocksAvailableMainnetPublishedSubset(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	configured := []string{
+		kv.ValidatorEffectiveBalance,
+		kv.ValidatorSlashings,
+		kv.ValidatorBalance,
+		kv.StateEvents,
+		kv.ActiveValidatorIndicies,
+		kv.StateRoot,
+		kv.BlockRoot,
+		kv.SlotData,
+		kv.EpochData,
+		kv.InactivityScores,
+		kv.NextSyncCommittee,
+		kv.CurrentSyncCommittee,
+		kv.Eth1DataVotes,
+		kv.IntraRandaoMixes,
+		kv.RandaoMixes,
+		kv.BalancesDump,
+		kv.EffectiveBalancesDump,
+		kv.PendingConsolidations,
+		kv.PendingPartialWithdrawals,
+		kv.PendingDeposits,
+		kv.PendingConsolidationsDump,
+		kv.PendingPartialWithdrawalsDump,
+		kv.PendingDepositsDump,
+		kv.Builders,
+		kv.BuildersDump,
+		kv.BuilderPendingWithdrawals,
+		kv.BuilderPendingWithdrawalsDump,
+		kv.PayloadExpectedWithdrawals,
+		kv.PayloadExpectedWithdrawalsDump,
+		kv.ExecutionPayloadAvailabilityTable,
+		kv.BuilderPendingPaymentsTable,
+		kv.PtcWindowTable,
+		kv.LatestExecutionPayloadBidTable,
+	}
+	require.Len(t, configured, 33)
+	published := configured[:23]
+	require.Len(t, published, 23)
+	for _, table := range published {
+		writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	}
+
+	s := openTestCaplinStateSnapshotsWithTables(t, dirs, configured, logger)
+	require.Equal(t, uint64(0), s.BlocksAvailable())
 }
