@@ -140,11 +140,9 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 				return newHighestBlockProcessed, nil
 			}
 			if errors.Is(err, forkchoice.ErrMissingSegment) {
-				// Parent state not available — likely peer returned incomplete chain.
-				// Do NOT advance progress: return the initial highestBlockProcessed so the
-				// downloader retries from the same position with a (potentially different) peer.
-				// The 2-minute stale timeout in forwardSync will hand off to ChainTipSync
-				// if retries never succeed (e.g. all peers lack these blocks).
+				// A missing parent may mean the peer returned an incomplete chain. Keep the
+				// original progress so the same range is retried, possibly from another peer.
+				// The stale timeout eventually hands off to ChainTipSync.
 				logger.Debug("[Caplin] forward sync missing segment, will retry", "blockSlot", block.Block.Slot)
 				return highestBlockProcessed, nil
 			}

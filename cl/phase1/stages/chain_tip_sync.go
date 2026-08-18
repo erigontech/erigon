@@ -199,12 +199,13 @@ func sendFetchError(ctx context.Context, errCh chan<- error, err error) {
 	}
 }
 
+// Keep one response prefetched while the listener validates and imports the current batch.
 func newChainTipBlockResponseChannel() chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock] {
 	return make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
 }
 
-// listenToIncomingBlocksUntilANewBlockIsReceived listens for incoming blocks until a new block with a slot greater than or equal to the target slot is received.
-// It processes blocks, checks their validity, and publishes them. It also handles context cancellation and logs progress periodically.
+// listenToIncomingBlocksUntilANewBlockIsReceived validates and imports fetched batches
+// until fork choice reaches the target slot. Transient DA failures remain eligible for retry.
 func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
 	// Timer to log progress every 30 seconds
 	logTicker := time.NewTicker(30 * time.Second)
@@ -272,7 +273,7 @@ MainLoop:
 				availabilityBlocks = append(availabilityBlocks, block)
 				availabilityRoots = append(availabilityRoots, root)
 				commitments := block.GetBlobKzgCommitments()
-				if chainTipDataAvailabilityRequired(cfg, block) && commitments != nil && commitments.Len() > 0 {
+				if requiresRecentBlockDataAvailability(cfg, block) && commitments != nil && commitments.Len() > 0 {
 					needsDataAvailabilityPreflight = true
 				}
 			}
@@ -364,7 +365,7 @@ MainLoop:
 					continue
 				}
 
-				checkDataAvailability := chainTipDataAvailabilityRequired(cfg, block)
+				checkDataAvailability := requiresRecentBlockDataAvailability(cfg, block)
 				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, checkDataAvailability); err != nil {
 					log.Debug("failed to process chain-tip block", "err", err, "blockSlot", block.Block.Slot)
 					if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
@@ -389,10 +390,6 @@ MainLoop:
 		}
 	}
 	return nil
-}
-
-func chainTipDataAvailabilityRequired(cfg *Cfg, block *cltypes.SignedBeaconBlock) bool {
-	return requiresRecentBlockDataAvailability(cfg, block)
 }
 
 // fetchAndApplyEnvelopes fetches missing execution payload envelopes from peers and applies them.

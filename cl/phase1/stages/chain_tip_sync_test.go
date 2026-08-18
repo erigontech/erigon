@@ -109,7 +109,7 @@ func TestChainTipSyncValidatesBlockBeforeAcquiringColumns(t *testing.T) {
 	require.ErrorContains(t, err, "signature")
 }
 
-func TestChainTipDataAvailabilityRequired(t *testing.T) {
+func TestRequiresRecentBlockDataAvailabilityByFork(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
 	cfg.AltairForkEpoch = 0
@@ -141,7 +141,7 @@ func TestChainTipDataAvailabilityRequired(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			block := cltypes.NewSignedBeaconBlock(&cfg, tt.version)
 			block.Block.Slot = tt.slot
-			require.Equal(t, tt.want, chainTipDataAvailabilityRequired(stageCfg, block))
+			require.Equal(t, tt.want, requiresRecentBlockDataAvailability(stageCfg, block))
 		})
 	}
 }

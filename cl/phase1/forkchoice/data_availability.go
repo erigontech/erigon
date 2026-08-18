@@ -24,6 +24,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
+// requireDataColumnAvailability accepts only materialized PeerDAS columns. EL
+// blob evidence alone is not enough for the CL to sample or serve those columns.
 func (f *ForkChoiceStore) requireDataColumnAvailability(block *cltypes.SignedBeaconBlock, blockRoot common.Hash) error {
 	if f.peerDas == nil {
 		return fmt.Errorf("%w: peer DAS is not configured", ErrEIP7594ColumnDataNotAvailable)

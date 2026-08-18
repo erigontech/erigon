@@ -201,7 +201,7 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 		t.Fatal("malicious peer was not added to the custody-peer queue")
 	}
 
-	// Match NewPeerDas: getGloasData assumes a non-nil cache.
+	// Gloas sidecar processing requires a non-nil cache.
 	gloasDataCache, err := lru.New[common.Hash, *gloasBlockData]("gloasDataCacheTest", 8)
 	require.NoError(t, err)
 	d := &peerdas{

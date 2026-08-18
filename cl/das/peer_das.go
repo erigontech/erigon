@@ -70,7 +70,7 @@ var numOfBlobRecoveryWorkers = 8
 const (
 	maxDeferredColumnSyncBlocks = 64
 	deferredColumnSyncTTL       = 30 * time.Minute
-	// Shared across all column download batches.
+	// Limit column RPC concurrency across all batches and sync paths.
 	maxConcurrentColumnRequests = 4
 	columnRequestInterval       = 100 * time.Millisecond
 )
@@ -103,6 +103,8 @@ func (b *deferredColumnSyncBlock) GetBlobKzgCommitments() *solid.ListSSZ[*cltype
 	return b.commitments
 }
 
+// configuredColumnSyncVersion uses the configured fork schedule when available
+// because a network block's container version is untrusted.
 func configuredColumnSyncVersion(cfg *clparams.BeaconChainConfig, block cltypes.ColumnSyncableSignedBlock) clparams.StateVersion {
 	version := block.Version()
 	if cfg != nil && cfg.SlotsPerEpoch != 0 {

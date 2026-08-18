@@ -275,6 +275,7 @@ func (b *blockService) scheduleBlock(block *cltypes.SignedBeaconBlock, retryAfte
 	}
 
 	now := b.currentTime()
+	// Preserve an existing job so redelivery cannot reset its retry budget.
 	b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, &blockJob{
 		block:        block,
 		creationTime: now,

@@ -61,8 +61,9 @@ func TestAcquireBlockDataAvailability(t *testing.T) {
 			)
 			peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(tt.afterDownload, nil)
 
-			err = acquireBlockDataAvailability(t.Context(), peerDas, block)
-			require.ErrorIs(t, err, tt.wantErr)
+			errs := acquireBlocksDataAvailability(t.Context(), peerDas, []cltypes.ColumnSyncableSignedBlock{block})
+			require.Len(t, errs, 1)
+			require.ErrorIs(t, errs[0], tt.wantErr)
 		})
 	}
 }
@@ -81,7 +82,9 @@ func TestAcquireBlockDataAvailabilityInArchiveMode(t *testing.T) {
 	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), []cltypes.ColumnSyncableSignedBlock{block}).Return(nil)
 	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(true, nil)
 
-	require.NoError(t, acquireBlockDataAvailability(t.Context(), peerDas, block))
+	errs := acquireBlocksDataAvailability(t.Context(), peerDas, []cltypes.ColumnSyncableSignedBlock{block})
+	require.Len(t, errs, 1)
+	require.NoError(t, errs[0])
 }
 
 func TestAcquireRecentBlocksDataAvailabilityBatchesDownloads(t *testing.T) {

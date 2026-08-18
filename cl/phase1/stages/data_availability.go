@@ -27,10 +27,6 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-func acquireBlockDataAvailability(ctx context.Context, peerDas das.PeerDas, block *cltypes.SignedBeaconBlock) error {
-	return acquireBlocksDataAvailability(ctx, peerDas, []cltypes.ColumnSyncableSignedBlock{block})[0]
-}
-
 func acquireBlocksDataAvailability(ctx context.Context, peerDas das.PeerDas, blocks []cltypes.ColumnSyncableSignedBlock) []error {
 	errs := make([]error, len(blocks))
 	if len(blocks) == 0 {
@@ -121,6 +117,8 @@ func acquireRecentBlocksDataAvailability(ctx context.Context, cfg *Cfg, blocks [
 	return errs
 }
 
+// requiresRecentBlockDataAvailability derives the fork from the configured schedule
+// because block containers received from peers are untrusted.
 func requiresRecentBlockDataAvailability(cfg *Cfg, block *cltypes.SignedBeaconBlock) bool {
 	blockVersion := block.Version()
 	if cfg.beaconCfg.SlotsPerEpoch != 0 {

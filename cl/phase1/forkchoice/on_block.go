@@ -152,6 +152,8 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Validate parent payload status path early (before expensive operations)
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
+	// A caller may request stricter checks, but cannot disable the protocol
+	// column-availability requirement for a recent Fulu block.
 	checkDataAvailability = checkDataAvailability || das.IsDataAvailabilityRequired(f.beaconCfg, f.Slot(), block.Block.Slot, blockVersion)
 	isGloas := blockVersion >= clparams.GloasVersion
 	headBeforeBlock := common.Hash{}

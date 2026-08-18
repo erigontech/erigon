@@ -32,7 +32,11 @@ type dataAvailabilityPreflightParent struct {
 	slot  uint64
 }
 
-// PreflightDataAvailabilityBlocks validates downloaded blocks before network column acquisition.
+// PreflightDataAvailabilityBlocks screens downloaded blocks before column acquisition.
+// skipNonFinalized has one entry per input block and marks blocks whose parent branch
+// does not descend from the finalized checkpoint. When err is non-nil, retryable
+// distinguishes a local fork-choice failure from invalid peer data; callers should retry
+// local failures without penalizing the serving peer. Full validation occurs on import.
 func (f *ForkChoiceStore) PreflightDataAvailabilityBlocks(blocks []*cltypes.SignedBeaconBlock) (skipNonFinalized []bool, retryable bool, err error) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()

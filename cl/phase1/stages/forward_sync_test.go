@@ -48,6 +48,24 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
+func TestForwardSyncProgressCurrentSlotPastChainTip(t *testing.T) {
+	slotsRemaining, ratePerSec := forwardSyncProgress(1_000_000, 1_000_050, 999_900, 30)
+	require.Zero(t, slotsRemaining)
+	require.GreaterOrEqual(t, ratePerSec, float64(0))
+}
+
+func TestForwardSyncProgressReorgBelowPreviousProgress(t *testing.T) {
+	slotsRemaining, ratePerSec := forwardSyncProgress(1_000_000, 900_000, 950_000, 30)
+	require.Equal(t, uint64(100_000), slotsRemaining)
+	require.Zero(t, ratePerSec)
+}
+
+func TestForwardSyncProgressNormal(t *testing.T) {
+	slotsRemaining, ratePerSec := forwardSyncProgress(1_000_000, 900_000, 899_700, 30)
+	require.Equal(t, uint64(100_000), slotsRemaining)
+	require.Equal(t, float64(10), ratePerSec)
+}
+
 func TestForwardSyncValidatesBlockBeforeAcquiringColumns(t *testing.T) {
 	stageCfg, block, _ := newSignedFuluForwardSyncFixture(t)
 	block.Signature = common.Bytes96{}

@@ -18,7 +18,9 @@ package das
 
 import "github.com/erigontech/erigon/cl/clparams"
 
-// IsDataAvailabilityRequired reports whether a Fulu block is inside the protocol's column request window.
+// IsDataAvailabilityRequired reports whether peers are required to serve a Fulu
+// block's columns. Older Fulu blocks fall outside the protocol request window.
+// This helper is Fulu-specific; other fork paths enforce their own DA rules.
 func IsDataAvailabilityRequired(cfg *clparams.BeaconChainConfig, currentSlot, blockSlot uint64, version clparams.StateVersion) bool {
 	if version != clparams.FuluVersion {
 		return false

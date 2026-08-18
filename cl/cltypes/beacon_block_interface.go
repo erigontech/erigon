@@ -6,7 +6,8 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// ColumnSyncableSignedBlock provides the block metadata needed to request PeerDAS columns.
+// ColumnSyncableSignedBlock exposes the metadata needed to request PeerDAS
+// columns without depending on a specific signed-block container.
 type ColumnSyncableSignedBlock interface {
 	Version() clparams.StateVersion
 	GetSlot() uint64
