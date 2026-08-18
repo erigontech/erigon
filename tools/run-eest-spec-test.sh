@@ -7,6 +7,8 @@
 #
 #   statetests-stable                          state tests vs. eest_stable
 #   statetests-devnet                          state tests vs. eest_devnet
+#   transactiontests-stable                    transaction tests vs. eest_stable
+#   transactiontests-devnet                    transaction tests vs. eest_devnet
 #   statetests-legacy                          complete legacy Cancun state tests
 #   rlptests-legacy-race                      complete legacy RLP tests
 #   transactiontests-legacy-race              complete legacy transaction tests
@@ -138,6 +140,8 @@ paths=()
 case "$shard_route" in
 	statetests-stable | statetests-devnet)
 		cmd=statetest;   paths=("$base/state_tests") ;;
+	transactiontests-stable | transactiontests-devnet)
+		cmd=transactiontest;   paths=("$base/transaction_tests") ;;
 	statetests-legacy)
 		cmd=statetest;   paths=("$base/Cancun/GeneralStateTests") ;;
 	rlptests-legacy-*)

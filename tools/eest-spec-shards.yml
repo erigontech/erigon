@@ -41,6 +41,14 @@
 - shard: statetests-devnet
   workers: 12
   max-allowed-failures: 0
+- shard: transactiontests-stable
+  workers: 12
+  max-allowed-failures: 0
+  no-ramdisk: true
+- shard: transactiontests-devnet
+  workers: 12
+  max-allowed-failures: 0
+  no-ramdisk: true
 - shard: statetests-legacy
   workers: 12
   max-allowed-failures: 0
