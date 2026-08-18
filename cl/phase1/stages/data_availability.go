@@ -92,10 +92,6 @@ func acquireBlocksDataAvailability(ctx context.Context, peerDas das.PeerDas, blo
 	return errs
 }
 
-func acquireRecentBlockDataAvailability(ctx context.Context, cfg *Cfg, block *cltypes.SignedBeaconBlock) error {
-	return acquireRecentBlocksDataAvailability(ctx, cfg, []*cltypes.SignedBeaconBlock{block})[0]
-}
-
 func acquireRecentBlocksDataAvailability(ctx context.Context, cfg *Cfg, blocks []*cltypes.SignedBeaconBlock) []error {
 	errs := make([]error, len(blocks))
 	required := make([]cltypes.ColumnSyncableSignedBlock, 0, len(blocks))

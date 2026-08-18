@@ -83,6 +83,145 @@ func TestChainTipBlockResponseQueueHoldsOneBatch(t *testing.T) {
 }
 
 func TestChainTipSyncChecksFuluDataAvailability(t *testing.T) {
+	stageCfg, anchorRoot := newFuluChainTipTestCfg(t)
+	block := newFuluChainTipTestBlock(stageCfg.beaconCfg, 1, anchorRoot)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	stageCfg.forkChoice.OnTick(block.Block.Slot * stageCfg.beaconCfg.SecondsPerSlot)
+
+	ctrl := gomock.NewController(t)
+	stageClock := eth_clock.NewMockEthereumClock(ctrl)
+	stageClock.EXPECT().GetCurrentSlot().Return(block.Block.Slot).AnyTimes()
+	peerDas := dasmock.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(false, nil)
+	peerDas.EXPECT().IsArchivedMode().Return(false)
+	peerDas.EXPECT().DownloadOnlyCustodyColumns(gomock.Any(), gomock.Any()).Return(nil)
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(false, nil)
+	stageCfg.ethClock = stageClock
+	stageCfg.peerDas = peerDas
+	stageCfg.forkChoice.InitPeerDas(peerDas)
+
+	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
+	respCh <- &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{block}}
+	errCh := make(chan error)
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), stageCfg, Args{targetSlot: block.Block.Slot}, respCh, errCh)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	_, imported := stageCfg.forkChoice.GetHeader(common.Hash(blockRoot))
+	require.False(t, imported)
+}
+
+func TestChainTipDataAvailabilityRequired(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 1
+	cfg.GloasForkEpoch = 2
+	cfg.InitializeForkSchedule()
+
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(2 * cfg.SlotsPerEpoch).AnyTimes()
+	stageCfg := &Cfg{beaconCfg: &cfg, ethClock: clock}
+
+	tests := []struct {
+		name    string
+		slot    uint64
+		version clparams.StateVersion
+		want    bool
+	}{
+		{name: "Electra", slot: 0, version: clparams.ElectraVersion},
+		{name: "Fulu", slot: cfg.SlotsPerEpoch, version: clparams.FuluVersion, want: true},
+		{name: "Gloas", slot: 2 * cfg.SlotsPerEpoch, version: clparams.GloasVersion},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			block := cltypes.NewSignedBeaconBlock(&cfg, tt.version)
+			block.Block.Slot = tt.slot
+			require.Equal(t, tt.want, chainTipDataAvailabilityRequired(stageCfg, block))
+		})
+	}
+}
+
+func TestChainTipSyncBatchesFuluDataAvailability(t *testing.T) {
+	stageCfg, anchorRoot := newFuluChainTipTestCfg(t)
+	first := newFuluChainTipTestBlock(stageCfg.beaconCfg, 1, anchorRoot)
+	firstRoot, err := first.Block.HashSSZ()
+	require.NoError(t, err)
+	second := newFuluChainTipTestBlock(stageCfg.beaconCfg, 2, common.Hash(firstRoot))
+	secondRoot, err := second.Block.HashSSZ()
+	require.NoError(t, err)
+	blocks := []*cltypes.SignedBeaconBlock{first, second}
+	stageCfg.forkChoice.OnTick(second.Block.Slot * stageCfg.beaconCfg.SecondsPerSlot)
+
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(second.Block.Slot).AnyTimes()
+	peerDas := dasmock.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().IsDataAvailable(first.Block.Slot, common.Hash(firstRoot)).Return(false, nil)
+	peerDas.EXPECT().IsDataAvailable(second.Block.Slot, common.Hash(secondRoot)).Return(false, nil)
+	peerDas.EXPECT().IsArchivedMode().Return(false)
+	peerDas.EXPECT().DownloadOnlyCustodyColumns(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, downloaded []cltypes.ColumnSyncableSignedBlock) error {
+			require.Len(t, downloaded, len(blocks))
+			return nil
+		},
+	)
+	peerDas.EXPECT().IsDataAvailable(first.Block.Slot, common.Hash(firstRoot)).Return(false, nil)
+	peerDas.EXPECT().IsDataAvailable(second.Block.Slot, common.Hash(secondRoot)).Return(false, nil)
+	stageCfg.ethClock = clock
+	stageCfg.peerDas = peerDas
+	stageCfg.forkChoice.InitPeerDas(peerDas)
+
+	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
+	respCh <- &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: blocks}
+	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
+	defer cancel()
+
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), stageCfg, Args{targetSlot: second.Block.Slot}, respCh, make(chan error))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestChainTipSyncRetriesLocalDataAvailabilityErrors(t *testing.T) {
+	stageCfg, anchorRoot := newFuluChainTipTestCfg(t)
+	block := newFuluChainTipTestBlock(stageCfg.beaconCfg, 1, anchorRoot)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	stageCfg.forkChoice.OnTick(block.Block.Slot * stageCfg.beaconCfg.SecondsPerSlot)
+
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(block.Block.Slot).AnyTimes()
+	peerDas := dasmock.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(false, errors.New("storage temporarily unavailable")).Times(2)
+	stageCfg.ethClock = clock
+	stageCfg.peerDas = peerDas
+	stageCfg.forkChoice.InitPeerDas(peerDas)
+
+	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
+	respCh <- &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{block}}
+	go func() {
+		timer := time.NewTimer(1100 * time.Millisecond)
+		defer timer.Stop()
+		<-timer.C
+		respCh <- &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{block}}
+	}()
+	ctx, cancel := context.WithTimeout(t.Context(), 1250*time.Millisecond)
+	defer cancel()
+
+	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), stageCfg, Args{targetSlot: block.Block.Slot}, respCh, make(chan error))
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func newFuluChainTipTestCfg(t *testing.T) (*Cfg, common.Hash) {
+	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
 	clparams.ApplyMinimalPreset(&cfg)
 	cfg.AltairForkEpoch = 0
@@ -97,7 +236,6 @@ func TestChainTipSyncChecksFuluDataAvailability(t *testing.T) {
 	anchorState.SetVersion(clparams.FuluVersion)
 	anchorRoot, err := anchorState.BlockRoot()
 	require.NoError(t, err)
-
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
 	store, err := forkchoice.NewForkChoiceStore(
@@ -115,39 +253,13 @@ func TestChainTipSyncChecksFuluDataAvailability(t *testing.T) {
 		nil,
 	)
 	require.NoError(t, err)
+	return &Cfg{beaconCfg: &cfg, forkChoice: store, indiciesDB: db}, anchorRoot
+}
 
-	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
-	block.Block.Slot = 1
-	block.Block.ParentRoot = anchorRoot
+func newFuluChainTipTestBlock(cfg *clparams.BeaconChainConfig, slot uint64, parentRoot common.Hash) *cltypes.SignedBeaconBlock {
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.FuluVersion)
+	block.Block.Slot = slot
+	block.Block.ParentRoot = parentRoot
 	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
-	store.OnTick(block.Block.Slot * cfg.SecondsPerSlot)
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-
-	ctrl := gomock.NewController(t)
-	stageClock := eth_clock.NewMockEthereumClock(ctrl)
-	stageClock.EXPECT().GetCurrentSlot().Return(block.Block.Slot).AnyTimes()
-	peerDas := dasmock.NewMockPeerDas(ctrl)
-	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(false, nil)
-	peerDas.EXPECT().IsArchivedMode().Return(false)
-	peerDas.EXPECT().DownloadOnlyCustodyColumns(gomock.Any(), gomock.Any()).Return(nil)
-	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, common.Hash(blockRoot)).Return(false, nil)
-	store.InitPeerDas(peerDas)
-
-	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
-	respCh <- &peers.PeeredObject[[]*cltypes.SignedBeaconBlock]{Data: []*cltypes.SignedBeaconBlock{block}}
-	errCh := make(chan error)
-	ctx, cancel := context.WithTimeout(t.Context(), 100*time.Millisecond)
-	defer cancel()
-
-	err = listenToIncomingBlocksUntilANewBlockIsReceived(ctx, log.Root(), &Cfg{
-		beaconCfg:  &cfg,
-		ethClock:   stageClock,
-		forkChoice: store,
-		indiciesDB: db,
-		peerDas:    peerDas,
-	}, Args{targetSlot: block.Block.Slot}, respCh, errCh)
-	require.ErrorIs(t, err, context.DeadlineExceeded)
-	_, imported := store.GetHeader(common.Hash(blockRoot))
-	require.False(t, imported)
+	return block
 }

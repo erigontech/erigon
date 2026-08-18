@@ -30,6 +30,14 @@ import (
 // The stage transition function should skip ForwardSync and go directly to ChainTipSync.
 var ErrForwardSyncStale = errors.New("forward sync stale")
 
+type forwardSyncBlock struct {
+	block                 *cltypes.SignedBeaconBlock
+	root                  common.Hash
+	known                 bool
+	skipNonFinalized      bool
+	checkDataAvailability bool
+}
+
 // processDownloadedBlockBatches processes a batch of downloaded blocks.
 // It takes the highest block processed, a flag to determine if insertion is needed, a list of signed beacon blocks,
 // and a map of beacon block root -> envelope for GLOAS FULL blocks.
@@ -39,18 +47,80 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 	slices.SortFunc(blocks, func(a, b *cltypes.SignedBeaconBlock) int {
 		return cmp.Compare(a.Block.Slot, b.Block.Slot)
 	})
-	dataAvailabilityErrs := acquireRecentBlocksDataAvailability(ctx, cfg, blocks)
+	prepared := make([]forwardSyncBlock, len(blocks))
+	unknown := make([]*forwardSyncBlock, 0, len(blocks))
+	needsDataAvailabilityPreflight := false
+	for i, block := range blocks {
+		blockRoot, hashErr := block.Block.HashSSZ()
+		if hashErr != nil {
+			return highestBlockProcessed, fmt.Errorf("failed to hash block: %w", hashErr)
+		}
+		prepared[i] = forwardSyncBlock{
+			block: block,
+			root:  common.Hash(blockRoot),
+		}
+		_, prepared[i].known = cfg.forkChoice.GetHeader(prepared[i].root)
+		if prepared[i].known {
+			continue
+		}
+		prepared[i].checkDataAvailability = requiresRecentBlockDataAvailability(cfg, block)
+		if commitments := block.GetBlobKzgCommitments(); prepared[i].checkDataAvailability && commitments != nil && commitments.Len() > 0 {
+			needsDataAvailabilityPreflight = true
+		}
+		unknown = append(unknown, &prepared[i])
+	}
+	if needsDataAvailabilityPreflight {
+		preflightBlocks := make([]*cltypes.SignedBeaconBlock, len(unknown))
+		for i, preparedBlock := range unknown {
+			preflightBlocks[i] = preparedBlock.block
+		}
+		skippedNonFinalized, retryable, preflightErr := cfg.forkChoice.PreflightDataAvailabilityBlocks(preflightBlocks)
+		if preflightErr != nil {
+			if retryable {
+				logger.Debug("[Caplin] forward sync preflight will retry", "err", preflightErr)
+				return highestBlockProcessed, nil
+			}
+			return highestBlockProcessed, fmt.Errorf("bad blocks segment received: %w", preflightErr)
+		}
+		for i, skip := range skippedNonFinalized {
+			unknown[i].skipNonFinalized = skip
+		}
+	}
+	availabilityCandidates := make([]*forwardSyncBlock, 0, len(unknown))
+	unknownBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(unknown))
+	for _, preparedBlock := range unknown {
+		if preparedBlock.skipNonFinalized {
+			continue
+		}
+		availabilityCandidates = append(availabilityCandidates, preparedBlock)
+		unknownBlocks = append(unknownBlocks, preparedBlock.block)
+	}
+	dataAvailabilityErrs := acquireRecentBlocksDataAvailability(ctx, cfg, unknownBlocks)
+	for i, availabilityErr := range dataAvailabilityErrs {
+		if availabilityErr == nil {
+			continue
+		}
+		logger.Debug("[Caplin] forward sync data acquisition will retry", "blockSlot", availabilityCandidates[i].block.Block.Slot, "err", availabilityErr)
+		return highestBlockProcessed, nil
+	}
 
-	var blockRoot common.Hash
 	newHighestBlockProcessed = highestBlockProcessed
 	// Iterate over each block in the sorted list
-	for i, block := range blocks {
-		// Compute the hash of the current block
-		blockRoot, err = block.Block.HashSSZ()
-		if err != nil {
-			// Return an error if block hashing fails
-			err = fmt.Errorf("failed to hash block: %w", err)
-			return
+	for _, preparedBlock := range prepared {
+		block := preparedBlock.block
+		blockRoot := preparedBlock.root
+		if preparedBlock.known {
+			if newHighestBlockProcessed < block.Block.Slot {
+				newHighestBlockProcessed = block.Block.Slot
+			}
+			continue
+		}
+		if preparedBlock.skipNonFinalized {
+			logger.Debug("[Caplin] forward sync: block not on finalized chain, skipping", "blockSlot", block.Block.Slot)
+			if newHighestBlockProcessed < block.Block.Slot {
+				newHighestBlockProcessed = block.Block.Slot
+			}
+			continue
 		}
 
 		var hasSignedHeaderInDB bool
@@ -63,16 +133,8 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
-		if err = dataAvailabilityErrs[i]; err != nil {
-			if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot)
-				return newHighestBlockProcessed, nil
-			}
-			return newHighestBlockProcessed, err
-		}
-
 		// Process the block
-		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, requiresRecentBlockDataAvailability(cfg, block)); err != nil {
+		if err = processBlock(ctx, cfg, cfg.indiciesDB, block, false, true, preparedBlock.checkDataAvailability); err != nil {
 			if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot, "err", err)
 				return newHighestBlockProcessed, nil

@@ -222,19 +222,29 @@ func TestDataAvailabilityRetriesAreDelayed(t *testing.T) {
 	require.Equal(t, 1, store.onBlockCalls)
 }
 
-func TestFirstScheduledBlockRetryIsDelayed(t *testing.T) {
+func TestFirstScheduledBlockRetryRunsOnNextTick(t *testing.T) {
 	service, store, block, clock := newDataUnavailableBlockJob(t)
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	service.blocksScheduledForLaterExecution.Delete(blockRoot)
 
-	now := clock.now
 	service.scheduleBlockForLaterProcessing(block)
-	clock.now = now.Add(blockRetryInterval - time.Nanosecond)
+	service.processScheduledBlocks(t.Context(), clock.now)
+	require.Equal(t, 1, store.onBlockCalls)
+}
+
+func TestFirstDataAvailabilityRetryIsDelayed(t *testing.T) {
+	service, store, block, clock := newDataUnavailableBlockJob(t)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	service.blocksScheduledForLaterExecution.Delete(blockRoot)
+
+	service.scheduleBlockForDataAvailability(block)
+	clock.now = clock.now.Add(blockRetryInterval - time.Nanosecond)
 	service.processScheduledBlocks(t.Context(), clock.now)
 	require.Zero(t, store.onBlockCalls)
 
-	clock.now = now.Add(blockRetryInterval)
+	clock.now = clock.now.Add(time.Nanosecond)
 	service.processScheduledBlocks(t.Context(), clock.now)
 	require.Equal(t, 1, store.onBlockCalls)
 }

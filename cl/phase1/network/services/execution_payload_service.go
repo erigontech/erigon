@@ -174,8 +174,11 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true); err != nil {
-		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
+		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			return fmt.Errorf("%w: %w", ErrIgnore, err)
+		}
+		if errors.Is(err, forkchoice.ErrIgnore) {
+			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // the forkchoice ignore sentinel is internal to the store
 		}
 		return fmt.Errorf("failed to process execution payload: %w", err)
 	}
@@ -290,14 +293,15 @@ func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 			return true // Block still not here, keep waiting
 		}
 
-		// Block arrived, remove from pending and process
-		s.pendingEnvelopes.Delete(pendingKey)
-		s.pendingCount.Add(-1)
-
 		// Re-run full validation via ProcessMessage
 		if err := s.ProcessMessage(ctx, nil, job.envelope); err != nil {
+			if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+				return true
+			}
 			log.Trace("Failed to process pending envelope", "blockRoot", pendingKey.blockRoot, "err", err)
 		}
+		s.pendingEnvelopes.Delete(pendingKey)
+		s.pendingCount.Add(-1)
 		return true
 	})
 }

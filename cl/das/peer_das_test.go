@@ -108,6 +108,13 @@ func TestDownloadOnlyCustodyColumnsWithoutRPC(t *testing.T) {
 	require.Error(t, d.DownloadOnlyCustodyColumns(context.Background(), nil))
 }
 
+func TestDownloadColumnsAndRecoverBlobsWithoutRPC(t *testing.T) {
+	d := &peerdas{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	require.Error(t, d.DownloadColumnsAndRecoverBlobs(context.Background(), []cltypes.ColumnSyncableSignedBlock{block}))
+}
+
 func TestSyncDeferredColumnDataPrunesExpiredJobsWithoutRPC(t *testing.T) {
 	now := time.Now()
 	expiredRoot := common.Hash{1}

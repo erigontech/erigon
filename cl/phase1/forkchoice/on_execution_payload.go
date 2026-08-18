@@ -328,6 +328,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 		log.Trace("OnExecutionPayload: block not found in fork graph, queuing envelope", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block not found in fork graph for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
+	f.pendingEnvelopes.Remove(beaconBlockRoot)
 
 	// Validate envelope against block (bid matching + signature verification)
 	if validatePayload {
@@ -339,6 +340,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 	// Check blob data availability
 	if checkBlobData {
 		if err := f.checkDataAvailability(ctx, block, common.Hash(beaconBlockRoot)); err != nil {
+			f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 			return false, err
 		}
 	}

@@ -240,6 +240,43 @@ MainLoop:
 			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
 			envelopes := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
 
+			blockRoots := make(map[*cltypes.SignedBeaconBlock]common.Hash, len(blocks.Data))
+			availabilityBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(blocks.Data))
+			availabilityRoots := make([]common.Hash, 0, len(blocks.Data))
+			batchRoots := make(map[common.Hash]struct{}, len(blocks.Data))
+			now := time.Now()
+			for _, block := range blocks.Data {
+				blockRoot, err := block.Block.HashSSZ()
+				if err != nil {
+					log.Debug("failed to hash chain-tip block", "err", err, "blockSlot", block.Block.Slot)
+					continue
+				}
+				root := common.Hash(blockRoot)
+				blockRoots[block] = root
+				if _, known := cfg.forkChoice.GetHeader(root); known {
+					continue
+				}
+				if _, parentKnown := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !parentKnown {
+					if _, parentInBatch := batchRoots[block.Block.ParentRoot]; !parentInBatch {
+						continue
+					}
+				}
+				if _, seen := seenBlockRoots[root]; seen {
+					continue
+				}
+				if retryAfter, retrying := dataAvailabilityRetryAfter[root]; retrying && now.Before(retryAfter) {
+					continue
+				}
+				batchRoots[root] = struct{}{}
+				availabilityBlocks = append(availabilityBlocks, block)
+				availabilityRoots = append(availabilityRoots, root)
+			}
+			availabilityErrs := acquireRecentBlocksDataAvailability(ctx, cfg, availabilityBlocks)
+			availabilityByRoot := make(map[common.Hash]error, len(availabilityRoots))
+			for i, root := range availabilityRoots {
+				availabilityByRoot[root] = availabilityErrs[i]
+			}
+
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
 				// Check if the parent block is known
@@ -249,7 +286,10 @@ MainLoop:
 				}
 
 				// Calculate the block root and check if the block is already known
-				blockRoot, _ := block.Block.HashSSZ() // Ignoring error as block would not process if HashSSZ failed
+				blockRoot, hashed := blockRoots[block]
+				if !hashed {
+					continue
+				}
 				if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
 					// Check if the block slot is greater than or equal to the target slot
 					if block.Block.Slot >= args.targetSlot {
@@ -277,17 +317,17 @@ MainLoop:
 					}
 				}
 
-				if err := acquireRecentBlockDataAvailability(ctx, cfg, block); err != nil {
-					log.Debug("failed to acquire chain-tip data columns", "err", err, "blockSlot", block.Block.Slot)
-					if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-						dataAvailabilityRetryAfter[blockRoot] = time.Now().Add(time.Second)
-						continue
-					}
-					seenBlockRoots[blockRoot] = struct{}{}
+				availabilityErr, prepared := availabilityByRoot[blockRoot]
+				if !prepared {
+					continue
+				}
+				if availabilityErr != nil {
+					log.Debug("failed to acquire chain-tip data columns", "err", availabilityErr, "blockSlot", block.Block.Slot)
+					dataAvailabilityRetryAfter[blockRoot] = time.Now().Add(time.Second)
 					continue
 				}
 
-				checkDataAvailability := block.Version() < clparams.GloasVersion
+				checkDataAvailability := chainTipDataAvailabilityRequired(cfg, block)
 				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, checkDataAvailability); err != nil {
 					log.Debug("failed to process chain-tip block", "err", err, "blockSlot", block.Block.Slot)
 					if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
@@ -312,6 +352,10 @@ MainLoop:
 		}
 	}
 	return nil
+}
+
+func chainTipDataAvailabilityRequired(cfg *Cfg, block *cltypes.SignedBeaconBlock) bool {
+	return requiresRecentBlockDataAvailability(cfg, block)
 }
 
 // fetchAndApplyEnvelopes fetches missing execution payload envelopes from peers and applies them.

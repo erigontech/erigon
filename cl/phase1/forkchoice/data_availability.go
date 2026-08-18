@@ -30,7 +30,7 @@ func (f *ForkChoiceStore) requireDataColumnAvailability(block *cltypes.SignedBea
 	}
 	available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
 	if err != nil {
-		return fmt.Errorf("failed to check data column availability: %w", err)
+		return fmt.Errorf("%w: failed to check data column availability: %w", ErrEIP7594ColumnDataNotAvailable, err)
 	}
 	if available {
 		return nil

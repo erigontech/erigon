@@ -222,7 +222,11 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if isDataAvailabilityError(err) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
+		if isDataAvailabilityError(err) {
+			b.scheduleBlockForDataAvailability(msg)
+			return nil
+		}
+		if errors.Is(err, forkchoice.ErrParentEnvelopePending) {
 			b.scheduleBlockForLaterProcessing(msg)
 			return nil
 		}
@@ -250,6 +254,14 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 
 // scheduleBlockForLaterProcessing schedules a block for later processing
 func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
+	b.scheduleBlock(block, time.Time{})
+}
+
+func (b *blockService) scheduleBlockForDataAvailability(block *cltypes.SignedBeaconBlock) {
+	b.scheduleBlock(block, b.currentTime().Add(blockRetryInterval))
+}
+
+func (b *blockService) scheduleBlock(block *cltypes.SignedBeaconBlock, retryAfter time.Time) {
 	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
 	var blockNum uint64
 	if block.Block.Body.ExecutionPayload != nil {
@@ -266,7 +278,7 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 	b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, &blockJob{
 		block:        block,
 		creationTime: now,
-		retryAfter:   now.Add(blockRetryInterval),
+		retryAfter:   retryAfter,
 	})
 }
 
@@ -368,7 +380,7 @@ func (b *blockService) processScheduledBlocks(ctx context.Context, now time.Time
 					blockJob.retryAfter = b.currentTime().Add(blockRetryInterval)
 				}
 			} else {
-				blockJob.retryAfter = b.currentTime().Add(blockRetryInterval)
+				blockJob.retryAfter = time.Time{}
 			}
 			log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
 			return true

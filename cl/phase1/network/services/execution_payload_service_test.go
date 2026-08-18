@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
 )
@@ -289,6 +290,40 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 
 	// Envelope should be marked as seen
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+}
+
+func TestExecutionPayloadServiceKeepsPendingEnvelopeWhileColumnsAreUnavailable(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	impl := &executionPayloadService{
+		forkchoiceStore: forkchoiceMock,
+		beaconCfg:       cfg,
+		emitters:        beaconevents.NewEventEmitter(),
+	}
+	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	require.NoError(t, err)
+	impl.seenEnvelopesCache = seenCache
+
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	key := pendingEnvelopeKey{blockRoot: blockRoot, envelopeHash: envelopeHash}
+	impl.pendingEnvelopes.Store(key, &envelopeJob{envelope: envelope, creationTime: time.Now()})
+	impl.pendingCount.Store(1)
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	impl.processPendingEnvelopes(t.Context())
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+	_, pending := impl.pendingEnvelopes.Load(key)
+	require.True(t, pending)
+
+	forkchoiceMock.OnExecutionPayloadErr = nil
+	impl.processPendingEnvelopes(t.Context())
+	require.Zero(t, impl.pendingCount.Load())
+	_, pending = impl.pendingEnvelopes.Load(key)
+	require.False(t, pending)
 }
 
 func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {

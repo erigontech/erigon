@@ -710,6 +710,9 @@ func (d *peerdas) DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltyp
 }
 
 func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error {
+	if d.rpc == nil {
+		return errors.New("peer DAS RPC is not configured")
+	}
 	// filter out blocks that don't need to be processed
 	blocksToProcess := []cltypes.ColumnSyncableSignedBlock{}
 	for _, block := range blocks {
