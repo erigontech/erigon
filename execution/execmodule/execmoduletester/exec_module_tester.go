@@ -89,8 +89,6 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 	"github.com/erigontech/erigon/txnprovider/txpool"
@@ -144,7 +142,6 @@ type ExecModuleTester struct {
 	HistoryV3      bool
 	cfg            ethconfig.Config
 	BlockSnapshots *blocksnapshots.RoSnapshots
-	borSnapshots   *heimdall.RoSnapshots
 	blockRetire    dbservices.BlockRetire
 	BlockReader    dbservices.FullBlockReader
 	ReceiptsReader *receipts.Generator
@@ -165,9 +162,6 @@ func (emt *ExecModuleTester) Close() {
 	}
 	if emt.BlockSnapshots != nil {
 		emt.BlockSnapshots.Close()
-	}
-	if emt.borSnapshots != nil {
-		emt.borSnapshots.Close()
 	}
 	if emt.DB != nil {
 		emt.DB.Close()
@@ -436,8 +430,6 @@ func applyOptions(opts []Option) options {
 	// engine depends on genesis
 	if opt.engine == nil {
 		switch {
-		case opt.genesis.Config.Bor != nil:
-			opt.engine = bor.NewFaker()
 		case opt.genesis.Config.TerminalTotalDifficultyPassed:
 			opt.engine = merge.NewFaker(ethash.NewFaker())
 		default:
@@ -549,11 +541,9 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		panic(err)
 	}
 
-	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, nil, logger)
+	erigonGrpcServer := remotedbserver.NewKvServer(ctx, db, nil, nil, logger)
 	allSnapshots := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
-	allBorSnapshots := heimdall.NewRoSnapshots(cfg.Snapshot, dirs.Snap, logger)
-
-	br := freezeblocks.NewBlockReader(allSnapshots, allBorSnapshots)
+	br := freezeblocks.NewBlockReader(allSnapshots)
 
 	mock := &ExecModuleTester{
 		Ctx: ctx, cancel: ctxCancel, DB: db,
@@ -567,7 +557,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		stateChangesClient: direct.NewStateDiffClientDirect(erigonGrpcServer),
 		PeerId:             gointerfaces.ConvertHashToH512([64]byte{0x12, 0x34, 0x50}), // "12345"
 		BlockSnapshots:     allSnapshots,
-		borSnapshots:       allBorSnapshots,
 		BlockReader:        br,
 		ReceiptsReader:     receipts.NewGenerator(dirs, br, engine, nil, 5*time.Second),
 		HistoryV3:          true,
@@ -717,7 +706,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	)
 	mock.BlockBuilder = blkBuilder
 
-	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
+	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
 	mock.blockRetire = blockRetire
 	mock.Sync = stagedsync.New(
 		cfg.Sync,

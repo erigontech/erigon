@@ -65,7 +65,7 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	}
 	require.NoError(t, snapshots.OpenFolder())
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	// Pin a view, then retire the [0, mergeLimit) tx segment from the live set.
 	tx := blockFilesTxStub{view: snapshots.View()}

@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
@@ -50,11 +49,7 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 	}
 
 	if config.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		if err := jsoniter.ConfigFastest.Unmarshal(config.BorJSON, borConfig); err != nil {
-			return nil, fmt.Errorf("invalid chain config 'bor' JSON: %x, %w", hash, err)
-		}
-		config.Bor = borConfig
+		return nil, fmt.Errorf("chain config %x carries a 'bor' section: Polygon is not supported, see https://github.com/0xPolygon/erigon", hash)
 	}
 	return &config, nil
 }

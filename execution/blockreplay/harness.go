@@ -221,8 +221,7 @@ func (c *fixtureChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	}
 	return nil
 }
-func (c *fixtureChainReader) FrozenBlocks() uint64        { return 0 }
-func (c *fixtureChainReader) FrozenBorBlocks(bool) uint64 { return 0 }
+func (c *fixtureChainReader) FrozenBlocks() uint64 { return 0 }
 
 func (c *fixtureChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
 	if c.parent != nil && c.parent.Number.Uint64() == number {

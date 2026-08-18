@@ -46,7 +46,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 type RemoteBlockReader struct {
@@ -138,12 +137,10 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 	}
 	return block.Header(), nil
 }
-func (r *RemoteBlockReader) Snapshots() dbservices.BlockSnapshots    { panic("not implemented") }
-func (r *RemoteBlockReader) BorSnapshots() dbservices.BlockSnapshots { panic("not implemented") }
-func (r *RemoteBlockReader) AllTypes() []snaptype.Type               { panic("not implemented") }
-func (r *RemoteBlockReader) FrozenBlocks() uint64                    { panic("not supported") }
-func (r *RemoteBlockReader) FrozenBorBlocks(align bool) uint64       { panic("not supported") }
-func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing   { panic("not supported") }
+func (r *RemoteBlockReader) Snapshots() dbservices.BlockSnapshots  { panic("not implemented") }
+func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
+func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
+func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum, err := r.HeaderNumber(ctx, tx, hash)
@@ -361,7 +358,6 @@ func (r *RemoteBlockReader) TxnumReader() rawdbv3.TxNumsReader {
 // BlockReader can read blocks from db and snapshots
 type BlockReader struct {
 	sn           *blocksnapshots.RoSnapshots
-	borSn        *heimdall.RoSnapshots
 	txNumsReader rawdbv3.TxNumsReader
 
 	//files are immutable: no reorgs, on updates - means no invalidation needed
@@ -372,10 +368,9 @@ type BlockReader struct {
 var headerByNumCacheSize = dbg.EnvInt("RPC_HEADER_BY_NUM_LRU", 1_000)
 var canonicalHashCacheSize = dbg.EnvInt("RPC_CANONICAL_HASH_LRU", 10_000)
 
-func NewBlockReader(snapshots dbservices.BlockSnapshots, borSnapshots dbservices.BlockSnapshots) *BlockReader {
-	borSn, _ := borSnapshots.(*heimdall.RoSnapshots)
+func NewBlockReader(snapshots dbservices.BlockSnapshots) *BlockReader {
 	sn, _ := snapshots.(*blocksnapshots.RoSnapshots)
-	br := &BlockReader{sn: sn, borSn: borSn}
+	br := &BlockReader{sn: sn}
 	br.headerByNumCache, _ = lru.New[uint64, *types.Header](headerByNumCacheSize)
 	br.canonicalHashCache, _ = lru.New[uint64, common.Hash](canonicalHashCacheSize)
 	br.txNumsReader = rawdbv3.TxNums.WithCustomReadTxNumFunc(TxBlockIndexFromBlockReader(br))
@@ -385,47 +380,11 @@ func NewBlockReader(snapshots dbservices.BlockSnapshots, borSnapshots dbservices
 func (r *BlockReader) CanPruneTo(currentBlockInDB uint64) uint64 {
 	return CanDeleteTo(currentBlockInDB, r.sn.BlocksAvailable())
 }
-func (r *BlockReader) Snapshots() dbservices.BlockSnapshots { return r.sn }
-func (r *BlockReader) BorSnapshots() dbservices.BlockSnapshots {
-	if r.borSn != nil {
-		return r.borSn
-	}
-
-	return nil
-}
-
-func (r *BlockReader) Ready(ctx context.Context) <-chan error {
-	if r.borSn == nil {
-		return r.sn.Ready(ctx)
-	}
-
-	ch := make(chan error)
-
-	go func() {
-		if err := <-r.sn.Ready(ctx); err != nil {
-			ch <- err
-			return
-		}
-
-		if r.borSn != nil {
-			if err := <-r.borSn.Ready(ctx); err != nil {
-				ch <- err
-				return
-			}
-		}
-		ch <- nil
-	}()
-
-	return ch
-}
+func (r *BlockReader) Snapshots() dbservices.BlockSnapshots   { return r.sn }
+func (r *BlockReader) Ready(ctx context.Context) <-chan error { return r.sn.Ready(ctx) }
 
 func (r *BlockReader) AllTypes() []snaptype.Type {
-	var types []snaptype.Type
-	types = append(types, r.sn.Types()...)
-	if r.borSn != nil {
-		types = append(types, r.borSn.Types()...)
-	}
-	return types
+	return append([]snaptype.Type{}, r.sn.Types()...)
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
@@ -475,28 +434,6 @@ func (r *BlockReader) findFirstCompleteBlock(tx kv.Tx) (uint64, error) {
 
 	result := binary.BigEndian.Uint64(secondKey[:8])
 	return result, nil
-}
-func (r *BlockReader) FrozenBorBlocks(align bool) uint64 {
-	if r.borSn == nil {
-		return 0
-	}
-
-	frozen := r.borSn.BlocksAvailable()
-
-	if !align {
-		return frozen
-	}
-
-	for _, t := range r.borSn.Types() {
-
-		available := r.borSn.VisibleBlocksAvailable(t.Enum())
-
-		if available < frozen {
-			frozen = available
-		}
-	}
-
-	return frozen
 }
 func (r *BlockReader) FreezingCfg() ethconfig.BlocksFreezing { return r.sn.Cfg() }
 

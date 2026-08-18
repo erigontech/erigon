@@ -418,7 +418,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allSnapshots = blocksnapshots.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
 		allSnapshots.DownloadComplete()
 
-		blockReader = freezeblocks.NewBlockReader(allSnapshots, nil)
+		blockReader = freezeblocks.NewBlockReader(allSnapshots)
 		txNumsReader := blockReader.TxnumReader()
 
 		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
