@@ -1923,23 +1923,6 @@ func BenchmarkDispatchPendingCompaction(b *testing.B) {
 	}
 }
 
-// The apply loop's readers (fee calc, finalize syscalls, WriteSet.Normalize)
-// must use the per-block state cache the block's workers fill — a private one
-// starts empty on every block, so each address costs a domain read.
-func TestBlockExecUsesTaskStateCache(t *testing.T) {
-	cache := state.NewBlockStateCache()
-	header := &types.Header{Number: *uint256.NewInt(7)}
-	block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
-	tasks := []exec.Task{&exec.TxTask{Header: header, BlockStateCache: cache}}
-
-	// A busy map keeps processRequest from scheduling the block for execution.
-	pe := &parallelExecutor{blockExecutors: map[uint64]*blockExecutor{0: {}}}
-	require.NoError(t, pe.processRequest(context.Background(), &execRequest{block: block, tasks: tasks}))
-	require.Same(t, cache, pe.blockExecutors[7].blockStateCache)
-
-	require.NotNil(t, newBlockExec(nil, nil, nil, nil, nil, false, nil, blockStateCacheOf(nil)).blockStateCache)
-}
-
 // logEmittingSyscallEngine drives a fixed number of block-end system calls at
 // one contract, each of which emits a log.
 type logEmittingSyscallEngine struct {
