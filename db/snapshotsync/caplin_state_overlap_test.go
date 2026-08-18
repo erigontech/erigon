@@ -208,13 +208,14 @@ func TestCaplinStateRemoveOverlapsIgnoresUnknownType(t *testing.T) {
 
 	segPath, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
 	unknownPath := filepath.Join(dirs.SnapCaplin, "v1.1-000000-000050-BlockProposers.seg")
-	require.NoError(t, os.WriteFile(unknownPath, nil, 0o644))
+	require.NoError(t, os.WriteFile(unknownPath, []byte{0}, 0o644))
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 	require.NoError(t, s.RemoveOverlaps(nil))
 
 	require.FileExists(t, segPath)
 	require.FileExists(t, unknownPath)
+	require.Equal(t, []Range{{from: 0, to: 50_000}}, s.coveredRangesForType(table))
 }
 
 func TestCaplinStateRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
