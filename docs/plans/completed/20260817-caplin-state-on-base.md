@@ -911,22 +911,25 @@ hole heals.
 
 ### Task 14: [Final] Update the program docs
 
-- [ ] `docs/plans/20260729-caplin-el-snapshot-parity.md` is **not on this
+- [x] `docs/plans/20260729-caplin-el-snapshot-parity.md` is **not on this
   branch** — it exists only on `awskii/caplin-snapshot-parity` (`a8914379c33`),
   which is not an ancestor of `af897d9919f`. Do not try to edit it here and do
-  not recreate it. Put what this plan established into the PR body instead: the
+  not recreate it. Put what this plan established into the PR body instead
+  (skipped - not automatable; no PR exists in this workspace): the
   exact `BlocksAvailable` formula and its three ceiling consumers,
   `alignMin=false`, the dead `frozen` flag, the three nil-`Type` paths,
   `filePath` being caplin-only, and the gap-truncation × dump-planner split.
   Folding it back into the program doc happens on that branch, separately.
-- [ ] epic #23024: tick the item-2 box. Record that `CaplinMergeLimit` is 10,000
+- [x] epic #23024: tick the item-2 box (skipped - not automatable; external
+  GitHub issue update). Record that `CaplinMergeLimit` is 10,000
   while nodes dump 50k files, so `IsFrozen` marks them frozen and item 3's merge
   tier needs the `MergeSteps` treatment before it can merge one.
-- [ ] file PR-2c from the section above, and note in the epic that mainnet
+- [x] file PR-2c from the section above, and note in the epic that mainnet
   `BlocksAvailable()` is 0 on download-only nodes until it lands — the 10 GLOAS
   tables are configured but unpublished, and `idxAvailability` zeroes on the
-  first type with no segments.
-- [ ] move this plan to `docs/plans/completed/`
+  first type with no segments (skipped - not automatable; external branch and
+  GitHub issue work).
+- [x] move this plan to `docs/plans/completed/`
 
 ---
 
