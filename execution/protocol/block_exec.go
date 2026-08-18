@@ -240,6 +240,39 @@ func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.
 }
 
 func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+	return sysCallContract(nil, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+}
+
+// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse. header only
+// seeds the block context; every call resets it.
+func NewSysCallEVM(chainConfig *chain.Config, engine rules.EngineReader, header *types.Header, ibs *state.IntraBlockState, vmCfg vm.Config) *vm.EVM {
+	var author accounts.Address
+	if chainConfig.Bor != nil {
+		author = accounts.InternAddress(header.Coinbase)
+	} else {
+		author = params.SystemAddress
+	}
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
+	return vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vmCfg)
+}
+
+// SysCallContractWithEVM runs a system call on an EVM the caller owns instead of
+// building one per call. System calls run at block start and block end, when the
+// caller's EVM is between transactions, so its frame state is free to take.
+// The EVM must belong to the calling goroutine and carry chainConfig; a mismatch
+// or a nil EVM falls back to allocating one.
+func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
+	var author accounts.Address
+	if chainConfig.Bor != nil {
+		author = accounts.InternAddress(header.Coinbase)
+	} else {
+		author = params.SystemAddress
+	}
+	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
+	return sysCallContract(evm, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+}
+
+func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	isBor := chainConfig.Bor != nil
 	msg := types.NewMessage(
 		params.SystemAddress,
@@ -266,7 +299,11 @@ func SysCallContractWithBlockContext(contract accounts.Address, data []byte, cha
 	} else {
 		txContext = NewEVMTxContext(msg)
 	}
-	evm := vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+	if evm == nil || evm.ChainConfig() != chainConfig {
+		evm = vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
+	} else {
+		evm.ResetBetweenBlocks(blockContext, txContext, ibs, vmConfig, blockContext.Rules(chainConfig))
+	}
 	mdGas := mdgas.MdGas{
 		Execution: msg.Gas(),
 		State:     0, // pre-Amsterdam: state-gas reservoir not used; spills into execution gas
