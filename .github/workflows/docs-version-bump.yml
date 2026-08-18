@@ -81,14 +81,25 @@ jobs:
       - name: Install dependencies
         run: npm ci
 
+      # Docusaurus config runs branch-controlled JS (config + plugins) and needs
+      # an authenticated call for its release lookup. Mint a read-only token for
+      # it rather than handing it this job's contents:write GITHUB_TOKEN.
+      - name: Generate read-only token for docs build
+        id: docs_token
+        uses: actions/create-github-app-token@bcd2ba49218906704ab6c1aa796996da409d3eb1  ## v3.2.0
+        with:
+          client-id: ${{ vars.RELEASE_BOT_APP_ID }}
+          private-key: ${{ secrets.RELEASE_BOT_APP_KEY }}
+          repositories: "erigon"
+          permission-contents: read
+
       - name: Snapshot current docs as ${{ inputs.archive_version }}
         env:
           ARCHIVE_VERSION: ${{ inputs.archive_version }}
-          # docs:version loads docusaurus.config.ts, whose release lookup now
-          # fails closed; without a token it runs on the anonymous rate limit.
-          # This job's write scope reaches that config, accepted because the
-          # workflow is dispatch-only so the ref is maintainer-chosen.
-          GITHUB_TOKEN: ${{ github.token }}
+          # docs:version loads docusaurus.config.ts, whose release lookup fails
+          # closed; without a token it runs on the anonymous rate limit. Use the
+          # read-only token so branch-controlled config never sees write scope.
+          GITHUB_TOKEN: ${{ steps.docs_token.outputs.token }}
         run: npx docusaurus docs:version "$ARCHIVE_VERSION"
 
       - name: Bump current version label to ${{ inputs.new_label }}
@@ -118,7 +129,9 @@ jobs:
       - name: Verify build
         run: npm run build
         env:
-          GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
+          # Same reasoning as the snapshot step: `npm run build` loads the same
+          # branch-controlled config, so it gets the read-only token too.
+          GITHUB_TOKEN: ${{ steps.docs_token.outputs.token }}
 
       - name: Open pull request
         env:
