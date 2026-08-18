@@ -25,6 +25,8 @@ import (
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -459,11 +461,30 @@ func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
 	}
 }
 
+// syncBuffer is a log sink safe to read while the process-wide root handler may still be written
+// to by goroutines leaked from other tests: Write and String share one lock.
+type syncBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *syncBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *syncBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
 func TestPollAssembledPayloadLogsUnknownPayload(t *testing.T) {
-	var output bytes.Buffer
+	output := &syncBuffer{}
 	root := log.Root()
 	previousHandler := root.GetHandler()
-	root.SetHandler(log.SyncHandler(log.StreamHandler(&output, log.LogfmtFormat())))
+	root.SetHandler(log.StreamHandler(output, log.LogfmtFormat()))
 	t.Cleanup(func() { root.SetHandler(previousHandler) })
 
 	now := time.Now()
@@ -472,10 +493,19 @@ func TestPollAssembledPayloadLogsUnknownPayload(t *testing.T) {
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return nil, nil, nil, nil, &engine_helpers.UnknownPayloadErr
 		})
-
 	require.False(t, ok)
-	require.Contains(t, output.String(), "BlockProduction: execution payload is unknown")
-	require.Contains(t, output.String(), "lvl=warn")
+
+	// The level is asserted within the record itself, so a stray warn line from another goroutine
+	// cannot satisfy it.
+	var record string
+	for line := range strings.SplitSeq(output.String(), "\n") {
+		if strings.Contains(line, "BlockProduction: execution payload is unknown") {
+			record = line
+			break
+		}
+	}
+	require.NotEmpty(t, record, "unknown-payload record not logged")
+	require.Contains(t, record, "lvl=warn")
 }
 
 func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {

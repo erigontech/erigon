@@ -117,11 +117,16 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 			log.Debug("Stopped block builder due to max build time exceeded")
 			return
 		}
-		if errors.Is(err, ErrDiscarded) || builder.finished() {
+		// Not unresponsive: someone else discarded it, it finished on its own, or the node is
+		// shutting down and cut the grace short.
+		if errors.Is(err, ErrDiscarded) || builder.Finished() || ctx.Err() != nil {
 			return
 		}
 		builder.Discard()
-		log.Warn("Discarded unresponsive block builder due to max build time exceeded")
+		// The swap can lose to a completion landing in between, and then nothing was discarded.
+		if builder.Discarded() {
+			log.Warn("Discarded unresponsive block builder due to max build time exceeded")
+		}
 	}()
 
 	return builder
@@ -136,9 +141,7 @@ func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, erro
 	select {
 	case <-b.done:
 	case <-ctx.Done():
-		select {
-		case <-b.done:
-		default:
+		if !b.Finished() {
 			return nil, ctx.Err()
 		}
 	}
@@ -149,13 +152,15 @@ func (b *BlockBuilder) readResult() (*types.BlockWithReceipts, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
 
+	// Keep a payload that completed as discard arrived: a replay must not lose a latched block.
 	if b.Discarded() && (b.result == nil || b.err != nil) {
 		return nil, ErrDiscarded
 	}
 	return b.result, b.err
 }
 
-func (b *BlockBuilder) finished() bool {
+// Finished reports whether the build goroutine has returned and latched its outcome.
+func (b *BlockBuilder) Finished() bool {
 	select {
 	case <-b.done:
 		return true
@@ -179,9 +184,7 @@ func (b *BlockBuilder) Discarded() bool {
 // Failed reports whether the builder has finished and ended in an error, which a caller looking to
 // reuse it has to read as absent because that error is latched.
 func (b *BlockBuilder) Failed() bool {
-	select {
-	case <-b.done:
-	default:
+	if !b.Finished() {
 		return false
 	}
 	b.mu.Lock()

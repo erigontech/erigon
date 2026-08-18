@@ -39,17 +39,6 @@ import (
 	"github.com/erigontech/erigon/txnprovider"
 )
 
-type doneObservedContext struct {
-	context.Context
-	observed chan struct{}
-	once     sync.Once
-}
-
-func (c *doneObservedContext) Done() <-chan struct{} {
-	c.once.Do(func() { close(c.observed) })
-	return c.Context.Done()
-}
-
 // newTestModule builds a module whose builders run builderFunc. Every test needs the same fields,
 // and getting the config or the context wrong changes the builder's own deadline silently.
 func newTestModule(t *testing.T, builderFunc builder.BlockBuilderFunc) *ExecModule {
@@ -681,6 +670,9 @@ func TestGetAssembledBlockReportsDiscardDuringStopAsUnknown(t *testing.T) {
 func TestGetAssembledBlockKeepsPayloadCompletedAsDiscardLands(t *testing.T) {
 	timestamp := newTestTimestamp()
 	finish := make(chan struct{})
+	var finishOnce sync.Once
+	closeFinish := func() { finishOnce.Do(func() { close(finish) }) }
+	t.Cleanup(closeFinish)
 	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
 	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
@@ -698,8 +690,7 @@ func TestGetAssembledBlockKeepsPayloadCompletedAsDiscardLands(t *testing.T) {
 		err    error
 	}
 	collected := make(chan response, 1)
-	stopObserved := make(chan struct{})
-	stopCtx := &doneObservedContext{Context: t.Context(), observed: stopObserved}
+	stopCtx, stopObserved := NewDoneObservedContext(t.Context())
 	go func() {
 		result, err := module.GetAssembledBlock(stopCtx, assembled.PayloadID)
 		collected <- response{result: result, err: err}
@@ -710,7 +701,7 @@ func TestGetAssembledBlockKeepsPayloadCompletedAsDiscardLands(t *testing.T) {
 		t.Fatal("builder did not observe the collection request")
 	}
 	module.builders[assembled.PayloadID].builder.Discard()
-	close(finish)
+	closeFinish()
 
 	select {
 	case result := <-collected:
@@ -744,6 +735,36 @@ func TestGetAssembledBlockKeepsFailureCompletedBeforeDiscard(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 	require.False(t, result.Unknown)
 	require.NotContains(t, module.builders, assembled.PayloadID)
+}
+
+func TestEvictionSparesADiscardedBuilderWithALatchedPayload(t *testing.T) {
+	timestamp := newTestTimestamp()
+	release := make(chan struct{})
+	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-release
+		return want, nil
+	})
+
+	assembled, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+	entry := module.builders[assembled.PayloadID]
+	entry.builder.Discard()
+	close(release)
+	require.Eventually(t, func() bool { return entry.builder.Block() != nil }, 5*time.Second, time.Millisecond)
+
+	// The latched payload is still served to getPayload, so evicting this entry while its slot is
+	// live would flip a payload the CL can already collect into Unknown between two polls.
+	for id := assembled.PayloadID + 1; len(module.builders) < engine_helpers.MaxBuilders; id++ {
+		module.builders[id] = nil
+	}
+	module.evictOldBuilders()
+
+	require.Contains(t, module.builders, assembled.PayloadID)
+	replayed, err := module.GetAssembledBlock(t.Context(), assembled.PayloadID)
+	require.NoError(t, err)
+	require.False(t, replayed.Unknown)
+	require.Same(t, want, replayed.Block)
 }
 
 func TestEvictionTakesAFailedCurrentBuilderBeforeALiveSupersededOne(t *testing.T) {

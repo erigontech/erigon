@@ -154,8 +154,9 @@ type ExecutionModule interface {
 	// otherwise PayloadID identifies the new build.
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)
 
-	// GetAssembledBlock stops and waits for payloadID's builder. Busy reports that the execution
-	// module is occupied; Unknown reports that no builder is held for payloadID.
+	// GetAssembledBlock stops payloadID's builder and waits for its payload; a discarded builder
+	// is answered at once. Busy reports that the execution module is occupied; Unknown reports
+	// that no builder is held for payloadID.
 	GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error)
 
 	// --- Header / body queries --------------------------------------------
