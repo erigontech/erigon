@@ -254,6 +254,16 @@ type DownloadFailed struct {
 	Reason   string
 }
 
+// DownloadSuperseded fires when the orchestrator determines a pending
+// download is no longer needed: either it was dropped from the
+// canonical view (peers moved on) or its last advertising peer
+// departed. Provider subscribes and asks the downloader to drop the
+// torrent so the retry loop terminates.
+type DownloadSuperseded struct {
+	FileName string
+	Reason   string
+}
+
 // FileSeeded fires when a file has been registered with the local torrent
 // client and is serving peers.
 type FileSeeded struct {

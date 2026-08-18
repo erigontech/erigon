@@ -288,19 +288,52 @@ func (o *Orchestrator) scheduleCanonicalRecomputeLocked() {
 // name, then verifies TorrentHash matches across all advertisers.
 // Files with a divergent hash are excluded (divergence rejection).
 // Publishes CanonicalChanged if the resulting set differs from the
-// prior canonical.
+// prior canonical, and DownloadSuperseded for each removed file that
+// was in the pending set (so the Downloader can drop the torrent
+// rather than retry indefinitely against peers that no longer serve it).
 func (o *Orchestrator) recomputeCanonical() {
 	o.peerMu.Lock()
 	next := computeCanonicalLocked(o.peerManifests)
 	prev := o.canonical
 	added, removed := diffCanonical(prev, next)
 	o.canonical = next
+	cancels := collectSupersededPendingLocked(o.pending, next)
+	for _, name := range cancels {
+		delete(o.pending, name)
+		if o.statePending > 0 {
+			o.statePending--
+		}
+	}
 	o.peerMu.Unlock()
 
-	if len(added) == 0 && len(removed) == 0 {
-		return
+	if len(added) > 0 || len(removed) > 0 {
+		o.bus.Publish(CanonicalChanged{Added: added, Removed: removed})
 	}
-	o.bus.Publish(CanonicalChanged{Added: added, Removed: removed})
+	for _, name := range cancels {
+		o.bus.Publish(DownloadSuperseded{FileName: name, Reason: "not-in-canonical"})
+	}
+}
+
+// collectSupersededPendingLocked returns the names of pending files
+// absent from the current canonical set. Runs on every canonical
+// recompute — once canonical excludes a name, the file is no longer
+// authoritative for us and continuing to fetch it wastes work and
+// blocks statePending from draining.
+func collectSupersededPendingLocked(
+	pending map[string]*snapshot.FileEntry,
+	canonical map[string]*snapshot.FileEntry,
+) []string {
+	if len(pending) == 0 {
+		return nil
+	}
+	var cancels []string
+	for name := range pending {
+		if _, ok := canonical[name]; !ok {
+			cancels = append(cancels, name)
+		}
+	}
+	sort.Strings(cancels)
+	return cancels
 }
 
 // computeCanonicalLocked builds the canonical set from per-peer manifests.
