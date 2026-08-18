@@ -5,16 +5,16 @@
 # owns the flag set. Pass DATADIR / LOG via env to override.
 #
 # Two modes, gated by env:
-#   leg P (default): --snap.p2p-manifest with no publisher wired. On a
-#   machine with no chain-toml publishers reachable, the 2-min manifest
-#   discovery times out and stage_snapshots falls back to preverified.
-#   This is what most of the existing soak history was run under.
+#   leg P (default): --snap.p2p-manifest with no publisher wired.
+#   --snap.bootstrap-from-preverified defaults to true so the consumer
+#   seeds a synthetic manifest from preverified.toml at startup and
+#   proceeds without waiting for a chain-toml peer.
 #
 #   leg M (PUBLISHER_ENR + PUBLISHER_TRUST_ROOT set): staticpeer the
-#   local master publisher and pin its trust-root pubkey. The manifest
-#   discovery MUST succeed via the publisher — no preverified fallback
-#   should fire. The soak wrapper post-checks the log for the fallback
-#   line and fails the leg if it appears.
+#   local master publisher and pin its trust-root pubkey. Sets
+#   --snap.bootstrap-from-preverified=false so the manifest MUST come
+#   from the publisher — preverified is disabled, no silent
+#   degradation possible.
 #
 #   Optional second publisher (ARCHIVE_ENR + ARCHIVE_TRUST_ROOT set):
 #   also staticpeer a full-history publisher so mode-B unwinds deeper
@@ -73,6 +73,12 @@ if [[ -n "$STATICPEERS" ]]; then
 fi
 if [[ -n "$TRUST_ROOTS" ]]; then
   EXTRA_ARGS+=(--snapshot.trust-roots="$TRUST_ROOTS")
+fi
+# Leg M: manifest MUST come from the publisher; preverified is disabled
+# so any failure to reach the publisher surfaces as a hang, not silent
+# degradation to preverified.
+if [[ -n "${PUBLISHER_ENR:-}" ]]; then
+  EXTRA_ARGS+=(--snap.bootstrap-from-preverified=false)
 fi
 
 exec "$BIN" \

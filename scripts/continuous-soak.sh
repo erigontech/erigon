@@ -163,10 +163,11 @@ run_leg_m() {
   echo "$rc" >"$out/exit-code"
 
   # Post-check: manifest path MUST have been the actual bootstrap route.
-  # If the "P2P manifest discovery timed out — falling back to preverified"
-  # line appears, this leg silently degraded to leg P and is invalid.
-  if grep -q "P2P manifest discovery timed out — falling back to preverified" "$out/soak.log"; then
-    echo "[continuous-soak] FAIL leg M cycle $cycle: manifest bootstrap fell back to preverified" | tee -a "$out/verdict.txt"
+  # Leg M passes --snap.bootstrap-from-preverified=false so the synthetic-
+  # preverified seed cannot fire; if the seeding log line appears anyway,
+  # the flag wiring is broken and this leg silently degraded to leg P.
+  if grep -q "bootstrap-from-preverified: seeding synthetic manifest" "$out/soak.log"; then
+    echo "[continuous-soak] FAIL leg M cycle $cycle: preverified bootstrap fired despite --snap.bootstrap-from-preverified=false" | tee -a "$out/verdict.txt"
     return 2
   fi
   return "$rc"

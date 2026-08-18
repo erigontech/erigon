@@ -757,7 +757,8 @@ var (
 	}
 	SnapBootstrapFromPreverifiedFlag = cli.BoolFlag{
 		Name:  "snap.bootstrap-from-preverified",
-		Usage: "Opt this node into bootstrap-publisher mode: use preverified.toml as the initial download set AND seed it into the published chain.toml. Default false — V2 nodes (--snap.p2p-manifest) use peer-discovered chain.toml exclusively. Set this on initial publishers / chain rollout / recovery scenarios.",
+		Usage: "Use preverified.toml as the initial download set AND seed it into the published chain.toml. Default true — every consumer / publisher has a working initial-manifest source out of the box. Set to false only to test pure peer-manifest mode where the swarm must supply the initial chain.toml.",
+		Value: true,
 	}
 	SnapBlockAlignedBoundariesFlag = cli.BoolFlag{
 		Name:  "snap.block-aligned-boundaries",
