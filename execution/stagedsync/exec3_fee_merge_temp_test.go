@@ -120,11 +120,11 @@ func TestMergeRecordedWritesReclaimsEveryMergeSite(t *testing.T) {
 	txOut := feeMergeTestWrites(t, addr, 1)
 	be.blockIO.RecordWrites(txVersion, txOut)
 
-	feeMerged := be.mergeRecordedWrites(0, txVersion, feeMergeTestWrites(t, addr, 2))
+	feeMerged := be.mergeRecordedWrites(txVersion, feeMergeTestWrites(t, addr, 2))
 	require.Same(t, feeMerged, be.blockIO.WriteSet(0))
 	require.Equal(t, 1, txOut.Count(), "TxOut must survive the fee merge")
 
-	finalizeMerged := be.mergeRecordedWrites(0, txVersion, feeMergeTestWrites(t, addr, 3))
+	finalizeMerged := be.mergeRecordedWrites(txVersion, feeMergeTestWrites(t, addr, 3))
 	require.Same(t, finalizeMerged, be.blockIO.WriteSet(0))
 	require.Same(t, finalizeMerged, be.mergedWrites[0])
 	releaseSuperseded(be)
