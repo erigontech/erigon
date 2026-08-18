@@ -25,6 +25,7 @@ import (
 	"strings"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/app/event"
@@ -136,8 +137,16 @@ type Orchestrator struct {
 	// PeerManifestReceived replaces the peer's entry (peers publish
 	// self-contained snapshots, not diffs). Untrusted peers do not
 	// enter this map. PeerDeparted removes the peer's entry. Consumed
-	// by canonical computation in later phases.
+	// by canonical computation.
 	peerManifests map[string]map[string]*snapshot.FileEntry
+
+	// canonical is the file set unanimously advertised by all trusted
+	// peers with matching hash. Recomputed via recomputeCanonical
+	// (debounced by canonicalDebounce after each PeerManifestReceived
+	// / PeerDeparted). CanonicalChanged fires with the diff on transition.
+	canonical         map[string]*snapshot.FileEntry
+	canonicalDebounce time.Duration
+	canonicalTimer    *time.Timer
 
 	// Phased scheduling: state-domain files are requested first; block
 	// files are held in blocksQueued until the last state download
@@ -231,6 +240,119 @@ type Orchestrator struct {
 	// file to TrustVerified. Nil means no re-verification (existing
 	// behaviour); set via SetProofRootVerifier before Start.
 	proofVerifier ProofRootVerifier
+}
+
+// defaultCanonicalDebounce batches bursts of peer manifests within a
+// rotation window into a single canonical recompute. Long enough to
+// absorb sub-second inter-peer skew; short enough to keep canonical
+// responsive under normal cadence.
+const defaultCanonicalDebounce = 3 * time.Second
+
+// SetCanonicalDebounce overrides the default canonical-recompute
+// debounce. Must be called before Start. Tests use tiny values (tens of
+// milliseconds) for fast convergence; production leaves the default.
+func (o *Orchestrator) SetCanonicalDebounce(d time.Duration) {
+	if o == nil {
+		return
+	}
+	o.mu.Lock()
+	defer o.mu.Unlock()
+	if d > 0 {
+		o.canonicalDebounce = d
+	}
+}
+
+// Canonical returns a snapshot of the file entries unanimously
+// advertised by all trusted peers with matching hash. The returned map
+// is a clone; callers may mutate without affecting orchestrator state.
+// An empty map means no quorum has formed (zero trusted peers, or the
+// intersection is currently empty).
+func (o *Orchestrator) Canonical() map[string]*snapshot.FileEntry {
+	o.peerMu.RLock()
+	defer o.peerMu.RUnlock()
+	return maps.Clone(o.canonical)
+}
+
+// scheduleCanonicalRecompute (re)arms the debounce timer. On fire it
+// runs recomputeCanonical. Timer is reset on each subsequent call so a
+// burst of peer manifests batches into one recompute. Must be called
+// with peerMu held.
+func (o *Orchestrator) scheduleCanonicalRecomputeLocked() {
+	if o.canonicalTimer != nil {
+		o.canonicalTimer.Stop()
+	}
+	o.canonicalTimer = time.AfterFunc(o.canonicalDebounce, o.recomputeCanonical)
+}
+
+// recomputeCanonical intersects all trusted peers' manifests by file
+// name, then verifies TorrentHash matches across all advertisers.
+// Files with a divergent hash are excluded (divergence rejection).
+// Publishes CanonicalChanged if the resulting set differs from the
+// prior canonical.
+func (o *Orchestrator) recomputeCanonical() {
+	o.peerMu.Lock()
+	next := computeCanonicalLocked(o.peerManifests)
+	prev := o.canonical
+	added, removed := diffCanonical(prev, next)
+	o.canonical = next
+	o.peerMu.Unlock()
+
+	if len(added) == 0 && len(removed) == 0 {
+		return
+	}
+	o.bus.Publish(CanonicalChanged{Added: added, Removed: removed})
+}
+
+// computeCanonicalLocked builds the canonical set from per-peer manifests.
+// Zero trusted peers → empty canonical. One trusted peer → its manifest
+// (trivial quorum). More peers → intersection by name, with hash-match
+// gate rejecting divergent-hash files.
+func computeCanonicalLocked(peerManifests map[string]map[string]*snapshot.FileEntry) map[string]*snapshot.FileEntry {
+	out := make(map[string]*snapshot.FileEntry)
+	if len(peerManifests) == 0 {
+		return out
+	}
+	// Seed the candidate set from any one peer (map iteration is fine).
+	var seed map[string]*snapshot.FileEntry
+	for _, files := range peerManifests {
+		seed = files
+		break
+	}
+	// For each candidate name, verify every other peer also advertises
+	// it with the same TorrentHash. First mismatch → excluded.
+CANDIDATE:
+	for name, entry := range seed {
+		hash := entry.TorrentHash
+		for _, files := range peerManifests {
+			other, ok := files[name]
+			if !ok {
+				continue CANDIDATE
+			}
+			if other.TorrentHash != hash {
+				continue CANDIDATE
+			}
+		}
+		out[name] = entry
+	}
+	return out
+}
+
+// diffCanonical returns names added and removed between the prior and
+// next canonical maps. Sorted for deterministic event payloads.
+func diffCanonical(prev, next map[string]*snapshot.FileEntry) (added, removed []string) {
+	for name := range next {
+		if _, ok := prev[name]; !ok {
+			added = append(added, name)
+		}
+	}
+	for name := range prev {
+		if _, ok := next[name]; !ok {
+			removed = append(removed, name)
+		}
+	}
+	sort.Strings(added)
+	sort.Strings(removed)
+	return added, removed
 }
 
 // SetTrust attaches a TrustFilter that gates which peers the
@@ -360,14 +482,16 @@ func NewWithStorage(bus event.EventBus, storage Storage, logger log.Logger) *Orc
 		logger = log.Root()
 	}
 	o := &Orchestrator{
-		bus:              bus,
-		storage:          storage,
-		log:              logger,
-		peerFiles:        make(map[string]*peerFileClaim),
-		pending:          make(map[string]*snapshot.FileEntry),
-		peerManifests:    make(map[string]map[string]*snapshot.FileEntry),
-		stateDomainsSeen: make(map[snapshot.Domain]struct{}),
-		phase1Files:      make(map[string]struct{}),
+		bus:               bus,
+		storage:           storage,
+		log:               logger,
+		peerFiles:         make(map[string]*peerFileClaim),
+		pending:           make(map[string]*snapshot.FileEntry),
+		peerManifests:     make(map[string]map[string]*snapshot.FileEntry),
+		canonical:         make(map[string]*snapshot.FileEntry),
+		canonicalDebounce: defaultCanonicalDebounce,
+		stateDomainsSeen:  make(map[snapshot.Domain]struct{}),
+		phase1Files:       make(map[string]struct{}),
 	}
 	o.hBlocksFlushed = o.onBlocksFlushed
 	o.hPeerManifestReceived = o.onPeerManifestReceived
@@ -552,6 +676,7 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 		}
 		o.peerMu.Lock()
 		o.peerManifests[e.PeerID] = files
+		o.scheduleCanonicalRecomputeLocked()
 		o.peerMu.Unlock()
 	}
 
@@ -1181,7 +1306,10 @@ func (o *Orchestrator) onPeerDeparted(e PeerDeparted) {
 	}
 	o.peerMu.Lock()
 	defer o.peerMu.Unlock()
-	delete(o.peerManifests, e.PeerID)
+	if _, existed := o.peerManifests[e.PeerID]; existed {
+		delete(o.peerManifests, e.PeerID)
+		o.scheduleCanonicalRecomputeLocked()
+	}
 	for name, claim := range o.peerFiles {
 		if _, had := claim.peers[e.PeerID]; !had {
 			continue

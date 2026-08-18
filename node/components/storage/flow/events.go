@@ -199,6 +199,16 @@ type PeerDeparted struct {
 	PeerID string
 }
 
+// CanonicalChanged fires when the orchestrator's canonical view (files
+// unanimously advertised by all trusted peers with matching hash)
+// transitions. Recompute is debounced so bursts of peer manifests
+// during a rotation window batch into one event where possible.
+// Added / Removed are keyed by file name.
+type CanonicalChanged struct {
+	Added   []string
+	Removed []string
+}
+
 // ManifestPublished fires after the local node updates its chain.toml / ENR
 // advertisement.
 type ManifestPublished struct {
