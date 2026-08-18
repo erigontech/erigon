@@ -171,6 +171,11 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		}
 
 		if strings.HasPrefix(p.Name, "caplin") {
+			caplinFile, _, known := snaptype.ParseFileName("caplin", filepath.Base(v+"-"+name))
+			if !known || caplinFile.Type == nil {
+				continue
+			}
+
 			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, "caplin/"))
 			if err != nil {
 				continue

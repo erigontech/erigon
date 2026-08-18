@@ -449,25 +449,25 @@ leaves `AllTypedSegments:1156` open, which is the path PR-2b lands on first.
 - Modify: `db/snapcfg/util_test.go`
 - Modify: `db/snapshotsync/caplin_preverified_window_test.go`
 
-- [ ] `db/snapcfg/util.go:173-186`: resolve the entry against the **global
+- [x] `db/snapcfg/util.go:173-186`: resolve the entry against the **global
   snaptype registry** and drop it when that does not know it; keep the
   version-window check unchanged. Note the shape: at `:168` `name` is the
   post-`Cut` remainder (`000000-000050-BlockProposers.seg`), and `ParseFileName`
   starts by parsing a version off the front (`files.go:155`), so it needs the
   basename reassembled and a dir argument containing `"caplin"`.
-- [ ] the caplin branch stays independent of the `types` argument. Do **not**
+- [x] the caplin branch stays independent of the `types` argument. Do **not**
   mirror the generic branch's allow-list walk (`:223-240`) — production passes
   `knownTypes[networkName]`, which carries two caplin entries and no state type
   (Ground truth), so an allow-list check drops all 33 and a download-only node
   fetches no state snapshots at all. A test that passes
   `CaplinStateSnapshotTypes` explicitly is blind to this; the regression below is
   the one that catches it.
-- [ ] report the dropped names the same way the existing filter does, so an
+- [x] report the dropped names the same way the existing filter does, so an
   operator sees what was skipped instead of silently losing files.
-- [ ] write a test feeding a `Preverified` containing `BlockProposers` plus two
+- [x] write a test feeding a `Preverified` containing `BlockProposers` plus two
   known caplin types, asserting the unknown one is dropped and the known ones
   survive with their versions intact
-- [ ] write the production-shaped regression **in `db/snapshotsync`**, not in
+- [x] write the production-shaped regression **in `db/snapshotsync`**, not in
   `db/snapcfg`: `snapcfg.KnownCfg(networkname.Mainnet)` over the vendored mainnet
   fixture, asserting `BlockRoot` and `PendingDeposits` entries survive while
   `BlockProposers` is dropped. Passing the state types explicitly would defeat
@@ -478,12 +478,12 @@ leaves `AllTypedSegments:1156` open, which is the path PR-2b lands on first.
   `Typed(nil)`, silently passing. `db/snapshotsync` has both halves already: its
   `TestMain` seeds the fixture (`main_test.go:44-47`) and it links `db/snaptype2`
   (`snapshotsync.go:35`), so that init has run.
-- [ ] write a test asserting a caplin entry outside the version window is still
+- [x] write a test asserting a caplin entry outside the version window is still
   dropped for the old reason, so the two filters stay independent
-- [ ] check `db/snapshotsync` for assertions sensitive to caplin entry counts —
+- [x] check `db/snapshotsync` for assertions sensitive to caplin entry counts —
   `main_test.go:44-47` seeds the real mainnet fixture, which carries the 18
   `BlockProposers` lines, into the registry for every test in that package
-- [ ] run `go test ./db/snapcfg/... ./db/snapshotsync/...` — must pass before task 6
+- [x] run `go test ./db/snapcfg/... ./db/snapshotsync/...` — must pass before task 6
 
 ---
 

@@ -29,6 +29,20 @@ func TestTypedCaplinVersionWindow(t *testing.T) {
 	require.Equal(t, []string{"caplin/v1.1-000000-000100-BlockRoot.seg"}, names)
 }
 
+func TestTypedCaplinUsesRegisteredTypes(t *testing.T) {
+	items := PreverifiedItems{
+		{Name: "caplin/v1.1-000000-000100-BlockProposers.seg", Hash: "unknown"},
+		{Name: "caplin/v1.1-000000-000100-BlockRoot.seg", Hash: "block-root"},
+		{Name: "caplin/v1.1-000000-000100-PendingDeposits.seg", Hash: "pending-deposits"},
+	}
+
+	typed := Preverified{Items: items}.Typed(nil)
+	require.Equal(t, PreverifiedItems{
+		{Name: "caplin/v1.1-000000-000100-BlockRoot.seg", Hash: "block-root"},
+		{Name: "caplin/v1.1-000000-000100-PendingDeposits.seg", Hash: "pending-deposits"},
+	}, typed.Items)
+}
+
 func TestTypedCaplinKeepsNewestPerName(t *testing.T) {
 	names := typedNames(t, PreverifiedItems{
 		{Name: "caplin/v1.0-000000-000100-BlockRoot.seg", Hash: "old"},
