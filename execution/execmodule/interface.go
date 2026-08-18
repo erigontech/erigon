@@ -154,8 +154,8 @@ type ExecutionModule interface {
 	// parameters.  Returns the payload ID assigned to the build job.
 	AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error)
 
-	// GetAssembledBlock retrieves the block that was assembled under the
-	// given payloadID.  The result is Busy when the builder has not finished.
+	// GetAssembledBlock stops and waits for payloadID's builder. Busy reports that the execution
+	// module is occupied; Unknown reports that no builder is held for payloadID.
 	GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error)
 
 	// --- Header / body queries --------------------------------------------

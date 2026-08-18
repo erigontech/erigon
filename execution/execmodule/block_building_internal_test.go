@@ -628,6 +628,40 @@ func TestGetAssembledBlockReportsADiscardedBuilderAsUnknown(t *testing.T) {
 	require.NotContains(t, module.buildersByTimestamp, timestamp)
 }
 
+func TestGetAssembledBlockReportsDiscardDuringStopAsUnknown(t *testing.T) {
+	timestamp := newTestTimestamp()
+	stopObserved := make(chan struct{})
+	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		close(stopObserved)
+		<-ctx.Done()
+		return nil, ctx.Err()
+	})
+
+	assembled, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{0x01}})
+	require.NoError(t, err)
+
+	type response struct {
+		result AssembledBlockResult
+		err    error
+	}
+	collected := make(chan response, 1)
+	go func() {
+		result, err := module.GetAssembledBlock(t.Context(), assembled.PayloadID)
+		collected <- response{result: result, err: err}
+	}()
+	<-stopObserved
+	module.builders[assembled.PayloadID].builder.Discard()
+
+	result := <-collected
+	require.NoError(t, result.err)
+	require.True(t, result.result.Unknown)
+	require.NotContains(t, module.builders, assembled.PayloadID)
+	require.NotContains(t, module.buildersByTimestamp, timestamp)
+}
+
 func TestEvictionTakesAFailedCurrentBuilderBeforeALiveSupersededOne(t *testing.T) {
 	timestamp := newTestTimestamp()
 	started := make(chan struct{}, 4)

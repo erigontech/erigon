@@ -433,6 +433,20 @@ func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
+func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
+	calls := 0
+	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, chainreader.ErrUnknownPayload
+		})
+	require.False(t, ok)
+	require.Nil(t, payload)
+	require.Equal(t, 1, calls)
+}
+
 func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}

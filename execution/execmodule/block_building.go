@@ -245,6 +245,10 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		return AssembledBlockResult{Unknown: true}, nil
 	}
 	blockWithReceipts, err := entry.builder.Stop(ctx)
+	if entry.builder.Discarded() {
+		e.dropBuilder(payloadID, entry)
+		return AssembledBlockResult{Unknown: true}, nil
+	}
 	if err != nil {
 		// Stop reports the caller's wait expiring and the build's own failure through the same
 		// error, and a build can fail with a context error of its own - a transaction provider

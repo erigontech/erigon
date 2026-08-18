@@ -63,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -317,9 +318,12 @@ func pollAssembledPayload(
 	for {
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
-		if err != nil {
+		switch {
+		case errors.Is(err, chainreader.ErrUnknownPayload):
+			return nil, nil, nil, nil, false
+		case err != nil:
 			log.Error("BlockProduction: Failed to get payload", "err", err)
-		} else if payload != nil {
+		case payload != nil:
 			return payload, bundles, requestsBundle, blockValue, true
 		}
 		select {
