@@ -176,7 +176,7 @@ func (cc *ExecutionClientEngine) NewPayload(
 		payloadStatus, err = cc.engine.NewPayloadV5(ctx, request, versionedHashes, beaconParentRoot, executionRequestsList)
 	}
 	if err != nil {
-		return PayloadStatusNone, fmt.Errorf("engine NewPayload failed: %w", err)
+		return PayloadStatusNone, fmt.Errorf("engine NewPayload failed: %w", cc.markRequestAbandoned(ctx, err))
 	}
 	if payloadStatus == nil {
 		return PayloadStatusNone, errors.New("engine NewPayload returned nil status")

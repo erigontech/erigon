@@ -21,6 +21,7 @@ import (
 	"context"
 	"math/big"
 	"testing"
+	"testing/synctest"
 	"time"
 
 	"github.com/jinzhu/copier"
@@ -38,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -48,6 +50,24 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
+
+func TestWaitForResponseStopsWhenContextIsCanceled(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		calls := 0
+
+		waiting, err := waitForResponse(ctx, time.Hour, func() (bool, error) {
+			calls++
+			cancel()
+			return true, nil
+		})
+
+		require.False(t, waiting)
+		require.ErrorIs(t, err, context.Canceled)
+		require.ErrorIs(t, err, execmodule.ErrRequestAbandoned)
+		require.Equal(t, 1, calls)
+	})
+}
 
 // Do 1 step to start txPool
 func oneBlockSteps(m *execmoduletester.ExecModuleTester, require *require.Assertions, blocks int) {
