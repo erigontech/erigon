@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"reflect"
-	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -44,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
@@ -752,32 +752,26 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 	return loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr)
 }
 
-func boundedLogFilterCriteria(criteria filters.FilterCriteria, maxAddresses, maxTopics int) filters.FilterCriteria {
-	bounded := criteria
-	addressCount := len(criteria.Addresses)
-	if maxAddresses != 0 {
-		addressCount = min(addressCount, max(maxAddresses, 0))
-	}
-	bounded.Addresses = criteria.Addresses[:addressCount:addressCount]
-
-	bounded.Topics = slices.Clip(criteria.Topics)
-	remainingTopics := maxTopics
-	for i, topics := range criteria.Topics {
-		topicCount := len(topics)
-		if maxTopics != 0 {
-			topicCount = min(topicCount, max(remainingTopics, 0))
-			remainingTopics -= topicCount
-		}
-		bounded.Topics[i] = topics[:topicCount:topicCount]
-	}
-	return bounded
-}
-
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription is
 // installed and the error is returned.
 func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID, error) {
-	criteria = boundedLogFilterCriteria(criteria, ff.config.RpcSubscriptionFiltersMaxAddresses, ff.config.RpcSubscriptionFiltersMaxTopics)
+	if maxAddresses := ff.config.RpcSubscriptionFiltersMaxAddresses; maxAddresses > 0 && len(criteria.Addresses) > maxAddresses {
+		return nil, "", &rpc.InvalidParamsError{
+			Message: fmt.Sprintf("log filter has %d addresses, maximum is %d", len(criteria.Addresses), maxAddresses),
+		}
+	}
+	if maxTopics := ff.config.RpcSubscriptionFiltersMaxTopics; maxTopics > 0 {
+		topicCount := 0
+		for _, topics := range criteria.Topics {
+			topicCount += len(topics)
+		}
+		if topicCount > maxTopics {
+			return nil, "", &rpc.InvalidParamsError{
+				Message: fmt.Sprintf("log filter has %d topic alternatives, maximum is %d", topicCount, maxTopics),
+			}
+		}
+	}
 	var pollingCriteria *filters.FilterCriteria
 	if protocol == ProtocolHTTP {
 		pollingCriteria = &criteria

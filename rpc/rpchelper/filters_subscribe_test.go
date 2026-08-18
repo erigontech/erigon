@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
+	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 )
 
@@ -43,39 +44,38 @@ func TestSubscribeLogsRemoteUpdateFailureReturnsError(t *testing.T) {
 	require.False(t, f.hasTrackedSub(SubscriptionID(id)))
 }
 
-func TestSubscribeLogsStoresBoundedCriteriaForHTTP(t *testing.T) {
-	address1 := common.Address{1}
-	address2 := common.Address{2}
-	topic1 := common.Hash{1}
-	topic2 := common.Hash{2}
-	topic3 := common.Hash{3}
-	criteria := filters.FilterCriteria{
-		Addresses: []common.Address{address1, address2},
-		Topics:    [][]common.Hash{{topic1, topic2}, {topic3}},
+func TestSubscribeLogsRejectsTooManyAddresses(t *testing.T) {
+	for _, protocol := range []SubProtocol{ProtocolHTTP, ProtocolWS} {
+		t.Run(string(protocol), func(t *testing.T) {
+			config := FiltersConfig{
+				RpcSubscriptionFiltersMaxAddresses: 1,
+			}
+			f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
+
+			_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{
+				Addresses: []common.Address{{1}, {2}},
+			}, protocol)
+			var invalidParams *rpc.InvalidParamsError
+			require.ErrorAs(t, err, &invalidParams)
+			require.EqualError(t, err, "log filter has 2 addresses, maximum is 1")
+			require.Empty(t, id)
+		})
 	}
-	addressStorage := &criteria.Addresses[0]
-	topicStorage := &criteria.Topics[0][0]
+}
+
+func TestSubscribeLogsRejectsTooManyTopics(t *testing.T) {
 	config := FiltersConfig{
-		RpcSubscriptionFiltersMaxAddresses: 1,
-		RpcSubscriptionFiltersMaxTopics:    2,
+		RpcSubscriptionFiltersMaxTopics: 2,
 	}
 	f := New(t.Context(), config, nil, nil, nil, func() {}, log.New(), nil)
 
-	_, id, err := f.SubscribeLogs(8, criteria, ProtocolHTTP)
-	require.NoError(t, err)
-	t.Cleanup(func() { f.UnsubscribeLogs(id) })
-
-	stored, ok := f.LogFilterCriteria(id)
-	require.True(t, ok)
-	require.Equal(t, []common.Address{address1}, stored.Addresses)
-	require.Equal(t, [][]common.Hash{{topic1, topic2}, {}}, stored.Topics)
-	require.Same(t, addressStorage, &stored.Addresses[0])
-	require.Same(t, topicStorage, &stored.Topics[0][0])
-	require.Equal(t, len(stored.Addresses), cap(stored.Addresses))
-	require.Equal(t, len(stored.Topics), cap(stored.Topics))
-	for _, topics := range stored.Topics {
-		require.Equal(t, len(topics), cap(topics))
-	}
+	_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{
+		Topics: [][]common.Hash{{{1}, {2}}, {{3}}},
+	}, ProtocolHTTP)
+	var invalidParams *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &invalidParams)
+	require.EqualError(t, err, "log filter has 3 topic alternatives, maximum is 2")
+	require.Empty(t, id)
 }
 
 func TestSubscribeLogsDoesNotStoreCriteriaForWebSocket(t *testing.T) {

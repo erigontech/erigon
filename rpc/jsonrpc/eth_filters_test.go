@@ -141,6 +141,31 @@ func TestGetFilterLogsReturnsHistoricalLogs(t *testing.T) {
 	}
 }
 
+func TestGetFilterLogsDoesNotConsumeFilterChanges(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	crit := filters.FilterCriteria{FromBlock: big.NewInt(10), ToBlock: big.NewInt(10)}
+
+	filterID, err := api.NewFilter(ctx, crit)
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = api.UninstallFilter(ctx, filterID)
+	})
+
+	queued := &types.Log{Address: common.Address{1}}
+	ff.AddLogs(rpchelper.LogsSubID(strings.TrimPrefix(filterID, "0x")), queued)
+
+	_, err = api.GetFilterLogs(ctx, filterID)
+	require.NoError(t, err)
+	changes, err := api.GetFilterChanges(ctx, filterID)
+	require.NoError(t, err)
+	require.Equal(t, []any{queued}, changes)
+}
+
 func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	m := execmoduletester.New(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)

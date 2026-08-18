@@ -21,15 +21,14 @@ import "time"
 // DefaultFilterTimeout matches geth's deadline for evicting idle filters; 0 disables eviction.
 const DefaultFilterTimeout = 5 * time.Minute
 
-// FiltersConfig defines the configuration settings for RPC subscription filters.
-// Each field represents a limit on the number of respective items that can be stored per subscription.
-// A value of 0 disables the limit (no cap). Oldest items are evicted first (FIFO) when the limit is reached.
+// FiltersConfig defines resource limits for RPC filters. A value of 0 disables a limit.
+// Queue limits evict the oldest entries, while criteria limits reject oversized subscriptions.
 type FiltersConfig struct {
 	RpcSubscriptionFiltersMaxLogs      int           // Maximum number of logs to store per subscription. Default: 10000
 	RpcSubscriptionFiltersMaxHeaders   int           // Maximum number of block headers to store per subscription. Default: 10000
 	RpcSubscriptionFiltersMaxTxs       int           // Maximum number of transactions to store per subscription. Default: 10000
-	RpcSubscriptionFiltersMaxAddresses int           // Maximum number of addresses per subscription to filter logs by. Default: 0 (no limit)
-	RpcSubscriptionFiltersMaxTopics    int           // Maximum number of topics per subscription to filter logs by. Default: 0 (no limit)
+	RpcSubscriptionFiltersMaxAddresses int           // Maximum number of addresses accepted per log subscription. Default: 0 (no limit)
+	RpcSubscriptionFiltersMaxTopics    int           // Maximum topic alternatives accepted per log subscription. Default: 0 (no limit)
 	RpcSubscriptionFiltersTimeout      time.Duration // Timeout before idle filters are evicted. Default: 5m; 0 disables eviction
 }
 
