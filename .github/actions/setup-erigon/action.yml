@@ -208,14 +208,18 @@ runs:
       # apt repos (Google Chrome, Microsoft/azure-cli) whose
       # CDNs intermittently break `apt-get update` — a Packages.gz size mismatch
       # mid-mirror-sync, or a 403 "no longer signed" on the azure-cli repo —
-      # failing the whole job. Drop every source pointing at those CDNs before
-      # updating (we never install from them); the Ubuntu archive retries on blips.
+      # failing the whole job. Drop every source pointing at those CDNs (we never
+      # install from them); the Ubuntu archive retries on blips. That runs even
+      # when the install below is skipped, so anything else in the job that
+      # reaches for apt does not trip over them.
       #
       # apt waits indefinitely for an unreachable mirror or for a lock held by
       # the image's own unattended-upgrades, and -qq hides that it is waiting,
-      # so the step can consume the entire job budget in silence. Skip apt when
-      # those three are already on PATH, and bound whatever is left.
+      # so the step can consume the entire job budget in silence. Skip the
+      # install when the tools are already on PATH, and bound whatever is left.
       run: |
+        sudo grep -rlZE 'dl\.google\.com|packages\.microsoft\.com' \
+          /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -0 -r rm -f || true
         cc_bin=$(go env CC || true)
         cxx_bin=$(go env CXX || true)
         if command -v make >/dev/null 2>&1 &&
@@ -224,8 +228,6 @@ runs:
           echo "make, $cc_bin and $cxx_bin already present; skipping apt"
           exit 0
         fi
-        sudo grep -rlZE 'dl\.google\.com|packages\.microsoft\.com' \
-          /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -0 -r rm -f || true
         apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=15
                   -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=60)
         if ! sudo timeout --kill-after=10s 300 apt-get update -q "${apt_opts[@]}"; then
