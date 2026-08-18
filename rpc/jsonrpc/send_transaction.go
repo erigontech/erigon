@@ -21,7 +21,7 @@ import (
 func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.Bytes) (common.Hash, error) {
 	txn, err := types.DecodeWrappedTransaction(encodedTx)
 	if err != nil {
-		return common.Hash{}, err
+		return common.Hash{}, &rpc.InvalidParamsError{Message: err.Error()}
 	}
 
 	// If the transaction fee cap is already specified, ensure the
@@ -52,7 +52,7 @@ func (api *APIImpl) SendRawTransaction(ctx context.Context, encodedTx hexutil.By
 		txnChainId := txn.GetChainID()
 		chainId := cc.ChainID
 		if chainId.Cmp(txnChainId) != 0 {
-			return common.Hash{}, fmt.Errorf("invalid chain id, expected: %d got: %d", chainId, txnChainId)
+			return common.Hash{}, &rpc.InvalidParamsError{Message: fmt.Sprintf("invalid chain id, expected: %d got: %d", chainId, txnChainId)}
 		}
 	}
 
