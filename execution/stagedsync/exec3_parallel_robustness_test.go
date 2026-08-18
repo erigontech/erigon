@@ -1616,6 +1616,14 @@ func TestResolveApplyLoopClosePrecedence(t *testing.T) {
 		require.Nil(t, pe.verdict)
 		require.NotNil(t, pe.exhausted)
 	})
+
+	t.Run("cancellation-only infra falls through to resumable boundary", func(t *testing.T) {
+		infraErr := fmt.Errorf("commitment: %w", context.Canceled)
+		pe, err := run(context.Background(), infraErr, failCandidate{}, mkSet(5), mkSet(5))
+		require.NoError(t, err)
+		require.Nil(t, pe.verdict)
+		require.NotNil(t, pe.exhausted)
+	})
 }
 
 // Undrained work is an executor failure, not proof that a block is invalid.

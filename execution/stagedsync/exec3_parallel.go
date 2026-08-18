@@ -1449,16 +1449,16 @@ func classifyApplyFailures(infraErr error, fail failCandidate) (*blockVerdict, e
 	return verdict, errors.Join(commonerrors.NilIfCanceled(infraErr), opErr)
 }
 
-// resolveApplyLoopClose stores block verdicts and resumable boundaries on pe;
-// only cancellation and operational failures are returned as errors. Recorded
-// failures take precedence because their cancellation can leave later results
-// incomplete, so completeness is checked only for an otherwise healthy stream.
+// resolveApplyLoopClose classifies recorded failures before deciding whether
+// they take precedence, so cancellation-only infrastructure noise still reaches
+// completeness and close classification. A genuine failure can leave later
+// results incomplete, so completeness is checked only for a healthy stream.
 func (pe *parallelExecutor) resolveApplyLoopClose(ctx context.Context, infraErr error, fail failCandidate, sc *stopCause,
 	startBlockNum, lastBlockNum uint64, txResultBlocks, appliedBlocks map[uint64]struct{},
 ) error {
-	if infraErr != nil || fail.set {
-		var err error
-		pe.verdict, err = classifyApplyFailures(infraErr, fail)
+	var err error
+	pe.verdict, err = classifyApplyFailures(infraErr, fail)
+	if err != nil || pe.verdict != nil {
 		return err
 	}
 	if err := applyLoopMissingBlocksError(ctx, lastBlockNum, pe.maxBlockNum, txResultBlocks, appliedBlocks); err != nil {
