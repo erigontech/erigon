@@ -17,6 +17,7 @@
 package snapshotsync
 
 import (
+	"bytes"
 	"context"
 	"path/filepath"
 	"slices"
@@ -498,6 +499,44 @@ func TestRetireFilesBelowSkipsWindowTooSmall(t *testing.T) {
 	require.Equal(2, s.dirty[txEnum].Len())
 }
 
+// Block-segment retirement must be visible in the log: it is the only signal an operator
+// (or the QA retirement check) has that the prune window actually dropped files, since
+// unlink happens later, off the retire call.
+func TestRetireFilesBelowLogsWhatItRetired(t *testing.T) {
+	dir := t.TempDir()
+	require := require.New(t)
+
+	logger := log.New()
+	const mergeLimit = snaptype.Erigon2MergeLimit
+	for _, snT := range snaptype2.BlockSnapshotTypes {
+		createTestSegmentFile(t, 0, mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, mergeLimit, 2*mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+		createTestSegmentFile(t, 2*mergeLimit, 3*mergeLimit, snT.Enum(), dir, version.V1_0, logger)
+	}
+
+	output := new(bytes.Buffer)
+	logger.SetHandler(log.StreamHandler(output, log.LogfmtFormat()))
+	s := NewBaseRoSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, dir, snaptype2.BlockSnapshotTypes, snaptype2.Transactions, true, logger)
+	defer s.Close()
+	require.NoError(s.OpenFolder())
+
+	txEnum := snaptype2.Transactions.Enum()
+	require.Equal(3, s.dirty[txEnum].Len())
+
+	retired, err := s.RetireFilesBelow(snaptype2.Transactions, 2*mergeLimit, func([]string) error { return nil })
+	require.NoError(err)
+	require.True(retired)
+
+	// The count in the log has to be the count actually detached, so assert both.
+	require.Equal(2, s.dirty[txEnum].Len())
+	require.False(visibleHas(s, txEnum, 0, mergeLimit))
+
+	require.Contains(output.String(), "retired old block files")
+	require.Contains(output.String(), "type=transactions")
+	require.Contains(output.String(), "removed=1")
+	require.Contains(output.String(), "blockTo=200000")
+}
+
 // The SnapshotDownloadToBlock cleanup: after downloading past the target block, the extra
 // segments (ending at/beyond it) are retired across all block types and handed to the seeder,
 // while segments fully below it stay.
@@ -835,7 +874,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(21200000, int(f.To))
 	require.Equal("BlockRoot", f.TypeString)
 	require.Equal("BlockRoot", f.CaplinTypeString)
-	require.Nil(f.Type) // caplin state snapshot types don't have a registered snaptype.Type
+	require.NotNil(f.Type)
 
 	f, e3, ok = snaptype.ParseFileName("", "caplin/v1.1-013050-013100-ValidatorEffectiveBalance.seg")
 	require.True(ok)
@@ -844,7 +883,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(13100000, int(f.To))
 	require.Equal("ValidatorEffectiveBalance", f.TypeString)
 	require.Equal("ValidatorEffectiveBalance", f.CaplinTypeString)
-	require.Nil(f.Type) // caplin state snapshot types don't have a registered snaptype.Type
+	require.NotNil(f.Type)
 
 	f, e3, ok = snaptype.ParseFileName("caplin", "v1.1-013050-013100-ValidatorEffectiveBalance.seg")
 	require.True(ok)
@@ -853,7 +892,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(13100000, int(f.To))
 	require.Equal("ValidatorEffectiveBalance", f.TypeString)
 	require.Equal("ValidatorEffectiveBalance", f.CaplinTypeString)
-	require.Nil(f.Type) // caplin state snapshot types don't have a registered snaptype.Type
+	require.NotNil(f.Type)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-022695-022696-transactions-to-block.idx"))
 	require.True(ok)

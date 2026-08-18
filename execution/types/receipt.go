@@ -263,7 +263,7 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 			return fmt.Errorf("close Log: %w", err)
 		}
 	}
-	if !errors.Is(err, rlp.EOL) {
+	if err != rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 		return fmt.Errorf("open Log: %w", err)
 	}
 	if err = s.ListEnd(); err != nil {

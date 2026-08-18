@@ -31,11 +31,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -553,15 +550,7 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	t.Cleanup(rawDb.Close)
-
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx, rawDb)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	db, err := temporal.New(rawDb, agg, nil)
-	require.NoError(t, err)
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
 
 	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
 	require.NoError(t, err)
@@ -651,6 +640,97 @@ func TestComputeAhead_StepBoundaryCheckpointMidBlock(t *testing.T) {
 	require.Equal(t, uint64(2), gotBlock, "the checkpoint sits inside the straddling block 2")
 
 	requireBranchesConsistentWithAccounts(t, doms, tx, accountValues)
+}
+
+// TestLoop_BlockRequestBeatsSameNumberedResult pins that loop() handles a block's
+// request before its own result, which select alone does not guarantee. The two
+// delivery orders hit different windows: pre-buffered makes both cases ready at
+// once, after-start races the send against select's readiness poll.
+func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
+	defer func(p bool) { dbg.BALDrivenCommitment = p }(dbg.BALDrivenCommitment)
+	defer func(p bool) { dbg.IgnoreBAL = p }(dbg.IgnoreBAL)
+	defer func(p bool) { dbg.BatchCommitments = p }(dbg.BatchCommitments)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+	// Per-block mode would publish a second, incremental result per block and
+	// break the single-result assertion below.
+	dbg.BatchCommitments = true
+
+	// Each iteration logs its own expected wrong-root failure.
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+
+	// Each iteration is an independent chance at select's two-ready pick, but the
+	// two orders are not equally likely to hit it: with the drain removed, the
+	// pre-buffered order catches within a handful of iterations while after-start
+	// averages ~40 and tails past 100, so it needs the larger count to keep a
+	// regression from slipping through.
+	for _, tc := range []struct {
+		name       string
+		afterStart bool
+		iterations uint64
+	}{
+		{name: "buffered before start", iterations: 200},
+		{name: "delivered after start", afterStart: true, iterations: 2_000},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			// Own domains per subtest: block and txNum restart at 1.
+			db, _, doms := setupStepTest(t)
+			rnd := rand.New(rand.NewSource(7))
+			for i := uint64(1); i <= tc.iterations; i++ {
+				in := make(chan applyResult, 4)
+				reqs := make(chan *blockRequest, 4)
+				out := make(chan commitmentResult, 4)
+				cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1<<62, in, reqs, out)
+				require.NoError(t, err)
+				cc.hasFirstBlock = true
+				cc.firstBlockNum = i
+
+				addrBytes := make([]byte, length.Addr)
+				rnd.Read(addrBytes)
+				bal := types.BlockAccessList{{
+					Address:      accounts.InternAddress([20]byte(addrBytes)),
+					NonceChanges: []*types.NonceChange{{Index: 0, Value: 1}},
+				}}
+
+				// stateRoot is deliberately wrong, so a processed request publishes
+				// ErrWrongTrieRoot and a dropped one publishes nothing at all.
+				send := func() {
+					reqs <- &blockRequest{
+						blockNum:   i,
+						firstTxNum: i,
+						lastTxNum:  i,
+						stateRoot:  common.Hash{0xba, 0xd5, 0x00, 0x71},
+						bal:        bal,
+					}
+					in <- newTestBlockResult(i, common.Hash{0x01}, i, false)
+					close(reqs)
+					close(in)
+				}
+				if tc.afterStart {
+					cc.Start(ctx)
+					go send()
+				} else {
+					send()
+					cc.Start(ctx)
+				}
+
+				// Range rather than Stop() first: out closes only after loop() returns,
+				// and Stop()'s close(cc.done) would race an in-flight publish().
+				var results []commitmentResult
+				for res := range out {
+					results = append(results, res)
+				}
+				cc.Stop()
+
+				require.Len(t, results, 1,
+					"iteration %d: block %d's request was dropped by its own same-numbered result before compute-ahead could run", i, i)
+				require.ErrorIs(t, results[0].err, ErrWrongTrieRoot,
+					"iteration %d: block %d's request must be processed before its own result", i, i)
+			}
+		})
+	}
 }
 
 // feedBlock1Shadow builds a calculator, feeds block 1's n writes (seed 42) into

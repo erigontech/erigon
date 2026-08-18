@@ -477,7 +477,6 @@ type Progress struct {
 	prevAccountReadDuration        time.Duration
 	prevStorageReadDuration        time.Duration
 	prevCodeReadDuration           time.Duration
-	prevTaskReadCount              int64
 	prevTaskGas                    int64
 	prevBlockCount                 int64
 	prevBlockDuration              time.Duration

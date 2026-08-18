@@ -280,7 +280,7 @@ func (me *webseedChecker) yieldHashes(r io.Reader, pieceLength int64, onReadN fu
 			n, err := io.CopyN(h, r, pieceLength)
 			onReadN(n)
 			if err != nil {
-				if err != io.EOF {
+				if !errors.Is(err, io.EOF) {
 					yield(result.Err[metainfo.Hash](err))
 					return
 				}

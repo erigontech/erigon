@@ -64,7 +64,7 @@ func (pt *patternTable) insertWord(cw *codeword) {
 
 // posEntry is one slot in a Huffman position table: bits>0 is a terminal
 // (pos is the decoded position); bits==0 is a subtable router (pos is the
-// child index in posArena.tables), valid on the posMask!=0 path only.
+// child index in posArena.tables).
 type posEntry struct {
 	pos  uint32
 	bits uint8
@@ -168,12 +168,11 @@ func (e ErrCompressedFileCorrupted) Is(err error) bool {
 // Decompressor provides access to the superstrings in a file produced by a compressor
 type Decompressor struct {
 	f                   *os.File
-	mmapHandle2         *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	dict                *patternTable
 	posDict             *posTable
 	patArena            *patternArena // arena keeping all pattern table allocations alive
 	posArena            *posArena     // arena keeping all position table allocations alive
-	mmapHandle1         []byte        // mmap handle for unix (this is used to close mmap)
+	mmapHandle1         mmap.Ro       // mmap handle for unix (this is used to close mmap)
 	data                []byte        // slice of correct size for the decompressor to work with
 	wordsStart          uint64        // Offset of whether the superstrings actually start
 	size                int64
@@ -249,7 +248,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	}
 
 	d.modTime = stat.ModTime()
-	if d.mmapHandle1, d.mmapHandle2, err = mmap.Mmap(d.f, int(d.size)); err != nil {
+	if d.mmapHandle1, err = mmap.OpenRo(d.f, int(d.size)); err != nil {
 		return nil, err
 	}
 	// read patterns from file
@@ -578,7 +577,7 @@ func (d *Decompressor) Close() {
 		rb.stop() // join the refresh goroutine before munmap so no mincore touches freed memory
 		d.residency.Store(nil)
 	}
-	if err := mmap.Munmap(d.mmapHandle1, d.mmapHandle2); err != nil {
+	if err := d.mmapHandle1.Unmap(); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", d.FileName(), "stack", dbg.Stack())
 	}
 	if err := d.f.Close(); err != nil {
@@ -680,8 +679,7 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 //	https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
 type SequentialView struct {
 	d           *Decompressor
-	mmapHandle1 []byte
-	mmapHandle2 *[mmap.MaxMapSize]byte
+	mmapHandle1 mmap.Ro
 	data        []byte // words data region from the sequential mmap
 }
 
@@ -694,7 +692,7 @@ func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialVi
 	if !separateReadahead {
 		return &SequentialView{d: d, data: d.data[d.wordsStart:]}, nil
 	}
-	h1, h2, err := mmap.Mmap(d.f, int(d.size))
+	h1, err := mmap.OpenRo(d.f, int(d.size))
 	if err != nil {
 		return nil, err
 	}
@@ -709,7 +707,7 @@ func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialVi
 	headerSize := d.size - int64(len(d.data))
 	wordsFileOffset := headerSize + int64(d.wordsStart)
 	return &SequentialView{
-		d: d, mmapHandle1: h1, mmapHandle2: h2,
+		d: d, mmapHandle1: h1,
 		data: h1[wordsFileOffset:d.size],
 	}, nil
 }
@@ -719,6 +717,7 @@ func (v *SequentialView) MakeGetter() *Getter {
 		d:           v.d,
 		data:        v.data,
 		dataLen:     uint64(len(v.data)),
+		dataOffset:  uint64(v.d.size - int64(len(v.data))),
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
 	}
@@ -726,7 +725,6 @@ func (v *SequentialView) MakeGetter() *Getter {
 		g.posTables = v.d.posArena.tables
 	}
 	if v.d.posDict != nil {
-		g.posMask = v.d.posDict.mask
 		g.posEntries = v.d.posDict.entries
 	}
 	return g
@@ -736,7 +734,7 @@ func (v *SequentialView) Close() {
 	if v == nil || v.mmapHandle1 == nil {
 		return
 	}
-	_ = mmap.Munmap(v.mmapHandle1, v.mmapHandle2)
+	_ = v.mmapHandle1.Unmap()
 	v.mmapHandle1 = nil
 	v.data = nil
 }
@@ -747,7 +745,6 @@ type Getter struct {
 	dataP      uint64     // current byte offset in data
 	dataLen    uint64     // u64-typed len(data) to reduce amount of type-casting
 	dataBit    int        // bit offset within current byte (0-7)
-	posMask    uint16     // cached d.posDict.mask, avoids pointer chain on hot path
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
@@ -755,6 +752,8 @@ type Getter struct {
 	patternDict   *patternTable
 	d             *Decompressor
 	fName         string
+	dataOffset    uint64
+	literalWarmer func(*Getter, uint64, uint64)
 	trace         bool
 	residencyGate bool
 }
@@ -779,21 +778,24 @@ func (g *Getter) nextPosClean() uint64 {
 }
 
 // nextPos reads the next position from the Huffman-coded bitstream.
-// It is structured to be inlinable: the subtable (deep-tree) case is pushed
-// into a separate //go:noinline helper so this function stays small.
+// Do NOT swap len(data)/len(entries) for g.dataLen/posTable.mask: prove cannot
+// relate a field to the slice it indexes, so the bounds checks come back and
+// the two stream bytes stop fusing into one 16-bit load.
 func (g *Getter) nextPos() uint64 {
-	if g.posMask == 0 {
-		return uint64(g.posEntries[0].pos)
+	entries := g.posEntries
+	if len(entries) <= 1 {
+		return uint64(entries[0].pos)
 	}
 	dataP := g.dataP
 	dataBit := uint(g.dataBit) & 7 // & 7 proves to compiler: 0 ≤ dataBit < 8, eliminating shift guards
 	data := g.data
-	code := uint16(data[dataP]) >> dataBit
-	if dataP+1 < g.dataLen {
-		code |= uint16(data[dataP+1]) << (8 - dataBit)
+	var code uint16
+	if dataP+1 < uint64(len(data)) {
+		code = (uint16(data[dataP]) | uint16(data[dataP+1])<<8) >> dataBit
+	} else {
+		code = uint16(data[dataP]) >> dataBit
 	}
-	code &= g.posMask
-	entry := g.posEntries[code]
+	entry := entries[int(code)&(len(entries)-1)]
 	l := uint(entry.bits)
 	if l == 0 {
 		return g.nextPosSubtable(entry.pos)
@@ -820,9 +822,11 @@ func (g *Getter) nextPosSubtable(tableIdx uint32) uint64 {
 		dataBit += 9
 		dataP += uint64(dataBit >> 3)
 		dataBit &= 7
-		code := uint16(data[dataP]) >> dataBit
-		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
-			code |= uint16(data[dataP+1]) << (8 - dataBit)
+		var code uint16
+		if dataP+1 < uint64(len(data)) {
+			code = (uint16(data[dataP]) | uint16(data[dataP+1])<<8) >> dataBit
+		} else {
+			code = uint16(data[dataP]) >> dataBit
 		}
 		code &= table.mask
 		entry := table.entries[code]
@@ -848,9 +852,11 @@ func (g *Getter) nextPattern() []byte {
 	dataBit := uint(g.dataBit) & 7
 
 	for {
-		code := uint16(data[dataP]) >> dataBit
-		if 8-dataBit < uint(table.bitLen) && dataP+1 < g.dataLen {
-			code |= uint16(data[dataP+1]) << (8 - dataBit)
+		var code uint16
+		if dataP+1 < uint64(len(data)) {
+			code = (uint16(data[dataP]) | uint16(data[dataP+1])<<8) >> dataBit
+		} else {
+			code = uint16(data[dataP]) >> dataBit
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 
@@ -887,6 +893,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 		d:           d,
 		data:        data,
 		dataLen:     uint64(len(data)),
+		dataOffset:  uint64(d.size - int64(len(data))),
 		patternDict: d.dict,
 		fName:       d.FileName(),
 	}
@@ -894,7 +901,6 @@ func (d *Decompressor) MakeGetter() *Getter {
 		g.posTables = d.posArena.tables
 	}
 	if d.posDict != nil {
-		g.posMask = d.posDict.mask
 		g.posEntries = d.posDict.entries
 	}
 	return g
@@ -951,16 +957,28 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	// Loop below fills in the patterns
 	// Tracking position in buf where to insert part of the word
 	bufPos := bufOffset
+	literalWarmer := g.literalWarmer
+	literalLen := wordLen
 	for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
 		pt := g.nextPattern()
 		copy(buf[bufPos:], pt)
+		if literalWarmer != nil {
+			if patternLen := uint64(len(pt)); patternLen <= literalLen {
+				literalLen -= patternLen
+			} else {
+				literalLen = 0
+			}
+		}
 	}
 	if g.dataBit > 0 {
 		g.dataP++
 		g.dataBit = 0
 	}
 	postLoopPos := g.dataP
+	if literalWarmer != nil && literalLen > 0 {
+		literalWarmer(g, g.dataOffset+postLoopPos, literalLen)
+	}
 	g.dataP = savePos
 	g.dataBit = 0
 	g.nextPosClean() // Reset the state of huffman reader

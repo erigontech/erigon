@@ -70,7 +70,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 	// SharedDomains block overlay and are flushed via a brief RwTx.
 	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %w", err)
 	}
 	defer roTx.Rollback()
 
@@ -81,7 +81,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		// ErrBehindCommitment is tolerated: sd is usable, catch-up drives txNums forward.
 		if err != nil {
 			if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
-				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %w", err)
 			}
 			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
 		}
@@ -118,7 +118,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			// Parent's total difficulty — reads from overlay first, then base RO tx.
 			parentTd, err = rawdb.ReadTd(blockOverlay, header.ParentHash, height-1)
 			if err != nil || parentTd == nil {
-				return 0, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
+				return 0, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %w", header.ParentHash, height-1, err)
 			}
 		} else {
 			parentTd = new(uint256.Int)
@@ -134,13 +134,13 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: TD overflows uint256 at height %d hash %x", height, blockHash)
 		}
 		if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %w", err)
 		}
 		if err := rawdb.WriteTd(blockOverlay, blockHash, height, td); err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %w", err)
 		}
 		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, blockHash, height, body); err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %w", err)
 		}
 		if blockAccessList := block.BlockAccessList(); blockAccessList != nil {
 			if header.BlockAccessListHash == nil {
@@ -148,10 +148,10 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			}
 			blockAccessListBytes, err := types.EncodeBlockAccessListBytes(blockAccessList)
 			if err != nil {
-				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encodeBlockAccessList, block %d: %s", height, err)
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encodeBlockAccessList, block %d: %w", height, err)
 			}
 			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, blockHash, height, blockAccessListBytes); err != nil {
-				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %w", height, err)
 			}
 			e.readAheader.AddBlockAccessList(blockHash, blockAccessList)
 		}

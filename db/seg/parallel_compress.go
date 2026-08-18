@@ -356,11 +356,10 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	if lvl < log.LvlTrace {
 		logger.Log(lvl, fmt.Sprintf("[%s] dictionary file parsed", logPrefix), "entries", len(code2pattern))
 	}
-	// we pass consecutive words so that AC mather's prefix-resume functionality
-	// can process words faster (the words are in sorted order);
-	// so we send a batch of coverBatchSize consecutive words to each worker
+	// Consecutive words per batch keep the AC matcher's prefix-resume working (words
+	// arrive sorted); a small input shrinks the batch so every worker still gets a share.
 	coverBatchSize := 512
-	if n := int(uncompressedFile.count); cfg.Workers > 1 && n < coverBatchSize*cfg.Workers {
+	if n := int(uncompressedFile.count); n < coverBatchSize*cfg.Workers {
 		coverBatchSize = max(1, n/cfg.Workers)
 	}
 	ch := make(chan []*CompressionWord, cfg.Workers*4)
@@ -377,31 +376,19 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 	heap.Init(&compressionQueue)
 	queueLimit := 128 * 1024
 
-	// For the case of workers == 1
-	var output = make([]byte, 0, 256)
-	var uncovered = make([]int, 256)
-	var patterns = make([]int, 0, 256)
-	var cells = make([]DynamicCell, 0, 256)
-	mf3 := patricia.NewACMatcher(ac)
-
-	var posMaps []*posCounter
+	posMaps := make([]*posCounter, 0, 1+cfg.Workers)
 	uncompPosMap := &posCounter{} // For the uncompressed words
 	posMaps = append(posMaps, uncompPosMap)
 	var wg sync.WaitGroup
-	if cfg.Workers > 1 {
-		for i := 0; i < cfg.Workers; i++ {
-			posMap := &posCounter{}
-			posMaps = append(posMaps, posMap)
-			wg.Go(func() {
-				coverWordsByPatternsWorker(trace, ch, out, ac, inputSize, outputSize, posMap)
-			})
-		}
+	for range cfg.Workers {
+		posMap := &posCounter{}
+		posMaps = append(posMaps, posMap)
+		wg.Go(func() {
+			coverWordsByPatternsWorker(trace, ch, out, ac, inputSize, outputSize, posMap)
+		})
 	}
-	var curBatch []*CompressionWord // consecutive words accumulating for the next batch
-	var freeList []*CompressionWord // written words available for reuse
-	if cfg.Workers > 1 {
-		curBatch = make([]*CompressionWord, 0, coverBatchSize)
-	}
+	curBatch := make([]*CompressionWord, 0, coverBatchSize) // consecutive words accumulating for the next batch
+	var freeList []*CompressionWord                         // written words available for reuse
 	t := time.Now()
 
 	var err error
@@ -435,108 +422,79 @@ func compressWithPatternCandidates(ctx context.Context, trace bool, cfg Cfg, log
 			}
 		}
 
-		if cfg.Workers > 1 {
-			// take processed batches in non-blocking way and push their words to the queue
-		outer:
-			for {
+		// take processed batches in non-blocking way and push their words to the queue
+	outer:
+		for {
+			select {
+			case batch := <-out:
+				for _, w := range batch {
+					heap.Push(&compressionQueue, w)
+				}
+			default:
+				break outer
+			}
+		}
+		// queue[0].order is never below outCount, so > means the next word to write is missing:
+		// nothing can be written, so wait for results instead of reading more input.
+		for compressionQueue.Len() >= queueLimit && compressionQueue[0].order > outCount {
+			if len(curBatch) > 0 {
+				// The missing word may sit in curBatch, and only we can send it — so offer it
+				// while waiting, else <-out waits forever. Rare: AddWord followed by a long run
+				// of AddUncompressedWord (see TestCompressParallelBatchingBackpressureNoDeadlock).
 				select {
+				case ch <- curBatch:
+					curBatch = make([]*CompressionWord, 0, coverBatchSize)
 				case batch := <-out:
 					for _, w := range batch {
 						heap.Push(&compressionQueue, w)
 					}
-				default:
-					break outer
 				}
+				continue
 			}
-			// queue[0].order is never below outCount, so > means the next word to write is
-			// missing: nothing can be written, so wait for results instead of reading more input.
-			for compressionQueue.Len() >= queueLimit && compressionQueue[0].order > outCount {
-				if len(curBatch) > 0 {
-					// The missing word may sit in curBatch, and only we can send it — so offer it
-					// while waiting, else <-out waits forever. Rare: AddWord followed by a long run
-					// of AddUncompressedWord (see TestCompressParallelBatchingBackpressureNoDeadlock).
-					select {
-					case ch <- curBatch:
-						curBatch = make([]*CompressionWord, 0, coverBatchSize)
-					case batch := <-out:
-						for _, w := range batch {
-							heap.Push(&compressionQueue, w)
-						}
-					}
-					continue
-				}
-				batch := <-out
-				for _, w := range batch {
-					heap.Push(&compressionQueue, w)
-				}
+			batch := <-out
+			for _, w := range batch {
+				heap.Push(&compressionQueue, w)
 			}
-			// Write any in-order words at the top of the queue, recycling them onto freeList
-			for compressionQueue.Len() > 0 && compressionQueue[0].order == outCount {
-				w := heap.Pop(&compressionQueue).(*CompressionWord)
-				outCount++
-				if _, e := intermediateW.Write(w.word); e != nil {
-					return e
-				}
-				freeList = append(freeList, w)
-			}
-			var compW *CompressionWord
-			if k := len(freeList); k > 0 {
-				compW = freeList[k-1]
-				freeList = freeList[:k-1]
-			} else {
-				compW = &CompressionWord{}
-			}
-			compW.order = inCount
-			switch {
-			case len(v) == 0:
-				// Empty word, cannot be compressed
-				compW.word = append(compW.word[:0], 0)
-				uncompPosMap.add(1)
-				uncompPosMap.add(0)
-				heap.Push(&compressionQueue, compW) // Push to the queue directly, bypassing compression
-			case compression:
-				compW.word = append(compW.word[:0], v...)
-				curBatch = append(curBatch, compW)
-				if len(curBatch) >= coverBatchSize {
-					ch <- curBatch // Send for compression
-					curBatch = make([]*CompressionWord, 0, coverBatchSize)
-				}
-			default:
-				// Prepend word with encoding of length + zero byte, which indicates no patterns to be found in this word
-				wordLen := uint64(len(v))
-				n := binary.PutUvarint(numBuf[:], wordLen)
-				uncompPosMap.add(wordLen + 1)
-				uncompPosMap.add(0)
-				compW.word = append(append(append(compW.word[:0], numBuf[:n]...), 0), v...)
-				heap.Push(&compressionQueue, compW) // Push to the queue directly, bypassing compression
-			}
-		} else {
+		}
+		// Write any in-order words at the top of the queue, recycling them onto freeList
+		for compressionQueue.Len() > 0 && compressionQueue[0].order == outCount {
+			w := heap.Pop(&compressionQueue).(*CompressionWord)
 			outCount++
-			wordLen := uint64(len(v))
-			n := binary.PutUvarint(numBuf[:], wordLen)
-			if _, e := intermediateW.Write(numBuf[:n]); e != nil {
+			if _, e := intermediateW.Write(w.word); e != nil {
 				return e
 			}
-			if wordLen > 0 {
-				if compression {
-					output, patterns, uncovered, cells = coverWordByPatterns(trace, v, mf3, output[:0], uncovered, patterns, cells, uncompPosMap)
-					if _, e := intermediateW.Write(output); e != nil {
-						return e
-					}
-					outputSize.Add(uint64(len(output)))
-				} else {
-					if e := intermediateW.WriteByte(0); e != nil {
-						return e
-					}
-					if _, e := intermediateW.Write(v); e != nil {
-						return e
-					}
-					outputSize.Add(1 + uint64(len(v)))
-				}
+			freeList = append(freeList, w)
+		}
+		var compW *CompressionWord
+		if k := len(freeList); k > 0 {
+			compW = freeList[k-1]
+			freeList = freeList[:k-1]
+		} else {
+			compW = &CompressionWord{}
+		}
+		compW.order = inCount
+		switch {
+		case len(v) == 0:
+			// Empty word, cannot be compressed
+			compW.word = append(compW.word[:0], 0)
+			uncompPosMap.add(1)
+			uncompPosMap.add(0)
+			heap.Push(&compressionQueue, compW) // Push to the queue directly, bypassing compression
+		case compression:
+			compW.word = append(compW.word[:0], v...)
+			curBatch = append(curBatch, compW)
+			if len(curBatch) >= coverBatchSize {
+				ch <- curBatch // Send for compression
+				curBatch = make([]*CompressionWord, 0, coverBatchSize)
 			}
-			inputSize.Add(1 + wordLen)
+		default:
+			// Prepend word with encoding of length + zero byte, which indicates no patterns to be found in this word
+			wordLen := uint64(len(v))
+			n := binary.PutUvarint(numBuf[:], wordLen)
 			uncompPosMap.add(wordLen + 1)
 			uncompPosMap.add(0)
+			compW.word = append(append(append(compW.word[:0], numBuf[:n]...), 0), v...)
+			heap.Push(&compressionQueue, compW) // Push to the queue directly, bypassing compression
 		}
 		inCount++
 		if len(v) == 0 {

@@ -236,7 +236,7 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 		bal, decodeErr := types.DecodeBlockAccessListBytes(entry)
 		if decodeErr != nil {
 			badPeer = true
-			err = fmt.Errorf("%w: req %d returned malformed BAL: %v", ErrBadBALResponse, i, decodeErr)
+			err = fmt.Errorf("%w: req %d returned malformed BAL: %w", ErrBadBALResponse, i, decodeErr)
 			continue
 		}
 		out[reqs[i].Hash] = bal
