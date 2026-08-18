@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -47,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -439,6 +441,42 @@ func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
 	require.NoError(t, err)
 	require.Same(t, want, payload)
 	require.Equal(t, 2, calls)
+}
+
+func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"direct execution client", fmt.Errorf("get payload: %w", chainreader.ErrUnknownPayload)},
+		{"remote execution client", fmt.Errorf("get payload: %w", &engine_helpers.UnknownPayloadErr)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
+			calls := 0
+			payload, _, _, _, err := pollAssembledPayload(context.Background(), window, time.Millisecond,
+				func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					calls++
+					return nil, nil, nil, nil, tc.err
+				})
+			require.True(t, execution_client.IsUnknownPayloadError(err))
+			require.Nil(t, payload)
+			require.Equal(t, 1, calls)
+		})
+	}
+}
+
+func TestProductionReportsUnknownPayloadOnce(t *testing.T) {
+	logs := captureProductionLogs(t)
+
+	err := produceBlockWithFailingCollection(t, t.Context(), &engine_helpers.UnknownPayloadErr)
+	require.Error(t, err)
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "execution payload is unknown"), "records:\n"+captured)
+	require.Contains(t, captured, "lvl=warn")
+	require.NotContains(t, captured, "lvl=eror")
 }
 
 func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {

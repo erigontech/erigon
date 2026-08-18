@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/pool"
@@ -318,6 +319,8 @@ func reportProductionFailure(err error, targetSlot uint64) {
 	case err == nil:
 	case errors.Is(err, context.Canceled):
 		log.Debug("BlockProduction: abandoned by its caller", "err", err, "slot", targetSlot)
+	case execution_client.IsUnknownPayloadError(err):
+		log.Warn("BlockProduction: execution payload is unknown", "err", err, "slot", targetSlot)
 	default:
 		log.Error("BlockProduction: failed to produce block", "err", err, "slot", targetSlot)
 	}
@@ -365,6 +368,9 @@ func pollAssembledPayload(
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
 		attempts++
+		if execution_client.IsUnknownPayloadError(err) {
+			return nil, nil, nil, nil, err
+		}
 		if err != nil {
 			// The caller's own cancellation comes back through get. That is the slot ending, not
 			// the execution layer failing, and it is not worth reporting on a healthy node. A
