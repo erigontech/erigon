@@ -221,6 +221,63 @@ class LandingSynthesisTests(unittest.TestCase):
             g.synthesize_landing(body)
         self.assertIn("dropped cards", str(ctx.exception))
 
+    def test_renamed_title_marker_is_caught_not_absorbed(self):
+        """The guard must not count the marker it validates.
+
+        Counting `lp-card-title` would shrink in step with the very loss it is
+        meant to detect, so a renamed marker would drop its card in silence.
+        Counting `lp-card` containers keeps the two signals independent.
+        """
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+<Link className="lp-card" to="/b/">
+  <div className="lp-card-heading">B</div>
+  <div className="lp-card-desc">Desc B.</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 1 of 2", str(ctx.exception))
+
+    def test_card_attribute_order_does_not_matter(self):
+        """`to=` may precede or follow the class; both must parse."""
+        body = """
+<div className="lp-grid">
+<Link to="/a/" className="lp-card">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+</div>
+"""
+        out = g.synthesize_landing(body)
+        self.assertIsNotNone(out)
+        self.assertIn("[A](https://docs.erigon.tech/a): Desc A.", out)
+
+    def test_all_cards_malformed_raises_rather_than_falling_back(self):
+        """Total parser failure must not look like an ordinary prose page.
+
+        Returning None here would send the caller to strip_mdx, degrading the
+        page silently — the exact outcome the guard exists to prevent.
+        """
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+</Link>
+<Link className="lp-card" to="/b/">
+  <div className="lp-card-title">B</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 0 of 2", str(ctx.exception))
+
 
 class LeadingH1StripTests(unittest.TestCase):
     """The build() body-prep step strips a leading H1 to avoid duplicate headings."""
