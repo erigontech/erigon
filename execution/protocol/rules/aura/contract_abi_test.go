@@ -18,6 +18,7 @@ package aura
 
 import (
 	"errors"
+	"math/big"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
@@ -59,5 +60,36 @@ func TestGetCertifierFailsClosed(t *testing.T) {
 				assert.Nil(t, got, "expected nil certifier on syscall/unpack failure")
 			})
 		})
+	}
+}
+
+// Both calls run once per block on Gnosis chains, on the serialised apply loop.
+func BenchmarkExecuteSystemWithdrawalsPack(b *testing.B) {
+	const n = 16
+	amounts := make([]uint64, n)
+	addresses := make([]common.Address, n)
+	for i := range addresses {
+		amounts[i] = uint64(1_000_000_000 + i)
+		addresses[i][0] = byte(i)
+	}
+	maxFailed := big.NewInt(4)
+	abi := withdrawalAbi()
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := abi.Pack("executeSystemWithdrawals", maxFailed, amounts, addresses); err != nil {
+			b.Fatal(err)
+		}
+	}
+}
+
+func BenchmarkBlockRewardPack(b *testing.B) {
+	beneficiaries := []common.Address{{1}}
+	kinds := []uint16{0}
+	abi := blockRewardAbi()
+	b.ReportAllocs()
+	for b.Loop() {
+		if _, err := abi.Pack("reward", beneficiaries, kinds); err != nil {
+			b.Fatal(err)
+		}
 	}
 }
