@@ -217,13 +217,16 @@ func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 	if s == nil {
 		return 0
 	}
+	// One generation for every type: VisibleSegmentsMaxTo loads per call, so a publish
+	// landing mid-loop mixes two and can report a floor no single generation supports.
+	vis := s.visible.Load()
 	minTo := uint64(math.MaxUint64)
 	for _, typ := range s.Types() {
-		to := s.VisibleSegmentsMaxTo(typ.Enum())
-		if to == 0 {
+		segs := vis.segments[typ.Enum()]
+		if len(segs) == 0 {
 			return 0
 		}
-		minTo = min(minTo, to)
+		minTo = min(minTo, segs[len(segs)-1].to)
 	}
 	if minTo == math.MaxUint64 {
 		return 0
