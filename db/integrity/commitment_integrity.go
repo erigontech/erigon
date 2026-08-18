@@ -1349,9 +1349,9 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		if !commReader.HasNext() {
 			err = errors.New("invalid key/value pair during decompression")
 			if failFast {
-				return fmt.Errorf("%w: %s in %s", ErrIntegrity, err, fileName)
+				return fmt.Errorf("%w: %w in %s", ErrIntegrity, err, fileName)
 			}
-			integrityErr = fmt.Errorf("%w: %s in %s", ErrIntegrity, err, fileName)
+			integrityErr = fmt.Errorf("%w: %w in %s", ErrIntegrity, err, fileName)
 			logger.Warn(err.Error())
 			continue
 		}
@@ -1363,6 +1363,10 @@ func checkStateCorrespondenceBase(ctx context.Context, file state.VisibleFile, s
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
+
+		if branchData.IsTombstone() {
+			continue // tombstones kept across merges, not corruption
+		}
 
 		// Check completeness
 		if !branchData.IsComplete() {
@@ -1573,6 +1577,9 @@ func checkStateCorrespondenceReverse(ctx context.Context, file state.VisibleFile
 		branchKeys++
 
 		branchData := commitment.BranchData(branchValue)
+		if branchData.IsTombstone() {
+			continue
+		}
 
 		if !branchData.IsComplete() {
 			touchMap := uint16(0)

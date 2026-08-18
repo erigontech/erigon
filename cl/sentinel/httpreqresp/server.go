@@ -306,7 +306,7 @@ func NewRequestHandler(host host.Host) http.HandlerFunc {
 		stream.SetReadDeadline(time.Now().Add(5 * time.Second))
 		n, err := io.ReadFull(stream, code)
 		synthesizedEmptySuccess := false
-		if err == io.EOF && n == 0 && communication.IsMultiChunkProtocol(topic) {
+		if errors.Is(err, io.EOF) && n == 0 && communication.IsMultiChunkProtocol(topic) {
 			synthesizedEmptySuccess = true
 		} else if err != nil {
 			http.Error(w, "Read Code: "+err.Error()+", readBytes="+strconv.Itoa(n)+", bytesWritten="+strconv.FormatInt(bytesWritten, 10)+", contentLength="+strconv.FormatInt(r.ContentLength, 10)+", topic="+topic+", peer="+peerIdBase58, http.StatusBadRequest)

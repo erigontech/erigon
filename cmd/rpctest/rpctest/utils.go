@@ -20,6 +20,7 @@ import (
 	"bufio"
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"net/http"
@@ -46,7 +47,7 @@ func openWriters(recordFileName, errorFileName string) (rec, errs *bufio.Writer,
 	if errorFileName != "" {
 		f, err := os.Create(errorFileName)
 		if err != nil {
-			return nil, nil, cleanup, fmt.Errorf("cannot create file %s: %v", errorFileName, err)
+			return nil, nil, cleanup, fmt.Errorf("cannot create file %s: %w", errorFileName, err)
 		}
 		errs = bufio.NewWriter(f)
 		closers = append(closers, func() { errs.Flush(); f.Close() })
@@ -55,7 +56,7 @@ func openWriters(recordFileName, errorFileName string) (rec, errs *bufio.Writer,
 		f, err := os.Create(recordFileName)
 		if err != nil {
 			cleanup() // close any files already opened above
-			return nil, nil, nil, fmt.Errorf("cannot create file %s: %v", recordFileName, err)
+			return nil, nil, nil, fmt.Errorf("cannot create file %s: %w", recordFileName, err)
 		}
 		rec = bufio.NewWriter(f)
 		closers = append(closers, func() { rec.Flush(); f.Close() })
@@ -69,7 +70,7 @@ func fetchBlock(reqGen *RequestGenerator, bn uint64, needCompare bool, rec *bufi
 	b = new(EthBlockByNumber)
 	res := reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true), b)
 	if res.Err != nil {
-		return nil, false, fmt.Errorf("could not retrieve block (Erigon) %d: %v", bn, res.Err)
+		return nil, false, fmt.Errorf("could not retrieve block (Erigon) %d: %w", bn, res.Err)
 	}
 	if b.Error != nil {
 		return nil, false, fmt.Errorf("error retrieving block (Erigon): %d %s", b.Error.Code, b.Error.Message)
@@ -78,7 +79,7 @@ func fetchBlock(reqGen *RequestGenerator, bn uint64, needCompare bool, rec *bufi
 		var bg EthBlockByNumber
 		res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true), &bg)
 		if res.Err != nil {
-			return nil, false, fmt.Errorf("could not retrieve block (geth) %d: %v", bn, res.Err)
+			return nil, false, fmt.Errorf("could not retrieve block (geth) %d: %w", bn, res.Err)
 		}
 		if bg.Error != nil {
 			return nil, false, fmt.Errorf("error retrieving block (geth): %d %s", bg.Error.Code, bg.Error.Message)
@@ -340,7 +341,7 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 					// Keep going
 				} else {
 					reqFile, _ := os.Create("request.json")                //nolint:errcheck
-					reqFile.Write([]byte(request))                         //nolint:errcheck
+					reqFile.WriteString(request)                           //nolint:errcheck
 					reqFile.Close()                                        //nolint:errcheck
 					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
 					erigonRespFile.Write(res.Response)                     //nolint:errcheck
@@ -348,7 +349,7 @@ func requestAndCompare(request string, methodName string, errCtx string, reqGen 
 					oeRespFile, _ := os.Create("oe-response.json")         //nolint:errcheck
 					oeRespFile.Write(resg.Response)                        //nolint:errcheck
 					oeRespFile.Close()                                     //nolint:errcheck
-					return fmt.Errorf("different results for method %s, errCtx %s: %v\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodName, errCtx, err)
+					return fmt.Errorf("different results for method %s, errCtx %s: %w\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodName, errCtx, err)
 				}
 			}
 		} else {
@@ -395,7 +396,7 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 					// Keep going
 				} else {
 					reqFile, _ := os.Create("request.json")                //nolint:errcheck
-					reqFile.Write([]byte(requestA))                        //nolint:errcheck
+					reqFile.WriteString(requestA)                          //nolint:errcheck
 					reqFile.Close()                                        //nolint:errcheck
 					erigonRespFile, _ := os.Create("erigon-response.json") //nolint:errcheck
 					erigonRespFile.Write(res.Response)                     //nolint:errcheck
@@ -403,7 +404,7 @@ func requestAndCompareErigon(requestA, requestB string, methodNameA, methodNameB
 					oeRespFile, _ := os.Create("oe-response.json")         //nolint:errcheck
 					oeRespFile.Write(resg.Response)                        //nolint:errcheck
 					oeRespFile.Close()                                     //nolint:errcheck
-					return fmt.Errorf("different results for methods %s, %s, errCtx %s: %v\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodNameA, methodNameB, errCtx, err)
+					return fmt.Errorf("different results for methods %s, %s, errCtx %s: %w\nRequest in file request.json, Erigon response in file erigon-response.json, Geth/OE response in file oe-response.json", methodNameA, methodNameB, errCtx, err)
 				}
 			}
 		} else {
@@ -709,7 +710,7 @@ func post(client *http.Client, url, request string, response any) error {
 	//fmt.Printf("Request=%s\n", request)
 	//log.Info("Getting", "url", url, "request", request)
 	//start := time.Now()
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) //nolint:noctx
 	if err != nil {
 		return err
 	}
@@ -733,7 +734,7 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 	//fmt.Printf("Request=%s\n", request)
 	//log.Info("Getting", "url", url, "request", request)
 	//start := time.Now()
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) //nolint:noctx
 	if err != nil {
 		return nil, nil, err
 	}
@@ -755,8 +756,8 @@ func post2(client *http.Client, url, request string) ([]byte, *fastjson.Value, e
 	return response, v, nil
 }
 
-func print(client *http.Client, url, request string) {
-	r, err := client.Post(url, "application/json", strings.NewReader(request))
+func printRPCRequest(client *http.Client, url, request string) {
+	r, err := client.Post(url, "application/json", strings.NewReader(request)) //nolint:noctx
 	if err != nil {
 		fmt.Printf("Could not print: %v\n", err)
 		return
@@ -769,7 +770,7 @@ func print(client *http.Client, url, request string) {
 	fmt.Printf("ContentLength: %d\n", r.ContentLength)
 	buf := make([]byte, 2000000)
 	l, err := r.Body.Read(buf)
-	if err != nil && err != io.EOF {
+	if err != nil && !errors.Is(err, io.EOF) {
 		fmt.Printf("Could not read response: %v\n", err)
 		return
 	}

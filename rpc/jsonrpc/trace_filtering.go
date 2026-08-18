@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"math/big"
 	"runtime"
+	"slices"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -134,24 +135,19 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 }
 
 // Get implements trace_get
-func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, indicies []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error) {
-	// Parity fails if it gets more than a single index. It returns nothing in this case. Must we?
-	if len(indicies) > 1 {
-		return nil, nil
-	}
+func (api *TraceAPIImpl) Get(ctx context.Context, txHash common.Hash, traceAddress []hexutil.Uint64, gasBailOut *bool, traceConfig *config.TraceConfig) (*ParityTrace, error) {
 	traces, err := api.Transaction(ctx, txHash, gasBailOut, traceConfig)
 	if err != nil {
 		return nil, err
 	}
 
-	// 'trace_get' index starts at one (oddly)
-	firstIndex := int(indicies[0]) + 1
+	path := common.SliceMap(traceAddress, func(level hexutil.Uint64) int { return int(level) })
 	for i := range traces {
-		if i == firstIndex {
+		if slices.Equal(traces[i].TraceAddress, path) {
 			return &traces[i], nil
 		}
 	}
-	return nil, err
+	return nil, nil
 }
 
 func rewardKindToString(kind protocolrules.RewardKind) string {
@@ -329,7 +325,8 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {
-		fromBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, api.filters)
+		// nil filters: resolve on the committed view, like the scan below.
+		fromBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, nil)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()
@@ -346,7 +343,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 		}
 		toBlock = *headNumber
 	} else {
-		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, api.filters)
+		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, nil)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()
@@ -357,6 +354,14 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 	if fromBlock > toBlock {
 		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
+	}
+
+	// The txnum index silently clamps a missing block to the last available
+	// txnum, so a not-yet-executed toBlock would be omitted without a trace.
+	if req.ToBlock != nil {
+		if err := rpchelper.CheckBlockExecuted(dbtx, toBlock); err != nil {
+			return err
+		}
 	}
 
 	// if we've pruned this history away for this block then just return early

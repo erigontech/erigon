@@ -70,7 +70,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 	// SharedDomains block overlay and are flushed via a brief RwTx.
 	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
-		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %s", err)
+		return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not begin transaction: %w", err)
 	}
 	defer roTx.Rollback()
 
@@ -81,7 +81,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		// ErrBehindCommitment is tolerated: sd is usable, catch-up drives txNums forward.
 		if err != nil {
 			if !errors.Is(err, commitmentdb.ErrBehindCommitment) {
-				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %s", err)
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: could not create shared domains: %w", err)
 			}
 			e.logger.Info("ethereumExecutionModule.InsertBlocks: state ahead of blocks, proceeding with catch-up", "err", err)
 		}
@@ -118,7 +118,7 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			// Parent's total difficulty — reads from overlay first, then base RO tx.
 			parentTd, err = rawdb.ReadTd(blockOverlay, header.ParentHash, height-1)
 			if err != nil || parentTd == nil {
-				return 0, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %v", header.ParentHash, height-1, err)
+				return 0, fmt.Errorf("parent's total difficulty not found with hash %x and height %d: %w", header.ParentHash, height-1, err)
 			}
 		} else {
 			parentTd = new(uint256.Int)
@@ -128,29 +128,30 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		metrics.UpdateBlockConsumerBodyDownloadDelay(header.Time, height, e.logger)
 
 		// Sum TDs.
-		hash := header.Hash()
+		blockHash := header.Hash()
 		var td uint256.Int
 		if _, overflow := td.AddOverflow(parentTd, &header.Difficulty); overflow {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: TD overflows uint256 at height %d hash %x", height, hash)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: TD overflows uint256 at height %d hash %x", height, blockHash)
 		}
 		if err := rawdb.WriteHeader(blockOverlay, header); err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %s", err)
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeHeader: %w", err)
 		}
-		if err := rawdb.WriteTd(blockOverlay, hash, height, td); err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %s", err)
+		if err := rawdb.WriteTd(blockOverlay, blockHash, height, td); err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeTd: %w", err)
 		}
-		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, hash, height, body); err != nil {
-			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %s", err)
+		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, blockHash, height, body); err != nil {
+			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %w", err)
 		}
 		if blockAccessList := block.BlockAccessList(); len(blockAccessList) > 0 {
 			if header.BlockAccessListHash == nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
 			}
-			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, hash, height, blockAccessList); err != nil {
-				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %s", height, err)
+			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, blockHash, height, blockAccessList); err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %w", height, err)
 			}
+			e.readAheader.AddBlockAccessList(blockHash, blockAccessList)
 		}
-		e.logger.Trace("Inserted block", "hash", hash, "number", header.Number)
+		e.logger.Trace("Inserted block", "hash", blockHash, "number", header.Number)
 	}
 
 	// On ChainTip - store blocks in Overlay
