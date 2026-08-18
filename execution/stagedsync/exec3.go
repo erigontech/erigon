@@ -528,12 +528,12 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	}
 }
 
-func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
-	data := block.BlockAccessList()
-	if len(data) == 0 && block.HeaderNoCopy().HasNonEmptyBAL() {
-		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
+func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {
+	bal := block.BlockAccessList()
+	if bal == nil && block.HeaderNoCopy().HasNonEmptyBAL() {
+		return rawdb.ReadBlockAccessList(blockTx, block.Hash(), blockNum)
 	}
-	return data, nil
+	return bal, nil
 }
 
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
@@ -619,36 +619,29 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 			go warmTxsHashes(b)
 
-			var dbBAL types.BlockAccessList
-			// Prefer the BAL carried on the block (the payload) — the newPayload /
-			// backward-sync paths attach it, so no read is needed. Fall back to the
-			// BAL sidecar in the DB (via blockTx: overlay or execRoTx) for blocks
-			// that don't carry it (snapshot / forward-sync); do NOT open a separate
-			// db.View() as it can deadlock with the stageloop's RW transaction when
-			// BlockOverlay is active. ProcessBAL still computes+validates the BAL
-			// from the write-set as the ultimate fallback.
-			data, err := blockAccessListBytes(blockTx, b, blockNum)
+			var blockBAL types.BlockAccessList
+			// Blocks normally carry their decoded BAL. The persisted sidecar covers
+			// blocks reconstructed by paths that do not attach it.
+			blockBAL, err = blockAccessList(blockTx, b, blockNum)
 			if err != nil {
 				return err
 			}
-			if len(data) > 0 && !dbg.IgnoreBAL {
-				dbBAL, err = types.DecodeBlockAccessListBytes(data)
-				if err != nil {
-					return fmt.Errorf("decode block access list: %w", err)
-				}
-				if err := dbBAL.Validate(); err != nil {
-					return fmt.Errorf("invalid block access list: %w", err)
-				}
+			if b.BlockAccessList() == nil && blockBAL != nil {
+				b = types.NewBlockFromStorage(b.Hash(), b.HeaderNoCopy(), b.Transactions(), b.Uncles(), b.Withdrawals(), blockBAL)
 			}
 			header := b.HeaderNoCopy()
-			if dbBAL == nil && !dbg.IgnoreBAL && te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasBAL() {
+			executionBAL := blockBAL
+			if dbg.IgnoreBAL {
+				executionBAL = nil
+			}
+			if executionBAL == nil && !dbg.IgnoreBAL && te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL() {
 				te.logger.Debug("executing block without a BAL", "blockNum", blockNum)
 			}
 			if dbg.TraceBALFeed {
-				if dbBAL != nil {
-					fmt.Printf("BAL-FEED blk=%d bytes=%d accounts=%d\n", blockNum, len(data), len(dbBAL))
-				} else if te.cfg.chainConfig.IsAmsterdam(header.Time) {
-					fmt.Printf("BAL-MISSING blk=%d bytes=%d\n", blockNum, len(data))
+				if executionBAL != nil {
+					fmt.Printf("BAL-FEED blk=%d accounts=%d\n", blockNum, len(executionBAL))
+				} else if te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL() {
+					fmt.Printf("BAL-MISSING blk=%d\n", blockNum)
 				}
 			}
 
@@ -720,7 +713,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					firstTxNum: blockStartTxNum,
 					lastTxNum:  inputTxNum - 1,
 					blockTime:  header.Time,
-					bal:        dbBAL,
+					bal:        executionBAL,
 				}:
 				case <-ctx.Done():
 					return ctx.Err()
@@ -730,7 +723,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			case te.execRequests <- &execRequest{
 				block:         b,
 				gasPool:       protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				accessList:    dbBAL,
+				accessList:    executionBAL,
 				tasks:         txTasks,
 				applyResults:  applyResults,
 				commitResults: commitResults,

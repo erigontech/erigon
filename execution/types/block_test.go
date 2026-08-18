@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // the following 2 functions are replica for the test
@@ -173,10 +174,10 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 	}
 
 	hashBefore := decoded.Hash()
-	bal := []byte{0x01, 0x02, 0x03}
+	bal := BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
 	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), bal)
-	if got := block.BlockAccessList(); !bytes.Equal(got, bal) {
-		t.Errorf("BAL mismatch: got %x want %x", got, bal)
+	if got := block.BlockAccessList(); !reflect.DeepEqual(got, bal) {
+		t.Errorf("BAL mismatch: got %v want %v", got, bal)
 	}
 	if got := block.Hash(); got != hashBefore {
 		t.Errorf("BAL changed block hash: got %x want %x", got, hashBefore)
@@ -194,7 +195,7 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 	if roundTrip.BlockAccessList() != nil {
-		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %x", roundTrip.BlockAccessList())
+		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %v", roundTrip.BlockAccessList())
 	}
 }
 

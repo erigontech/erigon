@@ -468,9 +468,9 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 		return nil, err
 	}
 
-	var bal []byte
-	if executionPayload.BlockAccessList != nil {
-		bal = executionPayload.BlockAccessList.Bytes()
+	bal, err := execution_client.DecodeBlockAccessList(executionPayload)
+	if err != nil {
+		return nil, err
 	}
 
 	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal), nil

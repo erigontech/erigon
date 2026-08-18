@@ -1185,7 +1185,8 @@ func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
 
 	readBlock := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
 	require.NotNil(t, readBlock)
-	require.Equal(t, emptyBALBytes, readBlock.BlockAccessList())
+	require.NotNil(t, readBlock.BlockAccessList())
+	require.Empty(t, readBlock.BlockAccessList())
 }
 
 func TestBlockAccessListStorage(t *testing.T) {

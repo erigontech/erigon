@@ -58,7 +58,7 @@ func TestBlockReadAheaderCarriesBlockAccessList(t *testing.T) {
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	body := &types.Body{Transactions: []types.Transaction{types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)}}
 	blockHash := header.Hash()
-	bal := []byte{0xc0}
+	bal := types.BlockAccessList{}
 	sender := common.Address{1}
 	bra.AddHeaderAndBody(context.Background(), nil, header, body)
 	bra.AddBlockAccessList(blockHash, bal)
@@ -66,6 +66,7 @@ func TestBlockReadAheaderCarriesBlockAccessList(t *testing.T) {
 	block, ok := bra.ReadBlockWithSenders(blockHash)
 	require.True(t, ok)
 	require.Equal(t, bal, block.BlockAccessList())
+	require.NotNil(t, block.BlockAccessList())
 }
 
 // seedFill places an entry with an exact txNum stamp through the public fill

@@ -309,7 +309,9 @@ func TestGetBlockAccessListsResponseMatrix(t *testing.T) {
 	require.Equal(t, uint64(1), count)
 	require.NoError(t, rwTx.Commit())
 	balBytes := func(num uint64) rlp.RawValue {
-		return canonical.Blocks[num-1].BlockAccessList()
+		encoded, err := types.EncodeBlockAccessListBytes(canonical.Blocks[num-1].BlockAccessList())
+		require.NoError(t, err)
+		return encoded
 	}
 	blockHash := func(num uint64) common.Hash {
 		return canonical.Blocks[num-1].Hash()

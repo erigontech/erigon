@@ -71,6 +71,60 @@ type CodeChange struct {
 	Bytecode []byte
 }
 
+// Copy returns a deep copy of bal.
+func (bal BlockAccessList) Copy() BlockAccessList {
+	if bal == nil {
+		return nil
+	}
+	cpy := make(BlockAccessList, len(bal))
+	for i, account := range bal {
+		if account == nil {
+			continue
+		}
+		accountCopy := *account
+		accountCopy.StorageChanges = slices.Clone(account.StorageChanges)
+		for j, slot := range account.StorageChanges {
+			if slot == nil {
+				continue
+			}
+			slotCopy := *slot
+			slotCopy.Changes = make([]*StorageChange, len(slot.Changes))
+			for k, change := range slot.Changes {
+				if change != nil {
+					changeCopy := *change
+					slotCopy.Changes[k] = &changeCopy
+				}
+			}
+			accountCopy.StorageChanges[j] = &slotCopy
+		}
+		accountCopy.StorageReads = slices.Clone(account.StorageReads)
+		accountCopy.BalanceChanges = slices.Clone(account.BalanceChanges)
+		for j, change := range account.BalanceChanges {
+			if change != nil {
+				changeCopy := *change
+				accountCopy.BalanceChanges[j] = &changeCopy
+			}
+		}
+		accountCopy.NonceChanges = slices.Clone(account.NonceChanges)
+		for j, change := range account.NonceChanges {
+			if change != nil {
+				changeCopy := *change
+				accountCopy.NonceChanges[j] = &changeCopy
+			}
+		}
+		accountCopy.CodeChanges = slices.Clone(account.CodeChanges)
+		for j, change := range account.CodeChanges {
+			if change != nil {
+				changeCopy := *change
+				changeCopy.Bytecode = bytes.Clone(change.Bytecode)
+				accountCopy.CodeChanges[j] = &changeCopy
+			}
+		}
+		cpy[i] = &accountCopy
+	}
+	return cpy
+}
+
 // indexedChange interface for generic validation of change types with indices
 type indexedChange interface {
 	*StorageChange | *BalanceChange | *NonceChange | *CodeChange

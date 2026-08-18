@@ -1488,7 +1488,9 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	require.Len(t, stored, 2)
 	for i, pb := range stored {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "stored block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "stored block %d", i+1)
 	}
 	err = m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
@@ -1508,14 +1510,18 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	require.Len(t, byHash, 2)
 	for i, pb := range byHash {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "byHash block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "byHash block %d", i+1)
 	}
 	byRange, err := m.ExecModule.GetPayloadBodiesByRange(ctx, 1, 2)
 	require.NoError(t, err)
 	require.Len(t, byRange, 2)
 	for i, pb := range byRange {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "byRange block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "byRange block %d", i+1)
 	}
 }
 

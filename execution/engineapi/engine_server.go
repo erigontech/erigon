@@ -359,7 +359,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
-	var blockAccessListBytes []byte
+	var blockAccessList types.BlockAccessList
 	var err error
 	if version < clparams.GloasVersion && req.SlotNumber != nil {
 		return nil, &rpc.InvalidParamsError{Message: "unexpected slotNumber before engine_newPayloadV5"}
@@ -375,11 +375,10 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		if req.BlockAccessList == nil {
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
-		bal := *req.BlockAccessList
-		// Decode fully validates EIP-7928 structure, ordering and limits; the raw
-		// bytes are what we hash and store, so the decoded value itself is discarded.
-		if _, err = types.DecodeBlockAccessListBytes(bal); err != nil {
-			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(bal))
+		balBytes := *req.BlockAccessList
+		blockAccessList, err = types.DecodeBlockAccessListBytes(balBytes)
+		if err != nil {
+			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
 			// A decodable list that violates EIP-7928 rules is an invalid
 			// block; undecodable bytes are a malformed request (-32602).
 			if errors.Is(err, types.ErrInvalidBlockAccessList) {
@@ -390,9 +389,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			}
 			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("undecodable blockAccessList: %v", err)}
 		}
-		hash := crypto.Keccak256Hash(bal)
+		hash := crypto.Keccak256Hash(balBytes)
 		header.BlockAccessListHash = &hash
-		blockAccessListBytes = bal
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
 			header.SlotNumber = &slotNumber
@@ -486,8 +484,8 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	// inside InsertBlocks doesn't re-encode every tx
 	// via rlp.EncodeToBytes. Both slices reference the same underlying
 	// byte buffers from req.Transactions.
-	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessListBytes)
-	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes, blockAccessListBytes)
+	block := types.NewBlockFromStorageWithBinaryTxs(blockHash, &header, transactions, txs, nil /* uncles */, withdrawals, blockAccessList)
+	payloadStatus, err := s.HandleNewPayload(ctx, "NewPayload", block, expectedBlobHashes)
 	if err != nil {
 		if errors.Is(err, rules.ErrInvalidBlock) {
 			return &engine_types.PayloadStatus{
@@ -939,7 +937,6 @@ func (e *EngineServer) HandleNewPayload(
 	logPrefix string,
 	block *types.Block,
 	versionedHashes []common.Hash,
-	blockAccessListBytes []byte,
 ) (*engine_types.PayloadStatus, error) {
 	e.engineLogSpamer.RecordRequest()
 

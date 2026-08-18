@@ -15,6 +15,41 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
+func TestBlockAccessListCopy(t *testing.T) {
+	bal := BlockAccessList{{
+		Address: accounts.InternAddress(common.Address{1}),
+		StorageChanges: []*SlotChanges{{
+			Slot:    accounts.InternKey(common.Hash{2}),
+			Changes: []*StorageChange{{Index: 1, Value: *uint256.NewInt(3)}},
+		}},
+		StorageReads:   []accounts.StorageKey{accounts.InternKey(common.Hash{4})},
+		BalanceChanges: []*BalanceChange{{Index: 2, Value: *uint256.NewInt(5)}},
+		NonceChanges:   []*NonceChange{{Index: 3, Value: 6}},
+		CodeChanges:    []*CodeChange{{Index: 4, Bytecode: []byte{7}}},
+	}}
+
+	cpy := bal.Copy()
+	if !reflect.DeepEqual(bal, cpy) {
+		t.Fatalf("copy differs: got %v, want %v", cpy, bal)
+	}
+	if bal[0] == cpy[0] || bal[0].StorageChanges[0] == cpy[0].StorageChanges[0] ||
+		bal[0].StorageChanges[0].Changes[0] == cpy[0].StorageChanges[0].Changes[0] ||
+		bal[0].BalanceChanges[0] == cpy[0].BalanceChanges[0] ||
+		bal[0].NonceChanges[0] == cpy[0].NonceChanges[0] ||
+		bal[0].CodeChanges[0] == cpy[0].CodeChanges[0] {
+		t.Fatal("copy shares mutable entries")
+	}
+
+	bal[0].StorageChanges[0].Changes[0].Index = 10
+	bal[0].StorageReads[0] = accounts.InternKey(common.Hash{11})
+	bal[0].BalanceChanges[0].Index = 12
+	bal[0].NonceChanges[0].Index = 13
+	bal[0].CodeChanges[0].Bytecode[0] = 14
+	if reflect.DeepEqual(bal, cpy) {
+		t.Fatal("mutating the original changed the copy")
+	}
+}
+
 func TestBlockAccessListValidateOrdering(t *testing.T) {
 	var addrA, addrB common.Address
 	addrA[19] = 0x02

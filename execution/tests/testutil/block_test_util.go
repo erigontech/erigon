@@ -356,16 +356,12 @@ func (bt *BlockTest) insertBlocks(m *execmoduletester.ExecModuleTester) ([]btBlo
 				return nil, fmt.Errorf("block RLP decoding failed when expected to succeed: %w", err)
 			}
 		}
-		var balBytes []byte
+		var bal types.BlockAccessList
 		if len(b.BlockAccessList) > 0 {
-			bal := b.BlockAccessList.toBAL()
-			balBytes, err = types.EncodeBlockAccessListBytes(bal)
-			if err != nil {
-				return nil, fmt.Errorf("block #%v encode block access list: %w", cb.Number(), err)
-			}
+			bal = b.BlockAccessList.toBAL()
 		}
 		// RLP decoding worked, try to insert into chain:
-		cb = types.NewBlockFromNetwork(cb.HeaderNoCopy(), cb.Body(), balBytes)
+		cb = types.NewBlockFromNetwork(cb.HeaderNoCopy(), cb.Body(), bal)
 		chain := &blockgen.ChainPack{Blocks: []*types.Block{cb}, Headers: []*types.Header{cb.Header()}, TopBlock: cb}
 		var previousHead *types.Header
 		if b.BlockHeader == nil {

@@ -101,10 +101,8 @@ func newBlockAccessListRPCFixture(t *testing.T) (*blockgen.ChainPack, *rpc.Clien
 	return chainPack, client
 }
 
-func marshalBlockAccessListJSON(t *testing.T, data []byte) json.RawMessage {
+func marshalBlockAccessListJSON(t *testing.T, bal types.BlockAccessList) json.RawMessage {
 	t.Helper()
-	bal, err := types.DecodeBlockAccessListBytes(data)
-	require.NoError(t, err)
 	encoded, err := json.Marshal(ethapi.MarshalBlockAccessList(bal))
 	require.NoError(t, err)
 	return encoded
@@ -115,6 +113,13 @@ func marshalHexBytesJSON(t *testing.T, data []byte) json.RawMessage {
 	encoded, err := json.Marshal(hexutil.Bytes(data))
 	require.NoError(t, err)
 	return encoded
+}
+
+func marshalBlockAccessListBytesJSON(t *testing.T, bal types.BlockAccessList) json.RawMessage {
+	t.Helper()
+	data, err := types.EncodeBlockAccessListBytes(bal)
+	require.NoError(t, err)
+	return marshalHexBytesJSON(t, data)
 }
 
 func runBlockAccessListRPCCases(t *testing.T, client *rpc.Client, method string, cases []blockAccessListRPCCase) {
@@ -170,9 +175,7 @@ func TestGetBlockAccessListRegeneratesPrunedBAL(t *testing.T) {
 		blockNum := rpc.BlockNumber(block.NumberU64())
 		got, err := api.GetBlockAccessList(ctx, rpc.BlockNumberOrHash{BlockNumber: &blockNum})
 		require.NoError(t, err, "block %d", block.NumberU64())
-		canonical, err := types.DecodeBlockAccessListBytes(block.BlockAccessList())
-		require.NoError(t, err)
-		require.Equal(t, ethapi.MarshalBlockAccessList(canonical), got, "block %d", block.NumberU64())
+		require.Equal(t, ethapi.MarshalBlockAccessList(block.BlockAccessList()), got, "block %d", block.NumberU64())
 	}
 }
 

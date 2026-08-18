@@ -16,7 +16,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -29,7 +28,7 @@ type BlockReadAheader struct {
 	headers *lru.Cache[common.Hash, *types.Header]
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	senders *lru.Cache[common.Hash, []byte] // just do raw senders
-	bals    *lru.Cache[common.Hash, []byte]
+	bals    *lru.Cache[common.Hash, types.BlockAccessList]
 
 	// this is for warming state
 	warming atomic.Bool // only one warmBody can run at a time
@@ -57,7 +56,7 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
-	bals, err := lru.New[common.Hash, []byte](4)
+	bals, err := lru.New[common.Hash, types.BlockAccessList](4)
 	if err != nil {
 		panic(err)
 	}
@@ -145,8 +144,8 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	bra.senders.Add(blockHash, bytes.Clone(senders))
 }
 
-func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal []byte) {
-	if len(bal) == 0 {
+func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal types.BlockAccessList) {
+	if bal == nil {
 		return
 	}
 	bra.bals.Add(blockHash, bal)
@@ -169,24 +168,9 @@ func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *t
 
 	var wg errgroup.Group
 
-	// If BAL exists in DB, use BAL warming (more complete)
 	var bal types.BlockAccessList
-	if header != nil && db != nil {
-		tx, err := db.BeginRo(ctx)
-		if err != nil {
-			log.Warn("[warmBody] failed to open tx for BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
-		} else {
-			data, err := tx.GetOne(kv.BlockAccessList, dbutils.BlockBodyKey(header.Number.Uint64(), header.Hash()))
-			if err != nil {
-				log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
-			} else if len(data) > 0 {
-				bal, err = types.DecodeBlockAccessListBytes(data)
-				if err != nil {
-					log.Warn("[warmBody] failed to decode BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
-				}
-			}
-			tx.Rollback()
-		}
+	if header != nil {
+		bal, _ = bra.bals.Get(header.Hash())
 	}
 
 	balLen := len(bal)

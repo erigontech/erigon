@@ -82,9 +82,9 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusInvalidated, err
 	}
 
-	var bal []byte
-	if payload.Version() >= clparams.GloasVersion && payload.BlockAccessList != nil {
-		bal = payload.BlockAccessList.Bytes()
+	bal, err := DecodeBlockAccessList(payload)
+	if err != nil {
+		return PayloadStatusInvalidated, err
 	}
 
 	startInsertBlock := time.Now()
