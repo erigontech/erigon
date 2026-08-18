@@ -223,3 +223,32 @@ func TestNewCaplinStateSnapshotsPanicsForUnknownType(t *testing.T) {
 		NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, log.New())
 	})
 }
+
+func TestCaplinStateSegmentsMaxUsesHighestSegment(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.BlockRoot
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 200_000, logger)
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.Equal(t, uint64(199_999), s.SegmentsMax())
+}
+
+// A segment on the far side of a gap is truncated out of the visible set and cannot be
+// read, so it must not raise the reported height: three consumers use BlocksAvailable as
+// a ceiling and a value one too high breaks them.
+func TestCaplinStateBlocksAvailableStopsAtGap(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.BlockRoot
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.Equal(t, uint64(50_000), s.IndicesMax(), "index height must come from the visible set, not raw dirty coverage")
+	require.Equal(t, uint64(49_999), s.SegmentsMax())
+	require.Equal(t, uint64(49_999), s.BlocksAvailable())
+}

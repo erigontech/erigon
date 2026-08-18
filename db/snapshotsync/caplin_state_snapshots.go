@@ -231,28 +231,6 @@ func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 	return minTo
 }
 
-func (s *CaplinStateSnapshots) SegmentsMax() uint64 {
-	if s == nil {
-		return 0
-	}
-	entries, err := os.ReadDir(s.Dir())
-	if err != nil {
-		return 0
-	}
-	var max uint64
-	for _, entry := range entries {
-		if entry.IsDir() || filepath.Ext(entry.Name()) != ".seg" {
-			continue
-		}
-		f, _, ok := snaptype.ParseFileName(s.Dir(), entry.Name())
-		if !ok || f.Type == nil || !s.BaseRoSnapshots.HasType(f.Type) || f.To == 0 {
-			continue
-		}
-		max = f.To - 1
-	}
-	return max
-}
-
 func (s *CaplinStateSnapshots) LogStat(str string) {
 	s.logger.Info(fmt.Sprintf("[snapshots:%s] Stat", str),
 		"blocks", common.PrettyExact(s.SegmentsMax()+1), "indices", common.PrettyExact(s.IndicesMax()+1))

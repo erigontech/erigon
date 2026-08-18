@@ -180,9 +180,9 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			if err != nil {
 				continue
 			}
-			// Caplin state files borrow their versions from BeaconBlocks, and an .idx
-			// carries its .seg's data version: the loader derives the accessor path by
-			// swapping only the extension, so both go through the one data window.
+			// One window for every caplin file, taken from BeaconBlocks: an .idx carries
+			// its .seg's data version, so filtering them apart would drop an index whose
+			// segment was kept. The per-type windows are identical today.
 			versions := snaptype.BeaconBlocks.Versions()
 			if caplinVersion.Less(versions.MinSupported) || versions.Current.Less(caplinVersion) {
 				continue
