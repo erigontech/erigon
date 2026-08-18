@@ -880,6 +880,92 @@ func TestAccountRange(t *testing.T) {
 	})
 }
 
+func TestAccountRangeBlockTags(t *testing.T) {
+	m, chainPack, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newDebugApiForTest(m)
+	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
+
+	// The test chain has 13 blocks (1–13). Set up forkchoice state with
+	// distinct positions so we can prove each tag resolves to its own block:
+	//   finalized = block 3
+	//   safe      = block 5
+	//   head      = block 10
+	finalizedBlock := chainPack.Blocks[2] // index 2 = block 3
+	safeBlock := chainPack.Blocks[4]      // index 4 = block 5
+	headBlock := chainPack.Blocks[9]      // index 9 = block 10
+
+	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceFinalized(tx, finalizedBlock.Hash())
+		rawdb.WriteForkchoiceSafe(tx, safeBlock.Hash())
+		rawdb.WriteForkchoiceHead(tx, headBlock.Hash())
+		return nil
+	})
+	require.NoError(t, err)
+
+	t.Run("safe tag matches concrete block", func(t *testing.T) {
+		safeTag := rpc.SafeBlockNumber
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &safeTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		concreteNum := rpc.BlockNumber(safeBlock.NumberU64())
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
+	})
+
+	t.Run("finalized tag matches concrete block", func(t *testing.T) {
+		finalizedTag := rpc.FinalizedBlockNumber
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &finalizedTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		concreteNum := rpc.BlockNumber(finalizedBlock.NumberU64())
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
+	})
+
+	t.Run("safe and finalized return different state when blocks differ", func(t *testing.T) {
+		safeTag := rpc.SafeBlockNumber
+		safeResult, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &safeTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		finalizedTag := rpc.FinalizedBlockNumber
+		finalizedResult, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &finalizedTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		// Blocks 3 and 5 should have different state roots since they're different blocks.
+		require.NotEqual(t, safeResult.Root, finalizedResult.Root)
+	})
+
+	t.Run("latest tag succeeds", func(t *testing.T) {
+		latestTag := rpc.LatestBlockNumber
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result.Accounts)
+	})
+
+	t.Run("pending tag is rejected", func(t *testing.T) {
+		pendingTag := rpc.PendingBlockNumber
+		_, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &pendingTag}, addr[:], 10, true, true, nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "pending block not supported")
+	})
+
+	t.Run("earliest tag matches block 0", func(t *testing.T) {
+		earliestTag := rpc.EarliestBlockNumber
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &earliestTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		zero := rpc.BlockNumber(0)
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &zero}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
+	})
+}
+
 func TestGetModifiedAccountsByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
