@@ -57,6 +57,30 @@ head_dec=$(printf '%d\n' "$head_hex")
 current_chain_id_hex=$(rpc_call "$PARENT_RPC" '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' '.result')
 current_chain_id=$(printf '%d\n' "$current_chain_id_hex")
 
+# Reset to hoodi if a previous tier left the parent on a sibling fork.
+# debug_setFork rejects sibling-to-sibling transitions (target.Parent ==
+# current.Parent, no direct parent relationship). Match the fork-soak
+# reset pattern: transition back to hoodi first, then proceed.
+HOODI_CHAIN_ID=560048
+if [[ "$current_chain_id" != "$HOODI_CHAIN_ID" ]]; then
+    echo "  startup chain_id=$current_chain_id is NOT hoodi — resetting via fork→parent transition"
+    reset_ucan="$PARENT_DATADIR/fork-transition-ucan-restart-reset.b64"
+    "$INTEGRATION_BIN" mint_fork_transition \
+        --trust-root-key="$TRUST_ROOT_KEY" \
+        --chain=hoodi --validity=1h --out="$reset_ucan" >/dev/null 2>&1
+    [[ -s "$reset_ucan" ]] || fail "reset: could not mint UCAN"
+    reset_out=$("$INTEGRATION_BIN" set_fork \
+        --chain=hoodi --rpcendpoint="$PARENT_RPC" \
+        --authority-ucan-file="$reset_ucan" 2>&1)
+    if ! echo "$reset_out" | grep -q '"to_chain": "hoodi"'; then
+        echo "$reset_out"
+        fail "reset transition to hoodi failed"
+    fi
+    current_chain_id_hex=$(rpc_call "$PARENT_RPC" '{"jsonrpc":"2.0","method":"eth_chainId","params":[],"id":1}' '.result')
+    current_chain_id=$(printf '%d\n' "$current_chain_id_hex")
+    echo "  reset complete; current_chain_id=$current_chain_id"
+fi
+
 # TARGET_IS_PARENT (from the soak driver) splits the direction:
 # parent→fork writes chain.json + fresh cutBlock + fresh chainId;
 # fork→parent skips chain.json (target already in the registry) and
