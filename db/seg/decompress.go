@@ -1403,3 +1403,18 @@ func (d *Decompressor) calcCompressedMinSize() int64 {
 
 	return compressedMinSize + 2
 }
+
+// DictSlotStats reports Huffman table geometry: how many slots each side's
+// tables occupy versus how many distinct symbols they resolve to. Scratch
+// instrumentation, not for merge.
+func (d *Decompressor) DictSlotStats() (patSlots, patCodewords, posSlots, posTables int) {
+	if d.patArena != nil {
+		patSlots = cap(d.patArena.slots)
+		patCodewords = cap(d.patArena.codewords)
+	}
+	if d.posArena != nil {
+		posSlots = cap(d.posArena.entriesArr)
+		posTables = cap(d.posArena.tables)
+	}
+	return
+}
