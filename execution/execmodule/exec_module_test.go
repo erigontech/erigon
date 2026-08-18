@@ -129,17 +129,6 @@ type delayedSealEngine struct {
 	release chan struct{}
 }
 
-type doneObservedContext struct {
-	context.Context
-	observed chan struct{}
-	once     sync.Once
-}
-
-func (c *doneObservedContext) Done() <-chan struct{} {
-	c.once.Do(func() { close(c.observed) })
-	return c.Context.Done()
-}
-
 func (e *delayedSealEngine) Seal(_ rules.ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
 	close(e.started)
 	go func() {
@@ -727,8 +716,7 @@ func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
 	}, time.Minute, time.Minute)
 
 	stopped := make(chan error, 1)
-	stopObserved := make(chan struct{})
-	stopCtx := &doneObservedContext{Context: context.Background(), observed: stopObserved}
+	stopCtx, stopObserved := execmodule.NewDoneObservedContext(context.Background())
 	go func() {
 		_, stopErr := payloadBuilder.Stop(stopCtx)
 		stopped <- stopErr

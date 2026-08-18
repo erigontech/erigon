@@ -88,4 +88,7 @@ func TestFinishBlockDoesNotSealWhenCanceledDuringAssembly(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.False(t, engine.called.Load())
 	require.Nil(t, store.BlockBuilt())
+	// Exactly two checks means the cancellation fired at the mid-assembly check: an extra Err()
+	// call added upstream would silently turn this into a copy of the entry-check test.
+	require.Equal(t, uint32(2), testCtx.checks.Load())
 }

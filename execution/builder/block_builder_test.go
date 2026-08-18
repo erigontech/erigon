@@ -250,3 +250,25 @@ func TestBlockBuilderStopReturnsImmediatelyAfterDiscard(t *testing.T) {
 	_, err := b.Stop(ctx)
 	require.ErrorIs(t, err, ErrDiscarded)
 }
+
+func TestBlockBuilderStopAfterAnExpiredWaitReturnsTheLatchedError(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	wantErr := errors.New("build failed")
+	b := NewBlockBuilder(t.Context(), func(context.Context, *Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-release
+		return nil, wantErr
+	}, &Parameters{}, time.Minute, time.Minute)
+
+	expired, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := b.Stop(expired)
+	require.ErrorIs(t, err, context.Canceled)
+
+	// Once the build has finished, a later read reports its own outcome, not the earlier expiry.
+	close(release)
+	require.Eventually(t, b.Finished, 5*time.Second, time.Millisecond)
+	_, err = b.Stop(context.Background())
+	require.ErrorIs(t, err, wantErr)
+}

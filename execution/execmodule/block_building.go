@@ -111,8 +111,10 @@ func (e *ExecModule) isLiveProposalTarget(id uint64, entry *builderEntry, now ti
 	if !e.isIndexedFor(id, entry) {
 		return false
 	}
-	// A builder that can no longer produce is not worth protecting, however live its slot.
-	if entry.builder == nil || entry.builder.Failed() || entry.builder.Discarded() {
+	// A builder that can no longer serve a payload is not worth protecting, however live its slot.
+	// A discarded one that already latched a completed payload still serves it to getPayload.
+	if entry.builder == nil || entry.builder.Failed() ||
+		(entry.builder.Discarded() && entry.builder.Block() == nil) {
 		return false
 	}
 	// Compared as seconds rather than times, so an implausible timestamp wraps into "not live"
@@ -239,15 +241,17 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 		return AssembledBlockResult{Unknown: true}, nil
 	}
 	blockWithReceipts, err := entry.builder.Stop(ctx)
+	if err != nil && entry.builder.Finished() {
+		// The build finished while Stop was returning the caller's expiry, so re-read its own
+		// latched outcome instead of reporting the caller's context error as the build's.
+		blockWithReceipts, err = entry.builder.Stop(context.Background())
+	}
 	if errors.Is(err, builder.ErrDiscarded) {
 		e.dropBuilder(payloadID, entry)
 		return AssembledBlockResult{Unknown: true}, nil
 	}
 	if err != nil {
-		// Stop reports the caller's wait expiring and the build's own failure through the same
-		// error, and a build can fail with a context error of its own - a transaction provider
-		// giving up, say. Only the builder knows which happened, so ask it rather than guess from
-		// the error: a caller that gave up leaves a builder still worth collecting.
+		// Still running, so the error is the caller's own expiry: the builder stays collectable.
 		if !entry.builder.Failed() {
 			return AssembledBlockResult{}, err
 		}
