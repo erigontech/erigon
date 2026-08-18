@@ -137,6 +137,46 @@ class LandingSynthesisTests(unittest.TestCase):
         self.assertIn("[Staking](https://docs.erigon.tech/staking)", out)
         self.assertIn("Hardware requirements", out)
 
+    def test_prose_after_the_grid_is_kept(self):
+        """Post-grid prose is page content, not card markup.
+
+        Dropping it cost why-using-erigon its whole AI-Native Node Access
+        section in llms-full.txt, with no signal that anything was missing.
+        """
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+</div>
+
+## After the grid
+
+Prose that follows the card grid must survive.
+"""
+        out = g.synthesize_landing(body)
+        self.assertIn("[A](https://docs.erigon.tech/a): Desc A.", out)
+        self.assertIn("## After the grid", out)
+        self.assertIn("Prose that follows the card grid must survive.", out)
+
+    def test_hero_lead_is_not_duplicated_by_the_trailing_prose(self):
+        """Only the tail is recovered; the hero lead is already emitted above."""
+        body = """
+<div className="lp-hero">
+  <h1>Title</h1>
+  <p>Lead paragraph.</p>
+</div>
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+</div>
+"""
+        out = g.synthesize_landing(body)
+        self.assertEqual(out.count("Lead paragraph."), 1)
+
     def test_hero_paragraph_emitted(self):
         body = """
 <div className="lp-hero">

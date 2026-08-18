@@ -333,7 +333,8 @@ def synthesize_landing(raw_body):
     # ordinary prose page: the caller would fall back to strip_mdx and the guard
     # below would never run — silently degrading exactly the case it exists to
     # catch.
-    containers = _LANDING_CARD_LINK_RE.findall(raw_body)
+    matches = list(_LANDING_CARD_LINK_RE.finditer(raw_body))
+    containers = [m.groups() for m in matches]
     expected = max(
         len(containers),
         len(_CARD_TITLE_MARKER_RE.findall(raw_body)),
@@ -383,6 +384,17 @@ def synthesize_landing(raw_body):
         if href.startswith("/"):
             href = BASE_URL + href.rstrip("/")
         out.append(f"- [{title}]({href}): {desc}")
+
+    # Prose after the grid is ordinary page content, not card markup — dropping
+    # it silently cost the whole "AI-Native Node Access" section of
+    # why-using-erigon. Only the tail is recovered: everything before the first
+    # card is the hero, whose lead paragraph is already emitted above, so
+    # stripping that region too would duplicate it.
+    trailing = strip_mdx(raw_body[matches[-1].end():]).strip()
+    if trailing:
+        out.append("")
+        out.append(trailing)
+
     return "\n".join(out)
 
 
@@ -578,8 +590,10 @@ def build():
     # advertise llms.txt via <link rel="describedby">, not llms-full.txt, so an
     # agent that arrives here would otherwise have no way to reach it.
     lines.append(
-        f"The full text of every page listed below is also available as a single "
-        f"file: [llms-full.txt]({BASE_URL}/llms-full.txt)"
+        f"The text of every page listed below is also available as a single file: "
+        f"[llms-full.txt]({BASE_URL}/llms-full.txt). Pages are cleaned for machine "
+        f"reading — MDX components are stripped, and card-grid landing pages are "
+        f"rendered as a link list followed by their remaining prose."
     )
     lines.append("")
 
