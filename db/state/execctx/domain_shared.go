@@ -874,10 +874,13 @@ func (sd *SharedDomains) SetStateCache(stateCache *cache.StateCache) {
 	if !dbg.UseStateCache || stateCache == nil {
 		return
 	}
-	sd.bindStateCache(stateCache)
+	sd.BindStateCache(stateCache)
 }
 
-func (sd *SharedDomains) bindStateCache(stateCache *cache.StateCache) {
+// BindStateCache attaches a cache unconditionally, bypassing the USE_STATE_CACHE
+// check in SetStateCache. Tests use it so they always exercise the cache without
+// mutating the process-global flag, which would race t.Parallel tests.
+func (sd *SharedDomains) BindStateCache(stateCache *cache.StateCache) {
 	sd.stateCache = stateCache
 	sd.cacheApplier = stateCache.Applier()
 	sd.cacheApplier.Initialize(sd.baseStateVersion)
@@ -1629,6 +1632,12 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 // committed account frontier that established the absence of code. The value
 // is passed in by the caller rather than read from sd.txNum, which the parallel
 // execution loop advances concurrently.
+// CodeHashForAddr resolves the code hash for addr as of txNum, reading through
+// the shared domains' cache view.
+func (sd *SharedDomains) CodeHashForAddr(tx kv.TemporalTx, addr []byte, txNum uint64) []byte {
+	return sd.codeHashForAddr(tx, sd.cacheReader(), addr, txNum)
+}
+
 func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, addr []byte, txNum uint64) []byte {
 	if len(addr) == 0 {
 		return nil

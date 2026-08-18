@@ -508,7 +508,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	if len(tx.PrivateKey) > 0 {
 		key, err := crypto.ToECDSA(tx.PrivateKey)
 		if err != nil {
-			return nil, fmt.Errorf("invalid private key: %v", err)
+			return nil, fmt.Errorf("invalid private key: %w", err)
 		}
 		from = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
 	}
@@ -518,7 +518,7 @@ func toMessage(tx stTransaction, ps stPostState, baseFee *uint256.Int) (protocol
 	if tx.To != "" {
 		var txto common.Address
 		if err := txto.UnmarshalText([]byte(tx.To)); err != nil {
-			return nil, fmt.Errorf("invalid to address: %v", err)
+			return nil, fmt.Errorf("invalid to address: %w", err)
 		}
 		to = accounts.InternAddress(txto)
 	}

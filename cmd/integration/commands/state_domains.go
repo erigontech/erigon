@@ -56,12 +56,6 @@ func init() {
 	rootCmd.AddCommand(readDomains)
 }
 
-// if trie variant is not hex, we could not have another rootHash with to verify it
-var (
-	stepSize uint64
-	lastStep uint64
-)
-
 // write command to just seek and query state by addr and domain from state db and files (if any)
 var readDomains = &cobra.Command{
 	Use:       "read_domains",

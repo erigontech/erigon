@@ -17,6 +17,7 @@
 package state
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -75,7 +76,7 @@ func TestCreateOverAbsenceConsumedBeforeDestructFlush(t *testing.T) {
 			func() {
 				defer func() {
 					if r := recover(); r != nil {
-						if r == ErrDependency {
+						if err, ok := r.(error); ok && errors.Is(err, ErrDependency) {
 							diverged = true
 							return
 						}

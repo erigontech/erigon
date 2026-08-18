@@ -27,8 +27,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/db/state/execctx"
-
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -36,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -427,25 +426,6 @@ func compareStateObjects(so0, so1 *stateObject, t *testing.T) {
 	}
 }
 
-func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
-	tb.Helper()
-
-	dirs := datadir.New(tb.TempDir())
-
-	stepSize := uint64(16)
-	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
-	tb.Cleanup(db.Close)
-	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
-	require.NoError(tb, err)
-	tb.Cleanup(tx.Rollback)
-
-	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
-	require.NoError(tb, err)
-	tb.Cleanup(domains.Close)
-
-	return db, tx, domains
-}
-
 func TestDump(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -520,4 +500,23 @@ func TestDump(t *testing.T) {
 	if got != want {
 		t.Fatalf("dump mismatch:\ngot: %s\nwant: %s\n", got, want)
 	}
+}
+
+func NewTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
+	tb.Helper()
+
+	dirs := datadir.New(tb.TempDir())
+
+	stepSize := uint64(16)
+	db := temporaltest.NewTestDBWithStepSize(tb, dirs, stepSize)
+	tb.Cleanup(db.Close)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(tb, err)
+	tb.Cleanup(tx.Rollback)
+
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(tb, err)
+	tb.Cleanup(domains.Close)
+
+	return db, tx, domains
 }

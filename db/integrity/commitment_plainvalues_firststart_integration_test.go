@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/integrity"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 )
@@ -89,7 +89,7 @@ func runFirstStartRegimeCheck(t *testing.T, plainValues bool) {
 
 func newTestDBWithSettings(t *testing.T, ctx context.Context, dirs datadir.Dirs, settings *state.ErigonDBSettings) kv.TemporalRwDB {
 	t.Helper()
-	rawDB := memdb.NewTestDB(t, dbcfg.ChainDB)
+	rawDB := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	agg := state.NewTest(dirs).WithErigonDBSettings(settings).MustOpen(ctx, rawDB)
 	require.NoError(t, agg.OpenFolder())
 	t.Cleanup(agg.Close)

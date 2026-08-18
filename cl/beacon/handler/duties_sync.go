@@ -121,7 +121,7 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	for idx, committeeParticipantPublicKey := range syncCommittee.GetCommittee() {
 		committeeParticipantIndex, _, err := a.syncedData.ValidatorIndexByPublicKey(committeeParticipantPublicKey)
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x: %s", committeeParticipantPublicKey, err))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x: %w", committeeParticipantPublicKey, err))
 		}
 		if _, ok := dutiesSet[committeeParticipantIndex]; !ok {
 			continue

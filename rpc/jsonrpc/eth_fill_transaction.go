@@ -21,7 +21,8 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"math/big"
+
+	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -46,7 +47,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	if args.GasPrice != nil && args.AuthorizationList != nil {
 		return nil, errors.New("both gasPrice and authorizationList specified")
 	}
-	if args.MaxFeePerBlobGas != nil && args.MaxFeePerBlobGas.ToInt().Sign() == 0 {
+	if args.MaxFeePerBlobGas != nil && (*uint256.Int)(args.MaxFeePerBlobGas).IsZero() {
 		return nil, errors.New("maxFeePerBlobGas, if specified, must be non-zero")
 	}
 
@@ -70,7 +71,7 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	}
 
 	if args.Value == nil {
-		args.Value = new(hexutil.Big)
+		args.Value = new(hexutil.U256)
 	}
 
 	if args.Nonce == nil {
@@ -128,15 +129,17 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 			if err != nil {
 				return nil, err
 			}
-			b := blobFee.ToBig()
-			args.MaxFeePerBlobGas = (*hexutil.Big)(b.Lsh(b, 1))
+			blobFeeCap, overflow := new(uint256.Int).AddOverflow(&blobFee, &blobFee)
+			if overflow {
+				return nil, fmt.Errorf("maxFeePerBlobGas overflow: 2*blobGasPrice (%v) exceeds 256 bits", &blobFee)
+			}
+			args.MaxFeePerBlobGas = (*hexutil.U256)(blobFeeCap)
 		}
 	}
 
-	chainIDBig := cc.ChainID.ToBig()
 	if args.ChainID == nil {
-		args.ChainID = (*hexutil.Big)(chainIDBig)
-	} else if have := args.ChainID.ToInt(); have.Cmp(chainIDBig) != 0 {
+		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(cc.ChainID))
+	} else if have := (*uint256.Int)(args.ChainID); !have.Eq(cc.ChainID) {
 		return nil, fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, cc.ChainID)
 	}
 
@@ -178,23 +181,23 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 			if err != nil {
 				return err
 			}
-			args.GasPrice = (*hexutil.Big)(price.ToBig())
+			args.GasPrice = (*hexutil.U256)(new(uint256.Int).Set(price))
 		}
 		return nil
 	}
 
 	if args.GasPrice == nil && args.MaxFeePerGas != nil && args.MaxPriorityFeePerGas != nil {
-		if args.MaxFeePerGas.ToInt().Sign() == 0 {
+		if (*uint256.Int)(args.MaxFeePerGas).IsZero() {
 			return errors.New("maxFeePerGas must be non-zero")
 		}
-		if args.MaxFeePerGas.ToInt().Cmp(args.MaxPriorityFeePerGas.ToInt()) < 0 {
+		if (*uint256.Int)(args.MaxFeePerGas).Lt((*uint256.Int)(args.MaxPriorityFeePerGas)) {
 			return fmt.Errorf("maxFeePerGas (%v) < maxPriorityFeePerGas (%v)", args.MaxFeePerGas, args.MaxPriorityFeePerGas)
 		}
 		return nil
 	}
 
 	if args.GasPrice != nil {
-		if args.GasPrice.ToInt().Sign() == 0 {
+		if (*uint256.Int)(args.GasPrice).IsZero() {
 			return errors.New("gasPrice must be non-zero after london fork")
 		}
 		return nil
@@ -206,16 +209,20 @@ func (api *APIImpl) fillFeeDefaults(ctx context.Context, args *ethapi.CallArgs, 
 		if err != nil {
 			return err
 		}
-		args.MaxPriorityFeePerGas = (*hexutil.Big)(tip.ToBig())
+		args.MaxPriorityFeePerGas = (*hexutil.U256)(new(uint256.Int).Set(tip))
 	}
 	if args.MaxFeePerGas == nil {
-		val := new(big.Int).Add(
-			args.MaxPriorityFeePerGas.ToInt(),
-			new(big.Int).Lsh(head.BaseFee.ToBig(), 1),
-		)
-		args.MaxFeePerGas = (*hexutil.Big)(val)
+		doubledBaseFee, overflow := new(uint256.Int).AddOverflow(head.BaseFee, head.BaseFee)
+		if overflow {
+			return fmt.Errorf("maxFeePerGas overflow: 2*baseFee (%v) exceeds 256 bits", head.BaseFee)
+		}
+		val, overflow := new(uint256.Int).AddOverflow((*uint256.Int)(args.MaxPriorityFeePerGas), doubledBaseFee)
+		if overflow {
+			return fmt.Errorf("maxFeePerGas overflow: maxPriorityFeePerGas (%v) + 2*baseFee exceeds 256 bits", args.MaxPriorityFeePerGas)
+		}
+		args.MaxFeePerGas = (*hexutil.U256)(val)
 	}
-	if args.MaxFeePerGas.ToInt().Cmp(args.MaxPriorityFeePerGas.ToInt()) < 0 {
+	if (*uint256.Int)(args.MaxFeePerGas).Lt((*uint256.Int)(args.MaxPriorityFeePerGas)) {
 		if autoFilledPriorityFee {
 			return fmt.Errorf("suggested maxPriorityFeePerGas (%v) exceeds provided maxFeePerGas (%v)", args.MaxPriorityFeePerGas, args.MaxFeePerGas)
 		}

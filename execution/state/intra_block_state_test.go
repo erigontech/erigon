@@ -22,6 +22,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -56,7 +57,8 @@ func TestSnapshotRandom(t *testing.T) {
 	err := quick.Check(func() bool {
 		return ts.run(t)
 	}, config)
-	if cerr, ok := err.(*quick.CheckError); ok {
+	var cerr *quick.CheckError
+	if errors.As(err, &cerr) {
 		test := cerr.In[0].(*snapshotTest)
 		t.Errorf("%v:\n%s", test.err, test)
 	} else if err != nil {

@@ -61,7 +61,7 @@ func twoStepRows(t *testing.T, db kv.TemporalRwDB, sc *cache.StateCache) (key, v
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.BindStateCache(sc)
 
 	sd.SetTxNum(5)
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, v1, 5, nil))
@@ -206,7 +206,7 @@ func TestStaleGetterResolvesCacheStateVersionOnce(t *testing.T) {
 	defer currentDomains.Close()
 	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	currentDomains.SetStateCacheForTest(stateCache)
+	currentDomains.BindStateCache(stateCache)
 
 	countingTx := &stateVersionCountingTx{TemporalTx: staleTx}
 	getter := currentDomains.AsStateGetter(countingTx)
@@ -238,7 +238,7 @@ func TestStateCache_MergedUnwindPublishesInvalidation(t *testing.T) {
 	defer parent.Close()
 	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	parent.SetStateCacheForTest(stateCache)
+	parent.BindStateCache(stateCache)
 
 	key := make([]byte, 20)
 	key[0] = 0x01
@@ -284,7 +284,7 @@ func TestReadFill_MemoizesWritableVisibleEndUntilFlush(t *testing.T) {
 	defer domains.Close()
 	stateCache := newSmallStateCache()
 	t.Cleanup(stateCache.Close)
-	domains.SetStateCacheForTest(stateCache)
+	domains.BindStateCache(stateCache)
 
 	for i := byte(2); i <= 3; i++ {
 		missing := make([]byte, 20)
@@ -334,7 +334,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwind(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.BindStateCache(sc)
 
 	sd.Unwind(10, &diffs) // in-flight: mem publishes maxStep=1; MDBX still holds the step-1 row
 	// A live cache entry below the unwind floor: the restored (correct) value,
@@ -393,7 +393,7 @@ func TestAssertStateCache_NoFalsePanicDuringInFlightUnwindStepZero(t *testing.T)
 	sd2, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd2.Close()
-	sd2.SetStateCacheForTest(sc)
+	sd2.BindStateCache(sc)
 
 	sd2.Unwind(3, &diffs)
 	seed(t, sc, roTx, kv.AccountsDomain, key, nil, 2)
@@ -431,7 +431,7 @@ func TestReadFill_DoesNotClobberLiveEntry(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.BindStateCache(sc)
 
 	sd.Unwind(10, &diffs)
 	// A live (current-epoch) entry above the read bound: the maxStep gate turns
@@ -465,7 +465,7 @@ func TestReadFill_SkipsInFlightUnwindRow(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.BindStateCache(sc)
 	sd.Unwind(10, &diffs)
 
 	got, _, err := sd.GetLatest(kv.AccountsDomain, roTx, key)
@@ -578,7 +578,7 @@ func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.BindStateCache(sc)
 	sd.SetTxNum(20)
 	require.NoError(t, sd.DomainPut(kv.AccountsDomain, rwTx, key, value, 20, nil))
 	require.NoError(t, sd.Commit(ctx, rwTx))
@@ -594,7 +594,7 @@ func TestCodeHashFill_SkipsInFlightUnwindRow(t *testing.T) {
 	sd2, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd2.Close()
-	sd2.SetStateCacheForTest(sc)
+	sd2.BindStateCache(sc)
 	sd2.Unwind(10, &diffs)
 
 	got := sd2.CodeHashForAddr(roTx, key, 20)
@@ -628,7 +628,7 @@ func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 	seedDomains, err := execctx.NewSharedDomains(ctx, seedTx, log.New())
 	require.NoError(t, err)
 	defer seedDomains.Close()
-	seedDomains.SetStateCacheForTest(stateCache)
+	seedDomains.BindStateCache(stateCache)
 	seedDomains.SetCodeStore(codeStore)
 	seedDomains.SetTxNum(20)
 	require.NoError(t, seedDomains.DomainPut(kv.AccountsDomain, seedTx, addr, account, 20, nil))
@@ -647,7 +647,7 @@ func TestGetCode_RespectsStagedUnwindBound(t *testing.T) {
 	unwindDomains, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer unwindDomains.Close()
-	unwindDomains.SetStateCacheForTest(stateCache)
+	unwindDomains.BindStateCache(stateCache)
 	unwindDomains.SetCodeStore(codeStore)
 	unwindDomains.Unwind(10, &diffs)
 
@@ -684,7 +684,7 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	sd, err := execctx.NewSharedDomains(ctx, rwTx, log.New())
 	require.NoError(t, err)
 	defer sd.Close()
-	sd.SetStateCacheForTest(sc)
+	sd.BindStateCache(sc)
 
 	written := make([]byte, 20)
 	written[0] = 0x01
@@ -701,7 +701,7 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	sd2, err := execctx.NewSharedDomains(ctx, roTx, log.New())
 	require.NoError(t, err)
 	defer sd2.Close()
-	sd2.SetStateCacheForTest(sc)
+	sd2.BindStateCache(sc)
 
 	missing := make([]byte, 20)
 	missing[0] = 0x02

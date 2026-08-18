@@ -578,14 +578,3 @@ func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
 	})
 	return addrs
 }
-
-func sortedAllocKeys(m types.GenesisAlloc) []string {
-	keys := make([]string, len(m))
-	i := 0
-	for k := range m {
-		keys[i] = string(k[:])
-		i++
-	}
-	slices.Sort(keys)
-	return keys
-}

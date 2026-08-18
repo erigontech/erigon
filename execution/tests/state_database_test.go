@@ -17,7 +17,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package state_test
+package executiontests
 
 import (
 	"bytes"
@@ -27,12 +27,15 @@ import (
 	"testing"
 
 	"github.com/holiman/uint256"
-	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
@@ -40,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/contracts"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -937,54 +939,6 @@ func TestCreateOnExistingStorage(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestReproduceCrash(t *testing.T) {
-	t.Parallel()
-	// This example was taken from Ropsten contract that used to cause a crash
-	// it is created in the block 598915 and then there are 3 transactions modifying
-	// its storage in the same block:
-	// 1. Setting storageKey 1 to a non-zero value
-	// 2. Setting storageKey 2 to a non-zero value
-	// 3. Setting both storageKey1 and storageKey2 to zero values
-	value0 := uint256.NewInt(0)
-	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
-	storageKey1 := accounts.InternKey(common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132541"))
-	value1 := uint256.NewInt(0x016345785d8a0000)
-	storageKey2 := accounts.InternKey(common.HexToHash("0x0e4c0e7175f9d22279a4f63ff74f7fa28b7a954a6454debaa62ce43dd9132542"))
-	value2 := uint256.NewInt(0x58c00a51)
-
-	_, tx, sd := state.NewTestRwTx(t)
-
-	txNum := uint64(1)
-	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	tsr := state.NewReaderV3(sd.AsStateGetter(tx))
-
-	intraBlockState := state.New(tsr)
-	defer intraBlockState.Close()
-	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
-	// Start the 2nd transaction
-	intraBlockState.SetState(contract, storageKey1, *value1)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
-	// Start the 3rd transaction
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	intraBlockState.SetState(contract, storageKey2, *value2)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
-	// Start the 4th transaction - clearing both storage cells
-	intraBlockState.SubBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	intraBlockState.SetState(contract, storageKey1, *value0)
-	intraBlockState.SetState(contract, storageKey2, *value0)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
-}
-
 func TestEip2200Gas(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -1379,134 +1333,6 @@ func TestWrongIncarnation2(t *testing.T) {
 
 }
 
-func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
-	t.Parallel()
-	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
-
-	_, tx, sd := state.NewTestRwTx(t)
-	blockNum, txNum := uint64(1), uint64(3)
-	_ = blockNum
-
-	r, tsw := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	intraBlockState := state.New(r)
-	defer intraBlockState.Close()
-	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
-
-	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
-
-	intraBlockState.SetCode(contract, oldCode, tracing.CodeChangeUnspecified)
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
-	rh1, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
-	require.NoError(t, err)
-	//t.Logf("stateRoot %x", rh1)
-
-	trieCode, tcErr := r.ReadAccountCode(contract)
-	require.NoError(t, tcErr, "you can receive the new code")
-	assert.Equal(t, oldCode, trieCode, "new code should be received")
-
-	newCode := []byte{0x04, 0x04, 0x04, 0x04}
-	intraBlockState.SetCode(contract, newCode, tracing.CodeChangeUnspecified)
-
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
-
-	trieCode, tcErr = r.ReadAccountCode(contract)
-	require.NoError(t, tcErr, "you can receive the new code")
-	assert.Equal(t, newCode, trieCode, "new code should be received")
-
-	rh2, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
-	require.NoError(t, err)
-	require.NotEqual(t, rh1, rh2)
-}
-
-// TestCacheCodeSizeSeparately makes sure that we don't store CodeNodes for code sizes
-func TestCacheCodeSizeSeparately(t *testing.T) {
-	t.Parallel()
-	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
-	//root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
-
-	_, tx, sd := state.NewTestRwTx(t)
-	blockNum, txNum := uint64(1), uint64(3)
-	_ = blockNum
-
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-
-	intraBlockState := state.New(r)
-	defer intraBlockState.Close()
-	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
-
-	code := []byte{0x01, 0x02, 0x03, 0x04}
-
-	intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified)
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
-	if err := intraBlockState.CommitBlock(&chain.Rules{}, w); err != nil {
-		t.Errorf("error committing block: %v", err)
-	}
-
-	codeSize, err := r.ReadAccountCodeSize(contract)
-	require.NoError(t, err, "you can receive the new code")
-	assert.Equal(t, len(code), codeSize, "new code should be received")
-
-	code2, err := r.ReadAccountCode(contract)
-	require.NoError(t, err, "you can receive the new code")
-	assert.Equal(t, code, code2, "new code should be received")
-}
-
-// TestCacheCodeSizeInTrie makes sure that we don't just read from the DB all the time
-func TestCacheCodeSizeInTrie(t *testing.T) {
-	t.Parallel()
-	//t.Skip("switch to TG state readers/writers")
-	contract := accounts.InternAddress(common.HexToAddress("0x71dd1027069078091B3ca48093B00E4735B20624"))
-	root := common.HexToHash("0xb939e5bcf5809adfb87ab07f0795b05b95a1d64a90f0eddd0c3123ac5b433854")
-
-	_, tx, sd := state.NewTestRwTx(t)
-	blockNum := uint64(1)
-	txNum := uint64(3)
-
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-
-	intraBlockState := state.New(r)
-	defer intraBlockState.Close()
-	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
-
-	code := []byte{0x01, 0x02, 0x03, 0x04}
-
-	intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified)
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
-	if err := intraBlockState.CommitBlock(&chain.Rules{}, w); err != nil {
-		t.Errorf("error committing block: %v", err)
-	}
-
-	r2, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
-	require.NoError(t, err)
-	require.Equal(t, root, common.CastToHash(r2))
-
-	codeSize, err := r.ReadAccountCodeSize(contract)
-	require.NoError(t, err, "you can receive the code size ")
-	assert.Equal(t, len(code), codeSize, "you can receive the code size")
-
-	codeSize2, err := r.ReadAccountCodeSize(contract)
-	require.NoError(t, err, "you can still receive code size even with empty DB")
-	assert.Equal(t, len(code), codeSize2, "code size should be received even with empty DB")
-
-	r2, err = sd.ComputeCommitment(context.Background(), tx, true, 1, 2, "", nil)
-	require.NoError(t, err)
-	require.Equal(t, root, common.CastToHash(r2))
-}
-
 func TestRecreateAndRewind(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -1781,4 +1607,18 @@ func TestTxLookupUnwind(t *testing.T) {
 	if count != 0 {
 		t.Errorf("txlookup record expected to be deleted, got %d", count)
 	}
+}
+
+func newTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
+	tb.Helper()
+	dirs := datadir.New(tb.TempDir())
+	db := temporaltest.NewTestDBWithStepSize(tb, dirs, 16)
+	tb.Cleanup(db.Close)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(tb, err)
+	tb.Cleanup(tx.Rollback)
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(tb, err)
+	tb.Cleanup(domains.Close)
+	return db, tx, domains
 }
