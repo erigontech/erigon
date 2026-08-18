@@ -376,7 +376,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// cancellation.
 	calculator, err := newCommitmentCalculator(ctx, executorContext, pe.rs.Domains(), pe.cfg.db, pe.cfg.chainConfig, pe.logPrefix, pe.logger, forcePerBlockCompute, pe.changesetWindowStart, commitResults, blockRequests, rootResults)
 	if err != nil {
-		return nil, nil, err
+		return nil, rwTx, err
 	}
 	calculator.Start(ctx)
 	defer calculator.Stop()

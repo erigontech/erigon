@@ -23,6 +23,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -140,6 +141,15 @@ type failingAccountTemporalTx struct {
 	kv.TemporalTx
 	address common.Address
 	err     error
+}
+
+type failingBeginTemporalRoDB struct {
+	kv.TemporalRwDB
+	err error
+}
+
+func (db failingBeginTemporalRoDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	return nil, db.err
 }
 
 func (tx failingAccountTemporalTx) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.Step, error) {
@@ -1528,6 +1538,27 @@ func newResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Config) (
 		},
 	}
 	return pe, roTx
+}
+
+func TestParallelExecPreservesApplyTxWhenCommitmentCalculatorSetupFails(t *testing.T) {
+	db := newResumeTestDB(t)
+	pe, execLoopTx := newResumeTestExec(t, db, chain.TestChainBerlinConfig)
+	pe.applyTx = execLoopTx
+	pe.cfg.blockReader = freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
+	cause := errors.New("commitment database unavailable")
+	pe.cfg.db = failingBeginTemporalRoDB{TemporalRwDB: db, err: cause}
+
+	applyTx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(applyTx.Rollback)
+	logEvery := time.NewTicker(time.Hour)
+	t.Cleanup(logEvery.Stop)
+
+	_, returnedTx, err := pe.exec(context.Background(), 1, 0, 1, 0, 0, 0, false, applyTx, 0, nil, nil, logEvery)
+
+	require.ErrorIs(t, err, cause)
+	require.NotNil(t, returnedTx)
+	require.Equal(t, applyTx.ViewID(), returnedTx.ViewID())
 }
 
 func newParallelFinalizeTestBlock(config *chain.Config) (*blockExecutor, *taskVersion) {
