@@ -142,7 +142,4 @@ func TestEnumRangeLayout(t *testing.T) {
 		snaptype.MinBorEnum < snaptype.MaxEnum) {
 		t.Fatalf("enum ranges are not ordered: core=%d caplin=%d bor=%d max=%d", snaptype.MinCoreEnum, snaptype.MinCaplinEnum, snaptype.MinBorEnum, snaptype.MaxEnum)
 	}
-	if width := snaptype.MinBorEnum - snaptype.MinCaplinEnum; width < 35 {
-		t.Fatalf("caplin enum range has %d slots, want at least 35", width)
-	}
 }

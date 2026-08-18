@@ -292,16 +292,16 @@ move; `CaplinStateSnapshots` still keys its own maps by string.
 - Create: `db/snaptype/caplin_state_types.go`
 - Create: `db/snaptype/caplin_state_types_test.go`
 
-- [ ] new file declaring one `SnapType` per caplin state table, enum
+- [x] new file declaring one `SnapType` per caplin state table, enum
   `MinCaplinEnum + 2 + i`, `name` = the table's **string value**, `versions` =
   `version.V1_1_standart`, `indexes` = `[]Index{{Name: <same name>, Version: version.V1_1_standart}}`.
   The set is exactly the 33 keys of `MakeCaplinStateSnapshotsTypes`
   (`db/snapshotsync/caplin_state_snapshots.go:100-140`): 23 pre-GLOAS (`:103-125`)
   plus 10 GLOAS (`:127-137`). Mind the four identifier/value mismatches listed
   in Ground truth.
-- [ ] export each type as its own package-level var, not only through the slice
+- [x] export each type as its own package-level var, not only through the slice
   — Task 9 needs to name one directly.
-- [ ] declare each type's **introducing fork**, per the mapping in Ground truth.
+- [x] declare each type's **introducing fork**, per the mapping in Ground truth.
   Nothing reads it in this PR; PR-2c does. Declaring it here is why 2c is small,
   and why the next fork that adds tables annotates them at the moment it declares
   them instead of discovering the omission on a mainnet node.
@@ -322,17 +322,17 @@ move; `CaplinStateSnapshots` still keys its own maps by string.
     lookup does not carry. Annotate only what the collector actually gates. A
     wrong annotation excludes a table that should be required, so unknown must
     fail toward "expected", never away from it.
-- [ ] write a test asserting each type's declared fork matches the gate the
+- [x] write a test asserting each type's declared fork matches the gate the
   collector applies to that table, reading it through `CaplinStateIntroducedIn`
   rather than any private field — this is the guard that keeps the two from
   drifting, since they live in different packages
-- [ ] export `CaplinStateSnapshotTypes []Type` in enum order. Leave
+- [x] export `CaplinStateSnapshotTypes []Type` in enum order. Leave
   `CaplinSnapshotTypes` at two entries — `freezeblocks/caplin_snapshots.go:78`
   builds the *blocks* `BaseRoSnapshots` from it, and `caplinsnapschema:19`,
   `snapshots_cmd.go:2117`, `snaptype2/block_types.go:46` all iterate it.
-- [ ] `IsCaplinType` (`caplin_types.go:38-46`) becomes a range check on the enum
+- [x] `IsCaplinType` (`caplin_types.go:38-46`) becomes a range check on the enum
   instead of a linear scan.
-- [ ] do **not** widen `allSnapshotTypes()` (`enum_registry_test.go:41-47`) here.
+- [x] do **not** widen `allSnapshotTypes()` (`enum_registry_test.go:41-47`) here.
   `TestEnumRoundTrip` (`:49-64`) walks that list and calls `enum.String()`, which
   for an unregistered enum falls to `default:`, misses `registeredTypes` and
   **panics** (`type.go:432`), killing the package's test binary — and after Task 1
@@ -340,17 +340,17 @@ move; `CaplinStateSnapshots` still keys its own maps by string.
   accidentally covers them. Registration is Task 3, so the widening is Task 3's.
   This task's own assertions read only `Name()` and `Enum()`, which need no
   registry.
-- [ ] assert enum uniqueness and contiguity **within `CaplinStateSnapshotTypes`
+- [x] assert enum uniqueness and contiguity **within `CaplinStateSnapshotTypes`
   itself** — a local walk over the slice, not through `allSnapshotTypes()`
-- [ ] write a test asserting each type's `Name()` equals its `kv` constant and
+- [x] write a test asserting each type's `Name()` equals its `kv` constant and
   that the 33 names match `MakeCaplinStateSnapshotsTypes`'s key set exactly —
   the guard that a new fork table cannot be added to one place and forgotten in
   the other
-- [ ] write a test asserting `len(CaplinSnapshotTypes) == 2`, the invariant the
+- [x] write a test asserting `len(CaplinSnapshotTypes) == 2`, the invariant the
   four call sites above depend on
-- [ ] move Task 1's width assertion here now that both lists exist:
+- [x] move Task 1's width assertion here now that both lists exist:
   `len(CaplinSnapshotTypes) + len(CaplinStateSnapshotTypes) <= MinBorEnum - MinCaplinEnum`
-- [ ] run `go test ./db/snaptype/...` — must pass before task 3
+- [x] run `go test ./db/snaptype/...` — must pass before task 3
 
 ---
 

@@ -36,12 +36,5 @@ var (
 )
 
 func IsCaplinType(t Enum) bool {
-
-	for _, ct := range CaplinSnapshotTypes {
-		if t == ct.Enum() {
-			return true
-		}
-	}
-
-	return false
+	return t >= MinCaplinEnum && t < MinBorEnum
 }
