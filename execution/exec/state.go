@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -241,9 +242,9 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
-		var getter kv.TemporalGetter
+		var getter execctxapi.StateGetter
 		if chainTx != nil {
-			getter = rs.Domains().AsGetterMetered(chainTx, rw.readMetrics)
+			getter = rs.Domains().AsStateGetterMetered(chainTx, rw.readMetrics)
 		}
 		// Use CachedReaderV3 for parallel workers — caches account data
 		// on first read per block, providing a stable pre-block committed
@@ -323,7 +324,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 
 	if rw.chainTx != nil {
 		type latest interface {
-			SetGetter(kv.TemporalGetter)
+			SetGetter(execctxapi.StateGetter)
 		}
 
 		type historic interface {
@@ -332,7 +333,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 
 		switch typedReader := rw.stateReader.(type) {
 		case latest:
-			typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
+			typedReader.SetGetter(rw.rs.Domains().AsStateGetterMetered(rw.chainTx, rw.readMetrics))
 		case historic:
 			typedReader.SetTx(rw.chainTx)
 		default:
@@ -470,7 +471,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 func (rw *Worker) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
 	type latest interface {
-		SetGetter(kv.TemporalGetter)
+		SetGetter(execctxapi.StateGetter)
 	}
 
 	type historic interface {
@@ -479,7 +480,7 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
+		typedReader.SetGetter(rw.rs.Domains().AsStateGetterMetered(rw.chainTx, rw.readMetrics))
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
@@ -514,7 +515,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		// the coinbase race investigation).
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
-		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics), nil))
+		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsStateGetterMetered(rw.chainTx, rw.readMetrics), nil))
 	}
 
 	// Set the per-block committed state cache from the task.
@@ -611,7 +612,7 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 			reader := stateReader
 
 			if reader == nil {
-				reader = state.NewReaderV3(rs.Domains().AsGetterMetered(nil, w.readMetrics))
+				reader = state.NewReaderV3(rs.Domains().AsStateGetterMetered(nil, w.readMetrics))
 			}
 
 			if err = w.ResetState(rs, nil, reader, stateWriter, accumulator); err != nil {
