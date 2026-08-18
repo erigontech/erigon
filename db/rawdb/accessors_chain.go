@@ -830,7 +830,7 @@ func readBlock(tx kv.Getter, hash common.Hash, number uint64) (*types.Block, err
 func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	block, err := readBlock(tx, hash, number)
 	if err != nil {
-		log.Error("Invalid block access list", "hash", hash, "number", number, "err", err)
+		log.Error("failed to read block", "hash", hash, "number", number, "err", err)
 		return nil
 	}
 	return block
