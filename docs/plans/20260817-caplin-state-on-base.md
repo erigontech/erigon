@@ -407,13 +407,13 @@ leaves `AllTypedSegments:1156` open, which is the path PR-2b lands on first.
 - Modify: `db/snaptype/files_test.go`
 - Create: `db/snapshotsync/base_unknown_type_test.go`
 
-- [ ] write a test that puts a `v1.1-000000-000050-BlockProposers.seg` in a
+- [x] write a test that puts a `v1.1-000000-000050-BlockProposers.seg` in a
   caplin snapshot dir and calls `BaseRoSnapshots.OpenFolder()` over it. Use
   `datadir.New(t.TempDir()).SnapCaplin` — `IsCaplin` keys on the literal string
   `"caplin"` in the dir or file name (`files.go:130-135`), so a bare
   `t.TempDir()` makes `ParseFileName` return `ok=false` and the test passes for
   the wrong reason. Confirm the panic is in `AllTypedSegments` before fixing.
-- [ ] drop nil-`Type` entries in `parseDirEntries` (`files.go:417-437`), next to
+- [x] drop nil-`Type` entries in `parseDirEntries` (`files.go:417-437`), next to
   the existing `if !ok { continue }`. `ParseDir` has one caller, `FilesWithExt`
   (`:111`). This is safe not because of extension ordering — `FilesWithExt` runs
   `ParseDir` before `FilterExt`, so the guard sees salt either way — but because
@@ -421,24 +421,24 @@ leaves `AllTypedSegments:1156` open, which is the path PR-2b lands on first.
   receives it. The salt branch (`:145-151`) does return `ok=true` with a nil
   `Type` when `db/snaptype2` is not linked in; that is why the guard belongs
   here and not inside `ParseFileName`.
-- [ ] also guard `f.Type == nil` in `openSegments` (`snapshots.go:1196-1202`),
+- [x] also guard `f.Type == nil` in `openSegments` (`snapshots.go:1196-1202`),
   before `HasType`. `OpenFolder` derives its list from `AllTypedSegments`, so
   after the `ParseDir` guard this path is unreachable through it — but
   `OpenList(fileNames, optimistic)` (`:1303`) is public, re-parses raw strings
   with no `ParseDir` in between, and `CaplinStateSnapshots` inherits it after
   Task 9. Two lines of defence in depth on a public entry point.
-- [ ] write a second test driving `findOverlaps` over the same directory,
+- [x] write a second test driving `findOverlaps` over the same directory,
   covering the `GetGrouping` path, asserting no panic and that the real segments
   are still grouped correctly
-- [ ] write a test asserting `ParseFileName(<caplin dir>, "v1.1-000000-000050-PendingDepositsDump.seg")`
+- [x] write a test asserting `ParseFileName(<caplin dir>, "v1.1-000000-000050-PendingDepositsDump.seg")`
   returns a non-nil `Type`, `From=0`, `To=50000`, and
   `CaplinTypeString="PendingDepositsDump"` — the last is what
   `CaplinStateSnapshots.OpenList` keys on today and must not shift
-- [ ] note in the PR body: `SegmentsCaplin`'s two `f.Type != nil` guards
+- [x] note in the PR body (deferred to the PR description): `SegmentsCaplin`'s two `f.Type != nil` guards
   (`snapshots.go:1953,1956`) are dead — it runs on `dirs.Snap`, where `IsCaplin`
   is false and `ParseFileName` already returns `ok=false` for an unresolvable
   name. Leave them; just don't let a reader think they are the protection.
-- [ ] run `go test ./db/snaptype/... ./db/snapshotsync/...` — must pass before task 5
+- [x] run `go test ./db/snaptype/... ./db/snapshotsync/...` — must pass before task 5
 
 ---
 

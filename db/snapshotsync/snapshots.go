@@ -1194,7 +1194,7 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 		seen[fName] = struct{}{}
 
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
-		if !ok || isState || snaptype.IsTorrentPartial(f.Ext) {
+		if !ok || isState || f.Type == nil || snaptype.IsTorrentPartial(f.Ext) {
 			continue
 		}
 		if !s.HasType(f.Type) {
