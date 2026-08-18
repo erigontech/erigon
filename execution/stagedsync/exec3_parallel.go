@@ -1296,7 +1296,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted, t.GetBlockStateCache())
 			}
 		}
 
@@ -2381,6 +2381,8 @@ type blockExecutor struct {
 
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
+	// Same instance the block's tasks carry, so the apply loop's readers hit
+	// what the workers already read instead of going back to the domain.
 	blockStateCache *state.BlockStateCache
 }
 
@@ -2439,7 +2441,10 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 	return nil
 }
 
-func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted, blockStateCache *state.BlockStateCache) *blockExecutor {
+	if blockStateCache == nil {
+		blockStateCache = state.NewBlockStateCache()
+	}
 	return &blockExecutor{
 		blockNum:         blockNum,
 		blockHash:        blockHash,
@@ -2456,7 +2461,7 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		applyResults:     applyResults,
 		commitResults:    commitResults,
 		gasPool:          gasPool,
-		blockStateCache:  state.NewBlockStateCache(),
+		blockStateCache:  blockStateCache,
 		exhausted:        exhausted,
 	}
 }
