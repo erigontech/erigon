@@ -28,10 +28,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
-// caplin/ state tables have no snaptype of their own and borrow snaptype.BeaconBlocks'
-// version window, so bumping that type drops every published caplin entry from the
-// download set — silently, since the filter just skips out-of-window names.
-func TestTypedKeepsPublishedCaplinEntries(t *testing.T) {
+func TestTypedKeepsPublishedCaplinEntriesAndDropsUnknownTypes(t *testing.T) {
 	published := map[string]struct{}{}
 	sc := bufio.NewScanner(bytes.NewReader(mainnetPreverifiedFixture))
 	for sc.Scan() {
@@ -49,8 +46,19 @@ func TestTypedKeepsPublishedCaplinEntries(t *testing.T) {
 
 	cfg, ok := snapcfg.KnownCfg(networkname.Mainnet)
 	require.True(t, ok)
+	items := make(map[string]struct{}, len(cfg.Preverified.Items))
 	for _, item := range cfg.Preverified.Items {
-		delete(published, item.Name)
+		items[item.Name] = struct{}{}
 	}
-	require.Empty(t, published, "published caplin entries dropped by the version window")
+
+	require.Contains(t, items, "caplin/v1.1-000000-010500-BlockRoot.seg")
+	require.Contains(t, items, "caplin/v1.1-000000-011200-PendingDeposits.seg")
+	require.NotContains(t, items, "caplin/v1.1-000000-010500-BlockProposers.seg")
+
+	for name := range published {
+		if strings.Contains(name, "-BlockProposers.") {
+			continue
+		}
+		require.Contains(t, items, name, "published known Caplin entry was dropped")
+	}
 }
