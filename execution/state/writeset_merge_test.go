@@ -26,6 +26,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -352,6 +353,26 @@ func TestWriteSetReleaseMaps(t *testing.T) {
 	// Double release and nil-map release must not panic.
 	prev.ReleaseMaps()
 	prev.ReleaseMaps()
+}
+
+// A set released for good must fail its whole-set readers under assertions:
+// the maps are pooled, so those reads would otherwise silently see nothing.
+func TestWriteSetReleasedTripwire(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	released, _ := mergeIntoFixture()
+	released.ReleaseMaps()
+	assert.Panics(t, func() { released.Count() })
+	assert.Panics(t, func() {
+		for range released.AllHeaders() {
+		}
+	})
+
+	// ReleaseAndReset resets for reuse, so it must leave the set readable.
+	reused := &WriteSet{}
+	reused.ReleaseAndReset()
+	assert.Zero(t, reused.Count())
 }
 
 func TestVersionedIOReleaseOutputMaps(t *testing.T) {

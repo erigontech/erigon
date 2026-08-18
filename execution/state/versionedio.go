@@ -657,6 +657,18 @@ type WriteSet struct {
 	codeHash       map[accounts.Address]*VersionedWrite[accounts.CodeHash]
 	codeSize       map[accounts.Address]*VersionedWrite[int]
 	storage        map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]
+
+	// released marks a ReleaseMaps that was not a reset for reuse. The pooled
+	// maps leave the set reading as empty rather than failing, so under
+	// assertions the whole-set readers panic instead. Only written when
+	// dbg.AssertEnabled.
+	released bool
+}
+
+func (s *WriteSet) assertLive(op string) {
+	if dbg.AssertEnabled && s != nil && s.released {
+		panic("WriteSet." + op + " after ReleaseMaps: the maps are pooled, so this read silently sees nothing")
+	}
 }
 
 // vwMapPool[T] pools the per-path map[Address]*VersionedWrite[T] containers
@@ -1071,6 +1083,7 @@ func (s *WriteSet) Count() int {
 	if s == nil {
 		return 0
 	}
+	s.assertLive("Count")
 	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) +
 		len(s.selfDestruct) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize)
 	for _, inner := range s.storage {
@@ -1299,6 +1312,7 @@ func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield f
 // AllHeaders visits the type-agnostic header of every write; the value is read
 // typed-by-path from the per-path maps, so nothing is erased to an interface.
 func (s *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
+	s.assertLive("AllHeaders")
 	return func(yield func(WriteHeader) bool) {
 		if s == nil {
 			return
@@ -1363,6 +1377,9 @@ func (s *WriteSet) ReleaseAndReset() {
 		}
 	}
 	s.ReleaseMaps()
+	if dbg.AssertEnabled {
+		s.released = false // a reset hands the set back for reuse
+	}
 }
 
 // ReleaseMaps returns the map containers to their pools without releasing the
@@ -1387,6 +1404,9 @@ func (s *WriteSet) ReleaseMaps() {
 	}
 	wsPutStorageOuter(s.storage)
 	*s = WriteSet{}
+	if dbg.AssertEnabled {
+		s.released = true
+	}
 }
 
 // Per-path typed delete methods.  Direct map access, no internal switch

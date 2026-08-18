@@ -765,6 +765,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// The BAL was the last reader of the recorded write sets;
 					// return their map containers to the pools.
 					applyResult.TxIO.ReleaseOutputMaps()
+					applyResult.releaseSupersededWrites()
 
 					// Mark this block as fully applied. The exit-completeness
 					// check at channel-close compares this set against the
@@ -1781,6 +1782,17 @@ type blockResult struct {
 	AllDeps          map[int]map[int]bool
 	Exhausted        *ErrLoopExhausted
 	blockStateCache  *state.BlockStateCache
+	supersededWrites []*state.WriteSet
+}
+
+// releaseSupersededWrites pools the map containers of the merged write sets
+// this block replaced. ReleaseMaps clears every map before pooling it, which is
+// O(entries) per set, so the exec loop only collects them and the apply loop
+// pays for them where it already releases the recorded write sets.
+func (r *blockResult) releaseSupersededWrites() {
+	for _, ws := range r.supersededWrites {
+		ws.ReleaseMaps()
+	}
 }
 
 type txResult struct {
@@ -2279,12 +2291,14 @@ type blockExecutor struct {
 	tasks   []*execTask
 	results []*execResult
 
-	// feeMergeTemp[tx] is the write set the fee merge created and recorded for
-	// tx. A revalidation round merges again and supersedes it; every other
-	// recorded set is some execResult's TxOut, which stays live.
-	feeMergeTemp map[int]*state.WriteSet
+	// mergedWrites[tx] is the write set a merge created and recorded for tx. A
+	// later merge for the same tx supersedes it; every other recorded set is
+	// some execResult's TxOut, which stays live.
+	mergedWrites map[int]*state.WriteSet
 
-	mapReleasing sync.WaitGroup
+	// supersededWrites collects the merged sets a later merge replaced. Nothing
+	// reaches them from then on, so their maps can go back to the pools.
+	supersededWrites []*state.WriteSet
 
 	// settledInput[tx]==true marks a task that was dispatched when every
 	// preceding task had already validated — so it executed against fully
@@ -2422,7 +2436,7 @@ func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList type
 		begin:            time.Now(),
 		stats:            map[int]ExecutionStat{},
 		finalizedResults: map[int]*execResult{},
-		feeMergeTemp:     map[int]*state.WriteSet{},
+		mergedWrites:     map[int]*state.WriteSet{},
 		settledInput:     map[int]bool{},
 		estimateDeps:     map[int][]int{},
 		preValidated:     map[int]bool{},
@@ -2455,51 +2469,28 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	}
 }
 
-// recordFeeMerge takes ownership of the set the fee merge just recorded for tx
-// and reclaims the one it superseded. Only a set an earlier fee merge created
-// may be released: prev is otherwise some execResult's TxOut, which stays live.
-// MergeInto shares VersionedWrite pointers rather than the maps holding them,
-// so pooling prev's maps leaves the writes merged now holds intact.
-func (be *blockExecutor) recordFeeMerge(tx int, prev, merged *state.WriteSet) {
-	if temp := be.feeMergeTemp[tx]; temp != nil && temp == prev && merged != temp {
-		be.queueMapRelease(temp)
+// mergeRecordedWrites folds the write set recorded for tx into add and records
+// the merged set in its place.
+func (be *blockExecutor) mergeRecordedWrites(tx int, txVersion state.Version, add *state.WriteSet) *state.WriteSet {
+	existing := be.blockIO.WriteSet(txVersion.TxIndex)
+	merged := existing.MergeInto(add)
+	be.blockIO.RecordWrites(txVersion, merged)
+	be.recordMerge(tx, existing, merged)
+	return merged
+}
+
+// recordMerge takes ownership of the set the merge just recorded for tx and
+// hands the one it superseded to the block's reclaim list. Only a set an
+// earlier merge created may be reclaimed: prev is otherwise some execResult's
+// TxOut, which stays live. MergeInto shares VersionedWrite pointers rather
+// than the maps holding them, so pooling prev's maps leaves the writes merged
+// now holds intact.
+func (be *blockExecutor) recordMerge(tx int, prev, merged *state.WriteSet) {
+	if temp := be.mergedWrites[tx]; temp != nil && temp == prev && merged != temp {
+		be.supersededWrites = append(be.supersededWrites, temp)
 	}
-	be.feeMergeTemp[tx] = merged
+	be.mergedWrites[tx] = merged
 }
-
-// ReleaseMaps clears every map before pooling it, which is O(entries), and a
-// superseded fee-merge set holds the whole tx's writes. Keep it off the apply
-// loop, which is the serial stage the workers wait behind.
-type mapRelease struct {
-	ws      *state.WriteSet
-	pending *sync.WaitGroup
-}
-
-var (
-	mapReleases     = make(chan mapRelease, 4096)
-	mapReleaseStart sync.Once
-)
-
-func (be *blockExecutor) queueMapRelease(ws *state.WriteSet) {
-	mapReleaseStart.Do(func() {
-		go func() {
-			for r := range mapReleases {
-				r.ws.ReleaseMaps()
-				r.pending.Done()
-			}
-		}()
-	})
-	be.mapReleasing.Add(1)
-	select {
-	case mapReleases <- mapRelease{ws, &be.mapReleasing}:
-	default:
-		// Releaser is behind; inline costs less than blocking the apply loop.
-		ws.ReleaseMaps()
-		be.mapReleasing.Done()
-	}
-}
-
-func (be *blockExecutor) awaitMapReleases() { be.mapReleasing.Wait() }
 
 // tooManyRetries returns an invalid-block result when tx has exceeded its
 // retry budget, otherwise nil. origin may be nil (validator-invalid path)
@@ -2765,10 +2756,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				return nil, err
 			}
 			if !tipWrites.IsEmpty() {
-				existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-				merged := existingWrites.MergeInto(tipWrites)
-				be.blockIO.RecordWrites(txVersion, merged)
-				be.recordFeeMerge(tx, existingWrites, merged)
+				be.mergeRecordedWrites(tx, txVersion, tipWrites)
 			}
 		}
 
@@ -2895,9 +2883,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				if !addWrites.IsEmpty() {
 					// Merge finalization writes with existing execution writes.
-					existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
-					merged := existingWrites.MergeInto(addWrites)
-					be.blockIO.RecordWrites(txVersion, merged)
+					merged := be.mergeRecordedWrites(tx, txVersion, addWrites)
 
 					// Flush the merged writes (including fee calc changes)
 					// to the version map so that subsequent per-tx
@@ -3264,6 +3250,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			AllDeps:          allDeps,
 			Exhausted:        be.exhausted,
 			blockStateCache:  be.blockStateCache,
+			supersededWrites: be.supersededWrites,
 		}
 		return be.result, nil
 	}
