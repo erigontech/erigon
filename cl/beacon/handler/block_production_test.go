@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -1056,6 +1057,29 @@ func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
 	captured := logs()
 	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
 	require.Contains(t, captured, "boom")
+}
+
+func TestProductionCollectsTwoFailingBodyStepsWithoutRacing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return([]byte{1, 2, 3, 4, 5, 6, 7, 8}, nil).AnyTimes()
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, nil, nil, nil, errors.New("boom")).AnyTimes()
+	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+	handler.engine = engine
+
+	// The body steps run concurrently, so each needs somewhere of its own to put its failure.
+	syncPool := sync_pool_mock.NewMockSyncContributionPool(ctrl)
+	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("no aggregate")).AnyTimes()
+	handler.syncMessagePool = syncPool
+
+	_, err := handler.produceBlock(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+		postState.Slot()+1, common.Bytes96{}, common.Hash{})
+	require.Error(t, err)
 }
 
 func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {

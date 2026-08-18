@@ -1097,7 +1097,9 @@ func (a *ApiHandler) produceBeaconBody(
 
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
-	var executionErr error
+	// One collector per concurrent body step. Sharing one would be a write-write race whenever
+	// two steps fail together.
+	var executionErr, syncAggregateErr error
 	var executionRequestsRoot common.Hash
 	// [New in Gloas:EIP7732] saved for envelope construction.
 	// Always initialize for GLOAS so EncodeSSZ never sees nil sub-fields.
@@ -1303,10 +1305,12 @@ func (a *ApiHandler) produceBeaconBody(
 		defer func() {
 			log.Info("BlockProduction: GetSyncAggregate took", "duration", time.Since(start))
 		}()
-		beaconBody.SyncAggregate, err = a.syncMessagePool.GetSyncAggregate(targetSlot-1, blockRoot)
+		aggregate, err := a.syncMessagePool.GetSyncAggregate(targetSlot-1, blockRoot)
 		if err != nil {
-			executionErr = fmt.Errorf("produceBeaconBody: sync aggregate: %w", err)
+			syncAggregateErr = fmt.Errorf("produceBeaconBody: sync aggregate: %w", err)
+			return
 		}
+		beaconBody.SyncAggregate = aggregate
 	})
 	// Process operations all in parallel with each other.
 	wg.Go(func() {
@@ -1345,6 +1349,9 @@ func (a *ApiHandler) produceBeaconBody(
 	wg.Wait()
 	if executionErr != nil {
 		return nil, 0, executionErr
+	}
+	if syncAggregateErr != nil {
+		return nil, 0, syncAggregateErr
 	}
 	if executionPayload == nil {
 		return nil, 0, errors.New("failed to produce execution payload")
