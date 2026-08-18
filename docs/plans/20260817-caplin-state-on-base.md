@@ -522,11 +522,11 @@ and a `BlocksAvailable` whose numeric value does not move.
 **Files:**
 - Create: `db/snapshotsync/caplin_state_lifecycle_test.go`
 
-- [ ] write a test that opens a `CaplinStateSnapshots` over two segments of one
+- [x] write a test that opens a `CaplinStateSnapshots` over two segments of one
   table, takes a `View`, then triggers a visible-set recalculation, and asserts
   the view still reports the segments it pinned. It fails today because
   `CaplinStateView.VisibleSegments` reads `v.s.visible` live (`:658-670`).
-- [ ] write a `-race` test whose driver actually writes. `View` never touches
+- [x] write a `-race` test whose driver actually writes. `View` never touches
   `sn.Decompressor`/`sn.indexes` (it wraps `VisibleSegments.BeginRo`,
   `snapshots.go:471-473`), and a repeated `OpenList` over the *same* list writes
   nothing — `openSegIfNeed` returns early on `Decompressor != nil` (`:322-325`)
@@ -534,9 +534,16 @@ and a `BlocksAvailable` whose numeric value does not move.
   two goroutines calling `OpenList(all)` and `OpenList(subset)`: the subset call
   drives `closeWhatNotInList` → `close()`, nilling the fields the other's
   post-unlock deferred recalc is reading through `isIndexed`.
-- [ ] confirm both fail for the stated reason and record the output in the task
+- [x] confirm both fail for the stated reason and record the output in the task
   notes; they go green in Task 9, which lands with them
-- [ ] run `go test -race ./db/snapshotsync/ -run CaplinState`
+- [x] run `go test -race ./db/snapshotsync/ -run CaplinState` (expected red until Task 9)
+
+Task 7 TDD notes: `TestCaplinStateViewPinsVisibleSegments` failed because the
+view returned only `[0, 50000)` after recalculation instead of its pinned two
+segments. The race run reported writes in `DirtySegment.closeIdx` and
+`DirtySegment.closeSeg` from `closeWhatNotInList` racing with
+`recalcVisibleFiles` → `isIndexed` reads. Both failures are expected to turn
+green when Task 9 moves lifecycle ownership to `BaseRoSnapshots`.
 
 ---
 
