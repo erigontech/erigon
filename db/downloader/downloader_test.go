@@ -378,8 +378,8 @@ func newLocalSnapshotTest(t *testing.T) (d *Downloader, logs *logBuffer, name, p
 	return
 }
 
-// Issue #21522: data that backs no metainfo is renamed to .part, leaving a hole in the snapshot
-// tier. That must be visible at warn level or louder.
+// Data that backs no metainfo is renamed to .part, leaving a hole in the snapshot tier. That must
+// be visible at warn level or louder.
 func TestInvalidateDataRenamesLocalFile(t *testing.T) {
 	require := require.New(t)
 	d, logs, name, path := newLocalSnapshotTest(t)
@@ -394,7 +394,7 @@ func TestInvalidateDataRenamesLocalFile(t *testing.T) {
 	require.Contains(logs.String(), name, "rename must be logged at warn or louder")
 }
 
-// Data that backs its own metainfo was built or kept deliberately, so a preverified hash that
+// Data that hashes to its own metainfo was built or kept deliberately, so a preverified hash that
 // disagrees must not evict it.
 func TestKeepsCompleteLocalSnapshot(t *testing.T) {
 	require := require.New(t)
@@ -411,4 +411,25 @@ func TestKeepsCompleteLocalSnapshot(t *testing.T) {
 	require.FileExists(path)
 	require.NoFileExists(path + ".part")
 	require.Contains(logs.String(), name)
+}
+
+// Same length as its metainfo but different content: the metainfo is stale, so the local hash must
+// not be adopted.
+func TestInvalidatesLocalSnapshotNotMatchingItsMetainfo(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+	_, err := BuildTorrentIfNeed(t.Context(), name, d.snapDir(), d.torrentFS)
+	require.NoError(err)
+
+	before, err := os.ReadFile(path)
+	require.NoError(err)
+	require.NoError(os.WriteFile(path, bytes.Repeat([]byte("x"), len(before)), 0o644))
+
+	differentPreverifiedInfoHash := snaptype.Hex2InfoHash("aa")
+	_, addInfoHash, err := d.chooseAddInfoHash(differentPreverifiedInfoHash, name)
+	require.NoError(err)
+	require.Equal(differentPreverifiedInfoHash, addInfoHash)
+
+	require.NoFileExists(path)
+	require.FileExists(path + ".part")
 }

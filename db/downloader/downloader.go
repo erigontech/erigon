@@ -493,7 +493,20 @@ func (d *Downloader) StartTorrentPeerManager(ctx context.Context) {
 	})
 }
 
-// Check snapshot data looks right.
+// Reports whether the data on disk is what info describes, by rebuilding the piece hashes from it.
+// Sizes alone can't say: a stale metainfo can describe different content of the same length.
+func (d *Downloader) snapshotDataMatchesMetainfo(name string, info *metainfo.Info) bool {
+	if !d.snapshotDataSizesMatch(info) {
+		return false
+	}
+	rebuilt := metainfo.Info{PieceLength: info.PieceLength, Name: info.Name}
+	if err := rebuilt.BuildFromFilePath(d.filePathForName(name)); err != nil {
+		d.log(log.LvlWarn, "error hashing local snapshot", "err", err, "name", name)
+		return false
+	}
+	return rebuilt.Length == info.Length && bytes.Equal(rebuilt.Pieces, info.Pieces)
+}
+
 func (d *Downloader) snapshotDataSizesMatch(info *metainfo.Info) bool {
 	for f := range info.UpvertedFilesIter() {
 		pathParts := append([]string{info.BestName()}, f.BestPath()...)
@@ -1029,9 +1042,7 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	name string,
 ) (
 	t *torrent.Torrent,
-	// First add of this Torrent that asked to download. The caller is responsible for adding
-	// download tasks.
-	firstDownloader bool,
+	firstDownloader bool, // First add of this Torrent that asked to download. The caller is responsible for adding download tasks.
 	localMetainfo g.Option[*metainfo.MetaInfo],
 	err error,
 ) {
@@ -1107,7 +1118,7 @@ func (d *Downloader) chooseAddInfoHash(
 	addInfoHash = preverifiedInfoHash
 	localMetainfo, err = d.maybeLoadMetainfoFromDisk(name)
 	if err != nil {
-		d.log(log.LvlError, "error loading metainfo from disk", "err", err, "name", name)
+		d.log(log.LvlWarn, "error loading metainfo from disk", "err", err, "name", name)
 		err = nil
 	}
 	if localMetainfo.Ok {
@@ -1115,7 +1126,7 @@ func (d *Downloader) chooseAddInfoHash(
 		if localInfoHash == preverifiedInfoHash {
 			return
 		}
-		if info, infoErr := localMetainfo.Value.UnmarshalInfo(); infoErr == nil && d.snapshotDataSizesMatch(&info) {
+		if info, infoErr := localMetainfo.Value.UnmarshalInfo(); infoErr == nil && d.snapshotDataMatchesMetainfo(name, &info) {
 			d.log(log.LvlWarn, "keeping local snapshot, preverified hash differs",
 				"preverified", preverifiedInfoHash,
 				"local", localInfoHash,
