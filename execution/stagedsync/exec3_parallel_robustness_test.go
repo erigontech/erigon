@@ -1856,6 +1856,14 @@ func TestClassifyApplyFailures(t *testing.T) {
 			"an unhealthy run must fail operationally, not report INVALID")
 	})
 
+	t.Run("cancellation-only infra does not displace a verdict", func(t *testing.T) {
+		var fail failCandidate
+		fail.consider(3, common.HexToHash("0x03"), true, verdictErr)
+		verdict, opErr := classifyApplyFailures(fmt.Errorf("worker teardown: %w", context.Canceled), fail)
+		require.NotNil(t, verdict)
+		require.NoError(t, opErr)
+	})
+
 	t.Run("verdict alone stays a clean exit", func(t *testing.T) {
 		var fail failCandidate
 		fail.consider(3, common.HexToHash("0x03"), true, verdictErr)

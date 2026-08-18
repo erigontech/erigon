@@ -1441,12 +1441,12 @@ func classifyApplyExit(fail failCandidate) (*blockVerdict, error) {
 	return nil, fail.err
 }
 
-// classifyApplyFailures merges the operational slot with the fail-candidate:
-// operational faults surface unconditionally, while a coincident verdict is
-// still recorded so the executor can log its withholding.
+// classifyApplyFailures merges the operational slot with the fail-candidate.
+// Cancellation-only infrastructure errors are teardown noise and cannot
+// displace a verdict; mixed or genuine operational failures still withhold it.
 func classifyApplyFailures(infraErr error, fail failCandidate) (*blockVerdict, error) {
 	verdict, opErr := classifyApplyExit(fail)
-	return verdict, errors.Join(infraErr, opErr)
+	return verdict, errors.Join(commonerrors.NilIfCanceled(infraErr), opErr)
 }
 
 // resolveApplyLoopClose stores block verdicts and resumable boundaries on pe;
