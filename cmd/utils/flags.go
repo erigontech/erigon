@@ -849,7 +849,7 @@ var (
 	}
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
-		Usage: "DB is split to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintenance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
+		Usage: "DB is split to 'pages' of fixed size. Can't change after DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintenance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
 		Value: ethconfig.DefaultChainDBPageSize.String(),
 	}
 	DbSizeLimitFlag = cli.StringFlag{
@@ -2088,13 +2088,11 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		dbg.SetExec3Workers(1)
 		cfg.ExecWorkerCount = 1
 	}
-	// If FILES_ASYNC_IO is set but io_uring is unavailable (old kernel, or blocked
-	// by a seccomp sandbox such as Docker's default profile), disable the gate at
-	// startup so it doesn't pay the per-read residency-probe cost for warms that
-	// would never run. Warming is an optimization; reads just use ordinary faults.
-	if dbg.FilesAsyncIO && runtime.GOOS == "linux" && !iouring.Available() {
-		log.Warn("FILES_ASYNC_IO is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
+	// Disable io_uring experiments at startup when their reads cannot run.
+	if (dbg.FilesAsyncIO || dbg.FilesAsyncIOLiterals) && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("async file I/O is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
 		dbg.FilesAsyncIO = false
+		dbg.FilesAsyncIOLiterals = false
 	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {

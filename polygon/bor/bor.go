@@ -97,8 +97,6 @@ var (
 	errInvalidMixDigest = errors.New("non-zero mix digest")
 	// errInvalidUncleHash is returned if a block contains an non-empty uncle list.
 	errInvalidUncleHash = errors.New("non empty uncle hash")
-	// errInvalidDifficulty is returned if the difficulty of a block neither 1 or 2.
-	errInvalidDifficulty = errors.New("invalid difficulty")
 	// errInvalidTimestamp is returned if the timestamp of a block is lower than
 	// the previous block's timestamp + the minimum block period.
 	errInvalidTimestamp = errors.New("invalid timestamp")
@@ -722,7 +720,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 			blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
 			if err != nil {
 				log.Error("[bor] encoding block extra data", "err", err)
-				return fmt.Errorf("error while encoding block extra data: %v", err)
+				return fmt.Errorf("error while encoding block extra data: %w", err)
 			}
 
 			header.Extra = append(header.Extra, blockExtraDataBytes...)
@@ -740,7 +738,7 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 		blockExtraDataBytes, err := rlp.EncodeToBytes(blockExtraData)
 		if err != nil {
 			log.Error("[bor] encoding block extra data", "err", err)
-			return fmt.Errorf("error while encoding block extra data: %v", err)
+			return fmt.Errorf("error while encoding block extra data: %w", err)
 		}
 
 		header.Extra = append(header.Extra, blockExtraDataBytes...)
@@ -842,7 +840,7 @@ func (c *Bor) changeContractCodeIfNeeded(headerNumber uint64, state *state.Intra
 		if blockNumber == strconv.FormatUint(headerNumber, 10) {
 			allocs, err := types.DecodeGenesisAlloc(genesisAlloc)
 			if err != nil {
-				return fmt.Errorf("failed to decode genesis alloc: %v", err)
+				return fmt.Errorf("failed to decode genesis alloc: %w", err)
 			}
 
 			for addr, account := range allocs {

@@ -243,11 +243,11 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules
 	if chainReader != nil {
 		if err := engine.VerifyHeader(chainReader, currentHeader, true); err != nil {
 			log.Warn("Header Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-			return fmt.Errorf("%w: %v", rules.ErrInvalidBlock, err)
+			return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, err)
 		}
 		if err := engine.VerifyUncles(chainReader, currentHeader, currentBody.Uncles); err != nil {
 			log.Warn("Unlcles Verification Failed", "number", currentHeight, "hash", currentHash, "reason", err)
-			return fmt.Errorf("%w: %v", rules.ErrInvalidBlock, err)
+			return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, err)
 		}
 	}
 	// Prepare memory state for block execution
