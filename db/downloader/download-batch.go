@@ -39,10 +39,14 @@ func (me *downloadBatch) taskWaiter() {
 }
 
 func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
-	t, first, localMetainfo, err := me.d.addPreverifiedSnapshotForDownload(item.InfoHash, item.Name)
+	snapshotTorrent, first, localMetainfo, err := me.d.addPreverifiedSnapshotForDownload(item.InfoHash, item.Name)
 	if err != nil {
 		return err
 	}
+	if !snapshotTorrent.Ok {
+		return nil
+	}
+	t := snapshotTorrent.Value
 	me.torrents = append(me.torrents, t)
 	if !first {
 		return nil
