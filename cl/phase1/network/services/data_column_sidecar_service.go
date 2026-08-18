@@ -167,8 +167,7 @@ func (s *dataColumnSidecarService) processFuluMessage(ctx context.Context, subne
 	}
 
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) ||
-			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
+		if s.forkChoice.GetPeerDas().IsColumnOverHalf(blockHeader.Slot, blockRoot) {
 			return ErrIgnore
 		}
 	} else {
@@ -280,10 +279,8 @@ func (s *dataColumnSidecarService) processGloasMessage(ctx context.Context, subn
 		return ErrIgnore
 	}
 
-	// Check custody columns
 	if s.forkChoice.GetPeerDas().IsArchivedMode() {
-		if s.forkChoice.GetPeerDas().IsColumnOverHalf(slot, blockRoot) ||
-			s.forkChoice.GetPeerDas().IsBlobAlreadyRecovered(blockRoot) {
+		if s.forkChoice.GetPeerDas().IsColumnOverHalf(slot, blockRoot) {
 			return ErrIgnore
 		}
 	} else {

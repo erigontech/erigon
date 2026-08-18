@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	storagemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
+	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/common"
 )
@@ -141,6 +142,83 @@ func TestDownloadColumnsAndRecoverBlobsWithoutRPC(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
 	require.Error(t, d.DownloadColumnsAndRecoverBlobs(context.Background(), []cltypes.ColumnSyncableSignedBlock{block}))
+}
+
+func TestArchivedDataAvailabilityRequiresColumns(t *testing.T) {
+	cfg := fuluAtEpochTwoConfig()
+	slot := cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	blockRoot := common.Hash{1}
+	ctrl := gomock.NewController(t)
+	columnStorage := storagemock.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), slot, blockRoot).Return(nil, nil)
+	blobStorage := storagemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), blockRoot).Return(uint32(1), nil).AnyTimes()
+	d := &peerdas{
+		beaconConfig:  &cfg,
+		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
+		columnStorage: columnStorage,
+		blobStorage:   blobStorage,
+	}
+
+	available, err := d.IsDataAvailable(slot, blockRoot)
+
+	require.NoError(t, err)
+	require.False(t, available)
+}
+
+func TestArchivedDataAvailabilityReturnsStorageError(t *testing.T) {
+	cfg := fuluAtEpochTwoConfig()
+	slot := cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	blockRoot := common.Hash{1}
+	wantErr := errors.New("column storage unavailable")
+	ctrl := gomock.NewController(t)
+	columnStorage := storagemock.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), slot, blockRoot).Return(nil, wantErr)
+	blobStorage := storagemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), blockRoot).Return(uint32(0), nil).AnyTimes()
+	d := &peerdas{
+		beaconConfig:  &cfg,
+		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
+		columnStorage: columnStorage,
+		blobStorage:   blobStorage,
+	}
+
+	available, err := d.IsDataAvailable(slot, blockRoot)
+
+	require.False(t, available)
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestDownloadColumnsAndRecoverBlobsDoesNotUseRecoveredBlobsAsColumns(t *testing.T) {
+	cfg := fuluAtEpochTwoConfig()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	columnStorage := storagemock.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, common.Hash(blockRoot)).Return(nil, nil).AnyTimes()
+	blobStorage := storagemock.NewMockBlobStorage(ctrl)
+	blobChecked := false
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), common.Hash(blockRoot)).DoAndReturn(func(context.Context, common.Hash) (uint32, error) {
+		blobChecked = true
+		return 1, nil
+	}).AnyTimes()
+	d := &peerdas{
+		rpc:            &rpc.BeaconRpcP2P{},
+		beaconConfig:   &cfg,
+		caplinConfig:   &clparams.CaplinConfig{ArchiveBlobs: true},
+		columnStorage:  columnStorage,
+		blobStorage:    blobStorage,
+		columnRPCSlots: make(chan struct{}, maxConcurrentColumnRequests),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}))
+	require.False(t, blobChecked)
 }
 
 func TestSyncDeferredColumnDataPrunesExpiredJobsWithoutRPC(t *testing.T) {

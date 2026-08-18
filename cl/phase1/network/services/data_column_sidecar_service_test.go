@@ -62,9 +62,11 @@ type dataColumnSidecarTestSuite struct {
 	dataColumnSidecarService DataColumnSidecarService
 	beaconConfig             *clparams.BeaconChainConfig
 	mockFuncs                *mockFuncs
+	archiveMode              bool
 }
 
 func (t *dataColumnSidecarTestSuite) SetupTest() {
+	t.archiveMode = false
 	t.gomockCtrl = gomock.NewController(t.T())
 	t.mockForkChoice = forkchoice_mock.NewForkChoiceStorageMock(t.T())
 	t.mockEthClock = eth_clock.NewMockEthereumClock(t.gomockCtrl)
@@ -75,7 +77,7 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 	t.mockForkChoice.MockPeerDas = t.mockPeerDas
 
 	// Set up default mock behavior for PeerDas
-	t.mockPeerDas.EXPECT().IsArchivedMode().Return(false).AnyTimes()
+	t.mockPeerDas.EXPECT().IsArchivedMode().DoAndReturn(func() bool { return t.archiveMode }).AnyTimes()
 	t.mockPeerDas.EXPECT().StateReader().Return(t.mockPeerDasStateReader).AnyTimes()
 
 	// Set up default mock behavior for PeerDasStateReader
@@ -428,6 +430,36 @@ func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenValidSidecar_StoresS
 	t.NoError(err)
 }
 
+func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenBlobRecovered_StoresNeededArchiveColumn() {
+	t.archiveMode = true
+	verifyDataColumnSidecar = t.mockFuncs.VerifyDataColumnSidecar
+	verifyDataColumnSidecarInclusionProof = t.mockFuncs.VerifyDataColumnSidecarInclusionProof
+	verifyDataColumnSidecarKZGProofs = t.mockFuncs.VerifyDataColumnSidecarKZGProofs
+	blsVerify = t.mockFuncs.BlsVerify
+
+	sidecar := createMockDataColumnSidecar(testSlot, 0)
+	blockRoot, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+	t.Require().NoError(err)
+	t.mockPeerDas.EXPECT().IsColumnOverHalf(testSlot, blockRoot).Return(false)
+	t.mockPeerDas.EXPECT().IsBlobAlreadyRecovered(blockRoot).Return(true).AnyTimes()
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecar", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarInclusionProof", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofs", gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "BlsVerify", gomock.Any(), gomock.Any(), gomock.Any()).Return(true, nil).AnyTimes()
+	t.mockForkChoice.Headers[testParentRoot] = &cltypes.BeaconBlockHeader{}
+	t.mockSyncedData.EXPECT().ViewHeadState(gomock.Any()).DoAndReturn(func(synced_data.ViewHeadStateFn) error {
+		return nil
+	})
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), blockRoot, int64(0), sidecar).Return(nil)
+	t.mockPeerDas.EXPECT().TryScheduleRecover(testSlot, blockRoot).Return(nil)
+
+	err = t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
+
+	t.NoError(err)
+}
+
 // TestProcessMessage_WhenStorageFails_ReturnsError tests storage failure handling
 func (t *dataColumnSidecarTestSuite) TestProcessMessage_WhenStorageFails_ReturnsError() {
 	// Setup mock functions
@@ -673,6 +705,27 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenValid_StoresSuc
 	t.mockPeerDas.EXPECT().TryScheduleRecover(testSlot, testBlockRoot).Return(nil).Times(1)
 
 	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
+
+	t.NoError(err)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenBlobRecovered_StoresNeededArchiveColumn() {
+	t.archiveMode = true
+	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
+	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
+
+	t.mockPeerDas.EXPECT().IsColumnOverHalf(testSlot, testBlockRoot).Return(false)
+	t.mockPeerDas.EXPECT().IsBlobAlreadyRecovered(testBlockRoot).Return(true).AnyTimes()
+	t.mockSyncedData.EXPECT().Syncing().Return(false)
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true).AnyTimes()
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot, testBlockRoot)
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), testBlockRoot, int64(0), sidecar).Return(nil)
+	t.mockPeerDas.EXPECT().TryScheduleRecover(testSlot, testBlockRoot).Return(nil)
+
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	t.NoError(err)

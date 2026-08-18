@@ -53,6 +53,8 @@ type PeerDas interface {
 	// to support both pre-GLOAS (blinded) and GLOAS (non-blinded) blocks
 	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
+	// IsDataAvailable reports whether the node holds the verified columns required by its mode.
+	// Reconstructed blobs do not substitute for those column sidecars.
 	IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error)
 	Prune(keepSlotDistance uint64) error
 	UpdateValidatorsCustody(cgc uint64)
@@ -295,12 +297,20 @@ func (d *peerdas) IsBlobAlreadyRecovered(blockRoot common.Hash) bool {
 }
 
 func (d *peerdas) IsColumnOverHalf(slot uint64, blockRoot common.Hash) bool {
-	existingColumns, err := d.columnStorage.GetSavedColumnIndex(context.Background(), slot, blockRoot)
+	available, err := d.hasEnoughColumnsToRecover(context.Background(), slot, blockRoot)
 	if err != nil {
 		log.Warn("failed to get saved column index", "err", err, "blockRoot", blockRoot)
 		return false
 	}
-	return len(existingColumns) >= int(d.beaconConfig.NumberOfColumns+1)/2
+	return available
+}
+
+func (d *peerdas) hasEnoughColumnsToRecover(ctx context.Context, slot uint64, blockRoot common.Hash) (bool, error) {
+	existingColumns, err := d.columnStorage.GetSavedColumnIndex(ctx, slot, blockRoot)
+	if err != nil {
+		return false, err
+	}
+	return len(existingColumns) >= int(d.beaconConfig.NumberOfColumns+1)/2, nil
 }
 
 func (d *peerdas) IsArchivedMode() bool {
@@ -309,7 +319,7 @@ func (d *peerdas) IsArchivedMode() bool {
 
 func (d *peerdas) IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error) {
 	if d.IsArchivedMode() {
-		return d.IsColumnOverHalf(slot, blockRoot) || d.IsBlobAlreadyRecovered(blockRoot), nil
+		return d.hasEnoughColumnsToRecover(context.Background(), slot, blockRoot)
 	}
 	return d.isMyColumnDataAvailable(slot, blockRoot)
 }
@@ -743,7 +753,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 			continue
 		}
 
-		if d.IsColumnOverHalf(block.GetSlot(), root) || d.IsBlobAlreadyRecovered(root) {
+		if d.IsColumnOverHalf(block.GetSlot(), root) {
 			if err := d.TryScheduleRecover(block.GetSlot(), root); err != nil {
 				log.Debug("failed to schedule recover", "err", err)
 			}
@@ -843,19 +853,17 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 		close(resultChan)
 	}()
 
-	// check if the column data is over half at the same time because we might also receive the column sidecars from other peers
-	halfCheckTicker := time.NewTicker(500 * time.Millisecond)
-	defer halfCheckTicker.Stop()
+	availabilityCheckTicker := time.NewTicker(500 * time.Millisecond)
+	defer availabilityCheckTicker.Stop()
 mainloop:
 	for {
 		select {
 		case <-ctx.Done():
 			break mainloop
-		case <-halfCheckTicker.C:
+		case <-availabilityCheckTicker.C:
 			for _, entry := range req.remainingEntries() {
 				if needToRecoverBlobs {
-					if d.IsColumnOverHalf(entry.slot, entry.blockRoot) || d.IsBlobAlreadyRecovered(entry.blockRoot) {
-						// no need to schedule recovery for this block because someone else will do it
+					if d.IsColumnOverHalf(entry.slot, entry.blockRoot) {
 						req.removeBlock(entry.slot, entry.blockRoot)
 					}
 				} else {
@@ -897,9 +905,7 @@ mainloop:
 					}
 					isGloasSidecar := sidecar.Version() >= clparams.GloasVersion
 					defer func() {
-						// check if need to schedule recover whenever we download a column sidecar
-						if needToRecoverBlobs &&
-							(d.IsColumnOverHalf(slot, blockRoot) || d.IsBlobAlreadyRecovered(blockRoot)) {
+						if needToRecoverBlobs && d.IsColumnOverHalf(slot, blockRoot) {
 							req.removeBlock(slot, blockRoot)
 							d.TryScheduleRecover(slot, blockRoot)
 						}
