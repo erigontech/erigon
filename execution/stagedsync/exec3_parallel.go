@@ -2420,13 +2420,23 @@ func (be *blockExecutor) deliver(ctx context.Context, ch chan<- applyResult, r a
 
 // blockStateCacheOf returns the per-block state cache carried by the block's
 // tasks, so the apply loop reads the entries the workers already filled.
+//
+// A block that straddles lastFrozenTxNum keeps its own cache: its historic
+// tasks are applied through HistoryReaderV3, whose block-cache tier falls back
+// to the committed (pre-block latest) view, so entries filled by the block's
+// non-historic workers would answer reads that must resolve as of an earlier
+// txNum.
 func blockStateCacheOf(tasks []exec.Task) *state.BlockStateCache {
+	var shared *state.BlockStateCache
 	for _, t := range tasks {
-		if cache := t.GetBlockStateCache(); cache != nil {
-			return cache
+		if t.IsHistoric() {
+			return nil
+		}
+		if shared == nil {
+			shared = t.GetBlockStateCache()
 		}
 	}
-	return nil
+	return shared
 }
 
 func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted, blockStateCache *state.BlockStateCache) *blockExecutor {
