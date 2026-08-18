@@ -34,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -45,7 +46,23 @@ import (
 
 var ErrNotSupported = errors.New("operation not supported in engine API mode")
 
-const DefaultRPCHTTPTimeout = 30 * time.Second
+const (
+	DefaultRPCHTTPTimeout          = 30 * time.Second
+	remoteForkChoiceTimeoutMessage = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
+)
+
+func markRemoteRequestAbandoned(ctx context.Context, err error) error {
+	if err == nil || errors.Is(err, execmodule.ErrRequestAbandoned) {
+		return err
+	}
+	ctxErr := ctx.Err()
+	// HTTP transport errors retain context identity, while JSON-RPC application errors do not.
+	// Requiring both signals keeps an engine-side timeout classified as an engine error.
+	if ctxErr != nil && errors.Is(err, ctxErr) {
+		return execmodule.RequestAbandonedError(err, nil)
+	}
+	return err
+}
 
 func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 	if payloadStatus == nil {
@@ -104,6 +121,13 @@ func NewExecutionClientEngineRPC(jwtSecret []byte, addr string, port int, beacon
 
 func (cc *ExecutionClientEngine) isLocal() bool {
 	return cc.chainRW != nil
+}
+
+func (cc *ExecutionClientEngine) markRequestAbandoned(ctx context.Context, err error) error {
+	if cc.isLocal() {
+		return err
+	}
+	return markRemoteRequestAbandoned(ctx, err)
 }
 
 func (cc *ExecutionClientEngine) SetBeaconChainConfig(beaconCfg *clparams.BeaconChainConfig) {
@@ -193,10 +217,12 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes, nil)
 	}
 	if err != nil {
-		if err.Error() == errContextExceeded {
+		// A remote EL exposes its internal FCU timeout as an application error. It means the update
+		// continues asynchronously, not that the caller abandoned the request.
+		if err.Error() == remoteForkChoiceTimeoutMessage {
 			return nil, nil
 		}
-		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
+		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", cc.markRequestAbandoned(ctx, err))
 	}
 
 	if resp.PayloadId == nil {
@@ -337,28 +363,11 @@ func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byt
 }
 
 func (cc *ExecutionClientEngine) getAssembledBlockV3(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	if cc.beaconCfg == nil {
-		return nil, nil, nil, nil, errors.New("beaconCfg not set — call SetBeaconChainConfig before GetAssembledBlock")
-	}
 	resp, err := cc.engine.GetPayloadV3(ctx, hexutil.Bytes(id))
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV3 failed: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV3 failed: %w", cc.markRequestAbandoned(ctx, err))
 	}
-	if resp.ExecutionPayload == nil {
-		return nil, nil, nil, nil, errors.New("GetPayloadV3 returned nil execution payload")
-	}
-
-	block, err := executionPayloadToEth1Block(resp.ExecutionPayload, version, cc.beaconCfg)
-	if err != nil {
-		return nil, nil, nil, nil, err
-	}
-
-	var blockValue *big.Int
-	if resp.BlockValue != nil {
-		blockValue = resp.BlockValue.ToInt()
-	}
-
-	return block, resp.BlobsBundle, nil, blockValue, nil
+	return cc.getAssembledBlockFromResponse(resp, version)
 }
 
 // getAssembledBlockFromResponse converts an Engine response into Caplin's
@@ -397,7 +406,7 @@ func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_type
 func (cc *ExecutionClientEngine) getAssembledBlockV4(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	resp, err := cc.engine.GetPayloadV4(ctx, hexutil.Bytes(id))
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV4 failed: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV4 failed: %w", cc.markRequestAbandoned(ctx, err))
 	}
 	return cc.getAssembledBlockFromResponse(resp, version)
 }
@@ -405,7 +414,7 @@ func (cc *ExecutionClientEngine) getAssembledBlockV4(ctx context.Context, id []b
 func (cc *ExecutionClientEngine) getAssembledBlockV5(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	resp, err := cc.engine.GetPayloadV5(ctx, hexutil.Bytes(id))
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV5 failed: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV5 failed: %w", cc.markRequestAbandoned(ctx, err))
 	}
 	return cc.getAssembledBlockFromResponse(resp, version)
 }
@@ -413,7 +422,7 @@ func (cc *ExecutionClientEngine) getAssembledBlockV5(ctx context.Context, id []b
 func (cc *ExecutionClientEngine) getAssembledBlockV6(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	resp, err := cc.engine.GetPayloadV6(ctx, hexutil.Bytes(id))
 	if err != nil {
-		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV6 failed: %w", err)
+		return nil, nil, nil, nil, fmt.Errorf("engine GetPayloadV6 failed: %w", cc.markRequestAbandoned(ctx, err))
 	}
 	return cc.getAssembledBlockFromResponse(resp, version)
 }

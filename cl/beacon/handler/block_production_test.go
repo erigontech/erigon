@@ -21,12 +21,16 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"sync"
 	"testing"
+	"testing/synctest"
 	"time"
 
+	"github.com/go-chi/chi/v5"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -43,6 +47,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -387,13 +392,13 @@ func TestPollAssembledPayloadReturnsReadyPayload(t *testing.T) {
 	window := blockBuilderWindow{firstGetAt: now.Add(-time.Millisecond), pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+	result, err := pollAssembledPayload(context.Background(), window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return want, nil, nil, nil, nil
 		})
-	require.True(t, ok)
-	require.Same(t, want, payload)
+	require.NoError(t, err)
+	require.Same(t, want, result.payload)
 	require.Equal(t, 1, calls)
 }
 
@@ -402,7 +407,7 @@ func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+	result, err := pollAssembledPayload(context.Background(), window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls < 3 {
@@ -410,8 +415,8 @@ func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
 			}
 			return want, nil, nil, nil, nil
 		})
-	require.True(t, ok)
-	require.Same(t, want, payload)
+	require.NoError(t, err)
+	require.Same(t, want, result.payload)
 	require.Equal(t, 3, calls)
 }
 
@@ -420,7 +425,7 @@ func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+	result, err := pollAssembledPayload(context.Background(), window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls == 1 {
@@ -428,8 +433,8 @@ func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
 			}
 			return want, nil, nil, nil, nil
 		})
-	require.True(t, ok)
-	require.Same(t, want, payload)
+	require.NoError(t, err)
+	require.Same(t, want, result.payload)
 	require.Equal(t, 2, calls)
 }
 
@@ -437,13 +442,13 @@ func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
 	calls := 0
-	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+	result, err := pollAssembledPayload(context.Background(), window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
 		})
-	require.False(t, ok)
-	require.Nil(t, payload)
+	require.NoError(t, err)
+	require.Nil(t, result)
 	require.NotZero(t, calls)
 }
 
@@ -451,12 +456,13 @@ func TestPollAssembledPayloadLateRequestGrabsOnce(t *testing.T) {
 	past := time.Now().Add(-time.Second)
 	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
 	calls := 0
-	_, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+	result, err := pollAssembledPayload(context.Background(), window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
 		})
-	require.False(t, ok)
+	require.NoError(t, err)
+	require.Nil(t, result)
 	require.Equal(t, 1, calls)
 }
 
@@ -466,13 +472,265 @@ func TestPollAssembledPayloadReturnsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls := 0
-	_, _, _, _, ok := pollAssembledPayload(ctx, window, time.Millisecond,
+	result, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
 		})
-	require.False(t, ok)
+	require.Nil(t, result)
+	require.ErrorIs(t, err, execmodule.ErrRequestAbandoned)
+	require.ErrorIs(t, err, context.Canceled)
 	require.Zero(t, calls)
+}
+
+func TestPollAssembledPayloadPrefersCancellationOverExpiredPollingWindow(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	past := time.Now().Add(-time.Second)
+	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
+
+	for range 100 {
+		result, err := pollAssembledPayload(ctx, window, time.Hour,
+			func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+				return nil, nil, nil, nil, nil
+			})
+
+		require.Nil(t, result)
+		require.ErrorIs(t, err, execmodule.ErrRequestAbandoned)
+		require.ErrorIs(t, err, context.Canceled)
+	}
+}
+
+type getPayloadErrorLogCounter struct{ errors int }
+
+func (h *getPayloadErrorLogCounter) Log(r *log.Record) error {
+	if r.Lvl <= log.LvlError && r.Msg == "BlockProduction: Failed to get payload" {
+		h.errors++
+	}
+	return nil
+}
+
+func (h *getPayloadErrorLogCounter) Enabled(context.Context, log.Lvl) bool { return true }
+
+func captureGetPayloadErrors(t *testing.T) *getPayloadErrorLogCounter {
+	t.Helper()
+	rec := &getPayloadErrorLogCounter{}
+	prevHandler := log.Root().GetHandler()
+	log.Root().SetHandler(rec)
+	t.Cleanup(func() { log.Root().SetHandler(prevHandler) })
+	return rec
+}
+
+func TestPollAssembledPayloadDoesNotReportCancellationAsError(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now.Add(-time.Millisecond), pollUntil: now.Add(time.Hour)}
+	ctx, cancel := context.WithCancel(context.Background())
+
+	rec := captureGetPayloadErrors(t)
+
+	calls := 0
+	result, err := pollAssembledPayload(ctx, window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			if calls == 1 {
+				return nil, nil, nil, nil, errors.New("EL hiccup")
+			}
+			cancel()
+			return nil, nil, nil, nil, fmt.Errorf("%w: %w", execmodule.ErrRequestAbandoned, ctx.Err())
+		})
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, execmodule.ErrRequestAbandoned)
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 2, calls, "polling must stop once the request is cancelled")
+	require.Equal(t, 1, rec.errors, "only the failure before the cancellation is a node fault")
+}
+
+func TestPollAssembledPayloadReportsFailureAfterCancellation(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now.Add(-time.Millisecond), pollUntil: now.Add(time.Hour)}
+	ctx, cancel := context.WithCancel(context.Background())
+	failure := fmt.Errorf("EL disconnected: %w", context.Canceled)
+
+	rec := captureGetPayloadErrors(t)
+
+	calls := 0
+	result, err := pollAssembledPayload(ctx, window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			cancel()
+			return nil, nil, nil, nil, failure
+		})
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, failure)
+	require.ErrorIs(t, err, context.Canceled)
+	require.NotErrorIs(t, err, execmodule.ErrRequestAbandoned)
+	require.Equal(t, 1, calls)
+	require.Equal(t, 1, rec.errors, "an EL failure with its own context error must remain visible")
+}
+
+func TestPollAssembledPayloadDoesNotReportBusyAsError(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now.Add(-time.Millisecond), pollUntil: now.Add(5 * time.Millisecond)}
+	rec := captureGetPayloadErrors(t)
+
+	result, err := pollAssembledPayload(context.Background(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			return nil, nil, nil, nil, execmodule.ErrBusy
+		})
+
+	require.Nil(t, result)
+	require.ErrorIs(t, err, execmodule.ErrBusy)
+	require.Zero(t, rec.errors)
+}
+
+func TestPollAssembledPayloadDoesNotReportStaleBusy(t *testing.T) {
+	synctest.Test(t, func(t *testing.T) {
+		now := time.Now()
+		window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
+
+		calls := 0
+		result, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+			func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+				calls++
+				if calls == 1 {
+					return nil, nil, nil, nil, execmodule.ErrBusy
+				}
+				return nil, nil, nil, nil, nil
+			})
+
+		require.Nil(t, result)
+		require.NoError(t, err)
+		require.Greater(t, calls, 1)
+	})
+}
+
+type abandonedBlockProductionEngine struct {
+	execution_client.ExecutionEngine
+}
+
+func (abandonedBlockProductionEngine) ForkChoiceUpdate(
+	context.Context,
+	common.Hash,
+	common.Hash,
+	common.Hash,
+	*engine_types.PayloadAttributes,
+	clparams.StateVersion,
+) ([]byte, error) {
+	return nil, execmodule.RequestAbandonedError(context.Canceled, execmodule.ErrBusy)
+}
+
+type blockProductionFailureLogCounter struct {
+	mu                     sync.Mutex
+	failures               int
+	busyDiagnostics        int
+	abandonmentDiagnostics int
+	unavailableWarnings    int
+}
+
+func (h *blockProductionFailureLogCounter) Log(r *log.Record) error {
+	if r.Msg == "Block production request ended while execution module was busy" {
+		h.mu.Lock()
+		h.busyDiagnostics++
+		h.mu.Unlock()
+	}
+	if r.Msg == "Block production request abandoned" {
+		h.mu.Lock()
+		h.abandonmentDiagnostics++
+		h.mu.Unlock()
+	}
+	if r.Lvl == log.LvlWarn && r.Msg == "Execution payload unavailable during block production" {
+		h.mu.Lock()
+		h.unavailableWarnings++
+		h.mu.Unlock()
+	}
+	if r.Lvl > log.LvlWarn {
+		return nil
+	}
+	switch r.Msg {
+	case "BlockProduction: Failed to get payload id", "Failed to produce beacon body", "Failed to produce block":
+		h.mu.Lock()
+		h.failures++
+		h.mu.Unlock()
+	}
+	return nil
+}
+
+func (h *blockProductionFailureLogCounter) Enabled(context.Context, log.Lvl) bool { return true }
+
+func (h *blockProductionFailureLogCounter) count() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.failures
+}
+
+func (h *blockProductionFailureLogCounter) busyDiagnosticCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.busyDiagnostics
+}
+
+func (h *blockProductionFailureLogCounter) abandonmentDiagnosticCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.abandonmentDiagnostics
+}
+
+func (h *blockProductionFailureLogCounter) unavailableWarningCount() int {
+	h.mu.Lock()
+	defer h.mu.Unlock()
+	return h.unavailableWarnings
+}
+
+func TestLogBlockProductionFailureWarnsWhenPayloadIsUnavailable(t *testing.T) {
+	rec := &blockProductionFailureLogCounter{}
+	previousHandler := log.Root().GetHandler()
+	log.Root().SetHandler(rec)
+	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
+
+	logBlockProductionFailure(errExecutionPayloadUnavailable, 1)
+
+	require.Zero(t, rec.count())
+	require.Equal(t, 1, rec.unavailableWarningCount())
+}
+
+func TestLogBlockProductionFailureRecordsRequestAbandonmentAtDebug(t *testing.T) {
+	rec := &blockProductionFailureLogCounter{}
+	previousHandler := log.Root().GetHandler()
+	log.Root().SetHandler(rec)
+	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
+
+	logBlockProductionFailure(execmodule.RequestAbandonedError(context.Canceled, nil), 1)
+
+	require.Zero(t, rec.count())
+	require.Equal(t, 1, rec.abandonmentDiagnosticCount())
+}
+
+func TestBlockProductionDoesNotReportRequestAbandonmentAsFailure(t *testing.T) {
+	_, blocks, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	h.engine = abandonedBlockProductionEngine{}
+
+	rec := &blockProductionFailureLogCounter{}
+	previousHandler := log.Root().GetHandler()
+	log.Root().SetHandler(rec)
+	t.Cleanup(func() { log.Root().SetHandler(previousHandler) })
+
+	targetSlot := blocks[len(blocks)-1].Block.Slot + 1
+	url := fmt.Sprintf("/?randao_reveal=%s&skip_randao_verification&graffiti=0x00", hexutil.Encode(make([]byte, 96)))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodGet, url, nil)
+	routeContext := chi.NewRouteContext()
+	routeContext.URLParams.Add("slot", fmt.Sprint(targetSlot))
+	req = req.WithContext(context.WithValue(req.Context(), chi.RouteCtxKey, routeContext))
+
+	response, err := h.GetEthV3ValidatorBlock(httptest.NewRecorder(), req)
+
+	require.Nil(t, response)
+	require.ErrorIs(t, err, execmodule.ErrRequestAbandoned)
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, execmodule.ErrBusy)
+	require.Zero(t, rec.count())
+	require.Equal(t, 1, rec.busyDiagnosticCount())
 }
 
 func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T) {
