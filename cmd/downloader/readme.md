@@ -95,6 +95,9 @@ downloader torrent_hashes --datadir=<your_datadir> --chain=<chain> --diff
 downloader --downloader.api.addr=127.0.0.1:9093 --datadir=<your_datadir>
 ```
 
+The retire command also indexes Caplin state segments that are missing an index
+and removes fully covered Caplin state overlaps before the files are seeded.
+
 Additional info:
 
 ```shell
@@ -256,4 +259,3 @@ downloader --datadir=<your> --chain=mainnet --webseed=<webseed_url> --seedbox
 ```
 
 ---------------
-

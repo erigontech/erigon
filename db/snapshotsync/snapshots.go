@@ -108,7 +108,7 @@ func NoGaps[T SortedRange](in []T) (out []T, missingRanges []Range) {
 	return out, missingRanges
 }
 
-func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
+func findOverlaps(in []snaptype.FileInfo) (res []snaptype.FileInfo, overlapped []snaptype.FileInfo) {
 	for i := 0; i < len(in); i++ {
 		f := in[i]
 		iFrom, iTo := f.GetRange()
@@ -126,6 +126,16 @@ func findOverlaps[T SortedRange](in []T) (res []T, overlapped []T) {
 			}
 			if jFrom == jTo {
 				overlapped = append(overlapped, f2)
+				continue
+			}
+			if iFrom == jFrom && iTo == jTo {
+				if f.Version.Less(f2.Version) {
+					overlapped = append(overlapped, f)
+					f = f2
+					iFrom, iTo = f.GetRange()
+				} else {
+					overlapped = append(overlapped, f2)
+				}
 				continue
 			}
 			if jFrom > iFrom && jTo > iTo {
@@ -424,17 +434,33 @@ func (s *DirtySegment) openIdx(dir string, dirEntries []string) (err error) {
 		if s.indexes[i] != nil {
 			continue
 		}
-		fPathMask, err := version.ReplaceVersionWithMask(fileName)
-		if err != nil {
-			return fmt.Errorf("[open index] can't replace with mask in file %s: %w", fileName, err)
-		}
-
 		var fPath string
 		var ok bool
+		var err error
+		exactFileName := fileName
+		indexes := s.Type().Indexes()
+		if i < len(indexes) {
+			exactFileName = snaptype.IdxFileName(s.version, s.from, s.to, indexes[i].Name)
+		}
+		exactPath := filepath.Join(dir, exactFileName)
 		if dirEntries != nil {
-			fPath, _, ok, err = version.MatchVersionedFile(fPathMask, dirEntries, dir)
-		} else {
-			fPath, _, ok, err = version.FindFilesWithVersionsByPattern(filepath.Join(dir, fPathMask))
+			if slices.Contains(dirEntries, exactFileName) {
+				fPath, ok = exactPath, true
+			}
+		} else if _, err := os.Stat(exactPath); err == nil {
+			fPath, ok = exactPath, true
+		}
+		if !ok {
+			var fPathMask string
+			fPathMask, err = version.ReplaceVersionWithMask(fileName)
+			if err != nil {
+				return fmt.Errorf("[open index] can't replace with mask in file %s: %w", fileName, err)
+			}
+			if dirEntries != nil {
+				fPath, _, ok, err = version.MatchVersionedFile(fPathMask, dirEntries, dir)
+			} else {
+				fPath, _, ok, err = version.FindFilesWithVersionsByPattern(filepath.Join(dir, fPathMask))
+			}
 		}
 		if err != nil {
 			return fmt.Errorf("%w, fileName: %s", err, fileName)

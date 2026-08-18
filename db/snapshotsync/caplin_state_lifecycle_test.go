@@ -23,6 +23,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	dir2 "github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -63,13 +64,23 @@ func TestCaplinStateViewPinsVisibleSegments(t *testing.T) {
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 
 	view := s.View()
-	defer view.Close()
-	require.Equal(t, []Range{{from: 0, to: 50_000}, {from: 50_000, to: 100_000}},
-		caplinStateVisibleRanges(view.VisibleSegments(table)))
+	visible, ok := view.VisibleSegment(0, table)
+	require.True(t, ok)
+	getter := visible.Src().MakeGetter()
+	getter.Reset(0)
+	require.True(t, getter.HasNext())
+	value, _ := getter.Next(nil)
+	require.Equal(t, []byte{1}, value)
 
 	require.NoError(t, s.OpenList([]string{filepath.Base(firstSeg)}, false))
 	require.Equal(t, []Range{{from: 0, to: 50_000}, {from: 50_000, to: 100_000}},
 		caplinStateVisibleRanges(view.VisibleSegments(table)))
+	getter = visible.Src().MakeGetter()
+	getter.Reset(0)
+	require.True(t, getter.HasNext())
+	value, _ = getter.Next(nil)
+	require.Equal(t, []byte{1}, value)
+	view.Close()
 }
 
 func TestCaplinStateOpenListRecalculateRace(t *testing.T) {
@@ -141,6 +152,43 @@ func TestCaplinStateBlocksAvailableZeroWhenTableHasNoSegments(t *testing.T) {
 
 	s := openTestCaplinStateSnapshotsWithTables(t, dirs, tables, logger)
 	require.Equal(t, uint64(0), s.BlocksAvailable())
+}
+
+func TestCaplinStateBlocksAvailableAcrossGap(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.BlockRoot
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.Equal(t, uint64(149_999), s.BlocksAvailable())
+}
+
+func TestCaplinStateBlocksAvailableExcludesUnindexedTail(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.BlockRoot
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	_, unindexedIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 50_000, 100_000, logger)
+	require.NoError(t, dir2.RemoveFile(unindexedIdx))
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.Equal(t, uint64(50_000), s.BlocksAvailable())
+}
+
+func TestCaplinStateSegmentsMaxUsesHighestSegment(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.BlockRoot
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 200_000, logger)
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.Equal(t, uint64(199_999), s.SegmentsMax())
 }
 
 func TestCaplinStateBlocksAvailableMainnetPublishedSubset(t *testing.T) {
