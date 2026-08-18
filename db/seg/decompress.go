@@ -21,6 +21,7 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
+	"math"
 	"os"
 	"path/filepath"
 	"sort"
@@ -36,13 +37,16 @@ import (
 	"github.com/erigontech/erigon/common/mmap"
 )
 
-type word []byte // plain text word associated with code from dictionary
+// patternRef locates one pattern inside patternArena.patternData.
+type patternRef struct {
+	off, len uint32
+}
 
 type codeword struct {
-	pattern word          // Pattern corresponding to entries
-	ptr     *patternTable // pointer to deeper level tables
-	code    uint16        // code associated with that word
-	len     byte          // Number of bits in the codes
+	pat  patternRef // pattern bytes, in patternArena.patternData
+	sub  uint32     // sub-table index in patternArena.tables; set when len == 0
+	code uint16     // code associated with that word
+	len  byte       // Number of bits in the codes
 }
 
 type patternTable struct {
@@ -81,29 +85,31 @@ type posTable struct {
 // consolidating O(N) individual heap allocations into 3 large slabs.
 // This reduces GC pressure when many decompressors are open simultaneously.
 type patternArena struct {
-	codewords []codeword
-	tables    []patternTable
-	slots     []*codeword // backing store for all patternTable.patterns slices
-	cwIdx     int
-	tableIdx  int
-	slotIdx   int
+	codewords   []codeword
+	tables      []patternTable
+	slots       []*codeword // backing store for all patternTable.patterns slices
+	patternData []byte      // heap copy of every pattern, addressed by codeword.pat
+	cwIdx       int
+	tableIdx    int
+	slotIdx     int
 }
 
-func (a *patternArena) allocCW(code uint16, pattern word, codeLen byte, ptr *patternTable) *codeword {
+func (a *patternArena) allocCW(code uint16, pat patternRef, codeLen byte, sub uint32) *codeword {
 	cw := &a.codewords[a.cwIdx]
 	a.cwIdx++
-	cw.code, cw.pattern, cw.len, cw.ptr = code, pattern, codeLen, ptr
+	cw.code, cw.pat, cw.len, cw.sub = code, pat, codeLen, sub
 	return cw
 }
 
-func (a *patternArena) allocTable(bitLen int) *patternTable {
+func (a *patternArena) allocTable(bitLen int) (uint32, *patternTable) {
 	sz := 1 << bitLen
-	t := &a.tables[a.tableIdx]
+	idx := a.tableIdx
+	t := &a.tables[idx]
 	a.tableIdx++
 	t.bitLen = bitLen
 	t.patterns = a.slots[a.slotIdx : a.slotIdx+sz]
 	a.slotIdx += sz
-	return t
+	return uint32(idx), t
 }
 
 // posArena pre-allocates all storage for a decompressor's Huffman position table
@@ -298,14 +304,20 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 			Reason: fmt.Sprintf("invalid patterns dictSize=%s while file size is just %s",
 				datasize.ByteSize(dictSize).HR(), datasize.ByteSize(len(d.data)).HR())}
 	}
+	if dictSize > math.MaxUint32 { // patternRef addresses patterns with uint32 offsets
+		return nil, &ErrCompressedFileCorrupted{
+			FileName: fName,
+			Reason:   fmt.Sprintf("patterns dictSize=%s exceeds 4GB", datasize.ByteSize(dictSize).HR())}
+	}
 
 	// todo awskii: want to move dictionary reading to separate function?
 	data := d.data[pos : pos+dictSize]
 
 	var depths []uint64
-	var patterns [][]byte
+	var patterns []patternRef
 	var dictPos uint64
 	var patternMaxDepth uint64
+	var patternBytes uint64
 
 	for dictPos < dictSize {
 		depth, ns := binary.Uvarint(data[dictPos:])
@@ -321,8 +333,8 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		dictPos += uint64(ns)
 		l, n := binary.Uvarint(data[dictPos:])
 		dictPos += uint64(n)
-		patterns = append(patterns, data[dictPos:dictPos+l])
-		//fmt.Printf("depth = %d, pattern = [%x]\n", depth, data[dictPos:dictPos+l])
+		patterns = append(patterns, patternRef{off: uint32(dictPos), len: uint32(l)})
+		patternBytes += l
 		dictPos += l
 	}
 	d.dictWords = len(patterns)
@@ -337,12 +349,20 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		// Pre-count exact arena sizes, then build with a single set of large allocations
 		// instead of O(N) individual ones — reduces GC pressure when many files are open.
 		_, extraSlots, numSubTables := countHuffmanArena(depths, 0, 0, patternMaxDepth)
-		d.patArena = &patternArena{
-			codewords: make([]codeword, len(patterns)+numSubTables), // terminals + routing nodes
-			tables:    make([]patternTable, 1+numSubTables),
-			slots:     make([]*codeword, (1<<bitLen)+extraSlots),
+		patternData := make([]byte, patternBytes)
+		var slabOff uint32
+		for i := range patterns {
+			src := data[patterns[i].off : patterns[i].off+patterns[i].len]
+			slabOff += uint32(copy(patternData[slabOff:], src))
+			patterns[i].off = slabOff - patterns[i].len
 		}
-		d.dict = d.patArena.allocTable(bitLen)
+		d.patArena = &patternArena{
+			codewords:   make([]codeword, len(patterns)+numSubTables), // terminals + routing nodes
+			tables:      make([]patternTable, 1+numSubTables),
+			slots:       make([]*codeword, (1<<bitLen)+extraSlots),
+			patternData: patternData,
+		}
+		_, d.dict = d.patArena.allocTable(bitLen)
 		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth, d.patArena); err != nil {
 			return nil, &ErrCompressedFileCorrupted{FileName: fName, Reason: err.Error()}
 		}
@@ -417,7 +437,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	return d, nil
 }
 
-func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [][]byte, code uint16, bits int, depth uint64, maxDepth uint64, arena *patternArena) (int, error) {
+func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns []patternRef, code uint16, bits int, depth uint64, maxDepth uint64, arena *patternArena) (int, error) {
 	if maxDepth > maxAllowedDepth {
 		return 0, fmt.Errorf("buildCondensedPatternTable: maxDepth=%d is too deep", maxDepth)
 	}
@@ -427,7 +447,7 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 	}
 	if depth == depths[0] {
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
-		cw := arena.allocCW(code, word(patterns[0]), byte(bits), nil)
+		cw := arena.allocCW(code, patterns[0], byte(bits), 0)
 		table.insertWord(cw)
 		return 1, nil
 	}
@@ -438,8 +458,8 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 		} else {
 			bitLen = int(maxDepth)
 		}
-		subTable := arena.allocTable(bitLen)
-		cw := arena.allocCW(code, nil, 0, subTable)
+		subIdx, subTable := arena.allocTable(bitLen)
+		cw := arena.allocCW(code, patternRef{}, 0, subIdx)
 		table.insertWord(cw)
 		return buildCondensedPatternTable(subTable, depths, patterns, 0, 0, depth, maxDepth, arena)
 	}
@@ -508,15 +528,15 @@ func (d *Decompressor) SerializedTotalDictSize() uint64 { return d.serializedDic
 func (d *Decompressor) DictWords() int                  { return d.dictWords }
 func (d *Decompressor) DictLens() int                   { return d.dictLens }
 
-// DictMemSize returns the in-memory size of the decoded Huffman table structures
-// (arena-allocated codeword/table/slot slabs). Pattern bytes are subslices of the
-// mmap'd file data and are not included.
+// DictMemSize returns the in-memory size of the decoded dictionary: the
+// arena-allocated Huffman table slabs plus the pattern bytes copied off the mapping.
 func (d *Decompressor) DictMemSize() uint64 {
 	var total uint64
 	if d.patArena != nil {
 		total += uint64(cap(d.patArena.codewords)) * uint64(unsafe.Sizeof(codeword{}))
 		total += uint64(cap(d.patArena.tables)) * uint64(unsafe.Sizeof(patternTable{}))
 		total += uint64(cap(d.patArena.slots)) * uint64(unsafe.Sizeof((*codeword)(nil)))
+		total += uint64(cap(d.patArena.patternData))
 	}
 	if d.posArena != nil {
 		total += uint64(cap(d.posArena.tables)) * uint64(unsafe.Sizeof(posTable{}))
@@ -721,6 +741,10 @@ func (v *SequentialView) MakeGetter() *Getter {
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
 	}
+	if v.d.patArena != nil {
+		g.patTables = v.d.patArena.tables
+		g.patternData = v.d.patArena.patternData
+	}
 	if v.d.posArena != nil {
 		g.posTables = v.d.posArena.tables
 	}
@@ -748,7 +772,9 @@ type Getter struct {
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posTables     []posTable // posArena.tables; only used for the subtable path
+	posTables     []posTable     // posArena.tables; only used for the subtable path
+	patTables     []patternTable // patArena.tables; only used for the subtable path
+	patternData   []byte         // patArena.patternData; backs every pattern returned
 	patternDict   *patternTable
 	d             *Decompressor
 	fName         string
@@ -844,7 +870,8 @@ func (g *Getter) nextPosSubtable(tableIdx uint32) uint64 {
 func (g *Getter) nextPattern() []byte {
 	table := g.patternDict
 	if table.bitLen == 0 {
-		return table.patterns[0].pattern
+		cw := table.patterns[0]
+		return g.patternData[cw.pat.off : cw.pat.off+cw.pat.len]
 	}
 
 	data := g.data
@@ -862,7 +889,7 @@ func (g *Getter) nextPattern() []byte {
 
 		cw := table.patterns[code]
 		if cw.len == 0 {
-			table = cw.ptr
+			table = &g.patTables[cw.sub]
 			dataBit += 9
 		} else {
 			dataBit += uint(cw.len)
@@ -872,7 +899,7 @@ func (g *Getter) nextPattern() []byte {
 		if cw.len != 0 {
 			g.dataP = dataP
 			g.dataBit = int(dataBit)
-			return cw.pattern
+			return g.patternData[cw.pat.off : cw.pat.off+cw.pat.len]
 		}
 	}
 }
@@ -896,6 +923,10 @@ func (d *Decompressor) MakeGetter() *Getter {
 		dataOffset:  uint64(d.size - int64(len(data))),
 		patternDict: d.dict,
 		fName:       d.FileName(),
+	}
+	if d.patArena != nil {
+		g.patTables = d.patArena.tables
+		g.patternData = d.patArena.patternData
 	}
 	if d.posArena != nil {
 		g.posTables = d.posArena.tables
