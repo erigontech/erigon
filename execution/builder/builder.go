@@ -107,7 +107,7 @@ func (b *Builder) PendingBlockCh() chan *types.Block {
 //
 // Everything that can block runs under ctx, so discarding the payload releases the read view and
 // unblocks the transaction provider instead of leaving them to finish on their own.
-func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomic.Bool, acknowledgeStop func()) (result *types.BlockWithReceipts, err error) {
+func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (result *types.BlockWithReceipts, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
 			err = fmt.Errorf("%+v, trace: %s", rec, dbg.Stack())
@@ -169,7 +169,7 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 	if param.CustomTxnProvider != nil {
 		txnProvider = param.CustomTxnProvider
 	}
-	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, acknowledgeStop, param.PayloadId, txnProvider, b.blockReader)
+	execCfg := StageBuilderExecCfg(state, b.notifier, b.chainConfig, b.engine, b.vmConfig, b.tmpdir, interrupt, param.PayloadId, txnProvider, b.blockReader)
 	finishCfg := StageBuilderFinishCfg(b.chainConfig, b.engine, state, b.sealCancel, b.blockReader, b.latestBlockBuiltStore)
 
 	if err := createBlock(ctx, sd, compositeTx, executionAt, createCfg, b.logger); err != nil {

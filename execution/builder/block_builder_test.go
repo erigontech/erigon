@@ -33,10 +33,10 @@ func TestBlockBuilderRunningHasNotFailed(t *testing.T) {
 
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
-	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		<-release
 		return nil, errors.New("builder stopped")
-	}, &Parameters{}, time.Minute)
+	}, &Parameters{}, time.Minute, time.Minute)
 
 	require.Never(t, b.Failed, 50*time.Millisecond, 5*time.Millisecond)
 }
@@ -44,12 +44,12 @@ func TestBlockBuilderRunningHasNotFailed(t *testing.T) {
 func TestBlockBuilderStoppedForItsPayloadHasNotFailed(t *testing.T) {
 	t.Parallel()
 
-	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
-	}, &Parameters{}, time.Minute)
+	}, &Parameters{}, time.Minute, time.Minute)
 
 	_, err := b.Stop(t.Context())
 	require.NoError(t, err)
@@ -62,9 +62,9 @@ func TestBlockBuilderStoppedForItsPayloadHasNotFailed(t *testing.T) {
 func TestBlockBuilderHasFailedOnceItErrors(t *testing.T) {
 	t.Parallel()
 
-	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		return nil, errors.New("build failed")
-	}, &Parameters{}, time.Minute)
+	}, &Parameters{}, time.Minute, time.Minute)
 
 	require.Eventually(t, b.Failed, time.Second, time.Millisecond)
 }
@@ -73,10 +73,10 @@ func TestBlockBuilderStaysReusableOnceItFillsTheBlock(t *testing.T) {
 	t.Parallel()
 
 	built := make(chan struct{})
-	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		defer close(built)
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
-	}, &Parameters{}, time.Minute)
+	}, &Parameters{}, time.Minute, time.Minute)
 
 	<-built
 	// A builder that ran out of room holds a complete payload, so its id is still worth reusing.
@@ -89,7 +89,7 @@ func TestBlockBuilderReleasesABuildThatIgnoresTheDeadline(t *testing.T) {
 	// A build parked in something that never reads the interrupt flag - a transaction provider
 	// waiting on a block, say - would hold its read view until the builder count forced it out.
 	released := make(chan error, 1)
-	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, _ *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		select {
 		case <-ctx.Done():
 			released <- ctx.Err()
@@ -97,7 +97,7 @@ func TestBlockBuilderReleasesABuildThatIgnoresTheDeadline(t *testing.T) {
 			released <- errors.New("build was never released")
 		}
 		return nil, errors.New("builder stopped")
-	}, &Parameters{}, time.Millisecond)
+	}, &Parameters{}, time.Millisecond, 10*time.Millisecond)
 
 	select {
 	case err := <-released:
@@ -113,37 +113,61 @@ func TestBlockBuilderStillHandsOverAPayloadWhenItsBudgetRunsOut(t *testing.T) {
 
 	// Reaching the budget asks for the block it has, which is what the budget is for. Only a build
 	// that will not answer is discarded.
-	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
-	}, &Parameters{}, time.Millisecond)
+	}, &Parameters{}, time.Millisecond, time.Minute)
 
 	require.Eventually(t, func() bool { return b.Block() != nil }, 5*time.Second, time.Millisecond)
 	require.False(t, b.Failed())
 }
 
-func TestBlockBuilderLetsFinalizationOutliveStopGrace(t *testing.T) {
+func TestBlockBuilderKeepsAHealthyBuildThatIsSlowToObserveTheStop(t *testing.T) {
 	t.Parallel()
 
-	finalizing := make(chan struct{})
-	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, interrupt *atomic.Bool, acknowledgeStop func()) (*types.BlockWithReceipts, error) {
-		for !interrupt.Load() {
-			time.Sleep(time.Millisecond)
-		}
-		acknowledgeStop()
-		close(finalizing)
+	// A single heavy transaction has no interrupt boundary, so a healthy build can be slow to
+	// answer the stop without being unresponsive. Discarding it destroys a payload a proposal may
+	// still collect.
+	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		select {
-		case <-time.After(buildStopGrace + 100*time.Millisecond):
-			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
 		case <-ctx.Done():
 			return nil, ctx.Err()
+		case <-time.After(500 * time.Millisecond):
+			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
 		}
-	}, &Parameters{}, time.Millisecond)
+	}, &Parameters{}, time.Millisecond, 5*time.Second)
 
-	<-finalizing
 	result, err := b.Stop(t.Context())
 	require.NoError(t, err)
 	require.NotNil(t, result)
+}
+
+func TestBlockBuilderReleasesABuildThatWedgesAfterObservingTheStop(t *testing.T) {
+	t.Parallel()
+
+	// Observing the stop earns the build its grace, not an unbounded stay: a wedge after the
+	// observation - in finalization, say - would otherwise pin the read view until the builder
+	// count forced it out.
+	released := make(chan error, 1)
+	NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		select {
+		case <-ctx.Done():
+			released <- ctx.Err()
+		case <-time.After(time.Minute):
+			released <- errors.New("build was never released")
+		}
+		return nil, errors.New("builder stopped")
+	}, &Parameters{}, time.Millisecond, 50*time.Millisecond)
+
+	select {
+	case err := <-released:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(5 * time.Second):
+		t.Fatal("wedged build outlived its grace without being released")
+	}
 }

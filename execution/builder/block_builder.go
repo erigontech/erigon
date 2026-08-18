@@ -28,30 +28,29 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// buildStopGrace bounds how long a builder may ignore a stop request. Once acknowledged, its
-// packing tail and payload finalization are allowed to finish.
-const buildStopGrace = 500 * time.Millisecond
-
 // BlockBuilderFunc builds a payload. Its context ends when the payload is discarded, so anything
 // that can block - opening a read view, waiting on a transaction provider - has to honour it.
-// acknowledgeStop marks that the interrupt was observed or transaction packing has already ended.
-type BlockBuilderFunc func(ctx context.Context, param *Parameters, interrupt *atomic.Bool, acknowledgeStop func()) (*types.BlockWithReceipts, error)
+type BlockBuilderFunc func(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
 
 // BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining").
 //
 // It answers to two different requests. Interrupting asks for the block it has so far, which is how
 // a payload is collected. Discarding says the payload is not wanted at all, and cancels the work.
 type BlockBuilder struct {
-	interrupt        atomic.Bool
-	discard          context.CancelFunc
-	mu               sync.Mutex
-	done             chan struct{}
-	result           *types.BlockWithReceipts
-	err              error
-	stopAcknowledged bool
+	interrupt atomic.Bool
+	discarded atomic.Bool
+	discard   context.CancelFunc
+	mu        sync.Mutex
+	done      chan struct{}
+	result    *types.BlockWithReceipts
+	err       error
 }
 
-func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Parameters, maxBuildTime time.Duration) *BlockBuilder {
+// NewBlockBuilder starts a build. maxBuildTime is the budget after which the builder stops itself
+// and keeps the block it has; stopGrace is how long a stopped build may take to finish up - the
+// transaction in flight, the packing tail, payload finalization - before it is taken as stuck and
+// discarded.
+func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Parameters, maxBuildTime, stopGrace time.Duration) *BlockBuilder {
 	buildCtx, discard := context.WithCancel(ctx)
 	builder := &BlockBuilder{done: make(chan struct{}), discard: discard}
 
@@ -76,7 +75,7 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 
 		log.Info("Building block...")
 		t := time.Now()
-		result, err = build(buildCtx, param, &builder.interrupt, builder.acknowledgeStop)
+		result, err = build(buildCtx, param, &builder.interrupt)
 		if err != nil {
 			if buildCtx.Err() != nil {
 				log.Debug("Block builder discarded", "err", err)
@@ -97,17 +96,19 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 		case <-builder.done:
 			return
 		}
-		// Ask for the block it has, which is what the budget was for, but do not wait on it
-		// indefinitely: a build parked somewhere that never reads the flag would hold its read view
-		// until the builder count forced it out, which on a quiet node is a very long time.
+		// Ask for the block it has, which is what the budget was for. A build that has not answered
+		// by the end of the grace is parked in a wait that never reads the flag, and would hold its
+		// read view until the builder count forced it out, so it is discarded instead.
 		log.Warn("Stopping block builder due to max build time exceeded")
-		graceCtx, cancelGrace := context.WithTimeout(ctx, buildStopGrace)
+		graceCtx, cancelGrace := context.WithTimeout(ctx, stopGrace)
 		defer cancelGrace()
 		if _, err := builder.Stop(graceCtx); err != nil {
-			if builder.discardIfUnresponsive() {
-				log.Debug("Discarded block builder due to max build time exceeded")
-			} else {
-				log.Debug("Block builder acknowledged stop after max build time exceeded")
+			select {
+			case <-builder.done:
+				// The build ended within the grace with an error of its own, logged where it happened.
+			default:
+				builder.Discard()
+				log.Warn("Discarded unresponsive block builder due to max build time exceeded")
 			}
 			return
 		}
@@ -115,22 +116,6 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 	}()
 
 	return builder
-}
-
-func (b *BlockBuilder) acknowledgeStop() {
-	b.mu.Lock()
-	b.stopAcknowledged = true
-	b.mu.Unlock()
-}
-
-func (b *BlockBuilder) discardIfUnresponsive() bool {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-	if b.stopAcknowledged {
-		return false
-	}
-	b.discard()
-	return true
 }
 
 func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
@@ -147,13 +132,18 @@ func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, erro
 	return b.result, b.err
 }
 
-// Discard abandons the build and releases what it holds. A read view or a transaction provider
-// blocked on the builder's context returns at once instead of waiting out its own deadline, which
-// is the difference between an evicted builder freeing its resources now and freeing them a slot
-// from now.
+// Discard abandons the build and releases what it holds: a read view or a transaction provider
+// blocked on the builder's context returns at once instead of waiting out its own deadline.
 func (b *BlockBuilder) Discard() {
 	b.interrupt.Store(true)
+	b.discarded.Store(true)
 	b.discard()
+}
+
+// Discarded reports the payload was abandoned. The work may still be winding down, but nothing will
+// come of it, so a discarded builder reads as gone at once.
+func (b *BlockBuilder) Discarded() bool {
+	return b.discarded.Load()
 }
 
 // Failed reports whether the builder has finished and ended in an error, which a caller looking to

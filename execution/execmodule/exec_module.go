@@ -178,7 +178,7 @@ func (c *CacheView) HasStorage(address common.Address) (bool, error) {
 }
 
 type ExecModule struct {
-	bacgroundCtx context.Context
+	backgroundCtx context.Context
 	// Snapshots + MDBX
 	blockReader dbservices.FullBlockReader
 
@@ -276,7 +276,7 @@ func NewExecModule(
 		engine:                  engine,
 		balRegenerator:          bal.NewRegenerator(blockReader, engine, logger),
 		syncCfg:                 syncCfg,
-		bacgroundCtx:            ctx,
+		backgroundCtx:           ctx,
 		fcuBackgroundPrune:      fcuBackgroundPrune,
 		onlySnapDownloadOnStart: onlySnapDownloadOnStart,
 		stateCache:              domainCache,
@@ -409,7 +409,7 @@ func (e *ExecModule) suspendReadAhead(ctx context.Context) (func(), error) {
 func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.TemporalRwTx, header *types.Header, ensureReadAheadSuspended func() error) error {
 	currentHeader := header
 	for {
-		isCanonical, err := e.isCanonicalHash(e.bacgroundCtx, tx, currentHeader.Hash())
+		isCanonical, err := e.isCanonicalHash(e.backgroundCtx, tx, currentHeader.Hash())
 		if err != nil {
 			return err
 		}
@@ -417,7 +417,7 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 			break
 		}
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
-		currentHeader, err = e.getHeader(e.bacgroundCtx, tx, parentBlockHash, parentBlockNum)
+		currentHeader, err = e.getHeader(e.backgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
 			return err
 		}

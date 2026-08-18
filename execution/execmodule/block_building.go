@@ -60,6 +60,13 @@ func buildDuration(payloadTimestamp uint64, now time.Time, secondsPerSlot uint64
 	return min(max(d, slot/4), 2*slot)
 }
 
+// stopGraceDuration returns how long a builder that reached its budget may take to finish up - the
+// transaction in flight, the packing tail, payload finalization - before it is taken as stuck and
+// discarded.
+func stopGraceDuration(secondsPerSlot uint64) time.Duration {
+	return time.Duration(secondsPerSlot) * time.Second / 2
+}
+
 // sameBuildRequest reports whether a request is asking for the payload another one is already
 // building. A custom transaction provider is never treated as the same request: it is stateful and
 // hands its transactions over once, so a second request carrying one is not asking for what the
@@ -101,6 +108,10 @@ func (e *ExecModule) isIndexedFor(id uint64, entry *builderEntry) bool {
 // them would mean never evicting anything.
 func (e *ExecModule) isLiveProposalTarget(id uint64, entry *builderEntry, now time.Time) bool {
 	if !e.isIndexedFor(id, entry) {
+		return false
+	}
+	// A builder that can no longer produce is not worth protecting, however live its slot.
+	if entry.builder == nil || entry.builder.Failed() || entry.builder.Discarded() {
 		return false
 	}
 	// Compared as seconds rather than times, so an implausible timestamp wraps into "not live"
@@ -148,8 +159,12 @@ func (e *ExecModule) evictOldBuilders() {
 
 func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error) {
 	// Cancellation is checked first so an expired request reports why it stopped instead of
-	// masquerading as contention, which callers retry.
+	// looking like contention, which callers retry. The module's own context is checked too: a
+	// builder born after shutdown can only fail, yet its id would be handed out.
 	if err := ctx.Err(); err != nil {
+		return AssembleBlockResult{}, err
+	}
+	if err := e.backgroundCtx.Err(); err != nil {
 		return AssembleBlockResult{}, err
 	}
 	if !e.semaphore.TryAcquire(1) {
@@ -162,9 +177,11 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	}
 
 	// A stopped builder is still worth reusing: it holds the payload it was stopped for, which is
-	// exactly what a repeated request is asking for. Only a failed one has to be passed over.
+	// exactly what a repeated request is asking for. Only one that cannot produce - failed, or
+	// discarded with its work still winding down - has to be passed over.
 	if previousID, ok := e.buildersByTimestamp[params.Timestamp]; ok {
-		if previous := e.builders[previousID]; previous != nil && previous.builder != nil && !previous.builder.Failed() {
+		if previous := e.builders[previousID]; previous != nil && previous.builder != nil &&
+			!previous.builder.Failed() && !previous.builder.Discarded() {
 			if sameBuildRequest(previous.params, params) {
 				e.logger.Info("[ForkChoiceUpdated] duplicate build request")
 				return AssembleBlockResult{PayloadID: previousID}, nil
@@ -177,12 +194,14 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	e.evictOldBuilders()
 
 	e.nextPayloadId++
-	params.PayloadId = e.nextPayloadId
 	ownedParams := params.Copy()
+	ownedParams.PayloadId = e.nextPayloadId
 
+	secondsPerSlot := e.config.SecondsPerSlot()
 	e.builders[e.nextPayloadId] = &builderEntry{
-		builder: builder.NewBlockBuilder(e.bacgroundCtx, e.builderFunc, ownedParams, buildDuration(params.Timestamp, time.Now(), e.config.SecondsPerSlot())),
-		params:  ownedParams,
+		builder: builder.NewBlockBuilder(e.backgroundCtx, e.builderFunc, ownedParams,
+			buildDuration(params.Timestamp, time.Now(), secondsPerSlot), stopGraceDuration(secondsPerSlot)),
+		params: ownedParams,
 	}
 	e.buildersByTimestamp[params.Timestamp] = e.nextPayloadId
 	e.logger.Info("[ForkChoiceUpdated] BlockBuilder added", "payload", e.nextPayloadId)
@@ -217,6 +236,12 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 
 	entry, ok := e.builders[payloadID]
 	if !ok || entry == nil || entry.builder == nil {
+		return AssembledBlockResult{Unknown: true}, nil
+	}
+	// Nothing comes of a discarded build, and waiting for its goroutine to notice would hold the
+	// caller for as long as whatever the build is blocked on.
+	if entry.builder.Discarded() {
+		e.dropBuilder(payloadID, entry)
 		return AssembledBlockResult{Unknown: true}, nil
 	}
 	blockWithReceipts, err := entry.builder.Stop(ctx)

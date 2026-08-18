@@ -43,8 +43,8 @@ type Parameters struct {
 	ExtraData []byte
 }
 
-// Copy returns parameters that no longer share anything mutable with the receiver, so a caller
-// cannot change what a builder was asked for after the fact. Reference-typed fields added to
+// Copy returns parameters that share nothing mutable with the receiver, except CustomTxnProvider:
+// a provider is a live object and stays shared by reference. Reference-typed fields added to
 // Parameters have to be handled here; TestParametersCopyCoversEveryField fails if one is not.
 func (p *Parameters) Copy() *Parameters {
 	if p == nil {

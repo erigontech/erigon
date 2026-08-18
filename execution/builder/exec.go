@@ -48,17 +48,16 @@ import (
 )
 
 type BuilderExecCfg struct {
-	builderState    BuilderState
-	notifier        stagedsync.ChainEventNotifier
-	chainConfig     *chain.Config
-	engine          rules.Engine
-	blockReader     dbservices.FullBlockReader
-	vmConfig        *vm.Config
-	tmpdir          string
-	interrupt       *atomic.Bool
-	acknowledgeStop func()
-	payloadId       uint64
-	txnProvider     txnprovider.TxnProvider
+	builderState BuilderState
+	notifier     stagedsync.ChainEventNotifier
+	chainConfig  *chain.Config
+	engine       rules.Engine
+	blockReader  dbservices.FullBlockReader
+	vmConfig     *vm.Config
+	tmpdir       string
+	interrupt    *atomic.Bool
+	payloadId    uint64
+	txnProvider  txnprovider.TxnProvider
 }
 
 func StageBuilderExecCfg(
@@ -69,23 +68,21 @@ func StageBuilderExecCfg(
 	vmConfig *vm.Config,
 	tmpdir string,
 	interrupt *atomic.Bool,
-	acknowledgeStop func(),
 	payloadId uint64,
 	txnProvider txnprovider.TxnProvider,
 	blockReader dbservices.FullBlockReader,
 ) BuilderExecCfg {
 	return BuilderExecCfg{
-		builderState:    builderState,
-		notifier:        notifier,
-		chainConfig:     chainConfig,
-		engine:          engine,
-		blockReader:     blockReader,
-		vmConfig:        vmConfig,
-		tmpdir:          tmpdir,
-		interrupt:       interrupt,
-		acknowledgeStop: acknowledgeStop,
-		payloadId:       payloadId,
-		txnProvider:     txnProvider,
+		builderState: builderState,
+		notifier:     notifier,
+		chainConfig:  chainConfig,
+		engine:       engine,
+		blockReader:  blockReader,
+		vmConfig:     vmConfig,
+		tmpdir:       tmpdir,
+		interrupt:    interrupt,
+		payloadId:    payloadId,
+		txnProvider:  txnProvider,
 	}
 }
 
@@ -190,7 +187,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 		}
 
 		if len(txns) > 0 {
-			logs, stop, err := ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, interrupt, cfg.acknowledgeStop, logPrefix, logger)
+			logs, stop, err := ba.AddTransactions(ctx, getHeader, txns, coinbase, cfg.vmConfig, ibs, interrupt, logPrefix, logger)
 			if err != nil {
 				return err
 			}
@@ -211,7 +208,6 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			}
 		}
 	}
-	cfg.acknowledgeStop()
 	logger.Info("Block txn filtration", append([]any{"block", current.Header.Number.Uint64()}, filtration.logArgs()...)...)
 
 	metrics.UpdateBlockProducerProductionDelay(current.ParentHeaderTime, current.Header.Number.Uint64(), logger)
