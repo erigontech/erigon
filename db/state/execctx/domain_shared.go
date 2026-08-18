@@ -815,9 +815,10 @@ func (sd *SharedDomains) GetMemBatch() kv.TemporalMemBatch { return sd.mem }
 func (sd *SharedDomains) SetInMemHistoryReads(v bool)      { sd.mem.SetInMemHistoryReads(v) }
 func (sd *SharedDomains) InMemHistoryReads() bool          { return sd.mem.InMemHistoryReads() }
 
-// GetLatestFromMemory reads local and parent memory and returns any bound on a fallback read.
-func (sd *SharedDomains) GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, step, maxStep kv.Step, ok bool) {
-	return sd.latestFromMem(domain, key)
+// GetLatestFromMemory reads local and parent memory and returns the step bound for a fallback read.
+func (sd *SharedDomains) GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, maxStep kv.Step, ok bool) {
+	v, _, maxStep, ok = sd.latestFromMem(domain, key)
+	return v, maxStep, ok
 }
 
 // SetParent sets a parent SD for read-through domain chaining. Domain reads

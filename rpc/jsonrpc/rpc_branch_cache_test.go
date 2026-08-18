@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
 
-func poisonSharedBranchCache(t *testing.T, db kv.TemporalRoDB) func() {
+func poisonSharedBranchCache(t *testing.T, db kv.TemporalRoDB) (branchKey, branchValue []byte, assertPoisoned func()) {
 	t.Helper()
 	tx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
@@ -61,12 +61,16 @@ func poisonSharedBranchCache(t *testing.T, db kv.TemporalRoDB) func() {
 			continue
 		}
 		key = bytes.Clone(key)
+		if len(poisonedKeys) == 0 {
+			branchKey = key
+			branchValue = bytes.Clone(value)
+		}
 		cache.Put(key, poison, 0, 0)
 		poisonedKeys = append(poisonedKeys, key)
 	}
 	require.NotEmpty(t, poisonedKeys)
 
-	return func() {
+	return branchKey, branchValue, func() {
 		for _, key := range poisonedKeys {
 			cached, _, ok := cache.Get(key)
 			require.True(t, ok)
@@ -86,7 +90,7 @@ func TestGetProofIgnoresSharedBranchCache(t *testing.T) {
 	enableStateCacheForTest(t)
 
 	m, _, contractAddress, _ := chainWithDeployedContract(t)
-	assertPoisoned := poisonSharedBranchCache(t, m.DB)
+	_, _, assertPoisoned := poisonSharedBranchCache(t, m.DB)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 	proof, err := api.GetProof(t.Context(), contractAddress, nil, bnhPtr(rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)))
@@ -99,7 +103,7 @@ func TestSimulateV1IgnoresSharedBranchCache(t *testing.T) {
 	enableStateCacheForTest(t)
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	assertPoisoned := poisonSharedBranchCache(t, m.DB)
+	_, _, assertPoisoned := poisonSharedBranchCache(t, m.DB)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
@@ -123,25 +127,10 @@ func TestSnapshotCommitmentDomainsIgnoreSharedBranchCache(t *testing.T) {
 	enableStateCacheForTest(t)
 
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	assertPoisoned := poisonSharedBranchCache(t, m.DB)
+	branchKey, branchValue, assertPoisoned := poisonSharedBranchCache(t, m.DB)
 	tx, err := m.DB.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-
-	it, err := tx.Debug().RangeLatest(kv.CommitmentDomain, nil, nil, kv.Unlim)
-	require.NoError(t, err)
-	defer it.Close()
-	var branchKey, branchValue []byte
-	for it.HasNext() {
-		key, value, err := it.Next()
-		require.NoError(t, err)
-		if !bytes.Equal(key, commitment.KeyCommitmentState) && len(value) > 0 {
-			branchKey = bytes.Clone(key)
-			branchValue = bytes.Clone(value)
-			break
-		}
-	}
-	require.NotEmpty(t, branchKey)
 
 	domains, err := newSnapshotCommitmentDomains(t.Context(), tx, log.New())
 	require.NoError(t, err)

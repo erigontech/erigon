@@ -40,7 +40,7 @@ type sd interface {
 	AsStateGetter(tx kv.TemporalTx) execctxapi.StateGetter
 	AsStateGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
-	GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, step, maxStep kv.Step, ok bool)
+	GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, maxStep kv.Step, ok bool)
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
 	// read), tagged with source.
@@ -393,11 +393,11 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 }
 
 // BranchChildCount returns a branch's child count from a complete post-compute view.
-func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte) (int, error) {
-	if sdc.stateReader == nil {
-		return 0, errors.New("BranchChildCount requires an installed state reader")
+func (sdc *SharedDomainsCommitmentContext) BranchChildCount(computeReader StateReader, nibblePrefix []byte) (int, error) {
+	if computeReader == nil {
+		return 0, errors.New("BranchChildCount requires the compute state reader")
 	}
-	if sdc.stateReader.WithHistory() {
+	if computeReader.WithHistory() {
 		return 0, errors.New("BranchChildCount requires a reader that permits branch writes")
 	}
 	if sdc.pendingUpdate != nil {
@@ -405,7 +405,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 	}
 
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, _, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(kv.CommitmentDomain, key)
+	enc, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(kv.CommitmentDomain, key)
 	if ok {
 		return commitment.BranchData(enc).ChildCount(), nil
 	}
@@ -413,7 +413,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(nibblePrefix []byte)
 		return 0, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
 	}
 
-	enc, _, err := sdc.stateReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
+	enc, _, err := computeReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
 	if err != nil {
 		return 0, err
 	}
