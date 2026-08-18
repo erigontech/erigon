@@ -307,11 +307,49 @@ func (o *Orchestrator) recomputeCanonical() {
 	o.peerMu.Unlock()
 
 	if len(added) > 0 || len(removed) > 0 {
+		if merges := detectMergeTransitions(added, removed, next, prev); len(merges) > 0 {
+			o.log.Info("[flow] merge-transition detected", "count", len(merges), "first", merges[0])
+		}
 		o.bus.Publish(CanonicalChanged{Added: added, Removed: removed})
 	}
 	for _, name := range cancels {
 		o.bus.Publish(DownloadSuperseded{FileName: name, Reason: "not-in-canonical"})
 	}
+}
+
+// detectMergeTransitions finds cases where one or more removed files
+// fit inside a newly-added wider file by step-range containment — a
+// structural merge on the publisher side, not divergence. Returns the
+// added file names that subsume ≥1 removed file for observability.
+func detectMergeTransitions(
+	added, removed []string,
+	nextEntries, prevEntries map[string]*snapshot.FileEntry,
+) []string {
+	if len(added) == 0 || len(removed) == 0 {
+		return nil
+	}
+	var merges []string
+	for _, addedName := range added {
+		wider := nextEntries[addedName]
+		if wider == nil {
+			continue
+		}
+		for _, removedName := range removed {
+			narrower := prevEntries[removedName]
+			if narrower == nil {
+				continue
+			}
+			if wider.Kind != narrower.Kind {
+				continue
+			}
+			if narrower.FromStep >= wider.FromStep && narrower.ToStep <= wider.ToStep &&
+				(narrower.ToStep-narrower.FromStep) < (wider.ToStep-wider.FromStep) {
+				merges = append(merges, addedName)
+				break
+			}
+		}
+	}
+	return merges
 }
 
 // collectSupersededPendingLocked returns the names of pending files

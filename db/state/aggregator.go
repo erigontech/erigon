@@ -95,6 +95,14 @@ type Aggregator struct {
 	branchCacheDisabled bool
 	workers             workersCfg
 
+	// quarantineDir, when non-empty, redirects file deletions on merge
+	// completion to a rename-into-quarantine-instead-of-delete. Consumers
+	// on a slightly-older canonical view can still be served from this
+	// dir by the downloader; primary snapshots dir advertises the new
+	// authoritative wide file. Empty (default) preserves the existing
+	// delete-in-place semantics.
+	quarantineDir string
+
 	// To keep DB small - need move data to small files ASAP.
 	// It means goroutine which creating small files - can't be locked by merge or indexing.
 	buildingFiles atomic.Bool
@@ -2233,7 +2241,7 @@ func (a *Aggregator) recalcVisibleFiles(retired retiredFiles) {
 
 	// `recalcVisibleFiles` is rare background operation under `dirtyFilesLock`
 	// it's good idea to delete files here, then hot reader-Close path will more likely be lock-free
-	reclaimFiles(a.reclaimRetiredLocked())
+	reclaimFilesInto(a.reclaimRetiredLocked(), a.quarantineDir)
 }
 
 // stateMinimaxTxNum returns min(EndTxNum) across kv.StateDomains. Mirrors
@@ -2910,8 +2918,20 @@ func (a *Aggregator) reclaimRetiredLocked() (toReclaim retiredFiles) {
 func (a *Aggregator) reclaimRetired() {
 	a.dirtyFilesLock.Lock()
 	toReclaim := a.reclaimRetiredLocked()
+	qDir := a.quarantineDir
 	a.dirtyFilesLock.Unlock()
-	reclaimFiles(toReclaim)
+	reclaimFilesInto(toReclaim, qDir)
+}
+
+// SetQuarantineDir configures a directory into which retired-with-
+// canDelete files are moved instead of being deleted. Publisher
+// deployments serving consumers on the quorum-lagging edge point this
+// at a subdirectory not visible to the local file scan; empty (default)
+// preserves the historical delete-in-place behaviour.
+func (a *Aggregator) SetQuarantineDir(path string) {
+	a.dirtyFilesLock.Lock()
+	defer a.dirtyFilesLock.Unlock()
+	a.quarantineDir = path
 }
 
 // reclaimFiles closes each retired file, additionally deleting it from disk when it is
@@ -2919,9 +2939,15 @@ func (a *Aggregator) reclaimRetired() {
 // OpenFolder that found them gone) are close-only, so a same-name recreation before the
 // pinning readers drain is never clobbered.
 func reclaimFiles(files retiredFiles) {
+	reclaimFilesInto(files, "")
+}
+
+// reclaimFilesInto is the quarantine-aware variant: canDelete files are
+// moved into quarantineDir when set, or deleted in-place when empty.
+func reclaimFilesInto(files retiredFiles, quarantineDir string) {
 	for _, f := range files {
 		if f.canDelete.Load() {
-			f.closeFilesAndRemove()
+			f.closeFilesAndQuarantine(quarantineDir)
 		} else {
 			f.closeFiles()
 		}

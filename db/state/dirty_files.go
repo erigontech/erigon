@@ -267,6 +267,56 @@ func (i *FilesItem) FilePaths(basePath string) (relativePaths []string) {
 	return relativePaths
 }
 
+// closeFilesAndQuarantine is like closeFilesAndRemove but moves files
+// into quarantineDir instead of deleting when quarantineDir != "". A
+// name collision in quarantine falls back to delete-in-place so an
+// existing quarantined copy is never clobbered.
+func (i *FilesItem) closeFilesAndQuarantine(quarantineDir string) {
+	if i == nil {
+		return
+	}
+	if quarantineDir == "" {
+		i.closeFilesAndRemove()
+		return
+	}
+	moveOrRemove := func(path string) {
+		target := filepath.Join(quarantineDir, filepath.Base(path))
+		if _, err := os.Stat(target); err == nil {
+			// Collision — keep the existing quarantined copy.
+			_ = dir.RemoveFile(path)
+			return
+		}
+		if err := os.Rename(path, target); err != nil {
+			log.Trace("quarantine failed, falling back to remove", "err", err, "path", path)
+			_ = dir.RemoveFile(path)
+		}
+	}
+	if i.index != nil {
+		i.index.Close()
+		moveOrRemove(i.index.FilePath())
+		moveOrRemove(i.index.FilePath() + ".torrent")
+		i.index = nil
+	}
+	if i.bindex != nil {
+		i.bindex.Close()
+		moveOrRemove(i.bindex.FilePath())
+		moveOrRemove(i.bindex.FilePath() + ".torrent")
+		i.bindex = nil
+	}
+	if i.existence != nil {
+		i.existence.Close()
+		moveOrRemove(i.existence.FilePath)
+		moveOrRemove(i.existence.FilePath + ".torrent")
+		i.existence = nil
+	}
+	if i.decompressor != nil {
+		i.decompressor.Close()
+		moveOrRemove(i.decompressor.FilePath())
+		moveOrRemove(i.decompressor.FilePath() + ".torrent")
+		i.decompressor = nil
+	}
+}
+
 func (i *FilesItem) closeFilesAndRemove() {
 	if i == nil {
 		return
