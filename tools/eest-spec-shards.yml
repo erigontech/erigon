@@ -405,8 +405,7 @@
   no-ramdisk: true
 - shard: zkevm-witness
   workers: 8
-  # TODO v8.1.0 spec conformance
-  max-allowed-failures: 15262
+  max-allowed-failures: 0
   commitment-parallel: false
 - shard: blocktests-stable-race-pre-cancun-sequential
   workers: 12
@@ -460,6 +459,5 @@
   run: 'fork_Amsterdam'
 - shard: zkevm-witness-race
   workers: 8
-  # TODO v8.1.0 spec conformance
-  max-allowed-failures: 15262
+  max-allowed-failures: 0
   commitment-parallel: false
