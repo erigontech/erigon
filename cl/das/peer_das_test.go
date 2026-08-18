@@ -24,12 +24,26 @@ import (
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	storagemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/common"
 )
+
+func fuluAtEpochTwoConfig() clparams.BeaconChainConfig {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	return cfg
+}
 
 func TestSyncColumnDataLaterStoresCompactFuluBlock(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
@@ -65,14 +79,7 @@ func TestSyncColumnDataLaterBoundsQueue(t *testing.T) {
 }
 
 func TestSyncColumnDataLaterUsesConfiguredFork(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cfg.AltairForkEpoch = 0
-	cfg.BellatrixForkEpoch = 0
-	cfg.CapellaForkEpoch = 0
-	cfg.DenebForkEpoch = 0
-	cfg.ElectraForkEpoch = 0
-	cfg.FuluForkEpoch = 2
-	cfg.InitializeForkSchedule()
+	cfg := fuluAtEpochTwoConfig()
 
 	tests := []struct {
 		name           string
@@ -101,6 +108,27 @@ func TestSyncColumnDataLaterUsesConfiguredFork(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestInitializeDownloadRequestUsesConfiguredFork(t *testing.T) {
+	cfg := fuluAtEpochTwoConfig()
+
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.ElectraVersion)
+	block.Block.Slot = cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	storage := storagemock.NewMockDataColumnStorage(gomock.NewController(t))
+	storage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, common.Hash(blockRoot)).Return(nil, nil)
+	req, err := initializeDownloadRequest(
+		[]cltypes.ColumnSyncableSignedBlock{block},
+		&cfg,
+		storage,
+		map[cltypes.CustodyIndex]bool{0: true},
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, req.remainingEntriesCount())
 }
 
 func TestDownloadOnlyCustodyColumnsWithoutRPC(t *testing.T) {

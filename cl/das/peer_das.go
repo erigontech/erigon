@@ -103,6 +103,14 @@ func (b *deferredColumnSyncBlock) GetBlobKzgCommitments() *solid.ListSSZ[*cltype
 	return b.commitments
 }
 
+func configuredColumnSyncVersion(cfg *clparams.BeaconChainConfig, block cltypes.ColumnSyncableSignedBlock) clparams.StateVersion {
+	version := block.Version()
+	if cfg != nil && cfg.SlotsPerEpoch != 0 {
+		version = cfg.GetCurrentStateVersion(block.GetSlot() / cfg.SlotsPerEpoch)
+	}
+	return version
+}
+
 type peerdas struct {
 	state             *peerdasstate.PeerDasState
 	nodeID            enode.ID
@@ -722,7 +730,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 	blocksToProcess := []cltypes.ColumnSyncableSignedBlock{}
 	for _, block := range blocks {
 		kzgCommitments := block.GetBlobKzgCommitments()
-		if block.Version() < clparams.FuluVersion ||
+		if configuredColumnSyncVersion(d.beaconConfig, block) < clparams.FuluVersion ||
 			kzgCommitments == nil ||
 			kzgCommitments.Len() == 0 {
 			continue
@@ -1028,7 +1036,7 @@ func initializeDownloadRequest(
 	downloadTable := make(map[downloadTableEntry]map[uint64]bool)
 	blockRootToBeaconBlock := make(map[common.Hash]cltypes.ColumnSyncableSignedBlock)
 	for _, block := range blocks {
-		if block.Version() < clparams.FuluVersion {
+		if configuredColumnSyncVersion(beaconConfig, block) < clparams.FuluVersion {
 			continue
 		}
 		kzgCommitments := block.GetBlobKzgCommitments()
@@ -1135,10 +1143,7 @@ func (d *downloadRequest) requestData() *solid.ListSSZ[*cltypes.DataColumnsByRoo
 }
 
 func (d *peerdas) SyncColumnDataLater(block *cltypes.SignedBeaconBlock) error {
-	blockVersion := block.Version()
-	if d.beaconConfig != nil && d.beaconConfig.SlotsPerEpoch != 0 {
-		blockVersion = d.beaconConfig.GetCurrentStateVersion(block.Block.Slot / d.beaconConfig.SlotsPerEpoch)
-	}
+	blockVersion := configuredColumnSyncVersion(d.beaconConfig, block)
 	if blockVersion < clparams.FuluVersion {
 		return nil
 	}
