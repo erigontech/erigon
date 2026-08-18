@@ -54,7 +54,7 @@ func TestBuilder_Build_DBError(t *testing.T) {
 		logger:         log.New(),
 	}
 
-	_, err := b.Build(t.Context(), &Parameters{}, &atomic.Bool{})
+	_, err := b.Build(t.Context(), &Parameters{}, &atomic.Bool{}, func() {})
 	require.ErrorIs(t, err, want)
 }
 

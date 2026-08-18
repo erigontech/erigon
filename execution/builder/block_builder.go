@@ -28,26 +28,27 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// buildStopGrace is how long a builder asked to stop is given to hand its block over. It is sized
-// against how often the build loop looks at the interrupt flag, not against the slot: a build that
-// is cooperating answers within one of those polls, and one that is not never will.
+// buildStopGrace bounds how long a builder may ignore a stop request. Once acknowledged, its
+// packing tail and payload finalization are allowed to finish.
 const buildStopGrace = 500 * time.Millisecond
 
 // BlockBuilderFunc builds a payload. Its context ends when the payload is discarded, so anything
 // that can block - opening a read view, waiting on a transaction provider - has to honour it.
-type BlockBuilderFunc func(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
+// acknowledgeStop marks that the interrupt was observed or transaction packing has already ended.
+type BlockBuilderFunc func(ctx context.Context, param *Parameters, interrupt *atomic.Bool, acknowledgeStop func()) (*types.BlockWithReceipts, error)
 
 // BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining").
 //
 // It answers to two different requests. Interrupting asks for the block it has so far, which is how
 // a payload is collected. Discarding says the payload is not wanted at all, and cancels the work.
 type BlockBuilder struct {
-	interrupt atomic.Bool
-	discard   context.CancelFunc
-	mu        sync.Mutex
-	done      chan struct{}
-	result    *types.BlockWithReceipts
-	err       error
+	interrupt        atomic.Bool
+	discard          context.CancelFunc
+	mu               sync.Mutex
+	done             chan struct{}
+	result           *types.BlockWithReceipts
+	err              error
+	stopAcknowledged bool
 }
 
 func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Parameters, maxBuildTime time.Duration) *BlockBuilder {
@@ -75,7 +76,7 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 
 		log.Info("Building block...")
 		t := time.Now()
-		result, err = build(buildCtx, param, &builder.interrupt)
+		result, err = build(buildCtx, param, &builder.interrupt, builder.acknowledgeStop)
 		if err != nil {
 			if buildCtx.Err() != nil {
 				log.Debug("Block builder discarded", "err", err)
@@ -103,12 +104,33 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 		graceCtx, cancelGrace := context.WithTimeout(ctx, buildStopGrace)
 		defer cancelGrace()
 		if _, err := builder.Stop(graceCtx); err != nil {
-			builder.Discard()
+			if builder.discardIfUnresponsive() {
+				log.Debug("Discarded block builder due to max build time exceeded")
+			} else {
+				log.Debug("Block builder acknowledged stop after max build time exceeded")
+			}
+			return
 		}
 		log.Debug("Stopped block builder due to max build time exceeded")
 	}()
 
 	return builder
+}
+
+func (b *BlockBuilder) acknowledgeStop() {
+	b.mu.Lock()
+	b.stopAcknowledged = true
+	b.mu.Unlock()
+}
+
+func (b *BlockBuilder) discardIfUnresponsive() bool {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	if b.stopAcknowledged {
+		return false
+	}
+	b.discard()
+	return true
 }
 
 func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {

@@ -67,7 +67,7 @@ func TestAssembleBlockKeepsBuildersApartByTimestamp(t *testing.T) {
 		interrupt *atomic.Bool
 	}
 	started := make(chan runningBuilder, 4)
-	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		started <- runningBuilder{id: params.PayloadId, interrupt: interrupt}
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
@@ -151,7 +151,7 @@ func TestEvictionReleasesABuilderBlockedOnItsProvider(t *testing.T) {
 	// is not read until it does. Only cancelling the build reaches it.
 	entered := make(chan struct{}, 1)
 	released := make(chan error, 1)
-	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(ctx context.Context, _ *builder.Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		entered <- struct{}{}
 		select {
 		case <-ctx.Done():
@@ -194,7 +194,7 @@ func TestEvictionReleasesABuilderBlockedOnItsProvider(t *testing.T) {
 func TestSupersededBuilderKeepsPackingAndStaysRetrievable(t *testing.T) {
 	timestamp := newTestTimestamp()
 	started := make(chan *atomic.Bool, 4)
-	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		started <- interrupt
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
@@ -226,7 +226,7 @@ func TestSupersededBuilderKeepsPackingAndStaysRetrievable(t *testing.T) {
 func TestCollectedPayloadIsHandedBackToARepeatedRequest(t *testing.T) {
 	timestamp := newTestTimestamp()
 	started := make(chan struct{}, 4)
-	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		started <- struct{}{}
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
@@ -258,7 +258,7 @@ func TestAssembleBlockDoesNotReuseFailedBuilder(t *testing.T) {
 	var failNext atomic.Bool
 	failNext.Store(true)
 	started := make(chan struct{}, 4)
-	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		started <- struct{}{}
 		if failNext.Swap(false) {
 			return nil, errors.New("build failed")
@@ -289,7 +289,7 @@ func TestAssembleBlockDoesNotReuseFailedBuilder(t *testing.T) {
 
 func TestGetAssembledBlockDropsFailedBuilder(t *testing.T) {
 	timestamp := newTestTimestamp()
-	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, _ *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		return nil, errors.New("build failed")
 	})
 
@@ -308,7 +308,7 @@ func TestGetAssembledBlockKeepsBuilderWhenTheCallerGivesUpMidStop(t *testing.T) 
 	timestamp := newTestTimestamp()
 	interrupted := make(chan struct{})
 	release := make(chan struct{})
-	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
@@ -360,7 +360,7 @@ func (m *mutableTxnProvider) ProvideTxns(context.Context, ...txnprovider.Provide
 
 func TestAssembleBlockNeverReusesABuilderWithACustomProvider(t *testing.T) {
 	started := make(chan struct{}, 4)
-	module := newTestModule(t, func(ctx context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(ctx context.Context, params *builder.Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		started <- struct{}{}
 		// Keep the provider busy for the whole test, which is when a comparison would read it.
 		for !interrupt.Load() && ctx.Err() == nil {
@@ -402,7 +402,7 @@ func TestAssembleBlockOwnsParameters(t *testing.T) {
 	}
 	readParameters := make(chan struct{})
 	observed := make(chan observedParameters, 1)
-	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(_ context.Context, params *builder.Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		<-readParameters
 		observed <- observedParameters{parentRoot: *params.ParentBeaconBlockRoot, extraData: params.ExtraData[0]}
 		for !interrupt.Load() {
@@ -440,7 +440,7 @@ func TestAssembleBlockOwnsParameters(t *testing.T) {
 func TestAssembleBlockCanceledContextDoesNotSupersedeBuilder(t *testing.T) {
 	timestamp := newTestTimestamp()
 	started := make(chan *atomic.Bool, 1)
-	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		started <- interrupt
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
@@ -511,7 +511,7 @@ func TestBuildDurationCapsOverflowingTimestamp(t *testing.T) {
 
 func TestGetAssembledBlockDropsABuildThatFailedWithAContextError(t *testing.T) {
 	timestamp := newTestTimestamp()
-	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool, func()) (*types.BlockWithReceipts, error) {
 		// A transaction provider that gives up reports its own context error, which is a failed
 		// build rather than a caller that stopped waiting.
 		return nil, fmt.Errorf("issue while waiting for parent block: %w", context.DeadlineExceeded)
@@ -529,7 +529,7 @@ func TestGetAssembledBlockDropsABuildThatFailedWithAContextError(t *testing.T) {
 }
 
 func TestGetAssembledBlockSaysWhenAPayloadIdIsUnknown(t *testing.T) {
-	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool, func()) (*types.BlockWithReceipts, error) {
 		return nil, errors.New("builder stopped")
 	})
 
@@ -544,7 +544,7 @@ func TestGetAssembledBlockSaysWhenAPayloadIdIsUnknown(t *testing.T) {
 func TestEvictionSparesTheBuilderATimestampStillPointsAt(t *testing.T) {
 	timestamp := newTestTimestamp()
 	started := make(chan struct{}, 1)
-	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		started <- struct{}{}
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
@@ -571,7 +571,7 @@ func TestEvictionSparesTheBuilderATimestampStillPointsAt(t *testing.T) {
 }
 
 func TestEvictionKeepsTheBuilderCacheBounded(t *testing.T) {
-	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+	module := newTestModule(t, func(context.Context, *builder.Parameters, *atomic.Bool, func()) (*types.BlockWithReceipts, error) {
 		return nil, errors.New("builder stopped")
 	})
 

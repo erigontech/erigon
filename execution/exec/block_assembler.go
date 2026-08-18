@@ -173,6 +173,7 @@ func (ba *BlockAssembler) AddTransactions(
 	vmConfig *vm.Config,
 	ibs *state.IntraBlockState,
 	interrupt *atomic.Bool,
+	acknowledgeStop func(),
 	logPrefix string,
 	logger log.Logger) (types.Logs, bool, error) {
 
@@ -317,6 +318,7 @@ LOOP:
 		}
 
 		if interrupt != nil && interrupt.Load() && stopped == nil {
+			acknowledgeStop()
 			logger.Debug("Transaction adding was requested to stop", "payload", ba.PayloadId)
 			// ensure we run for at least 500ms after the request to stop comes in from GetPayload
 			stopped = time.NewTicker(500 * time.Millisecond)

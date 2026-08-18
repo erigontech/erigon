@@ -33,7 +33,7 @@ func TestBlockBuilderRunningHasNotFailed(t *testing.T) {
 
 	release := make(chan struct{})
 	t.Cleanup(func() { close(release) })
-	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		<-release
 		return nil, errors.New("builder stopped")
 	}, &Parameters{}, time.Minute)
@@ -44,7 +44,7 @@ func TestBlockBuilderRunningHasNotFailed(t *testing.T) {
 func TestBlockBuilderStoppedForItsPayloadHasNotFailed(t *testing.T) {
 	t.Parallel()
 
-	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
@@ -62,7 +62,7 @@ func TestBlockBuilderStoppedForItsPayloadHasNotFailed(t *testing.T) {
 func TestBlockBuilderHasFailedOnceItErrors(t *testing.T) {
 	t.Parallel()
 
-	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		return nil, errors.New("build failed")
 	}, &Parameters{}, time.Minute)
 
@@ -73,7 +73,7 @@ func TestBlockBuilderStaysReusableOnceItFillsTheBlock(t *testing.T) {
 	t.Parallel()
 
 	built := make(chan struct{})
-	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		defer close(built)
 		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
 	}, &Parameters{}, time.Minute)
@@ -89,7 +89,7 @@ func TestBlockBuilderReleasesABuildThatIgnoresTheDeadline(t *testing.T) {
 	// A build parked in something that never reads the interrupt flag - a transaction provider
 	// waiting on a block, say - would hold its read view until the builder count forced it out.
 	released := make(chan error, 1)
-	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, _ *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		select {
 		case <-ctx.Done():
 			released <- ctx.Err()
@@ -113,7 +113,7 @@ func TestBlockBuilderStillHandsOverAPayloadWhenItsBudgetRunsOut(t *testing.T) {
 
 	// Reaching the budget asks for the block it has, which is what the budget is for. Only a build
 	// that will not answer is discarded.
-	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
+	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, interrupt *atomic.Bool, _ func()) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
@@ -122,4 +122,28 @@ func TestBlockBuilderStillHandsOverAPayloadWhenItsBudgetRunsOut(t *testing.T) {
 
 	require.Eventually(t, func() bool { return b.Block() != nil }, 5*time.Second, time.Millisecond)
 	require.False(t, b.Failed())
+}
+
+func TestBlockBuilderLetsFinalizationOutliveStopGrace(t *testing.T) {
+	t.Parallel()
+
+	finalizing := make(chan struct{})
+	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, interrupt *atomic.Bool, acknowledgeStop func()) (*types.BlockWithReceipts, error) {
+		for !interrupt.Load() {
+			time.Sleep(time.Millisecond)
+		}
+		acknowledgeStop()
+		close(finalizing)
+		select {
+		case <-time.After(buildStopGrace + 100*time.Millisecond):
+			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+	}, &Parameters{}, time.Millisecond)
+
+	<-finalizing
+	result, err := b.Stop(t.Context())
+	require.NoError(t, err)
+	require.NotNil(t, result)
 }
