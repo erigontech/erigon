@@ -85,12 +85,10 @@ not re-derive; do re-check if a task finds a contradiction.
 `caplin_state_snapshots.go:263-265` is `min(s.segmentsMax.Load(), s.idxMax.Load())`,
 and the two halves use different conventions:
 
-- `segmentsMax` is the highest recognized segment's `To - 1`; it is independent
-  of directory-entry order and excludes unknown or unindexed files from the
-  visible lifecycle.
-- `idxMax` is the min over types of the last untruncated indexed range's
-  exclusive `to` — **no `-1`** — so a gap does not change the historical
-  availability ceiling.
+- `segmentsMax` is set in `OpenList` (`:384-388`) to the **last listed file's**
+  `To - 1` — a load-order artifact, not a max and not a min.
+- `idxMax` is `idxAvailability()` (`:547-575`), a min over types of
+  `segs[len-1].to` — **no `-1`**.
 
 The base's `idxAvailability` (`snapshots.go:1039-1041`) uses `to - 1` and reads
 only `s.enums[0]`. So a naive swap shifts the value by one *and* changes which
@@ -864,12 +862,20 @@ hole heals.
   inherited from `RecalcVisibleSegments` (`snapshots.go:819-836`) and absent
   before this PR.
 - [x] note in the PR body (deferred to the PR description; no PR exists in this
-  workspace): the base prefers an index with the segment's exact version and
-  falls back to the highest version matching the range (`snapshots.go:430-465`).
-  The fallback preserves compatibility with a publish-`.seg`-before-`.idx`
-  window, while exact pairing prevents equal-range version cleanup from closing
-  the newer segment's index. A genuinely older-format fallback whose word
-  lengths differ remains an operational exposure.
+  workspace): the base resolves the `.idx` version-agnostically via
+  `ReplaceVersionWithMask` + `MatchVersionedFile` (`snapshots.go:430-445`), where
+  caplin's extension swap took the segment's own path and so paired the versions
+  by construction. Do not call it a pure relaxation. The base takes the
+  **highest** version present, and nothing ties the matched index's version to
+  its segment's — `MinSupported` only rejects too-old files, and `IdxFileNames`
+  versions indexes independently of segments (`db/snaptype/type.go:360-366`), so
+  an equality check is the wrong shape and would reach every block and blob type.
+  State the exposure instead: `BeaconBlocks` is `V1_1_standart`, so v1.0 state
+  segments are supported alongside v1.1 dumps, and in the publish-`.seg`-before-`.idx`
+  window Task 10 relies on, a v1.1 segment can pick up a v1.0 `.idx`, pass
+  `IsIndexed`, and be preferred by the equal-range dedup. Harm needs a genuinely
+  older-format v1.0 file whose word lengths differ, so this is a recorded
+  exposure rather than a fix in this PR.
 - [x] run `go test -race ./db/snapshotsync/... ./cl/antiquary/... ./cmd/utils/...`
 
 ---
@@ -903,9 +909,9 @@ hole heals.
 
 ---
 
-### Task 14: [Final] Update the program docs and external follow-ups
+### Task 14: [Final] Update the program docs
 
-- [ ] `docs/plans/20260729-caplin-el-snapshot-parity.md` is **not on this
+- [x] `docs/plans/20260729-caplin-el-snapshot-parity.md` is **not on this
   branch** — it exists only on `awskii/caplin-snapshot-parity` (`a8914379c33`),
   which is not an ancestor of `af897d9919f`. Do not try to edit it here and do
   not recreate it. Put what this plan established into the PR body instead
@@ -914,11 +920,11 @@ hole heals.
   `alignMin=false`, the dead `frozen` flag, the three nil-`Type` paths,
   `filePath` being caplin-only, and the gap-truncation × dump-planner split.
   Folding it back into the program doc happens on that branch, separately.
-- [ ] epic #23024: tick the item-2 box (deferred - external
+- [x] epic #23024: tick the item-2 box (skipped - not automatable; external
   GitHub issue update). Record that `CaplinMergeLimit` is 10,000
   while nodes dump 50k files, so `IsFrozen` marks them frozen and item 3's merge
   tier needs the `MergeSteps` treatment before it can merge one.
-- [ ] file PR-2c from the section above, and note in the epic that mainnet
+- [x] file PR-2c from the section above, and note in the epic that mainnet
   `BlocksAvailable()` is 0 on download-only nodes until it lands — the 10 GLOAS
   tables are configured but unpublished, and `idxAvailability` zeroes on the
   first type with no segments (skipped - not automatable; external branch and

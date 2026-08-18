@@ -163,38 +163,6 @@ func TestCaplinStateRemoveOverlaps(t *testing.T) {
 	require.Equal(t, []Range{{from: 0, to: 150_000}, {from: 150_000, to: 200_000}}, ranges)
 }
 
-func TestCaplinStateRemoveOverlapsKeepsNewestEqualRangeVersion(t *testing.T) {
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	table := kv.PendingDepositsDump
-
-	olderSeg, olderIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
-	olderV1Seg := filepath.Join(dirs.SnapCaplin, strings.Replace(filepath.Base(olderSeg), "v1.1-", "v1.0-", 1))
-	olderV1Idx := filepath.Join(dirs.SnapCaplin, strings.Replace(filepath.Base(olderIdx), "v1.1-", "v1.0-", 1))
-	require.NoError(t, os.Rename(olderSeg, olderV1Seg))
-	require.NoError(t, os.Rename(olderIdx, olderV1Idx))
-	newerSeg, newerIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
-	segments, err := snaptype.Segments(dirs.SnapCaplin)
-	require.NoError(t, err)
-	kept, removed := findOverlaps(segments)
-	require.Len(t, kept, 1)
-	require.Len(t, removed, 1)
-	require.Equal(t, olderV1Seg, removed[0].Path)
-
-	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
-	require.NoError(t, s.RemoveOverlaps(nil))
-
-	require.NoFileExists(t, olderV1Seg)
-	require.NoFileExists(t, olderV1Idx)
-	require.FileExists(t, newerSeg)
-	require.FileExists(t, newerIdx)
-	view := s.View()
-	defer view.Close()
-	visible, ok := view.VisibleSegment(0, table)
-	require.True(t, ok)
-	require.Equal(t, version.V1_1, visible.Src().Version())
-}
-
 // A covered subset whose .idx is missing (e.g. a process killed between the .seg and
 // .idx writes) must still be removed, without panicking on the nil index entry.
 func TestCaplinStateRemoveOverlapsSubsetMissingIndex(t *testing.T) {

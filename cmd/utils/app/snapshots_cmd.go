@@ -3489,18 +3489,6 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 	return nil
 }
 
-type caplinStateRetireSnapshots interface {
-	BuildMissingIndices(context.Context, log.Logger) error
-	RemoveOverlaps(func([]string) error) error
-}
-
-func prepareCaplinStateSnapshotsForRetire(ctx context.Context, snapshots caplinStateRetireSnapshots, logger log.Logger) error {
-	if err := snapshots.BuildMissingIndices(ctx, logger); err != nil {
-		return err
-	}
-	return snapshots.RemoveOverlaps(nil)
-}
-
 func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	logger := log.Root()
 	defer logger.Info("Done")
@@ -3562,7 +3550,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		return err
 	}
 
-	if err := prepareCaplinStateSnapshotsForRetire(ctx, caplinStateSnaps, logger); err != nil {
+	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
+		return err
+	}
+	if err := caplinStateSnaps.RemoveOverlaps(nil); err != nil {
 		return err
 	}
 

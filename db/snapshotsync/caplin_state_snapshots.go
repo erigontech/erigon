@@ -218,12 +218,11 @@ func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 		return 0
 	}
 	minTo := uint64(math.MaxUint64)
-	for name := range s.typeEnums {
-		ranges := s.coveredRangesForType(name)
-		if len(ranges) == 0 {
+	for _, typ := range s.Types() {
+		to := s.VisibleSegmentsMaxTo(typ.Enum())
+		if to == 0 {
 			return 0
 		}
-		to := ranges[len(ranges)-1].to
 		minTo = min(minTo, to)
 	}
 	if minTo == math.MaxUint64 {
@@ -240,7 +239,7 @@ func (s *CaplinStateSnapshots) SegmentsMax() uint64 {
 	if err != nil {
 		return 0
 	}
-	var maxTo uint64
+	var max uint64
 	for _, entry := range entries {
 		if entry.IsDir() || filepath.Ext(entry.Name()) != ".seg" {
 			continue
@@ -249,9 +248,9 @@ func (s *CaplinStateSnapshots) SegmentsMax() uint64 {
 		if !ok || f.Type == nil || !s.BaseRoSnapshots.HasType(f.Type) || f.To == 0 {
 			continue
 		}
-		maxTo = max(maxTo, f.To-1)
+		max = f.To - 1
 	}
-	return maxTo
+	return max
 }
 
 func (s *CaplinStateSnapshots) LogStat(str string) {
