@@ -39,7 +39,6 @@ import (
 	"github.com/erigontech/erigon/execution/stagedsync/rawdbreset"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 var cmdResetState = &cobra.Command{
@@ -54,16 +53,15 @@ var cmdResetState = &cobra.Command{
 		}
 		defer db.Close()
 
-		sn, borSn, _, _, _, _, err := allSnapshots(ctx, db, logger)
+		sn, _, _, err := allSnapshots(ctx, db, logger)
 		if err != nil {
 			logger.Error("Opening snapshots", "error", err)
 			return
 		}
 
 		defer sn.Close()
-		defer borSn.Close()
 
-		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) }); err != nil {
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -81,7 +79,7 @@ var cmdResetState = &cobra.Command{
 
 		// set genesis after reset all buckets
 		fmt.Printf("After reset: \n")
-		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) }); err != nil {
+		if err := db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn) }); err != nil {
 			if !errors.Is(err, context.Canceled) {
 				logger.Error(err.Error())
 			}
@@ -118,7 +116,7 @@ func init() {
 	rootCmd.AddCommand(cmdClearBadBlocks)
 }
 
-func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn *heimdall.RoSnapshots) error {
+func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots) error {
 	var err error
 	var progress uint64
 	w := new(tabwriter.Writer)
@@ -146,11 +144,6 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn 
 		fmt.Fprintf(w, "blocks: segments=%d, indices=%d\n", snapshots.SegmentsMax(), snapshots.IndicesMax())
 	} else {
 		fmt.Fprintf(w, "blocks: segments=0, indices=0; failed to open snapshots\n")
-	}
-	if borSn != nil {
-		fmt.Fprintf(w, "blocks.bor: segments=%d, indices=%d\n", borSn.SegmentsMax(), borSn.IndicesMax())
-	} else {
-		fmt.Fprintf(w, "blocks.bor: segments=0, indices=0; failed to open bor snapshots\n")
 	}
 
 	_lb, _lt, _ := rawdbv3.TxNums.Last(tx)

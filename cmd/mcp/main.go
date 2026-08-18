@@ -245,7 +245,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 		DBReadConcurrency: httpcfg.DefaultDBReadConcurrency(),
 	}
 
-	db, backend, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err :=
+	db, backend, txPool, mining, stateCache, blockReader, engine, ff, err :=
 		cli.RemoteServices(ctx, cfg, logger, rootCancel)
 	if err != nil {
 		return fmt.Errorf("failed to initialize datadir services: %w", err)
@@ -253,12 +253,6 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	defer db.Close()
 	if engine != nil {
 		defer engine.Close()
-	}
-	if bridgeReader != nil {
-		defer bridgeReader.Close()
-	}
-	if heimdallReader != nil {
-		defer heimdallReader.Close()
 	}
 
 	// Create the JSON-RPC APIs and serve them over an in-process connection —

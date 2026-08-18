@@ -19,7 +19,6 @@ package app
 import (
 	"context"
 	"encoding/json"
-	"fmt"
 	"os"
 
 	"github.com/urfave/cli/v3"
@@ -33,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/debug"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 var initCommand = cli.Command{
@@ -81,13 +79,7 @@ func initGenesis(ctx context.Context, cliCtx *cli.Command) error {
 	}
 
 	if genesis.Config.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		err = json.Unmarshal(genesis.Config.BorJSON, borConfig)
-		if err != nil {
-			panic(fmt.Sprintf("Could not parse 'bor' config for %s: %v", genesisPath, err))
-		}
-
-		genesis.Config.Bor = borConfig
+		utils.Fatalf("%s carries a 'bor' config: Polygon is not supported, see https://github.com/0xPolygon/erigon", genesisPath)
 	}
 
 	// Open and initialise both full and light databases
