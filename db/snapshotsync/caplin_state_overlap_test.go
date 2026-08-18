@@ -181,3 +181,57 @@ func TestCaplinStateRemoveOverlapsSubsetMissingIndex(t *testing.T) {
 	require.FileExists(t, supSeg)
 	require.False(t, hasDiskOverlap(t, dirs.SnapCaplin, table))
 }
+
+func TestCaplinStateRemoveOverlapsUnindexedSuperset(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	subSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	supSeg, supIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)
+	require.NoError(t, dir2.RemoveFile(supIdx))
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.NoError(t, s.BuildMissingIndices(t.Context(), logger))
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.NoFileExists(t, subSeg)
+	require.FileExists(t, supSeg, "the indexed covering segment must survive")
+	require.FileExists(t, supIdx)
+	require.Equal(t, []Range{{from: 0, to: 100_000}}, s.coveredRangesForType(table))
+}
+
+func TestCaplinStateRemoveOverlapsIgnoresUnknownType(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	segPath, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	unknownPath := filepath.Join(dirs.SnapCaplin, "v1.1-000000-000050-BlockProposers.seg")
+	require.NoError(t, os.WriteFile(unknownPath, nil, 0o644))
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.FileExists(t, segPath)
+	require.FileExists(t, unknownPath)
+}
+
+func TestCaplinStateRemoveOverlapsDefersUnlinkWhileViewOpen(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	supSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)
+	subSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	v := s.View()
+
+	require.NoError(t, s.RemoveOverlaps(nil))
+	require.FileExists(t, subSeg, "the open view must defer unlinking")
+	require.FileExists(t, supSeg)
+
+	v.Close()
+	require.NoFileExists(t, subSeg)
+}

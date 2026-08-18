@@ -789,7 +789,7 @@ hole heals.
 - Modify: `cmd/utils/app/snapshots_cmd.go`
 - Modify: `db/snapshotsync/caplin_state_overlap_test.go`
 
-- [ ] **build the missing indices before the call.** The offline version
+- [x] **build the missing indices before the call.** The offline version
   restricted candidate supersets to indexed segments (`caplin_state_snapshots.go:505-515`);
   the base's `findOverlaps` runs over every parsed `.seg` in `s.dir` with no
   index check. With an indexed `[0,50k)` and a dumped-but-unindexed `[0,100k)` —
@@ -800,12 +800,12 @@ hole heals.
   `caplinStateSnaps.BuildMissingIndices(ctx, logger)` at `:3022` is a different
   command. Call it immediately before `RemoveOverlaps` so no unindexed superset
   can exist at that moment.
-- [ ] `doRetireCommand` (`snapshots_cmd.go:3553`) keeps the `nil` Task 9 put
+- [x] `doRetireCommand` (`snapshots_cmd.go:3553`) keeps the `nil` Task 9 put
   there. Do **not** wire the node's seeder-delete callback: the EL line two
   above it is `br.RemoveOverlaps(nil)` (`:3549`) and the command has no
   downloader — it passes `dbservices.NoopSeederClient{}` to `BuildFiles`. The
   real callback lives on the node path (`block_snapshots.go:333`), not here.
-- [ ] note the constraint for whoever later wires a real callback on the node
+- [x] note the constraint for whoever later wires a real callback on the node
   path: the base relativizes against `s.dir` (`toRelativePaths`,
   `snapshots.go:1487`), which for state is `dirs.SnapCaplin`, so the callback
   receives `v1.1-…` where caplin torrents are keyed `caplin/v1.1-…`
@@ -813,19 +813,19 @@ hole heals.
   against `dirs.Snap` and returns a relative one untouched
   (`db/downloader/client.go:20-32`), so a raw pass-through would name a
   nonexistent root-level torrent. A caplin callback has to re-prefix.
-- [ ] add a test with a stray `BlockProposers.seg` in the caplin dir across the
+- [x] add a test with a stray `BlockProposers.seg` in the caplin dir across the
   call — the regression test for Task 4's guard on the `GetGrouping` path.
-- [ ] add a test for the unindexed-superset case: an indexed `[0,50k)` plus an
+- [x] add a test for the unindexed-superset case: an indexed `[0,50k)` plus an
   unindexed `[0,100k)`, asserting the readable segment survives the call and
   coverage is non-empty afterwards
-- [ ] add a test with a `View` open across the call, asserting the file is
+- [x] add a test with a `View` open across the call, asserting the file is
   unlinked only after the view closes — the property the offline version could
   not offer.
-- [ ] note in the PR body: the base's `RemoveOverlaps` unconditionally deletes
+- [x] note in the PR body: the base's `RemoveOverlaps` unconditionally deletes
   every `.tmp` in `s.dir` (`snapshots.go:1506-1513`, carrying an in-tree TODO
   that this may remove caplin's useful `.tmp` files). The offline version did
   not. State it; scoping the sweep is deferred to item 3a, which already owns it.
-- [ ] run `go test ./db/snapshotsync/... ./cmd/utils/...` — must pass before task 12
+- [x] run `go test ./db/snapshotsync/... ./cmd/utils/...` — must pass before task 12
 
 ---
 
