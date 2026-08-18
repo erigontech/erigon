@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -1686,4 +1687,86 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 	if assert.NotNil(res) {
 		assert.False(res.receiptsComplete)
 	}
+}
+
+// logEmittingSyscallEngine drives a fixed number of block-end system calls at
+// one contract, each of which emits a log.
+type logEmittingSyscallEngine struct {
+	rules.Engine
+	contract accounts.Address
+	calls    int
+}
+
+func (e *logEmittingSyscallEngine) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain rules.ChainReader,
+	syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	for range e.calls {
+		if _, err := syscall(e.contract, nil); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
+// seedLogEmittingContract deploys `LOG0` bytecode at addr so that every system
+// call to it appends exactly one log to the caller's IntraBlockState.
+func seedLogEmittingContract(t *testing.T, db kv.TemporalRwDB, addr common.Address) {
+	code := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.STOP)}
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {
+			return err
+		}
+		return putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil)
+	})
+}
+
+// TestParallelBlockEndLogsCountEachSyscallOnce pins the block-end log run: the
+// finalize system calls share one IntraBlockState and one txIndex, so the state
+// holds their cumulative logs, and collecting per call counted the earlier ones
+// again — k(k+1)/2 logs for k calls.
+func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
+	const syscalls = 3
+
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	contract := common.HexToAddress("0x00000000000000000000000000000000000c0de0")
+	seedLogEmittingContract(t, db, contract)
+
+	txTask := &exec.TxTask{
+		Header: &types.Header{
+			Number:   *uint256.NewInt(1),
+			GasLimit: 10_000_000,
+		},
+		TxNum:   1,
+		TxIndex: 0,
+		Config:  config,
+	}
+
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.cfg.engine = &logEmittingSyscallEngine{Engine: ethash.NewFaker(), contract: accounts.InternAddress(contract), calls: syscalls}
+	pe.cfg.vmConfig = &vm.Config{}
+
+	be := newBlockExec(1, common.Hash{}, new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 4), nil, false, nil)
+	eTask := &execTask{Task: txTask, index: 0}
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.execTasks.inProgress = []int{0}
+
+	txResult := &exec.TxResult{
+		Task: &taskVersion{
+			execTask: eTask,
+			version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 1},
+		},
+		ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000},
+	}
+
+	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.NoError(t, res.Err)
+
+	assert.Len(t, txResult.Logs, syscalls)
 }
