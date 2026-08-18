@@ -246,10 +246,6 @@ func (l *ListSSZ[T]) ValidateBounds(limit int) error {
 	return nil
 }
 
-func (l *ListSSZ[T]) ValidateProgressiveDecodeBounds(configuredLimit int) error {
-	return l.ValidateBounds(progressiveDecodeLimit(configuredLimit))
-}
-
 func (l *ListSSZ[T]) Set(index int, value T) {
 	l.list[index] = value
 	l.root = common.Hash{}

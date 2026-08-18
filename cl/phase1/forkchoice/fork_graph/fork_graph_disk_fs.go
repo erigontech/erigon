@@ -35,10 +35,7 @@ import (
 	"github.com/erigontech/erigon/common/snappypool"
 )
 
-// maxSSZObjectSize is a generous upper bound for any single SSZ object
-// (beacon state, envelope, etc.). Mainnet states with ~1.5M validators are
-// ~327 MB after decompression; 1 GiB leaves ample room for validator-set
-// growth while still catching clearly corrupt length fields before OOM.
+// maxSSZObjectSize leaves room for beacon-state growth while rejecting corrupt lengths before allocation.
 const maxSSZObjectSize = 1 << 30 // 1 GiB
 
 func getBeaconStateFilename(blockRoot common.Hash) string {
