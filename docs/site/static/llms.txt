@@ -64,7 +64,6 @@
 - [trace](https://docs.erigon.tech/interacting-with-erigon/trace): trace_ namespace: OpenEthereum-compatible transaction and block traces.
 - [txpool](https://docs.erigon.tech/interacting-with-erigon/txpool): txpool_ namespace: inspect pending and queued transactions in the mempool.
 - [admin](https://docs.erigon.tech/interacting-with-erigon/admin): admin_ namespace: peer management, node info, and datadir inspection.
-- [bor](https://docs.erigon.tech/interacting-with-erigon/bor): bor_ namespace: Polygon-specific APIs for Bor consensus layer interaction.
 - [ots](https://docs.erigon.tech/interacting-with-erigon/ots): ots_ namespace: Otterscan block explorer extensions for efficient state queries.
 - [internal](https://docs.erigon.tech/interacting-with-erigon/internal): internal_ namespace: node internals and low-level diagnostic endpoints.
 - [gRPC](https://docs.erigon.tech/interacting-with-erigon/grpc): High-performance binary interface for programmatic Erigon access via gRPC.

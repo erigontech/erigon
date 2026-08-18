@@ -155,7 +155,7 @@ func (e *EngineServer) Start(
 			return nil
 		})
 	}
-	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, engine, nil, jsonrpc.NewBaseApiConfig(httpConfig))
+	base := jsonrpc.NewBaseApi(filters, stateCache, blockReader, engine, jsonrpc.NewBaseApiConfig(httpConfig))
 	ethImpl := jsonrpc.NewEthAPI(base, db, eth, e.txpool, mining, jsonrpc.NewEthApiConfig(httpConfig), e.logger)
 
 	apiList := []rpc.API{

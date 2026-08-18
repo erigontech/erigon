@@ -198,7 +198,7 @@ func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db k
 
 	additionalFields := make(map[string]any)
 
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, nil, common.Hash{}, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, additionalFields)
 
 	if err == nil && rpc.BlockNumber(block.NumberU64()) == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields

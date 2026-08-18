@@ -105,6 +105,13 @@ export default async function createConfig(): Promise<Config> {
               from: '/get-started/easy-nodes/how-to-run-a-polygon-node',
               to: '/fundamentals/supported-networks',
             },
+            // The bor_ namespace is removed along with Polygon support. Inbound
+            // links land on the namespace index; the page is still readable in
+            // the v3.4 archive.
+            {
+              from: '/interacting-with-erigon/bor',
+              to: '/interacting-with-erigon',
+            },
           ],
         },
       ],

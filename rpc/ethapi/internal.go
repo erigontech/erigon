@@ -20,7 +20,6 @@ package ethapi
 import (
 	"maps"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -37,8 +36,8 @@ func RPCMarshalBlock(b *types.Block, inclTx bool, fullTx bool, additional map[st
 }
 
 // nolint
-func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, borTx types.Transaction, borTxHash common.Hash, additional map[string]any) (map[string]any, error) {
-	fields, err := RPCMarshalBlockExDeprecated(b, inclTx, fullTx, borTx, borTxHash)
+func RPCMarshalBlockEx(b *types.Block, inclTx bool, fullTx bool, additional map[string]any) (map[string]any, error) {
+	fields, err := RPCMarshalBlockDeprecated(b, inclTx, fullTx)
 	if err != nil {
 		return nil, err
 	}

@@ -156,16 +156,13 @@ type BaseAPI struct {
 	_txnReader   dbservices.TxnReader
 	_engine      rules.EngineReader
 
-	bridgeReader bridgeReader
-
-	evmCallTimeout      time.Duration
-	blockRangeLimit     int
-	getLogsMaxResults   int
-	logQueryLimit       int
-	dirs                datadir.Dirs
-	receiptsGenerator   *receipts.Generator
-	borReceiptGenerator *receipts.BorGenerator
-	balRegenerator      *bal.Regenerator
+	evmCallTimeout    time.Duration
+	blockRangeLimit   int
+	getLogsMaxResults int
+	logQueryLimit     int
+	dirs              datadir.Dirs
+	receiptsGenerator *receipts.Generator
+	balRegenerator    *bal.Regenerator
 
 	// witnessCache serves recent legacy-mode debug_executionWitness results from
 	// memory, keyed by block hash; nil disables it (only the embedded node wires one).
@@ -174,7 +171,7 @@ type BaseAPI struct {
 	witnessCache *witnessResultCache
 }
 
-func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, bridgeReader bridgeReader, conf *rpccfg.BaseApiConfig) *BaseAPI {
+func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbservices.FullBlockReader, engine rules.Engine, conf *rpccfg.BaseApiConfig) *BaseAPI {
 	if conf == nil {
 		conf = &rpccfg.BaseApiConfig{}
 	}
@@ -194,22 +191,20 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 	}
 
 	return &BaseAPI{
-		filters:             f,
-		stateCache:          stateCache,
-		blocksLRU:           blocksLRU,
-		_blockReader:        blockReader,
-		_txnReader:          blockReader,
-		_txNumReader:        blockReader.TxnumReader(),
-		evmCallTimeout:      evmCallTimeout,
-		_engine:             engine,
-		receiptsGenerator:   receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
-		borReceiptGenerator: receipts.NewBorGenerator(blockReader, engine, stateCache, f),
-		balRegenerator:      bal.NewRegenerator(blockReader, engine, log.Root()),
-		dirs:                conf.Dirs,
-		bridgeReader:        bridgeReader,
-		blockRangeLimit:     conf.BlockRangeLimit,
-		getLogsMaxResults:   conf.GetLogsMaxResults,
-		logQueryLimit:       conf.LogQueryLimit,
+		filters:           f,
+		stateCache:        stateCache,
+		blocksLRU:         blocksLRU,
+		_blockReader:      blockReader,
+		_txnReader:        blockReader,
+		_txNumReader:      blockReader.TxnumReader(),
+		evmCallTimeout:    evmCallTimeout,
+		_engine:           engine,
+		receiptsGenerator: receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
+		balRegenerator:    bal.NewRegenerator(blockReader, engine, log.Root()),
+		dirs:              conf.Dirs,
+		blockRangeLimit:   conf.BlockRangeLimit,
+		getLogsMaxResults: conf.GetLogsMaxResults,
+		logQueryLimit:     conf.LogQueryLimit,
 	}
 }
 
@@ -257,37 +252,11 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 	return api._txnReader.TxnLookup(ctx, overlayTx, txnHash)
 }
 
-func (api *BaseAPI) txnLookupWithBorFallback(ctx context.Context, tx kv.Tx, txnHash common.Hash, chainConfig *chain.Config) (blockNum uint64, txNum uint64, isBorStateSyncTxn bool, ok bool, err error) {
-	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
-	if err != nil {
-		return 0, 0, false, false, err
-	}
-	if ok {
-		return blockNum, txNum, false, true, nil
-	}
-	if chainConfig.Bor == nil {
-		return 0, 0, false, false, nil
-	}
-	blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-	if err != nil {
-		return 0, 0, false, false, err
-	}
-	if !ok {
-		return 0, 0, false, false, nil
-	}
-	return blockNum, txNum, true, true, nil
-}
-
-// txnIndexInBlock derives the in-block txn index from a global txNum. Bor state sync
-// txns are not part of the block body, so they yield the -1 sentinel and the consistency
-// check is skipped (their txNum comes from a missed lookup).
-func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txNum uint64, isBorStateSyncTxn bool) (int, error) {
+// txnIndexInBlock derives the in-block txn index from a global txNum.
+func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txNum uint64) (int, error) {
 	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
 	if err != nil {
 		return 0, err
-	}
-	if isBorStateSyncTxn {
-		return -1, nil
 	}
 	if txNumMin+1 > txNum {
 		return 0, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
@@ -509,11 +478,6 @@ func (api *BaseAPI) commitmentHistoryEnabled(tx kv.Tx) (bool, error) {
 		api._commitmentHistoryEnabled.Store(&enabled)
 	}
 	return enabled, nil
-}
-
-type bridgeReader interface {
-	Events(ctx context.Context, blockHash common.Hash, blockNum uint64) ([]*types.Message, error)
-	EventTxnLookup(ctx context.Context, borTxHash common.Hash) (uint64, bool, error)
 }
 
 // APIImpl is implementation of the EthAPI interface based on remote Db access

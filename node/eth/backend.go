@@ -769,7 +769,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			backend.rpcDaemonStateCache,
 			blockReader,
 			backend.engine,
-			backend.polygonBridge,
 			jsonrpc.NewBaseApiConfig(&httpRpcCfg),
 		)
 		ethApi := jsonrpc.NewEthAPI(
@@ -1161,7 +1160,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 			}
 		}
 	}
-	witnessCache, witnessBuilder := jsonrpc.NewWitnessCacheBuilderAPI(enableWitnessCache, headCaptureMode, chainKv, s.ethRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine, s.polygonBridge)
+	witnessCache, witnessBuilder := jsonrpc.NewWitnessCacheBuilderAPI(enableWitnessCache, headCaptureMode, chainKv, s.ethRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &httpRpcCfg, s.engine)
 	if witnessBuilder != nil {
 		var headCh chan [][]byte
 		headCh, s.unsubscribeWitnessCache = s.notifications.Events.AddHeaderSubscription()
@@ -1185,7 +1184,7 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	// One APIList call even when MCP widens the namespace set, so the HTTP
 	// RPC server and MCP share the BaseApi block/receipt caches instead of
 	// each holding their own.
-	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, s.polygonBridge, s.heimdallService, testingEntry, witnessCache)
+	allAPIs := jsonrpc.APIList(chainKv, s.ethRpcClient, s.txPoolRpcClient, s.miningRpcClient, s.rpcFilters, s.rpcDaemonStateCache, blockReader, &apiCfg, s.engine, s.logger, testingEntry, witnessCache)
 	s.apiList = apisForNamespaces(allAPIs, append(slices.Clone(httpRpcCfg.API), "graphql"))
 
 	if config.MCPAddress != "" {

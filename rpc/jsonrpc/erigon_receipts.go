@@ -33,7 +33,6 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -351,11 +350,10 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			erigonLog.BlockNumber = hexutil.Uint64(blockNum)
 			erigonLog.BlockHash = blockHash
 			txi := int(log.TxIndex)
-			if txi == len(body.Transactions) {
-				erigonLog.TxHash = bortypes.ComputeBorTxHash(blockNum, blockHash)
-			} else {
-				erigonLog.TxHash = body.Transactions[txi].Hash()
+			if txi >= len(body.Transactions) {
+				return nil, fmt.Errorf("log txIndex %d out of range in block %d with %d txns", txi, blockNum, len(body.Transactions))
 			}
+			erigonLog.TxHash = body.Transactions[txi].Hash()
 			erigonLog.BlockTimestamp = hexutil.Uint64(timestamp)
 			erigonLog.Address = log.Address
 			erigonLog.Topics = log.Topics
@@ -418,7 +416,7 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	if err != nil {
 		return nil, err
 	}
-	receipts, borReceipt, err := api.getReceiptsWithBor(ctx, tx, chainConfig, block)
+	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, err
 	}
@@ -427,10 +425,6 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	for _, receipt := range receipts {
 		txn := block.Transactions()[receipt.TransactionIndex]
 		result = append(result, ethutils.MarshalReceipt(receipt, txn, chainConfig, block.HeaderNoCopy(), txn.Hash(), true, false))
-	}
-
-	if borReceipt != nil {
-		result = append(result, ethutils.MarshalReceipt(borReceipt, bortypes.NewBorTransaction(), chainConfig, block.HeaderNoCopy(), borReceipt.TxHash, false, false))
 	}
 
 	return result, nil

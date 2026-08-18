@@ -45,7 +45,7 @@ Testing tracing RPC API by generating patters of contracts invoking one another 
 func TestGeneratedDebugApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestExecModuleForTraces(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
 	var buf bytes.Buffer
 	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
@@ -132,7 +132,7 @@ func TestGeneratedDebugApi(t *testing.T) {
 func TestGeneratedTraceApi(t *testing.T) {
 	m := rpcdaemontest.CreateTestExecModuleForTraces(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	api := NewTraceAPI(baseApi, m.DB, &rpccfg.TraceApiConfig{})
 	traces, err := api.Block(context.Background(), rpc.BlockNumber(1), new(bool), nil)
 	if err != nil {
