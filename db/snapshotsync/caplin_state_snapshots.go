@@ -687,10 +687,14 @@ var errIncompleteStateRange = errors.New("state range not fully reconstructed")
 func dumpCaplinState(ctx context.Context, snapName string, kvGetter KeyValueGetter, fromSlot uint64, toSlot, blocksPerFile uint64, salt uint32, dirs datadir.Dirs, workers int, lvl log.Lvl, logger log.Logger, compress bool) error {
 	tmpDir, snapDir := dirs.Tmp, dirs.SnapCaplin
 
-	segName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, fromSlot, toSlot)
-	// a little bit ugly.
-	segName = strings.ReplaceAll(segName, "beaconblocks", snapName)
-	f, _, _ := snaptype.ParseFileName(snapDir, segName)
+	segName, err := caplinStateFileName(snapName, fromSlot, toSlot)
+	if err != nil {
+		return err
+	}
+	f, _, ok := snaptype.ParseFileName(snapDir, segName)
+	if !ok || f.Type == nil {
+		return fmt.Errorf("invalid caplin state snapshot filename %q", segName)
+	}
 
 	compressCfg := seg.DefaultCfg
 	compressCfg.Workers = workers
@@ -770,6 +774,18 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 	}
 
 	return nil
+}
+
+func caplinStateFileName(snapName string, fromSlot, toSlot uint64) (string, error) {
+	enum, ok := snaptype.ParseEnum(snapName)
+	if !ok || enum < snaptype.MinCaplinEnum+2 || enum >= snaptype.MinBorEnum {
+		return "", fmt.Errorf("unknown caplin state snapshot type %q", snapName)
+	}
+	typ := enum.Type()
+	if typ == nil {
+		return "", fmt.Errorf("unknown caplin state snapshot type %q", snapName)
+	}
+	return typ.FileName(version.ZeroVersion, fromSlot, toSlot), nil
 }
 
 type caplinStateDumpJob struct {

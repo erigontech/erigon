@@ -493,19 +493,19 @@ leaves `AllTypedSegments:1156` open, which is the path PR-2b lands on first.
 - Modify: `db/snapshotsync/caplin_state_snapshots.go`
 - Modify: `db/snapshotsync/caplinsnapschema/caplin_snap_schema.go`
 
-- [ ] `caplin_state_snapshots.go:690-692`: build the segment name from the state
+- [x] `caplin_state_snapshots.go:690-692`: build the segment name from the state
   type itself instead of `BeaconBlocks.FileName(...)` plus
   `strings.ReplaceAll(segName, "beaconblocks", snapName)`.
-- [ ] `caplinsnapschema/caplin_snap_schema.go:27-32`: take each state schema's
+- [x] `caplinsnapschema/caplin_snap_schema.go:27-32`: take each state schema's
   data and accessor versions from its own type rather than borrowing
   `BeaconBlocks`'s.
-- [ ] do **not** touch `kv.Proposers`. It is an entry in `ChaindataTables`
+- [x] do **not** touch `kv.Proposers`. It is an entry in `ChaindataTables`
   (`db/kv/tables.go:433`), so removing it drops a table from the chaindata
   schema — a separate change with its own risk, unrelated to registering types.
-- [ ] write a test asserting the name `dumpCaplinState` produces for a given
+- [x] write a test asserting the name `dumpCaplinState` produces for a given
   table and range is byte-identical to the current one, pinning the expected
   string literally — this is the compatibility guarantee of the whole PR
-- [ ] run `go test ./db/snapshotsync/...`, then `make lint && make erigon`
+- [x] run `go test ./db/snapshotsync/...`, then `make lint && make erigon`
 
 ---
 
