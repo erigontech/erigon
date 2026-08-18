@@ -463,7 +463,7 @@ func TestPollAssembledPayloadLogsUnknownPayload(t *testing.T) {
 	var output bytes.Buffer
 	root := log.Root()
 	previousHandler := root.GetHandler()
-	root.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	root.SetHandler(log.SyncHandler(log.StreamHandler(&output, log.LogfmtFormat())))
 	t.Cleanup(func() { root.SetHandler(previousHandler) })
 
 	now := time.Now()

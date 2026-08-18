@@ -171,12 +171,13 @@ func TestBlockBuilderReleasesABuildThatWedgesAfterObservingTheStop(t *testing.T)
 	}
 }
 
-func TestBlockBuilderRemainsDiscardedWhenCanceledBuildReturnsPayload(t *testing.T) {
+func TestBlockBuilderReplaysPayloadCompletedAfterDiscard(t *testing.T) {
 	t.Parallel()
 
+	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
 	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		<-ctx.Done()
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return want, nil
 	}, &Parameters{}, time.Minute, time.Minute)
 
 	b.Discard()
@@ -187,4 +188,65 @@ func TestBlockBuilderRemainsDiscardedWhenCanceledBuildReturnsPayload(t *testing.
 	}
 
 	require.True(t, b.Discarded())
+	for range 2 {
+		got, err := b.Stop(t.Context())
+		require.NoError(t, err)
+		require.Same(t, want, got)
+	}
+}
+
+func TestBlockBuilderStopPrefersCompletedOutcomeOverCanceledCaller(t *testing.T) {
+	t.Parallel()
+
+	wantBlock := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
+	wantErr := errors.New("build failed")
+	tests := []struct {
+		name   string
+		result *types.BlockWithReceipts
+		err    error
+	}{
+		{name: "payload", result: wantBlock},
+		{name: "error", err: wantErr},
+	}
+	for _, tc := range tests {
+		t.Run(tc.name, func(t *testing.T) {
+			b := NewBlockBuilder(t.Context(), func(context.Context, *Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+				return tc.result, tc.err
+			}, &Parameters{}, time.Minute, time.Minute)
+			select {
+			case <-b.done:
+			case <-time.After(5 * time.Second):
+				t.Fatal("builder did not finish")
+			}
+
+			ctx, cancel := context.WithCancel(t.Context())
+			cancel()
+			for range 100 {
+				got, err := b.Stop(ctx)
+				if tc.err != nil {
+					require.ErrorIs(t, err, tc.err)
+					continue
+				}
+				require.NoError(t, err)
+				require.Same(t, tc.result, got)
+			}
+		})
+	}
+}
+
+func TestBlockBuilderStopReturnsImmediatelyAfterDiscard(t *testing.T) {
+	t.Parallel()
+
+	release := make(chan struct{})
+	t.Cleanup(func() { close(release) })
+	b := NewBlockBuilder(t.Context(), func(context.Context, *Parameters, *atomic.Bool) (*types.BlockWithReceipts, error) {
+		<-release
+		return nil, errors.New("builder stopped")
+	}, &Parameters{}, time.Minute, time.Minute)
+	b.Discard()
+
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	_, err := b.Stop(ctx)
+	require.ErrorIs(t, err, ErrDiscarded)
 }

@@ -61,6 +61,9 @@ func StageBuilderFinishCfg(
 
 func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) error {
 	const logPrefix = "BuilderFinish"
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	current := cfg.builderState.BuiltBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.

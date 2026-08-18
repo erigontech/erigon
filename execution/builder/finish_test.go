@@ -34,6 +34,19 @@ type recordingSealEngine struct {
 	called atomic.Bool
 }
 
+type cancelOnSecondCheckContext struct {
+	context.Context
+	cancel context.CancelFunc
+	checks atomic.Uint32
+}
+
+func (c *cancelOnSecondCheckContext) Err() error {
+	if c.checks.Add(1) == 2 {
+		c.cancel()
+	}
+	return c.Context.Err()
+}
+
 func (e *recordingSealEngine) Seal(rules.ChainHeaderReader, *types.BlockWithReceipts, chan<- *types.BlockWithReceipts, <-chan struct{}) error {
 	e.called.Store(true)
 	return nil
@@ -45,6 +58,24 @@ func TestFinishBlockDoesNotSealAfterCancellation(t *testing.T) {
 	engine := &recordingSealEngine{}
 	store := NewLatestBlockBuiltStore()
 	cfg := BuilderFinishCfg{
+		engine:                engine,
+		latestBlockBuiltStore: store,
+	}
+
+	err := finishBlock(ctx, nil, cfg, log.Root())
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, engine.called.Load())
+	require.Nil(t, store.BlockBuilt())
+}
+
+func TestFinishBlockDoesNotSealWhenCanceledDuringAssembly(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	testCtx := &cancelOnSecondCheckContext{Context: ctx, cancel: cancel}
+	engine := &recordingSealEngine{}
+	store := NewLatestBlockBuiltStore()
+	cfg := BuilderFinishCfg{
 		engine: engine,
 		builderState: BuilderState{
 			BuiltBlock: &exec.AssembledBlock{Header: &types.Header{}},
@@ -52,7 +83,7 @@ func TestFinishBlockDoesNotSealAfterCancellation(t *testing.T) {
 		latestBlockBuiltStore: store,
 	}
 
-	err := finishBlock(ctx, nil, cfg, log.Root())
+	err := finishBlock(testCtx, nil, cfg, log.Root())
 
 	require.ErrorIs(t, err, context.Canceled)
 	require.False(t, engine.called.Load())

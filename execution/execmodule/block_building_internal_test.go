@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -37,6 +38,17 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/txnprovider"
 )
+
+type doneObservedContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
 
 // newTestModule builds a module whose builders run builderFunc. Every test needs the same fields,
 // and getting the config or the context wrong changes the builder's own deadline silently.
@@ -668,14 +680,12 @@ func TestGetAssembledBlockReportsDiscardDuringStopAsUnknown(t *testing.T) {
 
 func TestGetAssembledBlockKeepsPayloadCompletedAsDiscardLands(t *testing.T) {
 	timestamp := newTestTimestamp()
-	stopObserved := make(chan struct{})
 	finish := make(chan struct{})
 	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
 	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
-		close(stopObserved)
 		<-finish
 		return want, nil
 	})
@@ -688,8 +698,10 @@ func TestGetAssembledBlockKeepsPayloadCompletedAsDiscardLands(t *testing.T) {
 		err    error
 	}
 	collected := make(chan response, 1)
+	stopObserved := make(chan struct{})
+	stopCtx := &doneObservedContext{Context: t.Context(), observed: stopObserved}
 	go func() {
-		result, err := module.GetAssembledBlock(t.Context(), assembled.PayloadID)
+		result, err := module.GetAssembledBlock(stopCtx, assembled.PayloadID)
 		collected <- response{result: result, err: err}
 	}()
 	select {
@@ -708,6 +720,11 @@ func TestGetAssembledBlockKeepsPayloadCompletedAsDiscardLands(t *testing.T) {
 	case <-time.After(5 * time.Second):
 		t.Fatal("payload collection did not finish")
 	}
+
+	replayed, err := module.GetAssembledBlock(t.Context(), assembled.PayloadID)
+	require.NoError(t, err)
+	require.False(t, replayed.Unknown)
+	require.Same(t, want, replayed.Block)
 }
 
 func TestGetAssembledBlockKeepsFailureCompletedBeforeDiscard(t *testing.T) {

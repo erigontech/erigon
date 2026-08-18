@@ -112,20 +112,16 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 		log.Warn("Stopping block builder due to max build time exceeded")
 		graceCtx, cancelGrace := context.WithTimeout(ctx, stopGrace)
 		defer cancelGrace()
-		if _, err := builder.Stop(graceCtx); err != nil {
-			if errors.Is(err, ErrDiscarded) {
-				return
-			}
-			select {
-			case <-builder.done:
-				// The build ended within the grace with an error of its own, logged where it happened.
-			default:
-				builder.Discard()
-				log.Warn("Discarded unresponsive block builder due to max build time exceeded")
-			}
+		_, err := builder.Stop(graceCtx)
+		if err == nil {
+			log.Debug("Stopped block builder due to max build time exceeded")
 			return
 		}
-		log.Debug("Stopped block builder due to max build time exceeded")
+		if errors.Is(err, ErrDiscarded) || builder.finished() {
+			return
+		}
+		builder.Discard()
+		log.Warn("Discarded unresponsive block builder due to max build time exceeded")
 	}()
 
 	return builder
@@ -134,22 +130,38 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
 	b.interrupt.Store(true)
 	if b.Discarded() {
-		return nil, ErrDiscarded
+		return b.readResult()
 	}
 
 	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	case <-b.done:
+	case <-ctx.Done():
+		select {
+		case <-b.done:
+		default:
+			return nil, ctx.Err()
+		}
 	}
+	return b.readResult()
+}
 
+func (b *BlockBuilder) readResult() (*types.BlockWithReceipts, error) {
 	b.mu.Lock()
 	defer b.mu.Unlock()
-	// Keep a payload that completed as discard arrived.
-	if b.state.Load() == blockBuilderDiscarded && (b.result == nil || b.err != nil) {
+
+	if b.Discarded() && (b.result == nil || b.err != nil) {
 		return nil, ErrDiscarded
 	}
 	return b.result, b.err
+}
+
+func (b *BlockBuilder) finished() bool {
+	select {
+	case <-b.done:
+		return true
+	default:
+		return false
+	}
 }
 
 // Discard cancels the build without waiting for it to return.
@@ -178,11 +190,9 @@ func (b *BlockBuilder) Failed() bool {
 }
 
 func (b *BlockBuilder) Block() *types.Block {
-	b.mu.Lock()
-	defer b.mu.Unlock()
-
-	if b.result == nil {
+	result, err := b.readResult()
+	if err != nil || result == nil {
 		return nil
 	}
-	return b.result.Block
+	return result.Block
 }
