@@ -270,19 +270,19 @@ move; `CaplinStateSnapshots` still keys its own maps by string.
 - Modify: `db/snaptype/type.go`
 - Modify: `db/snaptype/enum_registry_test.go`
 
-- [ ] `db/snaptype/type.go:406-410`: `MinBorEnum` 12 → 50, `MaxEnum` 16 → 54.
+- [x] `db/snaptype/type.go:406-410`: `MinBorEnum` 12 → 50, `MaxEnum` 16 → 54.
   `MinCoreEnum` and `MinCaplinEnum` unchanged. Caplin owns `[10, 50)` — 40 slots
   for 35 types, five spare so the next fork adding tables does not have to move
   bor again.
-- [ ] confirm nothing hardcodes an enum literal: bor is `MinBorEnum + n`
+- [x] confirm nothing hardcodes an enum literal: bor is `MinBorEnum + n`
   (`polygon/heimdall/types.go:71-74`), core is `MinCoreEnum + n`
   (`db/snaptype2/block_types.go:69-77`).
-- [ ] write a test over the constants alone — `MinCoreEnum < MinCaplinEnum <
+- [x] write a test over the constants alone — `MinCoreEnum < MinCaplinEnum <
   MinBorEnum < MaxEnum` and `MinBorEnum - MinCaplinEnum >= 35`. Do **not**
   reference `CaplinStateSnapshotTypes` here: it does not exist until Task 2 and
   a forward reference is a compile error, which fails the package build rather
   than the assertion.
-- [ ] run `go test ./db/snaptype/...` — must pass before task 2
+- [x] run `go test ./db/snaptype/...` — must pass before task 2
 
 ---
 
