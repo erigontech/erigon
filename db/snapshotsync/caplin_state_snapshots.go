@@ -30,6 +30,8 @@ import (
 	"slices"
 	"sort"
 
+	"github.com/tidwall/btree"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/common"
@@ -265,7 +267,7 @@ func (s *CaplinStateSnapshots) TypeNames() []string {
 	return names
 }
 
-func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
+func (s *CaplinStateSnapshots) visibleRangesForType(name string) []Range {
 	enum, ok := s.typeEnums[name]
 	if !ok {
 		return nil
@@ -278,10 +280,42 @@ func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
 	return ranges
 }
 
+func (s *CaplinStateSnapshots) coveredRangesForType(name string) []Range {
+	enum, ok := s.typeEnums[name]
+	if !ok {
+		return nil
+	}
+
+	dirty := btree.NewBTreeGOptions[*DirtySegment](DirtySegmentLess, btree.Options{Degree: 128, NoLocks: false})
+	// WalkDirtySegments holds dirtyLock.RLock during the callback; copy metadata
+	// only and do not open, close, or republish files here.
+	s.WalkDirtySegments(enum, func(segment *DirtySegment) bool {
+		if !segment.IsIndexed() {
+			return true
+		}
+		dirty.Set(&DirtySegment{
+			Range:   segment.Range,
+			indexes: slices.Clone(segment.indexes),
+			segType: segment.segType,
+			version: segment.version,
+		})
+		return true
+	})
+
+	// The temporary segments are not part of a pinned visible generation. Copy only
+	// their ranges before returning so a later reclaim cannot invalidate the result.
+	visible := buildVisibleSegments(dirty)
+	ranges := make([]Range, 0, len(visible))
+	for _, segment := range visible {
+		ranges = append(ranges, segment.Range)
+	}
+	return ranges
+}
+
 // ContiguousCoverageEnd returns the end of the unbroken visible-segment run that
 // starts at slot 0 for the given type, or 0 when coverage is not rooted at genesis.
 func (s *CaplinStateSnapshots) ContiguousCoverageEnd(typeName string) uint64 {
-	ranges := s.coveredRangesForType(typeName)
+	ranges := s.visibleRangesForType(typeName)
 	slices.SortFunc(ranges, func(a, b Range) int { return cmp.Compare(a.from, b.from) })
 	var end uint64
 	for _, r := range ranges {

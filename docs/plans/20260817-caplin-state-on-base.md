@@ -736,11 +736,11 @@ hole heals.
 - Modify: `db/snapshotsync/caplin_state_snapshots.go`
 - Modify: `db/snapshotsync/caplin_state_coverage_test.go`
 
-- [ ] split the two readers into two named accessors — `ContiguousCoverageEnd`
+- [x] split the two readers into two named accessors — `ContiguousCoverageEnd`
   currently *calls* `coveredRangesForType` (`:298`), so two backing sets need
   two functions. The planner-facing one reads dirty; `ContiguousCoverageEnd`
   keeps the visible one.
-- [ ] the dirty-backed accessor is `RecalcVisibleSegments` **minus the
+- [x] the dirty-backed accessor is `RecalcVisibleSegments` **minus the
   gap-truncation block only** (`snapshots.go:852-863`). Keep the `IsIndexed`
   gate (`:815`), the equal-range version dedup (`:819-829`) and the subset
   suppression (`:830-843`) — a raw dirty walk returns both segments in
@@ -749,16 +749,16 @@ hole heals.
   `[0,150k)` + `[100k,150k)`. The gap block is a contiguous trailing section
   over the local slice, so split it into a builder plus a `truncateAtGap`
   composer; `RecalcVisibleSegments` has one caller (`:890`).
-- [ ] the builder's output holds `src *DirtySegment` pointers belonging to **no
+- [x] the builder's output holds `src *DirtySegment` pointers belonging to **no
   pinned generation** — it runs outside a `recalcVisibleFiles` publish, so
   nothing refcounts them. Reading `.Range` and discarding the slice is safe;
   returning these from any accessor is a use-after-munmap now that reclaim is
   live. Say so at the function, since the type looks identical to the pinned one.
-- [ ] the `IsIndexed` gate is the invariant that matters, not the truncation:
+- [x] the `IsIndexed` gate is the invariant that matters, not the truncation:
   `dumpCaplinState` never calls `TryAcquireRange`, so a `.seg` written but not
   yet indexed can enter dirty, and only that gate keeps it out of the planner.
   Retired segments leave dirty before unlink, so they cannot leak in.
-- [ ] read dirty through `WalkDirtySegments` (`snapshots.go:1076-1080`), which
+- [x] read dirty through `WalkDirtySegments` (`snapshots.go:1076-1080`), which
   takes `dirtyLock.RLock()` — do not reach into the btrees directly.
   `DumpCaplinState` calls the accessor once per type (`:826-828`), sequentially
   and never nested, so a writer arriving mid-loop delays but cannot wedge, and
@@ -768,18 +768,18 @@ hole heals.
   that, since `View.Close` can reach `dirtyLock.Lock()` through
   `reclaimRetired`. `sync.RWMutex` is not reentrant: state the constraint at the
   callback.
-- [ ] keep `ContiguousCoverageEnd` on the visible set. Not because the numbers
+- [x] keep `ContiguousCoverageEnd` on the visible set. Not because the numbers
   differ — it truncates at the first gap itself (`:297-311`), so both inputs
   give the same answer today — but because the visible set is by construction
   what reads see, which keeps the prune boundary from desyncing from reads if a
   future visibility filter is added.
-- [ ] write a test for the hole scenario: dump-plan over `[0,50k)` + `[100k,150k)`
+- [x] write a test for the hole scenario: dump-plan over `[0,50k)` + `[100k,150k)`
   and assert the planner proposes only `[50k,100k)`, not a re-dump of
   `[100k,150k)`
-- [ ] write a test asserting an unindexed segment is excluded from the
+- [x] write a test asserting an unindexed segment is excluded from the
   planner-facing accessor, the invariant that keeps prune from advancing past
   what reads can serve
-- [ ] run `go test ./db/snapshotsync/... ./cl/antiquary/...` — must pass before task 11
+- [x] run `go test ./db/snapshotsync/... ./cl/antiquary/...` — must pass before task 11
 
 ---
 
