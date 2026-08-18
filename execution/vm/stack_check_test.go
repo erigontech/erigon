@@ -66,10 +66,8 @@ func TestStackBoundsInvariant(t *testing.T) {
 		"berlin":           &berlinInstructionSet,
 		"london":           &londonInstructionSet,
 		"shanghai":         &shanghaiInstructionSet,
-		"napoli":           &napoliInstructionSet,
 		"cancun":           &cancunInstructionSet,
 		"prague":           &pragueInstructionSet,
-		"bhilai":           &bhilaiInstructionSet,
 		"osaka":            &osakaInstructionSet,
 		"amsterdam":        &amsterdamInstructionSet,
 	}

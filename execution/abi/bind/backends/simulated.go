@@ -57,7 +57,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/polygon/bor"
 )
 
 // This nil assignment ensures at compile time that SimulatedBackend implements bind.ContractBackend.
@@ -93,8 +92,6 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	genesis := types.Genesis{Config: config, GasLimit: gasLimit, Alloc: alloc}
 	var engine rules.Engine
 	switch {
-	case config.Bor != nil:
-		engine = bor.NewFaker()
 	case config.TerminalTotalDifficultyPassed:
 		engine = merge.NewFaker(ethash.NewFaker())
 	default:

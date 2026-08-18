@@ -146,10 +146,6 @@ type TxPool struct {
 	totalBlobsInPool        atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
-	agraBlock               *uint64
-	isPostAgra              atomic.Bool
-	bhilaiBlock             *uint64
-	isPostBhilai            atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
@@ -266,10 +262,6 @@ func New(
 	res.avgBlockTimeMs.Store(12_000)
 
 	res.shanghaiTime = chainConfig.ShanghaiTime
-	if chainConfig.Bor != nil {
-		res.agraBlock = chainConfig.Bor.GetAgraBlock()
-		res.bhilaiBlock = chainConfig.Bor.GetBhilaiBlock()
-	}
 	res.cancunTime = chainConfig.CancunTime
 	res.pragueTime = chainConfig.PragueTime
 	res.osakaTime = chainConfig.OsakaTime
@@ -783,8 +775,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 
 	best := p.pending.best
 
-	isEIP3860 := p.isShanghai() || p.isAgra()
-	isEIP7623 := p.isPrague() || p.isBhilai()
+	isEIP3860 := p.isShanghai()
+	isEIP7623 := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
 
 	txns.Resize(uint(min(n, len(best.ms))))
@@ -999,8 +991,8 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) (txpoolcfg.DiscardReason, error) {
-	isEIP3860 := p.isShanghai() || p.isAgra()
-	isPrague := p.isPrague() || p.isBhilai()
+	isEIP3860 := p.isShanghai()
+	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
 	isEIP7954 := isAmsterdam
 	if txn.IsCreation() {
@@ -1281,50 +1273,6 @@ func isTimeBasedForkActivated(isPostFlag *atomic.Bool, forkTime *uint64) bool {
 
 func (p *TxPool) isShanghai() bool {
 	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
-}
-
-func (p *TxPool) isBlockNumBasedForkActivated(isPostFlag *atomic.Bool, forkBlockNum *uint64) bool {
-	// once this flag has been set for the first time we no longer need to check the block
-	set := isPostFlag.Load()
-	if set {
-		return true
-	}
-	if forkBlockNum == nil {
-		return false
-	}
-	forkBlock := *forkBlockNum
-
-	// a zero here means the fork is always active
-	if forkBlock == 0 {
-		isPostFlag.Swap(true)
-		return true
-	}
-
-	tx, err := p._chainDB.BeginRo(context.Background())
-	if err != nil {
-		return false
-	}
-	defer tx.Rollback()
-
-	headBlock, err := chain.CurrentBlockNumber(tx)
-	if headBlock == nil || err != nil {
-		return false
-	}
-	// A new block is built on top of the head block, so when the head is forkBlock-1,
-	// the new block should use the new fork rules.
-	activated := (*headBlock + 1) >= forkBlock
-	if activated {
-		isPostFlag.Swap(true)
-	}
-	return activated
-}
-
-func (p *TxPool) isAgra() bool {
-	return p.isBlockNumBasedForkActivated(&p.isPostAgra, p.agraBlock)
-}
-
-func (p *TxPool) isBhilai() bool {
-	return p.isBlockNumBasedForkActivated(&p.isPostBhilai, p.bhilaiBlock)
 }
 
 func (p *TxPool) isCancun() bool {

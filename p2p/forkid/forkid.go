@@ -232,18 +232,6 @@ func GatherForks(config *chain.Config, genesisTime uint64) (heightForks []uint64
 		heightForks = append(heightForks, *config.Aura.PosdaoTransition)
 	}
 
-	if config.Bor != nil {
-		if config.Bor.GetAgraBlock() != nil {
-			heightForks = append(heightForks, *config.Bor.GetAgraBlock())
-		}
-		if config.Bor.GetNapoliBlock() != nil {
-			heightForks = append(heightForks, *config.Bor.GetNapoliBlock())
-		}
-		if config.Bor.GetBhilaiBlock() != nil {
-			heightForks = append(heightForks, *config.Bor.GetBhilaiBlock())
-		}
-	}
-
 	// Sort the fork block numbers & times to permit chronological XOR
 	slices.Sort(heightForks)
 	slices.Sort(timeForks)

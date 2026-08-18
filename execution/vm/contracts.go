@@ -73,12 +73,8 @@ func Precompiles(chainRules *chain.Rules) PrecompiledContracts {
 	switch {
 	case chainRules.IsOsaka:
 		return PrecompiledContractsOsaka
-	case chainRules.IsBhilai:
-		return PrecompiledContractsBhilai
 	case chainRules.IsPrague:
 		return PrecompiledContractsPrague
-	case chainRules.IsNapoli:
-		return PrecompiledContractsNapoli
 	case chainRules.IsCancun:
 		return PrecompiledContractsCancun
 	case chainRules.IsBerlin:
@@ -155,39 +151,6 @@ var PrecompiledContractsCancun = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x0a})): &pointEvaluation{},
 }
 
-var PrecompiledContractsNapoli = PrecompiledContracts{
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01})):       &ecrecover{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x02})):       &sha256hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x03})):       &ripemd160hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x04})):       &dataCopy{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x05})):       &bigModExp{eip2565: true},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x06})):       &bn254AddIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x07})):       &bn254ScalarMulIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x08})):       &bn254PairingIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x09})):       &blake2F{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{},
-}
-
-var PrecompiledContractsBhilai = PrecompiledContracts{
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01})):       &ecrecover{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x02})):       &sha256hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x03})):       &ripemd160hash{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x04})):       &dataCopy{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x05})):       &bigModExp{eip2565: true},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x06})):       &bn254AddIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x07})):       &bn254ScalarMulIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x08})):       &bn254PairingIstanbul{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x09})):       &blake2F{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0b})):       &bls12381G1Add{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0c})):       &bls12381G1MultiExp{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0d})):       &bls12381G2Add{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0e})):       &bls12381G2MultiExp{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x0f})):       &bls12381Pairing{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x10})):       &bls12381MapFpToG1{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x11})):       &bls12381MapFp2ToG2{},
-	accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00})): &p256Verify{},
-}
-
 var PrecompiledContractsPrague = PrecompiledContracts{
 	accounts.InternAddress(common.BytesToAddress([]byte{0x01})): &ecrecover{},
 	accounts.InternAddress(common.BytesToAddress([]byte{0x02})): &sha256hash{},
@@ -232,8 +195,6 @@ var PrecompiledContractsOsaka = PrecompiledContracts{
 var (
 	PrecompiledAddressesOsaka     []accounts.Address
 	PrecompiledAddressesPrague    []accounts.Address
-	PrecompiledAddressesNapoli    []accounts.Address
-	PrecompiledAddressesBhilai    []accounts.Address
 	PrecompiledAddressesCancun    []accounts.Address
 	PrecompiledAddressesBerlin    []accounts.Address
 	PrecompiledAddressesIstanbul  []accounts.Address
@@ -257,12 +218,6 @@ func init() {
 	for k := range PrecompiledContractsCancun {
 		PrecompiledAddressesCancun = append(PrecompiledAddressesCancun, k)
 	}
-	for k := range PrecompiledContractsNapoli {
-		PrecompiledAddressesNapoli = append(PrecompiledAddressesNapoli, k)
-	}
-	for k := range PrecompiledContractsBhilai {
-		PrecompiledAddressesBhilai = append(PrecompiledAddressesBhilai, k)
-	}
 	for k := range PrecompiledContractsPrague {
 		PrecompiledAddressesPrague = append(PrecompiledAddressesPrague, k)
 	}
@@ -276,12 +231,8 @@ func ActivePrecompiles(rules *chain.Rules) []accounts.Address {
 	switch {
 	case rules.IsOsaka:
 		return PrecompiledAddressesOsaka
-	case rules.IsBhilai:
-		return PrecompiledAddressesBhilai
 	case rules.IsPrague:
 		return PrecompiledAddressesPrague
-	case rules.IsNapoli:
-		return PrecompiledAddressesNapoli
 	case rules.IsCancun:
 		return PrecompiledAddressesCancun
 	case rules.IsBerlin:

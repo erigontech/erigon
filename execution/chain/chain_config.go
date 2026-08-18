@@ -434,27 +434,9 @@ func (c *Config) IsShanghai(time uint64) bool {
 	return isForked(c.ShanghaiTime, time)
 }
 
-// IsAgra returns whether num is either equal to the Agra fork block or greater.
-// The Agra hard fork is based on the Shanghai hard fork, but it doesn't include withdrawals.
-// Also Agra is activated based on the block number rather than the timestamp.
-// Refer to https://forum.polygon.technology/t/pip-28-agra-hardfork
-func (c *Config) IsAgra(num uint64) bool {
-	return (c != nil) && (c.Bor != nil) && c.Bor.IsAgra(num)
-}
-
 // Refer to https://forum.polygon.technology/t/pip-33-napoli-upgrade
-func (c *Config) IsNapoli(num uint64) bool {
-	return (c != nil) && (c.Bor != nil) && c.Bor.IsNapoli(num)
-}
-
-func (c *Config) IsAhmedabad(num uint64) bool {
-	return (c != nil) && (c.Bor != nil) && c.Bor.IsAhmedabad(num)
-}
 
 // Refer to https://forum.polygon.technology/t/pip-63-bhilai-hardfork
-func (c *Config) IsBhilai(num uint64) bool {
-	return (c != nil) && (c.Bor != nil) && c.Bor.IsBhilai(num)
-}
 
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time uint64) bool {
@@ -869,7 +851,7 @@ type Rules struct {
 	IsHomestead, IsTangerineWhistle, IsSpuriousDragon bool
 	IsByzantium, IsConstantinople, IsPetersburg       bool
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
-	IsCancun, IsNapoli, IsAhmedabad, IsBhilai         bool
+	IsCancun                                          bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
