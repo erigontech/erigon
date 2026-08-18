@@ -39,11 +39,13 @@ import (
 
 type OpType int
 
-const readType = 0
-const writeType = 1
-const otherType = 2
-const greenTick = "✅"
-const redCross = "❌"
+const (
+	readType  = 0
+	writeType = 1
+	otherType = 2
+	greenTick = "✅"
+	redCross  = "❌"
+)
 
 const threeRockets = "🚀🚀🚀"
 
@@ -76,7 +78,6 @@ type Timer func(txIdx int, opIdx int) time.Duration
 type Sender func(int) accounts.Address
 
 func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *testExecTask {
-
 	return &testExecTask{
 		TxTask: &exec.TxTask{
 			Header: &types.Header{
@@ -128,7 +129,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 	chainConfig *chain.Config,
 	chainReader rules.ChainReader,
 	dirs datadir.Dirs,
-	calcFees bool) *exec.TxResult {
+	calcFees bool,
+) *exec.TxResult {
 	// Sleep for 50 microsecond to simulate setup time
 	sleepWithContext(t.ctx, time.Microsecond*50) //nolint:errcheck
 
@@ -158,7 +160,8 @@ func (t *testExecTask) Execute(evm *vm.EVM,
 					if nonce, _, ok := vm.ReadNonce(k.addr, version.TxIndex); ok && int(nonce) != t.nonce {
 						return &exec.TxResult{Err: protocol.ErrExecAbortError{
 							DependencyTxIndex: -1,
-							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce)}}
+							OriginError:       fmt.Errorf("invalid nonce: got: %d, expected: %d", nonce, t.nonce),
+						}}
 					}
 				}
 			}
@@ -253,8 +256,8 @@ type opkey struct {
 }
 
 var randomPathGenerator = func(i int, j int, total int) opkey {
-	addr := accounts.InternAddress(common.BigToAddress((big.NewInt(int64(i % 10)))))
-	hash := accounts.InternKey(common.BigToHash((big.NewInt(int64(total)))))
+	addr := accounts.InternAddress(common.BigToAddress(big.NewInt(int64(i % 10))))
+	hash := accounts.InternKey(common.BigToHash(big.NewInt(int64(total))))
 	return opkey{addr, hash, state.StoragePath}
 }
 
@@ -268,9 +271,11 @@ var dexPathGenerator = func(i int, j int, total int) opkey {
 	}
 }
 
-var readTime = randTimeGenerator(4*time.Microsecond, 12*time.Microsecond)
-var writeTime = randTimeGenerator(2*time.Microsecond, 6*time.Microsecond)
-var nonIOTime = randTimeGenerator(1*time.Microsecond, 2*time.Microsecond)
+var (
+	readTime  = randTimeGenerator(4*time.Microsecond, 12*time.Microsecond)
+	writeTime = randTimeGenerator(2*time.Microsecond, 6*time.Microsecond)
+	nonIOTime = randTimeGenerator(1*time.Microsecond, 2*time.Microsecond)
+)
 
 func taskFactory(numTask int, sender Sender, readsPerT int, writesPerT int, nonIOPerT int, pathGenerator PathGenerator, readTime Timer, writeTime Timer, nonIOTime Timer) ([]exec.Task, time.Duration) {
 	exec := make([]exec.Task, 0, numTask)
@@ -1453,7 +1458,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1536,7 +1541,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1609,7 +1614,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1684,7 +1689,7 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil, nil)
 	be.tasks = []*execTask{eTask0, eTask1}
 	be.results = []*execResult{nil, nil}
 	// tx 0 was "finalized" without a receipt — the invariant nextResult
@@ -1743,7 +1748,7 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 			pe.in = exec.NewQueueWithRetry(16)
 			t.Cleanup(pe.in.Close)
 			gasPool := new(protocol.GasPool).AddGas(10_000_000)
-			be := newBlockExec(newParallelTestBlock(tc.blockNum), gasPool, nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
+			be := newBlockExec(newParallelTestBlock(tc.blockNum), gasPool, nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil, nil)
 			eTask := &execTask{Task: txTask, index: 0}
 			be.tasks = []*execTask{eTask}
 			be.results = []*execResult{nil}
@@ -1916,6 +1921,23 @@ func BenchmarkDispatchPendingCompaction(b *testing.B) {
 			}
 		})
 	}
+}
+
+// The apply loop's readers (fee calc, finalize syscalls, WriteSet.Normalize)
+// must use the per-block state cache the block's workers fill — a private one
+// starts empty on every block, so each address costs a domain read.
+func TestBlockExecUsesTaskStateCache(t *testing.T) {
+	cache := state.NewBlockStateCache()
+	header := &types.Header{Number: *uint256.NewInt(7)}
+	block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
+	tasks := []exec.Task{&exec.TxTask{Header: header, BlockStateCache: cache}}
+
+	// A busy map keeps processRequest from scheduling the block for execution.
+	pe := &parallelExecutor{blockExecutors: map[uint64]*blockExecutor{0: {}}}
+	require.NoError(t, pe.processRequest(context.Background(), &execRequest{block: block, tasks: tasks}))
+	require.Same(t, cache, pe.blockExecutors[7].blockStateCache)
+
+	require.NotNil(t, newBlockExec(nil, nil, nil, nil, nil, false, nil, blockStateCacheOf(nil)).blockStateCache)
 }
 
 // logEmittingSyscallEngine drives a fixed number of block-end system calls at

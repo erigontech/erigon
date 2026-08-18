@@ -728,7 +728,8 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task
-			// Per-block committed state cache for parallel workers' GetCommittedState.
+			// Per-block committed state cache, shared by the block's workers and
+			// (in parallel exec) its apply loop.
 			blockStateCache := state.NewBlockStateCache()
 
 			blockStartTxNum := inputTxNum
