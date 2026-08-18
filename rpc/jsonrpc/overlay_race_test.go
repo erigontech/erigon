@@ -1037,3 +1037,136 @@ func TestFeeHistory_HeadCommittedDuringTxAcquisition(t *testing.T) {
 		"a commit and unpublish landing during tx acquisition must not hide the head block")
 	require.Equal(t, h.overlayHeader.BaseFee.ToBig(), got.BaseFee[0].ToInt())
 }
+
+// commitSiblingOfCommittedBlock commits a same-height sibling of an already
+// committed block, replacing the canonical marker at that height the way a
+// reorg landing between two tx opens does.
+func commitSiblingOfCommittedBlock(t *testing.T, h *overlayAheadHarness, number uint64) *types.Header {
+	t.Helper()
+	rwTx, err := h.m.DB.BeginRw(h.m.Ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	committed := rawdb.ReadHeaderByNumber(rwTx, number)
+	require.NotNil(t, committed)
+
+	sibling := types.CopyHeader(committed)
+	sibling.BaseFee = uint256.NewInt(overlayRaceBaseFee + 3333)
+	require.NotEqual(t, committed.Hash(), sibling.Hash())
+	writeHeadBlockMarkers(t, rwTx, sibling, &types.Body{})
+	require.NoError(t, rwTx.Commit())
+	return sibling
+}
+
+// TestGasPriceOracle_ForkRejectsDivergentSnapshot pins that a fork is not used
+// when its own database snapshot no longer agrees with the chain the parent
+// resolved: a child tx never shares the parent's snapshot, so a reorg
+// committed after the parent opened would otherwise let one request mix block
+// identities from two chains. Fork's documented answer is a nil backend, which
+// sends the caller to sequential reads on the parent tx.
+func TestGasPriceOracle_ForkRejectsDivergentSnapshot(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	backend := NewGasPriceOracleBackend(h.m.DB, h.base.filters.WithTemporalOverlay(tx), h.base)
+
+	commitSiblingOfCommittedBlock(t, h, overlayRaceChainSize)
+
+	forked, cleanup, err := backend.Fork(h.m.Ctx)
+	require.NoError(t, err)
+	if cleanup != nil {
+		cleanup()
+	}
+	require.Nil(t, forked,
+		"a fork whose snapshot carries a reorg the parent never saw must degrade to sequential reads")
+}
+
+// TestGasPriceOracle_ForkKeepsParallelAcrossAppend pins the other side of that
+// guard: a block appended after the parent opened leaves every identity the
+// parent resolved intact, so the fan-out must stay parallel.
+func TestGasPriceOracle_ForkKeepsParallelAcrossAppend(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	backend := NewGasPriceOracleBackend(h.m.DB, h.base.filters.WithTemporalOverlay(tx), h.base)
+
+	commitOverlayBlock(t, h)
+
+	forked, cleanup, err := backend.Fork(h.m.Ctx)
+	require.NoError(t, err)
+	require.NotNil(t, forked,
+		"an appended block changes no identity the parent resolved, so the fork must stay usable")
+	defer cleanup()
+
+	head, err := forked.HeaderByNumber(h.m.Ctx, rpc.LatestBlockNumber)
+	require.NoError(t, err)
+	require.NotNil(t, head)
+	require.Equal(t, h.overlayHeader.Hash(), head.Hash())
+}
+
+func saveSnapshotsStageProgress(t *testing.T, h *overlayAheadHarness, number uint64) {
+	t.Helper()
+	rwTx, err := h.m.DB.BeginRw(h.m.Ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Snapshots, number))
+	require.NoError(t, rwTx.Commit())
+}
+
+// TestFeeHistory_SnapshotsStageProgressIsNotTheFrozenBoundary pins that the
+// number-keyed cache regime follows what the canonical markers say is retired,
+// not the Snapshots stage progress: that progress tracks
+// min(Headers, Bodies, Senders, TxLookup) and on a synced node sits at the
+// head, so trusting it keys reorgable heights by number and lets a dead block
+// be served from the cache.
+func TestFeeHistory_SnapshotsStageProgressIsNotTheFrozenBoundary(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	saveSnapshotsStageProgress(t, h, overlayRaceChainSize)
+	api := newEthApiForTest(h.base, h.m.DB, nil, nil)
+
+	first, err := api.FeeHistory(h.m.Ctx, 2, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, first.BaseFee, 3)
+
+	sibling := publishCommittedSiblingOverlay(t, h, overlayRaceChainSize)
+
+	second, err := api.FeeHistory(h.m.Ctx, 1, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Equal(t, sibling.Number.ToBig(), second.OldestBlock.ToInt())
+	require.Equal(t, sibling.BaseFee.ToBig(), second.BaseFee[0].ToInt(),
+		"a height the Snapshots stage progress covers is still reorgable, so it must not be cached by number")
+}
+
+func pruneCanonicalMarkersBelow(t *testing.T, h *overlayAheadHarness, threshold uint64) {
+	t.Helper()
+	rwTx, err := h.m.DB.BeginRw(h.m.Ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for number := uint64(1); number < threshold; number++ {
+		require.NoError(t, rwTx.Delete(kv.HeaderCanonical, hexutil.EncodeTs(number)))
+	}
+	require.NoError(t, rwTx.Commit())
+}
+
+// TestGasPriceOracleBackend_FrozenBoundaryFollowsPrunedMarkers pins the other
+// side of that boundary: a height whose canonical marker was pruned is retired
+// to snapshots and can no longer be resolved, so the boundary must sit right
+// below the lowest marker the db still holds.
+func TestGasPriceOracleBackend_FrozenBoundaryFollowsPrunedMarkers(t *testing.T) {
+	t.Parallel()
+	h := newOverlayAheadHarness(t, false)
+	pruneCanonicalMarkersBelow(t, h, 3)
+
+	tx, err := h.m.DB.BeginTemporalRo(h.m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	backend := NewGasPriceOracleBackend(h.m.DB, h.base.filters.WithTemporalOverlay(tx), h.base)
+
+	got, err := backend.FrozenBlocks()
+	require.NoError(t, err)
+	require.Equal(t, uint64(2), got)
+}
