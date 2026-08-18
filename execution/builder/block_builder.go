@@ -92,9 +92,14 @@ func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, erro
 	b.interrupt.Store(true)
 
 	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	case <-b.done:
+	case <-ctx.Done():
+		// Completion may become ready while select chooses, so recheck before abandoning the result.
+		select {
+		case <-b.done:
+		default:
+			return nil, ctx.Err()
+		}
 	}
 
 	b.mu.Lock()
