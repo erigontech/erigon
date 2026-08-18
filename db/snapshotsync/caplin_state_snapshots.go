@@ -213,6 +213,16 @@ func (s *CaplinStateSnapshots) BlocksAvailable() uint64 {
 	return min(s.SegmentsMax(), s.IndicesMax())
 }
 
+// RemoveOverlaps re-declares the base guard, as CaplinSnapshots.Close already does:
+// `seg retire` holds a nil *CaplinStateSnapshots on any chain without a beacon config,
+// and reaching the embedded pointer to run a promoted method dereferences that nil.
+func (s *CaplinStateSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
+	if s == nil {
+		return nil
+	}
+	return s.BaseRoSnapshots.RemoveOverlaps(onDelete)
+}
+
 func (s *CaplinStateSnapshots) IndicesMax() uint64 {
 	if s == nil {
 		return 0

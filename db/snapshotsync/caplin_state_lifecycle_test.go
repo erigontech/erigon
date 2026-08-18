@@ -252,3 +252,9 @@ func TestCaplinStateBlocksAvailableStopsAtGap(t *testing.T) {
 	require.Equal(t, uint64(49_999), s.SegmentsMax())
 	require.Equal(t, uint64(49_999), s.BlocksAvailable())
 }
+
+// `seg retire` holds a nil *CaplinStateSnapshots on every chain without a beacon config.
+func TestCaplinStateNilSnapshotsRemoveOverlapsIsNoop(t *testing.T) {
+	var s *CaplinStateSnapshots
+	require.NoError(t, s.RemoveOverlaps(nil))
+}
