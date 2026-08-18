@@ -285,18 +285,12 @@ def strip_mdx(text):
 # index pages. After MDX stripping, they collapse to a structureless pile of
 # title/desc fragments. We detect the lp-card pattern and synthesize a clean
 # bullet list instead, keeping link structure intact for LLM consumption.
-# Parsed in two stages, deliberately. A single pattern spanning the whole card
-# cannot express "and never cross into the next card": with `[^<]+` for the text
-# and `.*?` for the gaps, a description containing inline markup (`<strong>`,
-# `<code>`) fails to match locally, and the engine then scans forward and pairs
-# the title with the *next* card's description — silently swallowing the card in
-# between. Matching each <Link> block first makes a card boundary unrepresentable.
-#
-# The container match is also what the guard below counts. It deliberately keys
-# on `lp-card` — the wrapper — and not on any marker the parse itself consumes:
-# a count taken from `lp-card-title` would shrink in step with the very loss it
-# is supposed to detect, so a renamed title marker would drop its card in
-# silence. Attributes are matched order-independently; `to=` is read separately.
+# Two invariants hold this together:
+#   1. A field match must never cross a card boundary, so each <Link> block is
+#      matched first and the fields are read only inside it.
+#   2. The expected count must not be derived from a marker the parse consumes,
+#      or the count shrinks in step with the loss it exists to detect.
+# Attributes are matched order-independently; `to=` is read separately.
 _LANDING_CARD_LINK_RE = re.compile(
     r'<Link\s([^>]*\blp-card\b[^>]*)>(.*?)</Link>', re.DOTALL)
 _LINK_TO_RE = re.compile(r'\bto=[\'"]([^\'"]+)[\'"]')
@@ -304,6 +298,14 @@ _CARD_TITLE_RE = re.compile(
     r'<div[^>]*\blp-card-title\b[^>]*>(.*?)</div>', re.DOTALL)
 _CARD_DESC_RE = re.compile(
     r'<div[^>]*\blp-card-desc\b[^>]*>(.*?)</div>', re.DOTALL)
+
+# Invariant 2 in practice: three markers are counted over the whole body, none
+# of which can vouch for the others. A renamed wrapper drops the container count
+# while the title/desc counts stand; a renamed title marker does the reverse.
+# The expected card count is the largest of the three, so any single rename
+# leaves parsed < expected and trips the guard instead of losing a card.
+_CARD_TITLE_MARKER_RE = re.compile(r'<div[^>]*\blp-card-title\b[^>]*>')
+_CARD_DESC_MARKER_RE = re.compile(r'<div[^>]*\blp-card-desc\b[^>]*>')
 
 
 def _card_text(fragment):
@@ -332,7 +334,11 @@ def synthesize_landing(raw_body):
     # below would never run — silently degrading exactly the case it exists to
     # catch.
     containers = _LANDING_CARD_LINK_RE.findall(raw_body)
-    expected = len(containers)
+    expected = max(
+        len(containers),
+        len(_CARD_TITLE_MARKER_RE.findall(raw_body)),
+        len(_CARD_DESC_MARKER_RE.findall(raw_body)),
+    )
     if not expected:
         return None
 
@@ -343,8 +349,15 @@ def synthesize_landing(raw_body):
         desc = _CARD_DESC_RE.search(block)
         if not href or not title or not desc:
             continue
-        cards.append((href.group(1), _card_text(title.group(1)),
-                      _card_text(desc.group(1))))
+        # `(.*?)` and `_card_text` both accept emptiness — an empty div, or one
+        # holding only markup, flattens to "". The match object stays truthy, so
+        # without this the card would be appended as `- [](url): ` and the count
+        # guard would pass on output no reader can use.
+        title_text = _card_text(title.group(1))
+        desc_text = _card_text(desc.group(1))
+        if not title_text or not desc_text:
+            continue
+        cards.append((href.group(1), title_text, desc_text))
 
     # A card that parses to nothing is invisible in the output, and `--check`
     # only compares generated output against committed output — so a systematic

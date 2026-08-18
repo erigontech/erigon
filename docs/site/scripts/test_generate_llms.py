@@ -278,6 +278,80 @@ class LandingSynthesisTests(unittest.TestCase):
             g.synthesize_landing(body)
         self.assertIn("parsed 0 of 2", str(ctx.exception))
 
+    def test_renamed_wrapper_marker_is_caught_not_absorbed(self):
+        """The mirror of the renamed-title case: the wrapper is not privileged.
+
+        Counting only `lp-card` containers would shrink with a renamed wrapper
+        exactly as a title-derived count shrinks with a renamed title. The
+        expected count takes the largest of three independent markers, so the
+        surviving title/desc pair still accounts for the card.
+        """
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+<Link className="lp-tile" to="/b/">
+  <div className="lp-card-title">B</div>
+  <div className="lp-card-desc">Desc B.</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 1 of 2", str(ctx.exception))
+
+    def test_every_wrapper_renamed_raises_rather_than_falling_back(self):
+        """A wholesale wrapper rename must not read as an ordinary prose page.
+
+        With the count keyed on the wrapper alone this returned None and the
+        caller fell back to strip_mdx, degrading every card grid in silence.
+        """
+        body = """
+<div className="lp-grid">
+<Link className="lp-tile" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+<Link className="lp-tile" to="/b/">
+  <div className="lp-card-title">B</div>
+  <div className="lp-card-desc">Desc B.</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 0 of 2", str(ctx.exception))
+
+    def test_empty_title_raises_rather_than_emitting_a_blank_link(self):
+        """An empty title flattens to "" but its match object stays truthy."""
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title"></div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 0 of 1", str(ctx.exception))
+
+    def test_markup_only_description_raises_rather_than_emitting_a_blank(self):
+        """`_card_text` reduces markup-only content to "" — also a dropped card."""
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc"><span className="icon" /></div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 0 of 1", str(ctx.exception))
+
 
 class LeadingH1StripTests(unittest.TestCase):
     """The build() body-prep step strips a leading H1 to avoid duplicate headings."""

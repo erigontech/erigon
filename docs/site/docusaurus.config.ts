@@ -71,7 +71,9 @@ export default async function createConfig(): Promise<Config> {
     markdown: {mermaid: true},
     themes: ['@docusaurus/theme-mermaid'],
 
-    customFields: {latestVersion},
+    // archivedVersions reaches src/theme/Root.tsx, which uses it to keep the
+    // llms.txt descriptor off archived routes the index does not cover.
+    customFields: {latestVersion, archivedVersions},
 
     headTags: [
       {
@@ -85,21 +87,6 @@ export default async function createConfig(): Promise<Config> {
         tagName: 'script',
         attributes: {},
         innerHTML: 'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()',
-      },
-      // Point every page at the llms.txt index that covers it. `describedby` is
-      // the relation the llmstxt.org proposal defines for exactly this; its
-      // `alternate` + `text/markdown` pairing is reserved for a *per-page*
-      // Markdown representation, which this site-wide index is not.
-      // llms-full.txt is deliberately not advertised here: it is not a
-      // description of any single page. It stays discoverable through llms.txt,
-      // the sitemap, and the MCP docs page.
-      {
-        tagName: 'link',
-        attributes: {
-          rel: 'describedby',
-          href: 'https://docs.erigon.tech/llms.txt',
-          title: 'Erigon Documentation — page index for LLMs',
-        },
       },
     ],
 
