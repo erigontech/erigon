@@ -17,6 +17,7 @@
 package execmodule_test
 
 import (
+	"context"
 	"testing"
 	"time"
 
@@ -33,7 +34,8 @@ import (
 )
 
 func TestExecModuleProducesE2Snapshots(t *testing.T) {
-	ctx := t.Context()
+	ctx, cancel := context.WithTimeout(t.Context(), time.Minute)
+	defer cancel()
 	retireStep := uint64(10)
 	chainLen := int(retireStep) + 2
 	emt := execmoduletester.New(
@@ -42,6 +44,7 @@ func TestExecModuleProducesE2Snapshots(t *testing.T) {
 		execmoduletester.WithE2RetireStep(retireStep),
 		execmoduletester.WithMaxReorgDepth(1),
 	)
+	require.NoError(t, emt.WaitForBlockRetirement(ctx))
 	cp, err := emt.GenerateChain(chainLen, func(i int, gen *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(
@@ -59,26 +62,17 @@ func TestExecModuleProducesE2Snapshots(t *testing.T) {
 		gen.AddTx(tx)
 	})
 	require.NoError(t, err)
-	retirementDoneSub, retirementDoneSubClose := emt.Notifications.Events.AddRetirementDoneSubscription()
-	t.Cleanup(retirementDoneSubClose)
 	status, err := emt.InsertBlocks(ctx, cp.Blocks)
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, status)
 	result, err := emt.UpdateForkChoice(ctx, cp.Blocks[len(cp.Blocks)-2].Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
+	require.NoError(t, emt.WaitForBlockRetirement(ctx))
 	result, err = emt.UpdateForkChoice(ctx, cp.TopBlock.Header())
 	require.NoError(t, err)
 	require.Equal(t, execmodule.ExecutionStatusSuccess, result.Status)
-	// wait for 2 retirement loops to be done since there are 2 UFCs
-	timeoutC := time.After(time.Minute)
-	for range 2 {
-		select {
-		case <-retirementDoneSub:
-		case <-timeoutC:
-			t.Fatal("retirement done timed out")
-		}
-	}
+	require.NoError(t, emt.WaitForBlockRetirement(ctx))
 	err = emt.BlockSnapshots.OpenFolder()
 	require.NoError(t, err)
 	require.Equal(t, uint64(9), emt.BlockSnapshots.BlocksAvailable())

@@ -1154,39 +1154,6 @@ func (s *WriteSet) GetStorage(addr accounts.Address, key accounts.StorageKey) (*
 	return vw, ok
 }
 
-// hasAddr reports whether any path has an entry for addr.
-func (s *WriteSet) hasAddr(addr accounts.Address) bool {
-	if _, ok := s.address[addr]; ok {
-		return true
-	}
-	if _, ok := s.balance[addr]; ok {
-		return true
-	}
-	if _, ok := s.nonce[addr]; ok {
-		return true
-	}
-	if _, ok := s.incarnation[addr]; ok {
-		return true
-	}
-	if _, ok := s.selfDestruct[addr]; ok {
-		return true
-	}
-	if _, ok := s.createContract[addr]; ok {
-		return true
-	}
-	if _, ok := s.code[addr]; ok {
-		return true
-	}
-	if _, ok := s.codeHash[addr]; ok {
-		return true
-	}
-	if _, ok := s.codeSize[addr]; ok {
-		return true
-	}
-	_, ok := s.storage[addr]
-	return ok
-}
-
 // forEachAddr calls f for every address with at least one entry, allocating
 // nothing. An address present in several paths is visited once per path, so
 // callers must tolerate repeats (use addrs() when a deduped set is required).

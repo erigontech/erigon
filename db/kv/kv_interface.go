@@ -458,6 +458,7 @@ type TemporalTx interface {
 	Tx
 	TemporalGetter
 	WithFreezeInfo
+	GetLatestValSize(name Domain, k []byte) (size int, found bool, err error)
 
 	// GetAsOf - state as of given `ts`
 	// Example: GetAsOf(Account, key, txNum) - returns account's value before `txNum` transaction changed it
@@ -584,7 +585,6 @@ type TemporalMemBatch interface {
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
 	Merge(other TemporalMemBatch) error
-	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte) (cont bool, err error)) error
 	HasPrefix(domain Domain, prefix []byte, roTx Tx) ([]byte, []byte, bool, error)

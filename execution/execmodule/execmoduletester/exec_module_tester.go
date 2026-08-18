@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -130,7 +131,6 @@ type ExecModuleTester struct {
 	StateCache      *execmodule.Cache
 	retirementStart chan bool
 	retirementDone  chan struct{}
-	retirementWg    sync.WaitGroup
 
 	Notifications      *shards.Notifications
 	stateChangesClient StateChangesClient
@@ -356,12 +356,6 @@ func WithoutAmsterdamBuilderContracts() Option {
 	}
 }
 
-func WithFcuBackgroundCommit() Option {
-	return func(opts *options) {
-		opts.fcuBackgroundCommit = true
-	}
-}
-
 // WithAlwaysGenerateChangesets pins --experimental.always-generate-changesets
 // regardless of the tester default: true for tests that reorg deeper than
 // MaxReorgDepth, false for tests that rely on the windowed-changesets
@@ -404,7 +398,6 @@ type options struct {
 	pruneMode                     *prune.Mode
 	withTxPool                    bool
 	enableDomains                 []kv.Domain
-	fcuBackgroundCommit           bool
 	fcuBackgroundPrune            bool
 	alwaysGenerateChangesets      *bool
 	maxReorgDepth                 *uint64
@@ -521,7 +514,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	cfg.Prune = pruneMode
 	cfg.ExperimentalBAL = opt.experimentalBAL
 	cfg.FcuBackgroundPrune = opt.fcuBackgroundPrune
-	cfg.FcuBackgroundCommit = opt.fcuBackgroundCommit
 
 	logLvl := log.LvlError
 	if lvl, ok := os.LookupEnv("EXEC_MODULE_TESTER_LOG_LEVEL"); ok {
@@ -584,15 +576,12 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	if tb != nil {
 		tb.Cleanup(mock.Close)
-		tb.Cleanup(func() {
-			// Wait for all the background snapshot retirements launched by any stages2.StageLoopIteration to finish
-			mock.retirementWg.Wait()
-		})
 	}
 
 	// Committed genesis will be shared between download and mock sentry
 	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", datadir.New(tmpdir), mock.Log)
-	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
+	var compatErr *chain.ConfigCompatError
+	if err != nil && !errors.As(err, &compatErr) {
 		if tb != nil {
 			tb.Fatal(err)
 		} else {
@@ -638,7 +627,11 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
-				return mdbx.New(dbcfg.TxPoolDB, logger).InMem(tb, tmpdir).MustOpen(), nil
+				dbOpts := mdbx.New(dbcfg.TxPoolDB, logger)
+				if tb == nil {
+					return dbOpts.InMem(tmpdir).MustOpen(), nil
+				}
+				return mdbxtest.InMem(tb, dbOpts, tmpdir).MustOpen(), nil
 			}),
 		)
 		if err != nil {
@@ -803,7 +796,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		engine,
 		cfg.Sync,
 		cfg.FcuBackgroundPrune,
-		cfg.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
 		readAheader,
 		func() error { return nil },
@@ -899,6 +891,24 @@ func (emt *ExecModuleTester) UpdateForkChoice(ctx context.Context, header *types
 		}
 		return result, result.Status == execmodule.ExecutionStatusBusy, nil
 	})
+}
+
+func (emt *ExecModuleTester) WaitForBlockRetirement(ctx context.Context) error {
+	select {
+	case started := <-emt.retirementStart:
+		if !started {
+			return nil
+		}
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for block retirement start: %w", ctx.Err())
+	}
+
+	select {
+	case <-emt.retirementDone:
+		return nil
+	case <-ctx.Done():
+		return fmt.Errorf("waiting for block retirement completion: %w", ctx.Err())
+	}
 }
 
 func (emt *ExecModuleTester) InsertValidateAndUfc1By1(ctx context.Context, blocks []*types.Block) error {

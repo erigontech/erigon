@@ -86,9 +86,7 @@ type SimulatedBackend struct {
 	pendingReaderTx kv.TemporalTx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
-	rmLogsFeed event.Feed
-	chainFeed  event.Feed
-	logsFeed   event.Feed
+	logsFeed event.Feed
 }
 
 func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {
@@ -696,7 +694,8 @@ func (b *SimulatedBackend) EstimateGas(ctx context.Context, call bind.CallMsg) (
 			}
 			return true, nil, err // Bail out
 		}
-		return res.Failed(), res, nil
+		failed := res.Failed()
+		return failed, res, nil
 	}
 	// Execute the binary search and hone in on an executable gas limit
 	for lo+1 < hi {
