@@ -39,17 +39,21 @@ func (me *downloadBatch) taskWaiter() {
 }
 
 func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
-	t, first, miOpt, err := me.d.addPreverifiedSnapshotForDownload(item.InfoHash, item.Name)
+	snapshotTorrent, first, localMetainfo, err := me.d.addPreverifiedSnapshotForDownload(item.InfoHash, item.Name)
 	if err != nil {
 		return err
 	}
+	if !snapshotTorrent.Ok {
+		return nil
+	}
+	t := snapshotTorrent.Value
 	me.torrents = append(me.torrents, t)
 	if !first {
 		return nil
 	}
 	me.metainfoTasks.Go(func() {
 		me.doMetainfoTask(func() func() {
-			return me.d.addedFirstDownloader(me.d.ctx, t, miOpt, item.Name, item.InfoHash)
+			return me.d.addedFirstDownloader(me.d.ctx, t, localMetainfo, item.Name, item.InfoHash)
 		})
 	})
 	return nil

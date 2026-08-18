@@ -17,6 +17,7 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -26,10 +27,13 @@ import (
 	"sync"
 	"testing"
 
+	g "github.com/anacrolix/generics"
+	"github.com/anacrolix/torrent/metainfo"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
@@ -345,4 +349,307 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		cfg:        cfg,
 		downloader: d,
 	}
+}
+
+// logBuffer is a log sink readable while the Downloader's goroutines write to it.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func newLocalSnapshotTest(t *testing.T) (d *Downloader, logs *logBuffer, name, path string) {
+	d = newDownloaderTest(t).downloader
+	logs = &logBuffer{}
+	d.logger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(logs, log.LogfmtFormat())))
+
+	name = "domain/v2.0-accounts.0-1024.kv"
+	path = d.filePathForName(name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("locally rebuilt"), 0o644))
+	return
+}
+
+// Renaming data to .part leaves a hole in the snapshot tier, so it must be logged at warn or louder.
+func TestInvalidateDataRenamesLocalFile(t *testing.T) {
+	require := require.New(t)
+	d, logs, name, path := newLocalSnapshotTest(t)
+	differentPreverifiedInfoHash := snaptype.Hex2InfoHash("aa")
+
+	_, download := prepareLocalDataForDownload(t, d, differentPreverifiedInfoHash, name)
+	require.True(download)
+
+	require.NoFileExists(path)
+	require.FileExists(path + ".part")
+	require.Contains(logs.String(), "invalidated local snapshot data", "rename must be logged at warn or louder")
+	require.Contains(logs.String(), name)
+}
+
+// A stale metainfo doesn't rescue the data while the initial download is incomplete.
+func TestInvalidateDataWithStaleMetainfo(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+	_, err := BuildTorrentIfNeed(t.Context(), name, d.snapDir(), d.torrentFS)
+	require.NoError(err)
+
+	_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), name)
+	require.True(download)
+
+	require.NoFileExists(path)
+	require.FileExists(path + ".part")
+}
+
+// Once preverified.toml exists, local data is kept whatever the manifest says.
+func TestKeepsLocalSnapshotAfterInitialDownload(t *testing.T) {
+	for _, withMetainfo := range []bool{false, true} {
+		t.Run(fmt.Sprint("withMetainfo=", withMetainfo), func(t *testing.T) {
+			require := require.New(t)
+			d, logs, name, path := newLocalSnapshotTest(t)
+			if withMetainfo {
+				_, err := BuildTorrentIfNeed(t.Context(), name, d.snapDir(), d.torrentFS)
+				require.NoError(err)
+			}
+			markInitialDownloadComplete(t, d)
+
+			_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), name)
+			require.False(download, "preverified download must be skipped")
+
+			require.FileExists(path)
+			require.NoFileExists(path + ".part")
+			require.Contains(logs.String(), "keeping local snapshot")
+			require.Contains(logs.String(), name)
+		})
+	}
+}
+
+// Nothing local to protect: the preverified file is still downloaded.
+func TestDownloadsMissingSnapshotAfterInitialDownload(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+	require.NoError(dir.RemoveFile(path))
+	markInitialDownloadComplete(t, d)
+
+	preverifiedInfoHash := snaptype.Hex2InfoHash("aa")
+	_, download := prepareLocalDataForDownload(t, d, preverifiedInfoHash, name)
+	require.True(download)
+}
+
+// Under d.lock, as production callers hold it.
+func prepareLocalDataForDownload(t *testing.T, d *Downloader, preverifiedInfoHash metainfo.Hash, name string) (
+	localMetainfo g.Option[*metainfo.MetaInfo],
+	download bool,
+) {
+	t.Helper()
+	d.lock.Lock()
+	defer d.lock.Unlock()
+	localMetainfo, download, err := d.prepareLocalDataForDownload(preverifiedInfoHash, name)
+	require.NoError(t, err)
+	return localMetainfo, download
+}
+
+func markInitialDownloadComplete(t *testing.T, d *Downloader) {
+	require.NoError(t, os.WriteFile(d.cfg.Dirs.PreverifiedPath(), nil, 0o644))
+}
+
+// The metainfo on disk is the preverified one: the file is used as-is.
+func TestKeepsSnapshotMatchingPreverifiedHash(t *testing.T) {
+	for _, initialDownloadComplete := range []bool{false, true} {
+		t.Run(fmt.Sprint("initialDownloadComplete=", initialDownloadComplete), func(t *testing.T) {
+			require := require.New(t)
+			d, _, name, path := newLocalSnapshotTest(t)
+			_, err := BuildTorrentIfNeed(t.Context(), name, d.snapDir(), d.torrentFS)
+			require.NoError(err)
+			if initialDownloadComplete {
+				markInitialDownloadComplete(t, d)
+			}
+			localInfoHash := loadLocalInfoHash(t, d, name)
+
+			localMetainfo, download := prepareLocalDataForDownload(t, d, localInfoHash, name)
+			require.True(localMetainfo.Ok)
+			require.True(download)
+
+			require.FileExists(path)
+			require.NoFileExists(path + ".part")
+		})
+	}
+}
+
+// A from-scratch sync has no data to invalidate, so it must stay quiet.
+func TestInvalidateDataQuietWithoutLocalData(t *testing.T) {
+	require := require.New(t)
+	d, logs, name, path := newLocalSnapshotTest(t)
+	require.NoError(dir.RemoveFile(path))
+
+	_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), name)
+	require.True(download)
+
+	require.NoFileExists(path + ".part")
+	require.Empty(logs.String())
+}
+
+// An unreadable metainfo costs the file only while the manifest is still authoritative.
+func TestUnreadableMetainfoEvictsOnlyDuringInitialDownload(t *testing.T) {
+	for _, initialDownloadComplete := range []bool{false, true} {
+		t.Run(fmt.Sprint("initialDownloadComplete=", initialDownloadComplete), func(t *testing.T) {
+			require := require.New(t)
+			d, _, name, path := newLocalSnapshotTest(t)
+			require.NoError(os.WriteFile(d.metainfoFilePathForName(name), []byte("not bencode"), 0o644))
+			if initialDownloadComplete {
+				markInitialDownloadComplete(t, d)
+			}
+
+			_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), name)
+			if initialDownloadComplete {
+				require.False(download)
+				require.FileExists(path)
+			} else {
+				require.True(download)
+				require.NoFileExists(path)
+			}
+		})
+	}
+}
+
+// The skip reaches the caller as None, so the batch has nothing to wait for.
+func TestAddPreverifiedSnapshotSkipsAfterInitialDownload(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+	markInitialDownloadComplete(t, d)
+
+	snapshotTorrent, firstDownloader, _, err := d.addPreverifiedSnapshotForDownload(snaptype.Hex2InfoHash("aa"), name)
+	require.NoError(err)
+	require.False(snapshotTorrent.Ok)
+	require.False(firstDownloader)
+	require.FileExists(path)
+}
+
+func loadLocalInfoHash(t *testing.T, d *Downloader, name string) metainfo.Hash {
+	t.Helper()
+	mi, err := metainfo.LoadFromFile(d.metainfoFilePathForName(name))
+	require.NoError(t, err)
+	return mi.HashInfoBytes()
+}
+
+type localSnapshotState struct {
+	data     bool
+	metainfo string // "none", "matching", "stale", "corrupt"
+}
+
+func (st localSnapshotState) name() string {
+	return fmt.Sprintf("domain/v2.0-accounts.%d-%d.kv", boolToInt(st.data), len(st.metainfo))
+}
+
+func boolToInt(b bool) int {
+	if b {
+		return 1
+	}
+	return 0
+}
+
+// Writes one snapshot in the requested state and returns its name and the hash a caller should pass
+// as the preverified one.
+func writeLocalSnapshot(t *testing.T, d *Downloader, name string, st localSnapshotState) metainfo.Hash {
+	t.Helper()
+	path := d.filePathForName(name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("locally rebuilt "+name), 0o644))
+	preverified := snaptype.Hex2InfoHash("aa")
+	switch st.metainfo {
+	case "matching":
+		_, err := BuildTorrentIfNeed(t.Context(), name, d.snapDir(), d.torrentFS)
+		require.NoError(t, err)
+		preverified = loadLocalInfoHash(t, d, name)
+	case "stale":
+		_, err := BuildTorrentIfNeed(t.Context(), name, d.snapDir(), d.torrentFS)
+		require.NoError(t, err)
+	case "corrupt":
+		require.NoError(t, os.WriteFile(d.metainfoFilePathForName(name), []byte("not bencode"), 0o644))
+	}
+	if !st.data {
+		require.NoError(t, dir.RemoveFile(path))
+	}
+	return preverified
+}
+
+func allLocalSnapshotStates() (all []localSnapshotState) {
+	for _, data := range []bool{false, true} {
+		for _, mi := range []string{"none", "matching", "stale", "corrupt"} {
+			all = append(all, localSnapshotState{data: data, metainfo: mi})
+		}
+	}
+	return
+}
+
+// Invariant: once preverified.toml exists, no state of the datadir may cost a data file, and a file
+// we have is never re-downloaded.
+func TestNeverEvictsAfterInitialDownload(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+	markInitialDownloadComplete(t, d)
+
+	for _, st := range allLocalSnapshotStates() {
+		name := st.name()
+		preverified := writeLocalSnapshot(t, d, name, st)
+
+		_, download := prepareLocalDataForDownload(t, d, preverified, name)
+
+		require.NoFileExists(d.filePathForName(name)+".part", "%+v", st)
+		require.Equal(st.data, fileExists(d.filePathForName(name)), "%+v", st)
+		// The preverified file is the local file: adding it is free, the client sees it complete.
+		wantDownload := !st.data || st.metainfo == "matching"
+		require.Equal(wantDownload, download, "%+v", st)
+	}
+}
+
+// The snapshot stage writes preverified.toml mid-run, so the rule must be re-read, not cached from
+// an earlier call.
+func TestInitialDownloadCompletingMidRunKeepsLocalData(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+
+	beforeName := "domain/v2.0-accounts.0-1024.kv"
+	writeLocalSnapshot(t, d, beforeName, localSnapshotState{data: true, metainfo: "none"})
+	_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), beforeName)
+	require.True(download)
+	require.FileExists(d.filePathForName(beforeName) + ".part")
+
+	markInitialDownloadComplete(t, d)
+
+	afterName := "domain/v2.0-accounts.1024-2048.kv"
+	writeLocalSnapshot(t, d, afterName, localSnapshotState{data: true, metainfo: "none"})
+	_, download = prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), afterName)
+	require.False(download)
+	require.FileExists(d.filePathForName(afterName))
+	require.NoFileExists(d.filePathForName(afterName) + ".part")
+}
+
+// The rename itself refuses to run after the initial download, whatever the caller decided.
+func TestInvalidateDataRefusesAfterInitialDownload(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+	markInitialDownloadComplete(t, d)
+
+	d.lock.Lock()
+	err := d.invalidateData(name, snaptype.Hex2InfoHash("aa"))
+	d.lock.Unlock()
+
+	require.Error(err)
+	require.FileExists(path)
+	require.NoFileExists(path + ".part")
+}
+
+func fileExists(path string) bool {
+	_, err := os.Stat(path)
+	return err == nil
 }
