@@ -25,5 +25,12 @@ import (
 )
 
 func newSnapshotCommitmentDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger) (*execctx.SharedDomains, error) {
-	return execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	domains, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithoutSharedBranchCache(), execctx.WithSequentialCommitment())
+	if err != nil {
+		if domains != nil {
+			domains.Close()
+		}
+		return nil, err
+	}
+	return domains, nil
 }

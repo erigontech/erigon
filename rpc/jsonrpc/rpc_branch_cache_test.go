@@ -29,7 +29,9 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 )
@@ -148,4 +150,19 @@ func TestSnapshotCommitmentDomainsIgnoreSharedBranchCache(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, branchValue, got)
 	assertPoisoned()
+}
+
+func TestSnapshotCommitmentDomainsReturnsNilOnInitializationError(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	tx, err := m.DB.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require.NoError(t, rawdbv3.TxNums.Truncate(tx, 0))
+	domains, err := newSnapshotCommitmentDomains(t.Context(), tx, log.New())
+	if domains != nil {
+		defer domains.Close()
+	}
+	require.ErrorIs(t, err, commitmentdb.ErrBehindCommitment)
+	require.Nil(t, domains)
 }
