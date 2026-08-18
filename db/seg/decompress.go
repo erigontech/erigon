@@ -868,6 +868,9 @@ func (g *Getter) nextPattern() []byte {
 	data := g.data
 	dataP := g.dataP
 	dataBit := uint(g.dataBit) & 7
+	// Local copy: the slice header would otherwise be reloaded from g on every
+	// iteration, since the compiler cannot prove the loop leaves g alone.
+	cws := g.patCodewords
 
 	for {
 		var code uint16
@@ -878,7 +881,7 @@ func (g *Getter) nextPattern() []byte {
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 
-		cw := &g.patCodewords[table.patterns[code]]
+		cw := &cws[table.patterns[code]]
 		if cw.len == 0 {
 			table = cw.ptr
 			dataBit += 9
