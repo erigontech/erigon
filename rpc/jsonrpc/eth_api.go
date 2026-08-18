@@ -437,7 +437,38 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 // checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
 // that read block headers/bodies but do not require state (e.g. GetBlockByNumber, GetTransactionByHash).
 func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
+	expiry, mergeHeight, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if expiry {
+		if mergeHeight == nil || block >= *mergeHeight {
+			return nil
+		}
+		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *mergeHeight)
+	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
+}
+
+// blocksFollowChainHistoryExpiry reports whether block retention is the chain's
+// history-expiry policy rather than a window, which Distance.Enabled reads as "not
+// pruning" although pre-merge bodies are never downloaded. History carrying the same
+// sentinel excludes it: that is an archive datadir stored before keep-all became the
+// Blocks default, and it holds every body — EnsureNotChanged corrects that shape in
+// memory without rewriting the stored value the RPC layer reads.
+func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx) (bool, *uint64, error) {
+	p, err := api.pruneMode(tx)
+	if err != nil || p == nil {
+		return false, nil, err
+	}
+	if p.Blocks != prune.KeepPostMergeBlocksPruneMode || p.History == prune.KeepPostMergeBlocksPruneMode {
+		return false, nil, nil
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return false, nil, err
+	}
+	return true, chainConfig.MergeHeight, nil
 }
 
 func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
@@ -469,6 +500,13 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 // on its own --prune.receipts.distance window when one is set, and alongside history
 // otherwise.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
+	computed, err := api.postStateCalculated(ctx, tx, block)
+	if err != nil {
+		return err
+	}
+	if computed {
+		return api.checkPruneHistory(ctx, tx, block)
+	}
 	persisted, err := kvcfg.PersistReceipts.Enabled(tx)
 	if err != nil {
 		return err
@@ -492,6 +530,24 @@ func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block 
 		}
 		return api.checkPruneHistory(ctx, tx, block)
 	}
+}
+
+// postStateCalculated reports whether the receipts of this block carry a post state
+// that has to be computed, which is the case below Byzantium. The persistent cache
+// does not store that field, so those receipts are always re-executed and reach only
+// as far back as state history.
+func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	if chainConfig.IsByzantium(block) {
+		return false, nil
+	}
+	if api._blockReader.FrozenBlocks() == 0 {
+		return true, nil
+	}
+	return api.commitmentHistoryEnabled(tx)
 }
 
 // checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.

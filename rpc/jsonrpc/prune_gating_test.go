@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/execution/chain"
@@ -44,6 +45,12 @@ const (
 	// pruneGatingEmptyBlockIdx is left without transactions: the receipts of such a
 	// block are answerable from its body alone, whatever the receipt retention is.
 	pruneGatingEmptyBlockIdx = 4
+	// pruneGatingMergeHeight is a merge point inside the test chain, distinct from
+	// the prune distance so the two boundaries cannot be confused.
+	pruneGatingMergeHeight = uint64(8)
+	// pruneGatingByzantiumHeight puts the fork above the history window, so the
+	// blocks that only history can answer for are also the pre-Byzantium ones.
+	pruneGatingByzantiumHeight = uint64(12)
 )
 
 // pruneGateBoundary declares which prune boundary an endpoint must gate its
@@ -68,6 +75,8 @@ type pruneGatingAPIs struct {
 	graphql *GraphQLAPIImpl
 	ots     *OtterscanAPIImpl
 	overlay *OverlayAPIImpl
+	// rwDB lets a test remove data the stored prune mode only claims is gone.
+	rwDB kv.TemporalRwDB
 }
 
 type pruneGatingRef struct {
@@ -233,6 +242,9 @@ type pruneGatingConfig struct {
 	name            string
 	mode            prune.Mode
 	persistReceipts bool
+	// chainConfig defaults to TestChainBerlinConfig; set it to declare a merge
+	// point or another chain property a gate reads.
+	chainConfig *chain.Config
 }
 
 var pruneGatingConfigs = []pruneGatingConfig{
@@ -240,6 +252,10 @@ var pruneGatingConfigs = []pruneGatingConfig{
 	{name: "blocks", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode}},
 	{name: "full_minimal", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance}},
 	{name: "full_legacy", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode}},
+	// The same shape on a chain that declares a merge point: there the blocks
+	// sentinel is chain history expiry rather than a no-op.
+	{name: "full_legacy_merge_chain", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight)},
 	{name: "blocks_receipts_follow_history", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode}, persistReceipts: true},
 	{name: "blocks_receipts_keep_all", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode, Receipts: prune.KeepAllReceiptsPruneMode}, persistReceipts: true},
 	{name: "minimal_receipts_keep_all", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance, Receipts: prune.KeepAllReceiptsPruneMode}, persistReceipts: true},
@@ -287,6 +303,15 @@ func pruneGateFires(boundary pruneGateBoundary, cfg pruneGatingConfig, blockNum,
 	var amount prune.BlockAmount
 	switch boundary {
 	case gatedByBlocks:
+		// Not amount-based: the blocks distance also carries the chain-history-expiry
+		// sentinel, whose cutoff comes from the chain's merge point.
+		if cfg.mode.Blocks == prune.KeepPostMergeBlocksPruneMode && cfg.mode.History != prune.KeepPostMergeBlocksPruneMode {
+			// Chain history expiry: the cutoff is the merge point, not a window.
+			if cfg.chainConfig == nil || cfg.chainConfig.MergeHeight == nil {
+				return false
+			}
+			return blockNum < *cfg.chainConfig.MergeHeight
+		}
 		amount = cfg.mode.Blocks
 	case gatedByHistory:
 		amount = cfg.mode.History
@@ -310,9 +335,13 @@ func pruneGateFires(boundary pruneGateBoundary, cfg pruneGatingConfig, blockNum,
 
 func setupPruneGating(t *testing.T, cfg pruneGatingConfig) (pruneGatingAPIs, pruneGatingChain) {
 	t.Helper()
+	chainConfig := cfg.chainConfig
+	if chainConfig == nil {
+		chainConfig = chain.TestChainBerlinConfig
+	}
 	m := execmoduletester.New(t,
 		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config: chain.TestChainBerlinConfig,
+			Config: chainConfig,
 			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
 		}),
 		execmoduletester.WithKey(testKey),
@@ -367,6 +396,7 @@ func setupPruneGating(t *testing.T, cfg pruneGatingConfig) (pruneGatingAPIs, pru
 	otsBase := newBaseApiForTest(m)
 	apis.ots = NewOtterscanAPI(otsBase, m.DB, 25)
 	apis.overlay = NewOverlayAPI(otsBase, m.DB, &rpccfg.OverlayApiConfig{GasCap: 1_000_000}, apis.ots)
+	apis.rwDB = m.DB
 	empty := c.Blocks[pruneGatingEmptyBlockIdx]
 	require.Empty(t, empty.Transactions(), "the empty-block leg needs a block without transactions")
 	return apis, pruneGatingChain{

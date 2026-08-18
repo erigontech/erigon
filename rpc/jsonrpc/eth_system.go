@@ -157,27 +157,39 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	stateField := avail(stateOldest, pruneMode.History)
 	blocksField := avail(blocksOldest, pruneMode.Blocks)
 
-	var receiptsField CapabilityField
+	// The receipt cache exists on disk only with --prune.include-receipts, and enabling
+	// it says nothing about how much is kept: RCacheDomain is retired on its own
+	// --prune.receipts.distance window when one is set, and alongside history otherwise.
+	// Below a window of its own the read falls back to re-execution, which reaches as far
+	// as history, so the wider of the two decides. This mirrors checkReceiptsAvailable.
+	receiptsOldest, receiptsAmount := stateOldest, pruneMode.History
 	if persistReceipts {
-		// --prune.include-receipts widens past state-history pruning (receipts are written to
-		// RCacheDomain at execution time, not re-derived from state). The remaining bound
-		// is block-body availability: eth_getBlockReceipts walks block.Transactions(), and
-		// getLogsV3 reads log indexes whose snapshots follow prune.Blocks (see
-		// isReceiptsSegmentPruned in db/snapshotsync). So receipts/logs fall back to
-		// blocksOldest with the same DeleteStrategy as blocks.
-		receiptsField = avail(blocksOldest, pruneMode.Blocks)
-	} else {
-		// Without --prune.include-receipts, receipts are re-executed on demand, requiring both state
-		// history and the block body. Use the more restrictive of the two oldest-block bounds.
-		if blocksOldest > stateOldest {
-			receiptsField = avail(blocksOldest, pruneMode.Blocks)
-		} else {
-			receiptsField = stateField
+		switch amount := pruneMode.ReceiptsAmount(); {
+		case amount == prune.KeepAllReceiptsPruneMode:
+			receiptsOldest, receiptsAmount = 0, amount
+		case pruneMode.ReceiptsFollowHistory():
+		default:
+			if windowOldest := amount.PruneTo(headBlock); windowOldest < stateOldest {
+				receiptsOldest, receiptsAmount = windowOldest, amount
+			}
 		}
 	}
-	// getLogsV3 uses log indexes scoped to prune.Blocks; matches in pruned blocks are silently
-	// dropped, so the effective oldest for logs equals receipts in both branches.
-	logsField := receiptsField
+	// Reading the receipts of a block needs its body too: the stored receipt carries no
+	// TxHash, so it is derived from the block's transaction.
+	if blocksOldest >= receiptsOldest {
+		receiptsOldest, receiptsAmount = blocksOldest, pruneMode.Blocks
+	}
+	receiptsField := avail(receiptsOldest, receiptsAmount)
+
+	// A log query filtered by address or topic searches LogAddrIdx and LogTopicIdx,
+	// standalone indices retired at the history cutoff whatever the receipt retention is.
+	// The field takes that stricter form: an unfiltered query reads straight from the
+	// receipts and reaches further back than advertised.
+	logsOldest, logsAmount := receiptsOldest, receiptsAmount
+	if stateOldest > logsOldest {
+		logsOldest, logsAmount = stateOldest, pruneMode.History
+	}
+	logsField := avail(logsOldest, logsAmount)
 
 	return &CapabilitiesResult{
 		Head:        CapabilityHead{Number: hexutil.Uint64(headBlock), Hash: headHash},

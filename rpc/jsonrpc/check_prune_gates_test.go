@@ -25,7 +25,9 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
@@ -195,6 +197,59 @@ func TestReceiptsGateKeepAll(t *testing.T) {
 		"history is still pruned; only the receipts survive")
 }
 
+// TestReceiptsGateFollowsHistoryWherePostStateIsComputed pins the receipt paths that
+// bypass the cache: a pre-Byzantium receipt carries a post state the cache does not
+// store, so it is always re-executed and only history can answer for it — whatever
+// the receipt retention says.
+func TestReceiptsGateFollowsHistoryWherePostStateIsComputed(t *testing.T) {
+	t.Parallel()
+
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+			Receipts: prune.KeepAllReceiptsPruneMode,
+		},
+		persistReceipts: true,
+		chainConfig:     byzantiumChainConfig(pruneGatingByzantiumHeight),
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	historyOldest := pruneGatingDistance.PruneTo(pruneGatingChainLen)
+	require.Less(t, historyOldest, pruneGatingByzantiumHeight, "history must reach below the fork for this to test anything")
+
+	err = apis.eth.checkReceiptsAvailable(ctx, tx, historyOldest-1)
+	require.ErrorIs(t, err, state.PrunedError, "a pre-Byzantium receipt below history cannot be re-executed")
+	require.Contains(t, err.Error(), "history is available")
+
+	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, historyOldest),
+		"a pre-Byzantium receipt inside history is re-executed")
+	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, pruneGatingByzantiumHeight+1),
+		"from the fork on, the kept cache answers")
+}
+
+// TestBorStateSyncReceiptFollowsHistory pins the other cache-bypassing path: the
+// synthetic state sync receipt is reconstructed from the state at the end of the
+// block, so a block carrying events needs history however long receipts are kept.
+func TestBorStateSyncReceiptFollowsHistory(t *testing.T) {
+	t.Parallel()
+
+	api, chainInfo := setupBorStateSyncGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+			Receipts: prune.KeepAllReceiptsPruneMode,
+		},
+		persistReceipts: true,
+	}, pruneGatingChainLen, &types.Message{})
+	ctx := t.Context()
+
+	_, err := api.GetBlockReceipts(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(chainInfo.old.num)))
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Contains(t, err.Error(), "history is available")
+}
+
 // TestBlockReceiptsGateCombinesBothBoundaries pins that the composed gate rejects
 // on either leg, and in particular that the blocks leg does the work where the
 // receipts one would not: with the cache kept forever, only the missing body
@@ -347,6 +402,105 @@ func TestLogsGateRequiresBlockBodies(t *testing.T) {
 	require.Contains(t, err.Error(), "blocks are available")
 }
 
+// TestBlocksGateServesLegacyArchive pins the shape that must not be read as chain
+// history expiry: an archive datadir stored before keep-all became the default keeps
+// the same sentinel in Blocks, but holds every body. The stored mode is what the RPC
+// layer reads, and EnsureNotChanged corrects that shape in memory without rewriting
+// it, so the gate has to tell the two apart by History carrying the sentinel too.
+func TestBlocksGateServesLegacyArchive(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prune.KeepPostMergeBlocksPruneMode,
+			Blocks:      prune.KeepPostMergeBlocksPruneMode,
+		},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, 0), "an archive node holds every body")
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num))
+	require.NoError(t, apis.eth.checkPruneHistory(ctx, tx, 0))
+
+	_, err = apis.eth.GetBlockByNumber(ctx, rpc.BlockNumber(chainInfo.old.num), false)
+	require.NoError(t, err)
+}
+
+// TestBlocksGateAppliesChainHistoryExpiry pins the legacy full shape, where the
+// blocks distance is a sentinel rather than a window: pre-merge bodies are never
+// downloaded on a chain that declares a merge point, so the gate must refuse below
+// it instead of reading the sentinel as "nothing is pruned".
+func TestBlocksGateAppliesChainHistoryExpiry(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: prune.KeepAllBlocksPruneMode,
+			Blocks: prune.KeepPostMergeBlocksPruneMode,
+		},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	err = apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", pruneGatingMergeHeight))
+
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, pruneGatingMergeHeight),
+		"the merge block itself is served")
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.recent.num))
+
+	_, err = apis.eth.GetBlockByNumber(ctx, rpc.BlockNumber(chainInfo.old.num), false)
+	require.ErrorIs(t, err, state.PrunedError, "the endpoints must see the same boundary")
+}
+
+// TestLogsByBlockHashNamesThePruneBoundary pins that a filter pinned to a block
+// hash reports pruning rather than a missing block: the range is resolved from the
+// retained header, so the gate speaks before any body is read.
+func TestLogsByBlockHashNamesThePruneBoundary(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance},
+	})
+	ctx := t.Context()
+
+	// setupPruneGating stores the prune mode without pruning, so the body a pruned
+	// node would no longer hold has to be removed here.
+	rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	rawdb.DeleteBody(rwTx, chainInfo.old.hash, chainInfo.old.num)
+	require.NoError(t, rwTx.Commit())
+
+	hash := chainInfo.old.hash
+	for _, tc := range []struct {
+		name string
+		call func() (any, error)
+	}{
+		{"eth_getLogs", func() (any, error) {
+			return apis.eth.GetLogs(ctx, filters.FilterCriteria{BlockHash: &hash})
+		}},
+		{"overlay_getLogs", func() (any, error) {
+			return apis.overlay.GetLogs(ctx, filters.FilterCriteria{BlockHash: &hash}, nil, nil)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, err := tc.call()
+			require.ErrorIs(t, err, state.PrunedError)
+			require.Contains(t, err.Error(), "blocks are available")
+		})
+	}
+}
+
 // TestBlockHistoryGateCombinesBothBoundaries pins that the composed gate rejects on
 // either leg and names the one that rejected, including the boundary block itself.
 // Each leg is measured with the other kept in full, so neither can mask the other.
@@ -359,9 +513,8 @@ func TestBlockHistoryGateCombinesBothBoundaries(t *testing.T) {
 		boundary string
 	}{
 		{
-			name:     "both_legs_pass",
-			mode:     prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: prune.KeepAllBlocksPruneMode},
-			boundary: "",
+			name: "both_legs_pass",
+			mode: prune.Mode{Initialised: true, History: prune.KeepAllBlocksPruneMode, Blocks: prune.KeepAllBlocksPruneMode},
 		},
 		{
 			name:     "blocks_leg_rejects",
@@ -458,10 +611,39 @@ func TestBlockReceiptsGateServesEmptyBlocks(t *testing.T) {
 	require.Empty(t, receipts)
 }
 
-// borStateSyncChainConfig mirrors TestChainBerlinConfig with Bor enabled, which is
-// what puts the state sync txn lookup on the bridge instead of the block bodies.
-// The rules name stays ethash to match the faker the tester picks for Bor.
+// borStateSyncChainConfig puts the state sync txn lookup on the bridge instead of
+// the block bodies. The rules name stays ethash to match the faker the tester
+// picks for Bor.
 func borStateSyncChainConfig() *chain.Config {
+	cfg := pruneGatingChainConfig()
+	cfg.Bor = &borcfg.BorConfig{}
+	return cfg
+}
+
+// byzantiumChainConfig moves Byzantium and every later fork to at, so the blocks
+// below it carry a post state the receipt cache does not store.
+func byzantiumChainConfig(at uint64) *chain.Config {
+	cfg := pruneGatingChainConfig()
+	for _, fork := range []**uint64{
+		&cfg.ByzantiumBlock, &cfg.ConstantinopleBlock, &cfg.PetersburgBlock,
+		&cfg.IstanbulBlock, &cfg.MuirGlacierBlock, &cfg.BerlinBlock,
+	} {
+		*fork = &at
+	}
+	return cfg
+}
+
+// mergeHeightChainConfig declares a merge point, which is what turns
+// KeepPostMergeBlocksPruneMode from a no-op into chain history expiry.
+func mergeHeightChainConfig(height uint64) *chain.Config {
+	cfg := pruneGatingChainConfig()
+	cfg.MergeHeight = &height
+	return cfg
+}
+
+// pruneGatingChainConfig mirrors TestChainBerlinConfig, which cannot be copied
+// because chain.Config carries a sync.Once.
+func pruneGatingChainConfig() *chain.Config {
 	return &chain.Config{
 		ChainID:               uint256.NewInt(1337),
 		Rules:                 chain.EtHashRules,
@@ -475,18 +657,21 @@ func borStateSyncChainConfig() *chain.Config {
 		MuirGlacierBlock:      common.NewUint64(0),
 		BerlinBlock:           common.NewUint64(0),
 		Ethash:                new(chain.EthashConfig),
-		Bor:                   &borcfg.BorConfig{},
 	}
 }
 
 // setupBorStateSyncGating builds a Bor chain and an eth API whose bridge resolves
 // one state sync txn hash to stateSyncBlock. Such a txn is not part of any block
 // body, so the regular txn lookup misses it and only the bridge can place it.
-func setupBorStateSyncGating(t *testing.T, mode prune.Mode, stateSyncBlock uint64) (*APIImpl, pruneGatingChain) {
+func setupBorStateSyncGating(t *testing.T, cfg pruneGatingConfig, stateSyncBlock uint64, events ...*types.Message) (*APIImpl, pruneGatingChain) {
 	t.Helper()
+	chainConfig := cfg.chainConfig
+	if chainConfig == nil {
+		chainConfig = borStateSyncChainConfig()
+	}
 	m := execmoduletester.New(t,
 		execmoduletester.WithGenesisSpec(&types.Genesis{
-			Config: borStateSyncChainConfig(),
+			Config: chainConfig,
 			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1_000_000_000)}},
 		}),
 		execmoduletester.WithKey(testKey),
@@ -498,11 +683,14 @@ func setupBorStateSyncGating(t *testing.T, mode prune.Mode, stateSyncBlock uint6
 	tx, err := m.DB.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	_, err = prune.EnsureNotChanged(tx, mode)
+	_, err = prune.EnsureNotChanged(tx, cfg.mode)
 	require.NoError(t, err)
+	if cfg.persistReceipts {
+		require.NoError(t, kvcfg.PersistReceipts.ForceWrite(tx, true))
+	}
 	require.NoError(t, tx.Commit())
 
-	bridge := mockBridgeReader{stateSyncBlock: stateSyncBlock, stateSyncFound: true}
+	bridge := mockBridgeReader{stateSyncBlock: stateSyncBlock, stateSyncFound: true, events: events}
 	base := NewBaseApi(nil, m.StateCache, m.BlockReader, m.Engine, bridge, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	ref := func(idx int) pruneGatingRef {
 		b := c.Blocks[idx]
@@ -521,9 +709,9 @@ func setupBorStateSyncGating(t *testing.T, mode prune.Mode, stateSyncBlock uint6
 func TestEmptyBlockBypassExcludesBor(t *testing.T) {
 	t.Parallel()
 
-	api, chainInfo := setupBorStateSyncGating(t, prune.Mode{
+	api, chainInfo := setupBorStateSyncGating(t, pruneGatingConfig{mode: prune.Mode{
 		Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
-	}, pruneGatingChainLen)
+	}}, pruneGatingChainLen)
 	ctx := t.Context()
 	tx, err := api.db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
@@ -549,18 +737,115 @@ func TestTransactionReceiptGatesResolvedBorStateSyncBlock(t *testing.T) {
 
 	t.Run("retained_block_is_served", func(t *testing.T) {
 		t.Parallel()
-		api, chainInfo := setupBorStateSyncGating(t, mode, pruneGatingChainLen-1)
+		api, chainInfo := setupBorStateSyncGating(t, pruneGatingConfig{mode: mode}, pruneGatingChainLen-1)
 		_, err := api.GetTransactionReceipt(t.Context(), bortypes.ComputeBorTxHash(chainInfo.recent.num, chainInfo.recent.hash))
 		require.NotErrorIs(t, err, state.PrunedError)
 	})
 
 	t.Run("pruned_block_names_itself", func(t *testing.T) {
 		t.Parallel()
-		api, chainInfo := setupBorStateSyncGating(t, mode, uint64(pruneGatingOldBlockIdx+1))
+		api, chainInfo := setupBorStateSyncGating(t, pruneGatingConfig{mode: mode}, uint64(pruneGatingOldBlockIdx+1))
 		_, err := api.GetTransactionReceipt(t.Context(), bortypes.ComputeBorTxHash(chainInfo.old.num, chainInfo.old.hash))
 		require.ErrorIs(t, err, state.PrunedError)
 		require.Contains(t, err.Error(), fmt.Sprintf("requested block %d", chainInfo.old.num))
 	})
+}
+
+// TestCapabilitiesAgreeWithGates pins eth_capabilities against the gates it
+// describes: for every prune shape the oldest block a field advertises must be
+// exactly the block where the matching gate stops refusing. Advertising more than
+// the gate serves sends a caller after data it will be refused.
+func TestCapabilitiesAgreeWithGates(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	t.Parallel()
+
+	for _, cfg := range pruneGatingConfigs {
+		t.Run(cfg.name, func(t *testing.T) {
+			t.Parallel()
+			apis, chainInfo := setupPruneGating(t, cfg)
+			ctx := t.Context()
+			tx, err := apis.eth.db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			caps, err := apis.eth.Capabilities(ctx)
+			require.NoError(t, err)
+
+			for _, pair := range []struct {
+				name  string
+				field CapabilityField
+				gate  func(block uint64) error
+			}{
+				{"state", caps.State, func(b uint64) error { return apis.eth.checkPruneHistory(ctx, tx, b) }},
+				{"blocks", caps.Blocks, func(b uint64) error { return apis.eth.checkPruneBlocks(ctx, tx, b) }},
+				{"tx", caps.Tx, func(b uint64) error { return apis.eth.checkPruneBlocks(ctx, tx, b) }},
+				{"receipts", caps.Receipts, func(b uint64) error {
+					return apis.eth.checkBlockReceiptsAvailable(ctx, tx, b)
+				}},
+				{"logs", caps.Logs, func(b uint64) error {
+					return apis.eth.checkLogsAvailable(ctx, tx, b, addressFilter(b))
+				}},
+			} {
+				t.Run(pair.name, func(t *testing.T) {
+					require.False(t, pair.field.Disabled)
+					require.NotNil(t, pair.field.OldestBlock)
+					oldest := uint64(*pair.field.OldestBlock)
+
+					require.NoError(t, pair.gate(oldest), "the advertised oldest block must be served")
+					if chainInfo.old.num >= oldest {
+						require.NoError(t, pair.gate(chainInfo.old.num),
+							"every block above the advertised oldest must be served")
+					}
+					if oldest == 0 {
+						return
+					}
+					require.NotEqual(t, chainInfo.empty.num, oldest-1,
+						"a transaction-free block is served by the receipt gate whatever the retention")
+					require.ErrorIs(t, pair.gate(oldest-1), state.PrunedError,
+						"the block below the advertised oldest must be refused")
+				})
+			}
+		})
+	}
+}
+
+// TestCapabilitiesAdvertiseTheReceiptWindow pins the shape the endpoint table does not
+// carry: a receipt cache with a finite window of its own, wider than history. The
+// receipts field must advertise that window and render it, while a filtered log query
+// still stops at history.
+func TestCapabilitiesAdvertiseTheReceiptWindow(t *testing.T) {
+	t.Parallel()
+
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+			Receipts: pruneGatingReceiptsWide,
+		},
+		persistReceipts: true,
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	wideOldest := pruneGatingReceiptsWide.PruneTo(pruneGatingChainLen)
+	historyOldest := pruneGatingDistance.PruneTo(pruneGatingChainLen)
+
+	caps, err := apis.eth.Capabilities(ctx)
+	require.NoError(t, err)
+
+	require.Equal(t, wideOldest, uint64(*caps.Receipts.OldestBlock))
+	require.NotNil(t, caps.Receipts.DeleteStrategy)
+	require.Equal(t, uint64(pruneGatingReceiptsWide), uint64(caps.Receipts.DeleteStrategy.RetentionBlocks),
+		"the window that decides must be the one rendered")
+
+	require.Equal(t, historyOldest, uint64(*caps.Logs.OldestBlock),
+		"a filtered log query searches the indices, which follow history")
+
+	require.NoError(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, wideOldest))
+	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, wideOldest-1), state.PrunedError)
 }
 
 // TestCheckTxFee pins the fee cap: the fee is gasPrice*gas in wei, compared

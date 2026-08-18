@@ -104,6 +104,11 @@ func (api *BaseAPI) borReceiptForBlock(ctx context.Context, tx kv.TemporalTx, ch
 	if len(events) == 0 {
 		return nil, nil
 	}
+	// Reconstructed from the state at the end of the block, so this one needs history
+	// however long the receipts themselves are kept.
+	if err := api.checkPruneHistory(ctx, tx, block.NumberU64()); err != nil {
+		return nil, err
+	}
 	return api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
 }
 
@@ -171,16 +176,16 @@ func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint
 // rejected as they are resolved.
 func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters.FilterCriteria, checkFuture bool) (begin, end uint64, err error) {
 	if crit.BlockHash != nil {
-		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
+		// Only the number is needed here, and the header outlives the body: reading
+		// the block instead would report a pruned one as missing, before the gate.
+		num, err := api._blockReader.HeaderNumber(ctx, api.filters.WithOverlay(tx), *crit.BlockHash)
 		if err != nil {
 			return 0, 0, err
 		}
-		if block == nil {
+		if num == nil {
 			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-
-		num := block.NumberU64()
-		return num, num, nil
+		return *num, *num, nil
 	}
 
 	latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)

@@ -222,11 +222,13 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		pruned := head - testPruneDistance
-		// --prune.include-receipts: receipts and logs available from genesis, not limited by state prune window.
-		require.Equal(t, uint64(0), oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
-		require.Equal(t, uint64(0), oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
+		// --prune.include-receipts without a window of its own: the cache is retired
+		// alongside state history, so receipts and logs follow that window instead of
+		// reaching genesis, and they advertise it.
+		require.Equal(t, pruned, oldest(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, pruned, oldest(t, result.Logs))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 		// state still respects history prune distance
 		require.Equal(t, pruned, oldest(t, result.State))
 	})
