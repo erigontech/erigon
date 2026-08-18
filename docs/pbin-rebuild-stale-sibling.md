@@ -87,3 +87,23 @@ inherits a base file, which is correct but forfeits the memory win sharding exis
 
 `TestRebuildCommitmentFilesBinTargetShardedRangeAppliesInheritedRemovals` pins it, asserting a
 sharded range commits the same root as the same range rebuilt whole.
+
+## Production validation
+
+Full mainnet conversion on snap-arb1 completed in 40h45m18s over 412.23M keys, zero
+errors, final state root `ac1aad1f5dfa33083c8d5681eca76916aa1e96c16bc20aa1dcd6e0eab5094364`
+at block 25743399. All six ranges that inherited commitment files ran the pass once, in
+their first shard, and no shard hit `errPBinDeleteUnsupported`:
+
+| range | removals | cost |
+|---|---|---|
+| 8192-9216 | 51.18M | 1m02.6s |
+| 9216-9472 | 16.52M | 21.9s |
+| 9472-9504 | 2.25M | 2.4s |
+| 9504-9520 | 834.66k | 1.06s |
+| 9520-9524 | 205.53k | 194ms |
+| 9524-9526 | 87.46k | 87ms |
+
+71.08M removals for 88.2s total — 0.06% of the run. Both count and cost scale with range
+size, as the once-per-range gating predicts. The run that failed without the pass died 54
+minutes into the first shard of `8192-9216`.
