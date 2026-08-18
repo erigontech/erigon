@@ -362,7 +362,7 @@ move; `CaplinStateSnapshots` still keys its own maps by string.
 - Modify: `db/snaptype/caplin_state_types.go`
 - Modify: `db/snaptype/enum_registry_test.go`
 
-- [ ] extract `RegisterType`'s body (`type.go:240-270`) into an unexported
+- [x] extract `RegisterType`'s body (`type.go:240-270`) into an unexported
   `register(...)` and add `RegisterCaplinType` alongside it, asserting
   `MinCaplinEnum <= enum < MinBorEnum`. Split the four guards explicitly:
   duplicate-enum, duplicate-name and out-of-range move into `register`; the
@@ -370,27 +370,27 @@ move; `CaplinStateSnapshots` still keys its own maps by string.
   Moving it into `register` makes `RegisterCaplinType` panic on all 35 caplin
   types and kills every binary at init. Duplicate-name must stay in `register`
   or Task 3's own duplicate-name test is vacuous for state types.
-- [ ] register `BeaconBlocks`, `BlobSidecars` and the 33 state types through
+- [x] register `BeaconBlocks`, `BlobSidecars` and the 33 state types through
   `RegisterCaplinType` in an `init`.
-- [ ] delete the caplin arms from `Enum.String` (`:422-435`), `Enum.Type`
+- [x] delete the caplin arms from `Enum.String` (`:422-435`), `Enum.Type`
   (`:437-446`) and `ParseEnum` (`:465-478`). Do **not** hand-write a
   `blocksidecars` alias: `register` already inserts index names into `namedTypes`
   (`:265-268`) and that index is named `blocksidecars` (`:157`). Assert the
   alias in a test rather than restating it in code.
-- [ ] now that the types are registered, add `CaplinStateSnapshotTypes` to
+- [x] now that the types are registered, add `CaplinStateSnapshotTypes` to
   `allSnapshotTypes()` (`enum_registry_test.go:41-47`) so `TestEnumRoundTrip` and
   `TestEnumUniqueness` cover the 33, and extend `TestEnumRangeDisjointness` to
   walk them. This is deliberately here and not in Task 2 — `TestEnumRoundTrip`
   panics on an unregistered enum, so the widening cannot precede registration.
-- [ ] update the stale docstring on `TestRegisterTypePanicsOnCaplinName`
+- [x] update the stale docstring on `TestRegisterTypePanicsOnCaplinName`
   (`enum_registry_test.go:104-105`) — caplin names now do live in `namedTypes`.
-- [ ] write a test asserting `Enum.String()` round-trips exact case
+- [x] write a test asserting `Enum.String()` round-trips exact case
   (`PendingDepositsDump`, not lowercased) for every state type, since the file
   name derives from it
-- [ ] write a test asserting `ParseEnum` resolves lowercased state names, that
+- [x] write a test asserting `ParseEnum` resolves lowercased state names, that
   `blocksidecars` still resolves to `BlobSidecars`, and that duplicate enum and
   duplicate name registrations still panic
-- [ ] run `go test ./db/snaptype/...` — must pass before task 4
+- [x] run `go test ./db/snaptype/...` — must pass before task 4
 
 ---
 
