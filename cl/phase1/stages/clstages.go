@@ -50,34 +50,37 @@ import (
 )
 
 type Cfg struct {
-	rpc                         *rpc.BeaconRpcP2P
-	ethClock                    eth_clock.EthereumClock
-	beaconCfg                   *clparams.BeaconChainConfig
-	executionClient             execution_client.ExecutionEngine
-	state                       *state.CachingBeaconState
-	forkChoice                  *forkchoice.ForkChoiceStore
-	indiciesDB                  kv.RwDB
-	dirs                        datadir.Dirs
-	blockReader                 freezeblocks.BeaconSnapshotReader
-	antiquary                   *antiquary.Antiquary
-	syncedData                  *synced_data.SyncedDataManager
-	emitter                     *beaconevents.EventEmitter
-	blockCollector              block_collector.BlockCollector
-	sn                          *freezeblocks.CaplinSnapshots
-	blobStore                   blob_storage.BlobStorage
-	peerDas                     das.PeerDas
-	blobDownloader              *network2.BlobHistoryDownloader
-	attestationDataProducer     attestation_producer.AttestationDataProducer
-	caplinConfig                clparams.CaplinConfig
-	hasDownloaded               bool
-	gloasPayloadRetryOffset     atomic.Uint32
-	gloasEnvelopeRecoveryCursor common.Hash
-	gloasEnvelopeRecoveryHead   common.Hash
-	gloasHeadEnvelopeRequestMu  sync.Mutex
-	gloasHeadEnvelopeRequestID  uint64
-	gloasHeadEnvelopeRequests   map[common.Hash]uint64
-	gloasVerificationCursor     common.Hash
-	gloasVerificationHead       common.Hash
+	rpc                          *rpc.BeaconRpcP2P
+	ethClock                     eth_clock.EthereumClock
+	beaconCfg                    *clparams.BeaconChainConfig
+	executionClient              execution_client.ExecutionEngine
+	state                        *state.CachingBeaconState
+	forkChoice                   *forkchoice.ForkChoiceStore
+	indiciesDB                   kv.RwDB
+	dirs                         datadir.Dirs
+	blockReader                  freezeblocks.BeaconSnapshotReader
+	antiquary                    *antiquary.Antiquary
+	syncedData                   *synced_data.SyncedDataManager
+	emitter                      *beaconevents.EventEmitter
+	blockCollector               block_collector.BlockCollector
+	sn                           *freezeblocks.CaplinSnapshots
+	blobStore                    blob_storage.BlobStorage
+	peerDas                      das.PeerDas
+	blobDownloader               *network2.BlobHistoryDownloader
+	attestationDataProducer      attestation_producer.AttestationDataProducer
+	caplinConfig                 clparams.CaplinConfig
+	hasDownloaded                bool
+	gloasPayloadRetryOffset      atomic.Uint32
+	gloasEnvelopeRecoveryCursor  common.Hash
+	gloasEnvelopeRecoveryHead    common.Hash
+	gloasHeadEnvelopeRequestMu   sync.Mutex
+	gloasHeadEnvelopeRequestID   uint64
+	gloasHeadEnvelopeRequests    map[common.Hash]uint64
+	gloasHeadEnvelopeRequestHead common.Hash
+	gloasHeadEnvelopeAttempted   bool
+	gloasPayloadValidator        gloasPayloadValidator
+	gloasVerificationCursor      common.Hash
+	gloasVerificationHead        common.Hash
 }
 
 type Args struct {
@@ -143,6 +146,7 @@ func ClStagesCfg(
 		emitter:                 emitters,
 		blobStore:               blobStore,
 		blockCollector:          block_collector.NewPersistentBlockCollector(log.Root(), executionClient, beaconCfg, dirs.CaplinHistory),
+		gloasPayloadValidator:   forkChoice,
 		attestationDataProducer: attestationDataProducer,
 	}
 }

@@ -288,6 +288,15 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 ) (execution_client.PayloadStatus, error) {
 	f.mu.Unlock()
 	defer f.mu.Lock()
+	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
+		if f.forkGraph.HasEnvelope(beaconBlockRoot) {
+			return execution_client.PayloadStatusValidated, nil
+		}
+		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
+	})
+}
+
+func (f *ForkChoiceStore) withPayloadValidationAdmission(ctx context.Context, validate func() (execution_client.PayloadStatus, error)) (execution_client.PayloadStatus, error) {
 
 	f.payloadValidationOnce.Do(func() {
 		f.payloadValidationAdmission = make(chan struct{}, 1)
@@ -298,16 +307,25 @@ func (f *ForkChoiceStore) newPayloadWhileYieldingForkChoiceLock(
 	case <-ctx.Done():
 		return execution_client.PayloadStatusNone, fmt.Errorf("%w: %w", errPayloadValidationAdmission, ctx.Err())
 	}
-	f.mu.Lock()
-	alreadyApplied := f.forkGraph.HasEnvelope(beaconBlockRoot)
-	f.mu.Unlock()
-	if alreadyApplied {
-		return execution_client.PayloadStatusValidated, nil
-	}
-
 	timeStartExec := time.Now()
 	defer monitor.ObserveNewPayloadTime(timeStartExec)
-	return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
+	return validate()
+}
+
+// NewPayloadWithAdmission serializes EL payload validation across fork-choice and stage retries.
+func (f *ForkChoiceStore) NewPayloadWithAdmission(
+	ctx context.Context,
+	payload *cltypes.Eth1Block,
+	parentBlockRoot *common.Hash,
+	versionedHashes []common.Hash,
+	executionRequestsList []hexutil.Bytes,
+) (execution_client.PayloadStatus, error) {
+	if f.engine == nil {
+		return execution_client.PayloadStatusNone, errors.New("execution client is not configured")
+	}
+	return f.withPayloadValidationAdmission(ctx, func() (execution_client.PayloadStatus, error) {
+		return f.engine.NewPayload(ctx, payload, parentBlockRoot, versionedHashes, executionRequestsList)
+	})
 }
 
 func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
@@ -357,16 +375,12 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 	return nil
 }
 
-func (f *ForkChoiceStore) refreshEnvelopeBlockLocked(beaconBlockRoot common.Hash) (*state.CachingBeaconState, *cltypes.SignedBeaconBlock, error) {
-	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
-	if err != nil {
-		return nil, nil, err
-	}
+func (f *ForkChoiceStore) refreshEnvelopeBlockLocked(beaconBlockRoot common.Hash) (*cltypes.SignedBeaconBlock, error) {
 	block, ok := f.forkGraph.GetBlock(beaconBlockRoot)
-	if blockState == nil || !ok || block == nil {
-		return nil, nil, fmt.Errorf("%w: block disappeared during payload validation for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
+	if !ok || block == nil {
+		return nil, fmt.Errorf("%w: block disappeared during payload validation for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
 	}
-	return blockState, block, nil
+	return block, nil
 }
 
 type missingEnvelopeMode bool
@@ -376,9 +390,7 @@ const (
 	queueMissingEnvelope missingEnvelopeMode = true
 )
 
-// applyEnvelope processes the envelope under f.mu: validates, verifies with CL and EL,
-// and persists the envelope to disk. No CL state transition is performed — the
-// execution effects are deferred to the next block's ProcessParentExecutionPayload.
+// applyEnvelope processes the envelope under f.mu except while waiting for EL validation.
 // Returns (true, nil) if the envelope was applied,
 // (false, nil) if it was skipped (already processed or block not yet known),
 // or (false, err) on failure.
@@ -464,9 +476,9 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 		if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 			return false, nil
 		}
-		blockState, block, err = f.refreshEnvelopeBlockLocked(beaconBlockRoot)
+		block, err = f.refreshEnvelopeBlockLocked(beaconBlockRoot)
 		if err != nil {
-			return false, fmt.Errorf("OnExecutionPayload: failed to refresh block state: %w", err)
+			return false, fmt.Errorf("OnExecutionPayload: failed to refresh block: %w", err)
 		}
 		if err := f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, common.Hash(beaconBlockRoot)); err != nil {
 			if errors.Is(err, errELBehind) {
@@ -743,9 +755,9 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		if f.forkGraph.HasEnvelope(beaconBlockRoot) {
 			return false, nil
 		}
-		blockState, block, err = f.refreshEnvelopeBlockLocked(beaconBlockRoot)
+		block, err = f.refreshEnvelopeBlockLocked(beaconBlockRoot)
 		if err != nil {
-			return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to refresh block state: %w", err)
+			return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to refresh block: %w", err)
 		}
 		if err := f.applyPayloadValidationResultLocked(payloadStatus, validationErr, envelope, block, common.Hash(beaconBlockRoot)); err != nil {
 			if errors.Is(err, errELBehind) {

@@ -61,7 +61,7 @@ func (f *ForkChoiceStore) OnPayloadAttestationMessage(
 		return err
 	}
 
-	// Verify the signature and check that it's for the current slot if coming from wire
+	// Verify the signature if coming from wire.
 	if !isFromBlock {
 		if err := validationContext.validateSignature(msg); err != nil {
 			return err

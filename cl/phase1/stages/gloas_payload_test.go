@@ -62,27 +62,41 @@ func TestWaitForSelectedHeadEnvelopeRequestsAndAppliesPeerEnvelope(t *testing.T)
 	require.True(t, store.HasEnvelope(headRoot))
 }
 
-func TestSelectedHeadEnvelopeRequestCanRetryAfterCompletion(t *testing.T) {
+func TestSelectedHeadEnvelopeRequestAttemptsOncePerHead(t *testing.T) {
 	cfg := &Cfg{}
 	firstHead := common.HexToHash("0x1234")
 	secondHead := common.HexToHash("0x5678")
 
-	firstAttempt, ok := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	firstAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
 	require.True(t, ok)
-	_, ok = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.True(t, wait)
+	_, ok, wait = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
 	require.False(t, ok)
+	require.True(t, wait)
 	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
-	secondAttempt, ok := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
-	require.True(t, ok)
-	secondHeadAttempt, ok := claimSelectedHeadEnvelopeRequest(cfg, secondHead)
-	require.True(t, ok)
-	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
-	_, ok = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	_, ok, wait = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
 	require.False(t, ok)
-	releaseSelectedHeadEnvelopeRequest(cfg, secondAttempt)
-	_, ok = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.False(t, wait)
+	observeSelectedHeadEnvelopeRequest(cfg, secondHead)
+	observeSelectedHeadEnvelopeRequest(cfg, firstHead)
+	thirdAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
 	require.True(t, ok)
+	require.True(t, wait)
+	releaseSelectedHeadEnvelopeRequest(cfg, thirdAttempt)
+
+	observeSelectedHeadEnvelopeRequest(cfg, secondHead)
+	secondHeadAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, secondHead)
+	require.True(t, ok)
+	require.True(t, wait)
 	releaseSelectedHeadEnvelopeRequest(cfg, secondHeadAttempt)
+	secondAttempt, ok, wait := claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.True(t, ok)
+	require.True(t, wait)
+	releaseSelectedHeadEnvelopeRequest(cfg, firstAttempt)
+	_, ok, wait = claimSelectedHeadEnvelopeRequest(cfg, firstHead)
+	require.False(t, ok)
+	require.True(t, wait)
+	releaseSelectedHeadEnvelopeRequest(cfg, secondAttempt)
 }
 
 func TestGloasRecoveryCursorAdvancesAfterIncompleteFetch(t *testing.T) {
@@ -94,6 +108,35 @@ func TestGloasRecoveryCursorAdvancesAfterIncompleteFetch(t *testing.T) {
 
 	advanceGloasEnvelopeRecoveryCursor(cfg, scanRoot, true)
 	require.Equal(t, common.Hash{}, cfg.gloasEnvelopeRecoveryCursor)
+}
+
+func TestGloasVerificationItemFailureOnlyStopsOnCancellation(t *testing.T) {
+	completeBatch := true
+	require.True(t, continueGloasVerificationAfterItemFailure(context.Background(), &completeBatch))
+	require.True(t, completeBatch)
+	canceled, cancel := context.WithCancel(context.Background())
+	cancel()
+	completeBatch = true
+	require.False(t, continueGloasVerificationAfterItemFailure(canceled, &completeBatch))
+	require.False(t, completeBatch)
+}
+
+func TestGloasVerificationImmediateFailureDoesNotFreezeBatch(t *testing.T) {
+	completeBatch := true
+	processed := 0
+	items := []*gloasVerificationItem{{}, {}}
+	process := func(gloasVerificationItem) bool {
+		processed++
+		if processed == 1 {
+			return continueGloasVerificationAfterItemFailure(context.Background(), &completeBatch)
+		}
+		return true
+	}
+
+	processImmediateGloasVerificationItems(items[0], items[1], process, &completeBatch)
+
+	require.Equal(t, 2, processed)
+	require.True(t, completeBatch)
 }
 
 func TestBlockSupportsExecutionPayloadEnvelopeUsesBlockVersion(t *testing.T) {
@@ -350,9 +393,10 @@ func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 	}
 
 	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
-		beaconCfg:       cfg,
-		executionClient: remoteEL,
-		forkChoice:      &forkchoice.ForkChoiceStore{},
+		beaconCfg:             cfg,
+		executionClient:       remoteEL,
+		gloasPayloadValidator: remoteEL,
+		forkChoice:            &forkchoice.ForkChoiceStore{},
 	}, anchorRoot, bid, env))
 	require.Equal(t, 1, remoteEL.newPayloadCalls)
 
@@ -361,9 +405,10 @@ func TestValidateAnchorPayloadWithAnyExecutionClient(t *testing.T) {
 		payloadStatus:    execution_client.PayloadStatusValidated,
 	}
 	require.NoError(t, validateAnchorPayloadWithExecutionClient(context.Background(), &Cfg{
-		beaconCfg:       cfg,
-		executionClient: localEL,
-		forkChoice:      &forkchoice.ForkChoiceStore{},
+		beaconCfg:             cfg,
+		executionClient:       localEL,
+		gloasPayloadValidator: localEL,
+		forkChoice:            &forkchoice.ForkChoiceStore{},
 	}, anchorRoot, bid, env))
 	require.Equal(t, 1, localEL.newPayloadCalls)
 }
@@ -406,9 +451,10 @@ func TestDrainPendingGloasPayloadsRequeuesNotValidatedPayload(t *testing.T) {
 	fc.RequeuePendingELPayload(pending)
 
 	drainPendingGloasPayloads(context.Background(), &Cfg{
-		beaconCfg:       &cfg,
-		executionClient: engine,
-		forkChoice:      fc,
+		beaconCfg:             &cfg,
+		executionClient:       engine,
+		gloasPayloadValidator: engine,
+		forkChoice:            fc,
 	})
 
 	require.Equal(t, 1, engine.newPayloadCalls)
@@ -444,7 +490,7 @@ func TestDrainPendingGloasPayloadsStopsAfterCancellation(t *testing.T) {
 
 	ctx, cancel := context.WithTimeout(context.Background(), 20*time.Millisecond)
 	defer cancel()
-	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, forkChoice: fc})
+	drainPendingGloasPayloads(ctx, &Cfg{beaconCfg: cfg, executionClient: engine, gloasPayloadValidator: engine, forkChoice: fc})
 
 	require.Equal(t, 1, engine.newPayloadCalls)
 	require.Len(t, fc.DrainPendingELPayloads(), 3)
@@ -605,6 +651,10 @@ func (t *testExecutionEngine) NewPayload(ctx context.Context, _ *cltypes.Eth1Blo
 		return t.newPayloadFn(ctx)
 	}
 	return t.payloadStatus, nil
+}
+
+func (t *testExecutionEngine) NewPayloadWithAdmission(ctx context.Context, payload *cltypes.Eth1Block, parentRoot *common.Hash, hashes []common.Hash, requests []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+	return t.NewPayload(ctx, payload, parentRoot, hashes, requests)
 }
 
 func (t *testExecutionEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {

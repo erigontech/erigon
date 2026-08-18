@@ -562,7 +562,7 @@ func validateAnchorPayloadWithEL(ctx context.Context, cfg *Cfg, bid *cltypes.Exe
 	if err != nil {
 		return execution_client.PayloadStatusNone, err
 	}
-	return cfg.executionClient.NewPayload(ctx, env.Message.Payload, &bid.ParentBlockRoot, versionedHashes, executionRequestsList)
+	return cfg.gloasPayloadValidator.NewPayloadWithAdmission(ctx, env.Message.Payload, &bid.ParentBlockRoot, versionedHashes, executionRequestsList)
 }
 
 func buildAnchorNewPayloadArgs(beaconCfg *clparams.BeaconChainConfig, bid *cltypes.ExecutionPayloadBid, env *cltypes.SignedExecutionPayloadEnvelope) ([]common.Hash, []hexutil.Bytes, error) {

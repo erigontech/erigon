@@ -64,6 +64,19 @@ type panickingUpdateDB struct {
 	calls   atomic.Int32
 }
 
+type blockRefreshForkGraph struct {
+	fork_graph.ForkGraph
+	block *cltypes.SignedBeaconBlock
+}
+
+func (g blockRefreshForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	return g.block, g.block != nil
+}
+
+func (blockRefreshForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+	panic("refresh must not replay state")
+}
+
 func (db *panickingUpdateDB) Update(ctx context.Context, f func(kv.RwTx) error) error {
 	if db.calls.Add(1) == 1 {
 		close(db.started)
@@ -1094,6 +1107,129 @@ func TestValidatePayloadWithELReleasesForkChoiceMuDuringNewPayload(t *testing.T)
 	}
 	close(releaseEngine)
 	require.NoError(t, <-done)
+}
+
+func TestRefreshEnvelopeBlockDoesNotReplayState(t *testing.T) {
+	want := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{}}
+	f := &ForkChoiceStore{forkGraph: blockRefreshForkGraph{block: want}}
+
+	var got *cltypes.SignedBeaconBlock
+	require.NotPanics(t, func() {
+		var err error
+		got, err = f.refreshEnvelopeBlockLocked(common.HexToHash("0x1234"))
+		require.NoError(t, err)
+	})
+	require.Same(t, want, got)
+}
+
+func TestNewPayloadWithAdmissionSerializesCallers(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	started := make(chan struct{}, 2)
+	release := make(chan struct{}, 2)
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Times(2).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			started <- struct{}{}
+			<-release
+			return execution_client.PayloadStatusValidated, nil
+		})
+
+	f := &ForkChoiceStore{engine: engine}
+	call := func(done chan<- error) {
+		_, err := f.NewPayloadWithAdmission(context.Background(), nil, nil, nil, nil)
+		done <- err
+	}
+	done := make(chan error, 2)
+	go call(done)
+	go call(done)
+
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("first NewPayload call did not start")
+	}
+	select {
+	case <-started:
+		t.Fatal("second NewPayload call bypassed shared admission")
+	case <-time.After(20 * time.Millisecond):
+	}
+	release <- struct{}{}
+	select {
+	case <-started:
+	case <-time.After(time.Second):
+		t.Fatal("second NewPayload call did not start after admission release")
+	}
+	release <- struct{}{}
+	require.NoError(t, <-done)
+	require.NoError(t, <-done)
+}
+
+func TestValidatePayloadWithELDoesNotWaitForUnrelatedForkChoiceWriter(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engineStarted := make(chan struct{})
+	engine.EXPECT().
+		NewPayload(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, *cltypes.Eth1Block, *common.Hash, []common.Hash, []hexutil.Bytes) (execution_client.PayloadStatus, error) {
+			close(engineStarted)
+			return execution_client.PayloadStatusValidated, nil
+		})
+
+	f := &ForkChoiceStore{
+		beaconCfg:                  cfg,
+		engine:                     engine,
+		forkGraph:                  payloadVoteForkGraph{},
+		payloadValidationAdmission: make(chan struct{}, 1),
+	}
+	f.payloadValidationOnce.Do(func() {})
+	f.payloadValidationAdmission <- struct{}{}
+	body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
+	body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](0, 48),
+	}}
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Body: body}}
+	envelope := cltypes.NewExecutionPayloadEnvelope(cfg)
+
+	done := make(chan struct{})
+	validationLocked := make(chan struct{})
+	startValidation := make(chan struct{})
+	go func() {
+		f.mu.Lock()
+		defer f.mu.Unlock()
+		close(validationLocked)
+		<-startValidation
+		_, _ = f.validatePayloadWithEL(context.Background(), envelope, block, common.HexToHash("0x1234"))
+		close(done)
+	}()
+	<-validationLocked
+	close(startValidation)
+
+	writerAcquired := make(chan struct{})
+	releaseWriter := make(chan struct{})
+	go func() {
+		f.mu.Lock()
+		close(writerAcquired)
+		<-releaseWriter
+		f.mu.Unlock()
+	}()
+	select {
+	case <-writerAcquired:
+	case <-time.After(time.Second):
+		t.Fatal("unrelated writer did not acquire forkchoice lock")
+	}
+	<-f.payloadValidationAdmission
+	select {
+	case <-engineStarted:
+	case <-time.After(50 * time.Millisecond):
+		close(releaseWriter)
+		<-done
+		t.Fatal("admitted NewPayload waited for an unrelated forkchoice writer")
+	}
+	close(releaseWriter)
+	<-done
 }
 
 func TestValidatePayloadWithELAdmissionCancellationIsNotELBehind(t *testing.T) {
