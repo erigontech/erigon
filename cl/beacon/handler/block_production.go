@@ -63,6 +63,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -75,7 +76,10 @@ const (
 	BlockPublishingValidationConsensusAndEquivocation BlockPublishingValidation = "consensus_and_equivocation"
 )
 
-var errBuilderNotEnabled = errors.New("builder is not enabled")
+var (
+	errBuilderNotEnabled           = errors.New("builder is not enabled")
+	errExecutionPayloadUnavailable = errors.New("execution payload unavailable")
+)
 
 const (
 	caplinClientCode = "CN"
@@ -293,21 +297,37 @@ func shouldRetryGetPayload(now, deadline time.Time) bool {
 	return now.Before(deadline)
 }
 
-// pollAssembledPayload waits out the build window, then polls get (which stops the EL builder) until
-// it returns a payload or the deadline passes; ok is false when no payload was produced in time.
+func isRequestAbandoned(err error) bool {
+	return errors.Is(err, execmodule.ErrRequestAbandoned)
+}
+
+type assembledPayload struct {
+	payload        *cltypes.Eth1Block
+	blobs          *engine_types.BlobsBundle
+	requestsBundle *typesproto.RequestsBundle
+	blockValue     *big.Int
+}
+
+func payloadPollingError(lastBusy error) error {
+	if lastBusy == nil {
+		return nil
+	}
+	return fmt.Errorf("failed to produce execution payload: %w", lastBusy)
+}
+
+// pollAssembledPayload waits for the build window, then polls until it receives a payload, the
+// request ends, or the polling deadline passes. A nil result and nil error mean that no payload
+// became available before the deadline.
 func pollAssembledPayload(
 	ctx context.Context,
 	window blockBuilderWindow,
 	retryTime time.Duration,
 	get func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error),
-) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, bool) {
+) (*assembledPayload, error) {
+	var lastBusy error
 	if wait := time.Until(window.firstGetAt); wait > 0 {
-		buildTimer := time.NewTimer(wait)
-		select {
-		case <-ctx.Done():
-			buildTimer.Stop()
-			return nil, nil, nil, nil, false
-		case <-buildTimer.C:
+		if err := common.Sleep(ctx, wait); err != nil {
+			return nil, execmodule.RequestAbandonedError(err, nil)
 		}
 	}
 	deadlineTimer := time.NewTimer(time.Until(window.pollUntil))
@@ -317,23 +337,67 @@ func pollAssembledPayload(
 	for {
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
+		lastBusy = nil
 		if err != nil {
-			log.Error("BlockProduction: Failed to get payload", "err", err)
+			switch {
+			case isRequestAbandoned(err):
+				return nil, err
+			case errors.Is(err, execmodule.ErrBusy):
+				lastBusy = err
+				if ctxErr := ctx.Err(); ctxErr != nil {
+					return nil, execmodule.RequestAbandonedError(ctxErr, lastBusy)
+				}
+			default:
+				log.Error("BlockProduction: Failed to get payload", "err", err)
+				if ctx.Err() != nil {
+					return nil, err
+				}
+			}
 		} else if payload != nil {
-			return payload, bundles, requestsBundle, blockValue, true
+			return &assembledPayload{
+				payload:        payload,
+				blobs:          bundles,
+				requestsBundle: requestsBundle,
+				blockValue:     blockValue,
+			}, nil
 		}
 		select {
 		case <-ctx.Done():
-			return nil, nil, nil, nil, false
+			return nil, execmodule.RequestAbandonedError(ctx.Err(), lastBusy)
 		case <-deadlineTimer.C:
-			return nil, nil, nil, nil, false
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, execmodule.RequestAbandonedError(ctxErr, lastBusy)
+			}
+			return nil, payloadPollingError(lastBusy)
 		case <-retryTicker.C:
 		}
 		// Re-check here, not before get(): the select may pick the ticker after
 		// deadlineTimer fired, and get() stops the builder, so it must not run past pollUntil.
 		if !shouldRetryGetPayload(time.Now(), window.pollUntil) {
-			return nil, nil, nil, nil, false
+			if ctxErr := ctx.Err(); ctxErr != nil {
+				return nil, execmodule.RequestAbandonedError(ctxErr, lastBusy)
+			}
+			return nil, payloadPollingError(lastBusy)
 		}
+	}
+}
+
+// logBlockProductionFailure logs only terminal outcomes. Request abandonment is expected and stays
+// at Debug level; a joined ErrBusy preserves the contention that prevented the final attempt.
+func logBlockProductionFailure(err error, slot uint64) {
+	switch {
+	case isRequestAbandoned(err):
+		if errors.Is(err, execmodule.ErrBusy) {
+			log.Debug("Block production request ended while execution module was busy", "err", err, "slot", slot)
+		} else {
+			log.Debug("Block production request abandoned", "err", err, "slot", slot)
+		}
+	case errors.Is(err, errExecutionPayloadUnavailable):
+		log.Warn("Execution payload unavailable during block production", "err", err, "slot", slot)
+	case errors.Is(err, execmodule.ErrBusy):
+		log.Warn("Execution module stayed busy during block production", "err", err, "slot", slot)
+	default:
+		log.Error("Failed to produce block", "err", err, "slot", slot)
 	}
 }
 
@@ -559,7 +623,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
 	block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
-		log.Warn("Failed to produce block", "err", err, "slot", targetSlot)
+		logBlockProductionFailure(err, targetSlot)
 		return nil, err
 	}
 
@@ -742,8 +806,6 @@ func (a *ApiHandler) produceBlock(
 	wg.Wait()
 
 	if localErr != nil {
-		// if we failed to locally produce the beacon body, we should not proceed with the block production
-		log.Error("Failed to produce beacon body", "err", localErr, "slot", targetSlot)
 		return nil, localErr
 	}
 	// prepare basic block
@@ -1040,7 +1102,7 @@ func (a *ApiHandler) produceBeaconBody(
 		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
 		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, stateVersion, targetSlot)
 		if err != nil {
-			log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
+			executionErr = fmt.Errorf("BlockProduction: GetExpectedWithdrawals failed: %w", err)
 			return
 		}
 		slotNumber := hexutil.Uint64(targetSlot)
@@ -1064,21 +1126,30 @@ func (a *ApiHandler) produceBeaconBody(
 			stateVersion,
 		)
 		if err != nil {
-			log.Error("BlockProduction: Failed to get payload id", "err", err)
+			executionErr = err
 			return
 		}
 		if len(idBytes) == 0 {
-			log.Warn("BlockProduction: ForkchoiceUpdate returned no payload id (EL may be syncing)", "slot", targetSlot)
+			executionErr = fmt.Errorf("%w: fork choice update returned no payload ID (EL may be syncing)", errExecutionPayloadUnavailable)
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion)
-		payload, bundles, requestsBundle, blockValue, ok := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+		assembled, err := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})
-		if !ok {
+		if err != nil {
+			executionErr = err
 			return
 		}
+		if assembled == nil {
+			executionErr = fmt.Errorf("%w before polling deadline", errExecutionPayloadUnavailable)
+			return
+		}
+		payload := assembled.payload
+		bundles := assembled.blobs
+		requestsBundle := assembled.requestsBundle
+		blockValue := assembled.blockValue
 		// Determine block value
 		if blockValue == nil {
 			executionValue = 0

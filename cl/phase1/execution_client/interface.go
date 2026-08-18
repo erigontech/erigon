@@ -29,8 +29,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
-
 // ExecutionEngine is used only for syncing up very close to chain tip and to stay in sync.
 // It pretty much mimics engine API.
 

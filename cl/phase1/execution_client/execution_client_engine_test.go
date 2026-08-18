@@ -17,7 +17,10 @@
 package execution_client
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,10 +28,85 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
+
+func TestMarkRemoteRequestAbandoned(t *testing.T) {
+	canceledCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	tests := []struct {
+		name       string
+		ctx        context.Context
+		err        error
+		abandoned  bool
+		contextErr error
+	}{
+		{
+			name:       "matching request cancellation",
+			ctx:        canceledCtx,
+			err:        fmt.Errorf("rpc call: %w", context.Canceled),
+			abandoned:  true,
+			contextErr: context.Canceled,
+		},
+		{
+			name:      "unrelated remote failure after cancellation",
+			ctx:       canceledCtx,
+			err:       errors.New("remote builder failed"),
+			abandoned: false,
+		},
+		{
+			name:      "unrelated context error while request is active",
+			ctx:       t.Context(),
+			err:       fmt.Errorf("remote builder failed: %w", context.Canceled),
+			abandoned: false,
+		},
+		{
+			name:      "remote engine deadline string while request is active",
+			ctx:       t.Context(),
+			err:       errors.New(remoteForkChoiceTimeoutMessage),
+			abandoned: false,
+		},
+		{
+			name:      "remote engine deadline string racing caller cancellation",
+			ctx:       canceledCtx,
+			err:       errors.New(remoteForkChoiceTimeoutMessage),
+			abandoned: false,
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := markRemoteRequestAbandoned(test.ctx, test.err)
+			require.Equal(t, test.abandoned, errors.Is(err, execmodule.ErrRequestAbandoned))
+			require.ErrorIs(t, err, test.err)
+			if test.contextErr != nil {
+				require.ErrorIs(t, err, test.contextErr)
+			}
+		})
+	}
+}
+
+type timedOutForkChoiceEngine struct {
+	engineapi.EngineAPI
+}
+
+func (timedOutForkChoiceEngine) ForkchoiceUpdatedV1(context.Context, *engine_types.ForkChoiceState, *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return nil, errors.New(remoteForkChoiceTimeoutMessage)
+}
+
+func TestRemoteForkChoiceUpdateToleratesEngineTimeout(t *testing.T) {
+	client := &ExecutionClientEngine{engine: timedOutForkChoiceEngine{}}
+
+	payloadID, err := client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.BellatrixVersion)
+
+	require.NoError(t, err)
+	require.Nil(t, payloadID)
+}
 
 type beaconCfgEngineStub struct {
 	engineapi.EngineAPI
