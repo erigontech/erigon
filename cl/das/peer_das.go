@@ -70,7 +70,9 @@ var numOfBlobRecoveryWorkers = 8
 const (
 	maxDeferredColumnSyncBlocks = 64
 	deferredColumnSyncTTL       = 30 * time.Minute
+	// Shared across all column download batches.
 	maxConcurrentColumnRequests = 4
+	columnRequestInterval       = 100 * time.Millisecond
 )
 
 type deferredColumnSyncJob struct {
@@ -102,18 +104,18 @@ func (b *deferredColumnSyncBlock) GetBlobKzgCommitments() *solid.ListSSZ[*cltype
 }
 
 type peerdas struct {
-	state              *peerdasstate.PeerDasState
-	nodeID             enode.ID
-	rpc                *rpc.BeaconRpcP2P
-	beaconConfig       *clparams.BeaconChainConfig
-	caplinConfig       *clparams.CaplinConfig
-	columnStorage      blob_storage.DataColumnStorage
-	blobStorage        blob_storage.BlobStorage
-	sentinel           sentinelproto.SentinelClient
-	ethClock           eth_clock.EthereumClock
-	gossipManager      gossipmgr.Gossip
-	recoverBlobsQueue  chan recoverBlobsRequest
-	columnRequestSlots chan struct{}
+	state             *peerdasstate.PeerDasState
+	nodeID            enode.ID
+	rpc               *rpc.BeaconRpcP2P
+	beaconConfig      *clparams.BeaconChainConfig
+	caplinConfig      *clparams.CaplinConfig
+	columnStorage     blob_storage.DataColumnStorage
+	blobStorage       blob_storage.BlobStorage
+	sentinel          sentinelproto.SentinelClient
+	ethClock          eth_clock.EthereumClock
+	gossipManager     gossipmgr.Gossip
+	recoverBlobsQueue chan recoverBlobsRequest
+	columnRPCSlots    chan struct{}
 
 	recoveringMutex     sync.Mutex
 	isRecovering        map[common.Hash]bool
@@ -145,18 +147,18 @@ func NewPeerDas(
 	kzg.InitKZGCtx()
 	gloasDataCache, _ := lru.New[common.Hash, *gloasBlockData]("gloasDataCache", 128)
 	p := &peerdas{
-		state:              peerDasState,
-		nodeID:             nodeID,
-		rpc:                rpc,
-		beaconConfig:       beaconConfig,
-		caplinConfig:       caplinConfig,
-		columnStorage:      columnStorage,
-		blobStorage:        blobStorage,
-		sentinel:           sentinel,
-		ethClock:           ethClock,
-		gossipManager:      gossipManager,
-		recoverBlobsQueue:  make(chan recoverBlobsRequest, 128),
-		columnRequestSlots: make(chan struct{}, maxConcurrentColumnRequests),
+		state:             peerDasState,
+		nodeID:            nodeID,
+		rpc:               rpc,
+		beaconConfig:      beaconConfig,
+		caplinConfig:      caplinConfig,
+		columnStorage:     columnStorage,
+		blobStorage:       blobStorage,
+		sentinel:          sentinel,
+		ethClock:          ethClock,
+		gossipManager:     gossipManager,
+		recoverBlobsQueue: make(chan recoverBlobsRequest, 128),
+		columnRPCSlots:    make(chan struct{}, maxConcurrentColumnRequests),
 
 		recoveringMutex:   sync.Mutex{},
 		isRecovering:      make(map[common.Hash]bool),
@@ -785,10 +787,10 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 	stopChan := make(chan struct{})
 	defer close(stopChan)
 	resultChan := make(chan resultData, 64)
-	go func(req *downloadRequest) {
-		ticker := time.NewTicker(100 * time.Millisecond)
+	go func() {
+		ticker := time.NewTicker(columnRequestInterval)
 		defer ticker.Stop()
-		wg := sync.WaitGroup{}
+		var wg sync.WaitGroup
 	loop:
 		for {
 			select {
@@ -796,12 +798,12 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 				break loop
 			case <-ticker.C:
 				select {
-				case d.columnRequestSlots <- struct{}{}:
+				case d.columnRPCSlots <- struct{}{}:
 				default:
 					continue
 				}
 				wg.Go(func() {
-					defer func() { <-d.columnRequestSlots }()
+					defer func() { <-d.columnRPCSlots }()
 					cctx, cancel := context.WithTimeout(ctx, 5*time.Second)
 					defer cancel()
 					ids := req.requestData()
@@ -822,14 +824,14 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 						err:       err,
 					}:
 					default:
-						// just drop it if the channel is full
+						// Leave the request pending so a later tick retries it.
 					}
 				})
 			}
 		}
 		wg.Wait()
 		close(resultChan)
-	}(req)
+	}()
 
 	// check if the column data is over half at the same time because we might also receive the column sidecars from other peers
 	halfCheckTicker := time.NewTicker(500 * time.Millisecond)
