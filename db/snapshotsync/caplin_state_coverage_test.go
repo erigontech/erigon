@@ -17,6 +17,9 @@
 package snapshotsync
 
 import (
+	"os"
+	"path/filepath"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -25,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/version"
 )
 
 func TestCaplinStateContiguousCoverageEndContiguous(t *testing.T) {
@@ -70,6 +74,27 @@ func TestCaplinStateContiguousCoverageEndNotRootedAtGenesis(t *testing.T) {
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
 	require.Zero(t, s.ContiguousCoverageEnd(table))
+}
+
+func TestCaplinStateEqualRangePrefersNewestVersion(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.BlockRoot
+
+	olderSeg, olderIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	olderV1Seg := filepath.Join(dirs.SnapCaplin, strings.Replace(filepath.Base(olderSeg), "v1.1-", "v1.0-", 1))
+	olderV1Idx := filepath.Join(dirs.SnapCaplin, strings.Replace(filepath.Base(olderIdx), "v1.1-", "v1.0-", 1))
+	require.NoError(t, os.Rename(olderSeg, olderV1Seg))
+	require.NoError(t, os.Rename(olderIdx, olderV1Idx))
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	view := s.View()
+	defer view.Close()
+
+	visible := view.VisibleSegments(table)
+	require.Len(t, visible, 1)
+	require.Equal(t, version.V1_1, visible[0].Src().Version())
 }
 
 func TestCaplinStateDumpPlanUsesDirtyCoverageAcrossGap(t *testing.T) {

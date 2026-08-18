@@ -839,29 +839,30 @@ hole heals.
 - Modify: `cl/antiquary/state_prune_reader_test.go`
 - Modify: `cmd/utils/app/publishable_check_test.go`
 
-- [ ] adapt the fixtures to the embedded base. Behavioral assertions are the
+- [x] adapt the fixtures to the embedded base. Behavioral assertions are the
   regression net for the swap — do not weaken one to make it pass. The two
   exceptions are already retired in Task 9, with reasons, and are not to be
   reinstated: `caplin_state_snapshots_test.go` and
   `TestCaplinStateRemoveOverlapsKeepsSubsetWithoutIndexedSuperset`.
-- [ ] `TestCaplinStateUnindexedSegmentInvisible` (`caplin_state_visibility_test.go:35`)
+- [x] `TestCaplinStateUnindexedSegmentInvisible` (`caplin_state_visibility_test.go:35`)
   is the one test asserting an *unindexed* segment is excluded from coverage —
   its assertions are at `:48` and `:56`. It survives only if Task 10 kept the
   `IsIndexed` gate; treat a failure there as a Task 10 bug, not a fixture to
   update.
-- [ ] `TestCaplinStateIndexFoundWhenDatadirPathContainsSeg` (`:63`) is a
+- [x] `TestCaplinStateIndexFoundWhenDatadirPathContainsSeg` (`:63`) is a
   different property — that an **indexed** segment IS visible when the datadir
   path itself contains `.seg`. If it goes red, the cause is the base's
   version-agnostic `.idx` resolution replacing the extension swap (see the
   `ReplaceVersionWithMask` note below), not a lost `IsIndexed` gate. Do not go
   looking in Task 10.
-- [ ] refresh the docstring at `caplin_state_visibility_test.go:59-62`, which
+- [x] refresh the docstring at `caplin_state_visibility_test.go:59-62`, which
   pins the `.seg`-in-path mechanism of the deleted `openIdxIfNeedForCaplinState`.
   The assertion survives; the explanation rots.
-- [ ] add a case asserting equal-range version dedup now applies to state,
+- [x] add a case asserting equal-range version dedup now applies to state,
   inherited from `RecalcVisibleSegments` (`snapshots.go:819-836`) and absent
   before this PR.
-- [ ] note in the PR body: the base resolves the `.idx` version-agnostically via
+- [x] note in the PR body (deferred to the PR description; no PR exists in this
+  workspace): the base resolves the `.idx` version-agnostically via
   `ReplaceVersionWithMask` + `MatchVersionedFile` (`snapshots.go:430-445`), where
   caplin's extension swap took the segment's own path and so paired the versions
   by construction. Do not call it a pure relaxation. The base takes the
@@ -875,7 +876,7 @@ hole heals.
   `IsIndexed`, and be preferred by the equal-range dedup. Harm needs a genuinely
   older-format v1.0 file whose word lengths differ, so this is a recorded
   exposure rather than a fix in this PR.
-- [ ] run `go test -race ./db/snapshotsync/... ./cl/antiquary/... ./cmd/utils/...`
+- [x] run `go test -race ./db/snapshotsync/... ./cl/antiquary/... ./cmd/utils/...`
 
 ---
 
