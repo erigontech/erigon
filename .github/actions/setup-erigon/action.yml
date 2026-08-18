@@ -209,12 +209,29 @@ runs:
       # mid-mirror-sync, or a 403 "no longer signed" on the azure-cli repo —
       # failing the whole job. Drop every source pointing at those CDNs before
       # updating (we never install from them); the Ubuntu archive retries on blips.
-      # Can't suppress "Reading database..." from apt-get install. Also it's very slow...
+      #
+      # apt waits indefinitely for an unreachable mirror or for a lock held by
+      # the image's own unattended-upgrades, and -qq hides that it is waiting,
+      # so the step can consume the entire job budget in silence. Skip apt when
+      # the toolchain already builds, and bound whatever is left.
       run: |
+        if command -v make >/dev/null 2>&1 &&
+           printf 'int main(void){return 0;}' | cc -x c -o /dev/null - 2>/dev/null; then
+          echo "C toolchain and make already usable; skipping apt"
+          exit 0
+        fi
         sudo grep -rlZE 'dl\.google\.com|packages\.microsoft\.com' \
           /etc/apt/sources.list.d/ 2>/dev/null | sudo xargs -0 -r rm -f || true
-        sudo apt-get update -qq -o Acquire::Retries=3 \
-          && sudo apt-get install -qq -y build-essential 2>/dev/null
+        apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=15
+                  -o Acquire::https::Timeout=15 -o DPkg::Lock::Timeout=60)
+        if ! sudo timeout 300 apt-get update -q "${apt_opts[@]}"; then
+          echo "::error::apt-get update did not finish within 300s"
+          exit 1
+        fi
+        if ! sudo timeout 600 apt-get install -qq -y "${apt_opts[@]}" build-essential; then
+          echo "::error::apt-get install build-essential did not finish within 600s"
+          exit 1
+        fi
 
     - name: Ensure make on Windows
       if: ${{ runner.os == 'Windows' }}
