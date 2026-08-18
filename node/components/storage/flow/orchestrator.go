@@ -861,6 +861,13 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 	toRequest := make([]*snapshot.FileEntry, 0, len(peerEntries))
 	inv := o.storage.Inventory()
 	o.peerMu.Lock()
+	// Canonical gate: once quorum has formed (canonical is non-empty),
+	// only files IN canonical are eligible for download. Files a single
+	// peer advertises that others don't (rotation-window gap files) fall
+	// off. When canonical is empty (bootstrap — no manifests yet, or
+	// mid-quorum-break), fall back to additive behaviour so first-boot
+	// still makes progress until the first canonical forms.
+	gateOnCanonical := len(o.canonical) > 0
 	for _, entry := range peerEntries {
 		eligibleForPhase1 := domain != "" || entry.Kind != snapshot.KindCaplin
 		if o.haveLocally(domain, entry.Name) {
@@ -876,6 +883,11 @@ func (o *Orchestrator) requestGapsFor(domain snapshot.Domain, peerEntries []*sna
 		// fix-verified).
 		if inv != nil && inv.IsProducing(entry.Name) {
 			continue
+		}
+		if gateOnCanonical {
+			if _, ok := o.canonical[entry.Name]; !ok {
+				continue
+			}
 		}
 		role := fileRole(entry.Name)
 		if o.coverageForRoleLocked(domain, role).IsComplete(entry.FromStep, entry.ToStep) {
