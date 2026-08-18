@@ -149,7 +149,7 @@ func TestCaplinStateRemoveOverlaps(t *testing.T) {
 	require.True(t, hasDiskOverlap(t, dirs.SnapCaplin, table), "fixture must reproduce the on-disk overlap")
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
-	require.NoError(t, s.RemoveOverlaps())
+	require.NoError(t, s.RemoveOverlaps(nil))
 
 	require.NoFileExists(t, subSeg)
 	require.NoFileExists(t, subIdx)
@@ -175,27 +175,9 @@ func TestCaplinStateRemoveOverlapsSubsetMissingIndex(t *testing.T) {
 	require.NoError(t, dir2.RemoveFile(subIdx)) // subset .seg present, .idx missing
 
 	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
-	require.NoError(t, s.RemoveOverlaps())
+	require.NoError(t, s.RemoveOverlaps(nil))
 
 	require.NoFileExists(t, subSeg, "covered subset must be removed even without its index")
 	require.FileExists(t, supSeg)
 	require.False(t, hasDiskOverlap(t, dirs.SnapCaplin, table))
-}
-
-// A subset must be kept when no fully-present indexed superset covers it: deleting it
-// would drop data. Here the "superset" lacks its .idx, so it is not usable yet.
-func TestCaplinStateRemoveOverlapsKeepsSubsetWithoutIndexedSuperset(t *testing.T) {
-	logger := log.New()
-	dirs := datadir.New(t.TempDir())
-	table := kv.PendingDepositsDump
-
-	supSeg, supIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
-	subSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
-	require.NoError(t, dir2.RemoveFile(supIdx)) // superset not indexed → not a valid cover
-
-	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
-	require.NoError(t, s.RemoveOverlaps())
-
-	require.FileExists(t, subSeg, "subset must survive when its superset is not indexed")
-	require.FileExists(t, supSeg)
 }

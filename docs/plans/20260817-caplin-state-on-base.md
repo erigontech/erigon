@@ -600,7 +600,7 @@ listed below reads a field or a view shape that this task removes.
 - Delete: `db/snapshotsync/caplin_state_snapshots_test.go`
 - Modify: `cmd/utils/app/snapshots_cmd.go`
 
-- [ ] replace the lifecycle fields (`:145-170`) with an embedded
+- [x] replace the lifecycle fields (`:145-170`) with an embedded
   `*BaseRoSnapshots`, keeping `snapshotTypes` and `tmpdir`. Drop `beaconCfg` —
   set at `:206`, never read; PR-2c re-adds it, because resolving a declared fork
   to an activation slot needs the fork epochs. Deleting dead state is this
@@ -609,13 +609,13 @@ listed below reads a field or a view shape that this task removes.
   Keep `Salt`: it is read at `:880` even though nothing ever assigns it, so it
   is always 0 (decision F — salt stays 0 for the whole epic, and nothing here
   may assign it).
-- [ ] `NewCaplinStateSnapshots` builds the base with `alignMin=false`. Derive
+- [x] `NewCaplinStateSnapshots` builds the base with `alignMin=false`. Derive
   the type list from the passed `snapshotTypes.KeyValueGetters` keys via
   `ParseEnum` — **not** from the global `CaplinStateSnapshotTypes`, which would
   make `caplin_state_overlap_test.go:105-115`'s single-table map silently open
   all 33. Panic on a key that does not resolve; skipping it silently would leave
   `s.dirty[enum]` absent and drop that table's segments with no error.
-- [ ] `baseSegType` must be a member of the derived list — `newRoSnapshots`
+- [x] `baseSegType` must be a member of the derived list — `newRoSnapshots`
   panics otherwise (`snapshots.go:586-588`) — so it cannot be a fixed
   `snaptype.BlockRoot` while the list is derived. **Sort the resolved types by
   enum, then take `[0]`**; map iteration order is random, so "the first key" is
@@ -626,17 +626,17 @@ listed below reads a field or a view shape that this task removes.
   `*CaplinStateSnapshots` alone (`:184`) and the signature stays, so an error
   return is not available. Both this and the unresolvable-key case are programmer
   errors; test both panic messages.
-- [ ] note the cross-PR coupling: panicking on an unresolvable key is only
+- [x] note the cross-PR coupling: panicking on an unresolvable key is only
   unreachable because Task 2's "the 33 names match `MakeCaplinStateSnapshotsTypes`'s
   key set exactly" test holds. That test is in PR-2a and this panic is in PR-2b;
   weakening the former arms the latter.
-- [ ] keep the constructor signature unchanged so the four non-test sites need
+- [x] keep the constructor signature unchanged so the four non-test sites need
   no edit.
-- [ ] delete `OpenList`, `OpenFolder`, `recalcVisibleFiles`, `idxAvailability`,
+- [x] delete `OpenList`, `OpenFolder`, `recalcVisibleFiles`, `idxAvailability`,
   `closeWhatNotInList`, `Close`, `openSegIfNeed`, `openIdxForCaplinStateIfNeeded`,
   `openIdxIfNeedForCaplinState`, `isIndexed`, `listAllSegFilesInDir` and the
   offline `RemoveOverlaps` (`:495-545`).
-- [ ] `RemoveOverlaps` is the one deletion that changes a signature — the
+- [x] `RemoveOverlaps` is the one deletion that changes a signature — the
   promoted base version takes `onDelete func([]string) error` (`snapshots.go:1458`)
   where the offline one took nothing. Update all four no-arg call sites **here**,
   passing `nil`: `caplin_state_overlap_test.go:152,178,197` and
@@ -645,14 +645,14 @@ listed below reads a field or a view shape that this task removes.
   uncompilable from this task through that one, and this task's own gate cannot
   run. Every other deletion is either unexported or signature-identical on the
   base (`OpenList`, `OpenFolder`, `Close`), so no other caller moves.
-- [ ] **delete `caplin_state_snapshots_test.go` here**, for the same reason. Its
+- [x] **delete `caplin_state_snapshots_test.go` here**, for the same reason. Its
   only test hand-builds `&CaplinStateSnapshots{dirty: map[string]...}` (`:33`)
   and calls `closeWhatNotInList` (`:35`) — both removed by this task, so the
   package stops compiling with `unknown field dirty` and
   `closeWhatNotInList undefined`, killing this task's gate and Tasks 10 and 11's
   with it. Task 12 lists the file, but three dead gates cannot wait for it. The
   behavior is covered by the base's own close-and-retire tests.
-- [ ] **retire `TestCaplinStateRemoveOverlapsKeepsSubsetWithoutIndexedSuperset`
+- [x] **retire `TestCaplinStateRemoveOverlapsKeepsSubsetWithoutIndexedSuperset`
   (`caplin_state_overlap_test.go:187-201`) here too.** It pins a guarantee the
   base does not make: the offline version restricted candidate supersets to
   indexed segments, while `findOverlaps` (`snapshots.go:111-144`) compares only
@@ -664,16 +664,16 @@ listed below reads a field or a view shape that this task removes.
   building the missing indices before the call. The test two above it
   (`:180`, indexed superset) still holds and stays. Say both retirements in the
   PR body.
-- [ ] delete `LS` (`:222-240`). It reads `view.roTxs` and has no caller —
+- [x] delete `LS` (`:222-240`). It reads `view.roTxs` and has no caller —
   `snapshots_cmd.go:3085` is `freezeblocks.CaplinSnapshots.LS()`, `:3075` is
   `agg.LS()`.
-- [ ] `CaplinStateView` becomes a thin wrapper over the base `*View`;
+- [x] `CaplinStateView` becomes a thin wrapper over the base `*View`;
   `VisibleSegments(tbl)` resolves the table to its enum through a
   `map[string]snaptype.Enum` built once in the constructor — `Get` is a per-slot
   path driven from the historical reader, so a `ParseEnum` per call does not
   belong there. `Close` (`:644-656`) iterates `v.roTxs` and must be rewritten
   with the struct, not left behind.
-- [ ] rewrite `BuildMissingIndices` (`:843-889`). It does not compile after the
+- [x] rewrite `BuildMissingIndices` (`:843-889`). It does not compile after the
   swap and Task 9's "keep it caplin-owned" does not mean "leave it alone":
   `for caplinType, filesTree := range s.dirty` (`:856`) then
   `s.snapshotTypes.KeyValueGetters[caplinType]` (`:858`) assumes caplin's
@@ -683,22 +683,22 @@ listed below reads a field or a view shape that this task removes.
   (`:866`), whose base equivalent is `df.IsIndexed()` (`snapshots.go:291`), and
   iterating the base's `dirty` needs `dirtyLock` where today it is lock-free.
   `return s.OpenFolder()` (`:888`) is fine — same signature on the base.
-- [ ] **`SegFileNames` must stop reading `src.filePath`** (`:256`). That field is
+- [x] **`SegFileNames` must stop reading `src.filePath`** (`:256`). That field is
   written only by the `OpenList` this task deletes, so the signature would
   survive while the function returned empty strings — straight into
   `s.downloader.Seed(s.ctx, paths)` at `cl/antiquary/state_antiquary.go:658`,
   silently seeding nothing. Build the path from `seg.src.FileName()` and
   `s.Dir()`.
-- [ ] override `BlocksAvailable()` so its numeric value is unchanged; Task 8's
+- [x] override `BlocksAvailable()` so its numeric value is unchanged; Task 8's
   tests are the specification. **Override `SegmentsMax` and `IndicesMax` too**
   (`:214-215`) — deleting them is not available, because `LogStat` (`:217-220`)
   reads both and has a caller (`cmd/utils/app/snapshots_cmd.go:3157`). Left to
   promote, they silently become the base's max-over-types and `enums[0]`
   height, changing what the operator reads.
-- [ ] rebase `coveredRangesForType` and `Get` on the base view, keeping their
+- [x] rebase `coveredRangesForType` and `Get` on the base view, keeping their
   signatures. `TypeNames` (`:267-274`) reads only `snapshotTypes.KeyValueGetters`
   — leave it.
-- [ ] `ContiguousCoverageEnd` must **not** open a `View` per call. `View.Close`
+- [x] `ContiguousCoverageEnd` must **not** open a `View` per call. `View.Close`
   → `releaseVisible` → `reclaimRetired` takes `dirtyLock.Lock()`
   (`snapshots.go:963-966`, `:980-984`), and the prune path calls it 66× per pass
   — per table in `statePruneBacklog` (`state_prune.go:78`) and again in
@@ -706,15 +706,15 @@ listed below reads a field or a view shape that this task removes.
   (`state_antiquary.go:621`). Today it takes `visibleLock.RLock()` with no
   writer contention. Read `s.visible.Load().segments[enum]` and copy only
   `.Range` values; a pin is not needed to read a range.
-- [ ] keep `DumpCaplinState`, `planStateDump`, `dumpCaplinState` and
+- [x] keep `DumpCaplinState`, `planStateDump`, `dumpCaplinState` and
   `BuildMissingIndices` caplin-owned — the base's `BuildMissedIndices` takes a
   `*chain.Config` caplin does not have, the same reason PR-1 kept it for blocks.
-- [ ] state owns `dirs.SnapCaplin` outright, so unlike caplin blocks it inherits
+- [x] state owns `dirs.SnapCaplin` outright, so unlike caplin blocks it inherits
   the base's unfiltered directory scan — do not add a name filter.
-- [ ] write a test asserting `SegFileNames` returns absolute, non-empty paths
+- [x] write a test asserting `SegFileNames` returns absolute, non-empty paths
   that exist on disk
-- [ ] Task 7's two tests turn green here; Task 8's must stay green
-- [ ] run `go test -race ./db/snapshotsync/... ./cl/antiquary/... ./cl/persistence/... ./cl/beacon/... ./cmd/utils/...` — must pass before task 10
+- [x] Task 7's two tests turn green here; Task 8's must stay green
+- [x] run `go test -race ./db/snapshotsync/... ./cl/antiquary/... ./cl/persistence/... ./cl/beacon/... ./cmd/utils/...` — must pass before task 10
 
 ---
 

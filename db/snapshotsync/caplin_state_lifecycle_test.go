@@ -191,3 +191,35 @@ func TestCaplinStateBlocksAvailableMainnetPublishedSubset(t *testing.T) {
 	s := openTestCaplinStateSnapshotsWithTables(t, dirs, configured, logger)
 	require.Equal(t, uint64(0), s.BlocksAvailable())
 }
+
+func TestCaplinStateSegFileNamesReturnsExistingAbsolutePaths(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+	segPath, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	paths := s.SegFileNames(0, 50_000)
+
+	require.Equal(t, []string{segPath}, paths)
+	for _, path := range paths {
+		require.NotEmpty(t, path)
+		require.True(t, filepath.IsAbs(path))
+		require.FileExists(t, path)
+	}
+}
+
+func TestNewCaplinStateSnapshotsPanicsForEmptyTypes(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	require.PanicsWithValue(t, "caplin state snapshot KeyValueGetters is empty", func() {
+		NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, SnapshotTypes{}, log.New())
+	})
+}
+
+func TestNewCaplinStateSnapshotsPanicsForUnknownType(t *testing.T) {
+	dirs := datadir.New(t.TempDir())
+	types := SnapshotTypes{KeyValueGetters: map[string]KeyValueGetter{"unknown-state-table": nil}}
+	require.PanicsWithValue(t, `caplin state snapshot type "unknown-state-table" is not registered`, func() {
+		NewCaplinStateSnapshots(ethconfig.BlocksFreezing{ChainName: networkname.Mainnet}, nil, dirs, types, log.New())
+	})
+}

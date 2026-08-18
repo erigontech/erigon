@@ -209,9 +209,6 @@ type DirtySegment struct {
 	frozen bool
 
 	canDelete atomic.Bool
-
-	// only caplin state
-	filePath string
 }
 
 func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
