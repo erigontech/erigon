@@ -387,26 +387,28 @@ func TestShouldRetryGetPayloadStopsAtDeadline(t *testing.T) {
 }
 
 func TestPollAssembledPayloadReturnsReadyPayload(t *testing.T) {
+	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now.Add(-time.Millisecond), pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, pollErr := pollAssembledPayload(t.Context(), 10, window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return want, nil, nil, nil, nil
 		})
-	require.NoError(t, pollErr)
+	require.NoError(t, err)
 	require.Same(t, want, payload)
 	require.Equal(t, 1, calls)
 }
 
 func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
+	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, pollErr := pollAssembledPayload(t.Context(), 10, window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls < 3 {
@@ -414,17 +416,18 @@ func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
 			}
 			return want, nil, nil, nil, nil
 		})
-	require.NoError(t, pollErr)
+	require.NoError(t, err)
 	require.Same(t, want, payload)
 	require.Equal(t, 3, calls)
 }
 
 func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
+	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, pollErr := pollAssembledPayload(t.Context(), 10, window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls == 1 {
@@ -432,35 +435,37 @@ func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
 			}
 			return want, nil, nil, nil, nil
 		})
-	require.NoError(t, pollErr)
+	require.NoError(t, err)
 	require.Same(t, want, payload)
 	require.Equal(t, 2, calls)
 }
 
 func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {
+	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
 	calls := 0
-	payload, _, _, _, pollErr := pollAssembledPayload(t.Context(), 10, window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
 		})
-	require.Error(t, pollErr)
+	require.Error(t, err)
 	require.Nil(t, payload)
 	require.NotZero(t, calls)
 }
 
 func TestPollAssembledPayloadLateRequestGrabsOnce(t *testing.T) {
+	ctx := t.Context()
 	past := time.Now().Add(-time.Second)
 	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
 	calls := 0
-	_, _, _, _, pollErr := pollAssembledPayload(t.Context(), 10, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
 		})
-	require.Error(t, pollErr)
+	require.Error(t, err)
 	require.Equal(t, 1, calls)
 }
 
@@ -470,12 +475,12 @@ func TestPollAssembledPayloadReturnsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls := 0
-	_, _, _, _, pollErr := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
 		})
-	require.Error(t, pollErr)
+	require.Error(t, err)
 	require.Zero(t, calls)
 }
 
@@ -874,11 +879,12 @@ func captureProductionLogs(t *testing.T) func() string {
 }
 
 func TestPollAssembledPayloadStaysQuietWhenAFailedPollRecovers(t *testing.T) {
+	ctx := t.Context()
 	logs := captureProductionLogs(t)
 	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Second)}
 
 	calls := 0
-	payload, _, _, _, pollErr := pollAssembledPayload(t.Context(), 10, window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls == 1 {
@@ -887,19 +893,20 @@ func TestPollAssembledPayloadStaysQuietWhenAFailedPollRecovers(t *testing.T) {
 			return &cltypes.Eth1Block{}, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil
 		})
 
-	require.NoError(t, pollErr)
+	require.NoError(t, err)
 	require.NotNil(t, payload)
 	// Contention that clears is a healthy slot, so nothing may be reported at error level.
 	require.NotContains(t, logs(), "lvl=eror")
 }
 
 func TestPollAssembledPayloadReportsAWindowThatNeverProducedOnce(t *testing.T) {
+	ctx := t.Context()
 	logs := captureProductionLogs(t)
 	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(50 * time.Millisecond)}
 
 	boom := errors.New("boom")
 	calls := 0
-	_, _, _, _, pollErr := pollAssembledPayload(t.Context(), 10, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, boom
@@ -909,8 +916,8 @@ func TestPollAssembledPayloadReportsAWindowThatNeverProducedOnce(t *testing.T) {
 
 	// The reason goes to the caller, which knows the slot and owns the record, carrying the first
 	// failure - the one that says what went wrong - and how many there were.
-	require.ErrorIs(t, pollErr, boom)
-	require.Contains(t, pollErr.Error(), "attempt")
+	require.ErrorIs(t, err, boom)
+	require.Contains(t, err.Error(), "attempt")
 	require.Empty(t, logs(), "the poll does not report; its caller does")
 }
 
@@ -919,7 +926,7 @@ func TestPollAssembledPayloadStaysQuietWhenTheCallerGoesAway(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Minute)}
 
-	_, _, _, _, pollErr := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			cancel()
 			return nil, nil, nil, nil, context.Canceled
@@ -927,7 +934,7 @@ func TestPollAssembledPayloadStaysQuietWhenTheCallerGoesAway(t *testing.T) {
 
 	// A validator client that times out, or a node shutting down, takes the slot with it. Nothing
 	// failed that anyone can act on.
-	require.Error(t, pollErr)
+	require.Error(t, err)
 	require.NotContains(t, logs(), "lvl=eror")
 }
 
@@ -936,7 +943,7 @@ func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *
 	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Minute)}
 
 	calls := 0
-	_, _, _, _, pollErr := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls == 1 {
@@ -948,8 +955,8 @@ func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *
 
 	// The client may well have given up because production was failing. Reporting only the
 	// cancellation would lose the only sign of it.
-	require.NotErrorIs(t, pollErr, context.Canceled)
-	require.Contains(t, pollErr.Error(), "boom")
+	require.NotErrorIs(t, err, context.Canceled)
+	require.Contains(t, err.Error(), "boom")
 }
 
 func TestFeeRecipientWarnsOncePerProposer(t *testing.T) {
@@ -1003,7 +1010,7 @@ func TestPollAssembledPayloadDoesNotCollectAfterTheCallerHasGone(t *testing.T) {
 	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
 
 	calls := 0
-	_, _, _, _, pollErr := pollAssembledPayload(ctx, 10, window, time.Microsecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Microsecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			// The execution module takes its semaphore before it looks at a context, so a request
@@ -1011,7 +1018,7 @@ func TestPollAssembledPayloadDoesNotCollectAfterTheCallerHasGone(t *testing.T) {
 			return nil, nil, nil, nil, errors.New("execution module is busy")
 		})
 
-	require.Error(t, pollErr)
+	require.Error(t, err)
 	require.Zero(t, calls, "collection must not be started for a caller that has gone")
 	require.NotContains(t, logs(), "lvl=eror")
 }
@@ -1038,9 +1045,10 @@ func produceBlockWithFailingCollection(t *testing.T, ctx context.Context, collec
 }
 
 func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
+	ctx := t.Context()
 	logs := captureProductionLogs(t)
 
-	err := produceBlockWithFailingCollection(t, t.Context(), errors.New("boom"))
+	err := produceBlockWithFailingCollection(t, ctx, errors.New("boom"))
 	require.Error(t, err)
 
 	// One record for the whole request, and it carries the cause: the generic failure the caller
