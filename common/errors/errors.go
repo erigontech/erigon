@@ -44,15 +44,16 @@ func IsOnly(err error, targets ...error) bool {
 	if err == nil || len(targets) == 0 {
 		return false
 	}
-	errType := reflect.TypeOf(err)
-	if errType.Comparable() {
+	errValue := reflect.ValueOf(err)
+	if errValue.Comparable() {
 		for _, target := range targets {
-			if errType == reflect.TypeOf(target) && err == target {
+			targetValue := reflect.ValueOf(target)
+			if targetValue.IsValid() && errValue.Type() == targetValue.Type() && errValue.Equal(targetValue) {
 				return true
 			}
 		}
 	}
-	switch x := err.(type) {
+	switch x := err.(type) { //nolint:errorlint // errors.As would inspect child branches instead of only this node.
 	case interface{ Unwrap() []error }:
 		errs := x.Unwrap()
 		if len(errs) == 0 {
