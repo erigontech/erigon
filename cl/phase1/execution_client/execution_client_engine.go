@@ -376,6 +376,9 @@ func (cc *ExecutionClientEngine) getAssembledBlockFromResponse(resp *engine_type
 	if resp.ExecutionPayload == nil {
 		return nil, nil, nil, nil, errors.New("GetPayload returned nil execution payload")
 	}
+	if resp.BlobsBundle == nil {
+		return nil, nil, nil, nil, errors.New("GetPayload returned nil blobs bundle")
+	}
 	if cc.beaconCfg == nil {
 		return nil, nil, nil, nil, errors.New("beaconCfg not set — call SetBeaconChainConfig before GetAssembledBlock")
 	}

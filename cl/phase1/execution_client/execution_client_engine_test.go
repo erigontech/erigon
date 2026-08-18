@@ -131,6 +131,19 @@ func TestRemoteNewPayloadMarksRequestCancellation(t *testing.T) {
 	require.ErrorIs(t, err, execmodule.ErrRequestAbandoned)
 }
 
+func TestGetAssembledBlockRejectsMissingBlobsBundle(t *testing.T) {
+	client := &ExecutionClientEngine{beaconCfg: &clparams.MainnetBeaconConfig}
+	resp := &engine_types.GetPayloadResponse{ExecutionPayload: &engine_types.ExecutionPayload{}}
+
+	payload, blobs, requests, value, err := client.getAssembledBlockFromResponse(resp, clparams.DenebVersion)
+
+	require.Nil(t, payload)
+	require.Nil(t, blobs)
+	require.Nil(t, requests)
+	require.Nil(t, value)
+	require.EqualError(t, err, "GetPayload returned nil blobs bundle")
+}
+
 type beaconCfgEngineStub struct {
 	engineapi.EngineAPI
 	cfg *clparams.BeaconChainConfig
