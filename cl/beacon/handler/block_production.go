@@ -2172,7 +2172,8 @@ func storeProducedDataColumns(
 		seen[column.Index] = true
 	}
 	for _, column := range columns {
-		if err := storage.WriteColumnSidecars(ctx, blockRoot, int64(column.Index), column); err != nil {
+		storedColumn := *column
+		if err := storage.WriteColumnSidecars(ctx, blockRoot, int64(column.Index), &storedColumn); err != nil {
 			return fmt.Errorf("store data column %d: %w", column.Index, err)
 		}
 	}

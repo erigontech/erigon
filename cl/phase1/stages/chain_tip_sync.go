@@ -244,6 +244,7 @@ MainLoop:
 			availabilityBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(blocks.Data))
 			availabilityRoots := make([]common.Hash, 0, len(blocks.Data))
 			batchRoots := make(map[common.Hash]struct{}, len(blocks.Data))
+			needsDataAvailabilityPreflight := false
 			now := time.Now()
 			for _, block := range blocks.Data {
 				blockRoot, err := block.Block.HashSSZ()
@@ -270,10 +271,46 @@ MainLoop:
 				batchRoots[root] = struct{}{}
 				availabilityBlocks = append(availabilityBlocks, block)
 				availabilityRoots = append(availabilityRoots, root)
+				commitments := block.GetBlobKzgCommitments()
+				if chainTipDataAvailabilityRequired(cfg, block) && commitments != nil && commitments.Len() > 0 {
+					needsDataAvailabilityPreflight = true
+				}
 			}
-			availabilityErrs := acquireRecentBlocksDataAvailability(ctx, cfg, availabilityBlocks)
-			availabilityByRoot := make(map[common.Hash]error, len(availabilityRoots))
-			for i, root := range availabilityRoots {
+
+			skipNonFinalized := make([]bool, len(availabilityBlocks))
+			if needsDataAvailabilityPreflight {
+				var retryable bool
+				var preflightErr error
+				skipNonFinalized, retryable, preflightErr = cfg.forkChoice.PreflightDataAvailabilityBlocks(availabilityBlocks)
+				if preflightErr != nil {
+					if !retryable {
+						if cfg.rpc != nil && blocks.Peer != "" {
+							cfg.rpc.BanPeer(blocks.Peer)
+						}
+						return fmt.Errorf("chain-tip block preflight: %w", preflightErr)
+					}
+					logger.Debug("chain-tip block preflight will retry", "err", preflightErr)
+					retryAfter := time.Now().Add(time.Second)
+					for _, root := range availabilityRoots {
+						dataAvailabilityRetryAfter[root] = retryAfter
+					}
+					continue
+				}
+			}
+
+			downloadBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(availabilityBlocks))
+			downloadRoots := make([]common.Hash, 0, len(availabilityRoots))
+			for i, block := range availabilityBlocks {
+				if skipNonFinalized[i] {
+					seenBlockRoots[availabilityRoots[i]] = struct{}{}
+					continue
+				}
+				downloadBlocks = append(downloadBlocks, block)
+				downloadRoots = append(downloadRoots, availabilityRoots[i])
+			}
+			availabilityErrs := acquireRecentBlocksDataAvailability(ctx, cfg, downloadBlocks)
+			availabilityByRoot := make(map[common.Hash]error, len(downloadRoots))
+			for i, root := range downloadRoots {
 				availabilityByRoot[root] = availabilityErrs[i]
 			}
 

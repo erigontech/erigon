@@ -67,6 +67,26 @@ func TestStoreProducedDataColumns(t *testing.T) {
 	require.NoError(t, storeProducedDataColumns(t.Context(), storage, &cfg, blockRoot, columns))
 }
 
+func TestStoreProducedDataColumnsIsolatesStorageMutation(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.NumberOfColumns = 1
+	blockRoot := common.Hash{1}
+	column := &cltypes.DataColumnSidecar{BlockRoot: common.Hash{2}, Index: 0, Slot: 3}
+
+	storage := blobstoragemock.NewMockDataColumnStorage(gomock.NewController(t))
+	storage.EXPECT().WriteColumnSidecars(gomock.Any(), blockRoot, int64(0), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ common.Hash, _ int64, stored *cltypes.DataColumnSidecar) error {
+			require.NotSame(t, column, stored)
+			stored.BlockRoot = blockRoot
+			stored.Slot = 4
+			return nil
+		},
+	)
+	require.NoError(t, storeProducedDataColumns(t.Context(), storage, &cfg, blockRoot, []*cltypes.DataColumnSidecar{column}))
+	require.Equal(t, common.Hash{2}, column.BlockRoot)
+	require.Equal(t, uint64(3), column.Slot)
+}
+
 func TestStoreProducedDataColumnsRequiresEveryColumn(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.NumberOfColumns = 2

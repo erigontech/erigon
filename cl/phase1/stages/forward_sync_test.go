@@ -91,34 +91,50 @@ func TestForwardSyncSkipsKnownOverlapBeforeAcquiringColumns(t *testing.T) {
 
 func newSignedFuluForwardSyncFixture(t *testing.T) (*Cfg, *cltypes.SignedBeaconBlock, common.Hash) {
 	t.Helper()
+	stageCfg, blocks, roots := newSignedFuluSyncFixture(t, 1)
+	return stageCfg, blocks[0], roots[0]
+}
+
+func newSignedFuluSyncFixture(t *testing.T, slots ...uint64) (*Cfg, []*cltypes.SignedBeaconBlock, []common.Hash) {
+	t.Helper()
+	require.NotEmpty(t, slots)
 	cfg := testFuluConfig()
 	anchorState, keys, err := devgenesis.BuildGenesisState("forward-sync-test", 1, &cfg, 0, common.Hash{})
 	require.NoError(t, err)
 	stageCfg, anchorRoot := newForwardSyncTestCfg(t, &cfg, anchorState)
 
-	block := newFuluChainTipTestBlock(&cfg, 1, anchorRoot)
-	block.Block.ProposerIndex = 0
 	domain, err := fork.ComputeDomain(
 		cfg.DomainBeaconProposer[:],
 		clutils.Uint32ToBytes4(cfg.GetForkVersionByVersion(clparams.FuluVersion)),
 		anchorState.GenesisValidatorsRoot(),
 	)
 	require.NoError(t, err)
-	signingRoot, err := fork.ComputeSigningRoot(block.Block, domain)
-	require.NoError(t, err)
-	copy(block.Signature[:], keys[0].Sign(signingRoot[:]).Bytes())
-	blockRoot, err := block.Block.HashSSZ()
-	require.NoError(t, err)
-	stageCfg.forkChoice.OnTick(block.Block.Slot * cfg.SecondsPerSlot)
+
+	blocks := make([]*cltypes.SignedBeaconBlock, len(slots))
+	roots := make([]common.Hash, len(slots))
+	parentRoot := anchorRoot
+	for i, slot := range slots {
+		block := newFuluChainTipTestBlock(&cfg, slot, parentRoot)
+		block.Block.ProposerIndex = 0
+		signingRoot, err := fork.ComputeSigningRoot(block.Block, domain)
+		require.NoError(t, err)
+		copy(block.Signature[:], keys[0].Sign(signingRoot[:]).Bytes())
+		blockRoot, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		blocks[i] = block
+		roots[i] = common.Hash(blockRoot)
+		parentRoot = roots[i]
+	}
+	stageCfg.forkChoice.OnTick(slots[len(slots)-1] * cfg.SecondsPerSlot)
 
 	ctrl := gomock.NewController(t)
 	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetCurrentSlot().Return(block.Block.Slot).AnyTimes()
+	clock.EXPECT().GetCurrentSlot().Return(slots[len(slots)-1]).AnyTimes()
 	peerDas := dasmock.NewMockPeerDas(ctrl)
 	stageCfg.ethClock = clock
 	stageCfg.peerDas = peerDas
 	stageCfg.forkChoice.InitPeerDas(peerDas)
-	return stageCfg, block, common.Hash(blockRoot)
+	return stageCfg, blocks, roots
 }
 
 func newKnownFuluForwardSyncFixture(t *testing.T) (*Cfg, *cltypes.SignedBeaconBlock) {
