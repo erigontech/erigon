@@ -18,6 +18,7 @@ package builder
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -27,6 +28,11 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+// ErrStopAbandoned reports that the caller stopped waiting before a build outcome was available.
+// It distinguishes that outcome from a build failure, which may wrap a context error of its own.
+// The builder still records its eventual outcome.
+var ErrStopAbandoned = errors.New("stopped waiting for the block builder")
 
 type BlockBuilderFunc func(param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
 
@@ -98,7 +104,7 @@ func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, erro
 		select {
 		case <-b.done:
 		default:
-			return nil, ctx.Err()
+			return nil, fmt.Errorf("%w: %w", ErrStopAbandoned, ctx.Err())
 		}
 	}
 

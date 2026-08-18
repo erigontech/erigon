@@ -796,6 +796,7 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 		t.Fatal("GetAssembledBlock remained blocked after context cancellation while the txpool was behind the builder parent")
 	}
 	require.ErrorIs(t, requestErr, context.Canceled)
+	require.ErrorIs(t, requestErr, execmodule.ErrRequestAbandoned)
 }
 
 func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
