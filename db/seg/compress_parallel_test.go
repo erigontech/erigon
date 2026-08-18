@@ -71,27 +71,21 @@ func readBack(t *testing.T, file string) [][]byte {
 	return out
 }
 
-// assertParallelMatchesSingle compresses corpus at Workers=1 and at each of workers, and
-// asserts the decoded words and the on-disk bytes are identical across all of them.
-func assertParallelMatchesSingle(t *testing.T, corpus []testWord, workers ...int) {
+func assertSameOutputEveryWorkerCount(t *testing.T, corpus []testWord, wantSum uint32, workers ...int) {
 	t.Helper()
-	single := compressCorpus(t, corpus, 1)
-	want := readBack(t, single)
-	require.Len(t, want, len(corpus))
-	for i := range corpus {
-		require.Equalf(t, corpus[i].data, want[i], "single-worker round-trip mismatch at word %d", i)
-	}
-	singleSum := checksum(single)
 	for _, w := range workers {
-		parallel := compressCorpus(t, corpus, w)
-		require.Equalf(t, want, readBack(t, parallel), "decoded words differ at Workers=%d", w)
-		require.Equalf(t, singleSum, checksum(parallel), "output not byte-identical at Workers=%d", w)
+		file := compressCorpus(t, corpus, w)
+		got := readBack(t, file)
+		require.Lenf(t, got, len(corpus), "word count differs at Workers=%d", w)
+		for i := range corpus {
+			require.Equalf(t, corpus[i].data, got[i], "round-trip mismatch at word %d, Workers=%d", i, w)
+		}
+		require.Equalf(t, wantSum, checksum(file), "output differs from the pre-batching encoder at Workers=%d", w)
 	}
 }
 
-// The parallel cover phase hands each worker a batch of consecutive words. A corpus large
-// enough to cross several batch boundaries must round-trip and stay byte-identical to the
-// single-worker path.
+// The cover phase hands each worker a batch of consecutive words. A corpus large enough to
+// cross several batch boundaries must round-trip and keep the original encoding.
 func TestCompressParallelBatchingRoundTrip(t *testing.T) {
 	const n = 4000
 	corpus := make([]testWord, 0, n+2)
@@ -100,11 +94,11 @@ func TestCompressParallelBatchingRoundTrip(t *testing.T) {
 	}
 	corpus = append(corpus, testWord{data: []byte{}, compressed: true}, testWord{data: []byte("zzz-unique-tail"), compressed: true})
 
-	assertParallelMatchesSingle(t, corpus, 2, 4, 8)
+	assertSameOutputEveryWorkerCount(t, corpus, 1432034479, 1, 2, 4, 8)
 }
 
 // Compressed, uncompressed and empty words interleaved exercise the queue's bypass paths
-// alongside the batched cover path; output must still match the single-worker path.
+// alongside the batched cover path.
 func TestCompressParallelBatchingMixedStream(t *testing.T) {
 	const n = 6000
 	corpus := make([]testWord, 0, n)
@@ -119,7 +113,7 @@ func TestCompressParallelBatchingMixedStream(t *testing.T) {
 		}
 	}
 
-	assertParallelMatchesSingle(t, corpus, 2, 4, 8)
+	assertSameOutputEveryWorkerCount(t, corpus, 660475778, 1, 2, 4, 8)
 }
 
 // A partial (unflushed) batch of compressible words followed by more than queueLimit
@@ -140,7 +134,7 @@ func TestCompressParallelBatchingBackpressureNoDeadlock(t *testing.T) {
 	done := make(chan struct{})
 	go func() {
 		defer close(done)
-		assertParallelMatchesSingle(t, corpus, 4)
+		assertSameOutputEveryWorkerCount(t, corpus, 2163753720, 1, 4)
 	}()
 	select {
 	case <-done:

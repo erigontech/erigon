@@ -132,6 +132,11 @@ const (
 	// a range frozen before it was reconstructed; such a blank segment shadows the DB and
 	// breaks historical-state reads. Cheap: iterates the .seg words, no DB or re-derivation.
 	CaplinStateRoots Check = "CaplinStateRoots"
+
+	// TorrentPieces re-hashes data files against their .torrent piece hashes. It runs as a
+	// pre-pass rather than from the check loop, because only --file-integrity-cache enables
+	// it, but it is named so --skip-check can turn it off like any other check.
+	TorrentPieces Check = "TorrentPieces"
 )
 
 // FastChecks is ordered cheapest → heaviest so time-budgeted runs give unused
@@ -148,7 +153,7 @@ var DeprecatedChecks = []Check{
 	CommitmentKvDeref, //StateVerify - will overcome
 	StateProgress,
 }
-var AllChecks = append(append(append([]Check{}, FastChecks...), SlowChecks...), DeprecatedChecks...)
+var AllChecks = append(append(append([]Check{TorrentPieces}, FastChecks...), SlowChecks...), DeprecatedChecks...)
 
 // SortChecksByCost returns a copy of checks ordered by their position in FastChecks
 // (cheapest → heaviest). Checks not in FastChecks keep their original relative order at the end.

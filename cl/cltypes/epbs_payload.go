@@ -28,7 +28,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/clonable"
 	"github.com/erigontech/erigon/common/length"
-	log "github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
 )
 

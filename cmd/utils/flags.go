@@ -328,6 +328,51 @@ var (
 		Usage: "HTTP-RPC server listening port",
 		Value: nodecfg.DefaultHTTPPort,
 	}
+	HTTPURLFlag = cli.StringFlag{
+		Name:  "http.url",
+		Usage: "HTTP server listening url. will OVERRIDE http.addr and http.port. will NOT respect http paths. prefix supported are tcp, unix",
+		Value: "",
+	}
+	HTTPSEnabledFlag = cli.BoolFlag{
+		Name:  "https.enabled",
+		Usage: "Enable HTTPS server",
+		Value: false,
+	}
+	HTTPSListenAddrFlag = cli.StringFlag{
+		Name:  "https.addr",
+		Usage: "rpc HTTPS server listening interface",
+		Value: nodecfg.DefaultHTTPHost,
+	}
+	HTTPSPortFlag = cli.IntFlag{
+		Name:  "https.port",
+		Usage: "rpc HTTPS server listening port. default to http.port + 363 if not set",
+		Value: 0,
+	}
+	HTTPSURLFlag = cli.StringFlag{
+		Name:  "https.url",
+		Usage: "rpc HTTPS server listening url. will OVERRIDE https.addr and https.port. will NOT respect paths. prefix supported are tcp, unix",
+		Value: "",
+	}
+	HTTPSCertFlag = cli.StringFlag{
+		Name:  "https.cert",
+		Usage: "certificate for rpc HTTPS server",
+		Value: "",
+	}
+	HTTPSKeyFlag = cli.StringFlag{
+		Name:  "https.key",
+		Usage: "key file for rpc HTTPS server",
+		Value: "",
+	}
+	SocketEnabledFlag = cli.BoolFlag{
+		Name:  "socket.enabled",
+		Usage: "Enable IPC server",
+		Value: false,
+	}
+	SocketURLFlag = cli.StringFlag{
+		Name:  "socket.url",
+		Usage: "IPC server listening url. prefix supported are tcp, unix",
+		Value: "unix:///var/run/erigon.sock",
+	}
 	AuthRpcAddr = cli.StringFlag{
 		Name:  "authrpc.addr",
 		Usage: "HTTP-RPC server listening interface for the Engine API",
@@ -804,7 +849,7 @@ var (
 	}
 	DbPageSizeFlag = cli.StringFlag{
 		Name:  "db.pagesize",
-		Usage: "DB is split to 'pages' of fixed size. Can't change DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Default: equal to OperationSystem's pageSize. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintenance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
+		Usage: "DB is split to 'pages' of fixed size. Can't change after DB creation. Must be power of 2 and '256b <= pagesize <= 64kb'. Bigger pageSize causing: 1. More writes to disk during commit 2. Smaller b-tree high 3. Less fragmentation 4. Less overhead on 'free-pages list' maintenance (a bit faster Put/Commit) 5. If expecting DB-size > 8Tb then set pageSize >= 8Kb",
 		Value: ethconfig.DefaultChainDBPageSize.String(),
 	}
 	DbSizeLimitFlag = cli.StringFlag{
@@ -959,12 +1004,12 @@ var (
 	}
 	SentinelBootnodes = cli.StringSliceFlag{
 		Name:  "sentinel.bootnodes",
-		Usage: "Comma separated enode URLs for P2P discovery bootstrap",
+		Usage: "Comma-separated Consensus bootstrap nodes provided as ENRs or direct TCP libp2p multiaddrs",
 		Value: []string{},
 	}
 	SentinelStaticPeers = cli.StringSliceFlag{
 		Name:  "sentinel.staticpeers",
-		Usage: "connect to comma-separated Consensus static peers",
+		Usage: "connect to comma-separated Consensus static peers provided as ENRs or direct TCP libp2p multiaddrs",
 		Value: []string{},
 	}
 
@@ -1121,14 +1166,6 @@ var (
 		Usage: "EXPERIMENTAL: enables fully parallel trie for commitment (ParallelPatriciaHashed).",
 		Value: false,
 	}
-	// ExperimentalStreamingCommitmentFlag selects the StreamingCommitter, which
-	// overlaps commitment fold work with block execution. Default off; takes
-	// precedence over the parallel flag when set.
-	ExperimentalStreamingCommitmentFlag = cli.BoolFlag{
-		Name:  "experimental.streaming-commitment",
-		Usage: "EXPERIMENTAL: enables streaming trie for commitment (StreamingCommitter, overlaps folding with execution). Takes precedence over --experimental.parallel-commitment if set.",
-		Value: false,
-	}
 	GDBMeFlag = cli.BoolFlag{
 		Name:  "gdbme",
 		Usage: "restart erigon under gdb for debug purposes",
@@ -1161,11 +1198,6 @@ var (
 		Name:  "fcu.background.prune",
 		Usage: "Enables background pruning post fcu",
 		Value: ethconfig.Defaults.FcuBackgroundPrune,
-	}
-	FcuBackgroundCommitFlag = cli.BoolFlag{
-		Name:  "fcu.background.commit",
-		Usage: "Enables background flush and commit",
-		Value: ethconfig.Defaults.FcuBackgroundCommit,
 	}
 	MCPDisableFlag = cli.BoolFlag{
 		Name:  "mcp.disable",
@@ -1967,7 +1999,14 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 	cfg.CaplinConfig.SentinelAddr = ctx.String(SentinelAddrFlag.Name)
 	cfg.CaplinConfig.SentinelPort = ctx.Uint64(SentinelPortFlag.Name)
 	cfg.CaplinConfig.BootstrapNodes = ctx.StringSlice(SentinelBootnodes.Name)
-	cfg.CaplinConfig.StaticPeers = ctx.StringSlice(SentinelStaticPeers.Name)
+	if ctx.IsSet(SentinelStaticPeers.Name) {
+		cfg.CaplinConfig.StaticPeers = []string{}
+		for _, staticPeer := range ctx.StringSlice(SentinelStaticPeers.Name) {
+			if staticPeer != "" {
+				cfg.CaplinConfig.StaticPeers = append(cfg.CaplinConfig.StaticPeers, staticPeer)
+			}
+		}
+	}
 
 	chain := resolveChainName(ctx)
 	if ctx.IsSet(NetworkIdFlag.Name) {
@@ -2020,13 +2059,8 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		cfg.ExperimentalParallelCommitment = true
 	}
 
-	if ctx.Bool(ExperimentalStreamingCommitmentFlag.Name) {
-		cfg.ExperimentalStreamingCommitment = true
-	}
-
 	cfg.FcuTimeout = ctx.Duration(FcuTimeoutFlag.Name)
 	cfg.FcuBackgroundPrune = ctx.Bool(FcuBackgroundPruneFlag.Name)
-	cfg.FcuBackgroundCommit = ctx.Bool(FcuBackgroundCommitFlag.Name)
 
 	// Executor performance toggles. When the user explicitly sets the CLI
 	// flag, it overrides the env-var default that dbg read at package init.
@@ -2054,13 +2088,11 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		dbg.SetExec3Workers(1)
 		cfg.ExecWorkerCount = 1
 	}
-	// If FILES_ASYNC_IO is set but io_uring is unavailable (old kernel, or blocked
-	// by a seccomp sandbox such as Docker's default profile), disable the gate at
-	// startup so it doesn't pay the per-read residency-probe cost for warms that
-	// would never run. Warming is an optimization; reads just use ordinary faults.
-	if dbg.FilesAsyncIO && runtime.GOOS == "linux" && !iouring.Available() {
-		log.Warn("FILES_ASYNC_IO is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
+	// Disable io_uring experiments at startup when their reads cannot run.
+	if (dbg.FilesAsyncIO || dbg.FilesAsyncIOLiterals) && runtime.GOOS == "linux" && !iouring.Available() {
+		log.Warn("async file I/O is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
 		dbg.FilesAsyncIO = false
+		dbg.FilesAsyncIOLiterals = false
 	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {
@@ -2267,7 +2299,7 @@ func setDevnetEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logg
 	genesisTime := uint64(time.Now().Unix())
 	// Compute the EL genesis block hash so the beacon state's Eth1Data
 	// matches the actual chain genesis.
-	elGenesisBlock, ibs, err := genesiswrite.GenesisToBlock(nil, cfg.Genesis, cfg.Dirs, logger)
+	elGenesisBlock, ibs, err := genesiswrite.GenesisToBlock(cfg.Genesis, cfg.Dirs, logger)
 	if err != nil {
 		Fatalf("Failed to compute dev EL genesis hash: %v", err)
 	}
