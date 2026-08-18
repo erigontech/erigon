@@ -39,11 +39,12 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 	slices.SortFunc(blocks, func(a, b *cltypes.SignedBeaconBlock) int {
 		return cmp.Compare(a.Block.Slot, b.Block.Slot)
 	})
+	dataAvailabilityErrs := acquireRecentBlocksDataAvailability(ctx, cfg, blocks)
 
 	var blockRoot common.Hash
 	newHighestBlockProcessed = highestBlockProcessed
 	// Iterate over each block in the sorted list
-	for _, block := range blocks {
+	for i, block := range blocks {
 		// Compute the hash of the current block
 		blockRoot, err = block.Block.HashSSZ()
 		if err != nil {
@@ -62,7 +63,7 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 			return
 		}
 
-		if err = acquireRecentBlockDataAvailability(ctx, cfg, block); err != nil {
+		if err = dataAvailabilityErrs[i]; err != nil {
 			if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 				logger.Trace("[Caplin] forward sync data not available", "blockSlot", block.Block.Slot)
 				return newHighestBlockProcessed, nil

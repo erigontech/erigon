@@ -84,6 +84,60 @@ func TestAcquireBlockDataAvailabilityInArchiveMode(t *testing.T) {
 	require.NoError(t, acquireBlockDataAvailability(t.Context(), peerDas, block))
 }
 
+func TestAcquireRecentBlocksDataAvailabilityBatchesDownloads(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.InitializeForkSchedule()
+
+	blocks := make([]*cltypes.SignedBeaconBlock, 2)
+	roots := make([]common.Hash, len(blocks))
+	for i := range blocks {
+		block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+		block.Block.Slot = uint64(i + 1)
+		block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+		root, err := block.Block.HashSSZ()
+		require.NoError(t, err)
+		blocks[i] = block
+		roots[i] = common.Hash(root)
+	}
+
+	ctrl := gomock.NewController(t)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(blocks[len(blocks)-1].Block.Slot).AnyTimes()
+	peerDas := dasmock.NewMockPeerDas(ctrl)
+	for i, block := range blocks {
+		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, roots[i]).Return(false, nil)
+	}
+	peerDas.EXPECT().IsArchivedMode().Return(false)
+	peerDas.EXPECT().DownloadOnlyCustodyColumns(gomock.Any(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, downloaded []cltypes.ColumnSyncableSignedBlock) error {
+			require.Len(t, downloaded, len(blocks))
+			for i, block := range blocks {
+				require.Same(t, block, downloaded[i])
+			}
+			return nil
+		},
+	)
+	for i, block := range blocks {
+		peerDas.EXPECT().IsDataAvailable(block.Block.Slot, roots[i]).Return(true, nil)
+	}
+
+	errs := acquireRecentBlocksDataAvailability(t.Context(), &Cfg{
+		beaconCfg: &cfg,
+		ethClock:  clock,
+		peerDas:   peerDas,
+	}, blocks)
+	require.Len(t, errs, len(blocks))
+	for _, err := range errs {
+		require.NoError(t, err)
+	}
+}
+
 func TestRequiresRecentBlockDataAvailabilityUsesConfiguredFork(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
