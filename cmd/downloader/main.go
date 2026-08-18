@@ -66,8 +66,6 @@ import (
 	"github.com/erigontech/erigon/node/paths"
 	"github.com/erigontech/erigon/p2p/nat"
 
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
-
 	_ "github.com/erigontech/erigon/db/snaptype2"     //hack
 	_ "github.com/erigontech/erigon/polygon/heimdall" //hack
 )

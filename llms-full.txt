@@ -6,7 +6,7 @@ An efficient, modular Ethereum execution layer client built for performance, low
 ## Sections
 
 - [Get Started](https://docs.erigon.tech/get-started): Hardware requirements, installation options, and first-run guides to get your node online fast.
-- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum mainnet, Gnosis Chain, and Polygon nodes with sensible defaults.
+- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum mainnet and Gnosis Chain nodes with sensible defaults.
 - [Fundamentals](https://docs.erigon.tech/fundamentals): Pruning modes, configuration, Docker, JWT, logging, storage optimization, and day-to-day operations.
 - [Modules](https://docs.erigon.tech/fundamentals/modules): Run RPC Daemon, TxPool, Sentry, and Downloader as independent processes for scalable cluster setups.
 - [Staking](https://docs.erigon.tech/staking): Solo staking with Caplin (built-in consensus layer) or pair Erigon with any external consensus client.
@@ -25,7 +25,7 @@ Everything you need to go from zero to a running Erigon node — requirements, i
 - [Why Erigon?](https://docs.erigon.tech/get-started/why-using-erigon): Performance benchmarks, disk savings, and architecture advantages over other Ethereum clients.
 - [Hardware Requirements](https://docs.erigon.tech/get-started/hardware-requirements): Minimum and recommended specs for mainnet, testnets, and archive mode.
 - [Installation](https://docs.erigon.tech/get-started/installation): Binary releases, building from source, Docker images, and upgrade instructions.
-- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum, Gnosis Chain, and Polygon nodes with sensible defaults.
+- [Easy Nodes](https://docs.erigon.tech/get-started/easy-nodes): One-command guided setup for Ethereum and Gnosis Chain nodes with sensible defaults.
 - [Migrating from Geth](https://docs.erigon.tech/get-started/migrating-from-geth): Switch from go-ethereum to Erigon — what changes, what stays the same, and how to preserve your data.
 - [Interacting with Erigon](https://docs.erigon.tech/interacting-with-erigon): JSON-RPC and gRPC API reference — eth, debug, trace, engine, TxPool, and other namespaces.
 
@@ -2763,7 +2763,6 @@ The default flag is `--chain=mainnet`, which enables Erigon to operate on the Et
 | Chain     | Tag         | ChainId |
 | --------- | ----------- | ------- |
 | Ethereum  | mainnet     | 1       |
-| Polygon\* | bor-mainnet | 137     |
 | Gnosis    | gnosis      | 100     |
 
 ## Testnets
@@ -2775,12 +2774,6 @@ The default flag is `--chain=mainnet`, which enables Erigon to operate on the Et
 | Sepolia | sepolia | 11155111 |
 | Hoodi   | hoodi   | 560048   |
 
-### Polygon testnets
-
-| Chain  | Tag  | ChainId |
-| ------ | ---- | ------- |
-| Amoy\* | amoy | 80002   |
-
 ### Gnosis Chain Testnets
 
 | Chain  | Tag    | ChainId |
@@ -2788,7 +2781,7 @@ The default flag is `--chain=mainnet`, which enables Erigon to operate on the Et
 | Chiado | chiado | 10200   |
 
 :::warning
-\* The final release series of Erigon that officially supports Polygon is 3.1.\*. For the software supported by Polygon, please refer to the link: [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
+Erigon no longer supports Polygon. The final release series that officially supported it is 3.1.\*. For Polygon-supported software, see [https://github.com/0xPolygon/erigon/releases](https://github.com/0xPolygon/erigon/releases).
 :::
 
 ---
@@ -3260,9 +3253,6 @@ If using network-attached storage, apply these optimizations:
 # Reduce disk latency impact
 export SNAPSHOT_MADV_RND=false
 --db.pagesize=64kb
-
-# For Polygon networks
---sync.loop.block.limit=10000
 ```
 
 ### Memory Locking for Performance
@@ -8010,7 +8000,7 @@ URL: https://docs.erigon.tech/help-center/frequently-asked-questions-faqs
   ['What is a snapshot sync?', 'Snapshot sync downloads pre-made snapshots of the blockchain state to greatly accelerate the initial sync instead of processing from genesis.'],
   ["How do I monitor my node's sync progress?", 'Read the stage prefix in the live log line (e.g. [6/8 Execution]), query eth_syncing on the RPC daemon, or ask an AI assistant through the built-in MCP server.'],
   ['Can I use Erigon with Docker?', 'Yes. Erigon provides official Docker images on Docker Hub; see the Installation guide for setup.'],
-  ['Does Erigon support other chains besides Ethereum?', 'Yes. Erigon is EVM-compatible and supports networks such as Gnosis and Polygon; select the chain with the --chain flag.'],
+  ['Does Erigon support other chains besides Ethereum?', 'Yes. Erigon is EVM-compatible and supports networks such as Gnosis; select the chain with the --chain flag.'],
   ['Where can I find official support?', 'The official Erigon Discord and GitHub repository are the primary channels for support and community discussion.'],
   ['What is Caplin?', "Caplin is Erigon's built-in beacon API server, letting Erigon act as both a consensus and execution client."],
   ['What is OtterSync?', 'OtterSync is a syncing algorithm that shifts most computation to network bandwidth, reducing sync times and improving chain-tip performance, disk footprint, and decentralisation.'],
@@ -8380,9 +8370,9 @@ This section details common error messages and provides clear, actionable steps 
 
 ### Connect: connection refused or dial tcp... failures
 
-* **Error Description:** The node cannot connect to an external service, such as a local or remote Heimdall instance.
+* **Error Description:** The node cannot connect to an external service, such as a local or remote consensus-layer endpoint.
 * **Cause:** This is a configuration error. The dependent service is either not running, or the command-line flag is pointing to an incorrect address.
-* **Solution:** Confirm that the required services are running and that the command-line flags (e.g., `--bor.heimdall.url`) are correctly set. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
+* **Solution:** Confirm that the required services are running and that the command-line flags (e.g., `--externalcl`) are correctly set. See [Configuring Erigon](/fundamentals/configuring-erigon) for all available flags.
 
 ## Chain-Specific Issues
 

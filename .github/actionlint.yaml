@@ -6,7 +6,6 @@ self-hosted-runner:
     - Gnosis
     - linux
     - long-running
-    - Polygon
     - qa
     - Release
     - rpc-historical

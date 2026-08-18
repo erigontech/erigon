@@ -87,8 +87,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 // makeStageCmd creates a cobra command that opens the DB, runs stageFn, and handles errors.
