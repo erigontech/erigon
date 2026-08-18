@@ -279,9 +279,9 @@ func initSeparatedLogging(
 	}
 	userLog := log.StreamHandler(lumberjack, dirFormat)
 
-	mux := log.MultiHandler(consoleHandler, log.LvlFilterHandler(dirLevel, userLog))
-	logger.SetHandler(mux)
+	// Emit before attaching the file handler: this banner is for the console, in the file it is noise.
 	logger.Info("logging to file system", "logDir", dirPath, "filePrefix", filePrefix, "logLevel", dirLevel, "json", dirJson)
+	logger.SetHandler(log.MultiHandler(consoleHandler, log.LvlFilterHandler(dirLevel, userLog)))
 }
 
 // GetLogLevel parses a log level given as a name ("info") or a numeric string ("3").
