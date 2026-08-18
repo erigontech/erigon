@@ -19,6 +19,7 @@ package flow
 import (
 	"context"
 	"fmt"
+	"maps"
 	"slices"
 	"sort"
 	"strings"
@@ -129,6 +130,14 @@ type Orchestrator struct {
 	peerMu    sync.RWMutex
 	peerFiles map[string]*peerFileClaim
 	pending   map[string]*snapshot.FileEntry
+
+	// peerManifests records the CURRENT file set each trusted peer
+	// advertises — keyed by peerID, valued by (filename → entry). Each
+	// PeerManifestReceived replaces the peer's entry (peers publish
+	// self-contained snapshots, not diffs). Untrusted peers do not
+	// enter this map. PeerDeparted removes the peer's entry. Consumed
+	// by canonical computation in later phases.
+	peerManifests map[string]map[string]*snapshot.FileEntry
 
 	// Phased scheduling: state-domain files are requested first; block
 	// files are held in blocksQueued until the last state download
@@ -356,6 +365,7 @@ func NewWithStorage(bus event.EventBus, storage Storage, logger log.Logger) *Orc
 		log:              logger,
 		peerFiles:        make(map[string]*peerFileClaim),
 		pending:          make(map[string]*snapshot.FileEntry),
+		peerManifests:    make(map[string]map[string]*snapshot.FileEntry),
 		stateDomainsSeen: make(map[snapshot.Domain]struct{}),
 		phase1Files:      make(map[string]struct{}),
 	}
@@ -507,6 +517,44 @@ func (o *Orchestrator) onPeerManifestReceived(e PeerManifestReceived) {
 	}
 	o.log.Info("[flow] onPeerManifestReceived", "peer", e.PeerID, "entries", totalEntries,
 		"domains", len(e.Domains), "blocks", len(e.Blocks), "meta", len(e.Meta), "salt", len(e.Salt), "caplin", len(e.Caplin))
+
+	// Record the peer's current view — self-replacing snapshot semantics.
+	// Untrusted peers are excluded so an untrusted advertiser cannot
+	// pollute the canonical intersection.
+	if o.trust == nil || o.trust.Trusted(e.PeerID) {
+		files := make(map[string]*snapshot.FileEntry, totalEntries)
+		for _, entries := range e.Domains {
+			for _, entry := range entries {
+				if entry != nil && entry.Name != "" {
+					files[entry.Name] = entry
+				}
+			}
+		}
+		for _, entry := range e.Blocks {
+			if entry != nil && entry.Name != "" {
+				files[entry.Name] = entry
+			}
+		}
+		for _, entry := range e.Caplin {
+			if entry != nil && entry.Name != "" {
+				files[entry.Name] = entry
+			}
+		}
+		for _, entry := range e.Meta {
+			if entry != nil && entry.Name != "" {
+				files[entry.Name] = entry
+			}
+		}
+		for _, entry := range e.Salt {
+			if entry != nil && entry.Name != "" {
+				files[entry.Name] = entry
+			}
+		}
+		o.peerMu.Lock()
+		o.peerManifests[e.PeerID] = files
+		o.peerMu.Unlock()
+	}
+
 	for domain, peerEntries := range e.Domains {
 		o.requestGapsFor(domain, peerEntries, e.PeerID)
 	}
@@ -1133,6 +1181,7 @@ func (o *Orchestrator) onPeerDeparted(e PeerDeparted) {
 	}
 	o.peerMu.Lock()
 	defer o.peerMu.Unlock()
+	delete(o.peerManifests, e.PeerID)
 	for name, claim := range o.peerFiles {
 		if _, had := claim.peers[e.PeerID]; !had {
 			continue
@@ -1166,6 +1215,21 @@ func (o *Orchestrator) PeersOffering(name string) []string {
 	}
 	sort.Strings(out)
 	return out
+}
+
+// PeerManifestFiles returns a snapshot of the file entries the given
+// trusted peer's latest manifest advertised, keyed by file name. Returns
+// nil if the peer has never sent a manifest (or was untrusted and
+// filtered out at receive time). The returned map is a clone; callers
+// may mutate it without affecting orchestrator state.
+func (o *Orchestrator) PeerManifestFiles(peerID string) map[string]*snapshot.FileEntry {
+	o.peerMu.RLock()
+	defer o.peerMu.RUnlock()
+	files, ok := o.peerManifests[peerID]
+	if !ok {
+		return nil
+	}
+	return maps.Clone(files)
 }
 
 // haveLocally reports whether the local inventory has a file with the given
