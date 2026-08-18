@@ -1301,7 +1301,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 	executor, ok := pe.blockExecutors[blockNum]
 	if !ok {
-		executor = newBlockExec(execRequest.block, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted)
+		executor = newBlockExec(execRequest.block, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted, blockStateCacheOf(execRequest.tasks))
 	}
 
 	for i, txTask := range execRequest.tasks {
@@ -2367,6 +2367,8 @@ type blockExecutor struct {
 
 	// blockStateCache provides a stable pre-block snapshot of account data
 	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
+	// Same instance the block's tasks carry, so the apply loop's readers hit
+	// what the workers already read instead of going back to the domain.
 	blockStateCache *state.BlockStateCache
 }
 
@@ -2416,7 +2418,21 @@ func (be *blockExecutor) deliver(ctx context.Context, ch chan<- applyResult, r a
 	}
 }
 
-func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted) *blockExecutor {
+// blockStateCacheOf returns the per-block state cache carried by the block's
+// tasks, so the apply loop reads the entries the workers already filled.
+func blockStateCacheOf(tasks []exec.Task) *state.BlockStateCache {
+	for _, t := range tasks {
+		if cache := t.GetBlockStateCache(); cache != nil {
+			return cache
+		}
+	}
+	return nil
+}
+
+func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted, blockStateCache *state.BlockStateCache) *blockExecutor {
+	if blockStateCache == nil {
+		blockStateCache = state.NewBlockStateCache()
+	}
 	return &blockExecutor{
 		block:            block,
 		begin:            time.Now(),
@@ -2432,7 +2448,7 @@ func newBlockExec(block *types.Block, gasPool *protocol.GasPool, accessList type
 		applyResults:     applyResults,
 		commitResults:    commitResults,
 		gasPool:          gasPool,
-		blockStateCache:  state.NewBlockStateCache(),
+		blockStateCache:  blockStateCache,
 		exhausted:        exhausted,
 	}
 }

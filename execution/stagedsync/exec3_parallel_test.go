@@ -1452,7 +1452,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1535,7 +1535,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1608,7 +1608,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1683,7 +1683,7 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil, nil)
 	be.tasks = []*execTask{eTask0, eTask1}
 	be.results = []*execResult{nil, nil}
 	// tx 0 was "finalized" without a receipt — the invariant nextResult
@@ -1742,7 +1742,7 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 			pe.in = exec.NewQueueWithRetry(16)
 			t.Cleanup(pe.in.Close)
 			gasPool := new(protocol.GasPool).AddGas(10_000_000)
-			be := newBlockExec(newParallelTestBlock(tc.blockNum), gasPool, nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
+			be := newBlockExec(newParallelTestBlock(tc.blockNum), gasPool, nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil, nil)
 			eTask := &execTask{Task: txTask, index: 0}
 			be.tasks = []*execTask{eTask}
 			be.results = []*execResult{nil}
@@ -1915,4 +1915,21 @@ func BenchmarkDispatchPendingCompaction(b *testing.B) {
 			}
 		})
 	}
+}
+
+// The apply loop's readers (fee calc, finalize syscalls, WriteSet.Normalize)
+// must use the per-block state cache the block's workers fill — a private one
+// starts empty on every block, so each address costs a domain read.
+func TestBlockExecUsesTaskStateCache(t *testing.T) {
+	cache := state.NewBlockStateCache()
+	header := &types.Header{Number: *uint256.NewInt(7)}
+	block := types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
+	tasks := []exec.Task{&exec.TxTask{Header: header, BlockStateCache: cache}}
+
+	// A busy map keeps processRequest from scheduling the block for execution.
+	pe := &parallelExecutor{blockExecutors: map[uint64]*blockExecutor{0: {}}}
+	require.NoError(t, pe.processRequest(context.Background(), &execRequest{block: block, tasks: tasks}))
+	require.Same(t, cache, pe.blockExecutors[7].blockStateCache)
+
+	require.NotNil(t, newBlockExec(nil, nil, nil, nil, nil, false, nil, blockStateCacheOf(nil)).blockStateCache)
 }
