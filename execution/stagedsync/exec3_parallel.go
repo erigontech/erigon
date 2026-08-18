@@ -639,8 +639,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					block := applyResult.Block
 					blockNum := block.NumberU64()
 					blockHash := block.Hash()
-					// Above the paths that abandon the block below: a superseded
-					// set has no reader left, whatever the block's verdict.
 					applyResult.releaseSupersededWrites()
 					if finalized {
 						appliedBlocks[blockNum] = struct{}{}
@@ -1787,10 +1785,6 @@ type blockResult struct {
 	supersededWrites []*state.WriteSet
 }
 
-// releaseSupersededWrites pools the map containers of the merged write sets
-// this block replaced. ReleaseMaps clears every map before pooling it, which is
-// O(entries) per set, so the exec loop only collects them and the apply loop
-// pays for them where it already releases the recorded write sets.
 func (r *blockResult) releaseSupersededWrites() {
 	for _, ws := range r.supersededWrites {
 		ws.ReleaseMaps()
@@ -2293,13 +2287,13 @@ type blockExecutor struct {
 	tasks   []*execTask
 	results []*execResult
 
-	// mergedWrites[txIndex] is the write set a merge created and recorded for
-	// the tx. A later merge for the same tx supersedes it; every other recorded
-	// set is some execResult's TxOut, which stays live.
+	// mergedWrites[txIndex] is the write set a merge created and recorded for the
+	// tx; every other recorded set is some execResult's TxOut, which stays live.
 	mergedWrites map[int]*state.WriteSet
 
 	// supersededWrites collects the merged sets a later merge replaced. Nothing
-	// reaches them from then on, so their maps can go back to the pools.
+	// reaches them from then on, and ReleaseMaps is O(entries) per set, so the
+	// apply loop pools them rather than the exec loop.
 	supersededWrites []*state.WriteSet
 
 	// settledInput[tx]==true marks a task that was dispatched when every
@@ -2472,8 +2466,6 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	}
 }
 
-// mergeRecordedWrites folds the write set recorded for the tx into add and
-// records the merged set in its place.
 func (be *blockExecutor) mergeRecordedWrites(txVersion state.Version, add *state.WriteSet) *state.WriteSet {
 	existing := be.blockIO.WriteSet(txVersion.TxIndex)
 	merged := existing.MergeInto(add)
@@ -2482,12 +2474,11 @@ func (be *blockExecutor) mergeRecordedWrites(txVersion state.Version, add *state
 	return merged
 }
 
-// recordMerge takes ownership of the set the merge just recorded for the tx and
-// hands the one it superseded to the block's reclaim list. Only a set an
-// earlier merge created may be reclaimed: prev is otherwise some execResult's
-// TxOut, which stays live. MergeInto shares VersionedWrite pointers rather
-// than the maps holding them, so pooling prev's maps leaves the writes merged
-// now holds intact.
+// recordMerge takes ownership of merged and hands the set it superseded to the
+// reclaim list. Only a set an earlier merge created may go there: prev is
+// otherwise some execResult's TxOut, which stays live. MergeInto shares the
+// VersionedWrite pointers, not the maps holding them, so pooling prev's maps
+// leaves merged intact.
 func (be *blockExecutor) recordMerge(txIndex int, prev, merged *state.WriteSet) {
 	if temp := be.mergedWrites[txIndex]; temp != nil && temp == prev && merged != temp {
 		be.supersededWrites = append(be.supersededWrites, temp)

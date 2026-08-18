@@ -369,8 +369,7 @@ func TestWriteSetReleasedTripwire(t *testing.T) {
 		}
 	})
 
-	// Writing to a released set checks fresh maps out of the pools, so the set
-	// is live again and its readers must work.
+	// A write checks fresh maps out of the pools, so the set is live again.
 	released.SetBalance(mergeAddr(0xd4), balanceWrite(mergeAddr(0xd4), 3, 0))
 	assert.Equal(t, 1, released.Count())
 

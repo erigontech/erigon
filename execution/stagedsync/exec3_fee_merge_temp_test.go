@@ -42,11 +42,8 @@ func releaseSuperseded(be *blockExecutor) {
 	be.supersededWrites = nil
 }
 
-// TestRecordMergeReleasesSupersededTemp pins the three transitions a merged
-// write set goes through for one tx: the first merge has no temp to reclaim, a
-// later merge reclaims the temp it replaces, and a merge whose input is an
-// execResult's TxOut (after a re-execution replaced the recorded slot)
-// reclaims nothing.
+// TestRecordMergeReleasesSupersededTemp pins which of the three merge rounds a
+// tx can go through reclaims its input, and which must leave it alone.
 func TestRecordMergeReleasesSupersededTemp(t *testing.T) {
 	t.Parallel()
 
@@ -72,7 +69,7 @@ func TestRecordMergeReleasesSupersededTemp(t *testing.T) {
 	require.Equal(t, 1, temp2.Count())
 
 	// After a re-execution the recorded slot is the new TxOut again, so the
-	// stale temp does not match prev and stays untouched.
+	// stale temp does not match prev.
 	txOut2 := feeMergeTestWrites(t, addr, 4)
 	temp3 := feeMergeTestWrites(t, addr, 5)
 	be.recordMerge(0, txOut2, temp3)
@@ -83,8 +80,7 @@ func TestRecordMergeReleasesSupersededTemp(t *testing.T) {
 }
 
 // TestRecordMergeReleaseKeepsSharedWrites pins what makes the release safe:
-// MergeInto shares VersionedWrite pointers rather than the maps holding them,
-// so pooling the superseded temp's maps leaves the surviving set readable.
+// MergeInto shares VersionedWrite pointers rather than the maps holding them.
 func TestRecordMergeReleaseKeepsSharedWrites(t *testing.T) {
 	t.Parallel()
 
@@ -107,9 +103,8 @@ func TestRecordMergeReleaseKeepsSharedWrites(t *testing.T) {
 	require.Equal(t, uint64(7), vw.Val.Uint64())
 }
 
-// TestMergeRecordedWritesReclaimsEveryMergeSite pins that a second merge for
-// the same tx — the finalize merge following the fee merge — reclaims the set
-// the fee merge left recorded, instead of dropping it stale.
+// TestMergeRecordedWritesReclaimsEveryMergeSite pins that the finalize merge
+// reclaims what the fee merge left recorded, instead of dropping it stale.
 func TestMergeRecordedWritesReclaimsEveryMergeSite(t *testing.T) {
 	t.Parallel()
 

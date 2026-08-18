@@ -658,10 +658,9 @@ type WriteSet struct {
 	codeSize       map[accounts.Address]*VersionedWrite[int]
 	storage        map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]
 
-	// released marks a ReleaseMaps that was not a reset for reuse. The pooled
-	// maps leave the set reading as empty rather than failing, so under
-	// assertions the whole-set readers panic instead. Only written when
-	// dbg.AssertEnabled.
+	// released marks a ReleaseMaps that was not a reset for reuse: the pooled
+	// maps leave the set reading as empty, so under assertions readers panic
+	// instead. Only written when dbg.AssertEnabled.
 	released bool
 }
 
@@ -751,7 +750,6 @@ func writeSetPut[T any](s *WriteSet, m *map[accounts.Address]*VersionedWrite[T],
 	(*m)[addr] = vw
 }
 
-// revive clears the released mark, so reads of the set are meaningful again.
 func (s *WriteSet) revive() {
 	if dbg.AssertEnabled {
 		s.released = false
