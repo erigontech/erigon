@@ -17,6 +17,7 @@
 package downloader
 
 import (
+	"bytes"
 	"context"
 	"fmt"
 	"io/fs"
@@ -345,4 +346,69 @@ func newDownloaderTest(t *testing.T) *downloaderTest {
 		cfg:        cfg,
 		downloader: d,
 	}
+}
+
+// logBuffer is a log sink readable while the Downloader's goroutines write to it.
+type logBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (b *logBuffer) Write(p []byte) (int, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.Write(p)
+}
+
+func (b *logBuffer) String() string {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.buf.String()
+}
+
+func newLocalSnapshotTest(t *testing.T) (d *Downloader, logs *logBuffer, name, path string) {
+	d = newDownloaderTest(t).downloader
+	logs = &logBuffer{}
+	d.logger.SetHandler(log.LvlFilterHandler(log.LvlWarn, log.StreamHandler(logs, log.LogfmtFormat())))
+
+	name = "domain/v2.0-accounts.0-1024.kv"
+	path = d.filePathForName(name)
+	require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+	require.NoError(t, os.WriteFile(path, []byte("locally rebuilt"), 0o644))
+	return
+}
+
+// Issue #21522: data that backs no metainfo is renamed to .part, leaving a hole in the snapshot
+// tier. That must be visible at warn level or louder.
+func TestInvalidateDataRenamesLocalFile(t *testing.T) {
+	require := require.New(t)
+	d, logs, name, path := newLocalSnapshotTest(t)
+	differentPreverifiedInfoHash := snaptype.Hex2InfoHash("aa")
+
+	_, addInfoHash, err := d.chooseAddInfoHash(differentPreverifiedInfoHash, name)
+	require.NoError(err)
+	require.Equal(differentPreverifiedInfoHash, addInfoHash)
+
+	require.NoFileExists(path)
+	require.FileExists(path + ".part")
+	require.Contains(logs.String(), name, "rename must be logged at warn or louder")
+}
+
+// Data that backs its own metainfo was built or kept deliberately, so a preverified hash that
+// disagrees must not evict it.
+func TestKeepsCompleteLocalSnapshot(t *testing.T) {
+	require := require.New(t)
+	d, logs, name, path := newLocalSnapshotTest(t)
+	_, err := BuildTorrentIfNeed(t.Context(), name, d.snapDir(), d.torrentFS)
+	require.NoError(err)
+
+	differentPreverifiedInfoHash := snaptype.Hex2InfoHash("aa")
+	localMetainfo, addInfoHash, err := d.chooseAddInfoHash(differentPreverifiedInfoHash, name)
+	require.NoError(err)
+	require.True(localMetainfo.Ok)
+	require.Equal(localMetainfo.Value.HashInfoBytes(), addInfoHash)
+
+	require.FileExists(path)
+	require.NoFileExists(path + ".part")
+	require.Contains(logs.String(), name)
 }
