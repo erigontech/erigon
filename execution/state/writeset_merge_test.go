@@ -320,7 +320,10 @@ func TestWriteSetReleaseMaps(t *testing.T) {
 	merged := prev.MergeInto(next)
 
 	prev.ReleaseMaps()
-	assert.True(t, prev.IsEmpty(), "released set must be empty")
+	// Read the maps directly: the whole-set readers panic under assertions once
+	// the set is released, which is the point of the tripwire.
+	assert.Nil(t, prev.address, "released set must hand its maps back")
+	assert.Nil(t, prev.storage, "released set must hand its maps back")
 
 	// The entries merged shares with prev are prev's non-conflicting ones —
 	// prev's writes on a lost the merge and never entered merged.
@@ -364,10 +367,22 @@ func TestWriteSetReleasedTripwire(t *testing.T) {
 	released, _ := mergeIntoFixture()
 	released.ReleaseMaps()
 	assert.Panics(t, func() { released.Count() })
+	assert.Panics(t, func() { released.IsEmpty() })
 	assert.Panics(t, func() {
 		for range released.AllHeaders() {
 		}
 	})
+	assert.Panics(t, func() {
+		for range released.Balances() {
+		}
+	})
+	assert.Panics(t, func() {
+		for range released.Storages() {
+		}
+	})
+
+	// A released set reads as empty, so an unguarded Merge would silently drop it.
+	assert.Panics(t, func() { released.Merge(&WriteSet{}) })
 
 	// A write checks fresh maps out of the pools, so the set is live again.
 	released.SetBalance(mergeAddr(0xd4), balanceWrite(mergeAddr(0xd4), 3, 0))
@@ -390,7 +405,11 @@ func TestVersionedIOReleaseOutputMaps(t *testing.T) {
 	// Read the slots directly: the accessors panic under assertions once the
 	// outputs are released, which is the point of the guard.
 	for _, output := range io.outputs {
-		assert.True(t, output.IsEmpty(), "slots must be empty after release")
+		if output == nil {
+			continue
+		}
+		assert.Nil(t, output.address, "slots must hand their maps back after release")
+		assert.Nil(t, output.storage, "slots must hand their maps back after release")
 	}
 
 	// Empty and already-released IO must not panic.

@@ -65,7 +65,8 @@ func TestRecordMergeReleasesSupersededTemp(t *testing.T) {
 	require.Equal(t, 1, temp1.Count(), "superseded temp is reclaimed at the release point, not on the exec loop")
 	releaseSuperseded(be)
 	require.Same(t, temp2, be.mergedWrites[0])
-	require.True(t, temp1.IsEmpty(), "superseded temp must be released")
+	_, live := temp1.GetBalance(addr)
+	require.False(t, live, "superseded temp must be released")
 	require.Equal(t, 1, temp2.Count())
 
 	// After a re-execution the recorded slot is the new TxOut again, so the
@@ -97,7 +98,8 @@ func TestRecordMergeReleaseKeepsSharedWrites(t *testing.T) {
 	be.recordMerge(0, temp1, merged)
 	releaseSuperseded(be)
 
-	require.True(t, temp1.IsEmpty())
+	_, live := temp1.GetBalance(shared)
+	require.False(t, live, "superseded temp must be released")
 	vw, ok := merged.GetBalance(shared)
 	require.True(t, ok, "entry shared from the released temp must still be reachable")
 	require.Equal(t, uint64(7), vw.Val.Uint64())
@@ -123,6 +125,7 @@ func TestMergeRecordedWritesReclaimsEveryMergeSite(t *testing.T) {
 	require.Same(t, finalizeMerged, be.blockIO.WriteSet(0))
 	require.Same(t, finalizeMerged, be.mergedWrites[0])
 	releaseSuperseded(be)
-	require.True(t, feeMerged.IsEmpty(), "the fee merge's set must be reclaimed by the finalize merge")
+	_, live := feeMerged.GetBalance(addr)
+	require.False(t, live, "the fee merge's set must be reclaimed by the finalize merge")
 	require.Equal(t, 1, finalizeMerged.Count())
 }

@@ -664,9 +664,11 @@ type WriteSet struct {
 	released bool
 }
 
-func (s *WriteSet) assertLive(op string) {
+// The panic must stay inline with a constant message: an out-of-line helper
+// costs a call, and IsEmpty then exceeds its inline budget.
+func (s *WriteSet) assertLive() {
 	if dbg.AssertEnabled && s != nil && s.released {
-		panic("WriteSet." + op + " after ReleaseMaps: the maps are pooled, so this read silently sees nothing")
+		panic("WriteSet read after ReleaseMaps: the maps are pooled, so this read silently sees nothing")
 	}
 }
 
@@ -800,6 +802,7 @@ func (s *WriteSet) IsEmpty() bool {
 	if s == nil {
 		return true
 	}
+	s.assertLive()
 	return len(s.address) == 0 && len(s.balance) == 0 && len(s.nonce) == 0 &&
 		len(s.incarnation) == 0 && len(s.selfDestruct) == 0 && len(s.createContract) == 0 &&
 		len(s.code) == 0 && len(s.codeHash) == 0 && len(s.codeSize) == 0 && len(s.storage) == 0
@@ -1090,7 +1093,7 @@ func (s *WriteSet) Count() int {
 	if s == nil {
 		return 0
 	}
-	s.assertLive("Count")
+	s.assertLive()
 	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) +
 		len(s.selfDestruct) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize)
 	for _, inner := range s.storage {
@@ -1268,42 +1271,49 @@ func (s *WriteSet) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint25
 	if s == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[uint256.Int](nil))
 	}
+	s.assertLive()
 	return maps.All(s.balance)
 }
 func (s *WriteSet) Nonces() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	if s == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[uint64](nil))
 	}
+	s.assertLive()
 	return maps.All(s.nonce)
 }
 func (s *WriteSet) Incarnations() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
 	if s == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[uint64](nil))
 	}
+	s.assertLive()
 	return maps.All(s.incarnation)
 }
 func (s *WriteSet) SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
 	if s == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[bool](nil))
 	}
+	s.assertLive()
 	return maps.All(s.selfDestruct)
 }
 func (s *WriteSet) Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]] {
 	if s == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[accounts.Code](nil))
 	}
+	s.assertLive()
 	return maps.All(s.code)
 }
 func (s *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.CodeHash]] {
 	if s == nil {
 		return maps.All(map[accounts.Address]*VersionedWrite[accounts.CodeHash](nil))
 	}
+	s.assertLive()
 	return maps.All(s.codeHash)
 }
 func (s *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
 	if s == nil {
 		return maps.All(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int](nil))
 	}
+	s.assertLive()
 	return maps.All(s.storage)
 }
 
@@ -1319,7 +1329,7 @@ func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield f
 // AllHeaders visits the type-agnostic header of every write; the value is read
 // typed-by-path from the per-path maps, so nothing is erased to an interface.
 func (s *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
-	s.assertLive("AllHeaders")
+	s.assertLive()
 	return func(yield func(WriteHeader) bool) {
 		if s == nil {
 			return
