@@ -327,11 +327,11 @@ func shouldRetryGetPayload(now, deadline time.Time) bool {
 	return now.Before(deadline)
 }
 
-// pollAssembledPayload waits out the build window, then polls get (which stops the EL builder) until
-// it returns a payload or the deadline passes; ok is false when no payload was produced in time.
+// pollAssembledPayload waits out the collection window and reports why no payload arrived rather
+// than logging it: the caller knows which slot it was for and is the one answering the validator
+// client. Contention that clears is invisible, and a caller that gave up produces no record at all.
 func pollAssembledPayload(
 	ctx context.Context,
-	targetSlot uint64,
 	window blockBuilderWindow,
 	retryTime time.Duration,
 	get func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error),
@@ -1147,12 +1147,12 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		if len(idBytes) == 0 {
-			log.Warn("BlockProduction: ForkchoiceUpdate returned no payload id (EL may be syncing)", "slot", targetSlot)
+			executionErr = errors.New("produceBeaconBody: forkchoice update returned no payload ID (EL may be syncing)")
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion)
-		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, targetSlot, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})
 		if pollErr != nil {

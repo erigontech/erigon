@@ -393,7 +393,7 @@ func TestPollAssembledPayloadReturnsReadyPayload(t *testing.T) {
 	window := blockBuilderWindow{firstGetAt: now.Add(-time.Millisecond), pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return want, nil, nil, nil, nil
@@ -409,7 +409,7 @@ func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls < 3 {
@@ -428,7 +428,7 @@ func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls == 1 {
@@ -446,7 +446,7 @@ func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
 	calls := 0
-	payload, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
@@ -461,7 +461,7 @@ func TestPollAssembledPayloadLateRequestGrabsOnce(t *testing.T) {
 	past := time.Now().Add(-time.Second)
 	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
 	calls := 0
-	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
@@ -476,7 +476,7 @@ func TestPollAssembledPayloadReturnsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls := 0
-	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
@@ -885,7 +885,7 @@ func TestPollAssembledPayloadStaysQuietWhenAFailedPollRecovers(t *testing.T) {
 	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Second)}
 
 	calls := 0
-	payload, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls == 1 {
@@ -907,7 +907,7 @@ func TestPollAssembledPayloadReportsAWindowThatNeverProducedOnce(t *testing.T) {
 
 	boom := errors.New("boom")
 	calls := 0
-	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, boom
@@ -927,7 +927,7 @@ func TestPollAssembledPayloadStaysQuietWhenTheCallerGoesAway(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
 	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Minute)}
 
-	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			cancel()
 			return nil, nil, nil, nil, context.Canceled
@@ -944,7 +944,7 @@ func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *
 	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Minute)}
 
 	calls := 0
-	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls == 1 {
@@ -1011,7 +1011,7 @@ func TestPollAssembledPayloadDoesNotCollectAfterTheCallerHasGone(t *testing.T) {
 	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
 
 	calls := 0
-	_, _, _, _, err := pollAssembledPayload(ctx, 10, window, time.Microsecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Microsecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			// The execution module takes its semaphore before it looks at a context, so a request
@@ -1057,6 +1057,33 @@ func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
 	captured := logs()
 	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
 	require.Contains(t, captured, "boom")
+}
+
+func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
+	ctx := t.Context()
+	logs := captureProductionLogs(t)
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, nil).AnyTimes()
+	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+	handler.engine = engine
+
+	_, err = handler.produceBlock(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
+		targetSlot, common.Bytes96{}, common.Hash{})
+	require.ErrorContains(t, err, "forkchoice update returned no payload ID")
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "forkchoice update returned no payload ID"), "records:\n"+captured)
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.NotContains(t, captured, "lvl=warn", "records:\n"+captured)
+	require.NotContains(t, captured, "failed to produce execution payload")
 }
 
 func TestProductionCollectsTwoFailingBodyStepsWithoutRacing(t *testing.T) {
