@@ -130,16 +130,24 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 		}
 	}()
 
+	result, err := waitForForkchoiceOutcome(ctx, outcomeCh)
+	if errors.Is(err, ErrRequestAbandoned) {
+		e.logger.Debug("forkChoiceUpdate cancelled")
+	}
+	return result, err
+}
+
+func waitForForkchoiceOutcome(ctx context.Context, outcomeCh <-chan forkchoiceOutcome) (ForkChoiceResult, error) {
 	select {
 	case outcome := <-outcomeCh:
 		return outcome.result, outcome.err
 	case <-ctx.Done():
-		if ctx.Err() == context.DeadlineExceeded {
-			e.logger.Debug("treating forkChoiceUpdated as asynchronous as it is taking too long")
-			return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
+		select {
+		case outcome := <-outcomeCh:
+			return outcome.result, outcome.err
+		default:
 		}
-		e.logger.Debug("forkChoiceUpdate cancelled")
-		return ForkChoiceResult{}, fmt.Errorf("%w: %w", ErrRequestAbandoned, ctx.Err())
+		return ForkChoiceResult{}, RequestAbandonedError(ctx.Err(), nil)
 	}
 }
 

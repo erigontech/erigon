@@ -108,6 +108,29 @@ func TestRemoteForkChoiceUpdateToleratesEngineTimeout(t *testing.T) {
 	require.Nil(t, payloadID)
 }
 
+type canceledNewPayloadEngine struct {
+	engineapi.EngineAPI
+}
+
+func (canceledNewPayloadEngine) NewPayloadV1(ctx context.Context, _ *engine_types.ExecutionPayload) (*engine_types.PayloadStatus, error) {
+	return nil, fmt.Errorf("remote NewPayload: %w", ctx.Err())
+}
+
+func TestRemoteNewPayloadMarksRequestCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	payload := cltypes.NewEth1Block(clparams.BellatrixVersion, &clparams.MainnetBeaconConfig)
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = &solid.TransactionsSSZ{}
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(clparams.MainnetBeaconConfig.MaxWithdrawalsPerPayload), 44)
+
+	client := &ExecutionClientEngine{engine: canceledNewPayloadEngine{}}
+	_, err := client.NewPayload(ctx, payload, nil, nil, nil)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, execmodule.ErrRequestAbandoned)
+}
+
 type beaconCfgEngineStub struct {
 	engineapi.EngineAPI
 	cfg *clparams.BeaconChainConfig

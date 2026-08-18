@@ -608,7 +608,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 		if header != nil && isCanonical {
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
-		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
+		if shouldWait, _ := waitForResponse(ctx, 50*time.Millisecond, func() (bool, error) {
 			if parent == nil {
 				parent = s.chainRW.GetHeaderByHash(ctx, parentHash)
 			}
@@ -618,7 +618,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.SyncingStatus}, nil
 		}
 	} else {
-		if shouldWait, _ := waitForResponse(50*time.Millisecond, func() (bool, error) {
+		if shouldWait, _ := waitForResponse(ctx, 50*time.Millisecond, func() (bool, error) {
 			return header == nil && s.blockDownloader.Status() == engine_block_downloader.Syncing, nil
 		}); shouldWait {
 			s.logger.Debug(fmt.Sprintf("[%s] Downloading some other PoS stuff", prefix), "hash", blockHash)
@@ -632,7 +632,7 @@ func (s *EngineServer) getQuickPayloadStatusIfPossible(ctx context.Context, bloc
 			return &engine_types.PayloadStatus{Status: engine_types.ValidStatus, LatestValidHash: &blockHash}, nil
 		}
 	}
-	waitingForExecutionReady, err := waitForResponse(500*time.Millisecond, func() (bool, error) {
+	waitingForExecutionReady, err := waitForResponse(ctx, 500*time.Millisecond, func() (bool, error) {
 		isReady, err := s.chainRW.Ready(ctx)
 		return !isReady, err
 	})
@@ -669,7 +669,7 @@ func (s *EngineServer) getPayload(ctx context.Context, payloadId uint64, version
 	var assembled execmodule.AssembledBlockResult
 	var err error
 
-	execBusy, err := waitForResponse(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
+	execBusy, err := waitForResponse(ctx, time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
 		assembled, err = s.executionService.GetAssembledBlock(ctx, payloadId)
 		if err != nil {
 			return false, err
@@ -849,7 +849,7 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	var assembled execmodule.AssembleBlockResult
 	// Wait for the execution service to be ready to assemble a block. Wait a full slot duration (12 seconds) to ensure that the execution service is not busy.
 	// Blocks are important and 0.5 seconds is not enough to wait for the execution service to be ready.
-	execBusy, err := waitForResponse(time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
+	execBusy, err := waitForResponse(ctx, time.Duration(s.config.SecondsPerSlot())*time.Second, func() (bool, error) {
 		assembled, err = s.executionService.AssembleBlock(ctx, assembleParams)
 		if err != nil {
 			return false, err
@@ -976,7 +976,7 @@ func (e *EngineServer) HandleNewPayload(
 			// We try waiting until we finish downloading the PoS blocks if the distance from the head is enough,
 			// so that we will perform full validation.
 			var respondSyncing bool
-			if _, _ = waitForResponse(waitTime, func() (bool, error) {
+			if _, _ = waitForResponse(ctx, waitTime, func() (bool, error) {
 				status := e.blockDownloader.Status()
 				respondSyncing = status != engine_block_downloader.Synced
 				// no point in waiting if the downloader is no longer syncing (e.g. it's dropped the download request)
@@ -1304,7 +1304,7 @@ func (e *EngineServer) getBlobs(ctx context.Context, blobHashes []common.Hash, v
 	}
 }
 
-func waitForResponse(maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
+func waitForResponse(ctx context.Context, maxWait time.Duration, waitCondnF func() (bool, error)) (bool, error) {
 	shouldWait, err := waitCondnF()
 	if err != nil || !shouldWait {
 		return false, err
@@ -1312,7 +1312,9 @@ func waitForResponse(maxWait time.Duration, waitCondnF func() (bool, error)) (bo
 	checkInterval := 10 * time.Millisecond
 	maxChecks := int64(maxWait) / int64(checkInterval)
 	for range maxChecks {
-		time.Sleep(checkInterval)
+		if err := common.Sleep(ctx, checkInterval); err != nil {
+			return false, execmodule.RequestAbandonedError(err, nil)
+		}
 		shouldWait, err = waitCondnF()
 		if err != nil || !shouldWait {
 			return shouldWait, err

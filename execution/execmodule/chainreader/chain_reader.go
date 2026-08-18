@@ -18,6 +18,7 @@ package chainreader
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"time"
@@ -44,6 +45,8 @@ type ChainReaderWriterEth1 struct {
 
 	fcuTimeout time.Duration
 }
+
+var errForkChoiceTimedOut = errors.New("fork choice update timed out")
 
 func NewChainReaderEth1(cfg *chain.Config, executionModule execmodule.ExecutionModule, fcuTimeout time.Duration) ChainReaderWriterEth1 {
 	return ChainReaderWriterEth1{
@@ -243,7 +246,7 @@ func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Ha
 }
 
 func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
-	// Apply timeout via context so the native UpdateForkChoice returns Busy on deadline exceeded.
+	// Only this configured timeout is translated to Busy; caller cancellation keeps its identity.
 	timeout := c.fcuTimeout
 	if len(timeoutOverride) > 0 {
 		timeout = time.Duration(timeoutOverride[0]) * time.Millisecond
@@ -251,11 +254,14 @@ func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, s
 	callCtx := ctx
 	if timeout > 0 {
 		var cancel context.CancelFunc
-		callCtx, cancel = context.WithTimeout(ctx, timeout)
+		callCtx, cancel = context.WithTimeoutCause(ctx, timeout, errForkChoiceTimedOut)
 		defer cancel()
 	}
 	result, err := c.executionModule.UpdateForkChoice(callCtx, headHash, safeHash, finalizeHash)
 	if err != nil {
+		if errors.Is(err, execmodule.ErrRequestAbandoned) && errors.Is(context.Cause(callCtx), errForkChoiceTimedOut) {
+			return execmodule.ExecutionStatusBusy, nil, common.Hash{}, nil
+		}
 		return 0, nil, common.Hash{}, err
 	}
 	var validationError *string
