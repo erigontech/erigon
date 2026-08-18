@@ -58,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -1140,8 +1141,8 @@ func (emt *ExecModuleTester) NewHistoryStateReader(blockNum uint64, tx kv.Tempor
 	return r
 }
 
-func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalGetter) state.StateReader {
-	return state.NewReaderV3(tx)
+func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalTx) state.StateReader {
+	return state.NewReaderV3(execctx.NewTemporalTxStateGetter(tx))
 }
 
 func (emt *ExecModuleTester) BlocksIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {

@@ -677,7 +677,7 @@ func (s *simulator) newStateReaderForBlock(
 	}
 
 	if latest {
-		return state.NewReaderV3(sharedDomains.AsGetter(tx)), minTxNum, firstMinTxNum, nil
+		return state.NewReaderV3(sharedDomains.AsStateGetter(tx)), minTxNum, firstMinTxNum, nil
 	}
 
 	if minTxNum < state.StateHistoryStartTxNum(tx) {

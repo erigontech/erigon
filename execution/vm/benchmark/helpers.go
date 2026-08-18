@@ -75,7 +75,7 @@ func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 	require.NoError(t, err)
 
 	statedb := state.NewWithVersionMap(
-		state.NewReaderV3(domains.AsGetter(tx)),
+		state.NewReaderV3(domains.AsStateGetter(tx)),
 		state.NewVersionMap(nil),
 	)
 	statedb.SetNoMaterialize(noMaterialize)

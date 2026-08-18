@@ -5,6 +5,7 @@ import (
 	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 )
 
 type StateReader interface {
@@ -20,16 +21,9 @@ type StateReader interface {
 	CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader
 }
 
-// ctxGetter is the optional context-aware read method (see
-// temporalGetter.GetLatestContext). Worker readers type-assert for it so reads
-// meter into the per-worker accumulator carried by the worker context.
-type ctxGetter interface {
-	GetLatestContext(ctx context.Context, name kv.Domain, k []byte) (v []byte, step kv.Step, err error)
-}
-
 type LatestStateReader struct {
 	sharedDomains sd
-	getter        kv.TemporalGetter
+	getter        execctxapi.StateGetter
 	srcTx         kv.TemporalTx
 	// workerCtx, when non-nil, carries this worker's lock-free metrics
 	// accumulator; reads route through getter.GetLatestContext(workerCtx, …) so
@@ -39,14 +33,14 @@ type LatestStateReader struct {
 }
 
 func NewLatestStateReader(tx kv.TemporalTx, sd sd) *LatestStateReader {
-	return &LatestStateReader{sharedDomains: sd, getter: sd.AsGetter(tx), srcTx: tx}
+	return &LatestStateReader{sharedDomains: sd, getter: sd.AsStateGetter(tx), srcTx: tx}
 }
 
 // NewLatestStateReaderForWorker is like NewLatestStateReader but reads meter
 // into the per-worker accumulator carried by workerCtx (for concurrent
 // workers). See LatestStateReader.workerCtx.
 func NewLatestStateReaderForWorker(workerCtx context.Context, tx kv.TemporalTx, sd sd) *LatestStateReader {
-	return &LatestStateReader{sharedDomains: sd, getter: sd.AsGetter(tx), srcTx: tx, workerCtx: workerCtx}
+	return &LatestStateReader{sharedDomains: sd, getter: sd.AsStateGetter(tx), srcTx: tx, workerCtx: workerCtx}
 }
 
 func (r *LatestStateReader) WithHistory() bool {
@@ -63,13 +57,11 @@ func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error 
 
 func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if r.workerCtx != nil {
-		if cg, ok := r.getter.(ctxGetter); ok {
-			enc, step, err = cg.GetLatestContext(r.workerCtx, d, plainKey)
-			if err != nil {
-				return nil, 0, fmt.Errorf("LatestStateReader(GetLatestContext) %q: %w", d, err)
-			}
-			return enc, step, nil
+		enc, step, err = r.getter.GetLatestContext(r.workerCtx, d, plainKey)
+		if err != nil {
+			return nil, 0, fmt.Errorf("LatestStateReader(GetLatestContext) %q: %w", d, err)
 		}
+		return enc, step, nil
 	}
 	enc, step, err = r.getter.GetLatest(d, plainKey)
 	if err != nil {
@@ -84,9 +76,9 @@ func (r *LatestStateReader) Clone(tx kv.TemporalTx) StateReader {
 	// from this reader's source — e.g. recomputing commitment in an empty db
 	// while reading committed state from the source db (TouchChangedKeysFromHistory).
 	// Before flush drained sd.mem this was masked because the in-memory batch
-	// still held the source values; rebinding sd.AsGetter to the foreign compute
+	// still held the source values; rebinding the getter to the foreign compute
 	// tx reads the wrong database and yields empty state (wrong root).
-	return &LatestStateReader{sharedDomains: r.sharedDomains, getter: r.sharedDomains.AsGetter(r.srcTx), srcTx: r.srcTx, workerCtx: r.workerCtx}
+	return &LatestStateReader{sharedDomains: r.sharedDomains, getter: r.sharedDomains.AsStateGetter(r.srcTx), srcTx: r.srcTx, workerCtx: r.workerCtx}
 }
 
 // CloneForWorker clones into a worker reader that meters into workerCtx's

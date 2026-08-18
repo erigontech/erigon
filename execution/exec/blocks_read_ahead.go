@@ -19,6 +19,8 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -90,26 +92,27 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 //
 // Code reads also populate the content-addressed and size-cache layers.
 type cachePopulatingGetter struct {
-	kv.TemporalGetter
+	execctxapi.StateGetter
 	view     cache.ReadView
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
-func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
+func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGetter {
+	getter := execctx.NewTemporalTxStateGetter(ttx)
 	if sc == nil {
-		return ttx
+		return getter
 	}
 	debug := ttx.Debug()
 	stateVersion, err := rawdb.GetStateVersion(ttx)
 	if err != nil {
-		return ttx
+		return getter
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
-	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
+	return &cachePopulatingGetter{StateGetter: getter, view: sc.View(frontier), stepSize: debug.StepSize()}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	v, step, err := cpg.TemporalGetter.GetLatest(name, k)
+	v, step, err := cpg.StateGetter.GetLatest(name, k)
 	if err == nil {
 		readTxNum := (uint64(step)+1)*cpg.stepSize - 1
 		cpg.view.Fill(name, k, v, readTxNum)
@@ -131,6 +134,11 @@ func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, 
 		return nil, false, err
 	}
 	return code, len(code) > 0, nil
+}
+
+func (cpg *cachePopulatingGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
+	code, found, err := cpg.GetCode(addr, txNum)
+	return len(code), found, err
 }
 
 func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, tx kv.Getter, header *types.Header, body *types.Body) {
@@ -548,7 +556,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 		return nil
 	}
 
-	stateReader := state.NewReaderV3(ttx)
+	stateReader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(ttx))
 	senders := block.Body().SendersFromTxs()
 
 	for _, sender := range senders {

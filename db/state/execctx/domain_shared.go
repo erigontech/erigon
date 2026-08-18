@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/diagnostics/metrics"
@@ -286,7 +287,7 @@ type SharedDomains struct {
 	visibleEnds domainVisibleEndMemo
 
 	// codeStore is the optional two-tier (in-mem + MDBX) codehash-keyed code
-	// cache, reached via temporalGetter so an addr-keyed reader can serve a
+	// cache, reached via StateGetter so an addr-keyed reader can serve a
 	// code-by-hash read with the application's authoritative codehash.
 	codeStore *cache.CodeStore
 
@@ -311,11 +312,11 @@ type SharedDomains struct {
 	collector *kvmetrics.Collector
 
 	// reqMetrics is an optional request-scoped accumulator for callers that read
-	// through the plain AsGetter (nil per-read metrics) on a single goroutine —
+	// through the plain AsStateGetter (nil per-read metrics) on a single goroutine —
 	// e.g. an RPC handler that owns this SharedDomains for one request. Enabled
 	// via StartRequestMetrics(source) and flushed to the collector at Close.
 	// Single-owner (the request goroutine); never set on exec SDs, whose workers
-	// pass their own per-worker instance via AsGetterMetered.
+	// pass their own per-worker instance via AsStateGetterMetered.
 	reqMetrics *kvmetrics.DomainMetrics
 	reqSource  kvmetrics.Source
 
@@ -593,80 +594,19 @@ func (sd *SharedDomains) domainPutNoLock(domain kv.Domain, roTx kv.TemporalTx, k
 	return sd.domainPut(domain, roTx, k, v, txNum, prevVal, true)
 }
 
-type temporalGetter struct {
-	sd *SharedDomains
-	tx kv.TemporalTx
-	// view binds the shared state cache to tx's read view once per getter,
-	// keeping the per-read path allocation-free.
-	view cache.ReadView
-	// m is an optional per-worker metrics instance to record reads into. nil
-	// (the AsGetter default) collects nothing — there is no process-wide
-	// accumulator, since AsGetter is used by many concurrent goroutines (RPC,
-	// engine) where a shared one would be raced/unbounded. Exec workers pass
-	// their own instance via AsGetterMetered and merge it at task end.
-	m *kvmetrics.DomainMetrics
+// AsStateGetter returns an execution-aware getter with optimized code reads.
+func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx) execctxapi.StateGetter {
+	return &StateGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
 }
 
-func (gt *temporalGetter) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.getLatestMetered(name, gt.tx, k, gt.m, gt.view)
+// AsStateGetterNoMetrics is AsStateGetter with request metrics disabled.
+func (sd *SharedDomains) AsStateGetterNoMetrics(tx kv.TemporalTx) execctxapi.StateGetter {
+	return sd.AsStateGetter(tx)
 }
 
-// GetLatestContext is the context-aware read: it records into the per-worker,
-// lock-free accumulator carried by ctx (a nil ctx-value collects no metrics).
-// Concurrent workers (trie-warmup goroutines) pass their own accumulator via
-// ctx, so they neither share metrics state with the main goroutine nor take any
-// lock. Optional method — callers type-assert for it (mirrors the existing
-// AggregatorRoTx.MeteredGetLatest pattern).
-func (gt *temporalGetter) GetLatestContext(ctx context.Context, name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return gt.sd.getLatestMetered(name, gt.tx, k, kvmetrics.MetricsFromContext(ctx), gt.view)
-}
-
-// GetCodeSize returns the length of the code at addr without loading the
-// bytes. Returns (size, true, nil) on size-cache hit, (size, true, nil)
-// after a full-bytes load+populate, or (0, false, nil) when the account
-// has no code. Errors propagate normally.
-//
-// Callers (ReaderV3.ReadAccountCodeSize, etc.) type-assert on this method
-// so the existing kv.TemporalGetter interface is unchanged. txNum is the
-// caller's read txNum, used to stamp any cache entry it populates.
-func (gt *temporalGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
-	return gt.sd.getCodeSize(gt.tx, gt.view, addr, txNum)
-}
-
-// GetCode returns contract code via the content-addressed fast path (see
-// SD.GetCode): many addresses sharing one bytecode resolve to a single cached
-// copy with no per-address CodeDomain read. Read-only — callers
-// (ReaderV3.ReadAccountCode) type-assert this method; setters must not use it
-// (they resolve prevVal through GetLatest, which is addr-keyed). txNum is the
-// caller's read txNum, used to stamp any cache entry it populates.
-func (gt *temporalGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
-	return gt.sd.getCode(gt.tx, gt.view, addr, txNum)
-}
-
-func (gt *temporalGetter) HasPrefix(name kv.Domain, prefix []byte) (firstKey []byte, firstVal []byte, ok bool, err error) {
-	return gt.sd.HasPrefix(name, prefix, gt.tx)
-}
-
-func (gt *temporalGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
-	return gt.tx.StepsInFiles(entitySet...)
-}
-
-func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) kv.TemporalGetter {
-	return &temporalGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
-}
-
-// AsGetterNoMetrics is an explicit-intent alias of AsGetter (collects no
-// metrics), for concurrent callers (RPC/engine) where that is deliberate.
-func (sd *SharedDomains) AsGetterNoMetrics(tx kv.TemporalTx) kv.TemporalGetter {
-	return &temporalGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
-}
-
-// AsGetterMetered returns a getter that records reads into the caller's own
-// per-worker metrics instance m. m must be single-owner (one goroutine); the
-// caller hands it off via MergeMetrics at task end (a lock per task, not per
-// read) and allocates a fresh instance. Used by parallel-exec workers.
-func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) kv.TemporalGetter {
-	return &temporalGetter{sd: sd, tx: tx, m: m, view: sd.cacheViewFor(tx)}
+// AsStateGetterMetered returns an execution-aware getter with caller-owned metrics.
+func (sd *SharedDomains) AsStateGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter {
+	return &StateGetter{sd: sd, tx: tx, m: m, view: sd.cacheViewFor(tx)}
 }
 
 // MergeMetrics hands a boundary producer's accumulator to BOTH sinks: the
@@ -695,7 +635,7 @@ func (sd *SharedDomains) Collector() *kvmetrics.Collector {
 	return sd.collector
 }
 
-// StartRequestMetrics enables request-scoped metering for plain AsGetter reads on
+// StartRequestMetrics enables request-scoped metering for plain AsStateGetter reads on
 // this SharedDomains, tagged with source. For single-goroutine owners (an RPC
 // handler). The accumulator is flushed to the collector at Close. No-op when read
 // metrics are off or there is no collector. Do NOT use on a SharedDomains shared
@@ -1333,7 +1273,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 }
 
 // TemporalDomain satisfaction. Collects no read metrics — see
-// temporalGetter.GetLatest for why there is no process-wide accumulator.
+// StateGetter.GetLatest for why there is no process-wide accumulator.
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	return sd.getLatestMetered(domain, tx, k, nil, sd.cacheReader())
 }
@@ -1341,7 +1281,7 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 // GetLatestContext is the context-aware read for callers that read on behalf of
 // a concurrent worker: metrics go to the per-worker, lock-free accumulator
 // carried by ctx (nil ctx-value => no metrics). Lets a worker's reader meter
-// without any shared accumulator or lock. Mirrors temporalGetter.GetLatestContext
+// without any shared accumulator or lock. Mirrors StateGetter.GetLatestContext
 // for readers that hold the SD directly (e.g. the committer's asOfStateReader).
 func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	return sd.getLatestMetered(domain, tx, k, kvmetrics.MetricsFromContext(ctx), sd.cacheReader())
@@ -1404,7 +1344,7 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	var start time.Time
 	if dbg.KVReadLevelledMetrics {
 		start = time.Now()
-		// Plain AsGetter reads (wm == nil) on a request-scoped SD fold into the
+		// Plain AsStateGetter reads (wm == nil) on a request-scoped SD fold into the
 		// request accumulator. Short-circuits for exec workers (wm != nil), which
 		// never touch reqMetrics — so no cross-goroutine access.
 		if wm == nil {

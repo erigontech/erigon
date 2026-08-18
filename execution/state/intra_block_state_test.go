@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -248,7 +249,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 		return false
 	}
 	var (
-		state        = New(NewReaderV3(tx))
+		state        = New(NewReaderV3(execctx.NewTemporalTxStateGetter(tx)))
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
@@ -263,7 +264,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkstate := New(NewReaderV3(tx))
+		checkstate := New(NewReaderV3(execctx.NewTemporalTxStateGetter(tx)))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
 			action.fn(action, checkstate)
 		}
@@ -472,7 +473,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
@@ -554,7 +555,7 @@ func TestVersionMapRevert(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 
@@ -618,7 +619,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 	states := []*IntraBlockState{s}
@@ -699,7 +700,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 
@@ -790,7 +791,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 
@@ -932,7 +933,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 
@@ -1032,23 +1033,23 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	addrVal := addr.Value()
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 
-	deploy := New(NewReaderV3(domains.AsGetter(tx)))
+	deploy := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer deploy.Close()
 	require.NoError(t, deploy.CreateAccount(addr, true))
 	require.NoError(t, deploy.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, deploy.SetCode(addr, code, tracing.CodeChangeUnspecified))
 	require.NoError(t, deploy.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 
-	got, _, err := domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
+	got, _, err := domains.AsStateGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
 	require.NoError(t, err)
 	require.Equal(t, code, got)
 
-	clear := New(NewReaderV3(domains.AsGetter(tx)))
+	clear := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer clear.Close()
 	require.NoError(t, clear.SetCode(addr, []byte{}, tracing.CodeChangeUnspecified))
 	require.NoError(t, clear.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 1)))
 
-	got, _, err = domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
+	got, _, err = domains.AsStateGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
 	require.NoError(t, err)
 	require.Empty(t, got, "clearing code must clear the CodeDomain entry")
 }
