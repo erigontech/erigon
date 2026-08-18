@@ -147,9 +147,8 @@ func TestBlockBuilderKeepsAHealthyBuildThatIsSlowToObserveTheStop(t *testing.T) 
 func TestBlockBuilderReleasesABuildThatWedgesAfterObservingTheStop(t *testing.T) {
 	t.Parallel()
 
-	// Observing the stop earns the build its grace, not an unbounded stay: a wedge after the
-	// observation - in finalization, say - would otherwise pin the read view until the builder
-	// count forced it out.
+	// Observing the stop earns the build its grace, not an unbounded stay. Discard must still cancel
+	// context-aware work that blocks later in the build.
 	released := make(chan error, 1)
 	NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {

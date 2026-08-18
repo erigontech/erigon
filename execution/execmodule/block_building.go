@@ -122,7 +122,7 @@ func (e *ExecModule) isLiveProposalTarget(id uint64, entry *builderEntry, now ti
 	return timestamp+slotSeconds > nowSeconds && timestamp <= nowSeconds+2*slotSeconds
 }
 
-// dropBuilder removes a builder and releases whatever it is holding.
+// dropBuilder removes and discards a builder.
 func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
 	if entry != nil {
 		if e.isIndexedFor(id, entry) {
@@ -135,9 +135,8 @@ func (e *ExecModule) dropBuilder(id uint64, entry *builderEntry) {
 	delete(e.builders, id)
 }
 
-// evictOldBuilders drops the oldest builders so that at most MaxBuilders - 1 remain, skipping only
-// those a proposal is still waiting on. Being old by id says nothing about that, and there are only
-// ever a couple of live targets, so the bound holds.
+// evictOldBuilders makes room for one builder by dropping the oldest entries, except those a live
+// proposal is still waiting on.
 func (e *ExecModule) evictOldBuilders() {
 	remaining := len(e.builders) - engine_helpers.MaxBuilders + 1
 	if remaining <= 0 {
@@ -159,8 +158,8 @@ func (e *ExecModule) evictOldBuilders() {
 
 func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Parameters) (AssembleBlockResult, error) {
 	// Cancellation is checked first so an expired request reports why it stopped instead of
-	// looking like contention, which callers retry. The module's own context is checked too: a
-	// builder born after shutdown can only fail, yet its id would be handed out.
+	// looking like contention, which callers retry. The module context check avoids starting work
+	// after shutdown has already been observed.
 	if err := ctx.Err(); err != nil {
 		return AssembleBlockResult{}, err
 	}

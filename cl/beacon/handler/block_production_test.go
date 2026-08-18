@@ -21,6 +21,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -434,17 +436,27 @@ func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
 }
 
 func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
-	now := time.Now()
-	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
-	calls := 0
-	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
-		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-			calls++
-			return nil, nil, nil, nil, chainreader.ErrUnknownPayload
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"direct execution client", fmt.Errorf("get payload: %w", chainreader.ErrUnknownPayload)},
+		{"remote execution client", fmt.Errorf("get payload: %w", &engine_helpers.UnknownPayloadErr)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
+			calls := 0
+			payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+				func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					calls++
+					return nil, nil, nil, nil, tc.err
+				})
+			require.False(t, ok)
+			require.Nil(t, payload)
+			require.Equal(t, 1, calls)
 		})
-	require.False(t, ok)
-	require.Nil(t, payload)
-	require.Equal(t, 1, calls)
+	}
 }
 
 func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {

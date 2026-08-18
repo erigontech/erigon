@@ -19,6 +19,7 @@ package builder
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"testing"
 
@@ -35,6 +36,17 @@ import (
 type errDB struct {
 	kv.TemporalRoDB // nil embed satisfies the interface; other methods must not be called
 	err             error
+}
+
+type finishOnDoneContext struct {
+	context.Context
+	finish func()
+	once   sync.Once
+}
+
+func (c *finishOnDoneContext) Done() <-chan struct{} {
+	c.once.Do(c.finish)
+	return c.Context.Done()
 }
 
 func (e *errDB) BeginTemporalRo(_ context.Context) (kv.TemporalTx, error) {
@@ -67,4 +79,21 @@ func TestBuilder_PendingBlockCh(t *testing.T) {
 	ch := b.PendingBlockCh()
 	require.NotNil(t, ch)
 	require.Equal(t, ch, b.PendingBlockCh(), "must return the same channel on repeated calls")
+}
+
+func TestWaitForBuilderResultPrefersCompletedPayloadOverCancellation(t *testing.T) {
+	for range 50 {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		want := &types.BlockWithReceipts{}
+		results := make(chan *types.BlockWithReceipts, 1)
+		finishCtx := &finishOnDoneContext{
+			Context: ctx,
+			finish:  func() { results <- want },
+		}
+
+		got, err := waitForBuilderResult(finishCtx, results)
+		require.NoError(t, err)
+		require.Same(t, want, got)
+	}
 }

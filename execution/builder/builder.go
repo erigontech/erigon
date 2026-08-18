@@ -105,8 +105,8 @@ func (b *Builder) PendingBlockCh() chan *types.Block {
 
 // Build satisfies BlockBuilderFunc. Pass b.Build directly to ExecModule.
 //
-// Everything that can block runs under ctx, so discarding the payload releases the read view and
-// unblocks the transaction provider instead of leaving them to finish on their own.
+// Build passes ctx through the read and execution paths and stops waiting for an asynchronous seal
+// result when the context ends, allowing its deferred read resources to close.
 func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (result *types.BlockWithReceipts, err error) {
 	defer func() {
 		if rec := recover(); rec != nil {
@@ -178,9 +178,29 @@ func (b *Builder) Build(ctx context.Context, param *Parameters, interrupt *atomi
 	if err := execBlock(ctx, sd, compositeTx, executionAt, execCfg, b.executeBlockCfg, b.logger); err != nil {
 		return nil, err
 	}
-	if err := finishBlock(compositeTx, finishCfg, b.logger); err != nil {
+	if err := finishBlock(ctx, compositeTx, finishCfg, b.logger); err != nil {
 		return nil, err
 	}
 
-	return <-state.BuilderResultCh, nil
+	return waitForBuilderResult(ctx, state.BuilderResultCh)
+}
+
+func waitForBuilderResult(ctx context.Context, results <-chan *types.BlockWithReceipts) (*types.BlockWithReceipts, error) {
+	select {
+	case result := <-results:
+		return result, nil
+	default:
+	}
+
+	select {
+	case result := <-results:
+		return result, nil
+	case <-ctx.Done():
+		select {
+		case result := <-results:
+			return result, nil
+		default:
+			return nil, ctx.Err()
+		}
+	}
 }

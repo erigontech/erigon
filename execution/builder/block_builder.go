@@ -97,8 +97,7 @@ func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Paramet
 			return
 		}
 		// Ask for the block it has, which is what the budget was for. A build that has not answered
-		// by the end of the grace is parked in a wait that never reads the flag, and would hold its
-		// read view until the builder count forced it out, so it is discarded instead.
+		// by the end of the grace is treated as unresponsive and discarded.
 		log.Warn("Stopping block builder due to max build time exceeded")
 		graceCtx, cancelGrace := context.WithTimeout(ctx, stopGrace)
 		defer cancelGrace()
@@ -132,8 +131,7 @@ func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, erro
 	return b.result, b.err
 }
 
-// Discard abandons the build and releases what it holds: a read view or a transaction provider
-// blocked on the builder's context returns at once instead of waiting out its own deadline.
+// Discard marks the build unusable and cancels its context. It does not wait for the work to unwind.
 func (b *BlockBuilder) Discard() {
 	b.interrupt.Store(true)
 	b.discarded.Store(true)

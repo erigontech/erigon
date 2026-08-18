@@ -51,6 +51,9 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
@@ -112,6 +115,27 @@ func (p *rewindingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovi
 type observingTxnProvider struct {
 	txnprovider.TxnProvider
 	txnCounts chan int
+}
+
+type emptyTxnProvider struct{}
+
+func (emptyTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	return nil, nil
+}
+
+type delayedSealEngine struct {
+	rules.Engine
+	started chan struct{}
+	release chan struct{}
+}
+
+func (e *delayedSealEngine) Seal(_ rules.ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
+	close(e.started)
+	go func() {
+		<-e.release
+		results <- block
+	}()
+	return nil
 }
 
 func (p *observingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
@@ -653,6 +677,58 @@ func TestAssembleBlock(t *testing.T) {
 
 	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
+	engine := &delayedSealEngine{
+		Engine:  merge.NewFaker(ethash.NewFaker()),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	m := execmoduletester.New(t,
+		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
+		execmoduletester.WithEngine(engine),
+	)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	parent := chainPack.TopBlock
+	beaconRoot := randomHash()
+	payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
+		CustomTxnProvider:     emptyTxnProvider{},
+	}, time.Minute, time.Minute)
+
+	stopped := make(chan error, 1)
+	go func() {
+		_, stopErr := payloadBuilder.Stop(context.Background())
+		stopped <- stopErr
+	}()
+
+	select {
+	case <-engine.started:
+	case <-time.After(10 * time.Second):
+		close(engine.release)
+		t.Fatal("builder did not reach sealing")
+	}
+	payloadBuilder.Discard()
+
+	select {
+	case err := <-stopped:
+		close(engine.release)
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		close(engine.release)
+		<-stopped
+		t.Fatal("discarded builder remained blocked waiting for a seal result")
+	}
 }
 
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
