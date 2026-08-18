@@ -71,16 +71,6 @@ func getData(data []byte, start uint64, size uint64) []byte {
 	return common.RightPadBytes(data[start:end], int(size))
 }
 
-// getDataBig returns a slice from the data based on the start and size and pads
-// up to size with zero's. This function is overflow safe.
-func getDataBig(data []byte, start *uint256.Int, size uint64) []byte {
-	start64, overflow := start.Uint64WithOverflow()
-	if overflow {
-		start64 = ^uint64(0)
-	}
-	return getData(data, start64, size)
-}
-
 // ToWordSize returns the ceiled word size required for memory expansion.
 func ToWordSize(size uint64) uint64 {
 	if size > math.MaxUint64-31 {
@@ -98,11 +88,12 @@ func CheckMaxCodeSize(size int, rules *chain.Rules) error {
 	}
 
 	var maxSize int
-	if rules.IsAmsterdam {
+	switch {
+	case rules.IsAmsterdam:
 		maxSize = params.MaxCodeSizeAmsterdam
-	} else if rules.IsAhmedabad {
+	case rules.IsAhmedabad:
 		maxSize = params.MaxCodeSizeAhmedabad
-	} else {
+	default:
 		maxSize = params.MaxCodeSize
 	}
 	if size > maxSize {
@@ -114,11 +105,12 @@ func CheckMaxCodeSize(size int, rules *chain.Rules) error {
 // See EIP-3860 & EIP-7954
 func CheckMaxInitCodeSize(size uint64, eip3860, eip7954 bool) error {
 	var maxSize uint64
-	if eip7954 {
+	switch {
+	case eip7954:
 		maxSize = params.MaxInitCodeSizeAmsterdam
-	} else if eip3860 {
+	case eip3860:
 		maxSize = params.MaxInitCodeSize
-	} else {
+	default:
 		return nil
 	}
 	if size > maxSize {

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -83,7 +84,7 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 
 func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
 	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
 
 	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
@@ -102,7 +103,7 @@ func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
 			block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, version)
 			body, err := json.Marshal(block)
 			require.NoError(t, err)
-			req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Eth-Consensus-Version", version.String())
 
@@ -119,13 +120,13 @@ func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
 
 func TestPublishBlindedBlocksRejectsUnsupportedContentType(t *testing.T) {
 	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
-	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", nil)
 	req.Header.Set("Content-Type", "text/plain")
 	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 
 	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
-	endpointErr, ok := err.(*beaconhttp.EndpointError)
-	require.True(t, ok)
+	var endpointErr *beaconhttp.EndpointError
+	require.True(t, errors.As(err, &endpointErr))
 	require.Equal(t, http.StatusUnsupportedMediaType, endpointErr.Code)
 	require.ErrorContains(t, err, "unsupported content type")
 }
@@ -146,7 +147,7 @@ func TestPublishBlindedBlocksAcceptsEmptyFuluBuilderResponse(t *testing.T) {
 	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	body, err := json.Marshal(block)
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json; charset=utf-8")
 	req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 
@@ -166,7 +167,7 @@ func TestPublishBlindedBlocksRejectsMissingPreFuluPayload(t *testing.T) {
 	block := cltypes.NewSignedBlindedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.ElectraVersion)
 	body, err := json.Marshal(block)
 	require.NoError(t, err)
-	req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Eth-Consensus-Version", clparams.ElectraVersion.String())
 
@@ -234,7 +235,7 @@ func TestPublishBlindedBlocksRejectsMalformedRequest(t *testing.T) {
 			if tc.mutateJSON != nil {
 				body = tc.mutateJSON(t, body)
 			}
-			req := httptest.NewRequest(http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(body))
 			req.Header.Set("Content-Type", "application/json")
 			req.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 
@@ -510,7 +511,7 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 
 	// Insert 1 initial block so we have a chain head.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
@@ -642,7 +643,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 
 	// Insert 1 initial block so we have a chain head.
-	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, gen *blockgen.BlockGen) {
+	chainPack, err := m.GenerateChain(1, func(i int, gen *blockgen.BlockGen) {
 		tx, err := types.SignTx(
 			types.NewTransaction(gen.TxNonce(m.Address), common.Address{1}, uint256.NewInt(10_000), params.TxGas, uint256.NewInt(m.Genesis.BaseFee().Uint64()), nil),
 			*types.LatestSignerForChainID(m.ChainConfig.ChainID), m.Key,
@@ -731,4 +732,100 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 		"PayloadAttributes.SlotNumber must be set for Glamsterdam (EIP-7843)")
 	require.Equal(t, hexutil.Uint64(targetSlot), *spy.lastAttributes.SlotNumber,
 		"SlotNumber should equal the target slot")
+}
+
+func TestExpectedWithdrawalsReadsTheRightSourcePerFork(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch, cfg.BellatrixForkEpoch, cfg.CapellaForkEpoch = 0, 0, 0
+	a := &ApiHandler{beaconChainCfg: &cfg}
+
+	capellaState := state.New(&cfg)
+	capellaState.SetVersion(clparams.CapellaVersion)
+
+	// Before Gloas the expectation is computed from the head state itself, and the list is present
+	// even when empty: the execution layer rejects a nil one after Shanghai.
+	withdrawals, err := a.expectedWithdrawals(capellaState, nil, clparams.CapellaVersion, 0)
+	require.NoError(t, err)
+	require.NotNil(t, withdrawals)
+	require.Empty(t, withdrawals)
+
+	gloasState := state.New(&cfg)
+	gloasState.SetVersion(clparams.GloasVersion)
+
+	// A Gloas head whose payload was revealed is read from the state copy carrying that payload,
+	// not from the head state. Only that copy carries a pending builder withdrawal, so reading the
+	// wrong one comes back empty rather than merely equal.
+	withParentPayload := state.New(&cfg)
+	withParentPayload.SetVersion(clparams.GloasVersion)
+	pending := solid.NewDynamicListSSZ[*cltypes.BuilderPendingWithdrawal](int(cfg.MaxWithdrawalsPerPayload))
+	pending.Append(&cltypes.BuilderPendingWithdrawal{FeeRecipient: common.Address{0xbb}, Amount: 12, BuilderIndex: 3})
+	withParentPayload.SetBuilderPendingWithdrawals(pending)
+
+	withdrawals, err = a.expectedWithdrawals(gloasState, withParentPayload, clparams.GloasVersion, 0)
+	require.NoError(t, err)
+	require.Equal(t, []*types.Withdrawal{{
+		Index:     0,
+		Validator: state.ConvertBuilderIndexToValidatorIndex(3),
+		Address:   common.Address{0xbb},
+		Amount:    12,
+	}}, withdrawals)
+
+	// An EMPTY Gloas head uses the expectation the state already cached rather than computing a
+	// fresh one, so what it returns is whatever was cached.
+	withdrawals, err = a.expectedWithdrawals(gloasState, nil, clparams.GloasVersion, 0)
+	require.NoError(t, err)
+	require.Empty(t, withdrawals)
+
+	cached := solid.NewDynamicListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload))
+	cached.Append(&cltypes.Withdrawal{Index: 7, Validator: 8, Address: common.Address{0xaa}, Amount: 9})
+	gloasState.SetPayloadExpectedWithdrawals(cached)
+	withdrawals, err = a.expectedWithdrawals(gloasState, nil, clparams.GloasVersion, 0)
+	require.NoError(t, err)
+	require.Equal(t, []*types.Withdrawal{
+		{Index: 7, Validator: 8, Address: common.Address{0xaa}, Amount: 9},
+	}, withdrawals)
+}
+
+func TestPayloadAttributesOmitFieldsTheChosenVersionCannotCarry(t *testing.T) {
+	root := common.Hash{0xaa}
+	withdrawals := []*types.Withdrawal{{Index: 1}}
+	slotNumber := hexutil.Uint64(64)
+	targetGasLimit := hexutil.Uint64(36_000_000)
+
+	for _, tc := range []struct {
+		version         clparams.StateVersion
+		wantWithdrawals bool
+		wantParentRoot  bool
+		wantGloasFields bool
+	}{
+		{clparams.BellatrixVersion, false, false, false},
+		{clparams.CapellaVersion, true, false, false},
+		{clparams.DenebVersion, true, true, false},
+		{clparams.FuluVersion, true, true, false},
+		{clparams.GloasVersion, true, true, true},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			attrs := payloadAttributes(tc.version, 1, common.Hash{0xbb}, common.Address{0xcc},
+				withdrawals, &root, &slotNumber, &targetGasLimit)
+
+			// A version that does not define a field must not have it populated: V1 carries no
+			// withdrawals, V1 and V2 no parent beacon block root, and supplying one is rejected
+			// rather than ignored.
+			require.Equal(t, tc.wantWithdrawals, attrs.Withdrawals != nil)
+			require.Equal(t, tc.wantParentRoot, attrs.ParentBeaconBlockRoot != nil)
+
+			// The values have to arrive, not merely be non-nil: dropping either Gloas field leaves
+			// every Gloas proposal rejected with -38003.
+			if tc.wantGloasFields {
+				require.Equal(t, &slotNumber, attrs.SlotNumber)
+				require.Equal(t, &targetGasLimit, attrs.TargetGasLimit)
+			} else {
+				require.Nil(t, attrs.SlotNumber)
+				require.Nil(t, attrs.TargetGasLimit)
+			}
+			require.Equal(t, hexutil.Uint64(1), attrs.Timestamp)
+			require.Equal(t, common.Hash{0xbb}, attrs.PrevRandao)
+			require.Equal(t, common.Address{0xcc}, attrs.SuggestedFeeRecipient)
+		})
+	}
 }

@@ -25,6 +25,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/consensuschain"
 	"github.com/erigontech/erigon/execution/chain"
@@ -36,10 +37,12 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-type readerMock struct{}
+type readerMock struct {
+	config *chain.Config
+}
 
 func (r readerMock) Config() *chain.Config {
-	return nil
+	return r.config
 }
 
 func (r readerMock) CurrentHeader() *types.Header {
@@ -89,7 +92,7 @@ func TestVerifyHeaderDifficulty(t *testing.T) {
 	mergeEngine := New(eth1Engine)
 
 	err := mergeEngine.verifyHeader(readerMock{}, header, parent)
-	if err != errInvalidDifficulty {
+	if !errors.Is(err, errInvalidDifficulty) {
 		if err != nil {
 			t.Fatalf("Merge engine should not accept non-zero difficulty, got %s", err.Error())
 		} else {
@@ -111,13 +114,54 @@ func TestVerifyHeaderNonce(t *testing.T) {
 	mergeEngine := New(eth1Engine)
 
 	err := mergeEngine.verifyHeader(readerMock{}, header, parent)
-	if err != errInvalidNonce {
+	if !errors.Is(err, errInvalidNonce) {
 		if err != nil {
 			t.Fatalf("Merge engine should not accept non-zero difficulty, got %s", err.Error())
 		} else {
 			t.Fatalf("Merge engine should not accept non-zero difficulty")
 		}
 	}
+}
+
+func TestVerifyHeaderRequiresSlotNumberAfterAmsterdam(t *testing.T) {
+	t.Parallel()
+
+	config := &chain.Config{
+		LondonBlock:   common.NewUint64(0),
+		ShanghaiTime:  common.NewUint64(0),
+		CancunTime:    common.NewUint64(0),
+		PragueTime:    common.NewUint64(0),
+		AmsterdamTime: common.NewUint64(0),
+	}
+	zero := uint64(0)
+	baseFee := uint256.NewInt(1)
+	parent := &types.Header{
+		Number:        *uint256.NewInt(0),
+		Time:          1,
+		GasLimit:      30_000_000,
+		GasUsed:       15_000_000,
+		BaseFee:       baseFee,
+		BlobGasUsed:   &zero,
+		ExcessBlobGas: &zero,
+	}
+	emptyHash := common.Hash{}
+	header := &types.Header{
+		Number:                *uint256.NewInt(1),
+		Time:                  2,
+		GasLimit:              parent.GasLimit,
+		BaseFee:               new(uint256.Int).Set(baseFee),
+		Difficulty:            *ProofOfStakeDifficulty,
+		UncleHash:             empty.UncleHash,
+		WithdrawalsHash:       &emptyHash,
+		BlobGasUsed:           &zero,
+		ExcessBlobGas:         &zero,
+		ParentBeaconBlockRoot: &emptyHash,
+		RequestsHash:          &emptyHash,
+		BlockAccessListHash:   &emptyHash,
+	}
+
+	err := New(nil).verifyHeader(readerMock{config: config}, header, parent)
+	require.ErrorIs(t, err, rules.ErrMissingSlotNumber)
 }
 
 func TestNullParentBeaconBlockRootDoesNotPanic(t *testing.T) {

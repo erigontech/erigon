@@ -338,7 +338,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		verifyFiles = strings.Split(_verifyFiles, ",")
 	}
 	if manualDataVerification { // remove and create .torrent files (will re-read all snapshots)
-		if err = d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
+		if err := d.VerifyData(ctx, verifyFiles, verifyFailfast); err != nil {
 			return err
 		}
 		if verifyFailfast {
@@ -373,7 +373,7 @@ func Downloader(cmd *cobra.Command, logger log.Logger) error {
 		}
 	}
 
-	grpcServer, err := StartGrpc(bittorrentServer, downloaderApiAddr, nil /* transportCredentials */, logger)
+	grpcServer, err := StartGrpc(ctx, bittorrentServer, downloaderApiAddr, nil /* transportCredentials */, logger)
 	if err != nil {
 		return err
 	}
@@ -754,13 +754,13 @@ func doDiffTorrentHashes(ctx context.Context, local map[string]string) error {
 	return nil
 }
 
-func StartGrpc(snServer *downloader.GrpcServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
+func StartGrpc(ctx context.Context, snServer *downloader.GrpcServer, addr string, creds credentials.TransportCredentials, logger log.Logger) (*grpc.Server, error) {
 	grpcServer := grpcutil.NewServerWithOpts(creds)
 	if snServer != nil {
 		downloaderproto.RegisterDownloaderServer(grpcServer, snServer)
 	}
 
-	if err := grpcutil.StartServer(grpcServer, addr, true, logger, "gRPC server stop"); err != nil {
+	if err := grpcutil.StartServer(ctx, grpcServer, addr, true, logger, "gRPC server stop"); err != nil {
 		return nil, err
 	}
 	logger.Info("Started gRPC server", "on", addr)

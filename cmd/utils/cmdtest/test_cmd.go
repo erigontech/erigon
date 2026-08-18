@@ -22,6 +22,7 @@ package cmdtest
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -51,6 +52,8 @@ type TestCmd struct {
 	Func    template.FuncMap
 	Data    any
 	Cleanup func()
+	// Env holds extra "KEY=VALUE" entries appended to the child's environment.
+	Env []string
 
 	cmd    *exec.Cmd
 	stdout *bufio.Reader
@@ -71,6 +74,9 @@ func (tt *TestCmd) Run(name string, args ...string) {
 		Path:   reexec.Self(),
 		Args:   append([]string{name}, args...),
 		Stderr: tt.stderr,
+	}
+	if len(tt.Env) > 0 {
+		tt.cmd.Env = append(os.Environ(), tt.Env...)
 	}
 	stdout, err := tt.cmd.StdoutPipe()
 	if err != nil {
@@ -137,7 +143,7 @@ func (tt *TestCmd) matchExactOutput(want []byte) error {
 	if n < len(want) || !bytes.Equal(buf, want) {
 		// Grab any additional buffered output in case of mismatch
 		// because it might help with debugging.
-		buf = append(buf, make([]byte, tt.stdout.Buffered())...)
+		buf = append(buf, make([]byte, tt.stdout.Buffered())...) //nolint:makezero
 		tt.stdout.Read(buf[n:])
 		// Find the mismatch position.
 		for i := 0; i < n; i++ {
@@ -211,8 +217,8 @@ func (tt *TestCmd) Interrupt() {
 // It will only return a valid value after the process has finished.
 func (tt *TestCmd) ExitStatus() int {
 	if tt.Err != nil {
-		exitErr, ok := tt.Err.(*exec.ExitError)
-		if !ok {
+		var exitErr *exec.ExitError
+		if !errors.As(tt.Err, &exitErr) {
 			log.Warn("Failed to type convert testCmd.Error to exec.ExitError")
 		}
 		if exitErr != nil {

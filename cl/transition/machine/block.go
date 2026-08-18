@@ -49,7 +49,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	// [New in Gloas:EIP7732] process_parent_execution_payload BEFORE process_block_header
 	if version >= clparams.GloasVersion {
 		if err := impl.ProcessParentExecutionPayload(s, block); err != nil {
-			return fmt.Errorf("processBlock: failed to process parent execution payload: %v", err)
+			return fmt.Errorf("processBlock: failed to process parent execution payload: %w", err)
 		}
 	}
 
@@ -59,17 +59,17 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 		return fmt.Errorf("processBlock: failed to hash block body: %w", err)
 	}
 	if err := impl.ProcessBlockHeader(s, block.GetSlot(), block.GetProposerIndex(), block.GetParentRoot(), bodyRoot); err != nil {
-		return fmt.Errorf("processBlock: failed to process block header: %v", err)
+		return fmt.Errorf("processBlock: failed to process block header: %w", err)
 	}
 
 	if version >= clparams.GloasVersion {
 		// 2. [Modified in Gloas:EIP7732] process_withdrawals(state)
 		if err := impl.ProcessWithdrawals(s, nil); err != nil {
-			return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
+			return fmt.Errorf("processBlock: failed to process withdrawals: %w", err)
 		}
 		// 3. [New in Gloas:EIP7732] process_execution_payload_bid(state, block)
 		if err := impl.ProcessExecutionPayloadBid(s, block); err != nil {
-			return fmt.Errorf("processBlock: failed to process execution payload bid: %v", err)
+			return fmt.Errorf("processBlock: failed to process execution payload bid: %w", err)
 		}
 	} else if version >= clparams.BellatrixVersion {
 		// Pre-Gloas: process execution payload if enabled
@@ -81,18 +81,18 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 			if version >= clparams.CapellaVersion {
 				expect, err := state.GetExpectedWithdrawals(s, state.Epoch(s))
 				if err != nil {
-					return fmt.Errorf("processBlock: failed to get expected withdrawals: %v", err)
+					return fmt.Errorf("processBlock: failed to get expected withdrawals: %w", err)
 				}
 				expectWithdrawals := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(s.BeaconConfig().MaxWithdrawalsPerPayload), 44)
 				for i := range expect.Withdrawals {
 					expectWithdrawals.Append(expect.Withdrawals[i])
 				}
 				if err := impl.ProcessWithdrawals(s, expectWithdrawals); err != nil {
-					return fmt.Errorf("processBlock: failed to process withdrawals: %v", err)
+					return fmt.Errorf("processBlock: failed to process withdrawals: %w", err)
 				}
 			}
 			if err := impl.ProcessExecutionPayload(s, body); err != nil {
-				return fmt.Errorf("processBlock: failed to process execution payload: %v", err)
+				return fmt.Errorf("processBlock: failed to process execution payload: %w", err)
 			}
 		}
 	}
@@ -107,13 +107,13 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 
 	// 5. process_eth1_data
 	if err := impl.ProcessEth1Data(s, body.GetEth1Data()); err != nil {
-		return fmt.Errorf("processBlock: failed to process Eth1 data: %v", err)
+		return fmt.Errorf("processBlock: failed to process Eth1 data: %w", err)
 	}
 
 	// 6. process_operations
 	sigs, msgs, pubKeys, err = ProcessOperations(impl, s, body)
 	if err != nil {
-		return fmt.Errorf("processBlock: failed to process block body operations: %v", err)
+		return fmt.Errorf("processBlock: failed to process block body operations: %w", err)
 	}
 	signatures, messages, publicKeys = append(signatures, sigs...), append(messages, msgs...), append(publicKeys, pubKeys...)
 
@@ -131,7 +131,7 @@ func ProcessBlock(impl BlockProcessor, s abstract.BeaconState, block cltypes.Gen
 	// 7. process_sync_aggregate
 	if version >= clparams.AltairVersion {
 		if err := impl.ProcessSyncAggregate(s, body.GetSyncAggregate()); err != nil {
-			return fmt.Errorf("processBlock: failed to process sync aggregate: %v", err)
+			return fmt.Errorf("processBlock: failed to process sync aggregate: %w", err)
 		}
 	}
 
@@ -160,6 +160,11 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 	case blockBody.GetDeposits().Len() != 0:
 		return nil, nil, nil, errors.New("old-style deposits are not allowed after Fulu")
 	}
+	if s.Version() >= clparams.GloasVersion {
+		if err := validateGloasOperationCounts(blockBody, s.BeaconConfig()); err != nil {
+			return nil, nil, nil, err
+		}
+	}
 
 	// Process each proposer slashing
 	sigs, msgs, pubKeys, err := processProposerSlashings(impl, s, blockBody)
@@ -170,18 +175,18 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 
 	// attester slashings
 	if err := forEachProcess(s, blockBody.GetAttesterSlashings(), impl.ProcessAttesterSlashing); err != nil {
-		return nil, nil, nil, fmt.Errorf("ProcessProposerSlashing: %s", err)
+		return nil, nil, nil, fmt.Errorf("ProcessProposerSlashing: %w", err)
 	}
 
 	// Process each attestations
 	if err := impl.ProcessAttestations(s, blockBody.GetAttestations()); err != nil {
-		return nil, nil, nil, fmt.Errorf("ProcessAttestation: %s", err)
+		return nil, nil, nil, fmt.Errorf("ProcessAttestation: %w", err)
 	}
 
 	if s.Version() < clparams.FuluVersion {
 		// Process each deposit
 		if err := forEachProcess(s, blockBody.GetDeposits(), impl.ProcessDeposit); err != nil {
-			return nil, nil, nil, fmt.Errorf("ProcessDeposit: %s", err)
+			return nil, nil, nil, fmt.Errorf("ProcessDeposit: %w", err)
 		}
 	}
 
@@ -205,24 +210,45 @@ func ProcessOperations(impl BlockOperationProcessor, s abstract.BeaconState, blo
 
 	if clparams.ElectraVersion <= s.Version() && s.Version() < clparams.GloasVersion {
 		if err := forEachProcess(s, blockBody.GetExecutionRequests().Deposits, impl.ProcessDepositRequest); err != nil {
-			return nil, nil, nil, fmt.Errorf("ProcessDepositRequest: %s", err)
+			return nil, nil, nil, fmt.Errorf("ProcessDepositRequest: %w", err)
 		}
 		if err := forEachProcess(s, blockBody.GetExecutionRequests().Withdrawals, impl.ProcessWithdrawalRequest); err != nil {
-			return nil, nil, nil, fmt.Errorf("ProcessWithdrawalRequest: %s", err)
+			return nil, nil, nil, fmt.Errorf("ProcessWithdrawalRequest: %w", err)
 		}
 		if err := forEachProcess(s, blockBody.GetExecutionRequests().Consolidations, impl.ProcessConsolidationRequest); err != nil {
-			return nil, nil, nil, fmt.Errorf("ProcessConsolidationRequest: %s", err)
+			return nil, nil, nil, fmt.Errorf("ProcessConsolidationRequest: %w", err)
 		}
 	}
 
 	// [New in Gloas:EIP7732] Process payload attestations
 	if s.Version() >= clparams.GloasVersion {
 		if err := forEachProcess(s, blockBody.GetPayloadAttestations(), impl.ProcessPayloadAttestation); err != nil {
-			return nil, nil, nil, fmt.Errorf("ProcessPayloadAttestation: %s", err)
+			return nil, nil, nil, fmt.Errorf("ProcessPayloadAttestation: %w", err)
 		}
 	}
 
 	return
+}
+
+func validateGloasOperationCounts(blockBody cltypes.GenericBeaconBody, cfg *clparams.BeaconChainConfig) error {
+	operationCounts := []struct {
+		name  string
+		count int
+		limit uint64
+	}{
+		{"proposer slashings", blockBody.GetProposerSlashings().Len(), cfg.MaxProposerSlashings},
+		{"attester slashings", blockBody.GetAttesterSlashings().Len(), cfg.MaxAttesterSlashingsElectra},
+		{"attestations", blockBody.GetAttestations().Len(), cfg.MaxAttestationsElectra},
+		{"voluntary exits", blockBody.GetVoluntaryExits().Len(), cfg.MaxVoluntaryExits},
+		{"BLS-to-execution changes", blockBody.GetExecutionChanges().Len(), cfg.MaxBlsToExecutionChanges},
+		{"payload attestations", blockBody.GetPayloadAttestations().Len(), cfg.MaxPayloadAttestations},
+	}
+	for _, operationCount := range operationCounts {
+		if uint64(operationCount.count) > operationCount.limit {
+			return fmt.Errorf("too many %s: %d > %d", operationCount.name, operationCount.count, operationCount.limit)
+		}
+	}
+	return nil
 }
 
 func forEachProcess[T solid.EncodableHashableSSZ](
@@ -247,7 +273,7 @@ func processRandao(impl BlockProcessor, s abstract.BeaconState, body cltypes.Gen
 	if impl.FullValidate() {
 		domain, err := s.GetDomain(s.BeaconConfig().DomainRandao, epoch)
 		if err != nil {
-			return nil, nil, nil, fmt.Errorf("ProcessRandao: unable to get domain: %v", err)
+			return nil, nil, nil, fmt.Errorf("ProcessRandao: unable to get domain: %w", err)
 		}
 		// compute signing root epoch
 		b := make([]byte, 32)
@@ -258,7 +284,7 @@ func processRandao(impl BlockProcessor, s abstract.BeaconState, body cltypes.Gen
 		sigs, msgs, pubKeys = append(sigs, randao[:]), append(msgs, signingRoot[:]), append(pubKeys, pk[:])
 	}
 	if err = impl.ProcessRandao(s, randao, proposerIndex); err != nil {
-		return nil, nil, nil, fmt.Errorf("processBlock: failed to process RANDAO reveal: %v", err)
+		return nil, nil, nil, fmt.Errorf("processBlock: failed to process RANDAO reveal: %w", err)
 	}
 	return
 }
@@ -277,18 +303,18 @@ func processProposerSlashings(impl BlockOperationProcessor, s abstract.BeaconSta
 				state.GetEpochAtSlot(s.BeaconConfig(), signedHeader.Header.Slot),
 			)
 			if err != nil {
-				return fmt.Errorf("unable to get domain: %v", err)
+				return fmt.Errorf("unable to get domain: %w", err)
 			}
 			signingRoot, err := fork.ComputeSigningRoot(signedHeader.Header, domain)
 			if err != nil {
-				return fmt.Errorf("unable to compute signing root: %v", err)
+				return fmt.Errorf("unable to compute signing root: %w", err)
 			}
 			pk := proposer.PublicKey()
 			sigs, msgs, pubKeys = append(sigs, signedHeader.Signature[:]), append(msgs, signingRoot[:]), append(pubKeys, pk[:])
 		}
 
 		if err = impl.ProcessProposerSlashing(s, propSlashing); err != nil {
-			return fmt.Errorf("ProcessProposerSlashing: %s", err)
+			return fmt.Errorf("ProcessProposerSlashing: %w", err)
 		}
 		return nil
 	})
@@ -333,7 +359,7 @@ func processVoluntaryExits(impl BlockOperationProcessor, s abstract.BeaconState,
 		}
 
 		if err = impl.ProcessVoluntaryExit(s, exit); err != nil {
-			return fmt.Errorf("ProcessVoluntaryExit: %s", err)
+			return fmt.Errorf("ProcessVoluntaryExit: %w", err)
 		}
 		return nil
 	})
@@ -383,7 +409,7 @@ func processBlsToExecutionChanges(impl BlockOperationProcessor, s abstract.Beaco
 		}
 
 		if err := impl.ProcessBlsToExecutionChange(s, addressChange); err != nil {
-			return fmt.Errorf("ProcessBlsToExecutionChange: %s", err)
+			return fmt.Errorf("ProcessBlsToExecutionChange: %w", err)
 		}
 		return nil
 	})

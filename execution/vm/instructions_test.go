@@ -755,7 +755,7 @@ func TestOpTstore(t *testing.T) {
 		callContext = &CallContext{Contract: *NewContract(caller, caller, to, uint256.Int{})}
 		value       = common.Hex2Bytes("abcdef00000000000000abba000000000deaf000000c0de00100000000133700")
 	)
-	defer state.Release(false)
+	defer state.Close()
 
 	pc := uint64(0)
 	// push the value to the stack
@@ -1302,9 +1302,10 @@ func TestEIP8024_Execution(t *testing.T) {
 				if errOp != tc.wantOpcode {
 					t.Fatalf("expected error from opcode %s, got %s", tc.wantOpcode, errOp)
 				}
-				// Fail if we don't get the error we expect.
-				switch tc.wantErr.(type) {
-				case *ErrInvalidOpCode:
+				var invalidOp *ErrInvalidOpCode
+				var stackUnderflow *ErrStackUnderflow
+				switch {
+				case errors.As(tc.wantErr, &invalidOp):
 					var got *ErrInvalidOpCode
 					if !errors.As(err, &got) {
 						t.Fatalf("expected ErrInvalidOpCode, got %v", err)
@@ -1320,7 +1321,7 @@ func TestEIP8024_Execution(t *testing.T) {
 							t.Fatalf("ErrInvalidOpCode.operand=0x%02x; want 0x%02x", *got.operand, *tc.wantOperand)
 						}
 					}
-				case *ErrStackUnderflow:
+				case errors.As(tc.wantErr, &stackUnderflow):
 					var want *ErrStackUnderflow
 					if !errors.As(err, &want) {
 						t.Fatalf("expected ErrStackUnderflow, got %v", err)

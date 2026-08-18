@@ -345,7 +345,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 	}
 	p.lastBlockTimestampMs.Store(nowMs)
 
-	if err = minedTxns.Valid(); err != nil {
+	if err := minedTxns.Valid(); err != nil {
 		return err
 	}
 
@@ -410,7 +410,7 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 			}
 		}
 	}
-	if err = p.senders.onNewBlock(stateChanges, unwindTxns, minedTxns, p.logger); err != nil {
+	if err := p.senders.onNewBlock(stateChanges, unwindTxns, minedTxns, p.logger); err != nil {
 		return err
 	}
 
@@ -432,11 +432,11 @@ func (p *TxPool) OnNewBlock(ctx context.Context, stateChanges *remoteproto.State
 		}
 	}
 
-	if err = p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
+	if err := p.processMinedFinalizedBlobs(minedTxns.Txns, stateChanges.FinalizedBlock); err != nil {
 		return err
 	}
 
-	if err = p.removeMined(p.all, minedTxns.Txns); err != nil {
+	if err := p.removeMined(p.all, minedTxns.Txns); err != nil {
 		return err
 	}
 
@@ -725,10 +725,36 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
 
+	// sync.Cond has no notion of a context, so a caller that goes away while parked below would
+	// sleep until the next block broadcast the condition, or forever while the chain is stalled.
+	// Broadcasting on cancellation wakes it; every waiter rechecks its own condition anyway. The
+	// broadcast takes the lock so it cannot land between the check below and the wait, which is the
+	// window where a wakeup would be lost.
+	stopWatching, watcherDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		select {
+		case <-ctx.Done():
+			p.lock.Lock()
+			p.lastSeenCond.Broadcast()
+			p.lock.Unlock()
+		case <-stopWatching:
+		}
+	}()
+	// Joined rather than merely told to stop: with the context already ended the watcher can pick
+	// either case, and one that picked cancellation would otherwise take the lock after this call
+	// had returned. Registered before the lock is taken, so it runs after the lock is released.
+	defer func() {
+		close(stopWatching)
+		<-watcherDone
+	}()
+
 	p.lock.Lock()
 	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
 		select {
 		case <-ctx.Done():
+			// Leaving with the lock held would stop every later pool operation, not just this one.
+			p.lock.Unlock()
 			return false, 0, ctx.Err()
 		default:
 			// continue
@@ -1459,7 +1485,7 @@ func (p *TxPool) AddLocalTxns(ctx context.Context, newTxns TxnSlots) ([]txpoolcf
 	p.lock.Lock()
 	defer p.lock.Unlock()
 
-	if err = p.senders.registerNewSenders(&newTxns, p.logger); err != nil {
+	if err := p.senders.registerNewSenders(&newTxns, p.logger); err != nil {
 		return nil, err
 	}
 
@@ -2133,9 +2159,10 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 	p.all.ascend(senderID, func(mt *metaTxn) bool {
 		deleteAndContinueReasonLog := ""
 		discardReason := txpoolcfg.NonceTooLow
-		if senderNonce > mt.TxnSlot.Nonce {
+		switch {
+		case senderNonce > mt.TxnSlot.Nonce:
 			deleteAndContinueReasonLog = "low nonce"
-		} else if p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap {
+		case p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap:
 			// Evict "zombie" queued transactions whose nonce is so far ahead of the sender's
 			// on-chain nonce (accounting for any consecutive txns already in the pool) that they
 			// can practically never become pending. This prevents unbounded pool bloat from accounts
@@ -2143,7 +2170,7 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			// on-chain nonce is 6398). The gap threshold is configurable via MaxNonceGap (default 64).
 			deleteAndContinueReasonLog = "nonce gap too large"
 			discardReason = txpoolcfg.NonceTooDistant
-		} else if mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.TxType() == BlobTxnType { // Discard nonce-gapped blob txns
+		case mt.TxnSlot.Nonce != noGapsNonce && mt.TxnSlot.TxType() == BlobTxnType: // Discard nonce-gapped blob txns
 			deleteAndContinueReasonLog = "nonce-gapped blob txn"
 		}
 		if deleteAndContinueReasonLog != "" {

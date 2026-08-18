@@ -73,7 +73,6 @@ import (
 	"github.com/erigontech/erigon/diagnostics/diaglib"
 	"github.com/erigontech/erigon/diagnostics/mem"
 	"github.com/erigontech/erigon/execution/builder"
-	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/engineapi"
@@ -310,11 +309,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		if config.ExperimentalParallelCommitment {
 			statecfg.ExperimentalParallelCommitment = true
 		}
-		if config.ExperimentalStreamingCommitment {
-			statecfg.ExperimentalStreamingCommitment = true
-		}
 
-		if err = stages.UpdateMetrics(tx); err != nil {
+		if err := stages.UpdateMetrics(tx); err != nil {
 			return err
 		}
 
@@ -385,7 +381,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
-		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
+		var compatErr *chain.ConfigCompatError
+		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
 			return genesisErr
 		}
 
@@ -598,11 +595,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	logger.Info("Initialising Ethereum protocol", "network", config.NetworkID)
 	var rulesConfig any
 
-	if chainConfig.Aura != nil {
+	switch {
+	case chainConfig.Aura != nil:
 		rulesConfig = &config.Aura
-	} else if chainConfig.Bor != nil {
+	case chainConfig.Bor != nil:
 		rulesConfig = chainConfig.Bor
-	} else {
+	default:
 		rulesConfig = &config.Ethash
 	}
 
@@ -853,6 +851,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			}
 		}
 		backend.privateAPI, err = privateapi2.StartGrpc(
+			ctx,
 			backend.kvRPC,
 			backend.ethBackendRPC,
 			backend.txPoolGrpcServer,
@@ -943,14 +942,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		Accumulator:    backend.notifications.Accumulator,
 		RecentReceipts: backend.notifications.RecentReceipts,
 	}
-	// Test harnesses (e.g. EngineApiTester) set StateCacheBudget small so each
-	// per-fixture ExecModule doesn't allocate the full production cache; 0 keeps
-	// the production default.
-	var domainStateCache *cache.StateCache
-	if config.StateCacheBudget > 0 {
-		b := config.StateCacheBudget
-		domainStateCache = cache.NewStateCache(b, b, b, b)
-	}
 	backend.execModule = execmodule.NewExecModule(
 		ctx,
 		blockReader,
@@ -962,12 +953,11 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		hook,
 		accum,
 		execmoduleCache,
-		domainStateCache,
+		config.StateCacheBudget,
 		logger,
 		backend.engine,
 		config.Sync,
 		config.FcuBackgroundPrune,
-		config.FcuBackgroundCommit,
 		onlySnapDownloadOnStart,
 		backend.readAheader,
 		backend.stopNode,
@@ -1121,10 +1111,9 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	blockReader := s.blockReader
 	ctx := s.sentryCtx
 	chainKv := s.chainDB
-	var err error
 	emptyBadHash := config.BadBlockHash == common.Hash{}
 	if !emptyBadHash {
-		if err = chainKv.View(ctx, func(tx kv.Tx) error {
+		if err := chainKv.View(ctx, func(tx kv.Tx) error {
 			badBlockHeader, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
 			if badBlockHeader != nil {
 				unwindPoint := badBlockHeader.Number.Uint64() - 1
@@ -1356,26 +1345,7 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		return nil, nil, nil, nil, nil, nil, nil, err
 	}
 
-	erigonDBSettings, err := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, snConfig.Snapshot.NoDownloader, snConfig.CommitmentRefsFirstStart())
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, err
-	}
-	aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
-	if snConfig.ErigondbDomainStepsInFrozenFile != nil {
-		v := *snConfig.ErigondbDomainStepsInFrozenFile
-		stepsStr := "Inf"
-		if v != config3.UnboundedDomainMerge {
-			stepsStr = fmt.Sprintf("%d", v)
-		}
-		logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
-		aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
-	}
-	agg, err := aggOpts.Open(ctx, db)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, err
-	}
-	agg.SetSnapshotBuildSema(blockSnapBuildSema)
-	agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+	tdb, dbIsTemporal := db.(*temporal.DB)
 
 	allSegmentsDownloadComplete, err := rawdb.AllSegmentsDownloadCompleteFromDB(db)
 	if err != nil {
@@ -1386,14 +1356,41 @@ func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConf
 		if chainConfig.Bor != nil {
 			allBorSnapshots.OptimisticalyOpenFolder()
 		}
-		_ = agg.OpenFolder()
 	} else {
 		logger.Debug("[rpc] download of segments not complete yet. please wait StageSnapshots to finish")
 	}
 
-	temporalDb, err := temporal.New(db, agg, allSnapshots)
-	if err != nil {
-		return nil, nil, nil, nil, nil, nil, nil, err
+	var temporalDb kv.TemporalRwDB
+	if dbIsTemporal {
+		temporalDb = tdb
+	} else {
+		erigonDBSettings, settingsErr := state.ResolveErigonDBSettingsWithRefsDefault(dirs, logger, snConfig.Snapshot.NoDownloader, snConfig.CommitmentRefsFirstStart())
+		if settingsErr != nil {
+			return nil, nil, nil, nil, nil, nil, nil, settingsErr
+		}
+		aggOpts := state.New(dirs).Logger(logger).SanityOldNaming().GenSaltIfNeed(createNewSaltFileIfNeeded).WithErigonDBSettings(erigonDBSettings)
+		if snConfig.ErigondbDomainStepsInFrozenFile != nil {
+			v := *snConfig.ErigondbDomainStepsInFrozenFile
+			stepsStr := "Inf"
+			if v != config3.UnboundedDomainMerge {
+				stepsStr = fmt.Sprintf("%d", v)
+			}
+			logger.Info("domain merge cap overridden", "steps_in_frozen_file", stepsStr)
+			aggOpts = aggOpts.ErigondbDomainStepsInFrozenFile(v)
+		}
+		agg, openErr := aggOpts.Open(ctx, db)
+		if openErr != nil {
+			return nil, nil, nil, nil, nil, nil, nil, openErr
+		}
+		agg.SetSnapshotBuildSema(blockSnapBuildSema)
+		agg.SetProduceMod(snConfig.Snapshot.ProduceE3)
+		if allSegmentsDownloadComplete {
+			_ = agg.OpenFolder()
+		}
+		temporalDb, err = temporal.New(db, agg, allSnapshots)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, err
+		}
 	}
 
 	blockWriter := blockio.NewBlockWriter()
@@ -1622,6 +1619,10 @@ func (s *Ethereum) Stop() error {
 	}
 
 	s.chainDB.Close()
+
+	if s.execModule != nil {
+		s.execModule.Close()
+	}
 
 	if s.config.Downloader != nil {
 		_ = s.config.Downloader.CloseTorrentLogFile()

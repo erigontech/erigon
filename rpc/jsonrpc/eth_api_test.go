@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -189,7 +188,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalDefault_BlockNotFoundError
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	offChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *blockgen.BlockGen) {
+	offChain, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -210,7 +209,7 @@ func TestGetStorageAt_ByBlockHash_WithRequireCanonicalTrue_BlockNotFoundError(t 
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
 	addr := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 
-	offChain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, block *blockgen.BlockGen) {
+	offChain, err := m.GenerateChain(1, func(i int, block *blockgen.BlockGen) {
 	})
 	if err != nil {
 		t.Fatal(err)
@@ -308,18 +307,6 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 	} else {
 		t.Error("error expected")
 	}
-}
-
-var _ bridgeReader = mockBridgeReader{}
-
-type mockBridgeReader struct{}
-
-func (m mockBridgeReader) Events(context.Context, common.Hash, uint64) ([]*types.Message, error) {
-	panic("mock")
-}
-
-func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
-	panic("mock")
 }
 
 func TestGetStorageValues_HappyPath(t *testing.T) {

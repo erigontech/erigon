@@ -26,12 +26,11 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/edsrzf/mmap-go"
-
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -309,17 +308,17 @@ func (btw *BtIndexWriter) Build() error {
 	btw.logger.Log(btw.args.Lvl, "[index] write", "file", btw.indexFileName)
 	btw.built = true
 
-	if err = btw.writer.Flush(); err != nil {
+	if err := btw.writer.Flush(); err != nil {
 		return err
 	}
-	if err = btw.fsync(); err != nil {
+	if err := btw.fsync(); err != nil {
 		return err
 	}
 	tmpName := btw.indexF.Name()
-	if err = btw.indexF.Close(); err != nil {
+	if err := btw.indexF.Close(); err != nil {
 		return err
 	}
-	if err = os.Rename(tmpName, btw.args.IndexFile); err != nil {
+	if err := os.Rename(tmpName, btw.args.IndexFile); err != nil {
 		return err
 	}
 	btw.indexF = nil
@@ -365,7 +364,7 @@ func (btw *BtIndexWriter) Close() {
 }
 
 type BtIndex struct {
-	m        mmap.MMap
+	m        mmap.Ro
 	data     []byte
 	ef       *eliasfano32.EliasFano
 	file     *os.File
@@ -411,7 +410,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 	p := ps.AddNew(indexFileName, uint64(kv.Count()/2))
 	defer ps.Delete(p)
 
-	defer kv.MadvNormal().DisableReadAhead()
+	defer kv.MadvSequential().DisableReadAhead()
 
 	var existenceFilter *existence.Filter
 	if accessors.Has(statecfg.AccessorExistence) {
@@ -446,7 +445,7 @@ func BuildBtreeIndexWithDecompressor(indexPath string, existenceFilterPath strin
 
 	for kv.HasNext() {
 		key, _ = kv.Next(key[:0])
-		if err = iw.AddKey(key, pos); err != nil {
+		if err := iw.AddKey(key, pos); err != nil {
 			return err
 		}
 		hi, _ := murmur3.Sum128WithSeed(key, salt)
@@ -505,10 +504,14 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 		return idx, nil
 	}
 
-	idx.m, err = mmap.MapRegion(idx.file, int(idx.size), mmap.RDONLY, 0, 0)
+	idx.m, err = mmap.OpenRo(idx.file, int(idx.size))
 	if err != nil {
 		return nil, err
 	}
+	// Decoding below walks the whole node blob, so readahead pays off once. Lookups
+	// afterwards are scattered, hence OpenRo's MADV_RANDOM is restored on the way out.
+	_ = mmap.MadviseSequential(idx.m)
+	defer func() { _ = mmap.MadviseRandom(idx.m) }()
 	idx.data = idx.m[:idx.size]
 
 	var nodeOfftEF *eliasfano32.EliasFano
@@ -691,6 +694,23 @@ func (b *BtIndex) Get(lookup []byte, gr *seg.Reader) (k, v []byte, offsetInFile 
 		return lookup, v, offsetInFile, false, err
 	}
 	return lookup, v, offsetInFile, found, nil
+}
+
+func (b *BtIndex) GetValSize(lookup []byte, gr *seg.Reader) (size int, found bool, err error) {
+	if b.Empty() {
+		return 0, false, nil
+	}
+	if b.bplus == nil {
+		panic(fmt.Errorf("GetValSize: `b.bplus` is nil: %s", gr.FileName()))
+	}
+	size, found, err = b.bplus.GetValSize(gr, lookup)
+	if err != nil {
+		if errors.Is(err, ErrBtIndexLookupBounds) {
+			return 0, false, nil
+		}
+		return 0, false, err
+	}
+	return size, found, nil
 }
 
 // Seek moves cursor to position where key >= x.

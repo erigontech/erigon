@@ -711,8 +711,14 @@ func TestExecLoopShouldExitPriority(t *testing.T) {
 
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
-			br := &blockResult{BlockNum: tc.blockNum, Exhausted: tc.exhausted}
-			got := execLoopShouldExit(br, tc.sizeEst, batchLimit, tc.maxBlockNum, tc.stopAfterBlock)
+			got := execLoopShouldExit(execLoopExitInput{
+				blockNum:       tc.blockNum,
+				exhausted:      tc.exhausted,
+				sizeEst:        tc.sizeEst,
+				batchLimit:     batchLimit,
+				maxBlockNum:    tc.maxBlockNum,
+				stopAfterBlock: tc.stopAfterBlock,
+			})
 			if got != tc.want {
 				t.Fatalf("execLoopShouldExit got %v, want %v", got, tc.want)
 			}
@@ -749,6 +755,31 @@ func TestApplyLoopCloseIsClean(t *testing.T) {
 				t.Fatalf("applyLoopCloseIsClean(%d,%d,%d) = %v, want %v", tc.lastBlockNum, tc.maxBlockNum, tc.txResults, got, tc.want)
 			}
 		})
+	}
+}
+
+func TestAppliedBlockProgress(t *testing.T) {
+	var progress appliedBlockProgress
+
+	if progress.advance(0, 1) {
+		t.Fatal("genesis must not advance applied block progress")
+	}
+	if progress.blockNum != 0 || progress.lastTxNum != 0 {
+		t.Fatalf("genesis changed progress to block=%d txNum=%d", progress.blockNum, progress.lastTxNum)
+	}
+
+	if !progress.advance(1, 4) {
+		t.Fatal("block 1 must advance applied block progress")
+	}
+	if progress.blockNum != 1 || progress.lastTxNum != 4 {
+		t.Fatalf("unexpected progress block=%d txNum=%d", progress.blockNum, progress.lastTxNum)
+	}
+
+	if progress.advance(1, 5) {
+		t.Fatal("duplicate block must not advance applied block progress")
+	}
+	if progress.blockNum != 1 || progress.lastTxNum != 4 {
+		t.Fatalf("duplicate block changed progress to block=%d txNum=%d", progress.blockNum, progress.lastTxNum)
 	}
 }
 
@@ -1153,7 +1184,8 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 			origErr:    nil,
 			depTxIndex: 5,
 			check: func(t *testing.T, got error) {
-				abort, ok := got.(protocol.ErrExecAbortError)
+				var abort protocol.ErrExecAbortError
+				ok := errors.As(got, &abort)
 				require.True(t, ok)
 				require.Equal(t, 5, abort.DependencyTxIndex)
 				require.Nil(t, abort.OriginError,
@@ -1167,7 +1199,8 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 			origErr:    realErr,
 			depTxIndex: 0,
 			check: func(t *testing.T, got error) {
-				abort, ok := got.(protocol.ErrExecAbortError)
+				var abort protocol.ErrExecAbortError
+				ok := errors.As(got, &abort)
 				require.True(t, ok)
 				require.Equal(t, 0, abort.DependencyTxIndex)
 				require.True(t, abort.IsError())
@@ -1182,7 +1215,8 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 			origErr:    protocol.ErrExecAbortError{DependencyTxIndex: 7, OriginError: nil},
 			depTxIndex: 99,
 			check: func(t *testing.T, got error) {
-				abort, ok := got.(protocol.ErrExecAbortError)
+				var abort protocol.ErrExecAbortError
+				ok := errors.As(got, &abort)
 				require.True(t, ok)
 				require.Equal(t, 7, abort.DependencyTxIndex,
 					"depTxIndex of the passed-through err must not be overwritten")

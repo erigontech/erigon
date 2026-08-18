@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -54,7 +55,7 @@ func setup2CacheTest(t *testing.T) (kv.TemporalRwTx, *execctx.SharedDomains) {
 	t.Cleanup(func() { dir.RemoveAll(tmpDir) })
 
 	dirs := datadir.New(tmpDir)
-	rawDb := mdbx.New(dbcfg.ChainDB, lgr).InMem(t, dirs.Chaindata).MustOpen()
+	rawDb := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, lgr), dirs.Chaindata).MustOpen()
 	t.Cleanup(rawDb.Close)
 
 	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(lgr).Open(context.Background(), rawDb)
@@ -114,7 +115,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	baseReader := state.NewReaderV3(domains.AsGetter(tx))
 	bufferedRdr := state.NewBufferedReader(rs, baseReader)
 	ibsN1 := state.New(bufferedRdr)
-	defer ibsN1.Release(false)
+	defer ibsN1.Close()
 
 	// Must read block N's value from rs.accounts, not stale domains.
 	gotBal, err := ibsN1.GetBalance(addr)
@@ -130,7 +131,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	// Sanity check: a plain domain reader (no buffering) still sees zero —
 	// the timing hole is real without rs.accounts.
 	ibsRaw := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer ibsRaw.Release(false)
+	defer ibsRaw.Close()
 	rawBal, err := ibsRaw.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, uint64(0), rawBal.Uint64(),
@@ -139,7 +140,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	// Simulate ApplyStateWrites completing (domain apply catches up).
 	w := state.NewWriter(domains.AsPutDel(tx), nil, 5)
 	ibsApply := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer ibsApply.Release(false)
+	defer ibsApply.Close()
 	ibsApply.SetTxContext(1, 0)
 	err = ibsApply.SetBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
@@ -150,7 +151,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 
 	// After domain apply, plain reader must see the correct value.
 	ibsRawAfter := state.New(state.NewReaderV3(domains.AsGetter(tx)))
-	defer ibsRawAfter.Release(false)
+	defer ibsRawAfter.Close()
 	rawBalAfter, err := ibsRawAfter.GetBalance(addr)
 	require.NoError(t, err)
 	require.Equal(t, uint64(500), rawBalAfter.Uint64(),

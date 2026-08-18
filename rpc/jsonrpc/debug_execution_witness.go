@@ -627,6 +627,7 @@ func (api *BaseAPI) buildAccessedState(
 
 	// Create the in-block state with the recording state as reader
 	ibs := state.New(recordingState)
+	defer ibs.Close()
 
 	// Get header for block context
 	header := block.HeaderNoCopy()
@@ -1113,11 +1114,12 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 		_, deleted := rs.DeletedAccounts[sysAddr]
 		postOverlay, hasOverlay := rs.accountOverlay[sysAddr]
 		var postExists bool
-		if deleted {
+		switch {
+		case deleted:
 			postExists = false
-		} else if hasOverlay {
+		case hasOverlay:
 			postExists = postOverlay != nil
-		} else {
+		default:
 			postExists = preExists
 		}
 		existenceChanged := preExists != postExists
@@ -1269,7 +1271,7 @@ func detectCollapseSiblings(
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
+		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w\n", err)
 	}
 
 	if common.Hash(computedRootHash) != expectedBlockRoot {
@@ -1963,7 +1965,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
 			// fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
 			if err := s.t.UpdateAccountCode(addrHash[:], code); err != nil {
-				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %v\n", addr, err)
+				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %w\n", addr, err)
 			}
 		}
 	}
@@ -2057,6 +2059,7 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 
 	// Create the in-block state with the witness stateless as reader
 	ibs := state.New(stateless)
+	defer ibs.Close()
 	header := block.HeaderNoCopy()
 	blockNum := block.NumberU64()
 

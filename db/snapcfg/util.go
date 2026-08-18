@@ -121,8 +121,39 @@ type Preverified struct {
 	Items PreverifiedItems
 }
 
+// keepNewest stores item under key unless an entry with an equal or newer version is already there.
+func keepNewest(best *btree.Map[string, PreverifiedItem], kept *btree.Map[string, snaptype.Version], key string, item PreverifiedItem, v snaptype.Version) {
+	if current, ok := kept.Get(key); ok && !current.Less(v) {
+		return
+	}
+	best.Set(key, item)
+	kept.Set(key, v)
+}
+
+const maxLoggedDroppedNames = 16
+
+// droppedNames returns the names in all that kept no longer contains, capped at
+// limit, along with the total dropped count.
+func droppedNames(all, kept []PreverifiedItem, limit int) (names []string, dropped int) {
+	keptNames := make(map[string]struct{}, len(kept))
+	for _, item := range kept {
+		keptNames[item.Name] = struct{}{}
+	}
+	for _, item := range all {
+		if _, ok := keptNames[item.Name]; ok {
+			continue
+		}
+		dropped++
+		if len(names) < limit {
+			names = append(names, item.Name)
+		}
+	}
+	return names, dropped
+}
+
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
+	var keptVersions btree.Map[string, snaptype.Version]
 
 	for _, p := range p.Items {
 		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
@@ -140,7 +171,23 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		}
 
 		if strings.HasPrefix(p.Name, "caplin") {
-			bestVersions.Set(p.Name, p)
+			caplinFile, _, known := snaptype.ParseFileName("caplin", filepath.Base(v+"-"+name))
+			if !known || caplinFile.Type == nil {
+				continue
+			}
+
+			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, "caplin/"))
+			if err != nil {
+				continue
+			}
+			// One window for every caplin file, taken from BeaconBlocks: an .idx carries
+			// its .seg's data version, so filtering them apart would drop an index whose
+			// segment was kept. The per-type windows are identical today.
+			versions := snaptype.BeaconBlocks.Versions()
+			if caplinVersion.Less(versions.MinSupported) || versions.Current.Less(caplinVersion) {
+				continue
+			}
+			keepNewest(&bestVersions, &keptVersions, "caplin/"+name, p, caplinVersion)
 			continue
 		}
 
@@ -210,16 +257,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			continue
 		}
 
-		if current, ok := bestVersions.Get(name); ok {
-			v, _, _ := strings.Cut(current.Name, "-")
-			cv, _ := ver.ParseVersion(v)
-
-			if cv.Less(version) {
-				bestVersions.Set(name, p)
-			}
-		} else {
-			bestVersions.Set(name, p)
-		}
+		keepNewest(&bestVersions, &keptVersions, name, p, version)
 	}
 
 	var versioned []PreverifiedItem
@@ -234,14 +272,9 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		return strings.Compare(i.Name, j.Name)
 	})
 	if len(p.Items) != len(versioned) {
-		log.Root().Warn("Preverified list reduced after applying type filter", "from", len(p.Items), "to", len(versioned))
-		// for _, v := range p.Items {
-		// 	if !slices.ContainsFunc(versioned, func(item PreverifiedItem) bool {
-		// 		return item.Name == v.Name
-		// 	}) {
-		// 		log.Root().Warn("Preverified item removed by type filter", "name", v.Name)
-		// 	}
-		// }
+		names, dropped := droppedNames(p.Items, versioned, maxLoggedDroppedNames)
+		log.Root().Warn("Preverified list reduced after applying type filter",
+			"from", len(p.Items), "to", len(versioned), "dropped", dropped, "names", strings.Join(names, ","))
 	} else {
 		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
 	}
@@ -372,6 +405,12 @@ func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 }
 
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
+	// Caplin entries are skipped below and no core entry can match a caplin enum, so the
+	// scan is a no-op for these types — and IsFrozen calls this per segment opened.
+	if snaptype.IsCaplinType(t) {
+		return snaptype.CaplinMergeLimit
+	}
+
 	hasType := t == snaptype.MinCoreEnum
 
 	for _, info := range c.PreverifiedParsed {
@@ -403,13 +442,6 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	// This should only get called the first time a new type is added and created - as it will
 	// not have previous history to check against
 
-	// BeaconBlocks && BlobSidecars follow their own slot based sharding scheme which is
-	// not the same as other snapshots which follow a block based sharding scheme
-	// TODO: If we add any more sharding schemes (we currently have blocks, state & beacon block schemes)
-	// - we may need to add some kind of sharding scheme identifier to snaptype.Type
-	if snaptype.IsCaplinType(t) {
-		return snaptype.CaplinMergeLimit
-	}
 	if hasType {
 		return snaptype.Erigon2MergeLimit
 	}

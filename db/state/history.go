@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type History struct {
@@ -306,7 +307,7 @@ func (h *History) buildVI(ctx context.Context, historyIdxPath string, hist, efHi
 					return err
 				}
 				histKey = historyKey(txNum, keyBuf, histKey[:0])
-				if err = rs.AddKey(histKey, valOffset); err != nil {
+				if err := rs.AddKey(histKey, valOffset); err != nil {
 					return err
 				}
 
@@ -384,6 +385,10 @@ func (h *History) Scan(ctx context.Context, toTxNum uint64) error {
 	return nil
 }
 
+// mdbx keeps a dupsort value as a key of the nested tree, so it is capped by keysize_max(pageSize),
+// which is pageSize/2 - 26. Here that budget is shared with the 8-byte txNum prefix.
+const maxHistoryValLen = int(ethconfig.DefaultChainDBPageSize)/2 - 26 - 8
+
 func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) (err error) {
 	if w.discard {
 		return nil
@@ -423,8 +428,8 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 	historyVal := historyKey[lk:]
 	invIdxVal := historyKey[:lk]
 
-	if len(original) > 2048 {
-		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", len(w.historyKey)-8-len(k))
+	if len(original) > maxHistoryValLen {
+		log.Error("History value is too large while largeValues=false", "h", w.historyValsTable, "histo", string(w.historyKey[:lk]), "len", len(original), "max", maxHistoryValLen)
 		panic("History value is too large while largeValues=false")
 	}
 
@@ -713,7 +718,7 @@ func (h *History) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64
 		return HistoryCollation{}, err
 	}
 	if len(offsets) > 0 {
-		if err = loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
+		if err := loadBitmapsFunc(nil, make([]byte, 8), nil, nil); err != nil {
 			return HistoryCollation{}, err
 		}
 	}
@@ -984,45 +989,6 @@ func (ht *HistoryRoTx) statelessIdxReader(i int) *recsplit.IndexReader {
 		ht.readers[i] = r
 	}
 	return r
-}
-
-func (ht *HistoryRoTx) canHashPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {
-	minIdxTx, maxIdxTx := ht.iit.ii.minTxNumInDB(tx), ht.iit.ii.maxTxNumInDB(tx)
-	//defer func() {
-	//	fmt.Printf("CanPrune[%s]Until(%d) noFiles=%t txTo %d idxTx [%d-%d] keepRecentTxInDB=%d; result %t\n",
-	//		ht.h.filenameBase, untilTx, ht.h.dontProduceHistoryFiles, txTo, minIdxTx, maxIdxTx, ht.h.keepRecentTxInDB, minIdxTx < txTo)
-	//}()
-
-	if ht.h.SnapshotsDisabled {
-		if ht.h.KeepRecentTxnInDB >= maxIdxTx {
-			return false, 0
-		}
-		txTo = min(maxIdxTx-ht.h.KeepRecentTxnInDB, untilTx) // bound pruning
-	} else {
-		canPruneIdx := ht.iit.CanPrune(tx, untilTx)
-		if !canPruneIdx {
-			return false, 0
-		}
-		txTo = min(ht.files.EndTxNum(), ht.iit.files.EndTxNum(), untilTx)
-	}
-	minTxDB := ht.h.minTxNumInDB(tx)
-	delta := 0.0
-	if txTo > minTxDB {
-		delta = float64(txTo-minTxDB) / float64(ht.stepSize) //TODO: why this is happening?
-	}
-
-	switch ht.h.FilenameBase {
-	case "accounts":
-		mxPrunableHAcc.Set(delta)
-	case "storage":
-		mxPrunableHSto.Set(delta)
-	case "code":
-		mxPrunableHCode.Set(delta)
-	case "commitment":
-		mxPrunableHComm.Set(delta)
-	}
-
-	return minIdxTx < txTo, txTo
 }
 
 func (ht *HistoryRoTx) canPruneUntil(tx kv.Tx, untilTx uint64) (can bool, txTo uint64) {

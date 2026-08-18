@@ -108,6 +108,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 	}
 	ibs := state.New(stateReader)
+	defer ibs.Close()
 
 	parent, _ := api.headerByNumber(ctx, rpc.BlockNumber(stateBlockNumber), tx)
 	if parent == nil {
@@ -179,7 +180,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
-		if err = ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
+		if err := ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
 			return nil, err
 		}
 
@@ -226,7 +227,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 			}
 			return nil, err
 		}
-		if err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+		if err := api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
 		b, err = api.blockByNumber(ctx, rpc.BlockNumber(blockNum), tx)

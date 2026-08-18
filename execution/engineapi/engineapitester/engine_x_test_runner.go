@@ -108,7 +108,6 @@ type EngineXTestRunner struct {
 	preAllocs          map[PreAllocHash]*PreAlloc
 	mu                 sync.Mutex
 	testers            map[Fork]map[PreAllocHash]testerEntry
-	wg                 sync.WaitGroup
 	profileHook        RequestProfileHook
 	warmupKzgCtxOnInit bool
 }
@@ -326,6 +325,10 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 			v := uint64(*env.BlobGasUsed)
 			genesis.BlobGasUsed = &v
 		}
+		if env.SlotNumber != nil {
+			v := uint64(*env.SlotNumber)
+			genesis.SlotNumber = &v
+		}
 	} else {
 		// Old format: genesis parsed directly from JSON
 		genesis = alloc.Genesis
@@ -537,6 +540,7 @@ type EngineXEnvironment struct {
 	BaseFee       *math.HexOrDecimal64 `json:"currentBaseFee"`
 	ExcessBlobGas *math.HexOrDecimal64 `json:"currentExcessBlobGas"`
 	BlobGasUsed   *math.HexOrDecimal64 `json:"currentBlobGasUsed"`
+	SlotNumber    *math.HexOrDecimal64 `json:"slotNumber"`
 }
 
 type Fork string

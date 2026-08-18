@@ -361,17 +361,18 @@ LOOP:
 		} else {
 			clearTxIO()
 		}
-		if errors.Is(err, protocol.ErrGasLimitReached) {
+		switch {
+		case errors.Is(err, protocol.ErrGasLimitReached):
 			logger.Debug(fmt.Sprintf("[%s] Gas limit exceeded for env block", logPrefix), "hash", txn.Hash(), "sender", from)
-		} else if errors.Is(err, protocol.ErrNonceTooLow) {
+		case errors.Is(err, protocol.ErrNonceTooLow):
 			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with low nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "err", err)
-		} else if errors.Is(err, protocol.ErrNonceTooHigh) {
+		case errors.Is(err, protocol.ErrNonceTooHigh):
 			logger.Debug(fmt.Sprintf("[%s] Skipping transaction with high nonce", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce())
-		} else if err == nil {
+		case err == nil:
 			logger.Trace(fmt.Sprintf("[%s] Added transaction", logPrefix), "hash", txn.Hash(), "sender", from, "nonce", txn.GetNonce(), "payload", ba.PayloadId)
 			coalescedLogs = append(coalescedLogs, logs...)
 			txnIdx++
-		} else {
+		default:
 			logger.Debug(fmt.Sprintf("[%s] Skipping transaction", logPrefix), "hash", txn.Hash(), "sender", from, "err", err)
 		}
 	}
@@ -397,7 +398,7 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger, nil)
 
 	if err != nil {
-		return nil, fmt.Errorf("cannot finalize block execution: %s", err)
+		return nil, fmt.Errorf("cannot finalize block execution: %w", err)
 	}
 
 	// Note: NewBlock (called by FinalizeBlockExecution) copies the header,
