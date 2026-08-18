@@ -596,17 +596,18 @@ func (sd *SharedDomains) domainPutNoLock(domain kv.Domain, roTx kv.TemporalTx, k
 
 // AsStateGetter returns an execution-aware getter with optimized code reads.
 func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx) execctxapi.StateGetter {
-	return &StateGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
+	return &stateGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
 }
 
-// AsStateGetterNoMetrics is AsStateGetter with request metrics disabled.
+// AsStateGetterNoMetrics is an explicit-intent alias for callers that do not
+// bind per-worker metrics. Request-scoped metrics configured on sd still apply.
 func (sd *SharedDomains) AsStateGetterNoMetrics(tx kv.TemporalTx) execctxapi.StateGetter {
 	return sd.AsStateGetter(tx)
 }
 
 // AsStateGetterMetered returns an execution-aware getter with caller-owned metrics.
 func (sd *SharedDomains) AsStateGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter {
-	return &StateGetter{sd: sd, tx: tx, m: m, view: sd.cacheViewFor(tx)}
+	return &stateGetter{sd: sd, tx: tx, m: m, view: sd.cacheViewFor(tx)}
 }
 
 // MergeMetrics hands a boundary producer's accumulator to BOTH sinks: the
@@ -1275,17 +1276,12 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	return nil
 }
 
-// TemporalDomain satisfaction. Collects no read metrics — see
-// StateGetter.GetLatest for why there is no process-wide accumulator.
+// TemporalDomain satisfaction. Direct reads use request metrics when configured.
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	return sd.getLatestMetered(domain, tx, k, nil, sd.cacheReader())
 }
 
-// GetLatestContext is the context-aware read for callers that read on behalf of
-// a concurrent worker: metrics go to the per-worker, lock-free accumulator
-// carried by ctx (nil ctx-value => no metrics). Lets a worker's reader meter
-// without any shared accumulator or lock. Mirrors StateGetter.GetLatestContext
-// for readers that hold the SD directly (e.g. the committer's asOfStateReader).
+// GetLatestContext routes reads to the per-worker metrics carried by ctx.
 func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
 	return sd.getLatestMetered(domain, tx, k, kvmetrics.MetricsFromContext(ctx), sd.cacheReader())
 }

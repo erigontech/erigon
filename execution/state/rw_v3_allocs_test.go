@@ -17,7 +17,6 @@
 package state
 
 import (
-	"context"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -38,9 +37,6 @@ func (g fixedGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, b
 	return nil, nil, false, nil
 }
 func (g fixedGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step { return 0 }
-func (g fixedGetter) GetLatestContext(_ context.Context, name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	return g.GetLatest(name, k)
-}
 func (g fixedGetter) GetCode([]byte, uint64) ([]byte, bool, error) {
 	return g.val, len(g.val) > 0, nil
 }

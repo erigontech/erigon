@@ -17,65 +17,52 @@
 package execctx
 
 import (
-	"context"
-
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/cache"
 )
 
-// StateGetter provides execution-aware reads over SharedDomains.
-type StateGetter struct {
+type stateGetter struct {
 	sd   *SharedDomains
 	tx   kv.TemporalTx
 	view cache.ReadView
 	m    *kvmetrics.DomainMetrics
 }
 
-var _ execctxapi.StateGetter = (*StateGetter)(nil)
+var _ execctxapi.StateGetter = (*stateGetter)(nil)
 
-func (g *StateGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
+// GetLatest never writes to a process-wide metrics accumulator shared by concurrent readers.
+func (g *stateGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
 	return g.sd.getLatestMetered(name, g.tx, k, g.m, g.view)
 }
 
-func (g *StateGetter) GetLatestContext(ctx context.Context, name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	return g.sd.getLatestMetered(name, g.tx, k, kvmetrics.MetricsFromContext(ctx), g.view)
-}
-
-func (g *StateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
+func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
 	return g.sd.getCode(g.tx, g.view, addr, txNum)
 }
 
-func (g *StateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
+func (g *stateGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
 	return g.sd.getCodeSize(g.tx, g.view, addr, txNum)
 }
 
-func (g *StateGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
+func (g *stateGetter) HasPrefix(name kv.Domain, prefix []byte) ([]byte, []byte, bool, error) {
 	return g.sd.HasPrefix(name, prefix, g.tx)
 }
 
-func (g *StateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
+func (g *stateGetter) StepsInFiles(entitySet ...kv.Domain) kv.Step {
 	return g.tx.StepsInFiles(entitySet...)
 }
 
-// TemporalTxStateGetter adapts a temporal transaction using value-size reads.
+// TemporalTxStateGetter exposes execution reads over a temporal transaction.
 type TemporalTxStateGetter struct {
 	kv.TemporalTx
 }
 
 var _ execctxapi.StateGetter = (*TemporalTxStateGetter)(nil)
 
-// NewTemporalTxStateGetter adapts a temporal transaction using value-size reads.
+// NewTemporalTxStateGetter wraps tx with execution-read methods.
 func NewTemporalTxStateGetter(tx kv.TemporalTx) *TemporalTxStateGetter {
-	if tx == nil {
-		return nil
-	}
 	return &TemporalTxStateGetter{TemporalTx: tx}
-}
-
-func (g *TemporalTxStateGetter) GetLatestContext(_ context.Context, name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	return g.GetLatest(name, k)
 }
 
 func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {
@@ -84,5 +71,6 @@ func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, er
 }
 
 func (g *TemporalTxStateGetter) GetCodeSize(addr []byte, _ uint64) (int, bool, error) {
-	return g.GetLatestValSize(kv.CodeDomain, addr)
+	size, found, err := g.GetLatestValSize(kv.CodeDomain, addr)
+	return size, found && size > 0, err
 }

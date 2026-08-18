@@ -130,9 +130,11 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 		context = c.publishedSD()
 	}
 
-	view := &CacheView{context: context, getter: execctx.NewTemporalTxStateGetter(tx)}
+	var view *CacheView
 	if context != nil {
-		view.getter = context.AsStateGetter(tx)
+		view = &CacheView{context: context, getter: context.AsStateGetter(tx)}
+	} else {
+		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
 	return view, nil
 }

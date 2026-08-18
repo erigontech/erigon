@@ -84,7 +84,7 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 	bra.stateCache = sc
 }
 
-// cachePopulatingGetter wraps a kv.TemporalGetter and fills a StateCache
+// cachePopulatingGetter wraps a StateGetter and fills a StateCache
 // ReadView as a side effect. Used by warmBody to make read-ahead prefetches
 // populate the same in-process cache layer that SharedDomains.GetLatest
 // consults — eliminating the file-accessor stack cost on the EVM's first

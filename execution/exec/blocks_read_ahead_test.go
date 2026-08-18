@@ -57,10 +57,6 @@ func newTestStateGetter(getter kv.TemporalGetter) testStateGetter {
 	return testStateGetter{TemporalGetter: getter}
 }
 
-func (g testStateGetter) GetLatestContext(_ context.Context, domain kv.Domain, key []byte) ([]byte, kv.Step, error) {
-	return g.GetLatest(domain, key)
-}
-
 func (g testStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {
 	code, _, err := g.GetLatest(kv.CodeDomain, addr)
 	return code, len(code) > 0, err

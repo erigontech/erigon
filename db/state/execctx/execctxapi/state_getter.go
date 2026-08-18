@@ -16,16 +16,14 @@
 
 package execctxapi
 
-import (
-	"context"
-
-	"github.com/erigontech/erigon/db/kv"
-)
+import "github.com/erigontech/erigon/db/kv"
 
 // StateGetter provides execution-aware reads over temporal state.
 type StateGetter interface {
 	kv.TemporalGetter
-	GetLatestContext(ctx context.Context, name kv.Domain, k []byte) ([]byte, kv.Step, error)
+	// GetCode reports whether the address has non-empty code. It is read-only;
+	// writes must use GetLatest to resolve the previous CodeDomain value.
 	GetCode(addr []byte, txNum uint64) ([]byte, bool, error)
+	// GetCodeSize reports whether the address has non-empty code.
 	GetCodeSize(addr []byte, txNum uint64) (int, bool, error)
 }

@@ -6,6 +6,7 @@ import (
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
 type StateReader interface {
@@ -25,22 +26,41 @@ type LatestStateReader struct {
 	sharedDomains sd
 	getter        execctxapi.StateGetter
 	srcTx         kv.TemporalTx
-	// workerCtx, when non-nil, carries this worker's lock-free metrics
-	// accumulator; reads route through getter.GetLatestContext(workerCtx, …) so
-	// concurrent workers don't share the main accumulator. Nil on the main
-	// reader, which meters into sd.mainWM via the plain GetLatest.
-	workerCtx context.Context
+	metrics       *kvmetrics.DomainMetrics
 }
 
-func NewLatestStateReader(tx kv.TemporalTx, sd sd) *LatestStateReader {
-	return &LatestStateReader{sharedDomains: sd, getter: sd.AsStateGetter(tx), srcTx: tx}
+type latestStateReaderOptions struct {
+	metrics *kvmetrics.DomainMetrics
 }
 
-// NewLatestStateReaderForWorker is like NewLatestStateReader but reads meter
-// into the per-worker accumulator carried by workerCtx (for concurrent
-// workers). See LatestStateReader.workerCtx.
-func NewLatestStateReaderForWorker(workerCtx context.Context, tx kv.TemporalTx, sd sd) *LatestStateReader {
-	return &LatestStateReader{sharedDomains: sd, getter: sd.AsStateGetter(tx), srcTx: tx, workerCtx: workerCtx}
+// LatestStateReaderOption configures NewLatestStateReader.
+type LatestStateReaderOption func(*latestStateReaderOptions)
+
+// WithReadMetrics binds reads to a caller-owned metrics accumulator.
+func WithReadMetrics(metrics *kvmetrics.DomainMetrics) LatestStateReaderOption {
+	return func(opts *latestStateReaderOptions) {
+		opts.metrics = metrics
+	}
+}
+
+// NewLatestStateReader creates a reader over latest shared-domain state.
+func NewLatestStateReader(tx kv.TemporalTx, sd sd, opts ...LatestStateReaderOption) *LatestStateReader {
+	cfg := latestStateReaderOptions{}
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	var getter execctxapi.StateGetter
+	if cfg.metrics != nil {
+		getter = sd.AsStateGetterMetered(tx, cfg.metrics)
+	} else {
+		getter = sd.AsStateGetter(tx)
+	}
+	return &LatestStateReader{
+		sharedDomains: sd,
+		getter:        getter,
+		srcTx:         tx,
+		metrics:       cfg.metrics,
+	}
 }
 
 func (r *LatestStateReader) WithHistory() bool {
@@ -56,13 +76,6 @@ func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error 
 }
 
 func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	if r.workerCtx != nil {
-		enc, step, err = r.getter.GetLatestContext(r.workerCtx, d, plainKey)
-		if err != nil {
-			return nil, 0, fmt.Errorf("LatestStateReader(GetLatestContext) %q: %w", d, err)
-		}
-		return enc, step, nil
-	}
 	enc, step, err = r.getter.GetLatest(d, plainKey)
 	if err != nil {
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
@@ -70,7 +83,7 @@ func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) 
 	return enc, step, nil
 }
 
-func (r *LatestStateReader) Clone(tx kv.TemporalTx) StateReader {
+func (r *LatestStateReader) Clone(_ kv.TemporalTx) StateReader {
 	// Keep reading the source this reader was bound to. The tx passed by
 	// clone/warmup callers targets the *compute* database, which may differ
 	// from this reader's source — e.g. recomputing commitment in an empty db
@@ -78,13 +91,16 @@ func (r *LatestStateReader) Clone(tx kv.TemporalTx) StateReader {
 	// Before flush drained sd.mem this was masked because the in-memory batch
 	// still held the source values; rebinding the getter to the foreign compute
 	// tx reads the wrong database and yields empty state (wrong root).
-	return &LatestStateReader{sharedDomains: r.sharedDomains, getter: r.sharedDomains.AsStateGetter(r.srcTx), srcTx: r.srcTx, workerCtx: r.workerCtx}
+	if r.metrics != nil {
+		return NewLatestStateReader(r.srcTx, r.sharedDomains, WithReadMetrics(r.metrics))
+	}
+	return NewLatestStateReader(r.srcTx, r.sharedDomains)
 }
 
 // CloneForWorker clones into a worker reader that meters into workerCtx's
 // per-worker accumulator. Source tx preserved, same as Clone.
 func (r *LatestStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader {
-	return NewLatestStateReaderForWorker(workerCtx, r.srcTx, r.sharedDomains)
+	return NewLatestStateReader(r.srcTx, r.sharedDomains, WithReadMetrics(kvmetrics.MetricsFromContext(workerCtx)))
 }
 
 // HistoryStateReader reads *full* historical state at specified txNum.
@@ -381,7 +397,7 @@ func (r *RebuildStateReader) Clone(tx kv.TemporalTx) StateReader {
 // the per-worker accumulator carried by workerCtx.
 func (r *RebuildStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader {
 	return &RebuildStateReader{
-		commitmentReader: NewLatestStateReaderForWorker(workerCtx, tx, r.sd),
+		commitmentReader: NewLatestStateReader(tx, r.sd, WithReadMetrics(kvmetrics.MetricsFromContext(workerCtx))),
 		plainStateReader: NewHistoryStateReader(tx, r.plainStateAsOf),
 		plainStateAsOf:   r.plainStateAsOf,
 		sd:               r.sd,
