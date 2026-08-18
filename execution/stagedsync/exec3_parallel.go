@@ -1296,7 +1296,7 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 			executor, ok = pe.blockExecutors[blockNum]
 
 			if !ok {
-				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted, t.GetBlockStateCache())
+				executor = newBlockExec(blockNum, execRequest.blockHash, execRequest.gasPool, execRequest.accessList, execRequest.applyResults, execRequest.commitResults, execRequest.profile, execRequest.exhausted, blockStateCacheOf(t))
 			}
 		}
 
@@ -2439,6 +2439,22 @@ func (be *blockExecutor) sendResult(ctx context.Context, r applyResult, mustDeli
 		}
 	}
 	return nil
+}
+
+// blockStateCacheOf returns the per-block state cache the block's tasks carry,
+// so the apply loop reads the entries the workers already filled.
+//
+// A block that straddles lastFrozenTxNum keeps its own cache: its historic
+// tasks are applied through HistoryReaderV3, whose block-cache tier falls back
+// to the committed (pre-block latest) view, so entries filled by the block's
+// non-historic workers would answer reads that must resolve as of an earlier
+// txNum. Tasks turn historic in txNum order, so the block's first task decides
+// it for the whole block.
+func blockStateCacheOf(t exec.Task) *state.BlockStateCache {
+	if t.IsHistoric() {
+		return nil
+	}
+	return t.GetBlockStateCache()
 }
 
 func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasPool, accessList types.BlockAccessList, applyResults chan applyResult, commitResults chan applyResult, profile bool, exhausted *ErrLoopExhausted, blockStateCache *state.BlockStateCache) *blockExecutor {

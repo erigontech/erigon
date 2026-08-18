@@ -1846,4 +1846,9 @@ func TestBlockExecUsesTaskStateCache(t *testing.T) {
 	require.Same(t, second, pe.blockExecutors[8].blockStateCache)
 
 	require.NotNil(t, newBlockExec(0, common.Hash{}, nil, nil, nil, nil, false, nil, nil).blockStateCache)
+
+	// A block straddling lastFrozenTxNum applies its historic tasks through
+	// HistoryReaderV3, which resolves reads as of a txNum the workers' entries
+	// are ahead of — such a block keeps a private cache.
+	require.Nil(t, blockStateCacheOf(&exec.TxTask{BlockStateCache: first, HistoryExecution: true}))
 }
