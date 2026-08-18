@@ -23,6 +23,7 @@ import (
 	"fmt"
 	"io"
 	"reflect"
+	"slices"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -32,7 +33,6 @@ import (
 	"google.golang.org/grpc"
 	"google.golang.org/protobuf/proto"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -752,31 +752,46 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 	return loaded.(func(*remoteproto.ReceiptsFilterRequest) error)(rfr)
 }
 
+func boundedLogFilterCriteria(criteria filters.FilterCriteria, maxAddresses, maxTopics int) filters.FilterCriteria {
+	bounded := criteria
+	addressCount := len(criteria.Addresses)
+	if maxAddresses != 0 {
+		addressCount = min(addressCount, max(maxAddresses, 0))
+	}
+	bounded.Addresses = criteria.Addresses[:addressCount:addressCount]
+
+	bounded.Topics = slices.Clip(criteria.Topics)
+	remainingTopics := maxTopics
+	for i, topics := range criteria.Topics {
+		topicCount := len(topics)
+		if maxTopics != 0 {
+			topicCount = min(topicCount, max(remainingTopics, 0))
+			remainingTopics -= topicCount
+		}
+		bounded.Topics[i] = topics[:topicCount:topicCount]
+	}
+	return bounded
+}
+
 // SubscribeLogs subscribes to logs using the specified filter criteria and returns a channel to receive the logs
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription is
 // installed and the error is returned.
 func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID, error) {
+	criteria = boundedLogFilterCriteria(criteria, ff.config.RpcSubscriptionFiltersMaxAddresses, ff.config.RpcSubscriptionFiltersMaxTopics)
+	var pollingCriteria *filters.FilterCriteria
+	if protocol == ProtocolHTTP {
+		pollingCriteria = &criteria
+	}
 	sub := newChanSub[*types.Log](size, protocol)
-	id, f := ff.logsSubs.insertLogsFilter(sub, criteria)
-
-	// Initialize address and topic maps
-	f.addrs = concurrent.NewSyncMap[common.Address, int]()
-	f.topics = concurrent.NewSyncMap[common.Hash, int]()
+	id, f := ff.logsSubs.insertLogsFilter(sub, pollingCriteria)
 
 	// Handle addresses
 	if len(criteria.Addresses) == 0 {
 		// If no addresses are specified, it means all addresses should be included
 		f.allAddrs = 1
 	} else {
-		// Limit the number of addresses
-		addressCount := 0
 		for _, addr := range criteria.Addresses {
-			if ff.config.RpcSubscriptionFiltersMaxAddresses == 0 || addressCount < ff.config.RpcSubscriptionFiltersMaxAddresses {
-				f.addrs.Put(addr, 1)
-				addressCount++
-			} else {
-				break
-			}
+			f.addrs.Put(addr, 1)
 		}
 	}
 
@@ -785,24 +800,12 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 		// If no topics are specified, it means all topics should be included
 		f.allTopics = 1
 	} else {
-		// Limit the number of topics
-		topicCount := 0
-		allowedTopics := make([][]common.Hash, 0, len(criteria.Topics))
 		for _, topics := range criteria.Topics {
-			allowedTopicsRow := []common.Hash{}
 			for _, topic := range topics {
-				if ff.config.RpcSubscriptionFiltersMaxTopics == 0 || topicCount < ff.config.RpcSubscriptionFiltersMaxTopics {
-					f.topics.Put(topic, 1)
-					allowedTopicsRow = append(allowedTopicsRow, topic)
-					topicCount++
-				} else {
-					break
-				}
+				f.topics.Put(topic, 1)
 			}
-			// Preserve per-position wildcard slots (empty rows) for correct positional matching.
-			allowedTopics = append(allowedTopics, allowedTopicsRow)
 		}
-		f.topicsOriginal = allowedTopics
+		f.topicsOriginal = criteria.Topics
 	}
 
 	// Add the filter to the list of log filters

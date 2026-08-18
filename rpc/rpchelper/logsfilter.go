@@ -41,13 +41,13 @@ type LogsFilterAggregator struct {
 // Also, addAddr and allTopic are int instead of bool because they are also counters, counting
 // how many subscribers have this set on.
 type LogsFilter struct {
-	allAddrs       int
-	addrs          *concurrent.SyncMap[common.Address, int]
-	allTopics      int
-	topics         *concurrent.SyncMap[common.Hash, int]
-	topicsOriginal [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
-	criteria       filters.FilterCriteria
-	sender         Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
+	allAddrs        int
+	addrs           *concurrent.SyncMap[common.Address, int]
+	allTopics       int
+	topics          *concurrent.SyncMap[common.Hash, int]
+	topicsOriginal  [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
+	pollingCriteria *filters.FilterCriteria
+	sender          Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
 // Close closes the sender associated with the LogsFilter.
@@ -70,15 +70,15 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 
 // insertLogsFilter inserts a new log filter into the LogsFilterAggregator with the specified sender.
 // It generates a new filter ID, creates a new LogsFilter, and adds it to the logsFilters map.
-func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types.Log], criteria filters.FilterCriteria) (LogsSubID, *LogsFilter) {
+func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types.Log], pollingCriteria *filters.FilterCriteria) (LogsSubID, *LogsFilter) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	filterId := LogsSubID(generateSubscriptionID())
 	filter := &LogsFilter{
-		addrs:    concurrent.NewSyncMap[common.Address, int](),
-		topics:   concurrent.NewSyncMap[common.Hash, int](),
-		criteria: criteria,
-		sender:   sender,
+		addrs:           concurrent.NewSyncMap[common.Address, int](),
+		topics:          concurrent.NewSyncMap[common.Hash, int](),
+		pollingCriteria: pollingCriteria,
+		sender:          sender,
 	}
 	a.logsFilters.Put(filterId, filter)
 	return filterId, filter
@@ -88,10 +88,10 @@ func (a *LogsFilterAggregator) filterCriteria(filterId LogsSubID) (filters.Filte
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 	filter, ok := a.logsFilters.Get(filterId)
-	if !ok {
+	if !ok || filter.pollingCriteria == nil {
 		return filters.FilterCriteria{}, false
 	}
-	return filter.criteria, true
+	return *filter.pollingCriteria, true
 }
 
 // removeLogsFilter removes a log filter identified by filterId from the LogsFilterAggregator.
