@@ -1185,6 +1185,15 @@ func (p *Provider) Initialize(deps Deps) error {
 		go p.watchInitialValidation(ctx, flow.InitialDownloadsCompleteChannel(p.eventBus), revalPolicy, initialSet)
 	}
 
+	// DownloadSuperseded → downloader.Delete: the orchestrator's
+	// canonical-recompute publishes this event when a pending file falls
+	// out of canonical (peer manifest rotation, unanimous drop). Without
+	// telling anacrolix to drop the torrent, it retries indefinitely
+	// against peers that no longer serve the file.
+	if p.eventBus != nil && !config.Snapshot.NoDownloader && downloaderClient != nil {
+		p.subscribeDownloadSuperseded(ctx, downloaderClient)
+	}
+
 	// Unconditional startup scan for pre-existing block-snapshot files.
 	// The lifecycle.Driver's discoverNewFiles runs only when
 	// LifecycleDrivenByStorage is on; on the legacy path nothing else
