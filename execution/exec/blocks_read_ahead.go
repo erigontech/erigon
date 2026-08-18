@@ -84,7 +84,7 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 	bra.stateCache = sc
 }
 
-// cachePopulatingGetter wraps a StateGetter and fills a StateCache
+// cachePopulatingGetter wraps a TemporalGetter and fills a StateCache
 // ReadView as a side effect. Used by warmBody to make read-ahead prefetches
 // populate the same in-process cache layer that SharedDomains.GetLatest
 // consults — eliminating the file-accessor stack cost on the EVM's first
@@ -92,27 +92,26 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 //
 // Code reads also populate the content-addressed and size-cache layers.
 type cachePopulatingGetter struct {
-	execctxapi.StateGetter
+	kv.TemporalGetter
 	view     cache.ReadView
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
 func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGetter {
-	getter := execctx.NewTemporalTxStateGetter(ttx)
 	if sc == nil {
-		return getter
+		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	debug := ttx.Debug()
 	stateVersion, err := rawdb.GetStateVersion(ttx)
 	if err != nil {
-		return getter
+		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
-	return &cachePopulatingGetter{StateGetter: getter, view: sc.View(frontier), stepSize: debug.StepSize()}
+	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
 }
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	v, step, err := cpg.StateGetter.GetLatest(name, k)
+	v, step, err := cpg.TemporalGetter.GetLatest(name, k)
 	if err == nil {
 		readTxNum := (uint64(step)+1)*cpg.stepSize - 1
 		cpg.view.Fill(name, k, v, readTxNum)
