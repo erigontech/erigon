@@ -60,7 +60,7 @@ func StartHTTPEndpoint(urlEndpoint string, cfg *HttpEndpointConfig, handler http
 		if err != nil {
 			return nil, nil, fmt.Errorf("malformed http listen url %s: %w", urlEndpoint, err)
 		}
-		if listener, err = net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath()); err != nil {
+		if listener, err = net.Listen(socketUrl.Scheme, socketUrl.Host+socketUrl.EscapedPath()); err != nil { //nolint:noctx
 			return nil, nil, err
 		}
 	}

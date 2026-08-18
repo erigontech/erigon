@@ -30,7 +30,7 @@ func Bench4(erigon_url string) error {
 	template := `{"jsonrpc":"2.0","method":"eth_getBlockByNumber","params":["0x%x",true],"id":%d}`
 	var b EthBlockByNumber
 	if err := post(client, erigon_url, fmt.Sprintf(template, 1720000, req_id), &b); err != nil {
-		return fmt.Errorf("Could not retrieve block %d: %v\n", 1720000, err)
+		return fmt.Errorf("Could not retrieve block %d: %w\n", 1720000, err)
 	}
 	if b.Error != nil {
 		fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
@@ -41,13 +41,13 @@ func Bench4(erigon_url string) error {
 		template = `{"jsonrpc":"2.0","method":"debug_traceTransaction","params":["%s"],"id":%d}`
 		var trace EthTxTrace
 		if err := post(client, erigon_url, fmt.Sprintf(template, txhash, req_id), &trace); err != nil {
-			print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
-			return fmt.Errorf("Could not trace transaction %s: %v\n", txhash, err)
+			printRPCRequest(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
+			return fmt.Errorf("Could not trace transaction %s: %w\n", txhash, err)
 		}
 		if trace.Error != nil {
 			fmt.Printf("Error tracing transaction: %d %s\n", trace.Error.Code, trace.Error.Message)
 		}
-		print(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
+		printRPCRequest(client, erigon_url, fmt.Sprintf(template, txhash, req_id))
 	}
 	to := common.HexToAddress("0x8b3b3b624c3c0397d3da8fd861512393d51dcbac")
 	sm := make(map[common.Hash]storageEntry)
@@ -60,7 +60,7 @@ func Bench4(erigon_url string) error {
 	for nextKey != nil {
 		var sr DebugStorageRange
 		if err := post(client, erigon_url, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, req_id), &sr); err != nil {
-			return fmt.Errorf("Could not get storageRange: %v\n", err)
+			return fmt.Errorf("Could not get storageRange: %w\n", err)
 		}
 		if sr.Error != nil {
 			fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)

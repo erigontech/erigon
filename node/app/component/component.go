@@ -736,7 +736,7 @@ func (c *component) configure(ctx context.Context, force bool, activationLocked 
 								if r := recover(); r != nil {
 									var ok bool
 									if err, ok = r.(error); ok {
-										err = fmt.Errorf("%T configure panicked with error: %s, stack: %s", dependency, err, dbg.Stack())
+										err = fmt.Errorf("%T configure panicked with error: %w, stack: %s", dependency, err, dbg.Stack())
 									} else {
 										err = fmt.Errorf("%T configure panicked: %v, stack: %s", dependency, r, dbg.Stack())
 									}
@@ -824,7 +824,7 @@ func (c *component) initialize(ctx context.Context, activationLocked bool, onAct
 								if r := recover(); r != nil {
 									var ok bool
 									if err, ok = r.(error); ok {
-										err = fmt.Errorf("%T initialize panicked with error: %s, stack: %s", dependency, err, dbg.Stack())
+										err = fmt.Errorf("%T initialize panicked with error: %w, stack: %s", dependency, err, dbg.Stack())
 									} else {
 										err = fmt.Errorf("%T initialize panicked: %v, stack: %s", dependency, r, dbg.Stack())
 									}
@@ -1255,12 +1255,6 @@ func (c *component) addDependent(dependent *component, parentLocked bool) error 
 		}
 	}
 
-	return nil
-}
-
-func (c *component) removeDependent(dependent *component, dependentLocked bool) error {
-	c.dependents = c.dependents.Remove(dependent)
-	dependent.removeDependency(c, dependentLocked)
 	return nil
 }
 
