@@ -882,24 +882,30 @@ hole heals.
 
 ### Task 13: verify acceptance criteria
 
-- [ ] every caplin state file on disk resolves to a registered type, and an
+- [x] every caplin state file on disk resolves to a registered type, and an
   unknown one is skipped rather than panicking — on all three paths:
   `AllTypedSegments` (via `OpenFolder`), `openSegments`, and
-  `GetGrouping` (via `RemoveOverlaps`)
-- [ ] `BlocksAvailable()` returns the same number as before the swap, asserted
+  `GetGrouping` (via `RemoveOverlaps`) — verified by the snaptype parser,
+  snapshotsync overlap, and full race-suite regressions.
+- [x] `BlocksAvailable()` returns the same number as before the swap, asserted
   numerically. Walk the full consumer set: `state_antiquary.go` 113, 130, 133,
   136, 141, 144, 626, 679; `antiquary.go:214`;
   `historical_states_reader.go` 92, 489, 496; `duties_proposer.go:290-295`.
   `state_antiquary.go:141`, `historical_states_reader.go:92` and
   `duties_proposer.go:293` are ceilings — a value one too high breaks them, not
-  the floors.
-- [ ] `SegFileNames` returns real paths and the antiquary still seeds
-- [ ] the dump planner does not re-dump a file that already exists on the far
-  side of a gap
-- [ ] file names produced and consumed are byte-identical to main
-- [ ] `RemoveOverlaps` is live-safe and drain-gated
-- [ ] `make lint` clean (repeat until stable), `make erigon integration` builds
-- [ ] `go test -race ./db/snaptype/... ./db/snapshotsync/... ./db/snapcfg/... ./cl/antiquary/... ./cl/persistence/... ./cl/beacon/... ./cmd/utils/...`
+  the floors. Exact multi-table, lower-table, zero-table, and mainnet-subset
+  pins pass, and the full consumer packages pass under `-race`.
+- [x] `SegFileNames` returns real paths and the antiquary still seeds — covered
+  by `TestCaplinStateSegFileNamesReturnsExistingAbsolutePaths`.
+- [x] the dump planner does not re-dump a file that already exists on the far
+  side of a gap — covered by `TestCaplinStateDumpPlanUsesDirtyCoverageAcrossGap`.
+- [x] file names produced and consumed are byte-identical to main — covered by
+  the registered-type dump filename and parser regressions.
+- [x] `RemoveOverlaps` is live-safe and drain-gated — covered by the Caplin
+  overlap tests and the full race suite.
+- [x] `make lint` clean (repeat until stable), `make erigon integration` builds
+  — lint passed twice and both binaries built successfully.
+- [x] `go test -race ./db/snaptype/... ./db/snapshotsync/... ./db/snapcfg/... ./cl/antiquary/... ./cl/persistence/... ./cl/beacon/... ./cmd/utils/...` — passed.
 
 ---
 
