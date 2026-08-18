@@ -116,7 +116,17 @@ type peerAndBlocks struct {
 	blocks []*cltypes.SignedBeaconBlock
 }
 
+var (
+	forwardBeaconRequestInterval = 300 * time.Millisecond
+	forwardBeaconRequestTimeout  = 30 * time.Second
+)
+
+const maxConcurrentForwardBeaconRequests = 2
+
 func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
+	requestCtx, cancelRequests := context.WithCancel(ctx)
+	defer cancelRequests()
+
 	count := uint64(32)
 	var atomicResp atomic.Value
 	atomicResp.Store(peerAndBlocks{})
@@ -124,7 +134,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	// Fast path: when HTTP has been working, skip P2P probing entirely.
 	if f.httpPreferred.Load() && f.httpFallbackURL != "" {
 		httpStart := f.highestSlotProcessed + 1
-		httpBlocks, httpErr := fetchBlocksFromBeaconAPI(ctx, f.httpFallbackURL, httpStart, count+10, f.beaconCfg)
+		httpBlocks, httpErr := fetchBlocksFromBeaconAPI(requestCtx, f.httpFallbackURL, httpStart, count+10, f.beaconCfg)
 		if httpErr == nil && len(httpBlocks) > 0 {
 			atomicResp.Store(peerAndBlocks{"http-fallback", httpBlocks})
 		} else {
@@ -137,21 +147,36 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 	}
 
 	{
+		probeCtx, cancelProbes := context.WithCancel(requestCtx)
+		var probeWG sync.WaitGroup
+		probeSlots := make(chan struct{}, maxConcurrentForwardBeaconRequests)
+		stopProbes := func() {
+			cancelProbes()
+			probeWG.Wait()
+		}
+		defer stopProbes()
+
 		// Start with a base interval; backoff increases it on repeated failures.
-		baseInterval := 300 * time.Millisecond
+		baseInterval := forwardBeaconRequestInterval
 		var consecutiveFailures atomic.Int32
 		reqInterval := time.NewTicker(baseInterval)
 		defer reqInterval.Stop()
 		// Timeout: if no blocks received within this duration, return to let the caller
 		// run stale detection and potentially switch to ChainTipSync.
-		requestTimeout := time.NewTimer(30 * time.Second)
+		requestTimeout := time.NewTimer(forwardBeaconRequestTimeout)
 		defer requestTimeout.Stop()
 
 	Loop:
 		for {
 			select {
 			case <-reqInterval.C:
-				go func() {
+				select {
+				case probeSlots <- struct{}{}:
+				default:
+					continue
+				}
+				probeWG.Go(func() {
+					defer func() { <-probeSlots }()
 					if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 						return
 					}
@@ -178,7 +203,10 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
 						log.Trace("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
 					}
-					responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(ctx, reqSlot, reqCount)
+					responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(probeCtx, reqSlot, reqCount)
+					if probeCtx.Err() != nil {
+						return
+					}
 					if err != nil {
 						if errors.Is(err, peers.ErrNoPeers) {
 							log.Debug("[Caplin] no peers available for beacon blocks by range request", "slot", reqSlot, "reqCount", reqCount)
@@ -200,7 +228,10 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 								return
 							}
 							httpStart := f.highestSlotProcessed + 1
-							httpBlocks, httpErr := fetchBlocksFromBeaconAPI(ctx, f.httpFallbackURL, httpStart, count+10, f.beaconCfg)
+							httpBlocks, httpErr := fetchBlocksFromBeaconAPI(probeCtx, f.httpFallbackURL, httpStart, count+10, f.beaconCfg)
+							if probeCtx.Err() != nil {
+								return
+							}
 							if httpErr == nil && len(httpBlocks) > 0 {
 								log.Debug("[ForwardBeaconDownloader] P2P failed, fetched blocks from beacon API",
 									"fromSlot", httpStart, "count", len(httpBlocks))
@@ -241,11 +272,13 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 						return
 					}
 					atomicResp.Store(peerAndBlocks{peerId, responses})
-				}()
+				})
 			case <-ctx.Done():
+				stopProbes()
 				return
 			case <-requestTimeout.C:
 				// No blocks received in time — return to let stale detection run.
+				stopProbes()
 				return
 			default:
 				if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
@@ -254,6 +287,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 				time.Sleep(10 * time.Millisecond)
 			}
 		}
+		stopProbes()
 	} // end P2P probing block
 
 Process:
@@ -291,13 +325,13 @@ Process:
 			// batch — skip the 30s P2P envelope timeout and fetch directly via HTTP.
 			if pid == "http-fallback" && f.httpFallbackURL != "" {
 				envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
-				httpEnvs := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
+				httpEnvs := fetchEnvelopesFromBeaconAPI(requestCtx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
 				if httpEnvs > 0 {
 					log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpEnvs)
 				}
 			} else {
 				var envErr error
-				envelopes, envErr = RequestEnvelopesFrantically(ctx, f.rpc, fullRoots, processBlocks...)
+				envelopes, envErr = RequestEnvelopesFrantically(requestCtx, f.rpc, fullRoots, processBlocks...)
 				if envErr != nil {
 					log.Debug("[ForwardBeaconDownloader] failed to get envelopes via P2P", "err", envErr)
 				}
@@ -306,7 +340,7 @@ Process:
 					if envelopes == nil {
 						envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)
 					}
-					httpEnvs := fetchEnvelopesFromBeaconAPI(ctx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
+					httpEnvs := fetchEnvelopesFromBeaconAPI(requestCtx, f.httpFallbackURL, processBlocks, fullRoots, envelopes, f.beaconCfg)
 					if httpEnvs > 0 {
 						log.Debug("[ForwardBeaconDownloader] fetched envelopes from beacon API", "count", httpEnvs)
 					}

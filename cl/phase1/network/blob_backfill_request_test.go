@@ -181,7 +181,7 @@ func TestBlobBackfillProgressWithPersistenceErrorBacksOff(t *testing.T) {
 	pacing.failed(base)
 	validationTime := base.Add(requestBlobRetryInterval)
 
-	pacing.recordValidation(validationTime, true, false, errors.New("temporary persistence failure"))
+	pacing.recordValidation(validationTime, true, errors.New("temporary persistence failure"))
 
 	require.False(t, pacing.ready(validationTime.Add(requestBlobRetryInterval)))
 	require.True(t, pacing.ready(validationTime.Add(2*requestBlobRetryInterval)))
@@ -193,7 +193,7 @@ func TestBlobBackfillSuccessfulProgressResetsFailureBackoff(t *testing.T) {
 	pacing.failed(base)
 	validationTime := base.Add(requestBlobRetryInterval)
 
-	pacing.recordValidation(validationTime, true, false, nil)
+	pacing.recordValidation(validationTime, true, nil)
 
 	require.False(t, pacing.ready(validationTime.Add(requestBlobRetryInterval-time.Nanosecond)))
 	require.True(t, pacing.ready(validationTime.Add(requestBlobRetryInterval)))
@@ -213,7 +213,7 @@ func TestBlobBackfillRequestPacingBacksOffEveryFailure(t *testing.T) {
 	require.Equal(t, requestBlobMaxBackoff, pacing.backoff)
 }
 
-func TestBlobBackfillEmptyResponsesKeepBaseCadence(t *testing.T) {
+func TestBlobBackfillEmptyResponsesBackOffWithoutProgress(t *testing.T) {
 	ticks := make(chan time.Time)
 	expires := make(chan time.Time)
 	requests := make(chan struct{}, 3)
@@ -224,11 +224,13 @@ func TestBlobBackfillEmptyResponsesKeepBaseCadence(t *testing.T) {
 	var attempts atomic.Int64
 	client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
 		elapsed.Store((attempts.Add(1) - 1) * int64(requestBlobRetryInterval))
-		requests <- struct{}{}
 		return nil, "peer", nil
 	})
 	go func() {
-		_, err := requestBlobsForBackfillWithSchedule(t.Context(), client, emptyBlobRequest, func(context.Context, *PeerAndSidecars) (bool, bool, error) {
+		_, err := requestBlobsForBackfillWithSchedule(t.Context(), client, func() *solid.ListSSZ[*cltypes.BlobIdentifier] {
+			requests <- struct{}{}
+			return emptyBlobRequest()
+		}, func(context.Context, *PeerAndSidecars) (bool, bool, error) {
 			return false, false, nil
 		}, blobBackfillRequestSchedule{
 			ticks:   ticks,
@@ -249,14 +251,16 @@ func TestBlobBackfillEmptyResponsesKeepBaseCadence(t *testing.T) {
 	ticks <- base.Add(2 * requestBlobRetryInterval)
 	select {
 	case <-requests:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("empty response introduced exponential retry delay")
+		t.Fatal("empty response retried before exponential backoff elapsed")
+	default:
 	}
-	expires <- base.Add(3 * requestBlobRetryInterval)
+	ticks <- base.Add(3 * requestBlobRetryInterval)
+	receiveBlobTestSignal(t, requests)
+	expires <- base.Add(4 * requestBlobRetryInterval)
 	require.ErrorIs(t, receiveBlobTestValue(t, done), ErrTimeout)
 }
 
-func TestBlobBackfillDenebEmptyResponsesKeepBaseCadence(t *testing.T) {
+func TestBlobBackfillDenebEmptyResponsesBackOffWithoutProgress(t *testing.T) {
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 	request, err := BlobsIdentifiersFromBlocks([]*cltypes.SignedBeaconBlock{block}, &clparams.MainnetBeaconConfig)
@@ -274,11 +278,13 @@ func TestBlobBackfillDenebEmptyResponsesKeepBaseCadence(t *testing.T) {
 	var attempts atomic.Int64
 	client := blobRequesterFunc(func(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
 		elapsed.Store((attempts.Add(1) - 1) * int64(requestBlobRetryInterval))
-		requests <- struct{}{}
 		return nil, "peer", nil
 	})
 	go func() {
-		_, err := requestBlobsForBackfillWithSchedule(t.Context(), client, batch.remaining, func(_ context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
+		_, err := requestBlobsForBackfillWithSchedule(t.Context(), client, func() *solid.ListSSZ[*cltypes.BlobIdentifier] {
+			requests <- struct{}{}
+			return batch.remaining()
+		}, func(_ context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
 			progress, err := batch.validate(candidate.requested, candidate.Responses)
 			return progress > 0, false, err
 		}, blobBackfillRequestSchedule{
@@ -299,10 +305,12 @@ func TestBlobBackfillDenebEmptyResponsesKeepBaseCadence(t *testing.T) {
 	ticks <- base.Add(2 * requestBlobRetryInterval)
 	select {
 	case <-requests:
-	case <-time.After(100 * time.Millisecond):
-		t.Fatal("production Deneb empty response introduced exponential retry delay")
+		t.Fatal("production Deneb empty response retried before exponential backoff elapsed")
+	default:
 	}
-	expires <- base.Add(3 * requestBlobRetryInterval)
+	ticks <- base.Add(3 * requestBlobRetryInterval)
+	receiveBlobTestSignal(t, requests)
+	expires <- base.Add(4 * requestBlobRetryInterval)
 	require.ErrorIs(t, receiveBlobTestValue(t, done), ErrTimeout)
 }
 

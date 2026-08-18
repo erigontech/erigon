@@ -111,15 +111,12 @@ func (p *blobBackfillRequestPacing) reset(now time.Time) {
 	p.nextRequest = now.Add(requestBlobRetryInterval)
 }
 
-func (p *blobBackfillRequestPacing) recordValidation(now time.Time, progress, empty bool, err error) {
-	switch {
-	case progress && err == nil:
+func (p *blobBackfillRequestPacing) recordValidation(now time.Time, progress bool, err error) {
+	if progress && err == nil {
 		p.reset(now)
-	case progress || !empty:
-		p.failed(now)
-	default:
-		p.reset(now)
+		return
 	}
+	p.failed(now)
 }
 
 type blobBackfillRequestSchedule struct {
@@ -200,7 +197,7 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 	}
 	handleValidation := func(result blobValidationResult) *PeerAndSidecars {
 		validating = false
-		pacing.recordValidation(schedule.now(), result.progress, len(result.candidate.Responses) == 0, result.err)
+		pacing.recordValidation(schedule.now(), result.progress, result.err)
 		if result.err != nil || !result.progress {
 			if result.err != nil && result.progress {
 				retryCandidate = result.candidate

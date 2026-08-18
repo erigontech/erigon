@@ -24,6 +24,7 @@ import (
 	"fmt"
 	"io"
 	"strings"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
@@ -44,6 +45,8 @@ import (
 )
 
 const maxMessageLength = 18 * datasize.MB
+
+const reqRespFallbackTimeout = 30 * time.Second
 
 var errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
 
@@ -416,7 +419,10 @@ func (b *BeaconRpcP2P) sendRequest(
 	reqPayload []byte,
 	maxResponseBytes uint64,
 ) ([]responseData, string, error) {
-	message, err := b.sentinel.SendRequest(ctx, &sentinelproto.RequestData{
+	requestCtx, cancel := boundReqRespContext(ctx)
+	defer cancel()
+
+	message, err := b.sentinel.SendRequest(requestCtx, &sentinelproto.RequestData{
 		Data:             reqPayload,
 		Topic:            topic,
 		MaxResponseBytes: maxResponseBytes,
@@ -434,7 +440,10 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 	peerId string,
 	maxResponseBytes uint64,
 ) ([]responseData, string, error) {
-	message, err := b.sentinel.SendPeerRequest(ctx, &sentinelproto.RequestDataWithPeer{
+	requestCtx, cancel := boundReqRespContext(ctx)
+	defer cancel()
+
+	message, err := b.sentinel.SendPeerRequest(requestCtx, &sentinelproto.RequestDataWithPeer{
 		Pid:              peerId,
 		Data:             reqPayload,
 		Topic:            topic,
@@ -444,4 +453,11 @@ func (b *BeaconRpcP2P) sendRequestWithPeer(
 		return nil, "", err
 	}
 	return b.parseResponseData(message)
+}
+
+func boundReqRespContext(ctx context.Context) (context.Context, context.CancelFunc) {
+	if _, ok := ctx.Deadline(); ok {
+		return ctx, func() {}
+	}
+	return context.WithTimeout(ctx, reqRespFallbackTimeout)
 }

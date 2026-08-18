@@ -58,6 +58,23 @@ func TestReqRespRequestsPreserveCallerDeadline(t *testing.T) {
 	}
 }
 
+func TestReqRespRequestsBoundContextsWithoutDeadline(t *testing.T) {
+	for _, withPeer := range []bool{false, true} {
+		sentinel := &contextRecordingSentinel{}
+		client := &BeaconRpcP2P{sentinel: sentinel}
+		before := time.Now().Add(30 * time.Second)
+		if withPeer {
+			_, _, _ = client.sendRequestWithPeer(t.Context(), "topic", nil, "peer", 0)
+		} else {
+			_, _, _ = client.sendRequest(t.Context(), "topic", nil, 0)
+		}
+		after := time.Now().Add(30 * time.Second)
+		require.True(t, sentinel.hasDeadline)
+		require.False(t, sentinel.deadline.Before(before))
+		require.False(t, sentinel.deadline.After(after))
+	}
+}
+
 func (s *blockResponseSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
 	return &sentinelproto.ResponseData{
 		Data: s.response,
