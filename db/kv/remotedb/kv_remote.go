@@ -723,8 +723,13 @@ func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, e
 	return reply.V, reply.Ok, nil
 }
 
-func (tx *tx) GetLatest(name kv.Domain, k []byte, _ kv.GetLatestOptions) (v []byte, step kv.Step, err error) {
-	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remoteproto.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Latest: true})
+func (tx *tx) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) (v []byte, step kv.Step, err error) {
+	req := &remoteproto.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Latest: true, BranchCache: opts.BranchCache()}
+	if maxStep := opts.MaxStep(); maxStep != kv.NoStepBound {
+		maxStepValue := uint64(maxStep)
+		req.MaxStep = &maxStepValue
+	}
+	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, req)
 	if err != nil {
 		return nil, 0, err
 	}

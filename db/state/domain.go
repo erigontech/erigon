@@ -1830,7 +1830,11 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		return v, foundStep, true, nil
 	}
 
-	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, 0)
+	var maxTxNum uint64
+	if maxStep != kv.NoStepBound {
+		maxTxNum = maxStep.LastTxNum(dt.stepSize)
+	}
+	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, maxTxNum)
 	if metrics != nil && dbg.KVReadLevelledMetrics {
 		metrics.UpdateFileReadsUnique(dt.name, key, start)
 	}

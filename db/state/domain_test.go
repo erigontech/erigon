@@ -1039,6 +1039,37 @@ func TestDomain_CollationSelectsExactStep(t *testing.T) {
 		"step 1 collation must contain only step 1 values")
 }
 
+func TestDomain_GetLatestMaxStepBoundsFiles(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomain(t, log.New())
+	tx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	domainTx := d.beginForTests()
+	writer := domainTx.NewWriter()
+	key := []byte("key")
+	v0, v1, v2 := []byte("step-0"), []byte("step-1"), []byte("step-2")
+	require.NoError(t, writer.PutWithPrev(key, v0, 5, nil))
+	require.NoError(t, writer.PutWithPrev(key, v1, 20, v0))
+	require.NoError(t, writer.PutWithPrev(key, v2, 40, v1))
+	require.NoError(t, writer.Flush(t.Context(), tx))
+	writer.Close()
+	domainTx.Close()
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 0, tx, background.NewProgressSet()))
+	require.NoError(t, d.collateBuildIntegrate(t.Context(), 1, tx, background.NewProgressSet()))
+	domainTx = d.beginForTests()
+	defer domainTx.Close()
+	fromFiles, found, _, _, err := domainTx.getLatestFromFiles(key, 0)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, v1, fromFiles)
+	got, step, found, err := domainTx.getLatest(key, tx, 0, nil, time.Time{})
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, v0, got)
+	require.Equal(t, kv.Step(1), step)
+}
+
 func TestDomain_Delete(t *testing.T) {
 	if testing.Short() {
 		t.Skip()

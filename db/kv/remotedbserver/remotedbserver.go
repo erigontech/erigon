@@ -63,7 +63,8 @@ const MaxTxTTL = 60 * time.Second
 // 6.0.0 - Blocks now have system-txs - in the begin/end of block
 // 6.1.0 - Add methods Range, IndexRange, HistorySeek, HistoryRange
 // 6.2.0 - Add HistoryFiles to reply of Snapshots() method
-var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 0, Patch: 0}
+// 7.1.0 - Add maximum-step and branch-cache options to GetLatest
+var KvServiceAPIVersion = &typesproto.VersionReply{Major: 7, Minor: 1, Patch: 0}
 
 type KvServer struct {
 	remoteproto.UnimplementedKVServer // must be embedded to have forward compatible implementations.
@@ -541,7 +542,14 @@ func (s *KvServer) GetLatest(_ context.Context, req *remoteproto.GetLatestReq) (
 	reply = &remoteproto.GetLatestReply{}
 	if err := s.with(req.TxId, func(tx kv.TemporalTx) error {
 		if req.Latest {
-			reply.V, _, err = tx.GetLatest(domainName, req.K, kv.GetLatestOptions{})
+			opts := kv.GetLatestOptions{}
+			if req.MaxStep != nil {
+				opts = opts.WithMaxStep(kv.Step(req.GetMaxStep()))
+			}
+			if req.BranchCache {
+				opts = opts.WithBranchCache()
+			}
+			reply.V, _, err = tx.GetLatest(domainName, req.K, opts)
 			if err != nil {
 				return err
 			}

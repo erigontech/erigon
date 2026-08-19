@@ -28,7 +28,37 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
+
+type getLatestOptionsTx struct {
+	kv.TemporalTx
+	opts kv.GetLatestOptions
+}
+
+func (tx *getLatestOptionsTx) GetLatest(_ kv.Domain, _ []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	tx.opts = opts
+	return nil, 0, nil
+}
+
+func TestGetLatestForwardsMaxStep(t *testing.T) {
+	tx := &getLatestOptionsTx{}
+	s := NewKvServer(t.Context(), nil, nil, nil, nil, log.New())
+	s.txs[1] = &threadSafeTx{TemporalTx: tx}
+	maxStep := uint64(0)
+	_, err := s.GetLatest(t.Context(), &remoteproto.GetLatestReq{TxId: 1, Table: kv.AccountsDomain.String(), Latest: true, MaxStep: &maxStep})
+	require.NoError(t, err)
+	require.Equal(t, kv.Step(0), tx.opts.MaxStep())
+}
+
+func TestGetLatestForwardsBranchCache(t *testing.T) {
+	tx := &getLatestOptionsTx{}
+	s := NewKvServer(t.Context(), nil, nil, nil, nil, log.New())
+	s.txs[1] = &threadSafeTx{TemporalTx: tx}
+	_, err := s.GetLatest(t.Context(), &remoteproto.GetLatestReq{TxId: 1, Table: kv.CommitmentDomain.String(), Latest: true, BranchCache: true})
+	require.NoError(t, err)
+	require.True(t, tx.opts.BranchCache())
+}
 
 func TestKvServer_renew(t *testing.T) {
 	//goland:noinspection GoBoolExpressions
