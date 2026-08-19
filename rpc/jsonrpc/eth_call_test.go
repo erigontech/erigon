@@ -48,6 +48,8 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/commitment/trie"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -503,6 +505,50 @@ func TestGetProofPinsReadSnapshot(t *testing.T) {
 	base.stateCache = stateCache
 	api := newEthApiForTest(base, m.DB, nil, nil)
 
+	proof, err := api.getProof(
+		m.Ctx,
+		roTx,
+		contractAddress,
+		[]StorageKeysInfo{{Hash: storageKey, KeyLength: len(storageKey)}},
+		6,
+		true,
+		log.New(),
+	)
+	require.NoError(t, err)
+	require.NotNil(t, proof)
+	require.Equal(t, uint64(2), (*uint256.Int)(proof.StorageProof[0].Value).Uint64())
+}
+
+func TestGetProofIgnoresNewerSharedBranchCache(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() {
+		statecfg.Schema = previousSchema
+	})
+
+	m, _, contractAddress, _ := chainWithDeployedContract(t)
+	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
+	require.True(t, ok)
+	branchCache := provider.BranchCache()
+	require.NotNil(t, branchCache)
+	branchCache.Clear()
+	t.Cleanup(branchCache.Clear)
+
+	rootKey := nibbles.HexToCompact(nil)
+	_, snapshotTxNum, err := rawdbv3.TxNums.Last(roTx)
+	require.NoError(t, err)
+	newerRootBranch := make(commitment.BranchData, 4)
+	branchCache.Put(rootKey, newerRootBranch, 0, snapshotTxNum+1)
+	cachedRootBranch, _, ok := branchCache.Get(rootKey)
+	require.True(t, ok)
+	require.Equal(t, []byte(newerRootBranch), cachedRootBranch)
+
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	storageKey := common.Hash{}
 	proof, err := api.getProof(
 		m.Ctx,
 		roTx,
