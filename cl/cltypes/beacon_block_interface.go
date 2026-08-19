@@ -6,10 +6,8 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
-// ColumnSyncableSignedBlock is implemented by both SignedBeaconBlock and SignedBlindedBeaconBlock
-// for PeerDAS column synchronization operations.
-// [New in Gloas:EIP7732] This interface allows PeerDAS to work with both block types
-// without needing to call Blinded() which fails for GLOAS blocks.
+// ColumnSyncableSignedBlock exposes the metadata needed to request PeerDAS
+// columns without depending on a specific signed-block container.
 type ColumnSyncableSignedBlock interface {
 	Version() clparams.StateVersion
 	GetSlot() uint64

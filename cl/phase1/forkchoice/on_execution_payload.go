@@ -25,14 +25,12 @@ import (
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -178,49 +176,21 @@ func (f *ForkChoiceStore) verifyEnvelopeBuilderSignature(
 	return nil
 }
 
-// checkDataAvailability checks if blob data is available for the execution payload.
-// For GLOAS, blob_kzg_commitments are in the committed bid, not directly in BeaconBlock.
-// Returns nil if data is available, ErrEIP7594ColumnDataNotAvailable if not available yet.
 func (f *ForkChoiceStore) checkDataAvailability(
-	ctx context.Context,
+	_ context.Context,
 	block *cltypes.SignedBeaconBlock,
 	beaconBlockRoot common.Hash,
 ) error {
-	// Get committed bid from the block
 	committedBid := block.Block.Body.GetSignedExecutionPayloadBid()
 	if committedBid == nil || committedBid.Message == nil {
-		// No bid means no blobs to check
 		return nil
 	}
 
 	blobCommitments := &committedBid.Message.BlobKzgCommitments
 	if blobCommitments.Len() == 0 {
-		// No blobs to check
 		return nil
 	}
-
-	// Check PeerDAS data availability
-	// Note: Unlike OnBlock, we don't skip this check even if EL has blobs,
-	// because we need to ensure blobs are stored in CL's blob storage for beacon API.
-	available, err := f.peerDas.IsDataAvailable(block.Block.Slot, beaconBlockRoot)
-	if err != nil {
-		return fmt.Errorf("checkDataAvailability: failed to check data availability: %w", err)
-	}
-	if !available {
-		if f.syncedDataManager.Syncing() {
-			// During sync, return error immediately to retry later
-			return ErrEIP7594ColumnDataNotAvailable
-		}
-		// Not syncing - schedule deferred column data sync
-		if err := f.peerDas.SyncColumnDataLater(block); err != nil {
-			log.Warn("checkDataAvailability: failed to schedule deferred column data sync",
-				"slot", block.Block.Slot, "beaconBlockRoot", beaconBlockRoot, "err", err)
-		}
-		// Return error so envelope can be queued for later processing
-		return ErrEIP7594ColumnDataNotAvailable
-	}
-
-	return nil
+	return f.requireDataColumnAvailability(block, beaconBlockRoot)
 }
 
 // validatePayloadWithEL validates the execution payload with the execution layer engine.
@@ -241,22 +211,8 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		return errors.New("validatePayloadWithEL: block missing execution payload bid")
 	}
 
-	// Calculate versioned hashes from committed bid's blob_kzg_commitments
-	versionedHashes := make([]common.Hash, 0)
 	blobCommitments := &committedBid.Message.BlobKzgCommitments
-	if blobCommitments.Len() > 0 {
-		versionedHashes = make([]common.Hash, 0, blobCommitments.Len())
-		if err := solid.RangeErr[*cltypes.KZGCommitment](blobCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
-			versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
-			if err != nil {
-				return err
-			}
-			versionedHashes = append(versionedHashes, versionedHash)
-			return nil
-		}); err != nil {
-			return fmt.Errorf("validatePayloadWithEL: failed to compute versioned hashes: %w", err)
-		}
-	}
+	versionedHashes := kzgCommitmentsToVersionedHashes(blobCommitments)
 
 	// Get execution requests list
 	var executionRequestsList []hexutil.Bytes
@@ -372,6 +328,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 		log.Trace("OnExecutionPayload: block not found in fork graph, queuing envelope", "beaconBlockRoot", common.Hash(beaconBlockRoot))
 		return false, fmt.Errorf("%w: block not found in fork graph for beacon_block_root %v", ErrIgnore, common.Hash(beaconBlockRoot))
 	}
+	f.pendingEnvelopes.Remove(beaconBlockRoot)
 
 	// Validate envelope against block (bid matching + signature verification)
 	if validatePayload {
@@ -383,6 +340,7 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 	// Check blob data availability
 	if checkBlobData {
 		if err := f.checkDataAvailability(ctx, block, common.Hash(beaconBlockRoot)); err != nil {
+			f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
 			return false, err
 		}
 	}

@@ -45,6 +45,7 @@ import (
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
@@ -2170,7 +2171,12 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	if err != nil {
 		return err
 	}
-	// TODO: write column sidecars if needed
+	commitments := block.GetBlobKzgCommitments()
+	if block.Version() >= clparams.FuluVersion && commitments != nil && commitments.Len() > 0 {
+		if err := storeProducedDataColumns(ctx, a.columnStorage, a.beaconChainCfg, blockRoot, columnSidecars); err != nil {
+			return err
+		}
+	}
 
 	if block.Version() < clparams.FuluVersion {
 		if err := a.blobStoage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
@@ -2229,6 +2235,39 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		return fmt.Errorf("failed to update synced data: %w", err)
 	}
 
+	return nil
+}
+
+func storeProducedDataColumns(
+	ctx context.Context,
+	storage blob_storage.DataColumnStorage,
+	cfg *clparams.BeaconChainConfig,
+	blockRoot common.Hash,
+	columns []*cltypes.DataColumnSidecar,
+) error {
+	expected := int(cfg.NumberOfColumns)
+	if len(columns) != expected {
+		return fmt.Errorf("expected %d data columns, got %d", expected, len(columns))
+	}
+	if storage == nil {
+		return errors.New("data column storage is not configured")
+	}
+	seen := make([]bool, expected)
+	for _, column := range columns {
+		if column == nil || column.Index >= cfg.NumberOfColumns {
+			return errors.New("produced data column has an invalid index")
+		}
+		if seen[column.Index] {
+			return fmt.Errorf("produced data column %d is duplicated", column.Index)
+		}
+		seen[column.Index] = true
+	}
+	for _, column := range columns {
+		storedColumn := *column
+		if err := storage.WriteColumnSidecars(ctx, blockRoot, int64(column.Index), &storedColumn); err != nil {
+			return fmt.Errorf("store data column %d: %w", column.Index, err)
+		}
+	}
 	return nil
 }
 

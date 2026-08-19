@@ -28,9 +28,34 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	dasmock "github.com/erigontech/erigon/cl/das/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common"
 )
+
+type envelopeDataAvailabilityForkGraph struct {
+	fork_graph.ForkGraph
+	root  common.Hash
+	block *cltypes.SignedBeaconBlock
+	state *state.CachingBeaconState
+}
+
+func (g envelopeDataAvailabilityForkGraph) HasEnvelope(common.Hash) bool {
+	return false
+}
+
+func (g envelopeDataAvailabilityForkGraph) GetState(root common.Hash, _ bool) (*state.CachingBeaconState, error) {
+	if root != g.root {
+		return nil, nil
+	}
+	return g.state, nil
+}
+
+func (g envelopeDataAvailabilityForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	return g.block, root == g.root
+}
 
 // TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid
 func TestValidateEnvelopeAgainstBlock_NoBid(t *testing.T) {
@@ -250,6 +275,39 @@ func TestCheckDataAvailability_NoBlobs(t *testing.T) {
 
 	err := f.checkDataAvailability(context.TODO(), block, common.Hash{})
 	require.NoError(t, err)
+}
+
+func TestApplyEnvelopeKeepsPendingEnvelopeWhileColumnsAreUnavailable(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	blockRoot := common.HexToHash("0x1234")
+	body := cltypes.NewBeaconBody(cfg, clparams.GloasVersion)
+	body.GetSignedExecutionPayloadBid().Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100, Body: body}}
+	blockState := state.New(cfg)
+	blockState.SetVersion(clparams.GloasVersion)
+	pendingEnvelopes, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](16)
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	peerDas := dasmock.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, blockRoot).Return(false, nil)
+	peerDas.EXPECT().SyncColumnDataLater(block).Return(nil)
+	f := &ForkChoiceStore{
+		beaconCfg:        cfg,
+		forkGraph:        envelopeDataAvailabilityForkGraph{root: blockRoot, block: block, state: blockState},
+		peerDas:          peerDas,
+		pendingEnvelopes: pendingEnvelopes,
+	}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: blockRoot},
+	}
+
+	applied, err := f.applyEnvelopeLocked(t.Context(), envelope, true, false)
+	require.False(t, applied)
+	require.ErrorIs(t, err, ErrEIP7594ColumnDataNotAvailable)
+	queued, ok := f.pendingEnvelopes.Get(blockRoot)
+	require.True(t, ok)
+	require.Same(t, envelope, queued)
 }
 
 // TestValidatePayloadWithEL_NoEngine tests that validatePayloadWithEL returns nil when there's no engine

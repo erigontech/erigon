@@ -30,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
 )
@@ -39,6 +40,21 @@ func setupExecutionPayloadService(t *testing.T) (ExecutionPayloadService, *mock_
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, beaconevents.NewEventEmitter())
 	return service, forkchoiceMock
+}
+
+func setupExecutionPayloadServiceWithoutLoop(t *testing.T) (*executionPayloadService, *mock_services.ForkChoiceStorageMock) {
+	t.Helper()
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
+	require.NoError(t, err)
+	return &executionPayloadService{
+		forkchoiceStore:    forkchoiceMock,
+		beaconCfg:          cfg,
+		emitters:           beaconevents.NewEventEmitter(),
+		seenEnvelopesCache: seenCache,
+		pendingCond:        sync.NewCond(&sync.Mutex{}),
+	}, forkchoiceMock
 }
 
 func newTestSignedEnvelope(slot uint64, blockRoot common.Hash, builderIndex uint64) *cltypes.SignedExecutionPayloadEnvelope {
@@ -289,6 +305,75 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 
 	// Envelope should be marked as seen
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
+}
+
+func TestExecutionPayloadServiceRetriesEnvelopeAfterColumnsBecomeAvailable(t *testing.T) {
+	impl, forkchoiceMock := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	key := pendingEnvelopeKey{blockRoot: blockRoot, envelopeHash: envelopeHash}
+	impl.pendingEnvelopes.Store(key, &envelopeJob{envelope: envelope, creationTime: time.Now()})
+	impl.pendingCount.Store(1)
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	impl.processPendingEnvelopes(t.Context())
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+	value, pending := impl.pendingEnvelopes.Load(key)
+	require.True(t, pending)
+
+	job := value.(*envelopeJob)
+	require.True(t, job.waitingForColumns)
+	dueJob := *job
+	dueJob.retryAfter = time.Time{}
+	require.True(t, impl.pendingEnvelopes.CompareAndSwap(key, job, &dueJob))
+	forkchoiceMock.OnExecutionPayloadErr = nil
+	impl.processPendingEnvelopes(t.Context())
+	require.Zero(t, impl.pendingCount.Load())
+	_, pending = impl.pendingEnvelopes.Load(key)
+	require.False(t, pending)
+}
+
+func TestExecutionPayloadServiceQueuesKnownBlockEnvelopeWhileColumnsAreUnavailable(t *testing.T) {
+	impl, forkchoiceMock := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	err := impl.ProcessMessage(t.Context(), nil, envelope)
+
+	require.ErrorIs(t, err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+	require.Equal(t, int32(1), impl.pendingCount.Load())
+	envelopeHash, hashErr := envelope.HashSSZ()
+	require.NoError(t, hashErr)
+	value, pending := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot: blockRoot, envelopeHash: envelopeHash})
+	require.True(t, pending)
+	require.True(t, value.(*envelopeJob).waitingForColumns)
+}
+
+func TestExecutionPayloadServicePromotesPendingEnvelopeToColumnWait(t *testing.T) {
+	impl, forkchoiceMock := setupExecutionPayloadServiceWithoutLoop(t)
+	blockRoot := common.HexToHash("0x1234")
+	envelope := newTestSignedEnvelope(100, blockRoot, 1)
+	envelopeHash, err := envelope.HashSSZ()
+	require.NoError(t, err)
+	key := pendingEnvelopeKey{blockRoot: blockRoot, envelopeHash: envelopeHash}
+	creationTime := time.Now().Add(-pendingEnvelopeExpiry / 2)
+	impl.pendingEnvelopes.Store(key, &envelopeJob{envelope: envelope, creationTime: creationTime})
+	impl.pendingCount.Store(1)
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+
+	impl.processPendingEnvelopes(t.Context())
+
+	value, pending := impl.pendingEnvelopes.Load(key)
+	require.True(t, pending)
+	job := value.(*envelopeJob)
+	require.True(t, job.waitingForColumns)
+	require.True(t, job.creationTime.After(creationTime))
 }
 
 func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {

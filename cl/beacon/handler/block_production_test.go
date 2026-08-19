@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -58,6 +59,49 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
+
+func TestStoreProducedDataColumns(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.NumberOfColumns = 2
+	blockRoot := common.Hash{1}
+	columns := []*cltypes.DataColumnSidecar{{Index: 0}, {Index: 1}}
+
+	ctrl := gomock.NewController(t)
+	storage := blobstoragemock.NewMockDataColumnStorage(ctrl)
+	for _, column := range columns {
+		storage.EXPECT().WriteColumnSidecars(gomock.Any(), blockRoot, int64(column.Index), column).Return(nil)
+	}
+	require.NoError(t, storeProducedDataColumns(t.Context(), storage, &cfg, blockRoot, columns))
+}
+
+func TestStoreProducedDataColumnsIsolatesStorageMutation(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.NumberOfColumns = 1
+	blockRoot := common.Hash{1}
+	column := &cltypes.DataColumnSidecar{BlockRoot: common.Hash{2}, Index: 0, Slot: 3}
+
+	storage := blobstoragemock.NewMockDataColumnStorage(gomock.NewController(t))
+	storage.EXPECT().WriteColumnSidecars(gomock.Any(), blockRoot, int64(0), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ common.Hash, _ int64, stored *cltypes.DataColumnSidecar) error {
+			require.NotSame(t, column, stored)
+			stored.BlockRoot = blockRoot
+			stored.Slot = 4
+			return nil
+		},
+	)
+	require.NoError(t, storeProducedDataColumns(t.Context(), storage, &cfg, blockRoot, []*cltypes.DataColumnSidecar{column}))
+	require.Equal(t, common.Hash{2}, column.BlockRoot)
+	require.Equal(t, uint64(3), column.Slot)
+}
+
+func TestStoreProducedDataColumnsRequiresEveryColumn(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.NumberOfColumns = 2
+	storage := blobstoragemock.NewMockDataColumnStorage(gomock.NewController(t))
+
+	err := storeProducedDataColumns(t.Context(), storage, &cfg, common.Hash{}, []*cltypes.DataColumnSidecar{{Index: 0}})
+	require.Error(t, err)
+}
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{

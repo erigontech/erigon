@@ -41,10 +41,7 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
-// maliciousColumnSentinel stands in for a selected custody peer. It answers
-// metadata honestly so it becomes eligible for column requests, then serves a
-// fixed response to every column request.
-type maliciousColumnSentinel struct {
+type columnTestSentinel struct {
 	sentinelproto.SentinelClient
 	metadataResponse []byte
 	columnResponse   []byte
@@ -53,36 +50,39 @@ type maliciousColumnSentinel struct {
 	metadataReady chan struct{}
 	banOnce       sync.Once
 	banned        chan struct{}
+
+	columnRequestsStarted chan<- struct{}
 }
 
-func (s *maliciousColumnSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
-	return &sentinelproto.PeersInfoResponse{Peers: []*sentinelproto.Peer{{Pid: "malicious-peer"}}}, nil
+func (s *columnTestSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
+	return &sentinelproto.PeersInfoResponse{Peers: []*sentinelproto.Peer{{Pid: "column-test-peer"}}}, nil
 }
 
-func (s *maliciousColumnSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
+func (s *columnTestSentinel) BanPeer(context.Context, *sentinelproto.Peer, ...grpc.CallOption) (*sentinelproto.EmptyMessage, error) {
 	s.banOnce.Do(func() { close(s.banned) })
 	return &sentinelproto.EmptyMessage{}, nil
 }
 
-func (s *maliciousColumnSentinel) SendPeerRequest(_ context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
-	peer := &sentinelproto.Peer{Pid: "malicious-peer"}
+func (s *columnTestSentinel) SendPeerRequest(ctx context.Context, req *sentinelproto.RequestDataWithPeer, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	peer := &sentinelproto.Peer{Pid: "column-test-peer"}
 	if strings.Contains(req.Topic, "metadata") {
 		s.metadataOnce.Do(func() { close(s.metadataReady) })
 		return &sentinelproto.ResponseData{Data: s.metadataResponse, Peer: peer}, nil
 	}
+	if s.columnRequestsStarted != nil {
+		select {
+		case s.columnRequestsStarted <- struct{}{}:
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		}
+		<-ctx.Done()
+		return nil, ctx.Err()
+	}
 	return &sentinelproto.ResponseData{Data: s.columnResponse, Peer: peer}, nil
 }
 
-// A peer selects the response fork digest, so it can serve a Gloas-schema
-// sidecar (no SignedBlockHeader) that claims a pre-Gloas slot. runDownload must
-// ban the peer rather than dereference the header the schema left unset; the
-// per-sidecar goroutine has no recover, so a nil deref there kills the process.
-//
-// This drives the real BeaconRpcP2P decode path, so it also pins that
-// DataColumnSidecar.Version() reflects the peer's digest choice.
-func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
-	// Kept at mainnet's schedule: Gloas sits at FAR_FUTURE_EPOCH, so its digest is
-	// registered and resolvable even though no slot maps to Gloas.
+func newColumnTestSetup(t *testing.T) (*clparams.BeaconChainConfig, uint64, eth_clock.EthereumClock, []byte) {
+	t.Helper()
 	cfg := clparams.MainnetBeaconConfig
 	cfg.InitializeForkSchedule()
 	initTestBeaconConfig(&cfg)
@@ -91,18 +91,91 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 	genesisTime := uint64(time.Now().Unix()) - currentSlot*cfg.SecondsPerSlot
 	clock := eth_clock.NewEthereumClock(genesisTime, common.Hash{}, &cfg)
 
+	custodyGroupCount := cfg.NumberOfColumns
+	syncnets := [1]byte{}
+	metadata := &cltypes.Metadata{Syncnets: &syncnets, CustodyGroupCount: &custodyGroupCount}
+	var metadataWire bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&metadataWire, metadata))
+	return &cfg, currentSlot, clock, metadataWire.Bytes()
+}
+
+func newSingleColumnDownloadRequest(cfg *clparams.BeaconChainConfig, blockRoot common.Hash, slot uint64) *downloadRequest {
+	return &downloadRequest{
+		beaconConfig: cfg,
+		downloadTable: map[downloadTableEntry]map[uint64]bool{
+			{blockRoot: blockRoot, slot: slot}: {0: true},
+		},
+	}
+}
+
+func TestRunDownloadSharedConcurrencyLimit(t *testing.T) {
+	cfg, currentSlot, clock, metadataResponse := newColumnTestSetup(t)
+
+	columnRequestsStarted := make(chan struct{}, maxConcurrentColumnRequests+1)
+	sentinel := &columnTestSentinel{
+		metadataResponse:      metadataResponse,
+		metadataReady:         make(chan struct{}),
+		banned:                make(chan struct{}),
+		columnRequestsStarted: columnRequestsStarted,
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	defer cancel()
+	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, cfg, clock, nil)
+
+	select {
+	case <-sentinel.metadataReady:
+	case <-time.After(30 * time.Second):
+		t.Fatal("test peer was not added to the custody-peer queue")
+	}
+
+	d := &peerdas{
+		rpc:            rpcClient,
+		beaconConfig:   cfg,
+		state:          peerdasstate.NewPeerDasState(cfg, &clparams.NetworkConfig{}),
+		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 0, cfg, clock, beaconevents.NewEventEmitter()),
+		columnRPCSlots: make(chan struct{}, maxConcurrentColumnRequests),
+	}
+	done := make(chan error, 2)
+	for i := byte(1); i <= 2; i++ {
+		req := newSingleColumnDownloadRequest(cfg, common.BytesToHash([]byte{i}), currentSlot)
+		go func() { done <- d.runDownload(ctx, req, false) }()
+	}
+
+	requestTimeout := time.NewTimer(5 * time.Second)
+	defer requestTimeout.Stop()
+	for range maxConcurrentColumnRequests {
+		select {
+		case <-columnRequestsStarted:
+		case <-requestTimeout.C:
+			t.Fatal("column requests did not reach the concurrency limit")
+		}
+	}
+
+	exceededLimit := false
+	select {
+	case <-columnRequestsStarted:
+		exceededLimit = true
+	case <-time.After(3 * columnRequestInterval):
+	}
+	cancel()
+	require.NoError(t, <-done)
+	require.NoError(t, <-done)
+	require.False(t, exceededLimit, "column RPC concurrency exceeded %d", maxConcurrentColumnRequests)
+}
+
+// The real RPC decoder derives the sidecar schema from the peer-selected fork
+// digest. A sidecar whose slot does not match that schema must be rejected before
+// schema-specific fields are used.
+func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
+	// Keep Gloas at FAR_FUTURE_EPOCH so its digest resolves without any slot
+	// using its schema.
+	cfg, currentSlot, clock, metadataResponse := newColumnTestSetup(t)
+
 	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
 	require.NoError(t, err)
 	decodeVersion, err := clock.StateVersionByForkDigest(gloasDigest)
 	require.NoError(t, err)
 	require.Equal(t, clparams.GloasVersion, decodeVersion, "far-future Gloas digest must resolve")
-
-	// Advertising every custody group makes this peer eligible for any column.
-	cgc := cfg.NumberOfColumns
-	syncnets := [1]byte{}
-	metadata := &cltypes.Metadata{Syncnets: &syncnets, CustodyGroupCount: &cgc}
-	var metadataWire bytes.Buffer
-	require.NoError(t, ssz_snappy.EncodeAndWrite(&metadataWire, metadata))
 
 	sidecar := cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion)
 	sidecar.Slot = 0
@@ -111,8 +184,8 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 	var columnWire bytes.Buffer
 	require.NoError(t, ssz_snappy.EncodeAndWrite(&columnWire, sidecar, gloasDigest[:]...))
 
-	sentinel := &maliciousColumnSentinel{
-		metadataResponse: metadataWire.Bytes(),
+	sentinel := &columnTestSentinel{
+		metadataResponse: metadataResponse,
 		columnResponse:   columnWire.Bytes(),
 		metadataReady:    make(chan struct{}),
 		banned:           make(chan struct{}),
@@ -120,7 +193,7 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 
 	ctx, cancel := context.WithCancel(context.Background())
 	defer cancel()
-	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil)
+	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, cfg, clock, nil)
 
 	select {
 	case <-sentinel.metadataReady:
@@ -128,23 +201,19 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 		t.Fatal("malicious peer was not added to the custody-peer queue")
 	}
 
-	// gloasDataCache is populated so that a sidecar wrongly accepted as Gloas
-	// fails this test's ban assertion rather than nil-panicking downstream.
+	// Gloas sidecar processing requires a non-nil cache.
 	gloasDataCache, err := lru.New[common.Hash, *gloasBlockData]("gloasDataCacheTest", 8)
 	require.NoError(t, err)
 	d := &peerdas{
 		rpc:            rpcClient,
-		beaconConfig:   &cfg,
-		state:          peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{}),
-		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 0, &cfg, clock, beaconevents.NewEventEmitter()),
+		beaconConfig:   cfg,
+		state:          peerdasstate.NewPeerDasState(cfg, &clparams.NetworkConfig{}),
+		columnStorage:  blob_storage.NewDataColumnStore(afero.NewMemMapFs(), 0, cfg, clock, beaconevents.NewEventEmitter()),
+		columnRPCSlots: make(chan struct{}, maxConcurrentColumnRequests),
 		gloasDataCache: gloasDataCache,
 	}
-	req := &downloadRequest{
-		beaconConfig: &cfg,
-		downloadTable: map[downloadTableEntry]map[uint64]bool{
-			{blockRoot: common.HexToHash("0xbeef"), slot: currentSlot}: {0: true},
-		},
-	}
+	blockRoot := common.HexToHash("0xbeef")
+	req := newSingleColumnDownloadRequest(cfg, blockRoot, currentSlot)
 
 	done := make(chan error, 1)
 	go func() { done <- d.runDownload(ctx, req, false) }()
@@ -162,8 +231,8 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 		t.Fatal("runDownload did not return after cancellation")
 	}
 
-	// Nothing may be stored: the sidecar is rejected before any write.
-	saved, err := d.columnStorage.GetSavedColumnIndex(context.Background(), currentSlot, common.HexToHash("0xbeef"))
+	// Rejected sidecars must not reach storage.
+	saved, err := d.columnStorage.GetSavedColumnIndex(context.Background(), currentSlot, blockRoot)
 	require.NoError(t, err)
 	require.Empty(t, saved)
 }

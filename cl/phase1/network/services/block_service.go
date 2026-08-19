@@ -51,8 +51,11 @@ type proposerIndexAndSlot struct {
 }
 
 type blockJob struct {
-	block        *cltypes.SignedBeaconBlock
-	creationTime time.Time
+	block                      *cltypes.SignedBeaconBlock
+	creationTime               time.Time
+	retryAfter                 time.Time
+	columnAvailabilityAttempts uint8
+	waitingForColumns          bool
 }
 
 type blockService struct {
@@ -64,11 +67,10 @@ type blockService struct {
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
 
-	// blocks that should be scheduled for later execution (e.g missing blobs).
 	emitter                          *beaconevents.EventEmitter
 	blocksScheduledForLaterExecution sync.Map
-	// store the block in db
-	db kv.RwDB
+	db                               kv.RwDB
+	now                              func() time.Time
 }
 
 // NewBlockService creates a new block service
@@ -93,6 +95,7 @@ func NewBlockService(
 		seenBlocksCache: seenBlocksCache,
 		emitter:         emitter,
 		db:              db,
+		now:             time.Now,
 	}
 	go b.loop(ctx)
 	return b
@@ -159,7 +162,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		}
 		return err
 	}
-
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
 	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
 	if !ok {
@@ -217,10 +219,15 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		// i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
 		return ErrInvalidCommitmentsCount
 	}
+	b.seenBlocksCache.Add(seenCacheKey, struct{}{})
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
+		if isDataAvailabilityError(err) {
+			b.scheduleBlockForDataAvailability(msg)
+			return nil
+		}
+		if errors.Is(err, forkchoice.ErrParentEnvelopePending) {
 			b.scheduleBlockForLaterProcessing(msg)
 			return nil
 		}
@@ -248,6 +255,14 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 
 // scheduleBlockForLaterProcessing schedules a block for later processing
 func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
+	b.scheduleBlock(block, time.Time{})
+}
+
+func (b *blockService) scheduleBlockForDataAvailability(block *cltypes.SignedBeaconBlock) {
+	b.scheduleBlock(block, b.currentTime().Add(blockRetryInterval))
+}
+
+func (b *blockService) scheduleBlock(block *cltypes.SignedBeaconBlock, retryAfter time.Time) {
 	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
 	var blockNum uint64
 	if block.Block.Body.ExecutionPayload != nil {
@@ -260,10 +275,24 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		return
 	}
 
-	b.blocksScheduledForLaterExecution.Store(blockRoot, &blockJob{
+	now := b.currentTime()
+	// Preserve an existing job so redelivery cannot reset its retry budget.
+	b.blocksScheduledForLaterExecution.LoadOrStore(blockRoot, &blockJob{
 		block:        block,
-		creationTime: time.Now(),
+		creationTime: now,
+		retryAfter:   retryAfter,
 	})
+}
+
+func isDataAvailabilityError(err error) bool {
+	return errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+}
+
+func (b *blockService) currentTime() time.Time {
+	if b.now == nil {
+		return time.Now()
+	}
+	return b.now()
 }
 
 // processAndStoreBlock processes and stores a block
@@ -330,19 +359,54 @@ func (b *blockService) loop(ctx context.Context) {
 			return
 		case <-ticker.C:
 		}
-		b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
-			blockJob := value.(*blockJob)
-			// check if it has expired
-			if time.Since(blockJob.creationTime) > blockJobExpiry {
-				b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
-				log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
-				return true
-			}
-			b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
-			return true
-		})
+		b.processScheduledBlocks(ctx, b.currentTime())
 	}
+}
+
+func (b *blockService) processScheduledBlocks(ctx context.Context, now time.Time) {
+	b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
+		blockRoot := key.([32]byte)
+		blockJob := value.(*blockJob)
+		expiry := blockJobExpiry
+		if blockJob.waitingForColumns {
+			expiry = deferredColumnAvailabilityExpiry
+		}
+		if now.Sub(blockJob.creationTime) > expiry {
+			b.blocksScheduledForLaterExecution.Delete(blockRoot)
+			return true
+		}
+		if now.Before(blockJob.retryAfter) {
+			return true
+		}
+		if blockJob.waitingForColumns {
+			peerDas := b.forkchoiceStore.GetPeerDas()
+			if peerDas == nil {
+				blockJob.retryAfter = now.Add(blockRetryInterval)
+				return true
+			}
+			available, err := peerDas.IsDataAvailable(blockJob.block.Block.Slot, common.Hash(blockRoot))
+			if err != nil || !available {
+				blockJob.retryAfter = now.Add(blockRetryInterval)
+				return true
+			}
+			blockJob.waitingForColumns = false
+		}
+		if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
+			if isDataAvailabilityError(err) {
+				blockJob.retryAfter = b.currentTime().Add(blockRetryInterval)
+				if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+					blockJob.columnAvailabilityAttempts++
+					if blockJob.columnAvailabilityAttempts >= maxColumnAvailabilityRetries {
+						blockJob.waitingForColumns = true
+					}
+				}
+			} else {
+				blockJob.retryAfter = time.Time{}
+			}
+			log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
+			return true
+		}
+		b.blocksScheduledForLaterExecution.Delete(blockRoot)
+		return true
+	})
 }

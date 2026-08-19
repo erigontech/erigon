@@ -17,17 +17,225 @@
 package das
 
 import (
+	"context"
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	storagemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
+	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/common"
 )
+
+func fuluAtEpochTwoConfig() clparams.BeaconChainConfig {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 2
+	cfg.InitializeForkSchedule()
+	return cfg
+}
+
+func TestSyncColumnDataLaterStoresCompactFuluBlock(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	d := &peerdas{}
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, d.SyncColumnDataLater(block))
+
+	value, ok := d.blocksToCheckSync[common.Hash(blockRoot)]
+	require.True(t, ok)
+	queued, compact := value.block.(*deferredColumnSyncBlock)
+	require.True(t, compact)
+	require.Equal(t, block.Block.Slot, queued.slot)
+	require.Equal(t, common.Hash(blockRoot), queued.root)
+	require.Equal(t, block.Block.Body.BlobKzgCommitments.Len(), queued.commitments.Len())
+}
+
+func TestSyncColumnDataLaterBoundsQueue(t *testing.T) {
+	const queueLimit = maxDeferredColumnSyncBlocks
+	cfg := clparams.MainnetBeaconConfig
+	d := &peerdas{}
+	for slot := uint64(1); slot <= queueLimit+1; slot++ {
+		block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+		block.Block.Slot = slot
+		block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+		require.NoError(t, d.SyncColumnDataLater(block))
+	}
+
+	require.LessOrEqual(t, len(d.blocksToCheckSync), queueLimit)
+}
+
+func TestSyncColumnDataLaterUsesConfiguredFork(t *testing.T) {
+	cfg := fuluAtEpochTwoConfig()
+
+	tests := []struct {
+		name           string
+		blockSlot      uint64
+		decodedVersion clparams.StateVersion
+		wantQueued     bool
+	}{
+		{name: "Fulu slot decoded as Electra", blockSlot: 2 * cfg.SlotsPerEpoch, decodedVersion: clparams.ElectraVersion, wantQueued: true},
+		{name: "Electra slot decoded as Fulu", blockSlot: cfg.SlotsPerEpoch, decodedVersion: clparams.FuluVersion},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			d := &peerdas{beaconConfig: &cfg}
+			block := cltypes.NewSignedBeaconBlock(&cfg, tt.decodedVersion)
+			block.Block.Slot = tt.blockSlot
+			block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+
+			require.NoError(t, d.SyncColumnDataLater(block))
+			job, queued := d.blocksToCheckSync[common.Hash(blockRoot)]
+			require.Equal(t, tt.wantQueued, queued)
+			if tt.wantQueued {
+				require.Equal(t, clparams.FuluVersion, job.block.Version())
+			}
+		})
+	}
+}
+
+func TestInitializeDownloadRequestUsesConfiguredFork(t *testing.T) {
+	cfg := fuluAtEpochTwoConfig()
+
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.ElectraVersion)
+	block.Block.Slot = cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	storage := storagemock.NewMockDataColumnStorage(gomock.NewController(t))
+	storage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, common.Hash(blockRoot)).Return(nil, nil)
+	req, err := initializeDownloadRequest(
+		[]cltypes.ColumnSyncableSignedBlock{block},
+		&cfg,
+		storage,
+		map[cltypes.CustodyIndex]bool{0: true},
+	)
+	require.NoError(t, err)
+	require.Equal(t, 1, req.remainingEntriesCount())
+}
+
+func TestDownloadOnlyCustodyColumnsWithoutRPC(t *testing.T) {
+	d := &peerdas{}
+	require.Error(t, d.DownloadOnlyCustodyColumns(context.Background(), nil))
+}
+
+func TestDownloadColumnsAndRecoverBlobsWithoutRPC(t *testing.T) {
+	d := &peerdas{}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	require.Error(t, d.DownloadColumnsAndRecoverBlobs(context.Background(), []cltypes.ColumnSyncableSignedBlock{block}))
+}
+
+func TestArchivedDataAvailabilityRequiresColumns(t *testing.T) {
+	cfg := fuluAtEpochTwoConfig()
+	slot := cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	blockRoot := common.Hash{1}
+	ctrl := gomock.NewController(t)
+	columnStorage := storagemock.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), slot, blockRoot).Return(nil, nil)
+	blobStorage := storagemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), blockRoot).Return(uint32(1), nil).AnyTimes()
+	d := &peerdas{
+		beaconConfig:  &cfg,
+		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
+		columnStorage: columnStorage,
+		blobStorage:   blobStorage,
+	}
+
+	available, err := d.IsDataAvailable(slot, blockRoot)
+
+	require.NoError(t, err)
+	require.False(t, available)
+}
+
+func TestArchivedDataAvailabilityReturnsStorageError(t *testing.T) {
+	cfg := fuluAtEpochTwoConfig()
+	slot := cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	blockRoot := common.Hash{1}
+	wantErr := errors.New("column storage unavailable")
+	ctrl := gomock.NewController(t)
+	columnStorage := storagemock.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), slot, blockRoot).Return(nil, wantErr)
+	blobStorage := storagemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), blockRoot).Return(uint32(0), nil).AnyTimes()
+	d := &peerdas{
+		beaconConfig:  &cfg,
+		caplinConfig:  &clparams.CaplinConfig{ArchiveBlobs: true},
+		columnStorage: columnStorage,
+		blobStorage:   blobStorage,
+	}
+
+	available, err := d.IsDataAvailable(slot, blockRoot)
+
+	require.False(t, available)
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestDownloadColumnsAndRecoverBlobsDoesNotUseRecoveredBlobsAsColumns(t *testing.T) {
+	cfg := fuluAtEpochTwoConfig()
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	columnStorage := storagemock.NewMockDataColumnStorage(ctrl)
+	columnStorage.EXPECT().GetSavedColumnIndex(gomock.Any(), block.Block.Slot, common.Hash(blockRoot)).Return(nil, nil).AnyTimes()
+	blobStorage := storagemock.NewMockBlobStorage(ctrl)
+	blobChecked := false
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), common.Hash(blockRoot)).DoAndReturn(func(context.Context, common.Hash) (uint32, error) {
+		blobChecked = true
+		return 1, nil
+	}).AnyTimes()
+	d := &peerdas{
+		rpc:            &rpc.BeaconRpcP2P{},
+		beaconConfig:   &cfg,
+		caplinConfig:   &clparams.CaplinConfig{ArchiveBlobs: true},
+		columnStorage:  columnStorage,
+		blobStorage:    blobStorage,
+		columnRPCSlots: make(chan struct{}, maxConcurrentColumnRequests),
+	}
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.NoError(t, d.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block}))
+	require.False(t, blobChecked)
+}
+
+func TestSyncDeferredColumnDataPrunesExpiredJobsWithoutRPC(t *testing.T) {
+	now := time.Now()
+	expiredRoot := common.Hash{1}
+	activeRoot := common.Hash{2}
+	d := &peerdas{blocksToCheckSync: map[common.Hash]deferredColumnSyncJob{
+		expiredRoot: {block: &deferredColumnSyncBlock{}, addedAt: now.Add(-deferredColumnSyncTTL - time.Second)},
+		activeRoot:  {block: &deferredColumnSyncBlock{}, addedAt: now},
+	}}
+
+	d.syncDeferredColumnData(t.Context())
+
+	jobs := d.deferredColumnSyncJobs()
+	require.NotContains(t, jobs, expiredRoot)
+	require.Contains(t, jobs, activeRoot)
+}
 
 // initTestBeaconConfig installs cfg as the global config if no test has done so
 // yet. InitGlobalStaticConfig panics on a second call, so tests in this package

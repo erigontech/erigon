@@ -106,9 +106,7 @@ func waitForExecutionEngineToBeFinished(ctx context.Context, cfg *Cfg) (ready bo
 	}
 }
 
-// fetchBlocksFromReqResp retrieves blocks starting from a specified block number and continues for a given count.
-// It sends a request to fetch the blocks, verifies the associated blobs, and inserts them into the blob store.
-// It returns a PeeredObject containing the blocks and the peer ID, or an error if something goes wrong.
+// fetchBlocksFromReqResp requests a block range and returns the response sorted by slot.
 func fetchBlocksFromReqResp(ctx context.Context, cfg *Cfg, from uint64, count uint64) (*peers.PeeredObject[[]*cltypes.SignedBeaconBlock], error) {
 	blocks, pid, err := cfg.rpc.SendBeaconBlocksByRangeReq(ctx, from, count)
 	for err != nil {
@@ -180,8 +178,7 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 		// Fetch blocks from the specified range
 		blocks, err := fetchBlocksFromReqResp(ctx, cfg, from, count)
 		if err != nil {
-			// Send error to the error channel and return
-			errCh <- err
+			sendFetchError(ctx, errCh, err)
 			return
 		}
 
@@ -195,8 +192,20 @@ func startFetchingBlocksMissedByGossipAfterSomeTime(ctx context.Context, cfg *Cf
 	}
 }
 
-// listenToIncomingBlocksUntilANewBlockIsReceived listens for incoming blocks until a new block with a slot greater than or equal to the target slot is received.
-// It processes blocks, checks their validity, and publishes them. It also handles context cancellation and logs progress periodically.
+func sendFetchError(ctx context.Context, errCh chan<- error, err error) {
+	select {
+	case errCh <- err:
+	case <-ctx.Done():
+	}
+}
+
+// Keep one response prefetched while the listener validates and imports the current batch.
+func newChainTipBlockResponseChannel() chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock] {
+	return make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1)
+}
+
+// listenToIncomingBlocksUntilANewBlockIsReceived validates and imports fetched batches
+// until fork choice reaches the target slot. Transient DA failures remain eligible for retry.
 func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger log.Logger, cfg *Cfg, args Args, respCh <-chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], errCh chan error) error {
 	// Timer to log progress every 30 seconds
 	logTicker := time.NewTicker(30 * time.Second)
@@ -208,6 +217,7 @@ func listenToIncomingBlocksUntilANewBlockIsReceived(ctx context.Context, logger 
 
 	// Map to keep track of seen block roots
 	seenBlockRoots := make(map[common.Hash]struct{})
+	dataAvailabilityRetryAfter := make(map[common.Hash]time.Time)
 MainLoop:
 	for {
 		select {
@@ -231,6 +241,80 @@ MainLoop:
 			envelopeRoots := determineParentEnvelopeRoots(cfg, blocks.Data)
 			envelopes := fetchParentEnvelopes(ctx, cfg, envelopeRoots)
 
+			blockRoots := make(map[*cltypes.SignedBeaconBlock]common.Hash, len(blocks.Data))
+			availabilityBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(blocks.Data))
+			availabilityRoots := make([]common.Hash, 0, len(blocks.Data))
+			batchRoots := make(map[common.Hash]struct{}, len(blocks.Data))
+			needsDataAvailabilityPreflight := false
+			now := time.Now()
+			for _, block := range blocks.Data {
+				blockRoot, err := block.Block.HashSSZ()
+				if err != nil {
+					log.Debug("failed to hash chain-tip block", "err", err, "blockSlot", block.Block.Slot)
+					continue
+				}
+				root := common.Hash(blockRoot)
+				blockRoots[block] = root
+				if _, known := cfg.forkChoice.GetHeader(root); known {
+					continue
+				}
+				if _, parentKnown := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !parentKnown {
+					if _, parentInBatch := batchRoots[block.Block.ParentRoot]; !parentInBatch {
+						continue
+					}
+				}
+				if _, seen := seenBlockRoots[root]; seen {
+					continue
+				}
+				if retryAfter, retrying := dataAvailabilityRetryAfter[root]; retrying && now.Before(retryAfter) {
+					continue
+				}
+				batchRoots[root] = struct{}{}
+				availabilityBlocks = append(availabilityBlocks, block)
+				availabilityRoots = append(availabilityRoots, root)
+				commitments := block.GetBlobKzgCommitments()
+				if requiresRecentBlockDataAvailability(cfg, block) && commitments != nil && commitments.Len() > 0 {
+					needsDataAvailabilityPreflight = true
+				}
+			}
+
+			skipNonFinalized := make([]bool, len(availabilityBlocks))
+			if needsDataAvailabilityPreflight {
+				var retryable bool
+				var preflightErr error
+				skipNonFinalized, retryable, preflightErr = cfg.forkChoice.PreflightDataAvailabilityBlocks(availabilityBlocks)
+				if preflightErr != nil {
+					if !retryable {
+						if cfg.rpc != nil && blocks.Peer != "" {
+							cfg.rpc.BanPeer(blocks.Peer)
+						}
+						return fmt.Errorf("chain-tip block preflight: %w", preflightErr)
+					}
+					logger.Debug("chain-tip block preflight will retry", "err", preflightErr)
+					retryAfter := time.Now().Add(time.Second)
+					for _, root := range availabilityRoots {
+						dataAvailabilityRetryAfter[root] = retryAfter
+					}
+					continue
+				}
+			}
+
+			downloadBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(availabilityBlocks))
+			downloadRoots := make([]common.Hash, 0, len(availabilityRoots))
+			for i, block := range availabilityBlocks {
+				if skipNonFinalized[i] {
+					seenBlockRoots[availabilityRoots[i]] = struct{}{}
+					continue
+				}
+				downloadBlocks = append(downloadBlocks, block)
+				downloadRoots = append(downloadRoots, availabilityRoots[i])
+			}
+			availabilityErrs := acquireRecentBlocksDataAvailability(ctx, cfg, downloadBlocks)
+			availabilityByRoot := make(map[common.Hash]error, len(downloadRoots))
+			for i, root := range downloadRoots {
+				availabilityByRoot[root] = availabilityErrs[i]
+			}
+
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
 				// Check if the parent block is known
@@ -240,7 +324,10 @@ MainLoop:
 				}
 
 				// Calculate the block root and check if the block is already known
-				blockRoot, _ := block.Block.HashSSZ() // Ignoring error as block would not process if HashSSZ failed
+				blockRoot, hashed := blockRoots[block]
+				if !hashed {
+					continue
+				}
 				if _, ok := cfg.forkChoice.GetHeader(blockRoot); ok {
 					// Check if the block slot is greater than or equal to the target slot
 					if block.Block.Slot >= args.targetSlot {
@@ -251,6 +338,9 @@ MainLoop:
 
 				// Check if the block root has already been seen
 				if _, ok := seenBlockRoots[blockRoot]; ok {
+					continue
+				}
+				if retryAfter, ok := dataAvailabilityRetryAfter[blockRoot]; ok && time.Now().Before(retryAfter) {
 					continue
 				}
 
@@ -265,9 +355,23 @@ MainLoop:
 					}
 				}
 
-				// Process the block - DA can be downloaded later if we are behind (see blobHistoryDownloader)
-				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, false); err != nil {
-					log.Debug("bad blocks segment received", "err", err, "blockSlot", block.Block.Slot)
+				availabilityErr, prepared := availabilityByRoot[blockRoot]
+				if !prepared {
+					continue
+				}
+				if availabilityErr != nil {
+					log.Debug("failed to acquire chain-tip data columns", "err", availabilityErr, "blockSlot", block.Block.Slot)
+					dataAvailabilityRetryAfter[blockRoot] = time.Now().Add(time.Second)
+					continue
+				}
+
+				checkDataAvailability := requiresRecentBlockDataAvailability(cfg, block)
+				if err := processBlock(ctx, cfg, cfg.indiciesDB, block, true, true, checkDataAvailability); err != nil {
+					log.Debug("failed to process chain-tip block", "err", err, "blockSlot", block.Block.Slot)
+					if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+						dataAvailabilityRetryAfter[blockRoot] = time.Now().Add(time.Second)
+						continue
+					}
 					seenBlockRoots[blockRoot] = struct{}{}
 					continue
 				}
@@ -726,7 +830,7 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 		"targetSlot", args.targetSlot,
 		"requestedSlots", totalRequest,
 	)
-	respCh := make(chan *peers.PeeredObject[[]*cltypes.SignedBeaconBlock], 1024)
+	respCh := newChainTipBlockResponseChannel()
 	errCh := make(chan error)
 
 	// 25 seconds is a good timeout for this

@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -55,22 +56,10 @@ var (
 )
 
 func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, block *cltypes.BeaconBlock) error {
-	expectedBlobHashes := []common.Hash{}
+	expectedBlobHashes := kzgCommitmentsToVersionedHashes(block.Body.BlobKzgCommitments)
 	transactions, err := types.DecodeTransactions(block.Body.ExecutionPayload.Transactions.UnderlyngReference())
 	if err != nil {
 		return fmt.Errorf("unable to decode transactions: %w", err)
-	}
-	block.Body.BlobKzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
-		var kzg common.Hash
-		kzg, err = utils.KzgCommitmentToVersionedHash(common.Bytes48(*value))
-		if err != nil {
-			return false
-		}
-		expectedBlobHashes = append(expectedBlobHashes, kzg)
-		return true
-	})
-	if err != nil {
-		return err
 	}
 
 	maxBlobsPerBlock := cfg.MaxBlobsPerBlockByVersion(block.Version())
@@ -78,6 +67,19 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 		maxBlobsPerBlock = cfg.GetBlobParameters(block.Slot / cfg.SlotsPerEpoch).MaxBlobsPerBlock
 	}
 	return misc.ValidateBlobs(block.Body.ExecutionPayload.BlobGasUsed, cfg.MaxBlobGasPerBlock, maxBlobsPerBlock, expectedBlobHashes, &transactions)
+}
+
+func kzgCommitmentsToVersionedHashes(commitments *solid.ListSSZ[*cltypes.KZGCommitment]) []common.Hash {
+	if commitments == nil {
+		return nil
+	}
+	hashes := make([]common.Hash, 0, commitments.Len())
+	commitments.Range(func(_ int, commitment *cltypes.KZGCommitment, _ int) bool {
+		versionedHash, _ := utils.KzgCommitmentToVersionedHash(common.Bytes48(*commitment))
+		hashes = append(hashes, versionedHash)
+		return true
+	})
+	return hashes
 }
 
 func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, currentSlotOnEntry uint64) {
@@ -88,7 +90,21 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 	monitor.ObserveBlockImportingLatency(initialSlotTime)
 }
 
-func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+func hasCompleteBlobDataForAllCommitments(blobs [][]byte, proofs [][][]byte, expectedCount int) bool {
+	if len(blobs) != expectedCount || len(proofs) != expectedCount {
+		return false
+	}
+	for i, blob := range blobs {
+		if len(blob) != cltypes.BYTES_PER_BLOB ||
+			len(proofs[i]) != 1 ||
+			len(proofs[i][0]) != cltypes.BYTES_KZG_PROOF {
+			return false
+		}
+	}
+	return true
+}
+
+func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvailability bool) error {
 	f.mu.Lock()
 	unlocked := false
 	defer f.drainQueuedWork()
@@ -136,6 +152,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	// Validate parent payload status path early (before expensive operations)
 	blockEpoch := f.computeEpochAtSlot(block.Block.Slot)
 	blockVersion := f.beaconCfg.GetCurrentStateVersion(blockEpoch)
+	// A caller may request stricter checks, but cannot disable the protocol
+	// column-availability requirement for a recent Fulu block.
+	checkDataAvailability = checkDataAvailability || das.IsDataAvailabilityRequired(f.beaconCfg, f.Slot(), block.Block.Slot, blockVersion)
 	isGloas := blockVersion >= clparams.GloasVersion
 	headBeforeBlock := common.Hash{}
 	if isGloas && f.Slot() == block.Block.Slot {
@@ -159,46 +178,26 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 	startEngine := time.Now()
 	isVerifiedExecutionPayload := f.verifiedExecutionPayload.Contains(blockRoot)
 	if blockVersion < clparams.GloasVersion {
-		// Find the versioned hashes from blob commitments
+		blobCommitmentCount := block.Block.Body.BlobKzgCommitments.Len()
 		var versionedHashes []common.Hash
 		if newPayload && f.engine != nil && block.Version() >= clparams.DenebVersion {
-			versionedHashes = []common.Hash{}
-			solid.RangeErr[*cltypes.KZGCommitment](block.Block.Body.BlobKzgCommitments, func(i1 int, k *cltypes.KZGCommitment, i2 int) error {
-				versionedHash, err := utils.KzgCommitmentToVersionedHash(common.Bytes48(*k))
-				if err != nil {
-					return err
-				}
-				versionedHashes = append(versionedHashes, versionedHash)
-				return nil
-			})
+			versionedHashes = kzgCommitmentsToVersionedHashes(block.Block.Body.BlobKzgCommitments)
 		}
 
-		// Check if EL has blobs
-		elHasBlobs := false
-		if f.engine != nil && f.peerDas != nil && checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !f.peerDas.IsArchivedMode() {
-			blobsWithProof, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
+		elHasBlobData := false
+		if newPayload && f.engine != nil && f.peerDas != nil && checkDataAvailability && blockVersion < clparams.FuluVersion && blobCommitmentCount > 0 && !f.peerDas.IsArchivedMode() {
+			blobs, proofs, err := f.engine.GetBlobs(ctx, versionedHashes, block.Version())
 			if err != nil {
 				log.Warn("OnBlock: GetBlobs failed", "blockRoot", common.Hash(blockRoot), "err", err)
 			}
-			elHasBlobs = err == nil && len(blobsWithProof) == len(versionedHashes) && len(proofs) == len(versionedHashes)
-			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobs", elHasBlobs)
+			elHasBlobData = err == nil && hasCompleteBlobDataForAllCommitments(blobs, proofs, blobCommitmentCount)
+			log.Trace("OnBlock: EL blob data availability", "blockRoot", common.Hash(blockRoot), "elHasBlobData", elHasBlobData)
 		}
 
-		// Check if blob data is available (skip if blobs are in txpool)
-		if checkDataAvaiability && block.Block.Body.BlobKzgCommitments.Len() > 0 && !elHasBlobs {
-			if block.Version() >= clparams.FuluVersion && f.peerDas != nil {
-				available, err := f.peerDas.IsDataAvailable(block.Block.Slot, blockRoot)
-				if err != nil {
+		if checkDataAvailability && blobCommitmentCount > 0 && !elHasBlobData {
+			if blockVersion == clparams.FuluVersion {
+				if err := f.requireDataColumnAvailability(block, blockRoot); err != nil {
 					return err
-				}
-				if !available {
-					if f.syncedDataManager.Syncing() {
-						return ErrEIP7594ColumnDataNotAvailable
-					} else {
-						if err := f.peerDas.SyncColumnDataLater(block); err != nil {
-							log.Warn("failed to schedule deferred column data sync", "slot", block.Block.Slot, "blockRoot", blockRoot, "err", err)
-						}
-					}
 				}
 			} else if block.Version() >= clparams.DenebVersion {
 				if err := f.isDataAvailable(ctx, block.Block.Slot, blockRoot, block.Block.Body.BlobKzgCommitments); err != nil {
@@ -316,10 +315,6 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			f.eth2Roots.Add(blockRoot, parentHash)
 		}
 	}
-	// Note: highestSeen was already updated before AddChainSegment (line ~216)
-	// so aggregates/attestations for this slot are accepted promptly. No second
-	// update needed here.
-
 	// Remove the parent from the head set
 	delete(f.headSet, block.Block.ParentRoot)
 	f.headSet[blockRoot] = struct{}{}
@@ -370,7 +365,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			// Always validate payload with EL for pending envelopes, regardless of the caller's newPayload flag.
 			// During forward sync newPayload is false, but the envelope still needs to reach the EL;
 			// otherwise the EL never learns about this block and the chain stalls.
-			applied, applyErr := f.applyEnvelopeLocked(ctx, pending, checkDataAvaiability, true)
+			applied, applyErr := f.applyEnvelopeLocked(ctx, pending, checkDataAvailability, true)
 			if applyErr != nil {
 				log.Warn("OnBlock: failed to process pending envelope", "blockRoot", common.Hash(blockRoot), "err", applyErr)
 			} else if applied {
