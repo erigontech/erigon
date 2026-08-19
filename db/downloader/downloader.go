@@ -1136,6 +1136,7 @@ func (d *Downloader) prepareLocalDataForDownload(
 	if loadErr != nil {
 		d.log(log.LvlWarn, "error loading metainfo from disk", "err", loadErr, "name", name)
 	}
+	localMetainfoUnbacked := false
 	if localMetainfo.Ok {
 		localInfoHash := localMetainfo.Value.HashInfoBytes()
 		if localInfoHash == preverifiedInfoHash {
@@ -1145,6 +1146,8 @@ func (d *Downloader) prepareLocalDataForDownload(
 			"preverified", preverifiedInfoHash,
 			"local", localInfoHash,
 			"name", name)
+		info, infoErr := localMetainfo.Value.UnmarshalInfo()
+		localMetainfoUnbacked = infoErr == nil && !d.snapshotDataSizesMatch(&info)
 		// Forget the metainfo we loaded, it's wrong (probably changed hash but not name...)
 		localMetainfo.SetNone()
 	} else {
@@ -1161,11 +1164,20 @@ func (d *Downloader) prepareLocalDataForDownload(
 		if err != nil {
 			return localMetainfo, false, err
 		}
-		if exists {
-			// TODO(@AskAlexSharov, #21522): build the metainfo here when missing, so the kept file can be seeded.
-			d.log(log.LvlWarn, "keeping local snapshot, skipping preverified download", "name", name)
+		if !exists {
+			return localMetainfo, true, nil
 		}
-		return localMetainfo, !exists, nil
+		if localMetainfoUnbacked {
+			// The data backs neither manifest, and nothing else here would ever repair it.
+			// Downloading hands it to the client, which hash-checks and repairs in place.
+			d.log(log.LvlWarn, "local snapshot does not match its own metainfo, downloading",
+				"name", name)
+			return localMetainfo, true, nil
+		}
+		// TODO(@AskAlexSharov, #21522): build and add the metainfo when it is missing
+		// (BuildTorrentIfNeed + addCompleteTorrent), or the kept file is never seeded.
+		d.log(log.LvlWarn, "keeping local snapshot, skipping preverified download", "name", name)
+		return localMetainfo, false, nil
 	}
 
 	if err := d.invalidateData(name, preverifiedInfoHash); err != nil {
