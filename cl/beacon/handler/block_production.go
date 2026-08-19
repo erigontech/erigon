@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/pool"
@@ -2108,7 +2109,12 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
 	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
 	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
-		return err
+		// Storing the block does not depend on the execution layer acknowledging the head in time,
+		// and the next head sends another update.
+		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+			return err
+		}
+		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
