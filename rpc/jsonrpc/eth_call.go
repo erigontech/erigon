@@ -575,7 +575,7 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 
 	var reader state.StateReader
 	if isLatest {
-		reader = rpchelper.NewLatestStateReader(roTx)
+		reader = rpchelper.NewLatestStateReader(execctx.NewTemporalTxStateGetter(roTx))
 	} else {
 		reader, err = rpchelper.CreateHistoryStateReader(ctx, roTx, blockNumber+1, 0, api._txNumReader)
 		if err != nil {
