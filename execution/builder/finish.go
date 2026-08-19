@@ -17,6 +17,7 @@
 package builder
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -58,8 +59,11 @@ func StageBuilderFinishCfg(
 	}
 }
 
-func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) error {
+func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) error {
 	const logPrefix = "BuilderFinish"
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	current := cfg.builderState.BuiltBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
@@ -82,6 +86,9 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests, BlockAccessList: current.BlockAccessList}
 	if dbg.LogHashMismatchReason() {
 		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	*current = exec.AssembledBlock{} // hack to clean global data
 
