@@ -126,7 +126,7 @@ func TestFileMappings(t *testing.T) {
 
 func TestServeFileMappings(t *testing.T) {
 	rec := httptest.NewRecorder()
-	ServeFileMappings(rec, httptest.NewRequest(http.MethodGet, "/debug/mmap?prefix=/nonexistent", nil))
+	ServeFileMappings(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/debug/mmap?prefix=/nonexistent", nil))
 
 	require.Equal(t, http.StatusOK, rec.Code)
 	require.Equal(t, "application/json", rec.Header().Get("Content-Type"))
@@ -151,7 +151,7 @@ func TestServeFileMappingsAllListsEverySeparately(t *testing.T) {
 	require.NoError(t, err)
 
 	rec := httptest.NewRecorder()
-	ServeFileMappings(rec, httptest.NewRequest(http.MethodGet, "/debug/mmap?all=true&prefix="+self, nil))
+	ServeFileMappings(rec, httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/debug/mmap?all=true&prefix="+self, nil))
 	require.Equal(t, http.StatusOK, rec.Code)
 
 	var got struct {
