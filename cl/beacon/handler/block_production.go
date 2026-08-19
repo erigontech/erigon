@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/pool"
@@ -289,24 +290,61 @@ func (a *ApiHandler) expectedWithdrawals(
 	return cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals), nil
 }
 
+// feeRecipientForProposal resolves the fee recipient, warning once per proposer when there is none:
+// building with the zero address gives that block's fees away.
+func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) common.Address {
+	feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
+	if registered {
+		return feeRecipient
+	}
+	// Claimed in one step, so requests for the same slot arriving together do not each decide they
+	// are the first. Without somewhere to remember them, reporting every time beats reporting never.
+	firstTime := true
+	if a.unregisteredProposers != nil {
+		alreadyWarned, _ := a.unregisteredProposers.ContainsOrAdd(proposerIndex, struct{}{})
+		firstTime = !alreadyWarned
+	}
+	if firstTime {
+		log.Warn("BlockProduction: no fee recipient from prepare_beacon_proposer, using zero address",
+			"proposerIndex", proposerIndex, "slot", targetSlot)
+	}
+	return common.Address{}
+}
+
+// reportProductionFailure is the one place a failed production is recorded, so every exit through
+// produceBlock is covered exactly once. A caller that has already gone is not something anyone can
+// act on; an execution layer that stopped answering still is, and that arrives as a deadline.
+func reportProductionFailure(err error, targetSlot uint64) {
+	switch {
+	case err == nil:
+	case errors.Is(err, context.Canceled):
+		log.Debug("BlockProduction: abandoned by its caller", "err", err, "slot", targetSlot)
+	case execution_client.IsUnknownPayloadError(err):
+		log.Warn("BlockProduction: execution payload is unknown", "err", err, "slot", targetSlot)
+	default:
+		log.Error("BlockProduction: failed to produce block", "err", err, "slot", targetSlot)
+	}
+}
+
 func shouldRetryGetPayload(now, deadline time.Time) bool {
 	return now.Before(deadline)
 }
 
-// pollAssembledPayload waits out the build window, then polls get (which stops the EL builder) until
-// it returns a payload or the deadline passes; ok is false when no payload was produced in time.
+// pollAssembledPayload waits out the collection window and reports why no payload arrived rather
+// than logging it: the caller knows which slot it was for and is the one answering the validator
+// client. Contention that clears is invisible, and a caller that gave up produces no record at all.
 func pollAssembledPayload(
 	ctx context.Context,
 	window blockBuilderWindow,
 	retryTime time.Duration,
 	get func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error),
-) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, bool) {
+) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if wait := time.Until(window.firstGetAt); wait > 0 {
 		buildTimer := time.NewTimer(wait)
 		select {
 		case <-ctx.Done():
 			buildTimer.Stop()
-			return nil, nil, nil, nil, false
+			return nil, nil, nil, nil, ctx.Err()
 		case <-buildTimer.C:
 		}
 	}
@@ -314,27 +352,71 @@ func pollAssembledPayload(
 	defer deadlineTimer.Stop()
 	retryTicker := time.NewTicker(retryTime)
 	defer retryTicker.Stop()
+
+	var (
+		attempts int
+		failures int
+		firstErr error
+	)
 	for {
+		// Nothing is waiting for this payload any more, and starting another collection would stop
+		// the builder and could fail for reasons of its own - contention, most likely - which would
+		// then be reported against a slot nobody is waiting for.
+		if ctx.Err() != nil {
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+		}
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
+		attempts++
+		if execution_client.IsUnknownPayloadError(err) {
+			return nil, nil, nil, nil, err
+		}
 		if err != nil {
-			log.Error("BlockProduction: Failed to get payload", "err", err)
+			// The caller's own cancellation comes back through get. That is the slot ending, not
+			// the execution layer failing, and it is not worth reporting on a healthy node. A
+			// failure that happened before it still is.
+			if ctx.Err() == nil || !errors.Is(err, ctx.Err()) {
+				failures++
+				if firstErr == nil {
+					firstErr = err
+				}
+			}
 		} else if payload != nil {
-			return payload, bundles, requestsBundle, blockValue, true
+			return payload, bundles, requestsBundle, blockValue, nil
 		}
 		select {
 		case <-ctx.Done():
-			return nil, nil, nil, nil, false
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
 		case <-deadlineTimer.C:
-			return nil, nil, nil, nil, false
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
 		case <-retryTicker.C:
 		}
 		// Re-check here, not before get(): the select may pick the ticker after
 		// deadlineTimer fired, and get() stops the builder, so it must not run past pollUntil.
 		if !shouldRetryGetPayload(time.Now(), window.pollUntil) {
-			return nil, nil, nil, nil, false
+			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
 		}
 	}
+}
+
+// terminalCause says why the window ended without a payload. A caller that went away with nothing
+// having failed took the slot with it, and there is nothing anyone can act on; anything that did
+// fail is worth reporting however the window ended, since giving up is often the consequence of it.
+func terminalCause(ctx context.Context, attempts, failures int, firstErr error) error {
+	if failures == 0 && ctx.Err() != nil {
+		return ctx.Err()
+	}
+	if firstErr != nil {
+		return fmt.Errorf("no payload after %s, %d failed: %w", attemptsMade(attempts), failures, firstErr)
+	}
+	return fmt.Errorf("no payload after %s", attemptsMade(attempts))
+}
+
+func attemptsMade(attempts int) string {
+	if attempts == 1 {
+		return "1 attempt"
+	}
+	return fmt.Sprintf("%d attempts", attempts)
 }
 
 func (a *ApiHandler) waitForHeadSlot(slot uint64) {
@@ -559,7 +641,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
 	block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
-		log.Warn("Failed to produce block", "err", err, "slot", targetSlot)
+		// produceBlock owns this record; repeating it here made one failure two.
 		return nil, err
 	}
 
@@ -677,7 +759,9 @@ func (a *ApiHandler) produceBlock(
 	targetSlot uint64,
 	randaoReveal common.Bytes96,
 	graffiti common.Hash,
-) (*cltypes.BlindOrExecutionBeaconBlock, error) {
+) (block *cltypes.BlindOrExecutionBeaconBlock, err error) {
+	defer func() { reportProductionFailure(err, targetSlot) }()
+
 	var wg sync.WaitGroup
 	// produce beacon body
 	var (
@@ -743,7 +827,6 @@ func (a *ApiHandler) produceBlock(
 
 	if localErr != nil {
 		// if we failed to locally produce the beacon body, we should not proceed with the block production
-		log.Error("Failed to produce beacon body", "err", localErr, "slot", targetSlot)
 		return nil, localErr
 	}
 	// prepare basic block
@@ -755,7 +838,7 @@ func (a *ApiHandler) produceBlock(
 	if err != nil {
 		return nil, err
 	}
-	block := &cltypes.BlindOrExecutionBeaconBlock{
+	block = &cltypes.BlindOrExecutionBeaconBlock{
 		Slot:          targetSlot,
 		ProposerIndex: proposerIndex,
 		ParentRoot:    baseBlockRoot,
@@ -1020,7 +1103,9 @@ func (a *ApiHandler) produceBeaconBody(
 
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
-	var executionErr error
+	// One collector per concurrent body step. Sharing one would be a write-write race whenever
+	// two steps fail together.
+	var executionErr, syncAggregateErr error
 	var executionRequestsRoot common.Hash
 	// [New in Gloas:EIP7732] saved for envelope construction.
 	// Always initialize for GLOAS so EncodeSSZ never sees nil sub-fields.
@@ -1037,10 +1122,10 @@ func (a *ApiHandler) produceBeaconBody(
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
 		}()
 		retryTime := 10 * time.Millisecond
-		feeRecipient, _ := a.validatorParams.GetFeeRecipient(proposerIndex)
+		feeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
 		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, stateVersion, targetSlot)
 		if err != nil {
-			log.Error("BlockProduction: GetExpectedWithdrawals failed", "err", err)
+			executionErr = fmt.Errorf("produceBeaconBody: expected withdrawals: %w", err)
 			return
 		}
 		slotNumber := hexutil.Uint64(targetSlot)
@@ -1064,19 +1149,20 @@ func (a *ApiHandler) produceBeaconBody(
 			stateVersion,
 		)
 		if err != nil {
-			log.Error("BlockProduction: Failed to get payload id", "err", err)
+			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w", err)
 			return
 		}
 		if len(idBytes) == 0 {
-			log.Warn("BlockProduction: ForkchoiceUpdate returned no payload id (EL may be syncing)", "slot", targetSlot)
+			executionErr = errors.New("produceBeaconBody: forkchoice update returned no payload ID (EL may be syncing)")
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion)
-		payload, bundles, requestsBundle, blockValue, ok := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})
-		if !ok {
+		if pollErr != nil {
+			executionErr = fmt.Errorf("produceBeaconBody: %w", pollErr)
 			return
 		}
 		// Determine block value
@@ -1089,28 +1175,28 @@ func (a *ApiHandler) produceBeaconBody(
 		if stateVersion.Before(clparams.FuluVersion) {
 			if len(bundles.Blobs) != len(bundles.Proofs) ||
 				len(bundles.Commitments) != len(bundles.Proofs) {
-				log.Error("BlockProduction: Invalid bundle")
+				executionErr = errors.New("produceBeaconBody: invalid blobs bundle")
 				return
 			}
 		} else {
 			if len(bundles.Blobs) != len(bundles.Commitments) ||
 				len(bundles.Proofs) != len(bundles.Blobs)*int(a.beaconChainCfg.NumberOfColumns) {
-				log.Error("BlockProduction: Invalid peerdas bundle")
+				executionErr = errors.New("produceBeaconBody: invalid peerdas bundle")
 				return
 			}
 		}
 
 		for i := range bundles.Blobs {
 			if len(bundles.Commitments[i]) != length.Bytes48 {
-				log.Error("BlockProduction: Invalid commitment length")
+				executionErr = errors.New("produceBeaconBody: invalid commitment length")
 				return
 			}
 			if stateVersion.Before(clparams.FuluVersion) && len(bundles.Proofs[i]) != length.Bytes48 {
-				log.Error("BlockProduction: Invalid proof length")
+				executionErr = errors.New("produceBeaconBody: invalid proof length")
 				return
 			}
 			if len(bundles.Blobs[i]) != cltypes.BYTES_PER_BLOB {
-				log.Error("BlockProduction: Invalid blob length")
+				executionErr = errors.New("produceBeaconBody: invalid blob length")
 				return
 			}
 
@@ -1177,7 +1263,7 @@ func (a *ApiHandler) produceBeaconBody(
 			// so the bid's ExecutionRequestsRoot matches the envelope's actual root.
 			root, err := gloasExecRequests.HashSSZ()
 			if err != nil {
-				log.Error("BlockProduction: GLOAS failed to compute ExecutionRequestsRoot", "err", err)
+				executionErr = fmt.Errorf("produceBeaconBody: execution requests root: %w", err)
 			} else {
 				executionRequestsRoot = common.Hash(root)
 			}
@@ -1225,10 +1311,12 @@ func (a *ApiHandler) produceBeaconBody(
 		defer func() {
 			log.Info("BlockProduction: GetSyncAggregate took", "duration", time.Since(start))
 		}()
-		beaconBody.SyncAggregate, err = a.syncMessagePool.GetSyncAggregate(targetSlot-1, blockRoot)
+		aggregate, err := a.syncMessagePool.GetSyncAggregate(targetSlot-1, blockRoot)
 		if err != nil {
-			log.Error("BlockProduction: Failed to get sync aggregate", "err", err)
+			syncAggregateErr = fmt.Errorf("produceBeaconBody: sync aggregate: %w", err)
+			return
 		}
+		beaconBody.SyncAggregate = aggregate
 	})
 	// Process operations all in parallel with each other.
 	wg.Go(func() {
@@ -1267,6 +1355,9 @@ func (a *ApiHandler) produceBeaconBody(
 	wg.Wait()
 	if executionErr != nil {
 		return nil, 0, executionErr
+	}
+	if syncAggregateErr != nil {
+		return nil, 0, syncAggregateErr
 	}
 	if executionPayload == nil {
 		return nil, 0, errors.New("failed to produce execution payload")
@@ -2125,7 +2216,12 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
 	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
 	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
-		return err
+		// Storing the block does not depend on the execution layer acknowledging the head in time,
+		// and the next head sends another update.
+		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+			return err
+		}
+		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
