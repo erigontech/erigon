@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -16,28 +16,10 @@
 
 package chain
 
-import "fmt"
-
-type RulesName string
-
-const (
-	AuRaRules   RulesName = "aura"
-	EtHashRules RulesName = "ethash"
-	ParliaRules RulesName = "parlia"
-)
-
-// ValidRulesNames is the set of recognised consensus engine names.
-var ValidRulesNames = map[RulesName]struct{}{
-	AuRaRules:   {},
-	EtHashRules: {},
-	ParliaRules: {},
-	"":          {}, // empty is valid (defaults to ethash)
+// ParliaConfig is the consensus-engine config for BSC's Parlia (PoSA) L1 engine.
+// It is currently empty: epoch length, block interval and turn length are
+// Parlia snapshot state rather than static chain config.
+type ParliaConfig struct {
 }
 
-// Validate returns an error if the RulesName is not a recognised consensus engine.
-func (r RulesName) Validate() error {
-	if _, ok := ValidRulesNames[r]; !ok {
-		return fmt.Errorf("unsupported consensus engine %q (supported: aura, ethash, parlia)", r)
-	}
-	return nil
-}
+func (c *ParliaConfig) String() string { return "parlia" }
