@@ -108,7 +108,7 @@ type ApiHandler struct {
 
 	// Validator data structures
 	validatorParams *validator_params.ValidatorParams
-	// warnedUnregisteredProposers bounds the set of recent proposers whose warnings are deduplicated.
+	// Bounded cache for fee-recipient warnings; eviction permits a later warning for a proposer.
 	warnedUnregisteredProposers        *lru.Cache[uint64, struct{}]
 	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
 	engine                             execution_client.ExecutionEngine
@@ -201,7 +201,8 @@ func NewApiHandler(
 		blobSnapshots = caplinSnapshots
 	}
 
-	warnedUnregisteredProposers, err := lru.New[uint64, struct{}]("warnedUnregisteredProposers", 1024)
+	// Keep the metric label stable because dashboards can depend on it.
+	warnedUnregisteredProposers, err := lru.New[uint64, struct{}]("unregisteredProposers", 1024)
 	if err != nil {
 		panic(err)
 	}

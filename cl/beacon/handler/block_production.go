@@ -292,7 +292,7 @@ func (a *ApiHandler) expectedWithdrawals(
 
 // feeRecipientForProposal returns the registered fee recipient. Falling back to the zero address
 // gives the proposal's fees away, so missing registrations are warned. The bounded cache suppresses
-// duplicate warnings only while a proposer remains recent.
+// duplicate warnings until their entries are evicted.
 func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) common.Address {
 	feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
 	if registered {
@@ -300,7 +300,7 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 	}
 	shouldWarn := true
 	if a.warnedUnregisteredProposers != nil {
-		// Claim the warning atomically so concurrent requests for the same proposer emit one record.
+		// Check and add atomically so matching requests cannot both claim the same absent entry.
 		alreadyWarned, _ := a.warnedUnregisteredProposers.ContainsOrAdd(proposerIndex, struct{}{})
 		shouldWarn = !alreadyWarned
 	}
@@ -311,20 +311,38 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 	return common.Address{}
 }
 
-// productionErrorSeverity defines the shared priority order for error selection and logging.
+// productionErrorSeverity orders failures by diagnostic value and determines their log level.
 type productionErrorSeverity uint8
 
 const (
 	productionErrorNone productionErrorSeverity = iota
 	productionErrorCanceled
 	productionErrorUnknownPayload
+	productionErrorUnexpectedCancellation
 	productionErrorActionable
 )
 
+// productionOperationCanceledError distinguishes an internal cancellation from the request ending.
+type productionOperationCanceledError struct {
+	operation string
+	cause     error
+}
+
+func (e *productionOperationCanceledError) Error() string {
+	return e.operation + " canceled while request remained active: " + e.cause.Error()
+}
+
+func (e *productionOperationCanceledError) Unwrap() error {
+	return e.cause
+}
+
 func classifyProductionError(err error) productionErrorSeverity {
+	var operationCanceled *productionOperationCanceledError
 	switch {
 	case err == nil:
 		return productionErrorNone
+	case errors.As(err, &operationCanceled):
+		return productionErrorUnexpectedCancellation
 	case errors.Is(err, context.Canceled):
 		return productionErrorCanceled
 	case execution_client.IsUnknownPayloadError(err):
@@ -342,9 +360,8 @@ func mostActionableProductionError(first, second error) error {
 	return first
 }
 
-// reportProductionFailure is the one place a failed production is recorded, so every exit through
-// produceBlock is covered exactly once. A caller that has already gone is not something anyone can
-// act on; an execution layer that stopped answering still is, and that arrives as a deadline.
+// reportProductionFailure emits one handler-level record for each failed produceBlock call. Caller
+// cancellation is routine; failures observed while the request is active remain actionable.
 func reportProductionFailure(err error, targetSlot uint64) {
 	switch classifyProductionError(err) {
 	case productionErrorNone:
@@ -352,9 +369,18 @@ func reportProductionFailure(err error, targetSlot uint64) {
 		log.Debug("BlockProduction: abandoned by its caller", "err", err, "slot", targetSlot)
 	case productionErrorUnknownPayload:
 		log.Warn("BlockProduction: execution payload is unknown", "err", err, "slot", targetSlot)
-	case productionErrorActionable:
+	case productionErrorUnexpectedCancellation, productionErrorActionable:
 		log.Error("BlockProduction: failed to produce block", "err", err, "slot", targetSlot)
 	}
+}
+
+// preserveProductionCancellation records whether the request was active when cancellation was
+// observed.
+func preserveProductionCancellation(requestErr error, operation string, err error) error {
+	if requestErr == nil && errors.Is(err, context.Canceled) {
+		return &productionOperationCanceledError{operation: operation, cause: err}
+	}
+	return err
 }
 
 func shouldRetryGetPayload(now, deadline time.Time) bool {
@@ -398,18 +424,14 @@ func pollAssembledPayload(
 		payload, bundles, requestsBundle, blockValue, err := get()
 		attempts++
 		if err != nil {
-			// The caller's own cancellation comes back through get. That is the slot ending, not
-			// the execution layer failing, and it is not worth reporting on a healthy node. A
-			// failure that happened before it still is.
-			if ctx.Err() == nil || !errors.Is(err, ctx.Err()) {
+			requestErr := ctx.Err()
+			if requestErr == nil || !errors.Is(err, requestErr) {
 				failures++
-				if firstErr == nil {
-					firstErr = err
-				}
+				failure := preserveProductionCancellation(requestErr, "payload collection", err)
+				firstErr = mostActionableProductionError(firstErr, failure)
 			}
 			if execution_client.IsUnknownPayloadError(err) {
-				cause := mostActionableProductionError(firstErr, err)
-				return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, cause)
+				return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
 			}
 		} else if payload != nil {
 			return payload, bundles, requestsBundle, blockValue, nil
@@ -1179,7 +1201,8 @@ func (a *ApiHandler) produceBeaconBody(
 			stateVersion,
 		)
 		if err != nil {
-			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w", err)
+			executionErr = fmt.Errorf("produceBeaconBody: %w",
+				preserveProductionCancellation(ctx.Err(), "forkchoice update", err))
 			return
 		}
 		if len(idBytes) == 0 {

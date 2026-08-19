@@ -489,7 +489,7 @@ func TestPollAssembledPayloadKeepsFailureBeforeUnknownPayload(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
-func TestPollAssembledPayloadDoesNotTreatBuilderCancellationAsCallerCancellation(t *testing.T) {
+func TestPollAssembledPayloadPreservesBuilderCancellationWhileRequestRemainsActive(t *testing.T) {
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	calls := 0
@@ -504,9 +504,31 @@ func TestPollAssembledPayloadDoesNotTreatBuilderCancellationAsCallerCancellation
 			return nil, nil, nil, nil, &engine_helpers.UnknownPayloadErr
 		})
 
-	require.True(t, execution_client.IsUnknownPayloadError(err))
-	require.NotErrorIs(t, err, context.Canceled)
+	require.ErrorIs(t, err, context.Canceled)
+	require.False(t, execution_client.IsUnknownPayloadError(err))
+	require.ErrorContains(t, err, "payload collection canceled while request remained active")
 	require.Equal(t, 2, calls)
+}
+
+func TestProductionReportsBuilderCancellationAfterPollDeadline(t *testing.T) {
+	logs := captureProductionLogs(t)
+	past := time.Now().Add(-time.Second)
+	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
+	calls := 0
+
+	_, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, context.Canceled
+		})
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, 1, calls)
+	reportProductionFailure(err, 123)
+
+	captured := logs()
+	require.Contains(t, captured, "lvl=eror")
+	require.Contains(t, captured, "payload collection canceled while request remained active")
 }
 
 func TestProductionReportsUnknownPayloadOnce(t *testing.T) {
@@ -1040,9 +1062,9 @@ func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *
 	require.Contains(t, err.Error(), "boom")
 }
 
-func TestFeeRecipientDeduplicatesRecentWarnings(t *testing.T) {
+func TestFeeRecipientDeduplicatesWarningsWhileCached(t *testing.T) {
 	logs := captureProductionLogs(t)
-	warned, err := lru.New[uint64, struct{}]("warnedUnregisteredProposers", 8)
+	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 2)
 	require.NoError(t, err)
 	params := validator_params.NewValidatorParams()
 	a := &ApiHandler{validatorParams: params, warnedUnregisteredProposers: warned}
@@ -1063,11 +1085,16 @@ func TestFeeRecipientDeduplicatesRecentWarnings(t *testing.T) {
 	// Another proposer must not reset a cached warning while capacity remains.
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(9, 5))
 	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"))
+
+	// Once capacity evicts an entry, that proposer can produce another useful warning.
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(11, 6))
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(9, 7))
+	require.Equal(t, 4, strings.Count(logs(), "lvl=warn"))
 }
 
 func TestFeeRecipientDeduplicatesConcurrentWarnings(t *testing.T) {
 	logs := captureProductionLogs(t)
-	warned, err := lru.New[uint64, struct{}]("warnedUnregisteredProposers", 8)
+	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 8)
 	require.NoError(t, err)
 	a := &ApiHandler{validatorParams: validator_params.NewValidatorParams(), warnedUnregisteredProposers: warned}
 
@@ -1141,9 +1168,8 @@ func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
 	require.Contains(t, captured, "boom")
 }
 
-func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
-	ctx := t.Context()
-	logs := captureProductionLogs(t)
+func produceBlockWithForkChoiceResult(t *testing.T, ctx context.Context, payloadID []byte, forkChoiceErr error) error {
+	t.Helper()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -1153,12 +1179,28 @@ func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, nil).AnyTimes()
+		Return(payloadID, forkChoiceErr).AnyTimes()
 	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
 	handler.engine = engine
 
 	_, err = handler.produceBlock(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
+	return err
+}
+
+func TestProductionReportsForkChoiceCancellationWhileRequestRemainsActive(t *testing.T) {
+	logs := captureProductionLogs(t)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), nil, context.Canceled)
+	require.ErrorIs(t, err, context.Canceled)
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.Contains(t, captured, "forkchoice update canceled while request remained active")
+}
+
+func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
+	logs := captureProductionLogs(t)
+	err := produceBlockWithForkChoiceResult(t, t.Context(), nil, nil)
 	require.ErrorContains(t, err, "forkchoice update returned no payload ID")
 
 	captured := logs()
