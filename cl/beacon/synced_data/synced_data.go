@@ -47,8 +47,9 @@ type SyncedDataManager struct {
 	headState         *state.CachingBeaconState
 	previousHeadState *state.CachingBeaconState
 
-	accessLock sync.RWMutex // lock used for accessing atomic methods
-	mu         sync.RWMutex
+	selectedHeadMu sync.RWMutex
+	accessLock     sync.RWMutex // lock used for accessing atomic methods
+	mu             sync.RWMutex
 }
 
 type headIdentity struct {
@@ -67,6 +68,8 @@ func (s *SyncedDataManager) OnSelectedHead(blockRoot common.Hash, blockSlot uint
 	if !s.enabled {
 		return
 	}
+	s.selectedHeadMu.Lock()
+	defer s.selectedHeadMu.Unlock()
 	s.selectedHead.Store(&headIdentity{root: blockRoot, slot: blockSlot})
 }
 
@@ -79,6 +82,21 @@ func (s *SyncedDataManager) SelectedHead() (common.Hash, uint64, bool) {
 		return common.Hash{}, 0, false
 	}
 	return head.root, head.slot, true
+}
+
+// ViewSelectedHead keeps the selected head unchanged while fn acts on it. Head publication waits
+// for fn, so callers must keep the work bounded.
+func (s *SyncedDataManager) ViewSelectedHead(fn ViewSelectedHeadFn) error {
+	if !s.enabled {
+		return ErrNotSynced
+	}
+	s.selectedHeadMu.RLock()
+	defer s.selectedHeadMu.RUnlock()
+	head := s.selectedHead.Load()
+	if head == nil {
+		return ErrNotSynced
+	}
+	return fn(head.root, head.slot)
 }
 
 // OnHeadState updates the current head state and tracks the previous state.
@@ -253,13 +271,16 @@ func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
 
 func (s *SyncedDataManager) UnsetHeadState() {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	s.accessLock.Lock()
-	defer s.accessLock.Unlock()
 	s.stateHead.Store(nil)
-	s.selectedHead.Store(nil)
 	s.headState = nil
 	s.previousHeadState = nil
+	s.accessLock.Unlock()
+	s.mu.Unlock()
+
+	s.selectedHeadMu.Lock()
+	s.selectedHead.Store(nil)
+	s.selectedHeadMu.Unlock()
 }
 
 func (s *SyncedDataManager) ValidatorPublicKeyByIndex(index int) (common.Bytes48, error) {

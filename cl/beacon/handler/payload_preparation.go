@@ -360,10 +360,19 @@ func (a *ApiHandler) forkChoiceUpdateForPreparation(
 				return nil, errProposalInFlight
 			}
 			defer finishPreparation()
-			if selectedRoot, _, selected := a.syncedData.SelectedHead(); !selected || selectedRoot != baseBlockRoot {
+			var payloadID []byte
+			viewErr := a.syncedData.ViewSelectedHead(func(selectedRoot common.Hash, _ uint64) error {
+				if selectedRoot != baseBlockRoot {
+					return errPreparationHeadChanged
+				}
+				var err error
+				payloadID, err = a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+				return err
+			})
+			if errors.Is(viewErr, synced_data.ErrNotSynced) {
 				return nil, errPreparationHeadChanged
 			}
-			return a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+			return payloadID, viewErr
 		}()
 		if !errors.Is(err, execution_client.ErrForkChoiceBusy) {
 			return payloadID, err
