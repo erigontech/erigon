@@ -165,9 +165,9 @@ func TestPBinBranchCodecIsCanonical(t *testing.T) {
 // pbinTestRecord assembles a record by hand so decode can be probed with bytes
 // the encoder would never emit.
 func pbinTestRecord(touchMap, afterMap uint16, bodies ...[]byte) []byte {
-	rec := make([]byte, 4)
-	binary.BigEndian.PutUint16(rec, touchMap)
-	binary.BigEndian.PutUint16(rec[2:], afterMap)
+	rec := make([]byte, 0, 4)
+	rec = binary.BigEndian.AppendUint16(rec, touchMap)
+	rec = binary.BigEndian.AppendUint16(rec, afterMap)
 	for _, b := range bodies {
 		rec = append(rec, b...)
 	}

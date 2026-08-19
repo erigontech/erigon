@@ -36,21 +36,18 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
-	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tests/testforks"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/execution/vm/program"
-	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
 func TestMemoryGasCost(t *testing.T) {
@@ -65,8 +62,8 @@ func TestMemoryGasCost(t *testing.T) {
 	}
 	for i, tt := range tests {
 		v, err := vm.MemoryGasCost(&vm.CallContext{}, tt.size)
-		if (err == vm.ErrGasUintOverflow) != tt.overflow {
-			t.Errorf("test %d: overflow mismatch: have %v, want %v", i, err == vm.ErrGasUintOverflow, tt.overflow)
+		if errors.Is(err, vm.ErrGasUintOverflow) != tt.overflow {
+			t.Errorf("test %d: overflow mismatch: have %v, want %v", i, errors.Is(err, vm.ErrGasUintOverflow), tt.overflow)
 		}
 		if v != tt.cost {
 			t.Errorf("test %d: gas cost mismatch: have %v, want %v", i, v, tt.cost)
@@ -128,7 +125,7 @@ func TestEIP2200(t *testing.T) {
 			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 			require.NoError(t, err)
 
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+			r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 			defer s.Close()
 
@@ -230,7 +227,7 @@ func TestEIP8038SStore(t *testing.T) {
 			tx, sd := testTemporalTxSD(t)
 			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 			require.NoError(t, err)
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+			r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 			defer s.Close()
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -265,7 +262,7 @@ func TestEIP8038RevisedScheduleSelectedByConfig(t *testing.T) {
 		tx, sd := testTemporalTxSD(t)
 		txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 		require.NoError(t, err)
-		r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+		r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 		s := state.New(r)
 		defer s.Close()
 		address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -423,7 +420,7 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			tx, sd := testTemporalTxSD(t)
 			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 			require.NoError(t, err)
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+			r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 			defer s.Close()
 			caller := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -455,7 +452,7 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	tx, sd := testTemporalTxSD(t)
 	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 	require.NoError(t, err)
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
 	defer s.Close()
 	initCode := program.New().Push(0).Push(400_000).Op(vm.MSTORE).Return(0, 0).Bytes()
@@ -521,7 +518,7 @@ func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
 				tx, sd := testTemporalTxSD(t)
 				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
 				defer s.Close()
 				initCode := []byte{byte(vm.STOP)}
@@ -592,7 +589,7 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 				tx, sd := testTemporalTxSD(t)
 				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
 				defer s.Close()
 				initCode := program.New().Push(0).Return(0, 0).Bytes()
@@ -687,7 +684,7 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 				tx, sd := testTemporalTxSD(t)
 				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
 				defer s.Close()
 				initCode := program.New().Push(0xaa).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
@@ -763,7 +760,7 @@ var createGasTests = []struct {
 
 func TestCreateGas(t *testing.T) {
 	t.Parallel()
-	db := testutil.TemporalDB(t)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -776,8 +773,8 @@ func TestCreateGas(t *testing.T) {
 			require.NoError(t, err)
 			defer domains.Close()
 
-			stateReader := rpchelper.NewLatestStateReader(domains.AsGetter(tx))
-			stateWriter := rpchelper.NewLatestStateWriter(tx, domains, (*freezeblocks.BlockReader)(nil), 0)
+			stateReader := state.NewReaderV3(domains.AsStateGetter(tx))
+			stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
 
 			s := state.New(stateReader)
 			defer s.Close()
@@ -824,7 +821,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 	require.NoError(t, err)
 
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
 	defer s.Close()
 

@@ -69,14 +69,7 @@ type HistoricalTraceWorker struct {
 
 	taskGasPool *protocol.GasPool
 
-	// calculated by .changeBlock()
-	blockHash common.Hash
-	blockNum  uint64
-	header    *types.Header
-	blockCtx  *evmtypes.BlockContext
-	rules     *chain.Rules
-	signer    *types.Signer
-	vmCfg     *vm.Config
+	vmCfg *vm.Config
 }
 
 type TraceConsumer interface {
@@ -179,7 +172,7 @@ func (rw *HistoricalTraceWorker) RunTxTask(txTask *TxTask) *TxResult {
 		if txTask.BlockNumber() == 0 {
 			// Genesis block
 			var genesisIbs *state.IntraBlockState
-			_, genesisIbs, err = genesiswrite.GenesisToBlock(nil, rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
+			_, genesisIbs, err = genesiswrite.GenesisToBlock(rw.execArgs.Genesis, rw.execArgs.Dirs, rw.logger)
 			if err != nil {
 				panic(fmt.Errorf("GenesisToBlock: %w", err))
 			}
@@ -461,7 +454,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 		hooks := result.TracingHooks()
 		if result.Err != nil {
 			if hooks != nil && hooks.OnTxEnd != nil {
-				hooks.OnTxEnd(nil, err)
+				hooks.OnTxEnd(nil, result.Err)
 			}
 			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, result.Err)
 		}
@@ -480,7 +473,7 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 		}
 
 		if err != nil {
-			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, result.Err)
+			return outputTxNum, false, fmt.Errorf("bn=%d, tn=%d: %w", result.BlockNumber(), result.Version().TxNum, err)
 		}
 
 		if receipt != nil {
@@ -497,17 +490,16 @@ func (p *historicalResultProcessor) processResults(consumer TraceConsumer, cfg *
 					defer ibs.Close()
 					ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 					syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-						ret, err := protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{
-							Tracer: result.TracingHooks(),
-						})
-						result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
-						return ret, err
+						return protocol.SysCallContract(contract, data, cfg.ChainConfig, ibs, txTask.Header, txTask.Engine, false /* constCall */, vm.Config{})
 					}
 
 					_, err := cfg.Engine.Finalize(cfg.ChainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles, p.blockResult.Receipts, txTask.Withdrawals, chainReader, syscall, true /* skipReceiptsEval */, logger)
 					if err != nil {
 						result.Err = err
+						return
 					}
+
+					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 				}()
 			}
 

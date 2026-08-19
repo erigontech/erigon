@@ -33,8 +33,8 @@ func mergeableRange(name kv.Domain, from, to uint64) DomainRanges {
 	}
 }
 
-// The rebuild's shard loop holds live accounts/storage file streams for the whole
-// range, so only commitment may collapse underneath it.
+// A rebuild shard runs inside a range-scoped iterator over the accounts and
+// storage files, so only commitment may collapse underneath it.
 func TestKeepCommitmentMergeOnly(t *testing.T) {
 	t.Parallel()
 

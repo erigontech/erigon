@@ -27,7 +27,6 @@ import (
 	"sync/atomic"
 )
 
-// ParallelPatriciaHashed is the trie-side of the parallel commitment pipeline.
 type ParallelPatriciaHashed struct {
 	template       *HexPatriciaHashed
 	trieCtxFactory TrieContextFactory
@@ -44,11 +43,8 @@ type ParallelPatriciaHashed struct {
 	deferredForCaller      []*DeferredBranchUpdate
 }
 
-// DeepLocalFolds reports how many big-storage accounts the last Process deep-folded
-// concurrently rather than demoting to serial recursion.
 func (p *ParallelPatriciaHashed) DeepLocalFolds() uint64 { return p.deepLocalFolds.Load() }
 
-// NewParallelPatriciaHashed constructs a fresh ParallelPatriciaHashed.
 func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int16, cfg TrieConfig) *ParallelPatriciaHashed {
 	p := &ParallelPatriciaHashed{
 		template:       NewHexPatriciaHashed(accountKeyLen, nil, cfg),
@@ -60,7 +56,6 @@ func NewParallelPatriciaHashed(ctxFactory TrieContextFactory, accountKeyLen int1
 	return p
 }
 
-// SetNumWorkers overrides the worker count for the next Process call; n <= 0 falls back to runtime.NumCPU.
 func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 	if n <= 0 {
 		n = runtime.NumCPU()
@@ -68,30 +63,24 @@ func (p *ParallelPatriciaHashed) SetNumWorkers(n int) {
 	p.numWorkers = n
 }
 
-// SetLeaveDeferredForCaller makes Process leave the deferred branch updates for the caller to flush instead of applying them inline.
 func (p *ParallelPatriciaHashed) SetLeaveDeferredForCaller(leave bool) {
 	p.leaveDeferredForCaller = leave
 }
 
-// HasPendingDeferredUpdates reports whether Process left deferred branch updates for the caller to flush.
 func (p *ParallelPatriciaHashed) HasPendingDeferredUpdates() bool {
 	return len(p.deferredForCaller) > 0
 }
 
-// TakeDeferredUpdates returns the deferred branch updates staged for the caller and clears them; the caller takes ownership.
 func (p *ParallelPatriciaHashed) TakeDeferredUpdates() []*DeferredBranchUpdate {
 	d := p.deferredForCaller
 	p.deferredForCaller = nil
 	return d
 }
 
-// AdoptRootTrie replaces the template with a trie that already carries state
-// (e.g. restored before the variant upgrade); the previous trie must not be used after.
 func (p *ParallelPatriciaHashed) AdoptRootTrie(root *HexPatriciaHashed) {
 	p.template = root
 }
 
-// RootTrie returns the template trie, which carries the live root state.
 func (p *ParallelPatriciaHashed) RootTrie() *HexPatriciaHashed {
 	return p.template
 }
@@ -119,7 +108,6 @@ func (p *ParallelPatriciaHashed) Reset() {
 	p.deepLocalFolds.Store(0)
 }
 
-// Release frees the template and worker pool; the instance must not be used afterwards. Repeat calls are no-ops.
 func (p *ParallelPatriciaHashed) Release() {
 	if p.template != nil {
 		p.template.Release()
@@ -128,29 +116,21 @@ func (p *ParallelPatriciaHashed) Release() {
 	p.rootHash.Store(nil)
 }
 
-// ResetContext propagates a new PatriciaContext to the template; per-worker contexts come from trieCtxFactory.
 func (p *ParallelPatriciaHashed) ResetContext(ctx PatriciaContext) {
 	if p.template != nil {
 		p.template.ResetContext(ctx)
 	}
 }
 
-// SetTrieContextFactory replaces the per-worker context factory.
 func (p *ParallelPatriciaHashed) SetTrieContextFactory(f TrieContextFactory) {
 	p.trieCtxFactory = f
 }
 
-// syncWriter serializes concurrent trace writes from the root template and the
-// mount fold workers onto one underlying io.Writer.
 type syncWriter struct {
 	mu sync.Mutex
 	w  io.Writer
 }
 
-// NewSyncWriter wraps w so concurrent trace writes are serialized. It is
-// idempotent (a *syncWriter is returned unchanged) and returns nil for nil,
-// so the same guarded writer can be shared across the template and its fold
-// workers without stacking mutexes.
 func NewSyncWriter(w io.Writer) io.Writer {
 	if w == nil {
 		return nil
@@ -167,9 +147,6 @@ func (sw *syncWriter) Write(p []byte) (int, error) {
 	return sw.w.Write(p)
 }
 
-// prefixWriter tags each line with a fixed prefix and forwards the whole tagged
-// chunk to w in one Write, so a worker's trace lines stay attributable and never
-// interleave mid-line when multiplexed onto a shared writer.
 type prefixWriter struct {
 	w      io.Writer
 	prefix []byte
@@ -194,9 +171,6 @@ func (pw *prefixWriter) Write(p []byte) (int, error) {
 	return len(p), nil
 }
 
-// tracePrefix wraps w so a fold worker's trace lines are tagged with prefix.
-// Returns nil (tracing disabled) when w is nil, so callers keep the cheap
-// `traceW != nil` guard. w should be the shared syncWriter.
 func tracePrefix(w io.Writer, prefix string) io.Writer {
 	if w == nil {
 		return nil
@@ -204,9 +178,6 @@ func tracePrefix(w io.Writer, prefix string) io.Writer {
 	return &prefixWriter{w: w, prefix: []byte(prefix)}
 }
 
-// SetTraceWriter routes trace output to w (nil disables tracing). The writer is
-// wrapped once in a mutex-guarded syncWriter shared with the template, whose
-// fold workers fan it out to their per-goroutine tries.
 func (p *ParallelPatriciaHashed) SetTraceWriter(w io.Writer) {
 	tw := NewSyncWriter(w)
 	if p.template != nil {
@@ -224,7 +195,6 @@ func (p *ParallelPatriciaHashed) Variant() TrieVariant {
 	return VariantParallelHexPatricia
 }
 
-// RootHash returns the root hash published by Process, falling back to the template's current root if none was published.
 func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 	if r := p.rootHash.Load(); r != nil {
 		src := *r
@@ -238,7 +208,6 @@ func (p *ParallelPatriciaHashed) RootHash() ([]byte, error) {
 	return p.template.RootHash()
 }
 
-// Process is the entry point for parallel commitment computation; it requires updates.mode == ModeParallel.
 func (p *ParallelPatriciaHashed) Process(
 	ctx context.Context,
 	updates *Updates,
@@ -299,7 +268,7 @@ func (p *ParallelPatriciaHashed) Process(
 	return out, nil
 }
 
-// dfsSubtree visits the subtree in nibble order, emitting each node before its children; the hashedKey passed to fn is mutated in place and must not be retained.
+// hashedKey passed to fn is mutated in place and must not be retained.
 func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byte, update *Update) error) error {
 	if node == nil {
 		return nil
@@ -328,7 +297,6 @@ func dfsSubtree(node *prefixNode, path []byte, fn func(hashedKey, plainKey []byt
 	return nil
 }
 
-// applyDeferredUpdates applies the merged deferred branch updates, returning every entry to the pool on success or failure.
 func (p *ParallelPatriciaHashed) applyDeferredUpdates(ctx context.Context, pu *parallelUpdate) error {
 	pu.deferredMu.Lock()
 	deferred := pu.deferredCombined

@@ -54,7 +54,6 @@ func runDirectBench(b *testing.B, pk [][]byte, updates []Update) {
 func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) {
 	ctx := context.Background()
 	b.ReportAllocs()
-	// pph is reused across iterations so the worker pool amortizes.
 	var pph *ParallelPatriciaHashed
 	defer func() {
 		if pph != nil {
@@ -70,7 +69,6 @@ func runParallelBench(b *testing.B, pk [][]byte, updates []Update, workers int) 
 			pph = NewParallelPatriciaHashed(mockTrieCtxFactory(ms), length.Addr, DefaultTrieConfig())
 			pph.SetNumWorkers(workers)
 		} else {
-			// Rewire MockState without Reset()/Release(), which would drop the worker pool.
 			pph.SetTrieContextFactory(mockTrieCtxFactory(ms))
 			pph.ResetContext(ms)
 		}
@@ -147,7 +145,6 @@ func Benchmark_Commitment_DirectVsParallel(b *testing.B) {
 	})
 }
 
-// Accounts are pinned to distinct top nibbles so their sub-tries don't share branches.
 func buildClusteredStorageCorpus(b testing.TB, numAccounts, slotsPerAccount int) ([][]byte, []Update) {
 	b.Helper()
 	rnd := rand.New(rand.NewSource(99001))
@@ -182,7 +179,6 @@ type storageGroup struct {
 	updates []Update
 }
 
-// Splits one whale account's slots into disjoint, independently processable sub-tries.
 func buildWhaleStorageGroups(slots, groups int) []storageGroup {
 	rnd := rand.New(rand.NewSource(919273))
 	addr := make([]byte, length.Addr)
@@ -211,7 +207,6 @@ type groupRun struct {
 	upds *Updates
 }
 
-// Must run on the test goroutine (uses require); each group gets its own MockState so concurrent process() shares no state.
 func setupGroup(tb testing.TB, g storageGroup) groupRun {
 	ms := NewMockState(tb)
 	require.NoError(tb, ms.applyPlainUpdates(g.pk, g.updates))
@@ -220,7 +215,7 @@ func setupGroup(tb testing.TB, g storageGroup) groupRun {
 	return groupRun{hph: hph, upds: upds}
 }
 
-// process is safe to call from any goroutine (no require/FailNow).
+// Returns err, not require: FailNow is unsafe off the test goroutine.
 func (r groupRun) process() error {
 	_, err := r.hph.Process(context.Background(), r.upds, "", nil, WarmupConfig{})
 	return err

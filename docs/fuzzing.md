@@ -63,6 +63,12 @@ go test ./db/seg/ -run '^$' -fuzz '^FuzzCompress$' -fuzztime 30s
 - Newly discovered "interesting" inputs are cached under
   `$(go env GOCACHE)/fuzz`; a crashing input is written to the package's
   `testdata/fuzz/<FuzzName>/` so it can be committed and replayed.
+- A `FAIL` whose only detail is `context deadline exceeded`, with no file written
+  under `testdata/fuzz/`, is the fuzzing engine misreporting the end of the
+  `fuzztime` window, not a finding — rerun it
+  ([golang/go#75804](https://github.com/golang/go/issues/75804), fixed in Go
+  1.27). The nightly workflow recognises and ignores that exact signature;
+  anything else is a real failure.
 
 Replay just the seed + discovered corpus (no mutation), e.g. to reproduce a
 crash file someone committed:

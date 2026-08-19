@@ -76,7 +76,7 @@ func pbinM1ANewAgg(t *testing.T, rawDB kv.RwDB, dirs datadir.Dirs, stepSize uint
 func pbinM1ANewDatadir(t *testing.T, stepSize uint64) (kv.TemporalRwDB, *state.Aggregator, datadir.Dirs) {
 	t.Helper()
 	dirs := datadir.New(t.TempDir())
-	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t, dirs.Chaindata).
+	rawDB := mdbx.New(dbcfg.ChainDB, log.New()).InMem(dirs.Chaindata).
 		GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(rawDB.Close)
 

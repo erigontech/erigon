@@ -68,11 +68,11 @@ func TestPBinGenesisComputesBinaryRoot(t *testing.T) {
 	g := pbinTestGenesis()
 
 	withBinCommitment(t, false)
-	hexBlock, _, err := genesiswrite.GenesisToBlock(t, g, datadir.New(t.TempDir()), logger)
+	hexBlock, _, err := genesiswrite.GenesisToBlock(g, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 
 	withBinCommitment(t, true)
-	binBlock, _, err := genesiswrite.GenesisToBlock(t, g, datadir.New(t.TempDir()), logger)
+	binBlock, _, err := genesiswrite.GenesisToBlock(g, datadir.New(t.TempDir()), logger)
 	require.NoError(t, err)
 
 	require.NotEqual(t, hexBlock.Root(), binBlock.Root(), "genesis under the bin variant returned the hex root")

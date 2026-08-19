@@ -1275,14 +1275,15 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
-	mxRunningMerges.Inc()
-	defer mxRunningMerges.Dec()
 
 	r := aggTx.findMergeRange(toTxNum, a.StepSize(), a.StepsInFrozenFile())
 	if !r.any() {
 		a.cleanAfterMerge(nil)
 		return false, nil
 	}
+
+	mxRunningMerges.Inc()
+	defer mxRunningMerges.Dec()
 
 	outs, err := aggTx.filesInRange(r)
 	if err != nil {
@@ -2736,6 +2737,10 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []b
 
 func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
 	return at.getLatest(domain, k, tx, maxStep, metrics, start)
+}
+
+func (at *AggregatorRoTx) GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx) (size int, ok bool, err error) {
+	return at.d[domain].GetLatestValSize(k, tx)
 }
 
 // MeteredGetLatestWithTxN returns the high-water txN alongside (value,

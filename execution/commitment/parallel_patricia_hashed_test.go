@@ -279,7 +279,7 @@ func TestDFSSubtree(t *testing.T) {
 	pu.Insert(nibs(0x01, 0x02, 0x03), []byte("pk-A"), nil)
 	pu.Insert(nibs(0x01, 0x02, 0x04), []byte("pk-B"), nil)
 	pu.Insert(nibs(0x05, 0x06, 0x07), []byte("pk-C"), nil)
-	pu.Insert(nibs(0x01, 0x02), []byte("pk-D"), nil) // prefix of A and B
+	pu.Insert(nibs(0x01, 0x02), []byte("pk-D"), nil)
 
 	type kv struct{ hk, pk string }
 	var got []kv
@@ -428,7 +428,6 @@ func TestParallelPatriciaHashedTemplateMirrorsPublishedRoot(t *testing.T) {
 	require.NoError(t, err)
 	require.NotEmpty(t, published)
 
-	// drop the atomic publish so RootHash falls back to the template's root cell
 	p.rootHash.Store(nil)
 
 	got, err := p.RootHash()
@@ -488,10 +487,9 @@ type stagedBatch struct {
 	label      string
 	plainKeys  [][]byte
 	updates    []Update
-	expectSame bool // root must equal the previous batch's root
+	expectSame bool
 }
 
-// one MockState per mode persists across batches, so a later batch sees the DB state earlier batches established
 func stagedRootEquivalence(t *testing.T, batches []stagedBatch, numWorkers int) []byte {
 	t.Helper()
 	ctx := context.Background()
@@ -618,7 +616,6 @@ func TestParallelBloatnetShape(t *testing.T) {
 		len(plainKeys), numAccounts, root)
 }
 
-// guards against workers folding from deep storage depth overflowing the fixed-size cell.extension
 func TestParallelSingleAccountManyStorage(t *testing.T) {
 	t.Parallel()
 
@@ -736,7 +733,6 @@ func TestParallelDeleteWithSurvivingSiblings_BranchInspection(t *testing.T) {
 	}
 }
 
-// counterOff is the byte offset of the search counter within key
 func findHashForNibbles(t testing.TB, key []byte, counterOff int, prefix []byte, seed, salt uint64) {
 	t.Helper()
 	counter := seed*salt + 1
@@ -779,7 +775,6 @@ var (
 	storageSubN byte = 2
 )
 
-// deterministic nested forks at depths 1..4 that random keccak keys never produce
 func genWideNested(t testing.TB) (keys [][]byte, upds []Update) {
 	t.Helper()
 	seed := uint64(1)
@@ -805,7 +800,6 @@ func genWideNested(t testing.TB) (keys [][]byte, upds []Update) {
 	return keys, upds
 }
 
-// storage slots fork at depths 1..4 to exercise deep extensions and account-terminator nodes below depth 64
 func genAccountsWithNestedStorage(t testing.TB, nAccounts int) (keys [][]byte, upds []Update) {
 	t.Helper()
 	seed := uint64(1000)
@@ -843,7 +837,6 @@ func genAccountsWithNestedStorage(t testing.TB, nAccounts int) (keys [][]byte, u
 	return keys, upds
 }
 
-// uncontrolled keccak distribution, the production-like counterpart to the forked generators
 func genRandomAccountsStorage(nAcc int) (keys [][]byte, upds []Update) {
 	for a := range nAcc {
 		var addr [20]byte
@@ -896,7 +889,6 @@ func sparseBatch2(keys [][]byte, modN int, deletes bool) (k2 [][]byte, u2 []Upda
 	return k2, u2
 }
 
-// one MockState across both batches: batch-1 branches become DB state for batch-2
 func runIncremental(t *testing.T, mode runMode, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) ([]byte, *MockState) {
 	t.Helper()
 	return incrementalRoot(t, mode, workers, k1, u1, k2, u2)
@@ -907,8 +899,6 @@ func requireIncrementalEquiv(t *testing.T, k1 [][]byte, u1 []Update, k2 [][]byte
 	requireAllEnginesParity(t, k1, u1, k2, u2, workers)
 }
 
-// Folds two batches on ONE trie instance with the per-block Reset + SetState
-// lifecycle in between, so batch-2 runs on workers cached by batch-1.
 func reusedInstanceIncrementalRoot(t *testing.T, variant TrieVariant, workers int, k1 [][]byte, u1 []Update, k2 [][]byte, u2 []Update) []byte {
 	t.Helper()
 	ctx := context.Background()
@@ -967,7 +957,6 @@ func TestVerifyParallel_WideNestedIncremental(t *testing.T) {
 	requireIncrementalEquiv(t, keys, upds, k2, u2, 8)
 }
 
-// one storage slot per account, so each top nibble holds a single account+storage leaf sharing one extension
 func TestVerifyParallel_StorageMinimal(t *testing.T) {
 	oldTop, oldSub := storageTopN, storageSubN
 	storageTopN, storageSubN = 1, 1
@@ -977,7 +966,6 @@ func TestVerifyParallel_StorageMinimal(t *testing.T) {
 	requireIncrementalEquiv(t, keys, upds, k2, u2, 8)
 }
 
-// compares stored branches, not just the root, catching wrong branch metadata a matching root would hide
 func TestVerifyParallel_StorageBranchEquiv(t *testing.T) {
 	t.Parallel()
 	ctx := context.Background()

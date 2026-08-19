@@ -25,7 +25,7 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 // pbinTestStoredTree runs a small corpus through the engine and returns the
@@ -52,8 +52,8 @@ func TestPBinRootRecordRealTableIteration(t *testing.T) {
 	rootRecord := bytes.Clone(ms.cm[string(pbinRootKey)])
 	require.NotEmpty(t, rootRecord)
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	tx := memdb.BeginRw(t, db)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	tx := mdbxtest.BeginRw(t, db)
 	for key, record := range ms.cm {
 		require.NoError(t, tx.Put(kv.TblCommitmentVals, []byte(key), record))
 	}

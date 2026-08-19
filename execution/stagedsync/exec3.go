@@ -129,6 +129,10 @@ func deferCommitmentUpdates(variant commitment.TrieVariant, isForkValidation, pa
 	return isForkValidation || (parallel && isApplyingBlocks)
 }
 
+func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
+	return dbg.ReadAheadWait && isValidatingBlocks
+}
+
 // execRange is the resolved block/txNum window the executor runs over. The
 // stage wrapper resolves it (SeekCommitment + restoreTxNum) and passes it in;
 // the exec core does not touch the stage's DB metadata to derive it.
@@ -223,6 +227,9 @@ func execV3(ctx context.Context,
 			doms.SetDeferCommitmentUpdates(true)
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
+	}
+	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
+		cfg.readAheader.WaitForWarmup(ctx)
 	}
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
@@ -335,6 +342,9 @@ func execV3Serial(ctx context.Context,
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
+	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
+		cfg.readAheader.WaitForWarmup(ctx)
+	}
 	if !initialCycle && isApplyingBlocks {
 		var clean func()
 
@@ -882,7 +892,7 @@ type FlushAndComputeCommitmentTimes struct {
 	ComputeCommitment time.Duration
 }
 
-// computeAndCheckCommitmentV3 - does write state to db and then check commitment
+// computeAndCheckCommitmentV3 records execution progress and checks the commitment.
 func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
 		return false, times, errors.New("header is nil")
@@ -895,9 +905,6 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	if !parallel {
 		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
 			return false, times, err
-		}
-		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
-			return false, times, fmt.Errorf("writing plain state version: %w", err)
 		}
 	}
 

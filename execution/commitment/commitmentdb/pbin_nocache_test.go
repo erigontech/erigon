@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -38,8 +39,11 @@ import (
 
 type pbinStubSharedDomains struct{ sharedCache bool }
 
-func (s *pbinStubSharedDomains) SetTxNum(uint64)                                         {}
-func (s *pbinStubSharedDomains) AsGetter(kv.TemporalTx) kv.TemporalGetter                { return nil }
+func (s *pbinStubSharedDomains) SetTxNum(uint64)                                    {}
+func (s *pbinStubSharedDomains) AsStateGetter(kv.TemporalTx) execctxapi.StateGetter { return nil }
+func (s *pbinStubSharedDomains) AsStateGetterMetered(kv.TemporalTx, *kvmetrics.DomainMetrics) execctxapi.StateGetter {
+	return nil
+}
 func (s *pbinStubSharedDomains) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
 func (s *pbinStubSharedDomains) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
 func (s *pbinStubSharedDomains) StepSize() uint64                                        { return 1 }
@@ -95,7 +99,7 @@ func pbinNewTestDb(tb testing.TB) kv.TemporalRwDB {
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbx.New(dbcfg.ChainDB, logger).InMem(dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
 	agg := state.NewTest(dirs).StepSize(16).Logger(logger).MustOpen(tb.Context(), db)

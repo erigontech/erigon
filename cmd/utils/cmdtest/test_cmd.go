@@ -22,6 +22,7 @@ package cmdtest
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -142,7 +143,7 @@ func (tt *TestCmd) matchExactOutput(want []byte) error {
 	if n < len(want) || !bytes.Equal(buf, want) {
 		// Grab any additional buffered output in case of mismatch
 		// because it might help with debugging.
-		buf = append(buf, make([]byte, tt.stdout.Buffered())...)
+		buf = append(buf, make([]byte, tt.stdout.Buffered())...) //nolint:makezero
 		tt.stdout.Read(buf[n:])
 		// Find the mismatch position.
 		for i := 0; i < n; i++ {
@@ -216,8 +217,8 @@ func (tt *TestCmd) Interrupt() {
 // It will only return a valid value after the process has finished.
 func (tt *TestCmd) ExitStatus() int {
 	if tt.Err != nil {
-		exitErr, ok := tt.Err.(*exec.ExitError)
-		if !ok {
+		var exitErr *exec.ExitError
+		if !errors.As(tt.Err, &exitErr) {
 			log.Warn("Failed to type convert testCmd.Error to exec.ExitError")
 		}
 		if exitErr != nil {

@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -37,7 +37,8 @@ var (
 
 type sd interface {
 	SetTxNum(blockNum uint64)
-	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
+	AsStateGetter(tx kv.TemporalTx) execctxapi.StateGetter
+	AsStateGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
@@ -183,22 +184,6 @@ func (sdc *SharedDomainsCommitmentContext) HasPendingUpdate() bool {
 	return sdc.pendingUpdate != nil
 }
 
-// flushPendingUpdate applies the pending commitment update using the given putter.
-// The update is written with its original TxNum. Called at the start of ComputeCommitment
-// to ensure the previously deferred update is applied before processing new ones.
-func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel) error {
-	upd := sdc.pendingUpdate
-	putBranch := func(prefix, data, prevData []byte) error {
-		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData)
-	}
-	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
-		return err
-	}
-	upd.Clear()
-	sdc.pendingUpdate = nil
-	return nil
-}
-
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
@@ -273,7 +258,6 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 // exclusively. Warmup/concurrent-mount readers get their own via the factories.
 func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context) *TrieContext {
 	mainTtx := &TrieContext{
-		getter:       sdc.sharedDomains.AsGetter(tx),
 		putter:       sdc.sharedDomains.AsPutDel(tx),
 		stepSize:     sdc.sharedDomains.StepSize(),
 		txNum:        txNum,
@@ -284,7 +268,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
 	} else {
-		mainTtx.stateReader = NewLatestStateReaderForWorker(readCtx, tx, sdc.sharedDomains)
+		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains, WithReadMetrics(kvmetrics.MetricsFromContext(readCtx)))
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -476,7 +460,7 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, ni
 		return 0, pbinUnsupported("branch child count by hex nibble prefix")
 	}
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, _, err := sdc.sharedDomains.AsGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	enc, _, err := sdc.sharedDomains.AsStateGetter(tx).GetLatest(kv.CommitmentDomain, key)
 	if err != nil {
 		return 0, err
 	}
@@ -757,7 +741,6 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			getter:       sdc.sharedDomains.AsGetter(roTx),
 			putter:       sdc.sharedDomains.AsPutDel(roTx),
 			stepSize:     stepSize,
 			txNum:        txNum,
@@ -767,7 +750,7 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, WithReadMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
@@ -804,7 +787,6 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			getter:         sdc.sharedDomains.AsGetter(roTx),
 			putter:         sdc.sharedDomains.AsPutDel(roTx),
 			stepSize:       stepSize,
 			txNum:          txNum,
@@ -815,7 +797,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, WithReadMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
@@ -1009,7 +991,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 }
 
 type TrieContext struct {
-	getter   kv.TemporalGetter
 	putter   kv.TemporalPutDel
 	txNum    uint64
 	blockNum uint64

@@ -22,14 +22,18 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type pbinStateStubSD struct{}
 
-func (s *pbinStateStubSD) SetTxNum(uint64)                                         {}
-func (s *pbinStateStubSD) AsGetter(kv.TemporalTx) kv.TemporalGetter                { return nil }
+func (s *pbinStateStubSD) SetTxNum(uint64)                                    {}
+func (s *pbinStateStubSD) AsStateGetter(kv.TemporalTx) execctxapi.StateGetter { return nil }
+func (s *pbinStateStubSD) AsStateGetterMetered(kv.TemporalTx, *kvmetrics.DomainMetrics) execctxapi.StateGetter {
+	return nil
+}
 func (s *pbinStateStubSD) AsPutDel(kv.TemporalTx) kv.TemporalPutDel                { return nil }
 func (s *pbinStateStubSD) MergeMetrics(kvmetrics.Source, *kvmetrics.DomainMetrics) {}
 func (s *pbinStateStubSD) StepSize() uint64                                        { return 1 }
