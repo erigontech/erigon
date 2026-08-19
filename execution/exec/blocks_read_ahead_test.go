@@ -594,6 +594,24 @@ func TestCachePopulatingGetterKeepsFresherEntry(t *testing.T) {
 	}
 }
 
+func TestCachePopulatingGetterDoesNotCacheBoundedRead(t *testing.T) {
+	addr := []byte("\x11\x22\x33\x44\x55\x66\x77\x88\x99\xaa\xbb\xcc\xdd\xee\xff\x00\x11\x22\x33\x44")
+	account := accounts.NewAccount()
+	account.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash([]byte("historical code")))
+	value := accounts.SerialiseV3(&account)
+	sc := newTestStateCache()
+	t.Cleanup(sc.Close)
+	cpg := &cachePopulatingGetter{TemporalGetter: stubTemporalGetter{v: value}, view: sc.View(cache.FrontierFunc(emptyVisibleEnd)), stepSize: 16}
+	got, step, err := cpg.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{}.WithMaxStep(0))
+	require.NoError(t, err)
+	require.Equal(t, value, got)
+	require.Zero(t, step)
+	_, ok := sc.View(nil).Get(kv.AccountsDomain, addr)
+	require.False(t, ok)
+	_, ok = sc.View(nil).GetAddrCodeHash(addr)
+	require.False(t, ok)
+}
+
 // Same invariant for the code addr→code binding, which is rebound when an
 // account's code changes and is therefore just as clobber-able as accounts.
 func TestCachePopulatingGetterKeepsFresherCodeBinding(t *testing.T) {

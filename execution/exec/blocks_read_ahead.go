@@ -112,7 +112,7 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 
 func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
-	if err == nil {
+	if err == nil && opts.MaxStep() == kv.NoStepBound {
 		readTxNum := step.LastTxNum(cpg.stepSize)
 		cpg.view.Fill(name, k, v, readTxNum)
 		if name == kv.AccountsDomain {
