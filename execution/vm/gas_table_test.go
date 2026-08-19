@@ -124,7 +124,7 @@ func TestEIP2200(t *testing.T) {
 			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 			require.NoError(t, err)
 
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+			r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 			defer s.Close()
 
@@ -226,7 +226,7 @@ func TestEIP8038SStore(t *testing.T) {
 			tx, sd := testTemporalTxSD(t)
 			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 			require.NoError(t, err)
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+			r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 			defer s.Close()
 			address := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -381,7 +381,7 @@ func TestCallNewAccountSpillBefore63of64(t *testing.T) {
 			tx, sd := testTemporalTxSD(t)
 			txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 			require.NoError(t, err)
-			r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+			r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 			s := state.New(r)
 			defer s.Close()
 			caller := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
@@ -413,7 +413,7 @@ func TestCreate2OntoExistingAccountSkipsNewAccountCharge(t *testing.T) {
 	tx, sd := testTemporalTxSD(t)
 	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 	require.NoError(t, err)
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
 	defer s.Close()
 	initCode := program.New().Push(0).Push(400_000).Op(vm.MSTORE).Return(0, 0).Bytes()
@@ -479,7 +479,7 @@ func TestCreate2OntoStorageOnlyAccountChargesBeforeCollision(t *testing.T) {
 				tx, sd := testTemporalTxSD(t)
 				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
 				defer s.Close()
 				initCode := []byte{byte(vm.STOP)}
@@ -550,7 +550,7 @@ func TestCreateTraceOnEarlyFailure(t *testing.T) {
 				tx, sd := testTemporalTxSD(t)
 				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
 				defer s.Close()
 				initCode := program.New().Push(0).Return(0, 0).Bytes()
@@ -645,7 +645,7 @@ func TestNestedCreateCollisionSeesOnEnterState(t *testing.T) {
 				tx, sd := testTemporalTxSD(t)
 				txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 				require.NoError(t, err)
-				r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+				r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 				s := state.New(r)
 				defer s.Close()
 				initCode := program.New().Push(0xaa).Push(0).Op(vm.MSTORE8).Return(0, 1).Bytes()
@@ -734,7 +734,7 @@ func TestCreateGas(t *testing.T) {
 			require.NoError(t, err)
 			defer domains.Close()
 
-			stateReader := state.NewReaderV3(domains.AsGetter(tx))
+			stateReader := state.NewReaderV3(domains.AsStateGetter(tx))
 			stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, 1)
 
 			s := state.New(stateReader)
@@ -782,7 +782,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 	txNum, _, err := sd.SeekCommitment(t.Context(), tx)
 	require.NoError(t, err)
 
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	s := state.New(r)
 	defer s.Close()
 

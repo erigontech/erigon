@@ -164,7 +164,7 @@ func encodeStatusPacket(status *sentryproto.StatusData, version uint) eth.Status
 	return eth.StatusPacket{
 		ProtocolVersion: uint32(version),
 		NetworkID:       status.NetworkId,
-		TD:              ourTD.ToBig(),
+		TD:              ourTD,
 		Head:            gointerfaces.ConvertH256ToHash(status.BestHash),
 		Genesis:         genesisHash,
 		ForkID:          forkid.NewIDFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime),
