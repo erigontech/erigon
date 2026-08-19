@@ -234,7 +234,8 @@ func TestPreparePayloadLoopStandsOffWhileProducing(t *testing.T) {
 	handler.ethClock = clock
 
 	// Priming would contend with the block being produced for the execution layer's single slot.
-	handler.proposalsInFlight.Add(1)
+	finishProduction := handler.payloadPreparationGate.beginProduction()
+	defer finishProduction()
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	handler.engine = engine
@@ -512,6 +513,54 @@ func TestPreparePayloadForRechecksTheHeadBeforeEachRetry(t *testing.T) {
 
 	_, err = handler.preparePayloadFor(t.Context(), targetSlot)
 	require.ErrorIs(t, err, errPreparationHeadChanged)
+}
+
+func TestPreparePayloadForStopsWhenProductionStartsDuringStateCopy(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	stateCopied := make(chan struct{})
+	resumePreparation := make(chan struct{})
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			err := view(postState, baseBlockRoot, postState.Slot())
+			close(stateCopied)
+			<-resumePreparation
+			return err
+		})
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+
+	forkChoiceUpdates := 0
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+			forkChoiceUpdates++
+			return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+		}).AnyTimes()
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	result := make(chan error, 1)
+	go func() {
+		_, err := handler.preparePayloadFor(t.Context(), targetSlot)
+		result <- err
+	}()
+	<-stateCopied
+	finishProduction := handler.payloadPreparationGate.beginProduction()
+	defer finishProduction()
+	close(resumePreparation)
+
+	require.ErrorIs(t, <-result, errProposalInFlight)
+	require.Zero(t, forkChoiceUpdates)
 }
 
 func TestPreparePayloadForStopsWhenTheCopySpentTheLead(t *testing.T) {

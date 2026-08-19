@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -40,6 +41,7 @@ var (
 	errNoPayloadID            = errors.New("execution layer returned no payload id")
 	errHeadTooFarBack         = errors.New("head state is too far behind the slot to prepare")
 	errPreparationHeadChanged = errors.New("head changed while preparing payload")
+	errProposalInFlight       = errors.New("block production is in progress")
 	errPreparationTooLate     = errors.New("slot is too close to prime a payload production would use")
 )
 
@@ -55,6 +57,13 @@ type preparedPayloadRecord struct {
 type preparedPayload struct {
 	mu       sync.Mutex
 	payloads map[uint64]preparedPayloadRecord
+}
+
+// payloadPreparationGate gives block production priority over speculative preparation. Productions
+// share admission for their full request; preparation takes it exclusively for one EL attempt.
+type payloadPreparationGate struct {
+	admission sync.RWMutex
+	proposals atomic.Int64
 }
 
 func (p *preparedPayload) set(slot uint64, payloadID []byte, primedAt time.Time) {
@@ -81,6 +90,34 @@ func (p *preparedPayload) matches(slot uint64, payloadID []byte, now time.Time, 
 
 func canUsePreparedPayload(p *preparedPayload, builderContinuity bool, slot uint64, payloadID []byte, now time.Time, minAge time.Duration) bool {
 	return builderContinuity && p.matches(slot, payloadID, now, minAge)
+}
+
+func (g *payloadPreparationGate) beginProduction() func() {
+	// Announce production before waiting for admission. If preparation already holds the gate, the
+	// count prevents it from starting another attempt before production enters.
+	g.proposals.Add(1)
+	g.admission.RLock()
+	return func() {
+		g.admission.RUnlock()
+		g.proposals.Add(-1)
+	}
+}
+
+func (g *payloadPreparationGate) productionInFlight() bool {
+	return g.proposals.Load() > 0
+}
+
+func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
+	// Preparation never waits on production. The count also covers production that announced its
+	// intent but is waiting for an earlier preparation attempt to release admission.
+	if !g.admission.TryLock() {
+		return nil, false
+	}
+	if g.productionInFlight() {
+		g.admission.Unlock()
+		return nil, false
+	}
+	return g.admission.Unlock, true
 }
 
 // StartPayloadPreparation primes the execution layer for slots this node is due to propose, so the
@@ -133,7 +170,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 			continue
 		}
 		// On consecutive proposals the prime for the next slot lands inside this one.
-		if a.proposalsInFlight.Load() > 0 {
+		if a.payloadPreparationGate.productionInFlight() {
 			continue
 		}
 		// Nothing is registered, so nothing here can be ours. Checking first keeps a non-validating
@@ -219,6 +256,7 @@ func isExpectedPreparationSkip(err error) bool {
 		errors.Is(err, errNoPayloadID) ||
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
+		errors.Is(err, errProposalInFlight) ||
 		errors.Is(err, errPreparationTooLate) ||
 		errors.Is(err, execution_client.ErrForkChoiceNotAdopted) ||
 		errors.Is(err, execution_client.ErrForkChoiceBusy) ||
@@ -315,10 +353,18 @@ func (a *ApiHandler) forkChoiceUpdateForPreparation(
 	stateVersion clparams.StateVersion,
 ) ([]byte, error) {
 	for {
-		if selectedRoot, _, selected := a.syncedData.SelectedHead(); !selected || selectedRoot != baseBlockRoot {
-			return nil, errPreparationHeadChanged
-		}
-		payloadID, err := a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+		// Keep state derivation and retry delays outside admission so they cannot delay production.
+		payloadID, err := func() ([]byte, error) {
+			finishPreparation, ok := a.payloadPreparationGate.tryBeginPreparation()
+			if !ok {
+				return nil, errProposalInFlight
+			}
+			defer finishPreparation()
+			if selectedRoot, _, selected := a.syncedData.SelectedHead(); !selected || selectedRoot != baseBlockRoot {
+				return nil, errPreparationHeadChanged
+			}
+			return a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+		}()
 		if !errors.Is(err, execution_client.ErrForkChoiceBusy) {
 			return payloadID, err
 		}

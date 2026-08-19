@@ -615,6 +615,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	r *http.Request,
 ) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
+	// Cover the whole request so preparation cannot enter the execution layer while production is
+	// still deriving or collecting the block.
+	finishProduction := a.payloadPreparationGate.beginProduction()
+	defer finishProduction()
+
 	// parse request data
 	randaoRevealString := r.URL.Query().Get("randao_reveal")
 	var randaoReveal common.Bytes96
@@ -823,12 +828,6 @@ func (a *ApiHandler) produceBlock(
 	graffiti common.Hash,
 ) (block *cltypes.BlindOrExecutionBeaconBlock, err error) {
 	defer func() { reportProductionFailure(err, targetSlot) }()
-
-	// Preparation stands off while this runs. Both go through the execution module's weight-one
-	// semaphore, and a prime that takes it across the collection window turns a payload this node
-	// has already built into a missed slot.
-	a.proposalsInFlight.Add(1)
-	defer a.proposalsInFlight.Add(-1)
 
 	var wg sync.WaitGroup
 	// produce beacon body
