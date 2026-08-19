@@ -78,6 +78,7 @@ type Cfg struct {
 	gloasHeadEnvelopeRequests    map[common.Hash]uint64
 	gloasHeadEnvelopeRequestHead common.Hash
 	gloasHeadEnvelopeAttempted   bool
+	gloasHeadEnvelopeRetryUsed   bool
 	gloasPayloadValidator        gloasPayloadValidator
 	gloasVerificationCursor      common.Hash
 	gloasVerificationHead        common.Hash

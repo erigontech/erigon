@@ -542,7 +542,7 @@ func waitForSelectedHeadEnvelope(
 			}
 			envelopes, err := requestEnvelopes(pollCtx, [][32]byte{headRoot})
 			if err != nil {
-				if hooks.retry != nil && (pollCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				if hooks.retry != nil && ctx.Err() != nil {
 					hooks.retry()
 				}
 				log.Debug("[chainTipSync] failed to request selected head envelope", "headRoot", headRoot, "err", err)
@@ -593,6 +593,7 @@ func observeSelectedHeadEnvelopeRequest(cfg *Cfg, headRoot common.Hash) {
 	if cfg.gloasHeadEnvelopeRequestHead != headRoot {
 		cfg.gloasHeadEnvelopeRequestHead = headRoot
 		cfg.gloasHeadEnvelopeAttempted = false
+		cfg.gloasHeadEnvelopeRetryUsed = false
 	}
 }
 
@@ -602,6 +603,7 @@ func claimSelectedHeadEnvelopeRequest(cfg *Cfg, headRoot common.Hash) (selectedH
 	if cfg.gloasHeadEnvelopeRequestHead != headRoot {
 		cfg.gloasHeadEnvelopeRequestHead = headRoot
 		cfg.gloasHeadEnvelopeAttempted = false
+		cfg.gloasHeadEnvelopeRetryUsed = false
 	}
 	if _, ok := cfg.gloasHeadEnvelopeRequests[headRoot]; ok {
 		return selectedHeadEnvelopeRequestClaim{}, false, true
@@ -630,7 +632,8 @@ func releaseSelectedHeadEnvelopeRequest(cfg *Cfg, claim selectedHeadEnvelopeRequ
 func retrySelectedHeadEnvelopeRequest(cfg *Cfg, claim selectedHeadEnvelopeRequestClaim) {
 	cfg.gloasHeadEnvelopeRequestMu.Lock()
 	defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
-	if cfg.gloasHeadEnvelopeRequestHead == claim.root && cfg.gloasHeadEnvelopeRequests[claim.root] == claim.id {
+	if cfg.gloasHeadEnvelopeRequestHead == claim.root && cfg.gloasHeadEnvelopeRequests[claim.root] == claim.id && !cfg.gloasHeadEnvelopeRetryUsed {
+		cfg.gloasHeadEnvelopeRetryUsed = true
 		cfg.gloasHeadEnvelopeAttempted = false
 	}
 }
