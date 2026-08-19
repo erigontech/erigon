@@ -204,15 +204,12 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		return s.Done(tx)
 	}
 	logPrefix := s.LogPrefix()
-	var blockTo uint64
-
-	// Forward stage doesn't write anything before PruneTo point
-	if cfg.prune.History.Enabled() {
-		blockTo = cfg.prune.History.PruneTo(s.ForwardProgress)
-	} else {
-		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
-	}
-
+	// Rows below the snapshot frontier are duplicates of the .idx files, which is why
+	// SpawnTxLookup refuses to write them. Dropping a duplicate loses nothing, so the
+	// retention distance has no say here: prune.History.PruneTo would sit far below
+	// the frontier and leave every redundant row in place, and on a node whose
+	// snapshots lag it would sit above and delete the only copy.
+	blockTo := cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	if blockTo == 0 {
 		return nil
 	}
@@ -285,6 +282,8 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("prune TxLookup: %w", err)
 	}
+	logger.Debug(fmt.Sprintf("[%s] prune", logPrefix), "scanned", pruneStat.ScanCountValues,
+		"pruned", pruneStat.PruneCountValues, "status", pruneStat.ValueProgress.String(), "blockTo", blockTo)
 	defer func() {
 		pruneStat.TxFrom, pruneStat.TxTo = 0, txTo
 		if e := state.SavePruneValProgress(tx, kv.TxLookup, pruneStat); e != nil {

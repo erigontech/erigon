@@ -18,6 +18,7 @@ type Stat struct {
 	MaxTxNum         uint64
 	PruneCountTx     uint64
 	PruneCountValues uint64
+	ScanCountValues  uint64
 	DupsDeleted      uint64
 	LastPrunedValue  []byte
 	LastPrunedKey    []byte
@@ -333,6 +334,7 @@ func tableScanningPrune(
 		if ctx.Err() != nil {
 			return bytes.Clone(val), nil
 		}
+		stat.ScanCountValues++
 
 		// Different storage modes have different dup-iteration orders:
 		//   - StepValueStorageMode (^step||val): FirstDup = newest, LastDup = oldest
@@ -434,7 +436,7 @@ func tableScanningPrune(
 
 		select {
 		case <-logEvery.C:
-			args := []any{"name", filenameBase, "pruned values", stat.PruneCountValues}
+			args := []any{"name", filenameBase, "scanned values", stat.ScanCountValues, "pruned values", stat.PruneCountValues}
 			if keysCursor != nil {
 				args = append(args, "pruned tx", stat.PruneCountTx)
 			}
