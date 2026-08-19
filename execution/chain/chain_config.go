@@ -99,6 +99,37 @@ type Config struct {
 	BalancerTime            *uint64                          `json:"balancerTime,omitempty"`
 	BalancerRewriteBytecode map[common.Address]hexutil.Bytes `json:"balancerRewriteBytecode,omitempty"`
 
+	// BSC (Parlia) hard forks. Kept as plain *uint64 on the core config so that
+	// forkid gathers them by reflection and they unmarshal straight from the
+	// chapel/bsc chainspec. Engine-specific state (validator set, block interval,
+	// system-contract upgrades) lives in the Parlia snapshot / L2 config, not here.
+	RamanujanBlock  *uint64 `json:"ramanujanBlock,omitempty"`
+	NielsBlock      *uint64 `json:"nielsBlock,omitempty"`
+	MirrorSyncBlock *uint64 `json:"mirrorSyncBlock,omitempty"`
+	BrunoBlock      *uint64 `json:"brunoBlock,omitempty"`
+	EulerBlock      *uint64 `json:"eulerBlock,omitempty"`
+	GibbsBlock      *uint64 `json:"gibbsBlock,omitempty"`
+	NanoBlock       *uint64 `json:"nanoBlock,omitempty"`
+	MoranBlock      *uint64 `json:"moranBlock,omitempty"`
+	PlanckBlock     *uint64 `json:"planckBlock,omitempty"`
+	LubanBlock      *uint64 `json:"lubanBlock,omitempty"`
+	PlatoBlock      *uint64 `json:"platoBlock,omitempty"`
+	HertzBlock      *uint64 `json:"hertzBlock,omitempty"`
+	HertzfixBlock   *uint64 `json:"hertzfixBlock,omitempty"`
+
+	KeplerTime     *uint64 `json:"keplerTime,omitempty"`
+	FeynmanTime    *uint64 `json:"feynmanTime,omitempty"`
+	FeynmanFixTime *uint64 `json:"feynmanFixTime,omitempty"`
+	HaberTime      *uint64 `json:"haberTime,omitempty"`
+	HaberFixTime   *uint64 `json:"haberFixTime,omitempty"`
+	BohrTime       *uint64 `json:"bohrTime,omitempty"`
+	PascalTime     *uint64 `json:"pascalTime,omitempty"`
+	LorentzTime    *uint64 `json:"lorentzTime,omitempty"`
+	MaxwellTime    *uint64 `json:"maxwellTime,omitempty"`
+	FermiTime      *uint64 `json:"fermiTime,omitempty"`
+	MendelTime     *uint64 `json:"mendelTime,omitempty"` // also activates BSC Osaka (same timestamp)
+	PasteurTime    *uint64 `json:"pasteurTime,omitempty"`
+
 	// (Optional) governance contract where EIP-1559 fees will be sent to, which otherwise would be burnt since the London fork.
 	// A key corresponds to the block number, starting from which the fees are sent to the address (map value).
 	// Starting from Prague, EIP-4844 fees might be collected as well:
@@ -129,6 +160,9 @@ type Config struct {
 
 	Bor     BorConfig       `json:"-"`
 	BorJSON json.RawMessage `json:"bor,omitempty"`
+
+	// Parlia is BSC's L1 consensus engine (peer to Ethash/AuRa/Bor).
+	Parlia *ParliaConfig `json:"parlia,omitempty"`
 
 	// L2 carries opaque L2-chain-specific config. L2JSON is decoded from the
 	// chainspec JSON verbatim; the registering L2 package unmarshals it into
@@ -353,6 +387,8 @@ func (c *Config) getEngine() string {
 		return c.Bor.String()
 	case c.Aura != nil:
 		return c.Aura.String()
+	case c.Parlia != nil:
+		return c.Parlia.String()
 	default:
 		return "unknown"
 	}

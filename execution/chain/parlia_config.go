@@ -1,4 +1,4 @@
-// Copyright 2024 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,16 +14,12 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package chainspec
+package chain
 
-const (
-	MainnetChainID    = 1
-	SepoliaChainID    = 11155111
-	HoodiChainID      = 560048
-	GnosisChainID     = 100
-	ChiadoChainID     = 10200
-	BloatnetNetworkID = 12159 // Bloatnet NetworkID (ChainID is 1/mainnet)
-	ChapelChainID     = 97    // BSC testnet
-)
+// ParliaConfig is the consensus-engine config for BSC's Parlia (PoSA) L1 engine.
+// It is currently empty: epoch length, block interval and turn length are
+// Parlia snapshot state rather than static chain config.
+type ParliaConfig struct {
+}
 
-var NetworkNameByID = make(map[uint64]string)
+func (c *ParliaConfig) String() string { return "parlia" }

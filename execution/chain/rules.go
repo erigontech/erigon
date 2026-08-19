@@ -24,6 +24,7 @@ const (
 	AuRaRules   RulesName = "aura"
 	EtHashRules RulesName = "ethash"
 	BorRules    RulesName = "bor"
+	ParliaRules RulesName = "parlia"
 )
 
 // ValidRulesNames is the set of recognised consensus engine names.
@@ -31,13 +32,14 @@ var ValidRulesNames = map[RulesName]struct{}{
 	AuRaRules:   {},
 	EtHashRules: {},
 	BorRules:    {},
+	ParliaRules: {},
 	"":          {}, // empty is valid (defaults to ethash)
 }
 
 // Validate returns an error if the RulesName is not a recognised consensus engine.
 func (r RulesName) Validate() error {
 	if _, ok := ValidRulesNames[r]; !ok {
-		return fmt.Errorf("unsupported consensus engine %q (supported: aura, bor, ethash)", r)
+		return fmt.Errorf("unsupported consensus engine %q (supported: aura, bor, ethash, parlia)", r)
 	}
 	return nil
 }
