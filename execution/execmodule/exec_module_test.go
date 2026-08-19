@@ -664,7 +664,10 @@ func syntheticSlotNumber(parent *types.Block) *uint64 {
 func TestGetAssembledBlockReportsUnknownPayload(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
 
-	result, err := m.ExecModule.GetAssembledBlock(t.Context(), 404)
+	result, err := retryBusy(t.Context(), func() (execmodule.AssembledBlockResult, bool, error) {
+		result, err := m.ExecModule.GetAssembledBlock(t.Context(), 404)
+		return result, result.Busy, err
+	})
 	require.NoError(t, err)
 	require.True(t, result.Unknown)
 	require.Nil(t, result.Block)
