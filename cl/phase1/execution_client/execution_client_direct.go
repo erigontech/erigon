@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -126,6 +127,30 @@ func (cc *ExecutionClientDirect) NewPayload(
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
+// ErrForkChoiceNotAdopted reports that the execution layer did not adopt the requested head, so
+// there is nothing to build on.
+var ErrForkChoiceNotAdopted = errors.New("execution layer did not adopt forkchoice head")
+
+// ErrForkChoiceBusy reports contention rather than rejection. The execution layer either declined
+// the update outright or is still running it in the background; the two are indistinguishable from
+// here, and in both cases only a later attempt settles it. Retrying is the caller's decision,
+// because only the caller knows whether the head it asked for is still the one it wants.
+var ErrForkChoiceBusy = errors.New("execution layer busy with a forkchoice update")
+
+// forkChoiceStatusError classifies a status reached with payload attributes attached. Only an
+// adopted head is safe to build on: a builder ignores the parent it was asked for and packs on top
+// of whatever the execution tip really is.
+func forkChoiceStatusError(status execmodule.ExecutionStatus) error {
+	switch status {
+	case execmodule.ExecutionStatusSuccess:
+		return nil
+	case execmodule.ExecutionStatusBusy:
+		return ErrForkChoiceBusy
+	default:
+		return fmt.Errorf("%w: status %d", ErrForkChoiceNotAdopted, status)
+	}
+}
+
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
 	if err != nil {
@@ -138,7 +163,13 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
+		if status == execmodule.ExecutionStatusBusy {
+			log.Debug("[ForkChoiceUpdated] execution layer busy, head may not have been applied", "head", head)
+		}
 		return nil, nil
+	}
+	if err := forkChoiceStatusError(status); err != nil {
+		return nil, err
 	}
 	// Retry AssembleBlock if the EL is busy (semaphore contention with
 	// fork choice commits). This is common in single-process dev mode

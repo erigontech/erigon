@@ -106,6 +106,13 @@ type ApiHandler struct {
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
 
+	// preparedPayload tracks the payload primed ahead of a slot this node proposes.
+	preparedPayload preparedPayload
+	// proposalsInFlight counts block productions running on this node, so preparation can stand
+	// off. Both go through the execution layer's weight-one semaphore, and a prime holding it
+	// across the collection window turns a fully built payload into a missed slot.
+	proposalsInFlight atomic.Int64
+
 	// Validator data structures
 	validatorParams *validator_params.ValidatorParams
 	// unregisteredProposers remembers which proposers have already been warned about, so the
@@ -202,10 +209,6 @@ func NewApiHandler(
 		blobSnapshots = caplinSnapshots
 	}
 
-	unregisteredProposers, err := lru.New[uint64, struct{}]("unregisteredProposers", 1024)
-	if err != nil {
-		panic(err)
-	}
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
 		panic(err)
@@ -218,9 +221,14 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
+	unregisteredProposers, err := lru.New[uint64, struct{}]("unregisteredProposers", 1024)
+	if err != nil {
+		panic(err)
+	}
 	return &ApiHandler{
 		logger:                             logger,
 		validatorParams:                    validatorParams,
+		unregisteredProposers:              unregisteredProposers,
 		o:                                  sync.Once{},
 		netConfig:                          netConfig,
 		ethClock:                           ethClock,
@@ -234,7 +242,6 @@ func NewApiHandler(
 		caplinStateSnapshots:               caplinStateSnapshots,
 		peerDas:                            peerDas,
 		slotWaitedForAttestationProduction: slotWaitedForAttestationProduction,
-		unregisteredProposers:              unregisteredProposers,
 		randaoMixesPool: sync.Pool{New: func() any {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},

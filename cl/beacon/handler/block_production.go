@@ -211,10 +211,33 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 
 // computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
 // reserving a publication margin before the attestation deadline (see payloadPublicationDivisor).
-func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) blockBuilderWindow {
+// unpreparedGrabOffset is when production starts polling for a payload it did not prime, and
+// preparedGrabOffset is when it may start for one it did. Their difference is the warm-up a primed
+// builder must already have, so the two paths give a builder the same total build time.
+func unpreparedGrabOffset(due time.Duration) time.Duration {
+	return due - due/payloadPublicationDivisor
+}
+
+func preparedGrabOffset(due time.Duration) time.Duration {
+	return due / payloadPublicationDivisor
+}
+
+// preparedPayloadMinimumAge is how long a primed builder must already have been running before
+// production may collect from it early. A prime younger than this has no warm-up to offer.
+func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
-	grabBy := slotStart.Add(due - due/payloadPublicationDivisor)
+	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
+}
+
+const forkChoiceBusyRetryDelay = 100 * time.Millisecond
+
+func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
+	due := attestationDue(cfg, stateVersion)
+	grabBy := slotStart.Add(unpreparedGrabOffset(due))
 	firstGetAt := grabBy.Add(-minPayloadPollingWindow)
+	if prepared {
+		firstGetAt = slotStart.Add(preparedGrabOffset(due)).Add(-minPayloadPollingWindow)
+	}
 	if firstGetAt.Before(now) {
 		firstGetAt = now
 	}
@@ -762,6 +785,12 @@ func (a *ApiHandler) produceBlock(
 ) (block *cltypes.BlindOrExecutionBeaconBlock, err error) {
 	defer func() { reportProductionFailure(err, targetSlot) }()
 
+	// Preparation stands off while this runs. Both go through the execution module's weight-one
+	// semaphore, and a prime that takes it across the collection window turns a payload this node
+	// has already built into a missed slot.
+	a.proposalsInFlight.Add(1)
+	defer a.proposalsInFlight.Add(-1)
+
 	var wg sync.WaitGroup
 	// produce beacon body
 	var (
@@ -1157,7 +1186,15 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion)
+		prepared := canUsePreparedPayload(
+			&a.preparedPayload,
+			a.engine.SupportInsertion(),
+			targetSlot,
+			idBytes,
+			time.Now(),
+			preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion),
+		)
+		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, prepared)
 		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})
