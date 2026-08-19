@@ -22,6 +22,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 
+	"github.com/erigontech/erigon/bsc/parlia"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
@@ -130,6 +131,8 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 				panic(err)
 			}
 		}
+	case *chain.ParliaConfig:
+		eng = parlia.New(chainConfig, logger)
 	}
 
 	if eng == nil {
@@ -149,6 +152,8 @@ func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, 
 	switch {
 	case chainConfig.Aura != nil:
 		consensusConfig = chainConfig.Aura
+	case chainConfig.Parlia != nil:
+		consensusConfig = chainConfig.Parlia
 	case chainConfig.L2 != nil:
 		consensusConfig = chainConfig.L2
 	default:

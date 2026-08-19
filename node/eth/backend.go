@@ -38,6 +38,9 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	_ "github.com/erigontech/erigon/bsc/chain" // Register BSC chains
+	bscp2p "github.com/erigontech/erigon/bsc/p2p"
+	bscsync "github.com/erigontech/erigon/bsc/sync"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -198,6 +201,7 @@ type Ethereum struct {
 
 	sentinel sentinelproto.SentinelClient
 
+	bscP2PService  *bscp2p.Service
 	stopNode       func() error
 	bgComponentsEg errgroup.Group
 	readAheader    *exec.BlockReadAheader
@@ -583,6 +587,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	switch {
 	case chainConfig.Aura != nil:
 		rulesConfig = &config.Aura
+	case chainConfig.Parlia != nil:
+		rulesConfig = chainConfig.Parlia
 	default:
 		rulesConfig = &config.Ethash
 	}
@@ -975,6 +981,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
+	if chainConfig.Parlia != nil {
+		backend.bscP2PService = bscp2p.NewService(
+			logger,
+			p2pConfig.MaxPeers,
+			backend.sentryProvider.Multiplexer,
+			statusDataProvider.GetStatusData,
+			config.Dirs.Tmp,
+		)
+	}
+
 	if !dbg.NoBackgroundMaintenance() {
 		// Track the MergeLoop goroutine in bgComponentsEg so that Stop() →
 		// bgComponentsEg.Wait() waits for it to exit before chainDB.Close().
@@ -1357,9 +1373,20 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
-	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
+	switch {
+	case chainspec.IsChainPoS(s.chainConfig, currentTDProvider):
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		go s.execModule.Start(s.sentryCtx, hook)
+	case s.chainConfig.Parlia != nil:
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Info("[bsc] block printer goroutine terminated")
+			err := bscsync.RunBlockPrinter(s.sentryCtx, s.logger, s.bscP2PService)
+			if err == nil || errors.Is(err, context.Canceled) {
+				return err
+			}
+			s.logger.Error("[bsc] block printer crashed", "err", err)
+			return err
+		})
 	}
 
 	if s.txPool != nil {

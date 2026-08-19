@@ -77,6 +77,8 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
+
+	_ "github.com/erigontech/erigon/bsc/chain" // Register BSC chains
 )
 
 // These are all the command line flags we support.

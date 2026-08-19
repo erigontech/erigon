@@ -38,6 +38,7 @@ import (
 	grpcHealth "google.golang.org/grpc/health"
 	"google.golang.org/grpc/health/grpc_health_v1"
 
+	"github.com/erigontech/erigon/bsc/parlia"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/graphql"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/health"
@@ -1008,6 +1009,8 @@ func (e *remoteRulesEngine) init(db kv.RoDB, blockReader dbservices.FullBlockRea
 		if err != nil {
 			return err
 		}
+	case cc.Parlia != nil:
+		eng = parlia.New(cc, logger)
 	default:
 		eng = ethash.NewFaker()
 	}

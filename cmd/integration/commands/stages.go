@@ -36,6 +36,7 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
 
+	_ "github.com/erigontech/erigon/bsc/chain" // Register BSC chains
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -1309,6 +1310,8 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 	switch {
 	case cc.Aura != nil:
 		rulesConfig = &config.Aura
+	case cc.Parlia != nil:
+		rulesConfig = cc.Parlia
 	default:
 		rulesConfig = &config.Ethash
 	}
