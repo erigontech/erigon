@@ -415,12 +415,21 @@ mount operations; Docker-group membership alone is insufficient.
 
 ## Validate and summarize results
 
-Find the newest run and confirm counts:
+Set `RESULTS_DIR` to the exact effective `runner.benchmark.results_dir` of the command being
+validated. Do not assume the default `$TESTS_DIR/results`: staging, smoke, and measured commands
+may each use a different results root. Find the run only below that configured root and confirm
+counts:
 
 ```bash
-find "$TESTS_DIR/results/runs" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' |
+RESULTS_DIR=${RESULTS_DIR:?set to the effective runner.benchmark.results_dir}
+RESULTS_DIR=$(realpath -e -- "$RESULTS_DIR")
+RUNS_DIR="$RESULTS_DIR/runs"
+test -d "$RUNS_DIR"
+
+find "$RUNS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' |
   sort -nr | head
-RUN_DIR="$TESTS_DIR/results/runs/<run-id>"
+RUN_DIR="$RUNS_DIR/<run-id>"
+test -f "$RUN_DIR/config.json"
 jq '{status, test_counts, suite_hash, instance: {
   id: .instance.id,
   image: .instance.image,
@@ -456,7 +465,9 @@ jq '.instance | {
   datadir
 }' "$RUN_DIR/config.json"
 SUITE_HASH=$(jq -r .suite_hash "$RUN_DIR/config.json")
-jq '.metadata.labels' "$TESTS_DIR/results/suites/$SUITE_HASH/summary.json"
+SUITE_DIR="$RESULTS_DIR/suites/$SUITE_HASH"
+test -f "$SUITE_DIR/summary.json"
+jq '.metadata.labels' "$SUITE_DIR/summary.json"
 lscpu -e=CPU,CORE,SOCKET,NODE,ONLINE
 ```
 

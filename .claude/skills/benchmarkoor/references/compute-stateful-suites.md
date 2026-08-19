@@ -121,15 +121,18 @@ defaults to `~/.cache/benchmarkoor`; standalone URLs are extracted below
 from the run output instead of hard-coding it. A cache hit can suppress the download log; provenance
 must still come from the pinned YAML and persisted suite summary.
 
-After source preparation or the required smoke run, enumerate both the full archive inventory and
+After source preparation or the required smoke run, set `RESULTS_DIR` to that command's effective
+`runner.benchmark.results_dir`. Select `RUN_DIR` only from its `runs` child; never infer the results
+root from `$TESTS_DIR` or from an unrelated run. Then enumerate both the full archive inventory and
 the fixtures selected by the current filter:
 
 ```bash
-RUN_DIR=${RUN_DIR:?set to a smoke or measured run directory}
-RUN_DIR=${RUN_DIR%/}
-RUNS_DIR=$(dirname -- "$RUN_DIR")
-test "$(basename -- "$RUNS_DIR")" = runs
-RESULTS_DIR=$(dirname -- "$RUNS_DIR")
+RESULTS_DIR=${RESULTS_DIR:?set to the effective runner.benchmark.results_dir}
+RESULTS_DIR=$(realpath -e -- "$RESULTS_DIR")
+RUNS_DIR=$(realpath -e -- "$RESULTS_DIR/runs")
+RUN_DIR=${RUN_DIR:?set to a smoke or measured run below RESULTS_DIR/runs}
+RUN_DIR=$(realpath -e -- "$RUN_DIR")
+test "$(dirname -- "$RUN_DIR")" = "$RUNS_DIR"
 SUITE_HASH=$(jq -r .suite_hash "$RUN_DIR/config.json")
 SUITE_DIR="$RESULTS_DIR/suites/$SUITE_HASH"
 SUITE_SUMMARY="$SUITE_DIR/summary.json"
@@ -411,6 +414,11 @@ runner:
 Copy the complete selected instance from `DATASET_CLIENTS_CONFIG`; instance lists replace rather
 than merge. Keep `cleanup_on_start: false` while a deliberate staging overlay is mounted because
 broad orphan cleanup can destroy that baseline.
+
+Record the exact absolute `results_dir` used by each command. Before using the shared validation
+or fixture-enumeration recipes, assign that path to the shell `RESULTS_DIR`. If staging, smoke, and
+measured commands use different results roots, reset `RESULTS_DIR` for each corresponding run; the
+recipes intentionally never fall back to `$TESTS_DIR/results`.
 
 ### Stage a pre-run once
 
