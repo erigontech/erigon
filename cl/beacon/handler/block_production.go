@@ -401,7 +401,8 @@ func pollAssembledPayload(
 				}
 			}
 			if execution_client.IsUnknownPayloadError(err) {
-				return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
+				cause := mostActionableProductionError(firstErr, err)
+				return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, cause)
 			}
 		} else if payload != nil {
 			return payload, bundles, requestsBundle, blockValue, nil

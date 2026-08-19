@@ -489,6 +489,25 @@ func TestPollAssembledPayloadKeepsFailureBeforeUnknownPayload(t *testing.T) {
 	require.Equal(t, 2, calls)
 }
 
+func TestPollAssembledPayloadDoesNotTreatBuilderCancellationAsCallerCancellation(t *testing.T) {
+	now := time.Now()
+	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
+	calls := 0
+
+	_, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			if calls == 1 {
+				return nil, nil, nil, nil, context.Canceled
+			}
+			return nil, nil, nil, nil, &engine_helpers.UnknownPayloadErr
+		})
+
+	require.True(t, execution_client.IsUnknownPayloadError(err))
+	require.NotErrorIs(t, err, context.Canceled)
+	require.Equal(t, 2, calls)
+}
+
 func TestProductionReportsUnknownPayloadOnce(t *testing.T) {
 	logs := captureProductionLogs(t)
 
