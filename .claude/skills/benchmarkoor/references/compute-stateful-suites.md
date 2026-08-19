@@ -125,6 +125,11 @@ After source preparation or the required smoke run, enumerate both the full arch
 the fixtures selected by the current filter:
 
 ```bash
+RUN_DIR=${RUN_DIR:?set to a smoke or measured run directory}
+RUN_DIR=${RUN_DIR%/}
+RUNS_DIR=$(dirname -- "$RUN_DIR")
+test "$(basename -- "$RUNS_DIR")" = runs
+RESULTS_DIR=$(dirname -- "$RUNS_DIR")
 SUITE_HASH=$(jq -r .suite_hash "$RUN_DIR/config.json")
 SUITE_DIR="$RESULTS_DIR/suites/$SUITE_HASH"
 SUITE_SUMMARY="$SUITE_DIR/summary.json"
@@ -246,17 +251,19 @@ OVERLAY_TMP="$RUN_ROOT/overlay-runtime"
 ```
 
 Apply the main skill's read-only bind, probe-overlay canary, sizes, full-tree metadata fingerprint,
-and dataset-appropriate critical hashes before starting a client. Require `ro` as a distinct mount
-option first, then require an expected-failure write probe through the protected bind without ever
-writing through the original path:
+and dataset-appropriate critical hashes before starting a client. Set `INTEGRITY_ROOT` to
+`ORIGINAL_LOWER` after its read-only remount, and use that path for every traversal, `du`, content
+hash, and before/after fingerprint. Never collect integrity data through `PRISTINE_DIR`: reads on a
+writable `relatime` mount can mutate atime. Require `ro` as a distinct mount option first, then
+require an expected-failure write probe through the protected bind without ever writing through or
+inspecting the original path:
 
 ```bash
+INTEGRITY_ROOT="$ORIGINAL_LOWER"
 READONLY_CANARY=.benchmarkoor-readonly-canary
-test ! -e "$ORIGINAL_LOWER/$READONLY_CANARY"
-test ! -e "$PRISTINE_DIR/$READONLY_CANARY"
-! sudo touch "$ORIGINAL_LOWER/$READONLY_CANARY"
-test ! -e "$ORIGINAL_LOWER/$READONLY_CANARY"
-test ! -e "$PRISTINE_DIR/$READONLY_CANARY"
+test ! -e "$INTEGRITY_ROOT/$READONLY_CANARY"
+! sudo touch "$INTEGRITY_ROOT/$READONLY_CANARY"
+test ! -e "$INTEGRITY_ROOT/$READONLY_CANARY"
 ```
 
 For this dataset, include stable sidecars and lock files plus a full hash of `chaindata/mdbx.dat`
@@ -266,11 +273,12 @@ cache, result, and probe path outside the pristine and lower trees.
 The bind protects accesses through `ORIGINAL_LOWER`; the raw pristine path is still writable on the
 host. Before starting, require no process has an open file below `PRISTINE_DIR`, no container uses
 it as a mount source, and no alternate bind exposes it to a workload. Inspect host handles, mount
-tables, and every running container's mounts rather than checking names alone. During staging and
-measurement, keep a recursive write-event watcher on `PRISTINE_DIR`, periodically repeat the handle
-and mount checks, and require every task container to mount only `ORIGINAL_LOWER` or
-`ADVANCED_LOWER`. On any unexplained access or write event, stop the exact task-owned process and
-ask the user; do not stop or alter the unrelated accessor.
+tables, and every running container's mounts rather than checking names alone; perform any required
+tree traversal through `ORIGINAL_LOWER`. During staging and measurement, keep a recursive
+write-event watcher on `ORIGINAL_LOWER`, periodically repeat the handle and mount checks, and
+require every task container to mount only `ORIGINAL_LOWER` or `ADVANCED_LOWER`. On any unexplained
+access or write event, stop the exact task-owned process and ask the user; do not stop or alter the
+unrelated accessor.
 
 Download sidecars can be stale after bloating. Boot the exact client only through a disposable
 OverlayFS over `ORIGINAL_LOWER`, query `eth_getBlockByNumber("latest")`, and record its block,
@@ -281,7 +289,9 @@ live head to match the selected suite's base head.
 
 Do not load a hosted `schelk` runner file and override only `method`: Viper retains sibling
 `schelk_options`, yielding an invalid mixed config. Load the dataset's global/genesis file and
-supply a complete local map after it:
+supply a complete local map after the selected test source and clients. Test-source files can set
+`runner.container_runtime` and `data-disk-type`; if loaded later, those values override Docker and
+OverlayFS settings from an earlier local map:
 
 ```yaml
 global:
@@ -346,43 +356,47 @@ benchmark command; use it only to verify the bind and later identify the exact c
 
 Create a field-for-field copy of the selected test-source map and remove only `pre_runs`. Preserve
 its name, labels, fixture URL, fixture subdirectory, rollback strategy, runner settings, and any
-other source fields. Do not try to delete the inherited key with a partial later map. During
-measured runs, use this complete local source and `ADVANCED_LOWER`, and restore the resource-limit
-config.
+other source fields in that copy. Do not try to delete the inherited key with a partial later map.
+Deliberately replace its environment-specific runtime and storage-label values with the final local
+Docker/OverlayFS config described below. During measured runs, use this complete local source and
+`ADVANCED_LOWER`, and restore the resource-limit config.
 
 For the ordered command shown earlier in this reference, replace both State Actor datadir configs
-with the pre-populated dataset's `global.yaml` and the complete local OverlayFS config. Omit its
-hosted runner config. Replace the upstream source with the complete no-pre-runs source when using an
-advanced baseline. Keep the context global and clients files from the pinned suite, followed by the
-local instance, advanced-lower, and optional exact-filter overrides.
+with the pre-populated dataset's `global.yaml`. Omit its hosted runner config. Replace the upstream
+source with the complete no-pre-runs source when using an advanced baseline. After the context,
+source, and clients files, load the complete local Docker/OverlayFS config, then the local instance
+and optional exact-filter overrides. The final local config must reassert `container_runtime:
+docker`, the complete OverlayFS datadir map, and `data-disk-type: overlayfs`.
 
 The two effective config stacks are therefore:
 
 ```text
 staging: configs/global.yaml
          -> dataset global/genesis
-         -> complete local OverlayFS config using ORIGINAL_LOWER
          -> context global
          -> complete original stateful source (with pre_runs)
          -> pinned clients
+         -> complete local Docker/OverlayFS config using ORIGINAL_LOWER
          -> complete local staging instance
 
 measured: configs/global.yaml
           -> resource-limit config
           -> dataset global/genesis
-          -> complete local OverlayFS config using ADVANCED_LOWER
           -> context global
           -> complete local stateful source (without pre_runs)
           -> pinned clients
+          -> complete local Docker/OverlayFS config using ADVANCED_LOWER
           -> complete local measured instance and optional exact-filter override
 ```
 
 Use `--debug.stop-after-prerun` only on the staging command. Use the same
 `--limit-instance-client` and `--limit-instance-id` on both. Let the smoke create its persisted
-`config.json`, inspect that effective configuration and its nonzero resolved tests, and only then
-start the requested measured run. If the requested subset has at most ten fixtures, it may itself
-serve as the smoke when it uses this identical final stack and passes every smoke gate. For an
-all-fixtures run, remove the smoke filter and pass the archive-count equality gate above.
+`config.json`, require its instance runtime to be `docker` and datadir method to be `overlayfs`,
+require the persisted suite summary's `data-disk-type` to be `overlayfs`, and confirm its nonzero
+resolved tests before starting the requested measured run. If the requested subset has at most ten
+fixtures, it may itself serve as the smoke when it uses this identical final stack and passes every
+smoke gate. For an all-fixtures run, remove the smoke filter and pass the archive-count equality
+gate above.
 
 ### Monitor and clean up
 

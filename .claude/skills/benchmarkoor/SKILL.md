@@ -29,6 +29,8 @@ rolling branches, fixture URLs, or image tags still identify the same code.
 - Use `method: overlayfs` for these Linux benchmark hosts.
 - Configure `source_dir` to a verified read-only bind mount of the pristine datadir, never to the
   original writable path.
+- Perform recursive inspection, size measurement, and hashing through that read-only bind. Reading
+  files through the writable path can update access times on a `relatime` filesystem.
 - Keep OverlayFS `upperdir`, `workdir`, and `merged` paths outside the pristine and lower trees.
 - Verify the lower mount is `ro` before startup and remains `ro` throughout the run.
 - Treat every other datadir method as an alternative that requires an explicit user request; never
@@ -132,12 +134,13 @@ settled at 516.83 GiB; treat that 2.04x ratio as capacity evidence, not a bound.
 exit and inspect CPU and disk activity instead of treating a quiet finalization phase or ETA as a
 failure.
 
-After success, inspect:
+After success, install the read-only bind in the protection section before inspecting the completed
+tree. Once that section has set `INTEGRITY_ROOT`, inspect only through that path:
 
 ```bash
-jq . "$PRISTINE_DIR/state-actor-manifest.json"
-jq . "$PRISTINE_DIR/.benchmarkoor-build.json"
-find "$PRISTINE_DIR" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
+jq . "$INTEGRITY_ROOT/state-actor-manifest.json"
+jq . "$INTEGRITY_ROOT/.benchmarkoor-build.json"
+find "$INTEGRITY_ROOT" -maxdepth 1 -type f -printf '%f %s bytes\n' | sort
 ```
 
 The manifest records State Actor metadata and the resolved builder-image digest; the sidecar records
@@ -146,12 +149,11 @@ pristine.
 
 ## Measure pristine and overlay capacity
 
-Measure allocated and apparent sizes because large database files may be sparse, then check the
-writable filesystem that will hold the overlay upper layer:
+First identify the filesystems containing the pristine tree and writable overlay. Defer recursive
+allocated/apparent-size measurement until the read-only bind in the protection section is mounted;
+large database files may be sparse, and reading them through the writable path can update atime:
 
 ```bash
-du -sx --block-size=1 "$PRISTINE_DIR"
-du -sx --apparent-size --block-size=1 "$PRISTINE_DIR"
 df -B1 --output=size,used,avail,target "$PRISTINE_DIR" "$OVERLAY_TMP"
 findmnt -T "$PRISTINE_DIR"
 findmnt -T "$OVERLAY_TMP"
@@ -274,35 +276,39 @@ sudo mkdir -p "$LOWER_ROOT/erigon" "$OVERLAY_TMP"
 sudo mount --bind "$PRISTINE_DIR" "$LOWER_ROOT/erigon"
 sudo mount -o remount,bind,ro "$LOWER_ROOT/erigon"
 findmnt -n -o SOURCE,OPTIONS "$LOWER_ROOT/erigon"
+INTEGRITY_ROOT="$LOWER_ROOT/erigon"
 ```
 
 Require `ro` as a distinct mount option before continuing. Record allocated/apparent size,
 dataset-appropriate critical file hashes, and a metadata fingerprint that covers every path's
-type, size, mtime, ctime, mode, owner, group, and symlink target. The State Actor files below are
-examples, not a universal list for pre-populated snapshots:
+type, size, atime, mtime, ctime, mode, owner, group, and symlink target. From this point onward, run
+every recursive read and content hash through `INTEGRITY_ROOT`, never through `PRISTINE_DIR`. The
+State Actor files below are examples, not a universal list for pre-populated snapshots:
 
 ```bash
 pristine_fingerprint() {
-  find "$PRISTINE_DIR" -xdev \
-    -printf '%P\0%y\0%s\0%T@\0%C@\0%m\0%u\0%g\0%l\0' |
+  local integrity_root=${1:?set integrity root to the read-only bind}
+  find "$integrity_root" -xdev \
+    -printf '%P\0%y\0%s\0%A@\0%T@\0%C@\0%m\0%u\0%g\0%l\0' |
     LC_ALL=C sort -z |
     sha256sum
 }
 
-du -sx --block-size=1 "$PRISTINE_DIR"
-du -sx --apparent-size --block-size=1 "$PRISTINE_DIR"
+du -sx --block-size=1 "$INTEGRITY_ROOT"
+du -sx --apparent-size --block-size=1 "$INTEGRITY_ROOT"
 sha256sum \
-  "$PRISTINE_DIR/state-actor-manifest.json" \
-  "$PRISTINE_DIR/.benchmarkoor-build.json" \
-  "$PRISTINE_DIR/chainspec.json" \
-  "$PRISTINE_DIR/genesis.json" \
-  "$PRISTINE_DIR/nodekey"
-pristine_fingerprint
+  "$INTEGRITY_ROOT/state-actor-manifest.json" \
+  "$INTEGRITY_ROOT/.benchmarkoor-build.json" \
+  "$INTEGRITY_ROOT/chainspec.json" \
+  "$INTEGRITY_ROOT/genesis.json" \
+  "$INTEGRITY_ROOT/nodekey"
+pristine_fingerprint "$INTEGRITY_ROOT"
 ```
 
 Before the real run, manually mount a small probe overlay with this read-only bind as `lowerdir`.
-Create a canary through the merged path and require it to appear in `upperdir` but never in either
-the bind mount or pristine directory:
+Create a canary through the merged path and require it to appear in `upperdir` but never in the
+bind mount. Because the bind and pristine path expose the same underlying tree, inspect only the
+read-only bind:
 
 ```bash
 PROBE_ROOT=$(mktemp -d "$OVERLAY_TMP/benchmarkoor-overlay-probe.XXXXXX")
@@ -318,7 +324,6 @@ mkdir "$PROBE_ROOT/upper" "$PROBE_ROOT/work" "$PROBE_ROOT/merged"
   sudo touch "$PROBE_ROOT/merged/$CANARY"
   test -e "$PROBE_ROOT/upper/$CANARY"
   test ! -e "$LOWER_ROOT/erigon/$CANARY"
-  test ! -e "$PRISTINE_DIR/$CANARY"
   sudo umount "$PROBE_ROOT/merged"
   trap - EXIT
 )
