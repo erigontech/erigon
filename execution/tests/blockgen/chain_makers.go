@@ -436,7 +436,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		return nil, err
 	}
 
-	stateReader := state.NewReaderV3(domains.AsGetter(tx))
+	stateReader := state.NewReaderV3(domains.AsStateGetter(tx))
 	stateWriter := state.NewWriter(domains.AsPutDel(tx), nil, latestTxNum)
 
 	txNum, err := rawdbv3.TxNums.Max(ctx, tx, parent.NumberU64())
@@ -666,6 +666,12 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 	}
 
 	header := builder.MakeEmptyHeader(parent.Header(), chain.Config(), time, nil)
+	if chain.Config().IsAmsterdam(time) {
+		// Real slot numbers come from the consensus layer. Synthetic chains use
+		// the block number as a deterministic stand-in.
+		slotNumber := header.Number.Uint64()
+		header.SlotNumber = &slotNumber
+	}
 	header.Coinbase = parent.Coinbase()
 	header.Difficulty = engine.CalcDifficulty(chain, time,
 		time-10,

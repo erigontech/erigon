@@ -74,7 +74,7 @@ func TestTransactionsSSZ_DecodeSSZ_BoundsCheck(t *testing.T) {
 		t.Run(tt.name, func(t *testing.T) {
 			txs := &TransactionsSSZ{}
 			err := txs.DecodeSSZ(tt.buf, 0)
-			if err != tt.wantErr {
+			if !errors.Is(err, tt.wantErr) {
 				t.Errorf("DecodeSSZ() error = %v, wantErr = %v", err, tt.wantErr)
 			}
 		})

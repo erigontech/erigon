@@ -51,6 +51,9 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
@@ -112,6 +115,38 @@ func (p *rewindingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovi
 type observingTxnProvider struct {
 	txnprovider.TxnProvider
 	txnCounts chan int
+}
+
+type emptyTxnProvider struct{}
+
+func (emptyTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	return nil, nil
+}
+
+type delayedSealEngine struct {
+	rules.Engine
+	started chan struct{}
+	release chan struct{}
+}
+
+type doneObservedContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+func (e *delayedSealEngine) Seal(_ rules.ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
+	close(e.started)
+	go func() {
+		<-e.release
+		results <- block
+	}()
+	return nil
 }
 
 func (p *observingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
@@ -527,11 +562,9 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 	}{
 		{name: "fg-prune"},
 		// bg-prune matches the hive erigon default (FcuBackgroundPrune=true): the
-		// background prune shares the pipeline sync with the next FCU's RunLoop.
-		// bg-commit hands the semaphore to its goroutine the same way; in both
-		// modes the handoff must not overlap the FCU goroutine's cleanup.
+		// background prune shares the pipeline sync with the next FCU's RunLoop,
+		// and its semaphore handoff must not overlap the FCU goroutine's cleanup.
 		{name: "bg-prune", opt: execmoduletester.WithFcuBackgroundPrune()},
-		{name: "bg-commit", opt: execmoduletester.WithFcuBackgroundCommit()},
 	}
 	for _, mode := range modes {
 		opts := []execmoduletester.Option{execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges})}
@@ -618,6 +651,14 @@ func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m
 	}
 }
 
+func TestExecModuleTesterReportsUnknownPayload(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+
+	block, err := m.GetAssembledBlock(t.Context(), 404)
+	require.ErrorIs(t, err, chainreader.ErrUnknownPayload)
+	require.Nil(t, block)
+}
+
 func TestAssembleBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -645,6 +686,7 @@ func TestAssembleBlock(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 	block, err := m.GetAssembledBlock(ctx, payloadId)
@@ -654,6 +696,62 @@ func TestAssembleBlock(t *testing.T) {
 
 	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
+	engine := &delayedSealEngine{
+		Engine:  merge.NewFaker(ethash.NewFaker()),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	t.Cleanup(func() { close(engine.release) })
+	m := execmoduletester.New(t,
+		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
+		execmoduletester.WithEngine(engine),
+	)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	parent := chainPack.TopBlock
+	beaconRoot := randomHash()
+	payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
+		CustomTxnProvider:     emptyTxnProvider{},
+	}, time.Minute, time.Minute)
+
+	stopped := make(chan error, 1)
+	stopObserved := make(chan struct{})
+	stopCtx := &doneObservedContext{Context: context.Background(), observed: stopObserved}
+	go func() {
+		_, stopErr := payloadBuilder.Stop(stopCtx)
+		stopped <- stopErr
+	}()
+
+	select {
+	case <-engine.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not reach sealing")
+	}
+	select {
+	case <-stopObserved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not begin waiting for the builder")
+	}
+	payloadBuilder.Discard()
+
+	select {
+	case err := <-stopped:
+		require.ErrorIs(t, err, builder.ErrDiscarded)
+	case <-time.After(5 * time.Second):
+		t.Fatal("discarded builder remained blocked waiting for a seal result")
+	}
 }
 
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
@@ -703,6 +801,7 @@ func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{4},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
 		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
@@ -759,6 +858,7 @@ func TestGetAssembledBlockHonorsCanceledContextWhenTxPoolIsBehindParent(t *testi
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
 		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
@@ -831,6 +931,7 @@ func TestAssembleBlockWithFreshlyAddedTxns(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 		CustomTxnProvider:     provider,
 	})
 	require.NoError(t, err)
@@ -856,6 +957,12 @@ func randomHash() common.Hash {
 	return h
 }
 
+func syntheticSlotNumber(parent *types.Block) *uint64 {
+	// Consensus assigns slots independently; synthetic tests reuse block numbers.
+	slotNumber := parent.NumberU64() + 1
+	return &slotNumber
+}
+
 func TestAssembleEmptyBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -879,6 +986,7 @@ func TestAssembleEmptyBlock(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 
@@ -918,6 +1026,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 
@@ -941,6 +1050,7 @@ func TestAssembleBlockWithStateVerification(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(block),
 	})
 	require.NoError(t, err)
 
@@ -996,6 +1106,7 @@ func TestAssembleBlockWithContractCreation(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 
@@ -1066,6 +1177,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 	block, err := m.GetAssembledBlock(ctx, payloadId)
@@ -1085,6 +1197,7 @@ func TestAssembleBlockGasOverflow(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(block),
 	})
 	require.NoError(t, err)
 	block2, err := m.GetAssembledBlock(ctx, payloadId2)
@@ -1159,6 +1272,7 @@ func TestAssembleBlockMixedTxTypes(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: func() *common.Hash { h := randomHash(); return &h }(),
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 	block, err := m.GetAssembledBlock(ctx, payloadId)
@@ -1250,6 +1364,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 		SuggestedFeeRecipient: common.Address{1},
 		Withdrawals:           make([]*types.Withdrawal, 0),
 		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(chainPack.TopBlock),
 	})
 	require.NoError(t, err)
 
@@ -1260,7 +1375,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 		time.Hour,
 	)
 
-	eth1Block, blobsBundle, requestsBundle, blockValue, err := chainRW.GetAssembledBlock(payloadId)
+	eth1Block, blobsBundle, requestsBundle, blockValue, err := chainRW.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.NotNil(t, eth1Block, "Eth1Block should not be nil")
 	require.NotNil(t, blobsBundle, "BlobsBundle should not be nil")
@@ -1676,35 +1791,6 @@ func TestNotificationDispatchForegroundCommit(t *testing.T) {
 		return nil
 	})
 	require.NoError(t, err)
-}
-
-// TestNotificationDispatchBackgroundCommit verifies that with background
-// commit enabled, notifications are still dispatched before FCU returns,
-// even though the DB commit happens asynchronously.
-//
-// Note: with background commit, subsequent blocks may fail validation
-// because the DB state hasn't caught up yet (the commit is async). This
-// test only processes the genesis → block 1 transition to verify that
-// notification dispatch works correctly in the background commit path.
-func TestNotificationDispatchBackgroundCommit(t *testing.T) {
-	// Background commit creates a race: FCU N returns before commit finishes,
-	// so FCU N+1 reads stale state from DB. This is the known limitation that
-	// the API-layer "latest head pointer" coordination is designed to solve.
-	// Once that's implemented, remove this skip and verify the full flow.
-	t.Skip("background commit requires API-layer coordination (latest head pointer) to work correctly")
-
-	m := execmoduletester.New(t, execmoduletester.WithFcuBackgroundCommit())
-
-	headerCh, unsub := m.Notifications.Events.AddHeaderSubscription()
-	defer unsub()
-
-	chainPack, err := m.GenerateChain(1, nil)
-	require.NoError(t, err)
-
-	err = m.InsertChain(chainPack)
-	require.NoError(t, err)
-
-	drainHeaders(t, headerCh, 2*time.Second)
 }
 
 // TestNotificationDispatchBackgroundPrune verifies that with the default
@@ -2349,12 +2435,11 @@ func TestInsertBlocksWithBatchedFCU(t *testing.T) {
 	}
 }
 
-// runBatchedFCUBadBlockRecovery is the shared body for the foreground- and
-// background-commit variants of the bad-block recovery test. Both FCU
-// cleanup branches — local SD close (foreground) and the additional
-// currentContext reset (background) — must leave the next InsertBlocks+FCU
-// cycle able to recover.
-func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
+// TestInsertBlocksWithBatchedFCU_BadBlockRecovery covers the FCU cleanup path:
+// a bad-block FCU closes the local SharedDomains while the persistent
+// currentContext remains, and the next InsertBlocks+FCU cycle must
+// re-initialize the overlay on top of it and recover.
+func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 	ctx := t.Context()
 	privKey, err := crypto.GenerateKey()
 	require.NoError(t, err)
@@ -2365,19 +2450,12 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 			senderAddr: {Balance: new(big.Int).Exp(big.NewInt(10), big.NewInt(18), nil)},
 		},
 	}
-	opts := []execmoduletester.Option{
+	m := execmoduletester.New(t,
 		execmoduletester.WithGenesisSpec(genesis),
 		execmoduletester.WithKey(privKey),
-	}
-	if bgCommit {
-		opts = append(opts, execmoduletester.WithFcuBackgroundCommit())
-	}
-	m := execmoduletester.New(t, opts...)
+	)
 
-	// Under background commit, a commit (including the genesis InsertBlocks inside
-	// New) lands asynchronously after the call returns. These polls let DB reads
-	// wait for the commit goroutine; both return immediately under foreground
-	// commit. Transient read errors are treated as "not ready yet" and retried.
+	// Transient read errors are treated as "not ready yet" and retried.
 	waitForGenesis := func() {
 		require.Eventually(t, func() bool {
 			var funded bool
@@ -2456,10 +2534,8 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 
 	// Phase 3: recovery — insert the real block 6 and FCU on it. This must
 	// succeed even though the bad-block FCU just closed the local
-	// SharedDomains. The persistent e.currentContext is either still
-	// pointing to the prior SD (foreground) or has been nil'd (background);
-	// both paths must let the next InsertBlocks re-initialize the overlay
-	// cleanly.
+	// SharedDomains: the persistent e.currentContext still points at the prior
+	// SD, and the next InsertBlocks must re-initialize the overlay cleanly.
 	recoverIns, err := m.InsertBlocks(ctx, []*types.Block{chainPack.Blocks[5]})
 	require.NoError(t, err, "InsertBlocks of the good block after a bad-block FCU must not error")
 	require.Equal(t, execmodule.ExecutionStatusSuccess, recoverIns)
@@ -2486,22 +2562,6 @@ func runBatchedFCUBadBlockRecovery(t *testing.T, bgCommit bool) {
 		require.NotNil(t, td)
 		return nil
 	}))
-}
-
-// TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Foreground covers the
-// foreground-commit cleanup path: a bad-block FCU closes the local
-// SharedDomains while the persistent currentContext remains, and the next
-// InsertBlocks must re-initialize the overlay on top of it.
-func TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Foreground(t *testing.T) {
-	runBatchedFCUBadBlockRecovery(t, false)
-}
-
-// TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Background covers the
-// background-commit cleanup path, where the bad-block FCU additionally resets
-// currentContext. Commits land asynchronously, so the shared body polls
-// committed state before asserting (see waitForGenesis/waitForBlock).
-func TestInsertBlocksWithBatchedFCU_BadBlockRecovery_Background(t *testing.T) {
-	runBatchedFCUBadBlockRecovery(t, true)
 }
 
 // transferGen returns a deterministic per-block tx generator: identical

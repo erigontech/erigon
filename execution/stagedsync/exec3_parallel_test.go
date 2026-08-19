@@ -16,6 +16,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
@@ -92,6 +93,21 @@ func NewTestExecTask(txIdx int, ops []Op, sender accounts.Address, nonce int) *t
 		nonce:        nonce,
 		dependencies: []int{},
 	}
+}
+
+func newParallelTestBlock(blockNum uint64) *types.Block {
+	header := &types.Header{Number: *uint256.NewInt(blockNum)}
+	return types.NewBlockFromStorage(common.Hash{}, header, nil, nil, nil, nil)
+}
+
+func newParallelTestBlockFromTasks(tasks []exec.Task) *types.Block {
+	txs := make(types.Transactions, 0, len(tasks))
+	for _, task := range tasks {
+		if tx := task.Tx(); tx != nil {
+			txs = append(txs, tx)
+		}
+	}
+	return types.NewBlockFromStorage(tasks[0].BlockHash(), tasks[0].BlockHeader(), txs, nil, nil, nil)
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
@@ -571,8 +587,9 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 	ctx, cancel := context.WithCancel(context.Background())
 
 	applyResults := make(chan applyResult, 1000)
+	block := newParallelTestBlockFromTasks(tasks)
 
-	pe.execRequests <- &execRequest{0, common.Hash{}, nil, nil, tasks, applyResults, nil, profile, nil}
+	pe.execRequests <- &execRequest{block: block, tasks: tasks, applyResults: applyResults, profile: profile}
 
 	// TODO get results back
 
@@ -1436,7 +1453,7 @@ func TestParallelResumeBoundaryOffsets(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(0, common.Hash{}, gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1519,7 +1536,7 @@ func TestParallelResumeReconstructsPriorReceipts(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1592,7 +1609,7 @@ func TestParallelResumeReconstructionFailureIsNonFatal(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(1, common.Hash{}, gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
 	eTask := &execTask{
 		Task:  txTask,
 		index: 0,
@@ -1667,7 +1684,7 @@ func TestParallelFinalizeMissingPrevReceiptErrors(t *testing.T) {
 
 	gasPool := new(protocol.GasPool).AddGas(10_000_000)
 
-	be := newBlockExec(0, common.Hash{}, gasPool, nil, make(chan applyResult, 1), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(0), gasPool, nil, make(chan applyResult, 1), nil, false, nil)
 	be.tasks = []*execTask{eTask0, eTask1}
 	be.results = []*execResult{nil, nil}
 	// tx 0 was "finalized" without a receipt — the invariant nextResult
@@ -1726,7 +1743,7 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 			pe.in = exec.NewQueueWithRetry(16)
 			t.Cleanup(pe.in.Close)
 			gasPool := new(protocol.GasPool).AddGas(10_000_000)
-			be := newBlockExec(tc.blockNum, common.Hash{}, gasPool, nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
+			be := newBlockExec(newParallelTestBlock(tc.blockNum), gasPool, nil, make(chan applyResult, 8), make(chan applyResult, 8), false, nil)
 			eTask := &execTask{Task: txTask, index: 0}
 			be.tasks = []*execTask{eTask}
 			be.results = []*execResult{nil}
@@ -1760,4 +1777,225 @@ func TestNextResult_NilVsEmptyRecordForkAware(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestDispatchPendingCompaction(t *testing.T) {
+	cases := []struct {
+		name       string
+		pending    []int
+		decide     func(tx int) dispatchAction
+		wantPend   []int
+		wantInProg []int
+	}{
+		{
+			name:    "mix hold/consume then stop",
+			pending: []int{0, 1, 2, 3, 4, 5, 6, 7},
+			decide: func(tx int) dispatchAction {
+				switch tx {
+				case 1, 3:
+					return dispatchHold
+				case 5:
+					return dispatchStop
+				default:
+					return dispatchConsume
+				}
+			},
+			wantPend:   []int{1, 3, 5, 6, 7},
+			wantInProg: []int{0, 1, 2, 3, 4},
+		},
+		{
+			name:    "hold-stop when input is full",
+			pending: []int{0, 1, 2, 3},
+			decide: func(tx int) dispatchAction {
+				if tx == 1 {
+					return dispatchHoldStop
+				}
+				return dispatchConsume
+			},
+			wantPend:   []int{1, 2, 3},
+			wantInProg: []int{0, 1},
+		},
+		{
+			name:       "all consumed",
+			pending:    []int{0, 1, 2},
+			decide:     func(int) dispatchAction { return dispatchConsume },
+			wantPend:   []int{},
+			wantInProg: []int{0, 1, 2},
+		},
+		{
+			name:       "stop immediately leaves pending untouched",
+			pending:    []int{0, 1, 2},
+			decide:     func(int) dispatchAction { return dispatchStop },
+			wantPend:   []int{0, 1, 2},
+			wantInProg: []int{},
+		},
+		{
+			name:       "all held",
+			pending:    []int{0, 1, 2},
+			decide:     func(int) dispatchAction { return dispatchHold },
+			wantPend:   []int{0, 1, 2},
+			wantInProg: []int{0, 1, 2},
+		},
+	}
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			m := &execStatusList{pending: append([]int{}, tc.pending...)}
+			m.dispatchPending(tc.decide)
+			require.Equal(t, tc.wantPend, m.pending, "pending")
+
+			gotInProg := map[int]bool{}
+			for i, v := range m.inProgress {
+				if v {
+					gotInProg[i] = true
+				}
+			}
+			wantInProg := map[int]bool{}
+			for _, v := range tc.wantInProg {
+				wantInProg[v] = true
+			}
+			require.Equal(t, wantInProg, gotInProg, "inProgress")
+			require.Equal(t, len(tc.wantInProg), m.inProgressCnt, "inProgressCnt")
+		})
+	}
+}
+
+// dispatchPending must produce the same result on a slice whose start and
+// capacity have drifted through takeNextPending as on a fresh one.
+func TestDispatchPendingOnDriftedSlice(t *testing.T) {
+	m := &execStatusList{}
+	for i := range 10 {
+		m.pushPending(i)
+	}
+	m.takeNextPending()
+	m.takeNextPending()
+	m.dispatchPending(func(tx int) dispatchAction {
+		switch tx {
+		case 3, 4:
+			return dispatchHold
+		case 7:
+			return dispatchStop
+		default:
+			return dispatchConsume
+		}
+	})
+	require.Equal(t, []int{3, 4, 7, 8, 9}, m.pending)
+}
+
+// BenchmarkDispatchPendingCompaction holds back and dispatches a fixed prefix in
+// front of a growing suffix. The compaction never touches the suffix, so the
+// time stays flat as the suffix grows.
+func BenchmarkDispatchPendingCompaction(b *testing.B) {
+	const held, consumed = 8, 8
+	prefix := held + consumed
+	decide := func(tx int) dispatchAction {
+		switch {
+		case tx < held:
+			return dispatchHold
+		case tx < prefix:
+			return dispatchConsume
+		default:
+			return dispatchStop
+		}
+	}
+	for _, suffix := range []int{1024, 4096, 16384, 65536} {
+		total := prefix + suffix
+		base := make([]int, total)
+		for i := range base {
+			base[i] = i
+		}
+		buf := make([]int, total)
+		b.Run(fmt.Sprintf("suffix=%d", suffix), func(b *testing.B) {
+			m := &execStatusList{}
+			m.ensureLen(total)
+			copy(buf, base) // dispatchPending only rewrites the prefix, so the suffix stays valid
+			b.ResetTimer()
+			for i := 0; i < b.N; i++ {
+				copy(buf[:prefix], base[:prefix])
+				m.pending = buf
+				m.dispatchPending(decide)
+			}
+		})
+	}
+}
+
+// logEmittingSyscallEngine drives a fixed number of block-end system calls at
+// one contract, each of which emits a log.
+type logEmittingSyscallEngine struct {
+	rules.Engine
+	contract accounts.Address
+	calls    int
+}
+
+func (e *logEmittingSyscallEngine) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal, chain rules.ChainReader,
+	syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	for range e.calls {
+		if _, err := syscall(e.contract, nil); err != nil {
+			return nil, err
+		}
+	}
+	return nil, nil
+}
+
+// seedLogEmittingContract deploys `LOG0` bytecode at addr so that every system
+// call to it appends exactly one log to the caller's IntraBlockState.
+func seedLogEmittingContract(t *testing.T, db kv.TemporalRwDB, addr common.Address) {
+	code := []byte{byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.LOG0), byte(vm.STOP)}
+	seedResumeTestDB(t, db, func(putter kv.TemporalPutDel) error {
+		acc := accounts.NewAccount()
+		acc.CodeHash = accounts.InternCodeHash(crypto.Keccak256Hash(code))
+		if err := putter.DomainPut(kv.CodeDomain, addr[:], code, 0, nil); err != nil {
+			return err
+		}
+		return putter.DomainPut(kv.AccountsDomain, addr[:], accounts.SerialiseV3(&acc), 0, nil)
+	})
+}
+
+// TestParallelBlockEndLogsCountEachSyscallOnce pins the block-end log run: the
+// finalize system calls share one IntraBlockState and one txIndex, so the state
+// holds their cumulative logs, and collecting per call counted the earlier ones
+// again — k(k+1)/2 logs for k calls.
+func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
+	const syscalls = 3
+
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	contract := common.HexToAddress("0x00000000000000000000000000000000000c0de0")
+	seedLogEmittingContract(t, db, contract)
+
+	txTask := &exec.TxTask{
+		Header: &types.Header{
+			Number:   *uint256.NewInt(1),
+			GasLimit: 10_000_000,
+		},
+		TxNum:   1,
+		TxIndex: 0,
+		Config:  config,
+	}
+
+	pe, roTx := newResumeTestExec(t, db, config)
+	pe.cfg.engine = &logEmittingSyscallEngine{Engine: ethash.NewFaker(), contract: accounts.InternAddress(contract), calls: syscalls}
+	pe.cfg.vmConfig = &vm.Config{}
+
+	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 4), nil, false, nil)
+	eTask := &execTask{Task: txTask, index: 0}
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.execTasks.setInProgress(0)
+
+	txResult := &exec.TxResult{
+		Task: &taskVersion{
+			execTask: eTask,
+			version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 1, TxNum: 1},
+		},
+		ExecutionResult: evmtypes.ExecutionResult{ReceiptGasUsed: 21000},
+	}
+
+	res, err := be.nextResult(context.Background(), pe, txResult, roTx)
+	require.NoError(t, err)
+	require.NotNil(t, res)
+	require.NoError(t, res.Err)
+
+	assert.Len(t, txResult.Logs, syscalls)
 }

@@ -10,11 +10,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -68,14 +69,14 @@ func benchConfig(b *testing.B, gasLimit uint64) *vm.EVM {
 func newBenchEnv(t testing.TB, gasLimit uint64, noMaterialize bool) *vm.EVM {
 	t.Helper()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
 
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
 	statedb := state.NewWithVersionMap(
-		state.NewReaderV3(domains.AsGetter(tx)),
+		state.NewReaderV3(domains.AsStateGetter(tx)),
 		state.NewVersionMap(nil),
 	)
 	statedb.SetNoMaterialize(noMaterialize)

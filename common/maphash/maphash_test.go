@@ -204,6 +204,33 @@ func TestMapOverwrite(t *testing.T) {
 	}
 }
 
+// The bool reports presence, not insertion; callers count entries off it.
+func TestMapReplaceIfPresent(t *testing.T) {
+	SetSeed(42)
+	m := NewMap[string]()
+
+	if m.ReplaceIfPresent([]byte("absent"), "v") {
+		t.Error("ReplaceIfPresent on an absent key must report false")
+	}
+	if _, ok := m.Get([]byte("absent")); ok {
+		t.Error("ReplaceIfPresent must not insert")
+	}
+	if m.Len() != 0 {
+		t.Errorf("expected len 0, got %d", m.Len())
+	}
+
+	m.Set([]byte("key"), "first")
+	if !m.ReplaceIfPresent([]byte("key"), "second") {
+		t.Error("ReplaceIfPresent on a present key must report true")
+	}
+	if v, ok := m.Get([]byte("key")); !ok || v != "second" {
+		t.Errorf("expected (second, true), got (%s, %v)", v, ok)
+	}
+	if m.Len() != 1 {
+		t.Errorf("expected len 1, got %d", m.Len())
+	}
+}
+
 func TestMapEmptyKey(t *testing.T) {
 	SetSeed(42)
 	m := NewMap[int]()

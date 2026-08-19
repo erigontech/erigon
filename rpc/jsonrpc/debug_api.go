@@ -205,7 +205,7 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		var err error
 		startBytes, err = hexutil.Decode(v)
 		if err != nil {
-			return state.IteratorDump{}, fmt.Errorf("invalid hex string for start parameter: %v", err)
+			return state.IteratorDump{}, fmt.Errorf("invalid hex string for start parameter: %w", err)
 		}
 
 	case []byte:
@@ -319,8 +319,10 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 		return nil, err
 	}
 
-	// forces negative numbers to fail (too large) but allows zero
-	startNum := uint64(startNumber.Int64())
+	startNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(startNumber), tx, api._blockReader, nil)
+	if err != nil {
+		return nil, err
+	}
 	if startNum > latestBlock {
 		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
 	}
@@ -342,7 +344,10 @@ func (api *DebugAPIImpl) GetModifiedAccountsByNumber(ctx context.Context, startN
 	}
 
 	// Two params: Geth compares state at startNum vs endNum → blocks (startNum, endNum].
-	endNum := uint64(endNumber.Int64()) // forces negative numbers to fail (too large)
+	endNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(*endNumber), tx, api._blockReader, nil)
+	if err != nil {
+		return nil, err
+	}
 	if endNum > latestBlock {
 		return nil, fmt.Errorf("end block (%d) is later than the latest block (%d)", endNum, latestBlock)
 	}
@@ -524,6 +529,9 @@ func (api *DebugAPIImpl) GetModifiedAccountsByHash(ctx context.Context, startHas
 	startNum, err := api.headerNumberByHash(ctx, tx, startHash)
 	if err != nil {
 		return nil, fmt.Errorf("start block %x not found", startHash)
+	}
+	if startNum > latestBlock {
+		return nil, fmt.Errorf("start block (%d) is later than the latest block (%d)", startNum, latestBlock)
 	}
 
 	if endHash == nil {

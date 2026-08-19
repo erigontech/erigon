@@ -34,8 +34,6 @@ import (
 	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
-var json = jsoniter.ConfigFastest
-
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
 func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 	data, err := db.GetOne(kv.ConfigTable, hash[:])

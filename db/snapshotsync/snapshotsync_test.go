@@ -27,7 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/snapcfg"
@@ -38,7 +38,7 @@ import (
 
 func beginTestRoTx(t *testing.T) kv.Tx {
 	t.Helper()
-	tx, err := memdb.NewTestDB(t, dbcfg.ChainDB).BeginRo(context.Background())
+	tx, err := mdbxtest.NewTestDB(t, dbcfg.ChainDB).BeginRo(context.Background())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -520,7 +520,7 @@ func TestIsReceiptsSegmentPruned(t *testing.T) {
 	const stepSize = 100
 	const pruneHeight = 50 // minTxNum(50)=5000 → cutoff step 50
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tx, err := db.BeginRw(context.Background())
 	if err != nil {
 		t.Fatal(err)
