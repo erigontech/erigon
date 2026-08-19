@@ -9,49 +9,49 @@ const versionReplace = require('./src/remark/version-replace.js');
 // below derives everything from this list, no per-version config edits required.
 const archivedVersions: string[] = require('./versions.json');
 
+// The docs series this branch publishes; also scopes the {ERIGON_VERSION}
+// lookup below. The `label: 'vX.Y'` literal is rewritten at each cutover.
+const currentDocsVersion = {
+  label: 'v3.6',
+  badge: false,
+};
+
+type Release = {tag_name: string; prerelease: boolean; draft: boolean};
+
+// Stable-release selection lives in its own CommonJS module so its ordering
+// rules are testable without booting Docusaurus (src/releases.test.js). The
+// GitHub API orders releases by publish date, so every selector there sorts by
+// semantic version instead of trusting that order.
+const {installableVersion, latestStableInSeries} = require('./src/releases.js');
+
 function githubHeaders(): Record<string, string> {
   const headers: Record<string, string> = {Accept: 'application/vnd.github.v3+json'};
   if (process.env.GITHUB_TOKEN) headers['Authorization'] = `Bearer ${process.env.GITHUB_TOKEN}`;
   return headers;
 }
 
-async function fetchLatestVersion(): Promise<string> {
-  try {
-    const res = await fetch(
-      'https://api.github.com/repos/erigontech/erigon/releases/latest',
-      {headers: githubHeaders()},
-    );
-    if (!res.ok) return 'latest';
-    const data = await res.json() as {tag_name?: string};
-    return data.tag_name?.replace(/^v/, '') ?? 'latest';
-  } catch {
-    return 'latest';
+// One page serves every series resolved below; 100 is the API maximum and must
+// stay wide enough to reach the oldest archived series.
+async function fetchReleases(): Promise<Release[]> {
+  const res = await fetch(
+    'https://api.github.com/repos/erigontech/erigon/releases?per_page=100',
+    {headers: githubHeaders()},
+  );
+  if (!res.ok) {
+    const hint = res.status === 403 || res.status === 429
+      ? ' Set GITHUB_TOKEN if this is rate limiting.'
+      : '';
+    throw new Error(`Release lookup failed: ${res.status} ${res.statusText}.${hint}`);
   }
-}
-
-async function fetchLatestSeriesVersion(prefix: string): Promise<string> {
-  try {
-    const res = await fetch(
-      'https://api.github.com/repos/erigontech/erigon/releases?per_page=50',
-      {headers: githubHeaders()},
-    );
-    if (!res.ok) return 'latest';
-    const releases = await res.json() as Array<{tag_name: string; prerelease: boolean}>;
-    const latest = releases.find((r) => !r.prerelease && r.tag_name.startsWith(prefix));
-    return latest?.tag_name.replace(/^v/, '') ?? 'latest';
-  } catch {
-    return 'latest';
-  }
+  return await res.json() as Release[];
 }
 
 export default async function createConfig(): Promise<Config> {
-  const [latestVersion, ...archivedVersionStrings] = await Promise.all([
-    fetchLatestVersion(),
-    ...archivedVersions.map((v) => fetchLatestSeriesVersion(`${v}.`)),
-  ]);
+  const releases = await fetchReleases();
+  const latestVersion = installableVersion(releases, currentDocsVersion.label);
   // Map each archived version id (e.g. "v3.4") to its latest patch release string.
   const versionStrings: Record<string, string> = Object.fromEntries(
-    archivedVersions.map((v, i) => [v, archivedVersionStrings[i]]),
+    archivedVersions.map((v) => [v, latestStableInSeries(releases, v)]),
   );
 
   return {
@@ -98,6 +98,13 @@ export default async function createConfig(): Promise<Config> {
               from: '/fundamentals/configuring-erigon/nat',
               to: '/fundamentals/nat',
             },
+            // The Polygon easy-node guide is removed: 3.1.* is the last series
+            // that officially supports Polygon. Inbound links land on the support
+            // statement; the guide itself is still readable in the v3.4 archive.
+            {
+              from: '/get-started/easy-nodes/how-to-run-a-polygon-node',
+              to: '/fundamentals/supported-networks',
+            },
           ],
         },
       ],
@@ -132,10 +139,7 @@ export default async function createConfig(): Promise<Config> {
           routeBasePath: '/',
           lastVersion: 'current',
           versions: {
-            current: {
-              label: 'v3.6',
-              badge: false,
-            },
+            current: currentDocsVersion,
           },
           remarkPlugins: [[versionReplace, {currentVersion: latestVersion, versionStrings}]],
           showLastUpdateTime: true,
