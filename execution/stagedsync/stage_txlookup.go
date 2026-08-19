@@ -199,6 +199,10 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	return nil
 }
 
+// blockTo advances in this many blocks, so a completed rotation stays valid until
+// enough new rows are prunable to be worth another scan.
+const blockToGranularity = 1_000
+
 func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
 		return s.Done(tx)
@@ -212,6 +216,11 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	} else {
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
+
+	// Quantize to the granularity CanDeleteTo already uses. Distance.PruneTo moves
+	// with every block, so without this a completed rotation is stale immediately and
+	// the whole table is rescanned once per payload to collect one block of rows.
+	blockTo = blockTo / blockToGranularity * blockToGranularity
 
 	if blockTo == 0 {
 		return nil

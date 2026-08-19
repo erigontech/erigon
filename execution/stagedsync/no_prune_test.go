@@ -180,6 +180,26 @@ func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders, staleFlo
 	return tx, cfg, s
 }
 
+// A completed rotation must survive the tip advancing, or the whole table is
+// rescanned once per payload to collect a single block of rows.
+func TestPruneTxLookupSkipsRescanAfterRotation(t *testing.T) {
+	ctx, logger := context.Background(), log.New()
+	tx, cfg, s := txLookupFixture(t, 1, 0, 0, 0)
+
+	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
+	first, err := state.GetPruneValProgress(tx, []byte(kv.TxLookup))
+	require.NoError(t, err)
+	require.NotNil(t, first)
+	require.Equal(t, prune.Done, first.ValueProgress)
+
+	s.ForwardProgress++ // one more block at the tip
+	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
+
+	second, err := state.GetPruneValProgress(tx, []byte(kv.TxLookup))
+	require.NoError(t, err)
+	require.Equal(t, first.TxTo, second.TxTo, "rescanned the whole table for one block of rows")
+}
+
 func txLookupCount(t *testing.T, tx kv.Tx) int {
 	t.Helper()
 	n, err := tx.Count(kv.TxLookup)
@@ -218,7 +238,7 @@ func TestPruneTxLookupFloor(t *testing.T) {
 			require.NoError(t, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
 			require.Less(t, txLookupCount(t, tx), before)
 
-			blockTo := txlBlocks - txlDistance // exclusive end of the range
+			blockTo := (txlBlocks - txlDistance) / blockToGranularity * blockToGranularity // exclusive, quantized
 			require.Nil(t, txLookupRow(t, tx, 1), "left an early row: floor above 0")
 			require.Nil(t, txLookupRow(t, tx, blockTo-1), "left a row below blockTo")
 			require.NotNil(t, txLookupRow(t, tx, blockTo), "pruned blockTo itself")
