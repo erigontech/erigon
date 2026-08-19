@@ -217,18 +217,16 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		return nil
 	}
 
-	// The floor stays at 0. tableScanningPrune walks the whole table from a rolling
-	// cursor and uses txFrom only as a delete predicate, so raising it saves no
-	// traversal and silently retains every row below it. Both values this stage used
-	// to derive it from track blockTo itself: kv.Headers is deleted to the same
-	// frontier by PruneAncientBlocks, and PruneProgress is set to FrozenBlocks() by
-	// SpawnTxLookup to skip ancient traversal in the old per-block delete loop.
+	// Floor stays at 0: tableScanningPrune uses txFrom only as a delete predicate,
+	// so any higher floor retains rows without saving traversal.
 	var txFrom uint64
 
 	txNumReader := cfg.blockReader.TxnumReader()
-	txTo, err := txNumReader.Max(ctx, tx, blockTo)
+	// blockTo is exclusive, so the range ends at its first txNum: Min(blockTo) ==
+	// Max(blockTo-1)+1. Max(blockTo) would eat all of blockTo but its last txn.
+	txTo, err := txNumReader.Min(ctx, tx, blockTo)
 	if err != nil {
-		return fmt.Errorf("txNumReader.Max(%d): %w", blockTo, err)
+		return fmt.Errorf("txNumReader.Min(%d): %w", blockTo, err)
 	}
 	if txFrom >= txTo {
 		return nil

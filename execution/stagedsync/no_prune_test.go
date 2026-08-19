@@ -125,140 +125,88 @@ func TestNoPruneFlagBookkeeping(t *testing.T) {
 	}
 }
 
-// seedTxLookupPruneFixture builds the minimal state PruneTxLookup reads: a
-// txNum index for every block, TxLookup rows carrying blockNum||txNum, and a
-// Headers table whose oldest surviving entry is firstHeader — which is what a
-// node that started from downloaded snapshots looks like, since PruneAncientBlocks
-// deletes headers up to the same frontier this stage prunes to.
-func seedTxLookupPruneFixture(t *testing.T, tx kv.RwTx, lastBlock, firstHeader uint64) {
+const (
+	txlBlocks   = uint64(2_000)
+	txlDistance = uint64(100)
+)
+
+func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders uint64) (kv.TemporalRwTx, TxLookupCfg, *PruneState) {
 	t.Helper()
-	txNumReader := freezeblocks.NewBlockReader(nil, nil).TxnumReader()
-	for blockNum := uint64(0); blockNum <= lastBlock; blockNum++ {
-		require.NoError(t, txNumReader.Append(tx, blockNum, blockNum*2+1))
+	dir := t.TempDir()
+	db := temporaltest.NewTestDB(t, datadir.New(dir))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	txNums := freezeblocks.NewBlockReader(nil, nil).TxnumReader()
+	require.NoError(t, tx.Put(kv.Headers, dbutils.HeaderKey(0, common.Hash{}), []byte{1}))
+	for b := uint64(0); b <= txlBlocks; b++ {
+		require.NoError(t, txNums.Append(tx, b, b*2+1))
 	}
-	for blockNum := uint64(1); blockNum <= lastBlock; blockNum++ {
-		var hash common.Hash
-		binary.BigEndian.PutUint64(hash[:], blockNum)
+	for b := uint64(1); b <= txlBlocks; b++ {
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[:], b)
 		val := make([]byte, 16)
-		binary.BigEndian.PutUint64(val[:8], blockNum)
-		binary.BigEndian.PutUint64(val[8:], blockNum*2)
-		require.NoError(t, tx.Put(kv.TxLookup, hash[:], val))
-		if blockNum >= firstHeader {
-			require.NoError(t, tx.Put(kv.Headers, dbutils.HeaderKey(blockNum, hash), []byte{1}))
+		binary.BigEndian.PutUint64(val[:8], b)
+		binary.BigEndian.PutUint64(val[8:], b*2)
+		require.NoError(t, tx.Put(kv.TxLookup, h[:], val))
+		if b >= firstHeader {
+			require.NoError(t, tx.Put(kv.Headers, dbutils.HeaderKey(b, h), []byte{1}))
 		}
 	}
-	var genesis common.Hash
-	require.NoError(t, tx.Put(kv.Headers, dbutils.HeaderKey(0, genesis), []byte{1}))
+	if pruneProgress > 0 {
+		require.NoError(t, stages.SaveStagePruneProgress(tx, stages.TxLookup, pruneProgress))
+	}
+	if senders > 0 {
+		require.NoError(t, stages.SaveStageProgress(tx, stages.Senders, senders))
+		require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, senders))
+	}
+
+	cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(txlDistance)},
+		dir, freezeblocks.NewBlockReader(nil, nil))
+	s := &PruneState{ID: stages.TxLookup, ForwardProgress: txlBlocks, PruneProgress: pruneProgress,
+		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
+	return tx, cfg, s
 }
 
-func txLookupRowCount(t *testing.T, tx kv.Tx) int {
+func txLookupCount(t *testing.T, tx kv.Tx) int {
 	t.Helper()
 	n, err := tx.Count(kv.TxLookup)
 	require.NoError(t, err)
 	return int(n)
 }
 
-// TestPruneTxLookupFloorNotTiedToHeaders pins the prune range floor. The floor
-// must not come from kv.Headers: another stage deletes headers up to this
-// stage's own blockTo, so reading it back yields an empty range forever and
-// TxLookup never shrinks.
-func TestPruneTxLookupFloorNotTiedToHeaders(t *testing.T) {
-	ctx := context.Background()
-	logger := log.New()
+func txLookupRow(t *testing.T, tx kv.Tx, block uint64) []byte {
+	t.Helper()
+	var h common.Hash
+	binary.BigEndian.PutUint64(h[:], block)
+	v, err := tx.GetOne(kv.TxLookup, h[:])
+	require.NoError(t, err)
+	return v
+}
 
-	const lastBlock, forward, distance = 2_000, uint64(2_000), uint64(100)
-
+// The floor must not track blockTo: kv.Headers is deleted to the same frontier,
+// and SpawnTxLookup sets PruneProgress to FrozenBlocks().
+func TestPruneTxLookupFloor(t *testing.T) {
 	for _, tc := range []struct {
-		name        string
-		firstHeader uint64
+		name                                string
+		firstHeader, pruneProgress, senders uint64
 	}{
 		{name: "headers_from_genesis", firstHeader: 1},
-		{name: "headers_pruned_to_frontier", firstHeader: forward - distance},
-		{name: "headers_pruned_past_frontier", firstHeader: forward - 1},
+		{name: "headers_pruned_to_frontier", firstHeader: txlBlocks - txlDistance},
+		{name: "headers_pruned_past_frontier", firstHeader: txlBlocks - 1},
+		{name: "forward_stage_watermark", firstHeader: 1, pruneProgress: txlBlocks - txlDistance},
+		{name: "ahead_of_execution", firstHeader: 1, senders: 500},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-			tx, err := db.BeginTemporalRw(ctx)
-			require.NoError(t, err)
-			defer tx.Rollback()
+			tx, cfg, s := txLookupFixture(t, tc.firstHeader, tc.pruneProgress, tc.senders)
+			before := txLookupCount(t, tx)
+			require.NoError(t, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
+			require.Less(t, txLookupCount(t, tx), before)
 
-			seedTxLookupPruneFixture(t, tx, lastBlock, tc.firstHeader)
-			before := txLookupRowCount(t, tx)
-			require.Positive(t, before)
-
-			cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(distance)},
-				t.TempDir(), freezeblocks.NewBlockReader(nil, nil))
-			s := &PruneState{ID: stages.TxLookup, ForwardProgress: forward,
-				CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
-			require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
-
-			require.Less(t, txLookupRowCount(t, tx), before,
-				"no rows pruned: the range floor tracked kv.Headers instead of the stage's own progress")
+			blockTo := txlBlocks - txlDistance // exclusive end of the range
+			require.Nil(t, txLookupRow(t, tx, blockTo-1), "left a row below blockTo")
+			require.NotNil(t, txLookupRow(t, tx, blockTo), "pruned blockTo itself")
 		})
 	}
-}
-
-// TestPruneTxLookupFloorIgnoresForwardStageWatermark pins that the floor is not
-// taken from PruneProgress either. SpawnTxLookup writes PruneProgress =
-// FrozenBlocks() to skip ancient traversal in the old per-block delete loop;
-// under the value-filtering scan that watermark would skip exactly the stale
-// rows this stage exists to delete.
-func TestPruneTxLookupFloorIgnoresForwardStageWatermark(t *testing.T) {
-	ctx := context.Background()
-	logger := log.New()
-
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	const lastBlock, forward, distance = 2_000, uint64(2_000), uint64(100)
-	seedTxLookupPruneFixture(t, tx, lastBlock, 1)
-	before := txLookupRowCount(t, tx)
-
-	// What SpawnTxLookup does when snapshots already index these blocks.
-	require.NoError(t, stages.SaveStagePruneProgress(tx, stages.TxLookup, forward-distance))
-
-	cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(distance)},
-		t.TempDir(), freezeblocks.NewBlockReader(nil, nil))
-	s := &PruneState{ID: stages.TxLookup, ForwardProgress: forward,
-		PruneProgress:    forward - distance,
-		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
-	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
-
-	require.Less(t, txLookupRowCount(t, tx), before,
-		"stale rows below the forward stage's PruneProgress watermark were skipped")
-}
-
-// TestPruneTxLookupForwardAheadOfExecution covers the stage ordering where
-// TxLookup has run further than Execution/Senders: the prune range is driven by
-// TxLookup's own ForwardProgress, so it must still prune and must not walk past
-// its retention distance.
-func TestPruneTxLookupForwardAheadOfExecution(t *testing.T) {
-	ctx := context.Background()
-	logger := log.New()
-
-	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	tx, err := db.BeginTemporalRw(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	const lastBlock, forward, distance = 2_000, uint64(2_000), uint64(100)
-	seedTxLookupPruneFixture(t, tx, lastBlock, 1)
-	// Execution/Senders lag behind TxLookup.
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Senders, 500))
-	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 500))
-
-	cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(distance)},
-		t.TempDir(), freezeblocks.NewBlockReader(nil, nil))
-	s := &PruneState{ID: stages.TxLookup, ForwardProgress: forward,
-		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
-	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
-
-	// Rows at or above the retention frontier must survive.
-	var keep common.Hash
-	binary.BigEndian.PutUint64(keep[:], forward-1)
-	v, err := tx.GetOne(kv.TxLookup, keep[:])
-	require.NoError(t, err)
-	require.NotNil(t, v, "pruned past the retention distance")
 }
