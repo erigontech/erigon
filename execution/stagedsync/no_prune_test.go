@@ -18,15 +18,20 @@ package stagedsync
 
 import (
 	"context"
+	"encoding/binary"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -117,5 +122,93 @@ func TestNoPruneFlagBookkeeping(t *testing.T) {
 		got, err := stages.GetStagePruneProgress(tx, id)
 		require.NoError(t, err)
 		require.Equal(t, forward, got, "stage %s did not record PruneProgress under --exec.no-prune", id)
+	}
+}
+
+const (
+	txlBlocks   = uint64(2_000)
+	txlDistance = uint64(100)
+)
+
+func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders uint64) (kv.RwTx, TxLookupCfg, *PruneState) {
+	t.Helper()
+	dir := t.TempDir()
+	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	txNums := freezeblocks.NewBlockReader(nil, nil).TxnumReader()
+	require.NoError(t, tx.Put(kv.Headers, dbutils.HeaderKey(0, common.Hash{}), []byte{1}))
+	for b := uint64(0); b <= txlBlocks; b++ {
+		require.NoError(t, txNums.Append(tx, b, b*2+1))
+	}
+	for b := uint64(1); b <= txlBlocks; b++ {
+		var h common.Hash
+		binary.BigEndian.PutUint64(h[:], b)
+		val := make([]byte, 16)
+		binary.BigEndian.PutUint64(val[:8], b)
+		binary.BigEndian.PutUint64(val[8:], b*2)
+		require.NoError(t, tx.Put(kv.TxLookup, h[:], val))
+		if b >= firstHeader {
+			require.NoError(t, tx.Put(kv.Headers, dbutils.HeaderKey(b, h), []byte{1}))
+		}
+	}
+	if pruneProgress > 0 {
+		require.NoError(t, stages.SaveStagePruneProgress(tx, stages.TxLookup, pruneProgress))
+	}
+	if senders > 0 {
+		require.NoError(t, stages.SaveStageProgress(tx, stages.Senders, senders))
+		require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, senders))
+	}
+
+	cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(txlDistance)},
+		dir, freezeblocks.NewBlockReader(nil, nil))
+	s := &PruneState{ID: stages.TxLookup, ForwardProgress: txlBlocks, PruneProgress: pruneProgress,
+		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
+	return tx, cfg, s
+}
+
+func txLookupCount(t *testing.T, tx kv.Tx) int {
+	t.Helper()
+	n, err := tx.Count(kv.TxLookup)
+	require.NoError(t, err)
+	return int(n)
+}
+
+func txLookupRow(t *testing.T, tx kv.Tx, block uint64) []byte {
+	t.Helper()
+	var h common.Hash
+	binary.BigEndian.PutUint64(h[:], block)
+	v, err := tx.GetOne(kv.TxLookup, h[:])
+	require.NoError(t, err)
+	return v
+}
+
+// The floor must not track blockTo: kv.Headers is deleted to the same frontier,
+// and SpawnTxLookup sets PruneProgress to FrozenBlocks().
+func TestPruneTxLookupFloor(t *testing.T) {
+	for _, tc := range []struct {
+		name                                string
+		firstHeader, pruneProgress, senders uint64
+	}{
+		{name: "headers_from_genesis", firstHeader: 1},
+		{name: "headers_pruned_to_frontier", firstHeader: txlBlocks - txlDistance},
+		{name: "headers_pruned_past_frontier", firstHeader: txlBlocks - 1},
+		{name: "forward_stage_watermark", firstHeader: 1, pruneProgress: txlBlocks - txlDistance},
+		// no non-genesis header, so the removed Senders fallback would fire
+		{name: "senders_fallback", firstHeader: txlBlocks + 1, senders: 500},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			tx, cfg, s := txLookupFixture(t, tc.firstHeader, tc.pruneProgress, tc.senders)
+			before := txLookupCount(t, tx)
+			require.NoError(t, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
+			require.Less(t, txLookupCount(t, tx), before)
+
+			blockTo := txlBlocks - txlDistance // exclusive end of the range
+			require.Nil(t, txLookupRow(t, tx, 1), "left an early row: floor above 0")
+			require.Nil(t, txLookupRow(t, tx, blockTo-1), "left a row below blockTo")
+			require.NotNil(t, txLookupRow(t, tx, blockTo), "pruned blockTo itself")
+		})
 	}
 }
