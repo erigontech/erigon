@@ -95,7 +95,32 @@ func TestGetLatestHonorsStagedUnwindBound(t *testing.T) {
 	sd.Unwind(32, &diffs)
 	got, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, key)
 	require.NoError(t, err)
-	require.Equal(t, frozenValue, got)
+	require.Equal(t, stepOneValue, got)
+}
+
+func TestBoundedGetLatestDoesNotPopulateBranchCache(t *testing.T) {
+	const stepSize = uint64(16)
+	db, key, frozenValue := commitmentFileFixture(t, stepSize)
+	stepOneValue := []byte{0, 0, 0, 0, 2}
+	deadForkValue := []byte{0, 0, 0, 0, 3}
+	writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 20, value: stepOneValue}, commitmentWrite{txNum: 40, value: deadForkValue})
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache.Clear()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(1))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.CommitmentDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes), Value: nil}}
+	sd.Unwind(32, &diffs)
+	_, _, err = sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
+	_, _, ok := branchCache.Get(key)
+	require.False(t, ok)
 }
 
 func TestSnapshotBranchCacheEntrySurvivesLegalUnwind(t *testing.T) {

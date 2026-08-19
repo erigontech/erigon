@@ -1441,19 +1441,32 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	return nil
 }
 
-// getLatestFromFiles doesn't provide same semantics as getLatestFromDB - it returns start/end tx
-// of file where the value is stored (not exact step when kv has been set)
-//
-// maxTxNum, if > 0, filters out files with bigger txnums from search
-func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+func (dt *DomainRoTx) debugGetLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	return dt.lookupLatestFromFiles(k, maxTxNum, maxTxNum != 0 && maxTxNum != math.MaxUint64)
+}
+
+func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxStep kv.Step) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
+	if maxStep == kv.NoStepBound {
+		return dt.lookupLatestFromFiles(k, 0, false)
+	}
+	maxTxNum := maxStep.LastTxNum(dt.stepSize)
+	for _, f := range dt.files {
+		if f.startTxNum <= maxTxNum && maxTxNum < f.endTxNum-1 {
+			return nil, false, 0, 0, fmt.Errorf("max step %d splits %s domain file [%d,%d)", maxStep, dt.name, f.startTxNum, f.endTxNum)
+		}
+	}
+	return dt.lookupLatestFromFiles(k, maxTxNum, true)
+}
+
+func (dt *DomainRoTx) lookupLatestFromFiles(k []byte, maxTxNum uint64, bounded bool) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
 	if len(dt.files) == 0 {
 		return
 	}
-	if maxTxNum == 0 {
+	if !bounded {
 		maxTxNum = math.MaxUint64
 	}
 	useExistenceFilter := dt.d.Accessors.Has(statecfg.AccessorExistence)
-	useCache := dt.name != kv.CommitmentDomain && maxTxNum == math.MaxUint64
+	useCache := dt.name != kv.CommitmentDomain && !bounded
 
 	hi, lo := dt.ht.iit.hashKey(k)
 
@@ -1474,7 +1487,7 @@ func (dt *DomainRoTx) getLatestFromFiles(k []byte, maxTxNum uint64) (v []byte, f
 	// Walk newest→oldest; skip files starting strictly after maxTxNum so a key's
 	// last write in an older .kv is still found (walkback bounded by maxTxNum).
 	for i, f := range slices.Backward(dt.files) {
-		if maxTxNum != math.MaxUint64 && f.startTxNum > maxTxNum {
+		if bounded && f.startTxNum > maxTxNum {
 			continue
 		}
 		// fmt.Printf("getLatestFromFiles: lim=%d %d %d %d %d\n", maxTxNum, dt.files[i].startTxNum, dt.files[i].endTxNum, dt.files[i].startTxNum/dt.stepSize, dt.files[i].endTxNum/dt.stepSize)
@@ -1562,7 +1575,7 @@ func (dt *DomainRoTx) GetLatestValSize(key []byte, roTx kv.Tx) (size int, found 
 	if dt.d.Disable {
 		return 0, false, nil
 	}
-	v, _, found, err := dt.getLatestFromDb(key, roTx)
+	v, _, found, err := dt.getLatestFromDb(key, roTx, kv.NoStepBound)
 	if err != nil {
 		return 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
@@ -1741,7 +1754,7 @@ func (dt *DomainRoTx) valsCursor(tx kv.Tx) (c kv.Cursor, err error) {
 	return dt.valsC, err
 }
 
-func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
+func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx, maxStep kv.Step) ([]byte, kv.Step, bool, error) {
 	if dt == nil {
 		return nil, 0, false, nil
 	}
@@ -1755,7 +1768,14 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 
 	if dt.d.LargeValues {
 		var fullkey []byte
-		fullkey, v, err = valsC.Seek(key)
+		if maxStep == kv.NoStepBound {
+			fullkey, v, err = valsC.Seek(key)
+		} else {
+			seekKey := make([]byte, len(key)+8)
+			copy(seekKey, key)
+			binary.BigEndian.PutUint64(seekKey[len(key):], ^uint64(maxStep))
+			fullkey, v, err = valsC.Seek(seekKey)
+		}
 		if err != nil {
 			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
 		}
@@ -1767,17 +1787,24 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 		}
 		foundInvStep = fullkey[len(fullkey)-8:]
 	} else {
-		_, stepWithVal, err := func() (_ []byte, _ []byte, err error) {
-			defer func() {
-				if rec := recover(); rec != nil {
-					fmt.Println(fmt.Sprintf("%p: seek failed for: %d", dt, roTx.ViewID()), "reason", rec, "stack", dbg.Stack())
-					err = fmt.Errorf("paniced ")
-				}
+		var stepWithVal []byte
+		if maxStep == kv.NoStepBound {
+			_, stepWithVal, err = func() (_ []byte, _ []byte, err error) {
+				defer func() {
+					if rec := recover(); rec != nil {
+						fmt.Println(fmt.Sprintf("%p: seek failed for: %d", dt, roTx.ViewID()), "reason", rec, "stack", dbg.Stack())
+						err = fmt.Errorf("paniced ")
+					}
+				}()
+				return valsC.SeekExact(key)
 			}()
-			return valsC.SeekExact(key)
-		}()
+		} else {
+			var invStep [8]byte
+			binary.BigEndian.PutUint64(invStep[:], ^uint64(maxStep))
+			stepWithVal, err = valsC.(kv.CursorDupSort).SeekBothRange(key, invStep[:])
+		}
 		if err != nil {
-			return nil, 0, false, fmt.Errorf("valsCursor.SeekExact: %w", err)
+			return nil, 0, false, fmt.Errorf("valsCursor.Seek: %w", err)
 		}
 		if len(stepWithVal) == 0 {
 			return nil, 0, false, nil
@@ -1799,14 +1826,15 @@ func (dt *DomainRoTx) getLatestFromDb(key []byte, roTx kv.Tx) ([]byte, kv.Step, 
 // GetLatest returns value, step in which the value last changed, and bool value which is true if the value
 // is present, and false if it is not present (not set or deleted)
 func (dt *DomainRoTx) GetLatest(key []byte, roTx kv.Tx) ([]byte, kv.Step, bool, error) {
-	return dt.getLatest(key, roTx, kv.NoStepBound, nil, time.Time{})
+	return dt.getLatest(key, roTx, kv.GetLatestOptions{})
 }
 
-func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics kv.GetLatestMetrics, start time.Time) ([]byte, kv.Step, bool, error) {
+func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, opts kv.GetLatestOptions) ([]byte, kv.Step, bool, error) {
 	if dt.d.Disable {
 		return nil, 0, false, nil
 	}
-
+	metrics, start := opts.Metrics()
+	maxStep := opts.MaxStep()
 	var v []byte
 	var foundStep kv.Step
 	var found bool
@@ -1819,7 +1847,7 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		}()
 	}
 
-	v, foundStep, found, err = dt.getLatestFromDb(key, roTx)
+	v, foundStep, found, err = dt.getLatestFromDb(key, roTx, maxStep)
 	if err != nil {
 		return nil, 0, false, fmt.Errorf("getLatestFromDb: %w", err)
 	}
@@ -1830,11 +1858,9 @@ func (dt *DomainRoTx) getLatest(key []byte, roTx kv.Tx, maxStep kv.Step, metrics
 		return v, foundStep, true, nil
 	}
 
-	var maxTxNum uint64
-	if maxStep != kv.NoStepBound {
-		maxTxNum = maxStep.LastTxNum(dt.stepSize)
-	}
-	v, foundInFile, _, endTxNum, err := dt.getLatestFromFiles(key, maxTxNum)
+	var foundInFile bool
+	var endTxNum uint64
+	v, foundInFile, _, endTxNum, err = dt.getLatestFromFiles(key, maxStep)
 	if metrics != nil && dbg.KVReadLevelledMetrics {
 		metrics.UpdateFileReadsUnique(dt.name, key, start)
 	}

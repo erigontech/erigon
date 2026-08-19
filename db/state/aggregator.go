@@ -2739,10 +2739,11 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts kv.GetLatestOptions) (v []byte, step kv.Step, ok bool, err error) {
 	metrics, start := opts.Metrics()
 	maxStep := opts.MaxStep()
+	cacheBranch := opts.BranchCache() && maxStep == kv.NoStepBound
 	if domain != kv.CommitmentDomain {
-		return at.d[domain].getLatest(k, tx, maxStep, metrics, start)
+		return at.d[domain].getLatest(k, tx, opts)
 	}
-	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
+	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx, maxStep)
 	if err != nil {
 		return nil, 0, false, err
 	}
@@ -2750,14 +2751,12 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
-		at.cacheLatestBranch(opts.BranchCache(), k, v, step, step.LastTxNum(at.StepSize()))
+		at.cacheLatestBranch(cacheBranch, k, v, step, step.LastTxNum(at.StepSize()))
 		return v, step, true, nil
 	}
-	var maxTxNum uint64
-	if maxStep != kv.NoStepBound {
-		maxTxNum = maxStep.LastTxNum(at.StepSize())
-	}
-	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, maxTxNum)
+	var found bool
+	var fileStartTxNum, fileEndTxNum uint64
+	v, found, fileStartTxNum, fileEndTxNum, err = at.d[domain].getLatestFromFiles(k, maxStep)
 	if !found {
 		return nil, 0, false, err
 	}
@@ -2767,7 +2766,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts k
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
-		at.cacheLatestBranch(opts.BranchCache(), k, v, step, fileEndTxNum)
+		at.cacheLatestBranch(cacheBranch, k, v, step, fileEndTxNum)
 	}
 	return v, step, found, err
 }
@@ -2777,11 +2776,11 @@ func (at *AggregatorRoTx) GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx)
 }
 
 func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, kv.Step, bool, error) {
-	return at.d[domain].getLatestFromDb(key, tx)
+	return at.d[domain].getLatestFromDb(key, tx, kv.NoStepBound)
 }
 
 func (at *AggregatorRoTx) DebugGetLatestFromFiles(domain kv.Domain, k []byte, maxTxNum uint64) (v []byte, found bool, fileStartTxNum uint64, fileEndTxNum uint64, err error) {
-	v, found, fileStartTxNum, fileEndTxNum, err = at.d[domain].getLatestFromFiles(k, maxTxNum)
+	v, found, fileStartTxNum, fileEndTxNum, err = at.d[domain].debugGetLatestFromFiles(k, maxTxNum)
 	if domain == kv.CommitmentDomain && found {
 		v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	}
