@@ -597,3 +597,46 @@ func TestPlainKeyArenaGrowsGeometrically(t *testing.T) {
 	require.Empty(t, a.buf)
 	require.Positive(t, cap(a.buf), "reset must keep the grown capacity")
 }
+
+func TestPrefixArenaKeepsMaxSlabAcrossReset(t *testing.T) {
+	a := newPrefixArena()
+	for range prefixSlabMax + 1 {
+		a.allocNode()
+	}
+	var maxSlab *prefixNode
+	for _, s := range a.slabs {
+		if len(s) == prefixSlabMax {
+			maxSlab = &s[0]
+			break
+		}
+	}
+	require.NotNil(t, maxSlab, "test must actually reach a max-sized slab")
+
+	a.resetArena()
+	for range prefixSlabMax {
+		a.allocNode()
+	}
+	for _, s := range a.slabs {
+		if len(s) == prefixSlabMax {
+			require.Same(t, maxSlab, &s[0], "refill must reuse the max slab, not allocate a new one")
+			return
+		}
+	}
+	t.Fatal("no max-sized slab after refill")
+}
+
+func TestPrefixTrieResetClearsVisited(t *testing.T) {
+	tr := newPrefixTrie()
+	for i := range 64 {
+		k := make([]byte, 64)
+		k[0] = byte(i % 16)
+		k[1] = byte(i / 16)
+		tr.Insert(k, nil, nil)
+	}
+	require.NotZero(t, cap(tr.visited), "test must actually populate visited")
+
+	tr.Reset()
+	for i, n := range tr.visited[:cap(tr.visited)] {
+		require.Nil(t, n, "Reset left a node pointer at visited[%d], pinning a dropped slab", i)
+	}
+}

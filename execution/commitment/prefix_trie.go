@@ -113,6 +113,13 @@ func (a *prefixArena) resetArena() {
 		held += len(a.slabs[keep])
 		keep++
 	}
+	// The ramp sums to less than one max slab, so an arena that reached a max-sized
+	// slab must keep that slab instead: keeping the ramp would re-allocate it on
+	// every reset, which is the per-batch allocation this arena exists to avoid.
+	if len(a.slabs[0]) < prefixSlabMax && keep < len(a.slabs) && len(a.slabs[keep]) == prefixSlabMax {
+		a.slabs[0] = a.slabs[keep]
+		keep = 1
+	}
 	// nil trailing slabs first: reslicing alone keeps them GC-reachable via the backing array.
 	clear(a.slabs[keep:])
 	a.slabs = a.slabs[:keep]
@@ -152,6 +159,10 @@ func newPrefixTrie() *prefixTrie {
 }
 
 func (t *prefixTrie) Reset() {
+	// Past len, visited still holds nodes from earlier inserts; a single one keeps a
+	// released slab's whole backing array reachable.
+	clear(t.visited[:cap(t.visited)])
+	t.visited = t.visited[:0]
 	t.arena.resetArena()
 	t.root = t.arena.allocNode()
 }
