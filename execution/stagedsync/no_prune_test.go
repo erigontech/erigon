@@ -196,8 +196,8 @@ func TestPruneTxLookupFloor(t *testing.T) {
 		{name: "headers_pruned_to_frontier", firstHeader: txlBlocks - txlDistance},
 		{name: "headers_pruned_past_frontier", firstHeader: txlBlocks - 1},
 		{name: "forward_stage_watermark", firstHeader: 1, pruneProgress: txlBlocks - txlDistance},
-		// guards that blockTo stays derived from this stage, not from Senders
-		{name: "ahead_of_execution", firstHeader: 1, senders: 500},
+		// no non-genesis header, so the removed Senders fallback would fire
+		{name: "senders_fallback", firstHeader: txlBlocks + 1, senders: 500},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			tx, cfg, s := txLookupFixture(t, tc.firstHeader, tc.pruneProgress, tc.senders)
@@ -206,6 +206,7 @@ func TestPruneTxLookupFloor(t *testing.T) {
 			require.Less(t, txLookupCount(t, tx), before)
 
 			blockTo := txlBlocks - txlDistance // exclusive end of the range
+			require.Nil(t, txLookupRow(t, tx, 1), "left an early row: floor above 0")
 			require.Nil(t, txLookupRow(t, tx, blockTo-1), "left a row below blockTo")
 			require.NotNil(t, txLookupRow(t, tx, blockTo), "pruned blockTo itself")
 		})
