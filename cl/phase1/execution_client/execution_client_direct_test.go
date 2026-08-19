@@ -24,8 +24,53 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
+
+type forkChoiceModuleStub struct {
+	execmodule.ExecutionModule
+	result execmodule.ForkChoiceResult
+}
+
+func (s *forkChoiceModuleStub) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
+	return s.result, nil
+}
+
+func TestDirectHeadForkChoiceUpdateReportsBusy(t *testing.T) {
+	module := &forkChoiceModuleStub{result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}}
+	client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+	require.NoError(t, err)
+
+	_, err = client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, nil, clparams.ElectraVersion)
+
+	require.ErrorIs(t, err, ErrForkChoiceBusy)
+}
+
+type forkChoiceSequenceEngine struct {
+	ExecutionEngine
+	errors []error
+	calls  int
+}
+
+func (e *forkChoiceSequenceEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+	err := e.errors[e.calls]
+	e.calls++
+	return nil, err
+}
+
+func TestRetryForkChoiceUpdateWaitsOutContention(t *testing.T) {
+	engine := &forkChoiceSequenceEngine{errors: []error{ErrForkChoiceBusy, ErrForkChoiceUpdateTimeout, nil}}
+
+	_, err := RetryForkChoiceUpdate(t.Context(), engine, common.Hash{}, common.Hash{}, common.Hash{0x41}, clparams.ElectraVersion)
+
+	require.NoError(t, err)
+	require.Equal(t, 3, engine.calls)
+}
 
 func TestRetryAssembleBlockReturnsFirstSuccess(t *testing.T) {
 	calls := 0

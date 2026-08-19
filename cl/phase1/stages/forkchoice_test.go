@@ -5,15 +5,34 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
+
+func TestNotifyExecutionForkChoiceWaitsOutContention(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	gomock.InOrder(
+		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
+			Return(nil, execution_client.ErrForkChoiceBusy),
+		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
+			Return(nil, nil),
+	)
+
+	err := notifyExecutionForkChoice(
+		t.Context(), engine, common.Hash{0x01}, common.Hash{0x02}, common.Hash{0x03}, clparams.ElectraVersion,
+	)
+
+	require.NoError(t, err)
+}
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)

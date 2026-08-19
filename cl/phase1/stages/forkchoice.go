@@ -75,11 +75,13 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 
 		// Run fork choice update with finalized checkpoint and head
 		headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
-		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
+		if err = notifyExecutionForkChoice(
 			ctx,
+			cfg.forkChoice.Engine(),
 			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
-			cfg.forkChoice.GetEth1Hash(headRoot), nil, headVersion,
+			cfg.forkChoice.GetEth1Hash(headRoot),
+			headVersion,
 		); err != nil {
 			// A forkchoice update that ran out of time is not a rejection, and sync has no payload
 			// to lose by carrying on: the next head will send another one.
@@ -102,6 +104,16 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		logger.Warn("Could not set status", "err", err2)
 	}
 	return
+}
+
+func notifyExecutionForkChoice(
+	ctx context.Context,
+	engine execution_client.ExecutionEngine,
+	finalized, safe, head common.Hash,
+	version clparams.StateVersion,
+) error {
+	_, err := execution_client.RetryForkChoiceUpdate(ctx, engine, finalized, safe, head, version)
+	return err
 }
 
 // updateCanonicalChainInTheDatabase updates the canonical chain in the database by marking the given head slot and root as canonical.

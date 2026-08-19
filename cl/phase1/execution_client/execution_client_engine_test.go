@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -32,8 +33,10 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
 
@@ -41,6 +44,15 @@ type fcuEngineStub struct {
 	engineapi.EngineAPI
 	response *engine_types.ForkChoiceUpdatedResponse
 	err      error
+}
+
+type hasBlockModuleStub struct {
+	execmodule.ExecutionModule
+	hasBlock bool
+}
+
+func (s *hasBlockModuleStub) HasBlock(context.Context, *common.Hash, *uint64) (bool, error) {
+	return s.hasBlock, nil
 }
 
 func (s *fcuEngineStub) ForkchoiceUpdatedV3(context.Context, *engine_types.ForkChoiceState, *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
@@ -100,6 +112,24 @@ func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
 	require.Nil(t, id)
 }
 
+func TestForkChoiceUpdateRejectsInvalidStatusWithoutValidationError(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cc := &ExecutionClientEngine{
+		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.InvalidStatus},
+		}},
+		beaconCfg: &cfg,
+	}
+
+	id, err := cc.ForkChoiceUpdate(
+		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.DenebVersion,
+	)
+
+	require.ErrorIs(t, err, ErrForkChoiceNotAdopted)
+	require.NotErrorIs(t, err, ErrForkChoiceUpdateNoPayloadID)
+	require.Nil(t, id)
+}
+
 func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cc := &ExecutionClientEngine{
@@ -115,6 +145,24 @@ func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T)
 
 	require.NoError(t, err)
 	require.Empty(t, id)
+}
+
+func TestLocalHeadForkChoiceUpdateReportsBusyForKnownHead(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	chainRW := chainreader.NewChainReaderEth1(chain.AllProtocolChanges, &hasBlockModuleStub{hasBlock: true}, time.Second)
+	cc := &ExecutionClientEngine{
+		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
+		}},
+		chainRW:   &chainRW,
+		beaconCfg: &cfg,
+	}
+
+	_, err := cc.ForkChoiceUpdate(
+		t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, nil, clparams.DenebVersion,
+	)
+
+	require.ErrorIs(t, err, ErrForkChoiceBusy)
 }
 
 type beaconCfgEngineStub struct {

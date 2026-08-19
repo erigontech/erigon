@@ -58,6 +58,19 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 	return nil
 }
 
+func checkForkChoiceStatus(payloadStatus *engine_types.PayloadStatus) error {
+	if payloadStatus == nil {
+		return nil
+	}
+	if payloadStatus.Status == engine_types.InvalidStatus || payloadStatus.Status == engine_types.InvalidBlockHashStatus {
+		if payloadStatus.ValidationError != nil {
+			return fmt.Errorf("%w: %w", ErrForkChoiceNotAdopted, payloadStatus.ValidationError.Error())
+		}
+		return fmt.Errorf("%w: status %s", ErrForkChoiceNotAdopted, payloadStatus.Status)
+	}
+	return checkPayloadStatus(payloadStatus)
+}
+
 // ExecutionClientEngine implements ExecutionEngine with either an in-process or
 // remote EngineAPI. Local mode accesses chain data and the transaction pool
 // directly; remote mode uses authenticated HTTP JSON-RPC for Engine API and
@@ -199,16 +212,23 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
 	}
 
-	if resp.PayloadId == nil {
-		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
-			return nil, err
+	if err := checkForkChoiceStatus(resp.PayloadStatus); err != nil {
+		return nil, err
+	}
+	if attributes == nil && cc.isLocal() && resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.SyncingStatus {
+		// A local SYNCING response for a known head is transient execution-module contention.
+		knownHead, err := cc.chainRW.HasBlock(ctx, head)
+		if err == nil && knownHead {
+			return nil, ErrForkChoiceBusy
 		}
+	}
+	if resp.PayloadId == nil {
 		if attributes != nil {
 			return nil, ErrForkChoiceUpdateNoPayloadID
 		}
 		return []byte{}, nil
 	}
-	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
+	return *resp.PayloadId, nil
 }
 
 func (cc *ExecutionClientEngine) SupportInsertion() bool {

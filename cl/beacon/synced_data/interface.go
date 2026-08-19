@@ -24,7 +24,6 @@ import (
 
 type (
 	CancelFn                    func()
-	ViewSelectedHeadFn          func(root common.Hash, slot uint64) error
 	ViewHeadStateFn             func(headState *state.CachingBeaconState) error
 	ViewHeadStateWithIdentityFn func(headState *state.CachingBeaconState, root common.Hash, slot uint64) error
 )
@@ -32,7 +31,6 @@ type (
 //go:generate mockgen -typed=true -destination=./mock_services/synced_data_mock.go -package=mock_services . SyncedData
 type SyncedData interface {
 	SelectedHead() (common.Hash, uint64, bool)
-	ViewSelectedHead(fn ViewSelectedHeadFn) error
 	StateHead() (common.Hash, uint64, bool)
 	OnHeadState(newState *state.CachingBeaconState) error
 	OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error

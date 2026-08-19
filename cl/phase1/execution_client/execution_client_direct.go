@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
@@ -164,7 +163,7 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	}
 	if attr == nil {
 		if status == execmodule.ExecutionStatusBusy {
-			log.Debug("[ForkChoiceUpdated] execution layer busy, head may not have been applied", "head", head)
+			return nil, ErrForkChoiceBusy
 		}
 		return nil, nil
 	}

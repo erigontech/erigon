@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"math/big"
+	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -85,4 +86,39 @@ type ExecutionEngine interface {
 	GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error)
 	// Client identification
 	GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)
+}
+
+// RetryForkChoiceUpdate waits out ambiguous EL contention so a later canonical head update lands
+// after any earlier asynchronous update.
+func RetryForkChoiceUpdate(
+	ctx context.Context,
+	engine ExecutionEngine,
+	finalized, safe, head common.Hash,
+	version clparams.StateVersion,
+) ([]byte, error) {
+	const retryDelay = 100 * time.Millisecond
+	for {
+		payloadID, err := engine.ForkChoiceUpdate(ctx, finalized, safe, head, nil, version)
+		if err == nil || !isForkChoiceUpdateContention(err) {
+			return payloadID, err
+		}
+		timer := time.NewTimer(retryDelay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return nil, ctx.Err()
+		case <-timer.C:
+		}
+	}
+}
+
+func isForkChoiceUpdateContention(err error) bool {
+	return errors.Is(err, ErrForkChoiceBusy) ||
+		errors.Is(err, ErrForkChoiceUpdateTimeout) ||
+		errors.Is(err, context.DeadlineExceeded)
 }

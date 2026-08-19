@@ -229,13 +229,9 @@ func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clp
 	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
 }
 
-// forkChoiceUpdateForProposal bounds acquiring a payload id by the moment the payload has to be
-// collected, so neither the retries here nor the assemble retry below them can eat the margin the
-// block needs to reach attesters. Contention is not a rejection: an update that is busy, times out
-// while settling, or returns without starting a payload build gets another attempt rather than
-// costing the slot. One attempt always runs past the bound, because failing a proposal outright is
-// worse than answering late. The head is not re-read between attempts: a proposal is committed to
-// the parent it is being built on.
+// forkChoiceUpdateForProposal bounds ordinary contention retries by the payload collection time.
+// After that bound, it still waits out EL contention because a late block is better than none.
+// A missing payload ID returns immediately so the validator client can fail over from a syncing EL.
 func (a *ApiHandler) forkChoiceUpdateForProposal(
 	ctx context.Context,
 	targetSlot uint64,
@@ -254,22 +250,48 @@ func (a *ApiHandler) forkChoiceUpdateForProposal(
 			return idBytes, nil
 		case ctx.Err() != nil:
 			return nil, ctx.Err()
-		case !errors.Is(err, execution_client.ErrForkChoiceBusy) &&
-			!errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) &&
-			!errors.Is(err, execution_client.ErrForkChoiceUpdateNoPayloadID) &&
-			!errors.Is(err, context.DeadlineExceeded):
+		case !isForkChoiceContention(err):
 			return nil, err
 		}
-		select {
-		case <-ctx.Done():
-			return nil, ctx.Err()
-		case <-time.After(forkChoiceBusyRetryDelay):
+		if err := waitForForkChoiceRetry(ctx); err != nil {
+			return nil, err
 		}
 	}
-	return a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+
+	for {
+		idBytes, err := a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+		switch {
+		case err == nil:
+			return idBytes, nil
+		case ctx.Err() != nil:
+			return nil, ctx.Err()
+		case !isForkChoiceContention(err):
+			return nil, err
+		}
+		if err := waitForForkChoiceRetry(ctx); err != nil {
+			return nil, err
+		}
+	}
 }
 
 const forkChoiceBusyRetryDelay = 100 * time.Millisecond
+
+func isForkChoiceContention(err error) bool {
+	return errors.Is(err, execution_client.ErrForkChoiceBusy) ||
+		errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) ||
+		errors.Is(err, context.DeadlineExceeded)
+}
+
+func waitForForkChoiceRetry(ctx context.Context) error {
+	timer := time.NewTimer(forkChoiceBusyRetryDelay)
+	defer timer.Stop()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case <-timer.C:
+		return nil
+	}
+}
 
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
@@ -1137,14 +1159,7 @@ func (a *ApiHandler) produceBeaconBody(
 			head = baseState.GetLatestBlockHash()
 		}
 	}
-	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
-	if finalizedHash == (common.Hash{}) {
-		finalizedHash = head
-	}
-	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.CurrentJustifiedCheckpoint().Root)
-	if safeHash == (common.Hash{}) {
-		safeHash = head
-	}
+	safeHash, finalizedHash := a.executionCheckpointHashes(baseState)
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, 0, err
@@ -1166,9 +1181,6 @@ func (a *ApiHandler) produceBeaconBody(
 			}
 		}
 	}
-	currEpoch := a.ethClock.GetCurrentEpoch()
-	random := baseState.GetRandaoMixes(currEpoch)
-
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
 	// One collector per concurrent body step. Sharing one would be a write-write race whenever
@@ -1196,17 +1208,23 @@ func (a *ApiHandler) produceBeaconBody(
 			executionErr = fmt.Errorf("produceBeaconBody: expected withdrawals: %w", err)
 			return
 		}
-		slotNumber := hexutil.Uint64(targetSlot)
-		attrs := payloadAttributes(
-			stateVersion,
-			hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
-			random,
-			feeRecipient,
-			withdrawals,
-			(*common.Hash)(&blockRoot),
-			&slotNumber,
-			targetGasLimit,
-		)
+		var attrs *engine_types.PayloadAttributes
+		if stateVersion.Before(clparams.GloasVersion) {
+			attrs = a.preGloasPayloadAttributes(baseState, blockRoot, targetSlot, feeRecipient, withdrawals, stateVersion)
+		} else {
+			targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
+			slotNumber := hexutil.Uint64(targetSlot)
+			attrs = payloadAttributes(
+				stateVersion,
+				hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
+				baseState.GetRandaoMixes(targetEpoch),
+				feeRecipient,
+				withdrawals,
+				(*common.Hash)(&blockRoot),
+				&slotNumber,
+				targetGasLimit,
+			)
+		}
 		builderStartedAt := time.Now()
 		idBytes, err := a.forkChoiceUpdateForProposal(ctx, targetSlot, finalizedHash, safeHash, head, attrs, stateVersion)
 		if err != nil {
@@ -2235,6 +2253,9 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	sidecars []*cltypes.BlobSidecar,
 	columnSidecars []*cltypes.DataColumnSidecar,
 ) error {
+	finishProduction := a.payloadPreparationGate.beginProduction()
+	defer finishProduction()
+
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -2284,10 +2305,14 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
 	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
 	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
-	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
+	headUpdateCtx, cancelHeadUpdate := context.WithTimeout(ctx, time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
+	defer cancelHeadUpdate()
+	if _, err := execution_client.RetryForkChoiceUpdate(
+		headUpdateCtx, a.engine, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), headVersion,
+	); err != nil {
 		// Storing the block does not depend on the execution layer acknowledging the head in time,
 		// and the next head sends another update.
-		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) && !errors.Is(err, context.DeadlineExceeded) {
 			return err
 		}
 		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
