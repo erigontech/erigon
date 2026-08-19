@@ -14,7 +14,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -301,7 +300,7 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 	case 3:
 		resp, err = e.ForkchoiceUpdatedV3(r.Context(), &state, attrs)
 	case 4:
-		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs)
+		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs, nil)
 	}
 	if err != nil {
 		writeEngineError(w, err)
@@ -406,8 +405,6 @@ func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Req
 	writeSSZBytes(w, out)
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter, r *http.Request) {
 	body, err := readSSZBody(r)
 	if err != nil {
@@ -428,5 +425,3 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter, r *http.Requ
 	}
 	writeSSZBytes(w, out)
 }
-
-func hashesToCommon(in []common.Hash) []common.Hash { return in }

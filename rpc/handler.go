@@ -96,8 +96,8 @@ func HandleError(err error, stream jsonstream.Stream) {
 		stream.WriteObjectField("error")
 		stream.WriteObjectStart()
 		stream.WriteObjectField("code")
-		ec, ok := err.(Error)
-		if ok {
+		var ec Error
+		if errors.As(err, &ec) {
 			stream.WriteInt(ec.ErrorCode())
 		} else {
 			stream.WriteInt(ErrCodeDefault)
@@ -105,8 +105,8 @@ func HandleError(err error, stream jsonstream.Stream) {
 		stream.WriteMore()
 		stream.WriteObjectField("message")
 		stream.WriteString(err.Error())
-		de, ok := err.(DataError)
-		if ok {
+		var de DataError
+		if errors.As(err, &de) {
 			stream.WriteMore()
 			stream.WriteObjectField("data")
 			data, derr := json.Marshal(de.ErrorData())
@@ -708,8 +708,13 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
-		buf, _ := json.Marshal(msg)
-		_, _ = stream.Write(buf)
+		buf, err := json.Marshal(msg)
+		if err != nil {
+			buf, err = json.Marshal(msg.errorResponse(err))
+		}
+		if err == nil {
+			_, _ = stream.Write(buf)
+		}
 		return
 	}
 	stream.WriteObjectStart()

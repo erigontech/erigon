@@ -275,14 +275,14 @@ func (nbp *NewBlockPacket) DecodeRLP(s *rlp.Stream) error {
 	}
 	// decode Block
 	nbp.Block = &types.Block{}
-	if err = nbp.Block.DecodeRLP(s); err != nil {
+	if err := nbp.Block.DecodeRLP(s); err != nil {
 		return err
 	}
 	// decode TD
 	if err = s.ReadUint256(&nbp.TD); err != nil {
 		return fmt.Errorf("read TD: %w", err)
 	}
-	if err = s.ListEnd(); err != nil {
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
 	return nil

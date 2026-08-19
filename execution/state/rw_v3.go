@@ -32,9 +32,9 @@ import (
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -47,6 +47,11 @@ type StateV3 struct {
 	persistReceiptsCacheV2 bool
 	txNum                  uint64
 	trace                  atomic.Bool
+
+	// Scratch for the per-transaction index writes; the apply goroutine alone
+	// touches them.
+	receiptsWriter rawtemporaldb.ReceiptWriter
+	traceAddr      common.Address
 }
 
 func NewStateV3(domains *execctx.SharedDomains, persistReceiptsCacheV2 bool, logger log.Logger) *StateV3 {
@@ -75,20 +80,29 @@ func (rs *StateV3) SetTxNum(txNum uint64) {
 // the parallel executor and block production. trace gates the dbg.TraceApply
 // logging StateV3 used to read from its own flag.
 //
-// Writes carry complete account state (all fields emitted by UpdateAccountData),
-// so no domain reads are needed to reconstruct the full serialised account.
-// SelfDestructPath=true signals either:
-//   - pure account deletion (no account fields follow) — from DeleteAccount
-//   - code+storage cleanup before recreation — from UpdateAccountData when
-//     original.Incarnation > account.Incarnation (followed by account fields)
+// A write set may carry only the account fields that changed, so Apply overlays
+// it on the current account, read from the block cache or AccountsDomain. A
+// self-destructed address is the exception: its base stays empty so cleared
+// fields cannot be resurrected, and it carries at most the balance EIP-8246
+// preserves plus its storage-delete cascade — Normalize drops the nonce,
+// incarnation and code hash, and assertSelfDestructNormalized pins that.
 func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx, blockNum, txNum uint64, balanceIncreases map[accounts.Address]uint256.Int, rules *chain.Rules, blockCache *BlockStateCache, trace bool) error {
 	if writes != nil && !writes.IsEmpty() {
+		if dbg.AssertEnabled {
+			writes.assertSelfDestructNormalized()
+		}
+		// Field presence is tracked with has-flags rather than pointers: the
+		// pointer form heap-escapes one allocation per field per address.
 		type addrState struct {
-			balance        *uint256.Int
-			nonce          *uint64
-			incarnation    *uint64
-			codeHash       *accounts.CodeHash
+			balance        uint256.Int
+			nonce          uint64
+			incarnation    uint64
+			codeHash       accounts.CodeHash
 			code           []byte
+			hasBalance     bool
+			hasNonce       bool
+			hasIncarnation bool
+			hasCodeHash    bool
 			codeWritten    bool
 			selfDestruct   bool
 			createContract bool
@@ -107,22 +121,26 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 		// Range the typed collections directly rather than AllHeaders()+GetX —
 		// the header walk plus a second per-value map probe is strictly more work.
 		for a, vw := range writes.Balances() {
-			v := vw.Val
-			ensure(a).balance = &v
+			d := ensure(a)
+			d.balance = vw.Val
+			d.hasBalance = true
 		}
 		for a, vw := range writes.Nonces() {
-			v := vw.Val
-			ensure(a).nonce = &v
+			d := ensure(a)
+			d.nonce = vw.Val
+			d.hasNonce = true
 		}
 		for a, vw := range writes.Incarnations() {
-			v := vw.Val
-			ensure(a).incarnation = &v
+			d := ensure(a)
+			d.incarnation = vw.Val
+			d.hasIncarnation = true
 		}
 		// CodeHashes before Codes: an explicit CodeHashPath write wins; a code
 		// write only supplies the hash when no explicit one was recorded.
 		for a, vw := range writes.CodeHashes() {
-			v := vw.Val
-			ensure(a).codeHash = &v
+			d := ensure(a)
+			d.codeHash = vw.Val
+			d.hasCodeHash = true
 		}
 		for a, vw := range writes.Codes() {
 			d := ensure(a)
@@ -164,8 +182,8 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 				}
 				// An EIP-8246 self-destruct keeps its balance write; the record
 				// survives only when a non-zero balance is left to preserve.
-				sdPreservedBalance := d.balance != nil && !d.balance.IsZero()
-				pureDelete := !sdPreservedBalance && d.nonce == nil && d.incarnation == nil && d.codeHash == nil
+				sdPreservedBalance := d.hasBalance && !d.balance.IsZero()
+				pureDelete := !sdPreservedBalance && !d.hasNonce && !d.hasIncarnation && !d.hasCodeHash
 				if blockCache != nil {
 					// Route the account+code delete and storage-prefix wipe through
 					// the cache so they're recorded in writeLog order. A later
@@ -201,8 +219,8 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 						continue
 					}
 				}
-				// Otherwise: cleanup code+storage before recreating account
-				// (originalIncarnation > account.Incarnation case).
+				// Otherwise an EIP-8246 balance survives: code and storage are
+				// gone, and the account is written back from an empty base below.
 			}
 
 			// Contract creation: clear stale storage before writing new account.
@@ -213,7 +231,7 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 				}
 			}
 
-			if d.balance != nil || d.nonce != nil || d.incarnation != nil || d.codeHash != nil || d.codeWritten {
+			if d.hasBalance || d.hasNonce || d.hasIncarnation || d.hasCodeHash || d.codeWritten {
 				// A WriteSet may contain only the changed account fields, so
 				// overlay it on the current state. Self-destruct is the exception:
 				// its base stays empty so cleared fields cannot be resurrected.
@@ -229,17 +247,17 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 						_ = accounts.DeserialiseV3(&acc, enc0)
 					}
 				}
-				if d.balance != nil {
-					acc.Balance = *d.balance
+				if d.hasBalance {
+					acc.Balance = d.balance
 				}
-				if d.nonce != nil {
-					acc.Nonce = *d.nonce
+				if d.hasNonce {
+					acc.Nonce = d.nonce
 				}
-				if d.incarnation != nil {
-					acc.Incarnation = *d.incarnation
+				if d.hasIncarnation {
+					acc.Incarnation = d.incarnation
 				}
-				if d.codeHash != nil {
-					acc.CodeHash = *d.codeHash
+				if d.hasCodeHash {
+					acc.CodeHash = d.codeHash
 				} else if d.codeWritten {
 					acc.CodeHash = accounts.NewCode(d.code).Hash
 				}
@@ -443,15 +461,15 @@ func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, b
 func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool, skipReceiptCache bool) error {
 	domains := rs.domains
 	for addr := range traceFroms {
-		addrValue := addr.Value()
-		if err := domains.IndexAdd(kv.TracesFromIdx, addrValue[:], txNum); err != nil {
+		rs.traceAddr = addr.Value()
+		if err := domains.IndexAdd(kv.TracesFromIdx, rs.traceAddr[:], txNum); err != nil {
 			return err
 		}
 	}
 
 	for addr := range traceTos {
-		addrValue := addr.Value()
-		if err := domains.IndexAdd(kv.TracesToIdx, addrValue[:], txNum); err != nil {
+		rs.traceAddr = addr.Value()
+		if err := domains.IndexAdd(kv.TracesToIdx, rs.traceAddr[:], txNum); err != nil {
 			return err
 		}
 	}
@@ -467,20 +485,26 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 
+	var putter kv.TemporalPutDel
+
 	if receipt != nil {
 		if !historyExecution {
 			blockLogIndex := receipt.FirstLogIndexWithinBlock
 			if !rawtemporaldb.ReceiptStoresFirstLogIdx(tx) {
 				blockLogIndex += uint32(len(receipt.Logs))
 			}
-			if err := rawtemporaldb.AppendReceipt(rs.domains.AsPutDel(tx), blockLogIndex, receipt.CumulativeGasUsed, cummulativeBlobGas, txNum); err != nil {
+			putter = domains.AsPutDel(tx)
+			if err := rs.receiptsWriter.AppendMetadata(putter, blockLogIndex, receipt.CumulativeGasUsed, cummulativeBlobGas, txNum); err != nil {
 				return err
 			}
 		}
 	}
 
 	if rs.persistReceiptsCacheV2 && !skipReceiptCache {
-		if err := rawdb.WriteReceiptCacheV2(rs.domains.AsPutDel(tx), receipt, txNum); err != nil {
+		if putter == nil {
+			putter = domains.AsPutDel(tx)
+		}
+		if err := rs.receiptsWriter.Append(putter, receipt, txNum); err != nil {
 			return err
 		}
 	}
@@ -909,7 +933,7 @@ type ReaderV3 struct {
 	txNum       uint64
 	trace       bool
 	tracePrefix string
-	getter      kv.TemporalGetter
+	getter      execctxapi.StateGetter
 
 	// addr and composite are reused key buffers: as non-pointer fields of the
 	// heap-allocated reader, the key slices they back reach the interface getter
@@ -918,16 +942,16 @@ type ReaderV3 struct {
 	composite [length.Addr + length.Hash]byte // reused storage lookup key (addr||slot)
 }
 
-func NewReaderV3(getter kv.TemporalGetter) *ReaderV3 {
+func NewReaderV3(getter execctxapi.StateGetter) *ReaderV3 {
 	return &ReaderV3{
 		//trace:  true,
 		getter: getter,
 	}
 }
 
-func (r *ReaderV3) DiscardReadList()                   {}
-func (r *ReaderV3) SetTxNum(txNum uint64)              { r.txNum = txNum }
-func (r *ReaderV3) SetGetter(getter kv.TemporalGetter) { r.getter = getter }
+func (r *ReaderV3) DiscardReadList()                        {}
+func (r *ReaderV3) SetTxNum(txNum uint64)                   { r.txNum = txNum }
+func (r *ReaderV3) SetGetter(getter execctxapi.StateGetter) { r.getter = getter }
 
 func (r *ReaderV3) SetTrace(trace bool, tracePrefix string) {
 	r.trace = trace
@@ -966,10 +990,10 @@ type BlockStateCache struct {
 
 	// committed holds pre-block state, lazily populated on first read.
 	// These values are returned by CachedReaderV3 for GetCommittedState.
-	// committedAccounts is write-once-per-key (an immutable pre-block view),
-	// so it is a sync.Map for lock-free reads off the shared mu hot path.
+	// Both are write-once-per-key (an immutable pre-block view), so they are
+	// sync.Maps for lock-free reads off the shared mu hot path.
 	committedAccounts sync.Map // accounts.Address -> *accounts.Account (nil ptr = absent)
-	committedStorage  map[accounts.Address]map[accounts.StorageKey][]byte
+	committedStorage  sync.Map // committedStorageKey -> []byte (nil slice = cached empty slot)
 
 	// current holds the latest state including intra-block writes.
 	// Updated by WriteAccount/WriteStorage. Read by block finalize.
@@ -998,6 +1022,12 @@ type BlockStateCache struct {
 	writeLog []bcWriteOp
 }
 
+// committedStorageKey is the sync.Map key for BlockStateCache.committedStorage.
+type committedStorageKey struct {
+	addr accounts.Address
+	key  accounts.StorageKey
+}
+
 // bcOpKind enumerates the operations recorded in BlockStateCache.writeLog.
 type bcOpKind uint8
 
@@ -1024,10 +1054,9 @@ type bcWriteOp struct {
 
 func NewBlockStateCache() *BlockStateCache {
 	return &BlockStateCache{
-		committedStorage: make(map[accounts.Address]map[accounts.StorageKey][]byte),
-		currentAccounts:  make(map[accounts.Address][]byte),
-		currentStorage:   make(map[accounts.Address]map[accounts.StorageKey][]byte),
-		currentCode:      make(map[accounts.Address][]byte),
+		currentAccounts: make(map[accounts.Address][]byte),
+		currentStorage:  make(map[accounts.Address]map[accounts.StorageKey][]byte),
+		currentCode:     make(map[accounts.Address][]byte),
 	}
 }
 
@@ -1049,27 +1078,16 @@ func (c *BlockStateCache) PutCommittedAccount(addr accounts.Address, acc *accoun
 
 // GetCommittedStorage returns the pre-block storage value, or (nil, false) if not cached.
 func (c *BlockStateCache) GetCommittedStorage(addr accounts.Address, key accounts.StorageKey) ([]byte, bool) {
-	c.mu.RLock()
-	slots, addrOk := c.committedStorage[addr]
-	if !addrOk {
-		c.mu.RUnlock()
+	v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key})
+	if !ok {
 		return nil, false
 	}
-	val, ok := slots[key]
-	c.mu.RUnlock()
-	return val, ok
+	return v.([]byte), true
 }
 
 // PutCommittedStorage caches a pre-block storage value. nil = empty slot.
 func (c *BlockStateCache) PutCommittedStorage(addr accounts.Address, key accounts.StorageKey, val []byte) {
-	c.mu.Lock()
-	slots, ok := c.committedStorage[addr]
-	if !ok {
-		slots = make(map[accounts.StorageKey][]byte)
-		c.committedStorage[addr] = slots
-	}
-	slots[key] = val
-	c.mu.Unlock()
+	c.committedStorage.Store(committedStorageKey{addr: addr, key: key}, val)
 }
 
 // --- Current (write buffer) methods ---
@@ -1133,6 +1151,32 @@ func (c *BlockStateCache) DeleteAccount(addr accounts.Address, txNum uint64) {
 	c.mu.Unlock()
 }
 
+// GetCurrentAccountDecoded returns the latest account (including intra-block
+// writes), avoiding GetCurrentAccount's re-encode of the committed entry.
+func (c *BlockStateCache) GetCurrentAccountDecoded(addr accounts.Address) (*accounts.Account, bool, error) {
+	c.mu.RLock()
+	enc, written := c.currentAccounts[addr]
+	c.mu.RUnlock()
+	if written {
+		if enc == nil {
+			return nil, true, nil
+		}
+		acc := new(accounts.Account)
+		if err := accounts.DeserialiseV3(acc, enc); err != nil {
+			return nil, true, err
+		}
+		return acc, true, nil
+	}
+	if acc, ok := c.GetCommittedAccount(addr); ok {
+		if acc == nil {
+			return nil, true, nil
+		}
+		result := *acc
+		return &result, true, nil
+	}
+	return nil, false, nil
+}
+
 // GetCurrentAccount returns the latest account blob (including intra-block writes).
 // Falls back to committed state if no write exists. Returns (nil, false) if not cached.
 func (c *BlockStateCache) GetCurrentAccount(addr accounts.Address) ([]byte, bool) {
@@ -1168,14 +1212,10 @@ func (c *BlockStateCache) GetCurrentStorage(addr accounts.Address, key accounts.
 			return val, true
 		}
 	}
-	// Fall back to committed.
-	if slots, ok := c.committedStorage[addr]; ok {
-		if val, ok := slots[key]; ok {
-			c.mu.RUnlock()
-			return val, true
-		}
-	}
 	c.mu.RUnlock()
+	if v, ok := c.committedStorage.Load(committedStorageKey{addr: addr, key: key}); ok {
+		return v.([]byte), true
+	}
 	return nil, false
 }
 
@@ -1260,7 +1300,7 @@ type CachedReaderV3 struct {
 	readCurrent bool // when true, read from currentAccounts (post-TX) instead of committedAccounts (pre-block)
 }
 
-func NewCachedReaderV3(getter kv.TemporalGetter, blockCache *BlockStateCache) *CachedReaderV3 {
+func NewCachedReaderV3(getter execctxapi.StateGetter, blockCache *BlockStateCache) *CachedReaderV3 {
 	return &CachedReaderV3{
 		ReaderV3:   NewReaderV3(getter),
 		blockCache: blockCache,
@@ -1270,7 +1310,7 @@ func NewCachedReaderV3(getter kv.TemporalGetter, blockCache *BlockStateCache) *C
 // NewCurrentCachedReaderV3 creates a reader that reads from the write buffer
 // (currentAccounts) first, seeing all per-TX writes accumulated in the block.
 // Used by the block finalize IBS which needs the post-TX coinbase balance.
-func NewCurrentCachedReaderV3(getter kv.TemporalGetter, blockCache *BlockStateCache) *CachedReaderV3 {
+func NewCurrentCachedReaderV3(getter execctxapi.StateGetter, blockCache *BlockStateCache) *CachedReaderV3 {
 	return &CachedReaderV3{
 		ReaderV3:    NewReaderV3(getter),
 		blockCache:  blockCache,
@@ -1286,16 +1326,13 @@ func (r *CachedReaderV3) SetBlockStateCache(cache *BlockStateCache) {
 func (r *CachedReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	if r.blockCache != nil {
 		if r.readCurrent {
-			// Read from write buffer — sees accumulated per-TX writes.
-			if enc, ok := r.blockCache.GetCurrentAccount(address); ok {
-				if enc == nil {
-					return nil, nil
-				}
-				var acc accounts.Account
-				if err := accounts.DeserialiseV3(&acc, enc); err != nil {
-					return nil, err
-				}
-				return &acc, nil
+			// Sees accumulated per-TX writes.
+			acc, ok, err := r.blockCache.GetCurrentAccountDecoded(address)
+			if err != nil {
+				return nil, err
+			}
+			if ok {
+				return acc, nil
 			}
 		} else {
 			// Read from committed cache — stable pre-block view.
@@ -1453,17 +1490,7 @@ func (r *ReaderV3) traceReadAccountStorage(address accounts.Address, key account
 
 func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	r.addr = address.Value()
-	// Pure read: prefer the content-addressed fast path (addr → codeHash →
-	// cached bytes, no per-address CodeDomain read) when the getter offers it.
-	// This is a getter, never a setter — it must not feed a DomainPut prevVal,
-	// so it does not use the addr-keyed GetLatest the write path relies on.
-	var enc []byte
-	var err error
-	if cg, ok := r.getter.(codeGetter); ok {
-		enc, _, err = cg.GetCode(r.addr[:], r.txNum)
-	} else {
-		enc, _, err = r.getter.GetLatest(kv.CodeDomain, r.addr[:])
-	}
+	enc, _, err := r.getter.GetCode(r.addr[:], r.txNum)
 	if err != nil {
 		return nil, err
 	}
@@ -1474,40 +1501,14 @@ func (r *ReaderV3) ReadAccountCode(address accounts.Address) ([]byte, error) {
 	return enc, nil
 }
 
-// codeGetter is the type-asserted fast-path interface for full-code reads
-// (EXTCODECOPY / CALL / ReadAccountCode). Implemented by execctx.temporalGetter;
-// callers fall back to GetLatest otherwise. Read-only: never used to resolve a
-// DomainPut prevVal (setters resolve prevVal via the addr-keyed GetLatest).
-type codeGetter interface {
-	GetCode(addr []byte, txNum uint64) ([]byte, bool, error)
-}
-
-// codeSizeGetter is the type-asserted fast-path interface for callers
-// that only need the length of the code (EXTCODESIZE / EXTCODEHASH).
-// Implemented by execctx.temporalGetter; fallback to GetLatest otherwise.
-type codeSizeGetter interface {
-	GetCodeSize(addr []byte, txNum uint64) (int, bool, error)
-}
-
 func (r *ReaderV3) ReadAccountCodeSize(address accounts.Address) (int, error) {
 	r.addr = address.Value()
-	if sg, ok := r.getter.(codeSizeGetter); ok {
-		size, _, err := sg.GetCodeSize(r.addr[:], r.txNum)
-		if err != nil {
-			return 0, err
-		}
-		if r.trace {
-			fmt.Printf("%sReadAccountCodeSize (sz) [%x] => [%d], txNum: %d\n", r.tracePrefix, r.addr, size, r.txNum)
-		}
-		return size, nil
-	}
-	enc, _, err := r.getter.GetLatest(kv.CodeDomain, r.addr[:])
+	size, _, err := r.getter.GetCodeSize(r.addr[:], r.txNum)
 	if err != nil {
 		return 0, err
 	}
-	size := len(enc)
 	if r.trace {
-		fmt.Printf("%sReadAccountCodeSize [%x] => [%d], txNum: %d\n", r.tracePrefix, r.addr, size, r.txNum)
+		fmt.Printf("%sReadAccountCodeSize (sz) [%x] => [%d], txNum: %d\n", r.tracePrefix, r.addr, size, r.txNum)
 	}
 	return size, nil
 }
@@ -1525,8 +1526,8 @@ type latestBufferedReader struct {
 	bufferedReader
 }
 
-func (r *latestBufferedReader) SetGetter(getter kv.TemporalGetter) {
-	r.reader.(interface{ SetGetter(kv.TemporalGetter) }).SetGetter(getter)
+func (r *latestBufferedReader) SetGetter(getter execctxapi.StateGetter) {
+	r.reader.(interface{ SetGetter(execctxapi.StateGetter) }).SetGetter(getter)
 }
 
 type historicBufferedReader struct {
@@ -1539,7 +1540,7 @@ func (r *historicBufferedReader) SetTx(tx kv.TemporalTx) {
 
 func NewBufferedReader(bufferedState *StateV3Buffered, reader StateReader) StateReader {
 	type latest interface {
-		SetGetter(kv.TemporalGetter)
+		SetGetter(execctxapi.StateGetter)
 	}
 
 	type historic interface {

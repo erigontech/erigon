@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/recsplit/eliasfano32"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
@@ -1085,7 +1086,7 @@ func TestCommitmentValTransformDomainPanicsWithNeedMergeFalse(t *testing.T) {
 	defer dc.Close()
 
 	require.Panics(t, func() {
-		dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil, false)
+		_, _ = dc.commitmentValTransformDomain(MergeRange{needMerge: false}, dc, dc, nil, nil, false)
 	})
 }
 
@@ -1373,13 +1374,13 @@ func TestMergeFilesWithDependency(t *testing.T) {
 func TestHistoryAndIIAlignment(t *testing.T) {
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(db.Close)
 
 	agg := NewTest(dirs).Logger(logger).StepSize(1).MustOpen(t.Context(), db)
 	t.Cleanup(agg.Close)
 	setup := func() (account *Domain) {
-		agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger)
+		require.NoError(t, agg.RegisterDomain(statecfg.Schema.GetDomainCfg(kv.AccountsDomain), nil, dirs, logger))
 		domain := agg.d[kv.AccountsDomain]
 		domain.History.InvertedIndex.Accessors = 0
 		domain.History.Accessors = 0

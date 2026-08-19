@@ -36,13 +36,11 @@ import (
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
-	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
-	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
@@ -113,11 +111,11 @@ func genTestChainOnce(t *testing.T) {
 		defer contractBackend.Close()
 
 		var err error
-		testOrphanedChain, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 5, func(i int, block *blockgen.BlockGen) {})
+		testOrphanedChain, err = m.GenerateChain(5, func(i int, block *blockgen.BlockGen) {})
 		if err != nil {
 			t.Fatalf("rpcdaemontest: failed to generate orphaned chain: %v", err)
 		}
-		testChain, err = generateChain(&addresses, m.ChainConfig, m.Genesis, m.Engine, m.DB, contractBackend)
+		testChain, err = generateChain(&addresses, m, contractBackend)
 		if err != nil {
 			t.Fatalf("rpcdaemontest: failed to generate chain: %v", err)
 		}
@@ -125,6 +123,23 @@ func genTestChainOnce(t *testing.T) {
 }
 
 func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack, []*blockgen.ChainPack) {
+	m, testChain := CreateTestExecModuleNoInsert(t)
+
+	if err := m.InsertChain(testOrphanedChain); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.InsertChain(testChain); err != nil {
+		t.Fatal(err)
+	}
+
+	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}
+}
+
+// CreateTestExecModuleNoInsert builds a fresh exec module with the same genesis as
+// CreateTestExecModule but inserts no blocks, so a caller can drive insertion
+// incrementally (e.g. to hold an RO snapshot pinned mid-chain). It returns the module
+// and the canonical testChain the caller inserts.
+func CreateTestExecModuleNoInsert(t *testing.T) (*execmoduletester.ExecModuleTester, *blockgen.ChainPack) {
 	genTestChainOnce(t)
 
 	addresses := makeTestAddresses()
@@ -139,22 +154,12 @@ func CreateTestExecModule(t *testing.T) (*execmoduletester.ExecModuleTester, *bl
 	}
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(addresses.key))
 
-	if err := m.InsertChain(testOrphanedChain); err != nil {
-		t.Fatal(err)
-	}
-	if err := m.InsertChain(testChain); err != nil {
-		t.Fatal(err)
-	}
-
-	return m, testChain, []*blockgen.ChainPack{testOrphanedChain}
+	return m, testChain
 }
 
 func generateChain(
 	addresses *testAddresses,
-	config *chain.Config,
-	parent *types.Block,
-	engine rules.Engine,
-	db kv.TemporalRwDB,
+	m *execmoduletester.ExecModuleTester,
 	contractBackend *backends.SimulatedBackend,
 ) (*blockgen.ChainPack, error) {
 	var (
@@ -177,8 +182,8 @@ func generateChain(
 	var tokenContract *contracts.Token
 	var tokenContract2 *contracts.Token
 
-	// We generate the blocks without plain state because it's not supported in blockgen.GenerateChain
-	return blockgen.GenerateChain(config, parent, engine, db, 13, func(i int, block *blockgen.BlockGen) {
+	// We generate the blocks without plain state because GenerateChain does not support it.
+	return m.GenerateChain(13, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -416,10 +421,6 @@ func findAddressesWithMatchingStorageKeyPrefix(targetKey common.Hash, slot uint6
 	return addresses
 }
 
-type IsMiningMock struct{}
-
-func (*IsMiningMock) IsMining() bool { return false }
-
 func CreateTestGrpcConn(t *testing.T, m *execmoduletester.ExecModuleTester) (context.Context, *grpc.ClientConn) { //nolint
 	ctx, cancel := context.WithCancel(context.Background())
 
@@ -434,7 +435,7 @@ func CreateTestGrpcConn(t *testing.T, m *execmoduletester.ExecModuleTester) (con
 	remoteproto.RegisterETHBACKENDServer(server, privateapi.NewEthBackendServer(ctx, nil, m.DB, m.Notifications,
 		m.BlockReader, nil, log.New(), builder.NewLatestBlockBuiltStore(), nil))
 	txpoolproto.RegisterTxpoolServer(server, m.TxPoolGrpcServer)
-	txpoolproto.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, &IsMiningMock{}, ethashApi, m.Log))
+	txpoolproto.RegisterMiningServer(server, privateapi.NewMiningServer(ctx, privateapi.NoMining{}, ethashApi, m.Log))
 	listener := bufconn.Listen(1024 * 1024)
 
 	dialer := func() func(context.Context, string) (net.Conn, error) {
@@ -553,7 +554,7 @@ func CreateTestExecModuleForTraces(t *testing.T) *execmoduletester.ExecModuleTes
 		}
 	)
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AAAA
 		tx, _ := types.SignTx(types.NewTransaction(0, a2,
@@ -655,7 +656,7 @@ func CreateTestExecModuleForTracesCollision(t *testing.T) *execmoduletester.Exec
 	// This test uses intra-block SELFDESTRUCT + CREATE2 reincarnation which the
 	// parallel executor doesn't handle correctly yet. Use serial execution.
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key), execmoduletester.WithoutExperimentalBAL())
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(1, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		// One transaction to AA, to kill it
 		tx, _ := types.SignTx(types.NewTransaction(0, aa,

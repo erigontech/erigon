@@ -17,6 +17,7 @@
 package builder
 
 import (
+	"context"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/dbg"
@@ -58,8 +59,11 @@ func StageBuilderFinishCfg(
 	}
 }
 
-func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) error {
+func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) error {
 	const logPrefix = "BuilderFinish"
+	if err := ctx.Err(); err != nil {
+		return err
+	}
 	current := cfg.builderState.BuiltBlock
 
 	// Short circuit when receiving duplicate result caused by resubmitting.
@@ -67,17 +71,28 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 	//	continue
 	//}
 
-	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals)
+	var blockAccessList []byte
 	// Only embed the BAL hash in the header for Amsterdam+ chains.
 	// For pre-Amsterdam chains with ExperimentalBAL, the BAL is computed
 	// and validated but NOT included in the block header.
 	if current.BlockAccessList != nil && cfg.chainConfig.IsEIPEnabled(7928, current.Header.Time) {
+		var err error
+		blockAccessList, err = types.EncodeBlockAccessListBytes(current.BlockAccessList)
+		if err != nil {
+			return fmt.Errorf("encode block access list: %w", err)
+		}
+	}
+	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals, blockAccessList)
+	if blockAccessList != nil {
 		hash := current.BlockAccessList.Hash()
 		block.HeaderNoCopy().BlockAccessListHash = &hash
 	}
 	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests, BlockAccessList: current.BlockAccessList}
 	if dbg.LogHashMismatchReason() {
 		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)
+	}
+	if err := ctx.Err(); err != nil {
+		return err
 	}
 	*current = exec.AssembledBlock{} // hack to clean global data
 

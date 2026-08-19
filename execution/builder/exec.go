@@ -116,7 +116,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	sd.SetTxNum(txNum)
 
 	stateWriter := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsStateGetter(tx))
 
 	// filterSd is a separate SharedDomains used only for filterBadTransactions.
 	// The filter makes speculative nonce/balance writes that may not match actual
@@ -134,10 +134,10 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	}
 	defer filterSd.Close()
 	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
-	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
+	filterReader := state.NewReaderV3(filterSd.AsStateGetter(filterMb))
 
 	ibs := state.New(stateReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
 
 	current.PayloadId = cfg.payloadId
@@ -318,7 +318,7 @@ func getNextTransactions(
 		// EIP-8037: runtime state gas is enforced by post-execution rollback
 		// in the block assembler.
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(
-			header.GasLimit-gasUsed.BlockRegular,
+			header.GasLimit-gasUsed.BlockExecution,
 			header.GasLimit-gasUsed.BlockState,
 			remainingBlobGas,
 		)),

@@ -112,7 +112,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 		if base := ctx.String(OutputBasedir.Name); len(base) > 0 {
 			err2 := os.MkdirAll(base, 0755) // //rw-r--r--
 			if err2 != nil {
-				return NewError(ErrorIO, fmt.Errorf("failed creating output basedir: %v", err2))
+				return NewError(ErrorIO, fmt.Errorf("failed creating output basedir: %w", err2))
 			}
 			baseDir = base
 		}
@@ -138,7 +138,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 			}
 			traceFile, err2 := os.Create(path.Join(baseDir, fmt.Sprintf("trace-%d-%v.jsonl", txIndex, txHash.String())))
 			if err2 != nil {
-				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %v", err2))
+				return nil, NewError(ErrorIO, fmt.Errorf("failed creating trace-file: %w", err2))
 			}
 			prevFile = traceFile
 			return trace_logger.NewJSONLogger(logConfig, traceFile).Tracer().Hooks, nil
@@ -168,12 +168,12 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	if allocStr != stdinSelector {
 		inFile, err1 := os.Open(allocStr)
 		if err1 != nil {
-			return NewError(ErrorIO, fmt.Errorf("failed reading alloc file: %v", err1))
+			return NewError(ErrorIO, fmt.Errorf("failed reading alloc file: %w", err1))
 		}
 		defer inFile.Close()
 		decoder := json.NewDecoder(inFile)
 		if err = decoder.Decode(&inputData.Alloc); err != nil {
-			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling alloc-file: %v", err))
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling alloc-file: %w", err))
 		}
 	}
 
@@ -183,13 +183,13 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	if envStr != stdinSelector {
 		inFile, err1 := os.Open(envStr)
 		if err1 != nil {
-			return NewError(ErrorIO, fmt.Errorf("failed reading env file: %v", err1))
+			return NewError(ErrorIO, fmt.Errorf("failed reading env file: %w", err1))
 		}
 		defer inFile.Close()
 		decoder := json.NewDecoder(inFile)
 		var env stEnv
 		if err = decoder.Decode(&env); err != nil {
-			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %v", err))
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling env-file: %w", err))
 		}
 		inputData.Env = &env
 	}
@@ -202,7 +202,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	// Construct the chainconfig
 	var chainConfig *chain.Config
 	if cConf, extraEips, err1 := testutil.GetChainConfig(ctx.String(ForknameFlag.Name)); err1 != nil {
-		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %v", err1))
+		return NewError(ErrorVMConfig, fmt.Errorf("failed constructing chain configuration: %w", err1))
 	} else {
 		chainConfig = cConf
 		vmConfig.ExtraEips = extraEips
@@ -214,12 +214,12 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	if txStr != stdinSelector {
 		inFile, err1 := os.Open(txStr)
 		if err1 != nil {
-			return NewError(ErrorIO, fmt.Errorf("failed reading txs file: %v", err1))
+			return NewError(ErrorIO, fmt.Errorf("failed reading txs file: %w", err1))
 		}
 		defer inFile.Close()
 		decoder := json.NewDecoder(inFile)
 		if err = decoder.Decode(&txsWithKeys); err != nil {
-			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %v", err))
+			return NewError(ErrorJson, fmt.Errorf("failed unmarshaling txs-file: %w", err))
 		}
 	} else {
 		txsWithKeys = inputData.Txs
@@ -228,7 +228,7 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	signer := types.MakeSigner(chainConfig, prestate.Env.Number, prestate.Env.Timestamp)
 
 	if txs, err = signUnsignedTransactions(txsWithKeys, *signer); err != nil {
-		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %v", err))
+		return NewError(ErrorJson, fmt.Errorf("failed signing transactions: %w", err))
 	}
 
 	eip1559 := chainConfig.IsLondon(prestate.Env.Number)
@@ -348,11 +348,11 @@ func Main(_ context.Context, ctx *cli.Command) error {
 	result.StateRoot = *root
 
 	// Persist the post-execution state so the alloc dumper (which reads tx) sees it.
-	if err = sd.Flush(context.Background(), tx); err != nil {
+	if err := sd.Flush(context.Background(), tx); err != nil {
 		return err
 	}
 	// Record the block→txNum mapping the dumper needs to read the post-state as-of.
-	if err = rawdbv3.TxNums.Append(tx, blockNum, txNum); err != nil {
+	if err := rawdbv3.TxNums.Append(tx, blockNum, txNum); err != nil {
 		return err
 	}
 
@@ -423,7 +423,8 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 	chainId := deref(txJson.ChainID)
 	v, r, s := deref(txJson.V), deref(txJson.R), deref(txJson.S)
 
-	if txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType {
+	switch {
+	case txJson.Type == types.LegacyTxType || txJson.Type == types.AccessListTxType:
 		if txJson.Type == types.LegacyTxType {
 			return &types.LegacyTx{
 				CommonTx: types.CommonTx{
@@ -457,7 +458,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			ChainID:    chainId,
 			AccessList: *txJson.Accesses,
 		}, nil
-	} else if txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType {
+	case txJson.Type == types.DynamicFeeTxType || txJson.Type == types.SetCodeTxType:
 		tipCap := deref(txJson.MaxPriorityFeePerGas)
 		feeCap := deref(txJson.MaxFeePerGas)
 
@@ -510,7 +511,7 @@ func getTransaction(txJson ethapi.RPCTransaction) (types.Transaction, error) {
 			},
 			Authorizations: auths,
 		}, nil
-	} else {
+	default:
 		return nil, nil
 	}
 }
@@ -537,7 +538,7 @@ func signUnsignedTransactions(txs []*txWithKey, signer types.Signer) (types.Tran
 			// This transaction needs to be signed
 			signed, err := types.SignTx(tx, signer, key)
 			if err != nil {
-				return nil, NewError(ErrorJson, fmt.Errorf("tx %d: failed to sign tx: %v", i, err))
+				return nil, NewError(ErrorJson, fmt.Errorf("tx %d: failed to sign tx: %w", i, err))
 			}
 			signedTxs = append(signedTxs, signed)
 		} else {
@@ -574,11 +575,11 @@ func (g Alloc) OnAccount(addr common.Address, dumpAccount state.DumpAccount) {
 func saveFile(baseDir, filename string, data any) error {
 	b, err := json.MarshalIndent(data, "", " ")
 	if err != nil {
-		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
+		return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %w", err))
 	}
 	location := filepath.Join(baseDir, filename)
 	if err = os.WriteFile(location, b, 0644); err != nil { //nolint:gosec
-		return NewError(ErrorIO, fmt.Errorf("failed writing output: %v", err))
+		return NewError(ErrorIO, fmt.Errorf("failed writing output: %w", err))
 	}
 	log.Info("Wrote file", "file", location)
 	return nil
@@ -616,14 +617,14 @@ func dispatchOutput(ctx *cli.Command, baseDir string, result *protocol.Ephemeral
 	if len(stdOutObject) > 0 {
 		b, err := json.MarshalIndent(stdOutObject, "", " ")
 		if err != nil {
-			return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
+			return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %w", err))
 		}
 		os.Stdout.Write(b)
 	}
 	if len(stdErrObject) > 0 {
 		b, err := json.MarshalIndent(stdErrObject, "", " ")
 		if err != nil {
-			return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %v", err))
+			return NewError(ErrorJson, fmt.Errorf("failed marshalling output: %w", err))
 		}
 		os.Stderr.Write(b)
 	}

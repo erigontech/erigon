@@ -25,7 +25,6 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/golang/snappy"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -130,17 +129,6 @@ func GetBitlistLength(b []byte) int {
 	// bits in the preceding bytes plus the position of the most significant
 	// bit. Subtract this value by 1 to determine the length of the bitlist.
 	return 8*(len(b)-1) + msb - 1
-}
-
-func ReverseBytes(h *common.Hash) {
-	a := binary.LittleEndian.Uint64(h[0:8])
-	b := binary.LittleEndian.Uint64(h[24:32])
-	binary.LittleEndian.PutUint64(h[0:8], bits.ReverseBytes64(b))
-	binary.LittleEndian.PutUint64(h[24:32], bits.ReverseBytes64(a))
-	a = binary.LittleEndian.Uint64(h[8:16])
-	b = binary.LittleEndian.Uint64(h[16:24])
-	binary.LittleEndian.PutUint64(h[8:16], bits.ReverseBytes64(b))
-	binary.LittleEndian.PutUint64(h[16:24], bits.ReverseBytes64(a))
 }
 
 func FlipBitOn(b []byte, i int) {

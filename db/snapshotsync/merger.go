@@ -144,7 +144,7 @@ func (m *Merger) mergeSubSegment(
 func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
 	//log.Info("[snapshots] build idx", "file", sn.Name())
 	if err := sn.Type.BuildIndexes(ctx, sn, indexBuilder, chainConfig, tmpDir, p, lvl, logger); err != nil {
-		return fmt.Errorf("buildIdx: %s: %s", sn.Type, err)
+		return fmt.Errorf("buildIdx: %s: %w", sn.Type, err)
 	}
 	//log.Info("[snapshots] finish build idx", "file", fName)
 	return nil
@@ -333,12 +333,18 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	var word = make([]byte, 0, 4096)
 	var expectedTotal int
 	cList := make([]*seg.Decompressor, len(toMerge))
+	defer func() {
+		for _, d := range cList {
+			if d != nil {
+				d.Close()
+			}
+		}
+	}()
 	for i, cFile := range toMerge {
 		d, err := seg.NewDecompressor(cFile.FilePath())
 		if err != nil {
 			return nil, err
 		}
-		defer d.Close()
 		cList[i] = d
 		expectedTotal += d.Count()
 	}
@@ -356,23 +362,28 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	m.logger.Debug("[snapshots] merge", "file", targetFile.Name())
 
 	for _, d := range cList {
-		view, err := d.OpenSequentialView(true)
-		if err != nil {
-			return nil, err
-		}
-		defer view.Close()
-		g := view.MakeGetter()
-		for g.HasNext() {
-			word, _ = g.Next(word[:0])
-			if err := f.AddWord(word); err != nil {
-				return nil, err
+		if err := func() error {
+			view, err := d.OpenSequentialView(true)
+			if err != nil {
+				return err
 			}
+			defer view.Close()
+			g := view.MakeGetter()
+			for g.HasNext() {
+				word, _ = g.Next(word[:0])
+				if err := f.AddWord(word); err != nil {
+					return err
+				}
+			}
+			return nil
+		}(); err != nil {
+			return nil, err
 		}
 	}
 	if f.Count() != expectedTotal {
 		return nil, fmt.Errorf("unexpected amount after segments merge. got: %d, expected: %d", f.Count(), expectedTotal)
 	}
-	if err = f.Compress(); err != nil {
+	if err := f.Compress(); err != nil {
 		return nil, err
 	}
 	sn := &DirtySegment{

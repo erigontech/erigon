@@ -21,6 +21,7 @@ package rpc
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"io"
 	"strings"
@@ -157,7 +158,7 @@ func (s *Server) serveSingleRequest(ctx context.Context, codec ServerCodec, stre
 
 	reqs, batch, err := codec.ReadBatch()
 	if err != nil {
-		if err != io.EOF {
+		if !errors.Is(err, io.EOF) {
 			return errorMessage(&invalidMessageError{"parse error"})
 		}
 		return nil

@@ -205,7 +205,6 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 	}
 
 	blocksBatch := []*types.Block{}
-	balByHash := map[common.Hash][]byte{}
 	inserted := uint64(0)
 	var lastInsertedBlock *types.Block
 
@@ -248,7 +247,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 			}
 			hasRows = true
 
-			block, bal, err := p.decodeBlock(v)
+			block, err := p.decodeBlock(v)
 			if err != nil {
 				p.logger.Warn("[BlockCollector] Failed to decode block", "key", common.Bytes2Hex(k), "err", err)
 				continue
@@ -259,10 +258,6 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 			if block.NumberU64() < minInsertableBlockNumber {
 				continue
 			}
-			if len(bal) > 0 {
-				balByHash[block.Hash()] = bal
-			}
-
 			// Another variant at the current height: buffer it for look-ahead resolution.
 			if pendingHeight > 0 && block.NumberU64() == pendingHeight {
 				pending = append(pending, block)
@@ -297,7 +292,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 				blocksBatch = append(blocksBatch, resolved)
 				lastCommittedHeight = pendingHeight
 				if len(blocksBatch) >= batchSize {
-					if err := p.insertBatch(ctx, blocksBatch, balByHash, &inserted, &lastInsertedBlock); err != nil {
+					if err := p.insertBatch(ctx, blocksBatch, &inserted, &lastInsertedBlock); err != nil {
 						return err
 					}
 					// Drive FCU after each batch so execution + prune can drain
@@ -339,7 +334,7 @@ func (p *PersistentBlockCollector) Flush(ctx context.Context) error {
 
 	// Insert remaining blocks
 	if len(blocksBatch) > 0 {
-		if err := p.insertBatch(ctx, blocksBatch, balByHash, &inserted, &lastInsertedBlock); err != nil {
+		if err := p.insertBatch(ctx, blocksBatch, &inserted, &lastInsertedBlock); err != nil {
 			return err
 		}
 	}
@@ -425,17 +420,17 @@ func (p *PersistentBlockCollector) dbSize() uint64 {
 	return size
 }
 
-func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, []byte, error) {
+func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 	if len(v) == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	v, err := utils.DecompressSnappy(v, false)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 	if len(v) < blockPrefixLen {
-		return nil, nil, fmt.Errorf("persistent block value too short: have %d, want at least %d", len(v), blockPrefixLen)
+		return nil, fmt.Errorf("persistent block value too short: have %d, want at least %d", len(v), blockPrefixLen)
 	}
 
 	version := clparams.StateVersion(v[0])
@@ -444,7 +439,7 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, []byte, 
 
 	if version >= clparams.ElectraVersion {
 		if len(v) < electraBlockPrefixLen {
-			return nil, nil, fmt.Errorf("persistent block value too short for execution requests: have %d, want at least %d", len(v), electraBlockPrefixLen)
+			return nil, fmt.Errorf("persistent block value too short for execution requests: have %d, want at least %d", len(v), electraBlockPrefixLen)
 		}
 		requestsHash = common.BytesToHash(v[blockPrefixLen:electraBlockPrefixLen])
 		v = v[electraBlockPrefixLen:]
@@ -454,53 +449,39 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, []byte, 
 
 	executionPayload := cltypes.NewEth1Block(version, p.beaconChainCfg)
 	if err := executionPayload.DecodeSSZ(v, int(version)); err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	body := executionPayload.Body()
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
 	// Skip genesis block
 	if executionPayload.BlockNumber == 0 {
-		return nil, nil, nil
+		return nil, nil
 	}
 
 	header, err := executionPayload.RlpHeader(&parentRoot, requestsHash)
 	if err != nil {
-		return nil, nil, err
+		return nil, err
 	}
 
-	// The Gloas execution payload envelope carries the raw EIP-7928 BAL bytes, so
-	// hand them to InsertBlocks to persist the BAL without re-deriving it.
 	var bal []byte
 	if executionPayload.BlockAccessList != nil {
 		bal = executionPayload.BlockAccessList.Bytes()
 	}
 
-	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals), bal, nil
+	return types.NewBlockFromStorageWithBinaryTxs(executionPayload.BlockHash, header, txs, body.Transactions, nil, body.Withdrawals, bal), nil
 }
 
-func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, balByHash map[common.Hash][]byte, inserted *uint64, lastInserted **types.Block) error {
+func (p *PersistentBlockCollector) insertBatch(ctx context.Context, blocksBatch []*types.Block, inserted *uint64, lastInserted **types.Block) error {
 	p.logger.Info("[BlockCollector] Inserting blocks",
 		"from", blocksBatch[0].NumberU64(),
 		"to", blocksBatch[len(blocksBatch)-1].NumberU64())
 
-	var bals [][]byte
-	for i, b := range blocksBatch {
-		bal, ok := balByHash[b.Hash()]
-		if !ok {
-			continue
-		}
-		if bals == nil {
-			bals = make([][]byte, len(blocksBatch))
-		}
-		bals[i] = bal
-	}
-
-	if err := p.engine.InsertBlocks(ctx, blocksBatch, bals); err != nil {
+	if err := p.engine.InsertBlocks(ctx, blocksBatch); err != nil {
 		p.logger.Warn("[BlockCollector] Failed to insert blocks", "err", err)
 		return err
 	}

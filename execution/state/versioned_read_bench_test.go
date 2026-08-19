@@ -15,7 +15,7 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	_ = tx
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 
 	addr := accounts.InternAddress([20]byte{0x01})
 	key := accounts.InternKey([32]byte{0x01})
@@ -28,7 +28,7 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 
 	// tx 1 reads → hits MapRead path inside versionedRead
 	s := NewWithVersionMap(reader, mvhm)
-	defer s.Release(false)
+	defer s.Close()
 	s.txIndex = 1
 
 	b.Run("GetNonce", func(b *testing.B) {
@@ -60,7 +60,7 @@ func BenchmarkVersionedReadGetters(b *testing.B) {
 func BenchmarkWarmExtCodeHashSeq(b *testing.B) {
 	_, tx, domains := NewTestRwTx(b)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 
 	addr := accounts.InternAddress([20]byte{0xC0, 0xDE})
 	code := []byte{0x60, 0x01, 0x60, 0x02, 0x01}

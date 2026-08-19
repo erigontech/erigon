@@ -116,8 +116,8 @@ func TestEstimateGasBlockOverridesBlobBaseFee(t *testing.T) {
 	api := newTestEthAPIWithFilters(t, m)
 
 	callData := hexutil.Bytes(contractInvocationData(1))
-	blobFeeCap := (*hexutil.Big)(big.NewInt(10))
-	blobBaseFee := (*hexutil.Big)(big.NewInt(11))
+	blobFeeCap := (*hexutil.U256)(uint256.NewInt(10))
+	blobBaseFee := (*hexutil.U256)(uint256.NewInt(11))
 	args := &ethapi.CallArgs{
 		From:                &bankAddr,
 		To:                  &contractAddr,
@@ -148,7 +148,7 @@ func TestEstimateGasBlockOverridesBlobBaseFeeSkipsZeroBlobFeeCap(t *testing.T) {
 		Data:                &callData,
 		BlobVersionedHashes: []common.Hash{{1}},
 	}, nil, nil, &ethapi.BlockOverrides{
-		BlobBaseFee: (*hexutil.Big)(big.NewInt(11)),
+		BlobBaseFee: (*hexutil.U256)(uint256.NewInt(11)),
 	})
 	require.NoError(t, err)
 }
@@ -197,14 +197,14 @@ func TestEthCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 		From:                 &bankAddr,
 		To:                   &contractAddr,
 		Data:                 &callData,
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}, nil, &ethapi.StateOverrides{
 		accounts.InternAddress(contractAddr): {
 			Code: &callData,
 		},
 	}, &ethapi.BlockOverrides{
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(10)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(10)),
 	})
 	require.NoError(t, err)
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", result.String())
@@ -431,7 +431,7 @@ func TestGetProof(t *testing.T) {
 						continue
 					}
 					found = true
-					require.Equal(t, tt.stateVal, (*big.Int)(storageProof.Value).Uint64())
+					require.Equal(t, tt.stateVal, (*uint256.Int)(storageProof.Value).Uint64())
 					err = trie.VerifyStorageProof(proof.StorageHash, storageProof)
 					require.NoError(t, err)
 				}
@@ -771,7 +771,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 
 	var contractAddr common.Address
 
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 6, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(6, func(i int, block *blockgen.BlockGen) {
 		nonce := block.TxNonce(bankAddress)
 		switch i {
 		case 0:
@@ -883,7 +883,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err := rpchelper.CreateHistoryStateReader(ctx, tx, 1, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st := state.New(stateReader)
-	defer st.Release(false)
+	defer st.Close()
 	exist, err := st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.False(t, exist, "Contract should not exist at block #1")
@@ -891,7 +891,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 2, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
-	defer st.Release(false)
+	defer st.Close()
 	exist, err = st.Exist(accounts.InternAddress(contractAddr))
 	require.NoError(t, err)
 	assert.True(t, exist, "Contract should exist at block #2")
@@ -902,7 +902,7 @@ func chainWithDeployedContractAndConfig(t *testing.T, cfg *chain.Config) (*execm
 	stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, 6, 0, rawdbv3.TxNums)
 	require.NoError(t, err)
 	st = state.New(stateReader)
-	defer st.Release(false)
+	defer st.Close()
 	createdFillers := 0
 	for _, pk := range fillerPublicKeys {
 		exist, err := st.Exist(accounts.InternAddress(crypto.PubkeyToAddress(*pk)))

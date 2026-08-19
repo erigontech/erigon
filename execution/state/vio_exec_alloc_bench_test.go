@@ -98,9 +98,9 @@ func BenchmarkVersionedExecReads(b *testing.B) {
 		mvhm.WriteStorage(addrs[i], key, Version{TxIndex: 0}, *uint256.NewInt(uint64(i)), true)
 	}
 
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
-	defer ibs.Release(false)
+	defer ibs.Close()
 
 	b.ReportAllocs()
 	b.ResetTimer()
@@ -142,7 +142,7 @@ func BenchmarkWarmExtCodeHash(b *testing.B) {
 		mvhm.WriteCodeHash(addrs[i], Version{TxIndex: 0}, accounts.InternCodeHash(common.BytesToHash([]byte{0xaa, byte(i)})), true)
 	}
 
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
 
 	b.ReportAllocs()

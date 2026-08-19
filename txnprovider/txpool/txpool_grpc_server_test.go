@@ -31,7 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
@@ -80,10 +80,10 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 
 	mockPool := &addMockTxPool{
 		knownByCall: []bool{true, false}, // first tx treated as already-known, second goes to AddLocalTxns
-		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.Success},
+		addReasons:  []txpoolcfg.DiscardReason{txpoolcfg.TipAboveFeeCap},
 	}
 
-	s := NewGrpcServer(ctx, mockPool, memdb.NewTestPoolDB(t), nil, chainID, log.New())
+	s := NewGrpcServer(ctx, mockPool, mdbxtest.NewTestPoolDB(t), nil, chainID, log.New())
 	validRlp := hexutil.MustDecodeHex(TxnParseMainnetTests[0].PayloadStr)
 
 	reply, err := s.Add(ctx, &txpoolproto.AddRequest{RlpTxs: [][]byte{validRlp, validRlp}})
@@ -102,7 +102,7 @@ func TestGrpcServerAddDiscardReasonIndexAlignment(t *testing.T) {
 	if reply.Imported[0] != txpoolproto.ImportResult_ALREADY_EXISTS || reply.Errors[0] != txpoolcfg.AlreadyKnown.String() {
 		t.Fatalf("unexpected first tx result: imported=%v error=%q", reply.Imported[0], reply.Errors[0])
 	}
-	if reply.Imported[1] != txpoolproto.ImportResult_SUCCESS || reply.Errors[1] != txpoolcfg.Success.String() {
+	if reply.Imported[1] != txpoolproto.ImportResult_INVALID || reply.Errors[1] != "max priority fee per gas higher than max fee per gas" {
 		t.Fatalf("unexpected second tx result: imported=%v error=%q", reply.Imported[1], reply.Errors[1])
 	}
 }
@@ -126,7 +126,7 @@ func TestQueryAllWithoutPanicUnknown(t *testing.T) {
 	// Prepare tx pool and core+pool DBs
 	newTxns := make(chan Announcements, 1)
 	chainDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	poolDB := memdb.NewTestPoolDB(t)
+	poolDB := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	cache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, newTxns, poolDB, chainDB, cfg, cache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New())

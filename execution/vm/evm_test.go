@@ -19,14 +19,15 @@ package vm
 import (
 	"math"
 	"testing"
+	"unsafe"
 )
 
-// TestDeriveFrameRegularGasUsed covers the EIP-8037 cases where the formula
-// Regular = (inputTotal − gasRemainingTotal) − stateGasUsed must hold,
+// TestDeriveFrameExecutionGasUsed covers the EIP-8037 cases where the formula
+// Execution = (inputTotal − gasRemainingTotal) − stateGasUsed must hold,
 // including the refund-heavy case where stateGas grows above the input
 // because inline state-gas refunds (refillStateGas) credit the
 // frame's local reservoir.
-func TestDeriveFrameRegularGasUsed(t *testing.T) {
+func TestDeriveFrameExecutionGasUsed(t *testing.T) {
 	t.Parallel()
 
 	const sgps = 64 * 1530 // params.StateGasPerStorageSet
@@ -39,7 +40,7 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 		want              uint64
 	}{
 		{
-			// Plain frame: 50 regular ops, 30 state charge from a 100-unit
+			// Plain frame: 50 execution ops, 30 state charge from a 100-unit
 			// reservoir, no spillover.
 			//   input = 1000 R + 100 S = 1100
 			//   leftover = 950 R + 70 S = 1020
@@ -51,12 +52,12 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 			want:              50,
 		},
 		{
-			// Spillover: 50 regular ops + state charge 200 against a 100-unit
-			// reservoir, 100 spills into regular gas.
+			// Spillover: 50 execution ops + state charge 200 against a 100-unit
+			// reservoir, 100 spills into execution gas.
 			//   input = 1000 R + 100 S = 1100
 			//   leftover = 850 R + 0 S = 850
 			//   stateGasUsed = 200 (full charge, regardless of spillover)
-			// Want 50 (RegularUsedDirect only — the spilled portion is
+			// Want 50 (ExecutionUsedDirect only — the spilled portion is
 			// already represented in stateGasUsed).
 			name:              "with_spillover",
 			inputTotal:        1100,
@@ -71,9 +72,9 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 			// pushing gasRemainingTotal above inputTotal.
 			//   input = 100 R + 50 S = 150
 			//   refund sgps grows leftover state to 50 + sgps
-			//   10 regular ops → leftover regular = 90
+			//   10 execution ops → leftover execution = 90
 			//   stateGasUsed = -sgps
-			// Want 10 (the regular ops). A guarded uint64 subtraction would
+			// Want 10 (the execution ops). A guarded uint64 subtraction would
 			// see gasRemainingTotal > inputTotal and (wrongly) return 0.
 			name:              "refunds_exceed_charges_intermediate_frame",
 			inputTotal:        150,
@@ -82,9 +83,9 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 			want:              10,
 		},
 		{
-			// Pure refund frame, no regular work. Verifies signed cancellation
+			// Pure refund frame, no execution work. Verifies signed cancellation
 			// across the entire delta.
-			name:              "refunds_only_no_regular_ops",
+			name:              "refunds_only_no_execution_ops",
 			inputTotal:        150,
 			gasRemainingTotal: 150 + sgps,
 			stateGasUsed:      -sgps,
@@ -106,11 +107,23 @@ func TestDeriveFrameRegularGasUsed(t *testing.T) {
 	for _, tc := range cases {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
-			got := deriveFrameRegularGasUsed(tc.inputTotal, tc.gasRemainingTotal, tc.stateGasUsed)
+			got := deriveFrameExecutionGasUsed(tc.inputTotal, tc.gasRemainingTotal, tc.stateGasUsed)
 			if got != tc.want {
-				t.Fatalf("deriveFrameRegularGasUsed(input=%d, leftover=%d, state=%d) = %d, want %d",
+				t.Fatalf("deriveFrameExecutionGasUsed(input=%d, leftover=%d, state=%d) = %d, want %d",
 					tc.inputTotal, tc.gasRemainingTotal, tc.stateGasUsed, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestEVMFitsItsSizeClass keeps EVM inside the allocation size class its field
+// order was chosen for. The bound is one-sided: shrinking EVM is free, growing
+// it past the class is what costs a size class per allocation.
+func TestEVMFitsItsSizeClass(t *testing.T) {
+	t.Parallel()
+
+	if got := unsafe.Sizeof(EVM{}); got > evmSizeClass {
+		t.Fatalf("sizeof(EVM) = %d, above the %d-byte size class: pack the new field into "+
+			"existing padding, or raise evmSizeClass knowing every EVM allocation grows", got, evmSizeClass)
 	}
 }

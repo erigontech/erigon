@@ -168,12 +168,13 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		receiver      = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 		genesisConfig *types.Genesis
 	)
-	if machineFriendlyOutput {
+	switch {
+	case machineFriendlyOutput:
 		tracer = logger.NewJSONLogger(logconfig, os.Stderr).Tracer()
-	} else if ctx.Bool(DebugFlag.Name) {
+	case ctx.Bool(DebugFlag.Name):
 		debugLogger = logger.NewStructLogger(logconfig)
 		tracer = debugLogger.Tracer()
-	} else {
+	default:
 		debugLogger = logger.NewStructLogger(logconfig)
 	}
 	tmpDir, err := os.MkdirTemp("", "erigon-evm-run-*")
@@ -203,7 +204,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsStateGetter(tx))
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))

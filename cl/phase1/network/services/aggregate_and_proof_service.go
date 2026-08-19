@@ -179,6 +179,13 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 	subnet *uint64,
 	aggregateAndProof *SignedAggregateAndProofForGossip,
 ) error {
+	if aggregateAndProof == nil || aggregateAndProof.SignedAggregateAndProof == nil ||
+		aggregateAndProof.SignedAggregateAndProof.Message == nil ||
+		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate == nil ||
+		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data == nil ||
+		aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.AggregationBits == nil {
+		return errors.New("invalid aggregate and proof")
+	}
 	selectionProof := aggregateAndProof.SignedAggregateAndProof.Message.SelectionProof
 	aggregateData := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate.Data
 	aggregate := aggregateAndProof.SignedAggregateAndProof.Message.Aggregate
@@ -192,7 +199,14 @@ func (a *aggregateAndProofServiceImpl) ProcessMessage(
 
 	epoch := slot / a.beaconCfg.SlotsPerEpoch
 	clversion := a.beaconCfg.GetCurrentStateVersion(epoch)
+	aggregateAndProof.SignedAggregateAndProof.SetVersion(clversion)
+	if err := aggregate.ValidateForConfig(a.beaconCfg, clversion); err != nil {
+		return err
+	}
 	if clversion.AfterOrEqual(clparams.ElectraVersion) {
+		if aggregate.CommitteeBits == nil {
+			return errors.New("invalid aggregate and proof: missing committee bits")
+		}
 		// [REJECT] len(committee_indices) == 1, where committee_indices = get_committee_indices(aggregate).
 		indices := aggregate.CommitteeBits.GetOnIndices()
 		if len(indices) != 1 {
@@ -470,12 +484,12 @@ func AggregateMessageSignature(
 
 	domain, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, indexedAttestation.Data.Target.Epoch)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("unable to get the domain: %v", err)
+		return nil, nil, nil, fmt.Errorf("unable to get the domain: %w", err)
 	}
 
 	signingRoot, err := fork.ComputeSigningRoot(indexedAttestation.Data, domain)
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("unable to get signing root: %v", err)
+		return nil, nil, nil, fmt.Errorf("unable to get signing root: %w", err)
 	}
 
 	pubKeys, err := bls.AggregatePublickKeys(pks)
@@ -484,20 +498,6 @@ func AggregateMessageSignature(
 	}
 
 	return indexedAttestation.Signature[:], signingRoot[:], pubKeys, nil
-}
-
-func (a *aggregateAndProofServiceImpl) scheduleAggregateForLaterProcessing(
-	aggregateAndProof *SignedAggregateAndProofForGossip,
-) {
-	key, err := aggregateAndProof.SignedAggregateAndProof.HashSSZ()
-	if err != nil {
-		panic(err)
-	}
-
-	a.aggregatesScheduledForLaterExecution.Store(key, &aggregateJob{
-		aggregate:    aggregateAndProof,
-		creationTime: time.Now(),
-	})
 }
 
 func (a *aggregateAndProofServiceImpl) loop(ctx context.Context) {

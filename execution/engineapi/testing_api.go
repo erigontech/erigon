@@ -101,7 +101,7 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, fmt.Errorf("NewSharedDomains error: %w", err)
 		}
 		defer sd.Close()
-		reader = state.NewReaderV3(sd.AsGetter(dbTx))
+		reader = state.NewReaderV3(sd.AsStateGetter(dbTx))
 	}
 
 	decoded := make([]types.Transaction, 0, len(*transactions))
@@ -219,17 +219,10 @@ func (t *testingImpl) CommitBlockV1(
 	blockHash := block.Hash()
 	blockNumber := block.NumberU64()
 
-	var encodedBAL []byte
-	if assembled.Block.BlockAccessList != nil {
-		if encodedBAL, err = types.EncodeBlockAccessListBytes(assembled.Block.BlockAccessList); err != nil {
-			return common.Hash{}, err
-		}
-	}
-
 	err = func() error {
 		t.server.lock.Lock()
 		defer t.server.lock.Unlock()
-		return t.server.chainRW.InsertBlock(ctx, block, encodedBAL)
+		return t.server.chainRW.InsertBlock(ctx, block)
 	}()
 	if err != nil {
 		return common.Hash{}, err

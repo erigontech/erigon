@@ -11,10 +11,8 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/phase1/core/checkpoint_sync"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -31,95 +29,6 @@ import (
 // ErrForwardSyncStale is returned when forward sync makes no progress for an extended period.
 // The stage transition function should skip ForwardSync and go directly to ChainTipSync.
 var ErrForwardSyncStale = errors.New("forward sync stale")
-
-// shouldProcessBlobs checks if any block in the given list of blocks
-// has a version greater than or equal to DenebVersion and contains BlobKzgCommitments.
-func shouldProcessBlobs(blocks []*cltypes.SignedBeaconBlock, cfg *Cfg) bool {
-	if !cfg.caplinConfig.ArchiveBlobs && !cfg.caplinConfig.ImmediateBlobsBackfilling {
-		return false
-	}
-	blobsExist := false
-	highestSlot := blocks[0].Block.Slot
-	for _, block := range blocks {
-		// Check if block version is greater than or equal to DenebVersion and contains BlobKzgCommitments
-		if block.Version() >= clparams.DenebVersion {
-			if c := block.Block.Body.GetBlobKzgCommitments(); c != nil && c.Len() > 0 {
-				blobsExist = true
-			}
-		}
-		if block.Block.Slot > highestSlot {
-			highestSlot = block.Block.Slot
-		}
-	}
-	// Check if the requested blocks are too old to request blobs
-	// https://github.com/ethereum/consensus-specs/blob/dev/specs/deneb/p2p-interface.md#the-reqresp-domain
-
-	// this is bad
-	// highestEpoch := highestSlot / cfg.beaconCfg.SlotsPerEpoch
-	// currentEpoch := cfg.ethClock.GetCurrentEpoch()
-	// minEpochDist := uint64(0)
-	// if currentEpoch > cfg.beaconCfg.MinEpochsForBlobSidecarsRequests {
-	// 	minEpochDist = currentEpoch - cfg.beaconCfg.MinEpochsForBlobSidecarsRequests
-	// }
-	// finalizedEpoch := currentEpoch - 2
-	// if highestEpoch < max(cfg.beaconCfg.DenebForkEpoch, minEpochDist, finalizedEpoch) {
-	// 	return false
-	// }
-
-	return blobsExist
-}
-
-// downloadAndProcessEip4844DA handles downloading and processing of EIP-4844 data availability blobs.
-// It takes highest slot processed, and a list of signed beacon blocks as input.
-// It returns the highest blob slot processed and an error if any.
-func downloadAndProcessEip4844DA(ctx context.Context, logger log.Logger, cfg *Cfg, highestSlotProcessed uint64, blocks []*cltypes.SignedBeaconBlock) (highestBlobSlotProcessed uint64, err error) {
-	var (
-		ids   *solid.ListSSZ[*cltypes.BlobIdentifier]
-		blobs *network2.PeerAndSidecars
-	)
-
-	// Retrieve blob identifiers from the given blocks
-	ids, err = network2.BlobsIdentifiersFromBlocks(blocks, cfg.beaconCfg)
-	if err != nil {
-		// Return an error if blob identifiers could not be retrieved
-		err = fmt.Errorf("failed to get blob identifiers: %w", err)
-		return
-	}
-
-	// If there are no blobs to retrieve, return the highest slot processed
-	if ids.Len() == 0 {
-		return highestSlotProcessed, nil
-	}
-
-	// Request blobs from the network
-	blobs, err = network2.RequestBlobsFrantically(ctx, cfg.rpc, ids)
-	if errors.Is(err, network2.ErrTimeout) {
-		log.Warn("Blob request timeout", "from", blocks[0].Block.Slot, "to", blocks[len(blocks)-1].Block.Slot)
-		return highestSlotProcessed, nil
-	}
-	if err != nil {
-		// Return an error if blobs could not be retrieved
-		err = fmt.Errorf("failed to get blobs: %w", err)
-		return
-	}
-
-	var highestProcessed, inserted uint64
-	// Verify and insert blobs into the blob store
-	if highestProcessed, inserted, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(ctx, cfg.blobStore, ids, blobs.Responses, nil); err != nil {
-		// Ban the peer if verification fails
-		cfg.rpc.BanPeer(blobs.Peer)
-		// Return an error if blobs could not be verified
-		err = fmt.Errorf("failed to verify blobs: %w", err)
-		return
-	}
-	// If all blobs were inserted successfully, return the highest processed slot
-	if inserted == uint64(ids.Len()) {
-		return highestProcessed, nil
-	}
-
-	// If not all blobs were inserted, return the highest processed slot minus one
-	return highestProcessed - 1, err
-}
 
 // processDownloadedBlockBatches processes a batch of downloaded blocks.
 // It takes the highest block processed, a flag to determine if insertion is needed, a list of signed beacon blocks,
@@ -228,8 +137,8 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 						err = fmt.Errorf("failed to dump state: %w", err)
 						return
 					}
-					if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
-						err = fmt.Errorf("failed to save head state: %w", err)
+					if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
+						err = fmt.Errorf("failed to save finalized state: %w", err)
 						return
 					}
 				}
@@ -246,8 +155,8 @@ func processDownloadedBlockBatches(ctx context.Context, logger log.Logger, cfg *
 					err = fmt.Errorf("failed to dump state: %w", err)
 					return
 				}
-				if err = saveHeadStateOnDiskIfNeeded(cfg, st); err != nil {
-					err = fmt.Errorf("failed to save head state: %w", err)
+				if err = saveFinalizedStateOnDiskIfNeeded(cfg.forkChoice, cfg.beaconCfg, cfg.dirs, st.Slot()); err != nil {
+					err = fmt.Errorf("failed to save finalized state: %w", err)
 					return
 				}
 			}
@@ -385,9 +294,11 @@ func forwardSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) er
 			// Return if the context is done
 			return ctx.Err()
 		case <-logTicker.C:
-			// Log progress at regular intervals
+			// Log progress at regular intervals. Read the tip live rather than reusing
+			// the loop's captured chainTipSlot: near the head the loop can run for
+			// minutes, so a frozen tip would pin the reported distance to a stale gap.
 			cur := currentSlot.Load()
-			slotsRemaining, ratePerSec := forwardSyncProgress(chainTipSlot, cur, prevProgress, secsPerLog)
+			slotsRemaining, ratePerSec := forwardSyncProgress(cfg.ethClock.GetCurrentSlot(), cur, prevProgress, secsPerLog)
 			prevProgress = cur
 			// distance-from-chain-tip is the ETA at the chain's own production rate
 			// (one slot per SecondsPerSlot), which also saturates instead of overflowing.
@@ -419,6 +330,13 @@ func setHeadStateFromForkChoice(cfg *Cfg, logger log.Logger) {
 		return
 	}
 	logger.Info("[Caplin] Head state set from forward sync", "slot", headSlot, "root", headRoot)
+}
+
+// anchorEnvelopeMatches reports whether env is the execution payload envelope for anchorRoot.
+// The checkpoint endpoint serves the server's current finalized envelope, which may be for a
+// newer block than a local resume anchor; a non-matching envelope must not be accepted.
+func anchorEnvelopeMatches(env *cltypes.SignedExecutionPayloadEnvelope, anchorRoot common.Hash) bool {
+	return env != nil && env.Message != nil && env.Message.BeaconBlockRoot == anchorRoot
 }
 
 // ensureAnchorEnvelopeOnce proactively fetches the anchor block's execution payload
@@ -473,13 +391,17 @@ func ensureAnchorEnvelopeOnce(ctx context.Context, cfg *Cfg) error {
 		}
 	} else {
 		// Try HTTP API first (checkpoint sync endpoint), then fall back to P2P.
-		// HTTP is more reliable on devnets with few peers.
-		if httpEnv := checkpoint_sync.FetchFinalizedEnvelope(ctx, cfg.beaconCfg, cfg.caplinConfig); httpEnv != nil {
+		// HTTP is more reliable on devnets with few peers. The checkpoint endpoint
+		// serves the server's current finalized envelope, which can be a newer block
+		// than our local resume anchor; accept it only when its root matches anchorRoot,
+		// otherwise request the anchor's envelope by root over P2P.
+		httpEnv := checkpoint_sync.FetchFinalizedEnvelope(ctx, cfg.beaconCfg, cfg.caplinConfig)
+		if anchorEnvelopeMatches(httpEnv, anchorRoot) {
 			log.Info("[Caplin] Anchor envelope fetched via HTTP checkpoint sync", "anchorSlot", anchorSlot)
 			env = httpEnv
 		} else {
-			// Fall back to P2P
-			log.Info("[Caplin] HTTP envelope fetch returned nil, trying P2P...", "anchorSlot", anchorSlot)
+			// Fall back to P2P (root-specific request)
+			log.Info("[Caplin] HTTP anchor envelope unavailable or ahead of local anchor, trying P2P...", "anchorSlot", anchorSlot)
 			envMap, err := network2.RequestEnvelopesFrantically(ctx, cfg.rpc, [][32]byte{anchorRoot})
 			if err != nil {
 				return fmt.Errorf("failed to request anchor envelope: %w", err)

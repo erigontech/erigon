@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"math/big"
 	"sync"
 	"testing"
 
@@ -66,7 +65,7 @@ func TestCallTraceOneByOne(t *testing.T) {
 		t.Skip("slow test")
 	}
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
@@ -101,13 +100,13 @@ func TestCallTraceUnwind(t *testing.T) {
 	m := execmoduletester.New(t)
 	var chainA, chainB *blockgen.ChainPack
 	var err error
-	chainA, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chainA, err = m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
 		t.Fatalf("generate chainA: %v", err)
 	}
-	chainB, err = blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 20, func(i int, gen *blockgen.BlockGen) {
+	chainB, err = m.GenerateChain(20, func(i int, gen *blockgen.BlockGen) {
 		if i < 5 || i >= 10 {
 			gen.SetCoinbase(common.Address{1})
 		} else {
@@ -176,7 +175,7 @@ func TestFilterNoAddresses(t *testing.T) {
 		t.Skip("slow test")
 	}
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, gen *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(10, func(i int, gen *blockgen.BlockGen) {
 		gen.SetCoinbase(common.Address{1})
 	})
 	if err != nil {
@@ -211,15 +210,16 @@ func TestFilterAddressIntersection(t *testing.T) {
 	toAddress1, toAddress2, other := common.Address{1}, common.Address{2}, common.Address{3}
 
 	once := new(sync.Once)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 15, func(i int, block *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(15, func(i int, block *blockgen.BlockGen) {
 		once.Do(func() { block.SetCoinbase(common.Address{4}) })
 
 		var rcv common.Address
-		if i < 5 {
+		switch {
+		case i < 5:
 			rcv = toAddress1
-		} else if i < 10 {
+		case i < 10:
 			rcv = toAddress2
-		} else {
+		default:
 			rcv = other
 		}
 
@@ -406,7 +406,7 @@ func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
 	defer jsoniter.ConfigDefault.ReturnStream(s)
 	stream := jsonstream.Wrap(s)
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
-		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.Big)(big.NewInt(1))},
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	}, stream)
 	require.NoError(t, err)
 	require.Contains(t, string(stream.Buffer()), "protected txn is not supported by signer")

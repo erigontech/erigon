@@ -63,6 +63,39 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 	return d
 }
 
+func TestNextReportsPackedLiteral(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "literal.kv")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = ^uint64(0)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+
+	word := make([]byte, 6*os.Getpagesize())
+	for i := range word {
+		word[i] = byte(i)
+	}
+	require.NoError(t, c.AddWord(word))
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	require.Zero(t, d.dictWords)
+
+	g := d.MakeGetter()
+	var literalOffset, literalLength uint64
+	g.literalWarmer = func(_ *Getter, offset, length uint64) {
+		literalOffset, literalLength = offset, length
+	}
+	got, _ := g.Next(nil)
+
+	require.Equal(t, word, got)
+	require.Equal(t, uint64(len(word)), literalLength)
+	require.Equal(t, word, []byte(d.mmapHandle1[literalOffset:literalOffset+literalLength]))
+}
+
 func TestDecompressSkip(t *testing.T) {
 	loremStrings := append(strings.Split(rmNewLine(lorem), " "), "") // including emtpy string - to trigger corner cases
 	d := prepareLoremDict(t)
@@ -628,21 +661,21 @@ func randWord() []byte {
 	return word
 }
 
-func generateRandWords() (WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
-	WORDS = [N][]byte{}
-	WORD_FLAGS = [N]bool{} // false - uncompressed word, true - compressed word
-	INPUT_FLAGS = []int{}  // []byte or nil input
+func generateRandWords() (words [N][]byte, wordFlags [N]bool, inputFlags []int) {
+	words = [N][]byte{}
+	wordFlags = [N]bool{} // false - uncompressed word, true - compressed word
+	inputFlags = []int{}  // []byte or nil input
 
 	for i := range N - 2 {
-		WORDS[i] = randWord()
+		words[i] = randWord()
 	}
 	// make sure we have at least 2 emtpy []byte
-	WORDS[N-2] = []byte{}
-	WORDS[N-1] = []byte{}
+	words[N-2] = []byte{}
+	words[N-1] = []byte{}
 	return
 }
 
-func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLAGS [N]bool, INPUT_FLAGS []int) {
+func prepareRandomDict(t *testing.T) (d *Decompressor, words [N][]byte, wordFlags [N]bool, inputFlags []int) {
 	t.Helper()
 	logger := log.New()
 	tmpDir := t.TempDir()
@@ -657,32 +690,32 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	// c.DisableFsync()
 	defer c.Close()
 	rand.Seed(time.Now().UnixNano())
-	WORDS, WORD_FLAGS, INPUT_FLAGS = generateRandWords()
+	words, wordFlags, inputFlags = generateRandWords()
 
 	idx := 0
 	for idx < N {
 		n := rand.Intn(2)
 		switch n {
 		case 0: // input case
-			word := WORDS[idx]
+			word := words[idx]
 			m := rand.Intn(2)
 			if m == 1 {
 				if err = c.AddWord(word); err != nil {
 					t.Fatal(err)
 				}
-				WORD_FLAGS[idx] = true
+				wordFlags[idx] = true
 			} else {
 				if err = c.AddUncompressedWord(word); err != nil {
 					t.Fatal(err)
 				}
 			}
 			idx++
-			INPUT_FLAGS = append(INPUT_FLAGS, n)
+			inputFlags = append(inputFlags, n)
 		case 1: // nil word
 			if err = c.AddWord(nil); err != nil {
 				t.Fatal(err)
 			}
-			INPUT_FLAGS = append(INPUT_FLAGS, n)
+			inputFlags = append(inputFlags, n)
 		default:
 			t.Fatal(fmt.Errorf("case %d\n", n))
 		}
@@ -694,7 +727,7 @@ func prepareRandomDict(t *testing.T) (d *Decompressor, WORDS [N][]byte, WORD_FLA
 	if d, err = NewDecompressor(file); err != nil {
 		t.Fatal(err)
 	}
-	return d, WORDS, WORD_FLAGS, INPUT_FLAGS
+	return d, words, wordFlags, inputFlags
 }
 
 // TestMatchCmpCompressedBinaryKeys tests MatchCmp with binary keys similar to real storage keys.

@@ -1,3 +1,11 @@
+# Erigon v3.7.0 — TBD
+
+### Changed
+
+- node: RPC HTTP gzip compression moved from the cgo-based `go-libdeflate` to the pure-Go `klauspost/compress`, and fully buffered (one-shot) responses now compress at `BestSpeed` (level 1) instead of level 6; streaming responses were already at `BestSpeed`. Large one-shot responses gain ~10-14% latency and roughly half the compression CPU, in exchange for slightly larger compressed bodies (+2-8% wire size — relevant for operators who pay for egress). Also removes the libdeflate compressor pool and its `libdeflate_pool_*` metrics, eliminating the cgo leak class fixed in #22700 (#22882) — by @lupin012
+
+---
+
 # Erigon v3.6.0 — Upstream Underbelly — TBD
 
 ### Breaking Changes
@@ -105,6 +113,34 @@ Filters created with `eth_newFilter`, `eth_newBlockFilter`, and `eth_newPendingT
 
 - `--prune.distance.blocks` now accepts readable policy names — `keep-post-merge` and `keep-all` — instead of the raw `MaxUint64`-based magic numbers (`18446744073709551615` / `18446744073709551614`); `--prune.distance` likewise accepts `keep-all`. Numeric values still work (#22119) — by @yperbasis
 - `--rpc.subscription.filters.timeout` — deadline for evicting idle RPC polling filters (default 5m; 0 disables). New `subscriptions_active` gauge and `subscriptions_created_total` / `subscriptions_unsubscribed_total` / `subscriptions_reaped_total` counters track the filter lifecycle (#22261) — by @onelapahead
+- `--witness.cache.blocks`, `--witness.cache.head-capture`, and `--witness.cache.maxmb` enable an eager in-memory cache of recent-block legacy `debug_executionWitness` results, keyed by block hash. Head-capture mode lets a minimal node (no commitment-domain history) serve witnesses for the last N head blocks cache-only — a miss returns out-of-window rather than recomputing from history. New `witness_cache_*` metrics track hits, misses, builds, and resident entries. Embedded RPC only — by @awskii
+
+---
+
+# Erigon v3.5.5 — Tidal Tails — 2026-08-11
+
+v3.5.5 is a bugfix and security release recommended for all users, and especially for block proposers and archive-node operators. It fixes a panic on every Fulu blinded-block submission (#23150), a payload frozen before its slot began under an external consensus layer (#23102), and wrong `logIndex` values on archive nodes (#22951). It is a drop-in upgrade from 3.5.4 — no re-sync required.
+
+**Bugfixes**
+
+- cl/beacon: handle an empty Fulu builder response (#23150) by @domiwei — Builder API v2 answers a successful Fulu blinded-block submission with `202 Accepted` and no body, so the builder client returned all-nil and `publishBlindedBlocks` dereferenced the nil payload. The beacon router installs no `middleware.Recoverer`, so the validator client saw only a dropped connection and nothing reached the Erigon log. Fixes #22598.
+- execution: build payloads until the slot they are for (#23102) by @lystopad — the builder's time budget ran from when payload attributes arrived rather than from the payload timestamp, so a consensus layer sending attributes well ahead of the slot got a payload frozen before that slot began. The budget now derives from the timestamp, floored at the old value and capped at two slots. Non-proposing nodes and Caplin are unaffected.
+- db/state: route receipt-domain reads through the overlay `DomainReader` (#22951) by @Sahil-4555 and @mh0lt — a block admitted through the block overlay read its receipt metadata from the committed tx, where a history miss fell back to `GetLatest` and returned the previous writing block's final log count. The wrong `logIndex` was then cached in the RPC layer. Affected v3.5.1–v3.5.4. Fixes #22106.
+- db/state: roll back receipt domains on an in-RAM reorg unwind (#23064) by @MoonBoi9001 — the in-memory unwind path restored a hand-written list of the four state kinds that existed when it was written and never gained the receipt counters added later, so it left the abandoned blocks' values in place. It now walks every state kind, as the disk path does.
+- db/downloader: allow seeding caplin state snapshots with a nil global type (#22980) by @lystopad — a node upgraded in place from a recent `release/3.4` build logged `nil ptr after parsing file: caplin/…-NextSyncCommittee.seg` and silently stopped seeding its caplin state snapshots.
+
+**Security**
+
+- build: bump `golang.org/x/text` to v0.39.0 (#23178) by @lystopad — CVE-2026-56852: infinite loop in `unicode/norm` on invalid UTF-8. Reachable from the downloader's HTTP/3 webseed path, and the only advisory here that `govulncheck` reports as called.
+- build: bump `golang.org/x/net` to v0.56.0 (#23178) by @lystopad — CVE-2026-46600: panic parsing a malformed SVCB or HTTPS DNS resource record.
+- build: bump `github.com/quic-go/webtransport-go` to v0.11.1 (#23178) by @lystopad — CVE-2026-57497: memory exhaustion from unbounded buffering of unknown capsules. Not reachable in Erigon: no WebTransport libp2p transport is registered.
+- build: bump `github.com/go-chi/chi/v5` to v5.3.1 (#23178) by @lystopad — CVE-2025-69725 (open redirect in `RedirectSlashes`) plus three `middleware.RealIP` IP-spoofing advisories. Not reachable in Erigon: none of chi's middleware is used.
+
+**Improvements**
+
+- build: revert the `go-eth-kzg` verifier optimization (#23177) by @yperbasis — `release/3.5` pinned `crate-crypto/go-eth-kzg` to an Erigon fork carrying an upstream change that is still an unmerged draft. This restores the released upstream `v1.5.0` while the correctness concerns are investigated.
+
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.4...v3.5.5
 
 ---
 

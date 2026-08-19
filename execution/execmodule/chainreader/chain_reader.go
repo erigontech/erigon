@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -217,9 +216,8 @@ func (c ChainReaderWriterEth1) FrozenBlocks(ctx context.Context) (uint64, bool) 
 	return frozen, hasGap
 }
 
-func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block, bals [][]byte) error {
-	rawBlocks := blocksToRaw(blocks, bals)
-	status, err := c.executionModule.InsertBlocks(ctx, rawBlocks)
+func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
+	status, err := c.executionModule.InsertBlocks(ctx, blocks)
 	if err != nil {
 		return err
 	}
@@ -229,20 +227,8 @@ func (c ChainReaderWriterEth1) InsertBlocks(ctx context.Context, blocks []*types
 	return nil
 }
 
-func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block, bal []byte) error {
-	return c.InsertBlocks(ctx, []*types.Block{block}, [][]byte{bal})
-}
-
-func blocksToRaw(blocks []*types.Block, bals [][]byte) []*types.RawBlock {
-	raw := make([]*types.RawBlock, len(blocks))
-	for i, b := range blocks {
-		rb := &types.RawBlock{Header: b.Header(), Body: b.RawBody()}
-		if i < len(bals) {
-			rb.BlockAccessList = bals[i]
-		}
-		raw[i] = rb
-	}
-	return raw
+func (c ChainReaderWriterEth1) InsertBlock(ctx context.Context, block *types.Block) error {
+	return c.InsertBlocks(ctx, []*types.Block{block})
 }
 
 func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Hash, number uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
@@ -293,7 +279,15 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (
 	return c.executionModule.HasBlock(ctx, &hash, nil)
 }
 
-func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
+// ErrExecutionBusy reports that the execution module was already occupied, which settles on its
+// own, as opposed to a rejection that returns the same answer however many times it is asked.
+var ErrExecutionBusy = errors.New("execution module is busy")
+
+// ErrUnknownPayload reports that no builder is held for a payload id, so nothing will ever arrive
+// for it. Without it a caller polling that id cannot tell it from a build still running.
+var ErrUnknownPayload = errors.New("unknown payload id")
+
+func (c ChainReaderWriterEth1) AssembleBlock(ctx context.Context, baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
 	params := &builder.Parameters{
 		ParentHash:            baseHash,
 		Timestamp:             uint64(attributes.Timestamp),
@@ -304,23 +298,26 @@ func (c ChainReaderWriterEth1) AssembleBlock(baseHash common.Hash, attributes *e
 		TargetGasLimit:        (*uint64)(attributes.TargetGasLimit),
 		ParentBeaconBlockRoot: attributes.ParentBeaconBlockRoot,
 	}
-	result, err := c.executionModule.AssembleBlock(context.Background(), params)
+	result, err := c.executionModule.AssembleBlock(ctx, params)
 	if err != nil {
 		return 0, err
 	}
 	if result.Busy {
-		return 0, errors.New("execution data is still syncing")
+		return 0, ErrExecutionBusy
 	}
 	return result.PayloadID, nil
 }
 
-func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	result, err := c.executionModule.GetAssembledBlock(context.Background(), id)
+func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+	result, err := c.executionModule.GetAssembledBlock(ctx, id)
 	if err != nil {
 		return nil, nil, nil, nil, err
 	}
 	if result.Busy {
-		return nil, nil, nil, nil, errors.New("execution data is still syncing")
+		return nil, nil, nil, nil, ErrExecutionBusy
+	}
+	if result.Unknown {
+		return nil, nil, nil, nil, ErrUnknownPayload
 	}
 	if result.Block == nil {
 		return nil, nil, nil, nil, nil
@@ -341,12 +338,9 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(id uint64) (*cltypes.Eth1Block,
 	extraData.SetBytes(header.Extra)
 	blockHash := block.Hash()
 
-	// BaseFeePerGas in cltypes.Eth1Block is stored as little-endian bytes in a common.Hash.
 	var baseFeeLE common.Hash
 	if header.BaseFee != nil {
-		be := header.BaseFee.Bytes32() // big-endian [32]byte
-		copy(baseFeeLE[:], be[:])
-		utils.ReverseBytes(&baseFeeLE) // convert to little-endian
+		_, _ = header.BaseFee.MarshalSSZAppend(baseFeeLE[:0])
 	}
 
 	eth1Block := &cltypes.Eth1Block{

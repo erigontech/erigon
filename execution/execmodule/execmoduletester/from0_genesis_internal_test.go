@@ -91,7 +91,7 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 	emt := New(t, WithGenesisSpec(gspec), WithKey(key))
 
 	// Build a chain of empty blocks that NEVER touch the dormant address.
-	gen, err := blockgen.GenerateChain(emt.ChainConfig, emt.Genesis, emt.Engine, emt.DB, 5, func(i int, b *blockgen.BlockGen) {
+	gen, err := emt.GenerateChain(5, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(t, err)
@@ -115,9 +115,9 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 				return err
 			}
 			defer doms.Close()
-			r := state.NewReaderV3(doms.AsGetter(rTx))
+			r := state.NewReaderV3(doms.AsStateGetter(rTx))
 			st := state.New(r)
-			defer st.Release(false)
+			defer st.Close()
 			b, err := st.GetBalance(dormantAddr)
 			if err != nil {
 				return err
@@ -135,10 +135,10 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 	// Mimic `stage_exec --reset`: wipe domain tables and reset stage progress.
 	require.NoError(t, rawdbreset.ResetExec(ctx, emt.DB))
 
-	// Now drive execution the SAME way cmd/integration/commands/stages.go:802
-	// does — direct SpawnExecuteBlocksStage in a loop, with Flush/ClearRam/
-	// Commit between iterations. This is the path that fails in CI; the
-	// engine-API InsertChain path above succeeds.
+	// Now drive execution the SAME way cmd/integration/commands/stages.go
+	// does — direct SpawnExecuteBlocksStage in a loop, one rwtx and one
+	// SharedDomains per batch, each committed with doms.Commit. This is the
+	// path that fails in CI; the engine-API InsertChain path above succeeds.
 	require.NoError(t, reExecViaIntegrationPath(t, ctx, emt, gen.TopBlock.NumberU64(), emt.cfg.BatchSize, false /*badBlockHalt*/, logger))
 
 	postReExec := checkBalance("after-reset-and-integration-reexec")
@@ -176,24 +176,18 @@ func setupOfflineExec(emt *ExecModuleTester, batchSize datasize.ByteSize, badBlo
 }
 
 // reExecViaIntegrationPath drives execution the way cmd/integration/commands/
-// stages.go does: SpawnExecuteBlocksStage one batch per rwtx, committing each
-// with doms.Commit + ClearRam and reusing the SharedDomains. This bypasses the
-// engine API. doms.Commit (not Flush) is load-bearing: it refreshes the
-// aggregator BranchCache to match committed state — Flush leaves it stale and
-// corrupts the next batch's trie root.
+// stages.go does: SpawnExecuteBlocksStage one batch per rwtx and per
+// SharedDomains, each committed with doms.Commit. This bypasses the engine
+// API. doms.Commit (not Flush) is load-bearing: it refreshes the aggregator
+// BranchCache to match committed state — Flush leaves it stale and corrupts
+// the next batch's trie root.
 func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModuleTester, toBlock uint64, batchSize datasize.ByteSize, badBlockHalt bool, logger log.Logger) error {
 	t.Helper()
 
 	cfg := setupOfflineExec(emt, batchSize, badBlockHalt)
 
-	doms, err := newReusedDomains(ctx, emt, logger)
-	if err != nil {
-		return err
-	}
-	defer doms.Close()
-
 	for {
-		progress, err := execOneBatch(ctx, emt, doms, cfg, toBlock, logger)
+		progress, err := execOneBatch(ctx, emt, cfg, toBlock, logger)
 		if err != nil {
 			return err
 		}
@@ -203,34 +197,23 @@ func reExecViaIntegrationPath(t *testing.T, ctx context.Context, emt *ExecModule
 	}
 }
 
-// newReusedDomains opens a SharedDomains seeded from committed state. The seeding
-// tx is rolled back right away: each batch re-seeks commitment under its own tx,
-// and the SharedDomains keeps no reference to the tx it was built from.
-func newReusedDomains(ctx context.Context, emt *ExecModuleTester, logger log.Logger) (*execctx.SharedDomains, error) {
-	tx, err := emt.DB.BeginTemporalRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
-	if err != nil {
-		return nil, err
-	}
-	doms.SetInMemHistoryReads(false)
-	return doms, nil
-}
-
-// execOneBatch runs a single batch in its own rwtx (begin/rollback-on-error/
-// commit), reusing doms. doms.Commit commits the tx and refreshes the BranchCache;
-// ClearRam drops the flushed batch so doms is clean for the next call. Returns the
-// Execution stage progress after the batch.
-func execOneBatch(ctx context.Context, emt *ExecModuleTester, doms *execctx.SharedDomains, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, logger log.Logger) (uint64, error) {
+// execOneBatch runs a single batch in its own rwtx and its own SharedDomains
+// (a fresh one per call avoids reusing a committed, spent one — same as the
+// integration tool). doms.Commit commits the tx and refreshes the BranchCache.
+// Returns the Execution stage progress after the batch.
+func execOneBatch(ctx context.Context, emt *ExecModuleTester, cfg stagedsync.ExecuteBlockCfg, toBlock uint64, logger log.Logger) (uint64, error) {
 	tx, err := emt.DB.BeginTemporalRw(ctx)
 	if err != nil {
 		return 0, err
 	}
 	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
+	if err != nil {
+		return 0, err
+	}
+	defer doms.Close()
+	doms.SetInMemHistoryReads(false)
 
 	s, err := emt.Sync.StageState(stages.Execution, tx, true, false)
 	if err != nil {
@@ -249,7 +232,6 @@ func execOneBatch(ctx context.Context, emt *ExecModuleTester, doms *execctx.Shar
 	if err := doms.Commit(ctx, tx); err != nil {
 		return 0, err
 	}
-	doms.ClearRam(true)
 	return progress, nil
 }
 
@@ -297,7 +279,7 @@ func runBranchCacheCoherentAcrossBatches(t *testing.T) {
 	// fresh recipient, so new account leaves and the branch nodes above them
 	// change block to block — exactly what the BranchCache must track.
 	signer := types.LatestSignerForChainID(emt.ChainConfig.ChainID)
-	gen, err := blockgen.GenerateChain(emt.ChainConfig, emt.Genesis, emt.Engine, emt.DB, 12, func(i int, b *blockgen.BlockGen) {
+	gen, err := emt.GenerateChain(12, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		for j := range 3 {
 			to := common.BytesToAddress([]byte{byte(i + 1), byte(j + 1), 0xab})
@@ -342,7 +324,7 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	emt := New(t, WithGenesisSpec(gspec), WithKey(key))
 
 	signer := types.LatestSignerForChainID(emt.ChainConfig.ChainID)
-	gen, err := blockgen.GenerateChain(emt.ChainConfig, emt.Genesis, emt.Engine, emt.DB, 4, func(i int, b *blockgen.BlockGen) {
+	gen, err := emt.GenerateChain(4, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 		to := common.BytesToAddress([]byte{byte(i + 1), 0xab})
 		tx, txErr := types.SignTx(
@@ -360,13 +342,24 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 
 	cfg := setupOfflineExec(emt, emt.cfg.BatchSize, false /*badBlockHalt*/)
 
-	doms, err := newReusedDomains(ctx, emt, logger)
+	tx, err := emt.DB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	defer doms.Close()
+	doms.SetInMemHistoryReads(false)
 
 	readerBefore := doms.GetCommitmentContext().StateReader()
-	_, err = execOneBatch(ctx, emt, doms, cfg, gen.TopBlock.NumberU64(), logger)
+
+	s, err := emt.Sync.StageState(stages.Execution, tx, true, false)
 	require.NoError(t, err)
+	err = stagedsync.SpawnExecuteBlocksStage(s, emt.Sync, doms, tx, gen.TopBlock.NumberU64(), ctx, cfg, logger)
+	if err != nil && !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+		require.NoError(t, err)
+	}
+	require.NoError(t, doms.Commit(ctx, tx))
 
 	require.Equal(t, readerBefore, doms.GetCommitmentContext().StateReader(),
 		"exec must restore the commitment state reader it found; leaving the parallel calculator's asOfStateReader installed breaks a later foreground SeekCommitment with in-mem history reads disabled")

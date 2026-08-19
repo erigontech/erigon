@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -241,9 +242,9 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
-		var getter kv.TemporalGetter
+		var getter execctxapi.StateGetter
 		if chainTx != nil {
-			getter = rs.Domains().AsGetterMetered(chainTx, rw.readMetrics)
+			getter = rs.Domains().AsStateGetterMetered(chainTx, rw.readMetrics)
 		}
 		// Use CachedReaderV3 for parallel workers — caches account data
 		// on first read per block, providing a stable pre-block committed
@@ -275,6 +276,17 @@ func (rw *Worker) ResetTx(chainTx kv.TemporalTx) error {
 	rw.lock.Lock()
 	defer rw.lock.Unlock()
 	return rw.resetTx(chainTx)
+}
+
+// Close releases the worker's state, tx, reader and writer. Idempotent. Only
+// call it once the worker's Run goroutine has exited.
+func (rw *Worker) Close() {
+	rw.lock.Lock()
+	defer rw.lock.Unlock()
+	rw.ibs.Close()
+	if err := rw.resetTx(nil); err != nil {
+		panic(fmt.Errorf("exec.Worker.Close: %w", err)) // unreachable: only a non-nil tx can fail
+	}
 }
 
 func (rw *Worker) resetTxNum(txNum uint64) {
@@ -312,7 +324,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 
 	if rw.chainTx != nil {
 		type latest interface {
-			SetGetter(kv.TemporalGetter)
+			SetGetter(execctxapi.StateGetter)
 		}
 
 		type historic interface {
@@ -321,7 +333,7 @@ func (rw *Worker) resetTx(chainTx kv.TemporalTx) error {
 
 		switch typedReader := rw.stateReader.(type) {
 		case latest:
-			typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
+			typedReader.SetGetter(rw.rs.Domains().AsStateGetterMetered(rw.chainTx, rw.readMetrics))
 		case historic:
 			typedReader.SetTx(rw.chainTx)
 		default:
@@ -442,9 +454,9 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 				rw.metrics.CodeReadCount.Add(rw.ibs.CodeReadCount())
 			}
 			if result != nil {
-				// EIP-8037: per-tx max(regular, state) overestimates vs the true block gas
+				// EIP-8037: per-tx max(execution, state) overestimates vs the true block gas
 				// (max of sums, not sum of maxes), but is a safe upper bound for metrics.
-				rw.metrics.GasUsed.Add(int64(max(result.ExecutionResult.BlockRegularGasUsed, result.ExecutionResult.BlockStateGasUsed)))
+				rw.metrics.GasUsed.Add(int64(max(result.ExecutionResult.BlockExecutionGasUsed, result.ExecutionResult.BlockStateGasUsed)))
 			}
 			rw.metrics.Active.Add(-1)
 		}()
@@ -459,7 +471,7 @@ func (rw *Worker) RunTxTask(txTask Task) (result *TxResult) {
 func (rw *Worker) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
 	type latest interface {
-		SetGetter(kv.TemporalGetter)
+		SetGetter(execctxapi.StateGetter)
 	}
 
 	type historic interface {
@@ -468,12 +480,12 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
-		typedReader.SetGetter(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics))
+		typedReader.SetGetter(rw.rs.Domains().AsStateGetterMetered(rw.chainTx, rw.readMetrics))
 	case historic:
 		typedReader.SetTx(rw.chainTx)
 	}
 	if rw.ibs != nil {
-		rw.ibs.Release(true)
+		rw.ibs.Close()
 	}
 	rw.ibs = state.New(rw.stateReader)
 
@@ -503,7 +515,7 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		// the coinbase race investigation).
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
-		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics), nil))
+		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsStateGetterMetered(rw.chainTx, rw.readMetrics), nil))
 	}
 
 	// Set the per-block committed state cache from the task.
@@ -569,23 +581,41 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, background bool, chainDb kv.TemporalRoDB,
 	rs *state.StateV3Buffered, stateReader state.StateReader, stateWriter state.StateWriter, in *QueueWithRetry, blockReader dbservices.FullBlockReader, chainConfig *chain.Config, genesis *types.Genesis,
 	engine rules.Engine, workerCount int, metrics *WorkerMetrics, dirs datadir.Dirs, logger log.Logger) (reconWorkers []*Worker, applyWorker *Worker, rws *ResultsQueue, clear func(), wait func(), err error) {
-	reconWorkers = make([]*Worker, workerCount)
+	// Appended, so a part-way failure leaves clear only the workers actually built.
+	reconWorkers = make([]*Worker, 0, workerCount)
 
 	resultsSize := workerCount * 8
 	rws = NewResultsQueue(resultsSize, workerCount)
 
 	g, gctx := errgroup.WithContext(ctx)
-	for i := range workerCount {
-		reconWorkers[i] = NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+
+	// Assigned before anything can fail: every return path must hand back a callable clear.
+	var clearDone bool
+	clear = func() {
+		if clearDone {
+			return
+		}
+		clearDone = true
+		g.Wait()
+		applyWorker.Close()
+		for _, w := range reconWorkers {
+			w.Close()
+		}
+	}
+
+	for range workerCount {
+		w := NewWorker(gctx, background, metrics, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
+		reconWorkers = append(reconWorkers, w)
 
 		if rs != nil {
 			reader := stateReader
 
 			if reader == nil {
-				reader = state.NewReaderV3(rs.Domains().AsGetterMetered(nil, reconWorkers[i].readMetrics))
+				reader = state.NewReaderV3(rs.Domains().AsStateGetterMetered(nil, w.readMetrics))
 			}
 
-			if err = reconWorkers[i].ResetState(rs, nil, reader, stateWriter, accumulator); err != nil {
+			if err = w.ResetState(rs, nil, reader, stateWriter, accumulator); err != nil {
 				return
 			}
 		}
@@ -598,22 +628,6 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 		}
 		wait = func() { g.Wait() }
 	}
-
-	var clearDone bool
-	clear = func() {
-		if clearDone {
-			return
-		}
-		clearDone = true
-		g.Wait()
-		for _, w := range reconWorkers {
-			if err = w.ResetTx(nil); err != nil {
-				return
-			}
-		}
-		//applyWorker.ResetTx(nil)
-	}
-	applyWorker = NewWorker(ctx, false, nil, chainDb, in, blockReader, chainConfig, genesis, rws, engine, dirs, logger)
 
 	return reconWorkers, applyWorker, rws, clear, wait, err
 }

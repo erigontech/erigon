@@ -25,6 +25,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -110,8 +111,8 @@ func TestStateLogger(t *testing.T) {
 			mockCtl := gomock.NewController(t)
 			defer mockCtl.Finish()
 			mt := mockTracer{}
-			state := New(NewReaderV3(tx))
-			defer state.Release(false)
+			state := New(NewReaderV3(execctx.NewTemporalTxStateGetter(tx)))
+			defer state.Close()
 			state.SetHooks(mt.Hooks())
 
 			tt.run(state)

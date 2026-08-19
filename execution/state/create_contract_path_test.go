@@ -33,7 +33,7 @@ func TestCreateContractPath_ContractOnlySignal(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 	vm := NewVersionMap(nil)
-	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), vm)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx)), vm)
 	ibs.SetTxContext(0, 1)
 
 	contract := getAddress(1)
