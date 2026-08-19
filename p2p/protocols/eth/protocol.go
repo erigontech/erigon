@@ -79,6 +79,10 @@ const (
 	// Protocol messages added in eth/71 (EIP-8159 Block Access List Exchange)
 	GetBlockAccessListsMsg = 0x12
 	BlockAccessListsMsg    = 0x13
+
+	// BSC (Parlia) handshake extension, sent right after Status on networks
+	// 56/97/714. Reuses the eth/63-era 0x0b slot, unused in modern eth.
+	UpgradeStatusMsg = 0x0b
 )
 
 var toProto68 = map[uint64]sentryproto.MessageId{
@@ -176,6 +180,24 @@ type StatusPacket69 struct {
 	ForkID                    forkid.ID
 	MinimumBlock, LatestBlock uint64
 	LatestBlockHash           common.Hash
+}
+
+// UpgradeStatusPacket is BSC's post-Status handshake extension (bsc eth/67+).
+type UpgradeStatusPacket struct {
+	Extension *rlp.RawValue `rlp:"nil"`
+}
+
+type UpgradeStatusExtension struct {
+	DisablePeerTxBroadcast bool
+}
+
+func (e *UpgradeStatusExtension) Encode() (*rlp.RawValue, error) {
+	rawBytes, err := rlp.EncodeToBytes(e)
+	if err != nil {
+		return nil, err
+	}
+	raw := rlp.RawValue(rawBytes)
+	return &raw, nil
 }
 
 // NewBlockHashesPacket is the network packet for the block announcements.
