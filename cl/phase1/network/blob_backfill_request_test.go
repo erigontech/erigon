@@ -423,6 +423,117 @@ func TestBlobBackfillStopWaitsForValidationOwnership(t *testing.T) {
 	}
 }
 
+func TestBlobBackfillStopWaitsForRequestOwnership(t *testing.T) {
+	tests := map[string]struct {
+		stop func(context.CancelFunc, chan<- time.Time)
+		want error
+	}{
+		"expiration": {
+			stop: func(_ context.CancelFunc, expires chan<- time.Time) { expires <- time.Now() },
+			want: ErrTimeout,
+		},
+		"caller cancellation": {
+			stop: func(cancel context.CancelFunc, _ chan<- time.Time) { cancel() },
+			want: context.Canceled,
+		},
+	}
+	for name, test := range tests {
+		t.Run(name, func(t *testing.T) {
+			ctx, cancel := context.WithCancel(t.Context())
+			ticks := make(chan time.Time)
+			expires := make(chan time.Time, 1)
+			requestStarted := make(chan struct{})
+			requestContext := make(chan context.Context, 1)
+			releaseRequest := make(chan struct{})
+			client := blobRequesterFunc(func(ctx context.Context, _ *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+				requestContext <- ctx
+				close(requestStarted)
+				<-ctx.Done()
+				<-releaseRequest
+				return nil, "peer", ctx.Err()
+			})
+			done := make(chan error, 1)
+			go func() {
+				_, err := requestBlobsForBackfillWithSchedule(ctx, client, emptyBlobRequest, func(context.Context, *PeerAndSidecars) (bool, bool, error) {
+					return true, true, nil
+				}, blobBackfillRequestSchedule{
+					ticks:   ticks,
+					expires: expires,
+					now:     time.Now,
+				})
+				done <- err
+			}()
+
+			receiveBlobTestSignal(t, requestStarted)
+			requestCtx := receiveBlobTestValue(t, requestContext)
+			test.stop(cancel, expires)
+			receiveBlobTestSignal(t, requestCtx.Done())
+			select {
+			case err := <-done:
+				t.Fatalf("request returned before request handler released ownership: %v", err)
+			case <-time.After(100 * time.Millisecond):
+			}
+			close(releaseRequest)
+			require.ErrorIs(t, receiveBlobTestValue(t, done), test.want)
+		})
+	}
+}
+
+func TestBlobBackfillSuccessWaitsForRequestOwnership(t *testing.T) {
+	ticks := make(chan time.Time)
+	expires := make(chan time.Time)
+	firstStarted := make(chan struct{})
+	firstReply := make(chan struct{})
+	secondStarted := make(chan context.Context, 1)
+	releaseSecond := make(chan struct{})
+	var requestIndex atomic.Int64
+	client := blobRequesterFunc(func(ctx context.Context, _ *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
+		switch requestIndex.Add(1) {
+		case 1:
+			close(firstStarted)
+			<-firstReply
+			return []*cltypes.BlobSidecar{{}}, "first", nil
+		case 2:
+			secondStarted <- ctx
+			<-ctx.Done()
+			<-releaseSecond
+			return nil, "second", ctx.Err()
+		default:
+			return nil, "unexpected", errors.New("unexpected request")
+		}
+	})
+	type requestOutcome struct {
+		result *PeerAndSidecars
+		err    error
+	}
+	done := make(chan requestOutcome, 1)
+	go func() {
+		result, err := requestBlobsForBackfillWithSchedule(t.Context(), client, emptyBlobRequest, func(context.Context, *PeerAndSidecars) (bool, bool, error) {
+			return true, true, nil
+		}, blobBackfillRequestSchedule{
+			ticks:   ticks,
+			expires: expires,
+			now:     time.Now,
+		})
+		done <- requestOutcome{result: result, err: err}
+	}()
+
+	receiveBlobTestSignal(t, firstStarted)
+	ticks <- time.Now()
+	secondCtx := receiveBlobTestValue(t, secondStarted)
+	close(firstReply)
+	receiveBlobTestSignal(t, secondCtx.Done())
+	select {
+	case outcome := <-done:
+		t.Fatalf("request returned before request handler released ownership: %+v", outcome)
+	case <-time.After(100 * time.Millisecond):
+	}
+	close(releaseSecond)
+	outcome := receiveBlobTestValue(t, done)
+	require.NoError(t, outcome.err)
+	require.Equal(t, "first", outcome.result.Peer)
+}
+
 func emptyBlobRequest() *solid.ListSSZ[*cltypes.BlobIdentifier] {
 	return solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 2)
 }

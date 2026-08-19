@@ -19,6 +19,7 @@ package network
 import (
 	"context"
 	"errors"
+	"sync"
 	"sync/atomic"
 	"time"
 
@@ -153,7 +154,11 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 		return nil, err
 	}
 	requestCtx, cancel := context.WithCancel(ctx)
-	defer cancel()
+	var requestWorkers sync.WaitGroup
+	defer func() {
+		cancel()
+		requestWorkers.Wait()
+	}()
 	results := make(chan blobRequestResult, maxConcurrentBlobBackfillRequest)
 	validationResults := make(chan blobValidationResult, 1)
 	inFlight := 0
@@ -163,13 +168,13 @@ func requestBlobsForBackfillWithSchedule(ctx context.Context, r blobRequester, r
 	launch := func() {
 		inFlight++
 		requested := req()
-		go func() {
+		requestWorkers.Go(func() {
 			responses, peer, err := r.SendBlobsSidecarByIdentifierReq(requestCtx, requested)
 			select {
 			case results <- blobRequestResult{peer: peer, responses: responses, requested: requested, err: err}:
 			case <-requestCtx.Done():
 			}
-		}()
+		})
 	}
 	startValidation := func(candidate *PeerAndSidecars) {
 		validating = true
