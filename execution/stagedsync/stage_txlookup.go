@@ -204,12 +204,6 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		return s.Done(tx)
 	}
 	logPrefix := s.LogPrefix()
-	// The floor is this stage's own progress. It must not be read back from
-	// kv.Headers: PruneAncientBlocks deletes headers up to CanDeleteTo(), the same
-	// frontier blockTo comes from, so the range would always be empty. TxLookup rows
-	// are filtered by txNum value over a rolling full-table scan, not by key range,
-	// so 0 is the correct start and keeps txFrom stable across cycles.
-	blockFrom := s.PruneProgress
 	var blockTo uint64
 
 	// Forward stage doesn't write anything before PruneTo point
@@ -219,15 +213,19 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
 	}
 
-	if blockFrom >= blockTo {
+	if blockTo == 0 {
 		return nil
 	}
 
+	// The floor stays at 0. tableScanningPrune walks the whole table from a rolling
+	// cursor and uses txFrom only as a delete predicate, so raising it saves no
+	// traversal and silently retains every row below it. Both values this stage used
+	// to derive it from track blockTo itself: kv.Headers is deleted to the same
+	// frontier by PruneAncientBlocks, and PruneProgress is set to FrozenBlocks() by
+	// SpawnTxLookup to skip ancient traversal in the old per-block delete loop.
+	var txFrom uint64
+
 	txNumReader := cfg.blockReader.TxnumReader()
-	txFrom, err := txNumReader.Min(ctx, tx, blockFrom)
-	if err != nil {
-		return fmt.Errorf("txNumReader.Min(%d): %w", blockFrom, err)
-	}
 	txTo, err := txNumReader.Max(ctx, tx, blockTo)
 	if err != nil {
 		return fmt.Errorf("txNumReader.Max(%d): %w", blockTo, err)

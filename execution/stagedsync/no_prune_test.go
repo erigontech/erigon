@@ -198,6 +198,38 @@ func TestPruneTxLookupFloorNotTiedToHeaders(t *testing.T) {
 	}
 }
 
+// TestPruneTxLookupFloorIgnoresForwardStageWatermark pins that the floor is not
+// taken from PruneProgress either. SpawnTxLookup writes PruneProgress =
+// FrozenBlocks() to skip ancient traversal in the old per-block delete loop;
+// under the value-filtering scan that watermark would skip exactly the stale
+// rows this stage exists to delete.
+func TestPruneTxLookupFloorIgnoresForwardStageWatermark(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	const lastBlock, forward, distance = 2_000, uint64(2_000), uint64(100)
+	seedTxLookupPruneFixture(t, tx, lastBlock, 1)
+	before := txLookupRowCount(t, tx)
+
+	// What SpawnTxLookup does when snapshots already index these blocks.
+	require.NoError(t, stages.SaveStagePruneProgress(tx, stages.TxLookup, forward-distance))
+
+	cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(distance)},
+		t.TempDir(), freezeblocks.NewBlockReader(nil, nil))
+	s := &PruneState{ID: stages.TxLookup, ForwardProgress: forward,
+		PruneProgress:    forward - distance,
+		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
+	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
+
+	require.Less(t, txLookupRowCount(t, tx), before,
+		"stale rows below the forward stage's PruneProgress watermark were skipped")
+}
+
 // TestPruneTxLookupForwardAheadOfExecution covers the stage ordering where
 // TxLookup has run further than Execution/Senders: the prune range is driven by
 // TxLookup's own ForwardProgress, so it must still prune and must not walk past
