@@ -238,6 +238,37 @@ An old hosted run may use `schelk`. Match its dataset, fixtures, client, and lim
 only the storage mechanism with OverlayFS. Check historical arguments against the current Erigon
 source and image help so removed flags do not survive in the local override.
 
+### Select the dataset context
+
+Resolve the pre-populated dataset's context independently of the State Actor `CONTEXT_DIR` defined
+earlier. The dataset context supplies fork-schedule variables and the matching clients; never reuse
+the generic context or mix files from the two trees. For the jochemnet Glamsterdam devnet 7 run:
+
+```bash
+DATASET_DATADIR_GLOBAL="$TESTS_DIR/configs/datadirs/jochemnet/v1/global.yaml"
+DATASET_CONTEXT_DIR="$TESTS_DIR/configs/contexts/repricing/jochemnet/v1/glamsterdam-devnet-7"
+DATASET_CONTEXT_GLOBAL="$DATASET_CONTEXT_DIR/global.yaml"
+DATASET_CLIENTS_CONFIG="$DATASET_CONTEXT_DIR/clients.yaml"
+DATASET_STATEFUL_CONFIG="$DATASET_CONTEXT_DIR/test-source.stateful.runner.yaml"
+
+test -f "$DATASET_DATADIR_GLOBAL" || exit 1
+test -f "$DATASET_CONTEXT_GLOBAL" || exit 1
+test -f "$DATASET_CLIENTS_CONFIG" || exit 1
+test -f "$DATASET_STATEFUL_CONFIG" || exit 1
+
+EXPECTED_AMSTERDAM_ACTIVATION_TS=$(yq -r \
+  '.global.env.AMSTERDAM_ACTIVATION_TS // ""' "$DATASET_CONTEXT_GLOBAL")
+test -n "$EXPECTED_AMSTERDAM_ACTIVATION_TS" || exit 1
+rg -n 'override\.amsterdam=.*AMSTERDAM_ACTIVATION_TS' \
+  "$DATASET_CLIENTS_CONFIG" || exit 1
+```
+
+Resolve equivalent paths from the authoritative hosted run for another dataset or fork. Require
+every variable referenced by the selected source and client instance to be defined by an earlier
+config in both the staging and measured stacks. For jochemnet, confirm the persisted Erigon command
+contains `--override.amsterdam=$EXPECTED_AMSTERDAM_ACTIVATION_TS`; an empty or different value is a
+hard failure.
+
 ### Protect and identify the original
 
 For the jochemnet host, use these roles:
@@ -377,7 +408,7 @@ runner:
         method: overlayfs
 ```
 
-Copy the complete selected instance from the pinned `clients.yaml`; instance lists replace rather
+Copy the complete selected instance from `DATASET_CLIENTS_CONFIG`; instance lists replace rather
 than merge. Keep `cleanup_on_start: false` while a deliberate staging overlay is mounted because
 broad orphan cleanup can destroy that baseline.
 
@@ -397,7 +428,9 @@ every fixture. Build an immutable advanced baseline:
    successful replay to the expected end block/hash/root, resolve the exact retained container and
    logged data mount, then set
    `STAGING_MERGED=$(verify_task_overlay "$CONTAINER_ID" "$ORIGINAL_LOWER")`. Require the logged
-   data mount to resolve to `STAGING_MERGED`.
+   data mount to resolve to `STAGING_MERGED`. From the logged run directory, require the persisted
+   Erigon command to contain
+   `--override.amsterdam=$EXPECTED_AMSTERDAM_ACTIVATION_TS` exactly.
 3. Stop that exact container gracefully and wait until it has exited. This closes container stdio
    so benchmarkoor's following log stream can reach EOF. Record its stopped state and run `sync`,
    but do not remove the container or unmount its overlay yet.
@@ -422,30 +455,32 @@ Deliberately replace its environment-specific runtime and storage-label values w
 Docker/OverlayFS config described below. During measured runs, use this complete local source and
 `ADVANCED_LOWER`, and restore the resource-limit config.
 
-For the ordered command shown earlier in this reference, replace both State Actor datadir configs
-with the pre-populated dataset's `global.yaml`. Omit its hosted runner config. Replace the upstream
-source with the complete no-pre-runs source when using an advanced baseline. After the context,
-source, and clients files, load the complete local Docker/OverlayFS config, then the local instance
-and optional exact-filter overrides. The final local config must reassert `container_runtime:
-docker`, the complete OverlayFS datadir map, and `data-disk-type: overlayfs`.
+Do not reuse the earlier State Actor command's `CONTEXT_DIR`, `SUITE_RUNNER_CONFIG`, or clients.
+Replace both State Actor datadir configs with `DATASET_DATADIR_GLOBAL`, use
+`DATASET_CONTEXT_GLOBAL`, and load `DATASET_CLIENTS_CONFIG`. Omit the hosted datadir runner config.
+Use `DATASET_STATEFUL_CONFIG` for staging and its complete no-pre-runs copy for an advanced
+baseline. After the dataset context, source, and clients files, load the complete local
+Docker/OverlayFS config, then the local instance and optional exact-filter overrides. The final
+local config must reassert `container_runtime: docker`, the complete OverlayFS datadir map, and
+`data-disk-type: overlayfs`.
 
 The two effective config stacks are therefore:
 
 ```text
 staging: configs/global.yaml
-         -> dataset global/genesis
-         -> context global
-         -> complete original stateful source (with pre_runs)
-         -> pinned clients
+         -> $DATASET_DATADIR_GLOBAL
+         -> $DATASET_CONTEXT_GLOBAL
+         -> $DATASET_STATEFUL_CONFIG (complete source with pre_runs)
+         -> $DATASET_CLIENTS_CONFIG
          -> complete local Docker/OverlayFS config using ORIGINAL_LOWER
          -> complete local staging instance
 
 measured: configs/global.yaml
           -> resource-limit config
-          -> dataset global/genesis
-          -> context global
-          -> complete local stateful source (without pre_runs)
-          -> pinned clients
+          -> $DATASET_DATADIR_GLOBAL
+          -> $DATASET_CONTEXT_GLOBAL
+          -> complete no-pre-runs copy of $DATASET_STATEFUL_CONFIG
+          -> $DATASET_CLIENTS_CONFIG
           -> complete local Docker/OverlayFS config using ADVANCED_LOWER
           -> complete local measured instance and optional exact-filter override
 ```
@@ -467,11 +502,40 @@ the fixed paths; a raw mountpoint count double-counts the bind. Require the benc
 remove the prior per-test container and mount before creating the next one. Stop immediately if two
 per-test uppers persist.
 
-After staging, measure the fixed upper's allocated and apparent sizes and re-check filesystem
-availability. The remaining availability must cover the conservative per-test copy-up budget from
-the main skill plus the predeclared emergency floor. During measured runs, monitor free space and
-the aggregate size of both the fixed staging upper and the current per-test upper; accounting for
-only the per-test layer understates peak consumption.
+After staging, measure the fixed upper and the complete read-only advanced baseline, then re-check
+the writable filesystem. The per-test upper may have to copy any file visible through
+`ADVANCED_LOWER`, including files created or enlarged during staging, so the original pristine size
+is not a sufficient bound:
+
+```bash
+EMERGENCY_FLOOR_BYTES=${EMERGENCY_FLOOR_BYTES:?set the predeclared free-space floor}
+STAGING_BASE=$(dirname -- "$(realpath -e -- "$STAGING_MERGED")")
+STAGING_UPPER="$STAGING_BASE/upper"
+
+du -sx --block-size=1 "$STAGING_UPPER"
+du -sx --apparent-size --block-size=1 "$STAGING_UPPER"
+ADVANCED_ALLOCATED_BYTES=$(du -sx --block-size=1 "$ADVANCED_LOWER" | awk '{print $1}')
+ADVANCED_APPARENT_BYTES=$(du -sx --apparent-size --block-size=1 \
+  "$ADVANCED_LOWER" | awk '{print $1}')
+AVAILABLE_BYTES=$(df -B1 --output=avail "$OVERLAY_TMP" | awk 'NR == 2 {print $1}')
+
+for byte_count in "$EMERGENCY_FLOOR_BYTES" "$ADVANCED_ALLOCATED_BYTES" \
+  "$ADVANCED_APPARENT_BYTES" "$AVAILABLE_BYTES"; do
+  case "$byte_count" in
+    ''|*[!0-9]*) exit 2 ;;
+  esac
+done
+REQUIRED_BYTES=$((ADVANCED_ALLOCATED_BYTES + EMERGENCY_FLOOR_BYTES))
+test "$AVAILABLE_BYTES" -ge "$REQUIRED_BYTES" || exit 1
+printf 'advanced allocated=%s apparent=%s available=%s required=%s\n' \
+  "$ADVANCED_ALLOCATED_BYTES" "$ADVANCED_APPARENT_BYTES" \
+  "$AVAILABLE_BYTES" "$REQUIRED_BYTES"
+```
+
+Measure this gate after the fixed staging upper exists, so `AVAILABLE_BYTES` already accounts for
+it. The emergency floor must also cover result, cache, log, and operating headroom. During measured
+runs, monitor free space and the aggregate size of both the fixed staging upper and the current
+per-test upper; accounting for only the per-test layer understates peak consumption.
 
 After result validation, require zero per-test mounts, directories, containers, and benchmarkoor
 processes. Compare pristine fingerprints, sizes, path count, and critical hashes while

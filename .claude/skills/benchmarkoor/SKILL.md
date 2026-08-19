@@ -374,6 +374,14 @@ complete test-source override that omits `pre_runs`. Never promote into or write
 pristine snapshot. Copy the complete source map and remove only `pre_runs`; do not construct a
 partial override and rely on merge deletion.
 
+Before smoke or measured fixtures, recalculate the conservative per-test copy-up budget from the
+allocated size of the read-only advanced baseline. The original pristine size is no longer a safe
+bound after staging has created or enlarged files.
+
+Treat the dataset datadir global, context global, stateful source, and clients as one pinned set.
+Do not reuse the generic State Actor context for a pre-populated dataset; fork variables and client
+arguments must come from the matching dataset context.
+
 Do not load a `schelk` runner config and then override only `method`: Viper retains sibling
 `schelk_options`, producing an invalid mixed datadir config. Load the dataset's global/genesis
 config and supply a complete local OverlayFS datadir map instead. While the staged baseline is
