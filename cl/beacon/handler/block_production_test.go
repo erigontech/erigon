@@ -494,6 +494,7 @@ func TestPollAssembledPayloadDoesNotTreatBuilderCancellationAsCallerCancellation
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	calls := 0
 
+	// The request remains live while the builder's own operation is canceled.
 	_, _, _, _, err := pollAssembledPayload(t.Context(), window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
@@ -1059,6 +1060,7 @@ func TestFeeRecipientDeduplicatesRecentWarnings(t *testing.T) {
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(10, 4))
 	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"), "a different proposer is worth saying again")
 
+	// Another proposer must not reset a cached warning while capacity remains.
 	require.Equal(t, common.Address{}, a.feeRecipientForProposal(9, 5))
 	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"))
 }
@@ -1099,6 +1101,8 @@ func TestPollAssembledPayloadDoesNotCollectAfterTheCallerHasGone(t *testing.T) {
 	require.NotContains(t, logs(), "lvl=eror")
 }
 
+// produceBlockWithFailingCollection exercises the production error boundary with controlled
+// execution-payload and sync-aggregate failures.
 func produceBlockWithFailingCollection(t *testing.T, ctx context.Context, collect, syncFailure error) error {
 	t.Helper()
 	ctrl := gomock.NewController(t)

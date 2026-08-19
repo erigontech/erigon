@@ -290,6 +290,9 @@ func (a *ApiHandler) expectedWithdrawals(
 	return cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals), nil
 }
 
+// feeRecipientForProposal returns the registered fee recipient. Falling back to the zero address
+// gives the proposal's fees away, so missing registrations are warned. The bounded cache suppresses
+// duplicate warnings only while a proposer remains recent.
 func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) common.Address {
 	feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
 	if registered {
@@ -297,6 +300,7 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 	}
 	shouldWarn := true
 	if a.warnedUnregisteredProposers != nil {
+		// Claim the warning atomically so concurrent requests for the same proposer emit one record.
 		alreadyWarned, _ := a.warnedUnregisteredProposers.ContainsOrAdd(proposerIndex, struct{}{})
 		shouldWarn = !alreadyWarned
 	}
@@ -307,6 +311,7 @@ func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) c
 	return common.Address{}
 }
 
+// productionErrorSeverity defines the shared priority order for error selection and logging.
 type productionErrorSeverity uint8
 
 const (
@@ -329,6 +334,7 @@ func classifyProductionError(err error) productionErrorSeverity {
 	}
 }
 
+// mostActionableProductionError returns the higher-severity error and preserves the first on ties.
 func mostActionableProductionError(first, second error) error {
 	if classifyProductionError(second) > classifyProductionError(first) {
 		return second
@@ -384,6 +390,7 @@ func pollAssembledPayload(
 		firstErr error
 	)
 	for {
+		// A collection attempt stops the builder; do not start one after the caller has gone.
 		if ctx.Err() != nil {
 			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
 		}
@@ -664,6 +671,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
 	block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
+		// produceBlock logs production failures at its error boundary.
 		return nil, err
 	}
 

@@ -107,7 +107,8 @@ type ApiHandler struct {
 	logger    log.Logger
 
 	// Validator data structures
-	validatorParams                    *validator_params.ValidatorParams
+	validatorParams *validator_params.ValidatorParams
+	// warnedUnregisteredProposers bounds the set of recent proposers whose warnings are deduplicated.
 	warnedUnregisteredProposers        *lru.Cache[uint64, struct{}]
 	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
 	engine                             execution_client.ExecutionEngine
