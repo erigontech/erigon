@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -1415,4 +1416,65 @@ func TestRawTransactionsRangeExcludesForeignTxns(t *testing.T) {
 	txs, err := rawdb.RawTransactionsRange(tx, 0, 1)
 	require.NoError(err)
 	require.Equal([][]byte{txCanon}, txs)
+}
+
+// TestPruneBlocksCutsOnlyTheBlockRange pins the key-width assumption the range
+// cut rests on: Senders/BlockBody/BlockAccessList/Headers are keyed blockNum||hash,
+// but the bounds are bare 8-byte block numbers. Byte order makes num||hash fall in
+// [EncodeTs(from), EncodeTs(to)) exactly when from <= num < to, so a wrong bound
+// shows up here as a neighbouring block losing its rows.
+func TestPruneBlocksCutsOnlyTheBlockRange(t *testing.T) {
+	t.Parallel()
+	_, tx := mdbxtest.NewTestTx(t)
+
+	tables := []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers}
+	for n := uint64(0); n <= 6; n++ {
+		for _, h := range []common.Hash{{byte(n), 0xaa}, {byte(n), 0xbb}} { // two forks per height
+			require.NoError(t, rawdb.WriteBodyForStorage(tx, h, n, &types.BodyForStorage{BaseTxnID: types.BaseTxnID(n * 10), TxCount: 1}))
+			for _, table := range []string{kv.Senders, kv.BlockAccessList, kv.Headers} {
+				require.NoError(t, tx.Put(table, dbutils.BlockBodyKey(n, h), []byte{byte(n)}))
+			}
+		}
+	}
+
+	deleted, err := rawdb.PruneBlocks(tx, 4, 100)
+	require.NoError(t, err)
+	require.EqualValues(t, 6, deleted, "blocks 1..3, two forks each")
+
+	for _, table := range tables {
+		var got []uint64
+		require.NoError(t, tx.ForEach(table, nil, func(k, _ []byte) error {
+			got = append(got, binary.BigEndian.Uint64(k))
+			return nil
+		}))
+		require.Equal(t, []uint64{0, 0, 4, 4, 5, 5, 6, 6}, got,
+			"%s: genesis and blocks >= 4 must survive, 1..3 must be gone", table)
+	}
+}
+
+// TestTruncateBlocksKeepsGenesis pins that the open-ended cut starts at the
+// requested height and never reaches genesis, which PruneBlocks relies on too.
+func TestTruncateBlocksKeepsGenesis(t *testing.T) {
+	t.Parallel()
+	_, tx := mdbxtest.NewTestTx(t)
+
+	tables := []string{kv.Senders, kv.BlockBody, kv.BlockAccessList, kv.Headers}
+	for n := uint64(0); n <= 4; n++ {
+		h := common.Hash{byte(n)}
+		require.NoError(t, rawdb.WriteBodyForStorage(tx, h, n, &types.BodyForStorage{BaseTxnID: types.BaseTxnID(n * 10), TxCount: 1}))
+		for _, table := range []string{kv.Senders, kv.BlockAccessList, kv.Headers} {
+			require.NoError(t, tx.Put(table, dbutils.BlockBodyKey(n, h), []byte{byte(n)}))
+		}
+	}
+
+	require.NoError(t, rawdb.TruncateBlocks(t.Context(), tx, 2))
+
+	for _, table := range tables {
+		var got []uint64
+		require.NoError(t, tx.ForEach(table, nil, func(k, _ []byte) error {
+			got = append(got, binary.BigEndian.Uint64(k))
+			return nil
+		}))
+		require.Equal(t, []uint64{0, 1}, got, "%s: blocks >= 2 must be gone", table)
+	}
 }

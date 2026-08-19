@@ -333,7 +333,7 @@ type noRangeDeleteTx struct{ kv.RwTx }
 func TestKVDeleteRange(t *testing.T) {
 	t.Run("panics rather than emulating the cut by iterating", func(t *testing.T) {
 		require.PanicsWithValue(t,
-			"mdbx.noRangeDeleteTx does not implement kv.HasDeleteRange",
+			"mdbx_test.noRangeDeleteTx does not implement kv.HasDeleteRange",
 			func() { _, _ = kv.DeleteRange(noRangeDeleteTx{}, deleteRangeTable, nil, nil) })
 	})
 
