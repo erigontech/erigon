@@ -3,8 +3,8 @@
 Main Properties:
 
 ```
-- if initialDownload complete: local .torrent are more important than remote. and local .torrent is more important than local .seg. If no data-file exists without .torrent - then create .torrent from data-file      
-- if initialDownload not-complete: download remote preveified.toml and align datadir according to preverified.toml (download remote .torrent and data-files)             
+- if initialDownload complete: local `.torrent` are more important than remote. and local `.torrent` is more important than local `data-file`. If `data-file` exists without `.torrent` - then derivew `.torrent` from `data-file`      
+- if initialDownload not-complete: download remote `preveified.toml` and align datadir according to `preverified.toml` (download remote `.torrent` and `data-files`)             
 ```
 
 The diagram below shows the components used to manage downloads between torrents and WebSeeds.
