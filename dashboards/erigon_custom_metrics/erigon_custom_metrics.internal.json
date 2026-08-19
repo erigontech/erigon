@@ -4026,26 +4026,31 @@
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "grafanacloud-prom"
+          "id": 198,
+          "type": "state-timeline",
+          "title": "State: running collate/merge/prune",
+          "gridPos": {
+            "h": 10,
+            "w": 12,
+            "x": 12,
+            "y": 182
           },
           "fieldConfig": {
             "defaults": {
+              "custom": {
+                "lineWidth": 0,
+                "fillOpacity": 70,
+                "spanNulls": false,
+                "insertNulls": false,
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                },
+                "axisPlacement": "auto"
+              },
               "color": {
                 "mode": "thresholds"
-              },
-              "custom": {
-                "axisPlacement": "auto",
-                "fillOpacity": 70,
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineWidth": 0,
-                "spanNulls": false
               },
               "mappings": [],
               "thresholds": {
@@ -4053,7 +4058,7 @@
                 "steps": [
                   {
                     "color": "dark-blue",
-                    "value": 0
+                    "value": null
                   },
                   {
                     "color": "green",
@@ -4064,34 +4069,7 @@
             },
             "overrides": []
           },
-          "gridPos": {
-            "h": 10,
-            "w": 12,
-            "x": 12,
-            "y": 182
-          },
-          "id": 198,
-          "options": {
-            "alignValue": "left",
-            "annotations": {
-              "clustering": -1,
-              "multiLane": false
-            },
-            "legend": {
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
-            },
-            "mergeValues": true,
-            "rowHeight": 0.84,
-            "showValue": "never",
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "single",
-              "sort": "none"
-            }
-          },
-          "pluginVersion": "13.0.0-23429090056",
+          "pluginVersion": "12.4.9",
           "targets": [
             {
               "datasource": {
@@ -4100,7 +4078,7 @@
               },
               "editorMode": "code",
               "expr": "domain_running_merges{instance=~\"$instance\"}",
-              "legendFormat": "running merges:",
+              "legendFormat": "merge| {{instance}}",
               "range": true,
               "refId": "A"
             },
@@ -4111,7 +4089,7 @@
               },
               "editorMode": "code",
               "expr": "domain_running_collations{instance=~\"$instance\"}",
-              "legendFormat": "running collations:",
+              "legendFormat": "collations| {{instance}}",
               "range": true,
               "refId": "B"
             },
@@ -4133,7 +4111,7 @@
               },
               "editorMode": "code",
               "expr": "domain_running_commitment{instance=~\"$instance\"}",
-              "legendFormat": "running commitment:",
+              "legendFormat": "commitment| {{instance}}",
               "range": true,
               "refId": "D"
             },
@@ -4162,8 +4140,30 @@
               "refId": "F"
             }
           ],
-          "title": "State: running collate/merge/prune",
-          "type": "state-timeline"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "grafanacloud-prom"
+          },
+          "options": {
+            "mergeValues": true,
+            "showValue": "never",
+            "alignValue": "left",
+            "rowHeight": 0.84,
+            "legend": {
+              "showLegend": true,
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none",
+              "hideZeros": false
+            },
+            "annotations": {
+              "clustering": -1,
+              "multiLane": false
+            }
+          }
         },
         {
           "datasource": {
