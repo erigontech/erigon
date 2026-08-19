@@ -285,6 +285,8 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("prune TxLookup: %w", err)
 	}
+	logger.Debug(fmt.Sprintf("[%s] prune", logPrefix), "scanned", pruneStat.ScanCountValues,
+		"pruned", pruneStat.PruneCountValues, "status", pruneStat.ValueProgress.String(), "blockTo", blockTo)
 	defer func() {
 		pruneStat.TxFrom, pruneStat.TxTo = 0, txTo
 		if e := state.SavePruneValProgress(tx, kv.TxLookup, pruneStat); e != nil {
