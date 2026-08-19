@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -36,13 +37,14 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
 
-type fcuErrorEngineStub struct {
+type fcuEngineStub struct {
 	engineapi.EngineAPI
-	err error
+	response *engine_types.ForkChoiceUpdatedResponse
+	err      error
 }
 
-func (s *fcuErrorEngineStub) ForkchoiceUpdatedV3(context.Context, *engine_types.ForkChoiceState, *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
-	return nil, s.err
+func (s *fcuEngineStub) ForkchoiceUpdatedV3(context.Context, *engine_types.ForkChoiceState, *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return s.response, s.err
 }
 
 // A forkchoice update that ran out of time has not been refused: the execution layer may still
@@ -53,13 +55,13 @@ func TestForkChoiceUpdateReportsATimeoutRatherThanAnEmptySuccess(t *testing.T) {
 		name string
 		err  error
 	}{
-		{"context deadline", context.DeadlineExceeded},
+		{"wrapped context deadline", fmt.Errorf("wrapped: %w", context.DeadlineExceeded)},
 		{"grpc deadline", status.Error(codes.DeadlineExceeded, "context deadline exceeded")},
 		{"legacy grpc string", errors.New("rpc error: code = DeadlineExceeded desc = context deadline exceeded")},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			cfg := clparams.MainnetBeaconConfig
-			cc := &ExecutionClientEngine{engine: &fcuErrorEngineStub{err: tc.err}, beaconCfg: &cfg}
+			cc := &ExecutionClientEngine{engine: &fcuEngineStub{err: tc.err}, beaconCfg: &cfg}
 
 			id, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
 
@@ -73,12 +75,46 @@ func TestForkChoiceUpdateReportsATimeoutRatherThanAnEmptySuccess(t *testing.T) {
 // only on timeouts does not retry a rejection forever.
 func TestForkChoiceUpdateDoesNotCallEveryFailureATimeout(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
-	cc := &ExecutionClientEngine{engine: &fcuErrorEngineStub{err: errors.New("boom")}, beaconCfg: &cfg}
+	cc := &ExecutionClientEngine{engine: &fcuEngineStub{err: errors.New("boom")}, beaconCfg: &cfg}
 
 	_, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
 
 	require.Error(t, err)
 	require.NotErrorIs(t, err, ErrForkChoiceUpdateTimeout)
+}
+
+func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cc := &ExecutionClientEngine{
+		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
+		}},
+		beaconCfg: &cfg,
+	}
+
+	id, err := cc.ForkChoiceUpdate(
+		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.DenebVersion,
+	)
+
+	require.ErrorIs(t, err, ErrForkChoiceUpdateNoPayloadID)
+	require.Nil(t, id)
+}
+
+func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cc := &ExecutionClientEngine{
+		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
+		}},
+		beaconCfg: &cfg,
+	}
+
+	id, err := cc.ForkChoiceUpdate(
+		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion,
+	)
+
+	require.NoError(t, err)
+	require.Empty(t, id)
 }
 
 type beaconCfgEngineStub struct {

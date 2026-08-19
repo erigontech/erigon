@@ -200,7 +200,13 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	}
 
 	if resp.PayloadId == nil {
-		return []byte{}, checkPayloadStatus(resp.PayloadStatus)
+		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
+			return nil, err
+		}
+		if attributes != nil {
+			return nil, ErrForkChoiceUpdateNoPayloadID
+		}
+		return []byte{}, nil
 	}
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
 }
