@@ -551,9 +551,8 @@ jobs:
         # failures so the next investigation or retry can start sooner
         # instead of burning runner hours on a dead chain.
         timeout-minutes: ${{ matrix.test_timeout_minutes }}
-        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        uses: erigontech/kurtosis-assertoor-github-action@v1.1.7
         with:
-            kurtosis_version: "${{ env.KURTOSIS_VERSION }}"
             enclave_name: "kurtosis-${{ matrix.suite }}-${{ matrix.commitment_mode }}-${{ github.run_id }}"
             ethereum_package_url: "${{ matrix.ethereum_package_url || 'github.com/ethpandaops/ethereum-package' }}"
             ethereum_package_args: "${{ matrix.package_args }}"
