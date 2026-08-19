@@ -6,6 +6,8 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/stretchr/testify/require"
 )
 
@@ -36,11 +38,12 @@ type testStateReader struct {
 	readDomain   kv.Domain
 	readKey      []byte
 	readStepSize uint64
+	withHistory  bool
 }
 
 var _ StateReader = (*testStateReader)(nil)
 
-func (r *testStateReader) WithHistory() bool { return false }
+func (r *testStateReader) WithHistory() bool { return r.withHistory }
 
 func (r *testStateReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
 
@@ -82,4 +85,112 @@ func Test_TrieContext_BranchCopiesData(t *testing.T) {
 
 	branch[1] = 8
 	require.Equal(t, []byte{9, 2, 3}, reader.branchData)
+}
+
+type branchChildCountDomains struct {
+	stubSharedDomains
+	value   []byte
+	ok      bool
+	bound   bool
+	maxStep kv.Step
+	calls   int
+	key     []byte
+}
+
+func (d *branchChildCountDomains) GetLatestFromMemory(domain kv.Domain, key []byte) ([]byte, kv.Step, bool) {
+	d.calls++
+	d.key = append(d.key[:0], key...)
+	if domain != kv.CommitmentDomain || !d.ok {
+		if d.bound {
+			return nil, d.maxStep, false
+		}
+		return nil, kv.NoStepBound, false
+	}
+	return d.value, kv.NoStepBound, true
+}
+
+func TestBranchChildCountReadsPostComputeView(t *testing.T) {
+	t.Parallel()
+
+	prefix := []byte{0x0a}
+	compactKey := nibbles.HexToCompact(prefix)
+
+	t.Run("changed branch comes from memory", func(t *testing.T) {
+		domains := &branchChildCountDomains{value: []byte{0, 0, 0, 0b0000_0111}, ok: true}
+		reader := &testStateReader{branchData: []byte{0, 0, 0, 0b0000_0011}}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: domains,
+		}
+
+		count, err := sdc.BranchChildCount(reader, prefix)
+		require.NoError(t, err)
+		require.Equal(t, 3, count)
+		require.Equal(t, 1, domains.calls)
+		require.Equal(t, compactKey, domains.key)
+		require.Zero(t, reader.readStepSize)
+	})
+
+	t.Run("unchanged branch comes from compute reader", func(t *testing.T) {
+		domains := &branchChildCountDomains{}
+		reader := &testStateReader{branchData: []byte{0, 0, 0, 0b0000_0011}}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: domains,
+		}
+
+		count, err := sdc.BranchChildCount(reader, prefix)
+		require.NoError(t, err)
+		require.Equal(t, 2, count)
+		require.Equal(t, 1, domains.calls)
+		require.Equal(t, compactKey, domains.key)
+		require.Equal(t, kv.CommitmentDomain, reader.readDomain)
+		require.Equal(t, compactKey, reader.readKey)
+		require.Equal(t, uint64(1), reader.readStepSize)
+	})
+}
+
+func TestBranchChildCountRejectsIncompleteComputedView(t *testing.T) {
+	t.Parallel()
+
+	prefix := []byte{0x0a}
+	branch := []byte{0, 0, 0, 0b0000_0011}
+
+	t.Run("missing state reader", func(t *testing.T) {
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{},
+		}
+
+		_, err := sdc.BranchChildCount(nil, prefix)
+		require.ErrorContains(t, err, "compute state reader")
+	})
+
+	t.Run("history reader suppresses branch writes", func(t *testing.T) {
+		reader := &testStateReader{branchData: branch, withHistory: true}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{},
+		}
+
+		_, err := sdc.BranchChildCount(reader, prefix)
+		require.ErrorContains(t, err, "reader that permits branch writes")
+	})
+
+	t.Run("deferred branch updates are pending", func(t *testing.T) {
+		reader := &testStateReader{branchData: branch}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{},
+			pendingUpdate: &commitment.PendingCommitmentUpdate{},
+		}
+
+		_, err := sdc.BranchChildCount(reader, prefix)
+		require.ErrorContains(t, err, "deferred branch updates are pending")
+	})
+
+	t.Run("staged unwind bounds the fallback", func(t *testing.T) {
+		reader := &testStateReader{branchData: branch}
+		sdc := &SharedDomainsCommitmentContext{
+			sharedDomains: &branchChildCountDomains{bound: true, maxStep: 1},
+		}
+
+		_, err := sdc.BranchChildCount(reader, prefix)
+		require.ErrorContains(t, err, "staged unwind")
+	})
 }

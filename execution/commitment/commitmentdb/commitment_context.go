@@ -40,6 +40,7 @@ type sd interface {
 	AsStateGetter(tx kv.TemporalTx) execctxapi.StateGetter
 	AsStateGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
+	GetLatestFromMemory(domain kv.Domain, key []byte) (v []byte, maxStep kv.Step, ok bool)
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
 	// read), tagged with source.
@@ -391,11 +392,28 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 	}
 }
 
-// BranchChildCount returns the child count of the branch at nibblePrefix, read
-// from the in-memory commitment domain (post-compute state).
-func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
+// BranchChildCount returns a branch's child count from a complete post-compute view.
+func (sdc *SharedDomainsCommitmentContext) BranchChildCount(computeReader StateReader, nibblePrefix []byte) (int, error) {
+	if computeReader == nil {
+		return 0, errors.New("BranchChildCount requires the compute state reader")
+	}
+	if computeReader.WithHistory() {
+		return 0, errors.New("BranchChildCount requires a reader that permits branch writes")
+	}
+	if sdc.pendingUpdate != nil {
+		return 0, errors.New("BranchChildCount cannot read while deferred branch updates are pending")
+	}
+
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, _, err := sdc.sharedDomains.AsStateGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	enc, maxStep, ok := sdc.sharedDomains.GetLatestFromMemory(kv.CommitmentDomain, key)
+	if ok {
+		return commitment.BranchData(enc).ChildCount(), nil
+	}
+	if maxStep != kv.NoStepBound {
+		return 0, fmt.Errorf("BranchChildCount cannot fall through a staged unwind at step %d", maxStep)
+	}
+
+	enc, _, err := computeReader.Read(kv.CommitmentDomain, key, sdc.sharedDomains.StepSize())
 	if err != nil {
 		return 0, err
 	}
