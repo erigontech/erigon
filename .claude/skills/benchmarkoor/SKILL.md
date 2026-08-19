@@ -1,6 +1,6 @@
 ---
 name: benchmarkoor
-description: Build pristine State Actor datadirs or safely reuse pre-populated snapshots, then run repeatable benchmarkoor performance benchmarks against Erigon using protected native Linux OverlayFS. Use for first-time benchmarkoor setup, old-style bloated snapshots, Glamsterdam compute or stateful repricing suites, local client image overrides, pristine-state protection, result extraction, before/after MGas/s comparisons, and cross-client ranking tables.
+description: Run repeatable benchmarkoor performance benchmarks against Erigon on current and future devnets, using protected native Linux OverlayFS with either pristine State Actor datadirs or pre-populated snapshots. Use for generic benchmark testing, compute or stateful suites, first-time setup, local client image overrides, pristine-state protection, result extraction, before/after MGas/s comparisons, and cross-client ranking tables.
 ---
 
 # Benchmarkoor
@@ -40,20 +40,47 @@ rolling branches, fixture URLs, or image tags still identify the same code.
 
 ## Discover paths and pin revisions
 
-Define task-specific paths after inspecting the host:
+Resolve these common inputs from the current host and requested suite. They are required inputs,
+not defaults copied from a previous machine:
+
+If checkout paths were not supplied, inspect only the task-approved workspace roots, identify Git
+repositories from their remotes and contents rather than their directory names, and clone a missing
+benchmarkoor or benchmarkoor-tests repository into a new task-owned path. Use
+`git rev-parse --show-toplevel`, `git remote -v`, and the expected `go.mod` or `configs/` layout to
+validate each candidate. Do not search the host for datadirs.
 
 ```bash
-BENCHMARKOOR_SRC=/absolute/path/to/benchmarkoor
-TESTS_DIR=/absolute/path/to/benchmarkoor-tests
-ERIGON_WT=/absolute/path/to/erigon-worktree
-STATE_ROOT=/absolute/path/to/state-actor-v1-pristine
-PRISTINE_DIR="$STATE_ROOT/erigon"
-LOWER_ROOT=/absolute/path/to/state-actor-v1-lower-ro
-OVERLAY_TMP=/absolute/path/to/overlay-runtime
+BENCHMARKOOR_SRC=${BENCHMARKOOR_SRC:?set the benchmarkoor checkout}
+TESTS_DIR=${TESTS_DIR:?set the benchmarkoor-tests checkout}
+ERIGON_WT=${ERIGON_WT:?set the dedicated Erigon worktree}
+CONTEXT_NAME=${CONTEXT_NAME:?set the exact context directory name}
+SUITE_KIND=${SUITE_KIND:?set to compute or stateful}
+RUN_ROOT=${RUN_ROOT:?set a new task-owned runtime directory}
+
+BENCHMARKOOR_SRC=$(realpath -e -- "$BENCHMARKOOR_SRC")
+TESTS_DIR=$(realpath -e -- "$TESTS_DIR")
+ERIGON_WT=$(realpath -e -- "$ERIGON_WT")
+RUN_ROOT=$(realpath -m -- "$RUN_ROOT")
+LOWER_DIR="$RUN_ROOT/lower-ro"
+OVERLAY_TMP="$RUN_ROOT/overlay-runtime"
+CACHE_DIR="$RUN_ROOT/cache"
+RESULTS_DIR="$RUN_ROOT/results"
 BENCHMARKOOR_BIN="$BENCHMARKOOR_SRC/bin/benchmarkoor"
-INSTANCE_ID=erigon-bal-full
-IMAGE_TAG=erigon-local:glamsterdam-devnet-7-<short-commit>
+ERIGON_SHORT_COMMIT=$(git -C "$ERIGON_WT" rev-parse --short=12 HEAD)
+IMAGE_TAG="erigon-local:$CONTEXT_NAME-$ERIGON_SHORT_COMMIT"
 ```
+
+Use the exact context name requested by the user, such as a future devnet directory; do not select
+a similarly named `-full` or older devnet. For a State Actor build, choose a new `STATE_ROOT` and
+set `PRISTINE_DIR="$STATE_ROOT/erigon"`. For a pre-populated run, require the operator to designate
+the existing `PRISTINE_DIR`; never infer which valuable datadir is pristine by scanning the host.
+Canonicalize it with `realpath -e` before creating mounts. Require `RUN_ROOT`, cache, results,
+OverlayFS writable layers, and build contexts to be outside the pristine tree and every protected
+lower. Stop on path overlap instead of silently choosing another directory.
+
+Before selecting a base image or writing an override, follow
+[Discover the current files](references/compute-stateful-suites.md#discover-the-current-files) to
+resolve the exact runner, context globals, clients file, and instance from the checked-out revision.
 
 Verify repository state and record commits:
 
@@ -70,7 +97,7 @@ Fetch the authoritative Erigon and benchmarkoor-tests branches immediately befor
 worktree and resolving the suite, then record both commits. Re-fetch after a long run. If a remote
 tip advanced, report both hashes and describe the intervening changes; call the result "latest at
 launch," not the current tip. For benchmarkoor-tests, also compare the selected runner-config blob
-and fixture URL because the repository can advance without changing the suite that ran. Do not
+and fixture source because the repository can advance without changing the suite that ran. Do not
 silently move the worktree or relabel an already-produced result.
 
 ## Build benchmarkoor
@@ -95,6 +122,12 @@ fixed staging overlay described below; do not count that fixed upper as a per-te
 
 ## Generate a separate pristine State Actor datadir
 
+```bash
+STATE_ROOT=${STATE_ROOT:?set a new State Actor output root}
+STATE_ROOT=$(realpath -m -- "$STATE_ROOT")
+PRISTINE_DIR="$STATE_ROOT/erigon"
+```
+
 Stop if `$PRISTINE_DIR` already exists and its ownership is unclear. Choose a new path rather than
 using `--force` against a valuable snapshot.
 
@@ -103,7 +136,7 @@ Append a local override after all upstream configs:
 ```yaml
 global:
   env:
-    STATE_DIR: /absolute/path/to/state-actor-v1-pristine
+    STATE_DIR: /absolute/path/to/new-state-actor-root
 
 runner:
   container_runtime: docker
@@ -117,25 +150,45 @@ concern, and the later run-only override supplies the protected OverlayFS source
 From the benchmarkoor-tests repository, build only Erigon:
 
 ```bash
+rg --files "$TESTS_DIR/configs/datadirs/state-actor" |
+  rg '/(global|builder)\.ya?ml$' |
+  sort
+
+STATE_ACTOR_GLOBAL_CONFIG=${STATE_ACTOR_GLOBAL_CONFIG:?select the matching global config}
+STATE_ACTOR_BUILDER_CONFIG=${STATE_ACTOR_BUILDER_CONFIG:?select the matching builder config}
+STATE_ACTOR_BUILD_OVERRIDE=${STATE_ACTOR_BUILD_OVERRIDE:?set the build-only local override}
+GLOBAL_CONFIG=$(realpath -e -- "$TESTS_DIR/configs/global.yaml")
+STATE_ACTOR_GLOBAL_CONFIG=$(realpath -e -- "$STATE_ACTOR_GLOBAL_CONFIG")
+STATE_ACTOR_BUILDER_CONFIG=$(realpath -e -- "$STATE_ACTOR_BUILDER_CONFIG")
+STATE_ACTOR_BUILD_OVERRIDE=$(realpath -e -- "$STATE_ACTOR_BUILD_OVERRIDE")
+
 cd "$TESTS_DIR"
 "$BENCHMARKOOR_BIN" build \
-  --config configs/global.yaml \
-  --config configs/datadirs/state-actor/v1/global.yaml \
-  --config configs/datadirs/state-actor/v1/builder.yaml \
-  --config local-overrides.yaml \
+  --config "$GLOBAL_CONFIG" \
+  --config "$STATE_ACTOR_GLOBAL_CONFIG" \
+  --config "$STATE_ACTOR_BUILDER_CONFIG" \
+  --config "$STATE_ACTOR_BUILD_OVERRIDE" \
   --limit-state-actor-target=erigon \
   --rebuild-on-diff
 ```
 
 State Actor can exceed its final-size projection while creating `streamsort-*` intermediates and
 explicit templates. Reserve peak working headroom and trust only the completed filesystem
-measurement after temporary data is cleaned up. One completed v1 build peaked near 1,056.5 GiB and
+measurement after temporary data is cleaned up. One historical build peaked near 1,056.5 GiB and
 settled at 516.83 GiB; treat that 2.04x ratio as capacity evidence, not a bound. Wait for a successful
 exit and inspect CPU and disk activity instead of treating a quiet finalization phase or ETA as a
 failure.
 
-After success, install the read-only bind in the protection section before inspecting the completed
-tree. Once that section has set `INTEGRITY_ROOT`, inspect only through that path:
+After success, canonicalize and recheck the path boundary before installing the read-only bind:
+
+```bash
+PRISTINE_DIR=$(realpath -e -- "$PRISTINE_DIR")
+case "$RUN_ROOT/" in "$PRISTINE_DIR/"*) exit 1 ;; esac
+case "$PRISTINE_DIR/" in "$RUN_ROOT/"*) exit 1 ;; esac
+```
+
+Install the bind in the protection section before inspecting the completed tree. Once that section
+has set `INTEGRITY_ROOT`, inspect only through that path:
 
 ```bash
 jq . "$INTEGRITY_ROOT/state-actor-manifest.json"
@@ -162,9 +215,9 @@ findmnt -T "$OVERLAY_TMP"
 Do not assume OverlayFS needs a second full copy for this workload, but do not assume the upper
 will stay small either. Before the first run, treat the pristine datadir's allocated size as a
 conservative copy-up budget and require operational headroom beyond it. During the run, measure the
-actual upper layer and stop before the filesystem becomes critically full. A completed 4,773-test
-compute run observed about 1.8 GiB of upper-layer data over a 516.83 GiB lower; this is evidence that
-2x was unnecessary for that run, not a future storage bound.
+actual upper layer and stop before the filesystem becomes critically full. A historical full
+compute run observed about 1.8 GiB of upper-layer data over a 516.83 GiB lower; this is capacity
+evidence, not a bound for a different source or client revision.
 
 ## Build an image from the exact Erigon worktree
 
@@ -182,14 +235,21 @@ the unchanged container environment. Create a dedicated build-context directory 
 built `erigon` binary and this Dockerfile:
 
 ```dockerfile
-FROM ethpandaops/erigon:glamsterdam-devnet-7@sha256:<resolved-base-digest>
+ARG BASE_IMAGE
+FROM ${BASE_IMAGE}
 COPY --chown=0:0 erigon /usr/local/bin/erigon
 ```
 
-Build and verify that the image contains the byte-identical local binary:
+Set `BASE_IMAGE` to the selected context's compatible client image pinned as
+`repository@sha256:digest`; obtain it from the effective selected instance, not from a prior
+devnet. Build and verify that the image contains the byte-identical local binary:
 
 ```bash
-docker build -t "$IMAGE_TAG" /absolute/path/to/overlay-context
+BASE_IMAGE=${BASE_IMAGE:?set the selected client base image pinned by digest}
+case "$BASE_IMAGE" in *@sha256:*) ;; *) exit 2 ;; esac
+IMAGE_CONTEXT=${IMAGE_CONTEXT:?set the task-owned image build context}
+IMAGE_CONTEXT=$(realpath -e -- "$IMAGE_CONTEXT")
+docker build --build-arg BASE_IMAGE="$BASE_IMAGE" -t "$IMAGE_TAG" "$IMAGE_CONTEXT"
 docker run --rm "$IMAGE_TAG" --version
 docker run --rm --entrypoint sha256sum "$IMAGE_TAG" /usr/local/bin/erigon
 ```
@@ -204,12 +264,13 @@ Copy the complete chosen instance from the current `clients.yaml` into the last 
 change its image and pull policy. Viper replaces lists rather than merging list entries, so an
 override containing `runner.instances` replaces the entire upstream instance list.
 
-For Glamsterdam devnet 7, the override should have this shape:
+For the selected context, the override should have this shape. Replace every placeholder from the
+resolved context and the complete selected instance; do not copy values from an older devnet:
 
 ```yaml
 global:
   env:
-    STATE_DIR: /absolute/path/to/state-actor-v1-lower-ro
+    ERIGON_DATADIR_LOWER: /absolute/path/to/read-only-lower
 
 runner:
   container_runtime: docker
@@ -227,26 +288,14 @@ runner:
   client:
     datadirs:
       erigon:
-        source_dir: ${STATE_DIR}/erigon
+        source_dir: ${ERIGON_DATADIR_LOWER}
         method: overlayfs
   instances:
-    - id: erigon-bal-full
+    - id: <selected-instance-id>
       client: erigon
-      image: erigon-local:glamsterdam-devnet-7-<short-commit>
+      image: <local-image-tag>
       pull_policy: never
-      metadata:
-        labels:
-          bal-mode: full
-      extra_args:
-        - --override.amsterdam=1
-        - --exec.no-merge=true
-        - --exec.no-prune=true
-        - --exec.no-background-maintenance
-        - --experimental.parallel-commitment
-      bootstrap_fcu:
-        enabled: true
-        max_retries: 120
-        backoff: 30s
+      # Copy every other field from the selected current instance.
 ```
 
 Re-copy the instance when upstream `clients.yaml` changes; do not let this example silently erase
@@ -272,11 +321,11 @@ Put a kernel-enforced read-only bind mount in front of the pristine datadir rath
 the original path directly:
 
 ```bash
-sudo mkdir -p "$LOWER_ROOT/erigon" "$OVERLAY_TMP"
-sudo mount --bind "$PRISTINE_DIR" "$LOWER_ROOT/erigon"
-sudo mount -o remount,bind,ro "$LOWER_ROOT/erigon"
-findmnt -n -o SOURCE,OPTIONS "$LOWER_ROOT/erigon"
-INTEGRITY_ROOT="$LOWER_ROOT/erigon"
+sudo mkdir -p "$LOWER_DIR" "$OVERLAY_TMP"
+sudo mount --bind "$PRISTINE_DIR" "$LOWER_DIR"
+sudo mount -o remount,bind,ro "$LOWER_DIR"
+findmnt -n -o SOURCE,OPTIONS "$LOWER_DIR"
+INTEGRITY_ROOT="$LOWER_DIR"
 ```
 
 Require `ro` as a distinct mount option before continuing. Record allocated/apparent size,
@@ -319,11 +368,11 @@ mkdir "$PROBE_ROOT/upper" "$PROBE_ROOT/work" "$PROBE_ROOT/merged"
   set -euo pipefail
   trap 'sudo umount "$PROBE_ROOT/merged" 2>/dev/null || true' EXIT
   sudo mount -t overlay overlay \
-    -o "lowerdir=$LOWER_ROOT/erigon,upperdir=$PROBE_ROOT/upper,workdir=$PROBE_ROOT/work" \
+    -o "lowerdir=$LOWER_DIR,upperdir=$PROBE_ROOT/upper,workdir=$PROBE_ROOT/work" \
     "$PROBE_ROOT/merged"
   sudo touch "$PROBE_ROOT/merged/$CANARY"
   test -e "$PROBE_ROOT/upper/$CANARY"
-  test ! -e "$LOWER_ROOT/erigon/$CANARY"
+  test ! -e "$LOWER_DIR/$CANARY"
   sudo umount "$PROBE_ROOT/merged"
   trap - EXIT
 )
@@ -356,9 +405,9 @@ pass. Never unmount or remove the pristine directory itself.
 ## Reuse a pre-populated snapshot
 
 Read [Pre-populated snapshot workflow](references/compute-stateful-suites.md#pre-populated-snapshot-workflow)
-before using an existing bloated or pruned datadir. On the jochemnet benchmark host,
-`/home/erigon/jochemnet/erigon_snapshot_pruned` is designated pristine: never configure that path
-directly, run Erigon against it, or use it as an OverlayFS upper or work directory.
+before using an existing bloated or pruned datadir. Require its path to be designated explicitly,
+then assign it to `PRISTINE_DIR`. Never configure that raw path directly, run Erigon against it, or
+use it as an OverlayFS upper or work directory.
 
 Protect the original with the same read-only bind, canary, fingerprint, size, and critical-hash
 checks used for State Actor. Treat download sidecars as hints; verify the live block, hash, and state
@@ -399,8 +448,8 @@ monitor one fixed staging overlay plus at most one writable per-test overlay.
 
 Read [Compute and stateful suites](references/compute-stateful-suites.md) before selecting or
 filtering a suite. It defines how to discover the current runner files, distinguish the adjacent
-`glamsterdam-devnet-7-full` context, validate fixture provenance, assemble the ordered config stack,
-and check the completed result.
+contexts with similar names, validate fixture provenance, assemble the ordered config stack, and
+check the completed result.
 
 The selected runner's `runner.benchmark.tests.source.eest_fixtures` map is authoritative for where
 fixtures come from. A missing/empty `runner.benchmark.tests.filter` selects every fixture in that
@@ -416,7 +465,7 @@ The essential runtime distinction is:
   previous container and overlay must be released before the next one.
 
 Never infer the suite from `fixtures_subdir`: both can say `blockchain_tests_stateful_engine`.
-Require the selected file's `test-type`, suite name, fixture URL, and rollback strategy to agree.
+Require the selected file's `test-type`, suite name, fixture source, and rollback strategy to agree.
 Run benchmarkoor as root or through an approved privileged wrapper because native OverlayFS needs
 mount operations; Docker-group membership alone is insufficient.
 
@@ -507,7 +556,8 @@ Report:
 - pristine allocated/apparent sizes and remaining filesystem space;
 - protected lower path, disposable upper location, and observed upper-layer peak;
 - exact before/after pristine fingerprint and read-only lower-mount proof;
-- selected compute/stateful runner, fixture URL, suite filter/test count, run ID, pass/fail count,
+- selected compute/stateful runner, fixture source and digest, suite filter/test count, run ID,
+  pass/fail count,
   and results path;
 - effective datadir method and published `data-disk-type` label;
 - effective memory bytes, swap policy, CPU IDs, physical-core mapping, and frequency-control result;

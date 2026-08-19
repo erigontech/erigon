@@ -16,36 +16,61 @@ compute or stateful suite.
 
 ## Discover the current files
 
-Search the checked-out `benchmarkoor-tests` revision instead of assuming an old path still exists:
+Search the checked-out `benchmarkoor-tests` revision instead of assuming a context version,
+dataset, or devnet path from an earlier run:
 
 ```bash
-CONTEXTS_DIR="$TESTS_DIR/configs/contexts/repricing/v1"
-rg --files "$CONTEXTS_DIR" |
-  rg '/test-source\.(compute|stateful)\.runner\.ya?ml$' |
-  sort
+CONTEXT_NAME=${CONTEXT_NAME:?set the exact requested context directory name}
+SUITE_KIND=${SUITE_KIND:?set to compute or stateful}
+case "$CONTEXT_NAME" in ''|*[!A-Za-z0-9._-]*) exit 2 ;; esac
+case "$SUITE_KIND" in compute|stateful) ;; *) exit 2 ;; esac
 
-rg -l --glob 'test-source.*.runner.yaml' \
-  'name:\s*state-actor-glamsterdam-devnet-7-(compute|stateful)\s*$' \
-  "$CONTEXTS_DIR"
+CONTEXTS_ROOT="$TESTS_DIR/configs/contexts"
+mapfile -t SOURCE_CANDIDATES < <(
+  while IFS= read -r candidate; do
+    test "$(basename -- "$(dirname -- "$candidate")")" = "$CONTEXT_NAME" || continue
+    printf '%s\n' "$candidate"
+  done < <(
+    rg --files "$CONTEXTS_ROOT" \
+      -g "test-source.${SUITE_KIND}.runner.yaml" \
+      -g "test-source.${SUITE_KIND}.runner.yml"
+  ) | sort
+)
+test "${#SOURCE_CANDIDATES[@]}" -gt 0 || exit 1
+printf '%s\n' "${SOURCE_CANDIDATES[@]}"
+
+SUITE_RUNNER_CONFIG=${SUITE_RUNNER_CONFIG:?select one candidate after inspecting it}
+SUITE_RUNNER_CONFIG=$(realpath -e -- "$SUITE_RUNNER_CONFIG")
+SOURCE_MATCH=false
+for candidate in "${SOURCE_CANDIDATES[@]}"; do
+  if test "$(realpath -e -- "$candidate")" = "$SUITE_RUNNER_CONFIG"; then
+    SOURCE_MATCH=true
+    break
+  fi
+done
+test "$SOURCE_MATCH" = true || exit 1
+
+CONTEXT_DIR=$(dirname -- "$SUITE_RUNNER_CONFIG")
+test "$(basename -- "$CONTEXT_DIR")" = "$CONTEXT_NAME" || exit 1
+CONTEXT_GLOBAL_CONFIG="$CONTEXT_DIR/global.yaml"
+CLIENTS_CONFIG="$CONTEXT_DIR/clients.yaml"
+
+test -f "$CONTEXT_GLOBAL_CONFIG" || exit 1
+test -f "$CLIENTS_CONFIG" || exit 1
+
+yq -r '.runner.instances[] | [.id, .client, .image] | @tsv' "$CLIENTS_CONFIG"
+INSTANCE_ID=${INSTANCE_ID:?select one listed Erigon instance ID}
+test "$(INSTANCE_ID="$INSTANCE_ID" yq -r \
+  '[.runner.instances[] | select(.id == strenv(INSTANCE_ID) and .client == "erigon")] | length' \
+  "$CLIENTS_CONFIG")" -eq 1 || exit 1
 ```
 
-For the non-`full` Glamsterdam devnet 7 suites, resolve and require these files:
-
-```bash
-CONTEXT_DIR="$CONTEXTS_DIR/glamsterdam-devnet-7"
-COMPUTE_CONFIG="$CONTEXT_DIR/test-source.compute.runner.yaml"
-STATEFUL_CONFIG="$CONTEXT_DIR/test-source.stateful.runner.yaml"
-
-test -f "$COMPUTE_CONFIG"
-test -f "$STATEFUL_CONFIG"
-test -f "$CONTEXT_DIR/global.yaml"
-test -f "$CONTEXT_DIR/clients.yaml"
-```
-
-The sibling `glamsterdam-devnet-7-full` directory is a different fixture set. Select it only when
-the user explicitly requests that context. This context name is independent of running all versus
-a filtered subset of its fixtures. Files ending in `.builder.yaml` build fixture archives; use
-`.runner.yaml` to run downloaded fixtures locally.
+Multiple candidates can share the same context name under different dataset trees. Inspect each
+candidate's suite name, labels, fixture source, rollback strategy, context global, and clients file;
+do not select by shortest path. A sibling such as `${CONTEXT_NAME}-full` is a different context and
+must be selected only when requested. The context name is independent of running all versus a
+filtered subset. Files ending in `.builder.yaml` build fixture archives; use `.runner.yaml` to run
+downloaded fixtures locally. A new context requires a new `CONTEXT_NAME`, not an edit to this skill.
 
 ## Distinguish the suites
 
@@ -53,40 +78,27 @@ a filtered subset of its fixtures. Files ending in `.builder.yaml` build fixture
 |---|---|---|
 | Runner file | `test-source.compute.runner.yaml` | `test-source.stateful.runner.yaml` |
 | `test-type` label | `compute` | `stateful` |
-| Fixture URL | contains `-compute-` | contains `-stateful-` |
+| Fixture provenance | selected compute build/source | selected stateful build/source |
 | Expected rollback | `none` | `container-recreate` |
 | Typical test path | `benchmark/compute/...` | `benchmark/stateful/bloatnet/...` |
 | Datadir lifetime | one disposable overlay for the run | fresh container and overlay per fixture |
-
-At `benchmarkoor-tests` commit `b9ddbab85b44fd8327940bcba9a8370798e064df`, successful local
-runs produced these checkpoints:
-
-| Suite | Tests | Suite hash |
-|---|---:|---|
-| Compute | 4,773 | `3c6dc791050b116d` |
-| Stateful | 1,461 | `3f6a0898955dff4f` |
-
-Treat those counts and hashes as revision-specific evidence, not permanent constants.
 
 ## Validate the selection
 
 Inspect the resolved runner file before starting:
 
 ```bash
-SUITE_KIND=${SUITE_KIND:?set to compute or stateful}
-case "$SUITE_KIND" in compute|stateful) ;; *) exit 2 ;; esac
-SUITE_RUNNER_CONFIG="$CONTEXT_DIR/test-source.$SUITE_KIND.runner.yaml"
-
-rg -n 'name:|test-type:|fixtures_url:|fixtures_subdir:|rollback_strategy:' \
-  "$SUITE_RUNNER_CONFIG"
+yq '.runner.benchmark.tests' "$SUITE_RUNNER_CONFIG"
+yq -r '.runner.client.config.rollback_strategy // ""' "$SUITE_RUNNER_CONFIG"
 git -C "$TESTS_DIR" rev-parse HEAD
 git -C "$TESTS_DIR" status --short --branch
 ```
 
-Require all five fields to describe the requested suite. The shared
-`blockchain_tests_stateful_engine` fixtures subdirectory does not distinguish compute from
+Require the suite name, `test-type`, fixture source map, and rollback strategy to describe the
+requested suite. Do not classify a future source from substrings in its URL. The shared
+`blockchain_tests_stateful_engine` fixtures subdirectory also does not distinguish compute from
 stateful. If the fixture archive is cached, the run log may omit a download line; retain the
-selected YAML blob and URL as provenance.
+selected YAML blob and resolved source as provenance.
 
 For a subset, put `runner.benchmark.tests.filter` in the last local override. EEST names can carry
 a leading `tests/` while filtering even though persisted result keys omit it, so anchor local
@@ -167,29 +179,40 @@ Never present a filtered count or suite hash as the full artifact.
 Check the read-only lower, image, free space, and residual state first:
 
 ```bash
-findmnt -n -o SOURCE,OPTIONS "$LOWER_ROOT/erigon"
+findmnt -n -o SOURCE,OPTIONS "$LOWER_DIR"
 findmnt -rn -t overlay | rg "$OVERLAY_TMP|benchmarkoor-overlay" || true
 docker image inspect "$IMAGE_TAG"
 docker ps --format '{{.Names}} {{.Image}} {{.Status}}'
 df -h "$OVERLAY_TMP"
 ```
 
-Require `ro` in the lower mount options and no unexplained overlay or client container. Preserve
-this config order and keep the local override last:
+Require `ro` in the lower mount options and no unexplained overlay or client container. For a
+State Actor run, resolve these files from the checked-out revision, preserve this config order, and
+keep the local override last:
 
 ```bash
+RESOURCE_LIMIT_CONFIG=${RESOURCE_LIMIT_CONFIG:?set the requested resource-limit config}
+DATADIR_GLOBAL_CONFIG=${DATADIR_GLOBAL_CONFIG:?set the State Actor datadir global config}
+DATADIR_RUNNER_CONFIG=${DATADIR_RUNNER_CONFIG:?set the State Actor datadir runner config}
+LOCAL_RUN_OVERRIDE=${LOCAL_RUN_OVERRIDE:?set the complete local override}
+GLOBAL_CONFIG=$(realpath -e -- "$TESTS_DIR/configs/global.yaml")
+RESOURCE_LIMIT_CONFIG=$(realpath -e -- "$RESOURCE_LIMIT_CONFIG")
+DATADIR_GLOBAL_CONFIG=$(realpath -e -- "$DATADIR_GLOBAL_CONFIG")
+DATADIR_RUNNER_CONFIG=$(realpath -e -- "$DATADIR_RUNNER_CONFIG")
+LOCAL_RUN_OVERRIDE=$(realpath -e -- "$LOCAL_RUN_OVERRIDE")
+
 cd "$TESTS_DIR"
 sudo -n "$BENCHMARKOOR_BIN" run \
-  --config configs/global.yaml \
-  --config configs/resource-limits-eip-7870-fullnode.yaml \
-  --config configs/datadirs/state-actor/v1/global.yaml \
-  --config configs/datadirs/state-actor/v1/runner.yaml \
-  --config "$CONTEXT_DIR/global.yaml" \
+  --config "$GLOBAL_CONFIG" \
+  --config "$RESOURCE_LIMIT_CONFIG" \
+  --config "$DATADIR_GLOBAL_CONFIG" \
+  --config "$DATADIR_RUNNER_CONFIG" \
+  --config "$CONTEXT_GLOBAL_CONFIG" \
   --config "$SUITE_RUNNER_CONFIG" \
-  --config "$CONTEXT_DIR/clients.yaml" \
-  --config local-run-overrides.yaml \
+  --config "$CLIENTS_CONFIG" \
+  --config "$LOCAL_RUN_OVERRIDE" \
   --limit-instance-client=erigon \
-  --limit-instance-id=erigon-bal-full
+  --limit-instance-id="$INSTANCE_ID"
 ```
 
 For stateful, confirm the Benchmarkoor revision eagerly removes each previous container and
@@ -231,11 +254,13 @@ broad cleanup can destroy the advanced baseline.
 ## Pre-populated snapshot workflow
 
 Use this variant when the suite starts from an existing bloated, pruned, or otherwise pre-populated
-datadir instead of State Actor. Resolve the authoritative hosted run and record its benchmarkoor and
+datadir instead of State Actor. Resolve the current authoritative configuration at task time from
+the checked-out repositories and, when supplied, the hosted run. Record its benchmarkoor and
 benchmarkoor-tests commits, image digest and embedded client commit, ordered configs, genesis, fork
-override, arguments, fixture URL and digest, filter, rollback strategy, resource limits, base head,
-and pre-run end head. Keep the hosted API token in protected config or environment; never print or
-persist it.
+override, arguments, fixture source and digest, filter, rollback strategy, resource limits, base
+head, and pre-run end head in the run notes. Do not embed a hosted run URL, suite hash, fixture URL,
+or test count in this skill: those values are revision-specific and must be rediscovered. Keep any
+hosted API token in protected config or environment; never print or persist it.
 
 An old hosted run may use `schelk`. Match its dataset, fixtures, client, and limits while replacing
 only the storage mechanism with OverlayFS. Check historical arguments against the current Erigon
@@ -243,52 +268,76 @@ source and image help so removed flags do not survive in the local override.
 
 ### Select the dataset context
 
-Resolve the pre-populated dataset's context independently of the State Actor `CONTEXT_DIR` defined
-earlier. The dataset context supplies fork-schedule variables and the matching clients; never reuse
-the generic context or mix files from the two trees. For the jochemnet Glamsterdam devnet 7 run:
+Use the source, context, and clients selected by the discovery section. Resolve the matching
+pre-populated datadir global from the authoritative ordered config stack; do not substitute the
+State Actor datadir configs or choose a datadir merely because its directory name looks familiar:
 
 ```bash
-DATASET_DATADIR_GLOBAL="$TESTS_DIR/configs/datadirs/jochemnet/v1/global.yaml"
-DATASET_CONTEXT_DIR="$TESTS_DIR/configs/contexts/repricing/jochemnet/v1/glamsterdam-devnet-7"
-DATASET_CONTEXT_GLOBAL="$DATASET_CONTEXT_DIR/global.yaml"
-DATASET_CLIENTS_CONFIG="$DATASET_CONTEXT_DIR/clients.yaml"
-DATASET_COMPUTE_CONFIG="$DATASET_CONTEXT_DIR/test-source.compute.runner.yaml"
-DATASET_STATEFUL_CONFIG="$DATASET_CONTEXT_DIR/test-source.stateful.runner.yaml"
+DATADIRS_ROOT="$TESTS_DIR/configs/datadirs"
+mapfile -t DATADIR_GLOBAL_CANDIDATES < <(
+  rg --files "$DATADIRS_ROOT" | rg '/global\.ya?ml$' | sort
+)
+printf '%s\n' "${DATADIR_GLOBAL_CANDIDATES[@]}"
+
+DATASET_DATADIR_GLOBAL=${DATASET_DATADIR_GLOBAL:?set from the authoritative config stack}
+DATASET_DATADIR_GLOBAL=$(realpath -e -- "$DATASET_DATADIR_GLOBAL")
+DATADIR_MATCH=false
+for candidate in "${DATADIR_GLOBAL_CANDIDATES[@]}"; do
+  if test "$(realpath -e -- "$candidate")" = "$DATASET_DATADIR_GLOBAL"; then
+    DATADIR_MATCH=true
+    break
+  fi
+done
+test "$DATADIR_MATCH" = true || exit 1
+
+DATASET_CONTEXT_GLOBAL="$CONTEXT_GLOBAL_CONFIG"
+DATASET_CLIENTS_CONFIG="$CLIENTS_CONFIG"
+DATASET_SOURCE_CONFIG="$SUITE_RUNNER_CONFIG"
 
 test -f "$DATASET_DATADIR_GLOBAL" || exit 1
 test -f "$DATASET_CONTEXT_GLOBAL" || exit 1
 test -f "$DATASET_CLIENTS_CONFIG" || exit 1
-
-case "${SUITE_KIND:?set to compute or stateful}" in
-  compute) DATASET_SOURCE_CONFIG="$DATASET_COMPUTE_CONFIG" ;;
-  stateful) DATASET_SOURCE_CONFIG="$DATASET_STATEFUL_CONFIG" ;;
-  *) exit 2 ;;
-esac
 test -f "$DATASET_SOURCE_CONFIG" || exit 1
 
-EXPECTED_AMSTERDAM_ACTIVATION_TS=$(yq -r \
-  '.global.env.AMSTERDAM_ACTIVATION_TS // ""' "$DATASET_CONTEXT_GLOBAL")
-test -n "$EXPECTED_AMSTERDAM_ACTIVATION_TS" || exit 1
-rg -n 'override\.amsterdam=.*AMSTERDAM_ACTIVATION_TS' \
-  "$DATASET_CLIENTS_CONFIG" || exit 1
+SOURCE_CONFIG_YAML=$(yq '.' "$DATASET_SOURCE_CONFIG") || exit 1
+SELECTED_INSTANCE_YAML=$(INSTANCE_ID="$INSTANCE_ID" yq \
+  '.runner.instances[] | select(.id == strenv(INSTANCE_ID) and .client == "erigon")' \
+  "$DATASET_CLIENTS_CONFIG") || exit 1
+printf '%s\n%s\n' "$SOURCE_CONFIG_YAML" "$SELECTED_INSTANCE_YAML" |
+  awk '{
+    while (match($0, /\$\{[A-Za-z_][A-Za-z0-9_]*\}/)) {
+      print substr($0, RSTART, RLENGTH)
+      $0 = substr($0, RSTART + RLENGTH)
+    }
+  }' |
+  sort -u
 ```
 
-Resolve equivalent paths from the authoritative hosted run for another dataset or fork. Require
-every variable referenced by the selected source and client instance to be defined by an earlier
-config in both the staging and measured stacks. For jochemnet, confirm the persisted Erigon command
-contains `--override.amsterdam=$EXPECTED_AMSTERDAM_ACTIVATION_TS`; an empty or different value is a
-hard failure.
+Require every listed variable used by the selected source and instance to be defined by an earlier
+global config in both staging and measured stacks. Resolve the selected fork activation from those
+globals and client arguments, whatever the fork or variable name is. After launch, require the
+persisted Erigon command to contain the resolved fork override exactly; an empty, inherited from a
+different context, or otherwise different value is a hard failure.
 
 ### Protect and identify the original
 
-For the jochemnet host, use these roles:
+Require the operator-designated pristine datadir and a task-owned runtime root, then canonicalize
+them. The runtime root may have any name and may be on another filesystem, but it must not contain
+or be contained by the pristine directory:
 
 ```bash
-PRISTINE_DIR=/home/erigon/jochemnet/erigon_snapshot_pruned
-RUN_ROOT=/absolute/path/to/benchmarkoor-prepopulated-run
-ORIGINAL_LOWER="$RUN_ROOT/lower-ro/erigon"
-ADVANCED_LOWER="$RUN_ROOT/advanced-lower-ro/erigon"
+PRISTINE_DIR=${PRISTINE_DIR:?operator must designate the pristine datadir}
+RUN_ROOT=${RUN_ROOT:?set a task-owned runtime root}
+PRISTINE_DIR=$(realpath -e -- "$PRISTINE_DIR")
+RUN_ROOT=$(realpath -m -- "$RUN_ROOT")
+
+case "$RUN_ROOT/" in "$PRISTINE_DIR/"*) exit 1 ;; esac
+case "$PRISTINE_DIR/" in "$RUN_ROOT/"*) exit 1 ;; esac
+
+ORIGINAL_LOWER="$RUN_ROOT/lower-ro"
+ADVANCED_LOWER="$RUN_ROOT/advanced-lower-ro"
 OVERLAY_TMP="$RUN_ROOT/overlay-runtime"
+LOWER_DIR="$ORIGINAL_LOWER"
 ```
 
 Apply the main skill's read-only bind, probe-overlay canary, sizes, full-tree metadata fingerprint,
@@ -307,9 +356,9 @@ test ! -e "$INTEGRITY_ROOT/$READONLY_CANARY"
 test ! -e "$INTEGRITY_ROOT/$READONLY_CANARY"
 ```
 
-For this dataset, include stable sidecars and lock files plus a full hash of `chaindata/mdbx.dat`
-when feasible; the State Actor filenames in the main skill need not exist. Keep every upper, work,
-cache, result, and probe path outside the pristine and lower trees.
+For an Erigon pre-populated datadir, include stable sidecars and lock files plus a full hash of
+`chaindata/mdbx.dat` when feasible; the State Actor filenames in the main skill need not exist.
+Keep every upper, work, cache, result, and probe path outside the pristine and lower trees.
 
 The bind protects accesses through `ORIGINAL_LOWER`; the raw pristine path is still writable on the
 host. Before starting, require no process has an open file below `PRISTINE_DIR`, no container uses
@@ -390,7 +439,7 @@ OverlayFS settings from an earlier local map:
 ```yaml
 global:
   env:
-    ERIGON_SNAPSHOT_DIR: /absolute/path/to/lower-ro/erigon
+    ERIGON_SNAPSHOT_DIR: /absolute/path/to/read-only-lower
   directories:
     cachedir: /absolute/path/to/task-owned-cache
 
@@ -438,7 +487,7 @@ compute: configs/global.yaml
          -> resource-limit config
          -> $DATASET_DATADIR_GLOBAL
          -> $DATASET_CONTEXT_GLOBAL
-         -> $DATASET_COMPUTE_CONFIG (complete source, including pre_runs)
+         -> $DATASET_SOURCE_CONFIG (complete compute source, including pre_runs)
          -> $DATASET_CLIENTS_CONFIG
          -> complete local Docker/OverlayFS config using ORIGINAL_LOWER
          -> complete local compute instance and optional exact-filter override
@@ -481,9 +530,8 @@ lower and replay the bundle for every fixture. Build an immutable advanced basel
    successful replay to the expected end block/hash/root, resolve the exact retained container and
    logged data mount, then set
    `STAGING_MERGED=$(verify_task_overlay "$CONTAINER_ID" "$ORIGINAL_LOWER")`. Require the logged
-   data mount to resolve to `STAGING_MERGED`. From the logged run directory, require the persisted
-   Erigon command to contain
-   `--override.amsterdam=$EXPECTED_AMSTERDAM_ACTIVATION_TS` exactly.
+   data mount to resolve to `STAGING_MERGED`. From the logged run directory, require every persisted
+   fork override and client argument to equal the values resolved from the selected context.
 3. Stop that exact container gracefully and wait until it has exited. This closes container stdio
    so benchmarkoor's following log stream can reach EOF. Record its stopped state and run `sync`,
    but do not remove the container or unmount its overlay yet.
@@ -502,20 +550,21 @@ After creating `ADVANCED_LOWER`, never address the writable staging-merged alias
 benchmark command; use it only to verify the bind and later identify the exact cleanup target.
 
 Create a field-for-field copy of the selected test-source map and remove only `pre_runs`. Preserve
-its name, labels, fixture URL, fixture subdirectory, rollback strategy, runner settings, and any
-other source fields in that copy. Do not try to delete the inherited key with a partial later map.
+its name, labels, complete fixture source, rollback strategy, runner settings, and every other
+source field in that copy. Do not try to delete the inherited key with a partial later map.
 Deliberately replace its environment-specific runtime and storage-label values with the final local
 Docker/OverlayFS config described below. During measured runs, use this complete local source and
 `ADVANCED_LOWER`, and restore the resource-limit config.
 
-Do not reuse the earlier State Actor command's `CONTEXT_DIR`, `SUITE_RUNNER_CONFIG`, or clients.
+Do not reuse context, source, client, or datadir variables from a previous State Actor task.
 Replace both State Actor datadir configs with `DATASET_DATADIR_GLOBAL`, use
 `DATASET_CONTEXT_GLOBAL`, and load `DATASET_CLIENTS_CONFIG`. Omit the hosted datadir runner config.
-Use `DATASET_STATEFUL_CONFIG` for staging and its complete no-pre-runs copy for an advanced
-baseline. After the dataset context, source, and clients files, load the complete local
-Docker/OverlayFS config, then the local instance and optional exact-filter overrides. The final
-local config must reassert `container_runtime: docker`, the complete OverlayFS datadir map, and
-`data-disk-type: overlayfs`.
+Use `DATASET_SOURCE_CONFIG` for staging. Save its complete no-pre-runs copy at a task-owned path as
+`DATASET_NO_PRERUN_CONFIG`; canonicalize that variable to the new file below `RUN_ROOT`, and never
+edit the checked-in source. After the dataset context, source, and clients files, load the complete
+local Docker/OverlayFS config, then the local instance and optional exact-filter overrides. The
+final local config must reassert `container_runtime: docker`, the complete OverlayFS datadir map,
+and `data-disk-type: overlayfs`.
 
 The two stateful config stacks are therefore:
 
@@ -523,7 +572,7 @@ The two stateful config stacks are therefore:
 staging: configs/global.yaml
          -> $DATASET_DATADIR_GLOBAL
          -> $DATASET_CONTEXT_GLOBAL
-         -> $DATASET_STATEFUL_CONFIG (complete source with pre_runs)
+         -> $DATASET_SOURCE_CONFIG (complete stateful source with pre_runs)
          -> $DATASET_CLIENTS_CONFIG
          -> complete local Docker/OverlayFS config using ORIGINAL_LOWER
          -> complete local staging instance
@@ -532,7 +581,7 @@ measured: configs/global.yaml
           -> resource-limit config
           -> $DATASET_DATADIR_GLOBAL
           -> $DATASET_CONTEXT_GLOBAL
-          -> complete no-pre-runs copy of $DATASET_STATEFUL_CONFIG
+          -> $DATASET_NO_PRERUN_CONFIG
           -> $DATASET_CLIENTS_CONFIG
           -> complete local Docker/OverlayFS config using ADVANCED_LOWER
           -> complete local measured instance and optional exact-filter override
@@ -613,21 +662,6 @@ then wait for or stop its exact benchmarkoor process. After all have exited, unm
 order above, discard only the verified task run root, and restage from `ORIGINAL_LOWER`; never guess
 with a broad mount, process, or cleanup target.
 
-`/home/erigon/jochemnet/erigon_snapshot_pruned` is designated pristine. At benchmarkoor-tests
-commit `6805e129a92d368f201f41197c80c5208d7940dc` and benchmarkoor
-`v0.1.0-201-g1e0b9d4`, the hosted
-[`glamsterdam-devnet-7` compute run](https://benchmarkoor.core.ethpandaops.io/runs/1787170961_518a2c68_erigon-bal-full)
-used `rollback_strategy: none`, resolved suite hash `97abdb9608284004`, and passed all 4,884 cases
-from the
-[jochemnet compute GitHub release asset](https://github.com/ethpandaops/benchmarkoor-tests/releases/download/eest-payloads-jochemnet-v1-amsterdam-compute-46d56762-4525339a-r2/eest-payloads-jochemnet-v1-amsterdam-compute-geth.tar.gz).
-Its schelk datadir was already at pre-run end block 24,410,463, hash
-`0x4525339a4634947f0b81d111728a7252542f21419f26d7f0eee8f76a36102c4e`, and state root
-`0xd46c2706dfd14d0f45bda68fd8d5277b31e2f072e7a0096f78a50aa388ac3c6a`, so benchmarkoor verified
-the tuple and skipped the 10,062,313,486-byte pre-run. A raw local snapshot at block 24,402,727 must
-instead replay that pre-run once inside its disposable compute overlay.
-
-A validated `glamsterdam-devnet-7` stateful run downloaded its 1,463-case archive from the
-[jochemnet stateful GitHub release asset](https://github.com/ethpandaops/benchmarkoor-tests/releases/download/eest-payloads-jochemnet-v1-amsterdam-stateful-d9ad55b3-20260807-000744/eest-payloads-jochemnet-v1-amsterdam-stateful-geth.tar.gz),
-found raw head 24,402,727, staged to head 24,410,463, and selected 18 `ether_transfers` fixtures at
-300M gas with an optional filter. Treat that URL, count, heads, and filtered result as
-revision-specific evidence and repeat every verification.
+Do not preserve historical run IDs, suite hashes, fixture URLs, test counts, block tuples, context
+names, or host paths as defaults in this reference. Discover them from the selected revision and
+effective run configuration each time, verify them, and include them only in that run's handoff.
