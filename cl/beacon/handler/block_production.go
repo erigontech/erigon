@@ -290,38 +290,63 @@ func (a *ApiHandler) expectedWithdrawals(
 	return cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(consensusWithdrawals), nil
 }
 
-// feeRecipientForProposal resolves the fee recipient, warning once per proposer when there is none:
-// building with the zero address gives that block's fees away.
 func (a *ApiHandler) feeRecipientForProposal(proposerIndex, targetSlot uint64) common.Address {
 	feeRecipient, registered := a.validatorParams.GetFeeRecipient(proposerIndex)
 	if registered {
 		return feeRecipient
 	}
-	// Claimed in one step, so requests for the same slot arriving together do not each decide they
-	// are the first. Without somewhere to remember them, reporting every time beats reporting never.
-	firstTime := true
-	if a.unregisteredProposers != nil {
-		alreadyWarned, _ := a.unregisteredProposers.ContainsOrAdd(proposerIndex, struct{}{})
-		firstTime = !alreadyWarned
+	shouldWarn := true
+	if a.warnedUnregisteredProposers != nil {
+		alreadyWarned, _ := a.warnedUnregisteredProposers.ContainsOrAdd(proposerIndex, struct{}{})
+		shouldWarn = !alreadyWarned
 	}
-	if firstTime {
+	if shouldWarn {
 		log.Warn("BlockProduction: no fee recipient from prepare_beacon_proposer, using zero address",
 			"proposerIndex", proposerIndex, "slot", targetSlot)
 	}
 	return common.Address{}
 }
 
+type productionErrorSeverity uint8
+
+const (
+	productionErrorNone productionErrorSeverity = iota
+	productionErrorCanceled
+	productionErrorUnknownPayload
+	productionErrorActionable
+)
+
+func classifyProductionError(err error) productionErrorSeverity {
+	switch {
+	case err == nil:
+		return productionErrorNone
+	case errors.Is(err, context.Canceled):
+		return productionErrorCanceled
+	case execution_client.IsUnknownPayloadError(err):
+		return productionErrorUnknownPayload
+	default:
+		return productionErrorActionable
+	}
+}
+
+func mostActionableProductionError(first, second error) error {
+	if classifyProductionError(second) > classifyProductionError(first) {
+		return second
+	}
+	return first
+}
+
 // reportProductionFailure is the one place a failed production is recorded, so every exit through
 // produceBlock is covered exactly once. A caller that has already gone is not something anyone can
 // act on; an execution layer that stopped answering still is, and that arrives as a deadline.
 func reportProductionFailure(err error, targetSlot uint64) {
-	switch {
-	case err == nil:
-	case errors.Is(err, context.Canceled):
+	switch classifyProductionError(err) {
+	case productionErrorNone:
+	case productionErrorCanceled:
 		log.Debug("BlockProduction: abandoned by its caller", "err", err, "slot", targetSlot)
-	case execution_client.IsUnknownPayloadError(err):
+	case productionErrorUnknownPayload:
 		log.Warn("BlockProduction: execution payload is unknown", "err", err, "slot", targetSlot)
-	default:
+	case productionErrorActionable:
 		log.Error("BlockProduction: failed to produce block", "err", err, "slot", targetSlot)
 	}
 }
@@ -359,18 +384,12 @@ func pollAssembledPayload(
 		firstErr error
 	)
 	for {
-		// Nothing is waiting for this payload any more, and starting another collection would stop
-		// the builder and could fail for reasons of its own - contention, most likely - which would
-		// then be reported against a slot nobody is waiting for.
 		if ctx.Err() != nil {
 			return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
 		}
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
 		attempts++
-		if execution_client.IsUnknownPayloadError(err) {
-			return nil, nil, nil, nil, err
-		}
 		if err != nil {
 			// The caller's own cancellation comes back through get. That is the slot ending, not
 			// the execution layer failing, and it is not worth reporting on a healthy node. A
@@ -380,6 +399,9 @@ func pollAssembledPayload(
 				if firstErr == nil {
 					firstErr = err
 				}
+			}
+			if execution_client.IsUnknownPayloadError(err) {
+				return nil, nil, nil, nil, terminalCause(ctx, attempts, failures, firstErr)
 			}
 		} else if payload != nil {
 			return payload, bundles, requestsBundle, blockValue, nil
@@ -641,7 +663,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	log.Info("[Beacon API] Found BeaconState object for block production", "slot", targetSlot, "duration", time.Since(start))
 	block, err := a.produceBlock(ctx, builderBoostFactor, baseBlockSlot, baseBlockRoot, baseState, targetSlot, randaoReveal, graffiti)
 	if err != nil {
-		// produceBlock owns this record; repeating it here made one failure two.
 		return nil, err
 	}
 
@@ -1353,11 +1374,8 @@ func (a *ApiHandler) produceBeaconBody(
 		})
 	}
 	wg.Wait()
-	if executionErr != nil {
-		return nil, 0, executionErr
-	}
-	if syncAggregateErr != nil {
-		return nil, 0, syncAggregateErr
+	if err := mostActionableProductionError(executionErr, syncAggregateErr); err != nil {
+		return nil, 0, err
 	}
 	if executionPayload == nil {
 		return nil, 0, errors.New("failed to produce execution payload")
