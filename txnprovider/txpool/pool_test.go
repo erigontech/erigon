@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -118,7 +118,7 @@ func newTestPoolWithFundedSender(t *testing.T) (context.Context, *TxPool, kv.RwD
 	t.Cleanup(cancel)
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	poolDB := memdb.NewTestPoolDB(t)
+	poolDB := mdbxtest.NewTestPoolDB(t)
 	pool, err := New(
 		ctx,
 		make(chan Announcements, 1),
@@ -236,7 +236,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	t.Cleanup(cancel)
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	pool, err := New(
 		ctx,
 		make(chan Announcements, 1),
@@ -320,7 +320,7 @@ func TestNonceFromAddress(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
@@ -546,7 +546,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -626,7 +626,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -729,7 +729,7 @@ func TestReverseNonces(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -844,7 +844,7 @@ func TestTxnPoke(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -1115,7 +1115,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -1263,7 +1263,7 @@ func TestAddLocalTxnsKeepsBatchOnSenderInfoError(t *testing.T) {
 
 	ch := make(chan Announcements, 1)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cache := kvcache.New(kvcache.DefaultCoherentConfig)
 	logger := log.New()
 
@@ -1308,7 +1308,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -1560,7 +1560,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 
 	cfg := txpoolcfg.DefaultConfig
 	cfg.NoGossip = true
@@ -1666,7 +1666,7 @@ func TestBlobSlots(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -1757,7 +1757,7 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	cfg.TotalBlobPoolLimit = 2 // tight limit: one 2-blob txn fills it
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1859,7 +1859,7 @@ func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
 
 	ch := make(chan Announcements, 1)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Osaka"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
@@ -1881,7 +1881,7 @@ func TestGetBlobs(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -1970,7 +1970,7 @@ func TestGasLimitChanged(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
@@ -2047,7 +2047,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	require := require.New(b)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
-	db := memdb.NewTestPoolDB(b)
+	db := mdbxtest.NewTestPoolDB(b)
 	ctx, cancel := context.WithCancel(context.Background())
 	b.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -2133,7 +2133,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -2221,7 +2221,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 		// Clear the pool first by using a fresh pool
 		ch2 := make(chan Announcements, 100)
 		coreDB2 := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-		db2 := memdb.NewTestPoolDB(t)
+		db2 := mdbxtest.NewTestPoolDB(t)
 		cfg2 := txpoolcfg.DefaultConfig
 		cfg2.MaxNonceGap = 10 // small gap for this test
 		pool2, err := New(ctx, ch2, db2, coreDB2, cfg2, kvcache.New(kvcache.DefaultCoherentConfig),

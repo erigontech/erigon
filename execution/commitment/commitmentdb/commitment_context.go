@@ -8,7 +8,6 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"runtime"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -21,6 +20,7 @@ import (
 	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/commitment"
@@ -37,7 +37,8 @@ var (
 
 type sd interface {
 	SetTxNum(blockNum uint64)
-	AsGetter(tx kv.TemporalTx) kv.TemporalGetter
+	AsStateGetter(tx kv.TemporalTx) execctxapi.StateGetter
+	AsStateGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
@@ -57,7 +58,7 @@ type SharedDomainsCommitmentContext struct {
 	sharedDomains sd
 	updates       *commitment.Updates
 	patriciaTrie  commitment.Trie
-	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for both parallel and streaming)
+	variant       commitment.TrieVariant // selected trie engine, for the [commitment] log (updates.Mode() is ModeParallel for the parallel trie)
 	justRestored  atomic.Bool            // set to true when commitment trie was just restored from snapshot
 	traceW        io.Writer
 	stateReader   StateReader
@@ -75,8 +76,8 @@ type SharedDomainsCommitmentContext struct {
 	// pendingUpdate stores a single deferred branch update to be flushed at the next ComputeCommitment call.
 	pendingUpdate *commitment.PendingCommitmentUpdate
 
-	// pendingVariant holds a parallel/streaming trie selection that waits for
-	// EnableParaTrieDB: those variants need the DB-backed TrieContextFactory.
+	// pendingVariant holds a parallel trie selection that waits for
+	// EnableParaTrieDB: that variant needs the DB-backed TrieContextFactory.
 	pendingVariant commitment.TrieVariant
 	pendingCfg     commitment.TrieConfig
 }
@@ -169,22 +170,6 @@ func (sdc *SharedDomainsCommitmentContext) HasPendingUpdate() bool {
 	return sdc.pendingUpdate != nil
 }
 
-// flushPendingUpdate applies the pending commitment update using the given putter.
-// The update is written with its original TxNum. Called at the start of ComputeCommitment
-// to ensure the previously deferred update is applied before processing new ones.
-func (sdc *SharedDomainsCommitmentContext) flushPendingUpdate(putter kv.TemporalPutDel) error {
-	upd := sdc.pendingUpdate
-	putBranch := func(prefix, data, prevData []byte) error {
-		return putter.DomainPut(kv.CommitmentDomain, prefix, data, upd.TxNum, prevData)
-	}
-	if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
-		return err
-	}
-	upd.Clear()
-	sdc.pendingUpdate = nil
-	return nil
-}
-
 // SetHistoryStateReader sets the state reader to read *full* historical state at specified txNum.
 func (sdc *SharedDomainsCommitmentContext) SetHistoryStateReader(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) {
 	sdc.SetStateReader(NewHistoryStateReader(roTx, limitReadAsOfTxNum))
@@ -231,12 +216,11 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 			NumWorkers: cfg.WarmupNumWorkersOrDefault(),
 		},
 	}
-	// The parallel and streaming tries need a per-worker TrieContextFactory that
-	// only DB-backed consumers can provide (via EnableParaTrieDB). Start on the
-	// sequential trie and upgrade when the DB arrives, so context holders that
-	// never wire one (RPC, integrity, tests) keep working under a global variant
-	// selection.
-	if variant == commitment.VariantParallelHexPatricia || variant == commitment.VariantStreamingHexPatricia {
+	// The parallel trie needs a per-worker TrieContextFactory that only DB-backed
+	// consumers can provide (via EnableParaTrieDB). Start on the sequential trie
+	// and upgrade when the DB arrives, so context holders that never wire one
+	// (RPC, integrity, tests) keep working under a global variant selection.
+	if variant == commitment.VariantParallelHexPatricia {
 		ctx.pendingVariant = variant
 		cfg.Variant = commitment.VariantHexPatriciaTrie
 		ctx.pendingCfg = cfg
@@ -251,7 +235,6 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 // exclusively. Warmup/concurrent-mount readers get their own via the factories.
 func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context) *TrieContext {
 	mainTtx := &TrieContext{
-		getter:   sdc.sharedDomains.AsGetter(tx),
 		putter:   sdc.sharedDomains.AsPutDel(tx),
 		stepSize: sdc.sharedDomains.StepSize(),
 		txNum:    txNum,
@@ -261,7 +244,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
 	} else {
-		mainTtx.stateReader = NewLatestStateReaderForWorker(readCtx, tx, sdc.sharedDomains)
+		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains, WithReadMetrics(kvmetrics.MetricsFromContext(readCtx)))
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -412,7 +395,7 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 // from the in-memory commitment domain (post-compute state).
 func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, _, err := sdc.sharedDomains.AsGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	enc, _, err := sdc.sharedDomains.AsStateGetter(tx).GetLatest(kv.CommitmentDomain, key)
 	if err != nil {
 		return 0, err
 	}
@@ -561,8 +544,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			trie.SetTrieContextFactory(concurrentFactory)
 		default:
 			// Serial: this factory only serves page-cache warmup, which does not
-			// compute the root, so its reads need no generation pin. (Streaming is
-			// a *ParallelPatriciaHashed and takes the pinned branch above.)
+			// compute the root, so its reads need no generation pin.
 			warmupConfig.CtxFactory = sdc.warmupTrieContextFactory(sdc.paraTrieDB, txNum)
 		}
 	}
@@ -680,7 +662,6 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			getter:   sdc.sharedDomains.AsGetter(roTx),
 			putter:   sdc.sharedDomains.AsPutDel(roTx),
 			stepSize: stepSize,
 			txNum:    txNum,
@@ -689,7 +670,7 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, WithReadMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
@@ -726,7 +707,6 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 		wm := kvmetrics.NewDomainMetrics()
 		workerCtx := kvmetrics.ContextWithMetrics(ctx, wm)
 		warmupCtx := &TrieContext{
-			getter:         sdc.sharedDomains.AsGetter(roTx),
 			putter:         sdc.sharedDomains.AsPutDel(roTx),
 			stepSize:       stepSize,
 			txNum:          txNum,
@@ -736,7 +716,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReaderForWorker(workerCtx, roTx, sdc.sharedDomains)
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, WithReadMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
@@ -792,7 +772,7 @@ func DecodeTxBlockNums(v []byte) (txNum, blockNum uint64) {
 // Found value does not become current state.
 func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *TrieContext) (blockNum, txNum uint64, state []byte, err error) {
 	tv := sdc.patriciaTrie.Variant()
-	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia && tv != commitment.VariantStreamingHexPatricia {
+	if tv != commitment.VariantHexPatriciaTrie && tv != commitment.VariantParallelHexPatricia {
 		return 0, 0, nil, errors.New("state storing is only supported hex patricia trie")
 	}
 	var step kv.Step
@@ -931,7 +911,7 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 			return 0, 0, errors.New("cannot typecast hex patricia trie")
 		}
 	}
-	if tv == commitment.VariantParallelHexPatricia || tv == commitment.VariantStreamingHexPatricia {
+	if tv == commitment.VariantParallelHexPatricia {
 		var ok bool
 		ppht, ok = sdc.patriciaTrie.(*commitment.ParallelPatriciaHashed)
 		if !ok {
@@ -958,7 +938,6 @@ func (sdc *SharedDomainsCommitmentContext) restorePatriciaState(value []byte) (u
 }
 
 type TrieContext struct {
-	getter   kv.TemporalGetter
 	putter   kv.TemporalPutDel
 	txNum    uint64
 	blockNum uint64
@@ -969,7 +948,7 @@ type TrieContext struct {
 	localCollector *etl.Collector // per-goroutine collector for concurrent PutBranch
 }
 
-// NewTrieContextRo creates a read-only TrieContext suitable for TrieReader lookups.
+// NewTrieContextRo creates a read-only TrieContext for Branch-only lookups.
 // Only Branch() is functional; PutBranch/Account/Storage will return errors or nil.
 func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 	return &TrieContext{stateReader: reader, stepSize: stepSize}

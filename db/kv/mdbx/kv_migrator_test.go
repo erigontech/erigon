@@ -29,12 +29,12 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func TestBucketCRUD(t *testing.T) {
 	require := require.New(t)
-	db, tx := memdb.NewTestTx(t)
+	db, tx := mdbxtest.NewTestTx(t)
 
 	normalBucket := kv.ChaindataTables[15]
 	deprecatedBucket := "none"
