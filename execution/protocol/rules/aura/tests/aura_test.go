@@ -83,7 +83,7 @@ func TestEmptyBlock(t *testing.T) {
 		genesisBlock.Header().AuRaStep,
 	)
 
-	block := types.NewBlockWithHeader(header)
+	block := types.NewBlockWithHeader(header, nil)
 
 	headers, blocks, receipts := make([]*types.Header, 1), make(types.Blocks, 1), make([]types.Receipts, 1)
 	headers[0] = header

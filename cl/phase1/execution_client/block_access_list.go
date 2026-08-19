@@ -24,14 +24,17 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-// DecodeBlockAccessList decodes the BAL carried by a Caplin execution payload.
-func DecodeBlockAccessList(payload *cltypes.Eth1Block) (types.BlockAccessList, error) {
+// DecodeAndValidateBlockAccessList decodes and validates a Caplin execution payload's BAL.
+func DecodeAndValidateBlockAccessList(payload *cltypes.Eth1Block) (*types.BlockAccessListSidecar, error) {
 	if payload.Version() < clparams.GloasVersion || payload.BlockAccessList == nil {
 		return nil, nil
 	}
-	bal, err := types.DecodeBlockAccessListBytes(payload.BlockAccessList.Bytes())
+	bal, err := types.DecodeBlockAccessListSidecar(payload.BlockAccessList.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("decode block access list: %w", err)
+	}
+	if err = bal.ValidateForBlock(payload.GasLimit); err != nil {
+		return nil, fmt.Errorf("validate block access list: %w", err)
 	}
 	return bal, nil
 }

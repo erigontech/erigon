@@ -82,7 +82,7 @@ func (cc *ExecutionClientDirect) NewPayload(
 		return PayloadStatusInvalidated, err
 	}
 
-	bal, err := DecodeBlockAccessList(payload)
+	bal, err := DecodeAndValidateBlockAccessList(payload)
 	if err != nil {
 		return PayloadStatusInvalidated, err
 	}

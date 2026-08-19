@@ -359,7 +359,7 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 		header.ParentBeaconBlockRoot = parentBeaconBlockRoot
 	}
 
-	var blockAccessList types.BlockAccessList
+	var blockAccessList *types.BlockAccessListSidecar
 	var err error
 	if version < clparams.GloasVersion && req.SlotNumber != nil {
 		return nil, &rpc.InvalidParamsError{Message: "unexpected slotNumber before engine_newPayloadV5"}
@@ -376,17 +376,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
 		balBytes := *req.BlockAccessList
-		blockAccessList, err = types.DecodeBlockAccessListBytes(balBytes)
+		blockAccessList, err = types.DecodeBlockAccessListSidecar(balBytes)
 		if err != nil {
 			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
-			// A decodable list that violates EIP-7928 rules is an invalid
-			// block; undecodable bytes are a malformed request (-32602).
-			if errors.Is(err, types.ErrInvalidBlockAccessList) {
-				return &engine_types.PayloadStatus{
-					Status:          engine_types.InvalidStatus,
-					ValidationError: engine_types.NewStringifiedErrorFromString(err.Error()),
-				}, nil
-			}
 			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("undecodable blockAccessList: %v", err)}
 		}
 		hash := crypto.Keccak256Hash(balBytes)
@@ -1009,7 +1001,7 @@ func (e *EngineServer) HandleNewPayload(
 	}
 
 	if err := e.chainRW.InsertBlocks(ctx, []*types.Block{block}); err != nil {
-		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) {
+		if errors.Is(err, types.ErrBlockExceedsMaxRlpSize) || errors.Is(err, types.ErrInvalidBlockAccessList) {
 			return &engine_types.PayloadStatus{
 				Status:          engine_types.InvalidStatus,
 				ValidationError: engine_types.NewStringifiedError(err),

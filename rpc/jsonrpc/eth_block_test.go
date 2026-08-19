@@ -232,7 +232,7 @@ func TestGetBlockByNumberWithPendingTag(t *testing.T) {
 		Number: *uint256.NewInt(uint64(expected)),
 	}
 
-	rlpBlock, err := rlp.EncodeToBytes(types.NewBlockWithHeader(header))
+	rlpBlock, err := rlp.EncodeToBytes(types.NewBlockWithHeader(header, nil))
 	if err != nil {
 		t.Errorf("failed encoding the block: %s", err)
 	}

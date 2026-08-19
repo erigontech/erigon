@@ -975,7 +975,7 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 
 	t.Run("pending tag uses committed view", func(t *testing.T) {
 		ff := rpchelper.New(t.Context(), rpchelper.FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
-		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)})
+		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)}, nil)
 		payload, err := rlp.EncodeToBytes(pendingBlock)
 		require.NoError(t, err)
 		ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})

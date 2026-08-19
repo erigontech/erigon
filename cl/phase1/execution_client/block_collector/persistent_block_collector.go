@@ -468,7 +468,7 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 		return nil, err
 	}
 
-	bal, err := execution_client.DecodeBlockAccessList(executionPayload)
+	bal, err := execution_client.DecodeAndValidateBlockAccessList(executionPayload)
 	if err != nil {
 		return nil, err
 	}

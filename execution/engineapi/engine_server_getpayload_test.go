@@ -245,7 +245,7 @@ func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) 
 		GasLimit:            30_000_000,
 		BlockAccessListHash: &emptyBALHash,
 	}
-	block := types.NewBlockWithHeader(header)
+	block := types.NewBlockWithHeader(header, nil)
 	br := &types.BlockWithReceipts{Block: block, BlockAccessList: make(types.BlockAccessList, 0), Requests: make(types.FlatRequests, 0)}
 
 	resp, err := assembledBlockToPayloadResponse(br, uint256.NewInt(0), clparams.GloasVersion)
@@ -294,7 +294,7 @@ func minimalPayloadBlock(timestamp uint64, requests types.FlatRequests) *types.B
 		BaseFee:  baseFee,
 		GasLimit: 30_000_000,
 	}
-	block := types.NewBlockWithHeader(header)
+	block := types.NewBlockWithHeader(header, nil)
 	return &types.BlockWithReceipts{
 		Block:    block,
 		Requests: requests,
@@ -317,7 +317,7 @@ func blobPayloadBlock(chainID *uint256.Int, wrapperVersion byte, commitments, bl
 		BaseFee:  uint256.NewInt(1_000_000_000),
 		GasLimit: 30_000_000,
 	}
-	block := types.NewBlock(header, []types.Transaction{wrappedTxn}, nil, nil, nil)
+	block := types.NewBlock(header, []types.Transaction{wrappedTxn}, nil, nil, nil, nil)
 	return &types.BlockWithReceipts{
 		Block:    block,
 		Requests: make(types.FlatRequests, 0),

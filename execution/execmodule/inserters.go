@@ -112,6 +112,15 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		if err := rawBlock.ValidateMaxRlpSize(e.config); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %w", err)
 		}
+		blockAccessList := block.BlockAccessListSidecar()
+		if blockAccessList != nil {
+			if header.BlockAccessListHash == nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
+			}
+			if err := blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: validateBlockAccessList, block %d: %w", height, err)
+			}
+		}
 
 		var parentTd *uint256.Int
 		if height > 0 {
@@ -142,11 +151,8 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 		if _, err := rawdb.WriteRawBodyIfNotExists(blockOverlay, blockHash, height, body); err != nil {
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %w", err)
 		}
-		if blockAccessList := block.BlockAccessList(); blockAccessList != nil {
-			if header.BlockAccessListHash == nil {
-				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
-			}
-			blockAccessListBytes, err := types.EncodeBlockAccessListBytes(blockAccessList)
+		if blockAccessList != nil {
+			blockAccessListBytes, err := blockAccessList.Bytes()
 			if err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encodeBlockAccessList, block %d: %w", height, err)
 			}

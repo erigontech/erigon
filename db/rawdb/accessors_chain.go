@@ -460,9 +460,9 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 	txs := make([]types.Transaction, amount)
 	i := uint32(0)
 	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
-		var decodeErr error
-		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); decodeErr != nil {
-			return decodeErr
+		var err error
+		if txs[i], err = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); err != nil {
+			return err
 		}
 		i++
 		return nil
@@ -812,14 +812,17 @@ func readBlock(tx kv.Getter, hash common.Hash, number uint64) (*types.Block, err
 	if body == nil {
 		return nil, nil
 	}
-	var bal types.BlockAccessList
-	// Carry the BAL sidecar (secondary storage) so a block reconstructed from the
-	// DB carries its BAL like its header/body. Only Amsterdam+ blocks have one.
+	var bal *types.BlockAccessListSidecar
 	if header.HasBAL() {
-		var err error
-		bal, err = ReadBlockAccessList(tx, hash, number)
+		data, err := ReadBlockAccessListBytes(tx, hash, number)
 		if err != nil {
 			return nil, fmt.Errorf("read block access list: %w", err)
+		}
+		if len(data) != 0 {
+			bal, err = types.DecodeBlockAccessListSidecar(data)
+			if err != nil {
+				return nil, fmt.Errorf("read block access list: %w", err)
+			}
 		}
 	}
 	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, bal), nil

@@ -71,7 +71,7 @@ func CreateTestBlockAccessListExecModule(t *testing.T) (*execmoduletester.ExecMo
 	require.NoError(t, err)
 	for _, i := range []int{2, 4} {
 		block := chainPack.Blocks[i]
-		chainPack.Blocks[i] = types.NewBlockFromNetwork(block.HeaderNoCopy(), block.Body(), types.BlockAccessList{})
+		chainPack.Blocks[i] = types.NewBlockFromNetwork(block.HeaderNoCopy(), block.Body(), types.NewBlockAccessListSidecar(types.BlockAccessList{}))
 	}
 	chainPack.TopBlock = chainPack.Blocks[len(chainPack.Blocks)-1]
 	pruneBlockAccessListHistory(t, m, chainPack.Blocks[3])

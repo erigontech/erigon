@@ -23,19 +23,34 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-func TestDecodeBlockAccessList(t *testing.T) {
+func TestDecodeAndValidateBlockAccessList(t *testing.T) {
 	t.Parallel()
 	payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
 	require.NoError(t, payload.BlockAccessList.SetBytes([]byte{0xc0}))
 
-	bal, err := DecodeBlockAccessList(payload)
+	bal, err := DecodeAndValidateBlockAccessList(payload)
 	require.NoError(t, err)
 	require.NotNil(t, bal)
-	require.Empty(t, bal)
+	require.Empty(t, bal.BlockAccessList())
+	raw, err := bal.Bytes()
+	require.NoError(t, err)
+	require.Equal(t, []byte{0xc0}, raw)
 
 	require.NoError(t, payload.BlockAccessList.SetBytes([]byte{0xc2, 0x01, 0x02}))
-	_, err = DecodeBlockAccessList(payload)
+	_, err = DecodeAndValidateBlockAccessList(payload)
 	require.Error(t, err)
+
+	oversized, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
+		Address: accounts.InternAddress(common.Address{1}),
+	}})
+	require.NoError(t, err)
+	require.NoError(t, payload.BlockAccessList.SetBytes(oversized))
+	payload.GasLimit = types.BalItemCost - 1
+	_, err = DecodeAndValidateBlockAccessList(payload)
+	require.ErrorContains(t, err, "block access list too large")
 }

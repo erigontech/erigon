@@ -31,7 +31,7 @@ type BlockReadAheader struct {
 	headers *lru.Cache[common.Hash, *types.Header]
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	senders *lru.Cache[common.Hash, []byte] // just do raw senders
-	bals    *lru.Cache[common.Hash, types.BlockAccessList]
+	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
 
 	// The single permit belongs either to one warmup or to the code suspending
 	// warmup across an unwind. Warmups never wait for it: read-ahead is
@@ -60,7 +60,7 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
-	bals, err := lru.New[common.Hash, types.BlockAccessList](4)
+	bals, err := lru.New[common.Hash, *types.BlockAccessListSidecar](4)
 	if err != nil {
 		panic(err)
 	}
@@ -148,17 +148,21 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	}
 	var bal types.BlockAccessList
 	if header.HasNonEmptyBAL() {
-		var ok bool
-		bal, ok = bra.bals.Get(blockHash)
+		balSidecar, ok := bra.bals.Get(blockHash)
 		if !ok {
-			var err error
-			bal, err = rawdb.ReadBlockAccessList(tx, blockHash, header.Number.Uint64())
+			data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, header.Number.Uint64())
 			if err != nil {
 				log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
-			} else if bal != nil {
-				bra.bals.Add(blockHash, bal)
+			} else if len(data) != 0 {
+				balSidecar, err = types.DecodeBlockAccessListSidecar(data)
+				if err != nil {
+					log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
+				} else {
+					bra.bals.Add(blockHash, balSidecar)
+				}
 			}
 		}
+		bal = balSidecar.BlockAccessList()
 	}
 	go func() {
 		defer bra.warmupGate.Release(1)
@@ -204,7 +208,7 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	bra.senders.Add(blockHash, bytes.Clone(senders))
 }
 
-func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal types.BlockAccessList) {
+func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *types.BlockAccessListSidecar) {
 	if bal == nil {
 		return
 	}

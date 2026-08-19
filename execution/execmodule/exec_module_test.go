@@ -2272,6 +2272,28 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	block := chainPack.Blocks[0]
+	header := block.Header()
+	invalidBAL := types.BlockAccessList{
+		{Address: accounts.InternAddress(common.Address{2})},
+		{Address: accounts.InternAddress(common.Address{1})},
+	}
+	encoded, err := types.EncodeBlockAccessListBytes(invalidBAL)
+	require.NoError(t, err)
+	balHash := crypto.Keccak256Hash(encoded)
+	header.BlockAccessListHash = &balHash
+	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(invalidBAL))
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+}
+
 // TestInsertBlocksWithBatchedFCU drives the Caplin persistent_block_collector
 // pattern: InsertBlocks(batch) → ForkChoiceUpdate(last block of batch),
 // repeated for each batch. Verifies parent TD continuity across batches —
@@ -2428,7 +2450,7 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 		Transactions: chainPack.Blocks[5].Transactions(),
 		Uncles:       chainPack.Blocks[5].Uncles(),
 		Withdrawals:  chainPack.Blocks[5].Withdrawals(),
-	}, chainPack.Blocks[5].BlockAccessList())
+	}, chainPack.Blocks[5].BlockAccessListSidecar())
 
 	badRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock6})
 	require.NoError(t, err)
@@ -2771,7 +2793,7 @@ func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
 	fakeHeader := m.Genesis.Header()
 	fakeHeader.Extra = []byte("not the genesis")
-	fakeBlock := types.NewBlockWithHeader(fakeHeader)
+	fakeBlock := types.NewBlockWithHeader(fakeHeader, nil)
 	require.NotEqual(t, m.Genesis.Hash(), fakeBlock.Hash())
 	insRes, err := m.InsertBlocks(ctx, []*types.Block{fakeBlock})
 	require.NoError(t, err)

@@ -175,7 +175,7 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 
 	hashBefore := decoded.Hash()
 	bal := BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
-	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), bal)
+	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), NewBlockAccessListSidecar(bal))
 	if got := block.BlockAccessList(); !reflect.DeepEqual(got, bal) {
 		t.Errorf("BAL mismatch: got %v want %v", got, bal)
 	}
@@ -196,6 +196,28 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 	}
 	if roundTrip.BlockAccessList() != nil {
 		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %v", roundTrip.BlockAccessList())
+	}
+}
+
+func TestBlockCarriesBlockAccessListSidecar(t *testing.T) {
+	raw := []byte{0xc0}
+	sidecar, err := DecodeBlockAccessListSidecar(raw)
+	if err != nil {
+		t.Fatalf("decode BAL sidecar: %v", err)
+	}
+	block := NewBlockFromNetwork(&Header{}, &Body{}, sidecar)
+	if block.BlockAccessListSidecar() != sidecar {
+		t.Fatal("block did not retain BAL sidecar")
+	}
+	if block.BlockAccessList() == nil {
+		t.Fatal("block lost empty BAL")
+	}
+	gotRaw, err := block.BlockAccessListSidecar().Bytes()
+	if err != nil {
+		t.Fatalf("sidecar bytes: %v", err)
+	}
+	if !bytes.Equal(gotRaw, raw) {
+		t.Fatalf("sidecar RLP differs: got %x, want %x", gotRaw, raw)
 	}
 }
 
@@ -503,7 +525,7 @@ func makeBenchBlock() *Block {
 			Extra:      []byte("benchmark uncle"),
 		}
 	}
-	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */)
+	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */, nil)
 }
 
 func TestCanEncodeAndDecodeRawBody(t *testing.T) {
@@ -730,7 +752,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		Amount:    5_000_000_000,
 	}
 
-	block := NewBlock(&header, nil, nil, nil, withdrawals)
+	block := NewBlock(&header, nil, nil, nil, withdrawals, nil)
 	_ = block.Size()
 
 	encoded, err := rlp.EncodeToBytes(block)
@@ -742,7 +764,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	assert.Equal(t, block.Hash(), decoded.Hash())
 
 	// Now test with empty withdrawals
-	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{})
+	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{}, nil)
 	_ = block2.Size()
 
 	encoded2, err := rlp.EncodeToBytes(block2)

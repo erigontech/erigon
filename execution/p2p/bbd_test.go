@@ -122,7 +122,7 @@ type countingBALFetcher struct {
 	calls atomic.Int64
 }
 
-func (s *countingBALFetcher) Fetch(_ context.Context, reqs []BALRequest, _ *PeerId, _ []PeerId, _ time.Duration, _ time.Duration) map[common.Hash]types.BlockAccessList {
+func (s *countingBALFetcher) Fetch(_ context.Context, reqs []BALRequest, _ *PeerId, _ []PeerId, _ time.Duration, _ time.Duration) map[common.Hash]*types.BlockAccessListSidecar {
 	s.calls.Add(1)
 	return nil
 }

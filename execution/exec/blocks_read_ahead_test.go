@@ -389,18 +389,20 @@ func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
 	require.Equal(t, accountBytes, got)
 }
 
-func TestBlockReadAheaderCarriesBlockAccessList(t *testing.T) {
+func TestBlockReadAheaderCarriesBlockAccessListSidecar(t *testing.T) {
 	bra := NewBlockReadAheader()
 	header := &types.Header{Number: *uint256.NewInt(1)}
 	body := &types.Body{Transactions: []types.Transaction{types.NewTransaction(0, common.Address{}, new(uint256.Int), 0, new(uint256.Int), nil)}}
 	blockHash := header.Hash()
 	bal := types.BlockAccessList{}
+	balSidecar := types.NewBlockAccessListSidecar(bal)
 	sender := common.Address{1}
 	bra.AddHeaderAndBody(context.Background(), nil, nil, header, body)
-	bra.AddBlockAccessList(blockHash, bal)
+	bra.AddBlockAccessList(blockHash, balSidecar)
 	bra.AddSenders(sender[:], blockHash)
 	block, ok := bra.ReadBlockWithSenders(blockHash)
 	require.True(t, ok)
+	require.Same(t, balSidecar, block.BlockAccessListSidecar())
 	require.Equal(t, bal, block.BlockAccessList())
 	require.NotNil(t, block.BlockAccessList())
 }
@@ -414,7 +416,7 @@ func TestBlockReadAheaderPrefersCachedBlockAccessList(t *testing.T) {
 	balHash := bal.Hash()
 	header := &types.Header{Number: *uint256.NewInt(1), BlockAccessListHash: &balHash}
 	bra := NewBlockReadAheader()
-	bra.AddBlockAccessList(header.Hash(), bal)
+	bra.AddBlockAccessList(header.Hash(), types.NewBlockAccessListSidecar(bal))
 	getter := new(countingGetter)
 	bra.AddHeaderAndBody(t.Context(), db, getter, header, new(types.Body))
 	bra.WaitForWarmup(t.Context())

@@ -405,7 +405,7 @@ func TestCommitBlockV1(t *testing.T) {
 		t.Parallel()
 		assembled := defaultAssembled()
 		assembled.BlockAccessList = types.BlockAccessList{}
-		assembled.Block = types.NewBlockFromNetwork(assembled.Block.HeaderNoCopy(), assembled.Block.Body(), assembled.BlockAccessList)
+		assembled.Block = types.NewBlockFromNetwork(assembled.Block.HeaderNoCopy(), assembled.Block.Body(), types.NewBlockAccessListSidecar(assembled.BlockAccessList))
 		api, rec, _ := newEnv(assembled)
 
 		_, err := api.CommitBlockV1(context.Background(), validPayloadAttrs(parentTimestamp), nil, nil)

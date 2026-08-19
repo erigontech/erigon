@@ -39,11 +39,11 @@ import (
 // The peer has been penalised before this error is returned.
 var ErrBadBALResponse = errors.New("bal: peer returned invalid block access list")
 
-// BALRequest pairs a block hash with the BAL hash its header commits to, so the
-// fetcher can validate the EIP-8159 response without a separate header lookup.
+// BALRequest carries the header fields needed to validate an EIP-8159 response.
 type BALRequest struct {
 	Hash         common.Hash
 	Number       uint64
+	GasLimit     uint64
 	ExpectedHash common.Hash
 }
 
@@ -55,7 +55,7 @@ type BALFetcher interface {
 	// against its header commitment; misses are absent. A hash mismatch or protocol
 	// violation penalises that peer. batchTimeout bounds the whole call across all
 	// rounds; requestTimeout bounds each single request.
-	Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, batchTimeout time.Duration, requestTimeout time.Duration) map[common.Hash]types.BlockAccessList
+	Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, batchTimeout time.Duration, requestTimeout time.Duration) map[common.Hash]*types.BlockAccessListSidecar
 }
 
 // balFetchParallelism bounds how many peers Fetch queries concurrently for a batch's BALs.
@@ -79,13 +79,13 @@ type balFetcher struct {
 	peerTracker     *PeerTracker
 }
 
-func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, batchTimeout time.Duration, requestTimeout time.Duration) map[common.Hash]types.BlockAccessList {
+func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerId, fallbackPeers []PeerId, batchTimeout time.Duration, requestTimeout time.Duration) map[common.Hash]*types.BlockAccessListSidecar {
 	if len(reqs) == 0 {
 		return nil
 	}
 	ctx, cancel := context.WithTimeout(ctx, batchTimeout)
 	defer cancel()
-	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash]types.BlockAccessList {
+	fetch := func(ctx context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
 		got, err := f.fetchFromPeer(ctx, rs, p, requestTimeout)
 		if err != nil {
 			f.logger.Debug("[p2p.bal] peer did not serve BALs", "peerId", p, "err", err)
@@ -111,7 +111,7 @@ func (f *balFetcher) Fetch(ctx context.Context, reqs []BALRequest, peerId *PeerI
 
 // peerFetchFunc fetches BALs from a single peer, injected so fetchAcrossPeers is
 // unit-testable without the network.
-type peerFetchFunc func(ctx context.Context, reqs []BALRequest, peerId *PeerId) map[common.Hash]types.BlockAccessList
+type peerFetchFunc func(ctx context.Context, reqs []BALRequest, peerId *PeerId) map[common.Hash]*types.BlockAccessListSidecar
 
 // balFetchShardingThreshold is the request-set size above which the first
 // round shards; at or below it the dedup savings are negligible and coverage
@@ -127,8 +127,8 @@ const balFetchShardingThreshold = 16
 // for the full remainder: union coverage, a block is found if any single peer
 // has it. The loop stops once covered or when a full-remainder round makes no
 // progress, which proves no connected peer can serve the rest.
-func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash]types.BlockAccessList {
-	out := make(map[common.Hash]types.BlockAccessList, len(reqs))
+func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, maxParallel int, fetch peerFetchFunc) map[common.Hash]*types.BlockAccessListSidecar {
+	out := make(map[common.Hash]*types.BlockAccessListSidecar, len(reqs))
 	if len(peerIds) == 0 {
 		return out
 	}
@@ -140,7 +140,7 @@ func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, 
 		if shardedFetch {
 			workers = shards
 		}
-		results := make([]map[common.Hash]types.BlockAccessList, workers)
+		results := make([]map[common.Hash]*types.BlockAccessListSidecar, workers)
 		var eg errgroup.Group
 		eg.SetLimit(maxParallel)
 		for i := 0; i < workers; i++ {
@@ -176,7 +176,7 @@ func fetchAcrossPeers(ctx context.Context, reqs []BALRequest, peerIds []PeerId, 
 	return out
 }
 
-func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) (map[common.Hash]types.BlockAccessList, error) {
+func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) (map[common.Hash]*types.BlockAccessListSidecar, error) {
 	if len(reqs) == 0 {
 		return nil, nil
 	}
@@ -206,13 +206,13 @@ func (f *balFetcher) fetchFromPeer(ctx context.Context, reqs []BALRequest, peerI
 // non-empty BAL, or a payload whose keccak256 does not match the committed hash.
 // A violating entry is skipped while the remaining valid entries are kept —
 // pruned peers answering 0xc0 must not cost the rest of the response.
-func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common.Hash]types.BlockAccessList, bool, error) {
+func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common.Hash]*types.BlockAccessListSidecar, bool, error) {
 	if len(response) > len(reqs) {
 		return nil, true, fmt.Errorf("%w: peer returned %d entries for %d requests", ErrBadBALResponse, len(response), len(reqs))
 	}
 	var badPeer bool
-	var err error
-	out := make(map[common.Hash]types.BlockAccessList, len(reqs))
+	var responseErr error
+	out := make(map[common.Hash]*types.BlockAccessListSidecar, len(reqs))
 	for i := range response {
 		entry := response[i]
 		expected := reqs[i].ExpectedHash
@@ -224,24 +224,29 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 		if len(entry) == 1 && entry[0] == 0xc0 {
 			if expected != empty.BlockAccessListHash {
 				badPeer = true
-				err = fmt.Errorf("%w: req %d wanted non-empty BAL %x, peer returned empty", ErrBadBALResponse, i, expected)
+				responseErr = fmt.Errorf("%w: req %d wanted non-empty BAL %x, peer returned empty", ErrBadBALResponse, i, expected)
 				continue
 			}
 		}
 		if crypto.Keccak256Hash(entry) != expected {
 			badPeer = true
-			err = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, crypto.Keccak256Hash(entry))
+			responseErr = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, crypto.Keccak256Hash(entry))
 			continue
 		}
-		bal, decodeErr := types.DecodeBlockAccessListBytes(entry)
-		if decodeErr != nil {
+		bal, err := types.DecodeBlockAccessListSidecar(entry)
+		if err != nil {
 			badPeer = true
-			err = fmt.Errorf("%w: req %d returned malformed BAL: %w", ErrBadBALResponse, i, decodeErr)
+			responseErr = fmt.Errorf("%w: req %d returned malformed BAL: %w", ErrBadBALResponse, i, err)
+			continue
+		}
+		if err = bal.ValidateForBlock(reqs[i].GasLimit); err != nil {
+			badPeer = true
+			responseErr = fmt.Errorf("%w: req %d returned invalid BAL: %w", ErrBadBALResponse, i, err)
 			continue
 		}
 		out[reqs[i].Hash] = bal
 	}
-	return out, badPeer, err
+	return out, badPeer, responseErr
 }
 
 func (f *balFetcher) fetchOnce(ctx context.Context, reqs []BALRequest, peerId *PeerId, timeout time.Duration) ([]rlp.RawValue, error) {

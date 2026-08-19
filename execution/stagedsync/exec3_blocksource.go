@@ -67,7 +67,7 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 		return nil, nil, err
 	}
 	if b.BlockAccessList() == nil && blockBAL != nil {
-		b = types.NewBlockFromStorage(b.Hash(), b.HeaderNoCopy(), b.Transactions(), b.Uncles(), b.Withdrawals(), blockBAL)
+		b = types.NewBlockFromStorage(b.Hash(), b.HeaderNoCopy(), b.Transactions(), b.Uncles(), b.Withdrawals(), types.NewBlockAccessListSidecar(blockBAL))
 	}
 	return b, blockBAL, nil
 }

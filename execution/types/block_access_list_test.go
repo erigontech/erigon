@@ -50,6 +50,52 @@ func TestBlockAccessListCopy(t *testing.T) {
 	}
 }
 
+func TestBlockAccessListSidecarPreservesRLP(t *testing.T) {
+	bal := BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	raw, err := EncodeBlockAccessListBytes(bal)
+	if err != nil {
+		t.Fatalf("encode BAL: %v", err)
+	}
+	wantRaw := bytes.Clone(raw)
+
+	sidecar, err := DecodeBlockAccessListSidecar(raw)
+	if err != nil {
+		t.Fatalf("decode BAL sidecar: %v", err)
+	}
+	raw[0] = 0
+	gotRaw, err := sidecar.Bytes()
+	if err != nil {
+		t.Fatalf("sidecar bytes: %v", err)
+	}
+	if !bytes.Equal(gotRaw, wantRaw) {
+		t.Fatalf("sidecar RLP changed: got %x, want %x", gotRaw, wantRaw)
+	}
+	if !reflect.DeepEqual(sidecar.BlockAccessList(), bal) {
+		t.Fatalf("sidecar BAL differs: got %v, want %v", sidecar.BlockAccessList(), bal)
+	}
+}
+
+func TestBlockAccessListSidecarMemoizesValidation(t *testing.T) {
+	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
+		Address: accounts.InternAddress(common.Address{1}),
+	}})
+	if sidecar.validated.Load() {
+		t.Fatal("new sidecar is already validated")
+	}
+	if err := sidecar.ValidateForBlock(BalItemCost); err != nil {
+		t.Fatalf("validate sidecar: %v", err)
+	}
+	if !sidecar.validated.Load() {
+		t.Fatal("successful validation was not memoized")
+	}
+	if got := sidecar.validatedGasLimit.Load(); got != BalItemCost {
+		t.Fatalf("validated gas limit = %d, want %d", got, BalItemCost)
+	}
+	if err := sidecar.ValidateForBlock(BalItemCost - 1); !errors.Is(err, ErrInvalidBlockAccessList) {
+		t.Fatalf("validation with a different gas limit returned %v, want ErrInvalidBlockAccessList", err)
+	}
+}
+
 func TestBlockAccessListValidateOrdering(t *testing.T) {
 	var addrA, addrB common.Address
 	addrA[19] = 0x02
@@ -64,36 +110,103 @@ func TestBlockAccessListValidateOrdering(t *testing.T) {
 	}
 }
 
-func TestAccountChangesEncodeRejectsUnsortedReads(t *testing.T) {
-	var addr common.Address
-	addr[19] = 0x01
-	var slotA, slotB common.Hash
-	slotA[31] = 0x02
-	slotB[31] = 0x01
-
-	ac := &AccountChanges{
-		Address:      accounts.InternAddress(addr),
-		StorageReads: []accounts.StorageKey{accounts.InternKey(slotA), accounts.InternKey(slotB)},
+func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testing.T) {
+	tests := []struct {
+		name      string
+		bal       BlockAccessList
+		wantError string
+	}{
+		{
+			name: "account address order",
+			bal: BlockAccessList{
+				{Address: accounts.InternAddress(common.Address{2})},
+				{Address: accounts.InternAddress(common.Address{1})},
+			},
+			wantError: "account addresses must be strictly increasing",
+		},
+		{
+			name: "storage read order",
+			bal: BlockAccessList{{
+				Address: accounts.InternAddress(common.Address{1}),
+				StorageReads: []accounts.StorageKey{
+					accounts.InternKey(common.Hash{2}),
+					accounts.InternKey(common.Hash{1}),
+				},
+			}},
+			wantError: "storage reads must be strictly increasing",
+		},
+		{
+			name: "balance change order",
+			bal: BlockAccessList{{
+				Address: accounts.InternAddress(common.Address{1}),
+				BalanceChanges: []*BalanceChange{
+					{Index: 2, Value: *uint256.NewInt(1)},
+					{Index: 1, Value: *uint256.NewInt(1)},
+				},
+			}},
+			wantError: "balance_changes: indices must be strictly increasing",
+		},
+		{
+			name: "nonce change order",
+			bal: BlockAccessList{{
+				Address: accounts.InternAddress(common.Address{1}),
+				NonceChanges: []*NonceChange{
+					{Index: 2, Value: 1},
+					{Index: 1, Value: 2},
+				},
+			}},
+			wantError: "nonce_changes: indices must be strictly increasing",
+		},
+		{
+			name: "code change order",
+			bal: BlockAccessList{{
+				Address: accounts.InternAddress(common.Address{1}),
+				CodeChanges: []*CodeChange{
+					{Index: 2, Bytecode: []byte{1}},
+					{Index: 1, Bytecode: []byte{2}},
+				},
+			}},
+			wantError: "code_changes: indices must be strictly increasing",
+		},
+		{
+			name: "empty slot changes",
+			bal: BlockAccessList{{
+				Address: accounts.InternAddress(common.Address{1}),
+				StorageChanges: []*SlotChanges{{
+					Slot: accounts.InternKey(common.Hash{1}),
+				}},
+			}},
+			wantError: "empty slot changes",
+		},
 	}
 
-	var buf bytes.Buffer
-	if err := ac.EncodeRLP(&buf); err == nil || !strings.Contains(err.Error(), "reads must be strictly increasing") {
-		t.Fatalf("expected storage read ordering error, got %v", err)
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			encoded, err := EncodeBlockAccessListBytes(tt.bal)
+			if err != nil {
+				t.Fatalf("encode semantically invalid BAL: %v", err)
+			}
+			decoded, err := DecodeBlockAccessListBytes(encoded)
+			if err != nil {
+				t.Fatalf("decode semantically invalid BAL: %v", err)
+			}
+			if !reflect.DeepEqual(decoded, tt.bal) {
+				t.Fatalf("round trip differs: got %v, want %v", decoded, tt.bal)
+			}
+			err = decoded.ValidateForBlock(^uint64(0))
+			if !errors.Is(err, ErrInvalidBlockAccessList) {
+				t.Fatalf("ValidateForBlock() error = %v, want ErrInvalidBlockAccessList", err)
+			}
+			if !strings.Contains(err.Error(), tt.wantError) {
+				t.Fatalf("ValidateForBlock() error = %v, want it to contain %q", err, tt.wantError)
+			}
+		})
 	}
 }
 
-func TestDecodeBalanceChangesRejectsOutOfOrderIndices(t *testing.T) {
-	payload, err := rlp.EncodeToBytes([][]any{
-		{uint64(2), []byte{0x01}},
-		{uint64(1), []byte{0x01}},
-	})
-	if err != nil {
-		t.Fatalf("failed to build payload: %v", err)
-	}
-
-	stream := rlp.NewStream(bytes.NewReader(payload), uint64(len(payload)))
-	if _, err := decodeBalanceChanges(stream); err == nil || !strings.Contains(err.Error(), "indices") {
-		t.Fatalf("expected index ordering error, got %v", err)
+func TestEncodeBlockAccessListRejectsUnrepresentableNil(t *testing.T) {
+	if _, err := EncodeBlockAccessListBytes(BlockAccessList{nil}); err == nil {
+		t.Fatal("expected nil account encoding error")
 	}
 }
 
@@ -327,40 +440,7 @@ func TestBlockAccessListRejectsEmptySlotChanges(t *testing.T) {
 	}
 }
 
-// balTestAccountRLP hand-encodes a minimal AccountChanges entry: a 20-byte
-// address whose last byte is lastAddrByte, followed by five empty change/read
-// lists (storage changes, storage reads, balance, nonce, code changes).
-func balTestAccountRLP(lastAddrByte byte) []byte {
-	acc := []byte{0xda, 0x94}
-	addr := make([]byte, 20)
-	addr[19] = lastAddrByte
-	acc = append(acc, addr...)
-	return append(acc, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
-}
-
-func balTestWrapList(items ...[]byte) []byte {
-	var content []byte
-	for _, item := range items {
-		content = append(content, item...)
-	}
-	if len(content) >= 56 {
-		panic("balTestWrapList supports short lists only")
-	}
-	return append([]byte{0xc0 + byte(len(content))}, content...)
-}
-
-func TestDecodeBlockAccessListBytesMalformedVsInvalid(t *testing.T) {
-	valid, err := DecodeBlockAccessListBytes(balTestWrapList(balTestAccountRLP(1), balTestAccountRLP(2)))
-	if err != nil {
-		t.Fatalf("valid two-account list: %v", err)
-	}
-	if len(valid) != 2 {
-		t.Fatalf("valid two-account list: got %d accounts, want 2", len(valid))
-	}
-	emptyBal, err := DecodeBlockAccessListBytes([]byte{0xc0})
-	if err != nil || emptyBal == nil || len(emptyBal) != 0 {
-		t.Fatalf("empty list: bal=%v err=%v", emptyBal, err)
-	}
+func TestDecodeBlockAccessListBytesRejectsMalformedRLP(t *testing.T) {
 	malformed := map[string][]byte{
 		"empty input":     {},
 		"string not list": {0x80},
@@ -375,22 +455,6 @@ func TestDecodeBlockAccessListBytesMalformedVsInvalid(t *testing.T) {
 		}
 		if errors.Is(err, ErrInvalidBlockAccessList) {
 			t.Fatalf("%s: malformed RLP must not map to ErrInvalidBlockAccessList: %v", name, err)
-		}
-	}
-	emptySlotChanges := append([]byte{0xdd, 0x94}, make([]byte, 20)...)
-	emptySlotChanges = append(emptySlotChanges, 0xc3, 0xc2, 0x01, 0xc0, 0xc0, 0xc0, 0xc0, 0xc0)
-	semanticallyInvalid := map[string][]byte{
-		"duplicate address":  balTestWrapList(balTestAccountRLP(1), balTestAccountRLP(1)),
-		"descending address": balTestWrapList(balTestAccountRLP(2), balTestAccountRLP(1)),
-		"empty slot changes": balTestWrapList(emptySlotChanges),
-	}
-	for name, data := range semanticallyInvalid {
-		_, err := DecodeBlockAccessListBytes(data)
-		if err == nil {
-			t.Fatalf("%s: expected error", name)
-		}
-		if !errors.Is(err, ErrInvalidBlockAccessList) {
-			t.Fatalf("%s: expected ErrInvalidBlockAccessList, got: %v", name, err)
 		}
 	}
 }

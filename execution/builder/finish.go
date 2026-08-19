@@ -74,7 +74,7 @@ func finishBlock(tx kv.TemporalTx, cfg BuilderFinishCfg, logger log.Logger) erro
 	if current.BlockAccessList != nil && cfg.chainConfig.IsEIPEnabled(7928, current.Header.Time) {
 		blockAccessList = current.BlockAccessList
 	}
-	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals, blockAccessList)
+	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals, types.NewBlockAccessListSidecar(blockAccessList))
 	if blockAccessList != nil {
 		hash := blockAccessList.Hash()
 		block.HeaderNoCopy().BlockAccessListHash = &hash

@@ -62,7 +62,7 @@ func makeTestHeader(number uint64, parent common.Hash, extra []byte) *types.Head
 // at the same number produce distinct SSZ roots — mimicking competing beacon variants.
 func makeBeaconBlock(t *testing.T, number uint64, forkTag byte, parent common.Hash, txs ...types.Transaction) *cltypes.BeaconBlock {
 	t.Helper()
-	block := types.NewBlock(makeTestHeader(number, parent, []byte{forkTag}), txs, nil, nil, []*types.Withdrawal{})
+	block := types.NewBlock(makeTestHeader(number, parent, []byte{forkTag}), txs, nil, nil, []*types.Withdrawal{}, nil)
 
 	bb := cltypes.NewBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	bb.Body.ExecutionPayload = cltypes.NewEth1BlockFromHeaderAndBody(block.Header(), block.RawBody(), &clparams.MainnetBeaconConfig)

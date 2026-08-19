@@ -208,7 +208,7 @@ func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 			"blockNum", initialHeader.Number.Uint64(),
 		)
 
-		if err := s.bridgeStore.ReplayInitialBlock(ctx, types.NewBlockWithHeader(initialHeader)); err != nil {
+		if err := s.bridgeStore.ReplayInitialBlock(ctx, types.NewBlockWithHeader(initialHeader, nil)); err != nil {
 			return err
 		}
 	}
@@ -255,7 +255,7 @@ func (s *ExecutionClientStore) bridgeReplayInitialBlockIfNeeded(ctx context.Cont
 			// carry-on
 		}
 
-		blocks = append(blocks, types.NewBlockWithHeader(header))
+		blocks = append(blocks, types.NewBlockWithHeader(header, nil))
 		if len(blocks) < blocksBatchSize && blockNum != end {
 			continue
 		}

@@ -43,13 +43,25 @@ func TestValidateBALResponse(t *testing.T) {
 	balHash := crypto.Keccak256Hash(bal)
 	h0 := common.BytesToHash([]byte{1})
 	h1 := common.BytesToHash([]byte{2})
+	validGasLimit := uint64(types.BalItemCost)
 
 	t.Run("valid populated BAL is returned", func(t *testing.T) {
-		reqs := []BALRequest{{Hash: h0, Number: 1, ExpectedHash: balHash}}
+		reqs := []BALRequest{{Hash: h0, Number: 1, GasLimit: validGasLimit, ExpectedHash: balHash}}
 		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal})
 		require.NoError(t, err)
 		require.False(t, bad)
-		require.Equal(t, wantBAL, out[h0])
+		require.Equal(t, wantBAL, out[h0].BlockAccessList())
+		gotRaw, err := out[h0].Bytes()
+		require.NoError(t, err)
+		require.Equal(t, bal, gotRaw)
+	})
+
+	t.Run("BAL exceeding the block gas bound penalises the peer", func(t *testing.T) {
+		reqs := []BALRequest{{Hash: h0, Number: 1, GasLimit: types.BalItemCost - 1, ExpectedHash: balHash}}
+		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal})
+		require.ErrorContains(t, err, "block access list too large")
+		require.True(t, bad)
+		require.NotContains(t, out, h0)
 	})
 
 	t.Run("hash-matching malformed BAL penalises the peer", func(t *testing.T) {
@@ -83,32 +95,32 @@ func TestValidateBALResponse(t *testing.T) {
 		require.NoError(t, err)
 		require.False(t, bad)
 		require.NotNil(t, out[h0])
-		require.Empty(t, out[h0])
+		require.Empty(t, out[h0].BlockAccessList())
 	})
 
 	t.Run("0xc0 for a non-empty-BAL hash penalises but keeps valid entries", func(t *testing.T) {
 		reqs := []BALRequest{
 			{Hash: h0, Number: 1, ExpectedHash: empty.BlockAccessListHash},
-			{Hash: h1, Number: 2, ExpectedHash: balHash},
+			{Hash: h1, Number: 2, GasLimit: validGasLimit, ExpectedHash: balHash},
 		}
 		reqs[0].ExpectedHash = balHash
 		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{{0xc0}, bal})
 		require.Error(t, err)
 		require.True(t, bad)
 		require.NotContains(t, out, h0)
-		require.Equal(t, wantBAL, out[h1])
+		require.Equal(t, wantBAL, out[h1].BlockAccessList())
 	})
 
 	t.Run("hash mismatch penalises but keeps valid entries", func(t *testing.T) {
 		reqs := []BALRequest{
 			{Hash: h0, Number: 1, ExpectedHash: common.BytesToHash([]byte{0xff})},
-			{Hash: h1, Number: 2, ExpectedHash: balHash},
+			{Hash: h1, Number: 2, GasLimit: validGasLimit, ExpectedHash: balHash},
 		}
 		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal, bal})
 		require.Error(t, err)
 		require.True(t, bad)
 		require.NotContains(t, out, h0)
-		require.Equal(t, wantBAL, out[h1])
+		require.Equal(t, wantBAL, out[h1].BlockAccessList())
 	})
 
 	t.Run("over-long response penalises the peer", func(t *testing.T) {
@@ -120,13 +132,13 @@ func TestValidateBALResponse(t *testing.T) {
 
 	t.Run("short response leaves trailing requests absent", func(t *testing.T) {
 		reqs := []BALRequest{
-			{Hash: h0, Number: 1, ExpectedHash: balHash},
+			{Hash: h0, Number: 1, GasLimit: validGasLimit, ExpectedHash: balHash},
 			{Hash: h1, Number: 2, ExpectedHash: balHash},
 		}
 		out, bad, err := validateBALResponse(reqs, []rlp.RawValue{bal}) // only first answered
 		require.NoError(t, err)
 		require.False(t, bad)
-		require.Equal(t, wantBAL, out[h0])
+		require.Equal(t, wantBAL, out[h0].BlockAccessList())
 		require.NotContains(t, out, h1)
 	})
 }
@@ -135,7 +147,7 @@ func TestBALRequestsForHeaders(t *testing.T) {
 	t.Parallel()
 	balHash := common.BytesToHash([]byte{0xaa})
 	emptyHash := empty.BlockAccessListHash
-	withBAL := &types.Header{Number: *uint256.NewInt(10), BlockAccessListHash: &balHash}
+	withBAL := &types.Header{Number: *uint256.NewInt(10), GasLimit: 30_000_000, BlockAccessListHash: &balHash}
 	preFork := &types.Header{Number: *uint256.NewInt(11)}                                   // BlockAccessListHash == nil
 	emptyBAL := &types.Header{Number: *uint256.NewInt(12), BlockAccessListHash: &emptyHash} // genuinely empty BAL
 
@@ -144,6 +156,7 @@ func TestBALRequestsForHeaders(t *testing.T) {
 	require.Equal(t, withBAL.Hash(), reqs[0].Hash)
 	require.Equal(t, balHash, reqs[0].ExpectedHash)
 	require.Equal(t, uint64(10), reqs[0].Number)
+	require.Equal(t, withBAL.GasLimit, reqs[0].GasLimit)
 }
 
 func TestFetchAcrossPeers(t *testing.T) {
@@ -151,10 +164,10 @@ func TestFetchAcrossPeers(t *testing.T) {
 	h0 := common.BytesToHash([]byte{1})
 	h1 := common.BytesToHash([]byte{2})
 	reqs := []BALRequest{{Hash: h0}, {Hash: h1}}
-	balA := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{0xaa})}}
-	balB := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{0xbb})}}
-	serveAll := func(rs []BALRequest) map[common.Hash]types.BlockAccessList {
-		out := map[common.Hash]types.BlockAccessList{}
+	balA := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: accounts.InternAddress(common.Address{0xaa})}})
+	balB := types.NewBlockAccessListSidecar(types.BlockAccessList{{Address: accounts.InternAddress(common.Address{0xbb})}})
+	serveAll := func(rs []BALRequest) map[common.Hash]*types.BlockAccessListSidecar {
+		out := map[common.Hash]*types.BlockAccessListSidecar{}
 		for _, r := range rs {
 			out[r.Hash] = balA
 		}
@@ -163,7 +176,7 @@ func TestFetchAcrossPeers(t *testing.T) {
 
 	t.Run("collects all BALs when one peer serves the batch", func(t *testing.T) {
 		serving := PeerIdFromUint64(3)
-		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) map[common.Hash]types.BlockAccessList {
+		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
 			if p.Equal(serving) {
 				return serveAll(rs)
 			}
@@ -175,11 +188,11 @@ func TestFetchAcrossPeers(t *testing.T) {
 	})
 
 	t.Run("merges partial results across peers", func(t *testing.T) {
-		fetch := func(_ context.Context, _ []BALRequest, p *PeerId) map[common.Hash]types.BlockAccessList {
+		fetch := func(_ context.Context, _ []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
 			if p.Equal(PeerIdFromUint64(1)) {
-				return map[common.Hash]types.BlockAccessList{h0: balA}
+				return map[common.Hash]*types.BlockAccessListSidecar{h0: balA}
 			}
-			return map[common.Hash]types.BlockAccessList{h1: balB}
+			return map[common.Hash]*types.BlockAccessListSidecar{h1: balB}
 		}
 		out := fetchAcrossPeers(context.Background(), reqs,
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2)}, 8, fetch)
@@ -189,7 +202,9 @@ func TestFetchAcrossPeers(t *testing.T) {
 	})
 
 	t.Run("no peer serves -> empty result", func(t *testing.T) {
-		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash]types.BlockAccessList { return nil }
+		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+			return nil
+		}
 		out := fetchAcrossPeers(context.Background(), reqs,
 			[]PeerId{*PeerIdFromUint64(1), *PeerIdFromUint64(2)}, 8, fetch)
 		require.Empty(t, out)
@@ -202,8 +217,8 @@ func TestFetchAcrossPeers(t *testing.T) {
 			hashes = append(hashes, h)
 			prefixReqs = append(prefixReqs, BALRequest{Hash: h})
 		}
-		fetch := func(_ context.Context, rs []BALRequest, _ *PeerId) map[common.Hash]types.BlockAccessList {
-			out := map[common.Hash]types.BlockAccessList{}
+		fetch := func(_ context.Context, rs []BALRequest, _ *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+			out := map[common.Hash]*types.BlockAccessListSidecar{}
 			for _, r := range rs[:min(2, len(rs))] {
 				out[r.Hash] = balA
 			}
@@ -228,8 +243,8 @@ func TestFetchAcrossPeers(t *testing.T) {
 		}
 		rare := many[37].Hash
 		holder := PeerIdFromUint64(7)
-		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) map[common.Hash]types.BlockAccessList {
-			out := map[common.Hash]types.BlockAccessList{}
+		fetch := func(_ context.Context, rs []BALRequest, p *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
+			out := map[common.Hash]*types.BlockAccessListSidecar{}
 			for _, r := range rs {
 				if r.Hash == rare {
 					if p.Equal(holder) {
@@ -251,9 +266,9 @@ func TestFetchAcrossPeers(t *testing.T) {
 	})
 	t.Run("stops when no peer makes progress", func(t *testing.T) {
 		var calls atomic.Int32
-		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash]types.BlockAccessList {
+		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
 			calls.Add(1)
-			return map[common.Hash]types.BlockAccessList{h0: balA}
+			return map[common.Hash]*types.BlockAccessListSidecar{h0: balA}
 		}
 		out := fetchAcrossPeers(
 			context.Background(),
@@ -267,7 +282,7 @@ func TestFetchAcrossPeers(t *testing.T) {
 	})
 	t.Run("honours the parallelism limit", func(t *testing.T) {
 		var live, peak atomic.Int32
-		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash]types.BlockAccessList {
+		fetch := func(_ context.Context, _ []BALRequest, _ *PeerId) map[common.Hash]*types.BlockAccessListSidecar {
 			n := live.Add(1)
 			for {
 				if p := peak.Load(); n <= p || peak.CompareAndSwap(p, n) {

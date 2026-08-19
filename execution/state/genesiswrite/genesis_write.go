@@ -392,7 +392,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 
 	head.Root = common.BytesToHash(rh)
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals), ibs, nil
+	return types.NewBlock(head, nil, nil, nil, withdrawals, nil), ibs, nil
 }
 
 func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.TemporalTx, sd *execctx.SharedDomains, head *types.Header) ([]byte, *state.IntraBlockState, error) {
