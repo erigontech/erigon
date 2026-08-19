@@ -609,8 +609,8 @@ func allLocalSnapshotStates() (all []localSnapshotState) {
 	return
 }
 
-// Invariant: once preverified.toml exists, no state of the datadir may cost a data file, and a file
-// we have is never re-downloaded.
+// Invariant: once preverified.toml exists, no state of the datadir may cost a data file. The
+// download flag below is only the decision to add the torrent, not a decision to fetch bytes.
 func TestNeverEvictsAfterInitialDownload(t *testing.T) {
 	require := require.New(t)
 	d := newDownloaderTest(t).downloader

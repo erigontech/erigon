@@ -1,11 +1,11 @@
 # Downloader Components
 
-Main Properties:
+Main properties:
 
-```
-- if initialDownload complete: local `.torrent` are more important than remote. and local `.torrent` is more important than local `data-file`. If `data-file` exists without `.torrent` - then derivew `.torrent` from `data-file`      
-- if initialDownload not-complete: download remote `preveified.toml` and align datadir according to `preverified.toml` (download remote `.torrent` and `data-files`)             
-```
+- initial download complete (`preverified.toml` on disk): the local `data-file` outranks the remote manifest and is never moved aside. A local `.torrent` with a different infohash is dropped, and only its sizes are used to check the file: on a mismatch the data backs neither manifest, so the download goes ahead under the preverified hash and the client hash-checks and repairs the file in place. Otherwise the preverified download is skipped.
+- initial download not complete: the remote manifest wins. Download `preverified.toml` and align the datadir to it (remote `.torrent` and `data-file`s); data of the wrong size is renamed to `.part` and re-fetched.
+
+Deriving a `.torrent` from a bare `data-file` happens on the seeding path (`AddNewSeedableFile`), not on either path above.
 
 The diagram below shows the components used to manage downloads between torrents and WebSeeds.
 

@@ -1201,15 +1201,15 @@ func (d *Downloader) addedFirstDownloader(
 	name string,
 	infoHash metainfo.Hash,
 ) (afterAdd func()) {
-	// Try again, we would have invalidated data for changed infohashes now.
+	// Try the webseeds for the metainfo that wasn't on disk. Nothing here relies on the data having
+	// been moved aside: after the initial download it never is, and the client hash-checks and
+	// repairs the file in place.
 	if !localMetainfo.Ok {
 		// Yes I mean for this error to be scoped here.
 		err := d.fetchMetainfoFromWebseeds(ctx, name, infoHash)
 		if err == nil {
 			// Always reuse code paths to ensure no surprises later. I.e. load the metainfo again
-			// through the same path that is used on a good run. No data invalidation here, at this
-			// point we've added the torrent, and already invalidated if the metainfo was missing
-			// the first time.
+			// through the same path that is used on a good run.
 			localMetainfo, err = d.maybeLoadMetainfoFromDisk(name)
 			if err != nil {
 				// Should this error be returned instead?
