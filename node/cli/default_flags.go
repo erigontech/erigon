@@ -278,6 +278,8 @@ var DefaultFlags = []cli.Flag{
 	&utils.GDBMeFlag,
 
 	&utils.ExperimentalParallelCommitmentFlag,
+	&utils.ExperimentalBinCommitmentFlag,
+	&utils.ExperimentalBinCommitmentHashFlag,
 
 	&utils.MCPDisableFlag,
 	&utils.MCPAddrFlag,

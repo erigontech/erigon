@@ -17,13 +17,21 @@
 package execctx
 
 import (
+	"errors"
+
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/commitment"
 )
 
+// ErrBinCommitmentUnsupported is returned by NewSharedDomains for a caller that
+// declared itself hex-only (WithHexCommitmentOnly) over a bin-variant datadir.
+var ErrBinCommitmentUnsupported = errors.New("this code path supports the hex commitment trie only, and the datadir uses the bin trie")
+
 type sharedDomainOptions struct {
 	trieCfg              commitment.TrieConfig
 	useSharedBranchCache bool
+	hexCommitmentOnly    bool
+	skipCommitmentSeek   bool
 	mem                  kv.TemporalMemBatch
 }
 
@@ -33,6 +41,13 @@ type SharedDomainOption func(*sharedDomainOptions)
 // WithTrieConfig replaces the trie configuration wholesale; the caller owns Variant.
 func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {
 	return func(o *sharedDomainOptions) { o.trieCfg = cfg }
+}
+
+// WithoutCommitmentSeek skips restoring the persisted trie state. A rebuild that
+// produces a scheme other than the one the DB's blob was written under cannot
+// decode it, and recomputes every key in the shard from files regardless.
+func WithoutCommitmentSeek() SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.skipCommitmentSeek = true }
 }
 
 // WithoutDeferredBranchUpdates disables deferred branch updates (read-only / one-shot domains).
@@ -55,7 +70,24 @@ func WithMemBatch(mem kv.TemporalMemBatch) SharedDomainOption {
 
 // WithSequentialCommitment forces the sequential HexPatriciaHashed trie regardless
 // of the experimental parallel/concurrent flags — for one-shot / empty-DB paths
-// (e.g. genesis) that wire no trie-context factory for the parallel trie.
+// (e.g. genesis) that wire no trie-context factory for the parallel trie. The bin
+// variant is a persisted whole-datadir property and stays bin: demoting it would
+// compute a hex root over a datadir the executor reads as bin.
 func WithSequentialCommitment() SharedDomainOption {
-	return func(o *sharedDomainOptions) { o.trieCfg.Variant = commitment.VariantHexPatriciaTrie }
+	return func(o *sharedDomainOptions) {
+		if o.trieCfg.Variant != commitment.VariantBinPatriciaTrie {
+			o.trieCfg.Variant = commitment.VariantHexPatriciaTrie
+		}
+	}
+}
+
+// WithHexCommitmentOnly is WithSequentialCommitment for callers that can only read
+// hex branch records — eth_getProof, eth_getWitness, eth_simulateV1, receipt
+// regeneration, commitment integrity. Under the bin variant NewSharedDomains returns
+// ErrBinCommitmentUnsupported instead of reading bit-path records as hex ones.
+func WithHexCommitmentOnly() SharedDomainOption {
+	return func(o *sharedDomainOptions) {
+		o.hexCommitmentOnly = true
+		WithSequentialCommitment()(o)
+	}
 }

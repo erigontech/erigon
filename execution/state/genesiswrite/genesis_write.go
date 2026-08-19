@@ -378,7 +378,8 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	defer tx.Rollback()
 
 	// Genesis is a one-shot commitment over an empty DB; the parallel trie has no
-	// context factory wired here, so use the sequential trie (identical root).
+	// context factory wired here, so demote it to the sequential trie (identical
+	// root). The bin variant is kept — block 0 must be the root the executor computes.
 	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, nil, err

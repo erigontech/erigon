@@ -343,7 +343,12 @@ type cacheUnwindState struct {
 // entry points instead of leaving Variant unset and relying on an implicit
 // fallback inside the trie constructor.
 func PickTrieVariant() commitment.TrieVariant {
-	if statecfg.ExperimentalParallelCommitment {
+	switch {
+	// Bin is a persisted whole-datadir property, so it wins over the runtime
+	// experiment (the settings resolver refuses the combination outright).
+	case statecfg.ExperimentalBinCommitment:
+		return commitment.VariantBinPatriciaTrie
+	case statecfg.ExperimentalParallelCommitment:
 		return commitment.VariantParallelHexPatricia
 	}
 	return commitment.VariantHexPatriciaTrie
@@ -357,6 +362,14 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	o.trieCfg.Variant = PickTrieVariant()
 	for _, opt := range opts {
 		opt(&o)
+	}
+	if o.trieCfg.Variant == commitment.VariantBinPatriciaTrie {
+		if o.hexCommitmentOnly {
+			return nil, ErrBinCommitmentUnsupported
+		}
+		// Bit-path branch keys collide in the cache's hex-shaped trunk slots; the
+		// commitment-context ctor refuses a bin SD that shares the cache.
+		WithoutSharedBranchCache()(&o)
 	}
 	trieCfg := o.trieCfg
 
@@ -402,6 +415,10 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	// residency ages by block-access recency across all SharedDomains, not per-SD.
 	if p, ok := tx.AggTx().(commitment.AdaptivePinControllerProvider); ok && o.useSharedBranchCache {
 		sd.adaptivePinController = p.AdaptivePinController()
+	}
+
+	if o.skipCommitmentSeek {
+		return sd, nil
 	}
 
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
@@ -933,6 +950,10 @@ func (sd *SharedDomains) IndexAdd(table kv.InvertedIdx, key []byte, txNum uint64
 }
 
 func (sd *SharedDomains) StepSize() uint64 { return sd.stepSize }
+
+// HasSharedBranchCache reports whether commitment-branch reads go through the
+// aggregator-scope BranchCache shared across SharedDomains instances.
+func (sd *SharedDomains) HasSharedBranchCache() bool { return sd.branchCache != nil }
 
 // IsUnfrozenStepEdge reports whether txNum is the last tx of a step whose
 // commitment is not yet frozen into files — where a step-boundary checkpoint

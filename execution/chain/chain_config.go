@@ -84,6 +84,11 @@ type Config struct {
 	OsakaTime     *uint64 `json:"osakaTime,omitempty"`
 	AmsterdamTime *uint64 `json:"amsterdamTime,omitempty"`
 
+	// EIP8038Revised charges EIP-8038's revised state-access schedule instead of the
+	// one the pinned spec-test corpora were generated against. Experimental forks that
+	// track head-of-spec set it; no scheduled network does.
+	EIP8038Revised bool `json:"eip8038Revised,omitempty"`
+
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
 	BlobSchedule          map[string]*params.BlobConfig `json:"blobSchedule,omitempty"`
@@ -871,6 +876,7 @@ type Rules struct {
 	IsIstanbul, IsBerlin, IsLondon, IsShanghai        bool
 	IsCancun, IsNapoli, IsAhmedabad, IsBhilai         bool
 	IsPrague, IsOsaka, IsAmsterdam                    bool
+	EIP8038Revised                                    bool
 	DisabledEIPs                                      []int
 	IsAura                                            bool
 

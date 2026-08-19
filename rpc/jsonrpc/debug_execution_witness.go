@@ -56,6 +56,11 @@ type RecordingState struct {
 	// createdCodeHashes holds code hashes written in-block; a pre-state read of a hash
 	// already created in-block is redundant in the witness (the verifier replays the create).
 	createdCodeHashes map[common.Hash]struct{}
+	// PreStateHasStorage holds the accounts whose pre-state storage the EIP-7610
+	// CREATE-collision check found non-empty. The binary trie commits no
+	// per-account storage root, so a verifier can only re-derive that answer from
+	// a proof of the account's storage zone (see accessedState.pbinStorageProbes).
+	PreStateHasStorage map[common.Address]struct{}
 
 	//HashedCodes map[common.Hash][]byte // set of code hashes seen during execution, used to avoid duplicate code entries in result.Codes
 
@@ -90,6 +95,7 @@ func NewRecordingState(inner state.StateReader) *RecordingState {
 		AccessedCode:          make(map[common.Address][]byte),
 		PreStateCode:          make(map[common.Address][]byte),
 		createdCodeHashes:     make(map[common.Hash]struct{}),
+		PreStateHasStorage:    make(map[common.Address]struct{}),
 		accountOverlay:        make(map[common.Address]*accounts.Account),
 		storageOverlay:        make(map[common.Address]map[common.Hash]uint256.Int),
 		codeOverlay:           make(map[common.Address][]byte),
@@ -237,6 +243,9 @@ func (s *RecordingState) HasStorage(address accounts.Address) (bool, error) {
 		return false, nil
 	}
 	has, err := s.inner.HasStorage(address)
+	if err == nil && has {
+		s.PreStateHasStorage[addr] = struct{}{}
+	}
 	if s.tracing(addr) {
 		fmt.Printf("[TRACE] HasStorage %s -> inner %v (err=%v)\n", addr.Hex(), has, err)
 	}
@@ -585,20 +594,35 @@ const (
 	witnessModeCanonical
 )
 
-// resolveWitnessMode resolves the witness mode from the request param; absent, defaults to legacy.
-// An explicit param value other than "legacy"/"canonical" is rejected.
-func resolveWitnessMode(modeParam *string) (witnessMode, error) {
+// errWitnessCanonicalHexOnly rejects an explicit canonical request under the binary
+// trie. The legacy/canonical split is an MPT distinction (empty nodes, minimum
+// siblings); bin has a single witness form, which the legacy default names.
+var errWitnessCanonicalHexOnly = errors.New("canonical witness mode is hex-only: the binary trie has a single witness form")
+
+// resolveWitnessMode resolves the witness mode from the request param; absent or empty,
+// it defaults to legacy. An explicit param value other than "legacy"/"canonical" is
+// rejected, as is canonical under the binary trie.
+func resolveWitnessMode(modeParam *string, binTrie bool) (witnessMode, error) {
 	if modeParam == nil {
 		return witnessModeLegacy, nil
 	}
 	switch *modeParam {
-	case "legacy":
+	case "", "legacy":
 		return witnessModeLegacy, nil
 	case "canonical":
+		if binTrie {
+			return witnessModeLegacy, errWitnessCanonicalHexOnly
+		}
 		return witnessModeCanonical, nil
 	default:
 		return witnessModeLegacy, fmt.Errorf("invalid witness mode %q: must be \"legacy\" or \"canonical\"", *modeParam)
 	}
+}
+
+// binCommitmentTrie reports whether the datadir runs the EIP-8297 binary commitment
+// trie, which skips the witness pipeline's MPT-shaped phases.
+func binCommitmentTrie() bool {
+	return execctx.PickTrieVariant() == commitment.VariantBinPatriciaTrie
 }
 
 // buildAccessedState re-executes a block against a recording historical-state reader
@@ -714,7 +738,7 @@ func (api *BaseAPI) buildAccessedState(
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
 func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error) {
-	resolvedMode, err := resolveWitnessMode(mode)
+	resolvedMode, err := resolveWitnessMode(mode, binCommitmentTrie())
 	if err != nil {
 		return nil, err
 	}
@@ -871,6 +895,7 @@ func (api *DebugAPIImpl) buildWitnessResultHeadCapture(ctx context.Context, comm
 // hc redirects only the commitment-domain reads to a pinned parent snapshot (head-capture);
 // nil is the durable-history path.
 func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalTx, hc *headCaptureSource, info *witnessBlockInfo, mode witnessMode) (*ExecutionWitnessResult, error) {
+	binTrie := binCommitmentTrie()
 	blockNum := info.BlockNum
 	block := info.Block
 	firstTxNumInBlock := info.FirstTxNumInBlock
@@ -898,8 +923,9 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	// Build merkle proofs for all accessed accounts
 	// Use the proof infrastructure from the commitment context.
-	// Witness generation requires the sequential HexPatriciaHashed (Witness()
-	// type-asserts it); the parallel trie cannot serve it.
+	// Witness capture is served by the sequential HexPatriciaHashed and by
+	// PBinPatriciaHashed, so bin is allowed through; only the parallel trie
+	// cannot serve it and is demoted.
 	domains, err := execctx.NewSharedDomains(ctx, tx, log.New(), execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
 	if err != nil {
 		return nil, err
@@ -936,14 +962,14 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 
 	siblingPaths, err := detectCollapseSiblings(ctx, tx, hc, domains, sdCtx,
 		firstTxNumInBlock, endTxNum, blockNum, parentNum,
-		block.Root(), accessed, mode)
+		block.Root(), accessed, mode, binTrie)
 	if err != nil {
 		return nil, err
 	}
 
 	// Materialize exclusion-proof branches for strict sparse-trie verifiers in legacy/default
 	// mode; canonical mode stays minimal to match the reference witness.
-	nodes, err := buildWitnessTrie(ctx, tx, hc, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical)
+	nodes, err := buildWitnessTrie(ctx, tx, hc, domains, sdCtx, firstTxNumInBlock, expectedParentRoot, siblingPaths, accessed, mode != witnessModeCanonical, binTrie)
 	if err != nil {
 		return nil, err
 	}
@@ -960,21 +986,11 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	if !ok {
 		return nil, fmt.Errorf("engine does not support full rules.Engine interface")
 	}
-	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine); err != nil {
+	if err := api.verifyWitnessStateless(ctx, tx, result, block, fullEngine, binTrie, expectedParentRoot); err != nil {
 		return nil, fmt.Errorf("%w: %w", errWitnessVerifyFailed, err)
 	}
 
-	// legacy carries the empty storage-trie node (0x80) once when some account has an
-	// empty storage root (EmptyRoot appears only as an account-leaf storage-root field);
-	// canonical omits it. Added after stateless verification, which rejects the bare node.
-	if mode == witnessModeLegacy {
-		for _, node := range result.State {
-			if bytes.Contains(node, trie.EmptyRoot[:]) {
-				result.State = append(result.State, hexutil.Bytes{0x80})
-				break
-			}
-		}
-	}
+	result.State = appendLegacyEmptyStorageNode(result.State, mode, binTrie)
 
 	// Sort after verifyWitnessStateless: RLPDecode treats result.State[0] as the trie root.
 	slices.SortFunc(result.State, func(a, b hexutil.Bytes) int {
@@ -982,6 +998,22 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	})
 
 	return result, nil
+}
+
+// appendLegacyEmptyStorageNode appends the empty storage-trie node (0x80) once when some
+// account leaf carries an empty storage root (EmptyRoot appears only as an account-leaf
+// storage-root field). It is an MPT artifact: canonical mode omits it and the binary trie
+// has no such node. Called after stateless verification, which rejects the bare node.
+func appendLegacyEmptyStorageNode(nodes []hexutil.Bytes, mode witnessMode, binTrie bool) []hexutil.Bytes {
+	if mode != witnessModeLegacy || binTrie {
+		return nodes
+	}
+	for _, node := range nodes {
+		if bytes.Contains(node, trie.EmptyRoot[:]) {
+			return append(nodes, hexutil.Bytes{0x80})
+		}
+	}
+	return nodes
 }
 
 // accessedState summarizes everything the witness needs from a recorded execution:
@@ -997,6 +1029,30 @@ type accessedState struct {
 	SortedCodes []hexutil.Bytes
 	CodeReads   map[common.Hash]witnesstypes.CodeWithHash
 	Deleted     map[common.Address]struct{}
+	// ModifiedCode is the code the block writes, per address. The binary trie
+	// commits code, so a witness for it has to cover the chunk keys these imply.
+	ModifiedCode map[common.Address][]byte
+	// StorageZoneProbes names the accounts whose storage the CREATE-collision
+	// check read out of pre-state (RecordingState.PreStateHasStorage).
+	StorageZoneProbes map[common.Address]struct{}
+}
+
+// pbinStorageProbes returns one plain storage key per account the
+// CREATE-collision check found storage on. Touching them brings those accounts'
+// storage zones into the witness, without which a binary-trie verifier reads a
+// zone slot as no storage at all: the tree commits no per-account storage root,
+// and the zone sits off the proof path the account's own leaves lie on.
+func (a *accessedState) pbinStorageProbes() [][]byte {
+	probe := commitment.PBinStorageZoneProbeSlot()
+	keys := make([][]byte, 0, len(a.StorageZoneProbes))
+	for addr := range a.StorageZoneProbes {
+		key := make([]byte, 0, len(addr)+len(probe))
+		key = append(key, addr[:]...)
+		key = append(key, probe[:]...)
+		keys = append(keys, key)
+	}
+	slices.SortFunc(keys, bytes.Compare)
+	return keys
 }
 
 // isEmpty reports whether no accounts, storage slots, or code addresses were touched.
@@ -1042,8 +1098,9 @@ func (a *accessedState) touchNonZeroKeys(sdCtx *commitmentdb.SharedDomainsCommit
 
 // touchAll touches every accessed account, storage slot, and code address on the
 // commitment context. Order matches the original inline implementation: accounts
-// first, then storage, then code.
-func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext) {
+// first, then storage, then code. Bin additionally touches the storage-zone
+// probes; hex needs none, since an MPT account leaf carries its storage root.
+func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentContext, binTrie bool) {
 	for addr := range a.Addresses {
 		sdCtx.TouchKey(kv.AccountsDomain, string(addr[:]), nil)
 	}
@@ -1056,6 +1113,11 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 	for addr := range a.CodeAddrs {
 		sdCtx.TouchKey(kv.CodeDomain, string(addr[:]), nil)
 	}
+	if binTrie {
+		for _, probe := range a.pbinStorageProbes() {
+			sdCtx.TouchKey(kv.StorageDomain, string(probe), nil)
+		}
+	}
 }
 
 // collectAccessedState rolls the RecordingState maps into an accessedState.
@@ -1063,16 +1125,23 @@ func (a *accessedState) touchAll(sdCtx *commitmentdb.SharedDomainsCommitmentCont
 // verifier re-derives in-block-created code by replaying the transactions.
 func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	out := &accessedState{
-		Addresses:   make(map[common.Address]struct{}),
-		Storage:     make(map[common.Address]map[common.Hash]struct{}),
-		CodeAddrs:   make(map[common.Address]struct{}),
-		SortedCodes: []hexutil.Bytes{},
-		WitnessKeys: []hexutil.Bytes{},
-		CodeReads:   make(map[common.Hash]witnesstypes.CodeWithHash),
-		Deleted:     make(map[common.Address]struct{}),
+		Addresses:    make(map[common.Address]struct{}),
+		Storage:      make(map[common.Address]map[common.Hash]struct{}),
+		CodeAddrs:    make(map[common.Address]struct{}),
+		SortedCodes:  []hexutil.Bytes{},
+		WitnessKeys:  []hexutil.Bytes{},
+		CodeReads:    make(map[common.Hash]witnesstypes.CodeWithHash),
+		ModifiedCode: make(map[common.Address][]byte),
+		Deleted:      make(map[common.Address]struct{}),
+
+		StorageZoneProbes: make(map[common.Address]struct{}, len(rs.PreStateHasStorage)),
 	}
+
 	for addr := range rs.DeletedAccounts {
 		out.Deleted[addr] = struct{}{}
+	}
+	for addr := range rs.PreStateHasStorage {
+		out.StorageZoneProbes[addr] = struct{}{}
 	}
 
 	readAddresses, readStorageKeys := rs.GetAccessedKeys()
@@ -1212,8 +1281,9 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 	for addr := range preCode {
 		out.CodeAddrs[addr] = struct{}{}
 	}
-	for addr := range modCode {
+	for addr, code := range modCode {
 		out.CodeAddrs[addr] = struct{}{}
+		out.ModifiedCode[addr] = code
 	}
 
 	return out
@@ -1223,6 +1293,12 @@ func collectAccessedState(rs *RecordingState, mode witnessMode) *accessedState {
 // (commitment from parent state, plain state from block end) and returns the sibling
 // paths the trie collapses through. The witness build must touch them, else collapsed-
 // sibling data is missing and stateless re-execution diverges from the root.
+//
+// The whole phase is hex-only. The binary trie does collapse branches, but it needs no
+// second pass to find them: its pruner keeps the sibling hanging off every branch a
+// proved key descends, so the survivor of any collapse is already in the witness. Both
+// tools this phase uses refuse bin anyway — SetCollapseTracer panics and
+// BranchChildCount is keyed by a hex nibble prefix.
 func detectCollapseSiblings(
 	ctx context.Context,
 	tx kv.TemporalTx,
@@ -1233,7 +1309,12 @@ func detectCollapseSiblings(
 	expectedBlockRoot common.Hash,
 	accessed *accessedState,
 	mode witnessMode,
+	binTrie bool,
 ) (siblingPaths [][]byte, err error) {
+	if binTrie {
+		return nil, nil
+	}
+
 	// Set up split reader: commitment from block beginning (durable) or the pinned
 	// parent snapshot (head-capture), plain state from block end. withHistory=false
 	// so branch updates are written using PutBranch().
@@ -1314,7 +1395,16 @@ func buildWitnessTrie(
 	siblingPaths [][]byte,
 	accessed *accessedState,
 	produceExclusionProofs bool,
+	binTrie bool,
 ) (encodedNodes []hexutil.Bytes, err error) {
+	// TouchHashedKey records a hashed path with an empty plain key, which the bin update
+	// stream cannot resolve. Bin carries its collapse survivors through the pruner instead,
+	// so detectCollapseSiblings returns none for it and one arriving here is a bug to
+	// surface, not a case to serve.
+	if binTrie && len(siblingPaths) > 0 {
+		return nil, fmt.Errorf("binary trie witness got %d collapse sibling paths; the binary trie names none", len(siblingPaths))
+	}
+
 	encodedNodes = []hexutil.Bytes{}
 
 	sdCtx.SetCustomHistoryStateReader(trieReaderFor(hc, tx, firstTxNumInBlock))
@@ -1322,7 +1412,24 @@ func buildWitnessTrie(
 		return nil, fmt.Errorf("failed to reset commitment for regular witness: %w", err)
 	}
 
-	accessed.touchAll(sdCtx)
+	accessed.touchAll(sdCtx, binTrie)
+
+	// The pass walks the parent state, which holds neither the code the block
+	// deploys nor any sign of which accounts it removed — and under bin both
+	// decide which keys the block touches.
+	if binTrie {
+		block := commitment.PBinWitnessBlock{
+			Code:    make(map[string][]byte, len(accessed.ModifiedCode)),
+			Removed: make(map[string]struct{}, len(accessed.Deleted)),
+		}
+		for addr, code := range accessed.ModifiedCode {
+			block.Code[string(addr[:])] = code
+		}
+		for addr := range accessed.Deleted {
+			block.Removed[string(addr[:])] = struct{}{}
+		}
+		sdCtx.SetWitnessBlock(block)
+	}
 
 	if len(siblingPaths) > 0 {
 		log.Debug("[debug_executionWitness] detected sibling paths", "count", len(siblingPaths))
@@ -1447,17 +1554,18 @@ func (api *BaseAPI) collectAccessedHeaders(
 	return headers, byNumber, nil
 }
 
-// verifyWitnessStateless optionally re-executes the block statelessly against the
-// generated witness and asserts the resulting state root matches. Verification is
-// a no-op when ERIGON_WITNESS_NO_VERIFY=true (it roughly doubles execution cost).
+// verifyWitnessStateless re-executes the block statelessly against the generated
+// witness and asserts the resulting state root matches.
 func (api *DebugAPIImpl) verifyWitnessStateless(
 	ctx context.Context,
 	tx kv.TemporalTx,
 	result *ExecutionWitnessResult,
 	block *types.Block,
 	fullEngine rules.Engine,
+	binTrie bool,
+	parentRoot common.Hash,
 ) error {
-	if dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false) {
+	if witnessVerifySkipped(binTrie) {
 		return nil
 	}
 
@@ -1466,7 +1574,51 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 		return fmt.Errorf("failed to get chain config: %w", err)
 	}
 
-	newStateRoot, stateless, err := execBlockStatelessly(result, block, chainCfg, fullEngine)
+	return verifyWitnessAgainstBlock(ctx, result, block, parentRoot, chainCfg, fullEngine, binTrie)
+}
+
+// witnessVerifySkipped reports whether ERIGON_WITNESS_NO_VERIFY may turn the
+// stateless gate off. Under bin it never may: binary witnesses have no external
+// conformance oracle, so re-execution is the only correctness evidence there is,
+// while hex's opt-out exists only to save the roughly doubled execution cost.
+func witnessVerifySkipped(binTrie bool) bool {
+	return !binTrie && dbg.EnvBool("ERIGON_WITNESS_NO_VERIFY", false)
+}
+
+// verifyWitnessAgainstBlock re-executes the block from the witness alone and
+// asserts it reaches the header's post-state root, then that keys[] carries a
+// preimage for every leaf the re-execution resolved. The two variants share the
+// replay and differ only in how a leaf resolves and how the root is merkelized;
+// bin needs parentRoot because its decoder is told its root rather than deriving
+// it from the node set.
+func verifyWitnessAgainstBlock(
+	ctx context.Context,
+	result *ExecutionWitnessResult,
+	block *types.Block,
+	parentRoot common.Hash,
+	chainCfg *chain.Config,
+	fullEngine rules.Engine,
+	binTrie bool,
+) error {
+	var (
+		newStateRoot common.Hash
+		usedAddrs    map[common.Address]struct{}
+		usedSlots    map[common.Hash]struct{}
+		err          error
+	)
+	if binTrie {
+		var stateless *pbinWitnessStateless
+		newStateRoot, stateless, err = pbinExecBlockStatelessly(ctx, result, block, parentRoot, chainCfg, fullEngine)
+		if stateless != nil {
+			usedAddrs, usedSlots = stateless.usedTrieAddrs, stateless.usedTrieSlots
+		}
+	} else {
+		var stateless *witnessStateless
+		newStateRoot, stateless, err = execBlockStatelessly(result, block, chainCfg, fullEngine)
+		if stateless != nil {
+			usedAddrs, usedSlots = stateless.usedTrieAddrs, stateless.usedTrieSlots
+		}
+	}
 	if err != nil {
 		return fmt.Errorf("[debug_executionWitness] stateless block execution failed: %w", err)
 	}
@@ -1476,8 +1628,8 @@ func (api *DebugAPIImpl) verifyWitnessStateless(
 		return fmt.Errorf("[debug_executionWitness] state root mismatch after stateless execution : got %x, expected %x", newStateRoot, expectedRoot)
 	}
 
-	if stateless != nil {
-		if err := checkWitnessKeysComplete(stateless.usedTrieAddrs, stateless.usedTrieSlots, result.Keys); err != nil {
+	if usedAddrs != nil || usedSlots != nil {
+		if err := checkWitnessKeysComplete(usedAddrs, usedSlots, result.Keys); err != nil {
 			return fmt.Errorf("[debug_executionWitness] %w", err)
 		}
 	}
@@ -2057,6 +2209,30 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		// common.HexToAddress("0x8863786beBE8eB9659DF00b49f8f1eeEc7e2C8c1"),
 	})
 
+	if err := replayBlockOverWitness(result, block, chainConfig, engine, stateless); err != nil {
+		return common.Hash{}, stateless, err
+	}
+
+	// Finalize and compute the resulting state root
+	newStateRoot, err := stateless.Finalize()
+	if err != nil {
+		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] stateless.Finalize() failed: %w", err)
+	}
+	return newStateRoot, stateless, nil
+}
+
+// statelessWitnessState is the reader/writer seam a witness re-execution runs
+// against. Hex and bin resolve a leaf and merkelize differently but replay a
+// block identically, so the replay itself is shared.
+type statelessWitnessState interface {
+	state.StateReader
+	state.StateWriter
+}
+
+// replayBlockOverWitness drives the block through the EVM against a witness-backed
+// reader/writer. It stops short of the post-state root, which each variant computes
+// its own way.
+func replayBlockOverWitness(result *ExecutionWitnessResult, block *types.Block, chainConfig *chain.Config, engine rules.Engine, stateless statelessWitnessState) error {
 	// Create the in-block state with the witness stateless as reader
 	ibs := state.New(stateless)
 	defer ibs.Close()
@@ -2074,18 +2250,18 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	systemCallCustom := func(contract accounts.Address, data []byte, ibState *state.IntraBlockState, hdr *types.Header, constCall bool) ([]byte, error) {
 		return protocol.SysCallContract(contract, data, chainConfig, ibState, hdr, engine, constCall, vm.Config{})
 	}
-	if err = engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("verification: failed to initialize block: %w", err)
+	if err := engine.Initialize(chainConfig, nil /* chainReader */, header, ibs, systemCallCustom, log.Root(), nil); err != nil {
+		return fmt.Errorf("verification: failed to initialize block: %w", err)
 	}
-	if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
+	if err := ibs.FinalizeTx(blockRules, stateless); err != nil {
+		return fmt.Errorf("verification: failed to finalize engine.Initialize tx: %w", err)
 	}
 
 	// Execute all transactions in the block
 	for txIndex, txn := range block.Transactions() {
 		msg, err := txn.AsMessage(*signer, header.BaseFee, blockRules)
 		if err != nil {
-			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to convert tx %d to message: %w", txIndex, err)
+			return fmt.Errorf("[statelessExec] failed to convert tx %d to message: %w", txIndex, err)
 		}
 
 		txCtx := protocol.NewEVMTxContext(msg)
@@ -2095,14 +2271,13 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 		ibs.SetTxContext(blockNum, txIndex)
 
 		// Apply the message - gasBailout must be false to properly deduct gas from sender
-		_, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
-		if err != nil {
-			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to apply tx %d: %w", txIndex, err)
+		if _, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine); err != nil {
+			return fmt.Errorf("[statelessExec] failed to apply tx %d: %w", txIndex, err)
 		}
 
 		// Finalize tx - state changes go to the witness stateless
 		if err = ibs.FinalizeTx(blockRules, stateless); err != nil {
-			return common.Hash{}, stateless, fmt.Errorf("[statelessExec] failed to finalize tx %d: %w", txIndex, err)
+			return fmt.Errorf("[statelessExec] failed to finalize tx %d: %w", txIndex, err)
 		}
 	}
 
@@ -2117,20 +2292,13 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	// only Bor and AuRa engine use ChainReader. And the ChainReader is only used to read headers. This means their
 	// witness may need to be augmented with headers accessed during their engine.Finalize(). This is something that
 	// can be implemented later. For now use ChainReader = nil, as this is sufficient for Ethereum.
-	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), statelessReceipts, block.Withdrawals(), nil /* chainReader */, syscall, false /*skipReceiptsEval*/, log.Root())
-	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
+	if _, err := engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), statelessReceipts, block.Withdrawals(), nil /* chainReader */, syscall, false /*skipReceiptsEval*/, log.Root()); err != nil {
+		return fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)
 	}
 
-	err = ibs.CommitBlock(blockRules, stateless)
-	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
+	if err := ibs.CommitBlock(blockRules, stateless); err != nil {
+		return fmt.Errorf("[statelessExec] ibs.CommitBlock() failed : %w", err)
 	}
 
-	// Finalize and compute the resulting state root
-	newStateRoot, err := stateless.Finalize()
-	if err != nil {
-		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] stateless.Finalize() failed: %w", err)
-	}
-	return newStateRoot, stateless, nil
+	return nil
 }

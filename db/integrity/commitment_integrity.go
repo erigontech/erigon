@@ -212,7 +212,7 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 
 func checkCommitmentRootViaSd(ctx context.Context, tx kv.TemporalTx, f state.VisibleFile, info commitmentRootInfo, logger log.Logger) (*execctx.SharedDomains, error) {
 	maxTxNum := f.EndRootNum() - 1
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithSequentialCommitment())
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithHexCommitmentOnly())
 	if err != nil {
 		return nil, err
 	}
@@ -1109,7 +1109,7 @@ func CheckCommitmentHistAtBlk(ctx context.Context, db kv.TemporalRoDB, br dbserv
 		return err
 	}
 	defer tx.Rollback()
-	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+	sd, err := execctx.NewSharedDomains(ctx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithHexCommitmentOnly())
 	if err != nil {
 		return err
 	}
@@ -1177,7 +1177,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 				return err
 			}
 			defer tx.Rollback()
-			sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithSequentialCommitment())
+			sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithHexCommitmentOnly())
 			if err != nil {
 				return err
 			}
@@ -1191,7 +1191,7 @@ func CheckCommitmentHistAtBlkRange(ctx context.Context, sc SamplerCfg, db kv.Tem
 			for blockNum := range sampler.BlockNums(windowStart, windowEnd) {
 				// Fresh SharedDomains per block: an SD is committed-or-closed,
 				// never reset in place.
-				sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates())
+				sd, err := execctx.NewSharedDomains(wCtx, tx, logger, execctx.WithoutDeferredBranchUpdates(), execctx.WithHexCommitmentOnly())
 				if err != nil {
 					return err
 				}

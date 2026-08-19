@@ -127,8 +127,28 @@ integration stage_exec
 ## How to re-gen CommitmentDomain
 
 ```sh
-integration commitment rebuild
+# hex, in place
+integration commitment rebuild --datadir=<datadir>
+
+# EIP-8297 binary trie, derived from a hex datadir (offline migration).
+# --output.datadir is required for a bin target: a commitment .kv records no trie
+# variant, so bin files left beside hex ones would later be read as hex.
+integration commitment rebuild --datadir=<src> --output.datadir=<out> --no-history \
+  --experimental.bin-commitment --experimental.bin-commitment.hash=blake3
+
+# resume an interrupted run; without --resume a non-empty output is refused
+integration commitment rebuild --datadir=<src> --output.datadir=<out> --no-history --resume ...
 ```
+
+The output datadir is staged with hardlinks to the source's account/storage/code files, so it must
+be on the same filesystem as the source and must not sit inside it. Size the output volume for the
+whole state, not for the commitment files alone: the merge loop that runs after each rebuilt range
+rewrites the merged account/storage/code files into the output and drops the links, so the hardlinks
+save the initial copy and nothing after it. `--output.datadir` requires
+`--no-history` and is refused together with `--reset` and `--clear-commitment`, all of which write
+to the source; `--squeeze` is refused for a bin target. The run prints `commitment_files`,
+`rebuild_ranges` and `rebuild_shards` as tab-separated tables. Start a node on the output with
+`--experimental.bin-commitment` — the run writes the matching `erigondb.toml` there.
 
 ## How to re-generate optional Domain/Index
 

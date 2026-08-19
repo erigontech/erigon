@@ -63,6 +63,8 @@ var (
 	clearCommitment                 bool
 	resume                          bool
 	noHistory                       bool
+	rebuildOutputDatadir            string
+	rebuildMaxShardSteps            uint64
 	erigondbDomainStepsInFrozenFile string
 	syncCfg                         = ethconfig.Defaults.Sync
 
@@ -148,6 +150,11 @@ func withResume(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&resume, "resume", false, "resume a previously interrupted commitment rebuild")
 }
 
+func withRebuildOutputDatadir(cmd *cobra.Command) {
+	cmd.Flags().StringVar(&rebuildOutputDatadir, "output.datadir", "", "datadir the rebuilt commitment files are written into; the source datadir stays a read-only input. Required for a bin target, whose files are indistinguishable from hex ones by name")
+	must(cmd.MarkFlagDirname("output.datadir"))
+}
+
 func withNoHistory(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&noHistory, "no-history", false, "skip history regeneration and only rebuild commitment KV files")
 }
@@ -175,6 +182,8 @@ func withDataDir(cmd *cobra.Command) {
 
 func withExperimentalCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Usage)
+	cmd.Flags().BoolVar(&statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Name, statecfg.ExperimentalBinCommitment, utils.ExperimentalBinCommitmentFlag.Usage)
+	cmd.Flags().StringVar(&statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Name, statecfg.BinCommitmentHash, utils.ExperimentalBinCommitmentHashFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {

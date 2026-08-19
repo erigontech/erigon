@@ -600,7 +600,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 		cc.fail(ctx, target, fmt.Errorf("BAL-driven compute-ahead block %d: %w", req.blockNum, err))
 		return
 	}
-	if !bytes.Equal(rh, req.stateRoot[:]) {
+	if headerRootMismatch(rh, req.stateRoot[:]) {
 		cc.fail(ctx, target, fmt.Errorf("%w: BAL-driven block %d root %x expected %x",
 			ErrWrongTrieRoot, req.blockNum, rh, req.stateRoot))
 		return
@@ -705,6 +705,8 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target com
 		cc.fail(ctx, target, fmt.Errorf("shadow incremental compute: %w", err))
 		return
 	}
+	// Both operands are roots this node computed, so the header-root toggle does
+	// not apply: this is the only thing validating the BAL-driven path.
 	if !bytes.Equal(rh, balRoot) {
 		cc.fail(ctx, target, fmt.Errorf("%w: shadow mismatch block %d incremental %x BAL-driven %x",
 			ErrWrongTrieRoot, target.blockNum, rh, balRoot))
@@ -812,7 +814,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	if !m.checkRoot {
 		return
 	}
-	mismatch := !bytes.Equal(rh, t.stateRoot[:])
+	mismatch := headerRootMismatch(rh, t.stateRoot[:])
 	if !m.publishRoot && !mismatch {
 		return
 	}

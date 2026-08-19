@@ -106,6 +106,15 @@ type Trie interface {
 	Release()
 }
 
+// StatefulTrie is the optional capability of a Trie to save its in-memory state
+// into the commitment-state record and restore it after a restart. Both calls
+// require a fully folded trie; a state blob is engine-specific and must only be
+// restored by the variant that produced it.
+type StatefulTrie interface {
+	EncodeCurrentState(buf []byte) ([]byte, error)
+	SetState(buf []byte) error
+}
+
 type CommitProgress struct {
 	KeyIndex    uint64
 	UpdateCount uint64
@@ -126,6 +135,10 @@ type TrieVariant string
 const (
 	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
 	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
+	// VariantBinPatriciaTrie is EIP-8297's binary tree. Experimental: a
+	// whole-datadir property resolved at first start, sequential only, and
+	// unsupported on the paths listed in PBinPatriciaHashed's doc.
+	VariantBinPatriciaTrie TrieVariant = "bin-patricia-hashed"
 )
 
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
@@ -134,6 +147,12 @@ func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
+		return trie, tree
+	case VariantBinPatriciaTrie:
+		// ModeDirect regardless of the argument: the parallel prefix trie is a
+		// hex-nibble structure and the binary key space has no nibbles.
+		trie := NewPBinPatriciaHashed(nil)
+		tree := NewUpdates(ModeDirect, tmpdir, trie.setHashSuite(pbinSelectedSum))
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
@@ -1145,6 +1164,8 @@ func ParseTrieVariant(s string) TrieVariant {
 	switch s {
 	case "parallel":
 		trieVariant = VariantParallelHexPatricia
+	case "bin":
+		trieVariant = VariantBinPatriciaTrie
 	case "hex":
 		fallthrough
 	default:
@@ -1561,6 +1582,7 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 				}
 				if update.Flags&CodeUpdate != 0 {
 					existing.update.CodeHash = update.CodeHash
+					existing.update.CodeSize = update.CodeSize
 					existing.update.Flags |= CodeUpdate
 				}
 				if update.Flags&StorageUpdate != 0 {
@@ -2007,6 +2029,9 @@ type Update struct {
 	Flags      UpdateFlags
 	Balance    uint256.Int
 	Nonce      uint64
+	// CodeSize travels with CodeHash and is read only by the binary trie, whose
+	// BASIC_DATA leaf packs it (eip-8297).
+	CodeSize uint64
 }
 
 func (u *Update) Reset() {
@@ -2015,6 +2040,7 @@ func (u *Update) Reset() {
 	u.Nonce = 0
 	u.StorageLen = 0
 	u.CodeHash = empty.CodeHash
+	u.CodeSize = 0
 }
 
 func (u *Update) Copy() *Update {
@@ -2027,6 +2053,7 @@ func (u *Update) Copy() *Update {
 		StorageLen: u.StorageLen,
 		Flags:      u.Flags,
 		Nonce:      u.Nonce,
+		CodeSize:   u.CodeSize,
 	}
 	c.Balance.Set(&u.Balance)
 	return c
@@ -2051,6 +2078,7 @@ func (u *Update) Merge(b *Update) {
 	if b.Flags&CodeUpdate != 0 {
 		u.Flags |= CodeUpdate
 		copy(u.CodeHash[:], b.CodeHash[:])
+		u.CodeSize = b.CodeSize
 	}
 	if b.Flags&StorageUpdate != 0 {
 		u.Flags |= StorageUpdate
@@ -2071,6 +2099,8 @@ func (u *Update) Encode(buf []byte, numBuf []byte) []byte {
 	}
 	if u.Flags&CodeUpdate != 0 {
 		buf = append(buf, u.CodeHash[:]...)
+		n := binary.PutUvarint(numBuf, u.CodeSize)
+		buf = append(buf, numBuf[:n]...)
 	}
 	if u.Flags&StorageUpdate != 0 {
 		n := binary.PutUvarint(numBuf, uint64(u.StorageLen))
@@ -2123,6 +2153,15 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 		}
 		copy(u.CodeHash[:], buf[pos:pos+32])
 		pos += length.Hash
+		var n int
+		u.CodeSize, n = binary.Uvarint(buf[pos:])
+		if n == 0 {
+			return 0, errors.New("decode Update: buffer too small for codeSize")
+		}
+		if n < 0 {
+			return 0, errors.New("decode Update: codeSize overflow")
+		}
+		pos += n
 	}
 	if u.Flags&StorageUpdate != 0 {
 		l, n := binary.Uvarint(buf[pos:])
@@ -2133,6 +2172,9 @@ func (u *Update) Decode(buf []byte, pos int) (int, error) {
 			return 0, errors.New("decode Update: storage pos overflow")
 		}
 		pos += n
+		if l > uint64(len(u.Storage)) {
+			return 0, errors.New("decode Update: storage len out of range")
+		}
 		if len(buf) < pos+int(l) {
 			return 0, errors.New("decode Update: buffer too small for storage")
 		}
@@ -2156,7 +2198,7 @@ func (u *Update) String() string {
 		sb.WriteString(fmt.Sprintf(", Nonce: [%d]", u.Nonce))
 	}
 	if u.Flags&CodeUpdate != 0 {
-		sb.WriteString(fmt.Sprintf(", CodeHash: [%x]", u.CodeHash))
+		sb.WriteString(fmt.Sprintf(", CodeHash: [%x], CodeSize: [%d]", u.CodeHash, u.CodeSize))
 	}
 	if u.Flags&StorageUpdate != 0 {
 		sb.WriteString(fmt.Sprintf(", Storage: [%x]", u.Storage[:u.StorageLen]))

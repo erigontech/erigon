@@ -109,7 +109,7 @@ func TestAggregator_RebuildCommitmentAcrossMergedShards(t *testing.T) {
 	}
 	require.NoError(t, agg.OpenFolder())
 
-	finalRoot, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false)
+	finalRoot, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false, state.DefaultRebuildTarget())
 	require.NoError(t, err)
 	require.NotEmpty(t, finalRoot)
 	require.NotEqual(t, empty.RootHash[:], finalRoot)

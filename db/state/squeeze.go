@@ -22,6 +22,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -871,10 +872,116 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 	return latestRoot, nil
 }
 
+// RebuildTarget is the commitment scheme a rebuild produces. It is a parameter of
+// the rebuild rather than a property of the source datadir: deriving bin files
+// from a hex datadir is the offline migration case, so the target must not be read
+// from process configuration once a caller names one.
+type RebuildTarget struct {
+	Variant  commitment.TrieVariant
+	HashName string // H for a bin target; empty keeps the suite this process selected
+	// MaxShardSteps caps how many steps one shard covers; 0 sizes it from the machine.
+	MaxShardSteps uint64
+}
+
+// DefaultRebuildTarget is what a rebuild produces when the caller names no
+// target: the scheme this process is configured for.
+func DefaultRebuildTarget() RebuildTarget {
+	t := RebuildTarget{Variant: execctx.PickTrieVariant()}
+	if t.Variant == commitment.VariantBinPatriciaTrie {
+		// The configured hash, not the selected suite: a tool that binds its own
+		// suite per run never calls SetPBinHashSuite, so the suite still reads as
+		// the default while the flag asks for the other one.
+		if t.HashName = statecfg.BinCommitmentHash; t.HashName == "" {
+			t.HashName = commitment.PBinHashSuiteName()
+		}
+	}
+	return t
+}
+
+// Resolve fills in what the caller left unset and refuses a combination the
+// rebuild cannot honour.
+func (t RebuildTarget) Resolve() (RebuildTarget, error) {
+	switch t.Variant {
+	case "":
+		shardSteps := t.MaxShardSteps
+		t = DefaultRebuildTarget()
+		t.MaxShardSteps = shardSteps
+	case commitment.VariantBinPatriciaTrie:
+		if t.HashName == "" {
+			t.HashName = commitment.PBinHashSuiteName()
+		}
+		if t.HashName != commitment.PBinHashKeccak && t.HashName != commitment.PBinHashBlake3 {
+			return RebuildTarget{}, fmt.Errorf("commitment rebuild: unknown hash suite %q", t.HashName)
+		}
+	case commitment.VariantHexPatriciaTrie, commitment.VariantParallelHexPatricia:
+		if t.HashName != "" {
+			return RebuildTarget{}, fmt.Errorf("commitment rebuild: hash suite %q needs the bin trie target", t.HashName)
+		}
+	default:
+		return RebuildTarget{}, fmt.Errorf("commitment rebuild: unknown trie variant %q", t.Variant)
+	}
+	return t, nil
+}
+
+// RebuildReport is what only the rebuild can tell its caller: the counts it
+// walked. File sizes are on disk and are the caller's to stat.
+type RebuildReport struct {
+	Target RebuildTarget
+	Ranges []RebuildRangeReport
+}
+
+type RebuildRangeReport struct {
+	StepFrom      kv.Step
+	StepTo        kv.Step
+	TxnFrom       uint64
+	TxnTo         uint64
+	KeysInFiles   uint64 // accounts + storage keys the range's files hold
+	KeysProcessed uint64 // keys the shards below actually walked
+	RootHash      []byte
+	Shards        []RebuildShardReport
+}
+
+// RebuildShardReport carries the code-hash reuse the chunk cache acts on. The
+// cache lives for one shard, so a ratio taken over the whole datadir overstates
+// what the rebuild saves.
+type RebuildShardReport struct {
+	StepFrom            kv.Step
+	StepTo              kv.Step
+	Keys                uint64
+	CodeBearingAccounts uint64
+	UniqueCodeHashes    uint64
+}
+
+// bindPBinHashSuite selects H for the duration of a bin rebuild and returns the
+// restore. H is process-wide, so the rebuild binds it from its own target instead
+// of inheriting whatever the source datadir's erigondb.toml resolved to.
+func bindPBinHashSuite(name string) (func(), error) {
+	prev := commitment.PBinHashSuiteName()
+	if err := commitment.SetPBinHashSuite(name); err != nil {
+		return nil, err
+	}
+	return func() { _ = commitment.SetPBinHashSuite(prev) }, nil
+}
+
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
-func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool) (latestRoot []byte, err error) {
+// A zero target resolves to the scheme this process is configured for.
+func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsReader *rawdbv3.TxNumsReader, logger log.Logger, squeeze bool, target RebuildTarget) (latestRoot []byte, report *RebuildReport, err error) {
+	target, err = target.Resolve()
+	if err != nil {
+		return nil, nil, err
+	}
+	report = &RebuildReport{Target: target}
+	logger.Info("[commitment_rebuild] target", "variant", target.Variant, "hash", target.HashName)
+	if target.Variant == commitment.VariantBinPatriciaTrie {
+		restoreHashSuite, err := bindPBinHashSuite(target.HashName)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer restoreHashSuite()
+	}
+
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
 
 	// disable hard alignment; allowing commitment and storage/account to have
@@ -911,7 +1018,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 	sf, err := acRo.filesInRange(rng)
 	if err != nil {
-		return nil, err
+		return nil, nil, err
 	}
 
 	ranges := make([]MergeRange, 0)
@@ -925,7 +1032,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		})
 	}
 	if len(ranges) == 0 {
-		return nil, errors.New("no account files found")
+		return nil, nil, errors.New("no account files found")
 	}
 
 	logger.Info("[commitment_rebuild] collected shards to build", "count", len(sf.d[kv.AccountsDomain]))
@@ -947,7 +1054,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	// variant enables it explicitly. Variant is set per-iteration in the inner loop.
 	rebuildTrieCfg := commitment.DefaultTrieConfig()
 	rebuildTrieCfg.EnableTrieWarmup = false
-	maxShardSteps := uint64(commitment.DefaultRebuildShardMaxSteps)
+	totalMemory := estimate.TotalMemory()
 
 	var totalKeysCommitted uint64
 
@@ -961,7 +1068,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 		roTx, err := a.db.BeginRo(ctx)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		defer roTx.Rollback() //nolint:gocritic
 
@@ -977,7 +1084,14 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		stepsInShard := uint64(shardTo - shardFrom)
 		keysPerStep := totalKeys / stepsInShard // how many keys in just one step?
 
-		shardStepsSize := kv.Step(min(uint64(math.Pow(2, math.Log2(float64(stepsInShard)))), maxShardSteps))
+		shardSteps := rebuildShardSteps(totalMemory, stepsInShard, keysPerStep)
+		if target.MaxShardSteps != 0 {
+			shardSteps = min(target.MaxShardSteps, prevPowerOfTwo(stepsInShard))
+		}
+		logger.Info("[commitment_rebuild] shard sizing", "shardSteps", shardSteps,
+			"stepsInRange", stepsInShard, "keysPerStep", keysPerStep,
+			"totalMemory", common.ByteCount(totalMemory))
+		shardStepsSize := kv.Step(shardSteps)
 		if uint64(shardStepsSize) != stepsInShard { // processing shard in several smaller steps
 			shardTo = shardFrom + shardStepsSize // if shard is quite big, we will process it in several steps
 		}
@@ -997,34 +1111,38 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		var rebuiltCommit *rebuiltCommitment
 		var processed uint64
 
+		rangeReport := RebuildRangeReport{
+			StepFrom:    shardFrom,
+			StepTo:      lastShard,
+			TxnFrom:     r.from,
+			TxnTo:       r.to,
+			KeysInFiles: totalKeys,
+		}
+
 		streamAcc, err := acRo.FileStream(kv.AccountsDomain, rangeFromTxNum, rangeToTxNum)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		streamSto, err := acRo.FileStream(kv.StorageDomain, rangeFromTxNum, rangeToTxNum)
 		if err != nil {
-			return nil, err
+			return nil, nil, err
 		}
 		keyIter := stream.UnionKV(streamAcc, streamSto, -1)
 		// blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		blockNum, ok, err := txNumsReader.FindBlockNum(ctx, roTx, rangeToTxNum-1)
 		if err != nil {
-			return nil, fmt.Errorf("CommitmentRebuild: FindBlockNum(%d) %w", rangeToTxNum, err)
+			return nil, nil, fmt.Errorf("CommitmentRebuild: FindBlockNum(%d) %w", rangeToTxNum, err)
 		}
 		if !ok {
 			// var txnum uint64
 			blockNum, _, err = txNumsReader.Last(roTx)
 			if err != nil {
-				return nil, fmt.Errorf("CommitmentRebuild: Last() %w", err)
+				return nil, nil, fmt.Errorf("CommitmentRebuild: Last() %w", err)
 			}
 		}
 		roTx.Rollback()
 
-		trieVariant := commitment.VariantHexPatriciaTrie
-		if statecfg.ExperimentalParallelCommitment {
-			trieVariant = commitment.VariantParallelHexPatricia
-		}
-
+		firstShard := true
 		for shardFrom < lastShard { // recreate this file range 1+ steps
 			nextKey := func() (ok bool, k []byte) {
 				if !keyIter.HasNext() {
@@ -1044,25 +1162,38 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 			rwTx, err := rwDb.BeginTemporalRw(ctx)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			defer rwTx.Rollback() //nolint:gocritic
 
 			iterTrieCfg := rebuildTrieCfg
-			iterTrieCfg.Variant = trieVariant
-			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), execctx.WithTrieConfig(iterTrieCfg))
+			iterTrieCfg.Variant = target.Variant
+			sdOpts := []execctx.SharedDomainOption{execctx.WithTrieConfig(iterTrieCfg)}
+			if target.Variant == commitment.VariantBinPatriciaTrie {
+				sdOpts = append(sdOpts, execctx.WithoutCommitmentSeek())
+			}
+			domains, err := execctx.NewSharedDomains(ctx, rwTx, log.New(), sdOpts...)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 
 			domains.SetTxNum(lastTxnumInShard - 1)
 			currentTxNum := lastTxnumInShard - 1
 			domains.GetCommitmentCtx().SetStateReader(commitmentdb.NewFilesOnlyStateReader(rwTx, lastTxnumInShard-1))
-			if statecfg.ExperimentalParallelCommitment {
+			if target.Variant == commitment.VariantParallelHexPatricia {
 				domains.EnableParaTrieDB(rwDb)
 			}
 
-			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, &rebuiltCommitment{
+			var removals func(*execctx.SharedDomains) (uint64, error)
+			if firstShard && target.Variant == commitment.VariantBinPatriciaTrie {
+				removals = func(sd *execctx.SharedDomains) (uint64, error) {
+					from, to := r.FromTo()
+					return touchRangeRemovals(acRo, sd, from, to)
+				}
+			}
+			firstShard = false
+
+			rebuiltCommit, err = rebuildCommitmentShard(ctx, domains, rwTx, nextKey, removals, &rebuiltCommitment{
 				StepFrom: shardFrom,
 				StepTo:   shardTo,
 				TxnFrom:  rangeFromTxNum,
@@ -1074,8 +1205,15 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 				LogPrefix:   fmt.Sprintf("[commitment_rebuild] range %s shard %d-%d", r.String("", a.StepSize()), shardFrom, shardTo),
 			})
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
+			rangeReport.Shards = append(rangeReport.Shards, RebuildShardReport{
+				StepFrom:            rebuiltCommit.StepFrom,
+				StepTo:              rebuiltCommit.StepTo,
+				Keys:                rebuiltCommit.KeysProcessed,
+				CodeBearingAccounts: rebuiltCommit.CodeStats.CodeBearingAccounts,
+				UniqueCodeHashes:    rebuiltCommit.CodeStats.UniqueCodeHashes,
+			})
 			domains.Close()
 
 			// make new file visible for all aggregator transactions
@@ -1087,7 +1225,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			for {
 				smthDone, err := a.mergeCommitmentStep(ctx, rangeToTxNum)
 				if err != nil {
-					return nil, err
+					return nil, nil, err
 				}
 				if !smthDone {
 					break
@@ -1112,6 +1250,9 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			rhx = hex.EncodeToString(rebuiltCommit.RootHash)
 			latestRoot = rebuiltCommit.RootHash
 		}
+		rangeReport.KeysProcessed = processed
+		rangeReport.RootHash = latestRoot
+		report.Ranges = append(report.Ranges, rangeReport)
 
 		var m runtime.MemStats
 		dbg.ReadMemStats(&m)
@@ -1121,7 +1262,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 		for {
 			smthDone, err := a.mergeLoopStep(ctx, rangeToTxNum)
 			if err != nil {
-				return nil, err
+				return nil, nil, err
 			}
 			if !smthDone {
 				break
@@ -1137,7 +1278,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	acRo.Close()
 
 	if !squeeze && !wantsReferencesInBranches {
-		return latestRoot, nil
+		return latestRoot, report, nil
 	}
 	logger.Info("[squeeze] starting")
 	a.dirtyFilesLock.Lock()
@@ -1153,7 +1294,7 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	if err = SqueezeCommitmentFiles(ctx, actx, logger); err != nil {
 		logger.Warn("[squeeze] failed", "err", err)
 		logger.Info("[squeeze] rebuilt commitment files still available. Instead of re-run, you have to run 'erigon snapshots squeeze' to finish squeezing")
-		return nil, err
+		return nil, nil, err
 	}
 	actx.Close()
 	if err = a.ReloadFiles(); err != nil {
@@ -1162,13 +1303,42 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 
 	if err = a.BuildMissedAccessors(ctx, 4); err != nil {
 		logger.Warn("[squeeze] failed to build missed accessors", "err", err)
-		return nil, err
+		return nil, nil, err
 	}
 
-	return latestRoot, nil
+	return latestRoot, report, nil
 }
 
-func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
+// touchRangeRemovals feeds every key the range removes, a zero-length record in
+// its own domain files, into the update set. Shards slice the range in plain-key
+// order while the trie is ordered by tree key, so a removal can land in a later
+// shard than the one re-hashing the branch that still names its leaf, where the
+// bin trie reads it absent and the forward-only fold can no longer drop it.
+func touchRangeRemovals(acRo *AggregatorRoTx, sd *execctx.SharedDomains, fromTxNum, toTxNum uint64) (uint64, error) {
+	var touched uint64
+	for _, d := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain} {
+		s, err := acRo.FileStream(d, fromTxNum, toTxNum)
+		if err != nil {
+			return touched, err
+		}
+		for s.HasNext() {
+			k, v, err := s.Next()
+			if err != nil {
+				s.Close()
+				return touched, err
+			}
+			if len(v) > 0 {
+				continue
+			}
+			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(k), nil)
+			touched++
+		}
+		s.Close()
+	}
+	return touched, nil
+}
+
+func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalTx, next func() (bool, []byte), removals func(*execctx.SharedDomains) (uint64, error), cfg *rebuiltCommitment) (*rebuiltCommitment, error) {
 	aggTx := AggTx(tx)
 	sd.DiscardWrites(kv.AccountsDomain)
 	sd.DiscardWrites(kv.StorageDomain)
@@ -1180,11 +1350,27 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 	logger.Info(cfg.LogPrefix+" started", "totalKeys", common.PrettyCounter(cfg.Keys), "block", cfg.BlockNumber, "txn", cfg.TxnNumber,
 		"files", fmt.Sprintf("%d %v", len(visComFiles), visComFiles.String()))
 
+	// Only a range that inherits commitment files can hold a leaf this range
+	// removes; a range building its own tree never inserts one.
+	if removals != nil && len(visComFiles) > 0 {
+		rf := time.Now()
+		touched, err := removals(sd)
+		if err != nil {
+			return nil, fmt.Errorf("%s: inherited removals: %w", cfg.LogPrefix, err)
+		}
+		logger.Info(cfg.LogPrefix+" applied inherited removals", "keys", common.PrettyCounter(touched),
+			"spent", time.Since(rf).String())
+	}
+
 	sf := time.Now()
 	var processed uint64
+	// next() signals "no more keys" as (false, nil) but a shard boundary as
+	// (false, key), so the key has to be checked separately from ok.
 	for ok, key := next(); ; ok, key = next() {
-		sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
-		processed++
+		if len(key) > 0 {
+			sd.GetCommitmentCtx().TouchKey(kv.AccountsDomain, string(key), nil)
+			processed++
+		}
 		if !ok {
 			break
 		}
@@ -1196,8 +1382,14 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		return nil, err
 	}
 
+	var codeStats commitment.PBinCodeStats
+	if trie, ok := sd.GetCommitmentCtx().Trie().(codeStatsTrie); ok {
+		codeStats = trie.CodeStats()
+	}
+
 	logger.Info(cfg.LogPrefix+" now sealing (dumping on disk)", "root", hex.EncodeToString(rh),
-		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys))
+		"keysInShard", common.PrettyCounter(processed), "keysInRange", common.PrettyCounter(cfg.Keys),
+		"codeBearingAccounts", codeStats.CodeBearingAccounts, "uniqueCodeHashes", codeStats.UniqueCodeHashes)
 
 	sb := time.Now()
 	err = aggTx.d[kv.CommitmentDomain].d.dumpStepRangeOnDisk(ctx, cfg.StepFrom, cfg.StepTo, sd.GetMemBatch().(*TemporalMemBatch), nil)
@@ -1210,25 +1402,35 @@ func rebuildCommitmentShard(ctx context.Context, sd *execctx.SharedDomains, tx k
 		"spentCollecting", collectionSpent.String(), "spentComputing", time.Since(sf).String(), "spentDumpingOnDisk", time.Since(sb).String())
 
 	return &rebuiltCommitment{
-		RootHash: rh,
-		StepFrom: cfg.StepFrom,
-		StepTo:   cfg.StepTo,
-		TxnFrom:  cfg.TxnFrom,
-		TxnTo:    cfg.TxnTo,
-		Keys:     processed,
+		RootHash:      rh,
+		StepFrom:      cfg.StepFrom,
+		StepTo:        cfg.StepTo,
+		TxnFrom:       cfg.TxnFrom,
+		TxnTo:         cfg.TxnTo,
+		Keys:          cfg.Keys,
+		KeysProcessed: processed,
+		CodeStats:     codeStats,
 	}, nil
 }
 
+// codeStatsTrie is the optional capability of an engine to report the code its
+// last Process chunkified; only the bin engine chunkifies code at all.
+type codeStatsTrie interface {
+	CodeStats() commitment.PBinCodeStats
+}
+
 type rebuiltCommitment struct {
-	RootHash    []byte // root hash of this commitment. set once commit is finished
-	StepFrom    kv.Step
-	StepTo      kv.Step
-	TxnFrom     uint64
-	TxnTo       uint64
-	Keys        uint64 // amount of keys in this range
-	BlockNumber uint64 // block number for this commitment
-	TxnNumber   uint64 // tx number for this commitment
-	LogPrefix   string
+	RootHash      []byte // root hash of this commitment. set once commit is finished
+	StepFrom      kv.Step
+	StepTo        kv.Step
+	TxnFrom       uint64
+	TxnTo         uint64
+	Keys          uint64 // amount of keys in this range
+	KeysProcessed uint64 // amount of keys this shard walked. set once commit is finished
+	CodeStats     commitment.PBinCodeStats
+	BlockNumber   uint64 // block number for this commitment
+	TxnNumber     uint64 // tx number for this commitment
+	LogPrefix     string
 }
 
 func domainFiles(dirs datadir.Dirs, domain kv.Domain) []string {

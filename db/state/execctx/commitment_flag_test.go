@@ -106,3 +106,16 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 		"sequential and parallel commitment roots must match: sequential=%x parallel=%x",
 		seqRoot, parRoot)
 }
+
+func TestPickTrieVariant_BinFlag(t *testing.T) {
+	// No t.Parallel: mutates process-global statecfg flags.
+	origBin := statecfg.ExperimentalBinCommitment
+	t.Cleanup(func() { statecfg.ExperimentalBinCommitment = origBin })
+
+	statecfg.ExperimentalBinCommitment = true
+	require.Equal(t, commitment.VariantBinPatriciaTrie, execctx.PickTrieVariant())
+
+	// Bin is a persisted datadir property, so it wins over the runtime experiment.
+	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
+	require.Equal(t, commitment.VariantBinPatriciaTrie, execctx.PickTrieVariant())
+}

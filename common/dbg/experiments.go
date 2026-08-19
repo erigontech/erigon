@@ -67,6 +67,16 @@ var (
 	discardCommitment    = EnvBool("DISCARD_COMMITMENT", false)
 	pruneTotalDifficulty = EnvBool("PRUNE_TOTAL_DIFFICULTY", true)
 
+	// CheckHeaderStateRoot gates the post-execution comparison of the computed
+	// state root against the block header's. On by default; switch off only for
+	// a chain whose headers this node cannot reproduce — with it off nothing
+	// cross-checks execution results.
+	CheckHeaderStateRoot = EnvBool("CHECK_HEADER_STATE_ROOT", true)
+
+	warnRootCheckOff = sync.OnceFunc(func() {
+		log.Warn("HEADER STATE-ROOT CHECK IS DISABLED (CHECK_HEADER_STATE_ROOT=false): nothing cross-checks execution results against headers; a wrong chain will look healthy")
+	})
+
 	// force skipping of any non-Erigon2 .torrent files
 	DownloaderOnlyBlocks = EnvBool("DOWNLOADER_ONLY_BLOCKS", false)
 
@@ -166,6 +176,16 @@ func init() {
 		runtime.SetBlockProfileRate(1)
 		runtime.SetMutexProfileFraction(1)
 	}
+}
+
+// WarnHeaderStateRootCheckDisabled says once per process that nothing
+// cross-checks execution against headers. Node startup and the execution path
+// both call it, so a runner that never boots a node still says so.
+func WarnHeaderStateRootCheckDisabled() {
+	if CheckHeaderStateRoot {
+		return
+	}
+	warnRootCheckOff()
 }
 
 func ReadMemStats(m *runtime.MemStats) {
