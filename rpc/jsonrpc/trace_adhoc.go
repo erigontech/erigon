@@ -1126,7 +1126,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 	}
 
 	// nil filters: committed view — the replay below reads temporal data through this tx.
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, nil)
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1324,7 +1324,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 	// nil filters: committed view — the replay below reads temporal data through this tx.
-	blockNumber, hash, latest, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, nil)
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -1400,7 +1400,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 	// nil filters: committed view — the replay below reads temporal data through this tx.
-	parentBlockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, nil)
+	parentBlockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, nil)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1628,7 +1628,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 		parentNrOrHash = &rpc.BlockNumberOrHash{BlockNumber: &num}
 	}
 	// nil filters: committed view — the replay below reads temporal data through this tx.
-	parentBlockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, nil)
+	parentBlockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, *parentNrOrHash, dbtx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}

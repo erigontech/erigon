@@ -31,6 +31,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/db/dbservices"
@@ -42,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -162,6 +164,20 @@ func (r staticTxnReader) TxnLookup(context.Context, kv.Getter, common.Hash) (uin
 type hideHeaderBlockReader struct {
 	dbservices.FullBlockReader
 	blockNumber uint64
+}
+
+type publishOverlayOnSecondProbeTx struct {
+	kv.Tx
+	probes  int
+	publish func()
+}
+
+func (tx *publishOverlayOnSecondProbeTx) IsOverlayReadView() bool {
+	tx.probes++
+	if tx.probes == 2 {
+		tx.publish()
+	}
+	return false
 }
 
 func (r hideHeaderBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNumber uint64) (*types.Header, error) {
@@ -380,6 +396,69 @@ func TestGetRawHeader_PinsOverlayView(t *testing.T) {
 	require.NotNil(t, header)
 }
 
+func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ff := rpchelper.New(m.Ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)})
+	payload, err := rlp.EncodeToBytes(pendingBlock)
+	require.NoError(t, err)
+	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
+
+	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	header, err := api.GetRawHeader(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber))
+	require.NoError(t, err)
+	require.Nil(t, header)
+}
+
+func TestHeaderHelpersDoNotReselectOverlay(t *testing.T) {
+	tests := []struct {
+		name string
+		call func(context.Context, *BaseAPI, kv.Tx) (*types.Header, error)
+	}{
+		{
+			name: "headerByNumber",
+			call: func(ctx context.Context, api *BaseAPI, tx kv.Tx) (*types.Header, error) {
+				return api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
+			},
+		},
+		{
+			name: "headerByNumberOrHash",
+			call: func(ctx context.Context, api *BaseAPI, tx kv.Tx) (*types.Header, error) {
+				header, _, err := api.headerByNumberOrHash(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+				return header, err
+			},
+		},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			base, m, _, events := newOverlayAheadTestAPIWithEvents(t)
+			domains := events.LatestSD()
+			require.NotNil(t, domains)
+			events.PublishOverlay(nil)
+
+			tx, err := m.DB.BeginTemporalRo(m.Ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+			committedHeader, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, overlayRaceChainSize)
+			require.NoError(t, err)
+			require.NotNil(t, committedHeader)
+
+			probeTx := &publishOverlayOnSecondProbeTx{
+				Tx:      tx,
+				publish: func() { events.PublishOverlay(domains) },
+			}
+			header, err := test.call(m.Ctx, base, probeTx)
+			require.NoError(t, err)
+			require.NotNil(t, header)
+			require.Equal(t, committedHeader.Hash(), header.Hash())
+			require.Equal(t, 1, probeTx.probes)
+		})
+	}
+}
+
 func TestGetBlockNumberPreservesPinnedOverlayView(t *testing.T) {
 	base, m, firstHeader, events := newOverlayAheadTestAPIWithEvents(t)
 
@@ -443,6 +522,27 @@ func TestReplayTransactionHandlesMissingHeader(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Nil(t, result)
+}
+
+func TestGetTransactionReceiptHandlesMissingHeader(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base := newBaseApiForTest(m)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	minTxNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+
+	base._txnReader = staticTxnReader{TxnReader: base._txnReader, blockNumber: 1, txNum: minTxNum + 1}
+	base._blockReader = hideHeaderBlockReader{FullBlockReader: base._blockReader, blockNumber: 1}
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	var receipt map[string]any
+	require.NotPanics(t, func() {
+		receipt, err = api.GetTransactionReceipt(m.Ctx, common.Hash{1})
+	})
+	require.NoError(t, err)
+	require.Nil(t, receipt)
 }
 
 // TestDebugAccountAt_OverlayHeadHash_CommittedView pins that debug_accountAt

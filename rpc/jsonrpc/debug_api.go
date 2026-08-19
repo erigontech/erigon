@@ -658,8 +658,8 @@ type AccountResult struct {
 // GetRawHeader implements debug_getRawHeader - returns a an RLP-encoded header, given a block number or hash
 func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
-		if block := api.pendingBlock(); block != nil {
-			return rlp.EncodeToBytes(block.Header())
+		if api.pendingBlock() != nil {
+			return nil, nil
 		}
 	}
 	tx, err := api.db.BeginTemporalRo(ctx)

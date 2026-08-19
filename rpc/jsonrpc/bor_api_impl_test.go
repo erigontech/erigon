@@ -58,6 +58,39 @@ func newBorAPIWithHeaderLookupError(t *testing.T) (*BorImpl, error) {
 	return NewBorAPI(base, m.DB, nil), wantErr
 }
 
+func newBorAPI(t *testing.T) *BorImpl {
+	t.Helper()
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base := newBaseApiForTest(m)
+	engine := borengine.New(borchain.BorDevnet.Config, base._blockReader, nil, nil, log.New(), nil, nil)
+	t.Cleanup(func() { require.NoError(t, engine.Close()) })
+	base._engine = engine
+	return NewBorAPI(base, m.DB, nil)
+}
+
+func TestBorNumberEndpointsPreserveUnknownBlockError(t *testing.T) {
+	api := newBorAPI(t)
+	number := rpc.BlockNumber(1_000_000)
+	selector := rpc.BlockNumberOrHashWithNumber(number)
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{"getSnapshot", func() error { _, err := api.GetSnapshot(&number); return err }},
+		{"getSigners", func() error { _, err := api.GetSigners(&number); return err }},
+		{"getAuthor", func() error { _, err := api.GetAuthor(&selector); return err }},
+		{"getSnapshotProposer", func() error { _, err := api.GetSnapshotProposer(&selector); return err }},
+		{"getSnapshotProposerSequence", func() error { _, err := api.GetSnapshotProposerSequence(&selector); return err }},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			require.ErrorIs(t, test.call(), errUnknownBlock)
+		})
+	}
+}
+
 func TestBorGetSnapshotPropagatesHeaderLookupError(t *testing.T) {
 	api, wantErr := newBorAPIWithHeaderLookupError(t)
 	number := rpc.BlockNumber(0)

@@ -21,6 +21,7 @@ import (
 	"errors"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/polygon/heimdall"
@@ -46,6 +47,15 @@ type difficultiesKV struct {
 	Difficulty uint64
 }
 
+func (api *BorImpl) headerByNumberForBor(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
+	header, err := api.headerByNumber(ctx, number, tx)
+	var blockNotFound rpc.BlockNotFoundErr
+	if errors.As(err, &blockNotFound) {
+		return nil, nil
+	}
+	return header, err
+}
+
 // GetSnapshot retrieves the state snapshot at a given block.
 func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	// init chain db
@@ -61,7 +71,7 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	if number != nil {
 		blockNr = *number
 	}
-	header, err := api.headerByNumber(ctx, blockNr, tx)
+	header, err := api.headerByNumberForBor(ctx, blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -101,9 +111,9 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Ad
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if blockNrOrHash == nil {
-		header, err = api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
+		header, err = api.headerByNumberForBor(ctx, rpc.LatestBlockNumber, tx)
 	} else if blockNr, ok := blockNrOrHash.Number(); ok {
-		header, err = api.headerByNumber(ctx, blockNr, tx)
+		header, err = api.headerByNumberForBor(ctx, blockNr, tx)
 	} else if blockHash, ok := blockNrOrHash.Hash(); ok {
 		header, err = api.headerByHash(ctx, blockHash, tx)
 	}
@@ -169,7 +179,7 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	if number != nil {
 		blockNr = *number
 	}
-	header, err := api.headerByNumber(ctx, blockNr, tx)
+	header, err := api.headerByNumberForBor(ctx, blockNr, tx)
 	if err != nil {
 		return nil, err
 	}
@@ -311,9 +321,9 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 
 	var header *types.Header
 	if blockNrOrHash == nil {
-		header, err = api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
+		header, err = api.headerByNumberForBor(ctx, rpc.LatestBlockNumber, tx)
 	} else if blockNr, ok := blockNrOrHash.Number(); ok {
-		header, err = api.headerByNumber(ctx, blockNr, tx)
+		header, err = api.headerByNumberForBor(ctx, blockNr, tx)
 	} else if blockHash, ok := blockNrOrHash.Hash(); ok {
 		header, err = api.headerByHash(ctx, blockHash, tx)
 	}
@@ -344,9 +354,9 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
 	if blockNrOrHash == nil {
-		header, err = api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
+		header, err = api.headerByNumberForBor(ctx, rpc.LatestBlockNumber, tx)
 	} else if blockNr, ok := blockNrOrHash.Number(); ok {
-		header, err = api.headerByNumber(ctx, blockNr, tx)
+		header, err = api.headerByNumberForBor(ctx, blockNr, tx)
 	} else if blockHash, ok := blockNrOrHash.Hash(); ok {
 		header, err = api.headerByHash(ctx, blockHash, tx)
 	}

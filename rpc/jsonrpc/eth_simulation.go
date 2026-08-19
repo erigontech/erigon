@@ -112,6 +112,9 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		latestBlock := rpc.LatestBlockNumber
 		blockParameter.BlockNumber = &latestBlock
 	}
+	if err := rejectPendingState(blockParameter); err != nil {
+		return nil, err
+	}
 
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {

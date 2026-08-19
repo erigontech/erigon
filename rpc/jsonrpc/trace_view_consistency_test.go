@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/json"
 	"errors"
 	"io"
 	"testing"
@@ -144,6 +145,48 @@ func TestTraceCallUsesCommittedHeader(t *testing.T) {
 	require.Equal(t, expected, result.Output)
 }
 
+func TestAdHocTracesRejectNonCanonicalBlockHash(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+
+	var canonicalHeader *types.Header
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var err error
+		canonicalHeader, err = m.BlockReader.HeaderByNumber(m.Ctx, tx, overlayRaceChainSize)
+		return err
+	}))
+	require.NotNil(t, canonicalHeader)
+
+	sideHeader := types.CopyHeader(canonicalHeader)
+	sideHeader.Coinbase = common.Address{2}
+	require.NotEqual(t, canonicalHeader.Hash(), sideHeader.Hash())
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteHeader(tx, sideHeader)
+	}))
+
+	selector := rpc.BlockNumberOrHashWithHash(sideHeader.Hash(), false)
+	traceAPI := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+	debugAPI := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	t.Run("trace_call", func(t *testing.T) {
+		_, err := traceAPI.Call(m.Ctx, TraceCallParam{}, []string{TraceTypeTrace}, &selector, nil)
+		require.ErrorContains(t, err, "is not currently canonical")
+	})
+
+	t.Run("trace_callMany", func(t *testing.T) {
+		_, err := traceAPI.CallMany(m.Ctx, json.RawMessage("[]"), &selector, nil)
+		require.ErrorContains(t, err, "is not currently canonical")
+	})
+
+	t.Run("debug_traceCallMany", func(t *testing.T) {
+		to := common.Address{3}
+		gas := hexutil.Uint64(21_000)
+		err := debugAPI.TraceCallMany(m.Ctx, []Bundle{{
+			Transactions: []ethapi.CallArgs{{From: &m.Address, To: &to, Gas: &gas}},
+		}}, StateContext{BlockNumber: selector}, nil, jsonstream.New(io.Discard))
+		require.ErrorContains(t, err, "is not currently canonical")
+	})
+}
+
 func TestTraceBlockUsesCommittedBlockBody(t *testing.T) {
 	base, m, _ := newOverlayAheadTestAPI(t)
 	base._blockReader = rejectOverlayBlockReader{FullBlockReader: base._blockReader}
@@ -187,6 +230,29 @@ func TestSimulateV1UsesCommittedBlockBody(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Len(t, result, 1)
+}
+
+func TestCommittedStateMethodsRejectPendingTag(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+
+	t.Run("eth_simulateV1", func(t *testing.T) {
+		_, err := api.SimulateV1(m.Ctx, SimulationRequest{
+			BlockStateCalls: []SimulatedBlock{{}},
+		}, pending)
+		require.EqualError(t, err, "pending state is not supported")
+	})
+
+	t.Run("eth_getWitness", func(t *testing.T) {
+		_, err := api.GetWitness(m.Ctx, pending)
+		require.EqualError(t, err, "pending state is not supported")
+	})
+
+	t.Run("eth_getTxWitness", func(t *testing.T) {
+		_, err := api.GetTxWitness(m.Ctx, pending, 0)
+		require.EqualError(t, err, "pending state is not supported")
+	})
 }
 
 func TestTraceTransactionUsesCommittedTxnLookup(t *testing.T) {

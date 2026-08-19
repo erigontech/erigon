@@ -576,6 +576,9 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
+	if header == nil {
+		return nil, nil
+	}
 
 	if isBorStateSyncTx {
 		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)

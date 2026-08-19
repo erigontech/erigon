@@ -54,7 +54,17 @@ import (
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
-var latestNumOrHash = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+var (
+	latestNumOrHash             = rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	errPendingStateNotSupported = errors.New("pending state is not supported")
+)
+
+func rejectPendingState(blockNrOrHash rpc.BlockNumberOrHash) error {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		return errPendingStateNotSupported
+	}
+	return nil
+}
 
 // orLatest resolves an optional block selector, defaulting to the latest block
 // when the caller omitted the parameter (nil). Used by the state-reading methods
@@ -572,14 +582,9 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 		}
 	}
 
-	var reader state.StateReader
-	if isLatest {
-		reader = rpchelper.NewLatestStateReader(execctx.NewTemporalTxStateGetter(roTx))
-	} else {
-		reader, err = rpchelper.CreateHistoryStateReader(ctx, roTx, blockNumber+1, 0, api._txNumReader)
-		if err != nil {
-			return nil, err
-		}
+	reader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, roTx, blockNumber, isLatest, 0, api._txNumReader)
+	if err != nil {
+		return nil, err
 	}
 
 	// get storage key proofs
@@ -648,6 +653,10 @@ func (api *APIImpl) GetTxWitness(ctx context.Context, blockNr rpc.BlockNumberOrH
 }
 
 func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrOrHash rpc.BlockNumberOrHash, txIndex hexutil.Uint, fullBlock bool, logger log.Logger) (hexutil.Bytes, error) {
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
+
 	tx, err := db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
