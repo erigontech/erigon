@@ -210,7 +210,7 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	}
 	marshaled, err := io.ReadAll(r.Body)
 	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+		return nil, fmt.Errorf("checkpoint sync read failed %w", err)
 	}
 	if len(marshaled) < 108 {
 		return nil, errors.New("read failed, too short")
@@ -221,12 +221,12 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	block := cltypes.NewSignedBeaconBlock(beaconConfig, v)
 	err = block.DecodeSSZ(marshaled, int(v))
 	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+		return nil, fmt.Errorf("checkpoint sync decode failed %w", err)
 	}
 	if expectedBlockRoot != nil {
 		has, err := block.Block.HashSSZ()
 		if err != nil {
-			return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+			return nil, fmt.Errorf("checkpoint sync decode failed %w", err)
 		}
 		if has != *expectedBlockRoot {
 			return nil, fmt.Errorf("checkpoint sync decode failed, unexpected block root %s", has)
@@ -273,7 +273,7 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams
 	}
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&blobsResponse); err != nil {
-		return nil, fmt.Errorf("blob retrieval decode failed %s", err)
+		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 	}
 	return blobsResponse.Data, nil
 }
@@ -891,7 +891,7 @@ func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfi
 	}
 	marshaled, err := io.ReadAll(r.Body)
 	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+		return nil, fmt.Errorf("checkpoint sync read failed %w", err)
 	}
 
 	epoch := slot / beaconConfig.SlotsPerEpoch
@@ -899,7 +899,7 @@ func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfi
 	beaconState := state.New(beaconConfig)
 	err = beaconState.DecodeSSZ(marshaled, int(beaconConfig.GetCurrentStateVersion(epoch)))
 	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+		return nil, fmt.Errorf("checkpoint sync decode failed %w", err)
 	}
 	return beaconState, nil
 }
