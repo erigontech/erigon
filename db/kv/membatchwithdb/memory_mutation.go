@@ -595,7 +595,7 @@ func (m *MemoryMutation) DeleteRange(table string, from, to []byte) (uint64, err
 			keys = append(keys, bytes.Clone(k))
 		}
 		if perDup {
-			dups = append(dups, cursorEntry{bytes.Clone(k), bytes.Clone(v)})
+			dups = append(dups, cursorEntry{keys[len(keys)-1], bytes.Clone(v)})
 		}
 		deleted++
 		return nil
