@@ -108,8 +108,10 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Ad
 		header, err = api.headerByHash(ctx, blockHash, tx)
 	}
 
-	// Ensure we have an actually valid block and return its snapshot
-	if header == nil || err != nil {
+	if err != nil {
+		return accounts.NilAddress, err
+	}
+	if header == nil {
 		return accounts.NilAddress, errUnknownBlock
 	}
 
@@ -194,7 +196,10 @@ func (api *BorImpl) GetSignersAtHash(hash common.Hash) ([]common.Address, error)
 	defer tx.Rollback()
 
 	// Retrieve the header
-	header, _ := api.headerByHash(ctx, hash, tx)
+	header, err := api.headerByHash(ctx, hash, tx)
+	if err != nil {
+		return nil, err
+	}
 
 	// Ensure we have an actually valid block
 	if header == nil {
@@ -313,7 +318,10 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 		header, err = api.headerByHash(ctx, blockHash, tx)
 	}
 
-	if header == nil || err != nil {
+	if err != nil {
+		return common.Address{}, err
+	}
+	if header == nil {
 		return common.Address{}, errUnknownBlock
 	}
 
@@ -343,8 +351,11 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 		header, err = api.headerByHash(ctx, blockHash, tx)
 	}
 
+	if err != nil {
+		return BlockSigners{}, err
+	}
 	// Ensure we have an actually valid block
-	if header == nil || err != nil {
+	if header == nil {
 		return BlockSigners{}, errUnknownBlock
 	}
 

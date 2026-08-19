@@ -90,7 +90,7 @@ func (api *GraphQLAPIImpl) GetLatestBlockNumber(ctx context.Context) (uint64, er
 		return 0, err
 	}
 	defer tx.Rollback()
-	return rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+	return rpchelper.GetLatestBlockNumber(tx)
 }
 
 func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.Hash) (uint64, bool, error) {

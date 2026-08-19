@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
@@ -86,7 +85,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	blockNumber, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, txHash, chainConfig)
+	blockNumber, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallbackInView(ctx, tx, txHash, chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -212,7 +211,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	}
 
 	// Extract transactions from block
-	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, bErr := api.blockWithSendersInView(ctx, tx, hash, blockNum)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -342,14 +341,10 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 
 	if req.ToBlock == nil {
-		headNumber, err := api._blockReader.HeaderNumber(ctx, dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		toBlock, err = rpchelper.GetLatestExecutedBlockNumber(dbtx)
 		if err != nil {
 			return err
 		}
-		if headNumber == nil {
-			return errors.New("head header not found")
-		}
-		toBlock = *headNumber
 	} else {
 		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, nil)
 		if err != nil {
@@ -841,7 +836,7 @@ func (api *TraceAPIImpl) callBlock(
 		return nil, nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, pNo, false, 0, api._txNumReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1186,7 +1181,7 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, pNo, false, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}

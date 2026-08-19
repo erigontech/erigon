@@ -17,16 +17,23 @@
 package jsonrpc
 
 import (
+	"context"
+	"errors"
+	"io"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
@@ -34,8 +41,33 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
+
+var (
+	errUnexpectedOverlayBlockRead = errors.New("unexpected overlay block read")
+	errUnexpectedStateCacheView   = errors.New("unexpected state cache view")
+)
+
+type rejectOverlayBlockReader struct {
+	dbservices.FullBlockReader
+}
+
+func (r rejectOverlayBlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Block, []common.Address, error) {
+	if view, ok := tx.(interface{ IsOverlayReadView() bool }); blockNum != 0 && ok && view.IsOverlayReadView() {
+		return nil, nil, errUnexpectedOverlayBlockRead
+	}
+	return r.FullBlockReader.BlockWithSenders(ctx, tx, hash, blockNum)
+}
+
+type rejectStateCache struct {
+	kvcache.Cache
+}
+
+func (rejectStateCache) View(context.Context, kv.TemporalTx) (kvcache.CacheView, error) {
+	return nil, errUnexpectedStateCacheView
+}
 
 func TestTraceCallUsesCommittedState(t *testing.T) {
 	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
@@ -110,4 +142,152 @@ func TestTraceCallUsesCommittedHeader(t *testing.T) {
 	expected := make(hexutil.Bytes, 32)
 	copy(expected[len(expected)-len(committedHeader.Coinbase):], committedHeader.Coinbase[:])
 	require.Equal(t, expected, result.Output)
+}
+
+func TestTraceBlockUsesCommittedBlockBody(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base._blockReader = rejectOverlayBlockReader{FullBlockReader: base._blockReader}
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	result, err := api.Block(m.Ctx, rpc.LatestBlockNumber, nil, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
+func TestReplayBlockTransactionsUsesCommittedBlockBody(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base._blockReader = rejectOverlayBlockReader{FullBlockReader: base._blockReader}
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	result, err := api.ReplayBlockTransactions(m.Ctx, latest, []string{TraceTypeTrace}, nil, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
+func TestDebugTraceBlockUsesCommittedBlockBody(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base._blockReader = rejectOverlayBlockReader{FullBlockReader: base._blockReader}
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, nil, jsonstream.New(io.Discard))
+
+	require.NoError(t, err)
+}
+
+func TestSimulateV1UsesCommittedBlockBody(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base._blockReader = rejectOverlayBlockReader{FullBlockReader: base._blockReader}
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	request := SimulationRequest{BlockStateCalls: []SimulatedBlock{{}}}
+
+	result, err := api.SimulateV1(m.Ctx, request, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+}
+
+func TestTraceTransactionUsesCommittedTxnLookup(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base._txnReader = rejectOverlayTxnReader{TxnReader: base._txnReader}
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	result, err := api.Transaction(m.Ctx, common.Hash{1}, nil, nil)
+
+	require.NoError(t, err)
+	require.Nil(t, result)
+}
+
+func TestDebugTraceTransactionUsesCommittedTxnLookup(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base._txnReader = rejectOverlayTxnReader{TxnReader: base._txnReader}
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	err := api.TraceTransaction(m.Ctx, common.Hash{1}, nil, jsonstream.New(io.Discard))
+
+	require.EqualError(t, err, "transaction not found")
+}
+
+func TestDebugTraceTransactionUsesCommittedBlockBody(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	minTxNum, err := base._txNumReader.Min(m.Ctx, tx, overlayRaceChainSize)
+	require.NoError(t, err)
+
+	base._txnReader = staticTxnReader{
+		TxnReader:   base._txnReader,
+		blockNumber: overlayRaceChainSize,
+		txNum:       minTxNum + 1,
+	}
+	base._blockReader = rejectOverlayBlockReader{FullBlockReader: base._blockReader}
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	err = api.TraceTransaction(m.Ctx, common.Hash{1}, nil, jsonstream.New(io.Discard))
+
+	require.ErrorContains(t, err, "not found")
+}
+
+func TestTraceBlockUsesUncachedCommittedState(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base.stateCache = rejectStateCache{}
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	_, err := api.Block(m.Ctx, rpc.LatestBlockNumber, nil, nil)
+
+	require.NoError(t, err)
+}
+
+func TestDebugTraceBlockUsesUncachedCommittedState(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base.stateCache = rejectStateCache{}
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	err := api.TraceBlockByNumber(m.Ctx, rpc.LatestBlockNumber, nil, jsonstream.New(io.Discard))
+
+	require.NoError(t, err)
+}
+
+func TestReplayTransactionUsesUncachedCommittedState(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base := newBaseApiForTest(m)
+	base.stateCache = rejectStateCache{}
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	result, err := api.ReplayTransaction(m.Ctx, common.HexToHash(debugTraceTransactionTests[0].txHash), []string{TraceTypeTrace}, nil, nil)
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+}
+
+func TestDebugTraceTransactionUsesUncachedCommittedState(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base := newBaseApiForTest(m)
+	base.stateCache = rejectStateCache{}
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	err := api.TraceTransaction(m.Ctx, common.HexToHash(debugTraceTransactionTests[0].txHash), nil, jsonstream.New(io.Discard))
+
+	require.NoError(t, err)
+}
+
+func TestGetWitnessUsesCommittedBlockBody(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	base, m, _ := newOverlayAheadTestAPI(t)
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+	base._blockReader = rejectOverlayBlockReader{FullBlockReader: base._blockReader}
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	result, err := api.GetWitness(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
 }

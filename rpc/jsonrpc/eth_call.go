@@ -685,7 +685,7 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("eth_getWitness requires commitment history: restart the node with --prune.experimental.include-commitment-history")
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNr)
+	block, err := api.blockWithSendersInView(ctx, tx, hash, blockNr)
 	if err != nil {
 		return nil, err
 	}

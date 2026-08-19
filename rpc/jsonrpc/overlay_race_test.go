@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -527,6 +528,22 @@ func newHeaderAheadTester(t *testing.T) (m *execmoduletester.ExecModuleTester, a
 	return m, aheadHash
 }
 
+type rejectTxNumsAboveIndex struct {
+	maxBlock uint64
+	err      error
+}
+
+func (r rejectTxNumsAboveIndex) MaxTxNum(ctx context.Context, tx kv.Tx, cursor kv.Cursor, blockNum uint64) (uint64, bool, error) {
+	if blockNum > r.maxBlock {
+		return 0, false, r.err
+	}
+	return rawdbv3.DefaultTxBlockIndexInstance.MaxTxNum(ctx, tx, cursor, blockNum)
+}
+
+func (r rejectTxNumsAboveIndex) BlockNumber(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
+	return rawdbv3.DefaultTxBlockIndexInstance.BlockNumber(ctx, tx, txNum)
+}
+
 // TestTraceFilter_FutureToBlockErrors pins that an explicit toBlock past the
 // executed head errors instead of silently clamping the scan to the last
 // available txnum, which would make an omitted head block look empty.
@@ -542,6 +559,27 @@ func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
 	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
 	require.ErrorContains(t, err, "not executed")
+}
+
+func TestTraceFilter_OmittedToBlockUsesExecutionProgress(t *testing.T) {
+	m, aheadHash := newHeaderAheadTester(t)
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteHeadHeaderHash(tx, aheadHash)
+	}))
+
+	base := newBaseApiForTest(m)
+	wantErr := errors.New("txnum lookup beyond execution progress")
+	base._txNumReader = base._txNumReader.WithCustomReadTxNumFunc(rejectTxNumsAboveIndex{
+		maxBlock: overlayRaceChainSize,
+		err:      wantErr,
+	})
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	err := api.Filter(m.Ctx, TraceFilterRequest{}, nil, nil, jsonstream.Wrap(s))
+
+	require.NoError(t, err)
 }
 
 // TestGetModifiedAccountsByHash_FutureStartBlockErrors pins that ByHash rejects

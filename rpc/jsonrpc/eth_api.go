@@ -300,15 +300,18 @@ func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txN
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	overlayTx := api.filters.WithOverlay(tx)
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), overlayTx, api._blockReader, api.filters)
+	return api.blockByNumberWithSendersInView(ctx, api.filters.WithOverlay(tx), number)
+}
+
+func (api *BaseAPI) blockByNumberWithSendersInView(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
+	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
 	if err != nil {
-		if errors.As(err, &rpc.BlockNotFoundErr{}) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	return api.blockWithSenders(ctx, overlayTx, hash, blockNumber)
+	if !ok {
+		return nil, nil
+	}
+	return api.blockWithSendersInView(ctx, tx, hash, number)
 }
 
 func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
@@ -326,17 +329,20 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 		return nil, nil
 	}
 
-	return api.blockWithSenders(ctx, overlayTx, hash, *number)
+	return api.blockWithSendersInView(ctx, overlayTx, hash, *number)
 }
 
 func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
+	return api.blockWithSendersInView(ctx, api.filters.WithOverlay(tx), hash, number)
+}
+
+func (api *BaseAPI) blockWithSendersInView(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
 			return it, nil
 		}
 	}
-	overlayTx := api.filters.WithOverlay(tx)
-	block, _, err := api._blockReader.BlockWithSenders(ctx, overlayTx, hash, number)
+	block, _, err := api._blockReader.BlockWithSenders(ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}

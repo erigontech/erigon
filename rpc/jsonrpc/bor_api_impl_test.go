@@ -25,31 +25,41 @@ import (
 
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	borengine "github.com/erigontech/erigon/polygon/bor"
+	borchain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/rpc"
 )
 
-type canonicalHashErrorBlockReader struct {
+type headerLookupErrorBlockReader struct {
 	dbservices.FullBlockReader
 	err error
 }
 
-func (r canonicalHashErrorBlockReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
+func (r headerLookupErrorBlockReader) CanonicalHash(context.Context, kv.Getter, uint64) (common.Hash, bool, error) {
 	return common.Hash{}, false, r.err
 }
 
-func newBorAPIWithCanonicalHashError(t *testing.T) (*BorImpl, error) {
+func (r headerLookupErrorBlockReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
+	return nil, r.err
+}
+
+func newBorAPIWithHeaderLookupError(t *testing.T) (*BorImpl, error) {
 	t.Helper()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	wantErr := errors.New("canonical hash failure")
+	wantErr := errors.New("header lookup failure")
 	base := newBaseApiForTest(m)
-	base._blockReader = canonicalHashErrorBlockReader{FullBlockReader: base._blockReader, err: wantErr}
+	base._blockReader = headerLookupErrorBlockReader{FullBlockReader: base._blockReader, err: wantErr}
+	engine := borengine.New(borchain.BorDevnet.Config, base._blockReader, nil, nil, log.New(), nil, nil)
+	t.Cleanup(func() { require.NoError(t, engine.Close()) })
+	base._engine = engine
 	return NewBorAPI(base, m.DB, nil), wantErr
 }
 
 func TestBorGetSnapshotPropagatesHeaderLookupError(t *testing.T) {
-	api, wantErr := newBorAPIWithCanonicalHashError(t)
+	api, wantErr := newBorAPIWithHeaderLookupError(t)
 	number := rpc.BlockNumber(0)
 
 	snapshot, err := api.GetSnapshot(&number)
@@ -59,11 +69,47 @@ func TestBorGetSnapshotPropagatesHeaderLookupError(t *testing.T) {
 }
 
 func TestBorGetSignersPropagatesHeaderLookupError(t *testing.T) {
-	api, wantErr := newBorAPIWithCanonicalHashError(t)
+	api, wantErr := newBorAPIWithHeaderLookupError(t)
 	number := rpc.BlockNumber(0)
 
 	signers, err := api.GetSigners(&number)
 
 	require.ErrorIs(t, err, wantErr)
 	require.Nil(t, signers)
+}
+
+func TestBorGetAuthorPropagatesHeaderLookupError(t *testing.T) {
+	api, wantErr := newBorAPIWithHeaderLookupError(t)
+	number := rpc.BlockNumberOrHashWithNumber(0)
+
+	_, err := api.GetAuthor(&number)
+
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestBorGetSignersAtHashPropagatesHeaderLookupError(t *testing.T) {
+	api, wantErr := newBorAPIWithHeaderLookupError(t)
+
+	signers, err := api.GetSignersAtHash(common.Hash{1})
+
+	require.ErrorIs(t, err, wantErr)
+	require.Nil(t, signers)
+}
+
+func TestBorGetSnapshotProposerPropagatesHeaderLookupError(t *testing.T) {
+	api, wantErr := newBorAPIWithHeaderLookupError(t)
+	number := rpc.BlockNumberOrHashWithNumber(0)
+
+	_, err := api.GetSnapshotProposer(&number)
+
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestBorGetSnapshotProposerSequencePropagatesHeaderLookupError(t *testing.T) {
+	api, wantErr := newBorAPIWithHeaderLookupError(t)
+	number := rpc.BlockNumberOrHashWithNumber(0)
+
+	_, err := api.GetSnapshotProposerSequence(&number)
+
+	require.ErrorIs(t, err, wantErr)
 }
