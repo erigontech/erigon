@@ -82,7 +82,7 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 
 	// Verify envelope was queued (check internal state)
 	impl := service.(*executionPayloadService)
-	require.Equal(t, int32(1), impl.pendingCount.Load())
+	require.Equal(t, int32(1), impl.pending.count.Load())
 
 	// Now add block to forkchoice
 	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
@@ -203,13 +203,13 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	ctx := t.Context()
 
-	// Create service directly to access internals
+	// Create service directly to access internals; the background loop is not started
 	impl := &executionPayloadService{
 		forkchoiceStore: forkchoiceMock,
 		beaconCfg:       cfg,
 		emitters:        beaconevents.NewEventEmitter(),
-		pendingCond:     nil, // Don't start background loop
 	}
+	impl.pending = impl.newPendingQueue()
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
@@ -224,17 +224,17 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 		blockRoot:    blockRoot,
 		envelopeHash: envelopeHash,
 	}
-	impl.pendingEnvelopes.Store(key, &envelopeJob{
-		envelope:     envelope,
+	impl.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
+		msg:          envelope,
 		creationTime: time.Now().Add(-pendingEnvelopeExpiry - time.Second), // expired
 	})
-	impl.pendingCount.Store(1)
+	impl.pending.count.Store(1)
 
 	// Process pending - should remove expired
-	impl.processPendingEnvelopes(ctx)
+	impl.pending.processPending(ctx)
 
-	require.Equal(t, int32(0), impl.pendingCount.Load())
-	_, exists := impl.pendingEnvelopes.Load(key)
+	require.Equal(t, int32(0), impl.pending.count.Load())
+	_, exists := impl.pending.jobs.Load(key)
 	require.False(t, exists)
 }
 
@@ -243,13 +243,13 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	ctx := t.Context()
 
-	// Create service directly to access internals
+	// Create service directly to access internals; the background loop is not started
 	impl := &executionPayloadService{
 		forkchoiceStore: forkchoiceMock,
 		beaconCfg:       cfg,
 		emitters:        beaconevents.NewEventEmitter(),
-		pendingCond:     nil,
 	}
+	impl.pending = impl.newPendingQueue()
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
@@ -264,15 +264,15 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 		blockRoot:    blockRoot,
 		envelopeHash: envelopeHash,
 	}
-	impl.pendingEnvelopes.Store(key, &envelopeJob{
-		envelope:     envelope,
+	impl.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
+		msg:          envelope,
 		creationTime: time.Now(),
 	})
-	impl.pendingCount.Store(1)
+	impl.pending.count.Store(1)
 
 	// Block not yet available - should keep pending
-	impl.processPendingEnvelopes(ctx)
-	require.Equal(t, int32(1), impl.pendingCount.Load())
+	impl.pending.processPending(ctx)
+	require.Equal(t, int32(1), impl.pending.count.Load())
 
 	// Now add block
 	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
@@ -282,9 +282,9 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 	}
 
 	// Process again - should process and remove
-	impl.processPendingEnvelopes(ctx)
-	require.Equal(t, int32(0), impl.pendingCount.Load())
-	_, exists := impl.pendingEnvelopes.Load(key)
+	impl.pending.processPending(ctx)
+	require.Equal(t, int32(0), impl.pending.count.Load())
+	_, exists := impl.pending.jobs.Load(key)
 	require.False(t, exists)
 
 	// Envelope should be marked as seen
@@ -300,8 +300,8 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 		forkchoiceStore: forkchoiceMock,
 		beaconCfg:       cfg,
 		emitters:        beaconevents.NewEventEmitter(),
-		pendingCond:     nil,
 	}
+	impl.pending = impl.newPendingQueue()
 	seenCache, err := lru.New[seenEnvelopeKey, struct{}]("seen_envelopes", seenEnvelopeCacheSize)
 	require.NoError(t, err)
 	impl.seenEnvelopesCache = seenCache
@@ -316,15 +316,15 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	hash2, _ := envelope2.HashSSZ()
 
 	// Add both as pending
-	impl.pendingEnvelopes.Store(pendingEnvelopeKey{blockRoot, hash1}, &envelopeJob{
-		envelope:     envelope1,
+	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash1}, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
+		msg:          envelope1,
 		creationTime: time.Now(),
 	})
-	impl.pendingEnvelopes.Store(pendingEnvelopeKey{blockRoot, hash2}, &envelopeJob{
-		envelope:     envelope2,
+	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash2}, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
+		msg:          envelope2,
 		creationTime: time.Now(),
 	})
-	impl.pendingCount.Store(2)
+	impl.pending.count.Store(2)
 
 	// Add block
 	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
@@ -334,9 +334,9 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	}
 
 	// Process - both should be processed
-	impl.processPendingEnvelopes(ctx)
+	impl.pending.processPending(ctx)
 
-	require.Equal(t, int32(0), impl.pendingCount.Load())
+	require.Equal(t, int32(0), impl.pending.count.Load())
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 1}))
 	require.True(t, impl.seenEnvelopesCache.Contains(seenEnvelopeKey{blockRoot, 2}))
 }
@@ -352,20 +352,19 @@ func TestExecutionPayloadServicePendingQueueCap(t *testing.T) {
 		beaconCfg:          cfg,
 		emitters:           beaconevents.NewEventEmitter(),
 		seenEnvelopesCache: seenCache,
-		pendingCond:        sync.NewCond(&sync.Mutex{}),
 	}
-
-	impl.pendingCount.Store(maxPendingEnvelopes)
+	impl.pending = impl.newPendingQueue()
+	impl.pending.count.Store(maxPendingEnvelopes)
 
 	blockRoot := common.HexToHash("0xffff")
 	envelope := newTestSignedEnvelope(100, blockRoot, 999)
 
 	impl.queuePendingEnvelope(blockRoot, envelope)
 
-	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
+	require.Equal(t, int32(maxPendingEnvelopes), impl.pending.count.Load())
 	envelopeHash, err := envelope.HashSSZ()
 	require.NoError(t, err)
-	_, exists := impl.pendingEnvelopes.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
+	_, exists := impl.pending.jobs.Load(pendingEnvelopeKey{blockRoot, envelopeHash})
 	require.False(t, exists)
 }
 
@@ -380,10 +379,10 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 		beaconCfg:          cfg,
 		emitters:           beaconevents.NewEventEmitter(),
 		seenEnvelopesCache: seenCache,
-		pendingCond:        sync.NewCond(&sync.Mutex{}),
 	}
+	impl.pending = impl.newPendingQueue()
 
-	impl.pendingCount.Store(maxPendingEnvelopes - 5)
+	impl.pending.count.Store(maxPendingEnvelopes - 5)
 
 	var wg sync.WaitGroup
 	for i := range 100 {
@@ -395,9 +394,9 @@ func TestExecutionPayloadServicePendingQueueCapConcurrent(t *testing.T) {
 	}
 	wg.Wait()
 
-	require.Equal(t, int32(maxPendingEnvelopes), impl.pendingCount.Load())
+	require.Equal(t, int32(maxPendingEnvelopes), impl.pending.count.Load())
 	stored := 0
-	impl.pendingEnvelopes.Range(func(_, _ any) bool {
+	impl.pending.jobs.Range(func(_, _ any) bool {
 		stored++
 		return true
 	})
