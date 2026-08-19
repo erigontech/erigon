@@ -36,7 +36,7 @@ var mxNormalizeTook = metrics.GetOrCreateSummary("exec3_normalize_seconds")
 
 // slowNormalizeThreshold is the debug-branch trigger for dumping write-set
 // geometry, so outlier shapes can be reproduced in the benchmark.
-const slowNormalizeThreshold = 10 * time.Millisecond
+const slowNormalizeThreshold = 40 * time.Millisecond
 
 // sdCascadeStats accumulates the cost of the self-destruct storage cascade.
 // domainTook is split from vmTook because only the former walks the domain
