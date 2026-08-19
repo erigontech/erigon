@@ -314,7 +314,7 @@ func execV3Serial(ctx context.Context,
 	blockLimit := uint64(cfg.syncCfg.LoopBlockLimit)
 
 	doms.EnableParaTrieDB(cfg.db)
-	doms.EnableTrieWarmup(true)
+	doms.EnableTrieWarmup(!dbg.EnvBool("DISABLE_TRIE_WARMUP", false))
 	doms.SetDeferCommitmentUpdates(false)
 	if isForkValidation {
 		doms.SetDeferCommitmentUpdates(true)
