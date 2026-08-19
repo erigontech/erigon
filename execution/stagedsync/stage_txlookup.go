@@ -31,10 +31,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -206,22 +204,12 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		return s.Done(tx)
 	}
 	logPrefix := s.LogPrefix()
+	// The floor is this stage's own progress. It must not be read back from
+	// kv.Headers: PruneAncientBlocks deletes headers up to CanDeleteTo(), the same
+	// frontier blockTo comes from, so the range would always be empty. TxLookup rows
+	// are filtered by txNum value over a rolling full-table scan, not by key range,
+	// so 0 is the correct start and keeps txFrom stable across cycles.
 	blockFrom := s.PruneProgress
-	if blockFrom == 0 {
-		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
-		if err != nil {
-			return err
-		}
-		if firstNonGenesisHeader != nil {
-			blockFrom = binary.BigEndian.Uint64(firstNonGenesisHeader)
-		} else {
-			execProgress, err := stageProgress(tx, nil, stages.Senders)
-			if err != nil {
-				return err
-			}
-			blockFrom = execProgress
-		}
-	}
 	var blockTo uint64
 
 	// Forward stage doesn't write anything before PruneTo point
