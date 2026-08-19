@@ -88,6 +88,7 @@ import (
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
 
+	_ "github.com/erigontech/erigon/bsc/chain"     // Register BSC chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
@@ -1345,6 +1346,8 @@ func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.R
 	switch {
 	case cc.Aura != nil:
 		rulesConfig = &config.Aura
+	case cc.Parlia != nil:
+		rulesConfig = cc.Parlia
 	case cc.Bor != nil:
 		rulesConfig = cc.Bor
 		config.HeimdallURL = HeimdallURL

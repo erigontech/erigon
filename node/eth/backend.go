@@ -38,6 +38,7 @@ import (
 	"google.golang.org/grpc/credentials"
 	"google.golang.org/protobuf/types/known/emptypb"
 
+	bscsync "github.com/erigontech/erigon/bsc/sync"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format/getters"
 	executionclient "github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -114,6 +115,7 @@ import (
 	"github.com/erigontech/erigon/polygon/bridge"
 	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
+	polygonp2p "github.com/erigontech/erigon/polygon/p2p"
 	polygonsync "github.com/erigontech/erigon/polygon/sync"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/contracts"
@@ -125,6 +127,7 @@ import (
 	"github.com/erigontech/erigon/txnprovider/txpool"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 
+	_ "github.com/erigontech/erigon/bsc/chain"     // Register BSC chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
@@ -207,6 +210,7 @@ type Ethereum struct {
 	sentinel sentinelproto.SentinelClient
 
 	polygonSyncService *polygonsync.Service
+	bscP2PService      *polygonp2p.Service
 	polygonBridge      *bridge.Service
 	heimdallService    *heimdall.Service
 	stopNode           func() error
@@ -600,6 +604,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		rulesConfig = &config.Aura
 	case chainConfig.Bor != nil:
 		rulesConfig = chainConfig.Bor
+	case chainConfig.Parlia != nil:
+		rulesConfig = chainConfig.Parlia
 	default:
 		rulesConfig = &config.Ethash
 	}
@@ -1089,6 +1095,16 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 	}
 
+	if chainConfig.Parlia != nil {
+		backend.bscP2PService = polygonp2p.NewService(
+			logger,
+			p2pConfig.MaxPeers,
+			backend.sentryProvider.Multiplexer,
+			statusDataProvider.GetStatusData,
+			config.Dirs.Tmp,
+		)
+	}
+
 	if !dbg.NoBackgroundMaintenance() {
 		// Track the MergeLoop goroutine in bgComponentsEg so that Stop() →
 		// bgComponentsEg.Wait() waits for it to exit before chainDB.Close().
@@ -1486,10 +1502,11 @@ func (s *Ethereum) Start() error {
 		return currentTD
 	}
 
-	if chainspec.IsChainPoS(s.chainConfig, currentTDProvider) {
+	switch {
+	case chainspec.IsChainPoS(s.chainConfig, currentTDProvider):
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.pipelineStagedSync.StagesIdsList())})
 		go s.execModule.Start(s.sentryCtx, hook)
-	} else if s.chainConfig.Bor != nil {
+	case s.chainConfig.Bor != nil:
 		diaglib.Send(diaglib.SyncStageList{StagesList: diaglib.InitStagesFromList(s.stagedSync.StagesIdsList())})
 		s.bgComponentsEg.Go(func() error {
 			defer s.logger.Info("[polygon.sync] exeuction server start goroutine completed")
@@ -1510,6 +1527,16 @@ func (s *Ethereum) Start() error {
 					s.logger.Error("[polygon.sync] could not stop node", "err", stopErr)
 				}
 			}()
+			return err
+		})
+	case s.chainConfig.Parlia != nil:
+		s.bgComponentsEg.Go(func() error {
+			defer s.logger.Info("[bsc] block printer goroutine terminated")
+			err := bscsync.RunBlockPrinter(s.sentryCtx, s.logger, s.bscP2PService)
+			if err == nil || errors.Is(err, context.Canceled) {
+				return err
+			}
+			s.logger.Error("[bsc] block printer crashed", "err", err)
 			return err
 		})
 	}

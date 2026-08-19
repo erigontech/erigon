@@ -60,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
 
+	_ "github.com/erigontech/erigon/bsc/chain"     // Register BSC chains
 	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
