@@ -156,9 +156,10 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	require.False(t, dumperCalled)
 }
 
-// The keep window is subtracted from a bound rounded down to 1000, so the guard
-// has to cover every height where that rounded bound is below the window — not
-// just the first few blocks.
+// Pins the bound CanDeleteTo promises: never past the snapshot frontier, nothing
+// to delete without snapshots, and the rounded height minus the keep window once
+// above it. Below that window the subtraction is only safe because the frontier
+// clamps it.
 func TestCanDeleteToNoUnderflow(t *testing.T) {
 	const snaps uint64 = 5_000
 	for _, cur := range []uint64{0, 24, 25, 500, 1_500, 1_999, 2_000, 2_048, 10_000, 25_674_121} {
