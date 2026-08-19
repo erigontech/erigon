@@ -42,9 +42,8 @@ import (
 const reorgTooDeepDepth = 3
 
 type ExecutionClientDirect struct {
-	chainRW             chainreader.ChainReaderWriterEth1
-	txpool              txpoolproto.TxpoolClient
-	payloadPreparations payloadPreparationCoordinator
+	chainRW chainreader.ChainReaderWriterEth1
+	txpool  txpoolproto.TxpoolClient
 }
 
 func NewExecutionClientDirect(chainRW chainreader.ChainReaderWriterEth1, txpool txpoolproto.TxpoolClient) (*ExecutionClientDirect, error) {
@@ -64,8 +63,6 @@ func (cc *ExecutionClientDirect) NewPayload(
 	if payload == nil {
 		return PayloadStatusValidated, nil
 	}
-	finishCritical := cc.payloadPreparations.beginCritical()
-	defer finishCritical()
 
 	var requestsHash common.Hash
 	if payload.Version() >= clparams.ElectraVersion {
@@ -129,41 +126,16 @@ func (cc *ExecutionClientDirect) NewPayload(
 	return PayloadStatusNone, errors.New("unexpected status")
 }
 
-// ErrForkChoiceNotAdopted reports that the execution layer did not adopt the requested head, so
-// there is nothing to build on.
-var ErrForkChoiceNotAdopted = errors.New("execution layer did not adopt forkchoice head")
-
-// ErrForkChoiceBusy reports contention rather than rejection. The execution layer either declined
-// the update outright or is still running it in the background; the two are indistinguishable from
-// here, and in both cases only a later attempt settles it. Retrying is the caller's decision,
-// because only the caller knows whether the head it asked for is still the one it wants.
-var ErrForkChoiceBusy = errors.New("execution layer busy with a forkchoice update")
-
-// ErrForkChoiceSyncing reports that the execution layer lacks the data or progress needed to adopt
-// the requested head. Unlike contention, another immediate attempt is not expected to settle it.
-var ErrForkChoiceSyncing = errors.New("execution layer is syncing forkchoice head")
-
-// forkChoiceStatusError reports whether the execution layer adopted the requested head.
-func forkChoiceStatusError(status execmodule.ExecutionStatus) error {
-	switch status {
-	case execmodule.ExecutionStatusSuccess:
-		return nil
-	case execmodule.ExecutionStatusBusy:
-		return ErrForkChoiceBusy
-	case execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
-		return ErrForkChoiceSyncing
-	default:
-		return fmt.Errorf("%w: status %d", ErrForkChoiceNotAdopted, status)
-	}
-}
-
 func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized, safe, head common.Hash, attr *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
 	status, _, _, err := cc.chainRW.UpdateForkChoice(ctx, head, safe, finalized)
 	if err != nil {
 		return nil, fmt.Errorf("execution Client RPC failed to retrieve ForkChoiceUpdate response, err: %w", err)
 	}
-	if err := forkChoiceStatusError(status); err != nil {
-		return nil, err
+	if status == execmodule.ExecutionStatusInvalidForkchoice {
+		return nil, errors.New("forkchoice was invalid")
+	}
+	if status == execmodule.ExecutionStatusBadBlock {
+		return nil, errors.New("bad block as forkchoice")
 	}
 	if attr == nil {
 		return nil, nil
@@ -178,6 +150,16 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if err != nil {
 		return nil, err
 	}
+	binary.LittleEndian.PutUint64(idBytes, id)
+	return idBytes, nil
+}
+
+func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
+	id, err := startPayloadBuild(ctx, cc.chainRW, head, attributes)
+	if err != nil {
+		return nil, err
+	}
+	idBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(idBytes, id)
 	return idBytes, nil
 }
@@ -203,8 +185,17 @@ func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, 
 		if attempt+1 == attempts {
 			break
 		}
-		if err := common.Sleep(ctx, delay); err != nil {
-			return 0, err
+		timer := time.NewTimer(delay)
+		select {
+		case <-ctx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			return 0, ctx.Err()
+		case <-timer.C:
 		}
 	}
 	return 0, err
@@ -214,19 +205,11 @@ func (cc *ExecutionClientDirect) SupportInsertion() bool {
 	return true
 }
 
-func (cc *ExecutionClientDirect) bindPayloadPreparation(ctx context.Context) (context.Context, func()) {
-	return cc.payloadPreparations.bind(ctx)
-}
-
 func (cc *ExecutionClientDirect) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
-	finishCritical := cc.payloadPreparations.beginCritical()
-	defer finishCritical()
 	return cc.chainRW.InsertBlocks(ctx, blocks)
 }
 
 func (cc *ExecutionClientDirect) InsertBlock(ctx context.Context, block *types.Block) error {
-	finishCritical := cc.payloadPreparations.beginCritical()
-	defer finishCritical()
 	return cc.chainRW.InsertBlock(ctx, block)
 }
 

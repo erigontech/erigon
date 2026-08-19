@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"math/big"
-	"time"
 
 	"google.golang.org/grpc/codes"
 	"google.golang.org/grpc/status"
@@ -86,82 +85,4 @@ type ExecutionEngine interface {
 	GetBlobs(ctx context.Context, versionedHashes []common.Hash, version clparams.StateVersion) (blobs [][]byte, proofs [][][]byte, err error)
 	// Client identification
 	GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)
-}
-
-const (
-	// Leave room for the default one-second FCU timeout to settle without holding consensus work
-	// for a substantial part of the slot.
-	forkChoiceUpdateRetryWindow = 2 * time.Second
-	// ForkChoiceRetryDelay is the pause between attempts after transient execution contention.
-	ForkChoiceRetryDelay = 100 * time.Millisecond
-)
-
-// RetryForkChoiceUpdate sends one update to a remote engine. For an insertion-capable engine, it
-// gives an earlier asynchronous update a bounded window to settle before resending the canonical
-// head. If the window closes first, it returns the last contention error.
-func RetryForkChoiceUpdate(
-	ctx context.Context,
-	engine ExecutionEngine,
-	finalized, safe, head common.Hash,
-	version clparams.StateVersion,
-) ([]byte, error) {
-	if err := ctx.Err(); err != nil {
-		return nil, err
-	}
-	if !engine.SupportInsertion() {
-		return engine.ForkChoiceUpdate(ctx, finalized, safe, head, nil, version)
-	}
-	return retryForkChoiceUpdate(
-		ctx, engine, finalized, safe, head, version,
-		forkChoiceUpdateRetryWindow, ForkChoiceRetryDelay,
-	)
-}
-
-func retryForkChoiceUpdate(
-	ctx context.Context,
-	engine ExecutionEngine,
-	finalized, safe, head common.Hash,
-	version clparams.StateVersion,
-	retryWindow, retryDelay time.Duration,
-) ([]byte, error) {
-	retryCtx, cancel := context.WithTimeout(ctx, retryWindow)
-	defer cancel()
-
-	var lastErr error
-	for {
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if retryCtx.Err() != nil {
-			if lastErr != nil {
-				return nil, lastErr
-			}
-			return nil, retryCtx.Err()
-		}
-		payloadID, err := engine.ForkChoiceUpdate(retryCtx, finalized, safe, head, nil, version)
-		if err == nil || !IsForkChoiceContention(err) {
-			return payloadID, err
-		}
-		lastErr = err
-		if ctx.Err() != nil {
-			return nil, ctx.Err()
-		}
-		if retryCtx.Err() != nil {
-			return nil, lastErr
-		}
-
-		if err := common.Sleep(retryCtx, retryDelay); err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, lastErr
-		}
-	}
-}
-
-// IsForkChoiceContention reports an update that may succeed after current execution work settles.
-func IsForkChoiceContention(err error) bool {
-	return errors.Is(err, ErrForkChoiceBusy) ||
-		errors.Is(err, ErrForkChoiceUpdateTimeout) ||
-		errors.Is(err, context.DeadlineExceeded)
 }

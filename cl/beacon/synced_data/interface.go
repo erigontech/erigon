@@ -17,8 +17,6 @@
 package synced_data
 
 import (
-	"context"
-
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
@@ -33,7 +31,6 @@ type (
 //go:generate mockgen -typed=true -destination=./mock_services/synced_data_mock.go -package=mock_services . SyncedData
 type SyncedData interface {
 	SelectedHead() (common.Hash, uint64, bool)
-	BindToSelectedHead(ctx context.Context, blockRoot common.Hash) (context.Context, CancelFn, bool)
 	StateHead() (common.Hash, uint64, bool)
 	OnHeadState(newState *state.CachingBeaconState) error
 	OnHeadStateWithBlockRoot(newState *state.CachingBeaconState, blockRoot common.Hash) error

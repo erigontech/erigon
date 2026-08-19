@@ -244,50 +244,18 @@ func (c ChainReaderWriterEth1) ValidateChain(ctx context.Context, hash common.Ha
 }
 
 func (c ChainReaderWriterEth1) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash, timeoutOverride ...uint64) (execmodule.ExecutionStatus, *string, common.Hash, error) {
+	// Apply timeout via context so the native UpdateForkChoice returns Busy on deadline exceeded.
 	timeout := c.fcuTimeout
 	if len(timeoutOverride) > 0 {
 		timeout = time.Duration(timeoutOverride[0]) * time.Millisecond
 	}
-	if timeout <= 0 {
-		return c.updateForkChoice(ctx, headHash, safeHash, finalizeHash)
+	callCtx := ctx
+	if timeout > 0 {
+		var cancel context.CancelFunc
+		callCtx, cancel = context.WithTimeout(ctx, timeout)
+		defer cancel()
 	}
-
-	// Use a response timer instead of a child deadline. The FCU may continue after Busy is returned,
-	// while a later custom cancellation cause can still stop obsolete work.
-	resultCh := make(chan forkChoiceCallResult, 1)
-	go func() {
-		status, validationError, latestValidHash, err := c.updateForkChoice(ctx, headHash, safeHash, finalizeHash)
-		resultCh <- forkChoiceCallResult{
-			status:          status,
-			validationError: validationError,
-			latestValidHash: latestValidHash,
-			err:             err,
-		}
-	}()
-	timer := time.NewTimer(timeout)
-	defer timer.Stop()
-	select {
-	case result := <-resultCh:
-		return result.status, result.validationError, result.latestValidHash, result.err
-	case <-timer.C:
-		return execmodule.ExecutionStatusBusy, nil, common.Hash{}, nil
-	case <-ctx.Done():
-		if errors.Is(ctx.Err(), context.DeadlineExceeded) {
-			return execmodule.ExecutionStatusBusy, nil, common.Hash{}, nil
-		}
-		return 0, nil, common.Hash{}, context.Cause(ctx)
-	}
-}
-
-type forkChoiceCallResult struct {
-	status          execmodule.ExecutionStatus
-	validationError *string
-	latestValidHash common.Hash
-	err             error
-}
-
-func (c ChainReaderWriterEth1) updateForkChoice(ctx context.Context, headHash, safeHash, finalizeHash common.Hash) (execmodule.ExecutionStatus, *string, common.Hash, error) {
-	result, err := c.executionModule.UpdateForkChoice(ctx, headHash, safeHash, finalizeHash)
+	result, err := c.executionModule.UpdateForkChoice(callCtx, headHash, safeHash, finalizeHash)
 	if err != nil {
 		return 0, nil, common.Hash{}, err
 	}

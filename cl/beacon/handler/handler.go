@@ -205,6 +205,10 @@ func NewApiHandler(
 		blobSnapshots = caplinSnapshots
 	}
 
+	unregisteredProposers, err := lru.New[uint64, struct{}]("unregisteredProposers", 1024)
+	if err != nil {
+		panic(err)
+	}
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
 		panic(err)
@@ -217,14 +221,9 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
-	unregisteredProposers, err := lru.New[uint64, struct{}]("unregisteredProposers", 1024)
-	if err != nil {
-		panic(err)
-	}
 	return &ApiHandler{
 		logger:                             logger,
 		validatorParams:                    validatorParams,
-		unregisteredProposers:              unregisteredProposers,
 		o:                                  sync.Once{},
 		netConfig:                          netConfig,
 		ethClock:                           ethClock,
@@ -238,6 +237,7 @@ func NewApiHandler(
 		caplinStateSnapshots:               caplinStateSnapshots,
 		peerDas:                            peerDas,
 		slotWaitedForAttestationProduction: slotWaitedForAttestationProduction,
+		unregisteredProposers:              unregisteredProposers,
 		randaoMixesPool: sync.Pool{New: func() any {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},

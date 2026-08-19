@@ -75,18 +75,16 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 
 		// Run fork choice update with finalized checkpoint and head
 		headVersion := cfg.beaconCfg.GetCurrentStateVersion(headSlot / cfg.beaconCfg.SlotsPerEpoch)
-		if err = notifyExecutionForkChoice(
+		if _, err = cfg.forkChoice.Engine().ForkChoiceUpdate(
 			ctx,
-			cfg.forkChoice.Engine(),
 			cfg.forkChoice.GetFinalizedExecutionHash(finalizedCheckpoint.Root),
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
-			cfg.forkChoice.GetEth1Hash(headRoot),
-			headVersion,
+			cfg.forkChoice.GetEth1Hash(headRoot), nil, headVersion,
 		); err != nil {
-			// Contention is not a rejection, and sync has no payload to lose by carrying on: the
-			// next head will send another update.
-			if isExpectedCanonicalForkChoiceDelay(err) {
-				logger.Debug("[Caplin] forkchoice update did not settle", "head", headRoot, "err", err)
+			// A forkchoice update that ran out of time is not a rejection, and sync has no payload
+			// to lose by carrying on: the next head will send another one.
+			if errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
 				err = nil
 			} else {
 				err = fmt.Errorf("failed to run forkchoice: %w", err)
@@ -104,21 +102,6 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		logger.Warn("Could not set status", "err", err2)
 	}
 	return
-}
-
-func isExpectedCanonicalForkChoiceDelay(err error) bool {
-	return execution_client.IsForkChoiceContention(err) ||
-		errors.Is(err, execution_client.ErrForkChoiceSyncing)
-}
-
-func notifyExecutionForkChoice(
-	ctx context.Context,
-	engine execution_client.ExecutionEngine,
-	finalized, safe, head common.Hash,
-	version clparams.StateVersion,
-) error {
-	_, err := engine.ForkChoiceUpdate(ctx, finalized, safe, head, nil, version)
-	return err
 }
 
 // updateCanonicalChainInTheDatabase updates the canonical chain in the database by marking the given head slot and root as canonical.

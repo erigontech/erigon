@@ -33,13 +33,14 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 var (
 	errNotOurProposal         = errors.New("next slot is not proposed by a registered validator")
 	errNoPayloadID            = errors.New("execution layer returned no payload id")
 	errHeadTooFarBack         = errors.New("head state is too far behind the slot to prepare")
-	errPreparationHeadChanged = synced_data.ErrSelectedHeadChanged
+	errPreparationHeadChanged = errors.New("selected head changed while preparing payload")
 	errProposalInFlight       = errors.New("block production is in progress")
 	errPreparationTooLate     = errors.New("slot is too close to prime a payload production would use")
 )
@@ -58,15 +59,10 @@ type preparedPayload struct {
 	payloads map[uint64]preparedPayloadRecord
 }
 
-// payloadPreparationGate lets production cancel speculative EL work without waiting for it.
+// payloadPreparationGate keeps the short builder-start call separate from block production.
+// Preparation never holds the gate while copying state or waiting to retry.
 type payloadPreparationGate struct {
-	mu          sync.Mutex
-	proposals   int
-	preparation *payloadPreparationAdmission
-}
-
-type payloadPreparationAdmission struct {
-	cancel context.CancelCauseFunc
+	attempt sync.RWMutex
 }
 
 func (p *preparedPayload) set(slot uint64, payloadID []byte, primedAt time.Time) {
@@ -92,50 +88,35 @@ func (p *preparedPayload) matches(slot uint64, payloadID []byte, now time.Time, 
 }
 
 func (g *payloadPreparationGate) beginProduction() func() {
-	g.mu.Lock()
-	g.proposals++
-	preparation := g.preparation
-	if preparation != nil {
-		preparation.cancel(errProposalInFlight)
-	}
-	g.mu.Unlock()
-	return func() {
-		g.mu.Lock()
-		g.proposals--
-		g.mu.Unlock()
-	}
+	g.attempt.RLock()
+	return sync.OnceFunc(g.attempt.RUnlock)
 }
 
-func (g *payloadPreparationGate) productionInFlight() bool {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	return g.proposals > 0
+func (g *payloadPreparationGate) idle() bool {
+	if !g.attempt.TryLock() {
+		return false
+	}
+	g.attempt.Unlock()
+	return true
 }
 
-func (g *payloadPreparationGate) tryBeginPreparation(ctx context.Context) (context.Context, func(), bool) {
-	g.mu.Lock()
-	defer g.mu.Unlock()
-	if g.proposals > 0 || g.preparation != nil {
-		return nil, nil, false
+func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
+	if !g.attempt.TryLock() {
+		return nil, false
 	}
-	prepareCtx, cancel := context.WithCancelCause(ctx)
-	admission := &payloadPreparationAdmission{cancel: cancel}
-	g.preparation = admission
-	return prepareCtx, func() {
-		cancel(context.Canceled)
-		g.mu.Lock()
-		if g.preparation == admission {
-			g.preparation = nil
-		}
-		g.mu.Unlock()
-	}, true
+	return g.attempt.Unlock, true
 }
 
 // StartPayloadPreparation primes the execution layer for slots this node is due to propose.
 // The returned channel closes when the preparation loop stops.
 func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) <-chan struct{} {
 	done := make(chan struct{})
-	if a.routerCfg == nil || !a.routerCfg.Validator || a.engine == nil || !a.engine.SupportInsertion() {
+	if a.routerCfg == nil || !a.routerCfg.Validator || a.engine == nil {
+		close(done)
+		return done
+	}
+	// Direct builder startup requires the same local chain access reported by SupportInsertion.
+	if _, ok := a.engine.(execution_client.PayloadBuilder); !ok || !a.engine.SupportInsertion() {
 		close(done)
 		return done
 	}
@@ -157,12 +138,8 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 	ticker := time.NewTicker(tick)
 	defer ticker.Stop()
 
-	var (
-		primed         slotHead
-		notOurs        slotHead
-		failed         slotHead
-		lastFailureLog time.Time
-	)
+	var lastSettled slotHead
+	var lastFailureLog time.Time
 	for immediate := true; ; immediate = false {
 		if immediate {
 			select {
@@ -180,14 +157,17 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 
 		targetSlot := a.ethClock.GetCurrentSlot() + 1
 		stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
-		if preparationRetired(stateVersion) {
+		// Gloas uses builder bids instead of local payload priming. Before Capella the payload
+		// attributes needed by this path are not available.
+		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			return
 		}
-		if !shouldPreparePayloadVersion(stateVersion) {
+		if stateVersion.Before(clparams.CapellaVersion) {
 			continue
 		}
-		// On consecutive proposals the prime for the next slot lands inside this one.
-		if a.payloadPreparationGate.productionInFlight() {
+		// This early check avoids state work during production. The gate is checked again before
+		// builder startup to cover production that begins after this point.
+		if !a.payloadPreparationGate.idle() {
 			continue
 		}
 		// Nothing is registered, so nothing here can be ours. Checking first keeps a non-validating
@@ -214,21 +194,17 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 			continue
 		}
 		// Memoized outcomes remain valid only for the same slot, head and validator registrations.
-		settled := slotHead{slot: targetSlot, head: selectedRoot, generation: generation}
-		if primed == settled || notOurs == settled || failed == settled {
+		current := slotHead{slot: targetSlot, head: selectedRoot, generation: generation}
+		if current == lastSettled {
 			continue
 		}
-		// An ordinary FCU deadline leaves execution work running asynchronously. A preparation-specific
-		// cause stops speculative work when the slot begins.
 		prepareCtx, cancel := context.WithDeadlineCause(ctx, slotStart, errPreparationTooLate)
 		head, err := a.preparePayloadFor(prepareCtx, targetSlot)
 		cancel()
+		outcome := slotHead{slot: targetSlot, head: head, generation: generation}
 		if err != nil {
-			outcome := slotHead{slot: targetSlot, head: head, generation: generation}
-			if errors.Is(err, errNotOurProposal) {
-				notOurs = outcome
-			} else if isStablePreparationFailure(err) {
-				failed = outcome
+			if errors.Is(err, errNotOurProposal) || errors.Is(err, errNoPayloadID) {
+				lastSettled = outcome
 			}
 			if !isExpectedPreparationSkip(err) && time.Since(lastFailureLog) >= time.Minute {
 				log.Warn("PayloadPreparation: failed", "slot", targetSlot, "err", err)
@@ -236,7 +212,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 			}
 			continue
 		}
-		primed = slotHead{slot: targetSlot, head: head, generation: generation}
+		lastSettled = outcome
 	}
 }
 
@@ -255,17 +231,6 @@ func maxPreparationLead(cfg *clparams.BeaconChainConfig) time.Duration {
 	return time.Duration(cfg.SecondsPerSlot) * time.Second
 }
 
-// preparationRetired is the single authority for the fork after which builders gossip bids
-// instead of being primed, so the loop and the per-slot check cannot drift apart.
-func preparationRetired(version clparams.StateVersion) bool {
-	return version.AfterOrEqual(clparams.GloasVersion)
-}
-
-// shouldPreparePayloadVersion confines preparation to the Capella-through-Fulu builder protocol.
-func shouldPreparePayloadVersion(version clparams.StateVersion) bool {
-	return version.AfterOrEqual(clparams.CapellaVersion) && !preparationRetired(version)
-}
-
 // isExpectedPreparationSkip reports whether there was simply nothing to prepare, as opposed to a
 // failure worth reporting.
 func isExpectedPreparationSkip(err error) bool {
@@ -275,24 +240,12 @@ func isExpectedPreparationSkip(err error) bool {
 		errors.Is(err, errPreparationHeadChanged) ||
 		errors.Is(err, errProposalInFlight) ||
 		errors.Is(err, errPreparationTooLate) ||
-		errors.Is(err, execution_client.ErrPayloadPreparationPreempted) ||
-		errors.Is(err, execution_client.ErrForkChoiceNotAdopted) ||
-		errors.Is(err, execution_client.ErrForkChoiceSyncing) ||
-		errors.Is(err, execution_client.ErrForkChoiceUpdateNoPayloadID) ||
 		errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, context.Canceled) ||
 		errors.Is(err, synced_data.ErrNotSynced)
 }
 
-// isStablePreparationFailure identifies answers that cannot change while the target slot, selected
-// head and validator registrations remain unchanged.
-func isStablePreparationFailure(err error) bool {
-	return errors.Is(err, errNoPayloadID) ||
-		errors.Is(err, execution_client.ErrForkChoiceUpdateNoPayloadID) ||
-		errors.Is(err, execution_client.ErrForkChoiceNotAdopted)
-}
-
-// preparePayloadFor sends the forkchoice update for targetSlot ahead of the slot itself.
+// preparePayloadFor starts the builder for targetSlot without changing execution fork choice.
 func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (common.Hash, error) {
 	var (
 		baseBlockRoot      common.Hash
@@ -352,16 +305,24 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 	if time.Until(a.ethClock.GetSlotTime(targetSlot)) < preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion) {
 		return baseBlockRoot, errPreparationTooLate
 	}
-	head, safeHash, finalizedHash, attrs, err := a.preGloasForkChoiceInputs(baseState, baseBlockRoot, targetSlot, feeRecipient, stateVersion)
+	withdrawals, err := a.expectedWithdrawals(baseState, nil, stateVersion, targetSlot)
 	if err != nil {
 		return baseBlockRoot, err
 	}
-	payloadID, err := a.forkChoiceUpdateForPreparation(ctx, baseBlockRoot, finalizedHash, safeHash, head, attrs, stateVersion)
+	head := baseState.LatestExecutionPayloadHeader().BlockHash
+	attrs := a.payloadBuildAttributes(
+		baseState, baseBlockRoot, targetSlot, feeRecipient, withdrawals, nil, nil, stateVersion,
+	)
+	payloadID, err := a.startPayloadBuildForPreparation(ctx, baseBlockRoot, head, attrs)
 	if err != nil {
 		return baseBlockRoot, err
 	}
 	if len(payloadID) == 0 {
 		return baseBlockRoot, errNoPayloadID
+	}
+	selectedRoot, _, selected := a.syncedData.SelectedHead()
+	if !selected || selectedRoot != baseBlockRoot {
+		return baseBlockRoot, errPreparationHeadChanged
 	}
 
 	a.preparedPayload.set(targetSlot, payloadID, time.Now())
@@ -369,91 +330,68 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 	return baseBlockRoot, nil
 }
 
-// forkChoiceUpdateForPreparation retries contention while baseBlockRoot remains selected. One
-// cancellation scope spans every attempt and retry delay, so higher-priority execution work can
-// preempt preparation without waiting for the retry sequence to finish.
-func (a *ApiHandler) forkChoiceUpdateForPreparation(
+// startPayloadBuildForPreparation retries only when the execution head is still catching up or the
+// in-process execution module is busy. Each attempt is non-blocking and separately gated.
+func (a *ApiHandler) startPayloadBuildForPreparation(
 	ctx context.Context,
 	baseBlockRoot common.Hash,
-	finalized, safe, head common.Hash,
+	head common.Hash,
 	attrs *engine_types.PayloadAttributes,
-	stateVersion clparams.StateVersion,
 ) ([]byte, error) {
-	headCtx, releaseHead, ok := a.syncedData.BindToSelectedHead(ctx, baseBlockRoot)
+	payloadBuilder, ok := a.engine.(execution_client.PayloadBuilder)
 	if !ok {
-		return nil, errPreparationHeadChanged
+		return nil, execution_client.ErrNotSupported
 	}
-	defer releaseHead()
-	headCtx, releaseExecution := execution_client.BindPayloadPreparation(headCtx, a.engine)
-	defer releaseExecution()
-	prepareCtx, finishPreparation, ok := a.payloadPreparationGate.tryBeginPreparation(headCtx)
-	if !ok {
-		return nil, errProposalInFlight
-	}
-	defer finishPreparation()
-
 	for {
-		if cause := context.Cause(prepareCtx); cause != nil {
+		if cause := context.Cause(ctx); cause != nil {
 			return nil, cause
 		}
-		payloadID, err := a.engine.ForkChoiceUpdate(prepareCtx, finalized, safe, head, attrs, stateVersion)
-		cancelCause := context.Cause(prepareCtx)
-
-		// Success wins a concurrent cancellation because the execution layer has already completed
-		// the update for these exact inputs.
+		selectedRoot, _, selected := a.syncedData.SelectedHead()
+		if !selected || selectedRoot != baseBlockRoot {
+			return nil, errPreparationHeadChanged
+		}
+		finishAttempt, ok := a.payloadPreparationGate.tryBeginPreparation()
+		if !ok {
+			return nil, errProposalInFlight
+		}
+		payloadID, err := payloadBuilder.StartPayloadBuild(ctx, head, attrs)
+		finishAttempt()
 		if err == nil {
 			return payloadID, nil
 		}
-		if cancelCause != nil {
-			return nil, cancelCause
-		}
-		if !isPreparationContention(err) {
+		if !errors.Is(err, execution_client.ErrPayloadBuildHeadMismatch) &&
+			!errors.Is(err, chainreader.ErrExecutionBusy) {
 			return payloadID, err
 		}
-		if err := common.Sleep(prepareCtx, execution_client.ForkChoiceRetryDelay); err != nil {
-			return nil, context.Cause(prepareCtx)
+		if err := common.Sleep(ctx, 100*time.Millisecond); err != nil {
+			if cause := context.Cause(ctx); cause != nil {
+				return nil, cause
+			}
+			return nil, err
 		}
 	}
 }
 
-func isPreparationContention(err error) bool {
-	return execution_client.IsForkChoiceContention(err) ||
-		errors.Is(err, chainreader.ErrExecutionBusy)
-}
-
-// executionCheckpointHashes resolves the safe and finalized execution hashes known to fork choice.
-// An unknown checkpoint stays zero because substituting the head would falsely finalize it.
-func (a *ApiHandler) executionCheckpointHashes(baseState *state.CachingBeaconState) (safeHash, finalizedHash common.Hash) {
-	finalizedHash = a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
-	safeHash = a.forkchoiceStore.GetFinalizedExecutionHash(baseState.CurrentJustifiedCheckpoint().Root)
-	return safeHash, finalizedHash
-}
-
-// preGloasForkChoiceInputs keeps preparation and production on identical FCU inputs.
-func (a *ApiHandler) preGloasForkChoiceInputs(
+// payloadBuildAttributes is shared because production reuses a prepared builder only when every
+// attribute is identical. Fields introduced with Gloas remain nil during pre-Gloas preparation.
+func (a *ApiHandler) payloadBuildAttributes(
 	baseState *state.CachingBeaconState,
 	baseBlockRoot common.Hash,
 	targetSlot uint64,
 	feeRecipient common.Address,
+	withdrawals []*types.Withdrawal,
+	slotNumber, targetGasLimit *hexutil.Uint64,
 	stateVersion clparams.StateVersion,
-) (head, safeHash, finalizedHash common.Hash, attrs *engine_types.PayloadAttributes, err error) {
-	head = baseState.LatestExecutionPayloadHeader().BlockHash
-	safeHash, finalizedHash = a.executionCheckpointHashes(baseState)
-
-	withdrawals, err := a.expectedWithdrawals(baseState, nil, stateVersion, targetSlot)
-	if err != nil {
-		return head, safeHash, finalizedHash, nil, err
-	}
+) *engine_types.PayloadAttributes {
 	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
-	attrs = payloadAttributes(
+	return payloadAttributes(
 		stateVersion,
 		hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
 		baseState.GetRandaoMixes(targetEpoch),
 		feeRecipient,
 		withdrawals,
 		&baseBlockRoot,
-		nil,
-		nil,
+		slotNumber,
+		targetGasLimit,
 	)
-	return head, safeHash, finalizedHash, attrs, nil
 }

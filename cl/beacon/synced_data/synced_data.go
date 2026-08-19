@@ -17,7 +17,6 @@
 package synced_data
 
 import (
-	"context"
 	"errors"
 	"fmt"
 	"sync"
@@ -34,7 +33,6 @@ import (
 var (
 	ErrNotSynced                 = errors.New("not synced")
 	ErrPreviousStateNotAvailable = errors.New("previous state not available")
-	ErrSelectedHeadChanged       = errors.New("selected head changed")
 )
 
 var _ SyncedData = (*SyncedDataManager)(nil)
@@ -43,10 +41,8 @@ type SyncedDataManager struct {
 	enabled bool
 	cfg     *clparams.BeaconChainConfig
 
-	selectedHead         atomic.Pointer[headIdentity]
-	stateHead            atomic.Pointer[headIdentity]
-	selectedHeadMu       sync.Mutex
-	selectedHeadBindings map[*selectedHeadBinding]struct{}
+	selectedHead atomic.Pointer[headIdentity]
+	stateHead    atomic.Pointer[headIdentity]
 
 	headState         *state.CachingBeaconState
 	previousHeadState *state.CachingBeaconState
@@ -60,11 +56,6 @@ type headIdentity struct {
 	slot uint64
 }
 
-type selectedHeadBinding struct {
-	cancel context.CancelCauseFunc
-	active bool
-}
-
 func NewSyncedDataManager(cfg *clparams.BeaconChainConfig, enabled bool) *SyncedDataManager {
 	return &SyncedDataManager{
 		enabled: enabled,
@@ -76,11 +67,7 @@ func (s *SyncedDataManager) OnSelectedHead(blockRoot common.Hash, blockSlot uint
 	if !s.enabled {
 		return
 	}
-	current := s.selectedHead.Load()
-	if current != nil && current.root == blockRoot && current.slot == blockSlot {
-		return
-	}
-	s.setSelectedHead(&headIdentity{root: blockRoot, slot: blockSlot})
+	s.selectedHead.Store(&headIdentity{root: blockRoot, slot: blockSlot})
 }
 
 func (s *SyncedDataManager) SelectedHead() (common.Hash, uint64, bool) {
@@ -92,68 +79,6 @@ func (s *SyncedDataManager) SelectedHead() (common.Hash, uint64, bool) {
 		return common.Hash{}, 0, false
 	}
 	return head.root, head.slot, true
-}
-
-// BindToSelectedHead returns a child context that OnSelectedHead cancels before returning when it
-// selects a different head. It returns false if blockRoot is no longer selected; callers must
-// release every successful binding.
-func (s *SyncedDataManager) BindToSelectedHead(ctx context.Context, blockRoot common.Hash) (context.Context, CancelFn, bool) {
-	if !s.enabled {
-		return nil, nil, false
-	}
-
-	headCtx, cancel := context.WithCancelCause(ctx)
-	binding := &selectedHeadBinding{cancel: cancel, active: true}
-	s.selectedHeadMu.Lock()
-	head := s.selectedHead.Load()
-	if head == nil || head.root != blockRoot {
-		s.selectedHeadMu.Unlock()
-		cancel(ErrSelectedHeadChanged)
-		return nil, nil, false
-	}
-	if s.selectedHeadBindings == nil {
-		s.selectedHeadBindings = map[*selectedHeadBinding]struct{}{}
-	}
-	s.selectedHeadBindings[binding] = struct{}{}
-	s.selectedHeadMu.Unlock()
-
-	return headCtx, func() {
-		s.selectedHeadMu.Lock()
-		if !binding.active {
-			s.selectedHeadMu.Unlock()
-			return
-		}
-		binding.active = false
-		delete(s.selectedHeadBindings, binding)
-		s.selectedHeadMu.Unlock()
-		cancel(context.Canceled)
-	}, true
-}
-
-func (s *SyncedDataManager) setSelectedHead(head *headIdentity) {
-	s.selectedHeadMu.Lock()
-	current := s.selectedHead.Load()
-	sameHead := current == nil && head == nil
-	if current != nil && head != nil {
-		sameHead = current.root == head.root && current.slot == head.slot
-	}
-	if sameHead {
-		s.selectedHeadMu.Unlock()
-		return
-	}
-	s.selectedHead.Store(head)
-	bindings := s.selectedHeadBindings
-	s.selectedHeadBindings = nil
-	// Mark bindings inactive before unlocking so a concurrent release cannot replace the head-change
-	// cause with context.Canceled.
-	for binding := range bindings {
-		binding.active = false
-	}
-	s.selectedHeadMu.Unlock()
-
-	for binding := range bindings {
-		binding.cancel(ErrSelectedHeadChanged)
-	}
 }
 
 // OnHeadState updates the current head state and tracks the previous state.
@@ -328,14 +253,13 @@ func (s *SyncedDataManager) CommitteeCount(epoch uint64) uint64 {
 
 func (s *SyncedDataManager) UnsetHeadState() {
 	s.mu.Lock()
+	defer s.mu.Unlock()
 	s.accessLock.Lock()
+	defer s.accessLock.Unlock()
 	s.stateHead.Store(nil)
+	s.selectedHead.Store(nil)
 	s.headState = nil
 	s.previousHeadState = nil
-	s.accessLock.Unlock()
-	s.mu.Unlock()
-
-	s.setSelectedHead(nil)
 }
 
 func (s *SyncedDataManager) ValidatorPublicKeyByIndex(index int) (common.Bytes48, error) {

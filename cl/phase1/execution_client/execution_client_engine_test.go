@@ -87,7 +87,7 @@ func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cc := &ExecutionClientEngine{
 		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.ValidStatus},
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
 		}},
 		beaconCfg: &cfg,
 	}
@@ -100,59 +100,11 @@ func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
 	require.Nil(t, id)
 }
 
-// SYNCING describes execution-layer progress, so it must not be replaced with the missing-payload-ID
-// error used when a VALID response unexpectedly omits the build identifier.
-func TestEngineForkChoiceUpdateReportsSyncingBeforeInspectingPayloadID(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	cc := &ExecutionClientEngine{
-		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
-		}},
-		beaconCfg: &cfg,
-	}
-
-	for _, attributes := range []*engine_types.PayloadAttributes{nil, {}} {
-		id, err := cc.ForkChoiceUpdate(
-			t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, attributes, clparams.DenebVersion,
-		)
-
-		require.ErrorIs(t, err, ErrForkChoiceSyncing)
-		require.Nil(t, id)
-	}
-}
-
-// Only VALID adopts the requested head. A nil validation error must not make another status
-// successful or retryable.
-func TestForkChoiceUpdateRejectsNonValidStatusesWithoutValidationError(t *testing.T) {
-	for _, engineStatus := range []engine_types.EngineStatus{
-		engine_types.InvalidStatus,
-		engine_types.InvalidBlockHashStatus,
-		engine_types.AcceptedStatus,
-		"UNKNOWN",
-	} {
-		cfg := clparams.MainnetBeaconConfig
-		cc := &ExecutionClientEngine{
-			engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-				PayloadStatus: &engine_types.PayloadStatus{Status: engineStatus},
-			}},
-			beaconCfg: &cfg,
-		}
-
-		id, err := cc.ForkChoiceUpdate(
-			t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.DenebVersion,
-		)
-
-		require.ErrorIs(t, err, ErrForkChoiceNotAdopted, "status %s", engineStatus)
-		require.NotErrorIs(t, err, ErrForkChoiceUpdateNoPayloadID, "status %s", engineStatus)
-		require.Nil(t, id, "status %s", engineStatus)
-	}
-}
-
 func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cc := &ExecutionClientEngine{
 		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.ValidStatus},
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
 		}},
 		beaconCfg: &cfg,
 	}

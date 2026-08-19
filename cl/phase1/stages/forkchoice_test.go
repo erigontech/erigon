@@ -2,60 +2,18 @@ package stages
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
-
-// The canonical stage is sequential, so it reports contention instead of holding the stage through
-// a retry window.
-func TestNotifyExecutionForkChoiceDoesNotHoldTheStageOnContention(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
-		Return(nil, execution_client.ErrForkChoiceBusy)
-
-	err := notifyExecutionForkChoice(
-		t.Context(), engine, common.Hash{0x01}, common.Hash{0x02}, common.Hash{0x03}, clparams.ElectraVersion,
-	)
-
-	require.ErrorIs(t, err, execution_client.ErrForkChoiceBusy)
-}
-
-func TestNotifyExecutionForkChoiceReturnsSuccess(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
-		Return(nil, nil)
-
-	err := notifyExecutionForkChoice(
-		t.Context(), engine, common.Hash{0x01}, common.Hash{0x02}, common.Hash{0x03}, clparams.ElectraVersion,
-	)
-
-	require.NoError(t, err)
-}
-
-func TestCanonicalForkChoiceDelayIsNonFatal(t *testing.T) {
-	for _, err := range []error{
-		execution_client.ErrForkChoiceBusy,
-		execution_client.ErrForkChoiceSyncing,
-		execution_client.ErrForkChoiceUpdateTimeout,
-	} {
-		require.True(t, isExpectedCanonicalForkChoiceDelay(err))
-	}
-	require.False(t, isExpectedCanonicalForkChoiceDelay(errors.New("rejected")))
-}
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {
 	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)

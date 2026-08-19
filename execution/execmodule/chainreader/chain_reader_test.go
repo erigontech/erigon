@@ -18,12 +18,10 @@ package chainreader
 
 import (
 	"context"
-	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/execmodule"
 )
 
@@ -32,19 +30,6 @@ import (
 type assembledBlockStub struct {
 	execmodule.ExecutionModule
 	result execmodule.AssembledBlockResult
-}
-
-type blockingForkChoiceStub struct {
-	execmodule.ExecutionModule
-	started chan context.Context
-	stopped chan error
-}
-
-func (s blockingForkChoiceStub) UpdateForkChoice(ctx context.Context, _, _, _ common.Hash) (execmodule.ForkChoiceResult, error) {
-	s.started <- ctx
-	<-ctx.Done()
-	s.stopped <- context.Cause(ctx)
-	return execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}, nil
 }
 
 func (s assembledBlockStub) GetAssembledBlock(context.Context, uint64) (execmodule.AssembledBlockResult, error) {
@@ -68,34 +53,4 @@ func TestGetAssembledBlockDistinguishesAnUnknownIdFromAnEmptyOne(t *testing.T) {
 	block, _, _, _, err := building.GetAssembledBlock(t.Context(), 1)
 	require.NoError(t, err)
 	require.Nil(t, block)
-}
-
-// The response timer reports Busy without becoming the work's cancellation cause. A later explicit
-// caller cause must still reach asynchronous forkchoice work.
-func TestUpdateForkChoiceTimeoutKeepsListeningForCallerCancellation(t *testing.T) {
-	started := make(chan context.Context, 1)
-	stopped := make(chan error, 1)
-	reader := ChainReaderWriterEth1{executionModule: blockingForkChoiceStub{started: started, stopped: stopped}}
-	requestCtx, cancelRequest := context.WithCancelCause(t.Context())
-
-	result := make(chan struct {
-		status execmodule.ExecutionStatus
-		err    error
-	}, 1)
-	go func() {
-		status, _, _, err := reader.UpdateForkChoice(requestCtx, common.Hash{}, common.Hash{}, common.Hash{}, 5)
-		result <- struct {
-			status execmodule.ExecutionStatus
-			err    error
-		}{status: status, err: err}
-	}()
-	callCtx := <-started
-	callResult := <-result
-	require.NoError(t, callResult.err)
-	require.Equal(t, execmodule.ExecutionStatusBusy, callResult.status)
-
-	expectedErr := errors.New("selected head changed")
-	cancelRequest(expectedErr)
-	require.ErrorIs(t, <-stopped, expectedErr)
-	require.ErrorIs(t, context.Cause(callCtx), expectedErr)
 }

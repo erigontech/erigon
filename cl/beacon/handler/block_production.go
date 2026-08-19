@@ -229,64 +229,6 @@ func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clp
 	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
 }
 
-// proposalForkChoiceLateRetryWindow is the extra local contention budget after normal payload
-// collection begins. Bounding it still permits a late block without holding the validator request
-// indefinitely.
-const proposalForkChoiceLateRetryWindow = 6 * time.Second
-
-// forkChoiceUpdateForProposal retries only transient in-process contention. A remote engine gets
-// one attempt. Syncing and rejection responses return immediately so the caller retains its
-// failover window.
-func (a *ApiHandler) forkChoiceUpdateForProposal(
-	ctx context.Context,
-	targetSlot uint64,
-	finalized, safe, head common.Hash,
-	attrs *engine_types.PayloadAttributes,
-	stateVersion clparams.StateVersion,
-) ([]byte, error) {
-	if !a.engine.SupportInsertion() {
-		return a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
-	}
-	collectAt := a.ethClock.GetSlotTime(targetSlot).Add(unpreparedGrabOffset(attestationDue(a.beaconChainCfg, stateVersion)))
-	return a.forkChoiceUpdateForProposalUntil(
-		ctx, collectAt.Add(proposalForkChoiceLateRetryWindow), finalized, safe, head, attrs, stateVersion,
-	)
-}
-
-func (a *ApiHandler) forkChoiceUpdateForProposalUntil(
-	ctx context.Context,
-	retryUntil time.Time,
-	finalized, safe, head common.Hash,
-	attrs *engine_types.PayloadAttributes,
-	stateVersion clparams.StateVersion,
-) ([]byte, error) {
-	if !time.Now().Before(retryUntil) {
-		return a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
-	}
-	retryCtx, cancel := context.WithDeadline(ctx, retryUntil)
-	defer cancel()
-
-	var lastErr error
-	for {
-		idBytes, err := a.engine.ForkChoiceUpdate(retryCtx, finalized, safe, head, attrs, stateVersion)
-		switch {
-		case err == nil:
-			return idBytes, nil
-		case ctx.Err() != nil:
-			return nil, ctx.Err()
-		case !execution_client.IsForkChoiceContention(err):
-			return nil, err
-		}
-		lastErr = err
-		if err := common.Sleep(retryCtx, execution_client.ForkChoiceRetryDelay); err != nil {
-			if ctx.Err() != nil {
-				return nil, ctx.Err()
-			}
-			return nil, lastErr
-		}
-	}
-}
-
 // computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
 // reserving a publication margin before the attestation deadline.
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
@@ -1105,7 +1047,8 @@ func (a *ApiHandler) produceBeaconBody(
 	beaconBody.Version = stateVersion
 
 	// Build execution payload
-	var gloasHead common.Hash
+	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
+	head := latestExecutionPayload.BlockHash
 	// [GLOAS] In deferred payload processing, the EL head and withdrawal source depend on
 	// the head's payload status (FULL vs EMPTY). When FULL, we copy the state, apply the
 	// parent execution payload, and compute withdrawals from the mutated copy. When EMPTY,
@@ -1121,11 +1064,11 @@ func (a *ApiHandler) produceBeaconBody(
 			isPreGloasParent := parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0
 			switch {
 			case isPreGloasParent:
-				gloasHead = parentBid.BlockHash
+				head = parentBid.BlockHash
 			case a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
 				a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
 				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}):
-				gloasHead = parentBid.BlockHash
+				head = parentBid.BlockHash
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()
 				if err != nil {
@@ -1148,11 +1091,19 @@ func (a *ApiHandler) produceBeaconBody(
 				// against the parent bid's ExecutionRequestsRoot.
 				beaconBody.ParentExecutionRequests = envelope.Message.ExecutionRequests
 			default:
-				gloasHead = parentBid.ParentBlockHash
+				head = parentBid.ParentBlockHash
 			}
 		} else {
-			gloasHead = baseState.GetLatestBlockHash()
+			head = baseState.GetLatestBlockHash()
 		}
+	}
+	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
+	if finalizedHash == (common.Hash{}) {
+		finalizedHash = head
+	}
+	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.CurrentJustifiedCheckpoint().Root)
+	if safeHash == (common.Hash{}) {
+		safeHash = head
 	}
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
@@ -1197,41 +1148,24 @@ func (a *ApiHandler) produceBeaconBody(
 		}()
 		retryTime := 10 * time.Millisecond
 		feeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
-		var (
-			executionHead           = gloasHead
-			safeHash, finalizedHash common.Hash
-			attrs                   *engine_types.PayloadAttributes
-			inputErr                error
-		)
-		if stateVersion.Before(clparams.GloasVersion) {
-			executionHead, safeHash, finalizedHash, attrs, inputErr = a.preGloasForkChoiceInputs(
-				baseState, blockRoot, targetSlot, feeRecipient, stateVersion,
-			)
-		} else {
-			safeHash, finalizedHash = a.executionCheckpointHashes(baseState)
-			var withdrawals []*types.Withdrawal
-			withdrawals, inputErr = a.expectedWithdrawals(baseState, gloasWithdrawalsState, stateVersion, targetSlot)
-			targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
-			slotNumber := hexutil.Uint64(targetSlot)
-			if inputErr == nil {
-				attrs = payloadAttributes(
-					stateVersion,
-					hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
-					baseState.GetRandaoMixes(targetEpoch),
-					feeRecipient,
-					withdrawals,
-					(*common.Hash)(&blockRoot),
-					&slotNumber,
-					targetGasLimit,
-				)
-			}
-		}
-		if inputErr != nil {
-			executionErr = fmt.Errorf("produceBeaconBody: expected withdrawals: %w", inputErr)
+		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, stateVersion, targetSlot)
+		if err != nil {
+			executionErr = fmt.Errorf("produceBeaconBody: expected withdrawals: %w", err)
 			return
 		}
+		slotNumber := hexutil.Uint64(targetSlot)
+		attrs := a.payloadBuildAttributes(
+			baseState, blockRoot, targetSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
+		)
 		builderStartedAt := time.Now()
-		idBytes, err := a.forkChoiceUpdateForProposal(ctx, targetSlot, finalizedHash, safeHash, executionHead, attrs, stateVersion)
+		idBytes, err := a.engine.ForkChoiceUpdate(
+			ctx,
+			finalizedHash,
+			safeHash,
+			head,
+			attrs,
+			stateVersion,
+		)
 		if err != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w", err)
 			return
@@ -2305,17 +2239,13 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
 	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
 	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
-	headUpdateCtx, cancelHeadUpdate := context.WithTimeout(ctx, time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second)
-	defer cancelHeadUpdate()
-	if _, err := execution_client.RetryForkChoiceUpdate(
-		headUpdateCtx, a.engine, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), headVersion,
-	); err != nil {
+	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
 		// Storing the block does not depend on the execution layer acknowledging the head in time,
 		// and the next head sends another update.
-		if !execution_client.IsForkChoiceContention(err) {
+		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
 			return err
 		}
-		log.Debug("BlockProduction: forkchoice update did not settle while storing block", "root", headRoot, "err", err)
+		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
