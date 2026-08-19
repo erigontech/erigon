@@ -38,24 +38,14 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
-type iodir int
-
-const (
-	get iodir = iota
-	put
-)
-
 type dataWithTxNum struct {
 	data  []byte
 	txNum uint64
-	dir   iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
 type TemporalMemBatch struct {
 	stepSize uint64
-
-	getCacheSize int
 
 	// inMemHistoryReads: accumulate all writes with txNums so GetAsOf can answer time-travel
 	// queries from in-flight state (needed for RPC reads during live chain-tip execution).
@@ -736,7 +726,8 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 }
 
 // flushLocked is the body of Flush, factored so the callback path can run it
-// inside latestStateLock without re-acquiring.
+// inside latestStateLock without re-acquiring. PlainStateVersion advances here
+// with the domain writes; metadata overlays must not advance it independently.
 func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if sd.unwindChangesetRaw != nil {
 		for domain := range sd.unwindChangesetRaw {

@@ -33,7 +33,8 @@ func TestHostTCPPortReturnsBoundPort(t *testing.T) {
 	port := hostTCPPort(host)
 	require.NotZero(t, port)
 
-	conn, err := net.Dial("tcp", fmt.Sprintf("127.0.0.1:%d", port))
+	var dialer net.Dialer
+	conn, err := dialer.DialContext(t.Context(), "tcp", fmt.Sprintf("127.0.0.1:%d", port))
 	require.NoError(t, err)
 	conn.Close()
 }

@@ -18,6 +18,7 @@ package handler
 
 import (
 	"context"
+	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strconv"
@@ -74,7 +75,7 @@ func TestDebugBeaconHeadsReportsSelectedHeadOptimistic(t *testing.T) {
 				forkchoiceStore:         fcu,
 			}
 
-			response, err := a.GetEthV2DebugBeaconHeads(httptest.NewRecorder(), httptest.NewRequest(http.MethodGet, "/eth/v2/debug/beacon/heads", nil))
+			response, err := a.GetEthV2DebugBeaconHeads(httptest.NewRecorder(), httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v2/debug/beacon/heads", nil))
 			require.NoError(t, err)
 			heads := response.Data.([]any)
 			require.Len(t, heads, 1)
@@ -139,7 +140,7 @@ func TestHeadBlockIDUsesSelectedHead(t *testing.T) {
 		forkchoiceStore:         fcu,
 	}
 
-	request := httptest.NewRequest(http.MethodGet, "/eth/v1/beacon/blocks/head/root", nil)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/beacon/blocks/head/root", nil)
 	routeContext := chi.NewRouteContext()
 	routeContext.URLParams.Add("block_id", "head")
 	request = request.WithContext(context.WithValue(request.Context(), chi.RouteCtxKey, routeContext))
@@ -239,7 +240,7 @@ func TestViewHeadStateWithIdentityReportsSyncing(t *testing.T) {
 	a := &ApiHandler{syncedData: syncedData}
 
 	err := a.viewHeadStateWithIdentity(func(*state.CachingBeaconState, common.Hash, uint64) error { return nil })
-	endpointErr, ok := err.(*beaconhttp.EndpointError)
-	require.True(t, ok)
+	var endpointErr *beaconhttp.EndpointError
+	require.True(t, errors.As(err, &endpointErr))
 	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
 }

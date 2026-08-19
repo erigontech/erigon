@@ -339,6 +339,15 @@ type poolingError struct {
 	Failures []poolingFailure `json:"failures,omitempty"`
 }
 
+// writePoolingFailures reports partial failures as 400 with the failure list.
+// logger is nil on handlers built by struct literal, which the package tests do.
+func (a *ApiHandler) writePoolingFailures(w http.ResponseWriter, failures []poolingFailure) {
+	w.WriteHeader(http.StatusBadRequest)
+	if err := json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures}); err != nil && a.logger != nil {
+		a.logger.Debug("[Beacon REST] failed to encode pooling error", "err", err)
+	}
+}
+
 func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWriter, r *http.Request) {
 	req := []*cltypes.SignedBLSToExecutionChange{}
 	if err := json.NewDecoder(r.Body).Decode(&req); err != nil {
@@ -366,8 +375,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolBlsToExecutionChanges(w http.ResponseWri
 	}
 
 	if len(failures) > 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
+		a.writePoolingFailures(w, failures)
 		return
 	}
 	// Only write 200
@@ -423,8 +431,7 @@ func (a *ApiHandler) PostEthV1ValidatorAggregatesAndProof(w http.ResponseWriter,
 	}
 
 	if len(failures) > 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
+		a.writePoolingFailures(w, failures)
 		return
 	}
 	// Only write 200
@@ -480,8 +487,7 @@ func (a *ApiHandler) PostEthV1BeaconPoolSyncCommittees(w http.ResponseWriter, r 
 		}
 	}
 	if len(failures) > 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
+		a.writePoolingFailures(w, failures)
 		return
 	}
 	// Only write 200
@@ -525,8 +531,7 @@ func (a *ApiHandler) PostEthV1ValidatorContributionsAndProofs(w http.ResponseWri
 	}
 
 	if len(failures) > 0 {
-		w.WriteHeader(http.StatusBadRequest)
-		json.NewEncoder(w).Encode(poolingError{Code: http.StatusBadRequest, Message: "some failures", Failures: failures})
+		a.writePoolingFailures(w, failures)
 		return
 	}
 	// Only write 200

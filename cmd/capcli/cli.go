@@ -210,7 +210,7 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	}
 	marshaled, err := io.ReadAll(r.Body)
 	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+		return nil, fmt.Errorf("checkpoint sync read failed %w", err)
 	}
 	if len(marshaled) < 108 {
 		return nil, errors.New("read failed, too short")
@@ -221,12 +221,12 @@ func retrieveAndSanitizeBlockFromRemoteEndpoint(ctx context.Context, beaconConfi
 	block := cltypes.NewSignedBeaconBlock(beaconConfig, v)
 	err = block.DecodeSSZ(marshaled, int(v))
 	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+		return nil, fmt.Errorf("checkpoint sync decode failed %w", err)
 	}
 	if expectedBlockRoot != nil {
 		has, err := block.Block.HashSSZ()
 		if err != nil {
-			return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+			return nil, fmt.Errorf("checkpoint sync decode failed %w", err)
 		}
 		if has != *expectedBlockRoot {
 			return nil, fmt.Errorf("checkpoint sync decode failed, unexpected block root %s", has)
@@ -273,7 +273,7 @@ func retrieveBlobsFromRemoteEndpoint(ctx context.Context, beaconConfig *clparams
 	}
 	decoder := json.NewDecoder(r.Body)
 	if err := decoder.Decode(&blobsResponse); err != nil {
-		return nil, fmt.Errorf("blob retrieval decode failed %s", err)
+		return nil, fmt.Errorf("blob retrieval decode failed %w", err)
 	}
 	return blobsResponse.Data, nil
 }
@@ -691,7 +691,7 @@ func (r *RetrieveHistoricalState) Run(ctx *Context) error {
 		return err
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, eth1Getter, beaconConfig)
-	gSpot, err := initial_state.GetGenesisState(t)
+	gSpot, err := initial_state.GetGenesisState(ctx, t)
 	if err != nil {
 		return err
 	}
@@ -813,9 +813,9 @@ type ArchiveSanitizer struct {
 	FaultOut     string `help:"fault out" default:""`
 }
 
-func getHead(beaconApiURL string) (uint64, error) {
+func getHead(ctx context.Context, beaconApiURL string) (uint64, error) {
 	headResponse := map[string]any{}
-	req, err := http.NewRequest("GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", beaconApiURL+"/eth/v2/debug/beacon/heads", nil)
 	if err != nil {
 		return 0, err
 	}
@@ -844,9 +844,9 @@ func getHead(beaconApiURL string) (uint64, error) {
 	return slot, nil
 }
 
-func getStateRootAtSlot(beaconApiURL string, slot uint64) (common.Hash, error) {
+func getStateRootAtSlot(ctx context.Context, beaconApiURL string, slot uint64) (common.Hash, error) {
 	response := map[string]any{}
-	req, err := http.NewRequest("GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
+	req, err := http.NewRequestWithContext(ctx, "GET", fmt.Sprintf("%s/eth/v1/beacon/states/%d/root", beaconApiURL, slot), nil)
 	if err != nil {
 		return common.Hash{}, err
 	}
@@ -891,7 +891,7 @@ func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfi
 	}
 	marshaled, err := io.ReadAll(r.Body)
 	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync read failed %s", err)
+		return nil, fmt.Errorf("checkpoint sync read failed %w", err)
 	}
 
 	epoch := slot / beaconConfig.SlotsPerEpoch
@@ -899,7 +899,7 @@ func getBeaconState(ctx context.Context, beaconConfig *clparams.BeaconChainConfi
 	beaconState := state.New(beaconConfig)
 	err = beaconState.DecodeSSZ(marshaled, int(beaconConfig.GetCurrentStateVersion(epoch)))
 	if err != nil {
-		return nil, fmt.Errorf("checkpoint sync decode failed %s", err)
+		return nil, fmt.Errorf("checkpoint sync decode failed %w", err)
 	}
 	return beaconState, nil
 }
@@ -912,13 +912,13 @@ func (a *ArchiveSanitizer) Run(ctx *Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// retrieve the head slot first through /eth/v2/debug/beacon/heads
-	headSlot, err := getHead(a.BeaconApiURL)
+	headSlot, err := getHead(ctx, a.BeaconApiURL)
 	if err != nil {
 		return err
 	}
 	for i := a.StartSlot; i < headSlot; i += a.IntervalSlot {
 		// retrieve the state root at slot i and skip if not found (can happen)
-		stateRoot, err := getStateRootAtSlot(a.BeaconApiURL, i)
+		stateRoot, err := getStateRootAtSlot(ctx, a.BeaconApiURL, i)
 		if err != nil {
 			return err
 		}
@@ -969,7 +969,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 	log.Root().SetHandler(log.LvlFilterHandler(log.LvlDebug, log.StderrHandler))
 
 	// retrieve the head slot first through /eth/v2/debug/beacon/heads
-	headSlot, err := getHead(b.BaseURL)
+	headSlot, err := getHead(ctx, b.BaseURL)
 	if err != nil {
 		return err
 	}
@@ -994,7 +994,7 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 		uri := b.BaseURL + b.Endpoint
 		uri = strings.Replace(uri, "{slot}", strconv.FormatUint(i, 10), 1)
 		uri = strings.Replace(uri, "{epoch}", strconv.FormatUint(i/beaconConfig.SlotsPerEpoch, 10), 1)
-		elapsed, err := timeRequest(uri, b.Accept, b.Method, b.Body)
+		elapsed, err := timeRequest(ctx, uri, b.Accept, b.Method, b.Body)
 		if err != nil {
 			log.Warn("Failed to benchmark", "error", err, "uri", uri)
 			continue
@@ -1008,8 +1008,8 @@ func (b *BenchmarkNode) Run(ctx *Context) error {
 	return nil
 }
 
-func timeRequest(uri, accept, method, body string) (time.Duration, error) {
-	req, err := http.NewRequest(method, uri, nil)
+func timeRequest(ctx context.Context, uri, accept, method, body string) (time.Duration, error) {
+	req, err := http.NewRequestWithContext(ctx, method, uri, nil)
 	if err != nil {
 		return 0, err
 	}
