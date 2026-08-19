@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -54,7 +55,7 @@ func TestForkChoiceUpdateReportsATimeoutRatherThanAnEmptySuccess(t *testing.T) {
 		name string
 		err  error
 	}{
-		{"context deadline", context.DeadlineExceeded},
+		{"wrapped context deadline", fmt.Errorf("wrapped: %w", context.DeadlineExceeded)},
 		{"grpc deadline", status.Error(codes.DeadlineExceeded, "context deadline exceeded")},
 		{"legacy grpc string", errors.New("rpc error: code = DeadlineExceeded desc = context deadline exceeded")},
 	} {
