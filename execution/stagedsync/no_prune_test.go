@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"crypto/sha256"
 	"encoding/binary"
@@ -294,6 +295,28 @@ func TestPruneTxLookupResumesInterruptedRotation(t *testing.T) {
 	require.Equal(t, prune.Done, st.ValueProgress)
 }
 
+// A rotation that spans a bound advance resumes past rows the widened range now
+// covers, so finishing it must not record the wider bound — that would claim
+// coverage it never achieved and short-circuit the pass that would catch them.
+func TestPruneTxLookupRotationRecordsItsStartBound(t *testing.T) {
+	ctx, logger := context.Background(), log.New()
+	tx, cfg, s := txLookupFixture(t, 1, 0, 0, 0, txlBlocks/2)
+
+	// the interrupted rotation started at a lower bound than the current one
+	started, err := state.GetPruneValProgress(tx, []byte(kv.TxLookup))
+	require.NoError(t, err)
+	require.Equal(t, prune.InProgress, started.ValueProgress)
+	require.Less(t, started.TxTo, txlMinTxNum(txlBlockTo()))
+
+	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
+
+	done, err := state.GetPruneValProgress(tx, []byte(kv.TxLookup))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, done.ValueProgress)
+	require.Equal(t, started.TxTo, done.TxTo,
+		"recorded the widened bound, claiming coverage the resumed rotation skipped")
+}
+
 // A completed rotation must survive the tip advancing, or the whole table is
 // rescanned once per payload to collect a single block of rows.
 func TestPruneTxLookupSkipsRescanAfterRotation(t *testing.T) {
@@ -318,4 +341,69 @@ func TestPruneTxLookupSkipsRescanAfterRotation(t *testing.T) {
 	got, err := tx.GetOne(kv.TxLookup, planted[:])
 	require.NoError(t, err)
 	require.NotNil(t, got, "rescanned the whole table though the bound had not moved")
+}
+
+// Drives one table through the whole prune lifecycle, asserting the state machine
+// at each step rather than each step in isolation.
+func TestPruneTxLookupLifecycle(t *testing.T) {
+	ctx, logger := context.Background(), log.New()
+	tx, cfg, s := txLookupFixture(t, 1, 0, 0, 0, 0)
+	progress := func() *prune.Stat {
+		st, err := state.GetPruneValProgress(tx, []byte(kv.TxLookup))
+		require.NoError(t, err)
+		return st
+	}
+	to := txlBlockTo()
+
+	// 1. fresh node: one rotation clears everything below the bound
+	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
+	require.Equal(t, prune.Done, progress().ValueProgress)
+	require.Zero(t, txlBlockRows(t, tx, to-1), "left rows below the bound")
+	require.EqualValues(t, txlTxPerBlock, txlBlockRows(t, tx, to), "pruned the exclusive bound")
+	afterFirst := progress().TxTo
+
+	// 2. bound unchanged: short-circuits, so a row planted below it survives
+	planted := txlTxHash(txlBlocks+1, 0)
+	val := make([]byte, 16)
+	binary.BigEndian.PutUint64(val[8:], afterFirst-1)
+	require.NoError(t, tx.Put(kv.TxLookup, planted[:], val))
+	s.ForwardProgress++
+	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
+	got, err := tx.GetOne(kv.TxLookup, planted[:])
+	require.NoError(t, err)
+	require.NotNil(t, got, "rescanned though the bound had not moved")
+	require.Equal(t, afterFirst, progress().TxTo, "short-circuit moved the recorded bound")
+
+	// 3. an interrupted rotation is resumed, not restarted. The table is hash-ordered,
+	// so the probe has to sort before the saved cursor to be skipped by a resume.
+	cur := txlTxHash(txlBlocks/2, 0)
+	var before common.Hash
+	for i := uint64(0); ; i++ {
+		if h := txlTxHash(txlBlocks+2, i); bytes.Compare(h[:], cur[:]) < 0 {
+			before = h
+			break
+		}
+	}
+	require.NoError(t, tx.Put(kv.TxLookup, before[:], val))
+	require.NoError(t, state.SavePruneValProgress(tx, kv.TxLookup, &prune.Stat{
+		TxFrom: 0, TxTo: afterFirst, ValueProgress: prune.InProgress, LastPrunedValue: cur[:],
+	}))
+	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
+	require.Equal(t, prune.Done, progress().ValueProgress)
+	require.NotNil(t, mustGet(t, tx, before[:]), "restarted from First instead of resuming")
+
+	// 4. a pre-fix record bypasses the short-circuit and restarts
+	require.NoError(t, state.SavePruneValProgress(tx, kv.TxLookup, &prune.Stat{
+		TxFrom: 42, TxTo: afterFirst + 1_000_000, ValueProgress: prune.Done, LastPrunedValue: cur[:],
+	}))
+	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
+	require.Nil(t, mustGet(t, tx, before[:]), "stale record still short-circuited")
+	require.Zero(t, progress().TxFrom, "stale floor was not cleared")
+}
+
+func mustGet(t *testing.T, tx kv.Tx, k []byte) []byte {
+	t.Helper()
+	v, err := tx.GetOne(kv.TxLookup, k)
+	require.NoError(t, err)
+	return v
 }
