@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/das/mock_services"
 	blobstoragemock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -149,22 +150,49 @@ func TestBlobHistoryDownloaderKeepsRetryTargetAtDenebStart(t *testing.T) {
 	require.Equal(t, denebStart, downloader.nextBackfillTargetSlot)
 }
 
-func TestBlobHistoryDownloaderSecondCompletedPassScansOnlyRecentWindow(t *testing.T) {
+func TestBlobHistoryDownloaderSecondCompletedPassScansEntireUnfrozenRange(t *testing.T) {
 	const head = uint64(1_000)
-	reader := &boundaryBlockReader{}
+	reader := &boundaryBlockReader{block: cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)}
 	downloader := newBoundaryDownloader(t, head, 0, 0, reader)
 
 	require.NoError(t, downloader.downloadOnce(false))
 	reader.slots = nil
 	require.NoError(t, downloader.downloadOnce(false))
 
-	wantFloor := head - clparams.MainnetBeaconConfig.SlotsPerEpoch*2
-	require.Equal(t, wantFloor, downloader.nextBackfillTargetSlot)
-	require.Equal(t, head-wantFloor+1, uint64(len(reader.slots)))
-	require.Equal(t, wantFloor, reader.slots[len(reader.slots)-1])
+	require.Zero(t, downloader.nextBackfillTargetSlot)
+	require.Equal(t, head+1, uint64(len(reader.slots)))
+	require.Zero(t, reader.slots[len(reader.slots)-1])
 }
 
-func TestBlobHistoryDownloaderNonArchiveSecondPassScansOnlyRecentWindow(t *testing.T) {
+func TestBlobHistoryDownloaderFailedRecoveryContinuesScanAndNotifies(t *testing.T) {
+	const (
+		head   = uint64(100)
+		target = uint64(80)
+	)
+	ctrl := gomock.NewController(t)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	failedRecovery := errors.New("recovery failed")
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	peerDas := mock_services.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().DownloadColumnsAndRecoverBlobs(gomock.Any(), gomock.Any()).Return(failedRecovery)
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Slot = head
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	reader := &boundaryBlockReader{blocks: map[uint64]*cltypes.SignedBeaconBlock{head: block}}
+	downloader := newBoundaryDownloader(t, head, 0, target, reader)
+	downloader.blobStorage = blobStorage
+	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
+	notified := false
+	downloader.SetNotifyBlobBackfilled(func() { notified = true })
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, target, reader.slots[len(reader.slots)-1])
+	require.True(t, notified)
+	require.True(t, downloader.backfillCompleted.Load())
+}
+
+func TestBlobHistoryDownloaderNonArchiveSecondPassScansEntireRetentionRange(t *testing.T) {
 	const head = uint64(1_000)
 	reader := &boundaryBlockReader{}
 	downloader := newBoundaryDownloader(t, head, 0, 0, reader)
@@ -175,10 +203,9 @@ func TestBlobHistoryDownloaderNonArchiveSecondPassScansOnlyRecentWindow(t *testi
 	reader.slots = nil
 	require.NoError(t, downloader.downloadOnce(false))
 
-	wantFloor := head - clparams.MainnetBeaconConfig.SlotsPerEpoch*2
-	require.Equal(t, wantFloor, downloader.nextBackfillTargetSlot)
-	require.Equal(t, head-wantFloor+1, uint64(len(reader.slots)))
-	require.Equal(t, wantFloor, reader.slots[len(reader.slots)-1])
+	require.Zero(t, downloader.nextBackfillTargetSlot)
+	require.Equal(t, head+1, uint64(len(reader.slots)))
+	require.Zero(t, reader.slots[len(reader.slots)-1])
 }
 
 func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader freezeblocks.BeaconSnapshotReader) *BlobHistoryDownloader {
@@ -205,6 +232,7 @@ type boundaryBlockReader struct {
 	slots  []uint64
 	err    error
 	block  *cltypes.SignedBeaconBlock
+	blocks map[uint64]*cltypes.SignedBeaconBlock
 	onRead func(uint64)
 }
 
@@ -212,6 +240,9 @@ func (r *boundaryBlockReader) ReadBeaconBlockBodyBySlot(_ context.Context, _ kv.
 	r.slots = append(r.slots, slot)
 	if r.onRead != nil {
 		r.onRead(slot)
+	}
+	if r.blocks != nil {
+		return r.blocks[slot], r.err
 	}
 	return r.block, r.err
 }
