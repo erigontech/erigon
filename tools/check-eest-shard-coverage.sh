@@ -137,6 +137,6 @@ fi
 if (( rc == 0 )); then
 	echo "EEST shard coverage OK."
 else
-	echo "EEST shard coverage FAILED: fix the race run regexes in tools/eest-spec-shards.yml or the hive matrix in .github/workflows/test-hive-eest.yml." >&2
+	echo "EEST shard coverage FAILED: fix the transaction race-shard names or race run regexes in tools/eest-spec-shards.yml, or the Hive matrix in .github/workflows/test-hive-eest.yml." >&2
 fi
 exit $rc
