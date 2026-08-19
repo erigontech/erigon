@@ -229,6 +229,45 @@ func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clp
 	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
 }
 
+// forkChoiceUpdateForProposal bounds acquiring a payload id by the moment the payload has to be
+// collected, so neither the retries here nor the assemble retry below them can eat the margin the
+// block needs to reach attesters. Contention is not a rejection: a forkchoice update that is busy,
+// or one that ran out of time and is still settling, gets another attempt rather than costing the
+// slot. One attempt always runs past the bound, because failing a proposal outright is worse than
+// answering late. The head is not re-read between attempts: a proposal is committed to the parent
+// it is being built on.
+func (a *ApiHandler) forkChoiceUpdateForProposal(
+	ctx context.Context,
+	targetSlot uint64,
+	finalized, safe, head common.Hash,
+	attrs *engine_types.PayloadAttributes,
+	stateVersion clparams.StateVersion,
+) ([]byte, error) {
+	collectAt := a.ethClock.GetSlotTime(targetSlot).Add(unpreparedGrabOffset(attestationDue(a.beaconChainCfg, stateVersion)))
+	boundedCtx, cancel := context.WithDeadline(ctx, collectAt)
+	defer cancel()
+
+	for time.Now().Before(collectAt) {
+		idBytes, err := a.engine.ForkChoiceUpdate(boundedCtx, finalized, safe, head, attrs, stateVersion)
+		switch {
+		case err == nil:
+			return idBytes, nil
+		case ctx.Err() != nil:
+			return nil, ctx.Err()
+		case !errors.Is(err, execution_client.ErrForkChoiceBusy) &&
+			!errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) &&
+			!errors.Is(err, context.DeadlineExceeded):
+			return nil, err
+		}
+		select {
+		case <-ctx.Done():
+			return nil, ctx.Err()
+		case <-time.After(forkChoiceBusyRetryDelay):
+		}
+	}
+	return a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+}
+
 const forkChoiceBusyRetryDelay = 100 * time.Millisecond
 
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
@@ -1169,14 +1208,7 @@ func (a *ApiHandler) produceBeaconBody(
 			targetGasLimit,
 		)
 		builderStartedAt := time.Now()
-		idBytes, err := a.engine.ForkChoiceUpdate(
-			ctx,
-			finalizedHash,
-			safeHash,
-			head,
-			attrs,
-			stateVersion,
-		)
+		idBytes, err := a.forkChoiceUpdateForProposal(ctx, targetSlot, finalizedHash, safeHash, head, attrs, stateVersion)
 		if err != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w", err)
 			return
