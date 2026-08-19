@@ -417,10 +417,27 @@ func londonTransferScenario() *testFinalizeScenario {
 	return s
 }
 
-// senderIsCoinbaseScenario builds a scenario where sender == coinbase (via
-// a real signed tx so finalizeTxSimple's TxMessage().From() == result.Coinbase
-// check returns true). The TxOut and CollectorWrites shapes are minimal
-// baselines — each test customizes them to exercise its specific case.
+// zeroTipEmptyCoinbaseScenario: the fee adjustment is an EIP-161 delete of the
+// coinbase rather than a balance credit.
+func zeroTipEmptyCoinbaseScenario() *testFinalizeScenario {
+	s := simpleTransferScenario()
+	s.name = "zero_tip_empty_coinbase"
+	s.feeTipped = uint256.Int{}
+	return s
+}
+
+// londonZeroTipEmptyCoinbaseScenario: the adjustment has two halves that can
+// move apart — an EIP-161 delete of the emptied coinbase and the burnt-fee
+// credit — so one can vanish between rounds while the other still matches.
+func londonZeroTipEmptyCoinbaseScenario() *testFinalizeScenario {
+	s := londonTransferScenario()
+	s.name = "london_zero_tip_empty_coinbase"
+	s.feeTipped = uint256.Int{}
+	return s
+}
+
+// senderIsCoinbaseScenario builds a scenario where the transaction sender is
+// also the fee recipient. Tests add the TxOut and CollectorWrites shapes they need.
 //
 // preBlockCoinbaseBal is the pre-block coinbase balance written into the
 // reader's accts map. tip is the FeeTipped value the worker-skipped tip
@@ -564,7 +581,7 @@ func (s *testFinalizeScenario) runFinalizeTx(t *testing.T, priorCoinbaseBalance 
 
 	task := result.Task.(*taskVersion)
 
-	writes, err := result.calcFees(task, vm, reader, s.rules, nil)
+	writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 	require.NoError(t, err)
 	return writes
 }
@@ -825,7 +842,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_AccumulatedAcrossTxs(t *testing.T) {
 
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		writes, err := result.calcFees(task, vm, reader, s.rules, nil)
+		writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 		require.NoError(t, err, "tx %d: calcFees", txIdx)
 
 		// Flush finalize writes so the next tx sees them via versionMap.
@@ -890,7 +907,7 @@ func TestFinalizeTxSimple_SenderIsCoinbase_ReExecutedIncarnation(t *testing.T) {
 	// Now flush the re-executed TxOut at incarnation 1.
 	vm.FlushVersionedWrites(result.TxOut, true, "")
 
-	writes, err := result.calcFees(task, vm, reader, s.rules, nil)
+	writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 	require.NoError(t, err)
 
 	coinbaseWrite := findBalance(writes, s.coinbase)
@@ -979,7 +996,7 @@ func TestFinalizeTxSimple_AccumulatedFees(t *testing.T) {
 		// Flush TxOut to versionMap (simulates line 1928).
 		vm.FlushVersionedWrites(result.TxOut, true, "")
 
-		writes, err := result.calcFees(task, vm, reader, s.rules, nil)
+		writes, _, err := result.calcFees(task, vm, reader, s.rules, nil)
 		require.NoError(t, err)
 
 		// Flush finalize writes to versionMap for next TX.
@@ -1773,65 +1790,90 @@ func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
 		"AddressPath sibling must share version with the BalancePath write")
 }
 
-// feeCreditRound mirrors one apply-loop validation round for a single tx:
-// calcFees derives the credit, and a non-empty result is folded into the
-// recorded write set the way nextResult does it.
+// feeCreditRound drives one validation round for a single tx through a real
+// blockExecutor, so the credit, the recorded set and the version map get the
+// same bookkeeping the apply loop gives them.
 type feeCreditRound struct {
-	result   *execResult
-	task     *taskVersion
-	vm       *state.VersionMap
-	reader   *mapStateReader
-	rules    *chain.Rules
-	recorded *state.WriteSet
-	// credited tracks the recorded set once a fee merge produced it, which is
-	// blockExecutor.feeMergeTemp's job in the apply loop.
-	credited *state.WriteSet
+	be     *blockExecutor
+	result *execResult
+	task   *taskVersion
+	vm     *state.VersionMap
+	reader *mapStateReader
+	rules  *chain.Rules
 }
 
 func newFeeCreditRound(t testing.TB, s *testFinalizeScenario) *feeCreditRound {
 	t.Helper()
 
 	result := s.buildExecResult()
+	be := feeMergeTestExecutor(t)
+	be.versionMap.FlushVersionedWrites(result.TxOut, true, "")
 
-	vm := state.NewVersionMap(nil)
-	vm.FlushVersionedWrites(result.TxOut, true, "")
-
-	return &feeCreditRound{
-		result:   result,
-		task:     result.Task.(*taskVersion),
-		vm:       vm,
-		reader:   s.makeReader(),
-		rules:    s.rules,
-		recorded: result.TxOut,
+	r := &feeCreditRound{
+		be:     be,
+		result: result,
+		task:   result.Task.(*taskVersion),
+		vm:     be.versionMap,
+		reader: s.makeReader(),
+		rules:  s.rules,
 	}
+	be.recordWorkerWrites(r.task.Version(), result.TxOut)
+	return r
 }
 
-// run performs one round and returns the credit calcFees produced, nil when it
-// found the recorded set already carries it. The returned set is a copy: the
-// merge folds the recorded set into the credit in place, so the credit itself is
-// only observable before it.
-func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
+func (r *feeCreditRound) recorded() *state.WriteSet {
+	return r.be.blockIO.WriteSet(r.task.Version().TxIndex)
+}
+
+func (r *feeCreditRound) credited() *state.WriteSet {
+	return r.be.creditedWrites(r.task.Version(), r.recorded())
+}
+
+// setPreCreditBalance is what an earlier tx moving addr's balance looks like to
+// the next round: the same account, on a new base the credit lands on.
+func (r *feeCreditRound) setPreCreditBalance(addr accounts.Address, balance uint64) {
+	r.reader.accounts[addr].Balance = *uint256.NewInt(balance)
+}
+
+// run performs one round and returns the outcome calcFees reported together
+// with the credit it produced, nil for every outcome but feeCreditNew. The
+// credit is a copy, because the merge folds the recorded set into it in place.
+func (r *feeCreditRound) run(t testing.TB) (*state.WriteSet, feeOutcome) {
 	t.Helper()
 
-	tip, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, r.credited)
+	version := r.task.Version()
+	recorded := r.recorded()
+	tip, outcome, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, r.credited())
 	require.NoError(t, err)
-	if tip.IsEmpty() {
-		return nil
+
+	var credit *state.WriteSet
+	if outcome == feeCreditNew {
+		credit = copyWrites(tip)
 	}
-	credit := copyWrites(tip)
-	r.recorded = r.recorded.MergeInto(tip)
-	r.credited = r.recorded
-	return credit
+	r.be.recordFeeMerge(version, recorded, tip, outcome)
+	r.vm.FlushVersionedWrites(r.recorded(), true, "")
+	return credit, outcome
 }
 
 func TestCalcFees_SkipsRedundantReCredit(t *testing.T) {
 	t.Parallel()
-	r := newFeeCreditRound(t, simpleTransferScenario())
+	s := simpleTransferScenario()
+	r := newFeeCreditRound(t, s)
 
-	require.NotNil(t, r.run(t), "the first round must credit the tip")
-	require.Nil(t, r.run(t),
+	first, _ := r.run(t)
+	require.NotNil(t, first, "the first round must credit the tip")
+	credited := findBalance(first, s.coinbase)
+	require.NotNil(t, credited)
+
+	tip, outcome := r.run(t)
+	require.Nil(t, tip,
 		"re-crediting a set that already carries this exact credit rebuilds an identical "+
 			"write set and re-runs the merge for nothing")
+	require.Equal(t, feeCreditRecorded, outcome,
+		"the recorded credit must be kept, not taken back")
+	kept := findBalance(r.recorded(), s.coinbase)
+	require.NotNil(t, kept, "the recorded set must still carry the credit")
+	require.Equal(t, credited.Val, kept.Val)
 }
 
 func TestCalcFees_ReCreditsWhenPriorBalanceChanged(t *testing.T) {
@@ -1839,16 +1881,15 @@ func TestCalcFees_ReCreditsWhenPriorBalanceChanged(t *testing.T) {
 	s := simpleTransferScenario()
 	r := newFeeCreditRound(t, s)
 
-	require.NotNil(t, r.run(t), "the first round must credit the tip")
+	first, _ := r.run(t)
+	require.NotNil(t, first, "the first round must credit the tip")
 
-	// A prior tx moved the coinbase balance, so the tip lands on a new base.
-	// Only the balance changes — the rest of the account must stay put, or the
-	// test would pass even if recordedIn stopped comparing balances.
 	priorBalance := uint256.NewInt(7_000_000)
-	r.reader.accounts[s.coinbase].Balance = *priorBalance
+	r.setPreCreditBalance(s.coinbase, priorBalance.Uint64())
 
-	tip := r.run(t)
-	require.NotNil(t, tip, "a changed base balance must produce a fresh credit")
+	tip, outcome := r.run(t)
+	require.Equal(t, feeCreditNew, outcome, "a changed base balance must produce a fresh credit")
+	require.NotNil(t, tip)
 
 	credited := findBalance(tip, s.coinbase)
 	require.NotNil(t, credited)
@@ -1860,19 +1901,17 @@ func TestCalcFees_ReCreditsWhenAddressPathMissing(t *testing.T) {
 	s := simpleTransferScenario()
 	r := newFeeCreditRound(t, s)
 
-	first := r.run(t)
+	first, _ := r.run(t)
 	require.NotNil(t, first, "the first round must credit the tip")
 
-	// A half-recorded credit is not a credit: the balance alone leaves
-	// downstream reads without an account record.
 	balanceOnly := &state.WriteSet{}
 	bw, ok := first.GetBalance(s.coinbase)
 	require.True(t, ok)
 	balanceOnly.SetBalance(s.coinbase, bw)
 
-	tip, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, balanceOnly)
+	tip, outcome, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, balanceOnly)
 	require.NoError(t, err)
-	require.False(t, tip.IsEmpty(), "a recorded balance without its AddressPath sibling must be re-credited")
+	require.Equal(t, feeCreditNew, outcome, "a recorded balance without its AddressPath sibling must be re-credited")
 	require.NotNil(t, findAddress(tip, s.coinbase))
 }
 
@@ -1881,38 +1920,49 @@ func TestCalcFees_SkipsRedundantReCreditWithBurntContract(t *testing.T) {
 	s := londonTransferScenario()
 	r := newFeeCreditRound(t, s)
 
-	first := r.run(t)
+	first, _ := r.run(t)
 	require.NotNil(t, first, "the first round must credit the tip")
-	require.NotNil(t, findBalance(first, s.burntAddr), "London burns to the burnt contract")
+	creditedCoinbase := findBalance(first, s.coinbase)
+	require.NotNil(t, creditedCoinbase)
+	creditedBurnt := findBalance(first, s.burntAddr)
+	require.NotNil(t, creditedBurnt, "London burns to the burnt contract")
 
-	require.Nil(t, r.run(t),
+	tip, outcome := r.run(t)
+	require.Nil(t, tip,
 		"both halves of the credit are already recorded, so the round is a no-op")
+	require.Equal(t, feeCreditRecorded, outcome,
+		"both halves must be kept, not taken back")
+	recorded := r.recorded()
+	keptCoinbase := findBalance(recorded, s.coinbase)
+	require.NotNil(t, keptCoinbase, "the recorded set must still carry the coinbase half")
+	require.Equal(t, creditedCoinbase.Val, keptCoinbase.Val)
+	keptBurnt := findBalance(recorded, s.burntAddr)
+	require.NotNil(t, keptBurnt, "the recorded set must still carry the burnt half")
+	require.Equal(t, creditedBurnt.Val, keptBurnt.Val)
 }
 
 func TestCalcFees_SkipsRedundantReCreditOnEmptyRemoval(t *testing.T) {
 	t.Parallel()
-	s := simpleTransferScenario()
-	// A zero tip on an already-empty coinbase is the EIP-161 case: the credit
-	// is a delete rather than a balance write, and takes a different path
-	// through both recordedIn and writeTo.
-	s.feeTipped = uint256.Int{}
+	s := zeroTipEmptyCoinbaseScenario()
 	r := newFeeCreditRound(t, s)
 
-	first := r.run(t)
+	first, _ := r.run(t)
 	require.NotNil(t, first, "an emptied coinbase must still be touched")
 	sd, ok := first.GetSelfDestruct(s.coinbase)
 	require.True(t, ok, "the credit is a SelfDestructPath delete")
 	require.True(t, sd.Val)
 
-	require.Nil(t, r.run(t),
+	tip, outcome := r.run(t)
+	require.Nil(t, tip,
 		"the delete is already recorded, so the round is a no-op")
+	require.Equal(t, feeCreditRecorded, outcome,
+		"the delete must be kept, not taken back")
+	kept, ok := r.recorded().GetSelfDestruct(s.coinbase)
+	require.True(t, ok, "the recorded set must still carry the delete")
+	require.True(t, kept.Val)
 }
 
-// TestFeeEntryWriteToIsRecordedIn pins the two halves against each other: if
-// recordedIn stops accepting what writeTo produces the skip silently never
-// fires, and if it accepts more the credit can be skipped without ever having
-// been written.
-func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
+func TestFeeEntry_RecordedInAcceptsWhatWriteToWrote(t *testing.T) {
 	t.Parallel()
 	version := state.Version{TxIndex: 3, Incarnation: 1}
 	addr := fAddr("credited")
@@ -1936,7 +1986,7 @@ func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
 		e.writeTo(ws, version)
 
 		require.True(t, e.recordedIn(ws, version),
-			"entry %d: recordedIn must accept what writeTo wrote", i)
+			"entry %d: recordedIn must accept what writeTo wrote, or the skip never fires", i)
 		require.False(t, e.recordedIn(ws, state.Version{TxIndex: 3, Incarnation: 2}),
 			"entry %d: a credit stamped at another incarnation is not this credit", i)
 		require.False(t, e.recordedIn(&state.WriteSet{}, version),
@@ -1944,27 +1994,58 @@ func TestFeeEntryWriteToIsRecordedIn(t *testing.T) {
 	}
 }
 
-// TestFeeEntryNilIsAbsent pins the absent entry: an adjustment that does not
-// touch this address writes nothing and reads as already recorded, so the skip
-// turns on the entries that do exist.
-func TestFeeEntryNilIsAbsent(t *testing.T) {
+func TestFeeEntry_NilIsAbsent(t *testing.T) {
 	t.Parallel()
 	var absent *feeEntry
 	ws := &state.WriteSet{}
 
 	absent.writeTo(ws, state.Version{TxIndex: 3})
 	require.True(t, ws.IsEmpty(), "an absent entry has nothing to write")
-	require.True(t, absent.recordedIn(ws, state.Version{TxIndex: 3}))
+	require.True(t, absent.recordedIn(ws, state.Version{TxIndex: 3}),
+		"an address the adjustment does not touch must not hold the skip back")
 }
 
-// TestFeeEntryDeletedMatchesAnyWriterAtThisVersion pins what the deleted arm
-// accepts. It keys on version and value only, so a worker's own SELFDESTRUCT at
-// this version reads as the credit — harmless, because the entry writes that
-// same delete.
-func TestFeeEntryDeletedMatchesAnyWriterAtThisVersion(t *testing.T) {
+// An absent entry is only absent from this round. What the recorded set holds
+// for its address decides whether the shape still matches.
+func TestFeeEntry_AbsentEntryMatchesOnlyAnAddressWithNoFeeWrite(t *testing.T) {
+	t.Parallel()
+	var absent *feeEntry
+	addr := fAddr("coinbase")
+	version := state.Version{TxIndex: 3, TxNum: 7}
+
+	require.True(t, absent.shapeRecordedIn(&state.WriteSet{}, version, addr),
+		"nothing recorded for the address is the shape a round emitting none has")
+
+	for _, tc := range []struct {
+		name  string
+		write func(ws *state.WriteSet)
+	}{
+		{"delete", func(ws *state.WriteSet) {
+			(&feeEntry{addr: addr, deleted: true}).writeTo(ws, version)
+		}},
+		{"credit", func(ws *state.WriteSet) {
+			(&feeEntry{addr: addr, acc: *fMakeAccount(5, 0)}).writeTo(ws, version)
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := &state.WriteSet{}
+			tc.write(ws)
+			require.False(t, absent.shapeRecordedIn(ws, version, addr),
+				"a %s this round no longer emits must be taken back, not read as recorded", tc.name)
+		})
+	}
+
+	workerWrite := &state.WriteSet{}
+	(&feeEntry{addr: addr, deleted: true}).writeTo(workerWrite, state.Version{TxIndex: 3})
+	require.True(t, absent.shapeRecordedIn(workerWrite, version, addr),
+		"the worker's own delete carries no TxNum and is not the fee shape")
+}
+
+func TestFeeEntry_DeleteArmFencedByTxNum(t *testing.T) {
 	t.Parallel()
 	addr := fAddr("emptied")
-	version := state.Version{TxIndex: 3, Incarnation: 1}
+	taskVersion := state.Version{BlockNum: 9, TxNum: 42, TxIndex: 3, Incarnation: 1}
+	workerVersion := state.Version{BlockNum: 9, TxIndex: 3, Incarnation: 1}
 	e := &feeEntry{addr: addr, deleted: true}
 
 	selfDestruct := func(v state.Version, val bool) *state.WriteSet {
@@ -1976,45 +2057,149 @@ func TestFeeEntryDeletedMatchesAnyWriterAtThisVersion(t *testing.T) {
 		return ws
 	}
 
-	require.False(t, e.recordedIn(selfDestruct(state.Version{TxIndex: 3}, true), version),
+	require.True(t, e.recordedIn(selfDestruct(taskVersion, true), taskVersion),
+		"the credit's own delete is recorded")
+	require.False(t, e.recordedIn(selfDestruct(workerVersion, true), taskVersion),
+		"a worker's SELFDESTRUCT leaves TxNum zero, so it cannot pass as this credit")
+	require.False(t, e.recordedIn(selfDestruct(state.Version{BlockNum: 9, TxNum: 42, TxIndex: 3, Incarnation: 2}, true), taskVersion),
 		"a delete stamped at another incarnation is not this credit")
-	require.False(t, e.recordedIn(selfDestruct(version, false), version),
+	require.False(t, e.recordedIn(selfDestruct(taskVersion, false), taskVersion),
 		"a SelfDestruct write that is not a delete carries no empty-removal")
-	require.True(t, e.recordedIn(selfDestruct(version, true), version),
-		"any delete at this version counts, whichever writer produced it")
+}
+
+func TestFeeEntry_RecordedInRejectsMutations(t *testing.T) {
+	t.Parallel()
+	version := state.Version{BlockNum: 9, TxNum: 42, TxIndex: 3, Incarnation: 1}
+	addr := fAddr("credited")
+	entry := &feeEntry{
+		addr:   addr,
+		acc:    accounts.Account{Balance: *uint256.NewInt(7), Nonce: 2, Incarnation: 1, CodeHash: accounts.EmptyCodeHash},
+		reason: tracing.BalanceIncreaseRewardTransactionFee,
+	}
+
+	for _, tc := range []struct {
+		name   string
+		mutate func(ws *state.WriteSet)
+	}{
+		{"balance value", func(ws *state.WriteSet) {
+			w, _ := ws.GetBalance(addr)
+			w.Val = *uint256.NewInt(8)
+		}},
+		{"balance reason", func(ws *state.WriteSet) {
+			w, _ := ws.GetBalance(addr)
+			w.Reason = tracing.BalanceDecreaseGasBuy
+		}},
+		{"balance txnum", func(ws *state.WriteSet) {
+			w, _ := ws.GetBalance(addr)
+			w.Version.TxNum = version.TxNum + 1
+		}},
+		{"balance incarnation", func(ws *state.WriteSet) {
+			w, _ := ws.GetBalance(addr)
+			w.Version.Incarnation = version.Incarnation + 1
+		}},
+		{"account nonce", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			acc := *w.Val
+			acc.Nonce++
+			w.Val = &acc
+		}},
+		{"account balance", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			acc := *w.Val
+			acc.Balance = *uint256.NewInt(8)
+			w.Val = &acc
+		}},
+		{"account code hash", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			acc := *w.Val
+			acc.CodeHash = accounts.InternCodeHash(common.Hash{0xAB})
+			w.Val = &acc
+		}},
+		{"account incarnation", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			acc := *w.Val
+			acc.Incarnation++
+			w.Val = &acc
+		}},
+		{"account version", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			w.Version.TxNum = version.TxNum + 1
+		}},
+		{"account write nil", func(ws *state.WriteSet) {
+			w, _ := ws.GetAddress(addr)
+			w.Val = nil
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ws := &state.WriteSet{}
+			entry.writeTo(ws, version)
+			require.True(t, entry.recordedIn(ws, version), "unmutated set must be accepted")
+			tc.mutate(ws)
+			require.False(t, entry.recordedIn(ws, version),
+				"a set differing in %s is not this credit, and skipping it drops a credit "+
+					"that was never written", tc.name)
+		})
+	}
+
+	full := &state.WriteSet{}
+	entry.writeTo(full, version)
+
+	t.Run("balance write missing", func(t *testing.T) {
+		aw, ok := full.GetAddress(addr)
+		require.True(t, ok)
+		ws := &state.WriteSet{}
+		ws.SetAddress(addr, aw)
+		require.False(t, entry.recordedIn(ws, version), "the AddressPath sibling alone is not the credit")
+	})
+
+	t.Run("address write missing", func(t *testing.T) {
+		bw, ok := full.GetBalance(addr)
+		require.True(t, ok)
+		ws := &state.WriteSet{}
+		ws.SetBalance(addr, bw)
+		require.False(t, entry.recordedIn(ws, version), "a balance write without its AddressPath sibling is not the credit")
+	})
 }
 
 var feeCreditSink *state.WriteSet
 
 func BenchmarkCalcFees(b *testing.B) {
-	for _, bc := range []struct {
-		name     string
-		recredit bool
+	for _, sc := range []struct {
+		name  string
+		build func() *testFinalizeScenario
 	}{
-		{"first_credit", false},
-		{"redundant_recredit", true},
+		{"pre_london", simpleTransferScenario},
+		{"london", londonTransferScenario},
 	} {
-		b.Run(bc.name, func(b *testing.B) {
-			r := newFeeCreditRound(b, simpleTransferScenario())
-			var credited *state.WriteSet
-			if bc.recredit {
-				require.NotNil(b, r.run(b))
-				credited = r.credited
-			}
-
-			b.ReportAllocs()
-			b.ResetTimer()
-			for i := 0; i < b.N; i++ {
-				tip, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, credited)
-				if err != nil {
-					b.Fatal(err)
+		for _, bc := range []struct {
+			name     string
+			recredit bool
+		}{
+			{"first_credit", false},
+			{"redundant_recredit", true},
+		} {
+			b.Run(sc.name+"/"+bc.name, func(b *testing.B) {
+				r := newFeeCreditRound(b, sc.build())
+				var credited *state.WriteSet
+				if bc.recredit {
+					first, _ := r.run(b)
+					require.NotNil(b, first)
+					credited = r.credited()
 				}
-				feeCreditSink = tip
-				// The apply loop recycles the emitted set's maps through
-				// recordFeeMerge; without this the pools stay empty and the
-				// emit arm is measured against a permanently cold pool.
-				tip.ReleaseMaps()
-			}
-		})
+
+				b.ReportAllocs()
+				b.ResetTimer()
+				for i := 0; i < b.N; i++ {
+					tip, _, err := r.result.calcFees(r.task, r.vm, r.reader, r.rules, credited)
+					if err != nil {
+						b.Fatal(err)
+					}
+					feeCreditSink = tip
+					// The apply loop recycles these maps, so the benchmark must
+					// too, or the emit arm is measured against a cold pool.
+					tip.ReleaseMaps()
+				}
+			})
+		}
 	}
 }
