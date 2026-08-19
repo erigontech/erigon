@@ -26,7 +26,7 @@ func NewCaplinSchema(dirs datadir.Dirs, stepSize uint64, stateTypes snapshotsync
 	statemp := make(map[string]state.SnapNameSchema)
 	for table := range stateTypes.KeyValueGetters {
 		enum, ok := snaptype.ParseEnum(table)
-		if !ok || enum < snaptype.MinCaplinEnum+2 || enum >= snaptype.MinBorEnum {
+		if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MinBorEnum {
 			panic(fmt.Sprintf("Caplin schema: unknown state table %s", table))
 		}
 		snapt := enum.Type()

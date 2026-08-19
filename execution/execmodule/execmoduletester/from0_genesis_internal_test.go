@@ -114,7 +114,7 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 				return err
 			}
 			defer doms.Close()
-			r := state.NewReaderV3(doms.AsGetter(rTx))
+			r := state.NewReaderV3(doms.AsStateGetter(rTx))
 			st := state.New(r)
 			defer st.Close()
 			b, err := st.GetBalance(dormantAddr)
