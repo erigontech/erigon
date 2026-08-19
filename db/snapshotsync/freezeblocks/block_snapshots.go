@@ -249,11 +249,12 @@ func CanDeleteTo(curBlockNum uint64, blocksInSnapshots uint64) (blockTo uint64) 
 	}
 
 	var keep uint64 = 1024 // params.FullImmutabilityThreshold //TODO: we will increase this value after db optimizations - about on-chain-tip prune speed
-	hardLimit := (curBlockNum / 1_000) * 1_000
-	if hardLimit < keep { // the subtraction below would wrap
+	if curBlockNum+999 < keep {
+		// To prevent overflow of uint64 below
 		return blocksInSnapshots + 1
 	}
-	return min(hardLimit-keep, blocksInSnapshots+1)
+	hardLimit := (curBlockNum/1_000)*1_000 - keep
+	return min(hardLimit, blocksInSnapshots+1)
 }
 
 func (br *BlockRetire) dbHasEnoughDataForBlocksRetire(ctx context.Context) (bool, error) {
