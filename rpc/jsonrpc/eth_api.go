@@ -258,7 +258,11 @@ func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash
 }
 
 func (api *BaseAPI) txnLookupWithBorFallback(ctx context.Context, tx kv.Tx, txnHash common.Hash, chainConfig *chain.Config) (blockNum uint64, txNum uint64, isBorStateSyncTxn bool, ok bool, err error) {
-	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	return api.txnLookupWithBorFallbackInView(ctx, api.filters.WithOverlay(tx), txnHash, chainConfig)
+}
+
+func (api *BaseAPI) txnLookupWithBorFallbackInView(ctx context.Context, tx kv.Tx, txnHash common.Hash, chainConfig *chain.Config) (blockNum uint64, txNum uint64, isBorStateSyncTxn bool, ok bool, err error) {
+	blockNum, txNum, ok, err = api._txnReader.TxnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return 0, 0, false, false, err
 	}

@@ -913,7 +913,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	blockNum, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, txHash, chainConfig)
+	blockNum, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallbackInView(ctx, tx, txHash, chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -929,6 +929,9 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if header == nil {
+		return nil, nil
 	}
 
 	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, isBorStateSyncTxn)

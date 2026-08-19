@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"strconv"
@@ -134,6 +135,39 @@ type unpublishOverlayBlockReader struct {
 	dbservices.FullBlockReader
 	events      *shards.Events
 	blockNumber uint64
+}
+
+type rejectOverlayTxnReader struct {
+	dbservices.TxnReader
+}
+
+func (r rejectOverlayTxnReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
+	if view, ok := tx.(interface{ IsOverlayReadView() bool }); ok && view.IsOverlayReadView() {
+		return 0, 0, false, errors.New("unexpected overlay transaction lookup")
+	}
+	return r.TxnReader.TxnLookup(ctx, tx, txnHash)
+}
+
+type staticTxnReader struct {
+	dbservices.TxnReader
+	blockNumber uint64
+	txNum       uint64
+}
+
+func (r staticTxnReader) TxnLookup(context.Context, kv.Getter, common.Hash) (uint64, uint64, bool, error) {
+	return r.blockNumber, r.txNum, true, nil
+}
+
+type hideHeaderBlockReader struct {
+	dbservices.FullBlockReader
+	blockNumber uint64
+}
+
+func (r hideHeaderBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNumber uint64) (*types.Header, error) {
+	if blockNumber == r.blockNumber {
+		return nil, nil
+	}
+	return r.FullBlockReader.HeaderByNumber(ctx, tx, blockNumber)
 }
 
 func (r *unpublishOverlayBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (common.Hash, bool, error) {
@@ -363,6 +397,36 @@ func TestGetBlockNumberPreservesPinnedOverlayView(t *testing.T) {
 	)
 	require.NoError(t, err)
 	require.Equal(t, firstHeader.Hash(), hash)
+}
+
+func TestReplayTransactionUsesCommittedTxnLookup(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base._txnReader = rejectOverlayTxnReader{TxnReader: base._txnReader}
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	result, err := api.ReplayTransaction(m.Ctx, common.Hash{1}, []string{TraceTypeTrace}, nil, nil)
+	require.NoError(t, err)
+	require.Nil(t, result)
+}
+
+func TestReplayTransactionHandlesMissingHeader(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	minTxNum, err := base._txNumReader.Min(m.Ctx, tx, 1)
+	require.NoError(t, err)
+
+	base._txnReader = staticTxnReader{TxnReader: base._txnReader, blockNumber: 1, txNum: minTxNum + 1}
+	base._blockReader = hideHeaderBlockReader{FullBlockReader: base._blockReader, blockNumber: 1}
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	var result *TraceCallResult
+	require.NotPanics(t, func() {
+		result, err = api.ReplayTransaction(m.Ctx, common.Hash{1}, []string{TraceTypeTrace}, nil, nil)
+	})
+	require.NoError(t, err)
+	require.Nil(t, result)
 }
 
 // TestDebugAccountAt_OverlayHeadHash_CommittedView pins that debug_accountAt
