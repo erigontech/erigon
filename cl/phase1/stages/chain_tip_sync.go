@@ -542,6 +542,9 @@ func waitForSelectedHeadEnvelope(
 			}
 			envelopes, err := requestEnvelopes(pollCtx, [][32]byte{headRoot})
 			if err != nil {
+				if hooks.retry != nil && (pollCtx.Err() != nil || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+					hooks.retry()
+				}
 				log.Debug("[chainTipSync] failed to request selected head envelope", "headRoot", headRoot, "err", err)
 				return
 			}
@@ -1001,8 +1004,6 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 				verifyUnverifiedGloasPayloads(verifyCtx, cfg)
 				cancelVerify()
 			}
-			// NOTE: recoverMissingEnvelopes runs unconditionally above (before
-			// SupportInsertion check), so it covers every cycle.
 		}
 		return nil
 	}
