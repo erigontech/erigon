@@ -32,7 +32,7 @@ const (
 
 func gloasVersionedHashes(blobCommitments *solid.ListSSZ[*cltypes.KZGCommitment]) ([]common.Hash, error) {
 	if blobCommitments == nil || blobCommitments.Len() == 0 {
-		return nil, nil
+		return []common.Hash{}, nil
 	}
 	versionedHashes := make([]common.Hash, 0, blobCommitments.Len())
 	if err := solid.RangeErr[*cltypes.KZGCommitment](blobCommitments, func(_ int, k *cltypes.KZGCommitment, _ int) error {
@@ -512,6 +512,11 @@ type selectedHeadEnvelopeStore interface {
 
 type envelopeRequestFunc func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error)
 
+type selectedHeadEnvelopeRequestHooks struct {
+	done  func()
+	retry func()
+}
+
 func waitForSelectedHeadEnvelope(
 	ctx context.Context,
 	store selectedHeadEnvelopeStore,
@@ -520,14 +525,21 @@ func waitForSelectedHeadEnvelope(
 	timeout time.Duration,
 	requestFromPeer bool,
 	validatePayload bool,
+	hooks selectedHeadEnvelopeRequestHooks,
 ) {
 	pollCtx, pollCancel := context.WithTimeout(ctx, timeout)
 	defer pollCancel()
 	if store.HasEnvelope(headRoot) {
+		if hooks.done != nil {
+			hooks.done()
+		}
 		return
 	}
 	if requestFromPeer {
 		go func() {
+			if hooks.done != nil {
+				defer hooks.done()
+			}
 			envelopes, err := requestEnvelopes(pollCtx, [][32]byte{headRoot})
 			if err != nil {
 				log.Debug("[chainTipSync] failed to request selected head envelope", "headRoot", headRoot, "err", err)
@@ -538,9 +550,15 @@ func waitForSelectedHeadEnvelope(
 				return
 			}
 			if pollCtx.Err() != nil {
+				if hooks.retry != nil {
+					hooks.retry()
+				}
 				return
 			}
 			if err := store.OnExecutionPayload(pollCtx, envelope, true, validatePayload); err != nil {
+				if hooks.retry != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+					hooks.retry()
+				}
 				log.Debug("[chainTipSync] failed to apply selected head envelope", "headRoot", headRoot, "err", err)
 			}
 		}()
@@ -604,6 +622,21 @@ func releaseSelectedHeadEnvelopeRequest(cfg *Cfg, claim selectedHeadEnvelopeRequ
 	if cfg.gloasHeadEnvelopeRequests[claim.root] == claim.id {
 		delete(cfg.gloasHeadEnvelopeRequests, claim.root)
 	}
+}
+
+func retrySelectedHeadEnvelopeRequest(cfg *Cfg, claim selectedHeadEnvelopeRequestClaim) {
+	cfg.gloasHeadEnvelopeRequestMu.Lock()
+	defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+	if cfg.gloasHeadEnvelopeRequestHead == claim.root && cfg.gloasHeadEnvelopeRequests[claim.root] == claim.id {
+		cfg.gloasHeadEnvelopeAttempted = false
+	}
+}
+
+func shouldRecoverMissingEnvelopes(beaconCfg *clparams.BeaconChainConfig, targetSlot uint64) bool {
+	if beaconCfg == nil || beaconCfg.SlotsPerEpoch == 0 {
+		return false
+	}
+	return beaconCfg.GetCurrentStateVersion(targetSlot/beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion
 }
 
 func blockSupportsExecutionPayloadEnvelope(block *cltypes.SignedBeaconBlock) bool {
@@ -914,12 +947,9 @@ func runGloasPayloadRetryPhases(ctx context.Context, budget time.Duration, offse
 // chainTipSync synchronizes the chain tip by fetching blocks from the highest seen block up to the target slot by listening to incoming blocks.
 // or by fetching blocks that might have been missed by gossip after a delay.
 func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) error {
-	// [GLOAS] Recover any execution payload envelopes that were missed by gossip.
-	// This runs every cycle (not just when caught-up) because seenSlot < targetSlot
-	// is almost always true — by the time ChainTipSync finishes a slot, the next one
-	// has arrived. Recovery only needs P2P (cfg.rpc) and fork choice — no local EL
-	// insertion — so it must run regardless of SupportInsertion().
-	recoverMissingEnvelopes(ctx, cfg)
+	if shouldRecoverMissingEnvelopes(cfg.beaconCfg, args.targetSlot) {
+		recoverMissingEnvelopes(ctx, cfg)
+	}
 
 	if canValidateGloasPayloads(cfg) {
 		offset := cfg.gloasPayloadRetryOffset.Add(1) - 1
@@ -956,10 +986,14 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			if headRoot != (common.Hash{}) && blockSupportsExecutionPayloadEnvelope(headBlock) && !cfg.forkChoice.HasEnvelope(headRoot) {
 				requestClaim, requestFromPeer, waitForEnvelope := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
 				if waitForEnvelope {
+					hooks := selectedHeadEnvelopeRequestHooks{}
+					if requestFromPeer {
+						hooks.done = func() { releaseSelectedHeadEnvelopeRequest(cfg, requestClaim) }
+						hooks.retry = func() { retrySelectedHeadEnvelopeRequest(cfg, requestClaim) }
+					}
 					waitForSelectedHeadEnvelope(ctx, cfg.forkChoice, func(requestCtx context.Context, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
-						defer releaseSelectedHeadEnvelopeRequest(cfg, requestClaim)
 						return network.RequestEnvelopesFrantically(requestCtx, cfg.rpc, roots)
-					}, headRoot, 2*time.Second, requestFromPeer, canValidateGloasPayloads(cfg))
+					}, headRoot, 2*time.Second, requestFromPeer, canValidateGloasPayloads(cfg), hooks)
 				}
 			}
 			if canValidateGloasPayloads(cfg) {

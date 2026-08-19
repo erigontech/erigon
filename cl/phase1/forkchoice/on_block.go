@@ -224,9 +224,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 					return fmt.Errorf("OnBlock: failed to process kzg commitments: %w", err)
 				}
 			}
-			timeStartExec := time.Now()
 			payloadStatus, err := f.NewPayloadWithAdmission(ctx, block.Block.Body.ExecutionPayload, &block.Block.ParentRoot, versionedHashes, executionRequestsList)
-			monitor.ObserveNewPayloadTime(timeStartExec)
 			log.Trace("[OnBlock] NewPayload", "status", payloadStatus, "blockSlot", block.Block.Slot)
 
 			// Track payload status and gas limit by execution block hash for GLOAS parent payload validation
@@ -452,12 +450,14 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		appliedEnvelope = f.applyPendingEnvelope(ctx, common.Hash(blockRoot), pendingEnvelope, pendingEnvelopeLocal, checkDataAvaiability)
 	}
 	f.mu.Lock()
+	unlocked = false
 	blockData := &beaconevents.BlockData{
 		Slot:                block.Block.Slot,
 		Block:               blockRoot,
 		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
 	}
 	f.queueEmit(func() { f.emitters.State().SendBlock(blockData) })
+	unlocked = true
 	f.mu.Unlock()
 	f.drainQueuedWork()
 
@@ -545,6 +545,13 @@ func (f *ForkChoiceStore) RetryPendingExecutionPayloadEnvelopes(ctx context.Cont
 func (f *ForkChoiceStore) applyPendingEnvelope(ctx context.Context, blockRoot common.Hash, pending *cltypes.SignedExecutionPayloadEnvelope, local, checkDataAvailability bool) *cltypes.ExecutionPayloadEnvelope {
 	if pending == nil {
 		if !f.forkGraph.HasEnvelope(blockRoot) {
+			if local {
+				if current, ok := f.pendingLocalSelfBuildEnvelopes.Peek(blockRoot); ok && current == nil {
+					f.pendingLocalSelfBuildEnvelopes.Remove(blockRoot)
+				}
+			} else if current, ok := f.pendingEnvelopes.Peek(blockRoot); ok && current == nil {
+				f.pendingEnvelopes.Remove(blockRoot)
+			}
 			return nil
 		}
 		persisted, err := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
@@ -613,7 +620,7 @@ func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.
 	if errors.Is(err, errInvalidExecutionPayloadEnvelope) {
 		return false
 	}
-	if !errors.Is(err, ErrIgnore) {
+	if !errors.Is(err, ErrIgnore) && !errors.Is(err, ErrEIP7594ColumnDataNotAvailable) {
 		return true
 	}
 	if pending == nil || pending.Message == nil || pending.Message.Payload == nil {
