@@ -699,21 +699,16 @@ type SequentialView struct {
 
 // OpenSequentialView returns a view for a full scan. separateReadahead opens a second
 // MADV_SEQUENTIAL mmap; without it the scan reads through the shared one. Caller must Close.
-func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialView, error) {
+func (d *Decompressor) OpenSequentialView(allowSequentialView bool) (*SequentialView, error) {
 	if d == nil || d.f == nil {
 		return nil, nil
-	}
-	if !separateReadahead {
-		return &SequentialView{d: d, data: d.data[d.wordsStart:]}, nil
 	}
 	h1, err := mmap.OpenRo(d.f, int(d.size))
 	if err != nil {
 		return nil, err
 	}
-	if dbg.SnapshotMadvSequential {
+	if allowSequentialView && dbg.SnapshotMadvSequential {
 		_ = mmap.MadviseSequential(h1)
-	} else {
-		_ = mmap.MadviseRandom(h1)
 	}
 	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
 	// (version, feature flags, metadata). wordsStart is relative to d.data,
