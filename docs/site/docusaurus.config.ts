@@ -86,6 +86,21 @@ export default async function createConfig(): Promise<Config> {
         attributes: {},
         innerHTML: 'window.plausible=window.plausible||function(){(plausible.q=plausible.q||[]).push(arguments)},plausible.init=plausible.init||function(i){plausible.o=i||{}};plausible.init()',
       },
+      // Point every page at the llms.txt index that covers it. `describedby` is
+      // the relation the llmstxt.org proposal defines for exactly this; its
+      // `alternate` + `text/markdown` pairing is reserved for a *per-page*
+      // Markdown representation, which this site-wide index is not.
+      // llms-full.txt is deliberately not advertised here: it is not a
+      // description of any single page. It stays discoverable through llms.txt,
+      // the sitemap, and the MCP docs page.
+      {
+        tagName: 'link',
+        attributes: {
+          rel: 'describedby',
+          href: 'https://docs.erigon.tech/llms.txt',
+          title: 'Erigon Documentation — page index for LLMs',
+        },
+      },
     ],
 
     plugins: [
@@ -150,6 +165,15 @@ export default async function createConfig(): Promise<Config> {
           changefreq: 'weekly',
           priority: 0.5,
           ignorePatterns: ['/search'],
+          // The llms.txt artifacts live in static/, so Docusaurus never routes
+          // them and the default sitemap omits them — which leaves them
+          // unindexable by search. Append them explicitly. This is also how
+          // llms-full.txt stays reachable, since it is not advertised in head.
+          createSitemapItems: async ({defaultCreateSitemapItems, ...rest}) => [
+            ...(await defaultCreateSitemapItems(rest)),
+            {url: 'https://docs.erigon.tech/llms.txt', changefreq: 'weekly', priority: 0.5},
+            {url: 'https://docs.erigon.tech/llms-full.txt', changefreq: 'weekly', priority: 0.5},
+          ],
         },
       } satisfies Preset.Options],
     ],

@@ -159,6 +159,125 @@ class LandingSynthesisTests(unittest.TestCase):
         out = g.synthesize_landing("# Hello\n\nProse only, no cards.")
         self.assertIsNone(out)
 
+    def test_desc_with_inline_markup_is_extracted(self):
+        """Inline markup in a description must not defeat the match."""
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/pruning/">
+  <div className="lp-card-title">Flexible Pruning</div>
+  <div className="lp-card-desc"><code>--prune.mode=minimal</code> gives a <strong>smaller</strong> footprint.</div>
+</Link>
+</div>
+"""
+        out = g.synthesize_landing(body)
+        self.assertIsNotNone(out)
+        self.assertIn("--prune.mode=minimal gives a smaller footprint.", out)
+        self.assertNotIn("<code>", out)
+        self.assertNotIn("<strong>", out)
+
+    def test_markup_card_does_not_swallow_the_next_card(self):
+        """A card whose desc has markup must not steal the following card's desc."""
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/immutable/">
+  <div className="lp-card-title">Immutable Data</div>
+  <div className="lp-card-desc">Historical data lives in <strong>immutable</strong> files.</div>
+</Link>
+<Link className="lp-card" to="/staged-sync/">
+  <div className="lp-card-title">Staged Sync</div>
+  <div className="lp-card-desc">Splits processing into specialised stages.</div>
+</Link>
+</div>
+"""
+        out = g.synthesize_landing(body)
+        self.assertIsNotNone(out)
+        bullets = [ln for ln in out.split("\n") if ln.startswith("- [")]
+        self.assertEqual(len(bullets), 2)
+        self.assertIn(
+            "- [Immutable Data](https://docs.erigon.tech/immutable): "
+            "Historical data lives in immutable files.",
+            bullets,
+        )
+        self.assertIn(
+            "- [Staged Sync](https://docs.erigon.tech/staged-sync): "
+            "Splits processing into specialised stages.",
+            bullets,
+        )
+
+    def test_dropped_card_raises_instead_of_silently_shrinking(self):
+        """A card the parser cannot read must fail loudly — `--check` cannot see it."""
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/ok/">
+  <div className="lp-card-title">Fine</div>
+  <div className="lp-card-desc">Parses correctly.</div>
+</Link>
+<Link className="lp-card" to="/broken/">
+  <div className="lp-card-title">Missing Its Description</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("dropped cards", str(ctx.exception))
+
+    def test_renamed_title_marker_is_caught_not_absorbed(self):
+        """The guard must not count the marker it validates.
+
+        Counting `lp-card-title` would shrink in step with the very loss it is
+        meant to detect, so a renamed marker would drop its card in silence.
+        Counting `lp-card` containers keeps the two signals independent.
+        """
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+<Link className="lp-card" to="/b/">
+  <div className="lp-card-heading">B</div>
+  <div className="lp-card-desc">Desc B.</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 1 of 2", str(ctx.exception))
+
+    def test_card_attribute_order_does_not_matter(self):
+        """`to=` may precede or follow the class; both must parse."""
+        body = """
+<div className="lp-grid">
+<Link to="/a/" className="lp-card">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+</div>
+"""
+        out = g.synthesize_landing(body)
+        self.assertIsNotNone(out)
+        self.assertIn("[A](https://docs.erigon.tech/a): Desc A.", out)
+
+    def test_all_cards_malformed_raises_rather_than_falling_back(self):
+        """Total parser failure must not look like an ordinary prose page.
+
+        Returning None here would send the caller to strip_mdx, degrading the
+        page silently — the exact outcome the guard exists to prevent.
+        """
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+</Link>
+<Link className="lp-card" to="/b/">
+  <div className="lp-card-title">B</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 0 of 2", str(ctx.exception))
+
 
 class LeadingH1StripTests(unittest.TestCase):
     """The build() body-prep step strips a leading H1 to avoid duplicate headings."""

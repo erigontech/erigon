@@ -285,16 +285,30 @@ def strip_mdx(text):
 # index pages. After MDX stripping, they collapse to a structureless pile of
 # title/desc fragments. We detect the lp-card pattern and synthesize a clean
 # bullet list instead, keeping link structure intact for LLM consumption.
-_LANDING_CARD_RE = re.compile(
-    r'<Link\s[^>]*\bto=[\'"]([^\'"]+)[\'"][^>]*>'
-    r'(?:.*?)'
-    r'<div[^>]*\blp-card-title\b[^>]*>([^<]+)</div>'
-    r'(?:.*?)'
-    r'<div[^>]*\blp-card-desc\b[^>]*>([^<]+)</div>'
-    r'(?:.*?)'
-    r'</Link>',
-    re.DOTALL,
-)
+# Parsed in two stages, deliberately. A single pattern spanning the whole card
+# cannot express "and never cross into the next card": with `[^<]+` for the text
+# and `.*?` for the gaps, a description containing inline markup (`<strong>`,
+# `<code>`) fails to match locally, and the engine then scans forward and pairs
+# the title with the *next* card's description — silently swallowing the card in
+# between. Matching each <Link> block first makes a card boundary unrepresentable.
+#
+# The container match is also what the guard below counts. It deliberately keys
+# on `lp-card` — the wrapper — and not on any marker the parse itself consumes:
+# a count taken from `lp-card-title` would shrink in step with the very loss it
+# is supposed to detect, so a renamed title marker would drop its card in
+# silence. Attributes are matched order-independently; `to=` is read separately.
+_LANDING_CARD_LINK_RE = re.compile(
+    r'<Link\s([^>]*\blp-card\b[^>]*)>(.*?)</Link>', re.DOTALL)
+_LINK_TO_RE = re.compile(r'\bto=[\'"]([^\'"]+)[\'"]')
+_CARD_TITLE_RE = re.compile(
+    r'<div[^>]*\blp-card-title\b[^>]*>(.*?)</div>', re.DOTALL)
+_CARD_DESC_RE = re.compile(
+    r'<div[^>]*\blp-card-desc\b[^>]*>(.*?)</div>', re.DOTALL)
+
+
+def _card_text(fragment):
+    """Flatten a card's inner HTML to plain text, collapsing whitespace."""
+    return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', fragment)).strip()
 _LANDING_HERO_RE = re.compile(
     r'<div[^>]*\blp-hero\b[^>]*>'
     r'(?:.*?)'
@@ -312,9 +326,34 @@ def synthesize_landing(raw_body):
     Card hrefs that start with `/` are rewritten to absolute BASE_URL form so
     bullets remain useful when the body is read out of context.
     """
-    cards = list(_LANDING_CARD_RE.finditer(raw_body))
-    if not cards:
+    # Count first, parse second. Deciding "this is not a card grid" on an empty
+    # parse result would make total parser failure indistinguishable from an
+    # ordinary prose page: the caller would fall back to strip_mdx and the guard
+    # below would never run — silently degrading exactly the case it exists to
+    # catch.
+    containers = _LANDING_CARD_LINK_RE.findall(raw_body)
+    expected = len(containers)
+    if not expected:
         return None
+
+    cards = []
+    for attrs, block in containers:
+        href = _LINK_TO_RE.search(attrs)
+        title = _CARD_TITLE_RE.search(block)
+        desc = _CARD_DESC_RE.search(block)
+        if not href or not title or not desc:
+            continue
+        cards.append((href.group(1), _card_text(title.group(1)),
+                      _card_text(desc.group(1))))
+
+    # A card that parses to nothing is invisible in the output, and `--check`
+    # only compares generated output against committed output — so a systematic
+    # parser regression stays green in CI while the corpus quietly loses pages.
+    if len(cards) != expected:
+        raise SystemExit(
+            f"synthesize_landing dropped cards: parsed {len(cards)} "
+            f"of {expected} lp-card containers"
+        )
 
     out = []
     hero = _LANDING_HERO_RE.search(raw_body)
@@ -326,12 +365,10 @@ def synthesize_landing(raw_body):
 
     out.append("## Sections")
     out.append("")
-    for m in cards:
-        href = m.group(1).strip()
+    for href, title, desc in cards:
+        href = href.strip()
         if href.startswith("/"):
             href = BASE_URL + href.rstrip("/")
-        title = m.group(2).strip()
-        desc = m.group(3).strip()
         out.append(f"- [{title}]({href}): {desc}")
     return "\n".join(out)
 
@@ -523,6 +560,14 @@ def build():
     lines.append("> Erigon is a high-performance Ethereum execution client known for its efficiency,")
     lines.append("> modularity, and minimal disk footprint. It features an integrated consensus layer")
     lines.append("> (Caplin), BitTorrent-based historical data distribution, and fast node synchronization.")
+    lines.append("")
+    # The only machine-readable route from this index to the full corpus. Pages
+    # advertise llms.txt via <link rel="describedby">, not llms-full.txt, so an
+    # agent that arrives here would otherwise have no way to reach it.
+    lines.append(
+        f"The full text of every page listed below is also available as a single "
+        f"file: [llms-full.txt]({BASE_URL}/llms-full.txt)"
+    )
     lines.append("")
 
     current_section = None

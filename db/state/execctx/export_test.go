@@ -17,6 +17,5 @@ func (sd *SharedDomains) CodeHashForAddr(tx kv.TemporalTx, addr []byte, txNum ui
 // it so they always exercise the cache instead of skipping when the env is off
 // — without mutating the process-global flag (which would race t.Parallel tests).
 func (sd *SharedDomains) SetStateCacheForTest(sc *cache.StateCache) {
-	sd.stateCache = sc
-	sd.cacheApplier = sc.Applier()
+	sd.bindStateCache(sc)
 }

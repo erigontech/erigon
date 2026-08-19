@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 )
 
 func TestGetHeadersIncludesFinalized(t *testing.T) {
@@ -134,4 +135,31 @@ func TestGetHeadersIncludesFinalized(t *testing.T) {
 			}
 		})
 	}
+}
+
+func TestGetHeadHeaderIsCanonicalBeforeDatabasePromotion(t *testing.T) {
+	db, blocks, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), false)
+	head := blocks[len(blocks)-1]
+	headRoot, err := head.Block.HashSSZ()
+	require.NoError(t, err)
+	fcu.HeadVal = headRoot
+	fcu.HeadSlotVal = head.Block.Slot
+
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		return beacon_indicies.TruncateCanonicalChain(context.Background(), tx, head.Block.Slot)
+	}))
+
+	server := httptest.NewServer(handler.mux)
+	defer server.Close()
+	resp, err := http.Get(server.URL + "/eth/v1/beacon/headers/head")
+	require.NoError(t, err)
+	defer resp.Body.Close()
+	require.Equal(t, http.StatusOK, resp.StatusCode)
+
+	var body struct {
+		Data headerResponse `json:"data"`
+	}
+	require.NoError(t, json.NewDecoder(resp.Body).Decode(&body))
+	require.Equal(t, common.Hash(headRoot), body.Data.Root)
+	require.True(t, body.Data.Canonical)
 }
