@@ -95,10 +95,12 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 	if snap := n.snapDownload.Load(); snap != nil {
 		switch snap.phase {
 		case snapHandoff:
-			// Committed execution progress means the handoff is over: observing it
-			// here ends the pin on every path, so only a startup pipeline that never
+			// The handoff is over once committed progress reaches the commitment block,
+			// not on any nonzero progress: until the snapshots stage's tx commits, an
+			// upgraded node still reads its lower pre-download position. Observing the
+			// end here covers every path, so only a startup pipeline that never
 			// commits needs an owner to end it explicitly.
-			if currentBlock == 0 {
+			if currentBlock < snap.commitBlock {
 				reply.CurrentBlock = snap.commitBlock
 				reply.LastNewBlockSeen = max(snap.commitBlock, highestBlock)
 				return reply, nil

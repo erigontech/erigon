@@ -299,17 +299,34 @@ func TestBuildSyncingReplySnapshotDownloadKeepsCommittedProgress(t *testing.T) {
 	require.Equal(t, uint64(5_000_000), reply.CurrentBlock)
 }
 
-// The handoff pin ends where the reply is built: committed execution progress
-// means the handoff is over, so the reply switches back to the stage shape and
-// the state is latched off without any owner signalling the end.
-func TestBuildSyncingReplyHandoffEndsOnceExecutionProgressAppears(t *testing.T) {
-	n, tx := newSyncStateFixture(t, 500)
+// The handoff pin ends where the reply is built: execution progress reaching the
+// commitment block means the handoff is over, so the reply switches back to the
+// stage shape and the state is latched off without any owner signalling the end.
+func TestBuildSyncingReplyHandoffEndsOnceExecutionReachesCommitmentBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 19_000_000)
 	n.NewLastBlockSeen(20_000_000)
 	n.SetSnapshotDownloadHandoff(19_000_000)
 
 	reply, err := n.BuildSyncingReply(tx, 0)
 	require.NoError(t, err)
-	require.Equal(t, uint64(500), reply.CurrentBlock)
+	require.Equal(t, uint64(19_000_000), reply.CurrentBlock)
 	require.Len(t, reply.Stages, len(stages.AllStages))
 	require.Nil(t, n.snapDownload.Load(), "handoff latched off")
+}
+
+// Committed progress below the commitment block is the pre-download position of
+// an upgraded node: the stage bumps Execution to the commitment block in its own
+// tx, so the publish that sets the pin still reads the old value. Dropping the
+// pin there reports that old position, i.e. the backwards jump the pin prevents.
+func TestBuildSyncingReplyHandoffSurvivesProgressBelowCommitmentBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 6_000_000)
+	n.NewLastBlockSeen(20_000_000)
+	n.SetSnapshotDownloadHandoff(19_000_000)
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(19_000_000), reply.CurrentBlock)
+	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
+	require.Empty(t, reply.Stages)
+	require.NotNil(t, n.snapDownload.Load(), "handoff still pinned")
 }
