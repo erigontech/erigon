@@ -170,7 +170,7 @@ src=<datadir>/chaindata && ./build/bin/mdbx_copy -c -u "$src" "${src}/mdbx.dat.t
 ## See tables size
 
 ```sh
-./build/bin/mdbx_stat -efa  /erigon-data/mainnet_archive/chaindata/ | awk '
+./build/bin/mdbx_stat -efa  /home/erigon/erigon-datadir/chaindata/ | awk '
     BEGIN { pagesize = 4096 }
     /^  Pagesize:/ { pagesize = $2 }
     /^Status of/ { table = $3 }

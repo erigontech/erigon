@@ -24,6 +24,8 @@ make eest-spec-enginextests-devnet-{sequential,parallel}
                                              # devnet engine-x tests in both commitment modes
 make eest-spec-statetests-devnet-{sequential,parallel}
                                              # state tests vs eest_devnet fixtures
+make eest-spec-transactiontests-{stable,devnet}-race
+                                             # transaction tests with evm.race
 make eest-spec-blocktests-devnet-{sequential,parallel}
                                              # devnet blocktests in both commitment modes
 make eest-spec-statetests-legacy-{sequential,parallel}
