@@ -83,9 +83,8 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	}
 	defer roTx.Rollback()
 
-	// The overlay exposes block tables only: "latest" resolves to the
-	// pre-commit head while temporal state reads still see the last committed
-	// block (see ethconfig.Defaults.FcuBackgroundCommit).
+	// The block overlay and published state view are acquired independently,
+	// so this path does not yet guarantee the same in-flight generation.
 	var tx kv.TemporalTx = roTx
 	if api.filters != nil {
 		if sd := api.filters.LatestSD(); sd != nil {
