@@ -94,6 +94,24 @@ type StatusPacket interface {
 	eth.StatusPacket | eth.StatusPacket69
 }
 
+func readUpgradeStatusMsg(rw p2p.MsgReadWriter, status *eth.UpgradeStatusPacket) *p2p.PeerError {
+	msg, err := rw.ReadMsg()
+	if err != nil {
+		return p2p.NewPeerError(p2p.PeerErrorStatusReceive, p2p.DiscNetworkError, err, "readUpgradeStatusMsg rw.ReadMsg error")
+	}
+	defer msg.Discard()
+	if msg.Code != eth.UpgradeStatusMsg {
+		return p2p.NewPeerError(p2p.PeerErrorStatusReceive, p2p.DiscProtocolError, fmt.Errorf("first msg has code %x (!= %x)", msg.Code, eth.UpgradeStatusMsg), "readUpgradeStatusMsg wrong code")
+	}
+	if msg.Size > eth.ProtocolMaxMsgSize {
+		return p2p.NewPeerError(p2p.PeerErrorStatusReceive, p2p.DiscProtocolError, fmt.Errorf("message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize), "readUpgradeStatusMsg too large")
+	}
+	if err := msg.Decode(status); err != nil {
+		return p2p.NewPeerError(p2p.PeerErrorStatusDecode, p2p.DiscProtocolError, err, "readUpgradeStatusMsg decode error")
+	}
+	return nil
+}
+
 func handShake[T StatusPacket](
 	ctx context.Context,
 	status *sentryproto.StatusData,
@@ -144,6 +162,46 @@ func handShake[T StatusPacket](
 			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.handShake ctx.Done")
 		}
 	}
+	// BSC (Parlia) networks send an UpgradeStatusMsg (0x0b) immediately after
+	// Status; the peer drops us if we neither send nor consume it.
+	if version >= eth.ETH68 && (status.NetworkId == 56 || status.NetworkId == 97 || status.NetworkId == 714) {
+		var upgradeStatus eth.UpgradeStatusPacket
+		extensionRaw, err := (&eth.UpgradeStatusExtension{}).Encode()
+		if err != nil {
+			return nil, p2p.NewPeerError(p2p.PeerErrorStatusDecode, p2p.DiscIncompatibleVersion, err, "sentry.handShake failed to encode bsc UpgradeStatusExtension")
+		}
+		go func() {
+			defer dbg.LogPanic()
+			if err := p2p.Send(rw, eth.UpgradeStatusMsg, &eth.UpgradeStatusPacket{Extension: extensionRaw}); err == nil {
+				errChan <- nil
+			} else {
+				errChan <- p2p.NewPeerError(p2p.PeerErrorStatusSend, p2p.DiscNetworkError, err, "sentry.handShake failed to send bsc UpgradeStatusMsg")
+			}
+		}()
+		go func() {
+			defer dbg.LogPanic()
+			if err := readUpgradeStatusMsg(rw, &upgradeStatus); err == nil {
+				errChan <- nil
+			} else {
+				errChan <- err
+			}
+		}()
+		tu := time.NewTimer(timeout)
+		defer tu.Stop()
+		for range 2 {
+			select {
+			case err := <-errChan:
+				if err != nil {
+					return nil, err
+				}
+			case <-tu.C:
+				return nil, p2p.NewPeerError(p2p.PeerErrorStatusHandshakeTimeout, p2p.DiscReadTimeout, nil, "sentry.UpgradeStatusMsg timeout")
+			case <-ctx.Done():
+				return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.handShake ctx.Done (UpgradeStatus)")
+			}
+		}
+	}
+
 	// Safely wait for the reply with the same guards
 	t2 := time.NewTimer(timeout)
 	defer t2.Stop()
@@ -164,7 +222,7 @@ func encodeStatusPacket(status *sentryproto.StatusData, version uint) eth.Status
 	return eth.StatusPacket{
 		ProtocolVersion: uint32(version),
 		NetworkID:       status.NetworkId,
-		TD:              ourTD.ToBig(),
+		TD:              ourTD,
 		Head:            gointerfaces.ConvertH256ToHash(status.BestHash),
 		Genesis:         genesisHash,
 		ForkID:          forkid.NewIDFromForks(status.ForkData.HeightForks, status.ForkData.TimeForks, genesisHash, status.MaxBlockHeight, status.MaxBlockTime),

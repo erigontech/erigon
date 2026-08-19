@@ -23,7 +23,6 @@ import (
 	"fmt"
 	"io"
 	"maps"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -80,6 +79,10 @@ const (
 	// Protocol messages added in eth/71 (EIP-8159 Block Access List Exchange)
 	GetBlockAccessListsMsg = 0x12
 	BlockAccessListsMsg    = 0x13
+
+	// BSC (Parlia) handshake extension, sent right after Status on networks
+	// 56/97/714. Reuses the eth/63-era 0x0b slot, unused in modern eth.
+	UpgradeStatusMsg = 0x0b
 )
 
 var toProto68 = map[uint64]sentryproto.MessageId{
@@ -155,10 +158,15 @@ type Packet interface {
 }
 
 // StatusPacket is the network packet for the status message for eth/64 and later.
+//
+// TD is a *uint256.Int rather than a *big.Int: total difficulty fits in 256
+// bits, the wire encoding is identical, and execution/rlp can decode uint256
+// but not big.Int (a *big.Int field falls through to the struct decoder and
+// fails with "expected input list for big.Int").
 type StatusPacket struct {
 	ProtocolVersion uint32
 	NetworkID       uint64
-	TD              *big.Int
+	TD              *uint256.Int
 	Head            common.Hash
 	Genesis         common.Hash
 	ForkID          forkid.ID
@@ -172,6 +180,24 @@ type StatusPacket69 struct {
 	ForkID                    forkid.ID
 	MinimumBlock, LatestBlock uint64
 	LatestBlockHash           common.Hash
+}
+
+// UpgradeStatusPacket is BSC's post-Status handshake extension (bsc eth/67+).
+type UpgradeStatusPacket struct {
+	Extension *rlp.RawValue `rlp:"nil"`
+}
+
+type UpgradeStatusExtension struct {
+	DisablePeerTxBroadcast bool
+}
+
+func (e *UpgradeStatusExtension) Encode() (*rlp.RawValue, error) {
+	rawBytes, err := rlp.EncodeToBytes(e)
+	if err != nil {
+		return nil, err
+	}
+	raw := rlp.RawValue(rawBytes)
+	return &raw, nil
 }
 
 // NewBlockHashesPacket is the network packet for the block announcements.
