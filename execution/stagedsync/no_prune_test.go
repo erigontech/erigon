@@ -183,7 +183,7 @@ func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders, staleFlo
 		require.NoError(t, txNums.Append(tx, b, txlMaxTxNum(b)))
 	}
 	for b := uint64(1); b <= txlBlocks; b++ {
-		for i := uint64(0); i < txlTxPerBlock; i++ {
+		for i := range txlTxPerBlock {
 			val := make([]byte, 16)
 			binary.BigEndian.PutUint64(val[:8], b)
 			binary.BigEndian.PutUint64(val[8:], txlMinTxNum(b)+i+1)
@@ -221,7 +221,7 @@ func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders, staleFlo
 func txlBlockRows(t *testing.T, tx kv.Tx, block uint64) int {
 	t.Helper()
 	n := 0
-	for i := uint64(0); i < txlTxPerBlock; i++ {
+	for i := range txlTxPerBlock {
 		h := txlTxHash(block, i)
 		v, err := tx.GetOne(kv.TxLookup, h[:])
 		require.NoError(t, err)
