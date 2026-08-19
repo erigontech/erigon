@@ -167,7 +167,7 @@ func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains
 	if diffs := writeSet.Diff(expected); len(diffs) > 0 {
 		return fmt.Errorf("write-set has extra writes (%d): %s", len(diffs), strings.Join(diffs, " | "))
 	}
-	got, err := blockreplay.CollectOutputs(state.NewReaderV3(doms.AsGetter(tx)), expected)
+	got, err := blockreplay.CollectOutputs(state.NewReaderV3(doms.AsStateGetter(tx)), expected)
 	if err != nil {
 		return err
 	}

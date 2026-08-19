@@ -26,12 +26,11 @@ import (
 	"time"
 	"unsafe"
 
-	"github.com/edsrzf/mmap-go"
-
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/common/murmur3"
 	"github.com/erigontech/erigon/db/bufiopool"
 	"github.com/erigontech/erigon/db/datastruct/existence"
@@ -365,7 +364,7 @@ func (btw *BtIndexWriter) Close() {
 }
 
 type BtIndex struct {
-	m        mmap.MMap
+	m        mmap.Ro
 	data     []byte
 	ef       *eliasfano32.EliasFano
 	file     *os.File
@@ -505,10 +504,14 @@ func OpenBtreeIndexWithDecompressor(indexPath string, kvGetter *seg.Reader) (bt 
 		return idx, nil
 	}
 
-	idx.m, err = mmap.MapRegion(idx.file, int(idx.size), mmap.RDONLY, 0, 0)
+	idx.m, err = mmap.OpenRo(idx.file, int(idx.size))
 	if err != nil {
 		return nil, err
 	}
+	// Decoding below walks the whole node blob, so readahead pays off once. Lookups
+	// afterwards are scattered, hence OpenRo's MADV_RANDOM is restored on the way out.
+	_ = mmap.MadviseSequential(idx.m)
+	defer func() { _ = mmap.MadviseRandom(idx.m) }()
 	idx.data = idx.m[:idx.size]
 
 	var nodeOfftEF *eliasfano32.EliasFano
