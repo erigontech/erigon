@@ -21,9 +21,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
+	"strings"
+	"sync"
 	"testing"
 	"time"
 
@@ -37,11 +40,15 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
+	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
@@ -383,26 +390,28 @@ func TestShouldRetryGetPayloadStopsAtDeadline(t *testing.T) {
 }
 
 func TestPollAssembledPayloadReturnsReadyPayload(t *testing.T) {
+	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now.Add(-time.Millisecond), pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return want, nil, nil, nil, nil
 		})
-	require.True(t, ok)
+	require.NoError(t, err)
 	require.Same(t, want, payload)
 	require.Equal(t, 1, calls)
 }
 
 func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
+	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls < 3 {
@@ -410,17 +419,18 @@ func TestPollAssembledPayloadRetriesWhileBusy(t *testing.T) {
 			}
 			return want, nil, nil, nil, nil
 		})
-	require.True(t, ok)
+	require.NoError(t, err)
 	require.Same(t, want, payload)
 	require.Equal(t, 3, calls)
 }
 
 func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
+	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(time.Second)}
 	want := &cltypes.Eth1Block{}
 	calls := 0
-	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			if calls == 1 {
@@ -428,35 +438,73 @@ func TestPollAssembledPayloadRetriesOnError(t *testing.T) {
 			}
 			return want, nil, nil, nil, nil
 		})
-	require.True(t, ok)
+	require.NoError(t, err)
 	require.Same(t, want, payload)
 	require.Equal(t, 2, calls)
 }
 
+func TestPollAssembledPayloadStopsOnUnknownPayload(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"direct execution client", fmt.Errorf("get payload: %w", chainreader.ErrUnknownPayload)},
+		{"remote execution client", fmt.Errorf("get payload: %w", &engine_helpers.UnknownPayloadErr)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			now := time.Now()
+			window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
+			calls := 0
+			payload, _, _, _, err := pollAssembledPayload(context.Background(), window, time.Millisecond,
+				func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+					calls++
+					return nil, nil, nil, nil, tc.err
+				})
+			require.True(t, execution_client.IsUnknownPayloadError(err))
+			require.Nil(t, payload)
+			require.Equal(t, 1, calls)
+		})
+	}
+}
+
+func TestProductionReportsUnknownPayloadOnce(t *testing.T) {
+	logs := captureProductionLogs(t)
+
+	err := produceBlockWithFailingCollection(t, t.Context(), &engine_helpers.UnknownPayloadErr)
+	require.Error(t, err)
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "execution payload is unknown"), "records:\n"+captured)
+	require.Contains(t, captured, "lvl=warn")
+	require.NotContains(t, captured, "lvl=eror")
+}
+
 func TestPollAssembledPayloadStopsAtDeadline(t *testing.T) {
+	ctx := t.Context()
 	now := time.Now()
 	window := blockBuilderWindow{firstGetAt: now, pollUntil: now.Add(50 * time.Millisecond)}
 	calls := 0
-	payload, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+	payload, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
 		})
-	require.False(t, ok)
+	require.Error(t, err)
 	require.Nil(t, payload)
 	require.NotZero(t, calls)
 }
 
 func TestPollAssembledPayloadLateRequestGrabsOnce(t *testing.T) {
+	ctx := t.Context()
 	past := time.Now().Add(-time.Second)
 	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
 	calls := 0
-	_, _, _, _, ok := pollAssembledPayload(context.Background(), window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
 		})
-	require.False(t, ok)
+	require.Error(t, err)
 	require.Equal(t, 1, calls)
 }
 
@@ -466,12 +514,12 @@ func TestPollAssembledPayloadReturnsOnContextCancel(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	cancel()
 	calls := 0
-	_, _, _, _, ok := pollAssembledPayload(ctx, window, time.Millisecond,
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
 		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			calls++
 			return nil, nil, nil, nil, nil
 		})
-	require.False(t, ok)
+	require.Error(t, err)
 	require.Zero(t, calls)
 }
 
@@ -828,4 +876,287 @@ func TestPayloadAttributesOmitFieldsTheChosenVersionCannotCarry(t *testing.T) {
 			require.Equal(t, common.Address{0xcc}, attrs.SuggestedFeeRecipient)
 		})
 	}
+}
+
+// syncedBuffer is a writer the log package can hand to several goroutines at once, which
+// StreamHandler requires and a bare bytes.Buffer does not provide.
+type syncedBuffer struct {
+	mu  sync.Mutex
+	buf bytes.Buffer
+}
+
+func (s *syncedBuffer) Write(p []byte) (int, error) {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.Write(p)
+}
+
+func (s *syncedBuffer) String() string {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	return s.buf.String()
+}
+
+// captureProductionLogs redirects the root logger for one test and returns everything written at
+// warning level or above. It deliberately does not filter by message: a record this package emits
+// under another name is exactly what a test asserting silence needs to see.
+func captureProductionLogs(t *testing.T) func() string {
+	t.Helper()
+	output := &syncedBuffer{}
+	previous := log.Root().GetHandler()
+	log.Root().SetHandler(log.StreamHandler(output, log.LogfmtFormat()))
+	t.Cleanup(func() { log.Root().SetHandler(previous) })
+	return func() string {
+		var loud []string
+		for line := range strings.SplitSeq(output.String(), "\n") {
+			if strings.Contains(line, "lvl=eror") || strings.Contains(line, "lvl=warn") {
+				loud = append(loud, line)
+			}
+		}
+		return strings.Join(loud, "\n")
+	}
+}
+
+func TestPollAssembledPayloadStaysQuietWhenAFailedPollRecovers(t *testing.T) {
+	ctx := t.Context()
+	logs := captureProductionLogs(t)
+	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Second)}
+
+	calls := 0
+	payload, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			if calls == 1 {
+				return nil, nil, nil, nil, errors.New("execution module is busy")
+			}
+			return &cltypes.Eth1Block{}, &engine_types.BlobsBundle{}, nil, big.NewInt(1), nil
+		})
+
+	require.NoError(t, err)
+	require.NotNil(t, payload)
+	// Contention that clears is a healthy slot, so nothing may be reported at error level.
+	require.NotContains(t, logs(), "lvl=eror")
+}
+
+func TestPollAssembledPayloadReportsAWindowThatNeverProducedOnce(t *testing.T) {
+	ctx := t.Context()
+	logs := captureProductionLogs(t)
+	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(50 * time.Millisecond)}
+
+	boom := errors.New("boom")
+	calls := 0
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			return nil, nil, nil, nil, boom
+		})
+
+	require.NotZero(t, calls)
+
+	// The reason goes to the caller, which knows the slot and owns the record, carrying the first
+	// failure - the one that says what went wrong - and how many there were.
+	require.ErrorIs(t, err, boom)
+	require.Contains(t, err.Error(), "attempt")
+	require.Empty(t, logs(), "the poll does not report; its caller does")
+}
+
+func TestPollAssembledPayloadStaysQuietWhenTheCallerGoesAway(t *testing.T) {
+	logs := captureProductionLogs(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Minute)}
+
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			cancel()
+			return nil, nil, nil, nil, context.Canceled
+		})
+
+	// A validator client that times out, or a node shutting down, takes the slot with it. Nothing
+	// failed that anyone can act on.
+	require.Error(t, err)
+	require.NotContains(t, logs(), "lvl=eror")
+}
+
+func TestPollAssembledPayloadStillReportsFailuresThatPrecededTheCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	window := blockBuilderWindow{firstGetAt: time.Now(), pollUntil: time.Now().Add(time.Minute)}
+
+	calls := 0
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Millisecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			if calls == 1 {
+				return nil, nil, nil, nil, errors.New("boom")
+			}
+			cancel()
+			return nil, nil, nil, nil, context.Canceled
+		})
+
+	// The client may well have given up because production was failing. Reporting only the
+	// cancellation would lose the only sign of it.
+	require.NotErrorIs(t, err, context.Canceled)
+	require.Contains(t, err.Error(), "boom")
+}
+
+func TestFeeRecipientWarnsOncePerProposer(t *testing.T) {
+	logs := captureProductionLogs(t)
+	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 8)
+	require.NoError(t, err)
+	params := validator_params.NewValidatorParams()
+	a := &ApiHandler{validatorParams: params, unregisteredProposers: warned}
+
+	registered := common.Address{0x11}
+	params.SetFeeRecipient(7, registered)
+	require.Equal(t, registered, a.feeRecipientForProposal(7, 1))
+	require.NotContains(t, logs(), "lvl=warn", "a registered proposer must stay quiet")
+
+	// Giving the fees away is worth saying, but only once: a chain whose validator never registers
+	// one would otherwise warn on every proposal.
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(9, 2))
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(9, 3))
+	require.Equal(t, 1, strings.Count(logs(), "lvl=warn"))
+
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(10, 4))
+	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"), "a different proposer is worth saying again")
+
+	// Alternating proposers must not each reset the other: 9 has already been reported.
+	require.Equal(t, common.Address{}, a.feeRecipientForProposal(9, 5))
+	require.Equal(t, 2, strings.Count(logs(), "lvl=warn"))
+}
+
+func TestFeeRecipientWarnsOncePerProposerUnderConcurrentRequests(t *testing.T) {
+	logs := captureProductionLogs(t)
+	warned, err := lru.New[uint64, struct{}]("unregisteredProposers", 8)
+	require.NoError(t, err)
+	a := &ApiHandler{validatorParams: validator_params.NewValidatorParams(), unregisteredProposers: warned}
+
+	// Several block template requests for the same slot arrive together, and each would otherwise
+	// find the proposer absent and report it.
+	var wg sync.WaitGroup
+	for range 128 {
+		wg.Go(func() { a.feeRecipientForProposal(9, 2) })
+	}
+	wg.Wait()
+
+	require.Equal(t, 1, strings.Count(logs(), "lvl=warn"))
+}
+
+func TestPollAssembledPayloadDoesNotCollectAfterTheCallerHasGone(t *testing.T) {
+	logs := captureProductionLogs(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	past := time.Now().Add(-time.Second)
+	window := blockBuilderWindow{firstGetAt: past, pollUntil: past}
+
+	calls := 0
+	_, _, _, _, err := pollAssembledPayload(ctx, window, time.Microsecond,
+		func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			calls++
+			// The execution module takes its semaphore before it looks at a context, so a request
+			// made after the caller has gone comes back as contention rather than cancellation.
+			return nil, nil, nil, nil, errors.New("execution module is busy")
+		})
+
+	require.Error(t, err)
+	require.Zero(t, calls, "collection must not be started for a caller that has gone")
+	require.NotContains(t, logs(), "lvl=eror")
+}
+
+// produceBlockWithFailingCollection drives a real production through to the payload collection and
+// makes that collection fail the given way, so the records the whole request emits are observable
+// rather than only those of the polling loop.
+func produceBlockWithFailingCollection(t *testing.T, ctx context.Context, collect error) error {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return([]byte{1, 2, 3, 4, 5, 6, 7, 8}, nil).AnyTimes()
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, nil, nil, nil, collect).AnyTimes()
+	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+	handler.engine = engine
+
+	_, err := handler.produceBlock(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
+		postState.Slot()+1, common.Bytes96{}, common.Hash{})
+	return err
+}
+
+func TestProductionReportsAFailedCollectionExactlyOnce(t *testing.T) {
+	ctx := t.Context()
+	logs := captureProductionLogs(t)
+
+	err := produceBlockWithFailingCollection(t, ctx, errors.New("boom"))
+	require.Error(t, err)
+
+	// One record for the whole request, and it carries the cause: the generic failure the caller
+	// used to see said only that production failed.
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.Contains(t, captured, "boom")
+}
+
+func TestProductionReportsMissingPayloadIDExactlyOnce(t *testing.T) {
+	ctx := t.Context()
+	logs := captureProductionLogs(t)
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, nil).AnyTimes()
+	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+	handler.engine = engine
+
+	_, err = handler.produceBlock(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
+		targetSlot, common.Bytes96{}, common.Hash{})
+	require.ErrorContains(t, err, "forkchoice update returned no payload ID")
+
+	captured := logs()
+	require.Equal(t, 1, strings.Count(captured, "forkchoice update returned no payload ID"), "records:\n"+captured)
+	require.Equal(t, 1, strings.Count(captured, "lvl=eror"), "records:\n"+captured)
+	require.NotContains(t, captured, "lvl=warn", "records:\n"+captured)
+	require.NotContains(t, captured, "failed to produce execution payload")
+}
+
+func TestProductionCollectsTwoFailingBodyStepsWithoutRacing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return([]byte{1, 2, 3, 4, 5, 6, 7, 8}, nil).AnyTimes()
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, nil, nil, nil, errors.New("boom")).AnyTimes()
+	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+	handler.engine = engine
+
+	// The body steps run concurrently, so each needs somewhere of its own to put its failure.
+	syncPool := sync_pool_mock.NewMockSyncContributionPool(ctrl)
+	syncPool.EXPECT().GetSyncAggregate(gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("no aggregate")).AnyTimes()
+	handler.syncMessagePool = syncPool
+
+	_, err := handler.produceBlock(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+		postState.Slot()+1, common.Bytes96{}, common.Hash{})
+	require.Error(t, err)
+}
+
+func TestProductionSaysNothingWhenTheRequestWasAbandoned(t *testing.T) {
+	logs := captureProductionLogs(t)
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	err := produceBlockWithFailingCollection(t, ctx, context.Canceled)
+	require.Error(t, err)
+
+	// A validator client that disconnects, or a node shutting down, is routine. Nothing about it is
+	// actionable, at any layer. The unregistered fee recipient this fixture also warns about is a
+	// separate matter and not what this measures.
+	require.NotContains(t, logs(), "lvl=eror", "records:\n"+logs())
 }
