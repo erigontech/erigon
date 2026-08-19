@@ -126,7 +126,7 @@ func ParseDepositLogs(logs types.Logs, depositContractAddress common.Address) (*
 		if l.Address == depositContractAddress && len(l.Topics) > 0 && l.Topics[0] == depositTopic {
 			d, err := unpackDepositLog(l.Data)
 			if err != nil {
-				return nil, fmt.Errorf("unable to parse deposit data: %v", err)
+				return nil, fmt.Errorf("unable to parse deposit data: %w", err)
 			}
 			reqData = append(reqData, d...)
 		}

@@ -122,11 +122,6 @@ func (b *BpsTree) compareKey(g *seg.Reader, key []byte, di uint64) int {
 
 type cursorGetter func(k, v []byte, di uint64, g *seg.Reader) *Cursor
 
-type BpsTreeIterator struct {
-	t *BpsTree
-	i uint64
-}
-
 //// If data[i] == key, returns 0 (equal) and value, nil err
 //// if data[i] <> key, returns comparation result and nil value and error -- to be able to compare later
 //func (b *BpsTree) matchKeyValue(g ArchiveGetter, i uint64, key []byte) (int, []byte, error) {

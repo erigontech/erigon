@@ -47,7 +47,6 @@ import (
 )
 
 type CustomTraceCfg struct {
-	tmpdir   string
 	db       kv.TemporalRwDB
 	ExecArgs *exec.ExecArgs
 

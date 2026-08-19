@@ -27,7 +27,6 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
@@ -167,7 +166,8 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 			begin = uint64(fromBlock)
 		} else {
 			blockNum := rpc.BlockNumber(fromBlock)
-			begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+			// nil filters: resolve on the committed view, like the baseline above.
+			begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, nil)
 			if err != nil {
 				return 0, 0, err
 			}
@@ -184,7 +184,7 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 			end = uint64(toBlock)
 		} else {
 			blockNum := rpc.BlockNumber(toBlock)
-			end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, api.filters)
+			end, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, nil)
 			if err != nil {
 				return 0, 0, err
 			}
@@ -368,7 +368,6 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		return nil, err
 	}
 
-	//var blockHash common.Hash
 	var header *types.Header
 
 	txNumbers, err := applyFiltersV3(api._txNumReader, tx, begin, end, crit, order.Asc)
@@ -400,55 +399,24 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		}
 
 		if isFinalTxn {
-			if chainConfig.Bor != nil {
-				if header == nil {
-					header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum)
-					if err != nil {
-						return nil, err
-					}
-				}
-				// check for state sync event logs
-				events, err := api.bridgeReader.Events(ctx, header.Hash(), blockNum)
-				if err != nil {
-					return logs, err
-				}
-
-				if len(events) == 0 {
-					continue
-				}
-
-				borLogs, err := api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txIndex, txNum)
-				if err != nil {
-					return logs, err
-				}
-
-				borLogs = borLogs.FilterWithTopicMap(addrMap, topicMap, 0)
-
-				for i := range borLogs {
-					if maxResults != 0 && len(logs) >= maxResults {
-						return nil, &rpc.InvalidParamsError{
-							Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
-						}
-					}
-					logs = append(logs, &types.ErigonLog{
-						Log:       borLogs[i],
-						Timestamp: hexutil.Uint64(header.Time),
-					})
-				}
+			if chainConfig.Bor == nil {
+				continue
 			}
-
+			borLogs, err := api.borStateSyncLogs(ctx, tx, chainConfig, header, txIndex, txNum)
+			if err != nil {
+				return logs, err
+			}
+			logs, err = appendErigonLogs(logs, borLogs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
+			if err != nil {
+				return nil, err
+			}
 			continue
 		}
 
-		//fmt.Printf("txNum=%d, blockNum=%d, txIndex=%d, maxTxNumInBlock=%d,mixTxNumInBlock=%d\n", txNum, blockNum, txIndex, maxTxNumInBlock, minTxNumInBlock)
-
 		if r, ok := api.receiptsGenerator.TryGetCachedReceipt(header.Hash(), txNum, txIndex); ok {
-			cached := r.Logs.FilterWithTopicMap(addrMap, topicMap, 0)
-			for i := range cached {
-				if maxResults != 0 && len(logs) >= maxResults {
-					return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults)}
-				}
-				logs = append(logs, &types.ErigonLog{Log: cached[i], Timestamp: hexutil.Uint64(header.Time)})
+			logs, err = appendErigonLogs(logs, r.Logs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
+			if err != nil {
+				return nil, err
 			}
 			continue
 		}
@@ -468,22 +436,34 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 		if r == nil {
 			return nil, err
 		}
-		filtered := r.Logs.FilterWithTopicMap(addrMap, topicMap, 0)
 
-		for i := range filtered {
-			if maxResults != 0 && len(logs) >= maxResults {
-				return nil, &rpc.InvalidParamsError{
-					Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
-				}
-			}
-			logs = append(logs, &types.ErigonLog{
-				Log:       filtered[i],
-				Timestamp: hexutil.Uint64(header.Time),
-			})
+		logs, err = appendErigonLogs(logs, r.Logs.FilterWithTopicMap(addrMap, topicMap, 0), header.Time, maxResults)
+		if err != nil {
+			return nil, err
 		}
 	}
 
 	return logs, nil
+}
+
+func appendErigonLogs(logs []*types.ErigonLog, filtered types.Logs, blockTime uint64, maxResults int) ([]*types.ErigonLog, error) {
+	if maxResults != 0 && len(logs)+len(filtered) > maxResults {
+		return nil, &rpc.InvalidParamsError{
+			Message: fmt.Sprintf("%s: %d", errExceedLogResults, maxResults),
+		}
+	}
+	return append(logs, filtered.ToErigonLogs(blockTime)...), nil
+}
+
+func (api *BaseAPI) borStateSyncLogs(ctx context.Context, tx kv.TemporalTx, chainConfig *chain.Config, header *types.Header, txIndex int, txNum uint64) (types.Logs, error) {
+	events, err := api.bridgeReader.Events(ctx, header.Hash(), header.Number.Uint64())
+	if err != nil {
+		return nil, err
+	}
+	if len(events) == 0 {
+		return nil, nil
+	}
+	return api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txIndex, txNum)
 }
 
 // The Topic list restricts matches to particular event topics. Each event has a list
