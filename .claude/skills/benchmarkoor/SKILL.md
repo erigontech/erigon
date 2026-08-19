@@ -366,11 +366,13 @@ root by booting the exact client through a disposable OverlayFS view.
 
 If the selected stateful source has `pre_runs`, do not replay that bundle for every
 `container-recreate` fixture. Stage it once in a disposable overlay with
-`--debug.stop-after-prerun`, stop the client gracefully, and expose the staged merged directory
-through a second read-only bind. Run smoke and production fixtures with a fresh per-test OverlayFS
-layer over that advanced bind and a complete test-source override that omits `pre_runs`. Never
-promote into or write back to the pristine snapshot. Copy the complete source map and remove only
-`pre_runs`; do not construct a partial override and rely on merge deletion.
+`--debug.stop-after-prerun`. After validating the completion marker and head, stop the retained
+client gracefully before waiting for benchmarkoor to exit; stopping the container lets its log
+stream drain. Then expose the staged merged directory through a second read-only bind. Run smoke
+and production fixtures with a fresh per-test OverlayFS layer over that advanced bind and a
+complete test-source override that omits `pre_runs`. Never promote into or write back to the
+pristine snapshot. Copy the complete source map and remove only `pre_runs`; do not construct a
+partial override and rely on merge deletion.
 
 Do not load a `schelk` runner config and then override only `method`: Viper retains sibling
 `schelk_options`, producing an invalid mixed datadir config. Load the dataset's global/genesis

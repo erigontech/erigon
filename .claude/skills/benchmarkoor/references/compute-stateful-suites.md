@@ -275,10 +275,63 @@ host. Before starting, require no process has an open file below `PRISTINE_DIR`,
 it as a mount source, and no alternate bind exposes it to a workload. Inspect host handles, mount
 tables, and every running container's mounts rather than checking names alone; perform any required
 tree traversal through `ORIGINAL_LOWER`. During staging and measurement, keep a recursive
-write-event watcher on `ORIGINAL_LOWER`, periodically repeat the handle and mount checks, and
-require every task container to mount only `ORIGINAL_LOWER` or `ADVANCED_LOWER`. On any unexplained
-access or write event, stop the exact task-owned process and ask the user; do not stop or alter the
-unrelated accessor.
+write-event watcher on `ORIGINAL_LOWER` and periodically repeat the handle and mount checks.
+
+With `method: overlayfs`, the container must mount a task-owned `merged` directory, not either
+protected lower directly. Verify the container's datadir source and the corresponding host overlay
+as one chain. Use `ORIGINAL_LOWER` as `expected_lower` during staging and `ADVANCED_LOWER` during
+smoke and measured runs; replace `/data` only when the effective client config uses another datadir
+target:
+
+```bash
+verify_task_overlay() {
+  local container_id=${1:?set container ID}
+  local expected_lower=${2:?set expected read-only lower}
+  local container_datadir=${3:-/data}
+  local -a data_sources
+  local merged mount_target overlay_options lowerdir lower_options
+  local resolved_mount_target resolved_merged resolved_lowerdir resolved_expected_lower
+
+  mapfile -t data_sources < <(
+    docker inspect "$container_id" |
+      jq -r --arg target "$container_datadir" \
+        '.[0].Mounts[] | select(.Destination == $target) | .Source'
+  )
+  test "${#data_sources[@]}" -eq 1 || return 1
+  merged=${data_sources[0]}
+  case "$merged" in
+    "$OVERLAY_TMP"/benchmarkoor-overlay-*/merged) ;;
+    *) return 1 ;;
+  esac
+
+  test "$(findmnt -n -T "$merged" -o FSTYPE)" = overlay || return 1
+  mount_target=$(findmnt -n -T "$merged" -o TARGET) || return 1
+  resolved_mount_target=$(realpath -e -- "$mount_target") || return 1
+  resolved_merged=$(realpath -e -- "$merged") || return 1
+  test "$resolved_mount_target" = "$resolved_merged" || return 1
+
+  overlay_options=$(findmnt -n -T "$merged" -o OPTIONS) || return 1
+  lowerdir=${overlay_options#*lowerdir=}
+  test "$lowerdir" != "$overlay_options" || return 1
+  lowerdir=${lowerdir%%,*}
+  resolved_lowerdir=$(realpath -e -- "$lowerdir") || return 1
+  resolved_expected_lower=$(realpath -e -- "$expected_lower") || return 1
+  test "$resolved_lowerdir" = "$resolved_expected_lower" || return 1
+
+  lower_options=$(findmnt -n -T "$expected_lower" -o OPTIONS) || return 1
+  case ",$lower_options," in
+    *,ro,*) ;;
+    *) return 1 ;;
+  esac
+
+  printf '%s\n' "$merged"
+}
+```
+
+Require exactly one datadir source from Docker inspection and repeat this verification whenever
+benchmarkoor recreates the client. Neither protected lower should appear directly in a task
+container's mount sources. On any unexplained access, mount chain, or write event, stop the exact
+task-owned process and ask the user; do not stop or alter the unrelated accessor.
 
 Download sidecars can be stale after bloating. Boot the exact client only through a disposable
 OverlayFS over `ORIGINAL_LOWER`, query `eth_getBlockByNumber("latest")`, and record its block,
@@ -337,18 +390,26 @@ every fixture. Build an immutable advanced baseline:
 1. Run the exact stateful source against `ORIGINAL_LOWER` with
    `--debug.stop-after-prerun`. Omit the CPU and memory performance-limit config during this
    unmeasured command. The debug flag deliberately retains the staged datadir and container state
-   for inspection; it does not make this a measured run.
-2. Wait for the debug benchmarkoor process to exit successfully and preserve its exit status and
-   logs. Require successful replay to the expected end block/hash/root, then resolve the exact
-   container and data mount under `OVERLAY_TMP`.
-3. Stop that container gracefully and wait until it has exited. Before removal, preserve its final
-   logs and state; require a clean Erigon shutdown, no timeout, SIGKILL, or OOM kill, and no process
-   or open handle below the merged directory. Run `sync`, then remove only that container. Leave
-   its disposable merged overlay mounted. If any shutdown gate fails, discard the stage instead of
+   for inspection; it does not make this a measured run. Keep a controlling shell or exact process
+   handle so the command can be waited after the retained container is stopped.
+2. Follow the staging log until both `Pre-run steps completed` and the
+   `--stop-after-prerun set` record appear. Do not wait for the benchmarkoor process yet. Require
+   successful replay to the expected end block/hash/root, resolve the exact retained container and
+   logged data mount, then set
+   `STAGING_MERGED=$(verify_task_overlay "$CONTAINER_ID" "$ORIGINAL_LOWER")`. Require the logged
+   data mount to resolve to `STAGING_MERGED`.
+3. Stop that exact container gracefully and wait until it has exited. This closes container stdio
+   so benchmarkoor's following log stream can reach EOF. Record its stopped state and run `sync`,
+   but do not remove the container or unmount its overlay yet.
+4. Only after the container has stopped, wait for the exact benchmarkoor process. Preserve and
+   require its successful exit status and final logs. Require a clean Erigon shutdown with no
+   timeout, SIGKILL, or OOM kill and no process or open handle below `STAGING_MERGED`. Preserve the
+   stopped container's final state, then remove only that container. Leave the disposable merged
+   overlay mounted. If any shutdown or process-exit gate fails, discard the stage instead of
    promoting potentially inconsistent MDBX state.
-4. Bind the merged directory to `ADVANCED_LOWER`, remount the bind read-only, and prove a direct
+5. Bind `STAGING_MERGED` to `ADVANCED_LOWER`, remount the bind read-only, and prove a direct
    write is rejected.
-5. Canary-test a short-lived OverlayFS over `ADVANCED_LOWER`. The canary must appear only in the
+6. Canary-test a short-lived OverlayFS over `ADVANCED_LOWER`. The canary must appear only in the
    probe upper, never in either lower, the staging merged path, or the pristine snapshot.
 
 After creating `ADVANCED_LOWER`, never address the writable staging-merged alias from a client or
@@ -424,9 +485,10 @@ wait for both to exit, and require no open handle before unmounting anything. Th
 remove only that run's disposable per-test mount and directory. Preserve the fixed staging mount
 and `ADVANCED_LOWER`, re-prove both lower binds read-only, and repeat the smoke gates before
 resuming. If staging itself is interrupted, shutdown was not clean, or the mapping of a mount to
-its upper is uncertain, stop all exact task-owned processes and containers, wait for exit, unmount
-in the cleanup order above, discard only the verified task run root, and restage from
-`ORIGINAL_LOWER`; never guess with a broad mount, process, or cleanup target.
+its upper is uncertain, stop every exact task-owned container first so its log stream can drain,
+then wait for or stop its exact benchmarkoor process. After all have exited, unmount in the cleanup
+order above, discard only the verified task run root, and restage from `ORIGINAL_LOWER`; never guess
+with a broad mount, process, or cleanup target.
 
 `/home/erigon/jochemnet/erigon_snapshot_pruned` is designated pristine. A validated
 `glamsterdam-devnet-7` stateful run downloaded its 1,463-case archive from the
