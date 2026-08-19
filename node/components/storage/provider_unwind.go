@@ -103,16 +103,7 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 	}
 	defer historyCleanup()
 
-	// 1. Compute the commitment anchor. History for the walk range was
-	//    downloaded upfront (step 0); anything else is a genuine
-	//    consensus mismatch — refuse loud and early, no mutation.
-	recompute, err := p.ensureCommitmentAtBlockCompute(ctx, opts.Tx, toBlock)
-	if err != nil {
-		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor compute: %w", err)
-	}
-	defer recompute.Close() // idempotent — Apply also closes
-
-	// 2. Snapshot-trim (staged for post-commit FS deletion).
+	// 1. Snapshot-trim (staged for post-commit FS deletion).
 	removed, err := p.unwindSnapshotsPastBlock(ctx, opts.Tx, toBlock)
 	if err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: snapshot-trim: %w", err)
@@ -121,18 +112,31 @@ func (p *Provider) Unwind(ctx context.Context, toBlock uint64, opts UnwindOpts) 
 		p.logger.Info("[storage] Provider.Unwind: snapshot files trimmed past toBlock", "toBlock", toBlock, "files", len(removed))
 	}
 
-	// 3. + 4. DB-reset (TxNums/canonicalHash/headPointers truncation)
+	// 2. + 3. DB-reset (TxNums/canonicalHash/headPointers truncation)
 	//    + WipeWritableShadowPast (per-domain wipe past lastTxNum +
 	//    boundary-step diff-replay for history-tracked domains +
 	//    whole-step wipe of commitment+RCache at stepContaining).
-	//    unwindDBPastBlock orchestrates both.
+	//    unwindDBPastBlock orchestrates both. Runs BEFORE compute so
+	//    the writable shadow holds as-of-lastTxNum state — otherwise
+	//    the compute's HistoryStateReader→GetAsOf→GetLatest fallback
+	//    reads tip-state from MDBX and produces a wrong root (mode-D
+	//    2026-08-19: 99.4% storage / 95.6% account reads fell through).
 	if err := p.unwindDBPastBlock(ctx, opts.Tx, toBlock); err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: db-reset: %w", err)
 	}
 
+	// 4. Compute the commitment anchor. Reads the wiped+replayed
+	//    writable shadow — no tip-state contamination possible. Any
+	//    error here rolls the whole tx back via the caller's AbortUnwind.
+	recompute, err := p.ensureCommitmentAtBlockCompute(ctx, opts.Tx, toBlock)
+	if err != nil {
+		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor compute: %w", err)
+	}
+	defer recompute.Close() // idempotent — Apply also closes
+
 	// 5. Apply the recompute result. Drains the branch collector +
 	//    writes KeyCommitmentState into the now-cleaned writable
-	//    shadow. The wipe's whole-step commitment clear (in step 3+4)
+	//    shadow. The wipe's whole-step commitment clear (step 2+3)
 	//    guarantees these writes land without orphan dups.
 	if err := p.ensureCommitmentAtBlockApply(ctx, opts.Tx, toBlock, recompute); err != nil {
 		return fmt.Errorf("storage.Provider.Unwind: commitment-anchor apply: %w", err)
