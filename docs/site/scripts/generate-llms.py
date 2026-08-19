@@ -314,15 +314,29 @@ _CARD_DESC_MARKER_RE = re.compile(r'<div[^>]*\blp-card-desc\b[^>]*>')
 # region would over-count and raise — a false alarm rather than a silent loss.
 _LANDING_GRID_OPEN_RE = re.compile(r'<div[^>]*\blp-grid\b[^>]*>')
 _LINK_TAG_RE = re.compile(r'<Link\s')
+_DIV_TAG_RE = re.compile(r'<div\b[^>]*?(/?)>|(</div>)', re.DOTALL)
 
 
 def _grid_link_count(raw_body):
-    """<Link> tags from the first grid onward, grid region by grid region."""
-    opens = [m.start() for m in _LANDING_GRID_OPEN_RE.finditer(raw_body)]
+    """<Link> tags contained by a grid, counted grid by grid.
+
+    Each span is closed by matching div depth rather than by the next grid or
+    EOF: an ordinary <Link> in the prose after a grid is page content, and
+    counting it as a card would abort a well-formed page.
+    """
     total = 0
-    for i, start in enumerate(opens):
-        end = opens[i + 1] if i + 1 < len(opens) else len(raw_body)
-        total += len(_LINK_TAG_RE.findall(raw_body[start:end]))
+    for opening in _LANDING_GRID_OPEN_RE.finditer(raw_body):
+        depth = 1
+        end = len(raw_body)
+        for tag in _DIV_TAG_RE.finditer(raw_body, opening.end()):
+            if tag.group(2):          # </div>
+                depth -= 1
+            elif not tag.group(1):    # <div ...>, not self-closing
+                depth += 1
+            if depth == 0:
+                end = tag.start()
+                break
+        total += len(_LINK_TAG_RE.findall(raw_body[opening.end():end]))
     return total
 
 

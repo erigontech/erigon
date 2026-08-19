@@ -156,6 +156,26 @@ Prose that follows the card grid must survive.
         self.assertIn("## After the grid", out)
         self.assertIn("Prose that follows the card grid must survive.", out)
 
+    def test_ordinary_link_after_a_grid_is_not_counted_as_a_card(self):
+        """A <Link> in the prose is page content, not a card.
+
+        Counting it would abort a well-formed page — and this parser now keeps
+        exactly that surrounding prose.
+        """
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+</div>
+
+See also <Link to="/ordinary/">Ordinary prose link</Link> for more.
+"""
+        out = g.synthesize_landing(body)
+        self.assertIn("[A](https://docs.erigon.tech/a): Desc A.", out)
+        self.assertIn("Ordinary prose link", out)
+
     def test_one_renamed_card_family_still_trips_the_guard(self):
         """The lp-card prefix is shared by all three markers, so renaming it
         defeats them together; the grid's <Link> children do not."""
@@ -251,8 +271,9 @@ Closing prose after the last grid.
         out = g.synthesize_landing(body)
         self.assertEqual(out.count("## Sections"), 1)
 
-    def test_hero_lead_is_not_duplicated_by_the_trailing_prose(self):
-        """Only the tail is recovered; the hero lead is already emitted above."""
+    def test_hero_lead_is_not_duplicated_by_the_surrounding_prose(self):
+        """The hero span is excluded from the prose segments, so its lead
+        paragraph is emitted once rather than twice."""
         body = """
 <div className="lp-hero">
   <h1>Title</h1>
