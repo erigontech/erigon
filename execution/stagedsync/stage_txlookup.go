@@ -210,7 +210,35 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	// the frontier and leave every redundant row in place, and on a node whose
 	// snapshots lag it would sit above and delete the only copy.
 	blockTo := cfg.blockReader.CanPruneTo(s.ForwardProgress)
+
+	// dbg: one line per call on every path, with a verdict. Rows in kv.TxLookup should
+	// only cover blocks not yet in snapshots; far beyond that means stale rows remain.
+	report := func(reason string, st *prune.Stat) {
+		rows, _ := tx.Count(kv.TxLookup)
+		var ahead uint64
+		if s.ForwardProgress > blockTo {
+			ahead = s.ForwardProgress - blockTo
+		}
+		const maxTxnPerBlock = 2000
+		budget := ahead*maxTxnPerBlock + maxTxnPerBlock
+		verdict := "OK"
+		if rows > budget {
+			verdict = "STALE-ROWS-LEFT"
+		}
+		var scanned, pruned uint64
+		status := "-"
+		if st != nil {
+			scanned, pruned, status = st.ScanCountValues, st.PruneCountValues, st.ValueProgress.String()
+		}
+		logger.Info(fmt.Sprintf("[%s] prune", logPrefix), "verdict", verdict,
+			"rows", rows, "rowsBudget", budget, "blocksAhead", ahead, "reason", reason,
+			"scanned", scanned, "pruned", pruned, "status", status,
+			"blockTo", blockTo, "frozen", cfg.blockReader.FrozenBlocks(), "fwd", s.ForwardProgress,
+			"prunedTo", s.PruneProgress, "initialCycle", s.CurrentSyncCycle.IsInitialCycle)
+	}
+
 	if blockTo == 0 {
+		report("no-snapshots-yet", nil)
 		return nil
 	}
 
@@ -237,6 +265,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 	// A completed rotation that covers current txTo — nothing more to do.
 	if !staleFloor && prevStat != nil && prevStat.TxTo >= txTo && prevStat.ValueProgress == prune.Done {
+		report("nothing-new-since-last-rotation", prevStat)
 		return nil
 	}
 	if prevStat == nil {
@@ -287,8 +316,11 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("prune TxLookup: %w", err)
 	}
-	logger.Debug(fmt.Sprintf("[%s] prune", logPrefix), "scanned", pruneStat.ScanCountValues,
-		"pruned", pruneStat.PruneCountValues, "status", pruneStat.ValueProgress.String(), "blockTo", blockTo)
+	if pruneStat.ValueProgress == prune.Done {
+		report("rotation-finished", pruneStat)
+	} else {
+		report("budget-hit-will-resume", pruneStat)
+	}
 	defer func() {
 		pruneStat.TxFrom, pruneStat.TxTo = 0, txTo
 		if e := state.SavePruneValProgress(tx, kv.TxLookup, pruneStat); e != nil {

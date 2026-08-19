@@ -146,6 +146,7 @@ type txlBlockReader struct {
 func (r txlBlockReader) CanPruneTo(cur uint64) uint64 {
 	return freezeblocks.CanDeleteTo(cur, r.frozen)
 }
+func (r txlBlockReader) FrozenBlocks() uint64 { return r.frozen }
 func (r txlBlockReader) TxnumReader() rawdbv3.TxNumsReader {
 	return freezeblocks.NewBlockReader(nil, nil).TxnumReader()
 }
