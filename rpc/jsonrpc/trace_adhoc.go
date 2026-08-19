@@ -251,9 +251,9 @@ func (args *TraceCallParam) ToMessage(globalGasCap uint64, baseFee *uint256.Int)
 }
 
 // overrideBaseFee is a nil-safe wrapper around (*ethapi.BlockOverrides).OverrideBaseFee.
-func overrideBaseFee(traceConfig *config.TraceConfig, baseFee *uint256.Int) (*uint256.Int, error) {
+func overrideBaseFee(traceConfig *config.TraceConfig, baseFee *uint256.Int) *uint256.Int {
 	if traceConfig == nil {
-		return baseFee, nil
+		return baseFee
 	}
 	return traceConfig.BlockOverrides.OverrideBaseFee(baseFee)
 }
@@ -1341,9 +1341,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 	if parentHeader.BaseFee != nil {
 		baseFee = parentHeader.BaseFee
 	}
-	if baseFee, err = overrideBaseFee(traceConfig, baseFee); err != nil {
-		return nil, err
-	}
+	baseFee = overrideBaseFee(traceConfig, baseFee)
 	msgs := make([]*types.Message, len(callParams))
 	txns := make([]types.Transaction, len(callParams))
 	for i := range callParams {

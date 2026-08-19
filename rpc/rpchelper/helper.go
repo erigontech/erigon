@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -220,7 +221,7 @@ func CreateHistoryStateReader(ctx context.Context, tx kv.TemporalTx, blockNumber
 	return state.NewHistoryReaderV3(tx, txNum), nil
 }
 
-func NewLatestStateReader(getter kv.TemporalGetter) state.StateReader {
+func NewLatestStateReader(getter execctxapi.StateGetter) state.StateReader {
 	return state.NewReaderV3(getter)
 }
 
