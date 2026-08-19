@@ -32,9 +32,12 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/nibbles"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
@@ -269,6 +272,63 @@ func TestSimulateV1RejectsNonCanonicalBlockHash(t *testing.T) {
 
 	_, err := api.SimulateV1(m.Ctx, request, selector)
 	require.ErrorContains(t, err, "is not currently canonical")
+}
+
+func TestSimulateV1IgnoresNewerSharedBranchCache(t *testing.T) {
+	previousSchema := statecfg.Schema
+	statecfg.EnableHistoricalCommitment()
+	t.Cleanup(func() { statecfg.Schema = previousSchema })
+
+	m, _, _, _ := chainWithDeployedContract(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	request := SimulationRequest{BlockStateCalls: []SimulatedBlock{{}}}
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	baseline, err := api.SimulateV1(m.Ctx, request, latest)
+	require.NoError(t, err)
+	require.Len(t, baseline, 1)
+	expectedRoot, ok := baseline[0]["stateRoot"].(common.Hash)
+	require.True(t, ok)
+
+	roTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+
+	provider, ok := roTx.AggTx().(commitment.BranchCacheProvider)
+	require.True(t, ok)
+	branchCache := provider.BranchCache()
+	require.NotNil(t, branchCache)
+	branchCache.Clear()
+	t.Cleanup(branchCache.Clear)
+
+	_, snapshotTxNum, err := rawdbv3.TxNums.Last(roTx)
+	require.NoError(t, err)
+	rootKey := nibbles.HexToCompact(nil)
+	newerRootBranch := make(commitment.BranchData, 4)
+	branchCache.Put(rootKey, newerRootBranch, 0, snapshotTxNum+1)
+	cachedRootBranch, _, ok := branchCache.Get(rootKey)
+	require.True(t, ok)
+	require.Equal(t, []byte(newerRootBranch), cachedRootBranch)
+
+	result, err := api.SimulateV1(m.Ctx, request, latest)
+	require.NoError(t, err)
+	require.Len(t, result, 1)
+	require.Equal(t, expectedRoot, result[0]["stateRoot"])
+}
+
+func TestExecutionWitnessRejectsNonCanonicalBlockHash(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	sideHeader := writeNonCanonicalTestBlock(t, m)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	selector := rpc.BlockNumberOrHashWithHash(sideHeader.Hash(), false)
+	info, err := api.resolveWitnessBlock(m.Ctx, tx, selector)
+	require.ErrorContains(t, err, "is not currently canonical")
+	require.Nil(t, info)
 }
 
 func TestCommittedStateMethodsRejectPendingTag(t *testing.T) {
