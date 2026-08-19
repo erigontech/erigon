@@ -209,7 +209,7 @@ func TestStaleGetterResolvesCacheStateVersionOnce(t *testing.T) {
 	currentDomains.BindStateCache(stateCache)
 
 	countingTx := &stateVersionCountingTx{TemporalTx: staleTx}
-	getter := currentDomains.AsGetter(countingTx)
+	getter := currentDomains.AsStateGetter(countingTx)
 	require.Equal(t, 1, countingTx.stateVersionReads, "getter construction resolves its transaction version")
 
 	for i := byte(1); i <= 3; i++ {

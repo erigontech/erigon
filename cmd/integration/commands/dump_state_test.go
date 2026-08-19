@@ -173,7 +173,7 @@ func seedTestAccounts(t *testing.T) kv.TemporalTx {
 	contractAddr := accounts.InternAddress(common.HexToAddress("0x02"))
 	dustAddr := accounts.InternAddress(common.HexToAddress("0x03"))
 
-	st := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
 	defer st.Close()
 
 	_, err = st.GetOrNewStateObject(eoaAddr)
@@ -220,7 +220,7 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
 
-	st := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
 	defer st.Close()
 
 	for i := range n {
