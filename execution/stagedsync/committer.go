@@ -15,6 +15,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -973,14 +975,10 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 // Commitment domain reads use GetLatest since branches are only written
 // by the calculator sequentially.
 type asOfStateReader struct {
-	sd    *execctx.SharedDomains
-	roTx  kv.TemporalTx
-	txNum uint64
-	// workerCtx, when non-nil, carries this worker's lock-free metrics
-	// accumulator; the CommitmentDomain read routes through GetLatestContext so
-	// a concurrent trie-warmup worker doesn't write the shared main accumulator
-	// (a race) or take the global metrics lock. Nil on the main reader.
-	workerCtx context.Context
+	sd     *execctx.SharedDomains
+	roTx   kv.TemporalTx
+	getter execctxapi.StateGetter
+	txNum  uint64
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -992,8 +990,8 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
-		if r.workerCtx != nil {
-			enc, step, err = r.sd.GetLatestContext(r.workerCtx, d, r.roTx, plainKey)
+		if r.getter != nil {
+			enc, step, err = r.getter.GetLatest(d, plainKey)
 		} else {
 			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
 		}
@@ -1032,7 +1030,7 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 // reader during block assembly, where trie-warmup runs concurrently — so it
 // must not write the shared main accumulator).
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
+	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, execctxapi.WithStateGetterMetrics(kvmetrics.MetricsFromContext(workerCtx))), txNum: r.txNum}
 }
 
 // Keep imports used.

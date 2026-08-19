@@ -81,7 +81,7 @@ func (db *singleTxRoDB) BeginRo(context.Context) (kv.Tx, error) {
 	return db.tx, nil
 }
 
-func (tx *firstAccountReadErrorTx) GetLatest(domain kv.Domain, _ []byte) ([]byte, kv.Step, error) {
+func (tx *firstAccountReadErrorTx) GetLatest(domain kv.Domain, _ []byte, _ ...kv.GetLatestOption) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain {
 		tx.accountReads++
 		if tx.accountReads == 1 {
@@ -91,7 +91,7 @@ func (tx *firstAccountReadErrorTx) GetLatest(domain kv.Domain, _ []byte) ([]byte
 	return nil, 0, nil
 }
 
-func (s stubTemporalGetter) GetLatest(kv.Domain, []byte) ([]byte, kv.Step, error) {
+func (s stubTemporalGetter) GetLatest(kv.Domain, []byte, ...kv.GetLatestOption) ([]byte, kv.Step, error) {
 	return s.v, s.step, nil
 }
 
@@ -101,7 +101,7 @@ func (s stubTemporalGetter) HasPrefix(kv.Domain, []byte) ([]byte, []byte, bool, 
 
 func (s stubTemporalGetter) StepsInFiles(...kv.Domain) kv.Step { return 0 }
 
-func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte) ([]byte, kv.Step, error) {
+func (s *sharedCodeTemporalGetter) GetLatest(domain kv.Domain, _ []byte, _ ...kv.GetLatestOption) ([]byte, kv.Step, error) {
 	if domain == kv.AccountsDomain {
 		s.accountReads++
 		return s.account, 0, nil

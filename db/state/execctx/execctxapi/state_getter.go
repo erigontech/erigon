@@ -18,6 +18,26 @@ package execctxapi
 
 import "github.com/erigontech/erigon/db/kv"
 
+type stateGetterOptions struct {
+	metrics kv.GetLatestMetrics
+}
+
+type StateGetterOption func(*stateGetterOptions)
+
+func WithStateGetterMetrics(metrics kv.GetLatestMetrics) StateGetterOption {
+	return func(opts *stateGetterOptions) {
+		opts.metrics = metrics
+	}
+}
+
+func ApplyStateGetterOptions(opts ...StateGetterOption) kv.GetLatestMetrics {
+	var cfg stateGetterOptions
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg.metrics
+}
+
 // StateGetter provides execution-aware reads over temporal state.
 type StateGetter interface {
 	kv.TemporalGetter

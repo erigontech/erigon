@@ -49,12 +49,11 @@ func NewLatestStateReader(tx kv.TemporalTx, sd sd, opts ...LatestStateReaderOpti
 	for _, opt := range opts {
 		opt(&cfg)
 	}
-	var getter execctxapi.StateGetter
+	var getterOpts []execctxapi.StateGetterOption
 	if cfg.metrics != nil {
-		getter = sd.AsStateGetterMetered(tx, cfg.metrics)
-	} else {
-		getter = sd.AsStateGetter(tx)
+		getterOpts = []execctxapi.StateGetterOption{execctxapi.WithStateGetterMetrics(cfg.metrics)}
 	}
+	getter := sd.AsStateGetter(tx, getterOpts...)
 	return &LatestStateReader{
 		sharedDomains: sd,
 		getter:        getter,

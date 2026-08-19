@@ -316,7 +316,7 @@ type SharedDomains struct {
 	// e.g. an RPC handler that owns this SharedDomains for one request. Enabled
 	// via StartRequestMetrics(source) and flushed to the collector at Close.
 	// Single-owner (the request goroutine); never set on exec SDs, whose workers
-	// pass their own per-worker instance via AsStateGetterMetered.
+	// pass their own per-worker instance through AsStateGetter options.
 	reqMetrics *kvmetrics.DomainMetrics
 	reqSource  kvmetrics.Source
 
@@ -595,19 +595,8 @@ func (sd *SharedDomains) domainPutNoLock(domain kv.Domain, roTx kv.TemporalTx, k
 }
 
 // AsStateGetter returns an execution-aware getter with optimized code reads.
-func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx) execctxapi.StateGetter {
-	return &stateGetter{sd: sd, tx: tx, view: sd.cacheViewFor(tx)}
-}
-
-// AsStateGetterNoMetrics is an explicit-intent alias for callers that do not
-// bind per-worker metrics. Request-scoped metrics configured on sd still apply.
-func (sd *SharedDomains) AsStateGetterNoMetrics(tx kv.TemporalTx) execctxapi.StateGetter {
-	return sd.AsStateGetter(tx)
-}
-
-// AsStateGetterMetered returns an execution-aware getter with caller-owned metrics.
-func (sd *SharedDomains) AsStateGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter {
-	return &stateGetter{sd: sd, tx: tx, m: m, view: sd.cacheViewFor(tx)}
+func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts ...execctxapi.StateGetterOption) execctxapi.StateGetter {
+	return &stateGetter{sd: sd, tx: tx, m: execctxapi.ApplyStateGetterOptions(opts...), view: sd.cacheViewFor(tx)}
 }
 
 // MergeMetrics hands a boundary producer's accumulator to BOTH sinks: the
@@ -1278,12 +1267,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 
 // TemporalDomain satisfaction. Direct reads use request metrics when configured.
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
-	return sd.getLatestMetered(domain, tx, k, nil, sd.cacheReader())
-}
-
-// GetLatestContext routes reads to the per-worker metrics carried by ctx.
-func (sd *SharedDomains) GetLatestContext(ctx context.Context, domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
-	return sd.getLatestMetered(domain, tx, k, kvmetrics.MetricsFromContext(ctx), sd.cacheReader())
+	return sd.getLatest(domain, tx, k, nil, time.Time{}, sd.cacheReader())
 }
 
 // servableUnderBound gates a value against an in-flight unwind's per-key
@@ -1328,11 +1312,11 @@ func withCodeHash(codeHash []byte) getLatestOption {
 	}
 }
 
-// getLatestMetered is the read implementation. wm is the caller's lock-free
+// getLatest is the read implementation. wm is the caller's lock-free
 // per-task/per-worker metrics accumulator (nil disables metrics for the call).
 // No global metrics lock is taken on this hot path — accumulators are combined
 // into the shared DomainMetrics later via Merge.
-func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k []byte, wm *kvmetrics.DomainMetrics, view cache.ReadView, options ...getLatestOption) (v []byte, step kv.Step, err error) {
+func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte, wm kv.GetLatestMetrics, start time.Time, view cache.ReadView, options ...getLatestOption) (v []byte, step kv.Step, err error) {
 	var opts getLatestOptions
 	for _, option := range options {
 		option(&opts)
@@ -1340,15 +1324,20 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 	if tx == nil {
 		return nil, 0, errors.New("sd.GetLatest: unexpected nil tx")
 	}
-	var start time.Time
 	if dbg.KVReadLevelledMetrics {
-		start = time.Now()
+		if start.IsZero() {
+			start = time.Now()
+		}
 		// Plain AsStateGetter reads (wm == nil) on a request-scoped SD fold into the
 		// request accumulator. Short-circuits for exec workers (wm != nil), which
 		// never touch reqMetrics — so no cross-goroutine access.
 		if wm == nil {
 			wm = sd.reqMetrics
 		}
+	}
+	var txOpts []kv.GetLatestOption
+	if wm != nil {
+		txOpts = []kv.GetLatestOption{kv.WithGetLatestMetrics(wm, start)}
 	}
 	// Mem batches hold the current transaction's uncommitted state, so a hit
 	// needs no shared-cache fill. Parent hits also obey any bound from the child.
@@ -1358,16 +1347,6 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			wm.UpdateCacheReads(domain, start)
 		}
 		return v, step, nil
-	}
-
-	type MeteredGetter interface {
-		MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error)
-	}
-	// MeteredGetterWithTxN exposes the txN of the read so the
-	// BranchCache entry can be tagged; falls back to MeteredGetter
-	// when only the legacy interface is implemented (test stubs).
-	type MeteredGetterWithTxN interface {
-		MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error)
 	}
 
 	// stateCache holds committed values shared across domain readers.
@@ -1396,18 +1375,9 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 				// Fetch authoritative value from the backing tx and panic on any divergence.
 				// sd.mem and sd.parent.mem were already checked above and missed, so the
 				// backing tx is the single source of truth for this key at this point.
-				var vDB []byte
-				var dbErr error
-				if aggTx, okAgg := tx.AggTx().(MeteredGetter); okAgg {
-					vDB, _, _, dbErr = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
-				} else {
-					vDB, _, dbErr = tx.GetLatest(domain, k)
-				}
-				// A transient read error leaves vDB nil; comparing against it would
-				// panic "divergence" on an I/O fault even when the cache was correct.
-				// Surface the real error instead.
-				if dbErr != nil {
-					return nil, 0, fmt.Errorf("AssertStateCache: authoritative read failed: %w", dbErr)
+				vDB, _, err := tx.GetLatest(domain, k, txOpts...)
+				if err != nil {
+					return nil, 0, fmt.Errorf("AssertStateCache: authoritative read failed: %w", err)
 				}
 				if !bytes.Equal(v, vDB) {
 					panic(fmt.Sprintf("stateCache divergence: domain=%v key=%x cached=%x db=%x txNum=%d",
@@ -1433,24 +1403,14 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 		}
 	}
 
-	var readTxN uint64
-	var txNKnown bool
-	switch aggTx := tx.AggTx().(type) {
-	case MeteredGetterWithTxN:
-		v, step, readTxN, _, err = aggTx.MeteredGetLatestWithTxN(domain, k, tx, maxStep, wm, start)
-		txNKnown = true
-	case MeteredGetter:
-		v, step, _, err = aggTx.MeteredGetLatest(domain, k, tx, maxStep, wm, start)
-	default:
-		v, step, err = tx.GetLatest(domain, k)
-	}
+	v, step, err = tx.GetLatest(domain, k, txOpts...)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
 
 	// A bounded read observes a staged unwind, not stable committed state.
 	if maxStep == kv.NoStepBound && sd.stateCache != nil && sd.stateCache.Caches(domain) {
-		readTxNum := (uint64(step)+1)*sd.StepSize() - 1
+		readTxNum := step.LastTxNum(sd.StepSize())
 		fillView := view
 		if fillView.NeedsFrontier() {
 			// Frontier-less views retry on the miss path, where binding cost is
@@ -1463,11 +1423,8 @@ func (sd *SharedDomains) getLatestMetered(domain kv.Domain, tx kv.TemporalTx, k 
 			fillView.Fill(domain, k, v, readTxNum)
 		}
 	}
-	// Only cache a branch when the read's txN is known: a txN=0 entry would
-	// be treated as immortal by UnwindTo, so skip the Put rather than insert
-	// an entry that can never be unwind-evicted.
-	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 && txNKnown {
-		sd.branchCache.Put(k, v, uint64(step), readTxN)
+	if domain == kv.CommitmentDomain && sd.branchCache != nil && len(v) > 0 {
+		sd.branchCache.Put(k, v, uint64(step), step.LastTxNum(sd.StepSize()))
 	}
 
 	return v, step, nil
@@ -1534,7 +1491,7 @@ func (sd *SharedDomains) getCodeSize(tx kv.TemporalTx, view cache.ReadView, addr
 		return size, true, nil
 	}
 
-	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view, withCodeHash(codeHash))
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, view, withCodeHash(codeHash))
 	if err != nil {
 		return 0, false, err
 	}
@@ -1605,7 +1562,7 @@ func (sd *SharedDomains) getCode(tx kv.TemporalTx, view cache.ReadView, addr []b
 	}
 
 	// Cold path: authoritative addr-keyed read (also populates the caches).
-	v, _, err := sd.getLatestMetered(kv.CodeDomain, tx, addr, nil, view, withCodeHash(codeHash))
+	v, _, err := sd.getLatest(kv.CodeDomain, tx, addr, nil, time.Time{}, view, withCodeHash(codeHash))
 	if err != nil {
 		return nil, false, err
 	}
@@ -1649,7 +1606,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 	if maxStep != kv.NoStepBound {
 		// A staged unwind bounds the committed lookup. Reuse the normal account
 		// path so every cache and database source observes the same bound.
-		v, _, err := sd.getLatestMetered(kv.AccountsDomain, tx, addr, nil, view)
+		v, _, err := sd.getLatest(kv.AccountsDomain, tx, addr, nil, time.Time{}, view)
 		if err != nil {
 			return nil
 		}

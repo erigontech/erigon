@@ -19,7 +19,6 @@ package execctx
 import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
-	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/cache"
 )
 
@@ -27,14 +26,18 @@ type stateGetter struct {
 	sd   *SharedDomains
 	tx   kv.TemporalTx
 	view cache.ReadView
-	m    *kvmetrics.DomainMetrics
+	m    kv.GetLatestMetrics
 }
 
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
 
 // GetLatest never writes to a process-wide metrics accumulator shared by concurrent readers.
-func (g *stateGetter) GetLatest(name kv.Domain, k []byte) ([]byte, kv.Step, error) {
-	return g.sd.getLatestMetered(name, g.tx, k, g.m, g.view)
+func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts ...kv.GetLatestOption) ([]byte, kv.Step, error) {
+	metrics, start := kv.ApplyGetLatestOptions(opts...)
+	if metrics == nil {
+		metrics = g.m
+	}
+	return g.sd.getLatest(name, g.tx, k, metrics, start, g.view)
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
@@ -63,6 +66,10 @@ var _ execctxapi.StateGetter = (*TemporalTxStateGetter)(nil)
 // NewTemporalTxStateGetter wraps tx with execution-read methods.
 func NewTemporalTxStateGetter(tx kv.TemporalTx) *TemporalTxStateGetter {
 	return &TemporalTxStateGetter{TemporalTx: tx}
+}
+
+func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts ...kv.GetLatestOption) ([]byte, kv.Step, error) {
+	return g.TemporalTx.GetLatest(name, k, opts...)
 }
 
 func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {

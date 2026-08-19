@@ -37,8 +37,7 @@ var (
 
 type sd interface {
 	SetTxNum(blockNum uint64)
-	AsStateGetter(tx kv.TemporalTx) execctxapi.StateGetter
-	AsStateGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter
+	AsStateGetter(tx kv.TemporalTx, opts ...execctxapi.StateGetterOption) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per

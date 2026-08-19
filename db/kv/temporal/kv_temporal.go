@@ -553,8 +553,8 @@ func (tx *RwTx) RangeAsOf(name kv.Domain, fromKey, toKey []byte, asOfTs uint64, 
 	return tx.rangeAsOf(name, tx.RwTx, fromKey, toKey, asOfTs, asc, limit)
 }
 
-func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte) (v []byte, step kv.Step, err error) {
-	v, step, ok, err := tx.aggtx.GetLatest(name, k, dbTx)
+func (tx *tx) getLatest(name kv.Domain, dbTx kv.Tx, k []byte, opts ...kv.GetLatestOption) (v []byte, step kv.Step, err error) {
+	v, step, ok, err := tx.aggtx.GetLatest(name, k, dbTx, opts...)
 	if err != nil {
 		return nil, step, err
 	}
@@ -600,12 +600,12 @@ func (tx *tx) hasPrefix(name kv.Domain, dbTx kv.Tx, prefix []byte) ([]byte, []by
 	return k, v, true, nil
 }
 
-func (tx *Tx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return tx.getLatest(name, tx.Tx, k)
+func (tx *Tx) GetLatest(name kv.Domain, k []byte, opts ...kv.GetLatestOption) (v []byte, step kv.Step, err error) {
+	return tx.getLatest(name, tx.Tx, k, opts...)
 }
 
-func (tx *RwTx) GetLatest(name kv.Domain, k []byte) (v []byte, step kv.Step, err error) {
-	return tx.getLatest(name, tx.RwTx, k)
+func (tx *RwTx) GetLatest(name kv.Domain, k []byte, opts ...kv.GetLatestOption) (v []byte, step kv.Step, err error) {
+	return tx.getLatest(name, tx.RwTx, k, opts...)
 }
 
 func (tx *Tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {

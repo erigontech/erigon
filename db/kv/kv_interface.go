@@ -443,13 +443,46 @@ const NoStepBound = Step(math.MaxUint64)
 // Returns the txNum of the first tx in the step.
 func (s Step) ToTxNum(stepSize uint64) uint64 { return uint64(s) * stepSize }
 
+// LastTxNum returns the txNum at the end of the step.
+func (s Step) LastTxNum(stepSize uint64) uint64 { return (uint64(s)+1)*stepSize - 1 }
+
 type (
 	Domain      uint16
 	InvertedIdx uint16
 )
 
+type GetLatestMetrics interface {
+	UpdateCacheReads(domain Domain, start time.Time)
+	UpdateDbReads(domain Domain, start time.Time)
+	UpdateStateCacheHit(domain Domain)
+	UpdateStateCacheMiss(domain Domain)
+	UpdateFileReadsUnique(domain Domain, key []byte, start time.Time)
+}
+
+type getLatestOptions struct {
+	metrics GetLatestMetrics
+	start   time.Time
+}
+
+type GetLatestOption func(*getLatestOptions)
+
+func WithGetLatestMetrics(metrics GetLatestMetrics, start time.Time) GetLatestOption {
+	return func(opts *getLatestOptions) {
+		opts.metrics = metrics
+		opts.start = start
+	}
+}
+
+func ApplyGetLatestOptions(opts ...GetLatestOption) (GetLatestMetrics, time.Time) {
+	var cfg getLatestOptions
+	for _, opt := range opts {
+		opt(&cfg)
+	}
+	return cfg.metrics, cfg.start
+}
+
 type TemporalGetter interface {
-	GetLatest(name Domain, k []byte) (v []byte, step Step, err error)
+	GetLatest(name Domain, k []byte, opts ...GetLatestOption) (v []byte, step Step, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 	StepsInFiles(entitySet ...Domain) Step
 }

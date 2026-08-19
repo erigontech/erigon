@@ -1159,7 +1159,7 @@ func (a *Aggregator) readyForCollation(ctx context.Context, step kv.Step) (lastB
 	a.commitGate.RLock()
 	defer a.commitGate.RUnlock()
 	err = a.db.View(ctx, func(tx kv.Tx) error {
-		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, lastTxNumOfStep(step, a.stepSize.Load()))
+		lastBlockInStep, ok, err = rawdbv3.TxNums.FindBlockNum(ctx, tx, step.LastTxNum(a.stepSize.Load()))
 		if err != nil {
 			return err
 		}
@@ -1813,10 +1813,6 @@ func (a *Aggregator) FilesAmount() (res []int) {
 
 func firstTxNumOfStep(step kv.Step, stepSize uint64) uint64 {
 	return uint64(step) * stepSize
-}
-
-func lastTxNumOfStep(step kv.Step, stepSize uint64) uint64 {
-	return firstTxNumOfStep(step+1, stepSize) - 1
 }
 
 // firstTxNumOfStep returns txStepBeginning of given step.
@@ -2730,62 +2726,34 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	return v, ok, err
 }
 
-func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx) (v []byte, step kv.Step, ok bool, err error) {
-	return at.getLatest(domain, k, tx, math.MaxUint64, nil, time.Time{})
-}
-
-func (at *AggregatorRoTx) MeteredGetLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
-	return at.getLatest(domain, k, tx, maxStep, metrics, start)
+func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts ...kv.GetLatestOption) (v []byte, step kv.Step, ok bool, err error) {
+	metrics, start := kv.ApplyGetLatestOptions(opts...)
+	if domain != kv.CommitmentDomain {
+		return at.d[domain].getLatest(k, tx, metrics, start)
+	}
+	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
+	if err != nil {
+		return nil, 0, false, err
+	}
+	if ok {
+		if metrics != nil && dbg.KVReadLevelledMetrics {
+			metrics.UpdateDbReads(domain, start)
+		}
+		return v, step, true, nil
+	}
+	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
+	if !found {
+		return nil, 0, false, err
+	}
+	if metrics != nil && dbg.KVReadLevelledMetrics {
+		metrics.UpdateFileReadsUnique(domain, k, start)
+	}
+	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
+	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
 }
 
 func (at *AggregatorRoTx) GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx) (size int, ok bool, err error) {
 	return at.d[domain].GetLatestValSize(k, tx)
-}
-
-// MeteredGetLatestWithTxN returns the high-water txN alongside (value,
-// step) for tagging BranchCache entries so a lazy unwind can drop them by
-// (txN, epoch). Non-CommitmentDomain reads return txN=0.
-func (at *AggregatorRoTx) MeteredGetLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
-	return at.getLatestWithTxN(domain, k, tx, maxStep, metrics, start)
-}
-
-func (at *AggregatorRoTx) getLatest(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, ok bool, err error) {
-	v, step, _, ok, err = at.getLatestWithTxN(domain, k, tx, maxStep, metrics, start)
-	return v, step, ok, err
-}
-
-func (at *AggregatorRoTx) getLatestWithTxN(domain kv.Domain, k []byte, tx kv.Tx, maxStep kv.Step, metrics *kvmetrics.DomainMetrics, start time.Time) (v []byte, step kv.Step, txN uint64, ok bool, err error) {
-	if domain != kv.CommitmentDomain {
-		v, step, ok, err = at.d[domain].getLatest(k, tx, maxStep, metrics, start)
-		return v, step, 0, ok, err
-	}
-
-	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
-	if err != nil {
-		return nil, kv.Step(0), 0, false, err
-	}
-	if ok && step <= maxStep {
-		if metrics != nil && dbg.KVReadLevelledMetrics {
-			metrics.UpdateDbReads(domain, start)
-		}
-		// DB-sourced: tag with the step's high-water; the exact write
-		// txN isn't recoverable from the step-keyed record.
-		return v, step, lastTxNumOfStep(step, at.StepSize()), true, nil
-	}
-
-	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
-	if !found {
-		return nil, kv.Step(0), 0, false, err
-	}
-	if metrics != nil && dbg.KVReadLevelledMetrics {
-		// UpdateFileReadsUnique tracks total + distinct prefixes; the
-		// ratio is the read amplification factor (hot prefixes re-read).
-		metrics.UpdateFileReadsUnique(domain, k, start)
-	}
-	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
-	// File-sourced: tag with fileEndTxNum; snapshots are immutable and
-	// unwind can't cross them, so this is always <= any legal watermark.
-	return v, kv.Step(fileEndTxNum / at.StepSize()), fileEndTxNum, found, err
 }
 
 func (at *AggregatorRoTx) DebugGetLatestFromDB(domain kv.Domain, key []byte, tx kv.Tx) ([]byte, kv.Step, bool, error) {
