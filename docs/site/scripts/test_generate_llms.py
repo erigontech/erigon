@@ -137,7 +137,7 @@ class LandingSynthesisTests(unittest.TestCase):
         self.assertIn("[Staking](https://docs.erigon.tech/staking)", out)
         self.assertIn("Hardware requirements", out)
 
-    def test_prose_after_the_grid_is_kept(self):
+    def test_prose_outside_the_cards_is_kept(self):
         """Prose outside the cards is page content and must reach the corpus."""
         body = """
 <div className="lp-grid">
@@ -155,6 +155,43 @@ Prose that follows the card grid must survive.
         self.assertIn("[A](https://docs.erigon.tech/a): Desc A.", out)
         self.assertIn("## After the grid", out)
         self.assertIn("Prose that follows the card grid must survive.", out)
+
+    def test_one_renamed_card_family_still_trips_the_guard(self):
+        """The lp-card prefix is shared by all three markers, so renaming it
+        defeats them together; the grid's <Link> children do not."""
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+<Link className="doc-card" to="/b/">
+  <div className="doc-card-title">B</div>
+  <div className="doc-card-desc">Desc B.</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 1 of 2", str(ctx.exception))
+
+    def test_every_card_family_renamed_raises_rather_than_falling_back(self):
+        """A wholesale family rename must not read as an ordinary prose page."""
+        body = """
+<div className="lp-grid">
+<Link className="doc-card" to="/a/">
+  <div className="doc-card-title">A</div>
+  <div className="doc-card-desc">Desc A.</div>
+</Link>
+<Link className="doc-card" to="/b/">
+  <div className="doc-card-title">B</div>
+  <div className="doc-card-desc">Desc B.</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 0 of 2", str(ctx.exception))
 
     def test_prose_before_and_between_grids_is_kept(self):
         """Every non-card segment reaches the corpus, in document order."""

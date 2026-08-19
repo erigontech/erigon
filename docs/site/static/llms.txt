@@ -4,7 +4,7 @@
 > modularity, and minimal disk footprint. It features an integrated consensus layer
 > (Caplin), BitTorrent-based historical data distribution, and fast node synchronization.
 
-The text of every page listed below is also available as a single file: [llms-full.txt](https://docs.erigon.tech/llms-full.txt). Pages are cleaned for machine reading — MDX components are stripped, and card-grid landing pages are rendered as a link list followed by their remaining prose.
+The text of every page listed below is also available as a single file: [llms-full.txt](https://docs.erigon.tech/llms-full.txt). Pages are cleaned for machine reading — MDX components are stripped, and on card-grid landing pages each grid becomes a link list, with the page's prose kept around it in document order.
 
 - [Introduction](https://docs.erigon.tech/): Official documentation for Erigon — the efficient, modular Ethereum execution client. Get started, explore the JSON-RPC API, and learn how to run a full or archive node.
 

@@ -307,6 +307,24 @@ _CARD_DESC_RE = re.compile(
 _CARD_TITLE_MARKER_RE = re.compile(r'<div[^>]*\blp-card-title\b[^>]*>')
 _CARD_DESC_MARKER_RE = re.compile(r'<div[^>]*\blp-card-desc\b[^>]*>')
 
+# The three markers above all carry the `lp-card` prefix, so renaming that
+# prefix on a card removes it from every one of them at once. Counting the
+# <Link> children of each grid is independent of the whole family: it is the
+# structure a card is, not the name it goes by. A non-card <Link> inside a grid
+# region would over-count and raise — a false alarm rather than a silent loss.
+_LANDING_GRID_OPEN_RE = re.compile(r'<div[^>]*\blp-grid\b[^>]*>')
+_LINK_TAG_RE = re.compile(r'<Link\s')
+
+
+def _grid_link_count(raw_body):
+    """<Link> tags from the first grid onward, grid region by grid region."""
+    opens = [m.start() for m in _LANDING_GRID_OPEN_RE.finditer(raw_body)]
+    total = 0
+    for i, start in enumerate(opens):
+        end = opens[i + 1] if i + 1 < len(opens) else len(raw_body)
+        total += len(_LINK_TAG_RE.findall(raw_body[start:end]))
+    return total
+
 
 def _card_text(fragment):
     """Flatten a card's inner HTML to plain text, collapsing whitespace."""
@@ -341,6 +359,7 @@ def synthesize_landing(raw_body):
         len(matches),
         len(_CARD_TITLE_MARKER_RE.findall(raw_body)),
         len(_CARD_DESC_MARKER_RE.findall(raw_body)),
+        _grid_link_count(raw_body),
     )
     if not expected:
         return None
@@ -370,7 +389,8 @@ def synthesize_landing(raw_body):
             f"{expected} expected "
             f"(wrappers={len(matches)}, "
             f"titles={len(_CARD_TITLE_MARKER_RE.findall(raw_body))}, "
-            f"descs={len(_CARD_DESC_MARKER_RE.findall(raw_body))})"
+            f"descs={len(_CARD_DESC_MARKER_RE.findall(raw_body))}, "
+            f"grid_links={_grid_link_count(raw_body)})"
         )
 
     out = []
@@ -617,8 +637,9 @@ def build():
     lines.append(
         f"The text of every page listed below is also available as a single file: "
         f"[llms-full.txt]({BASE_URL}/llms-full.txt). Pages are cleaned for machine "
-        f"reading — MDX components are stripped, and card-grid landing pages are "
-        f"rendered as a link list followed by their remaining prose."
+        f"reading — MDX components are stripped, and on card-grid landing pages "
+        f"each grid becomes a link list, with the page's prose kept around it in "
+        f"document order."
     )
     lines.append("")
 

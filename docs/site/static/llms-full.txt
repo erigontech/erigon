@@ -4020,7 +4020,7 @@ MCP connects a model to your **running node**. To let a model answer questions a
 
 Both are generated from the same Markdown source as this site by a script in the repository, and CI fails when a documentation change lands without regenerating them, so they cannot quietly go stale.
 
-Two things to know about their scope. They cover the **current** documentation and the help center only — archived versions, published under `/vX.Y/`, are not included. And the text is cleaned rather than copied verbatim: MDX components are stripped, and section index pages built as card grids are rendered as the list of links they present followed by the rest of their prose. Read the corpus as the documentation's prose, not as a byte-for-byte mirror of the rendered site.
+Two things to know about their scope. They cover the **current** documentation and the help center only — archived versions, published under `/vX.Y/`, are not included. And the text is cleaned rather than copied verbatim: MDX components are stripped, and on section index pages built as card grids each grid becomes the list of links it presents, with the page's prose kept around it in document order. Read the corpus as the documentation's prose, not as a byte-for-byte mirror of the rendered site.
 
 ```bash
 # Give a local model the whole documentation, with no network access
