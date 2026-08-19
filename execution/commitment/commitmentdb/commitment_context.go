@@ -4,7 +4,6 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
-	"encoding/hex"
 	"errors"
 	"fmt"
 	"io"
@@ -418,15 +417,15 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 	}
 
 	updateCount := sdc.updates.Size()
-	start := time.Now()
-	defer func() {
-		took := time.Since(start)
-		var keysPerSec uint64
-		if took > 0 {
-			keysPerSec = uint64(float64(updateCount) / took.Seconds())
-		}
-		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.variant, "bufmode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
-	}()
+	//start := time.Now()
+	//defer func() {
+	//	took := time.Since(start)
+	//	var keysPerSec uint64
+	//	if took > 0 {
+	//		keysPerSec = uint64(float64(updateCount) / took.Seconds())
+	//	}
+	//	log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.variant, "bufmode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
+	//}()
 	// Re-apply the trace writer before any trie operations (including the early-return
 	// RootHash below); GenerateWitness clears it, so it must be restored on each call.
 	sdc.patriciaTrie.SetTraceWriter(sdc.traceW)
