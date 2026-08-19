@@ -57,6 +57,16 @@
   # TODO v8.1.0 spec conformance
   max-allowed-failures: 11789
   commitment-parallel: true
+- shard: transactiontests-stable-race
+  workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: false
+  no-ramdisk: true
+- shard: transactiontests-devnet-race
+  workers: 12
+  max-allowed-failures: 0
+  commitment-parallel: false
+  no-ramdisk: true
 - shard: statetests-legacy-sequential
   workers: 12
   max-allowed-failures: 0
