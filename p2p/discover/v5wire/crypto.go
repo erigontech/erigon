@@ -154,11 +154,11 @@ func ecdh(privkey *ecdsa.PrivateKey, pubkey *ecdsa.PublicKey) []byte {
 func encryptGCM(dest, key, nonce, plaintext, authData []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		panic(fmt.Errorf("can't create block cipher: %v", err))
+		panic(fmt.Errorf("can't create block cipher: %w", err))
 	}
 	aesgcm, err := cipher.NewGCMWithNonceSize(block, gcmNonceSize)
 	if err != nil {
-		panic(fmt.Errorf("can't create GCM: %v", err))
+		panic(fmt.Errorf("can't create GCM: %w", err))
 	}
 	return aesgcm.Seal(dest, nonce, plaintext, authData), nil
 }
@@ -167,14 +167,14 @@ func encryptGCM(dest, key, nonce, plaintext, authData []byte) ([]byte, error) {
 func decryptGCM(key, nonce, ct, authData []byte) ([]byte, error) {
 	block, err := aes.NewCipher(key)
 	if err != nil {
-		return nil, fmt.Errorf("can't create block cipher: %v", err)
+		return nil, fmt.Errorf("can't create block cipher: %w", err)
 	}
 	if len(nonce) != gcmNonceSize {
 		return nil, fmt.Errorf("invalid GCM nonce size: %d", len(nonce))
 	}
 	aesgcm, err := cipher.NewGCMWithNonceSize(block, gcmNonceSize)
 	if err != nil {
-		return nil, fmt.Errorf("can't create GCM: %v", err)
+		return nil, fmt.Errorf("can't create GCM: %w", err)
 	}
 	pt := make([]byte, 0, len(ct))
 	return aesgcm.Open(pt, nonce, ct, authData)

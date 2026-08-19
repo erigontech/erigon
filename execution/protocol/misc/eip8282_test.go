@@ -23,11 +23,12 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -84,9 +85,9 @@ func TestSystemContractsExcludeBuilderPreAmsterdam(t *testing.T) {
 func TestDequeueBuilderDepositRequests_EmptyCodeReturnsError(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
 	defer statedb.Close()
 
 	// Contract exists with zero-length code.
@@ -103,9 +104,9 @@ func TestDequeueBuilderDepositRequests_EmptyCodeReturnsError(t *testing.T) {
 func TestDequeueBuilderExitRequests_EmptyCodeReturnsError(t *testing.T) {
 	t.Parallel()
 
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, domains := temporaltest.NewTestTxSD(t, db)
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
 	defer statedb.Close()
 
 	// Contract exists with zero-length code.
