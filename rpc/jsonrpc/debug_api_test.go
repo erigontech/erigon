@@ -970,17 +970,41 @@ func TestAccountRangeBlockTags(t *testing.T) {
 		require.Contains(t, err.Error(), "pending block not supported")
 	})
 
-	t.Run("earliest tag matches block 0", func(t *testing.T) {
+	t.Run("earliest tag returns genesis state root", func(t *testing.T) {
 		earliestTag := rpc.EarliestBlockNumber
-		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &earliestTag}, addr[:], 10, true, true, nil)
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &earliestTag}, addr[:], 10, true, true, nil)
 		require.NoError(t, err)
 
-		zero := rpc.BlockNumber(0)
-		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &zero}, addr[:], 10, true, true, nil)
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
 		require.NoError(t, err)
-
-		require.Equal(t, byNumber, byTag)
+		defer tx.Rollback()
+		genesis, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, 0)
+		require.NoError(t, err)
+		require.Equal(t, fmt.Sprintf("%x", genesis.Root), result.Root)
 	})
+}
+
+// TestAccountRange_UsesCommittedBlockResolution pins that AccountRange resolves
+// block tags against committed state, not the block overlay. With the overlay
+// head one past the MDBX-committed chain, "latest" must resolve to the committed
+// head — the overlay-only block has no committed state for NewDumper.
+func TestAccountRange_UsesCommittedBlockResolution(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+	addr := common.HexToAddress("0x0100000000000000000000000000000000000000")
+
+	latestTag := rpc.LatestBlockNumber
+	result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, addr[:], 10, true, true, nil)
+	require.NoError(t, err)
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	committedHead, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, overlayRaceChainSize)
+	require.NoError(t, err)
+	require.Equal(t, fmt.Sprintf("%x", committedHead.Root), result.Root,
+		"must resolve to the committed head, not the overlay-only block")
 }
 
 func TestGetModifiedAccountsByNumber(t *testing.T) {
