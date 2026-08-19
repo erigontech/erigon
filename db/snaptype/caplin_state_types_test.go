@@ -21,7 +21,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snaptype"
@@ -29,46 +28,45 @@ import (
 )
 
 type caplinStateTypeExpectation struct {
-	typ        snaptype.Type
-	name       string
-	introduced clparams.StateVersion
+	typ  snaptype.Type
+	name string
 }
 
 func caplinStateTypeExpectations() []caplinStateTypeExpectation {
 	return []caplinStateTypeExpectation{
-		{snaptype.ValidatorEffectiveBalance, kv.ValidatorEffectiveBalance, clparams.Phase0Version},
-		{snaptype.ValidatorSlashings, kv.ValidatorSlashings, clparams.Phase0Version},
-		{snaptype.ValidatorBalance, kv.ValidatorBalance, clparams.Phase0Version},
-		{snaptype.StateEvents, kv.StateEvents, clparams.Phase0Version},
-		{snaptype.ActiveValidatorIndicies, kv.ActiveValidatorIndicies, clparams.Phase0Version},
-		{snaptype.StateRoot, kv.StateRoot, clparams.Phase0Version},
-		{snaptype.BlockRoot, kv.BlockRoot, clparams.Phase0Version},
-		{snaptype.SlotData, kv.SlotData, clparams.Phase0Version},
-		{snaptype.EpochData, kv.EpochData, clparams.Phase0Version},
-		{snaptype.InactivityScores, kv.InactivityScores, clparams.AltairVersion},
-		{snaptype.NextSyncCommittee, kv.NextSyncCommittee, clparams.AltairVersion},
-		{snaptype.CurrentSyncCommittee, kv.CurrentSyncCommittee, clparams.AltairVersion},
-		{snaptype.Eth1DataVotes, kv.Eth1DataVotes, clparams.Phase0Version},
-		{snaptype.IntraRandaoMixes, kv.IntraRandaoMixes, clparams.Phase0Version},
-		{snaptype.RandaoMixes, kv.RandaoMixes, clparams.Phase0Version},
-		{snaptype.BalancesDump, kv.BalancesDump, clparams.Phase0Version},
-		{snaptype.EffectiveBalancesDump, kv.EffectiveBalancesDump, clparams.Phase0Version},
-		{snaptype.PendingConsolidations, kv.PendingConsolidations, clparams.ElectraVersion},
-		{snaptype.PendingPartialWithdrawals, kv.PendingPartialWithdrawals, clparams.ElectraVersion},
-		{snaptype.PendingDeposits, kv.PendingDeposits, clparams.ElectraVersion},
-		{snaptype.PendingConsolidationsDump, kv.PendingConsolidationsDump, clparams.ElectraVersion},
-		{snaptype.PendingPartialWithdrawalsDump, kv.PendingPartialWithdrawalsDump, clparams.ElectraVersion},
-		{snaptype.PendingDepositsDump, kv.PendingDepositsDump, clparams.ElectraVersion},
-		{snaptype.Builders, kv.Builders, clparams.GloasVersion},
-		{snaptype.BuildersDump, kv.BuildersDump, clparams.GloasVersion},
-		{snaptype.BuilderPendingWithdrawals, kv.BuilderPendingWithdrawals, clparams.GloasVersion},
-		{snaptype.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawalsDump, clparams.GloasVersion},
-		{snaptype.PayloadExpectedWithdrawals, kv.PayloadExpectedWithdrawals, clparams.GloasVersion},
-		{snaptype.PayloadExpectedWithdrawalsDump, kv.PayloadExpectedWithdrawalsDump, clparams.GloasVersion},
-		{snaptype.ExecutionPayloadAvailabilityTable, kv.ExecutionPayloadAvailabilityTable, clparams.GloasVersion},
-		{snaptype.BuilderPendingPaymentsTable, kv.BuilderPendingPaymentsTable, clparams.GloasVersion},
-		{snaptype.PtcWindowTable, kv.PtcWindowTable, clparams.GloasVersion},
-		{snaptype.LatestExecutionPayloadBidTable, kv.LatestExecutionPayloadBidTable, clparams.GloasVersion},
+		{snaptype.ValidatorEffectiveBalance, kv.ValidatorEffectiveBalance},
+		{snaptype.ValidatorSlashings, kv.ValidatorSlashings},
+		{snaptype.ValidatorBalance, kv.ValidatorBalance},
+		{snaptype.StateEvents, kv.StateEvents},
+		{snaptype.ActiveValidatorIndicies, kv.ActiveValidatorIndicies},
+		{snaptype.StateRoot, kv.StateRoot},
+		{snaptype.BlockRoot, kv.BlockRoot},
+		{snaptype.SlotData, kv.SlotData},
+		{snaptype.EpochData, kv.EpochData},
+		{snaptype.InactivityScores, kv.InactivityScores},
+		{snaptype.NextSyncCommittee, kv.NextSyncCommittee},
+		{snaptype.CurrentSyncCommittee, kv.CurrentSyncCommittee},
+		{snaptype.Eth1DataVotes, kv.Eth1DataVotes},
+		{snaptype.IntraRandaoMixes, kv.IntraRandaoMixes},
+		{snaptype.RandaoMixes, kv.RandaoMixes},
+		{snaptype.BalancesDump, kv.BalancesDump},
+		{snaptype.EffectiveBalancesDump, kv.EffectiveBalancesDump},
+		{snaptype.PendingConsolidations, kv.PendingConsolidations},
+		{snaptype.PendingPartialWithdrawals, kv.PendingPartialWithdrawals},
+		{snaptype.PendingDeposits, kv.PendingDeposits},
+		{snaptype.PendingConsolidationsDump, kv.PendingConsolidationsDump},
+		{snaptype.PendingPartialWithdrawalsDump, kv.PendingPartialWithdrawalsDump},
+		{snaptype.PendingDepositsDump, kv.PendingDepositsDump},
+		{snaptype.Builders, kv.Builders},
+		{snaptype.BuildersDump, kv.BuildersDump},
+		{snaptype.BuilderPendingWithdrawals, kv.BuilderPendingWithdrawals},
+		{snaptype.BuilderPendingWithdrawalsDump, kv.BuilderPendingWithdrawalsDump},
+		{snaptype.PayloadExpectedWithdrawals, kv.PayloadExpectedWithdrawals},
+		{snaptype.PayloadExpectedWithdrawalsDump, kv.PayloadExpectedWithdrawalsDump},
+		{snaptype.ExecutionPayloadAvailabilityTable, kv.ExecutionPayloadAvailabilityTable},
+		{snaptype.BuilderPendingPaymentsTable, kv.BuilderPendingPaymentsTable},
+		{snaptype.PtcWindowTable, kv.PtcWindowTable},
+		{snaptype.LatestExecutionPayloadBidTable, kv.LatestExecutionPayloadBidTable},
 	}
 }
 
@@ -85,7 +83,6 @@ func TestCaplinStateSnapshotTypes(t *testing.T) {
 		require.Equal(t, snaptype.MinCaplinEnum+2+snaptype.Enum(i), typ.Enum())
 		require.Equal(t, expected.name, typ.Name())
 		require.Equal(t, version.V1_1_standart, typ.Versions())
-		require.Equal(t, expected.introduced, snaptype.CaplinStateIntroducedIn(typ.Enum()))
 
 		indexes := typ.Indexes()
 		require.Len(t, indexes, 1)
@@ -120,8 +117,4 @@ func TestCaplinStateSnapshotTypeRange(t *testing.T) {
 
 func TestCaplinSnapshotTypesRemainBlockTypes(t *testing.T) {
 	require.Len(t, snaptype.CaplinSnapshotTypes, 2)
-}
-
-func TestCaplinStateIntroducedInDefaultsToGenesis(t *testing.T) {
-	require.Equal(t, clparams.Phase0Version, snaptype.CaplinStateIntroducedIn(snaptype.Unknown))
 }
