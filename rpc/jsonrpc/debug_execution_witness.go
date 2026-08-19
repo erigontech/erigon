@@ -714,6 +714,9 @@ func (api *BaseAPI) buildAccessedState(
 // It executes a block using a historical state reader, records all state accesses
 // (accounts, storage, code), and builds merkle proofs for the accessed keys.
 func (api *DebugAPIImpl) ExecutionWitness(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, mode *string) (*ExecutionWitnessResult, error) {
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 	resolvedMode, err := resolveWitnessMode(mode)
 	if err != nil {
 		return nil, err
@@ -777,7 +780,7 @@ func (api *DebugAPIImpl) serveFromWitnessCache(ctx context.Context, tx kv.Tempor
 	// orphan into a plain miss and losing the reorged-away signal.
 	resolve := blockNrOrHash
 	resolve.RequireCanonical = false
-	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, api.filters)
+	num, hash, _, err := rpchelper.GetBlockNumber(ctx, resolve, tx, api._blockReader, nil)
 	if err != nil {
 		witnessCacheMissCounter.Inc()
 		return nil, false, false

@@ -412,6 +412,36 @@ func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {
 	require.Nil(t, header)
 }
 
+func TestHeaderHelpersReturnPublishedPendingHeader(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ff := rpchelper.New(m.Ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
+	pendingBlock := types.NewBlockWithHeader(&types.Header{
+		Number:   *uint256.NewInt(100),
+		Coinbase: common.Address{1},
+	})
+	payload, err := rlp.EncodeToBytes(pendingBlock)
+	require.NoError(t, err)
+	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
+
+	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	t.Run("headerByNumber", func(t *testing.T) {
+		header, err := base.headerByNumber(m.Ctx, rpc.PendingBlockNumber, tx)
+		require.NoError(t, err)
+		require.Equal(t, pendingBlock.Hash(), header.Hash())
+	})
+
+	t.Run("headerByNumberOrHash", func(t *testing.T) {
+		header, isLatest, err := base.headerByNumberOrHash(m.Ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber))
+		require.NoError(t, err)
+		require.False(t, isLatest)
+		require.Equal(t, pendingBlock.Hash(), header.Hash())
+	})
+}
+
 func TestHeaderHelpersDoNotReselectOverlay(t *testing.T) {
 	tests := []struct {
 		name string
@@ -641,6 +671,16 @@ func newHeaderAheadTester(t *testing.T) (m *execmoduletester.ExecModuleTester, a
 		return rawdb.WriteCanonicalHash(tx, aheadHash, aheadNumber)
 	}))
 	return m, aheadHash
+}
+
+func TestGetLogsBlockHashRequiresBody(t *testing.T) {
+	t.Parallel()
+	m, aheadHash := newHeaderAheadTester(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &aheadHash})
+	require.EqualError(t, err, fmt.Sprintf("block not found: %x", aheadHash))
+	require.Nil(t, logs)
 }
 
 type rejectTxNumsAboveIndex struct {

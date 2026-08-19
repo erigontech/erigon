@@ -340,7 +340,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {
-		fromBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, nil)
+		fromBlock, _, _, err = rpchelper.GetCanonicalBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, nil)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()
@@ -356,7 +356,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 			return err
 		}
 	} else {
-		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, nil)
+		toBlock, _, _, err = rpchelper.GetCanonicalBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, nil)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()

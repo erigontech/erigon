@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/execmodule"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tracing/tracers/config"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -68,6 +69,29 @@ type rejectStateCache struct {
 
 func (rejectStateCache) View(context.Context, kv.TemporalTx) (kvcache.CacheView, error) {
 	return nil, errUnexpectedStateCacheView
+}
+
+func writeNonCanonicalTestBlock(t *testing.T, m *execmoduletester.ExecModuleTester) *types.Header {
+	t.Helper()
+
+	var canonicalHeader *types.Header
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var err error
+		canonicalHeader, err = m.BlockReader.HeaderByNumber(m.Ctx, tx, overlayRaceChainSize)
+		return err
+	}))
+	require.NotNil(t, canonicalHeader)
+
+	sideHeader := types.CopyHeader(canonicalHeader)
+	sideHeader.Coinbase = common.Address{2}
+	require.NotEqual(t, canonicalHeader.Hash(), sideHeader.Hash())
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		if err := rawdb.WriteHeader(tx, sideHeader); err != nil {
+			return err
+		}
+		return rawdb.WriteBody(tx, sideHeader.Hash(), sideHeader.Number.Uint64(), &types.Body{})
+	}))
+	return sideHeader
 }
 
 func TestTraceCallUsesCommittedState(t *testing.T) {
@@ -147,21 +171,7 @@ func TestTraceCallUsesCommittedHeader(t *testing.T) {
 
 func TestAdHocTracesRejectNonCanonicalBlockHash(t *testing.T) {
 	base, m, _ := newOverlayAheadTestAPI(t)
-
-	var canonicalHeader *types.Header
-	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		var err error
-		canonicalHeader, err = m.BlockReader.HeaderByNumber(m.Ctx, tx, overlayRaceChainSize)
-		return err
-	}))
-	require.NotNil(t, canonicalHeader)
-
-	sideHeader := types.CopyHeader(canonicalHeader)
-	sideHeader.Coinbase = common.Address{2}
-	require.NotEqual(t, canonicalHeader.Hash(), sideHeader.Hash())
-	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
-		return rawdb.WriteHeader(tx, sideHeader)
-	}))
+	sideHeader := writeNonCanonicalTestBlock(t, m)
 
 	selector := rpc.BlockNumberOrHashWithHash(sideHeader.Hash(), false)
 	traceAPI := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
@@ -183,6 +193,23 @@ func TestAdHocTracesRejectNonCanonicalBlockHash(t *testing.T) {
 		err := debugAPI.TraceCallMany(m.Ctx, []Bundle{{
 			Transactions: []ethapi.CallArgs{{From: &m.Address, To: &to, Gas: &gas}},
 		}}, StateContext{BlockNumber: selector}, nil, jsonstream.New(io.Discard))
+		require.ErrorContains(t, err, "is not currently canonical")
+	})
+}
+
+func TestTraceFilterRejectsNonCanonicalBlockHash(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	sideHeader := writeNonCanonicalTestBlock(t, m)
+	selector := rpc.BlockNumberOrHashWithHash(sideHeader.Hash(), false)
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	t.Run("fromBlock", func(t *testing.T) {
+		err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &selector}, nil, nil, jsonstream.New(io.Discard))
+		require.ErrorContains(t, err, "is not currently canonical")
+	})
+
+	t.Run("toBlock", func(t *testing.T) {
+		err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &selector}, nil, nil, jsonstream.New(io.Discard))
 		require.ErrorContains(t, err, "is not currently canonical")
 	})
 }
@@ -232,9 +259,23 @@ func TestSimulateV1UsesCommittedBlockBody(t *testing.T) {
 	require.Len(t, result, 1)
 }
 
+func TestSimulateV1RejectsNonCanonicalBlockHash(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	sideHeader := writeNonCanonicalTestBlock(t, m)
+
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	request := SimulationRequest{BlockStateCalls: []SimulatedBlock{{}}}
+	selector := rpc.BlockNumberOrHashWithHash(sideHeader.Hash(), false)
+
+	_, err := api.SimulateV1(m.Ctx, request, selector)
+	require.ErrorContains(t, err, "is not currently canonical")
+}
+
 func TestCommittedStateMethodsRejectPendingTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	base := newBaseApiForTest(m)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	debugAPI := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 
 	t.Run("eth_simulateV1", func(t *testing.T) {
@@ -253,6 +294,44 @@ func TestCommittedStateMethodsRejectPendingTag(t *testing.T) {
 		_, err := api.GetTxWitness(m.Ctx, pending, 0)
 		require.EqualError(t, err, "pending state is not supported")
 	})
+
+	t.Run("eth_getProof", func(t *testing.T) {
+		_, err := api.GetProof(m.Ctx, m.Address, nil, &pending)
+		require.EqualError(t, err, "pending state is not supported")
+	})
+
+	t.Run("debug_executionWitness", func(t *testing.T) {
+		_, err := debugAPI.ExecutionWitness(m.Ctx, pending, nil)
+		require.EqualError(t, err, "pending state is not supported")
+	})
+}
+
+func TestExecutionWitnessCacheUsesCommittedView(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	var committedHash common.Hash
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var ok bool
+		var err error
+		committedHash, ok, err = m.BlockReader.CanonicalHash(m.Ctx, tx, overlayRaceChainSize)
+		require.True(t, ok)
+		return err
+	}))
+
+	want := &ExecutionWitnessResult{State: []hexutil.Bytes{{1}}}
+	api.witnessCache = newWitnessResultCache(96, 0, true, false)
+	api.witnessCache.Add(committedHash, want)
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+	got, hit, reorgedAway := api.serveFromWitnessCache(m.Ctx, tx, latest, witnessModeLegacy)
+	require.True(t, hit)
+	require.False(t, reorgedAway)
+	require.Same(t, want, got)
 }
 
 func TestTraceTransactionUsesCommittedTxnLookup(t *testing.T) {

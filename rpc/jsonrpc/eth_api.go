@@ -248,6 +248,17 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	}
 	return api.filters.LastPendingBlock()
 }
+
+func (api *BaseAPI) pendingHeader(number rpc.BlockNumber) *types.Header {
+	if number != rpc.PendingBlockNumber {
+		return nil
+	}
+	if block := api.pendingBlock(); block != nil {
+		return block.HeaderNoCopy()
+	}
+	return nil
+}
+
 func (api *BaseAPI) engine() rules.EngineReader {
 	return api._engine
 }
@@ -385,6 +396,11 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 
 // headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
 func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
+	if number, ok := blockNrOrHash.Number(); ok {
+		if header := api.pendingHeader(number); header != nil {
+			return header, false, nil
+		}
+	}
 	// One overlay view for both the tag resolution and the read: deriving a
 	// second one can miss a head whose overlay was unpublished in between.
 	overlayTx := api.filters.WithOverlay(tx)
@@ -407,6 +423,9 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 }
 
 func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
+	if header := api.pendingHeader(number); header != nil {
+		return header, nil
+	}
 	overlayTx := api.filters.WithOverlay(tx)
 	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), overlayTx, api._blockReader, nil)
 	if err != nil {

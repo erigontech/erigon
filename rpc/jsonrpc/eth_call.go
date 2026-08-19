@@ -445,6 +445,9 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 			Code:    rpc.ErrCodeInvalidParams,
 		}
 	}
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 
 	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {

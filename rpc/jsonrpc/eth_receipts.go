@@ -160,6 +160,13 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 		if !ok || canonicalHash != *crit.BlockHash {
 			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
+		body, _, err := api._blockReader.Body(ctx, tx, *crit.BlockHash, *number)
+		if err != nil {
+			return 0, 0, err
+		}
+		if body == nil {
+			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
+		}
 		return *number, *number, nil
 	}
 
