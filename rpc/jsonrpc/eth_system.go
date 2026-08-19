@@ -82,6 +82,33 @@ type CapabilitiesResult struct {
 	StateProofs CapabilityField `json:"stateproofs"`
 }
 
+// stricterRetention returns the policy that bounds availability more and
+// widerRetention the one that bounds it less. The oldest blocks alone cannot rank
+// them: a window that has not started pruning reports zero like keep-all, so a tie
+// there is resolved on the retention the policies will apply.
+func stricterRetention(oldestA uint64, a prune.BlockAmount, oldestB uint64, b prune.BlockAmount) (uint64, prune.BlockAmount) {
+	if oldestA > oldestB || (oldestA == oldestB && retentionBlocks(a) <= retentionBlocks(b)) {
+		return oldestA, a
+	}
+	return oldestB, b
+}
+
+func widerRetention(oldestA uint64, a prune.BlockAmount, oldestB uint64, b prune.BlockAmount) (uint64, prune.BlockAmount) {
+	if oldestA < oldestB || (oldestA == oldestB && retentionBlocks(a) >= retentionBlocks(b)) {
+		return oldestA, a
+	}
+	return oldestB, b
+}
+
+// retentionBlocks measures a policy by the window it keeps, every sentinel counting
+// as unbounded.
+func retentionBlocks(amount prune.BlockAmount) uint64 {
+	if d, ok := amount.(prune.Distance); ok && d.Enabled() {
+		return uint64(d)
+	}
+	return math.MaxUint64
+}
+
 // Capabilities implements eth_capabilities.
 // stateproofs is only available when --prune.include-commitment-history was set at node startup;
 // otherwise it is disabled regardless of prune mode.
@@ -169,26 +196,30 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 			receiptsOldest, receiptsAmount = 0, amount
 		case pruneMode.ReceiptsFollowHistory():
 		default:
-			if windowOldest := amount.PruneTo(headBlock); windowOldest < stateOldest {
-				receiptsOldest, receiptsAmount = windowOldest, amount
-			}
+			receiptsOldest, receiptsAmount = widerRetention(amount.PruneTo(headBlock), amount, stateOldest, pruneMode.History)
+		}
+	}
+	// Below Byzantium the receipt carries a post state the cache does not store, so
+	// those blocks are re-executed and reach only as far as history. This mirrors
+	// postStateCalculated, down to the shape that computes the post state at all.
+	if byzantium := chainConfig.ByzantiumBlock; byzantium != nil && receiptsOldest < *byzantium &&
+		(api._blockReader.FrozenBlocks() == 0 || keepExecutionProofs) {
+		if stateOldest < *byzantium {
+			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
+		} else {
+			receiptsOldest = *byzantium
 		}
 	}
 	// Reading the receipts of a block needs its body too: the stored receipt carries no
 	// TxHash, so it is derived from the block's transaction.
-	if blocksOldest >= receiptsOldest {
-		receiptsOldest, receiptsAmount = blocksOldest, pruneMode.Blocks
-	}
+	receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, blocksOldest, pruneMode.Blocks)
 	receiptsField := avail(receiptsOldest, receiptsAmount)
 
 	// A log query filtered by address or topic searches LogAddrIdx and LogTopicIdx,
 	// standalone indices retired at the history cutoff whatever the receipt retention is.
 	// The field takes that stricter form: an unfiltered query reads straight from the
 	// receipts and reaches further back than advertised.
-	logsOldest, logsAmount := receiptsOldest, receiptsAmount
-	if stateOldest > logsOldest {
-		logsOldest, logsAmount = stateOldest, pruneMode.History
-	}
+	logsOldest, logsAmount := stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
 	logsField := avail(logsOldest, logsAmount)
 
 	return &CapabilitiesResult{

@@ -150,6 +150,7 @@ type BaseAPI struct {
 	_genesis                  atomic.Pointer[types.Block]
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
+	_preMergeBodies           atomic.Pointer[bool]
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -452,23 +453,45 @@ func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64
 
 // blocksFollowChainHistoryExpiry reports whether block retention is the chain's
 // history-expiry policy rather than a window, which Distance.Enabled reads as "not
-// pruning" although pre-merge bodies are never downloaded. History carrying the same
-// sentinel excludes it: that is an archive datadir stored before keep-all became the
-// Blocks default, and it holds every body — EnsureNotChanged corrects that shape in
-// memory without rewriting the stored value the RPC layer reads.
+// pruning" although pre-merge bodies are never downloaded.
 func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx) (bool, *uint64, error) {
 	p, err := api.pruneMode(tx)
 	if err != nil || p == nil {
 		return false, nil, err
 	}
-	if p.Blocks != prune.KeepPostMergeBlocksPruneMode || p.History == prune.KeepPostMergeBlocksPruneMode {
+	if p.Blocks != prune.KeepPostMergeBlocksPruneMode {
 		return false, nil, nil
 	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return false, nil, err
 	}
+	if chainConfig.MergeHeight != nil && p.History == prune.KeepPostMergeBlocksPruneMode {
+		holds, err := api.holdsPreMergeBodies(ctx, tx, *chainConfig.MergeHeight)
+		if err != nil || holds {
+			return false, nil, err
+		}
+	}
 	return true, chainConfig.MergeHeight, nil
+}
+
+// holdsPreMergeBodies reports whether the datadir holds any body below the merge
+// point. The stored prune mode cannot answer that on its own where History carries
+// the same sentinel as Blocks: an archive datadir written before keep-all became the
+// Blocks default and an operator asking for chain-history expiry on top of archive
+// persist that pair alike, and the downloader reads it as expiry. The answer is a
+// property of the datadir, so it is resolved once.
+func (api *BaseAPI) holdsPreMergeBodies(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
+	if holds := api._preMergeBodies.Load(); holds != nil {
+		return *holds, nil
+	}
+	oldest, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	holds := oldest < mergeHeight
+	api._preMergeBodies.Store(&holds)
+	return holds, nil
 }
 
 func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
@@ -571,15 +594,13 @@ func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, b
 
 // blockHasNoReceipts reports whether the block has no receipt to read at all, in
 // which case its transaction count is the whole answer and neither the receipt
-// cache nor state history is consulted. Bor never qualifies: its state sync
-// receipt is reconstructed from state history even where the body is empty.
+// cache nor state history is consulted. A Bor block qualifies only where it carries
+// no state sync event: that receipt is reconstructed from state history even though
+// the body is empty.
 func (api *BaseAPI) blockHasNoReceipts(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return false, err
-	}
-	if chainConfig.Bor != nil {
-		return false, nil
 	}
 	header, err := api._blockReader.HeaderByNumber(ctx, tx, block)
 	if err != nil || header == nil {
@@ -589,7 +610,20 @@ func (api *BaseAPI) blockHasNoReceipts(ctx context.Context, tx kv.Tx, block uint
 	if err != nil || body == nil {
 		return false, err
 	}
-	return txCount == 0, nil
+	if txCount != 0 {
+		return false, nil
+	}
+	if chainConfig.Bor == nil {
+		return true, nil
+	}
+	if api.bridgeReader == nil {
+		return false, nil
+	}
+	events, err := api.bridgeReader.Events(ctx, header.Hash(), block)
+	if err != nil {
+		return false, err
+	}
+	return len(events) == 0, nil
 }
 
 // checkBlockHistoryAvailable gates endpoints that re-execute a block: they read its

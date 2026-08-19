@@ -497,6 +497,11 @@ func (api *BaseAPI) borStateSyncLogs(ctx context.Context, tx kv.TemporalTx, chai
 	if len(events) == 0 {
 		return nil, nil
 	}
+	// Reconstructed from end-of-block state like the state sync receipt, so an
+	// unfiltered query reaching this txn still needs history.
+	if err := api.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
+		return nil, err
+	}
 	return api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txIndex, txNum)
 }
 

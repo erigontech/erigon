@@ -371,9 +371,11 @@ func TestCapabilities(t *testing.T) {
 		result, err := api.Capabilities(t.Context())
 		require.NoError(t, err)
 		require.Equal(t, mergeAt, oldest(t, result.Receipts))
-		require.Nil(t, result.Receipts.DeleteStrategy)
 		require.Equal(t, mergeAt, oldest(t, result.Logs))
-		require.Nil(t, result.Logs.DeleteStrategy)
+		// The merge point and the history window bound the same block here, but only
+		// the window moves with the head, so it is the one that describes the retention.
+		require.Equal(t, testPruneDistance, window(t, result.Receipts))
+		require.Equal(t, testPruneDistance, window(t, result.Logs))
 	})
 
 	t.Run("wire_format", func(t *testing.T) {
