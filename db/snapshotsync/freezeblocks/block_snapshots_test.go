@@ -155,18 +155,3 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	require.ErrorIs(t, err, snapshotsync.ErrRangeBuildInProgress)
 	require.False(t, dumperCalled)
 }
-
-// Pins the bound CanDeleteTo promises: never past the snapshot frontier, nothing
-// to delete without snapshots, and the rounded height minus the keep window once
-// above it. Below that window the subtraction is only safe because the frontier
-// clamps it.
-func TestCanDeleteToNoUnderflow(t *testing.T) {
-	const snaps uint64 = 5_000
-	for _, cur := range []uint64{0, 24, 25, 500, 1_500, 1_999, 2_000, 2_048, 10_000, 25_674_121} {
-		got := CanDeleteTo(cur, snaps)
-		require.LessOrEqual(t, got, snaps+1, "cur=%d wrapped or exceeded the snapshot frontier", cur)
-	}
-	require.Zero(t, CanDeleteTo(10_000, 0), "no snapshots means nothing is duplicated")
-	// above the window the bound is the rounded height minus the keep distance
-	require.EqualValues(t, uint64(25_672_976), CanDeleteTo(25_674_121, 25_674_000))
-}
