@@ -196,6 +196,7 @@ func TestPruneTxLookupFloor(t *testing.T) {
 		{name: "headers_pruned_to_frontier", firstHeader: txlBlocks - txlDistance},
 		{name: "headers_pruned_past_frontier", firstHeader: txlBlocks - 1},
 		{name: "forward_stage_watermark", firstHeader: 1, pruneProgress: txlBlocks - txlDistance},
+		// guards that blockTo stays derived from this stage, not from Senders
 		{name: "ahead_of_execution", firstHeader: 1, senders: 500},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
