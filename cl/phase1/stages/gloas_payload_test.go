@@ -139,29 +139,28 @@ func TestSelectedHeadEnvelopeRequestRetriesAfterCanceledApply(t *testing.T) {
 	require.True(t, wait)
 }
 
-func TestSelectedHeadEnvelopeRequestDoesNotRetryAfterAttemptDeadline(t *testing.T) {
+func TestClaimedSelectedHeadEnvelopeBoundsAttemptDeadlineRetries(t *testing.T) {
 	cfg := &Cfg{}
 	headRoot := common.HexToHash("0x1234")
-	claim, request, wait := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
-	require.True(t, request)
-	require.True(t, wait)
 	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
-	requestDone := make(chan struct{})
-	waitForSelectedHeadEnvelope(context.Background(), store, func(requestCtx context.Context, _ [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+	requestCalls := 0
+	request := func(requestCtx context.Context, _ [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requestCalls++
 		<-requestCtx.Done()
 		return nil, requestCtx.Err()
-	}, headRoot, 10*time.Millisecond, true, false, selectedHeadEnvelopeRequestHooks{
-		done: func() {
-			releaseSelectedHeadEnvelopeRequest(cfg, claim)
-			close(requestDone)
-		},
-		retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
-	})
-	<-requestDone
+	}
 
-	_, request, wait = claimSelectedHeadEnvelopeRequest(cfg, headRoot)
-	require.False(t, request)
-	require.False(t, wait)
+	for range 3 {
+		waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 10*time.Millisecond, false)
+		require.Eventually(t, func() bool {
+			cfg.gloasHeadEnvelopeRequestMu.Lock()
+			defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+			_, active := cfg.gloasHeadEnvelopeRequests[headRoot]
+			return !active
+		}, time.Second, time.Millisecond)
+	}
+
+	require.Equal(t, 2, requestCalls)
 }
 
 func TestClaimedSelectedHeadEnvelopeRetriesAfterParentCancellation(t *testing.T) {
@@ -221,28 +220,27 @@ func TestClaimedSelectedHeadEnvelopeBoundsApplyFailureRetries(t *testing.T) {
 	require.Equal(t, 2, requestCalls)
 }
 
-func TestSelectedHeadEnvelopeRequestDoesNotRetryEmptyResponse(t *testing.T) {
+func TestClaimedSelectedHeadEnvelopeBoundsEmptyResponseRetries(t *testing.T) {
 	cfg := &Cfg{}
 	headRoot := common.HexToHash("0x1234")
-	claim, request, wait := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
-	require.True(t, request)
-	require.True(t, wait)
 	store := &selectedHeadEnvelopeTestStore{envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope)}
-	requestDone := make(chan struct{})
-	waitForSelectedHeadEnvelope(context.Background(), store, func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+	requestCalls := 0
+	request := func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requestCalls++
 		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}, nil
-	}, headRoot, 10*time.Millisecond, true, false, selectedHeadEnvelopeRequestHooks{
-		done: func() {
-			releaseSelectedHeadEnvelopeRequest(cfg, claim)
-			close(requestDone)
-		},
-		retry: func() { retrySelectedHeadEnvelopeRequest(cfg, claim) },
-	})
-	<-requestDone
+	}
 
-	_, request, wait = claimSelectedHeadEnvelopeRequest(cfg, headRoot)
-	require.False(t, request)
-	require.False(t, wait)
+	for range 3 {
+		waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 10*time.Millisecond, false)
+		require.Eventually(t, func() bool {
+			cfg.gloasHeadEnvelopeRequestMu.Lock()
+			defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+			_, active := cfg.gloasHeadEnvelopeRequests[headRoot]
+			return !active
+		}, time.Second, time.Millisecond)
+	}
+
+	require.Equal(t, 2, requestCalls)
 }
 
 func TestSelectedHeadEnvelopeRequestRetriesAfterHardApplyFailure(t *testing.T) {

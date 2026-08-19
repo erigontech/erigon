@@ -542,7 +542,7 @@ func waitForSelectedHeadEnvelope(
 			}
 			envelopes, err := requestEnvelopes(pollCtx, [][32]byte{headRoot})
 			if err != nil {
-				if hooks.retry != nil && ctx.Err() != nil {
+				if hooks.retry != nil {
 					hooks.retry()
 				}
 				log.Debug("[chainTipSync] failed to request selected head envelope", "headRoot", headRoot, "err", err)
@@ -550,6 +550,9 @@ func waitForSelectedHeadEnvelope(
 			}
 			envelope := envelopes[headRoot]
 			if envelope == nil {
+				if hooks.retry != nil {
+					hooks.retry()
+				}
 				return
 			}
 			if pollCtx.Err() != nil {
