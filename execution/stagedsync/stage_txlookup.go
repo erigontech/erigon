@@ -219,7 +219,8 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 	txNumReader := cfg.blockReader.TxnumReader()
 	// blockTo is exclusive, so the range ends at its first txNum: Min(blockTo) ==
-	// Max(blockTo-1)+1. Max(blockTo) would eat all of blockTo but its last txn.
+	// Max(blockTo-1)+1. A block is [Min system][Min+1..Min+len txns][Max system] and
+	// only the txns get rows, so Max(blockTo) took every lookup blockTo has.
 	txTo, err := txNumReader.Min(ctx, tx, blockTo)
 	if err != nil {
 		return fmt.Errorf("txNumReader.Min(%d): %w", blockTo, err)
@@ -242,8 +243,9 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 	// Rolling scan: preserve cursor position across txTo advances so each B-tree page
 	// is visited sequentially once per rotation instead of restarting from First() on
-	// every prune cycle. Only reset the cursor when a full rotation has completed.
-	if prevStat.ValueProgress == prune.Done {
+	// every prune cycle. Restart on a completed rotation, and on a rotation left over
+	// from a higher floor, whose cursor already passed rows this one must delete.
+	if prevStat.ValueProgress == prune.Done || prevStat.TxFrom != 0 {
 		prevStat.ValueProgress = prune.First
 		prevStat.LastPrunedValue = nil
 	}
