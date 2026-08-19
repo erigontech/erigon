@@ -125,7 +125,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 	// cleanup has run, so any follow-up op (AssembleBlock, next FCU) that acquires
 	// the semaphore observes fully-settled state.
 	go func() {
-		if err := e.updateForkChoice(e.bacgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
+		if err := e.updateForkChoice(e.backgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
 	}()
@@ -840,7 +840,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 
 	e.logger.Debug("[dispatchNotifications] dispatching", "finishBefore", finishProgressBefore, "finishAfter", finishProgressAfter)
 	if err := dispatcher.Dispatch(
-		e.bacgroundCtx,
+		e.backgroundCtx,
 		overlay,
 		stateVersion,
 		e.accum.Accumulator,
@@ -868,7 +868,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToCloseBeforeCommit kv.TemporalTx, finishProgressBefore uint64, isSynced bool) ([]any, error) {
 	timings := make([]any, 0, 2)
 
-	rwTx, err := e.db.BeginTemporalRw(e.bacgroundCtx)
+	rwTx, err := e.db.BeginTemporalRw(e.backgroundCtx)
 	if err != nil {
 		return nil, fmt.Errorf("fcu flush+commit: begin rw: %w", err)
 	}
@@ -878,21 +878,21 @@ func (e *ExecModule) runForkchoiceFlushCommit(sd *execctx.SharedDomains, roTxToC
 		roTxToCloseBeforeCommit.Rollback()
 	}
 	flushStart := time.Now()
-	if err := sd.Commit(e.bacgroundCtx, rwTx); err != nil {
+	if err := sd.Commit(e.backgroundCtx, rwTx); err != nil {
 		return nil, err
 	}
 	timings = append(timings, "flush+commit", common.Round(time.Since(flushStart), 0))
 
 	// Update head and announce block range (notifications already dispatched).
 	if e.hook != nil {
-		if err := e.db.View(e.bacgroundCtx, func(tx kv.Tx) error {
+		if err := e.db.View(e.backgroundCtx, func(tx kv.Tx) error {
 			return e.hook.UpdateHead(tx, finishProgressBefore, isSynced)
 		}); err != nil {
 			return nil, err
 		}
 	}
 	// Force fsync so data is durable before the next slot.
-	if err := e.db.Update(e.bacgroundCtx, func(tx kv.RwTx) error {
+	if err := e.db.Update(e.backgroundCtx, func(tx kv.RwTx) error {
 		return kv.IncrementKey(tx, kv.DatabaseInfo, []byte("chaindata_force"))
 	}); err != nil {
 		return nil, err
@@ -920,13 +920,13 @@ func (e *ExecModule) runForkchoicePrune(initialCycle bool) ([]any, error) {
 			baseTimeout := time.Duration(e.config.SecondsPerSlot()*1000/3) * time.Millisecond
 			maxTimeout := time.Duration(e.config.SecondsPerSlot()*2000/3) * time.Millisecond
 			pruneTimeout := min(baseTimeout+time.Duration(agg.MaxPrunableStepsBacklog()/100)*200*time.Millisecond, maxTimeout)
-			if err := agg.CollateAndPrune(e.bacgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
+			if err := agg.CollateAndPrune(e.backgroundCtx, e.db, func(tx kv.TemporalRwTx) error {
 				if e.codeStore != nil {
 					if err := e.codeStore.Evict(tx); err != nil {
 						return err
 					}
 				}
-				return e.pipelineExecutor.RunPrune(e.bacgroundCtx, tx, initialCycle, pruneTimeout)
+				return e.pipelineExecutor.RunPrune(e.backgroundCtx, tx, initialCycle, pruneTimeout)
 			}, e.logger); err != nil {
 				return nil, err
 			}

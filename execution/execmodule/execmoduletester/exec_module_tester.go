@@ -122,6 +122,7 @@ type ExecModuleTester struct {
 	Address         common.Address
 	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
+	BlockBuilder    *builder.Builder
 	StateCache      *execmodule.Cache
 	retirementStart chan bool
 	retirementDone  chan struct{}
@@ -654,7 +655,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	readAheader := exec.NewBlockReadAheader()
 	blkBuilder := builder.NewBuilder(
-		mock.Ctx,
 		mock.DB,
 		&cfg.Builder,
 		mock.ChainConfig,
@@ -686,6 +686,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		nil, /*sdProvider*/
 		logger,
 	)
+
+	mock.BlockBuilder = blkBuilder
 
 	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
 	mock.blockRetire = blockRetire

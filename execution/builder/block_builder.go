@@ -17,6 +17,8 @@
 package builder
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -27,23 +29,42 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-type BlockBuilderFunc func(param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
+// BlockBuilderFunc builds a payload. Its context ends when the payload is discarded, so anything
+// that can block - opening a read view, waiting on a transaction provider - has to honour it.
+type BlockBuilderFunc func(ctx context.Context, param *Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error)
 
-// BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining")
+// ErrDiscarded reports that the payload was abandoned before the build completed.
+var ErrDiscarded = errors.New("block builder discarded")
+
+const (
+	blockBuilderRunning uint32 = iota
+	blockBuilderCompleted
+	blockBuilderDiscarded
+)
+
+// BlockBuilder wraps a goroutine that builds Proof-of-Stake payloads (PoS "mining").
+//
+// It answers to two different requests. Interrupting asks for the block it has so far, which is how
+// a payload is collected. Discarding says the payload is not wanted at all, and cancels the work.
 type BlockBuilder struct {
 	interrupt atomic.Bool
-	syncCond  *sync.Cond
+	state     atomic.Uint32
+	discard   context.CancelFunc
+	mu        sync.Mutex
+	done      chan struct{}
 	result    *types.BlockWithReceipts
 	err       error
 }
 
-func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTime time.Duration) *BlockBuilder {
-	builder := new(BlockBuilder)
-	builder.syncCond = sync.NewCond(new(sync.Mutex))
-	terminated := make(chan struct{})
+// NewBlockBuilder starts a build. maxBuildTime is the budget after which the builder stops itself
+// and keeps the block it has; stopGrace is how long a stopped build may take to finish up - the
+// transaction in flight, the packing tail, payload finalization - before it is taken as stuck and
+// discarded.
+func NewBlockBuilder(ctx context.Context, build BlockBuilderFunc, param *Parameters, maxBuildTime, stopGrace time.Duration) *BlockBuilder {
+	buildCtx, discard := context.WithCancel(ctx)
+	builder := &BlockBuilder{done: make(chan struct{}), discard: discard}
 
 	go func() {
-		defer close(terminated)
 		var result *types.BlockWithReceipts
 		var err error
 
@@ -54,18 +75,24 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTime tim
 				result = nil
 			}
 
-			builder.syncCond.L.Lock()
-			defer builder.syncCond.L.Unlock()
+			builder.mu.Lock()
 			builder.result = result
 			builder.err = err
-			builder.syncCond.Broadcast()
+			builder.state.CompareAndSwap(blockBuilderRunning, blockBuilderCompleted)
+			builder.mu.Unlock()
+			close(builder.done)
+			discard()
 		}()
 
 		log.Info("Building block...")
 		t := time.Now()
-		result, err = build(param, &builder.interrupt)
+		result, err = build(buildCtx, param, &builder.interrupt)
 		if err != nil {
-			log.Warn("Failed to build a block", "err", err)
+			if buildCtx.Err() != nil {
+				log.Debug("Block builder discarded", "err", err)
+			} else {
+				log.Warn("Failed to build a block", "err", err)
+			}
 		} else {
 			block := result.Block
 			log.Info("Built block", "hash", block.Hash(), "height", block.NumberU64(), "txs", len(block.Transactions()), "executionRequests", len(result.Requests), "gas used %", 100*float64(block.GasUsed())/float64(block.GasLimit()), "time", time.Since(t))
@@ -77,36 +104,95 @@ func NewBlockBuilder(build BlockBuilderFunc, param *Parameters, maxBuildTime tim
 		defer timer.Stop()
 		select {
 		case <-timer.C:
-			log.Warn("Stopping block builder due to max build time exceeded")
-			_, _ = builder.Stop()
-			log.Debug("Stopped block builder due to max build time exceeded")
-			return
-		case <-terminated:
+		case <-builder.done:
 			return
 		}
+		// Ask for the block it has, which is what the budget was for. A build that has not answered
+		// by the end of the grace is treated as unresponsive and discarded.
+		log.Warn("Stopping block builder due to max build time exceeded")
+		graceCtx, cancelGrace := context.WithTimeout(ctx, stopGrace)
+		defer cancelGrace()
+		_, err := builder.Stop(graceCtx)
+		if err == nil {
+			log.Debug("Stopped block builder due to max build time exceeded")
+			return
+		}
+		if errors.Is(err, ErrDiscarded) || builder.finished() {
+			return
+		}
+		builder.Discard()
+		log.Warn("Discarded unresponsive block builder due to max build time exceeded")
 	}()
 
 	return builder
 }
 
-func (b *BlockBuilder) Stop() (*types.BlockWithReceipts, error) {
+func (b *BlockBuilder) Stop(ctx context.Context) (*types.BlockWithReceipts, error) {
 	b.interrupt.Store(true)
-
-	b.syncCond.L.Lock()
-	defer b.syncCond.L.Unlock()
-	for b.result == nil && b.err == nil {
-		b.syncCond.Wait()
+	if b.Discarded() {
+		return b.readResult()
 	}
 
+	select {
+	case <-b.done:
+	case <-ctx.Done():
+		select {
+		case <-b.done:
+		default:
+			return nil, ctx.Err()
+		}
+	}
+	return b.readResult()
+}
+
+func (b *BlockBuilder) readResult() (*types.BlockWithReceipts, error) {
+	b.mu.Lock()
+	defer b.mu.Unlock()
+
+	if b.Discarded() && (b.result == nil || b.err != nil) {
+		return nil, ErrDiscarded
+	}
 	return b.result, b.err
 }
 
-func (b *BlockBuilder) Block() *types.Block {
-	b.syncCond.L.Lock()
-	defer b.syncCond.L.Unlock()
+func (b *BlockBuilder) finished() bool {
+	select {
+	case <-b.done:
+		return true
+	default:
+		return false
+	}
+}
 
-	if b.result == nil {
+// Discard cancels the build without waiting for it to return.
+func (b *BlockBuilder) Discard() {
+	b.interrupt.Store(true)
+	b.state.CompareAndSwap(blockBuilderRunning, blockBuilderDiscarded)
+	b.discard()
+}
+
+// Discarded reports whether discard won before the build completed.
+func (b *BlockBuilder) Discarded() bool {
+	return b.state.Load() == blockBuilderDiscarded
+}
+
+// Failed reports whether the builder has finished and ended in an error, which a caller looking to
+// reuse it has to read as absent because that error is latched.
+func (b *BlockBuilder) Failed() bool {
+	select {
+	case <-b.done:
+	default:
+		return false
+	}
+	b.mu.Lock()
+	defer b.mu.Unlock()
+	return b.err != nil
+}
+
+func (b *BlockBuilder) Block() *types.Block {
+	result, err := b.readResult()
+	if err != nil || result == nil {
 		return nil
 	}
-	return b.result.Block
+	return result.Block
 }
