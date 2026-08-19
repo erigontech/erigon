@@ -231,11 +231,11 @@ func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clp
 
 // forkChoiceUpdateForProposal bounds acquiring a payload id by the moment the payload has to be
 // collected, so neither the retries here nor the assemble retry below them can eat the margin the
-// block needs to reach attesters. Contention is not a rejection: a forkchoice update that is busy,
-// or one that ran out of time and is still settling, gets another attempt rather than costing the
-// slot. One attempt always runs past the bound, because failing a proposal outright is worse than
-// answering late. The head is not re-read between attempts: a proposal is committed to the parent
-// it is being built on.
+// block needs to reach attesters. Contention is not a rejection: an update that is busy, times out
+// while settling, or returns without starting a payload build gets another attempt rather than
+// costing the slot. One attempt always runs past the bound, because failing a proposal outright is
+// worse than answering late. The head is not re-read between attempts: a proposal is committed to
+// the parent it is being built on.
 func (a *ApiHandler) forkChoiceUpdateForProposal(
 	ctx context.Context,
 	targetSlot uint64,
@@ -256,6 +256,7 @@ func (a *ApiHandler) forkChoiceUpdateForProposal(
 			return nil, ctx.Err()
 		case !errors.Is(err, execution_client.ErrForkChoiceBusy) &&
 			!errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) &&
+			!errors.Is(err, execution_client.ErrForkChoiceUpdateNoPayloadID) &&
 			!errors.Is(err, context.DeadlineExceeded):
 			return nil, err
 		}

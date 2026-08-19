@@ -391,6 +391,32 @@ func TestProductionRetriesAForkChoiceUpdateThatIsBusy(t *testing.T) {
 	require.Equal(t, []byte{9, 9, 9, 9, 9, 9, 9, 9}, id)
 }
 
+func TestProductionRetriesAForkChoiceUpdateWithoutPayloadID(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	payloadID := []byte{9, 9, 9, 9, 9, 9, 9, 9}
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	gomock.InOrder(
+		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(nil, execution_client.ErrForkChoiceUpdateNoPayloadID),
+		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+			Return(payloadID, nil),
+	)
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(4 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	id, err := handler.forkChoiceUpdateForProposal(t.Context(), targetSlot,
+		common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion)
+
+	require.NoError(t, err)
+	require.Equal(t, payloadID, id)
+}
+
 // Pins the wiring, not just the helper: production must go through the retry, so restoring the
 // direct engine call fails here even though the helper itself still works.
 func TestProduceBeaconBodySurvivesABusyForkChoiceUpdate(t *testing.T) {
