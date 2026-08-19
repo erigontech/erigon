@@ -2043,17 +2043,6 @@ func (result *execResult) calcFees(
 		return nil, feeCreditRecorded, nil
 	}
 
-	if emitCoinbase {
-		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
-			result.Coinbase, coinbaseAcc, newCoinbaseBalance,
-			tracing.BalanceIncreaseRewardTransactionFee, coinbaseEmptyRemoval)
-	}
-	if emitBurnt {
-		result.CollectorWrites = result.CollectorWrites.SetAccountBalanceOrDelete(
-			burntAddr, burntAcc, newBurntBalance,
-			tracing.BalanceDecreaseGasBuy, state.EIP161EmptyRemoval(chainRules.IsEIP161Enabled(), chainRules.IsAura, burntAddr))
-	}
-
 	addWrites := &state.WriteSet{}
 	coinbaseEntry.writeTo(addWrites, taskVersion)
 	burntEntry.writeTo(addWrites, taskVersion)
@@ -2990,19 +2979,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// + fees) when reading via the version map fallback
 					// chain.
 					be.versionMap.FlushVersionedWrites(merged, true, "")
-
-					// Update CollectorWrites with fee-adjusted balances (coinbase /
-					// burnt) so the BlockStateCache sees the correct accumulated fees.
-					if !txResult.CollectorWrites.IsEmpty() {
-						for addr, w := range addWrites.Balances() {
-							if existing, ok := txResult.CollectorWrites.GetBalance(addr); ok {
-								existing.Val = w.Val
-								existing.Reason = w.Reason
-							} else {
-								txResult.CollectorWrites.SetBalance(addr, &state.VersionedWrite[uint256.Int]{WriteHeader: state.WriteHeader{Address: addr, Path: state.BalancePath, Reason: w.Reason}, Val: w.Val})
-							}
-						}
-					}
 				}
 
 				{

@@ -211,14 +211,17 @@ func TestRecordFeeMerge_RetractsVanishedCredit(t *testing.T) {
 	r := newFeeCreditRound(t, s)
 	version := r.task.Version()
 
-	require.NotNil(t, r.run(t), "an emptied coinbase must be touched")
+	first, _ := r.run(t)
+	require.NotNil(t, first, "an emptied coinbase must be touched")
 	merged := r.recorded()
 	sd, ok := merged.GetSelfDestruct(s.coinbase)
 	require.True(t, ok, "the credit is a SelfDestructPath delete")
 	require.True(t, sd.Val)
 
 	r.setPreCreditBalance(s.coinbase, 9_000)
-	require.Nil(t, r.run(t), "a funded coinbase leaves this round no adjustment to emit")
+	tip, outcome := r.run(t)
+	require.Nil(t, tip, "a funded coinbase leaves this round no adjustment to emit")
+	require.Equal(t, feeCreditNone, outcome, "the credit an earlier round merged must be taken back")
 
 	restored := r.recorded()
 	require.Same(t, r.result.TxOut, restored,
@@ -242,11 +245,14 @@ func TestRecordFeeMerge_RecordedRoundKeepsTheCredit(t *testing.T) {
 	r := newFeeCreditRound(t, s)
 	version := r.task.Version()
 
-	require.NotNil(t, r.run(t), "the first round must credit")
+	first, _ := r.run(t)
+	require.NotNil(t, first, "the first round must credit")
 	merged := r.recorded()
 	require.Same(t, merged, r.credited(), "the merge product is this version's credit")
 
-	require.Nil(t, r.run(t), "a set that already carries this exact credit is not re-credited")
+	tip, outcome := r.run(t)
+	require.Nil(t, tip, "a set that already carries this exact credit is not re-credited")
+	require.Equal(t, feeCreditRecorded, outcome, "the recorded credit must be kept, not taken back")
 
 	require.Same(t, merged, r.recorded(), "a Recorded round must not replace the recorded set")
 	require.Same(t, merged, r.credited(), "nor drop the temp that says it is credited")
@@ -266,7 +272,7 @@ func TestRecordFeeMerge_RetractsHalfOfVanishedCredit(t *testing.T) {
 	r := newFeeCreditRound(t, s)
 	version := r.task.Version()
 
-	first := r.run(t)
+	first, _ := r.run(t)
 	require.NotNil(t, first, "the first round must emit both halves")
 	sd, ok := first.GetSelfDestruct(s.coinbase)
 	require.True(t, ok, "an emptied coinbase is deleted")
@@ -276,8 +282,10 @@ func TestRecordFeeMerge_RetractsHalfOfVanishedCredit(t *testing.T) {
 	// An earlier tx funds the coinbase, so this round no longer empties it. The
 	// burnt half is untouched and still matches what was recorded.
 	r.setPreCreditBalance(s.coinbase, 1)
-	require.NotNil(t, r.run(t),
+	rebuiltCredit, outcome := r.run(t)
+	require.Equal(t, feeCreditNew, outcome,
 		"the delete stopped applying, so the round must rebuild the credit without it")
+	require.NotNil(t, rebuiltCredit)
 
 	rebuilt := r.recorded()
 	_, ok = rebuilt.GetSelfDestruct(s.coinbase)

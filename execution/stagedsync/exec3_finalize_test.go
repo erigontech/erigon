@@ -1835,10 +1835,10 @@ func (r *feeCreditRound) setPreCreditBalance(addr accounts.Address, balance uint
 	r.reader.accounts[addr].Balance = *uint256.NewInt(balance)
 }
 
-// run performs one round and returns the credit calcFees produced, nil when the
-// round emits none. The returned set is a copy, because the merge folds the
-// recorded set into the credit in place.
-func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
+// run performs one round and returns the outcome calcFees reported together
+// with the credit it produced, nil for every outcome but feeCreditNew. The
+// credit is a copy, because the merge folds the recorded set into it in place.
+func (r *feeCreditRound) run(t testing.TB) (*state.WriteSet, feeOutcome) {
 	t.Helper()
 
 	version := r.task.Version()
@@ -1852,17 +1852,28 @@ func (r *feeCreditRound) run(t testing.TB) *state.WriteSet {
 	}
 	r.be.recordFeeMerge(version, recorded, tip, outcome)
 	r.vm.FlushVersionedWrites(r.recorded(), true, "")
-	return credit
+	return credit, outcome
 }
 
 func TestCalcFees_SkipsRedundantReCredit(t *testing.T) {
 	t.Parallel()
-	r := newFeeCreditRound(t, simpleTransferScenario())
+	s := simpleTransferScenario()
+	r := newFeeCreditRound(t, s)
 
-	require.NotNil(t, r.run(t), "the first round must credit the tip")
-	require.Nil(t, r.run(t),
+	first, _ := r.run(t)
+	require.NotNil(t, first, "the first round must credit the tip")
+	credited := findBalance(first, s.coinbase)
+	require.NotNil(t, credited)
+
+	tip, outcome := r.run(t)
+	require.Nil(t, tip,
 		"re-crediting a set that already carries this exact credit rebuilds an identical "+
 			"write set and re-runs the merge for nothing")
+	require.Equal(t, feeCreditRecorded, outcome,
+		"the recorded credit must be kept, not taken back")
+	kept := findBalance(r.recorded(), s.coinbase)
+	require.NotNil(t, kept, "the recorded set must still carry the credit")
+	require.Equal(t, credited.Val, kept.Val)
 }
 
 func TestCalcFees_ReCreditsWhenPriorBalanceChanged(t *testing.T) {
@@ -1870,13 +1881,15 @@ func TestCalcFees_ReCreditsWhenPriorBalanceChanged(t *testing.T) {
 	s := simpleTransferScenario()
 	r := newFeeCreditRound(t, s)
 
-	require.NotNil(t, r.run(t), "the first round must credit the tip")
+	first, _ := r.run(t)
+	require.NotNil(t, first, "the first round must credit the tip")
 
 	priorBalance := uint256.NewInt(7_000_000)
 	r.setPreCreditBalance(s.coinbase, priorBalance.Uint64())
 
-	tip := r.run(t)
-	require.NotNil(t, tip, "a changed base balance must produce a fresh credit")
+	tip, outcome := r.run(t)
+	require.Equal(t, feeCreditNew, outcome, "a changed base balance must produce a fresh credit")
+	require.NotNil(t, tip)
 
 	credited := findBalance(tip, s.coinbase)
 	require.NotNil(t, credited)
@@ -1888,7 +1901,7 @@ func TestCalcFees_ReCreditsWhenAddressPathMissing(t *testing.T) {
 	s := simpleTransferScenario()
 	r := newFeeCreditRound(t, s)
 
-	first := r.run(t)
+	first, _ := r.run(t)
 	require.NotNil(t, first, "the first round must credit the tip")
 
 	balanceOnly := &state.WriteSet{}
@@ -1907,12 +1920,25 @@ func TestCalcFees_SkipsRedundantReCreditWithBurntContract(t *testing.T) {
 	s := londonTransferScenario()
 	r := newFeeCreditRound(t, s)
 
-	first := r.run(t)
+	first, _ := r.run(t)
 	require.NotNil(t, first, "the first round must credit the tip")
-	require.NotNil(t, findBalance(first, s.burntAddr), "London burns to the burnt contract")
+	creditedCoinbase := findBalance(first, s.coinbase)
+	require.NotNil(t, creditedCoinbase)
+	creditedBurnt := findBalance(first, s.burntAddr)
+	require.NotNil(t, creditedBurnt, "London burns to the burnt contract")
 
-	require.Nil(t, r.run(t),
+	tip, outcome := r.run(t)
+	require.Nil(t, tip,
 		"both halves of the credit are already recorded, so the round is a no-op")
+	require.Equal(t, feeCreditRecorded, outcome,
+		"both halves must be kept, not taken back")
+	recorded := r.recorded()
+	keptCoinbase := findBalance(recorded, s.coinbase)
+	require.NotNil(t, keptCoinbase, "the recorded set must still carry the coinbase half")
+	require.Equal(t, creditedCoinbase.Val, keptCoinbase.Val)
+	keptBurnt := findBalance(recorded, s.burntAddr)
+	require.NotNil(t, keptBurnt, "the recorded set must still carry the burnt half")
+	require.Equal(t, creditedBurnt.Val, keptBurnt.Val)
 }
 
 func TestCalcFees_SkipsRedundantReCreditOnEmptyRemoval(t *testing.T) {
@@ -1920,14 +1946,20 @@ func TestCalcFees_SkipsRedundantReCreditOnEmptyRemoval(t *testing.T) {
 	s := zeroTipEmptyCoinbaseScenario()
 	r := newFeeCreditRound(t, s)
 
-	first := r.run(t)
+	first, _ := r.run(t)
 	require.NotNil(t, first, "an emptied coinbase must still be touched")
 	sd, ok := first.GetSelfDestruct(s.coinbase)
 	require.True(t, ok, "the credit is a SelfDestructPath delete")
 	require.True(t, sd.Val)
 
-	require.Nil(t, r.run(t),
+	tip, outcome := r.run(t)
+	require.Nil(t, tip,
 		"the delete is already recorded, so the round is a no-op")
+	require.Equal(t, feeCreditRecorded, outcome,
+		"the delete must be kept, not taken back")
+	kept, ok := r.recorded().GetSelfDestruct(s.coinbase)
+	require.True(t, ok, "the recorded set must still carry the delete")
+	require.True(t, kept.Val)
 }
 
 func TestFeeEntry_RecordedInAcceptsWhatWriteToWrote(t *testing.T) {
@@ -2150,7 +2182,8 @@ func BenchmarkCalcFees(b *testing.B) {
 				r := newFeeCreditRound(b, sc.build())
 				var credited *state.WriteSet
 				if bc.recredit {
-					require.NotNil(b, r.run(b))
+					first, _ := r.run(b)
+					require.NotNil(b, first)
 					credited = r.credited()
 				}
 
