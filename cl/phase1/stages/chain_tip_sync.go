@@ -559,7 +559,7 @@ func waitForSelectedHeadEnvelope(
 				return
 			}
 			if err := store.OnExecutionPayload(pollCtx, envelope, true, validatePayload); err != nil {
-				if hooks.retry != nil && (errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded)) {
+				if hooks.retry != nil {
 					hooks.retry()
 				}
 				log.Debug("[chainTipSync] failed to apply selected head envelope", "headRoot", headRoot, "err", err)
@@ -633,6 +633,27 @@ func retrySelectedHeadEnvelopeRequest(cfg *Cfg, claim selectedHeadEnvelopeReques
 	if cfg.gloasHeadEnvelopeRequestHead == claim.root && cfg.gloasHeadEnvelopeRequests[claim.root] == claim.id {
 		cfg.gloasHeadEnvelopeAttempted = false
 	}
+}
+
+func waitForClaimedSelectedHeadEnvelope(
+	ctx context.Context,
+	cfg *Cfg,
+	store selectedHeadEnvelopeStore,
+	requestEnvelopes envelopeRequestFunc,
+	headRoot common.Hash,
+	timeout time.Duration,
+	validatePayload bool,
+) {
+	claim, requestFromPeer, waitForEnvelope := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
+	if !waitForEnvelope {
+		return
+	}
+	hooks := selectedHeadEnvelopeRequestHooks{}
+	if requestFromPeer {
+		hooks.done = func() { releaseSelectedHeadEnvelopeRequest(cfg, claim) }
+		hooks.retry = func() { retrySelectedHeadEnvelopeRequest(cfg, claim) }
+	}
+	waitForSelectedHeadEnvelope(ctx, store, requestEnvelopes, headRoot, timeout, requestFromPeer, validatePayload, hooks)
 }
 
 func shouldRecoverMissingEnvelopes(beaconCfg *clparams.BeaconChainConfig, targetSlot uint64) bool {
@@ -987,17 +1008,9 @@ func chainTipSync(ctx context.Context, logger log.Logger, cfg *Cfg, args Args) e
 			headBlock, _ := cfg.forkChoice.GetBlock(headRoot)
 			observeSelectedHeadEnvelopeRequest(cfg, headRoot)
 			if headRoot != (common.Hash{}) && blockSupportsExecutionPayloadEnvelope(headBlock) && !cfg.forkChoice.HasEnvelope(headRoot) {
-				requestClaim, requestFromPeer, waitForEnvelope := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
-				if waitForEnvelope {
-					hooks := selectedHeadEnvelopeRequestHooks{}
-					if requestFromPeer {
-						hooks.done = func() { releaseSelectedHeadEnvelopeRequest(cfg, requestClaim) }
-						hooks.retry = func() { retrySelectedHeadEnvelopeRequest(cfg, requestClaim) }
-					}
-					waitForSelectedHeadEnvelope(ctx, cfg.forkChoice, func(requestCtx context.Context, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
-						return network.RequestEnvelopesFrantically(requestCtx, cfg.rpc, roots)
-					}, headRoot, 2*time.Second, requestFromPeer, canValidateGloasPayloads(cfg), hooks)
-				}
+				waitForClaimedSelectedHeadEnvelope(ctx, cfg, cfg.forkChoice, func(requestCtx context.Context, roots [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+					return network.RequestEnvelopesFrantically(requestCtx, cfg.rpc, roots)
+				}, headRoot, 2*time.Second, canValidateGloasPayloads(cfg))
 			}
 			if canValidateGloasPayloads(cfg) {
 				verifyCtx, cancelVerify := context.WithTimeout(ctx, gloasPayloadRetryBudget)

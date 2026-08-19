@@ -34,6 +34,7 @@ type selectedHeadEnvelopeTestStore struct {
 	mu                    sync.Mutex
 	envelopes             map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	onExecutionPayloadErr error
+	onExecutionPayload    func(*cltypes.SignedExecutionPayloadEnvelope) error
 }
 
 func (s *selectedHeadEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
@@ -45,6 +46,11 @@ func (s *selectedHeadEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
 func (s *selectedHeadEnvelopeTestStore) OnExecutionPayload(_ context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, _, _ bool) error {
 	s.mu.Lock()
 	defer s.mu.Unlock()
+	if s.onExecutionPayload != nil {
+		if err := s.onExecutionPayload(envelope); err != nil {
+			return err
+		}
+	}
 	if s.onExecutionPayloadErr != nil {
 		return s.onExecutionPayloadErr
 	}
@@ -182,7 +188,7 @@ func TestSelectedHeadEnvelopeRequestDoesNotRetryEmptyResponse(t *testing.T) {
 	require.False(t, wait)
 }
 
-func TestSelectedHeadEnvelopeRequestDoesNotRetryHardApplyFailure(t *testing.T) {
+func TestSelectedHeadEnvelopeRequestRetriesAfterHardApplyFailure(t *testing.T) {
 	cfg := &Cfg{}
 	headRoot := common.HexToHash("0x1234")
 	claim, request, wait := claimSelectedHeadEnvelopeRequest(cfg, headRoot)
@@ -206,8 +212,43 @@ func TestSelectedHeadEnvelopeRequestDoesNotRetryHardApplyFailure(t *testing.T) {
 	<-requestDone
 
 	_, request, wait = claimSelectedHeadEnvelopeRequest(cfg, headRoot)
-	require.False(t, request)
-	require.False(t, wait)
+	require.True(t, request)
+	require.True(t, wait)
+}
+
+func TestClaimedSelectedHeadEnvelopeRetriesTransientApplyFailure(t *testing.T) {
+	cfg := &Cfg{}
+	headRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{BeaconBlockRoot: headRoot}}
+	applyCalls := 0
+	store := &selectedHeadEnvelopeTestStore{
+		envelopes: make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
+		onExecutionPayload: func(*cltypes.SignedExecutionPayloadEnvelope) error {
+			applyCalls++
+			if applyCalls == 1 {
+				return forkchoice.ErrEIP7594ColumnDataNotAvailable
+			}
+			return nil
+		},
+	}
+	requestCalls := 0
+	request := func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error) {
+		requestCalls++
+		return map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{headRoot: envelope}, nil
+	}
+
+	waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 10*time.Millisecond, false)
+	require.Eventually(t, func() bool {
+		cfg.gloasHeadEnvelopeRequestMu.Lock()
+		defer cfg.gloasHeadEnvelopeRequestMu.Unlock()
+		_, active := cfg.gloasHeadEnvelopeRequests[headRoot]
+		return !active
+	}, time.Second, time.Millisecond)
+	waitForClaimedSelectedHeadEnvelope(context.Background(), cfg, store, request, headRoot, 60*time.Millisecond, false)
+
+	require.Equal(t, 2, requestCalls)
+	require.Equal(t, 2, applyCalls)
+	require.True(t, store.HasEnvelope(headRoot))
 }
 
 func TestSelectedHeadEnvelopeRequestReleasesUnusedClaim(t *testing.T) {
