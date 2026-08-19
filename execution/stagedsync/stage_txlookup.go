@@ -217,10 +217,6 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		return nil
 	}
 
-	// Floor stays at 0: tableScanningPrune uses txFrom only as a delete predicate,
-	// so any higher floor retains rows without saving traversal.
-	var txFrom uint64
-
 	txNumReader := cfg.blockReader.TxnumReader()
 	// blockTo is exclusive, so the range ends at its first txNum: Min(blockTo) ==
 	// Max(blockTo-1)+1. Max(blockTo) would eat all of blockTo but its last txn.
@@ -228,7 +224,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("txNumReader.Min(%d): %w", blockTo, err)
 	}
-	if txFrom >= txTo {
+	if txTo == 0 {
 		return nil
 	}
 
@@ -252,7 +248,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		prevStat.LastPrunedValue = nil
 	}
 	// Sync range params so TableScanningPrune won't reset the cursor mid-rotation.
-	prevStat.TxFrom = txFrom
+	prevStat.TxFrom = 0
 	prevStat.TxTo = txTo
 
 	valsRwCursor, err := tx.RwCursor(kv.TxLookup)
@@ -278,13 +274,15 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	pruneCtx, pruneCancel := context.WithTimeout(ctx, pruneTimeout)
 	defer pruneCancel()
 
-	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", txFrom, txTo, 1,
+	// txFrom stays 0: tableScanningPrune uses it only as a delete predicate, so any
+	// higher floor retains rows without saving traversal.
+	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", 0, txTo, 1,
 		logEvery, logger, nil, valsCursor, false, prevStat, prune.ValueOffset8StorageMode)
 	if err != nil {
 		return fmt.Errorf("prune TxLookup: %w", err)
 	}
 	defer func() {
-		pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
+		pruneStat.TxFrom, pruneStat.TxTo = 0, txTo
 		if e := state.SavePruneValProgress(tx, kv.TxLookup, pruneStat); e != nil {
 			logger.Error("[snapshots] save prune val progress", "name", "txlookup", "err", e)
 		}
