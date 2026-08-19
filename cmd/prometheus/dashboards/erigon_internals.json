@@ -4187,86 +4187,50 @@
           "type": "timeseries"
         },
         {
-          "datasource": {
-            "type": "prometheus",
-            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
-          },
-          "fieldConfig": {
-            "defaults": {
-              "color": {
-                "mode": "palette-classic"
-              },
-              "custom": {
-                "axisBorderShow": false,
-                "axisCenteredZero": false,
-                "axisColorMode": "text",
-                "axisLabel": "",
-                "axisPlacement": "auto",
-                "barAlignment": 0,
-                "barWidthFactor": 0.6,
-                "drawStyle": "line",
-                "fillOpacity": 0,
-                "gradientMode": "none",
-                "hideFrom": {
-                  "legend": false,
-                  "tooltip": false,
-                  "viz": false
-                },
-                "insertNulls": false,
-                "lineInterpolation": "smooth",
-                "lineWidth": 1,
-                "pointSize": 5,
-                "scaleDistribution": {
-                  "type": "linear"
-                },
-                "showPoints": "auto",
-                "spanNulls": false,
-                "stacking": {
-                  "group": "A",
-                  "mode": "none"
-                },
-                "thresholdsStyle": {
-                  "mode": "off"
-                }
-              },
-              "mappings": [],
-              "thresholds": {
-                "mode": "absolute",
-                "steps": [
-                  {
-                    "color": "green",
-                    "value": 0
-                  },
-                  {
-                    "color": "red",
-                    "value": 80
-                  }
-                ]
-              }
-            },
-            "overrides": []
-          },
+          "id": 198,
+          "type": "state-timeline",
+          "title": "State: running collate/merge/prune",
           "gridPos": {
             "h": 10,
             "w": 12,
             "x": 12,
             "y": 81
           },
-          "id": 198,
-          "options": {
-            "legend": {
-              "calcs": [],
-              "displayMode": "list",
-              "placement": "bottom",
-              "showLegend": true
+          "fieldConfig": {
+            "defaults": {
+              "custom": {
+                "lineWidth": 0,
+                "fillOpacity": 70,
+                "spanNulls": false,
+                "insertNulls": false,
+                "hideFrom": {
+                  "tooltip": false,
+                  "viz": false,
+                  "legend": false
+                },
+                "axisPlacement": "auto"
+              },
+              "color": {
+                "mode": "thresholds"
+              },
+              "mappings": [],
+              "thresholds": {
+                "mode": "absolute",
+                "steps": [
+                  {
+                    "color": "dark-blue",
+                    "value": null
+                  },
+                  {
+                    "color": "green",
+                    "value": 1
+                  }
+                ]
+              }
             },
-            "tooltip": {
-              "hideZeros": false,
-              "mode": "multi",
-              "sort": "desc"
-            }
+            "overrides": []
           },
-          "pluginVersion": "12.1.0-91295",
+          "pluginVersion": "12.4.9",
           "targets": [
             {
               "datasource": {
@@ -4275,7 +4239,7 @@
               },
               "editorMode": "code",
               "expr": "domain_running_merges{instance=~\"$instance\"}",
-              "legendFormat": "running merges: {{instance}}",
+              "legendFormat": "merge| {{instance}}",
               "range": true,
               "refId": "A"
             },
@@ -4286,8 +4250,7 @@
               },
               "editorMode": "code",
               "expr": "domain_running_collations{instance=~\"$instance\"}",
-              "hide": false,
-              "legendFormat": "running collations: {{instance}}",
+              "legendFormat": "collations| {{instance}}",
               "range": true,
               "refId": "B"
             },
@@ -4298,8 +4261,7 @@
               },
               "editorMode": "code",
               "expr": "domain_pruning_progress{instance=~\"$instance\"}",
-              "hide": false,
-              "legendFormat": "running prunes: {{instance}}",
+              "legendFormat": "running prunes:",
               "range": true,
               "refId": "C"
             },
@@ -4310,8 +4272,7 @@
               },
               "editorMode": "code",
               "expr": "domain_running_commitment{instance=~\"$instance\"}",
-              "hide": false,
-              "legendFormat": "running commitment: {{instance}}",
+              "legendFormat": "commitment| {{instance}}",
               "range": true,
               "refId": "D"
             },
@@ -4322,9 +4283,8 @@
               },
               "editorMode": "code",
               "expr": "domain_running_files_building{instance=~\"$instance\"}",
-              "hide": false,
               "instant": false,
-              "legendFormat": "running files building: {{instance}}",
+              "legendFormat": "running files building:",
               "range": true,
               "refId": "E"
             },
@@ -4335,15 +4295,36 @@
               },
               "editorMode": "code",
               "expr": "domain_wal_flushes{instance=~\"$instance\"}",
-              "hide": false,
               "instant": false,
               "legendFormat": "WAL flushes {{instance}}",
               "range": true,
               "refId": "F"
             }
           ],
-          "title": "State: running collate/merge/prune",
-          "type": "timeseries"
+          "datasource": {
+            "type": "prometheus",
+            "uid": "${DS_GRAFANACLOUD-ERIGONOVHMONITORING-PROM}"
+          },
+          "options": {
+            "mergeValues": true,
+            "showValue": "never",
+            "alignValue": "left",
+            "rowHeight": 0.84,
+            "legend": {
+              "showLegend": true,
+              "displayMode": "list",
+              "placement": "bottom"
+            },
+            "tooltip": {
+              "mode": "single",
+              "sort": "none",
+              "hideZeros": false
+            },
+            "annotations": {
+              "clustering": -1,
+              "multiLane": false
+            }
+          }
         },
         {
           "datasource": {
