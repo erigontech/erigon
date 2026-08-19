@@ -416,6 +416,10 @@ const MinCoreEnum = 1
 const MinBorEnum = 50
 const MinCaplinEnum = 10
 
+// MinCaplinStateEnum is the first beacon-state type; BeaconBlocks and BlobSidecars occupy
+// the two slots below it, so a new caplin block type must go here, not at a free tail slot.
+const MinCaplinStateEnum = MinCaplinEnum + 2
+
 const MaxEnum = 54
 
 var CaplinEnums = struct {

@@ -274,10 +274,10 @@ test-fixtures-zkevm:
 test-fixtures-legacy:
 	tools/test-fixtures.sh test-fixtures.json test-fixtures-cache legacy_tests legacy_cancun
 
-# EEST spec tests: run cmd/evm runners (statetest, blocktest, enginextest, zkevmtest)
-# against EEST fixtures. The shard list, workers, and failure budgets live in
-# tools/eest-spec-shards.yml (single source of truth shared with
-# .github/workflows/test-eest-spec.yml's load-matrix job and
+# EEST spec tests: run cmd/evm runners (statetest, transactiontest, blocktest,
+# enginextest, zkevmtest) against EEST fixtures. The shard list, workers, and
+# failure budgets live in tools/eest-spec-shards.yml (single source of truth
+# shared with .github/workflows/test-eest-spec.yml's load-matrix job and
 # tools/run-eest-spec-test.sh's runtime lookup). Shards whose names contain
 # "-race" dispatch through the race-instrumented evm.race binary so race
 # coverage works without polluting the non-race shards. Each shard provisions
@@ -480,6 +480,10 @@ check-kurtosis:
 		echo "kurtosis command not found in PATH, please source it in PATH. If Kurtosis is not installed, install it by visiting https://docs.kurtosis.com/install/"; \
 		exit 1; \
 	fi; \
+
+## test-kurtosis-setup:             test the bounded Kurtosis CI setup
+test-kurtosis-setup:
+	@bash .github/actions/setup-kurtosis/setup.test.sh
 
 kurtosis-pectra-assertoor:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
