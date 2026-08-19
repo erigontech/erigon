@@ -99,6 +99,23 @@ func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
 	require.Nil(t, id)
 }
 
+func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cc := &ExecutionClientEngine{
+		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
+		}},
+		beaconCfg: &cfg,
+	}
+
+	id, err := cc.ForkChoiceUpdate(
+		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion,
+	)
+
+	require.NoError(t, err)
+	require.Empty(t, id)
+}
+
 type beaconCfgEngineStub struct {
 	engineapi.EngineAPI
 	cfg *clparams.BeaconChainConfig
