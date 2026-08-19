@@ -14,7 +14,7 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package rawdb
+package rawdb_test
 
 import (
 	"testing"
@@ -23,6 +23,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 )
 
@@ -39,9 +40,9 @@ func TestChainConfigL2JSONRoundTrip(t *testing.T) {
 	hash := common.Hash{1}
 
 	cfg := &chain.Config{L2: &testL2Config{Stack: "testl2"}}
-	require.NoError(t, WriteChainConfig(tx, hash, cfg))
+	require.NoError(t, rawdb.WriteChainConfig(tx, hash, cfg))
 
-	got, err := ReadChainConfig(tx, hash)
+	got, err := rawdb.ReadChainConfig(tx, hash)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"stack":"testl2"}`, string(got.L2JSON))
 	require.True(t, got.IsL2())
@@ -52,9 +53,9 @@ func TestChainConfigL2JSONNullBackfill(t *testing.T) {
 	hash := common.Hash{2}
 
 	cfg := &chain.Config{L2JSON: []byte("null"), L2: &testL2Config{Stack: "testl2"}}
-	require.NoError(t, WriteChainConfig(tx, hash, cfg))
+	require.NoError(t, rawdb.WriteChainConfig(tx, hash, cfg))
 
-	got, err := ReadChainConfig(tx, hash)
+	got, err := rawdb.ReadChainConfig(tx, hash)
 	require.NoError(t, err)
 	require.JSONEq(t, `{"stack":"testl2"}`, string(got.L2JSON))
 	require.True(t, got.IsL2())

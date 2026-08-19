@@ -19,6 +19,8 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/state"
@@ -82,7 +84,7 @@ func (bra *BlockReadAheader) SetStateCache(sc *cache.StateCache) {
 	bra.stateCache = sc
 }
 
-// cachePopulatingGetter wraps a kv.TemporalGetter and fills a StateCache
+// cachePopulatingGetter wraps a TemporalGetter and fills a StateCache
 // ReadView as a side effect. Used by warmBody to make read-ahead prefetches
 // populate the same in-process cache layer that SharedDomains.GetLatest
 // consults — eliminating the file-accessor stack cost on the EVM's first
@@ -95,14 +97,14 @@ type cachePopulatingGetter struct {
 	stepSize uint64 // for the read txNum upper bound (last txNum of the read's step)
 }
 
-func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) kv.TemporalGetter {
+func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGetter {
 	if sc == nil {
-		return ttx
+		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	debug := ttx.Debug()
 	stateVersion, err := rawdb.GetStateVersion(ttx)
 	if err != nil {
-		return ttx
+		return execctx.NewTemporalTxStateGetter(ttx)
 	}
 	frontier := cache.FrontierWithStateVersion(debug, stateVersion)
 	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
@@ -131,6 +133,11 @@ func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, 
 		return nil, false, err
 	}
 	return code, len(code) > 0, nil
+}
+
+func (cpg *cachePopulatingGetter) GetCodeSize(addr []byte, txNum uint64) (int, bool, error) {
+	code, found, err := cpg.GetCode(addr, txNum)
+	return len(code), found, err
 }
 
 func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, tx kv.Getter, header *types.Header, body *types.Body) {
@@ -548,7 +555,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 		return nil
 	}
 
-	stateReader := state.NewReaderV3(ttx)
+	stateReader := state.NewReaderV3(execctx.NewTemporalTxStateGetter(ttx))
 	senders := block.Body().SendersFromTxs()
 
 	for _, sender := range senders {
