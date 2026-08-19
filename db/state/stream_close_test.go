@@ -61,8 +61,8 @@ func TestDomainLatestIterFileInitCursorMDBXClosesDupCursorOutsideRange(t *testin
 }
 
 func TestDomainLatestIterFileInitCursorOnDBClosesCursorOutsideRangeForLargeValues(t *testing.T) {
-	c := &testCursor{seekKey: []byte("b\x00\x00\x00\x00\x00\x00\x00\x00")}
-	tx := &testTx{cursor: c}
+	c := &testCursorDupSort{testCursor: testCursor{seekKey: []byte("b")}}
+	tx := &testTx{dupCursor: c}
 	hi := &DomainLatestIterFile{
 		roTx: tx,
 		to:   []byte("b"),
@@ -70,7 +70,7 @@ func TestDomainLatestIterFileInitCursorOnDBClosesCursorOutsideRangeForLargeValue
 	}
 	domainRoTx := &DomainRoTx{
 		stepSize: 1,
-		d:        &Domain{DomainCfg: statecfg.DomainCfg{LargeValues: true, ValuesTable: "vals"}},
+		d:        &Domain{DomainCfg: statecfg.DomainCfg{LargeValues: true, KeysTable: "keys", ValuesTable: "vals"}},
 	}
 
 	err := hi.initCursorOnDB(domainRoTx)

@@ -2281,6 +2281,20 @@ func TestDomain_PruneProgress(t *testing.T) {
 	require.Equal(t, prune.Done, prg3.ValueProgress)
 }
 
+// countTableEntries counts rows in a plain (non-DupSort) table.
+func countTableEntries(t testing.TB, tx kv.Tx, tbl string) int {
+	t.Helper()
+	cur, err := tx.Cursor(tbl)
+	require.NoError(t, err)
+	defer cur.Close()
+	n := 0
+	for k, _, err := cur.First(); k != nil; k, _, err = cur.Next() {
+		require.NoError(t, err)
+		n++
+	}
+	return n
+}
+
 // countDupSortKeys counts unique keys in a DupSort table.
 func countDupSortKeys(t testing.TB, tx kv.Tx, tbl string) int {
 	t.Helper()
@@ -2404,6 +2418,49 @@ func TestDomain_PruneRollingCursorProgress(t *testing.T) {
 		"first half of step-2 keys must remain (before cursor position)")
 }
 
+// TestDomain_LargeValuesPruneNoOrphans checks that pruneLargeValues removes val rows
+// for older steps even when a newer-step dup (outside the prune range) exists for the
+// same key. The former TableScanningPrune path used NextNoDup and skipped the key
+// entirely when the newest dup was beyond the range, leaving stale rows in ValuesTable.
+func TestDomain_LargeValuesPruneNoOrphans(t *testing.T) {
+	t.Parallel()
+
+	ctx := t.Context()
+	const aggStep = uint64(16)
+	db, d := testDbAndDomainOfStep(t, statecfg.Schema.CommitmentDomain, aggStep, log.New())
+
+	rwTx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	dt := d.beginForTests()
+	defer dt.Close()
+	writer := dt.NewWriter()
+	defer writer.Close()
+
+	key := []byte("key1")
+	val0 := []byte("value_step0")
+	val1 := []byte("value_step1")
+
+	// Write key at step 0 and step 1 so ValuesTable gets two seqID rows.
+	require.NoError(t, writer.PutWithPrev(key, val0, 0, nil))
+	require.NoError(t, writer.PutWithPrev(key, val1, aggStep, val0))
+	require.NoError(t, writer.Flush(ctx, rwTx))
+
+	logEvery := time.NewTicker(30 * time.Second)
+	defer logEvery.Stop()
+
+	require.Equal(t, 2, countTableEntries(t, rwTx, d.ValuesTable),
+		"pre-prune: both step-0 and step-1 rows must exist in ValuesTable")
+
+	// Prune step 0 [0, aggStep): the step-0 row must be removed.
+	stat, err := dt.prune(ctx, rwTx, 0, 0, aggStep, math.MaxUint64, logEvery)
+	require.NoError(t, err)
+	require.Equal(t, uint64(1), stat.Values, "exactly one val row pruned from step 0")
+	require.Equal(t, 1, countTableEntries(t, rwTx, d.ValuesTable),
+		"post-prune: only step-1 row must remain; no orphaned val rows")
+}
+
 func TestDomain_Unwind(t *testing.T) {
 	if testing.Short() {
 		t.Skip()
@@ -2490,7 +2547,7 @@ func TestDomain_Unwind(t *testing.T) {
 			}
 		}
 
-		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, totalDiff)
+		err = domainRoTx.unwind(ctx, tx, unwindTo/d.stepSize, unwindTo, uint64(domainRoTx.FirstStepNotInFiles()), totalDiff)
 		currTx = unwindTo
 		require.NoError(t, err)
 		domainRoTx.Close()
@@ -3670,7 +3727,7 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 			defer domainRoTx.Close()
 
 			// diff for txNum 18: prev was empty (key was deleted) → Value=[]byte{}
-			err = domainRoTx.unwind(ctx, tx, 1, 18, txNum18Diff)
+			err = domainRoTx.unwind(ctx, tx, 1, 18, uint64(domainRoTx.FirstStepNotInFiles()), txNum18Diff)
 			require.NoError(err)
 			domainRoTx.Close()
 			require.NoError(tx.Commit())

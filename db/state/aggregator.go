@@ -108,6 +108,7 @@ type Aggregator struct {
 	buildingFiles atomic.Bool
 	mergingFiles  atomic.Bool
 
+	//warmupWorking          atomic.Bool
 	ctx       context.Context
 	ctxCancel context.CancelFunc
 
@@ -1790,14 +1791,53 @@ func (a *Aggregator) CommitGate() *sync.RWMutex { return &a.commitGate }
 // keeps state files from extending past block files, so no external cap
 // is needed.
 func (a *Aggregator) CollateAndPrune(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) error {
-	a.commitGate.Lock()
-	err := db.UpdateTemporal(ctx, pruneFn)
-	a.commitGate.Unlock()
+	const targetSteps = 1.5
+
+	toTxNum := a.EndTxNumMinimax() + a.StepSize()
+	a.BuildFilesInBackground(toTxNum)
+
+	prevSteps := float64(0)
+	for {
+		err := func() error {
+			a.commitGate.Lock()
+			defer a.commitGate.Unlock()
+			return db.UpdateTemporal(ctx, pruneFn)
+		}()
+		if err != nil {
+			return err
+		}
+
+		stepsInDB, err := a.StepsInDB(ctx, db)
+		if err != nil || stepsInDB <= targetSteps {
+			return nil
+		}
+
+		if stepsInDB >= prevSteps && prevSteps > 0 {
+			return nil
+		}
+		prevSteps = stepsInDB
+
+		toTxNum = a.EndTxNumMinimax() + a.StepSize()
+		a.BuildFilesInBackground(toTxNum)
+
+		time.Sleep(100 * time.Millisecond)
+	}
+}
+
+func (a *Aggregator) CollateAndPruneIfNeeded(ctx context.Context, db kv.TemporalRwDB, pruneFn func(tx kv.TemporalRwTx) error, logger log.Logger) error {
+	toTxNum := a.EndTxNumMinimax() + a.StepSize()
+	a.BuildFilesInBackground(toTxNum)
+
+	stepsInDB, err := a.StepsInDB(ctx, db)
 	if err != nil {
 		return err
 	}
-	a.BuildFilesInBackground(a.EndTxNumMinimax() + a.StepSize())
-	return nil
+	if stepsInDB <= 1.5 {
+		a.commitGate.Lock()
+		defer a.commitGate.Unlock()
+		return db.UpdateTemporal(ctx, pruneFn)
+	}
+	return a.CollateAndPrune(ctx, db, pruneFn, logger)
 }
 func (a *Aggregator) FilesAmount() (res []int) {
 	a.dirtyFilesLock.Lock()
@@ -2812,8 +2852,13 @@ func (at *AggregatorRoTx) Unwind(ctx context.Context, tx kv.RwTx, txNumUnwindTo 
 	defer logEvery.Stop()
 
 	step := txNumUnwindTo / at.StepSize()
+	// Use the CURRENT (atomically published) file boundary, not the stale
+	// tx-scoped snapshot. BuildFilesInBackground may have filed new steps
+	// since this AggregatorRoTx was opened, and getLatestFromDb will use
+	// the current view — so the unwind must tag entries beyond it.
+	currentFilesEndStep := at.a.EndTxNumMinimax() / at.StepSize()
 	for idx, d := range at.d {
-		if err := d.unwind(ctx, tx, step, txNumUnwindTo, changeset[idx]); err != nil {
+		if err := d.unwind(ctx, tx, step, txNumUnwindTo, currentFilesEndStep, changeset[idx]); err != nil {
 			return err
 		}
 	}
