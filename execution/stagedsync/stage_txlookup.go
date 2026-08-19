@@ -269,7 +269,9 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	pruneTimeout := 2 * time.Second
+	// Chain-tip budget: this runs on the newPayload path, next to the exec-stage
+	// prune that already takes a third of a slot.
+	pruneTimeout := 250 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = time.Hour
 	}
