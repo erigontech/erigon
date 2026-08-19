@@ -88,20 +88,60 @@ type ExecutionEngine interface {
 	GetClientVersionV1(ctx context.Context, callerVersion *engine_types.ClientVersionV1) ([]engine_types.ClientVersionV1, error)
 }
 
-// RetryForkChoiceUpdate waits out ambiguous EL contention so a later canonical head update lands
-// after any earlier asynchronous update.
+const (
+	// Leave room for the default one-second FCU timeout to settle without holding consensus work
+	// for a substantial part of the slot.
+	forkChoiceUpdateRetryWindow = 2 * time.Second
+	forkChoiceUpdateRetryDelay  = 100 * time.Millisecond
+)
+
+// RetryForkChoiceUpdate gives an earlier asynchronous update a bounded window to settle before
+// resending the canonical head. If the window closes first, it returns the last contention error.
 func RetryForkChoiceUpdate(
 	ctx context.Context,
 	engine ExecutionEngine,
 	finalized, safe, head common.Hash,
 	version clparams.StateVersion,
 ) ([]byte, error) {
-	const retryDelay = 100 * time.Millisecond
+	return retryForkChoiceUpdate(
+		ctx, engine, finalized, safe, head, version,
+		forkChoiceUpdateRetryWindow, forkChoiceUpdateRetryDelay,
+	)
+}
+
+func retryForkChoiceUpdate(
+	ctx context.Context,
+	engine ExecutionEngine,
+	finalized, safe, head common.Hash,
+	version clparams.StateVersion,
+	retryWindow, retryDelay time.Duration,
+) ([]byte, error) {
+	retryCtx, cancel := context.WithTimeout(ctx, retryWindow)
+	defer cancel()
+
+	var lastErr error
 	for {
-		payloadID, err := engine.ForkChoiceUpdate(ctx, finalized, safe, head, nil, version)
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if retryCtx.Err() != nil {
+			if lastErr != nil {
+				return nil, lastErr
+			}
+			return nil, retryCtx.Err()
+		}
+		payloadID, err := engine.ForkChoiceUpdate(retryCtx, finalized, safe, head, nil, version)
 		if err == nil || !isForkChoiceUpdateContention(err) {
 			return payloadID, err
 		}
+		lastErr = err
+		if ctx.Err() != nil {
+			return nil, ctx.Err()
+		}
+		if retryCtx.Err() != nil {
+			return nil, lastErr
+		}
+
 		timer := time.NewTimer(retryDelay)
 		select {
 		case <-ctx.Done():
@@ -112,6 +152,17 @@ func RetryForkChoiceUpdate(
 				}
 			}
 			return nil, ctx.Err()
+		case <-retryCtx.Done():
+			if !timer.Stop() {
+				select {
+				case <-timer.C:
+				default:
+				}
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, lastErr
 		case <-timer.C:
 		}
 	}

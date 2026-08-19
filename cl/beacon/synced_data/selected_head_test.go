@@ -17,6 +17,7 @@
 package synced_data
 
 import (
+	"context"
 	"sync"
 	"testing"
 
@@ -58,6 +59,34 @@ func TestSelectedHeadDisabled(t *testing.T) {
 
 	_, _, ok := manager.SelectedHead()
 	require.False(t, ok)
+}
+
+func TestSelectedHeadBindingIsCanceledWhenTheHeadChanges(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	rootA := common.Hash{0xaa}
+	manager.OnSelectedHead(rootA, 100)
+
+	headCtx, release, ok := manager.BindToSelectedHead(t.Context(), rootA)
+	require.True(t, ok)
+	defer release()
+
+	manager.OnSelectedHead(common.Hash{0xbb}, 101)
+
+	require.ErrorIs(t, context.Cause(headCtx), ErrSelectedHeadChanged)
+}
+
+func TestSelectedHeadBindingSurvivesRepublishingTheSameHead(t *testing.T) {
+	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
+	root := common.Hash{0xaa}
+	manager.OnSelectedHead(root, 100)
+
+	headCtx, release, ok := manager.BindToSelectedHead(t.Context(), root)
+	require.True(t, ok)
+	defer release()
+
+	manager.OnSelectedHead(root, 100)
+
+	require.NoError(t, context.Cause(headCtx))
 }
 
 func TestSelectedHeadRootAndSlotStayInOneGeneration(t *testing.T) {

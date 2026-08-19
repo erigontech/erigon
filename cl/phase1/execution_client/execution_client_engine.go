@@ -215,8 +215,9 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	if err := checkForkChoiceStatus(resp.PayloadStatus); err != nil {
 		return nil, err
 	}
-	if attributes == nil && cc.isLocal() && resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.SyncingStatus {
+	if cc.isLocal() && resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.SyncingStatus {
 		// A local SYNCING response for a known head is transient execution-module contention.
+		// Classify it before a missing payload ID so head-only and payload-building callers both retry.
 		knownHead, err := cc.chainRW.HasBlock(ctx, head)
 		if err == nil && knownHead {
 			return nil, ErrForkChoiceBusy

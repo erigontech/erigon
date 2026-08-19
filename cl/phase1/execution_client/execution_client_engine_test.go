@@ -165,6 +165,25 @@ func TestLocalHeadForkChoiceUpdateReportsBusyForKnownHead(t *testing.T) {
 	require.ErrorIs(t, err, ErrForkChoiceBusy)
 }
 
+func TestLocalPayloadForkChoiceUpdateReportsBusyForKnownHead(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	chainRW := chainreader.NewChainReaderEth1(chain.AllProtocolChanges, &hasBlockModuleStub{hasBlock: true}, time.Second)
+	cc := &ExecutionClientEngine{
+		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
+		}},
+		chainRW:   &chainRW,
+		beaconCfg: &cfg,
+	}
+
+	_, err := cc.ForkChoiceUpdate(
+		t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, &engine_types.PayloadAttributes{}, clparams.DenebVersion,
+	)
+
+	require.ErrorIs(t, err, ErrForkChoiceBusy)
+	require.NotErrorIs(t, err, ErrForkChoiceUpdateNoPayloadID)
+}
+
 type beaconCfgEngineStub struct {
 	engineapi.EngineAPI
 	cfg *clparams.BeaconChainConfig

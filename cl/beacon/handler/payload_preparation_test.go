@@ -40,6 +40,10 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 )
 
+func bindSelectedHead(ctx context.Context, _ common.Hash) (context.Context, synced_data.CancelFn, bool) {
+	return ctx, func() {}, true
+}
+
 func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
@@ -554,7 +558,7 @@ func TestPreparePayloadForRetriesWhileTheExecutionLayerIsBusy(t *testing.T) {
 		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
 			return view(postState, baseBlockRoot, postState.Slot())
 		}).AnyTimes()
-	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+	syncedDataMock.EXPECT().BindToSelectedHead(gomock.Any(), baseBlockRoot).DoAndReturn(bindSelectedHead)
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	gomock.InOrder(
@@ -574,9 +578,7 @@ func TestPreparePayloadForRetriesWhileTheExecutionLayerIsBusy(t *testing.T) {
 	require.Equal(t, baseBlockRoot, head)
 }
 
-// The head is re-read before every attempt, not only the first: a retry must not assert a parent
-// fork choice has already left behind, which is exactly the window a busy answer opens up.
-func TestPreparePayloadForRechecksTheHeadBeforeEachRetry(t *testing.T) {
+func TestPreparePayloadForStopsRetryWhenTheHeadChanges(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -585,21 +587,21 @@ func TestPreparePayloadForRechecksTheHeadBeforeEachRetry(t *testing.T) {
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
 
 	baseBlockRoot := common.Hash{0x41}
-	movedRoot := common.Hash{0x42}
 	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
 	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
 		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
 			return view(postState, baseBlockRoot, postState.Slot())
 		}).AnyTimes()
-	gomock.InOrder(
-		syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).Times(3),
-		syncedDataMock.EXPECT().SelectedHead().Return(movedRoot, postState.Slot(), true),
-	)
+	headCtx, cancelHead := context.WithCancelCause(t.Context())
+	syncedDataMock.EXPECT().BindToSelectedHead(gomock.Any(), baseBlockRoot).
+		Return(headCtx, func() {}, true)
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
-	// Exactly one: the busy answer earns a retry, and the moved head must stop it before a second.
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(nil, execution_client.ErrForkChoiceBusy).Times(1)
+		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+			cancelHead(errPreparationHeadChanged)
+			return nil, execution_client.ErrForkChoiceBusy
+		}).Times(1)
 	handler.engine = engine
 
 	clock := eth_clock.NewMockEthereumClock(ctrl)
@@ -617,12 +619,12 @@ func TestPreparationDoesNotBlockSelectedHeadPublication(t *testing.T) {
 	movedBlockRoot := common.Hash{0x42}
 	data.OnSelectedHead(baseBlockRoot, 1)
 
-	updateStarted := make(chan struct{})
+	preparationStarted := make(chan context.Context, 1)
 	releaseUpdate := make(chan struct{})
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
-			close(updateStarted)
+		DoAndReturn(func(ctx context.Context, _ common.Hash, _ common.Hash, _ common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+			preparationStarted <- ctx
 			<-releaseUpdate
 			return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
 		})
@@ -634,7 +636,7 @@ func TestPreparationDoesNotBlockSelectedHeadPublication(t *testing.T) {
 			common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
 		result <- err
 	}()
-	<-updateStarted
+	activePreparationCtx := <-preparationStarted
 
 	headChanged := make(chan struct{})
 	go func() {
@@ -647,9 +649,11 @@ func TestPreparationDoesNotBlockSelectedHeadPublication(t *testing.T) {
 		headPublished = true
 	case <-time.After(time.Second):
 	}
+	cancelCause := context.Cause(activePreparationCtx)
 	close(releaseUpdate)
 	resultErr := <-result
 	require.True(t, headPublished, "selected head publication waited for payload preparation")
+	require.ErrorIs(t, cancelCause, errPreparationHeadChanged)
 	require.ErrorIs(t, resultErr, errPreparationHeadChanged)
 }
 
@@ -722,7 +726,7 @@ func TestPreparePayloadForStopsWhenProductionStartsDuringStateCopy(t *testing.T)
 			<-resumePreparation
 			return err
 		})
-	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true)
+	syncedDataMock.EXPECT().BindToSelectedHead(gomock.Any(), baseBlockRoot).DoAndReturn(bindSelectedHead)
 	forkChoiceUpdates := 0
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -788,14 +792,13 @@ func TestPreparePayloadForRejectsChangedHeadBeforeForkChoiceUpdate(t *testing.T)
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
 
 	baseBlockRoot := common.Hash{0x41}
-	changedBlockRoot := common.Hash{0x42}
 	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
 	gomock.InOrder(
 		syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
 			DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
 				return view(postState, baseBlockRoot, postState.Slot())
 			}),
-		syncedDataMock.EXPECT().SelectedHead().Return(changedBlockRoot, postState.Slot(), true),
+		syncedDataMock.EXPECT().BindToSelectedHead(gomock.Any(), baseBlockRoot).Return(context.TODO(), nil, false),
 	)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
@@ -860,7 +863,7 @@ func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
 		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
 			return view(headState, baseBlockRoot, headState.Slot())
 		})
-	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, headState.Slot(), true).AnyTimes()
+	syncedDataMock.EXPECT().BindToSelectedHead(gomock.Any(), baseBlockRoot).DoAndReturn(bindSelectedHead)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(_ context.Context, _, _, _ common.Hash, attrs *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
@@ -919,7 +922,7 @@ func TestPreparePayloadForPairsRootAndStateFromOneView(t *testing.T) {
 		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
 			return view(postState, viewRoot, postState.Slot())
 		})
-	syncedDataMock.EXPECT().SelectedHead().Return(viewRoot, postState.Slot(), true).AnyTimes()
+	syncedDataMock.EXPECT().BindToSelectedHead(gomock.Any(), viewRoot).DoAndReturn(bindSelectedHead)
 
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()

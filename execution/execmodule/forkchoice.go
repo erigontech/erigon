@@ -116,16 +116,14 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
 	outcomeCh := make(chan forkchoiceOutcome, 1)
 
-	// Spawn the actual forkchoice work using the module's background context so
-	// it is not cancelled when the caller's context times out. We return as soon
-	// as the result lands on outcomeCh — for a merge-extending fork at tip the
-	// result is sent before flush/commit, so the consensus client is not blocked
-	// on the EL commit. The semaphore is released — by the forkchoice goroutine, or
-	// by the background prune goroutine it hands off to — only after the FCU
-	// cleanup has run, so any follow-up op (AssembleBlock, next FCU) that acquires
-	// the semaphore observes fully-settled state.
+	// Run FCU work on the module context so a caller deadline can return Busy while the work
+	// completes asynchronously. Explicit cancellation still stops the work. An extending-fork
+	// result can arrive before flush and commit, but the semaphore stays held through cleanup so
+	// the next FCU or payload build observes settled state.
 	go func() {
-		if err := e.updateForkChoice(e.backgroundCtx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
+		workCtx, cleanup := forkchoiceWorkContext(e.backgroundCtx, ctx)
+		defer cleanup()
+		if err := e.updateForkChoice(workCtx, ctx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
 		}
 	}()
@@ -139,7 +137,7 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 			return ForkChoiceResult{Status: ExecutionStatusBusy}, nil
 		}
 		e.logger.Debug("forkChoiceUpdate cancelled")
-		return ForkChoiceResult{}, ctx.Err()
+		return ForkChoiceResult{}, context.Cause(ctx)
 	}
 }
 
@@ -335,7 +333,10 @@ func (e *ExecModule) unwindIfNeeded(
 	return nil, nil
 }
 
-func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
+func (e *ExecModule) updateForkChoice(ctx, requestCtx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
+	if err := explicitForkchoiceCancellation(requestCtx); err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+	}
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.updateForkChoice: ExecutionStatus_Busy")
 		sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
@@ -350,6 +351,9 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			e.semaphore.Release(1)
 		}
 	}()
+	if err := explicitForkchoiceCancellation(requestCtx); err != nil {
+		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
+	}
 
 	defer UpdateForkChoiceDuration(time.Now())
 	// The next semaphore acquirer must observe settled state, so the bg-prune
@@ -743,6 +747,30 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		Status:          status,
 		ValidationError: validationError,
 	}, stateFlushingInParallel)
+}
+
+// explicitForkchoiceCancellation ignores deadlines, which keep FCUs asynchronous, and returns any
+// cancellation that must stop the work.
+func explicitForkchoiceCancellation(requestCtx context.Context) error {
+	cause := context.Cause(requestCtx)
+	if cause == nil || errors.Is(cause, context.DeadlineExceeded) {
+		return nil
+	}
+	return cause
+}
+
+// forkchoiceWorkContext outlives request deadlines but stops on explicit request cancellation.
+func forkchoiceWorkContext(backgroundCtx, requestCtx context.Context) (context.Context, func()) {
+	workCtx, cancelWork := context.WithCancelCause(backgroundCtx)
+	stopRequestCancellation := context.AfterFunc(requestCtx, func() {
+		if cause := explicitForkchoiceCancellation(requestCtx); cause != nil {
+			cancelWork(cause)
+		}
+	})
+	return workCtx, func() {
+		stopRequestCancellation()
+		cancelWork(context.Canceled)
+	}
 }
 
 // runPostForkchoice runs the background FCU prune. Flush+commit and the

@@ -10,6 +10,7 @@
 package mock_services
 
 import (
+	context "context"
 	reflect "reflect"
 
 	synced_data "github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -41,6 +42,46 @@ func NewMockSyncedData(ctrl *gomock.Controller) *MockSyncedData {
 // EXPECT returns an object that allows the caller to indicate expected use.
 func (m *MockSyncedData) EXPECT() *MockSyncedDataMockRecorder {
 	return m.recorder
+}
+
+// BindToSelectedHead mocks base method.
+func (m *MockSyncedData) BindToSelectedHead(ctx context.Context, blockRoot common.Hash) (context.Context, synced_data.CancelFn, bool) {
+	m.ctrl.T.Helper()
+	ret := m.ctrl.Call(m, "BindToSelectedHead", ctx, blockRoot)
+	ret0, _ := ret[0].(context.Context)
+	ret1, _ := ret[1].(synced_data.CancelFn)
+	ret2, _ := ret[2].(bool)
+	return ret0, ret1, ret2
+}
+
+// BindToSelectedHead indicates an expected call of BindToSelectedHead.
+func (mr *MockSyncedDataMockRecorder) BindToSelectedHead(ctx, blockRoot any) *MockSyncedDataBindToSelectedHeadCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "BindToSelectedHead", reflect.TypeOf((*MockSyncedData)(nil).BindToSelectedHead), ctx, blockRoot)
+	return &MockSyncedDataBindToSelectedHeadCall{Call: call}
+}
+
+// MockSyncedDataBindToSelectedHeadCall wrap *gomock.Call
+type MockSyncedDataBindToSelectedHeadCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockSyncedDataBindToSelectedHeadCall) Return(arg0 context.Context, arg1 synced_data.CancelFn, arg2 bool) *MockSyncedDataBindToSelectedHeadCall {
+	c.Call = c.Call.Return(arg0, arg1, arg2)
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockSyncedDataBindToSelectedHeadCall) Do(f func(context.Context, common.Hash) (context.Context, synced_data.CancelFn, bool)) *MockSyncedDataBindToSelectedHeadCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockSyncedDataBindToSelectedHeadCall) DoAndReturn(f func(context.Context, common.Hash) (context.Context, synced_data.CancelFn, bool)) *MockSyncedDataBindToSelectedHeadCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
 }
 
 // CommitteeCount mocks base method.

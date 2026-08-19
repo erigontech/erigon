@@ -2,6 +2,7 @@ package stages
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -32,6 +33,16 @@ func TestNotifyExecutionForkChoiceWaitsOutContention(t *testing.T) {
 	)
 
 	require.NoError(t, err)
+}
+
+func TestCanonicalForkChoiceDelayIsNonFatal(t *testing.T) {
+	for _, err := range []error{
+		execution_client.ErrForkChoiceBusy,
+		execution_client.ErrForkChoiceUpdateTimeout,
+	} {
+		require.True(t, isExpectedCanonicalForkChoiceDelay(err))
+	}
+	require.False(t, isExpectedCanonicalForkChoiceDelay(errors.New("rejected")))
 }
 
 func TestUpdateCanonicalChainReorgEvent(t *testing.T) {

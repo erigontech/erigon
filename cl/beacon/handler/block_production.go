@@ -2312,10 +2312,10 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	); err != nil {
 		// Storing the block does not depend on the execution layer acknowledging the head in time,
 		// and the next head sends another update.
-		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) && !errors.Is(err, context.DeadlineExceeded) {
+		if !isForkChoiceContention(err) {
 			return err
 		}
-		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
+		log.Debug("BlockProduction: forkchoice update did not settle while storing block", "root", headRoot, "err", err)
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {

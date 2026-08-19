@@ -51,6 +51,26 @@ func TestDirectHeadForkChoiceUpdateReportsBusy(t *testing.T) {
 	require.ErrorIs(t, err, ErrForkChoiceBusy)
 }
 
+func TestDirectForkChoiceUpdateReportsTransientStatusesAsBusy(t *testing.T) {
+	for _, status := range []execmodule.ExecutionStatus{
+		execmodule.ExecutionStatusBusy,
+		execmodule.ExecutionStatusMissingSegment,
+		execmodule.ExecutionStatusTooFarAway,
+	} {
+		for _, attributes := range []*engine_types.PayloadAttributes{nil, {}} {
+			module := &forkChoiceModuleStub{result: execmodule.ForkChoiceResult{Status: status}}
+			client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+			require.NoError(t, err)
+
+			_, err = client.ForkChoiceUpdate(
+				t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, attributes, clparams.ElectraVersion,
+			)
+
+			require.ErrorIs(t, err, ErrForkChoiceBusy, "status %d, payload build %t", status, attributes != nil)
+		}
+	}
+}
+
 type forkChoiceSequenceEngine struct {
 	ExecutionEngine
 	errors []error
@@ -70,6 +90,59 @@ func TestRetryForkChoiceUpdateWaitsOutContention(t *testing.T) {
 
 	require.NoError(t, err)
 	require.Equal(t, 3, engine.calls)
+}
+
+type forkChoiceErrorEngine struct {
+	ExecutionEngine
+	err   error
+	calls int
+}
+
+func (e *forkChoiceErrorEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+	e.calls++
+	return nil, e.err
+}
+
+func TestRetryForkChoiceUpdateStopsAfterRetryWindow(t *testing.T) {
+	engine := &forkChoiceErrorEngine{err: ErrForkChoiceBusy}
+	ctx, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+
+	_, err := retryForkChoiceUpdate(
+		ctx, engine, common.Hash{}, common.Hash{}, common.Hash{0x41}, clparams.ElectraVersion,
+		10*time.Millisecond, time.Millisecond,
+	)
+
+	require.ErrorIs(t, err, ErrForkChoiceBusy)
+}
+
+type blockingForkChoiceEngine struct {
+	ExecutionEngine
+}
+
+func (e *blockingForkChoiceEngine) ForkChoiceUpdate(ctx context.Context, _ common.Hash, _ common.Hash, _ common.Hash, _ *engine_types.PayloadAttributes, _ clparams.StateVersion) ([]byte, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+func TestRetryForkChoiceUpdateBoundsEachAttemptByRetryWindow(t *testing.T) {
+	_, err := retryForkChoiceUpdate(
+		t.Context(), &blockingForkChoiceEngine{}, common.Hash{}, common.Hash{}, common.Hash{0x41}, clparams.ElectraVersion,
+		10*time.Millisecond, time.Millisecond,
+	)
+
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+}
+
+func TestRetryForkChoiceUpdateDoesNotStartWithCanceledContext(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	engine := &forkChoiceErrorEngine{err: ErrForkChoiceBusy}
+
+	_, err := RetryForkChoiceUpdate(ctx, engine, common.Hash{}, common.Hash{}, common.Hash{0x41}, clparams.ElectraVersion)
+
+	require.ErrorIs(t, err, context.Canceled)
+	require.Zero(t, engine.calls)
 }
 
 func TestRetryAssembleBlockReturnsFirstSuccess(t *testing.T) {

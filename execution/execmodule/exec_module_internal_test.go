@@ -20,10 +20,12 @@ import (
 	"context"
 	"errors"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
@@ -126,4 +128,50 @@ func TestForkValidatorSuspendsReadAheadBeforeItsOwnUnwind(t *testing.T) {
 		return suspendErr
 	}, log.New())
 	require.ErrorIs(t, criticalErr, suspendErr)
+}
+
+func TestUpdateForkChoiceDropsExplicitlyCanceledRequestBeforeAdmission(t *testing.T) {
+	admission := semaphore.NewWeighted(1)
+	require.NoError(t, admission.Acquire(t.Context(), 1))
+	defer admission.Release(1)
+
+	expectedErr := errors.New("selected head changed")
+	requestCtx, cancel := context.WithCancelCause(t.Context())
+	cancel(expectedErr)
+	outcome := make(chan forkchoiceOutcome, 1)
+	module := &ExecModule{semaphore: admission, logger: log.New()}
+
+	err := module.updateForkChoice(t.Context(), requestCtx, common.Hash{}, common.Hash{}, common.Hash{}, outcome)
+
+	require.ErrorIs(t, err, expectedErr)
+	require.ErrorIs(t, (<-outcome).err, expectedErr)
+}
+
+func TestForkchoiceWorkContextCancelsExplicitRequest(t *testing.T) {
+	expectedErr := errors.New("selected head changed")
+	requestCtx, cancelRequest := context.WithCancelCause(t.Context())
+	workCtx, cleanup := forkchoiceWorkContext(t.Context(), requestCtx)
+	defer cleanup()
+
+	cancelRequest(expectedErr)
+
+	select {
+	case <-workCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("forkchoice work remained active after explicit cancellation")
+	}
+	require.ErrorIs(t, context.Cause(workCtx), expectedErr)
+}
+
+func TestForkchoiceWorkContextKeepsDeadlineAsynchronous(t *testing.T) {
+	requestCtx, cancelRequest := context.WithCancelCause(t.Context())
+	workCtx, cleanup := forkchoiceWorkContext(t.Context(), requestCtx)
+	defer cleanup()
+	cancelRequest(context.DeadlineExceeded)
+
+	select {
+	case <-workCtx.Done():
+		t.Fatal("forkchoice deadline canceled asynchronous work")
+	case <-time.After(20 * time.Millisecond):
+	}
 }

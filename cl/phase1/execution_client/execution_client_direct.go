@@ -136,14 +136,13 @@ var ErrForkChoiceNotAdopted = errors.New("execution layer did not adopt forkchoi
 // because only the caller knows whether the head it asked for is still the one it wants.
 var ErrForkChoiceBusy = errors.New("execution layer busy with a forkchoice update")
 
-// forkChoiceStatusError classifies a status reached with payload attributes attached. Only an
-// adopted head is safe to build on: a builder ignores the parent it was asked for and packs on top
-// of whatever the execution tip really is.
+// forkChoiceStatusError reports whether the execution layer adopted the requested head. Busy,
+// missing-segment, and too-far-away outcomes are transient because a later update can settle them.
 func forkChoiceStatusError(status execmodule.ExecutionStatus) error {
 	switch status {
 	case execmodule.ExecutionStatusSuccess:
 		return nil
-	case execmodule.ExecutionStatusBusy:
+	case execmodule.ExecutionStatusBusy, execmodule.ExecutionStatusMissingSegment, execmodule.ExecutionStatusTooFarAway:
 		return ErrForkChoiceBusy
 	default:
 		return fmt.Errorf("%w: status %d", ErrForkChoiceNotAdopted, status)
@@ -161,14 +160,11 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if status == execmodule.ExecutionStatusBadBlock {
 		return nil, errors.New("bad block as forkchoice")
 	}
-	if attr == nil {
-		if status == execmodule.ExecutionStatusBusy {
-			return nil, ErrForkChoiceBusy
-		}
-		return nil, nil
-	}
 	if err := forkChoiceStatusError(status); err != nil {
 		return nil, err
+	}
+	if attr == nil {
+		return nil, nil
 	}
 	// Retry AssembleBlock if the EL is busy (semaphore contention with
 	// fork choice commits). This is common in single-process dev mode

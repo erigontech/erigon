@@ -40,7 +40,7 @@ var (
 	errNotOurProposal         = errors.New("next slot is not proposed by a registered validator")
 	errNoPayloadID            = errors.New("execution layer returned no payload id")
 	errHeadTooFarBack         = errors.New("head state is too far behind the slot to prepare")
-	errPreparationHeadChanged = errors.New("head changed while preparing payload")
+	errPreparationHeadChanged = synced_data.ErrSelectedHeadChanged
 	errProposalInFlight       = errors.New("block production is in progress")
 	errPreparationTooLate     = errors.New("slot is too close to prime a payload production would use")
 )
@@ -226,7 +226,9 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		if primed == settled || notOurs == settled {
 			continue
 		}
-		prepareCtx, cancel := context.WithDeadline(ctx, slotStart)
+		// An ordinary FCU deadline leaves execution work running asynchronously. Use a preparation-specific
+		// cause so speculative work stops when the slot begins.
+		prepareCtx, cancel := context.WithDeadlineCause(ctx, slotStart, errPreparationTooLate)
 		head, err := a.preparePayloadFor(prepareCtx, targetSlot)
 		cancel()
 		if err != nil {
@@ -366,10 +368,8 @@ func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (
 	return baseBlockRoot, nil
 }
 
-// forkChoiceUpdateForPreparation retries contention within the prime, whose context already ends at
-// the slot it is for. Everything upstream of it — the head view, the state copy, the epoch
-// transition — is far more expensive to repeat than the update itself. The head is re-checked before
-// every attempt so a retry can never assert one fork choice has already left behind.
+// forkChoiceUpdateForPreparation retries contention while baseBlockRoot remains selected. Binding
+// the request to that selection prevents a superseded prime from landing after a canonical update.
 func (a *ApiHandler) forkChoiceUpdateForPreparation(
 	ctx context.Context,
 	baseBlockRoot common.Hash,
@@ -377,29 +377,29 @@ func (a *ApiHandler) forkChoiceUpdateForPreparation(
 	attrs *engine_types.PayloadAttributes,
 	stateVersion clparams.StateVersion,
 ) ([]byte, error) {
+	headCtx, releaseHead, ok := a.syncedData.BindToSelectedHead(ctx, baseBlockRoot)
+	if !ok {
+		return nil, errPreparationHeadChanged
+	}
+	defer releaseHead()
+
 	for {
-		selectedRoot, _, selected := a.syncedData.SelectedHead()
-		if !selected || selectedRoot != baseBlockRoot {
-			return nil, errPreparationHeadChanged
+		if cause := context.Cause(headCtx); cause != nil {
+			return nil, cause
 		}
 
-		prepareCtx, finishPreparation, ok := a.payloadPreparationGate.tryBeginPreparation(ctx)
+		prepareCtx, finishPreparation, ok := a.payloadPreparationGate.tryBeginPreparation(headCtx)
 		if !ok {
 			return nil, errProposalInFlight
 		}
-		selectedRoot, _, selected = a.syncedData.SelectedHead()
-		if !selected || selectedRoot != baseBlockRoot {
+		if cause := context.Cause(prepareCtx); cause != nil {
 			finishPreparation()
-			return nil, errPreparationHeadChanged
+			return nil, cause
 		}
 		payloadID, err := a.engine.ForkChoiceUpdate(prepareCtx, finalized, safe, head, attrs, stateVersion)
 		cancelCause := context.Cause(prepareCtx)
 		finishPreparation()
 
-		selectedRoot, _, selected = a.syncedData.SelectedHead()
-		if !selected || selectedRoot != baseBlockRoot {
-			return nil, errPreparationHeadChanged
-		}
 		if cancelCause != nil {
 			return nil, cancelCause
 		}

@@ -83,10 +83,10 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 			cfg.forkChoice.GetEth1Hash(headRoot),
 			headVersion,
 		); err != nil {
-			// A forkchoice update that ran out of time is not a rejection, and sync has no payload
-			// to lose by carrying on: the next head will send another one.
-			if errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
-				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
+			// Contention is not a rejection, and sync has no payload to lose by carrying on: the
+			// next head will send another update.
+			if isExpectedCanonicalForkChoiceDelay(err) {
+				logger.Debug("[Caplin] forkchoice update did not settle", "head", headRoot, "err", err)
 				err = nil
 			} else {
 				err = fmt.Errorf("failed to run forkchoice: %w", err)
@@ -104,6 +104,11 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 		logger.Warn("Could not set status", "err", err2)
 	}
 	return
+}
+
+func isExpectedCanonicalForkChoiceDelay(err error) bool {
+	return errors.Is(err, execution_client.ErrForkChoiceBusy) ||
+		errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout)
 }
 
 func notifyExecutionForkChoice(
