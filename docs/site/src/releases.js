@@ -1,7 +1,7 @@
 // Release selection for docusaurus.config.ts.
 //
 // Lives in its own module so the ordering rules below can be exercised without
-// booting Docusaurus: `node --test src/releases.test.js`.
+// booting Docusaurus: `npm test` from docs/site.
 
 // Releases carry a pre-release suffix without reliably setting the API's
 // `prerelease` flag, so tag shape is the load-bearing check. Semver identifiers
