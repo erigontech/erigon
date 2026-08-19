@@ -138,11 +138,7 @@ class LandingSynthesisTests(unittest.TestCase):
         self.assertIn("Hardware requirements", out)
 
     def test_prose_after_the_grid_is_kept(self):
-        """Post-grid prose is page content, not card markup.
-
-        Dropping it cost why-using-erigon its whole AI-Native Node Access
-        section in llms-full.txt, with no signal that anything was missing.
-        """
+        """Prose outside the cards is page content and must reach the corpus."""
         body = """
 <div className="lp-grid">
 <Link className="lp-card" to="/a/">
@@ -159,6 +155,64 @@ Prose that follows the card grid must survive.
         self.assertIn("[A](https://docs.erigon.tech/a): Desc A.", out)
         self.assertIn("## After the grid", out)
         self.assertIn("Prose that follows the card grid must survive.", out)
+
+    def test_prose_before_and_between_grids_is_kept(self):
+        """Every non-card segment reaches the corpus, in document order."""
+        body = """
+<div className="lp-hero">
+  <h1>Title</h1>
+  <p>Lead paragraph.</p>
+</div>
+
+Intro prose before any grid.
+
+## First Group
+
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+</div>
+
+## Between The Grids
+
+<div className="lp-grid">
+<Link className="lp-card" to="/b/">
+  <div className="lp-card-title">B</div>
+  <div className="lp-card-desc">Desc B.</div>
+</Link>
+</div>
+
+Closing prose after the last grid.
+"""
+        out = g.synthesize_landing(body)
+        for fragment in ("Intro prose before any grid.", "## First Group",
+                         "## Between The Grids", "Closing prose after the last grid."):
+            self.assertIn(fragment, out)
+        self.assertIn("[A](https://docs.erigon.tech/a): Desc A.", out)
+        self.assertIn("[B](https://docs.erigon.tech/b): Desc B.", out)
+        # Document order: intro, first card, divider heading, second card.
+        self.assertLess(out.index("Intro prose"), out.index("Desc A."))
+        self.assertLess(out.index("Desc A."), out.index("## Between The Grids"))
+        self.assertLess(out.index("## Between The Grids"), out.index("Desc B."))
+
+    def test_adjacent_cards_stay_one_list(self):
+        """Cards separated only by markup are one grid, not one list each."""
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+<Link className="lp-card" to="/b/">
+  <div className="lp-card-title">B</div>
+  <div className="lp-card-desc">Desc B.</div>
+</Link>
+</div>
+"""
+        out = g.synthesize_landing(body)
+        self.assertEqual(out.count("## Sections"), 1)
 
     def test_hero_lead_is_not_duplicated_by_the_trailing_prose(self):
         """Only the tail is recovered; the hero lead is already emitted above."""
@@ -262,12 +316,7 @@ Prose that follows the card grid must survive.
         self.assertIn("dropped cards", str(ctx.exception))
 
     def test_renamed_title_marker_is_caught_not_absorbed(self):
-        """The guard must not count the marker it validates.
-
-        Counting `lp-card-title` would shrink in step with the very loss it is
-        meant to detect, so a renamed marker would drop its card in silence.
-        Counting `lp-card` containers keeps the two signals independent.
-        """
+        """The expected count must not depend on a marker the parse consumes."""
         body = """
 <div className="lp-grid">
 <Link className="lp-card" to="/a/">
@@ -299,11 +348,7 @@ Prose that follows the card grid must survive.
         self.assertIn("[A](https://docs.erigon.tech/a): Desc A.", out)
 
     def test_all_cards_malformed_raises_rather_than_falling_back(self):
-        """Total parser failure must not look like an ordinary prose page.
-
-        Returning None here would send the caller to strip_mdx, degrading the
-        page silently — the exact outcome the guard exists to prevent.
-        """
+        """Total parser failure must not look like an ordinary prose page."""
         body = """
 <div className="lp-grid">
 <Link className="lp-card" to="/a/">
@@ -319,13 +364,7 @@ Prose that follows the card grid must survive.
         self.assertIn("parsed 0 of 2", str(ctx.exception))
 
     def test_renamed_wrapper_marker_is_caught_not_absorbed(self):
-        """The mirror of the renamed-title case: the wrapper is not privileged.
-
-        Counting only `lp-card` containers would shrink with a renamed wrapper
-        exactly as a title-derived count shrinks with a renamed title. The
-        expected count takes the largest of three independent markers, so the
-        surviving title/desc pair still accounts for the card.
-        """
+        """No single marker is privileged: a renamed wrapper must trip the guard."""
         body = """
 <div className="lp-grid">
 <Link className="lp-card" to="/a/">
@@ -343,11 +382,7 @@ Prose that follows the card grid must survive.
         self.assertIn("parsed 1 of 2", str(ctx.exception))
 
     def test_every_wrapper_renamed_raises_rather_than_falling_back(self):
-        """A wholesale wrapper rename must not read as an ordinary prose page.
-
-        With the count keyed on the wrapper alone this returned None and the
-        caller fell back to strip_mdx, degrading every card grid in silence.
-        """
+        """A wholesale wrapper rename must not read as an ordinary prose page."""
         body = """
 <div className="lp-grid">
 <Link className="lp-tile" to="/a/">

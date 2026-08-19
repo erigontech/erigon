@@ -34,6 +34,15 @@ Everything you need to go from zero to a running Erigon node — requirements, i
 # Why using Erigon?
 URL: https://docs.erigon.tech/get-started/why-using-erigon
 
+
+Erigon is an Ethereum execution layer client focused on performance, low disk usage, and modular architecture.
+
+A core benefit of Erigon is its **reduced disk footprint** across all available pruning modes — achieved through efficient state storage and compression, making node operation feasible on consumer-grade hardware. It also features an **integrated Consensus Layer (Caplin)**, eliminating the need for separate CL software, and a **BitTorrent-based protocol** for decentralised historical data distribution.
+
+## Key Architectural & Performance Advantages
+
+Erigon's architecture provides measurable improvements in cost, performance, and reliability.
+
 ## Sections
 
 - [Integrated Consensus Layer (Caplin)](../fundamentals/caplin): Built-in consensus client — no need to run and manage separate software like Lighthouse. One binary handles both execution and consensus, simplifying setup for stakers and node runners.
@@ -44,6 +53,11 @@ URL: https://docs.erigon.tech/get-started/why-using-erigon
 - [Modularity](../fundamentals/modules/): Core node, RPC Daemon, and TxPool run as independent processes with per-component resource limits. If one crashes the rest stay alive. Run multiple instances without downtime.
 - [OtterSync](../fundamentals/pruning-modes): Shifts initial sync from CPU-intensive transaction re-execution to network download — similar to BitTorrent for state data. Reduces sync time for both full and Archive nodes.
 - [Flexible Pruning](../fundamentals/optimizing-storage): --prune.mode=minimal gives a smaller-than-full-node footprint that still satisfies all validator requirements. Right-size your storage without sacrificing functionality.
+
+---
+
+## Benefits by Audience
+
 - [RPC Providers & Large Stakers](../fundamentals/modules/rpc-daemon): Modular architecture and predictable performance handle high-volume traffic with low latency. Smaller database cuts hardware costs. Caplin reduces missed attestations and slashing risk.
 - [Home Users & Solo Stakers](../staking/): Run a full or archive node on a consumer SSD. Fast sync cuts setup from days to hours. No third-party servers — your node, your keys, your contribution to decentralisation.
 - [Developers](../interacting-with-erigon/): Full trace_ namespace, historical eth_getProof, historical blobs, and gRPC API. Modular components let you update, extend, or replace parts without rebuilding the whole stack.

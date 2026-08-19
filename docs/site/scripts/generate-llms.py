@@ -327,46 +327,50 @@ def synthesize_landing(raw_body):
     Returns synthesized markdown, or None if no `lp-card` patterns are present.
     Card hrefs that start with `/` are rewritten to absolute BASE_URL form so
     bullets remain useful when the body is read out of context.
+
+    Cards become a link list; every other part of the page is kept as prose, in
+    document order, so a grid page contributes the same text to the corpus that
+    a reader sees.
     """
     # Count first, parse second. Deciding "this is not a card grid" on an empty
     # parse result would make total parser failure indistinguishable from an
     # ordinary prose page: the caller would fall back to strip_mdx and the guard
-    # below would never run — silently degrading exactly the case it exists to
-    # catch.
+    # below would never run.
     matches = list(_LANDING_CARD_LINK_RE.finditer(raw_body))
-    containers = [m.groups() for m in matches]
     expected = max(
-        len(containers),
+        len(matches),
         len(_CARD_TITLE_MARKER_RE.findall(raw_body)),
         len(_CARD_DESC_MARKER_RE.findall(raw_body)),
     )
     if not expected:
         return None
 
-    cards = []
-    for attrs, block in containers:
+    parsed = []
+    for m in matches:
+        attrs, block = m.groups()
         href = _LINK_TO_RE.search(attrs)
         title = _CARD_TITLE_RE.search(block)
         desc = _CARD_DESC_RE.search(block)
         if not href or not title or not desc:
             continue
-        # `(.*?)` and `_card_text` both accept emptiness — an empty div, or one
-        # holding only markup, flattens to "". The match object stays truthy, so
-        # without this the card would be appended as `- [](url): ` and the count
-        # guard would pass on output no reader can use.
+        # `(.*?)` and `_card_text` both accept emptiness, while the match object
+        # stays truthy, so an empty field would otherwise emit `- [](url): `.
         title_text = _card_text(title.group(1))
         desc_text = _card_text(desc.group(1))
         if not title_text or not desc_text:
             continue
-        cards.append((href.group(1), title_text, desc_text))
+        parsed.append((m, href.group(1), title_text, desc_text))
 
     # A card that parses to nothing is invisible in the output, and `--check`
     # only compares generated output against committed output — so a systematic
     # parser regression stays green in CI while the corpus quietly loses pages.
-    if len(cards) != expected:
+    if len(parsed) != expected:
         raise SystemExit(
-            f"synthesize_landing dropped cards: parsed {len(cards)} "
-            f"of {expected} lp-card containers"
+            f"synthesize_landing dropped cards: parsed {len(parsed)} of "
+            f"{expected} expected "
+            f"(wrappers={len(matches)}, "
+            f"titles={len(_CARD_TITLE_MARKER_RE.findall(raw_body))}, "
+            f"descs={len(_CARD_DESC_MARKER_RE.findall(raw_body))})"
         )
 
     out = []
@@ -377,25 +381,46 @@ def synthesize_landing(raw_body):
             out.append(lead)
             out.append("")
 
-    out.append("## Sections")
-    out.append("")
-    for href, title, desc in cards:
-        href = href.strip()
-        if href.startswith("/"):
-            href = BASE_URL + href.rstrip("/")
-        out.append(f"- [{title}]({href}): {desc}")
+    def prose(lo, hi):
+        """Page text between two offsets, minus the hero already emitted."""
+        if hero:
+            hs, he = hero.span()
+            if lo < he and hi > hs:  # overlaps the hero — drop that part
+                head = strip_mdx(raw_body[lo:min(hi, hs)]).strip() if lo < hs else ""
+                tail = strip_mdx(raw_body[max(lo, he):hi]).strip() if hi > he else ""
+                return "\n\n".join(p for p in (head, tail) if p)
+        return strip_mdx(raw_body[lo:hi]).strip()
 
-    # Prose after the grid is ordinary page content, not card markup — dropping
-    # it silently cost the whole "AI-Native Node Access" section of
-    # why-using-erigon. Only the tail is recovered: everything before the first
-    # card is the hero, whose lead paragraph is already emitted above, so
-    # stripping that region too would duplicate it.
-    trailing = strip_mdx(raw_body[matches[-1].end():]).strip()
-    if trailing:
-        out.append("")
-        out.append(trailing)
+    def emit(text):
+        if text:
+            out.append(text)
+            out.append("")
 
-    return "\n".join(out)
+    # Walk the page in order: prose, then each run of adjacent cards as a list.
+    # Consecutive cards separated by nothing but markup belong to one grid; a
+    # run ends wherever real prose appears, which is what keeps a heading
+    # between two grids (and the text around them) in place.
+    emit(prose(0, matches[0].start()))
+    heading_emitted = False
+    run = []
+    for i, (m, href, title, desc) in enumerate(parsed):
+        run.append((href, title, desc))
+        gap = prose(m.end(), parsed[i + 1][0].start()) if i + 1 < len(parsed) else prose(m.end(), len(raw_body))
+        if gap or i + 1 == len(parsed):
+            if not heading_emitted:
+                out.append("## Sections")
+                out.append("")
+                heading_emitted = True
+            for href_, title_, desc_ in run:
+                href_ = href_.strip()
+                if href_.startswith("/"):
+                    href_ = BASE_URL + href_.rstrip("/")
+                out.append(f"- [{title_}]({href_}): {desc_}")
+            out.append("")
+            run = []
+            emit(gap)
+
+    return "\n".join(out).rstrip()
 
 
 def file_to_url(filepath, route_prefix):
