@@ -243,23 +243,77 @@ Prose that must survive the hero match.
         self.assertIn("## A Heading", out)
         self.assertIn("[A](https://docs.erigon.tech/a): Desc A.", out)
 
-    def test_wholesale_lp_prefix_rename_falls_back_by_design(self):
-        """Renaming lp-grid and lp-card together leaves no signal at all.
-
-        Every counter keys on the `lp-` prefix, so a repo-wide rename makes the
-        page indistinguishable from ordinary prose and it goes through
-        strip_mdx. Pinned so the limit is a decision, not a surprise: card text
-        survives, hrefs do not.
-        """
+    def test_nested_element_in_a_field_is_not_truncated(self):
+        """A field is read to its matching close, not the first nested one."""
         body = """
-<div className="x-grid">
-<Link className="x-card" to="/a/">
-  <div className="x-card-title">A</div>
-  <div className="x-card-desc">Desc A.</div>
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Before <div>inside</div> after.</div>
 </Link>
 </div>
 """
-        self.assertIsNone(g.synthesize_landing(body))
+        out = g.synthesize_landing(body)
+        self.assertIn("Before inside after.", out)
+
+    def test_break_tags_keep_a_word_boundary(self):
+        """Dropping a <br /> outright welded two lines into one word."""
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">First line<br />Second line.</div>
+</Link>
+</div>
+"""
+        out = g.synthesize_landing(body)
+        self.assertIn("First line Second line.", out)
+
+    def test_inline_tags_do_not_detach_punctuation(self):
+        """Inline markup is removed without inserting a space."""
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Made <strong>10x</strong> faster.</div>
+</Link>
+</div>
+"""
+        out = g.synthesize_landing(body)
+        self.assertIn("Made 10x faster.", out)
+
+    def test_angle_brackets_inside_inline_code_survive(self):
+        """A code literal is not a tag: `<string>` must not be stripped."""
+        body = """
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Pass `--flag=&lt;string&gt;` to set it.</div>
+</Link>
+</div>
+"""
+        body = body.replace("&lt;", "<").replace("&gt;", ">")
+        out = g.synthesize_landing(body)
+        self.assertIn("`--flag=<string>`", out)
+
+    def test_wholesale_namespace_rename_still_trips_the_guard(self):
+        """Renaming the entire lp- namespace must not read as ordinary prose.
+
+        Every class-keyed signal goes to zero together, so the guard rests on
+        the one signal that names nothing: a <Link> wrapping divs is a card's
+        shape whatever the classes are called.
+        """
+        body = """
+<div className="doc-grid">
+<Link className="doc-card" to="/a/">
+  <div className="doc-card-title">A</div>
+  <div className="doc-card-desc">Desc A.</div>
+</Link>
+</div>
+"""
+        with self.assertRaises(SystemExit) as ctx:
+            g.synthesize_landing(body)
+        self.assertIn("parsed 0 of 1", str(ctx.exception))
 
     def test_prose_before_and_between_grids_is_kept(self):
         """Every non-card segment reaches the corpus, in document order."""

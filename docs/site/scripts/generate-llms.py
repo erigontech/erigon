@@ -294,26 +294,38 @@ def strip_mdx(text):
 _LANDING_CARD_LINK_RE = re.compile(
     r'<Link\s([^>]*\blp-card\b[^>]*)>(.*?)</Link>', re.DOTALL)
 _LINK_TO_RE = re.compile(r'\bto=[\'"]([^\'"]+)[\'"]')
-_CARD_TITLE_RE = re.compile(
-    r'<div[^>]*\blp-card-title\b[^>]*>(.*?)</div>', re.DOTALL)
-_CARD_DESC_RE = re.compile(
-    r'<div[^>]*\blp-card-desc\b[^>]*>(.*?)</div>', re.DOTALL)
+# Field openings only. The text is taken to the matching close, because `.*?`
+# up to `</div>` stops at the first nested one and truncates silently.
+_CARD_TITLE_OPEN_RE = re.compile(r'<div[^>]*\blp-card-title\b[^>]*>')
+_CARD_DESC_OPEN_RE = re.compile(r'<div[^>]*\blp-card-desc\b[^>]*>')
 
-# Invariant 2 in practice: three markers are counted over the whole body, none
-# of which can vouch for the others. A renamed wrapper drops the container count
-# while the title/desc counts stand; a renamed title marker does the reverse.
-# The expected card count is the largest of the three, so any single rename
-# leaves parsed < expected and trips the guard instead of losing a card.
+# Invariant 2 in practice: several signals are counted over the whole body and
+# the expected card count is the largest of them, so no single rename can shrink
+# both sides of the guard.
 _CARD_TITLE_MARKER_RE = re.compile(r'<div[^>]*\blp-card-title\b[^>]*>')
 _CARD_DESC_MARKER_RE = re.compile(r'<div[^>]*\blp-card-desc\b[^>]*>')
 
-# The three markers above all carry the `lp-card` prefix, so renaming that
-# prefix on a card removes it from every one of them at once. Counting the
-# <Link> children of each grid is independent of the whole family: it is the
-# structure a card is, not the name it goes by. A non-card <Link> inside a grid
-# region would over-count and raise — a false alarm rather than a silent loss.
+# The markers above share the `lp-card` prefix, so they cannot vouch for each
+# other. The two counts below are progressively less name-dependent. Any
+# over-count raises — a false alarm, never a silent loss.
 _LANDING_GRID_OPEN_RE = re.compile(r'<div[^>]*\blp-grid\b[^>]*>')
 _LINK_TAG_RE = re.compile(r'<Link\s')
+_LINK_OPEN_RE = re.compile(r'<Link\b[^>]*>')
+
+
+def _card_shaped_link_count(raw_body):
+    """<Link> tags that wrap at least one <div> — a card's shape.
+
+    The only signal keyed to no class name, so a rename of the whole namespace
+    cannot zero every count at once. A prose link wraps text; a card wraps divs.
+    """
+    total = 0
+    for opening in _LINK_OPEN_RE.finditer(raw_body):
+        close = raw_body.find('</Link>', opening.end())
+        body = raw_body[opening.end():close if close != -1 else len(raw_body)]
+        if '<div' in body:
+            total += 1
+    return total
 _DIV_TAG_RE = re.compile(r'<div\b[^>]*?(/?)>|(</div>)', re.DOTALL)
 
 
@@ -349,15 +361,43 @@ def _grid_link_count(raw_body):
     return total
 
 
+_CODE_SPAN_RE = re.compile(r'`[^`]*`')
+# Tags that stand for a break in the text. These become a space; inline tags
+# (<strong>, <code>) are dropped outright, so punctuation stays attached.
+_BREAK_TAG_RE = re.compile(r'<\s*(?:br|/p|/div|/li|/h[1-6])\b[^>]*>', re.IGNORECASE)
+
+
 def _card_text(fragment):
-    """Flatten a card's inner HTML to plain text, collapsing whitespace."""
-    return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', fragment)).strip()
-# The hero is read inside its own div, and its fields tolerate inline markup.
-# An `[^<]+` field with a `.*?` gap cannot express "and never leave the hero":
-# a heading like <h1>Erigon <em>3.6</em></h1> fails to match where it stands,
-# and the engine then walks past </div> to the next plain h1/p further down the
-# page — putting that whole stretch inside the hero span, which the prose
-# segments then excise. Same failure the card parser had.
+    """Flatten a card's inner HTML to plain text, collapsing whitespace.
+
+    Break tags become a space — dropping them welded `First<br />Second` into
+    one word. Inline code spans are masked first, so a literal like `<string>`
+    survives instead of being read as a tag and removed.
+    """
+    spans = []
+
+    def mask(match):
+        spans.append(match.group(0))
+        return f"\x00{len(spans) - 1}\x00"
+
+    masked = _CODE_SPAN_RE.sub(mask, fragment)
+    text = _BREAK_TAG_RE.sub(' ', masked)
+    text = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', text)).strip()
+    for i, span in enumerate(spans):
+        text = text.replace(f"\x00{i}\x00", span)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _card_field(block, opening_re):
+    """Flattened text of a card field, read to its matching closing div."""
+    opening = opening_re.search(block)
+    if not opening:
+        return None
+    end = _div_span_end(block, opening.end())
+    return _card_text(block[opening.end():end])
+# The hero is read inside its own div: a field pattern that cannot cross the
+# closing tag is the only way to keep an inline-markup heading from pushing the
+# match onto a later h1/p and dragging that stretch into the hero span.
 _LANDING_HERO_OPEN_RE = re.compile(r'<div[^>]*\blp-hero\b[^>]*>')
 _HERO_H1_RE = re.compile(r'<h1[^>]*>(.*?)</h1>', re.DOTALL)
 _HERO_P_RE = re.compile(r'<p[^>]*>(.*?)</p>', re.DOTALL)
@@ -395,6 +435,7 @@ def synthesize_landing(raw_body):
         len(_CARD_TITLE_MARKER_RE.findall(raw_body)),
         len(_CARD_DESC_MARKER_RE.findall(raw_body)),
         _grid_link_count(raw_body),
+        _card_shaped_link_count(raw_body),
     )
     if not expected:
         return None
@@ -403,15 +444,11 @@ def synthesize_landing(raw_body):
     for m in matches:
         attrs, block = m.groups()
         href = _LINK_TO_RE.search(attrs)
-        title = _CARD_TITLE_RE.search(block)
-        desc = _CARD_DESC_RE.search(block)
-        if not href or not title or not desc:
-            continue
-        # `(.*?)` and `_card_text` both accept emptiness, while the match object
-        # stays truthy, so an empty field would otherwise emit `- [](url): `.
-        title_text = _card_text(title.group(1))
-        desc_text = _card_text(desc.group(1))
-        if not title_text or not desc_text:
+        title_text = _card_field(block, _CARD_TITLE_OPEN_RE)
+        desc_text = _card_field(block, _CARD_DESC_OPEN_RE)
+        # An empty or markup-only field flattens to "", which would otherwise
+        # emit `- [](url): ` and still satisfy the count guard.
+        if not href or not title_text or not desc_text:
             continue
         parsed.append((m, href.group(1), title_text, desc_text))
 
@@ -425,7 +462,8 @@ def synthesize_landing(raw_body):
             f"(wrappers={len(matches)}, "
             f"titles={len(_CARD_TITLE_MARKER_RE.findall(raw_body))}, "
             f"descs={len(_CARD_DESC_MARKER_RE.findall(raw_body))}, "
-            f"grid_links={_grid_link_count(raw_body)})"
+            f"grid_links={_grid_link_count(raw_body)}, "
+            f"card_shaped={_card_shaped_link_count(raw_body)})"
         )
 
     out = []
