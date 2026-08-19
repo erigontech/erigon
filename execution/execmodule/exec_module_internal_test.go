@@ -150,7 +150,7 @@ func TestUpdateForkChoiceDropsExplicitlyCanceledRequestBeforeAdmission(t *testin
 func TestForkchoiceWorkContextCancelsExplicitRequest(t *testing.T) {
 	expectedErr := errors.New("selected head changed")
 	requestCtx, cancelRequest := context.WithCancelCause(t.Context())
-	workCtx, cleanup := forkchoiceWorkContext(t.Context(), requestCtx)
+	workCtx, _, cleanup := forkchoiceWorkContext(t.Context(), requestCtx)
 	defer cleanup()
 
 	cancelRequest(expectedErr)
@@ -165,13 +165,45 @@ func TestForkchoiceWorkContextCancelsExplicitRequest(t *testing.T) {
 
 func TestForkchoiceWorkContextKeepsDeadlineAsynchronous(t *testing.T) {
 	requestCtx, cancelRequest := context.WithCancelCause(t.Context())
-	workCtx, cleanup := forkchoiceWorkContext(t.Context(), requestCtx)
+	workCtx, _, cleanup := forkchoiceWorkContext(t.Context(), requestCtx)
 	defer cleanup()
 	cancelRequest(context.DeadlineExceeded)
 
 	select {
 	case <-workCtx.Done():
 		t.Fatal("forkchoice deadline canceled asynchronous work")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+// Plain cancellation commonly comes from caller cleanup and must not abort asynchronous work after
+// synchronous waiting has ended.
+func TestForkchoiceWorkContextKeepsPlainCancellationAsynchronous(t *testing.T) {
+	requestCtx, cancelRequest := context.WithCancel(t.Context())
+	workCtx, _, cleanup := forkchoiceWorkContext(t.Context(), requestCtx)
+	defer cleanup()
+	cancelRequest()
+
+	select {
+	case <-workCtx.Done():
+		t.Fatal("routine caller cleanup canceled asynchronous forkchoice work")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+// Once an outcome is returned, even an explicit request cause must not abort acknowledged
+// flush-and-commit work.
+func TestForkchoiceWorkContextIgnoresCallerCleanupAfterOutcome(t *testing.T) {
+	requestCtx, cancelRequest := context.WithCancelCause(t.Context())
+	workCtx, detachRequest, cleanup := forkchoiceWorkContext(t.Context(), requestCtx)
+	defer cleanup()
+
+	detachRequest()
+	cancelRequest(errors.New("selected head changed"))
+
+	select {
+	case <-workCtx.Done():
+		t.Fatal("caller cleanup canceled work after the outcome was returned")
 	case <-time.After(20 * time.Millisecond):
 	}
 }

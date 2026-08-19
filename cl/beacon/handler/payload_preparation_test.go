@@ -107,16 +107,6 @@ func TestPreparedPayloadMinimumWarmupPreservesBuildTime(t *testing.T) {
 	require.Equal(t, 2*time.Second, preparedPayloadMinimumAge(cfg, clparams.ElectraVersion))
 }
 
-func TestPreparedPayloadRequiresBuilderContinuity(t *testing.T) {
-	var p preparedPayload
-	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	now := time.Unix(100, 0)
-	p.set(10, id, now.Add(-3*time.Second))
-
-	require.True(t, canUsePreparedPayload(&p, true, 10, id, now, 2*time.Second))
-	require.False(t, canUsePreparedPayload(&p, false, 10, id, now, 2*time.Second))
-}
-
 func TestStartPayloadPreparationSkipsRemoteEngine(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
@@ -278,6 +268,47 @@ func TestPreparePayloadLoopSkipsSlotsAboutToStart(t *testing.T) {
 	handler.preparePayloadLoop(ctx)
 }
 
+// A deterministic rejection cannot change while the slot, selected head, and validator
+// registrations stay fixed. Retrying it on every tick would repeat the expensive state work.
+func TestPreparePayloadLoopMemoizesStableFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	config := *handler.beaconChainCfg
+	config.SecondsPerSlot = 1
+	config.IntervalsPerSlot = 3
+	handler.beaconChainCfg = &config
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, postState.Slot())
+		}).Times(1)
+	syncedDataMock.EXPECT().BindToSelectedHead(gomock.Any(), baseBlockRoot).DoAndReturn(bindSelectedHead).Times(1)
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, execution_client.ErrForkChoiceNotAdopted).Times(1)
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).DoAndReturn(func(uint64) time.Time {
+		return time.Now().Add(800 * time.Millisecond)
+	}).AnyTimes()
+	handler.ethClock = clock
+
+	ctx, cancel := context.WithTimeout(t.Context(), 650*time.Millisecond)
+	defer cancel()
+	handler.preparePayloadLoop(ctx)
+}
+
 func TestPreparePayloadForSendsCompleteForkChoiceUpdate(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, fcu, validatorParams := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), true)
@@ -363,18 +394,15 @@ func TestPreparePayloadForSendsCompleteForkChoiceUpdate(t *testing.T) {
 	require.True(t, handler.preparedPayload.matches(targetSlot, payloadID, time.Now(), 0))
 }
 
-// The lead is measured before the state copy and the epoch transition. Those are slow enough to
-// spend it, and a prime that starts anyway occupies the execution module into the slot it was
-// meant to help - the proposal then finds the builder busy with the prime it asked for.
-// A busy execution layer must not cost the proposal. Before contention was classified, production
-// fell through to retryAssembleBlock and waited it out; classifying it as an error without a retry
-// here would turn any forkchoice update over the module's one-second timeout into a missed slot.
+// Busy means local forkchoice work is still settling, not that the requested head was rejected.
+// Production retries it so a short execution-layer delay does not cost an otherwise viable proposal.
 func TestProductionRetriesAForkChoiceUpdateThatIsBusy(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().SupportInsertion().Return(true)
 	gomock.InOrder(
 		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return(nil, execution_client.ErrForkChoiceBusy),
@@ -404,12 +432,15 @@ func TestPreparationGateRefusesActiveProduction(t *testing.T) {
 	require.False(t, ok, "preparation must stand off a production that has announced itself")
 }
 
+// A missing payload ID means the execution layer did not start a build. Retrying until the slot
+// deadline would consume time that a validator client can use to fail over to another beacon node.
 func TestProductionDoesNotRetryAForkChoiceUpdateWithoutPayloadID(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().SupportInsertion().Return(true)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, execution_client.ErrForkChoiceUpdateNoPayloadID).Times(1)
 	handler.engine = engine
@@ -425,6 +456,8 @@ func TestProductionDoesNotRetryAForkChoiceUpdateWithoutPayloadID(t *testing.T) {
 	require.Nil(t, id)
 }
 
+// The normal collection boundary is not a hard failure boundary. Production still allows a bounded
+// late window for transient local contention because a slightly late proposal can remain useful.
 func TestProductionRetriesBusyForkChoiceUpdateAfterCollectionDeadline(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
@@ -432,6 +465,7 @@ func TestProductionRetriesBusyForkChoiceUpdateAfterCollectionDeadline(t *testing
 	payloadID := []byte{9, 9, 9, 9, 9, 9, 9, 9}
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().SupportInsertion().Return(true)
 	gomock.InOrder(
 		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 			Return(nil, execution_client.ErrForkChoiceBusy),
@@ -441,7 +475,8 @@ func TestProductionRetriesBusyForkChoiceUpdateAfterCollectionDeadline(t *testing
 	handler.engine = engine
 
 	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-10 * time.Second)).AnyTimes()
+	collectionOffset := unpreparedGrabOffset(attestationDue(handler.beaconChainCfg, clparams.ElectraVersion))
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-collectionOffset - time.Second)).AnyTimes()
 	handler.ethClock = clock
 
 	id, err := handler.forkChoiceUpdateForProposal(t.Context(), targetSlot,
@@ -451,8 +486,74 @@ func TestProductionRetriesBusyForkChoiceUpdateAfterCollectionDeadline(t *testing
 	require.Equal(t, payloadID, id)
 }
 
-// Pins the wiring, not just the helper: production must go through the retry, so restoring the
-// direct engine call fails here even though the helper itself still works.
+// The late retry window must remain bounded so persistent contention cannot hold the validator
+// request indefinitely and prevent failover.
+func TestProductionStopsRetryingForkChoiceContentionAtDeadline(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, execution_client.ErrForkChoiceBusy).AnyTimes()
+	handler.engine = engine
+
+	started := time.Now()
+	_, err := handler.forkChoiceUpdateForProposalUntil(
+		t.Context(), time.Now().Add(20*time.Millisecond), common.Hash{}, common.Hash{}, common.Hash{},
+		&engine_types.PayloadAttributes{}, clparams.ElectraVersion,
+	)
+
+	require.ErrorIs(t, err, execution_client.ErrForkChoiceBusy)
+	require.Less(t, time.Since(started), time.Second)
+}
+
+// Syncing requires execution-layer progress and may persist for many slots. It is not short-lived
+// local contention, so retrying here would only consume the validator client's failover window.
+func TestProductionDoesNotRetryWhileExecutionLayerIsSyncing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().SupportInsertion().Return(true)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, execution_client.ErrForkChoiceSyncing).Times(1)
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(4 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	_, err := handler.forkChoiceUpdateForProposal(t.Context(), targetSlot,
+		common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion)
+
+	require.ErrorIs(t, err, execution_client.ErrForkChoiceSyncing)
+}
+
+// A remote engine call already has its own request timeout. Local retries would add another waiting
+// window and reduce the time available for validator-client failover.
+func TestProductionDoesNotRetryRemoteForkChoiceContention(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().SupportInsertion().Return(false)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, execution_client.ErrForkChoiceBusy).Times(1)
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(4 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	_, err := handler.forkChoiceUpdateForProposal(t.Context(), targetSlot,
+		common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion)
+
+	require.ErrorIs(t, err, execution_client.ErrForkChoiceBusy)
+}
+
+// Exercise the complete production path so contention tolerance cannot exist only in the helper.
 func TestProduceBeaconBodySurvivesABusyForkChoiceUpdate(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
@@ -528,6 +629,7 @@ func TestProductionDoesNotRetryAForkChoiceRejection(t *testing.T) {
 	targetSlot := postState.Slot() + 1
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().SupportInsertion().Return(true)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(nil, execution_client.ErrForkChoiceNotAdopted).Times(1)
 	handler.engine = engine
@@ -542,8 +644,8 @@ func TestProductionDoesNotRetryAForkChoiceRejection(t *testing.T) {
 	require.ErrorIs(t, err, execution_client.ErrForkChoiceNotAdopted)
 }
 
-// Contention is not a rejection, so a busy execution layer gets another attempt. Without this the
-// prime gives up on the first busy answer and the slot is never primed at all.
+// Contention is not a rejection. Preparation retries it while the selected-head binding remains
+// valid so a short execution-layer delay does not leave the proposal slot cold.
 func TestPreparePayloadForRetriesWhileTheExecutionLayerIsBusy(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
@@ -654,7 +756,33 @@ func TestPreparationDoesNotBlockSelectedHeadPublication(t *testing.T) {
 	resultErr := <-result
 	require.True(t, headPublished, "selected head publication waited for payload preparation")
 	require.ErrorIs(t, cancelCause, errPreparationHeadChanged)
-	require.ErrorIs(t, resultErr, errPreparationHeadChanged)
+	require.NoError(t, resultErr)
+}
+
+// Once forkchoice succeeds, cancellation racing with its return must not discard the completed
+// payload build.
+func TestPreparationKeepsPayloadIDReturnedWithConcurrentCancellation(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	data := synced_data.NewSyncedDataManager(&clparams.BeaconChainConfig{}, true)
+	baseBlockRoot := common.Hash{0x41}
+	data.OnSelectedHead(baseBlockRoot, 1)
+	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	handler := &ApiHandler{syncedData: data}
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+			finishProduction := handler.payloadPreparationGate.beginProduction()
+			finishProduction()
+			return payloadID, nil
+		})
+	handler.engine = engine
+
+	got, err := handler.forkChoiceUpdateForPreparation(t.Context(), baseBlockRoot,
+		common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.ElectraVersion)
+
+	require.NoError(t, err)
+	require.Equal(t, payloadID, got)
 }
 
 func TestProductionDoesNotWaitForPayloadPreparation(t *testing.T) {
@@ -905,6 +1033,23 @@ func TestFuluPreparationRejectsUnregisteredProposerBeforeCopyingState(t *testing
 	require.Less(t, allocations, 1000.0, "an unregistered Fulu proposer should not require a full state copy")
 }
 
+// Memoization must use the head paired with the state that produced the verdict, not an earlier
+// selected-head snapshot.
+func TestPreparePayloadForReturnsViewedHeadWhenProposalIsNotOurs(t *testing.T) {
+	_, _, _, _, postState, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	viewRoot := common.Hash{0x41}
+	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, viewRoot, postState.Slot())
+		})
+
+	head, err := handler.preparePayloadFor(t.Context(), targetSlot)
+
+	require.ErrorIs(t, err, errNotOurProposal)
+	require.Equal(t, viewRoot, head)
+}
+
 func TestPreparePayloadForPairsRootAndStateFromOneView(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
@@ -913,9 +1058,8 @@ func TestPreparePayloadForPairsRootAndStateFromOneView(t *testing.T) {
 	require.NoError(t, err)
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
 
-	// The root the view hands over is the only one preparation may use. Reading it separately would
-	// let a head update in between pair a parent beacon block root with a different state, priming a
-	// builder production can never match.
+	// Root and state must come from one view. Separate reads could pair a new root with an old state
+	// and produce payload inputs that production can never reproduce.
 	viewRoot := common.Hash{0x41}
 	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
 	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).

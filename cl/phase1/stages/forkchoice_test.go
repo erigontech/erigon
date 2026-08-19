@@ -18,32 +18,13 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
-func TestNotifyExecutionForkChoiceWaitsOutContention(t *testing.T) {
+// The canonical stage is sequential, so it reports contention instead of holding the stage through
+// a retry window.
+func TestNotifyExecutionForkChoiceDoesNotHoldTheStageOnContention(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
-	gomock.InOrder(
-		engine.EXPECT().SupportInsertion().Return(true),
-		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
-			Return(nil, execution_client.ErrForkChoiceBusy),
-		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
-			Return(nil, nil),
-	)
-
-	err := notifyExecutionForkChoice(
-		t.Context(), engine, common.Hash{0x01}, common.Hash{0x02}, common.Hash{0x03}, clparams.ElectraVersion,
-	)
-
-	require.NoError(t, err)
-}
-
-func TestNotifyExecutionForkChoiceDoesNotRetryRemoteEngine(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	gomock.InOrder(
-		engine.EXPECT().SupportInsertion().Return(false),
-		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
-			Return(nil, execution_client.ErrForkChoiceBusy),
-	)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
+		Return(nil, execution_client.ErrForkChoiceBusy)
 
 	err := notifyExecutionForkChoice(
 		t.Context(), engine, common.Hash{0x01}, common.Hash{0x02}, common.Hash{0x03}, clparams.ElectraVersion,
@@ -52,9 +33,23 @@ func TestNotifyExecutionForkChoiceDoesNotRetryRemoteEngine(t *testing.T) {
 	require.ErrorIs(t, err, execution_client.ErrForkChoiceBusy)
 }
 
+func TestNotifyExecutionForkChoiceReturnsSuccess(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
+		Return(nil, nil)
+
+	err := notifyExecutionForkChoice(
+		t.Context(), engine, common.Hash{0x01}, common.Hash{0x02}, common.Hash{0x03}, clparams.ElectraVersion,
+	)
+
+	require.NoError(t, err)
+}
+
 func TestCanonicalForkChoiceDelayIsNonFatal(t *testing.T) {
 	for _, err := range []error{
 		execution_client.ErrForkChoiceBusy,
+		execution_client.ErrForkChoiceSyncing,
 		execution_client.ErrForkChoiceUpdateTimeout,
 	} {
 		require.True(t, isExpectedCanonicalForkChoiceDelay(err))

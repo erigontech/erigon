@@ -92,7 +92,8 @@ const (
 	// Leave room for the default one-second FCU timeout to settle without holding consensus work
 	// for a substantial part of the slot.
 	forkChoiceUpdateRetryWindow = 2 * time.Second
-	forkChoiceUpdateRetryDelay  = 100 * time.Millisecond
+	// ForkChoiceRetryDelay is the pause between attempts after transient execution contention.
+	ForkChoiceRetryDelay = 100 * time.Millisecond
 )
 
 // RetryForkChoiceUpdate sends one update to a remote engine. For an insertion-capable engine, it
@@ -112,7 +113,7 @@ func RetryForkChoiceUpdate(
 	}
 	return retryForkChoiceUpdate(
 		ctx, engine, finalized, safe, head, version,
-		forkChoiceUpdateRetryWindow, forkChoiceUpdateRetryDelay,
+		forkChoiceUpdateRetryWindow, ForkChoiceRetryDelay,
 	)
 }
 
@@ -138,7 +139,7 @@ func retryForkChoiceUpdate(
 			return nil, retryCtx.Err()
 		}
 		payloadID, err := engine.ForkChoiceUpdate(retryCtx, finalized, safe, head, nil, version)
-		if err == nil || !isForkChoiceUpdateContention(err) {
+		if err == nil || !IsForkChoiceContention(err) {
 			return payloadID, err
 		}
 		lastErr = err
@@ -149,33 +150,17 @@ func retryForkChoiceUpdate(
 			return nil, lastErr
 		}
 
-		timer := time.NewTimer(retryDelay)
-		select {
-		case <-ctx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
-			return nil, ctx.Err()
-		case <-retryCtx.Done():
-			if !timer.Stop() {
-				select {
-				case <-timer.C:
-				default:
-				}
-			}
+		if err := common.Sleep(retryCtx, retryDelay); err != nil {
 			if ctx.Err() != nil {
 				return nil, ctx.Err()
 			}
 			return nil, lastErr
-		case <-timer.C:
 		}
 	}
 }
 
-func isForkChoiceUpdateContention(err error) bool {
+// IsForkChoiceContention reports an update that may succeed after current execution work settles.
+func IsForkChoiceContention(err error) bool {
 	return errors.Is(err, ErrForkChoiceBusy) ||
 		errors.Is(err, ErrForkChoiceUpdateTimeout) ||
 		errors.Is(err, context.DeadlineExceeded)

@@ -115,13 +115,13 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 
 func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, finalizedHash common.Hash) (ForkChoiceResult, error) {
 	outcomeCh := make(chan forkchoiceOutcome, 1)
+	workCtx, detachRequest, cleanup := forkchoiceWorkContext(e.backgroundCtx, ctx)
 
-	// Run FCU work on the module context so a caller deadline can return Busy while the work
-	// completes asynchronously. Explicit cancellation still stops the work. An extending-fork
-	// result can arrive before flush and commit, but the semaphore stays held through cleanup so
-	// the next FCU or payload build observes settled state.
+	// Run FCU work on the module context so a caller deadline can return Busy while work continues.
+	// A custom cancellation cause still stops obsolete work; plain cancellation only ends the
+	// caller's wait. An extending-fork result can arrive before flush and commit, but the semaphore
+	// stays held through cleanup so the next FCU or payload build observes settled state.
 	go func() {
-		workCtx, cleanup := forkchoiceWorkContext(e.backgroundCtx, ctx)
 		defer cleanup()
 		if err := e.updateForkChoice(workCtx, ctx, headHash, safeHash, finalizedHash, outcomeCh); err != nil {
 			e.logger.Debug("updateforkchoice failed", "err", err)
@@ -130,6 +130,9 @@ func (e *ExecModule) UpdateForkChoice(ctx context.Context, headHash, safeHash, f
 
 	select {
 	case outcome := <-outcomeCh:
+		// Stop observing the request before returning. Caller cleanup must not abort flush or commit
+		// after the outcome has been acknowledged.
+		detachRequest()
 		return outcome.result, outcome.err
 	case <-ctx.Done():
 		if ctx.Err() == context.DeadlineExceeded {
@@ -334,7 +337,7 @@ func (e *ExecModule) unwindIfNeeded(
 }
 
 func (e *ExecModule) updateForkChoice(ctx, requestCtx context.Context, originalBlockHash, safeHash, finalizedHash common.Hash, outcomeCh chan forkchoiceOutcome) (err error) {
-	if err := explicitForkchoiceCancellation(requestCtx); err != nil {
+	if err := forkchoiceAbortCause(requestCtx); err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 	if !e.semaphore.TryAcquire(1) {
@@ -351,7 +354,7 @@ func (e *ExecModule) updateForkChoice(ctx, requestCtx context.Context, originalB
 			e.semaphore.Release(1)
 		}
 	}()
-	if err := explicitForkchoiceCancellation(requestCtx); err != nil {
+	if err := forkchoiceAbortCause(requestCtx); err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
@@ -749,26 +752,28 @@ func (e *ExecModule) updateForkChoice(ctx, requestCtx context.Context, originalB
 	}, stateFlushingInParallel)
 }
 
-// explicitForkchoiceCancellation ignores deadlines, which keep FCUs asynchronous, and returns any
-// cancellation that must stop the work.
-func explicitForkchoiceCancellation(requestCtx context.Context) error {
+// forkchoiceAbortCause returns only custom cancellation causes. Deadlines and context.Canceled end
+// the caller's wait but leave FCU work asynchronous.
+func forkchoiceAbortCause(requestCtx context.Context) error {
 	cause := context.Cause(requestCtx)
-	if cause == nil || errors.Is(cause, context.DeadlineExceeded) {
+	if cause == nil || errors.Is(cause, context.Canceled) || errors.Is(cause, context.DeadlineExceeded) {
 		return nil
 	}
 	return cause
 }
 
-// forkchoiceWorkContext outlives request deadlines but stops on explicit request cancellation.
-func forkchoiceWorkContext(backgroundCtx, requestCtx context.Context) (context.Context, func()) {
+// forkchoiceWorkContext outlives request deadlines and routine cancellation. A custom cause stops
+// it until detachRequest transfers full ownership of the acknowledged work to the module.
+func forkchoiceWorkContext(backgroundCtx, requestCtx context.Context) (context.Context, func(), func()) {
 	workCtx, cancelWork := context.WithCancelCause(backgroundCtx)
 	stopRequestCancellation := context.AfterFunc(requestCtx, func() {
-		if cause := explicitForkchoiceCancellation(requestCtx); cause != nil {
+		if cause := forkchoiceAbortCause(requestCtx); cause != nil {
 			cancelWork(cause)
 		}
 	})
-	return workCtx, func() {
-		stopRequestCancellation()
+	detachRequest := sync.OnceFunc(func() { stopRequestCancellation() })
+	return workCtx, detachRequest, func() {
+		detachRequest()
 		cancelWork(context.Canceled)
 	}
 }

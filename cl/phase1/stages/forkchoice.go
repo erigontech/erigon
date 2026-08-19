@@ -107,8 +107,8 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 }
 
 func isExpectedCanonicalForkChoiceDelay(err error) bool {
-	return errors.Is(err, execution_client.ErrForkChoiceBusy) ||
-		errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout)
+	return execution_client.IsForkChoiceContention(err) ||
+		errors.Is(err, execution_client.ErrForkChoiceSyncing)
 }
 
 func notifyExecutionForkChoice(
@@ -117,7 +117,7 @@ func notifyExecutionForkChoice(
 	finalized, safe, head common.Hash,
 	version clparams.StateVersion,
 ) error {
-	_, err := execution_client.RetryForkChoiceUpdate(ctx, engine, finalized, safe, head, version)
+	_, err := engine.ForkChoiceUpdate(ctx, finalized, safe, head, nil, version)
 	return err
 }
 

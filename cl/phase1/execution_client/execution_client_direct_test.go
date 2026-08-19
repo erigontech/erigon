@@ -37,37 +37,83 @@ type forkChoiceModuleStub struct {
 	result execmodule.ForkChoiceResult
 }
 
+// Critical execution work must cancel speculative preparation before both compete for the shared
+// execution-module semaphore.
+func TestCriticalExecutionPreemptsActivePayloadPreparation(t *testing.T) {
+	var coordinator payloadPreparationCoordinator
+	prepareCtx, finishPreparation := coordinator.bind(t.Context())
+	defer finishPreparation()
+
+	finishCritical := coordinator.beginCritical()
+	defer finishCritical()
+
+	require.ErrorIs(t, context.Cause(prepareCtx), ErrPayloadPreparationPreempted)
+}
+
+// The critical-work count closes the race where preparation starts after preemption but before the
+// critical operation finishes.
+func TestPayloadPreparationCannotStartDuringCriticalExecution(t *testing.T) {
+	var coordinator payloadPreparationCoordinator
+	finishCritical := coordinator.beginCritical()
+	defer finishCritical()
+
+	prepareCtx, finishPreparation := coordinator.bind(t.Context())
+	defer finishPreparation()
+
+	require.ErrorIs(t, context.Cause(prepareCtx), ErrPayloadPreparationPreempted)
+}
+
 func (s *forkChoiceModuleStub) UpdateForkChoice(context.Context, common.Hash, common.Hash, common.Hash) (execmodule.ForkChoiceResult, error) {
 	return s.result, nil
 }
 
 func TestDirectHeadForkChoiceUpdateReportsBusy(t *testing.T) {
-	module := &forkChoiceModuleStub{result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}}
-	client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
-	require.NoError(t, err)
+	for _, attributes := range []*engine_types.PayloadAttributes{nil, {}} {
+		module := &forkChoiceModuleStub{result: execmodule.ForkChoiceResult{Status: execmodule.ExecutionStatusBusy}}
+		client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+		require.NoError(t, err)
 
-	_, err = client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, nil, clparams.ElectraVersion)
+		_, err = client.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, attributes, clparams.ElectraVersion)
 
-	require.ErrorIs(t, err, ErrForkChoiceBusy)
+		require.ErrorIs(t, err, ErrForkChoiceBusy)
+	}
 }
 
-func TestDirectForkChoiceUpdateReportsTransientStatusesAsBusy(t *testing.T) {
+// Missing execution data requires chain progress; it is not short-lived semaphore contention.
+func TestDirectForkChoiceUpdateReportsMissingExecutionDataAsSyncing(t *testing.T) {
 	for _, status := range []execmodule.ExecutionStatus{
-		execmodule.ExecutionStatusBusy,
 		execmodule.ExecutionStatusMissingSegment,
 		execmodule.ExecutionStatusTooFarAway,
 	} {
-		for _, attributes := range []*engine_types.PayloadAttributes{nil, {}} {
-			module := &forkChoiceModuleStub{result: execmodule.ForkChoiceResult{Status: status}}
-			client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
-			require.NoError(t, err)
+		module := &forkChoiceModuleStub{result: execmodule.ForkChoiceResult{Status: status}}
+		client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+		require.NoError(t, err)
 
-			_, err = client.ForkChoiceUpdate(
-				t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, attributes, clparams.ElectraVersion,
-			)
+		_, err = client.ForkChoiceUpdate(
+			t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, &engine_types.PayloadAttributes{}, clparams.ElectraVersion,
+		)
 
-			require.ErrorIs(t, err, ErrForkChoiceBusy, "status %d, payload build %t", status, attributes != nil)
-		}
+		require.ErrorIs(t, err, ErrForkChoiceSyncing, "status %d", status)
+		require.NotErrorIs(t, err, ErrForkChoiceBusy, "status %d", status)
+	}
+}
+
+// Rejected native statuses must have one error type so callers cannot mistake them for contention.
+func TestDirectForkChoiceUpdateReportsRejectedStatusesAsNotAdopted(t *testing.T) {
+	for _, status := range []execmodule.ExecutionStatus{
+		execmodule.ExecutionStatusInvalidForkchoice,
+		execmodule.ExecutionStatusBadBlock,
+		execmodule.ExecutionStatusReorgTooDeep,
+	} {
+		module := &forkChoiceModuleStub{result: execmodule.ForkChoiceResult{Status: status}}
+		client, err := NewExecutionClientDirect(chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second), nil)
+		require.NoError(t, err)
+
+		_, err = client.ForkChoiceUpdate(
+			t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, nil, clparams.ElectraVersion,
+		)
+
+		require.ErrorIs(t, err, ErrForkChoiceNotAdopted, "status %d", status)
 	}
 }
 

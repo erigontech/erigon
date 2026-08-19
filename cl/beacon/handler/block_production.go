@@ -209,29 +209,34 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 	return time.Duration(cfg.AttestationDueMs(stateVersion.AfterOrEqual(clparams.GloasVersion))) * time.Millisecond
 }
 
-// computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
-// reserving a publication margin before the attestation deadline (see payloadPublicationDivisor).
-// unpreparedGrabOffset is when production starts polling for a payload it did not prime, and
-// preparedGrabOffset is when it may start for one it did. Their difference is the warm-up a primed
-// builder must already have, so the two paths give a builder the same total build time.
+// unpreparedGrabOffset is the normal payload collection deadline measured from the slot start. It
+// reserves the final publication share of the attestation window for processing, signing, and gossip.
 func unpreparedGrabOffset(due time.Duration) time.Duration {
 	return due - due/payloadPublicationDivisor
 }
 
+// preparedGrabOffset is the earlier collection point available to a builder that was warmed before
+// the slot. The minimum-age check below preserves the build time available on the unprepared path.
 func preparedGrabOffset(due time.Duration) time.Duration {
 	return due / payloadPublicationDivisor
 }
 
 // preparedPayloadMinimumAge is how long a primed builder must already have been running before
-// production may collect from it early. A prime younger than this has no warm-up to offer.
+// production may collect from it early. It is the gap between prepared and unprepared collection
+// offsets, so both paths give the builder the same total build time.
 func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
 	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
 }
 
-// forkChoiceUpdateForProposal bounds ordinary contention retries by the payload collection time.
-// After that bound, it still waits out EL contention because a late block is better than none.
-// A missing payload ID returns immediately so the validator client can fail over from a syncing EL.
+// proposalForkChoiceLateRetryWindow is the extra local contention budget after normal payload
+// collection begins. Bounding it still permits a late block without holding the validator request
+// indefinitely.
+const proposalForkChoiceLateRetryWindow = 6 * time.Second
+
+// forkChoiceUpdateForProposal retries only transient in-process contention. A remote engine gets
+// one attempt. Syncing and rejection responses return immediately so the caller retains its
+// failover window.
 func (a *ApiHandler) forkChoiceUpdateForProposal(
 	ctx context.Context,
 	targetSlot uint64,
@@ -239,60 +244,51 @@ func (a *ApiHandler) forkChoiceUpdateForProposal(
 	attrs *engine_types.PayloadAttributes,
 	stateVersion clparams.StateVersion,
 ) ([]byte, error) {
+	if !a.engine.SupportInsertion() {
+		return a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+	}
 	collectAt := a.ethClock.GetSlotTime(targetSlot).Add(unpreparedGrabOffset(attestationDue(a.beaconChainCfg, stateVersion)))
-	boundedCtx, cancel := context.WithDeadline(ctx, collectAt)
+	return a.forkChoiceUpdateForProposalUntil(
+		ctx, collectAt.Add(proposalForkChoiceLateRetryWindow), finalized, safe, head, attrs, stateVersion,
+	)
+}
+
+func (a *ApiHandler) forkChoiceUpdateForProposalUntil(
+	ctx context.Context,
+	retryUntil time.Time,
+	finalized, safe, head common.Hash,
+	attrs *engine_types.PayloadAttributes,
+	stateVersion clparams.StateVersion,
+) ([]byte, error) {
+	if !time.Now().Before(retryUntil) {
+		return a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+	}
+	retryCtx, cancel := context.WithDeadline(ctx, retryUntil)
 	defer cancel()
 
-	for time.Now().Before(collectAt) {
-		idBytes, err := a.engine.ForkChoiceUpdate(boundedCtx, finalized, safe, head, attrs, stateVersion)
-		switch {
-		case err == nil:
-			return idBytes, nil
-		case ctx.Err() != nil:
-			return nil, ctx.Err()
-		case !isForkChoiceContention(err):
-			return nil, err
-		}
-		if err := waitForForkChoiceRetry(ctx); err != nil {
-			return nil, err
-		}
-	}
-
+	var lastErr error
 	for {
-		idBytes, err := a.engine.ForkChoiceUpdate(ctx, finalized, safe, head, attrs, stateVersion)
+		idBytes, err := a.engine.ForkChoiceUpdate(retryCtx, finalized, safe, head, attrs, stateVersion)
 		switch {
 		case err == nil:
 			return idBytes, nil
 		case ctx.Err() != nil:
 			return nil, ctx.Err()
-		case !isForkChoiceContention(err):
+		case !execution_client.IsForkChoiceContention(err):
 			return nil, err
 		}
-		if err := waitForForkChoiceRetry(ctx); err != nil {
-			return nil, err
+		lastErr = err
+		if err := common.Sleep(retryCtx, execution_client.ForkChoiceRetryDelay); err != nil {
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			return nil, lastErr
 		}
 	}
 }
 
-const forkChoiceBusyRetryDelay = 100 * time.Millisecond
-
-func isForkChoiceContention(err error) bool {
-	return errors.Is(err, execution_client.ErrForkChoiceBusy) ||
-		errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) ||
-		errors.Is(err, context.DeadlineExceeded)
-}
-
-func waitForForkChoiceRetry(ctx context.Context) error {
-	timer := time.NewTimer(forkChoiceBusyRetryDelay)
-	defer timer.Stop()
-	select {
-	case <-ctx.Done():
-		return ctx.Err()
-	case <-timer.C:
-		return nil
-	}
-}
-
+// computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
+// reserving a publication margin before the attestation deadline.
 func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
 	grabBy := slotStart.Add(unpreparedGrabOffset(due))
@@ -1109,8 +1105,7 @@ func (a *ApiHandler) produceBeaconBody(
 	beaconBody.Version = stateVersion
 
 	// Build execution payload
-	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
-	head := latestExecutionPayload.BlockHash
+	var gloasHead common.Hash
 	// [GLOAS] In deferred payload processing, the EL head and withdrawal source depend on
 	// the head's payload status (FULL vs EMPTY). When FULL, we copy the state, apply the
 	// parent execution payload, and compute withdrawals from the mutated copy. When EMPTY,
@@ -1126,11 +1121,11 @@ func (a *ApiHandler) produceBeaconBody(
 			isPreGloasParent := parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0
 			switch {
 			case isPreGloasParent:
-				head = parentBid.BlockHash
+				gloasHead = parentBid.BlockHash
 			case a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
 				a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
 				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}):
-				head = parentBid.BlockHash
+				gloasHead = parentBid.BlockHash
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()
 				if err != nil {
@@ -1153,13 +1148,12 @@ func (a *ApiHandler) produceBeaconBody(
 				// against the parent bid's ExecutionRequestsRoot.
 				beaconBody.ParentExecutionRequests = envelope.Message.ExecutionRequests
 			default:
-				head = parentBid.ParentBlockHash
+				gloasHead = parentBid.ParentBlockHash
 			}
 		} else {
-			head = baseState.GetLatestBlockHash()
+			gloasHead = baseState.GetLatestBlockHash()
 		}
 	}
-	safeHash, finalizedHash := a.executionCheckpointHashes(baseState)
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, 0, err
@@ -1203,30 +1197,41 @@ func (a *ApiHandler) produceBeaconBody(
 		}()
 		retryTime := 10 * time.Millisecond
 		feeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
-		withdrawals, err := a.expectedWithdrawals(baseState, gloasWithdrawalsState, stateVersion, targetSlot)
-		if err != nil {
-			executionErr = fmt.Errorf("produceBeaconBody: expected withdrawals: %w", err)
-			return
-		}
-		var attrs *engine_types.PayloadAttributes
+		var (
+			executionHead           = gloasHead
+			safeHash, finalizedHash common.Hash
+			attrs                   *engine_types.PayloadAttributes
+			inputErr                error
+		)
 		if stateVersion.Before(clparams.GloasVersion) {
-			attrs = a.preGloasPayloadAttributes(baseState, blockRoot, targetSlot, feeRecipient, withdrawals, stateVersion)
+			executionHead, safeHash, finalizedHash, attrs, inputErr = a.preGloasForkChoiceInputs(
+				baseState, blockRoot, targetSlot, feeRecipient, stateVersion,
+			)
 		} else {
+			safeHash, finalizedHash = a.executionCheckpointHashes(baseState)
+			var withdrawals []*types.Withdrawal
+			withdrawals, inputErr = a.expectedWithdrawals(baseState, gloasWithdrawalsState, stateVersion, targetSlot)
 			targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
 			slotNumber := hexutil.Uint64(targetSlot)
-			attrs = payloadAttributes(
-				stateVersion,
-				hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
-				baseState.GetRandaoMixes(targetEpoch),
-				feeRecipient,
-				withdrawals,
-				(*common.Hash)(&blockRoot),
-				&slotNumber,
-				targetGasLimit,
-			)
+			if inputErr == nil {
+				attrs = payloadAttributes(
+					stateVersion,
+					hexutil.Uint64(state.ComputeTimestampAtSlot(baseState, targetSlot)),
+					baseState.GetRandaoMixes(targetEpoch),
+					feeRecipient,
+					withdrawals,
+					(*common.Hash)(&blockRoot),
+					&slotNumber,
+					targetGasLimit,
+				)
+			}
+		}
+		if inputErr != nil {
+			executionErr = fmt.Errorf("produceBeaconBody: expected withdrawals: %w", inputErr)
+			return
 		}
 		builderStartedAt := time.Now()
-		idBytes, err := a.forkChoiceUpdateForProposal(ctx, targetSlot, finalizedHash, safeHash, head, attrs, stateVersion)
+		idBytes, err := a.forkChoiceUpdateForProposal(ctx, targetSlot, finalizedHash, safeHash, executionHead, attrs, stateVersion)
 		if err != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w", err)
 			return
@@ -1236,13 +1241,8 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		prepared := canUsePreparedPayload(
-			&a.preparedPayload,
-			a.engine.SupportInsertion(),
-			targetSlot,
-			idBytes,
-			time.Now(),
-			preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion),
+		prepared := a.preparedPayload.matches(
+			targetSlot, idBytes, time.Now(), preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion),
 		)
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, prepared)
 		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
@@ -2312,7 +2312,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	); err != nil {
 		// Storing the block does not depend on the execution layer acknowledging the head in time,
 		// and the next head sends another update.
-		if !isForkChoiceContention(err) {
+		if !execution_client.IsForkChoiceContention(err) {
 			return err
 		}
 		log.Debug("BlockProduction: forkchoice update did not settle while storing block", "root", headRoot, "err", err)

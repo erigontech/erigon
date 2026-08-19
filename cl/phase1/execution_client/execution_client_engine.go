@@ -62,13 +62,19 @@ func checkForkChoiceStatus(payloadStatus *engine_types.PayloadStatus) error {
 	if payloadStatus == nil {
 		return nil
 	}
-	if payloadStatus.Status == engine_types.InvalidStatus || payloadStatus.Status == engine_types.InvalidBlockHashStatus {
+	switch payloadStatus.Status {
+	case engine_types.ValidStatus:
+		return checkPayloadStatus(payloadStatus)
+	case engine_types.SyncingStatus:
+		return ErrForkChoiceSyncing
+	case engine_types.InvalidStatus, engine_types.InvalidBlockHashStatus:
 		if payloadStatus.ValidationError != nil {
 			return fmt.Errorf("%w: %w", ErrForkChoiceNotAdopted, payloadStatus.ValidationError.Error())
 		}
 		return fmt.Errorf("%w: status %s", ErrForkChoiceNotAdopted, payloadStatus.Status)
+	default:
+		return fmt.Errorf("%w: unexpected status %s", ErrForkChoiceNotAdopted, payloadStatus.Status)
 	}
-	return checkPayloadStatus(payloadStatus)
 }
 
 // ExecutionClientEngine implements ExecutionEngine with either an in-process or
@@ -76,11 +82,12 @@ func checkForkChoiceStatus(payloadStatus *engine_types.PayloadStatus) error {
 // directly; remote mode uses authenticated HTTP JSON-RPC for Engine API and
 // eth_* calls.
 type ExecutionClientEngine struct {
-	engine    engineapi.EngineAPI
-	chainRW   *chainreader.ChainReaderWriterEth1 // non-nil for local mode
-	rpcClient *rpc.Client                        // non-nil for remote mode (eth_* calls)
-	txpool    txpoolproto.TxpoolClient           // non-nil for local mode
-	beaconCfg *clparams.BeaconChainConfig
+	engine              engineapi.EngineAPI
+	chainRW             *chainreader.ChainReaderWriterEth1 // non-nil for local mode
+	rpcClient           *rpc.Client                        // non-nil for remote mode (eth_* calls)
+	txpool              txpoolproto.TxpoolClient           // non-nil for local mode
+	beaconCfg           *clparams.BeaconChainConfig
+	payloadPreparations payloadPreparationCoordinator
 }
 
 // NewExecutionClientEngineLocal creates an in-process client with direct chain
@@ -144,6 +151,8 @@ func (cc *ExecutionClientEngine) NewPayload(
 	if payload == nil {
 		return PayloadStatusValidated, nil
 	}
+	finishCritical := cc.payloadPreparations.beginCritical()
+	defer finishCritical()
 
 	request := engine_types.ExecutionPayloadFromSSZBlock(payload, payload.Version())
 
@@ -215,14 +224,6 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	if err := checkForkChoiceStatus(resp.PayloadStatus); err != nil {
 		return nil, err
 	}
-	if cc.isLocal() && resp.PayloadStatus != nil && resp.PayloadStatus.Status == engine_types.SyncingStatus {
-		// A local SYNCING response for a known head is transient execution-module contention.
-		// Classify it before a missing payload ID so head-only and payload-building callers both retry.
-		knownHead, err := cc.chainRW.HasBlock(ctx, head)
-		if err == nil && knownHead {
-			return nil, ErrForkChoiceBusy
-		}
-	}
 	if resp.PayloadId == nil {
 		if attributes != nil {
 			return nil, ErrForkChoiceUpdateNoPayloadID
@@ -236,10 +237,16 @@ func (cc *ExecutionClientEngine) SupportInsertion() bool {
 	return cc.isLocal()
 }
 
+func (cc *ExecutionClientEngine) bindPayloadPreparation(ctx context.Context) (context.Context, func()) {
+	return cc.payloadPreparations.bind(ctx)
+}
+
 func (cc *ExecutionClientEngine) InsertBlocks(ctx context.Context, blocks []*types.Block) error {
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
+	finishCritical := cc.payloadPreparations.beginCritical()
+	defer finishCritical()
 	return cc.chainRW.InsertBlocks(ctx, blocks)
 }
 
@@ -247,6 +254,8 @@ func (cc *ExecutionClientEngine) InsertBlock(ctx context.Context, block *types.B
 	if !cc.isLocal() {
 		return ErrNotSupported
 	}
+	finishCritical := cc.payloadPreparations.beginCritical()
+	defer finishCritical()
 	return cc.chainRW.InsertBlock(ctx, block)
 }
 

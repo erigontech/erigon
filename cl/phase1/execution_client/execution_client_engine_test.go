@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"testing"
-	"time"
 
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc/codes"
@@ -33,10 +32,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
 
@@ -44,15 +41,6 @@ type fcuEngineStub struct {
 	engineapi.EngineAPI
 	response *engine_types.ForkChoiceUpdatedResponse
 	err      error
-}
-
-type hasBlockModuleStub struct {
-	execmodule.ExecutionModule
-	hasBlock bool
-}
-
-func (s *hasBlockModuleStub) HasBlock(context.Context, *common.Hash, *uint64) (bool, error) {
-	return s.hasBlock, nil
 }
 
 func (s *fcuEngineStub) ForkchoiceUpdatedV3(context.Context, *engine_types.ForkChoiceState, *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
@@ -99,7 +87,7 @@ func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cc := &ExecutionClientEngine{
 		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.ValidStatus},
 		}},
 		beaconCfg: &cfg,
 	}
@@ -112,29 +100,59 @@ func TestForkChoiceUpdateRejectsMissingPayloadIDForPayloadBuild(t *testing.T) {
 	require.Nil(t, id)
 }
 
-func TestForkChoiceUpdateRejectsInvalidStatusWithoutValidationError(t *testing.T) {
+// SYNCING describes execution-layer progress, so it must not be replaced with the missing-payload-ID
+// error used when a VALID response unexpectedly omits the build identifier.
+func TestEngineForkChoiceUpdateReportsSyncingBeforeInspectingPayloadID(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cc := &ExecutionClientEngine{
 		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.InvalidStatus},
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
 		}},
 		beaconCfg: &cfg,
 	}
 
-	id, err := cc.ForkChoiceUpdate(
-		t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.DenebVersion,
-	)
+	for _, attributes := range []*engine_types.PayloadAttributes{nil, {}} {
+		id, err := cc.ForkChoiceUpdate(
+			t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, attributes, clparams.DenebVersion,
+		)
 
-	require.ErrorIs(t, err, ErrForkChoiceNotAdopted)
-	require.NotErrorIs(t, err, ErrForkChoiceUpdateNoPayloadID)
-	require.Nil(t, id)
+		require.ErrorIs(t, err, ErrForkChoiceSyncing)
+		require.Nil(t, id)
+	}
+}
+
+// Only VALID adopts the requested head. A nil validation error must not make another status
+// successful or retryable.
+func TestForkChoiceUpdateRejectsNonValidStatusesWithoutValidationError(t *testing.T) {
+	for _, engineStatus := range []engine_types.EngineStatus{
+		engine_types.InvalidStatus,
+		engine_types.InvalidBlockHashStatus,
+		engine_types.AcceptedStatus,
+		"UNKNOWN",
+	} {
+		cfg := clparams.MainnetBeaconConfig
+		cc := &ExecutionClientEngine{
+			engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
+				PayloadStatus: &engine_types.PayloadStatus{Status: engineStatus},
+			}},
+			beaconCfg: &cfg,
+		}
+
+		id, err := cc.ForkChoiceUpdate(
+			t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, &engine_types.PayloadAttributes{}, clparams.DenebVersion,
+		)
+
+		require.ErrorIs(t, err, ErrForkChoiceNotAdopted, "status %s", engineStatus)
+		require.NotErrorIs(t, err, ErrForkChoiceUpdateNoPayloadID, "status %s", engineStatus)
+		require.Nil(t, id, "status %s", engineStatus)
+	}
 }
 
 func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cc := &ExecutionClientEngine{
 		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
+			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.ValidStatus},
 		}},
 		beaconCfg: &cfg,
 	}
@@ -145,43 +163,6 @@ func TestForkChoiceUpdateAllowsMissingPayloadIDWithoutPayloadBuild(t *testing.T)
 
 	require.NoError(t, err)
 	require.Empty(t, id)
-}
-
-func TestLocalHeadForkChoiceUpdateReportsBusyForKnownHead(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	chainRW := chainreader.NewChainReaderEth1(chain.AllProtocolChanges, &hasBlockModuleStub{hasBlock: true}, time.Second)
-	cc := &ExecutionClientEngine{
-		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
-		}},
-		chainRW:   &chainRW,
-		beaconCfg: &cfg,
-	}
-
-	_, err := cc.ForkChoiceUpdate(
-		t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, nil, clparams.DenebVersion,
-	)
-
-	require.ErrorIs(t, err, ErrForkChoiceBusy)
-}
-
-func TestLocalPayloadForkChoiceUpdateReportsBusyForKnownHead(t *testing.T) {
-	cfg := clparams.MainnetBeaconConfig
-	chainRW := chainreader.NewChainReaderEth1(chain.AllProtocolChanges, &hasBlockModuleStub{hasBlock: true}, time.Second)
-	cc := &ExecutionClientEngine{
-		engine: &fcuEngineStub{response: &engine_types.ForkChoiceUpdatedResponse{
-			PayloadStatus: &engine_types.PayloadStatus{Status: engine_types.SyncingStatus},
-		}},
-		chainRW:   &chainRW,
-		beaconCfg: &cfg,
-	}
-
-	_, err := cc.ForkChoiceUpdate(
-		t.Context(), common.Hash{}, common.Hash{}, common.Hash{0x41}, &engine_types.PayloadAttributes{}, clparams.DenebVersion,
-	)
-
-	require.ErrorIs(t, err, ErrForkChoiceBusy)
-	require.NotErrorIs(t, err, ErrForkChoiceUpdateNoPayloadID)
 }
 
 type beaconCfgEngineStub struct {
