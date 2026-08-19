@@ -61,7 +61,7 @@ func (tx *fakeTemporalTx) GetAsOf(d kv.Domain, k []byte, ts uint64) ([]byte, boo
 	return nil, false, nil
 }
 
-func (tx *fakeTemporalTx) GetLatest(d kv.Domain, k []byte, _ ...kv.GetLatestOption) ([]byte, kv.Step, error) {
+func (tx *fakeTemporalTx) GetLatest(d kv.Domain, k []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	tx.getCalls = append(tx.getCalls, getLatestCall{d, append([]byte(nil), k...)})
 	if gv, ok := tx.latest[fmt.Sprintf("%d/%x", d, k)]; ok {
 		return gv.v, gv.step, nil

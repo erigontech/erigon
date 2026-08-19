@@ -463,38 +463,25 @@ type GetLatestOptions struct {
 	metrics     GetLatestMetrics
 	start       time.Time
 	maxStep     Step
+	hasMaxStep  bool
 	branchCache bool
 }
 
-type GetLatestOption func(GetLatestOptions) GetLatestOptions
-
-func WithGetLatestMetrics(metrics GetLatestMetrics, start time.Time) GetLatestOption {
-	return func(opts GetLatestOptions) GetLatestOptions {
-		opts.metrics, opts.start = metrics, start
-		return opts
-	}
+func (opts GetLatestOptions) WithMetrics(metrics GetLatestMetrics, start time.Time) GetLatestOptions {
+	opts.metrics, opts.start = metrics, start
+	return opts
 }
 
-func WithGetLatestMaxStep(maxStep Step) GetLatestOption {
-	return func(opts GetLatestOptions) GetLatestOptions {
-		opts.maxStep = min(opts.maxStep, maxStep)
-		return opts
+func (opts GetLatestOptions) WithMaxStep(maxStep Step) GetLatestOptions {
+	if !opts.hasMaxStep || maxStep < opts.maxStep {
+		opts.maxStep, opts.hasMaxStep = maxStep, true
 	}
+	return opts
 }
 
-func WithGetLatestBranchCache() GetLatestOption {
-	return func(opts GetLatestOptions) GetLatestOptions {
-		opts.branchCache = true
-		return opts
-	}
-}
-
-func ApplyGetLatestOptions(opts ...GetLatestOption) GetLatestOptions {
-	cfg := GetLatestOptions{maxStep: NoStepBound}
-	for i := range opts {
-		cfg = opts[i](cfg)
-	}
-	return cfg
+func (opts GetLatestOptions) WithBranchCache() GetLatestOptions {
+	opts.branchCache = true
+	return opts
 }
 
 func (opts GetLatestOptions) Metrics() (GetLatestMetrics, time.Time) {
@@ -502,6 +489,9 @@ func (opts GetLatestOptions) Metrics() (GetLatestMetrics, time.Time) {
 }
 
 func (opts GetLatestOptions) MaxStep() Step {
+	if !opts.hasMaxStep {
+		return NoStepBound
+	}
 	return opts.maxStep
 }
 
@@ -510,7 +500,7 @@ func (opts GetLatestOptions) BranchCache() bool {
 }
 
 type TemporalGetter interface {
-	GetLatest(name Domain, k []byte, opts ...GetLatestOption) (v []byte, step Step, err error)
+	GetLatest(name Domain, k []byte, opts GetLatestOptions) (v []byte, step Step, err error)
 	HasPrefix(name Domain, prefix []byte) (firstKey []byte, firstVal []byte, hasPrefix bool, err error)
 	StepsInFiles(entitySet ...Domain) Step
 }

@@ -37,7 +37,7 @@ var (
 
 type sd interface {
 	SetTxNum(blockNum uint64)
-	AsStateGetter(tx kv.TemporalTx, opts ...execctxapi.StateGetterOption) execctxapi.StateGetter
+	AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGetterOptions) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
@@ -243,7 +243,7 @@ func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNu
 	if sdc.stateReader != nil {
 		mainTtx.stateReader = sdc.stateReader.CloneForWorker(readCtx, tx)
 	} else {
-		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains, WithReadMetrics(kvmetrics.MetricsFromContext(readCtx)))
+		mainTtx.stateReader = NewLatestStateReader(tx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(kvmetrics.MetricsFromContext(readCtx)))
 	}
 	sdc.patriciaTrie.ResetContext(mainTtx)
 	return mainTtx
@@ -394,7 +394,7 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 // from the in-memory commitment domain (post-compute state).
 func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, _, err := sdc.sharedDomains.AsStateGetter(tx).GetLatest(kv.CommitmentDomain, key)
+	enc, _, err := sdc.sharedDomains.AsStateGetter(tx, execctxapi.StateGetterOptions{}).GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 	if err != nil {
 		return 0, err
 	}
@@ -669,7 +669,7 @@ func (sdc *SharedDomainsCommitmentContext) warmupTrieContextFactory(db kv.Tempor
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, WithReadMetrics(wm))
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
@@ -715,7 +715,7 @@ func (sdc *SharedDomainsCommitmentContext) concurrentTrieContextFactory(db kv.Te
 		if sdc.stateReader != nil {
 			warmupCtx.stateReader = sdc.stateReader.CloneForWorker(workerCtx, roTx)
 		} else {
-			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, WithReadMetrics(wm))
+			warmupCtx.stateReader = NewLatestStateReader(roTx, sdc.sharedDomains, LatestStateReaderOptions{}.WithMetrics(wm))
 		}
 		cleanup := func() {
 			sdc.sharedDomains.MergeMetrics(kvmetrics.SourceWarmup, wm)
@@ -1105,7 +1105,7 @@ func (cs *commitmentState) Encode() ([]byte, error) {
 }
 
 func LatestBlockNumWithCommitment(tx kv.TemporalGetter) (uint64, error) {
-	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState)
+	stateVal, _, err := tx.GetLatest(kv.CommitmentDomain, KeyCommitmentState, kv.GetLatestOptions{})
 	if err != nil {
 		return 0, err
 	}

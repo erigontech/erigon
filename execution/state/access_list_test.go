@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -93,7 +94,7 @@ func TestAccessList(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	state := New(NewReaderV3(domains.AsStateGetter(tx)))
+	state := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer state.Close()
 
 	state.accessList.Reset()
@@ -416,7 +417,7 @@ func TestSlotKnownWarmOnEmptyAccessList(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
 
-	state := New(NewReaderV3(domains.AsStateGetter(tx)))
+	state := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer state.Close()
 
 	require.False(t, state.SlotKnownWarm(accounts.NilAddress, accounts.NilKey))

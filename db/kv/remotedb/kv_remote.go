@@ -723,7 +723,7 @@ func (tx *tx) GetAsOf(name kv.Domain, k []byte, ts uint64) (v []byte, ok bool, e
 	return reply.V, reply.Ok, nil
 }
 
-func (tx *tx) GetLatest(name kv.Domain, k []byte, _ ...kv.GetLatestOption) (v []byte, step kv.Step, err error) {
+func (tx *tx) GetLatest(name kv.Domain, k []byte, _ kv.GetLatestOptions) (v []byte, step kv.Step, err error) {
 	reply, err := tx.db.remoteKV.GetLatest(tx.ctx, &remoteproto.GetLatestReq{TxId: tx.id, Table: name.String(), K: k, Latest: true})
 	if err != nil {
 		return nil, 0, err
@@ -732,7 +732,7 @@ func (tx *tx) GetLatest(name kv.Domain, k []byte, _ ...kv.GetLatestOption) (v []
 }
 
 func (tx *tx) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
-	v, _, err := tx.GetLatest(name, k)
+	v, _, err := tx.GetLatest(name, k, kv.GetLatestOptions{})
 	return len(v), len(v) > 0, err
 }
 

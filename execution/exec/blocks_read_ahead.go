@@ -110,8 +110,8 @@ func readAheadGetter(ttx kv.TemporalTx, sc *cache.StateCache) execctxapi.StateGe
 	return &cachePopulatingGetter{TemporalGetter: ttx, view: sc.View(frontier), stepSize: debug.StepSize()}
 }
 
-func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts ...kv.GetLatestOption) ([]byte, kv.Step, error) {
-	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts...)
+func (cpg *cachePopulatingGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	v, step, err := cpg.TemporalGetter.GetLatest(name, k, opts)
 	if err == nil {
 		readTxNum := step.LastTxNum(cpg.stepSize)
 		cpg.view.Fill(name, k, v, readTxNum)
@@ -128,7 +128,7 @@ func (cpg *cachePopulatingGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, 
 	if code, ok := cpg.view.GetCodeByAddressHash(addr); ok {
 		return code, true, nil
 	}
-	code, _, err := cpg.GetLatest(kv.CodeDomain, addr)
+	code, _, err := cpg.GetLatest(kv.CodeDomain, addr, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, false, err
 	}

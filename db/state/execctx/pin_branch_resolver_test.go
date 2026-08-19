@@ -30,7 +30,7 @@ type fakeTemporalGetter struct {
 	err  error
 }
 
-func (f *fakeTemporalGetter) GetLatest(_ kv.Domain, k []byte, _ ...kv.GetLatestOption) ([]byte, kv.Step, error) {
+func (f *fakeTemporalGetter) GetLatest(_ kv.Domain, k []byte, _ kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	return f.vals[string(k)], 0, f.err
 }
 

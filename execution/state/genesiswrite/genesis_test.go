@@ -219,7 +219,7 @@ func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 	// Ground truth for DomainDel's guard: the accounts domain must hold a
 	// non-empty entry for this address (not dangling storage under an absent account).
 	av := address.Value()
-	acc, _, err := tx.GetLatest(kv.AccountsDomain, av[:])
+	acc, _, err := tx.GetLatest(kv.AccountsDomain, av[:], kv.GetLatestOptions{})
 	require.NoError(err)
 	require.NotEmpty(acc, "storage-bearing empty alloc must produce a present accounts-domain entry")
 

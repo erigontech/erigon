@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -672,7 +673,7 @@ func TestValidateRead_SDStaleness_RevivalDoesNotResurrectPreDestructRead(t *test
 func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	vm := NewVersionMap(nil)
-	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx)), vm)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), vm)
 	defer ibs.Close()
 	ibs.SetTxContext(0, 3)
 

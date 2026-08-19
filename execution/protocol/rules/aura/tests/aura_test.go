@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -188,7 +189,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	// Set up block 1 state the same way exec3 does for TxIndex == -1:
 	// engine.Initialize + FinalizeTx via InitializeBlockExecution.
 	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, logger))
-	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsStateGetter(tx)))
+	reader := state.NewBufferedReader(rs, state.NewReaderV3(rs.Domains().AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	writer := state.NewVersionedWriteCollector(rs)
 	ibs := state.New(reader)
 	defer ibs.Close()

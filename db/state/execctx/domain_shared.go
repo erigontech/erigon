@@ -595,8 +595,8 @@ func (sd *SharedDomains) domainPutNoLock(domain kv.Domain, roTx kv.TemporalTx, k
 }
 
 // AsStateGetter returns an execution-aware getter with optimized code reads.
-func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts ...execctxapi.StateGetterOption) execctxapi.StateGetter {
-	metrics := execctxapi.ApplyStateGetterOptions(opts...).Metrics()
+func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGetterOptions) execctxapi.StateGetter {
+	metrics := opts.Metrics()
 	if !dbg.KVReadLevelledMetrics {
 		metrics = nil
 	}
@@ -1197,7 +1197,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 	if sd.adaptivePinController != nil {
 		if ttx, ok := tx.(kv.TemporalTx); ok {
 			reader := func(prefix []byte) ([]byte, uint64, bool, error) {
-				v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix)
+				v, step, err := ttx.GetLatest(kv.CommitmentDomain, prefix, kv.GetLatestOptions{})
 				if err != nil {
 					return nil, 0, false, err
 				}
@@ -1336,7 +1336,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		// Plain AsStateGetter reads (wm == nil) on a request-scoped SD fold into the
 		// request accumulator. Short-circuits for exec workers (wm != nil), which
 		// never touch reqMetrics — so no cross-goroutine access.
-		if wm == nil {
+		if wm == nil && sd.reqMetrics != nil {
 			wm = sd.reqMetrics
 		}
 	} else {
@@ -1347,7 +1347,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	v, step, maxStep, ok := sd.latestFromMem(domain, k)
 	maxStep = min(maxStep, stepBound)
 	if ok && servableUnderBound(step, maxStep) {
-		if dbg.KVReadLevelledMetrics {
+		if wm != nil {
 			wm.UpdateCacheReads(domain, start)
 		}
 		return v, step, nil
@@ -1362,7 +1362,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		if ok && !servableUnderBound(cStep, maxStep) {
 			ok = false
 		}
-		if dbg.KVReadLevelledMetrics {
+		if wm != nil {
 			if ok {
 				wm.UpdateStateCacheHit(domain)
 			} else {
@@ -1380,11 +1380,11 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 				// backing tx is the single source of truth for this key at this point.
 				var vDB []byte
 				var err error
-				if wm == nil {
-					vDB, _, err = tx.GetLatest(domain, k)
-				} else {
-					vDB, _, err = tx.GetLatest(domain, k, kv.WithGetLatestMetrics(wm, start))
+				getOpts := kv.GetLatestOptions{}
+				if wm != nil {
+					getOpts = getOpts.WithMetrics(wm, start)
 				}
+				vDB, _, err = tx.GetLatest(domain, k, getOpts)
 				if err != nil {
 					return nil, 0, fmt.Errorf("AssertStateCache: authoritative read failed: %w", err)
 				}
@@ -1412,33 +1412,17 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 		}
 	}
 
-	cacheBranch := domain == kv.CommitmentDomain && sd.branchCache != nil
-	switch {
-	case wm == nil && maxStep == kv.NoStepBound && !cacheBranch:
-		v, step, err = tx.GetLatest(domain, k)
-	case wm != nil && maxStep == kv.NoStepBound && !cacheBranch:
-		v, step, err = tx.GetLatest(domain, k, kv.WithGetLatestMetrics(wm, start))
-	case wm == nil && maxStep != kv.NoStepBound && !cacheBranch:
-		v, step, err = tx.GetLatest(domain, k, kv.WithGetLatestMaxStep(maxStep))
-	case wm == nil && maxStep == kv.NoStepBound && cacheBranch:
-		v, step, err = tx.GetLatest(domain, k, kv.WithGetLatestBranchCache())
-	default:
-		var txOpts [3]kv.GetLatestOption
-		txOptCount := 0
-		if wm != nil {
-			txOpts[txOptCount] = kv.WithGetLatestMetrics(wm, start)
-			txOptCount++
-		}
-		if maxStep != kv.NoStepBound {
-			txOpts[txOptCount] = kv.WithGetLatestMaxStep(maxStep)
-			txOptCount++
-		}
-		if cacheBranch {
-			txOpts[txOptCount] = kv.WithGetLatestBranchCache()
-			txOptCount++
-		}
-		v, step, err = tx.GetLatest(domain, k, txOpts[:txOptCount]...)
+	getOpts := kv.GetLatestOptions{}
+	if wm != nil {
+		getOpts = getOpts.WithMetrics(wm, start)
 	}
+	if maxStep != kv.NoStepBound {
+		getOpts = getOpts.WithMaxStep(maxStep)
+	}
+	if domain == kv.CommitmentDomain && sd.branchCache != nil {
+		getOpts = getOpts.WithBranchCache()
+	}
+	v, step, err = tx.GetLatest(domain, k, getOpts)
 	if err != nil {
 		return nil, 0, fmt.Errorf("storage %x read error: %w", k, err)
 	}
@@ -1665,7 +1649,7 @@ func (sd *SharedDomains) codeHashForAddr(tx kv.TemporalTx, view cache.ReadView, 
 				return accounts.DeserialiseV3CodeHash(v), false
 			}
 		}
-		v, _, err := tx.GetLatest(kv.AccountsDomain, addr)
+		v, _, err := tx.GetLatest(kv.AccountsDomain, addr, kv.GetLatestOptions{})
 		if err != nil {
 			return nil, false
 		}

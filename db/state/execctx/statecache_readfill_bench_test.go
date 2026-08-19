@@ -125,13 +125,13 @@ func BenchmarkGetLatestColdNegativeMeteredNoCache(b *testing.B) {
 	sd, err := execctx.NewSharedDomains(b.Context(), tx, log.New())
 	require.NoError(b, err)
 	defer sd.Close()
-	getter := sd.AsStateGetter(tx, execctxapi.WithStateGetterMetrics(kvmetrics.NewDomainMetrics()))
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithMetrics(kvmetrics.NewDomainMetrics()))
 	key := make([]byte, 20)
 	key[0] = 0x02
 	b.ResetTimer()
 	for i := 0; i < b.N; i++ {
 		binary.BigEndian.PutUint64(key[12:], uint64(i)+1)
-		v, _, err := getter.GetLatest(kv.AccountsDomain, key)
+		v, _, err := getter.GetLatest(kv.AccountsDomain, key, kv.GetLatestOptions{})
 		if err != nil {
 			b.Fatal(err)
 		}

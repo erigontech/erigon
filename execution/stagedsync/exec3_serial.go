@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -372,7 +373,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 			case txTask.IsBlockEnd() && txTask.BlockNumber() > 0:
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
-				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsStateGetter(se.applyTx)))
+				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsStateGetter(se.applyTx, execctxapi.StateGetterOptions{})))
 				defer ibs.Close()
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {

@@ -29,36 +29,27 @@ type LatestStateReader struct {
 	metrics       *kvmetrics.DomainMetrics
 }
 
-type latestStateReaderOptions struct {
+type LatestStateReaderOptions struct {
 	metrics *kvmetrics.DomainMetrics
 }
 
-// LatestStateReaderOption configures NewLatestStateReader.
-type LatestStateReaderOption func(*latestStateReaderOptions)
-
-// WithReadMetrics binds reads to a caller-owned metrics accumulator.
-func WithReadMetrics(metrics *kvmetrics.DomainMetrics) LatestStateReaderOption {
-	return func(opts *latestStateReaderOptions) {
-		opts.metrics = metrics
-	}
+func (opts LatestStateReaderOptions) WithMetrics(metrics *kvmetrics.DomainMetrics) LatestStateReaderOptions {
+	opts.metrics = metrics
+	return opts
 }
 
 // NewLatestStateReader creates a reader over latest shared-domain state.
-func NewLatestStateReader(tx kv.TemporalTx, sd sd, opts ...LatestStateReaderOption) *LatestStateReader {
-	cfg := latestStateReaderOptions{}
-	for _, opt := range opts {
-		opt(&cfg)
+func NewLatestStateReader(tx kv.TemporalTx, sd sd, opts LatestStateReaderOptions) *LatestStateReader {
+	getterOpts := execctxapi.StateGetterOptions{}
+	if opts.metrics != nil {
+		getterOpts = getterOpts.WithMetrics(opts.metrics)
 	}
-	var getterOpts []execctxapi.StateGetterOption
-	if cfg.metrics != nil {
-		getterOpts = []execctxapi.StateGetterOption{execctxapi.WithStateGetterMetrics(cfg.metrics)}
-	}
-	getter := sd.AsStateGetter(tx, getterOpts...)
+	getter := sd.AsStateGetter(tx, getterOpts)
 	return &LatestStateReader{
 		sharedDomains: sd,
 		getter:        getter,
 		srcTx:         tx,
-		metrics:       cfg.metrics,
+		metrics:       opts.metrics,
 	}
 }
 
@@ -75,7 +66,7 @@ func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error 
 }
 
 func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	enc, step, err = r.getter.GetLatest(d, plainKey)
+	enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
 	}
@@ -91,15 +82,15 @@ func (r *LatestStateReader) Clone(_ kv.TemporalTx) StateReader {
 	// still held the source values; rebinding the getter to the foreign compute
 	// tx reads the wrong database and yields empty state (wrong root).
 	if r.metrics != nil {
-		return NewLatestStateReader(r.srcTx, r.sharedDomains, WithReadMetrics(r.metrics))
+		return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{}.WithMetrics(r.metrics))
 	}
-	return NewLatestStateReader(r.srcTx, r.sharedDomains)
+	return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{})
 }
 
 // CloneForWorker clones into a worker reader that meters into workerCtx's
 // per-worker accumulator. Source tx preserved, same as Clone.
 func (r *LatestStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader {
-	return NewLatestStateReader(r.srcTx, r.sharedDomains, WithReadMetrics(kvmetrics.MetricsFromContext(workerCtx)))
+	return NewLatestStateReader(r.srcTx, r.sharedDomains, LatestStateReaderOptions{}.WithMetrics(kvmetrics.MetricsFromContext(workerCtx)))
 }
 
 // HistoryStateReader reads *full* historical state at specified txNum.
@@ -256,7 +247,7 @@ type CommitmentReplayStateReader struct {
 
 func NewCommitmentReplayStateReader(ttx, tx kv.TemporalTx, tsd sd, plainStateAsOf uint64) *CommitmentReplayStateReader {
 	return &CommitmentReplayStateReader{
-		NewCommitmentSplitStateReader(NewLatestStateReader(ttx, tsd), NewHistoryStateReader(tx, plainStateAsOf), false),
+		NewCommitmentSplitStateReader(NewLatestStateReader(ttx, tsd, LatestStateReaderOptions{}), NewHistoryStateReader(tx, plainStateAsOf), false),
 	}
 }
 
@@ -273,7 +264,7 @@ func (r *txLatestReader) WithHistory() bool                           { return f
 func (r *txLatestReader) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
 
 func (r *txLatestReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) ([]byte, kv.Step, error) {
-	enc, step, err := r.tx.GetLatest(d, plainKey)
+	enc, step, err := r.tx.GetLatest(d, plainKey, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, 0, fmt.Errorf("txLatestReader(GetLatest) %q: %w", d, err)
 	}
@@ -365,7 +356,7 @@ var _ StateReader = (*RebuildStateReader)(nil)
 
 func NewRebuildStateReader(tx kv.TemporalTx, sharedDomains sd, plainStateAsOf uint64) *RebuildStateReader {
 	return &RebuildStateReader{
-		commitmentReader: NewLatestStateReader(tx, sharedDomains),
+		commitmentReader: NewLatestStateReader(tx, sharedDomains, LatestStateReaderOptions{}),
 		plainStateReader: NewHistoryStateReader(tx, plainStateAsOf),
 		plainStateAsOf:   plainStateAsOf,
 		sd:               sharedDomains,
@@ -396,7 +387,7 @@ func (r *RebuildStateReader) Clone(tx kv.TemporalTx) StateReader {
 // the per-worker accumulator carried by workerCtx.
 func (r *RebuildStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) StateReader {
 	return &RebuildStateReader{
-		commitmentReader: NewLatestStateReader(tx, r.sd, WithReadMetrics(kvmetrics.MetricsFromContext(workerCtx))),
+		commitmentReader: NewLatestStateReader(tx, r.sd, LatestStateReaderOptions{}.WithMetrics(kvmetrics.MetricsFromContext(workerCtx))),
 		plainStateReader: NewHistoryStateReader(tx, r.plainStateAsOf),
 		plainStateAsOf:   r.plainStateAsOf,
 		sd:               r.sd,

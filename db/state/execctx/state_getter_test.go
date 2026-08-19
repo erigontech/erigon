@@ -21,6 +21,8 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
 )
@@ -33,6 +35,39 @@ type valSizeTx struct {
 
 func (tx valSizeTx) GetLatestValSize(kv.Domain, []byte) (int, bool, error) {
 	return tx.size, tx.found, nil
+}
+
+type latestOptionsCaptureTx struct {
+	kv.TemporalTx
+	sawMetrics bool
+}
+
+func (tx *latestOptionsCaptureTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	metrics, _ := opts.Metrics()
+	tx.sawMetrics = metrics != nil
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func TestPlainGetLatestDoesNotPassNilRequestMetrics(t *testing.T) {
+	metricsEnabled := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = metricsEnabled })
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := &latestOptionsCaptureTx{TemporalTx: roTx}
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	tx.sawMetrics = false
+	key := make([]byte, 20)
+	_, _, err = sd.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
+	require.False(t, tx.sawMetrics)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, key, []byte{1}, 1, nil))
+	_, _, err = sd.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
 }
 
 func TestTemporalTxStateGetterCodePresence(t *testing.T) {

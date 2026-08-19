@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
@@ -81,7 +82,7 @@ type stEnvMarshaling struct {
 }
 
 func MakePreState(chainRules *chain.Rules, tx kv.TemporalRwTx, sd *execctx.SharedDomains, alloc types.GenesisAlloc, blockNum, txNum uint64) (state.StateReader, state.StateWriter) {
-	stateReader, stateWriter := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	stateReader, stateWriter := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	statedb := state.New(stateReader) //ibs
 	for address, account := range alloc {
 		addr := accounts.InternAddress(address)

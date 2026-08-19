@@ -88,14 +88,14 @@ func (c *LatestBatchCache) Get(k []byte, tx kv.TemporalTx, id uint64) ([]byte, e
 			return bytes.Clone(v), nil
 		}
 		c.mu.RUnlock()
-		v, _, err := tx.GetLatest(kv.AccountsDomain, k)
+		v, _, err := tx.GetLatest(kv.AccountsDomain, k, kv.GetLatestOptions{})
 		return v, err
 	}
-	v, _, err := tx.GetLatest(kv.StorageDomain, k)
+	v, _, err := tx.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
 func (c *LatestBatchCache) GetCode(k []byte, tx kv.TemporalTx, id uint64) ([]byte, error) {
-	v, _, err := tx.GetLatest(kv.CodeDomain, k)
+	v, _, err := tx.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
 func (c *LatestBatchCache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*CacheValidationResult, error) {

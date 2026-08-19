@@ -32,13 +32,12 @@ type stateGetter struct {
 var _ execctxapi.StateGetter = (*stateGetter)(nil)
 
 // GetLatest never writes to a process-wide metrics accumulator shared by concurrent readers.
-func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts ...kv.GetLatestOption) ([]byte, kv.Step, error) {
-	cfg := kv.ApplyGetLatestOptions(opts...)
-	metrics, start := cfg.Metrics()
+func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	metrics, start := opts.Metrics()
 	if metrics == nil {
 		metrics = g.m
 	}
-	return g.sd.getLatest(name, g.tx, k, metrics, start, cfg.MaxStep(), g.view)
+	return g.sd.getLatest(name, g.tx, k, metrics, start, opts.MaxStep(), g.view)
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {
@@ -69,12 +68,12 @@ func NewTemporalTxStateGetter(tx kv.TemporalTx) *TemporalTxStateGetter {
 	return &TemporalTxStateGetter{TemporalTx: tx}
 }
 
-func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts ...kv.GetLatestOption) ([]byte, kv.Step, error) {
-	return g.TemporalTx.GetLatest(name, k, opts...)
+func (g *TemporalTxStateGetter) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	return g.TemporalTx.GetLatest(name, k, opts)
 }
 
 func (g *TemporalTxStateGetter) GetCode(addr []byte, _ uint64) ([]byte, bool, error) {
-	code, _, err := g.GetLatest(kv.CodeDomain, addr)
+	code, _, err := g.GetLatest(kv.CodeDomain, addr, kv.GetLatestOptions{})
 	return code, len(code) > 0, err
 }
 

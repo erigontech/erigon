@@ -2722,7 +2722,7 @@ func (at *AggregatorRoTx) DebugRangeLatestFromFiles(domain kv.Domain, from, to [
 func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx) (v []byte, ok bool, err error) {
 	v, ok, err = at.d[name].GetAsOf(k, ts, tx)
 	if name == kv.CommitmentDomain && !ok {
-		v, _, ok, err = at.GetLatest(name, k, tx)
+		v, _, ok, err = at.GetLatest(name, k, tx, kv.GetLatestOptions{})
 	}
 	return v, ok, err
 }
@@ -2736,10 +2736,9 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 	}
 }
 
-func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts ...kv.GetLatestOption) (v []byte, step kv.Step, ok bool, err error) {
-	cfg := kv.ApplyGetLatestOptions(opts...)
-	metrics, start := cfg.Metrics()
-	maxStep := cfg.MaxStep()
+func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts kv.GetLatestOptions) (v []byte, step kv.Step, ok bool, err error) {
+	metrics, start := opts.Metrics()
+	maxStep := opts.MaxStep()
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, maxStep, metrics, start)
 	}
@@ -2751,7 +2750,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts .
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
-		at.cacheLatestBranch(cfg.BranchCache(), k, v, step, step.LastTxNum(at.StepSize()))
+		at.cacheLatestBranch(opts.BranchCache(), k, v, step, step.LastTxNum(at.StepSize()))
 		return v, step, true, nil
 	}
 	var maxTxNum uint64
@@ -2768,7 +2767,7 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts .
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
 	step = kv.Step(fileEndTxNum / at.StepSize())
 	if err == nil {
-		at.cacheLatestBranch(cfg.BranchCache(), k, v, step, fileEndTxNum)
+		at.cacheLatestBranch(opts.BranchCache(), k, v, step, fileEndTxNum)
 	}
 	return v, step, found, err
 }

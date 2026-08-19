@@ -956,11 +956,11 @@ func (m *MemoryMutation) AggTx() any {
 	return m.db.(hasAggCtx).AggTx()
 }
 
-func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte, opts ...kv.GetLatestOption) (v []byte, step kv.Step, err error) {
+func (m *MemoryMutation) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) (v []byte, step kv.Step, err error) {
 	if m.db == nil {
 		return nil, 0, fmt.Errorf("MemoryMutation: domain read requires backing tx (detached overlay)")
 	}
-	return m.db.GetLatest(name, k, opts...)
+	return m.db.GetLatest(name, k, opts)
 }
 
 func (m *MemoryMutation) GetLatestValSize(name kv.Domain, k []byte) (size int, found bool, err error) {
@@ -1163,8 +1163,8 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 
 // Temporal methods — delegate to the independent temporal tx.
 
-func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte, opts ...kv.GetLatestOption) ([]byte, kv.Step, error) {
-	return v.temporalTx.GetLatest(name, k, opts...)
+func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	return v.temporalTx.GetLatest(name, k, opts)
 }
 
 func (v *OverlayTemporalReadView) GetLatestValSize(name kv.Domain, k []byte) (int, bool, error) {

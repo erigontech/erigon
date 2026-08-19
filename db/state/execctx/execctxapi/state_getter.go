@@ -22,21 +22,9 @@ type StateGetterOptions struct {
 	metrics kv.GetLatestMetrics
 }
 
-type StateGetterOption func(StateGetterOptions) StateGetterOptions
-
-func WithStateGetterMetrics(metrics kv.GetLatestMetrics) StateGetterOption {
-	return func(opts StateGetterOptions) StateGetterOptions {
-		opts.metrics = metrics
-		return opts
-	}
-}
-
-func ApplyStateGetterOptions(opts ...StateGetterOption) StateGetterOptions {
-	var cfg StateGetterOptions
-	for i := range opts {
-		cfg = opts[i](cfg)
-	}
-	return cfg
+func (opts StateGetterOptions) WithMetrics(metrics kv.GetLatestMetrics) StateGetterOptions {
+	opts.metrics = metrics
+	return opts
 }
 
 func (opts StateGetterOptions) Metrics() kv.GetLatestMetrics {

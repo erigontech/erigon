@@ -24,6 +24,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -102,7 +103,7 @@ func TestFinalizeReaderSeesBlockCacheWrite(t *testing.T) {
 
 	// Sanity: CurrentCachedReaderV3 (the reader used for non-historic
 	// blocks) sees the post-tx28 value.
-	curReader := NewCurrentCachedReaderV3(domains.AsStateGetter(tx), blockCache)
+	curReader := NewCurrentCachedReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}), blockCache)
 	curAcc, err := curReader.ReadAccountData(addr)
 	require.NoError(t, err)
 	require.NotNil(t, curAcc, "current-cached reader should see the blockCache write")
