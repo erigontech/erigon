@@ -252,12 +252,19 @@ DATASET_DATADIR_GLOBAL="$TESTS_DIR/configs/datadirs/jochemnet/v1/global.yaml"
 DATASET_CONTEXT_DIR="$TESTS_DIR/configs/contexts/repricing/jochemnet/v1/glamsterdam-devnet-7"
 DATASET_CONTEXT_GLOBAL="$DATASET_CONTEXT_DIR/global.yaml"
 DATASET_CLIENTS_CONFIG="$DATASET_CONTEXT_DIR/clients.yaml"
+DATASET_COMPUTE_CONFIG="$DATASET_CONTEXT_DIR/test-source.compute.runner.yaml"
 DATASET_STATEFUL_CONFIG="$DATASET_CONTEXT_DIR/test-source.stateful.runner.yaml"
 
 test -f "$DATASET_DATADIR_GLOBAL" || exit 1
 test -f "$DATASET_CONTEXT_GLOBAL" || exit 1
 test -f "$DATASET_CLIENTS_CONFIG" || exit 1
-test -f "$DATASET_STATEFUL_CONFIG" || exit 1
+
+case "${SUITE_KIND:?set to compute or stateful}" in
+  compute) DATASET_SOURCE_CONFIG="$DATASET_COMPUTE_CONFIG" ;;
+  stateful) DATASET_SOURCE_CONFIG="$DATASET_STATEFUL_CONFIG" ;;
+  *) exit 2 ;;
+esac
+test -f "$DATASET_SOURCE_CONFIG" || exit 1
 
 EXPECTED_AMSTERDAM_ACTIVATION_TS=$(yq -r \
   '.global.env.AMSTERDAM_ACTIVATION_TS // ""' "$DATASET_CONTEXT_GLOBAL")
@@ -313,9 +320,9 @@ write-event watcher on `ORIGINAL_LOWER` and periodically repeat the handle and m
 
 With `method: overlayfs`, the container must mount a task-owned `merged` directory, not either
 protected lower directly. Verify the container's datadir source and the corresponding host overlay
-as one chain. Use `ORIGINAL_LOWER` as `expected_lower` during staging and `ADVANCED_LOWER` during
-smoke and measured runs; replace `/data` only when the effective client config uses another datadir
-target:
+as one chain. Use `ORIGINAL_LOWER` as `expected_lower` for compute and during stateful staging. Use
+`ADVANCED_LOWER` for stateful smoke and measured runs after staging; replace `/data` only when the
+effective client config uses another datadir target:
 
 ```bash
 verify_task_overlay() {
@@ -420,11 +427,49 @@ or fixture-enumeration recipes, assign that path to the shell `RESULTS_DIR`. If 
 measured commands use different results roots, reset `RESULTS_DIR` for each corresponding run; the
 recipes intentionally never fall back to `$TESTS_DIR/results`.
 
-### Stage a pre-run once
+### Run compute with one protected overlay
 
-If the source has no `pre_runs`, skip staging and use `ORIGINAL_LOWER` for the measured run.
-Otherwise, a plain `container-recreate` run would restore the raw lower and replay the bundle for
-every fixture. Build an immutable advanced baseline:
+For compute, require the complete selected source to declare `test-type: compute` and
+`rollback_strategy: none`. Preserve its `pre_runs` map when one exists. Load the dataset context and
+complete compute source rather than either State Actor source or the stateful source:
+
+```text
+compute: configs/global.yaml
+         -> resource-limit config
+         -> $DATASET_DATADIR_GLOBAL
+         -> $DATASET_CONTEXT_GLOBAL
+         -> $DATASET_COMPUTE_CONFIG (complete source, including pre_runs)
+         -> $DATASET_CLIENTS_CONFIG
+         -> complete local Docker/OverlayFS config using ORIGINAL_LOWER
+         -> complete local compute instance and optional exact-filter override
+```
+
+Omit the hosted datadir runner config and reassert Docker, the complete OverlayFS datadir map, and
+`data-disk-type: overlayfs` after the source and clients. Do not use
+`--debug.stop-after-prerun`, a no-`pre_runs` source copy, or `ADVANCED_LOWER` for this path. When the
+protected original is at the raw base head, benchmarkoor replays the pre-run once into the compute
+upper before measuring fixtures. When the datadir is already at the pre-run end head, allow the
+replay to be skipped only after block, hash, and state root all match the pinned source.
+
+The same compute container and OverlayFS layer then remain active for every selected fixture, as
+required by `rollback_strategy: none`. Require exactly one task-owned overlay during the run and
+verify it with `verify_task_overlay "$CONTAINER_ID" "$ORIGINAL_LOWER"`. Give every smoke and
+measured command a fresh upper; never reuse or promote a smoke upper. A fresh command may therefore
+replay the pre-run again, but it must never write to `ORIGINAL_LOWER` or the pristine path.
+
+After the smoke, require the persisted rollback strategy to be `none`, the suite label to be
+`test-type: compute`, and the datadir method to be `overlayfs`. The persisted `start_block` is the
+head observed before executor-level pre-runs: it must equal the raw tuple when replay was needed, or
+the post-pre-run tuple when benchmarkoor verified that replay could be skipped. In the raw case,
+require a successful `Pre-run steps completed` record before the first fixture and no failed pre-run
+step. A filtered smoke proves configuration and isolation, not the fixture count or state/cache
+history of an unfiltered compute run.
+
+### Stage a stateful pre-run once
+
+For stateful, require `rollback_strategy: container-recreate`. If the source has no `pre_runs`, skip
+staging and use `ORIGINAL_LOWER` for the measured run. Otherwise, a plain run would restore the raw
+lower and replay the bundle for every fixture. Build an immutable advanced baseline:
 
 1. Run the exact stateful source against `ORIGINAL_LOWER` with
    `--debug.stop-after-prerun`. Omit the CPU and memory performance-limit config during this
@@ -472,7 +517,7 @@ Docker/OverlayFS config, then the local instance and optional exact-filter overr
 local config must reassert `container_runtime: docker`, the complete OverlayFS datadir map, and
 `data-disk-type: overlayfs`.
 
-The two effective config stacks are therefore:
+The two stateful config stacks are therefore:
 
 ```text
 staging: configs/global.yaml
@@ -504,11 +549,17 @@ gate above.
 
 ### Monitor and clean up
 
-The staged design has one fixed overlay visible at its writable merged mount and read-only bind,
-plus at most one disposable per-test overlay. Count unique upper directories or explicitly exclude
-the fixed paths; a raw mountpoint count double-counts the bind. Require the benchmarkoor revision to
-remove the prior per-test container and mount before creating the next one. Stop immediately if two
-per-test uppers persist.
+Compute has one disposable per-run upper over `ORIGINAL_LOWER`; it persists and may grow throughout
+the suite. Budget at least the original lower's allocated size plus the emergency floor, monitor the
+single upper and free space, and stop if another unexplained task overlay appears. After a compute
+run, require its container, overlay mount, upper directory, and benchmarkoor process to be gone;
+then compare the pristine integrity records through `ORIGINAL_LOWER` before unmounting that guard.
+
+The staged stateful design has one fixed overlay visible at its writable merged mount and read-only
+bind, plus at most one disposable per-test overlay. Count unique upper directories or explicitly
+exclude the fixed paths; a raw mountpoint count double-counts the bind. Require the benchmarkoor
+revision to remove the prior per-test container and mount before creating the next one. Stop
+immediately if two per-test uppers persist.
 
 After staging, measure the fixed upper and the complete read-only advanced baseline, then re-check
 the writable filesystem. The per-test upper may have to copy any file visible through
@@ -545,11 +596,11 @@ it. The emergency floor must also cover result, cache, log, and operating headro
 runs, monitor free space and the aggregate size of both the fixed staging upper and the current
 per-test upper; accounting for only the per-test layer understates peak consumption.
 
-After result validation, require zero per-test mounts, directories, containers, and benchmarkoor
-processes. Compare pristine fingerprints, sizes, path count, and critical hashes while
+After stateful result validation, require zero per-test mounts, directories, containers, and
+benchmarkoor processes. Compare pristine fingerprints, sizes, path count, and critical hashes while
 `ORIGINAL_LOWER` is still mounted. Then unmount `ADVANCED_LOWER`, unmount and remove the exact
-disposable staging tree, and unmount `ORIGINAL_LOWER` last. Require zero task overlays and no
-canary in the pristine snapshot.
+disposable staging tree, and unmount `ORIGINAL_LOWER` last. Require zero task overlays and no canary
+in the pristine snapshot.
 
 If a measured run is interrupted, do not use `benchmarkoor cleanup --force` while the staged
 baseline is retained. Stop the exact recorded benchmarkoor PID and its exact client container,
@@ -562,8 +613,20 @@ then wait for or stop its exact benchmarkoor process. After all have exited, unm
 order above, discard only the verified task run root, and restage from `ORIGINAL_LOWER`; never guess
 with a broad mount, process, or cleanup target.
 
-`/home/erigon/jochemnet/erigon_snapshot_pruned` is designated pristine. A validated
-`glamsterdam-devnet-7` stateful run downloaded its 1,463-case archive from the
+`/home/erigon/jochemnet/erigon_snapshot_pruned` is designated pristine. At benchmarkoor-tests
+commit `6805e129a92d368f201f41197c80c5208d7940dc` and benchmarkoor
+`v0.1.0-201-g1e0b9d4`, the hosted
+[`glamsterdam-devnet-7` compute run](https://benchmarkoor.core.ethpandaops.io/runs/1787170961_518a2c68_erigon-bal-full)
+used `rollback_strategy: none`, resolved suite hash `97abdb9608284004`, and passed all 4,884 cases
+from the
+[jochemnet compute GitHub release asset](https://github.com/ethpandaops/benchmarkoor-tests/releases/download/eest-payloads-jochemnet-v1-amsterdam-compute-46d56762-4525339a-r2/eest-payloads-jochemnet-v1-amsterdam-compute-geth.tar.gz).
+Its schelk datadir was already at pre-run end block 24,410,463, hash
+`0x4525339a4634947f0b81d111728a7252542f21419f26d7f0eee8f76a36102c4e`, and state root
+`0xd46c2706dfd14d0f45bda68fd8d5277b31e2f072e7a0096f78a50aa388ac3c6a`, so benchmarkoor verified
+the tuple and skipped the 10,062,313,486-byte pre-run. A raw local snapshot at block 24,402,727 must
+instead replay that pre-run once inside its disposable compute overlay.
+
+A validated `glamsterdam-devnet-7` stateful run downloaded its 1,463-case archive from the
 [jochemnet stateful GitHub release asset](https://github.com/ethpandaops/benchmarkoor-tests/releases/download/eest-payloads-jochemnet-v1-amsterdam-stateful-d9ad55b3-20260807-000744/eest-payloads-jochemnet-v1-amsterdam-stateful-geth.tar.gz),
 found raw head 24,402,727, staged to head 24,410,463, and selected 18 `ether_transfers` fixtures at
 300M gas with an optional filter. Treat that URL, count, heads, and filtered result as

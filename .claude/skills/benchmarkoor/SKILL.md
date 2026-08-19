@@ -344,10 +344,10 @@ lagging and the run must be stopped before mounts and copied-up data accumulate.
 capture the exact benchmarkoor PID and use a separate free-space watchdog that sends `SIGINT` only
 when a predeclared floor is crossed. Never use a broad process match as the kill target.
 
-After benchmarkoor exits, require zero disposable per-test overlay mounts, temporary overlay
-directories, containers, and benchmarkoor processes. A pre-populated run retains its one fixed
-staging overlay only until post-run validation, then removes it in the order in the reference.
-Eager cleanup can leave old deferred container callbacks;
+After benchmarkoor exits, require zero disposable benchmark overlay mounts, temporary overlay
+directories, containers, and benchmarkoor processes. A staged stateful pre-populated run retains
+its one fixed staging overlay only until post-run validation, then removes it in the order in the
+reference. Eager cleanup can leave old deferred container callbacks;
 `No such container` warnings are harmless only when the run exited successfully and all of those
 postconditions pass. Compare the full-tree metadata fingerprint, sizes, and critical hashes before
 and after while the read-only guard is still mounted. Unmount only the guard after those checks
@@ -364,6 +364,12 @@ Protect the original with the same read-only bind, canary, fingerprint, size, an
 checks used for State Actor. Treat download sidecars as hints; verify the live block, hash, and state
 root by booting the exact client through a disposable OverlayFS view.
 
+For a compute source with `rollback_strategy: none`, keep its complete source map, including any
+`pre_runs`, and run it through one disposable OverlayFS layer over the protected original lower.
+Benchmarkoor applies the pre-run at most once in that layer and then retains the same container and
+overlay for the suite. Do not use the stateful no-`pre_runs` copy against a raw lower, and do not
+promote the compute upper into the pristine snapshot.
+
 If the selected stateful source has `pre_runs`, do not replay that bundle for every
 `container-recreate` fixture. Stage it once in a disposable overlay with
 `--debug.stop-after-prerun`. After validating the completion marker and head, stop the retained
@@ -374,19 +380,20 @@ complete test-source override that omits `pre_runs`. Never promote into or write
 pristine snapshot. Copy the complete source map and remove only `pre_runs`; do not construct a
 partial override and rely on merge deletion.
 
-Before smoke or measured fixtures, recalculate the conservative per-test copy-up budget from the
-allocated size of the read-only advanced baseline. The original pristine size is no longer a safe
-bound after staging has created or enlarged files.
+Before stateful smoke or measured fixtures over a staged baseline, recalculate the conservative
+per-test copy-up budget from the allocated size of the read-only advanced baseline. The original
+pristine size is no longer a safe bound after staging has created or enlarged files.
 
-Treat the dataset datadir global, context global, stateful source, and clients as one pinned set.
+Treat the dataset datadir global, context global, selected compute or stateful source, and clients
+as one pinned set.
 Do not reuse the generic State Actor context for a pre-populated dataset; fork variables and client
 arguments must come from the matching dataset context.
 
 Do not load a `schelk` runner config and then override only `method`: Viper retains sibling
 `schelk_options`, producing an invalid mixed datadir config. Load the dataset's global/genesis
-config and supply a complete local OverlayFS datadir map instead. While the staged baseline is
-retained, disable broad cleanup-on-start and monitor one fixed staging overlay plus at most one
-writable per-test overlay.
+config and supply a complete local OverlayFS datadir map instead. A compute run has one writable
+per-run overlay. While a stateful staged baseline is retained, disable broad cleanup-on-start and
+monitor one fixed staging overlay plus at most one writable per-test overlay.
 
 ## Choose and run compute or stateful
 
