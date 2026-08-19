@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 )
 
@@ -130,7 +131,7 @@ const (
 	txlDistance = uint64(100)
 )
 
-func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders uint64) (kv.RwTx, TxLookupCfg, *PruneState) {
+func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders, staleFloor uint64) (kv.RwTx, TxLookupCfg, *PruneState) {
 	t.Helper()
 	dir := t.TempDir()
 	db := memdb.NewTestDB(t, dbcfg.ChainDB)
@@ -162,6 +163,16 @@ func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders uint64) (
 		require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, senders))
 	}
 
+	if staleFloor > 0 {
+		// what the old code left behind: a rotation interrupted mid-table under a high floor
+		var mid common.Hash
+		binary.BigEndian.PutUint64(mid[:], txlBlocks/2)
+		require.NoError(t, state.SavePruneValProgress(tx, kv.TxLookup, &prune.Stat{
+			TxFrom: staleFloor, TxTo: staleFloor + 1,
+			ValueProgress: prune.InProgress, LastPrunedValue: mid[:],
+		}))
+	}
+
 	cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(txlDistance)},
 		dir, freezeblocks.NewBlockReader(nil, nil))
 	s := &PruneState{ID: stages.TxLookup, ForwardProgress: txlBlocks, PruneProgress: pruneProgress,
@@ -189,8 +200,8 @@ func txLookupRow(t *testing.T, tx kv.Tx, block uint64) []byte {
 // and SpawnTxLookup sets PruneProgress to FrozenBlocks().
 func TestPruneTxLookupFloor(t *testing.T) {
 	for _, tc := range []struct {
-		name                                string
-		firstHeader, pruneProgress, senders uint64
+		name                                            string
+		firstHeader, pruneProgress, senders, staleFloor uint64
 	}{
 		{name: "headers_from_genesis", firstHeader: 1},
 		{name: "headers_pruned_to_frontier", firstHeader: txlBlocks - txlDistance},
@@ -198,9 +209,11 @@ func TestPruneTxLookupFloor(t *testing.T) {
 		{name: "forward_stage_watermark", firstHeader: 1, pruneProgress: txlBlocks - txlDistance},
 		// no non-genesis header, so the removed Senders fallback would fire
 		{name: "senders_fallback", firstHeader: txlBlocks + 1, senders: 500},
+		// upgrade: a rotation left mid-table by the old high floor must restart
+		{name: "stale_rotation", firstHeader: 1, staleFloor: txlBlocks - txlDistance},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tx, cfg, s := txLookupFixture(t, tc.firstHeader, tc.pruneProgress, tc.senders)
+			tx, cfg, s := txLookupFixture(t, tc.firstHeader, tc.pruneProgress, tc.senders, tc.staleFloor)
 			before := txLookupCount(t, tx)
 			require.NoError(t, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
 			require.Less(t, txLookupCount(t, tx), before)
