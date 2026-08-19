@@ -22,6 +22,7 @@ func TestNotifyExecutionForkChoiceWaitsOutContention(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	gomock.InOrder(
+		engine.EXPECT().SupportInsertion().Return(true),
 		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
 			Return(nil, execution_client.ErrForkChoiceBusy),
 		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
@@ -33,6 +34,22 @@ func TestNotifyExecutionForkChoiceWaitsOutContention(t *testing.T) {
 	)
 
 	require.NoError(t, err)
+}
+
+func TestNotifyExecutionForkChoiceDoesNotRetryRemoteEngine(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	gomock.InOrder(
+		engine.EXPECT().SupportInsertion().Return(false),
+		engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), nil, clparams.ElectraVersion).
+			Return(nil, execution_client.ErrForkChoiceBusy),
+	)
+
+	err := notifyExecutionForkChoice(
+		t.Context(), engine, common.Hash{0x01}, common.Hash{0x02}, common.Hash{0x03}, clparams.ElectraVersion,
+	)
+
+	require.ErrorIs(t, err, execution_client.ErrForkChoiceBusy)
 }
 
 func TestCanonicalForkChoiceDelayIsNonFatal(t *testing.T) {

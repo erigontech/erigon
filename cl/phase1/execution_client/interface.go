@@ -95,14 +95,21 @@ const (
 	forkChoiceUpdateRetryDelay  = 100 * time.Millisecond
 )
 
-// RetryForkChoiceUpdate gives an earlier asynchronous update a bounded window to settle before
-// resending the canonical head. If the window closes first, it returns the last contention error.
+// RetryForkChoiceUpdate sends one update to a remote engine. For an insertion-capable engine, it
+// gives an earlier asynchronous update a bounded window to settle before resending the canonical
+// head. If the window closes first, it returns the last contention error.
 func RetryForkChoiceUpdate(
 	ctx context.Context,
 	engine ExecutionEngine,
 	finalized, safe, head common.Hash,
 	version clparams.StateVersion,
 ) ([]byte, error) {
+	if err := ctx.Err(); err != nil {
+		return nil, err
+	}
+	if !engine.SupportInsertion() {
+		return engine.ForkChoiceUpdate(ctx, finalized, safe, head, nil, version)
+	}
 	return retryForkChoiceUpdate(
 		ctx, engine, finalized, safe, head, version,
 		forkChoiceUpdateRetryWindow, forkChoiceUpdateRetryDelay,

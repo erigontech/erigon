@@ -73,8 +73,9 @@ func TestDirectForkChoiceUpdateReportsTransientStatusesAsBusy(t *testing.T) {
 
 type forkChoiceSequenceEngine struct {
 	ExecutionEngine
-	errors []error
-	calls  int
+	errors            []error
+	calls             int
+	supportsInsertion bool
 }
 
 func (e *forkChoiceSequenceEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
@@ -83,13 +84,29 @@ func (e *forkChoiceSequenceEngine) ForkChoiceUpdate(context.Context, common.Hash
 	return nil, err
 }
 
+func (e *forkChoiceSequenceEngine) SupportInsertion() bool {
+	return e.supportsInsertion
+}
+
 func TestRetryForkChoiceUpdateWaitsOutContention(t *testing.T) {
-	engine := &forkChoiceSequenceEngine{errors: []error{ErrForkChoiceBusy, ErrForkChoiceUpdateTimeout, nil}}
+	engine := &forkChoiceSequenceEngine{
+		errors:            []error{ErrForkChoiceBusy, ErrForkChoiceUpdateTimeout, nil},
+		supportsInsertion: true,
+	}
 
 	_, err := RetryForkChoiceUpdate(t.Context(), engine, common.Hash{}, common.Hash{}, common.Hash{0x41}, clparams.ElectraVersion)
 
 	require.NoError(t, err)
 	require.Equal(t, 3, engine.calls)
+}
+
+func TestRetryForkChoiceUpdateDoesNotRetryRemoteEngine(t *testing.T) {
+	engine := &forkChoiceSequenceEngine{errors: []error{ErrForkChoiceBusy, nil}}
+
+	_, err := RetryForkChoiceUpdate(t.Context(), engine, common.Hash{}, common.Hash{}, common.Hash{0x41}, clparams.ElectraVersion)
+
+	require.ErrorIs(t, err, ErrForkChoiceBusy)
+	require.Equal(t, 1, engine.calls)
 }
 
 type forkChoiceErrorEngine struct {
@@ -101,6 +118,10 @@ type forkChoiceErrorEngine struct {
 func (e *forkChoiceErrorEngine) ForkChoiceUpdate(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
 	e.calls++
 	return nil, e.err
+}
+
+func (e *forkChoiceErrorEngine) SupportInsertion() bool {
+	return true
 }
 
 func TestRetryForkChoiceUpdateStopsAfterRetryWindow(t *testing.T) {
