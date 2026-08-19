@@ -3167,9 +3167,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// Block finalize runs between transactions, so one EVM serves
 					// every system call of every block. Exec-loop only, like the
 					// rest of this function.
-					if pe.syscallEVM == nil {
-						pe.syscallEVM = protocol.NewSysCallEVM(pe.cfg.chainConfig, pe.cfg.engine, tt.Header, syscallIBS, *pe.cfg.vmConfig)
-					}
 					return protocol.SysCallContractWithEVM(pe.syscallEVM, contract, data, pe.cfg.chainConfig, syscallIBS, tt.Header, pe.cfg.engine, false, *pe.cfg.vmConfig)
 				}
 

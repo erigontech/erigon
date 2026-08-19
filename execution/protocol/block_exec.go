@@ -228,39 +228,24 @@ func ExecuteBlockEphemerally(
 }
 
 func SysCallContract(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	isBor := chainConfig.Bor != nil
-	var author accounts.Address
-	if isBor {
-		author = accounts.InternAddress(header.Coinbase)
-	} else {
-		author = params.SystemAddress
-	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
-	return SysCallContractWithBlockContext(contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
+	return SysCallContractWithEVM(nil, contract, data, chainConfig, ibs, header, engine, constCall, vmCfg)
 }
 
 func SysCallContractWithBlockContext(contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	return sysCallContract(nil, contract, data, chainConfig, ibs, blockContext, constCall, vmCfg)
 }
 
-// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse. header only
-// seeds the block context; every call resets it.
-func NewSysCallEVM(chainConfig *chain.Config, engine rules.EngineReader, header *types.Header, ibs *state.IntraBlockState, vmCfg vm.Config) *vm.EVM {
-	var author accounts.Address
-	if chainConfig.Bor != nil {
-		author = accounts.InternAddress(header.Coinbase)
-	} else {
-		author = params.SystemAddress
-	}
-	blockContext := NewEVMBlockContext(header, GetHashFn(header, nil), engine, author, chainConfig)
-	return vm.NewEVM(blockContext, evmtypes.TxContext{}, ibs, chainConfig, vmCfg)
+// NewSysCallEVM builds an EVM for SysCallContractWithEVM to reuse. Only
+// chainConfig survives a call, so there is nothing else to seed.
+func NewSysCallEVM(chainConfig *chain.Config, vmCfg vm.Config) *vm.EVM {
+	return vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vmCfg)
 }
 
 // SysCallContractWithEVM runs a system call on an EVM the caller owns instead of
-// building one per call. System calls run at block start and block end, when the
-// caller's EVM is between transactions, so its frame state is free to take.
-// The EVM must belong to the calling goroutine and carry chainConfig; a mismatch
-// or a nil EVM falls back to allocating one.
+// building one per call. The EVM must belong to the calling goroutine, and the
+// call overwrites its block context, tx context, IntraBlockState and vm.Config,
+// so the caller must not need any of those to survive. A nil EVM, or one built
+// for a different chainConfig, falls back to allocating one.
 func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, header *types.Header, engine rules.EngineReader, constCall bool, vmCfg vm.Config) (result []byte, err error) {
 	var author accounts.Address
 	if chainConfig.Bor != nil {
