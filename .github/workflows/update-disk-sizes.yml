@@ -4,9 +4,9 @@ name: Docs - Update disk sizes
 # Archive sizes are not handled here: they are read manually from the Grafana
 # dashboard and committed by hand in a dedicated monthly PR.
 # Downloads the disk-usage artifacts, updates docs/site/src/data/disk-sizes.json,
-# and opens (or updates) a draft PR against a pinned base branch (release/3.5).
+# and opens (or updates) a draft PR against a pinned base branch (release/3.6).
 on:
-  # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.5 for workflow_run events
+  # zizmor: ignore[dangerous-triggers] no checkout of triggering run's head; BASE_BRANCH is pinned to release/3.6 for workflow_run events
   workflow_run:
     workflows:
       - "QA - Sync from scratch (minimal node)"
@@ -25,7 +25,7 @@ on:
         description: "Base branch to update"
         required: true
         # Official docs branch — bump at each release cutover (e.g. 3.5 → 3.6).
-        default: "release/3.5"
+        default: "release/3.6"
       prune_mode:
         description: "Prune mode measured in that run"
         required: true
@@ -99,7 +99,7 @@ jobs:
             printf 'prune_mode=%s\n' "$MODE" >> "$GITHUB_OUTPUT"
             printf 'source_run_id=%s\n' "$WORKFLOW_RUN_ID" >> "$GITHUB_OUTPUT"
             # Official docs branch — bump at each release cutover (e.g. 3.5 → 3.6).
-            printf 'base_branch=release/3.5\n' >> "$GITHUB_OUTPUT"
+            printf 'base_branch=release/3.6\n' >> "$GITHUB_OUTPUT"
           fi
 
       - name: Generate GitHub App token
