@@ -44,8 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 )
 
-const foreseenProposers = 16
-
 var (
 	ErrEIP4844DataNotAvailable       = errors.New("EIP-4844 blob data is not available")
 	ErrEIP7594ColumnDataNotAvailable = errors.New("EIP-7594 column data is not available")
@@ -60,7 +58,7 @@ func verifyKzgCommitmentsAgainstTransactions(cfg *clparams.BeaconChainConfig, bl
 	expectedBlobHashes := []common.Hash{}
 	transactions, err := types.DecodeTransactions(block.Body.ExecutionPayload.Transactions.UnderlyngReference())
 	if err != nil {
-		return fmt.Errorf("unable to decode transactions: %v", err)
+		return fmt.Errorf("unable to decode transactions: %w", err)
 	}
 	block.Body.BlobKzgCommitments.Range(func(index int, value *cltypes.KZGCommitment, length int) bool {
 		var kzg common.Hash
@@ -207,7 +205,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 					if errors.Is(err, ErrEIP4844DataNotAvailable) {
 						return err
 					}
-					return fmt.Errorf("OnBlock: data is not available for block %x: %v", common.Hash(blockRoot), err)
+					return fmt.Errorf("OnBlock: data is not available for block %x: %w", common.Hash(blockRoot), err)
 				}
 			}
 		}
@@ -225,7 +223,7 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		if newPayload && f.engine != nil && !isVerifiedExecutionPayload {
 			if block.Version() >= clparams.DenebVersion {
 				if err := verifyKzgCommitmentsAgainstTransactions(f.beaconCfg, block.Block); err != nil {
-					return fmt.Errorf("OnBlock: failed to process kzg commitments: %v", err)
+					return fmt.Errorf("OnBlock: failed to process kzg commitments: %w", err)
 				}
 			}
 			timeStartExec := time.Now()
@@ -241,31 +239,31 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			switch payloadStatus {
 			case execution_client.PayloadStatusNone:
 				log.Debug("OnBlock: EL failed to process block", "block", common.Hash(blockRoot), "err", err)
-				return fmt.Errorf("%w: %v", ErrNewPayloadNoStatus, err)
+				return fmt.Errorf("%w: %w", ErrNewPayloadNoStatus, err)
 			case execution_client.PayloadStatusNotValidated:
 				log.Trace("OnBlock: block is not validated yet", "block", common.Hash(blockRoot))
 				// optimistic block candidate
 				if err := f.optimisticStore.AddOptimisticCandidate(blockRoot, block.Block); err != nil {
-					return fmt.Errorf("failed to add block to optimistic store: %v", err)
+					return fmt.Errorf("failed to add block to optimistic store: %w", err)
 				}
 			case execution_client.PayloadStatusInvalidated:
 				log.Warn("OnBlock: block is invalid", "block", common.Hash(blockRoot), "err", err)
 				f.forkGraph.MarkHeaderAsInvalid(blockRoot)
 				// remove from optimistic candidate
 				if err := f.optimisticStore.InvalidateBlock(blockRoot, block.Block); err != nil {
-					return fmt.Errorf("failed to remove block from optimistic store: %v", err)
+					return fmt.Errorf("failed to remove block from optimistic store: %w", err)
 				}
 				return errors.New("block is invalid")
 			case execution_client.PayloadStatusValidated:
 				log.Trace("OnBlock: block is validated", "block", common.Hash(blockRoot))
 				// remove from optimistic candidate
 				if err := f.optimisticStore.ValidateBlock(blockRoot, block.Block); err != nil {
-					return fmt.Errorf("failed to validate block in optimistic store: %v", err)
+					return fmt.Errorf("failed to validate block in optimistic store: %w", err)
 				}
 				f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
 			}
 			if err != nil {
-				return fmt.Errorf("newPayload failed: %v", err)
+				return fmt.Errorf("newPayload failed: %w", err)
 			}
 		}
 	}
@@ -545,7 +543,7 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 	// Blobs are preverified so we skip verification, we just need to check if commitments checks out.
 	sidecars, foundOnDisk, err := f.blobStorage.ReadBlobSidecars(ctx, slot, blockRoot)
 	if err != nil {
-		return fmt.Errorf("cannot check data avaiability. failed to read blob sidecars: %v", err)
+		return fmt.Errorf("cannot check data availability. failed to read blob sidecars: %w", err)
 	}
 	if !foundOnDisk {
 		sidecars = f.hotSidecars[blockRoot] // take it from memory
@@ -566,7 +564,7 @@ func (f *ForkChoiceStore) isDataAvailable(ctx context.Context, slot uint64, bloc
 			return cmp.Compare(a.Index, b.Index)
 		})
 		if err := f.blobStorage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
-			return fmt.Errorf("failed to write blob sidecars: %v", err)
+			return fmt.Errorf("failed to write blob sidecars: %w", err)
 		}
 	}
 	return nil

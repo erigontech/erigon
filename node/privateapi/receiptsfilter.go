@@ -17,6 +17,7 @@
 package privateapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -131,7 +132,7 @@ func (a *ReceiptsFilterAggregator) subscribeReceipts(server remoteproto.ETHBACKE
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateReceiptsFilter(filter, filterReq)
 	}
-	if recvErr != io.EOF {
+	if !errors.Is(recvErr, io.EOF) {
 		return fmt.Errorf("receiving receipts filter request: %w", recvErr)
 	}
 	return nil

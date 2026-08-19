@@ -27,15 +27,6 @@ import (
 	"github.com/erigontech/erigon/common/ssz"
 )
 
-func convertDepthToChunkSize(d int) int {
-	return (1 << d) // just power of 2
-}
-
-func getTreeCacheSize(listLen int, cacheDepth int) int {
-	treeChunks := convertDepthToChunkSize(cacheDepth)
-	return (listLen + treeChunks - 1) / treeChunks
-}
-
 // byteBasedUint64Slice represents a dynamic Uint64Slice data type that is byte-backed.
 // The underlying storage for the slice is a byte array. This approach allows for efficient
 // memory usage, especially when dealing with large slices.

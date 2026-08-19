@@ -117,7 +117,7 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	}
 	validationState, err := s.proposerPreferencesValidationState(depState, proposalEpoch)
 	if err != nil {
-		return fmt.Errorf("%w: failed to prepare dependent state: %v", ErrIgnore, err)
+		return fmt.Errorf("%w: failed to prepare dependent state: %w", ErrIgnore, err)
 	}
 	if err := s.validateProposerPreferencesWithState(msg, validationState); err != nil {
 		return fmt.Errorf("proposer preferences validation failed: %w", err)
