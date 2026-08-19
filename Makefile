@@ -463,6 +463,10 @@ check-kurtosis:
 		exit 1; \
 	fi; \
 
+## test-kurtosis-setup:             test the bounded Kurtosis CI setup
+test-kurtosis-setup:
+	@bash .github/actions/setup-kurtosis/setup.test.sh
+
 kurtosis-pectra-assertoor:	check-kurtosis
 	@$(call run-kurtosis-assertoor,".github/workflows/kurtosis/pectra.io")
 
