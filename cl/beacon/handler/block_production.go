@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/pool"
@@ -288,8 +289,8 @@ func shouldRetryGetPayload(now, deadline time.Time) bool {
 	return now.Before(deadline)
 }
 
-// pollAssembledPayload waits out the build window, then polls get (which stops the EL builder) until
-// it returns a payload or the deadline passes; ok is false when no payload was produced in time.
+// pollAssembledPayload waits out the build window, then polls get until it returns a payload or the
+// request can no longer produce one. ok reports whether a payload was returned.
 func pollAssembledPayload(
 	ctx context.Context,
 	window blockBuilderWindow,
@@ -312,9 +313,13 @@ func pollAssembledPayload(
 	for {
 		// Grab at least once, even past the deadline, so a late produce request still gets a payload.
 		payload, bundles, requestsBundle, blockValue, err := get()
-		if err != nil {
+		switch {
+		case execution_client.IsUnknownPayloadError(err):
+			log.Warn("BlockProduction: execution payload is unknown", "err", err)
+			return nil, nil, nil, nil, false
+		case err != nil:
 			log.Error("BlockProduction: Failed to get payload", "err", err)
-		} else if payload != nil {
+		case payload != nil:
 			return payload, bundles, requestsBundle, blockValue, true
 		}
 		select {

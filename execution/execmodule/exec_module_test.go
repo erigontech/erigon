@@ -53,6 +53,9 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
@@ -109,6 +112,67 @@ func (p *rewindingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovi
 		return nil, p.err
 	}
 	return p.pool.ProvideTxns(ctx, opts...)
+}
+
+type observingTxnProvider struct {
+	txnprovider.TxnProvider
+	txnCounts chan int
+}
+
+type emptyTxnProvider struct{}
+
+func (emptyTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	return nil, nil
+}
+
+type delayedSealEngine struct {
+	rules.Engine
+	started chan struct{}
+	release chan struct{}
+}
+
+type doneObservedContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+func (e *delayedSealEngine) Seal(_ rules.ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
+	close(e.started)
+	go func() {
+		<-e.release
+		results <- block
+	}()
+	return nil
+}
+
+func (p *observingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	txns, err := p.TxnProvider.ProvideTxns(ctx, opts...)
+	if err == nil {
+		p.txnCounts <- len(txns)
+	}
+	return txns, err
+}
+
+func waitForProvidedTxnCount(t *testing.T, txnCounts <-chan int, want int) {
+	t.Helper()
+	timer := time.NewTimer(10 * time.Second)
+	defer timer.Stop()
+	for {
+		select {
+		case got := <-txnCounts:
+			if got == want {
+				return
+			}
+		case <-timer.C:
+			t.Fatalf("transaction provider did not return %d transactions", want)
+		}
+	}
 }
 
 func txPoolHead(block *types.Block) *remoteproto.StateChangeBatch {
@@ -591,6 +655,21 @@ func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m
 	}
 }
 
+func syntheticSlotNumber(parent *types.Block) *uint64 {
+	// Consensus assigns slots independently; synthetic tests reuse block numbers.
+	slotNumber := parent.NumberU64() + 1
+	return &slotNumber
+}
+
+func TestGetAssembledBlockReportsUnknownPayload(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+
+	result, err := m.ExecModule.GetAssembledBlock(t.Context(), 404)
+	require.NoError(t, err)
+	require.True(t, result.Unknown)
+	require.Nil(t, result.Block)
+}
+
 func TestAssembleBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -628,6 +707,62 @@ func TestAssembleBlock(t *testing.T) {
 
 	err = insertValidateAndUfc1By1(ctx, exec, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
+	engine := &delayedSealEngine{
+		Engine:  merge.NewFaker(ethash.NewFaker()),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	t.Cleanup(func() { close(engine.release) })
+	m := execmoduletester.New(t,
+		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
+		execmoduletester.WithEngine(engine),
+	)
+	chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	parent := chainPack.TopBlock
+	beaconRoot := randomHash()
+	payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
+		CustomTxnProvider:     emptyTxnProvider{},
+	}, time.Minute, time.Minute)
+
+	stopped := make(chan error, 1)
+	stopObserved := make(chan struct{})
+	stopCtx := &doneObservedContext{Context: context.Background(), observed: stopObserved}
+	go func() {
+		_, stopErr := payloadBuilder.Stop(stopCtx)
+		stopped <- stopErr
+	}()
+
+	select {
+	case <-engine.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not reach sealing")
+	}
+	select {
+	case <-stopObserved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not begin waiting for the builder")
+	}
+	payloadBuilder.Discard()
+
+	select {
+	case err := <-stopped:
+		require.ErrorIs(t, err, builder.ErrDiscarded)
+	case <-time.After(5 * time.Second):
+		t.Fatal("discarded builder remained blocked waiting for a seal result")
+	}
 }
 
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
