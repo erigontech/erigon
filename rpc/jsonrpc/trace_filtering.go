@@ -312,6 +312,16 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream jsonstream.Stream) error {
+	if req.FromBlock != nil {
+		if err := rejectPending(*req.FromBlock); err != nil {
+			return err
+		}
+	}
+	if req.ToBlock != nil {
+		if err := rejectPending(*req.ToBlock); err != nil {
+			return err
+		}
+	}
 	if gasBailOut == nil {
 		//nolint
 		gasBailOut = new(bool) // false by default

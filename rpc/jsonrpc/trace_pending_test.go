@@ -76,4 +76,14 @@ func TestTracingRejectsPendingTag(t *testing.T) {
 		_, err := traceAPI.ReplayBlockTransactions(ctx, pendingNrOrHash, []string{TraceTypeTrace}, nil, nil)
 		require.ErrorIs(t, err, errPendingNotSupported)
 	})
+
+	t.Run("trace_filter fromBlock", func(t *testing.T) {
+		err := traceAPI.Filter(ctx, TraceFilterRequest{FromBlock: &pendingNrOrHash}, nil, nil, jsonstream.New(io.Discard))
+		require.ErrorIs(t, err, errPendingNotSupported)
+	})
+
+	t.Run("trace_filter toBlock", func(t *testing.T) {
+		err := traceAPI.Filter(ctx, TraceFilterRequest{ToBlock: &pendingNrOrHash}, nil, nil, jsonstream.New(io.Discard))
+		require.ErrorIs(t, err, errPendingNotSupported)
+	})
 }

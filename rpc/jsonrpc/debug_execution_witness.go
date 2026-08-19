@@ -1356,12 +1356,13 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 	tx kv.TemporalTx,
 	blockNrOrHash rpc.BlockNumberOrHash,
 ) (*witnessBlockInfo, error) {
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	// TxNums and commitment history must describe the same block view.
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, err := api.blockWithSendersInView(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, err
 	}

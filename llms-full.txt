@@ -6421,6 +6421,8 @@ Returns traces matching given filter
    * `count`: `Quantity` - (optional) Integer number of traces to display in a batch.
    * `mode`: `String` - (optional) Default is `"union"`, meaning traces matching either address filter are returned. Set to `"intersection"` to only return traces that satisfy both `fromAddress` and `toAddress` filters simultaneously.
 
+   The `'pending'` tag is not supported for either block bound: `trace_filter` scans committed trace history, which has no pending block.
+
 ```js
 params: [{
   "fromBlock": "0x2ed0c4", // 3068100

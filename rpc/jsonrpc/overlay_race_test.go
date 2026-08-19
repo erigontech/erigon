@@ -263,6 +263,21 @@ func TestGetModifiedAccountsByNumber_UsesCommittedEndTag(t *testing.T) {
 	require.NotEmpty(t, result)
 }
 
+func TestResolveWitnessBlockUsesCommittedView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	info, err := api.resolveWitnessBlock(m.Ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+	require.NoError(t, err)
+	require.Equal(t, uint64(overlayRaceChainSize), info.BlockNum)
+	require.NotEqual(t, overlayHeader.Hash(), info.Block.Hash())
+}
+
 // TestGetTransactionByHash_PendingTx_UsesOverlayHead pins that the pending-tx
 // fallback in GetTransactionByHash reads the current header through the block
 // overlay: the returned tx's gas price (derived from that header's base fee)
