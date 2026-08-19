@@ -17,10 +17,16 @@
 package execution_client
 
 import (
+	"context"
 	"encoding/json"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
+
+	"github.com/erigontech/erigon/common"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -29,6 +35,51 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
+
+type fcuErrorEngineStub struct {
+	engineapi.EngineAPI
+	err error
+}
+
+func (s *fcuErrorEngineStub) ForkchoiceUpdatedV3(context.Context, *engine_types.ForkChoiceState, *engine_types.PayloadAttributes) (*engine_types.ForkChoiceUpdatedResponse, error) {
+	return nil, s.err
+}
+
+// A forkchoice update that ran out of time has not been refused: the execution layer may still
+// apply it, and no payload id came back. Reporting that as success left every caller to infer a
+// timeout from an empty id, which reads identically to an execution layer that is syncing.
+func TestForkChoiceUpdateReportsATimeoutRatherThanAnEmptySuccess(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		err  error
+	}{
+		{"context deadline", context.DeadlineExceeded},
+		{"grpc deadline", status.Error(codes.DeadlineExceeded, "context deadline exceeded")},
+		{"legacy grpc string", errors.New("rpc error: code = DeadlineExceeded desc = context deadline exceeded")},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			cc := &ExecutionClientEngine{engine: &fcuErrorEngineStub{err: tc.err}, beaconCfg: &cfg}
+
+			id, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
+
+			require.Nil(t, id)
+			require.ErrorIs(t, err, ErrForkChoiceUpdateTimeout)
+		})
+	}
+}
+
+// A failure that is not a timeout keeps reporting as an ordinary failure, so a caller that retries
+// only on timeouts does not retry a rejection forever.
+func TestForkChoiceUpdateDoesNotCallEveryFailureATimeout(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cc := &ExecutionClientEngine{engine: &fcuErrorEngineStub{err: errors.New("boom")}, beaconCfg: &cfg}
+
+	_, err := cc.ForkChoiceUpdate(t.Context(), common.Hash{}, common.Hash{}, common.Hash{}, nil, clparams.DenebVersion)
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrForkChoiceUpdateTimeout)
+}
 
 type beaconCfgEngineStub struct {
 	engineapi.EngineAPI

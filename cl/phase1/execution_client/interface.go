@@ -18,7 +18,11 @@ package execution_client
 
 import (
 	"context"
+	"errors"
 	"math/big"
+
+	"google.golang.org/grpc/codes"
+	"google.golang.org/grpc/status"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -29,7 +33,27 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
-var errContextExceeded = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
+// ErrForkChoiceUpdateTimeout reports that the execution layer did not answer a forkchoice update
+// in time. The update is not refused by it - the execution layer may still apply it - and no
+// payload id came back, so a caller that needed one has to treat this as a failure rather than as
+// an empty success.
+var ErrForkChoiceUpdateTimeout = errors.New("forkchoice update timed out")
+
+// legacyGrpcDeadlineMessage is what a deadline used to be recognised by. Kept as a last resort for
+// a transport that reports one without a status code or a wrapped context error.
+const legacyGrpcDeadlineMessage = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
+
+// isDeadlineExceeded reports whether err is the execution layer running out of time, by the
+// context, by the gRPC status, or by the message a transport that carries neither would produce.
+func isDeadlineExceeded(err error) bool {
+	if errors.Is(err, context.DeadlineExceeded) {
+		return true
+	}
+	if status.Code(err) == codes.DeadlineExceeded {
+		return true
+	}
+	return err.Error() == legacyGrpcDeadlineMessage
+}
 
 // ExecutionEngine is used only for syncing up very close to chain tip and to stay in sync.
 // It pretty much mimics engine API.
