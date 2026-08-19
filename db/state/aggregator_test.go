@@ -809,3 +809,21 @@ func setupAggSnapRepo(t *testing.T, dirs datadir.Dirs, genRepo func(stepSize uin
 		Schema:                 schema,
 	}, log.New())
 }
+
+// TestRunningMergesGaugeIgnoresEmptyStep pins that domain_running_merges counts merges
+// and not merge polls: mergeLoopStep still runs findMergeRange and cleanAfterMerge when
+// there is no range, and a scrape landing there used to read one merge in flight.
+func TestRunningMergesGaugeIgnoresEmptyStep(t *testing.T) {
+	_, agg := testDbAndAggregatorv3(t, 10)
+
+	var duringCleanup float64
+	var cleanupRan bool
+	agg.OnFilesChange(func([]string) {}, func([]string) {
+		duringCleanup = mxRunningMerges.GetValue()
+		cleanupRan = true
+	})
+
+	require.NoError(t, agg.MergeLoop(t.Context()))
+	require.True(t, cleanupRan, "cleanAfterMerge must run, else the assertion below is vacuous")
+	require.Zero(t, duringCleanup, "no range to merge, so no merge is running")
+}
