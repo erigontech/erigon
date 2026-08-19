@@ -33,11 +33,12 @@ var _ execctxapi.StateGetter = (*stateGetter)(nil)
 
 // GetLatest never writes to a process-wide metrics accumulator shared by concurrent readers.
 func (g *stateGetter) GetLatest(name kv.Domain, k []byte, opts ...kv.GetLatestOption) ([]byte, kv.Step, error) {
-	metrics, start := kv.ApplyGetLatestOptions(opts...)
+	cfg := kv.ApplyGetLatestOptions(opts...)
+	metrics, start := cfg.Metrics()
 	if metrics == nil {
 		metrics = g.m
 	}
-	return g.sd.getLatest(name, g.tx, k, metrics, start, g.view)
+	return g.sd.getLatest(name, g.tx, k, metrics, start, cfg.MaxStep(), g.view)
 }
 
 func (g *stateGetter) GetCode(addr []byte, txNum uint64) ([]byte, bool, error) {

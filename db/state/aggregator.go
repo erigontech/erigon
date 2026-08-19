@@ -2727,22 +2727,38 @@ func (at *AggregatorRoTx) GetAsOf(name kv.Domain, k []byte, ts uint64, tx kv.Tx)
 	return v, ok, err
 }
 
+func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.Step, txNum uint64) {
+	if !enabled || len(v) == 0 {
+		return
+	}
+	if branchCache := at.BranchCache(); branchCache != nil {
+		branchCache.Put(k, v, uint64(step), txNum)
+	}
+}
+
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts ...kv.GetLatestOption) (v []byte, step kv.Step, ok bool, err error) {
-	metrics, start := kv.ApplyGetLatestOptions(opts...)
+	cfg := kv.ApplyGetLatestOptions(opts...)
+	metrics, start := cfg.Metrics()
+	maxStep := cfg.MaxStep()
 	if domain != kv.CommitmentDomain {
-		return at.d[domain].getLatest(k, tx, metrics, start)
+		return at.d[domain].getLatest(k, tx, maxStep, metrics, start)
 	}
 	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx)
 	if err != nil {
 		return nil, 0, false, err
 	}
-	if ok {
+	if ok && step <= maxStep {
 		if metrics != nil && dbg.KVReadLevelledMetrics {
 			metrics.UpdateDbReads(domain, start)
 		}
+		at.cacheLatestBranch(cfg.BranchCache(), k, v, step, step.LastTxNum(at.StepSize()))
 		return v, step, true, nil
 	}
-	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, 0)
+	var maxTxNum uint64
+	if maxStep != kv.NoStepBound {
+		maxTxNum = maxStep.LastTxNum(at.StepSize())
+	}
+	v, found, fileStartTxNum, fileEndTxNum, err := at.d[domain].getLatestFromFiles(k, maxTxNum)
 	if !found {
 		return nil, 0, false, err
 	}
@@ -2750,7 +2766,11 @@ func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts .
 		metrics.UpdateFileReadsUnique(domain, k, start)
 	}
 	v, err = at.replaceShortenedKeysInBranch(k, commitment.BranchData(v), fileStartTxNum, fileEndTxNum)
-	return v, kv.Step(fileEndTxNum / at.StepSize()), found, err
+	step = kv.Step(fileEndTxNum / at.StepSize())
+	if err == nil {
+		at.cacheLatestBranch(cfg.BranchCache(), k, v, step, fileEndTxNum)
+	}
+	return v, step, found, err
 }
 
 func (at *AggregatorRoTx) GetLatestValSize(domain kv.Domain, k []byte, tx kv.Tx) (size int, ok bool, err error) {

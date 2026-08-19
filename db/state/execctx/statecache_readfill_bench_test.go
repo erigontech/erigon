@@ -25,6 +25,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
 // benchSeedDb commits one account so the domain tables are non-empty for
@@ -113,4 +115,28 @@ func BenchmarkGetLatestColdNegativeRw(b *testing.B) { benchColdNegativeReads(b, 
 
 func BenchmarkGetLatestColdNegativeRwNoCache(b *testing.B) {
 	benchColdNegativeReads(b, false, true)
+}
+
+func BenchmarkGetLatestColdNegativeMeteredNoCache(b *testing.B) {
+	db := benchSeedDb(b)
+	tx, err := db.BeginTemporalRo(b.Context())
+	require.NoError(b, err)
+	defer tx.Rollback()
+	sd, err := execctx.NewSharedDomains(b.Context(), tx, log.New())
+	require.NoError(b, err)
+	defer sd.Close()
+	getter := sd.AsStateGetter(tx, execctxapi.WithStateGetterMetrics(kvmetrics.NewDomainMetrics()))
+	key := make([]byte, 20)
+	key[0] = 0x02
+	b.ResetTimer()
+	for i := 0; i < b.N; i++ {
+		binary.BigEndian.PutUint64(key[12:], uint64(i)+1)
+		v, _, err := getter.GetLatest(kv.AccountsDomain, key)
+		if err != nil {
+			b.Fatal(err)
+		}
+		if len(v) != 0 {
+			b.Fatalf("expected a negative, got %x", v)
+		}
+	}
 }

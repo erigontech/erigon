@@ -459,26 +459,54 @@ type GetLatestMetrics interface {
 	UpdateFileReadsUnique(domain Domain, key []byte, start time.Time)
 }
 
-type getLatestOptions struct {
-	metrics GetLatestMetrics
-	start   time.Time
+type GetLatestOptions struct {
+	metrics     GetLatestMetrics
+	start       time.Time
+	maxStep     Step
+	branchCache bool
 }
 
-type GetLatestOption func(*getLatestOptions)
+type GetLatestOption func(GetLatestOptions) GetLatestOptions
 
 func WithGetLatestMetrics(metrics GetLatestMetrics, start time.Time) GetLatestOption {
-	return func(opts *getLatestOptions) {
-		opts.metrics = metrics
-		opts.start = start
+	return func(opts GetLatestOptions) GetLatestOptions {
+		opts.metrics, opts.start = metrics, start
+		return opts
 	}
 }
 
-func ApplyGetLatestOptions(opts ...GetLatestOption) (GetLatestMetrics, time.Time) {
-	var cfg getLatestOptions
-	for _, opt := range opts {
-		opt(&cfg)
+func WithGetLatestMaxStep(maxStep Step) GetLatestOption {
+	return func(opts GetLatestOptions) GetLatestOptions {
+		opts.maxStep = min(opts.maxStep, maxStep)
+		return opts
 	}
-	return cfg.metrics, cfg.start
+}
+
+func WithGetLatestBranchCache() GetLatestOption {
+	return func(opts GetLatestOptions) GetLatestOptions {
+		opts.branchCache = true
+		return opts
+	}
+}
+
+func ApplyGetLatestOptions(opts ...GetLatestOption) GetLatestOptions {
+	cfg := GetLatestOptions{maxStep: NoStepBound}
+	for i := range opts {
+		cfg = opts[i](cfg)
+	}
+	return cfg
+}
+
+func (opts GetLatestOptions) Metrics() (GetLatestMetrics, time.Time) {
+	return opts.metrics, opts.start
+}
+
+func (opts GetLatestOptions) MaxStep() Step {
+	return opts.maxStep
+}
+
+func (opts GetLatestOptions) BranchCache() bool {
+	return opts.branchCache
 }
 
 type TemporalGetter interface {
