@@ -31,7 +31,7 @@ const (
 	seenBlockCacheSize            = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
 	blockJobsIntervalTick         = 50 * time.Millisecond
 	blockRetryInterval            = time.Second
-	maxDataAvailabilityRetries    = 4
+	maxColumnAvailabilityRetries  = 4
 	// Allows PeerDAS enough time to schedule and download missing columns.
 	deferredColumnAvailabilityExpiry = 3 * time.Minute
 	blobJobsIntervalTick             = 5 * time.Millisecond

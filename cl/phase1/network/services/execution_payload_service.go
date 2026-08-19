@@ -302,7 +302,7 @@ func (s *executionPayloadService) loop(ctx context.Context) {
 	}
 }
 
-// processPendingEnvelopes checks and processes any pending envelopes whose blocks have arrived
+// processPendingEnvelopes retries envelopes after their blocks and required columns arrive.
 func (s *executionPayloadService) processPendingEnvelopes(ctx context.Context) {
 	s.pendingEnvelopes.Range(func(key, value any) bool {
 		pendingKey := key.(pendingEnvelopeKey)

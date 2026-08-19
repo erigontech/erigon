@@ -51,11 +51,11 @@ type proposerIndexAndSlot struct {
 }
 
 type blockJob struct {
-	block                    *cltypes.SignedBeaconBlock
-	creationTime             time.Time
-	retryAfter               time.Time
-	dataAvailabilityAttempts uint8
-	waitingForColumns        bool
+	block                      *cltypes.SignedBeaconBlock
+	creationTime               time.Time
+	retryAfter                 time.Time
+	columnAvailabilityAttempts uint8
+	waitingForColumns          bool
 }
 
 type blockService struct {
@@ -393,16 +393,12 @@ func (b *blockService) processScheduledBlocks(ctx context.Context, now time.Time
 		}
 		if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
 			if isDataAvailabilityError(err) {
-				blockJob.dataAvailabilityAttempts++
-				if blockJob.dataAvailabilityAttempts >= maxDataAvailabilityRetries {
-					if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+				blockJob.retryAfter = b.currentTime().Add(blockRetryInterval)
+				if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+					blockJob.columnAvailabilityAttempts++
+					if blockJob.columnAvailabilityAttempts >= maxColumnAvailabilityRetries {
 						blockJob.waitingForColumns = true
-						blockJob.retryAfter = b.currentTime().Add(blockRetryInterval)
-					} else {
-						b.blocksScheduledForLaterExecution.Delete(blockRoot)
 					}
-				} else {
-					blockJob.retryAfter = b.currentTime().Add(blockRetryInterval)
 				}
 			} else {
 				blockJob.retryAfter = time.Time{}

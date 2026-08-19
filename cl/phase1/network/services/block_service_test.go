@@ -276,18 +276,44 @@ func TestDataAvailabilityRetryDelayStartsAfterAttempt(t *testing.T) {
 	require.Equal(t, finishedAt.Add(blockRetryInterval), value.(*blockJob).retryAfter)
 }
 
-func TestBlobDataAvailabilityRetriesAreBounded(t *testing.T) {
+func TestBlobDataAvailabilityRetriesUntilLateBlobArrival(t *testing.T) {
 	service, store, block, clock := newDataUnavailableBlockJob(t)
 	store.onBlockResult = forkchoice.ErrEIP4844DataNotAvailable
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	for range maxDataAvailabilityRetries + 1 {
+	for range maxColumnAvailabilityRetries {
 		clock.now = clock.now.Add(blockRetryInterval + time.Nanosecond)
 		service.processScheduledBlocks(t.Context(), clock.now)
 	}
 
-	require.Equal(t, maxDataAvailabilityRetries, store.onBlockCalls)
+	require.Equal(t, maxColumnAvailabilityRetries, store.onBlockCalls)
+	_, pending := service.blocksScheduledForLaterExecution.Load(blockRoot)
+	require.True(t, pending)
+
+	store.onBlockResult = nil
+	clock.now = clock.now.Add(blockRetryInterval)
+	service.processScheduledBlocks(t.Context(), clock.now)
+
+	require.Equal(t, maxColumnAvailabilityRetries+1, store.onBlockCalls)
+	_, pending = service.blocksScheduledForLaterExecution.Load(blockRoot)
+	require.False(t, pending)
+}
+
+func TestBlobDataAvailabilityRetryWindowIsBounded(t *testing.T) {
+	service, store, block, clock := newDataUnavailableBlockJob(t)
+	store.onBlockResult = forkchoice.ErrEIP4844DataNotAvailable
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	for range maxColumnAvailabilityRetries {
+		clock.now = clock.now.Add(blockRetryInterval)
+		service.processScheduledBlocks(t.Context(), clock.now)
+	}
+	clock.now = clock.now.Add(blockJobExpiry)
+	service.processScheduledBlocks(t.Context(), clock.now)
+
+	require.Equal(t, maxColumnAvailabilityRetries, store.onBlockCalls)
 	_, pending := service.blocksScheduledForLaterExecution.Load(blockRoot)
 	require.False(t, pending)
 }
@@ -304,17 +330,17 @@ func TestColumnAvailabilityRetryWaitsForDeferredDownload(t *testing.T) {
 	}).AnyTimes()
 	store.peerDas = peerDas
 
-	for range maxDataAvailabilityRetries {
+	for range maxColumnAvailabilityRetries {
 		clock.now = clock.now.Add(blockRetryInterval)
 		service.processScheduledBlocks(t.Context(), clock.now)
 	}
-	require.Equal(t, maxDataAvailabilityRetries, store.onBlockCalls)
+	require.Equal(t, maxColumnAvailabilityRetries, store.onBlockCalls)
 	_, pending := service.blocksScheduledForLaterExecution.Load(blockRoot)
 	require.True(t, pending)
 
 	clock.now = clock.now.Add(blockJobExpiry)
 	service.processScheduledBlocks(t.Context(), clock.now)
-	require.Equal(t, maxDataAvailabilityRetries, store.onBlockCalls)
+	require.Equal(t, maxColumnAvailabilityRetries, store.onBlockCalls)
 	_, pending = service.blocksScheduledForLaterExecution.Load(blockRoot)
 	require.True(t, pending)
 
@@ -323,7 +349,7 @@ func TestColumnAvailabilityRetryWaitsForDeferredDownload(t *testing.T) {
 	clock.now = clock.now.Add(blockRetryInterval)
 	service.processScheduledBlocks(t.Context(), clock.now)
 
-	require.Equal(t, maxDataAvailabilityRetries+1, store.onBlockCalls)
+	require.Equal(t, maxColumnAvailabilityRetries+1, store.onBlockCalls)
 	_, pending = service.blocksScheduledForLaterExecution.Load(blockRoot)
 	require.False(t, pending)
 }
@@ -333,21 +359,21 @@ func TestColumnAvailabilityWaitIsBounded(t *testing.T) {
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 
-	for range maxDataAvailabilityRetries {
+	for range maxColumnAvailabilityRetries {
 		clock.now = clock.now.Add(blockRetryInterval)
 		service.processScheduledBlocks(t.Context(), clock.now)
 	}
-	require.Equal(t, maxDataAvailabilityRetries, store.onBlockCalls)
+	require.Equal(t, maxColumnAvailabilityRetries, store.onBlockCalls)
 
 	clock.now = clock.now.Add(deferredColumnAvailabilityExpiry)
 	service.processScheduledBlocks(t.Context(), clock.now)
 
-	require.Equal(t, maxDataAvailabilityRetries, store.onBlockCalls)
+	require.Equal(t, maxColumnAvailabilityRetries, store.onBlockCalls)
 	_, pending := service.blocksScheduledForLaterExecution.Load(blockRoot)
 	require.False(t, pending)
 }
 
-func TestSchedulingSameBlockPreservesDataAvailabilityRetryBudget(t *testing.T) {
+func TestSchedulingSameBlockPreservesColumnAvailabilityRetryBudget(t *testing.T) {
 	service, _, block, clock := newDataUnavailableBlockJob(t)
 	clock.now = clock.now.Add(blockRetryInterval)
 	service.processScheduledBlocks(t.Context(), clock.now)
@@ -357,7 +383,7 @@ func TestSchedulingSameBlockPreservesDataAvailabilityRetryBudget(t *testing.T) {
 	require.NoError(t, err)
 	value, ok := service.blocksScheduledForLaterExecution.Load(blockRoot)
 	require.True(t, ok)
-	require.Equal(t, uint8(1), value.(*blockJob).dataAvailabilityAttempts)
+	require.Equal(t, uint8(1), value.(*blockJob).columnAvailabilityAttempts)
 }
 
 func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {
