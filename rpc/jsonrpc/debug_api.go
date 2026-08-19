@@ -171,6 +171,9 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 		}
 		return StorageRangeResult{}, err
 	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+		return StorageRangeResult{}, err
+	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 	if err != nil {
@@ -265,6 +268,9 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 			return state.IteratorDump{}, err2
 		}
 		blockNumber = bn
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+		return state.IteratorDump{}, err
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
@@ -611,6 +617,9 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	isCanonical := canonicalHash == blockHash
 	if !isCanonical {
 		return nil, errors.New("block hash is not canonical")
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, *blockNumber); err != nil {
+		return nil, err
 	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)

@@ -673,6 +673,105 @@ func newHeaderAheadTester(t *testing.T) (m *execmoduletester.ExecModuleTester, a
 	return m, aheadHash
 }
 
+// newBlockAheadOfExecutionTester makes the canonical target fully readable as
+// a block while leaving its state and transaction-number index unavailable.
+func newBlockAheadOfExecutionTester(t *testing.T) (m *execmoduletester.ExecModuleTester, aheadHash common.Hash) {
+	t.Helper()
+	m, aheadHash = newHeaderAheadTester(t)
+
+	aheadNumber := uint64(overlayRaceChainSize) + 1
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceHead(tx, aheadHash)
+		return rawdb.WriteBody(tx, aheadHash, aheadNumber, &types.Body{})
+	}))
+	return m, aheadHash
+}
+
+func TestSimulateV1RejectsBlockAheadOfExecution(t *testing.T) {
+	m, aheadHash := newBlockAheadOfExecutionTester(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	request := SimulationRequest{BlockStateCalls: []SimulatedBlock{{}}}
+
+	_, err := api.SimulateV1(m.Ctx, request, rpc.BlockNumberOrHashWithHash(aheadHash, false))
+	require.ErrorContains(t, err, "not executed")
+}
+
+func TestEthWitnessMethodsRejectBlockAheadOfExecution(t *testing.T) {
+	m, aheadHash := newBlockAheadOfExecutionTester(t)
+	require.NoError(t, m.DB.Update(m.Ctx, func(tx kv.RwTx) error {
+		return rawdb.WriteDBCommitmentHistoryEnabled(tx, true)
+	}))
+
+	base := newBaseApiForTest(m)
+	base._txNumReader = base._txNumReader.WithCustomReadTxNumFunc(rejectTxNumsAboveIndex{
+		maxBlock: overlayRaceChainSize,
+		err:      errors.New("txnum lookup beyond execution progress"),
+	})
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	selector := rpc.BlockNumberOrHashWithHash(aheadHash, false)
+
+	t.Run("block", func(t *testing.T) {
+		_, err := api.GetWitness(m.Ctx, selector)
+		require.ErrorContains(t, err, "not executed")
+	})
+
+	t.Run("transaction", func(t *testing.T) {
+		_, err := api.GetTxWitness(m.Ctx, selector, 0)
+		require.ErrorContains(t, err, "not executed")
+	})
+}
+
+func TestDebugExecutionWitnessRejectsBlockAheadOfExecution(t *testing.T) {
+	m, aheadHash := newBlockAheadOfExecutionTester(t)
+	base := newBaseApiForTest(m)
+	base._txNumReader = base._txNumReader.WithCustomReadTxNumFunc(rejectTxNumsAboveIndex{
+		maxBlock: overlayRaceChainSize,
+		err:      errors.New("txnum lookup beyond execution progress"),
+	})
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	info, err := api.resolveWitnessBlock(m.Ctx, tx, rpc.BlockNumberOrHashWithHash(aheadHash, false))
+	require.ErrorContains(t, err, "not executed")
+	require.Nil(t, info)
+}
+
+func TestStorageRangeAtRejectsBlockAheadOfExecution(t *testing.T) {
+	m, aheadHash := newHeaderAheadTester(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	_, err := api.StorageRangeAt(m.Ctx, aheadHash, 0, m.Address, nil, 10)
+	require.ErrorContains(t, err, "not executed")
+}
+
+func TestAccountRangeRejectsBlockAheadOfExecution(t *testing.T) {
+	m, aheadHash := newHeaderAheadTester(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	t.Run("hash", func(t *testing.T) {
+		selector := rpc.BlockNumberOrHashWithHash(aheadHash, false)
+		_, err := api.AccountRange(m.Ctx, selector, m.Address[:], 10, true, true, nil)
+		require.ErrorContains(t, err, "not executed")
+	})
+
+	t.Run("number", func(t *testing.T) {
+		selector := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
+		_, err := api.AccountRange(m.Ctx, selector, m.Address[:], 10, true, true, nil)
+		require.ErrorContains(t, err, "not executed")
+	})
+}
+
+func TestAccountAtRejectsBlockAheadOfExecution(t *testing.T) {
+	m, aheadHash := newHeaderAheadTester(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	_, err := api.AccountAt(m.Ctx, aheadHash, 0, m.Address)
+	require.ErrorContains(t, err, "not executed")
+}
+
 func TestGetLogsBlockHashRequiresBody(t *testing.T) {
 	t.Parallel()
 	m, aheadHash := newHeaderAheadTester(t)

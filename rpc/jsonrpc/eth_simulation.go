@@ -128,16 +128,12 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	}
 
 	// nil filters: committed view — the gate and the simulator below read this same tx.
-	blockNumber, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockParameter, tx, api._blockReader, nil)
+	blockNumber, blockHash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockParameter, tx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
-	latestBlockNumber, err := rpchelper.GetLatestBlockNumber(tx)
-	if err != nil {
+	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return nil, err
-	}
-	if latestBlockNumber < blockNumber {
-		return nil, fmt.Errorf("block number is in the future latest=%d requested=%d", latestBlockNumber, blockNumber)
 	}
 
 	block, err := api.blockWithSendersInView(ctx, tx, blockHash, blockNumber)
@@ -181,7 +177,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 	parent := sim.base
 	blockHashOverrides := ethapi.BlockHashOverrides{}
 	for index, bsc := range simulatedBlocks {
-		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], blockNumber == latestBlockNumber, blockHashOverrides)
+		blockResult, current, err := sim.simulateBlock(ctx, tx, sharedDomains, &bsc, headers[index], parent, headers[:index], latest, blockHashOverrides)
 		if err != nil {
 			return nil, err
 		}

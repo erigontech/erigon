@@ -683,6 +683,9 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	if api.witnessCache != nil && api.witnessCache.HeadCapture() {
 		return nil, errWitnessOutOfWindow
 	}
+	if err := rpchelper.CheckBlockExecuted(tx, blockNr); err != nil {
+		return nil, err
+	}
 
 	if err := api.checkPruneHistory(ctx, tx, blockNr); err != nil {
 		return nil, err
