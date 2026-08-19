@@ -391,6 +391,22 @@ func TestProductionRetriesAForkChoiceUpdateThatIsBusy(t *testing.T) {
 	require.Equal(t, []byte{9, 9, 9, 9, 9, 9, 9, 9}, id)
 }
 
+// Production announces itself before it waits for admission, so between an earlier preparation
+// attempt releasing the gate and production actually entering it, the mutex is free while the
+// announcement stands. Taking the gate there would put preparation in the execution layer for the
+// slot production is already deriving, which is the window the mutex alone does not close.
+func TestPreparationGateRefusesAnnouncedProductionWhileAdmissionIsFree(t *testing.T) {
+	var gate payloadPreparationGate
+
+	gate.proposals.Add(1) // announced, not yet holding admission
+	require.True(t, gate.admission.TryLock(), "precondition: the mutex is free in this window")
+	gate.admission.Unlock()
+
+	_, ok := gate.tryBeginPreparation()
+
+	require.False(t, ok, "preparation must stand off a production that has announced itself")
+}
+
 func TestProductionRetriesAForkChoiceUpdateWithoutPayloadID(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
