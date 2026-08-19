@@ -25,7 +25,7 @@ require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.2.0
-	github.com/anacrolix/go-libutp v1.5.0
+	github.com/anacrolix/go-libutp v1.5.1-0.20260817025621-104d95cd4dc1
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
 	github.com/anacrolix/missinggo/v2 v2.11.0
 	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1
