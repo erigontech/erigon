@@ -588,9 +588,9 @@ func SyncSnapshots(
 }
 
 // BlockFileRetainedUnderCap reports whether a block-segment file ending at
-// `to` survives a download capped at toBlock; toBlock == 0 means no cap. The
-// download progress reporter derives its block target with this same rule, so
-// the target and the downloaded byte total describe the same file set.
+// `to` survives a download capped at toBlock; toBlock == 0 means no cap.
+// Callers deriving a block target must use this same rule, so the target and
+// the downloaded byte total describe the same file set.
 func BlockFileRetainedUnderCap(to, toBlock uint64) bool {
 	return toBlock == 0 || to <= toBlock
 }

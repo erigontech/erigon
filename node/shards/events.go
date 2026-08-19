@@ -330,7 +330,7 @@ type Notifications struct {
 
 	// Snapshot download progress. Nil means no download is in progress;
 	// eth_syncing then reports block-based progress.
-	snapDownload atomic.Pointer[snapDownloadProgress]
+	snapDownload atomic.Pointer[snapDownloadState]
 
 	syncStateLock sync.Mutex
 	lastSyncState *remoteproto.SyncingReply
@@ -340,37 +340,52 @@ func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
 	n.LastNewBlockSeen.Store(blockNum)
 }
 
-// snapDownloadProgress is published as a whole: the byte total is recomputed by
+// snapDownloadState is published as a whole: the byte total is recomputed by
 // the downloader every cycle and grows as torrent metadata arrives, so mixing
 // fields from two samples can report more progress than was downloaded.
-type snapDownloadProgress struct {
+type snapDownloadState struct {
+	phase       snapDownloadPhase
 	done, total uint64
 	targetBlock uint64 // highest block covered by the snapshots being downloaded
+	commitBlock uint64 // block where execution resumes once the download is done
 }
 
-// SetSnapshotDownloadProgress records snapshot-download progress in bytes so
-// eth_syncing can report it as block-based progress. total==0 clears it
-// (download done or not started).
-func (n *Notifications) SetSnapshotDownloadProgress(done, total, targetBlock uint64) {
-	if total == 0 {
-		n.snapDownload.Store(nil)
-		return
-	}
-	n.snapDownload.Store(&snapDownloadProgress{done: done, total: total, targetBlock: targetBlock})
+type snapDownloadPhase uint8
+
+const (
+	snapDownloading snapDownloadPhase = iota
+	snapHandoff
+)
+
+// SetSnapshotDownloading records an in-flight snapshot-download sample in bytes
+// so eth_syncing can report it as block-based progress.
+func (n *Notifications) SetSnapshotDownloading(done, total, targetBlock uint64) {
+	n.snapDownload.Store(&snapDownloadState{done: done, total: total, targetBlock: targetBlock})
 }
 
-// ClearSnapshotDownloadPin drops a terminal (done == total) sample — the pin
-// published at download completion to bridge the handoff to execution — once
-// that handoff window is over, reporting whether it dropped one so the caller
-// can publish the change. An in-flight sample (done < total) is kept: after a
-// failed download it is the last honest progress the node can report.
+// SetSnapshotDownloadHandoff pins progress at the block where execution
+// resumes, bridging the window between a finished download and the first
+// committed execution progress.
+func (n *Notifications) SetSnapshotDownloadHandoff(commitBlock uint64) {
+	n.snapDownload.Store(&snapDownloadState{phase: snapHandoff, commitBlock: commitBlock})
+}
+
+// ClearSnapshotDownload drops the download state, so eth_syncing goes back to
+// reporting block-based progress.
+func (n *Notifications) ClearSnapshotDownload() {
+	n.snapDownload.Store(nil)
+}
+
+// ClearSnapshotDownloadPin ends the handoff on the paths where no committed
+// execution progress will ever end it, reporting whether it dropped one. An
+// in-flight sample is kept: after a failed download it is the last honest
+// progress the node can report.
 func (n *Notifications) ClearSnapshotDownloadPin() bool {
 	s := n.snapDownload.Load()
-	if s == nil || s.done < s.total {
+	if s == nil || s.phase != snapHandoff {
 		return false
 	}
-	n.snapDownload.Store(nil)
-	return true
+	return n.snapDownload.CompareAndSwap(s, nil)
 }
 
 func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {

@@ -466,6 +466,30 @@ func TestDownloaderCompletedFedByDownloadBatch(t *testing.T) {
 	}, 2*time.Second, 10*time.Millisecond, "the download's logging loop must feed Completed()")
 }
 
+// Progress samples carry no batch identity, so a batch must wait for the one in
+// flight instead of blending two disjoint file sets into one sample.
+func TestDownloadSnapshotsSerializesBatches(t *testing.T) {
+	test := newDownloaderTest(t)
+
+	test.downloader.downloadBatchLock.Lock()
+	done := make(chan error, 1)
+	go func() { done <- test.downloader.DownloadSnapshots(t.Context(), nil, "queued batch") }()
+
+	select {
+	case <-done:
+		t.Fatal("a batch must not run while another one is in flight")
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	test.downloader.downloadBatchLock.Unlock()
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(10 * time.Second):
+		t.Fatal("the queued batch must run once the one in flight is done")
+	}
+}
+
 // noProgressDownloaderClient stands in for an external downloader reached over
 // gRPC, which cannot report progress.
 type noProgressDownloaderClient struct {

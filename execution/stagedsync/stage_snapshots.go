@@ -165,8 +165,8 @@ var snapshotDownloadProgressInterval = 2 * time.Second
 // eth_syncing reports progress during the (long) snapshot download. The reply
 // switches to download-based progress only once the first sample arrives, so a
 // downloader with nothing to report never changes the reply shape. Returns a
-// stop func that, on a successful download, pins progress at 100% of the
-// commitment block to bridge the handoff to execution — or clears it when no
+// stop func that, on a successful download, pins progress at the commitment
+// block to bridge the handoff to execution — or clears it when no
 // commitment block came with the snapshots (execution restarts from genesis).
 // No-op when the downloader can't report progress or the target is unknown.
 func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg) func(downloadErr error, commitBlock uint64) {
@@ -211,8 +211,7 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 
 	reporter.ResetProgress()
 
-	setAndPublish := func(done, total, targetBlock uint64) {
-		cfg.notifier.SetSnapshotDownloadProgress(done, total, targetBlock)
+	publishState := func() {
 		if cfg.notifier.Events == nil {
 			return
 		}
@@ -227,9 +226,7 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 	var lastDone, lastTotal uint64
 	publish := func() {
 		done, total := reporter.Completed()
-		// A 100% sample is either the previous phase's terminal one or this phase's
-		// own completion, which the stop func pins.
-		if total == 0 || done >= total {
+		if total == 0 {
 			return
 		}
 		// The downloader refreshes its sample on a slower backoff than the tick,
@@ -238,7 +235,8 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 			return
 		}
 		lastDone, lastTotal = done, total
-		setAndPublish(done, total, target)
+		cfg.notifier.SetSnapshotDownloading(done, total, target)
+		publishState()
 	}
 
 	stopCtx, cancel := context.WithCancel(ctx)
@@ -266,18 +264,20 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 		if downloadErr != nil {
 			return
 		}
-		// Without a commitment block execution starts from genesis, so the pin
-		// would claim the frozen tip for the whole re-execution. Clear instead.
+		// Without a commitment block execution starts from genesis, so a handoff
+		// pin would claim the frozen tip for the whole re-execution. Clear instead.
 		if commitBlock == 0 {
-			setAndPublish(0, 0, 0)
+			cfg.notifier.ClearSnapshotDownload()
+			publishState()
 			return
 		}
-		// Pin at 100% of the commitment block, where execution resumes, instead
-		// of clearing: clearing would report currentBlock=0 until the first-cycle
-		// commit, i.e. a 100%→0% dip. Don't read the downloader here: completion
-		// can land inside the last sampling window, where it still reports (0, 0)
-		// and would clear instead.
-		setAndPublish(1, 1, commitBlock)
+		// Pin at the commitment block, where execution resumes, instead of
+		// clearing: clearing would report currentBlock=0 until the first-cycle
+		// commit, i.e. a 100%→0% dip. The last in-flight sample can map above it
+		// when the snapshot set's commitment lags the headers tip; stepping back
+		// to the block execution resumes from is the honest correction.
+		cfg.notifier.SetSnapshotDownloadHandoff(commitBlock)
+		publishState()
 	}
 }
 
@@ -469,7 +469,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Bump Execution stage progress to the snapshot commitment block so RPC sees a
 	// consistent view immediately, matching what ExecV3 would set on its first run.
 	// Plain assignment: the deferred stopReporter reads this variable, and a
-	// reflexive := here would shadow it and silently disable the handoff pin.
+	// := here would shadow it and silently disable the handoff pin.
 	commitBlock = readCommitmentBlockFromDB(ctx, cfg.db)
 	if commitBlock > 0 {
 		execProgress, err := stages.GetStageProgress(tx, stages.Execution)

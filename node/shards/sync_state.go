@@ -92,16 +92,30 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 		Syncing:          true,
 	}
 
-	// While snapshots are still downloading (before execution has advanced) map
-	// the byte-completion ratio onto the block-based fields so dashboards show
-	// smooth progress: currentBlock = ratio * blocks_to_be_downloaded. The ratio
-	// scales the snapshots' target, not the live head, which an FCU can push past
-	// what the snapshots actually cover.
-	if snap := n.snapDownload.Load(); snap != nil && currentBlock == 0 {
-		ratio := float64(snap.done) / float64(snap.total)
-		reply.CurrentBlock = uint64(ratio * float64(snap.targetBlock))
-		reply.LastNewBlockSeen = max(snap.targetBlock, highestBlock)
-		return reply, nil
+	if snap := n.snapDownload.Load(); snap != nil {
+		switch snap.phase {
+		case snapHandoff:
+			// Committed execution progress means the handoff is over: observing it
+			// here ends the pin on every path, so only a startup pipeline that never
+			// commits needs an owner to end it explicitly.
+			if currentBlock == 0 {
+				reply.CurrentBlock = snap.commitBlock
+				reply.LastNewBlockSeen = max(snap.commitBlock, highestBlock)
+				return reply, nil
+			}
+			n.snapDownload.CompareAndSwap(snap, nil)
+		case snapDownloading:
+			// Map the byte-completion ratio onto the block-based fields so dashboards
+			// show smooth progress: currentBlock = ratio * blocks_to_be_downloaded.
+			// The ratio scales the snapshots' target, not the live head, which an FCU
+			// can push past what the snapshots actually cover. Committed progress is
+			// the floor: a node downloading further snapshots must not report a
+			// position below the one it already reached.
+			ratio := float64(snap.done) / float64(snap.total)
+			reply.CurrentBlock = max(currentBlock, uint64(ratio*float64(snap.targetBlock)))
+			reply.LastNewBlockSeen = max(snap.targetBlock, highestBlock)
+			return reply, nil
+		}
 	}
 
 	if highestBlock == 0 {

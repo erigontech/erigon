@@ -83,7 +83,7 @@ func TestProcessFrozenBlocksOnlySnapDownloadKeepsPin(t *testing.T) {
 	pe, hook, notifications := newPinTestExecutor(t, func(bool, *stagedsync.StageState, stagedsync.Unwinder, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
 		return nil
 	})
-	notifications.SetSnapshotDownloadProgress(1, 1, 100)
+	notifications.SetSnapshotDownloadHandoff(100)
 
 	require.NoError(t, pe.ProcessFrozenBlocks(t.Context(), hook, true))
 
@@ -124,7 +124,7 @@ func TestProcessFrozenBlocksClearsPinOnFailure(t *testing.T) {
 		cancel()
 		return nil
 	})
-	notifications.SetSnapshotDownloadProgress(1, 1, 100)
+	notifications.SetSnapshotDownloadHandoff(100)
 	ch, unsubscribe := notifications.Events.AddSyncStateSubscription()
 	defer unsubscribe()
 
@@ -140,11 +140,38 @@ func TestProcessFrozenBlocksClearsPinOnSnapshotsStageFailure(t *testing.T) {
 	pe, hook, notifications := newPinTestExecutor(t, func(bool, *stagedsync.StageState, stagedsync.Unwinder, *execctx.SharedDomains, kv.TemporalRwTx, log.Logger) error {
 		return errors.New("stage tail failed after the pin")
 	})
-	notifications.SetSnapshotDownloadProgress(1, 1, 100)
+	notifications.SetSnapshotDownloadHandoff(100)
 	ch, unsubscribe := notifications.Events.AddSyncStateSubscription()
 	defer unsubscribe()
 
 	require.Error(t, pe.ProcessFrozenBlocks(t.Context(), hook, false))
 
 	requirePinDropped(t, notifications, ch)
+}
+
+// A publish inside the pipeline reads the Execution bump while it is still
+// uncommitted (BeforeRun publishes with the pipeline's rw tx), which latches the
+// handoff off. If the pipeline then fails, that bump rolls back, so the drop must
+// still reach subscribers — otherwise the last reply they hold claims a position
+// the node never committed.
+func TestProcessFrozenBlocksPublishesDropAfterLatchedPin(t *testing.T) {
+	const bumpedTo = 100
+	var hook *stageloop.Hook
+	pe, h, notifications := newPinTestExecutor(t, func(_ bool, _ *stagedsync.StageState, _ stagedsync.Unwinder, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
+		if err := stages.SaveStageProgress(tx, stages.Execution, bumpedTo); err != nil {
+			return err
+		}
+		hook.NotifySyncState(tx)
+		return errors.New("pipeline failed after the bump was published")
+	})
+	hook = h
+	notifications.SetSnapshotDownloadHandoff(bumpedTo)
+	ch, unsubscribe := notifications.Events.AddSyncStateSubscription()
+	defer unsubscribe()
+
+	require.Error(t, pe.ProcessFrozenBlocks(t.Context(), hook, false))
+
+	last := lastPublished(ch)
+	require.NotNil(t, last, "the drop must be published to subscribers")
+	require.Zero(t, last.CurrentBlock, "the last published reply must not claim the rolled-back bump")
 }

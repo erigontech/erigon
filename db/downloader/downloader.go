@@ -132,10 +132,13 @@ type Downloader struct {
 	manifestReady chan struct{}
 
 	// Latest aggregated stats snapshot, published by the download logging loop
-	// so eth_syncing can report download progress. One download session at a
-	// time: samples carry no batch identity, so concurrent Download calls would
-	// interleave progress over disjoint file sets.
+	// so eth_syncing can report download progress. Samples carry no batch
+	// identity, which is why downloadBatchLock keeps batches from overlapping.
 	lastStats atomic.Pointer[AggStats]
+
+	// Serializes download batches: overlapping batches would blend progress over
+	// disjoint file sets into one sample.
+	downloadBatchLock sync.Mutex
 }
 
 // Completed reports the latest snapshot-download progress in bytes; total is 0
@@ -842,6 +845,8 @@ func (d *Downloader) webSeedUrlStrs() iter.Seq[string] {
 // Logging is bound specific and bound to the lifetime of the call. Target is a name for what we're
 // syncing.
 func (d *Downloader) DownloadSnapshots(ctx context.Context, items []preverifiedSnapshot, target string) (err error) {
+	d.downloadBatchLock.Lock()
+	defer d.downloadBatchLock.Unlock()
 	ctx, cancel := context.WithCancel(ctx)
 	defer cancel()
 	wait, err := d.startSnapshotsDownload(ctx, items, target)

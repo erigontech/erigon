@@ -200,9 +200,10 @@ func (pe *PipelineExecutor) ProcessFrozenBlocks(ctx context.Context, hook *stage
 		if onlySnapDownload {
 			return
 		}
-		if !hook.ClearSnapshotDownloadPin() {
-			return
-		}
+		hook.ClearSnapshotDownloadPin()
+		// Publish unconditionally: a publish inside the pipeline can have latched
+		// the pin off from an uncommitted Execution bump, which a failure then
+		// rolls back. PublishSyncState dedups, so an unchanged reply costs a ro-tx.
 		if viewErr := pe.db.View(context.WithoutCancel(ctx), func(tx kv.Tx) error {
 			hook.NotifySyncState(tx)
 			return nil

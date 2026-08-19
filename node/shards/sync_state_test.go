@@ -85,7 +85,7 @@ func TestBuildSyncingReplyFrozenBlocksRaiseHighestBlock(t *testing.T) {
 func buildReplyWithDownloadForTest(t *testing.T, done, total, targetBlock, executionProgress uint64) *remoteproto.SyncingReply {
 	t.Helper()
 	n, tx := newSyncStateFixture(t, executionProgress)
-	n.SetSnapshotDownloadProgress(done, total, targetBlock)
+	n.SetSnapshotDownloading(done, total, targetBlock)
 	reply, err := n.BuildSyncingReply(tx, 0)
 	require.NoError(t, err)
 	return reply
@@ -102,19 +102,15 @@ func TestBuildSyncingReplySnapshotDownloadMapsRatioToBlocks(t *testing.T) {
 	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
 }
 
-// Once execution has started the download mapping must not apply, even if stale
-// download progress lingers.
-func TestBuildSyncingReplySnapshotDownloadIgnoredAfterExecutionStarts(t *testing.T) {
-	reply := buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 100)
-	require.True(t, reply.Syncing)
-	require.Equal(t, uint64(100), reply.CurrentBlock)
-}
+// After the download completes progress is pinned at the commitment block to
+// bridge the handoff to execution: currentBlock must report that block, not drop
+// to 0 while the Execution stage counter has not yet been updated.
+func TestBuildSyncingReplySnapshotDownloadHandoffPinsCommitmentBlock(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 0)
+	n.SetSnapshotDownloadHandoff(20_000_000)
 
-// After the download completes progress is pinned at 100% (done==total) to bridge
-// the handoff to execution: currentBlock must report the full target, not drop to
-// 0 while the Execution stage counter has not yet been updated.
-func TestBuildSyncingReplySnapshotDownloadCompletePinsFullProgress(t *testing.T) {
-	reply := buildReplyWithDownloadForTest(t, 1000, 1000, 20_000_000, 0)
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
 	require.True(t, reply.Syncing)
 	require.Empty(t, reply.Stages)
 	require.Equal(t, uint64(20_000_000), reply.CurrentBlock)
@@ -129,7 +125,7 @@ func TestBuildSyncingReplySnapshotDownloadDoesNotScaleToLiveHead(t *testing.T) {
 	const targetBlock, liveHead = 20_000_000, 21_000_000
 	n, tx := newSyncStateFixture(t, 0)
 	n.NewLastBlockSeen(liveHead)
-	n.SetSnapshotDownloadProgress(500, 1000, targetBlock)
+	n.SetSnapshotDownloading(500, 1000, targetBlock)
 
 	reply, err := n.BuildSyncingReply(tx, 0)
 	require.NoError(t, err)
@@ -155,8 +151,8 @@ func TestBuildSyncingReplySnapshotDownloadProgressIsPublishedAtomically(t *testi
 				return
 			default:
 			}
-			n.SetSnapshotDownloadProgress(99, 100, target)
-			n.SetSnapshotDownloadProgress(150, 200, target)
+			n.SetSnapshotDownloading(99, 100, target)
+			n.SetSnapshotDownloading(150, 200, target)
 		}
 	}()
 	defer func() {
@@ -171,20 +167,19 @@ func TestBuildSyncingReplySnapshotDownloadProgressIsPublishedAtomically(t *testi
 	}
 }
 
-// Only a terminal sample — the pin bridging the handoff to execution — is
-// dropped: an in-flight sample is the last honest progress after a failed
-// download and must survive. The report tells the caller whether the reply
-// changed, so the transition can be published to subscribers.
+// Only the handoff pin is dropped: an in-flight sample is the last honest
+// progress after a failed download and must survive. The report tells the caller
+// whether the reply changed, so the transition can be published to subscribers.
 func TestClearSnapshotDownloadPin(t *testing.T) {
 	n := NewNotifications(nil)
 
 	require.False(t, n.ClearSnapshotDownloadPin(), "no sample to drop")
 
-	n.SetSnapshotDownloadProgress(400, 1000, 20_000_000)
+	n.SetSnapshotDownloading(400, 1000, 20_000_000)
 	require.False(t, n.ClearSnapshotDownloadPin())
 	require.NotNil(t, n.snapDownload.Load())
 
-	n.SetSnapshotDownloadProgress(1, 1, 20_000_000)
+	n.SetSnapshotDownloadHandoff(20_000_000)
 	require.True(t, n.ClearSnapshotDownloadPin())
 	require.Nil(t, n.snapDownload.Load())
 	require.False(t, n.ClearSnapshotDownloadPin(), "already dropped")
@@ -290,4 +285,31 @@ func TestSubscribeSyncStateBeforeFirstPublishBuildsSeed(t *testing.T) {
 
 	require.NoError(t, n.PublishSyncState(tx, 0))
 	require.Len(t, drainSyncStateEvents(ch), 1, "a publish after subscribing must arrive as an event even when it equals the built seed")
+}
+
+// A node that already has committed execution progress and downloads more
+// snapshots (an upgrade, caplin enabled later) must never report a position
+// below what it committed; below that floor the byte ratio is the progress.
+func TestBuildSyncingReplySnapshotDownloadKeepsCommittedProgress(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 6_000_000)
+	require.True(t, reply.Syncing)
+	require.Equal(t, uint64(6_000_000), reply.CurrentBlock)
+
+	reply = buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 100)
+	require.Equal(t, uint64(5_000_000), reply.CurrentBlock)
+}
+
+// The handoff pin ends where the reply is built: committed execution progress
+// means the handoff is over, so the reply switches back to the stage shape and
+// the state is latched off without any owner signalling the end.
+func TestBuildSyncingReplyHandoffEndsOnceExecutionProgressAppears(t *testing.T) {
+	n, tx := newSyncStateFixture(t, 500)
+	n.NewLastBlockSeen(20_000_000)
+	n.SetSnapshotDownloadHandoff(19_000_000)
+
+	reply, err := n.BuildSyncingReply(tx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(500), reply.CurrentBlock)
+	require.Len(t, reply.Stages, len(stages.AllStages))
+	require.Nil(t, n.snapDownload.Load(), "handoff latched off")
 }

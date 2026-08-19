@@ -235,15 +235,22 @@ func TestSnapshotDownloadProgressReporterResetsStaleProgressAtStart(t *testing.T
 	require.Zero(t, h.currentBlock(t))
 }
 
-func TestSnapshotDownloadProgressReporterSkipsCompleteSample(t *testing.T) {
-	h := newSeededReporterHarness(t, 0)
+// The snapshot set's commitment can lag the headers tip the in-flight samples
+// scale to, so the pin steps back from the last mapped height to the block
+// execution resumes from. That step is the accepted correction: holding the
+// higher number would report a block that is neither committed progress nor the
+// resume point.
+func TestSnapshotDownloadProgressReporterStopPinsCommitmentBlockBelowLastSample(t *testing.T) {
+	const commitBlock = testCommitBlock
+	h := newSeededReporterHarness(t, 499_000)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
-	t.Cleanup(func() { stop(nil, 0) })
 	h.downloader.set(1000, 1000)
+	require.Greater(t, h.awaitEvent(t).CurrentBlock, uint64(commitBlock))
 
-	h.requireNoEvent(t)
-	require.Zero(t, h.currentBlock(t))
+	stop(nil, commitBlock)
+
+	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
 }
 
 func TestSnapshotDownloadProgressReporterSkipsUnknownTotal(t *testing.T) {
