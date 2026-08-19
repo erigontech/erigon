@@ -61,7 +61,10 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 	if number != nil {
 		blockNr = *number
 	}
-	header, _ := api.headerByNumber(ctx, blockNr, tx)
+	header, err := api.headerByNumber(ctx, blockNr, tx)
+	if err != nil {
+		return nil, err
+	}
 	// Ensure we have an actually valid block
 	if header == nil {
 		return nil, errUnknownBlock
@@ -164,7 +167,10 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 	if number != nil {
 		blockNr = *number
 	}
-	header, _ := api.headerByNumber(ctx, blockNr, tx)
+	header, err := api.headerByNumber(ctx, blockNr, tx)
+	if err != nil {
+		return nil, err
+	}
 	// Ensure we have an actually valid block
 	if header == nil {
 		return nil, errUnknownBlock
