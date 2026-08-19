@@ -234,6 +234,7 @@ func execV3(ctx context.Context,
 			blockSrc:          blockSrc,
 		},
 		workerCount: cfg.syncCfg.ExecWorkerCount,
+		syscallEVM:  protocol.NewSysCallEVM(cfg.chainConfig, *cfg.vmConfig),
 	}
 	pe.lastCommittedTxNum.Store(inputTxNum)
 	// blockNum is the next block to execute (from doms.BlockNum()), so the last
