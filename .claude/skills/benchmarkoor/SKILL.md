@@ -1,13 +1,13 @@
 ---
 name: benchmarkoor
-description: Build pristine State Actor datadirs and run repeatable benchmarkoor performance benchmarks against a locally built Erigon image using protected native Linux OverlayFS. Use for first-time benchmarkoor setup, Glamsterdam compute or stateful repricing suites, local client image overrides, pristine-state protection, result extraction, before/after MGas/s comparisons, and cross-client ranking tables.
+description: Build pristine State Actor datadirs or safely reuse pre-populated snapshots, then run repeatable benchmarkoor performance benchmarks against Erigon using protected native Linux OverlayFS. Use for first-time benchmarkoor setup, old-style bloated snapshots, Glamsterdam compute or stateful repricing suites, local client image overrides, pristine-state protection, result extraction, before/after MGas/s comparisons, and cross-client ranking tables.
 ---
 
 # Benchmarkoor
 
-Run benchmarkoor on Linux with native OverlayFS without mutating the pristine State Actor datadir.
-Put a kernel-enforced read-only bind mount in front of the pristine directory and keep all writable
-overlay data in a disposable external directory.
+Run benchmarkoor on Linux with native OverlayFS without mutating the pristine State Actor datadir
+or pre-populated snapshot. Put a kernel-enforced read-only bind mount in front of the pristine
+directory and keep all writable overlay data in a disposable external directory.
 
 ## Read current upstream material
 
@@ -24,8 +24,8 @@ rolling branches, fixture URLs, or image tags still identify the same code.
 
 - Obey the repository's `AGENTS.md`. For Erigon work, build from a dedicated Git worktree rather
   than the primary checkout.
-- Give the completed State Actor directory a name containing `pristine` and never use it as a
-  `direct` runner datadir.
+- Designate the completed State Actor directory or pre-populated snapshot as pristine and never use
+  it as a `direct` runner datadir.
 - Use `method: overlayfs` for these Linux benchmark hosts.
 - Configure `source_dir` to a verified read-only bind mount of the pristine datadir, never to the
   original writable path.
@@ -79,8 +79,8 @@ make build-core
 "$BENCHMARKOOR_BIN" version
 ```
 
-Use the source build because datadir handling, result formats, and State Actor orchestration change
-across benchmarkoor revisions.
+Use the source build because datadir handling, result formats, pre-run handling, and State Actor
+orchestration change across benchmarkoor revisions.
 
 Before a long suite whose rollback strategy is `container-recreate`, verify the selected
 benchmarkoor revision eagerly releases the previous datadir after removing its container. At
@@ -88,7 +88,8 @@ benchmarkoor `709ad43`, cleanup stayed deferred until process teardown, so a sta
 one OverlayFS mount and upper layer per completed fixture. Local patch `ea92a86` was validated to
 release each previous mount before preparing the next; use an upstream equivalent when available.
 Do not infer safety from a successful short command alone: smoke-test the actual binary and assert
-the live overlay count never exceeds one.
+the live disposable-overlay count never exceeds one. A pre-populated run may also retain the one
+fixed staging overlay described below; do not count that fixed upper as a per-test upper.
 
 ## Generate a separate pristine State Actor datadir
 
@@ -236,7 +237,6 @@ runner:
           bal-mode: full
       extra_args:
         - --override.amsterdam=1
-        - --fcu.background.commit=false
         - --exec.no-merge=true
         - --exec.no-prune=true
         - --exec.no-background-maintenance
@@ -276,9 +276,10 @@ sudo mount -o remount,bind,ro "$LOWER_ROOT/erigon"
 findmnt -n -o SOURCE,OPTIONS "$LOWER_ROOT/erigon"
 ```
 
-Require `ro` as a distinct mount option before continuing. Record allocated/apparent size, critical
-file hashes, and a metadata fingerprint that covers every path's type, size, mtime, ctime, mode,
-owner, group, and symlink target:
+Require `ro` as a distinct mount option before continuing. Record allocated/apparent size,
+dataset-appropriate critical file hashes, and a metadata fingerprint that covers every path's
+type, size, mtime, ctime, mode, owner, group, and symlink target. The State Actor files below are
+examples, not a universal list for pre-populated snapshots:
 
 ```bash
 pristine_fingerprint() {
@@ -330,7 +331,7 @@ Use the run-only override above so benchmarkoor writes its disposable overlay un
 and reads from the protected bind. Keep the explicit `data-disk-type: overlayfs` label because an
 upstream runner config may otherwise misclassify published results.
 
-Run a 5-10-fixture smoke subset with the exact binary, config stack, image, and State Actor lower
+Run a 5-10-fixture smoke subset with the exact binary, config stack, image, and protected lower
 before either full suite. During smoke and production runs, periodically require the lower
 mount to remain `ro`, monitor free space, measure the current `upper` directory, and count matching
 OverlayFS mounts. Zero is valid during the handoff between fixtures; more than one means cleanup is
@@ -338,12 +339,39 @@ lagging and the run must be stopped before mounts and copied-up data accumulate.
 capture the exact benchmarkoor PID and use a separate free-space watchdog that sends `SIGINT` only
 when a predeclared floor is crossed. Never use a broad process match as the kill target.
 
-After benchmarkoor exits, require zero matching overlay mounts, temporary overlay directories,
-containers, and benchmarkoor processes. Eager cleanup can leave old deferred container callbacks;
+After benchmarkoor exits, require zero disposable per-test overlay mounts, temporary overlay
+directories, containers, and benchmarkoor processes. A pre-populated run retains its one fixed
+staging overlay only until post-run validation, then removes it in the order in the reference.
+Eager cleanup can leave old deferred container callbacks;
 `No such container` warnings are harmless only when the run exited successfully and all of those
 postconditions pass. Compare the full-tree metadata fingerprint, sizes, and critical hashes before
 and after while the read-only guard is still mounted. Unmount only the guard after those checks
 pass. Never unmount or remove the pristine directory itself.
+
+## Reuse a pre-populated snapshot
+
+Read [Pre-populated snapshot workflow](references/compute-stateful-suites.md#pre-populated-snapshot-workflow)
+before using an existing bloated or pruned datadir. On the jochemnet benchmark host,
+`/home/erigon/jochemnet/erigon_snapshot_pruned` is designated pristine: never configure that path
+directly, run Erigon against it, or use it as an OverlayFS upper or work directory.
+
+Protect the original with the same read-only bind, canary, fingerprint, size, and critical-hash
+checks used for State Actor. Treat download sidecars as hints; verify the live block, hash, and state
+root by booting the exact client through a disposable OverlayFS view.
+
+If the selected stateful source has `pre_runs`, do not replay that bundle for every
+`container-recreate` fixture. Stage it once in a disposable overlay with
+`--debug.stop-after-prerun`, stop the client gracefully, and expose the staged merged directory
+through a second read-only bind. Run smoke and production fixtures with a fresh per-test OverlayFS
+layer over that advanced bind and a complete test-source override that omits `pre_runs`. Never
+promote into or write back to the pristine snapshot. Copy the complete source map and remove only
+`pre_runs`; do not construct a partial override and rely on merge deletion.
+
+Do not load a `schelk` runner config and then override only `method`: Viper retains sibling
+`schelk_options`, producing an invalid mixed datadir config. Load the dataset's global/genesis
+config and supply a complete local OverlayFS datadir map instead. While the staged baseline is
+retained, disable broad cleanup-on-start and monitor one fixed staging overlay plus at most one
+writable per-test overlay.
 
 ## Choose and run compute or stateful
 
@@ -351,6 +379,11 @@ Read [Compute and stateful suites](references/compute-stateful-suites.md) before
 filtering a suite. It defines how to discover the current runner files, distinguish the adjacent
 `glamsterdam-devnet-7-full` context, validate fixture provenance, assemble the ordered config stack,
 and check the completed result.
+
+The selected runner's `runner.benchmark.tests.source.eest_fixtures` map is authoritative for where
+fixtures come from. A missing/empty `runner.benchmark.tests.filter` selects every fixture in that
+source; add a filter only for an explicitly requested subset and never carry a smoke filter into an
+all-fixtures run.
 
 The essential runtime distinction is:
 
