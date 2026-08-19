@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent/metainfo"
@@ -38,6 +39,8 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 func TestConcurrentDownload(t *testing.T) {
@@ -628,6 +631,30 @@ func TestNeverEvictsAfterInitialDownload(t *testing.T) {
 		wantDownload := !st.data || st.metainfo == "matching"
 		require.Equal(wantDownload, download, "%+v", st)
 	}
+}
+
+// The guard has to hold at the entry point that reaches it in production: cmd/downloader --seedbox
+// issues a Download per preverified item whatever cfg.Local says, while erigon's own sync path is
+// gated earlier. The bounded context is so a regression fails instead of waiting on a peer.
+func TestGrpcDownloadKeepsLocalDataAfterInitialDownload(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+	markInitialDownloadComplete(t, d)
+	svr, err := NewGrpcServer(d)
+	require.NoError(err)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	_, err = svr.Download(ctx, &downloaderproto.DownloadRequest{
+		Items: []*downloaderproto.DownloadItem{{
+			Path:        name,
+			TorrentHash: gointerfaces.ConvertAddressToH160(snaptype.Hex2InfoHash("aa")),
+		}},
+	})
+	require.NoError(err)
+
+	require.FileExists(path)
+	require.NoFileExists(path + ".part")
 }
 
 // The snapshot stage writes preverified.toml mid-run, so the rule must be re-read, not cached from
