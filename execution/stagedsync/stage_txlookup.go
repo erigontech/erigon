@@ -31,10 +31,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -74,7 +72,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		pruneTo := cfg.prune.History.PruneTo(endBlock)
 		if startBlock < pruneTo {
 			startBlock = pruneTo
-			if err := s.UpdatePrune(tx, pruneTo); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
+			if err := s.UpdatePrune(tx, pruneTo); err != nil {
 				return err
 			}
 		}
@@ -83,7 +81,7 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 	if cfg.blockReader.FrozenBlocks() > startBlock {
 		// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
 		startBlock = cfg.blockReader.FrozenBlocks()
-		if err := s.UpdatePrune(tx, startBlock); err != nil { // prune func of this stage will use this value to prevent all ancient blocks traversal
+		if err := s.UpdatePrune(tx, startBlock); err != nil {
 			return err
 		}
 	}
@@ -206,45 +204,21 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		return s.Done(tx)
 	}
 	logPrefix := s.LogPrefix()
-	blockFrom := s.PruneProgress
-	if blockFrom == 0 {
-		firstNonGenesisHeader, err := rawdbv3.SecondKey(tx, kv.Headers)
-		if err != nil {
-			return err
-		}
-		if firstNonGenesisHeader != nil {
-			blockFrom = binary.BigEndian.Uint64(firstNonGenesisHeader)
-		} else {
-			execProgress, err := stageProgress(tx, nil, stages.Senders)
-			if err != nil {
-				return err
-			}
-			blockFrom = execProgress
-		}
-	}
-	var blockTo uint64
 
-	// Forward stage doesn't write anything before PruneTo point
-	if cfg.prune.History.Enabled() {
-		blockTo = cfg.prune.History.PruneTo(s.ForwardProgress)
-	} else {
-		blockTo = cfg.blockReader.CanPruneTo(s.ForwardProgress)
-	}
-
-	if blockFrom >= blockTo {
+	blockTo := cfg.blockReader.CanPruneTo(s.ForwardProgress)
+	if blockTo == 0 {
 		return nil
 	}
 
 	txNumReader := cfg.blockReader.TxnumReader()
-	txFrom, err := txNumReader.Min(ctx, tx, blockFrom)
+	// blockTo is exclusive, so the range ends at its first txNum: Min(blockTo) ==
+	// Max(blockTo-1)+1. A block is [Min system][Min+1..Min+len txns][Max system] and
+	// only the txns get rows, so Max(blockTo) took every lookup blockTo has.
+	txTo, err := txNumReader.Min(ctx, tx, blockTo)
 	if err != nil {
-		return fmt.Errorf("txNumReader.Min(%d): %w", blockFrom, err)
+		return fmt.Errorf("txNumReader.Min(%d): %w", blockTo, err)
 	}
-	txTo, err := txNumReader.Max(ctx, tx, blockTo)
-	if err != nil {
-		return fmt.Errorf("txNumReader.Max(%d): %w", blockTo, err)
-	}
-	if txFrom >= txTo {
+	if txTo == 0 {
 		return nil
 	}
 
@@ -252,8 +226,13 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if err != nil {
 		return err
 	}
+	// A record left by the pre-fix floor carries a non-zero TxFrom. Its cursor already
+	// passed rows this floor must delete, and its TxTo came from Max(blockTo) so it
+	// always covers the new Min(blockTo) — it must not short-circuit below.
+	staleFloor := prevStat != nil && prevStat.TxFrom != 0
+
 	// A completed rotation that covers current txTo — nothing more to do.
-	if prevStat != nil && prevStat.TxTo >= txTo && prevStat.ValueProgress == prune.Done {
+	if !staleFloor && prevStat != nil && prevStat.TxTo >= txTo && prevStat.ValueProgress == prune.Done {
 		return nil
 	}
 	if prevStat == nil {
@@ -262,13 +241,22 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 	// Rolling scan: preserve cursor position across txTo advances so each B-tree page
 	// is visited sequentially once per rotation instead of restarting from First() on
-	// every prune cycle. Only reset the cursor when a full rotation has completed.
-	if prevStat.ValueProgress == prune.Done {
+	// every prune cycle. Restart on a completed rotation, and on one left by the
+	// pre-fix floor.
+	if prevStat.ValueProgress == prune.Done || staleFloor {
 		prevStat.ValueProgress = prune.First
 		prevStat.LastPrunedValue = nil
 	}
+	// A rotation may span a blockTo advance: it resumes from a cursor that already
+	// passed rows the widened range now covers. Record the bound the rotation started
+	// with, so completing it does not claim coverage it never achieved.
+	rotationTxTo := txTo
+	if prevStat.ValueProgress == prune.InProgress && prevStat.TxTo > 0 && prevStat.TxTo < txTo {
+		rotationTxTo = prevStat.TxTo
+	}
+
 	// Sync range params so TableScanningPrune won't reset the cursor mid-rotation.
-	prevStat.TxFrom = txFrom
+	prevStat.TxFrom = 0
 	prevStat.TxTo = txTo
 
 	valsRwCursor, err := tx.RwCursor(kv.TxLookup)
@@ -287,20 +275,27 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	pruneTimeout := 2 * time.Second
+	// Chain-tip budget: this runs on the newPayload path, next to the exec-stage
+	// prune that already takes a third of a slot.
+	pruneTimeout := 250 * time.Millisecond
 	if s.CurrentSyncCycle.IsInitialCycle {
 		pruneTimeout = time.Hour
 	}
 	pruneCtx, pruneCancel := context.WithTimeout(ctx, pruneTimeout)
 	defer pruneCancel()
 
-	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", txFrom, txTo, 1,
+	// txFrom stays 0: this table is keyed by txn hash, so it is not sorted by txNum.
+	// The scan cannot seek to a floor nor stop at a ceiling — it walks every key and
+	// tests it — so a floor above 0 skips rows without skipping any work.
+	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", 0, txTo, 1,
 		logEvery, logger, nil, valsCursor, false, prevStat, prune.ValueOffset8StorageMode)
 	if err != nil {
 		return fmt.Errorf("prune TxLookup: %w", err)
 	}
+	logger.Debug(fmt.Sprintf("[%s] prune", logPrefix), "scanned", pruneStat.ScanCountValues,
+		"pruned", pruneStat.PruneCountValues, "status", pruneStat.ValueProgress.String(), "blockTo", blockTo)
 	defer func() {
-		pruneStat.TxFrom, pruneStat.TxTo = txFrom, txTo
+		pruneStat.TxFrom, pruneStat.TxTo = 0, rotationTxTo
 		if e := state.SavePruneValProgress(tx, kv.TxLookup, pruneStat); e != nil {
 			logger.Error("[snapshots] save prune val progress", "name", "txlookup", "err", e)
 		}
