@@ -169,7 +169,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	typeEnums := make(map[string]snaptype.Enum, len(snapshotTypes.KeyValueGetters))
 	for name := range snapshotTypes.KeyValueGetters {
 		enum, ok := snaptype.ParseEnum(name)
-		if !ok || enum < snaptype.MinCaplinEnum+2 || enum >= snaptype.MinBorEnum {
+		if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MinBorEnum {
 			panic(fmt.Sprintf("caplin state snapshot type %q is not registered", name))
 		}
 		typ := enum.Type()
@@ -184,27 +184,33 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	}
 	slices.SortFunc(types, func(a, b snaptype.Type) int { return cmp.Compare(a.Enum(), b.Enum()) })
 
-	return &CaplinStateSnapshots{
+	sn := &CaplinStateSnapshots{
 		BaseRoSnapshots: NewBaseRoSnapshots(cfg, dirs.SnapCaplin, types, types[0], false, logger),
 		snapshotTypes:   snapshotTypes,
 		tmpdir:          dirs.Tmp,
 		typeEnums:       typeEnums,
 	}
+	sn.keepUnindexedlyCovered = true
+	return sn
 }
 
+// SegFileNames walks dirty rather than visible segments: its caller announces freshly
+// dumped files to the seeder, and the visible set is truncated at the first gap, which a
+// partially-filled dump legitimately produces. Visible-backed, everything after a hole is
+// created and then never seeded.
 func (s *CaplinStateSnapshots) SegFileNames(from, to uint64) []string {
-	view := s.View()
-	defer view.Close()
-
 	var res []string
 
 	for _, typ := range s.Types() {
-		for _, seg := range view.view.Segments(typ) {
+		s.WalkDirtySegments(typ.Enum(), func(seg *DirtySegment) bool {
 			if seg.from >= to || seg.to <= from {
-				continue
+				return true
 			}
-			res = append(res, filepath.Join(s.Dir(), seg.src.FileName()))
-		}
+			if name := seg.FileName(); name != "" {
+				res = append(res, filepath.Join(s.Dir(), name))
+			}
+			return true
+		})
 	}
 	return res
 }
@@ -213,9 +219,16 @@ func (s *CaplinStateSnapshots) BlocksAvailable() uint64 {
 	return min(s.SegmentsMax(), s.IndicesMax())
 }
 
-// RemoveOverlaps re-declares the base guard, as CaplinSnapshots.Close already does:
-// `seg retire` holds a nil *CaplinStateSnapshots on any chain without a beacon config,
-// and reaching the embedded pointer to run a promoted method dereferences that nil.
+// Close and RemoveOverlaps re-declare the nil guard rather than inheriting it: the base is
+// embedded by pointer, so reaching it to run a promoted method dereferences a nil receiver
+// before the base's own check. `seg retire` holds a nil on any chain without a beacon config.
+func (s *CaplinStateSnapshots) Close() {
+	if s == nil {
+		return
+	}
+	s.BaseRoSnapshots.Close()
+}
+
 func (s *CaplinStateSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	if s == nil {
 		return nil
@@ -469,7 +482,7 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 
 func caplinStateFileName(snapName string, fromSlot, toSlot uint64) (string, error) {
 	enum, ok := snaptype.ParseEnum(snapName)
-	if !ok || enum < snaptype.MinCaplinEnum+2 || enum >= snaptype.MinBorEnum {
+	if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MinBorEnum {
 		return "", fmt.Errorf("unknown caplin state snapshot type %q", snapName)
 	}
 	typ := enum.Type()

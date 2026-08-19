@@ -109,7 +109,7 @@ func TestAccountLifecycle_LayersOwnTxWrites(t *testing.T) {
 
 	newIBS := func() (*IntraBlockState, *VersionMap) {
 		vm := NewVersionMap(nil)
-		ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), vm)
+		ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx)), vm)
 		ibs.SetTxContext(0, 5)
 		return ibs, vm
 	}
