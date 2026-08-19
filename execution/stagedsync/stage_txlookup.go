@@ -247,6 +247,14 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 		prevStat.ValueProgress = prune.First
 		prevStat.LastPrunedValue = nil
 	}
+	// A rotation may span a blockTo advance: it resumes from a cursor that already
+	// passed rows the widened range now covers. Record the bound the rotation started
+	// with, so completing it does not claim coverage it never achieved.
+	rotationTxTo := txTo
+	if prevStat.ValueProgress == prune.InProgress && prevStat.TxTo > 0 && prevStat.TxTo < txTo {
+		rotationTxTo = prevStat.TxTo
+	}
+
 	// Sync range params so TableScanningPrune won't reset the cursor mid-rotation.
 	prevStat.TxFrom = 0
 	prevStat.TxTo = txTo
@@ -276,8 +284,9 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	pruneCtx, pruneCancel := context.WithTimeout(ctx, pruneTimeout)
 	defer pruneCancel()
 
-	// txFrom stays 0: tableScanningPrune uses it only as a delete predicate, so any
-	// higher floor retains rows without saving traversal.
+	// txFrom stays 0: this table is keyed by txn hash, so it is not sorted by txNum.
+	// The scan cannot seek to a floor nor stop at a ceiling — it walks every key and
+	// tests it — so a floor above 0 skips rows without skipping any work.
 	pruneStat, err := prune.TableScanningPrune(pruneCtx, logPrefix, "txlookup", 0, txTo, 1,
 		logEvery, logger, nil, valsCursor, false, prevStat, prune.ValueOffset8StorageMode)
 	if err != nil {
@@ -286,7 +295,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	logger.Debug(fmt.Sprintf("[%s] prune", logPrefix), "scanned", pruneStat.ScanCountValues,
 		"pruned", pruneStat.PruneCountValues, "status", pruneStat.ValueProgress.String(), "blockTo", blockTo)
 	defer func() {
-		pruneStat.TxFrom, pruneStat.TxTo = 0, txTo
+		pruneStat.TxFrom, pruneStat.TxTo = 0, rotationTxTo
 		if e := state.SavePruneValProgress(tx, kv.TxLookup, pruneStat); e != nil {
 			logger.Error("[snapshots] save prune val progress", "name", "txlookup", "err", e)
 		}
