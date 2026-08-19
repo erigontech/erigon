@@ -88,7 +88,7 @@ type commitmentCalculator struct {
 	spare *commitment.Updates
 
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
-	// instead of reallocated — avoids a fresh prefix-trie arena (16k-node slab) each block.
+	// instead of reallocated — reuse keeps the arena's grown slabs and ext chunks.
 	balUpdates *commitment.Updates
 
 	// state accumulates account/storage values across TX writes.

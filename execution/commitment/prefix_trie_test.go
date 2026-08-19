@@ -306,15 +306,16 @@ func TestPrefixTrieArenaSpansMultipleSlabs(t *testing.T) {
 	assert.Equal(t, prefixSlabMax+5+1 /*root*/, tr.arena.nodeCount())
 	assert.GreaterOrEqual(t, len(tr.arena.slabs), 2)
 
+	grown := len(tr.arena.slabs)
+
 	tr.Reset()
 	assert.Equal(t, 1, tr.arena.nodeCount())
+	assert.Less(t, len(tr.arena.slabs), grown, "Reset must drop the slabs past the budget")
 	held := 0
 	for _, s := range tr.arena.slabs {
 		held += len(s)
 	}
-	assert.GreaterOrEqual(t, held, prefixSlabRetain, "Reset must keep the retained capacity")
-	assert.Less(t, held-len(tr.arena.slabs[len(tr.arena.slabs)-1]), prefixSlabRetain,
-		"Reset must drop every slab past the retention budget")
+	assert.LessOrEqual(t, held, prefixSlabMax, "Reset must not retain more than one max slab's worth")
 }
 
 func TestPrefixArenaGrowsGeometrically(t *testing.T) {
@@ -583,10 +584,14 @@ func TestPlainKeyArenaGrowsGeometrically(t *testing.T) {
 	a.intern(block)
 	require.Equal(t, 2*plainKeyArenaChunkMin, cap(a.buf), "each chunk must double the previous one")
 
-	for range 8 {
+	for cap(a.buf) < plainKeyArenaChunkMax {
 		a.intern(block)
 	}
-	require.LessOrEqual(t, cap(a.buf), plainKeyArenaChunkMax, "chunk size must stay capped")
+	require.Equal(t, plainKeyArenaChunkMax, cap(a.buf))
+	for range 128 {
+		a.intern(block)
+	}
+	require.Equal(t, plainKeyArenaChunkMax, cap(a.buf), "chunk size must stay capped")
 
 	a.reset()
 	require.Empty(t, a.buf)

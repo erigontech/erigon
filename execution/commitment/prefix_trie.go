@@ -27,10 +27,6 @@ import (
 const prefixSlabMin = 256
 const prefixSlabMax = 16384
 
-// Capacity resetArena keeps; anything past it is released so the arena settles at
-// its steady-state size rather than its peak.
-const prefixSlabRetain = 16384
-
 const prefixExtChunkMin = 4 * 1024
 const prefixExtChunkMax = 64 * 1024
 
@@ -110,8 +106,10 @@ func (a *prefixArena) resetArena() {
 		}
 		clear(a.slabs[i][:limit])
 	}
+	// Keep at most one max-slab's worth of capacity so the arena settles at its
+	// steady-state size; releasing the rest is what stops a peak from being pinned.
 	keep, held := 1, len(a.slabs[0])
-	for keep < len(a.slabs) && held < prefixSlabRetain {
+	for keep < len(a.slabs) && held+len(a.slabs[keep]) <= prefixSlabMax {
 		held += len(a.slabs[keep])
 		keep++
 	}

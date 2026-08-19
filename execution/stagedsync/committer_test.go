@@ -319,12 +319,14 @@ func TestHandOffUpdatesRotatesTwoBuffers(t *testing.T) {
 	touch(cc.updates, 1)
 	handed := cc.handOffUpdates()
 	require.Same(t, first, handed, "the filled buffer must be the one handed off")
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
 	require.Same(t, second, cc.updates, "the spare must rotate in")
 	require.Zero(t, cc.updates.Size(), "the rotated-in buffer must be empty")
 
 	touch(cc.updates, 2)
 	handed = cc.handOffUpdates()
 	require.Same(t, second, handed)
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
 	require.Same(t, first, cc.updates, "rotation must reuse the first buffer, not allocate")
 	require.Zero(t, cc.updates.Size(), "the reused buffer must be reset before refilling")
 }
