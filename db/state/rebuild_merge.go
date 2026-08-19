@@ -43,8 +43,6 @@ func keepCommitmentMergeOnly(r *Ranges) {
 func (a *Aggregator) mergeCommitmentStep(ctx context.Context, toTxNum uint64) (somethingDone bool, err error) {
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
-	mxRunningMerges.Inc()
-	defer mxRunningMerges.Dec()
 
 	// Referencing ties the accounts/storage/commitment ranges together, and holding
 	// the other two would stall the merge anyway.
@@ -60,6 +58,9 @@ func (a *Aggregator) mergeCommitmentStep(ctx context.Context, toTxNum uint64) (s
 		a.cleanAfterMerge(nil)
 		return false, nil
 	}
+
+	mxRunningMerges.Inc()
+	defer mxRunningMerges.Dec()
 
 	outs, err := aggTx.filesInRange(r)
 	if err != nil {
