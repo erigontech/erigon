@@ -39,6 +39,9 @@ import (
 // an empty success.
 var ErrForkChoiceUpdateTimeout = errors.New("forkchoice update timed out")
 
+// ErrForkChoiceUpdateNoPayloadID reports that an attribute-bearing update did not start a payload build.
+var ErrForkChoiceUpdateNoPayloadID = errors.New("forkchoice update returned no payload ID")
+
 // legacyGrpcDeadlineMessage is what a deadline used to be recognised by. Kept as a last resort for
 // a transport that reports one without a status code or a wrapped context error.
 const legacyGrpcDeadlineMessage = "rpc error: code = DeadlineExceeded desc = context deadline exceeded"
