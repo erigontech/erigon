@@ -1966,7 +1966,7 @@ The `seg du` estimates table shows the projected disk footprint for each mode gi
 
 v3.5 retargets the **Full** and **Blocks** pruning modes to the EIP-8252 reorg-retention window (262,144 blocks, ~36 days), up from the previous 100,000-block window. This changes **which snapshot files are present on disk** after upgrading — most notably, full nodes prune older block segments down to the window, freeing space. Existing datadirs migrate automatically on first start.
 
-Decide before that first start if you need to keep more than the window: pruning is not reversible, and block data already discarded comes back only by re-syncing. `--prune.distance.blocks=keep-post-merge` retains every post-merge block under Full mode, and `--prune.mode=blocks` keeps every block back to genesis. See [Pruning Modes](pruning-modes) for what each mode keeps.
+Decide before that first start if you need to keep more than the window: pruning is not reversible, and block data already discarded comes back only by re-syncing. To retain every post-merge block under Full mode, pass `--prune.distance.blocks=18446744073709551615` — v3.5 takes this option as a number; the readable `keep-post-merge` alias only exists from v3.6. `--prune.mode=blocks` keeps every block back to genesis. See [Pruning Modes](pruning-modes) for what each mode keeps.
 
 After the first prune pass, run `seg du` to inspect the resulting on-disk breakdown.
 
