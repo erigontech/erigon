@@ -56,6 +56,9 @@ jobs:
           find . -name '*.sh' -not -path './.git/*' -not -path '*/node_modules/*' -print0 \
             | xargs -0 shellcheck --severity=warning
 
+      - name: Test Kurtosis setup
+        run: make test-kurtosis-setup
+
       - uses: ./.github/actions/setup-erigon
         id: erigon
         with:

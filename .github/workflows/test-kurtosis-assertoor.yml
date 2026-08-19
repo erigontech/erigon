@@ -485,21 +485,9 @@ jobs:
           docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
 
       - name: Install Kurtosis CLI and start engine
-        # The engine otherwise bootstraps inside `kurtosis run`, mid-action,
-        # where a registry blip fails the whole test step. Start it here from
-        # the pre-loaded images, with cheap retries.
-        run: |
-          echo "deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
-          sudo apt-get update
-          sudo apt-get install -y kurtosis-cli=${KURTOSIS_VERSION}
-          kurtosis analytics disable
-          for n in 1 2 3; do
-            if kurtosis engine start; then exit 0; fi
-            echo "kurtosis engine start failed (attempt $n of 3)"
-            kurtosis engine stop || true
-            sleep $((10 * n))
-          done
-          exit 1
+        uses: ./.github/actions/setup-kurtosis
+        with:
+          version: ${{ env.KURTOSIS_VERSION }}
 
       - name: Download erigon image artifact
         uses: actions/download-artifact@v8
@@ -532,9 +520,8 @@ jobs:
         # failures so the next investigation or retry can start sooner
         # instead of burning runner hours on a dead chain.
         timeout-minutes: ${{ matrix.test_timeout_minutes }}
-        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        uses: erigontech/kurtosis-assertoor-github-action@v1.1.7
         with:
-            kurtosis_version: "${{ env.KURTOSIS_VERSION }}"
             enclave_name: "kurtosis-${{ matrix.suite }}-${{ matrix.exec_mode }}-${{ github.run_id }}"
             ethereum_package_url: "${{ matrix.ethereum_package_url || 'github.com/ethpandaops/ethereum-package' }}"
             ethereum_package_args: "${{ matrix.package_args }}"
