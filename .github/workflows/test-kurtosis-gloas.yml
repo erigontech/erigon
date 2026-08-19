@@ -377,9 +377,8 @@ jobs:
 
       - name: Run ${{ matrix.suite }} Kurtosis + assertoor tests
         timeout-minutes: ${{ matrix.test_timeout_minutes }}
-        uses: ethpandaops/kurtosis-assertoor-github-action@v1
+        uses: erigontech/kurtosis-assertoor-github-action@v1.1.7
         with:
-            kurtosis_version: "${{ env.KURTOSIS_VERSION }}"
             enclave_name: "kurtosis-${{ matrix.suite }}-${{ github.run_id }}"
             ethereum_package_url: "github.com/ethpandaops/ethereum-package"
             ethereum_package_args: "${{ matrix.package_args }}"

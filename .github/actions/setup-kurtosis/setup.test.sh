@@ -94,7 +94,11 @@ rejects "install ran after update failure" "apt-get install" "$calls"
 for workflow in test-kurtosis-assertoor.yml test-kurtosis-gloas.yml; do
   path="$repo/.github/workflows/$workflow"
   contains "$workflow does not use shared setup" "uses: ./.github/actions/setup-kurtosis" "$path"
+  contains "$workflow does not use the preinstalled Kurtosis action" \
+    "uses: erigontech/kurtosis-assertoor-github-action@v1.1.7" "$path"
   rejects "$workflow still installs with apt directly" "sudo apt-get" "$path"
+  rejects "$workflow uses an action that reinstalls Kurtosis" \
+    "uses: ethpandaops/kurtosis-assertoor-github-action@" "$path"
 done
 
 echo "setup-kurtosis tests passed"
