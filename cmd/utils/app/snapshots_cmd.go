@@ -2432,7 +2432,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
-			return fmt.Errorf("%w: failed to replace version in %s: %v", ErrSnapParseFilename, res.Name(), err)
+			return fmt.Errorf("%w: failed to replace version in %s: %w", ErrSnapParseFilename, res.Name(), err)
 		}
 		for snapType := range kv.DomainLen {
 			// skip rcache check if this datadir doesn't produce it
@@ -2443,7 +2443,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 			schemaVersionMinSup := statecfg.Schema.GetDomainCfg(snapType).GetVersions().Domain.DataKV.MinSupported
 			expectedFileName := strings.Replace(accName, "accounts", snapType.String(), 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, expectedFileName), schemaVersionMinSup); err != nil {
-				return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName), err)
+				return fmt.Errorf("%w: %s at %s: %w", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, expectedFileName), err)
 			}
 
 			// check that the index file exist
@@ -2452,7 +2452,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 				fileName := strings.Replace(expectedFileName, ".kv", ".bt", 1)
 				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
+					return fmt.Errorf("%w: %s at %s: %w", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorExistence) {
@@ -2460,7 +2460,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvei", 1)
 				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
+					return fmt.Errorf("%w: %s at %s: %w", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 			if statecfg.Schema.GetDomainCfg(snapType).Accessors.Has(statecfg.AccessorHashMap) {
@@ -2468,7 +2468,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 				fileName := strings.Replace(expectedFileName, ".kv", ".kvi", 1)
 				err := version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapDomain, fileName), schemaVersionMinSup)
 				if err != nil {
-					return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
+					return fmt.Errorf("%w: %s at %s: %w", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapDomain, fileName), err)
 				}
 			}
 		}
@@ -2556,7 +2556,7 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 		res := &accFiles[i]
 		accName, err := version.ReplaceVersionWithMask(res.Name())
 		if err != nil {
-			return fmt.Errorf("%w: failed to replace version in %s: %v", ErrSnapParseFilename, res.Name(), err)
+			return fmt.Errorf("%w: failed to replace version in %s: %w", ErrSnapParseFilename, res.Name(), err)
 		}
 		// do a range check over all snapshots types (sanitizes domain and history folder)
 		for _, snapType := range iiTypes {
@@ -2568,13 +2568,13 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 			schemaVersionMinSup := versioned.GetVersions().II.DataEF.MinSupported
 			expectedFileName := strings.Replace(accName, "accounts", snapType, 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapIdx, expectedFileName), schemaVersionMinSup); err != nil {
-				return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName), err)
+				return fmt.Errorf("%w: %s at %s: %w", ErrSnapMissingFile, expectedFileName, filepath.Join(dirs.SnapIdx, expectedFileName), err)
 			}
 			// Check accessors
 			schemaVersionMinSup = versioned.GetVersions().II.AccessorEFI.MinSupported
 			fileName := strings.Replace(expectedFileName, ".ef", ".efi", 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersionMinSup); err != nil {
-				return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
+				return fmt.Errorf("%w: %s at %s: %w", ErrSnapMissingFile, fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
 			}
 			if !slices.Contains(viTypes, snapType) {
 				continue
@@ -2582,13 +2582,13 @@ func checkStateSnapshotFiles(dirs datadir.Dirs, persistReceiptCache, commitmentH
 			schemaVersionMinSup = versioned.GetVersions().Hist.AccessorVI.MinSupported
 			fileName = strings.Replace(expectedFileName, ".ef", ".vi", 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapAccessors, fileName), schemaVersionMinSup); err != nil {
-				return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
+				return fmt.Errorf("%w: %s at %s: %w", ErrSnapMissingFile, fileName, filepath.Join(dirs.SnapAccessors, fileName), err)
 			}
 			schemaVersionMinSup = versioned.GetVersions().Hist.DataV.MinSupported
 			// check that .v
 			fileName = strings.Replace(expectedFileName, ".ef", ".v", 1)
 			if err = version.CheckIsThereFileWithSupportedVersion(filepath.Join(dirs.SnapHistory, fileName), schemaVersionMinSup); err != nil {
-				return fmt.Errorf("%w: %s at %s: %v", ErrSnapMissingFile, fileName, filepath.Join(dirs.SnapHistory, fileName), err)
+				return fmt.Errorf("%w: %s at %s: %w", ErrSnapMissingFile, fileName, filepath.Join(dirs.SnapHistory, fileName), err)
 			}
 		}
 	}
@@ -3589,7 +3589,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		return err
 	}
 
-	if err := caplinStateSnaps.RemoveOverlaps(); err != nil {
+	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
+		return err
+	}
+	if err := caplinStateSnaps.RemoveOverlaps(nil); err != nil {
 		return err
 	}
 

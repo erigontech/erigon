@@ -295,11 +295,11 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 		// [REJECT] The signature of attestation is valid.
 		pubKey, err = headState.ValidatorPublicKey(int(vIndex))
 		if err != nil {
-			return fmt.Errorf("unable to get public key: %v", err)
+			return fmt.Errorf("unable to get public key: %w", err)
 		}
 		domain, err = headState.GetDomain(s.beaconCfg.DomainBeaconAttester, targetEpoch)
 		if err != nil {
-			return fmt.Errorf("unable to get the domain: %v", err)
+			return fmt.Errorf("unable to get the domain: %w", err)
 		}
 		return nil
 	}); err != nil {
@@ -307,7 +307,7 @@ func (s *attestationService) ProcessMessage(ctx context.Context, subnet *uint64,
 	}
 	signingRoot, err := computeSigningRoot(data, domain)
 	if err != nil {
-		return fmt.Errorf("unable to get signing root: %v", err)
+		return fmt.Errorf("unable to get signing root: %w", err)
 	}
 
 	// [IGNORE] The block being voted for (attestation.data.beacon_block_root) has been seen (via both gossip and non-gossip sources)

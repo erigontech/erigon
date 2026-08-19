@@ -152,7 +152,7 @@ func (r *Record) Load(e Entry) error {
 func (r *Record) Set(e Entry) {
 	blob, err := rlp.EncodeToBytes(e)
 	if err != nil {
-		panic(fmt.Errorf("enr: can't encode %s: %v", e.ENRKey(), err))
+		panic(fmt.Errorf("enr: can't encode %s: %w", e.ENRKey(), err))
 	}
 	r.invalidate()
 
@@ -231,13 +231,13 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 		return dec, raw, err
 	}
 	if dec.signature, err = rs.Bytes(); err != nil {
-		if errors.Is(err, rlp.EOL) {
+		if err == rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 			err = errIncompleteList
 		}
 		return dec, raw, err
 	}
 	if dec.seq, err = rs.Uint64(); err != nil {
-		if errors.Is(err, rlp.EOL) {
+		if err == rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 			err = errIncompleteList
 		}
 		return dec, raw, err
@@ -249,14 +249,14 @@ func decodeRecord(s *rlp.Stream) (dec Record, raw []byte, err error) {
 	for i := 0; ; i++ {
 		key, err := rs.ViewBytes()
 		if err != nil {
-			if errors.Is(err, rlp.EOL) {
+			if err == rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 				break
 			}
 			return dec, raw, err
 		}
 		kv := pair{k: string(key)}
 		if kv.v, err = rs.Raw(); err != nil {
-			if errors.Is(err, rlp.EOL) {
+			if err == rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 				return dec, raw, errIncompletePair
 			}
 			return dec, raw, err
