@@ -416,12 +416,9 @@ func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
 
 // TestFilterErrorAfterExportedTracesKeepsValidJSON covers the other half of
 // filterV3's error contract: when a transaction fails after earlier traces were
-// already streamed, the request still fails, and the envelope stays valid JSON
-// whose result array holds only TraceEntry items. Filtering blocks 1-3 with no
-// address filter exports both empty blocks' reward traces before the protected
-// transaction in block 3 is rejected by the overridden pre-EIP-155 signer.
-// The envelope is assembled the way runMethod does it, since sealing the
-// half-written array is the handler's job, not filterV3's.
+// already streamed, the request still fails and the result array holds only
+// TraceEntry items. The envelope is assembled the way runMethod does it, since
+// sealing the half-written array is the handler's job, not filterV3's.
 func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
