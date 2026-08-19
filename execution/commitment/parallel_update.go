@@ -24,14 +24,18 @@ type plainKeyArena struct {
 	buf []byte
 }
 
-const plainKeyArenaChunk = 64 * 1024
+// Grows geometrically for the same reason the prefix arena does: a fresh buffer is
+// built per block, so a block touching two keys must not pay the full chunk.
+const plainKeyArenaChunkMin = 1024
+const plainKeyArenaChunkMax = 64 * 1024
 
 func (a *plainKeyArena) intern(b []byte) []byte {
-	if len(b) > plainKeyArenaChunk {
+	if len(b) > plainKeyArenaChunkMax {
 		return append([]byte(nil), b...)
 	}
 	if cap(a.buf)-len(a.buf) < len(b) {
-		a.buf = make([]byte, 0, plainKeyArenaChunk)
+		next := max(cap(a.buf)*2, plainKeyArenaChunkMin)
+		a.buf = make([]byte, 0, min(max(next, len(b)), plainKeyArenaChunkMax))
 	}
 	off := len(a.buf)
 	a.buf = append(a.buf, b...)
