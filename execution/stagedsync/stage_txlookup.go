@@ -230,8 +230,13 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if err != nil {
 		return err
 	}
+	// A record left by the pre-fix floor carries a non-zero TxFrom. Its cursor already
+	// passed rows this floor must delete, and its TxTo came from Max(blockTo) so it
+	// always covers the new Min(blockTo) — it must not short-circuit below.
+	staleFloor := prevStat != nil && prevStat.TxFrom != 0
+
 	// A completed rotation that covers current txTo — nothing more to do.
-	if prevStat != nil && prevStat.TxTo >= txTo && prevStat.ValueProgress == prune.Done {
+	if !staleFloor && prevStat != nil && prevStat.TxTo >= txTo && prevStat.ValueProgress == prune.Done {
 		return nil
 	}
 	if prevStat == nil {
@@ -240,9 +245,9 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 
 	// Rolling scan: preserve cursor position across txTo advances so each B-tree page
 	// is visited sequentially once per rotation instead of restarting from First() on
-	// every prune cycle. Restart on a completed rotation, and on a rotation left over
-	// from a higher floor, whose cursor already passed rows this one must delete.
-	if prevStat.ValueProgress == prune.Done || prevStat.TxFrom != 0 {
+	// every prune cycle. Restart on a completed rotation, and on one left by the
+	// pre-fix floor.
+	if prevStat.ValueProgress == prune.Done || staleFloor {
 		prevStat.ValueProgress = prune.First
 		prevStat.LastPrunedValue = nil
 	}
