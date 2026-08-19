@@ -1184,7 +1184,8 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 			origErr:    nil,
 			depTxIndex: 5,
 			check: func(t *testing.T, got error) {
-				abort, ok := got.(protocol.ErrExecAbortError)
+				var abort protocol.ErrExecAbortError
+				ok := errors.As(got, &abort)
 				require.True(t, ok)
 				require.Equal(t, 5, abort.DependencyTxIndex)
 				require.Nil(t, abort.OriginError,
@@ -1198,7 +1199,8 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 			origErr:    realErr,
 			depTxIndex: 0,
 			check: func(t *testing.T, got error) {
-				abort, ok := got.(protocol.ErrExecAbortError)
+				var abort protocol.ErrExecAbortError
+				ok := errors.As(got, &abort)
 				require.True(t, ok)
 				require.Equal(t, 0, abort.DependencyTxIndex)
 				require.True(t, abort.IsError())
@@ -1213,7 +1215,8 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 			origErr:    protocol.ErrExecAbortError{DependencyTxIndex: 7, OriginError: nil},
 			depTxIndex: 99,
 			check: func(t *testing.T, got error) {
-				abort, ok := got.(protocol.ErrExecAbortError)
+				var abort protocol.ErrExecAbortError
+				ok := errors.As(got, &abort)
 				require.True(t, ok)
 				require.Equal(t, 7, abort.DependencyTxIndex,
 					"depTxIndex of the passed-through err must not be overwritten")
