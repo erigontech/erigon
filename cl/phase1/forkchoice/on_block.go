@@ -450,14 +450,12 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		appliedEnvelope = f.applyPendingEnvelope(ctx, common.Hash(blockRoot), pendingEnvelope, pendingEnvelopeLocal, checkDataAvaiability)
 	}
 	f.mu.Lock()
-	unlocked = false
 	blockData := &beaconevents.BlockData{
 		Slot:                block.Block.Slot,
 		Block:               blockRoot,
 		ExecutionOptimistic: f.optimisticStore.IsOptimistic(blockRoot),
 	}
 	f.queueEmit(func() { f.emitters.State().SendBlock(blockData) })
-	unlocked = true
 	f.mu.Unlock()
 	f.drainQueuedWork()
 
