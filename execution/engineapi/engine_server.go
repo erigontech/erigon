@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli"
 	"github.com/erigontech/erigon/cmd/rpcdaemon/cli/httpcfg"
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -376,12 +375,15 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			return nil, &rpc.InvalidParamsError{Message: "blockAccessList missing"}
 		}
 		balBytes := *req.BlockAccessList
-		blockAccessList, err = types.DecodeBlockAccessListSidecar(balBytes)
+		blockAccessList, err = types.DecodeBlockAccessListSidecarOwned(balBytes)
 		if err != nil {
 			s.logger.Debug("[NewPayload] failed to decode blockAccessList", "err", err, "raw", hex.EncodeToString(balBytes))
 			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("undecodable blockAccessList: %v", err)}
 		}
-		hash := crypto.Keccak256Hash(balBytes)
+		hash, err := blockAccessList.Hash()
+		if err != nil {
+			return nil, &rpc.InvalidParamsError{Message: fmt.Sprintf("cannot hash blockAccessList: %v", err)}
+		}
 		header.BlockAccessListHash = &hash
 		if req.SlotNumber != nil {
 			slotNumber := uint64(*req.SlotNumber)
@@ -413,6 +415,14 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			Status:          engine_types.InvalidStatus,
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
 		}, nil
+	}
+	if blockAccessList != nil {
+		if err = blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
+			return &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedError(err),
+			}, nil
+		}
 	}
 
 	for _, txn := range req.Transactions {

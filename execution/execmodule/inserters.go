@@ -24,6 +24,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -113,12 +114,25 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: max rlp size validation: %w", err)
 		}
 		blockAccessList := block.BlockAccessListSidecar()
+		var blockAccessListBytes []byte
+		var blockAccessListHash common.Hash
 		if blockAccessList != nil {
 			if header.BlockAccessListHash == nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: block access list provided without hash for block %d", height)
 			}
 			if err := blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: validateBlockAccessList, block %d: %w", height, err)
+			}
+			blockAccessListBytes, err = blockAccessList.Bytes()
+			if err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encodeBlockAccessList, block %d: %w", height, err)
+			}
+			blockAccessListHash, err = blockAccessList.Hash()
+			if err != nil {
+				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: hash block access list, block %d: %w", height, err)
+			}
+			if blockAccessListHash != *header.BlockAccessListHash {
+				return 0, fmt.Errorf("%w: block %d block access list hash mismatch: got %s, want %s", types.ErrInvalidBlockAccessList, height, blockAccessListHash, *header.BlockAccessListHash)
 			}
 		}
 
@@ -152,10 +166,6 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.Block) (E
 			return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBody: %w", err)
 		}
 		if blockAccessList != nil {
-			blockAccessListBytes, err := blockAccessList.Bytes()
-			if err != nil {
-				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: encodeBlockAccessList, block %d: %w", height, err)
-			}
 			if err := rawdb.WriteBlockAccessListBytes(blockOverlay, blockHash, height, blockAccessListBytes); err != nil {
 				return 0, fmt.Errorf("ethereumExecutionModule.InsertBlocks: writeBlockAccessList, block %d: %w", height, err)
 			}

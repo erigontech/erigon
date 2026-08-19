@@ -2393,6 +2393,24 @@ func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
 	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
 }
 
+func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	block := chainPack.Blocks[0]
+	header := block.Header()
+	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	wrongHash := common.Hash{1}
+	header.BlockAccessListHash = &wrongHash
+	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+	require.ErrorContains(t, err, "block access list hash mismatch")
+}
+
 // TestInsertBlocksWithBatchedFCU drives the Caplin persistent_block_collector
 // pattern: InsertBlocks(batch) → ForkChoiceUpdate(last block of batch),
 // repeated for each batch. Verifies parent TD continuity across batches —

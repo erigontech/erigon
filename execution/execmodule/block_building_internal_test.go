@@ -210,7 +210,7 @@ func TestSupersededBuilderKeepsPackingAndStaysRetrievable(t *testing.T) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
 
 	first, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{0x01}})
@@ -241,7 +241,7 @@ func TestCollectedPayloadIsHandedBackToARepeatedRequest(t *testing.T) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
 
 	params := func() *builder.Parameters {
@@ -324,7 +324,7 @@ func TestGetAssembledBlockKeepsBuilderWhenTheCallerGivesUpMidStop(t *testing.T) 
 		}
 		close(interrupted)
 		<-release
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
 
 	result, err := module.AssembleBlock(t.Context(), &builder.Parameters{Timestamp: timestamp, ParentHash: common.Hash{0x01}})
@@ -681,7 +681,7 @@ func TestGetAssembledBlockReportsDiscardDuringStopAsUnknown(t *testing.T) {
 func TestGetAssembledBlockKeepsPayloadCompletedAsDiscardLands(t *testing.T) {
 	timestamp := newTestTimestamp()
 	finish := make(chan struct{})
-	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
+	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}
 	module := newTestModule(t, func(_ context.Context, _ *builder.Parameters, interrupt *atomic.Bool) (*types.BlockWithReceipts, error) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
@@ -757,7 +757,7 @@ func TestEvictionTakesAFailedCurrentBuilderBeforeALiveSupersededOne(t *testing.T
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	})
 	t.Cleanup(func() {
 		for _, entry := range module.builders {

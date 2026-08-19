@@ -26,7 +26,6 @@ import (
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -228,15 +227,21 @@ func validateBALResponse(reqs []BALRequest, response []rlp.RawValue) (map[common
 				continue
 			}
 		}
-		if crypto.Keccak256Hash(entry) != expected {
-			badPeer = true
-			responseErr = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, crypto.Keccak256Hash(entry))
-			continue
-		}
-		bal, err := types.DecodeBlockAccessListSidecar(entry)
+		bal, err := types.DecodeBlockAccessListSidecarOwned(entry)
 		if err != nil {
 			badPeer = true
 			responseErr = fmt.Errorf("%w: req %d returned malformed BAL: %w", ErrBadBALResponse, i, err)
+			continue
+		}
+		hash, err := bal.Hash()
+		if err != nil {
+			badPeer = true
+			responseErr = fmt.Errorf("%w: req %d could not hash BAL: %w", ErrBadBALResponse, i, err)
+			continue
+		}
+		if hash != expected {
+			badPeer = true
+			responseErr = fmt.Errorf("%w: req %d wanted %x got %x", ErrBadBALResponse, i, expected, hash)
 			continue
 		}
 		if err = bal.ValidateForBlock(reqs[i].GasLimit); err != nil {

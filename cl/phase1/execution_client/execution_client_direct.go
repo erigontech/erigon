@@ -69,7 +69,12 @@ func (cc *ExecutionClientDirect) NewPayload(
 		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
 	}
 
-	header, err := payload.RlpHeader(beaconParentRoot, requestsHash)
+	bal, err := DecodeAndValidateBlockAccessList(payload)
+	if err != nil {
+		return PayloadStatusInvalidated, err
+	}
+
+	header, err := payload.RlpHeader(beaconParentRoot, requestsHash, bal)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
@@ -79,11 +84,6 @@ func (cc *ExecutionClientDirect) NewPayload(
 	txs, err := types.DecodeTransactions(body.Transactions)
 	if err != nil {
 		// invalid block
-		return PayloadStatusInvalidated, err
-	}
-
-	bal, err := DecodeAndValidateBlockAccessList(payload)
-	if err != nil {
 		return PayloadStatusInvalidated, err
 	}
 

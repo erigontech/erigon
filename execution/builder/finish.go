@@ -78,11 +78,16 @@ func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, lo
 	if current.BlockAccessList != nil && cfg.chainConfig.IsEIPEnabled(7928, current.Header.Time) {
 		blockAccessList = current.BlockAccessList
 	}
-	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals, types.NewBlockAccessListSidecar(blockAccessList))
+	var blockAccessListSidecar *types.BlockAccessListSidecar
 	if blockAccessList != nil {
-		hash := blockAccessList.Hash()
-		block.HeaderNoCopy().BlockAccessListHash = &hash
+		blockAccessListSidecar = types.NewBlockAccessListSidecar(blockAccessList)
+		hash, err := blockAccessListSidecar.Hash()
+		if err != nil {
+			return fmt.Errorf("hash block access list: %w", err)
+		}
+		current.Header.BlockAccessListHash = &hash
 	}
+	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals, blockAccessListSidecar)
 	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests, BlockAccessList: current.BlockAccessList}
 	if dbg.LogHashMismatchReason() {
 		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)

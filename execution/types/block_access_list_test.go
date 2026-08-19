@@ -10,6 +10,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -75,6 +76,43 @@ func TestBlockAccessListSidecarPreservesRLP(t *testing.T) {
 	}
 }
 
+func TestDecodeBlockAccessListSidecarOwnedRetainsRLP(t *testing.T) {
+	raw, err := EncodeBlockAccessListBytes(BlockAccessList{{
+		Address: accounts.InternAddress(common.Address{1}),
+	}})
+	if err != nil {
+		t.Fatalf("encode BAL: %v", err)
+	}
+	sidecar, err := DecodeBlockAccessListSidecarOwned(raw)
+	if err != nil {
+		t.Fatalf("decode owned BAL sidecar: %v", err)
+	}
+	gotRaw, err := sidecar.Bytes()
+	if err != nil {
+		t.Fatalf("sidecar bytes: %v", err)
+	}
+	if &gotRaw[0] != &raw[0] {
+		t.Fatal("owned BAL sidecar copied its RLP bytes")
+	}
+}
+
+func TestBlockAccessListSidecarMemoizesRLP(t *testing.T) {
+	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
+		Address: accounts.InternAddress(common.Address{1}),
+	}})
+	first, err := sidecar.Bytes()
+	if err != nil {
+		t.Fatalf("encode sidecar: %v", err)
+	}
+	second, err := sidecar.Bytes()
+	if err != nil {
+		t.Fatalf("encode sidecar again: %v", err)
+	}
+	if &first[0] != &second[0] {
+		t.Fatal("sidecar did not memoize its RLP bytes")
+	}
+}
+
 func TestBlockAccessListSidecarMemoizesValidation(t *testing.T) {
 	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
 		Address: accounts.InternAddress(common.Address{1}),
@@ -93,6 +131,51 @@ func TestBlockAccessListSidecarMemoizesValidation(t *testing.T) {
 	}
 	if err := sidecar.ValidateForBlock(BalItemCost - 1); !errors.Is(err, ErrInvalidBlockAccessList) {
 		t.Fatalf("validation with a different gas limit returned %v, want ErrInvalidBlockAccessList", err)
+	}
+}
+
+func TestBlockAccessListSidecarMemoizesHash(t *testing.T) {
+	raw, err := EncodeBlockAccessListBytes(BlockAccessList{{
+		Address: accounts.InternAddress(common.Address{1}),
+	}})
+	if err != nil {
+		t.Fatalf("encode BAL: %v", err)
+	}
+	sidecar, err := DecodeBlockAccessListSidecar(raw)
+	if err != nil {
+		t.Fatalf("decode BAL sidecar: %v", err)
+	}
+	if sidecar.hash.Load() != nil {
+		t.Fatal("new sidecar already has a cached hash")
+	}
+
+	got, err := sidecar.Hash()
+	if err != nil {
+		t.Fatalf("hash sidecar: %v", err)
+	}
+	if want := crypto.Keccak256Hash(raw); got != want {
+		t.Fatalf("sidecar hash = %s, want %s", got, want)
+	}
+	cached := sidecar.hash.Load()
+	if cached == nil {
+		t.Fatal("sidecar hash was not cached")
+	}
+	gotRaw, err := sidecar.Bytes()
+	if err != nil {
+		t.Fatalf("get sidecar bytes: %v", err)
+	}
+	if !bytes.Equal(gotRaw, raw) {
+		t.Fatalf("sidecar RLP changed: got %x, want %x", gotRaw, raw)
+	}
+	gotHash, err := sidecar.Hash()
+	if err != nil {
+		t.Fatalf("get sidecar hash: %v", err)
+	}
+	if gotHash != got {
+		t.Fatalf("sidecar cached hash = %s, want %s", gotHash, got)
+	}
+	if sidecar.hash.Load() != cached {
+		t.Fatal("sidecar replaced its cached hash")
 	}
 }
 
@@ -207,6 +290,59 @@ func TestBlockAccessListCodecLeavesSemanticValidationToValidateForBlock(t *testi
 func TestEncodeBlockAccessListRejectsUnrepresentableNil(t *testing.T) {
 	if _, err := EncodeBlockAccessListBytes(BlockAccessList{nil}); err == nil {
 		t.Fatal("expected nil account encoding error")
+	}
+}
+
+func TestEncodeBlockAccessListRejectsNestedNil(t *testing.T) {
+	tests := []struct {
+		name string
+		bal  BlockAccessList
+	}{
+		{
+			name: "slot changes",
+			bal: BlockAccessList{{
+				Address:        accounts.InternAddress(common.Address{1}),
+				StorageChanges: []*SlotChanges{nil},
+			}},
+		},
+		{
+			name: "storage change",
+			bal: BlockAccessList{{
+				Address: accounts.InternAddress(common.Address{1}),
+				StorageChanges: []*SlotChanges{{
+					Slot:    accounts.InternKey(common.Hash{1}),
+					Changes: []*StorageChange{nil},
+				}},
+			}},
+		},
+		{
+			name: "balance change",
+			bal: BlockAccessList{{
+				Address:        accounts.InternAddress(common.Address{1}),
+				BalanceChanges: []*BalanceChange{nil},
+			}},
+		},
+		{
+			name: "nonce change",
+			bal: BlockAccessList{{
+				Address:      accounts.InternAddress(common.Address{1}),
+				NonceChanges: []*NonceChange{nil},
+			}},
+		},
+		{
+			name: "code change",
+			bal: BlockAccessList{{
+				Address:     accounts.InternAddress(common.Address{1}),
+				CodeChanges: []*CodeChange{nil},
+			}},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			if _, err := EncodeBlockAccessListBytes(test.bal); err == nil {
+				t.Fatal("expected nested nil encoding error")
+			}
+		})
 	}
 }
 

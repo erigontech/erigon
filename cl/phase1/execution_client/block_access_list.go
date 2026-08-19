@@ -29,7 +29,7 @@ func DecodeAndValidateBlockAccessList(payload *cltypes.Eth1Block) (*types.BlockA
 	if payload.Version() < clparams.GloasVersion || payload.BlockAccessList == nil {
 		return nil, nil
 	}
-	bal, err := types.DecodeBlockAccessListSidecar(payload.BlockAccessList.Bytes())
+	bal, err := types.DecodeBlockAccessListSidecarOwned(payload.BlockAccessList.Bytes())
 	if err != nil {
 		return nil, fmt.Errorf("decode block access list: %w", err)
 	}

@@ -14,6 +14,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/empty"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/rlp"
@@ -28,7 +29,8 @@ type BlockAccessList []*AccountChanges
 // BlockAccessListSidecar carries immutable decoded and encoded BAL representations.
 type BlockAccessListSidecar struct {
 	bal               BlockAccessList
-	raw               []byte
+	raw               atomic.Pointer[[]byte]
+	hash              atomic.Pointer[common.Hash]
 	validated         atomic.Bool
 	validatedGasLimit atomic.Uint64
 }
@@ -41,13 +43,21 @@ func NewBlockAccessListSidecar(bal BlockAccessList) *BlockAccessListSidecar {
 	return &BlockAccessListSidecar{bal: bal}
 }
 
-// DecodeBlockAccessListSidecar decodes a BAL and retains its canonical RLP bytes.
+// DecodeBlockAccessListSidecar decodes a BAL and copies its canonical RLP bytes.
 func DecodeBlockAccessListSidecar(data []byte) (*BlockAccessListSidecar, error) {
+	return DecodeBlockAccessListSidecarOwned(bytes.Clone(data))
+}
+
+// DecodeBlockAccessListSidecarOwned decodes a BAL and takes ownership of its canonical RLP bytes.
+// The caller must not mutate data after the call.
+func DecodeBlockAccessListSidecarOwned(data []byte) (*BlockAccessListSidecar, error) {
 	bal, err := DecodeBlockAccessListBytes(data)
 	if err != nil {
 		return nil, err
 	}
-	return &BlockAccessListSidecar{bal: bal, raw: bytes.Clone(data)}, nil
+	sidecar := &BlockAccessListSidecar{bal: bal}
+	sidecar.raw.Store(&data)
+	return sidecar, nil
 }
 
 // BlockAccessList returns the immutable decoded BAL.
@@ -63,10 +73,40 @@ func (s *BlockAccessListSidecar) Bytes() ([]byte, error) {
 	if s == nil {
 		return nil, nil
 	}
-	if s.raw != nil {
-		return s.raw, nil
+	if raw := s.raw.Load(); raw != nil {
+		return *raw, nil
 	}
-	return EncodeBlockAccessListBytes(s.bal)
+	raw, err := EncodeBlockAccessListBytes(s.bal)
+	if err != nil {
+		return nil, err
+	}
+	if s.raw.CompareAndSwap(nil, &raw) {
+		return raw, nil
+	}
+	return *s.raw.Load(), nil
+}
+
+// Hash returns the memoized Keccak-256 hash of the encoded BAL.
+func (s *BlockAccessListSidecar) Hash() (common.Hash, error) {
+	if s == nil {
+		return common.Hash{}, nil
+	}
+	if hash := s.hash.Load(); hash != nil {
+		return *hash, nil
+	}
+	raw, err := s.Bytes()
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return s.cacheHash(raw), nil
+}
+
+func (s *BlockAccessListSidecar) cacheHash(raw []byte) common.Hash {
+	hash := crypto.Keccak256Hash(raw)
+	if s.hash.CompareAndSwap(nil, &hash) {
+		return hash
+	}
+	return *s.hash.Load()
 }
 
 // ValidateForBlock validates once for each distinct gas limit.
@@ -89,9 +129,14 @@ func (s *BlockAccessListSidecar) copy() *BlockAccessListSidecar {
 	if s == nil {
 		return nil
 	}
-	cpy := &BlockAccessListSidecar{
-		bal: s.bal.Copy(),
-		raw: bytes.Clone(s.raw),
+	cpy := &BlockAccessListSidecar{bal: s.bal.Copy()}
+	if raw := s.raw.Load(); raw != nil {
+		rawCopy := bytes.Clone(*raw)
+		cpy.raw.Store(&rawCopy)
+	}
+	if hash := s.hash.Load(); hash != nil {
+		hashCopy := *hash
+		cpy.hash.Store(&hashCopy)
 	}
 	if s.validated.Load() {
 		cpy.validatedGasLimit.Store(s.validatedGasLimit.Load())
@@ -215,12 +260,12 @@ func (sc *StorageChange) GetIndex() uint32 { return sc.Index }
 
 func (ac *AccountChanges) EncodingSize() int {
 	size := 21 // address (1 prefix + 20 bytes)
-	storageChangesLen := EncodingSizeGenericList(ac.StorageChanges)
+	storageChangesLen := encodingSizeBlockAccessList(ac.StorageChanges)
 	size += rlp.ListPrefixLen(storageChangesLen) + storageChangesLen
 	storageReadsLen := encodingSizeHashList(ac.StorageReads)
-	balanceChangesLen := EncodingSizeGenericList(ac.BalanceChanges)
-	nonceChangesLen := EncodingSizeGenericList(ac.NonceChanges)
-	codeChangesLen := EncodingSizeGenericList(ac.CodeChanges)
+	balanceChangesLen := encodingSizeBlockAccessList(ac.BalanceChanges)
+	nonceChangesLen := encodingSizeBlockAccessList(ac.NonceChanges)
+	codeChangesLen := encodingSizeBlockAccessList(ac.CodeChanges)
 	size += storageReadsLen
 	size += rlp.ListPrefixLen(balanceChangesLen) + balanceChangesLen
 	size += rlp.ListPrefixLen(nonceChangesLen) + nonceChangesLen
@@ -341,7 +386,7 @@ func (ac *AccountChanges) Normalize() {
 
 func (sc *SlotChanges) EncodingSize() int {
 	size := rlp.Uint256Len(hashToUint256(sc.Slot.Value())) // minimal slot key
-	changesLen := EncodingSizeGenericList(sc.Changes)
+	changesLen := encodingSizeBlockAccessList(sc.Changes)
 	size += rlp.ListPrefixLen(changesLen) + changesLen
 	return size
 }
@@ -587,6 +632,19 @@ type blockAccessListRLPItem interface {
 	*AccountChanges | *SlotChanges | *StorageChange | *BalanceChange | *NonceChange | *CodeChange
 }
 
+func encodingSizeBlockAccessList[T blockAccessListRLPItem](items []T) int {
+	var total int
+	for _, item := range items {
+		if item == nil {
+			total += rlp.ListPrefixLen(0)
+			continue
+		}
+		size := item.EncodingSize()
+		total += rlp.ListPrefixLen(size) + size
+	}
+	return total
+}
+
 func encodeBlockAccessList[T blockAccessListRLPItem](items []T, w io.Writer, buf []byte) error {
 	var total int
 	for i, item := range items {
@@ -702,7 +760,6 @@ func EncodeBlockAccessListBytes(bal BlockAccessList) ([]byte, error) {
 	}
 	return buf.Bytes(), nil
 }
-
 func decodeSlotChangesList(s *rlp.Stream) ([]*SlotChanges, error) {
 	var err error
 	var size uint64

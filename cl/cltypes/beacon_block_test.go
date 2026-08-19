@@ -102,7 +102,7 @@ func TestBeaconBody(t *testing.T) {
 	require.NoError(t, err)
 	assert.Equal(t, common.HexToHash("918d1ee08d700e422fcce6319cd7509b951d3ebfb1a05291aab9466b7e9826fc"), common.Hash(root3))
 
-	_, err = body.ExecutionPayload.RlpHeader(&common.Hash{}, common.Hash{})
+	_, err = body.ExecutionPayload.RlpHeader(&common.Hash{}, common.Hash{}, nil)
 	require.NoError(t, err)
 
 	p, err := body.ExecutionPayload.PayloadHeader()

@@ -463,12 +463,12 @@ func (p *PersistentBlockCollector) decodeBlock(v []byte) (*types.Block, error) {
 		return nil, nil
 	}
 
-	header, err := executionPayload.RlpHeader(&parentRoot, requestsHash)
+	bal, err := execution_client.DecodeAndValidateBlockAccessList(executionPayload)
 	if err != nil {
 		return nil, err
 	}
 
-	bal, err := execution_client.DecodeAndValidateBlockAccessList(executionPayload)
+	header, err := executionPayload.RlpHeader(&parentRoot, requestsHash, bal)
 	if err != nil {
 		return nil, err
 	}

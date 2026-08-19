@@ -498,7 +498,7 @@ func validateAnchorEnvelope(beaconCfg *clparams.BeaconChainConfig, anchorState *
 		return fmt.Errorf("execution requests root mismatch: envelope=%v bid=%v", requestsRoot, bid.ExecutionRequestsRoot)
 	}
 	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
-	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash)
+	header, err := payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil)
 	if err != nil {
 		return fmt.Errorf("payload header: %w", err)
 	}

@@ -1210,6 +1210,17 @@ func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
 		require.ErrorContains(t, status.ValidationError.Error(), "access list",
 			"INVALID must originate from block-access-list validation, not e.g. a block-hash mismatch")
 
+		unknownParentPayload := *payload.ExecutionPayload
+		unknownParentPayload.ParentHash = common.Hash{0xff}
+		unknownParentBAL := hexutil.Bytes(duplicateAccounts)
+		unknownParentPayload.BlockAccessList = &unknownParentBAL
+		setBlockHash(&unknownParentPayload)
+		status, err = eat.EngineApiClient.NewPayloadV5(ctx, &unknownParentPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "access list")
+
 		oversized, err := types.EncodeBlockAccessListBytes(types.BlockAccessList{{
 			Address: accounts.InternAddress(common.Address{1}),
 		}})
