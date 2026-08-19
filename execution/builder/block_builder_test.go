@@ -19,7 +19,6 @@ package builder
 import (
 	"context"
 	"errors"
-	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
@@ -235,44 +234,29 @@ func TestBlockBuilderStopPrefersCompletedOutcomeOverCanceledCaller(t *testing.T)
 	}
 }
 
-type completeOnDoneCheck struct {
-	context.Context
-	cancelled chan struct{}
-	complete  func()
-	once      sync.Once
-}
-
-func (c *completeOnDoneCheck) Done() <-chan struct{} {
-	c.once.Do(c.complete)
-	return c.cancelled
-}
-
-func (c *completeOnDoneCheck) Err() error { return context.Canceled }
-
 func TestBlockBuilderStopPrefersPayloadCompletedDuringSelection(t *testing.T) {
 	t.Parallel()
 
-	// Stop evaluates the builder channel before asking for the context channel. Completing in Done
-	// makes both cases ready before select chooses between them.
+	callerCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	want := &types.BlockWithReceipts{}
+
+	// Stop's select evaluates channel operands in source order before choosing a ready case.
+	// Completing the builder from the context's Done method makes both cases ready together.
 	for range 100 {
-		done := make(chan struct{})
-		cancelled := make(chan struct{})
-		close(cancelled)
-		want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
-		builder := &BlockBuilder{done: done}
-		ctx := &completeOnDoneCheck{
-			Context:   t.Context(),
-			cancelled: cancelled,
-			complete: func() {
+		builder := &BlockBuilder{done: make(chan struct{})}
+		stopCtx := &finishOnDoneContext{
+			Context: callerCtx,
+			finish: func() {
 				builder.mu.Lock()
 				builder.result = want
 				builder.state.Store(blockBuilderCompleted)
 				builder.mu.Unlock()
-				close(done)
+				close(builder.done)
 			},
 		}
 
-		result, err := builder.Stop(ctx)
+		result, err := builder.Stop(stopCtx)
 		require.NoError(t, err)
 		require.Same(t, want, result)
 	}
