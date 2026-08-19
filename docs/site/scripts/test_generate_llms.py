@@ -213,6 +213,54 @@ See also <Link to="/ordinary/">Ordinary prose link</Link> for more.
             g.synthesize_landing(body)
         self.assertIn("parsed 0 of 2", str(ctx.exception))
 
+    def test_hero_with_inline_markup_does_not_swallow_the_page(self):
+        """The hero is bounded by its own div.
+
+        With `[^<]+` fields and a `.*?` gap, a heading carrying inline markup
+        pushed the match to the next plain h1/p further down, so the hero span
+        covered that whole stretch and the prose segments excised it.
+        """
+        body = """
+<div className="lp-hero">
+  <h1>Erigon <em>3.6</em></h1>
+  <p>Lead with <strong>markup</strong>.</p>
+</div>
+
+Prose that must survive the hero match.
+
+## A Heading
+
+<div className="lp-grid">
+<Link className="lp-card" to="/a/">
+  <div className="lp-card-title">A</div>
+  <div className="lp-card-desc">Desc A.</div>
+</Link>
+</div>
+"""
+        out = g.synthesize_landing(body)
+        self.assertIn("Lead with markup.", out)
+        self.assertIn("Prose that must survive the hero match.", out)
+        self.assertIn("## A Heading", out)
+        self.assertIn("[A](https://docs.erigon.tech/a): Desc A.", out)
+
+    def test_wholesale_lp_prefix_rename_falls_back_by_design(self):
+        """Renaming lp-grid and lp-card together leaves no signal at all.
+
+        Every counter keys on the `lp-` prefix, so a repo-wide rename makes the
+        page indistinguishable from ordinary prose and it goes through
+        strip_mdx. Pinned so the limit is a decision, not a surprise: card text
+        survives, hrefs do not.
+        """
+        body = """
+<div className="x-grid">
+<Link className="x-card" to="/a/">
+  <div className="x-card-title">A</div>
+  <div className="x-card-desc">Desc A.</div>
+</Link>
+</div>
+"""
+        self.assertIsNone(g.synthesize_landing(body))
+
     def test_prose_before_and_between_grids_is_kept(self):
         """Every non-card segment reaches the corpus, in document order."""
         body = """

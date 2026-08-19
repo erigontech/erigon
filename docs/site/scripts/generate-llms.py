@@ -317,25 +317,34 @@ _LINK_TAG_RE = re.compile(r'<Link\s')
 _DIV_TAG_RE = re.compile(r'<div\b[^>]*?(/?)>|(</div>)', re.DOTALL)
 
 
+def _div_span_end(raw_body, start):
+    """Offset of the </div> closing the div opened before `start`.
+
+    Depth-matched rather than "next tag of the same kind": a wrapper div holds
+    nested divs, so a naive close lands inside it. Returns len(raw_body) when
+    the markup never balances, which over-counts rather than under-counts.
+    """
+    depth = 1
+    for tag in _DIV_TAG_RE.finditer(raw_body, start):
+        if tag.group(2):          # </div>
+            depth -= 1
+        elif not tag.group(1):    # <div ...>, not self-closing
+            depth += 1
+        if depth == 0:
+            return tag.start()
+    return len(raw_body)
+
+
 def _grid_link_count(raw_body):
     """<Link> tags contained by a grid, counted grid by grid.
 
-    Each span is closed by matching div depth rather than by the next grid or
-    EOF: an ordinary <Link> in the prose after a grid is page content, and
-    counting it as a card would abort a well-formed page.
+    Bounded by the grid's own div rather than by the next grid or EOF: an
+    ordinary <Link> in the prose after a grid is page content, and counting it
+    as a card would abort a well-formed page.
     """
     total = 0
     for opening in _LANDING_GRID_OPEN_RE.finditer(raw_body):
-        depth = 1
-        end = len(raw_body)
-        for tag in _DIV_TAG_RE.finditer(raw_body, opening.end()):
-            if tag.group(2):          # </div>
-                depth -= 1
-            elif not tag.group(1):    # <div ...>, not self-closing
-                depth += 1
-            if depth == 0:
-                end = tag.start()
-                break
+        end = _div_span_end(raw_body, opening.end())
         total += len(_LINK_TAG_RE.findall(raw_body[opening.end():end]))
     return total
 
@@ -343,14 +352,26 @@ def _grid_link_count(raw_body):
 def _card_text(fragment):
     """Flatten a card's inner HTML to plain text, collapsing whitespace."""
     return re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', fragment)).strip()
-_LANDING_HERO_RE = re.compile(
-    r'<div[^>]*\blp-hero\b[^>]*>'
-    r'(?:.*?)'
-    r'<h1>([^<]+)</h1>'
-    r'(?:.*?)'
-    r'<p>([^<]+)</p>',
-    re.DOTALL,
-)
+# The hero is read inside its own div, and its fields tolerate inline markup.
+# An `[^<]+` field with a `.*?` gap cannot express "and never leave the hero":
+# a heading like <h1>Erigon <em>3.6</em></h1> fails to match where it stands,
+# and the engine then walks past </div> to the next plain h1/p further down the
+# page — putting that whole stretch inside the hero span, which the prose
+# segments then excise. Same failure the card parser had.
+_LANDING_HERO_OPEN_RE = re.compile(r'<div[^>]*\blp-hero\b[^>]*>')
+_HERO_H1_RE = re.compile(r'<h1[^>]*>(.*?)</h1>', re.DOTALL)
+_HERO_P_RE = re.compile(r'<p[^>]*>(.*?)</p>', re.DOTALL)
+
+
+def _landing_hero(raw_body):
+    """(span, lead) for the hero block, or None. Lead is its first paragraph."""
+    opening = _LANDING_HERO_OPEN_RE.search(raw_body)
+    if not opening:
+        return None
+    end = _div_span_end(raw_body, opening.end())
+    inner = raw_body[opening.end():end]
+    para = _HERO_P_RE.search(inner)
+    return (opening.start(), end), _card_text(para.group(1)) if para else ""
 
 
 def synthesize_landing(raw_body):
@@ -408,9 +429,9 @@ def synthesize_landing(raw_body):
         )
 
     out = []
-    hero = _LANDING_HERO_RE.search(raw_body)
+    hero = _landing_hero(raw_body)
     if hero:
-        lead = hero.group(2).strip()
+        hero_span, lead = hero
         if lead:
             out.append(lead)
             out.append("")
@@ -418,7 +439,7 @@ def synthesize_landing(raw_body):
     def prose(lo, hi):
         """Page text between two offsets, minus the hero already emitted."""
         if hero:
-            hs, he = hero.span()
+            hs, he = hero_span
             if lo < he and hi > hs:  # overlaps the hero — drop that part
                 head = strip_mdx(raw_body[lo:min(hi, hs)]).strip() if lo < hs else ""
                 tail = strip_mdx(raw_body[max(lo, he):hi]).strip() if hi > he else ""
