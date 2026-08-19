@@ -55,6 +55,7 @@ type blockJob struct {
 	creationTime             time.Time
 	retryAfter               time.Time
 	dataAvailabilityAttempts uint8
+	waitingForColumns        bool
 }
 
 type blockService struct {
@@ -364,19 +365,42 @@ func (b *blockService) loop(ctx context.Context) {
 
 func (b *blockService) processScheduledBlocks(ctx context.Context, now time.Time) {
 	b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
+		blockRoot := key.([32]byte)
 		blockJob := value.(*blockJob)
-		if now.Sub(blockJob.creationTime) > blockJobExpiry {
-			b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
+		expiry := blockJobExpiry
+		if blockJob.waitingForColumns {
+			expiry = deferredColumnAvailabilityExpiry
+		}
+		if now.Sub(blockJob.creationTime) > expiry {
+			b.blocksScheduledForLaterExecution.Delete(blockRoot)
 			return true
 		}
 		if now.Before(blockJob.retryAfter) {
 			return true
 		}
+		if blockJob.waitingForColumns {
+			peerDas := b.forkchoiceStore.GetPeerDas()
+			if peerDas == nil {
+				blockJob.retryAfter = now.Add(blockRetryInterval)
+				return true
+			}
+			available, err := peerDas.IsDataAvailable(blockJob.block.Block.Slot, common.Hash(blockRoot))
+			if err != nil || !available {
+				blockJob.retryAfter = now.Add(blockRetryInterval)
+				return true
+			}
+			blockJob.waitingForColumns = false
+		}
 		if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
 			if isDataAvailabilityError(err) {
 				blockJob.dataAvailabilityAttempts++
 				if blockJob.dataAvailabilityAttempts >= maxDataAvailabilityRetries {
-					b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
+					if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+						blockJob.waitingForColumns = true
+						blockJob.retryAfter = b.currentTime().Add(blockRetryInterval)
+					} else {
+						b.blocksScheduledForLaterExecution.Delete(blockRoot)
+					}
 				} else {
 					blockJob.retryAfter = b.currentTime().Add(blockRetryInterval)
 				}
@@ -386,7 +410,7 @@ func (b *blockService) processScheduledBlocks(ctx context.Context, now time.Time
 			log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
 			return true
 		}
-		b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
+		b.blocksScheduledForLaterExecution.Delete(blockRoot)
 		return true
 	})
 }

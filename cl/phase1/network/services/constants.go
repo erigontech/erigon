@@ -32,13 +32,15 @@ const (
 	blockJobsIntervalTick         = 50 * time.Millisecond
 	blockRetryInterval            = time.Second
 	maxDataAvailabilityRetries    = 4
-	blobJobsIntervalTick          = 5 * time.Millisecond
-	singleAttestationIntervalTick = 10 * time.Millisecond
-	attestationJobsIntervalTick   = 100 * time.Millisecond
-	blockJobExpiry                = 30 * time.Second
-	blobJobExpiry                 = 30 * time.Second
-	attestationJobExpiry          = 30 * time.Minute
-	singleAttestationJobExpiry    = 6 * time.Second
+	// Allows PeerDAS enough time to schedule and download missing columns.
+	deferredColumnAvailabilityExpiry = 3 * time.Minute
+	blobJobsIntervalTick             = 5 * time.Millisecond
+	singleAttestationIntervalTick    = 10 * time.Millisecond
+	attestationJobsIntervalTick      = 100 * time.Millisecond
+	blockJobExpiry                   = 30 * time.Second
+	blobJobExpiry                    = 30 * time.Second
+	attestationJobExpiry             = 30 * time.Minute
+	singleAttestationJobExpiry       = 6 * time.Second
 )
 
 var (
