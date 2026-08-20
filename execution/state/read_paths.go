@@ -886,6 +886,25 @@ func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
 	vm.WriteAddress(addr, Version{TxIndex: originIndex}, &origin, true)
 }
 
+// seedStorageOrigin records a cold slot's committed value as its versionMap
+// origin (originIndex), mirroring seedOrigin for accounts: later reads (any tx)
+// and the apply/commitment resolve the slot base from this one shared cell rather
+// than each re-resolving it fresh from the execution store (overlay + sd) at a
+// different point relative to the async fold — which left storage bases both
+// inconsistent across readers and unvalidatable (a bare UnknownVersion StorageRead
+// is version-only-validated, so a wrong value can never be caught). Only a genuine
+// cold committed base read seeds (StorageRead at the pre-seed UnknownVersion); a
+// versionMap or write-set hit is left untouched. Mutates r to record the read at
+// originIndex so the seeded cell and the recorded read agree.
+func seedStorageOrigin(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey, val uint256.Int, r *readPathResult) {
+	if s.versionMap == nil || r.source != StorageRead || r.version != UnknownVersion {
+		return
+	}
+	s.versionMap.WriteStorage(addr, key, Version{TxIndex: originIndex}, val, true)
+	r.hdr.Version = Version{TxIndex: originIndex}
+	r.version = Version{TxIndex: originIndex}
+}
+
 // gateOriginAccount applies the in-block lifecycle gate to a committed-origin
 // account (versionMap AddressPath at originIndex): if a prior tx destroyed it
 // with no revival, it reads as absent. In-block-created accounts (AddressPath at
@@ -1459,6 +1478,9 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 			// value exists on the parallel path, so it is always clean.
 			v, clean = r.mapStorageVal, true
 		}
+		if clean {
+			seedStorageOrigin(s, addr, key, v, &r)
+		}
 		if r.recordVR {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
@@ -1508,6 +1530,7 @@ func readCommittedState(s *IntraBlockState, addr accounts.Address, key accounts.
 		} else {
 			v = r.mapStorageVal
 		}
+		seedStorageOrigin(s, addr, key, v, &r)
 		if r.recordVR {
 			s.versionedReads.SetStorage(addr, key, VersionedRead[uint256.Int]{r.hdr, v})
 		}
