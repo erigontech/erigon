@@ -93,16 +93,20 @@ func (s *slotLocks) forSlot(slot uint64) *sync.RWMutex
 
 **`bucketStore` never locks.** Each of its methods is one filesystem operation against a complete file, and temp-then-rename means a reader observes either the old file or the new one, never a partial. Locking belongs to the façades, which alone know the granularity of the operation being performed — that is what makes the whole-scan and whole-batch guarantees expressible.
 
+**What the façade locks do and do not cover.** They serialise façade operations against each other for one slot. They do **not** exclude `pruneBelow`, which takes nothing — no lock the façades could take would, since a bucket spans 10,000 slots and therefore every stripe, which is the store-wide lock this design exists to avoid. Everything a prune removes is below the retention floor, so an operation it interferes with concerns data no caller is entitled to: a scan that mixes pre- and post-prune observations, or a batch split partway, describes an expiring slot either way.
+
 Both façades embed `bucketStore` and `slotLocks` by value and take `forSlot(slot)` for:
 
 - every write, to protect the fixed `<file>.tmp` name from a second writer to the same path
-- `WriteBlobSidecars`, once around the whole batch, so a prune cannot land between two sidecars of one block
-- `RemoveBlobSidecars`, so the files and the MDBX count row move together
-- `GetSavedColumnIndex` and `RemoveColumnSidecars`, once around the whole loop, so a scan cannot mix pre-prune and post-prune observations
+- `WriteBlobSidecars`, once around the whole batch, so a concurrent single-sidecar write cannot interleave with it. The method takes no slot — it derives one per sidecar from `SignedBlockHeader.Header.Slot` (`blob_db.go:88`) — so the lock is taken on the first sidecar's slot and only when the batch is non-empty. An empty batch writes no files and still records its zero count row, which is what distinguishes "this block has no blobs" from "unknown"; that path is reached per block from `on_block.go:566`.
+- `RemoveBlobSidecars` and `ReadBlobSidecars`, so the files and the MDBX count row move together *and* that is observable — the guarantee is worthless if the only reader of both takes no lock
+- `GetSavedColumnIndex` and `RemoveColumnSidecars`, once around the whole loop, so a scan cannot interleave with a concurrent write to the same slot
 
 Single-file reads take nothing, and `stream` in particular takes nothing: it runs `io.Copy` into a libp2p stream under a 5 s deadline (`cl/sentinel/handlers/handlers.go:192-195`), and a lock held across that would let one slow peer stall writers on the same stripe for the whole deadline.
 
-`pruneBelow` takes no lock either. The race it admits is benign in every direction: a file written into an expiring bucket is below the retention floor and nobody is entitled to it, an fd already open survives its directory being removed so a stream in flight completes, and a directory recreated by a racing write is removed on the next tick.
+`pruneBelow` takes no lock either. The race it admits is benign because everything it touches is below the retention floor: a file written into an expiring bucket is data nobody is entitled to, and a directory recreated by a racing write is removed on the next tick. A read or stream whose file disappears mid-operation fails cleanly rather than returning corruption, which is the same outcome as the file having been pruned a moment earlier.
+
+`pruneBelow` continues past a failed `RemoveAll`, attempts every expiring bucket, and returns the first error. A single stuck bucket must not wedge the rest — on Windows an open file blocks its directory's removal, so a bucket being served can legitimately fail and succeed on the next tick.
 
 **Write path.** `Stat` the target to set `created`, `MkdirAll(dir)`, create `<file>.tmp`, `ssz_snappy.EncodeAndWrite`, `Sync`, `Close`, `Rename(tmp, file)`. Any error removes the temp. The `created` return exists because the column façade's event emit must stay deduplicated: today the `Stat` guard at `data_column_db.go:94-97` returns above the `SendDataColumnSidecar` emit at `:115`, so it is the only thing keeping a duplicate delivery off the Beacon API `data_column_sidecar` stream. Under overwrite the façade emits only when `created` is true.
 
@@ -125,7 +129,19 @@ func floorFor(head, keep uint64) uint64 {
 
 A `MaxUint64` keep falls out as a no-op with no special case. The `pruneBlobDistance` expression moves here from `run.go:292`, making this the single place all three CL hot floors are computed. `cleanupAndPruning` checks and logs both `PruneBelow` errors — the new implementation propagates real filesystem failures, and the current calls discard them.
 
-**`PeerDas.PruneBelow` keeps its second job.** `peerdas.Prune` does not only delegate: it advances `EarliestAvailableSlot` under a monotonic guard (`cl/das/peer_das.go:337-345`), and that value is advertised to peers in the status handshake (`cl/sentinel/handshake/handshake.go:115`) and heartbeats (`cl/sentinel/handlers/heartbeats.go:152`). Under the new signature the absolute floor *is* `curSlot - keepSlotDistance`, so the translation is direct — `SetEarliestAvailableSlot(slot)` behind the same `>` guard — but dropping it would leave the node advertising a floor it can no longer serve.
+**`PeerDas.PruneBelow` keeps its second job.** `peerdas.Prune` does not only delegate: it advances `EarliestAvailableSlot` (`cl/das/peer_das.go:337-345`), and that value is advertised to peers in the status handshake (`cl/sentinel/handshake/handshake.go:115`) and heartbeats (`cl/sentinel/handlers/heartbeats.go:152`). Dropping it would leave the node advertising a floor it can no longer serve.
+
+The translation is exact, including the zero case, which today bypasses the monotonic guard rather than being subject to it:
+
+```go
+if slot == 0 {
+    d.state.SetEarliestAvailableSlot(0)          // keep-everything; today's curSlot < keepSlotDistance branch
+} else if slot > d.state.GetEarliestAvailableSlot() {
+    d.state.SetEarliestAvailableSlot(slot)
+}
+```
+
+Ordering against a prune error is a decision this plan makes rather than inherits: the floor advances even when the column prune returned an error, because removal below it has already begun and claiming a *later* floor is the safe direction — advertising data that was partially deleted is not. Today the error returns before the update, which errs the unsafe way.
 
 ## What Goes Where
 
@@ -141,13 +157,14 @@ A `MaxUint64` keep falls out as a no-op with no special case. The `pruneBlobDist
 - **Durability** — unchanged: file `fsync`, no directory `fsync`.
 - **`read`** — returns `(found, err)`; each façade maps it, because blobs want absence to mean "reschedule" and columns want an error.
 - **`remove`** — tolerates ENOENT. Behaviour change, fixes problem 3.
-- **Prune floor** — absolute slot, not a distance; `slotsKept` leaves both constructors.
-- **Prune walk** — readdir the store root, no lock, no persisted low-water state; the race it admits is benign in every direction.
+- **Prune floor** — absolute slot, not a distance. `slotsKept` and `ethClock` both leave both constructors: the clock is read only by `Prune` today (`blob_db.go:171`, `data_column_db.go:215`), so it dies with the floor.
+- **Prune walk** — readdir the store root, no lock, no persisted low-water state. It continues past a failed `RemoveAll` and returns the first error.
+- **Prune is not excluded** — façade locks serialise façade operations against each other, never against the pruner. No lock could: a bucket spans every stripe. Acceptable because everything a prune removes is below the retention floor.
 - **Bucket allowlist** — an entry is a bucket only if it is a directory whose name parses as a `uint64` and formats back byte-identically. The blob index MDBX is a sibling of the buckets in the same directory, so this is what stops the pruner deleting the database.
 - **Prune datum** — blocks keep cutting against `args.seenSlot`, blobs against the wall clock. Preserved and commented, not unified.
 - **Flag semantics** — untouched; `ColumnKeepSlots == 0` still resolves to the spec window. Fixing that reading is #23411.
 - **`RemoveAllColumnSidecars`** — deleted; no production callers.
-- **`PeerDas.PruneBelow`** — keeps advancing `EarliestAvailableSlot` under its monotonic guard; the value is advertised to peers, so dropping it is a P2P defect, not a simplification.
+- **`PeerDas.PruneBelow`** — keeps advancing `EarliestAvailableSlot`; the value is advertised to peers, so dropping it is a P2P defect. A zero floor sets 0 outright, bypassing the monotonic guard exactly as today. The floor advances even when the prune errored, which is a deliberate change from today's return-before-update.
 - **Write rule** — OPEN, not ruled: overwrite always vs skip when the target exists. Leaning overwrite (last-write-wins self-heals, and a `capcli` re-import becomes a repair path) at the cost of a redundant encode and fsync per duplicate. Task 3 implements overwrite unless this is ruled the other way first.
 - **Duplicate events** — `write` returns `created`, and the column façade emits `SendDataColumnSidecar` only on a create. Overwrite must not re-publish a sidecar to Beacon API subscribers, which today's `Stat` guard prevents by returning above the emit.
 
@@ -212,9 +229,10 @@ Every task lists its tests before the implementation they cover. In Go the red p
 - Modify: `cl/persistence/blob_storage/blob_db_test.go`
 
 - [ ] write a test that `RemoveBlobSidecars` succeeds when a file is already gone and still deletes the count row (red against today's first-ENOENT return)
-- [ ] write a test that a prune cannot land mid-batch: with the task 1 slow wrapper delaying a removal, a `WriteBlobSidecars` for a slot either lands entirely or not at all, never leaving the count row describing files that are absent
+- [ ] write a test that a concurrent single-sidecar write cannot interleave with a `WriteBlobSidecars` batch for the same slot
+- [ ] write a test that an empty `blobSidecars` slice still records its zero count row and takes no slot lock
 - [ ] embed `bucketStore` and `slotLocks` in `BlobStore`, call both `init`s from `NewBlobStore`, delete `blobSidecarFilePath`
-- [ ] route `WriteBlobSidecars`, `ReadBlobSidecars`, `BlobSidecarExists`, `WriteStream` and `RemoveBlobSidecars` through the shared methods, taking `forSlot(slot)` once around the whole batch in `WriteBlobSidecars` and around files-plus-row in `RemoveBlobSidecars`, and nothing in `WriteStream`
+- [ ] route `WriteBlobSidecars`, `ReadBlobSidecars`, `BlobSidecarExists`, `WriteStream` and `RemoveBlobSidecars` through the shared methods; `WriteBlobSidecars` takes `forSlot` on the first sidecar's slot and only when the batch is non-empty, `RemoveBlobSidecars` and `ReadBlobSidecars` take it around files-plus-row, and `WriteStream` takes nothing
 - [ ] keep `Prune()` and the `slotsKept` field, computing the floor inline from `slotsKept` and `ethClock` — `floorFor` belongs to package `stages` and does not exist yet, so it must not be referenced here
 - [ ] run `go test ./cl/persistence/blob_storage/...` — must pass before task 5
 
@@ -227,8 +245,8 @@ Every task lists its tests before the implementation they cover. In Go the red p
 
 - [ ] write a test using the task 1 failing wrapper that a truncated file is never reported as held: `ColumnSidecarExists` and `GetSavedColumnIndex` must both say the column is absent, since a truncated file would otherwise count toward custody and be served over P2P while reads error
 - [ ] write a test that a duplicate `WriteColumnSidecars` for an already-stored `(root, index)` emits no second event, using a recording emitter
-- [ ] write a test that `GetSavedColumnIndex` observes one instant: with the task 1 slow wrapper delaying a prune of that slot's bucket, the returned set is either fully pre-prune or fully post-prune, never mixed
-- [ ] embed `bucketStore` and `slotLocks`, call both `init`s from `NewDataColumnStore`, delete `dataColumnFilePath`, the local `rwLocks` array and `acquireLock`
+- [ ] write a test that a concurrent write to the same slot cannot interleave with a `GetSavedColumnIndex` scan or a `RemoveColumnSidecars` loop
+- [ ] embed `bucketStore` and `slotLocks`, call both `init`s from `NewDataColumnStore`, delete the local `rwLocks` array and `acquireLock`, and delete `dataColumnFilePath` together with its three test call sites at `data_column_db_test.go:94,116,199`
 - [ ] route every per-file method through the shared ones, taking `forSlot(slot)` once around the whole loop in `GetSavedColumnIndex` and `RemoveColumnSidecars`, keeping the version-aware decode in the façade, and emitting `SendDataColumnSidecar` only when `write` reports `created`
 - [ ] delete `RemoveAllColumnSidecars` from the interface, the implementation and `TestRemoveAllColumnSidecars`
 - [ ] keep `Prune(keepSlotDistance)` computing its floor inline, for the same package reason as task 4
@@ -252,11 +270,11 @@ Every task lists its tests before the implementation they cover. In Go the red p
 - Modify: `cl/persistence/blob_storage/data_column_db_test.go`
 
 - [ ] write tests for `floorFor` in package `stages`: `head <= keep` gives 0, a `MaxUint64` keep gives 0, a normal window gives `head - keep`
-- [ ] write a test that `PeerDas.PruneBelow` still advances `EarliestAvailableSlot` to the floor, still refuses to move it backwards, and still sets 0 when the floor is 0
+- [ ] write a test that `PeerDas.PruneBelow` advances `EarliestAvailableSlot` to the floor, refuses to move it backwards, sets 0 outright when the floor is 0, and still advances when the column prune returned an error
 - [ ] write a test that `PruneBelow(0)` removes nothing, and one that a `PruneBelow` error reaches the caller's log rather than being discarded
 - [ ] replace `Prune()` and `Prune(keepSlotDistance)` with `PruneBelow(slot uint64)` on `BlobStorage`, `DataColumnStorage` and `PeerDas`, keeping the `EarliestAvailableSlot` update in `peerdas.PruneBelow` (`peer_das.go:337-345`) with the floor in place of `curSlot - keepSlotDistance`
 - [ ] add `floorFor(head, keep uint64) uint64` to `cleanup_and_pruning.go`, and delete the inline floor code left in both stores by tasks 4 and 5
-- [ ] drop `slotsKept` from `NewBlobStore` and `NewDataColumnStore`, and drop the now-unused `blobPruneDistance` parameter from `OpenCaplinDatabase` (`run.go:86-94`), updating its 12 call sites in `cmd/capcli/cli.go` — lines 153, 296, 485, 526, 613, 664, 1053, 1129, 1170, 1233, 1306, 1365
+- [ ] drop `slotsKept` and `ethClock` from `NewBlobStore` and `NewDataColumnStore` — the clock is read only by `Prune` — and drop the now-unused `blobPruneDistance` parameter from `OpenCaplinDatabase` (`run.go:86-94`), updating its 12 call sites in `cmd/capcli/cli.go` — lines 153, 296, 485, 526, 613, 664, 1053, 1129, 1170, 1233, 1306, 1365
 - [ ] move the `pruneBlobDistance` expression from `run.go:292` into `cleanupAndPruning`, and check and log both `PruneBelow` return values there
 - [ ] resolve `ColumnKeepSlots == 0` to the spec window exactly as `cleanup_and_pruning.go:30-33` does today, unchanged
 - [ ] comment which datum each pruner cuts against and why they differ — no forward reference to the freeze gate, which `.claude/rules/comments.md` bans as scope narration
@@ -269,16 +287,17 @@ Every task lists its tests before the implementation they cover. In Go the red p
 **Files:**
 - Modify: `cl/persistence/blob_storage/bucket_store_test.go`
 
-- [ ] write a test that a prune in progress does not delay unrelated work: with the task 1 slow wrapper delaying each `RemoveAll`, a write into a surviving bucket and a `stream` of an unrelated slot both complete in well under the prune's total delay — this goes red if any store-wide lock is reintroduced
+- [ ] write a test at façade level that a prune in progress does not delay unrelated work: with the task 1 slow wrapper delaying each `RemoveAll`, a write into a surviving bucket and a `stream` of an unrelated slot both complete in well under the prune's total delay — this goes red if any store-wide lock is reintroduced
 - [ ] write a test that a `write` racing the removal of its own bucket leaves the store consistent whichever order wins: no partial file at the target path, and any error is a clean failure
-- [ ] write a test that two concurrent writes to the same `(slot, root, index)` cannot corrupt each other through the shared `<file>.tmp` name
+- [ ] write a façade-level test that two concurrent writes to the same `(slot, root, index)` cannot corrupt each other through the shared `<file>.tmp` name — the guarantee is the façade's slot lock, so testing `bucketStore` directly would assert something it does not provide
 - [ ] run `go test ./cl/persistence/blob_storage/...` and `go test -race ./cl/persistence/blob_storage/...` — must pass before task 8
 - [ ] do not add a `-race` mutation check: `bucketStore` holds no mutable Go state and `MemMapFs` is internally synchronized, so the detector cannot observe these guards — the timing and consistency assertions above are what falsify them
 
 ### Task 8: Verify acceptance criteria
 
 - [ ] verify each of the three problems in the Overview is pinned by a test that fails when the fix is reverted
-- [ ] verify the only public API changes are `Prune` becoming `PruneBelow`, `RemoveAllColumnSidecars` being deleted, and the dropped parameters on `NewBlobStore`, `NewDataColumnStore` and `OpenCaplinDatabase`
+- [ ] verify the only public API changes are `Prune` becoming `PruneBelow`, `RemoveAllColumnSidecars` being deleted, and the dropped `slotsKept`/`ethClock`/`blobPruneDistance` parameters on `NewBlobStore`, `NewDataColumnStore` and `OpenCaplinDatabase`
+- [ ] verify no test asserts that a façade lock excludes the pruner — it does not, and cannot
 - [ ] verify no flag semantics changed — same retention for the same flags on every network, `ColumnKeepSlots == 0` included
 - [ ] verify `EarliestAvailableSlot` still advances exactly as it does today for the same retention configuration
 - [ ] verify no duplicate `data_column_sidecar` event is published for a re-written sidecar
