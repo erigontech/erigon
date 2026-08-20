@@ -2911,7 +2911,7 @@ func doDecompressSpeed(ctx context.Context, cliCtx *cli.Command) error {
 		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView(true)
+		view, err := decompressor.OpenSequentialView()
 		if err != nil {
 			panic(err)
 		}
@@ -2927,7 +2927,7 @@ func doDecompressSpeed(ctx context.Context, cliCtx *cli.Command) error {
 		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView(true)
+		view, err := decompressor.OpenSequentialView()
 		if err != nil {
 			panic(err)
 		}

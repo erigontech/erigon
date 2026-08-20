@@ -615,7 +615,7 @@ func (d *Decompressor) WithReadAhead(f func(*Getter) error) error {
 	if d == nil || d._mmapHandle == nil {
 		return nil
 	}
-	v, err := d.OpenSequentialView(true)
+	v, err := d.OpenSequentialView()
 	if err != nil {
 		return err
 	}
@@ -688,18 +688,16 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 //	https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
 type SequentialView struct {
 	d      *Decompressor
-	ownMap mmap.Ro // nil when the view reads through the decompressor's mapping
-	data   []byte  // words region, inside ownMap when set and the decompressor's otherwise
+	ownMap mmap.Ro
+	data   []byte // words region inside ownMap
 }
 
-// OpenSequentialView returns a view for a full scan. separateReadahead opens a second
-// MADV_SEQUENTIAL mmap; without it the scan reads through the shared one. Caller must Close.
-func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialView, error) {
+// OpenSequentialView scans over its own MADV_SEQUENTIAL mmap, so readahead never
+// reaches the mapping random readers fault through. Caller must Close. To scan
+// through the shared mapping instead, use MakeGetter.
+func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	if d == nil || d.f == nil {
 		return nil, nil
-	}
-	if !separateReadahead {
-		return &SequentialView{d: d, data: d.data[d.wordsStart:]}, nil
 	}
 	h1, err := mmap.OpenRo(d.f, int(d.size))
 	if err != nil {
@@ -741,6 +739,15 @@ func (v *SequentialView) MakeGetter() *Getter {
 		panic("seg: getter dataOffset is not the file offset of data[0]")
 	}
 	return g
+}
+
+// SequentialViews closes a batch of views whose getters outlive the loop that opened them.
+type SequentialViews []*SequentialView
+
+func (vs SequentialViews) Close() {
+	for _, v := range vs {
+		v.Close()
+	}
 }
 
 func (v *SequentialView) Close() {

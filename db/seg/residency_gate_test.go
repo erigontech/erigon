@@ -114,10 +114,8 @@ func TestResidencyGateWarmsOnReset(t *testing.T) {
 	require.Equal(t, pick.w, w, "gated read must still return the correct word")
 }
 
-// TestResidencyBitmapIsPerFile pins the cache's scope. Residency is a page-cache
-// property of the file, so every reader of one Decompressor — including a
-// SequentialView that maps the same file a second time — shares one bitmap and
-// one rescan goroutine.
+// Every reader of one file shares one bitmap and one rescan goroutine, including a
+// SequentialView that maps the file a second time.
 func TestResidencyBitmapIsPerFile(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()
@@ -126,14 +124,14 @@ func TestResidencyBitmapIsPerFile(t *testing.T) {
 	require.NotNil(t, rb)
 	require.Same(t, rb, d.residencyBitmap(), "a second call must not build another bitmap")
 
-	v, err := d.OpenSequentialView(true)
+	v, err := d.OpenSequentialView()
 	require.NoError(t, err)
 	defer v.Close()
 	require.Same(t, rb, v.MakeGetter().d.residencyBitmap(), "a view of the same file shares it")
 }
 
-// TestResidencyBitmapNilAfterClose pins that a closed Decompressor reports no
-// bitmap rather than building one over the mapping Close just released.
+// A closed Decompressor reports no bitmap instead of building one over the mapping
+// Close just released.
 func TestResidencyBitmapNilAfterClose(t *testing.T) {
 	d := prepareLoremDict(t)
 	require.NotNil(t, d.residencyBitmap())

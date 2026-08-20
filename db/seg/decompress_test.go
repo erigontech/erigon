@@ -139,12 +139,9 @@ func TestOpenSequentialView(t *testing.T) {
 		want = append(want, w)
 	}
 
-	readAll := func(separateReadahead bool) [][]byte {
-		v, err := d.OpenSequentialView(separateReadahead)
-		require.NoError(t, err)
-		defer v.Close()
+	readAll := func(g *Getter) [][]byte {
 		var got [][]byte
-		vg := v.MakeGetter()
+		vg := g
 		for vg.HasNext() {
 			w, _ := vg.Next(nil)
 			got = append(got, w)
@@ -152,10 +149,16 @@ func TestOpenSequentialView(t *testing.T) {
 		return got
 	}
 
-	require.Equal(t, want, readAll(true), "separate MADV_SEQUENTIAL mmap view")
-	require.Equal(t, want, readAll(false), "shared mmap view")
-	// the shared view's Close must be a no-op on the decompressor's mmap: a subsequent read still works
-	require.Equal(t, want, readAll(true))
+	scan := func() [][]byte {
+		v, err := d.OpenSequentialView()
+		require.NoError(t, err)
+		defer v.Close()
+		return readAll(v.MakeGetter())
+	}
+	require.Equal(t, want, scan(), "separate MADV_SEQUENTIAL mmap view")
+	require.Equal(t, want, readAll(d.MakeGetter()), "shared mapping, no view")
+	// closing a view must leave the decompressor's own mmap readable
+	require.Equal(t, want, scan())
 }
 
 func TestDecompressMatchOK(t *testing.T) {
@@ -1307,9 +1310,8 @@ func vmaAdvice(tb testing.TB, addr uintptr) string {
 	return ""
 }
 
-// TestSequentialViewLeavesSharedMappingRandom guards the regression that disabled
-// this feature: the scan must madvise a mapping of its own and never touch the one
-// concurrent random readers fault through.
+// The scan must madvise a mapping of its own, never the one random readers fault
+// through. Touching the shared mapping is what disabled this feature before.
 func TestSequentialViewLeavesSharedMappingRandom(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()
@@ -1320,7 +1322,7 @@ func TestSequentialViewLeavesSharedMappingRandom(t *testing.T) {
 		require.Equal(t, "random", vmaAdvice(t, shared), "NewDecompressor leaves the shared mapping MADV_RANDOM")
 	}
 
-	v, err := d.OpenSequentialView(true)
+	v, err := d.OpenSequentialView()
 	require.NoError(t, err)
 	require.NotNil(t, v.ownMap, "a separate-readahead view must own its mapping")
 	own := uintptr(unsafe.Pointer(&v.ownMap[0]))
@@ -1339,29 +1341,24 @@ func TestSequentialViewLeavesSharedMappingRandom(t *testing.T) {
 	}
 }
 
-// TestSequentialViewSharedPathAddsNoMapping pins the separateReadahead=false path
-// that merges of referenced commitment files take: it reads through the
-// decompressor's mapping rather than adding a VMA per merge input.
-func TestSequentialViewSharedPathAddsNoMapping(t *testing.T) {
+// Scanning through the decompressor's own getter must leave its advice alone;
+// setting MADV_NORMAL here is what forced the original revert.
+func TestSharedScanKeepsAdviceRandom(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()
 
-	v, err := d.OpenSequentialView(false)
-	require.NoError(t, err)
-	defer v.Close()
-
-	require.Nil(t, v.ownMap, "the shared path must not open a second mapping")
+	g := d.MakeGetter()
+	for g.HasNext() {
+		g.Next(nil)
+	}
 	if runtime.GOOS == "linux" {
 		require.Equal(t, "random", vmaAdvice(t, uintptr(unsafe.Pointer(&d._mmapHandle[0]))),
 			"reading through the shared mapping must not change its advice")
 	}
 }
 
-// TestGetterDataOffsetIsFileOffset pins what the residency gate resolves word
-// positions against. Every kind of Getter must report the same file offset for
-// data[0], including a view reading through its own mmap: the gate turns
-// dataOffset+pos into a file offset, so a constructor that diverged here would
-// warm and mark the wrong pages.
+// The gate resolves word positions as dataOffset+pos, so every Getter must report
+// the same file offset for data[0] whichever mmap it reads through.
 func TestGetterDataOffsetIsFileOffset(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()
@@ -1369,13 +1366,10 @@ func TestGetterDataOffsetIsFileOffset(t *testing.T) {
 	want := uint64(d.size) - uint64(len(d.data[d.wordsStart:]))
 	require.Equal(t, want, d.MakeGetter().dataOffset)
 
-	own, err := d.OpenSequentialView(true)
+	own, err := d.OpenSequentialView()
 	require.NoError(t, err)
 	defer own.Close()
 	require.Equal(t, want, own.MakeGetter().dataOffset, "a view with its own mmap reads the same file offsets")
 
-	shared, err := d.OpenSequentialView(false)
-	require.NoError(t, err)
-	defer shared.Close()
-	require.Equal(t, want, shared.MakeGetter().dataOffset)
+	require.Equal(t, want, d.MakeGetter().dataOffset)
 }

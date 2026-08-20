@@ -48,10 +48,9 @@ var residencyRefresh = time.Duration(dbg.EnvInt("RESIDENCY_REFRESH_SEC", 120)) *
 // decompressed off the mapping. For random-access readers over state .kv files.
 func (g *Getter) EnableResidencyGate() { g.residencyGate = true }
 
-// residencyRegion returns the page-aligned file extent covering the word at
-// offset. dataOffset already places data[0] in the file, so this never needs the
-// mapping and stays right for a SequentialView reading through its own mmap.
-// A zero length means out of range.
+// residencyRegion returns the page-aligned file extent covering the word at offset,
+// zero length when out of range. Works in file offsets, so a SequentialView reading
+// through its own mmap needs no special case.
 func (g *Getter) residencyRegion(offset uint64) (length int, fileOffset int64) {
 	if g.d == nil || len(g.data) == 0 {
 		return 0, 0
@@ -86,9 +85,8 @@ func (g *Getter) ensureResident(offset uint64) {
 	rb.markRange(first, last)
 }
 
-// residencyBitmap is per file, not per reader: mincore needs a real mapping and
-// the decompressor's spans the whole file, while residency itself is a page-cache
-// property every mapping of that file shares.
+// residencyBitmap is per file: residency is a page-cache property every mapping of
+// the file shares, and mincore needs a mapping only as an access handle.
 func (d *Decompressor) residencyBitmap() *residencyBitmap {
 	if rb := d.residency.Load(); rb != nil {
 		return rb
@@ -169,8 +167,8 @@ func (d *Decompressor) refreshResidencyLoop(rb *residencyBitmap) {
 // refresh rebuilds the whole bitmap from a chunked mincore scan of the mapping.
 // It replaces words wholesale; a concurrent markRange that gets clobbered is a
 // harmless false-negative (one extra io_uring next time).
-// refreshResidency reads the mapping under rb.mu and after the stopped check, so
-// a scan can never begin once Close has started tearing the mapping down.
+// Reads the mapping under rb.mu, after the stopped check, so no scan can begin
+// once Close has started unmapping.
 func (d *Decompressor) refreshResidency(rb *residencyBitmap) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
