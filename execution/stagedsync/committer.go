@@ -991,7 +991,7 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
 		if r.getter != nil {
-			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{}.WithBranchCache())
+			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
 		} else {
 			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
 		}

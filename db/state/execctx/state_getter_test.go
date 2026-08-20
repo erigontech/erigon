@@ -74,7 +74,7 @@ func TestPlainGetLatestDoesNotPassNilRequestMetrics(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestStateGetterHonorsBranchCacheOption(t *testing.T) {
+func TestStateGetterUsesSharedBranchCacheForCommitment(t *testing.T) {
 	db := newTestDb(t, 16)
 	roTx, err := db.BeginTemporalRo(t.Context())
 	require.NoError(t, err)
@@ -92,14 +92,10 @@ func TestStateGetterHonorsBranchCacheOption(t *testing.T) {
 	tx.opts = kv.GetLatestOptions{}
 	got, _, err := getter.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
-	require.Nil(t, got)
-	require.False(t, tx.opts.BranchCache())
-	got, _, err = getter.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
-	require.NoError(t, err)
 	require.Equal(t, cached, got)
 	branchCache.Clear()
 	tx.opts = kv.GetLatestOptions{}
-	_, _, err = getter.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+	_, _, err = getter.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.True(t, tx.opts.BranchCache())
 }

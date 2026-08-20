@@ -394,7 +394,7 @@ func (sdc *SharedDomainsCommitmentContext) SetCollapseTracer(tracer commitment.C
 // from the in-memory commitment domain (post-compute state).
 func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, nibblePrefix []byte) (int, error) {
 	key := nibbles.HexToCompact(nibblePrefix)
-	enc, _, err := sdc.sharedDomains.AsStateGetter(tx, execctxapi.StateGetterOptions{}).GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{}.WithBranchCache())
+	enc, _, err := sdc.sharedDomains.AsStateGetter(tx, execctxapi.StateGetterOptions{}).GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
 	if err != nil {
 		return 0, err
 	}

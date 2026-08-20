@@ -66,11 +66,7 @@ func (r *LatestStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error 
 }
 
 func (r *LatestStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	opts := kv.GetLatestOptions{}
-	if d == kv.CommitmentDomain {
-		opts = opts.WithBranchCache()
-	}
-	enc, step, err = r.getter.GetLatest(d, plainKey, opts)
+	enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
 	if err != nil {
 		return nil, 0, fmt.Errorf("LatestStateReader(GetLatest) %q: %w", d, err)
 	}

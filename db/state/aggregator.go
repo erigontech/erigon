@@ -2737,12 +2737,12 @@ func (at *AggregatorRoTx) cacheLatestBranch(enabled bool, k, v []byte, step kv.S
 }
 
 func (at *AggregatorRoTx) GetLatest(domain kv.Domain, k []byte, tx kv.Tx, opts kv.GetLatestOptions) (v []byte, step kv.Step, ok bool, err error) {
-	metrics, start := opts.Metrics()
-	maxStep := opts.MaxStep()
-	cacheBranch := opts.BranchCache() && maxStep == kv.NoStepBound
 	if domain != kv.CommitmentDomain {
 		return at.d[domain].getLatest(k, tx, opts)
 	}
+	metrics, start := opts.Metrics()
+	maxStep := opts.MaxStep()
+	cacheBranch := opts.BranchCache() && maxStep == kv.NoStepBound
 	v, step, ok, err = at.d[domain].getLatestFromDb(k, tx, maxStep)
 	if err != nil {
 		return nil, 0, false, err

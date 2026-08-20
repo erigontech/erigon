@@ -1271,7 +1271,7 @@ func (sd *SharedDomains) Commit(ctx context.Context, tx kv.RwTx, validate ...fun
 
 // TemporalDomain satisfaction. Direct reads use request metrics when configured.
 func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte) (v []byte, step kv.Step, err error) {
-	return sd.getLatest(domain, tx, k, nil, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{}.withBranchCache())
+	return sd.getLatest(domain, tx, k, nil, time.Time{}, kv.NoStepBound, sd.cacheReader(), getLatestOptions{})
 }
 
 // servableUnderBound gates a value against an in-flight unwind's per-key
@@ -1305,17 +1305,11 @@ func (sd *SharedDomains) latestFromMem(domain kv.Domain, key []byte) (v []byte, 
 }
 
 type getLatestOptions struct {
-	codeHash    []byte
-	branchCache bool
+	codeHash []byte
 }
 
 func (opts getLatestOptions) withCodeHash(codeHash []byte) getLatestOptions {
 	opts.codeHash = codeHash
-	return opts
-}
-
-func (opts getLatestOptions) withBranchCache() getLatestOptions {
-	opts.branchCache = true
 	return opts
 }
 
@@ -1398,7 +1392,8 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	// branchCache sits between sd.mem/parent.mem and the aggTx files for
 	// CommitmentDomain only. Snapshot-isolated readers must disable it because
 	// concurrent commits can advance the cache beyond their transaction view.
-	if opts.branchCache && domain == kv.CommitmentDomain && sd.branchCache != nil {
+	useBranchCache := domain == kv.CommitmentDomain && sd.branchCache != nil
+	if useBranchCache {
 		if cv, cStepU64, ok := sd.branchCache.Get(k); ok {
 			// Get returns the on-disk step index directly — do NOT divide by
 			// StepSize (that double-division collapsed cStep to ~0, defeating the
@@ -1417,7 +1412,7 @@ func (sd *SharedDomains) getLatest(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	if maxStep != kv.NoStepBound {
 		getOpts = getOpts.WithMaxStep(maxStep)
 	}
-	if opts.branchCache && domain == kv.CommitmentDomain && sd.branchCache != nil {
+	if useBranchCache {
 		getOpts = getOpts.WithBranchCache()
 	}
 	v, step, err = tx.GetLatest(domain, k, getOpts)
