@@ -245,6 +245,24 @@ func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 	assert.Equal(u256.U64(0x2a), got, "storage slot must be readable")
 }
 
+func TestAmsterdamGenesisCarriesSlotNumber(t *testing.T) {
+	t.Parallel()
+
+	zero := uint64(0)
+	cfg := *chain.AllProtocolChanges
+	cfg.AmsterdamTime = &zero
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: &cfg})
+
+	// merge.VerifyHeader rejects an Amsterdam header without one (ErrMissingSlotNumber),
+	// and geth and besu both put zero here, so the genesis hash depends on it.
+	require.NotNil(t, head.SlotNumber, "Amsterdam genesis header must carry slotNumber")
+	require.Zero(t, *head.SlotNumber)
+
+	cfg.AmsterdamTime = nil
+	head, _ = genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: &cfg})
+	require.Nil(t, head.SlotNumber, "pre-Amsterdam genesis header must not carry slotNumber")
+}
+
 // See https://github.com/erigontech/erigon/pull/11264
 func TestDecodeBalance0(t *testing.T) {
 	genesisData, err := os.ReadFile("./genesis_test.json")

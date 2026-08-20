@@ -554,6 +554,8 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 		if g.SlotNumber != nil {
 			head.SlotNumber = g.SlotNumber
+		} else {
+			head.SlotNumber = new(uint64)
 		}
 	}
 
