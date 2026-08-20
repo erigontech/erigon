@@ -20,7 +20,9 @@
 package rpc
 
 import (
+	"bytes"
 	"context"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"reflect"
@@ -40,11 +42,84 @@ var (
 	errorType        = reflect.TypeFor[error]()
 	subscriptionType = reflect.TypeFor[Subscription]()
 	stringType       = reflect.TypeFor[string]()
+
+	jsonNull       = []byte("null")
+	jsonEmptyArray = []byte("[]")
 )
 
+// invoker is the interface implemented by typed, generic-registered RPC methods.
+// It replaces the reflection-based callback on the hot dispatch path.
+type invoker interface {
+	invoke(ctx context.Context, params json.RawMessage) (any, error)
+}
+
+// Method is a typed RPC handler that avoids reflection on every call.
+// Register it with [RegisterMethod] on a [Server].
+type Method[Params any, Result any] struct {
+	fn func(ctx context.Context, params Params) (Result, error)
+}
+
+// invoke implements [invoker]. It unmarshals params into the typed Params value
+// and calls fn, returning the result as any.
+//
+// Supported params forms, matching the reflection-based path:
+//   - omitted / null / [] → zero-value Params; handlers must validate required fields
+//   - [obj]               → single-element positional array unwrapped to obj
+//     (go-ethereum client convention when calling with one struct arg)
+//   - [a, b, ...]         → multi-element positional array unmarshalled directly
+//     into Params (works when Params is a slice or array type)
+//
+// Leading JSON whitespace is trimmed before these checks so whitespace-padded
+// payloads are handled identically to the reflection-based path.
+func (m Method[Params, Result]) invoke(ctx context.Context, raw json.RawMessage) (any, error) {
+	var p Params
+	raw = bytes.TrimSpace(raw)
+	if len(raw) > 0 && !bytes.Equal(raw, jsonNull) && !bytes.Equal(raw, jsonEmptyArray) {
+		// Params must be a JSON array, matching the JSON-RPC 2.0 positional-args convention
+		// used by the reflection-based path.
+		if raw[0] != '[' {
+			return nil, &InvalidParamsError{"non-array args"}
+		}
+		var arr []json.RawMessage
+		if err := json.Unmarshal(raw, &arr); err != nil {
+			return nil, &InvalidParamsError{err.Error()}
+		}
+		switch len(arr) {
+		case 0:
+			// leave p at zero value
+		case 1:
+			// Single-element positional array: [obj] → obj.
+			// go-ethereum client wraps single struct args in an array.
+			if err := json.Unmarshal(arr[0], &p); err != nil {
+				return nil, &InvalidParamsError{err.Error()}
+			}
+		default:
+			// Multi-element array: unmarshal the whole array into Params directly.
+			// Works when Params is a slice or array type.
+			if err := json.Unmarshal(raw, &p); err != nil {
+				return nil, &InvalidParamsError{err.Error()}
+			}
+		}
+	}
+	result, err := m.fn(ctx, p)
+	if err != nil {
+		return nil, err
+	}
+	return result, nil
+}
+
+// typedEntry holds a registered typed handler alongside its pre-cached metrics timers,
+// matching the timer-caching pattern used by [callback].
+type typedEntry struct {
+	inv          invoker
+	timerSuccess metrics.Summary
+	timerFailure metrics.Summary
+}
+
 type serviceRegistry struct {
-	mu       sync.Mutex
+	mu       sync.RWMutex
 	services map[string]service
+	typed    map[string]typedEntry // typed generic handlers, checked before reflection-based ones
 	logger   log.Logger
 }
 
@@ -115,15 +190,52 @@ func (r *serviceRegistry) callback(method string) *callback {
 	if !ok {
 		return nil
 	}
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return r.services[svc].callbacks[name]
+}
+
+// registerTyped registers a typed generic handler for the given full method name
+// (e.g. "eth_blockNumber"). Typed handlers take priority over reflection-based ones.
+// It also ensures the namespace appears in services so that RPCService.Modules()
+// includes typed-only namespaces.
+func (r *serviceRegistry) registerTyped(name string, inv invoker) {
+	ns, _, _ := strings.Cut(name, serviceMethodSeparator)
 	r.mu.Lock()
 	defer r.mu.Unlock()
-	return r.services[svc].callbacks[name]
+	if r.typed == nil {
+		r.typed = make(map[string]typedEntry)
+	}
+	r.typed[name] = typedEntry{
+		inv:          inv,
+		timerSuccess: newRPCServingTimerMS(name, true),
+		timerFailure: newRPCServingTimerMS(name, false),
+	}
+	// Ensure the namespace is visible in services so RPCService.Modules() lists it.
+	if r.services == nil {
+		r.services = make(map[string]service)
+	}
+	if _, ok := r.services[ns]; !ok {
+		r.services[ns] = service{
+			name:          ns,
+			callbacks:     make(map[string]*callback),
+			subscriptions: make(map[string]*callback),
+		}
+	}
+}
+
+// invokerFor returns the typed entry registered for method, or zero value if none.
+func (r *serviceRegistry) invokerFor(method string) (typedEntry, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	e, ok := r.typed[method]
+	return e, ok
 }
 
 // subscription returns a subscription callback in the given service.
 func (r *serviceRegistry) subscription(service, name string) *callback {
-	r.mu.Lock()
-	defer r.mu.Unlock()
+	r.mu.RLock()
+	defer r.mu.RUnlock()
 	return r.services[service].subscriptions[name]
 }
 
