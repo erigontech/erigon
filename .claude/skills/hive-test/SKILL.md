@@ -62,7 +62,7 @@ The user may specify one or more test suites in any combination:
 
 Sources of truth: `.github/workflows/test-hive.yml` (`max-allowed-failures` per matrix
 entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
-(`max-failures` per matrix entry, currently 0 everywhere) for eest shards.
+(`max-failures` per matrix entry) for eest shards.
 
 | Suite | Max Allowed Failures |
 |-------|---------------------|
@@ -74,7 +74,8 @@ entry) for engine + rpc-compat suites, `.github/workflows/test-hive-eest.yml`
 | rpc-compat | 0 |
 | eest (consume-enginex) | 0 |
 | eest-rlp | 0 |
-| every eest-devnet consume-enginex shard | 0 |
+| pre-Amsterdam eest-devnet consume-enginex shards | 0 |
+| glamsterdam-devnet consume-enginex | 0 |
 
 Note: Failure counts are version-dependent and may change with newer fixtures.
 The CI devnet rows split every EngineX fork exactly once and run only with parallel
