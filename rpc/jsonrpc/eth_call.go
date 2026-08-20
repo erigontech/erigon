@@ -98,8 +98,6 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 	}
 	defer roTx.Rollback()
 
-	// The block overlay and published state view are acquired independently,
-	// so this path does not yet guarantee the same in-flight generation.
 	var tx kv.TemporalTx = roTx
 	if api.filters != nil {
 		if sd := api.filters.LatestSD(); sd != nil {
@@ -173,8 +171,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	defer dbtx.Rollback()
 
 	selector := orLatest(blockNrOrHash)
-	// Erigon cannot acquire a pending header and matching state together here,
-	// so estimation preserves its established behavior by using the latest state.
+	// Preserve the established latest-state fallback for pending estimates.
 	if number, ok := selector.Number(); ok && number == rpc.PendingBlockNumber {
 		selector = latestNumOrHash
 	}

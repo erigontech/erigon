@@ -781,6 +781,18 @@ func TestAccountRangeRejectsBlockAheadOfExecution(t *testing.T) {
 	})
 }
 
+func TestAccountRangeLatestUsesExecutionProgress(t *testing.T) {
+	m, _ := newBlockAheadOfExecutionTester(t)
+	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	want, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), m.Address[:], 10, true, true, nil)
+	require.NoError(t, err)
+
+	got, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber), m.Address[:], 10, true, true, nil)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
 func TestAccountAtRejectsBlockAheadOfExecution(t *testing.T) {
 	m, aheadHash := newHeaderAheadTester(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})

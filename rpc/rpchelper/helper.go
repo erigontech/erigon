@@ -58,16 +58,9 @@ func CheckBlockExecuted(tx kv.Tx, blockNumber uint64) error {
 	return nil
 }
 
-// GetBlockNumber resolves a block number, hash, or tag to a concrete block number and hash.
-//
-// Tags resolve against the view tx exposes. Passing the API's Filters
-// additionally wraps tx in the block overlay (which includes a head whose
-// commit is still in flight) and lets "pending" resolve via LastPendingBlock.
-// With nil filters tx is used exactly as passed — a plain tx for
-// committed-view resolution, required when the caller then scans data through
-// that same tx so the bounds and the scan agree, or a tx the caller already
-// overlay-wrapped to pin one view for all its reads; "pending" then falls
-// back to the latest executed block.
+// GetBlockNumber resolves a block selector against tx. Non-nil filters may add
+// the live overlay and pending block; nil filters preserve the caller's view
+// and resolve pending to the latest executed block.
 func GetBlockNumber(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash, tx kv.Tx, br dbservices.FullBlockReader, filters *Filters) (uint64, common.Hash, bool, error) {
 	bn, bh, latest, found, err := _GetBlockNumber(ctx, blockNrOrHash.RequireCanonical, blockNrOrHash, tx, br, filters)
 	if err != nil {

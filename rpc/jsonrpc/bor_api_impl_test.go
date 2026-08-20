@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	borengine "github.com/erigontech/erigon/polygon/bor"
 	borchain "github.com/erigontech/erigon/polygon/chain"
+	"github.com/erigontech/erigon/polygon/heimdall"
 	"github.com/erigontech/erigon/rpc"
 )
 
@@ -67,6 +68,41 @@ func newBorAPI(t *testing.T) (*BorImpl, kv.TemporalRwDB) {
 	t.Cleanup(func() { require.NoError(t, engine.Close()) })
 	base._engine = engine
 	return NewBorAPI(base, m.DB, nil), m.DB
+}
+
+type recordingSpanProducersReader struct {
+	blockNumbers []uint64
+}
+
+func (r *recordingSpanProducersReader) Producers(_ context.Context, blockNum uint64) (*heimdall.ValidatorSet, error) {
+	r.blockNumbers = append(r.blockNumbers, blockNum)
+	return &heimdall.ValidatorSet{}, nil
+}
+
+func TestBorLatestUsesExecutedHeadWhenHeaderStageIsAhead(t *testing.T) {
+	m, _ := newHeaderAheadTester(t)
+	base := newBaseApiForTest(m)
+	engine := borengine.New(borchain.BorDevnet.Config, base._blockReader, nil, nil, log.New(), nil, nil)
+	t.Cleanup(func() { require.NoError(t, engine.Close()) })
+	base._engine = engine
+	producers := &recordingSpanProducersReader{}
+	api := NewBorAPI(base, m.DB, producers)
+
+	latest := rpc.LatestBlockNumber
+	for _, test := range []struct {
+		name   string
+		number *rpc.BlockNumber
+	}{
+		{name: "omitted"},
+		{name: "latest", number: &latest},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			snapshot, err := api.GetSnapshot(test.number)
+			require.NoError(t, err)
+			require.Equal(t, uint64(overlayRaceChainSize), snapshot.Number)
+		})
+	}
+	require.Equal(t, []uint64{overlayRaceChainSize, overlayRaceChainSize}, producers.blockNumbers)
 }
 
 func TestBorNumberEndpointsPreserveUnknownBlockError(t *testing.T) {
