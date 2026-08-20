@@ -481,6 +481,7 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 				invalidFileItems = append(invalidFileItems, item)
 				continue
 			}
+			item.decompressor.BackfillV0PageValuesCount(h.HistoryValuesOnCompressedPage)
 		}
 
 		if item.index == nil {
