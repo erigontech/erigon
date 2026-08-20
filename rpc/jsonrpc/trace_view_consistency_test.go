@@ -366,6 +366,27 @@ func TestCommittedStateMethodsRejectPendingTag(t *testing.T) {
 	})
 }
 
+func TestDebugTraceCallRejectsTransactionIndexOutOfRange(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newDebugApiForTest(m)
+	txIndex := ^hexutil.Uint(0)
+
+	err := api.TraceCall(m.Ctx, ethapi.CallArgs{}, rpc.BlockNumberOrHashWithNumber(1), &config.TraceConfig{TxIndex: &txIndex}, jsonstream.New(io.Discard))
+	require.ErrorContains(t, err, "out of range")
+}
+
+func TestDebugTraceCallManyRejectsTransactionIndexOutOfRange(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newDebugApiForTest(m)
+	txIndex := 1024
+
+	err := api.TraceCallMany(m.Ctx, []Bundle{{Transactions: []ethapi.CallArgs{{}}}}, StateContext{
+		BlockNumber:      rpc.BlockNumberOrHashWithNumber(1),
+		TransactionIndex: &txIndex,
+	}, nil, jsonstream.New(io.Discard))
+	require.ErrorContains(t, err, "out of range")
+}
+
 func TestExecutionWitnessCacheUsesCommittedView(t *testing.T) {
 	base, m, _ := newOverlayAheadTestAPI(t)
 	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
