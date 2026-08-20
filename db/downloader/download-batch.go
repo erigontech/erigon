@@ -39,9 +39,12 @@ func (me *downloadBatch) taskWaiter() {
 }
 
 func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
-	snapshotTorrent, first, localMetainfo, err := me.d.addPreverifiedSnapshotForDownload(item.InfoHash, item.Name)
+	snapshotTorrent, first, localMetainfo, keptLocal, err := me.d.addPreverifiedSnapshotForDownload(item.InfoHash, item.Name)
 	if err != nil {
 		return err
+	}
+	if keptLocal {
+		me.all.Go(func() { me.d.seedKeptSnapshot(me.d.ctx, item.Name) })
 	}
 	if !snapshotTorrent.Ok {
 		return nil
