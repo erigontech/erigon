@@ -918,7 +918,7 @@ func (h *blockingLogHandler) Enabled(context.Context, log.Lvl) bool {
 	return true
 }
 
-func blockRootLogMessage(t *testing.T, message string) (<-chan struct{}, func()) {
+func blockOnRootLogMessage(t *testing.T, message string) (<-chan struct{}, func()) {
 	t.Helper()
 	blocker := &blockingLogHandler{
 		message: message,
@@ -984,7 +984,7 @@ func TestProductionDerivesPayloadAttributesOutsidePreparationGate(t *testing.T) 
 
 	// The missing-recipient warning occurs before withdrawal and attribute derivation, making that
 	// phase observable without relying on how long the state work takes.
-	derivationStarted, releaseDerivation := blockRootLogMessage(t,
+	derivationStarted, releaseDerivation := blockOnRootLogMessage(t,
 		"BlockProduction: no fee recipient from prepare_beacon_proposer, using zero address")
 	result := make(chan error, 1)
 	go func() {
@@ -1043,7 +1043,7 @@ func TestProductionProcessesCollectedPayloadOutsidePreparationGate(t *testing.T)
 
 	// A non-empty request bundle reaches returned-payload processing and blocks before decoding, so
 	// the gate can be checked after collection without depending on processing speed.
-	processingStarted, releaseProcessing := blockRootLogMessage(t, "BlockProduction: Received requests bundle")
+	processingStarted, releaseProcessing := blockOnRootLogMessage(t, "BlockProduction: Received requests bundle")
 	result := make(chan error, 1)
 	go func() {
 		_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,

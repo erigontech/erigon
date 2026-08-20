@@ -215,8 +215,8 @@ func unpreparedGrabOffset(due time.Duration) time.Duration {
 	return due - due/payloadPublicationDivisor
 }
 
-// preparedGrabOffset is the earliest collection point available to a builder warmed before the
-// slot. Collection still waits this far into the slot for recent transactions.
+// preparedGrabOffset anchors the earliest collection window for a builder warmed before the slot.
+// Polling starts minPayloadPollingWindow before this offset to tolerate a brief unavailable result.
 func preparedGrabOffset(due time.Duration) time.Duration {
 	return due / payloadPublicationDivisor
 }
@@ -621,7 +621,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
-	// A validated production request keeps stale-head preparation off this slot's critical path.
+	// A parsed production request keeps stale-head preparation off this slot's critical path.
 	finishProductionRequest := a.payloadPreparationGate.beginProductionRequest(targetSlot)
 	defer finishProductionRequest()
 
@@ -2257,8 +2257,8 @@ func (a *ApiHandler) adoptProducedBlock(
 	block *cltypes.SignedBeaconBlock,
 	blockRoot common.Hash,
 ) (common.Hash, *state.CachingBeaconState, error) {
-	finishProduction := a.payloadPreparationGate.beginExecutionWork()
-	defer finishProduction()
+	finishExecutionWork := a.payloadPreparationGate.beginExecutionWork()
+	defer finishExecutionWork()
 
 	// Skip BLS re-verification for locally-produced blocks. The block was just
 	// built by this node, so re-verifying the signature is redundant. Additionally,

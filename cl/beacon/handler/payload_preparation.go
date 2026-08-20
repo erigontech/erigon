@@ -41,7 +41,7 @@ var (
 	errNoPayloadID            = errors.New("execution layer returned no payload id")
 	errHeadTooFarBack         = errors.New("head state is too far behind the slot to prepare")
 	errPreparationHeadChanged = errors.New("selected head changed while preparing payload")
-	errExecutionWorkInFlight  = errors.New("block production or import is using the execution layer")
+	errExecutionWorkInFlight  = errors.New("block production or local block adoption is using the execution layer")
 	errPreparationTooLate     = errors.New("slot is too close to prime a payload production would use")
 )
 
@@ -81,8 +81,8 @@ func (s *payloadPreparationScratch) resetForTargetSlot(targetSlot uint64) {
 }
 
 // payloadPreparationGate keeps builder startup from overlapping execution work for production or
-// import. It also records active production slots so stale-head fallback stays off their path.
-// Preparation does not hold the execution gate while copying state or waiting to retry.
+// local block adoption. It also records active production slots so stale-head fallback stays off
+// their path. Preparation does not hold the execution gate while copying state or waiting to retry.
 type payloadPreparationGate struct {
 	attempt            sync.RWMutex
 	productionMu       sync.RWMutex
@@ -104,12 +104,8 @@ func (p *preparedPayload) set(slot uint64, payloadID []byte, primedAt time.Time)
 	p.payloads[slot] = preparedPayloadRecord{id: bytes.Clone(payloadID), primedAt: primedAt}
 }
 
-func (p *preparedPayload) warmup(slot uint64, payloadID []byte, now time.Time) time.Duration {
-	warmup, _ := p.warmupAndMismatch(slot, payloadID, now)
-	return warmup
-}
-
-// warmupAndMismatch reports when a prepared record exists but production chose another payload ID.
+// warmupAndMismatch returns inherited build time for an exact payload-ID match. It also reports
+// when the slot has a prepared record but production chose another payload ID.
 func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now time.Time) (time.Duration, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
@@ -319,8 +315,8 @@ func maxPreparationLead(cfg *clparams.BeaconChainConfig) time.Duration {
 	return time.Duration(cfg.SecondsPerSlot) * time.Second
 }
 
-// A previous-slot head becomes usable only after the attestation deadline and after local
-// production for the current slot has finished.
+// An older selected head becomes usable only after the attestation deadline and after local
+// production for the current slot has finished. A future selected head is never valid here.
 func shouldWaitForCurrentSlotHead(
 	currentSlot, selectedSlot uint64,
 	now, currentSlotStart time.Time,

@@ -45,6 +45,11 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 )
 
+func preparedWarmup(p *preparedPayload, slot uint64, payloadID []byte, now time.Time) time.Duration {
+	warmup, _ := p.warmupAndMismatch(slot, payloadID, now)
+	return warmup
+}
+
 type payloadBuildEngine struct {
 	*execution_client.MockExecutionEngine
 	t                 *testing.T
@@ -112,16 +117,16 @@ func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	now := time.Unix(100, 0)
 
-	require.Zero(t, p.warmup(10, id, now), "nothing primed yet")
+	require.Zero(t, preparedWarmup(&p, 10, id, now), "nothing primed yet")
 
 	p.set(10, id, now.Add(-time.Second))
-	require.Equal(t, time.Second, p.warmup(10, id, now))
+	require.Equal(t, time.Second, preparedWarmup(&p, 10, id, now))
 
 	// A different payload ID means production selected another build, so the prepared record must
 	// not change its collection time.
-	require.Zero(t, p.warmup(10, []byte{9, 9, 9, 9, 9, 9, 9, 9}, now))
-	require.Zero(t, p.warmup(11, id, now), "primed for another slot")
-	require.Zero(t, p.warmup(10, nil, now), "no id from the execution layer")
+	require.Zero(t, preparedWarmup(&p, 10, []byte{9, 9, 9, 9, 9, 9, 9, 9}, now))
+	require.Zero(t, preparedWarmup(&p, 11, id, now), "primed for another slot")
+	require.Zero(t, preparedWarmup(&p, 10, nil, now), "no id from the execution layer")
 }
 
 func TestPreparedPayloadReportsMatchingWarmup(t *testing.T) {
@@ -130,7 +135,7 @@ func TestPreparedPayloadReportsMatchingWarmup(t *testing.T) {
 	now := time.Unix(100, 0)
 
 	p.set(10, id, now.Add(-1500*time.Millisecond))
-	require.Equal(t, 1500*time.Millisecond, p.warmup(10, id, now))
+	require.Equal(t, 1500*time.Millisecond, preparedWarmup(&p, 10, id, now))
 }
 
 func TestMaximumPreparedAdvancePreservesRecentBuildTime(t *testing.T) {
@@ -610,7 +615,7 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 	primedHead, err := handler.preparePayloadFor(t.Context(), targetSlot)
 	require.NoError(t, err)
 	require.Equal(t, baseBlockRoot, primedHead)
-	require.Positive(t, handler.preparedPayload.warmup(targetSlot, payloadID, time.Now().Add(time.Second)))
+	require.Positive(t, preparedWarmup(&handler.preparedPayload, targetSlot, payloadID, time.Now().Add(time.Second)))
 }
 
 func TestPreparationGateRefusesActiveProduction(t *testing.T) {
@@ -891,7 +896,7 @@ func TestPreparePayloadForRejectsChangedHeadBeforeStartingBuilder(t *testing.T) 
 
 	_, err = handler.preparePayloadFor(t.Context(), targetSlot)
 	require.ErrorIs(t, err, errPreparationHeadChanged)
-	require.Zero(t, handler.preparedPayload.warmup(targetSlot, []byte{1}, time.Now()))
+	require.Zero(t, preparedWarmup(&handler.preparedPayload, targetSlot, []byte{1}, time.Now()))
 }
 
 func TestPreparePayloadForSkipsStateCopyWhenExecutionWorkStarts(t *testing.T) {
@@ -1080,12 +1085,12 @@ func TestPreparedPayloadKeepsConsecutiveSlots(t *testing.T) {
 	// in production.
 	p.set(10, first, now)
 	p.set(11, second, now)
-	require.Positive(t, p.warmup(10, first, now.Add(time.Second)))
-	require.Positive(t, p.warmup(11, second, now.Add(time.Second)))
+	require.Positive(t, preparedWarmup(&p, 10, first, now.Add(time.Second)))
+	require.Positive(t, preparedWarmup(&p, 11, second, now.Add(time.Second)))
 
 	// Records old enough that they can no longer be produced are dropped, so the map is bounded.
 	p.set(10+preparedPayloadRetainSlots+1, []byte{3, 3, 3, 3, 3, 3, 3, 3}, now)
-	require.Zero(t, p.warmup(10, first, now.Add(time.Second)))
+	require.Zero(t, preparedWarmup(&p, 10, first, now.Add(time.Second)))
 }
 
 func TestPreparedPayloadCopiesTheID(t *testing.T) {
@@ -1097,6 +1102,6 @@ func TestPreparedPayloadCopiesTheID(t *testing.T) {
 	id[0] = 0xff
 
 	// The caller's buffer must not be able to invalidate, or forge, a later match.
-	require.Positive(t, p.warmup(10, []byte{1, 2, 3, 4, 5, 6, 7, 8}, now.Add(time.Second)))
-	require.Zero(t, p.warmup(10, id, now.Add(time.Second)))
+	require.Positive(t, preparedWarmup(&p, 10, []byte{1, 2, 3, 4, 5, 6, 7, 8}, now.Add(time.Second)))
+	require.Zero(t, preparedWarmup(&p, 10, id, now.Add(time.Second)))
 }
