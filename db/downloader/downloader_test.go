@@ -549,7 +549,7 @@ func TestAddPreverifiedSnapshotSkipsAfterInitialDownload(t *testing.T) {
 	d, _, name, path := newLocalSnapshotTest(t)
 	markInitialDownloadComplete(t, d)
 
-	snapshotTorrent, firstDownloader, _, err := d.addPreverifiedSnapshotForDownload(snaptype.Hex2InfoHash("aa"), name)
+	snapshotTorrent, firstDownloader, _, _, err := d.addPreverifiedSnapshotForDownload(snaptype.Hex2InfoHash("aa"), name)
 	require.NoError(err)
 	require.False(snapshotTorrent.Ok)
 	require.False(firstDownloader)
@@ -656,6 +656,26 @@ func TestGrpcDownloadKeepsLocalDataAfterInitialDownload(t *testing.T) {
 
 	require.FileExists(path)
 	require.NoFileExists(path + ".part")
+}
+
+// A kept snapshot still has to be seeded. With no torrent registered the name is absent from
+// torrentsByName, so allActiveSnapshots and PublishLocalChainToml never see it, and a seedbox
+// silently stops serving a file it holds.
+func TestKeptLocalSnapshotIsSeeded(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+	markInitialDownloadComplete(t, d)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	require.NoError(d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), name))
+
+	require.FileExists(path)
+	require.NoFileExists(path + ".part")
+	d.lock.RLock()
+	_, registered := d.torrentsByName[name]
+	d.lock.RUnlock()
+	require.True(registered, "a kept snapshot must be registered, or it is never seeded")
 }
 
 // The snapshot stage writes preverified.toml mid-run, so the rule must be re-read, not cached from

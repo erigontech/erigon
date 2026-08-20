@@ -1053,6 +1053,9 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	snapshotTorrent g.Option[*torrent.Torrent],
 	firstDownloader bool, // First add of this Torrent that asked to download. The caller is responsible for adding download tasks.
 	localMetainfo g.Option[*metainfo.MetaInfo],
+	// Local data was kept and no torrent is registered for it. The caller seeds it, off d.lock:
+	// deriving a metainfo hashes the whole file.
+	keptLocal bool,
 	err error,
 ) {
 	// Prevent anyone else from trying to add a torrent in the meanwhile, so we can do data
@@ -1085,7 +1088,7 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	if !ok {
 		var isNew bool
 		var addedTorrent g.Option[*torrent.Torrent]
-		addedTorrent, isNew, localMetainfo, err = d.addTorrentForPreverifiedSnapshot(preverifiedInfoHash, name)
+		addedTorrent, isNew, localMetainfo, keptLocal, err = d.addTorrentForPreverifiedSnapshot(preverifiedInfoHash, name)
 		if err != nil || !addedTorrent.Ok {
 			return
 		}
@@ -1106,11 +1109,13 @@ func (d *Downloader) addTorrentForPreverifiedSnapshot(
 	addedTorrent g.Option[*torrent.Torrent],
 	isNew bool,
 	localMetainfo g.Option[*metainfo.MetaInfo],
+	keptLocal bool,
 	err error,
 ) {
 	var download bool
 	localMetainfo, download, err = d.prepareLocalDataForDownload(preverifiedInfoHash, name)
 	if err != nil || !download {
+		keptLocal = err == nil
 		return
 	}
 	t, isNew, err := d.addTorrent(name, preverifiedInfoHash)
@@ -1178,8 +1183,6 @@ func (d *Downloader) prepareLocalDataForDownload(
 				"name", name)
 			return localMetainfo, true, nil
 		}
-		// TODO(@AskAlexSharov, #21522): build and add the metainfo when it is missing
-		// (BuildTorrentIfNeed + addCompleteTorrent), or the kept file is never seeded.
 		d.log(log.LvlWarn, "keeping local snapshot, skipping preverified download", "name", name)
 		return localMetainfo, false, nil
 	}
@@ -1188,6 +1191,14 @@ func (d *Downloader) prepareLocalDataForDownload(
 		return localMetainfo, false, fmt.Errorf("invalidating old snapshot data: %w", err)
 	}
 	return localMetainfo, true, nil
+}
+
+// seedKeptSnapshot registers a kept local snapshot so it is seeded, deriving the metainfo when
+// none is on disk. Must run without d.lock: deriving it hashes the whole file.
+func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) {
+	if err := d.AddNewSeedableFile(ctx, name); err != nil && ctx.Err() == nil {
+		d.log(log.LvlWarn, "cannot seed kept local snapshot", "err", err, "name", name)
+	}
 }
 
 func (d *Downloader) snapshotDataExists(name string) (bool, error) {
