@@ -251,15 +251,15 @@ Every task lists its tests before the implementation they cover. In Go the red p
 - Modify: `cl/persistence/blob_storage/data_column_db_test.go`
 - Modify: `cl/persistence/blob_storage/mock_services/data_column_storage_mock.go`
 
-- [ ] write a test using the task 1 failing wrapper that a truncated file is never reported as held: `ColumnSidecarExists` and `GetSavedColumnIndex` must both say the column is absent, since a truncated file would otherwise count toward custody and be served over P2P while reads error
-- [ ] write a test that a duplicate `WriteColumnSidecars` for an already-stored `(root, index)` emits no second event, using a recording emitter
-- [ ] write a test that a concurrent write to the same slot cannot interleave with a `GetSavedColumnIndex` scan or a `RemoveColumnSidecars` loop
-- [ ] embed `bucketStore` and `slotLocks`, call both `init`s from `NewDataColumnStore`, delete the local `rwLocks` array and `acquireLock`, and delete `dataColumnFilePath` together with its three test call sites at `data_column_db_test.go:94,116,199`
-- [ ] route every per-file method through the shared ones, taking `forSlot(slot)` once around the whole loop in `GetSavedColumnIndex` and `RemoveColumnSidecars`, keeping the version-aware decode in the façade, and emitting `SendDataColumnSidecar` only when `write` reports `created`
-- [ ] delete `RemoveAllColumnSidecars` from the interface, the implementation and `TestRemoveAllColumnSidecars`
-- [ ] keep `Prune(keepSlotDistance)` computing its floor inline, for the same package reason as task 4
-- [ ] regenerate the mock with `go generate ./cl/persistence/blob_storage/...`
-- [ ] run `go test ./cl/persistence/blob_storage/... ./cl/das/...` — must pass before task 6
+- [x] write a test using the task 1 failing wrapper that a truncated file is never reported as held: `ColumnSidecarExists` and `GetSavedColumnIndex` must both say the column is absent, since a truncated file would otherwise count toward custody and be served over P2P while reads error
+- [x] write a test that a duplicate `WriteColumnSidecars` for an already-stored `(root, index)` emits no second event, using a recording emitter
+- [x] write a test that a concurrent write to the same slot cannot interleave with a `GetSavedColumnIndex` scan or a `RemoveColumnSidecars` loop
+- [x] embed `bucketStore` and `slotLocks`, call both `init`s from `NewDataColumnStore`, delete the local `rwLocks` array and `acquireLock`, and delete `dataColumnFilePath` together with its three test call sites at `data_column_db_test.go:94,116,199`
+- [x] route every per-file method through the shared ones, taking `forSlot(slot)` once around the whole loop in `GetSavedColumnIndex` and `RemoveColumnSidecars`, keeping the version-aware decode in the façade, and emitting `SendDataColumnSidecar` only when `write` reports `created`
+- [x] delete `RemoveAllColumnSidecars` from the interface, the implementation and `TestRemoveAllColumnSidecars`
+- [x] keep `Prune(keepSlotDistance)` computing its floor inline, for the same package reason as task 4
+- [x] regenerate the mock with `go generate ./cl/persistence/blob_storage/...`
+- [x] run `go test ./cl/persistence/blob_storage/... ./cl/das/...` — must pass before task 6
 
 ### Task 6: PruneBelow signature and the floor moving to the caller
 

@@ -3,8 +3,11 @@ package blob_storage
 import (
 	"bytes"
 	"context"
+	"os"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -68,6 +71,168 @@ func createTestDataColumnSidecar(slot uint64, columnIndex int64) *cltypes.DataCo
 	return sidecar
 }
 
+type blockingColumnFs struct {
+	afero.Fs
+	blockStatPath   string
+	blockRemovePath string
+	createPath      string
+	statEntered     chan struct{}
+	statRelease     chan struct{}
+	removeEntered   chan struct{}
+	removeRelease   chan struct{}
+	createCalled    chan struct{}
+	statOnce        sync.Once
+	removeOnce      sync.Once
+	createOnce      sync.Once
+}
+
+func (f *blockingColumnFs) Stat(name string) (os.FileInfo, error) {
+	if name == f.blockStatPath {
+		f.statOnce.Do(func() { close(f.statEntered) })
+		<-f.statRelease
+	}
+	return f.Fs.Stat(name)
+}
+
+func (f *blockingColumnFs) Remove(name string) error {
+	if name == f.blockRemovePath {
+		f.removeOnce.Do(func() { close(f.removeEntered) })
+		<-f.removeRelease
+	}
+	return f.Fs.Remove(name)
+}
+
+func (f *blockingColumnFs) Create(name string) (afero.File, error) {
+	if name == f.createPath {
+		f.createOnce.Do(func() { close(f.createCalled) })
+	}
+	return f.Fs.Create(name)
+}
+
+func TestDataColumnStorageDoesNotReportTruncatedSidecar(t *testing.T) {
+	fs := newFailingFs(afero.NewMemMapFs())
+	storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, nil, beaconevents.NewEventEmitter())
+	impl := storage.(*dataColumnStorageImpl)
+	root := common.HexToHash("0x1234567890abcdef")
+	const slot = 1000
+	const index = 1
+	_, filepath := impl.path(slot, root, index)
+	fs.failWritesAfter(filepath, 1, errInducedFailure)
+	fs.failWritesAfter(filepath+tmpSuffix, 1, errInducedFailure)
+
+	err := storage.WriteColumnSidecars(t.Context(), root, index, createTestDataColumnSidecar(slot, index))
+	require.ErrorIs(t, err, errInducedFailure)
+
+	exists, err := storage.ColumnSidecarExists(t.Context(), slot, root, index)
+	require.NoError(t, err)
+	require.False(t, exists)
+
+	saved, err := storage.GetSavedColumnIndex(t.Context(), slot, root)
+	require.NoError(t, err)
+	require.Empty(t, saved)
+}
+
+func TestDuplicateColumnWriteDoesNotEmitAnotherEvent(t *testing.T) {
+	emitters := beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	storage := NewDataColumnStore(afero.NewMemMapFs(), 1000, globalBeaconConfig, nil, emitters)
+	root := common.HexToHash("0x1234567890abcdef")
+	sidecar := createTestDataColumnSidecar(1000, 1)
+
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, sidecar))
+	event := <-events
+	require.Equal(t, beaconevents.OpDataColumnSidecar, event.Event)
+
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 1, sidecar))
+	require.Len(t, events, 0)
+}
+
+func TestDataColumnWholeSlotOperationsDoNotInterleaveWithWrite(t *testing.T) {
+	t.Run("saved index scan", func(t *testing.T) {
+		fs := &blockingColumnFs{Fs: afero.NewMemMapFs()}
+		storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, nil, beaconevents.NewEventEmitter())
+		root := common.HexToHash("0x1234567890abcdef")
+		const slot = 1000
+		require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(slot, 0)))
+		impl := storage.(*dataColumnStorageImpl)
+		_, statPath := impl.path(slot, root, 0)
+		_, createPath := impl.path(slot, root, 1)
+		fs.blockStatPath = statPath
+		fs.statEntered = make(chan struct{})
+		fs.statRelease = make(chan struct{})
+		fs.createPath = createPath + tmpSuffix
+		fs.createCalled = make(chan struct{})
+
+		scanDone := make(chan []uint64, 1)
+		scanErr := make(chan error, 1)
+		go func() {
+			indices, err := storage.GetSavedColumnIndex(t.Context(), slot, root)
+			scanDone <- indices
+			scanErr <- err
+		}()
+		<-fs.statEntered
+
+		writeStarted := make(chan struct{})
+		writeDone := make(chan error, 1)
+		go func() {
+			close(writeStarted)
+			writeDone <- storage.WriteColumnSidecars(t.Context(), root, 1, createTestDataColumnSidecar(slot, 1))
+		}()
+		<-writeStarted
+		select {
+		case <-fs.createCalled:
+			t.Fatal("write interleaved with the saved-column scan")
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(fs.statRelease)
+
+		require.NoError(t, <-scanErr)
+		require.Equal(t, []uint64{0}, <-scanDone)
+		require.NoError(t, <-writeDone)
+	})
+
+	t.Run("remove loop", func(t *testing.T) {
+		fs := &blockingColumnFs{Fs: afero.NewMemMapFs()}
+		storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, nil, beaconevents.NewEventEmitter())
+		root := common.HexToHash("0x1234567890abcdef")
+		const slot = 1000
+		for index := range int64(2) {
+			require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, index, createTestDataColumnSidecar(slot, index)))
+		}
+		impl := storage.(*dataColumnStorageImpl)
+		_, removePath := impl.path(slot, root, 0)
+		_, createPath := impl.path(slot, root, 2)
+		fs.blockRemovePath = removePath
+		fs.removeEntered = make(chan struct{})
+		fs.removeRelease = make(chan struct{})
+		fs.createPath = createPath + tmpSuffix
+		fs.createCalled = make(chan struct{})
+
+		removeDone := make(chan error, 1)
+		go func() { removeDone <- storage.RemoveColumnSidecars(t.Context(), slot, root, 0, 1) }()
+		<-fs.removeEntered
+
+		writeStarted := make(chan struct{})
+		writeDone := make(chan error, 1)
+		go func() {
+			close(writeStarted)
+			writeDone <- storage.WriteColumnSidecars(t.Context(), root, 2, createTestDataColumnSidecar(slot, 2))
+		}()
+		<-writeStarted
+		select {
+		case <-fs.createCalled:
+			t.Fatal("write interleaved with the column-removal loop")
+		case <-time.After(100 * time.Millisecond):
+		}
+		close(fs.removeRelease)
+
+		require.NoError(t, <-removeDone)
+		require.NoError(t, <-writeDone)
+	})
+}
+
 func TestNewDataColumnStore(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	beaconConfig := &clparams.BeaconChainConfig{}
@@ -86,22 +251,8 @@ func TestNewDataColumnStore(t *testing.T) {
 	assert.Equal(t, uint64(1000), impl.slotsKept)
 }
 
-func TestDataColumnFilePath(t *testing.T) {
-	slot := uint64(1000)
-	blockRoot := common.HexToHash("0x1234567890abcdef")
-	columnIndex := uint64(2)
-
-	dir, filepath := dataColumnFilePath(slot, blockRoot, columnIndex)
-
-	expectedDir := "0" // 1000 / 10000 = 0
-	expectedFilepath := "0/0x0000000000000000000000000000000000000000000000001234567890abcdef_2"
-
-	assert.Equal(t, expectedDir, dir)
-	assert.Equal(t, expectedFilepath, filepath)
-}
-
 func TestWriteColumnSidecars(t *testing.T) {
-	storage, fs, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -113,9 +264,9 @@ func TestWriteColumnSidecars(t *testing.T) {
 	require.NoError(t, err)
 
 	// Verify file was created
-	_, filepath := dataColumnFilePath(1000, blockRoot, uint64(columnIndex))
-	_, err = fs.Stat(filepath)
+	exists, err := storage.ColumnSidecarExists(ctx, 1000, blockRoot, columnIndex)
 	require.NoError(t, err)
+	require.True(t, exists)
 
 	// Test writing to same location again (should not error)
 	err = storage.WriteColumnSidecars(ctx, blockRoot, columnIndex, sidecar)
@@ -196,7 +347,8 @@ func TestColumnSidecarExistsWithDirectoryError(t *testing.T) {
 	columnIndex := int64(1)
 
 	// Create a directory with the same name as the expected file to cause a stat error
-	_, filepath := dataColumnFilePath(1000, blockRoot, uint64(columnIndex))
+	impl := storage.(*dataColumnStorageImpl)
+	_, filepath := impl.path(1000, blockRoot, uint64(columnIndex))
 	dir := filepath[:len(filepath)-2] // Remove the "_1" part
 	err := fs.MkdirAll(dir, 0o755)
 	require.NoError(t, err)
@@ -243,38 +395,6 @@ func TestRemoveColumnSidecars(t *testing.T) {
 	exists, err = storage.ColumnSidecarExists(ctx, 1000, blockRoot, 2)
 	require.NoError(t, err)
 	assert.False(t, exists)
-}
-
-func TestRemoveAllColumnSidecars(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
-	ctx := context.Background()
-
-	blockRoot := common.HexToHash("0x1234567890abcdef")
-
-	// Write multiple sidecars
-	for i := range int64(3) {
-		sidecar := createTestDataColumnSidecar(1000, i)
-		err := storage.WriteColumnSidecars(ctx, blockRoot, i, sidecar)
-		require.NoError(t, err)
-	}
-
-	// Verify they exist
-	for i := range int64(3) {
-		exists, err := storage.ColumnSidecarExists(ctx, 1000, blockRoot, i)
-		require.NoError(t, err)
-		assert.True(t, exists)
-	}
-
-	// Remove all sidecars
-	err := storage.RemoveAllColumnSidecars(ctx, 1000, blockRoot)
-	require.NoError(t, err)
-
-	// Verify all are removed
-	for i := range int64(3) {
-		exists, err := storage.ColumnSidecarExists(ctx, 1000, blockRoot, i)
-		require.NoError(t, err)
-		assert.False(t, exists)
-	}
 }
 
 func TestWriteStream(t *testing.T) {
