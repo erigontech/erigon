@@ -470,7 +470,7 @@ func TestGetRawHeader_PinsOverlayView(t *testing.T) {
 func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ff := rpchelper.New(m.Ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
-	pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)})
+	pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)}, nil)
 	payload, err := rlp.EncodeToBytes(pendingBlock)
 	require.NoError(t, err)
 	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
@@ -489,7 +489,7 @@ func TestHeaderHelpersDoNotReturnPublishedPendingHeader(t *testing.T) {
 	pendingBlock := types.NewBlockWithHeader(&types.Header{
 		Number:   *uint256.NewInt(100),
 		Coinbase: common.Address{1},
-	})
+	}, nil)
 	payload, err := rlp.EncodeToBytes(pendingBlock)
 	require.NoError(t, err)
 	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
