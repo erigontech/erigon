@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -134,7 +135,7 @@ func requestDomains(chainDb, stateDb kv.RwDB, ctx context.Context, readDomain st
 		return err
 	}
 
-	r := state.NewReaderV3(domains.AsStateGetter(temporalTx))
+	r := state.NewReaderV3(domains.AsStateGetter(temporalTx, execctxapi.StateGetterOptions{}))
 	latestTx, latestBlock, err := domains.SeekCommitment(ctx, temporalTx)
 	if err != nil {
 		return fmt.Errorf("failed to seek commitment to txn %d: %w", startTxNum, err)

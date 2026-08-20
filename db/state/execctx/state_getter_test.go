@@ -21,8 +21,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/execution/commitment"
 )
 
 type valSizeTx struct {
@@ -33,6 +37,67 @@ type valSizeTx struct {
 
 func (tx valSizeTx) GetLatestValSize(kv.Domain, []byte) (int, bool, error) {
 	return tx.size, tx.found, nil
+}
+
+type latestOptionsCaptureTx struct {
+	kv.TemporalTx
+	sawMetrics bool
+	opts       kv.GetLatestOptions
+}
+
+func (tx *latestOptionsCaptureTx) GetLatest(domain kv.Domain, key []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
+	metrics, _ := opts.Metrics()
+	tx.sawMetrics = metrics != nil
+	tx.opts = opts
+	return tx.TemporalTx.GetLatest(domain, key, opts)
+}
+
+func TestPlainGetLatestDoesNotPassNilRequestMetrics(t *testing.T) {
+	metricsEnabled := dbg.KVReadLevelledMetrics
+	dbg.KVReadLevelledMetrics = true
+	t.Cleanup(func() { dbg.KVReadLevelledMetrics = metricsEnabled })
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := &latestOptionsCaptureTx{TemporalTx: roTx}
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	tx.sawMetrics = false
+	key := make([]byte, 20)
+	_, _, err = sd.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
+	require.False(t, tx.sawMetrics)
+	require.NoError(t, sd.DomainPut(kv.AccountsDomain, tx, key, []byte{1}, 1, nil))
+	_, _, err = sd.GetLatest(kv.AccountsDomain, tx, key)
+	require.NoError(t, err)
+}
+
+func TestStateGetterUsesSharedBranchCacheForCommitment(t *testing.T) {
+	db := newTestDb(t, 16)
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	tx := &latestOptionsCaptureTx{TemporalTx: roTx}
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache.Clear()
+	getter := sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
+	key := []byte{0xaa, 0xbb}
+	cached := []byte("cached")
+	branchCache.Put(key, cached, 0, 0)
+	tx.opts = kv.GetLatestOptions{}
+	got, _, err := getter.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.Equal(t, cached, got)
+	branchCache.Clear()
+	tx.opts = kv.GetLatestOptions{}
+	_, _, err = getter.GetLatest(kv.CommitmentDomain, key, kv.GetLatestOptions{})
+	require.NoError(t, err)
+	require.True(t, tx.opts.BranchCache())
 }
 
 func TestTemporalTxStateGetterCodePresence(t *testing.T) {
