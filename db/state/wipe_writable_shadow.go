@@ -81,9 +81,22 @@ func (a *Aggregator) WipeWritableShadowPast(ctx context.Context, tx kv.TemporalR
 
 	// For non-aligned cuts: snapshot the per-domain (key, target-value)
 	// pairs for the boundary-step replay BEFORE the history prune below
-	// removes the history records we need to read. GetAsOf consults the
-	// history index + values, both of which the prune phase wipes for
-	// txnums > lastTxNum.
+	// removes the history records we need to read. Uses HistorySeek
+	// directly, NOT GetAsOf — because GetAsOf falls through to GetLatest
+	// on HistorySeek miss (domain.go GetAsOf → GetLatest at line 1834),
+	// and GetLatest reads tip-state via unbounded file walk. Under mode-D
+	// unwind with post-target retire outputs like .310-311.kv, that tip
+	// state is post-target VALUE-V1 (nonce+1). Silently writing V1 into
+	// the shadow at step=stepContaining produces a retire-captured
+	// .kv-without-matching-.ef entry that breaks HistorySeek for the
+	// NEXT mode-D compute — wrong root, no explanation.
+	// (2026-08-20 root-cause; see /erigon/tmp/repros/wrong-root-2026-08-20-block-3344388-partial)
+	//
+	// A miss here is a real inconsistency: `collectKeysChangedInRange`
+	// only returns keys whose IX has entries in (lastTxNum, boundaryStepEnd],
+	// so HistorySeek(K, lastTxNum+1) MUST find such an entry. If it
+	// doesn't, the IX/history view is inconsistent — fail loudly rather
+	// than silently poisoning the shadow.
 	type replayPlan struct {
 		domain kv.Domain
 		keys   [][]byte
@@ -101,9 +114,17 @@ func (a *Aggregator) WipeWritableShadowPast(ctx context.Context, tx kv.TemporalR
 			}
 			targets := make([][]byte, len(keys))
 			for i, k := range keys {
-				v, _, gerr := tx.GetAsOf(name, k, lastTxNum+1)
-				if gerr != nil {
-					return fmt.Errorf("WipeWritableShadowPast: GetAsOf(%s, key=%x, ts=%d): %w", name, k, lastTxNum+1, gerr)
+				v, hOk, hErr := tx.HistorySeek(name, k, lastTxNum+1)
+				if hErr != nil {
+					return fmt.Errorf("WipeWritableShadowPast: HistorySeek(%s, key=%x, ts=%d): %w", name, k, lastTxNum+1, hErr)
+				}
+				if !hOk {
+					// Consistency violation: collectKeysChangedInRange
+					// listed K because its IX has an entry in
+					// (lastTxNum, boundaryStepEnd], so HistorySeek at
+					// lastTxNum+1 MUST find that entry. If it doesn't,
+					// IX and history-values are out of sync.
+					return fmt.Errorf("WipeWritableShadowPast: HistorySeek MISS for plan key (%s, key=%x, ts=%d) — IX/values inconsistency (would have poisoned shadow with tip-state)", name, k, lastTxNum+1)
 				}
 				if len(v) > 0 {
 					targets[i] = append([]byte(nil), v...)
