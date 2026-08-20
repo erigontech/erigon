@@ -490,9 +490,12 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 
-	_, txCount, err := api._blockReader.Body(ctx, overlayTx, blockHash, blockNum)
+	body, txCount, err := api._blockReader.Body(ctx, overlayTx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if body == nil {
+		return nil, nil
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)

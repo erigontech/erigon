@@ -83,7 +83,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 	}
 	defer tx.Rollback()
 
-	// nil filters: committed view — the replay below reads temporal data through this tx.
 	blockNumber, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		return err
@@ -401,7 +400,6 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	}
 	engine := api.engine()
 
-	// nil filters: committed view — the replay below reads temporal data through this tx.
 	blockNumber, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, dbtx, api._blockReader, nil)
 	if err != nil {
 		return fmt.Errorf("get block number: %w", err)
@@ -421,6 +419,9 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	if config == nil || config.TxIndex == nil || isLatest {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, isLatest, 0, api._txNumReader)
 	} else {
+		if err := api.validateBlockTxIndex(ctx, dbtx, hash, blockNumber, uint64(*config.TxIndex)); err != nil {
+			return err
+		}
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, int(*config.TxIndex), api._txNumReader)
 	}
 	if err != nil {
@@ -510,7 +511,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 	defer func(start time.Time) { log.Trace("Tracing CallMany finished", "runtime", time.Since(start)) }(time.Now())
 
-	// nil filters: committed view — the replay below reads temporal data through this tx.
 	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, simulateContext.BlockNumber, tx, api._blockReader, nil)
 	if err != nil {
 		return err
@@ -545,6 +545,9 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, 0, api._txNumReader)
 	} else {
+		if err := api.validateBlockTxIndex(ctx, tx, hash, blockNum, uint64(*simulateContext.TransactionIndex)); err != nil {
+			return err
+		}
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)
 	}
 

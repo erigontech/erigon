@@ -590,6 +590,11 @@ func (m *MemoryMutation) Commit() error {
 }
 
 func (m *MemoryMutation) Rollback() {
+	if m.memDb == nil {
+		// A read view owns neither the shared memory transaction nor its backing transaction.
+		m.statelessCursors = nil
+		return
+	}
 	m.memTx.Rollback()
 	m.memDb.Close()
 	m.statelessCursors = nil
@@ -1091,8 +1096,8 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 // methods also use it when it implements kv.TemporalTx.
 //
 // The returned kv.TemporalTx only exposes read methods. Callers cannot write
-// to the overlay through this view. The caller must not Close the returned
-// view (it doesn't own the memDb).
+// to the overlay through this view. Rollback and Close leave the shared overlay
+// and the caller's transaction open because the view owns neither one.
 func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 	return m.newReadViewMut(tx)
 }

@@ -386,6 +386,15 @@ func TestGetBlockTransactionCountByHash_PinsOverlayView(t *testing.T) {
 	require.Equal(t, hexutil.Uint(1), *count)
 }
 
+func TestGetBlockTransactionCountByHashReturnsNullWithoutBody(t *testing.T) {
+	m, aheadHash := newHeaderAheadTester(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	count, err := api.GetBlockTransactionCountByHash(m.Ctx, aheadHash)
+	require.NoError(t, err)
+	require.Nil(t, count)
+}
+
 func TestGetRawHeader_PinsOverlayView(t *testing.T) {
 	t.Parallel()
 	base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
@@ -412,7 +421,7 @@ func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {
 	require.Nil(t, header)
 }
 
-func TestHeaderHelpersReturnPublishedPendingHeader(t *testing.T) {
+func TestHeaderHelpersDoNotReturnPublishedPendingHeader(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ff := rpchelper.New(m.Ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
 	pendingBlock := types.NewBlockWithHeader(&types.Header{
@@ -431,14 +440,14 @@ func TestHeaderHelpersReturnPublishedPendingHeader(t *testing.T) {
 	t.Run("headerByNumber", func(t *testing.T) {
 		header, err := base.headerByNumber(m.Ctx, rpc.PendingBlockNumber, tx)
 		require.NoError(t, err)
-		require.Equal(t, pendingBlock.Hash(), header.Hash())
+		require.Nil(t, header)
 	})
 
 	t.Run("headerByNumberOrHash", func(t *testing.T) {
 		header, isLatest, err := base.headerByNumberOrHash(m.Ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber))
 		require.NoError(t, err)
 		require.False(t, isLatest)
-		require.Equal(t, pendingBlock.Hash(), header.Hash())
+		require.Nil(t, header)
 	})
 }
 
@@ -744,6 +753,14 @@ func TestStorageRangeAtRejectsBlockAheadOfExecution(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	_, err := api.StorageRangeAt(m.Ctx, aheadHash, 0, m.Address, nil, 10)
+	require.ErrorContains(t, err, "not executed")
+}
+
+func TestStorageRangeAtRejectsOverlayOnlyHead(t *testing.T) {
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	_, err := api.StorageRangeAt(m.Ctx, overlayHeader.Hash(), 0, m.Address, nil, 10)
 	require.ErrorContains(t, err, "not executed")
 }
 

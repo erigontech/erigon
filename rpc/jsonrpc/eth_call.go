@@ -455,8 +455,6 @@ func (api *APIImpl) GetProof(ctx context.Context, address common.Address, storag
 	}
 	defer roTx.Rollback()
 
-	// nil filters: the gate below and the commitment-history reads both go through
-	// this plain roTx, so the tag has to resolve on that same committed view.
 	blockNumber, _, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, roTx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
@@ -666,7 +664,6 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 	}
 	defer tx.Rollback()
 
-	// nil filters: committed view — the witness computation reads temporal data through this tx.
 	blockNr, hash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil) // DoCall cannot be executed on non-canonical blocks
 	if err != nil {
 		return nil, err

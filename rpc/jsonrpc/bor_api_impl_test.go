@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/rawdb"
 	borengine "github.com/erigontech/erigon/polygon/bor"
 	borchain "github.com/erigontech/erigon/polygon/chain"
 	"github.com/erigontech/erigon/rpc"
@@ -58,18 +59,18 @@ func newBorAPIWithHeaderLookupError(t *testing.T) (*BorImpl, error) {
 	return NewBorAPI(base, m.DB, nil), wantErr
 }
 
-func newBorAPI(t *testing.T) *BorImpl {
+func newBorAPI(t *testing.T) (*BorImpl, kv.TemporalRwDB) {
 	t.Helper()
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	base := newBaseApiForTest(m)
 	engine := borengine.New(borchain.BorDevnet.Config, base._blockReader, nil, nil, log.New(), nil, nil)
 	t.Cleanup(func() { require.NoError(t, engine.Close()) })
 	base._engine = engine
-	return NewBorAPI(base, m.DB, nil)
+	return NewBorAPI(base, m.DB, nil), m.DB
 }
 
 func TestBorNumberEndpointsPreserveUnknownBlockError(t *testing.T) {
-	api := newBorAPI(t)
+	api, _ := newBorAPI(t)
 	number := rpc.BlockNumber(1_000_000)
 	selector := rpc.BlockNumberOrHashWithNumber(number)
 
@@ -87,6 +88,37 @@ func TestBorNumberEndpointsPreserveUnknownBlockError(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			require.ErrorIs(t, test.call(), errUnknownBlock)
+		})
+	}
+}
+
+func TestBorNumberEndpointsPreserveUnknownBlockErrorForUnavailableTags(t *testing.T) {
+	api, db := newBorAPI(t)
+	require.NoError(t, db.Update(t.Context(), func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceFinalized(tx, common.Hash{})
+		rawdb.WriteForkchoiceSafe(tx, common.Hash{})
+		return nil
+	}))
+
+	for _, number := range []rpc.BlockNumber{rpc.FinalizedBlockNumber, rpc.SafeBlockNumber, rpc.PendingBlockNumber} {
+		t.Run(number.String(), func(t *testing.T) {
+			selector := rpc.BlockNumberOrHashWithNumber(number)
+			tests := []struct {
+				name string
+				call func() error
+			}{
+				{"getSnapshot", func() error { _, err := api.GetSnapshot(&number); return err }},
+				{"getSigners", func() error { _, err := api.GetSigners(&number); return err }},
+				{"getAuthor", func() error { _, err := api.GetAuthor(&selector); return err }},
+				{"getSnapshotProposer", func() error { _, err := api.GetSnapshotProposer(&selector); return err }},
+				{"getSnapshotProposerSequence", func() error { _, err := api.GetSnapshotProposerSequence(&selector); return err }},
+			}
+
+			for _, test := range tests {
+				t.Run(test.name, func(t *testing.T) {
+					require.ErrorIs(t, test.call(), errUnknownBlock)
+				})
+			}
 		})
 	}
 }

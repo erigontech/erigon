@@ -163,15 +163,26 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
-	// nil filters: committed view — the scan below reads temporal data through this tx.
 	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			// Probe the overlay only to distinguish an in-flight canonical head from an unknown hash.
+			// Temporal reads remain bound to the committed transaction.
+			overlayTx := api.filters.WithOverlay(tx)
+			overlayBlockNumber, _, _, overlayErr := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
+			if overlayErr == nil {
+				if err := rpchelper.CheckBlockExecuted(tx, overlayBlockNumber); err != nil {
+					return StorageRangeResult{}, err
+				}
+			}
 			return StorageRangeResult{}, nil
 		}
 		return StorageRangeResult{}, err
 	}
 	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
+		return StorageRangeResult{}, err
+	}
+	if err := api.validateBlockTxIndex(ctx, tx, blockHash, blockNumber, txIndex); err != nil {
 		return StorageRangeResult{}, err
 	}
 
@@ -244,30 +255,12 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 	}
 	defer tx.Rollback()
 
-	var blockNumber uint64
-
-	if number, ok := blockNrOrHash.Number(); ok {
-		if number == rpc.PendingBlockNumber {
-			return state.IteratorDump{}, errors.New("accountRange for pending block not supported")
-		}
-		if number == rpc.LatestBlockNumber {
-			var err error
-
-			blockNumber, err = stages.GetStageProgress(tx, stages.Execution)
-			if err != nil {
-				return state.IteratorDump{}, fmt.Errorf("last block has not found: %w", err)
-			}
-		} else {
-			blockNumber = uint64(number)
-		}
-
-	} else if _, ok := blockNrOrHash.Hash(); ok {
-		// nil filters: committed view — the dumper reads temporal data through this tx.
-		bn, _, _, err2 := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
-		if err2 != nil {
-			return state.IteratorDump{}, err2
-		}
-		blockNumber = bn
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		return state.IteratorDump{}, errors.New("accountRange for pending block not supported")
+	}
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	if err != nil {
+		return state.IteratorDump{}, err
 	}
 	if err := rpchelper.CheckBlockExecuted(tx, blockNumber); err != nil {
 		return state.IteratorDump{}, err
@@ -621,6 +614,9 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	if err := rpchelper.CheckBlockExecuted(tx, *blockNumber); err != nil {
 		return nil, err
 	}
+	if err := api.validateBlockTxIndex(ctx, tx, blockHash, *blockNumber, txIndex); err != nil {
+		return nil, err
+	}
 
 	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
 	if err != nil {
@@ -632,7 +628,8 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 		return nil, err
 	}
 	ttx := tx
-	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], minTxNum+txIndex+1)
+	asOfTxNum := minTxNum + txIndex + 1
+	v, ok, err := ttx.GetAsOf(kv.AccountsDomain, address[:], asOfTxNum)
 	if err != nil {
 		return nil, err
 	}
@@ -649,7 +646,7 @@ func (api *DebugAPIImpl) AccountAt(ctx context.Context, blockHash common.Hash, t
 	result.Nonce = hexutil.Uint64(a.Nonce)
 	result.CodeHash = a.CodeHash.Value()
 
-	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], minTxNum+txIndex)
+	code, _, err := ttx.GetAsOf(kv.CodeDomain, address[:], asOfTxNum)
 	if err != nil {
 		return nil, err
 	}

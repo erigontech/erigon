@@ -53,6 +53,10 @@ func (api *BorImpl) headerByNumberForBor(ctx context.Context, number rpc.BlockNu
 	if errors.As(err, &blockNotFound) {
 		return nil, nil
 	}
+	var unavailableBlock *rpc.CustomError
+	if errors.As(err, &unavailableBlock) && unavailableBlock.ErrorCode() == rpchelper.UnknownBlockCode {
+		return nil, nil
+	}
 	return header, err
 }
 

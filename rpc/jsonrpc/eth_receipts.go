@@ -182,7 +182,6 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 			begin = uint64(fromBlock)
 		} else {
 			blockNum := rpc.BlockNumber(fromBlock)
-			// nil filters: resolve on the committed view, like the baseline above.
 			begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, nil)
 			if err != nil {
 				return 0, 0, err

@@ -193,7 +193,6 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	// nil filters: committed view — the replay below reads temporal data through this tx.
 	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
@@ -335,8 +334,6 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	var fromBlock uint64
 	var toBlock uint64
 	var err error
-	// nil filters: resolve tags on the committed view filterV3 scans
-	// (see rpchelper.GetBlockNumber).
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {
