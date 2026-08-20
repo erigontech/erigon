@@ -14,13 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package rawtemporaldb
+//go:build !linux
 
-import "encoding/binary"
+package seg
 
-// ReceiptValueForTest is the value encoding, for assertions in tests.
-func ReceiptValueForTest(v uint64) []byte {
-	var buf [binary.MaxVarintLen64]byte
-	i := binary.PutUvarint(buf[:], v)
-	return buf[:i]
-}
+func (*Getter) EnableAsyncLiteralWarm() {}

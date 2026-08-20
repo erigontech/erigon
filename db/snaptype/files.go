@@ -430,7 +430,7 @@ func parseDirEntries(name string, files []os.DirEntry) (res []FileInfo, err erro
 		}
 
 		meta, _, ok := ParseFileName(name, f.Name())
-		if !ok {
+		if !ok || meta.Type == nil {
 			continue
 		}
 		res = append(res, meta)

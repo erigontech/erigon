@@ -34,7 +34,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -308,18 +307,6 @@ func TestCall_ByBlockHash_WithRequireCanonicalTrue_NonCanonicalBlock(t *testing.
 	} else {
 		t.Error("error expected")
 	}
-}
-
-var _ bridgeReader = mockBridgeReader{}
-
-type mockBridgeReader struct{}
-
-func (m mockBridgeReader) Events(context.Context, common.Hash, uint64) ([]*types.Message, error) {
-	panic("mock")
-}
-
-func (m mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
-	panic("mock")
 }
 
 func TestGetStorageValues_HappyPath(t *testing.T) {

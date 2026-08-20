@@ -59,7 +59,7 @@ func TestGzipHandlerBatchConcurrentStreamableFlush(t *testing.T) {
 	}
 	reqBody := "[" + strings.Join(calls, ",") + "]"
 
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(reqBody))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(reqBody))
 	req.Header.Set("Content-Type", "application/json")
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()

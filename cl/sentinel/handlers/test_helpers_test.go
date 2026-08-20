@@ -10,7 +10,7 @@ import (
 )
 
 func getEthClock(t *testing.T) eth_clock.EthereumClock {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	return eth_clock.NewEthereumClock(s.GenesisTime(), s.GenesisValidatorsRoot(), s.BeaconConfig())
 }

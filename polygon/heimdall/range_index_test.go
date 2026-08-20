@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	polygondb "github.com/erigontech/erigon/polygon/db"
 )
 
@@ -42,8 +43,7 @@ func newRangeIndexTest(t *testing.T) rangeIndexTest {
 	ctx := context.Background()
 	logger := log.New()
 
-	db, err := mdbx.New(dbcfg.ChainDB, logger).
-		InMem(t, tmpDir).
+	db, err := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), tmpDir).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg { return kv.TableCfg{"RangeIndex": {}} }).
 		MapSize(1 * datasize.GB).
 		Open(ctx)

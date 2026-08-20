@@ -48,6 +48,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/remotedbserver"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -57,6 +58,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
@@ -127,6 +129,7 @@ type ExecModuleTester struct {
 	Address         common.Address
 	ForkValidator   *execmodule.ForkValidator
 	ExecModule      *execmodule.ExecModule
+	BlockBuilder    *builder.Builder
 	StateCache      *execmodule.Cache
 	retirementStart chan bool
 	retirementDone  chan struct{}
@@ -579,7 +582,8 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	// Committed genesis will be shared between download and mock sentry
 	_, mock.Genesis, err = genesiswrite.CommitGenesisBlock(mock.DB, gspec, "", datadir.New(tmpdir), mock.Log)
-	if _, ok := err.(*chain.ConfigCompatError); err != nil && !ok {
+	var compatErr *chain.ConfigCompatError
+	if err != nil && !errors.As(err, &compatErr) {
 		if tb != nil {
 			tb.Fatal(err)
 		} else {
@@ -625,7 +629,11 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 			txpool.WithP2PSenderWg(nil),
 			txpool.WithFeeCalculator(nil),
 			txpool.WithPoolDBInitializer(func(_ context.Context, _ txpoolcfg.Config, _ log.Logger) (kv.RwDB, error) {
-				return mdbx.New(dbcfg.TxPoolDB, logger).InMem(tb, tmpdir).MustOpen(), nil
+				dbOpts := mdbx.New(dbcfg.TxPoolDB, logger)
+				if tb == nil {
+					return dbOpts.InMem(tmpdir).MustOpen(), nil
+				}
+				return mdbxtest.InMem(tb, dbOpts, tmpdir).MustOpen(), nil
 			}),
 		)
 		if err != nil {
@@ -676,7 +684,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	readAheader := exec.NewBlockReadAheader()
 	blkBuilder := builder.NewBuilder(
-		mock.Ctx,
 		mock.DB,
 		&cfg.Builder,
 		mock.ChainConfig,
@@ -708,6 +715,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		nil, /*sdProvider*/
 		logger,
 	)
+	mock.BlockBuilder = blkBuilder
 
 	blockRetire := freezeblocks.NewBlockRetire(mock.Ctx, 1, dirs, mock.BlockReader, blockWriter, mock.DB, nil, nil, mock.ChainConfig, &cfg, mock.Notifications.Events, nil, logger)
 	mock.blockRetire = blockRetire
@@ -953,6 +961,9 @@ func (emt *ExecModuleTester) GetAssembledBlock(ctx context.Context, payloadID ui
 		if err != nil {
 			return nil, false, err
 		}
+		if result.Unknown {
+			return nil, false, chainreader.ErrUnknownPayload
+		}
 		if result.Block == nil {
 			return nil, result.Busy, nil
 		}
@@ -1135,8 +1146,8 @@ func (emt *ExecModuleTester) NewHistoryStateReader(blockNum uint64, tx kv.Tempor
 	return r
 }
 
-func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalGetter) state.StateReader {
-	return state.NewReaderV3(tx)
+func (emt *ExecModuleTester) NewStateReader(tx kv.TemporalTx) state.StateReader {
+	return state.NewReaderV3(execctx.NewTemporalTxStateGetter(tx))
 }
 
 func (emt *ExecModuleTester) BlocksIO() (dbservices.FullBlockReader, *blockio.BlockWriter) {

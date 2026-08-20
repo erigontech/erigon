@@ -45,7 +45,7 @@ func decompressGzip(t *testing.T, r io.Reader) []byte {
 // gzipRequest issues a POST to handler with Accept-Encoding: gzip and returns the recorder.
 func gzipRequest(t *testing.T, handler http.Handler) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
 	req.Header.Set("Accept-Encoding", "gzip")
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
@@ -93,7 +93,7 @@ func TestGzipHandlerNoAcceptEncoding(t *testing.T) {
 		_, _ = w.Write(body)
 	}))
 
-	req := httptest.NewRequest(http.MethodPost, "/", nil)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", nil)
 	rec := httptest.NewRecorder()
 	handler.ServeHTTP(rec, req)
 

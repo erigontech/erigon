@@ -582,8 +582,6 @@ func (sdb *IntraBlockState) Exist(addr accounts.Address) (exists bool, err error
 	return readAccount != nil, nil
 }
 
-var emptyAccount = accounts.NewAccount()
-
 // Empty returns whether the state object is either non-existent
 // or empty according to the EIP161 specification (balance = nonce = code = 0)
 func (sdb *IntraBlockState) Empty(addr accounts.Address) (empty bool, err error) {

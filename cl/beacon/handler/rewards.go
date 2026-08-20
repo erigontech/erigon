@@ -221,7 +221,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsSyncCommittees(w http.ResponseWriter,
 	for committeeIdx, v := range committee {
 		idx, _, err := a.syncedData.ValidatorIndexByPublicKey(v)
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("sync committee public key not found: %s", err))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("sync committee public key not found: %w", err))
 		}
 		if len(filterIndiciesSet) > 0 {
 			if _, ok := filterIndiciesSet[idx]; !ok {
