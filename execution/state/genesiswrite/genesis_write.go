@@ -138,7 +138,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		}
 	}
 	// Just commit the new block if there is no stored genesis block.
-	storedHash, storedErr := rawdb.ReadCanonicalHash(tx, 0)
+	storedHash, stored, storedErr := rawdb.ReadCanonicalHash(tx, 0)
 	if storedErr != nil {
 		return nil, nil, storedErr
 	}
@@ -152,7 +152,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		}
 	}
 
-	if (storedHash == common.Hash{}) {
+	if !stored {
 		custom := true
 		if genesis == nil {
 			logger.Info("Writing main-net genesis block")
@@ -182,12 +182,17 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			return genesis.Config, block, &GenesisMismatchError{Stored: storedHash, New: hash}
 		}
 	}
-	number := rawdb.ReadHeaderNumber(tx, storedHash)
-	if number != nil {
-		var err error
-		storedBlock, _, err = rawdb.ReadBlockWithSenders(tx, storedHash, *number)
+	number, ok, err := rawdb.ReadHeaderNumber(tx, storedHash)
+	if err != nil {
+		return genesis.Config, nil, err
+	}
+	if ok {
+		result, _, found, err := rawdb.ReadBlockWithSenders(tx, storedHash, number)
 		if err != nil {
 			return genesis.Config, nil, err
+		}
+		if found {
+			storedBlock = result
 		}
 	}
 	// Get the existing chain configuration.
@@ -196,11 +201,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	if err := newCfg.CheckConfigForkOrder(); err != nil {
 		return newCfg, nil, err
 	}
-	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
+	storedCfg, storedCfgFound, storedErr := rawdb.ReadChainConfig(tx, storedHash)
 	if storedErr != nil && newCfg.Bor == nil {
 		return newCfg, nil, storedErr
 	}
-	if storedCfg == nil {
+	if !storedCfgFound {
 		logger.Warn("Found genesis block without chain config")
 		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
 		if err1 != nil {
@@ -230,11 +235,20 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
-	height := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
-	if height != nil {
-		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height)
-		if compatibilityErr != nil && *height != 0 && compatibilityErr.RewindTo != 0 {
-			return newCfg, storedBlock, compatibilityErr
+	headHash, headFound, err := rawdb.ReadHeadHeaderHash(tx)
+	if err != nil {
+		return newCfg, storedBlock, err
+	}
+	if headFound {
+		height, heightFound, err := rawdb.ReadHeaderNumber(tx, headHash)
+		if err != nil {
+			return newCfg, storedBlock, err
+		}
+		if heightFound {
+			compatibilityErr := storedCfg.CheckCompatible(newCfg, height)
+			if compatibilityErr != nil && height != 0 && compatibilityErr.RewindTo != 0 {
+				return newCfg, storedBlock, compatibilityErr
+			}
 		}
 	}
 	if err := rawdb.WriteChainConfig(tx, storedHash, newCfg); err != nil {

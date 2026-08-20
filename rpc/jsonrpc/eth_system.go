@@ -270,7 +270,11 @@ func (api *APIImpl) GasPrice(ctx context.Context) (*hexutil.Big, error) {
 	gasResult := uint256.NewInt(0)
 	gasResult.Set(tipcap)
 	overlayTx := api.filters.WithTemporalOverlay(tx)
-	if head := rawdb.ReadCurrentHeader(overlayTx); head != nil && head.BaseFee != nil {
+	head, ok, err := rawdb.ReadCurrentHeader(overlayTx)
+	if err != nil {
+		return nil, err
+	}
+	if ok && head.BaseFee != nil {
 		gasResult.Add(tipcap, head.BaseFee)
 	}
 
@@ -352,8 +356,11 @@ func (api *APIImpl) BlobBaseFee(ctx context.Context) (*hexutil.Big, error) {
 	}
 	defer tx.Rollback()
 	overlayTx := api.filters.WithTemporalOverlay(tx)
-	header := rawdb.ReadCurrentHeader(overlayTx)
-	if header == nil || header.ExcessBlobGas == nil {
+	header, ok, err := rawdb.ReadCurrentHeader(overlayTx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok || header.ExcessBlobGas == nil {
 		return nil, nil
 	}
 	config, err := api.BaseAPI.chainConfig(ctx, tx)
@@ -379,8 +386,11 @@ func (api *APIImpl) BaseFee(ctx context.Context) (*hexutil.Big, error) {
 	}
 	defer tx.Rollback()
 	overlayTx := api.filters.WithTemporalOverlay(tx)
-	header := rawdb.ReadCurrentHeader(overlayTx)
-	if header == nil {
+	header, ok, err := rawdb.ReadCurrentHeader(overlayTx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, nil
 	}
 	config, err := api.BaseAPI.chainConfig(ctx, tx)

@@ -67,6 +67,7 @@ type BlockGen struct {
 
 	config *chain.Config
 	engine rules.Engine
+	err    error
 
 	beforeAddTx func()
 }
@@ -112,6 +113,7 @@ func (b *BlockGen) SetDifficulty(diff uint64) {
 func (b *BlockGen) AddTx(tx types.Transaction) {
 	b.AddTxWithChain(nil, nil, tx)
 }
+
 func (b *BlockGen) AddFailedTx(tx types.Transaction) {
 	b.AddFailedTxWithChain(nil, nil, tx)
 }
@@ -124,7 +126,7 @@ func (b *BlockGen) AddFailedTx(tx types.Transaction) {
 // further limitations on the content of transactions that can be
 // added. If contract code relies on the BLOCKHASH instruction,
 // the block in chain will be returned.
-func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine rules.Engine, txn types.Transaction) {
+func (b *BlockGen) AddTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, bool, error), engine rules.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
@@ -169,7 +171,7 @@ func (b *BlockGen) blockRules() *chain.Rules {
 	return blockContext.Rules(b.config)
 }
 
-func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, error), engine rules.Engine, txn types.Transaction) {
+func (b *BlockGen) AddFailedTxWithChain(getHeader func(hash common.Hash, number uint64) (*types.Header, bool, error), engine rules.Engine, txn types.Transaction) {
 	if b.beforeAddTx != nil {
 		b.beforeAddTx()
 	}
@@ -270,7 +272,7 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		panic("block time out of range")
 	}
 	chainreader := &FakeChainReader{Cfg: b.config}
-	b.header.Difficulty = b.engine.CalcDifficulty(
+	difficulty, err := b.engine.CalcDifficulty(
 		chainreader,
 		b.header.Time,
 		parent.Time(),
@@ -280,6 +282,11 @@ func (b *BlockGen) OffsetTime(seconds int64) {
 		parent.UncleHash(),
 		parent.Header().AuRaStep,
 	)
+	if err != nil {
+		b.err = err
+		return
+	}
+	b.header.Difficulty = difficulty
 }
 
 func (b *BlockGen) GetHeader() *types.Header {
@@ -479,7 +486,10 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		if chainreader.Config().IsShanghai(parent.Time()) {
 			b.withdrawals = []*types.Withdrawal{}
 		}
-		b.header = makeHeader(chainreader, parent, ibs, b.engine)
+		b.header, err = makeHeader(chainreader, parent, ibs, b.engine)
+		if err != nil {
+			return nil, nil, err
+		}
 		// blockIO carries the per-phase write-sets: it feeds both the Amsterdam
 		// BAL and the versioned write-set commit, so create it for any versioned
 		// block, not only Amsterdam.
@@ -526,6 +536,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 		// Execute any user modifications to the block
 		if gen != nil {
 			gen(i, b)
+		}
+		if b.err != nil {
+			return nil, nil, b.err
 		}
 		txNumIncrement()
 		if b.engine != nil {
@@ -658,7 +671,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 	return &ChainPack{Headers: headers, Blocks: blocks, Receipts: receipts, TopBlock: blocks[n-1]}, nil
 }
 
-func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) *types.Header {
+func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.IntraBlockState, engine rules.Engine) (*types.Header, error) {
 	var time uint64
 	if parent.Time() == 0 {
 		time = 10
@@ -674,7 +687,7 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 		header.SlotNumber = &slotNumber
 	}
 	header.Coinbase = parent.Coinbase()
-	header.Difficulty = engine.CalcDifficulty(chain, time,
+	difficulty, err := engine.CalcDifficulty(chain, time,
 		time-10,
 		parent.Difficulty(),
 		parent.NumberU64(),
@@ -682,8 +695,12 @@ func makeHeader(chain rules.ChainReader, parent *types.Block, state *state.Intra
 		parent.UncleHash(),
 		parent.Header().AuRaStep,
 	)
+	if err != nil {
+		return nil, err
+	}
+	header.Difficulty = difficulty
 
-	return header
+	return header, nil
 }
 
 type FakeChainReader struct {
@@ -696,18 +713,45 @@ func (cr *FakeChainReader) Config() *chain.Config {
 	return cr.Cfg
 }
 
-func (cr *FakeChainReader) CurrentHeader() *types.Header { return cr.current.Header() }
-func (cr *FakeChainReader) CurrentFinalizedHeader() *types.Header {
-	return nil
+func (cr *FakeChainReader) CurrentHeader() (*types.Header, bool, error) {
+	if cr.current == nil {
+		return nil, false, nil
+	}
+	return cr.current.Header(), true, nil
 }
-func (cr *FakeChainReader) CurrentSafeHeader() *types.Header {
-	return nil
+
+func (cr *FakeChainReader) CurrentFinalizedHeader() (*types.Header, bool, error) {
+	return nil, false, nil
 }
-func (cr *FakeChainReader) GetHeaderByNumber(number uint64) *types.Header           { return nil }
-func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) *types.Header          { return nil }
-func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) *types.Header { return nil }
-func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) *types.Block   { return nil }
-func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) bool           { return false }
-func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int      { return nil }
-func (cr *FakeChainReader) FrozenBlocks() uint64                                    { return 0 }
-func (cr *FakeChainReader) FrozenBorBlocks(align bool) uint64                       { return 0 }
+
+func (cr *FakeChainReader) CurrentSafeHeader() (*types.Header, bool, error) {
+	return nil, false, nil
+}
+
+func (cr *FakeChainReader) GetHeaderByNumber(number uint64) (*types.Header, bool, error) {
+	return nil, false, nil
+}
+
+func (cr *FakeChainReader) GetHeaderByHash(hash common.Hash) (*types.Header, bool, error) {
+	return nil, false, nil
+}
+
+func (cr *FakeChainReader) GetHeader(hash common.Hash, number uint64) (*types.Header, bool, error) {
+	return nil, false, nil
+}
+
+func (cr *FakeChainReader) GetBlock(hash common.Hash, number uint64) (*types.Block, bool, error) {
+	return nil, false, nil
+}
+
+func (cr *FakeChainReader) HasBlock(hash common.Hash, number uint64) (bool, error) {
+	return false, nil
+}
+
+func (cr *FakeChainReader) GetTd(hash common.Hash, number uint64) (*uint256.Int, bool, error) {
+	return nil, false, nil
+}
+
+func (cr *FakeChainReader) FrozenBlocks() uint64 { return 0 }
+
+func (cr *FakeChainReader) FrozenBorBlocks(align bool) uint64 { return 0 }

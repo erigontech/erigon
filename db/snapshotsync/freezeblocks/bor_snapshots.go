@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"reflect"
@@ -50,7 +51,13 @@ func (br *BlockRetire) retireBorBlocks(
 	}
 
 	snapshots := br.borSnapshots()
-	chainConfig := fromdb.ChainConfig(br.db)
+	chainConfig, ok, err := fromdb.ChainConfig(br.db)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, errors.New("chain config not found in db")
+	}
 	notifier, logger, blockReader, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, int(br.workers.Load())
 
 	blocksRetired := false
@@ -116,7 +123,13 @@ func (br *BlockRetire) MergeBorBlocks(
 ) (mergedBlocks bool, err error) {
 	notifier, logger, _, tmpDir, db, workers := br.notifier, br.logger, br.blockReader, br.tmpDir, br.db, int(br.workers.Load())
 	snapshots := br.borSnapshots()
-	chainConfig := fromdb.ChainConfig(br.db)
+	chainConfig, ok, err := fromdb.ChainConfig(br.db)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
+		return false, errors.New("chain config not found in db")
+	}
 	merger := snapshotsync.NewMerger(tmpDir, workers, lvl, db, chainConfig, logger)
 	rangesToMerge := merger.FindMergeRanges(snapshots.Ranges(true), snapshots.BlocksAvailable())
 	if len(rangesToMerge) > 0 {

@@ -31,6 +31,6 @@ func (c ChainContext) Engine() rules.Engine {
 	return c.Bor
 }
 
-func (c ChainContext) GetHeader(hash common.Hash, number uint64) *types.Header {
+func (c ChainContext) GetHeader(hash common.Hash, number uint64) (*types.Header, bool, error) {
 	return c.Chain.GetHeader(hash, number)
 }

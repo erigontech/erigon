@@ -76,20 +76,20 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 	defer tx.Rollback()
 
 	// b, senders, err := rawdb.ReadBlockByHashWithSenders(tx, hash)
-	blockNumber, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	blockNumber, ok, err := api._blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
-	if blockNumber == nil {
+	if !ok {
 		return nil, fmt.Errorf("couldn't find block number for hash %v", hash[:])
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, *blockNumber)
+	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
-	b, err := api.blockWithSenders(ctx, tx, hash, *blockNumber)
+	b, err := api.blockWithSenders(ctx, tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}

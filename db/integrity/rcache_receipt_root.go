@@ -138,11 +138,11 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 	if err != nil {
 		return err
 	}
-	header, err := blockReader.HeaderByNumber(ctx, tx, blockNum)
+	header, headerFound, err := blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return fmt.Errorf("check-rcache-root-at-blk: failed to get header for block %d: %w", blockNum, err)
 	}
-	if header == nil {
+	if !headerFound {
 		return fmt.Errorf("check-rcache-root-at-blk: missing header for block %d", blockNum)
 	}
 	var receipts types.Receipts
@@ -166,11 +166,11 @@ func checkRCacheRootAtBlkChunk(ctx context.Context, fromBlock, toBlock uint64, d
 		if err != nil {
 			return err
 		}
-		header, err = blockReader.HeaderByNumber(ctx, tx, blockNum)
+		header, headerFound, err = blockReader.HeaderByNumber(ctx, tx, blockNum)
 		if err != nil {
 			return fmt.Errorf("check-rcache-root-at-blk: failed to get header for block %d: %w", blockNum, err)
 		}
-		if header == nil {
+		if !headerFound {
 			return fmt.Errorf("check-rcache-root-at-blk: missing header for block %d", blockNum)
 		}
 		return nil

@@ -225,21 +225,22 @@ Loop:
 			continue
 		}
 
-		var header *types.Header
-		if header, err = cfg.blockReader.Header(ctx, tx, blockHash, blockNumber); err != nil {
+		header, ok, err := cfg.blockReader.Header(ctx, tx, blockHash, blockNumber)
+		if err != nil {
 			return err
 		}
-		if header == nil {
+		if !ok {
 			logger.Warn(fmt.Sprintf("[%s] senders stage can't find header", logPrefix), "num", blockNumber, "hash", blockHash)
 			continue
 		}
 
 		body, ok := cfg.readAheader.ReadBodyWithTransactions(blockHash)
 		if body == nil || !ok {
-			if body, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber); err != nil {
+			body, ok, err = cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+			if err != nil {
 				return err
 			}
-			if body == nil {
+			if !ok {
 				logger.Warn(fmt.Sprintf("[%s] ReadBodyWithTransactions can't find block", logPrefix), "num", blockNumber, "hash", blockHash)
 				continue
 			}

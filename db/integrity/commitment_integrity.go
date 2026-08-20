@@ -197,11 +197,11 @@ func checkCommitmentRootViaFileData(ctx context.Context, tx kv.TemporalTx, br db
 		logger.Info("[integrity] CommitmentRoot skipping partial block", "file", filepath.Base(f.Fullpath()), "blockNum", blockNum, "txNum", txNum, "blockMinTxNum", blockMinTxNum, "blockMaxTxNum", blockMaxTxNum)
 		return info, nil
 	}
-	h, err := br.HeaderByNumber(ctx, tx, blockNum)
+	h, ok, err := br.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return info, err
 	}
-	if h == nil {
+	if !ok {
 		return info, fmt.Errorf("%w: missing canonical header for block %d", ErrIntegrity, blockNum)
 	}
 	if h.Root != rootHash {
@@ -963,9 +963,12 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 				integrityErr = fmt.Errorf("%w: %w", ErrIntegrity, err)
 			}
 			rootHash := common.Hash(rootHashBytes)
-			header, err := br.HeaderByNumber(ctx, tx, blockNum)
+			header, ok, err := br.HeaderByNumber(ctx, tx, blockNum)
 			if err != nil {
 				return 0, err
+			}
+			if !ok {
+				return 0, fmt.Errorf("missing canonical header for block %d", blockNum)
 			}
 			if rootHash != header.Root {
 				err = fmt.Errorf("commitment state root mismatch for block %d, tx %d in %s: %s != %s", blockNum, txNum, fileName, rootHash, header.Root)
@@ -999,9 +1002,12 @@ func checkCommitmentHistValBucket(ctx context.Context, tx kv.TemporalTx, br dbse
 // per-domain key index from ChangedKeysPerBlockIdx.
 func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, br dbservices.FullBlockReader, blockNum uint64, idx *ChangedKeysPerBlockIdx, lvl log.Lvl, logger log.Logger) error {
 	logger.Log(lvl, "checking commitment hist at block", "blockNum", blockNum)
-	header, err := br.HeaderByNumber(ctx, tx, blockNum)
+	header, ok, err := br.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
+	}
+	if !ok {
+		return fmt.Errorf("missing canonical header for block %d", blockNum)
 	}
 	txNumsReader := br.TxnumReader()
 	minTxNum, err := txNumsReader.Min(ctx, tx, blockNum)
@@ -1054,14 +1060,20 @@ func checkCommitmentHistAtBlkWithIdx(ctx context.Context, tx kv.TemporalTx, sd *
 		// Gap: commitment state is from an earlier block (empty blocks in between).
 		// Verify the gap is truly empty by comparing state roots from block headers —
 		// any state change would produce a different root, so this is sufficient.
-		refHeader, err := br.HeaderByNumber(ctx, tx, latestBlockNum)
+		refHeader, ok, err := br.HeaderByNumber(ctx, tx, latestBlockNum)
 		if err != nil {
 			return err
 		}
+		if !ok {
+			return fmt.Errorf("missing canonical header for block %d", latestBlockNum)
+		}
 		for gapBlock := latestBlockNum + 1; gapBlock < blockNum; gapBlock++ {
-			gapHeader, err := br.HeaderByNumber(ctx, tx, gapBlock)
+			gapHeader, ok, err := br.HeaderByNumber(ctx, tx, gapBlock)
 			if err != nil {
 				return err
+			}
+			if !ok {
+				return fmt.Errorf("missing canonical header for block %d", gapBlock)
 			}
 			if gapHeader.Root != refHeader.Root {
 				return fmt.Errorf("commitment state blockNum doesn't match blockNum: %d != %d (block %d has different state root: ref=%x header=%x)", latestBlockNum, blockNum, gapBlock, refHeader.Root, gapHeader.Root)

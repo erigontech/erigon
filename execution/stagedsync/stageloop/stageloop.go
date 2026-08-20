@@ -254,7 +254,7 @@ func addAndVerifyBlockStep(batch kv.RwTx, engine rules.Engine, chainReader rules
 	if err := rawdb.WriteHeader(batch, currentHeader); err != nil {
 		return err
 	}
-	prevHash, err := rawdb.ReadCanonicalHash(batch, currentHeight)
+	prevHash, _, err := rawdb.ReadCanonicalHash(batch, currentHeight)
 	if err != nil {
 		return err
 	}

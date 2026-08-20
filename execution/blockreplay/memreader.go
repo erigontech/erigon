@@ -86,92 +86,110 @@ func (r *memBlockReader) headerAt(number uint64) *types.Header {
 
 // --- HeaderReader ---
 
-func (r *memBlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error) {
-	return r.headerAt(blockNum), nil
+func (r *memBlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, bool, error) {
+	header := r.headerAt(blockNum)
+	return header, header != nil, nil
 }
-func (r *memBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error) {
-	return r.headerAt(blockNum), nil
+
+func (r *memBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, bool, error) {
+	header := r.headerAt(blockNum)
+	return header, header != nil, nil
 }
-func (r *memBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
+
+func (r *memBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, bool, error) {
 	if r.block.Hash() == hash {
-		return r.block.HeaderNoCopy(), nil
+		return r.block.HeaderNoCopy(), true, nil
 	}
 	if r.parent.Hash() == hash {
-		return r.parent, nil
+		return r.parent, true, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
-func (r *memBlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
+
+func (r *memBlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (uint64, bool, error) {
 	if r.block.Hash() == hash {
-		n := r.num
-		return &n, nil
+		return r.num, true, nil
 	}
 	if r.parent.Hash() == hash {
-		n := r.parentN
-		return &n, nil
+		return r.parentN, true, nil
 	}
-	return nil, nil
+	return 0, false, nil
 }
-func (r *memBlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64) {
-	return common.Hash{}, 0
+
+func (r *memBlockReader) ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64, bool, error) {
+	return common.Hash{}, 0, false, nil
 }
+
 func (r *memBlockReader) HeadersRange(ctx context.Context, walker func(header *types.Header) error) error {
 	return nil
 }
+
 func (r *memBlockReader) Integrity(ctx context.Context, tx kv.Getter) error { return nil }
 
 // --- BlockReader ---
 
-func (r *memBlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Block, []common.Address, error) {
+func (r *memBlockReader) BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Block, []common.Address, bool, error) {
 	if blockNum == r.num {
-		return r.block, r.senders, nil
+		return r.block, r.senders, true, nil
 	}
-	return nil, nil, nil
+	return nil, nil, false, nil
 }
-func (r *memBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error) {
+
+func (r *memBlockReader) BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, bool, error) {
 	if number == r.num {
-		return r.block, nil
+		return r.block, true, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
-func (r *memBlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error) {
+
+func (r *memBlockReader) BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, bool, error) {
 	if r.block.Hash() == hash {
-		return r.block, nil
+		return r.block, true, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
-func (r *memBlockReader) CurrentBlock(db kv.Tx) (*types.Block, error) { return r.block, nil }
+
+func (r *memBlockReader) CurrentBlock(db kv.Tx) (*types.Block, bool, error) {
+	return r.block, true, nil
+}
+
 func (r *memBlockReader) IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error {
 	return nil
 }
+
 func (r *memBlockReader) MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error) {
 	return 0, nil
 }
 
 // --- BodyReader ---
 
-func (r *memBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Body, error) {
+func (r *memBlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Body, bool, error) {
 	if blockNum == r.num {
-		return r.block.Body(), nil
+		return r.block.Body(), true, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
-func (r *memBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (rlp.RawValue, error) {
-	return nil, nil
+
+func (r *memBlockReader) BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (rlp.RawValue, bool, error) {
+	return nil, false, nil
 }
-func (r *memBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Body, uint32, error) {
+
+func (r *memBlockReader) Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Body, uint32, bool, error) {
 	if blockNum == r.num {
 		b := r.block.Body()
-		return b, uint32(len(b.Transactions)), nil
+		return b, uint32(len(b.Transactions)), true, nil
 	}
-	return nil, 0, nil
+	return nil, 0, false, nil
 }
-func (r *memBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.BodyForStorage, error) {
-	return nil, nil
+
+func (r *memBlockReader) CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.BodyForStorage, bool, error) {
+	return nil, false, nil
 }
+
 func (r *memBlockReader) HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error) {
 	return blockNum == r.num, nil
 }
+
 func (r *memBlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error) {
 	return 0, false, nil
 }
@@ -181,15 +199,18 @@ func (r *memBlockReader) BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint
 func (r *memBlockReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
 	return 0, 0, false, nil
 }
+
 func (r *memBlockReader) TxnByIdxInBlock(ctx context.Context, tx kv.Getter, blockNum uint64, i int) (types.Transaction, bool, error) {
 	if blockNum == r.num && i >= 0 && i < len(r.block.Transactions()) {
 		return r.block.Transactions()[i], true, nil
 	}
 	return nil, false, nil
 }
+
 func (r *memBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, fromBlock, toBlock uint64) ([][]byte, error) {
 	return nil, nil
 }
+
 func (r *memBlockReader) FirstTxnNumNotInSnapshots(tx kv.Getter) uint64 { return 0 }
 
 // --- CanonicalReader ---
@@ -203,23 +224,32 @@ func (r *memBlockReader) CanonicalHash(ctx context.Context, tx kv.Getter, blockN
 	}
 	return common.Hash{}, false, nil
 }
+
 func (r *memBlockReader) IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error) {
 	return true, nil
 }
-func (r *memBlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
-	return nil, nil
+
+func (r *memBlockReader) BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (uint64, bool, error) {
+	return 0, false, nil
 }
 
 // --- misc / freezing ---
 
-func (r *memBlockReader) FrozenBlocks() uint64                      { return 0 }
-func (r *memBlockReader) FrozenBorBlocks(align bool) uint64         { return 0 }
-func (r *memBlockReader) FreezingCfg() ethconfig.BlocksFreezing     { return ethconfig.BlocksFreezing{} }
+func (r *memBlockReader) FrozenBlocks() uint64 { return 0 }
+
+func (r *memBlockReader) FrozenBorBlocks(align bool) uint64 { return 0 }
+
+func (r *memBlockReader) FreezingCfg() ethconfig.BlocksFreezing { return ethconfig.BlocksFreezing{} }
+
 func (r *memBlockReader) CanPruneTo(currentBlockInDB uint64) uint64 { return 0 }
-func (r *memBlockReader) Snapshots() dbservices.BlockSnapshots      { return nil }
-func (r *memBlockReader) BorSnapshots() dbservices.BlockSnapshots   { return nil }
-func (r *memBlockReader) AllTypes() []snaptype.Type                 { return nil }
-func (r *memBlockReader) TxnumReader() rawdbv3.TxNumsReader         { return rawdbv3.TxNums }
+
+func (r *memBlockReader) Snapshots() dbservices.BlockSnapshots { return nil }
+
+func (r *memBlockReader) BorSnapshots() dbservices.BlockSnapshots { return nil }
+
+func (r *memBlockReader) AllTypes() []snaptype.Type { return nil }
+
+func (r *memBlockReader) TxnumReader() rawdbv3.TxNumsReader { return rawdbv3.TxNums }
 
 func (r *memBlockReader) Ready(ctx context.Context) <-chan error {
 	ch := make(chan error, 1)

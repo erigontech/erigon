@@ -525,12 +525,18 @@ func testSentryServer(db kv.Getter, genesis *types.Genesis, genesisHash common.H
 		ctx: context.Background(),
 	}
 
-	head := rawdb.ReadCurrentHeader(db)
-	headTd, err := rawdb.ReadTd(db, head.Hash(), head.Number.Uint64())
+	head, ok, err := rawdb.ReadCurrentHeader(db)
 	if err != nil {
 		panic(err)
 	}
-	if headTd == nil {
+	if !ok {
+		panic("current header not found")
+	}
+	headTd, ok, err := rawdb.ReadTd(db, head.Hash(), head.Number.Uint64())
+	if err != nil {
+		panic(err)
+	}
+	if !ok {
 		headTd = new(uint256.Int)
 	}
 
@@ -1332,12 +1338,18 @@ func (m *mockPeerEventsStream) Send(e *sentryproto.PeerEvent) error {
 	m.events = append(m.events, e)
 	return nil
 }
-func (m *mockPeerEventsStream) Context() context.Context         { return m.ctx }
-func (m *mockPeerEventsStream) SetHeader(grpcmetadata.MD) error  { return nil }
+
+func (m *mockPeerEventsStream) Context() context.Context { return m.ctx }
+
+func (m *mockPeerEventsStream) SetHeader(grpcmetadata.MD) error { return nil }
+
 func (m *mockPeerEventsStream) SendHeader(grpcmetadata.MD) error { return nil }
-func (m *mockPeerEventsStream) SetTrailer(grpcmetadata.MD)       {}
-func (m *mockPeerEventsStream) SendMsg(any) error                { return nil }
-func (m *mockPeerEventsStream) RecvMsg(any) error                { return nil }
+
+func (m *mockPeerEventsStream) SetTrailer(grpcmetadata.MD) {}
+
+func (m *mockPeerEventsStream) SendMsg(any) error { return nil }
+
+func (m *mockPeerEventsStream) RecvMsg(any) error { return nil }
 
 // TestGrpcServer_FindBestPeersWithPermit_FiltersVersion verifies that
 // findBestPeersWithPermit only considers peers whose negotiated eth version

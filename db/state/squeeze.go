@@ -403,7 +403,7 @@ func CheckCommitmentForPrint(ctx context.Context, rwDb kv.TemporalRwDB) (string,
 
 type rebuildBlockReader interface {
 	TxnumReader() rawdbv3.TxNumsReader
-	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
+	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, bool, error)
 }
 
 // historyBatch collects account and storage history keys for a block range into an ETL
@@ -671,11 +671,11 @@ func RebuildCommitmentFilesWithHistory(ctx context.Context, rwDb kv.TemporalRwDB
 		}
 		lastToTxNum = toTxNum
 
-		header, err := blockReader.HeaderByNumber(ctx, rwTx, blockNum)
+		header, ok, err := blockReader.HeaderByNumber(ctx, rwTx, blockNum)
 		if err != nil {
 			return fmt.Errorf("[rebuild_commitment_history] reading header for block %d: %w", blockNum, err)
 		}
-		if header == nil {
+		if !ok {
 			return fmt.Errorf("[rebuild_commitment_history] canonical header not found for block %d", blockNum)
 		}
 		if common.Hash(rh) != header.Root {

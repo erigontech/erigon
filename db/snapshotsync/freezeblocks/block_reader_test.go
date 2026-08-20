@@ -352,8 +352,9 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	tx, err := db.BeginRo(t.Context())
 	require.NoError(t, err)
 	defer tx.Rollback()
-	genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+	genesisHash, ok, err := rawdb.ReadCanonicalHash(tx, 0)
 	require.NoError(t, err)
+	assert.False(t, ok)
 	assert.Equal(t, genesisHash, common.Hash{}) // genesis hash should be empty
 	tx.Rollback()
 
@@ -378,14 +379,16 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, genesisHash, hash)
 
-	block, senders, err := blockReader.BlockWithSenders(t.Context(), tx, genesisHash, 0)
+	block, senders, ok, err := blockReader.BlockWithSenders(t.Context(), tx, genesisHash, 0)
 	assert.NoError(t, err)
+	assert.False(t, ok)
 	// should be nil because genesis block does not have transactions
 	assert.Nil(t, block)
 	assert.Nil(t, senders)
 
-	header, err := blockReader.Header(t.Context(), tx, genesisHash, 0)
+	header, ok, err := blockReader.Header(t.Context(), tx, genesisHash, 0)
 	require.NoError(t, err)
+	require.True(t, ok)
 	assert.NotNil(t, header)
 	assert.Equal(t, uint64(0), header.Number.Uint64())
 

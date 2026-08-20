@@ -44,25 +44,25 @@ type ChainHeaderReader interface {
 	Config() *chain.Config
 
 	// CurrentHeader retrieves the current header from the local chain.
-	CurrentHeader() *types.Header
+	CurrentHeader() (*types.Header, bool, error)
 
 	// CurrentFinalizedHeader retrieves the current finalized header from the local chain.
-	CurrentFinalizedHeader() *types.Header
+	CurrentFinalizedHeader() (*types.Header, bool, error)
 
 	// CurrentSafeHeader retrieves the current safe header from the local chain.
-	CurrentSafeHeader() *types.Header
+	CurrentSafeHeader() (*types.Header, bool, error)
 
 	// GetHeader retrieves a block header from the database by hash and number.
-	GetHeader(hash common.Hash, number uint64) *types.Header
+	GetHeader(hash common.Hash, number uint64) (*types.Header, bool, error)
 
 	// GetHeaderByNumber retrieves a block header from the database by number.
-	GetHeaderByNumber(number uint64) *types.Header
+	GetHeaderByNumber(number uint64) (*types.Header, bool, error)
 
 	// GetHeaderByHash retrieves a block header from the database by its hash.
-	GetHeaderByHash(hash common.Hash) *types.Header
+	GetHeaderByHash(hash common.Hash) (*types.Header, bool, error)
 
 	// GetTd retrieves the total difficulty from the database by hash and number.
-	GetTd(hash common.Hash, number uint64) *uint256.Int
+	GetTd(hash common.Hash, number uint64) (*uint256.Int, bool, error)
 
 	// Number of blocks frozen in the block snapshots
 	FrozenBlocks() uint64
@@ -74,8 +74,8 @@ type ChainHeaderReader interface {
 type ChainReader interface {
 	ChainHeaderReader
 	// GetBlock retrieves a block from the database by hash and number.
-	GetBlock(hash common.Hash, number uint64) *types.Block
-	HasBlock(hash common.Hash, number uint64) bool
+	GetBlock(hash common.Hash, number uint64) (*types.Block, bool, error)
+	HasBlock(hash common.Hash, number uint64) (bool, error)
 }
 
 type SystemCall func(contract accounts.Address, data []byte) ([]byte, error)
@@ -194,7 +194,7 @@ type EngineWriter interface {
 	// CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 	// that a new block should have.
 	CalcDifficulty(chain ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64,
-		parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int
+		parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) (uint256.Int, error)
 
 	// APIs returns the RPC APIs this rules engine provides.
 	APIs(chain ChainHeaderReader) []rpc.API

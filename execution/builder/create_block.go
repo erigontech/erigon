@@ -100,8 +100,11 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 		staleThreshold = 7
 	)
 
-	parent := rawdb.ReadHeaderByNumber(tx, executionAt)
-	if parent == nil { // todo: how to return error and don't stop Erigon?
+	parent, ok, err := rawdb.ReadHeaderByNumber(tx, executionAt)
+	if err != nil {
+		return err
+	}
+	if !ok { // todo: how to return error and don't stop Erigon?
 		return fmt.Errorf("empty block %d", executionAt)
 	}
 
@@ -124,21 +127,27 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 		return err
 	}
 	chain := stagedsync.ChainReader{Cfg: cfg.chainConfig, Db: tx, BlockReader: cfg.blockReader, Logger: logger}
-	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block) {
-		number, _ := cfg.blockReader.HeaderNumber(context.Background(), tx, hash)
-		if number == nil {
-			return nil
+	var GetBlocksFromHash = func(hash common.Hash, n int) (blocks []*types.Block, err error) {
+		number, ok, err := cfg.blockReader.HeaderNumber(context.Background(), tx, hash)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, nil
 		}
 		for range n {
-			block, _, _ := cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, *number)
-			if block == nil {
+			block, _, ok, err := cfg.blockReader.BlockWithSenders(context.Background(), tx, hash, number)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
 				break
 			}
 			blocks = append(blocks, block)
 			hash = block.ParentHash()
-			*number--
+			number--
 		}
-		return
+		return blocks, nil
 	}
 
 	// re-written miner/worker.go:commitNewWork
@@ -237,7 +246,11 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 	}
 
 	// when 08 is processed ancestors contain 07 (quick block)
-	for _, ancestor := range GetBlocksFromHash(parent.Hash(), 7) {
+	ancestors, err := GetBlocksFromHash(parent.Hash(), 7)
+	if err != nil {
+		return err
+	}
+	for _, ancestor := range ancestors {
 		for _, uncle := range ancestor.Uncles() {
 			env.family.Add(uncle.Hash())
 		}

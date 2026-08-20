@@ -19,6 +19,7 @@ package genesiswrite_test
 import (
 	"context"
 	"encoding/json"
+	"errors"
 	"math/big"
 	"os"
 	"reflect"
@@ -406,7 +407,13 @@ func TestSetupGenesis(t *testing.T) {
 			} else if err == nil {
 				if dbErr := db.View(context.Background(), func(tx kv.Tx) error {
 					// Check database content.
-					stored, _, _ := blockReader.BlockWithSenders(context.Background(), tx, test.wantHash, 0)
+					stored, _, ok, err := blockReader.BlockWithSenders(context.Background(), tx, test.wantHash, 0)
+					if err != nil {
+						return err
+					}
+					if !ok {
+						return errors.New("stored genesis block not found")
+					}
 					if stored.Hash() != test.wantHash {
 						t.Errorf("%s: block in DB has hash %s, want %s", test.name, stored.Hash(), test.wantHash)
 					}

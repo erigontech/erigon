@@ -62,8 +62,8 @@ func (s *stubBbdFetcher) FetchBlocksBackwardsByHash(context.Context, common.Hash
 
 type stubBbdHeaderReader struct{}
 
-func (stubBbdHeaderReader) HeaderByHash(context.Context, common.Hash) (*types.Header, error) {
-	return nil, nil
+func (stubBbdHeaderReader) HeaderByHash(context.Context, common.Hash) (*types.Header, bool, error) {
+	return nil, false, nil
 }
 
 func newTestBbd(t *testing.T, fetcher Fetcher) *BackwardBlockDownloader {
@@ -111,11 +111,11 @@ type fixedHeaderReader struct {
 	header *types.Header
 }
 
-func (r fixedHeaderReader) HeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error) {
+func (r fixedHeaderReader) HeaderByHash(_ context.Context, hash common.Hash) (*types.Header, bool, error) {
 	if hash == r.header.Hash() {
-		return r.header, nil
+		return r.header, true, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
 
 type countingBALFetcher struct {

@@ -80,7 +80,11 @@ func (c *AuRa) verifyGasLimitOverride(config *chain.Config, chain rules.ChainHea
 	gasLimitOverride := c.HasGasLimitContract() && !misc.IsPoSHeader(header)
 	if gasLimitOverride {
 		syscallPrevHeader := func(addr accounts.Address, data []byte) ([]byte, error) {
-			return syscallCustom(addr, data, state, chain.GetHeaderByHash(header.ParentHash), true)
+			parent, _, err := chain.GetHeaderByHash(header.ParentHash)
+			if err != nil {
+				return nil, err
+			}
+			return syscallCustom(addr, data, state, parent, true)
 		}
 		blockGasLimit := c.GetBlockGasLimitFromContract(config, syscallPrevHeader)
 

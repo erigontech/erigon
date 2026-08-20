@@ -64,8 +64,9 @@ func TestOverlayGetBeginEnd(t *testing.T) {
 	_, _, err = getBeginEnd(m.Ctx, tx, api, filters.FilterCriteria{FromBlock: big.NewInt(5), ToBlock: big.NewInt(2)})
 	require.EqualError(t, err, "end (2) < begin (5)")
 
-	block, err := api._blockReader.BlockByNumber(m.Ctx, tx, 1)
+	block, ok, err := api._blockReader.BlockByNumber(m.Ctx, tx, 1)
 	require.NoError(t, err)
+	require.True(t, ok)
 	blockHash := block.Hash()
 	begin, end, err = getBeginEnd(m.Ctx, tx, api, filters.FilterCriteria{BlockHash: &blockHash})
 	require.NoError(t, err)

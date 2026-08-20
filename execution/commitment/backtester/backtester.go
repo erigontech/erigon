@@ -279,11 +279,11 @@ func (bt Backtester) backtestBlock(ctx context.Context, tx kv.TemporalTx, block 
 	if err != nil {
 		return fmt.Errorf("failed to stop fgprof: %w", err)
 	}
-	canonicalHeader, err := bt.blockReader.HeaderByNumber(ctx, tx, block)
+	canonicalHeader, ok, err := bt.blockReader.HeaderByNumber(ctx, tx, block)
 	if err != nil {
 		return err
 	}
-	if canonicalHeader == nil {
+	if !ok {
 		return fmt.Errorf("canonical header not found for block %d", block)
 	}
 	if common.Hash(root) != canonicalHeader.Root {

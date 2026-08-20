@@ -95,8 +95,11 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 
 	uintTimestamp := timeStamp.TurnIntoUint64()
 
-	currentHeader := rawdb.ReadCurrentHeader(overlayTx)
-	if currentHeader == nil {
+	currentHeader, ok, err := rawdb.ReadCurrentHeader(overlayTx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, errors.New("current header not found")
 	}
 	currentHeaderTime := currentHeader.Time
@@ -131,18 +134,23 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 		return blockResponse, nil
 	}
 
+	var searchErr error
 	blockNum := sort.Search(int(currentHeader.Number.Uint64()), func(blockNum int) bool {
-		currentHeader, err := api._blockReader.HeaderByNumber(ctx, overlayTx, uint64(blockNum))
+		currentHeader, ok, err := api._blockReader.HeaderByNumber(ctx, overlayTx, uint64(blockNum))
 		if err != nil {
-			return false
+			searchErr = err
+			return true
 		}
 
-		if currentHeader == nil {
+		if !ok {
 			return false
 		}
 
 		return currentHeader.Time >= uintTimestamp
 	})
+	if searchErr != nil {
+		return nil, searchErr
+	}
 
 	resultingHeader, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNum), tx)
 	if err != nil {
@@ -180,19 +188,19 @@ func (api *ErigonImpl) GetBlockByTimestamp(ctx context.Context, timeStamp rpc.Ti
 }
 
 func buildBlockResponse(ctx context.Context, br dbservices.FullBlockReader, db kv.Tx, blockNum uint64, fullTx bool) (map[string]any, error) {
-	header, err := br.HeaderByNumber(ctx, db, blockNum)
+	header, ok, err := br.HeaderByNumber(ctx, db, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if header == nil {
+	if !ok {
 		return nil, nil
 	}
 
-	block, _, err := br.BlockWithSenders(ctx, db, header.Hash(), blockNum)
+	block, _, ok, err := br.BlockWithSenders(ctx, db, header.Hash(), blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
+	if !ok {
 		return nil, nil
 	}
 

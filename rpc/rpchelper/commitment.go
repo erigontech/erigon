@@ -18,6 +18,7 @@ package rpchelper
 
 import (
 	"context"
+	"errors"
 	"runtime"
 
 	"github.com/c2h5oh/datasize"
@@ -101,9 +102,12 @@ func (r *CommitmentReplay) ComputeCustomCommitmentFromStateHistory(
 	defer tsd.Close()
 
 	// We must compute genesis commitment from scratch because there's no history for block 0
-	genesis, err := rawdb.ReadGenesis(tx)
+	genesis, ok, err := rawdb.ReadGenesis(tx)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("genesis not found")
 	}
 	genesisHeader, _ := genesiswrite.GenesisWithoutStateToBlock(genesis)
 	_, ibs, err := genesiswrite.ComputeGenesisCommitment(ctx, genesis, ttx, tsd, genesisHeader)

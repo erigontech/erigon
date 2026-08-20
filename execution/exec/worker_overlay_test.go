@@ -104,8 +104,9 @@ func TestWorker_ChainReader_SeesOverlayHeader(t *testing.T) {
 	})
 	require.NoError(t, rw.ResetTx(workerRoTx))
 
-	got := rw.chain.GetHeaderByHash(hash)
-	require.NotNil(t, got,
+	got, ok, err := rw.chain.GetHeaderByHash(hash)
+	require.NoError(t, err)
+	require.True(t, ok,
 		"chain reader must resolve an overlay-staged header by hash; AuRa.verifyGasLimitOverride takes this exact path")
 	require.Equal(t, number, got.Number.Uint64())
 	require.Equal(t, hash, got.Hash())
@@ -174,7 +175,8 @@ func TestWorker_ChainReader_NoOverlayStillWorks(t *testing.T) {
 	})
 	require.NoError(t, rw.ResetTx(workerRoTx))
 
-	got := rw.chain.GetHeaderByHash(hash)
-	require.NotNil(t, got, "committed-MDBX header must still resolve when no overlay is active")
+	got, ok, err := rw.chain.GetHeaderByHash(hash)
+	require.NoError(t, err)
+	require.True(t, ok, "committed-MDBX header must still resolve when no overlay is active")
 	require.Equal(t, number, got.Number.Uint64())
 }

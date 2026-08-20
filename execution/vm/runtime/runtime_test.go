@@ -434,14 +434,17 @@ func BenchmarkEVM_CREATE_500(bench *testing.B) {
 	// initcode size 500K, repeatedly calls CREATE and then modifies the mem contents
 	benchmarkEVM_Create(bench, "5b6207a120600080f0600152600056")
 }
+
 func BenchmarkEVM_CREATE2_500(bench *testing.B) {
 	// initcode size 500K, repeatedly calls CREATE2 and then modifies the mem contents
 	benchmarkEVM_Create(bench, "5b586207a120600080f5600152600056")
 }
+
 func BenchmarkEVM_CREATE_1200(bench *testing.B) {
 	// initcode size 1200K, repeatedly calls CREATE and then modifies the mem contents
 	benchmarkEVM_Create(bench, "5b62124f80600080f0600152600056")
 }
+
 func BenchmarkEVM_CREATE2_1200(bench *testing.B) {
 	// initcode size 1200K, repeatedly calls CREATE2 and then modifies the mem contents
 	benchmarkEVM_Create(bench, "5b5862124f80600080f5600152600056")
@@ -508,13 +511,18 @@ type FakeChainHeaderReader struct{}
 func (cr *FakeChainHeaderReader) GetHeaderByHash(hash common.Hash) *types.Header {
 	return nil
 }
+
 func (cr *FakeChainHeaderReader) GetHeaderByNumber(number uint64) *types.Header {
 	return cr.GetHeaderByHash(common.BigToHash(new(big.Int).SetUint64(number)))
 }
-func (cr *FakeChainHeaderReader) Config() *chain.Config                 { return nil }
-func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header          { return nil }
+
+func (cr *FakeChainHeaderReader) Config() *chain.Config { return nil }
+
+func (cr *FakeChainHeaderReader) CurrentHeader() *types.Header { return nil }
+
 func (cr *FakeChainHeaderReader) CurrentFinalizedHeader() *types.Header { return nil }
-func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header      { return nil }
+
+func (cr *FakeChainHeaderReader) CurrentSafeHeader() *types.Header { return nil }
 
 // GetHeader returns a fake header with the parentHash equal to the number - 1
 func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *types.Header {
@@ -528,14 +536,19 @@ func (cr *FakeChainHeaderReader) GetHeader(hash common.Hash, number uint64) *typ
 		GasLimit:   100000,
 	}
 }
+
 func (cr *FakeChainHeaderReader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	return nil
 }
+
 func (cr *FakeChainHeaderReader) HasBlock(hash common.Hash, number uint64) bool { return false }
+
 func (cr *FakeChainHeaderReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	return nil
 }
-func (cr *FakeChainHeaderReader) FrozenBlocks() uint64    { return 0 }
+
+func (cr *FakeChainHeaderReader) FrozenBlocks() uint64 { return 0 }
+
 func (cr *FakeChainHeaderReader) FrozenBorBlocks() uint64 { return 0 }
 
 type dummyChain struct {
@@ -548,7 +561,7 @@ func (d *dummyChain) Engine() rules.Engine {
 }
 
 // GetHeader returns the hash corresponding to their hash.
-func (d *dummyChain) GetHeader(h common.Hash, n uint64) (*types.Header, error) {
+func (d *dummyChain) GetHeader(h common.Hash, n uint64) (*types.Header, bool, error) {
 	d.counter++
 	parentHash := common.Hash{}
 	s := common.LeftPadBytes(new(big.Int).SetUint64(n-1).Bytes(), 32)
@@ -556,7 +569,7 @@ func (d *dummyChain) GetHeader(h common.Hash, n uint64) (*types.Header, error) {
 
 	//parentHash := common.Hash{byte(n - 1)}
 	//fmt.Printf("GetHeader(%x, %d) => header with parent %x\n", h, n, parentHash)
-	return fakeHeader(n, parentHash), nil
+	return fakeHeader(n, parentHash), true, nil
 }
 
 // TestBlockhash tests the blockhash operation. It's a bit special, since it internally

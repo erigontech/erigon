@@ -18,6 +18,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 
@@ -133,7 +134,13 @@ func doBacktestCommitment(ctx context.Context, args backtestCommitmentArgs, logg
 	}()
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	snaps, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {

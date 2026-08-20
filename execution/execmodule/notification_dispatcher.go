@@ -19,7 +19,6 @@ package execmodule
 import (
 	"context"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
@@ -125,8 +124,11 @@ func (d *Dispatcher) Dispatch(
 		}
 	}
 
-	currentHeader := rawdb.ReadCurrentHeader(tx)
-	if accumulator != nil && currentHeader != nil {
+	currentHeader, currentHeaderOK, err := rawdb.ReadCurrentHeader(tx)
+	if err != nil {
+		return err
+	}
+	if accumulator != nil && currentHeaderOK {
 		if changes := accumulator.Changes(); len(changes) == 0 || changes[len(changes)-1].BlockHeight < currentHeader.Number.Uint64() {
 			accumulator.StartChange(currentHeader, nil, false)
 		}
@@ -143,7 +145,20 @@ func (d *Dispatcher) Dispatch(
 			pendingBlobFee = f.Uint64()
 		}
 
-		finalizedBlock := common.Deref(rawdb.ReadHeaderNumber(tx, rawdb.ReadForkchoiceFinalized(tx)))
+		var finalizedBlock uint64
+		finalizedHash, finalizedHashOK, err := rawdb.ReadForkchoiceFinalized(tx)
+		if err != nil {
+			return err
+		}
+		if finalizedHashOK {
+			finalizedNumber, finalizedNumberOK, err := rawdb.ReadHeaderNumber(tx, finalizedHash)
+			if err != nil {
+				return err
+			}
+			if finalizedNumberOK {
+				finalizedBlock = finalizedNumber
+			}
+		}
 
 		accumulator.SendAndReset(ctx, d.stateChangeConsumer, pendingBaseFee.Uint64(), pendingBlobFee, currentHeader.GasLimit, finalizedBlock)
 	}

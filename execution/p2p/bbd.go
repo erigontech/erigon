@@ -38,7 +38,7 @@ import (
 var ErrChainLengthExceedsLimit = errors.New("chain length exceeds limit")
 
 type BbdHeaderReader interface {
-	HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, error)
+	HeaderByHash(ctx context.Context, hash common.Hash) (*types.Header, bool, error)
 }
 
 type BackwardBlockDownloader struct {
@@ -267,11 +267,11 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 	maxHeadersBatchLen := min(config.blocksBatchSize, eth.MaxHeadersServe)
 	var connectionPoint *types.Header
 	// the initial header may be the connection point
-	h, err := headerReader.HeaderByHash(ctx, initialHeader.Hash())
+	_, ok, err := headerReader.HeaderByHash(ctx, initialHeader.Hash())
 	if err != nil {
 		return nil, err
 	}
-	if h != nil {
+	if ok {
 		connectionPoint = initialHeader
 	}
 	// if not, then continue fetching headers backwards until we find a connecting point
@@ -292,11 +292,11 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 		amount := min(parentNum, maxHeadersBatchLen)
 		if amount == 0 {
 			// can't fetch 0 blocks, just check if the hash matches our genesis and if it does set the connecting point
-			h, err := headerReader.HeaderByHash(ctx, parentHash)
+			_, ok, err := headerReader.HeaderByHash(ctx, parentHash)
 			if err != nil {
 				return nil, err
 			}
-			if h != nil {
+			if ok {
 				connectionPoint = lastHeader
 			}
 			break
@@ -363,11 +363,11 @@ func (bbd *BackwardBlockDownloader) downloadHeaderChainBackwards(
 			}
 			chainLen++
 			lastHeader = header
-			h, err := headerReader.HeaderByHash(ctx, header.ParentHash)
+			_, ok, err := headerReader.HeaderByHash(ctx, header.ParentHash)
 			if err != nil {
 				return nil, err
 			}
-			if h != nil {
+			if ok {
 				connectionPoint = header
 				break
 			}

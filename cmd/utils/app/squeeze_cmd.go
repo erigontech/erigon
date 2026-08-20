@@ -18,6 +18,7 @@ package app
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"path/filepath"
 	"strings"
@@ -83,7 +84,14 @@ func doSqueeze(ctx context.Context, cliCtx *cli.Command) error {
 func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	agg := res.Aggregator
@@ -116,7 +124,14 @@ func squeezeCommitment(ctx context.Context, dirs datadir.Dirs, logger log.Logger
 func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	cfg := ethconfig.NewSnapCfg(false, true, true, fromdb.ChainConfig(db).ChainName)
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
+	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
 	agg := res.Aggregator
 	if err != nil {
@@ -183,6 +198,7 @@ func squeezeStorage(ctx context.Context, dirs datadir.Dirs, logger log.Logger) e
 	log.Info("[squeeze] success", "please_remove", dirs.SnapDomain+"_backup")
 	return nil
 }
+
 func squeezeCode(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
@@ -233,7 +249,13 @@ func squeezeBlocks(ctx context.Context, dirs datadir.Dirs, logger log.Logger) er
 
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	chainConfig := fromdb.ChainConfig(db)
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)

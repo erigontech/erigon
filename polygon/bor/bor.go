@@ -565,7 +565,15 @@ func (c *Bor) verifyCascadingFields(chain rules.ChainHeaderReader, header *types
 	if len(parents) > 0 {
 		parent = parents[len(parents)-1]
 	} else {
-		parent = chain.GetHeader(header.ParentHash, number-1)
+		var ok bool
+		var err error
+		parent, ok, err = chain.GetHeader(header.ParentHash, number-1)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return rules.ErrUnknownAncestor
+		}
 	}
 
 	if parent == nil || parent.Number.Uint64() != number-1 || parent.Hash() != header.ParentHash {
@@ -641,7 +649,15 @@ func (c *Bor) verifySeal(chain rules.ChainHeaderReader, header *types.Header, pa
 	if len(parents) > 0 { // if parents is nil, len(parents) is zero
 		parent = parents[len(parents)-1]
 	} else if number > 0 {
-		parent = chain.GetHeader(header.ParentHash, number-1)
+		var ok bool
+		var err error
+		parent, ok, err = chain.GetHeader(header.ParentHash, number-1)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return rules.ErrUnknownAncestor
+		}
 	}
 
 	if err := ValidateHeaderTime(header, time.Now(), parent, validatorSet, c.config, c.Signatures); err != nil {
@@ -751,8 +767,11 @@ func (c *Bor) Prepare(chain rules.ChainHeaderReader, header *types.Header, state
 	header.MixDigest = common.Hash{}
 
 	// Ensure the timestamp has the correct delay
-	parent := chain.GetHeader(header.ParentHash, number-1)
-	if parent == nil {
+	parent, ok, err := chain.GetHeader(header.ParentHash, number-1)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return rules.ErrUnknownAncestor
 	}
 
@@ -1056,15 +1075,15 @@ func (c *Bor) IsProposer(header *types.Header) (bool, error) {
 // CalcDifficulty is the difficulty adjustment algorithm. It returns the difficulty
 // that a new block should have based on the previous blocks in the chain and the
 // current signer.
-func (c *Bor) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ uint256.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) uint256.Int {
+func (c *Bor) CalcDifficulty(chain rules.ChainHeaderReader, _, _ uint64, _ uint256.Int, parentNumber uint64, parentHash, _ common.Hash, _ uint64) (uint256.Int, error) {
 	signer := c.authorizedSigner.Load().signer
 
 	validatorSet, err := c.spanReader.Producers(context.Background(), parentNumber+1)
 	if err != nil {
-		return uint256.Int{}
+		return uint256.Int{}, err
 	}
 
-	return *uint256.NewInt(validatorSet.SafeDifficulty(signer))
+	return *uint256.NewInt(validatorSet.SafeDifficulty(signer)), nil
 }
 
 // SealHash returns the hash of a block prior to it being sealed.
@@ -1152,9 +1171,12 @@ func (c *Bor) GetRootHash(ctx context.Context, tx kv.Tx, start, end uint64) (str
 		return root, nil
 	}
 
-	header := rawdb.ReadCurrentHeader(tx)
+	header, ok, err := rawdb.ReadCurrentHeader(tx)
+	if err != nil {
+		return "", err
+	}
 	var currentHeaderNumber uint64 = 0
-	if header == nil {
+	if !ok {
 		return "", &heimdall.InvalidStartEndBlockError{Start: start, End: end, CurrentHeader: currentHeaderNumber}
 	}
 	currentHeaderNumber = header.Number.Uint64()
@@ -1196,12 +1218,12 @@ func ComputeHeadersRootHash(blockHeaders []*types.Header) ([]byte, error) {
 }
 
 func (c *Bor) getHeaderByNumber(ctx context.Context, tx kv.Tx, number uint64) (*types.Header, error) {
-	header, err := c.blockReader.HeaderByNumber(ctx, tx, number)
+	header, ok, err := c.blockReader.HeaderByNumber(ctx, tx, number)
 	if err != nil {
 		return nil, err
 	}
-	if header == nil {
-		_, _ = c.blockReader.HeaderByNumber(dbg.WithDebug(ctx, true), tx, number)
+	if !ok {
+		_, _, _ = c.blockReader.HeaderByNumber(dbg.WithDebug(ctx, true), tx, number)
 		return nil, fmt.Errorf("[bor] header not found: %d", number)
 	}
 	return header, nil
@@ -1226,7 +1248,13 @@ func (c *Bor) CommitStates(
 			return nil
 		}
 
-		prevSprintStart := chain.Chain.GetHeaderByNumber(blockNum - sprintLength)
+		prevSprintStart, ok, err := chain.Chain.GetHeaderByNumber(blockNum - sprintLength)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("[bor] header not found: %d", blockNum-sprintLength)
+		}
 		stateSyncDelay := c.config.CalculateStateSyncDelay(blockNum)
 
 		timeFrom := time.Unix(int64(prevSprintStart.Time-stateSyncDelay), 0)
@@ -1235,7 +1263,14 @@ func (c *Bor) CommitStates(
 		// Previous sprint was not indore.
 		if !c.config.IsIndore(prevSprintStart.Number.Uint64()) {
 			if prevSprintStart.Number.Uint64() >= sprintLength {
-				prevPrevSprintStart := chain.Chain.GetHeaderByNumber(prevSprintStart.Number.Uint64() - sprintLength)
+				prevPrevNumber := prevSprintStart.Number.Uint64() - sprintLength
+				prevPrevSprintStart, ok, err := chain.Chain.GetHeaderByNumber(prevPrevNumber)
+				if err != nil {
+					return err
+				}
+				if !ok {
+					return fmt.Errorf("[bor] header not found: %d", prevPrevNumber)
+				}
 				timeFrom = time.Unix(int64(prevPrevSprintStart.Time), 0)
 			} else {
 				timeFrom = time.Unix(0, 0)

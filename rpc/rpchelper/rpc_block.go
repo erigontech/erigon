@@ -19,7 +19,6 @@ package rpchelper
 import (
 	"fmt"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -36,11 +35,17 @@ func unknownBlockErr(requested string, latestBlock uint64) *rpc.CustomError {
 }
 
 func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
-	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
-	if forkchoiceHeadHash != (common.Hash{}) {
-		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
-		if forkchoiceHeadNum != nil {
-			return *forkchoiceHeadNum, nil
+	forkchoiceHeadHash, ok, err := rawdb.ReadForkchoiceHead(tx)
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		forkchoiceHeadNum, ok, err := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			return forkchoiceHeadNum, nil
 		}
 	}
 
@@ -53,28 +58,46 @@ func GetLatestBlockNumber(tx kv.Tx) (uint64, error) {
 }
 
 func GetFinalizedBlockNumber(tx kv.Tx) (uint64, error) {
-	forkchoiceFinalizedHash := rawdb.ReadForkchoiceFinalized(tx)
-	if forkchoiceFinalizedHash != (common.Hash{}) {
-		forkchoiceFinalizedNum := rawdb.ReadHeaderNumber(tx, forkchoiceFinalizedHash)
-		if forkchoiceFinalizedNum != nil {
-			return *forkchoiceFinalizedNum, nil
+	forkchoiceFinalizedHash, ok, err := rawdb.ReadForkchoiceFinalized(tx)
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		forkchoiceFinalizedNum, ok, err := rawdb.ReadHeaderNumber(tx, forkchoiceFinalizedHash)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			return forkchoiceFinalizedNum, nil
 		}
 	}
 
-	latest, _ := GetLatestBlockNumber(tx)
+	latest, err := GetLatestBlockNumber(tx)
+	if err != nil {
+		return 0, err
+	}
 	return 0, unknownBlockErr("finalized", latest)
 }
 
 func GetSafeBlockNumber(tx kv.Tx) (uint64, error) {
-	forkchoiceSafeHash := rawdb.ReadForkchoiceSafe(tx)
-	if forkchoiceSafeHash != (common.Hash{}) {
-		forkchoiceSafeNum := rawdb.ReadHeaderNumber(tx, forkchoiceSafeHash)
-		if forkchoiceSafeNum != nil {
-			return *forkchoiceSafeNum, nil
+	forkchoiceSafeHash, ok, err := rawdb.ReadForkchoiceSafe(tx)
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		forkchoiceSafeNum, ok, err := rawdb.ReadHeaderNumber(tx, forkchoiceSafeHash)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			return forkchoiceSafeNum, nil
 		}
 	}
 
-	latest, _ := GetLatestBlockNumber(tx)
+	latest, err := GetLatestBlockNumber(tx)
+	if err != nil {
+		return 0, err
+	}
 	return 0, unknownBlockErr("safe", latest)
 }
 

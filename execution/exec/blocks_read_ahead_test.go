@@ -375,8 +375,9 @@ func TestBlockReadAheaderWarmsOverlayBlockAccessList(t *testing.T) {
 	require.NoError(t, rawdb.WriteBlockAccessListBytes(overlay, header.Hash(), header.Number.Uint64(), balBytes))
 	// The regression requires the BAL to be present only in BlockOverlay.
 	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
-		stored, err := rawdb.ReadBlockAccessListBytes(tx, header.Hash(), header.Number.Uint64())
+		stored, ok, err := rawdb.ReadBlockAccessListBytes(tx, header.Hash(), header.Number.Uint64())
 		require.NoError(t, err)
+		require.False(t, ok)
 		require.Empty(t, stored)
 		return nil
 	}))

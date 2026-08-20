@@ -75,13 +75,16 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, errors.New("acc not found")
 	}
 
-	bn := rawdb.ReadCurrentBlockNumber(tx)
-	if bn == nil {
+	bn, ok, err := rawdb.ReadCurrentBlockNumber(tx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, errors.New("current block number not found")
 	}
 	// Min(bn+1) is the first txNum past bn — the state the latest-state account
 	// read above sees. Min(bn) would scan storage as of the end of bn-1.
-	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn+1)
+	minTxNum, err := api._txNumReader.Min(ctx, tx, bn+1)
 	if err != nil {
 		return nil, err
 	}

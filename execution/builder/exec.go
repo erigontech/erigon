@@ -163,9 +163,9 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 
 	execCfg = execCfg.WithAuthor(accounts.InternAddress(cfg.builderState.BuilderConfig.Etherbase))
 
-	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, bool, error) {
 		if execCfg.BlockReader() == nil {
-			return rawdb.ReadHeader(tx, hash, number), nil
+			return rawdb.ReadHeader(tx, hash, number)
 		}
 		return execCfg.BlockReader().Header(ctx, tx, hash, number)
 	}

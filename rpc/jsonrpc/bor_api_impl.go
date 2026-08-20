@@ -59,13 +59,18 @@ func (api *BorImpl) GetSnapshot(number *rpc.BlockNumber) (*Snapshot, error) {
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
+	var found bool
 	if number == nil || *number == rpc.LatestBlockNumber {
-		header = rawdb.ReadCurrentHeader(tx)
+		header, found, err = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, _ = api.headerByNumber(ctx, *number, tx)
+		header, err = api.headerByNumber(ctx, *number, tx)
+		found = header != nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	// Ensure we have an actually valid block
-	if header == nil {
+	if !found {
 		return nil, errUnknownBlock
 	}
 
@@ -99,6 +104,7 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Ad
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
+	var headerOK bool
 
 	//nolint:nestif
 	if blockNrOrHash == nil {
@@ -106,19 +112,22 @@ func (api *BorImpl) GetAuthor(blockNrOrHash *rpc.BlockNumberOrHash) (accounts.Ad
 		if err2 != nil {
 			return accounts.NilAddress, err2
 		}
-		header, err = api._blockReader.HeaderByNumber(ctx, tx, latestBlockNum)
+		header, headerOK, err = api._blockReader.HeaderByNumber(ctx, tx, latestBlockNum)
 	} else {
 		if blockNr, ok := blockNrOrHash.Number(); ok {
-			header, err = api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNr))
+			header, headerOK, err = api._blockReader.HeaderByNumber(ctx, tx, uint64(blockNr))
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
-				header, err = api._blockReader.HeaderByHash(ctx, tx, blockHash)
+				header, headerOK, err = api._blockReader.HeaderByHash(ctx, tx, blockHash)
 			}
 		}
 	}
 
 	// Ensure we have an actually valid block and return its snapshot
-	if header == nil || err != nil {
+	if err != nil {
+		return accounts.NilAddress, err
+	}
+	if !headerOK {
 		return accounts.NilAddress, errUnknownBlock
 	}
 
@@ -173,13 +182,18 @@ func (api *BorImpl) GetSigners(number *rpc.BlockNumber) ([]common.Address, error
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
+	var found bool
 	if number == nil || *number == rpc.LatestBlockNumber {
-		header = rawdb.ReadCurrentHeader(tx)
+		header, found, err = rawdb.ReadCurrentHeader(tx)
 	} else {
-		header, _ = api.headerByNumber(ctx, *number, tx)
+		header, err = api.headerByNumber(ctx, *number, tx)
+		found = header != nil
+	}
+	if err != nil {
+		return nil, err
 	}
 	// Ensure we have an actually valid block
-	if header == nil {
+	if !found {
 		return nil, errUnknownBlock
 	}
 
@@ -256,15 +270,21 @@ func (api *BorImpl) GetVoteOnHash(ctx context.Context, starBlockNr uint64, endBl
 	tipConfirmationBlockNr := endBlockNr + uint64(16)
 
 	//Check if tipConfirmation block exit
-	_, err = api._blockReader.BlockByNumber(ctx, tx, tipConfirmationBlockNr)
+	_, ok, err := api._blockReader.BlockByNumber(ctx, tx, tipConfirmationBlockNr)
 	if err != nil {
 		return false, errors.New("failed to get tip confirmation block")
 	}
+	if !ok {
+		return false, errors.New("tip confirmation block not found")
+	}
 
 	//Check if end block exist
-	localEndBlock, err := api._blockReader.BlockByNumber(ctx, tx, endBlockNr)
+	localEndBlock, ok, err := api._blockReader.BlockByNumber(ctx, tx, endBlockNr)
 	if err != nil {
 		return false, errors.New("failed to get end block")
+	}
+	if !ok {
+		return false, errors.New("end block not found")
 	}
 
 	localEndBlockHash := localEndBlock.Hash().String()
@@ -312,24 +332,30 @@ func (api *BorImpl) GetSnapshotProposer(blockNrOrHash *rpc.BlockNumberOrHash) (c
 	defer tx.Rollback()
 
 	var header *types.Header
+	var found bool
 	//nolint:nestif
 	if blockNrOrHash == nil {
-		header = rawdb.ReadCurrentHeader(tx)
+		header, found, err = rawdb.ReadCurrentHeader(tx)
 	} else {
 		if blockNr, ok := blockNrOrHash.Number(); ok {
 			if blockNr == rpc.LatestBlockNumber {
-				header = rawdb.ReadCurrentHeader(tx)
+				header, found, err = rawdb.ReadCurrentHeader(tx)
 			} else {
 				header, err = api.headerByNumber(ctx, blockNr, tx)
+				found = header != nil
 			}
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
 				header, err = api.headerByHash(ctx, blockHash, tx)
+				found = header != nil
 			}
 		}
 	}
 
-	if header == nil || err != nil {
+	if err != nil {
+		return common.Address{}, err
+	}
+	if !found {
 		return common.Address{}, errUnknownBlock
 	}
 
@@ -351,24 +377,29 @@ func (api *BorImpl) GetSnapshotProposerSequence(blockNrOrHash *rpc.BlockNumberOr
 
 	// Retrieve the requested block number (or current if none requested)
 	var header *types.Header
+	var found bool
 	if blockNrOrHash == nil {
-		header = rawdb.ReadCurrentHeader(tx)
+		header, found, err = rawdb.ReadCurrentHeader(tx)
 	} else {
 		if blockNr, ok := blockNrOrHash.Number(); ok {
 			if blockNr == rpc.LatestBlockNumber {
-				header = rawdb.ReadCurrentHeader(tx)
+				header, found, err = rawdb.ReadCurrentHeader(tx)
 			} else {
 				header, err = api.headerByNumber(ctx, blockNr, tx)
+				found = header != nil
 			}
 		} else {
 			if blockHash, ok := blockNrOrHash.Hash(); ok {
 				header, err = api.headerByHash(ctx, blockHash, tx)
+				found = header != nil
 			}
 		}
 	}
 
-	// Ensure we have an actually valid block
-	if header == nil || err != nil {
+	if err != nil {
+		return BlockSigners{}, err
+	}
+	if !found {
 		return BlockSigners{}, errUnknownBlock
 	}
 

@@ -42,8 +42,9 @@ func TestChainConfigL2JSONRoundTrip(t *testing.T) {
 	cfg := &chain.Config{L2: &testL2Config{Stack: "testl2"}}
 	require.NoError(t, rawdb.WriteChainConfig(tx, hash, cfg))
 
-	got, err := rawdb.ReadChainConfig(tx, hash)
+	got, ok, err := rawdb.ReadChainConfig(tx, hash)
 	require.NoError(t, err)
+	require.True(t, ok)
 	require.JSONEq(t, `{"stack":"testl2"}`, string(got.L2JSON))
 	require.True(t, got.IsL2())
 }
@@ -55,8 +56,9 @@ func TestChainConfigL2JSONNullBackfill(t *testing.T) {
 	cfg := &chain.Config{L2JSON: []byte("null"), L2: &testL2Config{Stack: "testl2"}}
 	require.NoError(t, rawdb.WriteChainConfig(tx, hash, cfg))
 
-	got, err := rawdb.ReadChainConfig(tx, hash)
+	got, ok, err := rawdb.ReadChainConfig(tx, hash)
 	require.NoError(t, err)
+	require.True(t, ok)
 	require.JSONEq(t, `{"stack":"testl2"}`, string(got.L2JSON))
 	require.True(t, got.IsL2())
 }

@@ -21,6 +21,7 @@ package rawdb
 
 import (
 	"encoding/binary"
+	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -30,18 +31,18 @@ import (
 
 // ReadTxLookupEntry retrieves the positional metadata associated with a transaction
 // hash to allow retrieving the transaction or receipt by hash.
-func ReadTxLookupEntry(db kv.Getter, txnHash common.Hash) (blockNumber *uint64, txNum *uint64, err error) {
+func ReadTxLookupEntry(db kv.Getter, txnHash common.Hash) (blockNumber uint64, txNum uint64, ok bool, err error) {
 	data, err := db.GetOne(kv.TxLookup, txnHash[:])
 	if err != nil {
-		return nil, nil, err
+		return 0, 0, false, err
+	}
+	if data == nil {
+		return 0, 0, false, nil
 	}
 	if len(data) != 16 {
-		return nil, nil, nil
+		return 0, 0, false, fmt.Errorf("invalid transaction lookup length %d", len(data))
 	}
-	numberBlockNum := binary.BigEndian.Uint64(data[:8])
-	numberTxNum := binary.BigEndian.Uint64(data[8:])
-
-	return &numberBlockNum, &numberTxNum, nil
+	return binary.BigEndian.Uint64(data[:8]), binary.BigEndian.Uint64(data[8:]), true, nil
 }
 
 // WriteTxLookupEntries stores a positional metadata for every transaction from

@@ -159,10 +159,11 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 		balBytes, ok = bra.bals.Get(blockHash)
 		if !ok {
 			var err error
-			balBytes, err = rawdb.ReadBlockAccessListBytes(tx, blockHash, header.Number.Uint64())
-			balBytes = bytes.Clone(balBytes)
+			balBytes, ok, err = rawdb.ReadBlockAccessListBytes(tx, blockHash, header.Number.Uint64())
 			if err != nil {
 				log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
+			} else if ok {
+				balBytes = bytes.Clone(balBytes)
 			}
 		}
 	}
@@ -540,12 +541,13 @@ func BlocksReadAhead(ctx context.Context, workers int, db kv.RoDB, engine rules.
 		_ = g.Wait()
 	}
 }
+
 func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine rules.Engine, blockReader dbservices.FullBlockReader) error {
-	block, err := blockReader.BlockByNumber(ctx, tx, blockNum)
+	block, ok, err := blockReader.BlockByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
-	if block == nil {
+	if !ok {
 		return nil
 	}
 	_, _ = engine.Author(block.HeaderNoCopy()) // Bor consensus: this calc is heavy and has cache

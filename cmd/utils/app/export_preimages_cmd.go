@@ -105,7 +105,14 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 		return fmt.Errorf("extract state root: %w", err)
 	}
 	commitmentRoot := common.BytesToHash(rootBytes)
-	if err := checkRootPin(commitmentRoot, rawdb.ReadHeaderByNumber(tx, blockNum), blockNum); err != nil {
+	header, ok, err := rawdb.ReadHeaderByNumber(tx, blockNum)
+	if err != nil {
+		return fmt.Errorf("read header %d: %w", blockNum, err)
+	}
+	if !ok {
+		return fmt.Errorf("canonical header for block %d not found; cannot verify state root %s", blockNum, commitmentRoot.Hex())
+	}
+	if err := checkRootPin(commitmentRoot, header, blockNum); err != nil {
 		return err
 	}
 	logger.Info("[export-preimages] pin", "block", blockNum, "txNum", txNum, "stateRoot", commitmentRoot.Hex())

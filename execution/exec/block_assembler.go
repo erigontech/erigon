@@ -167,7 +167,7 @@ func (ba *BlockAssembler) Initialize(ibs *state.IntraBlockState, tx kv.TemporalT
 
 func (ba *BlockAssembler) AddTransactions(
 	ctx context.Context,
-	getHeader func(hash common.Hash, number uint64) (*types.Header, error),
+	getHeader func(hash common.Hash, number uint64) (*types.Header, bool, error),
 	txns types.Transactions,
 	coinbase accounts.Address,
 	vmConfig *vm.Config,

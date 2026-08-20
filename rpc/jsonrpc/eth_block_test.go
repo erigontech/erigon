@@ -194,14 +194,15 @@ func TestGetBlockByNumberWithLatestTag_WithHeadHashInDb(t *testing.T) {
 	defer tx.Rollback()
 
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
+	latestBlock, ok, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
 	}
+	require.True(t, ok)
 	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
 	rawdb.WriteForkchoiceHead(tx, latestBlockHash)
-	if safedHeadBlock := rawdb.ReadForkchoiceHead(tx); safedHeadBlock == (common.Hash{}) {
+	if _, ok, err := rawdb.ReadForkchoiceHead(tx); err != nil || !ok {
 		tx.Rollback()
 		t.Error("didn't find forkchoice head hash")
 	}
@@ -268,14 +269,15 @@ func TestGetBlockByNumber_WithFinalizedTag_WithFinalizedBlockInDb(t *testing.T) 
 	defer tx.Rollback()
 
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
+	latestBlock, ok, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
 	}
+	require.True(t, ok)
 	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
 	rawdb.WriteForkchoiceFinalized(tx, latestBlockHash)
-	if safedFinalizedBlock := rawdb.ReadForkchoiceFinalized(tx); safedFinalizedBlock == (common.Hash{}) {
+	if _, ok, err := rawdb.ReadForkchoiceFinalized(tx); err != nil || !ok {
 		tx.Rollback()
 		t.Error("didn't find forkchoice finalized hash")
 	}
@@ -312,14 +314,15 @@ func TestGetBlockByNumber_WithSafeTag_WithSafeBlockInDb(t *testing.T) {
 	defer tx.Rollback()
 
 	latestBlockHash := common.HexToHash("0x6804117de2f3e6ee32953e78ced1db7b20214e0d8c745a03b8fecf7cc8ee76ef")
-	latestBlock, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
+	latestBlock, ok, err := m.BlockReader.BlockByHash(ctx, tx, latestBlockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("couldn't retrieve latest block")
 	}
+	require.True(t, ok)
 	rawdb.WriteHeaderNumber(tx, latestBlockHash, latestBlock.NonceU64())
 	rawdb.WriteForkchoiceSafe(tx, latestBlockHash)
-	if safedSafeBlock := rawdb.ReadForkchoiceSafe(tx); safedSafeBlock == (common.Hash{}) {
+	if _, ok, err := rawdb.ReadForkchoiceSafe(tx); err != nil || !ok {
 		tx.Rollback()
 		t.Error("didn't find forkchoice safe block hash")
 	}
@@ -345,16 +348,18 @@ func TestGetBlockTransactionCountByHash(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
+	header, ok, err := rawdb.ReadHeaderByHash(tx, blockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := m.BlockReader.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
+	require.True(t, ok)
+	bodyWithTx, ok, err := m.BlockReader.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
 	}
+	require.True(t, ok)
 	tx.Rollback()
 
 	expectedAmount := hexutil.Uint(len(bodyWithTx.Transactions))
@@ -377,16 +382,18 @@ func TestGetBlockTransactionCountByHash_ZeroTx(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
+	header, ok, err := rawdb.ReadHeaderByHash(tx, blockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := m.BlockReader.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
+	require.True(t, ok)
+	bodyWithTx, ok, err := m.BlockReader.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
 	}
+	require.True(t, ok)
 	tx.Rollback()
 
 	expectedAmount := hexutil.Uint(len(bodyWithTx.Transactions))
@@ -409,16 +416,18 @@ func TestGetBlockTransactionCountByNumber(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
+	header, ok, err := rawdb.ReadHeaderByHash(tx, blockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := m.BlockReader.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
+	require.True(t, ok)
+	bodyWithTx, ok, err := m.BlockReader.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
 	}
+	require.True(t, ok)
 	tx.Rollback()
 
 	expectedAmount := hexutil.Uint(len(bodyWithTx.Transactions))
@@ -442,16 +451,18 @@ func TestGetBlockTransactionCountByNumber_ZeroTx(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	header, err := rawdb.ReadHeaderByHash(tx, blockHash)
+	header, ok, err := rawdb.ReadHeaderByHash(tx, blockHash)
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed reading block by hash: %s", err)
 	}
-	bodyWithTx, err := m.BlockReader.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
+	require.True(t, ok)
+	bodyWithTx, ok, err := m.BlockReader.BodyWithTransactions(ctx, tx, blockHash, header.Number.Uint64())
 	if err != nil {
 		tx.Rollback()
 		t.Errorf("failed getting body with transactions: %s", err)
 	}
+	require.True(t, ok)
 	tx.Rollback()
 
 	expectedAmount := hexutil.Uint(len(bodyWithTx.Transactions))

@@ -86,20 +86,25 @@ func TestImportReorgUnwindToGenesis(t *testing.T) {
 	defer db.Close()
 
 	var storedGenesis, head common.Hash
-	var headNumber *uint64
+	var genesisFound, headFound, headNumberFound bool
+	var headNumber uint64
 	require.NoError(t, db.View(ctx, func(tx kv.Tx) error {
 		var err error
-		if storedGenesis, err = rawdb.ReadCanonicalHash(tx, 0); err != nil {
+		if storedGenesis, genesisFound, err = rawdb.ReadCanonicalHash(tx, 0); err != nil {
 			return err
 		}
-		head = rawdb.ReadHeadBlockHash(tx)
-		headNumber = rawdb.ReadHeaderNumber(tx, head)
-		return nil
+		if head, headFound, err = rawdb.ReadHeadBlockHash(tx); err != nil {
+			return err
+		}
+		headNumber, headNumberFound, err = rawdb.ReadHeaderNumber(tx, head)
+		return err
 	}))
+	require.True(t, genesisFound)
+	require.True(t, headFound)
 	require.Equal(t, genesisHash, storedGenesis.Hex(), "genesis hash mismatch — chain config drift?")
 	require.ErrorContains(t, importErr, "uncle")
-	require.NotNilf(t, headNumber, "no canonical head; import err: %v", importErr)
-	require.Equalf(t, uint64(4), *headNumber,
+	require.Truef(t, headNumberFound, "no canonical head; import err: %v", importErr)
+	require.Equalf(t, uint64(4), headNumber,
 		"head did not advance to the heavier side chain (block 4); import err: %v", importErr)
 	require.Equalf(t, tc.LastBlockHash, head.Hex(),
 		"final head mismatch (import err: %v)", importErr)

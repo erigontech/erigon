@@ -147,7 +147,7 @@ func (e *EpochManager) noteNewEpoch() { e.force = true }
 // zoomValidators - Zooms to the epoch after the header with the given hash. Returns true if succeeded, false otherwise.
 // It's analog of zoom_to_after function in OE, but doesn't require external locking
 // nolint
-func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, hash common.Hash, call rules.SystemCall) (*RollingFinality, uint64, bool) {
+func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, hash common.Hash, call rules.SystemCall) (*RollingFinality, uint64, bool, error) {
 	var lastWasParent bool
 	if e.finalityChecker.lastPushed != nil {
 		lastWasParent = *e.finalityChecker.lastPushed == hash
@@ -156,7 +156,7 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 	// early exit for current target == chain head, but only if the epochs are
 	// the same.
 	if lastWasParent && !e.force {
-		return e.finalityChecker, e.epochTransitionNumber, true
+		return e.finalityChecker, e.epochTransitionNumber, true, nil
 	}
 	e.force = false
 
@@ -164,19 +164,22 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 	// forks it will only need to be called for the block directly after
 	// epoch transition, in which case it will be O(1) and require a single
 	// DB lookup.
-	lastTransition, ok := epochTransitionFor(chain, er, hash)
+	lastTransition, ok, err := epochTransitionFor(chain, er, hash)
+	if err != nil {
+		return nil, 0, false, err
+	}
 	if !ok {
 		if lastTransition.BlockNumber > DEBUG_LOG_FROM {
 			fmt.Printf("zoom1: %d\n", lastTransition.BlockNumber)
 		}
-		return e.finalityChecker, e.epochTransitionNumber, false
+		return e.finalityChecker, e.epochTransitionNumber, false, nil
 	}
 
 	// extract other epoch set if it's not the same as the last.
 	if lastTransition.BlockHash != e.epochTransitionHash {
 		proof := &EpochTransitionProof{}
 		if err := rlp.DecodeBytes(lastTransition.ProofRlp, proof); err != nil {
-			panic(err)
+			return nil, 0, false, err
 		}
 		first := proof.SignalNumber == 0
 		if lastTransition.BlockNumber > DEBUG_LOG_FROM {
@@ -186,7 +189,7 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 		// use signal number so multi-set first calculation is correct.
 		list, _, err := validators.epochSet(first, proof.SignalNumber, proof.SetProof, call)
 		if err != nil {
-			panic(fmt.Errorf("proof produced by this engine is invalid: %w", err))
+			return nil, 0, false, fmt.Errorf("proof produced by this engine is invalid: %w", err)
 		}
 		epochSet := list.validators
 		log.Trace("[aura] Updating finality checker with new validator set extracted from epoch", "num", lastTransition.BlockNumber)
@@ -201,7 +204,7 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 
 	e.epochTransitionHash = lastTransition.BlockHash
 	e.epochTransitionNumber = lastTransition.BlockNumber
-	return e.finalityChecker, e.epochTransitionNumber, true
+	return e.finalityChecker, e.epochTransitionNumber, true, nil
 }
 
 // / Get the transition to the epoch the given parent hash is part of
@@ -210,20 +213,26 @@ func (e *EpochManager) zoomToAfter(chain rules.ChainHeaderReader, er *NonTransac
 // /
 // / The block corresponding the parent hash must be stored already.
 // nolint
-func epochTransitionFor(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, parentHash common.Hash) (transition EpochTransition, ok bool) {
+func epochTransitionFor(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, parentHash common.Hash) (transition EpochTransition, ok bool, err error) {
 	//TODO: probably this version of func doesn't support non-canonical epoch transitions
-	h := chain.GetHeaderByHash(parentHash)
-	if h == nil {
-		return transition, false
-	}
-	num, hash, transitionProof, err := e.FindBeforeOrEqualNumber(h.Number.Uint64())
+	h, ok, err := chain.GetHeaderByHash(parentHash)
 	if err != nil {
-		panic(err)
+		return transition, false, err
+	}
+	if !ok {
+		return transition, false, nil
+	}
+	num, hash, transitionProof, ok, err := e.FindBeforeOrEqualNumber(h.Number.Uint64())
+	if err != nil {
+		return transition, false, err
+	}
+	if !ok {
+		return transition, false, nil
 	}
 	if transitionProof == nil {
-		panic("genesis epoch transition must already be set")
+		return transition, false, errors.New("genesis epoch transition must already be set")
 	}
-	return EpochTransition{BlockNumber: num, BlockHash: hash, ProofRlp: transitionProof}, true
+	return EpochTransition{BlockNumber: num, BlockHash: hash, ProofRlp: transitionProof}, true, nil
 }
 
 // AuRa
@@ -379,8 +388,11 @@ func (c *AuRa) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header,
 	if number == 0 {
 		return nil
 	}
-	parent := chain.GetHeader(header.ParentHash, number-1)
-	if parent == nil {
+	parent, ok, err := chain.GetHeader(header.ParentHash, number-1)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		log.Error("rules.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return rules.ErrUnknownAncestor
 	}
@@ -419,7 +431,13 @@ func (c *AuRa) verifyFamily(chain rules.ChainHeaderReader, e *NonTransactionalEp
 	// TODO: I call it from Initialize - because looks like no much reason to have separated "verifyFamily" call
 
 	step := header.AuRaStep
-	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+	parent, ok, err := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return rules.ErrUnknownAncestor
+	}
 	parentStep := parent.AuRaStep
 	//nolint
 	validators, setNumber, err := c.epochSet(chain, e, header, syscall)
@@ -702,12 +720,11 @@ func (c *AuRa) Initialize(config *chain.Config, chain rules.ChainHeaderReader, h
 
 	// check_and_lock_block -> check_epoch_end_signal
 
-	epoch, err := c.e.GetEpoch(header.ParentHash, blockNum-1)
+	_, isEpochBegin, err := c.e.GetEpoch(header.ParentHash, blockNum-1)
 	if err != nil {
 		logger.Warn("[aura] initialize block: on epoch begin", "err", err)
 		return err
 	}
-	isEpochBegin := epoch != nil
 	if !isEpochBegin {
 		return nil
 	}
@@ -760,7 +777,10 @@ func (c *AuRa) Finalize(config *chain.Config, header *types.Header, state *state
 	}
 	// check_and_lock_block -> check_epoch_end_signal END
 
-	finalized := buildFinality(c.EpochManager, chain, c.e, c.cfg.Validators, header, syscall)
+	finalized, err := buildFinality(c.EpochManager, chain, c.e, c.cfg.Validators, header, syscall)
+	if err != nil {
+		return nil, err
+	}
 	c.EpochManager.finalityChecker.print(header.Number.Uint64())
 	epochEndProof, err := isEpochEnd(chain, c.e, finalized, header)
 	if err != nil {
@@ -781,53 +801,71 @@ func (c *AuRa) TxDependencies(h *types.Header) [][]int {
 	return nil
 }
 
-func buildFinality(e *EpochManager, chain rules.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, header *types.Header, syscall rules.SystemCall) []unAssembledHeader {
+func buildFinality(e *EpochManager, chain rules.ChainHeaderReader, er *NonTransactionalEpochReader, validators ValidatorSet, header *types.Header, syscall rules.SystemCall) ([]unAssembledHeader, error) {
 	// commit_block -> aura.build_finality
-	_, _, ok := e.zoomToAfter(chain, er, validators, header.ParentHash, syscall)
+	_, _, ok, err := e.zoomToAfter(chain, er, validators, header.ParentHash, syscall)
+	if err != nil {
+		return nil, err
+	}
 	if !ok {
-		return []unAssembledHeader{}
+		return []unAssembledHeader{}, nil
 	}
 	if e.finalityChecker.lastPushed == nil || *e.finalityChecker.lastPushed != header.ParentHash {
+		var readErr error
 		if err := e.finalityChecker.buildAncestrySubChain(func(hash common.Hash) ([]common.Address, common.Hash, common.Hash, uint64, bool) {
-			h := chain.GetHeaderByHash(hash)
-			if h == nil {
+			h, ok, err := chain.GetHeaderByHash(hash)
+			if err != nil {
+				readErr = err
+				return nil, common.Hash{}, common.Hash{}, 0, false
+			}
+			if !ok {
 				return nil, common.Hash{}, common.Hash{}, 0, false
 			}
 			return []common.Address{h.Coinbase}, h.Hash(), h.ParentHash, h.Number.Uint64(), true
 		}, header.ParentHash, e.epochTransitionHash); err != nil {
-			//log.Warn("[aura] buildAncestrySubChain", "err", err)
-			return []unAssembledHeader{}
+			return nil, err
+		}
+		if readErr != nil {
+			return nil, readErr
 		}
 	}
 
 	res, err := e.finalityChecker.push(header.Hash(), header.Number.Uint64(), []common.Address{header.Coinbase})
 	if err != nil {
-		//log.Warn("[aura] finalityChecker.push", "err", err)
-		return []unAssembledHeader{}
+		return nil, err
 	}
-	return res
+	return res, nil
 }
 
 func isEpochEnd(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, finalized []unAssembledHeader, header *types.Header) ([]byte, error) {
 	// commit_block -> aura.is_epoch_end
 	for i := range finalized {
-		pendingTransitionProof, err := e.GetPendingEpoch(finalized[i].hash, finalized[i].number)
+		pendingTransitionProof, ok, err := e.GetPendingEpoch(finalized[i].hash, finalized[i].number)
 		if err != nil {
 			return nil, err
 		}
-		if pendingTransitionProof == nil {
+		if !ok {
 			continue
 		}
 		if header.Number.Uint64() >= DEBUG_LOG_FROM {
 			fmt.Printf("pending transition: %d,%x,len=%d\n", finalized[i].number, finalized[i].hash, len(pendingTransitionProof))
 		}
 
-		finalityProof := allHeadersUntil(chain, header, finalized[i].hash)
+		finalityProof, err := allHeadersUntil(chain, header, finalized[i].hash)
+		if err != nil {
+			return nil, err
+		}
 		var finalizedHeader *types.Header
 		if finalized[i].hash == header.Hash() {
 			finalizedHeader = header
 		} else {
-			finalizedHeader = chain.GetHeader(finalized[i].hash, finalized[i].number)
+			finalizedHeader, ok, err = chain.GetHeader(finalized[i].hash, finalized[i].number)
+			if err != nil {
+				return nil, err
+			}
+			if !ok {
+				return nil, rules.ErrUnknownAncestor
+			}
 		}
 		signalNumber := finalizedHeader.Number
 		finalityProof = append(finalityProof, finalizedHeader)
@@ -856,12 +894,15 @@ func isEpochEnd(chain rules.ChainHeaderReader, e *NonTransactionalEpochReader, f
 // allHeadersUntil walk the chain backwards from current head until finalized_hash
 // to construct transition proof. author == ec_recover(sig) known
 // since the blocks are in the DB.
-func allHeadersUntil(chain rules.ChainHeaderReader, from *types.Header, to common.Hash) (out []*types.Header) {
+func allHeadersUntil(chain rules.ChainHeaderReader, from *types.Header, to common.Hash) (out []*types.Header, err error) {
 	var header = from
 	for {
-		header = chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
-		if header == nil {
-			panic("not found header")
+		header, ok, err := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, rules.ErrUnknownAncestor
 		}
 		if header.Number.Sign() == 0 {
 			break
@@ -871,7 +912,7 @@ func allHeadersUntil(chain rules.ChainHeaderReader, from *types.Header, to commo
 		}
 		out = append(out, header)
 	}
-	return out
+	return out, nil
 }
 
 //func (c *AuRa) check_epoch_end(cc *chain.Config, header *types.Header, state *state.IntraBlockState, txs []types.Transaction, uncles []*types.Header, syscall rules.SystemCall) {
@@ -991,17 +1032,20 @@ func (c *AuRa) epochSet(chain rules.ChainHeaderReader, e *NonTransactionalEpochR
 		return c.cfg.Validators, h.Number.Uint64(), nil
 	}
 
-	finalityChecker, epochTransitionNumber, ok := c.EpochManager.zoomToAfter(chain, e, c.cfg.Validators, h.ParentHash, call)
+	finalityChecker, epochTransitionNumber, ok, err := c.EpochManager.zoomToAfter(chain, e, c.cfg.Validators, h.ParentHash, call)
+	if err != nil {
+		return nil, 0, err
+	}
 	if !ok {
 		return nil, 0, errors.New("unable to zoomToAfter to epoch")
 	}
 	return finalityChecker.signers, epochTransitionNumber, nil
 }
 
-func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) uint256.Int {
+func (c *AuRa) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentStep uint64) (uint256.Int, error) {
 	currentStep := c.step.inner.inner.Load()
 	currentEmptyStepsLen := 0
-	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen))
+	return calculateScore(parentStep, currentStep, uint64(currentEmptyStepsLen)), nil
 }
 
 // calculateScore - analog of PoW difficulty:

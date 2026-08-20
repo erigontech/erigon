@@ -49,11 +49,11 @@ func (s *singleBlockSource) next(ctx context.Context) (*types.Block, types.Block
 	return s.block, s.bal, s.num, true, nil
 }
 
-func (s *singleBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
+func (s *singleBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, bool, error) {
 	if s.parent != nil && number == s.parent.Number.Uint64() {
-		return s.parent, nil
+		return s.parent, true, nil
 	}
-	return &types.Header{}, nil
+	return nil, false, nil
 }
 
 func fixturePath(tb testing.TB) string {

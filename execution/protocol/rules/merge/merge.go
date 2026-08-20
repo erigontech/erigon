@@ -111,8 +111,11 @@ func (s *Merge) VerifyHeader(chain rules.ChainHeaderReader, header *types.Header
 		return s.eth1Engine.VerifyHeader(chain, header, !chain.Config().TerminalTotalDifficultyPassed)
 	}
 	// Short circuit if the parent is not known
-	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
-	if parent == nil {
+	parent, ok, err := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return rules.ErrUnknownAncestor
 	}
 
@@ -300,15 +303,15 @@ func (s *Merge) SealHash(header *types.Header) (hash common.Hash) {
 	return s.eth1Engine.SealHash(header)
 }
 
-func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int {
+func (s *Merge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) (uint256.Int, error) {
 	reached, err := IsTTDReached(chain, parentHash, parentNumber)
 	if err != nil {
-		return *ProofOfStakeDifficulty
+		return uint256.Int{}, err
 	}
 	if !reached {
 		return s.eth1Engine.CalcDifficulty(chain, time, parentTime, parentDifficulty, parentNumber, parentHash, parentUncleHash, parentAuRaStep)
 	}
-	return *ProofOfStakeDifficulty
+	return *ProofOfStakeDifficulty, nil
 }
 
 func (c *Merge) TxDependencies(h *types.Header) [][]int {
@@ -445,8 +448,11 @@ func (s *Merge) Initialize(config *chain.Config, chain rules.ChainHeaderReader, 
 
 	// See https://hackmd.io/@filoozom/rycoQITlWl
 	if config.BalancerTime != nil && header.Time >= *config.BalancerTime {
-		parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
-		if parent == nil {
+		parent, ok, err := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			return rules.ErrUnknownAncestor
 		}
 		if parent.Time < *config.BalancerTime { // first Balancer HF block
@@ -513,8 +519,11 @@ func IsTTDReached(chain rules.ChainHeaderReader, parentHash common.Hash, number 
 	if chain.Config().TerminalTotalDifficulty == nil {
 		return false, nil
 	}
-	td := chain.GetTd(parentHash, number)
-	if td == nil {
+	td, ok, err := chain.GetTd(parentHash, number)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
 		return false, rules.ErrUnknownAncestorTD
 	}
 	return td.Cmp(chain.Config().TerminalTotalDifficulty) >= 0, nil

@@ -17,10 +17,10 @@ type headerReader struct {
 	blockReader dbservices.HeaderReader
 }
 
-func (hr headerReader) HeaderByHash(ctx context.Context, hash common.Hash) (h *types.Header, err error) {
+func (hr headerReader) HeaderByHash(ctx context.Context, hash common.Hash) (h *types.Header, found bool, err error) {
 	err = hr.db.View(ctx, func(tx kv.Tx) error {
-		h, err = hr.blockReader.HeaderByHash(ctx, tx, hash)
+		h, found, err = hr.blockReader.HeaderByHash(ctx, tx, hash)
 		return err
 	})
-	return h, err
+	return h, found, err
 }

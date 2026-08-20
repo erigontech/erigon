@@ -243,10 +243,13 @@ func (p *Provider) Initialize(ctx context.Context) error {
 	// refreshed on demand from ChainDB.
 	readNodeInfo := func() *eth.NodeInfo {
 		var res *eth.NodeInfo
-		_ = p.cfg.ChainDB.View(context.Background(), func(tx kv.Tx) error {
-			res = eth.ReadNodeInfo(tx, p.cfg.ChainConfig, p.cfg.GenesisHash, p.cfg.NetworkID)
+		if err := p.cfg.ChainDB.View(context.Background(), func(tx kv.Tx) (err error) {
+			res, err = eth.ReadNodeInfo(tx, p.cfg.ChainConfig, p.cfg.GenesisHash, p.cfg.NetworkID)
+			return err
+		}); err != nil {
+			p.logger.Error("ReadNodeInfo failed", "err", err)
 			return nil
-		})
+		}
 		return res
 	}
 

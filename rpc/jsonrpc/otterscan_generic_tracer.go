@@ -38,11 +38,11 @@ func (api *OtterscanAPIImpl) genericTracer(tx kv.TemporalTx, ctx context.Context
 	defer executor.Close()
 
 	// if block number changed, calculate all related field
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	header, ok, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return err
 	}
-	if header == nil {
+	if !ok {
 		return fmt.Errorf("header not found for block %d", blockNum)
 	}
 	executor.ChangeBlock(header)

@@ -618,7 +618,10 @@ func TestReorgBackAndForwardIntoCanonicalChain(t *testing.T) {
 			// settle before reading the committed head.
 			m.ExecModule.WaitIdle(ctx)
 			require.NoError(t, m.DB.ViewTemporal(ctx, func(tx kv.TemporalTx) error {
-				require.Equal(t, headerAt(chainLen).Hash(), rawdb.ReadHeadBlockHash(tx), "head must be at canonical tip")
+				headHash, ok, err := rawdb.ReadHeadBlockHash(tx)
+				require.NoError(t, err)
+				require.True(t, ok)
+				require.Equal(t, headerAt(chainLen).Hash(), headHash, "head must be at canonical tip")
 				return nil
 			}))
 		})
@@ -1785,8 +1788,9 @@ func TestNotificationDispatchForegroundCommit(t *testing.T) {
 	// after FCU returns — this is what eth_getBlockByNumber relies on.
 	err = m.DB.View(ctx, func(tx kv.Tx) error {
 		for _, b := range chainPack.Blocks {
-			h := rawdb.ReadHeader(tx, b.Hash(), b.NumberU64())
-			require.NotNil(t, h, "block %d header should be in DB after foreground FCU", b.NumberU64())
+			_, ok, err := rawdb.ReadHeader(tx, b.Hash(), b.NumberU64())
+			require.NoError(t, err)
+			require.True(t, ok, "block %d header should be in DB after foreground FCU", b.NumberU64())
 		}
 		return nil
 	})
@@ -1817,8 +1821,9 @@ func TestNotificationDispatchBackgroundPrune(t *testing.T) {
 	// Data committed to DB (prune is background, but commit is foreground).
 	err = m.DB.View(ctx, func(tx kv.Tx) error {
 		for _, b := range chainPack.Blocks {
-			h := rawdb.ReadHeader(tx, b.Hash(), b.NumberU64())
-			require.NotNil(t, h, "block %d header should be in DB with background prune", b.NumberU64())
+			_, ok, err := rawdb.ReadHeader(tx, b.Hash(), b.NumberU64())
+			require.NoError(t, err)
+			require.True(t, ok, "block %d header should be in DB with background prune", b.NumberU64())
 		}
 		return nil
 	})
@@ -2427,9 +2432,9 @@ func TestInsertBlocksWithBatchedFCU(t *testing.T) {
 			// First block of the just-inserted batch should have a readable TD
 			// (asserts the rawdb.WriteTd in InsertBlocks made it to DB).
 			firstOfBatch := batch[0].HeaderNoCopy()
-			td, err := rawdb.ReadTd(tx, firstOfBatch.Hash(), firstOfBatch.Number.Uint64())
+			_, ok, err := rawdb.ReadTd(tx, firstOfBatch.Hash(), firstOfBatch.Number.Uint64())
 			require.NoError(t, err)
-			require.NotNil(t, td, "TD for block %d must be readable across the batch boundary", firstOfBatch.Number.Uint64())
+			require.True(t, ok, "TD for block %d must be readable across the batch boundary", firstOfBatch.Number.Uint64())
 			return nil
 		}))
 	}
@@ -2557,9 +2562,9 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, uint64(6), execProg)
 
-		td, err := rawdb.ReadTd(tx, chainPack.Blocks[5].Hash(), 6)
+		_, ok, err := rawdb.ReadTd(tx, chainPack.Blocks[5].Hash(), 6)
 		require.NoError(t, err)
-		require.NotNil(t, td)
+		require.True(t, ok)
 		return nil
 	}))
 }
@@ -2669,7 +2674,10 @@ func TestUpdateForkChoiceShallowReorgAfterLargeBatchExec(t *testing.T) {
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
 		require.Equal(t, uint64(chainLen), execProg)
-		require.Equal(t, fork.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		headHash, ok, err := rawdb.ReadHeadBlockHash(tx)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, fork.TopBlock.Hash(), headHash)
 		return nil
 	}))
 }
@@ -2800,8 +2808,9 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 		// window and so not pruned — pre-window BAL sidecars are pruned beyond
 		// MaxReorgDepth, but compute-ahead reads them in-memory during execution,
 		// and on.computedAhead asserts the compute-ahead path actually engaged).
-		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, canonical.TopBlock.Hash(), canonical.TopBlock.NumberU64())
+		balBytes, ok, err := rawdb.ReadBlockAccessListBytes(tx, canonical.TopBlock.Hash(), canonical.TopBlock.NumberU64())
 		require.NoError(t, err)
+		require.True(t, ok)
 		require.NotEmpty(t, balBytes, "blocks must carry a BAL so BAL-driven compute-ahead actually engages")
 
 		// Window blocks own per-block changesets; capture their CommitmentDomain
@@ -2851,7 +2860,10 @@ func runBALComputeAheadChangeset(t *testing.T, computeAhead, shadow bool) balCom
 		execProg, err := stages.GetStageProgress(tx, stages.Execution)
 		require.NoError(t, err)
 		require.Equal(t, uint64(chainLen), execProg)
-		require.Equal(t, canonical.TopBlock.Hash(), rawdb.ReadHeadBlockHash(tx))
+		headHash, ok, err := rawdb.ReadHeadBlockHash(tx)
+		require.NoError(t, err)
+		require.True(t, ok)
+		require.Equal(t, canonical.TopBlock.Hash(), headHash)
 		return nil
 	}))
 	return res

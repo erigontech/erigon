@@ -107,11 +107,11 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 	data := make([]byte, 16)
 	return etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
-		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
+		body, ok, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
 		if err != nil {
 			return err
 		}
-		if body == nil { // tolerate such an error, because likely it's corner-case - and not critical one
+		if !ok { // tolerate such an error, because likely it's corner-case - and not critical one
 			log.Warn(fmt.Sprintf("[%s] transform: empty block body %d, hash %x", logPrefix, blocknum, v))
 			return nil
 		}
@@ -146,14 +146,16 @@ func txnLookupTransform(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64,
 func txnLookupIntegrity(logPrefix string, tx kv.RwTx, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
 	for i := blockFrom; i < blockTo; i++ {
 		var blockHeader *types.Header
-		blockHash, err := rawdb.ReadCanonicalHash(tx, i)
+		blockHash, ok, err := rawdb.ReadCanonicalHash(tx, i)
 		if err != nil {
 			return err
 		}
-		emptyHash := common.Hash{}
-		if blockHash != emptyHash {
-			blockHeader = rawdb.ReadHeader(tx, blockHash, i)
-			if blockHeader == nil {
+		if ok {
+			blockHeader, ok, err = rawdb.ReadHeader(tx, blockHash, i)
+			if err != nil {
+				return err
+			}
+			if !ok {
 				logger.Warn(fmt.Sprintf("[%s] txnLookup integrity: empty block %d", logPrefix, i))
 				return fmt.Errorf("[%s] txnLookup integrity: header not found in db block: %d", logPrefix, i)
 			}
@@ -305,11 +307,11 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 func deleteTxLookupRange(tx kv.RwTx, logPrefix string, blockFrom, blockTo uint64, ctx context.Context, cfg TxLookupCfg, logger log.Logger) (err error) {
 	err = etl.Transform(logPrefix, tx, kv.HeaderCanonical, kv.TxLookup, cfg.tmpdir, func(k, v []byte, next etl.ExtractNextFunc) error {
 		blocknum, blockHash := binary.BigEndian.Uint64(k), common.CastToHash(v)
-		body, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
+		body, ok, err := cfg.blockReader.BodyWithTransactions(ctx, tx, blockHash, blocknum)
 		if err != nil {
 			return err
 		}
-		if body == nil {
+		if !ok {
 			log.Debug("TxLookup pruning, empty block body", "height", blocknum)
 			return nil
 		}

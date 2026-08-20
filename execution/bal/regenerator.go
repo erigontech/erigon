@@ -83,11 +83,11 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	if cached, ok := g.cache.Get(blockHash); ok {
 		return cached, nil
 	}
-	header, err := g.blockReader.Header(ctx, tx, blockHash, blockNum)
+	header, ok, err := g.blockReader.Header(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if header == nil || header.BlockAccessListHash == nil {
+	if !ok || header.BlockAccessListHash == nil {
 		return nil, nil
 	}
 	canonicalHash, ok, err := g.blockReader.CanonicalHash(ctx, tx, blockNum)
@@ -108,11 +108,11 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	case <-ctx.Done():
 		return nil, ctx.Err()
 	}
-	block, _, err := g.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
+	block, _, ok, err := g.blockReader.BlockWithSenders(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
+	if !ok {
 		return nil, nil
 	}
 	reader, err := g.historyStateReader(ctx, tx, blockNum)
@@ -122,7 +122,7 @@ func (g *Regenerator) GetBlockAccessListBytes(ctx context.Context, cfg *chain.Co
 	ibs := state.New(reader)
 	defer ibs.Close()
 	ibs.SetVersionMap(state.NewVersionMap(nil))
-	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, bool, error) {
 		return g.blockReader.Header(ctx, tx, hash, number)
 	}
 	chainReader := exec.NewChainReader(cfg, tx, g.blockReader, g.logger)

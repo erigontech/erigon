@@ -19,6 +19,7 @@ package rawdbreset
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"time"
 
@@ -130,9 +131,12 @@ func ResetBlocks(db kv.RwDB, tx kv.RwTx, br dbservices.FullBlockReader, bw *bloc
 	if err := rawdb.TruncateTd(tx, 1); err != nil {
 		return err
 	}
-	hash, err := rawdb.ReadCanonicalHash(tx, 0)
+	hash, ok, err := rawdb.ReadCanonicalHash(tx, 0)
 	if err != nil {
 		return err
+	}
+	if !ok {
+		return errors.New("genesis canonical hash not found")
 	}
 	if err := rawdb.WriteHeadHeaderHash(tx, hash); err != nil {
 		return err

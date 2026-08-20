@@ -168,7 +168,8 @@ func NewBlockRetire(
 }
 
 func (br *BlockRetire) SetWorkers(workers int) { br.workers.Store(int32(workers)) }
-func (br *BlockRetire) GetWorkers() int        { return int(br.workers.Load()) }
+
+func (br *BlockRetire) GetWorkers() int { return int(br.workers.Load()) }
 
 // SetCommitGate wraps the retirement's chain DB reads with the given gate so
 // each db.View acquires RLock, serializing against a writer (Aggregator
@@ -763,8 +764,11 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 		}
 
 		h := common.BytesToHash(v)
-		dataRLP := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
-		if dataRLP == nil {
+		dataRLP, ok, err := rawdb.ReadStorageBodyRLP(tx, h, blockNum)
+		if err != nil {
+			return false, err
+		}
+		if !ok {
 			return false, fmt.Errorf("body not found: %d, %x", blockNum, h)
 		}
 		var body types.BodyForStorage
@@ -783,7 +787,7 @@ func DumpTxs(ctx context.Context, db kv.RoDB, chainConfig *chain.Config, blockFr
 			clean := kv.ReadAheadDeprecated(warmupCtx, db, warmupTxs, kv.EthTx, body.BaseTxnID.Bytes(), 100*10_000)
 			defer clean()
 		}
-		senders, err := rawdb.ReadSenders(tx, h, blockNum)
+		senders, _, err := rawdb.ReadSenders(tx, h, blockNum)
 		if err != nil {
 			return false, err
 		}
@@ -905,11 +909,11 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 	if blockFrom > 0 && !test {
 		if err := db.View(ctx, func(tx kv.Tx) error {
 			blockNum := blockFrom - 1
-			h, err := rawdb.ReadCanonicalHash(tx, blockNum)
+			h, ok, err := rawdb.ReadCanonicalHash(tx, blockNum)
 			if err != nil {
 				return err
 			}
-			if h == emptyHash {
+			if !ok {
 				return fmt.Errorf("header not found: %d", blockNum)
 			}
 			prevHash = h
@@ -976,8 +980,11 @@ func DumpHeadersRaw(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom,
 			return nil
 		}
 		blockNum := blockTo
-		h := rawdb.ReadHeaderByNumber(tx, blockNum)
-		if h == nil {
+		h, ok, err := rawdb.ReadHeaderByNumber(tx, blockNum)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			return fmt.Errorf("last header not found: %d", blockNum)
 		}
 		if prevHash != h.ParentHash {
@@ -1014,11 +1021,11 @@ func DumpBodies(ctx context.Context, db kv.RoDB, _ *chain.Config, blockFrom, blo
 		// So, we manually calc this field here and serialize again.
 		//
 		// FYI: we also have other table to map canonical BlockNum->TxNum: kv.MaxTxNum
-		body, err := rawdb.ReadBodyForStorageByKey(tx, key)
+		body, ok, err := rawdb.ReadBodyForStorageByKey(tx, key)
 		if err != nil {
 			return false, err
 		}
-		if body == nil {
+		if !ok {
 			logger.Warn("body missed", "block_num", blockNum, "hash", hex.EncodeToString(v))
 			return true, nil
 		}

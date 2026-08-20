@@ -55,29 +55,30 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 		lookups++
 		// Retrieve the next header satisfying the query
 		var origin *types.Header
+		var originFound bool
 		if hashMode {
 			if first {
 				first = false
-				origin, err = blockReader.HeaderByHash(context.Background(), db, query.Origin.Hash)
+				origin, originFound, err = blockReader.HeaderByHash(context.Background(), db, query.Origin.Hash)
 				if err != nil {
 					return nil, err
 				}
-				if origin != nil {
+				if originFound {
 					query.Origin.Number = origin.Number.Uint64()
 				}
 			} else {
-				origin, err = blockReader.Header(context.Background(), db, query.Origin.Hash, query.Origin.Number)
+				origin, originFound, err = blockReader.Header(context.Background(), db, query.Origin.Hash, query.Origin.Number)
 				if err != nil {
 					return nil, err
 				}
 			}
 		} else {
-			origin, err = blockReader.HeaderByNumber(context.Background(), db, query.Origin.Number)
+			origin, originFound, err = blockReader.HeaderByNumber(context.Background(), db, query.Origin.Number)
 			if err != nil {
 				return nil, err
 			}
 		}
-		if origin == nil {
+		if !originFound {
 			break
 		}
 		headers = append(headers, origin)
@@ -91,8 +92,12 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 			if ancestor == 0 {
 				unknown = true
 			} else {
-				query.Origin.Hash, query.Origin.Number = blockReader.ReadAncestor(db, query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical)
-				unknown = query.Origin.Hash == common.Hash{}
+				var found bool
+				query.Origin.Hash, query.Origin.Number, found, err = blockReader.ReadAncestor(db, query.Origin.Hash, query.Origin.Number, ancestor, &maxNonCanonical)
+				if err != nil {
+					return nil, err
+				}
+				unknown = !found
 			}
 		case hashMode && !query.Reverse:
 			// Hash based traversal towards the leaf block
@@ -106,14 +111,17 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 				log.Warn("[p2p] GetBlockHeaders skip overflow attack", "current", current, "skip", query.Skip, "next", next)
 				unknown = true
 			} else {
-				header, err := blockReader.HeaderByNumber(context.Background(), db, next)
+				header, found, err := blockReader.HeaderByNumber(context.Background(), db, next)
 				if err != nil {
 					return nil, err
 				}
-				if header != nil {
+				if found {
 					nextHash := header.Hash()
-					expOldHash, _ := blockReader.ReadAncestor(db, nextHash, next, query.Skip+1, &maxNonCanonical)
-					if expOldHash == query.Origin.Hash {
+					expOldHash, _, found, err := blockReader.ReadAncestor(db, nextHash, next, query.Skip+1, &maxNonCanonical)
+					if err != nil {
+						return nil, err
+					}
+					if found && expOldHash == query.Origin.Hash {
 						query.Origin.Hash, query.Origin.Number = nextHash, next
 					} else {
 						unknown = true
@@ -145,7 +153,7 @@ func AnswerGetBlockHeadersQuery(db kv.Tx, query *GetBlockHeadersPacket, blockRea
 	return headers, nil
 }
 
-func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader dbservices.HeaderAndBodyReader) []rlp.RawValue { //nolint:unparam
+func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader dbservices.HeaderAndBodyReader) ([]rlp.RawValue, error) { //nolint:unparam
 	// Gather blocks until the fetch or network limits is reached
 	var bytes int
 	bodies := make([]rlp.RawValue, 0, len(query))
@@ -155,18 +163,24 @@ func AnswerGetBlockBodiesQuery(db kv.Tx, query GetBlockBodiesPacket, blockReader
 			lookups >= 2*MaxBodiesServe {
 			break
 		}
-		number, _ := blockReader.HeaderNumber(context.Background(), db, hash)
-		if number == nil {
+		number, ok, err := blockReader.HeaderNumber(context.Background(), db, hash)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
 			continue
 		}
-		bodyRLP, _ := blockReader.BodyRlp(context.Background(), db, hash, *number)
-		if len(bodyRLP) == 0 {
+		bodyRLP, ok, err := blockReader.BodyRlp(context.Background(), db, hash, number)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
 			continue
 		}
 		bodies = append(bodies, bodyRLP)
 		bytes += len(bodyRLP)
 	}
-	return bodies
+	return bodies, nil
 }
 
 // notAvailableSentinel is the RLP encoding of an empty string (0x80). EIP-8159
@@ -205,7 +219,7 @@ type BlockAccessListGetter interface {
 // MaxBlockAccessListsRegenerate caps the re-execution work per request. When a
 // limit is reached, the response is truncated (not padded with 0x80) — the peer
 // sees a shorter array than requested, same convention as the BlockBodies handler.
-func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db kv.TemporalTx, query GetBlockAccessListsPacket, blockReader dbservices.HeaderReader, balGetter BlockAccessListGetter) []rlp.RawValue {
+func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db kv.TemporalTx, query GetBlockAccessListsPacket, blockReader dbservices.HeaderReader, balGetter BlockAccessListGetter) ([]rlp.RawValue, error) {
 	var bytes int
 	var regenerations int
 	bals := make([]rlp.RawValue, 0, len(query))
@@ -215,20 +229,26 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db k
 			lookups >= 2*MaxBlockAccessListsServe {
 			break
 		}
-		number, _ := blockReader.HeaderNumber(ctx, db, hash)
-		if number == nil {
+		number, ok, err := blockReader.HeaderNumber(ctx, db, hash)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
 			// We don't know the block — peer can retry elsewhere.
 			bals = append(bals, notAvailableSentinel)
 			bytes += len(notAvailableSentinel)
 			continue
 		}
-		bal, _ := rawdb.ReadBlockAccessListBytes(db, hash, *number)
-		if len(bal) == 0 && balGetter != nil {
+		bal, found, err := rawdb.ReadBlockAccessListBytes(db, hash, number)
+		if err != nil {
+			return nil, err
+		}
+		if !found && balGetter != nil {
 			if regenerations >= MaxBlockAccessListsRegenerate {
 				break
 			}
 			regenerations++
-			bal, _ = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, *number)
+			bal, _ = balGetter.GetBlockAccessListBytes(ctx, cfg, db, hash, number)
 		}
 		if len(bal) == 0 {
 			// We have the block but no BAL: pre-Amsterdam, or pruned beyond
@@ -241,7 +261,7 @@ func AnswerGetBlockAccessListsQuery(ctx context.Context, cfg *chain.Config, db k
 		bals = append(bals, bal)
 		bytes += len(bal)
 	}
-	return bals
+	return bals, nil
 }
 
 // Using a struct keeps the ReceiptsGetter interface stable when new options are added.
@@ -417,18 +437,18 @@ func AnswerGetReceiptsQuery(ctx context.Context, cfg *chain.Config, receiptsGett
 		}
 		// The response carries one receipt list per requested block in request
 		// order, so a block we cannot serve ends the response at that block.
-		number, err := br.HeaderNumber(ctx, db, hash)
+		number, ok, err := br.HeaderNumber(ctx, db, hash)
 		if err != nil {
 			return nil, false, err
 		}
-		if number == nil {
+		if !ok {
 			return receipts, false, nil
 		}
-		b, _, err := br.BlockWithSenders(ctx, db, hash, *number)
+		b, _, ok, err := br.BlockWithSenders(ctx, db, hash, number)
 		if err != nil {
 			return nil, false, err
 		}
-		if b == nil {
+		if !ok {
 			return receipts, false, nil
 		}
 		results, err := receiptsGetter.GetReceipts(ctx, cfg, db, b, receiptsOpts)

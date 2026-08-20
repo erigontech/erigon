@@ -100,22 +100,23 @@ func TestGetBlockReceiptsFrozenBlocks(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 	blockHash := func(num uint64) common.Hash {
-		block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, num)
+		block, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, num)
 		require.NoError(t, err)
-		require.NotNil(t, block)
+		require.True(t, ok)
 		return block.Hash()
 	}
 	emptyBlockHash := blockHash(frozenEmptyBlockNum)
 	// Precondition making the scenario real: the empty block is readable via the
 	// snapshot-aware block reader but its header is gone from the DB tables.
 	require.GreaterOrEqual(t, m.BlockReader.FrozenBlocks(), uint64(snaptype.Erigon2MinSegmentSize-1))
-	prunedHeader, err := rawdb.ReadHeaderByHash(tx, emptyBlockHash)
+	_, ok, err := rawdb.ReadHeaderByHash(tx, emptyBlockHash)
 	require.NoError(t, err)
-	require.Nil(t, prunedHeader)
+	require.False(t, ok)
 	receiptsGetter := receipts.NewGenerator(m.Dirs, m.BlockReader, m.Engine, nil, time.Minute)
 	encodedReceipts := func(num uint64) rlp.RawValue {
-		block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, num)
+		block, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, num)
 		require.NoError(t, err)
+		require.True(t, ok)
 		r, err := receiptsGetter.GetReceipts(m.Ctx, m.ChainConfig, tx, block, eth.ReceiptsOpts{})
 		require.NoError(t, err)
 		perReceipt := make([]rlp.RawValue, 0, len(r))

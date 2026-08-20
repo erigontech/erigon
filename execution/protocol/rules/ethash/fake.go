@@ -93,7 +93,10 @@ func (f *FakeEthash) VerifyUncles(chain rules.ChainReader, header *types.Header,
 		return nil
 	}
 
-	uncleBlocks, ancestors := getUncles(chain, header)
+	uncleBlocks, ancestors, err := getUncles(chain, header)
+	if err != nil {
+		return err
+	}
 
 	for _, uncle := range uncles {
 		if err := f.VerifyUncle(chain, header, uncle, uncleBlocks, ancestors, true); err != nil {

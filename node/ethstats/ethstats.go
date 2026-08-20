@@ -518,15 +518,15 @@ func (s *Service) reportBlock(conn *connWrapper) error {
 	}
 	defer roTx.Rollback()
 
-	block, err := s.blockReader.CurrentBlock(roTx)
+	block, ok, err := s.blockReader.CurrentBlock(roTx)
 	if err != nil {
 		return err
 	}
-	if block == nil {
+	if !ok {
 		return nil
 	}
 
-	td, err := rawdb.ReadTd(roTx, block.Hash(), block.NumberU64())
+	td, _, err := rawdb.ReadTd(roTx, block.Hash(), block.NumberU64())
 	if err != nil {
 		return err
 	}
@@ -592,13 +592,16 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 		indexes = append(indexes, list...)
 	} else {
 		// No indexes requested, send back the top ones
-		headHash := rawdb.ReadHeadBlockHash(roTx)
-		headNumber, err := s.blockReader.HeaderNumber(context.Background(), roTx, headHash)
-		if headNumber == nil || err != nil {
+		headHash, ok, err := rawdb.ReadHeadBlockHash(roTx)
+		if err != nil || !ok {
 			return err
 		}
-		start := max(int(*headNumber-historyUpdateRange+1), 0)
-		for i := uint64(start); i <= *headNumber; i++ {
+		headNumber, ok, err := s.blockReader.HeaderNumber(context.Background(), roTx, headHash)
+		if err != nil || !ok {
+			return err
+		}
+		start := max(int(headNumber-historyUpdateRange+1), 0)
+		for i := uint64(start); i <= headNumber; i++ {
 			indexes = append(indexes, i)
 		}
 	}
@@ -606,13 +609,13 @@ func (s *Service) reportHistory(conn *connWrapper, list []uint64) error {
 	history := make([]*blockStats, len(indexes))
 	for i, number := range indexes {
 		// Retrieve the next block if it's known to us
-		block, err := s.blockReader.BlockByNumber(context.Background(), roTx, number)
+		block, ok, err := s.blockReader.BlockByNumber(context.Background(), roTx, number)
 		if err != nil {
 			return err
 		}
 		// If we do have the block, add to the history and continue
-		if block != nil {
-			td, err := rawdb.ReadTd(roTx, block.Hash(), number)
+		if ok {
+			td, _, err := rawdb.ReadTd(roTx, block.Hash(), number)
 			if err != nil {
 				return err
 			}

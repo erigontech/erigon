@@ -278,7 +278,10 @@ func (cs *MultiClient) getBlockAccessLists71(ctx context.Context, inreq *sentryp
 		return err
 	}
 	defer tx.Rollback()
-	response := eth.AnswerGetBlockAccessListsQuery(ctx, cs.ChainConfig, tx, query.GetBlockAccessListsPacket, cs.blockReader, cs.balGenerator)
+	response, err := eth.AnswerGetBlockAccessListsQuery(ctx, cs.ChainConfig, tx, query.GetBlockAccessListsPacket, cs.blockReader, cs.balGenerator)
+	if err != nil {
+		return err
+	}
 	// Encode before releasing the tx: stored BALs are mdbx-backed slices only
 	// valid while the tx is open.
 	b, err := rlp.EncodeToBytes(&eth.BlockAccessListsPacket66{
@@ -316,7 +319,10 @@ func (cs *MultiClient) getBlockBodies66(ctx context.Context, inreq *sentryproto.
 		return err
 	}
 	defer tx.Rollback()
-	response := eth.AnswerGetBlockBodiesQuery(tx, query.GetBlockBodiesPacket, cs.blockReader)
+	response, err := eth.AnswerGetBlockBodiesQuery(tx, query.GetBlockBodiesPacket, cs.blockReader)
+	if err != nil {
+		return err
+	}
 	tx.Rollback()
 	b, err := rlp.EncodeToBytes(&eth.BlockBodiesRLPPacket66{
 		RequestId:            query.RequestId,
@@ -488,11 +494,11 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *sentryproto
 	witnessSize := make(map[common.Hash]uint64, len(seen))
 	headers := make(map[common.Hash]*types.Header, len(seen))
 	for witnessBlockHash := range seen {
-		header, err := cs.blockReader.HeaderByHash(ctx, tx, witnessBlockHash)
+		header, ok, err := cs.blockReader.HeaderByHash(ctx, tx, witnessBlockHash)
 		if err != nil {
 			return fmt.Errorf("reading header for witness hash %x: %w", witnessBlockHash, err)
 		}
-		if header == nil {
+		if !ok {
 			continue
 		}
 		headers[witnessBlockHash] = header
@@ -692,11 +698,11 @@ func (cs *MultiClient) addBlockWitnesses(ctx context.Context, inreq *sentryproto
 			continue
 		}
 
-		header, err := cs.blockReader.HeaderByHash(ctx, tx, witnessHash)
+		header, ok, err := cs.blockReader.HeaderByHash(ctx, tx, witnessHash)
 		if err != nil {
 			return fmt.Errorf("reading header for witness hash %x: %w", witnessHash, err)
 		}
-		if header == nil {
+		if !ok {
 			cs.logger.Debug("header not found for witness", "hash", witnessHash)
 			continue
 		}

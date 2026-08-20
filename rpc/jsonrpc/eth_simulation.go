@@ -881,8 +881,8 @@ func (s *simulatedCanonicalReader) IsCanonical(context.Context, kv.Getter, commo
 	return true, nil
 }
 
-func (s *simulatedCanonicalReader) BadHeaderNumber(context.Context, kv.Getter, common.Hash) (blockHeight *uint64, err error) {
-	return nil, errors.New("bad header not found")
+func (s *simulatedCanonicalReader) BadHeaderNumber(context.Context, kv.Getter, common.Hash) (uint64, bool, error) {
+	return 0, false, errors.New("bad header not found")
 }
 
 func (s *simulator) newSimulatedCanonicalReader(headers []*types.Header) dbservices.CanonicalReader {
@@ -1126,8 +1126,10 @@ func (r *simulationIntraBlockStateReader) ReadAccountIncarnation(address account
 }
 
 func (r *simulationIntraBlockStateReader) SetTrace(_ bool, _ string) {}
-func (r *simulationIntraBlockStateReader) Trace() bool               { return false }
-func (r *simulationIntraBlockStateReader) TracePrefix() string       { return "" }
+
+func (r *simulationIntraBlockStateReader) Trace() bool { return false }
+
+func (r *simulationIntraBlockStateReader) TracePrefix() string { return "" }
 
 func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomains) commitmentdb.StateReader {
 	// Both commitment and account/storage/code values are read from latest state *but* on different SharedDomains instances.

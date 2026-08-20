@@ -33,12 +33,14 @@ func newEpochReader(db kv.RwDB) *NonTransactionalEpochReader {
 	return &NonTransactionalEpochReader{db: db}
 }
 
-func (cr *NonTransactionalEpochReader) GetEpoch(hash common.Hash, number uint64) (v []byte, err error) {
-	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
-		v, err = rawdb.ReadEpoch(tx, number, hash)
+func (cr *NonTransactionalEpochReader) GetEpoch(hash common.Hash, number uint64) (v []byte, ok bool, err error) {
+	err = cr.db.View(context.Background(), func(tx kv.Tx) error {
+		v, ok, err = rawdb.ReadEpoch(tx, number, hash)
 		return err
 	})
+	return v, ok, err
 }
+
 func (cr *NonTransactionalEpochReader) PutEpoch(hash common.Hash, number uint64, proof []byte) error {
 	if cr.readonly {
 		return nil
@@ -47,12 +49,15 @@ func (cr *NonTransactionalEpochReader) PutEpoch(hash common.Hash, number uint64,
 		return rawdb.WriteEpoch(tx, number, hash, proof)
 	})
 }
-func (cr *NonTransactionalEpochReader) GetPendingEpoch(hash common.Hash, number uint64) (v []byte, err error) {
-	return v, cr.db.View(context.Background(), func(tx kv.Tx) error {
-		v, err = rawdb.ReadPendingEpoch(tx, number, hash)
+
+func (cr *NonTransactionalEpochReader) GetPendingEpoch(hash common.Hash, number uint64) (v []byte, ok bool, err error) {
+	err = cr.db.View(context.Background(), func(tx kv.Tx) error {
+		v, ok, err = rawdb.ReadPendingEpoch(tx, number, hash)
 		return err
 	})
+	return v, ok, err
 }
+
 func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash common.Hash, number uint64, proof []byte) error {
 	if cr.readonly {
 		return nil
@@ -61,9 +66,11 @@ func (cr *NonTransactionalEpochReader) PutPendingEpoch(hash common.Hash, number 
 		return rawdb.WritePendingEpoch(tx, number, hash, proof)
 	})
 }
-func (cr *NonTransactionalEpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, err error) {
-	return blockNum, blockHash, transitionProof, cr.db.View(context.Background(), func(tx kv.Tx) error {
-		blockNum, blockHash, transitionProof, err = rawdb.FindEpochBeforeOrEqualNumber(tx, number)
+
+func (cr *NonTransactionalEpochReader) FindBeforeOrEqualNumber(number uint64) (blockNum uint64, blockHash common.Hash, transitionProof []byte, ok bool, err error) {
+	err = cr.db.View(context.Background(), func(tx kv.Tx) error {
+		blockNum, blockHash, transitionProof, ok, err = rawdb.FindEpochBeforeOrEqualNumber(tx, number)
 		return err
 	})
+	return blockNum, blockHash, transitionProof, ok, err
 }

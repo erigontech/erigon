@@ -119,7 +119,7 @@ func NewEVMTxContext(msg Message) evmtypes.TxContext {
 }
 
 // GetHashFn returns a GetHashFunc which retrieves header hashes by number
-func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, error)) func(n uint64) (common.Hash, error) {
+func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64) (*types.Header, bool, error)) func(n uint64) (common.Hash, error) {
 	refNumber := ref.Number.Uint64() - 1
 	refHash := ref.ParentHash
 	lastKnownNumber := refNumber
@@ -173,7 +173,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 				}
 			}
 
-			header, err := func() (*types.Header, error) {
+			header, ok, err := func() (*types.Header, bool, error) {
 				hash, num := lastKnownHash, lastKnownNumber
 				hashLookupCacheLock.Unlock()
 				defer hashLookupCacheLock.Lock()
@@ -183,7 +183,7 @@ func GetHashFn(ref *types.Header, getHeader func(hash common.Hash, number uint64
 			if err != nil {
 				return common.Hash{}, err
 			}
-			if header == nil {
+			if !ok {
 				break
 			}
 			lastKnownHash = header.ParentHash

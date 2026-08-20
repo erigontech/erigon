@@ -358,12 +358,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	var genesis *types.Block
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 
-		genesisConfig, err := rawdb.ReadGenesis(tx)
+		genesisConfig, ok, err := rawdb.ReadGenesis(tx)
 		if err != nil {
 			return err
 		}
 
-		if genesisConfig != nil {
+		if ok {
 			config.Genesis = genesisConfig
 		}
 
@@ -371,12 +371,12 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			tracer.Hooks.OnBlockchainInit(config.Genesis.Config)
 		}
 
-		h, err := rawdb.ReadCanonicalHash(tx, 0)
+		_, found, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		genesisSpec := config.Genesis
-		if h != (common.Hash{}) { // fallback to db content
+		if found { // fallback to db content
 			genesisSpec = nil
 		}
 		var genesisErr error
@@ -581,7 +581,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var currentBlock *types.Block
 	if err := backend.chainDB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock, err = blockReader.CurrentBlock(tx)
+		block, ok, err := blockReader.CurrentBlock(tx)
+		if ok {
+			currentBlock = block
+		}
 		return err
 	}); err != nil {
 		panic(err)
@@ -1113,8 +1116,8 @@ func (s *Ethereum) Init(stack *node.Node, config *ethconfig.Config, chainConfig 
 	emptyBadHash := config.BadBlockHash == common.Hash{}
 	if !emptyBadHash {
 		if err := chainKv.View(ctx, func(tx kv.Tx) error {
-			badBlockHeader, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
-			if badBlockHeader != nil {
+			badBlockHeader, ok, hErr := rawdb.ReadHeaderByHash(tx, config.BadBlockHash)
+			if ok {
 				unwindPoint := badBlockHeader.Number.Uint64() - 1
 				if err := s.stagedSync.UnwindTo(unwindPoint, stagedsync.BadBlock(config.BadBlockHash, errors.New("Init unwind")), tx); err != nil {
 					return err
@@ -1263,8 +1266,10 @@ func (s *Ethereum) RegisterMinedBlockObserver(callback func(msg *types.Block)) e
 	return s.minedBlockObservers.Register(callback)
 }
 
-func (s *Ethereum) ChainKV() kv.RwDB            { return s.chainDB }
+func (s *Ethereum) ChainKV() kv.RwDB { return s.chainDB }
+
 func (s *Ethereum) NetVersion() (uint64, error) { return s.networkID, nil }
+
 func (s *Ethereum) NetPeerCount() (uint64, error) {
 	var sentryPc uint64 = 0
 
@@ -1698,16 +1703,15 @@ func RemoveContents(dirname string) error {
 func readCurrentTotalDifficulty(ctx context.Context, db kv.RwDB, blockReader dbservices.FullBlockReader) (*uint256.Int, error) {
 	var currentTD *uint256.Int
 	err := db.View(ctx, func(tx kv.Tx) error {
-		h, err := blockReader.CurrentBlock(tx)
+		h, ok, err := blockReader.CurrentBlock(tx)
 		if err != nil {
 			return err
 		}
-		if h == nil {
-			currentTD = nil
+		if !ok {
 			return nil
 		}
 
-		currentTD, err = rawdb.ReadTd(tx, h.Hash(), h.NumberU64())
+		currentTD, _, err = rawdb.ReadTd(tx, h.Hash(), h.NumberU64())
 		return err
 	})
 	return currentTD, err

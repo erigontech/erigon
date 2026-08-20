@@ -125,35 +125,35 @@ func TestLookupStorage(t *testing.T) {
 // ReadTransactionByHash retrieves a specific transaction from the database, along with
 // its added positional metadata.
 func readTransactionByHash(db kv.Tx, hash common.Hash, br dbservices.FullBlockReader) (txn types.Transaction, blockHash common.Hash, blockNumber uint64, txNum uint64, txIndex uint64, err error) {
-	blockNumberPtr, txNumPtr, err := rawdb.ReadTxLookupEntry(db, hash)
+	blockNumber, txNum, ok, err := rawdb.ReadTxLookupEntry(db, hash)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, 0, err
 	}
-	if blockNumberPtr == nil {
+	if !ok {
 		return nil, common.Hash{}, 0, 0, 0, nil
 	}
-	blockNumber = *blockNumberPtr
-	if txNumPtr == nil {
-		return nil, common.Hash{}, 0, 0, 0, nil
-	}
-	txNum = *txNumPtr
-	blockHash, ok, err := br.CanonicalHash(context.Background(), db, blockNumber)
+	blockHash, ok, err = br.CanonicalHash(context.Background(), db, blockNumber)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, 0, err
 	}
 	if !ok || blockHash == (common.Hash{}) {
 		return nil, common.Hash{}, 0, 0, 0, nil
 	}
-	body, _ := br.BodyWithTransactions(context.Background(), db, blockHash, blockNumber)
-	if body == nil {
+	body, ok, err := br.BodyWithTransactions(context.Background(), db, blockHash, blockNumber)
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, 0, err
+	}
+	if !ok {
 		log.Error("Transaction referenced missing", "number", blockNumber, "hash", blockHash)
 		return nil, common.Hash{}, 0, 0, 0, nil
 	}
-	senders, err1 := rawdb.ReadSenders(db, blockHash, blockNumber)
-	if err1 != nil {
-		return nil, common.Hash{}, 0, 0, 0, err1
+	senders, ok, err := rawdb.ReadSenders(db, blockHash, blockNumber)
+	if err != nil {
+		return nil, common.Hash{}, 0, 0, 0, err
 	}
-	body.SendersToTxs(senders)
+	if ok {
+		body.SendersToTxs(senders)
+	}
 	for txInd, txnValue := range body.Transactions {
 		if txnValue.Hash() == hash {
 			return txnValue, blockHash, blockNumber, txNum, uint64(txInd), nil

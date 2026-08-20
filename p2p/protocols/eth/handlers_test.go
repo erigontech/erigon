@@ -471,39 +471,44 @@ func newMockHeaderReader(chainLen int) *mockHeaderReader {
 	return m
 }
 
-func (m *mockHeaderReader) Header(_ context.Context, _ kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error) {
+func (m *mockHeaderReader) Header(_ context.Context, _ kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, bool, error) {
 	if h, ok := m.headers[blockNum]; ok && h.Hash() == hash {
-		return h, nil
+		return h, true, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
-func (m *mockHeaderReader) HeaderByNumber(_ context.Context, _ kv.Getter, blockNum uint64) (*types.Header, error) {
-	return m.headers[blockNum], nil
+
+func (m *mockHeaderReader) HeaderByNumber(_ context.Context, _ kv.Getter, blockNum uint64) (*types.Header, bool, error) {
+	header, ok := m.headers[blockNum]
+	return header, ok, nil
 }
-func (m *mockHeaderReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
-	if n, ok := m.byHash[hash]; ok {
-		return &n, nil
-	}
-	return nil, nil
+
+func (m *mockHeaderReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (uint64, bool, error) {
+	n, ok := m.byHash[hash]
+	return n, ok, nil
 }
-func (m *mockHeaderReader) HeaderByHash(_ context.Context, _ kv.Getter, hash common.Hash) (*types.Header, error) {
+
+func (m *mockHeaderReader) HeaderByHash(_ context.Context, _ kv.Getter, hash common.Hash) (*types.Header, bool, error) {
 	n, ok := m.byHash[hash]
 	if !ok {
-		return nil, nil
+		return nil, false, nil
 	}
-	return m.headers[n], nil
+	return m.headers[n], true, nil
 }
-func (m *mockHeaderReader) ReadAncestor(_ kv.Getter, hash common.Hash, number, ancestor uint64, _ *uint64) (common.Hash, uint64) {
+
+func (m *mockHeaderReader) ReadAncestor(_ kv.Getter, hash common.Hash, number, ancestor uint64, _ *uint64) (common.Hash, uint64, bool, error) {
 	n, ok := m.byHash[hash]
 	if !ok || n != number || ancestor > number {
-		return common.Hash{}, 0
+		return common.Hash{}, 0, false, nil
 	}
 	anc := m.headers[number-ancestor]
-	return anc.Hash(), number - ancestor
+	return anc.Hash(), number - ancestor, true, nil
 }
+
 func (m *mockHeaderReader) HeadersRange(_ context.Context, _ func(*types.Header) error) error {
 	return nil
 }
+
 func (m *mockHeaderReader) Integrity(_ context.Context, _ kv.Getter) error { return nil }
 
 // TestAnswerGetBlockHeadersQuery_HashModeSkip guards against a regression where
@@ -542,28 +547,31 @@ func TestAnswerGetBlockHeadersQuery_HashModeSkip(t *testing.T) {
 // method (they're not called by AnswerGetBlockAccessListsQuery).
 type balHeaderReader map[common.Hash]uint64
 
-func (m balHeaderReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+func (m balHeaderReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (uint64, bool, error) {
 	n, ok := m[hash]
-	if !ok {
-		return nil, nil
-	}
-	return &n, nil
+	return n, ok, nil
 }
-func (balHeaderReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, error) {
+
+func (balHeaderReader) Header(context.Context, kv.Getter, common.Hash, uint64) (*types.Header, bool, error) {
 	panic("not expected")
 }
-func (balHeaderReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, error) {
+
+func (balHeaderReader) HeaderByNumber(context.Context, kv.Getter, uint64) (*types.Header, bool, error) {
 	panic("not expected")
 }
-func (balHeaderReader) HeaderByHash(context.Context, kv.Getter, common.Hash) (*types.Header, error) {
+
+func (balHeaderReader) HeaderByHash(context.Context, kv.Getter, common.Hash) (*types.Header, bool, error) {
 	panic("not expected")
 }
-func (balHeaderReader) ReadAncestor(kv.Getter, common.Hash, uint64, uint64, *uint64) (common.Hash, uint64) {
+
+func (balHeaderReader) ReadAncestor(kv.Getter, common.Hash, uint64, uint64, *uint64) (common.Hash, uint64, bool, error) {
 	panic("not expected")
 }
+
 func (balHeaderReader) HeadersRange(context.Context, func(*types.Header) error) error {
 	panic("not expected")
 }
+
 func (balHeaderReader) Integrity(context.Context, kv.Getter) error { panic("not expected") }
 
 // TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing verifies that
@@ -595,7 +603,10 @@ func TestAnswerGetBlockAccessListsQuery_OrderedResponseWithMissing(t *testing.T)
 	}
 
 	query := GetBlockAccessListsPacket{hashKnownWithBAL, hashUnknown, hashKnownNoBAL}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil)
+	result, err := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil)
+	if err != nil {
+		t.Fatalf("AnswerGetBlockAccessListsQuery: %v", err)
+	}
 
 	if len(result) != 3 {
 		t.Fatalf("result len: have %d, want 3", len(result))
@@ -647,7 +658,10 @@ func TestAnswerGetBlockAccessListsQuery_SoftSizeLimit(t *testing.T) {
 		query = append(query, h)
 	}
 
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil)
+	result, err := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, nil)
+	if err != nil {
+		t.Fatalf("AnswerGetBlockAccessListsQuery: %v", err)
+	}
 	if len(result) < 1 || len(result) >= len(query) {
 		t.Fatalf("expected truncation: have %d entries, want 1..%d", len(result), len(query)-1)
 	}
@@ -714,7 +728,10 @@ func TestAnswerGetBlockAccessListsQuery_GeneratorFallback(t *testing.T) {
 		calls: map[common.Hash]int{},
 	}
 	query := GetBlockAccessListsPacket{hashStored, hashRegen, hashRegenEmpty, hashRegenErr, hashUnknown}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
+	result, err := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
+	if err != nil {
+		t.Fatalf("AnswerGetBlockAccessListsQuery: %v", err)
+	}
 	if len(result) != 5 {
 		t.Fatalf("result len: have %d, want 5", len(result))
 	}
@@ -782,7 +799,10 @@ func TestAnswerGetBlockAccessListsQuery_RegenerationBudget(t *testing.T) {
 		getter.bals[h] = regenBal
 		query = append(query, h)
 	}
-	result := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
+	result, err := AnswerGetBlockAccessListsQuery(context.Background(), chain.AllProtocolChanges, tx, query, reader, getter)
+	if err != nil {
+		t.Fatalf("AnswerGetBlockAccessListsQuery: %v", err)
+	}
 	wantLen := storedCount + MaxBlockAccessListsRegenerate
 	if len(result) != wantLen {
 		t.Fatalf("result len: have %d, want %d (truncated at the regeneration budget)", len(result), wantLen)

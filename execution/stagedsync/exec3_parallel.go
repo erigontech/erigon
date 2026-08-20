@@ -1214,7 +1214,9 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 		// executor isn't in the map yet this is a no-op; processResults
 		// then installs it lazily on the block's first apply.
 		pe.ensureChangesetAccumulator(next.block.NumberU64())
-		pe.onBlockStart(ctx, next.block)
+		if err := pe.onBlockStart(ctx, next.block); err != nil {
+			return false, err
+		}
 		next.execStarted = time.Now()
 		next.scheduleExecution(ctx, pe)
 	}

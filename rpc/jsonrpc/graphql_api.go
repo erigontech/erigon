@@ -206,11 +206,11 @@ func (api *GraphQLAPIImpl) buildBlockDetailsResponse(ctx context.Context, tx kv.
 		result = append(result, transaction)
 	}
 
-	td, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
+	td, ok, err := rawdb.ReadTd(tx, block.Hash(), block.NumberU64())
 	if err != nil {
 		return nil, err
 	}
-	if td != nil {
+	if ok {
 		getBlockRes["totalDifficulty"] = (*hexutil.Big)(td.ToBig())
 	} else {
 		getBlockRes["totalDifficulty"] = (*hexutil.Big)(new(big.Int))

@@ -61,13 +61,19 @@ func NoGapsInCanonicalHeaders(ctx context.Context, db kv.RoDB, br dbservices.Ful
 			}
 			log.Error(err.Error())
 		}
-		header := rawdb.ReadHeader(tx, hash, i)
-		if header == nil {
+		_, ok, err = rawdb.ReadHeader(tx, hash, i)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			err = fmt.Errorf("header not found: %d", i)
 			panic(err)
 		}
-		body, _, _ := rawdb.ReadBody(tx, hash, i)
-		if body == nil {
+		_, _, _, ok, err = rawdb.ReadBody(tx, hash, i)
+		if err != nil {
+			return err
+		}
+		if !ok {
 			err = fmt.Errorf("body not found: %d", i)
 			if failFast {
 				return err

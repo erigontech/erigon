@@ -21,7 +21,7 @@ type blockSource interface {
 	// next returns the following block and its access list; more is false when
 	// the source is exhausted.
 	next(ctx context.Context) (b *types.Block, bal types.BlockAccessList, blockNum uint64, more bool, err error)
-	header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error)
+	header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, bool, error)
 }
 
 // dbBlockSource reads blocks, their access lists, and ancestor headers through
@@ -48,19 +48,22 @@ func (s *dbBlockSource) next(ctx context.Context) (*types.Block, types.BlockAcce
 }
 
 func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*types.Block, types.BlockAccessList, error) {
-	canonicalHash, err := rawdb.ReadCanonicalHash(s.blockTx, blockNum)
+	canonicalHash, ok, err := rawdb.ReadCanonicalHash(s.blockTx, blockNum)
 	if err != nil {
 		return nil, nil, err
 	}
+	if !ok {
+		return nil, nil, fmt.Errorf("canonical hash not found: %d", blockNum)
+	}
 	b, ok := s.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
 	if b == nil || !ok {
-		b, err = exec.BlockWithSenders(ctx, s.cfg.db, s.blockTx, s.cfg.blockReader, blockNum)
+		b, ok, err = exec.BlockWithSenders(ctx, s.cfg.db, s.blockTx, s.cfg.blockReader, blockNum)
 		if err != nil {
 			return nil, nil, err
 		}
 	}
-	if b == nil {
-		return nil, nil, fmt.Errorf("nil block %d", blockNum)
+	if !ok {
+		return nil, nil, fmt.Errorf("block not found: %d", blockNum)
 	}
 
 	var dbBAL types.BlockAccessList
@@ -83,10 +86,6 @@ func (s *dbBlockSource) blockAndBAL(ctx context.Context, blockNum uint64) (*type
 	return b, dbBAL, nil
 }
 
-func (s *dbBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
-	h, err := s.cfg.blockReader.Header(ctx, s.blockTx, hash, number)
-	if h == nil && err == nil {
-		h = &types.Header{}
-	}
-	return h, err
+func (s *dbBlockSource) header(ctx context.Context, hash common.Hash, number uint64) (*types.Header, bool, error) {
+	return s.cfg.blockReader.Header(ctx, s.blockTx, hash, number)
 }

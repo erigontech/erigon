@@ -476,11 +476,11 @@ func (api *APIImpl) getProof(ctx context.Context, roTx kv.TemporalTx, address co
 	}
 	defer tx.Rollback()
 	// get the root hash from header to validate proofs along the way
-	header, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
+	header, ok, err := api._blockReader.HeaderByNumber(ctx, roTx, blockNrOrHash.BlockNumber.Uint64())
 	if err != nil {
 		return nil, err
 	}
-	if header == nil {
+	if !ok {
 		return nil, fmt.Errorf("header not found for block %d", blockNrOrHash.BlockNumber.Uint64())
 	}
 
@@ -718,11 +718,11 @@ func (api *BaseAPI) getWitness(ctx context.Context, db kv.TemporalRoDB, blockNrO
 		return nil, fmt.Errorf("commitment history pruned: start %d, last tx: %d", commitmentStartingTxNum, firstTxNumInBlock)
 	}
 
-	parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, parentNum)
+	parentHeader, ok, err := api._blockReader.HeaderByNumber(ctx, tx, parentNum)
 	if err != nil {
 		return nil, err
 	}
-	if parentHeader == nil {
+	if !ok {
 		return nil, fmt.Errorf("parent header %d not found", parentNum)
 	}
 	expectedParentRoot := parentHeader.Root

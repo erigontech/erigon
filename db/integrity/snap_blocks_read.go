@@ -40,7 +40,7 @@ func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader dbservi
 
 	for i := from; i < maxBlockNum; i += 10_000 {
 		if err := db.View(ctx, func(tx kv.Tx) error {
-			b, err := blockReader.BlockByNumber(ctx, tx, i)
+			_, ok, err := blockReader.BlockByNumber(ctx, tx, i)
 			if err != nil {
 				if failFast {
 					return err
@@ -48,7 +48,7 @@ func SnapBlocksRead(ctx context.Context, db kv.TemporalRoDB, blockReader dbservi
 				log.Error("[integrity] Blocks", "err", err)
 				return nil
 			}
-			if b == nil {
+			if !ok {
 				err := fmt.Errorf("[integrity] block not found in snapshots: %d", i)
 				if failFast {
 					return err

@@ -289,11 +289,11 @@ func (api *DebugAPIImpl) AccountRange(ctx context.Context, blockNrOrHash rpc.Blo
 		return state.IteratorDump{}, err
 	}
 
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNumber)
+	header, ok, err := api._blockReader.HeaderByNumber(ctx, tx, blockNumber)
 	if err != nil {
 		return state.IteratorDump{}, err
 	}
-	if header != nil {
+	if ok {
 		res.Root = fmt.Sprintf("%x", header.Root)
 	}
 
@@ -663,11 +663,11 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 		}
 		return nil, err
 	}
-	header, err := api._blockReader.Header(ctx, tx, h, n)
+	header, ok, err := api._blockReader.Header(ctx, tx, h, n)
 	if err != nil {
 		return nil, err
 	}
-	if header == nil {
+	if !ok {
 		return nil, nil
 	}
 	return rlp.EncodeToBytes(header)

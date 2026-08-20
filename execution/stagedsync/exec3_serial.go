@@ -94,19 +94,22 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 		default:
 		}
 
-		canonicalHash, err := rawdb.ReadCanonicalHash(se.applyTx, blockNum)
+		canonicalHash, found, err := rawdb.ReadCanonicalHash(se.applyTx, blockNum)
 		if err != nil {
 			return nil, rwTx, err
+		}
+		if !found {
+			return nil, rwTx, fmt.Errorf("canonical hash not found: %d", blockNum)
 		}
 		var ok bool
 		b, ok = se.cfg.readAheader.ReadBlockWithSenders(canonicalHash)
 		if b == nil || !ok {
-			b, _, err = se.cfg.blockReader.BlockWithSenders(ctx, se.applyTx, canonicalHash, blockNum)
+			b, _, ok, err = se.cfg.blockReader.BlockWithSenders(ctx, se.applyTx, canonicalHash, blockNum)
 			if err != nil {
 				return nil, rwTx, err
 			}
 		}
-		if b == nil {
+		if !ok {
 			// TODO: panic here and see that overall process deadlock
 			return nil, rwTx, fmt.Errorf("nil block %d", blockNum)
 		}
@@ -121,7 +124,7 @@ func (se *serialExecutor) exec(ctx context.Context, execStage *StageState, u Unw
 			return nil, rwTx, fmt.Errorf("amsterdam processing is not supported by serial exec from block: %d", blockNum)
 		}
 
-		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
+		blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, bool, error) {
 			getHashFnMutex.Lock()
 			defer getHashFnMutex.Unlock()
 			return se.getHeader(ctx, hash, number)
@@ -469,7 +472,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 					hooks.OnTxEnd(receipt, result.Err)
 				}
 			default:
-				se.onBlockStart(ctx, block)
+				if err := se.onBlockStart(ctx, block); err != nil {
+					return err
+				}
 			}
 
 			if se.cfg.syncCfg.ChaosMonkey && se.enableChaosMonkey {

@@ -38,8 +38,8 @@ type headerNumberErrorReader struct {
 	err error
 }
 
-func (r headerNumberErrorReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (*uint64, error) {
-	return nil, r.err
+func (r headerNumberErrorReader) HeaderNumber(context.Context, kv.Getter, common.Hash) (uint64, bool, error) {
+	return 0, false, r.err
 }
 
 type emptyStageProgressTx struct {
@@ -61,18 +61,18 @@ func (r sideForkReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.
 	return hash == r.canonicalHash, nil
 }
 
-func (r sideForkReader) Header(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (*types.Header, error) {
+func (r sideForkReader) Header(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (*types.Header, bool, error) {
 	if hash == r.forkHeader.Hash() {
-		return r.forkHeader, nil
+		return r.forkHeader, true, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
 
-func (r sideForkReader) BodyWithTransactions(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (*types.Body, error) {
+func (r sideForkReader) BodyWithTransactions(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (*types.Body, bool, error) {
 	if hash == r.forkHeader.Hash() {
-		return r.forkBody, nil
+		return r.forkBody, true, nil
 	}
-	return nil, nil
+	return nil, false, nil
 }
 
 // The module is the one owner of the domain state cache: callers pass a byte

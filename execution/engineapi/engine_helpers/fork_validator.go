@@ -214,21 +214,22 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		var (
 			header *types.Header
 			body   *types.Body
+			found  bool
 		)
-		header, criticalError = fv.blockReader.Header(fv.ctx, tx, currentHash, unwindPoint)
+		header, found, criticalError = fv.blockReader.Header(fv.ctx, tx, currentHash, unwindPoint)
 		if criticalError != nil {
 			return
 		}
-		if header == nil {
+		if !found {
 			// We miss some components so we did not check validity.
 			status = engine_types.AcceptedStatus
 			return
 		}
-		body, criticalError = fv.blockReader.BodyWithTransactions(fv.ctx, tx, currentHash, unwindPoint)
+		body, found, criticalError = fv.blockReader.BodyWithTransactions(fv.ctx, tx, currentHash, unwindPoint)
 		if criticalError != nil {
 			return
 		}
-		if body == nil {
+		if !found {
 			criticalError = fmt.Errorf("found chain gap in block body at hash %s, number %d", currentHash, unwindPoint)
 			return
 		}

@@ -61,9 +61,9 @@ func TestCallBlockParallelMatchesSequential(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	block, err := m.BlockReader.BlockByNumber(ctx, tx, blockNum)
+	block, ok, err := m.BlockReader.BlockByNumber(ctx, tx, blockNum)
 	require.NoError(t, err)
-	require.NotNil(t, block, "block %d not found", blockNum)
+	require.True(t, ok, "block %d not found", blockNum)
 
 	txs := block.Transactions()
 	require.Greater(t, len(txs), 1, "block %d must have multiple txs to exercise parallel path", blockNum)
@@ -162,9 +162,9 @@ func TestCallTransactionNilTxnReturnsError(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	block, err := m.BlockReader.BlockByNumber(ctx, tx, blockNum)
+	block, ok, err := m.BlockReader.BlockByNumber(ctx, tx, blockNum)
 	require.NoError(t, err)
-	require.NotNil(t, block, "block %d not found", blockNum)
+	require.True(t, ok, "block %d not found", blockNum)
 
 	chainConfig, err := api.chainConfig(ctx, tx)
 	require.NoError(t, err)

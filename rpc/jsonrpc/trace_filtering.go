@@ -337,11 +337,21 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 
 	if req.ToBlock == nil {
-		headNumber, err := api._blockReader.HeaderNumber(ctx, dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		headHash, ok, err := rawdb.ReadHeadHeaderHash(dbtx)
 		if err != nil {
 			return err
 		}
-		toBlock = *headNumber
+		if !ok {
+			return errors.New("head header hash not found")
+		}
+		headNumber, ok, err := api._blockReader.HeaderNumber(ctx, dbtx, headHash)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("head header number not found")
+		}
+		toBlock = headNumber
 	} else {
 		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, nil)
 		if err != nil {
@@ -547,7 +557,8 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		}
 
 		if blockNumChanged {
-			if lastHeader, err = api._blockReader.HeaderByNumber(ctx, dbtx, blockNum); err != nil {
+			nextHeader, ok, err := api._blockReader.HeaderByNumber(ctx, dbtx, blockNum)
+			if err != nil {
 				if first {
 					first = false
 				} else {
@@ -558,7 +569,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				stream.WriteObjectEnd()
 				continue
 			}
-			if lastHeader == nil {
+			if !ok {
 				if first {
 					first = false
 				} else {
@@ -569,6 +580,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				stream.WriteObjectEnd()
 				continue
 			}
+			lastHeader = nextHeader
 
 			if !isPos && chainConfig.TerminalTotalDifficulty != nil {
 				header := lastHeader
@@ -593,7 +605,7 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				continue
 			}
 
-			body, _, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
+			body, _, ok, err := api._blockReader.Body(ctx, dbtx, lastBlockHash, blockNum)
 			if err != nil {
 				if first {
 					first = false
@@ -602,6 +614,17 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 				}
 				stream.WriteObjectStart()
 				rpc.HandleError(err, stream)
+				stream.WriteObjectEnd()
+				continue
+			}
+			if !ok {
+				if first {
+					first = false
+				} else {
+					stream.WriteMore()
+				}
+				stream.WriteObjectStart()
+				rpc.HandleError(fmt.Errorf("body not found: %d", blockNum), stream)
 				stream.WriteObjectEnd()
 				continue
 			}

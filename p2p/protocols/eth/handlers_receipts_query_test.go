@@ -152,22 +152,20 @@ type queryTestBlockReader struct {
 	blockErrs  map[common.Hash]error
 }
 
-func (m *queryTestBlockReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+func (m *queryTestBlockReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (uint64, bool, error) {
 	if err := m.numberErrs[hash]; err != nil {
-		return nil, err
+		return 0, false, err
 	}
 	n, ok := m.numbers[hash]
-	if !ok {
-		return nil, nil
-	}
-	return &n, nil
+	return n, ok, nil
 }
 
-func (m *queryTestBlockReader) BlockWithSenders(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (*types.Block, []common.Address, error) {
+func (m *queryTestBlockReader) BlockWithSenders(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (*types.Block, []common.Address, bool, error) {
 	if err := m.blockErrs[hash]; err != nil {
-		return nil, nil, err
+		return nil, nil, false, err
 	}
-	return m.blocks[hash], nil, nil
+	block, ok := m.blocks[hash]
+	return block, nil, ok, nil
 }
 
 type queryTestReceiptsGetter struct {

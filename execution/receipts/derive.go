@@ -36,7 +36,7 @@ import (
 )
 
 // GetHeaderFunc returns a header by hash+number. Used for BLOCKHASH opcode.
-type GetHeaderFunc = func(hash common.Hash, number uint64) (*types.Header, error)
+type GetHeaderFunc = func(hash common.Hash, number uint64) (*types.Header, bool, error)
 
 // DeriveForRange replays transactions fromIdx..toIdx-1 (0-based within the block)
 // against the provided IntraBlockState and returns receipts for each.

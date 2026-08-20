@@ -145,20 +145,20 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 	}
 	defer tx.Rollback()
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	number, ok, err := api._blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
-	if number == nil {
+	if !ok {
 		return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 	}
 
-	err = api.BaseAPI.checkPruneBlocks(ctx, tx, *number)
+	err = api.BaseAPI.checkPruneBlocks(ctx, tx, number)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, *number)
+	block, err := api.blockWithSenders(ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}

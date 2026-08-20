@@ -37,6 +37,6 @@ func NewFaker(eth1Fake *ethash.FakeEthash) *FakeMerge {
 	}
 }
 
-func (s *FakeMerge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) uint256.Int {
-	return *ProofOfStakeDifficulty
+func (s *FakeMerge) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, parentHash, parentUncleHash common.Hash, parentAuRaStep uint64) (uint256.Int, error) {
+	return *ProofOfStakeDifficulty, nil
 }

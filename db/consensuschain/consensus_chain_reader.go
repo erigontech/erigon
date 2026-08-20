@@ -47,59 +47,67 @@ func NewReader(config *chain.Config, tx kv.Tx, blockReader dbservices.FullBlockR
 }
 
 func (cr Reader) Config() *chain.Config { return cr.config }
-func (cr Reader) CurrentHeader() *types.Header {
-	hash := rawdb.ReadHeadHeaderHash(cr.tx)
-	h, _ := cr.blockReader.HeaderByHash(context.TODO(), cr.tx, hash)
-	return h
+
+func (cr Reader) CurrentHeader() (*types.Header, bool, error) {
+	hash, ok, err := rawdb.ReadHeadHeaderHash(cr.tx)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	return cr.blockReader.HeaderByHash(context.TODO(), cr.tx, hash)
 }
-func (cr Reader) CurrentFinalizedHeader() *types.Header {
-	hash := rawdb.ReadForkchoiceFinalized(cr.tx)
-	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
-	return h
+
+func (cr Reader) CurrentFinalizedHeader() (*types.Header, bool, error) {
+	hash, ok, err := rawdb.ReadForkchoiceFinalized(cr.tx)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	return cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 }
-func (cr Reader) CurrentSafeHeader() *types.Header {
-	hash := rawdb.ReadForkchoiceSafe(cr.tx)
-	h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
-	return h
+
+func (cr Reader) CurrentSafeHeader() (*types.Header, bool, error) {
+	hash, ok, err := rawdb.ReadForkchoiceSafe(cr.tx)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	return cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 }
-func (cr Reader) GetHeader(hash common.Hash, number uint64) *types.Header {
+
+func (cr Reader) GetHeader(hash common.Hash, number uint64) (*types.Header, bool, error) {
 	if cr.blockReader != nil {
-		h, _ := cr.blockReader.Header(context.Background(), cr.tx, hash, number)
-		return h
+		return cr.blockReader.Header(context.Background(), cr.tx, hash, number)
 	}
 	return rawdb.ReadHeader(cr.tx, hash, number)
 }
-func (cr Reader) GetHeaderByNumber(number uint64) *types.Header {
+
+func (cr Reader) GetHeaderByNumber(number uint64) (*types.Header, bool, error) {
 	if cr.blockReader != nil {
-		h, _ := cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
-		return h
+		return cr.blockReader.HeaderByNumber(context.Background(), cr.tx, number)
 	}
 	return rawdb.ReadHeaderByNumber(cr.tx, number)
 
 }
-func (cr Reader) GetHeaderByHash(hash common.Hash) *types.Header {
+
+func (cr Reader) GetHeaderByHash(hash common.Hash) (*types.Header, bool, error) {
 	if cr.blockReader != nil {
-		h, _ := cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
-		return h
+		return cr.blockReader.HeaderByHash(context.Background(), cr.tx, hash)
 	}
-	h, _ := rawdb.ReadHeaderByHash(cr.tx, hash)
-	return h
+	return rawdb.ReadHeaderByHash(cr.tx, hash)
 }
-func (cr Reader) GetTd(hash common.Hash, number uint64) *uint256.Int {
-	td, err := rawdb.ReadTd(cr.tx, hash, number)
-	if err != nil {
-		cr.logger.Warn("ReadTd failed", "err", err)
-		return nil
-	}
-	return td
+
+func (cr Reader) GetTd(hash common.Hash, number uint64) (*uint256.Int, bool, error) {
+	return rawdb.ReadTd(cr.tx, hash, number)
 }
-func (cr Reader) FrozenBlocks() uint64              { return cr.blockReader.FrozenBlocks() }
+
+func (cr Reader) FrozenBlocks() uint64 { return cr.blockReader.FrozenBlocks() }
+
 func (cr Reader) FrozenBorBlocks(align bool) uint64 { return cr.blockReader.FrozenBorBlocks(align) }
-func (cr Reader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
-	return b
+
+func (cr Reader) GetBlock(hash common.Hash, number uint64) (*types.Block, bool, error) {
+	b, _, ok, err := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
+	return b, ok, err
 }
-func (cr Reader) HasBlock(hash common.Hash, number uint64) bool {
-	b, _ := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
-	return b != nil
+
+func (cr Reader) HasBlock(hash common.Hash, number uint64) (bool, error) {
+	_, ok, err := cr.blockReader.BodyRlp(context.Background(), cr.tx, hash, number)
+	return ok, err
 }

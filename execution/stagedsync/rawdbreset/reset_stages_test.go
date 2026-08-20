@@ -85,8 +85,9 @@ func TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers(t *te
 	require.NoError(t, err)
 
 	err = db.View(ctx, func(tx kv.Tx) error {
-		h, errRead := rawdb.ReadCanonicalHash(tx, 105)
+		h, ok, errRead := rawdb.ReadCanonicalHash(tx, 105)
 		require.NoError(t, errRead)
+		require.True(t, ok)
 		require.Equal(t, staleHashAt105, h, "stale entry must be present before reset")
 		return nil
 	})
@@ -96,8 +97,9 @@ func TestResetCanonicalAndRefillFromSnapshots_ClearsStaleSidechainPointers(t *te
 
 	err = db.View(ctx, func(tx kv.Tx) error {
 		for h := uint64(0); h <= sideTipHeight; h++ {
-			hash, errRead := rawdb.ReadCanonicalHash(tx, h)
+			hash, ok, errRead := rawdb.ReadCanonicalHash(tx, h)
 			require.NoError(t, errRead)
+			require.False(t, ok)
 			require.Equal(t, common.Hash{}, hash, "canonical hash at %d must be cleared", h)
 		}
 		for _, st := range []stages.SyncStage{stages.Headers, stages.BlockHashes, stages.Bodies, stages.Senders, stages.Snapshots} {

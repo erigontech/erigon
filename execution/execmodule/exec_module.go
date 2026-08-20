@@ -138,9 +138,13 @@ func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, er
 	}
 	return view, nil
 }
+
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
-func (c *Cache) Evict() int                                  { return 0 }
-func (c *Cache) Len() int                                    { return 0 }
+
+func (c *Cache) Evict() int { return 0 }
+
+func (c *Cache) Len() int { return 0 }
+
 func (c *Cache) ValidateCurrentRoot(_ context.Context, _ kv.TemporalTx) (*kvcache.CacheValidationResult, error) {
 	return &kvcache.CacheValidationResult{Enabled: false}, nil
 }
@@ -160,6 +164,7 @@ func (c *CacheView) Get(k []byte) ([]byte, error) {
 	v, _, err := c.getter.GetLatest(kv.StorageDomain, k, kv.GetLatestOptions{})
 	return v, err
 }
+
 func (c *CacheView) GetCode(k []byte) ([]byte, error) {
 	v, _, err := c.getter.GetLatest(kv.CodeDomain, k, kv.GetLatestOptions{})
 	return v, err
@@ -355,46 +360,31 @@ func (e *ExecModule) SetPublishedSD(provider func() *execctx.SharedDomains) {
 	e.publishedSD = provider
 }
 
-func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, error) {
+func (e *ExecModule) getHeader(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Header, bool, error) {
 	if e.blockReader == nil {
-		return rawdb.ReadHeader(tx, blockHash, blockNumber), nil
+		return rawdb.ReadHeader(tx, blockHash, blockNumber)
 	}
 
 	return e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*uint256.Int, error) {
+func (e *ExecModule) getTD(_ context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*uint256.Int, bool, error) {
 	return rawdb.ReadTd(tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, error) {
+func (e *ExecModule) getBody(ctx context.Context, tx kv.Tx, blockHash common.Hash, blockNumber uint64) (*types.Body, bool, error) {
 	if e.blockReader == nil {
-		body, _, _ := rawdb.ReadBody(tx, blockHash, blockNumber)
-		return body, nil
+		body, _, _, ok, err := rawdb.ReadBody(tx, blockHash, blockNumber)
+		return body, ok, err
 	}
 	return e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 }
 
-func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (common.Hash, error) {
-	var canonical common.Hash
-	var err error
+func (e *ExecModule) canonicalHash(ctx context.Context, tx kv.Tx, blockNumber uint64) (common.Hash, bool, error) {
 	if e.blockReader == nil {
-		canonical, err = rawdb.ReadCanonicalHash(tx, blockNumber)
-		if err != nil {
-			return common.Hash{}, err
-		}
-	} else {
-		var ok bool
-		canonical, ok, err = e.blockReader.CanonicalHash(ctx, tx, blockNumber)
-		if err != nil {
-			return common.Hash{}, err
-		}
-		if !ok {
-			return common.Hash{}, nil
-		}
+		return rawdb.ReadCanonicalHash(tx, blockNumber)
 	}
-
-	return canonical, nil
+	return e.blockReader.CanonicalHash(ctx, tx, blockNumber)
 }
 
 // suspendReadAhead prevents raw-database warmup from filling the shared state
@@ -420,11 +410,12 @@ func (e *ExecModule) unwindToCommonCanonical(sd *execctx.SharedDomains, tx kv.Te
 			break
 		}
 		parentBlockHash, parentBlockNum := currentHeader.ParentHash, currentHeader.Number.Uint64()-1
-		currentHeader, err = e.getHeader(e.backgroundCtx, tx, parentBlockHash, parentBlockNum)
+		var ok bool
+		currentHeader, ok, err = e.getHeader(e.backgroundCtx, tx, parentBlockHash, parentBlockNum)
 		if err != nil {
 			return err
 		}
-		if currentHeader == nil {
+		if !ok {
 			return makeErrMissingChainSegment(parentBlockHash)
 		}
 	}
@@ -485,6 +476,8 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		header             *types.Header
 		body               *types.Body
 		currentBlockNumber *uint64
+		headerOK           bool
+		bodyOK             bool
 		err                error
 	)
 	// Read header/body from the block overlay on currentContext if available
@@ -498,34 +491,50 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}
 		defer roTx.Rollback()
 		overlay.UpdateTxn(roTx)
-		header, err = e.blockReader.Header(ctx, overlay, blockHash, blockNumber)
+		header, headerOK, err = e.blockReader.Header(ctx, overlay, blockHash, blockNumber)
 		if err != nil {
 			return ValidationResult{}, err
 		}
-		body, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, blockNumber)
+		body, bodyOK, err = e.blockReader.BodyWithTransactions(ctx, overlay, blockHash, blockNumber)
 		if err != nil {
 			return ValidationResult{}, err
 		}
-		e.readAheader.AddHeaderAndBody(ctx, e.db, overlay, header, body)
-		currentBlockNumber = rawdb.ReadCurrentBlockNumber(overlay)
+		if headerOK && bodyOK {
+			e.readAheader.AddHeaderAndBody(ctx, e.db, overlay, header, body)
+		}
+		current, ok, err := rawdb.ReadCurrentBlockNumber(overlay)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		if ok {
+			currentBlockNumber = &current
+		}
 	} else {
 		if err := e.db.View(ctx, func(tx kv.Tx) error {
-			header, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
+			header, headerOK, err = e.blockReader.Header(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
 			}
-			body, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+			body, bodyOK, err = e.blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 			if err != nil {
 				return err
 			}
-			e.readAheader.AddHeaderAndBody(ctx, e.db, tx, header, body)
-			currentBlockNumber = rawdb.ReadCurrentBlockNumber(tx)
+			if headerOK && bodyOK {
+				e.readAheader.AddHeaderAndBody(ctx, e.db, tx, header, body)
+			}
+			current, ok, err := rawdb.ReadCurrentBlockNumber(tx)
+			if err != nil {
+				return err
+			}
+			if ok {
+				currentBlockNumber = &current
+			}
 			return nil
 		}); err != nil {
 			return ValidationResult{}, err
 		}
 	}
-	if header == nil || body == nil {
+	if !headerOK || !bodyOK || currentBlockNumber == nil {
 		return ValidationResult{
 			LatestValidHash:  common.Hash{},
 			ValidationStatus: ExecutionStatusMissingSegment,
@@ -666,23 +675,32 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
-	tip, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
+	tip, ok, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
 	if err != nil {
 		return err
 	}
-	if tip == nil {
+	if !ok {
 		// Block only existed in the overlay (not yet committed to DB) — nothing to purge.
 		return nil
 	}
 
-	dbHeadHash := rawdb.ReadHeadBlockHash(tx)
+	dbHeadHash, ok, err := rawdb.ReadHeadBlockHash(tx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("head block hash not found")
+	}
 
 	currentHash := headHash
-	currentNumber := *tip
+	currentNumber := tip
 	for currentHash != latestValidHash {
-		currentHeader, err := e.getHeader(ctx, tx, currentHash, currentNumber)
+		currentHeader, ok, err := e.getHeader(ctx, tx, currentHash, currentNumber)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return makeErrMissingChainSegment(currentHash)
 		}
 
 		// TODO: find a better way to handle this
@@ -769,14 +787,17 @@ func (e *ExecModule) HasBlock(ctx context.Context, blockHash *common.Hash, _ *ui
 	}
 	defer tx.Rollback()
 
-	num, _ := e.blockReader.HeaderNumber(ctx, tx, *blockHash)
-	if num == nil {
+	num, ok, err := e.blockReader.HeaderNumber(ctx, tx, *blockHash)
+	if err != nil {
+		return false, err
+	}
+	if !ok {
 		return false, nil
 	}
-	if *num <= e.blockReader.FrozenBlocks() {
+	if num <= e.blockReader.FrozenBlocks() {
 		return true, nil
 	}
-	dbKey := dbutils.HeaderKey(*num, *blockHash)
+	dbKey := dbutils.HeaderKey(num, *blockHash)
 	has, err := tx.Has(kv.Headers, dbKey)
 	if err != nil {
 		return false, err

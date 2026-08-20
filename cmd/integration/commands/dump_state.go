@@ -205,9 +205,9 @@ func buildDumpMetadata(ctx context.Context, db kv.RoDB, tx kv.TemporalTx, blockN
 	}
 
 	blockReader, _ := blocksIO(db, logger)
-	if header, err := blockReader.HeaderByNumber(ctx, tx, blockNumber); err != nil {
+	if header, ok, err := blockReader.HeaderByNumber(ctx, tx, blockNumber); err != nil {
 		logger.Warn("dump_state: could not read header for metadata", "err", err)
-	} else if header != nil {
+	} else if ok {
 		meta.BlockHash = header.Hash().Hex()
 		meta.StateRoot = header.Root.Hex()
 	}

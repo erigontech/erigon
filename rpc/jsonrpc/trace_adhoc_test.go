@@ -68,6 +68,7 @@ func TestEmptyQuery(t *testing.T) {
 		t.Errorf("expected empty array, got %d elements", len(results))
 	}
 }
+
 func TestCoinbaseBalance(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newTraceApiForTest(m)
@@ -376,9 +377,12 @@ func TestReplayTransaction(t *testing.T) {
 	api := newTraceApiForTest(m)
 	var txnHash common.Hash
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
+		b, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return fmt.Errorf("block 6 not found")
 		}
 		txnHash = b.Transactions()[5].Hash()
 		return nil
@@ -527,9 +531,12 @@ func TestOeTracer(t *testing.T) {
 func rawTxFromBlock(t *testing.T, m *execmoduletester.ExecModuleTester, blockNum uint64) (encoded []byte, from, to accounts.Address) {
 	t.Helper()
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
+		b, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return fmt.Errorf("block %d not found", blockNum)
 		}
 		txn := b.Transactions()[0]
 		var buf bytes.Buffer

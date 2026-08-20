@@ -53,8 +53,9 @@ func TestGetReceiptLogIndexThroughOverlay(t *testing.T) {
 	defer tx.Rollback()
 
 	const blockNum = uint64(2)
-	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
+	block, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, blockNum)
 	require.NoError(t, err)
+	require.True(t, ok)
 	require.Len(t, block.Transactions(), 1)
 
 	minTxNum, err := m.BlockReader.TxnumReader().Min(m.Ctx, tx, blockNum)

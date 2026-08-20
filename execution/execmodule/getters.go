@@ -49,8 +49,6 @@ func bodyToRawBody(body *types.Body) (*types.RawBody, error) {
 	}, nil
 }
 
-var errNotFound = errors.New("notfound")
-
 // beginOverlayOrRo returns a tx that reads from the block overlay (if a
 // persistent SharedDomains with an active overlay exists) or a plain DB RO tx.
 // When an overlay is active, the returned tx is an OverlayReadView backed by a
@@ -90,32 +88,32 @@ func (e *ExecModule) beginOverlayOrRo(ctx context.Context) (kv.TemporalTx, func(
 
 // resolveSegment converts optional (blockHash, blockNumber) to a concrete
 // (hash, number) pair by looking up the missing value from the database.
-func (e *ExecModule) resolveSegment(ctx context.Context, tx kv.Tx, blockHash *common.Hash, blockNumber *uint64) (common.Hash, uint64, error) {
+func (e *ExecModule) resolveSegment(ctx context.Context, tx kv.Tx, blockHash *common.Hash, blockNumber *uint64) (common.Hash, uint64, bool, error) {
 	switch {
 	case blockHash != nil && blockNumber == nil:
 		// Only hash: resolve number
-		numPtr, err := e.blockReader.HeaderNumber(ctx, tx, *blockHash)
+		number, ok, err := e.blockReader.HeaderNumber(ctx, tx, *blockHash)
 		if err != nil {
-			return common.Hash{}, 0, err
+			return common.Hash{}, 0, false, err
 		}
-		if numPtr == nil {
-			return common.Hash{}, 0, errNotFound
+		if !ok {
+			return common.Hash{}, 0, false, nil
 		}
-		return *blockHash, *numPtr, nil
+		return *blockHash, number, true, nil
 
 	case blockHash == nil && blockNumber != nil:
 		// Only number: resolve canonical hash
-		hash, err := e.canonicalHash(ctx, tx, *blockNumber)
+		hash, ok, err := e.canonicalHash(ctx, tx, *blockNumber)
 		if err != nil {
-			return common.Hash{}, 0, errNotFound
+			return common.Hash{}, 0, false, err
 		}
-		return hash, *blockNumber, nil
+		return hash, *blockNumber, ok, nil
 
 	case blockHash != nil && blockNumber != nil:
-		return *blockHash, *blockNumber, nil
+		return *blockHash, *blockNumber, true, nil
 
 	default:
-		return common.Hash{}, 0, errors.New("at least one of blockHash or blockNumber must be provided")
+		return common.Hash{}, 0, false, errors.New("at least one of blockHash or blockNumber must be provided")
 	}
 }
 
@@ -126,18 +124,18 @@ func (e *ExecModule) GetBody(ctx context.Context, blockHash *common.Hash, blockN
 	}
 	defer cleanup()
 
-	hash, number, err := e.resolveSegment(ctx, tx, blockHash, blockNumber)
-	if errors.Is(err, errNotFound) {
-		return nil, nil
-	}
+	hash, number, ok, err := e.resolveSegment(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: resolveSegment error %w", err)
 	}
-	body, err := e.getBody(ctx, tx, hash, number)
+	if !ok {
+		return nil, nil
+	}
+	body, ok, err := e.getBody(ctx, tx, hash, number)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetBody: getBody error %w", err)
 	}
-	if body == nil {
+	if !ok {
 		return nil, nil
 	}
 	return bodyToRawBody(body)
@@ -150,14 +148,18 @@ func (e *ExecModule) GetHeader(ctx context.Context, blockHash *common.Hash, bloc
 	}
 	defer cleanup()
 
-	hash, number, err := e.resolveSegment(ctx, tx, blockHash, blockNumber)
-	if errors.Is(err, errNotFound) {
-		return nil, nil
-	}
+	hash, number, ok, err := e.resolveSegment(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeader: resolveSegment error %w", err)
 	}
-	return e.getHeader(ctx, tx, hash, number)
+	if !ok {
+		return nil, nil
+	}
+	header, ok, err := e.getHeader(ctx, tx, hash, number)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return header, nil
 }
 
 func (e *ExecModule) GetBodiesByHashes(ctx context.Context, hashes []common.Hash) ([]*types.RawBody, error) {
@@ -169,19 +171,19 @@ func (e *ExecModule) GetBodiesByHashes(ctx context.Context, hashes []common.Hash
 
 	bodies := make([]*types.RawBody, 0, len(hashes))
 	for _, h := range hashes {
-		number, err := e.blockReader.HeaderNumber(ctx, tx, h)
+		number, ok, err := e.blockReader.HeaderNumber(ctx, tx, h)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: HeaderNumber error %w", err)
 		}
-		if number == nil {
+		if !ok {
 			bodies = append(bodies, nil)
 			continue
 		}
-		body, err := e.getBody(ctx, tx, h, *number)
+		body, ok, err := e.getBody(ctx, tx, h, number)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByHashes: getBody error %w", err)
 		}
-		if body == nil {
+		if !ok {
 			bodies = append(bodies, nil)
 			continue
 		}
@@ -203,19 +205,19 @@ func (e *ExecModule) GetBodiesByRange(ctx context.Context, start, count uint64) 
 
 	bodies := make([]*types.RawBody, 0, count)
 	for i := range count {
-		hash, err := e.canonicalHash(ctx, tx, start+i)
+		hash, ok, err := e.canonicalHash(ctx, tx, start+i)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: ReadCanonicalHash error %w", err)
 		}
-		if hash == (common.Hash{}) {
+		if !ok {
 			// beyond the last known canonical header
 			break
 		}
-		body, err := e.getBody(ctx, tx, hash, start+i)
+		body, ok, err := e.getBody(ctx, tx, hash, start+i)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetBodiesByRange: getBody error %w", err)
 		}
-		if body == nil {
+		if !ok {
 			bodies = append(bodies, nil)
 			continue
 		}
@@ -246,19 +248,19 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common
 
 	bodies := make([]*PayloadBody, 0, len(hashes))
 	for _, h := range hashes {
-		number, err := e.blockReader.HeaderNumber(ctx, tx, h)
+		number, ok, err := e.blockReader.HeaderNumber(ctx, tx, h)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: HeaderNumber error %w", err)
 		}
-		if number == nil {
+		if !ok {
 			bodies = append(bodies, nil)
 			continue
 		}
-		body, err := e.getBody(ctx, tx, h, *number)
+		body, ok, err := e.getBody(ctx, tx, h, number)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: getBody error %w", err)
 		}
-		if body == nil {
+		if !ok {
 			bodies = append(bodies, nil)
 			continue
 		}
@@ -266,15 +268,15 @@ func (e *ExecModule) GetPayloadBodiesByHash(ctx context.Context, hashes []common
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: MarshalTransactionsBinary error %w", err)
 		}
-		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, h, *number)
+		balBytes, balFound, err := rawdb.ReadBlockAccessListBytes(tx, h, number)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: ReadBlockAccessListBytes error %w", err)
 		}
-		if len(balBytes) > 0 {
+		if balFound {
 			// GetOne returns mdbx-backed memory; bodies outlive this tx.
 			balBytes = bytes.Clone(balBytes)
 		} else {
-			balBytes, err = e.regenerateBlockAccessList(ctx, tx, h, *number)
+			balBytes, err = e.regenerateBlockAccessList(ctx, tx, h, number)
 			if err != nil {
 				return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByHash: regenerateBlockAccessList error %w", err)
 			}
@@ -298,18 +300,18 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 	bodies := make([]*PayloadBody, 0, count)
 	for i := range count {
 		blockNum := start + i
-		hash, err := e.canonicalHash(ctx, tx, blockNum)
+		hash, ok, err := e.canonicalHash(ctx, tx, blockNum)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: ReadCanonicalHash error %w", err)
 		}
-		if hash == (common.Hash{}) {
+		if !ok {
 			break
 		}
-		body, err := e.getBody(ctx, tx, hash, blockNum)
+		body, ok, err := e.getBody(ctx, tx, hash, blockNum)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: getBody error %w", err)
 		}
-		if body == nil {
+		if !ok {
 			bodies = append(bodies, nil)
 			continue
 		}
@@ -317,11 +319,11 @@ func (e *ExecModule) GetPayloadBodiesByRange(ctx context.Context, start, count u
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: MarshalTransactionsBinary error %w", err)
 		}
-		balBytes, err := rawdb.ReadBlockAccessListBytes(tx, hash, blockNum)
+		balBytes, balFound, err := rawdb.ReadBlockAccessListBytes(tx, hash, blockNum)
 		if err != nil {
 			return nil, fmt.Errorf("ethereumExecutionModule.GetPayloadBodiesByRange: ReadBlockAccessListBytes error %w", err)
 		}
-		if len(balBytes) > 0 {
+		if balFound {
 			// GetOne returns mdbx-backed memory; bodies outlive this tx.
 			balBytes = bytes.Clone(balBytes)
 		} else {
@@ -374,31 +376,37 @@ func (e *ExecModule) GetHeaderHashNumber(ctx context.Context, blockHash common.H
 	}
 	defer cleanup()
 
-	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+	blockNumber, ok, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetHeaderHashNumber: HeaderNumber error %w", err)
 	}
-	return blockNumber, nil
+	if !ok {
+		return nil, nil
+	}
+	return &blockNumber, nil
 }
 
 func (e *ExecModule) isCanonicalHash(ctx context.Context, tx kv.Tx, hash common.Hash) (bool, error) {
-	blockNumber, err := e.blockReader.HeaderNumber(ctx, tx, hash)
+	blockNumber, ok, err := e.blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: HeaderNumber error %w", err)
 	}
-	if blockNumber == nil {
+	if !ok {
 		return false, nil
 	}
 
-	expectedHash, err := e.canonicalHash(ctx, tx, *blockNumber)
+	expectedHash, ok, err := e.canonicalHash(ctx, tx, blockNumber)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: could not read canonical hash %w", err)
 	}
-	td, err := rawdb.ReadTd(tx, hash, *blockNumber)
+	if !ok {
+		return false, nil
+	}
+	_, ok, err = rawdb.ReadTd(tx, hash, blockNumber)
 	if err != nil {
 		return false, fmt.Errorf("ethereumExecutionModule.isCanonicalHash: ReadTd error %w", err)
 	}
-	if td == nil {
+	if !ok {
 		return false, nil
 	}
 	return expectedHash == hash, nil
@@ -425,19 +433,25 @@ func (e *ExecModule) CurrentHeader(ctx context.Context) (*types.Header, error) {
 	}
 	defer cleanup()
 
-	hash := rawdb.ReadHeadHeaderHash(tx)
-	number, err := e.blockReader.HeaderNumber(ctx, tx, hash)
+	hash, ok, err := rawdb.ReadHeadHeaderHash(tx)
+	if err != nil {
+		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: ReadHeadHeaderHash error %w", err)
+	}
+	if !ok {
+		return nil, errors.New("ethereumExecutionModule.CurrentHeader: no head header hash - probably node not synced yet")
+	}
+	number, ok, err := e.blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: blockReader.HeaderNumber error %w", err)
 	}
-	if number == nil {
-		return nil, errors.New("ethereumExecutionModule.CurrentHeader: blockReader.HeaderNumber returned nil - probably node not synced yet")
+	if !ok {
+		return nil, errors.New("ethereumExecutionModule.CurrentHeader: blockReader.HeaderNumber did not find a block - probably node not synced yet")
 	}
-	h, err := e.blockReader.Header(ctx, tx, hash, *number)
+	h, ok, err := e.blockReader.Header(ctx, tx, hash, number)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.CurrentHeader: blockReader.Header error %w", err)
 	}
-	if h == nil {
+	if !ok {
 		return nil, errors.New("ethereumExecutionModule.CurrentHeader: no current header yet - probably node not synced yet")
 	}
 	return h, nil
@@ -450,16 +464,19 @@ func (e *ExecModule) GetTD(ctx context.Context, blockHash *common.Hash, blockNum
 	}
 	defer cleanup()
 
-	hash, number, err := e.resolveSegment(ctx, tx, blockHash, blockNumber)
-	if errors.Is(err, errNotFound) {
-		return nil, nil
-	}
+	hash, number, ok, err := e.resolveSegment(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetTD: resolveSegment error %w", err)
 	}
-	td, err := e.getTD(ctx, tx, hash, number)
+	if !ok {
+		return nil, nil
+	}
+	td, found, err := e.getTD(ctx, tx, hash, number)
 	if err != nil {
 		return nil, fmt.Errorf("ethereumExecutionModule.GetTD: getTD error %w", err)
+	}
+	if !found {
+		return nil, nil
 	}
 	return td, nil
 }
@@ -471,11 +488,19 @@ func (e *ExecModule) GetForkChoice(ctx context.Context) (ForkChoiceState, error)
 	}
 	defer cleanup()
 
-	return ForkChoiceState{
-		HeadHash:      rawdb.ReadForkchoiceHead(tx),
-		FinalizedHash: rawdb.ReadForkchoiceFinalized(tx),
-		SafeHash:      rawdb.ReadForkchoiceSafe(tx),
-	}, nil
+	headHash, _, err := rawdb.ReadForkchoiceHead(tx)
+	if err != nil {
+		return ForkChoiceState{}, err
+	}
+	finalizedHash, _, err := rawdb.ReadForkchoiceFinalized(tx)
+	if err != nil {
+		return ForkChoiceState{}, err
+	}
+	safeHash, _, err := rawdb.ReadForkchoiceSafe(tx)
+	if err != nil {
+		return ForkChoiceState{}, err
+	}
+	return ForkChoiceState{HeadHash: headHash, FinalizedHash: finalizedHash, SafeHash: safeHash}, nil
 }
 
 func (e *ExecModule) FrozenBlocks(ctx context.Context) (frozenBlocks uint64, hasGap bool, err error) {

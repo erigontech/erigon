@@ -389,13 +389,15 @@ func (api *BaseAPI) getLogsV3(ctx context.Context, tx kv.TemporalTx, begin, end 
 
 		// if block number changed, calculate all related field
 		if blockNumChanged {
-			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
+			nextHeader, ok, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+			if err != nil {
 				return nil, err
 			}
-			if header == nil {
+			if !ok {
 				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
+			header = nextHeader
 		}
 
 		if isFinalTxn {
@@ -562,9 +564,12 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
+	header, headerFound, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if !headerFound {
+		return nil, nil
 	}
 
 	if isBorStateSyncTx {

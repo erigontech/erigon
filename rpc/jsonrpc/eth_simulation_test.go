@@ -590,8 +590,9 @@ func TestSimulatedCanonicalReaderIsCanonical(t *testing.T) {
 
 func TestSimulatedCanonicalReaderBadHeaderNumber(t *testing.T) {
 	reader := &simulatedCanonicalReader{}
-	blockHeight, err := reader.BadHeaderNumber(context.TODO(), nil, common.Hash{})
-	assert.Nil(t, blockHeight)
+	blockHeight, ok, err := reader.BadHeaderNumber(context.TODO(), nil, common.Hash{})
+	assert.Zero(t, blockHeight)
+	assert.False(t, ok)
 	require.Error(t, err)
 }
 

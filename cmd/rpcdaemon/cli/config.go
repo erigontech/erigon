@@ -1197,7 +1197,7 @@ func (e *remoteRulesEngine) SealHash(_ *types.Header) common.Hash {
 	panic("remoteRulesEngine.SealHash not supported")
 }
 
-func (e *remoteRulesEngine) CalcDifficulty(_ rules.ChainHeaderReader, _ uint64, _ uint64, _ uint256.Int, _ uint64, _ common.Hash, _ common.Hash, _ uint64) uint256.Int {
+func (e *remoteRulesEngine) CalcDifficulty(_ rules.ChainHeaderReader, _ uint64, _ uint64, _ uint256.Int, _ uint64, _ common.Hash, _ common.Hash, _ uint64) (uint256.Int, error) {
 	panic("remoteRulesEngine.CalcDifficulty not supported")
 }
 
@@ -1212,13 +1212,19 @@ func (e *remoteRulesEngine) TxDependencies(header *types.Header) [][]int {
 func readChainConfigFromDB(ctx context.Context, db kv.RoDB) (*chain.Config, error) {
 	var cc *chain.Config
 	if err := db.View(ctx, func(tx kv.Tx) error {
-		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		genesisHash, ok, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
 			return err
 		}
-		cc, err = rawdb.ReadChainConfig(tx, genesisHash)
+		if !ok {
+			return errors.New("genesis hash not found in db")
+		}
+		cc, ok, err = rawdb.ReadChainConfig(tx, genesisHash)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return errors.New("chain config not found in db")
 		}
 		return nil
 	}); err != nil {

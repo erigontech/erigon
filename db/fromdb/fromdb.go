@@ -18,7 +18,6 @@ package fromdb
 
 import (
 	"context"
-	"fmt"
 
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/prune"
@@ -26,24 +25,19 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 )
 
-func ChainConfig(db kv.RoDB) (cc *chain.Config) {
-	err := db.View(context.Background(), func(tx kv.Tx) error {
-		genesisBlockHash, err := rawdb.ReadCanonicalHash(tx, 0)
+func ChainConfig(db kv.RoDB) (cc *chain.Config, found bool, err error) {
+	err = db.View(context.Background(), func(tx kv.Tx) error {
+		genesisBlockHash, ok, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
 			return err
 		}
-		cc, err = rawdb.ReadChainConfig(tx, genesisBlockHash)
+		if !ok {
+			return nil
+		}
+		cc, found, err = rawdb.ReadChainConfig(tx, genesisBlockHash)
 		return err
 	})
-
-	if err != nil {
-		panic(fmt.Errorf("failed to read chain config: %w", err))
-	}
-
-	if cc == nil {
-		panic("database is not initialized")
-	}
-	return cc
+	return cc, found, err
 }
 
 func PruneMode(db kv.RoDB) (pm prune.Mode) {

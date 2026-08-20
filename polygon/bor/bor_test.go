@@ -115,39 +115,41 @@ func (r headerReader) Config() *chain.Config {
 	return r.validator.ChainConfig
 }
 
-func (r headerReader) FrozenBlocks() uint64              { return 0 }
+func (r headerReader) FrozenBlocks() uint64 { return 0 }
+
 func (r headerReader) FrozenBorBlocks(align bool) uint64 { return 0 }
 
-func (r headerReader) CurrentHeader() *types.Header {
-	return nil
+func (r headerReader) CurrentHeader() (*types.Header, bool, error) {
+	return nil, false, nil
 }
 
-func (r headerReader) CurrentFinalizedHeader() *types.Header {
-	return nil
-}
-func (r headerReader) CurrentSafeHeader() *types.Header {
-	return nil
+func (r headerReader) CurrentFinalizedHeader() (*types.Header, bool, error) {
+	return nil, false, nil
 }
 
-func (r headerReader) GetHeader(_ common.Hash, blockNo uint64) *types.Header {
+func (r headerReader) CurrentSafeHeader() (*types.Header, bool, error) {
+	return nil, false, nil
+}
+
+func (r headerReader) GetHeader(_ common.Hash, blockNo uint64) (*types.Header, bool, error) {
 	return r.GetHeaderByNumber(blockNo)
 }
 
-func (r headerReader) GetHeaderByNumber(blockNo uint64) *types.Header {
+func (r headerReader) GetHeaderByNumber(blockNo uint64) (*types.Header, bool, error) {
 	if r.validator.blocks != nil {
 		if block, ok := r.validator.blocks[blockNo]; ok {
-			return block.Header()
+			return block.Header(), true, nil
 		}
 	}
-	return nil
+	return nil, false, nil
 }
 
-func (r headerReader) GetHeaderByHash(common.Hash) *types.Header {
-	return nil
+func (r headerReader) GetHeaderByHash(common.Hash) (*types.Header, bool, error) {
+	return nil, false, nil
 }
 
-func (r headerReader) GetTd(common.Hash, uint64) *uint256.Int {
-	return nil
+func (r headerReader) GetTd(common.Hash, uint64) (*uint256.Int, bool, error) {
+	return nil, false, nil
 }
 
 type spanner struct {
@@ -193,7 +195,11 @@ func (v validator) sealBlocks(blocks []*types.Block, receipts []types.Receipts) 
 			return nil, err
 		}
 
-		if parent := hr.GetHeaderByNumber(header.Number.Uint64() - 1); parent != nil {
+		parent, ok, err := hr.GetHeaderByNumber(header.Number.Uint64() - 1)
+		if err != nil {
+			return nil, err
+		}
+		if ok {
 			header.ParentHash = parent.Hash()
 		}
 

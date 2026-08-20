@@ -75,7 +75,7 @@ func TestEmptyBlock(t *testing.T) {
 	header.TxHash = trie.EmptyRoot
 	header.ReceiptHash = trie.EmptyRoot
 	header.Coinbase = common.HexToAddress("0xcace5b3c29211740e595850e80478416ee77ca21")
-	header.Difficulty = engine.CalcDifficulty(nil, time,
+	header.Difficulty, err = engine.CalcDifficulty(nil, time,
 		0,
 		genesisBlock.Difficulty(),
 		genesisBlock.NumberU64(),
@@ -83,6 +83,7 @@ func TestEmptyBlock(t *testing.T) {
 		genesisBlock.UncleHash(),
 		genesisBlock.Header().AuRaStep,
 	)
+	require.NoError(err)
 
 	block := types.NewBlockWithHeader(header)
 
@@ -176,7 +177,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
 	time := uint64(1)
 	header := builder.MakeEmptyHeader(genesisBlock.Header(), config, time, nil)
-	header.Difficulty = engine.CalcDifficulty(chainRdr, time,
+	header.Difficulty, err = engine.CalcDifficulty(chainRdr, time,
 		0,
 		genesisBlock.Difficulty(),
 		genesisBlock.NumberU64(),
@@ -184,6 +185,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 		genesisBlock.UncleHash(),
 		genesisBlock.Header().AuRaStep,
 	)
+	require.NoError(err)
 	header.GasLimit = 12500000
 
 	// Set up block 1 state the same way exec3 does for TxIndex == -1:

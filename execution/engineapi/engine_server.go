@@ -813,7 +813,13 @@ func (s *EngineServer) forkchoiceUpdated(ctx context.Context, forkchoiceState *e
 	if headHeader == nil && s.filters != nil {
 		if sd := s.filters.LatestSD(); sd != nil {
 			if overlay := sd.BlockOverlay(); overlay != nil {
-				headHeader, _ = rawdb.ReadHeaderByHash(overlay, forkchoiceState.HeadHash)
+				overlayHeader, ok, err := rawdb.ReadHeaderByHash(overlay, forkchoiceState.HeadHash)
+				if err != nil {
+					return nil, err
+				}
+				if ok {
+					headHeader = overlayHeader
+				}
 			}
 		}
 	}

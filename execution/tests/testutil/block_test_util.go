@@ -263,8 +263,11 @@ func (bt *BlockTest) runChecks(m *execmoduletester.ExecModuleTester) error {
 	}
 	defer tx.Rollback()
 
-	cmlast := rawdb.ReadHeadBlockHash(tx)
-	if common.Hash(bt.json.BestBlock) != cmlast {
+	cmlast, ok, err := rawdb.ReadHeadBlockHash(tx)
+	if err != nil {
+		return err
+	}
+	if !ok || common.Hash(bt.json.BestBlock) != cmlast {
 		return fmt.Errorf("last block hash validation mismatch: want: %x, have: %x", bt.json.BestBlock, cmlast)
 	}
 	newDB := state.New(m.NewStateReader(tx))
@@ -448,11 +451,11 @@ func (bt *BlockTest) isCanonical(m *execmoduletester.ExecModuleTester, block *ty
 		return false, err
 	}
 	defer roTx.Rollback()
-	canonical, _, err := bt.br.CanonicalHash(context.Background(), roTx, block.NumberU64())
+	canonical, ok, err := bt.br.CanonicalHash(context.Background(), roTx, block.NumberU64())
 	if err != nil {
 		return false, err
 	}
-	return canonical == block.Hash(), nil
+	return ok && canonical == block.Hash(), nil
 }
 
 // equalPtr reports whether two optional pointers point to equal values.
@@ -590,15 +593,25 @@ func (bt *BlockTest) validateImportedHeaders(tx kv.Tx, validBlocks []btBlock, m 
 	// block-by-block, so we can only validate imported headers after
 	// all blocks have been processed by BlockChain, as they may not
 	// be part of the longest chain until last block is imported.
-	for b, _ := m.BlockReader.CurrentBlock(tx); b != nil && b.NumberU64() != 0; {
+	b, ok, err := m.BlockReader.CurrentBlock(tx)
+	if err != nil {
+		return err
+	}
+	for ok && b.NumberU64() != 0 {
 		if err := validateHeader(bmap[b.Hash()].BlockHeader, b.HeaderNoCopy()); err != nil {
 			return fmt.Errorf("imported block header validation failed: %w", err)
 		}
-		number := rawdb.ReadHeaderNumber(tx, b.ParentHash())
-		if number == nil {
+		number, found, err := rawdb.ReadHeaderNumber(tx, b.ParentHash())
+		if err != nil {
+			return err
+		}
+		if !found {
 			break
 		}
-		b, _, _ = m.BlockReader.BlockWithSenders(m.Ctx, tx, b.ParentHash(), *number)
+		b, _, ok, err = m.BlockReader.BlockWithSenders(m.Ctx, tx, b.ParentHash(), number)
+		if err != nil {
+			return err
+		}
 	}
 	return nil
 }

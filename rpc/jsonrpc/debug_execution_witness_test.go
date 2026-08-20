@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"context"
+	"errors"
 	"strings"
 	"testing"
 
@@ -49,21 +50,30 @@ type fakeStateReader struct {
 func (r *fakeStateReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
 	return r.accounts[address.Value()], nil
 }
+
 func (r *fakeStateReader) ReadAccountDataForDebug(address accounts.Address) (*accounts.Account, error) {
 	return r.accounts[address.Value()], nil
 }
+
 func (r *fakeStateReader) ReadAccountStorage(address accounts.Address, key accounts.StorageKey) (uint256.Int, bool, error) {
 	return uint256.Int{}, false, nil
 }
-func (r *fakeStateReader) HasStorage(address accounts.Address) (bool, error)         { return false, nil }
-func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error)  { return nil, nil }
+
+func (r *fakeStateReader) HasStorage(address accounts.Address) (bool, error) { return false, nil }
+
+func (r *fakeStateReader) ReadAccountCode(address accounts.Address) ([]byte, error) { return nil, nil }
+
 func (r *fakeStateReader) ReadAccountCodeSize(address accounts.Address) (int, error) { return 0, nil }
+
 func (r *fakeStateReader) ReadAccountIncarnation(address accounts.Address) (uint64, error) {
 	return 0, nil
 }
+
 func (r *fakeStateReader) SetTrace(_ bool, _ string) {}
-func (r *fakeStateReader) Trace() bool               { return false }
-func (r *fakeStateReader) TracePrefix() string       { return "" }
+
+func (r *fakeStateReader) Trace() bool { return false }
+
+func (r *fakeStateReader) TracePrefix() string { return "" }
 
 // countingStateReader counts ReadAccountData calls per address so a test can pin that the
 // witness-keys gate consults the pre-block reader at most once.
@@ -528,9 +538,16 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 
 	var block1Hash common.Hash
 	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var ok bool
 		var err error
-		block1Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
-		return err
+		block1Hash, ok, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("canonical hash 1 not found")
+		}
+		return nil
 	}))
 
 	bn := rpc.BlockNumber(1)
@@ -571,9 +588,16 @@ func TestExecutionWitnessCacheOnlyServe(t *testing.T) {
 		// block 1 but the hash differs from the canonical one.
 		var hdr *types.Header
 		require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+			var ok bool
 			var err error
-			hdr, err = m.BlockReader.HeaderByNumber(ctx, tx, 1)
-			return err
+			hdr, ok, err = m.BlockReader.HeaderByNumber(ctx, tx, 1)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return errors.New("header 1 not found")
+			}
+			return nil
 		}))
 		require.NotNil(t, hdr)
 		fork := types.CopyHeader(hdr)

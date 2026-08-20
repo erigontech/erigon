@@ -21,6 +21,7 @@ package executiontests
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"maps"
 	"math"
@@ -96,10 +97,16 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	// Assert the chains have the same header/block at #i
 	var hash1, hash2 common.Hash
 	err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		if hash1, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
+		var ok bool
+		if hash1, ok, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
-		if block1, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, hash1, uint64(i)); block1 == nil {
+		if !ok {
+			t.Fatalf("Did not find canonical hash")
+		}
+		if _, _, ok, err := m.BlockReader.BlockWithSenders(ctx, tx, hash1, uint64(i)); err != nil {
+			t.Fatalf("Failed to read canonical block: %v", err)
+		} else if !ok {
 			t.Fatalf("Did not find canonical block")
 		}
 		return nil
@@ -107,10 +114,16 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	require.NoError(t, err)
 
 	canonicalMock.DB.View(ctx, func(tx kv.Tx) error {
-		if hash2, _, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
+		var ok bool
+		if hash2, ok, err = m.BlockReader.CanonicalHash(m.Ctx, tx, uint64(i)); err != nil {
 			t.Fatalf("Failed to read canonical hash: %v", err)
 		}
-		if block2, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, hash2, uint64(i)); block2 == nil {
+		if !ok {
+			t.Fatalf("Did not find canonical hash 2")
+		}
+		if _, _, ok, err := m.BlockReader.BlockWithSenders(ctx, tx, hash2, uint64(i)); err != nil {
+			t.Fatalf("Failed to read canonical block 2: %v", err)
+		} else if !ok {
 			t.Fatalf("Did not find canonical block 2")
 		}
 		return nil
@@ -126,7 +139,11 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	var currentBlockB *types.Block
 
 	err = canonicalMock.DB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlockB, err = m.BlockReader.CurrentBlock(tx)
+		var ok bool
+		currentBlockB, ok, err = m.BlockReader.CurrentBlock(tx)
+		if !ok && err == nil {
+			return errors.New("current block not found")
+		}
 		return err
 	})
 	require.NoError(t, err)
@@ -134,13 +151,19 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	blockChainB = makeBlockChain(currentBlockB, n, canonicalMock, forkSeed)
 
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		currentBlock, err := m.BlockReader.CurrentBlock(tx)
+		currentBlock, ok, err := m.BlockReader.CurrentBlock(tx)
 		if err != nil {
 			return err
 		}
-		tdPre, err = rawdb.ReadTd(tx, currentBlock.Hash(), currentBlock.NumberU64())
+		if !ok {
+			return errors.New("current block not found")
+		}
+		tdPre, ok, err = rawdb.ReadTd(tx, currentBlock.Hash(), currentBlock.NumberU64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current block: %v", err)
+		}
+		if !ok {
+			t.Fatalf("Did not find TD for current block")
 		}
 		return nil
 	})
@@ -151,14 +174,26 @@ func testFork(t *testing.T, m *execmoduletester.ExecModuleTester, i, n int, comp
 	}
 	currentBlockHash := blockChainB.TopBlock.Hash()
 	err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-		number, err := m.BlockReader.HeaderNumber(context.Background(), tx, currentBlockHash)
+		number, ok, err := m.BlockReader.HeaderNumber(context.Background(), tx, currentBlockHash)
 		if err != nil {
 			return err
 		}
-		currentBlock, _, _ := m.BlockReader.BlockWithSenders(ctx, tx, currentBlockHash, *number)
-		tdPost, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
+		if !ok {
+			return errors.New("current block number not found")
+		}
+		currentBlock, _, ok, err := m.BlockReader.BlockWithSenders(ctx, tx, currentBlockHash, number)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("current block not found")
+		}
+		tdPost, ok, err = rawdb.ReadTd(tx, currentBlockHash, currentBlock.NumberU64())
 		if err != nil {
 			t.Fatalf("Failed to read TD for current header: %v", err)
+		}
+		if !ok {
+			t.Fatalf("Did not find TD for current header")
 		}
 		return nil
 	})
@@ -189,7 +224,10 @@ func TestLastBlock(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	if chain.TopBlock.Hash() != rawdb.ReadHeadBlockHash(tx) {
+	headHash, ok, err := rawdb.ReadHeadBlockHash(tx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	if chain.TopBlock.Hash() != headHash {
 		t.Fatalf("Write/Get HeadBlockHash failed")
 	}
 }
@@ -253,7 +291,8 @@ func testShorterFork(t *testing.T) {
 // Tests that given a starting canonical chain of a given size, creating longer
 // forks do take canonical ownership.
 func TestLongerForkHeaders(t *testing.T) { testLongerFork(t, false) }
-func TestLongerForkBlocks(t *testing.T)  { testLongerFork(t, true) }
+
+func TestLongerForkBlocks(t *testing.T) { testLongerFork(t, true) }
 
 func testLongerFork(t *testing.T, full bool) {
 	if testing.Short() {
@@ -367,12 +406,17 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	}
 	defer tx.Rollback()
 	// Check that the chain is valid number and link wise
-	prev, err := m.BlockReader.CurrentBlock(tx)
+	prev, ok, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(err)
-	block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, rawdb.ReadCurrentHeader(tx).Number.Uint64()-1)
+	require.True(ok)
+	currentHeader, ok, err := rawdb.ReadCurrentHeader(tx)
+	require.NoError(err)
+	require.True(ok)
+	block, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, currentHeader.Number.Uint64()-1)
 	if err != nil {
 		t.Fatal(err)
 	}
+	require.True(ok)
 
 	hashPacket := make([]common.Hash, 0)
 	queryNum := 0
@@ -384,10 +428,11 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 			t.Errorf("parent block hash mismatch: have %x, want %x", prev.ParentHash(), block.Hash())
 		}
 		prev = block
-		block, err = m.BlockReader.BlockByNumber(m.Ctx, tx, block.NumberU64()-1)
+		block, ok, err = m.BlockReader.BlockByNumber(m.Ctx, tx, block.NumberU64()-1)
 		if err != nil {
 			t.Fatal(err)
 		}
+		require.True(ok)
 	}
 
 	b, err := rlp.EncodeToBytes(&eth.GetReceiptsPacket66{
@@ -432,16 +477,24 @@ func testReorg(t *testing.T, first, second []int64, td int64) {
 	// Make sure the chain total difficulty is the correct one
 	genDiff := m.Genesis.Difficulty()
 	want := new(uint256.Int).AddUint64(&genDiff, uint64(td))
-	have, err := rawdb.ReadTdByHash(tx, rawdb.ReadCurrentHeader(tx).Hash())
+	currentHeader, ok, err = rawdb.ReadCurrentHeader(tx)
 	require.NoError(err)
+	require.True(ok)
+	have, ok, err := rawdb.ReadTdByHash(tx, currentHeader.Hash())
+	require.NoError(err)
+	require.True(ok)
 	if want.Cmp(have) != 0 {
 		t.Errorf("total difficulty mismatch: have %v, want %v", have, want)
 	}
 	// Make sure the canonical chain is the correct one
-	require.Equal(secondChain.TopBlock.Hash(), rawdb.ReadHeadHeaderHash(tx))
+	headHash, ok, err := rawdb.ReadHeadHeaderHash(tx)
+	require.NoError(err)
+	require.True(ok)
+	require.Equal(secondChain.TopBlock.Hash(), headHash)
 	for _, h := range secondChain.Headers {
-		canon, err := rawdb.ReadCanonicalHash(tx, h.Number.Uint64())
+		canon, ok, err := rawdb.ReadCanonicalHash(tx, h.Number.Uint64())
 		require.NoError(err)
+		require.True(ok)
 		require.Equal(h.Hash(), canon)
 	}
 }
@@ -551,7 +604,7 @@ func TestChainTxReorgs(t *testing.T) {
 	// removed tx
 	txs := types.Transactions{pastDrop, freshDrop}
 	for i, txn := range txs {
-		if bn, _, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn != nil {
+		if _, _, found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash()); err != nil || found {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
 		if rcpt, _, _, _, _ := readReceipt(tx, txn.Hash(), m); rcpt != nil {
@@ -573,7 +626,7 @@ func TestChainTxReorgs(t *testing.T) {
 	// shared tx
 	txs = types.Transactions{postponed, swapped}
 	for i, txn := range txs {
-		if bn, _, _ := rawdb.ReadTxLookupEntry(tx, txn.Hash()); bn == nil {
+		if _, _, found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash()); err != nil || !found {
 			t.Errorf("drop %d: tx %v found while shouldn't have been", i, txn)
 		}
 
@@ -585,23 +638,26 @@ func TestChainTxReorgs(t *testing.T) {
 
 func readReceipt(db kv.TemporalTx, txHash common.Hash, m *execmoduletester.ExecModuleTester) (*types.Receipt, common.Hash, uint64, uint64, error) {
 	// Retrieve the context of the receipt based on the transaction hash
-	blockNumber, _, err := rawdb.ReadTxLookupEntry(db, txHash)
+	blockNumber, _, ok, err := rawdb.ReadTxLookupEntry(db, txHash)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
 	}
-	if blockNumber == nil {
+	if !ok {
 		return nil, common.Hash{}, 0, 0, nil
 	}
-	blockHash, _, err := m.BlockReader.CanonicalHash(context.Background(), db, *blockNumber)
+	blockHash, ok, err := m.BlockReader.CanonicalHash(context.Background(), db, blockNumber)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
 	}
-	if blockHash == (common.Hash{}) {
+	if !ok {
 		return nil, common.Hash{}, 0, 0, nil
 	}
-	b, _, err := m.BlockReader.BlockWithSenders(context.Background(), db, blockHash, *blockNumber)
+	b, _, ok, err := m.BlockReader.BlockWithSenders(context.Background(), db, blockHash, blockNumber)
 	if err != nil {
 		return nil, common.Hash{}, 0, 0, err
+	}
+	if !ok {
+		return nil, common.Hash{}, 0, 0, nil
 	}
 
 	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(db)
@@ -615,7 +671,7 @@ func readReceipt(db kv.TemporalTx, txHash common.Hash, m *execmoduletester.ExecM
 	}
 	for receiptIndex, receipt := range receipts {
 		if receipt.TxHash == txHash {
-			return receipt, blockHash, *blockNumber, uint64(receiptIndex), nil
+			return receipt, blockHash, blockNumber, uint64(receiptIndex), nil
 		}
 	}
 	log.Error("Receipt not found", "number", blockNumber, "hash", blockHash, "txhash", txHash)
@@ -643,20 +699,24 @@ func TestCanonicalBlockRetrieval(t *testing.T) {
 
 	for _, block := range chain.Blocks {
 		// try to retrieve a block by its canonical hash and see if the block data can be retrieved.
-		ch, _, err := m.BlockReader.CanonicalHash(m.Ctx, tx, block.NumberU64())
+		ch, ok, err := m.BlockReader.CanonicalHash(m.Ctx, tx, block.NumberU64())
 		require.NoError(t, err)
 		if err != nil {
 			panic(err)
 		}
-		if ch == (common.Hash{}) {
+		if !ok {
 			continue // busy wait for canonical hash to be written
 		}
 		if ch != block.Hash() {
 			t.Errorf("unknown canonical hash, want %s, got %s", block.Hash().Hex(), ch.Hex())
 			return
 		}
-		fb, _ := m.BlockReader.Header(m.Ctx, tx, ch, block.NumberU64())
-		if fb == nil {
+		fb, ok, err := m.BlockReader.Header(m.Ctx, tx, ch, block.NumberU64())
+		if err != nil {
+			t.Errorf("unable to retrieve block %d: %v", block.NumberU64(), err)
+			return
+		}
+		if !ok {
 			t.Errorf("unable to retrieve block %d for canonical hash: %s", block.NumberU64(), ch.Hex())
 			return
 		}
@@ -735,12 +795,24 @@ func TestEIP155Transition(t *testing.T) {
 		t.Fatal(chainErr)
 	}
 	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
-		block, _ := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
+		block, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("block 1 not found")
+		}
 		if block.Transactions()[0].Protected() {
 			t.Error("Expected block[0].txs[0] to not be replay protected")
 		}
 
-		block, _ = m.BlockReader.BlockByNumber(m.Ctx, tx, 3)
+		block, ok, err = m.BlockReader.BlockByNumber(m.Ctx, tx, 3)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("block 3 not found")
+		}
 		if block.Transactions()[0].Protected() {
 			t.Error("Expected block[3].txs[0] to not be replay protected")
 		}
@@ -883,16 +955,18 @@ func doModesTest(t *testing.T, pm prune.Mode) error {
 	*/
 
 	if pm.History.Enabled() {
-		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
+		b, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
 		require.NoError(err)
+		require.True(ok)
 		for _, txn := range b.Transactions() {
-			found, _, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
+			_, _, found, err := rawdb.ReadTxLookupEntry(tx, txn.Hash())
 			require.NoError(err)
-			require.Nil(found)
+			require.False(found)
 		}
 	} else {
-		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
+		b, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
 		require.NoError(err)
+		require.True(ok)
 		for _, txn := range b.Transactions() {
 			foundBlockNum, _, found, err := m.BlockReader.TxnLookup(context.Background(), tx, txn.Hash())
 			require.NoError(err)
@@ -1194,11 +1268,20 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 		}
 
 		if err := m2.DB.View(m2.Ctx, func(tx kv.Tx) error {
-			b, err := m.BlockReader.CurrentBlock(tx)
+			b, ok, err := m.BlockReader.CurrentBlock(tx)
 			if err != nil {
 				return err
 			}
-			h := rawdb.ReadCurrentHeader(tx)
+			if !ok {
+				return errors.New("current block not found")
+			}
+			h, ok, err := rawdb.ReadCurrentHeader(tx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return errors.New("current header not found")
+			}
 			bHash := b.Hash()
 			hHash := h.Hash()
 			if bHash != hHash {
@@ -1207,11 +1290,20 @@ func TestBlockchainHeaderchainReorgConsistency(t *testing.T) {
 			if err := m2.InsertChain(forks[i]); err != nil {
 				t.Fatalf(" fork %d: failed to insert into chain: %v", i, err)
 			}
-			b, err = m.BlockReader.CurrentBlock(tx)
+			b, ok, err = m.BlockReader.CurrentBlock(tx)
 			if err != nil {
 				return err
 			}
-			h = rawdb.ReadCurrentHeader(tx)
+			if !ok {
+				return errors.New("current block not found")
+			}
+			h, ok, err = rawdb.ReadCurrentHeader(tx)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return errors.New("current header not found")
+			}
 			bHash2 := b.Hash()
 			hHash2 := h.Hash()
 			if bHash2 != hHash2 {
@@ -1337,23 +1429,44 @@ func TestLowDiffLongChain(t *testing.T) {
 	}
 
 	if err := m2.DB.View(context.Background(), func(tx kv.Tx) error {
-		head, err := m.BlockReader.CurrentBlock(tx)
+		head, ok, err := m.BlockReader.CurrentBlock(tx)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return errors.New("current block not found")
 		}
 		if got := fork.TopBlock.Hash(); got != head.Hash() {
 			t.Fatalf("head wrong, expected %x got %x", head.Hash(), got)
 		}
 
 		// Sanity check that all the canonical numbers are present
-		header := rawdb.ReadCurrentHeader(tx)
+		header, ok, err := rawdb.ReadCurrentHeader(tx)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return errors.New("current header not found")
+		}
 		for number := head.NumberU64(); number > 0; number-- {
-			hh, _ := m.BlockReader.HeaderByNumber(m.Ctx, tx, number)
+			hh, ok, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, number)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("header %d not found", number)
+			}
 			if hash := hh.Hash(); hash != header.Hash() {
 				t.Fatalf("header %d: canonical hash mismatch: have %x, want %x", number, hash, header.Hash())
 			}
 
-			header, _ = m.BlockReader.Header(m.Ctx, tx, header.ParentHash, number-1)
+			header, ok, err = m.BlockReader.Header(m.Ctx, tx, header.ParentHash, number-1)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("header %d not found", number-1)
+			}
 		}
 		return nil
 	}); err != nil {
@@ -2190,7 +2303,9 @@ func TestEIP2718Transition(t *testing.T) {
 	}
 	defer tx.Rollback()
 
-	block, _ := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
+	block, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 1)
+	require.NoError(t, err)
+	require.True(t, ok)
 
 	// Expected gas is intrinsic + 2 * pc + hot load + cold load, since only one load is in the access list
 	expected := params.TxGas + params.TxAccessListAddressGas + params.TxAccessListStorageKeyGas +

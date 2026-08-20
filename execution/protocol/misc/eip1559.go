@@ -25,7 +25,6 @@ import (
 
 	"github.com/holiman/uint256"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
@@ -52,17 +51,19 @@ var Eip1559FeeCalculator eip1559Calculator
 type eip1559Calculator struct{}
 
 func (f eip1559Calculator) CurrentFees(chainConfig *chain.Config, db kv.Getter) (baseFee, blobFee, minBlobGasPrice, blockGasLimit uint64, err error) {
-	hash := rawdb.ReadHeadHeaderHash(db)
-
-	if hash == (common.Hash{}) {
-		return 0, 0, 0, 0, errors.New("can't get head header hash")
-	}
-
-	currentHeader, err := rawdb.ReadHeaderByHash(db, hash)
+	hash, ok, err := rawdb.ReadHeadHeaderHash(db)
 	if err != nil {
 		return 0, 0, 0, 0, err
 	}
-	if currentHeader == nil {
+	if !ok {
+		return 0, 0, 0, 0, errors.New("can't get head header hash")
+	}
+
+	currentHeader, ok, err := rawdb.ReadHeaderByHash(db, hash)
+	if err != nil {
+		return 0, 0, 0, 0, err
+	}
+	if !ok {
 		return 0, 0, 0, 0, nil
 	}
 

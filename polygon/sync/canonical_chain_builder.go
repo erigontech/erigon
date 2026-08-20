@@ -433,12 +433,12 @@ type CcbHeaderReader struct {
 	ccb *CanonicalChainBuilder
 }
 
-func (r CcbHeaderReader) HeaderByHash(_ context.Context, hash common.Hash) (*types.Header, error) {
+func (r CcbHeaderReader) HeaderByHash(_ context.Context, hash common.Hash) (*types.Header, bool, error) {
 	r.ccb.mu.Lock()
 	defer r.ccb.mu.Unlock()
 	node := r.ccb.nodeByHash(hash)
 	if node == nil {
-		return nil, nil
+		return nil, false, nil
 	}
-	return node.header, nil
+	return node.header, true, nil
 }

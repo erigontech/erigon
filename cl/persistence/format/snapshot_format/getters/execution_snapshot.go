@@ -53,11 +53,11 @@ func (r *ExecutionSnapshotReader) Transactions(number uint64, hash common.Hash) 
 	}
 	defer tx.Rollback()
 	// Get the body and fill both caches
-	body, err := r.blockReader.BodyWithTransactions(r.ctx, tx, hash, number)
+	body, ok, err := r.blockReader.BodyWithTransactions(r.ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
-	if body == nil {
+	if !ok {
 		return nil, fmt.Errorf("transactions not found for block %d", number)
 	}
 	// compute txs flats
@@ -76,11 +76,11 @@ func (r *ExecutionSnapshotReader) Withdrawals(number uint64, hash common.Hash) (
 	}
 	defer tx.Rollback()
 	// Get the body and fill both caches
-	body, _, err := r.blockReader.Body(r.ctx, tx, hash, number)
+	body, _, ok, err := r.blockReader.Body(r.ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
-	if body == nil {
+	if !ok {
 		return nil, fmt.Errorf("transactions not found for block %d", number)
 	}
 	ret := solid.NewStaticListSSZ[*cltypes.Withdrawal](int(r.beaconCfg.MaxWithdrawalsPerPayload), 44)

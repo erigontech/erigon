@@ -173,9 +173,13 @@ func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (
 		}
 		defer tx.Rollback()
 		// use latest
-		pendingBlock, err = s.blockReader.CurrentBlock(tx)
+		var ok bool
+		pendingBlock, ok, err = s.blockReader.CurrentBlock(tx)
 		if err != nil {
 			return nil, err
+		}
+		if !ok {
+			return &remoteproto.PendingBlockReply{}, nil
 		}
 	}
 
@@ -331,12 +335,12 @@ func (s *EthBackendServer) Block(ctx context.Context, req *remoteproto.BlockRequ
 		}
 	}
 
-	block, senders, err := s.blockReader.BlockWithSenders(ctx, tx, blockHash, blockHeight)
+	block, senders, ok, err := s.blockReader.BlockWithSenders(ctx, tx, blockHash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
 
-	if block == nil {
+	if !ok {
 		return &remoteproto.BlockReply{}, nil
 	}
 
@@ -359,11 +363,11 @@ func (s *EthBackendServer) CanonicalBodyForStorage(ctx context.Context, req *rem
 	}
 	defer tx.Rollback()
 
-	bd, err := s.blockReader.CanonicalBodyForStorage(ctx, tx, req.BlockNumber)
+	bd, ok, err := s.blockReader.CanonicalBodyForStorage(ctx, tx, req.BlockNumber)
 	if err != nil {
 		return nil, err
 	}
-	if bd == nil {
+	if !ok {
 		return &remoteproto.CanonicalBodyForStorageReply{}, nil
 	}
 	b := bytes.Buffer{}
@@ -397,15 +401,15 @@ func (s *EthBackendServer) HeaderNumber(ctx context.Context, req *remoteproto.He
 	}
 	defer tx.Rollback()
 
-	headerNum, err := s.blockReader.HeaderNumber(ctx, tx, gointerfaces.ConvertH256ToHash(req.Hash))
+	headerNum, ok, err := s.blockReader.HeaderNumber(ctx, tx, gointerfaces.ConvertH256ToHash(req.Hash))
 	if err != nil {
 		return nil, err
 	}
 
-	if headerNum == nil {
+	if !ok {
 		return &remoteproto.HeaderNumberReply{}, nil
 	}
-	return &remoteproto.HeaderNumberReply{Number: headerNum}, nil
+	return &remoteproto.HeaderNumberReply{Number: &headerNum}, nil
 }
 
 func (s *EthBackendServer) NodeInfo(_ context.Context, r *remoteproto.NodesInfoRequest) (*remoteproto.NodesInfoReply, error) {
@@ -503,9 +507,12 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 	}
 	defer tx.Rollback()
 
-	currentBlock, err := s.blockReader.CurrentBlock(tx)
+	currentBlock, ok, err := s.blockReader.CurrentBlock(tx)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, errors.New("current block not found")
 	}
 	header := currentBlock.HeaderNoCopy()
 

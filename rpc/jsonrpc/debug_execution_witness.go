@@ -911,11 +911,11 @@ func (api *DebugAPIImpl) buildWitnessResult(ctx context.Context, tx kv.TemporalT
 	var expectedParentRoot common.Hash
 
 	// Get the parent header for state root verification
-	parentHeader, err := api._blockReader.HeaderByNumber(ctx, tx, parentNum)
+	parentHeader, ok, err := api._blockReader.HeaderByNumber(ctx, tx, parentNum)
 	if err != nil {
 		return nil, err
 	}
-	if parentHeader == nil {
+	if !ok {
 		return nil, fmt.Errorf("parent header %d not found", parentNum)
 	}
 	expectedParentRoot = parentHeader.Root
@@ -1415,11 +1415,11 @@ func (api *BaseAPI) collectAccessedHeaders(
 			return nil
 		}
 
-		h, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
+		h, ok, err := api._blockReader.HeaderByNumber(ctx, tx, bn)
 		if err != nil {
 			return fmt.Errorf("failed to load header for block %d: %w", bn, err)
 		}
-		if h == nil {
+		if !ok {
 			return fmt.Errorf("missing header for block %d", bn)
 		}
 		encoded, err := rlp.EncodeToBytes(h)

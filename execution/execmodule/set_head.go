@@ -21,7 +21,6 @@ import (
 	"fmt"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -32,11 +31,17 @@ import (
 )
 
 func getLatestBlockNumber(tx kv.Tx) (uint64, error) {
-	forkchoiceHeadHash := rawdb.ReadForkchoiceHead(tx)
-	if forkchoiceHeadHash != (common.Hash{}) {
-		forkchoiceHeadNum := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
-		if forkchoiceHeadNum != nil {
-			return *forkchoiceHeadNum, nil
+	forkchoiceHeadHash, ok, err := rawdb.ReadForkchoiceHead(tx)
+	if err != nil {
+		return 0, err
+	}
+	if ok {
+		forkchoiceHeadNum, ok, err := rawdb.ReadHeaderNumber(tx, forkchoiceHeadHash)
+		if err != nil {
+			return 0, err
+		}
+		if ok {
+			return forkchoiceHeadNum, nil
 		}
 	}
 

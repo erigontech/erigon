@@ -106,11 +106,11 @@ func NewHistoryVerifier(
 					return fmt.Errorf("history verify: no canonical hash for block %d", blockNum)
 				}
 
-				block, _, err := blockReader.BlockWithSenders(gctx, workerTx, hash, blockNum)
+				block, _, ok, err := blockReader.BlockWithSenders(gctx, workerTx, hash, blockNum)
 				if err != nil {
 					return fmt.Errorf("history verify: read block %d: %w", blockNum, err)
 				}
-				if block == nil {
+				if !ok {
 					return fmt.Errorf("history verify: block %d not found", blockNum)
 				}
 
@@ -123,7 +123,7 @@ func NewHistoryVerifier(
 				stateWriter := state.NewNoopWriter()
 				chainReader := consensuschain.NewReader(chainConfig, workerTx, blockReader, logger)
 
-				blockHashFunc := protocol.GetHashFn(block.Header(), func(hash common.Hash, number uint64) (*types.Header, error) {
+				blockHashFunc := protocol.GetHashFn(block.Header(), func(hash common.Hash, number uint64) (*types.Header, bool, error) {
 					return blockReader.Header(gctx, workerTx, hash, number)
 				})
 

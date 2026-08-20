@@ -65,11 +65,11 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			return nil, err
 		}
 
-		header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
+		header, found, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
 		if err != nil {
 			return nil, err
 		}
-		if header == nil {
+		if !found {
 			return nil, nil
 		}
 
@@ -85,9 +85,12 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		// if no transaction was found then we return nil
 		if isBorStateSyncTx {
 			borTx := bortypes.NewBorTransaction()
-			_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+			_, txCount, found, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 			if err != nil {
 				return nil, err
+			}
+			if !found {
+				return nil, nil
 			}
 			return ethapi.NewRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(txCount), chainConfig.ChainID), nil
 		}
@@ -103,8 +106,11 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee), nil
 	}
 
-	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
-	if curHeader == nil {
+	curHeader, found, err := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
+	if err != nil {
+		return nil, err
+	}
+	if !found {
 		return nil, nil
 	}
 

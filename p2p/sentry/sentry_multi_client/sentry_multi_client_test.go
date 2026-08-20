@@ -262,12 +262,9 @@ type balHeaderNumberReader struct {
 	byHash map[common.Hash]uint64
 }
 
-func (m *balHeaderNumberReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (*uint64, error) {
+func (m *balHeaderNumberReader) HeaderNumber(_ context.Context, _ kv.Getter, hash common.Hash) (uint64, bool, error) {
 	n, ok := m.byHash[hash]
-	if !ok {
-		return nil, nil
-	}
-	return &n, nil
+	return n, ok, nil
 }
 
 // TestGetBlockAccessLists71_AnswersAndSends covers the server-side eth/71 BAL

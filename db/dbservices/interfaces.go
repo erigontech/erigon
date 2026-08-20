@@ -32,20 +32,20 @@ import (
 )
 
 type BlockReader interface {
-	BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, error)
-	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, error)
-	CurrentBlock(db kv.Tx) (*types.Block, error)
-	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, err error)
+	BlockByNumber(ctx context.Context, db kv.Tx, number uint64) (*types.Block, bool, error)
+	BlockByHash(ctx context.Context, db kv.Tx, hash common.Hash) (*types.Block, bool, error)
+	CurrentBlock(db kv.Tx) (*types.Block, bool, error)
+	BlockWithSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (block *types.Block, senders []common.Address, ok bool, err error)
 	IterateFrozenBodies(tx kv.Getter, f func(blockNum, baseTxNum, txCount uint64) error) error
 	MinimumBlockAvailable(ctx context.Context, tx kv.Tx) (uint64, error)
 }
 
 type HeaderReader interface {
-	Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, error)
-	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, error)
-	HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error)
-	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error)
-	ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64)
+	Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Header, bool, error)
+	HeaderByNumber(ctx context.Context, tx kv.Getter, blockNum uint64) (*types.Header, bool, error)
+	HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (uint64, bool, error)
+	HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, bool, error)
+	ReadAncestor(db kv.Getter, hash common.Hash, number, ancestor uint64, maxNonCanonical *uint64) (common.Hash, uint64, bool, error)
 
 	// HeadersRange - TODO: change it to `stream`
 	HeadersRange(ctx context.Context, walker func(header *types.Header) error) error
@@ -55,14 +55,14 @@ type HeaderReader interface {
 type CanonicalReader interface {
 	CanonicalHash(ctx context.Context, tx kv.Getter, blockNum uint64) (h common.Hash, ok bool, err error)
 	IsCanonical(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
-	BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight *uint64, err error)
+	BadHeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (blockHeight uint64, ok bool, err error)
 }
 
 type BodyReader interface {
-	BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, err error)
-	BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, err error)
-	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, err error)
-	CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, err error)
+	BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, ok bool, err error)
+	BodyRlp(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bodyRlp rlp.RawValue, ok bool, err error)
+	Body(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (body *types.Body, txCount uint32, ok bool, err error)
+	CanonicalBodyForStorage(ctx context.Context, tx kv.Getter, blockNum uint64) (body *types.BodyForStorage, ok bool, err error)
 	HasSenders(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (bool, error)
 	BlockForTxNum(ctx context.Context, tx kv.Tx, txNum uint64) (uint64, bool, error)
 }

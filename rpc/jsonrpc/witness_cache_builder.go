@@ -94,9 +94,15 @@ func waitCommittedHead(ctx context.Context, db kv.TemporalRoDB, num uint64, hash
 		}
 		var canonicalHash common.Hash
 		if committedHead >= num {
-			if canonicalHash, err = rawdb.ReadCanonicalHash(tx, num); err != nil {
+			var ok bool
+			canonicalHash, ok, err = rawdb.ReadCanonicalHash(tx, num)
+			if err != nil {
 				tx.Rollback()
 				return nil, false, err
+			}
+			if !ok {
+				tx.Rollback()
+				return nil, false, nil
 			}
 		}
 		switch decideCommittedHead(committedHead, num, canonicalHash, hash) {
@@ -158,12 +164,12 @@ func openRollingPin(ctx context.Context, db kv.TemporalRoDB) (*rollingPin, error
 		tx.Rollback()
 		return nil, nil
 	}
-	hash, err := rawdb.ReadCanonicalHash(tx, num)
+	hash, ok, err := rawdb.ReadCanonicalHash(tx, num)
 	if err != nil {
 		tx.Rollback()
 		return nil, err
 	}
-	if hash == (common.Hash{}) {
+	if !ok {
 		tx.Rollback()
 		return nil, nil
 	}
@@ -451,9 +457,12 @@ func (api *DebugAPIImpl) tryHeadCaptureBuild(ctx context.Context, committedTx kv
 	if num == 0 {
 		return false
 	}
-	parentHash, err := rawdb.ReadCanonicalHash(committedTx, num-1)
+	parentHash, ok, err := rawdb.ReadCanonicalHash(committedTx, num-1)
 	if err != nil {
 		witnessCacheBuildFailOtherCounter.Inc()
+		return false
+	}
+	if !ok {
 		return false
 	}
 	havePin := pin != nil

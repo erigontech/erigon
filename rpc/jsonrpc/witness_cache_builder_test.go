@@ -169,14 +169,20 @@ func buildTestChainHeader(t *testing.T, m *execmoduletester.ExecModuleTester, bl
 		headerRLP []byte
 	)
 	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		h, _, err := m.BlockReader.CanonicalHash(m.Ctx, tx, blockNum)
+		h, ok, err := m.BlockReader.CanonicalHash(m.Ctx, tx, blockNum)
 		if err != nil {
 			return err
 		}
+		if !ok {
+			return fmt.Errorf("canonical hash %d not found", blockNum)
+		}
 		hash = h
-		header, err := m.BlockReader.Header(m.Ctx, tx, hash, blockNum)
+		header, ok, err := m.BlockReader.Header(m.Ctx, tx, hash, blockNum)
 		if err != nil {
 			return err
+		}
+		if !ok {
+			return fmt.Errorf("header %d not found", blockNum)
 		}
 		headerRLP, err = rlp.EncodeToBytes(header)
 		return err
@@ -347,8 +353,9 @@ func TestOpenRollingPin(t *testing.T) {
 	head, err := stages.GetStageProgress(roTx, stages.Finish)
 	require.NoError(t, err)
 	require.Equal(t, head, pin.num, "pin tags the committed head")
-	wantHash, err := rawdb.ReadCanonicalHash(roTx, head)
+	wantHash, ok, err := rawdb.ReadCanonicalHash(roTx, head)
 	require.NoError(t, err)
+	require.True(t, ok)
 	require.Equal(t, wantHash, pin.hash, "pin tags the head's canonical hash")
 
 	pin.close()
@@ -537,9 +544,16 @@ func writeForkHeader(t *testing.T, ctx context.Context, m *execmoduletester.Exec
 	t.Helper()
 	var hdr *types.Header
 	require.NoError(t, m.DB.View(ctx, func(tx kv.Tx) error {
+		var ok bool
 		var err error
-		hdr, err = m.BlockReader.HeaderByNumber(ctx, tx, num)
-		return err
+		hdr, ok, err = m.BlockReader.HeaderByNumber(ctx, tx, num)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("header %d not found", num)
+		}
+		return nil
 	}))
 	require.NotNil(t, hdr)
 	fork := types.CopyHeader(hdr)
@@ -639,8 +653,9 @@ func TestRollingPinStableUnderTipAdvance(t *testing.T) {
 	require.Equal(t, pinAt, pin.num)
 	defer pin.close()
 
-	baseHash, err := rawdb.ReadCanonicalHash(pin.tx, pinAt)
+	baseHash, ok, err := rawdb.ReadCanonicalHash(pin.tx, pinAt)
 	require.NoError(t, err)
+	require.True(t, ok)
 	baseState, _, err := pin.tx.GetLatest(kv.CommitmentDomain, commitment.KeyCommitmentState, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	baseState = bytes.Clone(baseState)
@@ -666,9 +681,13 @@ func TestRollingPinStableUnderTipAdvance(t *testing.T) {
 				errCh <- fmt.Errorf("held pin Finish drifted to %d, want %d", finish, pinAt)
 				return
 			}
-			h, e := rawdb.ReadCanonicalHash(pin.tx, pinAt)
+			h, ok, e := rawdb.ReadCanonicalHash(pin.tx, pinAt)
 			if e != nil {
 				errCh <- e
+				return
+			}
+			if !ok {
+				errCh <- fmt.Errorf("held pin canonical hash missing at %d", pinAt)
 				return
 			}
 			if h != baseHash {

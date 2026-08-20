@@ -230,7 +230,10 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 		}
 
 		br, _ := ethereum.BlockIO()
-		missing := missingBlocks(chainDB, blocks[:i], br)
+		missing, err := missingBlocks(chainDB, blocks[:i], br)
+		if err != nil {
+			return err
+		}
 		if len(missing) == 0 {
 			logger.Info("Skipping batch as all blocks present", "batch", batch, "first", blocks[0].Hash(), "last", blocks[i-1].Hash())
 			continue
@@ -249,39 +252,54 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 	return nil
 }
 
-func ChainHasBlock(chainDB kv.RwDB, block *types.Block) bool {
+func ChainHasBlock(chainDB kv.RwDB, block *types.Block) (bool, error) {
 	var chainHasBlock bool
 
-	chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
-		chainHasBlock = rawdb.HasBlock(tx, block.Hash(), block.NumberU64())
-		return nil
-	})
-
-	return chainHasBlock
-}
-
-func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservices.FullBlockReader) []*types.Block {
-	var headBlock *types.Block
-	chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
-		headBlock, err = blockReader.CurrentBlock(tx)
+	err := chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
+		chainHasBlock, err = rawdb.HasBlock(tx, block.Hash(), block.NumberU64())
 		return err
 	})
+
+	return chainHasBlock, err
+}
+
+func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservices.FullBlockReader) ([]*types.Block, error) {
+	var headBlock *types.Block
+	var found bool
+	err := chainDB.View(context.Background(), func(tx kv.Tx) (err error) {
+		headBlock, found, err = blockReader.CurrentBlock(tx)
+		return err
+	})
+	if err != nil {
+		return nil, err
+	}
+	if !found {
+		return nil, errors.New("current block not found")
+	}
 
 	for i, block := range blocks {
 		// If we're behind the chain head, only check block, state is available at head
 		if headBlock.NumberU64() > block.NumberU64() {
-			if !ChainHasBlock(chainDB, block) {
-				return blocks[i:]
+			hasBlock, err := ChainHasBlock(chainDB, block)
+			if err != nil {
+				return nil, err
+			}
+			if !hasBlock {
+				return blocks[i:], nil
 			}
 			continue
 		}
 
-		if !ChainHasBlock(chainDB, block) {
-			return blocks[i:]
+		hasBlock, err := ChainHasBlock(chainDB, block)
+		if err != nil {
+			return nil, err
+		}
+		if !hasBlock {
+			return blocks[i:], nil
 		}
 	}
 
-	return nil
+	return nil, nil
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
@@ -313,23 +331,35 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	var currentHeadNumber uint64
 	if err := ethereum.ChainDB().View(ctx, func(tx kv.Tx) error {
 		if firstBlock.NumberU64() > 0 {
-			td, readErr := rawdb.ReadTd(tx, firstBlock.ParentHash(), firstBlock.NumberU64()-1)
+			td, ok, readErr := rawdb.ReadTd(tx, firstBlock.ParentHash(), firstBlock.NumberU64()-1)
 			if readErr != nil {
 				return fmt.Errorf("read parent TD: %w", readErr)
 			}
-			parentTd = td
+			if ok {
+				parentTd = td
+			}
 		} else {
 			parentTd = new(uint256.Int)
 		}
-		if hash := rawdb.ReadHeadBlockHash(tx); hash != (common.Hash{}) {
-			if num := rawdb.ReadHeaderNumber(tx, hash); num != nil {
-				td, readErr := rawdb.ReadTd(tx, hash, *num)
+		hash, ok, readErr := rawdb.ReadHeadBlockHash(tx)
+		if readErr != nil {
+			return fmt.Errorf("read head block hash: %w", readErr)
+		}
+		if ok {
+			num, found, readErr := rawdb.ReadHeaderNumber(tx, hash)
+			if readErr != nil {
+				return fmt.Errorf("read head block number: %w", readErr)
+			}
+			if found {
+				td, tdFound, readErr := rawdb.ReadTd(tx, hash, num)
 				if readErr != nil {
 					return fmt.Errorf("read head TD: %w", readErr)
 				}
-				currentHeadTd = td
-				currentHeadHash = hash
-				currentHeadNumber = *num
+				if tdFound {
+					currentHeadTd = td
+					currentHeadHash = hash
+					currentHeadNumber = num
+				}
 			}
 		}
 		return nil

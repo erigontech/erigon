@@ -352,7 +352,15 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 	t.Run("TraceBlockByHash_genesis", func(t *testing.T) {
 		var genesisHash common.Hash
 		require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			genesisHash, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
+			var ok bool
+			var err error
+			genesisHash, ok, err = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("canonical hash 0 not found")
+			}
 			return nil
 		}))
 		buf, s := newStream()
@@ -626,12 +634,14 @@ func TestStorageRangeAt(t *testing.T) {
 	api := newDebugApiForTest(m)
 	t.Run("invalid addr", func(t *testing.T) {
 		var block4 *types.Block
+		var found bool
 		var err error
 		err = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			block4, err = m.BlockReader.BlockByNumber(m.Ctx, tx, 4)
+			block4, found, err = m.BlockReader.BlockByNumber(m.Ctx, tx, 4)
 			return err
 		})
 		require.NoError(t, err)
+		require.True(t, found)
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
 		expect := StorageRangeResult{storageMap{}, nil}
 		result, err := api.StorageRangeAt(m.Ctx, block4.Hash(), 0, addr, nil, 100)
@@ -640,11 +650,14 @@ func TestStorageRangeAt(t *testing.T) {
 	})
 	t.Run("block 4, addr 1", func(t *testing.T) {
 		var block4 *types.Block
+		var found bool
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-			block4, _ = m.BlockReader.BlockByNumber(m.Ctx, tx, 4)
-			return nil
+			var err error
+			block4, found, err = m.BlockReader.BlockByNumber(m.Ctx, tx, 4)
+			return err
 		})
 		require.NoError(t, err)
+		require.True(t, found)
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 		keys := []common.Hash{ // hashes of Keys of storage
 			common.HexToHash("0x405787fa12a823e0f2b7631cc41b3ba8828b3321ca811111fa75cd3aa3bb5ace"),
@@ -661,11 +674,13 @@ func TestStorageRangeAt(t *testing.T) {
 	})
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
+		var found bool
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
-			latestBlock, err = m.BlockReader.CurrentBlock(tx)
+			latestBlock, found, err = m.BlockReader.CurrentBlock(tx)
 			return err
 		})
 		require.NoError(t, err)
+		require.True(t, found)
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 		keys := []common.Hash{ // hashes of Keys of storage
 			common.HexToHash("0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"),
@@ -720,11 +735,13 @@ func TestStorageRangeAtGethCompat(t *testing.T) {
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GethCompatibility: true})
 	t.Run("block latest, addr 1", func(t *testing.T) {
 		var latestBlock *types.Block
+		var found bool
 		err := m.DB.View(m.Ctx, func(tx kv.Tx) (err error) {
-			latestBlock, err = m.BlockReader.CurrentBlock(tx)
+			latestBlock, found, err = m.BlockReader.CurrentBlock(tx)
 			return err
 		})
 		require.NoError(t, err)
+		require.True(t, found)
 		addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 		keys := []common.Hash{ // pairs: (seckey, rawkey) — ordered by seckey (keccak256 hash)
 			common.HexToHash("0x290decd9548b62a8d60345a988386fc84ba6bc95484008f6362f93160ef3e563"),
@@ -1046,16 +1063,40 @@ func TestAccountAt(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
 
-	var blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent common.Hash
-	_ = m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		blockHash0, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
-		blockHash1, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
-		blockHash3, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 3)
-		blockHash10, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
-		blockHashNonExistent, _, _ = m.BlockReader.CanonicalHash(m.Ctx, tx, 20)
-		_, _, _, _, _ = blockHash0, blockHash1, blockHash3, blockHash10, blockHashNonExistent
+	var blockHash0, blockHash1, blockHash10, blockHashNonExistent common.Hash
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var ok bool
+		var err error
+		blockHash0, ok, err = m.BlockReader.CanonicalHash(m.Ctx, tx, 0)
+		if err != nil {
+			return fmt.Errorf("read canonical hash 0: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("canonical hash 0 not found")
+		}
+		blockHash1, ok, err = m.BlockReader.CanonicalHash(m.Ctx, tx, 1)
+		if err != nil {
+			return fmt.Errorf("read canonical hash 1: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("canonical hash 1 not found")
+		}
+		blockHash10, ok, err = m.BlockReader.CanonicalHash(m.Ctx, tx, 10)
+		if err != nil {
+			return fmt.Errorf("read canonical hash 10: %w", err)
+		}
+		if !ok {
+			return fmt.Errorf("canonical hash 10 not found")
+		}
+		blockHashNonExistent, ok, err = m.BlockReader.CanonicalHash(m.Ctx, tx, 20)
+		if err != nil {
+			return err
+		}
+		if ok {
+			return fmt.Errorf("unexpected canonical hash 20")
+		}
 		return nil
-	})
+	}))
 
 	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
 	contract := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
@@ -1145,7 +1186,9 @@ func TestGetBadBlocks(t *testing.T) {
 		return header.Hash()
 	}
 
-	number := *rawdb.ReadCurrentBlockNumber(tx)
+	number, ok, err := rawdb.ReadCurrentBlockNumber(tx)
+	require.NoError(err)
+	require.True(ok)
 
 	// put some blocks
 	i := number
@@ -1189,7 +1232,9 @@ func TestGetRawTransaction(t *testing.T) {
 		t.Errorf("could not begin read transaction: %s", err)
 	}
 	defer tx.Rollback()
-	number := *rawdb.ReadCurrentBlockNumber(tx)
+	number, ok, err := rawdb.ReadCurrentBlockNumber(tx)
+	require.NoError(err)
+	require.True(ok)
 	tx.Commit()
 
 	if number < 1 {
@@ -1200,8 +1245,9 @@ func TestGetRawTransaction(t *testing.T) {
 		tx, err := m.DB.BeginRo(ctx)
 		require.NoError(err)
 		defer tx.Rollback() //nolint:gocritic
-		block, err := api._blockReader.BlockByNumber(ctx, tx, i)
+		block, ok, err := api._blockReader.BlockByNumber(ctx, tx, i)
 		require.NoError(err)
+		require.True(ok)
 		txns := block.Transactions()
 
 		for _, txn := range txns {
@@ -1228,7 +1274,9 @@ func TestGetRawReceipts(t *testing.T) {
 	tx, err := m.DB.BeginTemporalRo(ctx)
 	require.NoError(err)
 	defer tx.Rollback()
-	number := *rawdb.ReadCurrentBlockNumber(tx)
+	number, ok, err := rawdb.ReadCurrentBlockNumber(tx)
+	require.NoError(err)
+	require.True(ok)
 
 	testedNonEmpty := false
 	for i := uint64(0); i <= number; i++ {
@@ -1316,7 +1364,15 @@ func TestExecutionWitness(t *testing.T) {
 	t.Run("by block hash", func(t *testing.T) {
 		var blockHash common.Hash
 		err := m.DB.View(ctx, func(tx kv.Tx) error {
-			blockHash, _, _ = m.BlockReader.CanonicalHash(ctx, tx, 1)
+			var ok bool
+			var err error
+			blockHash, ok, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("canonical hash 1 not found")
+			}
 			return nil
 		})
 		require.NoError(t, err)
@@ -1398,8 +1454,15 @@ func TestExecutionWitnessCacheServe(t *testing.T) {
 
 	var block1Hash common.Hash
 	err = m.DB.View(ctx, func(tx kv.Tx) error {
-		block1Hash, _, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
-		return err
+		var ok bool
+		block1Hash, ok, err = m.BlockReader.CanonicalHash(ctx, tx, 1)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("canonical hash 1 not found")
+		}
+		return nil
 	})
 	require.NoError(t, err)
 
@@ -1614,16 +1677,16 @@ func TestSetHeadCanonicalCleanup(t *testing.T) {
 	// Record canonical hashes that should be removed after unwind.
 	staleHashes := make(map[uint64]common.Hash)
 	for i := targetBlock + 1; i <= head; i++ {
-		h, err := rawdb.ReadCanonicalHash(roTx, i)
+		h, ok, err := rawdb.ReadCanonicalHash(roTx, i)
 		require.NoError(t, err)
-		require.NotEqual(t, common.Hash{}, h, "block %d must have a canonical hash before unwind", i)
+		require.True(t, ok, "block %d must have a canonical hash before unwind", i)
 		staleHashes[i] = h
 	}
 
 	// Record the target block hash (should survive the unwind).
-	targetHash, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
+	targetHash, ok, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
 	require.NoError(t, err)
-	require.NotEqual(t, common.Hash{}, targetHash)
+	require.True(t, ok)
 	roTx.Rollback()
 
 	// --- Perform the unwind ---
@@ -1637,19 +1700,22 @@ func TestSetHeadCanonicalCleanup(t *testing.T) {
 
 	// 1) Canonical hashes above targetBlock must be gone.
 	for blockNum := range staleHashes {
-		h, err := rawdb.ReadCanonicalHash(roTx, blockNum)
+		_, ok, err := rawdb.ReadCanonicalHash(roTx, blockNum)
 		require.NoError(t, err)
-		require.Equal(t, common.Hash{}, h,
+		require.False(t, ok,
 			"canonical hash at block %d should be removed after SetHead(%d)", blockNum, targetBlock)
 	}
 
 	// 2) The target block's canonical hash must still be intact.
-	h, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
+	h, ok, err := rawdb.ReadCanonicalHash(roTx, targetBlock)
 	require.NoError(t, err)
+	require.True(t, ok)
 	require.Equal(t, targetHash, h, "canonical hash at target block must survive the unwind")
 
 	// 3) HeadHeaderHash must point to the target block.
-	headHeaderHash := rawdb.ReadHeadHeaderHash(roTx)
+	headHeaderHash, ok, err := rawdb.ReadHeadHeaderHash(roTx)
+	require.NoError(t, err)
+	require.True(t, ok)
 	require.Equal(t, targetHash, headHeaderHash,
 		"HeadHeaderHash should equal the target block hash after SetHead")
 

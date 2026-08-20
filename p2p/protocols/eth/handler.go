@@ -83,12 +83,23 @@ type NodeInfo struct {
 }
 
 // ReadNodeInfo retrieves some `eth` protocol metadata about the running host node.
-func ReadNodeInfo(getter kv.Getter, config *chain.Config, genesisHash common.Hash, network uint64) *NodeInfo {
-	headHash := rawdb.ReadHeadHeaderHash(getter)
-	headNumber := rawdb.ReadHeaderNumber(getter, headHash)
+func ReadNodeInfo(getter kv.Getter, config *chain.Config, genesisHash common.Hash, network uint64) (*NodeInfo, error) {
+	headHash, headFound, err := rawdb.ReadHeadHeaderHash(getter)
+	if err != nil {
+		return nil, err
+	}
 	var td *uint256.Int
-	if headNumber != nil {
-		td, _ = rawdb.ReadTd(getter, headHash, *headNumber)
+	if headFound {
+		headNumber, numberFound, err := rawdb.ReadHeaderNumber(getter, headHash)
+		if err != nil {
+			return nil, err
+		}
+		if numberFound {
+			td, _, err = rawdb.ReadTd(getter, headHash, headNumber)
+			if err != nil {
+				return nil, err
+			}
+		}
 	}
 	return &NodeInfo{
 		Network:    network,
@@ -96,5 +107,5 @@ func ReadNodeInfo(getter kv.Getter, config *chain.Config, genesisHash common.Has
 		Genesis:    genesisHash,
 		Config:     config,
 		Head:       headHash,
-	}
+	}, nil
 }

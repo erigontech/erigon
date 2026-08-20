@@ -127,14 +127,15 @@ func (p *Provider) Initialize(deps Deps) error {
 	// Read current block number. Use deps.Ctx so cancellation/shutdown
 	// propagates into this lookup instead of masking it with Background.
 	var currentBlock *types.Block
+	var currentBlockOK bool
 	if err := p.ChainDB.View(ctx, func(tx kv.Tx) error {
 		var viewErr error
-		currentBlock, viewErr = p.BlockReader.CurrentBlock(tx)
+		currentBlock, currentBlockOK, viewErr = p.BlockReader.CurrentBlock(tx)
 		return viewErr
 	}); err != nil {
 		return fmt.Errorf("storage: read current block: %w", err)
 	}
-	if currentBlock != nil {
+	if currentBlockOK {
 		p.CurrentBlockNumber = currentBlock.NumberU64()
 	}
 

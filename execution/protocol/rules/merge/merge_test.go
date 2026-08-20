@@ -45,37 +45,38 @@ func (r readerMock) Config() *chain.Config {
 	return r.config
 }
 
-func (r readerMock) CurrentHeader() *types.Header {
-	return nil
+func (r readerMock) CurrentHeader() (*types.Header, bool, error) {
+	return nil, false, nil
 }
 
-func (cr readerMock) CurrentFinalizedHeader() *types.Header {
-	return nil
+func (cr readerMock) CurrentFinalizedHeader() (*types.Header, bool, error) {
+	return nil, false, nil
 }
 
-func (cr readerMock) CurrentSafeHeader() *types.Header {
-	return nil
+func (cr readerMock) CurrentSafeHeader() (*types.Header, bool, error) {
+	return nil, false, nil
 }
 
-func (r readerMock) GetHeader(common.Hash, uint64) *types.Header {
-	return nil
+func (r readerMock) GetHeader(common.Hash, uint64) (*types.Header, bool, error) {
+	return nil, false, nil
 }
 
-func (r readerMock) GetHeaderByNumber(uint64) *types.Header {
-	return nil
+func (r readerMock) GetHeaderByNumber(uint64) (*types.Header, bool, error) {
+	return nil, false, nil
 }
 
-func (r readerMock) GetHeaderByHash(common.Hash) *types.Header {
-	return nil
+func (r readerMock) GetHeaderByHash(common.Hash) (*types.Header, bool, error) {
+	return nil, false, nil
 }
 
-func (r readerMock) GetTd(common.Hash, uint64) *uint256.Int {
-	return nil
+func (r readerMock) GetTd(common.Hash, uint64) (*uint256.Int, bool, error) {
+	return nil, false, nil
 }
 
 func (r readerMock) FrozenBlocks() uint64 {
 	return 0
 }
+
 func (r readerMock) FrozenBorBlocks(align bool) uint64 { return 0 }
 
 // The thing only that changes between normal ethash checks other than POW, is difficulty

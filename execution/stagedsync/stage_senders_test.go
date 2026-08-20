@@ -153,19 +153,25 @@ func TestSenders(t *testing.T) {
 	{
 		header.Number = *common.Num1
 		hash = header.Hash()
-		found, senders, _ := br.BlockWithSenders(m.Ctx, tx, hash, 1)
+		found, senders, ok, err := br.BlockWithSenders(m.Ctx, tx, hash, 1)
+		require.NoError(err)
+		require.True(ok)
 		assert.NotNil(t, found)
 		assert.Len(t, found.Body().Transactions, 2)
 		assert.Len(t, senders, 2)
 		header.Number = *common.Num2
 		hash = header.Hash()
-		found, senders, _ = br.BlockWithSenders(m.Ctx, tx, hash, 2)
+		found, senders, ok, err = br.BlockWithSenders(m.Ctx, tx, hash, 2)
+		require.NoError(err)
+		require.True(ok)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 3, len(found.Body().Transactions))
 		assert.Len(t, senders, 3)
 		header.Number = *common.Num3
 		hash = header.Hash()
-		found, senders, _ = br.BlockWithSenders(m.Ctx, tx, hash, 3)
+		found, senders, ok, err = br.BlockWithSenders(m.Ctx, tx, hash, 3)
+		require.NoError(err)
+		require.True(ok)
 		assert.NotNil(t, found)
 		assert.NotNil(t, 0, len(found.Body().Transactions))
 		assert.NotNil(t, 2, len(found.Body().Uncles))

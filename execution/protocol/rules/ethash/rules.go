@@ -122,8 +122,11 @@ func (ethash *Ethash) VerifyHeader(chain rules.ChainHeaderReader, header *types.
 	if number == 0 {
 		return nil
 	}
-	parent := chain.GetHeader(header.ParentHash, number-1)
-	if parent == nil {
+	parent, ok, err := chain.GetHeader(header.ParentHash, number-1)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		log.Error("rules.ErrUnknownAncestor", "parentNum", number-1, "hash", header.ParentHash.String())
 		return rules.ErrUnknownAncestor
 	}
@@ -141,7 +144,10 @@ func (ethash *Ethash) VerifyUncles(chain rules.ChainReader, header *types.Header
 	if len(uncles) == 0 {
 		return nil
 	}
-	uncleBlocks, ancestors := getUncles(chain, header)
+	uncleBlocks, ancestors, err := getUncles(chain, header)
+	if err != nil {
+		return err
+	}
 
 	// Verify each of the uncles that it's recent, but not an ancestor
 	for _, uncle := range uncles {
@@ -152,22 +158,28 @@ func (ethash *Ethash) VerifyUncles(chain rules.ChainReader, header *types.Header
 	return nil
 }
 
-func getUncles(chain rules.ChainReader, header *types.Header) (mapset.Set[common.Hash], map[common.Hash]*types.Header) {
+func getUncles(chain rules.ChainReader, header *types.Header) (mapset.Set[common.Hash], map[common.Hash]*types.Header, error) {
 	// Gather the set of past uncles and ancestors
 	uncles, ancestors := mapset.NewSet[common.Hash](), make(map[common.Hash]*types.Header)
 
 	number, parent := header.Number.Uint64()-1, header.ParentHash
 	for range 7 {
-		ancestorHeader := chain.GetHeader(parent, number)
-		if ancestorHeader == nil {
+		ancestorHeader, ok, err := chain.GetHeader(parent, number)
+		if err != nil {
+			return nil, nil, err
+		}
+		if !ok {
 			break
 		}
 		ancestors[parent] = ancestorHeader
 		// If the ancestor doesn't have any uncles, we don't have to iterate them
 		if ancestorHeader.UncleHash != empty.UncleHash {
 			// Need to add those uncles to the blacklist too
-			ancestor := chain.GetBlock(parent, number)
-			if ancestor == nil {
+			ancestor, ok, err := chain.GetBlock(parent, number)
+			if err != nil {
+				return nil, nil, err
+			}
+			if !ok {
 				break
 			}
 			for _, uncle := range ancestor.Uncles() {
@@ -178,7 +190,7 @@ func getUncles(chain rules.ChainReader, header *types.Header) (mapset.Set[common
 	}
 	ancestors[header.Hash()] = header
 	uncles.Add(header.Hash())
-	return uncles, ancestors
+	return uncles, ancestors, nil
 }
 
 func (ethash *Ethash) VerifyUncle(chain rules.ChainHeaderReader, header *types.Header, uncle *types.Header, uncles mapset.Set[common.Hash], ancestors map[common.Hash]*types.Header, seal bool) error {
@@ -274,7 +286,10 @@ func (ethash *Ethash) verifyHeader(chain rules.ChainHeaderReader, header, parent
 		return err
 	}
 	// Verify the block's difficulty based on its timestamp and parent's difficulty
-	expected := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.AuRaStep)
+	expected, err := ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.AuRaStep)
+	if err != nil {
+		return err
+	}
 	if expected.Cmp(&header.Difficulty) != 0 {
 		return fmt.Errorf("invalid difficulty: have %s, want %s", &header.Difficulty, &expected)
 	}
@@ -299,8 +314,8 @@ func (ethash *Ethash) verifyHeader(chain rules.ChainHeaderReader, header, parent
 // CalcDifficulty is the difficulty adjustment algorithm. It returns
 // the difficulty that a new block should have when created at time
 // given the parent block's time and difficulty.
-func (ethash *Ethash) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, _, parentUncleHash common.Hash, _ uint64) uint256.Int {
-	return CalcDifficulty(chain.Config(), time, parentTime, parentDifficulty, parentNumber, parentUncleHash)
+func (ethash *Ethash) CalcDifficulty(chain rules.ChainHeaderReader, time, parentTime uint64, parentDifficulty uint256.Int, parentNumber uint64, _, parentUncleHash common.Hash, _ uint64) (uint256.Int, error) {
+	return CalcDifficulty(chain.Config(), time, parentTime, parentDifficulty, parentNumber, parentUncleHash), nil
 }
 
 // CalcDifficulty is the difficulty adjustment algorithm. It returns
@@ -397,12 +412,15 @@ func (ethash *Ethash) verifySeal(header *types.Header, fulldag bool) error { //n
 // Prepare implements rules.Engine, initializing the difficulty field of a
 // header to conform to the ethash protocol. The changes are done inline.
 func (ethash *Ethash) Prepare(chain rules.ChainHeaderReader, header *types.Header, state *state.IntraBlockState) error {
-	parent := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
-	if parent == nil {
+	parent, ok, err := chain.GetHeader(header.ParentHash, header.Number.Uint64()-1)
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return rules.ErrUnknownAncestor
 	}
-	header.Difficulty = ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.AuRaStep)
-	return nil
+	header.Difficulty, err = ethash.CalcDifficulty(chain, header.Time, parent.Time, parent.Difficulty, parent.Number.Uint64(), parent.Hash(), parent.UncleHash, parent.AuRaStep)
+	return err
 }
 
 func (ethash *Ethash) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,

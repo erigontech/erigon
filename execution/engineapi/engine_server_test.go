@@ -293,12 +293,14 @@ func TestGetBlobsV3(t *testing.T) {
 func canonicalHashAt(t *testing.T, db kv.TemporalRoDB, blockNum uint64) common.Hash {
 	t.Helper()
 	var hash common.Hash
+	var found bool
 	err := db.View(context.Background(), func(tx kv.Tx) error {
 		var err error
-		hash, err = rawdb.ReadCanonicalHash(tx, blockNum)
+		hash, found, err = rawdb.ReadCanonicalHash(tx, blockNum)
 		return err
 	})
 	require.NoError(t, err)
+	require.True(t, found)
 	return hash
 }
 

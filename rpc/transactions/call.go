@@ -165,12 +165,12 @@ func MakeBlockHashProvider(ctx context.Context, tx kv.Getter, reader dbservices.
 
 func MakeHeaderGetter(requireCanonical bool, tx kv.Getter, headerReader dbservices.HeaderReader) BlockHashProvider {
 	return func(n uint64) (common.Hash, error) {
-		h, err := headerReader.HeaderByNumber(context.Background(), tx, n)
+		h, ok, err := headerReader.HeaderByNumber(context.Background(), tx, n)
 		if err != nil {
 			log.Error("Can't get block hash by number", "number", n, "only-canonical", requireCanonical)
 			return common.Hash{}, err
 		}
-		if h == nil {
+		if !ok {
 			log.Warn("[evm] header is nil", "blockNum", n)
 			return common.Hash{}, nil
 		}

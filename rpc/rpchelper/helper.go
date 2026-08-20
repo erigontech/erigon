@@ -141,14 +141,14 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 			return blockNumber, hash, blockNumber == plainStateBlockNumber, false, nil
 		}
 	} else {
-		number, err := br.HeaderNumber(ctx, overlayTx, hash)
+		number, ok, err := br.HeaderNumber(ctx, overlayTx, hash)
 		if err != nil {
 			return 0, common.Hash{}, false, false, err
 		}
-		if number == nil {
+		if !ok {
 			return 0, common.Hash{}, false, false, rpc.BlockNotFoundErr{BlockId: blockNrOrHash.String()}
 		}
-		blockNumber = *number
+		blockNumber = number
 
 		ch, ok, err := br.CanonicalHash(ctx, overlayTx, blockNumber)
 		if err != nil {

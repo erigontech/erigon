@@ -110,8 +110,11 @@ func (api *TxPoolAPIImpl) Content(ctx context.Context) (map[string]map[string]ma
 		return nil, err
 	}
 
-	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
-	if curHeader == nil {
+	curHeader, ok, err := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, nil
 	}
 	for account, txs := range pending {
@@ -169,8 +172,11 @@ func (api *TxPoolAPIImpl) ContentFrom(ctx context.Context, addr common.Address) 
 		return nil, err
 	}
 
-	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
-	if curHeader == nil {
+	curHeader, ok, err := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, nil
 	}
 	content["pending"] = flattenTxs(pending, curHeader, cc)

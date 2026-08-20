@@ -209,8 +209,21 @@ func TestGetBlockReceiptsByBlockHash(t *testing.T) {
 		4: `[]`,
 	}
 	err := m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
-			block := rawdb.ReadHeaderByNumber(tx, i)
+		currentHeader, ok, err := rawdb.ReadCurrentHeader(tx)
+		if err != nil {
+			return err
+		}
+		if !ok {
+			return fmt.Errorf("current header not found")
+		}
+		for i := uint64(0); i <= currentHeader.Number.Uint64(); i++ {
+			block, ok, err := rawdb.ReadHeaderByNumber(tx, i)
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("header %d not found", i)
+			}
 
 			receiptsFromBlock, err := api.GetBlockReceiptsByBlockHash(context.Background(), block.Hash())
 			if err != nil {

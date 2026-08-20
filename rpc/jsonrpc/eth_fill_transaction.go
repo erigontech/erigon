@@ -65,8 +65,11 @@ func (api *APIImpl) FillTransaction(ctx context.Context, args ethapi.CallArgs) (
 	if err != nil {
 		return nil, err
 	}
-	head := rawdb.ReadCurrentHeader(overlayTx)
-	if head == nil {
+	head, ok, err := rawdb.ReadCurrentHeader(overlayTx)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, errors.New("missing current header")
 	}
 

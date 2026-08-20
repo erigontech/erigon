@@ -214,8 +214,11 @@ func (s *StatusDataProvider) fetchChainHead(ctx context.Context) (ChainHead, err
 
 // ReadChainHeadWithTx reads chain head in DB
 func ReadChainHeadWithTx(tx kv.Tx, minimumBlock uint64) (ChainHead, error) {
-	header := rawdb.ReadCurrentHeaderHavingBody(tx)
-	if header == nil {
+	header, ok, err := rawdb.ReadCurrentHeaderHavingBody(tx)
+	if err != nil {
+		return ChainHead{}, err
+	}
+	if !ok {
 		return ChainHead{}, ErrNoHead
 	}
 
@@ -223,11 +226,11 @@ func ReadChainHeadWithTx(tx kv.Tx, minimumBlock uint64) (ChainHead, error) {
 	hash := header.Hash()
 	time := header.Time
 
-	td, err := rawdb.ReadTd(tx, hash, height)
+	td, ok, err := rawdb.ReadTd(tx, hash, height)
 	if err != nil {
 		return ChainHead{}, fmt.Errorf("ReadChainHead: ReadTd error at height %d and hash %s: %w", height, hash, err)
 	}
-	if td == nil {
+	if !ok {
 		td = new(uint256.Int)
 	}
 
@@ -251,9 +254,12 @@ func (s *StatusDataProvider) ReadChainHeadFromSnapshots(ctx context.Context, min
 		return ChainHead{}, ErrNoSnapshots
 	}
 
-	header, err := s.blockReader.HeaderByNumber(ctx, nil, latest)
-	if err != nil || header == nil {
+	header, ok, err := s.blockReader.HeaderByNumber(ctx, nil, latest)
+	if err != nil {
 		return ChainHead{}, fmt.Errorf("failed reading snapshot header %d: %w", latest, err)
+	}
+	if !ok {
+		return ChainHead{}, fmt.Errorf("snapshot header %d not found", latest)
 	}
 
 	return ChainHead{

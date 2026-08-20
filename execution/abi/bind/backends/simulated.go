@@ -73,7 +73,7 @@ var (
 // the background. Its main purpose is to allow for easy testing of contract bindings.
 type SimulatedBackend struct {
 	m         *execmoduletester.ExecModuleTester
-	getHeader func(hash common.Hash, number uint64) (*types.Header, error)
+	getHeader func(hash common.Hash, number uint64) (*types.Header, bool, error)
 
 	mu              sync.Mutex
 	prependBlock    *types.Block
@@ -106,12 +106,12 @@ func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, confi
 	backend := &SimulatedBackend{
 		m:            m,
 		prependBlock: m.Genesis,
-		getHeader: func(hash common.Hash, number uint64) (h *types.Header, err error) {
+		getHeader: func(hash common.Hash, number uint64) (h *types.Header, found bool, err error) {
 			err = m.DB.View(context.Background(), func(tx kv.Tx) error {
-				h, err = m.BlockReader.Header(context.Background(), tx, hash, number)
-				return nil
+				h, found, err = m.BlockReader.Header(context.Background(), tx, hash, number)
+				return err
 			})
-			return h, err
+			return h, found, err
 		},
 	}
 	if t != nil {
@@ -127,9 +127,12 @@ func NewSimulatedBackend(t *testing.T, alloc types.GenesisAlloc, gasLimit uint64
 	return b
 }
 
-func (b *SimulatedBackend) DB() kv.TemporalRwDB                     { return b.m.DB }
-func (b *SimulatedBackend) HistoryV3() bool                         { return b.m.HistoryV3 }
-func (b *SimulatedBackend) Engine() rules.Engine                    { return b.m.Engine }
+func (b *SimulatedBackend) DB() kv.TemporalRwDB { return b.m.DB }
+
+func (b *SimulatedBackend) HistoryV3() bool { return b.m.HistoryV3 }
+
+func (b *SimulatedBackend) Engine() rules.Engine { return b.m.Engine }
+
 func (b *SimulatedBackend) BlockReader() dbservices.FullBlockReader { return b.m.BlockReader }
 
 // Close terminates the underlying blockchain's update loop.
@@ -278,16 +281,19 @@ func (b *SimulatedBackend) TransactionReceipt(ctx context.Context, txHash common
 	defer tx.Rollback()
 
 	// Retrieve the context of the receipt based on the transaction hash
-	blockNumber, _, err := rawdb.ReadTxLookupEntry(tx, txHash)
+	blockNumber, _, ok, err := rawdb.ReadTxLookupEntry(tx, txHash)
 	if err != nil {
 		return nil, err
 	}
-	if blockNumber == nil {
+	if !ok {
 		return nil, nil
 	}
-	block, err := b.BlockReader().BlockByNumber(b.m.Ctx, tx, *blockNumber)
+	block, ok, err := b.BlockReader().BlockByNumber(b.m.Ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 
 	commitmentHistoryEnabled, _, err := rawdb.ReadDBCommitmentHistoryEnabled(tx)
@@ -339,11 +345,11 @@ func (b *SimulatedBackend) TransactionByHash(ctx context.Context, txHash common.
 	if !ok {
 		return nil, false, bind.ErrNotFound
 	}
-	body, err := b.BlockReader().BodyWithTransactions(ctx, tx, blockHash, blockNumber)
+	body, ok, err := b.BlockReader().BodyWithTransactions(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, false, err
 	}
-	if body == nil {
+	if !ok {
 		return nil, false, bind.ErrNotFound
 	}
 	for _, txn = range body.Transactions {
@@ -368,11 +374,11 @@ func (b *SimulatedBackend) BlockByHash(ctx context.Context, hash common.Hash) (*
 	}
 	defer tx.Rollback()
 
-	block, err := b.BlockReader().BlockByHash(ctx, tx, hash)
+	block, ok, err := b.BlockReader().BlockByHash(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
-	if block != nil {
+	if ok {
 		return block, nil
 	}
 
@@ -402,11 +408,11 @@ func (b *SimulatedBackend) blockByNumberNoLock(ctx context.Context, number *uint
 	}
 	defer tx.Rollback()
 
-	block, err := b.BlockReader().BlockByNumber(ctx, tx, number.Uint64())
+	block, ok, err := b.BlockReader().BlockByNumber(ctx, tx, number.Uint64())
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
+	if !ok {
 		return nil, errBlockDoesNotExist
 	}
 
@@ -427,15 +433,18 @@ func (b *SimulatedBackend) HeaderByHash(ctx context.Context, hash common.Hash) (
 	}
 	defer tx.Rollback()
 
-	number := rawdb.ReadHeaderNumber(tx, hash)
-	if number == nil {
-		return nil, errBlockDoesNotExist
-	}
-	header, err := b.BlockReader().Header(ctx, tx, hash, *number)
+	number, ok, err := rawdb.ReadHeaderNumber(tx, hash)
 	if err != nil {
 		return nil, err
 	}
-	if header == nil {
+	if !ok {
+		return nil, errBlockDoesNotExist
+	}
+	header, ok, err := b.BlockReader().Header(ctx, tx, hash, number)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, errBlockDoesNotExist
 	}
 
@@ -457,9 +466,12 @@ func (b *SimulatedBackend) HeaderByNumber(ctx context.Context, number *uint256.I
 	if number == nil || number.Cmp(&prependBlockNum) == 0 {
 		return b.prependBlock.Header(), nil
 	}
-	header, err := b.BlockReader().HeaderByNumber(ctx, tx, number.Uint64())
+	header, ok, err := b.BlockReader().HeaderByNumber(ctx, tx, number.Uint64())
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 	return header, nil
 }
@@ -478,15 +490,18 @@ func (b *SimulatedBackend) TransactionCount(ctx context.Context, blockHash commo
 	}
 	defer tx.Rollback()
 
-	blockNum := rawdb.ReadHeaderNumber(tx, blockHash)
-	if blockNum == nil {
-		return 0, nil
-	}
-	block, _, err := b.BlockReader().BlockWithSenders(ctx, tx, blockHash, *blockNum)
+	blockNum, ok, err := rawdb.ReadHeaderNumber(tx, blockHash)
 	if err != nil {
 		return 0, err
 	}
-	if block == nil {
+	if !ok {
+		return 0, nil
+	}
+	block, _, ok, err := b.BlockReader().BlockWithSenders(ctx, tx, blockHash, blockNum)
+	if err != nil {
+		return 0, err
+	}
+	if !ok {
 		return uint(0), errBlockDoesNotExist
 	}
 
@@ -512,15 +527,18 @@ func (b *SimulatedBackend) TransactionInBlock(ctx context.Context, blockHash com
 	}
 	defer tx.Rollback()
 
-	blockNum := rawdb.ReadHeaderNumber(tx, blockHash)
-	if blockNum == nil {
-		return nil, nil
-	}
-	block, _, err := b.BlockReader().BlockWithSenders(ctx, tx, blockHash, *blockNum)
+	blockNum, ok, err := rawdb.ReadHeaderNumber(tx, blockHash)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil {
+	if !ok {
+		return nil, nil
+	}
+	block, _, ok, err := b.BlockReader().BlockWithSenders(ctx, tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
 		return nil, errBlockDoesNotExist
 	}
 
@@ -884,27 +902,44 @@ type callMsg struct {
 }
 
 func (m callMsg) From() accounts.Address { return accounts.InternAddress(m.CallMsg.From) }
-func (m callMsg) Nonce() uint64          { return 0 }
-func (m callMsg) CheckNonce() bool       { return false }
+
+func (m callMsg) Nonce() uint64 { return 0 }
+
+func (m callMsg) CheckNonce() bool { return false }
+
 func (m callMsg) CheckTransaction() bool { return false }
+
 func (m callMsg) To() accounts.Address {
 	if m.CallMsg.To == nil {
 		return accounts.NilAddress
 	}
 	return accounts.InternAddress(*m.CallMsg.To)
 }
-func (m callMsg) GasPrice() *uint256.Int                { return m.CallMsg.GasPrice }
-func (m callMsg) FeeCap() *uint256.Int                  { return m.CallMsg.FeeCap }
-func (m callMsg) TipCap() *uint256.Int                  { return m.CallMsg.TipCap }
-func (m callMsg) Gas() uint64                           { return m.CallMsg.Gas }
-func (m callMsg) CheckGas() bool                        { return true }
-func (m callMsg) Value() *uint256.Int                   { return m.CallMsg.Value }
-func (m callMsg) Data() []byte                          { return m.CallMsg.Data }
-func (m callMsg) AccessList() types.AccessList          { return m.CallMsg.AccessList }
-func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
-func (m callMsg) IsFree() bool                          { return false }
-func (m callMsg) SetIsFree(_ bool)                      {}
 
-func (m callMsg) BlobGas() uint64                { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
+func (m callMsg) GasPrice() *uint256.Int { return m.CallMsg.GasPrice }
+
+func (m callMsg) FeeCap() *uint256.Int { return m.CallMsg.FeeCap }
+
+func (m callMsg) TipCap() *uint256.Int { return m.CallMsg.TipCap }
+
+func (m callMsg) Gas() uint64 { return m.CallMsg.Gas }
+
+func (m callMsg) CheckGas() bool { return true }
+
+func (m callMsg) Value() *uint256.Int { return m.CallMsg.Value }
+
+func (m callMsg) Data() []byte { return m.CallMsg.Data }
+
+func (m callMsg) AccessList() types.AccessList { return m.CallMsg.AccessList }
+
+func (m callMsg) Authorizations() []types.Authorization { return m.CallMsg.Authorizations }
+
+func (m callMsg) IsFree() bool { return false }
+
+func (m callMsg) SetIsFree(_ bool) {}
+
+func (m callMsg) BlobGas() uint64 { return misc.GetBlobGasUsed(len(m.CallMsg.BlobHashes)) }
+
 func (m callMsg) MaxFeePerBlobGas() *uint256.Int { return m.CallMsg.MaxFeePerBlobGas }
-func (m callMsg) BlobHashes() []common.Hash      { return m.CallMsg.BlobHashes }
+
+func (m callMsg) BlobHashes() []common.Hash { return m.CallMsg.BlobHashes }

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -52,7 +53,14 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 		return nil
 	}
 
-	rawdb.WriteHeadBlockHash(tx, rawdb.ReadHeadHeaderHash(tx))
+	headHash, ok, err := rawdb.ReadHeadHeaderHash(tx)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("head header hash not found")
+	}
+	rawdb.WriteHeadBlockHash(tx, headHash)
 	err = s.Update(tx, executionAt)
 	if err != nil {
 		return err
@@ -67,11 +75,11 @@ func FinishForward(s *StageState, tx kv.RwTx, cfg FinishCfg) error {
 }
 
 func UnwindFinish(u *UnwindState, tx kv.RwTx) (err error) {
-	hash, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
+	hash, ok, err := rawdb.ReadCanonicalHash(tx, u.UnwindPoint)
 	if err != nil {
 		return err
 	}
-	if hash != (common.Hash{}) {
+	if ok {
 		rawdb.WriteHeadBlockHash(tx, hash)
 	}
 	return u.Done(tx)
@@ -102,8 +110,11 @@ func NotifyNewHeaders(ctx context.Context, notifyFrom, notifyTo uint64, notifier
 		if blockNum >= notifyTo { //[from,to)
 			return nil
 		}
-		headerRLP := rawdb.ReadHeaderRLP(tx, common.BytesToHash(hash), blockNum)
-		if headerRLP != nil {
+		headerRLP, ok, err := rawdb.ReadHeaderRLP(tx, common.BytesToHash(hash), blockNum)
+		if err != nil {
+			return err
+		}
+		if ok {
 			headersRlp = append(headersRlp, bytes.Clone(headerRLP))
 		}
 		return common.Stopped(ctx.Done())

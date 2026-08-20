@@ -214,30 +214,35 @@ func (emt *ExecModuleTester) SetPeerBlockRange(context.Context, *sentryproto.Set
 func (emt *ExecModuleTester) HandShake(ctx context.Context, in *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
 	return &sentryproto.HandShakeReply{Protocol: sentryproto.Protocol_ETH69}, nil
 }
+
 func (emt *ExecModuleTester) SendMessageByMinBlock(_ context.Context, r *sentryproto.SendMessageByMinBlockRequest) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SendMessageById(_ context.Context, r *sentryproto.SendMessageByIdRequest) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SendMessageToRandomPeers(_ context.Context, r *sentryproto.SendMessageToRandomPeersRequest) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r.Data)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SendMessageToAll(_ context.Context, r *sentryproto.OutboundMessageData) (*sentryproto.SentPeers, error) {
 	emt.sentMessagesMu.Lock()
 	emt.sentMessages = append(emt.sentMessages, r)
 	emt.sentMessagesMu.Unlock()
 	return nil, nil
 }
+
 func (emt *ExecModuleTester) SentMessage(i int) (*sentryproto.OutboundMessageData, error) {
 	emt.sentMessagesMu.Lock()
 	defer emt.sentMessagesMu.Unlock()
@@ -267,12 +272,15 @@ func (emt *ExecModuleTester) Messages(req *sentryproto.MessagesRequest, stream s
 func (emt *ExecModuleTester) Peers(context.Context, *emptypb.Empty) (*sentryproto.PeersReply, error) {
 	return &sentryproto.PeersReply{}, nil
 }
+
 func (emt *ExecModuleTester) PeerCount(context.Context, *sentryproto.PeerCountRequest) (*sentryproto.PeerCountReply, error) {
 	return &sentryproto.PeerCountReply{Count: 0}, nil
 }
+
 func (emt *ExecModuleTester) PeerById(context.Context, *sentryproto.PeerByIdRequest) (*sentryproto.PeerByIdReply, error) {
 	return &sentryproto.PeerByIdReply{}, nil
 }
+
 func (emt *ExecModuleTester) PeerEvents(req *sentryproto.PeerEventsRequest, server sentryproto.Sentry_PeerEventsServer) error {
 	return nil
 }
@@ -1063,7 +1071,11 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 	}
 	defer roTx.Rollback()
 	// Check if the latest header was imported or rolled back
-	if rawdb.ReadHeader(roTx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64()) == nil {
+	_, ok, err := rawdb.ReadHeader(roTx, chain.TopBlock.Hash(), chain.TopBlock.NumberU64())
+	if err != nil {
+		return err
+	}
+	if !ok {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	execAt, err := stages.GetStageProgress(roTx, stages.Execution)
@@ -1073,7 +1085,11 @@ func (emt *ExecModuleTester) insertChain(chain *blockgen.ChainPack) error {
 	if execAt < chain.TopBlock.NumberU64() {
 		return fmt.Errorf("sentryMock.InsertChain end up with Execution stage progress: %d < %d", execAt, chain.TopBlock.NumberU64())
 	}
-	if rawdb.ReadHeadBlockHash(roTx) != chain.TopBlock.Hash() {
+	headHash, ok, err := rawdb.ReadHeadBlockHash(roTx)
+	if err != nil {
+		return err
+	}
+	if !ok || headHash != chain.TopBlock.Hash() {
 		return fmt.Errorf("did not import block %d %x", chain.TopBlock.NumberU64(), chain.TopBlock.Hash())
 	}
 	return nil
@@ -1156,9 +1172,12 @@ func (emt *ExecModuleTester) BlocksIO() (dbservices.FullBlockReader, *blockio.Bl
 
 func (emt *ExecModuleTester) Current(tx kv.Tx) *types.Block {
 	if tx != nil {
-		b, err := emt.BlockReader.CurrentBlock(tx)
+		b, ok, err := emt.BlockReader.CurrentBlock(tx)
 		if err != nil {
 			panic(err)
+		}
+		if !ok {
+			return nil
 		}
 		return b
 	}
@@ -1167,9 +1186,12 @@ func (emt *ExecModuleTester) Current(tx kv.Tx) *types.Block {
 		panic(err)
 	}
 	defer tx.Rollback()
-	b, err := emt.BlockReader.CurrentBlock(tx)
+	b, ok, err := emt.BlockReader.CurrentBlock(tx)
 	if err != nil {
 		panic(err)
+	}
+	if !ok {
+		return nil
 	}
 	return b
 }

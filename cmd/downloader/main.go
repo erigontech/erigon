@@ -784,7 +784,11 @@ func checkChainName(ctx context.Context, dirs datadir.Dirs, chainName string) er
 	}
 	defer db.Close()
 
-	if cc := fromdb.ChainConfig(db); cc != nil {
+	cc, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if ok {
 		spc, err := chainspec.ChainSpecByName(chainName)
 		if err != nil {
 			return fmt.Errorf("unknown chain: %s", chainName)

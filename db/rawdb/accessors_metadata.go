@@ -35,28 +35,28 @@ import (
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
-func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
+func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, bool, error) {
 	data, err := db.GetOne(kv.ConfigTable, hash[:])
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if len(data) == 0 {
-		return nil, nil
+	if data == nil {
+		return nil, false, nil
 	}
 
 	var config chain.Config
 	if err := jsoniter.ConfigFastest.Unmarshal(data, &config); err != nil {
-		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
+		return nil, false, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
 	}
 
 	if config.BorJSON != nil {
 		borConfig := &borcfg.BorConfig{}
 		if err := jsoniter.ConfigFastest.Unmarshal(config.BorJSON, borConfig); err != nil {
-			return nil, fmt.Errorf("invalid chain config 'bor' JSON: %x, %w", hash, err)
+			return nil, false, fmt.Errorf("invalid chain config 'bor' JSON: %x, %w", hash, err)
 		}
 		config.Bor = borConfig
 	}
-	return &config, nil
+	return &config, true, nil
 }
 
 // WriteChainConfig writes the chain config settings to the database.
@@ -114,19 +114,19 @@ func WriteGenesisIfNotExist(db kv.RwTx, g *types.Genesis) error {
 	return db.Put(kv.ConfigTable, kv.GenesisKey, val)
 }
 
-func ReadGenesis(db kv.Getter) (*types.Genesis, error) {
+func ReadGenesis(db kv.Getter) (*types.Genesis, bool, error) {
 	val, err := db.GetOne(kv.ConfigTable, kv.GenesisKey)
 	if err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	if len(val) == 0 || bytes.Equal(val, []byte("null")) {
-		return nil, nil
+	if val == nil || bytes.Equal(val, []byte("null")) {
+		return nil, false, nil
 	}
 	var g types.Genesis
 	if err := jsoniter.ConfigFastest.Unmarshal(val, &g); err != nil {
-		return nil, err
+		return nil, false, err
 	}
-	return &g, nil
+	return &g, true, nil
 }
 
 func AllSegmentsDownloadComplete(tx kv.Getter) (allSegmentsDownloadComplete bool, err error) {

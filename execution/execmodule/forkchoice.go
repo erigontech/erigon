@@ -77,17 +77,20 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 	// Client software MUST return -38002: Invalid forkchoice state error if the payload referenced by
 	// forkchoiceState.headBlockHash is VALID and a payload referenced by either forkchoiceState.finalizedBlockHash or
 	// forkchoiceState.safeBlockHash does not belong to the chain defined by forkchoiceState.headBlockHash
-	headNumber, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+	headNumber, headOK, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
 	if err != nil {
 		return false, err
 	}
-	finalizedNumber, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
+	finalizedNumber, finalizedOK, err := e.blockReader.HeaderNumber(ctx, tx, finalizedHash)
 	if err != nil {
 		return false, err
 	}
-	safeNumber, err := e.blockReader.HeaderNumber(ctx, tx, safeHash)
+	safeNumber, safeOK, err := e.blockReader.HeaderNumber(ctx, tx, safeHash)
 	if err != nil {
 		return false, err
+	}
+	if !headOK {
+		return false, nil
 	}
 
 	if finalizedHash != (common.Hash{}) && finalizedHash != blockHash {
@@ -95,7 +98,7 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 		if err != nil {
 			return false, err
 		}
-		if !canonical || *headNumber <= *finalizedNumber {
+		if !canonical || !finalizedOK || headNumber <= finalizedNumber {
 			return false, nil
 		}
 
@@ -106,7 +109,7 @@ func (e *ExecModule) verifyForkchoiceHashes(ctx context.Context, tx kv.Tx, block
 			return false, err
 		}
 
-		if !canonical || *headNumber <= *safeNumber {
+		if !canonical || !safeOK || headNumber <= safeNumber {
 			return false, nil
 		}
 	}
@@ -172,19 +175,22 @@ func (e *ExecModule) unwindIfNeeded(
 	isSynced bool,
 ) (*ForkChoiceResult, error) {
 	var finalisedBlockNum uint64
-	lastKnownFinalisedHash := rawdb.ReadForkchoiceFinalized(tx)
-	if lastKnownFinalisedHash != (common.Hash{}) {
-		bn, err := e.blockReader.HeaderNumber(ctx, tx, lastKnownFinalisedHash)
+	lastKnownFinalisedHash, finalizedFound, err := rawdb.ReadForkchoiceFinalized(tx)
+	if err != nil {
+		return nil, err
+	}
+	if finalizedFound {
+		bn, ok, err := e.blockReader.HeaderNumber(ctx, tx, lastKnownFinalisedHash)
 		if err != nil {
 			return nil, err
 		}
-		if bn == nil {
+		if !ok {
 			return &ForkChoiceResult{
 				LatestValidHash: common.Hash{},
 				Status:          ExecutionStatusInvalidForkchoice,
 			}, nil
 		}
-		finalisedBlockNum = *bn
+		finalisedBlockNum = bn
 	}
 	// as per https://github.com/ethereum/execution-apis/pull/786
 	// we short circuit reorgs if:
@@ -209,8 +215,15 @@ func (e *ExecModule) unwindIfNeeded(
 		}, nil
 	}
 	if fcuHeader.Number.Sign() == 0 && canonicalHash != blockHash {
+		headHash, ok, err := rawdb.ReadHeadBlockHash(tx)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
+			return nil, errors.New("head block hash not found")
+		}
 		return &ForkChoiceResult{
-			LatestValidHash: rawdb.ReadHeadBlockHash(tx),
+			LatestValidHash: headHash,
 			Status:          ExecutionStatusBadBlock,
 			ValidationError: "forkchoice head is a non-genesis block at height 0",
 		}, nil
@@ -234,11 +247,11 @@ func (e *ExecModule) unwindIfNeeded(
 				hash:   currentParentHash,
 				number: currentParentNumber,
 			})
-			currentHeader, err := e.blockReader.Header(ctx, tx, currentParentHash, currentParentNumber)
+			currentHeader, ok, err := e.blockReader.Header(ctx, tx, currentParentHash, currentParentNumber)
 			if err != nil {
 				return nil, err
 			}
-			if currentHeader == nil {
+			if !ok {
 				return &ForkChoiceResult{
 					LatestValidHash: common.Hash{},
 					Status:          ExecutionStatusMissingSegment,
@@ -302,9 +315,15 @@ func (e *ExecModule) unwindIfNeeded(
 	// Mark all new canonicals as canonicals
 	chainReader := consensuschain.NewReader(e.config, tx, e.blockReader, e.logger)
 	for _, canonicalSegment := range newCanonicals {
-		b, _, _ := rawdb.ReadBody(tx, canonicalSegment.hash, canonicalSegment.number)
-		h := rawdb.ReadHeader(tx, canonicalSegment.hash, canonicalSegment.number)
-		if b == nil || h == nil {
+		b, _, _, bodyOK, err := rawdb.ReadBody(tx, canonicalSegment.hash, canonicalSegment.number)
+		if err != nil {
+			return nil, err
+		}
+		h, headerOK, err := rawdb.ReadHeader(tx, canonicalSegment.hash, canonicalSegment.number)
+		if err != nil {
+			return nil, err
+		}
+		if !bodyOK || !headerOK {
 			return nil, fmt.Errorf("unexpected chain cap: %d", canonicalSegment.number)
 		}
 		if canonicalSegment.number > 0 {
@@ -446,11 +465,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	blockHash := originalBlockHash
 
 	// Step one, find reconnection point, and mark all of those headers as canonical.
-	fcuHeader, err := e.blockReader.HeaderByHash(ctx, tx, originalBlockHash)
+	fcuHeader, ok, err := e.blockReader.HeaderByHash(ctx, tx, originalBlockHash)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
-	if fcuHeader == nil {
+	if !ok {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
 	}
 
@@ -484,7 +503,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		e.logger.Info("[sync] limited big jump", "from", finishProgressBefore, "to", fcuHeader.Number.Uint64(), "amount", uint64(e.syncCfg.LoopBlockLimit), "padding", limitedBigJumpPadding)
 	}
 
-	canonicalHash, err := e.canonicalHash(ctx, tx, fcuHeader.Number.Uint64())
+	canonicalHash, _, err := e.canonicalHash(ctx, tx, fcuHeader.Number.Uint64())
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
@@ -615,37 +634,51 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		err = fmt.Errorf("updateForkChoice: %w", err)
 		e.logger.Warn("Cannot update chain head", "hash", blockHash, "err", err)
 		if errors.Is(err, rules.ErrInvalidBlock) {
+			headHash, _, headErr := rawdb.ReadHeadBlockHash(tx)
+			if headErr != nil {
+				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, headErr, stateFlushingInParallel)
+			}
 			return sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
 				Status:          ExecutionStatusBadBlock,
 				ValidationError: err.Error(),
-				LatestValidHash: rawdb.ReadHeadBlockHash(tx),
+				LatestValidHash: headHash,
 			}, stateFlushingInParallel)
 		}
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
 
 	// if head hash was set then success otherwise no
-	headHash := rawdb.ReadHeadBlockHash(tx)
-	headNumber, err := e.blockReader.HeaderNumber(ctx, tx, headHash)
+	headHash, headFound, err := rawdb.ReadHeadBlockHash(tx)
 	if err != nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 	}
-	if headNumber != nil {
-		e.forkValidator.NotifyCurrentHeight(*headNumber)
+	var headNumber uint64
+	var headNumberOK bool
+	if headFound {
+		headNumber, headNumberOK, err = e.blockReader.HeaderNumber(ctx, tx, headHash)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
+		if headNumberOK {
+			e.forkValidator.NotifyCurrentHeight(headNumber)
+		}
 	}
 
 	var status ExecutionStatus
 
 	if headHash != blockHash {
 		status = ExecutionStatusBadBlock
-		blockHashBlockNum, _ := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+		blockHashBlockNum, blockHashBlockNumOK, err := e.blockReader.HeaderNumber(ctx, tx, blockHash)
+		if err != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+		}
 
 		validationError = "headHash and blockHash mismatch"
-		if headNumber != nil && e.logger != nil {
-			headNum := strconv.FormatUint(*headNumber, 10)
+		if headNumberOK && e.logger != nil {
+			headNum := strconv.FormatUint(headNumber, 10)
 			hashBlockNum := "unknown"
-			if blockHashBlockNum != nil {
-				hashBlockNum = strconv.FormatUint(*blockHashBlockNum, 10)
+			if blockHashBlockNumOK {
+				hashBlockNum = strconv.FormatUint(blockHashBlockNum, 10)
 			}
 			e.logger.Warn("bad forkchoice", "head", headHash, "headBlock", headNum, "hash", blockHash, "hashBlockNum", hashBlockNum)
 		}
@@ -666,11 +699,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				LatestValidHash: common.Hash{},
 			}, stateFlushingInParallel)
 		}
-		if err := rawdb.TruncateCanonicalChain(ctx, tx, *headNumber+1); err != nil {
+		if err := rawdb.TruncateCanonicalChain(ctx, tx, headNumber+1); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 
-		if err := rawdbv3.TxNums.Truncate(tx, *headNumber+1); err != nil {
+		if err := rawdbv3.TxNums.Truncate(tx, headNumber+1); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
 

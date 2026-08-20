@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"encoding/binary"
 	"encoding/hex"
+	"errors"
 	"fmt"
 	"testing"
 
@@ -42,6 +43,55 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
+
+type erroringGetter struct {
+	kv.Getter
+	err error
+}
+
+func (g erroringGetter) GetOne(string, []byte) ([]byte, error) {
+	return nil, g.err
+}
+
+func TestReadHeaderReturnsLookupStatusAndError(t *testing.T) {
+	t.Parallel()
+	wantErr := errors.New("read failed")
+
+	header, ok, err := rawdb.ReadHeader(erroringGetter{err: wantErr}, common.Hash{}, 1)
+	require.ErrorIs(t, err, wantErr)
+	require.False(t, ok)
+	require.Nil(t, header)
+
+	_, tx := mdbxtest.NewTestTx(t)
+	defer tx.Rollback()
+
+	header, ok, err = rawdb.ReadHeader(tx, common.Hash{}, 1)
+	require.NoError(t, err)
+	require.False(t, ok)
+	require.Nil(t, header)
+}
+
+func TestReadCanonicalHashRejectsEmptyValue(t *testing.T) {
+	t.Parallel()
+	_, tx := mdbxtest.NewTestTx(t)
+	defer tx.Rollback()
+
+	require.NoError(t, tx.Put(kv.HeaderCanonical, make([]byte, 8), []byte{}))
+	_, ok, err := rawdb.ReadCanonicalHash(tx, 0)
+	require.ErrorContains(t, err, "invalid canonical hash length")
+	require.False(t, ok)
+}
+
+func TestFindEpochRejectsMalformedKey(t *testing.T) {
+	t.Parallel()
+	_, tx := mdbxtest.NewTestTx(t)
+	defer tx.Rollback()
+
+	require.NoError(t, tx.Put(kv.Epoch, []byte{1}, []byte{1}))
+	_, _, _, ok, err := rawdb.FindEpochBeforeOrEqualNumber(tx, 0)
+	require.ErrorContains(t, err, "invalid epoch key length")
+	require.False(t, ok)
+}
 
 func newTestLegacyTx(nonce uint64, to common.Address, value uint256.Int, gasLimit uint64, gasPrice uint256.Int) *types.LegacyTx {
 	toAddr := to
@@ -371,19 +421,23 @@ func TestHeaderStorage(t *testing.T) {
 
 	// Create a test header to move around the database and make sure it's really new
 	header := &types.Header{Number: *uint256.NewInt(42), Extra: []byte("test header")}
-	entry, err := br.Header(ctx, tx, header.Hash(), header.Number.Uint64())
+	entry, ok, err := br.Header(ctx, tx, header.Hash(), header.Number.Uint64())
 	require.NoError(t, err)
-	if entry != nil {
+	if ok {
 		t.Fatalf("Non existent header returned: %v", entry)
 	}
 	// Write and verify the header in the database
 	rawdb.WriteHeader(tx, header)
-	if entry, _ := br.Header(ctx, tx, header.Hash(), header.Number.Uint64()); entry == nil {
+	if entry, ok, err := br.Header(ctx, tx, header.Hash(), header.Number.Uint64()); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatalf("Stored header not found")
 	} else if entry.Hash() != header.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, header)
 	}
-	if entry := rawdb.ReadHeaderRLP(tx, header.Hash(), header.Number.Uint64()); entry == nil {
+	if entry, ok, err := rawdb.ReadHeaderRLP(tx, header.Hash(), header.Number.Uint64()); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatalf("Stored header RLP not found")
 	} else {
 		hasher := keccak.NewFastKeccak()
@@ -395,7 +449,9 @@ func TestHeaderStorage(t *testing.T) {
 	}
 	// Delete the header and verify the execution
 	rawdb.DeleteHeader(tx, header.Hash(), header.Number.Uint64())
-	if entry, _ := br.Header(ctx, tx, header.Hash(), header.Number.Uint64()); entry != nil {
+	if entry, ok, err := br.Header(ctx, tx, header.Hash(), header.Number.Uint64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Deleted header returned: %v", entry)
 	}
 }
@@ -439,19 +495,24 @@ func TestBodyStorage(t *testing.T) {
 	hash := common.BytesToHash(hasher.Sum(nil))
 	header := &types.Header{Number: *common.Num1}
 
-	if entry, _ := br.BodyWithTransactions(ctx, tx, header.Hash(), 1); entry != nil {
+	if entry, ok, err := br.BodyWithTransactions(ctx, tx, header.Hash(), 1); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 	require.NoError(rawdb.WriteCanonicalHash(tx, header.Hash(), 1))
 	require.NoError(rawdb.WriteHeader(tx, header))
 	require.NoError(rawdb.WriteBody(tx, header.Hash(), 1, body))
-	if entry, _ := br.BodyWithTransactions(ctx, tx, header.Hash(), 1); entry == nil {
+	if entry, ok, err := br.BodyWithTransactions(ctx, tx, header.Hash(), 1); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(types.Transactions(body.Transactions)) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(body.Uncles) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, body)
 	}
-	if entry := rawdb.ReadBodyRLP(tx, header.Hash(), 1); entry == nil {
-		//if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 0); entry == nil {
+	if entry, ok, err := rawdb.ReadBodyRLP(tx, header.Hash(), 1); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatalf("Stored body RLP not found")
 	} else {
 		bodyRlp, err := rlp.EncodeToBytes(entry)
@@ -467,7 +528,9 @@ func TestBodyStorage(t *testing.T) {
 	}
 	// Delete the body and verify the execution
 	rawdb.DeleteBody(tx, hash, 1)
-	if entry, _ := br.BodyWithTransactions(ctx, tx, hash, 1); entry != nil {
+	if entry, ok, err := br.BodyWithTransactions(ctx, tx, hash, 1); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}
 }
@@ -494,13 +557,19 @@ func TestBlockStorage(t *testing.T) {
 		TxHash:      empty.RootHash,
 		ReceiptHash: empty.RootHash,
 	})
-	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, _, ok, err := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
-	if entry, _ := br.Header(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, ok, err := br.Header(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non existent header returned: %v", entry)
 	}
-	if entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, ok, err := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 
@@ -509,12 +578,16 @@ func TestBlockStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
-	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry == nil {
+	if entry, _, ok, err := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatalf("Stored block not found")
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved block mismatch: have %v, want %v", entry, block)
 	}
-	if entry, _ := br.Header(ctx, tx, block.Hash(), block.NumberU64()); entry == nil {
+	if entry, ok, err := br.Header(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatalf("Stored header not found")
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
@@ -522,7 +595,9 @@ func TestBlockStorage(t *testing.T) {
 	if err := rawdb.TruncateBlocks(t.Context(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
-	if entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry == nil {
+	if entry, ok, err := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(block.Transactions()) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(block.Uncles()) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
@@ -534,13 +609,19 @@ func TestBlockStorage(t *testing.T) {
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
 	//	t.Fatalf("Could not delete block: %v", err)
 	//}
-	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, _, ok, err := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Deleted block returned: %v", entry)
 	}
-	if entry, _ := br.Header(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, ok, err := br.Header(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Deleted header returned: %v", entry)
 	}
-	if entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, ok, err := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}
 
@@ -552,25 +633,36 @@ func TestBlockStorage(t *testing.T) {
 		//  - it must be not available by hash
 		//  - but available by hash+num - if read num from kv.BadHeaderNumber table
 		//  - prune blocks: must delete Canonical/NonCanonical/BadBlocks also
-		foundBn, _ := br.BadHeaderNumber(ctx, tx, block.Hash())
-		require.Nil(foundBn)
-		found, _ := br.BlockByHash(ctx, tx, block.Hash())
+		_, foundBnOK, err := br.BadHeaderNumber(ctx, tx, block.Hash())
+		require.NoError(err)
+		require.False(foundBnOK)
+		found, foundOK, err := br.BlockByHash(ctx, tx, block.Hash())
+		require.NoError(err)
+		require.True(foundOK)
 		require.NotNil(found)
 
 		err = rawdb.WriteCanonicalHash(tx, block.Hash(), block.NumberU64())
 		require.NoError(err)
 		err = rawdb.TruncateCanonicalHash(tx, block.NumberU64(), true)
 		require.NoError(err)
-		foundBlock, _ := br.BlockByHash(ctx, tx, block.Hash())
+		foundBlock, foundOK, err := br.BlockByHash(ctx, tx, block.Hash())
+		require.NoError(err)
+		require.False(foundOK)
 		require.Nil(foundBlock)
 
-		foundBn = rawdb.ReadHeaderNumber(tx, block.Hash())
-		require.Nil(foundBn)
-		foundBn, _ = br.BadHeaderNumber(ctx, tx, block.Hash())
-		require.NotNil(foundBn)
-		foundBlock, _ = br.BlockByNumber(ctx, tx, *foundBn)
+		_, foundBnOK, err = rawdb.ReadHeaderNumber(tx, block.Hash())
+		require.NoError(err)
+		require.False(foundBnOK)
+		foundBn, foundBnOK, err := br.BadHeaderNumber(ctx, tx, block.Hash())
+		require.NoError(err)
+		require.True(foundBnOK)
+		foundBlock, foundOK, err = br.BlockByNumber(ctx, tx, foundBn)
+		require.NoError(err)
+		require.False(foundOK)
 		require.Nil(foundBlock)
-		foundBlock, _, _ = br.BlockWithSenders(ctx, tx, block.Hash(), *foundBn)
+		foundBlock, _, foundOK, err = br.BlockWithSenders(ctx, tx, block.Hash(), foundBn)
+		require.NoError(err)
+		require.True(foundOK)
 		require.NotNil(foundBlock)
 	}
 
@@ -579,17 +671,23 @@ func TestBlockStorage(t *testing.T) {
 	deleted, err = bw.PruneBlocks(ctx, tx, 0, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)
-	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	entry, ok, err := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NoError(err)
+	require.True(ok)
 	require.NotNil(entry)
 	deleted, err = bw.PruneBlocks(ctx, tx, 1, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)
-	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	entry, ok, err = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NoError(err)
+	require.True(ok)
 	require.NotNil(entry)
 	deleted, err = bw.PruneBlocks(ctx, tx, 2, 1)
 	require.NoError(err)
 	require.Equal(1, deleted)
-	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	entry, ok, err = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NoError(err)
+	require.False(ok)
 	require.Nil(entry)
 }
 
@@ -616,7 +714,9 @@ func TestPartialBlockStorage(t *testing.T) {
 
 	// Store a header and check that it's not recognized as a block
 	rawdb.WriteHeader(tx, header)
-	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, _, ok, err := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
 	rawdb.DeleteHeader(tx, block.Hash(), block.NumberU64())
@@ -625,7 +725,9 @@ func TestPartialBlockStorage(t *testing.T) {
 	if err := rawdb.WriteBody(tx, block.Hash(), block.NumberU64(), block.Body()); err != nil {
 		t.Fatal(err)
 	}
-	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, _, ok, err := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
 	rawdb.DeleteBody(tx, block.Hash(), block.NumberU64())
@@ -636,7 +738,9 @@ func TestPartialBlockStorage(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry == nil {
+	if entry, _, ok, err := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatalf("Stored block not found")
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved block mismatch: have %v, want %v", entry, block)
@@ -656,11 +760,11 @@ func TestTdStorage(t *testing.T) {
 
 	// Create a test TD to move around the database and make sure it's really new
 	hash, td := common.Hash{}, uint256.NewInt(314)
-	entry, err := rawdb.ReadTd(tx, hash, 0)
+	entry, ok, err := rawdb.ReadTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("ReadTd failed: %v", err)
 	}
-	if entry != nil {
+	if ok {
 		t.Fatalf("Non existent TD returned: %v", entry)
 	}
 	// Write and verify the TD in the database
@@ -668,11 +772,11 @@ func TestTdStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteTd failed: %v", err)
 	}
-	entry, err = rawdb.ReadTd(tx, hash, 0)
+	entry, ok, err = rawdb.ReadTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("ReadTd failed: %v", err)
 	}
-	if entry == nil {
+	if !ok {
 		t.Fatalf("Stored TD not found")
 	} else if entry.Cmp(td) != 0 {
 		t.Fatalf("Retrieved TD mismatch: have %v, want %v", entry, td)
@@ -682,11 +786,11 @@ func TestTdStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteTd failed: %v", err)
 	}
-	entry, err = rawdb.ReadTd(tx, hash, 0)
+	entry, ok, err = rawdb.ReadTd(tx, hash, 0)
 	if err != nil {
 		t.Fatalf("ReadTd failed: %v", err)
 	}
-	if entry != nil {
+	if ok {
 		t.Fatalf("Deleted TD returned: %v", entry)
 	}
 }
@@ -705,11 +809,11 @@ func TestCanonicalMappingStorage(t *testing.T) {
 
 	// Create a test canonical number and assinged hash to move around
 	hash, number := common.Hash{0: 0xff}, uint64(314)
-	entry, _, err := br.CanonicalHash(m.Ctx, tx, number)
+	entry, ok, err := br.CanonicalHash(m.Ctx, tx, number)
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
-	if entry != (common.Hash{}) {
+	if ok {
 		t.Fatalf("Non existent canonical mapping returned: %v", entry)
 	}
 	// Write and verify the TD in the database
@@ -717,11 +821,11 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("WriteCanonicalHash failed: %v", err)
 	}
-	entry, _, err = br.CanonicalHash(m.Ctx, tx, number)
+	entry, ok, err = br.CanonicalHash(m.Ctx, tx, number)
 	if err != nil {
 		t.Fatalf("ReadCanonicalHash failed: %v", err)
 	}
-	if entry == (common.Hash{}) {
+	if !ok {
 		t.Fatalf("Stored canonical mapping not found")
 	} else if entry != hash {
 		t.Fatalf("Retrieved canonical mapping mismatch: have %v, want %v", entry, hash)
@@ -731,11 +835,11 @@ func TestCanonicalMappingStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("DeleteCanonicalHash failed: %v", err)
 	}
-	entry, _, err = br.CanonicalHash(m.Ctx, tx, number)
+	entry, ok, err = br.CanonicalHash(m.Ctx, tx, number)
 	if err != nil {
 		t.Error(err)
 	}
-	if entry != (common.Hash{}) {
+	if ok {
 		t.Fatalf("Deleted canonical mapping returned: %v", entry)
 	}
 }
@@ -749,10 +853,14 @@ func TestHeadStorage2(t *testing.T) {
 	blockFull := types.NewBlockWithHeader(&types.Header{Extra: []byte("test block full")})
 
 	// Check that no head entries are in a pristine database
-	if entry := rawdb.ReadHeadHeaderHash(db); entry != (common.Hash{}) {
+	if entry, ok, err := rawdb.ReadHeadHeaderHash(db); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non head header entry returned: %v", entry)
 	}
-	if entry := rawdb.ReadHeadBlockHash(db); entry != (common.Hash{}) {
+	if entry, ok, err := rawdb.ReadHeadBlockHash(db); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non head block entry returned: %v", entry)
 	}
 	// Assign separate entries for the head header and block
@@ -760,10 +868,14 @@ func TestHeadStorage2(t *testing.T) {
 	rawdb.WriteHeadBlockHash(db, blockFull.Hash())
 
 	// Check that both heads are present, and different (i.e. two heads maintained)
-	if entry := rawdb.ReadHeadHeaderHash(db); entry != blockHead.Hash() {
+	if entry, ok, err := rawdb.ReadHeadHeaderHash(db); err != nil {
+		t.Fatal(err)
+	} else if !ok || entry != blockHead.Hash() {
 		t.Fatalf("Head header hash mismatch: have %v, want %v", entry, blockHead.Hash())
 	}
-	if entry := rawdb.ReadHeadBlockHash(db); entry != blockFull.Hash() {
+	if entry, ok, err := rawdb.ReadHeadBlockHash(db); err != nil {
+		t.Fatal(err)
+	} else if !ok || entry != blockFull.Hash() {
 		t.Fatalf("Head block hash mismatch: have %v, want %v", entry, blockFull.Hash())
 	}
 }
@@ -787,10 +899,14 @@ func TestHeadStorage(t *testing.T) {
 	rawdb.WriteHeadBlockHash(tx, blockFull.Hash())
 
 	// Check that both heads are present, and different (i.e. two heads maintained)
-	if entry := rawdb.ReadHeadHeaderHash(tx); entry != blockHead.Hash() {
+	if entry, ok, err := rawdb.ReadHeadHeaderHash(tx); err != nil {
+		t.Fatal(err)
+	} else if !ok || entry != blockHead.Hash() {
 		t.Fatalf("Head header hash mismatch: have %v, want %v", entry, blockHead.Hash())
 	}
-	if entry := rawdb.ReadHeadBlockHash(tx); entry != blockFull.Hash() {
+	if entry, ok, err := rawdb.ReadHeadBlockHash(tx); err != nil {
+		t.Fatal(err)
+	} else if !ok || entry != blockFull.Hash() {
 		t.Fatalf("Head block hash mismatch: have %v, want %v", entry, blockFull.Hash())
 	}
 }
@@ -887,9 +1003,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 		require.NoError(sd.Flush(ctx, tx))
 	}
 
-	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
+	b, _, ok, err := br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
-	require.NotNil(b)
+	require.True(ok)
 	rs, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
 	require.NoError(err)
 	require.NotEmpty(rs)
@@ -903,9 +1019,9 @@ func TestBlockReceiptStorage(t *testing.T) {
 	require.NoError(rawdb.WriteHeader(tx, header))
 	// Sanity check that body alone without the receipt is a full purge
 	require.NoError(rawdb.WriteBody(tx, hash, 1, body))
-	b, _, err = br.BlockWithSenders(ctx, tx, hash, 1)
+	_, _, ok, err = br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(err)
-	require.NotNil(b)
+	require.True(ok)
 }
 
 func TestReadReceiptsCacheV2BadTxIndex(t *testing.T) {
@@ -951,9 +1067,9 @@ func TestReadReceiptsCacheV2BadTxIndex(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sd.Flush(ctx, tx))
 
-	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
+	b, _, ok, err := br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(t, err)
-	require.NotNil(t, b)
+	require.True(t, ok)
 	rs, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
 	require.NoError(t, err)
 	require.Empty(t, rs)
@@ -1002,9 +1118,9 @@ func TestReadReceiptsCacheV2UnorderedTxIndex(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, sd.Flush(ctx, tx))
 
-	b, _, err := br.BlockWithSenders(ctx, tx, hash, 1)
+	b, _, ok, err := br.BlockWithSenders(ctx, tx, hash, 1)
 	require.NoError(t, err)
-	require.NotNil(t, b)
+	require.True(t, ok)
 	rs, err := rawdb.ReadReceiptsCacheV2(tx, b, txNumReader)
 	require.NoError(t, err)
 	require.Empty(t, rs)
@@ -1049,13 +1165,19 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 		TxHash:      empty.RootHash,
 		ReceiptHash: empty.RootHash,
 	})
-	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, _, ok, err := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non existent block returned: %v", entry)
 	}
-	if entry, _ := br.Header(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, ok, err := br.Header(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non existent header returned: %v", entry)
 	}
-	if entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, ok, err := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Non existent body returned: %v", entry)
 	}
 
@@ -1073,12 +1195,16 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	if err != nil {
 		t.Fatalf("Could not write block: %v", err)
 	}
-	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry == nil {
+	if entry, _, ok, err := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatalf("Stored block not found")
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved block mismatch: have %v, want %v", entry, block)
 	}
-	if entry, _ := br.Header(ctx, tx, block.Hash(), block.NumberU64()); entry == nil {
+	if entry, ok, err := br.Header(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if !ok {
 		t.Fatalf("Stored header not found")
 	} else if entry.Hash() != block.Hash() {
 		t.Fatalf("Retrieved header mismatch: have %v, want %v", entry, block.Header())
@@ -1086,8 +1212,11 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	if err := rawdb.TruncateBlocks(t.Context(), tx, 2); err != nil {
 		t.Fatal(err)
 	}
-	entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
-	if entry == nil {
+	entry, ok, err := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !ok {
 		t.Fatalf("Stored body not found")
 	} else if types.DeriveSha(types.Transactions(entry.Transactions)) != types.DeriveSha(block.Transactions()) || types.CalcUncleHash(entry.Uncles) != types.CalcUncleHash(block.Uncles()) {
 		t.Fatalf("Retrieved body mismatch: have %v, want %v", entry, block.Body())
@@ -1121,13 +1250,19 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	//if err := DeleteBlock(tx, block.Hash(), block.NumberU64()); err != nil {
 	//	t.Fatalf("Could not delete block: %v", err)
 	//}
-	if entry, _, _ := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, _, ok, err := br.BlockWithSenders(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Deleted block returned: %v", entry)
 	}
-	if entry, _ := br.Header(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, ok, err := br.Header(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Deleted header returned: %v", entry)
 	}
-	if entry, _ := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); entry != nil {
+	if entry, ok, err := br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64()); err != nil {
+		t.Fatal(err)
+	} else if ok {
 		t.Fatalf("Deleted body returned: %v", entry)
 	}
 
@@ -1140,18 +1275,21 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	deleted, err = bw.PruneBlocks(ctx, tx, 0, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)
-	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
-	require.NotNil(entry)
+	entry, ok, err = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NoError(err)
+	require.True(ok)
 	deleted, err = bw.PruneBlocks(ctx, tx, 1, 1)
 	require.NoError(err)
 	require.Equal(0, deleted)
-	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
-	require.NotNil(entry)
+	entry, ok, err = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NoError(err)
+	require.True(ok)
 	deleted, err = bw.PruneBlocks(ctx, tx, 2, 1)
 	require.NoError(err)
 	require.Equal(1, deleted)
-	entry, _ = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
-	require.Nil(entry)
+	entry, ok, err = br.BodyWithTransactions(ctx, tx, block.Hash(), block.NumberU64())
+	require.NoError(err)
+	require.False(ok)
 }
 
 func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
@@ -1183,8 +1321,9 @@ func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), emptyBALBytes))
 
-	readBlock := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
-	require.NotNil(t, readBlock)
+	readBlock, ok, err := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
+	require.NoError(t, err)
+	require.True(t, ok)
 	require.Equal(t, emptyBALBytes, readBlock.BlockAccessList())
 }
 
@@ -1201,9 +1340,9 @@ func TestBlockAccessListStorage(t *testing.T) {
 		ReceiptHash: empty.RootHash,
 	})
 
-	data, err := rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
+	_, ok, err := rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
 	require.NoError(t, err)
-	require.Empty(t, data)
+	require.False(t, ok)
 
 	nonEmpty := types.BlockAccessList{
 		{
@@ -1214,8 +1353,9 @@ func TestBlockAccessListStorage(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), nonEmptyBytes))
 
-	data, err = rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
+	data, ok, err := rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
 	require.NoError(t, err)
+	require.True(t, ok)
 	require.Equal(t, nonEmptyBytes, data)
 
 	decoded, err := types.DecodeBlockAccessListBytes(data)
@@ -1227,8 +1367,9 @@ func TestBlockAccessListStorage(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), emptyBytes))
 
-	data, err = rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
+	data, ok, err = rawdb.ReadBlockAccessListBytes(tx, block.Hash(), block.NumberU64())
 	require.NoError(t, err)
+	require.True(t, ok)
 	require.Equal(t, emptyBytes, data)
 
 	decoded, err = types.DecodeBlockAccessListBytes(data)

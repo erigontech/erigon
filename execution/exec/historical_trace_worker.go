@@ -564,20 +564,16 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 		log.Info("[custom_trace] batch start", "blocks", fmt.Sprintf("%s-%s", common.PrettyExact(fromBlock), common.PrettyExact(toBlock)), "steps", fmt.Sprintf("%.2f-%.2f", fromStep, toStep), "workers", cfg.Workers)
 	}
 
-	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header, err error) {
+	getHeaderFunc := func(hash common.Hash, number uint64) (h *types.Header, found bool, err error) {
 		if tx != nil && WorkerCount == 1 {
-			h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
+			h, found, err = cfg.BlockReader.Header(ctx, tx, hash, number)
 		} else {
-			cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
-				h, err = cfg.BlockReader.Header(ctx, tx, hash, number)
-				return nil
+			err = cfg.ChainDB.View(ctx, func(tx kv.Tx) error {
+				h, found, err = cfg.BlockReader.Header(ctx, tx, hash, number)
+				return err
 			})
-
-			if err != nil {
-				return nil, err
-			}
 		}
-		return h, err
+		return h, found, err
 	}
 
 	outTxNum := &atomic.Uint64{}
@@ -608,14 +604,13 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 		default:
 		}
 
-		var b *types.Block
-		b, err = BlockWithSenders(ctx, nil, tx, br, blockNum)
+		b, ok, err := BlockWithSenders(ctx, nil, tx, br, blockNum)
 		if err != nil {
 			return err
 		}
-		if b == nil {
+		if !ok {
 			// TODO: panic here and see that overall process deadlock
-			return fmt.Errorf("nil block %d", blockNum)
+			return fmt.Errorf("block not found: %d", blockNum)
 		}
 		txs := b.Transactions()
 		header := b.HeaderNoCopy()
@@ -662,28 +657,22 @@ func CustomTraceMapReduce(ctx context.Context, fromBlock, toBlock uint64, consum
 	return nil
 }
 
-func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader dbservices.BlockReader, blockNum uint64) (b *types.Block, err error) {
+func BlockWithSenders(ctx context.Context, db kv.RoDB, tx kv.Tx, blockReader dbservices.BlockReader, blockNum uint64) (b *types.Block, ok bool, err error) {
 	select {
 	case <-ctx.Done():
-		return nil, ctx.Err()
+		return nil, false, ctx.Err()
 	default:
 	}
 	if tx == nil {
 		tx, err = db.BeginRo(context.Background())
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 		defer tx.Rollback()
 	}
-	b, err = blockReader.BlockByNumber(context.Background(), tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-	if b == nil {
-		return nil, nil
-	}
-	return b, err
+	return blockReader.BlockByNumber(context.Background(), tx, blockNum)
 }
+
 func BlkRangeToSteps(ctx context.Context, tx kv.TemporalTx, fromBlock, toBlock uint64, txNumsReader rawdbv3.TxNumsReader) (float64, float64, error) {
 	fromTxNum, err := txNumsReader.Min(ctx, tx, fromBlock)
 	if err != nil {

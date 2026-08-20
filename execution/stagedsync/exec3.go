@@ -519,26 +519,25 @@ func (te *txExecutor) domains() *execctx.SharedDomains {
 	return te.doms
 }
 
-func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header, err error) {
+func (te *txExecutor) getHeader(ctx context.Context, hash common.Hash, number uint64) (h *types.Header, found bool, err error) {
 	if te.applyTx != nil {
 		err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
-			h, err = te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
+			h, found, err = te.cfg.blockReader.Header(ctx, te.applyTx, hash, number)
 			return err
 		})
 
 		if err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	} else {
 		if err := te.cfg.db.View(ctx, func(tx kv.Tx) (err error) {
-			h, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
+			h, found, err = te.cfg.blockReader.Header(ctx, tx, hash, number)
 			return err
 		}); err != nil {
-			return nil, err
+			return nil, false, err
 		}
 	}
-
-	return h, nil
+	return h, found, nil
 }
 
 // reconstructPriorReceipts re-derives receipts of a resumed block's prefix txs
@@ -555,7 +554,7 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 	priorIbs := state.New(state.NewHistoryReaderV3(applyTx, blockStartTxNum))
 	defer priorIbs.Close()
 	priorGp := protocol.NewGasPool(header.GasLimit, te.cfg.chainConfig.GetMaxBlobGasPerBlock(header.Time))
-	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, bool, error) {
 		return te.cfg.blockReader.Header(ctx, applyTx, hash, number)
 	}
 	priorReceipts, err := receipts.DerivePriorReceipts(ctx, te.cfg.chainConfig, te.cfg.engine, header, txs, startTxIndex, blockStartTxNum, applyTx, priorIbs, priorGp, getHeader)
@@ -565,7 +564,7 @@ func (te *txExecutor) reconstructPriorReceipts(ctx context.Context, applyTx kv.T
 	return priorReceipts, nil
 }
 
-func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
+func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) error {
 	defer func() {
 		if rec := recover(); rec != nil {
 			te.logger.Warn("hook panicked", "panic", rec, "stack", dbg.Stack())
@@ -573,14 +572,14 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	}()
 
 	if te.hooks == nil {
-		return
+		return nil
 	}
 
 	blockNum := block.NumberU64()
 	blockHash := block.Hash()
 	if blockHash == (common.Hash{}) {
 		te.logger.Warn("hooks ignored: zero block hash")
-		return
+		return nil
 	}
 
 	if blockNum == 0 {
@@ -595,12 +594,30 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 
 			if err := te.applyTx.Apply(ctx, func(tx kv.Tx) (err error) {
 				chainReader := exec.NewChainReader(te.cfg.chainConfig, tx, te.cfg.blockReader, te.logger)
-				td = chainReader.GetTd(block.ParentHash(), blockNum-1)
-				finalized = chainReader.CurrentFinalizedHeader()
-				safe = chainReader.CurrentSafeHeader()
+				tdResult, tdFound, err := chainReader.GetTd(block.ParentHash(), blockNum-1)
+				if err != nil {
+					return err
+				}
+				if tdFound {
+					td = tdResult
+				}
+				finalizedResult, finalizedFound, err := chainReader.CurrentFinalizedHeader()
+				if err != nil {
+					return err
+				}
+				if finalizedFound {
+					finalized = finalizedResult
+				}
+				safeResult, safeFound, err := chainReader.CurrentSafeHeader()
+				if err != nil {
+					return err
+				}
+				if safeFound {
+					safe = safeResult
+				}
 				return nil
 			}); err != nil {
-				te.logger.Warn("hook: OnBlockStart: abandoned", "err", err)
+				return err
 			}
 
 			te.hooks.OnBlockStart(tracing.BlockEvent{
@@ -611,12 +628,17 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 			})
 		}
 	}
+	return nil
 }
 
 func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
 	data := block.BlockAccessList()
 	if len(data) == 0 && block.HeaderNoCopy().HasNonEmptyBAL() {
-		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
+		data, ok, err := rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
+		if err != nil || !ok {
+			return nil, err
+		}
+		return data, nil
 	}
 	return data, nil
 }
@@ -724,8 +746,15 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			// BlockContext: workers override GetHash with their own per-worker
 			// function (installWorkerGetHash) using their own roTx; this
 			// placeholder resolves ancestor headers via the block source.
-			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, error) {
-				return src.header(ctx, hash, number)
+			blockContext := protocol.NewEVMBlockContext(header, protocol.GetHashFn(header, func(hash common.Hash, number uint64) (*types.Header, bool, error) {
+				header, ok, err := src.header(ctx, hash, number)
+				if err != nil {
+					return nil, false, err
+				}
+				if !ok {
+					return nil, false, fmt.Errorf("header not found: %d", number)
+				}
+				return header, true, nil
 			}), te.cfg.engine, te.cfg.author, te.cfg.chainConfig)
 
 			var txTasks []exec.Task

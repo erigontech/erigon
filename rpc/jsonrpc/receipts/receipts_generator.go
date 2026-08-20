@@ -70,7 +70,7 @@ type ReceiptEnv struct {
 	gasUsed    *protocol.GasUsed
 	gp         *protocol.GasPool
 	noopWriter *state.NoopWriter
-	getHeader  func(hash common.Hash, number uint64) (*types.Header, error)
+	getHeader  func(hash common.Hash, number uint64) (*types.Header, bool, error)
 	header     *types.Header
 }
 
@@ -172,12 +172,12 @@ func (g *Generator) PrepareEnv(ctx context.Context, header *types.Header, cfg *c
 
 	noopWriter := state.NewNoopWriter()
 
-	getHeader := func(hash common.Hash, number uint64) (*types.Header, error) {
-		h, e := g.blockReader.Header(ctx, tx, hash, number)
+	getHeader := func(hash common.Hash, number uint64) (*types.Header, bool, error) {
+		h, ok, e := g.blockReader.Header(ctx, tx, hash, number)
 		if e != nil {
 			log.Error("getHeader error", "number", number, "hash", hash, "err", e)
 		}
-		return h, e
+		return h, ok, e
 	}
 	return &ReceiptEnv{
 		ibs:        ibs,

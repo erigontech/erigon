@@ -365,11 +365,11 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, 
 		}
 		return nil, err
 	}
-	header, err := api._blockReader.Header(ctx, tx, blockHash, blockNum)
+	header, ok, err := api._blockReader.Header(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if header == nil {
+	if !ok {
 		return nil, errBlockAccessListNotFound
 	}
 	chainConfig, err := api.chainConfig(ctx, tx)
@@ -379,11 +379,11 @@ func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, 
 	if !chainConfig.IsAmsterdam(header.Time) {
 		return nil, blockAccessListResourceNotFoundError()
 	}
-	data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
+	data, found, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if len(data) == 0 {
+	if !found {
 		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
 		if errors.Is(err, state.PrunedError) {
 			return nil, blockAccessListPrunedHistoryError()
@@ -442,11 +442,11 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, nil
 	}
 
-	body, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	_, txCount, ok, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
-	if body == nil {
+	if !ok {
 		return nil, nil
 	}
 
@@ -488,9 +488,12 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 
-	_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
+	_, txCount, ok, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
+	}
+	if !ok {
+		return nil, nil
 	}
 
 	chainConfig, err := api.chainConfig(ctx, tx)

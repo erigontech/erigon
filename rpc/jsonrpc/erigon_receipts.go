@@ -122,8 +122,11 @@ func (api *ErigonImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria)
 	defer tx.Rollback()
 
 	if crit.BlockHash != nil {
-		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
-		if header == nil {
+		header, ok, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
+		if err != nil {
+			return nil, err
+		}
+		if !ok {
 			return nil, err
 		}
 		begin = header.Number.Uint64()
@@ -198,11 +201,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 	var begin, end uint64 // Filter range: begin-end(from-to). Two limits are included in the filter
 
 	if crit.BlockHash != nil {
-		header, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
+		header, ok, err := api._blockReader.HeaderByHash(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return nil, err
 		}
-		if header == nil {
+		if !ok {
 			return nil, fmt.Errorf("block header not found %x", *crit.BlockHash)
 		}
 		begin = header.Number.Uint64()
@@ -274,10 +277,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 
 		// if block number changed, calculate all related field
 		if blockNumChanged {
-			if header, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
+			var ok bool
+			if header, ok, err = api._blockReader.HeaderByNumber(ctx, tx, blockNum); err != nil {
 				return nil, err
 			}
-			if header == nil {
+			if !ok {
 				log.Warn("[rpc] header is nil", "blockNum", blockNum)
 				continue
 			}
@@ -336,11 +340,11 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			continue
 		}
 
-		body, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNum)
+		body, ok, err := api._blockReader.BodyWithTransactions(ctx, tx, blockHash, blockNum)
 		if err != nil {
 			return nil, err
 		}
-		if body == nil {
+		if !ok {
 			return nil, fmt.Errorf("block not found %d", blockNum)
 		}
 		for _, log := range filtered {
@@ -381,14 +385,14 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 	defer tx.Rollback()
 
 	{
-		blockNum, err := api._blockReader.HeaderNumber(ctx, tx, cannonicalBlockHash)
+		blockNum, ok, err := api._blockReader.HeaderNumber(ctx, tx, cannonicalBlockHash)
 		if err != nil {
 			return nil, err
 		}
-		if blockNum == nil {
+		if !ok {
 			return nil, fmt.Errorf("block not found %x", cannonicalBlockHash)
 		}
-		isCanonicalHash, err := api._blockReader.IsCanonical(ctx, tx, cannonicalBlockHash, *blockNum)
+		isCanonicalHash, err := api._blockReader.IsCanonical(ctx, tx, cannonicalBlockHash, blockNum)
 		if err != nil {
 			return nil, err
 		}

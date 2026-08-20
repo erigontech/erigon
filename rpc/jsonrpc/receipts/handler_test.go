@@ -66,13 +66,15 @@ func TestGetBlockHeaders(t *testing.T) {
 
 	var blocks []*types.Block
 	for i := range limit {
-		block, err := backend.BlockReader.BlockByNumber(backend.Ctx, tx, i)
+		block, ok, err := backend.BlockReader.BlockByNumber(backend.Ctx, tx, i)
 		require.NoError(t, err)
+		require.True(t, ok)
 		blocks = append(blocks, block)
 	}
 
-	currentBlock, err := backend.BlockReader.CurrentBlock(tx)
+	currentBlock, ok, err := backend.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
+	require.True(t, ok)
 
 	getHashes := func(from, limit uint64) (hashes []common.Hash) {
 		for i := range limit {
@@ -240,8 +242,9 @@ func TestGetBlockHeaders(t *testing.T) {
 		_ = i
 		var expectedHeaders []*types.Header
 		for _, hash := range tt.expect {
-			block, err := backend.BlockReader.BlockByHash(backend.Ctx, tx, hash)
+			block, ok, err := backend.BlockReader.BlockByHash(backend.Ctx, tx, hash)
 			require.NoError(t, err)
+			require.True(t, ok)
 			expectedHeaders = append(expectedHeaders, block.Header())
 		}
 		backend.StreamWg.Wait()
@@ -309,9 +312,13 @@ func TestGetBlockReceipts(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	for i := uint64(0); i <= rawdb.ReadCurrentHeader(tx).Number.Uint64(); i++ {
-		block, err := m.BlockReader.BlockByNumber(m.Ctx, tx, i)
+	currentHeader, ok, err := rawdb.ReadCurrentHeader(tx)
+	require.NoError(t, err)
+	require.True(t, ok)
+	for i := uint64(0); i <= currentHeader.Number.Uint64(); i++ {
+		block, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, i)
 		require.NoError(t, err)
+		require.True(t, ok)
 
 		hashes = append(hashes, block.Hash())
 		// If known, encode and queue for response packet

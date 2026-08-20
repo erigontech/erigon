@@ -231,11 +231,12 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 	if genesisBlock == nil {
 		return nil, nil, errors.New("genesis block not found in database")
 	}
-	cc, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
+	var ok bool
+	cc, ok, err = rawdb.ReadChainConfig(tx, genesisBlock.Hash())
 	if err != nil {
 		return nil, nil, err
 	}
-	if cc != nil {
+	if ok {
 		api._genesis.Store(genesisBlock)
 		api._chainConfig.Store(cc)
 	}
@@ -248,6 +249,7 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	}
 	return api.filters.LastPendingBlock()
 }
+
 func (api *BaseAPI) engine() rules.EngineReader {
 	return api._engine
 }
@@ -313,15 +315,15 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 		}
 	}
 	overlayTx := api.filters.WithOverlay(tx)
-	number, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
+	number, ok, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
 	if err != nil {
 		return nil, err
 	}
-	if number == nil {
+	if !ok {
 		return nil, nil
 	}
 
-	return api.blockWithSenders(ctx, tx, hash, *number)
+	return api.blockWithSenders(ctx, tx, hash, number)
 }
 
 func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
@@ -331,11 +333,11 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 		}
 	}
 	overlayTx := api.filters.WithOverlay(tx)
-	block, _, err := api._blockReader.BlockWithSenders(ctx, overlayTx, hash, number)
+	block, _, ok, err := api._blockReader.BlockWithSenders(ctx, overlayTx, hash, number)
 	if err != nil {
 		return nil, err
 	}
-	if block == nil { // don't save nil's to cache
+	if !ok { // don't save nil's to cache
 		return nil, nil
 	}
 	// don't save empty blocks to cache, because in Erigon
@@ -360,15 +362,15 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 			return it.NumberU64(), nil
 		}
 	}
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	number, ok, err := api._blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return 0, err
 	}
 
-	if number == nil {
+	if !ok {
 		return 0, errors.New("header number not found")
 	}
-	return *number, nil
+	return number, nil
 
 }
 
@@ -385,11 +387,13 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	}
 
 	overlayTx := api.filters.WithOverlay(tx)
-	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
+	header, ok, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, false, err
 	}
-	// header can be nil
+	if !ok {
+		return nil, isLatest, nil
+	}
 	return header, isLatest, nil
 }
 
@@ -405,7 +409,11 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 		}
 	}
 	overlayTx := api.filters.WithOverlay(tx)
-	return api._blockReader.Header(ctx, overlayTx, h, n)
+	header, ok, err := api._blockReader.Header(ctx, overlayTx, h, n)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return header, nil
 }
 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {
@@ -415,15 +423,19 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 		}
 	}
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	number, ok, err := api._blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
 
-	if number == nil {
+	if !ok {
 		return nil, nil
 	}
-	return api._blockReader.Header(ctx, tx, hash, *number)
+	header, ok, err := api._blockReader.Header(ctx, tx, hash, number)
+	if err != nil || !ok {
+		return nil, err
+	}
+	return header, nil
 }
 
 // checks the pruning state to see if we would hold information about this

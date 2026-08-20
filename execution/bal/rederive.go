@@ -32,7 +32,7 @@ import (
 )
 
 // GetHeaderFunc returns a header by hash+number. Used for BLOCKHASH resolution.
-type GetHeaderFunc = func(hash common.Hash, number uint64) (*types.Header, error)
+type GetHeaderFunc = func(hash common.Hash, number uint64) (*types.Header, bool, error)
 
 // RederiveBlockAccessList re-derives a block's Block Access List by replaying
 // the whole block — init system calls, every transaction, and finalize.

@@ -121,8 +121,10 @@ func BenchmarkCanonicalHash_MDBXLookup(b *testing.B) {
 	b.ResetTimer()
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
-		if _, err := rawdb.ReadCanonicalHash(tx, uint64(i%benchBlockCount)); err != nil {
+		if _, ok, err := rawdb.ReadCanonicalHash(tx, uint64(i%benchBlockCount)); err != nil {
 			b.Fatal(err)
+		} else if !ok {
+			b.Fatal("canonical hash not found")
 		}
 	}
 }
@@ -219,8 +221,10 @@ func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
 
 	// Warmup: on this branch this populates the cache; on main it is a no-op.
 	for i := uint64(startBlock); i < startBlock+numBlocks; i++ {
-		if _, _, err := blockReader.CanonicalHash(context.Background(), tx, i); err != nil {
+		if _, ok, err := blockReader.CanonicalHash(context.Background(), tx, i); err != nil {
 			b.Fatal(err)
+		} else if !ok {
+			b.Fatalf("canonical hash %d not found", i)
 		}
 	}
 
@@ -228,8 +232,10 @@ func BenchmarkCanonicalHash_RealSnapshot(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		blockNum := uint64(startBlock + (i % numBlocks))
-		if _, _, err := blockReader.CanonicalHash(context.Background(), tx, blockNum); err != nil {
+		if _, ok, err := blockReader.CanonicalHash(context.Background(), tx, blockNum); err != nil {
 			b.Fatal(err)
+		} else if !ok {
+			b.Fatalf("canonical hash %d not found", blockNum)
 		}
 	}
 }
@@ -277,8 +283,10 @@ func BenchmarkCanonicalHash_RealSnapshot_MainEquivalent(b *testing.B) {
 
 	// Warm headerByNumCache for all numBlocks via the full snapshot path.
 	for i := uint64(startBlock); i < startBlock+numBlocks; i++ {
-		if _, _, err := blockReader.CanonicalHash(ctx, tx, i); err != nil {
+		if _, ok, err := blockReader.CanonicalHash(ctx, tx, i); err != nil {
 			b.Fatal(err)
+		} else if !ok {
+			b.Fatalf("canonical hash %d not found", i)
 		}
 	}
 	// Replace canonicalHashCache with a size-1 cache so it always misses when
@@ -290,8 +298,10 @@ func BenchmarkCanonicalHash_RealSnapshot_MainEquivalent(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		blockNum := uint64(startBlock + (i % numBlocks))
-		if _, _, err := blockReader.CanonicalHash(ctx, tx, blockNum); err != nil {
+		if _, ok, err := blockReader.CanonicalHash(ctx, tx, blockNum); err != nil {
 			b.Fatal(err)
+		} else if !ok {
+			b.Fatalf("canonical hash %d not found", blockNum)
 		}
 	}
 }
@@ -341,8 +351,10 @@ func BenchmarkCanonicalHash_RealSnapshot_Cold(b *testing.B) {
 	b.ReportAllocs()
 	for i := 0; i < b.N; i++ {
 		blockNum := uint64(startBlock + (i % coldRange))
-		if _, _, err := blockReader.CanonicalHash(context.Background(), tx, blockNum); err != nil {
+		if _, ok, err := blockReader.CanonicalHash(context.Background(), tx, blockNum); err != nil {
 			b.Fatal(err)
+		} else if !ok {
+			b.Fatalf("canonical hash %d not found", blockNum)
 		}
 	}
 }

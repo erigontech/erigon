@@ -547,7 +547,13 @@ func stageBodies(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) err
 
 func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	tmpdir := datadir.New(datadirCli).Tmp
-	chainConfig := fromdb.ChainConfig(db)
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	_, clean, engine, _, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
 	defer engine.Close()
@@ -571,13 +577,19 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 			if err := common.Stopped(ctx.Done()); err != nil {
 				return err
 			}
-			h, _ := br.HeaderByNumber(ctx, tx, i)
-			if h == nil {
-				break
-			}
-			withoutSenders, senders, err := br.BlockWithSenders(ctx, tx, h.Hash(), h.Number.Uint64())
+			h, ok, err := br.HeaderByNumber(ctx, tx, i)
 			if err != nil {
 				return err
+			}
+			if !ok {
+				break
+			}
+			withoutSenders, senders, ok, err := br.BlockWithSenders(ctx, tx, h.Hash(), h.Number.Uint64())
+			if err != nil {
+				return err
+			}
+			if !ok {
+				return fmt.Errorf("block %d not found", i)
 			}
 			withoutSenders.Body().SendersFromTxs() //remove senders info from txs
 			txs := withoutSenders.Transactions()
@@ -672,7 +684,14 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	logger.Info("Stage", "name", s.ID, "progress", s.BlockNumber)
-	chainConfig, pm := fromdb.ChainConfig(db), fromdb.PruneMode(db)
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
+	pm := fromdb.PruneMode(db)
 	if pruneTo > 0 {
 		pm.History = prune.Distance(s.BlockNumber - pruneTo)
 	}
@@ -887,7 +906,13 @@ func captureBlock(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	defer clean()
 	defer engine.Close()
 
-	chainConfig := fromdb.ChainConfig(db)
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	blockReader, _ := blocksIO(db, logger)
 
 	tx, err := db.BeginTemporalRo(ctx)
@@ -925,7 +950,13 @@ func stageExecReplay(db kv.TemporalRwDB, ctx context.Context, logger log.Logger)
 	defer clean()
 	must(sync.SetCurrentStage(stages.Execution))
 
-	chainConfig := fromdb.ChainConfig(db)
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	genesis := readGenesis(chain)
 	blockReader, _ := blocksIO(db, logger)
 
@@ -998,7 +1029,13 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	defer engine.Close()
 	must(sync.SetCurrentStage(stages.Execution))
 
-	chainConfig := fromdb.ChainConfig(db)
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	genesis := readGenesis(chain)
 	blockReader, _ := blocksIO(db, logger)
 
@@ -1033,7 +1070,7 @@ func stageCustomTrace(db kv.TemporalRwDB, ctx context.Context, logger log.Logger
 	agg.PresetOfflineExecution()
 	agg.PeriodicalyPrintProcessSet(ctx)
 
-	err := stagedsync.SpawnCustomTrace(cfg, ctx, logger)
+	err = stagedsync.SpawnCustomTrace(cfg, ctx, logger)
 	if err != nil {
 		return err
 	}
@@ -1143,7 +1180,15 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 
 		dirs := datadir.New(datadirCli)
 
-		chainConfig := fromdb.ChainConfig(db)
+		chainConfig, ok, readErr := fromdb.ChainConfig(db)
+		if readErr != nil {
+			err = readErr
+			return
+		}
+		if !ok {
+			err = errors.New("chain config not found in db")
+			return
+		}
 		snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 
 		_allSnapshotsSingleton = blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, logger)
@@ -1182,9 +1227,8 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 			return nil
 		})
 		g.Go(func() error {
-			chainConfig := fromdb.ChainConfig(db)
 			var beaconConfig *clparams.BeaconChainConfig
-			_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
+			_, beaconConfig, _, err := clparams.GetConfigsByNetworkName(chainConfig.ChainName)
 			if err == nil {
 				_allCaplinSnapshotsSingleton = freezeblocks.NewCaplinSnapshots(snapCfg, beaconConfig, dirs, logger)
 				if err = _allCaplinSnapshotsSingleton.OpenFolder(); err != nil {

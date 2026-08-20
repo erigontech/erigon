@@ -44,72 +44,67 @@ func (cr ChainReader) Config() *chain.Config {
 }
 
 // CurrentHeader retrieves the current header from the local chain.
-func (cr ChainReader) CurrentHeader() *types.Header {
-	hash := rawdb.ReadHeadHeaderHash(cr.Db)
-	h, _ := cr.BlockReader.HeaderByHash(context.Background(), cr.Db, hash)
-	return h
+func (cr ChainReader) CurrentHeader() (*types.Header, bool, error) {
+	hash, ok, err := rawdb.ReadHeadHeaderHash(cr.Db)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	return cr.BlockReader.HeaderByHash(context.Background(), cr.Db, hash)
 }
 
 // CurrentFinalizedHeader retrieves the current finalized header from the local chain.
-func (cr ChainReader) CurrentFinalizedHeader() *types.Header {
-	hash := rawdb.ReadForkchoiceFinalized(cr.Db)
-	if hash == (common.Hash{}) {
-		return nil
+func (cr ChainReader) CurrentFinalizedHeader() (*types.Header, bool, error) {
+	hash, ok, err := rawdb.ReadForkchoiceFinalized(cr.Db)
+	if err != nil || !ok {
+		return nil, false, err
 	}
 
 	return cr.GetHeaderByHash(hash)
 }
 
-func (cr ChainReader) CurrentSafeHeader() *types.Header {
-	hash := rawdb.ReadForkchoiceSafe(cr.Db)
-	if hash == (common.Hash{}) {
-		return nil
+func (cr ChainReader) CurrentSafeHeader() (*types.Header, bool, error) {
+	hash, ok, err := rawdb.ReadForkchoiceSafe(cr.Db)
+	if err != nil || !ok {
+		return nil, false, err
 	}
 
 	return cr.GetHeaderByHash(hash)
 }
 
 // GetHeader retrieves a block header from the database by hash and number.
-func (cr ChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
-	h, _ := cr.BlockReader.Header(context.Background(), cr.Db, hash, number)
-	return h
+func (cr ChainReader) GetHeader(hash common.Hash, number uint64) (*types.Header, bool, error) {
+	return cr.BlockReader.Header(context.Background(), cr.Db, hash, number)
 }
 
 // GetHeaderByNumber retrieves a block header from the database by number.
-func (cr ChainReader) GetHeaderByNumber(number uint64) *types.Header {
-	h, _ := cr.BlockReader.HeaderByNumber(context.Background(), cr.Db, number)
-	return h
+func (cr ChainReader) GetHeaderByNumber(number uint64) (*types.Header, bool, error) {
+	return cr.BlockReader.HeaderByNumber(context.Background(), cr.Db, number)
 }
 
 // GetHeaderByHash retrieves a block header from the database by its hash.
-func (cr ChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	h, _ := cr.BlockReader.HeaderByHash(context.Background(), cr.Db, hash)
-	return h
+func (cr ChainReader) GetHeaderByHash(hash common.Hash) (*types.Header, bool, error) {
+	return cr.BlockReader.HeaderByHash(context.Background(), cr.Db, hash)
 }
 
 // GetBlock retrieves a block from the database by hash and number.
-func (cr ChainReader) GetBlock(hash common.Hash, number uint64) *types.Block {
-	b, _, _ := cr.BlockReader.BlockWithSenders(context.Background(), cr.Db, hash, number)
-	return b
+func (cr ChainReader) GetBlock(hash common.Hash, number uint64) (*types.Block, bool, error) {
+	b, _, ok, err := cr.BlockReader.BlockWithSenders(context.Background(), cr.Db, hash, number)
+	return b, ok, err
 }
 
 // HasBlock retrieves a block from the database by hash and number.
-func (cr ChainReader) HasBlock(hash common.Hash, number uint64) bool {
-	b, _ := cr.BlockReader.BodyRlp(context.Background(), cr.Db, hash, number)
-	return b != nil
+func (cr ChainReader) HasBlock(hash common.Hash, number uint64) (bool, error) {
+	_, ok, err := cr.BlockReader.BodyRlp(context.Background(), cr.Db, hash, number)
+	return ok, err
 }
 
 // GetTd retrieves the total difficulty from the database by hash and number.
-func (cr ChainReader) GetTd(hash common.Hash, number uint64) *uint256.Int {
-	td, err := rawdb.ReadTd(cr.Db, hash, number)
-	if err != nil {
-		cr.Logger.Error("ReadTd failed", "err", err)
-		return nil
-	}
-	return td
+func (cr ChainReader) GetTd(hash common.Hash, number uint64) (*uint256.Int, bool, error) {
+	return rawdb.ReadTd(cr.Db, hash, number)
 }
 
 func (cr ChainReader) FrozenBlocks() uint64 { return cr.BlockReader.FrozenBlocks() }
+
 func (cr ChainReader) FrozenBorBlocks(align bool) uint64 {
 	return cr.BlockReader.FrozenBorBlocks(align)
 }

@@ -43,18 +43,18 @@ func Capture(
 	if !ok {
 		return nil, fmt.Errorf("no canonical hash for block %d", blockNum)
 	}
-	block, _, err := blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
+	block, _, ok, err := blockReader.BlockWithSenders(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, fmt.Errorf("read block %d: %w", blockNum, err)
 	}
-	if block == nil {
+	if !ok {
 		return nil, fmt.Errorf("block %d not found", blockNum)
 	}
-	parent, err := blockReader.Header(ctx, tx, block.ParentHash(), blockNum-1)
+	parent, ok, err := blockReader.Header(ctx, tx, block.ParentHash(), blockNum-1)
 	if err != nil {
 		return nil, fmt.Errorf("read parent header %d: %w", blockNum-1, err)
 	}
-	if parent == nil {
+	if !ok {
 		return nil, fmt.Errorf("parent header %d not found", blockNum-1)
 	}
 
@@ -68,7 +68,7 @@ func Capture(
 	rw := newRecordingWriter()
 	chainReader := consensuschain.NewReader(chainConfig, tx, blockReader, logger)
 
-	getHeader := func(h common.Hash, n uint64) (*types.Header, error) {
+	getHeader := func(h common.Hash, n uint64) (*types.Header, bool, error) {
 		return blockReader.Header(ctx, tx, h, n)
 	}
 	blockHashFunc := protocol.GetHashFn(block.Header(), getHeader)
@@ -109,7 +109,7 @@ func Capture(
 	// Persist the block access list sidecar so a BAL fixture replays through the
 	// production BAL-driven scheduling path, not the OCC/no-BAL fallback. Empty
 	// pre-Amsterdam (no sidecar in the DB).
-	if fx.BALBytes, err = rawdb.ReadBlockAccessListBytes(tx, hash, blockNum); err != nil {
+	if fx.BALBytes, _, err = rawdb.ReadBlockAccessListBytes(tx, hash, blockNum); err != nil {
 		return nil, fmt.Errorf("read block access list %d: %w", blockNum, err)
 	}
 	if err := captureAncestors(ctx, tx, blockReader, block.Header(), fx); err != nil {
@@ -204,35 +204,53 @@ func newFixtureChainReader(config *chain.Config, fx *Fixture) (*fixtureChainRead
 	return &fixtureChainReader{config: config, parent: parent}, nil
 }
 
-func (c *fixtureChainReader) Config() *chain.Config                 { return c.config }
-func (c *fixtureChainReader) CurrentHeader() *types.Header          { return c.parent }
-func (c *fixtureChainReader) CurrentFinalizedHeader() *types.Header { return c.parent }
-func (c *fixtureChainReader) CurrentSafeHeader() *types.Header      { return c.parent }
-func (c *fixtureChainReader) GetHeaderByNumber(number uint64) *types.Header {
-	if c.parent != nil && c.parent.Number.Uint64() == number {
-		return c.parent
-	}
-	return nil
+func (c *fixtureChainReader) Config() *chain.Config { return c.config }
+
+func (c *fixtureChainReader) CurrentHeader() (*types.Header, bool, error) {
+	return c.parent, c.parent != nil, nil
 }
 
-func (c *fixtureChainReader) GetHeaderByHash(hash common.Hash) *types.Header {
-	if c.parent != nil && c.parent.Hash() == hash {
-		return c.parent
-	}
-	return nil
+func (c *fixtureChainReader) CurrentFinalizedHeader() (*types.Header, bool, error) {
+	return c.parent, c.parent != nil, nil
 }
-func (c *fixtureChainReader) FrozenBlocks() uint64        { return 0 }
+
+func (c *fixtureChainReader) CurrentSafeHeader() (*types.Header, bool, error) {
+	return c.parent, c.parent != nil, nil
+}
+
+func (c *fixtureChainReader) GetHeaderByNumber(number uint64) (*types.Header, bool, error) {
+	if c.parent != nil && c.parent.Number.Uint64() == number {
+		return c.parent, true, nil
+	}
+	return nil, false, nil
+}
+
+func (c *fixtureChainReader) GetHeaderByHash(hash common.Hash) (*types.Header, bool, error) {
+	if c.parent != nil && c.parent.Hash() == hash {
+		return c.parent, true, nil
+	}
+	return nil, false, nil
+}
+
+func (c *fixtureChainReader) FrozenBlocks() uint64 { return 0 }
+
 func (c *fixtureChainReader) FrozenBorBlocks(bool) uint64 { return 0 }
 
-func (c *fixtureChainReader) GetHeader(hash common.Hash, number uint64) *types.Header {
+func (c *fixtureChainReader) GetHeader(hash common.Hash, number uint64) (*types.Header, bool, error) {
 	if c.parent != nil && c.parent.Number.Uint64() == number {
-		return c.parent
+		return c.parent, true, nil
 	}
-	return nil
+	return nil, false, nil
 }
 
-func (c *fixtureChainReader) GetTd(common.Hash, uint64) *uint256.Int    { return uint256.NewInt(0) }
-func (c *fixtureChainReader) GetBlock(common.Hash, uint64) *types.Block { return nil }
-func (c *fixtureChainReader) HasBlock(common.Hash, uint64) bool         { return false }
+func (c *fixtureChainReader) GetTd(common.Hash, uint64) (*uint256.Int, bool, error) {
+	return uint256.NewInt(0), true, nil
+}
+
+func (c *fixtureChainReader) GetBlock(common.Hash, uint64) (*types.Block, bool, error) {
+	return nil, false, nil
+}
+
+func (c *fixtureChainReader) HasBlock(common.Hash, uint64) (bool, error) { return false, nil }
 
 var _ rules.ChainReader = (*fixtureChainReader)(nil)

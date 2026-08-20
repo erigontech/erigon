@@ -166,16 +166,22 @@ func getChainNameFromChainData(ctx context.Context, cliCtx *cli.Command, logger 
 	var chainCfg *chain.Config
 	// See tool.ChainConfigFromDB for another example, but that panics on errors.
 	err = db.View(ctx, func(tx kv.Tx) (err error) {
-		genesis, err := rawdb.ReadCanonicalHash(tx, 0)
+		genesis, ok, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
 			err = fmt.Errorf("reading genesis block hash: %w", err)
 			return
 		}
+		if !ok {
+			return nil
+		}
 		// Do we need genesis block hash here?
-		chainCfg, err = rawdb.ReadChainConfig(tx, genesis)
+		chainCfg, ok, err = rawdb.ReadChainConfig(tx, genesis)
 		if err != nil {
 			err = fmt.Errorf("reading chain config: %w", err)
 			return
+		}
+		if !ok {
+			return nil
 		}
 		return
 	})

@@ -1355,7 +1355,13 @@ func doRollbackSnapshotsToBlock(ctx context.Context, blockNum uint64, prompt boo
 	}()
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	br, agg := res.BlockRetire, res.Aggregator
@@ -1500,7 +1506,13 @@ func doDebugKey(ctx context.Context, cliCtx *cli.Command) error {
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
@@ -1626,7 +1638,13 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
 
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
@@ -1838,7 +1856,13 @@ func doCheckCommitmentHistAtBlk(ctx context.Context, cliCtx *cli.Command, logger
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	blockRetire, agg := res.BlockRetire, res.Aggregator
@@ -1865,7 +1889,13 @@ func doCheckStateRootByHistory(ctx context.Context, cliCtx *cli.Command, logger 
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	blockRetire, agg := res.BlockRetire, res.Aggregator
@@ -1908,7 +1938,13 @@ func doCheckRCacheRootAtBlk(ctx context.Context, cliCtx *cli.Command, logger log
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
@@ -1936,7 +1972,13 @@ func doCheckRCacheRootAtBlkRange(ctx context.Context, cliCtx *cli.Command, logge
 	dirs := datadir.New(cliCtx.String(utils.DataDirFlag.Name))
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false /*keepBlocks*/, true /*produceE2*/, true /*produceE3*/, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	if err != nil {
@@ -2017,7 +2059,13 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	chainDB := mdbx.New(dbcfg.ChainDB, logger).Path(dirs.Chaindata).RoTxsLimiter(limiterB).MustOpen()
 	defer chainDB.Close()
 
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	snaps, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
@@ -2743,7 +2791,13 @@ func doBlkTxNum(ctx context.Context, cliCtx *cli.Command) error {
 
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
@@ -3008,7 +3062,13 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 		return err
 	}
 
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
@@ -3041,6 +3101,7 @@ func doIndicesCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dir
 
 	return nil
 }
+
 func doLS(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	return lsDatadir(ctx, dirs, log.Root())
 }
@@ -3048,7 +3109,10 @@ func doLS(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 func lsDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error {
 	defer logger.Info("Done")
 
-	chainDB, chainName := tryOpenChaindata(ctx, dirs, logger)
+	chainDB, chainName, err := tryOpenChaindata(ctx, dirs, logger)
+	if err != nil {
+		return err
+	}
 	if chainDB != nil {
 		defer chainDB.Close()
 	}
@@ -3090,17 +3154,26 @@ func lsDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error 
 	return nil
 }
 
-func tryOpenChaindata(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (kv.RwDB, string) {
+func tryOpenChaindata(ctx context.Context, dirs datadir.Dirs, logger log.Logger) (kv.RwDB, string, error) {
 	if _, err := os.Stat(dirs.Chaindata); err != nil {
 		logger.Info("chaindata unavailable, using filesystem-only listing", "reason", err)
-		return nil, ""
+		return nil, "", nil
 	}
 	db, err := dbCfg(dbcfg.ChainDB, dirs.Chaindata).Open(ctx)
 	if err != nil {
 		logger.Info("chaindata unavailable, using filesystem-only listing", "reason", err)
-		return nil, ""
+		return nil, "", nil
 	}
-	return db, fromdb.ChainConfig(db).ChainName
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		db.Close()
+		return nil, "", err
+	}
+	if !ok {
+		db.Close()
+		return nil, "", errors.New("chain config not found in db")
+	}
+	return db, chainConfig.ChainName, nil
 }
 
 type OpenSnapsResult struct {
@@ -3121,7 +3194,15 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		return
 	}
 
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, readErr := fromdb.ChainConfig(chainDB)
+	if readErr != nil {
+		err = readErr
+		return
+	}
+	if !ok {
+		err = errors.New("chain config not found in db")
+		return
+	}
 
 	res.BlockSnaps = blocksnapshots.NewRoSnapshots(cfg, dirs.Snap, logger)
 	if err = res.BlockSnaps.OpenFolder(); err != nil {
@@ -3344,7 +3425,13 @@ func doRemoveOverlap(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	chainConfig := fromdb.ChainConfig(db)
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
@@ -3473,7 +3560,13 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 	decomp.Close()
 	chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer chainDB.Close()
-	chainConfig := fromdb.ChainConfig(chainDB)
+	chainConfig, ok, err := fromdb.ChainConfig(chainDB)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
 	br := res.BlockRetire
@@ -3495,7 +3588,13 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 
 	db := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 	defer db.Close()
-	chainConfig := fromdb.ChainConfig(db)
+	chainConfig, ok, err := fromdb.ChainConfig(db)
+	if err != nil {
+		return err
+	}
+	if !ok {
+		return errors.New("chain config not found in db")
+	}
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, db, logger)
@@ -3716,6 +3815,7 @@ func dbCfg(label kv.Label, path string) mdbx.MdbxOpts {
 		RoTxsLimiter(limiterB).
 		Accede(true) // integration tool: open db without creation and without blocking erigon
 }
+
 func openAgg(ctx context.Context, dirs datadir.Dirs, chainDB kv.RwDB, logger log.Logger) *state.Aggregator {
 	agg, err := tryOpenAgg(ctx, dirs, chainDB, logger)
 	if err != nil {
@@ -4332,8 +4432,7 @@ func duFormatJSON(w io.Writer, result duResult) error {
 // doDU implements the "erigon seg du" subcommand.
 func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	// Resolve chain name and configured prune mode from chaindata (best-effort).
-	// Use recover because both MustOpen and fromdb.ChainConfig can panic
-	// (e.g., DB locked by running node, corrupted/empty chaindata).
+	// Use recover because MustOpen and PruneMode can panic.
 	chainName := "unknown"
 	var configuredMode string // empty when DB is unavailable
 	if _, err := os.Stat(dirs.Chaindata); err == nil {
@@ -4345,8 +4444,12 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 			}()
 			chainDB := dbCfg(dbcfg.ChainDB, dirs.Chaindata).MustOpen()
 			defer chainDB.Close()
-			cc := fromdb.ChainConfig(chainDB)
-			if cc != nil && cc.ChainName != "" {
+			cc, ok, err := fromdb.ChainConfig(chainDB)
+			if err != nil {
+				log.Warn("could not read chain config", "err", err)
+				return
+			}
+			if ok && cc.ChainName != "" {
 				chainName = cc.ChainName
 			}
 			pm := fromdb.PruneMode(chainDB)

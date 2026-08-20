@@ -479,8 +479,9 @@ func TestGetBlockByTimestampLatestTime(t *testing.T) {
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
-	latestBlock, err := m.BlockReader.CurrentBlock(tx)
+	latestBlock, ok, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
+	require.True(t, ok)
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 	require.NoError(t, err)
 
@@ -506,8 +507,9 @@ func TestGetBlockByTimestampOldestTime(t *testing.T) {
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
-	oldestBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 0)
+	oldestBlock, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 0)
 	require.NoError(t, err)
+	require.True(t, ok)
 
 	response, err := ethapi.RPCMarshalBlockDeprecated(oldestBlock, true, false)
 	require.NoError(t, err)
@@ -534,8 +536,9 @@ func TestGetBlockByTimeHigherThanLatestBlock(t *testing.T) {
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
-	latestBlock, err := m.BlockReader.CurrentBlock(tx)
+	latestBlock, ok, err := m.BlockReader.CurrentBlock(tx)
 	require.NoError(t, err)
+	require.True(t, ok)
 
 	response, err := ethapi.RPCMarshalBlockDeprecated(latestBlock, true, false)
 	require.NoError(t, err)
@@ -562,14 +565,17 @@ func TestGetBlockByTimeMiddle(t *testing.T) {
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
-	currentHeader := rawdb.ReadCurrentHeader(tx)
-	oldestHeader, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
+	currentHeader, ok, err := rawdb.ReadCurrentHeader(tx)
 	require.NoError(t, err)
-	require.NotNil(t, oldestHeader)
+	require.True(t, ok)
+	oldestHeader, ok, err := api._blockReader.HeaderByNumber(ctx, tx, 0)
+	require.NoError(t, err)
+	require.True(t, ok)
 
 	middleNumber := (currentHeader.Number.Uint64() + oldestHeader.Number.Uint64()) / 2
-	middleBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, middleNumber)
+	middleBlock, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, middleNumber)
 	require.NoError(t, err)
+	require.True(t, ok)
 
 	response, err := ethapi.RPCMarshalBlockDeprecated(middleBlock, true, false)
 	require.NoError(t, err)
@@ -595,10 +601,13 @@ func TestGetBlockByTimestamp(t *testing.T) {
 	defer tx.Rollback()
 	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
 
-	highestBlockNumber := rawdb.ReadCurrentHeader(tx).Number
-	pickedBlock, err := m.BlockReader.BlockByNumber(m.Ctx, tx, highestBlockNumber.Uint64()/3)
+	currentHeader, ok, err := rawdb.ReadCurrentHeader(tx)
 	require.NoError(t, err)
-	require.NotNil(t, pickedBlock)
+	require.True(t, ok)
+	highestBlockNumber := currentHeader.Number
+	pickedBlock, ok, err := m.BlockReader.BlockByNumber(m.Ctx, tx, highestBlockNumber.Uint64()/3)
+	require.NoError(t, err)
+	require.True(t, ok)
 	response, err := ethapi.RPCMarshalBlockDeprecated(pickedBlock, true, false)
 	require.NoError(t, err)
 
