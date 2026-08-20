@@ -145,12 +145,14 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 	if err != nil {
 		return err
 	}
-	log.Info("[ethGetLogsInvariants] starting", "blockFrom", blockFrom, "blockTo", blockTo, "latestBlock", latestBlock)
-	if blockFrom > latestBlock {
-		return fmt.Errorf("fromBlock(%d) > latestBlock(%d)", blockFrom, latestBlock)
-	}
-	if blockTo > latestBlock {
-		log.Info("[ethGetLogsInvariants] blockTo > latestBlock, setting blockTo to latestBlock", "blockTo", blockTo, "latestBlock", latestBlock)
+	if latestBlock > 0 {
+		log.Info("[ethGetLogsInvariants] starting", "blockFrom", blockFrom, "blockTo", blockTo, "latestBlock", latestBlock)
+		if blockFrom > latestBlock {
+			return fmt.Errorf("fromBlock(%d) > latestBlock(%d)", blockFrom, latestBlock)
+		}
+		if blockTo > latestBlock {
+			log.Info("[ethGetLogsInvariants] blockTo > latestBlock, setting blockTo to latestBlock", "blockTo", blockTo, "latestBlock", latestBlock)
+		}
 	}
 
 	logEvery, lastLoggedBlock, lastLoggedTime := time.NewTicker(20*time.Second), blockFrom, time.Now()
