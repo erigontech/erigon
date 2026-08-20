@@ -234,13 +234,15 @@ Every task lists its tests before the implementation they cover. In Go the red p
 - Modify: `cl/persistence/blob_storage/blob_db.go`
 - Modify: `cl/persistence/blob_storage/blob_db_test.go`
 
-- [ ] write a test that `RemoveBlobSidecars` succeeds when a file is already gone and still deletes the count row (red against today's first-ENOENT return)
-- [ ] write a test that a concurrent single-sidecar write cannot interleave with a `WriteBlobSidecars` batch for the same slot
-- [ ] write a test that an empty `blobSidecars` slice still records its zero count row and takes no slot lock
-- [ ] embed `bucketStore` and `slotLocks` in `BlobStore`, call both `init`s from `NewBlobStore`, delete `blobSidecarFilePath`
-- [ ] route `WriteBlobSidecars`, `ReadBlobSidecars`, `BlobSidecarExists`, `WriteStream` and `RemoveBlobSidecars` through the shared methods; `WriteBlobSidecars` takes `forSlot` on the first sidecar's slot and only when the batch is non-empty, `RemoveBlobSidecars` and `ReadBlobSidecars` take it around files-plus-row, and `WriteStream` takes nothing
-- [ ] keep `Prune()` and the `slotsKept` field, computing the floor inline from `slotsKept` and `ethClock` — `floorFor` belongs to package `stages` and does not exist yet, so it must not be referenced here
-- [ ] run `go test ./cl/persistence/blob_storage/...` — must pass before task 5
+- [x] write a test that `RemoveBlobSidecars` succeeds when a file is already gone and still deletes the count row (red against today's first-ENOENT return)
+- [x] write a test that a concurrent single-sidecar write cannot interleave with a `WriteBlobSidecars` batch for the same slot
+- [x] write a test that an empty `blobSidecars` slice still records its zero count row and takes no slot lock
+- [x] embed `bucketStore` and `slotLocks` in `BlobStore`, call both `init`s from `NewBlobStore`, delete `blobSidecarFilePath`
+- [x] route `WriteBlobSidecars`, `ReadBlobSidecars`, `BlobSidecarExists`, `WriteStream` and `RemoveBlobSidecars` through the shared methods; `WriteBlobSidecars` takes `forSlot` on the first sidecar's slot and only when the batch is non-empty, `RemoveBlobSidecars` and `ReadBlobSidecars` take it around files-plus-row, and `WriteStream` takes nothing
+- [x] keep `Prune()` and the `slotsKept` field, computing the floor inline from `slotsKept` and `ethClock` — `floorFor` belongs to package `stages` and does not exist yet, so it must not be referenced here
+- [x] run `go test ./cl/persistence/blob_storage/...` — must pass before task 5
+
+➕ The batch-lock guard needs the write order to be observable, so `blob_db_test.go` carries a fourth wrapper beside task 1's three: a `createOrderFs` that records every `Create` path and runs a hook inside the call, letting a test park the batch mid-write and see whether a concurrent write slips in.
 
 ### Task 5: dataColumnStorageImpl onto bucketStore
 

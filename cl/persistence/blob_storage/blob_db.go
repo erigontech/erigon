@@ -20,11 +20,8 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
-	"fmt"
 	"io"
 	"math"
-	"os"
-	"strconv"
 	"sync"
 	"sync/atomic"
 
@@ -34,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
@@ -53,22 +49,19 @@ type BlobStorage interface {
 }
 
 type BlobStore struct {
+	bucketStore
+	slotLocks
 	db                kv.RwDB
-	fs                afero.Fs
 	beaconChainConfig *clparams.BeaconChainConfig
 	ethClock          eth_clock.EthereumClock
 	slotsKept         uint64
 }
 
 func NewBlobStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) BlobStorage {
-	return &BlobStore{fs: fs, db: db, slotsKept: slotsKept, beaconChainConfig: beaconChainConfig, ethClock: ethClock}
-}
-
-func blobSidecarFilePath(slot, index uint64, blockRoot common.Hash) (folderpath, filepath string) {
-	subdir := slot / subdivisionSlot
-	folderpath = strconv.FormatUint(subdir, 10)
-	filepath = fmt.Sprintf("%s/%s_%d", folderpath, blockRoot.String(), index)
-	return
+	bs := &BlobStore{db: db, slotsKept: slotsKept, beaconChainConfig: beaconChainConfig, ethClock: ethClock}
+	bs.bucketStore.init(fs)
+	bs.slotLocks.init()
+	return bs
 }
 
 /*
@@ -79,25 +72,15 @@ indicies:
 
 // WriteBlobSidecars writes the sidecars on the database. it assumes that all blobSidecars are for the same blockRoot and we have all of them.
 func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error {
+	// An empty batch writes no file, so it has no slot to lock on; it still records a
+	// zero count row, which is what tells "this block has no blobs" from "unknown".
+	if len(blobSidecars) > 0 {
+		lock := bs.forSlot(blobSidecars[0].SignedBlockHeader.Header.Slot)
+		lock.Lock()
+		defer lock.Unlock()
+	}
 	for _, blobSidecar := range blobSidecars {
-		folderPath, filePath := blobSidecarFilePath(
-			blobSidecar.SignedBlockHeader.Header.Slot,
-			blobSidecar.Index, blockRoot,
-		)
-		// mkdir the whole folder and subfolders
-		bs.fs.MkdirAll(folderPath, 0o755)
-		// create the file
-		file, err := bs.fs.Create(filePath)
-		if err != nil {
-			return err
-		}
-		if err := func() error {
-			defer file.Close()
-			if err := ssz_snappy.EncodeAndWrite(file, blobSidecar); err != nil {
-				return err
-			}
-			return file.Sync()
-		}(); err != nil {
+		if _, err := bs.write(blobSidecar.SignedBlockHeader.Header.Slot, blockRoot, blobSidecar.Index, blobSidecar); err != nil {
 			return err
 		}
 	}
@@ -117,6 +100,10 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Has
 
 // ReadBlobSidecars reads the sidecars from the database. it assumes that all blobSidecars are for the same blockRoot and we have all of them.
 func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
+	lock := bs.forSlot(slot)
+	lock.RLock()
+	defer lock.RUnlock()
+
 	tx, err := bs.db.BeginRo(ctx)
 	if err != nil {
 		return nil, false, err
@@ -134,24 +121,13 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 
 	var blobSidecars []*cltypes.BlobSidecar
 	for i := range kzgCommitmentsLength {
-		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
-		file, err := bs.fs.Open(filePath)
+		blobSidecar := &cltypes.BlobSidecar{}
+		found, err := bs.read(slot, blockRoot, uint64(i), blobSidecar, clparams.DenebVersion)
 		if err != nil {
-			if errors.Is(err, afero.ErrFileNotFound) {
-				return nil, false, nil
-			}
 			return nil, false, err
 		}
-		blobSidecar, err := func() (*cltypes.BlobSidecar, error) {
-			defer file.Close()
-			blobSidecar := &cltypes.BlobSidecar{}
-			if err := ssz_snappy.DecodeAndReadNoForkDigest(file, blobSidecar, clparams.DenebVersion); err != nil {
-				return nil, err
-			}
-			return blobSidecar, nil
-		}()
-		if err != nil {
-			return nil, false, err
+		if !found {
+			return nil, false, nil
 		}
 		blobSidecars = append(blobSidecars, blobSidecar)
 	}
@@ -168,35 +144,15 @@ func (bs *BlobStore) Prune() error {
 	if currentSlot <= bs.slotsKept {
 		return nil
 	}
-	currentSlot -= bs.slotsKept
-	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
-	// delete all the folders that are older than slotsKept
-	for i := uint64(0); i < currentSlot; i += subdivisionSlot {
-		bs.fs.RemoveAll(strconv.FormatUint(i/subdivisionSlot, 10))
-	}
-	return nil
+	return bs.pruneBelow(currentSlot - bs.slotsKept)
 }
 
 func (bs *BlobStore) BlobSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, idx uint64) (bool, error) {
-	_, filePath := blobSidecarFilePath(slot, idx, blockRoot)
-	_, err := bs.fs.Stat(filePath)
-	if os.IsNotExist(err) {
-		return false, nil
-	} else if err != nil {
-		return false, err
-	}
-	return true, nil
+	return bs.exists(slot, blockRoot, idx)
 }
 
 func (bs *BlobStore) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {
-	_, filePath := blobSidecarFilePath(slot, idx, blockRoot)
-	file, err := bs.fs.Open(filePath)
-	if err != nil {
-		return err
-	}
-	defer file.Close()
-	_, err = io.Copy(w, file)
-	return err
+	return bs.stream(w, slot, blockRoot, idx)
 }
 
 func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error) {
@@ -216,6 +172,10 @@ func (bs *BlobStore) KzgCommitmentsCount(ctx context.Context, blockRoot common.H
 }
 
 func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) error {
+	lock := bs.forSlot(slot)
+	lock.Lock()
+	defer lock.Unlock()
+
 	tx, err := bs.db.BeginRw(ctx)
 	if err != nil {
 		return err
@@ -230,12 +190,13 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 	}
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
 	for i := range kzgCommitmentsLength {
-		_, filePath := blobSidecarFilePath(slot, uint64(i), blockRoot)
-		if err := bs.fs.Remove(filePath); err != nil {
+		if err := bs.remove(slot, blockRoot, uint64(i)); err != nil {
 			return err
 		}
 	}
-	tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:])
+	if err := tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:]); err != nil {
+		return err
+	}
 	return tx.Commit()
 }
 
