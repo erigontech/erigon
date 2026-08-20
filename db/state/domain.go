@@ -1668,11 +1668,11 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 		panic("assert: miss-use " + f.FileName())
 	}
 	g := f.MakeGetter()
-	if dbg.FilesAsyncIOMultiPage {
-		g.EnableMultiPageAsyncIO()
-	}
 	if dbg.FilesAsyncIO {
 		g.EnableResidencyGate()
+	}
+	if dbg.FilesAsyncIOMultiPage {
+		g.EnableMultiPageAsyncIO()
 	}
 	return seg.NewReader(g, d.Compression)
 }
