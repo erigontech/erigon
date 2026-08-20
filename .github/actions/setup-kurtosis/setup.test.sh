@@ -4,6 +4,8 @@ set -euo pipefail
 here=$(cd "$(dirname -- "$0")" && pwd)
 repo=$(cd "$here/../../.." && pwd)
 script="$here/setup.sh"
+# Kurtosis CLI version the workflows pin; bump here and in KURTOSIS_VERSION together.
+version=1.20.0
 tmp=$(mktemp -d)
 trap 'rm -rf "$tmp"' EXIT
 
@@ -67,7 +69,7 @@ reset_case() {
 run_setup() {
   env PATH="$mock_bin:$PATH" \
     SETUP_KURTOSIS_CALLS="$calls" \
-    KURTOSIS_VERSION=1.15.2 \
+    KURTOSIS_VERSION="$version" \
     KURTOSIS_APT_SOURCES_DIR="$sources" \
     "$@" bash "$script"
 }
@@ -78,8 +80,12 @@ contains "update has no hard deadline" "timeout --kill-after=10s 300 apt-get upd
 contains "install has no hard deadline" "timeout --kill-after=10s 600 apt-get install" "$calls"
 contains "apt has no network bound" "Acquire::https::Timeout=15" "$calls"
 contains "apt has no lock bound" "DPkg::Lock::Timeout=60" "$calls"
-contains "version is not pinned" "kurtosis-cli=1.15.2" "$calls"
+contains "version is not pinned" "kurtosis-cli=$version" "$calls"
 contains "engine did not start" "kurtosis engine start" "$calls"
+contains "Kurtosis is not installed from the supported repository" \
+  "https://sdk.kurtosis.com/kurtosis-cli-release-artifacts/" "$sources/kurtosis.list"
+rejects "Kurtosis is installed from the retired Gemfury repository" \
+  "apt.fury.io" "$sources/kurtosis.list"
 [ ! -e "$sources/microsoft.list" ] || fail "broken third-party source remains"
 [ -e "$sources/ubuntu.list" ] || fail "Ubuntu source was removed"
 
@@ -94,6 +100,8 @@ rejects "install ran after update failure" "apt-get install" "$calls"
 for workflow in test-kurtosis-assertoor.yml test-kurtosis-gloas.yml; do
   path="$repo/.github/workflows/$workflow"
   contains "$workflow does not use shared setup" "uses: ./.github/actions/setup-kurtosis" "$path"
+  contains "$workflow pins a Kurtosis version other than $version" \
+    "KURTOSIS_VERSION: \"$version\"" "$path"
   contains "$workflow does not use the preinstalled Kurtosis action" \
     "uses: erigontech/kurtosis-assertoor-github-action@v1.1.7" "$path"
   rejects "$workflow still installs with apt directly" "sudo apt-get" "$path"

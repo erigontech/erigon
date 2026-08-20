@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
@@ -204,7 +205,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd.AsStateGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))
