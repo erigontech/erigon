@@ -1135,11 +1135,6 @@ func (a *ApiHandler) produceBeaconBody(
 	blockRoot := baseBlockRoot
 	// Process the execution data in a thread.
 	wg.Go(func() {
-		// Preparation must not enter the execution module while production updates fork choice and
-		// collects the payload. Request validation, state work, and relay calls do not need this gate.
-		finishProduction := a.payloadPreparationGate.beginExecutionWork()
-		defer finishProduction()
-
 		start := time.Now()
 		defer func() {
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
@@ -1155,6 +1150,10 @@ func (a *ApiHandler) produceBeaconBody(
 		attrs := a.payloadBuildAttributes(
 			baseState, blockRoot, targetSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
 		)
+		// Preparation must not enter the execution module while production updates fork choice and
+		// collects the payload. State derivation and returned-payload processing stay outside this gate.
+		finishProduction := a.payloadPreparationGate.beginExecutionWork()
+		defer finishProduction()
 		builderStartedAt := time.Now()
 		idBytes, err := a.engine.ForkChoiceUpdate(
 			ctx,
@@ -1178,6 +1177,8 @@ func (a *ApiHandler) produceBeaconBody(
 		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})
+		// The deferred call covers early returns; release now before validating and copying the result.
+		finishProduction()
 		if pollErr != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: %w", pollErr)
 			return

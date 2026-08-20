@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -897,6 +898,40 @@ func (s *syncedBuffer) String() string {
 	return s.buf.String()
 }
 
+type blockingLogHandler struct {
+	message     string
+	entered     chan struct{}
+	release     chan struct{}
+	enteredOnce sync.Once
+}
+
+func (h *blockingLogHandler) Log(record *log.Record) error {
+	if record.Msg == h.message {
+		h.enteredOnce.Do(func() { close(h.entered) })
+		<-h.release
+	}
+	return nil
+}
+
+func (h *blockingLogHandler) Enabled(context.Context, log.Lvl) bool {
+	return true
+}
+
+func blockRootLogMessage(t *testing.T, message string) (<-chan struct{}, func()) {
+	t.Helper()
+	blocker := &blockingLogHandler{
+		message: message,
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	previous := log.Root().GetHandler()
+	log.Root().SetHandler(blocker)
+	release := sync.OnceFunc(func() { close(blocker.release) })
+	t.Cleanup(release)
+	t.Cleanup(func() { log.Root().SetHandler(previous) })
+	return blocker.entered, release
+}
+
 // captureProductionLogs redirects the root logger for one test and returns everything written at
 // warning level or above. It deliberately does not filter by message: a record this package emits
 // under another name is exactly what a test asserting silence needs to see.
@@ -915,6 +950,100 @@ func captureProductionLogs(t *testing.T) func() string {
 		}
 		return strings.Join(loud, "\n")
 	}
+}
+
+func TestProductionDerivesPayloadAttributesOutsidePreparationGate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+
+	gateHeldAtForkChoice := make(chan bool, 1)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
+			finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation()
+			if ok {
+				finishPreparation()
+			}
+			gateHeldAtForkChoice <- !ok
+			return nil, errors.New("stop after fork-choice entry")
+		})
+	handler.engine = engine
+
+	// The missing-recipient warning occurs before withdrawal and attribute derivation, making that
+	// phase observable without relying on how long the state work takes.
+	derivationStarted, releaseDerivation := blockRootLogMessage(t,
+		"BlockProduction: no fee recipient from prepare_beacon_proposer, using zero address")
+	result := make(chan error, 1)
+	go func() {
+		_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+			targetSlot, common.Bytes96{}, common.Hash{})
+		result <- err
+	}()
+
+	<-derivationStarted
+	finishPreparation, preparationStarted := handler.payloadPreparationGate.tryBeginPreparation()
+	if preparationStarted {
+		finishPreparation()
+	}
+	releaseDerivation()
+	productionErr := <-result
+
+	require.True(t, preparationStarted, "payload derivation must not suppress preparation")
+	require.True(t, <-gateHeldAtForkChoice, "fork choice must exclude preparation")
+	require.ErrorContains(t, productionErr, "stop after fork-choice entry")
+}
+
+func TestProductionProcessesCollectedPayloadOutsidePreparationGate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
+
+	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	gateHeldDuringCollection := make(chan bool, 1)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(payloadID, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), payloadID, clparams.ElectraVersion).
+		DoAndReturn(func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation()
+			if ok {
+				finishPreparation()
+			}
+			gateHeldDuringCollection <- !ok
+			return cltypes.NewEth1Block(clparams.ElectraVersion, handler.beaconChainCfg),
+				&engine_types.BlobsBundle{}, &typesproto.RequestsBundle{Requests: [][]byte{{0xff, 0}}}, nil, nil
+		})
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-10 * time.Second))
+	handler.ethClock = clock
+
+	// A non-empty request bundle reaches returned-payload processing and blocks before decoding, so
+	// the gate can be checked after collection without depending on processing speed.
+	processingStarted, releaseProcessing := blockRootLogMessage(t, "BlockProduction: Received requests bundle")
+	result := make(chan error, 1)
+	go func() {
+		_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+			targetSlot, common.Bytes96{}, common.Hash{})
+		result <- err
+	}()
+
+	<-processingStarted
+	finishPreparation, preparationStarted := handler.payloadPreparationGate.tryBeginPreparation()
+	if preparationStarted {
+		finishPreparation()
+	}
+	releaseProcessing()
+	productionErr := <-result
+
+	require.True(t, <-gateHeldDuringCollection, "payload collection must exclude preparation")
+	require.True(t, preparationStarted, "returned-payload processing must not suppress preparation")
+	require.ErrorContains(t, productionErr, "unknown execution request type")
 }
 
 func TestPollAssembledPayloadStaysQuietWhenAFailedPollRecovers(t *testing.T) {
