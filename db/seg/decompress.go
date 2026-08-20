@@ -724,9 +724,7 @@ func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialVi
 	}, nil
 }
 
-// readMapping is the mmap v.data points into: its own when it opened one, the
-// decompressor's when it reads through the shared mapping.
-func (v *SequentialView) readMapping() []byte {
+func (v *SequentialView) mmapHandle() []byte {
 	if v._mmapHandle != nil {
 		return v._mmapHandle
 	}
@@ -741,7 +739,7 @@ func (v *SequentialView) MakeGetter() *Getter {
 		dataOffset:  uint64(v.d.size - int64(len(v.data))),
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
-		mapping:     v.readMapping(),
+		mapping:     v.mmapHandle(),
 	}
 	if v.d.patArena != nil {
 		g.patCodewords = v.d.patArena.codewords
