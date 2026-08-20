@@ -247,24 +247,27 @@ jobs:
             echo "GLAMSTERDAM_GENESIS_GENERATOR_IMAGE=$genesis_glamsterdam"
             echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
-          # actions/cache caps a key at 512 chars and spelling out every tag
-          # already needs ~500, so key on a digest of the same values. The list
-          # is echoed to keep an opaque key debuggable from the job log.
-          images=$(printf '%s\n' "$assertoor" "$pectra" "$glamsterdam" "$lighthouse" \
-            "$teku" "$genesis_glamsterdam" "$lighthouse_vc" \
-            "$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
+          # Every cached tag stays spelled out in the cache key so a glance at the
+          # Actions cache list shows what a key holds. Only the registry/org prefix
+          # is dropped, which keeps the key clear of actions/cache's 512-char cap.
+          key=docker-cl
+          for image in "$lighthouse" "$lighthouse_vc" "$teku" "$assertoor" \
+            "kurtosis:$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
             "$KURTOSIS_CURL_JQ_IMAGE" "$KURTOSIS_TRAEFIK_IMAGE" "$KURTOSIS_ALPINE_IMAGE" \
-            "$ETH2_VAL_TOOLS_IMAGE" "$GENESIS_GENERATOR_IMAGE" \
-            "$CAPLIN_GENESIS_GENERATOR_IMAGE" "$KURTOSIS_PYTHON_IMAGE" | sort)
-          printf 'images behind the cache key:\n%s\n' "$images"
-          echo "DOCKER_CACHE_KEY=$(printf '%s\n' "$images" | sha256sum | cut -c1-32)" >> "$GITHUB_ENV"
+            "$ETH2_VAL_TOOLS_IMAGE" "$pectra" "$glamsterdam" "$GENESIS_GENERATOR_IMAGE" \
+            "$CAPLIN_GENESIS_GENERATOR_IMAGE" "$genesis_glamsterdam" "$KURTOSIS_PYTHON_IMAGE"; do
+            key="$key-${image##*/}"
+          done
+          [ ${#key} -le 512 ] \
+            || echo "::warning::cache key is ${#key} chars, over the 512 actions/cache allows"
+          echo "DOCKER_CACHE_KEY=$key" >> "$GITHUB_ENV"
 
       - name: Check whether third-party containers are already cached
         id: cache-cl-images
         uses: actions/cache/restore@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.DOCKER_CACHE_KEY }}
+          key: ${{ env.DOCKER_CACHE_KEY }}
           lookup-only: true
 
       - name: Pull third-party containers
@@ -323,7 +326,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.DOCKER_CACHE_KEY }}
+          key: ${{ env.DOCKER_CACHE_KEY }}
 
       - name: Check whether buildkit image is already cached
         id: cache-buildkit-image
@@ -493,24 +496,27 @@ jobs:
             echo "GLAMSTERDAM_GENESIS_GENERATOR_IMAGE=$genesis_glamsterdam"
             echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
-          # actions/cache caps a key at 512 chars and spelling out every tag
-          # already needs ~500, so key on a digest of the same values. The list
-          # is echoed to keep an opaque key debuggable from the job log.
-          images=$(printf '%s\n' "$assertoor" "$pectra" "$glamsterdam" "$lighthouse" \
-            "$teku" "$genesis_glamsterdam" "$lighthouse_vc" \
-            "$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
+          # Every cached tag stays spelled out in the cache key so a glance at the
+          # Actions cache list shows what a key holds. Only the registry/org prefix
+          # is dropped, which keeps the key clear of actions/cache's 512-char cap.
+          key=docker-cl
+          for image in "$lighthouse" "$lighthouse_vc" "$teku" "$assertoor" \
+            "kurtosis:$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
             "$KURTOSIS_CURL_JQ_IMAGE" "$KURTOSIS_TRAEFIK_IMAGE" "$KURTOSIS_ALPINE_IMAGE" \
-            "$ETH2_VAL_TOOLS_IMAGE" "$GENESIS_GENERATOR_IMAGE" \
-            "$CAPLIN_GENESIS_GENERATOR_IMAGE" "$KURTOSIS_PYTHON_IMAGE" | sort)
-          printf 'images behind the cache key:\n%s\n' "$images"
-          echo "DOCKER_CACHE_KEY=$(printf '%s\n' "$images" | sha256sum | cut -c1-32)" >> "$GITHUB_ENV"
+            "$ETH2_VAL_TOOLS_IMAGE" "$pectra" "$glamsterdam" "$GENESIS_GENERATOR_IMAGE" \
+            "$CAPLIN_GENESIS_GENERATOR_IMAGE" "$genesis_glamsterdam" "$KURTOSIS_PYTHON_IMAGE"; do
+            key="$key-${image##*/}"
+          done
+          [ ${#key} -le 512 ] \
+            || echo "::warning::cache key is ${#key} chars, over the 512 actions/cache allows"
+          echo "DOCKER_CACHE_KEY=$key" >> "$GITHUB_ENV"
 
       - name: Restore cached third-party containers
         id: cache-cl-images
         uses: actions/cache@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.DOCKER_CACHE_KEY }}
+          key: ${{ env.DOCKER_CACHE_KEY }}
 
       - name: Load cached containers into daemon
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
