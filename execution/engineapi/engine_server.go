@@ -1119,12 +1119,13 @@ func assembledBlockToPayloadResponse(br *types.BlockWithReceipts, blockValue *ui
 		sn := hexutil.Uint64(*header.SlotNumber)
 		ep.SlotNumber = &sn
 	}
-	if header.BlockAccessListHash != nil && br.BlockAccessList != nil {
-		encoded, encErr := types.EncodeBlockAccessListBytes(br.BlockAccessList)
-		if encErr == nil {
-			bal := hexutil.Bytes(encoded)
-			ep.BlockAccessList = &bal
+	if header.BlockAccessListHash != nil && block.BlockAccessListSidecar() != nil {
+		encoded, err := block.BlockAccessListSidecar().Bytes()
+		if err != nil {
+			return nil, fmt.Errorf("encode block access list: %w", err)
 		}
+		bal := hexutil.Bytes(encoded)
+		ep.BlockAccessList = &bal
 	}
 
 	blobsBundle, err := engine_types.BlobsBundleFromTransactions(block.Transactions())

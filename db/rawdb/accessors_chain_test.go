@@ -56,6 +56,18 @@ func newTestLegacyTx(nonce uint64, to common.Address, value uint256.Int, gasLimi
 	}
 }
 
+type blockAccessListTrackingGetter struct {
+	kv.Getter
+	read bool
+}
+
+func (g *blockAccessListTrackingGetter) GetOne(table string, key []byte) ([]byte, error) {
+	if table == kv.BlockAccessList {
+		g.read = true
+	}
+	return g.Getter.GetOne(table, key)
+}
+
 func TestWriteRawTransactions(t *testing.T) {
 	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
@@ -1154,7 +1166,7 @@ func TestBlockWithdrawalsStorage(t *testing.T) {
 	require.Nil(entry)
 }
 
-func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
+func TestReadBlockDoesNotLoadBlockAccessList(t *testing.T) {
 	t.Parallel()
 	_, tx := mdbxtest.NewTestTx(t)
 	defer tx.Rollback()
@@ -1177,16 +1189,15 @@ func TestReadBlockLoadsEmptyBlockAccessList(t *testing.T) {
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
 		RequestsHash:          &requestsHash,
 		BlockAccessListHash:   &emptyBALHash,
-	}, types.NewBlockAccessListSidecar(types.BlockAccessList{}))
+	}, nil)
 	require.NoError(t, rawdb.WriteBlock(tx, block))
-	emptyBALBytes, err := types.EncodeBlockAccessListBytes(nil)
-	require.NoError(t, err)
-	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), emptyBALBytes))
+	require.NoError(t, rawdb.WriteBlockAccessListBytes(tx, block.Hash(), block.NumberU64(), []byte{0xff}))
 
-	readBlock := rawdb.ReadBlock(tx, block.Hash(), block.NumberU64())
+	getter := &blockAccessListTrackingGetter{Getter: tx}
+	readBlock := rawdb.ReadBlock(getter, block.Hash(), block.NumberU64())
 	require.NotNil(t, readBlock)
-	require.NotNil(t, readBlock.BlockAccessList())
-	require.Empty(t, readBlock.BlockAccessList())
+	require.False(t, getter.read)
+	require.Nil(t, readBlock.BlockAccessList())
 }
 
 func TestBlockAccessListStorage(t *testing.T) {

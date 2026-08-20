@@ -1580,6 +1580,20 @@ func (b *Block) WithSeal(header *Header) *Block {
 	}
 }
 
+// WithBlockAccessListSidecar returns a block sharing b's immutable data with the supplied sidecar.
+func (b *Block) WithBlockAccessListSidecar(bal *BlockAccessListSidecar) *Block {
+	newB := &Block{
+		header:             b.header,
+		transactions:       b.transactions,
+		uncles:             b.uncles,
+		withdrawals:        b.withdrawals,
+		bal:                bal,
+		binaryTransactions: b.binaryTransactions,
+	}
+	newB.size.Store(b.size.Load())
+	return newB
+}
+
 // Hash returns the keccak256 hash of b's header.
 // The hash is computed on the first call and cached thereafter.
 func (b *Block) Hash() common.Hash { return b.header.Hash() }

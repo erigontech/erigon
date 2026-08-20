@@ -81,6 +81,9 @@ func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, lo
 	var blockAccessListSidecar *types.BlockAccessListSidecar
 	if blockAccessList != nil {
 		blockAccessListSidecar = types.NewBlockAccessListSidecar(blockAccessList)
+		if err := blockAccessListSidecar.ValidateForBlock(current.Header.GasLimit); err != nil {
+			return fmt.Errorf("validate block access list: %w", err)
+		}
 		hash, err := blockAccessListSidecar.Hash()
 		if err != nil {
 			return fmt.Errorf("hash block access list: %w", err)

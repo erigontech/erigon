@@ -705,9 +705,6 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			go warmTxsHashes(b)
 
 			blockBAL := dbBAL
-			if b.BlockAccessList() == nil && blockBAL != nil {
-				b = types.NewBlockFromStorage(b.Hash(), b.HeaderNoCopy(), b.Transactions(), b.Uncles(), b.Withdrawals(), types.NewBlockAccessListSidecar(blockBAL))
-			}
 			header := b.HeaderNoCopy()
 			executionBAL := blockBAL
 			if dbg.IgnoreBAL {

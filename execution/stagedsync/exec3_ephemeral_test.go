@@ -100,6 +100,9 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 	require.NoError(tb, err)
 	bal, err := fx.BAL()
 	require.NoError(tb, err)
+	if block.BlockAccessList() == nil && bal != nil {
+		block = block.WithBlockAccessListSidecar(types.NewBlockAccessListSidecar(bal))
+	}
 
 	br, err := blockreplay.NewMemBlockReader(fx)
 	require.NoError(tb, err)

@@ -803,40 +803,22 @@ func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
 	return nil
 }
 
-func readBlock(tx kv.Getter, hash common.Hash, number uint64) (*types.Block, error) {
+func readBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	header := ReadHeader(tx, hash, number)
 	if header == nil {
-		return nil, nil
+		return nil
 	}
 	body, _ := ReadBodyWithTransactions(tx, hash, number)
 	if body == nil {
-		return nil, nil
+		return nil
 	}
-	var bal *types.BlockAccessListSidecar
-	if header.HasBAL() {
-		data, err := ReadBlockAccessListBytes(tx, hash, number)
-		if err != nil {
-			return nil, fmt.Errorf("read block access list: %w", err)
-		}
-		if len(data) != 0 {
-			bal, err = types.DecodeBlockAccessListSidecar(data)
-			if err != nil {
-				return nil, fmt.Errorf("read block access list: %w", err)
-			}
-		}
-	}
-	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, bal), nil
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, nil)
 }
 
 // ReadBlock retrieves an entire block corresponding to the hash, assembling it
 // back from the stored header and body. If either part is unavailable, it returns nil.
 func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
-	block, err := readBlock(tx, hash, number)
-	if err != nil {
-		log.Error("failed to read block", "hash", hash, "number", number, "err", err)
-		return nil
-	}
-	return block
+	return readBlock(tx, hash, number)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -847,10 +829,7 @@ func HasBlock(db kv.Getter, hash common.Hash, number uint64) bool {
 }
 
 func ReadBlockWithSenders(db kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
-	block, err := readBlock(db, hash, number)
-	if err != nil {
-		return nil, nil, err
-	}
+	block := readBlock(db, hash, number)
 	if block == nil {
 		return nil, nil, nil
 	}
