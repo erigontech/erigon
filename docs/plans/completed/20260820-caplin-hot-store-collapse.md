@@ -315,11 +315,11 @@ Every task lists its tests before the implementation they cover. In Go the red p
 
 ### Task 9: [Final] Update documentation
 
-- [ ] verify no comment in the diff narrates the change, cites an issue number, restates a signature, or forward-references work not in the tree
-- [ ] verify `bucket_store.go` carries 2026 in its license header
-- [ ] update `CLAUDE.md` only if a new pattern was established that future work should follow
-- [ ] mark every checkbox in this plan and record any `➕` or `⚠️` entries that arose
-- [ ] move this plan to `docs/plans/completed/`
+- [x] verify no comment in the diff narrates the change, cites an issue number, restates a signature, or forward-references work not in the tree
+- [x] verify `bucket_store.go` carries 2026 in its license header
+- [x] update `CLAUDE.md` only if a new pattern was established that future work should follow (not needed; no new repository-wide pattern was established)
+- [x] mark every checkbox in this plan and record any `➕` or `⚠️` entries that arose (all discovered entries are recorded above)
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 
