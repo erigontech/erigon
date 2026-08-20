@@ -1142,10 +1142,10 @@ type OverlayTemporalReadView struct {
 
 var _ kv.TemporalTx = (*OverlayTemporalReadView)(nil)
 
-// NewTemporalReadView creates a temporal read-only view that checks the overlay's
-// mem layer first, then falls back to temporalTx for DB reads. The temporalTx
-// must be a fresh, independently-opened transaction — it is NOT shared with the
-// overlay's internal backing tx.
+// NewTemporalReadView creates a read-only view whose table reads check the
+// overlay first. Temporal domain and history reads use temporalTx directly.
+// The temporalTx must be a fresh, independently-opened transaction; it is not
+// shared with the overlay's internal backing tx.
 func (m *MemoryMutation) NewTemporalReadView(temporalTx kv.TemporalTx) *OverlayTemporalReadView {
 	return &OverlayTemporalReadView{
 		MemoryMutation: m.newReadViewMut(temporalTx),

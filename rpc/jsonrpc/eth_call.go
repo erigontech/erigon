@@ -87,6 +87,11 @@ const (
 
 // Call implements eth_call. Executes a new message call immediately without creating a transaction on the block chain.
 func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBlock *rpc.BlockNumberOrHash, stateOverrides *ethapi2.StateOverrides, blockOverrides *ethapi2.BlockOverrides) (hexutil.Bytes, error) {
+	blockNrOrHash := orLatest(requestedBlock)
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
+
 	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
@@ -104,12 +109,6 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		}
 	}
 
-	var blockNrOrHash rpc.BlockNumberOrHash
-	if requestedBlock != nil {
-		blockNrOrHash = *requestedBlock
-	} else {
-		blockNrOrHash = latestNumOrHash
-	}
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
@@ -190,18 +189,6 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	header, isLatest, err := api.headerByNumberOrHash(ctx, dbtx, *blockNrOrHash)
 	if err != nil {
 		return 0, err
-	}
-
-	// try to check if it is a pending block
-	if header == nil {
-		b := api.filters.LastPendingBlock()
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, dbtx, api._blockReader, api.filters)
-		if err != nil {
-			return 0, err
-		}
-		if b != nil && blockNum == b.NumberU64() {
-			header = b.HeaderNoCopy()
-		}
 	}
 
 	if header == nil {
@@ -907,6 +894,9 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 	bNrOrHash := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
 	if blockNrOrHash != nil {
 		bNrOrHash = *blockNrOrHash
+	}
+	if err := rejectPendingState(bNrOrHash); err != nil {
+		return nil, err
 	}
 
 	tx, err := api.db.BeginTemporalRo(ctx)

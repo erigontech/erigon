@@ -246,6 +246,30 @@ func TestCreateAccessListContractCreationWithoutFromDoesNotPanic(t *testing.T) {
 	require.NotNil(t, res)
 }
 
+func TestStateCallMethodsRejectPendingTag(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base := newBaseApiForTest(m)
+	api := newEthApiForTest(base, m.DB, stubTxPoolClient{}, nil)
+	graphqlAPI := NewGraphQLAPI(base, m.DB, api, stubTxPoolClient{}, &rpccfg.GraphQLApiConfig{})
+	ctx := context.Background()
+	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+
+	t.Run("eth_call", func(t *testing.T) {
+		_, err := api.Call(ctx, ethapi.CallArgs{}, &pending, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
+	t.Run("eth_createAccessList", func(t *testing.T) {
+		_, err := api.CreateAccessList(ctx, ethapi.CallArgs{}, &pending, nil, nil)
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+
+	t.Run("graphql_call", func(t *testing.T) {
+		_, err := graphqlAPI.Call(ctx, rpc.PendingBlockNumber, ethapi.CallArgs{})
+		require.ErrorIs(t, err, errPendingStateNotSupported)
+	})
+}
+
 func TestEthCallNonCanonical(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)

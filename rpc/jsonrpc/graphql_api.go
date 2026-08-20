@@ -381,6 +381,9 @@ func (api *GraphQLAPIImpl) SendRawTransaction(ctx context.Context, encodedTx hex
 
 func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error) {
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 
 	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {

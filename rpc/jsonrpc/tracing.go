@@ -535,11 +535,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	if simulateContext.TransactionIndex == nil || *simulateContext.TransactionIndex == -1 || isLatest {
-		var blockNrOrHash rpc.BlockNumberOrHash
-
-		rpcBlockNumValue := rpc.BlockNumber(blockNum)
-		blockNrOrHash.BlockNumber = &rpcBlockNumValue
-
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, 0, api._txNumReader)
 	} else {
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)
