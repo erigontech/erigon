@@ -200,7 +200,7 @@ func TestBranchCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	require.False(t, ok, "pre-Clear epoch must not alias the live epoch after a later unwind")
 }
 
-func clearDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write func()) {
+func fenceDuringBlockedBranchCacheWrite(block *sync.Mutex, write, fence func()) {
 	// GOMAXPROCS=1 makes each Gosched yield deterministically to the queued goroutine.
 	previousProcs := runtime.GOMAXPROCS(1)
 	defer runtime.GOMAXPROCS(previousProcs)
@@ -218,7 +218,7 @@ func clearDuringBlockedBranchCacheWrite(c *BranchCache, block *sync.Mutex, write
 
 	clearDone := make(chan struct{})
 	go func() {
-		c.Clear()
+		fence()
 		close(clearDone)
 	}()
 	runtime.Gosched()
@@ -234,9 +234,9 @@ func TestBranchCache_ClearFencesStartedPut(t *testing.T) {
 	c.Unwind(300)
 
 	key := []byte{0x12, 0x34, 0x56}
-	clearDuringBlockedBranchCacheWrite(c, &c.tailMu, func() {
+	fenceDuringBlockedBranchCacheWrite(&c.tailMu, func() {
 		c.Put(key, []byte("dead-fork-branch"), 0, 200)
-	})
+	}, c.Clear)
 
 	_, _, ok := c.Get(key)
 	require.False(t, ok, "Clear must remove a Put that started in the retiring generation")
@@ -249,12 +249,197 @@ func TestBranchCache_ClearFencesStartedPinEntry(t *testing.T) {
 
 	key := make([]byte, 33)
 	key[32] = 1
-	clearDuringBlockedBranchCacheWrite(c, &c.pinnedMu, func() {
+	fenceDuringBlockedBranchCacheWrite(&c.pinnedMu, func() {
 		c.PinEntry(key, []byte("dead-fork-branch"), 0, 200)
-	})
+	}, c.Clear)
 
 	_, _, ok := c.Get(key)
 	require.False(t, ok, "Clear must remove a PinEntry that started in the retiring generation")
+}
+
+func TestBranchCacheReconcileFilesPreservesAppliedState(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	prefix := []byte{0x01}
+	c.Put(prefix, []byte("branch"), 0, 100)
+	c.ReconcileFiles(101)
+
+	_, _, ok := c.Get(prefix)
+	require.True(t, ok)
+}
+
+func TestBranchCacheReconcileFilesClearsReadFills(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	prefix := []byte{0x01}
+	c.ReconcileFiles(100)
+	c.View().Fill(prefix, []byte("branch"), 0, 90, 100)
+	_, _, ok := c.Get(prefix)
+	require.True(t, ok)
+
+	c.ReconcileFiles(150)
+	_, _, ok = c.Get(prefix)
+	require.False(t, ok)
+}
+
+func TestBranchCacheRejectsReadFillBehindPublication(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	prefix := []byte{0x01}
+	c.ReconcileFiles(150)
+	c.View().Fill(prefix, []byte("stale"), 0, 90, 100)
+	_, _, ok := c.Get(prefix)
+	require.False(t, ok)
+
+	c.View().Fill(prefix, []byte("current"), 0, 140, 150)
+	value, _, ok := c.Get(prefix)
+	require.True(t, ok)
+	require.Equal(t, []byte("current"), value)
+}
+
+func TestBranchCacheRejectsAuthoritativePutBehindPublication(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	prefix := []byte{0x01}
+	c.ReconcileFiles(150)
+	c.Put(prefix, []byte("stale"), 0, 100)
+
+	_, _, ok := c.Get(prefix)
+	require.False(t, ok)
+}
+
+func TestBranchCacheRejectsPinBehindPublication(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	prefix := make([]byte, 33)
+	prefix[32] = 1
+	c.ReconcileFiles(150)
+	c.PinEntry(prefix, []byte("stale"), 0, 100)
+	_, _, ok := c.Get(prefix)
+	require.False(t, ok)
+
+	c.PinEntry(prefix, []byte("current"), 0, 150)
+	value, _, ok := c.Get(prefix)
+	require.True(t, ok)
+	require.Equal(t, []byte("current"), value)
+}
+
+func TestBranchCacheDeleteAdvancesAppliedFrontier(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	kept := []byte{0x01}
+	deleted := []byte{0x02}
+	c.Put(kept, []byte("kept"), 0, 50)
+	c.Put(deleted, []byte("deleted"), 0, 50)
+	c.Delete(deleted, 100)
+	c.ReconcileFiles(101)
+
+	_, _, ok := c.Get(kept)
+	require.True(t, ok)
+	_, _, ok = c.Get(deleted)
+	require.False(t, ok)
+}
+
+func TestBranchCacheAdvanceCommitPreservesStateAcrossQuietRange(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	prefix := []byte{0x01}
+	c.Put(prefix, []byte("branch"), 0, 50)
+	c.AdvanceCommit(100)
+	c.ReconcileFiles(101)
+
+	_, _, ok := c.Get(prefix)
+	require.True(t, ok)
+}
+
+func TestBranchCacheQuietCommitKeepsUnchangedFillEligible(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	prefix := []byte{0x01}
+	c.ReconcileFiles(100)
+	c.AdvanceCommit(149)
+	c.View().Fill(prefix, []byte("branch"), 0, 90, 100)
+
+	_, _, ok := c.Get(prefix)
+	require.True(t, ok)
+}
+
+func TestBranchCacheReconcileFilesFencesStartedFill(t *testing.T) {
+	c := NewBranchCache(100)
+	t.Cleanup(c.Close)
+	c.ReconcileFiles(100)
+
+	key := []byte{0x12, 0x34, 0x56}
+	view := c.View()
+	fenceDuringBlockedBranchCacheWrite(&c.tailMu, func() {
+		view.Fill(key, []byte("stale"), 0, 90, 100)
+	}, func() {
+		c.ReconcileFiles(150)
+	})
+
+	_, _, ok := c.Get(key)
+	require.False(t, ok)
+}
+
+func TestBranchCacheRejectsReadFillAcrossVisibilityLowering(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	c.ReconcileFiles(100)
+	older := c.View()
+	c.ReconcileFiles(50)
+	older.Fill([]byte{0x01}, []byte("stale"), 0, 90, 100)
+
+	_, _, ok := c.Get([]byte{0x01})
+	require.False(t, ok)
+}
+
+func TestBranchCacheRejectsPinAcrossVisibilityLowering(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	prefix := make([]byte, 33)
+	prefix[32] = 1
+	c.ReconcileFiles(100)
+	older := c.View()
+	c.ReconcileFiles(50)
+	older.PinEntry(prefix, []byte("stale"), 0, 100)
+
+	_, _, ok := c.Get(prefix)
+	require.False(t, ok)
+}
+
+func TestBranchCacheUnwindLowersAppliedFrontier(t *testing.T) {
+	t.Parallel()
+	c := NewBranchCache(64)
+	t.Cleanup(c.Close)
+
+	prefix := []byte{0x01}
+	c.Put(prefix, []byte("old fork"), 0, 100)
+	c.Unwind(50)
+	c.Put(prefix, []byte("new fork"), 0, 50)
+
+	value, _, ok := c.Get(prefix)
+	require.True(t, ok)
+	require.Equal(t, []byte("new fork"), value)
 }
 
 func TestBranchCache_Stats(t *testing.T) {

@@ -720,11 +720,17 @@ func TestReadFill_NegativeUsesLastVisibleTxNum(t *testing.T) {
 	require.False(t, ok, "an unwind of the view's last included txNum must invalidate the negative")
 }
 
-type fakeForbidder struct{ called bool }
+type fakeCacheBinder struct {
+	called bool
+	cache  *cache.StateCache
+}
 
-func (f *fakeForbidder) ForbidVisibilityLowering() { f.called = true }
+func (f *fakeCacheBinder) BindStateCache(stateCache *cache.StateCache) {
+	f.called = true
+	f.cache = stateCache
+}
 
-type fakeHasAgg struct{ f *fakeForbidder }
+type fakeHasAgg struct{ f *fakeCacheBinder }
 
 func (h fakeHasAgg) Agg() any { return h.f }
 
@@ -732,33 +738,32 @@ type fakeHasBadAgg struct{}
 
 func (fakeHasBadAgg) Agg() any { return struct{}{} }
 
-// The guard is load-bearing: for a fill-enabled cache it must either bind the
-// invariant or fail loudly — never silently drop it on a DB shape mismatch.
-// A nil or apply-only cache needs no guard at all.
+// Every non-nil cache must bind or fail loudly because file publication can
+// bypass authoritative applies even when reader fills are disabled.
 func TestGuardAggregatorForCache(t *testing.T) {
 	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
-	f := &fakeForbidder{}
+	f := &fakeCacheBinder{}
 	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
 	require.True(t, f.called)
+	require.Same(t, sc, f.cache)
 
 	require.NotPanics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, nil) },
 		"no cache, no invariant to bind — shape is irrelevant")
 	require.Panics(t, func() { execctx.GuardAggregatorForCache(struct{}{}, sc) },
 		"a db that cannot produce its aggregator must fail loudly, not drop the guard")
 	require.Panics(t, func() { execctx.GuardAggregatorForCache(fakeHasBadAgg{}, sc) },
-		"an aggregator without ForbidVisibilityLowering must fail loudly, not drop the guard")
+		"an aggregator without BindStateCache must fail loudly, not drop the guard")
 }
 
-// An apply-only cache (STATE_CACHE_FILLS=false) has no fills for a lowered
-// frontier to poison, so the guard must not constrain the aggregator.
-func TestGuardAggregatorForCache_ApplyOnlySkips(t *testing.T) {
+func TestGuardAggregatorForCache_ApplyOnlyStillBindsPublication(t *testing.T) {
 	t.Setenv("STATE_CACHE_FILLS", "false")
 	sc := newSmallStateCache()
 	t.Cleanup(sc.Close)
 
-	f := &fakeForbidder{}
+	f := &fakeCacheBinder{}
 	execctx.GuardAggregatorForCache(fakeHasAgg{f}, sc)
-	require.False(t, f.called)
+	require.True(t, f.called)
+	require.Same(t, sc, f.cache)
 }

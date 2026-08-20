@@ -39,8 +39,18 @@ type stubVisibleEndDebug struct {
 	viewID uint64
 }
 
+type nilDebugTemporalTx struct{ kv.TemporalTx }
+
+func (nilDebugTemporalTx) Debug() kv.TemporalDebugTx { return nil }
+
 func (d stubVisibleEndDebug) DomainVisibleEnd(kv.Domain) (uint64, bool) {
 	return d.viewID * 100, true
+}
+
+func TestDebugDomainVisibleEndWithoutDebugBackend(t *testing.T) {
+	end, ok := debugDomainVisibleEnd(nilDebugTemporalTx{}, kv.AccountsDomain)
+	require.False(t, ok)
+	require.Zero(t, end)
 }
 
 // Parallel-exec workers share one SharedDomains and one view, so the memo
