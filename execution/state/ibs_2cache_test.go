@@ -65,7 +65,7 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 	ibs := NewWithVersionMap(reader, mvhm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
@@ -151,7 +151,7 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xAAAA"))
 	key := accounts.InternKey(common.HexToHash("0x0001"))
@@ -227,7 +227,7 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xBBBB"))
 	key := accounts.InternKey(common.HexToHash("0x0001"))
@@ -290,7 +290,7 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 
 	// — Block N: write state then commit to domains via Writer —
 	{
-		ibsN := New(NewReaderV3(domains.AsGetter(tx)))
+		ibsN := New(NewReaderV3(domains.AsStateGetter(tx)))
 		defer ibsN.Close()
 		ibsN.SetTxContext(1, 0)
 
@@ -307,7 +307,7 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 	}
 
 	// — Block N+1: fresh IBS reads state that block N wrote to domains —
-	ibsN1 := New(NewReaderV3(domains.AsGetter(tx)))
+	ibsN1 := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer ibsN1.Close()
 
 	gotBal, err := ibsN1.GetBalance(addr)
@@ -334,7 +334,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xEEEE"))
 	key := accounts.InternKey(common.HexToHash("0x0001"))
@@ -368,7 +368,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	require.NoError(t, err)
 
 	// — Step 3: read back from domains, assert correct state —
-	ibsRead := New(NewReaderV3(domains.AsGetter(tx)))
+	ibsRead := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer ibsRead.Close()
 
 	gotBal, err := ibsRead.GetBalance(addr)

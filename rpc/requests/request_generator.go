@@ -264,7 +264,7 @@ func retryConnects(ctx context.Context, op func(context.Context) error) error {
 	// up; on deadline expiry, report the last dial error it discarded. Compared
 	// by identity so a permanent error that merely wraps DeadlineExceeded (from
 	// backoff.Permanent) is left intact.
-	if lastDialErr != nil && err == context.DeadlineExceeded {
+	if lastDialErr != nil && err == context.DeadlineExceeded { //nolint:errorlint // intentional bare sentinel check
 		return lastDialErr
 	}
 	return err
@@ -401,14 +401,14 @@ func (req *requestGenerator) Subscribe(ctx context.Context, method SubMethod, su
 			return err
 		})
 		if err != nil {
-			return nil, fmt.Errorf("failed to dial websocket: %v", err)
+			return nil, fmt.Errorf("failed to dial websocket: %w", err)
 		}
 	}
 
 	namespace, subMethod, err := NamespaceAndSubMethodFromMethod(string(method))
 
 	if err != nil {
-		return nil, fmt.Errorf("cannot get namespace and submethod from method: %v", err)
+		return nil, fmt.Errorf("cannot get namespace and submethod from method: %w", err)
 	}
 
 	args = append([]any{subMethod}, args...)

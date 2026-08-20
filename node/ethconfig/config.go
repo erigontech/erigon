@@ -117,7 +117,7 @@ var Defaults = Config{
 	WarmupKzgCtxOnInit: true,
 }
 
-const DefaultChainDBPageSize = 16 * datasize.KB
+const DefaultChainDBPageSize = 4 * datasize.KB
 
 func init() {
 	home := os.Getenv("HOME")

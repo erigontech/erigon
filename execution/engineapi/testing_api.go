@@ -101,7 +101,7 @@ func (t *testingImpl) decodeTxnProvider(ctx context.Context, transactions *[]hex
 			return nil, fmt.Errorf("NewSharedDomains error: %w", err)
 		}
 		defer sd.Close()
-		reader = state.NewReaderV3(sd.AsGetter(dbTx))
+		reader = state.NewReaderV3(sd.AsStateGetter(dbTx))
 	}
 
 	decoded := make([]types.Transaction, 0, len(*transactions))

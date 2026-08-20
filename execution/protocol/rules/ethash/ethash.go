@@ -147,7 +147,7 @@ func memoryMapAndGenerate(path string, size uint64, lock bool, generator func(bu
 	}
 	suffix, err := math.RandInt64()
 	if err != nil {
-		return nil, nil, nil, fmt.Errorf("failed to get random integer: %v", err)
+		return nil, nil, nil, fmt.Errorf("failed to get random integer: %w", err)
 	}
 	// Create a huge temporary empty file to fill with data
 	temp := path + "." + strconv.Itoa(int(suffix))

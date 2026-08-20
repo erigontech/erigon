@@ -1271,7 +1271,7 @@ func detectCollapseSiblings(
 
 	computedRootHash, err := sdCtx.ComputeCommitment(ctx, tx, false, blockNum, firstTxNumInBlock, "debug_executionWitness_collapse_detection", nil)
 	if err != nil {
-		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %v\n", err)
+		return nil, fmt.Errorf("[debug_executionWitness] collapse detection via ComputeCommitment failed: %w\n", err)
 	}
 
 	if common.Hash(computedRootHash) != expectedBlockRoot {
@@ -1965,7 +1965,7 @@ func (s *witnessStateless) Finalize() (common.Hash, error) {
 		if code, ok := s.codeUpdates[codeHashValue]; ok {
 			// fmt.Printf("  UpdateAccountCode %x: codeHash=%x, len=%d\n", addr[:8], codeHashValue[:8], len(code))
 			if err := s.t.UpdateAccountCode(addrHash[:], code); err != nil {
-				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %v\n", addr, err)
+				return common.Hash{}, fmt.Errorf("failed to update account code for addr %x: %w\n", addr, err)
 			}
 		}
 	}

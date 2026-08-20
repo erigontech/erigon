@@ -53,7 +53,7 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 		var b EthBlockByNumber
 		res = reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %w\n", bn, res.Err)
 		}
 
 		if b.Error != nil {
@@ -64,7 +64,7 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 			var bg EthBlockByNumber
 			res = reqGen.Geth("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &bg)
 			if res.Err != nil {
-				return fmt.Errorf("Could not retrieve block (geth) %d: %v\n", bn, res.Err)
+				return fmt.Errorf("Could not retrieve block (geth) %d: %w\n", bn, res.Err)
 			}
 			if bg.Error != nil {
 				return fmt.Errorf("Error retrieving block (geth): %d %s\n", bg.Error.Code, bg.Error.Message)
@@ -84,7 +84,7 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 				resultsCh <- res
 			}
 			if res.Err != nil {
-				return fmt.Errorf("Could not get account balance (Erigon): %v\n", res.Err)
+				return fmt.Errorf("Could not get account balance (Erigon): %w\n", res.Err)
 			}
 			if balance.Error != nil {
 				return fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message)
@@ -93,7 +93,7 @@ func BenchEthGetBalance(erigonURL, gethURL string, needCompare bool, blockFrom u
 				var balanceg EthBalance
 				res = reqGen.Geth("eth_getBalance", reqGen.getBalance(account, bn), &balanceg)
 				if res.Err != nil {
-					return fmt.Errorf("Could not get account balance (geth): %v\n", res.Err)
+					return fmt.Errorf("Could not get account balance (geth): %w\n", res.Err)
 				}
 				if balanceg.Error != nil {
 					return fmt.Errorf("Error getting account balance (geth): %d %s\n", balanceg.Error.Code, balanceg.Error.Message)
@@ -169,7 +169,7 @@ func BenchEthGetBalanceRandomAccount(erigonURL string, concurentRequests int) er
 		var b EthBlockByNumber
 		res := reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b)
 		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %w\n", bn, res.Err)
 		}
 
 		if b.Error != nil {
@@ -187,7 +187,7 @@ func BenchEthGetBalanceRandomAccount(erigonURL string, concurentRequests int) er
 
 				res := reqGen.Erigon("eth_getBalance", reqGen.getBalance(account, bn), &balance)
 				if res.Err != nil {
-					panic(fmt.Errorf("Could not get account balance (Erigon): %v\n", res.Err))
+					panic(fmt.Errorf("Could not get account balance (Erigon): %w\n", res.Err))
 				}
 				if balance.Error != nil {
 					panic(fmt.Errorf("Error getting account balance (Erigon): %d %s", balance.Error.Code, balance.Error.Message))

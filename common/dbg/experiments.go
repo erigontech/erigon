@@ -142,6 +142,7 @@ var (
 	ReadAheadWait        = EnvBool("READ_AHEAD_WAIT", false)
 	ReadAheadBALCode     = EnvBool("READ_AHEAD_BAL_CODE", false)
 	ReadAheadTxCode      = EnvBool("READ_AHEAD_TX_CODE", false)
+	FilesAsyncIOLiterals = EnvBool("FILES_ASYNC_IO_LITERALS", true)
 	// FilesAsyncIO warms cold state .kv pages via io_uring before the mmap read, so
 	// a would-be blocking page fault becomes a non-blocking read that releases the
 	// goroutine's P. Linux + io_uring only; self-disables (reads use ordinary faults)

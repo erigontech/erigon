@@ -672,7 +672,7 @@ func TestValidateRead_SDStaleness_RevivalDoesNotResurrectPreDestructRead(t *test
 func TestVersionedWritePoolReuse_NoStaleFields(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	vm := NewVersionMap(nil)
-	ibs := NewWithVersionMap(NewReaderV3(domains.AsGetter(tx)), vm)
+	ibs := NewWithVersionMap(NewReaderV3(domains.AsStateGetter(tx)), vm)
 	defer ibs.Close()
 	ibs.SetTxContext(0, 3)
 

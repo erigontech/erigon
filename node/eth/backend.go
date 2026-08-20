@@ -381,7 +381,8 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
-		if _, ok := genesisErr.(*chain.ConfigCompatError); genesisErr != nil && !ok {
+		var compatErr *chain.ConfigCompatError
+		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
 			return genesisErr
 		}
 
@@ -806,7 +807,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	blkBuilder := builder.NewBuilder(
-		backend.sentryCtx,
 		backend.chainDB,
 		&config.Builder,
 		backend.chainConfig,

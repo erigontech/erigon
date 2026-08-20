@@ -52,7 +52,7 @@ func BenchTraceFilter(erigonURL, oeURL string, needCompare bool, blockFrom uint6
 		var mag DebugModifiedAccounts
 		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+			return fmt.Errorf("Could not get modified accounts (Erigon): %w\n", res.Err)
 		}
 		if mag.Error != nil {
 			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)

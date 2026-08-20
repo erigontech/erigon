@@ -1656,7 +1656,9 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 		panic("assert: miss-use " + f.FileName())
 	}
 	g := f.MakeGetter()
-	if dbg.FilesAsyncIO {
+	if dbg.FilesAsyncIOLiterals {
+		g.EnableAsyncLiteralWarm()
+	} else if dbg.FilesAsyncIO {
 		g.EnableResidencyGate()
 	}
 	return seg.NewReader(g, d.Compression)
@@ -2039,7 +2041,6 @@ func (dt *DomainRoTx) prune(ctx context.Context, rwTx kv.RwTx, step kv.Step, txF
 
 	mxPruneInProgress.Inc()
 	defer mxPruneInProgress.Dec()
-	defer mxPruneTookDomain.ObserveDuration(time.Now())
 	var valsCursor kv.PseudoDupSortRwCursor
 	var mode prune.StorageMode
 	if dt.d.LargeValues {
