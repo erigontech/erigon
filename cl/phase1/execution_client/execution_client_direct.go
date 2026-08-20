@@ -154,6 +154,16 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	return idBytes, nil
 }
 
+func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
+	id, err := startPayloadBuild(ctx, cc.chainRW, head, attributes)
+	if err != nil {
+		return nil, err
+	}
+	idBytes := make([]byte, 8)
+	binary.LittleEndian.PutUint64(idBytes, id)
+	return idBytes, nil
+}
+
 func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, assemble func(context.Context) (uint64, error)) (uint64, error) {
 	if attempts <= 0 {
 		return 0, errors.New("assemble block requires at least one attempt")
