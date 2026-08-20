@@ -209,14 +209,16 @@ func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders, staleFlo
 		require.NoError(t, stages.SaveStageProgress(tx, stages.Senders, senders))
 		require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, senders))
 	}
-	if resumeFrom > 0 {
+	// Both describe the single kv.TxLookup prune record, so at most one may be set.
+	require.False(t, resumeFrom > 0 && staleFloor > 0, "resumeFrom and staleFloor write the same record")
+	switch {
+	case resumeFrom > 0:
 		// an interrupted rotation under the current floor: must be resumed, not restarted
 		h := txlTxHash(resumeFrom, 0)
 		require.NoError(t, state.SavePruneValProgress(tx, kv.TxLookup, &prune.Stat{
 			TxFrom: 0, TxTo: 1, ValueProgress: prune.InProgress, LastPrunedValue: h[:],
 		}))
-	}
-	if staleFloor > 0 {
+	case staleFloor > 0:
 		// what a pre-fix binary left: non-zero floor, TxTo from Max(blockTo), rotation Done
 		h := txlTxHash(txlBlocks/2, 0)
 		require.NoError(t, state.SavePruneValProgress(tx, kv.TxLookup, &prune.Stat{
@@ -253,8 +255,8 @@ func txlBlockTo() uint64 { return freezeblocks.CanDeleteTo(txlBlocks, txlFrozen)
 // and SpawnTxLookup sets PruneProgress to FrozenBlocks().
 func TestPruneTxLookupFloor(t *testing.T) {
 	for _, tc := range []struct {
-		name                                                        string
-		firstHeader, pruneProgress, senders, staleFloor, resumeFrom uint64
+		name                                            string
+		firstHeader, pruneProgress, senders, staleFloor uint64
 	}{
 		{name: "headers_from_genesis", firstHeader: 1},
 		{name: "headers_pruned_to_frontier", firstHeader: txlBlockTo()},
@@ -264,7 +266,7 @@ func TestPruneTxLookupFloor(t *testing.T) {
 		{name: "stale_rotation", firstHeader: 1, staleFloor: txlMinTxNum(txlBlocks / 2)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tx, cfg, s := txLookupFixture(t, tc.firstHeader, tc.pruneProgress, tc.senders, tc.staleFloor, tc.resumeFrom)
+			tx, cfg, s := txLookupFixture(t, tc.firstHeader, tc.pruneProgress, tc.senders, tc.staleFloor, 0)
 			require.NoError(t, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
 
 			to := txlBlockTo()

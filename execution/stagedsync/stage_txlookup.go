@@ -72,18 +72,12 @@ func SpawnTxLookup(s *StageState, tx kv.RwTx, toBlock uint64, cfg TxLookupCfg, c
 		pruneTo := cfg.prune.History.PruneTo(endBlock)
 		if startBlock < pruneTo {
 			startBlock = pruneTo
-			if err := s.UpdatePrune(tx, pruneTo); err != nil {
-				return err
-			}
 		}
 	}
 
 	if cfg.blockReader.FrozenBlocks() > startBlock {
 		// Snapshot .idx files already have TxLookup index - then no reason iterate over them here
 		startBlock = cfg.blockReader.FrozenBlocks()
-		if err := s.UpdatePrune(tx, startBlock); err != nil {
-			return err
-		}
 	}
 
 	if startBlock > 0 {
@@ -229,14 +223,11 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	// A record left by the pre-fix floor carries a non-zero TxFrom. Its cursor already
 	// passed rows this floor must delete, and its TxTo came from Max(blockTo) so it
 	// always covers the new Min(blockTo) — it must not short-circuit below.
-	staleFloor := prevStat != nil && prevStat.TxFrom != 0
+	staleFloor := prevStat.TxFrom != 0
 
 	// A completed rotation that covers current txTo — nothing more to do.
-	if !staleFloor && prevStat != nil && prevStat.TxTo >= txTo && prevStat.ValueProgress == prune.Done {
+	if !staleFloor && prevStat.TxTo >= txTo && prevStat.ValueProgress == prune.Done {
 		return nil
-	}
-	if prevStat == nil {
-		prevStat = &prune.Stat{}
 	}
 
 	// Rolling scan: preserve cursor position across txTo advances so each B-tree page
@@ -292,7 +283,7 @@ func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Conte
 	if err != nil {
 		return fmt.Errorf("prune TxLookup: %w", err)
 	}
-	logger.Debug(fmt.Sprintf("[%s] prune", logPrefix), "scanned", pruneStat.ScanCountValues,
+	logger.Debug(fmt.Sprintf("[%s] prune", logPrefix), "scanned", pruneStat.ScanCountKeys,
 		"pruned", pruneStat.PruneCountValues, "status", pruneStat.ValueProgress.String(), "blockTo", blockTo)
 	defer func() {
 		pruneStat.TxFrom, pruneStat.TxTo = 0, rotationTxTo
