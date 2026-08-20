@@ -27,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -65,7 +66,7 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsStateGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	ibs := NewWithVersionMap(reader, mvhm)
 	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
@@ -151,7 +152,7 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsStateGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xAAAA"))
 	key := accounts.InternKey(common.HexToHash("0x0001"))
@@ -227,7 +228,7 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsStateGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xBBBB"))
 	key := accounts.InternKey(common.HexToHash("0x0001"))
@@ -290,7 +291,7 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 
 	// — Block N: write state then commit to domains via Writer —
 	{
-		ibsN := New(NewReaderV3(domains.AsStateGetter(tx)))
+		ibsN := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 		defer ibsN.Close()
 		ibsN.SetTxContext(1, 0)
 
@@ -307,7 +308,7 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 	}
 
 	// — Block N+1: fresh IBS reads state that block N wrote to domains —
-	ibsN1 := New(NewReaderV3(domains.AsStateGetter(tx)))
+	ibsN1 := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer ibsN1.Close()
 
 	gotBal, err := ibsN1.GetBalance(addr)
@@ -334,7 +335,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsStateGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xEEEE"))
 	key := accounts.InternKey(common.HexToHash("0x0001"))
@@ -368,7 +369,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	require.NoError(t, err)
 
 	// — Step 3: read back from domains, assert correct state —
-	ibsRead := New(NewReaderV3(domains.AsStateGetter(tx)))
+	ibsRead := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer ibsRead.Close()
 
 	gotBal, err := ibsRead.GetBalance(addr)
