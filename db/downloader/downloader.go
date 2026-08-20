@@ -1135,6 +1135,7 @@ func (d *Downloader) prepareLocalDataForDownload(
 	if loadErr != nil {
 		d.log(log.LvlWarn, "error loading metainfo from disk", "err", loadErr, "name", name)
 	}
+	localMetainfoUnbacked := false
 	if localMetainfo.Ok {
 		localInfoHash := localMetainfo.Value.HashInfoBytes()
 		if localInfoHash == preverifiedInfoHash {
@@ -1144,6 +1145,11 @@ func (d *Downloader) prepareLocalDataForDownload(
 			"preverified", preverifiedInfoHash,
 			"local", localInfoHash,
 			"name", name)
+		info, infoErr := localMetainfo.Value.UnmarshalInfo()
+		if infoErr != nil {
+			d.log(log.LvlWarn, "error unmarshalling local metainfo", "err", infoErr, "name", name)
+		}
+		localMetainfoUnbacked = infoErr == nil && !d.snapshotDataSizesMatch(&info)
 		// Forget the metainfo we loaded, it's wrong (probably changed hash but not name...)
 		localMetainfo.SetNone()
 	} else {
@@ -1160,11 +1166,21 @@ func (d *Downloader) prepareLocalDataForDownload(
 		if err != nil {
 			return localMetainfo, false, err
 		}
-		if exists {
-			// TODO(@AskAlexSharov, #21522): build the metainfo here when missing, so the kept file can be seeded.
-			d.log(log.LvlWarn, "keeping local snapshot, skipping preverified download", "name", name)
+		if !exists {
+			return localMetainfo, true, nil
 		}
-		return localMetainfo, !exists, nil
+		if localMetainfoUnbacked {
+			// The data backs neither manifest. Downloading hands it to the client, which
+			// completes the file by length, so a wrong length is re-fetched while
+			// same-length-different-bytes is not.
+			d.log(log.LvlWarn, "local snapshot does not match its own metainfo, downloading",
+				"name", name)
+			return localMetainfo, true, nil
+		}
+		// TODO(@AskAlexSharov, #21522): build and add the metainfo when it is missing
+		// (BuildTorrentIfNeed + addCompleteTorrent), or the kept file is never seeded.
+		d.log(log.LvlWarn, "keeping local snapshot, skipping preverified download", "name", name)
+		return localMetainfo, false, nil
 	}
 
 	if err := d.invalidateData(name, preverifiedInfoHash); err != nil {
@@ -1188,15 +1204,15 @@ func (d *Downloader) addedFirstDownloader(
 	name string,
 	infoHash metainfo.Hash,
 ) (afterAdd func()) {
-	// Try again, we would have invalidated data for changed infohashes now.
+	// Try the webseeds for the metainfo that wasn't on disk. Nothing here relies on the data having
+	// been moved aside: after the initial download it never is, and the client completes the file
+	// by length.
 	if !localMetainfo.Ok {
 		// Yes I mean for this error to be scoped here.
 		err := d.fetchMetainfoFromWebseeds(ctx, name, infoHash)
 		if err == nil {
 			// Always reuse code paths to ensure no surprises later. I.e. load the metainfo again
-			// through the same path that is used on a good run. No data invalidation here, at this
-			// point we've added the torrent, and already invalidated if the metainfo was missing
-			// the first time.
+			// through the same path that is used on a good run.
 			localMetainfo, err = d.maybeLoadMetainfoFromDisk(name)
 			if err != nil {
 				// Should this error be returned instead?

@@ -26,6 +26,7 @@ import (
 	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	g "github.com/anacrolix/generics"
 	"github.com/anacrolix/torrent/metainfo"
@@ -38,6 +39,8 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/downloader/downloadercfg"
 	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/node/gointerfaces"
+	"github.com/erigontech/erigon/node/gointerfaces/downloaderproto"
 )
 
 func TestConcurrentDownload(t *testing.T) {
@@ -433,6 +436,25 @@ func TestKeepsLocalSnapshotAfterInitialDownload(t *testing.T) {
 	}
 }
 
+// Data that no longer matches its own metainfo backs neither manifest. Keeping it unverified
+// leaves a hole in the snapshot tier, so it goes to the client, which completes it by length.
+func TestDownloadsLocalSnapshotNotMatchingItsMetainfo(t *testing.T) {
+	require := require.New(t)
+	d, logs, name, path := newLocalSnapshotTest(t)
+	_, err := BuildTorrentIfNeed(t.Context(), name, d.snapDir(), d.torrentFS)
+	require.NoError(err)
+	require.NoError(os.WriteFile(path, []byte("truncated"), 0o644))
+	markInitialDownloadComplete(t, d)
+
+	_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), name)
+	require.True(download, "a file that backs no metainfo must be re-fetched, not kept")
+
+	require.FileExists(path, "the client completes in place, so the data must stay where it is")
+	require.NoFileExists(path+".part", "invalidation stays forbidden after the initial download")
+	require.Contains(logs.String(), "local snapshot does not match its own metainfo")
+	require.Contains(logs.String(), name)
+}
+
 // Nothing local to protect: the preverified file is still downloaded.
 func TestDownloadsMissingSnapshotAfterInitialDownload(t *testing.T) {
 	require := require.New(t)
@@ -591,8 +613,8 @@ func allLocalSnapshotStates() (all []localSnapshotState) {
 	return
 }
 
-// Invariant: once preverified.toml exists, no state of the datadir may cost a data file, and a file
-// we have is never re-downloaded.
+// Invariant: once preverified.toml exists, no state of the datadir may cost a data file. The
+// download flag below is only the decision to add the torrent, not a decision to fetch bytes.
 func TestNeverEvictsAfterInitialDownload(t *testing.T) {
 	require := require.New(t)
 	d := newDownloaderTest(t).downloader
@@ -610,6 +632,30 @@ func TestNeverEvictsAfterInitialDownload(t *testing.T) {
 		wantDownload := !st.data || st.metainfo == "matching"
 		require.Equal(wantDownload, download, "%+v", st)
 	}
+}
+
+// The guard has to hold at the entry point that reaches it in production: cmd/downloader --seedbox
+// issues a Download per preverified item whatever cfg.Local says, while erigon's own sync path is
+// gated earlier. The bounded context is so a regression fails instead of waiting on a peer.
+func TestGrpcDownloadKeepsLocalDataAfterInitialDownload(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+	markInitialDownloadComplete(t, d)
+	svr, err := NewGrpcServer(d)
+	require.NoError(err)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	_, err = svr.Download(ctx, &downloaderproto.DownloadRequest{
+		Items: []*downloaderproto.DownloadItem{{
+			Path:        name,
+			TorrentHash: gointerfaces.ConvertAddressToH160(snaptype.Hex2InfoHash("aa")),
+		}},
+	})
+	require.NoError(err)
+
+	require.FileExists(path)
+	require.NoFileExists(path + ".part")
 }
 
 // The snapshot stage writes preverified.toml mid-run, so the rule must be re-read, not cached from
