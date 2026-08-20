@@ -112,6 +112,9 @@ func TestDirectPreparationAndForkChoiceReuseTheSameExecutionBuild(t *testing.T) 
 	head := chainPack.TopBlock.Hash()
 	_, err = client.ForkChoiceUpdate(t.Context(), head, head, head, nil, clparams.ElectraVersion)
 	require.NoError(t, err)
+	// Parallel state flushing can outlive a successful fork-choice response. Wait for the setup work
+	// so this test isolates build reuse from expected execution-module contention.
+	module.ExecModule.WaitIdle(t.Context())
 
 	timestamp := hexutil.Uint64(time.Now().Add(12 * time.Second).Unix())
 	parentRoot := common.Hash{0x41}
