@@ -163,7 +163,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
-	blockNumber, _, _, err := api.resolveCanonicalBlockInCommittedView(ctx, tx, blockNrOrHash)
+	blockNumber, err := api.resolveCanonicalBlockNumberInCommittedView(ctx, tx, blockNrOrHash)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return StorageRangeResult{}, nil

@@ -337,7 +337,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {
-		fromBlock, _, _, err = api.resolveCanonicalBlockInCommittedView(ctx, dbtx, *req.FromBlock)
+		fromBlock, err = api.resolveCanonicalBlockNumberInCommittedView(ctx, dbtx, *req.FromBlock)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()
@@ -353,7 +353,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 			return err
 		}
 	} else {
-		toBlock, _, _, err = api.resolveCanonicalBlockInCommittedView(ctx, dbtx, *req.ToBlock)
+		toBlock, err = api.resolveCanonicalBlockNumberInCommittedView(ctx, dbtx, *req.ToBlock)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()
@@ -924,7 +924,7 @@ func (api *TraceAPIImpl) callBlock(
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
 	} else {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-			&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
+			header, parentNrOrHash.RequireCanonical, gasBailOut /* gasBailout */, traceConfig)
 	}
 
 	if cmErr != nil {
@@ -1230,7 +1230,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
-		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
+		header, parentNrOrHash.RequireCanonical, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
 		return nil, cmErr
