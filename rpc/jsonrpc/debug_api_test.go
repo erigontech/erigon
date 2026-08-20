@@ -94,8 +94,8 @@ var debugTraceTransactionNoRefundTests = []struct {
 
 func TestGetRawBlockAccessListRPCSpec(t *testing.T) {
 	chainPack, client := newBlockAccessListRPCFixture(t)
-	availableRaw := marshalHexBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
-	emptyRaw := marshalHexBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
+	availableRaw := marshalBlockAccessListBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
+	emptyRaw := marshalBlockAccessListBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
 	cases := []blockAccessListRPCCase{
 		{name: "available by number", selector: "0x2", want: availableRaw},
 		{name: "available by tag", selector: "safe", want: availableRaw},
@@ -1017,7 +1017,7 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 
 	t.Run("pending tag uses committed view", func(t *testing.T) {
 		ff := rpchelper.New(t.Context(), rpchelper.FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
-		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)})
+		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)}, nil)
 		payload, err := rlp.EncodeToBytes(pendingBlock)
 		require.NoError(t, err)
 		ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
