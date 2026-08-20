@@ -216,15 +216,17 @@ Every task lists its tests before the implementation they cover. In Go the red p
 - Modify: `cl/persistence/blob_storage/bucket_store.go`
 - Modify: `cl/persistence/blob_storage/bucket_store_test.go`
 
-- [ ] write success tests: write/read round trip, `exists` after a write, `stream` reproduces the written bytes, `remove` then `exists` is false
-- [ ] write tests that `write` reports `created == true` on a first write and `created == false` when it replaces an existing file
-- [ ] write error tests using the task 1 failing wrapper: a failed write leaves nothing at the target path and no stray temp, `remove` of a missing file returns nil, `read` of a missing file returns `found == false` with no error
-- [ ] add `write` returning `(created bool, err error)`: `Stat` the target to set `created`, `MkdirAll`, create `<file>.tmp`, `EncodeAndWrite`, `Sync`, `Close`, `Rename` onto the target, removing the temp on any error
-- [ ] add `read` returning `(found, err)`, mapping a missing file to `found == false` and leaving the not-found convention to callers
-- [ ] add `exists`, `remove` (ENOENT tolerated) and `stream`, none of them locking
-- [ ] comment on the type that it never locks and why — every method is one operation on a complete file, and callers own the granularity
-- [ ] mutation-check: revert `write` to writing in place, and `remove` to the erroring form
-- [ ] run tests — must pass before task 4
+- [x] write success tests: write/read round trip, `exists` after a write, `stream` reproduces the written bytes, `remove` then `exists` is false
+- [x] write tests that `write` reports `created == true` on a first write and `created == false` when it replaces an existing file
+- [x] write error tests using the task 1 failing wrapper: a failed write leaves nothing at the target path and no stray temp, `remove` of a missing file returns nil, `read` of a missing file returns `found == false` with no error
+- [x] add `write` returning `(created bool, err error)`: `Stat` the target to set `created`, `MkdirAll`, create `<file>.tmp`, `EncodeAndWrite`, `Sync`, `Close`, `Rename` onto the target, removing the temp on any error
+- [x] add `read` returning `(found, err)`, mapping a missing file to `found == false` and leaving the not-found convention to callers
+- [x] add `exists`, `remove` (ENOENT tolerated) and `stream`, none of them locking
+- [x] comment on the type that it never locks and why — every method is one operation on a complete file, and callers own the granularity
+- [x] mutation-check: revert `write` to writing in place, and `remove` to the erroring form
+- [x] run tests — must pass before task 4
+
+➕ `EncodeAndWrite` wraps the file in a `bufio.Writer` and flushes it in a defer whose error it discards, so on a value that fits the buffer it returns nil even when every byte failed to reach the file — the pre-existing path would then `Sync` a file it never wrote and rename the empty temp onto the target, which is problem 2 by another route. `write` therefore hands it an `errWriter` and checks the recorded error. Verified by mutation: dropping the `errWriter` leaves `TestBucketStoreFailedWriteLeavesNothingBehind` unable to induce a failure at all (`bucket_store_test.go:403` goes red on `got nil`).
 
 ### Task 4: BlobStore onto bucketStore
 

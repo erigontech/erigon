@@ -17,21 +17,32 @@
 package blob_storage
 
 import (
+	"errors"
 	"fmt"
+	"io"
+	"os"
 	"strconv"
 	"sync"
 
 	"github.com/spf13/afero"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/ssz"
 )
 
 const (
 	subdivisionSlot = 10_000
 	rwLocksCount    = 64
+	tmpSuffix       = ".tmp"
 )
 
 // bucketStore holds sidecars under <slot/subdivisionSlot>/<blockRoot>_<index>.
+//
+// It never locks. Every method is one operation on a complete file — a write lands by
+// rename, so a reader sees the old file or the new one and never a partial — which
+// leaves the caller free to pick the granularity of anything spanning more than one.
 type bucketStore struct {
 	fs afero.Fs
 }
@@ -44,6 +55,115 @@ func (b *bucketStore) path(slot uint64, root common.Hash, idx uint64) (dir, file
 	dir = strconv.FormatUint(slot/subdivisionSlot, 10)
 	file = fmt.Sprintf("%s/%s_%d", dir, root.String(), idx)
 	return dir, file
+}
+
+// write encodes v onto a temp file and renames it onto the target, so a failure
+// never leaves a partial file where a reader would take it for a complete one.
+// created reports whether the target was absent beforehand.
+func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
+	dir, file := b.path(slot, root, idx)
+	created := false
+	if _, err := b.fs.Stat(file); err != nil {
+		if !errors.Is(err, os.ErrNotExist) {
+			return false, err
+		}
+		created = true
+	}
+	if err := b.fs.MkdirAll(dir, 0o755); err != nil {
+		return false, err
+	}
+	tmp := file + tmpSuffix
+	if err := b.encodeTo(tmp, v); err != nil {
+		b.fs.Remove(tmp)
+		return false, err
+	}
+	if err := b.fs.Rename(tmp, file); err != nil {
+		b.fs.Remove(tmp)
+		return false, err
+	}
+	return created, nil
+}
+
+func (b *bucketStore) encodeTo(path string, v ssz.Marshaler) error {
+	fh, err := b.fs.Create(path)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+	// EncodeAndWrite flushes in a defer and discards that error, so a short write is
+	// only observable on the writer it was handed.
+	w := &errWriter{w: fh}
+	if err := ssz_snappy.EncodeAndWrite(w, v); err != nil {
+		return err
+	}
+	if w.err != nil {
+		return w.err
+	}
+	if err := fh.Sync(); err != nil {
+		return err
+	}
+	return fh.Close()
+}
+
+// read decodes the stored sidecar into out. A missing file is reported as not found,
+// leaving each caller to decide what absence means.
+func (b *bucketStore) read(slot uint64, root common.Hash, idx uint64, out ssz.EncodableSSZ, version clparams.StateVersion) (bool, error) {
+	_, file := b.path(slot, root, idx)
+	fh, err := b.fs.Open(file)
+	if err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	defer fh.Close()
+	if err := ssz_snappy.DecodeAndReadNoForkDigest(fh, out, version); err != nil {
+		return false, err
+	}
+	return true, nil
+}
+
+func (b *bucketStore) exists(slot uint64, root common.Hash, idx uint64) (bool, error) {
+	_, file := b.path(slot, root, idx)
+	if _, err := b.fs.Stat(file); err != nil {
+		if errors.Is(err, os.ErrNotExist) {
+			return false, nil
+		}
+		return false, err
+	}
+	return true, nil
+}
+
+func (b *bucketStore) remove(slot uint64, root common.Hash, idx uint64) error {
+	_, file := b.path(slot, root, idx)
+	if err := b.fs.Remove(file); err != nil && !errors.Is(err, os.ErrNotExist) {
+		return err
+	}
+	return nil
+}
+
+func (b *bucketStore) stream(w io.Writer, slot uint64, root common.Hash, idx uint64) error {
+	_, file := b.path(slot, root, idx)
+	fh, err := b.fs.Open(file)
+	if err != nil {
+		return err
+	}
+	defer fh.Close()
+	_, err = io.Copy(w, fh)
+	return err
+}
+
+type errWriter struct {
+	w   io.Writer
+	err error
+}
+
+func (e *errWriter) Write(p []byte) (int, error) {
+	n, err := e.w.Write(p)
+	if err != nil && e.err == nil {
+		e.err = err
+	}
+	return n, err
 }
 
 // pruneBelow removes every bucket that ends before slot. It attempts all of them and
