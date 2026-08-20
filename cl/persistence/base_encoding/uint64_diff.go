@@ -28,7 +28,6 @@ import (
 	"github.com/klauspost/compress/zstd"
 )
 
-// make a sync.pool of compressors (zstd)
 var zstdWriterPool = sync.Pool{
 	New: func() any {
 		compressor, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
@@ -39,7 +38,14 @@ var zstdWriterPool = sync.Pool{
 	},
 }
 
-func putComp(v *zstd.Encoder) {
+// getZstdWriter returns a pooled encoder writing to w. Release with putZstdWriter.
+func getZstdWriter(w io.Writer) *zstd.Encoder {
+	compressor := zstdWriterPool.Get().(*zstd.Encoder)
+	compressor.Reset(w)
+	return compressor
+}
+
+func putZstdWriter(v *zstd.Encoder) {
 	v.Reset(nil)
 	zstdWriterPool.Put(v)
 }
@@ -87,9 +93,8 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, oldVal, newVal []byt
 		return errors.New("old list is longer than new list")
 	}
 
-	compressor := zstdWriterPool.Get().(*zstd.Encoder)
-	defer putComp(compressor)
-	compressor.Reset(w)
+	compressor := getZstdWriter(w)
+	defer putZstdWriter(compressor)
 
 	// Get one repeated pattern buffer from the pool
 	repeatedPatternPtr := repeatedPatternBufferPool.Get().(*[]repeatedPatternEntry)

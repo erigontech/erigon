@@ -22,15 +22,12 @@ import (
 	"fmt"
 	"io"
 	"math"
-
-	"github.com/klauspost/compress/zstd"
 )
 
 func WriteRabbits(in []uint64, w io.Writer) error {
 	// Retrieve compressor first.
-	compressor := zstdWriterPool.Get().(*zstd.Encoder)
-	defer putComp(compressor)
-	compressor.Reset(w)
+	compressor := getZstdWriter(w)
+	defer putZstdWriter(compressor)
 
 	var buf [8]byte
 	writeNum := func(v uint64) error {
