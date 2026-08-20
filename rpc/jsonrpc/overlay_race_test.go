@@ -166,6 +166,18 @@ type hideHeaderBlockReader struct {
 	blockNumber uint64
 }
 
+type failOverlayHeaderNumberBlockReader struct {
+	dbservices.FullBlockReader
+	err error
+}
+
+func (r failOverlayHeaderNumberBlockReader) HeaderNumber(ctx context.Context, tx kv.Getter, hash common.Hash) (*uint64, error) {
+	if view, ok := tx.(interface{ IsOverlayReadView() bool }); ok && view.IsOverlayReadView() {
+		return nil, r.err
+	}
+	return r.FullBlockReader.HeaderNumber(ctx, tx, hash)
+}
+
 type publishOverlayOnSecondProbeTx struct {
 	kv.Tx
 	probes  int
@@ -207,6 +219,28 @@ func newOverlayUnpublishTestAPI(t *testing.T) (*BaseAPI, *execmoduletester.ExecM
 		blockNumber:     overlayHeader.Number.Uint64(),
 	}
 	return base, m, overlayHeader
+}
+
+func writeOverlayReorgHeader(t *testing.T, base *BaseAPI, m *execmoduletester.ExecModuleTester) *types.Header {
+	t.Helper()
+
+	var canonicalHeader *types.Header
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var err error
+		canonicalHeader, err = m.BlockReader.HeaderByNumber(m.Ctx, tx, overlayRaceChainSize)
+		return err
+	}))
+	require.NotNil(t, canonicalHeader)
+
+	reorgHeader := types.CopyHeader(canonicalHeader)
+	reorgHeader.Coinbase = common.Address{2}
+	require.NotEqual(t, canonicalHeader.Hash(), reorgHeader.Hash())
+
+	overlay := base.filters.LatestSD().BlockOverlay()
+	require.NoError(t, rawdb.WriteHeader(overlay, reorgHeader))
+	require.NoError(t, rawdb.WriteCanonicalHash(overlay, reorgHeader.Hash(), reorgHeader.Number.Uint64()))
+	require.NoError(t, rawdb.WriteBody(overlay, reorgHeader.Hash(), reorgHeader.Number.Uint64(), &types.Body{}))
+	return reorgHeader
 }
 
 // overlayRaceTxPoolClient extends stubTxPoolClient with canned replies for
@@ -764,6 +798,35 @@ func TestStorageRangeAtRejectsOverlayOnlyHead(t *testing.T) {
 	require.ErrorContains(t, err, "not executed")
 }
 
+func TestStorageRangeAtRejectsOverlayReorgAtExecutedHeight(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	reorgHeader := writeOverlayReorgHeader(t, base, m)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	_, err := api.StorageRangeAt(m.Ctx, reorgHeader.Hash(), 0, m.Address, nil, 10)
+	require.ErrorContains(t, err, "not available in the committed view")
+}
+
+func TestStorageRangeAtPropagatesOverlayProbeError(t *testing.T) {
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	wantErr := errors.New("overlay header lookup failed")
+	base._blockReader = failOverlayHeaderNumberBlockReader{FullBlockReader: base._blockReader, err: wantErr}
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	_, err := api.StorageRangeAt(m.Ctx, overlayHeader.Hash(), 0, m.Address, nil, 10)
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestStorageRangeAtUnknownHashReturnsEmpty(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	result, err := api.StorageRangeAt(m.Ctx, common.Hash{0xff}, 0, m.Address, nil, 10)
+	require.NoError(t, err)
+	require.Empty(t, result.Storage)
+	require.Nil(t, result.NextKey)
+}
+
 func TestAccountRangeRejectsBlockAheadOfExecution(t *testing.T) {
 	m, aheadHash := newHeaderAheadTester(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{})
@@ -842,6 +905,54 @@ func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
 	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
 	require.ErrorContains(t, err, "not executed")
+}
+
+func TestTraceFilter_RejectsOverlayOnlyHead(t *testing.T) {
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	to := rpc.BlockNumberOrHashWithHash(overlayHeader.Hash(), true)
+	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.Wrap(s))
+	require.ErrorContains(t, err, "not executed")
+}
+
+func TestTraceFilter_RejectsOverlayReorgAtExecutedHeight(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	reorgHeader := writeOverlayReorgHeader(t, base, m)
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	to := rpc.BlockNumberOrHashWithHash(reorgHeader.Hash(), true)
+	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.Wrap(s))
+	require.ErrorContains(t, err, "not available in the committed view")
+}
+
+func TestTraceFilter_PropagatesOverlayProbeError(t *testing.T) {
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	wantErr := errors.New("overlay header lookup failed")
+	base._blockReader = failOverlayHeaderNumberBlockReader{FullBlockReader: base._blockReader, err: wantErr}
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	to := rpc.BlockNumberOrHashWithHash(overlayHeader.Hash(), true)
+	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.Wrap(s))
+	require.ErrorIs(t, err, wantErr)
+}
+
+func TestTraceFilter_UnknownBlockReturnsEmptyArray(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	to := rpc.BlockNumberOrHashWithHash(common.Hash{0xff}, true)
+	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, jsonstream.Wrap(s))
+	require.NoError(t, err)
+	require.Equal(t, "[]", string(s.Buffer()))
 }
 
 func TestTraceFilter_OmittedToBlockUsesExecutionProgress(t *testing.T) {

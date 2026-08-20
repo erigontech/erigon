@@ -249,6 +249,25 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
+func (api *BaseAPI) resolveCanonicalBlockInCommittedView(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, common.Hash, bool, error) {
+	blockNumber, hash, latest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	var blockNotFound rpc.BlockNotFoundErr
+	if !errors.As(err, &blockNotFound) {
+		return blockNumber, hash, latest, err
+	}
+
+	overlayBlockNumber, _, _, overlayErr := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, api.filters.WithOverlay(tx), api._blockReader, nil)
+	if overlayErr != nil {
+		return 0, common.Hash{}, false, overlayErr
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, overlayBlockNumber); err != nil {
+		return 0, common.Hash{}, false, err
+	}
+
+	// Execution progress alone is insufficient after an overlay reorg: tx still exposes state for the committed canonical block.
+	return 0, common.Hash{}, false, fmt.Errorf("block %s is not available in the committed view", blockNrOrHash.String())
+}
+
 func (api *BaseAPI) engine() rules.EngineReader {
 	return api._engine
 }

@@ -163,18 +163,9 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
-	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	blockNumber, _, _, err := api.resolveCanonicalBlockInCommittedView(ctx, tx, blockNrOrHash)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
-			// Probe the overlay only to distinguish an in-flight canonical head from an unknown hash.
-			// Temporal reads remain bound to the committed transaction.
-			overlayTx := api.filters.WithOverlay(tx)
-			overlayBlockNumber, _, _, overlayErr := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
-			if overlayErr == nil {
-				if err := rpchelper.CheckBlockExecuted(tx, overlayBlockNumber); err != nil {
-					return StorageRangeResult{}, err
-				}
-			}
 			return StorageRangeResult{}, nil
 		}
 		return StorageRangeResult{}, err
