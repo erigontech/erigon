@@ -47,6 +47,7 @@ type LogsFilter struct {
 	topics          *concurrent.SyncMap[common.Hash, int]
 	topicsOriginal  [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
 	pollingCriteria *filters.FilterCriteria
+	pollingLimits   LogFilterLimits
 	sender          Sub[*types.Log] // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
@@ -70,7 +71,7 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 
 // insertLogsFilter inserts a new log filter into the LogsFilterAggregator with the specified sender.
 // It generates a new filter ID, creates a new LogsFilter, and adds it to the logsFilters map.
-func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types.Log], pollingCriteria *filters.FilterCriteria) (LogsSubID, *LogsFilter) {
+func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types.Log], pollingCriteria *filters.FilterCriteria, pollingLimits LogFilterLimits) (LogsSubID, *LogsFilter) {
 	a.logsFilterLock.Lock()
 	defer a.logsFilterLock.Unlock()
 	filterId := LogsSubID(generateSubscriptionID())
@@ -78,20 +79,21 @@ func (a *LogsFilterAggregator) insertLogsFilter(sender Sub[*types.Log], pollingC
 		addrs:           concurrent.NewSyncMap[common.Address, int](),
 		topics:          concurrent.NewSyncMap[common.Hash, int](),
 		pollingCriteria: pollingCriteria,
+		pollingLimits:   pollingLimits,
 		sender:          sender,
 	}
 	a.logsFilters.Put(filterId, filter)
 	return filterId, filter
 }
 
-func (a *LogsFilterAggregator) filterCriteria(filterId LogsSubID) (filters.FilterCriteria, bool) {
+func (a *LogsFilterAggregator) filterCriteria(filterId LogsSubID) (filters.FilterCriteria, LogFilterLimits, bool) {
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 	filter, ok := a.logsFilters.Get(filterId)
 	if !ok || filter.pollingCriteria == nil {
-		return filters.FilterCriteria{}, false
+		return filters.FilterCriteria{}, LogFilterLimits{}, false
 	}
-	return *filter.pollingCriteria, true
+	return *filter.pollingCriteria, filter.pollingLimits, true
 }
 
 // removeLogsFilter removes a log filter identified by filterId from the LogsFilterAggregator.

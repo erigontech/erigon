@@ -142,11 +142,14 @@ func (api *APIImpl) GetFilterLogs(ctx context.Context, index string) (types.RPCL
 	if ft, ok := api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex)); !ok || ft != rpchelper.FilterTypeLogs {
 		return nil, rpc.ErrFilterNotFound
 	}
-	criteria, ok := api.filters.LogFilterCriteria(rpchelper.LogsSubID(cutIndex))
+	criteria, limits, ok := api.filters.LogFilterCriteria(rpchelper.LogsSubID(cutIndex))
 	if !ok {
 		return nil, rpc.ErrFilterNotFound
 	}
-	return api.GetLogs(ctx, criteria)
+	return api.getLogs(ctx, criteria, getLogsLimits{
+		maxTopicPositions: maxTopics,
+		filterLimits:      limits,
+	})
 }
 
 // subscribeRPC runs the shared subscription skeleton: subscription creation and a

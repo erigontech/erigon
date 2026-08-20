@@ -166,6 +166,66 @@ func TestGetFilterLogsDoesNotConsumeFilterChanges(t *testing.T) {
 	require.Equal(t, []any{queued}, changes)
 }
 
+func TestGetFilterLogsUsesStoredFilterCriteriaLimits(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+
+	tests := []struct {
+		name       string
+		criteria   filters.FilterCriteria
+		filterConf rpchelper.FiltersConfig
+	}{
+		{
+			name: "addresses",
+			criteria: filters.FilterCriteria{
+				Addresses: common.Addresses{{1}, {2}},
+			},
+			filterConf: rpchelper.FiltersConfig{
+				RpcSubscriptionFiltersMaxAddresses: 2,
+			},
+		},
+		{
+			name: "topic alternatives",
+			criteria: filters.FilterCriteria{
+				Topics: [][]common.Hash{{{1}, {2}}},
+			},
+			filterConf: rpchelper.FiltersConfig{
+				RpcSubscriptionFiltersMaxTopics: 2,
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			test.filterConf.RpcSubscriptionFiltersTimeout = rpchelper.DefaultFilterTimeout
+			ff := rpchelper.New(ctx, test.filterConf, nil, nil, mining, func() {}, m.Log, nil)
+			base := NewBaseApi(ff, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{
+				Dirs:          m.Dirs,
+				LogQueryLimit: 1,
+			})
+			api := newEthApiForTest(base, m.DB, nil, nil)
+			test.criteria.FromBlock = big.NewInt(10)
+			test.criteria.ToBlock = big.NewInt(10)
+
+			filterID, err := api.NewFilter(ctx, test.criteria)
+			require.NoError(t, err)
+			t.Cleanup(func() {
+				_, _ = api.UninstallFilter(ctx, filterID)
+			})
+
+			_, err = api.GetLogs(ctx, test.criteria)
+			require.ErrorContains(t, err, "query exceeds the maximum of 1 addresses or topics per search position")
+
+			_, err = api.GetFilterLogs(ctx, filterID)
+			require.NoError(t, err)
+		})
+	}
+}
+
 func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {
 	m := execmoduletester.New(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)

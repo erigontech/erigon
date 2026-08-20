@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/txnprovider/txpool"
 )
@@ -756,28 +755,16 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription is
 // installed and the error is returned.
 func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.Log, LogsSubID, error) {
-	if maxAddresses := ff.config.RpcSubscriptionFiltersMaxAddresses; maxAddresses > 0 && len(criteria.Addresses) > maxAddresses {
-		return nil, "", &rpc.InvalidParamsError{
-			Message: fmt.Sprintf("log filter has %d addresses, maximum is %d", len(criteria.Addresses), maxAddresses),
-		}
-	}
-	if maxTopics := ff.config.RpcSubscriptionFiltersMaxTopics; maxTopics > 0 {
-		topicCount := 0
-		for _, topics := range criteria.Topics {
-			topicCount += len(topics)
-		}
-		if topicCount > maxTopics {
-			return nil, "", &rpc.InvalidParamsError{
-				Message: fmt.Sprintf("log filter has %d topic alternatives, maximum is %d", topicCount, maxTopics),
-			}
-		}
+	limits := ff.config.logFilterLimits()
+	if err := limits.Validate(criteria); err != nil {
+		return nil, "", err
 	}
 	var pollingCriteria *filters.FilterCriteria
 	if protocol == ProtocolHTTP {
 		pollingCriteria = &criteria
 	}
 	sub := newChanSub[*types.Log](size, protocol)
-	id, f := ff.logsSubs.insertLogsFilter(sub, pollingCriteria)
+	id, f := ff.logsSubs.insertLogsFilter(sub, pollingCriteria, limits)
 
 	// Handle addresses
 	if len(criteria.Addresses) == 0 {
@@ -827,7 +814,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 	return sub.ch, id, nil
 }
 
-func (ff *Filters) LogFilterCriteria(id LogsSubID) (filters.FilterCriteria, bool) {
+func (ff *Filters) LogFilterCriteria(id LogsSubID) (filters.FilterCriteria, LogFilterLimits, bool) {
 	return ff.logsSubs.filterCriteria(id)
 }
 

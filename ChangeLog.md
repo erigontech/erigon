@@ -2,7 +2,7 @@
 
 ### Breaking Changes
 
-- rpc: `eth_getFilterLogs` now returns all logs matching the stored criteria without consuming the queue read by `eth_getFilterChanges`. It also applies the same `rpc.blockrange.limit`, `rpc.logs.querylimit`, and `rpc.logs.maxresults` checks as `eth_getLogs`, so clients may now receive `-32602` for queries that exceed those limits (#23296) — by @taratorio
+- rpc: `eth_getFilterLogs` now returns all logs matching the stored criteria without consuming the queue read by `eth_getFilterChanges`. It applies the same `rpc.blockrange.limit` and `rpc.logs.maxresults` checks as `eth_getLogs`, while address and topic limits remain those validated when the filter was created. Clients may now receive `-32602` for queries that exceed the historical query limits (#23296) — by @taratorio
 - rpc: `eth_newFilter` and `eth_subscribe("logs")` now reject criteria exceeding the per-filter `rpc.subscription.filters.maxaddresses` or `rpc.subscription.filters.maxtopics` limit with `-32602` instead of silently capping them. This can be a breaking change for nodes that configure either limit above `0`; both limits default to `0` (unlimited) (#23296) — by @taratorio
 
 ### Changed

@@ -78,6 +78,18 @@ func TestSubscribeLogsRejectsTooManyTopics(t *testing.T) {
 	require.Empty(t, id)
 }
 
+func TestSubscribeLogsRejectsTooManyTopicPositions(t *testing.T) {
+	f := newTestFilters(t)
+
+	_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{
+		Topics: make([][]common.Hash, 5),
+	}, ProtocolHTTP)
+	var invalidParams *rpc.InvalidParamsError
+	require.ErrorAs(t, err, &invalidParams)
+	require.EqualError(t, err, "query exceeds the maximum of 4 topics")
+	require.Empty(t, id)
+}
+
 func TestSubscribeLogsDoesNotStoreCriteriaForWebSocket(t *testing.T) {
 	f := newTestFilters(t)
 
@@ -88,7 +100,7 @@ func TestSubscribeLogsDoesNotStoreCriteriaForWebSocket(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { f.UnsubscribeLogs(id) })
 
-	_, ok := f.LogFilterCriteria(id)
+	_, _, ok := f.LogFilterCriteria(id)
 	require.False(t, ok)
 }
 

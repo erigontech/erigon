@@ -36,6 +36,8 @@ import (
 // Same as bind.FilterQuery but with UnmarshalJSON() method.
 type FilterCriteria bind.FilterQuery
 
+const MaxTopicPositions = 4
+
 type LogFilterOptions struct {
 	LogCount          uint64 `json:"logCount,omitempty"`
 	BlockCount        uint64 `json:"blockCount,omitempty"`
