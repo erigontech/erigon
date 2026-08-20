@@ -621,9 +621,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
-	// A parsed production request keeps stale-head preparation off this slot's critical path.
-	finishProductionRequest := a.payloadPreparationGate.beginProductionRequest(targetSlot)
-	defer finishProductionRequest()
+	// A parsed production request keeps stale-head preparation off its critical path.
+	finishLocalBlockWork := a.payloadPreparationGate.beginLocalBlockWork()
+	defer finishLocalBlockWork()
 
 	start := time.Now()
 
@@ -1153,16 +1153,15 @@ func (a *ApiHandler) produceBeaconBody(
 		attrs := a.payloadBuildAttributes(
 			baseState, blockRoot, targetSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
 		)
-		var (
-			payload        *cltypes.Eth1Block
-			bundles        *engine_types.BlobsBundle
-			requestsBundle *typesproto.RequestsBundle
-			blockValue     *big.Int
-			pollErr        error
-		)
 		// Preparation must not enter the execution module while production updates fork choice and
 		// collects the payload. State derivation and returned-payload processing stay outside this gate.
-		func() {
+		payload, bundles, requestsBundle, blockValue, err := func() (
+			*cltypes.Eth1Block,
+			*engine_types.BlobsBundle,
+			*typesproto.RequestsBundle,
+			*big.Int,
+			error,
+		) {
 			finishExecutionWork := a.payloadPreparationGate.beginExecutionWork()
 			defer finishExecutionWork()
 
@@ -1176,12 +1175,10 @@ func (a *ApiHandler) produceBeaconBody(
 				stateVersion,
 			)
 			if err != nil {
-				executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w", err)
-				return
+				return nil, nil, nil, nil, fmt.Errorf("forkchoice update: %w", err)
 			}
 			if len(idBytes) == 0 {
-				executionErr = errors.New("produceBeaconBody: forkchoice update returned no payload ID (EL may be syncing)")
-				return
+				return nil, nil, nil, nil, errors.New("forkchoice update returned no payload ID (EL may be syncing)")
 			}
 			slotStart := a.ethClock.GetSlotTime(targetSlot)
 			warmup, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(targetSlot, idBytes, builderStartedAt)
@@ -1192,15 +1189,16 @@ func (a *ApiHandler) produceBeaconBody(
 				)
 			}
 			buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
-			payload, bundles, requestsBundle, blockValue, pollErr = pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+			return pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 				return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 			})
 		}()
-		if executionErr != nil {
+		if err != nil {
+			executionErr = fmt.Errorf("produceBeaconBody: %w", err)
 			return
 		}
-		if pollErr != nil {
-			executionErr = fmt.Errorf("produceBeaconBody: %w", pollErr)
+		if bundles == nil {
+			executionErr = errors.New("produceBeaconBody: execution layer returned no blobs bundle")
 			return
 		}
 		// Determine block value
@@ -1917,6 +1915,9 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, signedEnvelope ...*cltypes.SignedExecutionPayloadEnvelope) error {
+	finishLocalBlockWork := a.payloadPreparationGate.beginLocalBlockWork()
+	defer finishLocalBlockWork()
+
 	blkSSZ, err := blk.EncodeSSZ(nil)
 	if err != nil {
 		return err
@@ -2032,7 +2033,10 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
+	// Start tracking before the goroutine so preparation cannot enter during scheduler handoff.
+	finishBlockStorage := a.payloadPreparationGate.beginLocalBlockWork()
 	go func() {
+		defer finishBlockStorage()
 		if err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars); err != nil {
 			log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
 		}

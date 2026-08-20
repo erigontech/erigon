@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"sync"
+	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -48,6 +49,10 @@ var (
 // preparedPayloadRetainSlots keeps a primed record alive past the slot it was primed for, so
 // priming the next slot cannot evict the record for a proposal that is still being produced.
 const preparedPayloadRetainSlots = 2
+
+// Leave enough time for the state copy and one builder-start attempt. Starting later is likely to
+// overlap production without giving the builder useful warmup.
+const minimumPreparationLead = 500 * time.Millisecond
 
 type preparedPayloadRecord struct {
 	id       []byte
@@ -81,12 +86,11 @@ func (s *payloadPreparationScratch) resetForTargetSlot(targetSlot uint64) {
 }
 
 // payloadPreparationGate keeps builder startup from overlapping execution work for production or
-// local block adoption. It also records active production slots so stale-head fallback stays off
-// their path. Preparation does not hold the execution gate while copying state or waiting to retry.
+// local block adoption. It also records local block work so stale-head fallback stays off its path.
+// Preparation does not hold the execution gate while copying state or waiting to retry.
 type payloadPreparationGate struct {
-	attempt            sync.RWMutex
-	productionMu       sync.RWMutex
-	productionRequests map[uint64]uint64
+	attempt        sync.RWMutex
+	localBlockWork atomic.Int64
 }
 
 func (p *preparedPayload) set(slot uint64, payloadID []byte, primedAt time.Time) {
@@ -139,29 +143,15 @@ func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
 	return g.attempt.Unlock, true
 }
 
-func (g *payloadPreparationGate) beginProductionRequest(slot uint64) func() {
-	g.productionMu.Lock()
-	if g.productionRequests == nil {
-		g.productionRequests = make(map[uint64]uint64)
-	}
-	g.productionRequests[slot]++
-	g.productionMu.Unlock()
-
-	return func() {
-		g.productionMu.Lock()
-		defer g.productionMu.Unlock()
-		if g.productionRequests[slot] <= 1 {
-			delete(g.productionRequests, slot)
-			return
-		}
-		g.productionRequests[slot]--
-	}
+func (g *payloadPreparationGate) beginLocalBlockWork() func() {
+	g.localBlockWork.Add(1)
+	return sync.OnceFunc(func() {
+		g.localBlockWork.Add(-1)
+	})
 }
 
-func (g *payloadPreparationGate) productionInFlight(slot uint64) bool {
-	g.productionMu.RLock()
-	defer g.productionMu.RUnlock()
-	return g.productionRequests[slot] > 0
+func (g *payloadPreparationGate) localBlockWorkInFlight() bool {
+	return g.localBlockWork.Load() > 0
 }
 
 // StartPayloadPreparation primes the execution layer for slots this node is due to propose.
@@ -255,7 +245,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		// off; a builder primed that early hits its own cap before the slot even starts.
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
 		lead := time.Until(slotStart)
-		if lead > maxPreparationLead(a.beaconChainCfg) || lead <= 0 {
+		if lead > maxPreparationLead(a.beaconChainCfg) || lead <= minimumPreparationLead {
 			continue
 		}
 		selectedRoot, selectedSlot, selected := a.syncedData.SelectedHead()
@@ -268,7 +258,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 			time.Now(),
 			a.ethClock.GetSlotTime(currentSlot),
 			attestationDue(a.beaconChainCfg, stateVersion),
-			a.payloadPreparationGate.productionInFlight(currentSlot),
+			a.payloadPreparationGate.localBlockWorkInFlight(),
 		) {
 			continue
 		}
@@ -321,12 +311,12 @@ func shouldWaitForCurrentSlotHead(
 	currentSlot, selectedSlot uint64,
 	now, currentSlotStart time.Time,
 	attestationDeadline time.Duration,
-	productionInFlight bool,
+	localBlockWorkInFlight bool,
 ) bool {
 	if selectedSlot == currentSlot {
 		return false
 	}
-	if selectedSlot > currentSlot || productionInFlight {
+	if selectedSlot > currentSlot || localBlockWorkInFlight {
 		return true
 	}
 	return now.Before(currentSlotStart.Add(attestationDeadline))
@@ -346,17 +336,14 @@ func isExpectedPreparationSkip(err error) bool {
 		errors.Is(err, synced_data.ErrNotSynced)
 }
 
-// preparePayloadFor starts the builder for targetSlot without changing execution fork choice.
-func (a *ApiHandler) preparePayloadFor(ctx context.Context, targetSlot uint64) (common.Hash, error) {
-	var scratch payloadPreparationScratch
-	return a.preparePayloadForWithScratch(ctx, targetSlot, &scratch)
-}
-
 func (a *ApiHandler) preparePayloadForWithScratch(
 	ctx context.Context,
 	targetSlot uint64,
 	scratch *payloadPreparationScratch,
 ) (common.Hash, error) {
+	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
+		return common.Hash{}, errPreparationTooLate
+	}
 	scratch.resetForTargetSlot(targetSlot)
 	var (
 		baseBlockRoot      common.Hash

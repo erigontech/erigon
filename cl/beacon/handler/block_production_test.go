@@ -904,6 +904,7 @@ type blockingLogHandler struct {
 	entered     chan struct{}
 	release     chan struct{}
 	enteredOnce sync.Once
+	next        log.Handler
 }
 
 func (h *blockingLogHandler) Log(record *log.Record) error {
@@ -911,7 +912,7 @@ func (h *blockingLogHandler) Log(record *log.Record) error {
 		h.enteredOnce.Do(func() { close(h.entered) })
 		<-h.release
 	}
-	return nil
+	return h.next.Log(record)
 }
 
 func (h *blockingLogHandler) Enabled(context.Context, log.Lvl) bool {
@@ -924,12 +925,14 @@ func blockOnRootLogMessage(t *testing.T, message string) (<-chan struct{}, func(
 		message: message,
 		entered: make(chan struct{}),
 		release: make(chan struct{}),
+		next:    log.Root().GetHandler(),
 	}
-	previous := log.Root().GetHandler()
 	log.Root().SetHandler(blocker)
 	release := sync.OnceFunc(func() { close(blocker.release) })
-	t.Cleanup(release)
-	t.Cleanup(func() { log.Root().SetHandler(previous) })
+	t.Cleanup(func() {
+		release()
+		log.Root().SetHandler(blocker.next)
+	})
 	return blocker.entered, release
 }
 
@@ -996,8 +999,11 @@ func TestProductionDerivesPayloadAttributesOutsidePreparationGate(t *testing.T) 
 	select {
 	case <-derivationStarted:
 	case productionErr := <-result:
+		releaseDerivation()
 		t.Fatalf("block production exited before payload derivation was observed: %v", productionErr)
 	case <-time.After(5 * time.Second):
+		releaseDerivation()
+		awaitErrorResult(t, result)
 		t.Fatal("payload derivation was not observed")
 	}
 	finishPreparation, preparationStarted := handler.payloadPreparationGate.tryBeginPreparation()
@@ -1054,8 +1060,11 @@ func TestProductionProcessesCollectedPayloadOutsidePreparationGate(t *testing.T)
 	select {
 	case <-processingStarted:
 	case productionErr := <-result:
+		releaseProcessing()
 		t.Fatalf("block production exited before returned-payload processing was observed: %v", productionErr)
 	case <-time.After(5 * time.Second):
+		releaseProcessing()
+		awaitErrorResult(t, result)
 		t.Fatal("returned-payload processing was not observed")
 	}
 	finishPreparation, preparationStarted := handler.payloadPreparationGate.tryBeginPreparation()
