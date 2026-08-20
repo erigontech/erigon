@@ -621,6 +621,9 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
+	// A validated production request keeps stale-head preparation off this slot's critical path.
+	finishProductionRequest := a.payloadPreparationGate.beginProductionRequest(targetSlot)
+	defer finishProductionRequest()
 
 	start := time.Now()
 
@@ -1150,35 +1153,52 @@ func (a *ApiHandler) produceBeaconBody(
 		attrs := a.payloadBuildAttributes(
 			baseState, blockRoot, targetSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
 		)
+		var (
+			payload        *cltypes.Eth1Block
+			bundles        *engine_types.BlobsBundle
+			requestsBundle *typesproto.RequestsBundle
+			blockValue     *big.Int
+			pollErr        error
+		)
 		// Preparation must not enter the execution module while production updates fork choice and
 		// collects the payload. State derivation and returned-payload processing stay outside this gate.
-		finishProduction := a.payloadPreparationGate.beginExecutionWork()
-		defer finishProduction()
-		builderStartedAt := time.Now()
-		idBytes, err := a.engine.ForkChoiceUpdate(
-			ctx,
-			finalizedHash,
-			safeHash,
-			head,
-			attrs,
-			stateVersion,
-		)
-		if err != nil {
-			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w", err)
+		func() {
+			finishExecutionWork := a.payloadPreparationGate.beginExecutionWork()
+			defer finishExecutionWork()
+
+			builderStartedAt := time.Now()
+			idBytes, err := a.engine.ForkChoiceUpdate(
+				ctx,
+				finalizedHash,
+				safeHash,
+				head,
+				attrs,
+				stateVersion,
+			)
+			if err != nil {
+				executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w", err)
+				return
+			}
+			if len(idBytes) == 0 {
+				executionErr = errors.New("produceBeaconBody: forkchoice update returned no payload ID (EL may be syncing)")
+				return
+			}
+			slotStart := a.ethClock.GetSlotTime(targetSlot)
+			warmup, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(targetSlot, idBytes, builderStartedAt)
+			if preparedIDMismatch {
+				a.payloadPreparationLogger().Debug(
+					"PayloadPreparation: prepared payload ID did not match production",
+					"slot", targetSlot,
+				)
+			}
+			buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
+			payload, bundles, requestsBundle, blockValue, pollErr = pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+				return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
+			})
+		}()
+		if executionErr != nil {
 			return
 		}
-		if len(idBytes) == 0 {
-			executionErr = errors.New("produceBeaconBody: forkchoice update returned no payload ID (EL may be syncing)")
-			return
-		}
-		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		warmup := a.preparedPayload.warmup(targetSlot, idBytes, builderStartedAt)
-		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
-		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
-		})
-		// The deferred call covers early returns; release now before validating and copying the result.
-		finishProduction()
 		if pollErr != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: %w", pollErr)
 			return

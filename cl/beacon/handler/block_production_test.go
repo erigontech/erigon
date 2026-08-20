@@ -27,6 +27,7 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -932,6 +933,17 @@ func blockRootLogMessage(t *testing.T, message string) (<-chan struct{}, func())
 	return blocker.entered, release
 }
 
+func awaitErrorResult(t *testing.T, result <-chan error) error {
+	t.Helper()
+	select {
+	case err := <-result:
+		return err
+	case <-time.After(5 * time.Second):
+		t.Fatal("operation did not finish")
+		return nil
+	}
+}
+
 // captureProductionLogs redirects the root logger for one test and returns everything written at
 // warning level or above. It deliberately does not filter by message: a record this package emits
 // under another name is exactly what a test asserting silence needs to see.
@@ -957,7 +969,7 @@ func TestProductionDerivesPayloadAttributesOutsidePreparationGate(t *testing.T) 
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
 
-	gateHeldAtForkChoice := make(chan bool, 1)
+	var gateHeldAtForkChoice atomic.Bool
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
@@ -965,7 +977,7 @@ func TestProductionDerivesPayloadAttributesOutsidePreparationGate(t *testing.T) 
 			if ok {
 				finishPreparation()
 			}
-			gateHeldAtForkChoice <- !ok
+			gateHeldAtForkChoice.Store(!ok)
 			return nil, errors.New("stop after fork-choice entry")
 		})
 	handler.engine = engine
@@ -981,17 +993,23 @@ func TestProductionDerivesPayloadAttributesOutsidePreparationGate(t *testing.T) 
 		result <- err
 	}()
 
-	<-derivationStarted
+	select {
+	case <-derivationStarted:
+	case productionErr := <-result:
+		t.Fatalf("block production exited before payload derivation was observed: %v", productionErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("payload derivation was not observed")
+	}
 	finishPreparation, preparationStarted := handler.payloadPreparationGate.tryBeginPreparation()
 	if preparationStarted {
 		finishPreparation()
 	}
 	releaseDerivation()
-	productionErr := <-result
+	productionErr := awaitErrorResult(t, result)
 
 	require.True(t, preparationStarted, "payload derivation must not suppress preparation")
-	require.True(t, <-gateHeldAtForkChoice, "fork choice must exclude preparation")
 	require.ErrorContains(t, productionErr, "stop after fork-choice entry")
+	require.True(t, gateHeldAtForkChoice.Load(), "fork choice must exclude preparation")
 }
 
 func TestProductionProcessesCollectedPayloadOutsidePreparationGate(t *testing.T) {
@@ -1003,7 +1021,7 @@ func TestProductionProcessesCollectedPayloadOutsidePreparationGate(t *testing.T)
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
 
 	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	gateHeldDuringCollection := make(chan bool, 1)
+	var gateHeldDuringCollection atomic.Bool
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
 		Return(payloadID, nil)
@@ -1013,7 +1031,7 @@ func TestProductionProcessesCollectedPayloadOutsidePreparationGate(t *testing.T)
 			if ok {
 				finishPreparation()
 			}
-			gateHeldDuringCollection <- !ok
+			gateHeldDuringCollection.Store(!ok)
 			return cltypes.NewEth1Block(clparams.ElectraVersion, handler.beaconChainCfg),
 				&engine_types.BlobsBundle{}, &typesproto.RequestsBundle{Requests: [][]byte{{0xff, 0}}}, nil, nil
 		})
@@ -1033,17 +1051,23 @@ func TestProductionProcessesCollectedPayloadOutsidePreparationGate(t *testing.T)
 		result <- err
 	}()
 
-	<-processingStarted
+	select {
+	case <-processingStarted:
+	case productionErr := <-result:
+		t.Fatalf("block production exited before returned-payload processing was observed: %v", productionErr)
+	case <-time.After(5 * time.Second):
+		t.Fatal("returned-payload processing was not observed")
+	}
 	finishPreparation, preparationStarted := handler.payloadPreparationGate.tryBeginPreparation()
 	if preparationStarted {
 		finishPreparation()
 	}
 	releaseProcessing()
-	productionErr := <-result
+	productionErr := awaitErrorResult(t, result)
 
-	require.True(t, <-gateHeldDuringCollection, "payload collection must exclude preparation")
-	require.True(t, preparationStarted, "returned-payload processing must not suppress preparation")
 	require.ErrorContains(t, productionErr, "unknown execution request type")
+	require.True(t, gateHeldDuringCollection.Load(), "payload collection must exclude preparation")
+	require.True(t, preparationStarted, "returned-payload processing must not suppress preparation")
 }
 
 func TestPollAssembledPayloadStaysQuietWhenAFailedPollRecovers(t *testing.T) {
