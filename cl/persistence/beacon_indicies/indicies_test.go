@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"math/rand"
 	"testing"
 
 	"github.com/klauspost/compress/zstd"
@@ -383,9 +384,8 @@ func TestHasMorePrunableBeaconBlocksReturnsCursorError(t *testing.T) {
 	require.ErrorIs(t, err, wantErr)
 }
 
-// The encoder options must not change the output: these bytes are copied verbatim
-// into the caplin .seg files.
-func TestWriteBeaconBlockMatchesDefaultEncoderOptions(t *testing.T) {
+// See zstdWriterPool for why the output has to stay byte-identical.
+func TestWriteBeaconBlockMatchesReferenceEncoderOptions(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 	tx, err := db.BeginRw(context.Background())
@@ -410,4 +410,36 @@ func TestWriteBeaconBlockMatchesDefaultEncoderOptions(t *testing.T) {
 	require.NoError(t, enc.Close())
 
 	require.Equal(t, want.Bytes(), stored)
+}
+
+// Window and history options only start to change the output once a payload crosses
+// the 128KiB block size, which a single beacon block stays well below.
+func TestZstdWriterPoolMatchesReferenceEncoderOptionsOnLargePayload(t *testing.T) {
+	payload := make([]byte, 4<<20)
+	r := rand.New(rand.NewSource(1))
+	for i := range payload {
+		if i%23 == 0 {
+			payload[i] = byte(r.Intn(256))
+		} else {
+			payload[i] = byte(i % 251)
+		}
+	}
+
+	var want bytes.Buffer
+	ref, err := zstd.NewWriter(&want, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	require.NoError(t, err)
+	_, err = ref.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, ref.Close())
+
+	// Twice, so a pooled encoder also has to match after reuse.
+	for range 2 {
+		var got bytes.Buffer
+		enc := getZstdWriter(&got)
+		_, err = enc.Write(payload)
+		require.NoError(t, err)
+		require.NoError(t, enc.Close())
+		putZstdWriter(enc)
+		require.Equal(t, want.Bytes(), got.Bytes())
+	}
 }

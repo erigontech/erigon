@@ -72,7 +72,10 @@ func GetZstdReader(r io.Reader) (*zstd.Decoder, error) {
 }
 
 func PutZstdReader(v *zstd.Decoder) {
-	_ = v.Reset(nil)
+	// Reset fails only on a closed decoder, which can never be revived.
+	if err := v.Reset(nil); err != nil {
+		return
+	}
 	zstdReaderPool.Put(v)
 }
 

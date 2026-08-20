@@ -36,8 +36,7 @@ import (
 )
 
 // Encoder options must not change the output: these bytes are copied verbatim into
-// the caplin .seg files. Lower encoder memory does not, and cuts what an encoder
-// holds by ~40%.
+// the caplin .seg files.
 var zstdWriterPool = &sync.Pool{
 	New: func() any {
 		encoder, err := zstd.NewWriter(nil,

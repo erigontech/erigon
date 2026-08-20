@@ -21,7 +21,10 @@ var (
 )
 
 func putDec(dec *zstd.Decoder) {
-	_ = dec.Reset(nil)
+	// Reset fails only on a closed decoder, which can never be revived.
+	if err := dec.Reset(nil); err != nil {
+		return
+	}
 	zstdDecPool.Put(dec)
 }
 

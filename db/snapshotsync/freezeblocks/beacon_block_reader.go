@@ -56,7 +56,10 @@ func getZstdReader(r io.Reader) (*zstd.Decoder, error) {
 }
 
 func putZstdReader(reader *zstd.Decoder) {
-	_ = reader.Reset(nil)
+	// Reset fails only on a closed decoder, which can never be revived.
+	if err := reader.Reset(nil); err != nil {
+		return
+	}
 	zstdReaderPool.Put(reader)
 }
 
@@ -231,13 +234,6 @@ func (r *beaconSnapshotReader) ReadBlockByRoot(ctx context.Context, tx kv.Tx, ro
 	var buf []byte
 	// When no snapshots are available (BlocksAvailable==0) or slot exceeds snapshot range, read from DB.
 	if r.sn.BlocksAvailable() == 0 || *slot > r.sn.BlocksAvailable() {
-		slot, err := beacon_indicies.ReadBlockSlotByBlockRoot(tx, root)
-		if err != nil {
-			return nil, err
-		}
-		if slot == nil {
-			return nil, nil
-		}
 		buf, err = tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(*slot, root))
 		if err != nil {
 			return nil, err

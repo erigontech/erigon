@@ -583,10 +583,10 @@ func (r *HistoricalStatesReader) reconstructDiffedUint64List(tx kv.Tx, kvGetter 
 	if err != nil {
 		return nil, err
 	}
-	defer base_encoding.PutZstdReader(zstdReader)
-
 	currentList := make([]byte, validatorSetLength*8)
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+	_, err = io.ReadFull(zstdReader, currentList)
+	base_encoding.PutZstdReader(zstdReader)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 
@@ -668,9 +668,10 @@ func (r *HistoricalStatesReader) reconstructBalances(tx kv.Tx, kvGetter state_ac
 	if err != nil {
 		return nil, err
 	}
-	defer base_encoding.PutZstdReader(zstdReader)
 	currentList := make([]byte, validatorSetLength*8)
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
+	_, err = io.ReadFull(zstdReader, currentList)
+	base_encoding.PutZstdReader(zstdReader)
+	if err != nil && !errors.Is(err, io.ErrUnexpectedEOF) {
 		return nil, err
 	}
 
@@ -753,10 +754,10 @@ func (r *HistoricalStatesReader) ReconstructUint64ListDump(kvGetter state_access
 	if err != nil {
 		return err
 	}
-	defer base_encoding.PutZstdReader(zstdReader)
 	currentList := make([]byte, size*8)
-
-	if _, err = io.ReadFull(zstdReader, currentList); err != nil && !errors.Is(err, io.EOF) {
+	_, err = io.ReadFull(zstdReader, currentList)
+	base_encoding.PutZstdReader(zstdReader)
+	if err != nil && !errors.Is(err, io.EOF) {
 		return fmt.Errorf("failed to read dump: %w, len: %d", err, len(v))
 	}
 
@@ -1038,9 +1039,8 @@ func ReadQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors.GetValF
 		if err != nil {
 			return err
 		}
-		defer base_encoding.PutZstdReader(zstdReader)
-
 		sszEnc, err := io.ReadAll(zstdReader)
+		base_encoding.PutZstdReader(zstdReader)
 		if err != nil {
 			return err
 		}
@@ -1089,8 +1089,8 @@ func ReadRequiredQueueSSZ[T solid.EncodableHashableSSZ](kvGetter state_accessors
 	if err != nil {
 		return err
 	}
-	defer base_encoding.PutZstdReader(zstdReader)
 	sszEnc, err := io.ReadAll(zstdReader)
+	base_encoding.PutZstdReader(zstdReader)
 	if err != nil {
 		return err
 	}
@@ -1150,9 +1150,8 @@ func readCompressedSSZ[T interface {
 	if err != nil {
 		return err
 	}
-	defer base_encoding.PutZstdReader(zstdReader)
-
 	sszEnc, err := io.ReadAll(zstdReader)
+	base_encoding.PutZstdReader(zstdReader)
 	if err != nil {
 		return err
 	}
