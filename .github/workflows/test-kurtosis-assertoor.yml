@@ -14,7 +14,7 @@ env:
   # tags are dictated by the Kurtosis release — sync them when bumping (see
   # logs_aggregator_functions and logs_collector_functions consts in
   # kurtosis-tech/kurtosis).
-  KURTOSIS_VERSION: "1.15.2"
+  KURTOSIS_VERSION: "1.20.0"
   KURTOSIS_VECTOR_IMAGE: "timberio/vector:0.45.0-debian"
   KURTOSIS_FLUENTBIT_IMAGE: "fluent/fluent-bit:4.0.0"
 
@@ -221,7 +221,7 @@ jobs:
         # where a registry blip fails the whole test step. Start it here from
         # the pre-loaded images, with cheap retries.
         run: |
-          echo "deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
+          echo "deb [trusted=yes] https://sdk.kurtosis.com/kurtosis-cli-release-artifacts/ /" | sudo tee /etc/apt/sources.list.d/kurtosis.list
           sudo apt-get update
           sudo apt-get install -y kurtosis-cli=${KURTOSIS_VERSION}
           kurtosis analytics disable
