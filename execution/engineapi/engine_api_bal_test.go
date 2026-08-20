@@ -1228,6 +1228,7 @@ func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
 		oversizedBytes := hexutil.Bytes(oversized)
 		elPayload := *payload.ExecutionPayload
 		elPayload.GasLimit = hexutil.Uint64(types.BalItemCost - 1)
+		elPayload.Transactions = []hexutil.Bytes{}
 		elPayload.BlockAccessList = &oversizedBytes
 		setBlockHash(&elPayload)
 		status, err = eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
@@ -1235,5 +1236,15 @@ func TestEngineApiNewPayloadBALMalformedVsInvalid(t *testing.T) {
 		require.Equal(t, enginetypes.InvalidStatus, status.Status)
 		require.NotNil(t, status.ValidationError)
 		require.ErrorContains(t, status.ValidationError.Error(), "block access list too large")
+
+		elPayload = *payload.ExecutionPayload
+		elPayload.GasLimit = hexutil.Uint64(types.BalItemCost - 1)
+		elPayload.BlockAccessList = &oversizedBytes
+		setBlockHash(&elPayload)
+		status, err = eat.EngineApiClient.NewPayloadV5(ctx, &elPayload, []common.Hash{}, payload.ParentBeaconBlockRoot, executionRequests)
+		require.NoError(t, err)
+		require.Equal(t, enginetypes.InvalidStatus, status.Status)
+		require.NotNil(t, status.ValidationError)
+		require.ErrorContains(t, status.ValidationError.Error(), "gas limit reached")
 	})
 }

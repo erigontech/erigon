@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules"
@@ -286,9 +287,38 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	var bloom types.Bloom
 	copy(bloom[:], req.LogsBloom)
 
-	txs := make([][]byte, 0, len(req.Transactions))
-	for _, transaction := range req.Transactions {
-		txs = append(txs, transaction)
+	var err error
+	txs := make([][]byte, len(req.Transactions))
+	transactions := make([]types.Transaction, len(req.Transactions))
+	var invalidTransactionStatus *engine_types.PayloadStatus
+	for i, transaction := range req.Transactions {
+		txs[i] = transaction
+		if invalidTransactionStatus != nil {
+			continue
+		}
+		if types.TypedTransactionMarshalledAsRlpString(transaction) {
+			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(transaction))
+			invalidTransactionStatus = &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
+			}
+			continue
+		}
+		transactions[i], err = types.UnmarshalTransactionFromBinary(transaction, false /* blobTxnsAreWrappedWithBlobs */)
+		if err != nil {
+			s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
+			invalidTransactionStatus = &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedError(err),
+			}
+			continue
+		}
+		if transactions[i].GetGasLimit() > uint64(req.GasLimit) {
+			invalidTransactionStatus = &engine_types.PayloadStatus{
+				Status:          engine_types.InvalidStatus,
+				ValidationError: engine_types.NewStringifiedError(protocol.ErrGasLimitReached),
+			}
+		}
 	}
 
 	header := types.Header{
@@ -359,7 +389,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 	}
 
 	var blockAccessList *types.BlockAccessListSidecar
-	var err error
 	if version < clparams.GloasVersion && req.SlotNumber != nil {
 		return nil, &rpc.InvalidParamsError{Message: "unexpected slotNumber before engine_newPayloadV5"}
 	}
@@ -416,6 +445,9 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 			ValidationError: engine_types.NewStringifiedErrorFromString("invalid block hash"),
 		}, nil
 	}
+	if invalidTransactionStatus != nil {
+		return invalidTransactionStatus, nil
+	}
 	if blockAccessList != nil {
 		if err = blockAccessList.ValidateForBlock(header.GasLimit); err != nil {
 			return &engine_types.PayloadStatus{
@@ -423,25 +455,6 @@ func (s *EngineServer) newPayload(ctx context.Context, req *engine_types.Executi
 				ValidationError: engine_types.NewStringifiedError(err),
 			}, nil
 		}
-	}
-
-	for _, txn := range req.Transactions {
-		if types.TypedTransactionMarshalledAsRlpString(txn) {
-			s.logger.Warn("[NewPayload] typed txn marshalled as RLP string", "txn", common.Bytes2Hex(txn))
-			return &engine_types.PayloadStatus{
-				Status:          engine_types.InvalidStatus,
-				ValidationError: engine_types.NewStringifiedErrorFromString("typed txn marshalled as RLP string"),
-			}, nil
-		}
-	}
-
-	transactions, err := types.DecodeTransactions(txs)
-	if err != nil {
-		s.logger.Warn("[NewPayload] failed to decode transactions", "err", err)
-		return &engine_types.PayloadStatus{
-			Status:          engine_types.InvalidStatus,
-			ValidationError: engine_types.NewStringifiedError(err),
-		}, nil
 	}
 
 	if version >= clparams.DenebVersion {
