@@ -7148,15 +7148,15 @@ Returns the root hash for a range of blocks, used for checkpoint verification an
 
 **Parameters**
 
-| Parameter | Type     | Description           |
-| --------- | -------- | --------------------- |
-| start     | QUANTITY | Starting block number |
-| end       | QUANTITY | Ending block number   |
+| Parameter | Type   | Description                                      |
+| --------- | ------ | ------------------------------------------------ |
+| start     | NUMBER | Starting block number, as a plain decimal number |
+| end       | NUMBER | Ending block number, as a plain decimal number   |
 
 **Example**
 
 ```bash
-curl -s --data '{"jsonrpc":"2.0","method":"bor_getRootHash","params":["0x1", "0x100"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getRootHash","params":[1, 256],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
@@ -7169,25 +7169,32 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getRootHash","params":["0x1", "0x
 
 ## **bor\_getVoteOnHash**
 
-Returns voting information for a specific block hash, used in the Bor consensus mechanism.
+Votes on a milestone hash: reports whether the local chain has the given hash at `endBlockNr`. All four parameters are required, and `startBlockNr` and `milestoneId` are ignored by the implementation. The implementation reads block `endBlockNr + 16`, the 16-block confirmation of `endBlockNr`, but does not require it to exist.
 
 **Parameters**
 
-| Parameter | Type           | Description                                     |
-| --------- | -------------- | ----------------------------------------------- |
-| hash      | DATA, 32 BYTES | Hash of the block to get voting information for |
+| Parameter    | Type   | Description                                                            |
+| ------------ | ------ | ---------------------------------------------------------------------- |
+| startBlockNr | NUMBER | First block of the milestone range, as a plain decimal number; ignored |
+| endBlockNr   | NUMBER | Last block of the milestone range, as a plain decimal number           |
+| hash         | STRING | Milestone hash, compared as an exact lowercase `0x`-prefixed string    |
+| milestoneId  | STRING | Heimdall milestone identifier; ignored                                 |
 
 **Example**
 
 ```bash
-curl -s --data '{"jsonrpc":"2.0","method":"bor_getVoteOnHash","params":["0x1d59ff54b1eb26b013ce3cb5fc9dab3705b415a67127a003c3e61eb445bb8df2"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getVoteOnHash","params":[16000000, 16000064, "0x811b9d739a17d5c42904ba97bb9e3449da74000fece0e1ec112f61a11beb7632", "0x1"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
 
-| Type   | Description                                            |
-| ------ | ------------------------------------------------------ |
-| Object | Voting information object for the specified block hash |
+| Type    | Description                                                               |
+| ------- | ------------------------------------------------------------------------- |
+| BOOLEAN | `true` if the local hash of `endBlockNr` equals `hash`, `false` otherwise |
+
+A hash that matches except for letter case returns `false` rather than an error.
+If the node does not have block `endBlockNr`, the call fails with
+`method handler crashed` instead of returning a boolean.
 
 ---
 
