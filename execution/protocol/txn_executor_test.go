@@ -1286,7 +1286,7 @@ func BenchmarkSysCallContract(b *testing.B) {
 
 	b.Run("evm_reused", func(b *testing.B) {
 		ibs := newIBS(b)
-		evm := NewSysCallEVM(chainConfig, engine, header, ibs, vm.Config{})
+		evm := NewSysCallEVM(chainConfig, vm.Config{})
 		b.ReportAllocs()
 		for b.Loop() {
 			if _, err := SysCallContractWithEVM(evm, contract, root[:], chainConfig, ibs, header, engine, false, vm.Config{}); err != nil {
