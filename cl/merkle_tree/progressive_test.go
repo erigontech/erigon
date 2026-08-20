@@ -221,6 +221,9 @@ func TestProgressiveContainerRootReferenceVectors(t *testing.T) {
 	boundaryFields[0] = true
 	boundaryFields[255] = true
 
+	onlyLastField255Active := make([]bool, 256)
+	onlyLastField255Active[255] = true
+
 	tests := []struct {
 		name         string
 		fieldRoots   [][32]byte
@@ -256,6 +259,12 @@ func TestProgressiveContainerRootReferenceVectors(t *testing.T) {
 			fieldRoots:   progressiveTestChunks(2),
 			activeFields: boundaryFields,
 			expected:     "0x90640bd1cdf470b6f9d15c77d1b529badab7cca638ee01217edc2b2956f60319",
+		},
+		{
+			name:         "only field 255 active",
+			fieldRoots:   progressiveTestChunks(1),
+			activeFields: onlyLastField255Active,
+			expected:     "0xa967d5c68e607b678adb1df0a0933263c5916f0e3857c4785258e800188d91f7",
 		},
 	}
 
