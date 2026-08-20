@@ -189,9 +189,11 @@ const minGzipBodySize = 1024
 
 // Raw and compressed byte counters: out/in gives the live compression ratio,
 // the out rate tracks RPC egress.
+// path="streaming" is kept from the two-path counters this replaces: gzhttp only
+// streams, and dropping the label would silently break existing selectors.
 var (
-	gzipInBytes  = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total`)
-	gzipOutBytes = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total`)
+	gzipInBytes  = metrics.GetOrCreateCounter(`rpc_gzip_in_bytes_total{path="streaming"}`)
+	gzipOutBytes = metrics.GetOrCreateCounter(`rpc_gzip_out_bytes_total{path="streaming"}`)
 )
 
 // gzipWrapper compresses with klauspost's gzhttp middleware. It buffers only
@@ -220,17 +222,26 @@ var gzipWrapper = func() func(http.Handler) http.HandlerFunc {
 type countingResponseWriter struct {
 	http.ResponseWriter
 	n int
+	// afterWrite runs once the byte count has moved, so a response that never
+	// returns still advances the metrics.
+	afterWrite func()
 }
 
 func (w *countingResponseWriter) Write(b []byte) (int, error) {
 	n, err := w.ResponseWriter.Write(b)
 	w.n += n
+	if w.afterWrite != nil {
+		w.afterWrite()
+	}
 	return n, err
 }
 
 func (w *countingResponseWriter) Flush() {
 	if f, ok := w.ResponseWriter.(http.Flusher); ok {
 		f.Flush()
+	}
+	if w.afterWrite != nil {
+		w.afterWrite()
 	}
 }
 
@@ -247,8 +258,29 @@ func (w *countingResponseWriter) Hijack() (net.Conn, *bufio.ReadWriter, error) {
 // gzipMeter counts one request on both sides of the compressor: raw sees the
 // handler's bytes, wire sees what left the process.
 type gzipMeter struct {
-	raw  countingResponseWriter
-	wire countingResponseWriter
+	raw           countingResponseWriter
+	wire          countingResponseWriter
+	rawCommitted  int
+	wireCommitted int
+}
+
+// commit adds what has been counted since the last call. Only a compressed response
+// has a ratio, so nothing is committed until gzhttp has settled on gzip: it passes
+// the rest through untouched -- a client without gzip, a body under MinSize, a
+// content type it skips -- where both sides count the same bytes and out/in reads 1.
+// One request is served by one goroutine, so the deltas need no lock.
+func (m *gzipMeter) commit() {
+	if !strings.EqualFold(m.wire.Header().Get("Content-Encoding"), "gzip") {
+		return
+	}
+	if d := m.raw.n - m.rawCommitted; d > 0 {
+		gzipInBytes.AddInt(d)
+		m.rawCommitted = m.raw.n
+	}
+	if d := m.wire.n - m.wireCommitted; d > 0 {
+		gzipOutBytes.AddInt(d)
+		m.wireCommitted = m.wire.n
+	}
 }
 
 type gzipMeterKey struct{}
@@ -267,16 +299,10 @@ func newGzipHandler(next http.Handler) http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		m := &gzipMeter{}
 		m.wire.ResponseWriter = w
+		m.raw.afterWrite = m.commit
+		m.wire.afterWrite = m.commit
 		compressed.ServeHTTP(&m.wire, r.WithContext(context.WithValue(r.Context(), gzipMeterKey{}, m)))
-
-		// Only a compressed response has a ratio. gzhttp passes the rest through
-		// untouched — a client without gzip, a body under MinSize, a content type
-		// it skips — where both sides count the same bytes and out/in reads 1.
-		if !strings.EqualFold(m.wire.Header().Get("Content-Encoding"), "gzip") {
-			return
-		}
-		gzipInBytes.AddInt(m.raw.n)
-		gzipOutBytes.AddInt(m.wire.n)
+		m.commit()
 	})
 }
 

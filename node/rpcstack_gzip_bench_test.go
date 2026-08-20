@@ -552,6 +552,9 @@ func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
 			var peak atomic.Uint64
 			done := make(chan struct{})
 			var sampler sync.WaitGroup
+			// Before the sampler starts: it only ever raises peak, so setup garbage
+			// or a previous sub-benchmark would otherwise stay the recorded maximum.
+			runtime.GC()
 			sampler.Go(func() {
 				var ms runtime.MemStats
 				for {
@@ -567,7 +570,6 @@ func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
 				}
 			})
 
-			runtime.GC()
 			b.ResetTimer()
 			var wg sync.WaitGroup
 			for range clients {

@@ -23,6 +23,7 @@ import (
 	"net/http"
 	"net/http/httptest"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
@@ -51,9 +52,9 @@ func gzipRequest(t *testing.T, handler http.Handler) *httptest.ResponseRecorder 
 	return rec
 }
 
-// TestGzipHandlerNonStreaming verifies that a normal (non-streaming) response
-// above minGzipBodySize is gzip-compressed and the decompressed body matches
-// the original. Content-Length must equal the compressed size (no chunked).
+// TestGzipHandlerNonStreaming verifies that a handler writing its whole body without
+// flushing is gzip-compressed and round-trips. gzhttp only streams, so the response is
+// chunked and carries no Content-Length.
 func TestGzipHandlerNonStreaming(t *testing.T) {
 	body := bytes.Repeat([]byte(`{"jsonrpc":"2.0","result":"hello"}`), 64) // > minGzipBodySize
 	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -125,9 +126,8 @@ func TestGzipHandlerStreaming(t *testing.T) {
 	assert.Equal(t, want, decompressGzip(t, rec.Body))
 }
 
-// TestGzipHandlerStatusBuffered verifies that a custom HTTP status set before
-// any write is correctly forwarded in the non-streaming (buffered) path, for
-// a body large enough to trigger gzip compression.
+// TestGzipHandlerStatusBuffered verifies that a custom HTTP status set before any
+// write is forwarded, for a body large enough to trigger gzip compression.
 func TestGzipHandlerStatusBuffered(t *testing.T) {
 	body := bytes.Repeat([]byte("x"), minGzipBodySize)
 	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -157,9 +157,9 @@ func TestGzipHandlerStatusStreaming(t *testing.T) {
 	assert.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
 }
 
-// TestGzipHandlerLargeBody verifies that a response body larger than the
-// shared buffer-pool cap is compressed correctly. This exercises the
-// pool-cap path: the oversized buffer must not be returned to the pool.
+// TestGzipHandlerLargeBody verifies that a body larger than pool.MaxBufferCap
+// round-trips. Nothing holds a whole body any more, so the size is no longer
+// special: the case stays as a pin against reintroducing a whole-body buffer.
 func TestGzipHandlerLargeBody(t *testing.T) {
 	body := bytes.Repeat([]byte("x"), pool.MaxBufferCap+1)
 	handler := newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -172,10 +172,10 @@ func TestGzipHandlerLargeBody(t *testing.T) {
 	assert.Equal(t, body, decompressGzip(t, rec.Body))
 }
 
-// TestGzipMetricsCounters verifies the per-path raw/compressed byte counters:
+// TestGzipMetricsCounters verifies the raw/compressed byte counters:
 // in must grow by the uncompressed payload size, out by the bytes on the wire.
 func TestGzipMetricsCounters(t *testing.T) {
-	// Buffered path.
+	// Whole-body write.
 	body := bytes.Repeat([]byte("erigon "), 1024) // compressible, > minGzipBodySize
 	inBefore, outBefore := gzipInBytes.GetValueUint64(), gzipOutBytes.GetValueUint64()
 	rec := gzipRequest(t, newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
@@ -185,8 +185,8 @@ func TestGzipMetricsCounters(t *testing.T) {
 	assert.Equal(t, uint64(len(body)), gzipInBytes.GetValueUint64()-inBefore, "buffered in must count the raw payload")
 	assert.Equal(t, uint64(rec.Body.Len()), gzipOutBytes.GetValueUint64()-outBefore, "buffered out must count the compressed bytes")
 
-	// Streaming path: bytes written both before the Flush (drained from the
-	// buffer) and after it must be counted as raw input.
+	// Flushed mid-response: bytes written both before the Flush (drained from
+	// gzhttp's MinSize buffer) and after it must be counted as raw input.
 	inBefore, outBefore = gzipInBytes.GetValueUint64(), gzipOutBytes.GetValueUint64()
 	rec = gzipRequest(t, newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		_, _ = w.Write(body[:1000])
@@ -196,6 +196,40 @@ func TestGzipMetricsCounters(t *testing.T) {
 	require.Equal(t, "gzip", rec.Header().Get("Content-Encoding"))
 	assert.Equal(t, uint64(len(body)), gzipInBytes.GetValueUint64()-inBefore, "streaming in must count raw bytes from both sides of the Flush")
 	assert.Equal(t, uint64(rec.Body.Len()), gzipOutBytes.GetValueUint64()-outBefore, "streaming out must count the compressed bytes")
+}
+
+// A trace can send and flush for its whole lifetime before the handler returns.
+// Both counters must move while it is still running, not only at the end.
+func TestGzipMetricsAdvanceDuringStream(t *testing.T) {
+	flushed, release := make(chan struct{}), make(chan struct{})
+	body := bytes.Repeat([]byte("erigon "), 1024)
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		_, _ = w.Write(body)
+		w.(http.Flusher).Flush()
+		close(flushed)
+		<-release
+	})))
+	defer srv.Close()
+	defer close(release)
+
+	inBefore, outBefore := gzipInBytes.GetValueUint64(), gzipOutBytes.GetValueUint64()
+	req, err := http.NewRequestWithContext(t.Context(), http.MethodGet, srv.URL, nil)
+	require.NoError(t, err)
+	req.Header.Set("Accept-Encoding", "gzip")
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		resp, err := http.DefaultClient.Do(req)
+		if err == nil {
+			_, _ = io.Copy(io.Discard, resp.Body)
+			resp.Body.Close()
+		}
+	}()
+
+	<-flushed
+	assert.Eventually(t, func() bool {
+		return gzipInBytes.GetValueUint64() > inBefore && gzipOutBytes.GetValueUint64() > outBefore
+	}, 5*time.Second, 10*time.Millisecond, "counters must advance before the handler returns")
 }
 
 // A response gzhttp passes through untouched has no ratio to report: counting
