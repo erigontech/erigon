@@ -98,7 +98,7 @@ func TestNextReportsPackedLiteral(t *testing.T) {
 
 	require.Equal(t, word, got)
 	require.Equal(t, uint64(len(word)), literalLength)
-	require.Equal(t, word, []byte(d.mmapHandle1[literalOffset:literalOffset+literalLength]))
+	require.Equal(t, word, []byte(d._mmapHandle[literalOffset:literalOffset+literalLength]))
 }
 
 func TestDecompressSkip(t *testing.T) {
@@ -1315,15 +1315,15 @@ func TestSequentialViewLeavesSharedMappingRandom(t *testing.T) {
 	defer d.Close()
 
 	linux := runtime.GOOS == "linux"
-	shared := uintptr(unsafe.Pointer(&d.mmapHandle1[0]))
+	shared := uintptr(unsafe.Pointer(&d._mmapHandle[0]))
 	if linux {
 		require.Equal(t, "random", vmaAdvice(t, shared), "NewDecompressor leaves the shared mapping MADV_RANDOM")
 	}
 
 	v, err := d.OpenSequentialView(true)
 	require.NoError(t, err)
-	require.NotNil(t, v.mmapHandle, "a separate-readahead view must own its mapping")
-	own := uintptr(unsafe.Pointer(&v.mmapHandle[0]))
+	require.NotNil(t, v._mmapHandle, "a separate-readahead view must own its mapping")
+	own := uintptr(unsafe.Pointer(&v._mmapHandle[0]))
 	require.NotEqual(t, shared, own, "the view must not hand back the decompressor's mapping")
 
 	if linux {
@@ -1350,9 +1350,9 @@ func TestSequentialViewSharedPathAddsNoMapping(t *testing.T) {
 	require.NoError(t, err)
 	defer v.Close()
 
-	require.Nil(t, v.mmapHandle, "the shared path must not open a second mapping")
+	require.Nil(t, v._mmapHandle, "the shared path must not open a second mapping")
 	if runtime.GOOS == "linux" {
-		require.Equal(t, "random", vmaAdvice(t, uintptr(unsafe.Pointer(&d.mmapHandle1[0]))),
+		require.Equal(t, "random", vmaAdvice(t, uintptr(unsafe.Pointer(&d._mmapHandle[0]))),
 			"reading through the shared mapping must not change its advice")
 	}
 }
@@ -1365,19 +1365,19 @@ func TestGetterMappingFollowsItsView(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()
 
-	require.Same(t, &d.mmapHandle1[0], &d.MakeGetter().mapping[0],
+	require.Same(t, &d._mmapHandle[0], &d.MakeGetter().mapping[0],
 		"a Decompressor getter reads through the decompressor's mapping")
 
 	own, err := d.OpenSequentialView(true)
 	require.NoError(t, err)
 	defer own.Close()
-	require.Same(t, &own.mmapHandle[0], &own.MakeGetter().mapping[0],
+	require.Same(t, &own._mmapHandle[0], &own.MakeGetter().mapping[0],
 		"a separate-readahead view getter reads through the view's own mapping")
-	require.NotSame(t, &d.mmapHandle1[0], &own.MakeGetter().mapping[0])
+	require.NotSame(t, &d._mmapHandle[0], &own.MakeGetter().mapping[0])
 
 	shared, err := d.OpenSequentialView(false)
 	require.NoError(t, err)
 	defer shared.Close()
-	require.Same(t, &d.mmapHandle1[0], &shared.MakeGetter().mapping[0],
+	require.Same(t, &d._mmapHandle[0], &shared.MakeGetter().mapping[0],
 		"a shared view getter reads through the decompressor's mapping")
 }

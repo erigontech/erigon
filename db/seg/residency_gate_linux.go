@@ -88,7 +88,7 @@ func (g *Getter) residencyBitmap() *residencyBitmap {
 		return rb
 	}
 	g.d.residencyOnce.Do(func() {
-		g.d.residency.Store(newResidencyBitmap(g.d.mmapHandle1, int(g.d.f.Fd())))
+		g.d.residency.Store(newResidencyBitmap(g.d._mmapHandle, int(g.d.f.Fd())))
 	})
 	return g.d.residency.Load()
 }

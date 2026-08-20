@@ -36,7 +36,7 @@ import (
 // regionAround returns the page-aligned mmap slice covering [offset, offset+window)
 // within the getter's data, mirroring what the residency gate probes.
 func regionAround(g *Getter, offset uint64, window int) []byte {
-	full := g.d.mmapHandle1
+	full := g.d._mmapHandle
 	base := int(uintptr(unsafe.Pointer(&g.data[0])) - uintptr(unsafe.Pointer(&full[0])))
 	absStart := base + int(offset)
 	pg := os.Getpagesize()
@@ -85,9 +85,9 @@ func TestResidencyGateWarmsOnReset(t *testing.T) {
 	// independent of the configured window size.
 	window := os.Getpagesize()
 	evict := func() {
-		require.NoError(t, unix.Madvise(d.mmapHandle1, unix.MADV_DONTNEED))
+		require.NoError(t, unix.Madvise(d._mmapHandle, unix.MADV_DONTNEED))
 		require.NoError(t, d.f.Sync())
-		require.NoError(t, unix.Fadvise(int(d.f.Fd()), 0, int64(len(d.mmapHandle1)), unix.FADV_DONTNEED))
+		require.NoError(t, unix.Fadvise(int(d.f.Fd()), 0, int64(len(d._mmapHandle)), unix.FADV_DONTNEED))
 	}
 	isResident := func(g *Getter) bool {
 		r, err := mmap.Resident(regionAround(g, pick.off, window))
