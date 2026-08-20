@@ -14,36 +14,40 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-package fromdb
+package rawdb
 
 import (
-	"context"
+	"errors"
+	"testing"
+
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/prune"
-	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/execution/chain"
 )
 
-func ChainConfig(db kv.RoDB) (cc *chain.Config, found bool, err error) {
-	err = db.View(context.Background(), func(tx kv.Tx) error {
-		genesisBlockHash, ok, err := rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			return err
-		}
-		if !ok {
-			return nil
-		}
-		cc, found, err = rawdb.ReadChainConfig(tx, genesisBlockHash)
-		return err
-	})
-	return cc, found, err
+type forEachErrorTx struct {
+	kv.Tx
+	err error
 }
 
-func PruneMode(db kv.RoDB) (pm prune.Mode, err error) {
-	err = db.View(context.Background(), func(tx kv.Tx) error {
-		pm, err = prune.Get(tx)
-		return err
+func (tx forEachErrorTx) ForEach(string, []byte, func([]byte, []byte) error) error {
+	return tx.err
+}
+
+func TestGetLatestBadBlocksPropagatesCacheInitError(t *testing.T) {
+	wantErr := errors.New("cache read failed")
+
+	bheapMu.Lock()
+	previousCache := bheapCache
+	bheapCache = nil
+	bheapMu.Unlock()
+	t.Cleanup(func() {
+		bheapMu.Lock()
+		bheapCache = previousCache
+		bheapMu.Unlock()
 	})
-	return pm, err
+
+	blocks, err := GetLatestBadBlocks(forEachErrorTx{err: wantErr})
+	require.ErrorIs(t, err, wantErr)
+	require.Nil(t, blocks)
 }

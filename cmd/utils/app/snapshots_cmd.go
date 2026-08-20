@@ -4432,7 +4432,7 @@ func duFormatJSON(w io.Writer, result duResult) error {
 // doDU implements the "erigon seg du" subcommand.
 func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 	// Resolve chain name and configured prune mode from chaindata (best-effort).
-	// Use recover because MustOpen and PruneMode can panic.
+	// Use recover because MustOpen can panic.
 	chainName := "unknown"
 	var configuredMode string // empty when DB is unavailable
 	if _, err := os.Stat(dirs.Chaindata); err == nil {
@@ -4452,7 +4452,11 @@ func doDU(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) error {
 			if ok && cc.ChainName != "" {
 				chainName = cc.ChainName
 			}
-			pm := fromdb.PruneMode(chainDB)
+			pm, err := fromdb.PruneMode(chainDB)
+			if err != nil {
+				log.Warn("could not read prune mode", "err", err)
+				return
+			}
 			configuredMode = pm.String()
 		}()
 	}

@@ -157,11 +157,18 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn 
 	stepSize := tx.Debug().StepSize()
 
 	dbg := tx.Debug()
-	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n", rawdbhelpers.IdxStepsCountV3(tx, stepSize), _lb, _lt)
+	stateSteps, err := rawdbhelpers.IdxStepsCountV3(tx, stepSize)
+	if err != nil {
+		return err
+	}
+	fmt.Fprintf(w, "state.history: idx steps: %.02f, TxNums_Index(%d,%d)\n", stateSteps, _lb, _lt)
 	for i := range int(kv.DomainLen) {
 		d := kv.Domain(i)
 		cfg := statecfg.Schema.GetDomainCfg(d)
-		keysSteps := rawdbhelpers.IdxStepsInDB(tx, cfg.Hist.IiCfg.KeysTable, stepSize)
+		keysSteps, err := rawdbhelpers.IdxStepsInDB(tx, cfg.Hist.IiCfg.KeysTable, stepSize)
+		if err != nil {
+			return err
+		}
 		valsPrg, _ := dbstate.GetPruneValProgress(tx, []byte(cfg.Hist.ValuesTable))
 		if valsPrg != nil {
 			fmt.Fprintf(w, "%s.hist: keys steps=%.02f, vals pruneProgress(txTo=%d/step=%d keys=%s vals=%s)\n",
@@ -224,7 +231,10 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn 
 		txNum := dbg.IIProgress(ii)
 		step := txNum / stepSize
 		iiCfg := statecfg.Schema.GetIICfg(ii)
-		keysSteps := rawdbhelpers.IdxStepsInDB(tx, iiCfg.KeysTable, stepSize)
+		keysSteps, err := rawdbhelpers.IdxStepsInDB(tx, iiCfg.KeysTable, stepSize)
+		if err != nil {
+			return err
+		}
 		fmt.Fprintf(w, "%s \t\t - \t\t %d \t\t %d \t\t db_steps=%.02f\n", ii.String(), txNum, step, keysSteps)
 	}
 	fmt.Fprintf(w, "--\n")
@@ -251,6 +261,7 @@ func printStages(tx kv.TemporalTx, snapshots *blocksnapshots.RoSnapshots, borSn 
 	//})
 	return nil
 }
+
 func u64or0(in []byte) (v uint64) {
 	if len(in) > 0 {
 		v = binary.BigEndian.Uint64(in)

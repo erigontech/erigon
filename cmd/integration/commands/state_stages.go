@@ -153,7 +153,10 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 		return err
 	}
 
-	_, clean, engine, vmConfig, stateStages := newSync(ctx, db, &builderConfig, logger1)
+	_, clean, engine, vmConfig, stateStages, err := newSync(ctx, db, &builderConfig, logger1)
+	if err != nil {
+		return err
+	}
 	defer clean()
 	chainConfig, ok, err := fromdb.ChainConfig(db)
 	if err != nil {
@@ -162,7 +165,10 @@ func syncBySmallSteps(db kv.TemporalRwDB, builderConfig buildercfg.BuilderConfig
 	if !ok {
 		return errors.New("chain config not found in db")
 	}
-	pm := fromdb.PruneMode(db)
+	pm, err := fromdb.PruneMode(db)
+	if err != nil {
+		return err
+	}
 
 	tx, err := db.BeginTemporalRw(ctx)
 	if err != nil {
@@ -356,8 +362,15 @@ func loopExec(db kv.TemporalRwDB, ctx context.Context, unwind uint64, logger log
 	if !ok {
 		return errors.New("chain config not found in db")
 	}
-	dirs, pm := datadir.New(datadirCli), fromdb.PruneMode(db)
-	_, clean, engine, vmConfig, sync := newSync(ctx, db, nil, logger)
+	dirs := datadir.New(datadirCli)
+	pm, err := fromdb.PruneMode(db)
+	if err != nil {
+		return err
+	}
+	_, clean, engine, vmConfig, sync, err := newSync(ctx, db, nil, logger)
+	if err != nil {
+		return err
+	}
 	defer clean()
 
 	tx, err := db.BeginTemporalRw(ctx)

@@ -1483,7 +1483,7 @@ func TestBadBlocks(t *testing.T) {
 
 		return header.Hash()
 	}
-	rawdb.ResetBadBlockCache(tx, 4)
+	require.NoError(rawdb.ResetBadBlockCache(tx, 4))
 
 	// put some blocks
 	for i := 1; i <= 6; i++ {
@@ -1506,7 +1506,7 @@ func TestBadBlocks(t *testing.T) {
 	require.Equal(badBlks[3].Hash(), hash1)
 
 	// testing the "limit"
-	rawdb.ResetBadBlockCache(tx, 2)
+	require.NoError(rawdb.ResetBadBlockCache(tx, 2))
 	badBlks, err = rawdb.GetLatestBadBlocks(tx)
 	require.NoError(err)
 	require.Len(badBlks, 2)

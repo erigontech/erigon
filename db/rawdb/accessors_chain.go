@@ -107,7 +107,9 @@ func GetLatestBadBlocks(tx kv.Tx) ([]*types.Block, error) {
 	bheapMu.RUnlock()
 
 	if needsInit {
-		ResetBadBlockCache(tx, 100)
+		if err := ResetBadBlockCache(tx, 100); err != nil {
+			return nil, err
+		}
 	}
 
 	bheapMu.RLock()

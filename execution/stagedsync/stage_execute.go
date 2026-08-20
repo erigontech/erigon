@@ -692,7 +692,11 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 		}
 	}
 
-	mxExecStepsInDB.Set(rawdbhelpers.IdxStepsCountV3(tx, tx.Debug().StepSize()) * 100)
+	stepsInDB, err := rawdbhelpers.IdxStepsCountV3(tx, tx.Debug().StepSize())
+	if err != nil {
+		return err
+	}
+	mxExecStepsInDB.Set(stepsInDB * 100)
 
 	cutoffs, err := historyRetireCutoffs(ctx, tx, cfg.blockReader, cfg.prune, s.ForwardProgress)
 	if err != nil {

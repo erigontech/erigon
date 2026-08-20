@@ -175,7 +175,10 @@ func execV3(ctx context.Context,
 	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
+	stepsInDb, err := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
+	if err != nil {
+		return out, err
+	}
 
 	if maxBlockNum < blockNum {
 		return out, nil
@@ -303,7 +306,10 @@ func execV3Serial(ctx context.Context,
 	defer resetCommitmentGauges(ctx)
 	defer resetDomainGauges(ctx)
 
-	stepsInDb := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
+	stepsInDb, err := rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
+	if err != nil {
+		return err
+	}
 
 	if maxBlockNum < blockNum {
 		return nil
@@ -379,7 +385,10 @@ func execV3Serial(ctx context.Context,
 				committedTransactions := currentTxNum - se.lastCommittedTxNum.Load()
 				se.lastCommittedTxNum.Store(currentTxNum)
 
-				stepsInDb = rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
+				stepsInDb, err = rawdbhelpers.IdxStepsCountV3(applyTx, doms.StepSize())
+				if err != nil {
+					return err
+				}
 
 				if initialCycle {
 					se.LogCommitments(committedTransactions, stepsInDb, commitment.CommitProgress{})
