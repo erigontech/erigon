@@ -30,7 +30,7 @@ import (
 	"github.com/erigontech/erigon/common/mmap"
 )
 
-func TestLiteralWarmRange(t *testing.T) {
+func TestMultiPageWarmRange(t *testing.T) {
 	page := uint64(os.Getpagesize())
 	tests := []struct {
 		name       string
@@ -51,7 +51,7 @@ func TestLiteralWarmRange(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			offset, length, ok := literalWarmRange(tt.offset, tt.length)
+			offset, length, ok := multiPageWarmRange(tt.offset, tt.length)
 			require.Equal(t, tt.wantOffset, offset)
 			require.Equal(t, tt.wantLength, length)
 			require.Equal(t, tt.wantOK, ok)
@@ -59,9 +59,9 @@ func TestLiteralWarmRange(t *testing.T) {
 	}
 }
 
-func TestWarmLiteral(t *testing.T) {
+func TestMultiPageLiteralWarm(t *testing.T) {
 	page := os.Getpagesize()
-	file, err := os.CreateTemp(t.TempDir(), "literal-warm-*.kv")
+	file, err := os.CreateTemp(t.TempDir(), "multi-page-warm-*.kv")
 	require.NoError(t, err)
 	defer file.Close()
 
@@ -85,7 +85,7 @@ func TestWarmLiteral(t *testing.T) {
 	require.False(t, resident)
 
 	g := &Getter{d: &Decompressor{f: file}}
-	g.EnableAsyncLiteralWarm()
+	g.EnableMultiPageAsyncIO()
 	require.NotNil(t, g.literalWarmer)
 	g.literalWarmer(g, 0, uint64(len(region)))
 
