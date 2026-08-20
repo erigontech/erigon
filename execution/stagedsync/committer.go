@@ -991,7 +991,7 @@ func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (e
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
 		if r.getter != nil {
-			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
+			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{}.WithBranchCache())
 		} else {
 			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
 		}
@@ -1030,7 +1030,11 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 // reader during block assembly, where trie-warmup runs concurrently — so it
 // must not write the shared main accumulator).
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithMetrics(kvmetrics.MetricsFromContext(workerCtx))), txNum: r.txNum}
+	getterOpts := execctxapi.StateGetterOptions{}
+	if metrics := kvmetrics.MetricsFromContext(workerCtx); metrics != nil {
+		getterOpts = getterOpts.WithMetrics(metrics)
+	}
+	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
 }
 
 // Keep imports used.

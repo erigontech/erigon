@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
 
 type commitmentWrite struct {
@@ -76,6 +77,34 @@ func commitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB, []by
 	return db, key, value
 }
 
+func mergedCommitmentFileFixture(t *testing.T, stepSize uint64) (kv.TemporalRwDB, []byte, []byte) {
+	t.Helper()
+	db := newTestDb(t, stepSize)
+	key := []byte{0x0a, 0x0c}
+	stepZeroValue := []byte{0, 0, 0, 0, 1}
+	stepOneValue := []byte{0, 0, 0, 0, 2}
+	writeCommitmentRows(t, db, key, nil, commitmentWrite{txNum: 5, value: stepZeroValue})
+	writeCommitmentRows(t, db, key, stepZeroValue, commitmentWrite{txNum: 20, value: stepOneValue})
+	trieState, err := commitment.NewHexPatriciaHashed(1, nil, commitment.DefaultTrieConfig()).EncodeCurrentState(nil)
+	require.NoError(t, err)
+	commitmentState, err := commitmentdb.NewCommitmentState(20, 0, trieState).Encode()
+	require.NoError(t, err)
+	writeCommitmentRows(t, db, commitmentdb.KeyCommitmentState, nil, commitmentWrite{txNum: 20, value: commitmentState})
+	writeAggregationGuard(t, db, 40)
+	agg := db.(state.HasAgg).Agg().(*state.Aggregator)
+	require.NoError(t, agg.BuildFiles(2*stepSize))
+	require.NoError(t, agg.MergeLoop(t.Context()))
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	files := roTx.Debug().DomainFiles(kv.CommitmentDomain)
+	require.Len(t, files, 1)
+	require.Equal(t, uint64(0), files[0].StartRootNum())
+	require.Equal(t, 2*stepSize, files[0].EndRootNum())
+	roTx.Rollback()
+	return db, key, stepOneValue
+}
+
 func TestGetLatestHonorsStagedUnwindBound(t *testing.T) {
 	const stepSize = uint64(16)
 	db, key, frozenValue := commitmentFileFixture(t, stepSize)
@@ -96,6 +125,29 @@ func TestGetLatestHonorsStagedUnwindBound(t *testing.T) {
 	got, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, key)
 	require.NoError(t, err)
 	require.Equal(t, stepOneValue, got)
+}
+
+func TestLegalStagedUnwindReadsMergedCommitmentFile(t *testing.T) {
+	const stepSize = uint64(16)
+	db, key, frozenValue := mergedCommitmentFileFixture(t, stepSize)
+	deadForkValue := []byte{0, 0, 0, 0, 3}
+	writeCommitmentRows(t, db, key, frozenValue, commitmentWrite{txNum: 52, value: deadForkValue})
+	roTx, err := db.BeginTemporalRo(t.Context())
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	branchCache := roTx.AggTx().(commitment.BranchCacheProvider).BranchCache()
+	branchCache.Clear()
+	sd, err := execctx.NewSharedDomains(t.Context(), roTx, log.New())
+	require.NoError(t, err)
+	defer sd.Close()
+	stepBytes := make([]byte, 8)
+	binary.BigEndian.PutUint64(stepBytes, ^uint64(2))
+	var diffs [kv.DomainLen][]kv.DomainEntryDiff
+	diffs[kv.CommitmentDomain] = []kv.DomainEntryDiff{{Key: string(key) + string(stepBytes), Value: nil}}
+	sd.Unwind(3*stepSize, &diffs)
+	got, _, err := sd.GetLatest(kv.CommitmentDomain, roTx, key)
+	require.NoError(t, err)
+	require.Equal(t, frozenValue, got)
 }
 
 func TestBoundedGetLatestDoesNotPopulateBranchCache(t *testing.T) {
