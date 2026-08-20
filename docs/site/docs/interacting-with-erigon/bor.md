@@ -254,23 +254,26 @@ curl -s --data '{"jsonrpc":"2.0","method":"bor_getRootHash","params":["0x1", "0x
 
 ## **bor\_getVoteOnHash**
 
-Returns voting information for a specific block hash, used in the Bor consensus mechanism.
+Votes on a milestone hash: reports whether the local chain has the given hash at `endBlockNr`. The vote requires 16 confirmations, so block `endBlockNr + 16` must exist locally. All four parameters are required; `startBlockNr` and `milestoneId` are accepted for Heimdall compatibility and do not affect the result.
 
 **Parameters**
 
-| Parameter | Type           | Description                                     |
-| --------- | -------------- | ----------------------------------------------- |
-| hash      | DATA, 32 BYTES | Hash of the block to get voting information for |
+| Parameter    | Type           | Description                                                   |
+| ------------ | -------------- | ------------------------------------------------------------- |
+| startBlockNr | QUANTITY       | First block of the milestone range                            |
+| endBlockNr   | QUANTITY       | Last block of the milestone range, whose hash is compared     |
+| hash         | DATA, 32 BYTES | Milestone hash to compare against the local `endBlockNr` hash |
+| milestoneId  | STRING         | Heimdall milestone identifier                                 |
 
 **Example**
 
 ```bash
-curl -s --data '{"jsonrpc":"2.0","method":"bor_getVoteOnHash","params":["0x1d59ff54b1eb26b013ce3cb5fc9dab3705b415a67127a003c3e61eb445bb8df2"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getVoteOnHash","params":[16000000, 16000064, "0x1d59ff54b1eb26b013ce3cb5fc9dab3705b415a67127a003c3e61eb445bb8df2", "0x1"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 
 **Returns**
 
-| Type   | Description                                            |
-| ------ | ------------------------------------------------------ |
-| Object | Voting information object for the specified block hash |
+| Type    | Description                                                           |
+| ------- | --------------------------------------------------------------------- |
+| Boolean | True if the local hash of `endBlockNr` equals `hash`, false otherwise |
