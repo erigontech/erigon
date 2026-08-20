@@ -182,7 +182,7 @@ func createBlock(ctx context.Context, sd *execctx.SharedDomains, tx kv.TemporalT
 	}
 
 	logger.Info(fmt.Sprintf("[%s] Start building", logPrefix), "block", executionAt+1, "baseFee", header.BaseFee, "gasLimit", header.GasLimit)
-	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	ibs := state.New(state.NewReaderV3(sd.AsStateGetter(tx)))
 	defer ibs.Close()
 
 	if err = cfg.engine.Prepare(chain, header, ibs); err != nil {

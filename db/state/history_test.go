@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
@@ -2537,4 +2538,22 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 		}
 		it.Close()
 	}
+}
+
+func TestMaxHistoryValLen(t *testing.T) {
+	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t.TempDir()).
+		PageSize(ethconfig.DefaultChainDBPageSize).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{kv.TblAccountHistoryVals: kv.TableCfgItem{Flags: kv.DupSort}}
+		}).MustOpen()
+	defer db.Close()
+
+	// historyLargeValues=false stores txNum+value as one dupsort value
+	put := func(valLen int) error {
+		return db.Update(t.Context(), func(tx kv.RwTx) error {
+			return tx.Put(kv.TblAccountHistoryVals, []byte("key"), make([]byte, 8+valLen))
+		})
+	}
+	require.NoError(t, put(maxHistoryValLen))
+	require.Error(t, put(maxHistoryValLen+1))
 }

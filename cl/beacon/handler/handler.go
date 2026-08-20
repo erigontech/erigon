@@ -107,7 +107,10 @@ type ApiHandler struct {
 	logger    log.Logger
 
 	// Validator data structures
-	validatorParams                    *validator_params.ValidatorParams
+	validatorParams *validator_params.ValidatorParams
+	// unregisteredProposers remembers which proposers have already been warned about, so the
+	// warning is once per proposer rather than once per proposal.
+	unregisteredProposers              *lru.Cache[uint64, struct{}]
 	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
 	engine                             execution_client.ExecutionEngine
 	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
@@ -199,6 +202,10 @@ func NewApiHandler(
 		blobSnapshots = caplinSnapshots
 	}
 
+	unregisteredProposers, err := lru.New[uint64, struct{}]("unregisteredProposers", 1024)
+	if err != nil {
+		panic(err)
+	}
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
 		panic(err)
@@ -227,6 +234,7 @@ func NewApiHandler(
 		caplinStateSnapshots:               caplinStateSnapshots,
 		peerDas:                            peerDas,
 		slotWaitedForAttestationProduction: slotWaitedForAttestationProduction,
+		unregisteredProposers:              unregisteredProposers,
 		randaoMixesPool: sync.Pool{New: func() any {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},

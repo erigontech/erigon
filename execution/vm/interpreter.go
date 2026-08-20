@@ -97,6 +97,9 @@ func (ctx *CallContext) peekStorageKey(evm *EVM) accounts.StorageKey {
 	return ctx.memoStorageKey(evm)
 }
 
+// memoStorageKey is outlined from peekStorageKey, and memoAddress from
+// peekAddress, to keep the two peek functions inside the inlining budget.
+// Folding either back into its caller costs about 10% on the call benchmarks.
 func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
 	ctx.cachedKey = evm.internStorageKey(ctx.Stack.peek())
 	ctx.cachedKeyGen = ctx.cacheGen
@@ -105,11 +108,15 @@ func (ctx *CallContext) memoStorageKey(evm *EVM) accounts.StorageKey {
 
 // peekAddress returns the top-of-stack value as an interned Address.
 // Cached like peekStorageKey; same constraint: call before any stack mutation.
-func (ctx *CallContext) peekAddress() accounts.Address {
+func (ctx *CallContext) peekAddress(evm *EVM) accounts.Address {
 	if ctx.cachedAddrGen == ctx.cacheGen {
 		return ctx.cachedAddr
 	}
-	ctx.cachedAddr = accounts.InternAddress(ctx.Stack.peek().Bytes20())
+	return ctx.memoAddress(evm)
+}
+
+func (ctx *CallContext) memoAddress(evm *EVM) accounts.Address {
+	ctx.cachedAddr = evm.internAddress(ctx.Stack.peek())
 	ctx.cachedAddrGen = ctx.cacheGen
 	return ctx.cachedAddr
 }

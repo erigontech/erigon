@@ -238,16 +238,25 @@ var registeredTypes = map[Enum]Type{}
 var namedTypes = map[string]Type{}
 
 func RegisterType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
-	if prev, taken := registeredTypes[enum]; taken {
-		panic(fmt.Sprintf("snaptype: enum %d already registered as %q, cannot register %q", enum, prev.Name(), name))
-	}
 	if enum >= MinCaplinEnum && enum < MinBorEnum {
 		panic(fmt.Sprintf("snaptype: enum %d is in the caplin range, cannot register %q", enum, name))
 	}
-	// ParseEnum rather than namedTypes: caplin names resolve through its
-	// switch and never appear in the map.
-	if prevEnum, taken := ParseEnum(name); taken {
-		panic(fmt.Sprintf("snaptype: name %q already registered at enum %d", name, prevEnum))
+	return register(enum, name, versions, rangeExtractor, indexes, indexBuilder)
+}
+
+func RegisterCaplinType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+	if enum < MinCaplinEnum || enum >= MinBorEnum {
+		panic(fmt.Sprintf("snaptype: enum %d for %q outside caplin range [%d, %d)", enum, name, MinCaplinEnum, MinBorEnum))
+	}
+	return register(enum, name, versions, rangeExtractor, indexes, indexBuilder)
+}
+
+func register(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
+	if prev, taken := registeredTypes[enum]; taken {
+		panic(fmt.Sprintf("snaptype: enum %d already registered as %q, cannot register %q", enum, prev.Name(), name))
+	}
+	if prev, taken := namedTypes[strings.ToLower(name)]; taken {
+		panic(fmt.Sprintf("snaptype: name %q already registered at enum %d", name, prev.Enum()))
 	}
 	// Runtime file slices are sized by MaxEnum and indexed by enum, so an
 	// out-of-range registration must fail here, not on first slice access.
@@ -404,10 +413,14 @@ type Enums struct {
 }
 
 const MinCoreEnum = 1
-const MinBorEnum = 12
+const MinBorEnum = 50
 const MinCaplinEnum = 10
 
-const MaxEnum = 16
+// MinCaplinStateEnum is the first beacon-state type; BeaconBlocks and BlobSidecars occupy
+// the two slots below it, so a new caplin block type must go here, not at a free tail slot.
+const MinCaplinStateEnum = MinCaplinEnum + 2
+
+const MaxEnum = 54
 
 var CaplinEnums = struct {
 	Enums
@@ -420,29 +433,15 @@ var CaplinEnums = struct {
 }
 
 func (ft Enum) String() string {
-	switch ft {
-	case CaplinEnums.BeaconBlocks:
-		return "beaconblocks"
-	case CaplinEnums.BlobSidecars:
-		return "blobsidecars"
-	default:
-		if t, ok := registeredTypes[ft]; ok {
-			return t.Name()
-		}
-
-		panic(fmt.Sprintf("unknown file type: %d", ft))
+	if t, ok := registeredTypes[ft]; ok {
+		return t.Name()
 	}
+
+	panic(fmt.Sprintf("unknown file type: %d", ft))
 }
 
 func (ft Enum) Type() Type {
-	switch ft {
-	case CaplinEnums.BeaconBlocks:
-		return BeaconBlocks
-	case CaplinEnums.BlobSidecars:
-		return BlobSidecars
-	default:
-		return registeredTypes[ft]
-	}
+	return registeredTypes[ft]
 }
 
 func (e Enum) FileName(from uint64, to uint64) string {
@@ -464,17 +463,10 @@ func (e Enum) BuildIndexes(ctx context.Context, info FileInfo, indexBuilder Inde
 
 func ParseEnum(s string) (Enum, bool) {
 	s = strings.ToLower(s)
-	switch s {
-	case "beaconblocks":
-		return CaplinEnums.BeaconBlocks, true
-	case "blobsidecars", "blocksidecars":
-		return CaplinEnums.BlobSidecars, true
-	default:
-		if t, ok := namedTypes[s]; ok {
-			return t.Enum(), true
-		}
-		return Enums{}.Unknown, false
+	if t, ok := namedTypes[s]; ok {
+		return t.Enum(), true
 	}
+	return Enums{}.Unknown, false
 }
 
 // Idx - iterate over segment and building .idx file

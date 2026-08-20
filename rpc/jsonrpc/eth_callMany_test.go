@@ -151,19 +151,19 @@ func TestCallMany(t *testing.T) {
 	api := newEthApiForTest(NewBaseApi(nil, stateCache, contractBackend.BlockReader(), engine, nil, &rpccfg.BaseApiConfig{Dirs: datadir.New(t.TempDir())}), db, nil, nil)
 
 	callArgAddr1 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &nonce,
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(1e10)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
 		Data:                 &balanceCallAddr1,
 	}
 	callArgAddr2 := ethapi.CallArgs{From: &address, To: &tokenAddr, Nonce: &secondNonce,
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(1e10)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
 		Data:                 &balanceCallAddr2,
 	}
 
 	callArgTransferAddr2 := ethapi.CallArgs{From: &address2, To: &tokenAddr, Nonce: &nonce,
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(1e9)),
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(1e10)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(1e9)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(1e10)),
 		Data:                 &transferCallData,
 	}
 

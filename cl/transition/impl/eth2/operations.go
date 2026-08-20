@@ -131,7 +131,7 @@ func (imp *impl) ProcessAttesterSlashing(
 
 	valid, err := state.IsValidIndexedAttestation(s, att1)
 	if err != nil {
-		return fmt.Errorf("error calculating indexed attestation 1 validity: %v", err)
+		return fmt.Errorf("error calculating indexed attestation 1 validity: %w", err)
 	}
 	if !valid {
 		return errors.New("invalid indexed attestation 1")
@@ -139,7 +139,7 @@ func (imp *impl) ProcessAttesterSlashing(
 
 	valid, err = state.IsValidIndexedAttestation(s, att2)
 	if err != nil {
-		return fmt.Errorf("error calculating indexed attestation 2 validity: %v", err)
+		return fmt.Errorf("error calculating indexed attestation 2 validity: %w", err)
 	}
 	if !valid {
 		return errors.New("invalid indexed attestation 2")
@@ -158,7 +158,7 @@ func (imp *impl) ProcessAttesterSlashing(
 		if validator.IsSlashable(currentEpoch) {
 			pr, err := s.SlashValidator(ind, nil)
 			if err != nil {
-				return fmt.Errorf("unable to slash validator: %d: %s", ind, err)
+				return fmt.Errorf("unable to slash validator: %d: %w", ind, err)
 			}
 			if imp.BlockRewardsCollector != nil {
 				imp.BlockRewardsCollector.AttesterSlashings += pr
@@ -548,7 +548,7 @@ func (imp *impl) ProcessExecutionPayloadBid(s abstract.BeaconState, block cltype
 		// Verify that the bid signature is valid
 		valid, err := verifyExecutionPayloadBidSignature(s, signedBid)
 		if err != nil {
-			return fmt.Errorf("processExecutionPayloadBid: failed to verify bid signature: %v", err)
+			return fmt.Errorf("processExecutionPayloadBid: failed to verify bid signature: %w", err)
 		}
 		if !valid {
 			return errors.New("processExecutionPayloadBid: invalid bid signature")
@@ -1567,7 +1567,7 @@ func (imp *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex 
 	}
 	propInd, err := s.GetBeaconProposerIndex()
 	if err != nil {
-		return fmt.Errorf("error in GetBeaconProposerIndex: %v", err)
+		return fmt.Errorf("error in GetBeaconProposerIndex: %w", err)
 	}
 	if proposerIndex != propInd {
 		return fmt.Errorf(
@@ -1579,7 +1579,7 @@ func (imp *impl) ProcessBlockHeader(s abstract.BeaconState, slot, proposerIndex 
 	blockHeader := s.LatestBlockHeader()
 	latestRoot, err := (&blockHeader).HashSSZ()
 	if err != nil {
-		return fmt.Errorf("unable to hash tree root of latest block header: %v", err)
+		return fmt.Errorf("unable to hash tree root of latest block header: %w", err)
 	}
 	if parentRoot != latestRoot {
 		stateRoot, _ := s.HashSSZ()
@@ -1655,7 +1655,7 @@ func (imp *impl) ProcessSlots(s abstract.BeaconState, slot uint64) error {
 	for i := sSlot; i < slot; i++ {
 		err := transitionSlot(s)
 		if err != nil {
-			return fmt.Errorf("unable to process slot transition: %v", err)
+			return fmt.Errorf("unable to process slot transition: %w", err)
 		}
 
 		if (sSlot+1)%beaconConfig.SlotsPerEpoch == 0 {

@@ -22,6 +22,7 @@ package cmdtest
 import (
 	"bufio"
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -216,8 +217,8 @@ func (tt *TestCmd) Interrupt() {
 // It will only return a valid value after the process has finished.
 func (tt *TestCmd) ExitStatus() int {
 	if tt.Err != nil {
-		exitErr, ok := tt.Err.(*exec.ExitError)
-		if !ok {
+		var exitErr *exec.ExitError
+		if !errors.As(tt.Err, &exitErr) {
 			log.Warn("Failed to type convert testCmd.Error to exec.ExitError")
 		}
 		if exitErr != nil {

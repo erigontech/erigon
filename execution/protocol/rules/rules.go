@@ -184,6 +184,8 @@ type EngineWriter interface {
 	//
 	// Note, the method returns immediately and will send the result async. More
 	// than one result may also be returned depending on the consensus algorithm.
+	// Seal must not access chain after returning; the caller may release its backing resources
+	// immediately.
 	Seal(chain ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, stop <-chan struct{}) error
 
 	// SealHash returns the hash of a block prior to it being sealed.

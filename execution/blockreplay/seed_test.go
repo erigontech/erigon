@@ -35,7 +35,7 @@ func TestSeedReadback(t *testing.T) {
 	doms, err := execctx.NewSharedDomains(ctx, roTx, logger)
 	require.NoError(t, err)
 	defer doms.Close()
-	r := state.NewReaderV3(doms.AsGetter(roTx))
+	r := state.NewReaderV3(doms.AsStateGetter(roTx))
 
 	checkedContract := false
 	for a, d := range fx.Accounts {
