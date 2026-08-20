@@ -44,7 +44,7 @@ Dependencies identified — a caller survey established that no consumer constra
 ## Testing Strategy
 
 - **Unit tests**: required for every task, per Development Approach.
-- **Race tests**: `go test -race ./cl/persistence/blob_storage/...` — the store gains locking blobs do not have today, so the guards have to be real.
+- **Race tests**: `go test -race ./cl/persistence/blob_storage/...` runs, but `-race` cannot falsify these locks. `bucketStore` holds no mutable Go state beyond the mutexes; what the locks protect is a filesystem invariant. `afero.MemMapFs` guards its map with its own `sync.RWMutex` (`memmap.go:33`) and `mem.FileData` embeds a `sync.Mutex` (`mem/file.go:57`), and on a real `OsFs` the work happens in the kernel. So the concurrency guards are written as observable invariant tests driven by a filesystem wrapper that blocks inside `RemoveAll`, not as race-detector assertions.
 - **Mutation checks**: each guard is verified by reverting the code it protects and confirming the test goes red. Copy the file to a scratch directory, mutate, run, copy back — never `git checkout --` a file holding uncommitted work.
 - **No e2e tests**: this project has no UI-based e2e suite, and this change has no user-facing surface.
 - Commands: `go test ./cl/persistence/blob_storage/... ./cl/phase1/stages/... ./cl/das/...`, then `go test -race ./cl/persistence/blob_storage/...`, then `make lint`.
@@ -81,7 +81,7 @@ type bucketStore struct {
 func (b *bucketStore) init(fs afero.Fs)
 func (b *bucketStore) path(slot uint64, root common.Hash, idx uint64) (dir, file string)
 func (b *bucketStore) slotLock(slot uint64) *sync.RWMutex
-func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) error
+func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (created bool, err error)
 func (b *bucketStore) read(slot uint64, root common.Hash, idx uint64, out ssz.EncodableSSZ, v clparams.StateVersion) (found bool, err error)
 func (b *bucketStore) exists(slot uint64, root common.Hash, idx uint64) (bool, error)
 func (b *bucketStore) remove(slot uint64, root common.Hash, idx uint64) error
@@ -91,9 +91,13 @@ func (b *bucketStore) pruneBelow(slot uint64) error
 
 `init` is a method on the pointer receiver rather than a constructor returning a value, because a value carrying a `sync.RWMutex` trips `go vet`'s copylocks on assignment.
 
-**Lock order, strictly one direction.** Per-file operations take `mu.RLock()` then their slot's stripe. `pruneBelow` takes `mu.Lock()` and no stripe. Nothing takes a stripe before `mu`, so no deadlock is constructible.
+**Lock order, strictly one direction.** `write`, `read`, `exists` and `remove` take `mu.RLock()` then their slot's stripe. `pruneBelow` takes `mu.Lock()` and no stripe, **once per expiring bucket rather than once for the sweep**, so a backlog of hundreds of buckets does not hold every file operation off for the length of the whole sweep.
 
-**Write path.** `mu.RLock`, stripe `Lock`, `MkdirAll(dir)`, create `<file>.tmp`, `ssz_snappy.EncodeAndWrite`, `Sync`, `Close`, `Rename(tmp, file)`. Any error removes the temp. A file at the target path is therefore complete by construction, which is what fixes problem 2 — unshadowing the `err` would only narrow the window. The temp name needs no randomness: the stripe lock excludes the only writer that could target the same path. Durability is unchanged — file `fsync`, no directory `fsync`. `afero.MemMapFs` rename-over-existing was verified to replace the target and remove the source, so tests need no special case.
+`stream` is the exception: it takes only its stripe, never `mu`. It runs `io.Copy` straight into a libp2p stream carrying a 5 s deadline (`handlers/handlers.go:192-195`), and Go's `RWMutex` hands a pending writer priority — so a `stream` holding `mu.RLock()` with a queued `pruneBelow` behind it would block every new store operation for that whole deadline. Nothing is lost by omitting it: an fd already open survives its directory being removed, so a stream racing a prune completes against data that was below the retention floor anyway.
+
+Nothing takes a stripe before `mu`, so no deadlock is constructible.
+
+**Write path.** `mu.RLock`, stripe `Lock`, `Stat` the target to learn whether this is a create or a replace, `MkdirAll(dir)`, create `<file>.tmp`, `ssz_snappy.EncodeAndWrite`, `Sync`, `Close`, `Rename(tmp, file)`. Any error removes the temp. The `created` return exists because the column façade's event emit must stay deduplicated: today the `Stat` guard at `data_column_db.go:94-97` returns above the `SendDataColumnSidecar` emit at `:115`, so it is the only thing keeping a duplicate delivery off the Beacon API `data_column_sidecar` stream. Under overwrite the façade emits only when `created` is true, preserving that. A file at the target path is therefore complete by construction, which is what fixes problem 2 — unshadowing the `err` would only narrow the window. The temp name needs no randomness: the stripe lock excludes the only writer that could target the same path. Durability is unchanged — file `fsync`, no directory `fsync`. `afero.MemMapFs` rename-over-existing was verified to replace the target and remove the source, so tests need no special case.
 
 **Prune path.** `cutoff := slot / subdivisionSlot`; readdir the store root with no lock held; collect directories whose numeric name is below the cutoff; return early when none, so the common tick takes no lock at all; otherwise `mu.Lock()` and `RemoveAll` each. Non-numeric entries are skipped rather than erroring. `pruneBelow(0)` is a no-op, which retires the `slotsKept == MaxUint64` sentinel.
 
@@ -106,7 +110,9 @@ func floorFor(head, keep uint64) uint64 {
 }
 ```
 
-A `MaxUint64` keep falls out as a no-op with no special case. The `pruneBlobDistance` expression moves here from `run.go:292`, making this the single place all three CL hot floors are computed.
+`floorFor` lives in package `stages` and is introduced only when the signature flips, so no earlier task may reference it — the stores are in package `blob_storage` and cannot reach an unexported helper in `stages` without inverting the dependency. Until then each `Prune` computes its own floor inline from the fields it already holds.
+
+A `MaxUint64` keep falls out as a no-op with no special case. The `pruneBlobDistance` expression moves here from `run.go:292`, making this the single place all three CL hot floors are computed. `cleanupAndPruning` checks and logs both `PruneBelow` errors — the new implementation propagates real filesystem failures, and the current calls discard them.
 
 ## What Goes Where
 
@@ -116,18 +122,19 @@ A `MaxUint64` keep falls out as a no-op with no special case. The `pruneBlobDist
 ## Decisions
 
 - **Shape** — extract a `bucketStore`, keep both façades. Not one type with a kind descriptor.
-- **Locking** — per-slot stripes plus a store-level `RWMutex`; per-file ops take `mu.RLock()` then their stripe, `pruneBelow` takes `mu.Lock()` and no stripe.
+- **Locking** — per-slot stripes plus a store-level `RWMutex`; `write`/`read`/`exists`/`remove` take `mu.RLock()` then their stripe. `stream` takes only its stripe, never `mu`, so a slow peer cannot block the store behind a queued prune.
 - **Construction** — `init(fs)` on the pointer receiver, to avoid a copylocks vet failure.
 - **Write** — temp file then rename; fixes problem 2 structurally.
 - **Durability** — unchanged: file `fsync`, no directory `fsync`.
 - **`read`** — returns `(found, err)`; each façade maps it, because blobs want absence to mean "reschedule" and columns want an error.
 - **`remove`** — tolerates ENOENT. Behaviour change, fixes problem 3.
 - **Prune floor** — absolute slot, not a distance; `slotsKept` leaves both constructors.
-- **Prune walk** — readdir the store root; no persisted low-water state.
+- **Prune walk** — readdir the store root; no persisted low-water state; `mu.Lock()` taken per expiring bucket, not once for the sweep.
 - **Prune datum** — blocks keep cutting against `args.seenSlot`, blobs against the wall clock. Preserved and commented, not unified.
 - **Flag semantics** — untouched; `ColumnKeepSlots == 0` still resolves to the spec window. Fixing that reading is #23411.
 - **`RemoveAllColumnSidecars`** — deleted; no production callers.
 - **Write rule** — OPEN, not ruled: overwrite always vs skip when the target exists. Leaning overwrite (last-write-wins self-heals, and a `capcli` re-import becomes a repair path) at the cost of a redundant encode and fsync per duplicate. Task 3 implements overwrite unless this is ruled the other way first.
+- **Duplicate events** — `write` returns `created`, and the column façade emits `SendDataColumnSidecar` only on a create. Overwrite must not re-publish a sidecar to Beacon API subscribers, which today's `Stat` guard prevents by returning above the emit.
 
 ## Out of Scope
 
@@ -135,15 +142,16 @@ No freeze gate, no flag changes, no cold expiry. The directory layout is #23426,
 
 ## Implementation Steps
 
-### Task 1: Counting afero.Fs test helper
+Every task lists its tests before the implementation they cover. In Go the red phase for a new symbol is a compile failure — that counts, and the runner must see it before writing the implementation bullet.
+
+### Task 1: Counting and blocking afero.Fs test helpers
 
 **Files:**
-- Create: `cl/persistence/blob_storage/counting_fs_test.go`
+- Create: `cl/persistence/blob_storage/fs_helpers_test.go`
 
-- [ ] wrap `afero.Fs` recording per-method call counts for `RemoveAll`, `Stat`, `Create`, `Rename` and `Open`
-- [ ] expose a reset and a snapshot accessor so a test can assert an exact count
-- [ ] write tests proving the wrapper counts each recorded method correctly over `afero.NewMemMapFs()`
-- [ ] write a test proving unrecorded methods still delegate to the wrapped filesystem
+- [ ] write tests for a counting `afero.Fs` wrapper: each of `RemoveAll`, `Stat`, `Create`, `Rename` and `Open` is tallied, unrecorded methods still delegate, and the counters reset (red: helper does not exist yet)
+- [ ] write tests for a blocking `afero.Fs` wrapper that pauses inside `RemoveAll` until released, so a test can hold a prune mid-sweep and act against it
+- [ ] implement both wrappers over `afero.NewMemMapFs()`
 - [ ] run `go test ./cl/persistence/blob_storage/...` — must pass before task 2
 
 ### Task 2: bucketStore with path, init and pruneBelow
@@ -152,15 +160,15 @@ No freeze gate, no flag changes, no cold expiry. The directory layout is #23426,
 - Create: `cl/persistence/blob_storage/bucket_store.go`
 - Create: `cl/persistence/blob_storage/bucket_store_test.go`
 
+- [ ] write tests for `path` pinning the exact strings `blobSidecarFilePath` and `dataColumnFilePath` produce today (red: type does not exist)
+- [ ] write `pruneBelow` success tests: removes only buckets strictly below the cutoff, idempotent on a second call
+- [ ] write `pruneBelow` edge-case tests: `pruneBelow(0)` removes nothing, non-numeric entries survive, a readdir error propagates to the caller
+- [ ] write the syscall-count test with the task 1 counting wrapper: `RemoveAll` is called exactly once per existing expiring bucket and never for a bucket that does not exist
 - [ ] move `subdivisionSlot` and `rwLocksCount` into the new file from `blob_db.go:44-46` and `data_column_db.go:44`
 - [ ] add `bucketStore{fs, mu, locks}` with `init(fs)` on the pointer receiver, so no value carrying a mutex is copied
 - [ ] add `path(slot, root, idx)` reproducing today's `<slot/subdivisionSlot>/<root>_<idx>` exactly
-- [ ] add `pruneBelow(slot)`: readdir the root unlocked, collect directories numerically below `slot / subdivisionSlot`, return early when none, otherwise `mu.Lock()` and `RemoveAll` each
-- [ ] write tests for `path` pinning the exact strings both existing helpers produce today
-- [ ] write tests for `pruneBelow` success cases: removes only buckets strictly below the cutoff, and is idempotent on a second call
-- [ ] write tests for `pruneBelow` edge cases: `pruneBelow(0)` is a no-op, non-numeric entries survive, a readdir error propagates
-- [ ] write the syscall-count test: `RemoveAll` is called exactly once per existing expiring bucket, using the task 1 helper
-- [ ] mutation-check each guard: `<` to `<=`, drop the early return, drop the `ParseUint` skip, and revert `pruneBelow` to `for i := uint64(0); i < currentSlot; i += subdivisionSlot`
+- [ ] add `pruneBelow(slot)`: readdir the root unlocked, collect directories numerically below `slot / subdivisionSlot`, return early when none, otherwise take `mu.Lock()` per bucket and `RemoveAll` it, releasing between buckets
+- [ ] mutation-check each guard turns a test red: `<` to `<=`, drop the `ParseUint` skip, and revert `pruneBelow` to `for i := uint64(0); i < currentSlot; i += subdivisionSlot`
 - [ ] run tests — must pass before task 3
 
 ### Task 3: bucketStore write, read, exists, remove and stream
@@ -169,13 +177,14 @@ No freeze gate, no flag changes, no cold expiry. The directory layout is #23426,
 - Modify: `cl/persistence/blob_storage/bucket_store.go`
 - Modify: `cl/persistence/blob_storage/bucket_store_test.go`
 
-- [ ] add `slotLock(slot)` returning the stripe for that slot
-- [ ] add `write`: `mu.RLock`, stripe `Lock`, `MkdirAll`, create `<file>.tmp`, `EncodeAndWrite`, `Sync`, `Close`, `Rename` onto the target, removing the temp on any error
-- [ ] add `read` returning `(found, err)`, mapping a missing file to `found == false` and leaving the not-found convention to callers
-- [ ] add `exists`, `remove` tolerating ENOENT, and `stream`, each taking `mu.RLock` plus its stripe
-- [ ] comment on `stream` why the payload lives on the filesystem — it is copied straight to a network writer with no transaction open
 - [ ] write success tests: write/read round trip, `exists` after a write, `stream` reproduces the written bytes, `remove` then `exists` is false
+- [ ] write tests that `write` reports `created == true` on a first write and `created == false` when it replaces an existing file
 - [ ] write error tests: a failing encoder leaves nothing at the target path and no stray temp, `remove` of a missing file returns nil, `read` of a missing file returns `found == false` with no error
+- [ ] add `slotLock(slot)` returning the stripe for that slot
+- [ ] add `write` returning `(created bool, err error)`: `mu.RLock`, stripe `Lock`, `Stat` the target to set `created`, `MkdirAll`, create `<file>.tmp`, `EncodeAndWrite`, `Sync`, `Close`, `Rename` onto the target, removing the temp on any error
+- [ ] add `read` returning `(found, err)`, mapping a missing file to `found == false` and leaving the not-found convention to callers
+- [ ] add `exists` and `remove` (ENOENT tolerated) taking `mu.RLock` plus their stripe, and `stream` taking only its stripe
+- [ ] comment on `stream` why it takes no store lock and why the payload lives on the filesystem — it is copied straight to a network writer under a deadline, with no transaction open
 - [ ] mutation-check: revert `write` to writing in place, and `remove` to the erroring form
 - [ ] run tests — must pass before task 4
 
@@ -185,11 +194,11 @@ No freeze gate, no flag changes, no cold expiry. The directory layout is #23426,
 - Modify: `cl/persistence/blob_storage/blob_db.go`
 - Modify: `cl/persistence/blob_storage/blob_db_test.go`
 
+- [ ] write a test that `RemoveBlobSidecars` succeeds when a file is already gone and still deletes the count row (red against today's first-ENOENT return)
+- [ ] write a test that a partially written sidecar set is never observable through `ReadBlobSidecars`
 - [ ] embed `bucketStore` in `BlobStore`, call `init(fs)` from `NewBlobStore`, delete `blobSidecarFilePath`
 - [ ] route `WriteBlobSidecars`, `ReadBlobSidecars`, `BlobSidecarExists`, `WriteStream` and `RemoveBlobSidecars` through the shared methods, keeping the MDBX count row where it is and still written after the files
-- [ ] keep `Prune()` and the `slotsKept` field, now implemented as `pruneBelow(floorFor(head, slotsKept))`, so this task changes no signature
-- [ ] write a test that `RemoveBlobSidecars` succeeds when a file is already gone and still deletes the count row
-- [ ] write a test that a partially written sidecar set is never observable through `ReadBlobSidecars`
+- [ ] keep `Prune()` and the `slotsKept` field, computing the floor inline from `slotsKept` and `ethClock` — `floorFor` belongs to package `stages` and does not exist yet, so it must not be referenced here
 - [ ] run `go test ./cl/persistence/blob_storage/...` — must pass before task 5
 
 ### Task 5: dataColumnStorageImpl onto bucketStore
@@ -199,13 +208,14 @@ No freeze gate, no flag changes, no cold expiry. The directory layout is #23426,
 - Modify: `cl/persistence/blob_storage/data_column_db_test.go`
 - Modify: `cl/persistence/blob_storage/mock_services/data_column_storage_mock.go`
 
+- [ ] write a test that a truncated file is never reported as held: with a failed write behind it, `ColumnSidecarExists` and `GetSavedColumnIndex` must both say the column is absent, since a truncated file would otherwise be counted toward custody and served over P2P while reads error
+- [ ] write a test that a duplicate `WriteColumnSidecars` for an already-stored `(root, index)` emits no second event, using a recording emitter
+- [ ] write a test that `GetSavedColumnIndex` reports exactly the written indices
 - [ ] embed `bucketStore`, call `init(fs)` from `NewDataColumnStore`, delete `dataColumnFilePath`, the local `rwLocks` array and `acquireLock`
-- [ ] route every per-file method through the shared ones, keeping the event emit and the version-aware decode in the façade
+- [ ] route every per-file method through the shared ones, keeping the version-aware decode in the façade and emitting `SendDataColumnSidecar` only when `write` reports `created`
 - [ ] delete `RemoveAllColumnSidecars` from the interface, the implementation and `TestRemoveAllColumnSidecars`
-- [ ] keep `Prune(keepSlotDistance)` implemented via `pruneBelow`, so this task changes no signature
+- [ ] keep `Prune(keepSlotDistance)` computing its floor inline, for the same package reason as task 4
 - [ ] regenerate the mock with `go generate ./cl/persistence/blob_storage/...`
-- [ ] write a test that a failed column write leaves no file that a later write would skip over
-- [ ] write a test that `GetSavedColumnIndex` still reports exactly the written indices
 - [ ] run `go test ./cl/persistence/blob_storage/... ./cl/das/...` — must pass before task 6
 
 ### Task 6: PruneBelow signature and the floor moving to the caller
@@ -216,46 +226,51 @@ No freeze gate, no flag changes, no cold expiry. The directory layout is #23426,
 - Modify: `cl/das/peer_das.go`
 - Modify: `cl/phase1/stages/cleanup_and_pruning.go`
 - Modify: `cmd/caplin/caplin1/run.go`
+- Modify: `cmd/capcli/cli.go`
+- Modify: `cl/spectest/consensus_tests/fork_choice.go`
 - Modify: `cl/persistence/blob_storage/mock_services/blob_storage_mock.go`
 - Modify: `cl/persistence/blob_storage/mock_services/data_column_storage_mock.go`
 - Modify: `cl/das/mock_services/peer_das_mock.go`
 - Modify: `cl/persistence/blob_storage/data_column_db_test.go`
 
-- [ ] replace `Prune()` and `Prune(keepSlotDistance)` with `PruneBelow(slot uint64)` on `BlobStorage`, `DataColumnStorage` and `PeerDas`
-- [ ] drop `slotsKept` from both constructors and from `run.go`, and move the `pruneBlobDistance` expression into `cleanupAndPruning`
-- [ ] add `floorFor(head, keep uint64) uint64` returning 0 when `head <= keep`
-- [ ] resolve `ColumnKeepSlots == 0` to the spec window exactly as `cleanup_and_pruning.go:30-33` does today, unchanged
-- [ ] comment why blocks cut against `args.seenSlot` while blobs cut against the wall clock, and that the freeze gate replaces both
-- [ ] update the three `Prune(N)` calls at `data_column_db_test.go:345,360,374` and every constructor call across the tree that passes a distance
-- [ ] regenerate all three mocks
-- [ ] write tests for `floorFor`: `head <= keep` gives 0, a `MaxUint64` keep gives 0, a normal window gives `head - keep`
+- [ ] write tests for `floorFor` in package `stages`: `head <= keep` gives 0, a `MaxUint64` keep gives 0, a normal window gives `head - keep`
 - [ ] write a test that `PruneBelow(0)` removes nothing
-- [ ] run `go test ./cl/... ./cmd/caplin/...` — must pass before task 7
+- [ ] write a test that a `PruneBelow` error reaches the caller's log rather than being discarded
+- [ ] replace `Prune()` and `Prune(keepSlotDistance)` with `PruneBelow(slot uint64)` on `BlobStorage`, `DataColumnStorage` and `PeerDas`
+- [ ] add `floorFor(head, keep uint64) uint64` to `cleanup_and_pruning.go`, returning 0 when `head <= keep`, and delete the inline floor code left in both stores by tasks 4 and 5
+- [ ] drop `slotsKept` from `NewBlobStore` and `NewDataColumnStore`, and drop the now-unused `blobPruneDistance` parameter from `OpenCaplinDatabase` (`run.go:86-94`), updating its 12 call sites in `cmd/capcli/cli.go` that pass a trailing `0` — lines 153, 296, 485, 526, 613, 664, 1053, 1129, 1170, 1233, 1306, 1365
+- [ ] move the `pruneBlobDistance` expression from `run.go:292` into `cleanupAndPruning`, and check and log both `PruneBelow` return values there
+- [ ] resolve `ColumnKeepSlots == 0` to the spec window exactly as `cleanup_and_pruning.go:30-33` does today, unchanged
+- [ ] comment which datum each pruner cuts against and why they differ — no forward reference to the freeze gate, which `.claude/rules/comments.md` bans as scope narration
+- [ ] update the three `Prune(N)` calls at `data_column_db_test.go:345,360,374` and every direct constructor call: `cl/spectest/consensus_tests/fork_choice.go:312-313`, `cl/beacon/handler/utils_test.go:107`, `cl/phase1/forkchoice/fork_choice_test.go:94,190`, `cl/phase1/forkchoice/weight_store_diff_test.go:87`, `cl/das/peer_das_download_test.go:139`, `cl/sentinel/handlers/blobs_test.go:99,223`, `cl/sentinel/handlers/data_column_sidecar_test.go:472`, `cl/persistence/blob_storage/blob_db_test.go:48`
+- [ ] regenerate all three mocks
+- [ ] run `go test ./cl/... ./cmd/caplin/... ./cmd/capcli/...` and `go build ./...` — must pass before task 7
 
 ### Task 7: Concurrency guards
 
 **Files:**
 - Modify: `cl/persistence/blob_storage/bucket_store_test.go`
 
-- [ ] write a `-race` test driving concurrent `write` and `read` against one slot
-- [ ] write a `-race` test driving `pruneBelow` against concurrent writes into a surviving bucket
-- [ ] write a test that a write into an expiring bucket during prune leaves the store consistent, whichever order wins
-- [ ] mutation-check: drop the stripe from the write path, then drop `mu` from `pruneBelow` — each must report a race
-- [ ] run `go test -race ./cl/persistence/blob_storage/...` — must pass before task 8
+- [ ] write a test using the task 1 blocking wrapper that holds `pruneBelow` inside `RemoveAll` for an expiring bucket, and asserts a concurrent `write` into a *surviving* bucket completes rather than blocking for the whole sweep — this is what per-bucket locking buys, and it goes red if `mu.Lock()` is hoisted out of the loop
+- [ ] write a test that a `stream` in progress does not block a concurrent `pruneBelow` from starting, which goes red if `stream` takes `mu.RLock()`
+- [ ] write a test that a `write` racing the removal of its own bucket leaves the store consistent whichever order wins — no partial file at the target path, no error other than a clean failure
+- [ ] run `go test ./cl/persistence/blob_storage/...` and `go test -race ./cl/persistence/blob_storage/...` — must pass before task 8
+- [ ] confirm the two lock-scope mutations above each turn their test red; do not add a `-race` mutation check, since `bucketStore` holds no mutable Go state and `MemMapFs` is internally synchronized, so the detector cannot observe these locks
 
 ### Task 8: Verify acceptance criteria
 
 - [ ] verify each of the three problems in the Overview is pinned by a test that fails when the fix is reverted
-- [ ] verify no public interface changed beyond `Prune` becoming `PruneBelow` and `RemoveAllColumnSidecars` being deleted
+- [ ] verify the only public API changes are `Prune` becoming `PruneBelow`, `RemoveAllColumnSidecars` being deleted, and the dropped parameters on `NewBlobStore`, `NewDataColumnStore` and `OpenCaplinDatabase`
 - [ ] verify no flag semantics changed — same retention for the same flags on every network, `ColumnKeepSlots == 0` included
-- [ ] verify edge cases are handled: empty store, store with only non-numeric entries, `PruneBelow` above every bucket
-- [ ] run the full suite: `go test ./cl/persistence/blob_storage/... ./cl/phase1/stages/... ./cl/das/... ./cmd/caplin/...`
+- [ ] verify no duplicate `data_column_sidecar` event is published for a re-written sidecar
+- [ ] verify edge cases: empty store, store with only non-numeric entries, `PruneBelow` above every bucket
+- [ ] run the full suite: `go test ./cl/... ./cmd/caplin/... ./cmd/capcli/...`
 - [ ] run `go test -race ./cl/persistence/blob_storage/...`
 - [ ] run `make lint`
 
 ### Task 9: [Final] Update documentation
 
-- [ ] verify no comment in the diff narrates the change, cites an issue number, or restates a signature
+- [ ] verify no comment in the diff narrates the change, cites an issue number, restates a signature, or forward-references work not in the tree
 - [ ] verify `bucket_store.go` carries 2026 in its license header
 - [ ] update `CLAUDE.md` only if a new pattern was established that future work should follow
 - [ ] mark every checkbox in this plan and record any `➕` or `⚠️` entries that arose
@@ -268,7 +283,8 @@ No freeze gate, no flag changes, no cold expiry. The directory layout is #23426,
 **Manual verification:**
 
 - Run a node with a populated blob store and confirm the per-slot prune no longer scales with head. The syscall-count test proves the call count; it cannot show the wall-clock effect on a real datadir with hundreds of thousands of files.
-- Confirm on a Fulu node that column write throughput is unchanged, since columns gain a second lock acquisition per file operation.
+- Confirm on a Fulu node that column write throughput is unchanged, since columns gain a second lock acquisition per file operation and an extra `Stat` per write to set `created`.
+- Exercise the first prune after a long backlog — a node restarted with pruning on after running `--caplin.blobs-archive` — and confirm gossip validation and P2P serving stay responsive while hundreds of buckets expire. Per-bucket locking is what should make that safe, and only a real datadir shows it.
 
 **Follow-ups this unblocks:**
 
