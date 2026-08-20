@@ -569,6 +569,21 @@ func TestDecompressor_OpenCorrupted(t *testing.T) {
 			"file contains incorrect dictionary size in bytes, got error %v", err)
 		require.Nil(t, d)
 	})
+	t.Run("patternDictionarySizeOverflows", func(t *testing.T) {
+		aux := make([]byte, 32)
+
+		// 24+dictSize wraps around uint64, so the size check passes and slicing the
+		// dictionary panics. Opening must still report an error, not (nil, nil).
+		binary.BigEndian.PutUint64(aux[16:24], ^uint64(0)) // pattern dict size in bytes
+
+		fpath := filepath.Join(tmpDir, "patternDictionarySizeOverflows")
+		err := os.WriteFile(fpath, aux, 0644)
+		require.NoError(t, err)
+
+		d, err := NewDecompressor(fpath)
+		require.Error(t, err)
+		require.Nil(t, d)
+	})
 	t.Run("fileSizeShouldBeMinimal", func(t *testing.T) {
 		aux := make([]byte, 33)
 
@@ -1372,4 +1387,27 @@ func TestGetterDataOffsetIsFileOffset(t *testing.T) {
 	require.Equal(t, want, own.MakeGetter().dataOffset, "a view with its own mmap reads the same file offsets")
 
 	require.Equal(t, want, d.MakeGetter().dataOffset)
+}
+
+// A view that is never closed stays registered, which is what SLOW_TX reports.
+// Not parallel: it swaps the package-level detector, and Go suspends the
+// t.Parallel() tests in this package while it runs.
+func TestSequentialViewLeakDetection(t *testing.T) {
+	prev := leakDetector
+	leakDetector = dbg.NewLeakDetector("seg.view.test", time.Hour)
+	t.Cleanup(func() { leakDetector = prev })
+
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	v, err := d.OpenSequentialView()
+	require.NoError(t, err)
+	require.NotZero(t, v.traceID)
+	require.Equal(t, 1, leakDetector.Len(), "an open view is registered")
+
+	v.Close()
+	require.Zero(t, leakDetector.Len(), "Close releases it")
+
+	v.Close()
+	require.Zero(t, leakDetector.Len(), "a second Close is harmless")
 }
