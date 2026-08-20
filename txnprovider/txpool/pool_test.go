@@ -2581,3 +2581,36 @@ func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
 	asrt.EqualValues(baseFee, basefeeSubCounter.GetValue(), "baseFee gauge stale after OnNewBlock")
 	asrt.EqualValues(queued, queuedSubCounter.GetValue(), "queued gauge stale after OnNewBlock")
 }
+
+// The executor charges the revised EIP-8038 schedule whenever the binary tree is scheduled,
+// so a pool reading only the explicit key rejects transactions the executor would accept.
+func TestPoolEIP8038RevisedFollowsBinaryTrie(t *testing.T) {
+	t.Parallel()
+
+	newPool := func(t *testing.T, cfg *chain.Config) *TxPool {
+		t.Helper()
+		ctx, cancel := context.WithCancel(context.Background())
+		t.Cleanup(cancel)
+		pool, err := New(ctx, make(chan Announcements, 1), mdbxtest.NewTestPoolDB(t),
+			temporaltest.NewTestDB(t, datadir.New(t.TempDir())), txpoolcfg.DefaultConfig,
+			kvcache.New(kvcache.DefaultCoherentConfig), cfg, nil, nil, func() {}, nil, nil,
+			log.New(), WithFeeCalculator(nil))
+		require.NoError(t, err)
+		return pool
+	}
+
+	zero := uint64(0)
+	base := *chain.AllProtocolChanges
+	base.AmsterdamTime = &zero
+	base.EIP8038Revised = false
+
+	withTree := base
+	withTree.BinaryTrieTime = &zero
+	require.True(t, newPool(t, &withTree).isEIP8038Revised())
+
+	require.False(t, newPool(t, &base).isEIP8038Revised(), "Amsterdam alone keeps the pinned-corpus schedule")
+
+	explicit := base
+	explicit.EIP8038Revised = true
+	require.True(t, newPool(t, &explicit).isEIP8038Revised())
+}

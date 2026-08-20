@@ -254,14 +254,16 @@ const (
 	// Revised EIP-8038 schedule, selected by Rules.EIP8038Revised. The constants
 	// above stay on the values the pinned spec-test corpora were generated against,
 	// so only a chain config that opts in charges the revised ones. COLD_ACCOUNT_ACCESS,
-	// STORAGE_WRITE, ACCESS_LIST_ADDRESS_COST and EXTCODE warm access are unchanged
-	// by the revision and have no counterpart here.
+	// STORAGE_WRITE and EXTCODE warm access are unchanged by the revision and have no
+	// counterpart here. Both ACCESS_LIST costs subtract WARM_ACCESS, which the pinned
+	// corpora predate.
 	ColdStorageAccessCostEIP8038Revised      = uint64(2100)                                                                  // COLD_STORAGE_ACCESS
 	AccountWriteCostEIP8038Revised           = uint64(9000)                                                                  // ACCOUNT_WRITE
 	CallValueTransferGasEIP8038Revised       = AccountWriteCostEIP8038Revised + CallStipend                                  // CALL_VALUE = 11300
 	CreateAccessEIP8038Revised               = AccountWriteCostEIP8038Revised + ColdAccountAccessCostEIP8038                 // CREATE_ACCESS = 12000
 	SstoreClearsScheduleRefundEIP8038Revised = (StorageWriteCostEIP8038 + ColdStorageAccessCostEIP8038Revised) * 4800 / 5000 // REFUND_STORAGE_CLEAR = 11616
-	TxAccessListStorageKeyGasEIP8038Revised  = ColdStorageAccessCostEIP8038Revised                                           // ACCESS_LIST_STORAGE_KEY_COST
+	TxAccessListAddressGasEIP8038Revised     = ColdAccountAccessCostEIP8038 - WarmStorageReadCostEIP2929                     // ACCESS_LIST_ADDRESS_COST = 2900
+	TxAccessListStorageKeyGasEIP8038Revised  = ColdStorageAccessCostEIP8038Revised - WarmStorageReadCostEIP2929              // ACCESS_LIST_STORAGE_KEY_COST = 2000
 	PerAuthExecutionCostEIP8038Revised       = AccountWriteCostEIP8038Revised + ExecutionPerAuthBaseCostEIP8038
 
 	// EIP-2780: Reduce intrinsic transaction gas (resource-based decomposition).

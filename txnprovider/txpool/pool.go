@@ -157,7 +157,9 @@ type TxPool struct {
 	osakaTime               *uint64
 	isPostOsaka             atomic.Bool
 	amsterdamTime           *uint64
+	binaryTrieTime          *uint64
 	isPostAmsterdam         atomic.Bool
+	isPostBinaryTrie        atomic.Bool
 	feeCalculator           FeeCalculator
 	p2pFetcher              *Fetch
 	p2pSender               *Send
@@ -274,6 +276,7 @@ func New(
 	res.pragueTime = chainConfig.PragueTime
 	res.osakaTime = chainConfig.OsakaTime
 	res.amsterdamTime = chainConfig.AmsterdamTime
+	res.binaryTrieTime = chainConfig.BinaryTrieTime
 
 	res.p2pFetcher = NewFetch(ctx, sentryClients, res, stateChangesClient, poolDB, res.chainID, logger, opts...)
 	res.p2pSender = NewSend(ctx, sentryClients, logger, opts...)
@@ -786,6 +789,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	isEIP3860 := p.isShanghai() || p.isAgra()
 	isEIP7623 := p.isPrague() || p.isBhilai()
 	isAmsterdam := p.isAmsterdam()
+	isEIP8038Revised := p.isEIP8038Revised()
 
 	txns.Resize(uint(min(n, len(best.ms))))
 	var toRemove []*metaTxn
@@ -868,6 +872,7 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP2780:          isAmsterdam,
+			IsEIP8038Revised:   isEIP8038Revised,
 			IsAATxn:            isAATxn,
 		})
 		intrinsicGas := intrinsicGasResult.ExecutionGas
@@ -1071,6 +1076,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 		IsEIP7976:          isAmsterdam,
 		IsEIP7981:          isAmsterdam,
 		IsEIP2780:          isAmsterdam,
+		IsEIP8038Revised:   p.isEIP8038Revised(),
 		IsAATxn:            isAATxn,
 	})
 	gas := intrinsicGasResult.ExecutionGas
@@ -1341,6 +1347,12 @@ func (p *TxPool) isOsaka() bool {
 
 func (p *TxPool) isAmsterdam() bool {
 	return isTimeBasedForkActivated(&p.isPostAmsterdam, p.amsterdamTime)
+}
+
+// isEIP8038Revised must agree with evmtypes.BlockContext.Rules: a pool charging the
+// other EIP-8038 schedule rejects transactions its own executor would accept.
+func (p *TxPool) isEIP8038Revised() bool {
+	return p.chainConfig.EIP8038Revised || isTimeBasedForkActivated(&p.isPostBinaryTrie, p.binaryTrieTime)
 }
 
 func (p *TxPool) GetMaxBlobsPerBlock() uint64 {

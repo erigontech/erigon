@@ -151,6 +151,7 @@ func CalcIntrinsicGas(args IntrinsicGasCalcArgs) (IntrinsicGasCalcResult, bool) 
 			addressGas = params.TxAccessListAddressGasEIP8038
 			storageKeyGas = params.TxAccessListStorageKeyGasEIP8038
 			if args.IsEIP8038Revised {
+				addressGas = params.TxAccessListAddressGasEIP8038Revised
 				storageKeyGas = params.TxAccessListStorageKeyGasEIP8038Revised
 			}
 		} else {

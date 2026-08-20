@@ -245,6 +245,48 @@ func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 	assert.Equal(u256.U64(0x2a), got, "storage slot must be readable")
 }
 
+func TestAmsterdamGenesisCarriesSlotNumber(t *testing.T) {
+	t.Parallel()
+
+	zero := uint64(0)
+	cfg := *chain.AllProtocolChanges
+	cfg.AmsterdamTime = &zero
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: &cfg})
+
+	// merge.VerifyHeader rejects an Amsterdam header without one (ErrMissingSlotNumber),
+	// and geth and besu both put zero here, so the genesis hash depends on it.
+	require.NotNil(t, head.SlotNumber, "Amsterdam genesis header must carry slotNumber")
+	require.Zero(t, *head.SlotNumber)
+
+	cfg.AmsterdamTime = nil
+	head, _ = genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: &cfg})
+	require.Nil(t, head.SlotNumber, "pre-Amsterdam genesis header must not carry slotNumber")
+}
+
+// A binaryTrieTime the MPT node cannot honour must stop it here. Erigon's genesis decode
+// ignores unknown keys, so without this the node builds a merkle-patricia block 0 and only
+// fails later, at the first forkchoiceUpdated, on a parent it never produced.
+func TestBinaryTrieGenesisRefusesTheMPT(t *testing.T) {
+	zero, ten := uint64(0), uint64(10)
+	dirs := datadir.New(t.TempDir())
+
+	cfg := *chain.AllProtocolChanges
+	cfg.AmsterdamTime = &zero
+	cfg.BinaryTrieTime = &zero
+	_, _, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: &cfg}, dirs, log.Root())
+	require.ErrorContains(t, err, "merkle-patricia")
+
+	// Before Amsterdam the tree is undefined, whichever trie the node runs.
+	cfg.AmsterdamTime = &ten
+	_, _, err = genesiswrite.GenesisToBlock(&types.Genesis{Config: &cfg}, dirs, log.Root())
+	require.ErrorContains(t, err, "amsterdamTime")
+
+	cfg.AmsterdamTime = &zero
+	cfg.BinaryTrieTime = nil
+	_, _, err = genesiswrite.GenesisToBlock(&types.Genesis{Config: &cfg}, dirs, log.Root())
+	require.NoError(t, err, "an unscheduled binary trie leaves the MPT node alone")
+}
+
 // See https://github.com/erigontech/erigon/pull/11264
 func TestDecodeBalance0(t *testing.T) {
 	genesisData, err := os.ReadFile("./genesis_test.json")

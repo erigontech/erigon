@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -334,6 +335,10 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	}
 	_ = g.Alloc //nil-check
 
+	if err := checkBinaryTrieConfig(g); err != nil {
+		return nil, nil, err
+	}
+
 	head, withdrawals := GenesisWithoutStateToBlock(g)
 
 	ctx := context.Background()
@@ -394,6 +399,24 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	head.Root = common.BytesToHash(rh)
 
 	return types.NewBlock(head, nil, nil, nil, withdrawals), ibs, nil
+}
+
+// checkBinaryTrieConfig refuses a genesis that schedules EIP-8297 on a node not running
+// the binary commitment trie. Nothing downstream notices: the unknown-to-the-MPT config key
+// is ignored, block 0 gets a merkle-patricia root, and the first forkchoiceUpdated then
+// references a parent this node never produced.
+func checkBinaryTrieConfig(g *types.Genesis) error {
+	if g.Config == nil || g.Config.BinaryTrieTime == nil {
+		return nil
+	}
+	if g.Config.AmsterdamTime == nil || *g.Config.BinaryTrieTime < *g.Config.AmsterdamTime {
+		return fmt.Errorf("binaryTrieTime %d needs amsterdamTime scheduled no later: EIP-8297 is defined from Amsterdam onwards",
+			*g.Config.BinaryTrieTime)
+	}
+	if !statecfg.ExperimentalBinCommitment {
+		return errors.New("genesis schedules EIP-8297 (binaryTrieTime) but this node commits state through the merkle-patricia trie: set COMMITMENT_BIN=true, and COMMITMENT_BIN_HASH to the hash the chain uses")
+	}
+	return nil
 }
 
 func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.TemporalTx, sd *execctx.SharedDomains, head *types.Header) ([]byte, *state.IntraBlockState, error) {
@@ -554,6 +577,8 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 		if g.SlotNumber != nil {
 			head.SlotNumber = g.SlotNumber
+		} else {
+			head.SlotNumber = new(uint64)
 		}
 	}
 

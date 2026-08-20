@@ -86,8 +86,13 @@ type Config struct {
 
 	// EIP8038Revised charges EIP-8038's revised state-access schedule instead of the
 	// one the pinned spec-test corpora were generated against. Experimental forks that
-	// track head-of-spec set it; no scheduled network does.
+	// track head-of-spec set it; no scheduled network does. BinaryTrieTime implies it.
 	EIP8038Revised bool `json:"eip8038Revised,omitempty"`
+
+	// BinaryTrieTime schedules EIP-8297's partitioned binary tree. Shared with besu and
+	// geth, so one genesis.json serves a mixed network. Never earlier than AmsterdamTime:
+	// the tree is only defined from Amsterdam onwards.
+	BinaryTrieTime *uint64 `json:"binaryTrieTime,omitempty"`
 
 	// Optional EIP-4844 parameters (see also EIP-7691, EIP-7840, EIP-7892)
 	MinBlobGasPrice       *uint64                       `json:"minBlobGasPrice,omitempty"`
@@ -469,6 +474,12 @@ func (c *Config) IsCancun(time uint64) bool {
 // IsAmsterdam returns whether time is either equal to the Amsterdam fork time or greater.
 func (c *Config) IsAmsterdam(time uint64) bool {
 	return isForked(c.AmsterdamTime, time)
+}
+
+// IsBinaryTrie returns whether time is either equal to the EIP-8297 binary-tree fork
+// time or greater.
+func (c *Config) IsBinaryTrie(time uint64) bool {
+	return isForked(c.BinaryTrieTime, time)
 }
 
 // IsPrague returns whether time is either equal to the Prague fork time or greater.

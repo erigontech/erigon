@@ -20,9 +20,32 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
+
+// The EIP fixes both access-list costs at COLD - WARM. geth and besu charge these, and a
+// devnet run that got them 100 high rejected transactions geth had accepted, so the numbers
+// are pinned rather than derived from the constants under test.
+func TestEIP8038RevisedAccessListCosts(t *testing.T) {
+	t.Parallel()
+
+	require.Equal(t, uint64(2900), params.TxAccessListAddressGasEIP8038Revised)
+	require.Equal(t, uint64(2000), params.TxAccessListStorageKeyGasEIP8038Revised)
+
+	args := IntrinsicGasCalcArgs{IsEIP2: true, IsEIP2028: true, IsEIP2780: true, AccessListLen: 1, StorageKeysLen: 1}
+	unrevised, overflow := CalcIntrinsicGas(args)
+	require.False(t, overflow)
+	args.IsEIP8038Revised = true
+	revised, overflow := CalcIntrinsicGas(args)
+	require.False(t, overflow)
+
+	require.Equal(t,
+		params.TxAccessListAddressGasEIP8038+params.TxAccessListStorageKeyGasEIP8038-
+			params.TxAccessListAddressGasEIP8038Revised-params.TxAccessListStorageKeyGasEIP8038Revised,
+		unrevised.ExecutionGas-revised.ExecutionGas)
+}
 
 func TestShanghaiIntrinsicGas(t *testing.T) {
 	cases := map[string]struct {
