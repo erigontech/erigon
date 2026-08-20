@@ -246,10 +246,9 @@ func (rw *Worker) ResetState(rs *state.StateV3Buffered, chainTx kv.TemporalTx, s
 		if chainTx != nil {
 			getter = rs.Domains().AsStateGetterMetered(chainTx, rw.readMetrics)
 		}
-		// Use CachedReaderV3 for parallel workers — caches account data
-		// on first read per block, providing a stable pre-block committed
-		// view for GetCommittedState. The blockStateCache is set per block
-		// via SetBlockStateCache before workers start.
+		// Parallel workers read the pre-block base directly (sd.mem → StateCache
+		// → files). The version map on top of this reader gives intra-block
+		// isolation, so no per-block committed cache is needed here.
 		rw.SetReader(state.NewCachedReaderV3(getter, nil))
 	}
 
@@ -497,14 +496,6 @@ func (rw *Worker) SetReader(reader state.StateReader) {
 	}
 }
 
-// SetBlockStateCache updates the block-level account cache on the worker's
-// CachedReaderV3. Called before each block's workers start execution.
-func (rw *Worker) SetBlockStateCache(cache *state.BlockStateCache) {
-	if cr, ok := rw.stateReader.(*state.CachedReaderV3); ok {
-		cr.SetBlockStateCache(cache)
-	}
-}
-
 func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 	if txTask.IsHistoric() && !rw.historyMode {
 		// in case if we cancelled execution and commitment happened in the middle of the block, we have to process block
@@ -516,11 +507,6 @@ func (rw *Worker) RunTxTaskNoLock(txTask Task) *TxResult {
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
 		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsStateGetterMetered(rw.chainTx, rw.readMetrics), nil))
-	}
-
-	// Set the per-block committed state cache from the task.
-	if cache := txTask.GetBlockStateCache(); cache != nil {
-		rw.SetBlockStateCache(cache)
 	}
 
 	if rw.background && rw.chainTx == nil {
