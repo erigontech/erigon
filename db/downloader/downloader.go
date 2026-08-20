@@ -1147,6 +1147,9 @@ func (d *Downloader) prepareLocalDataForDownload(
 			"local", localInfoHash,
 			"name", name)
 		info, infoErr := localMetainfo.Value.UnmarshalInfo()
+		if infoErr != nil {
+			d.log(log.LvlWarn, "error unmarshalling local metainfo", "err", infoErr, "name", name)
+		}
 		localMetainfoUnbacked = infoErr == nil && !d.snapshotDataSizesMatch(&info)
 		// Forget the metainfo we loaded, it's wrong (probably changed hash but not name...)
 		localMetainfo.SetNone()
@@ -1168,8 +1171,9 @@ func (d *Downloader) prepareLocalDataForDownload(
 			return localMetainfo, true, nil
 		}
 		if localMetainfoUnbacked {
-			// The data backs neither manifest, and nothing else here would ever repair it.
-			// Downloading hands it to the client, which hash-checks and repairs in place.
+			// The data backs neither manifest. Downloading hands it to the client, which
+			// completes the file by length, so a wrong length is re-fetched while
+			// same-length-different-bytes is not.
 			d.log(log.LvlWarn, "local snapshot does not match its own metainfo, downloading",
 				"name", name)
 			return localMetainfo, true, nil
@@ -1202,8 +1206,8 @@ func (d *Downloader) addedFirstDownloader(
 	infoHash metainfo.Hash,
 ) (afterAdd func()) {
 	// Try the webseeds for the metainfo that wasn't on disk. Nothing here relies on the data having
-	// been moved aside: after the initial download it never is, and the client hash-checks and
-	// repairs the file in place.
+	// been moved aside: after the initial download it never is, and the client completes the file
+	// by length.
 	if !localMetainfo.Ok {
 		// Yes I mean for this error to be scoped here.
 		err := d.fetchMetainfoFromWebseeds(ctx, name, infoHash)

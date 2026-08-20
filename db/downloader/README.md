@@ -2,8 +2,8 @@
 
 Main properties:
 
-- initial download complete (`preverified.toml` on disk): the local `data-file` outranks the remote manifest and is never moved aside. A local `.torrent` with a different infohash is dropped, and only its sizes are used to check the file: on a mismatch the data backs neither manifest, so the download goes ahead under the preverified hash and the client hash-checks and repairs the file in place. Otherwise the preverified download is skipped.
-- initial download not complete: the remote manifest wins. Download `preverified.toml` and align the datadir to it (remote `.torrent` and `data-file`s); data of the wrong size is renamed to `.part` and re-fetched.
+- initial download complete (`preverified.toml` on disk): the local `data-file` outranks the remote manifest and is never moved aside. A missing `data-file` is still downloaded. A local `.torrent` with a different infohash is dropped on this path (`addPreverifiedSnapshotForDownload` retains one that is already loaded and seeds under its hash), and only its sizes are used to check the file: on a mismatch the data backs neither manifest, so the download goes ahead under the preverified hash and the client completes the file by length, re-fetching only if the length disagrees. Otherwise the preverified download is skipped.
+- initial download not complete: the remote manifest wins. Fetch the chain manifest (`chain.toml`) and align the datadir to it (remote `.torrent` and `data-file`s); data whose local `.torrent` infohash does not match the preverified one — including data with no readable `.torrent` at all — is renamed to `.part` and re-fetched. `preverified.toml` is written locally once the set is complete, never downloaded.
 
 Deriving a `.torrent` from a bare `data-file` happens on the seeding path (`AddNewSeedableFile`), not on either path above.
 

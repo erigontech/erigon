@@ -437,7 +437,7 @@ func TestKeepsLocalSnapshotAfterInitialDownload(t *testing.T) {
 }
 
 // Data that no longer matches its own metainfo backs neither manifest. Keeping it unverified
-// leaves a hole in the snapshot tier, so it goes to the client, which hash-checks and repairs it.
+// leaves a hole in the snapshot tier, so it goes to the client, which completes it by length.
 func TestDownloadsLocalSnapshotNotMatchingItsMetainfo(t *testing.T) {
 	require := require.New(t)
 	d, logs, name, path := newLocalSnapshotTest(t)
@@ -449,8 +449,9 @@ func TestDownloadsLocalSnapshotNotMatchingItsMetainfo(t *testing.T) {
 	_, download := prepareLocalDataForDownload(t, d, snaptype.Hex2InfoHash("aa"), name)
 	require.True(download, "a file that backs no metainfo must be re-fetched, not kept")
 
-	require.FileExists(path, "the client repairs in place, so the data must stay where it is")
+	require.FileExists(path, "the client completes in place, so the data must stay where it is")
 	require.NoFileExists(path+".part", "invalidation stays forbidden after the initial download")
+	require.Contains(logs.String(), "local snapshot does not match its own metainfo")
 	require.Contains(logs.String(), name)
 }
 
