@@ -305,8 +305,8 @@ func maxPreparationLead(cfg *clparams.BeaconChainConfig) time.Duration {
 	return time.Duration(cfg.SecondsPerSlot) * time.Second
 }
 
-// An older selected head becomes usable only after the attestation deadline and after local
-// production for the current slot has finished. A future selected head is never valid here.
+// An older selected head becomes usable only after the current slot's attestation deadline and
+// after local block work has finished. A future selected head is never valid here.
 func shouldWaitForCurrentSlotHead(
 	currentSlot, selectedSlot uint64,
 	now, currentSlotStart time.Time,

@@ -149,7 +149,7 @@ func (cc *ExecutionClientDirect) ForkChoiceUpdate(ctx context.Context, finalized
 	if err != nil {
 		return nil, err
 	}
-	return encodePayloadID(id), nil
+	return encodeDirectPayloadID(id), nil
 }
 
 func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
@@ -157,13 +157,17 @@ func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head com
 	if err != nil {
 		return nil, err
 	}
-	return encodePayloadID(id), nil
+	return encodeDirectPayloadID(id), nil
 }
 
-func encodePayloadID(id uint64) []byte {
+func encodeDirectPayloadID(id uint64) []byte {
 	idBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(idBytes, id)
 	return idBytes
+}
+
+func decodeDirectPayloadID(id []byte) uint64 {
+	return binary.LittleEndian.Uint64(id)
 }
 
 func retryAssembleBlock(ctx context.Context, attempts int, delay time.Duration, assemble func(context.Context) (uint64, error)) (uint64, error) {
@@ -247,7 +251,7 @@ func (cc *ExecutionClientDirect) HasBlock(ctx context.Context, hash common.Hash)
 }
 
 func (cc *ExecutionClientDirect) GetAssembledBlock(ctx context.Context, idBytes []byte, _ clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-	return cc.chainRW.GetAssembledBlock(ctx, binary.LittleEndian.Uint64(idBytes))
+	return cc.chainRW.GetAssembledBlock(ctx, decodeDirectPayloadID(idBytes))
 }
 
 func (cc *ExecutionClientDirect) HasGapInSnapshots(ctx context.Context) bool {
