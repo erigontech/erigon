@@ -211,17 +211,6 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
 }
 
-func (cc *ExecutionClientEngine) StartPayloadBuild(ctx context.Context, head common.Hash, attributes *engine_types.PayloadAttributes) ([]byte, error) {
-	if !cc.isLocal() {
-		return nil, ErrNotSupported
-	}
-	id, err := startPayloadBuild(ctx, *cc.chainRW, head, attributes)
-	if err != nil {
-		return nil, err
-	}
-	return *engine_types.ConvertPayloadId(id), nil
-}
-
 func (cc *ExecutionClientEngine) SupportInsertion() bool {
 	return cc.isLocal()
 }

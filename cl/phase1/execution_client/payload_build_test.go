@@ -24,7 +24,6 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
@@ -92,20 +91,7 @@ func TestStartPayloadBuildRequiresMatchingExecutionHead(t *testing.T) {
 	require.Zero(t, module.assembleCalls)
 }
 
-func TestLocalEngineStartPayloadBuildUsesEnginePayloadIDEncoding(t *testing.T) {
-	head := common.Hash{0x41}
-	module := &payloadBuildModuleStub{
-		forkChoice: execmodule.ForkChoiceState{HeadHash: head},
-		assembled:  execmodule.AssembleBlockResult{PayloadID: 42},
-	}
-	chainRW := chainreader.NewChainReaderEth1(chain.AllProtocolChanges, module, time.Second)
-	client, err := NewExecutionClientEngineLocal(nil, chainRW, nil, &clparams.MainnetBeaconConfig)
-	require.NoError(t, err)
-
-	id, err := client.StartPayloadBuild(t.Context(), head, &engine_types.PayloadAttributes{})
-
-	require.NoError(t, err)
-	require.Equal(t, []byte(*engine_types.ConvertPayloadId(42)), id)
-	require.Equal(t, 1, module.assembleCalls)
-	require.Zero(t, module.forkChoiceCalls)
+func TestEngineClientDoesNotExposeDirectPayloadBuild(t *testing.T) {
+	_, ok := any(&ExecutionClientEngine{}).(PayloadBuilder)
+	require.False(t, ok)
 }
