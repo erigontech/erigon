@@ -1123,7 +1123,7 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 	}
 
 	// Check nonce and balance
-	senderNonce, senderBalance, err := p.senders.info(stateCache, txn.SenderID)
+	senderNonce, senderBalance, senderCodeHash, err := p.senders.info(stateCache, txn.SenderID)
 	if err != nil {
 		return txpoolcfg.ErrGetSenderInfo, fmt.Errorf("validateTx: sender info for idHash=%x senderID=%d: %w", txn.IDHash, txn.SenderID, err)
 	}
@@ -1141,6 +1141,16 @@ func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.Cache
 			p.logger.Info(fmt.Sprintf("TX TRACING: validateTx insufficient funds idHash=%x balance in state=%d, txn.gas*txn.tip=%d", txn.IDHash, senderBalance, total))
 		}
 		return txpoolcfg.InsufficientFunds, nil
+	}
+	if !senderCodeHash.IsEmpty() {
+		if existing := p.all.get(txn.SenderID, txn.Nonce); existing == nil {
+			if p.all.hasTxns(txn.SenderID) {
+				return txpoolcfg.DelegatedTxnLimit, nil
+			}
+			if txn.Nonce != senderNonce {
+				return txpoolcfg.DelegatedNonceGap, nil
+			}
+		}
 	}
 	if txn.TxType() == BlobTxnType {
 		return p.validateBlobTxn(txn, isLocal), nil
@@ -1591,7 +1601,7 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		if _, ok := p.senderLastActivity[senderID]; !ok {
 			p.senderLastActivity[senderID] = blockNum
 		}
-		nonce, balance, err := senders.info(cacheView, senderID)
+		nonce, balance, _, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, discardReasons, err
 		}
@@ -1673,7 +1683,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for senderID := range sendersWithChangedState {
 		// Reset the dormancy timer: this sender had a real on-chain state change.
 		p.senderLastActivity[senderID] = blockNum
-		nonce, balance, err := senders.info(cacheView, senderID)
+		nonce, balance, _, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, err
 		}
@@ -1683,7 +1693,7 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	// Don't touch senderLastActivity for queuedSenders — these senders did not
 	// change state on-chain, so the dormancy timer should not be reset.
 	for senderID := range queuedSenders {
-		nonce, balance, err := senders.info(cacheView, senderID)
+		nonce, balance, _, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, err
 		}
