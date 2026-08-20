@@ -74,6 +74,9 @@ func (g *Getter) ensureResident(offset uint64) {
 		return
 	}
 	rb := g.d.residencyBitmap()
+	if rb == nil {
+		return
+	}
 	first := int(fileOffset) / pageSize
 	last := first + (length-1)/pageSize
 	if rb.residentRange(first, last) {
@@ -90,16 +93,19 @@ func (d *Decompressor) residencyBitmap() *residencyBitmap {
 	if rb := d.residency.Load(); rb != nil {
 		return rb
 	}
-	d.residencyOnce.Do(func() {
-		// Seed happens on the refresh goroutine's first pass, not here: a synchronous
-		// mincore of a multi-GB file would stall the exec worker that triggered init.
-		// Until the seed lands the bitmap reads all-cold, so early reads warm via
-		// io_uring (cache hits, cheap) rather than faulting.
-		rb := newResidencyBitmap((len(d._mmapHandle) + pageSize - 1) / pageSize)
-		d.residency.Store(rb)
-		go d.refreshResidencyLoop(rb)
-	})
-	return d.residency.Load()
+	if len(d._mmapHandle) == 0 { // closed: nothing left to probe
+		return nil
+	}
+	// Seed happens on the refresh goroutine's first pass, not here: a synchronous
+	// mincore of a multi-GB file would stall the exec worker that triggered init.
+	// Until the seed lands the bitmap reads all-cold, so early reads warm via
+	// io_uring (cache hits, cheap) rather than faulting.
+	rb := newResidencyBitmap((len(d._mmapHandle) + pageSize - 1) / pageSize)
+	if !d.residency.CompareAndSwap(nil, rb) {
+		return d.residency.Load() // lost the race; the winner owns the scan goroutine
+	}
+	go d.refreshResidencyLoop(rb)
+	return rb
 }
 
 // warm pulls the byte range into the page cache via io_uring so the following
