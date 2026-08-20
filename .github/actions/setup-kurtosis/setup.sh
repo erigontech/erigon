@@ -10,7 +10,7 @@ while IFS= read -r -d '' source; do
     sudo rm -f "$source"
   fi
 done < <(sudo find "$sources_dir" -type f -print0 2>/dev/null)
-printf 'deb [trusted=yes] https://apt.fury.io/kurtosis-tech/ /\n' \
+printf 'deb [trusted=yes] https://sdk.kurtosis.com/kurtosis-cli-release-artifacts/ /\n' \
   | sudo tee "$sources_dir/kurtosis.list" >/dev/null
 
 apt_opts=(-o Acquire::Retries=3 -o Acquire::http::Timeout=15
