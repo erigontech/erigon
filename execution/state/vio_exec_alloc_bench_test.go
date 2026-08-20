@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -98,7 +99,7 @@ func BenchmarkVersionedExecReads(b *testing.B) {
 		mvhm.WriteStorage(addrs[i], key, Version{TxIndex: 0}, *uint256.NewInt(uint64(i)), true)
 	}
 
-	reader := NewReaderV3(domains.AsStateGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	ibs := NewWithVersionMap(reader, mvhm)
 	defer ibs.Close()
 
@@ -142,7 +143,7 @@ func BenchmarkWarmExtCodeHash(b *testing.B) {
 		mvhm.WriteCodeHash(addrs[i], Version{TxIndex: 0}, accounts.InternCodeHash(common.BytesToHash([]byte{0xaa, byte(i)})), true)
 	}
 
-	reader := NewReaderV3(domains.AsStateGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	ibs := NewWithVersionMap(reader, mvhm)
 
 	b.ReportAllocs()
