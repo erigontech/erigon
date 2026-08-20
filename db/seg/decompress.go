@@ -45,12 +45,16 @@ type codeword struct {
 	len     byte          // Number of bits in the codes
 }
 
+// noCodeword marks a table slot no code reaches. Reading one indexes out of
+// range, which fails as loudly as the nil pointer the slots used to hold.
+const noCodeword = ^uint32(0)
+
 type patternTable struct {
-	patterns []*codeword
-	bitLen   int // Number of bits to lookup in the table
+	patterns []uint32 // codeword indices into patternArena.codewords
+	bitLen   int      // Number of bits to lookup in the table
 }
 
-func (pt *patternTable) insertWord(cw *codeword) {
+func (pt *patternTable) insertWord(idx uint32, cw *codeword) {
 	codeStep := uint16(1) << uint16(cw.len)
 	codeFrom, codeTo := cw.code, cw.code+codeStep
 	if pt.bitLen != int(cw.len) && cw.len > 0 {
@@ -58,7 +62,7 @@ func (pt *patternTable) insertWord(cw *codeword) {
 	}
 
 	for c := codeFrom; c < codeTo; c += codeStep {
-		pt.patterns[c] = cw
+		pt.patterns[c] = idx
 	}
 }
 
@@ -83,17 +87,27 @@ type posTable struct {
 type patternArena struct {
 	codewords []codeword
 	tables    []patternTable
-	slots     []*codeword // backing store for all patternTable.patterns slices
+	slots     []uint32 // backing store for all patternTable.patterns slices
 	cwIdx     int
 	tableIdx  int
 	slotIdx   int
 }
 
-func (a *patternArena) allocCW(code uint16, pattern word, codeLen byte, ptr *patternTable) *codeword {
-	cw := &a.codewords[a.cwIdx]
+func (a *patternArena) allocCW(code uint16, pattern word, codeLen byte, ptr *patternTable) (uint32, *codeword) {
+	idx := a.cwIdx
+	cw := &a.codewords[idx]
 	a.cwIdx++
 	cw.code, cw.pattern, cw.len, cw.ptr = code, pattern, codeLen, ptr
-	return cw
+	return uint32(idx), cw
+}
+
+// newSlots returns a slot slab where every entry starts unreachable.
+func newSlots(n int) []uint32 {
+	s := make([]uint32, n)
+	for i := range s {
+		s[i] = noCodeword
+	}
+	return s
 }
 
 func (a *patternArena) allocTable(bitLen int) *patternTable {
@@ -340,7 +354,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		d.patArena = &patternArena{
 			codewords: make([]codeword, len(patterns)+numSubTables), // terminals + routing nodes
 			tables:    make([]patternTable, 1+numSubTables),
-			slots:     make([]*codeword, (1<<bitLen)+extraSlots),
+			slots:     newSlots((1 << bitLen) + extraSlots),
 		}
 		d.dict = d.patArena.allocTable(bitLen)
 		if _, err = buildCondensedPatternTable(d.dict, depths, patterns, 0, 0, 0, patternMaxDepth, d.patArena); err != nil {
@@ -427,8 +441,8 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 	}
 	if depth == depths[0] {
 		//fmt.Printf("depth=%d, maxDepth=%d, code=[%b], codeLen=%d, pattern=[%x]\n", depth, maxDepth, code, bits, pattern)
-		cw := arena.allocCW(code, word(patterns[0]), byte(bits), nil)
-		table.insertWord(cw)
+		idx, cw := arena.allocCW(code, word(patterns[0]), byte(bits), nil)
+		table.insertWord(idx, cw)
 		return 1, nil
 	}
 	if bits == 9 {
@@ -439,8 +453,8 @@ func buildCondensedPatternTable(table *patternTable, depths []uint64, patterns [
 			bitLen = int(maxDepth)
 		}
 		subTable := arena.allocTable(bitLen)
-		cw := arena.allocCW(code, nil, 0, subTable)
-		table.insertWord(cw)
+		idx, cw := arena.allocCW(code, nil, 0, subTable)
+		table.insertWord(idx, cw)
 		return buildCondensedPatternTable(subTable, depths, patterns, 0, 0, depth, maxDepth, arena)
 	}
 	if maxDepth == 0 {
@@ -516,7 +530,7 @@ func (d *Decompressor) DictMemSize() uint64 {
 	if d.patArena != nil {
 		total += uint64(cap(d.patArena.codewords)) * uint64(unsafe.Sizeof(codeword{}))
 		total += uint64(cap(d.patArena.tables)) * uint64(unsafe.Sizeof(patternTable{}))
-		total += uint64(cap(d.patArena.slots)) * uint64(unsafe.Sizeof((*codeword)(nil)))
+		total += uint64(cap(d.patArena.slots)) * uint64(unsafe.Sizeof(uint32(0)))
 	}
 	if d.posArena != nil {
 		total += uint64(cap(d.posArena.tables)) * uint64(unsafe.Sizeof(posTable{}))
@@ -721,6 +735,9 @@ func (v *SequentialView) MakeGetter() *Getter {
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
 	}
+	if v.d.patArena != nil {
+		g.patCodewords = v.d.patArena.codewords
+	}
 	if v.d.posArena != nil {
 		g.posTables = v.d.posArena.tables
 	}
@@ -749,6 +766,7 @@ type Getter struct {
 	data       []byte
 	//less hot fields
 	posTables     []posTable // posArena.tables; only used for the subtable path
+	patCodewords  []codeword // patArena.codewords; table slots index into it
 	patternDict   *patternTable
 	d             *Decompressor
 	fName         string
@@ -844,12 +862,15 @@ func (g *Getter) nextPosSubtable(tableIdx uint32) uint64 {
 func (g *Getter) nextPattern() []byte {
 	table := g.patternDict
 	if table.bitLen == 0 {
-		return table.patterns[0].pattern
+		return g.patCodewords[table.patterns[0]].pattern
 	}
 
 	data := g.data
 	dataP := g.dataP
 	dataBit := uint(g.dataBit) & 7
+	// Local copy: the slice header would otherwise be reloaded from g on every
+	// iteration, since the compiler cannot prove the loop leaves g alone.
+	cws := g.patCodewords
 
 	for {
 		var code uint16
@@ -860,7 +881,7 @@ func (g *Getter) nextPattern() []byte {
 		}
 		code &= (uint16(1) << table.bitLen) - 1
 
-		cw := table.patterns[code]
+		cw := &cws[table.patterns[code]]
 		if cw.len == 0 {
 			table = cw.ptr
 			dataBit += 9
@@ -896,6 +917,9 @@ func (d *Decompressor) MakeGetter() *Getter {
 		dataOffset:  uint64(d.size - int64(len(data))),
 		patternDict: d.dict,
 		fName:       d.FileName(),
+	}
+	if d.patArena != nil {
+		g.patCodewords = d.patArena.codewords
 	}
 	if d.posArena != nil {
 		g.posTables = d.posArena.tables
