@@ -222,17 +222,22 @@ jobs:
           genesis_glamsterdam=$(yq -e '.ethereum_genesis_generator_params.image' "$glamsterdam_io")
           lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' "$caplin_io")
           # pectra's clients and caplin-minimal's assertoor are warmed under the tag
-          # another suite pins; bumping one alone would silently drop it back to a
-          # Docker Hub pull, so fail here instead of caching a tag nobody runs.
-          same_tag() {
-            [ "$2" = "$3" ] \
-              || { echo "::error::$1 pins $2 but the cache warms $3; reconcile them or extend the cache key"; exit 1; }
+          # another suite pins. Bumping one alone leaves it out of the cache, which
+          # is a slow path rather than a failure: warn, and hand the tag to the
+          # pre-pull step so it is fetched with retries.
+          uncached=
+          check_warmed() { # .io file, tag it pins, tag the cache warms
+            if [ "$2" != "$3" ]; then
+              echo "::warning::$1 pins $2 but the cache warms $3; extend the cache key to warm it"
+              uncached="$uncached $2"
+            fi
           }
-          same_tag "$pectra_io" \
+          check_warmed "$pectra_io" \
             "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$pectra_io")" "$teku"
-          same_tag "$pectra_io" \
+          check_warmed "$pectra_io" \
             "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$pectra_io")" "$lighthouse_vc"
-          same_tag "$caplin_io" "$(yq -e '.assertoor_params.image' "$caplin_io")" "$assertoor"
+          check_warmed "$caplin_io" "$(yq -e '.assertoor_params.image' "$caplin_io")" "$assertoor"
+          echo "UNCACHED_IMAGES=${uncached# }" >> "$GITHUB_ENV"
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
@@ -463,17 +468,22 @@ jobs:
           genesis_glamsterdam=$(yq -e '.ethereum_genesis_generator_params.image' "$glamsterdam_io")
           lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' "$caplin_io")
           # pectra's clients and caplin-minimal's assertoor are warmed under the tag
-          # another suite pins; bumping one alone would silently drop it back to a
-          # Docker Hub pull, so fail here instead of caching a tag nobody runs.
-          same_tag() {
-            [ "$2" = "$3" ] \
-              || { echo "::error::$1 pins $2 but the cache warms $3; reconcile them or extend the cache key"; exit 1; }
+          # another suite pins. Bumping one alone leaves it out of the cache, which
+          # is a slow path rather than a failure: warn, and hand the tag to the
+          # pre-pull step so it is fetched with retries.
+          uncached=
+          check_warmed() { # .io file, tag it pins, tag the cache warms
+            if [ "$2" != "$3" ]; then
+              echo "::warning::$1 pins $2 but the cache warms $3; extend the cache key to warm it"
+              uncached="$uncached $2"
+            fi
           }
-          same_tag "$pectra_io" \
+          check_warmed "$pectra_io" \
             "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$pectra_io")" "$teku"
-          same_tag "$pectra_io" \
+          check_warmed "$pectra_io" \
             "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$pectra_io")" "$lighthouse_vc"
-          same_tag "$caplin_io" "$(yq -e '.assertoor_params.image' "$caplin_io")" "$assertoor"
+          check_warmed "$caplin_io" "$(yq -e '.assertoor_params.image' "$caplin_io")" "$assertoor"
+          echo "UNCACHED_IMAGES=${uncached# }" >> "$GITHUB_ENV"
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
@@ -575,6 +585,21 @@ jobs:
           docker save "${CAPLIN_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/caplin-genesis-generator.tar
           docker save "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/glamsterdam-genesis-generator.tar
           docker save "${KURTOSIS_PYTHON_IMAGE}" -o /tmp/docker-cache/python.tar
+
+      # An uncovered tag would otherwise be pulled inside `kurtosis run`, where a
+      # registry blip fails the whole test step. Fetch it here instead, with the
+      # same retries the cached images get; kurtosis still pulls it if this fails.
+      - name: Pre-pull suite images the cache does not cover
+        if: env.UNCACHED_IMAGES != ''
+        run: |
+          for image in ${UNCACHED_IMAGES}; do
+            for n in 1 2 3; do
+              if docker pull "$image"; then continue 2; fi
+              echo "docker pull $image failed (attempt $n of 3)"
+              sleep $((10 * n))
+            done
+            echo "::warning::could not pre-pull $image; kurtosis retries it at run time"
+          done
 
       - name: Install Kurtosis CLI and start engine
         uses: ./.github/actions/setup-kurtosis
