@@ -34,7 +34,7 @@ var (
 type LogTracer struct {
 	// logs keeps logs for all open call frames.
 	// This lets us clear logs for failed calls.
-	logs           [][]*types.Log
+	logs           []types.Logs
 	count          int
 	traceTransfers bool
 	blockNumber    uint64
@@ -62,7 +62,7 @@ func (t *LogTracer) Hooks() *tracing.Hooks {
 }
 
 func (t *LogTracer) onEnter(depth int, typ byte, from accounts.Address, to accounts.Address, precompile bool, input []byte, gas uint64, value uint256.Int, code []byte) {
-	t.logs = append(t.logs, make([]*types.Log, 0))
+	t.logs = append(t.logs, make(types.Logs, 0))
 	op := vm.OpCode(typ)
 	if op != vm.DELEGATECALL && op != vm.CALLCODE && !value.IsZero() {
 		t.captureTransfer(from, to, &value)
@@ -100,7 +100,7 @@ func (t *LogTracer) onLog(log *types.Log) {
 }
 
 func (t *LogTracer) captureLog(address common.Address, topics []common.Hash, data []byte) {
-	t.logs[len(t.logs)-1] = append(t.logs[len(t.logs)-1], &types.Log{
+	t.logs[len(t.logs)-1] = append(t.logs[len(t.logs)-1], types.Log{
 		Address:     address,
 		Topics:      topics,
 		Data:        data,
@@ -135,9 +135,9 @@ func (t *LogTracer) Reset(txHash common.Hash, txIdx uint) {
 	t.txIdx = txIdx
 }
 
-func (t *LogTracer) Logs() []*types.Log {
+func (t *LogTracer) Logs() types.Logs {
 	if len(t.logs) == 0 {
-		return []*types.Log{}
+		return types.Logs{}
 	}
 	return t.logs[0]
 }

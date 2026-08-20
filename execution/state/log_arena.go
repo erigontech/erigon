@@ -35,29 +35,26 @@ const (
 	maxLogsPerTxn     = int(params.MaxTxnGasLimit / params.LogGas)     // 44739
 	maxLogBytesPerTxn = int(params.MaxTxnGasLimit / params.LogDataGas) // 2MB
 
-	// Fractions of those, because the pool never shrinks: the whole ceiling would
-	// park 13MB of entries per arena, while a tenth still holds the ~1700 logs of
-	// a p99 block that a caller resetting per block pools in one go.
-	maxPooledLogEntries = maxLogsPerTxn / 10
-	maxPooledLogBytes   = maxLogBytesPerTxn / 2
+	// Fractions of those, because the run's array never shrinks below the budget:
+	// the whole ceiling would park 7MB of entries per arena, while a tenth still
+	// holds the p99 block of 1706 logs that a caller resetting per block keeps.
+	maxRetainedLogSlots = maxLogsPerTxn / 10
+	maxRetainedLogBytes = maxLogBytesPerTxn / 2
 
 	// One large log must not take the whole budget and starve the small entries
 	// real traffic is made of, and a cap much lower would throw away the reuse
 	// that makes a block of large logs cheap.
-	maxPooledLogDataCap = maxPooledLogBytes / 8
-
-	// Slots the arena keeps between resets. The run is a block for a caller that
-	// resets per block, so this is bounded by the memory it costs rather than by
-	// a transaction's budget: 32KB of pointers, holding a p99 block's ~1700.
-	maxRetainedLogSlots = 32 * 1024 / 8
+	maxRetainedLogDataCap = maxRetainedLogBytes / 8
 )
 
-// logArena owns a block's log entries and recycles them through a pool, so what
-// it holds follows the largest transaction rather than the widest block.
+// logArena owns a block's log entries and recycles them in place, so what it
+// holds follows the largest transaction rather than the widest block.
 type logArena struct {
-	entries      types.Logs   // the block so far, in order — one transaction, for a caller that resets per transaction
-	pool         []*types.Log // entries taken back at reset, for any transaction to reuse
-	poolBytes    int          // Data the pool holds
+	// The block so far, in order — one transaction, for a caller that resets per
+	// transaction. Past the run, the array keeps the slots reset took back, Topics
+	// and Data included, for any later transaction to grow into.
+	entries      types.Logs
+	retainedData int // Data those slots hold, admitted against maxRetainedLogBytes
 	indexInBlock uint
 }
 
@@ -71,13 +68,14 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	entries := slices.Grow(a.entries, 1)[:logIdx+1]
 	a.entries = entries
 
-	// Always take: reset and revertLast empty a slot before shrinking past it, so
-	// a slot that still held an entry would be one two transactions share.
-	lp := a.take()
-	entries[logIdx] = lp
+	// Points into the run's array, so it is only valid until the next alloc may
+	// regrow it — the caller fills and notifies before allocating again.
+	lp := &entries[logIdx]
+	a.retainedData -= cap(lp.Data)
 	lp.Address = addr
 	lp.Topics = slices.Grow(lp.Topics[:0], numTopics)[:numTopics]
 	lp.Data = slices.Grow(lp.Data[:0], dataSize)[:dataSize]
+	a.retainedData += cap(lp.Data)
 	lp.Removed = false
 	lp.TxHash, lp.BlockHash = common.Hash{}, common.Hash{}
 	lp.TxIndex = hexutil.Uint(txIndex)
@@ -89,62 +87,41 @@ func (a *logArena) alloc(j *journal, addr common.Address, txIndex, numTopics, da
 	return lp
 }
 
-// take returns a pooled entry, Topics and Data included for alloc to grow into.
-func (a *logArena) take() *types.Log {
-	n := len(a.pool) - 1
-	if n < 0 {
-		return &types.Log{}
-	}
-	lp := a.pool[n]
-	a.pool = a.pool[:n]
-	a.poolBytes -= cap(lp.Data)
-	return lp
-}
-
-// put keeps an entry for the next transaction, dropping the Data it may not
-// hold. The entry itself is small enough to keep either way.
-func (a *logArena) put(lp *types.Log) {
-	if len(a.pool) >= maxPooledLogEntries {
-		return
-	}
-	if cap(lp.Data) > maxPooledLogDataCap || a.poolBytes+cap(lp.Data) > maxPooledLogBytes {
+// keepData admits a slot's Data for reuse, dropping what the arena may not hold.
+// Every slot passes through here on its way out of the run, reset and revert
+// alike, so what lies past the run is always within budget.
+func (a *logArena) keepData(lp *types.Log) {
+	if d := cap(lp.Data); d > maxRetainedLogDataCap || a.retainedData > maxRetainedLogBytes {
+		a.retainedData -= d
 		lp.Data = nil
 	}
-	a.poolBytes += cap(lp.Data)
-	a.pool = append(a.pool, lp)
 }
 
-// reset takes back what was written: the entries return to the pool and the
-// block goes empty. It walks only what the caller wrote, not the block's width.
+// reset takes back what was written: the run goes empty and its slots stay for
+// the next transaction. It walks only what the caller wrote, not the block's
+// width.
 func (a *logArena) reset() {
 	a.indexInBlock = 0
 	entries := a.entries
-	for i, lp := range entries {
-		if lp == nil {
-			continue
-		}
-		a.put(lp)
-		entries[i] = nil
+	for i := range entries {
+		a.keepData(&entries[i])
 	}
 	if cap(entries) > maxRetainedLogSlots {
-		a.entries = nil // an outlier keeps its entries, not the array that held them
+		a.entries, a.retainedData = nil, 0 // an outlier keeps its entries, not the array that held them
 	} else {
 		a.entries = entries[:0]
 	}
 }
 
-// revertLast drops the entry allocated last, returning it to the pool.
+// revertLast drops the entry allocated last. Its slot stays past the run, so the
+// next alloc grows back into the same Topics and Data.
 func (a *logArena) revertLast(txIndex int) {
-	entries := a.entries
-	last := len(entries) - 1
+	last := len(a.entries) - 1
 	if last < 0 {
 		panic(fmt.Sprintf("can't revert log of tx %d: none were emitted", txIndex))
 	}
-	if lp := entries[last]; lp != nil {
-		a.put(lp)
-		entries[last] = nil
-	}
-	a.entries = entries[:last]
+	a.keepData(&a.entries[last])
+	a.entries = a.entries[:last]
 	a.indexInBlock--
 }
 

@@ -821,7 +821,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	receipt1 := &types.Receipt{
 		Status:            types.ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
-		Logs: []*types.Log{
+		Logs: types.Logs{
 			{Address: common.BytesToAddress([]byte{0x11})},
 			{Address: common.BytesToAddress([]byte{0x01, 0x11})},
 		},
@@ -839,7 +839,7 @@ func TestBlockReceiptStorage(t *testing.T) {
 	receipt2 := &types.Receipt{
 		PostState:         receipt2PostState[:],
 		CumulativeGasUsed: 2,
-		Logs: []*types.Log{
+		Logs: types.Logs{
 			{Address: common.BytesToAddress([]byte{0x22})},
 			{Address: common.BytesToAddress([]byte{0x02, 0x22})},
 		},

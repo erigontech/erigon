@@ -96,7 +96,7 @@ type receiptRLP struct {
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
 	Bloom             Bloom
-	Logs              []*Log
+	Logs              Logs
 }
 
 // receiptRLP69 is the post-eth/69 consensus encoding of a receipt.
@@ -107,7 +107,7 @@ type receiptRLP69 struct {
 	Type              uint8
 	PostStateOrStatus []byte
 	CumulativeGasUsed uint64
-	Logs              []*Log
+	Logs              Logs
 }
 
 // storedReceiptRLP is the storage encoding of a receipt.
@@ -247,8 +247,8 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 		r.Logs = r.Logs[:0]
 	}
 	for _, err = s.List(); err == nil; _, err = s.List() {
-		r.Logs = append(r.Logs, &Log{})
-		log := r.Logs[len(r.Logs)-1]
+		r.Logs = append(r.Logs, Log{})
+		log := &r.Logs[len(r.Logs)-1]
 		if err = s.ReadBytes(log.Address[:]); err != nil {
 			return fmt.Errorf("read Address: %w", err)
 		}
@@ -382,7 +382,8 @@ func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
 	defer s.release()
 
 	s.logs = slices.Grow(s.logs[:0], len(r.Logs))
-	for _, l := range r.Logs {
+	for i := range r.Logs {
+		l := &r.Logs[i]
 		s.logs = append(s.logs, rlpStorageLog{Address: l.Address, Topics: l.Topics, Data: l.Data})
 	}
 	s.rec = storedReceiptRLP{
@@ -437,11 +438,10 @@ func decodeLogsForStorage(s *rlp.Stream) (Logs, error) {
 	preAlloc := int(min(128, l/typicalLogSize+1)) // hard cap: l is attacker-controlled, see decodeHashList
 	logs := make(Logs, 0, preAlloc)
 	for s.MoreDataInList() {
-		log := &Log{}
-		if err := (*LogForStorage)(log).DecodeRLP(s); err != nil {
+		logs = append(logs, Log{})
+		if err := (*LogForStorage)(&logs[len(logs)-1]).DecodeRLP(s); err != nil {
 			return nil, err
 		}
-		logs = append(logs, log)
 	}
 	return logs, s.ListEnd()
 }

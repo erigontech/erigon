@@ -91,7 +91,7 @@ type Filters struct {
 	pendingReceiptsUpdate atomic.Bool
 	onNewSnapshot         func()
 
-	logsStores         *concurrent.SyncMap[LogsSubID, []*types.Log]
+	logsStores         *concurrent.SyncMap[LogsSubID, types.Logs]
 	pendingHeadsStores *concurrent.SyncMap[HeadsSubID, []*types.Header]
 	pendingTxsStores   *concurrent.SyncMap[PendingTxsSubID, [][]types.Transaction]
 	trackedSubs        *concurrent.SyncMap[SubscriptionID, trackedSub]
@@ -123,7 +123,7 @@ func New(ctx context.Context, config FiltersConfig, ethBackend ApiBackend, txPoo
 		receiptsSubs:       NewReceiptsFilterAggregator(),
 		logsSubs:           NewLogsFilterAggregator(),
 		onNewSnapshot:      onNewSnapshot,
-		logsStores:         concurrent.NewSyncMap[LogsSubID, []*types.Log](),
+		logsStores:         concurrent.NewSyncMap[LogsSubID, types.Logs](),
 		pendingHeadsStores: concurrent.NewSyncMap[HeadsSubID, []*types.Header](),
 		pendingTxsStores:   concurrent.NewSyncMap[PendingTxsSubID, [][]types.Transaction](),
 		trackedSubs:        concurrent.NewSyncMap[SubscriptionID, trackedSub](),
@@ -524,7 +524,7 @@ func (ff *Filters) HandlePendingLogs(reply *txpoolproto.OnPendingLogsReply) {
 	if len(reply.RplLogs) == 0 {
 		return
 	}
-	l := []*types.Log{}
+	l := types.Logs{}
 	if err := rlp.DecodeBytes(reply.RplLogs, &l); err != nil {
 		ff.logger.Warn("OnNewPendingLogs rpc filters, unprocessable payload", "err", err)
 	}
@@ -1040,7 +1040,7 @@ func (ff *Filters) OnNewLogs(reply *remoteproto.SubscribeLogsReply) {
 
 // AddLogs adds logs to the store associated with the given subscription ID.
 func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
-	ff.logsStores.Do(id, func(st []*types.Log, ok bool) ([]*types.Log, bool) {
+	ff.logsStores.Do(id, func(st types.Logs, ok bool) (types.Logs, bool) {
 		// Drop (and clear) the entry when the subscription is gone: reads are gated
 		// on the subscription's existence, so a late write from the forwarding
 		// goroutine draining a closed channel would orphan the entry forever.
@@ -1050,28 +1050,28 @@ func (ff *Filters) AddLogs(id LogsSubID, log *types.Log) {
 			return nil, false
 		}
 		if !ok {
-			st = make([]*types.Log, 0)
+			st = make(types.Logs, 0)
 		}
 
 		maxLogs := ff.config.RpcSubscriptionFiltersMaxLogs
 		if maxLogs > 0 && len(st)+1 > maxLogs {
 			excessLogs := len(st) + 1 - maxLogs
 			if excessLogs >= len(st) {
-				st = []*types.Log{}
+				st = types.Logs{}
 			} else {
 				st = st[excessLogs:]
 			}
 		}
 
 		// Append the new log
-		st = append(st, log)
+		st = append(st, *log)
 		return st, true
 	})
 }
 
 // ReadLogs reads logs from the store associated with the given subscription ID.
 // It returns the logs and a boolean indicating whether the logs were found.
-func (ff *Filters) ReadLogs(id LogsSubID) ([]*types.Log, bool) {
+func (ff *Filters) ReadLogs(id LogsSubID) (types.Logs, bool) {
 	return ff.logsStores.Delete(id)
 }
 

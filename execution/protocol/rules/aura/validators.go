@@ -691,7 +691,7 @@ func (s *ValidatorSafeContract) extractFromEvent(header *types.Header, receipts 
 					}
 		*/
 		for i := range logs {
-			l := logs[i]
+			l := &logs[i]
 			if header.Number.Uint64() >= DEBUG_LOG_FROM {
 				fmt.Printf("extractFromEvent3: %d\n", header.Number.Uint64())
 			}

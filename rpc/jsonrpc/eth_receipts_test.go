@@ -35,7 +35,7 @@ import (
 func logsWithIndexes(n int) types.Logs {
 	logs := make(types.Logs, n)
 	for i := range logs {
-		logs[i] = &types.Log{Index: hexutil.Uint(i)}
+		logs[i] = types.Log{Index: hexutil.Uint(i)}
 	}
 	return logs
 }
@@ -43,7 +43,7 @@ func logsWithIndexes(n int) types.Logs {
 func erigonLogsWithIndexes(n int) []*types.ErigonLog {
 	logs := make([]*types.ErigonLog, n)
 	for i, l := range logsWithIndexes(n) {
-		logs[i] = &types.ErigonLog{Log: *l}
+		logs[i] = &types.ErigonLog{Log: l}
 	}
 	return logs
 }

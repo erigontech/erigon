@@ -64,7 +64,7 @@ func TestLegacyReceiptDecoding(t *testing.T) {
 	receipt := &Receipt{
 		Status:            ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
-		Logs: []*Log{
+		Logs: []Log{
 			{
 				Address: common.BytesToAddress([]byte{0x11}),
 				Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
@@ -167,7 +167,7 @@ func TestReceiptUnmarshalBinary(t *testing.T) {
 	legacyReceipt := &Receipt{
 		Status:            ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
-		Logs: []*Log{
+		Logs: []Log{
 			{
 				Address: common.BytesToAddress([]byte{0x11}),
 				Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
@@ -183,7 +183,7 @@ func TestReceiptUnmarshalBinary(t *testing.T) {
 	accessListReceipt := &Receipt{
 		Status:            ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
-		Logs: []*Log{
+		Logs: []Log{
 			{
 				Address: common.BytesToAddress([]byte{0x11}),
 				Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
@@ -200,7 +200,7 @@ func TestReceiptUnmarshalBinary(t *testing.T) {
 	eip1559Receipt := &Receipt{
 		Status:            ReceiptStatusFailed,
 		CumulativeGasUsed: 1,
-		Logs: []*Log{
+		Logs: []Log{
 			{
 				Address: common.BytesToAddress([]byte{0x11}),
 				Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
@@ -322,7 +322,7 @@ func TestReceiptUnmarshalBinary(t *testing.T) {
 func TestReceiptEncodeRLP69_AllTypesAreList(t *testing.T) {
 	t.Parallel()
 
-	logs := []*Log{
+	logs := []Log{
 		{
 			Address: common.BytesToAddress([]byte{0x11}),
 			Topics:  []common.Hash{common.HexToHash("dead"), common.HexToHash("beef")},
@@ -385,8 +385,8 @@ func TestReceiptEncodeRLP69_NoBloom(t *testing.T) {
 		Type:              DynamicFeeTxType,
 		Status:            ReceiptStatusSuccessful,
 		CumulativeGasUsed: 21000,
-		Bloom:             CreateBloom(Receipts{{Status: ReceiptStatusSuccessful, Logs: []*Log{{Address: common.BytesToAddress([]byte{0x11})}}}}),
-		Logs:              []*Log{},
+		Bloom:             CreateBloom(Receipts{{Status: ReceiptStatusSuccessful, Logs: []Log{{Address: common.BytesToAddress([]byte{0x11})}}}}),
+		Logs:              []Log{},
 	}
 
 	var buf bytes.Buffer
@@ -412,25 +412,25 @@ func TestReceiptsEncodeRLP69_MixedTypes(t *testing.T) {
 			Type:              LegacyTxType,
 			Status:            ReceiptStatusSuccessful,
 			CumulativeGasUsed: 21000,
-			Logs:              []*Log{},
+			Logs:              []Log{},
 		},
 		{
 			Type:              AccessListTxType,
 			Status:            ReceiptStatusFailed,
 			CumulativeGasUsed: 42000,
-			Logs:              []*Log{},
+			Logs:              []Log{},
 		},
 		{
 			Type:              DynamicFeeTxType,
 			Status:            ReceiptStatusSuccessful,
 			CumulativeGasUsed: 63000,
-			Logs:              []*Log{},
+			Logs:              []Log{},
 		},
 		{
 			Type:              BlobTxType,
 			Status:            ReceiptStatusSuccessful,
 			CumulativeGasUsed: 84000,
-			Logs:              []*Log{},
+			Logs:              []Log{},
 		},
 	}
 
@@ -466,8 +466,8 @@ func TestReceiptEncodeRLP69_DiffersFromETH68(t *testing.T) {
 		Type:              DynamicFeeTxType,
 		Status:            ReceiptStatusSuccessful,
 		CumulativeGasUsed: 21000,
-		Bloom:             CreateBloom(Receipts{{Status: ReceiptStatusSuccessful, Logs: []*Log{}}}),
-		Logs:              []*Log{},
+		Bloom:             CreateBloom(Receipts{{Status: ReceiptStatusSuccessful, Logs: []Log{}}}),
+		Logs:              []Log{},
 	}
 
 	// ETH68 encoding
@@ -506,7 +506,7 @@ func TestReceiptEncode(t *testing.T) {
 
 	t.Run("Enc.Empty.FirstLogIndexWithinBlock", func(t *testing.T) {
 		r1 := &ReceiptForStorage{Logs: Logs{
-			&Log{Index: 1},
+			Log{Index: 1},
 		}}
 		buf, err := rlp.EncodeToBytes(r1)
 		require.NoError(t, err)
@@ -519,7 +519,7 @@ func TestReceiptEncode(t *testing.T) {
 	t.Run("Enc.EmptyLogs", func(t *testing.T) {
 		r1 := &ReceiptForStorage{FirstLogIndexWithinBlock: 1,
 			Logs: Logs{
-				&Log{Index: 1},
+				Log{Index: 1},
 			},
 		}
 		buf, err := rlp.EncodeToBytes(r1)
@@ -532,7 +532,7 @@ func TestReceiptEncode(t *testing.T) {
 	t.Run("Enc.List", func(t *testing.T) {
 		r1 := &ReceiptForStorage{FirstLogIndexWithinBlock: 1}
 		for range 13 {
-			r1.Logs = append(r1.Logs, &Log{Topics: make([]common.Hash, 300)})
+			r1.Logs = append(r1.Logs, Log{Topics: make([]common.Hash, 300)})
 		}
 
 		buf, err := rlp.EncodeToBytes(r1)

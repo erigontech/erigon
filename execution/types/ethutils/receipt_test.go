@@ -37,7 +37,7 @@ func TestMarshalReceiptReusesReceiptBloom(t *testing.T) {
 		Status:            types.ReceiptStatusSuccessful,
 		CumulativeGasUsed: 21_000,
 		Bloom:             preset,
-		Logs: []*types.Log{{
+		Logs: types.Logs{{
 			Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
 			Topics:  []common.Hash{common.HexToHash("0x01")},
 		}},
