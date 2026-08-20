@@ -234,6 +234,34 @@ func TestBlockBuilderStopPrefersCompletedOutcomeOverCanceledCaller(t *testing.T)
 	}
 }
 
+func TestBlockBuilderStopPrefersPayloadCompletedDuringSelection(t *testing.T) {
+	t.Parallel()
+
+	callerCtx, cancel := context.WithCancel(t.Context())
+	cancel()
+	want := &types.BlockWithReceipts{}
+
+	// Stop's select evaluates channel operands in source order before choosing a ready case.
+	// Completing the builder from the context's Done method makes both cases ready together.
+	for range 100 {
+		builder := &BlockBuilder{done: make(chan struct{})}
+		stopCtx := &finishOnDoneContext{
+			Context: callerCtx,
+			finish: func() {
+				builder.mu.Lock()
+				builder.result = want
+				builder.state.Store(blockBuilderCompleted)
+				builder.mu.Unlock()
+				close(builder.done)
+			},
+		}
+
+		result, err := builder.Stop(stopCtx)
+		require.NoError(t, err)
+		require.Same(t, want, result)
+	}
+}
+
 func TestBlockBuilderStopReturnsImmediatelyAfterDiscard(t *testing.T) {
 	t.Parallel()
 
