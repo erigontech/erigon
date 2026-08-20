@@ -89,23 +89,23 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 	}
 	domain1, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation1.Data.Target.Epoch)
 	if err != nil {
-		return fmt.Errorf("unable to get the domain: %v", err)
+		return fmt.Errorf("unable to get the domain: %w", err)
 	}
 	domain2, err := s.GetDomain(s.BeaconConfig().DomainBeaconAttester, attestation2.Data.Target.Epoch)
 	if err != nil {
-		return fmt.Errorf("unable to get the domain: %v", err)
+		return fmt.Errorf("unable to get the domain: %w", err)
 	}
 
 	if !test {
 		// Verify validity of slashings (1)
 		signingRoot, err := fork.ComputeSigningRoot(attestation1.Data, domain1)
 		if err != nil {
-			return fmt.Errorf("unable to get signing root: %v", err)
+			return fmt.Errorf("unable to get signing root: %w", err)
 		}
 
 		valid, err := bls.VerifyAggregate(attestation1.Signature[:], signingRoot[:], attestation1PublicKeys)
 		if err != nil {
-			return fmt.Errorf("error while validating signature: %v", err)
+			return fmt.Errorf("error while validating signature: %w", err)
 		}
 		if !valid {
 			return errors.New("invalid aggregate signature")
@@ -113,12 +113,12 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 		// Verify validity of slashings (2)
 		signingRoot, err = fork.ComputeSigningRoot(attestation2.Data, domain2)
 		if err != nil {
-			return fmt.Errorf("unable to get signing root: %v", err)
+			return fmt.Errorf("unable to get signing root: %w", err)
 		}
 
 		valid, err = bls.VerifyAggregate(attestation2.Signature[:], signingRoot[:], attestation2PublicKeys)
 		if err != nil {
-			return fmt.Errorf("error while validating signature: %v", err)
+			return fmt.Errorf("error while validating signature: %w", err)
 		}
 		if !valid {
 			return errors.New("invalid aggregate signature")
@@ -131,7 +131,7 @@ func (f *ForkChoiceStore) onProcessAttesterSlashing(attesterSlashing *cltypes.At
 		if !anySlashed {
 			v, err := s.ValidatorForValidatorIndex(int(index))
 			if err != nil {
-				return fmt.Errorf("unable to retrieve state: %v", err)
+				return fmt.Errorf("unable to retrieve state: %w", err)
 			}
 			if v.IsSlashable(state.Epoch(s)) {
 				anySlashed = true

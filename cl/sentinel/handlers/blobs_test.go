@@ -44,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 func getTestBlobSidecars(blockHeader *cltypes.SignedBeaconBlockHeader) []*cltypes.BlobSidecar {
@@ -80,7 +80,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
-	blobDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
@@ -141,7 +141,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	for i := range sidecars {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && err != io.EOF {
+		if err != nil && !errors.Is(err, io.EOF) {
 			require.NoError(t, err)
 		}
 
@@ -178,7 +178,7 @@ func TestBlobsByRangeHandler(t *testing.T) {
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Fatal("Stream is not empty")
 	}
 
@@ -204,7 +204,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	require.NoError(t, err)
 
 	peersPool := peers.NewPool(host)
-	blobDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	blobDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	_, indiciesDB := setupStore(t)
 	store := tests.NewMockBlockReader()
 
@@ -265,7 +265,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	for i := range sidecars {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && err != io.EOF {
+		if err != nil && !errors.Is(err, io.EOF) {
 			require.NoError(t, err)
 		}
 
@@ -302,7 +302,7 @@ func TestBlobsByIdentifiersHandler(t *testing.T) {
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Fatal("Stream is not empty")
 	}
 

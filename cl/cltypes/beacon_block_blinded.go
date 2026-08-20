@@ -375,7 +375,7 @@ func (b *BlindedBeaconBody) DecodeSSZ(buf []byte, version int) error {
 	b.Version = clparams.StateVersion(version)
 
 	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[BeaconBody] err: %w", ssz.ErrLowBufferSize)
 	}
 
 	b.ExecutionPayload = NewEth1Header(b.Version)

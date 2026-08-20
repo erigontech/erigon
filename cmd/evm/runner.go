@@ -204,7 +204,7 @@ func runCmd(_ context.Context, ctx *cli.Command) error {
 		return err
 	}
 	defer sd.Close()
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsStateGetter(tx))
 	statedb = state.New(stateReader)
 	if ctx.String(SenderFlag.Name) != "" {
 		sender = accounts.InternAddress(common.HexToAddress(ctx.String(SenderFlag.Name)))

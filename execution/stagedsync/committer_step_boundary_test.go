@@ -31,11 +31,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/order"
-	"github.com/erigontech/erigon/db/kv/temporal"
-	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -553,15 +550,7 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	ctx := context.Background()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	rawDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
-	t.Cleanup(rawDb.Close)
-
-	agg, err := dbstate.NewTest(dirs).StepSize(16).Logger(logger).Open(ctx, rawDb)
-	require.NoError(t, err)
-	t.Cleanup(agg.Close)
-
-	db, err := temporal.New(rawDb, agg, nil)
-	require.NoError(t, err)
+	db := temporaltest.NewTestDBWithStepSize(t, dirs, 16)
 
 	tx, err := db.BeginTemporalRw(ctx) //nolint:gocritic
 	require.NoError(t, err)

@@ -21,7 +21,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"time"
 
 	"github.com/holiman/uint256"
@@ -275,7 +274,7 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 		}
 		if block.BlockOverrides.Number == nil {
 			nextNumber := prevNumber + 1
-			block.BlockOverrides.Number = (*hexutil.Big)(new(big.Int).SetUint64(nextNumber))
+			block.BlockOverrides.Number = (*hexutil.U256)(uint256.NewInt(nextNumber))
 		}
 		blockNumber := block.BlockOverrides.Number.Uint64()
 		if blockNumber <= prevNumber {
@@ -294,7 +293,7 @@ func (s *simulator) sanitizeSimulatedBlocks(blocks []SimulatedBlock) ([]Simulate
 				t := prevTimestamp + timestampIncrement
 				b := SimulatedBlock{
 					BlockOverrides: &ethapi.BlockOverrides{
-						Number: (*hexutil.Big)(new(big.Int).SetUint64(n)),
+						Number: (*hexutil.U256)(uint256.NewInt(n)),
 						Time:   (*hexutil.Uint64)(&t),
 					},
 				}
@@ -396,28 +395,28 @@ func (s *simulator) sanitizeCall(
 
 	if args.ChainID == nil {
 		// Copy the chain ID to avoid aliasing the live chainConfig pointer.
-		args.ChainID = (*hexutil.Big)(s.chainConfig.ChainID.ToBig())
+		args.ChainID = (*hexutil.U256)(new(uint256.Int).Set(s.chainConfig.ChainID))
 	} else {
-		if have := (*big.Int)(args.ChainID); have.Cmp(s.chainConfig.ChainID.ToBig()) != 0 {
+		if have := (*uint256.Int)(args.ChainID); !have.Eq(s.chainConfig.ChainID) {
 			return fmt.Errorf("chainId does not match node's (have=%v, want=%v)", have, s.chainConfig.ChainID)
 		}
 	}
 	if baseFee == nil {
 		// If there's no base fee, then it must be a non-1559 execution
 		if args.GasPrice == nil {
-			args.GasPrice = new(hexutil.Big)
+			args.GasPrice = new(hexutil.U256)
 		}
 	} else {
 		// A base fee is provided, requiring 1559-type execution
 		if args.MaxFeePerGas == nil {
-			args.MaxFeePerGas = new(hexutil.Big)
+			args.MaxFeePerGas = new(hexutil.U256)
 		}
 		if args.MaxPriorityFeePerGas == nil {
-			args.MaxPriorityFeePerGas = new(hexutil.Big)
+			args.MaxPriorityFeePerGas = new(hexutil.U256)
 		}
 	}
 	if args.MaxFeePerBlobGas == nil && args.BlobVersionedHashes != nil {
-		args.MaxFeePerBlobGas = new(hexutil.Big)
+		args.MaxFeePerBlobGas = new(hexutil.U256)
 	}
 	return nil
 }
@@ -677,7 +676,7 @@ func (s *simulator) newStateReaderForBlock(
 	}
 
 	if latest {
-		return state.NewReaderV3(sharedDomains.AsGetter(tx)), minTxNum, firstMinTxNum, nil
+		return state.NewReaderV3(sharedDomains.AsStateGetter(tx)), minTxNum, firstMinTxNum, nil
 	}
 
 	if minTxNum < state.StateHistoryStartTxNum(tx) {

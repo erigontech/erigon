@@ -31,7 +31,7 @@ import (
 // getGloasEthClockAndConfig returns an EthereumClock and BeaconChainConfig
 // with all fork epochs set to 0, so that GLOAS is active from the start.
 func getGloasEthClockAndConfig(t *testing.T) (eth_clock.EthereumClock, *clparams.BeaconChainConfig) {
-	s, err := initial_state.GetGenesisState(chainspec.MainnetChainID)
+	s, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 
 	cfg := s.BeaconConfig()

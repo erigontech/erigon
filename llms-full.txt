@@ -1057,8 +1057,8 @@ scheduled forks, not after.
     ./prysm.sh beacon-chain \
     --execution-endpoint http://localhost:8551 \
     --mainnet --jwt-secret=<your-datadir>/jwt.hex \
-    --checkpoint-sync-url=https://beaconstate.info \
-    --genesis-beacon-api-url=https://beaconstate.info
+    --checkpoint-sync-url=https://mainnet.checkpoint.sigp.io \
+    --genesis-beacon-api-url=https://mainnet.checkpoint.sigp.io
     ```
 
 1.  Start Erigon adding the `--externalcl` flag:
@@ -1797,7 +1797,7 @@ Erigon 3 supports four pruning modes that control how much chain history your no
 
 By **default**, Erigon run as a [full node](#full-node), to change its behavior use the flag `--prune.mode <value>`.
 
-In order to switch type of node, you must first delete the `/chaindata` folder in the chosen `--datadir` directory and re-sync from scratch.
+In order to switch type of node, you must first delete the `/chaindata` folder in the chosen `--datadir` directory and re-sync from scratch. Pruning is not reversible — data a mode has already discarded can only be recovered by re-syncing — so pick the mode that covers the history you need before you start.
 
 :::tip
 **Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
@@ -1809,12 +1809,6 @@ working within the node's state-history window, just with higher latency. On a H
 receipts additionally extend receipts and logs availability from the state-history window back to genesis.
 :::
 
-:::note[Breaking change in v3.5]
-**`--prune.mode=full` now follows the EIP-8252 reorg-retention window.** In v3.4, full mode pruned only pre-merge block data (EIP-4444 history-expiry) and **kept all post-merge block bodies, transactions, and receipts**, with a 100,000-block state-history window. In v3.5 it retains just the last **262,144 blocks (~36.4 days)** for *both* state and block data, matching [EIP-8252](https://github.com/ethereum/EIPs/pull/11601)'s `REORG_RETENTION_WINDOW`. The state-history window therefore grows (100,000 → 262,144), but **block bodies and receipts older than 262,144 blocks are now pruned** — a full node will no longer serve them.
-
-`--prune.mode=blocks` is unaffected for block data (it still keeps every block back to genesis); only its `History` window bumps from 100,000 to 262,144. `--prune.mode=minimal` is unchanged — both `Blocks` and `History` retain the 100,000-block window. **Existing datadirs upgrade automatically** on first start — Erigon rewrites the persisted mode and logs the transition, no operator action required. But **already-pruned block data cannot be recovered**, so choose *before* upgrading: set `--prune.distance.blocks=keep-post-merge` to retain the old full-mode behavior (keep post-merge blocks, prune only pre-merge), or use `--prune.mode=blocks` to keep every block back to genesis. See [#21342](https://github.com/erigontech/erigon/pull/21342) for details.
-:::
-
 ## Archive node
 
 Ethereum's state refers to account balances, contracts, and consensus data. Archive nodes retain all historical state and require more **disk space.** However, Erigon 3 has consistently reduced the [disk space](../get-started/hardware-requirements.mdx#disk-size-and-ram-requirements) requirements for running an archive node, rendering it more affordable and accessible to a broader range of users.
@@ -1823,7 +1817,9 @@ Archive are ideal for extensive research on the blockchain, developers, research
 
 ## Full node
 
-The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data within the **EIP-8252 reorg-retention window** — the last 262,144 blocks (~36.4 days), the inactivity-leak-bounded non-finality window across which an execution-layer client must be able to reconstruct state to handle any reorg without external sync. Older blocks, receipts, and state history are pruned. See [EIP-8252](https://github.com/ethereum/EIPs/pull/11601) for the rationale behind the constant.
+The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data within the **EIP-8252 reorg-retention window** — the last 262,144 blocks (~36.4 days), the inactivity-leak-bounded non-finality window across which an execution-layer client must be able to reconstruct state to handle any reorg without external sync. Older blocks, receipts, and state history are pruned, so a Full Node cannot serve queries against them. For block and transaction history reaching further back, run a [Blocks Node](#blocks-node); receipts need their own flags on top, as that section explains. See [EIP-8252](https://github.com/ethereum/EIPs/pull/11601) for the rationale behind the constant.
+
+To keep every post-merge block instead of only the window — pruning pre-merge block data alone — set `--prune.distance.blocks=keep-post-merge`. Decide before the first start: pruning is not reversible, and block data already discarded comes back only by re-syncing.
 
 We strongly recommend running a Full Node whenever possible, as its reduced disk space requirements make it suitable for the majority of users. By running a Full Node, you directly support the network's **decentralization, resilience, and robustness**, aligning with Ethereum's distributed ethos.
 
@@ -1970,7 +1966,7 @@ The `seg du` estimates table shows the projected disk footprint for each mode gi
 
 v3.5 retargets the **Full** and **Blocks** pruning modes to the EIP-8252 reorg-retention window (262,144 blocks, ~36 days), up from the previous 100,000-block window. This changes **which snapshot files are present on disk** after upgrading — most notably, full nodes prune older block segments down to the window, freeing space. Existing datadirs migrate automatically on first start.
 
-For the full breaking-change details — what each mode keeps, why block data older than the window cannot be recovered, and what to do *before* upgrading if you need to keep all post-merge blocks — see the v3.5 breaking-change note in [Pruning Modes](pruning-modes).
+Decide before that first start if you need to keep more than the window: pruning is not reversible, and block data already discarded comes back only by re-syncing. To retain every post-merge block under Full mode, pass `--prune.distance.blocks=18446744073709551615` — v3.5 takes this option as a number; the readable `keep-post-merge` alias only exists from v3.6. `--prune.mode=blocks` keeps every block back to genesis. See [Pruning Modes](pruning-modes) for what each mode keeps.
 
 After the first prune pass, run `seg du` to inspect the resulting on-disk breakdown.
 
@@ -2101,22 +2097,22 @@ These flags cover the general behavior and configuration of the Erigon client.
 
 These flags are mainly for dev networks, testing, or specialized block-production setups.
 
-* `--allow-insecure-unlock`: Allows insecure account unlocking when account-related RPCs are exposed by HTTP. Use only on trusted networks.
+* `--allow-insecure-unlock`: Accepted for go-ethereum CLI compatibility but currently has **no effect** — the flag is registered and settable, yet nothing in the codebase reads it and Erigon exposes no account-unlocking RPC.
   * Default: `false`
-* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator; enables PoS dev mode.
+* `--dev-validator-seed value`: Deterministic BLS key seed for the embedded dev validator. Read only in PoS dev mode, which is selected by `--chain dev`; on any other chain the flag does nothing.
   * Default: `devnet`
-* `--dev-validator-count value`: Number of validators for PoS dev mode.
+* `--dev-validator-count value`: Number of validators for PoS dev mode (`--chain dev`).
   * Default: `64`
-* `--dev.slot-time value`: Slot duration in seconds for PoS dev mode.
+* `--dev.slot-time value`: Slot duration in seconds for PoS dev mode (`--chain dev`). Values below `2` are silently raised to `2`.
   * Default: `6`
 * `--miner.gaslimit value`: Target gas limit for mined blocks.
-  * Default: `0`
-* `--miner.extradata value`: Block extra data set by the miner; defaults to the client version string.
-  * Default: client version string
+  * Default: unset — the target falls back to the chain configuration's default block gas limit, or `60000000` where the chain config does not set one. An explicit `0` is ignored rather than applied as a zero limit, so the flag only takes effect when set to a positive value.
+* `--miner.extradata value`: Block extra data set by the miner. Values longer than 32 bytes are silently truncated.
+  * Default: the client version string
 * `--experimental.bal`: Generates block access lists.
   * Default: `false`
 * `--experimental.always-generate-changesets`: Overrides changeset generation logic.
-  * Default: `false`
+  * Default: `false`, derived as the inverse of the `BATCH_COMMITMENTS` environment variable (itself `true` by default). Running with `BATCH_COMMITMENTS=false` therefore flips this default to `true` unless the flag is passed explicitly.
 * `--chaos.monkey`: Testing-only flag that enables spontaneous network, consensus, and other failures.
   * Default: `false`
 
@@ -2125,7 +2121,7 @@ These flags are mainly for dev networks, testing, or specialized block-productio
 These flags control database performance and memory usage. See [Database](/fundamentals/database) for the on-disk layout.
 
 * `--db.pagesize value`: Sets the fixed page size for the database.
-  * Default: `16KB`
+  * Default: `4KB`
 * `--db.size.limit value`: Sets a runtime limit on the chaindata database size.
   * Default: `1TB`
 * `--db.writemap`: Enables `WRITE_MAP` for fast database writes.
@@ -2136,7 +2132,7 @@ These flags control database performance and memory usage. See [Database](/funda
   * Default: `2`
 * `--batchSize value`: Sets the batch size for the execution stage.
   * Default: `512M`
-* `--etl.bufferSize value`: Buffer size for ETL operations.
+* `--etl.bufferSize value`: Buffer size for ETL operations. Also settable through the `ETL_OPTIMAL` environment variable.
   * Default: `256MB`
 * `--bodies.cache value`: Sets the size limit for the block bodies cache.
   * Default: `268435456`
@@ -2259,6 +2255,10 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `localhost`
 * `--http.port value`: The HTTP-RPC server listening port.
   * Default: `8545`
+* `--http.url value` *(New in v3.7)*: Full listen URL for the HTTP-RPC server, which overrides `--http.addr` and `--http.port`. Supported schemes are `tcp://` and `unix://` — for example `tcp://0.0.0.0:8545` or `unix:///var/run/erigon-rpc.sock`.
+  * Default: unset (the endpoint is built from `--http.addr` and `--http.port`)
+  * Only takes effect while the HTTP server is enabled.
+  * **Do not add a path to a `tcp://` URL.** The URL's host and path are concatenated into the listen address, so `tcp://0.0.0.0:8545/rpc` is not a route prefix — it produces an invalid address and the node fails to start. Only a `unix://` URL takes a path, where it *is* the socket path.
 * `--authrpc.addr value`: The HTTP-RPC server listening interface for the Engine API.
   * Default: `localhost`
 * `--authrpc.port value`: The HTTP-RPC server listening port for the Engine API.
@@ -2281,6 +2281,31 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `true`
 * `--ws.max.connections value`: Maximum number of concurrent WebSocket connections.
   * Default: `0` (unlimited)
+
+**HTTPS and IPC transports.** *(New in v3.7)* These flags are accepted by both the `erigon` binary and the standalone [RPC Daemon](/fundamentals/modules/rpc-daemon) — the embedded RPC server reads them from the same configuration. They serve the same JSON-RPC API as `--http`, over TLS or a separate socket instead.
+
+:::warning
+`--http=false` is a master switch: it disables the whole RPC stack, including the HTTPS and IPC listeners, so `--http=false --https.enabled` yields no listener at all. To serve TLS only, leave `--http` alone and turn off just the plain HTTP listener with `--http.enabled=false`.
+:::
+
+* `--https.enabled`: Enables a JSON-RPC HTTPS server on its own port, independently of the plain HTTP listener.
+  * Default: `false`
+  * `--https.cert` and `--https.key` are both required. If either is missing or unreadable the node still starts and the port still binds, but TLS serving fails and only a `Failed to serve https endpoint` warning is logged — so check the log rather than assuming success.
+* `--https.cert value`: Path to the certificate file for the HTTPS server.
+* `--https.key value`: Path to the private key file for the HTTPS server.
+* `--https.addr value`: The HTTPS-RPC server listening interface.
+  * Default: `localhost`
+* `--https.port value`: The HTTPS-RPC server listening port.
+  * Default: `0`, which means `--http.port` + 363 — so `8908` with a default `--http.port`. Set an explicit port if you need a predictable one.
+* `--https.url value`: Full listen URL for the HTTPS server, which overrides `--https.addr` and `--https.port`. Supported schemes are `tcp://` and `unix://`.
+  * Default: unset
+  * Setting this **implies `--https.enabled`**: a non-empty value turns the HTTPS server on by itself.
+* `--socket.enabled`: Enables a socket server that serves JSON-RPC on the endpoint given by `--socket.url` — a Unix socket by default, though a `tcp://` URL is also accepted.
+  * Default: `false`
+* `--socket.url value`: Listen URL for the IPC server. Supported schemes are `unix://` and `tcp://`.
+  * Default: `unix:///var/run/erigon.sock`
+  * The parent directory must exist and be writable by the Erigon user; `/var/run` normally is not, so point this at your datadir (for example `unix:///<your-datadir>/erigon.ipc`) unless you have arranged otherwise.
+
 * `--rpc.batch.concurrency value`: Limits the number of goroutines for batch requests.
   * Default: `2`
 * `--rpc.max.concurrency value`: Maximum number of concurrent HTTP RPC requests (HTTP admission control).
@@ -2815,6 +2840,7 @@ Erigon use the following default port for each service:
 | Sentry    | `30303` | TCP & UDP | eth/69, eth/70, eth/71 peering | Public     |
 | Sentry    | `9091`  | TCP       | incoming gRPC Connections   | Private       |
 | RPC Daemon | `8545`  | TCP       | HTTP & WebSockets & GraphQL | Private       |
+| RPC Daemon | `8908`  | TCP       | HTTPS (only when enabled)   | Private       |
 | mcp       | `8553`  | TCP       | MCP server (AI assistants)  | Private       |
 | shutter   | `23102` | TCP       | Peering                     | Public        |
 
@@ -2846,6 +2872,9 @@ Here is a comprehensive list of port-related options:
 
 * `--ws.port [value]`: WS-RPC server listening port (default: `8546`)
 * `--http.port [value]`: HTTP-RPC server listening port (default: `8545`)
+* `--https.port [value]`: HTTPS-RPC server listening port, used only when the HTTPS server is enabled (default: `0`, meaning `--http.port` + 363 — `8908` with a default `--http.port`)
+* `--http.url [value]` / `--https.url [value]`: Full listen URL that overrides the corresponding `addr` and `port` pair (`tcp://` or `unix://`)
+* `--socket.url [value]`: IPC server listen URL, used only when the IPC server is enabled (default: `unix:///var/run/erigon.sock`)
 
 ### Caplin
 
@@ -4393,7 +4422,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 * `--txpool.disable`: This flag disables the internal transaction pool (TxPool) and block producer (default: `false`). When running the TxPool as a separate process, this flag is used to prevent the internal TxPool from interfering with the external one.
 * `--private.api.addr=localhost:9090`: This flag sets the address and port for the private API. The private API is used for internal communication between Erigon components (default: `127.0.0.1:9090`).
 * `--datadir=<your datadir>`: This flag specifies the data directory for Erigon. This is where Erigon stores its databases and other data.
-* `--http=false`: This flag disables the HTTP API server in Erigon (default: `true)`. When running the TxPool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external TxPool.
+* `--http=false`: This flag disables the HTTP API server in Erigon (default: `true`). When running the TxPool as a separate process, this flag is used to prevent the internal HTTP server from interfering with the external TxPool.
 * `--sentry.api.addr=localhost:9091`: This flag sets the address and port for the Sentry API. The Sentry API is used for communication between the TxPool and the Sentry.
 * `--txpool.api.addr=localhost:9094`: This flag sets the address and port for the TxPool API (default: use value of `--private.api.addr`). The TxPool API is used for communication between the TxPool and other Erigon components.
 * `--pprof`: Enable the pprof HTTP server (default: `false`)
@@ -4401,7 +4430,7 @@ If Erigon is on a different device, add the flags `--pprof --pprof.addr 0.0.0.0`
 
 ## Command Line Options
 
-To display available options for TxPool digit:
+To display available options for TxPool, run:
 
 ```bash
 ./build/bin/txpool --help
@@ -4525,7 +4554,7 @@ For other information regarding Sentry functionality, configuration, and usage, 
 
 ### Command Line Options
 
-To display available options for Sentry digit:
+To display available options for Sentry, run:
 
 ```bash
 ./build/bin/sentry --help
@@ -4617,7 +4646,7 @@ By referring to the embedded documentation file, you can gain a deeper understan
 
 ## Command line options
 
-To display available options for Downloader digit:
+To display available options for Downloader, run:
 
 ```bash
 ./build/bin/downloader --help
@@ -4786,6 +4815,22 @@ Erigon supports HTTPS and HTTP/2 out of the box:
 rpcdaemon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
 ```
 
+**New in v3.7:** the same flags work on the `erigon` binary, so the embedded RPC server can serve TLS without a separate
+daemon:
+
+```bash
+erigon --https.enabled --https.cert /path/to/cert.pem --https.key /path/to/key.pem
+```
+
+The HTTPS listener is independent of the plain HTTP one and binds its own port: `--https.port`, which defaults to
+`--http.port` + 363 (`8908` with a default `--http.port`) — the derivation reads `--http.port` whether or not the plain
+HTTP listener is running. Both `--https.cert` and `--https.key` are required — if either is missing the
+port still binds but TLS serving fails with only a `Failed to serve https endpoint` warning in the log. Setting
+`--https.url` enables the HTTPS server on its own and overrides `--https.addr` and `--https.port`.
+
+Note that `--http=false` switches off the entire RPC stack, HTTPS included. For a TLS-only node, keep `--http` and
+disable just the plain HTTP listener with `--http.enabled=false`.
+
 ### WebSockets
 
 WebSockets is a bidirectional transport protocol. Most modern browsers support WebSockets.
@@ -4809,10 +4854,21 @@ erigon --http --ws --http.api eth,net,debug,trace
 
 IPC is a simpler transport protocol for use in local environments where the node and the client exist on the same machine.
 
-**Note:** IPC is only available through the separate `rpcdaemon` process, not the main `erigon` binary. Erigon uses a
-modular architecture where RPC functionality is handled by a standalone daemon.
+**New in v3.7:** the `erigon` binary accepts `--socket.enabled` and `--socket.url` directly, so IPC no longer requires a
+separate process:
+
+```bash
+erigon --datadir=<path-to-datadir> --socket.enabled --socket.url unix:///<path-to-datadir>/erigon.ipc
+```
+
+The default `--socket.url` is `unix:///var/run/erigon.sock`, which is usually not writable by the Erigon user — point it
+at your datadir as above. On earlier releases these flags exist only on `rpcdaemon`, and the geth-style `--ipcpath`
+endpoint remains permanently disabled in the `erigon` binary regardless of release.
 
 #### Enabling IPC with RPC Daemon
+
+IPC is also available from the standalone daemon, which is still the right choice when RPC serving runs on its own
+process or host.
 
 First, start Erigon with the private API enabled:
 
@@ -8152,7 +8208,7 @@ vm.max_map_count = 16777216
 
 The `--db.pagesize` flag sets the MDBX page size and **must be chosen before the first sync**. It cannot be changed on an existing database without deleting the datadir and re-syncing from scratch. See [Configuring Erigon](/fundamentals/configuring-erigon) for all database flags.
 
-The default page size is `16KB`. For cloud drives or any storage with high sequential I/O latency, a larger page size (e.g. `--db.pagesize=64kb`) reduces database fragmentation and improves I/O efficiency. See [Performance Tricks](/fundamentals/performance-tricks) and [Optimizing Storage](/fundamentals/optimizing-storage) for further tuning options.
+The default page size is `4KB`. For cloud drives or any storage with high sequential I/O latency, a larger page size (e.g. `--db.pagesize=64kb`) reduces database fragmentation and improves I/O efficiency. See [Performance Tricks](/fundamentals/performance-tricks) and [Optimizing Storage](/fundamentals/optimizing-storage) for further tuning options.
 
 ---
 

@@ -93,7 +93,7 @@ func TestAccessList(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	state := New(NewReaderV3(domains.AsGetter(tx)))
+	state := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer state.Close()
 
 	state.accessList.Reset()
@@ -416,7 +416,7 @@ func TestSlotKnownWarmOnEmptyAccessList(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
 
-	state := New(NewReaderV3(domains.AsGetter(tx)))
+	state := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer state.Close()
 
 	require.False(t, state.SlotKnownWarm(accounts.NilAddress, accounts.NilKey))

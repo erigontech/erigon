@@ -84,7 +84,7 @@ func benchColdNegativeReads(b *testing.B, withCache, writable bool) {
 	if withCache {
 		stateCache := newSmallStateCache()
 		defer stateCache.Close()
-		sd.SetStateCacheForTest(stateCache)
+		sd.BindStateCache(stateCache)
 	}
 
 	key := make([]byte, 20)

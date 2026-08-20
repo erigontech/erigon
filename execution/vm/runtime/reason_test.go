@@ -77,7 +77,7 @@ func newTestIBS(t *testing.T, tracer *tracing.Hooks) *Config {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	ibs := state.New(state.NewReaderV3(sd.AsStateGetter(tx)))
 	ibs.SetHooks(tracer)
 
 	cfg := new(Config)

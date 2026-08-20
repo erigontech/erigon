@@ -14,12 +14,14 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/monitor"
 	"github.com/erigontech/erigon/cl/monitor/shuffling_metrics"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/caches"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/shuffling"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -30,7 +32,6 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
-	"github.com/erigontech/erigon/execution/types"
 )
 
 // computeAndNotifyServicesOfNewForkChoice calculates the new head of the fork choice and notifies relevant services.
@@ -80,8 +81,15 @@ func computeAndNotifyServicesOfNewForkChoice(ctx context.Context, logger log.Log
 			cfg.forkChoice.GetFinalizedExecutionHash(justifiedCheckpoint.Root),
 			cfg.forkChoice.GetEth1Hash(headRoot), nil, headVersion,
 		); err != nil {
-			err = fmt.Errorf("failed to run forkchoice: %w", err)
-			return
+			// A forkchoice update that ran out of time is not a rejection, and sync has no payload
+			// to lose by carrying on: the next head will send another one.
+			if errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+				logger.Debug("[Caplin] forkchoice update timed out", "head", headRoot)
+				err = nil
+			} else {
+				err = fmt.Errorf("failed to run forkchoice: %w", err)
+				return
+			}
 		}
 	}
 
@@ -251,19 +259,11 @@ func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Ha
 		log.Warn("failed to get proposer index", "err", err)
 		return err
 	}
-	withdrawals := []*types.Withdrawal{}
 	expWithdrawals, err := state.GetExpectedWithdrawals(s, epoch)
 	if err != nil {
 		return err
 	}
-	for _, w := range expWithdrawals.Withdrawals {
-		withdrawals = append(withdrawals, &types.Withdrawal{
-			Amount:    w.Amount,
-			Index:     w.Index,
-			Validator: w.Validator,
-			Address:   w.Address,
-		})
-	}
+	withdrawals := cltypes.ConvertConsensusWithdrawalsToExecutionWithdrawals(expWithdrawals.Withdrawals)
 	payloadAttributes := engine_types.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(headPayloadHeader.Time + cfg.beaconCfg.SecondsPerSlot),
 		PrevRandao:            randaoMix,

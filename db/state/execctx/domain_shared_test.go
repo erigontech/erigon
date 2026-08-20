@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -58,7 +59,7 @@ func newTestDb(tb testing.TB, stepSize uint64) kv.TemporalRwDB {
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
 	agg := NewTest(dirs).StepSize(stepSize).Logger(logger).MustOpen(tb.Context(), db)
@@ -997,7 +998,7 @@ func TestSharedDomain_StorageIter(t *testing.T) {
 
 			for locs := range 1000 {
 				binary.BigEndian.PutUint64(l0[24:], uint64(locs))
-				pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...))
+				pv, _, err := domains.GetLatest(kv.AccountsDomain, rwTx, append(k0, l0...)) //nolint:makezero
 				require.NoError(t, err)
 
 				err = domains.DomainPut(kv.StorageDomain, rwTx, composite(k0, l0), l0[24:], txNum, pv)
@@ -1324,7 +1325,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
-		wantValueBytes = append(wantValueBytes, byte(1))       // value we wrote to the storage slot
+		wantValueBytes = append(wantValueBytes, byte(1))       //nolint:makezero // value we wrote to the storage slot
 		require.Equal(t, wantValueBytes, v)
 		k, v, err = c1.Next()
 		require.NoError(t, err)
@@ -1403,7 +1404,7 @@ func TestSharedDomain_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, append(append([]byte{}, acc2[:]...), acc2slot2[:]...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(2)) // step num
-		wantValueBytes = append(wantValueBytes, byte(2))       // value we wrote to the storage slot
+		wantValueBytes = append(wantValueBytes, byte(2))       //nolint:makezero // value we wrote to the storage slot
 		require.Equal(t, wantValueBytes, v)
 		k, v, err = c2.Next() // acc1 storage from step 1 must not be there
 		require.NoError(t, err)
@@ -1779,7 +1780,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		require.Equal(t, acc1Addr[:], k)
 		wantValueBytes := make([]byte, 8)                       // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1))  // step num
-		wantValueBytes = append(wantValueBytes, acc1Encoded...) // value we wrote to the account
+		wantValueBytes = append(wantValueBytes, acc1Encoded...) //nolint:makezero // value we wrote to the account
 		require.Equal(t, wantValueBytes, v)
 		k, v, err = c1.Next()
 		require.NoError(t, err)
@@ -1793,7 +1794,7 @@ func TestSharedDomain_TouchChangedKeysFromHistory(t *testing.T) {
 		require.Equal(t, append(append([]byte{}, acc1Addr[:]...), acc1Slot[:]...), k)
 		wantValueBytes = make([]byte, 8)                       // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
-		wantValueBytes = append(wantValueBytes, storageV1...)  // value we wrote to the storage slot
+		wantValueBytes = append(wantValueBytes, storageV1...)  //nolint:makezero // value we wrote to the storage slot
 		require.Equal(t, wantValueBytes, v)
 		k, v, err = c2.Next()
 		require.NoError(t, err)

@@ -522,7 +522,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	}
 
 	if len(buf) < b.EncodingSizeSSZ() {
-		return fmt.Errorf("[BeaconBody] err: %s", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[BeaconBody] err: %w", ssz.ErrLowBufferSize)
 	}
 
 	// [Modified in Gloas:EIP7732] ExecutionPayload removed in GLOAS

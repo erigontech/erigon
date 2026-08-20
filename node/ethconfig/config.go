@@ -117,7 +117,7 @@ var Defaults = Config{
 	WarmupKzgCtxOnInit: true,
 }
 
-const DefaultChainDBPageSize = 16 * datasize.KB
+const DefaultChainDBPageSize = 4 * datasize.KB
 
 func init() {
 	home := os.Getenv("HOME")
@@ -319,12 +319,11 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey                     bool
-	AlwaysGenerateChangesets        bool
-	MaxReorgDepth                   uint64
-	KeepExecutionProofs             bool
-	ExperimentalParallelCommitment  bool
-	ExperimentalStreamingCommitment bool
-	PersistReceiptsCacheV2          bool
-	SnapshotDownloadToBlock         uint64 // exclusive [0,toBlock)
+	ChaosMonkey                    bool
+	AlwaysGenerateChangesets       bool
+	MaxReorgDepth                  uint64
+	KeepExecutionProofs            bool
+	ExperimentalParallelCommitment bool
+	PersistReceiptsCacheV2         bool
+	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
 }

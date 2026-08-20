@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -103,7 +104,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
-		keys[txNum-1] = append(addr, loc...)
+		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		if (txNum+1)%stepSize == 0 {
 			trieState, err := hph.EncodeCurrentState(nil)
@@ -136,7 +137,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
-	newDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	newDb := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
 	newAgg := state.New(agg.Dirs()).StepSize(stepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile).MustOpen(ctx, newDb)
@@ -243,7 +244,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
 		require.Equal(t, length.Hash, n)
-		keys[txNum-1] = append(addr, loc...)
+		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		acc := accounts.Account{
 			Nonce:       1,
@@ -733,7 +734,7 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	ctx := t.Context()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
 	agg := state.NewTest(dirs).ReorgBlockDepth(5).StepSize(2).Logger(logger).MustOpen(ctx, db)
 	t.Cleanup(agg.Close)

@@ -53,7 +53,7 @@ func checkPayloadStatus(payloadStatus *engine_types.PayloadStatus) error {
 	}
 	validationErr := payloadStatus.ValidationError
 	if validationErr != nil {
-		return fmt.Errorf("engine payload status error: %s", validationErr.Error())
+		return fmt.Errorf("engine payload status error: %w", validationErr.Error())
 	}
 	return nil
 }
@@ -193,14 +193,20 @@ func (cc *ExecutionClientEngine) ForkChoiceUpdate(
 		resp, err = cc.engine.ForkchoiceUpdatedV4(ctx, forkChoiceState, attributes, nil)
 	}
 	if err != nil {
-		if err.Error() == errContextExceeded {
-			return nil, nil
+		if isDeadlineExceeded(err) {
+			return nil, fmt.Errorf("%w: %w", ErrForkChoiceUpdateTimeout, err)
 		}
 		return nil, fmt.Errorf("engine ForkchoiceUpdated failed: %w", err)
 	}
 
 	if resp.PayloadId == nil {
-		return []byte{}, checkPayloadStatus(resp.PayloadStatus)
+		if err := checkPayloadStatus(resp.PayloadStatus); err != nil {
+			return nil, err
+		}
+		if attributes != nil {
+			return nil, ErrForkChoiceUpdateNoPayloadID
+		}
+		return []byte{}, nil
 	}
 	return *resp.PayloadId, checkPayloadStatus(resp.PayloadStatus)
 }
@@ -320,7 +326,7 @@ func (cc *ExecutionClientEngine) HasBlock(ctx context.Context, hash common.Hash)
 
 func (cc *ExecutionClientEngine) GetAssembledBlock(ctx context.Context, id []byte, version clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 	if cc.isLocal() {
-		return cc.chainRW.GetAssembledBlock(binary.LittleEndian.Uint64(id))
+		return cc.chainRW.GetAssembledBlock(ctx, binary.LittleEndian.Uint64(id))
 	}
 
 	// GetPayload versions advance with the response fields introduced by each fork.

@@ -565,6 +565,22 @@ func TestParseTransactionRejectsBlobCommitmentCountMismatch(t *testing.T) {
 	require.ErrorContains(t, err, "fewer commitments than blobs")
 }
 
+func TestParseTransactionsRejectsTrailingBlobWrapperBytes(t *testing.T) {
+	chainID := uint256.NewInt(5)
+	wrapper := types.MakeV1WrappedBlobTxn(chainID)
+
+	wrapperBuf := &bytes.Buffer{}
+	require.NoError(t, wrapper.MarshalBinaryWrapped(wrapperBuf))
+	malformed := append(wrapperBuf.Bytes(), 0x80)
+	packet := EncodeTransactions([][]byte{malformed}, nil)
+
+	ctx := NewTxnParseContext(*chainID)
+	ctx.WithSender(false)
+	var slots TxnSlots
+	_, err := ParseTransactions(packet, 0, ctx, &slots, nil)
+	require.ErrorContains(t, err, "trailing bytes after blobs wrapper")
+}
+
 func TestSetCodeAuthSignatureRecover(t *testing.T) {
 	txnRlpHex := testdata.ValidSetCodeTxn1
 	// For authorizationList[0] in the above :-

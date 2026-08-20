@@ -29,7 +29,6 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/gossip"
-	"github.com/erigontech/erigon/cl/phase1/core/state"
 	gossipMgr "github.com/erigontech/erigon/cl/phase1/network/gossip"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/utils"
@@ -51,7 +50,6 @@ type CommitteeSubscribeMgmt struct {
 	ethClock      eth_clock.EthereumClock
 	beaconConfig  *clparams.BeaconChainConfig
 	netConfig     *clparams.NetworkConfig
-	state         *state.CachingBeaconState
 	syncedData    *synced_data.SyncedDataManager
 	gossipManager *gossipMgr.GossipManager
 	// subscriptions

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -343,7 +344,7 @@ func TestLightClientUpdates(t *testing.T) {
 
 		_, err := stream.Read(forkDigest)
 		if err != nil {
-			if err == io.EOF {
+			if errors.Is(err, io.EOF) {
 				t.Fatal("Stream is empty")
 			} else {
 				require.NoError(t, err)
@@ -385,7 +386,7 @@ func TestLightClientUpdates(t *testing.T) {
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Fatal("Stream is not empty")
 	}
 }

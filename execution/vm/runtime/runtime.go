@@ -136,7 +136,7 @@ func Execute(code, input []byte, cfg *Config, tempdir string) ([]byte, *state.In
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
+		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx)))
 	}
 	var (
 		address = contractAsAddress
@@ -200,7 +200,7 @@ func Create(input []byte, cfg *Config, blockNr uint64) ([]byte, common.Address, 
 		}
 		defer sd.Close()
 		//cfg.w = state.NewWriter(sd, nil)
-		cfg.State = state.New(state.NewReaderV3(sd.AsGetter(tx)))
+		cfg.State = state.New(state.NewReaderV3(sd.AsStateGetter(tx)))
 	}
 	var (
 		vmenv  = NewEnv(cfg)

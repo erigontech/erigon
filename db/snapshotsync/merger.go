@@ -144,7 +144,7 @@ func (m *Merger) mergeSubSegment(
 func buildIdx(ctx context.Context, sn snaptype.FileInfo, indexBuilder snaptype.IndexBuilder, chainConfig *chain.Config, tmpDir string, p *background.Progress, lvl log.Lvl, logger log.Logger) error {
 	//log.Info("[snapshots] build idx", "file", sn.Name())
 	if err := sn.Type.BuildIndexes(ctx, sn, indexBuilder, chainConfig, tmpDir, p, lvl, logger); err != nil {
-		return fmt.Errorf("buildIdx: %s: %s", sn.Type, err)
+		return fmt.Errorf("buildIdx: %s: %w", sn.Type, err)
 	}
 	//log.Info("[snapshots] finish build idx", "file", fName)
 	return nil

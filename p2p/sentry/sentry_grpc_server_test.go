@@ -295,7 +295,7 @@ func TestHandShake69_ETH69ToETH68(t *testing.T) {
 	sentry2EthStatus := &eth.StatusPacket{
 		ProtocolVersion: direct.ETH68,
 		NetworkID:       sentry2Status.NetworkId,
-		TD:              gointerfaces.ConvertH256ToUint256Int(sentry2Status.TotalDifficulty).ToBig(),
+		TD:              gointerfaces.ConvertH256ToUint256Int(sentry2Status.TotalDifficulty),
 		Head:            gointerfaces.ConvertH256ToHash(sentry2Status.BestHash),
 		Genesis:         gointerfaces.ConvertH256ToHash(sentry2Status.ForkData.Genesis),
 		ForkID:          forkid.NewIDFromForks(sentry2Status.ForkData.HeightForks, sentry2Status.ForkData.TimeForks, gointerfaces.ConvertH256ToHash(sentry2Status.ForkData.Genesis), sentry2Status.MaxBlockHeight, sentry2Status.MaxBlockTime),
@@ -1027,7 +1027,8 @@ func minimalP2PServerWithListener(t *testing.T) *p2p.Server {
 func listenerReachable(t *testing.T, srv *p2p.Server) bool {
 	t.Helper()
 	addr := srv.NodeInfo().ListenAddr
-	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	dialer := net.Dialer{Timeout: 200 * time.Millisecond}
+	c, err := dialer.DialContext(t.Context(), "tcp", addr)
 	if err != nil {
 		return false
 	}

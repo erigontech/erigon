@@ -1127,7 +1127,8 @@ func BenchmarkLogJSONUnmarshal(b *testing.B) {
 	}
 
 	log := mkLog()
-	encoded, _ := json.Marshal(log)
+	encoded, err := json.Marshal(log)
+	require.NoError(b, err)
 
 	b.Run("Log/Single", func(b *testing.B) {
 		b.ReportAllocs()
@@ -1137,7 +1138,8 @@ func BenchmarkLogJSONUnmarshal(b *testing.B) {
 	})
 
 	rpcLog := &RPCLog{Log: *log, BlockTimestamp: hexutil.Uint64(1700000000)}
-	rpcEncoded, _ := json.Marshal(rpcLog)
+	rpcEncoded, err := json.Marshal(rpcLog)
+	require.NoError(b, err)
 	var rpcSink RPCLog
 	b.Run("RPCLog/Single", func(b *testing.B) {
 		b.ReportAllocs()
@@ -1147,7 +1149,8 @@ func BenchmarkLogJSONUnmarshal(b *testing.B) {
 	})
 
 	erigonLog := &ErigonLog{Log: *log, Timestamp: hexutil.Uint64(1700000000)}
-	erigonEncoded, _ := json.Marshal(erigonLog)
+	erigonEncoded, err := json.Marshal(erigonLog)
+	require.NoError(b, err)
 	var erigonSink ErigonLog
 	b.Run("ErigonLog/Single", func(b *testing.B) {
 		b.ReportAllocs()

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/seg"
@@ -110,8 +111,7 @@ func testDbAndAggregatorForLargeData(tb testing.TB, aggStep uint64, persistentDi
 			MustOpen()
 	} else {
 		dirs = datadir.New(tb.TempDir())
-		db = mdbx.New(dbcfg.ChainDB, logger).
-			InMem(tb, dirs.Chaindata).
+		db = mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).
 			GrowthStep(64 * datasize.MB).
 			MapSize(16 * datasize.GB).
 			MustOpen()
@@ -131,7 +131,7 @@ func testDbAndAggregatorv3(tb testing.TB, aggStep uint64) (kv.TemporalRwDB, *sta
 	tb.Helper()
 	logger := log.New()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	tb.Cleanup(db.Close)
 
 	agg := testAgg(tb, db, dirs, aggStep, logger)

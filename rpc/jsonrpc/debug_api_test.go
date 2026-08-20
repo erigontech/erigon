@@ -373,7 +373,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 	from := common.Address{0xFF}
 	to := common.Address{0x01}
 	gas := hexutil.Uint64(21000)
-	gasPrice := hexutil.Big(*big.NewInt(1e9))
+	gasPrice := hexutil.U256(*uint256.NewInt(1e9))
 	traceCallArgs := ethapi.CallArgs{From: &from, To: &to, Gas: &gas, GasPrice: &gasPrice}
 	for _, tc := range []struct {
 		name   string
@@ -451,11 +451,11 @@ func TestDebugTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 		From:                 &c.bankAddress,
 		To:                   &contractAddr,
 		Gas:                  newUint64(100_000),
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}
 	returnValue := callDebugTraceCall(t, c.debugAPI(), args, &ethapi.BlockOverrides{
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(10)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(10)),
 	})
 	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", returnValue)
@@ -971,8 +971,9 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.FinalizedBlockNumber, nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, result)
+	})
 
-		// Non-nil filters with a LastPendingBlock exceeding latest executed block should return an error
+	t.Run("pending tag uses committed view", func(t *testing.T) {
 		ff := rpchelper.New(t.Context(), rpchelper.FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
 		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)})
 		payload, err := rlp.EncodeToBytes(pendingBlock)
@@ -982,8 +983,9 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		baseWithFilters := NewBaseApi(ff, m.StateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 		apiWithFilters := NewPrivateDebugAPI(baseWithFilters, m.DB, nil, &rpccfg.DebugApiConfig{})
 
-		_, err = apiWithFilters.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
-		require.Error(t, err)
+		result, err := apiWithFilters.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
 	})
 }
 

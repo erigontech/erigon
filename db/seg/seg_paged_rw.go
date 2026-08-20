@@ -277,7 +277,6 @@ type PagedWriter struct {
 	keys, vals         []byte
 	kLengths, vLengths []uint32
 
-	pageBuf            []byte // reusable buffer for bytesUncompressedTo in sync path
 	compressionBuf     []byte
 	compressionEnabled bool
 

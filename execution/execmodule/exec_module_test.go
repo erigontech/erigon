@@ -51,6 +51,9 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
+	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/execution/stagedsync"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state/contracts"
@@ -112,6 +115,38 @@ func (p *rewindingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovi
 type observingTxnProvider struct {
 	txnprovider.TxnProvider
 	txnCounts chan int
+}
+
+type emptyTxnProvider struct{}
+
+func (emptyTxnProvider) ProvideTxns(context.Context, ...txnprovider.ProvideOption) ([]types.Transaction, error) {
+	return nil, nil
+}
+
+type delayedSealEngine struct {
+	rules.Engine
+	started chan struct{}
+	release chan struct{}
+}
+
+type doneObservedContext struct {
+	context.Context
+	observed chan struct{}
+	once     sync.Once
+}
+
+func (c *doneObservedContext) Done() <-chan struct{} {
+	c.once.Do(func() { close(c.observed) })
+	return c.Context.Done()
+}
+
+func (e *delayedSealEngine) Seal(_ rules.ChainHeaderReader, block *types.BlockWithReceipts, results chan<- *types.BlockWithReceipts, _ <-chan struct{}) error {
+	close(e.started)
+	go func() {
+		<-e.release
+		results <- block
+	}()
+	return nil
 }
 
 func (p *observingTxnProvider) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOption) ([]types.Transaction, error) {
@@ -616,6 +651,14 @@ func addTwoTxnsToPool(ctx context.Context, startingNonce uint64, t *testing.T, m
 	}
 }
 
+func TestExecModuleTesterReportsUnknownPayload(t *testing.T) {
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+
+	block, err := m.GetAssembledBlock(t.Context(), 404)
+	require.ErrorIs(t, err, chainreader.ErrUnknownPayload)
+	require.Nil(t, block)
+}
+
 func TestAssembleBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
@@ -653,6 +696,62 @@ func TestAssembleBlock(t *testing.T) {
 
 	err = m.InsertValidateAndUfc1By1(ctx, []*types.Block{block})
 	require.NoError(t, err)
+}
+
+func TestDiscardReleasesBuilderWaitingForSeal(t *testing.T) {
+	engine := &delayedSealEngine{
+		Engine:  merge.NewFaker(ethash.NewFaker()),
+		started: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	t.Cleanup(func() { close(engine.release) })
+	m := execmoduletester.New(t,
+		execmoduletester.WithChainConfig(chain.AllProtocolChanges),
+		execmoduletester.WithEngine(engine),
+	)
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainPack))
+
+	parent := chainPack.TopBlock
+	beaconRoot := randomHash()
+	payloadBuilder := builder.NewBlockBuilder(t.Context(), m.BlockBuilder.Build, &builder.Parameters{
+		ParentHash:            parent.Hash(),
+		Timestamp:             parent.Time() + 1,
+		PrevRandao:            parent.Header().MixDigest,
+		SuggestedFeeRecipient: common.Address{1},
+		Withdrawals:           make([]*types.Withdrawal, 0),
+		ParentBeaconBlockRoot: &beaconRoot,
+		SlotNumber:            syntheticSlotNumber(parent),
+		CustomTxnProvider:     emptyTxnProvider{},
+	}, time.Minute, time.Minute)
+
+	stopped := make(chan error, 1)
+	stopObserved := make(chan struct{})
+	stopCtx := &doneObservedContext{Context: context.Background(), observed: stopObserved}
+	go func() {
+		_, stopErr := payloadBuilder.Stop(stopCtx)
+		stopped <- stopErr
+	}()
+
+	select {
+	case <-engine.started:
+	case <-time.After(10 * time.Second):
+		t.Fatal("builder did not reach sealing")
+	}
+	select {
+	case <-stopObserved:
+	case <-time.After(5 * time.Second):
+		t.Fatal("stop did not begin waiting for the builder")
+	}
+	payloadBuilder.Discard()
+
+	select {
+	case err := <-stopped:
+		require.ErrorIs(t, err, builder.ErrDiscarded)
+	case <-time.After(5 * time.Second):
+		t.Fatal("discarded builder remained blocked waiting for a seal result")
+	}
 }
 
 func TestAssembleBlockWithConcurrentSiblingCommit(t *testing.T) {
@@ -1276,7 +1375,7 @@ func TestAssembleBlockWithWithdrawalRequest(t *testing.T) {
 		time.Hour,
 	)
 
-	eth1Block, blobsBundle, requestsBundle, blockValue, err := chainRW.GetAssembledBlock(payloadId)
+	eth1Block, blobsBundle, requestsBundle, blockValue, err := chainRW.GetAssembledBlock(ctx, payloadId)
 	require.NoError(t, err)
 	require.NotNil(t, eth1Block, "Eth1Block should not be nil")
 	require.NotNil(t, blobsBundle, "BlobsBundle should not be nil")
