@@ -127,6 +127,47 @@ extracts it automatically. GitHub Actions artifact URLs require the configured G
 public release assets normally do not. If the source instead uses `github_release`, an artifact
 name, or a local source, preserve that mode rather than converting it silently.
 
+Define the privileged invocation after inspecting the selected source. Do not rely on the
+invoking user's `gh` login being available under root, and do not use broad `sudo -E`. For a source
+that needs GitHub authentication, obtain the token without printing it and preserve only
+`BENCHMARKOOR_RUNNER_GITHUB_TOKEN` across the privileged boundary:
+
+Use `github-token` for a GitHub Actions artifact or another authenticated GitHub source; use `none`
+only for a source that is demonstrably public or local.
+
+```bash
+case "$-" in
+  *x*) printf 'disable shell xtrace before loading credentials\n' >&2; exit 1 ;;
+esac
+FIXTURE_AUTH_MODE=${FIXTURE_AUTH_MODE:?set to none or github-token}
+BENCHMARKOOR_SUDO=(sudo -n)
+case "$FIXTURE_AUTH_MODE" in
+  none) ;;
+  github-token)
+    if test -z "${BENCHMARKOOR_RUNNER_GITHUB_TOKEN:-}"; then
+      BENCHMARKOOR_RUNNER_GITHUB_TOKEN=$(gh auth token) || exit 1
+    fi
+    test -n "$BENCHMARKOOR_RUNNER_GITHUB_TOKEN" || exit 1
+    export BENCHMARKOOR_RUNNER_GITHUB_TOKEN
+    BENCHMARKOOR_SUDO+=(
+      --preserve-env=BENCHMARKOOR_RUNNER_GITHUB_TOKEN
+    )
+    "${BENCHMARKOOR_SUDO[@]}" /bin/sh -c \
+      'test -n "${BENCHMARKOOR_RUNNER_GITHUB_TOKEN:-}"' || exit 1
+    ;;
+  *) exit 2 ;;
+esac
+```
+
+Use the same `BENCHMARKOOR_SUDO` array for every run command that may prepare fixtures, including
+staging, smoke, and measured runs. Do not preserve the token for commands that cannot download an
+artifact. If sudo policy rejects the named environment preservation, stop and use a root-readable
+mode-0600 override containing `runner.github_token`, loaded last and only for the exact task. Keep
+that override outside repositories, cache, results, and handoff artifacts; verify the exact
+Benchmarkoor revision does not serialize the token, and remove the override after the process
+exits. Keep shell tracing disabled while the token is present, unset the environment variable after
+the final authenticated run, and never print the token or place it in a checked-in config.
+
 Set `global.directories.cachedir` to a task-owned path outside every pristine/lower tree. It
 defaults to `~/.cache/benchmarkoor`; standalone URLs are extracted below
 `$CACHE_DIR/eest-url/<url-hash>/fixtures`. The hash directory is an internal detail, so discover it
@@ -200,9 +241,10 @@ RESOURCE_LIMIT_CONFIG=$(realpath -e -- "$RESOURCE_LIMIT_CONFIG")
 DATADIR_GLOBAL_CONFIG=$(realpath -e -- "$DATADIR_GLOBAL_CONFIG")
 DATADIR_RUNNER_CONFIG=$(realpath -e -- "$DATADIR_RUNNER_CONFIG")
 LOCAL_RUN_OVERRIDE=$(realpath -e -- "$LOCAL_RUN_OVERRIDE")
+declare -p BENCHMARKOOR_SUDO >/dev/null 2>&1 || exit 1
 
 cd "$TESTS_DIR"
-sudo -n "$BENCHMARKOOR_BIN" run \
+"${BENCHMARKOOR_SUDO[@]}" "$BENCHMARKOOR_BIN" run \
   --config "$GLOBAL_CONFIG" \
   --config "$RESOURCE_LIMIT_CONFIG" \
   --config "$DATADIR_GLOBAL_CONFIG" \
@@ -260,7 +302,8 @@ benchmarkoor-tests commits, image digest and embedded client commit, ordered con
 override, arguments, fixture source and digest, filter, rollback strategy, resource limits, base
 head, and pre-run end head in the run notes. Do not embed a hosted run URL, suite hash, fixture URL,
 or test count in this skill: those values are revision-specific and must be rediscovered. Keep any
-hosted API token in protected config or environment; never print or persist it.
+hosted API token in a protected secret source; never print it or include it in repositories,
+results, logs, or handoff artifacts.
 
 An old hosted run may use `schelk`. Match its dataset, fixtures, client, and limits while replacing
 only the storage mechanism with OverlayFS. Check historical arguments against the current Erigon
@@ -340,8 +383,10 @@ OVERLAY_TMP="$RUN_ROOT/overlay-runtime"
 LOWER_DIR="$ORIGINAL_LOWER"
 ```
 
-Apply the main skill's read-only bind, probe-overlay canary, sizes, full-tree metadata fingerprint,
-and dataset-appropriate critical hashes before starting a client. Set `INTEGRITY_ROOT` to
+Before binding, run the main skill's descendant-mount gate and stop if any mount target is below
+`PRISTINE_DIR`; do not let a plain bind hide separately mounted state. Then apply the main skill's
+read-only bind, probe-overlay canary, sizes, full-tree metadata fingerprint, and
+dataset-appropriate critical hashes before starting a client. Set `INTEGRITY_ROOT` to
 `ORIGINAL_LOWER` after its read-only remount, and use that path for every traversal, `du`, content
 hash, and before/after fingerprint. Never collect integrity data through `PRISTINE_DIR`: reads on a
 writable `relatime` mount can mutate atime. Require `ro` as a distinct mount option first, then
@@ -371,9 +416,14 @@ With `method: overlayfs`, the container must mount a task-owned `merged` directo
 protected lower directly. Verify the container's datadir source and the corresponding host overlay
 as one chain. Use `ORIGINAL_LOWER` as `expected_lower` for compute and during stateful staging. Use
 `ADVANCED_LOWER` for stateful smoke and measured runs after staging; replace `/data` only when the
-effective client config uses another datadir target:
+effective client config uses another datadir target. Benchmarkoor's privileged process normally
+creates its temporary overlay directory as root-owned mode 0700, so inspect it through the same
+non-interactive privilege boundary; never `chmod` or `chown` a retained overlay merely to inspect
+it:
 
 ```bash
+OVERLAY_INSPECT=(sudo -n)
+
 verify_task_overlay() {
   local container_id=${1:?set container ID}
   local expected_lower=${2:?set expected read-only lower}
@@ -383,7 +433,7 @@ verify_task_overlay() {
   local resolved_mount_target resolved_merged resolved_lowerdir resolved_expected_lower
 
   mapfile -t data_sources < <(
-    docker inspect "$container_id" |
+    "${OVERLAY_INSPECT[@]}" docker inspect "$container_id" |
       jq -r --arg target "$container_datadir" \
         '.[0].Mounts[] | select(.Destination == $target) | .Source'
   )
@@ -394,21 +444,21 @@ verify_task_overlay() {
     *) return 1 ;;
   esac
 
-  test "$(findmnt -n -T "$merged" -o FSTYPE)" = overlay || return 1
-  mount_target=$(findmnt -n -T "$merged" -o TARGET) || return 1
-  resolved_mount_target=$(realpath -e -- "$mount_target") || return 1
-  resolved_merged=$(realpath -e -- "$merged") || return 1
+  test "$("${OVERLAY_INSPECT[@]}" findmnt -n -T "$merged" -o FSTYPE)" = overlay || return 1
+  mount_target=$("${OVERLAY_INSPECT[@]}" findmnt -n -T "$merged" -o TARGET) || return 1
+  resolved_mount_target=$("${OVERLAY_INSPECT[@]}" realpath -e -- "$mount_target") || return 1
+  resolved_merged=$("${OVERLAY_INSPECT[@]}" realpath -e -- "$merged") || return 1
   test "$resolved_mount_target" = "$resolved_merged" || return 1
 
-  overlay_options=$(findmnt -n -T "$merged" -o OPTIONS) || return 1
+  overlay_options=$("${OVERLAY_INSPECT[@]}" findmnt -n -T "$merged" -o OPTIONS) || return 1
   lowerdir=${overlay_options#*lowerdir=}
   test "$lowerdir" != "$overlay_options" || return 1
   lowerdir=${lowerdir%%,*}
-  resolved_lowerdir=$(realpath -e -- "$lowerdir") || return 1
-  resolved_expected_lower=$(realpath -e -- "$expected_lower") || return 1
+  resolved_lowerdir=$("${OVERLAY_INSPECT[@]}" realpath -e -- "$lowerdir") || return 1
+  resolved_expected_lower=$("${OVERLAY_INSPECT[@]}" realpath -e -- "$expected_lower") || return 1
   test "$resolved_lowerdir" = "$resolved_expected_lower" || return 1
 
-  lower_options=$(findmnt -n -T "$expected_lower" -o OPTIONS) || return 1
+  lower_options=$("${OVERLAY_INSPECT[@]}" findmnt -n -T "$expected_lower" -o OPTIONS) || return 1
   case ",$lower_options," in
     *,ro,*) ;;
     *) return 1 ;;
@@ -420,8 +470,11 @@ verify_task_overlay() {
 
 Require exactly one datadir source from Docker inspection and repeat this verification whenever
 benchmarkoor recreates the client. Neither protected lower should appear directly in a task
-container's mount sources. On any unexplained access, mount chain, or write event, stop the exact
-task-owned process and ask the user; do not stop or alter the unrelated accessor.
+container's mount sources. Use privileged inspection for every later `realpath`, `findmnt`, `du`,
+open-handle scan, and canary operation that addresses a Benchmarkoor-created overlay directory. On
+any unexplained access, mount chain, or write event, stop the exact task-owned process and ask the
+user; do not stop or alter the unrelated accessor. Replace `OVERLAY_INSPECT` with an approved
+allowlisted helper when the host does not grant direct non-interactive sudo for these commands.
 
 Download sidecars can be stale after bloating. Boot the exact client only through a disposable
 OverlayFS over `ORIGINAL_LOWER`, query `eth_getBlockByNumber("latest")`, and record its block,
@@ -530,8 +583,10 @@ lower and replay the bundle for every fixture. Build an immutable advanced basel
    successful replay to the expected end block/hash/root, resolve the exact retained container and
    logged data mount, then set
    `STAGING_MERGED=$(verify_task_overlay "$CONTAINER_ID" "$ORIGINAL_LOWER")`. Require the logged
-   data mount to resolve to `STAGING_MERGED`. From the logged run directory, require every persisted
-   fork override and client argument to equal the values resolved from the selected context.
+   data mount to resolve to `STAGING_MERGED`, using
+   `"${OVERLAY_INSPECT[@]}" realpath -e` for both paths. From the logged run directory, require
+   every persisted fork override and client argument to equal the values resolved from the
+   selected context.
 3. Stop that exact container gracefully and wait until it has exited. This closes container stdio
    so benchmarkoor's following log stream can reach EOF. Record its stopped state and run `sync`,
    but do not remove the container or unmount its overlay yet.
@@ -599,10 +654,11 @@ gate above.
 ### Monitor and clean up
 
 Compute has one disposable per-run upper over `ORIGINAL_LOWER`; it persists and may grow throughout
-the suite. Budget at least the original lower's allocated size plus the emergency floor, monitor the
-single upper and free space, and stop if another unexplained task overlay appears. After a compute
-run, require its container, overlay mount, upper directory, and benchmarkoor process to be gone;
-then compare the pristine integrity records through `ORIGINAL_LOWER` before unmounting that guard.
+the suite. Budget at least the larger of the original lower's allocated and apparent sizes plus the
+emergency floor, monitor the single upper and free space, and stop if another unexplained task
+overlay appears. After a compute run, require its container, overlay mount, upper directory, and
+benchmarkoor process to be gone; then compare the pristine integrity records through
+`ORIGINAL_LOWER` before unmounting that guard.
 
 The staged stateful design has one fixed overlay visible at its writable merged mount and read-only
 bind, plus at most one disposable per-test overlay. Count unique upper directories or explicitly
@@ -617,15 +673,18 @@ is not a sufficient bound:
 
 ```bash
 EMERGENCY_FLOOR_BYTES=${EMERGENCY_FLOOR_BYTES:?set the predeclared free-space floor}
-STAGING_BASE=$(dirname -- "$(realpath -e -- "$STAGING_MERGED")")
+declare -p OVERLAY_INSPECT >/dev/null 2>&1 || exit 1
+STAGING_BASE=$(dirname -- "$("${OVERLAY_INSPECT[@]}" realpath -e -- "$STAGING_MERGED")")
 STAGING_UPPER="$STAGING_BASE/upper"
 
-du -sx --block-size=1 "$STAGING_UPPER"
-du -sx --apparent-size --block-size=1 "$STAGING_UPPER"
-ADVANCED_ALLOCATED_BYTES=$(du -sx --block-size=1 "$ADVANCED_LOWER" | awk '{print $1}')
-ADVANCED_APPARENT_BYTES=$(du -sx --apparent-size --block-size=1 \
+"${OVERLAY_INSPECT[@]}" du -sx --block-size=1 "$STAGING_UPPER"
+"${OVERLAY_INSPECT[@]}" du -sx --apparent-size --block-size=1 "$STAGING_UPPER"
+ADVANCED_ALLOCATED_BYTES=$("${OVERLAY_INSPECT[@]}" du -sx --block-size=1 \
   "$ADVANCED_LOWER" | awk '{print $1}')
-AVAILABLE_BYTES=$(df -B1 --output=avail "$OVERLAY_TMP" | awk 'NR == 2 {print $1}')
+ADVANCED_APPARENT_BYTES=$("${OVERLAY_INSPECT[@]}" du -sx --apparent-size --block-size=1 \
+  "$ADVANCED_LOWER" | awk '{print $1}')
+AVAILABLE_BYTES=$("${OVERLAY_INSPECT[@]}" df -B1 --output=avail \
+  "$OVERLAY_TMP" | awk 'NR == 2 {print $1}')
 
 for byte_count in "$EMERGENCY_FLOOR_BYTES" "$ADVANCED_ALLOCATED_BYTES" \
   "$ADVANCED_APPARENT_BYTES" "$AVAILABLE_BYTES"; do
@@ -633,11 +692,17 @@ for byte_count in "$EMERGENCY_FLOOR_BYTES" "$ADVANCED_ALLOCATED_BYTES" \
     ''|*[!0-9]*) exit 2 ;;
   esac
 done
-REQUIRED_BYTES=$((ADVANCED_ALLOCATED_BYTES + EMERGENCY_FLOOR_BYTES))
+if test "$ADVANCED_APPARENT_BYTES" -gt "$ADVANCED_ALLOCATED_BYTES"; then
+  COPYUP_BOUND_BYTES=$ADVANCED_APPARENT_BYTES
+else
+  COPYUP_BOUND_BYTES=$ADVANCED_ALLOCATED_BYTES
+fi
+REQUIRED_BYTES=$((COPYUP_BOUND_BYTES + EMERGENCY_FLOOR_BYTES))
+test "$REQUIRED_BYTES" -ge "$COPYUP_BOUND_BYTES" || exit 2
 test "$AVAILABLE_BYTES" -ge "$REQUIRED_BYTES" || exit 1
-printf 'advanced allocated=%s apparent=%s available=%s required=%s\n' \
+printf 'advanced allocated=%s apparent=%s copyup-bound=%s available=%s required=%s\n' \
   "$ADVANCED_ALLOCATED_BYTES" "$ADVANCED_APPARENT_BYTES" \
-  "$AVAILABLE_BYTES" "$REQUIRED_BYTES"
+  "$COPYUP_BOUND_BYTES" "$AVAILABLE_BYTES" "$REQUIRED_BYTES"
 ```
 
 Measure this gate after the fixed staging upper exists, so `AVAILABLE_BYTES` already accounts for

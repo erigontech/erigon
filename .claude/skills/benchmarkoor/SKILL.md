@@ -32,6 +32,8 @@ rolling branches, fixture URLs, or image tags still identify the same code.
 - Perform recursive inspection, size measurement, and hashing through that read-only bind. Reading
   files through the writable path can update access times on a `relatime` filesystem.
 - Keep OverlayFS `upperdir`, `workdir`, and `merged` paths outside the pristine and lower trees.
+- Reject descendant mounts below the pristine datadir before creating its bind. A plain bind does
+  not include child mounts and can otherwise expose incomplete or hidden underlying state.
 - Verify the lower mount is `ro` before startup and remains `ro` throughout the run.
 - Treat every other datadir method as an alternative that requires an explicit user request; never
   inherit an upstream datadir default silently.
@@ -213,9 +215,10 @@ findmnt -T "$OVERLAY_TMP"
 ```
 
 Do not assume OverlayFS needs a second full copy for this workload, but do not assume the upper
-will stay small either. Before the first run, treat the pristine datadir's allocated size as a
-conservative copy-up budget and require operational headroom beyond it. During the run, measure the
-actual upper layer and stop before the filesystem becomes critically full. A historical full
+will stay small either. Before the first run, use the larger of the pristine datadir's allocated
+and apparent sizes as the conservative copy-up budget, then require operational headroom beyond
+it. Apparent size covers writes that allocate holes in sparse lower files. During the run, measure
+the actual upper layer and stop before the filesystem becomes critically full. A historical full
 compute run observed about 1.8 GiB of upper-layer data over a 516.83 GiB lower; this is capacity
 evidence, not a bound for a different source or client revision.
 
@@ -321,6 +324,22 @@ Put a kernel-enforced read-only bind mount in front of the pristine datadir rath
 the original path directly:
 
 ```bash
+MOUNT_TABLE_JSON=$(findmnt -J -o TARGET) || exit 1
+MOUNT_TARGETS=$(jq -r '.. | objects | .target? // empty' \
+  <<<"$MOUNT_TABLE_JSON") || exit 1
+mapfile -t PRISTINE_DESCENDANT_MOUNTS < <(
+  while IFS= read -r mount_target; do
+    case "$mount_target" in
+      "$PRISTINE_DIR"/*) printf '%s\n' "$mount_target" ;;
+    esac
+  done <<<"$MOUNT_TARGETS"
+)
+if test "${#PRISTINE_DESCENDANT_MOUNTS[@]}" -ne 0; then
+  printf 'refusing snapshot with descendant mounts:\n' >&2
+  printf '  %s\n' "${PRISTINE_DESCENDANT_MOUNTS[@]}" >&2
+  exit 1
+fi
+
 sudo mkdir -p "$LOWER_DIR" "$OVERLAY_TMP"
 sudo mount --bind "$PRISTINE_DIR" "$LOWER_DIR"
 sudo mount -o remount,bind,ro "$LOWER_DIR"
@@ -430,8 +449,9 @@ pristine snapshot. Copy the complete source map and remove only `pre_runs`; do n
 partial override and rely on merge deletion.
 
 Before stateful smoke or measured fixtures over a staged baseline, recalculate the conservative
-per-test copy-up budget from the allocated size of the read-only advanced baseline. The original
-pristine size is no longer a safe bound after staging has created or enlarged files.
+per-test copy-up budget from the larger of the allocated and apparent sizes of the read-only
+advanced baseline. The original pristine size is no longer a safe bound after staging has created
+or enlarged files.
 
 Treat the dataset datadir global, context global, selected compute or stateful source, and clients
 as one pinned set.
@@ -466,8 +486,9 @@ The essential runtime distinction is:
 
 Never infer the suite from `fixtures_subdir`: both can say `blockchain_tests_stateful_engine`.
 Require the selected file's `test-type`, suite name, fixture source, and rollback strategy to agree.
-Run benchmarkoor as root or through an approved privileged wrapper because native OverlayFS needs
-mount operations; Docker-group membership alone is insufficient.
+Run benchmarkoor through the `BENCHMARKOOR_SUDO` array defined in the suite reference because
+native OverlayFS needs mount operations; Docker-group membership alone is insufficient. That
+wrapper also preserves only the required artifact credential when authentication is needed.
 
 ## Validate and summarize results
 
