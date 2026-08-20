@@ -173,10 +173,13 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	defer dbtx.Rollback()
 
-	// Use latest block by default
-	if blockNrOrHash == nil {
-		blockNrOrHash = &latestNumOrHash
+	selector := orLatest(blockNrOrHash)
+	// Erigon cannot acquire a pending header and matching state together here,
+	// so estimation preserves its established behavior by using the latest state.
+	if number, ok := selector.Number(); ok && number == rpc.PendingBlockNumber {
+		selector = latestNumOrHash
 	}
+	blockNrOrHash = &selector
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
