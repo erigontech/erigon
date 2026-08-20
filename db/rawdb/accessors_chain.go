@@ -500,9 +500,9 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 	txs := make([]types.Transaction, amount)
 	i := uint32(0)
 	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
-		var decodeErr error
-		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); decodeErr != nil {
-			return decodeErr
+		var err error
+		if txs[i], err = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); err != nil {
+			return err
 		}
 		i++
 		return nil
@@ -647,6 +647,19 @@ func ReadBlockAccessListBytes(db kv.Getter, hash common.Hash, number uint64) ([]
 		return nil, false, nil
 	}
 	return data, true, nil
+}
+
+// ReadBlockAccessList reads and decodes the block access list sidecar.
+func ReadBlockAccessList(db kv.Getter, hash common.Hash, number uint64) (types.BlockAccessList, bool, error) {
+	data, ok, err := ReadBlockAccessListBytes(db, hash, number)
+	if err != nil || !ok {
+		return nil, false, err
+	}
+	bal, err := types.DecodeBlockAccessListBytes(data)
+	if err != nil {
+		return nil, false, err
+	}
+	return bal, true, nil
 }
 
 // WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for
@@ -850,6 +863,8 @@ func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
 	return nil
 }
 
+// ReadBlock retrieves an entire block corresponding to the hash, assembling it
+// from the stored header and body.
 func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) (*types.Block, bool, error) {
 	header, ok, err := ReadHeader(tx, hash, number)
 	if err != nil || !ok {
@@ -859,17 +874,7 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) (*types.Block, boo
 	if err != nil || !ok {
 		return nil, false, err
 	}
-	var bal []byte
-	if header.HasBAL() {
-		data, found, err := ReadBlockAccessListBytes(tx, hash, number)
-		if err != nil {
-			return nil, false, err
-		}
-		if found {
-			bal = bytes.Clone(data)
-		}
-	}
-	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, bal)
+	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, nil)
 	return block, true, nil
 }
 
