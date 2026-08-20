@@ -511,9 +511,6 @@ func buildPosTable(depths []uint64, poss []uint64, table *posTable, code uint16,
 	return b0 + b1, err
 }
 
-func (d *Decompressor) DataHandle() unsafe.Pointer {
-	return unsafe.Pointer(&d.data[0])
-}
 func (d *Decompressor) SerializedDictSize() uint64      { return d.serializedDictSize }
 func (d *Decompressor) SerializedLenSize() uint64       { return d.lenDictSize }
 func (d *Decompressor) SerializedTotalDictSize() uint64 { return d.serializedDictSize + d.lenDictSize }
@@ -690,9 +687,9 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 //	https://www.kernel.org/doc/html/latest/mm/readahead.html
 //	https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
 type SequentialView struct {
-	d           *Decompressor
-	_mmapHandle mmap.Ro
-	data        []byte // words data region from the sequential mmap
+	d      *Decompressor
+	ownMap mmap.Ro // nil when the view reads through the decompressor's mapping
+	data   []byte  // words region, inside ownMap when set and the decompressor's otherwise
 }
 
 // OpenSequentialView returns a view for a full scan. separateReadahead opens a second
@@ -717,7 +714,7 @@ func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialVi
 	headerSize := d.size - int64(len(d.data))
 	wordsFileOffset := headerSize + int64(d.wordsStart)
 	return &SequentialView{
-		d: d, _mmapHandle: h1,
+		d: d, ownMap: h1,
 		data: h1[wordsFileOffset:d.size],
 	}, nil
 }
@@ -740,15 +737,18 @@ func (v *SequentialView) MakeGetter() *Getter {
 	if v.d.posDict != nil {
 		g.posEntries = v.d.posDict.entries
 	}
+	if dbg.AssertEnabled && g.dataOffset+uint64(len(g.data)) != uint64(v.d.size) {
+		panic("seg: getter dataOffset is not the file offset of data[0]")
+	}
 	return g
 }
 
 func (v *SequentialView) Close() {
-	if v == nil || v._mmapHandle == nil {
+	if v == nil || v.ownMap == nil {
 		return
 	}
-	_ = v._mmapHandle.Unmap()
-	v._mmapHandle = nil
+	_ = v.ownMap.Unmap()
+	v.ownMap = nil
 	v.data = nil
 }
 
@@ -761,14 +761,16 @@ type Getter struct {
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posTables     []posTable // posArena.tables; only used for the subtable path
-	patCodewords  []codeword // patArena.codewords; table slots index into it
-	patternDict   *patternTable
+	posTables    []posTable // posArena.tables; only used for the subtable path
+	patCodewords []codeword // patArena.codewords; table slots index into it
+	patternDict  *patternTable
+	dataOffset   uint64
+	trace        bool
+
+	// file-level fields
 	d             *Decompressor
 	fName         string
-	dataOffset    uint64
 	literalWarmer func(*Getter, uint64, uint64)
-	trace         bool
 	residencyGate bool
 }
 
@@ -922,6 +924,9 @@ func (d *Decompressor) MakeGetter() *Getter {
 	}
 	if d.posDict != nil {
 		g.posEntries = d.posDict.entries
+	}
+	if dbg.AssertEnabled && g.dataOffset+uint64(len(g.data)) != uint64(d.size) {
+		panic("seg: getter dataOffset is not the file offset of data[0]")
 	}
 	return g
 }

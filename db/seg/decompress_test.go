@@ -1322,8 +1322,8 @@ func TestSequentialViewLeavesSharedMappingRandom(t *testing.T) {
 
 	v, err := d.OpenSequentialView(true)
 	require.NoError(t, err)
-	require.NotNil(t, v._mmapHandle, "a separate-readahead view must own its mapping")
-	own := uintptr(unsafe.Pointer(&v._mmapHandle[0]))
+	require.NotNil(t, v.ownMap, "a separate-readahead view must own its mapping")
+	own := uintptr(unsafe.Pointer(&v.ownMap[0]))
 	require.NotEqual(t, shared, own, "the view must not hand back the decompressor's mapping")
 
 	if linux {
@@ -1350,7 +1350,7 @@ func TestSequentialViewSharedPathAddsNoMapping(t *testing.T) {
 	require.NoError(t, err)
 	defer v.Close()
 
-	require.Nil(t, v._mmapHandle, "the shared path must not open a second mapping")
+	require.Nil(t, v.ownMap, "the shared path must not open a second mapping")
 	if runtime.GOOS == "linux" {
 		require.Equal(t, "random", vmaAdvice(t, uintptr(unsafe.Pointer(&d._mmapHandle[0]))),
 			"reading through the shared mapping must not change its advice")
