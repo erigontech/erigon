@@ -1041,10 +1041,16 @@ func warmSource(src ReadSource) bool { return src == MapRead || src == StorageRe
 
 // warmReadable reports whether addr has no own write this tx, so a recorded read
 // of it is a stable snapshot the read-once fast path can serve (own writes take
-// precedence and must go through the full path). Same gate as versionedWriteHit.
+// precedence and must go through the full path). Same gate as versionedWriteHit,
+// plus versionedReadCore's resident-deleted check: an account destructed by a
+// prior tx must read as zero, not as the value this tx recorded before that
+// destruct became visible.
 func (s *IntraBlockState) warmReadable(addr accounts.Address) bool {
-	_, dirty := s.journal.dirties[addr]
-	return !dirty
+	if _, dirty := s.journal.dirties[addr]; dirty {
+		return false
+	}
+	so, ok := s.stateObjects[addr]
+	return !ok || !so.deleted
 }
 
 // readBalance returns the address's balance using the version-aware
@@ -1537,6 +1543,11 @@ func readState(s *IntraBlockState, addr accounts.Address, key accounts.StorageKe
 // which SetState uses to decide between deleting vs. updating the
 // versioned write on revert.
 func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.StorageKey) (uint256.Int, ReadSource, Version, bool, error) {
+	if s.warmReadable(addr) {
+		if tr, ok := s.versionedReads.GetStorage(addr, key); ok && warmSource(tr.Source) {
+			return tr.Val, tr.Source, tr.Version, false, nil
+		}
+	}
 	var r readPathResult
 	versionedReadCore(s, addr, StoragePath, key, false, false, &r)
 	if r.err != nil {
