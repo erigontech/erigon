@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -52,7 +53,7 @@ func TestReproduceCrash(t *testing.T) {
 
 	txNum := uint64(1)
 	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	tsr := state.NewReaderV3(sd.AsStateGetter(tx))
+	tsr := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	intraBlockState := state.New(tsr)
 	defer intraBlockState.Close()
@@ -89,7 +90,7 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
 
-	r, tsw := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, tsw := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
@@ -136,7 +137,7 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
 
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
@@ -174,7 +175,7 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	blockNum := uint64(1)
 	txNum := uint64(3)
 
-	r, w := state.NewReaderV3(sd.AsStateGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
