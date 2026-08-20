@@ -287,8 +287,10 @@ func (so *stateObject) SetStorage(storage Storage) {
 		so.fakeStorage = make(Storage)
 	}
 	// Set the fake storage through SetState to ensure journalling is done correctly.
+	// so.fakeStorage is non-nil at this point, so SetState always takes its
+	// fake-storage branch and returns a nil error.
 	for key, value := range storage {
-		so.SetState(key, value, false)
+		_, _ = so.SetState(key, value, false)
 	}
 }
 

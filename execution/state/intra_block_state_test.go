@@ -86,7 +86,7 @@ type snapshotTest struct {
 
 type testAction struct {
 	name   string
-	fn     func(testAction, *IntraBlockState)
+	fn     func(testAction, *IntraBlockState) error
 	args   []int64
 	noAddr bool
 }
@@ -96,95 +96,101 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 	actions := []testAction{
 		{
 			name: "SetBalance",
-			fn: func(a testAction, s *IntraBlockState) {
-				s.SetBalance(addr, u256.U64(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
+			fn: func(a testAction, s *IntraBlockState) error {
+				return s.SetBalance(addr, u256.U64(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "AddBalance",
-			fn: func(a testAction, s *IntraBlockState) {
-				s.AddBalance(addr, u256.U64(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
+			fn: func(a testAction, s *IntraBlockState) error {
+				return s.AddBalance(addr, u256.U64(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetNonce",
-			fn: func(a testAction, s *IntraBlockState) {
-				s.SetNonce(addr, uint64(a.args[0]), tracing.NonceChangeUnspecified)
+			fn: func(a testAction, s *IntraBlockState) error {
+				return s.SetNonce(addr, uint64(a.args[0]), tracing.NonceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetState",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				var key common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				val := uint256.NewInt(uint64(a.args[1]))
-				s.SetState(addr, accounts.InternKey(key), *val)
+				return s.SetState(addr, accounts.InternKey(key), *val)
 			},
 			args: make([]int64, 2),
 		},
 		{
 			name: "SetCode",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				code := make([]byte, 16)
 				binary.BigEndian.PutUint64(code, uint64(a.args[0]))
 				binary.BigEndian.PutUint64(code[8:], uint64(a.args[1]))
-				s.SetCode(addr, code, tracing.CodeChangeUnspecified)
+				return s.SetCode(addr, code, tracing.CodeChangeUnspecified)
 			},
 			args: make([]int64, 2),
 		},
 		{
 			name: "CreateAccount",
-			fn: func(a testAction, s *IntraBlockState) {
-				s.CreateAccount(addr, true)
+			fn: func(a testAction, s *IntraBlockState) error {
+				return s.CreateAccount(addr, true)
 			},
 		},
 		{
 			name: "Selfdestruct",
-			fn: func(a testAction, s *IntraBlockState) {
-				s.Selfdestruct(addr, false)
+			fn: func(a testAction, s *IntraBlockState) error {
+				_, err := s.Selfdestruct(addr, false)
+				return err
 			},
 		},
 		{
 			name: "AddRefund",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				s.AddRefund(uint64(a.args[0]))
+				return nil
 			},
 			args:   make([]int64, 1),
 			noAddr: true,
 		},
 		{
 			name: "AddLog",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				data := make([]byte, 2)
 				binary.BigEndian.PutUint16(data, uint16(a.args[0]))
 				s.AddLog(&types.Log{Address: addr.Value(), Data: data})
+				return nil
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "AddAddressToAccessList",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				s.AddAddressToAccessList(addr)
+				return nil
 			},
 		},
 		{
 			name: "AddSlotToAccessList",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				s.AddSlotToAccessList(addr,
 					accounts.InternKey(common.Hash{byte(a.args[0])}))
+				return nil
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetTransientState",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				var key common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				val := uint256.NewInt(uint64(a.args[1]))
 				s.SetTransientState(addr, accounts.InternKey(key), *val)
+				return nil
 			},
 			args: make([]int64, 2),
 		},
@@ -261,14 +267,21 @@ func (test *snapshotTest) run(t *testing.T) bool {
 			snapshotRevs[sindex] = state.PushSnapshot()
 			sindex++
 		}
-		action.fn(action, state)
+		if err := action.fn(action, state); err != nil {
+			test.err = err
+			return false
+		}
 	}
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
 		checkstate := New(NewReaderV3(execctx.NewTemporalTxStateGetter(tx)))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
-			action.fn(action, checkstate)
+			if err := action.fn(action, checkstate); err != nil {
+				test.err = err
+				checkstate.Close()
+				return false
+			}
 		}
 		state.RevertToSnapshot(snapshotRevs[sindex], nil)
 		state.PopSnapshot(snapshotRevs[sindex])
@@ -501,9 +514,10 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx1 write
-	states[1].GetOrNewStateObject(addr)
-	states[1].SetState(addr, key, val)
-	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+	_, err = states[1].GetOrNewStateObject(addr)
+	require.NoError(t, err)
+	require.NoError(t, states[1].SetState(addr, key, val))
+	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx1 read
@@ -527,8 +541,10 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// IsVersioned guards in txtask.go) and instead commits via the write-set.
 	// Materialize explicitly here — as Tx1 does — so FinalizeTx's updateAccount
 	// marks the object deleted and the post-finalize read observes the wipe.
-	states[3].GetOrNewStateObject(addr)
-	states[3].Selfdestruct(addr, false)
+	_, err = states[3].GetOrNewStateObject(addr)
+	require.NoError(t, err)
+	_, err = states[3].Selfdestruct(addr, false)
+	require.NoError(t, err)
 
 	// Within Tx 3, the state should not change before finalize
 	v, err = states[3].GetState(addr, key)
@@ -536,7 +552,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.Equal(t, val, v)
 
 	// After finalizing Tx 3, the state will change
-	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	require.NoError(t, states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	v, err = states[3].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -577,15 +593,16 @@ func TestVersionMapRevert(t *testing.T) {
 	balance := u256.U64(100)
 
 	// Tx0 write
-	states[0].GetOrNewStateObject(addr)
-	states[0].SetState(addr, key, val)
-	states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+	_, err := states[0].GetOrNewStateObject(addr)
+	require.NoError(t, err)
+	require.NoError(t, states[0].SetState(addr, key, val))
+	require.NoError(t, states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx1 perform some ops and then revert
 	snapshot := states[1].PushSnapshot()
-	states[1].AddBalance(addr, u256.U64(100), tracing.BalanceChangeUnspecified)
-	states[1].SetState(addr, key, u256.U64(1))
+	require.NoError(t, states[1].AddBalance(addr, u256.U64(100), tracing.BalanceChangeUnspecified))
+	require.NoError(t, states[1].SetState(addr, key, u256.U64(1)))
 	v, err := states[1].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
@@ -593,7 +610,8 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, u256.U64(200), b)
 	assert.Equal(t, u256.U64(1), v)
 
-	states[1].Selfdestruct(addr, false)
+	_, err = states[1].Selfdestruct(addr, false)
+	require.NoError(t, err)
 
 	states[1].RevertToSnapshot(snapshot, nil)
 	states[1].PopSnapshot(snapshot)
@@ -604,7 +622,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
-	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	require.NoError(t, states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx2 check the state and balance
@@ -645,16 +663,17 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx0 write
-	states[0].SetState(addr, key, val)
+	require.NoError(t, states[0].SetState(addr, key, val))
 	v, err = states[0].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx1 write
-	states[1].GetOrNewStateObject(addr)
-	states[1].SetState(addr, key, val)
-	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+	_, err = states[1].GetOrNewStateObject(addr)
+	require.NoError(t, err)
+	require.NoError(t, states[1].SetState(addr, key, val))
+	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx2 read
@@ -724,14 +743,15 @@ func TestVersionMapOverwrite(t *testing.T) {
 	balance2 := u256.U64(200)
 
 	// Tx0 write
-	states[0].GetOrNewStateObject(addr)
-	states[0].SetState(addr, key, val1)
-	states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
+	_, err := states[0].GetOrNewStateObject(addr)
+	require.NoError(t, err)
+	require.NoError(t, states[0].SetState(addr, key, val1))
+	require.NoError(t, states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx1 write
-	states[1].SetState(addr, key, val2)
-	states[1].SetBalance(addr, balance2, tracing.BalanceChangeUnspecified)
+	require.NoError(t, states[1].SetState(addr, key, val2))
+	require.NoError(t, states[1].SetBalance(addr, balance2, tracing.BalanceChangeUnspecified))
 	v, err := states[1].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
@@ -815,17 +835,18 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	val2 := u256.U64(2)
 
 	// Tx0 write
-	states[0].GetOrNewStateObject(addr)
+	_, err := states[0].GetOrNewStateObject(addr)
+	require.NoError(t, err)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx2 write
-	states[2].SetState(addr, key2, val2)
+	require.NoError(t, states[2].SetState(addr, key2, val2))
 	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
 
 	// Tx1 write
 	tx1Snapshot := states[1].PushSnapshot()
-	states[1].SetState(addr, key1, val1)
-	states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
+	require.NoError(t, states[1].SetState(addr, key1, val1))
+	require.NoError(t, states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx1 read
@@ -966,58 +987,64 @@ func TestApplyVersionedWrites(t *testing.T) {
 	code := []byte{1, 2, 3}
 
 	// Tx0 write
-	states[0].GetOrNewStateObject(addr1)
-	states[0].SetState(addr1, key1, val1)
-	states[0].SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified)
-	states[0].SetState(addr2, key2, val2)
-	states[0].GetOrNewStateObject(addr3)
-	states[0].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	_, err := states[0].GetOrNewStateObject(addr1)
+	require.NoError(t, err)
+	require.NoError(t, states[0].SetState(addr1, key1, val1))
+	require.NoError(t, states[0].SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified))
+	require.NoError(t, states[0].SetState(addr2, key2, val2))
+	_, err = states[0].GetOrNewStateObject(addr3)
+	require.NoError(t, err)
+	require.NoError(t, states[0].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
-	sSingleProcess.GetOrNewStateObject(addr1)
-	sSingleProcess.SetState(addr1, key1, val1)
-	sSingleProcess.SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified)
-	sSingleProcess.SetState(addr2, key2, val2)
-	sSingleProcess.GetOrNewStateObject(addr3)
+	_, err = sSingleProcess.GetOrNewStateObject(addr1)
+	require.NoError(t, err)
+	require.NoError(t, sSingleProcess.SetState(addr1, key1, val1))
+	require.NoError(t, sSingleProcess.SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified))
+	require.NoError(t, sSingleProcess.SetState(addr2, key2, val2))
+	_, err = sSingleProcess.GetOrNewStateObject(addr3)
+	require.NoError(t, err)
 
-	sClean.ApplyVersionedWrites(states[0].VersionedWrites())
+	require.NoError(t, sClean.ApplyVersionedWrites(states[0].VersionedWrites()))
 
 	// Tx1 write
-	states[1].SetState(addr1, key2, val2)
-	states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	states[1].SetNonce(addr1, 1, tracing.NonceChangeUnspecified)
-	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	require.NoError(t, states[1].SetState(addr1, key2, val2))
+	require.NoError(t, states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
+	require.NoError(t, states[1].SetNonce(addr1, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
-	sSingleProcess.SetState(addr1, key2, val2)
-	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	sSingleProcess.SetNonce(addr1, 1, tracing.NonceChangeUnspecified)
+	require.NoError(t, sSingleProcess.SetState(addr1, key2, val2))
+	require.NoError(t, sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
+	require.NoError(t, sSingleProcess.SetNonce(addr1, 1, tracing.NonceChangeUnspecified))
 
-	sClean.ApplyVersionedWrites(states[1].VersionedWrites())
+	require.NoError(t, sClean.ApplyVersionedWrites(states[1].VersionedWrites()))
 
 	// Tx2 write
-	states[2].SetState(addr1, key1, val2)
-	states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	states[2].SetNonce(addr1, 2, tracing.NonceChangeUnspecified)
-	states[2].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	require.NoError(t, states[2].SetState(addr1, key1, val2))
+	require.NoError(t, states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
+	require.NoError(t, states[2].SetNonce(addr1, 2, tracing.NonceChangeUnspecified))
+	require.NoError(t, states[2].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
 
-	sSingleProcess.SetState(addr1, key1, val2)
-	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	sSingleProcess.SetNonce(addr1, 2, tracing.NonceChangeUnspecified)
+	require.NoError(t, sSingleProcess.SetState(addr1, key1, val2))
+	require.NoError(t, sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
+	require.NoError(t, sSingleProcess.SetNonce(addr1, 2, tracing.NonceChangeUnspecified))
 
-	sClean.ApplyVersionedWrites(states[2].VersionedWrites())
+	require.NoError(t, sClean.ApplyVersionedWrites(states[2].VersionedWrites()))
 
 	// Tx3 write
-	states[3].Selfdestruct(addr2, false)
-	states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified)
-	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	_, err = states[3].Selfdestruct(addr2, false)
+	require.NoError(t, err)
+	require.NoError(t, states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
 
-	sSingleProcess.Selfdestruct(addr2, false)
-	sSingleProcess.SetCode(addr1, code, tracing.CodeChangeUnspecified)
+	_, err = sSingleProcess.Selfdestruct(addr2, false)
+	require.NoError(t, err)
+	require.NoError(t, sSingleProcess.SetCode(addr1, code, tracing.CodeChangeUnspecified))
 
-	sClean.ApplyVersionedWrites(states[3].VersionedWrites())
+	require.NoError(t, sClean.ApplyVersionedWrites(states[3].VersionedWrites()))
 }
 
 // TestMakeWriteSetClearsCodeDomainOnEmptyOverride pins that clearing an
@@ -1054,4 +1081,53 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	got, _, err = domains.AsStateGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
 	require.NoError(t, err)
 	require.Empty(t, got, "clearing code must clear the CodeDomain entry")
+}
+
+// erroringReader wraps NoopReader and fails ReadAccountData for one address,
+// simulating a DB read failure.
+type erroringReader struct {
+	*NoopReader
+	errAddr accounts.Address
+	err     error
+}
+
+func (r *erroringReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	if address == r.errAddr {
+		return nil, r.err
+	}
+	return r.NoopReader.ReadAccountData(address)
+}
+
+// TestFinalizeTxPropagatesBalanceIncGetStateObjectError pins that a DB read
+// failure while materializing a pending ripemd balance increase aborts
+// FinalizeTx instead of being silently dropped, which would let the account's
+// balance increase go unrecorded.
+func TestFinalizeTxPropagatesBalanceIncGetStateObjectError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("read failed")
+	reader := &erroringReader{NoopReader: NewNoopReader(), errAddr: ripemd, err: wantErr}
+	sdb := New(reader)
+	defer sdb.Close()
+
+	require.NoError(t, sdb.AddBalance(ripemd, uint256.Int{}, tracing.BalanceChangeUnspecified))
+
+	err := sdb.FinalizeTx(&chain.Rules{}, NewNoopWriter())
+	require.ErrorIs(t, err, wantErr)
+}
+
+// TestCommitBlockPropagatesBalanceIncGetStateObjectError is the CommitBlock
+// counterpart of TestFinalizeTxPropagatesBalanceIncGetStateObjectError.
+func TestCommitBlockPropagatesBalanceIncGetStateObjectError(t *testing.T) {
+	t.Parallel()
+
+	wantErr := errors.New("read failed")
+	reader := &erroringReader{NoopReader: NewNoopReader(), errAddr: ripemd, err: wantErr}
+	sdb := New(reader)
+	defer sdb.Close()
+
+	require.NoError(t, sdb.AddBalance(ripemd, uint256.Int{}, tracing.BalanceChangeUnspecified))
+
+	err := sdb.CommitBlock(&chain.Rules{}, NewNoopWriter())
+	require.ErrorIs(t, err, wantErr)
 }

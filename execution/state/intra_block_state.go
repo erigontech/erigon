@@ -2595,7 +2595,9 @@ func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateO
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
-			sdb.getStateObject(addr, true)
+			if _, err := sdb.getStateObject(addr, true); err != nil {
+				return err
+			}
 		}
 	}
 	for addr := range sdb.journal.dirties {
@@ -2670,7 +2672,9 @@ func (sdb *IntraBlockState) SoftFinalise() {
 func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
-			sdb.getStateObject(addr, true)
+			if _, err := sdb.getStateObject(addr, true); err != nil {
+				return err
+			}
 		}
 	}
 	return sdb.MakeWriteSet(chainRules, stateWriter)

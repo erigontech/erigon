@@ -66,7 +66,7 @@ func TestVersionedRead_B_DeletedStateObjectReturnsDefault(t *testing.T) {
 
 	addr := accounts.InternAddress(common.HexToAddress("0xdead"))
 	// Create + selfdestruct → state object marked deleted at FinalizeTx
-	ibs.CreateAccount(addr, true)
+	require.NoError(t, ibs.CreateAccount(addr, true))
 	err := ibs.SetBalance(addr, *uint256.NewInt(50), 0)
 	require.NoError(t, err)
 	_, err = ibs.Selfdestruct(addr, false)
