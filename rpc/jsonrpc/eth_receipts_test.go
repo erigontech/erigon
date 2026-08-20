@@ -82,7 +82,7 @@ func TestAppendErigonLogs(t *testing.T) {
 			require.Len(t, got, tc.wantLen)
 			for i, l := range got[len(tc.logs):] {
 				assert.Equal(t, tc.filtered[i].Index, l.Log.Index)
-				assert.Equal(t, hexutil.Uint64(blockTime), l.Timestamp)
+				assert.Equal(t, hexutil.Uint64(blockTime), l.BlockTimestamp)
 			}
 		})
 	}
