@@ -394,6 +394,17 @@ func (api *BaseAPI) headerInView(ctx context.Context, tx kv.Getter, hash common.
 	return api._blockReader.Header(ctx, tx, hash, number)
 }
 
+func (api *BaseAPI) headerByNumberInView(ctx context.Context, tx kv.Getter, number uint64) (*types.Header, error) {
+	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	return api.headerInView(ctx, tx, hash, number)
+}
+
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {

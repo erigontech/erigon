@@ -80,7 +80,10 @@ func (r *recordingSpanProducersReader) Producers(_ context.Context, blockNum uin
 }
 
 func TestBorLatestUsesExecutedHeadWhenHeaderStageIsAhead(t *testing.T) {
-	m, _ := newHeaderAheadTester(t)
+	m, aheadHash := newHeaderAheadTester(t)
+	require.NoError(t, m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		return rawdb.WriteHeadHeaderHash(tx, aheadHash)
+	}))
 	base := newBaseApiForTest(m)
 	engine := borengine.New(borchain.BorDevnet.Config, base._blockReader, nil, nil, log.New(), nil, nil)
 	t.Cleanup(func() { require.NoError(t, engine.Close()) })

@@ -98,7 +98,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNumber)
+	header, err := api.headerByNumberInView(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}

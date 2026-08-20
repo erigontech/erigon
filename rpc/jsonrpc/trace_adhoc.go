@@ -926,7 +926,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, blockNum)
+	header, err := api.headerByNumberInView(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
