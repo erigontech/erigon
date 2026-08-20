@@ -295,11 +295,11 @@ Every task lists its tests before the implementation they cover. In Go the red p
 **Files:**
 - Modify: `cl/persistence/blob_storage/bucket_store_test.go`
 
-- [ ] write a test at façade level that a prune in progress does not delay unrelated work: with the task 1 slow wrapper delaying each `RemoveAll`, a write into a surviving bucket and a `stream` of an unrelated slot both complete in well under the prune's total delay — this goes red if any store-wide lock is reintroduced
-- [ ] write a test that a `write` racing the removal of its own bucket leaves the store consistent whichever order wins: no partial file at the target path, and any error is a clean failure
-- [ ] write a façade-level test that two concurrent writes to the same `(slot, root, index)` cannot corrupt each other through the shared `<file>.tmp` name — the guarantee is the façade's slot lock, so testing `bucketStore` directly would assert something it does not provide
-- [ ] run `go test ./cl/persistence/blob_storage/...` and `go test -race ./cl/persistence/blob_storage/...` — must pass before task 8
-- [ ] do not add a `-race` mutation check: `bucketStore` holds no mutable Go state and `MemMapFs` is internally synchronized, so the detector cannot observe these guards — the timing and consistency assertions above are what falsify them
+- [x] write a test at façade level that a prune in progress does not delay unrelated work: with the task 1 slow wrapper delaying each `RemoveAll`, a write into a surviving bucket and a `stream` of an unrelated slot both complete in well under the prune's total delay — this goes red if any store-wide lock is reintroduced
+- [x] write a test that a `write` racing the removal of its own bucket leaves the store consistent whichever order wins: no partial file at the target path, and any error is a clean failure
+- [x] write a façade-level test that two concurrent writes to the same `(slot, root, index)` cannot corrupt each other through the shared `<file>.tmp` name — the guarantee is the façade's slot lock, so testing `bucketStore` directly would assert something it does not provide
+- [x] run `go test ./cl/persistence/blob_storage/...` and `go test -race ./cl/persistence/blob_storage/...` — must pass before task 8
+- [x] do not add a `-race` mutation check: `bucketStore` holds no mutable Go state and `MemMapFs` is internally synchronized, so the detector cannot observe these guards — the timing and consistency assertions above are what falsify them
 
 ### Task 8: Verify acceptance criteria
 

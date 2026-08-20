@@ -18,13 +18,17 @@ package blob_storage
 
 import (
 	"bytes"
+	"fmt"
 	"path/filepath"
 	"slices"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -456,4 +460,227 @@ func TestBucketStoreFailedSyncLeavesNothingBehind(t *testing.T) {
 	tmpExists, err := afero.Exists(fs, file+tmpSuffix)
 	require.NoError(t, err)
 	require.False(t, tmpExists)
+}
+
+func TestFacadePruneDoesNotBlockUnrelatedWork(t *testing.T) {
+	const (
+		removeAllDelay = 150 * time.Millisecond
+		oldBucketCount = 4
+	)
+
+	fs := newCountingFs(newSlowFs(afero.NewMemMapFs(), removeAllDelay))
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+	for bucket := range oldBucketCount {
+		require.NoError(t, fs.MkdirAll(fmt.Sprintf("%d", bucket), 0o755))
+	}
+
+	const streamSlot = 5*subdivisionSlot + 1
+	streamRoot := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), streamRoot, 0, createTestDataColumnSidecar(streamSlot, 0)))
+
+	pruneDone := make(chan error, 1)
+	go func() { pruneDone <- storage.PruneBelow(oldBucketCount * subdivisionSlot) }()
+	require.Eventually(t, func() bool { return fs.count(opRemoveAll) > 0 }, time.Second, time.Millisecond)
+
+	started := time.Now()
+	writeSlot := uint64(4*subdivisionSlot + 1)
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), common.Hash{2}, 0, createTestDataColumnSidecar(writeSlot, 0)))
+	var streamed bytes.Buffer
+	require.NoError(t, storage.WriteStream(&streamed, streamSlot, streamRoot, 0))
+	require.Less(t, time.Since(started), oldBucketCount*removeAllDelay/2)
+
+	require.NoError(t, <-pruneDone)
+}
+
+func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		writeWins bool
+	}{
+		{name: "write wins", writeWins: true},
+		{name: "prune wins", writeWins: false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			fs := newPruneRaceFs(afero.NewBasePathFs(afero.NewOsFs(), t.TempDir()))
+			storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+			const slot = 1000
+			root := common.Hash{3}
+			_, file := (&bucketStore{fs: fs}).path(slot, root, 0)
+			fs.removePath = "0"
+			fs.createPath = file + tmpSuffix
+			require.NoError(t, fs.MkdirAll(fs.removePath, 0o755))
+
+			writeDone := make(chan error, 1)
+			go func() {
+				writeDone <- storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(slot, 0))
+			}()
+			<-fs.createEntered
+
+			pruneDone := make(chan error, 1)
+			go func() { pruneDone <- storage.PruneBelow(subdivisionSlot) }()
+			<-fs.removeEntered
+
+			if tc.writeWins {
+				close(fs.createRelease)
+				require.NoError(t, <-writeDone)
+				stored, err := storage.ReadColumnSidecarByColumnIndex(t.Context(), slot, root, 0)
+				require.NoError(t, err)
+				require.Equal(t, uint64(0), stored.Index)
+				close(fs.removeRelease)
+			} else {
+				close(fs.removeRelease)
+				close(fs.createRelease)
+				require.Error(t, <-writeDone)
+			}
+			require.NoError(t, <-pruneDone)
+
+			exists, err := storage.ColumnSidecarExists(t.Context(), slot, root, 0)
+			require.NoError(t, err)
+			require.False(t, exists)
+			tmpExists, err := afero.Exists(fs, file+tmpSuffix)
+			require.NoError(t, err)
+			require.False(t, tmpExists)
+		})
+	}
+}
+
+func TestFacadeConcurrentWritesUseOneTempFileAtATime(t *testing.T) {
+	fs := newSerializedCreateFs(afero.NewMemMapFs())
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+	const slot = 1000
+	root := common.Hash{4}
+	_, file := (&bucketStore{fs: fs}).path(slot, root, 0)
+	fs.tempPath = file + tmpSuffix
+
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(slot, 0))
+	}()
+	<-fs.firstWriteEntered
+
+	secondStarted := make(chan struct{})
+	secondDone := make(chan error, 1)
+	go func() {
+		close(secondStarted)
+		secondDone <- storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(slot, 0))
+	}()
+	<-secondStarted
+
+	interleaved := false
+	select {
+	case <-fs.secondCreateEntered:
+		interleaved = true
+	case <-time.After(100 * time.Millisecond):
+	}
+
+	close(fs.releaseFirstWrite)
+	require.NoError(t, <-firstDone)
+	require.NoError(t, <-secondDone)
+	require.False(t, interleaved)
+
+	stored, err := storage.ReadColumnSidecarByColumnIndex(t.Context(), slot, root, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(0), stored.Index)
+	tmpExists, err := afero.Exists(fs, file+tmpSuffix)
+	require.NoError(t, err)
+	require.False(t, tmpExists)
+}
+
+type pruneRaceFs struct {
+	afero.Fs
+	removePath    string
+	createPath    string
+	removeEntered chan struct{}
+	removeRelease chan struct{}
+	createEntered chan struct{}
+	createRelease chan struct{}
+	removeOnce    sync.Once
+	createOnce    sync.Once
+}
+
+func newPruneRaceFs(fs afero.Fs) *pruneRaceFs {
+	return &pruneRaceFs{
+		Fs:            fs,
+		removeEntered: make(chan struct{}),
+		removeRelease: make(chan struct{}),
+		createEntered: make(chan struct{}),
+		createRelease: make(chan struct{}),
+	}
+}
+
+func (f *pruneRaceFs) RemoveAll(path string) error {
+	if path == f.removePath {
+		f.removeOnce.Do(func() { close(f.removeEntered) })
+		<-f.removeRelease
+	}
+	return f.Fs.RemoveAll(path)
+}
+
+func (f *pruneRaceFs) Create(name string) (afero.File, error) {
+	fh, err := f.Fs.Create(name)
+	if err != nil {
+		return nil, err
+	}
+	if name == f.createPath {
+		f.createOnce.Do(func() { close(f.createEntered) })
+		<-f.createRelease
+	}
+	return fh, nil
+}
+
+type serializedCreateFs struct {
+	afero.Fs
+	tempPath            string
+	firstWriteEntered   chan struct{}
+	releaseFirstWrite   chan struct{}
+	secondCreateEntered chan struct{}
+	createMu            sync.Mutex
+	createCount         int
+}
+
+func newSerializedCreateFs(fs afero.Fs) *serializedCreateFs {
+	return &serializedCreateFs{
+		Fs:                  fs,
+		firstWriteEntered:   make(chan struct{}),
+		releaseFirstWrite:   make(chan struct{}),
+		secondCreateEntered: make(chan struct{}),
+	}
+}
+
+func (f *serializedCreateFs) Create(name string) (afero.File, error) {
+	fh, err := f.Fs.Create(name)
+	if err != nil || name != f.tempPath {
+		return fh, err
+	}
+
+	f.createMu.Lock()
+	f.createCount++
+	createCount := f.createCount
+	f.createMu.Unlock()
+	if createCount == 1 {
+		return &serializedWriteFile{
+			File:    fh,
+			entered: f.firstWriteEntered,
+			release: f.releaseFirstWrite,
+		}, nil
+	}
+	if createCount == 2 {
+		close(f.secondCreateEntered)
+	}
+	return fh, nil
+}
+
+type serializedWriteFile struct {
+	afero.File
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (f *serializedWriteFile) Write(p []byte) (int, error) {
+	f.once.Do(func() {
+		close(f.entered)
+		<-f.release
+	})
+	return f.File.Write(p)
 }
