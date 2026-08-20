@@ -678,22 +678,25 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 //	https://www.kernel.org/doc/html/latest/mm/readahead.html
 //	https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
 type SequentialView struct {
-	d           *Decompressor
-	mmapHandle1 mmap.Ro
-	data        []byte // words data region from the sequential mmap
+	d          *Decompressor
+	mmapHandle mmap.Ro
+	data       []byte // words data region from the sequential mmap
 }
 
 // OpenSequentialView returns a view for a full scan. separateReadahead opens a second
 // MADV_SEQUENTIAL mmap; without it the scan reads through the shared one. Caller must Close.
-func (d *Decompressor) OpenSequentialView(allowSequentialView bool) (*SequentialView, error) {
+func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialView, error) {
 	if d == nil || d.f == nil {
 		return nil, nil
+	}
+	if !separateReadahead {
+		return &SequentialView{d: d, data: d.data[d.wordsStart:]}, nil
 	}
 	h1, err := mmap.OpenRo(d.f, int(d.size))
 	if err != nil {
 		return nil, err
 	}
-	if allowSequentialView && dbg.SnapshotMadvSequential {
+	if dbg.SnapshotMadvSequential { // OpenRo already left it MADV_RANDOM
 		_ = mmap.MadviseSequential(h1)
 	}
 	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
@@ -702,7 +705,7 @@ func (d *Decompressor) OpenSequentialView(allowSequentialView bool) (*Sequential
 	headerSize := d.size - int64(len(d.data))
 	wordsFileOffset := headerSize + int64(d.wordsStart)
 	return &SequentialView{
-		d: d, mmapHandle1: h1,
+		d: d, mmapHandle: h1,
 		data: h1[wordsFileOffset:d.size],
 	}, nil
 }
@@ -726,11 +729,11 @@ func (v *SequentialView) MakeGetter() *Getter {
 }
 
 func (v *SequentialView) Close() {
-	if v == nil || v.mmapHandle1 == nil {
+	if v == nil || v.mmapHandle == nil {
 		return
 	}
-	_ = v.mmapHandle1.Unmap()
-	v.mmapHandle1 = nil
+	_ = v.mmapHandle.Unmap()
+	v.mmapHandle = nil
 	v.data = nil
 }
 

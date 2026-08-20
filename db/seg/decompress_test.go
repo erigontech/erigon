@@ -16,17 +16,22 @@
 package seg
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 
 	"github.com/stretchr/testify/require"
@@ -148,7 +153,7 @@ func TestOpenSequentialView(t *testing.T) {
 	}
 
 	require.Equal(t, want, readAll(true), "separate MADV_SEQUENTIAL mmap view")
-	require.Equal(t, want, readAll(false), "shared mmap view (MADV_NORMAL)")
+	require.Equal(t, want, readAll(false), "shared mmap view")
 	// the shared view's Close must be a no-op on the decompressor's mmap: a subsequent read still works
 	require.Equal(t, want, readAll(true))
 }
@@ -1249,5 +1254,105 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 	}
 	if total != int(d.wordsCount) {
 		t.Fatalf("expected word count: %d, got %d\n", int(d.wordsCount), total)
+	}
+}
+
+// vmaAdvice reports the readahead hint the kernel holds for the VMA containing
+// addr, read back from /proc/self/smaps: `rr` is VM_RAND_READ, `sr` VM_SEQ_READ.
+func vmaAdvice(tb testing.TB, addr uintptr) string {
+	tb.Helper()
+	f, err := os.Open("/proc/self/smaps")
+	require.NoError(tb, err)
+	defer f.Close()
+
+	inRange := false
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		line := s.Text()
+		if flags, ok := strings.CutPrefix(line, "VmFlags:"); ok {
+			if !inRange {
+				continue
+			}
+			for fl := range strings.FieldsSeq(flags) {
+				switch fl {
+				case "rr":
+					return "random"
+				case "sr":
+					return "sequential"
+				}
+			}
+			return "normal"
+		}
+		dash := strings.IndexByte(line, '-')
+		if dash <= 0 {
+			continue
+		}
+		start, err := strconv.ParseUint(line[:dash], 16, 64)
+		if err != nil {
+			continue
+		}
+		rest := line[dash+1:]
+		sp := strings.IndexByte(rest, ' ')
+		if sp <= 0 {
+			continue
+		}
+		end, err := strconv.ParseUint(rest[:sp], 16, 64)
+		if err != nil {
+			continue
+		}
+		inRange = uint64(addr) >= start && uint64(addr) < end
+	}
+	require.NoError(tb, s.Err())
+	tb.Fatalf("no VMA covers %#x", addr)
+	return ""
+}
+
+// TestSequentialViewLeavesSharedMappingRandom guards the regression that disabled
+// this feature: the scan must madvise a mapping of its own and never touch the one
+// concurrent random readers fault through.
+func TestSequentialViewLeavesSharedMappingRandom(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	linux := runtime.GOOS == "linux"
+	shared := uintptr(unsafe.Pointer(&d.mmapHandle1[0]))
+	if linux {
+		require.Equal(t, "random", vmaAdvice(t, shared), "NewDecompressor leaves the shared mapping MADV_RANDOM")
+	}
+
+	v, err := d.OpenSequentialView(true)
+	require.NoError(t, err)
+	require.NotNil(t, v.mmapHandle, "a separate-readahead view must own its mapping")
+	own := uintptr(unsafe.Pointer(&v.mmapHandle[0]))
+	require.NotEqual(t, shared, own, "the view must not hand back the decompressor's mapping")
+
+	if linux {
+		if dbg.SnapshotMadvSequential {
+			require.Equal(t, "sequential", vmaAdvice(t, own), "the view's own VMA carries the scan hint")
+		}
+		require.Equal(t, "random", vmaAdvice(t, shared), "the shared VMA keeps MADV_RANDOM while the view is open")
+	}
+
+	v.Close()
+	if linux {
+		require.Equal(t, "random", vmaAdvice(t, shared), "and after the view is closed")
+	}
+}
+
+// TestSequentialViewSharedPathAddsNoMapping pins the separateReadahead=false path
+// that merges of referenced commitment files take: it reads through the
+// decompressor's mapping rather than adding a VMA per merge input.
+func TestSequentialViewSharedPathAddsNoMapping(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	v, err := d.OpenSequentialView(false)
+	require.NoError(t, err)
+	defer v.Close()
+
+	require.Nil(t, v.mmapHandle, "the shared path must not open a second mapping")
+	if runtime.GOOS == "linux" {
+		require.Equal(t, "random", vmaAdvice(t, uintptr(unsafe.Pointer(&d.mmapHandle1[0]))),
+			"reading through the shared mapping must not change its advice")
 	}
 }
