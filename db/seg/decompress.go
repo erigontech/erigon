@@ -665,6 +665,9 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 	return d
 }
 
+// package-level, not per Decompressor: one reporting goroutine, not one per open file
+var leakDetector = dbg.NewLeakDetector("seg.view", dbg.SlowTx())
+
 // SequentialView is a scan over its own mmap of the file, so MADV_SEQUENTIAL lands on a
 // separate VMA and the shared mapping keeps the MADV_RANDOM that NewDecompressor left on it.
 //
@@ -685,9 +688,10 @@ func (d *Decompressor) MadvWillNeed() *Decompressor {
 //	https://www.kernel.org/doc/html/latest/mm/readahead.html
 //	https://www.kernel.org/doc/html/latest/mm/page_reclaim.html
 type SequentialView struct {
-	d      *Decompressor
-	ownMap mmap.Ro
-	data   []byte // words region inside ownMap
+	d       *Decompressor
+	ownMap  mmap.Ro
+	data    []byte // words region inside ownMap
+	traceID uint64
 }
 
 // OpenSequentialView scans over its own MADV_SEQUENTIAL mmap, so readahead never
@@ -711,7 +715,8 @@ func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	wordsFileOffset := headerSize + int64(d.wordsStart)
 	return &SequentialView{
 		d: d, ownMap: h1,
-		data: h1[wordsFileOffset:d.size],
+		data:    h1[wordsFileOffset:d.size],
+		traceID: leakDetector.Add(),
 	}, nil
 }
 
@@ -752,6 +757,7 @@ func (v *SequentialView) Close() {
 	if v == nil || v.ownMap == nil {
 		return
 	}
+	leakDetector.Del(v.traceID)
 	_ = v.ownMap.Unmap()
 	v.ownMap = nil
 	v.data = nil
