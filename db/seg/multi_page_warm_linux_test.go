@@ -21,12 +21,14 @@ package seg
 import (
 	"math"
 	"os"
+	"path/filepath"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sys/unix"
 
 	"github.com/erigontech/erigon/common/iouring"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
 )
 
@@ -59,6 +61,35 @@ func TestMultiPageWarmRange(t *testing.T) {
 	}
 }
 
+func TestMultiPageAsyncIOSkipsPageSizedWord(t *testing.T) {
+	tmpDir := t.TempDir()
+	fileName := filepath.Join(tmpDir, "page-sized.kv")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = ^uint64(0)
+	c, err := NewCompressor(t.Context(), t.Name(), fileName, tmpDir, cfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+
+	word := make([]byte, os.Getpagesize())
+	require.NoError(t, c.AddWord(word))
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(fileName)
+	require.NoError(t, err)
+	defer d.Close()
+
+	g := d.MakeGetter()
+	g.EnableMultiPageAsyncIO()
+	called := false
+	g.multiPageWarmer = func(_ *Getter, _, _ uint64) {
+		called = true
+	}
+	got, _ := g.Next(nil)
+
+	require.Equal(t, word, got)
+	require.False(t, called)
+}
+
 func TestMultiPageLiteralWarm(t *testing.T) {
 	page := os.Getpagesize()
 	file, err := os.CreateTemp(t.TempDir(), "multi-page-warm-*.kv")
@@ -86,8 +117,8 @@ func TestMultiPageLiteralWarm(t *testing.T) {
 
 	g := &Getter{d: &Decompressor{f: file}}
 	g.EnableMultiPageAsyncIO()
-	require.NotNil(t, g.literalWarmer)
-	g.literalWarmer(g, 0, uint64(len(region)))
+	require.NotNil(t, g.multiPageWarmer)
+	g.multiPageWarmer(g, 0, uint64(len(region)))
 
 	resident, err = mmap.Resident(region)
 	require.NoError(t, err)

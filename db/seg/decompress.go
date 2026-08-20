@@ -766,15 +766,16 @@ type Getter struct {
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posTables     []posTable // posArena.tables; only used for the subtable path
-	patCodewords  []codeword // patArena.codewords; table slots index into it
-	patternDict   *patternTable
-	d             *Decompressor
-	fName         string
-	dataOffset    uint64
-	literalWarmer func(*Getter, uint64, uint64)
-	trace         bool
-	residencyGate bool
+	posTables                  []posTable // posArena.tables; only used for the subtable path
+	patCodewords               []codeword // patArena.codewords; table slots index into it
+	patternDict                *patternTable
+	d                          *Decompressor
+	fName                      string
+	dataOffset                 uint64
+	multiPageWarmer            func(*Getter, uint64, uint64)
+	multiPageLiteralMinWordLen uint64
+	trace                      bool
+	residencyGate              bool
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -982,13 +983,16 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	// Loop below fills in the patterns
 	// Tracking position in buf where to insert part of the word
 	bufPos := bufOffset
-	literalWarmer := g.literalWarmer
+	multiPageWarmer := g.multiPageWarmer
+	if wordLen <= g.multiPageLiteralMinWordLen {
+		multiPageWarmer = nil
+	}
 	literalLen := wordLen
 	for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
 		pt := g.nextPattern()
 		copy(buf[bufPos:], pt)
-		if literalWarmer != nil {
+		if multiPageWarmer != nil {
 			if patternLen := uint64(len(pt)); patternLen <= literalLen {
 				literalLen -= patternLen
 			} else {
@@ -1001,8 +1005,8 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		g.dataBit = 0
 	}
 	postLoopPos := g.dataP
-	if literalWarmer != nil && literalLen > 0 {
-		literalWarmer(g, g.dataOffset+postLoopPos, literalLen)
+	if multiPageWarmer != nil && literalLen > 0 {
+		multiPageWarmer(g, g.dataOffset+postLoopPos, literalLen)
 	}
 	g.dataP = savePos
 	g.dataBit = 0

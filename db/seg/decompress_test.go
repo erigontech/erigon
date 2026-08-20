@@ -86,8 +86,9 @@ func TestNextReportsPackedLiteral(t *testing.T) {
 
 	g := d.MakeGetter()
 	require.Equal(t, d.wordsFileOffset, g.dataOffset)
+	g.EnableMultiPageAsyncIO()
 	var literalOffset, literalLength uint64
-	g.literalWarmer = func(_ *Getter, offset, length uint64) {
+	g.multiPageWarmer = func(_ *Getter, offset, length uint64) {
 		literalOffset, literalLength = offset, length
 	}
 	got, _ := g.Next(nil)

@@ -25,7 +25,8 @@ import (
 )
 
 func (g *Getter) EnableMultiPageAsyncIO() {
-	g.literalWarmer = (*Getter).warmMultiPageLiteral
+	g.multiPageWarmer = (*Getter).warmMultiPageLiteral
+	g.multiPageLiteralMinWordLen = uint64(pageSize)
 }
 
 func multiPageWarmRange(offset, length uint64) (uint64, uint64, bool) {
