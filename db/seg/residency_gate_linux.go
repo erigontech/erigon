@@ -48,38 +48,38 @@ var residencyRefresh = time.Duration(dbg.EnvInt("RESIDENCY_REFRESH_SEC", 120)) *
 // decompressed off the mapping. For random-access readers over state .kv files.
 func (g *Getter) EnableResidencyGate() { g.residencyGate = true }
 
-// residencyRegion returns the page-aligned mmap slice covering the word extent
-// at offset, along with its file offset. Returns nil when out of range.
-func (g *Getter) residencyRegion(offset uint64) (region []byte, fileOffset int64) {
-	full := g.mapping
-	if len(full) == 0 || len(g.data) == 0 {
-		return nil, 0
+// residencyRegion returns the page-aligned file extent covering the word at
+// offset. dataOffset already places data[0] in the file, so this never needs the
+// mapping and stays right for a SequentialView reading through its own mmap.
+// A zero length means out of range.
+func (g *Getter) residencyRegion(offset uint64) (length int, fileOffset int64) {
+	if g.d == nil || len(g.data) == 0 {
+		return 0, 0
 	}
-	base := int(uintptr(unsafe.Pointer(&g.data[0])) - uintptr(unsafe.Pointer(&full[0])))
-	absStart := base + int(offset)
-	if absStart < 0 || absStart >= len(full) {
-		return nil, 0
+	absStart := int64(g.dataOffset + offset)
+	if absStart < 0 || absStart >= g.d.size {
+		return 0, 0
 	}
-	aligned := absStart &^ (pageSize - 1)
-	end := min(aligned+residencyWindow, len(full))
-	return full[aligned:end], int64(aligned)
+	aligned := absStart &^ int64(pageSize-1)
+	end := min(aligned+int64(residencyWindow), g.d.size)
+	return int(end - aligned), aligned
 }
 
 func (g *Getter) ensureResident(offset uint64) {
 	if residencyWindow <= 0 { // RESIDENCY_WINDOW_PAGES=0 disables the gate
 		return
 	}
-	region, fileOffset := g.residencyRegion(offset)
-	if region == nil {
+	length, fileOffset := g.residencyRegion(offset)
+	if length == 0 {
 		return
 	}
 	rb := g.residencyBitmap()
 	first := int(fileOffset) / pageSize
-	last := first + (len(region)-1)/pageSize
+	last := first + (length-1)/pageSize
 	if rb.residentRange(first, last) {
 		return // believed resident — go straight to the mapping (a stale bit just faults)
 	}
-	g.warm(fileOffset, len(region))
+	g.warm(fileOffset, length)
 	rb.markRange(first, last)
 }
 

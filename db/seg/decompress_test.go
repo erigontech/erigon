@@ -1357,27 +1357,25 @@ func TestSequentialViewSharedPathAddsNoMapping(t *testing.T) {
 	}
 }
 
-// TestGetterMappingFollowsItsView pins which mmap a Getter reads through. The
-// residency gate derives file offsets from the distance between g.data and that
-// mapping's base, so taking the Decompressor's handle for a view that owns a
-// private mmap subtracts two unrelated addresses and warms the wrong pages.
-func TestGetterMappingFollowsItsView(t *testing.T) {
+// TestGetterDataOffsetIsFileOffset pins what the residency gate resolves word
+// positions against. Every kind of Getter must report the same file offset for
+// data[0], including a view reading through its own mmap: the gate turns
+// dataOffset+pos into a file offset, so a constructor that diverged here would
+// warm and mark the wrong pages.
+func TestGetterDataOffsetIsFileOffset(t *testing.T) {
 	d := prepareLoremDict(t)
 	defer d.Close()
 
-	require.Same(t, &d._mmapHandle[0], &d.MakeGetter().mapping[0],
-		"a Decompressor getter reads through the decompressor's mapping")
+	want := uint64(d.size) - uint64(len(d.data[d.wordsStart:]))
+	require.Equal(t, want, d.MakeGetter().dataOffset)
 
 	own, err := d.OpenSequentialView(true)
 	require.NoError(t, err)
 	defer own.Close()
-	require.Same(t, &own._mmapHandle[0], &own.MakeGetter().mapping[0],
-		"a separate-readahead view getter reads through the view's own mapping")
-	require.NotSame(t, &d._mmapHandle[0], &own.MakeGetter().mapping[0])
+	require.Equal(t, want, own.MakeGetter().dataOffset, "a view with its own mmap reads the same file offsets")
 
 	shared, err := d.OpenSequentialView(false)
 	require.NoError(t, err)
 	defer shared.Close()
-	require.Same(t, &d._mmapHandle[0], &shared.MakeGetter().mapping[0],
-		"a shared view getter reads through the decompressor's mapping")
+	require.Equal(t, want, shared.MakeGetter().dataOffset)
 }
