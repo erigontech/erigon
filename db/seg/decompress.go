@@ -207,7 +207,8 @@ type Decompressor struct {
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 
-	residency atomic.Pointer[residencyBitmap] // page-residency bitmap for the async-io gate; nil unless enabled
+	residency     atomic.Pointer[residencyBitmap] // page-residency bitmap for the async-io gate; nil unless enabled
+	residencyOnce sync.Once                       //nolint:unused // Used only in Linux builds.
 }
 
 const (
