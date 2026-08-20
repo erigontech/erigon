@@ -30,14 +30,33 @@ import (
 	"github.com/erigontech/erigon/common/mmap"
 )
 
-func TestShouldWarmLiteral(t *testing.T) {
+func TestLiteralWarmRange(t *testing.T) {
 	page := uint64(os.Getpagesize())
+	tests := []struct {
+		name       string
+		offset     uint64
+		length     uint64
+		wantOffset uint64
+		wantLength uint64
+		wantOK     bool
+	}{
+		{name: "empty"},
+		{name: "one aligned page", offset: page, length: page},
+		{name: "small boundary crossing", offset: page - 32, length: 64},
+		{name: "one unaligned page", offset: page / 2, length: page},
+		{name: "aligned large literal", offset: page, length: page + 1, wantOffset: page, wantLength: page + 1, wantOK: true},
+		{name: "skip metadata-touched prefix", offset: page + page/2, length: 2 * page, wantOffset: 2 * page, wantLength: page + page/2, wantOK: true},
+		{name: "overflow", offset: math.MaxUint64 - page/2, length: page + 1},
+	}
 
-	require.False(t, shouldWarmLiteral(0, 0))
-	require.False(t, shouldWarmLiteral(page, page))
-	require.True(t, shouldWarmLiteral(page/2, page))
-	require.True(t, shouldWarmLiteral(page, page+1))
-	require.False(t, shouldWarmLiteral(math.MaxUint64-page/2, page))
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			offset, length, ok := literalWarmRange(tt.offset, tt.length)
+			require.Equal(t, tt.wantOffset, offset)
+			require.Equal(t, tt.wantLength, length)
+			require.Equal(t, tt.wantOK, ok)
+		})
+	}
 }
 
 func TestWarmLiteral(t *testing.T) {

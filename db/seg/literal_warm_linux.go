@@ -28,25 +28,33 @@ func (g *Getter) EnableAsyncLiteralWarm() {
 	g.literalWarmer = (*Getter).warmLiteral
 }
 
-func shouldWarmLiteral(offset, length uint64) bool {
-	if length == 0 {
-		return false
+func literalWarmRange(offset, length uint64) (uint64, uint64, bool) {
+	page := uint64(pageSize)
+	if length <= page {
+		return 0, 0, false
 	}
 	end := offset + length
 	if end < offset {
-		return false
+		return 0, 0, false
 	}
-	page := uint64(pageSize)
-	return offset/page != (end-1)/page
+	// The metadata walk has already touched the page containing the literal start.
+	if remainder := offset % page; remainder != 0 {
+		offset += page - remainder
+	}
+	if offset >= end {
+		return 0, 0, false
+	}
+	return offset, end - offset, true
 }
 
 func (g *Getter) warmLiteral(offset, length uint64) {
-	if !shouldWarmLiteral(offset, length) || offset+length > math.MaxInt64 {
+	offset, length, ok := literalWarmRange(offset, length)
+	if !ok || offset+length > math.MaxInt64 {
 		return
 	}
 	for length > 0 {
 		chunk := min(length, uint64(iouring.WarmBufSize))
-		iouring.WarmOne(int(g.d.f.Fd()), int64(offset), int(chunk))
+		g.warm(int64(offset), int(chunk))
 		offset += chunk
 		length -= chunk
 	}

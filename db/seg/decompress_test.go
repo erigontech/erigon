@@ -85,6 +85,7 @@ func TestNextReportsPackedLiteral(t *testing.T) {
 	require.Zero(t, d.dictWords)
 
 	g := d.MakeGetter()
+	require.Equal(t, d.wordsFileOffset, g.dataOffset)
 	var literalOffset, literalLength uint64
 	g.literalWarmer = func(_ *Getter, offset, length uint64) {
 		literalOffset, literalLength = offset, length
@@ -140,6 +141,7 @@ func TestOpenSequentialView(t *testing.T) {
 		defer v.Close()
 		var got [][]byte
 		vg := v.MakeGetter()
+		require.Equal(t, d.wordsFileOffset, vg.dataOffset)
 		for vg.HasNext() {
 			w, _ := vg.Next(nil)
 			got = append(got, w)

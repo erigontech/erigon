@@ -176,6 +176,7 @@ type Decompressor struct {
 	mmapHandle1         []byte        // mmap handle for unix (this is used to close mmap)
 	data                []byte        // slice of correct size for the decompressor to work with
 	wordsStart          uint64        // Offset of whether the superstrings actually start
+	wordsFileOffset     uint64
 	size                int64
 	modTime             time.Time
 	wordsCount          uint64
@@ -254,6 +255,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	}
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
+	var dataFileOffset uint64
 	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
 
 	d.version = d.data[0]
@@ -264,17 +266,20 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		// 3rd byte (otional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
 		d.featureFlagBitmask = FeatureFlagBitmask(d.data[1])
 		d.data = d.data[2:]
+		dataFileOffset += 2
 	}
 
 	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
 		d.compPageValuesCount = d.data[0]
 		d.data = d.data[1:]
+		dataFileOffset++
 	}
 
 	if hasMetadata {
 		metadataLen := binary.BigEndian.Uint32(d.data[:4])
 		d.metadata = d.data[4 : 4+metadataLen]
 		d.data = d.data[4+metadataLen:]
+		dataFileOffset += 4 + uint64(metadataLen)
 
 		dataSize := len(d.data)
 		if dataSize < compressedMinSize {
@@ -408,6 +413,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		}
 	}
 	d.wordsStart = pos + dictSize
+	d.wordsFileOffset = dataFileOffset + d.wordsStart
 
 	if d.Count() == 0 && dictSize == 0 && d.size > d.calcCompressedMinSize() {
 		return nil, &ErrCompressedFileCorrupted{
@@ -703,14 +709,9 @@ func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialVi
 	} else {
 		_ = mmap.MadviseRandom(h1)
 	}
-	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
-	// (version, feature flags, metadata). wordsStart is relative to d.data,
-	// so the file offset is: headerSize + wordsStart.
-	headerSize := d.size - int64(len(d.data))
-	wordsFileOffset := headerSize + int64(d.wordsStart)
 	return &SequentialView{
 		d: d, mmapHandle1: h1, mmapHandle2: h2,
-		data: h1[wordsFileOffset:d.size],
+		data: h1[d.wordsFileOffset:d.size],
 	}, nil
 }
 
@@ -719,7 +720,7 @@ func (v *SequentialView) MakeGetter() *Getter {
 		d:           v.d,
 		data:        v.data,
 		dataLen:     uint64(len(v.data)),
-		dataOffset:  uint64(v.d.size - int64(len(v.data))),
+		dataOffset:  v.d.wordsFileOffset,
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
 	}
@@ -890,7 +891,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 		d:           d,
 		data:        data,
 		dataLen:     uint64(len(data)),
-		dataOffset:  uint64(d.size - int64(len(data))),
+		dataOffset:  d.wordsFileOffset,
 		patternDict: d.dict,
 		fName:       d.FileName(),
 	}

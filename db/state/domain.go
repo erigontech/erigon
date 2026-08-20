@@ -1658,7 +1658,8 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 	g := f.MakeGetter()
 	if dbg.FilesAsyncIOLiterals {
 		g.EnableAsyncLiteralWarm()
-	} else if dbg.FilesAsyncIO {
+	}
+	if dbg.FilesAsyncIO {
 		g.EnableResidencyGate()
 	}
 	return seg.NewReader(g, d.Compression)
