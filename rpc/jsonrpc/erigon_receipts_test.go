@@ -434,3 +434,32 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.B
 	}
 	return m
 }
+
+// TestGetLogsByHashZeroLogReceipt pins the documented array-per-transaction shape: a
+// transaction emitting no logs must serialize as [] and not as null.
+func TestGetLogsByHashZeroLogReceipt(t *testing.T) {
+	signer := types.LatestSignerForChainID(nil)
+	generator := func(i int, block *blockgen.BlockGen) {
+		txn, err := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), common.Address{1}, uint256.NewInt(1000), params.TxGas, nil, nil), *signer, testKey)
+		require.NoError(t, err)
+		block.AddTx(txn)
+	}
+	m := mockWithGenerator(t, 1, generator)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	var blockHash common.Hash
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		blockHash = rawdb.ReadHeaderByNumber(tx, 1).Hash()
+		return nil
+	}))
+
+	logs, err := api.GetLogsByHash(m.Ctx, blockHash)
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+	require.NotNil(t, logs[0])
+	assert.Empty(t, logs[0])
+
+	encoded, err := json.Marshal(logs)
+	require.NoError(t, err)
+	assert.JSONEq(t, `[[]]`, string(encoded))
+}

@@ -2895,7 +2895,7 @@
                 "id": "6a55ab5e-fa04-4e14-b7f9-1b387ee51188",
                 "exec": [
                   "var expected = [",
-                  "  null,",
+                  "  [],",
                   "  [",
                   "    {",
                   "      \"address\": \"0xb8c77482e45f1f44de1745f52c74426c631bdd52\",",
