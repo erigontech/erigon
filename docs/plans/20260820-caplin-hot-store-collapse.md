@@ -303,15 +303,15 @@ Every task lists its tests before the implementation they cover. In Go the red p
 
 ### Task 8: Verify acceptance criteria
 
-- [ ] verify each of the three problems in the Overview is pinned by a test that fails when the fix is reverted
-- [ ] verify the only public API changes are `Prune` becoming `PruneBelow`, `RemoveAllColumnSidecars` being deleted, and the dropped `slotsKept`/`ethClock`/`blobPruneDistance` parameters on `NewBlobStore`, `NewDataColumnStore` and `OpenCaplinDatabase`
-- [ ] verify no test asserts that a façade lock excludes the pruner — it does not, and cannot
-- [ ] verify no flag semantics changed — same retention for the same flags on every network, `ColumnKeepSlots == 0` included
-- [ ] verify `EarliestAvailableSlot` still advances exactly as it does today for the same retention configuration
-- [ ] verify no duplicate `data_column_sidecar` event is published for a re-written sidecar
-- [ ] verify the prune allowlist against a store root containing `chaindata`, and confirm no code path can widen it
-- [ ] run the full suite: `go test ./cl/... ./cmd/caplin/... ./cmd/capcli/...`
-- [ ] run `go test -race ./cl/persistence/blob_storage/...` and `make lint`
+- [x] verify each of the three problems in the Overview is pinned by a test that fails when the fix is reverted
+- [x] verify the only public API changes are `Prune` becoming `PruneBelow`, `RemoveAllColumnSidecars` being deleted, and the dropped `slotsKept`/`ethClock`/`blobPruneDistance` parameters on `NewBlobStore`, `NewDataColumnStore` and `OpenCaplinDatabase`
+- [x] verify no test asserts that a façade lock excludes the pruner — it does not, and cannot
+- [x] verify no flag semantics changed — same retention for the same flags on every network, `ColumnKeepSlots == 0` included
+- [x] verify `EarliestAvailableSlot` still advances exactly as it does today for the same retention configuration
+- [x] verify no duplicate `data_column_sidecar` event is published for a re-written sidecar
+- [x] verify the prune allowlist against a store root containing `chaindata`, and confirm no code path can widen it
+- [x] run the full suite: `go test ./cl/... ./cmd/caplin/... ./cmd/capcli/...`
+- [x] run `go test -race ./cl/persistence/blob_storage/...` and `make lint` (lint reports only the pre-existing `db/seg/decompress.go:212` `residencyOnce` issue)
 
 ### Task 9: [Final] Update documentation
 
