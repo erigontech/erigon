@@ -6,10 +6,10 @@ env:
   # Pinned versions of third-party containers — bump here when upgrading.
   # These are cached via actions/cache (docker save/load) to avoid re-pulling
   # on every run and to eliminate Docker Hub rate-limit exposure.
-  # LIGHTHOUSE_IMAGE, TEKU_IMAGE, LIGHTHOUSE_VC_IMAGE and the ASSERTOOR_* tags are
-  # loaded at job start from the suite .io files (single source of truth) by the
-  # "Load image versions" step, so they can't drift from what kurtosis runs. The
-  # remaining third-party tags below aren't pinned in any .io, so they stay here.
+  # Every tag a suite .io pins — CL/VC clients, assertoor, and glamsterdam's
+  # genesis generator — is loaded at job start from those files (single source of
+  # truth) by the "Load image versions" step, so the cache can't drift from what
+  # kurtosis runs. The tags below aren't pinned in any .io, so they stay here.
   # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
   # are tagged with the CLI version) can be cached too. The vector and fluent-bit
   # tags are dictated by the Kurtosis release — sync them when bumping (see
@@ -209,27 +209,55 @@ jobs:
       - name: Load image versions from the .io files (single source of truth)
         run: |
           reg=.github/workflows/kurtosis/regular-assertoor.io
+          pectra_io=.github/workflows/kurtosis/pectra.io
+          glamsterdam_io=.github/workflows/kurtosis/glamsterdam.io
+          caplin_io=.github/workflows/kurtosis/caplin-minimal-assertoor.io
           assertoor=$(yq -e '.assertoor_params.image' "$reg")
-          pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
-          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam.io)
+          pectra=$(yq -e '.assertoor_params.image' "$pectra_io")
+          glamsterdam=$(yq -e '.assertoor_params.image' "$glamsterdam_io")
           lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
-          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
+          genesis_glamsterdam=$(yq -e '.ethereum_genesis_generator_params.image' "$glamsterdam_io")
+          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' "$caplin_io")
+          # pectra's clients and caplin-minimal's assertoor are warmed under the tag
+          # another suite pins; bumping one alone would silently drop it back to a
+          # Docker Hub pull, so fail here instead of caching a tag nobody runs.
+          same_tag() {
+            [ "$2" = "$3" ] \
+              || { echo "::error::$1 pins $2 but the cache warms $3; reconcile them or extend the cache key"; exit 1; }
+          }
+          same_tag "$pectra_io" \
+            "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$pectra_io")" "$teku"
+          same_tag "$pectra_io" \
+            "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$pectra_io")" "$lighthouse_vc"
+          same_tag "$caplin_io" "$(yq -e '.assertoor_params.image' "$caplin_io")" "$assertoor"
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
             echo "ASSERTOOR_GLAMSTERDAM_IMAGE=$glamsterdam"
             echo "LIGHTHOUSE_IMAGE=$lighthouse"
             echo "TEKU_IMAGE=$teku"
+            echo "GLAMSTERDAM_GENESIS_GENERATOR_IMAGE=$genesis_glamsterdam"
             echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
+          # actions/cache caps a key at 512 chars and spelling out every tag
+          # already needs ~500, so key on a digest of the same values. The list
+          # is echoed to keep an opaque key debuggable from the job log.
+          images=$(printf '%s\n' "$assertoor" "$pectra" "$glamsterdam" "$lighthouse" \
+            "$teku" "$genesis_glamsterdam" "$lighthouse_vc" \
+            "$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
+            "$KURTOSIS_CURL_JQ_IMAGE" "$KURTOSIS_TRAEFIK_IMAGE" "$KURTOSIS_ALPINE_IMAGE" \
+            "$ETH2_VAL_TOOLS_IMAGE" "$GENESIS_GENERATOR_IMAGE" \
+            "$CAPLIN_GENESIS_GENERATOR_IMAGE" "$KURTOSIS_PYTHON_IMAGE" | sort)
+          printf 'images behind the cache key:\n%s\n' "$images"
+          echo "DOCKER_CACHE_KEY=$(printf '%s\n' "$images" | sha256sum | cut -c1-32)" >> "$GITHUB_ENV"
 
       - name: Check whether third-party containers are already cached
         id: cache-cl-images
         uses: actions/cache/restore@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.CAPLIN_GENESIS_GENERATOR_IMAGE }}-${{ env.KURTOSIS_PYTHON_IMAGE }}
+          key: docker-cl-${{ env.DOCKER_CACHE_KEY }}
           lookup-only: true
 
       - name: Pull third-party containers
@@ -261,6 +289,7 @@ jobs:
           pull "${ETH2_VAL_TOOLS_IMAGE}"
           pull "${GENESIS_GENERATOR_IMAGE}"
           pull "${CAPLIN_GENESIS_GENERATOR_IMAGE}"
+          pull "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}"
           pull "${KURTOSIS_PYTHON_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
           docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
@@ -279,6 +308,7 @@ jobs:
           docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
           docker save "${GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/genesis-generator.tar
           docker save "${CAPLIN_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/caplin-genesis-generator.tar
+          docker save "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/glamsterdam-genesis-generator.tar
           docker save "${KURTOSIS_PYTHON_IMAGE}" -o /tmp/docker-cache/python.tar
 
       - name: Save third-party containers to cache
@@ -286,7 +316,7 @@ jobs:
         uses: actions/cache/save@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.CAPLIN_GENESIS_GENERATOR_IMAGE }}-${{ env.KURTOSIS_PYTHON_IMAGE }}
+          key: docker-cl-${{ env.DOCKER_CACHE_KEY }}
 
       - name: Check whether buildkit image is already cached
         id: cache-buildkit-image
@@ -420,27 +450,55 @@ jobs:
       - name: Load image versions from the .io files (single source of truth)
         run: |
           reg=.github/workflows/kurtosis/regular-assertoor.io
+          pectra_io=.github/workflows/kurtosis/pectra.io
+          glamsterdam_io=.github/workflows/kurtosis/glamsterdam.io
+          caplin_io=.github/workflows/kurtosis/caplin-minimal-assertoor.io
           assertoor=$(yq -e '.assertoor_params.image' "$reg")
-          pectra=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/pectra.io)
-          glamsterdam=$(yq -e '.assertoor_params.image' .github/workflows/kurtosis/glamsterdam.io)
+          pectra=$(yq -e '.assertoor_params.image' "$pectra_io")
+          glamsterdam=$(yq -e '.assertoor_params.image' "$glamsterdam_io")
           lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
-          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' .github/workflows/kurtosis/caplin-minimal-assertoor.io)
+          genesis_glamsterdam=$(yq -e '.ethereum_genesis_generator_params.image' "$glamsterdam_io")
+          lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' "$caplin_io")
+          # pectra's clients and caplin-minimal's assertoor are warmed under the tag
+          # another suite pins; bumping one alone would silently drop it back to a
+          # Docker Hub pull, so fail here instead of caching a tag nobody runs.
+          same_tag() {
+            [ "$2" = "$3" ] \
+              || { echo "::error::$1 pins $2 but the cache warms $3; reconcile them or extend the cache key"; exit 1; }
+          }
+          same_tag "$pectra_io" \
+            "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$pectra_io")" "$teku"
+          same_tag "$pectra_io" \
+            "$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$pectra_io")" "$lighthouse_vc"
+          same_tag "$caplin_io" "$(yq -e '.assertoor_params.image' "$caplin_io")" "$assertoor"
           {
             echo "ASSERTOOR_IMAGE=$assertoor"
             echo "ASSERTOOR_PECTRA_IMAGE=$pectra"
             echo "ASSERTOOR_GLAMSTERDAM_IMAGE=$glamsterdam"
             echo "LIGHTHOUSE_IMAGE=$lighthouse"
             echo "TEKU_IMAGE=$teku"
+            echo "GLAMSTERDAM_GENESIS_GENERATOR_IMAGE=$genesis_glamsterdam"
             echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
+          # actions/cache caps a key at 512 chars and spelling out every tag
+          # already needs ~500, so key on a digest of the same values. The list
+          # is echoed to keep an opaque key debuggable from the job log.
+          images=$(printf '%s\n' "$assertoor" "$pectra" "$glamsterdam" "$lighthouse" \
+            "$teku" "$genesis_glamsterdam" "$lighthouse_vc" \
+            "$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
+            "$KURTOSIS_CURL_JQ_IMAGE" "$KURTOSIS_TRAEFIK_IMAGE" "$KURTOSIS_ALPINE_IMAGE" \
+            "$ETH2_VAL_TOOLS_IMAGE" "$GENESIS_GENERATOR_IMAGE" \
+            "$CAPLIN_GENESIS_GENERATOR_IMAGE" "$KURTOSIS_PYTHON_IMAGE" | sort)
+          printf 'images behind the cache key:\n%s\n' "$images"
+          echo "DOCKER_CACHE_KEY=$(printf '%s\n' "$images" | sha256sum | cut -c1-32)" >> "$GITHUB_ENV"
 
       - name: Restore cached third-party containers
         id: cache-cl-images
         uses: actions/cache@v6
         with:
           path: /tmp/docker-cache
-          key: docker-cl-${{ env.LIGHTHOUSE_IMAGE }}-${{ env.LIGHTHOUSE_VC_IMAGE }}-${{ env.TEKU_IMAGE }}-${{ env.ASSERTOOR_IMAGE }}-kurtosis-${{ env.KURTOSIS_VERSION }}-${{ env.KURTOSIS_VECTOR_IMAGE }}-${{ env.KURTOSIS_FLUENTBIT_IMAGE }}-${{ env.KURTOSIS_CURL_JQ_IMAGE }}-${{ env.KURTOSIS_TRAEFIK_IMAGE }}-${{ env.KURTOSIS_ALPINE_IMAGE }}-${{ env.ETH2_VAL_TOOLS_IMAGE }}-${{ env.ASSERTOOR_PECTRA_IMAGE }}-${{ env.ASSERTOOR_GLAMSTERDAM_IMAGE }}-${{ env.GENESIS_GENERATOR_IMAGE }}-${{ env.CAPLIN_GENESIS_GENERATOR_IMAGE }}-${{ env.KURTOSIS_PYTHON_IMAGE }}
+          key: docker-cl-${{ env.DOCKER_CACHE_KEY }}
 
       - name: Load cached containers into daemon
         if: steps.cache-cl-images.outputs.cache-hit == 'true'
@@ -462,6 +520,7 @@ jobs:
           docker load -i /tmp/docker-cache/eth2-val-tools.tar
           docker load -i /tmp/docker-cache/genesis-generator.tar
           docker load -i /tmp/docker-cache/caplin-genesis-generator.tar
+          docker load -i /tmp/docker-cache/glamsterdam-genesis-generator.tar
           docker load -i /tmp/docker-cache/python.tar
 
       - name: Pull third-party containers and save to cache
@@ -493,6 +552,7 @@ jobs:
           pull "${ETH2_VAL_TOOLS_IMAGE}"
           pull "${GENESIS_GENERATOR_IMAGE}"
           pull "${CAPLIN_GENESIS_GENERATOR_IMAGE}"
+          pull "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}"
           pull "${KURTOSIS_PYTHON_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
           docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
@@ -511,6 +571,7 @@ jobs:
           docker save "${ETH2_VAL_TOOLS_IMAGE}" -o /tmp/docker-cache/eth2-val-tools.tar
           docker save "${GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/genesis-generator.tar
           docker save "${CAPLIN_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/caplin-genesis-generator.tar
+          docker save "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/glamsterdam-genesis-generator.tar
           docker save "${KURTOSIS_PYTHON_IMAGE}" -o /tmp/docker-cache/python.tar
 
       - name: Install Kurtosis CLI and start engine
