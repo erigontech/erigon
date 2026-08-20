@@ -24,12 +24,16 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 type payloadBuildModuleStub struct {
@@ -94,4 +98,37 @@ func TestStartPayloadBuildRequiresMatchingExecutionHead(t *testing.T) {
 func TestEngineClientDoesNotExposeDirectPayloadBuild(t *testing.T) {
 	_, ok := any(&ExecutionClientEngine{}).(PayloadBuilder)
 	require.False(t, ok)
+}
+
+func TestDirectPreparationAndForkChoiceReuseTheSameExecutionBuild(t *testing.T) {
+	module := execmoduletester.New(t, execmoduletester.WithTxPool(), execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := module.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, module.InsertChain(chainPack))
+
+	chainRW := chainreader.NewChainReaderEth1(module.ChainConfig, module.ExecModule, time.Hour)
+	client, err := NewExecutionClientDirect(chainRW, nil)
+	require.NoError(t, err)
+	head := chainPack.TopBlock.Hash()
+	_, err = client.ForkChoiceUpdate(t.Context(), head, head, head, nil, clparams.ElectraVersion)
+	require.NoError(t, err)
+
+	timestamp := hexutil.Uint64(time.Now().Add(12 * time.Second).Unix())
+	parentRoot := common.Hash{0x41}
+	attributes := &engine_types.PayloadAttributes{
+		Timestamp:             timestamp,
+		PrevRandao:            common.Hash{0x42},
+		SuggestedFeeRecipient: common.Address{0x43},
+		Withdrawals:           []*types.Withdrawal{},
+		ParentBeaconBlockRoot: &parentRoot,
+	}
+	preparedID, err := client.StartPayloadBuild(t.Context(), head, attributes)
+	require.NoError(t, err)
+	productionID, err := client.ForkChoiceUpdate(
+		t.Context(), head, head, head, attributes, clparams.ElectraVersion,
+	)
+	require.NoError(t, err)
+
+	require.NotEmpty(t, preparedID)
+	require.Equal(t, preparedID, productionID)
 }

@@ -19,6 +19,8 @@ package handler
 import (
 	"context"
 	"errors"
+	"net/http"
+	"net/http/httptest"
 	"testing"
 	"time"
 
@@ -29,6 +31,8 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/transition"
@@ -70,21 +74,36 @@ func TestBlockBuilderWindowTakesPreparedPayloadEarly(t *testing.T) {
 	}
 	slotStart := time.Unix(100, 0)
 
-	// A primed payload is taken one quarter of the attestation deadline into the slot.
-	prepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, true)
+	// Two seconds of warmup reaches the earliest prepared collection point.
+	prepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, 2*time.Second)
 	require.Equal(t, slotStart.Add(time.Second).Add(-minPayloadPollingWindow), prepared.firstGetAt)
 	require.Equal(t, slotStart.Add(3*time.Second), prepared.pollUntil)
 
 	// Without a primed builder nothing changes: the execution layer still needs most of the slot.
-	unprepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, false)
+	unprepared := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, 0)
 	require.Equal(t, slotStart.Add(3*time.Second).Add(-minPayloadPollingWindow), unprepared.firstGetAt)
 	require.Equal(t, slotStart.Add(3*time.Second), unprepared.pollUntil)
 
 	require.True(t, prepared.firstGetAt.Before(unprepared.firstGetAt))
 
-	late := computeBlockBuilderWindow(slotStart.Add(2*time.Second), slotStart, cfg, clparams.ElectraVersion, true)
+	late := computeBlockBuilderWindow(slotStart.Add(2*time.Second), slotStart, cfg, clparams.ElectraVersion, 2*time.Second)
 	require.Equal(t, slotStart.Add(2*time.Second), late.firstGetAt)
 	require.Equal(t, slotStart.Add(3*time.Second), late.pollUntil)
+}
+
+func TestBlockBuilderWindowUsesPartialWarmup(t *testing.T) {
+	cfg := &clparams.BeaconChainConfig{
+		SecondsPerSlot:   12,
+		IntervalsPerSlot: 3,
+	}
+	slotStart := time.Unix(100, 0)
+
+	window := computeBlockBuilderWindow(slotStart, slotStart, cfg, clparams.ElectraVersion, time.Second)
+
+	// One second of work before production advances collection by one second. It does not have to
+	// cross a minimum-age threshold before it becomes useful.
+	require.Equal(t, slotStart.Add(2*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
+	require.Equal(t, slotStart.Add(3*time.Second), window.pollUntil)
 }
 
 func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
@@ -92,44 +111,53 @@ func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	now := time.Unix(100, 0)
 
-	require.False(t, p.matches(10, id, now, 0), "nothing primed yet")
+	require.Zero(t, p.warmup(10, id, now), "nothing primed yet")
 
-	p.set(10, id, now)
-	require.True(t, p.matches(10, id, now, 0))
+	p.set(10, id, now.Add(-time.Second))
+	require.Equal(t, time.Second, p.warmup(10, id, now))
 
-	// A different payload id means the execution layer started a fresh build — a reorg, a late
-	// block, or a changed fee recipient — so the warm builder is gone.
-	require.False(t, p.matches(10, []byte{9, 9, 9, 9, 9, 9, 9, 9}, now, 0))
-	require.False(t, p.matches(11, id, now, 0), "primed for another slot")
-	require.False(t, p.matches(10, nil, now, 0), "no id from the execution layer")
+	// A different payload ID means production selected another build, so the prepared record must
+	// not change its collection time.
+	require.Zero(t, p.warmup(10, []byte{9, 9, 9, 9, 9, 9, 9, 9}, now))
+	require.Zero(t, p.warmup(11, id, now), "primed for another slot")
+	require.Zero(t, p.warmup(10, nil, now), "no id from the execution layer")
 }
 
-func TestPreparedPayloadRequiresMinimumWarmup(t *testing.T) {
+func TestPreparedPayloadReportsMatchingWarmup(t *testing.T) {
 	var p preparedPayload
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	now := time.Unix(100, 0)
-	minAge := 2 * time.Second
 
-	p.set(10, id, now.Add(-minAge+time.Nanosecond))
-	require.False(t, p.matches(10, id, now, minAge))
-
-	p.set(10, id, now.Add(-minAge))
-	require.True(t, p.matches(10, id, now, minAge))
+	p.set(10, id, now.Add(-1500*time.Millisecond))
+	require.Equal(t, 1500*time.Millisecond, p.warmup(10, id, now))
 }
 
-func TestPreparedPayloadMinimumWarmupPreservesBuildTime(t *testing.T) {
+func TestMaximumPreparedAdvancePreservesRecentBuildTime(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
 		IntervalsPerSlot: 3,
 	}
 
-	require.Equal(t, 2*time.Second, preparedPayloadMinimumAge(cfg, clparams.ElectraVersion))
+	require.Equal(t, 2*time.Second, maximumPreparedAdvance(cfg, clparams.ElectraVersion))
 }
 
-func TestStartPayloadPreparationSkipsRemoteEngine(t *testing.T) {
+func TestPayloadPreparationScratchReusesState(t *testing.T) {
+	_, _, _, _, postState, _, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	var scratch payloadPreparationScratch
+
+	first, err := scratch.copyFrom(postState)
+	require.NoError(t, err)
+	first.SetSlot(first.Slot() + 1)
+	second, err := scratch.copyFrom(postState)
+	require.NoError(t, err)
+
+	require.Same(t, first, second)
+	require.Equal(t, postState.Slot(), second.Slot())
+}
+
+func TestStartPayloadPreparationSkipsEngineWithoutDirectBuilder(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	engine := newPayloadBuildEngine(t, ctrl)
-	engine.EXPECT().SupportInsertion().Return(false)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
 	handler := &ApiHandler{
 		engine:         engine,
 		routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: true},
@@ -144,7 +172,6 @@ func TestStartPayloadPreparationSkipsRemoteEngine(t *testing.T) {
 func TestStartPayloadPreparationSkipsWithoutValidatorAPI(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	engine := newPayloadBuildEngine(t, ctrl)
-	engine.EXPECT().SupportInsertion().Times(0)
 	handler := &ApiHandler{
 		engine:         engine,
 		routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: false},
@@ -161,10 +188,9 @@ func TestStartPayloadPreparationSkipsNilEngine(t *testing.T) {
 	})
 }
 
-func TestStartPayloadPreparationStartsLocalEngine(t *testing.T) {
+func TestStartPayloadPreparationStartsWithDirectBuilder(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	engine := newPayloadBuildEngine(t, ctrl)
-	engine.EXPECT().SupportInsertion().Return(true)
 	handler := &ApiHandler{
 		engine:         engine,
 		routerCfg:      &beacon_router_configuration.RouterConfiguration{Validator: true},
@@ -207,6 +233,138 @@ func TestPreparePayloadLoopRunsImmediatelyWithSlotDeadline(t *testing.T) {
 	handler.preparePayloadLoop(ctx)
 }
 
+func TestPreparePayloadLoopWaitsForCurrentSlotHeadBeforeAttestationDeadline(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	config := *handler.beaconChainCfg
+	config.SecondsPerSlot = 12
+	config.IntervalsPerSlot = 3
+	handler.beaconChainCfg = &config
+
+	currentSlot := postState.Slot() + 1
+	targetSlot := currentSlot + 1
+	advancedState, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
+	proposerIndex, err := advancedState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).Times(0)
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	// Two seconds into the current slot is still before its four-second attestation deadline.
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(10 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+	handler.engine = newPayloadBuildEngine(t, ctrl)
+
+	ctx, cancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	defer cancel()
+	handler.preparePayloadLoop(ctx)
+}
+
+func TestPreparePayloadLoopUsesPreviousHeadAfterAttestationDeadline(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	config := *handler.beaconChainCfg
+	config.SecondsPerSlot = 12
+	config.IntervalsPerSlot = 3
+	handler.beaconChainCfg = &config
+
+	currentSlot := postState.Slot() + 1
+	targetSlot := currentSlot + 1
+	advancedState, err := postState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
+	proposerIndex, err := advancedState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, postState.Slot())
+		})
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	// Five seconds into the current slot is past its attestation deadline. Treat the missing block
+	// as an empty slot so a proposal in the next slot can still be prepared.
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(7 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	ctx, cancel := context.WithCancel(t.Context())
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		cancel()
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	handler.engine = engine
+
+	handler.preparePayloadLoop(ctx)
+}
+
+func TestInvalidProductionRequestDoesNotEnterPreparationGate(t *testing.T) {
+	handler := &ApiHandler{}
+	finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation()
+	require.True(t, ok)
+
+	result := make(chan error, 1)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v3/validator/blocks/1?randao_reveal=invalid", nil)
+	go func() {
+		_, err := handler.GetEthV3ValidatorBlock(httptest.NewRecorder(), request)
+		result <- err
+	}()
+
+	select {
+	case err := <-result:
+		finishPreparation()
+		require.ErrorContains(t, err, "invalid randao_reveal")
+	case <-time.After(100 * time.Millisecond):
+		finishPreparation()
+		<-result
+		t.Fatal("request validation waited for payload preparation")
+	}
+}
+
+func TestBlockStorageDoesNotHoldPreparationGateDuringPersistence(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := blob_storage_mock.NewMockBlobStorage(ctrl)
+	writeStarted := make(chan struct{})
+	releaseWrite := make(chan struct{})
+	persistenceErr := errors.New("stop after persistence")
+	storage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).
+		DoAndReturn(func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+			close(writeStarted)
+			<-releaseWrite
+			return persistenceErr
+		})
+	handler := &ApiHandler{blobStoage: storage}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+
+	result := make(chan error, 1)
+	go func() {
+		result <- handler.storeBlockAndBlobs(t.Context(), block, nil, nil)
+	}()
+	<-writeStarted
+
+	finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation()
+	if ok {
+		finishPreparation()
+	}
+	close(releaseWrite)
+	require.ErrorIs(t, <-result, persistenceErr)
+	require.True(t, ok, "database and blob persistence do not contend with execution payload preparation")
+}
+
 func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -222,7 +380,6 @@ func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {
 	handler.ethClock = clock
 
 	engine := newPayloadBuildEngine(t, ctrl)
-	engine.EXPECT().SupportInsertion().Return(true)
 	handler.engine = engine
 
 	ctx, cancel := context.WithTimeout(t.Context(), 250*time.Millisecond)
@@ -250,7 +407,7 @@ func TestPreparePayloadLoopStandsOffWhileProducing(t *testing.T) {
 	handler.ethClock = clock
 
 	// Priming would contend with the block being produced for the execution layer's single slot.
-	finishProduction := handler.payloadPreparationGate.beginProduction()
+	finishProduction := handler.payloadPreparationGate.beginExecutionWork()
 	defer finishProduction()
 	engine := newPayloadBuildEngine(t, ctrl)
 	handler.engine = engine
@@ -260,7 +417,7 @@ func TestPreparePayloadLoopStandsOffWhileProducing(t *testing.T) {
 	handler.preparePayloadLoop(ctx)
 }
 
-func TestPreparePayloadLoopSkipsSlotsAboutToStart(t *testing.T) {
+func TestPreparePayloadLoopSkipsSlotsThatHaveStarted(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	targetSlot := postState.Slot() + 1
@@ -268,11 +425,11 @@ func TestPreparePayloadLoopSkipsSlotsAboutToStart(t *testing.T) {
 	require.NoError(t, err)
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
 
-	// Too close to the slot for the prime to ever reach the age production demands of it, so the
-	// state copy and the builder-start call would both be spent for nothing.
+	// Production owns the target once its slot starts. Preparation must not begin new state or
+	// execution work for it.
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetCurrentSlot().Return(targetSlot - 1).AnyTimes()
-	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(200 * time.Millisecond)).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-time.Millisecond)).AnyTimes()
 	handler.ethClock = clock
 
 	engine := newPayloadBuildEngine(t, ctrl)
@@ -390,12 +547,12 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 	primedHead, err := handler.preparePayloadFor(t.Context(), targetSlot)
 	require.NoError(t, err)
 	require.Equal(t, baseBlockRoot, primedHead)
-	require.True(t, handler.preparedPayload.matches(targetSlot, payloadID, time.Now(), 0))
+	require.Positive(t, handler.preparedPayload.warmup(targetSlot, payloadID, time.Now().Add(time.Second)))
 }
 
 func TestPreparationGateRefusesActiveProduction(t *testing.T) {
 	var gate payloadPreparationGate
-	finishProduction := gate.beginProduction()
+	finishProduction := gate.beginExecutionWork()
 	defer finishProduction()
 
 	_, ok := gate.tryBeginPreparation()
@@ -516,7 +673,7 @@ func TestProductionWaitsForActivePreparationAttempt(t *testing.T) {
 
 	productionStarted := make(chan func(), 1)
 	go func() {
-		productionStarted <- gate.beginProduction()
+		productionStarted <- gate.beginExecutionWork()
 	}()
 
 	select {
@@ -564,14 +721,14 @@ func TestPreparePayloadForStopsWhenProductionStartsDuringStateCopy(t *testing.T)
 		result <- err
 	}()
 	<-stateCopied
-	finishProduction := handler.payloadPreparationGate.beginProduction()
+	finishProduction := handler.payloadPreparationGate.beginExecutionWork()
 	defer finishProduction()
 	close(resumePreparation)
 
-	require.ErrorIs(t, <-result, errProposalInFlight)
+	require.ErrorIs(t, <-result, errExecutionWorkInFlight)
 }
 
-func TestPreparePayloadForStopsWhenTheCopySpentTheLead(t *testing.T) {
+func TestPreparePayloadForStopsWhenStateWorkCrossesTheSlotBoundary(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -588,11 +745,8 @@ func TestPreparePayloadForStopsWhenTheCopySpentTheLead(t *testing.T) {
 	engine := newPayloadBuildEngine(t, ctrl)
 	handler.engine = engine
 
-	// Closer to the slot than the warm-up production would demand of the prime, so priming now
-	// could only occupy the module without ever being usable.
-	tooLate := preparedPayloadMinimumAge(handler.beaconChainCfg, clparams.ElectraVersion) / 2
 	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(tooLate)).AnyTimes()
+	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(-time.Millisecond)).AnyTimes()
 	handler.ethClock = clock
 
 	_, err = handler.preparePayloadFor(t.Context(), targetSlot)
@@ -623,7 +777,7 @@ func TestPreparePayloadForRejectsChangedHeadBeforeStartingBuilder(t *testing.T) 
 
 	_, err = handler.preparePayloadFor(t.Context(), targetSlot)
 	require.ErrorIs(t, err, errPreparationHeadChanged)
-	require.False(t, handler.preparedPayload.matches(targetSlot, []byte{1}, time.Now(), 0))
+	require.Zero(t, handler.preparedPayload.warmup(targetSlot, []byte{1}, time.Now()))
 }
 
 func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
@@ -779,12 +933,12 @@ func TestPreparedPayloadKeepsConsecutiveSlots(t *testing.T) {
 	// in production.
 	p.set(10, first, now)
 	p.set(11, second, now)
-	require.True(t, p.matches(10, first, now, 0))
-	require.True(t, p.matches(11, second, now, 0))
+	require.Positive(t, p.warmup(10, first, now.Add(time.Second)))
+	require.Positive(t, p.warmup(11, second, now.Add(time.Second)))
 
 	// Records old enough that they can no longer be produced are dropped, so the map is bounded.
 	p.set(10+preparedPayloadRetainSlots+1, []byte{3, 3, 3, 3, 3, 3, 3, 3}, now)
-	require.False(t, p.matches(10, first, now, 0))
+	require.Zero(t, p.warmup(10, first, now.Add(time.Second)))
 }
 
 func TestPreparedPayloadCopiesTheID(t *testing.T) {
@@ -796,6 +950,6 @@ func TestPreparedPayloadCopiesTheID(t *testing.T) {
 	id[0] = 0xff
 
 	// The caller's buffer must not be able to invalidate, or forge, a later match.
-	require.True(t, p.matches(10, []byte{1, 2, 3, 4, 5, 6, 7, 8}, now, 0))
-	require.False(t, p.matches(10, id, now, 0))
+	require.Positive(t, p.warmup(10, []byte{1, 2, 3, 4, 5, 6, 7, 8}, now.Add(time.Second)))
+	require.Zero(t, p.warmup(10, id, now.Add(time.Second)))
 }

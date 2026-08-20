@@ -215,29 +215,27 @@ func unpreparedGrabOffset(due time.Duration) time.Duration {
 	return due - due/payloadPublicationDivisor
 }
 
-// preparedGrabOffset is the earlier collection point available to a builder that was warmed before
-// the slot. The minimum-age check below preserves the build time available on the unprepared path.
+// preparedGrabOffset is the earliest collection point available to a builder warmed before the
+// slot. Collection still waits this far into the slot for recent transactions.
 func preparedGrabOffset(due time.Duration) time.Duration {
 	return due / payloadPublicationDivisor
 }
 
-// preparedPayloadMinimumAge is how long a primed builder must already have been running before
-// production may collect from it early. It is the gap between prepared and unprepared collection
-// offsets, so both paths give the builder the same total build time.
-func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
+// maximumPreparedAdvance caps how much payload preparation may advance collection. Even a builder
+// started far ahead is left running into the slot so it can include recent transactions.
+func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
 	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
 }
 
 // computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
-// reserving a publication margin before the attestation deadline.
-func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
+// reserving a publication margin before the attestation deadline. Work completed before production
+// advances the first poll by the same duration, up to the prepared collection point.
+func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, warmup time.Duration) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
 	grabBy := slotStart.Add(unpreparedGrabOffset(due))
-	firstGetAt := grabBy.Add(-minPayloadPollingWindow)
-	if prepared {
-		firstGetAt = slotStart.Add(preparedGrabOffset(due)).Add(-minPayloadPollingWindow)
-	}
+	advance := min(max(warmup, 0), maximumPreparedAdvance(cfg, stateVersion))
+	firstGetAt := grabBy.Add(-minPayloadPollingWindow).Add(-advance)
 	if firstGetAt.Before(now) {
 		firstGetAt = now
 	}
@@ -576,11 +574,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	r *http.Request,
 ) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
-	// Cover the whole request so preparation cannot enter the execution layer while production is
-	// still deriving or collecting the block.
-	finishProduction := a.payloadPreparationGate.beginProduction()
-	defer finishProduction()
-
 	// parse request data
 	randaoRevealString := r.URL.Query().Get("randao_reveal")
 	var randaoReveal common.Bytes96
@@ -1142,6 +1135,11 @@ func (a *ApiHandler) produceBeaconBody(
 	blockRoot := baseBlockRoot
 	// Process the execution data in a thread.
 	wg.Go(func() {
+		// Preparation must not enter the execution module while production updates fork choice and
+		// collects the payload. Request validation, state work, and relay calls do not need this gate.
+		finishProduction := a.payloadPreparationGate.beginExecutionWork()
+		defer finishProduction()
+
 		start := time.Now()
 		defer func() {
 			log.Info("BlockProduction: ForkChoiceUpdate&GetPayload took", "duration", time.Since(start))
@@ -1175,10 +1173,8 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		prepared := a.preparedPayload.matches(
-			targetSlot, idBytes, time.Now(), preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion),
-		)
-		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, prepared)
+		warmup := a.preparedPayload.warmup(targetSlot, idBytes, builderStartedAt)
+		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
 		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
 		})
@@ -2187,9 +2183,6 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	sidecars []*cltypes.BlobSidecar,
 	columnSidecars []*cltypes.DataColumnSidecar,
 ) error {
-	finishProduction := a.payloadPreparationGate.beginProduction()
-	defer finishProduction()
-
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
@@ -2220,32 +2213,9 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	// runs from the beacon API handler which may execute before the stage loop.
 	currentSlot := a.ethClock.GetCurrentSlot()
 	a.forkchoiceStore.OnTick(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot)
-
-	// Skip BLS re-verification for locally-produced blocks. The block was just
-	// built by this node, so re-verifying the signature is redundant. Additionally,
-	// AddChainSegment replays from the nearest checkpoint state, and the replayed
-	// state can produce a different proposer shuffling than the head state used
-	// during block production (especially on minimal preset with rapid epoch
-	// boundaries), causing VerifyBlockSignature to fail.
-	// TODO: fix the root cause in state replay so fullValidation can be re-enabled.
-	log.Warn("Skipping full validation for locally-produced block", "slot", block.Block.Slot, "proposer", block.Block.ProposerIndex)
-	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
-		return err
-	}
-	headRoot, headSlot, headState, err := a.selectedHeadState(blockRoot)
+	headRoot, headState, err := a.adoptProducedBlock(ctx, block, blockRoot)
 	if err != nil {
 		return err
-	}
-	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
-	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
-	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
-	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
-		// Storing the block does not depend on the execution layer acknowledging the head in time,
-		// and the next head sends another update.
-		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
-			return err
-		}
-		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
@@ -2259,6 +2229,43 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}
 
 	return nil
+}
+
+func (a *ApiHandler) adoptProducedBlock(
+	ctx context.Context,
+	block *cltypes.SignedBeaconBlock,
+	blockRoot common.Hash,
+) (common.Hash, *state.CachingBeaconState, error) {
+	finishProduction := a.payloadPreparationGate.beginExecutionWork()
+	defer finishProduction()
+
+	// Skip BLS re-verification for locally-produced blocks. The block was just
+	// built by this node, so re-verifying the signature is redundant. Additionally,
+	// AddChainSegment replays from the nearest checkpoint state, and the replayed
+	// state can produce a different proposer shuffling than the head state used
+	// during block production (especially on minimal preset with rapid epoch
+	// boundaries), causing VerifyBlockSignature to fail.
+	// TODO: fix the root cause in state replay so fullValidation can be re-enabled.
+	log.Warn("Skipping full validation for locally-produced block", "slot", block.Block.Slot, "proposer", block.Block.ProposerIndex)
+	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
+		return common.Hash{}, nil, err
+	}
+	headRoot, headSlot, headState, err := a.selectedHeadState(blockRoot)
+	if err != nil {
+		return common.Hash{}, nil, err
+	}
+	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
+	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
+	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
+	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
+		// Storing the block does not depend on the execution layer acknowledging the head in time,
+		// and the next head sends another update.
+		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+			return common.Hash{}, nil, err
+		}
+		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
+	}
+	return headRoot, headState, nil
 }
 
 func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, uint64, *state.CachingBeaconState, error) {
