@@ -335,7 +335,7 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	}
 	_ = g.Alloc //nil-check
 
-	if err := checkBinaryTrieConfig(g); err != nil {
+	if err := checkBinaryTrieSchedule(g); err != nil {
 		return nil, nil, err
 	}
 
@@ -362,6 +362,12 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 
 	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
 	if err != nil {
+		return nil, nil, err
+	}
+	// After the resolve, not before: a bin datadir adopts the variant from erigondb.toml
+	// here, so an earlier read would refuse `erigon init` on a datadir that is already bin
+	// whenever COMMITMENT_BIN is unset.
+	if err := checkBinaryTrieCommitment(g); err != nil {
 		return nil, nil, err
 	}
 	agg, err := dbstate.New(dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).DisableBranchCache().Open(ctx, genesisTmpDB)
@@ -401,11 +407,13 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	return types.NewBlock(head, nil, nil, nil, withdrawals), ibs, nil
 }
 
-// checkBinaryTrieConfig refuses a genesis that schedules EIP-8297 on a node not running
-// the binary commitment trie. Nothing downstream notices: the unknown-to-the-MPT config key
-// is ignored, block 0 gets a merkle-patricia root, and the first forkchoiceUpdated then
-// references a parent this node never produced.
-func checkBinaryTrieConfig(g *types.Genesis) error {
+// checkBinaryTrieSchedule refuses a binaryTrieTime this node cannot honour. Which trie
+// commits state is process-global from block 0 with no time parameter, so a tree scheduled
+// after genesis would be used for every block before its own activation — the same
+// unknown-parent failure as running the wrong trie, arriving from the other side. Only a
+// tree live at genesis is implementable, and pinning that also keeps the key out of the
+// EIP-2124 fork ID, which gathers any *Time field set after the genesis timestamp.
+func checkBinaryTrieSchedule(g *types.Genesis) error {
 	if g.Config == nil || g.Config.BinaryTrieTime == nil {
 		return nil
 	}
@@ -413,10 +421,22 @@ func checkBinaryTrieConfig(g *types.Genesis) error {
 		return fmt.Errorf("binaryTrieTime %d needs amsterdamTime scheduled no later: EIP-8297 is defined from Amsterdam onwards",
 			*g.Config.BinaryTrieTime)
 	}
-	if !statecfg.ExperimentalBinCommitment {
-		return errors.New("genesis schedules EIP-8297 (binaryTrieTime) but this node commits state through the merkle-patricia trie: set COMMITMENT_BIN=true, and COMMITMENT_BIN_HASH to the hash the chain uses")
+	if *g.Config.BinaryTrieTime > g.Timestamp {
+		return fmt.Errorf("binaryTrieTime %d is after the genesis timestamp %d: this node can only commit through the binary tree from block 0, so a tree scheduled later cannot be honoured",
+			*g.Config.BinaryTrieTime, g.Timestamp)
 	}
 	return nil
+}
+
+// checkBinaryTrieCommitment refuses a genesis that schedules EIP-8297 on a node not running
+// the binary commitment trie. Nothing downstream notices: the config key is ignored by the
+// merkle-patricia path, block 0 gets a merkle-patricia root, and the first forkchoiceUpdated
+// then references a parent this node never produced.
+func checkBinaryTrieCommitment(g *types.Genesis) error {
+	if g.Config == nil || g.Config.BinaryTrieTime == nil || statecfg.ExperimentalBinCommitment {
+		return nil
+	}
+	return errors.New("genesis schedules EIP-8297 (binaryTrieTime) but this node commits state through the merkle-patricia trie: set COMMITMENT_BIN=true, and COMMITMENT_BIN_HASH to the hash the chain uses")
 }
 
 func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.TemporalTx, sd *execctx.SharedDomains, head *types.Header) ([]byte, *state.IntraBlockState, error) {

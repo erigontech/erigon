@@ -286,6 +286,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 	}
 
 	isAmsterdam := p.chainConfig.IsAmsterdam(blockTime)
+	isEIP8038Revised := p.chainConfig.EIP8038Revised || p.chainConfig.IsBinaryTrie(blockTime)
 	isEIP3860 := p.chainConfig.IsShanghai(blockTime)
 	isEIP7623 := p.chainConfig.IsPrague(blockTime)
 	availableGas := provideOpts.GasTarget
@@ -315,6 +316,7 @@ func (p *Pool) ProvideTxns(ctx context.Context, opts ...txnprovider.ProvideOptio
 			IsEIP7976:          isAmsterdam,
 			IsEIP7981:          isAmsterdam,
 			IsEIP2780:          isAmsterdam,
+			IsEIP8038Revised:   isEIP8038Revised,
 			IsAATxn:            isAATxn,
 		})
 		if overflow {

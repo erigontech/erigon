@@ -25,9 +25,9 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/params"
 )
 
-// The EIP fixes both access-list costs at COLD - WARM. geth and besu charge these, and a
-// devnet run that got them 100 high rejected transactions geth had accepted, so the numbers
-// are pinned rather than derived from the constants under test.
+// The EIP fixes both access-list costs at COLD - WARM, and a devnet run that got them 100
+// high rejected transactions geth had accepted, so the numbers are pinned rather than
+// derived from the constants under test.
 func TestEIP8038RevisedAccessListCosts(t *testing.T) {
 	t.Parallel()
 

@@ -38,15 +38,21 @@ func withBinCommitment(t *testing.T, on bool) {
 	t.Helper()
 	orig := statecfg.ExperimentalBinCommitment
 	origParallel := statecfg.ExperimentalParallelCommitment
+	origHash := statecfg.BinCommitmentHash
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment = orig
 		statecfg.ExperimentalParallelCommitment = origParallel
+		statecfg.BinCommitmentHash = origHash
 	})
 	statecfg.ExperimentalBinCommitment = on
 	if on {
 		// erigondb.toml resolution refuses the combination: the bin trie is
 		// sequential-only, regardless of a process-wide parallel default.
 		statecfg.ExperimentalParallelCommitment = false
+	} else {
+		// The hash goes with the flag. A run under COMMITMENT_BIN_HASH leaves it set
+		// otherwise, and the resolver refuses a hash without the trie it names.
+		statecfg.BinCommitmentHash = ""
 	}
 }
 
