@@ -142,8 +142,8 @@ var (
 	ReadAheadWait         = EnvBool("READ_AHEAD_WAIT", false)
 	ReadAheadBALCode      = EnvBool("READ_AHEAD_BAL_CODE", false)
 	ReadAheadTxCode       = EnvBool("READ_AHEAD_TX_CODE", false)
-	FilesAsyncIOMultiPage = EnvBool("FILES_ASYNC_IO_MULTI_PAGE", true)
 	FilesAsyncIO          = EnvBool("FILES_ASYNC_IO", false)
+	FilesAsyncIOMultiPage = EnvBool("FILES_ASYNC_IO_MULTI_PAGE", true)
 
 	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
 	TraceDeletion         = EnvBool("TRACE_DELETION", false)
