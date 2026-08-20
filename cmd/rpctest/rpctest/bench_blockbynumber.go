@@ -36,7 +36,7 @@ func BenchEthGetBlockByNumber(erigonURL string) error {
 
 		res = reqGen.Erigon2("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, false /* withTxs */))
 		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn, res.Err)
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %w\n", bn, res.Err)
 		}
 		if errVal := res.Result.Get("error"); errVal != nil {
 			return fmt.Errorf("error: %d %s", errVal.GetInt("code"), errVal.GetStringBytes("message"))
@@ -48,7 +48,7 @@ func BenchEthGetBlockByNumber(erigonURL string) error {
 		bn1 := lastBlock - bn
 		res = reqGen.Erigon2("eth_getBlockByNumber", reqGen.getBlockByNumber(bn1, false /* withTxs */))
 		if res.Err != nil {
-			return fmt.Errorf("Could not retrieve block (Erigon) %d: %v\n", bn1, res.Err)
+			return fmt.Errorf("Could not retrieve block (Erigon) %d: %w\n", bn1, res.Err)
 		}
 		if errVal := res.Result.Get("error"); errVal != nil {
 			return fmt.Errorf("error: %d %s", errVal.GetInt("code"), errVal.GetStringBytes("message"))

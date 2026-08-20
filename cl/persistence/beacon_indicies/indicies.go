@@ -471,7 +471,7 @@ func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot common
 		return nil, false, nil
 	}
 	if err := h.DecodeSSZ(headerBytes, 0); err != nil {
-		return nil, false, fmt.Errorf("failed to decode BeaconHeader: %v", err)
+		return nil, false, fmt.Errorf("failed to decode BeaconHeader: %w", err)
 	}
 	canonical, err := ReadCanonicalBlockRoot(tx, h.Header.Slot)
 	if err != nil {

@@ -205,7 +205,9 @@ Getting in touch
 
 ### Reporting security issues/concerns
 
-Send an email to `security [at] torquem.ch`.
+Report vulnerabilities privately via
+[Security → Report a vulnerability](https://github.com/erigontech/erigon/security/advisories/new).
+Please don't open a public issue for one — see [SECURITY.md](./SECURITY.md).
 
 ### Getting help
 

@@ -73,9 +73,9 @@ func TestMultiPageLiteralWarm(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, file.Sync())
 
-	mapping, mappingHandle, err := mmap.Mmap(file, len(payload))
+	mapping, err := mmap.OpenRo(file, len(payload))
 	require.NoError(t, err)
-	defer mmap.Munmap(mapping, mappingHandle)
+	defer mapping.Unmap()
 
 	region := mapping[:2*page]
 	require.NoError(t, unix.Madvise(mapping, unix.MADV_DONTNEED))
