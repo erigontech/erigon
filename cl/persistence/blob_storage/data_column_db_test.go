@@ -13,12 +13,10 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
-	gomock "go.uber.org/mock/gomock"
 )
 
 var (
@@ -40,25 +38,13 @@ func init() {
 	clparams.InitGlobalStaticConfig(globalBeaconConfig, globalCaplinConfig)
 }
 
-func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clparams.BeaconChainConfig, eth_clock.EthereumClock) {
+func setupTestDataColumnStorage(t *testing.T) (DataColumnStorage, afero.Fs, *clparams.BeaconChainConfig) {
 	fs := afero.NewBasePathFs(afero.NewOsFs(), t.TempDir())
 
-	ctrl := gomock.NewController(t)
-	mockClock := eth_clock.NewMockEthereumClock(ctrl)
-
-	// Set up mock expectations
-	mockClock.EXPECT().GetCurrentSlot().Return(uint64(1000)).AnyTimes()
-	mockClock.EXPECT().GetCurrentEpoch().Return(uint64(31)).AnyTimes()
-	mockClock.EXPECT().GetEpochAtSlot(gomock.Any()).DoAndReturn(func(slot uint64) uint64 {
-		return slot / 32
-	}).AnyTimes()
-
 	emitters := beaconevents.NewEventEmitter()
-	storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, mockClock, emitters)
-	return storage, fs, globalBeaconConfig, mockClock
+	storage := NewDataColumnStore(fs, globalBeaconConfig, emitters)
+	return storage, fs, globalBeaconConfig
 }
-
-// Mock implementation removed - using eth_clock.NewMockEthereumClock instead
 
 func createTestDataColumnSidecar(slot uint64, columnIndex int64) *cltypes.DataColumnSidecar {
 	sidecar := cltypes.NewDataColumnSidecar()
@@ -111,7 +97,7 @@ func (f *blockingColumnFs) Create(name string) (afero.File, error) {
 
 func TestDataColumnStorageDoesNotReportTruncatedSidecar(t *testing.T) {
 	fs := newFailingFs(afero.NewMemMapFs())
-	storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, nil, beaconevents.NewEventEmitter())
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 	impl := storage.(*dataColumnStorageImpl)
 	root := common.HexToHash("0x1234567890abcdef")
 	const slot = 1000
@@ -137,7 +123,7 @@ func TestDuplicateColumnWriteDoesNotEmitAnotherEvent(t *testing.T) {
 	events := make(chan *beaconevents.EventStream, 2)
 	subscription := emitters.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
-	storage := NewDataColumnStore(afero.NewMemMapFs(), 1000, globalBeaconConfig, nil, emitters)
+	storage := NewDataColumnStore(afero.NewMemMapFs(), globalBeaconConfig, emitters)
 	root := common.HexToHash("0x1234567890abcdef")
 	sidecar := createTestDataColumnSidecar(1000, 1)
 
@@ -152,7 +138,7 @@ func TestDuplicateColumnWriteDoesNotEmitAnotherEvent(t *testing.T) {
 func TestDataColumnWholeSlotOperationsDoNotInterleaveWithWrite(t *testing.T) {
 	t.Run("saved index scan", func(t *testing.T) {
 		fs := &blockingColumnFs{Fs: afero.NewMemMapFs()}
-		storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, nil, beaconevents.NewEventEmitter())
+		storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 		root := common.HexToHash("0x1234567890abcdef")
 		const slot = 1000
 		require.NoError(t, storage.WriteColumnSidecars(t.Context(), root, 0, createTestDataColumnSidecar(slot, 0)))
@@ -195,7 +181,7 @@ func TestDataColumnWholeSlotOperationsDoNotInterleaveWithWrite(t *testing.T) {
 
 	t.Run("remove loop", func(t *testing.T) {
 		fs := &blockingColumnFs{Fs: afero.NewMemMapFs()}
-		storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, nil, beaconevents.NewEventEmitter())
+		storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 		root := common.HexToHash("0x1234567890abcdef")
 		const slot = 1000
 		for index := range int64(2) {
@@ -236,10 +222,8 @@ func TestDataColumnWholeSlotOperationsDoNotInterleaveWithWrite(t *testing.T) {
 func TestNewDataColumnStore(t *testing.T) {
 	fs := afero.NewMemMapFs()
 	beaconConfig := &clparams.BeaconChainConfig{}
-	ctrl := gomock.NewController(t)
-	mockClock := eth_clock.NewMockEthereumClock(ctrl)
 
-	storage := NewDataColumnStore(fs, 1000, beaconConfig, mockClock, beaconevents.NewEventEmitter())
+	storage := NewDataColumnStore(fs, beaconConfig, beaconevents.NewEventEmitter())
 
 	assert.NotNil(t, storage)
 
@@ -247,12 +231,10 @@ func TestNewDataColumnStore(t *testing.T) {
 	assert.True(t, ok)
 	assert.Equal(t, fs, impl.fs)
 	assert.Equal(t, beaconConfig, impl.beaconChainConfig)
-	assert.Equal(t, mockClock, impl.ethClock)
-	assert.Equal(t, uint64(1000), impl.slotsKept)
 }
 
 func TestWriteColumnSidecars(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -274,7 +256,7 @@ func TestWriteColumnSidecars(t *testing.T) {
 }
 
 func TestReadColumnSidecarByColumnIndex(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -298,7 +280,7 @@ func TestReadColumnSidecarByColumnIndex(t *testing.T) {
 }
 
 func TestColumnSidecarExists(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -321,7 +303,7 @@ func TestColumnSidecarExists(t *testing.T) {
 }
 
 func TestColumnSidecarExistsWithInvalidParameters(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.Hash{} // Empty hash
@@ -340,7 +322,7 @@ func TestColumnSidecarExistsWithInvalidParameters(t *testing.T) {
 }
 
 func TestColumnSidecarExistsWithDirectoryError(t *testing.T) {
-	storage, fs, _, _ := setupTestDataColumnStorage(t)
+	storage, fs, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -360,7 +342,7 @@ func TestColumnSidecarExistsWithDirectoryError(t *testing.T) {
 }
 
 func TestRemoveColumnSidecars(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -398,7 +380,7 @@ func TestRemoveColumnSidecars(t *testing.T) {
 }
 
 func TestWriteStream(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -423,7 +405,7 @@ func TestWriteStream(t *testing.T) {
 }
 
 func TestGetSavedColumnIndex(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
@@ -449,10 +431,7 @@ func TestGetSavedColumnIndex(t *testing.T) {
 }
 
 func TestPrune(t *testing.T) {
-	storage, fs, _, mockClock := setupTestDataColumnStorage(t)
-
-	// Set up mock clock expectations for pruning
-	mockClock.(*eth_clock.MockEthereumClock).EXPECT().GetCurrentSlot().Return(uint64(50000)).AnyTimes()
+	storage, fs, _ := setupTestDataColumnStorage(t)
 
 	// Create some test directories
 	fs.MkdirAll("0", 0o755) // slot 0-9999
@@ -461,47 +440,49 @@ func TestPrune(t *testing.T) {
 	fs.MkdirAll("3", 0o755) // slot 30000-39999
 	fs.MkdirAll("4", 0o755) // slot 40000-49999
 
-	// Test pruning with keepSlotDistance = 10000
-	err := storage.Prune(10000)
+	// Test pruning below slot 40000.
+	err := storage.PruneBelow(40000)
+	require.NoError(t, err)
+}
+
+func TestDataColumnStorePruneBelowZeroRemovesNothing(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	require.NoError(t, fs.MkdirAll("0", 0o755))
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+
+	require.NoError(t, storage.PruneBelow(0))
+	_, err := fs.Stat("0")
 	require.NoError(t, err)
 }
 
 func TestPruneWithLargeKeepDistance(t *testing.T) {
-	storage, fs, _, mockClock := setupTestDataColumnStorage(t)
-
-	// Set up mock clock expectations for pruning
-	mockClock.(*eth_clock.MockEthereumClock).EXPECT().GetCurrentSlot().Return(uint64(100000)).AnyTimes()
+	storage, fs, _ := setupTestDataColumnStorage(t)
 
 	// Create some test directories
 	fs.MkdirAll("0", 0o755) // slot 0-9999
 	fs.MkdirAll("1", 0o755) // slot 10000-19999
 
-	// Test pruning with very large keepSlotDistance
-	err := storage.Prune(50000)
+	// Test pruning below slot 50000.
+	err := storage.PruneBelow(50000)
 	require.NoError(t, err)
 }
 
 func TestPruneWithZeroKeepDistance(t *testing.T) {
-	storage, fs, _, mockClock := setupTestDataColumnStorage(t)
-
-	// Set up mock clock expectations for pruning
-	mockClock.(*eth_clock.MockEthereumClock).EXPECT().GetCurrentSlot().Return(uint64(1000)).AnyTimes()
+	storage, fs, _ := setupTestDataColumnStorage(t)
 
 	// Create some test directories
 	fs.MkdirAll("0", 0o755) // slot 0-9999
 
-	// Test pruning with zero keepSlotDistance
-	err := storage.Prune(0)
+	// Test a zero pruning floor.
+	err := storage.PruneBelow(0)
 	require.NoError(t, err)
 }
 
 func TestWriteColumnSidecarsErrorHandling(t *testing.T) {
 	// Create a filesystem that will fail on directory creation
 	fs := afero.NewMemMapFs()
-	ctrl := gomock.NewController(t)
-	mockClock := eth_clock.NewMockEthereumClock(ctrl)
 
-	storage := NewDataColumnStore(fs, 1000, globalBeaconConfig, mockClock, beaconevents.NewEventEmitter())
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 	columnIndex := int64(1)
@@ -513,7 +494,7 @@ func TestWriteColumnSidecarsErrorHandling(t *testing.T) {
 }
 
 func TestReadColumnSidecarByColumnIndexErrorHandling(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 	columnIndex := int64(1)
@@ -524,7 +505,7 @@ func TestReadColumnSidecarByColumnIndexErrorHandling(t *testing.T) {
 }
 
 func TestRemoveColumnSidecarsNonExistent(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 
@@ -534,7 +515,7 @@ func TestRemoveColumnSidecarsNonExistent(t *testing.T) {
 }
 
 func TestWriteStreamErrorHandling(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")
 	columnIndex := int64(1)
@@ -546,7 +527,7 @@ func TestWriteStreamErrorHandling(t *testing.T) {
 }
 
 func TestConcurrentAccess(t *testing.T) {
-	storage, _, _, _ := setupTestDataColumnStorage(t)
+	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()
 
 	blockRoot := common.HexToHash("0x1234567890abcdef")

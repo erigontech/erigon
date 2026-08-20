@@ -18,7 +18,6 @@ package handler
 
 import (
 	"context"
-	"math"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -104,7 +103,7 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	genesis, err := initial_state.GetGenesisState(t.Context(), chainspec.MainnetChainID)
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesis.GenesisTime(), genesis.GenesisValidatorsRoot(), &bcfg)
-	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), math.MaxUint64, &bcfg, ethClock)
+	blobStorage := blob_storage.NewBlobStore(blobDb, afero.NewMemMapFs(), &bcfg)
 	columnStorage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
 	blobStorage.WriteBlobSidecars(ctx, firstBlockRoot, []*cltypes.BlobSidecar{
 		{

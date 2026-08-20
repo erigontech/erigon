@@ -9,7 +9,6 @@ import (
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/spf13/afero"
@@ -23,23 +22,19 @@ type DataColumnStorage interface {
 	ColumnSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, columnIndex int64) (bool, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	GetSavedColumnIndex(ctx context.Context, slot uint64, blockRoot common.Hash) ([]uint64, error)
-	Prune(keepSlotDistance uint64) error
+	PruneBelow(slot uint64) error
 }
 
 type dataColumnStorageImpl struct {
 	bucketStore
 	slotLocks
 	beaconChainConfig *clparams.BeaconChainConfig
-	ethClock          eth_clock.EthereumClock
-	slotsKept         uint64
 	emitters          *beaconevents.EventEmitter
 }
 
-func NewDataColumnStore(fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, emitters *beaconevents.EventEmitter) DataColumnStorage {
+func NewDataColumnStore(fs afero.Fs, beaconChainConfig *clparams.BeaconChainConfig, emitters *beaconevents.EventEmitter) DataColumnStorage {
 	impl := &dataColumnStorageImpl{
 		beaconChainConfig: beaconChainConfig,
-		ethClock:          ethClock,
-		slotsKept:         slotsKept,
 		emitters:          emitters,
 	}
 	impl.bucketStore.init(fs)
@@ -135,13 +130,7 @@ func (s *dataColumnStorageImpl) GetSavedColumnIndex(ctx context.Context, slot ui
 	return savedColumns, nil
 }
 
-func (s *dataColumnStorageImpl) Prune(keepSlotDistance uint64) error {
-	currentSlot := s.ethClock.GetCurrentSlot()
-	if currentSlot <= keepSlotDistance {
-		return nil
-	}
-	currentSlot -= keepSlotDistance
-	currentSlot = (currentSlot / subdivisionSlot) * subdivisionSlot
-	log.Debug("pruning data column sidecars", "cutoff_slot", currentSlot)
-	return s.pruneBelow(currentSlot)
+func (s *dataColumnStorageImpl) PruneBelow(slot uint64) error {
+	log.Debug("pruning data column sidecars", "cutoff_slot", slot)
+	return s.pruneBelow(slot)
 }

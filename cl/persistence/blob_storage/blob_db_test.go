@@ -18,7 +18,6 @@ package blob_storage
 
 import (
 	"context"
-	"math"
 	"slices"
 	"strings"
 	"sync"
@@ -50,7 +49,7 @@ func TestBlobDB(t *testing.T) {
 	s2 := cltypes.NewBlobSidecar(1, &cltypes.Blob{3}, common.Bytes48{5}, common.Bytes48{9}, &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 1}}, solid.NewHashVector(cltypes.CommitmentBranchSize))
 
 	//
-	bs := NewBlobStore(db, afero.NewMemMapFs(), 12, &clparams.MainnetBeaconConfig, nil)
+	bs := NewBlobStore(db, afero.NewMemMapFs(), &clparams.MainnetBeaconConfig)
 	blockRoot := common.Hash{1}
 	err := bs.WriteBlobSidecars(context.Background(), blockRoot, []*cltypes.BlobSidecar{s1, s2})
 	require.NoError(t, err)
@@ -107,7 +106,7 @@ func TestBlobStoreRemoveSucceedsWhenAFileIsAlreadyGone(t *testing.T) {
 	defer db.Close()
 
 	fs := afero.NewMemMapFs()
-	bs := NewBlobStore(db, fs, math.MaxUint64, &clparams.MainnetBeaconConfig, nil)
+	bs := NewBlobStore(db, fs, &clparams.MainnetBeaconConfig)
 	root := common.Hash{4}
 	const slot = 12_345
 
@@ -136,7 +135,7 @@ func TestBlobStoreBatchWriteDoesNotInterleaveWithAConcurrentWrite(t *testing.T) 
 	defer db.Close()
 
 	fs := newCreateOrderFs(afero.NewMemMapFs())
-	bs := NewBlobStore(db, fs, math.MaxUint64, &clparams.MainnetBeaconConfig, nil)
+	bs := NewBlobStore(db, fs, &clparams.MainnetBeaconConfig)
 
 	const slot = 100
 	batchRoot, otherRoot := common.Hash{1}, common.Hash{2}
@@ -180,7 +179,7 @@ func TestBlobStoreEmptyBatchRecordsItsZeroRowWithoutLocking(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	bs := NewBlobStore(db, afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, nil).(*BlobStore)
+	bs := NewBlobStore(db, afero.NewMemMapFs(), &clparams.MainnetBeaconConfig).(*BlobStore)
 	root := common.Hash{3}
 
 	for i := range bs.locks {

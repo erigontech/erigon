@@ -277,18 +277,18 @@ Every task lists its tests before the implementation they cover. In Go the red p
 - Modify: `cl/persistence/blob_storage/blob_db_test.go`
 - Modify: `cl/persistence/blob_storage/data_column_db_test.go`
 
-- [ ] write tests for `floorFor` in package `stages`: `head <= keep` gives 0, a `MaxUint64` keep gives 0, a normal window gives `head - keep`
-- [ ] write a test that `PeerDas.PruneBelow` advances `EarliestAvailableSlot` to the floor, refuses to move it backwards, sets 0 outright when the floor is 0, and still advances when the column prune returned an error
-- [ ] write a test that `PruneBelow(0)` removes nothing, and one that a `PruneBelow` error reaches the caller's log rather than being discarded
-- [ ] replace `Prune()` and `Prune(keepSlotDistance)` with `PruneBelow(slot uint64)` on `BlobStorage`, `DataColumnStorage` and `PeerDas`, keeping the `EarliestAvailableSlot` update in `peerdas.PruneBelow` (`peer_das.go:337-345`) with the floor in place of `curSlot - keepSlotDistance`
-- [ ] add `floorFor(head, keep uint64) uint64` to `cleanup_and_pruning.go`, and delete the inline floor code left in both stores by tasks 4 and 5
-- [ ] drop `slotsKept` and `ethClock` from `NewBlobStore` and `NewDataColumnStore` — the clock is read only by `Prune` — and drop the now-unused `blobPruneDistance` parameter from `OpenCaplinDatabase` (`run.go:86-94`), updating its 12 call sites in `cmd/capcli/cli.go` — lines 153, 296, 485, 526, 613, 664, 1053, 1129, 1170, 1233, 1306, 1365
-- [ ] move the `pruneBlobDistance` expression from `run.go:292` into `cleanupAndPruning`, and check and log both `PruneBelow` return values there
-- [ ] resolve `ColumnKeepSlots == 0` to the spec window exactly as `cleanup_and_pruning.go:30-33` does today, unchanged
-- [ ] comment which datum each pruner cuts against and why they differ — no forward reference to the freeze gate, which `.claude/rules/comments.md` bans as scope narration
-- [ ] update the three `Prune(N)` calls at `data_column_db_test.go:345,360,374`, delete the `impl.slotsKept` assertion at `data_column_db_test.go:86`, and update every direct constructor call: `data_column_db_test.go:54,77,384`, `blob_db_test.go:48`, `cl/spectest/consensus_tests/fork_choice.go:312-313`, `cl/beacon/handler/utils_test.go:107`, `cl/phase1/forkchoice/fork_choice_test.go:94,190`, `cl/phase1/forkchoice/weight_store_diff_test.go:87`, `cl/das/peer_das_download_test.go:139`, `cl/sentinel/handlers/blobs_test.go:99,223`, `cl/sentinel/handlers/data_column_sidecar_test.go:472`
-- [ ] regenerate all three mocks
-- [ ] run `go test ./cl/... ./cmd/caplin/... ./cmd/capcli/...` and `go build ./...` — must pass before task 7
+- [x] write tests for `floorFor` in package `stages`: `head <= keep` gives 0, a `MaxUint64` keep gives 0, a normal window gives `head - keep`
+- [x] write a test that `PeerDas.PruneBelow` advances `EarliestAvailableSlot` to the floor, refuses to move it backwards, sets 0 outright when the floor is 0, and still advances when the column prune returned an error
+- [x] write a test that `PruneBelow(0)` removes nothing, and one that a `PruneBelow` error reaches the caller's log rather than being discarded
+- [x] replace `Prune()` and `Prune(keepSlotDistance)` with `PruneBelow(slot uint64)` on `BlobStorage`, `DataColumnStorage` and `PeerDas`, keeping the `EarliestAvailableSlot` update in `peerdas.PruneBelow` (`peer_das.go:337-345`) with the floor in place of `curSlot - keepSlotDistance`
+- [x] add `floorFor(head, keep uint64) uint64` to `cleanup_and_pruning.go`, and delete the inline floor code left in both stores by tasks 4 and 5
+- [x] drop `slotsKept` and `ethClock` from `NewBlobStore` and `NewDataColumnStore` — the clock is read only by `Prune` — and drop the now-unused `blobPruneDistance` parameter from `OpenCaplinDatabase` (`run.go:86-94`), updating its 12 call sites in `cmd/capcli/cli.go` — lines 153, 296, 485, 526, 613, 664, 1053, 1129, 1170, 1233, 1306, 1365
+- [x] move the `pruneBlobDistance` expression from `run.go:292` into `cleanupAndPruning`, and check and log both `PruneBelow` return values there
+- [x] resolve `ColumnKeepSlots == 0` to the spec window exactly as `cleanup_and_pruning.go:30-33` does today, unchanged
+- [x] comment which datum each pruner cuts against and why they differ — no forward reference to the freeze gate, which `.claude/rules/comments.md` bans as scope narration
+- [x] update the three `Prune(N)` calls at `data_column_db_test.go:345,360,374`, delete the `impl.slotsKept` assertion at `data_column_db_test.go:86`, and update every direct constructor call: `data_column_db_test.go:54,77,384`, `blob_db_test.go:48`, `cl/spectest/consensus_tests/fork_choice.go:312-313`, `cl/beacon/handler/utils_test.go:107`, `cl/phase1/forkchoice/fork_choice_test.go:94,190`, `cl/phase1/forkchoice/weight_store_diff_test.go:87`, `cl/das/peer_das_download_test.go:139`, `cl/sentinel/handlers/blobs_test.go:99,223`, `cl/sentinel/handlers/data_column_sidecar_test.go:472`
+- [x] regenerate all three mocks
+- [x] run `go test ./cl/... ./cmd/caplin/... ./cmd/capcli/...` and `go build ./...` — must pass before task 7
 
 ### Task 7: Concurrency guards
 

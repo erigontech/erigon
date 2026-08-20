@@ -53,7 +53,7 @@ type PeerDas interface {
 	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error)
-	Prune(keepSlotDistance uint64) error
+	PruneBelow(slot uint64) error
 	UpdateValidatorsCustody(cgc uint64)
 	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
 	IsBlobAlreadyRecovered(blockRoot common.Hash) bool
@@ -329,21 +329,14 @@ func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 	}
 }
 
-func (d *peerdas) Prune(keepSlotDistance uint64) error {
-	if err := d.columnStorage.Prune(keepSlotDistance); err != nil {
-		return err
-	}
-
-	curSlot := d.ethClock.GetCurrentSlot()
-	if curSlot < keepSlotDistance {
+func (d *peerdas) PruneBelow(slot uint64) error {
+	err := d.columnStorage.PruneBelow(slot)
+	if slot == 0 {
 		d.state.SetEarliestAvailableSlot(0)
-	} else {
-		earliestSlot := curSlot - keepSlotDistance
-		if earliestSlot > d.state.GetEarliestAvailableSlot() {
-			d.state.SetEarliestAvailableSlot(earliestSlot)
-		}
+	} else if slot > d.state.GetEarliestAvailableSlot() {
+		d.state.SetEarliestAvailableSlot(slot)
 	}
-	return nil
+	return err
 }
 
 type recoverBlobsRequest struct {

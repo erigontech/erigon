@@ -21,7 +21,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"io"
-	"math"
 	"sync"
 	"sync/atomic"
 
@@ -31,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/db/kv"
@@ -45,7 +43,7 @@ type BlobStorage interface {
 	BlobSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, idx uint64) (bool, error)
 	WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error // Used for P2P networking
 	KzgCommitmentsCount(ctx context.Context, blockRoot common.Hash) (uint32, error)
-	Prune() error
+	PruneBelow(slot uint64) error
 }
 
 type BlobStore struct {
@@ -53,12 +51,10 @@ type BlobStore struct {
 	slotLocks
 	db                kv.RwDB
 	beaconChainConfig *clparams.BeaconChainConfig
-	ethClock          eth_clock.EthereumClock
-	slotsKept         uint64
 }
 
-func NewBlobStore(db kv.RwDB, fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) BlobStorage {
-	bs := &BlobStore{db: db, slotsKept: slotsKept, beaconChainConfig: beaconChainConfig, ethClock: ethClock}
+func NewBlobStore(db kv.RwDB, fs afero.Fs, beaconChainConfig *clparams.BeaconChainConfig) BlobStorage {
+	bs := &BlobStore{db: db, beaconChainConfig: beaconChainConfig}
 	bs.bucketStore.init(fs)
 	bs.slotLocks.init()
 	return bs
@@ -134,17 +130,8 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 	return blobSidecars, true, nil
 }
 
-// Do a bit of pruning
-func (bs *BlobStore) Prune() error {
-	if bs.slotsKept == math.MaxUint64 {
-		return nil
-	}
-
-	currentSlot := bs.ethClock.GetCurrentSlot()
-	if currentSlot <= bs.slotsKept {
-		return nil
-	}
-	return bs.pruneBelow(currentSlot - bs.slotsKept)
+func (bs *BlobStore) PruneBelow(slot uint64) error {
+	return bs.pruneBelow(slot)
 }
 
 func (bs *BlobStore) BlobSidecarExists(ctx context.Context, slot uint64, blockRoot common.Hash, idx uint64) (bool, error) {

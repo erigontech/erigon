@@ -19,7 +19,6 @@ package forkchoice_test
 import (
 	"context"
 	_ "embed"
-	"math"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -91,7 +90,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	genesisState, err := initial_state.GetGenesisState(t.Context(), 1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
-	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &clparams.MainnetBeaconConfig)
 	localValidators := validator_params.NewValidatorParams()
 
 	store, err := forkchoice.NewForkChoiceStore(
@@ -187,7 +186,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	genesisState, err := initial_state.GetGenesisState(t.Context(), 1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
-	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &clparams.MainnetBeaconConfig)
 	localValidators := validator_params.NewValidatorParams()
 
 	store, err := forkchoice.NewForkChoiceStore(
