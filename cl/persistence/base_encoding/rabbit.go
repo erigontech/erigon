@@ -28,7 +28,7 @@ import (
 
 func WriteRabbits(in []uint64, w io.Writer) error {
 	// Retrieve compressor first.
-	compressor := compressorPool.Get().(*zstd.Encoder)
+	compressor := zstdWriterPool.Get().(*zstd.Encoder)
 	defer putComp(compressor)
 	compressor.Reset(w)
 

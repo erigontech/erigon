@@ -29,7 +29,7 @@ import (
 )
 
 // make a sync.pool of compressors (zstd)
-var compressorPool = sync.Pool{
+var zstdWriterPool = sync.Pool{
 	New: func() any {
 		compressor, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedFastest))
 		if err != nil {
@@ -41,10 +41,10 @@ var compressorPool = sync.Pool{
 
 func putComp(v *zstd.Encoder) {
 	v.Reset(nil)
-	compressorPool.Put(v)
+	zstdWriterPool.Put(v)
 }
 
-var decompressorPool = sync.Pool{
+var zstdReaderPool = sync.Pool{
 	New: func() any {
 		decompressor, err := zstd.NewReader(nil)
 		if err != nil {
@@ -57,7 +57,7 @@ var decompressorPool = sync.Pool{
 // GetZstdReader returns a pooled decoder reading r. Release with PutZstdReader, not
 // Close: Close is permanent.
 func GetZstdReader(r io.Reader) (*zstd.Decoder, error) {
-	decompressor := decompressorPool.Get().(*zstd.Decoder)
+	decompressor := zstdReaderPool.Get().(*zstd.Decoder)
 	if err := decompressor.Reset(r); err != nil {
 		PutZstdReader(decompressor)
 		return nil, err
@@ -67,7 +67,7 @@ func GetZstdReader(r io.Reader) (*zstd.Decoder, error) {
 
 func PutZstdReader(v *zstd.Decoder) {
 	_ = v.Reset(nil)
-	decompressorPool.Put(v)
+	zstdReaderPool.Put(v)
 }
 
 var repeatedPatternBufferPool = sync.Pool{
@@ -87,7 +87,7 @@ func ComputeCompressedSerializedUint64ListDiff(w io.Writer, oldVal, newVal []byt
 		return errors.New("old list is longer than new list")
 	}
 
-	compressor := compressorPool.Get().(*zstd.Encoder)
+	compressor := zstdWriterPool.Get().(*zstd.Encoder)
 	defer putComp(compressor)
 	compressor.Reset(w)
 
