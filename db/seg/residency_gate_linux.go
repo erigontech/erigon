@@ -57,11 +57,11 @@ func (g *Getter) residencyRegion(offset uint64) (length int, fileOffset int64) {
 		return 0, 0
 	}
 	absStart := int64(g.dataOffset + offset)
-	if absStart < 0 || absStart >= g.d.size {
+	if absStart < 0 || absStart >= g.d.Size() {
 		return 0, 0
 	}
 	aligned := absStart &^ int64(pageSize-1)
-	end := min(aligned+int64(residencyWindow), g.d.size)
+	end := min(aligned+int64(residencyWindow), g.d.Size())
 	return int(end - aligned), aligned
 }
 
@@ -73,31 +73,34 @@ func (g *Getter) ensureResident(offset uint64) {
 	if length == 0 {
 		return
 	}
-	rb := g.residencyBitmap()
+	rb := g.d.residencyBitmap()
 	first := int(fileOffset) / pageSize
 	last := first + (length-1)/pageSize
 	if rb.residentRange(first, last) {
 		return // believed resident — go straight to the mapping (a stale bit just faults)
 	}
-	g.warm(fileOffset, length)
+	g.d.warm(fileOffset, length)
 	rb.markRange(first, last)
 }
 
-func (g *Getter) residencyBitmap() *residencyBitmap {
-	if rb := g.d.residency.Load(); rb != nil {
+// residencyBitmap is per file, not per reader: mincore needs a real mapping and
+// the decompressor's spans the whole file, while residency itself is a page-cache
+// property every mapping of that file shares.
+func (d *Decompressor) residencyBitmap() *residencyBitmap {
+	if rb := d.residency.Load(); rb != nil {
 		return rb
 	}
-	g.d.residencyOnce.Do(func() {
-		g.d.residency.Store(newResidencyBitmap(g.d._mmapHandle, int(g.d.f.Fd())))
+	d.residencyOnce.Do(func() {
+		d.residency.Store(newResidencyBitmap(d._mmapHandle, int(d.f.Fd())))
 	})
-	return g.d.residency.Load()
+	return d.residency.Load()
 }
 
 // warm pulls the byte range into the page cache via io_uring so the following
 // mmap access is a minor fault. If io_uring is unavailable, WarmOne no-ops —
 // the range is simply left cold, not warmed.
-func (g *Getter) warm(fileOffset int64, n int) {
-	iouring.WarmOne(int(g.d.f.Fd()), fileOffset, n)
+func (d *Decompressor) warm(fileOffset int64, n int) {
+	iouring.WarmOne(int(d.f.Fd()), fileOffset, n)
 }
 
 // residencyBitmap caches page-cache residency, one bit per mapped page, so the

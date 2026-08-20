@@ -46,7 +46,7 @@ func (g *Getter) warmLiteral(offset, length uint64) {
 	}
 	for length > 0 {
 		chunk := min(length, uint64(iouring.WarmBufSize))
-		iouring.WarmOne(int(g.d.f.Fd()), int64(offset), int(chunk))
+		g.d.warm(int64(offset), int(chunk))
 		offset += chunk
 		length -= chunk
 	}
