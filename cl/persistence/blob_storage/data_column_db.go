@@ -41,8 +41,6 @@ type dataColumnStorageImpl struct {
 	rwLocks []sync.RWMutex
 }
 
-const rwLocksCount = 64
-
 func NewDataColumnStore(fs afero.Fs, slotsKept uint64, beaconChainConfig *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock, emitters *beaconevents.EventEmitter) DataColumnStorage {
 	impl := &dataColumnStorageImpl{
 		fs:                fs,

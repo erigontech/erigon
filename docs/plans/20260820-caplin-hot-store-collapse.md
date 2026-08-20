@@ -197,18 +197,18 @@ Every task lists its tests before the implementation they cover. In Go the red p
 - Create: `cl/persistence/blob_storage/bucket_store.go`
 - Create: `cl/persistence/blob_storage/bucket_store_test.go`
 
-- [ ] write tests for `path` pinning the exact strings `blobSidecarFilePath` and `dataColumnFilePath` produce today (red: type does not exist)
-- [ ] write `pruneBelow` success tests: removes only buckets strictly below the cutoff, idempotent on a second call
-- [ ] write the database-safety test: a `chaindata` directory in the store root survives every prune, alongside entries like `0x`, `12a`, ` 7`, `007` and a plain file named `5` — name the test for the database it protects, not for "non-numeric entries"
-- [ ] write `pruneBelow` edge-case tests: `pruneBelow(0)` removes nothing, a readdir error propagates to the caller
-- [ ] write the syscall-count test with the task 1 counting wrapper: `RemoveAll` is called exactly once per existing expiring bucket and never for a bucket that does not exist
-- [ ] move `subdivisionSlot` and `rwLocksCount` into the new file from `blob_db.go:44-46` and `data_column_db.go:44`
-- [ ] add `bucketStore{fs}` with `init(fs)`, and `slotLocks` with `init()` and `forSlot(slot)`, so the stripe array has one implementation while the façades decide when to take it
-- [ ] add `path(slot, root, idx)` reproducing today's `<slot/subdivisionSlot>/<root>_<idx>` exactly
-- [ ] add `pruneBelow(slot)` taking no lock: readdir the root, accept an entry as a bucket only if it is a directory whose name parses as `uint64` and formats back byte-identically, and `RemoveAll` those below the cutoff
-- [ ] comment the allowlist with the reason — the blob index MDBX is a sibling of the buckets in this directory, so a looser filter deletes it
-- [ ] mutation-check each guard turns a test red: `<` to `<=`, relax the allowlist to "any directory", and revert `pruneBelow` to `for i := uint64(0); i < currentSlot; i += subdivisionSlot`
-- [ ] run tests — must pass before task 3
+- [x] write tests for `path` pinning the exact strings `blobSidecarFilePath` and `dataColumnFilePath` produce today (red: type does not exist)
+- [x] write `pruneBelow` success tests: removes only buckets strictly below the cutoff, idempotent on a second call
+- [x] write the database-safety test: a `chaindata` directory in the store root survives every prune, alongside entries like `0x`, `12a`, ` 7`, `007` and a plain file named `5` — name the test for the database it protects, not for "non-numeric entries"
+- [x] write `pruneBelow` edge-case tests: `pruneBelow(0)` removes nothing, a readdir error propagates to the caller
+- [x] write the syscall-count test with the task 1 counting wrapper: `RemoveAll` is called exactly once per existing expiring bucket and never for a bucket that does not exist
+- [x] move `subdivisionSlot` and `rwLocksCount` into the new file from `blob_db.go:44-46` and `data_column_db.go:44`
+- [x] add `bucketStore{fs}` with `init(fs)`, and `slotLocks` with `init()` and `forSlot(slot)`, so the stripe array has one implementation while the façades decide when to take it
+- [x] add `path(slot, root, idx)` reproducing today's `<slot/subdivisionSlot>/<root>_<idx>` exactly
+- [x] add `pruneBelow(slot)` taking no lock: readdir the root, accept an entry as a bucket only if it is a directory whose name parses as `uint64` and formats back byte-identically, and `RemoveAll` those below the cutoff
+- [x] comment the allowlist with the reason — the blob index MDBX is a sibling of the buckets in this directory, so a looser filter deletes it
+- [x] mutation-check each guard turns a test red: `<` to `<=`, relax the allowlist to "any directory", and revert `pruneBelow` to `for i := uint64(0); i < currentSlot; i += subdivisionSlot`
+- [x] run tests — must pass before task 3
 
 ### Task 3: bucketStore write, read, exists, remove and stream
 

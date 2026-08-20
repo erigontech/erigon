@@ -41,10 +41,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-const (
-	subdivisionSlot = 10_000
-)
-
 //go:generate mockgen -typed=true -destination=./mock_services/blob_storage_mock.go -package=mock_services . BlobStorage
 type BlobStorage interface {
 	WriteBlobSidecars(ctx context.Context, blockRoot common.Hash, blobSidecars []*cltypes.BlobSidecar) error
