@@ -85,11 +85,12 @@ func (s *payloadPreparationScratch) resetForTargetSlot(targetSlot uint64) {
 	s.targetSlot = targetSlot
 }
 
-// payloadPreparationGate keeps builder startup from overlapping execution work for production or
-// local block adoption. It also records local block work so stale-head fallback stays off its path.
-// Preparation does not hold the execution gate while copying state or waiting to retry.
+// payloadPreparationGate separates short execution exclusion from the wider local block lifecycle.
+// Production and adoption hold the shared side only around execution-critical sections.
+// Preparation takes the exclusive side with TryLock, so it never queues ahead of them.
+// localBlockWork only suppresses older-head fallback; it does not extend the execution lock.
 type payloadPreparationGate struct {
-	attempt        sync.RWMutex
+	executionWork  sync.RWMutex
 	localBlockWork atomic.Int64
 }
 
@@ -124,25 +125,27 @@ func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now t
 }
 
 func (g *payloadPreparationGate) beginExecutionWork() func() {
-	g.attempt.RLock()
-	return g.attempt.RUnlock
+	g.executionWork.RLock()
+	return g.executionWork.RUnlock
 }
 
 func (g *payloadPreparationGate) idle() bool {
-	if !g.attempt.TryLock() {
+	if !g.executionWork.TryLock() {
 		return false
 	}
-	g.attempt.Unlock()
+	g.executionWork.Unlock()
 	return true
 }
 
 func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
-	if !g.attempt.TryLock() {
+	if !g.executionWork.TryLock() {
 		return nil, false
 	}
-	return g.attempt.Unlock, true
+	return g.executionWork.Unlock, true
 }
 
+// The wider lifecycle marker is reference-counted because local work can overlap. The returned
+// release is idempotent, so asynchronous and error cleanup paths may share it safely.
 func (g *payloadPreparationGate) beginLocalBlockWork() func() {
 	g.localBlockWork.Add(1)
 	return sync.OnceFunc(func() {

@@ -621,7 +621,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
-	// A parsed production request keeps stale-head preparation off its critical path.
+	// Stale-head preparation should not compete with a valid production request. Execution
+	// exclusion is narrower and is acquired only around execution-layer calls.
 	finishLocalBlockWork := a.payloadPreparationGate.beginLocalBlockWork()
 	defer finishLocalBlockWork()
 
@@ -1153,8 +1154,9 @@ func (a *ApiHandler) produceBeaconBody(
 		attrs := a.payloadBuildAttributes(
 			baseState, blockRoot, targetSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
 		)
-		// Preparation must not enter the execution module while production updates fork choice and
-		// collects the payload. State derivation and returned-payload processing stay outside this gate.
+		// Hold the shared execution gate only around fork-choice update and payload collection.
+		// Preparation takes the exclusive side without queuing; state derivation and returned-payload
+		// processing stay outside.
 		payload, bundles, requestsBundle, blockValue, err := func() (
 			*cltypes.Eth1Block,
 			*engine_types.BlobsBundle,
@@ -2261,6 +2263,8 @@ func (a *ApiHandler) adoptProducedBlock(
 	block *cltypes.SignedBeaconBlock,
 	blockRoot common.Hash,
 ) (common.Hash, *state.CachingBeaconState, error) {
+	// Adoption changes the execution head, so preparation must not concurrently start a builder
+	// from the previous head.
 	finishExecutionWork := a.payloadPreparationGate.beginExecutionWork()
 	defer finishExecutionWork()
 

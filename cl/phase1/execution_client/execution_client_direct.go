@@ -160,6 +160,8 @@ func (cc *ExecutionClientDirect) StartPayloadBuild(ctx context.Context, head com
 	return encodeDirectPayloadID(id), nil
 }
 
+// Direct execution-module payload IDs use little-endian uint64 encoding. Engine API payload IDs
+// are a separate wire format.
 func encodeDirectPayloadID(id uint64) []byte {
 	idBytes := make([]byte, 8)
 	binary.LittleEndian.PutUint64(idBytes, id)
