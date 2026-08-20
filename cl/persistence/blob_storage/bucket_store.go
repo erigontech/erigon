@@ -81,10 +81,15 @@ func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Mar
 		b.fs.Remove(tmp)
 		return false, err
 	}
-	// Windows replaces via MoveFileEx, which needs delete access to the destination, so
-	// this fails while another goroutine holds the target open for reading.
 	if err := b.fs.Rename(tmp, file); err != nil {
 		b.fs.Remove(tmp)
+		// Windows replaces via MoveFileEx, which needs delete access to the destination,
+		// so this fails while another goroutine holds the target open for reading. A
+		// sidecar is determined by its (slot, root, idx), so the file already there is
+		// the one we were about to write; keeping it satisfies the caller either way.
+		if !created {
+			return false, nil
+		}
 		return false, err
 	}
 	return created, nil

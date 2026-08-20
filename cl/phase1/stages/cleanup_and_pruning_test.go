@@ -133,3 +133,29 @@ func TestCleanupAndPruningKeepsEveryBlobUnderArchiveFlags(t *testing.T) {
 		})
 	}
 }
+
+func TestCleanupAndPruningResolvesZeroColumnKeepSlotsToTheSpecWindow(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
+	peerDas := das_mock_services.NewMockPeerDas(ctrl)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+
+	const head = 200_000
+	cfg := &Cfg{
+		indiciesDB:   mdbxtest.NewTestDB(t, dbcfg.ChainDB),
+		ethClock:     clock,
+		beaconCfg:    &clparams.MainnetBeaconConfig,
+		blobStore:    blobStore,
+		peerDas:      peerDas,
+		caplinConfig: clparams.CaplinConfig{},
+	}
+	// Zero means the spec window, not "keep nothing"; the standalone cmd/caplin binary
+	// leaves the field unset.
+	specWindow := cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests * cfg.beaconCfg.SlotsPerEpoch
+
+	clock.EXPECT().GetCurrentSlot().Return(uint64(head))
+	blobStore.EXPECT().PruneBelow(uint64(head - 128600)).Return(nil)
+	peerDas.EXPECT().PruneBelow(head - specWindow).Return(nil)
+
+	require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+}

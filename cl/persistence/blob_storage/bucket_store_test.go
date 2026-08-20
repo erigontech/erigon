@@ -494,11 +494,11 @@ func TestFacadePruneDoesNotBlockUnrelatedWork(t *testing.T) {
 
 func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 	for _, tc := range []struct {
-		name      string
-		writeWins bool
+		name              string
+		releaseWriteFirst bool
 	}{
-		{name: "write wins", writeWins: true},
-		{name: "prune wins", writeWins: false},
+		{name: "write released first", releaseWriteFirst: true},
+		{name: "both released together", releaseWriteFirst: false},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			fs := newPruneRaceFs(afero.NewBasePathFs(afero.NewOsFs(), t.TempDir()))
@@ -520,7 +520,7 @@ func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 			go func() { pruneDone <- storage.PruneBelow(subdivisionSlot) }()
 			<-fs.removeEntered
 
-			if tc.writeWins {
+			if tc.releaseWriteFirst {
 				close(fs.createRelease)
 				require.NoError(t, <-writeDone)
 				stored, err := storage.ReadColumnSidecarByColumnIndex(t.Context(), slot, root, 0)
