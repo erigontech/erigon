@@ -17,6 +17,7 @@
 package beacon_indicies
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"testing"
@@ -26,6 +27,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
@@ -379,4 +381,33 @@ func TestHasMorePrunableBeaconBlocksReturnsCursorError(t *testing.T) {
 
 	require.False(t, hasMore)
 	require.ErrorIs(t, err, wantErr)
+}
+
+// The encoder options must not change the output: these bytes are copied verbatim
+// into the caplin .seg files.
+func TestWriteBeaconBlockMatchesDefaultEncoderOptions(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = 42
+	block.EncodingSizeSSZ()
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, WriteBeaconBlock(context.Background(), tx, block))
+	stored, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+	require.NoError(t, err)
+
+	var want bytes.Buffer
+	enc, err := zstd.NewWriter(&want, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	require.NoError(t, err)
+	_, err = snapshot_format.WriteBlockForSnapshot(enc, block, nil)
+	require.NoError(t, err)
+	require.NoError(t, enc.Close())
+
+	require.Equal(t, want.Bytes(), stored)
 }

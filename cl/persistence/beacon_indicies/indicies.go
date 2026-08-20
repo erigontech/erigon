@@ -34,10 +34,14 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbutils"
 )
 
-// make a zstd writer pool
+// Encoder options must not change the output: these bytes are copied verbatim into
+// the caplin .seg files. These two do not, and halve what an encoder holds.
 var zstdWriterPool = &sync.Pool{
 	New: func() any {
-		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+		encoder, err := zstd.NewWriter(nil,
+			zstd.WithEncoderLevel(zstd.SpeedBetterCompression),
+			zstd.WithEncoderConcurrency(1),
+			zstd.WithLowerEncoderMem(true))
 		if err != nil {
 			panic(err)
 		}

@@ -77,11 +77,11 @@ func WriteRabbits(in []uint64, w io.Writer) error {
 
 func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 	// Retrieve compressor first
-	decompressor, err := zstd.NewReader(r)
+	decompressor, err := GetZstdReader(r)
 	if err != nil {
 		return nil, err
 	}
-	defer decompressor.Close()
+	defer PutZstdReader(decompressor)
 
 	var buf [8]byte
 	readNum := func() (uint64, error) {
