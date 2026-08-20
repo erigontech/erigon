@@ -527,19 +527,27 @@ func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, uint64(0), stored.Index)
 				close(fs.removeRelease)
+				require.NoError(t, <-pruneDone)
 			} else {
+				// Releasing both makes the goroutines runnable without ordering them, and
+				// Windows refuses to remove a directory holding an open temp handle, so
+				// neither outcome is guaranteed. Only the absence of a partial file is.
 				close(fs.removeRelease)
 				close(fs.createRelease)
-				require.Error(t, <-writeDone)
+				<-writeDone
+				<-pruneDone
 			}
-			require.NoError(t, <-pruneDone)
 
-			exists, err := storage.ColumnSidecarExists(t.Context(), slot, root, 0)
-			require.NoError(t, err)
-			require.False(t, exists)
 			tmpExists, err := afero.Exists(fs, file+tmpSuffix)
 			require.NoError(t, err)
 			require.False(t, tmpExists)
+			exists, err := storage.ColumnSidecarExists(t.Context(), slot, root, 0)
+			require.NoError(t, err)
+			if exists {
+				stored, err := storage.ReadColumnSidecarByColumnIndex(t.Context(), slot, root, 0)
+				require.NoError(t, err)
+				require.Equal(t, uint64(0), stored.Index)
+			}
 		})
 	}
 }

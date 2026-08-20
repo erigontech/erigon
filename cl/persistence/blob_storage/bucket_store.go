@@ -40,9 +40,9 @@ const (
 
 // bucketStore holds sidecars under <slot/subdivisionSlot>/<blockRoot>_<index>.
 //
-// It never locks. Every method is one operation on a complete file — a write lands by
-// rename, so a reader sees the old file or the new one and never a partial — which
-// leaves the caller free to pick the granularity of anything spanning more than one.
+// It never locks, so the caller picks the granularity. Reads need none: a write lands by
+// rename, so a reader sees the old file or the new one and never a partial. Writes do —
+// see write.
 type bucketStore struct {
 	fs afero.Fs
 }
@@ -60,6 +60,10 @@ func (b *bucketStore) path(slot uint64, root common.Hash, idx uint64) (dir, file
 // write encodes v onto a temp file and renames it onto the target, so a failure
 // never leaves a partial file where a reader would take it for a complete one.
 // created reports whether the target was absent beforehand.
+//
+// The temp name is derived from the target alone, so two writes of the same
+// (slot, root, idx) would share it and interleave into one file. Callers must
+// hold that slot's lock.
 func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
 	dir, file := b.path(slot, root, idx)
 	created := false
@@ -77,6 +81,8 @@ func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Mar
 		b.fs.Remove(tmp)
 		return false, err
 	}
+	// Windows replaces via MoveFileEx, which needs delete access to the destination, so
+	// this fails while another goroutine holds the target open for reading.
 	if err := b.fs.Rename(tmp, file); err != nil {
 		b.fs.Remove(tmp)
 		return false, err

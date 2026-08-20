@@ -99,3 +99,37 @@ func TestCleanupAndPruningLogsPruneErrors(t *testing.T) {
 	require.Contains(t, handler.records[0].Ctx, blobErr)
 	require.Contains(t, handler.records[1].Ctx, columnErr)
 }
+
+func TestCleanupAndPruningKeepsEveryBlobUnderArchiveFlags(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		caplin clparams.CaplinConfig
+	}{
+		{name: "blobs-archive", caplin: clparams.CaplinConfig{ArchiveBlobs: true, ColumnKeepSlots: 100}},
+		{name: "blobs-no-pruning", caplin: clparams.CaplinConfig{BlobPruningDisabled: true, ColumnKeepSlots: 100}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			blobStore := blob_mock_services.NewMockBlobStorage(ctrl)
+			peerDas := das_mock_services.NewMockPeerDas(ctrl)
+			clock := eth_clock.NewMockEthereumClock(ctrl)
+
+			clock.EXPECT().GetCurrentSlot().Return(uint64(200_000))
+			// A zero floor is what makes PruneBelow a no-op; any other value deletes the
+			// archive these flags exist to keep.
+			blobStore.EXPECT().PruneBelow(uint64(0)).Return(nil)
+			peerDas.EXPECT().PruneBelow(uint64(199_900)).Return(nil)
+
+			cfg := &Cfg{
+				indiciesDB:   mdbxtest.NewTestDB(t, dbcfg.ChainDB),
+				ethClock:     clock,
+				beaconCfg:    &clparams.MainnetBeaconConfig,
+				blobStore:    blobStore,
+				peerDas:      peerDas,
+				caplinConfig: test.caplin,
+			}
+
+			require.NoError(t, cleanupAndPruning(t.Context(), log.New(), cfg, Args{}))
+		})
+	}
+}

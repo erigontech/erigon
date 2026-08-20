@@ -20,7 +20,6 @@ import (
 	"errors"
 	"os"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -214,21 +213,15 @@ func (f *failingFile) Sync() error {
 
 type slowFs struct {
 	afero.Fs
-	removeAllDelay atomic.Int64
+	removeAllDelay time.Duration
 }
 
 func newSlowFs(fs afero.Fs, removeAllDelay time.Duration) *slowFs {
-	s := &slowFs{Fs: fs}
-	s.removeAllDelay.Store(int64(removeAllDelay))
-	return s
-}
-
-func (s *slowFs) setRemoveAllDelay(d time.Duration) {
-	s.removeAllDelay.Store(int64(d))
+	return &slowFs{Fs: fs, removeAllDelay: removeAllDelay}
 }
 
 func (s *slowFs) RemoveAll(path string) error {
-	time.Sleep(time.Duration(s.removeAllDelay.Load()))
+	time.Sleep(s.removeAllDelay)
 	return s.Fs.RemoveAll(path)
 }
 
@@ -442,13 +435,4 @@ func TestSlowFsDelaysNothingElse(t *testing.T) {
 	_, err := fs.Stat("7/a")
 	require.NoError(t, err)
 	require.Less(t, time.Since(start), delay/2)
-}
-
-func TestSlowFsDelayIsSettable(t *testing.T) {
-	fs := newSlowFs(afero.NewMemMapFs(), time.Hour)
-	fs.setRemoveAllDelay(0)
-
-	start := time.Now()
-	require.NoError(t, fs.RemoveAll("7"))
-	require.Less(t, time.Since(start), time.Second)
 }

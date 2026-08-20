@@ -430,19 +430,22 @@ func TestGetSavedColumnIndex(t *testing.T) {
 	}
 }
 
-func TestPrune(t *testing.T) {
+func TestDataColumnStorePruneBelowRemovesBucketsUnderTheFloor(t *testing.T) {
 	storage, fs, _ := setupTestDataColumnStorage(t)
+	for _, bucket := range []string{"0", "1", "2", "3", "4"} {
+		require.NoError(t, fs.MkdirAll(bucket, 0o755))
+	}
 
-	// Create some test directories
-	fs.MkdirAll("0", 0o755) // slot 0-9999
-	fs.MkdirAll("1", 0o755) // slot 10000-19999
-	fs.MkdirAll("2", 0o755) // slot 20000-29999
-	fs.MkdirAll("3", 0o755) // slot 30000-39999
-	fs.MkdirAll("4", 0o755) // slot 40000-49999
+	require.NoError(t, storage.PruneBelow(40000))
 
-	// Test pruning below slot 40000.
-	err := storage.PruneBelow(40000)
+	for _, gone := range []string{"0", "1", "2", "3"} {
+		exists, err := afero.DirExists(fs, gone)
+		require.NoError(t, err)
+		require.False(t, exists, "bucket %s is below the floor", gone)
+	}
+	exists, err := afero.DirExists(fs, "4")
 	require.NoError(t, err)
+	require.True(t, exists, "the floor's own bucket survives")
 }
 
 func TestDataColumnStorePruneBelowZeroRemovesNothing(t *testing.T) {
@@ -455,27 +458,19 @@ func TestDataColumnStorePruneBelowZeroRemovesNothing(t *testing.T) {
 	require.NoError(t, err)
 }
 
-func TestPruneWithLargeKeepDistance(t *testing.T) {
+func TestDataColumnStorePruneBelowFloorAboveEveryBucketEmptiesTheStore(t *testing.T) {
 	storage, fs, _ := setupTestDataColumnStorage(t)
+	for _, bucket := range []string{"0", "1"} {
+		require.NoError(t, fs.MkdirAll(bucket, 0o755))
+	}
 
-	// Create some test directories
-	fs.MkdirAll("0", 0o755) // slot 0-9999
-	fs.MkdirAll("1", 0o755) // slot 10000-19999
+	require.NoError(t, storage.PruneBelow(50000))
 
-	// Test pruning below slot 50000.
-	err := storage.PruneBelow(50000)
-	require.NoError(t, err)
-}
-
-func TestPruneWithZeroKeepDistance(t *testing.T) {
-	storage, fs, _ := setupTestDataColumnStorage(t)
-
-	// Create some test directories
-	fs.MkdirAll("0", 0o755) // slot 0-9999
-
-	// Test a zero pruning floor.
-	err := storage.PruneBelow(0)
-	require.NoError(t, err)
+	for _, gone := range []string{"0", "1"} {
+		exists, err := afero.DirExists(fs, gone)
+		require.NoError(t, err)
+		require.False(t, exists)
+	}
 }
 
 func TestWriteColumnSidecarsErrorHandling(t *testing.T) {
