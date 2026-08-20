@@ -209,6 +209,8 @@ message GetLatestReq {
   uint64 ts = 4;
   bytes k2 = 5;
   bool latest = 6; // if true, then `ts` ignored and return latest state (without history lookup)
+  optional uint64 max_step = 7; // absent means unbounded; zero bounds the read at step 0
+  bool branch_cache = 8;
 }
 
 message GetLatestReply{
@@ -341,4 +343,3 @@ message StepSizeReq {
 message StepSizeReply {
   uint64 step = 1;
 }
-
