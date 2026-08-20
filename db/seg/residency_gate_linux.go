@@ -91,7 +91,13 @@ func (d *Decompressor) residencyBitmap() *residencyBitmap {
 		return rb
 	}
 	d.residencyOnce.Do(func() {
-		d.residency.Store(newResidencyBitmap(d._mmapHandle, int(d.f.Fd())))
+		// Seed happens on the refresh goroutine's first pass, not here: a synchronous
+		// mincore of a multi-GB file would stall the exec worker that triggered init.
+		// Until the seed lands the bitmap reads all-cold, so early reads warm via
+		// io_uring (cache hits, cheap) rather than faulting.
+		rb := newResidencyBitmap((len(d._mmapHandle) + pageSize - 1) / pageSize)
+		d.residency.Store(rb)
+		go d.refreshResidencyLoop(rb)
 	})
 	return d.residency.Load()
 }
@@ -108,8 +114,6 @@ func (d *Decompressor) warm(fileOffset int64, n int) {
 // is a hint, kept honest by a periodic mincore rescan: a stale set bit costs one
 // mmap fault, a stale clear bit one cheap cache-hit io_uring read — both harmless.
 type residencyBitmap struct {
-	mmap   []byte
-	fd     int
 	nPages int
 	words  []uint64
 	done   chan struct{}
@@ -118,21 +122,12 @@ type residencyBitmap struct {
 	stopped bool
 }
 
-func newResidencyBitmap(m []byte, fd int) *residencyBitmap {
-	nPages := (len(m) + pageSize - 1) / pageSize
-	rb := &residencyBitmap{
-		mmap:   m,
-		fd:     fd,
+func newResidencyBitmap(nPages int) *residencyBitmap {
+	return &residencyBitmap{
 		nPages: nPages,
 		words:  make([]uint64, (nPages+63)/64),
 		done:   make(chan struct{}),
 	}
-	// Seed happens on the refresh goroutine's first tick, not here: a synchronous
-	// mincore of a multi-GB file would stall the exec worker that triggered init.
-	// Until the seed lands the bitmap reads all-cold, so early reads warm via
-	// io_uring (cache hits, cheap) rather than faulting.
-	go rb.refreshLoop()
-	return rb
 }
 
 func (rb *residencyBitmap) residentRange(first, last int) bool {
@@ -151,8 +146,8 @@ func (rb *residencyBitmap) markRange(first, last int) {
 	}
 }
 
-func (rb *residencyBitmap) refreshLoop() {
-	rb.refresh() // seed
+func (d *Decompressor) refreshResidencyLoop(rb *residencyBitmap) {
+	d.refreshResidency(rb) // seed
 	t := time.NewTicker(residencyRefresh)
 	defer t.Stop()
 	for {
@@ -160,7 +155,7 @@ func (rb *residencyBitmap) refreshLoop() {
 		case <-rb.done:
 			return
 		case <-t.C:
-			rb.refresh()
+			d.refreshResidency(rb)
 		}
 	}
 }
@@ -168,19 +163,25 @@ func (rb *residencyBitmap) refreshLoop() {
 // refresh rebuilds the whole bitmap from a chunked mincore scan of the mapping.
 // It replaces words wholesale; a concurrent markRange that gets clobbered is a
 // harmless false-negative (one extra io_uring next time).
-func (rb *residencyBitmap) refresh() {
+// refreshResidency reads the mapping under rb.mu and after the stopped check, so
+// a scan can never begin once Close has started tearing the mapping down.
+func (d *Decompressor) refreshResidency(rb *residencyBitmap) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 	if rb.stopped {
+		return
+	}
+	m := d._mmapHandle
+	if len(m) == 0 {
 		return
 	}
 	const chunkPages = 1 << 18 // 1GB per mincore call (256KB scratch), word-aligned
 	vec := make([]byte, chunkPages)
 	for p := 0; p < rb.nPages; p += chunkPages {
 		n := min(chunkPages, rb.nPages-p)
-		lenBytes := min(n*pageSize, len(rb.mmap)-p*pageSize)
+		lenBytes := min(n*pageSize, len(m)-p*pageSize)
 		_, _, errno := unix.Syscall(unix.SYS_MINCORE,
-			uintptr(unsafe.Pointer(&rb.mmap[p*pageSize])),
+			uintptr(unsafe.Pointer(&m[p*pageSize])),
 			uintptr(lenBytes),
 			uintptr(unsafe.Pointer(&vec[0])))
 		if errno != 0 {
