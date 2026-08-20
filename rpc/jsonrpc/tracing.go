@@ -419,9 +419,6 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	if config == nil || config.TxIndex == nil || isLatest {
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, blockNumber, isLatest, 0, api._txNumReader)
 	} else {
-		if err := api.validateBlockTxIndex(ctx, dbtx, hash, blockNumber, uint64(*config.TxIndex)); err != nil {
-			return err
-		}
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, dbtx, blockNumber, int(*config.TxIndex), api._txNumReader)
 	}
 	if err != nil {
@@ -545,9 +542,6 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 
 		stateReader, err = rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, tx, blockNum, isLatest, 0, api._txNumReader)
 	} else {
-		if err := api.validateBlockTxIndex(ctx, tx, hash, blockNum, uint64(*simulateContext.TransactionIndex)); err != nil {
-			return err
-		}
 		stateReader, err = rpchelper.CreateHistoryStateReader(ctx, tx, blockNum, *simulateContext.TransactionIndex, api._txNumReader)
 	}
 

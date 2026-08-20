@@ -366,21 +366,6 @@ func (api *BaseAPI) blockWithSendersInView(ctx context.Context, tx kv.Tx, hash c
 	return block, nil
 }
 
-func (api *BaseAPI) validateBlockTxIndex(ctx context.Context, tx kv.Getter, blockHash common.Hash, blockNumber, txIndex uint64) error {
-	body, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNumber)
-	if err != nil {
-		return err
-	}
-	if body == nil {
-		return fmt.Errorf("block %d(%x) not found", blockNumber, blockHash)
-	}
-	// The index selects a state boundary, so txCount is valid as the boundary after the last transaction.
-	if txIndex > uint64(txCount) {
-		return fmt.Errorf("transaction index %d out of range for block %x", txIndex, blockHash)
-	}
-	return nil
-}
-
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {

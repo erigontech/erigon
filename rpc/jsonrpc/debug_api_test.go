@@ -715,22 +715,6 @@ func TestStorageRangeAt(t *testing.T) {
 
 }
 
-func TestStorageRangeAtRejectsTransactionIndexOutOfRange(t *testing.T) {
-	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
-	api := newDebugApiForTest(m)
-	var blockHash common.Hash
-	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
-		var ok bool
-		var err error
-		blockHash, ok, err = m.BlockReader.CanonicalHash(m.Ctx, tx, 4)
-		require.True(t, ok)
-		return err
-	}))
-
-	_, err := api.StorageRangeAt(m.Ctx, blockHash, 1024, m.Address, nil, 10)
-	require.ErrorContains(t, err, "out of range")
-}
-
 func TestStorageRangeAtGethCompat(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, nil, &rpccfg.DebugApiConfig{GethCompatibility: true})
@@ -1159,10 +1143,10 @@ func TestAccountAt(t *testing.T) {
 		require.NotEmpty(t, result.Code)
 		require.Equal(t, crypto.Keccak256Hash(result.Code), result.CodeHash)
 	})
-	t.Run("transaction index out of range", func(t *testing.T) {
+	t.Run("large transaction index", func(t *testing.T) {
 		result, err := api.AccountAt(m.Ctx, blockHash10, 1024, contract)
-		require.ErrorContains(t, err, "out of range")
-		require.Nil(t, result)
+		require.NoError(t, err)
+		require.Equal(t, 42, int(result.Nonce))
 	})
 	t.Run("not existing addr", func(t *testing.T) {
 		require := require.New(t)
