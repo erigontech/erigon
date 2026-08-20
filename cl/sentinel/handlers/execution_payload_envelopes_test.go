@@ -124,7 +124,7 @@ func TestExecutionPayloadEnvelopesByRangeHandler(t *testing.T) {
 		envelope.Message.BeaconBlockRoot = blockRoot
 		envelope.Message.BuilderIndex = uint64(i)
 
-		fcMock.Envelopes[blockRoot] = envelope
+		fcMock.SetEnvelope(blockRoot, envelope)
 		expEnvelopes = append(expEnvelopes, envelope)
 	}
 
@@ -279,7 +279,7 @@ func TestExecutionPayloadEnvelopesByRootHandler(t *testing.T) {
 		envelope.Message.BeaconBlockRoot = blockRoot
 		envelope.Message.BuilderIndex = uint64(i)
 
-		fcMock.Envelopes[blockRoot] = envelope
+		fcMock.SetEnvelope(blockRoot, envelope)
 		expEnvelopes = append(expEnvelopes, envelope)
 		blockRoots = append(blockRoots, blockRoot)
 	}

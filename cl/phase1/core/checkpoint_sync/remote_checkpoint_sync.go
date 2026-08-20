@@ -181,19 +181,34 @@ func (r *RemoteCheckpointSync) fetchEnvelope(ctx context.Context, stateURI strin
 		return nil, fmt.Errorf("finalized envelope fetch failed, status %d", resp.StatusCode)
 	}
 
-	marshaled, err := io.ReadAll(resp.Body)
+	marshaled, err := readEnvelopeHTTPBody(resp.Body)
 	if err != nil {
 		return nil, fmt.Errorf("finalized envelope read failed: %w", err)
 	}
+	version, err := cltypes.ParseExecutionPayloadEnvelopeVersion(resp.Header.Get("Eth-Consensus-Version"))
+	if err != nil {
+		return nil, fmt.Errorf("finalized envelope consensus version: %w", err)
+	}
 
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: cltypes.NewExecutionPayloadEnvelope(r.beaconConfig),
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(r.beaconConfig, version),
 	}
-	if err := envelope.DecodeSSZ(marshaled, int(clparams.GloasVersion)); err != nil {
+	if err := envelope.DecodeSSZStrict(marshaled, int(version)); err != nil {
 		return nil, fmt.Errorf("finalized envelope decode failed: %w", err)
 	}
 	log.Info("[Checkpoint Sync] Finalized envelope retrieved", "beaconBlockRoot", envelope.Message.BeaconBlockRoot)
 	return envelope, nil
+}
+
+func readEnvelopeHTTPBody(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, int64(clparams.MaxChunkSize)+1))
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) > clparams.MaxChunkSize {
+		return nil, fmt.Errorf("execution payload envelope response too large: max %d bytes", clparams.MaxChunkSize)
+	}
+	return body, nil
 }
 
 // normalizeCheckpointURL ensures the URL includes the beacon state API path.

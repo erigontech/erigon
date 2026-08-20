@@ -46,6 +46,38 @@ func TestExecutionPayloadEnvelopeRequestsRejectOverLimit(t *testing.T) {
 	require.ErrorContains(t, err, "MAX_REQUEST_PAYLOADS")
 }
 
+func TestExecutionPayloadEnvelopeRequestsRejectPreGloasResponseVersion(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	fuluDigest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(&cfg),
+	}
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, fuluDigest[:]...))
+
+	for _, request := range []func(*BeaconRpcP2P) error{
+		func(client *BeaconRpcP2P) error {
+			_, _, err := client.SendExecutionPayloadEnvelopesByRangeReq(context.Background(), 1, 1)
+			return err
+		},
+		func(client *BeaconRpcP2P) error {
+			_, _, err := client.SendExecutionPayloadEnvelopesByRootReq(context.Background(), [][32]byte{{1}})
+			return err
+		},
+	} {
+		client := &BeaconRpcP2P{
+			ctx:          context.Background(),
+			sentinel:     &blockResponseSentinel{response: response.Bytes()},
+			beaconConfig: &cfg,
+			ethClock:     clock,
+		}
+		require.ErrorContains(t, request(client), "unsupported execution payload envelope consensus version")
+	}
+}
+
 func TestMaxRequestPayloadsFallback(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxRequestPayloads = 0

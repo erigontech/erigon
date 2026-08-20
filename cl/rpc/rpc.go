@@ -192,10 +192,13 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
-		envelope := &cltypes.SignedExecutionPayloadEnvelope{
-			Message: cltypes.NewExecutionPayloadEnvelope(b.beaconConfig),
+		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
+			return nil, pid, err
 		}
-		if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{
+			Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(b.beaconConfig, data.version),
+		}
+		if err := envelope.DecodeSSZStrict(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
 		}
 		envelopes = append(envelopes, envelope)
@@ -229,10 +232,13 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
-		envelope := &cltypes.SignedExecutionPayloadEnvelope{
-			Message: cltypes.NewExecutionPayloadEnvelope(b.beaconConfig),
+		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
+			return nil, pid, err
 		}
-		if err := envelope.DecodeSSZ(data.raw, int(data.version)); err != nil {
+		envelope := &cltypes.SignedExecutionPayloadEnvelope{
+			Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(b.beaconConfig, data.version),
+		}
+		if err := envelope.DecodeSSZStrict(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
 		}
 		envelopes = append(envelopes, envelope)

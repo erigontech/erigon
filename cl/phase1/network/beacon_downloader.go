@@ -612,17 +612,26 @@ func fetchEnvelopesFromBeaconAPI(
 			if err != nil {
 				return
 			}
-			body, err := io.ReadAll(resp.Body)
+			body, err := readEnvelopeHTTPBody(resp.Body)
 			resp.Body.Close()
 			if err != nil || resp.StatusCode != http.StatusOK {
 				return
 			}
+			version, err := cltypes.ParseExecutionPayloadEnvelopeVersion(resp.Header.Get("Eth-Consensus-Version"))
+			if err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope consensus version invalid", "slot", slot, "err", err)
+				return
+			}
 
 			envelope := &cltypes.SignedExecutionPayloadEnvelope{
-				Message: cltypes.NewExecutionPayloadEnvelope(beaconCfg),
+				Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(beaconCfg, version),
 			}
-			if err := envelope.DecodeSSZ(body, int(clparams.GloasVersion)); err != nil {
+			if err := envelope.DecodeSSZStrict(body, int(version)); err != nil {
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "slot", slot, "err", err)
+				return
+			}
+			if envelope.Message.BeaconBlockRoot != common.Hash(root) {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope block root mismatch", "slot", slot, "requested", common.Hash(root), "received", envelope.Message.BeaconBlockRoot)
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}
@@ -638,6 +647,17 @@ func fetchEnvelopesFromBeaconAPI(
 		}
 	}
 	return fetched
+}
+
+func readEnvelopeHTTPBody(r io.Reader) ([]byte, error) {
+	body, err := io.ReadAll(io.LimitReader(r, int64(clparams.MaxChunkSize)+1))
+	if err != nil {
+		return nil, err
+	}
+	if uint64(len(body)) > clparams.MaxChunkSize {
+		return nil, fmt.Errorf("execution payload envelope response too large: max %d bytes", clparams.MaxChunkSize)
+	}
+	return body, nil
 }
 
 // GetHighestProcessedSlot retrieve the highest processed slot we accumulated.
