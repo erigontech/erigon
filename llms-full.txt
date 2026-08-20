@@ -7152,7 +7152,7 @@ Votes on a milestone hash: reports whether the local chain has the given hash at
 **Example**
 
 ```bash
-curl -s --data '{"jsonrpc":"2.0","method":"bor_getVoteOnHash","params":[16000000, 16000064, "0x1d59ff54b1eb26b013ce3cb5fc9dab3705b415a67127a003c3e61eb445bb8df2", "0x1"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
+curl -s --data '{"jsonrpc":"2.0","method":"bor_getVoteOnHash","params":[16000000, 16000064, "0x811b9d739a17d5c42904ba97bb9e3449da74000fece0e1ec112f61a11beb7632", "0x1"],"id":"1"}' -H "Content-Type: application/json" -X POST http://localhost:8545
 ```
 
 **Returns**
