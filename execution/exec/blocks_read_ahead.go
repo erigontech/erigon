@@ -33,7 +33,7 @@ type BlockReadAheader struct {
 	headers *lru.Cache[common.Hash, *types.Header]
 	bodies  *lru.Cache[common.Hash, *types.Body]
 	senders *lru.Cache[common.Hash, []byte] // just do raw senders
-	bals    *lru.Cache[common.Hash, []byte]
+	bals    *lru.Cache[common.Hash, *types.BlockAccessListSidecar]
 
 	// The single permit belongs either to one warmup or to the code suspending
 	// warmup across an unwind. Warmups never wait for it: read-ahead is
@@ -62,7 +62,7 @@ func NewBlockReadAheader() *BlockReadAheader {
 	if err != nil {
 		panic(err)
 	}
-	bals, err := lru.New[common.Hash, []byte](4)
+	bals, err := lru.New[common.Hash, *types.BlockAccessListSidecar](4)
 	if err != nil {
 		panic(err)
 	}
@@ -153,22 +153,27 @@ func (bra *BlockReadAheader) AddHeaderAndBody(ctx context.Context, db kv.RoDB, t
 	if !bra.warmupGate.TryAcquire(1) {
 		return
 	}
-	var balBytes []byte
+	var bal types.BlockAccessList
 	if header.HasNonEmptyBAL() {
-		var ok bool
-		balBytes, ok = bra.bals.Get(blockHash)
+		balSidecar, ok := bra.bals.Get(blockHash)
 		if !ok {
-			var err error
-			balBytes, err = rawdb.ReadBlockAccessListBytes(tx, blockHash, header.Number.Uint64())
-			balBytes = bytes.Clone(balBytes)
+			data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, header.Number.Uint64())
 			if err != nil {
 				log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
+			} else if len(data) != 0 {
+				balSidecar, err = types.DecodeBlockAccessListSidecar(data)
+				if err != nil {
+					log.Warn("[warmBody] failed to read BAL", "blockNum", header.Number.Uint64(), "blockHash", blockHash, "err", err)
+				} else {
+					bra.bals.Add(blockHash, balSidecar)
+				}
 			}
 		}
+		bal = balSidecar.BlockAccessList()
 	}
 	go func() {
 		defer bra.warmupGate.Release(1)
-		bra.warmBody(ctx, db, header, body, balBytes, dbg.ReadAheadWorkers)
+		bra.warmBody(ctx, db, header, body, bal, dbg.ReadAheadWorkers)
 	}()
 }
 
@@ -210,8 +215,8 @@ func (bra *BlockReadAheader) AddSenders(senders []byte, blockHash common.Hash) {
 	bra.senders.Add(blockHash, bytes.Clone(senders))
 }
 
-func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal []byte) {
-	if len(bal) == 0 {
+func (bra *BlockReadAheader) AddBlockAccessList(blockHash common.Hash, bal *types.BlockAccessListSidecar) {
+	if bal == nil {
 		return
 	}
 	bra.bals.Add(blockHash, bal)
@@ -318,20 +323,12 @@ func warmBALStateTask(stateReader *state.ReaderV3, account *types.AccountChanges
 // and block-level access lists. Each worker creates its own transaction.
 // AddHeaderAndBody permits only one warmBody at a time; concurrent requests
 // skip warming.
-func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, balBytes []byte, workers int) {
+func (bra *BlockReadAheader) warmBody(ctx context.Context, db kv.RoDB, header *types.Header, body *types.Body, bal types.BlockAccessList, workers int) {
 	if !dbg.ReadAhead {
 		return
 	}
 	if workers <= 0 {
 		workers = 1
-	}
-	var bal types.BlockAccessList
-	if len(balBytes) > 0 {
-		var err error
-		bal, err = types.DecodeBlockAccessListBytes(balBytes)
-		if err != nil {
-			log.Warn("[warmBody] failed to decode BAL", "blockNum", header.Number.Uint64(), "blockHash", header.Hash(), "err", err)
-		}
 	}
 	if len(bal) > 0 {
 		codeMode := balCodeWarmupModeForFlags(dbg.ReadAheadBALCode, dbg.ReadAheadTxCode)
