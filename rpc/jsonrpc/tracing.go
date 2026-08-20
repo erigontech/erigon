@@ -424,7 +424,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	if err != nil {
 		return fmt.Errorf("create state reader: %w", err)
 	}
-	header, err := api._blockReader.Header(ctx, dbtx, hash, blockNumber)
+	header, err := api.headerInView(ctx, dbtx, hash, blockNumber)
 	if err != nil {
 		return fmt.Errorf("could not fetch header %d(%x): %w", blockNumber, hash, err)
 	}
@@ -519,7 +519,7 @@ func (api *DebugAPIImpl) TraceCallMany(ctx context.Context, bundles []Bundle, si
 	}
 
 	var header *types.Header
-	header, err = api._blockReader.Header(ctx, tx, hash, blockNum)
+	header, err = api.headerInView(ctx, tx, hash, blockNum)
 	if err != nil {
 		return err
 	}

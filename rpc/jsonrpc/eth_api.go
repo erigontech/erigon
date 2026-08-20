@@ -385,6 +385,15 @@ func (api *BaseAPI) blockWithSendersInView(ctx context.Context, tx kv.Tx, hash c
 	return block, nil
 }
 
+func (api *BaseAPI) headerInView(ctx context.Context, tx kv.Getter, hash common.Hash, number uint64) (*types.Header, error) {
+	if api.blocksLRU != nil {
+		if block, ok := api.blocksLRU.Get(hash); ok && block != nil {
+			return block.HeaderNoCopy(), nil
+		}
+	}
+	return api._blockReader.Header(ctx, tx, hash, number)
+}
+
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
@@ -416,13 +425,7 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	if err != nil {
 		return nil, false, err
 	}
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.HeaderNoCopy(), isLatest, nil
-		}
-	}
-
-	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
+	header, err := api.headerInView(ctx, overlayTx, hash, blockNum)
 	if err != nil {
 		return nil, false, err
 	}
@@ -440,13 +443,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 	if err != nil {
 		return nil, err
 	}
-
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(h); ok && it != nil {
-			return it.HeaderNoCopy(), nil
-		}
-	}
-	return api._blockReader.Header(ctx, overlayTx, h, n)
+	return api.headerInView(ctx, overlayTx, h, n)
 }
 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {

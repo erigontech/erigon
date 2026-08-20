@@ -1134,7 +1134,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	header, err := api._blockReader.Header(ctx, tx, hash, blockNumber)
+	header, err := api.headerInView(ctx, tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1331,7 +1331,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 
-	parentHeader, err := api._blockReader.Header(ctx, tx, hash, blockNumber)
+	parentHeader, err := api.headerInView(ctx, tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1402,7 +1402,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api._blockReader.Header(ctx, dbtx, hash, parentBlockNumber)
+	parentHeader, err := api.headerInView(ctx, dbtx, hash, parentBlockNumber)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1629,7 +1629,7 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 	noop := state.NewNoopWriter()
 
-	parentHeader, err := api._blockReader.Header(ctx, dbtx, hash, parentBlockNumber)
+	parentHeader, err := api.headerInView(ctx, dbtx, hash, parentBlockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1843,7 +1843,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, err
 	}
 
-	header, err := api._blockReader.Header(ctx, dbtx, hash, blockNumber)
+	header, err := api.headerInView(ctx, dbtx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}

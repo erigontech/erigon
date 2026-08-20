@@ -166,6 +166,19 @@ type hideHeaderBlockReader struct {
 	blockNumber uint64
 }
 
+type failHeaderReadBlockReader struct {
+	dbservices.FullBlockReader
+	hash common.Hash
+	err  error
+}
+
+func (r failHeaderReadBlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash, blockNumber uint64) (*types.Header, error) {
+	if hash == r.hash {
+		return nil, r.err
+	}
+	return r.FullBlockReader.Header(ctx, tx, hash, blockNumber)
+}
+
 type failOverlayHeaderNumberBlockReader struct {
 	dbservices.FullBlockReader
 	err error
@@ -595,6 +608,33 @@ func TestReplayTransactionHandlesMissingHeader(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.Nil(t, result)
+}
+
+func TestTraceRawTransactionUsesHeaderCacheInCommittedView(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base := newBaseApiForTest(m)
+
+	var latestBlock *types.Block
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		blockNumber, err := rpchelper.GetLatestBlockNumber(tx)
+		if err != nil {
+			return err
+		}
+		latestBlock, err = m.BlockReader.BlockByNumber(m.Ctx, tx, blockNumber)
+		return err
+	}))
+	require.NotNil(t, latestBlock)
+	base.blocksLRU.Add(latestBlock.Hash(), latestBlock)
+	base._blockReader = failHeaderReadBlockReader{
+		FullBlockReader: base._blockReader,
+		hash:            latestBlock.Hash(),
+		err:             errors.New("unexpected header database read"),
+	}
+
+	encoded, _, _ := rawTxFromBlock(t, m, 6)
+	result, err := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{}).RawTransaction(m.Ctx, encoded, []string{TraceTypeTrace})
+	require.NoError(t, err)
+	require.NotNil(t, result)
 }
 
 func TestGetTransactionReceiptHandlesMissingHeader(t *testing.T) {
