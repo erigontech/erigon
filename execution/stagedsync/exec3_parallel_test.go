@@ -3,6 +3,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"math/rand"
@@ -17,11 +18,13 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -31,6 +34,7 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -108,6 +112,81 @@ func newParallelTestBlockFromTasks(tasks []exec.Task) *types.Block {
 		}
 	}
 	return types.NewBlockFromStorage(tasks[0].BlockHash(), tasks[0].BlockHeader(), txs, nil, nil, nil)
+}
+
+type rulesEngineWithErrors struct {
+	rules.Engine
+	initializeErr error
+	finalizeErr   error
+}
+
+type failingAccountStateReader struct {
+	*state.NoopReader
+	err error
+}
+
+func (r failingAccountStateReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	return nil, r.err
+}
+
+type panickingAccountStateReader struct {
+	*state.NoopReader
+	panicValue any
+}
+
+func (r panickingAccountStateReader) ReadAccountData(accounts.Address) (*accounts.Account, error) {
+	panic(r.panicValue)
+}
+
+type failingAccountTemporalTx struct {
+	kv.TemporalTx
+	address common.Address
+	err     error
+}
+
+type failingBeginTemporalRoDB struct {
+	kv.TemporalRwDB
+	err error
+}
+
+func (db failingBeginTemporalRoDB) BeginTemporalRo(context.Context) (kv.TemporalTx, error) {
+	return nil, db.err
+}
+
+func (tx failingAccountTemporalTx) GetLatest(domain kv.Domain, key []byte) ([]byte, kv.Step, error) {
+	if domain == kv.AccountsDomain && common.BytesToAddress(key) == tx.address {
+		return nil, 0, tx.err
+	}
+	return tx.TemporalTx.GetLatest(domain, key)
+}
+
+func (tx failingAccountTemporalTx) AggTx() any {
+	return nil
+}
+
+func (e rulesEngineWithErrors) Initialize(config *chain.Config, chainReader rules.ChainHeaderReader, header *types.Header,
+	ibs *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks,
+) error {
+	return e.initializeErr
+}
+
+func (e rulesEngineWithErrors) Finalize(config *chain.Config, header *types.Header, ibs *state.IntraBlockState,
+	uncles []*types.Header, receipts types.Receipts, withdrawals []*types.Withdrawal,
+	chainReader rules.ChainReader, syscall rules.SystemCall, skipReceiptsEval bool, logger log.Logger,
+) (types.FlatRequests, error) {
+	return nil, e.finalizeErr
+}
+
+type rulesEngineWithFinalizeBalance struct {
+	rules.Engine
+	beneficiary accounts.Address
+}
+
+func (e rulesEngineWithFinalizeBalance) Finalize(_ *chain.Config, _ *types.Header, ibs *state.IntraBlockState,
+	_ []*types.Header, _ types.Receipts, _ []*types.Withdrawal, _ rules.ChainReader, _ rules.SystemCall,
+	_ bool, _ log.Logger,
+) (types.FlatRequests, error) {
+	return nil, ibs.AddBalance(e.beneficiary, *uint256.NewInt(1), tracing.BalanceIncreaseWithdrawal)
 }
 
 func sleepWithContext(ctx context.Context, d time.Duration) error {
@@ -535,7 +614,9 @@ func runParallel(tb testing.TB, tasks []exec.Task, validation propertyCheck, met
 	assert.NoError(tb, err, "error occur during parallel init")
 	assert.NoError(tb, executorContext.Err(), "error occur during parallel init")
 
-	defer executorCancel(nil)
+	defer func() {
+		assert.NoError(tb, executorCancel(nil))
+	}()
 
 	for _, task := range tasks {
 		task := task.(*testExecTask)
@@ -584,8 +665,6 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 		return nil, nil
 	}
 
-	ctx, cancel := context.WithCancel(context.Background())
-
 	applyResults := make(chan applyResult, 1000)
 	block := newParallelTestBlockFromTasks(tasks)
 
@@ -600,14 +679,53 @@ func executeParallelWithCheck(tb testing.TB, pe *parallelExecutor, tasks []exec.
 		}
 	}
 
-	cancel()
-	pe.wait(ctx)
+	pe.cancelExecLoop(nil)
+	if err := pe.wait(); err != nil {
+		return result, err
+	}
 
 	if check != nil {
 		err = check(pe)
 	}
 
 	return result, err
+}
+
+func TestExecuteParallelWithCheckCancelsBeforeWait(t *testing.T) {
+	executorCtx, cancelExecLoop := context.WithCancelCause(context.Background())
+	executorGroup, executorCtx := commonerrors.NewGroup(executorCtx)
+	executorGroup.Go(func() error {
+		<-executorCtx.Done()
+		return executorCtx.Err()
+	})
+
+	pe := &parallelExecutor{
+		txExecutor: txExecutor{
+			execRequests:  make(chan *execRequest, 1),
+			execLoopGroup: executorGroup,
+		},
+		cancelExecLoop: cancelExecLoop,
+	}
+	go func() {
+		request := <-pe.execRequests
+		request.applyResults <- &blockResult{Block: request.block}
+	}()
+
+	task := NewTestExecTask(0, nil, accounts.InternAddress(common.Address{}), 0)
+	done := make(chan error, 1)
+	go func() {
+		_, err := executeParallelWithCheck(t, pe, []exec.Task{task}, false, nil, false)
+		done <- err
+	}()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		cancelExecLoop(nil)
+		require.NoError(t, <-done)
+		t.Fatal("executeParallelWithCheck waited without stopping the executor")
+	}
 }
 
 func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propertyCheck) map[int]map[int]bool {
@@ -643,7 +761,9 @@ func runParallelGetMetadata(tb testing.TB, tasks []exec.Task, validation propert
 	}
 
 	executorContext, executorCancel, err := pe.run(ctx)
-	defer executorCancel(nil)
+	defer func() {
+		assert.NoError(tb, executorCancel(nil))
+	}()
 	assert.NoError(tb, err, "error occur during parallel init")
 
 	for _, task := range tasks {
@@ -670,7 +790,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 	chainSpec, _ := chainspec.ChainSpecByName(networkname.Mainnet)
 
 	// newExecutor creates a fresh domains/state/executor on the shared DB.
-	newExecutor := func() (*parallelExecutor, context.Context, context.CancelCauseFunc, func()) {
+	newExecutor := func() (*parallelExecutor, context.Context, func(error) error, func()) {
 		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
 		assert.NoError(tb, err)
 		domains, err := execctx.NewSharedDomains(ctx, tx, log.New())
@@ -690,7 +810,7 @@ func runProfileAndExecute(tb testing.TB, tasks []exec.Task, validation propertyC
 		assert.NoError(tb, err, "error during parallel init")
 
 		cleanup := func() {
-			executorCancel(nil)
+			assert.NoError(tb, executorCancel(nil))
 			domains.Close()
 			tx.Rollback()
 		}
@@ -1419,6 +1539,300 @@ func newResumeTestExec(t *testing.T, db kv.TemporalRwDB, config *chain.Config) (
 		},
 	}
 	return pe, roTx
+}
+
+func TestParallelExecPreservesApplyTxWhenCommitmentCalculatorSetupFails(t *testing.T) {
+	db := newResumeTestDB(t)
+	pe, execLoopTx := newResumeTestExec(t, db, chain.TestChainBerlinConfig)
+	pe.applyTx = execLoopTx
+	pe.cfg.blockReader = freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
+	cause := errors.New("commitment database unavailable")
+	pe.cfg.db = failingBeginTemporalRoDB{TemporalRwDB: db, err: cause}
+
+	applyTx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(applyTx.Rollback)
+	logEvery := time.NewTicker(time.Hour)
+	t.Cleanup(logEvery.Stop)
+
+	_, returnedTx, err := pe.exec(context.Background(), 1, 0, 1, 0, 0, 0, false, applyTx, 0, nil, nil, logEvery)
+
+	require.ErrorIs(t, err, cause)
+	require.NotNil(t, returnedTx)
+	require.Equal(t, applyTx.ViewID(), returnedTx.ViewID())
+}
+
+func newParallelFinalizeTestBlock(config *chain.Config) (*blockExecutor, *taskVersion) {
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	txTask := &exec.TxTask{
+		Header:          header,
+		TxNum:           1,
+		TxIndex:         0,
+		Config:          config,
+		Logger:          log.New(),
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	eTask := &execTask{Task: txTask, index: 0}
+	task := &taskVersion{execTask: eTask, version: state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0}}
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.txIncarnations = []int{0}
+	be.execFailed = []int{0}
+	be.execAborted = []int{0}
+	be.estimateDeps[0] = []int{}
+	be.execTasks.setInProgress(0)
+	return be, task
+}
+
+func TestParallelInitializeRulesEngineErrorUsesVerdictPath(t *testing.T) {
+	config := chain.TestChainBerlinConfig
+	engineErr := fmt.Errorf("epoch database read failed")
+	engine := rulesEngineWithErrors{Engine: ethash.NewFaker(), initializeErr: engineErr}
+	txTask := &exec.TxTask{
+		Header:          &types.Header{Number: *uint256.NewInt(1)},
+		TxIndex:         -1,
+		Config:          config,
+		Logger:          log.New(),
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	eTask := &execTask{Task: txTask}
+	task := &taskVersion{
+		execTask: eTask,
+		version:  state.Version{BlockNum: 1, TxIndex: -1},
+	}
+	ibs := state.New(state.NewNoopReader())
+	t.Cleanup(ibs.Close)
+
+	result := task.Execute(&vm.EVM{}, engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+
+	require.False(t, result.Operational)
+	var abort protocol.ErrExecAbortError
+	require.ErrorAs(t, result.Err, &abort)
+	require.ErrorIs(t, abort.OriginError, engineErr)
+}
+
+func TestParallelFinalizeClassifiesRulesEngineError(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		engineErr func(error) error
+	}{
+		{
+			name:      "plain error",
+			engineErr: func(cause error) error { return cause },
+		},
+		{
+			name: "preclassified invalid block",
+			engineErr: func(cause error) error {
+				return fmt.Errorf("%w: %w", rules.ErrInvalidBlock, cause)
+			},
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			db := newResumeTestDB(t)
+			config := chain.TestChainBerlinConfig
+			pe, roTx := newResumeTestExec(t, db, config)
+			cause := fmt.Errorf("epoch database write failed")
+			pe.cfg.engine = rulesEngineWithErrors{Engine: pe.cfg.engine, finalizeErr: tc.engineErr(cause)}
+			be, task := newParallelFinalizeTestBlock(config)
+
+			result, err := be.nextResult(context.Background(), pe, &exec.TxResult{
+				Task:  task,
+				TxIn:  state.ReadSet{},
+				TxOut: &state.WriteSet{},
+			}, roTx)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.ErrorIs(t, result.Err, rules.ErrInvalidBlock)
+			require.ErrorContains(t, result.Err, cause.Error())
+		})
+	}
+}
+
+func TestParallelFinalizeStateReadErrorUsesOperationalBlockResult(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	cause := errors.New("withdrawal account read failed")
+	beneficiary := accounts.InternAddress(common.Address{19: 0x42})
+	pe.cfg.engine = rulesEngineWithFinalizeBalance{Engine: pe.cfg.engine, beneficiary: beneficiary}
+	be, task := newParallelFinalizeTestBlock(config)
+
+	result, err := be.nextResult(context.Background(), pe, &exec.TxResult{
+		Task:  task,
+		TxIn:  state.ReadSet{},
+		TxOut: &state.WriteSet{},
+	}, failingAccountTemporalTx{TemporalTx: roTx, address: beneficiary.Value(), err: cause})
+
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.True(t, result.Operational)
+	require.ErrorIs(t, result.Err, cause)
+	require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
+}
+
+func TestParallelStateReadErrorUsesOperationalBlockResult(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	cause := fmt.Errorf("account domain read failed")
+
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	txTask := &exec.TxTask{
+		Header:          header,
+		TxNum:           1,
+		TxIndex:         0,
+		Config:          config,
+		Txs:             []types.Transaction{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0)},
+		Logger:          log.New(),
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	eTask := &execTask{Task: txTask, index: 0}
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.txIncarnations = []int{0}
+	be.execFailed = []int{0}
+	be.execAborted = []int{0}
+	be.estimateDeps[0] = []int{}
+	be.execTasks.setInProgress(0)
+	be.settledInput[0] = true
+
+	task := &taskVersion{
+		execTask:   eTask,
+		version:    state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0},
+		versionMap: be.versionMap,
+	}
+	ibs := state.New(failingAccountStateReader{NoopReader: state.NewNoopReader(), err: cause})
+	t.Cleanup(ibs.Close)
+	evm := &vm.EVM{}
+	require.NoError(t, task.Reset(evm, ibs, nil))
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result.Task = task
+	require.Zero(t, result.TxIn.Len())
+
+	blockResult, err := be.nextResult(context.Background(), pe, result, roTx)
+
+	require.NoError(t, err)
+	require.NotNil(t, blockResult)
+	require.Same(t, be.block, blockResult.Block)
+	require.True(t, blockResult.Operational)
+	require.ErrorIs(t, blockResult.Err, cause)
+	require.NotErrorIs(t, blockResult.Err, rules.ErrInvalidBlock)
+	require.True(t, result.Operational)
+}
+
+func newRetryLimitTestBlock() (*blockExecutor, *taskVersion) {
+	txTask := &exec.TxTask{
+		Header:  &types.Header{Number: *uint256.NewInt(1)},
+		TxIndex: 0,
+	}
+	eTask := &execTask{Task: txTask, index: 0}
+	be := newBlockExec(newParallelTestBlock(1), nil, nil, nil, nil, false, nil)
+	be.tasks = []*execTask{eTask}
+	be.results = make([]*execResult, len(be.tasks))
+	return be, &taskVersion{
+		execTask: eTask,
+		version:  state.Version{BlockNum: 1, TxIndex: 0, Incarnation: 2},
+	}
+}
+
+func TestParallelIncarnationLimitUsesOperationalBlockResult(t *testing.T) {
+	origin := errors.New("transaction execution failed")
+	for _, tc := range []struct {
+		name   string
+		origin error
+	}{
+		{name: "dependency retry"},
+		{name: "execution error retry", origin: origin},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			be, task := newRetryLimitTestBlock()
+
+			result, err := be.nextResult(context.Background(), nil, &exec.TxResult{
+				Task: task,
+				Err: protocol.ErrExecAbortError{
+					DependencyTxIndex: 0,
+					OriginError:       tc.origin,
+				},
+			}, nil)
+
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.True(t, result.Operational)
+			require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
+			require.ErrorContains(t, result.Err, "too many incarnations")
+			if tc.origin != nil {
+				require.ErrorIs(t, result.Err, tc.origin)
+			}
+		})
+	}
+}
+
+func TestParallelValidatorRetryLimitUsesOperationalBlockResult(t *testing.T) {
+	be, _ := newRetryLimitTestBlock()
+	be.txIncarnations = []int{2}
+
+	result := be.retryLimitResult(0, 0, be.txIncarnations[0], "validator-invalid retries", nil)
+
+	require.NotNil(t, result)
+	require.True(t, result.Operational)
+	require.NotErrorIs(t, result.Err, rules.ErrInvalidBlock)
+	require.ErrorContains(t, result.Err, "too many validator-invalid retries")
+}
+
+func TestParallelTransitionPanicUsesOperationalBlockResult(t *testing.T) {
+	db := newResumeTestDB(t)
+	config := chain.TestChainBerlinConfig
+	pe, roTx := newResumeTestExec(t, db, config)
+	panicValue := fmt.Errorf("%w: account reader panic", rules.ErrInvalidBlock)
+
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 10_000_000}
+	txTask := &exec.TxTask{
+		Header:          header,
+		TxNum:           1,
+		TxIndex:         0,
+		Config:          config,
+		Txs:             []types.Transaction{signSelfSendTx(t, 0, 0, 1, 21_000, config, 0)},
+		Logger:          log.New(),
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	eTask := &execTask{Task: txTask, index: 0}
+	gasPool := new(protocol.GasPool).AddGas(header.GasLimit)
+	be := newBlockExec(newParallelTestBlock(1), gasPool, nil, make(chan applyResult, 4), nil, false, nil)
+	be.tasks = []*execTask{eTask}
+	be.results = []*execResult{nil}
+	be.txIncarnations = []int{0}
+	be.execFailed = []int{0}
+	be.execAborted = []int{0}
+	be.estimateDeps[0] = []int{}
+	be.execTasks.setInProgress(0)
+	be.settledInput[0] = true
+
+	task := &taskVersion{
+		execTask:   eTask,
+		version:    state.Version{BlockNum: 1, TxNum: 1, TxIndex: 0},
+		versionMap: be.versionMap,
+	}
+	ibs := state.New(panickingAccountStateReader{NoopReader: state.NewNoopReader(), panicValue: panicValue})
+	t.Cleanup(ibs.Close)
+	evm := &vm.EVM{}
+	require.NoError(t, task.Reset(evm, ibs, nil))
+	result := task.Execute(evm, pe.cfg.engine, nil, ibs, state.NewNoopWriter(), config, nil, datadir.Dirs{}, false)
+	result.Task = task
+
+	blockResult, err := be.nextResult(context.Background(), pe, result, roTx)
+
+	require.NoError(t, err)
+	require.NotNil(t, blockResult)
+	require.Same(t, be.block, blockResult.Block)
+	require.True(t, blockResult.Operational)
+	require.ErrorContains(t, blockResult.Err, "account reader panic")
+	require.NotErrorIs(t, blockResult.Err, rules.ErrInvalidBlock)
+	require.True(t, result.Operational)
 }
 
 func TestParallelResumeBoundaryOffsets(t *testing.T) {

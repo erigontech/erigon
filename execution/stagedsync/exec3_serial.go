@@ -358,6 +358,9 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 				return result.Err
 			}
 			if result.Err != nil {
+				if result.Operational {
+					return fmt.Errorf("txnIdx=%d: %w", txTask.TxIndex, result.Err)
+				}
 				return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
 			}
 
@@ -471,7 +474,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 				se.onBlockStart(ctx, block)
 			}
 
-			if se.cfg.syncCfg.ChaosMonkey && se.enableChaosMonkey {
+			if se.randomConsensusChaosEnabled() {
 				chaosErr := chaos_monkey.ThrowRandomConsensusError(false, txTask.TxIndex, se.cfg.badBlockHalt, result.Err)
 				if chaosErr != nil {
 					log.Warn("Monkey in a consensus")

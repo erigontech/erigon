@@ -861,7 +861,7 @@ func execBlocksBatch(ctx context.Context, db kv.TemporalRwDB, st *stagedsync.Syn
 	}
 
 	if err := stagedsync.SpawnExecuteBlocksStage(s, st, doms, tx, toBlock, ctx, cfg, logger); err != nil {
-		if !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+		if !stagedsync.IsOnlyLoopExhausted(err) {
 			return 0, err
 		}
 	}

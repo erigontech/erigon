@@ -18,7 +18,6 @@ package execmoduletester
 
 import (
 	"context"
-	"errors"
 	"math/big"
 	"testing"
 
@@ -221,7 +220,7 @@ func execOneBatch(ctx context.Context, emt *ExecModuleTester, cfg stagedsync.Exe
 	}
 
 	err = stagedsync.SpawnExecuteBlocksStage(s, emt.Sync, doms, tx, toBlock, ctx, cfg, logger)
-	if err != nil && !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+	if err != nil && !stagedsync.IsOnlyLoopExhausted(err) {
 		return 0, err
 	}
 
@@ -356,7 +355,7 @@ func TestExec_RestoresCommitmentStateReader(t *testing.T) {
 	s, err := emt.Sync.StageState(stages.Execution, tx, true, false)
 	require.NoError(t, err)
 	err = stagedsync.SpawnExecuteBlocksStage(s, emt.Sync, doms, tx, gen.TopBlock.NumberU64(), ctx, cfg, logger)
-	if err != nil && !errors.Is(err, &stagedsync.ErrLoopExhausted{}) {
+	if err != nil && !stagedsync.IsOnlyLoopExhausted(err) {
 		require.NoError(t, err)
 	}
 	require.NoError(t, doms.Commit(ctx, tx))

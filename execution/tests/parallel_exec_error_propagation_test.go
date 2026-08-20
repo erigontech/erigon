@@ -1,0 +1,281 @@
+// Copyright 2026 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package executiontests
+
+import (
+	"context"
+	"errors"
+	"sync/atomic"
+	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	commonerrors "github.com/erigontech/erigon/common/errors"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/rawdb"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/vm"
+)
+
+// A pre-dispatch failure must surface as a hard error. Classifying it as
+// ErrLoopExhausted would make the stage retry without progress.
+func TestParallelExec_PreDispatchFailure_SurfacesInsteadOfInfiniteLoop(t *testing.T) {
+	ctx := context.Background()
+
+	m := execmoduletester.New(t)
+	require.NoError(t, m.InsertChain(makeBlockChain(m.Genesis, 1, m, canonicalSeed)))
+
+	// Only tx-number metadata is needed because the fault precedes the block read.
+	const maxBlockNum = uint64(2)
+	setupTx, err := m.DB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer setupTx.Rollback()
+	_, lastTxNum, err := m.BlockReader.TxnumReader().Last(setupTx)
+	require.NoError(t, err)
+	require.NoError(t, rawdbv3.TxNums.Append(setupTx, maxBlockNum, lastTxNum+2))
+	require.NoError(t, setupTx.Commit())
+
+	chaosErr := errors.New("chaos monkey: simulated pre-dispatch failure (snapshot step misalignment)")
+	err = runParallelExecV3(t, m, maxBlockNum, chaos_monkey.Faults{PreExecutionError: chaosErr})
+
+	require.ErrorIs(t, err, chaosErr,
+		"the pre-dispatch failure must surface as a hard error, wrapping the original")
+	var exhausted *stagedsync.ErrLoopExhausted
+	require.False(t, errors.As(err, &exhausted),
+		"pre-dispatch failure classified as ErrLoopExhausted → runStage loops forever with zero progress")
+}
+
+// tipWithUnexecutedBlock2 creates a committed block-1 tip and stores block 2
+// without executing it, giving fault-injection tests real work to dispatch.
+func tipWithUnexecutedBlock2(t *testing.T) (*execmoduletester.ExecModuleTester, *types.Block) {
+	t.Helper()
+	ctx := context.Background()
+
+	m := execmoduletester.New(t)
+	chain := makeBlockChain(m.Genesis, 2, m, canonicalSeed)
+	require.NoError(t, m.InsertChain(chain.Slice(0, 1)))
+
+	b2 := chain.Blocks[1]
+	setupTx, err := m.DB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer setupTx.Rollback()
+	require.NoError(t, rawdb.WriteHeader(setupTx, b2.Header()))
+	require.NoError(t, rawdb.WriteBody(setupTx, b2.Hash(), b2.NumberU64(), b2.Body()))
+	require.NoError(t, rawdb.WriteCanonicalHash(setupTx, b2.Hash(), b2.NumberU64()))
+	_, lastTxNum, err := m.BlockReader.TxnumReader().Last(setupTx)
+	require.NoError(t, err)
+	require.NoError(t, rawdbv3.TxNums.Append(setupTx, b2.NumberU64(), lastTxNum+2))
+	require.NoError(t, setupTx.Commit())
+	return m, b2
+}
+
+// runParallelExecV3 runs one parallel execution batch with scoped faults.
+func runParallelExecV3(t *testing.T, m *execmoduletester.ExecModuleTester, maxBlockNum uint64, faults chaos_monkey.Faults) error {
+	t.Helper()
+	ctx := chaos_monkey.WithFaults(context.Background(), faults)
+	return runParallelExecV3WithContext(t, ctx, m, maxBlockNum)
+}
+
+func runParallelExecV3WithContext(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, maxBlockNum uint64) error {
+	t.Helper()
+	return runParallelExecV3WithChaosGate(t, ctx, m, maxBlockNum, false, true)
+}
+
+func runParallelExecV3WithChaosGate(t *testing.T, ctx context.Context, m *execmoduletester.ExecModuleTester, maxBlockNum uint64, chaosMonkey, initialCycle bool) error {
+	t.Helper()
+
+	syncCfg := m.Cfg().Sync
+	syncCfg.ChaosMonkey = chaosMonkey
+	execCfg := stagedsync.StageExecuteBlocksCfg(
+		m.DB, m.Cfg().Prune, m.Cfg().BatchSize, m.ChainConfig, m.Engine, &vm.Config{},
+		m.Notifications, m.Cfg().StateStream, false /*badBlockHalt*/, m.Dirs, m.BlockReader,
+		m.Cfg().Genesis, syncCfg, false /*experimentalBAL*/, exec.NewBlockReadAheader(),
+	)
+
+	rwTx, err := m.DB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Senders, maxBlockNum))
+	doms, err := execctx.NewSharedDomains(ctx, rwTx, m.Log)
+	require.NoError(t, err)
+	defer doms.Close()
+
+	s := &stagedsync.StageState{
+		State:            m.Sync,
+		ID:               stages.Execution,
+		BlockNumber:      1,
+		CurrentSyncCycle: stagedsync.CurrentSyncCycleInfo{IsInitialCycle: initialCycle},
+	}
+	return stagedsync.SpawnExecuteBlocksStage(s, nil /*Unwinder*/, doms, rwTx, maxBlockNum, ctx, execCfg, m.Log)
+}
+
+type cancelOnTemporalRoDB struct {
+	kv.TemporalRwDB
+	done    <-chan struct{}
+	cancel  context.CancelFunc
+	blocked atomic.Bool
+}
+
+func (db *cancelOnTemporalRoDB) BeginTemporalRo(ctx context.Context) (kv.TemporalTx, error) {
+	if ctx.Done() != db.done || !db.blocked.CompareAndSwap(false, true) {
+		return db.TemporalRwDB.BeginTemporalRo(ctx)
+	}
+	db.cancel()
+	return nil, ctx.Err()
+}
+
+func (db *cancelOnTemporalRoDB) Agg() any {
+	return db.TemporalRwDB.(dbstate.HasAgg).Agg()
+}
+
+// A worker-pool failure must cancel the executor and surface instead of leaving
+// the exec loop waiting for results.
+func TestParallelExec_WorkerPoolDeath_SurfacesInsteadOfHanging(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	chaosErr := errors.New("chaos monkey: simulated worker panic")
+	err := runParallelExecV3(t, m, b2.NumberU64(), chaos_monkey.Faults{WorkerError: chaosErr})
+
+	require.ErrorIs(t, err, chaosErr,
+		"a dead worker pool must surface its error through the executor group")
+	var exhausted *stagedsync.ErrLoopExhausted
+	require.False(t, errors.As(err, &exhausted),
+		"worker-pool death classified as ErrLoopExhausted → runStage retries forever with zero progress")
+}
+
+func TestParallelExec_DeterministicWorkerFaultRunsWithRandomChaosDisabled(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	chaosErr := errors.New("chaos monkey: deterministic worker fault")
+	ctx := chaos_monkey.WithFaults(context.Background(), chaos_monkey.Faults{WorkerError: chaosErr})
+
+	err := runParallelExecV3WithChaosGate(t, ctx, m, b2.NumberU64(), false, true)
+
+	require.ErrorIs(t, err, chaosErr)
+}
+
+func TestParallelExec_DeterministicWorkerFaultHonorsInitialCycleGate(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	chaosErr := errors.New("chaos monkey: worker fault must stay disabled")
+	ctx := chaos_monkey.WithFaults(context.Background(), chaos_monkey.Faults{WorkerError: chaosErr})
+
+	err := runParallelExecV3WithChaosGate(t, ctx, m, b2.NumberU64(), false, false)
+
+	require.NoError(t, err)
+}
+
+func TestParallelExec_EarlySetupCancellationDoesNotHideWorkerFailure(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+	chaosErr := errors.New("chaos monkey: simulated worker panic")
+	ctx = chaos_monkey.WithFaults(ctx, chaos_monkey.Faults{WorkerError: chaosErr})
+	db := &cancelOnTemporalRoDB{
+		TemporalRwDB: m.DB,
+		done:         ctx.Done(),
+		cancel:       cancel,
+	}
+	m.DB = db
+
+	err := runParallelExecV3WithContext(t, ctx, m, b2.NumberU64())
+
+	require.ErrorIs(t, err, chaosErr)
+	require.False(t, commonerrors.IsOnlyCanceled(err))
+}
+
+// A custom parent-cancellation cause must survive an early setup exit: the
+// batch aborts before the executor is joined, and the cause is the only
+// record of why.
+func TestParallelExec_EarlySetupExitKeepsParentCause(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	parentFailure := errors.New("stage loop failed: snapshot files vanished")
+	ctx, cancel := context.WithCancelCause(context.Background())
+	t.Cleanup(func() { cancel(nil) })
+	db := &cancelOnTemporalRoDB{
+		TemporalRwDB: m.DB,
+		done:         ctx.Done(),
+		cancel:       func() { cancel(parentFailure) },
+	}
+	m.DB = db
+
+	err := runParallelExecV3WithContext(t, ctx, m, b2.NumberU64())
+
+	require.ErrorIs(t, err, parentFailure,
+		"the parent cause must not degrade to plain context.Canceled")
+	require.False(t, commonerrors.IsOnlyCanceled(err))
+}
+
+// A recovered apply-loop panic must fail the batch because the apply loop owns
+// post-execution validation.
+func TestParallelExec_ApplyLoopPanic_SurfacesInsteadOfCommitting(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	chaosErr := errors.New("chaos monkey: simulated apply-loop panic")
+	err := runParallelExecV3(t, m, b2.NumberU64(), chaos_monkey.Faults{ApplyLoopPanic: chaosErr})
+
+	// The panic surfaces by message, not identity: recovered panics are always
+	// plain operational errors.
+	require.ErrorContains(t, err, "apply loop panic",
+		"a recovered apply-loop panic must fail the batch, not commit unvalidated blocks")
+	require.ErrorContains(t, err, chaosErr.Error())
+}
+
+// A recovered exec-loop panic must surface instead of looking like a resumable
+// empty batch.
+func TestParallelExec_ExecLoopPanic_SurfacesInsteadOfRetrying(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	chaosErr := errors.New("chaos monkey: simulated exec-loop panic")
+	err := runParallelExecV3(t, m, b2.NumberU64(), chaos_monkey.Faults{ExecLoopPanic: chaosErr})
+
+	require.ErrorContains(t, err, "exec loop panic",
+		"a recovered exec-loop panic must surface as a hard error")
+	require.ErrorContains(t, err, chaosErr.Error())
+	var exhausted *stagedsync.ErrLoopExhausted
+	require.False(t, errors.As(err, &exhausted),
+		"exec-loop panic classified as ErrLoopExhausted → runStage retries forever with zero progress")
+}
+
+// A panic inside a worker task is an executor fault, never a block verdict: it
+// must surface as an operational error instead of marking the block INVALID.
+func TestParallelExec_TaskPanic_SurfacesAsOperationalError(t *testing.T) {
+	m, b2 := tipWithUnexecutedBlock2(t)
+
+	chaosErr := errors.New("chaos monkey: simulated task panic")
+	err := runParallelExecV3(t, m, b2.NumberU64(), chaos_monkey.Faults{TaskPanic: chaosErr})
+
+	require.Error(t, err)
+	require.NotErrorIs(t, err, rules.ErrInvalidBlock,
+		"a task panic must never become a bad-block verdict")
+	require.ErrorContains(t, err, "exec task panic")
+	require.ErrorContains(t, err, chaosErr.Error())
+	var exhausted *stagedsync.ErrLoopExhausted
+	require.False(t, errors.As(err, &exhausted),
+		"task panic classified as ErrLoopExhausted → runStage retries forever with zero progress")
+}

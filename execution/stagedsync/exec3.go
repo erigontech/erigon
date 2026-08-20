@@ -28,11 +28,11 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/cmp"
 	"github.com/erigontech/erigon/common/dbg"
+	commonerrors "github.com/erigontech/erigon/common/errors"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/receipts"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tests/chaos_monkey"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/shards"
@@ -123,15 +124,24 @@ type execRange struct {
 }
 
 // execV3Outcome carries what the stage wrapper needs after the parallel
-// executor returns. applyTx is the live post-exec tx (parallel exec may have
-// rolled the stageloop tx via Flush/CommitAndBegin, leaving the caller's rwTx
-// stale); the failed* fields name the block implicated in a bad-block unwind.
+// executor returns. applyTx is the caller-owned stage transaction; parallel
+// execution does not replace it. verdict carries the invalid-block verdict of
+// a healthy run, while exhausted carries its resumable batch boundary. At most
+// one of {error, verdict, exhausted} is set. The error return carries an
+// operational executor failure or cancellation, never a block verdict or
+// batch boundary.
 type execV3Outcome struct {
-	lastHeader            *types.Header
 	applyTx               kv.TemporalRwTx
 	lastCommittedBlockNum uint64
-	failedBlock           uint64
-	failedHash            common.Hash
+	verdict               *blockVerdict
+	exhausted             *ErrLoopExhausted
+}
+
+func finalizeExecV3Outcome(out execV3Outcome, err error) (execV3Outcome, error) {
+	if err != nil {
+		out.exhausted = nil
+	}
+	return out, err
 }
 
 // execV3 runs the parallel executor over the resolved window rng. It is
@@ -230,6 +240,7 @@ func execV3(ctx context.Context,
 			logPrefix:         logPrefix,
 			progress:          NewProgress(blockNum, inputTxNum, commitThreshold, false, logPrefix, logger),
 			enableChaosMonkey: initialCycle,
+			chaosFaults:       chaos_monkey.FaultsFromContext(ctx),
 			hooks:             hooks,
 			blockSrc:          blockSrc,
 		},
@@ -253,16 +264,39 @@ func execV3(ctx context.Context,
 		initialTxNum, inputTxNum, initialCycle, applyTx, stepsInDb, accumulator, readAhead, logEvery)
 
 	out = execV3Outcome{
-		lastHeader:            lastHeader,
 		applyTx:               applyTx,
 		lastCommittedBlockNum: pe.lastCommittedBlockNum.Load(),
-		failedBlock:           pe.failedBlock,
-		failedHash:            pe.failedHash,
+		verdict:               pe.verdict,
+		exhausted:             pe.exhausted,
+	}
+
+	// The finalize tail (commitment persist guard + txpool notification) runs
+	// only for healthy or resumable batches — a failed or invalid batch left
+	// nothing durable to persist or report.
+	if execErr != nil {
+		return out, execErr
+	}
+	if out.verdict != nil {
+		haltOnBadBlockDebug(cfg, logPrefix, out.verdict.err, logger)
+		return out, nil
 	}
 
 	execErr = execV3Finalize(ctx, execErr, cfg, doms, pe.lastCommittedTxNum.Load(), out.lastCommittedBlockNum,
 		lastHeader, shouldReportToTxPool, logPrefix, logger)
-	return out, execErr
+	return finalizeExecV3Outcome(out, execErr)
+}
+
+// haltOnBadBlockDebug freezes the process on an invalid block when both the
+// BAD_BLOCK_HALT env flag and cfg.badBlockHalt are set: the debug switch's
+// whole purpose is to keep the datadir at the pre-block state, and returning
+// would run deferred rollback/commit paths that overwrite it. Fork validation
+// alone (cfg.badBlockHalt without the env flag) must not exit — it needs the
+// verdict to propagate for in-memory validation.
+func haltOnBadBlockDebug(cfg ExecuteBlockCfg, logPrefix string, cause error, logger log.Logger) {
+	if cfg.badBlockHalt && dbg.BadBlockHalt {
+		logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", logPrefix), "err", cause)
+		os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional process halt without running deferred rollback to preserve state
+	}
 }
 
 // execV3Serial runs the legacy serial executor. It stays welded to the stage
@@ -361,7 +395,7 @@ func execV3Serial(ctx context.Context,
 	if u != nil && !u.HasUnwindPoint() {
 		if lastHeader != nil {
 			switch {
-			case execErr == nil || errors.Is(execErr, &ErrLoopExhausted{}):
+			case execErr == nil || IsOnlyLoopExhausted(execErr):
 				_, _, err = computeAndCheckCommitmentV3(ctx, lastHeader, applyTx, se.domains(), cfg, execStage, false, logger, u)
 				if err != nil {
 					return err
@@ -395,7 +429,7 @@ func execV3Serial(ctx context.Context,
 				switch {
 				case errors.Is(execErr, ErrWrongTrieRoot):
 					return fmt.Errorf("can't handle incorrect root err: %w", execErr)
-				case errors.Is(execErr, &ErrLoopExhausted{}):
+				case IsOnlyLoopExhausted(execErr):
 					break
 				default:
 					return execErr
@@ -421,22 +455,11 @@ func execV3Finalize(ctx context.Context, execErr error, cfg ExecuteBlockCfg, dom
 	// propagate the error so the caller can unwind. The step-frozen check only
 	// makes sense when execution succeeded and we need to persist the commitment.
 	if execErr != nil && errors.Is(execErr, rules.ErrInvalidBlock) {
-		// Intentional os.Exit under BAD_BLOCK_HALT (both the env flag dbg.BadBlockHalt
-		// and cfg.badBlockHalt): a debug switch whose whole purpose is to freeze
-		// process state at the bad block. Returning would run deferred
-		// rollback/commit/flush and overwrite the state we want to inspect.
-		// cfg.badBlockHalt alone (fork validation) must NOT exit — it needs the
-		// error to propagate for in-memory validation.
-		if cfg.badBlockHalt && dbg.BadBlockHalt {
-			logger.Error(fmt.Sprintf("[%s] BAD_BLOCK_HALT: halting on invalid block (debug mode, no commit)", logPrefix), "err", execErr)
-			os.Exit(1) //nolint:gocritic // exitAfterDefer: intentional process halt without running deferred rollback to preserve state
-		}
+		haltOnBadBlockDebug(cfg, logPrefix, execErr, logger)
 		return execErr
 	}
 
 	lastCommittedStep := kv.Step(lastCommittedTxNum / doms.StepSize())
-	// applyTx may be stale after parallel execution (the underlying mdbx tx
-	// was invalidated by Flush/CommitAndBegin). Use a fresh roTx for the check.
 	var lastFrozenStep kv.Step
 	if stepCheckTx, stepErr := cfg.db.BeginTemporalRo(ctx); stepErr == nil {
 		lastFrozenStep = kv.Step(stepCheckTx.StepsInFiles(kv.CommitmentDomain))
@@ -489,7 +512,7 @@ type txExecutor struct {
 	lastCommittedTxNum    atomic.Uint64
 	committedGas          atomic.Int64
 
-	execLoopGroup *errgroup.Group
+	execLoopGroup *commonerrors.Group
 
 	execRequests chan *execRequest
 	execCount    atomic.Int64
@@ -499,6 +522,7 @@ type txExecutor struct {
 	writeCount   atomic.Int64
 
 	enableChaosMonkey bool
+	chaosFaults       chaos_monkey.Faults
 }
 
 // A wrong root under fork validation means a payload the CL offered was rejected,
@@ -621,6 +645,18 @@ func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64
 	return data, nil
 }
 
+// recoveredPanicError formats a panic value with %v on purpose: a panic is
+// always an operational failure — never a block verdict, a resumable boundary,
+// or routine cancellation — so the recovered value must not keep a sentinel
+// identity that classifiers match.
+func recoveredPanicError(operation string, recovered any) error {
+	return fmt.Errorf("%s panic: %v", operation, recovered)
+}
+
+func (te *txExecutor) randomConsensusChaosEnabled() bool {
+	return te.cfg.syncCfg.ChaosMonkey && te.enableChaosMonkey
+}
+
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
 	if te.execLoopGroup == nil {
 		return errors.New("no exec group")
@@ -633,8 +669,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		// Closing here would race with the exec loop sending results.
 		defer func() {
 			if rec := recover(); rec != nil {
-				err = fmt.Errorf("exec blocks panic: %s", rec)
-			} else if err != nil && !errors.Is(err, context.Canceled) {
+				err = recoveredPanicError("exec blocks", rec)
+				return
+			}
+			if err != nil {
 				err = fmt.Errorf("exec blocks error: %w", err)
 			} else {
 				te.logger.Debug("[" + te.logPrefix + "] exec blocks exit")
@@ -646,6 +684,10 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 		// race this send select and panic on "send on closed channel".
 		if blockRequests != nil {
 			defer close(blockRequests)
+		}
+
+		if chaosErr := te.chaosFaults.PreExecutionError; te.enableChaosMonkey && chaosErr != nil {
+			return chaosErr
 		}
 
 		// Open a thread-local roTx for block metadata and StepsInFiles.
@@ -908,8 +950,9 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 // has been crossed at the current block — which causes executeBlocks to
 // stamp the dispatched blockResult with `Exhausted` and break out of
 // its loop. The exec loop sees the Exhausted flag, fires its
-// partial-batch flush, and the apply loop returns ErrLoopExhausted so
-// the stage loop resumes from the next block.
+// partial-batch flush, and the apply loop records the resumable boundary
+// so the stage returns ErrLoopExhausted and the sync loop resumes from
+// the next block.
 //
 // Two gates protect the initial cycle:
 //  1. !initialCycle — later cycles enforce blockLimit unconditionally.
