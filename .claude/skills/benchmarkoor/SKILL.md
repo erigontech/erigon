@@ -289,6 +289,9 @@ runner:
           data-disk-type: overlayfs
           erigon-commit: <full-erigon-commit>
   client:
+    config:
+      genesis:
+        erigon: ${ERIGON_DATADIR_LOWER}/chainspec.json
     datadirs:
       erigon:
         source_dir: ${ERIGON_DATADIR_LOWER}
@@ -300,6 +303,12 @@ runner:
       pull_policy: never
       # Copy every other field from the selected current instance.
 ```
+
+The State Actor datadir runner can inherit its Erigon genesis from
+`${STATE_DIR}/erigon/chainspec.json`. The run-only override is loaded last, so it must replace that
+path with the `chainspec.json` below the protected lower as shown above. Require that file to exist
+through `LOWER_DIR` before launch with `test -f "$LOWER_DIR/chainspec.json"`; never leave the run
+pointed at an upstream `/schelk` path or at the writable State Actor output root.
 
 Re-copy the instance when upstream `clients.yaml` changes; do not let this example silently erase
 new required flags. Check every copied `extra_args` option against `docker run --rm "$IMAGE_TAG"
@@ -430,23 +439,28 @@ use it as an OverlayFS upper or work directory.
 
 Protect the original with the same read-only bind, canary, fingerprint, size, and critical-hash
 checks used for State Actor. Treat download sidecars as hints; verify the live block, hash, and state
-root by booting the exact client through a disposable OverlayFS view.
+root by booting the exact client through a disposable OverlayFS view. Classify the protected
+snapshot as exactly `raw-base` or `post-prerun` by comparing all three live fields with the pinned
+tuples; reject every other head. Use that classification consistently for compute replay and
+stateful staging.
 
 For a compute source with `rollback_strategy: none`, keep its complete source map, including any
 `pre_runs`, and run it through one disposable OverlayFS layer over the protected original lower.
-Benchmarkoor applies the pre-run at most once in that layer and then retains the same container and
-overlay for the suite. Do not use the stateful no-`pre_runs` copy against a raw lower, and do not
-promote the compute upper into the pristine snapshot.
+Benchmarkoor applies the pre-run at most once in that layer when the snapshot is `raw-base`, and it
+must skip replay when the snapshot is `post-prerun`. It then retains the same container and overlay
+for the suite. Do not use the stateful no-`pre_runs` copy against a raw lower, and do not promote the
+compute upper into the pristine snapshot.
 
 If the selected stateful source has `pre_runs`, do not replay that bundle for every
-`container-recreate` fixture. Stage it once in a disposable overlay with
-`--debug.stop-after-prerun`. After validating the completion marker and head, stop the retained
-client gracefully before waiting for benchmarkoor to exit; stopping the container lets its log
-stream drain. Then expose the staged merged directory through a second read-only bind. Run smoke
-and production fixtures with a fresh per-test OverlayFS layer over that advanced bind and a
-complete test-source override that omits `pre_runs`. Never promote into or write back to the
-pristine snapshot. Copy the complete source map and remove only `pre_runs`; do not construct a
-partial override and rely on merge deletion.
+`container-recreate` fixture. When the protected snapshot is `raw-base`, stage it once in a
+disposable overlay with `--debug.stop-after-prerun`. After validating the completion marker and
+head, stop the retained client gracefully before waiting for benchmarkoor to exit; stopping the
+container lets its log stream drain. Then expose the staged merged directory through a second
+read-only bind. When the protected snapshot is already `post-prerun`, skip staging and use the
+original protected lower. In both cases, run smoke and production fixtures with a fresh per-test
+OverlayFS layer and a complete test-source override that omits `pre_runs`. Never promote into or
+write back to the pristine snapshot. Copy the complete source map and remove only `pre_runs`; do
+not construct a partial override and rely on merge deletion.
 
 Before stateful smoke or measured fixtures over a staged baseline, recalculate the conservative
 per-test copy-up budget from the larger of the allocated and apparent sizes of the read-only

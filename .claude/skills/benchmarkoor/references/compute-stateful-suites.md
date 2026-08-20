@@ -389,9 +389,11 @@ read-only bind, probe-overlay canary, sizes, full-tree metadata fingerprint, and
 dataset-appropriate critical hashes before starting a client. Set `INTEGRITY_ROOT` to
 `ORIGINAL_LOWER` after its read-only remount, and use that path for every traversal, `du`, content
 hash, and before/after fingerprint. Never collect integrity data through `PRISTINE_DIR`: reads on a
-writable `relatime` mount can mutate atime. Require `ro` as a distinct mount option first, then
-require an expected-failure write probe through the protected bind without ever writing through or
-inspecting the original path:
+writable `relatime` mount can mutate atime. Retain the resulting baseline fingerprint, sizes, path
+count, and critical hashes in task notes outside the disposable `RUN_ROOT`; interrupted-staging
+recovery must be able to compare a newly recreated guard with this same baseline. Require `ro` as a
+distinct mount option first, then require an expected-failure write probe through the protected
+bind without ever writing through or inspecting the original path:
 
 ```bash
 INTEGRITY_ROOT="$ORIGINAL_LOWER"
@@ -415,11 +417,11 @@ write-event watcher on `ORIGINAL_LOWER` and periodically repeat the handle and m
 With `method: overlayfs`, the container must mount a task-owned `merged` directory, not either
 protected lower directly. Verify the container's datadir source and the corresponding host overlay
 as one chain. Use `ORIGINAL_LOWER` as `expected_lower` for compute and during stateful staging. Use
-`ADVANCED_LOWER` for stateful smoke and measured runs after staging; replace `/data` only when the
-effective client config uses another datadir target. Benchmarkoor's privileged process normally
-creates its temporary overlay directory as root-owned mode 0700, so inspect it through the same
-non-interactive privilege boundary; never `chmod` or `chown` a retained overlay merely to inspect
-it:
+the `MEASURED_LOWER` selected below for stateful smoke and measured runs: `ADVANCED_LOWER` after
+staging, or `ORIGINAL_LOWER` when staging is skipped. Replace `/data` only when the effective client
+config uses another datadir target. Benchmarkoor's privileged process normally creates its
+temporary overlay directory as root-owned mode 0700, so inspect it through the same non-interactive
+privilege boundary; never `chmod` or `chown` a retained overlay merely to inspect it:
 
 ```bash
 OVERLAY_INSPECT=(sudo -n)
@@ -476,10 +478,18 @@ any unexplained access, mount chain, or write event, stop the exact task-owned p
 user; do not stop or alter the unrelated accessor. Replace `OVERLAY_INSPECT` with an approved
 allowlisted helper when the host does not grant direct non-interactive sudo for these commands.
 
-Download sidecars can be stale after bloating. Boot the exact client only through a disposable
-OverlayFS over `ORIGINAL_LOWER`, query `eth_getBlockByNumber("latest")`, and record its block,
-hash, and state root. Stop it gracefully and remove its exact container and overlay. Require the
-live head to match the selected suite's base head.
+Download sidecars can be stale after bloating. Resolve the authoritative raw-base block, hash, and
+state root from the selected source and effective reference configuration. If that source has
+`pre_runs`, also resolve its authoritative post-pre-run end block, hash, and state root. Do not
+infer either tuple from a filename or a sidecar alone.
+
+Boot the exact client only through a disposable OverlayFS over `ORIGINAL_LOWER`, query
+`eth_getBlockByNumber("latest")`, and record its block, hash, and state root. Stop it gracefully and
+remove its exact container and overlay. Normalize block-number representation and hash case, then
+compare all three fields. Set `SNAPSHOT_STATE=post-prerun` when the live tuple matches the pinned
+post-pre-run tuple; otherwise set `SNAPSHOT_STATE=raw-base` when it matches the pinned raw tuple. If
+the source has no `pre_runs`, only `raw-base` is valid. Reject an empty tuple, a partial match, and
+every other head. Record the classification and both authoritative tuples in the run notes.
 
 ### Replace the remote datadir config
 
@@ -549,29 +559,42 @@ compute: configs/global.yaml
 Omit the hosted datadir runner config and reassert Docker, the complete OverlayFS datadir map, and
 `data-disk-type: overlayfs` after the source and clients. Do not use
 `--debug.stop-after-prerun`, a no-`pre_runs` source copy, or `ADVANCED_LOWER` for this path. When the
-protected original is at the raw base head, benchmarkoor replays the pre-run once into the compute
-upper before measuring fixtures. When the datadir is already at the pre-run end head, allow the
-replay to be skipped only after block, hash, and state root all match the pinned source.
+protected original is classified as `raw-base`, benchmarkoor replays the pre-run once into the
+compute upper before measuring fixtures. When it is classified as `post-prerun`, require
+benchmarkoor to skip replay; never apply the pre-run a second time. No other `SNAPSHOT_STATE` is
+valid.
 
 The same compute container and OverlayFS layer then remain active for every selected fixture, as
 required by `rollback_strategy: none`. Require exactly one task-owned overlay during the run and
 verify it with `verify_task_overlay "$CONTAINER_ID" "$ORIGINAL_LOWER"`. Give every smoke and
-measured command a fresh upper; never reuse or promote a smoke upper. A fresh command may therefore
-replay the pre-run again, but it must never write to `ORIGINAL_LOWER` or the pristine path.
+measured command a fresh upper; never reuse or promote a smoke upper. With `raw-base`, each fresh
+command replays the pre-run into its own upper; with `post-prerun`, each command must skip it. No
+command may write to `ORIGINAL_LOWER` or the pristine path.
 
 After the smoke, require the persisted rollback strategy to be `none`, the suite label to be
 `test-type: compute`, and the datadir method to be `overlayfs`. The persisted `start_block` is the
 head observed before executor-level pre-runs: it must equal the raw tuple when replay was needed, or
-the post-pre-run tuple when benchmarkoor verified that replay could be skipped. In the raw case,
-require a successful `Pre-run steps completed` record before the first fixture and no failed pre-run
-step. A filtered smoke proves configuration and isolation, not the fixture count or state/cache
-history of an unfiltered compute run.
+the post-pre-run tuple when benchmarkoor skipped replay. In the raw case, require a successful
+`Pre-run steps completed` record before the first fixture and no failed pre-run step. In the
+post-pre-run case, require the logs and persisted start head to prove replay did not run. A filtered
+smoke proves configuration and isolation, not the fixture count or state/cache history of an
+unfiltered compute run.
 
 ### Stage a stateful pre-run once
 
-For stateful, require `rollback_strategy: container-recreate`. If the source has no `pre_runs`, skip
-staging and use `ORIGINAL_LOWER` for the measured run. Otherwise, a plain run would restore the raw
-lower and replay the bundle for every fixture. Build an immutable advanced baseline:
+For stateful, require `rollback_strategy: container-recreate`. Choose the measured lower from the
+verified snapshot classification:
+
+- If the source has no `pre_runs`, require `SNAPSHOT_STATE=raw-base`, skip staging, and use
+  `ORIGINAL_LOWER` with the selected source.
+- If the source has `pre_runs` and `SNAPSHOT_STATE=post-prerun`, skip staging, use
+  `ORIGINAL_LOWER`, and use a complete source copy with only `pre_runs` removed.
+- If the source has `pre_runs` and `SNAPSHOT_STATE=raw-base`, stage exactly once as described below,
+  then use `ADVANCED_LOWER` with that same no-`pre_runs` source copy.
+
+Reject every other combination. A plain stateful run against a raw lower would otherwise restore
+that lower and replay the bundle for every fixture. Only the third case builds an immutable
+advanced baseline:
 
 1. Run the exact stateful source against `ORIGINAL_LOWER` with
    `--debug.stop-after-prerun`. Omit the CPU and memory performance-limit config during this
@@ -609,19 +632,22 @@ its name, labels, complete fixture source, rollback strategy, runner settings, a
 source field in that copy. Do not try to delete the inherited key with a partial later map.
 Deliberately replace its environment-specific runtime and storage-label values with the final local
 Docker/OverlayFS config described below. During measured runs, use this complete local source and
-`ADVANCED_LOWER`, and restore the resource-limit config.
+the lower selected above, and restore the resource-limit config.
 
 Do not reuse context, source, client, or datadir variables from a previous State Actor task.
 Replace both State Actor datadir configs with `DATASET_DATADIR_GLOBAL`, use
 `DATASET_CONTEXT_GLOBAL`, and load `DATASET_CLIENTS_CONFIG`. Omit the hosted datadir runner config.
-Use `DATASET_SOURCE_CONFIG` for staging. Save its complete no-pre-runs copy at a task-owned path as
+Use `DATASET_SOURCE_CONFIG` for staging only in the raw-base case. When the selected source has
+`pre_runs`, save its complete no-pre-runs copy at a task-owned path as
 `DATASET_NO_PRERUN_CONFIG`; canonicalize that variable to the new file below `RUN_ROOT`, and never
 edit the checked-in source. After the dataset context, source, and clients files, load the complete
 local Docker/OverlayFS config, then the local instance and optional exact-filter overrides. The
 final local config must reassert `container_runtime: docker`, the complete OverlayFS datadir map,
 and `data-disk-type: overlayfs`.
 
-The two stateful config stacks are therefore:
+The staging stack exists only for a `raw-base` snapshot with `pre_runs`. The measured stack uses
+`MEASURED_LOWER=ADVANCED_LOWER` after successful staging and
+`MEASURED_LOWER=ORIGINAL_LOWER` when staging was skipped:
 
 ```text
 staging: configs/global.yaml
@@ -638,9 +664,12 @@ measured: configs/global.yaml
           -> $DATASET_CONTEXT_GLOBAL
           -> $DATASET_NO_PRERUN_CONFIG
           -> $DATASET_CLIENTS_CONFIG
-          -> complete local Docker/OverlayFS config using ADVANCED_LOWER
+          -> complete local Docker/OverlayFS config using MEASURED_LOWER
           -> complete local measured instance and optional exact-filter override
 ```
+
+When the selected source never had `pre_runs`, keep that complete source in the measured stack in
+place of `DATASET_NO_PRERUN_CONFIG`; do not create an unnecessary partial replacement.
 
 Use `--debug.stop-after-prerun` only on the staging command. Use the same
 `--limit-instance-client` and `--limit-instance-id` on both. Let the smoke create its persisted
@@ -712,20 +741,36 @@ per-test upper; accounting for only the per-test layer understates peak consumpt
 
 After stateful result validation, require zero per-test mounts, directories, containers, and
 benchmarkoor processes. Compare pristine fingerprints, sizes, path count, and critical hashes while
-`ORIGINAL_LOWER` is still mounted. Then unmount `ADVANCED_LOWER`, unmount and remove the exact
-disposable staging tree, and unmount `ORIGINAL_LOWER` last. Require zero task overlays and no canary
-in the pristine snapshot.
+`ORIGINAL_LOWER` is still mounted. For a staged run, then unmount `ADVANCED_LOWER` and unmount and
+remove the exact disposable staging tree. For an unstaged run, require that neither exists. Unmount
+`ORIGINAL_LOWER` last, then require zero task overlays and no canary in the pristine snapshot.
 
-If a measured run is interrupted, do not use `benchmarkoor cleanup --force` while the staged
-baseline is retained. Stop the exact recorded benchmarkoor PID and its exact client container,
-wait for both to exit, and require no open handle before unmounting anything. Then resolve and
-remove only that run's disposable per-test mount and directory. Preserve the fixed staging mount
-and `ADVANCED_LOWER`, re-prove both lower binds read-only, and repeat the smoke gates before
-resuming. If staging itself is interrupted, shutdown was not clean, or the mapping of a mount to
-its upper is uncertain, stop every exact task-owned container first so its log stream can drain,
-then wait for or stop its exact benchmarkoor process. After all have exited, unmount in the cleanup
-order above, discard only the verified task run root, and restage from `ORIGINAL_LOWER`; never guess
-with a broad mount, process, or cleanup target.
+For an interrupted unstaged stateful run, use the generic exact-stack recovery above and retain the
+`ORIGINAL_LOWER` guard until its integrity checks pass. For an interrupted measured run over a
+staged baseline, do not use `benchmarkoor cleanup --force`. Stop the exact recorded benchmarkoor
+PID and its exact client container, wait for both to exit, and require no open handle before
+unmounting anything. Then resolve and remove only that run's disposable per-test mount and
+directory. Preserve the fixed staging mount and `ADVANCED_LOWER`, re-prove both lower binds
+read-only, and repeat the smoke gates before resuming.
+
+If staging itself is interrupted, shutdown was not clean, or the mapping of a mount to its upper is
+uncertain, stop every exact task-owned container first so its log stream can drain, then wait for or
+stop its exact benchmarkoor process. Prove each retained mount belongs to this task before cleanup;
+if any target cannot be resolved exactly, stop and ask the user instead of unmounting or discarding
+it. After all processes have exited and ownership is proven, unmount `ADVANCED_LOWER` if it was
+created, the exact staging overlay, and `ORIGINAL_LOWER` last. Require zero mounts and open handles
+below the verified task root before discarding only that root; never guess with a broad mount,
+process, or cleanup target.
+
+The discarded root contained `ORIGINAL_LOWER`, so it cannot be reused. Select and create a new
+task-owned `RUN_ROOT`, recompute all derived paths, and repeat the full
+[Protect and identify the original](#protect-and-identify-the-original) procedure from the
+canonical operator-designated `PRISTINE_DIR`: path-overlap and descendant-mount gates, read-only
+bind/remount, `ro` assertion, rejected write probe, probe-overlay canary, host-access checks, sizes,
+path count, full fingerprint, and critical hashes. Compare the new integrity values with the
+baseline retained outside the discarded root. Stop if any value differs or any gate cannot be
+reproduced. Re-run the live-head classification, and only then stage again from the newly created
+`ORIGINAL_LOWER`.
 
 Do not preserve historical run IDs, suite hashes, fixture URLs, test counts, block tuples, context
 names, or host paths as defaults in this reference. Discover them from the selected revision and
