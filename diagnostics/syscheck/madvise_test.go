@@ -26,9 +26,9 @@ func TestMadviseRoundTrip(t *testing.T) {
 	st, err := f.Stat()
 	require.NoError(t, err)
 
-	h1, h2, err := mmap.Mmap(f, int(st.Size()))
+	h, err := mmap.OpenRo(f, int(st.Size()))
 	require.NoError(t, err)
-	defer func() { require.NoError(t, mmap.Munmap(h1, h2)) }()
+	defer func() { require.NoError(t, h.Unmap()) }()
 
 	advice := func() string {
 		all, err := syscheck.FileMappings()
@@ -49,19 +49,19 @@ func TestMadviseRoundTrip(t *testing.T) {
 		return
 	}
 
-	require.Equal(t, "random", advice(), "mmap.Mmap madvises MADV_RANDOM itself")
+	require.Equal(t, "random", advice(), "mmap.OpenRo madvises MADV_RANDOM itself")
 
-	require.NoError(t, mmap.MadviseSequential(h1))
+	require.NoError(t, mmap.MadviseSequential(h))
 	require.Equal(t, "sequential", advice())
 
-	require.NoError(t, mmap.MadviseNormal(h1))
+	require.NoError(t, mmap.MadviseNormal(h))
 	require.Equal(t, "normal", advice(), "MADV_NORMAL clears both VM_SEQ_READ and VM_RAND_READ")
 
-	require.NoError(t, mmap.MadviseRandom(h1))
+	require.NoError(t, mmap.MadviseRandom(h))
 	require.Equal(t, "random", advice())
 
 	// WILLNEED is a readahead request, not a flag change — the VMA keeps its advice.
-	require.NoError(t, mmap.MadviseWillNeed(h1))
+	require.NoError(t, mmap.MadviseWillNeed(h))
 	require.Equal(t, "random", advice())
 }
 
@@ -86,15 +86,15 @@ func TestSequentialViewLeavesSharedMappingRandom(t *testing.T) {
 	st, err := f.Stat()
 	require.NoError(t, err)
 
-	shared1, shared2, err := mmap.Mmap(f, int(st.Size()))
+	shared, err := mmap.OpenRo(f, int(st.Size()))
 	require.NoError(t, err)
-	defer func() { require.NoError(t, mmap.Munmap(shared1, shared2)) }()
+	defer func() { require.NoError(t, shared.Unmap()) }()
 
-	seq1, seq2, err := mmap.Mmap(f, int(st.Size()))
+	seq, err := mmap.OpenRo(f, int(st.Size()))
 	require.NoError(t, err)
-	defer func() { require.NoError(t, mmap.Munmap(seq1, seq2)) }()
+	defer func() { require.NoError(t, seq.Unmap()) }()
 
-	require.NoError(t, mmap.MadviseSequential(seq1))
+	require.NoError(t, mmap.MadviseSequential(seq))
 
 	all, err := syscheck.FileMappings()
 	require.NoError(t, err)
@@ -124,9 +124,9 @@ func TestMadviseSubPageMapping(t *testing.T) {
 	require.NoError(t, err)
 	require.Less(t, st.Size(), int64(os.Getpagesize()))
 
-	h1, h2, err := mmap.Mmap(f, int(st.Size()))
+	h, err := mmap.OpenRo(f, int(st.Size()))
 	require.NoError(t, err)
-	defer func() { require.NoError(t, mmap.Munmap(h1, h2)) }()
+	defer func() { require.NoError(t, h.Unmap()) }()
 
 	if runtime.GOOS != "linux" {
 		got, err := syscheck.FileMappings()
@@ -149,11 +149,11 @@ func TestMadviseSubPageMapping(t *testing.T) {
 		return got, n
 	}
 
-	// Mmap madvises random itself, so start from a state a later call must change.
+	// OpenRo madvises random itself, so start from a state a later call must change.
 	got, _ := advice()
 	require.Equal(t, "random", got)
 
-	require.NoError(t, mmap.MadviseNormal(h1))
+	require.NoError(t, mmap.MadviseNormal(h))
 	got, n := advice()
 	require.Equal(t, "normal", got, "advice on a sub-page mapping must take effect")
 	require.Equal(t, 1, n, "advising a whole mapping must not split its VMA")
