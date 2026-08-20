@@ -710,6 +710,15 @@ func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialVi
 	}, nil
 }
 
+// readMapping is the mmap v.data points into: its own when it opened one, the
+// decompressor's when it reads through the shared mapping.
+func (v *SequentialView) readMapping() []byte {
+	if v.mmapHandle != nil {
+		return v.mmapHandle
+	}
+	return v.d.mmapHandle1
+}
+
 func (v *SequentialView) MakeGetter() *Getter {
 	g := &Getter{
 		d:           v.d,
@@ -718,6 +727,7 @@ func (v *SequentialView) MakeGetter() *Getter {
 		dataOffset:  uint64(v.d.size - int64(len(v.data))),
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
+		mapping:     v.readMapping(),
 	}
 	if v.d.posArena != nil {
 		g.posTables = v.d.posArena.tables
@@ -746,9 +756,12 @@ type Getter struct {
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posTables     []posTable // posArena.tables; only used for the subtable path
-	patternDict   *patternTable
-	d             *Decompressor
+	posTables   []posTable // posArena.tables; only used for the subtable path
+	patternDict *patternTable
+	d           *Decompressor
+	// mapping is the mmap data points into. A SequentialView opens its own, so this
+	// is not always d.mmapHandle1 and the residency gate must offset against it.
+	mapping       []byte
 	fName         string
 	dataOffset    uint64
 	literalWarmer func(*Getter, uint64, uint64)
@@ -894,6 +907,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 		dataOffset:  uint64(d.size - int64(len(data))),
 		patternDict: d.dict,
 		fName:       d.FileName(),
+		mapping:     d.mmapHandle1,
 	}
 	if d.posArena != nil {
 		g.posTables = d.posArena.tables

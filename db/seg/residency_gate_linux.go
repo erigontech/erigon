@@ -51,7 +51,7 @@ func (g *Getter) EnableResidencyGate() { g.residencyGate = true }
 // residencyRegion returns the page-aligned mmap slice covering the word extent
 // at offset, along with its file offset. Returns nil when out of range.
 func (g *Getter) residencyRegion(offset uint64) (region []byte, fileOffset int64) {
-	full := g.d.mmapHandle1
+	full := g.mapping
 	if len(full) == 0 || len(g.data) == 0 {
 		return nil, 0
 	}

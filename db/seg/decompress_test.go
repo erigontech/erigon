@@ -1356,3 +1356,28 @@ func TestSequentialViewSharedPathAddsNoMapping(t *testing.T) {
 			"reading through the shared mapping must not change its advice")
 	}
 }
+
+// TestGetterMappingFollowsItsView pins which mmap a Getter reads through. The
+// residency gate derives file offsets from the distance between g.data and that
+// mapping's base, so taking the Decompressor's handle for a view that owns a
+// private mmap subtracts two unrelated addresses and warms the wrong pages.
+func TestGetterMappingFollowsItsView(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	require.Same(t, &d.mmapHandle1[0], &d.MakeGetter().mapping[0],
+		"a Decompressor getter reads through the decompressor's mapping")
+
+	own, err := d.OpenSequentialView(true)
+	require.NoError(t, err)
+	defer own.Close()
+	require.Same(t, &own.mmapHandle[0], &own.MakeGetter().mapping[0],
+		"a separate-readahead view getter reads through the view's own mapping")
+	require.NotSame(t, &d.mmapHandle1[0], &own.MakeGetter().mapping[0])
+
+	shared, err := d.OpenSequentialView(false)
+	require.NoError(t, err)
+	defer shared.Close()
+	require.Same(t, &d.mmapHandle1[0], &shared.MakeGetter().mapping[0],
+		"a shared view getter reads through the decompressor's mapping")
+}
