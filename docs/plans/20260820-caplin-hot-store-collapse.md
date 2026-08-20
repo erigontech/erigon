@@ -181,11 +181,15 @@ Every task lists its tests before the implementation they cover. In Go the red p
 **Files:**
 - Create: `cl/persistence/blob_storage/fs_helpers_test.go`
 
-- [ ] write tests for a counting `afero.Fs` wrapper: each of `RemoveAll`, `Stat`, `Create`, `Rename` and `Open` is tallied, unrecorded methods still delegate, and the counters reset (red: helper does not exist yet)
-- [ ] write tests for a failing `afero.Fs` wrapper that makes a named file's writes or `Sync` return an error, so a caller can induce a failed write at a chosen path
-- [ ] write tests for a slow `afero.Fs` wrapper that delays inside `RemoveAll` by a settable duration, so a test can measure how long an unrelated operation waits during a prune
-- [ ] implement the three wrappers over `afero.NewMemMapFs()`
-- [ ] run `go test ./cl/persistence/blob_storage/...` — must pass before task 2
+- [x] write tests for a counting `afero.Fs` wrapper: each of `RemoveAll`, `Stat`, `Create`, `Rename` and `Open` is tallied, unrecorded methods still delegate, and the counters reset (red: helper does not exist yet)
+- [x] write tests for a failing `afero.Fs` wrapper that makes a named file's writes or `Sync` return an error, so a caller can induce a failed write at a chosen path
+- [x] write tests for a slow `afero.Fs` wrapper that delays inside `RemoveAll` by a settable duration, so a test can measure how long an unrelated operation waits during a prune
+- [x] implement the three wrappers over `afero.NewMemMapFs()`
+- [x] run `go test ./cl/persistence/blob_storage/...` — must pass before task 2
+
+⚠️ `make lint` reports one pre-existing failure outside this change: `db/seg/decompress.go:212` field `residencyOnce is unused`. It is present on `origin/main` and untouched by this branch, so task 8's lint gate must treat it as inherited rather than chase it.
+
+`failWritesAfter(path, budget, err)` takes a byte budget so a test can leave a genuinely truncated file rather than an empty one, which is what task 5's column repro needs. The budget is snapshotted per open file, so a retry after a failure starts from a fresh budget.
 
 ### Task 2: bucketStore with path, init and pruneBelow
 
