@@ -1275,14 +1275,15 @@ func (a *Aggregator) mergeLoopStep(ctx context.Context, toTxNum uint64) (somethi
 
 	aggTx := a.BeginFilesRo()
 	defer aggTx.Close()
-	mxRunningMerges.Inc()
-	defer mxRunningMerges.Dec()
 
 	r := aggTx.findMergeRange(toTxNum, a.StepSize(), a.StepsInFrozenFile())
 	if !r.any() {
 		a.cleanAfterMerge(nil)
 		return false, nil
 	}
+
+	mxRunningMerges.Inc()
+	defer mxRunningMerges.Dec()
 
 	outs, err := aggTx.filesInRange(r)
 	if err != nil {

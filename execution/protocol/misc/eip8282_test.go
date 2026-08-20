@@ -87,7 +87,7 @@ func TestDequeueBuilderDepositRequests_EmptyCodeReturnsError(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
 	defer statedb.Close()
 
 	// Contract exists with zero-length code.
@@ -106,7 +106,7 @@ func TestDequeueBuilderExitRequests_EmptyCodeReturnsError(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
 	defer statedb.Close()
 
 	// Contract exists with zero-length code.

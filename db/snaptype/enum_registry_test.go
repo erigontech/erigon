@@ -43,6 +43,7 @@ func allSnapshotTypes() []snaptype.Type {
 		coreSnapshotTypes,
 		borSnapshotTypes,
 		snaptype.CaplinSnapshotTypes,
+		snaptype.CaplinStateSnapshotTypes,
 	)
 }
 
@@ -105,10 +106,43 @@ func TestRegisterTypePanicsOnDuplicateName(t *testing.T) {
 	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "headers", "already registered at enum")
 }
 
-// Caplin names resolve via ParseEnum's switch, not namedTypes, so the name
-// guard must reject them even though they never pass through RegisterType.
+// Caplin names are registered in namedTypes, so the common name guard must
+// reject them through RegisterType as well.
 func TestRegisterTypePanicsOnCaplinName(t *testing.T) {
 	expectRegisterPanic(t, snaptype.Enum(snaptype.MaxEnum), "beaconblocks", "already registered at enum")
+}
+
+func TestCaplinEnumNamesUseRegisteredTypes(t *testing.T) {
+	for _, typ := range snaptype.CaplinStateSnapshotTypes {
+		if got := typ.Enum().String(); got != typ.Name() {
+			t.Errorf("type %q: Enum().String() = %q, want exact case", typ.Name(), got)
+		}
+
+		parsed, ok := snaptype.ParseEnum(strings.ToLower(typ.Name()))
+		if !ok || parsed != typ.Enum() {
+			t.Errorf("type %q: ParseEnum(lowercase) = (%d, %v), want (%d, true)", typ.Name(), parsed, ok, typ.Enum())
+		}
+	}
+}
+
+func TestCaplinBlocksidecarsAlias(t *testing.T) {
+	parsed, ok := snaptype.ParseEnum("blocksidecars")
+	if !ok || parsed != snaptype.CaplinEnums.BlobSidecars {
+		t.Fatalf("ParseEnum(blocksidecars) = (%d, %v), want (%d, true)", parsed, ok, snaptype.CaplinEnums.BlobSidecars)
+	}
+}
+
+func TestRegisterCaplinTypePanicsOutsideCaplinRange(t *testing.T) {
+	defer func() {
+		r := recover()
+		if r == nil {
+			t.Fatal("RegisterCaplinType did not panic outside the caplin range")
+		}
+		if msg := fmt.Sprint(r); !strings.Contains(msg, "outside caplin range") {
+			t.Fatalf("RegisterCaplinType panicked with %q, want caplin-range error", msg)
+		}
+	}()
+	snaptype.RegisterCaplinType(snaptype.MinCoreEnum, "outsidecaplin", snaptype.Versions{}, nil, nil, nil)
 }
 
 // An enum outside [MinCoreEnum, MaxEnum) would index past the MaxEnum-sized
@@ -129,9 +163,22 @@ func TestEnumRangeDisjointness(t *testing.T) {
 			t.Errorf("caplin type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCaplinEnum, snaptype.MinBorEnum)
 		}
 	}
+	for _, typ := range snaptype.CaplinStateSnapshotTypes {
+		if e := typ.Enum(); e < snaptype.MinCaplinEnum || e >= snaptype.MinBorEnum {
+			t.Errorf("caplin state type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCaplinEnum, snaptype.MinBorEnum)
+		}
+	}
 	for _, typ := range borSnapshotTypes {
 		if e := typ.Enum(); e < snaptype.MinBorEnum || e >= snaptype.MaxEnum {
 			t.Errorf("bor type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinBorEnum, snaptype.MaxEnum)
 		}
+	}
+}
+
+func TestEnumRangeLayout(t *testing.T) {
+	if !(snaptype.MinCoreEnum < snaptype.MinCaplinEnum &&
+		snaptype.MinCaplinEnum < snaptype.MinBorEnum &&
+		snaptype.MinBorEnum < snaptype.MaxEnum) {
+		t.Fatalf("enum ranges are not ordered: core=%d caplin=%d bor=%d max=%d", snaptype.MinCoreEnum, snaptype.MinCaplinEnum, snaptype.MinBorEnum, snaptype.MaxEnum)
 	}
 }

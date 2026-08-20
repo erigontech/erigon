@@ -80,7 +80,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.NoError(t, err)
 	domains.SetTxNum(txNum)
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
-	setup := New(NewReaderV3(domains.AsGetter(tx)))
+	setup := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer setup.Close()
 	setup.CreateAccount(addr, true)
 	setup.SetState(addr, key, valA)
@@ -90,7 +90,7 @@ func TestFinalizeTxDoesNotSkipStorageRevertToBlockOrigin(t *testing.T) {
 	require.NoError(t, err)
 
 	// IBS for the next block — reads block-start state (slot=A) from domains.
-	ibs := New(NewReaderV3(domains.AsGetter(tx)))
+	ibs := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer ibs.Close()
 
 	// Tx1: A → B.
@@ -122,7 +122,7 @@ func TestNull(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsGetter(tx))
+	r := NewReaderV3(domains.AsStateGetter(tx))
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 	defer state.Close()
@@ -156,7 +156,7 @@ func TestTouchDelete(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsGetter(tx))
+	r := NewReaderV3(domains.AsStateGetter(tx))
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 	state := New(r)
 	defer state.Close()
@@ -191,7 +191,7 @@ func TestSnapshot(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsGetter(tx))
+	r := NewReaderV3(domains.AsStateGetter(tx))
 	state := New(r)
 	defer state.Close()
 
@@ -236,7 +236,7 @@ func TestSnapshotEmpty(t *testing.T) {
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	r := NewReaderV3(domains.AsGetter(tx))
+	r := NewReaderV3(domains.AsStateGetter(tx))
 	state := New(r)
 	defer state.Close()
 
@@ -257,7 +257,7 @@ func TestSnapshot2(t *testing.T) {
 
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-	state := New(NewReaderV3(domains.AsGetter(tx)))
+	state := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer state.Close()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
@@ -332,7 +332,7 @@ func TestCodeResolve(t *testing.T) {
 
 	w := NewWriter(domains.AsPutDel(tx), nil, txNum)
 
-	state := New(NewReaderV3(domains.AsGetter(tx)))
+	state := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer state.Close()
 
 	stateobjaddr0 := toAddr([]byte("so0"))
@@ -360,7 +360,7 @@ func TestCodeResolve(t *testing.T) {
 	err = state.CommitBlock(&chain.Rules{}, w)
 	require.NoError(t, err)
 
-	state1 := New(NewReaderV3(domains.AsGetter(tx)))
+	state1 := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer state1.Close()
 	state1.SetVersionMap(&VersionMap{})
 	state1.Prepare(&chain.Rules{}, accounts.ZeroAddress, accounts.ZeroAddress, accounts.ZeroAddress, nil, nil)
@@ -435,7 +435,7 @@ func TestDump(t *testing.T) {
 	err = rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(t, err)
 
-	st := New(NewReaderV3(domains.AsGetter(tx)))
+	st := New(NewReaderV3(domains.AsStateGetter(tx)))
 	defer st.Close()
 
 	// generate a few entries

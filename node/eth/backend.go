@@ -807,7 +807,6 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	}
 
 	blkBuilder := builder.NewBuilder(
-		backend.sentryCtx,
 		backend.chainDB,
 		&config.Builder,
 		backend.chainConfig,

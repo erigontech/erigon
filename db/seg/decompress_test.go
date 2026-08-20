@@ -93,7 +93,7 @@ func TestNextReportsPackedLiteral(t *testing.T) {
 
 	require.Equal(t, word, got)
 	require.Equal(t, uint64(len(word)), literalLength)
-	require.Equal(t, word, d.mmapHandle1[literalOffset:literalOffset+literalLength])
+	require.Equal(t, word, []byte(d.mmapHandle1[literalOffset:literalOffset+literalLength]))
 }
 
 func TestDecompressSkip(t *testing.T) {

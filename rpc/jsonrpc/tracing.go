@@ -406,10 +406,7 @@ func (api *DebugAPIImpl) TraceCall(ctx context.Context, args ethapi.CallArgs, bl
 	ibs := state.New(stateReader)
 	defer ibs.Close()
 
-	baseFee, err := overrideBaseFee(config, header.BaseFee)
-	if err != nil {
-		return err
-	}
+	baseFee := overrideBaseFee(config, header.BaseFee)
 	if config != nil && config.BlockOverrides != nil && config.BlockOverrides.BlobBaseFee != nil {
 		args.MaxFeePerBlobGas = config.BlockOverrides.BlobBaseFee
 	}
