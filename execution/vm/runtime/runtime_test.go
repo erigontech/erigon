@@ -38,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/abi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -116,7 +117,7 @@ func TestCall(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
 
-	state := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	state := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer state.Close()
 	address := accounts.InternAddress(common.HexToAddress("0xaa"))
 	require.NoError(t, state.SetCode(address, []byte{
@@ -230,7 +231,7 @@ func TestCallChargesAmsterdamNewAccountStateGas(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1000"))
@@ -255,7 +256,7 @@ func TestCallChargesAmsterdamDelegationTargetAccess(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
@@ -279,7 +280,7 @@ func TestCallWarmsPragueDelegationTarget(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	recipient := accounts.InternAddress(common.HexToAddress("0x2000"))
@@ -352,7 +353,7 @@ func BenchmarkCall(b *testing.B) {
 	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
 	tx, sd := temporaltest.NewTestTxSD(b, db)
 	//cfg.w = state.NewWriter(execctx, nil)
-	cfg.State = benchState(b, state.NewReaderV3(sd.AsStateGetter(tx)))
+	cfg.State = benchState(b, state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer cfg.State.Close()
 	// cfg carries a non-zero Value, so the origin has to be able to pay it or
 	// every call fails the balance check before reaching the interpreter.
@@ -389,7 +390,7 @@ func benchmarkEVM_Create(b *testing.B, code string) {
 	require.NoError(b, err)
 
 	var (
-		statedb  = benchState(b, state.NewReaderV3(domains.AsStateGetter(tx)))
+		statedb  = benchState(b, state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 		sender   = accounts.InternAddress(common.BytesToAddress([]byte("sender")))
 		receiver = accounts.InternAddress(common.BytesToAddress([]byte("receiver")))
 	)
@@ -461,7 +462,7 @@ func BenchmarkEVM_RETURN(b *testing.B) {
 	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(b, db)
 
-	statedb := benchState(b, state.NewReaderV3(domains.AsStateGetter(tx)))
+	statedb := benchState(b, state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
@@ -650,7 +651,7 @@ func benchmarkNonModifyingCode(gas mdgas.MdGas, code []byte, name string, tracer
 	err := rawdbv3.TxNums.Append(tx, 1, 1)
 	require.NoError(b, err)
 
-	cfg.State = benchState(b, state.NewReaderV3(domains.AsStateGetter(tx)))
+	cfg.State = benchState(b, state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer cfg.State.Close()
 	cfg.GasLimit = gas.Execution
 	//
@@ -915,7 +916,7 @@ func BenchmarkEVM_SWAP1(b *testing.B) {
 
 	db := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(b, db)
-	state := benchState(b, state.NewReaderV3(domains.AsStateGetter(tx)))
+	state := benchState(b, state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer state.Close()
 	contractAddr := accounts.InternAddress(common.BytesToAddress([]byte("contract")))
 
@@ -946,7 +947,7 @@ func TestCreate2CollisionWithEIP7702Delegation(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1234"))
@@ -1005,7 +1006,7 @@ func TestCreateCollisionWithEIP7702Delegation(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	sender := accounts.InternAddress(common.HexToAddress("0x1234"))
@@ -1138,7 +1139,7 @@ func TestSystemCallZeroValueSkipsTransferChecks(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, domains := temporaltest.NewTestTxSD(t, db)
-	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	statedb := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer statedb.Close()
 
 	systemAddr := params.SystemAddress

@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/temporal"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -112,7 +113,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 
 	// Block N+1 worker reads via NewBufferedReader.
 	// The base reader points at domains, which still have zero balance.
-	baseReader := state.NewReaderV3(domains.AsStateGetter(tx))
+	baseReader := state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	bufferedRdr := state.NewBufferedReader(rs, baseReader)
 	ibsN1 := state.New(bufferedRdr)
 	defer ibsN1.Close()
@@ -130,7 +131,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 
 	// Sanity check: a plain domain reader (no buffering) still sees zero —
 	// the timing hole is real without rs.accounts.
-	ibsRaw := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	ibsRaw := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer ibsRaw.Close()
 	rawBal, err := ibsRaw.GetBalance(addr)
 	require.NoError(t, err)
@@ -139,7 +140,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 
 	// Simulate ApplyStateWrites completing (domain apply catches up).
 	w := state.NewWriter(domains.AsPutDel(tx), nil, 5)
-	ibsApply := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	ibsApply := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer ibsApply.Close()
 	ibsApply.SetTxContext(1, 0)
 	err = ibsApply.SetBalance(addr, *uint256.NewInt(500), tracing.BalanceChangeUnspecified)
@@ -150,7 +151,7 @@ func TestCrossBlockTimingRace(t *testing.T) {
 	require.NoError(t, err)
 
 	// After domain apply, plain reader must see the correct value.
-	ibsRawAfter := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	ibsRawAfter := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer ibsRawAfter.Close()
 	rawBalAfter, err := ibsRawAfter.GetBalance(addr)
 	require.NoError(t, err)

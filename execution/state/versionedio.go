@@ -660,9 +660,13 @@ type WriteSet struct {
 
 	// released marks a ReleaseMaps that was not a reset for reuse: the pooled
 	// maps leave the set reading as empty, so under assertions readers panic
-	// instead. Only written when dbg.AssertEnabled.
+	// instead.
 	released bool
 }
+
+// Released reports whether ReleaseMaps pooled this set's maps and no later
+// write revived it.
+func (s *WriteSet) Released() bool { return s != nil && s.released }
 
 // The panic must stay inline with a constant message: an out-of-line helper
 // costs a call, and IsEmpty then exceeds its inline budget.
@@ -753,9 +757,7 @@ func writeSetPut[T any](s *WriteSet, m *map[accounts.Address]*VersionedWrite[T],
 }
 
 func (s *WriteSet) revive() {
-	if dbg.AssertEnabled {
-		s.released = false
-	}
+	s.released = false
 }
 
 func (s *WriteSet) SetAddress(addr accounts.Address, vw *VersionedWrite[*accounts.Account]) {
@@ -1419,9 +1421,7 @@ func (s *WriteSet) ReleaseMaps() {
 	}
 	wsPutStorageOuter(s.storage)
 	*s = WriteSet{}
-	if dbg.AssertEnabled {
-		s.released = true
-	}
+	s.released = true
 }
 
 // Per-path typed delete methods.  Direct map access, no internal switch
