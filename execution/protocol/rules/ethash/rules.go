@@ -439,7 +439,7 @@ func (ethash *Ethash) FinalizeAndAssemble(chainConfig *chain.Config, header *typ
 		return nil, nil, err
 	}
 	// Header seems complete, assemble into a block and return
-	return types.NewBlock(header, txs, uncles, r, withdrawals), nil, nil
+	return types.NewBlock(header, txs, uncles, r, withdrawals, nil), nil, nil
 }
 
 func (ethash *Ethash) ValidateBlockPostExecution(chainConfig *chain.Config, header *types.Header,
