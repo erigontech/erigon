@@ -26,21 +26,16 @@ import (
 const AutoCloseOnError = true
 const InitialBufferSize = 4096
 
-// FlushThreshold bounds how much a response buffers. It is chosen for memory,
-// not speed: with --http.compression, which defaults on, the size makes no
-// difference at all - gzhttp buffers on its own terms, and sweeping 4KiB to 1MiB
-// gives the same 774 socket writes and the same 25.6ms for an 8MB response,
-// which gzip itself dominates. Uncompressed it does matter, 2035 socket writes
-// and 5.9ms at 4KiB against 257 and 1.3ms here, flattening past 256KiB - not
-// worth four times the memory per concurrent stream for a non-default path.
+// FlushThreshold bounds how much a response buffers. Chosen for memory, not
+// speed: under --http.compression, which defaults on, gzhttp buffers on its own
+// terms and the size makes no difference; uncompressed it does, but flattens
+// past 256KiB. BenchmarkStreamFlushThreshold sweeps it.
 const FlushThreshold = int(64 * datasize.KB)
 
-// appendAndFlush appends raw bytes to the buffer instead of calling
-// jsoniter.Stream.Write, which exists to satisfy io.Writer: it writes through on
-// every call and reslices the buffer forward to keep whatever a short write left,
-// leaving nothing to append into. On a response written item by item that costs a
-// realloc each time, and defeats flushing on a full buffer. The latched error is
-// reported so callers that abandon expensive work on a write failure keep working.
+// appendAndFlush appends instead of calling jsoniter.Stream.Write, which
+// implements io.Writer and so writes through on every call, reslicing the buffer
+// forward and leaving nothing to append into or to hand over. It reports the
+// latched error so callers that abandon expensive work on a failure still see one.
 func appendAndFlush(stream *jsoniter.Stream, content []byte) (int, error) {
 	stream.SetBuffer(append(stream.Buffer(), content...))
 	flushIfFull(stream)
@@ -48,10 +43,9 @@ func appendAndFlush(stream *jsoniter.Stream, content []byte) (int, error) {
 }
 
 // flushIfFull hands the buffer over once it is full, so a large response streams
-// instead of being held whole. Bytes that fail to reach the client are dropped:
-// they can never be delivered, and every later Flush short-circuits on
-// stream.Error without draining, so keeping them would buffer the whole failed
-// response. stream.Error keeps the failure itself.
+// instead of being held whole. Undeliverable bytes are dropped: a later Flush
+// short-circuits on stream.Error without draining, so keeping them would buffer
+// the whole failed response. stream.Error keeps the failure.
 func flushIfFull(stream *jsoniter.Stream) {
 	if len(stream.Buffer()) < FlushThreshold {
 		return
