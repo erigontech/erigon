@@ -332,11 +332,20 @@ func mustGet(t *testing.T, tx kv.Tx, k []byte) []byte {
 
 // benchTxn is deterministic per (block, i) and its Hash() is a real txn hash, so
 // the block walk can rediscover the same keys the fixture wrote.
+// txlCalldata pads the txn to a realistic size: Hash() re-encodes and keccaks
+// the whole payload, and that cost is only paid by the block walk.
+var txlCalldata = dbg.EnvInt("TXL_BENCH_TXSIZE", 0)
+
 func benchTxn(block, i uint64) types.Transaction {
 	var to common.Address
 	binary.BigEndian.PutUint64(to[:8], block)
+	var data []byte
+	if txlCalldata > 0 {
+		data = make([]byte, txlCalldata)
+		binary.BigEndian.PutUint64(data, block*1_000_000+i)
+	}
 	return &types.LegacyTx{
-		CommonTx: types.CommonTx{Nonce: i, GasLimit: 21_000, To: &to, Value: *uint256.NewInt(block)},
+		CommonTx: types.CommonTx{Nonce: i, GasLimit: 21_000, To: &to, Value: *uint256.NewInt(block), Data: data},
 		GasPrice: *uint256.NewInt(1),
 	}
 }
