@@ -189,6 +189,7 @@ type Decompressor struct {
 	mmapHandle1         mmap.Ro       // mmap handle for unix (this is used to close mmap)
 	data                []byte        // slice of correct size for the decompressor to work with
 	wordsStart          uint64        // Offset of whether the superstrings actually start
+	wordsFileOffset     uint64
 	size                int64
 	modTime             time.Time
 	wordsCount          uint64
@@ -209,7 +210,7 @@ type Decompressor struct {
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 
 	residency     atomic.Pointer[residencyBitmap] // page-residency bitmap for the async-io gate; nil unless enabled
-	residencyOnce sync.Once
+	residencyOnce sync.Once                       //nolint:unused // Used only in Linux builds.
 }
 
 const (
@@ -267,6 +268,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 	}
 	// read patterns from file
 	d.data = d.mmapHandle1[:d.size]
+	var dataFileOffset uint64
 	defer d.MadvNormal().DisableReadAhead() //speedup opening on slow drives
 
 	d.version = d.data[0]
@@ -277,17 +279,20 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		// 3rd byte (otional): exists if PageLevelCompressionEnabled flag is enabled, and defines number of values on compressed page
 		d.featureFlagBitmask = FeatureFlagBitmask(d.data[1])
 		d.data = d.data[2:]
+		dataFileOffset += 2
 	}
 
 	if d.featureFlagBitmask.Has(PageLevelCompressionEnabled) {
 		d.compPageValuesCount = d.data[0]
 		d.data = d.data[1:]
+		dataFileOffset++
 	}
 
 	if hasMetadata {
 		metadataLen := binary.BigEndian.Uint32(d.data[:4])
 		d.metadata = d.data[4 : 4+metadataLen]
 		d.data = d.data[4+metadataLen:]
+		dataFileOffset += 4 + uint64(metadataLen)
 
 		dataSize := len(d.data)
 		if dataSize < compressedMinSize {
@@ -421,6 +426,7 @@ func NewDecompressorWithMetadata(compressedFilePath string, hasMetadata bool) (*
 		}
 	}
 	d.wordsStart = pos + dictSize
+	d.wordsFileOffset = dataFileOffset + d.wordsStart
 
 	if d.Count() == 0 && dictSize == 0 && d.size > d.calcCompressedMinSize() {
 		return nil, &ErrCompressedFileCorrupted{
@@ -715,14 +721,9 @@ func (d *Decompressor) OpenSequentialView(separateReadahead bool) (*SequentialVi
 	} else {
 		_ = mmap.MadviseRandom(h1)
 	}
-	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
-	// (version, feature flags, metadata). wordsStart is relative to d.data,
-	// so the file offset is: headerSize + wordsStart.
-	headerSize := d.size - int64(len(d.data))
-	wordsFileOffset := headerSize + int64(d.wordsStart)
 	return &SequentialView{
 		d: d, mmapHandle1: h1,
-		data: h1[wordsFileOffset:d.size],
+		data: h1[d.wordsFileOffset:d.size],
 	}, nil
 }
 
@@ -731,7 +732,7 @@ func (v *SequentialView) MakeGetter() *Getter {
 		d:           v.d,
 		data:        v.data,
 		dataLen:     uint64(len(v.data)),
-		dataOffset:  uint64(v.d.size - int64(len(v.data))),
+		dataOffset:  v.d.wordsFileOffset,
 		patternDict: v.d.dict,
 		fName:       v.d.FileName(),
 	}
@@ -765,15 +766,16 @@ type Getter struct {
 	posEntries []posEntry // cached d.posDict.entries, avoids pointer chain on hot path
 	data       []byte
 	//less hot fields
-	posTables     []posTable // posArena.tables; only used for the subtable path
-	patCodewords  []codeword // patArena.codewords; table slots index into it
-	patternDict   *patternTable
-	d             *Decompressor
-	fName         string
-	dataOffset    uint64
-	literalWarmer func(*Getter, uint64, uint64)
-	trace         bool
-	residencyGate bool
+	posTables                  []posTable // posArena.tables; only used for the subtable path
+	patCodewords               []codeword // patArena.codewords; table slots index into it
+	patternDict                *patternTable
+	d                          *Decompressor
+	fName                      string
+	dataOffset                 uint64
+	multiPageWarmer            func(*Getter, uint64, uint64)
+	multiPageLiteralMinWordLen uint64
+	trace                      bool
+	residencyGate              bool
 }
 
 func (g *Getter) MadvNormal() MadvDisabler {
@@ -914,7 +916,7 @@ func (d *Decompressor) MakeGetter() *Getter {
 		d:           d,
 		data:        data,
 		dataLen:     uint64(len(data)),
-		dataOffset:  uint64(d.size - int64(len(data))),
+		dataOffset:  d.wordsFileOffset,
 		patternDict: d.dict,
 		fName:       d.FileName(),
 	}
@@ -981,13 +983,16 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 	// Loop below fills in the patterns
 	// Tracking position in buf where to insert part of the word
 	bufPos := bufOffset
-	literalWarmer := g.literalWarmer
+	multiPageWarmer := g.multiPageWarmer
+	if wordLen <= g.multiPageLiteralMinWordLen {
+		multiPageWarmer = nil
+	}
 	literalLen := wordLen
 	for pos := g.nextPos(); pos != 0; pos = g.nextPos() {
 		bufPos += int(pos) - 1 // Positions where to insert patterns are encoded relative to one another
 		pt := g.nextPattern()
 		copy(buf[bufPos:], pt)
-		if literalWarmer != nil {
+		if multiPageWarmer != nil {
 			if patternLen := uint64(len(pt)); patternLen <= literalLen {
 				literalLen -= patternLen
 			} else {
@@ -1000,8 +1005,8 @@ func (g *Getter) Next(buf []byte) ([]byte, uint64) {
 		g.dataBit = 0
 	}
 	postLoopPos := g.dataP
-	if literalWarmer != nil && literalLen > 0 {
-		literalWarmer(g, g.dataOffset+postLoopPos, literalLen)
+	if multiPageWarmer != nil && literalLen > 0 {
+		multiPageWarmer(g, g.dataOffset+postLoopPos, literalLen)
 	}
 	g.dataP = savePos
 	g.dataBit = 0

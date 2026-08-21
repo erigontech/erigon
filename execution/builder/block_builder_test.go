@@ -48,7 +48,7 @@ func TestBlockBuilderStoppedForItsPayloadHasNotFailed(t *testing.T) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	}, &Parameters{}, time.Minute, time.Minute)
 
 	_, err := b.Stop(t.Context())
@@ -75,7 +75,7 @@ func TestBlockBuilderStaysReusableOnceItFillsTheBlock(t *testing.T) {
 	built := make(chan struct{})
 	b := NewBlockBuilder(t.Context(), func(_ context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		defer close(built)
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	}, &Parameters{}, time.Minute, time.Minute)
 
 	<-built
@@ -117,7 +117,7 @@ func TestBlockBuilderStillHandsOverAPayloadWhenItsBudgetRunsOut(t *testing.T) {
 		for !interrupt.Load() {
 			time.Sleep(time.Millisecond)
 		}
-		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+		return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 	}, &Parameters{}, time.Millisecond, time.Minute)
 
 	require.Eventually(t, func() bool { return b.Block() != nil }, 5*time.Second, time.Millisecond)
@@ -135,7 +135,7 @@ func TestBlockBuilderKeepsAHealthyBuildThatIsSlowToObserveTheStop(t *testing.T) 
 		case <-ctx.Done():
 			return nil, ctx.Err()
 		case <-time.After(500 * time.Millisecond):
-			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}, nil
+			return &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}, nil
 		}
 	}, &Parameters{}, time.Millisecond, 5*time.Second)
 
@@ -174,7 +174,7 @@ func TestBlockBuilderReleasesABuildThatWedgesAfterObservingTheStop(t *testing.T)
 func TestBlockBuilderReplaysPayloadCompletedAfterDiscard(t *testing.T) {
 	t.Parallel()
 
-	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
+	want := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}
 	b := NewBlockBuilder(t.Context(), func(ctx context.Context, _ *Parameters, _ *atomic.Bool) (*types.BlockWithReceipts, error) {
 		<-ctx.Done()
 		return want, nil
@@ -198,7 +198,7 @@ func TestBlockBuilderReplaysPayloadCompletedAfterDiscard(t *testing.T) {
 func TestBlockBuilderStopPrefersCompletedOutcomeOverCanceledCaller(t *testing.T) {
 	t.Parallel()
 
-	wantBlock := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil)}
+	wantBlock := &types.BlockWithReceipts{Block: types.NewBlock(&types.Header{}, nil, nil, nil, nil, nil)}
 	wantErr := errors.New("build failed")
 	tests := []struct {
 		name   string

@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -77,7 +78,7 @@ func newTestIBS(t *testing.T, tracer *tracing.Hooks) *Config {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	ibs := state.New(state.NewReaderV3(sd.AsStateGetter(tx)))
+	ibs := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	ibs.SetHooks(tracer)
 
 	cfg := new(Config)

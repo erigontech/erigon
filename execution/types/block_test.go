@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
 // the following 2 functions are replica for the test
@@ -173,10 +174,10 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 	}
 
 	hashBefore := decoded.Hash()
-	bal := []byte{0x01, 0x02, 0x03}
-	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), bal)
-	if got := block.BlockAccessList(); !bytes.Equal(got, bal) {
-		t.Errorf("BAL mismatch: got %x want %x", got, bal)
+	bal := BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), NewBlockAccessListSidecar(bal))
+	if got := block.BlockAccessList(); !reflect.DeepEqual(got, bal) {
+		t.Errorf("BAL mismatch: got %v want %v", got, bal)
 	}
 	if got := block.Hash(); got != hashBefore {
 		t.Errorf("BAL changed block hash: got %x want %x", got, hashBefore)
@@ -194,8 +195,47 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 	if roundTrip.BlockAccessList() != nil {
-		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %x", roundTrip.BlockAccessList())
+		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %v", roundTrip.BlockAccessList())
 	}
+}
+
+func TestBlockCarriesBlockAccessListSidecar(t *testing.T) {
+	raw := []byte{0xc0}
+	sidecar, err := DecodeBlockAccessListSidecar(raw)
+	if err != nil {
+		t.Fatalf("decode BAL sidecar: %v", err)
+	}
+	block := NewBlockFromNetwork(&Header{}, &Body{}, sidecar)
+	if block.BlockAccessListSidecar() != sidecar {
+		t.Fatal("block did not retain BAL sidecar")
+	}
+	if block.BlockAccessList() == nil {
+		t.Fatal("block lost empty BAL")
+	}
+	gotRaw, err := block.BlockAccessListSidecar().Bytes()
+	if err != nil {
+		t.Fatalf("sidecar bytes: %v", err)
+	}
+	if !bytes.Equal(gotRaw, raw) {
+		t.Fatalf("sidecar RLP differs: got %x, want %x", gotRaw, raw)
+	}
+}
+
+func TestWithBlockAccessListSidecarPreservesCaches(t *testing.T) {
+	block := NewBlockFromStorage(common.Hash{1}, &Header{}, nil, nil, nil, nil)
+	block.binaryTransactions = BinaryTransactions{{1, 2, 3}}
+	block.size.Store(123)
+	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
+		Address: accounts.InternAddress(common.Address{1}),
+	}})
+
+	withSidecar := block.WithBlockAccessListSidecar(sidecar)
+
+	require.Same(t, sidecar, withSidecar.BlockAccessListSidecar())
+	require.Nil(t, block.BlockAccessListSidecar())
+	require.Same(t, block.header, withSidecar.header)
+	require.Equal(t, block.binaryTransactions, withSidecar.binaryTransactions)
+	require.Equal(t, block.size.Load(), withSidecar.size.Load())
 }
 
 func TestEIP1559BlockEncoding(t *testing.T) {
@@ -502,7 +542,7 @@ func makeBenchBlock() *Block {
 			Extra:      []byte("benchmark uncle"),
 		}
 	}
-	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */)
+	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */, nil)
 }
 
 func TestCanEncodeAndDecodeRawBody(t *testing.T) {
@@ -729,7 +769,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		Amount:    5_000_000_000,
 	}
 
-	block := NewBlock(&header, nil, nil, nil, withdrawals)
+	block := NewBlock(&header, nil, nil, nil, withdrawals, nil)
 	_ = block.Size()
 
 	encoded, err := rlp.EncodeToBytes(block)
@@ -741,7 +781,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	assert.Equal(t, block.Hash(), decoded.Hash())
 
 	// Now test with empty withdrawals
-	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{})
+	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{}, nil)
 	_ = block2.Size()
 
 	encoded2, err := rlp.EncodeToBytes(block2)

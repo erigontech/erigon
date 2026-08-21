@@ -30,10 +30,9 @@ import (
 // does a single-read submit+wait (which releases the P via io_uring_enter),
 // and returns it. Sized to the expected number of concurrent cold readers.
 
-// WarmBufSize is the largest region one WarmOne can pull in. Sized in pages so it
-// always covers the residency gate's max window (8 pages) on any page size — the
-// gate must cap its window at WarmBufSize so it never marks unwarmed pages resident.
-var WarmBufSize = 8 * os.Getpagesize()
+// WarmBufSize covers a maximum-size contract in one read while remaining at
+// least eight pages for the residency gate on systems with larger pages.
+var WarmBufSize = max(64*1024, 8*os.Getpagesize())
 
 // poolSize bounds concurrent warms at ~2*GOMAXPROCS: a blocking fault holds a P,
 // and an io_uring read frees it for one more, so beyond that rings sit idle. The
