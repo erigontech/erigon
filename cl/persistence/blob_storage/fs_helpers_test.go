@@ -436,3 +436,27 @@ func TestSlowFsDelaysNothingElse(t *testing.T) {
 	require.NoError(t, err)
 	require.Less(t, time.Since(start), delay/2)
 }
+
+// renameFailingFs fails every Rename with err. When dropDestination is set it also removes
+// the destination first, standing in for a prune that took the bucket mid-write.
+type renameFailingFs struct {
+	afero.Fs
+	err             error
+	dropDestination bool
+}
+
+func newRenameFailingFs(fs afero.Fs, err error) *renameFailingFs {
+	return &renameFailingFs{Fs: fs, err: err}
+}
+
+func (r *renameFailingFs) Rename(oldname, newname string) error {
+	if r.dropDestination {
+		if err := r.Fs.Remove(newname); err != nil && !errors.Is(err, os.ErrNotExist) {
+			return err
+		}
+	}
+	if r.err != nil {
+		return r.err
+	}
+	return r.Fs.Rename(oldname, newname)
+}

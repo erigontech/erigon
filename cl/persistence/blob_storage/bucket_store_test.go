@@ -692,3 +692,29 @@ func (f *serializedWriteFile) Write(p []byte) (int, error) {
 	})
 	return f.File.Write(p)
 }
+
+func TestBucketStoreWriteReportsRenameFailureWhenTheTargetIsGone(t *testing.T) {
+	fs := newRenameFailingFs(afero.NewMemMapFs(), errInducedFailure)
+	b := newBucketStore(t, fs)
+	root := common.Hash{7}
+
+	_, err := b.write(12_345, root, 2, testSidecar(12_345, 2, 9))
+	require.ErrorIs(t, err, errInducedFailure)
+
+	// A rename that fails while the target survives is the Windows sharing case: the file
+	// already there is the one this write would have produced, so it is not an error.
+	fs.err = nil
+	_, err = b.write(12_345, root, 2, testSidecar(12_345, 2, 9))
+	require.NoError(t, err)
+
+	fs.err = errInducedFailure
+	created, err := b.write(12_345, root, 2, testSidecar(12_345, 2, 11))
+	require.NoError(t, err)
+	require.False(t, created)
+
+	// Same failure, but a concurrent prune took the target: nothing is stored and the
+	// caller must hear about it.
+	fs.dropDestination = true
+	_, err = b.write(12_345, root, 2, testSidecar(12_345, 2, 11))
+	require.ErrorIs(t, err, errInducedFailure)
+}
