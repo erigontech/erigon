@@ -630,3 +630,42 @@ func TestPruneTxLookupOrphanRows(t *testing.T) {
 		}
 	}
 }
+
+// The block walk resumes from the stage's prune watermark. Older binaries wrote
+// FrozenBlocks() into that same key from the forward stage, so an upgraded node
+// starts above its own backlog and never comes back down for it. The scan has
+// no watermark to poison.
+func TestPruneTxLookupPoisonedWatermark(t *testing.T) {
+	c := txlBenchCfg{blocks: 4_000, txPerBlock: 3, frozen: 2_000}
+	for _, byBlocks := range []bool{false, true} {
+		db, cfg, _ := txlBenchFixture(t, c)
+		tx, err := db.BeginTemporalRw(context.Background())
+		require.NoError(t, err)
+		require.NoError(t, stages.SaveStagePruneProgress(tx, stages.TxLookup, c.frozen))
+		require.NoError(t, tx.Commit())
+
+		txlPruneOnce(t, db, cfg, c.blocks, byBlocks)
+
+		ro, err := db.BeginTemporalRo(context.Background())
+		require.NoError(t, err)
+		backlog := 0
+		for b := uint64(1); b < c.frozen; b++ {
+			for i := range c.txPerBlock {
+				h := benchTxn(b, i).Hash()
+				v, err := ro.GetOne(kv.TxLookup, h[:])
+				require.NoError(t, err)
+				if v != nil {
+					backlog++
+				}
+			}
+		}
+		ro.Rollback()
+		db.Close()
+		if byBlocks {
+			require.Equal(t, int(c.frozen-1)*int(c.txPerBlock), backlog,
+				"block walk cleared a backlog its watermark had skipped")
+		} else {
+			require.Zero(t, backlog, "scan was blocked by the stale watermark")
+		}
+	}
+}
