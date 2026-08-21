@@ -27,6 +27,8 @@ import (
 
 	"github.com/stretchr/testify/assert"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
 )
@@ -35,6 +37,7 @@ func TestCheckCompatible(t *testing.T) {
 	type test struct {
 		stored, new *chain.Config
 		head        uint64
+		headTime    uint64
 		wantErr     *chain.ConfigCompatError
 	}
 	tests := []test{
@@ -99,10 +102,66 @@ func TestCheckCompatible(t *testing.T) {
 	}
 
 	for _, test := range tests {
-		err := test.stored.CheckCompatible(test.new, test.head)
+		err := test.stored.CheckCompatible(test.new, test.head, test.headTime)
 		if !reflect.DeepEqual(err, test.wantErr) {
 			t.Errorf("error mismatch:\nstored: %v\nnew: %v\nhead: %v\nerr: %v\nwant: %v", test.stored, test.new, test.head, err, test.wantErr)
 		}
+	}
+}
+
+// Post-merge forks are scheduled by timestamp. Before this they were compared against
+// nothing at all, so one could be rescheduled on a chain already past it and the node would
+// run a different schedule from its peers with no error.
+func TestCheckCompatibleTimestampForks(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		stored, newcfg *chain.Config
+		headTime       uint64
+		wantWhat       string
+		wantRewind     uint64
+	}{
+		{
+			name:     "not yet reached, may be rescheduled",
+			stored:   &chain.Config{PragueTime: common.NewUint64(100)},
+			newcfg:   &chain.Config{PragueTime: common.NewUint64(200)},
+			headTime: 50,
+		},
+		{
+			name:       "already past it, may not",
+			stored:     &chain.Config{PragueTime: common.NewUint64(100)},
+			newcfg:     &chain.Config{PragueTime: common.NewUint64(200)},
+			headTime:   150,
+			wantWhat:   "Prague fork timestamp",
+			wantRewind: 99,
+		},
+		{
+			name:       "unscheduling an active fork",
+			stored:     &chain.Config{AmsterdamTime: common.NewUint64(100)},
+			newcfg:     &chain.Config{},
+			headTime:   150,
+			wantWhat:   "Amsterdam fork timestamp",
+			wantRewind: 99,
+		},
+		{
+			name:       "the binary tree is consensus-active and covered too",
+			stored:     &chain.Config{AmsterdamTime: common.NewUint64(0), BinaryTrieTime: common.NewUint64(0)},
+			newcfg:     &chain.Config{AmsterdamTime: common.NewUint64(0), BinaryTrieTime: common.NewUint64(500)},
+			headTime:   150,
+			wantWhat:   "Binary trie fork timestamp",
+			wantRewind: 0,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.stored.CheckCompatible(tc.newcfg, 0, tc.headTime)
+			if tc.wantWhat == "" {
+				require.Nil(t, err)
+				return
+			}
+			require.NotNil(t, err, "a fork the chain is already past must not be reschedulable")
+			require.Equal(t, tc.wantWhat, err.What)
+			require.Equal(t, tc.wantRewind, err.RewindToTime)
+			require.Zero(t, err.RewindTo, "a timestamp fork rewinds by time, not by block")
+		})
 	}
 }
 
