@@ -863,8 +863,10 @@ func TestKeptLocalSeedingRespectsBoundAndAbandonCause(t *testing.T) {
 		require.NoError(err)
 
 		ctx, cancel := context.WithCancelCause(t.Context())
-		cancel(errors.New("abandon queued kept-local seeding"))
-		require.NoError(wait(ctx))
+		dropped := errors.New("abandon queued kept-local seeding")
+		cancel(dropped)
+		require.ErrorIs(wait(ctx), dropped,
+			"dropping queued seeding must not report success, or the caller publishes chain.toml for it")
 
 		d.lock.RLock()
 		defer d.lock.RUnlock()

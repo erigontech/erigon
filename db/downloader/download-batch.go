@@ -124,7 +124,12 @@ func (me *downloadBatch) abandon(cause error) {
 }
 
 func (me *downloadBatch) wait(ctx context.Context) (err error) {
-	defer func() { me.abandon(cmp.Or(err, ctx.Err())) }()
+	// An all-kept-local batch has no torrents, so the loop below never samples ctx: a cancelled
+	// caller must still surface as an error, or dropped seeding reports success.
+	defer func() {
+		err = cmp.Or(err, context.Cause(ctx))
+		me.abandon(err)
+	}()
 	for _, t := range me.torrents {
 		select {
 		case <-t.Complete().On():
