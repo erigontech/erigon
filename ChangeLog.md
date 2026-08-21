@@ -30,7 +30,8 @@ with leaner state access and maintenance throughout. It is an in-place upgrade f
   `--prune.include-receipts --prune.receipts.distance=keep-all` (#22296, #22349) — by @yperbasis, @AskAlexSharov
 - **Idle polling filters expire after five minutes.** Clients using `eth_newFilter`, `eth_newBlockFilter`, or
   `eth_newPendingTransactionFilter` must poll within the timeout or recreate the filter. Configure
-  `--rpc.subscription.filters.timeout`, or set it to `0` to disable eviction (#22261) — by @onelapahead
+  `--rpc.subscription.filters.timeout`, or set it to `0` to disable eviction. New `subscriptions_active` and
+  `subscriptions_*_total` metrics track the filter lifecycle (#22261) — by @onelapahead
 - **JSON-RPC compatibility changes.** Quoted decimal block numbers such as `"3"` are rejected; use `"0x3"`, a bare
   integer, or a named tag. `eth_simulateV1` now returns the specified `-38012` code when the base fee is too low instead
   of `-32602` (#21985, #21418) — by @lupin012, @Sahil-4555
