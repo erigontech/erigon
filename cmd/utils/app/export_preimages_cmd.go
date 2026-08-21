@@ -333,6 +333,11 @@ func collectHashedPreimages(
 	haveAccount := false
 
 	nextAccount := func() error {
+		select {
+		case <-done:
+			return ctx.Err()
+		default:
+		}
 		if !accounts.HasNext() {
 			haveAccount = false
 			return nil
@@ -391,11 +396,6 @@ func collectHashedPreimages(
 		stats.Slots++
 	}
 	for haveAccount {
-		select {
-		case <-done:
-			return stats, ctx.Err()
-		default:
-		}
 		if err := nextAccount(); err != nil {
 			return stats, err
 		}

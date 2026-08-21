@@ -501,3 +501,50 @@ func TestWriteHashedPreimages_CancellationKeepsContextErrorIdentity(t *testing.T
 	_, err := writeHashedPreimages(ctx, collector, io.Discard, nil)
 	require.ErrorIs(t, err, context.Canceled)
 }
+
+// Accounts past the last storage-bearing one are reached only by the drain loop after
+// the storage scan ends. Dropping them loses state silently: both count guards are
+// derived from this same scan, so neither can contradict it.
+func TestExportPreimages_AccountsAfterLastStorageKey(t *testing.T) {
+	accounts := &sliceKV{pairs: []kvPair{
+		{addr(0xaa), []byte{1}},
+		{addr(0xbb), []byte{1}},
+		{addr(0xcc), []byte{1}},
+	}}
+	storage := &sliceKV{pairs: []kvPair{{storageKey(addr(0xaa), slot(0x01)), []byte{1}}}}
+	var out bytes.Buffer
+
+	stats, err := exportPreimages(t, context.Background(), accounts, storage, &out, exportOpts{})
+	require.NoError(t, err)
+
+	want := append([]byte{}, addr(0xaa)...)
+	want = append(want, 0, 0, 0, 1)
+	want = append(want, slot(0x01)...)
+	want = append(want, addr(0xbb)...)
+	want = append(want, 0, 0, 0, 0)
+	want = append(want, addr(0xcc)...)
+	want = append(want, 0, 0, 0, 0)
+	require.Equal(t, want, out.Bytes())
+	require.Equal(t, exportPreimagesStats{Accounts: 3, Slots: 1}, stats)
+}
+
+// Advancing to the account that owns a storage run walks an unbounded stretch of
+// storage-less accounts. Checking only in the storage loop leaves that stretch
+// uninterruptible, which on mainnet is most of the domain.
+func TestCollectHashedPreimages_CancellationWhileAdvancingToStorageOwner(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	accounts := &cancelOnNthNextKV{
+		sliceKV: &sliceKV{pairs: []kvPair{
+			{addr(0xaa), []byte{1}},
+			{addr(0xbb), []byte{1}},
+			{addr(0xcc), []byte{1}},
+		}},
+		cancel:    cancel,
+		remaining: 2,
+	}
+	storage := &sliceKV{pairs: []kvPair{{storageKey(addr(0xcc), slot(0x01)), []byte{1}}}}
+	var out bytes.Buffer
+
+	_, err := exportPreimages(t, ctx, accounts, storage, &out, exportOpts{})
+	require.ErrorIs(t, err, context.Canceled)
+}
