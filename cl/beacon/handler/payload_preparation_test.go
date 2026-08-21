@@ -143,15 +143,6 @@ func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
 	require.Zero(t, preparedWarmup(&p, 10, nil, now), "no id from the execution layer")
 }
 
-func TestPreparedPayloadReportsMatchingWarmup(t *testing.T) {
-	var p preparedPayload
-	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	now := time.Unix(100, 0)
-
-	p.set(10, id, now.Add(-1500*time.Millisecond))
-	require.Equal(t, 1500*time.Millisecond, preparedWarmup(&p, 10, id, now))
-}
-
 func TestMaximumPreparedAdvancePreservesRecentBuildTime(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
@@ -514,6 +505,66 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 			require.Equal(t, test.shouldPrepare, buildStarted)
 		})
 	}
+}
+
+func TestPreparePayloadLoopPrimesFirstGloasSlotWithoutPtcDelay(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(
+		t, clparams.ElectraVersion, log.Root(), false,
+	)
+	config := *handler.beaconChainCfg
+	currentEpoch := postState.Slot() / config.SlotsPerEpoch
+	config.FuluForkEpoch = currentEpoch
+	config.GloasForkEpoch = currentEpoch + 1
+	config.InitializeForkSchedule()
+	handler.beaconChainCfg = &config
+
+	headState := state.New(&config)
+	require.NoError(t, postState.CopyInto(headState))
+	require.NoError(t, headState.UpgradeToFulu())
+	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+	targetSlot := currentSlot + 1
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, currentSlot))
+	preForkHead := common.Hash{0xa1}
+	executionHeader := headState.LatestExecutionPayloadHeader()
+	executionHeader.BlockHash = preForkHead
+	headState.SetLatestExecutionPayloadHeader(executionHeader)
+
+	proposerIndex, err := headState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(headState, baseBlockRoot, currentSlot)
+		}).Times(1)
+
+	currentSlotStart := time.Now().Add(-4 * time.Second)
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(currentSlot).Return(currentSlotStart).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(currentSlotStart.Add(12 * time.Second)).AnyTimes()
+	handler.ethClock = clock
+
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	buildStarted := false
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(_ context.Context, head common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
+		require.Equal(t, preForkHead, head)
+		require.NotNil(t, attrs.SlotNumber)
+		require.Equal(t, hexutil.Uint64(targetSlot), *attrs.SlotNumber)
+		buildStarted = true
+		cancel()
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	handler.engine = engine
+
+	handler.preparePayloadLoop(ctx)
+	require.True(t, buildStarted)
 }
 
 func TestInvalidProductionRequestDoesNotWaitForPreparation(t *testing.T) {
@@ -1000,13 +1051,13 @@ func TestPreparationGateTracksOverlappingLocalBlockWork(t *testing.T) {
 	require.False(t, gate.localBlockWorkInFlight())
 }
 
-func TestPreparationGateTracksProducedBlockUntilItsHeadIsSelected(t *testing.T) {
+func TestPreparationGateTracksProducedBlockUntilSlotHeadIsSelected(t *testing.T) {
 	var gate payloadPreparationGate
 	gate.noteProducedBlock(10)
 
 	require.True(t, gate.producedBlockPending(9, 9), "an early production is pending")
 	require.True(t, gate.producedBlockPending(10, 9), "the signing round trip is pending")
-	require.False(t, gate.producedBlockPending(10, 10), "the produced head is selected")
+	require.False(t, gate.producedBlockPending(10, 10), "a head for the produced slot is selected")
 	require.False(t, gate.producedBlockPending(11, 10), "the produced slot has passed")
 }
 

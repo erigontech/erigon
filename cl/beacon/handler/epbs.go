@@ -701,9 +701,7 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 				return
 			}
-		}
-
-		if a.epbsPool != nil {
+		} else if a.epbsPool != nil {
 			a.epbsPool.AddProposerPreference(req)
 		}
 

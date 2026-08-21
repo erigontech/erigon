@@ -620,8 +620,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
-	// Stale-head preparation should not compete with a valid production request. Execution
-	// exclusion is narrower and is acquired only around execution-layer calls.
+	// Payload preparation should not compete with a valid production request. Execution exclusion
+	// is narrower and is acquired only around execution-layer calls.
 	finishLocalBlockWork := a.payloadPreparationGate.beginLocalBlockWork()
 	defer finishLocalBlockWork()
 

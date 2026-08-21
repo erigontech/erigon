@@ -495,6 +495,35 @@ func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 	require.True(t, ok)
 }
 
+func TestPostProposerPreferencesStoresValidatedPreferenceOnce(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	epbsPool := pool.NewEpbsPool()
+	preference := &cltypes.SignedProposerPreferences{
+		Message: &cltypes.ProposerPreferences{
+			DependentRoot: common.Hash{0x11},
+			ProposalSlot:  32,
+		},
+	}
+	service := mock_services.NewMockProposerPreferencesService(ctrl)
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, preference).DoAndReturn(
+		func(_ context.Context, _ *uint64, msg *cltypes.SignedProposerPreferences) error {
+			epbsPool.AddProposerPreference(msg)
+			return nil
+		},
+	)
+	handler := &ApiHandler{
+		epbsPool:                   epbsPool,
+		proposerPreferencesService: service,
+	}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", http.NoBody)
+
+	handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{preference})
+
+	require.Equal(t, http.StatusOK, recorder.Code)
+	require.Equal(t, uint64(1), epbsPool.ProposerPreferencesGeneration())
+}
+
 func TestPostBeaconPoolProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.epbsPool = pool.NewEpbsPool()

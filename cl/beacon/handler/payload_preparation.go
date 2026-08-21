@@ -94,7 +94,7 @@ func (s *payloadPreparationScratch) resetForTargetSlot(targetSlot uint64) {
 // Production and adoption hold the shared side only around execution-critical sections.
 // Preparation takes the exclusive side with TryLock, so it never queues ahead of them.
 // localBlockWork suppresses preparation while local block work is active. latestProducedSlot keeps
-// stale-head preparation suppressed until the produced block is selected or its slot has passed.
+// stale-head preparation suppressed until a head for that slot is selected or the slot has passed.
 type payloadPreparationGate struct {
 	executionWork      sync.RWMutex
 	localBlockWork     atomic.Int64
