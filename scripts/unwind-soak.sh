@@ -33,9 +33,9 @@ DEPTHS_CSV="${DEPTHS:-$DEPTHS_DEFAULT}"
 OUT_DEFAULT="/tmp/unwind-soak-$(date -u +%Y-%m-%dT%H%M%S).csv"
 OUT="${OUT:-$OUT_DEFAULT}"
 RECOVERY_WINDOW_BLOCKS=1000
-RECOVERY_TIMEOUT_SEC=1800   # default 30 min; scenario 3 (mode_b/c/d) scales by depth via recovery_timeout_for_depth
-SETHEAD_BUSY_TIMEOUT_SEC=1800 # 30 min upper bound on retries-while-busy
-SETHEAD_CALL_TIMEOUT_SEC=1800 # 30 min per curl call (synchronous setHead)
+RECOVERY_TIMEOUT_SEC="${RECOVERY_TIMEOUT_SEC:-1800}"   # default 30 min; scenario 3 (mode_b/c/d) scales by depth via recovery_timeout_for_depth
+SETHEAD_BUSY_TIMEOUT_SEC="${SETHEAD_BUSY_TIMEOUT_SEC:-1800}" # 30 min upper bound on retries-while-busy
+SETHEAD_CALL_TIMEOUT_SEC="${SETHEAD_CALL_TIMEOUT_SEC:-1800}" # 30 min per curl call (synchronous setHead)
 
 # recovery_timeout_for_depth scales the scenario-3 recovery window with
 # unwind depth. Empirically (2026-06-28 hoodi soaks) the post-setHead
@@ -525,6 +525,14 @@ for ((i=1; i<=ITER; i++)); do
     if [[ $OVERALL_RC -ne 0 ]]; then
         echo "iter $i: ABORTING — scenario 2 (mode_a, past-changeset baseline) regression"
         break
+    fi
+
+    # SKIP_SCENARIO_3=1 short-circuits after the two mode_a scenarios
+    # so the loop iterates only on the SetHead-mode-B path (scenario 2,
+    # depth ≥ retained changeset window). Used when narrowing to
+    # mode-B failures without spending time on mode-C/D regen paths.
+    if [[ "${SKIP_SCENARIO_3:-0}" == "1" ]]; then
+        continue
     fi
 
     # Scenario 3: regime-driven depth from Phase 3.5. Target may land
