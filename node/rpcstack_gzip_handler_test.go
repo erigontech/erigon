@@ -19,9 +19,11 @@ package node
 import (
 	"bytes"
 	"compress/gzip"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 	"io"
 	"net/http"
 	"net/http/httptest"
+	"strings"
 	"testing"
 	"time"
 
@@ -310,6 +312,82 @@ func TestHTTPHandlerStackCompressionDisabled(t *testing.T) {
 				require.NoError(t, err)
 			}
 			require.Equal(t, body, got, "body must round-trip unchanged")
+		})
+	}
+}
+
+// TestZstdNegotiation pins what each Accept-Encoding gets. A client offering only
+// zstd used to fall through to an uncompressed body.
+func TestZstdNegotiation(t *testing.T) {
+	body := strings.Repeat(`{"pc":1,"op":"SSTORE","gas":42},`, 4000)
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body)
+	})))
+	defer srv.Close()
+
+	for _, tc := range []struct {
+		accept, want string
+	}{
+		{"gzip", "gzip"},
+		{"zstd", "zstd"},
+		{"zstd, gzip", "zstd"},
+		{"gzip, zstd", "zstd"},
+		{"gzip, deflate, br, zstd", "zstd"},
+		{"identity", ""},
+		{"", ""},
+	} {
+		t.Run(tc.accept, func(t *testing.T) {
+			req, err := http.NewRequest(http.MethodGet, srv.URL, nil) //nolint:noctx
+			require.NoError(t, err)
+			// http.Transport adds gzip itself unless the header is set.
+			req.Header.Set("Accept-Encoding", tc.accept)
+			resp, err := http.DefaultTransport.RoundTrip(req)
+			require.NoError(t, err)
+			defer resp.Body.Close()
+
+			require.Equal(t, tc.want, resp.Header.Get("Content-Encoding"))
+			n, err := io.Copy(io.Discard, resp.Body)
+			require.NoError(t, err)
+			if tc.want == "" {
+				require.EqualValues(t, len(body), n, "an unencoded body must arrive whole")
+			} else {
+				require.Less(t, n, int64(len(body)), "an encoded body must be smaller")
+			}
+		})
+	}
+}
+
+// TestCompressionMetricsAttributed pins that zstd responses are counted, not
+// silently dropped by a gzip-only check.
+func TestCompressionMetricsAttributed(t *testing.T) {
+	body := strings.Repeat(`{"pc":1,"op":"SSTORE","gas":42},`, 4000)
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = io.WriteString(w, body)
+	})))
+	defer srv.Close()
+
+	for _, tc := range []struct {
+		accept  string
+		in, out metrics.Counter
+	}{
+		{"gzip", gzipInBytes, gzipOutBytes},
+		{"zstd", zstdInBytes, zstdOutBytes},
+	} {
+		t.Run(tc.accept, func(t *testing.T) {
+			beforeIn, beforeOut := tc.in.GetValueUint64(), tc.out.GetValueUint64()
+
+			req, err := http.NewRequest(http.MethodGet, srv.URL, nil) //nolint:noctx
+			require.NoError(t, err)
+			req.Header.Set("Accept-Encoding", tc.accept)
+			resp, err := http.DefaultTransport.RoundTrip(req)
+			require.NoError(t, err)
+			_, err = io.Copy(io.Discard, resp.Body)
+			require.NoError(t, err)
+			resp.Body.Close()
+
+			require.Greater(t, tc.in.GetValueUint64(), beforeIn, "raw bytes were not counted")
+			require.Greater(t, tc.out.GetValueUint64(), beforeOut, "wire bytes were not counted")
+			require.Less(t, tc.out.GetValueUint64()-beforeOut, tc.in.GetValueUint64()-beforeIn, "ratio must be under 1")
 		})
 	}
 }
