@@ -51,7 +51,7 @@ type Stream interface {
 	WriteFloat64(val float64)
 	WriteString(val string)
 	// WriteHex writes b as the JSON string "0x<hex>". Hex needs no escaping, so
-	// this allocates nothing, unlike WriteString on an encoded string.
+	// the bytes go straight to the stream instead of through an encoded string.
 	WriteHex(b []byte)
 
 	// JSON structure methods

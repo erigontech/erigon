@@ -42,6 +42,7 @@ const (
 type StackStream struct {
 	stream *jsoniter.Stream
 	stack  []stackItem
+	hex    hexWriter
 }
 
 // NewStackStream creates a new StackStream with the given jsoniter.Stream
@@ -181,7 +182,7 @@ func (s *StackStream) WriteString(val string) {
 // WriteHex writes b as the JSON string "0x<hex>" without allocating.
 func (s *StackStream) WriteHex(b []byte) {
 	s.stream.WriteRaw(`"0x`)
-	writeHexBody(s.stream, b)
+	s.hex.writeBody(s.stream, b)
 	s.stream.WriteRaw(`"`)
 	s.popCommaOrField()
 }
@@ -189,7 +190,7 @@ func (s *StackStream) WriteHex(b []byte) {
 // WriteHexObjectField writes b as the JSON field name "0x<hex>" without allocating.
 func (s *StackStream) WriteHexObjectField(b []byte) {
 	s.stream.WriteRaw(`"0x`)
-	writeHexBody(s.stream, b)
+	s.hex.writeBody(s.stream, b)
 	s.stream.WriteRaw(`":`)
 	s.pop(ItemComma)
 	s.push(ItemField)

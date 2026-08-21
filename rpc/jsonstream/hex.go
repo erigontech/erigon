@@ -18,18 +18,24 @@ package jsonstream
 
 import (
 	"encoding/hex"
-	"slices"
 
 	jsoniter "github.com/json-iterator/go"
 )
 
-// writeHexBody encodes b as hex into the stream's own buffer. Going through an
-// intermediate array would push that array to the heap, since Write takes the
-// slice through an interface.
-func writeHexBody(stream *jsoniter.Stream, b []byte) {
-	buf := stream.Buffer()
-	n := len(buf)
-	buf = slices.Grow(buf, len(b)*2)[:n+len(b)*2]
-	hex.Encode(buf[n:], b)
-	stream.SetBuffer(buf)
+// hexWriter encodes hex for a stream. The scratch buffer belongs to the stream
+// so it never escapes per call, and going through Stream.Write keeps draining
+// to the underlying writer — encoding straight into the stream's buffer would
+// let a long trace accumulate the whole response in memory.
+type hexWriter struct {
+	scratch []byte
+}
+
+func (h *hexWriter) writeBody(stream *jsoniter.Stream, b []byte) {
+	need := len(b) * 2
+	if cap(h.scratch) < need {
+		h.scratch = make([]byte, need)
+	}
+	h.scratch = h.scratch[:need]
+	hex.Encode(h.scratch, b)
+	stream.Write(h.scratch) //nolint:errcheck
 }

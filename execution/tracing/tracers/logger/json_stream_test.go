@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
 	"maps"
 	"math/big"
 	"strings"
@@ -441,6 +442,22 @@ func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+// TestJsonStreamLogger_MemoryDrainsToWriter pins that a long memory-enabled trace
+// keeps reaching the writer instead of accumulating in the stream's buffer.
+func TestJsonStreamLogger_MemoryDrainsToWriter(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 2048)}
+	for i := range 200 {
+		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+	}
+
+	require.NotZero(t, buf.Len(), "nothing reached the writer before Flush")
+}
+
 // TestJsonStreamLogger_ClosePendingAfterMemory pins that writing memory words keeps
 // the stream's auto-close stack balanced. Raw writes bypass the bookkeeping that
 // WriteString does, so an unbalanced stack makes ClosePending emit stray closers.
@@ -458,4 +475,24 @@ func TestJsonStreamLogger_ClosePendingAfterMemory(t *testing.T) {
 	require.NoError(t, stream.ClosePending(0))
 	require.NoError(t, stream.Flush())
 	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+}
+
+func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xab}, 256),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+
+	stream := jsonstream.New(io.Discard)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	b.ReportAllocs()
+	i := 0
+	for b.Loop() {
+		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		i++
+	}
 }

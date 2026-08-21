@@ -1169,26 +1169,27 @@ func TestWriteHexKeepsAutoCloseBalanced(t *testing.T) {
 	})
 }
 
+// BenchmarkWriteHex writes to a real writer, so the flush that keeps the stream's
+// buffer bounded is part of what is measured; a nil writer would hide it.
 func BenchmarkWriteHex(b *testing.B) {
 	word := bytes.Repeat([]byte{0xab}, 32)
 
 	b.Run("WriteHex", func(b *testing.B) {
-		s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096))
+		s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, io.Discard, 4096))
 		b.ReportAllocs()
 		for b.Loop() {
-			s.Reset(nil)
 			s.WriteHex(word)
 		}
 	})
 	b.Run("WriteString of an encoded string", func(b *testing.B) {
-		s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096))
+		s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, io.Discard, 4096))
 		b.ReportAllocs()
 		var buf [66]byte
 		buf[0], buf[1] = '0', 'x'
 		for b.Loop() {
-			s.Reset(nil)
 			hex.Encode(buf[2:], word)
 			s.WriteString(string(buf[:]))
+			s.Flush() //nolint:errcheck
 		}
 	})
 }
