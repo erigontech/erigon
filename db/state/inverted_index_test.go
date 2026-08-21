@@ -1266,3 +1266,31 @@ func TestInvertedIndex_IdxRange_IgnoresDBInFileRange(t *testing.T) {
 	}
 	require.Equal(wantDesc, gotDesc, "descending: rogue DB entry in file range must be invisible")
 }
+
+// TestInvertedIndexDisabledDiscardsWrites pins that Enabled=false is a real
+// master switch: a writer taken from a disabled index must drop everything
+// instead of quietly collecting and flushing into the DB tables.
+func TestInvertedIndexDisabledDiscardsWrites(t *testing.T) {
+	logger := log.New()
+	db, ii := testDbAndInvertedIndex(t, 16, logger)
+	ii.Enabled = false
+	ctx := t.Context()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	ic := ii.beginForTests()
+	defer ic.Close()
+	w := ic.NewWriter()
+	defer w.close()
+
+	require.NoError(t, w.Add([]byte("key1"), 2))
+	require.NoError(t, w.Flush(ctx, tx))
+
+	for _, table := range []string{ii.KeysTable, ii.ValuesTable} {
+		n, err := tx.Count(table)
+		require.NoError(t, err)
+		require.Zerof(t, n, "table %s must stay empty", table)
+	}
+}

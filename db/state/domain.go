@@ -317,7 +317,9 @@ func (d *Domain) minStepInDB(tx kv.Tx) (lstInDb uint64) {
 	return binary.BigEndian.Uint64(lstIdx) / d.stepSize
 }
 
-func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter { return dt.newWriter(dt.d.dirs.Tmp, false) }
+func (dt *DomainRoTx) NewWriter() *DomainBufferedWriter {
+	return dt.newWriter(dt.d.dirs.Tmp, !dt.d.Enabled)
+}
 
 // openList - main method to open list of files.
 // It's ok if some files was open earlier.
