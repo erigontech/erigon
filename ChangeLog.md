@@ -1,7 +1,9 @@
 # Erigon v3.6.0 — Upstream Underbelly — 2026-08-24
 
 Erigon 3.6.0 is headlined by **more reliable Caplin block production** and **pruned nodes reclaiming old snapshots**,
-with leaner state access and maintenance throughout. It is an in-place upgrade from 3.5.x — no re-sync required.
+with leaner state access and maintenance throughout. Most 3.5 users can upgrade without re-syncing. Datadirs created with
+Erigon 3.3 or earlier that have not already been rebased must first convert their snapshot layout with
+`erigon seg step-rebase --new-step-size=390625`.
 
 ### Highlights
 
@@ -12,18 +14,18 @@ with leaner state access and maintenance throughout. It is an in-place upgrade f
   those windows. This fixes unbounded snapshot growth on long-running `minimal` and other pruned nodes (#21306, #22123,
   #21200, #22243, #22349) — by @AskAlexSharov, @JkLondon
 - **Plain commitment snapshots.** New commitment files store values directly by default, speeding state reads and merges
-  at the cost of larger files. Existing per-datadir settings are honored; referenced files remain readable and convert
-  lazily when plain writes are active (#14809, #21452, #21376) — by @awskii
+  at the cost of larger files. Existing referenced files remain readable and convert lazily during merges; the offline
+  `integration commitment convert` command provides an explicit migration path (#14809, #21452, #21376, #21933) — by
+  @awskii, @AskAlexSharov
 - **Faster state access and snapshot maintenance.** Sharded LRU state, code, and commitment caches replace whole-cache
-  resets; state-snapshot compression is 2–3x faster, dictionary-building merges are about 1.5x faster, and the mainnet
-  `.bt` pivot cache uses roughly one quarter of its previous heap (#22154, #21625, #22050, #21875) — by @mh0lt,
-  @sudeepdino008, @AskAlexSharov
+  resets; compression during state-snapshot merges is 2–3× faster, dictionary-building merges are about 1.5× faster,
+  and the mainnet `.bt` pivot cache uses roughly one quarter of its previous heap (#21386, #21982, #22154, #21625,
+  #22050, #21875) — by @mh0lt, @yperbasis, @sudeepdino008, @AskAlexSharov
 
 ### Breaking Changes
 
-- **Downgrading after new commitment files are written is unsupported.** Erigon 3.5 cannot read the new plain `v2.2`
-  commitment files. Back up the datadir before upgrading if rollback is required; upgrading itself needs no re-sync
-  (#21452, #21376).
+- **Downgrading after 3.6 writes new snapshot files is unsupported.** New 3.6 snapshot and accessor formats are
+  incompatible with Erigon 3.5. Back up the datadir before upgrading if rollback is required (#21452, #21376, #21778).
 - **Historical receipts are off by default on fresh datadirs in every prune mode.** Existing datadirs keep their stored
   enable/disable setting. Without the cache, receipt and log RPCs re-execute within the state-history window at higher
   latency. Blocks-mode operators who need receipts and logs back to genesis must use
@@ -33,8 +35,8 @@ with leaner state access and maintenance throughout. It is an in-place upgrade f
   `--rpc.subscription.filters.timeout`, or set it to `0` to disable eviction. New `subscriptions_active` and
   `subscriptions_*_total` metrics track the filter lifecycle (#22261) — by @onelapahead
 - **JSON-RPC compatibility changes.** Quoted decimal block numbers such as `"3"` are rejected; use `"0x3"`, a bare
-  integer, or a named tag. `eth_simulateV1` now returns the specified `-38012` code when the base fee is too low instead
-  of `-32602` (#21985, #21418) — by @lupin012, @Sahil-4555
+  integer, or a named tag. Streaming trace errors no longer include `result: null` alongside `error` (#21985, #21922) —
+  by @lupin012
 
 ### Added and Changed
 
@@ -51,6 +53,8 @@ with leaner state access and maintenance throughout. It is an in-place upgrade f
 
 #### Consensus layer and protocol
 
+- Validation now rejects fork-inconsistent blocks and sidecars, truncated typed transactions, invalid fee relationships,
+  and blob wrappers with trailing data (#22920, #23041, #22902, #23297) — by @yperbasis, @chfast
 - Default block graffiti now identifies both the execution and consensus clients (#22303) — by @lystopad
 - Caplin archive maintenance repairs truncated validator tables, removes frozen state rows from its indexing DB for
   reuse, and stores compact effective balances, cutting the measured per-slot copy from about 266 MB to 18 MB (#22385,
@@ -59,7 +63,8 @@ with leaner state access and maintenance throughout. It is an in-place upgrade f
   (#22273, #22271, #23245) — by @MysticRyuujin, @domiwei
 - Glamsterdam devnet-6 support adds EIP-8282 builder execution requests, EIP-2780, EIP-8038, EIP-8246, and the devnet-6
   revisions of EIP-7928/EIP-8037; Caplin tracks the Gloas alpha.11 request format, and BALs can be regenerated throughout
-  the weak-subjectivity period (#22091, #22093, #22053, #22060, #22122, #22136, #22161, #21764) — by @domiwei,
+  retained state history, extending beyond the weak-subjectivity period (#22091, #22093, #22053, #22060, #22122,
+  #22136, #22161, #21764) — by @domiwei,
   @taratorio. **Devnet/testing only — not scheduled on mainnet or any public testnet.**
 
 #### Operations
@@ -67,8 +72,8 @@ with leaner state access and maintenance throughout. It is an in-place upgrade f
 - Pruning flags now use readable policies: `--prune.distance` accepts `keep-all`, and `--prune.distance.blocks` accepts
   `keep-post-merge` and `keep-all`. Receipt and commitment-history caches have independent `--prune.*.distance` windows;
   the former receipt flag names remain aliases (#22119, #21200, #22349) — by @yperbasis, @JkLondon, @AskAlexSharov
-- `erigon seg index --rebuild` rebuilds every snapshot accessor and index without deleting snapshot data (#21919) — by
-  @sudeepdino008
+- Missing E3 accessors are rebuilt automatically on restart. `erigon seg index --rebuild` rebuilds every snapshot
+  accessor and index without deleting snapshot data (#22682, #21919) — by @AskAlexSharov, @sudeepdino008
 - The command-line layer now uses `urfave/cli/v3`. Normal flag handling remains compatible, and `--config` now applies
   to subcommands; operators with unusual invocation patterns should smoke-test them (#22130, #22546) — by
   @AskAlexSharov, @yperbasis, @lupin012
