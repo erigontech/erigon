@@ -1174,9 +1174,8 @@ func isOverlayReadView(tx kv.Tx) bool {
 	return ok && view.IsOverlayReadView()
 }
 
-// WithOverlay returns an existing overlay view unchanged, or creates a read
-// view backed by the latest block overlay. The first view pins the overlay for
-// subsequent reads in the same operation.
+// WithOverlay preserves an existing overlay view or wraps tx with the currently
+// published overlay. A wrapped view keeps that generation across nested calls.
 // Safe to call on a nil receiver.
 func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 	if ff == nil || isOverlayReadView(tx) {

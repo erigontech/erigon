@@ -249,6 +249,9 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
+// resolveCanonicalBlockNumberInCommittedView returns a block only when it is
+// canonical in tx. The overlay probe distinguishes an in-flight head from an
+// unavailable same-height generation without changing the selected view.
 func (api *BaseAPI) resolveCanonicalBlockNumberInCommittedView(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
 	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	var blockNotFound rpc.BlockNotFoundErr
@@ -423,19 +426,19 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 
 }
 
-// headerByNumberOrHash reads recent headers, using the LRU before the database.
-// It returns nil for pending because callers must acquire a pending header together with its matching state.
+// headerByNumberOrHash selects one overlay view and resolves a canonical header
+// through it. Pending is left to callers because they must select its header
+// together with matching state.
 func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
 	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
 		return nil, false, nil
 	}
-	// One overlay view for both the tag resolution and the read: deriving a
-	// second one can miss a head whose overlay was unpublished in between.
 	return api.canonicalHeaderByNumberOrHash(ctx, api.filters.WithOverlay(tx), blockNrOrHash)
 }
 
-// canonicalHeaderByNumberOrHash resolves and reads from the transaction supplied by the caller.
-// It does not select an overlay, so callers can keep dependent reads on the same view.
+// canonicalHeaderByNumberOrHash resolves the selector and header entirely
+// through tx. It never selects an overlay, allowing dependent reads to remain
+// on the same view.
 func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
 	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {

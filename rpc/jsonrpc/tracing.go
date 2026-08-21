@@ -42,11 +42,8 @@ import (
 	"github.com/erigontech/erigon/rpc/transactions"
 )
 
-// errPendingNotSupported is returned for the "pending" tag by the tracing methods.
-// They resolve and replay on the committed view, which holds no pending block, so
-// accepting the tag would answer for the latest executed block while reporting it
-// as the one the caller asked for. go-ethereum either traces a real pending block
-// or errors; it never substitutes a different one.
+// errPendingNotSupported prevents committed tracing from silently substituting
+// the latest executed block for pending.
 var errPendingNotSupported = errors.New("tracing on top of pending is not supported")
 
 func rejectPendingNumber(blockNr rpc.BlockNumber) error {

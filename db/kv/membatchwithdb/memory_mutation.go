@@ -1102,8 +1102,8 @@ func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 	return m.newReadViewMut(tx)
 }
 
-// IsOverlayReadView reports whether this transaction already pins an overlay
-// generation, so nested overlay-aware helpers keep using the same view.
+// IsOverlayReadView reports whether this transaction already uses a specific
+// overlay generation.
 func (m *MemoryMutation) IsOverlayReadView() bool {
 	return m != nil && m.memDb == nil
 }

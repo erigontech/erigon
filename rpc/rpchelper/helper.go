@@ -124,7 +124,7 @@ func _GetBlockNumber(ctx context.Context, requireCanonical bool, blockNrOrHash r
 				return 0, common.Hash{}, false, false, err
 			}
 		case rpc.PendingBlockNumber:
-			// nil filters (committed-view resolution) = no pending block known.
+			// Without filters there is no pending block source, so use execution progress.
 			if filters != nil {
 				if pendingBlock := filters.LastPendingBlock(); pendingBlock != nil {
 					return pendingBlock.NumberU64(), pendingBlock.Hash(), false, true, nil
