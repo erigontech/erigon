@@ -69,10 +69,23 @@ func (al accessList) addSlot(address common.Address, slot common.Hash) {
 	}
 }
 
-// clone returns an access list with the same contents, sharing no maps with al.
-func (al accessList) clone() accessList {
-	cp := make(accessList, len(al))
+// cloneExcluding copies al without the excluded addresses, sharing no maps with
+// it and renumbering order so it stays dense. The exclusion is not redundant:
+// the SLOAD/SSTORE path of OnOpcode adds the executing address without
+// consulting excl, so an excluded address can be in al.
+func (al accessList) cloneExcluding(excl map[common.Address]struct{}) accessList {
+	byOrder := make([]common.Address, len(al))
 	for addr, storage := range al {
+		byOrder[storage.order] = addr
+	}
+
+	cp := make(accessList, len(al))
+	for _, addr := range byOrder {
+		if _, ok := excl[addr]; ok {
+			continue
+		}
+		storage := al[addr]
+		storage.order = len(cp)
 		if storage.slots != nil {
 			storage.slots = maps.Clone(storage.slots)
 		}
@@ -200,7 +213,7 @@ func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct
 func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTracer {
 	return &AccessListTracer{
 		excl:  a.excl,
-		list:  a.list.clone(),
+		list:  a.list.cloneExcluding(a.excl),
 		state: state,
 	}
 }

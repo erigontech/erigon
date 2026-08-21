@@ -96,6 +96,22 @@ func TestAccessListTracerSeedNew(t *testing.T) {
 	require.Equal(t, roundTripped.AccessList(), prev.AccessList())
 }
 
+// TestAccessListTracerSeedNewDropsExcluded pins that seeding filters the exclusion
+// set. OnOpcode's SLOAD/SSTORE path adds the executing address without checking
+// excl, so an excluded address reaches the list and must not survive re-seeding.
+func TestAccessListTracerSeedNewDropsExcluded(t *testing.T) {
+	excluded := common.BytesToAddress([]byte{0x77})
+	excl := map[common.Address]struct{}{excluded: {}}
+
+	prev := NewAccessListTracer(nil, excl, nil)
+	prev.list.addSlot(excluded, slot1)
+	prev.list.addSlot(addr, slot2)
+
+	seeded := prev.SeedNew(nil)
+	require.Equal(t, NewAccessListTracer(prev.AccessList(), excl, nil).AccessList(), seeded.AccessList())
+	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot2}}}, seeded.AccessList())
+}
+
 func BenchmarkAccessListTracerSeed(b *testing.B) {
 	const nAddrs, nSlots = 30, 20
 
