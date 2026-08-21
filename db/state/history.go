@@ -1481,7 +1481,7 @@ func (ht *HistoryRoTx) HistoryDump(fromTxNum, toTxNum int, keyToDump *[]byte, du
 
 				val, _ := vReader.Next(nil)
 
-				if compressedPageValuesCount > 0 {
+				if compressedPageValuesCount > 1 {
 					histKeyBuf = historyKey(txNum, key, histKeyBuf)
 					val, pageBuf = seg.GetFromPage(histKeyBuf, val, pageBuf, true)
 				}
