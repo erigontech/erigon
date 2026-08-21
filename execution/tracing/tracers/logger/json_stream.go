@@ -47,9 +47,7 @@ type JsonStreamLogger struct {
 	storage   map[accounts.Address]Storage
 	env       *tracing.VMContext
 
-	// Staging for values handed to the stream: WriteHex takes its argument
-	// through an interface, so a local would be pushed to the heap per call.
-	hexBuf common.Hash
+	stagedHex common.Hash
 }
 
 // NewStructLogger returns a new logger
@@ -89,9 +87,9 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 // bytes if the last word is short.
 func (l *JsonStreamLogger) writeMemoryWord(chunk []byte) {
 	if len(chunk) < 32 {
-		l.hexBuf = common.Hash{}
-		copy(l.hexBuf[:], chunk)
-		l.stream.WriteHex(l.hexBuf[:])
+		l.stagedHex = common.Hash{}
+		copy(l.stagedHex[:], chunk)
+		l.stream.WriteHex(l.stagedHex[:])
 		return
 	}
 	l.stream.WriteHex(chunk)
@@ -240,8 +238,8 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 				l.stream.WriteMore()
 			}
 			l.stream.WriteHexObjectField(l.locations[i][:])
-			l.hexBuf = s[l.locations[i]]
-			l.stream.WriteHex(l.hexBuf[:])
+			l.stagedHex = s[l.locations[i]]
+			l.stream.WriteHex(l.stagedHex[:])
 		}
 		l.stream.WriteObjectEnd()
 	}
