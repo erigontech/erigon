@@ -82,6 +82,37 @@ type removalEntry struct {
 	domain kv.Domain
 }
 
+// historyRegenPair is the paired .v + .ef counterpart to regenPair.
+// Mode-C's v4 boundary emit produces a paired history/index pair filtered
+// so its entries stop at lastTxN (matching the v4 .kv's advertised horizon)
+// — closing the straddler gap that fed stale post-target history into
+// subsequent computes (the mode-C-after-mode-C wrong-root reproduced
+// 2026-08-21, evidence at /erigon/tmp/mode-c-repro/cycle-002/).
+//
+// Both .regen files are written during Provider.Unwind; FinalizeUnwind
+// promotes them atomically alongside the paired .kv (rename→final, build
+// paired .vi/.efi accessors, remove the straddler + its accessors).
+// AbortUnwind unlinks the .regen files on rollback.
+//
+// The Old* fields are empty when no straddler existed on disk (fresh sync
+// hasn't retired that step yet); FinalizeUnwind skips the removal in that
+// case and just lands the new v4 pair.
+type historyRegenPair struct {
+	domain kv.Domain
+
+	// .ef triple
+	efRegenPath string // <snapDir>/idx/v4.0-{d}.{fromTxN}-{lastTxN+1}.ef.regen
+	efFinalPath string // <snapDir>/idx/v4.0-{d}.{fromTxN}-{lastTxN+1}.ef
+	efOldName   string // Inventory Name of straddler .ef ("" if none)
+	efOldPath   string // resolved on-disk path of straddler .ef ("" if none)
+
+	// .v triple
+	vRegenPath string // <snapDir>/history/v4.0-{d}.{fromTxN}-{lastTxN+1}.v.regen
+	vFinalPath string // <snapDir>/history/v4.0-{d}.{fromTxN}-{lastTxN+1}.v
+	vOldName   string // Inventory Name of straddler .v ("" if none)
+	vOldPath   string // resolved on-disk path of straddler .v ("" if none)
+}
+
 // pendingRegenState is the deferred set of boundary-step regeneration
 // + entirely-past-boundary removal ops mode-B staged for post-commit
 // execution. FinalizeUnwind atomically swaps each .regen → .kv,
@@ -89,8 +120,9 @@ type removalEntry struct {
 // each .regen on rollback and leaves the removals untouched (their
 // files were never mutated during Provider.Unwind).
 type pendingRegenState struct {
-	pairs    []regenPair
-	removals []removalEntry
+	pairs        []regenPair
+	historyPairs []historyRegenPair
+	removals     []removalEntry
 }
 
 // regenerateBoundaryStepFiles walks every state domain
@@ -168,6 +200,7 @@ func (p *Provider) regenerateBoundaryStepFiles(
 	}
 
 	pairs := make([]regenPair, 0, len(snapshot.AllDomains))
+	historyPairs := make([]historyRegenPair, 0)
 	removals := make([]removalEntry, 0)
 	// On error return, unlink every .regen already written so we don't
 	// leak partial artifacts between Provider.Unwind failures.
@@ -180,12 +213,22 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		for _, pr := range pairs {
 			_ = dir.RemoveFile(pr.regenPath)
 		}
+		for i := range historyPairs {
+			_ = dir.RemoveFile(historyPairs[i].efRegenPath)
+			_ = dir.RemoveFile(historyPairs[i].vRegenPath)
+		}
 	}()
 	for _, sd := range snapshot.AllDomains {
 		kvDomain, ok := snapshotDomainToKVDomain(sd)
 		if !ok {
 			return nil, fmt.Errorf("unknown storage domain %q: no kv.Domain mapping", sd)
 		}
+
+		// mode-D residual diagnostic (2026-08-20): log entry into each
+		// domain's regen loop so timeouts show progress. Regen is
+		// sequential per domain; a hang in domain N stalls all N+1.
+		p.logger.Info("[dbg-regen] domain entry",
+			"domain", string(sd), "toBlock", toBlock, "lastTxNum", lastTxNum)
 
 		// planStateFileActions handles ALL local .kv files per domain
 		// uniformly — regen straddlers, remove entirely-past.
@@ -194,6 +237,8 @@ func (p *Provider) regenerateBoundaryStepFiles(
 			// Domain has no .kv files yet (early chain). Skip.
 			continue
 		}
+		p.logger.Info("[dbg-regen] domain files scanned",
+			"domain", string(sd), "fileCount", len(domainFiles), "rangeCount", len(ranges))
 
 		compression := p.Aggregator.DomainCompression(kvDomain)
 		var anchor []byte
@@ -326,6 +371,17 @@ func (p *Provider) regenerateBoundaryStepFiles(
 					oldBroadPath: oldPath,
 					domain:       kvDomain,
 				})
+
+				// Paired v4 .v/.ef: filter the straddler history/index
+				// files so their entries stop at lastTxN too. Without
+				// this the straddler tail (lastTxN, stepEnd) fed stale
+				// history into subsequent computes — the mode-C-after-
+				// mode-C wrong-root reproduced 2026-08-21.
+				if hp, err := p.emitPairedHistoryV4(ctx, sd, kvDomain, fileEntry, fromTxN, lastTxNum); err != nil {
+					return nil, fmt.Errorf("emit paired v4 history for %s: %w", sd, err)
+				} else if hp != nil {
+					historyPairs = append(historyPairs, *hp)
+				}
 			default:
 				finalPath := boundaryRegenFinalPath(p.Aggregator, kvDomain, uint64(fileEntry.FromStep), stepSize, action, lastTxNum, oldPath)
 				regenPath := finalPath + ".regen"
@@ -345,10 +401,88 @@ func (p *Provider) regenerateBoundaryStepFiles(
 		}
 	}
 
-	if len(pairs) == 0 && len(removals) == 0 {
+	if len(pairs) == 0 && len(historyPairs) == 0 && len(removals) == 0 {
 		return nil, nil
 	}
-	return &pendingRegenState{pairs: pairs, removals: removals}, nil
+	return &pendingRegenState{pairs: pairs, historyPairs: historyPairs, removals: removals}, nil
+}
+
+// emitPairedHistoryV4 looks up the straddler .v + .ef files paired with
+// kvEntry (same step range, same domain) and, when both exist,
+// filter-copies them into v4 .regen files whose entries stop at lastTxN.
+// Returns (nil, nil) when the domain has no history (commitment) or when
+// no straddler exists on disk yet (fresh sync hasn't retired that step).
+//
+// Straddler-not-present is a legitimate skip: the v4 .kv still emits
+// correctly, and there is no orphaned .v/.ef with entries past lastTxN
+// to fix. When a straddler DOES exist, the paired v4 emit is required to
+// prevent the mode-C-after-mode-C wrong-root (see doc header on
+// historyRegenPair).
+func (p *Provider) emitPairedHistoryV4(
+	ctx context.Context,
+	sd snapshot.Domain,
+	kvDomain kv.Domain,
+	kvEntry *snapshot.FileEntry,
+	fromTxN, lastTxNum uint64,
+) (*historyRegenPair, error) {
+	efEntry, vEntry := p.pairedHistoryStraddler(sd, kvEntry)
+	if efEntry == nil || vEntry == nil {
+		return nil, nil
+	}
+
+	efFinalPath := p.Aggregator.EFFilePathV4(kvDomain, fromTxN, lastTxNum+1)
+	vFinalPath := p.Aggregator.HistoryFilePathV4(kvDomain, fromTxN, lastTxNum+1)
+	efRegenPath := efFinalPath + ".regen"
+	vRegenPath := vFinalPath + ".regen"
+
+	efOldPath := snapshot.ResolveExistingPath(p.snapDir, efEntry.Name)
+	vOldPath := snapshot.ResolveExistingPath(p.snapDir, vEntry.Name)
+
+	vComp, efComp := p.Aggregator.HistoryCompressions(kvDomain)
+	if err := TruncateStraddlerHistoryFile(ctx,
+		efOldPath, vOldPath,
+		efRegenPath, vRegenPath,
+		fromTxN, lastTxNum,
+		efComp, vComp,
+		p.snapTmpDir, p.logger,
+	); err != nil {
+		return nil, fmt.Errorf("truncate straddler .v/.ef for %s: %w", sd, err)
+	}
+
+	return &historyRegenPair{
+		domain:      kvDomain,
+		efRegenPath: efRegenPath,
+		efFinalPath: efFinalPath,
+		efOldName:   efEntry.Name,
+		efOldPath:   efOldPath,
+		vRegenPath:  vRegenPath,
+		vFinalPath:  vFinalPath,
+		vOldName:    vEntry.Name,
+		vOldPath:    vOldPath,
+	}, nil
+}
+
+// pairedHistoryStraddler returns the straddler .v (KindHistory) and .ef
+// (KindIdx) FileEntries for the given domain whose step range matches
+// kvEntry's exactly. Returns (nil, nil) if either is absent — the caller
+// treats that as "no history straddler to reconstitute" and skips the
+// paired emit.
+func (p *Provider) pairedHistoryStraddler(sd snapshot.Domain, kvEntry *snapshot.FileEntry) (efEntry, vEntry *snapshot.FileEntry) {
+	if p.Inventory == nil {
+		return nil, nil
+	}
+	for _, e := range p.Inventory.AllDomainFiles(sd) {
+		if e.FromStep != kvEntry.FromStep || e.ToStep != kvEntry.ToStep {
+			continue
+		}
+		switch e.Kind {
+		case snapshot.KindHistory:
+			vEntry = e
+		case snapshot.KindIdx:
+			efEntry = e
+		}
+	}
+	return efEntry, vEntry
 }
 
 // emitSplitStraddler emits BOTH files for a mid-step unwind

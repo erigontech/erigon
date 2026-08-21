@@ -46,6 +46,9 @@ func (stubAggregator) StepSize() uint64 { return 390625 }
 func (stubAggregator) WipeWritableShadowPast(_ context.Context, _ kv.TemporalRwTx, _ uint64) error {
 	return nil
 }
+func (stubAggregator) HistoryCompressions(_ kv.Domain) (seg.FileCompression, seg.FileCompression) {
+	return seg.CompressNone, seg.CompressNone
+}
 func (stubAggregator) DomainCompression(_ kv.Domain) seg.FileCompression {
 	return seg.CompressNone
 }

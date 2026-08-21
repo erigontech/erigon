@@ -46,8 +46,11 @@ func (mockAggregator) WipeWritableShadowPast(context.Context, kv.TemporalRwTx, u
 	return nil
 }
 func (mockAggregator) DomainCompression(kv.Domain) seg.FileCompression { return seg.CompressNone }
-func (mockAggregator) Unwind(uint64)                                   {}
-func (mockAggregator) SetUnwindInProgress(bool)                        {}
+func (mockAggregator) HistoryCompressions(kv.Domain) (seg.FileCompression, seg.FileCompression) {
+	return seg.CompressNone, seg.CompressNone
+}
+func (mockAggregator) Unwind(uint64)            {}
+func (mockAggregator) SetUnwindInProgress(bool) {}
 func (mockAggregator) WaitForBuildAndMergeQuiescence(time.Duration) error {
 	return nil
 }

@@ -401,6 +401,16 @@ func (a *Aggregator) DomainCompression(domain kv.Domain) seg.FileCompression {
 	return a.d[domain].Compression
 }
 
+// HistoryCompressions returns the (.v, .ef) compression settings for the
+// domain's history/index files. Mode-C v4 paired-history emission needs
+// both to filter-copy a straddler in the source's wire format.
+func (a *Aggregator) HistoryCompressions(domain kv.Domain) (vComp, efComp seg.FileCompression) {
+	if int(domain) >= len(a.d) || a.d[domain] == nil || a.d[domain].History == nil {
+		return seg.CompressNone, seg.CompressNone
+	}
+	return a.d[domain].History.Compression, a.d[domain].History.InvertedIndex.Compression
+}
+
 func (a *Aggregator) reloadSalt() error {
 	salt, err := GetStateIndicesSalt(a.dirs, false, a.logger)
 	if err != nil {

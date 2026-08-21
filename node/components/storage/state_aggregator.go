@@ -61,6 +61,11 @@ type StateAggregator interface {
 	// returns a.Cfg(domain).Compression; mocks return CompressNone.
 	DomainCompression(domain kv.Domain) seg.FileCompression
 
+	// HistoryCompressions returns the (.v, .ef) compression settings for
+	// the domain's history/index files. Mode-C's paired-history v4 emit
+	// needs both to filter-copy a straddler in the source's wire format.
+	HistoryCompressions(domain kv.Domain) (vComp, efComp seg.FileCompression)
+
 	// Unwind is the cross-cutting aggregator-side unwind step:
 	// invalidates every aggregator-lifetime cache keyed by txN past
 	// the unwind target. SharedDomains.Unwind reaches the same surface

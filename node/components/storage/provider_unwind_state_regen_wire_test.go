@@ -56,6 +56,9 @@ func (a *pathSpyAggregator) StepSize() uint64 { return a.stepSize }
 func (a *pathSpyAggregator) WipeWritableShadowPast(_ context.Context, _ kv.TemporalRwTx, _ uint64) error {
 	return nil
 }
+func (a *pathSpyAggregator) HistoryCompressions(_ kv.Domain) (seg.FileCompression, seg.FileCompression) {
+	return seg.CompressNone, seg.CompressNone
+}
 func (a *pathSpyAggregator) DomainCompression(_ kv.Domain) seg.FileCompression {
 	return seg.CompressNone
 }
