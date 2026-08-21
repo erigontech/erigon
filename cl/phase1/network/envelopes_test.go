@@ -17,13 +17,74 @@
 package network
 
 import (
+	"context"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/common"
 )
+
+func TestRequestEnvelopesFranticallyCancelsBlockedRequestWhenBatchExpires(t *testing.T) {
+	previousExpiration := requestEnvelopeBatchExpiration
+	requestEnvelopeBatchExpiration = 100 * time.Millisecond
+	t.Cleanup(func() { requestEnvelopeBatchExpiration = previousExpiration })
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sentinel := newContextBlockingSentinel()
+	rpcClient, _ := newContextBlockingBeaconRPC(ctx, sentinel)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}})
+		done <- err
+	}()
+
+	select {
+	case <-sentinel.started:
+	case <-time.After(time.Second):
+		t.Fatal("request did not reach the Sentinel boundary")
+	}
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("batch expiration did not stop the blocked envelope request")
+	}
+	select {
+	case <-sentinel.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("batch expiration returned without canceling the blocked envelope request")
+	}
+}
+
+func TestRequestEnvelopesFranticallyReturnsCallerCancellation(t *testing.T) {
+	ctx, cancel := context.WithCancel(t.Context())
+	sentinel := newContextBlockingSentinel()
+	rpcClient, _ := newContextBlockingBeaconRPC(ctx, sentinel)
+
+	done := make(chan error, 1)
+	go func() {
+		_, err := RequestEnvelopesFrantically(ctx, rpcClient, [][32]byte{{1}})
+		done <- err
+	}()
+
+	select {
+	case <-sentinel.started:
+	case <-time.After(time.Second):
+		t.Fatal("request did not reach the Sentinel boundary")
+	}
+	cancel()
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("caller cancellation did not stop the blocked envelope request")
+	}
+}
 
 func TestAcceptEnvelopeResponsesKeepsOnlyRequestedRoots(t *testing.T) {
 	requestedRoot := common.Hash{1}

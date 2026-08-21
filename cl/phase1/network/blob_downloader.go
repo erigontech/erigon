@@ -26,10 +26,12 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
@@ -40,7 +42,6 @@ const (
 	blobLogInterval             = 30 * time.Second
 	blobBackfillWarningInterval = 4 * time.Minute
 	blocksBatchSize             = uint64(8)
-	minPeersForBlobDownload     = 16
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
 	blobColumnBackfillTimeout = 30 * time.Second
@@ -56,16 +57,25 @@ type PeerDasGetter interface {
 	GetPeerDas() das.PeerDas
 }
 
+type blobPeerClient interface {
+	Peers() (uint64, error)
+	blobRequester
+}
+
+type blobSnapshotReader interface {
+	FrozenBlobs() uint64
+}
+
 // BlobHistoryDownloader downloads blob history backwards from a head slot
 type BlobHistoryDownloader struct {
 	ctx context.Context
 
 	beaconCfg   *clparams.BeaconChainConfig
-	rpc         *rpc.BeaconRpcP2P
+	rpc         blobPeerClient
 	indiciesDB  kv.RoDB
 	blobStorage blob_storage.BlobStorage
 	blockReader freezeblocks.BeaconSnapshotReader
-	sn          *freezeblocks.CaplinSnapshots
+	sn          blobSnapshotReader
 
 	syncedChecker SyncedChecker
 	peerDasGetter PeerDasGetter
@@ -73,15 +83,16 @@ type BlobHistoryDownloader struct {
 	// headSlot is the slot we start downloading from (currentSlot + 1)
 	headSlot atomic.Uint64
 	// highestBackfilledSlot is the highest slot we've successfully backfilled to
-	highestBackfilledSlot atomic.Uint64
-	// targetSlot is the slot we're trying to reach (Deneb fork epoch start)
-	targetSlot uint64
+	highestBackfilledSlot  atomic.Uint64
+	nextBackfillTargetSlot uint64
+	denebStartSlot         uint64
 	// archiveBlobs indicates whether to archive all blobs or just recent ones
 	archiveBlobs bool
 	// immediateBlobsBackfilling indicates whether to backfill blobs immediately
 	immediateBlobsBackfilling bool
 	// columnBackfillTimeout bounds each fulu block's PeerDAS column recovery
 	columnBackfillTimeout time.Duration
+	verifyBlobSidecars    func([]*cltypes.BlobSidecar, clparams.StateVersion, func(*cltypes.SignedBeaconBlockHeader) error) error
 
 	running           atomic.Bool
 	backfillCompleted atomic.Bool
@@ -119,10 +130,12 @@ func NewBlobHistoryDownloader(
 		sn:                        sn,
 		syncedChecker:             syncedChecker,
 		peerDasGetter:             peerDasGetter,
-		targetSlot:                targetSlot,
+		nextBackfillTargetSlot:    targetSlot,
+		denebStartSlot:            targetSlot,
 		archiveBlobs:              archiveBlobs,
 		immediateBlobsBackfilling: immediateBlobsBackfilling,
 		columnBackfillTimeout:     blobColumnBackfillTimeout,
+		verifyBlobSidecars:        blob_storage.VerifyBlobSidecars,
 		logger:                    logger,
 	}
 }
@@ -206,14 +219,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	}
 	startSlot := currentSlot
 
-	// Check peer count before proceeding
-	peers, err := b.rpc.Peers()
-	if err != nil {
-		b.logger.Warn("[BlobHistoryDownloader] Failed to get peer count", "err", err)
-		return nil
-	}
-	if peers < minPeersForBlobDownload {
-		b.logger.Warn("[BlobHistoryDownloader] Skipping iteration due to low peer count", "peers", peers, "required", minPeersForBlobDownload)
+	if !b.peersAvailable() {
 		return nil
 	}
 
@@ -222,35 +228,37 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 
 	prevLogSlot := currentSlot
 	prevTime := time.Now()
+	finalScanSlot := currentSlot
 
-	targetSlot := b.targetSlot
+	targetSlot := b.nextBackfillTargetSlot
 	// in case of non-archive mode, we only backfill the last relevant epochs
 	if !b.archiveBlobs {
-		targetSlot = currentSlot - min(currentSlot, b.beaconCfg.MinSlotsForBlobsSidecarsRequest())
+		retentionFloor := currentSlot - min(currentSlot, b.beaconCfg.MinSlotsForBlobsSidecarsRequest())
+		targetSlot = max(targetSlot, retentionFloor)
 	}
-
-	defer func() {
-		// set target slot back in case it was modified
-		b.targetSlot = currentSlot - b.beaconCfg.SlotsPerEpoch*2
-	}()
 
 	if shouldLog {
 		b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards", "slot", currentSlot)
 	}
 
 	for currentSlot >= targetSlot {
-		if currentSlot <= b.sn.FrozenBlobs() {
+		firstUnfrozenSlot := max(targetSlot, b.sn.FrozenBlobs())
+		if currentSlot < firstUnfrozenSlot {
 			break
 		}
 		if !b.syncedChecker.Synced() {
-			time.Sleep(5 * time.Second)
+			if err := common.Sleep(b.ctx, 5*time.Second); err != nil {
+				return nil
+			}
 			continue
 		}
 
-		batch, visited, err := b.collectIncompleteBlocks(currentSlot, targetSlot)
+		batch, visited, err := b.collectIncompleteBlocks(currentSlot, firstUnfrozenSlot)
 		if err != nil {
 			return err
 		}
+		scanned := max(visited, 1)
+		finalScanSlot = currentSlot - (scanned - 1)
 
 		if len(batch) > 0 {
 			select {
@@ -273,8 +281,15 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 				}
 			default:
 			}
-			b.processBatch(batch)
-			b.highestBackfilledSlot.Store(currentSlot)
+			if !b.peersAvailable() {
+				return nil
+			}
+			if b.processBatch(batch) {
+				b.highestBackfilledSlot.Store(currentSlot)
+			}
+			if b.ctx.Err() != nil {
+				return nil
+			}
 		}
 
 		// Always advance so an uncompletable batch can't rebuild at the same slot forever.
@@ -290,6 +305,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	if shouldLog {
 		b.logger.Info("[BlobHistoryDownloader] Blob history download finished successfully")
 	}
+	b.nextBackfillTargetSlot = max(b.denebStartSlot, finalScanSlot-min(finalScanSlot, b.beaconCfg.SlotsPerEpoch*2))
 
 	b.backfillCompleted.Store(true)
 
@@ -301,6 +317,19 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	}
 
 	return nil
+}
+
+func (b *BlobHistoryDownloader) peersAvailable() bool {
+	peers, err := b.rpc.Peers()
+	if err != nil {
+		b.logger.Warn("[BlobHistoryDownloader] Failed to get peer count", "err", err)
+		return false
+	}
+	if peers == 0 {
+		b.logger.Warn("[BlobHistoryDownloader] Skipping iteration because no peers are available")
+		return false
+	}
+	return true
 }
 
 // collectIncompleteBlocks scans backwards from currentSlot for Deneb+ blocks still
@@ -331,16 +360,16 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 		if err != nil {
 			return nil, 0, err
 		}
-		blobsCount, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
-		if err != nil {
-			return nil, 0, err
-		}
 		commitments := block.Block.Body.GetBlobKzgCommitments()
 		if commitments == nil {
 			// For GLOAS, nil means SignedExecutionPayloadBid is absent — unexpected for a valid block.
 			// For pre-GLOAS this should not happen on Deneb+.
 			b.logger.Warn("[BlobHistoryDownloader] skipping block with nil kzg commitments", "slot", block.Block.Slot, "version", block.Version())
 			continue
+		}
+		blobsCount, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
+		if err != nil {
+			return nil, 0, err
 		}
 		if commitments.Len() == int(blobsCount) {
 			continue
@@ -350,9 +379,7 @@ func (b *BlobHistoryDownloader) collectIncompleteBlocks(currentSlot, targetSlot 
 	return batch, visited, nil
 }
 
-// processBatch best-effort recovers each block's blobs: Deneb by-root, Fulu from
-// PeerDAS columns.
-func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock) {
+func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock) bool {
 	fuluBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(batch))
 	denebBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(batch))
 	for _, block := range batch {
@@ -362,56 +389,348 @@ func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock)
 			denebBlocks = append(denebBlocks, block)
 		}
 	}
+	complete := true
 	if len(denebBlocks) > 0 {
-		b.recoverDenebBlobs(denebBlocks)
+		complete = b.recoverDenebBlobs(denebBlocks)
+	}
+	if b.ctx.Err() != nil {
+		return false
 	}
 	if len(fuluBlocks) > 0 {
-		b.recoverFuluColumns(fuluBlocks)
+		complete = b.recoverFuluColumns(fuluBlocks) && complete
 	}
+	return complete
 }
 
-func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeaconBlock) {
-	req, err := BlobsIdentifiersFromBlocks(blocks, b.beaconCfg)
+func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeaconBlock) bool {
+	requestedBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(blocks))
+	for _, block := range blocks {
+		blockRoot, err := block.Block.HashSSZ()
+		if err != nil {
+			return false
+		}
+		if block.GetBlobKzgCommitments().Len() > 0 {
+			requestedBlocks = append(requestedBlocks, block)
+			continue
+		}
+		stored, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
+		if err != nil {
+			return false
+		}
+		if stored > 0 {
+			if err := b.blobStorage.RemoveBlobSidecars(b.ctx, block.GetSlot(), blockRoot); err != nil {
+				return false
+			}
+		}
+	}
+	if len(requestedBlocks) == 0 {
+		return true
+	}
+	req, err := BlobsIdentifiersFromBlocks(requestedBlocks, b.beaconCfg)
 	if err != nil {
 		b.logger.Debug("[BlobHistoryDownloader] Error generating blob identifiers", "err", err)
-		return
+		return false
 	}
-	blobs, err := RequestBlobsFrantically(b.ctx, b.rpc, req)
+	batch, err := newDenebRecoveryBatch(requestedBlocks, req)
 	if err != nil {
-		b.logger.Debug("[BlobHistoryDownloader] Error requesting blobs", "err", err)
-		return
+		return false
 	}
-	_, _, err = blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(b.ctx, b.blobStorage, req, blobs.Responses, func(header *cltypes.SignedBeaconBlockHeader) error {
-		// The block is preverified so just check that the signature is correct against the block
-		for _, block := range blocks {
-			if block.Block.Slot != header.Header.Slot {
-				continue
-			}
-			if block.Signature != header.Signature {
-				return errors.New("signature mismatch between blob and stored block")
-			}
-			return nil
+	_, err = requestBlobsForBackfill(b.ctx, b.rpc, batch.remaining, func(ctx context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
+		progress, err := batch.validate(candidate.requested, candidate.Responses)
+		if err != nil {
+			return false, false, err
 		}
-		return errors.New("block not in batch")
+		stored, err := batch.store(ctx, b.blobStorage)
+		if err != nil {
+			return progress > 0 || batch.hasCompleteUnstoredGroup(), false, err
+		}
+		return progress > 0 || stored > 0, batch.complete(), nil
 	})
 	if err != nil {
-		// Best-effort backfill: log and move on rather than banning a peer from the
-		// shared live-sync pool for a historical-blob verification miss.
-		b.logger.Warn("[BlobHistoryDownloader] Error verifying blobs", "err", err)
+		b.logger.Debug("[BlobHistoryDownloader] Error requesting blobs", "err", err)
+		return false
 	}
+	for _, block := range blocks {
+		blockRoot, err := block.Block.HashSSZ()
+		if err != nil {
+			return false
+		}
+		_, complete, err := b.storedBlobSidecarsComplete(b.ctx, block, blockRoot)
+		if err != nil || !complete {
+			return false
+		}
+	}
+	return true
+}
+
+type blobIdentifierKey struct {
+	root  common.Hash
+	index uint64
+}
+
+type requestedBlobBlock struct {
+	block    *cltypes.SignedBeaconBlock
+	ids      []*cltypes.BlobIdentifier
+	sidecars map[uint64]*cltypes.BlobSidecar
+	stored   bool
+}
+
+type denebRecoveryBatch struct {
+	groups   map[common.Hash]*requestedBlobBlock
+	order    []common.Hash
+	verifier func([]*cltypes.BlobSidecar, func(*cltypes.SignedBeaconBlockHeader) error) error
+}
+
+func newDenebRecoveryBatch(blocks []*cltypes.SignedBeaconBlock, req *solid.ListSSZ[*cltypes.BlobIdentifier]) (*denebRecoveryBatch, error) {
+	batch := &denebRecoveryBatch{
+		groups: make(map[common.Hash]*requestedBlobBlock, len(blocks)),
+		order:  make([]common.Hash, 0, len(blocks)),
+		verifier: func(sidecars []*cltypes.BlobSidecar, verifySignatureFn func(*cltypes.SignedBeaconBlockHeader) error) error {
+			return blob_storage.VerifyBlobSidecars(sidecars, clparams.DenebVersion, verifySignatureFn)
+		},
+	}
+	blocksByRoot := make(map[common.Hash]*cltypes.SignedBeaconBlock, len(blocks))
+	for _, block := range blocks {
+		root, err := block.Block.HashSSZ()
+		if err != nil {
+			return nil, err
+		}
+		blocksByRoot[root] = block
+	}
+	for i := range req.Len() {
+		id := req.Get(i)
+		group := batch.groups[id.BlockRoot]
+		if group == nil {
+			group = &requestedBlobBlock{block: blocksByRoot[id.BlockRoot], sidecars: make(map[uint64]*cltypes.BlobSidecar)}
+			batch.groups[id.BlockRoot] = group
+			batch.order = append(batch.order, id.BlockRoot)
+		}
+		group.ids = append(group.ids, id)
+	}
+	return batch, nil
+}
+
+func (b *denebRecoveryBatch) validate(request *solid.ListSSZ[*cltypes.BlobIdentifier], sidecars []*cltypes.BlobSidecar) (int, error) {
+	requested := make(map[blobIdentifierKey]struct{}, request.Len())
+	for i := range request.Len() {
+		id := request.Get(i)
+		requested[blobIdentifierKey{root: id.BlockRoot, index: id.Index}] = struct{}{}
+	}
+	seen := make(map[blobIdentifierKey]struct{}, len(sidecars))
+	newSidecars := make([]*cltypes.BlobSidecar, 0, len(sidecars))
+	for _, sidecar := range sidecars {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil {
+			return 0, errors.New("blob response contains incomplete sidecar")
+		}
+		root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+		if err != nil {
+			return 0, err
+		}
+		key := blobIdentifierKey{root: root, index: sidecar.Index}
+		if _, ok := requested[key]; !ok {
+			return 0, fmt.Errorf("unrequested blob sidecar %x:%d", root, sidecar.Index)
+		}
+		group := b.groups[root]
+		if group == nil || group.block == nil {
+			return 0, fmt.Errorf("blob response block %x is not in batch", root)
+		}
+		if _, duplicate := seen[key]; duplicate {
+			return 0, fmt.Errorf("duplicate blob sidecar %x:%d", root, sidecar.Index)
+		}
+		seen[key] = struct{}{}
+		if group.sidecars[sidecar.Index] == nil {
+			newSidecars = append(newSidecars, sidecar)
+		}
+	}
+	if len(sidecars) == 0 {
+		return 0, errors.New("empty blob response")
+	}
+	if len(newSidecars) == 0 {
+		return 0, nil
+	}
+	if err := b.verifier(newSidecars, func(header *cltypes.SignedBeaconBlockHeader) error {
+		root, err := header.Header.HashSSZ()
+		if err != nil {
+			return err
+		}
+		group := b.groups[root]
+		if group == nil || group.block.Signature != header.Signature {
+			return errors.New("signature mismatch between blob and stored block")
+		}
+		return nil
+	}); err != nil {
+		return 0, err
+	}
+	for _, sidecar := range newSidecars {
+		root, _ := sidecar.SignedBlockHeader.Header.HashSSZ()
+		b.groups[root].sidecars[sidecar.Index] = sidecar
+	}
+	return len(newSidecars), nil
+}
+
+func (b *denebRecoveryBatch) store(ctx context.Context, storage blob_storage.BlobStorage) (int, error) {
+	stored := 0
+	for _, root := range b.order {
+		group := b.groups[root]
+		if group.stored || len(group.sidecars) != len(group.ids) {
+			continue
+		}
+		ordered := make([]*cltypes.BlobSidecar, 0, len(group.ids))
+		for _, id := range group.ids {
+			ordered = append(ordered, group.sidecars[id.Index])
+		}
+		if err := storage.WriteBlobSidecars(ctx, root, ordered); err != nil {
+			return stored, err
+		}
+		group.stored = true
+		stored++
+	}
+	return stored, nil
+}
+
+func (b *denebRecoveryBatch) hasCompleteUnstoredGroup() bool {
+	for _, group := range b.groups {
+		if !group.stored && len(group.sidecars) == len(group.ids) {
+			return true
+		}
+	}
+	return false
+}
+
+func (b *denebRecoveryBatch) complete() bool {
+	for _, group := range b.groups {
+		if !group.stored {
+			return false
+		}
+	}
+	return true
+}
+
+func (b *denebRecoveryBatch) remaining() *solid.ListSSZ[*cltypes.BlobIdentifier] {
+	remaining := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](0, 40)
+	for _, root := range b.order {
+		group := b.groups[root]
+		if group.stored {
+			continue
+		}
+		for _, id := range group.ids {
+			if group.sidecars[id.Index] == nil {
+				remaining.Append(id)
+			}
+		}
+	}
+	return remaining
 }
 
 // recoverFuluColumns recovers blobs from PeerDAS columns, bounding each attempt so
 // columns no peer still serves can't block the backfill indefinitely.
-func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaconBlock) {
-	peerDas := b.peerDasGetter.GetPeerDas()
+func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaconBlock) bool {
 	for _, block := range blocks {
-		// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
-		ctx, cancel := context.WithTimeout(b.ctx, b.columnBackfillTimeout)
-		err := peerDas.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block})
-		cancel()
+		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
+			b.logger.Warn("[BlobHistoryDownloader] Failed to hash recovered block", "err", err, "slot", block.GetSlot())
+			return false
+		}
+		commitments := block.GetBlobKzgCommitments()
+		if commitments == nil {
+			b.logger.Warn("[BlobHistoryDownloader] Blob recovery completed without commitments", "slot", block.GetSlot())
+			return false
+		}
+		ctx, cancel := context.WithTimeout(b.ctx, b.columnBackfillTimeout)
+		stored, complete, err := b.storedBlobSidecarsComplete(ctx, block, blockRoot)
+		if err != nil {
+			cancel()
+			b.logger.Warn("[BlobHistoryDownloader] Failed to read stored blobs", "err", err, "slot", block.GetSlot())
+			return false
+		}
+		if commitments.Len() == 0 {
+			if stored > 0 {
+				if err := b.blobStorage.RemoveBlobSidecars(ctx, block.GetSlot(), blockRoot); err != nil {
+					cancel()
+					b.logger.Warn("[BlobHistoryDownloader] Failed to clear incomplete blob storage", "err", err, "slot", block.GetSlot())
+					return false
+				}
+			}
+			cancel()
+			continue
+		}
+		if complete {
+			cancel()
+			continue
+		}
+		if stored > 0 {
+			if err := b.blobStorage.RemoveBlobSidecars(ctx, block.GetSlot(), blockRoot); err != nil {
+				cancel()
+				b.logger.Warn("[BlobHistoryDownloader] Failed to clear incomplete blob storage", "err", err, "slot", block.GetSlot())
+				return false
+			}
+		}
+		peerDas := b.peerDasGetter.GetPeerDas()
+		err = peerDas.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block})
+		if err != nil {
+			cancel()
 			b.logger.Warn("[BlobHistoryDownloader] Error recovering blobs from block", "err", err, "slot", block.GetSlot())
+			return false
+		}
+		stored, complete, err = b.waitForStoredBlobSidecars(ctx, block, blockRoot)
+		cancel()
+		if err != nil || !complete {
+			b.logger.Warn("[BlobHistoryDownloader] Blob recovery did not satisfy durable postcondition", "err", err, "slot", block.GetSlot(), "stored", stored, "expected", commitments.Len())
+			return false
 		}
 	}
+	return true
+}
+
+func (b *BlobHistoryDownloader) waitForStoredBlobSidecars(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash) (uint32, bool, error) {
+	ticker := time.NewTicker(requestBlobRetryInterval)
+	defer ticker.Stop()
+	for {
+		stored, complete, err := b.storedBlobSidecarsComplete(ctx, block, blockRoot)
+		if err != nil || complete {
+			return stored, complete, err
+		}
+		select {
+		case <-ctx.Done():
+			return stored, false, ctx.Err()
+		case <-ticker.C:
+		}
+	}
+}
+
+func (b *BlobHistoryDownloader) storedBlobSidecarsComplete(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash) (uint32, bool, error) {
+	commitments := block.GetBlobKzgCommitments()
+	if commitments == nil {
+		return 0, false, nil
+	}
+	stored, err := b.blobStorage.KzgCommitmentsCount(ctx, blockRoot)
+	if commitments.Len() == 0 {
+		return stored, stored == 0, err
+	}
+	if err != nil || int(stored) != commitments.Len() {
+		return stored, false, err
+	}
+	sidecars, found, err := b.blobStorage.ReadBlobSidecars(ctx, block.GetSlot(), blockRoot)
+	if err != nil || !found || len(sidecars) != commitments.Len() {
+		return stored, false, err
+	}
+	seen := make([]bool, commitments.Len())
+	for _, sidecar := range sidecars {
+		if sidecar == nil || sidecar.SignedBlockHeader == nil || sidecar.SignedBlockHeader.Header == nil || sidecar.Index >= uint64(commitments.Len()) || seen[sidecar.Index] {
+			return stored, false, nil
+		}
+		root, err := sidecar.SignedBlockHeader.Header.HashSSZ()
+		if err != nil || root != blockRoot || sidecar.SignedBlockHeader.Header.Slot != block.GetSlot() || sidecar.SignedBlockHeader.Signature != block.Signature || sidecar.KzgCommitment != common.Bytes48(*commitments.Get(int(sidecar.Index))) {
+			return stored, false, nil
+		}
+		seen[sidecar.Index] = true
+	}
+	verify := b.verifyBlobSidecars
+	if verify == nil {
+		verify = blob_storage.VerifyBlobSidecars
+	}
+	if err := verify(sidecars, block.Version(), nil); err != nil {
+		return stored, false, nil
+	}
+	return stored, true, nil
 }
