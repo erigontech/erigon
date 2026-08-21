@@ -106,6 +106,9 @@ type ApiHandler struct {
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
 
+	preparedPayload        preparedPayload
+	payloadPreparationGate payloadPreparationGate
+
 	// Validator data structures
 	validatorParams *validator_params.ValidatorParams
 	// unregisteredProposers remembers which proposers have already been warned about, so the
