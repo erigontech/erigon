@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"io"
-	"maps"
 	"math/big"
 	"strings"
 	"testing"
@@ -418,10 +417,11 @@ func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
 		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
 		want["0x"+hex.EncodeToString(key[:])] = "0x" + hex.EncodeToString(val[:])
 	}
-	// The logger writes a step's storage on the following step, so drive one more.
-	l.OnOpcode(99, byte(vm.STOP), 100, 0, scope, nil, 1, nil)
 
-	require.NoError(t, stream.ClosePending(0))
+	// Close the way the production epilogue does: ClosePending would repair an
+	// imbalance into valid JSON and hide exactly what this pins.
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
 	require.NoError(t, stream.Flush())
 	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
 
@@ -431,20 +431,51 @@ func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
 		} `json:"structLogs"`
 	}
 	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	require.NotEmpty(t, out.StructLogs)
 
-	got := map[string]string{}
-	multiSlot := false
-	for _, entry := range out.StructLogs {
-		maps.Copy(got, entry.Storage)
-		multiSlot = multiSlot || len(entry.Storage) > 1
+	// Storage accumulates, so the last step carries every pair and exercises
+	// three separators.
+	require.Equal(t, want, out.StructLogs[len(out.StructLogs)-1].Storage)
+}
+
+// TestJsonStreamLogger_StorageWithMemory drives both users of hexEncodeBuf in a
+// single step, which is what the aliasing in hexWithPrefix depends on.
+func TestJsonStreamLogger_StorageWithMemory(t *testing.T) {
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xcd}, 64),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
 	}
-	require.True(t, multiSlot, "no step emitted more than one slot, so no separator was exercised")
-	require.Equal(t, want, got)
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+	l.OnOpcode(0, byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(t, stream.Flush())
+
+	var out struct {
+		StructLogs []struct {
+			Memory  []string          `json:"memory"`
+			Storage map[string]string `json:"storage"`
+		} `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out), "output: %s", buf.Bytes())
+	require.Len(t, out.StructLogs, 1)
+
+	word := "0x" + strings.Repeat("cd", 32)
+	require.Equal(t, []string{word, word}, out.StructLogs[0].Memory)
+	require.Equal(t, map[string]string{
+		"0x" + hex.EncodeToString(key[:]): "0x" + hex.EncodeToString(val[:]),
+	}, out.StructLogs[0].Storage)
 }
 
 // TestJsonStreamLogger_ClosePendingAfterMemory pins that writing memory words keeps
-// the stream's auto-close stack balanced. Raw writes bypass the bookkeeping that
-// WriteString does, so an unbalanced stack makes ClosePending emit stray closers.
+// the stream's auto-close stack balanced: one word spans three stream calls, and
+// only the first may consume a pending comma or field.
 func TestJsonStreamLogger_ClosePendingAfterMemory(t *testing.T) {
 	var buf bytes.Buffer
 	stream := jsonstream.New(&buf)
