@@ -230,10 +230,17 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
-	height := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
+	headHash := rawdb.ReadHeadHeaderHash(tx)
+	height := rawdb.ReadHeaderNumber(tx, headHash)
 	if height != nil {
-		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height)
-		if compatibilityErr != nil && *height != 0 && compatibilityErr.RewindTo != 0 {
+		// The head's time, not just its number: the post-merge forks are scheduled by
+		// timestamp and cannot be compared against a block number.
+		var headTime uint64
+		if head := rawdb.ReadHeader(tx, headHash, *height); head != nil {
+			headTime = head.Time
+		}
+		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height, headTime)
+		if compatibilityErr != nil && *height != 0 && (compatibilityErr.RewindTo != 0 || compatibilityErr.RewindToTime != 0) {
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}
