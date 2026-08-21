@@ -339,7 +339,7 @@ var Schema = SchemaGen{
 			HistoryValuesOnCompressedPage: 16,
 
 			IiCfg: InvIdxCfg{
-				Enabled:      false, // rcache history is opt-in via EnableHistoricalRCache
+				Enabled:      false, // rcache domain is opt-in via EnableHistoricalRCache
 				FilenameBase: kv.RCacheDomain.String(), KeysTable: kv.TblRCacheHistoryKeys, ValuesTable: kv.TblRCacheIdx,
 				CompressorCfg: seg.DefaultCfg,
 				Accessors:     AccessorHashMap,
