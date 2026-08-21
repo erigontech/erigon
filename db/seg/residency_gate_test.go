@@ -45,9 +45,9 @@ func regionAround(g *Getter, offset uint64, window int) []byte {
 	return full[aligned:end]
 }
 
-func TestResidencyGateWarmsOnReset(t *testing.T) {
+func TestResidencyGateUsesBlockingAsyncIOOnReset(t *testing.T) {
 	if !iouring.Available() {
-		t.Skip("io_uring unavailable; the gate's warm path no-ops, so the warmed-page assertion below would fail")
+		t.Skip("io_uring unavailable; blocking async I/O cannot run")
 	}
 	tmp := t.TempDir()
 	file := filepath.Join(tmp, "test.kv")
@@ -66,7 +66,7 @@ func TestResidencyGateWarmsOnReset(t *testing.T) {
 	require.NoError(t, err)
 	defer d.Close()
 
-	// Collect (offset, word) pairs; iterating warms the whole file.
+	// Collect (offset, word) pairs; iterating reads the whole file.
 	type ent struct {
 		off uint64
 		w   []byte
@@ -81,7 +81,7 @@ func TestResidencyGateWarmsOnReset(t *testing.T) {
 	require.Greater(t, len(ents), n/2)
 	pick := ents[len(ents)*3/4]
 
-	// Probe just the word's start page; the gate warms at least this,
+	// Probe just the word's start page; the gate reads at least this,
 	// independent of the configured window size.
 	window := os.Getpagesize()
 	evict := func() {
@@ -95,20 +95,20 @@ func TestResidencyGateWarmsOnReset(t *testing.T) {
 		return r
 	}
 
-	// Ungated getter: Reset must not warm anything.
+	// Ungated getter: Reset must not read the page.
 	evict()
 	gu := d.MakeGetter()
 	require.False(t, isResident(gu), "region must be cold right after eviction")
 	gu.Reset(pick.off)
-	require.False(t, isResident(gu), "ungated Reset must not warm the page")
+	require.False(t, isResident(gu), "ungated Reset must not read the page")
 
-	// Gated getter: Reset warms the word's pages before the mmap touch.
+	// Gated getter: Reset reads the word's pages before the mmap access.
 	evict()
 	gg := d.MakeGetter()
 	gg.EnableResidencyGate()
 	require.False(t, isResident(gg), "region must be cold right after eviction")
 	gg.Reset(pick.off)
-	require.True(t, isResident(gg), "gated Reset should warm the word's pages")
+	require.True(t, isResident(gg), "gated Reset should read the word's pages")
 
 	w, _ := gg.Next(nil)
 	require.Equal(t, pick.w, w, "gated read must still return the correct word")

@@ -32,20 +32,18 @@ import (
 var pageSize = os.Getpagesize()
 
 // residencyWindow is how many bytes from the reset offset the gate ensures are
-// resident. State reads are scattered, so warming beyond the page holding the
-// read is pure read-amplification; the default of one page covers the read
-// itself and nothing more. Capped at one io_uring warm (WarmBufSize) so the gate
-// never marks a page resident that WarmOne truncated away — holds on any page size.
-var residencyWindow = min(dbg.EnvInt("RESIDENCY_WINDOW_PAGES", 1)*pageSize, iouring.WarmBufSize)
+// resident. State reads are scattered, so reading beyond the page holding the
+// value is pure read amplification. Capping it at MaxReadSize prevents
+// the bitmap from marking a range that BlockingRead truncated.
+var residencyWindow = min(dbg.EnvInt("RESIDENCY_WINDOW_PAGES", 1)*pageSize, iouring.MaxReadSize)
 
 // residencyRefresh is how often the cached residency bitmap is rebuilt from a
 // fresh mincore scan, correcting bits the OS changed under us (evictions clear,
 // readahead sets). Between refreshes the gate never calls mincore on the hot path.
 var residencyRefresh = time.Duration(dbg.EnvInt("RESIDENCY_REFRESH_SEC", 120)) * time.Second
 
-// EnableResidencyGate turns a would-be blocking mmap fault on a cold .kv page into
-// a non-blocking io_uring read that releases the goroutine's P before the value is
-// decompressed off the mapping. For random-access readers over state .kv files.
+// EnableResidencyGate routes cold .kv page access through blocking async I/O so
+// the read does not hold the goroutine's P.
 func (g *Getter) EnableResidencyGate() { g.residencyGate = true }
 
 // residencyRegion returns the page-aligned mmap slice covering the word extent
@@ -79,7 +77,7 @@ func (g *Getter) ensureResident(offset uint64) {
 	if rb.residentRange(first, last) {
 		return // believed resident — go straight to the mapping (a stale bit just faults)
 	}
-	g.warm(fileOffset, len(region))
+	g.blockingAsyncRead(fileOffset, len(region))
 	rb.markRange(first, last)
 }
 
@@ -93,11 +91,8 @@ func (g *Getter) residencyBitmap() *residencyBitmap {
 	return g.d.residency.Load()
 }
 
-// warm pulls the byte range into the page cache via io_uring so the following
-// mmap access is a minor fault. If io_uring is unavailable, WarmOne no-ops —
-// the range is simply left cold, not warmed.
-func (g *Getter) warm(fileOffset int64, n int) {
-	iouring.WarmOne(int(g.d.f.Fd()), fileOffset, n)
+func (g *Getter) blockingAsyncRead(fileOffset int64, n int) {
+	iouring.BlockingRead(int(g.d.f.Fd()), fileOffset, n)
 }
 
 // residencyBitmap caches page-cache residency, one bit per mapped page, so the
@@ -126,8 +121,8 @@ func newResidencyBitmap(m []byte, fd int) *residencyBitmap {
 	}
 	// Seed happens on the refresh goroutine's first tick, not here: a synchronous
 	// mincore of a multi-GB file would stall the exec worker that triggered init.
-	// Until the seed lands the bitmap reads all-cold, so early reads warm via
-	// io_uring (cache hits, cheap) rather than faulting.
+	// Until the seed lands the bitmap reads all-cold, so early reads use blocking
+	// async I/O rather than faulting through the mapping.
 	go rb.refreshLoop()
 	return rb
 }
