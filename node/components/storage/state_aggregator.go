@@ -109,4 +109,30 @@ type StateAggregator interface {
 	// AccessorBuilder interface in the storage package so the emit
 	// functions can call it directly.
 	BuildKVAccessors(ctx context.Context, domain kv.Domain, dataPath, finalPath string) error
+
+	// HistoryFilePathV4 returns the v4.0 raw-txnum-named .v path for the
+	// given domain's history file. Paired with DomainKVFilePathV4 for the
+	// mode-C boundary emit: when Provider.Unwind writes a v4 .kv over
+	// (baselineTxN, targetTxN], it also writes a paired v4 .v under this
+	// name so history entries stop at targetTxN too — closing the
+	// straddler-.v gap that fed stale history into subsequent computes.
+	HistoryFilePathV4(domain kv.Domain, fromTxN, toTxN uint64) string
+
+	// EFFilePathV4 returns the v4.0 raw-txnum-named .ef path — the
+	// inverted-index sibling of HistoryFilePathV4.
+	EFFilePathV4(domain kv.Domain, fromTxN, toTxN uint64) string
+
+	// BuildHistoryAccessors builds the .vi sidecar for a v4 .v file.
+	// buildVI enumerates every (key, txN) pair via the paired .ef, so
+	// both source paths (may carry .regen suffixes) are needed; finalVPath
+	// names the eventual destination whose parsed range determines the
+	// .vi's own name. Aggregator opens the .v + .ef as decompressors and
+	// runs the recsplit build using the History's existing tuning.
+	BuildHistoryAccessors(ctx context.Context, domain kv.Domain, vDataPath, efDataPath, finalVPath string) error
+
+	// BuildIndexAccessors builds the .efi sidecar for a v4 .ef file.
+	// dataPath is the physical .ef (may carry a .regen suffix); finalPath
+	// names the eventual destination whose parsed range determines the
+	// .efi's own name.
+	BuildIndexAccessors(ctx context.Context, domain kv.Domain, dataPath, finalPath string) error
 }

@@ -106,6 +106,18 @@ func (h *History) vAccessorNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", h.FileVersion.AccessorVI.String(), h.FilenameBase, fromStep, toStep))
 }
 
+// vNewFilePathV4 / vAccessorNewFilePathV4 mirror kvNewFilePathV4 on Domain —
+// v4.0-{filenameBase}.{fromTxN}-{toTxN}.v / .vi. Used by Provider.Unwind
+// mode-C to write the paired v4 .v alongside its boundary .kv so history
+// entries in the (baselineTxN, targetTxN] range match the v4 .kv range
+// exactly and no straddler tail leaks state.
+func (h *History) vNewFilePathV4(fromTxN, toTxN uint64) string {
+	return filepath.Join(h.dirs.SnapHistory, fmt.Sprintf("%s-%s.%d-%d.v", version.V4_0.String(), h.FilenameBase, fromTxN, toTxN))
+}
+func (h *History) vAccessorNewFilePathV4(fromTxN, toTxN uint64) string {
+	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", version.V4_0.String(), h.FilenameBase, fromTxN, toTxN))
+}
+
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, fromStep, toStep)
 }

@@ -59,6 +59,14 @@ func (stubAggregator) DomainKVFilePath(_ kv.Domain, _, _ kv.Step) string  { retu
 func (stubAggregator) BuildKVAccessors(_ context.Context, _ kv.Domain, _, _ string) error {
 	return nil
 }
+func (stubAggregator) HistoryFilePathV4(_ kv.Domain, _, _ uint64) string { return "" }
+func (stubAggregator) EFFilePathV4(_ kv.Domain, _, _ uint64) string      { return "" }
+func (stubAggregator) BuildHistoryAccessors(_ context.Context, _ kv.Domain, _, _, _ string) error {
+	return nil
+}
+func (stubAggregator) BuildIndexAccessors(_ context.Context, _ kv.Domain, _, _ string) error {
+	return nil
+}
 
 // TestCollectFilesPastBlock_StraddleFileSurvives pins the contract
 // that fixed live-rig issue #2 from the 2026-06-01 cycle: the block

@@ -77,6 +77,14 @@ func (a *pathSpyAggregator) DomainKVFilePath(domain kv.Domain, fromStep, toStep 
 func (a *pathSpyAggregator) BuildKVAccessors(_ context.Context, _ kv.Domain, _, _ string) error {
 	return nil
 }
+func (a *pathSpyAggregator) HistoryFilePathV4(_ kv.Domain, _, _ uint64) string { return "" }
+func (a *pathSpyAggregator) EFFilePathV4(_ kv.Domain, _, _ uint64) string      { return "" }
+func (a *pathSpyAggregator) BuildHistoryAccessors(_ context.Context, _ kv.Domain, _, _, _ string) error {
+	return nil
+}
+func (a *pathSpyAggregator) BuildIndexAccessors(_ context.Context, _ kv.Domain, _, _ string) error {
+	return nil
+}
 
 // These tests pin boundaryStepFileForDomain's lookup predicate. The
 // soak v14 iter-3 mode-B wedge (depth 30k, target=3,006,443) surfaced

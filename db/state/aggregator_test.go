@@ -18,6 +18,7 @@ package state
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"encoding/hex"
 	"fmt"
@@ -41,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -1156,6 +1158,152 @@ func TestAggregator_BuildKVAccessors_AcceptsStepAlignedBaseName(t *testing.T) {
 	require.NoError(t, btErr, "missing step-form .bt at %s", btPath)
 	_, kveiErr := os.Stat(kveiPath)
 	require.NoError(t, kveiErr, "missing step-form .kvei at %s", kveiPath)
+}
+
+// TestAggregator_HistoryFilePathV4_ReturnsExpectedName pins the v4-shape
+// naming used by mode-C boundary emission: v4.0-{filenameBase}.{fromTxN}-
+// {toTxN}.v under snapDir/history/. Guards accidental drift between the
+// paired .kv and .v paths — both must derive from the same (fromTxN, toTxN)
+// or FinalizeUnwind's rename would look for one file and find the other.
+func TestAggregator_HistoryFilePathV4_ReturnsExpectedName(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+
+	const fromTxN, toTxN = uint64(121093750), uint64(121175226)
+	got := agg.HistoryFilePathV4(kv.AccountsDomain, fromTxN, toTxN)
+	require.Equal(t, "v4.0-accounts.121093750-121175226.v", filepath.Base(got))
+	require.Contains(t, got, agg.d[kv.AccountsDomain].History.dirs.SnapHistory)
+}
+
+// TestAggregator_EFFilePathV4_ReturnsExpectedName — same guard on the
+// inverted-index side.
+func TestAggregator_EFFilePathV4_ReturnsExpectedName(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+
+	const fromTxN, toTxN = uint64(121093750), uint64(121175226)
+	got := agg.EFFilePathV4(kv.AccountsDomain, fromTxN, toTxN)
+	require.Equal(t, "v4.0-accounts.121093750-121175226.ef", filepath.Base(got))
+	require.Contains(t, got, agg.d[kv.AccountsDomain].History.InvertedIndex.dirs.SnapIdx)
+}
+
+// buildV4HistoryPairForTest writes a synthetic (.ef, .v) pair at the v4
+// naming with a single key K carrying state changes at every txN in txNums.
+// Values are BE-encoded txNums. Uses the domain's actual Compression
+// settings so BuildHistoryAccessors / BuildIndexAccessors see them exactly
+// as they'd see production-produced files.
+func buildV4HistoryPairForTest(t *testing.T, ctx context.Context, agg *Aggregator, domain kv.Domain, key []byte, baseTxN uint64, txNums []uint64) (efPath, vPath string) {
+	t.Helper()
+	require := require.New(t)
+	d := agg.d[domain]
+	h := d.History
+	ii := h.InvertedIndex
+	tmp := t.TempDir()
+
+	maxTxN := txNums[len(txNums)-1]
+	efPath = ii.efNewFilePathV4(baseTxN, maxTxN+1)
+	vPath = h.vNewFilePathV4(baseTxN, maxTxN+1)
+
+	cfg := seg.DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 1
+
+	// .ef
+	efComp, err := seg.NewCompressor(ctx, "fixture ef", efPath, tmp, cfg, log.LvlDebug, log.New())
+	require.NoError(err)
+	defer efComp.Close()
+	efWriter := seg.NewWriter(efComp, ii.Compression)
+
+	builder := multiencseq.NewBuilder(baseTxN, uint64(len(txNums)), maxTxN)
+	for _, txN := range txNums {
+		builder.AddOffset(txN)
+	}
+	builder.Build()
+	seqBytes := builder.AppendBytes(nil)
+
+	_, err = efWriter.Write(key)
+	require.NoError(err)
+	_, err = efWriter.Write(seqBytes)
+	require.NoError(err)
+	require.NoError(efComp.Compress())
+
+	// .v — paged
+	vComp, err := seg.NewCompressor(ctx, "fixture v", vPath, tmp, cfg.WithValuesOnCompressedPage(1), log.LvlDebug, log.New())
+	require.NoError(err)
+	defer vComp.Close()
+	vWriter := seg.NewPagedWriter(ctx, seg.NewWriter(vComp, h.Compression), true, 1)
+	for _, txN := range txNums {
+		hk := make([]byte, 8+len(key))
+		binary.BigEndian.PutUint64(hk, txN)
+		copy(hk[8:], key)
+		val := make([]byte, 8)
+		binary.BigEndian.PutUint64(val, txN)
+		require.NoError(vWriter.Add(hk, val))
+	}
+	require.NoError(vWriter.Flush())
+	require.NoError(vWriter.Compress())
+	return efPath, vPath
+}
+
+// TestAggregator_BuildHistoryAccessors_ProducesVI: given a valid v4 (.v, .ef)
+// pair, BuildHistoryAccessors lands a .vi at the paired v4 name.
+func TestAggregator_BuildHistoryAccessors_ProducesVI(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+	ctx := t.Context()
+
+	const baseTxN = uint64(1000)
+	efPath, vPath := buildV4HistoryPairForTest(t, ctx, agg, kv.AccountsDomain, []byte("account-key"), baseTxN, []uint64{1100, 1200, 1300})
+
+	require.NoError(t, agg.BuildHistoryAccessors(ctx, kv.AccountsDomain, vPath, efPath, vPath))
+
+	viPath := agg.d[kv.AccountsDomain].History.vAccessorNewFilePathV4(baseTxN, 1301)
+	_, err := os.Stat(viPath)
+	require.NoError(t, err, "missing .vi at %s", viPath)
+}
+
+// TestAggregator_BuildIndexAccessors_ProducesEFI: given a valid v4 .ef,
+// BuildIndexAccessors lands a .efi at the paired v4 name.
+func TestAggregator_BuildIndexAccessors_ProducesEFI(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+	ctx := t.Context()
+
+	const baseTxN = uint64(2000)
+	efPath, _ := buildV4HistoryPairForTest(t, ctx, agg, kv.AccountsDomain, []byte("account-key"), baseTxN, []uint64{2100, 2200})
+
+	require.NoError(t, agg.BuildIndexAccessors(ctx, kv.AccountsDomain, efPath, efPath))
+
+	efiPath := agg.d[kv.AccountsDomain].History.InvertedIndex.efAccessorNewFilePathV4(baseTxN, 2201)
+	_, err := os.Stat(efiPath)
+	require.NoError(t, err, "missing .efi at %s", efiPath)
+}
+
+// TestAggregator_BuildHistoryAccessors_RejectsUnparseableBaseName — the
+// parser rejects non-v4 shapes loudly instead of writing accessors at
+// wrong coords.
+func TestAggregator_BuildHistoryAccessors_RejectsUnparseableBaseName(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+	ctx := t.Context()
+
+	finalPath := filepath.Join(agg.d[kv.AccountsDomain].History.dirs.SnapHistory, "accounts.0-64.v")
+	err := agg.BuildHistoryAccessors(ctx, kv.AccountsDomain, finalPath, finalPath, finalPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not a v4 .v basename")
+}
+
+// TestAggregator_BuildIndexAccessors_RejectsUnparseableBaseName — same
+// for the .ef side.
+func TestAggregator_BuildIndexAccessors_RejectsUnparseableBaseName(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 1)
+	ctx := t.Context()
+
+	finalPath := filepath.Join(agg.d[kv.AccountsDomain].History.InvertedIndex.dirs.SnapIdx, "accounts.0-64.ef")
+	err := agg.BuildIndexAccessors(ctx, kv.AccountsDomain, finalPath, finalPath)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "not a v4 .ef basename")
 }
 
 // TestAggregator_BuildKVAccessors_RejectsUnparseableBaseName: the

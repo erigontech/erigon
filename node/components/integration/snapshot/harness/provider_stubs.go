@@ -56,6 +56,14 @@ func (mockAggregator) DomainKVFilePath(kv.Domain, kv.Step, kv.Step) string { ret
 func (mockAggregator) BuildKVAccessors(context.Context, kv.Domain, string, string) error {
 	return nil
 }
+func (mockAggregator) HistoryFilePathV4(kv.Domain, uint64, uint64) string { return "" }
+func (mockAggregator) EFFilePathV4(kv.Domain, uint64, uint64) string      { return "" }
+func (mockAggregator) BuildHistoryAccessors(context.Context, kv.Domain, string, string, string) error {
+	return nil
+}
+func (mockAggregator) BuildIndexAccessors(context.Context, kv.Domain, string, string) error {
+	return nil
+}
 
 // noopDBEventNotifier is the harness stand-in for shards.Events — the
 // Provider only forwards OnNewSnapshot through it, which the harness has

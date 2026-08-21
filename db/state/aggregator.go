@@ -1708,6 +1708,135 @@ func (a *Aggregator) DomainKVFilePath(domain kv.Domain, fromStep, toStep kv.Step
 	return a.d[domain].kvNewFilePath(fromStep, toStep)
 }
 
+// HistoryFilePathV4 returns the v4.0 raw-txnum-named .v path for the given
+// domain's history file — paired with DomainKVFilePathV4 for the mode-C
+// boundary emission. Panics for domains without history (commitment).
+func (a *Aggregator) HistoryFilePathV4(domain kv.Domain, fromTxN, toTxN uint64) string {
+	return a.d[domain].History.vNewFilePathV4(fromTxN, toTxN)
+}
+
+// EFFilePathV4 returns the v4.0 raw-txnum-named .ef path for the given
+// domain's inverted index — paired with HistoryFilePathV4. Panics for
+// domains without history (commitment).
+func (a *Aggregator) EFFilePathV4(domain kv.Domain, fromTxN, toTxN uint64) string {
+	return a.d[domain].History.InvertedIndex.efNewFilePathV4(fromTxN, toTxN)
+}
+
+// v4VBaseNameRegex parses a v4-shaped .v basename like
+// `v4.0-accounts.121093750-121175226.v`. Symmetric to v4KVFileNameRegex.
+var v4VBaseNameRegex = regexp.MustCompile(`^v([4-9]|[1-9][0-9]+)\.(\d+)-([[:lower:]]+)\.(\d+)-(\d+)\.v$`)
+
+// v4EFBaseNameRegex parses a v4-shaped .ef basename like
+// `v4.0-accounts.121093750-121175226.ef`.
+var v4EFBaseNameRegex = regexp.MustCompile(`^v([4-9]|[1-9][0-9]+)\.(\d+)-([[:lower:]]+)\.(\d+)-(\d+)\.ef$`)
+
+func parseV4VBaseName(base string) (fromTxN, toTxN uint64, err error) {
+	m := v4VBaseNameRegex.FindStringSubmatch(base)
+	if m == nil {
+		return 0, 0, fmt.Errorf("not a v4 .v basename: %q", base)
+	}
+	fromTxN, err = strconv.ParseUint(m[4], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse fromTxN from %q: %w", base, err)
+	}
+	toTxN, err = strconv.ParseUint(m[5], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse toTxN from %q: %w", base, err)
+	}
+	return fromTxN, toTxN, nil
+}
+
+func parseV4EFBaseName(base string) (fromTxN, toTxN uint64, err error) {
+	m := v4EFBaseNameRegex.FindStringSubmatch(base)
+	if m == nil {
+		return 0, 0, fmt.Errorf("not a v4 .ef basename: %q", base)
+	}
+	fromTxN, err = strconv.ParseUint(m[4], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse fromTxN from %q: %w", base, err)
+	}
+	toTxN, err = strconv.ParseUint(m[5], 10, 64)
+	if err != nil {
+		return 0, 0, fmt.Errorf("parse toTxN from %q: %w", base, err)
+	}
+	return fromTxN, toTxN, nil
+}
+
+// BuildHistoryAccessors builds the .vi sidecar for a v4 .v file. Reads both
+// the .v (vDataPath) and the paired .ef (efDataPath) — buildVI enumerates
+// every (key, txN) pair via the .ef and records the corresponding .v offset
+// per record. finalVPath is the eventual name whose parsed range determines
+// the accessor path (so the sidecar lands where FinalizeUnwind's rename
+// expects it).
+func (a *Aggregator) BuildHistoryAccessors(ctx context.Context, domain kv.Domain, vDataPath, efDataPath, finalVPath string) error {
+	if int(domain) >= len(a.d) || a.d[domain] == nil {
+		return fmt.Errorf("BuildHistoryAccessors: unknown domain %s", domain)
+	}
+	h := a.d[domain].History
+	if h == nil {
+		return fmt.Errorf("BuildHistoryAccessors: domain %s has no history", domain)
+	}
+
+	fromTxN, _, err := parseV4VBaseName(filepath.Base(finalVPath))
+	if err != nil {
+		return fmt.Errorf("BuildHistoryAccessors(%s): %w", domain, err)
+	}
+	viPath := h.vAccessorNewFilePathV4(fromTxN, mustParseV4VToTxN(finalVPath))
+
+	histDec, err := seg.NewDecompressor(vDataPath)
+	if err != nil {
+		return fmt.Errorf("BuildHistoryAccessors(%s): open v %s: %w", domain, vDataPath, err)
+	}
+	defer histDec.Close()
+
+	efDec, err := seg.NewDecompressor(efDataPath)
+	if err != nil {
+		return fmt.Errorf("BuildHistoryAccessors(%s): open ef %s: %w", domain, efDataPath, err)
+	}
+	defer efDec.Close()
+
+	ps := background.NewProgressSet()
+	// efBaseTxNum for the paired v4 .ef equals its fromTxN (the file's
+	// startTxNum in the multiencseq encoding).
+	return h.buildVI(ctx, viPath, histDec, efDec, fromTxN, ps)
+}
+
+// mustParseV4VToTxN is a helper that re-parses the finalVPath for its toTxN.
+// parseV4VBaseName returns both — this indirection keeps BuildHistoryAccessors
+// readable without a temporary variable that names the ignored value.
+func mustParseV4VToTxN(finalVPath string) uint64 {
+	_, toTxN, _ := parseV4VBaseName(filepath.Base(finalVPath))
+	return toTxN
+}
+
+// BuildIndexAccessors builds the .efi sidecar for a v4 .ef file. dataPath is
+// the physical .ef (typically with .regen suffix); finalPath is the eventual
+// name whose parsed range determines the .efi path.
+func (a *Aggregator) BuildIndexAccessors(ctx context.Context, domain kv.Domain, dataPath, finalPath string) error {
+	if int(domain) >= len(a.d) || a.d[domain] == nil {
+		return fmt.Errorf("BuildIndexAccessors: unknown domain %s", domain)
+	}
+	ii := a.d[domain].History.InvertedIndex
+	if ii == nil {
+		return fmt.Errorf("BuildIndexAccessors: domain %s has no inverted index", domain)
+	}
+
+	fromTxN, toTxN, err := parseV4EFBaseName(filepath.Base(finalPath))
+	if err != nil {
+		return fmt.Errorf("BuildIndexAccessors(%s): %w", domain, err)
+	}
+	efiPath := ii.efAccessorNewFilePathV4(fromTxN, toTxN)
+
+	dec, err := seg.NewDecompressor(dataPath)
+	if err != nil {
+		return fmt.Errorf("BuildIndexAccessors(%s): open ef %s: %w", domain, dataPath, err)
+	}
+	defer dec.Close()
+
+	ps := background.NewProgressSet()
+	return ii.buildMapAccessorAt(ctx, efiPath, dec, ps)
+}
+
 func (at *AggregatorRoTx) TxNumsInFiles(entitySet ...kv.Domain) (minTxNum uint64) {
 	if len(entitySet) == 0 {
 		panic("assert: missed arguments")

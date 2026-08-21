@@ -140,6 +140,16 @@ func (ii *InvertedIndex) efNewFilePath(fromStep, toStep kv.Step) string {
 	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", ii.FileVersion.DataEF.String(), ii.FilenameBase, fromStep, toStep))
 }
 
+// efNewFilePathV4 / efAccessorNewFilePathV4 mirror kvNewFilePathV4 on Domain —
+// v4.0-{filenameBase}.{fromTxN}-{toTxN}.ef / .efi. Paired with
+// History.vNewFilePathV4 for the mode-C boundary emission.
+func (ii *InvertedIndex) efNewFilePathV4(fromTxN, toTxN uint64) string {
+	return filepath.Join(ii.dirs.SnapIdx, fmt.Sprintf("%s-%s.%d-%d.ef", version.V4_0.String(), ii.FilenameBase, fromTxN, toTxN))
+}
+func (ii *InvertedIndex) efAccessorNewFilePathV4(fromTxN, toTxN uint64) string {
+	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", version.V4_0.String(), ii.FilenameBase, fromTxN, toTxN))
+}
+
 func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))
@@ -1165,7 +1175,13 @@ func (ii *InvertedIndex) buildFiles(ctx context.Context, step kv.Step, coll Inve
 }
 
 func (ii *InvertedIndex) buildMapAccessor(ctx context.Context, fromStep, toStep kv.Step, data *seg.Decompressor, ps *background.ProgressSet) error {
-	idxPath := ii.efAccessorNewFilePath(fromStep, toStep)
+	return ii.buildMapAccessorAt(ctx, ii.efAccessorNewFilePath(fromStep, toStep), data, ps)
+}
+
+// buildMapAccessorAt is buildMapAccessor with an explicit destination path —
+// lets callers with non-step-aligned targets (mode-C v4 .efi at
+// {fromTxN}-{toTxN}) reuse the same recsplit tuning.
+func (ii *InvertedIndex) buildMapAccessorAt(ctx context.Context, idxPath string, data *seg.Decompressor, ps *background.ProgressSet) error {
 	versionOfRs := version.DataStructureVersion(0)
 	if !ii.FileVersion.AccessorEFI.Current.Eq(version.V1_0) { // v1.0 files predate FuseFilter; dataStructureVersion>=1 is incompatible with them
 		versionOfRs = recsplit.ExistenceFilterVersion
