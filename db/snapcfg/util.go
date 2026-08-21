@@ -171,13 +171,18 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		}
 
 		if strings.HasPrefix(p.Name, "caplin") {
+			caplinFile, _, known := snaptype.ParseFileName("caplin", filepath.Base(v+"-"+name))
+			if !known || caplinFile.Type == nil {
+				continue
+			}
+
 			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, "caplin/"))
 			if err != nil {
 				continue
 			}
-			// Caplin state files borrow their versions from BeaconBlocks, and an .idx
-			// carries its .seg's data version: the loader derives the accessor path by
-			// swapping only the extension, so both go through the one data window.
+			// One window for every caplin file, taken from BeaconBlocks: an .idx carries
+			// its .seg's data version, so filtering them apart would drop an index whose
+			// segment was kept. The per-type windows are identical today.
 			versions := snaptype.BeaconBlocks.Versions()
 			if caplinVersion.Less(versions.MinSupported) || versions.Current.Less(caplinVersion) {
 				continue
@@ -400,6 +405,12 @@ func (c Cfg) IsFrozen(info snaptype.FileInfo) bool {
 }
 
 func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
+	// Caplin entries are skipped below and no core entry can match a caplin enum, so the
+	// scan is a no-op for these types — and IsFrozen calls this per segment opened.
+	if snaptype.IsCaplinType(t) {
+		return snaptype.CaplinMergeLimit
+	}
+
 	hasType := t == snaptype.MinCoreEnum
 
 	for _, info := range c.PreverifiedParsed {
@@ -431,13 +442,6 @@ func (c Cfg) MergeLimit(t snaptype.Enum, fromBlock uint64) uint64 {
 	// This should only get called the first time a new type is added and created - as it will
 	// not have previous history to check against
 
-	// BeaconBlocks && BlobSidecars follow their own slot based sharding scheme which is
-	// not the same as other snapshots which follow a block based sharding scheme
-	// TODO: If we add any more sharding schemes (we currently have blocks, state & beacon block schemes)
-	// - we may need to add some kind of sharding scheme identifier to snaptype.Type
-	if snaptype.IsCaplinType(t) {
-		return snaptype.CaplinMergeLimit
-	}
 	if hasType {
 		return snaptype.Erigon2MergeLimit
 	}

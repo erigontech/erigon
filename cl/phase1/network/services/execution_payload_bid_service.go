@@ -193,7 +193,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 			s.queuePendingBid(msg)
 			log.Trace("Queued execution payload bid waiting for dependencies",
 				"slot", slot, "builderIndex", builderIndex, "err", err)
-			return fmt.Errorf("%w: %w: %v", ErrIgnore, ErrBidQueued, err)
+			return fmt.Errorf("%w: %w: %w", ErrIgnore, ErrBidQueued, err)
 		}
 		return err
 	}
@@ -210,7 +210,7 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 			s.queuePendingBid(msg)
 			log.Trace("Queued execution payload bid waiting for dependencies",
 				"slot", slot, "builderIndex", builderIndex, "err", err)
-			return fmt.Errorf("%w: %w: %v", ErrIgnore, ErrBidQueued, err)
+			return fmt.Errorf("%w: %w: %w", ErrIgnore, ErrBidQueued, err)
 		}
 		return err
 	}

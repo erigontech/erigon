@@ -114,7 +114,7 @@ func (h *Eth1Header) EncodeSSZ(dst []byte) ([]byte, error) {
 func (h *Eth1Header) DecodeSSZ(buf []byte, version int) error {
 	h.version = clparams.StateVersion(version)
 	if len(buf) < h.EncodingSizeSSZ() {
-		return fmt.Errorf("[Eth1Header] err: %s", ssz.ErrLowBufferSize)
+		return fmt.Errorf("[Eth1Header] err: %w", ssz.ErrLowBufferSize)
 	}
 	return ssz2.UnmarshalSSZ(buf, version, h.getSchema()...)
 }

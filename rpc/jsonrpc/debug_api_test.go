@@ -94,8 +94,8 @@ var debugTraceTransactionNoRefundTests = []struct {
 
 func TestGetRawBlockAccessListRPCSpec(t *testing.T) {
 	chainPack, client := newBlockAccessListRPCFixture(t)
-	availableRaw := marshalHexBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
-	emptyRaw := marshalHexBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
+	availableRaw := marshalBlockAccessListBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
+	emptyRaw := marshalBlockAccessListBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
 	cases := []blockAccessListRPCCase{
 		{name: "available by number", selector: "0x2", want: availableRaw},
 		{name: "available by tag", selector: "safe", want: availableRaw},
@@ -373,7 +373,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 	from := common.Address{0xFF}
 	to := common.Address{0x01}
 	gas := hexutil.Uint64(21000)
-	gasPrice := hexutil.Big(*big.NewInt(1e9))
+	gasPrice := hexutil.U256(*uint256.NewInt(1e9))
 	traceCallArgs := ethapi.CallArgs{From: &from, To: &to, Gas: &gas, GasPrice: &gasPrice}
 	for _, tc := range []struct {
 		name   string
@@ -451,11 +451,11 @@ func TestDebugTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 		From:                 &c.bankAddress,
 		To:                   &contractAddr,
 		Gas:                  newUint64(100_000),
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}
 	returnValue := callDebugTraceCall(t, c.debugAPI(), args, &ethapi.BlockOverrides{
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(10)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(10)),
 	})
 	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", returnValue)
@@ -975,7 +975,7 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 
 	t.Run("pending tag uses committed view", func(t *testing.T) {
 		ff := rpchelper.New(t.Context(), rpchelper.FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
-		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)})
+		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)}, nil)
 		payload, err := rlp.EncodeToBytes(pendingBlock)
 		require.NoError(t, err)
 		ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})

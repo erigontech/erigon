@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/chain"
@@ -264,7 +265,7 @@ func (rw *WorkerContext) bindTx(chainTx kv.TemporalTx) error {
 	}
 	rw.chainTx = chainTx
 
-	type latest interface{ SetGetter(kv.TemporalGetter) }
+	type latest interface{ SetGetter(execctxapi.StateGetter) }
 	type historic interface{ SetTx(kv.TemporalTx) }
 	switch typedReader := rw.stateReader.(type) {
 	case latest:
@@ -329,7 +330,7 @@ func (rw *WorkerContext) RunTxTask(txTask Task) (result *TxResult) {
 func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	rw.stateReader = reader
 	type latest interface {
-		SetGetter(kv.TemporalGetter)
+		SetGetter(execctxapi.StateGetter)
 	}
 
 	type historic interface {

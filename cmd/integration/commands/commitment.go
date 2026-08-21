@@ -226,7 +226,7 @@ Examples:
 				return
 			}
 			defer sd.Close()
-			reader := commitmentdb.NewLatestStateReader(tx, sd)
+			reader := commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{})
 			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
 				logger.Error("Failed to read branch", "error", err)
 				return
@@ -716,7 +716,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 			return fmt.Errorf("failed to create shared domains: %w", err)
 		}
 		defer sd.Close()
-		commitmentReader = commitmentdb.NewLatestStateReader(tx, sd)
+		commitmentReader = commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{})
 	}
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64

@@ -10,10 +10,9 @@ import (
 
 	"github.com/FastFilter/xorfilter"
 	"github.com/c2h5oh/datasize"
-	"github.com/edsrzf/mmap-go"
 
 	"github.com/erigontech/erigon/common/dbg"
-	mm "github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/common/mmap"
 )
 
 type Features uint32
@@ -33,8 +32,8 @@ type Reader struct {
 	keepInMem bool // keep it in mem insted of mmap
 
 	fileName string
-	f        *os.File
-	m        mmap.MMap
+	f        *os.File // non-nil only when this Reader mapped the file itself
+	m        []byte   // borrowed unless f != nil
 	features Features
 
 	version uint8
@@ -60,7 +59,7 @@ func NewReader(filePath string) (_ *Reader, err error) {
 		return nil, err
 	}
 	sz := int(st.Size())
-	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
+	m, err := mmap.OpenRo(f, sz)
 	if err != nil {
 		return nil, err
 	}
@@ -170,46 +169,49 @@ func (r *Reader) ForceInMem() datasize.ByteSize {
 }
 
 func (r *Reader) MadvWillNeed() {
-	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseWillNeed(r.m); err != nil {
+	if err := mmap.MadviseWillNeed(r.m); err != nil {
 		panic(err)
 	}
 }
 func (r *Reader) MadvNormal() {
-	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseNormal(r.m); err != nil {
+	if err := mmap.MadviseNormal(r.m); err != nil {
 		panic(err)
 	}
 }
 func (r *Reader) MadvRandom() {
-	if r == nil || r.f == nil || r.m == nil || len(r.m) == 0 || r.keepInMem {
+	if r == nil || r.f == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseRandom(r.m); err != nil {
+	if err := mmap.MadviseRandom(r.m); err != nil {
 		panic(err)
 	}
 }
 func (r *Reader) FileName() string           { return r.fileName }
 func (r *Reader) ContainsHash(v uint64) bool { return r.inner.Contains(v) }
 func (r *Reader) Close() {
-	if r == nil || r.f == nil {
+	if r == nil {
 		return
 	}
-	_ = r.m.Unmap() //nolint
-	_ = r.f.Close() //nolint
-	r.f = nil
+	if r.f != nil { // borrowed bytes are not ours to unmap
+		owned := mmap.Ro(r.m)
+		_ = owned.Unmap() //nolint
+		_ = r.f.Close()   //nolint
+		r.f, r.m = nil, nil
+	}
 }
 
 // ReaderSharded reads a sharded fusefilter (outer header version=1).
 // Only the shard matching keyHash >> 56 is checked on lookup.
 // shards is a value array (not pointer array) so ContainsHash needs only one pointer dereference.
 type ReaderSharded struct {
-	m         mmap.MMap // outer slice spanning header + all shard blobs, used for madvise
-	f         *os.File  // non-nil only when opened via NewReaderSharded(filePath)
+	m         []byte   // outer slice spanning header + all shard blobs, used for madvise
+	f         *os.File // non-nil only when opened via NewReaderSharded(filePath)
 	fileName  string
 	keepInMem bool // ForceInMem replaced m with an anonymous heap copy; skip madvise/munmap
 	shards    [256]Reader
@@ -230,7 +232,7 @@ func NewReaderSharded(filePath string) (_ *ReaderSharded, err error) {
 		return nil, err
 	}
 	sz := int(st.Size())
-	m, err := mmap.MapRegion(f, sz, mmap.RDONLY, 0, 0)
+	m, err := mmap.OpenRo(f, sz)
 	if err != nil {
 		return nil, err
 	}
@@ -253,14 +255,15 @@ func NewReaderSharded(filePath string) (_ *ReaderSharded, err error) {
 func (r *ReaderSharded) FileName() string { return r.fileName }
 
 func (r *ReaderSharded) Close() {
-	if r == nil || r.f == nil {
+	if r == nil {
 		return
 	}
-	if !r.keepInMem {
-		_ = r.m.Unmap() //nolint
+	if r.f != nil { // borrowed bytes are not ours to unmap
+		owned := mmap.Ro(r.m)
+		_ = owned.Unmap() //nolint
+		_ = r.f.Close()   //nolint
+		r.f, r.m = nil, nil
 	}
-	_ = r.f.Close() //nolint
-	r.f = nil
 }
 
 func NewReaderShardedOnBytes(m []byte, fName string) (*ReaderSharded, int, error) {
@@ -332,7 +335,7 @@ func (r *ReaderSharded) MadvWillNeed() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseWillNeed(r.m); err != nil {
+	if err := mmap.MadviseWillNeed(r.m); err != nil {
 		panic(err)
 	}
 }
@@ -341,7 +344,7 @@ func (r *ReaderSharded) MadvNormal() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseNormal(r.m); err != nil {
+	if err := mmap.MadviseNormal(r.m); err != nil {
 		panic(err)
 	}
 }
@@ -349,7 +352,7 @@ func (r *ReaderSharded) MadvRandom() {
 	if r == nil || len(r.m) == 0 || r.keepInMem {
 		return
 	}
-	if err := mm.MadviseRandom(r.m); err != nil {
+	if err := mmap.MadviseRandom(r.m); err != nil {
 		panic(err)
 	}
 }

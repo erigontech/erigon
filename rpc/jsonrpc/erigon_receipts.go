@@ -356,7 +356,7 @@ func (api *ErigonImpl) GetLatestLogs(ctx context.Context, crit filters.FilterCri
 			} else {
 				erigonLog.TxHash = body.Transactions[txi].Hash()
 			}
-			erigonLog.Timestamp = hexutil.Uint64(timestamp)
+			erigonLog.BlockTimestamp = hexutil.Uint64(timestamp)
 			erigonLog.Address = log.Address
 			erigonLog.Topics = log.Topics
 			erigonLog.Data = log.Data

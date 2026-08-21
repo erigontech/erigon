@@ -229,33 +229,43 @@ func (a *Antiquary) Loop() error {
 }
 
 func (a *Antiquary) retirementLoop() error {
+	blocks := &retirementStep{
+		run:     a.antiquate,
+		onError: func(err error) { log.Warn("[Antiquary] Failed to antiquate", "err", err) },
+	}
+	blobs := &retirementStep{
+		run:     a.antiquateBlobs,
+		onError: func(err error) { log.Error("[Antiquary] Failed to antiquate blobs", "err", err) },
+	}
+
 	retirementTicker := time.NewTicker(12 * time.Second)
 	defer retirementTicker.Stop()
 	for {
 		select {
 		case <-retirementTicker.C:
-			if !a.backfilled.Load() {
-				continue
-			}
-
-			// A cancelled context is a shutdown, not a failure.
-			if err := a.antiquate(); err != nil && a.ctx.Err() == nil {
-				log.Warn("[Antiquary] Failed to antiquate", "err", err)
-			}
-			if a.cfg.DenebForkEpoch == math.MaxUint64 {
-				continue
-			}
-			if !a.blobBackfilled.Load() {
-				continue
-			}
-			if err := a.antiquateBlobs(); err != nil && a.ctx.Err() == nil {
-				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
-			}
+			a.retirementTick(blocks, blobs)
 		case <-a.ctx.Done():
 			return nil
 		}
 	}
 }
+
+func (a *Antiquary) retirementTick(blocks, blobs *retirementStep) {
+	if !a.backfilled.Load() {
+		return
+	}
+	blocks.attempt(a.shuttingDown)
+
+	if a.cfg.DenebForkEpoch == math.MaxUint64 {
+		return
+	}
+	if !a.blobBackfilled.Load() {
+		return
+	}
+	blobs.attempt(a.shuttingDown)
+}
+
+func (a *Antiquary) shuttingDown() bool { return a.ctx.Err() != nil }
 
 type readBeaconSnapshotHeaderFunc func(slot uint64, tx kv.Tx) (*cltypes.SignedBeaconBlockHeader, uint64, common.Hash, error)
 

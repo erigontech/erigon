@@ -41,33 +41,10 @@ func (reqGen *requestGenerator) EstimateGas(args bind.CallMsg, blockRef BlockNum
 
 	gas := hexutil.Uint64(args.Gas)
 
-	var gasPrice *hexutil.Big
-
-	if args.GasPrice != nil {
-		big := hexutil.Big(*args.GasPrice.ToBig())
-		gasPrice = &big
-	}
-
-	var tipCap *hexutil.Big
-
-	if args.TipCap != nil {
-		big := hexutil.Big(*args.TipCap.ToBig())
-		tipCap = &big
-	}
-
-	var feeCap *hexutil.Big
-
-	if args.FeeCap != nil {
-		big := hexutil.Big(*args.FeeCap.ToBig())
-		feeCap = &big
-	}
-
-	var value *hexutil.Big
-
-	if args.Value != nil {
-		big := hexutil.Big(*args.Value.ToBig())
-		value = &big
-	}
+	gasPrice := (*hexutil.U256)(args.GasPrice)
+	tipCap := (*hexutil.U256)(args.TipCap)
+	feeCap := (*hexutil.U256)(args.FeeCap)
+	value := (*hexutil.U256)(args.Value)
 
 	var data *hexutil.Bytes
 
@@ -136,7 +113,7 @@ func (reqGen *requestGenerator) SendTransaction(signedTx types.Transaction) (com
 
 	var buf bytes.Buffer
 	if err := signedTx.MarshalBinary(&buf); err != nil {
-		return common.Hash{}, fmt.Errorf("failed to marshal binary: %v", err)
+		return common.Hash{}, fmt.Errorf("failed to marshal binary: %w", err)
 	}
 
 	if err := reqGen.rpcCall(context.Background(), &result, Methods.ETHSendRawTransaction, hexutil.Bytes(buf.Bytes())); err != nil {
@@ -164,7 +141,7 @@ func (reqGen *requestGenerator) SendRawTransactionSync(signedTx types.Transactio
 
 	var buf bytes.Buffer
 	if err := signedTx.MarshalBinary(&buf); err != nil {
-		return nil, fmt.Errorf("failed to marshal binary: %v", err)
+		return nil, fmt.Errorf("failed to marshal binary: %w", err)
 	}
 
 	if err := reqGen.rpcCallOnce(context.Background(), &result, Methods.ETHSendRawTransactionSync, hexutil.Bytes(buf.Bytes()), timeoutMs); err != nil {

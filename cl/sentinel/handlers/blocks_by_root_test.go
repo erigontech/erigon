@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
@@ -116,7 +117,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	for i := 0; i < len(blockRoots); i++ {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && err != io.EOF {
+		if err != nil && !errors.Is(err, io.EOF) {
 			require.NoError(t, err)
 		}
 
@@ -158,7 +159,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Fatal("Stream is not empty")
 	}
 

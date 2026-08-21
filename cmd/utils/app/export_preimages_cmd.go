@@ -93,7 +93,7 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer tx.Rollback()
 
-	commitmentState, _, ok, err := aggTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, tx)
+	commitmentState, _, ok, err := aggTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState, tx, kv.GetLatestOptions{})
 	if err != nil {
 		return fmt.Errorf("read commitment state: %w", err)
 	}

@@ -140,7 +140,7 @@ func (e *TraceWorker) ExecTxn(txNum uint64, txIndex int, txn types.Transaction, 
 			if result == nil {
 				return fmt.Errorf("%w: blockNum=%d, txNum=%d", err, e.blockNum, txNum)
 			}
-			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %s", err, e.blockNum, txNum, result.Err)
+			return fmt.Errorf("%w: blockNum=%d, txNum=%d, %w", err, e.blockNum, txNum, result.Err)
 		}
 	}
 

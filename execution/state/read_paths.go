@@ -1375,15 +1375,16 @@ func readCodeHash(s *IntraBlockState, addr accounts.Address) (accounts.CodeHash,
 		return v, r.source, r.version, nil
 	case outcomeStorageRead:
 		var v accounts.CodeHash
-		if r.account != nil {
+		switch {
+		case r.account != nil:
 			// Match newObject: an empty CodeHash normalizes to EmptyCodeHash.
 			v = r.account.CodeHash
 			if v.IsEmpty() {
 				v = accounts.EmptyCodeHash
 			}
-		} else if r.so != nil && !r.so.deleted {
+		case r.so != nil && !r.so.deleted:
 			v = r.so.data.CodeHash
-		} else {
+		default:
 			v = accounts.NilCodeHash
 		}
 		if r.recordVR {
@@ -1575,11 +1576,12 @@ func readSelfDestruct(s *IntraBlockState, addr accounts.Address) (bool, ReadSour
 	case outcomeStorageRead:
 		var v bool
 		if r.so != nil {
-			if r.so.deleted {
+			switch {
+			case r.so.deleted:
 				v = false
-			} else if r.so.createdContract {
+			case r.so.createdContract:
 				v = false
-			} else {
+			default:
 				v = r.so.selfdestructed
 			}
 		}

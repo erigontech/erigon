@@ -166,7 +166,7 @@ func (b *blobSidecarService) verifyAndStoreBlobSidecar(msg *cltypes.BlobSidecar)
 
 	start := time.Now()
 	if err := kzgCtx.VerifyBlobKZGProof((*goethkzg.Blob)(&msg.Blob), goethkzg.KZGCommitment(msg.KzgCommitment), goethkzg.KZGProof(msg.KzgProof)); err != nil {
-		return fmt.Errorf("blob KZG proof verification failed: %v", err)
+		return fmt.Errorf("blob KZG proof verification failed: %w", err)
 	}
 
 	if !b.test {

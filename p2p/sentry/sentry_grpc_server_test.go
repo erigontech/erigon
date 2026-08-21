@@ -295,7 +295,7 @@ func TestHandShake69_ETH69ToETH68(t *testing.T) {
 	sentry2EthStatus := &eth.StatusPacket{
 		ProtocolVersion: direct.ETH68,
 		NetworkID:       sentry2Status.NetworkId,
-		TD:              gointerfaces.ConvertH256ToUint256Int(sentry2Status.TotalDifficulty).ToBig(),
+		TD:              gointerfaces.ConvertH256ToUint256Int(sentry2Status.TotalDifficulty),
 		Head:            gointerfaces.ConvertH256ToHash(sentry2Status.BestHash),
 		Genesis:         gointerfaces.ConvertH256ToHash(sentry2Status.ForkData.Genesis),
 		ForkID:          forkid.NewIDFromForks(sentry2Status.ForkData.HeightForks, sentry2Status.ForkData.TimeForks, gointerfaces.ConvertH256ToHash(sentry2Status.ForkData.Genesis), sentry2Status.MaxBlockHeight, sentry2Status.MaxBlockTime),

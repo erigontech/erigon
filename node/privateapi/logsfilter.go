@@ -17,6 +17,7 @@
 package privateapi
 
 import (
+	"errors"
 	"fmt"
 	"io"
 	"sync"
@@ -160,7 +161,7 @@ func (a *LogsFilterAggregator) subscribeLogs(server remoteproto.ETHBACKEND_Subsc
 	for filterReq, recvErr = server.Recv(); recvErr == nil; filterReq, recvErr = server.Recv() {
 		a.updateLogsFilter(filter, filterReq)
 	}
-	if recvErr != io.EOF { // termination
+	if !errors.Is(recvErr, io.EOF) { // termination
 		return fmt.Errorf("receiving log filter request: %w", recvErr)
 	}
 	return nil

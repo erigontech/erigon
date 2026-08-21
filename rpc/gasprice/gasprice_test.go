@@ -292,7 +292,7 @@ func (m *mockOracleBackend) BlockByNumber(ctx context.Context, _ rpc.BlockNumber
 	if err := ctx.Err(); err != nil {
 		return nil, err
 	}
-	return types.NewBlock(m.head, nil, nil, nil, nil), nil
+	return types.NewBlock(m.head, nil, nil, nil, nil, nil), nil
 }
 
 func (m *mockOracleBackend) ChainConfig() *chain.Config { return chain.AllProtocolChanges }

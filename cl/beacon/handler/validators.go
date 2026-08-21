@@ -378,7 +378,7 @@ func parseQueryValidatorIndex(syncedData synced_data.SyncedData, id string) (uin
 		}
 		idx, has, err := syncedData.ValidatorIndexByPublicKey(b48)
 		if err != nil {
-			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found: %s", err))
+			return 0, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("validator not found: %w", err))
 		}
 		if !has {
 			return math.MaxUint64, nil

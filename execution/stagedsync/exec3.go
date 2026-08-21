@@ -600,11 +600,19 @@ func (te *txExecutor) onBlockStart(ctx context.Context, blockNum uint64, blockHa
 }
 
 func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
-	data := block.BlockAccessList()
-	if len(data) == 0 && block.HeaderNoCopy().HasNonEmptyBAL() {
+	if sidecar := block.BlockAccessListSidecar(); sidecar != nil {
+		data, err := sidecar.Bytes()
+		if err != nil {
+			return nil, err
+		}
+		if len(data) > 0 {
+			return data, nil
+		}
+	}
+	if block.HeaderNoCopy().HasNonEmptyBAL() {
 		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
 	}
-	return data, nil
+	return nil, nil
 }
 
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, consumers *resultStream, blockRequests chan *blockRequest) error {

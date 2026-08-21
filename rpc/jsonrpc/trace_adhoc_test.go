@@ -703,7 +703,7 @@ func TestTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 			accounts.InternAddress(contractAddr): {Code: &gasPriceCode},
 		},
 		BlockOverrides: &ethapi.BlockOverrides{
-			BaseFeePerGas: (*hexutil.Big)(big.NewInt(10)),
+			BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(10)),
 		},
 	})
 	require.NoError(t, err)
@@ -846,7 +846,7 @@ func (c *baseFeeTestChain) mineParallelEligibleBlock(t *testing.T, contractAddr 
 func traceConfigWithBaseFeeOverride(baseFee *uint256.Int) *config.TraceConfig {
 	return &config.TraceConfig{
 		BlockOverrides: &ethapi.BlockOverrides{
-			BaseFeePerGas: (*hexutil.Big)(baseFee.ToBig()),
+			BaseFeePerGas: (*hexutil.U256)(baseFee),
 		},
 	}
 }
@@ -903,7 +903,7 @@ func blockOverrideOpcodeCases() []blockOverrideOpcodeCase {
 		{
 			name:     "number",
 			opcode:   opNumber,
-			override: &ethapi.BlockOverrides{Number: (*hexutil.Big)(big.NewInt(999))},
+			override: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(999))},
 			expected: uint256.NewInt(999).PaddedBytes(32),
 		},
 		{
@@ -933,7 +933,7 @@ func blockOverrideOpcodeCases() []blockOverrideOpcodeCase {
 		{
 			name:     "blobBaseFee",
 			opcode:   opBlobbasefee,
-			override: &ethapi.BlockOverrides{BlobBaseFee: (*hexutil.Big)(big.NewInt(777))},
+			override: &ethapi.BlockOverrides{BlobBaseFee: (*hexutil.U256)(uint256.NewInt(777))},
 			expected: uint256.NewInt(777).PaddedBytes(32),
 		},
 	}
@@ -1120,7 +1120,7 @@ func TestReplayTransactionSignerReflectsBlockOverridesNumber(t *testing.T) {
 
 	api := c.traceAPI()
 	_, err := api.ReplayTransaction(context.Background(), txHash, []string{"trace"}, new(bool), &config.TraceConfig{
-		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.Big)(big.NewInt(1))},
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	})
 	require.ErrorContains(t, err, "protected txn is not supported by signer")
 }

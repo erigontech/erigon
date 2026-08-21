@@ -212,12 +212,12 @@ func (tab *Table) setFallbackNodes(nodes []*enode.Node) error {
 		if n.Hostname() != "" && !n.IPAddr().IsValid() {
 			resolved, err := resolveBootnodeHostname(n, tab.log)
 			if err != nil {
-				return fmt.Errorf("bad bootstrap node %q: %v", n, err)
+				return fmt.Errorf("bad bootstrap node %q: %w", n, err)
 			}
 			n = resolved
 		}
 		if err := n.ValidateComplete(); err != nil {
-			return fmt.Errorf("bad bootstrap node %q: %v", n, err)
+			return fmt.Errorf("bad bootstrap node %q: %w", n, err)
 		}
 		if tab.cfg.NetRestrict != nil && !tab.cfg.NetRestrict.ContainsAddr(n.IPAddr()) {
 			tab.log.Error("[p2p] Bootstrap node filtered by netrestrict", "id", n.ID(), "ip", n.IPAddr())
@@ -236,7 +236,7 @@ func resolveBootnodeHostname(n *enode.Node, logger log.Logger) (*enode.Node, err
 
 	ips, err := net.DefaultResolver.LookupNetIP(ctx, "ip", n.Hostname())
 	if err != nil {
-		return nil, fmt.Errorf("DNS lookup failed for %q: %v", n.Hostname(), err)
+		return nil, fmt.Errorf("DNS lookup failed for %q: %w", n.Hostname(), err)
 	}
 
 	var ip4, ip6 netip.Addr

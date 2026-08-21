@@ -506,7 +506,7 @@ func (b *Eth1Block) getSchema() []any {
 }
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
-func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.Hash) (*types.Header, error) {
+func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.Hash, blockAccessList *types.BlockAccessListSidecar) (*types.Header, error) {
 	baseFee := new(uint256.Int)
 	_ = baseFee.UnmarshalSSZ(b.BaseFeePerGas[:])
 	// If the block version is Capella or later, calculate the withdrawals hash.
@@ -562,9 +562,16 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 	// Matches the engine API pattern in engine_server.go: keccak256(raw RLP bytes).
 	if b.version >= clparams.GloasVersion {
 		blockAccessListHash := new(common.Hash)
-		if b.BlockAccessList == nil || b.BlockAccessList.EncodingSizeSSZ() == 0 {
+		switch {
+		case blockAccessList != nil:
+			hash, err := blockAccessList.Hash()
+			if err != nil {
+				return nil, fmt.Errorf("hash block access list: %w", err)
+			}
+			*blockAccessListHash = hash
+		case b.BlockAccessList == nil || b.BlockAccessList.EncodingSizeSSZ() == 0:
 			*blockAccessListHash = empty.BlockAccessListHash
-		} else {
+		default:
 			*blockAccessListHash = crypto.Keccak256Hash(b.BlockAccessList.Bytes())
 		}
 		header.BlockAccessListHash = blockAccessListHash

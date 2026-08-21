@@ -86,8 +86,8 @@ func TestErigonGetLatestLogs(t *testing.T) {
 	expectedErigonLogs := make(types.ErigonLogs, 0)
 	for _, expectedLog := range slices.Backward(expectedLogs) {
 		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Log:       expectedLog.Log,
-			Timestamp: expectedLog.Timestamp,
+			Log:            expectedLog.Log,
+			BlockTimestamp: expectedLog.BlockTimestamp,
 		})
 	}
 	actual, err := api.GetLatestLogs(m.Ctx, filters.FilterCriteria{FromBlock: big.NewInt(0), ToBlock: big.NewInt(rpc.LatestBlockNumber.Int64())}, filters.LogFilterOptions{
@@ -111,7 +111,7 @@ func TestErigonGetLatestLogs(t *testing.T) {
 			Index:       0,
 			Removed:     false,
 		},
-		Timestamp: 100,
+		BlockTimestamp: 100,
 	}
 	assert.Equal(expectedLog, actual[0])
 }
@@ -126,8 +126,8 @@ func TestErigonGetLatestLogsIgnoreTopics(t *testing.T) {
 	expectedErigonLogs := make([]*types.ErigonLog, 0)
 	for _, expectedLog := range slices.Backward(expectedLogs) {
 		expectedErigonLogs = append(expectedErigonLogs, &types.ErigonLog{
-			Log:       expectedLog.Log,
-			Timestamp: expectedLog.Timestamp,
+			Log:            expectedLog.Log,
+			BlockTimestamp: expectedLog.BlockTimestamp,
 		})
 	}
 

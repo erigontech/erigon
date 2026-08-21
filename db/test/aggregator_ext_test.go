@@ -163,7 +163,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if uint64(i+1) >= txs-stepSize {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
-		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr])
+		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
@@ -176,7 +176,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		require.Equal(t, i+1, int(acc.Nonce))
 
-		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, storedV)
 		_ = key[0]
@@ -269,7 +269,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	for txNum++; txNum <= txs; txNum++ {
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		prev, _, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
+		prev, _, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev)
 		require.NoError(t, err)
@@ -284,7 +284,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	for i, key := range keys {
 
-		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
 		require.NotNil(t, storedV, "key %x not found %d", key, i)
 		require.NoError(t, err)
 		require.Equal(t, key[0], storedV[0])
@@ -433,11 +433,11 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
-	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
+	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 }

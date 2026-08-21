@@ -47,7 +47,7 @@ func TestPendingBlock(t *testing.T) {
 	engine := ethash.NewFaker()
 	api := newEthApiForTest(NewBaseApi(ff, stateCache, m.BlockReader, engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), nil, nil, nil)
 	expect := uint64(12345)
-	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(expect)}))
+	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(expect)}, nil))
 	require.NoError(t, err)
 	ch, id := ff.SubscribePendingBlock(1)
 	defer ff.UnsubscribePendingBlock(id)

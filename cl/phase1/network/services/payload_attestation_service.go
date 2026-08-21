@@ -175,7 +175,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 		// Preserve IGNORE vs REJECT distinction from forkchoice
 		// forkchoice.ErrIgnore != services.ErrIgnore, so we need to convert
 		if errors.Is(err, forkchoice.ErrIgnore) {
-			return fmt.Errorf("%w: %v", ErrIgnore, err)
+			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: forkchoice.ErrIgnore must not stay matchable
 		}
 		return fmt.Errorf("forkchoice rejected payload attestation: %w", err)
 	}

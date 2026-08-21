@@ -175,7 +175,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true); err != nil {
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
-			return fmt.Errorf("%w: %v", ErrIgnore, err)
+			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
 		}
 		return fmt.Errorf("failed to process execution payload: %w", err)
 	}

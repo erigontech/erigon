@@ -426,7 +426,7 @@ func (t *jsTracer) onError(context string, err error) {
 }
 
 func wrapError(context string, err error) error {
-	return fmt.Errorf("%v    in server-side tracer function '%v'", err, context)
+	return fmt.Errorf("%w    in server-side tracer function '%v'", err, context)
 }
 
 // setBuiltinFunctions injects Go functions which are available to tracers into the environment.

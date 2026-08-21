@@ -239,15 +239,15 @@ func decodeOptionalAddress(s *string, fieldName string) (*common.Address, error)
 	return &addr, nil
 }
 
-func decodeOptionalBig(s *string, fieldName string) (*hexutil.Big, error) {
+func decodeOptionalU256(s *string, fieldName string) (*hexutil.U256, error) {
 	if s == nil {
 		return nil, nil
 	}
-	b, err := hexutil.DecodeBig(*s)
+	u, err := hexutil.DecodeU256(*s)
 	if err != nil {
 		return nil, fmt.Errorf("invalid %s: %w", fieldName, err)
 	}
-	return (*hexutil.Big)(b), nil
+	return (*hexutil.U256)(&u), nil
 }
 
 func callDataToArgs(data model.CallData) (ethapi.CallArgs, error) {
@@ -265,16 +265,16 @@ func callDataToArgs(data model.CallData) (ethapi.CallArgs, error) {
 		gas := hexutil.Uint64(*data.Gas)
 		args.Gas = &gas
 	}
-	if args.GasPrice, err = decodeOptionalBig(data.GasPrice, "gasPrice"); err != nil {
+	if args.GasPrice, err = decodeOptionalU256(data.GasPrice, "gasPrice"); err != nil {
 		return args, err
 	}
-	if args.MaxFeePerGas, err = decodeOptionalBig(data.MaxFeePerGas, "maxFeePerGas"); err != nil {
+	if args.MaxFeePerGas, err = decodeOptionalU256(data.MaxFeePerGas, "maxFeePerGas"); err != nil {
 		return args, err
 	}
-	if args.MaxPriorityFeePerGas, err = decodeOptionalBig(data.MaxPriorityFeePerGas, "maxPriorityFeePerGas"); err != nil {
+	if args.MaxPriorityFeePerGas, err = decodeOptionalU256(data.MaxPriorityFeePerGas, "maxPriorityFeePerGas"); err != nil {
 		return args, err
 	}
-	if args.Value, err = decodeOptionalBig(data.Value, "value"); err != nil {
+	if args.Value, err = decodeOptionalU256(data.Value, "value"); err != nil {
 		return args, err
 	}
 	if data.Data != nil {

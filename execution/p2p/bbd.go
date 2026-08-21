@@ -484,7 +484,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 	}
 	batchAssignments := make([]batchAssignment, 0, len(headerBatches))
 	bodyBatches := make([][]*types.Body, len(availablePeers))
-	balBatches := make([]map[common.Hash][]byte, len(availablePeers))
+	balBatches := make([]map[common.Hash]*types.BlockAccessListSidecar, len(availablePeers))
 	pendingBatches := true
 	attempts := 1
 	for pendingBatches {
@@ -522,7 +522,7 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 			eg.Go(func() error {
 				var (
 					bodiesResponse FetcherResponse[[]*types.Body]
-					balsResponse   map[common.Hash][]byte
+					balsResponse   map[common.Hash]*types.BlockAccessListSidecar
 					balReqs        []BALRequest
 				)
 				balPrimary := peerId
@@ -646,7 +646,11 @@ func (bbd *BackwardBlockDownloader) downloadBlocksForHeaders(
 		balMap := balBatches[batchIndex]
 		for i, body := range bodyBatch {
 			header := headerBatches[batchIndex][i]
-			blocks = append(blocks, types.NewBlockFromNetwork(header, body, balMap[header.Hash()]))
+			bal := balMap[header.Hash()]
+			if bal == nil && header.HasBAL() && !header.HasNonEmptyBAL() {
+				bal = types.NewBlockAccessListSidecar(types.BlockAccessList{})
+			}
+			blocks = append(blocks, types.NewBlockFromNetwork(header, body, bal))
 		}
 	}
 
@@ -667,6 +671,7 @@ func balRequestsForHeaders(headers []*types.Header) []BALRequest {
 		reqs = append(reqs, BALRequest{
 			Hash:         header.Hash(),
 			Number:       header.Number.Uint64(),
+			GasLimit:     header.GasLimit,
 			ExpectedHash: *header.BlockAccessListHash,
 		})
 	}

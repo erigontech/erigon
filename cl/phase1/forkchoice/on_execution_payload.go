@@ -288,14 +288,14 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		log.Warn("validatePayloadWithEL: EL could not process payload (EL behind)",
 			"beaconBlockRoot", beaconBlockRoot, "blockHash", executionBlockHash, "err", err)
 		if optErr := f.optimisticStore.AddOptimisticCandidate(beaconBlockRoot, block.Block); optErr != nil {
-			return fmt.Errorf("failed to add block to optimistic store: %v", optErr)
+			return fmt.Errorf("failed to add block to optimistic store: %w", optErr)
 		}
 		return errELBehind
 	case execution_client.PayloadStatusNotValidated:
 		log.Trace("validatePayloadWithEL: payload is not validated yet", "beaconBlockRoot", beaconBlockRoot)
 		// optimistic block candidate
 		if err := f.optimisticStore.AddOptimisticCandidate(beaconBlockRoot, block.Block); err != nil {
-			return fmt.Errorf("failed to add block to optimistic store: %v", err)
+			return fmt.Errorf("failed to add block to optimistic store: %w", err)
 		}
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", err)
@@ -307,7 +307,7 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	}
 
 	if err != nil {
-		return fmt.Errorf("validatePayloadWithEL: newPayload failed: %v", err)
+		return fmt.Errorf("validatePayloadWithEL: newPayload failed: %w", err)
 	}
 
 	return nil

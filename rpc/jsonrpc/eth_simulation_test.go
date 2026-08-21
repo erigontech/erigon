@@ -5,7 +5,6 @@ import (
 	"errors"
 	"fmt"
 	"math"
-	"math/big"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -318,9 +317,9 @@ func TestSanitizeCallChainIDDefaultCopied(t *testing.T) {
 	require.NoError(t, err)
 	require.NotNil(t, args.ChainID)
 	// The returned chain ID should equal the original.
-	assert.Equal(t, 0, (*big.Int)(args.ChainID).Cmp(originalID.ToBig()))
+	assert.Equal(t, 0, (*uint256.Int)(args.ChainID).Cmp(originalID))
 	// But it must be a different pointer — mutating args.ChainID must not affect chainConfig.
-	(*big.Int)(args.ChainID).SetInt64(999)
+	(*uint256.Int)(args.ChainID).SetUint64(999)
 	assert.Equal(t, uint64(1), originalID.Uint64(), "mutating args.ChainID must not affect chainConfig.ChainID")
 }
 
@@ -328,7 +327,7 @@ func TestSanitizeCallChainIDDefaultCopied(t *testing.T) {
 func TestSanitizeCallChainIDMismatch(t *testing.T) {
 	sim := newTestSimulator(uint256.NewInt(1))
 	args := callArgs()
-	args.ChainID = (*hexutil.Big)(big.NewInt(999))
+	args.ChainID = (*hexutil.U256)(uint256.NewInt(999))
 	bc := blockCtx(30_000_000)
 
 	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
@@ -340,7 +339,7 @@ func TestSanitizeCallChainIDMismatch(t *testing.T) {
 func TestSanitizeCallChainIDMatch(t *testing.T) {
 	sim := newTestSimulator(uint256.NewInt(42))
 	args := callArgs()
-	args.ChainID = (*hexutil.Big)(big.NewInt(42))
+	args.ChainID = (*hexutil.U256)(uint256.NewInt(42))
 	bc := blockCtx(30_000_000)
 
 	err := sim.sanitizeCall(&args, nil, &bc, nil, 0, 50_000_000)
@@ -529,7 +528,7 @@ func TestSimulateV1PopulatesMaxUsedGas(t *testing.T) {
 
 	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	to := common.HexToAddress("0x0000000000000000000000000000000000000001")
-	value := (*hexutil.Big)(big.NewInt(100))
+	value := (*hexutil.U256)(uint256.NewInt(100))
 	gas := hexutil.Uint64(100000)
 
 	result, err := api.SimulateV1(context.Background(), SimulationRequest{
@@ -655,6 +654,6 @@ func newUint64(n uint64) *hexutil.Uint64 {
 	return &u
 }
 
-func newBig(n uint64) *hexutil.Big {
-	return (*hexutil.Big)(new(big.Int).SetUint64(n))
+func newBig(n uint64) *hexutil.U256 {
+	return (*hexutil.U256)(uint256.NewInt(n))
 }

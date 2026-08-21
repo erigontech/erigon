@@ -18,7 +18,6 @@ package jsonrpc
 
 import (
 	"context"
-	"math/big"
 	"sync"
 	"testing"
 
@@ -407,7 +406,7 @@ func TestFilterSignerReflectsBlockOverridesNumber(t *testing.T) {
 	defer jsoniter.ConfigDefault.ReturnStream(s)
 	stream := jsonstream.Wrap(s)
 	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
-		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.Big)(big.NewInt(1))},
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
 	}, stream)
 	require.NoError(t, err)
 	require.Contains(t, string(stream.Buffer()), "protected txn is not supported by signer")

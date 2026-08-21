@@ -2,6 +2,7 @@ package stagedsync
 
 import (
 	"context"
+	"errors"
 	"testing"
 )
 
@@ -140,7 +141,7 @@ func TestResultStream_PublishOnClosedIsCanceled(t *testing.T) {
 	s.register("applyResults", apply, true)
 	_ = s.close()
 
-	if err := s.publish(context.Background(), "r", false); err != context.Canceled {
+	if err := s.publish(context.Background(), "r", false); !errors.Is(err, context.Canceled) {
 		t.Fatalf("publish on a closed sink must return context.Canceled; got %v", err)
 	}
 }

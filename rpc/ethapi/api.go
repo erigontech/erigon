@@ -23,7 +23,6 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
-	"math/big"
 
 	"github.com/holiman/uint256"
 
@@ -44,16 +43,16 @@ type CallArgs struct {
 	From                 *common.Address           `json:"from"`
 	To                   *common.Address           `json:"to"`
 	Gas                  *hexutil.Uint64           `json:"gas"`
-	GasPrice             *hexutil.Big              `json:"gasPrice"`
-	MaxPriorityFeePerGas *hexutil.Big              `json:"maxPriorityFeePerGas"`
-	MaxFeePerGas         *hexutil.Big              `json:"maxFeePerGas"`
-	MaxFeePerBlobGas     *hexutil.Big              `json:"maxFeePerBlobGas"`
-	Value                *hexutil.Big              `json:"value"`
+	GasPrice             *hexutil.U256             `json:"gasPrice"`
+	MaxPriorityFeePerGas *hexutil.U256             `json:"maxPriorityFeePerGas"`
+	MaxFeePerGas         *hexutil.U256             `json:"maxFeePerGas"`
+	MaxFeePerBlobGas     *hexutil.U256             `json:"maxFeePerBlobGas"`
+	Value                *hexutil.U256             `json:"value"`
 	Nonce                *hexutil.Uint64           `json:"nonce"`
 	Data                 *hexutil.Bytes            `json:"data"`
 	Input                *hexutil.Bytes            `json:"input"`
 	AccessList           *types.AccessList         `json:"accessList"`
-	ChainID              *hexutil.Big              `json:"chainId,omitempty"`
+	ChainID              *hexutil.U256             `json:"chainId,omitempty"`
 	BlobVersionedHashes  []common.Hash             `json:"blobVersionedHashes,omitempty"`
 	AuthorizationList    []types.JsonAuthorization `json:"authorizationList"`
 }
@@ -102,37 +101,24 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 		// If there's no basefee, then it must be a non-1559 execution
 		gasPrice = new(uint256.Int)
 		if args.GasPrice != nil {
-			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
-			if overflow {
-				return nil, errors.New("args.GasPrice higher than 2^256-1")
-			}
+			gasPrice.Set((*uint256.Int)(args.GasPrice))
 		}
 		gasFeeCap, gasTipCap = gasPrice, gasPrice
 	} else {
 		// A basefee is provided, necessitating 1559-type execution
 		if args.GasPrice != nil {
 			// User specified the legacy gas field, convert to 1559 gas typing
-			gasPrice = new(uint256.Int)
-			overflow := gasPrice.SetFromBig(args.GasPrice.ToInt())
-			if overflow {
-				return nil, errors.New("args.GasPrice higher than 2^256-1")
-			}
+			gasPrice = new(uint256.Int).Set((*uint256.Int)(args.GasPrice))
 			gasFeeCap, gasTipCap = gasPrice, gasPrice
 		} else {
 			// User specified 1559 gas fields (or none), use those
 			gasFeeCap = new(uint256.Int)
 			if args.MaxFeePerGas != nil {
-				overflow := gasFeeCap.SetFromBig(args.MaxFeePerGas.ToInt())
-				if overflow {
-					return nil, errors.New("args.GasPrice higher than 2^256-1")
-				}
+				gasFeeCap.Set((*uint256.Int)(args.MaxFeePerGas))
 			}
 			gasTipCap = new(uint256.Int)
 			if args.MaxPriorityFeePerGas != nil {
-				overflow := gasTipCap.SetFromBig(args.MaxPriorityFeePerGas.ToInt())
-				if overflow {
-					return nil, errors.New("args.GasPrice higher than 2^256-1")
-				}
+				gasTipCap.Set((*uint256.Int)(args.MaxPriorityFeePerGas))
 			}
 			// Backfill the legacy gasPrice for EVM execution, unless we're all zeroes
 			gasPrice = new(uint256.Int)
@@ -142,20 +128,13 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 			}
 		}
 		if args.MaxFeePerBlobGas != nil {
-			blobFee, overflow := uint256.FromBig(args.MaxFeePerBlobGas.ToInt())
-			if overflow {
-				return nil, errors.New("args.MaxFeePerBlobGas higher than 2^256-1")
-			}
-			maxFeePerBlobGas = blobFee
+			maxFeePerBlobGas = new(uint256.Int).Set((*uint256.Int)(args.MaxFeePerBlobGas))
 		}
 	}
 
 	value := new(uint256.Int)
 	if args.Value != nil {
-		overflow := value.SetFromBig(args.Value.ToInt())
-		if overflow {
-			return nil, errors.New("args.Value higher than 2^256-1")
-		}
+		value.Set((*uint256.Int)(args.Value))
 	}
 	var data []byte
 	if args.Input != nil {
@@ -202,11 +181,7 @@ func (args *CallArgs) ToMessage(globalGasCap uint64, baseFee *uint256.Int) (*typ
 func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (types.Transaction, error) {
 	var chainID uint256.Int
 	if args.ChainID != nil {
-		cid, overflow := uint256.FromBig((*big.Int)(args.ChainID))
-		if overflow {
-			return nil, errors.New("chainId field caused an overflow (uint256)")
-		}
-		chainID = *cid
+		chainID = uint256.Int(*args.ChainID)
 	}
 
 	msg, err := args.ToMessage(globalGasCap, baseFee)
@@ -252,6 +227,10 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 		if args.AccessList != nil {
 			al = *args.AccessList
 		}
+		var maxFeePerBlobGas uint256.Int
+		if args.MaxFeePerBlobGas != nil {
+			maxFeePerBlobGas = uint256.Int(*args.MaxFeePerBlobGas)
+		}
 		tx = &types.BlobTx{
 			DynamicFeeTransaction: types.DynamicFeeTransaction{
 				CommonTx: types.CommonTx{
@@ -266,7 +245,7 @@ func (args *CallArgs) ToTransaction(globalGasCap uint64, baseFee *uint256.Int) (
 				TipCap:     *msg.TipCap(),
 				AccessList: al,
 			},
-			MaxFeePerBlobGas:    *uint256.MustFromBig(args.MaxFeePerBlobGas.ToInt()),
+			MaxFeePerBlobGas:    maxFeePerBlobGas,
 			BlobVersionedHashes: args.BlobVersionedHashes,
 		}
 	case args.MaxFeePerGas != nil:

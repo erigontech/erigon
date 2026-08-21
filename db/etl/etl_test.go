@@ -22,6 +22,7 @@ import (
 	"encoding/binary"
 	"encoding/hex"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -987,7 +988,7 @@ func BenchmarkFileDataProviderNext(b *testing.B) {
 
 				for {
 					_, _, err := provider.Next()
-					if err == io.EOF {
+					if errors.Is(err, io.EOF) {
 						break
 					}
 					if err != nil {
@@ -1439,7 +1440,7 @@ func BenchmarkMemoryDataProviderNext(b *testing.B) {
 					p := &memoryDataProvider{buffer: buf, currentIndex: 0}
 					for {
 						_, _, err := p.Next()
-						if err == io.EOF {
+						if errors.Is(err, io.EOF) {
 							break
 						}
 						if err != nil {
@@ -1533,7 +1534,7 @@ func TestVmtouchMmap(t *testing.T) {
 	// Read rest
 	for {
 		_, _, err := provider.Next()
-		if err == io.EOF {
+		if errors.Is(err, io.EOF) {
 			break
 		}
 	}

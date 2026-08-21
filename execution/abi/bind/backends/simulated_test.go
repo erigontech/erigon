@@ -65,7 +65,7 @@ func TestSimulatedBackend(t *testing.T) {
 	if isPending {
 		t.Fatal("transaction should not be pending")
 	}
-	if err != bind.ErrNotFound {
+	if !errors.Is(err, bind.ErrNotFound) {
 		t.Fatalf("err should be `bind.ErrNotFound` but received %v", err)
 	}
 
@@ -524,10 +524,11 @@ func TestSimulatedBackend_EstimateGas(t *testing.T) {
 				t.Fatalf("Expect error, want %v, got %v", c.expectError, err)
 			}
 			if c.expectData != nil {
-				if err, ok := err.(*revertError); !ok {
+				var rerr *revertError
+				if !errors.As(err, &rerr) {
 					t.Fatalf("Expect revert error, got %T", err)
-				} else if !reflect.DeepEqual(err.ErrorData(), c.expectData) {
-					t.Fatalf("Error data mismatch, want %v, got %v", c.expectData, err.ErrorData())
+				} else if !reflect.DeepEqual(rerr.ErrorData(), c.expectData) {
+					t.Fatalf("Error data mismatch, want %v, got %v", c.expectData, rerr.ErrorData())
 				}
 			}
 			continue
@@ -726,7 +727,7 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 	bgCtx := context.Background()
 
 	transaction, err := sim.TransactionInBlock(bgCtx, sim.pendingBlock.Hash(), uint(0))
-	if err == nil && err != errTransactionDoesNotExist {
+	if !errors.Is(err, errTransactionDoesNotExist) {
 		t.Errorf("expected a transaction does not exist error to be received but received %v", err)
 	}
 	if transaction != nil {
@@ -765,7 +766,7 @@ func TestSimulatedBackend_TransactionInBlock(t *testing.T) {
 	}
 
 	transaction, err = sim.TransactionInBlock(bgCtx, lastBlock.Hash(), uint(1))
-	if err == nil && err != errTransactionDoesNotExist {
+	if !errors.Is(err, errTransactionDoesNotExist) {
 		t.Errorf("expected a transaction does not exist error to be received but received %v", err)
 	}
 	if transaction != nil {
@@ -1220,8 +1221,8 @@ func TestSimulatedBackend_CallContractRevert(t *testing.T) {
 				t.Errorf("result from %v was not nil: %v", key, res)
 			}
 			if val != nil {
-				rerr, ok := err.(*revertError)
-				if !ok {
+				var rerr *revertError
+				if !errors.As(err, &rerr) {
 					t.Errorf("expect revert error")
 				}
 				if rerr.Error() != "execution reverted: "+val.(string) {

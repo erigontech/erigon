@@ -21,6 +21,7 @@ package forkid
 
 import (
 	"bytes"
+	"errors"
 	"math"
 	"testing"
 
@@ -258,7 +259,7 @@ func TestValidation(t *testing.T) {
 	heightForks, timeForks := GatherForks(chainspec.Mainnet.Config, 0 /* genesisTime */)
 	for i, tt := range tests {
 		filter := newFilter(heightForks, timeForks, chainspec.Mainnet.GenesisHash, tt.head, 0)
-		if err := filter(tt.id); err != tt.err {
+		if err := filter(tt.id); !errors.Is(err, tt.err) {
 			t.Errorf("test %d: validation error mismatch: have %v, want %v", i, err, tt.err)
 		}
 	}

@@ -96,7 +96,7 @@ func (c ChainReaderWriterEth1) GetBlockByHash(ctx context.Context, hash common.H
 		log.Warn("[engine] GetBlockByHash", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, nil)
 }
 
 func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint64) *types.Block {
@@ -118,7 +118,7 @@ func (c ChainReaderWriterEth1) GetBlockByNumber(ctx context.Context, number uint
 		log.Warn("[engine] GetBlockByNumber", "err", err)
 		return nil
 	}
-	return types.NewBlock(header, txs, nil, nil, body.Withdrawals)
+	return types.NewBlock(header, txs, nil, nil, body.Withdrawals, nil)
 }
 
 func (c ChainReaderWriterEth1) GetHeaderByHash(ctx context.Context, hash common.Hash) *types.Header {
@@ -283,6 +283,10 @@ func (c ChainReaderWriterEth1) HasBlock(ctx context.Context, hash common.Hash) (
 // own, as opposed to a rejection that returns the same answer however many times it is asked.
 var ErrExecutionBusy = errors.New("execution module is busy")
 
+// ErrUnknownPayload reports that no builder is held for a payload id, so nothing will ever arrive
+// for it. Without it a caller polling that id cannot tell it from a build still running.
+var ErrUnknownPayload = errors.New("unknown payload id")
+
 func (c ChainReaderWriterEth1) AssembleBlock(ctx context.Context, baseHash common.Hash, attributes *engine_types.PayloadAttributes) (id uint64, err error) {
 	params := &builder.Parameters{
 		ParentHash:            baseHash,
@@ -311,6 +315,9 @@ func (c ChainReaderWriterEth1) GetAssembledBlock(ctx context.Context, id uint64)
 	}
 	if result.Busy {
 		return nil, nil, nil, nil, ErrExecutionBusy
+	}
+	if result.Unknown {
+		return nil, nil, nil, nil, ErrUnknownPayload
 	}
 	if result.Block == nil {
 		return nil, nil, nil, nil, nil

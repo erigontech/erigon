@@ -181,7 +181,7 @@ func deployValidation(tx *types.AccountAbstractionTransaction, ibs *state.IntraB
 	senderCodeSize, err := ibs.GetCodeSize(tx.SenderAddress)
 	if err != nil {
 		return wrapError(fmt.Errorf(
-			"error getting code for sender:%s err:%s",
+			"error getting code for sender:%s err:%w",
 			tx.SenderAddress.String(), err,
 		))
 	}

@@ -74,12 +74,12 @@ func SetFlagsFromConfigFile(cmd *cli.Command, filePath string) error {
 				}
 				err := cmd.Set(key, strings.Join(s, ","))
 				if err != nil {
-					return fmt.Errorf("failed setting %s flag with values=%s error=%s", key, s, err)
+					return fmt.Errorf("failed setting %s flag with values=%s error=%w", key, s, err)
 				}
 			} else {
 				err := cmd.Set(key, fmt.Sprintf("%v", value))
 				if err != nil {
-					return fmt.Errorf("failed setting %s flag with value=%v error=%s", key, value, err)
+					return fmt.Errorf("failed setting %s flag with value=%v error=%w", key, value, err)
 
 				}
 			}

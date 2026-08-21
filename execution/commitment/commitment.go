@@ -114,6 +114,8 @@ type CommitProgress struct {
 
 type PatriciaContext interface {
 	Branch(prefix []byte) ([]byte, kv.Step, error)
+	// Implementations must copy prefix and data rather than retain them: callers may pass
+	// pooled buffers that are recycled for a later, unrelated update.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
 	Account(plainKey []byte) (*Update, error)
 	Storage(plainKey []byte) (*Update, error)
@@ -210,7 +212,7 @@ type DeferredBranchUpdate struct {
 	encoded BranchData
 }
 
-var deferredUpdatePool = sync.Pool{
+var deferredUpdatePool = &sync.Pool{
 	New: func() any {
 		return &DeferredBranchUpdate{}
 	},
@@ -230,18 +232,42 @@ func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = bytes.Clone(prefix)
-	upd.raw = bytes.Clone(raw)
+	upd.prefix = reuseBytes(upd.prefix, prefix)
+	upd.raw = reuseBytes(upd.raw, raw)
+	// prev stays cloned: it is the one argument that is legitimately nil or empty, and
+	// callers read a nil prev as "look up the previous value". Deriving that shape from a
+	// recycled buffer's capacity rather than from the input is not worth one allocation.
 	upd.prev = bytes.Clone(prev)
 	upd.encoded = nil
 
 	return upd
 }
 
+// reuseBytes copies src into dst's backing array, matching bytes.Clone's nil handling:
+// a nil src yields nil, so pool history cannot change the result's nil-ness. Callers
+// distinguish a nil prev ("look it up") from an empty one ("known absent").
+func reuseBytes(dst, src []byte) []byte {
+	if src == nil {
+		return nil
+	}
+	if cap(dst) == 0 {
+		dst = make([]byte, 0, len(src)) // non-nil even for an empty src, as bytes.Clone is
+	}
+	return append(dst[:0], src...)
+}
+
+// capLen hides a recycled buffer's leftover capacity, so what a callback sees is derived
+// from the input rather than from whichever update last used the pooled object.
+func capLen(b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	return slices.Clip(b)
+}
+
+// putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
 func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
-		upd.prefix = nil
-		upd.raw = nil
 		upd.prev = nil
 		upd.encoded = nil
 		deferredUpdatePool.Put(upd)
@@ -335,6 +361,7 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 	return nil
 }
 
+// putBranch is bound by the same no-retain rule as PatriciaContext.PutBranch.
 func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
@@ -351,6 +378,9 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
+// Returns the number of updates written. putBranch must copy prefix and data rather than
+// retain them: they are pooled and reused for a later, unrelated update. prevData is
+// cloned per update and carries no such constraint.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
@@ -375,7 +405,7 @@ func ApplyDeferredBranchUpdates(
 			if upd.encoded == nil {
 				continue
 			}
-			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
 				return written, err
 			}
 			written++
@@ -417,7 +447,7 @@ func ApplyDeferredBranchUpdates(
 		if upd.encoded == nil {
 			continue
 		}
-		if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
 			return written, err
 		}
 		written++

@@ -398,7 +398,7 @@ func (ba *BlockAssembler) AssembleBlock(stateReader state.StateReader, ibs *stat
 		ba.writer(), ba.cfg.ChainConfig, ibs, ba.Receipts, ba.Withdrawals, chainReader, true, logger, nil)
 
 	if err != nil {
-		return nil, fmt.Errorf("cannot finalize block execution: %s", err)
+		return nil, fmt.Errorf("cannot finalize block execution: %w", err)
 	}
 
 	// Note: NewBlock (called by FinalizeBlockExecution) copies the header,

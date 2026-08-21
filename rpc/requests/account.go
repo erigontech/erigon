@@ -84,7 +84,7 @@ func (reqGen *requestGenerator) DebugAccountAt(blockHash common.Hash, txIndex ui
 
 	method, body := reqGen.debugAccountAt(blockHash, txIndex, account)
 	if res := reqGen.rpcCallJSON(method, body, &b); res.Err != nil {
-		return nil, fmt.Errorf("failed to get account: %v", res.Err)
+		return nil, fmt.Errorf("failed to get account: %w", res.Err)
 	}
 
 	if b.Error != nil {

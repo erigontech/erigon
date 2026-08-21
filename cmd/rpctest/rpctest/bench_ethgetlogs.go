@@ -81,7 +81,7 @@ func BenchEthGetLogs(erigonURL, gethURL string, needCompare bool, blockFrom uint
 		var mag DebugModifiedAccounts
 		res = reqGen.Erigon("debug_getModifiedAccountsByNumber", reqGen.getModifiedAccountsByNumber(prevBn, bn), &mag)
 		if res.Err != nil {
-			return fmt.Errorf("Could not get modified accounts (Erigon): %v\n", res.Err)
+			return fmt.Errorf("Could not get modified accounts (Erigon): %w\n", res.Err)
 		}
 		if mag.Error != nil {
 			return fmt.Errorf("Error getting modified accounts (Erigon): %d %s\n", mag.Error.Code, mag.Error.Message)
@@ -182,7 +182,7 @@ func EthGetLogsInvariants(ctx context.Context, erigonURL, gethURL string, needCo
 			baseOK := true
 			if res.Err != nil {
 				if failFast {
-					return fmt.Errorf("could not get eth_getLogs baseline (Erigon): %v", res.Err)
+					return fmt.Errorf("could not get eth_getLogs baseline (Erigon): %w", res.Err)
 				}
 				log.Error("[ethGetLogsInvariants] could not get eth_getLogs baseline", "blockNum", bn, "error", res.Err.Error())
 				baseOK = false

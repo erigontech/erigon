@@ -37,7 +37,7 @@ func Bench6(erigon_url string) error {
 	for bn := firstBn; bn <= lastBlock; bn++ {
 		var b EthBlockByNumber
 		if res := reqGen.Erigon("eth_getBlockByNumber", reqGen.getBlockByNumber(bn, true /* withTxs */), &b); res.Err != nil {
-			return fmt.Errorf("Could not retrieve block %d: %v\n", bn, res.Err)
+			return fmt.Errorf("Could not retrieve block %d: %w\n", bn, res.Err)
 		}
 		if b.Error != nil {
 			fmt.Printf("Error retrieving block: %d %s\n", b.Error.Code, b.Error.Message)
@@ -52,7 +52,7 @@ func Bench6(erigon_url string) error {
 			var receipt EthReceipt
 			if res := reqGen.Erigon("eth_getTransactionReceipt", reqGen.getTransactionReceipt(txn.Hash), &receipt); res.Err != nil {
 				printRPCRequest(client, erigon_url, res.RequestBody)
-				return fmt.Errorf("Count not get receipt: %s: %v\n", txn.Hash, res.Err)
+				return fmt.Errorf("Count not get receipt: %s: %w\n", txn.Hash, res.Err)
 			}
 			if receipt.Error != nil {
 				return fmt.Errorf("Error getting receipt: %d %s\n", receipt.Error.Code, receipt.Error.Message)
