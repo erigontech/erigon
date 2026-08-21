@@ -30,7 +30,9 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type headerNumberErrorReader struct {
@@ -55,6 +57,20 @@ type sideForkReader struct {
 	canonicalHash common.Hash
 	forkHeader    *types.Header
 	forkBody      *types.Body
+}
+
+type readyBlockReader struct {
+	dbservices.FullBlockReader
+}
+
+func (readyBlockReader) Ready(context.Context) <-chan error {
+	ready := make(chan error, 1)
+	ready <- nil
+	return ready
+}
+
+func (readyBlockReader) TxnumReader() rawdbv3.TxNumsReader {
+	return rawdbv3.TxNumsReader{}
 }
 
 func (r sideForkReader) IsCanonical(_ context.Context, _ kv.Getter, hash common.Hash, _ uint64) (bool, error) {
@@ -93,6 +109,57 @@ func TestNewDomainStateCacheRespectsUseStateCache(t *testing.T) {
 	scDefault := newDomainStateCache(0)
 	require.NotNil(t, scDefault, "zero budget means the production default, not no cache")
 	scDefault.Close()
+}
+
+func newStartupTestExecModule(t *testing.T) *ExecModule {
+	t.Helper()
+	previous := dbg.UseStateCache
+	t.Cleanup(func() { dbg.SetUseStateCache(previous) })
+	dbg.SetUseStateCache(false)
+
+	em := NewExecModule(
+		t.Context(),
+		readyBlockReader{},
+		nil,
+		&PipelineExecutor{},
+		0,
+		nil,
+		nil,
+		nil,
+		nil,
+		nil,
+		0,
+		log.New(),
+		nil,
+		ethconfig.Sync{MaxReorgDepth: 1},
+		false,
+		false,
+		nil,
+		func() error { return nil },
+	)
+	t.Cleanup(em.FinishStartup)
+	return em
+}
+
+func TestExecModuleReadinessFollowsStartup(t *testing.T) {
+	em := newStartupTestExecModule(t)
+
+	ready, err := em.Ready(t.Context())
+	require.NoError(t, err)
+	require.False(t, ready)
+
+	em.FinishStartup()
+	ready, err = em.Ready(t.Context())
+	require.NoError(t, err)
+	require.True(t, ready)
+}
+
+func TestExecModuleRejectsValidationBeforeStartup(t *testing.T) {
+	em := newStartupTestExecModule(t)
+
+	result, err := em.ValidateChain(t.Context(), common.Hash{}, 0)
+	require.NoError(t, err)
+	require.Equal(t, ExecutionStatusBusy, result.ValidationStatus)
 }
 
 func TestUnwindToCommonCanonicalReturnsCanonicalityError(t *testing.T) {

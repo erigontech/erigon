@@ -132,6 +132,8 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 	if err != nil {
 		return err
 	}
+	// No lifecycle Start will consume the execution startup reservation.
+	ethereum.ExecutionModule().FinishStartup()
 
 	return importFiles(cliCtx.Args().Slice(), logger, func(fn string) error {
 		return ImportChain(ethereum, ethereum.ChainDB(), fn, logger)
