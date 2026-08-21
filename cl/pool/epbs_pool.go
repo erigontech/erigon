@@ -1,6 +1,8 @@
 package pool
 
 import (
+	"sync/atomic"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
@@ -48,6 +50,8 @@ type EpbsPool struct {
 	// PayloadAttestations stores recently validated PayloadAttestationMessages for beacon API serving.
 	// Short-lived cache (~1 slot), keyed by (slot, validatorIndex).
 	PayloadAttestations *lru.Cache[PayloadAttestationKey, *cltypes.PayloadAttestationMessage]
+
+	proposerPreferencesGeneration atomic.Uint64
 }
 
 func NewEpbsPool() *EpbsPool {
@@ -88,4 +92,21 @@ func (p *EpbsPool) GetPreferencesForSlot(slot uint64) []*cltypes.SignedProposerP
 
 func (p *EpbsPool) GetPreference(slot uint64, dependentRoot common.Hash) (*cltypes.SignedProposerPreferences, bool) {
 	return p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: slot, DependentRoot: dependentRoot})
+}
+
+// AddProposerPreference stores a preference and invalidates memoized payload preparation.
+func (p *EpbsPool) AddProposerPreference(preference *cltypes.SignedProposerPreferences) {
+	if preference == nil || preference.Message == nil {
+		return
+	}
+	p.ProposerPreferences.Add(ProposerPreferencesKey{
+		Slot:          preference.Message.ProposalSlot,
+		DependentRoot: preference.Message.DependentRoot,
+	}, preference)
+	p.proposerPreferencesGeneration.Add(1)
+}
+
+// ProposerPreferencesGeneration returns a value that changes whenever a preference is stored.
+func (p *EpbsPool) ProposerPreferencesGeneration() uint64 {
+	return p.proposerPreferencesGeneration.Load()
 }

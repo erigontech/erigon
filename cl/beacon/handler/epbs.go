@@ -704,10 +704,7 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 		}
 
 		if a.epbsPool != nil {
-			a.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
-				Slot:          req.Message.ProposalSlot,
-				DependentRoot: req.Message.DependentRoot,
-			}, req)
+			a.epbsPool.AddProposerPreference(req)
 		}
 
 		if a.sentinel != nil {

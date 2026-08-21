@@ -94,8 +94,8 @@ type ForkChoiceStorageReader interface {
 	// root should be extended. Used by prepare_execution_payload to decide FULL vs EMPTY path.
 	ShouldExtendPayload(root common.Hash) bool
 	// [New in Gloas:EIP7732] ShouldBuildOnFull returns whether the proposer should build on
-	// the full payload for the given head node. Used for proposer reorg of unavailable blocks.
-	ShouldBuildOnFull(head ForkChoiceNode) bool
+	// the full payload for the given head node at proposalSlot.
+	ShouldBuildOnFull(head ForkChoiceNode, proposalSlot uint64) bool
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)

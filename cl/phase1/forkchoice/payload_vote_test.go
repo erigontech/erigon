@@ -224,10 +224,10 @@ func TestPtcShouldBuildOnFullNoVotesCast(t *testing.T) {
 	f := newPtcVoteTestStore(root)
 	head := ForkChoiceNode{Root: root, PayloadStatus: cltypes.PayloadStatusFull}
 
-	require.True(t, f.ShouldBuildOnFull(head))
+	require.True(t, f.ShouldBuildOnFull(head, 1))
 
 	f.payloadDataAvailabilityVote.Store(root, ptcVotes(0, 0))
-	require.True(t, f.ShouldBuildOnFull(head))
+	require.True(t, f.ShouldBuildOnFull(head, 1))
 }
 
 func TestPtcShouldBuildOnFullWithUnavailableMajority(t *testing.T) {
@@ -238,11 +238,11 @@ func TestPtcShouldBuildOnFullWithUnavailableMajority(t *testing.T) {
 	require.False(t, f.ShouldBuildOnFull(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 1))
 	require.False(t, f.ShouldBuildOnFull(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusEmpty,
-	}))
+	}, 1))
 }
 
 func TestPtcShouldBuildOnFullWithLatePayloadMajority(t *testing.T) {
@@ -253,7 +253,7 @@ func TestPtcShouldBuildOnFullWithLatePayloadMajority(t *testing.T) {
 	require.False(t, f.ShouldBuildOnFull(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 1))
 }
 
 func TestPtcShouldBuildOnFullIgnoresVotesBeforePreviousSlot(t *testing.T) {
@@ -266,7 +266,14 @@ func TestPtcShouldBuildOnFullIgnoresVotesBeforePreviousSlot(t *testing.T) {
 	require.True(t, f.ShouldBuildOnFull(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 2))
+
+	// Preparation runs one slot early. The explicit proposal slot must still make the parent a
+	// previous-slot decision, even though fork choice has not advanced its own clock yet.
+	require.False(t, f.ShouldBuildOnFull(ForkChoiceNode{
+		Root:          root,
+		PayloadStatus: cltypes.PayloadStatusFull,
+	}, 1))
 }
 
 func TestPtcIsPreviousSlotPayloadDecision(t *testing.T) {
@@ -276,21 +283,20 @@ func TestPtcIsPreviousSlotPayloadDecision(t *testing.T) {
 	require.True(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 1))
 	require.True(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusEmpty,
-	}))
+	}, 1))
 	require.False(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusPending,
-	}))
+	}, 1))
 
-	f.time.Store(2 * f.beaconCfg.SecondsPerSlot)
 	require.False(t, f.isPreviousSlotPayloadDecision(ForkChoiceNode{
 		Root:          root,
 		PayloadStatus: cltypes.PayloadStatusFull,
-	}))
+	}, 2))
 }
 
 func TestGloasForkChoiceRequiresVerifiedPayload(t *testing.T) {
