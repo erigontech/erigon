@@ -358,3 +358,44 @@ func requireHashedOrder(t *testing.T, framed []byte) {
 		}
 	}
 }
+
+// The accounts domain is walked to exhaustion before the first storage key, so on
+// mainnet this guard is the only thing that answers a Ctrl-C for hours.
+func TestCollectHashedPreimages_CancellationWhileScanningAccounts(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	accounts := &cancelOnNthNextKV{
+		sliceKV: &sliceKV{pairs: []kvPair{
+			{addr(0xaa), []byte{1}},
+			{addr(0xbb), []byte{1}},
+		}},
+		cancel:    cancel,
+		remaining: 1,
+	}
+	var out bytes.Buffer
+
+	_, err := exportPreimages(t, ctx, accounts, &sliceKV{}, &out, exportOpts{})
+	require.ErrorIs(t, err, context.Canceled)
+}
+
+func TestCollectHashedPreimages_ReportsBothScans(t *testing.T) {
+	accounts := &sliceKV{pairs: []kvPair{{addr(0xaa), []byte{1}}, {addr(0xbb), []byte{1}}}}
+	storage := &sliceKV{pairs: []kvPair{
+		{storageKey(addr(0xaa), slot(0x01)), []byte{1}},
+		{storageKey(addr(0xbb), slot(0x02)), []byte{1}},
+	}}
+	var out bytes.Buffer
+	var reports []exportPreimagesStats
+
+	_, err := exportPreimages(t, context.Background(), accounts, storage, &out, exportOpts{
+		onCollect: func(stats exportPreimagesStats) { reports = append(reports, stats) },
+	})
+	require.NoError(t, err)
+	// Every account is collected before the first slot, so the counts advance in
+	// two runs rather than interleaving.
+	require.Equal(t, []exportPreimagesStats{
+		{Accounts: 1, Slots: 0},
+		{Accounts: 2, Slots: 0},
+		{Accounts: 2, Slots: 1},
+		{Accounts: 2, Slots: 2},
+	}, reports)
+}

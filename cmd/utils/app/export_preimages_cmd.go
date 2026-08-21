@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types"
@@ -133,19 +134,53 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 		return err
 	}
 	defer outputFile.Close()
-	bufferedWriter := bufio.NewWriterSize(outputFile, 4<<20)
-	countedWriter := &countingWriter{writer: bufferedWriter}
+
+	start := time.Now()
+	stats, err := writePreimagesFile(ctx, outputFile, tmpDir, aggTx, tx, logger)
+	if err != nil {
+		return fmt.Errorf("export aborted (partial file %s): %w", framedPath, err)
+	}
+
+	metadata := preimagesMeta{
+		Block: blockNum, StateRoot: commitmentRoot.Hex(),
+		Accounts: stats.Accounts, Storage: stats.Slots,
+	}
+	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
+	if err != nil {
+		return err
+	}
+	if err := os.WriteFile(metaPath, append(metadataJSON, '\n'), 0o644); err != nil {
+		return err
+	}
+	logger.Info("[export-preimages] done", "accounts", stats.Accounts, "slots", stats.Slots, "file", framedPath, "bytes", stats.sizeBytes(), "took", time.Since(start).Round(time.Second))
+	return nil
+}
+
+// writePreimagesFile hashes both domain scans through an ETL sort and writes the
+// framed file. Every error it returns leaves outputFile partially written.
+func writePreimagesFile(
+	ctx context.Context,
+	outputFile *os.File,
+	tmpDir string,
+	aggTx *state.AggregatorRoTx,
+	tx kv.Tx,
+	logger log.Logger,
+) (exportPreimagesStats, error) {
+	var stats exportPreimagesStats
 
 	accounts, err := aggTx.DebugRangeLatest(tx, kv.AccountsDomain, nil, nil, kv.Unlim)
 	if err != nil {
-		return err
+		return stats, err
 	}
 	defer accounts.Close()
 	storage, err := aggTx.DebugRangeLatest(tx, kv.StorageDomain, nil, nil, kv.Unlim)
 	if err != nil {
-		return err
+		return stats, err
 	}
 	defer storage.Close()
+
+	bufferedWriter := bufio.NewWriterSize(outputFile, 4<<20)
+	countedWriter := &countingWriter{writer: bufferedWriter}
 
 	logEvery := time.NewTicker(30 * time.Second)
 	defer logEvery.Stop()
@@ -164,47 +199,31 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 		}
 	}
 
-	collector := etl.NewCollector("export-preimages", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger).
-		SortAndFlushInBackground(true)
+	collector := etl.NewCollector("export-preimages", tmpDir, etl.NewSortableBuffer(etl.BufferOptimalSize), logger)
 	defer collector.Close()
 
-	start := time.Now()
 	collected, err := collectHashedPreimages(ctx, accounts, storage, collector, reportHashing)
 	if err != nil {
-		return err
+		return collected, err
 	}
-	stats, err := writeHashedPreimages(collector, countedWriter, ctx.Done(), reportWriting)
+	stats, err = writeHashedPreimages(collector, countedWriter, ctx.Done(), reportWriting)
 	if err != nil {
-		return fmt.Errorf("export aborted (partial file %s): %w", framedPath, err)
+		return stats, err
 	}
 	if stats != collected {
-		return fmt.Errorf("sort lost keys: collected %d accounts / %d slots, wrote %d / %d",
+		return stats, fmt.Errorf("sort lost keys: collected %d accounts / %d slots, wrote %d / %d",
 			collected.Accounts, collected.Slots, stats.Accounts, stats.Slots)
 	}
 	if err := bufferedWriter.Flush(); err != nil {
-		return err
+		return stats, err
 	}
 	if err := outputFile.Sync(); err != nil {
-		return err
+		return stats, err
 	}
-	sizeBytes := stats.sizeBytes()
-	if countedWriter.written != sizeBytes {
-		return fmt.Errorf("size mismatch: wrote %d bytes, formula says %d", countedWriter.written, sizeBytes)
+	if sizeBytes := stats.sizeBytes(); countedWriter.written != sizeBytes {
+		return stats, fmt.Errorf("size mismatch: wrote %d bytes, formula says %d", countedWriter.written, sizeBytes)
 	}
-
-	metadata := preimagesMeta{
-		Block: blockNum, StateRoot: commitmentRoot.Hex(),
-		Accounts: stats.Accounts, Storage: stats.Slots,
-	}
-	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
-	if err != nil {
-		return err
-	}
-	if err := os.WriteFile(metaPath, append(metadataJSON, '\n'), 0o644); err != nil {
-		return err
-	}
-	logger.Info("[export-preimages] done", "accounts", stats.Accounts, "slots", stats.Slots, "file", framedPath, "bytes", sizeBytes, "took", time.Since(start).Round(time.Second))
-	return nil
+	return stats, nil
 }
 
 func openExportDirs(dataDir string) (datadir.Dirs, error) {
@@ -337,8 +356,9 @@ func collectHashedPreimages(
 	return stats, nil
 }
 
-// writeHashedPreimages drains the collector into fixed-width records:
-// address[20] | slotCount[4, big-endian] | slotKey[32] * slotCount.
+// writeHashedPreimages drains the collector into records of
+// address[20] | slotCount[4, big-endian] | slotKey[32] * slotCount, so a record
+// is 24+32*slotCount bytes and only its fields are fixed width.
 func writeHashedPreimages(
 	collector *etl.Collector,
 	writer io.Writer,
@@ -401,5 +421,7 @@ func writeHashedPreimages(
 	if err := collector.Load(nil, "", loadFunc, etl.TransformArgs{Quit: quit}); err != nil {
 		return stats, err
 	}
-	return stats, flushRecord()
+	// flushRecord mutates stats, so it cannot share a return statement with it.
+	err := flushRecord()
+	return stats, err
 }
