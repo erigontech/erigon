@@ -19,7 +19,6 @@ package jsonstream
 import (
 	"errors"
 	"fmt"
-	"io"
 	"math"
 	"strings"
 	"testing"
@@ -1069,23 +1068,23 @@ func (w *failingWriter) Write(p []byte) (n int, err error) {
 	return len(p), nil
 }
 
-// TestWriteKeepsBufferCapacity pins the reason Write is not jsoniter's: its
-// Write reslices the buffer forward, so cap() afterwards reports only the tail
-// and the grown array is neither reusable nor measurable.
-func TestWriteKeepsBufferCapacity(t *testing.T) {
-	body := strings.Repeat("x", 2<<20)
+type countingWriter struct{ writes int }
 
-	raw := jsoniter.NewStream(jsoniter.ConfigDefault, io.Discard, InitialBufferSize)
-	raw.WriteRaw(body)
-	raw.Write([]byte("\n")) //nolint:errcheck
-	require.Less(t, cap(raw.Buffer()), 2<<20, "jsoniter's Write loses the capacity it grew")
+func (w *countingWriter) Write(p []byte) (int, error) { w.writes++; return len(p), nil }
 
-	s := New(io.Discard).(*StackStream)
-	s.WriteRaw(body)
-	s.Write([]byte("\n")) //nolint:errcheck
+// TestWriteBatchesIntoTheBuffer pins that Write appends rather than delegating to
+// jsoniter's, which implements io.Writer and so writes through on every call.
+func TestWriteBatchesIntoTheBuffer(t *testing.T) {
+	w := &countingWriter{}
+	s := New(w).(*StackStream)
+
+	const calls, size = 2000, 64
+	for range calls {
+		_, err := s.Write([]byte(strings.Repeat("x", size)))
+		require.NoError(t, err)
+	}
 	require.NoError(t, s.Flush())
-	require.GreaterOrEqual(t, cap(s.stream.Buffer()), FlushThreshold,
-		"our Write must leave a usable buffer behind")
+	require.LessOrEqual(t, w.writes, calls*size/FlushThreshold+1)
 }
 
 var errWriterGone = errors.New("client gone")
