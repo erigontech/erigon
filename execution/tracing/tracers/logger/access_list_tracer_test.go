@@ -70,3 +70,56 @@ func TestNewAccessListTracerExcludedAddress(t *testing.T) {
 		t.Fatalf("excluded prelude address must not contribute tuples, got %+v", got)
 	}
 }
+
+// TestAccessListTracerSeedNew pins that seeding directly from the accumulated maps
+// is observationally the same as the types.AccessList round-trip it replaces, and
+// that the two tracers share nothing.
+func TestAccessListTracerSeedNew(t *testing.T) {
+	excluded := common.BytesToAddress([]byte{0x09})
+	excl := map[common.Address]struct{}{excluded: {}}
+
+	prev := NewAccessListTracer(nil, excl, nil)
+	prev.list.addSlot(addr, slot1)
+	prev.list.addSlot(addr, slot2)
+	prev.list.addAddress(common.BytesToAddress([]byte{0x02, 0x72}))
+
+	seeded := prev.SeedNew(nil)
+	roundTripped := NewAccessListTracer(prev.AccessList(), excl, nil)
+
+	require.Equal(t, roundTripped.AccessList(), seeded.AccessList())
+	require.True(t, seeded.Equal(prev))
+	require.True(t, seeded.Equal(roundTripped))
+
+	seeded.list.addSlot(addr, slot3)
+	seeded.list.addAddress(excluded)
+	require.False(t, seeded.Equal(prev), "the seeded tracer must not write through to its source")
+	require.Equal(t, roundTripped.AccessList(), prev.AccessList())
+}
+
+func BenchmarkAccessListTracerSeed(b *testing.B) {
+	const nAddrs, nSlots = 30, 20
+
+	prev := NewAccessListTracer(nil, nil, nil)
+	for a := range nAddrs {
+		address := common.BytesToAddress([]byte{byte(a + 1)})
+		for s := range nSlots {
+			prev.list.addSlot(address, common.BytesToHash([]byte{byte(s + 1)}))
+		}
+	}
+
+	// AccessList() is built either way (the message needs it), so only the seeding
+	// half differs between the two.
+	acl := prev.AccessList()
+	b.Run("roundTrip", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_ = NewAccessListTracer(acl, nil, nil)
+		}
+	})
+	b.Run("seedNew", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			_ = prev.SeedNew(nil)
+		}
+	})
+}

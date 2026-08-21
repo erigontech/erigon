@@ -20,6 +20,7 @@
 package logger
 
 import (
+	"maps"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -66,6 +67,18 @@ func (al accessList) addSlot(address common.Address, slot common.Hash) {
 	if _, ok := storage.slots[slot]; !ok {
 		storage.slots[slot] = len(storage.slots)
 	}
+}
+
+// clone returns an access list with the same contents, sharing no maps with al.
+func (al accessList) clone() accessList {
+	cp := make(accessList, len(al))
+	for addr, storage := range al {
+		if storage.slots != nil {
+			storage.slots = maps.Clone(storage.slots)
+		}
+		cp[addr] = storage
+	}
+	return cp
 }
 
 // equal checks if the content of the current access list is the same as the
@@ -178,6 +191,17 @@ func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct
 		state:              state,
 		createdContracts:   make(map[common.Address]struct{}),
 		usedBeforeCreation: make(map[common.Address]struct{}),
+	}
+}
+
+// SeedNew returns a tracer that starts from a's accumulated list, for the next
+// convergence iteration. It copies the maps directly rather than round-tripping
+// through types.AccessList, and inherits a's exclusion set.
+func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTracer {
+	return &AccessListTracer{
+		excl:  a.excl,
+		list:  a.list.clone(),
+		state: state,
 	}
 }
 
