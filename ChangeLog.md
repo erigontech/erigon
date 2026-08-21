@@ -1,25 +1,26 @@
 # Erigon v3.6.0 — Upstream Underbelly — 2026-08-24
 
-Erigon 3.6.0 focuses on bounded disk growth and faster state access. It is an in-place upgrade from 3.5.x: existing
-datadirs need no re-sync, and old and new commitment snapshot files can coexist while normal merges convert them.
+Erigon 3.6.0 focuses on reclaiming pruned snapshot space and lowering the memory and CPU cost of state access and
+background maintenance. It is an in-place upgrade from 3.5.x: existing datadirs need no re-sync, and both referenced
+and plain commitment snapshots remain readable.
 
 ### Highlights
 
-- **Plain commitment snapshots.** Commitment branches no longer store shortened cross-file key references by default,
-  removing dereference I/O from state reads and merges at the cost of larger commitment files. Existing referenced files
-  remain readable and convert lazily; fresh syncs use the new 3.6 snapshot set (#14809, #21452, #21376) — by @awskii
+- **More reliable Caplin block production.** Caplin primes the execution layer before a proposer slot, publishes the
+  fork-choice head before copying state, and encodes the execution and consensus client versions in default block
+  graffiti (#23437, #23172, #22303) — by @lystopad
 - **Pruned nodes now reclaim old state snapshots.** State history, indexes, optional commitment history, and the receipts
   cache are retired once they fall outside their configured windows; fresh syncs also skip optional snapshots outside
   those windows. This fixes unbounded snapshot growth on long-running `minimal` and other pruned nodes (#21306, #22123,
   #21200, #22243, #22349) — by @AskAlexSharov, @JkLondon
+- **Plain commitment snapshots.** Commitment branches no longer store shortened cross-file key references by default,
+  removing dereference I/O from state reads and merges at the cost of larger commitment files. Existing per-datadir
+  settings are honored; if the setting is absent, 3.6 defaults new commitment merges to plain. Referenced files convert
+  lazily when plain writes are active, and fresh syncs use the new 3.6 snapshot set (#14809, #21452, #21376) — by @awskii
 - **Faster state access and snapshot maintenance.** Sharded LRU state, code, and commitment caches replace whole-cache
   resets; state-snapshot compression is 2–3x faster, dictionary-building merges are about 1.5x faster, and the mainnet
   `.bt` pivot cache uses roughly one quarter of its previous heap (#22154, #21625, #22050, #21875) — by @mh0lt,
   @sudeepdino008, @AskAlexSharov
-- **Glamsterdam devnet-6 support.** Adds EIP-8282 builder execution requests, EIP-2780, EIP-8038, EIP-8246, and the
-  devnet-6 revisions of EIP-7928/EIP-8037; Caplin tracks the Gloas alpha.11 request format, and BALs can be regenerated
-  throughout the weak-subjectivity period (#22091, #22093, #22053, #22060, #22122, #22136, #22161, #21764) — by
-  @domiwei, @taratorio. **Devnet/testing only — not scheduled on mainnet or any public testnet.**
 
 ### Breaking Changes
 
@@ -50,6 +51,18 @@ datadirs need no re-sync, and old and new commitment snapshot files can coexist 
 - `trace_block` and `trace_replayBlockTransactions` can include beacon-withdrawal balance changes through the optional
   `IncludeWithdrawals` trace setting (#21592) — by @lupin012
 
+#### Consensus layer and protocol
+
+- Caplin archive maintenance repairs truncated validator tables, removes frozen state rows from its indexing DB for
+  reuse, and stores compact effective balances, cutting the measured per-slot copy from about 266 MB to 18 MB (#22385,
+  #22396, #22411) — by @awskii, @AskAlexSharov
+- Caplin advertises its bound ports, skips peers without TCP endpoints, and accepts Chiado libp2p bootstrap nodes
+  (#22273, #22271, #23245) — by @MysticRyuujin, @domiwei
+- Glamsterdam devnet-6 support adds EIP-8282 builder execution requests, EIP-2780, EIP-8038, EIP-8246, and the devnet-6
+  revisions of EIP-7928/EIP-8037; Caplin tracks the Gloas alpha.11 request format, and BALs can be regenerated throughout
+  the weak-subjectivity period (#22091, #22093, #22053, #22060, #22122, #22136, #22161, #21764) — by @domiwei,
+  @taratorio. **Devnet/testing only — not scheduled on mainnet or any public testnet.**
+
 #### Operations
 
 - Pruning flags now use readable policies: `--prune.distance.blocks` accepts `keep-post-merge` and `keep-all`, while
@@ -57,9 +70,9 @@ datadirs need no re-sync, and old and new commitment snapshot files can coexist 
   remain aliases (#22119, #21200, #22349) — by @yperbasis, @JkLondon, @AskAlexSharov
 - `erigon seg index --rebuild` rebuilds every snapshot accessor and index without deleting snapshot data (#21919) — by
   @sudeepdino008
-- Caplin archive-state maintenance now removes frozen state rows from its indexing DB for reuse instead of growing the
-  DB without bound; compact effective-balance snapshots also cut the per-slot copy from about 266 MB to 18 MB on the
-  measured mainnet state (#22396, #22411) — by @awskii, @AskAlexSharov
+- The command-line layer now uses `urfave/cli/v3`. Normal flag handling remains compatible, and `--config` now applies
+  to subcommands; operators with unusual invocation patterns should smoke-test them (#22130, #22546) — by
+  @AskAlexSharov, @yperbasis, @lupin012
 
 **Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.5...v3.6.0
 
