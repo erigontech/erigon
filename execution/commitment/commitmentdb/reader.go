@@ -4,6 +4,8 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"sort"
+	"sync"
 	"sync/atomic"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -38,6 +40,13 @@ var (
 	histReaderDivergeCount   atomic.Uint64
 	histReaderSampleLogged   atomic.Uint64
 	histReaderMissedHistSeek atomic.Uint64 // class 1 count
+
+	// Per-file divergence histogram: (domain|fileRange) → count. Feeds
+	// the dual-root diagnostic — when bounded doesn't match header,
+	// the top offenders tell us WHICH files' contents contribute the
+	// wrong values (aggregator retire/merge suspects vs shadow).
+	histReaderDivergeByFileMu sync.Mutex
+	histReaderDivergeByFile   = map[string]uint64{}
 )
 
 // HistReaderResetCounters resets the diagnostic counters. Call before
@@ -49,6 +58,43 @@ func HistReaderResetCounters() {
 	histReaderSampleLogged.Store(0)
 	histReaderCompareCount.Store(0)
 	histReaderMissedHistSeek.Store(0)
+	histReaderDivergeByFileMu.Lock()
+	histReaderDivergeByFile = map[string]uint64{}
+	histReaderDivergeByFileMu.Unlock()
+}
+
+// HistReaderDivergentFileHistogramTop returns the top-N (source, count)
+// pairs from the per-file divergence histogram, sorted descending.
+// Fed into the dual-root diagnostic when bounded doesn't match header
+// to pinpoint which files contribute the wrong values.
+func HistReaderDivergentFileHistogramTop(n int) []struct {
+	Source string
+	Count  uint64
+} {
+	histReaderDivergeByFileMu.Lock()
+	entries := make([]struct {
+		Source string
+		Count  uint64
+	}, 0, len(histReaderDivergeByFile))
+	for k, v := range histReaderDivergeByFile {
+		entries = append(entries, struct {
+			Source string
+			Count  uint64
+		}{Source: k, Count: v})
+	}
+	histReaderDivergeByFileMu.Unlock()
+	sort.Slice(entries, func(i, j int) bool { return entries[i].Count > entries[j].Count })
+	if len(entries) > n {
+		entries = entries[:n]
+	}
+	return entries
+}
+
+func recordDivergentFileSource(domain kv.Domain, source string) {
+	key := domain.String() + "|" + source
+	histReaderDivergeByFileMu.Lock()
+	histReaderDivergeByFile[key]++
+	histReaderDivergeByFileMu.Unlock()
 }
 
 // HistReaderLogCounters logs the diagnostic counters.
@@ -220,6 +266,18 @@ func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64)
 	if histSeekMissedRealEntry {
 		histReaderMissedHistSeek.Add(1)
 	}
+	// Aggregate per-file (or shadow) divergence tally for the dual-root
+	// diagnostic — always recorded on divergence, not just for sampled
+	// full-detail log entries.
+	shadowValRec, _, shadowFoundRec, _ := r.roTx.Debug().GetLatestFromDB(d, plainKey)
+	_, _, ubStartTxNRec, ubEndTxNRec, _ := r.roTx.Debug().GetLatestFromFiles(d, plainKey, 0)
+	var source string
+	if shadowFoundRec && bytes.Equal(unboundedVal, shadowValRec) {
+		source = "shadow"
+	} else {
+		source = fmt.Sprintf("file[%d,%d)", ubStartTxNRec, ubEndTxNRec)
+	}
+	recordDivergentFileSource(d, source)
 	if histReaderSampleLogged.Load() < 5000 {
 		histReaderSampleLogged.Add(1)
 		shadowVal, shadowStep, shadowFound, _ := r.roTx.Debug().GetLatestFromDB(d, plainKey)

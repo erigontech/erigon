@@ -185,6 +185,15 @@ func (p *Provider) ensureCommitmentAtBlockCompute(ctx context.Context, tx kv.Tem
 				"boundedErr", bErr,
 				"boundedMatchesHeader", bErr == nil && common.Hash(boundedRoot) == header.Root,
 			)
+			// Divergent-file histogram: which files' contents contribute
+			// the wrong values. When boundedMatchesHeader=false, this
+			// tells us whether the corruption clusters in one file
+			// (aggregator retire/merge suspect) or is spread.
+			topDiverge := commitmentdb.HistReaderDivergentFileHistogramTop(10)
+			for i, entry := range topDiverge {
+				p.logger.Warn("[dbg-dual-root] divergent-source top",
+					"rank", i+1, "source", entry.Source, "count", entry.Count)
+			}
 		}
 		return nil, fmt.Errorf("recomputed root %x does not match header stateRoot %x at block %d (baselineTxNum=%d)", root, header.Root, toBlock, baselineTxNum)
 	}
