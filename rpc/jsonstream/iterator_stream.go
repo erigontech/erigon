@@ -44,27 +44,12 @@ func (s *JsoniterStream) Reset(out io.Writer) {
 }
 
 func (s *JsoniterStream) Write(content []byte) (int, error) {
-	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
-	s.flushIfFull()
-	return len(content), s.stream.Error
+	return appendAndFlush(s.stream, content)
 }
 
 func (s *JsoniterStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
-	s.flushIfFull()
-}
-
-func (s *JsoniterStream) flushIfFull() {
-	if len(s.stream.Buffer()) < FlushThreshold {
-		return
-	}
-	if s.stream.Flush() != nil {
-		// The client is gone, so these bytes can never be delivered and every
-		// later Flush short-circuits on stream.Error without draining. Dropping
-		// them keeps a failed response from buffering whole; Error() keeps the
-		// failure itself.
-		s.stream.SetBuffer(s.stream.Buffer()[:0])
-	}
+	flushIfFull(s.stream)
 }
 
 func (s *JsoniterStream) WriteNil() {
@@ -133,7 +118,7 @@ func (s *JsoniterStream) WriteFloat64(val float64) {
 
 func (s *JsoniterStream) WriteString(val string) {
 	s.stream.WriteString(val)
-	s.flushIfFull()
+	flushIfFull(s.stream)
 }
 
 func (s *JsoniterStream) WriteObjectStart() {

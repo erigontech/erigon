@@ -35,6 +35,32 @@ const InitialBufferSize = 4096
 // worth four times the memory per concurrent stream for a non-default path.
 const FlushThreshold = int(64 * datasize.KB)
 
+// appendAndFlush appends raw bytes to the buffer instead of calling
+// jsoniter.Stream.Write, which exists to satisfy io.Writer: it writes through on
+// every call and reslices the buffer forward to keep whatever a short write left,
+// leaving nothing to append into. On a response written item by item that costs a
+// realloc each time, and defeats flushing on a full buffer. The latched error is
+// reported so callers that abandon expensive work on a write failure keep working.
+func appendAndFlush(stream *jsoniter.Stream, content []byte) (int, error) {
+	stream.SetBuffer(append(stream.Buffer(), content...))
+	flushIfFull(stream)
+	return len(content), stream.Error
+}
+
+// flushIfFull hands the buffer over once it is full, so a large response streams
+// instead of being held whole. Bytes that fail to reach the client are dropped:
+// they can never be delivered, and every later Flush short-circuits on
+// stream.Error without draining, so keeping them would buffer the whole failed
+// response. stream.Error keeps the failure itself.
+func flushIfFull(stream *jsoniter.Stream) {
+	if len(stream.Buffer()) < FlushThreshold {
+		return
+	}
+	if stream.Flush() != nil {
+		stream.SetBuffer(stream.Buffer()[:0])
+	}
+}
+
 func New(out io.Writer) Stream {
 	return Wrap(jsoniter.NewStream(jsoniter.ConfigDefault, out, InitialBufferSize))
 }
