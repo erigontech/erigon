@@ -58,19 +58,27 @@ ERIGON_WT=${ERIGON_WT:?set the dedicated Erigon worktree}
 CONTEXT_NAME=${CONTEXT_NAME:?set the exact context directory name}
 SUITE_KIND=${SUITE_KIND:?set to compute or stateful}
 RUN_ROOT=${RUN_ROOT:?set a new task-owned runtime directory}
+RESULTS_DIR=${RESULTS_DIR:?set a durable task-owned results directory outside RUN_ROOT}
 
 BENCHMARKOOR_SRC=$(realpath -e -- "$BENCHMARKOOR_SRC")
 TESTS_DIR=$(realpath -e -- "$TESTS_DIR")
 ERIGON_WT=$(realpath -e -- "$ERIGON_WT")
 RUN_ROOT=$(realpath -m -- "$RUN_ROOT")
+RESULTS_DIR=$(realpath -m -- "$RESULTS_DIR")
+case "$RESULTS_DIR/" in "$RUN_ROOT/"*) exit 1 ;; esac
+case "$RUN_ROOT/" in "$RESULTS_DIR/"*) exit 1 ;; esac
 LOWER_DIR="$RUN_ROOT/lower-ro"
 OVERLAY_TMP="$RUN_ROOT/overlay-runtime"
 CACHE_DIR="$RUN_ROOT/cache"
-RESULTS_DIR="$RUN_ROOT/results"
-BENCHMARKOOR_BIN="$BENCHMARKOOR_SRC/bin/benchmarkoor"
+BENCHMARKOOR_SOURCE_BIN="$BENCHMARKOOR_SRC/bin/benchmarkoor"
 ERIGON_SHORT_COMMIT=$(git -C "$ERIGON_WT" rev-parse --short=12 HEAD)
-IMAGE_TAG="erigon-local:$CONTEXT_NAME-$ERIGON_SHORT_COMMIT"
+DOCKER=(env -i PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  /usr/bin/docker --host unix:///var/run/docker.sock)
 ```
+
+Use this sanitized `DOCKER` command array for every Docker CLI operation in the workflow. It pins
+inspection, image preparation, and preflight checks to the same system daemon used by the guarded
+launcher, regardless of the invoking account's current Docker context or environment.
 
 Use the exact context name requested by the user, such as a future devnet directory; do not select
 a similarly named `-full` or older devnet. For a State Actor build, choose a new `STATE_ROOT` and
@@ -78,7 +86,9 @@ set `PRISTINE_DIR="$STATE_ROOT/erigon"`. For a pre-populated run, require the op
 the existing `PRISTINE_DIR`; never infer which valuable datadir is pristine by scanning the host.
 Canonicalize it with `realpath -e` before creating mounts. Require `RUN_ROOT`, cache, results,
 OverlayFS writable layers, and build contexts to be outside the pristine tree and every protected
-lower. Stop on path overlap instead of silently choosing another directory.
+lower. Keep the durable `RESULTS_DIR` disjoint from the disposable `RUN_ROOT` so runtime cleanup
+cannot remove benchmark artifacts. Stop on path overlap instead of silently choosing another
+directory.
 
 Before selecting a base image or writing an override, follow
 [Discover the current files](references/compute-stateful-suites.md#discover-the-current-files) to
@@ -105,9 +115,9 @@ silently move the worktree or relabel an already-produced result.
 ## Build benchmarkoor
 
 ```bash
-cd "$BENCHMARKOOR_SRC"
+cd "$BENCHMARKOOR_SRC" || exit 1
 make build-core
-"$BENCHMARKOOR_BIN" version
+"$BENCHMARKOOR_SOURCE_BIN" version
 ```
 
 Use the source build because datadir handling, result formats, pre-run handling, and State Actor
@@ -140,8 +150,14 @@ global:
   env:
     STATE_DIR: /absolute/path/to/new-state-actor-root
 
+builder:
+  cleanup_on_start: false
+  state_actor:
+    container_runtime: docker
+
 runner:
   container_runtime: docker
+  cleanup_on_start: false
   live_reporting:
     enabled: false
 ```
@@ -163,9 +179,21 @@ GLOBAL_CONFIG=$(realpath -e -- "$TESTS_DIR/configs/global.yaml")
 STATE_ACTOR_GLOBAL_CONFIG=$(realpath -e -- "$STATE_ACTOR_GLOBAL_CONFIG")
 STATE_ACTOR_BUILDER_CONFIG=$(realpath -e -- "$STATE_ACTOR_BUILDER_CONFIG")
 STATE_ACTOR_BUILD_OVERRIDE=$(realpath -e -- "$STATE_ACTOR_BUILD_OVERRIDE")
+BUILD_USER=$(id -un)
+BUILD_HOME=$(getent passwd "$(id -u)" | cut -d: -f6)
+test -n "$BUILD_USER"
+test -d "$BUILD_HOME"
 
-cd "$TESTS_DIR"
-"$BENCHMARKOOR_BIN" build \
+cd "$TESTS_DIR" || exit 1
+env -i \
+  PATH=/usr/sbin:/usr/bin:/sbin:/bin \
+  HOME="$BUILD_HOME" \
+  USER="$BUILD_USER" \
+  LOGNAME="$BUILD_USER" \
+  DOCKER_HOST=unix:///var/run/docker.sock \
+  BENCHMARKOOR_BUILDER_CLEANUP_ON_START=false \
+  BENCHMARKOOR_RUNNER_CLEANUP_ON_START=false \
+  "$BENCHMARKOOR_SOURCE_BIN" build \
   --config "$GLOBAL_CONFIG" \
   --config "$STATE_ACTOR_GLOBAL_CONFIG" \
   --config "$STATE_ACTOR_BUILDER_CONFIG" \
@@ -204,14 +232,24 @@ pristine.
 
 ## Measure pristine and overlay capacity
 
-First identify the filesystems containing the pristine tree and writable overlay. Defer recursive
-allocated/apparent-size measurement until the read-only bind in the protection section is mounted;
-large database files may be sparse, and reading them through the writable path can update atime:
+First identify the filesystems containing the pristine tree and planned writable overlay. The
+fresh `RUN_ROOT` need not exist yet, so resolve its nearest existing ancestor for this planning
+check. Defer recursive allocated/apparent-size measurement until the read-only bind in the
+protection section is mounted; large database files may be sparse, and reading them through the
+writable path can update atime:
 
 ```bash
-df -B1 --output=size,used,avail,target "$PRISTINE_DIR" "$OVERLAY_TMP"
+OVERLAY_FS_PROBE="$RUN_ROOT"
+while test ! -e "$OVERLAY_FS_PROBE"; do
+  next_probe=$(dirname -- "$OVERLAY_FS_PROBE")
+  test "$next_probe" != "$OVERLAY_FS_PROBE" || exit 1
+  OVERLAY_FS_PROBE="$next_probe"
+done
+test -d "$OVERLAY_FS_PROBE"
+test -w "$OVERLAY_FS_PROBE"
+df -B1 --output=size,used,avail,target "$PRISTINE_DIR" "$OVERLAY_FS_PROBE"
 findmnt -T "$PRISTINE_DIR"
-findmnt -T "$OVERLAY_TMP"
+findmnt -T "$OVERLAY_FS_PROBE"
 ```
 
 Do not assume OverlayFS needs a second full copy for this workload, but do not assume the upper
@@ -227,10 +265,11 @@ evidence, not a bound for a different source or client revision.
 Build the binary from the exact commit under test:
 
 ```bash
-cd "$ERIGON_WT"
+cd "$ERIGON_WT" || exit 1
 make erigon
 ./build/bin/erigon --version
-sha256sum ./build/bin/erigon
+ERIGON_BINARY_SHA256=$(sha256sum ./build/bin/erigon | awk '{print $1}')
+[[ "$ERIGON_BINARY_SHA256" =~ ^[0-9a-f]{64}$ ]] || exit 1
 ```
 
 When a compatible image for the same branch already exists, a small overlay image avoids rebuilding
@@ -250,16 +289,43 @@ devnet. Build and verify that the image contains the byte-identical local binary
 ```bash
 BASE_IMAGE=${BASE_IMAGE:?set the selected client base image pinned by digest}
 case "$BASE_IMAGE" in *@sha256:*) ;; *) exit 2 ;; esac
+SUITE_RUNNER_CONFIG=$(realpath -e -- "${SUITE_RUNNER_CONFIG:?select the suite runner config}")
+CLIENTS_CONFIG=$(realpath -e -- "${CLIENTS_CONFIG:?select its clients config}")
+INSTANCE_ID=${INSTANCE_ID:?select the exact Erigon instance}
+IMAGE_SCOPE=$(
+  {
+    printf 'base=%s\0instance=%s\0binary=%s\0' \
+      "$BASE_IMAGE" "$INSTANCE_ID" "$ERIGON_BINARY_SHA256"
+    sha256sum "$SUITE_RUNNER_CONFIG" "$CLIENTS_CONFIG"
+  } | sha256sum | cut -c1-16
+)
+IMAGE_TAG="erigon-local:$ERIGON_SHORT_COMMIT-$IMAGE_SCOPE"
 IMAGE_CONTEXT=${IMAGE_CONTEXT:?set the task-owned image build context}
 IMAGE_CONTEXT=$(realpath -e -- "$IMAGE_CONTEXT")
-docker build --build-arg BASE_IMAGE="$BASE_IMAGE" -t "$IMAGE_TAG" "$IMAGE_CONTEXT"
-docker run --rm "$IMAGE_TAG" --version
-docker run --rm --entrypoint sha256sum "$IMAGE_TAG" /usr/local/bin/erigon
+IMAGE_IID_FILE=$(mktemp /tmp/benchmarkoor-image-id.XXXXXX)
+test "$(stat -Lc '%u:%g:%a:%h' -- "$IMAGE_IID_FILE")" = \
+  "$(id -u):$(id -g):600:1" || exit 1
+if ! "${DOCKER[@]}" build --iidfile "$IMAGE_IID_FILE" \
+  --build-arg BASE_IMAGE="$BASE_IMAGE" -t "$IMAGE_TAG" "$IMAGE_CONTEXT"; then
+  unlink -- "$IMAGE_IID_FILE"
+  exit 1
+fi
+LOCAL_IMAGE_ID=$(tr -d '[:space:]' <"$IMAGE_IID_FILE")
+unlink -- "$IMAGE_IID_FILE"
+[[ "$LOCAL_IMAGE_ID" =~ ^sha256:[0-9a-f]{64}$ ]] || exit 1
+"${DOCKER[@]}" run --rm "$LOCAL_IMAGE_ID" --version
+test "$("${DOCKER[@]}" run --rm --entrypoint sha256sum "$LOCAL_IMAGE_ID" \
+  /usr/local/bin/erigon | awk '{print $1}')" = "$ERIGON_BINARY_SHA256"
 ```
 
 Resolve and pin the base-image digest. If the branch changes the container environment or is
 incompatible with that base, build the repository's complete Dockerfile instead. Do not rely on a
-rolling remote image's Erigon binary when benchmarking a local branch.
+rolling remote image's Erigon binary when benchmarking a local branch. The tag scope includes the
+base digest, selected instance and config blobs, and binary digest, but tags remain mutable daemon
+aliases. Capture this build's immutable ID through its unique `--iidfile`; never resolve the tag
+afterward because another task can retag it between those operations. Put `LOCAL_IMAGE_ID` in every
+run override and retain `pull_policy: never`; verify the persisted run records that same image ID
+before accepting results.
 
 ## Create a run-only override
 
@@ -274,14 +340,18 @@ resolved context and the complete selected instance; do not copy values from an 
 global:
   env:
     ERIGON_DATADIR_LOWER: /absolute/path/to/read-only-lower
+  directories:
+    cachedir: /absolute/path/to/task-owned-cache
 
 runner:
   container_runtime: docker
+  cleanup_on_start: false
   live_reporting:
     enabled: false
   directories:
     tmp_datadir: /absolute/path/to/overlay-runtime
   benchmark:
+    results_dir: /absolute/path/to/task-owned-results
     results_owner: "<invoking-uid>:<invoking-gid>"
     tests:
       metadata:
@@ -299,7 +369,7 @@ runner:
   instances:
     - id: <selected-instance-id>
       client: erigon
-      image: <local-image-tag>
+      image: <immutable-local-image-id>
       pull_policy: never
       # Copy every other field from the selected current instance.
 ```
@@ -310,9 +380,20 @@ path with the `chainspec.json` below the protected lower as shown above. Require
 through `LOWER_DIR` before launch with `test -f "$LOWER_DIR/chainspec.json"`; never leave the run
 pointed at an upstream `/schelk` path or at the writable State Actor output root.
 
+Replace the cache and results placeholders with the canonical absolute `CACHE_DIR` and
+`RESULTS_DIR` derived above. Require the effective run configuration to contain those exact paths
+before launch; later fixture discovery and result validation must use that same `RESULTS_DIR`.
+Keep `builder.cleanup_on_start: false` for State Actor builds and `runner.cleanup_on_start: false`
+for every shared-host run, including staging, smoke, and measured runs. An earlier global config can
+enable forced cleanup that is not scoped to this task. A `BENCHMARKOOR_*_CLEANUP_ON_START`
+environment variable overrides YAML, so explicitly set both supported environment keys to `false`
+on every invocation, including after the `sudo` boundary, as shown in the suite reference. Do not
+rely only on inspecting the final override. Use the task-scoped residual-resource checks and
+recovery procedure instead.
+
 Re-copy the instance when upstream `clients.yaml` changes; do not let this example silently erase
-new required flags. Check every copied `extra_args` option against `docker run --rm "$IMAGE_TAG"
---help` before starting the long suite.
+new required flags. Check every copied `extra_args` option against
+`"${DOCKER[@]}" run --rm "$LOCAL_IMAGE_ID" --help` before starting the long suite.
 
 For current Erigon, `--experimental.parallel-commitment` is the CLI equivalent of
 `COMMITMENT_PARALLEL=true`: it sets `ExperimentalParallelCommitment` and selects the parallel hex
@@ -333,6 +414,13 @@ Put a kernel-enforced read-only bind mount in front of the pristine datadir rath
 the original path directly:
 
 ```bash
+PRISTINE_DIR=${PRISTINE_DIR:?set the operator-designated pristine datadir}
+PRISTINE_DIR=$(realpath -e -- "$PRISTINE_DIR")
+for writable_root in "$RUN_ROOT" "$RESULTS_DIR"; do
+  case "$writable_root/" in "$PRISTINE_DIR/"*) exit 1 ;; esac
+  case "$PRISTINE_DIR/" in "$writable_root/"*) exit 1 ;; esac
+done
+
 MOUNT_TABLE_JSON=$(findmnt -J -o TARGET) || exit 1
 MOUNT_TARGETS=$(jq -r '.. | objects | .target? // empty' \
   <<<"$MOUNT_TABLE_JSON") || exit 1
@@ -349,12 +437,78 @@ if test "${#PRISTINE_DESCENDANT_MOUNTS[@]}" -ne 0; then
   exit 1
 fi
 
-sudo mkdir -p "$LOWER_DIR" "$OVERLAY_TMP"
-sudo mount --bind "$PRISTINE_DIR" "$LOWER_DIR"
-sudo mount -o remount,bind,ro "$LOWER_DIR"
-findmnt -n -o SOURCE,OPTIONS "$LOWER_DIR"
+umask 077
+TASK_UID=$(id -u)
+TASK_GID=$(id -g)
+for task_dir in "$RUN_ROOT" "$OVERLAY_TMP" "$CACHE_DIR" "$RESULTS_DIR"; do
+  if test ! -e "$task_dir"; then
+    install -d -m 0700 -- "$task_dir" || exit 1
+  fi
+  test -d "$task_dir" || exit 1
+  test ! -L "$task_dir" || exit 1
+  test "$(stat -Lc '%u:%g:%a' -- "$task_dir")" = \
+    "$TASK_UID:$TASK_GID:700" || exit 1
+  test -w "$task_dir" || exit 1
+done
+
+TASK_ROOT_MOUNT_CONFLICT=
+while IFS= read -r mount_target; do
+  case "$mount_target" in
+    "$RUN_ROOT"|"$RUN_ROOT"/*)
+      TASK_ROOT_MOUNT_CONFLICT=$mount_target
+      break
+      ;;
+  esac
+done <<<"$MOUNT_TARGETS"
+if test -n "$TASK_ROOT_MOUNT_CONFLICT"; then
+  printf 'refusing runtime root with an existing mount: %s\n' \
+    "$TASK_ROOT_MOUNT_CONFLICT" >&2
+  exit 1
+fi
+
+sudo mount --bind "$RUN_ROOT" "$RUN_ROOT" || exit 1
+sudo mount --make-private "$RUN_ROOT" || exit 1
+TASK_ROOT_MOUNT_TARGET=$(findmnt -n -T "$RUN_ROOT" -o TARGET) || exit 1
+TASK_ROOT_PROPAGATION=$(findmnt -n -T "$RUN_ROOT" -o PROPAGATION) || exit 1
+test "$(realpath -e -- "$TASK_ROOT_MOUNT_TARGET")" = "$RUN_ROOT" || exit 1
+test "$TASK_ROOT_PROPAGATION" = private || exit 1
+
+EXPECTED_LOWER_DIR="$RUN_ROOT/lower-ro"
+test "$(realpath -m -- "$LOWER_DIR")" = "$EXPECTED_LOWER_DIR" || exit 1
+test "$(dirname -- "$EXPECTED_LOWER_DIR")" = "$RUN_ROOT" || exit 1
+if sudo test -e "$LOWER_DIR" || sudo test -L "$LOWER_DIR"; then
+  printf 'fresh protected-lower mountpoint already exists: %s\n' \
+    "$LOWER_DIR" >&2
+  exit 1
+fi
+sudo install -d -o root -g root -m 0700 -- "$LOWER_DIR" || exit 1
+sudo test ! -L "$LOWER_DIR" || exit 1
+LOWER_DIR=$(sudo realpath -e -- "$LOWER_DIR") || exit 1
+test "$LOWER_DIR" = "$EXPECTED_LOWER_DIR" || exit 1
+test "$(dirname -- "$LOWER_DIR")" = "$RUN_ROOT" || exit 1
+test "$(sudo stat -Lc '%u:%g:%a' -- "$LOWER_DIR")" = 0:0:700 || exit 1
+sudo mount --bind "$PRISTINE_DIR" "$LOWER_DIR" || exit 1
+sudo mount --make-private "$LOWER_DIR" || exit 1
+sudo mount -o remount,bind,ro "$LOWER_DIR" || exit 1
+LOWER_MOUNT_TARGET=$(findmnt -n -T "$LOWER_DIR" -o TARGET) || exit 1
+LOWER_PROPAGATION=$(findmnt -n -T "$LOWER_DIR" -o PROPAGATION) || exit 1
+LOWER_OPTIONS=$(findmnt -n -T "$LOWER_DIR" -o OPTIONS) || exit 1
+test "$(realpath -e -- "$LOWER_MOUNT_TARGET")" = "$LOWER_DIR" || exit 1
+test "$LOWER_PROPAGATION" = private || exit 1
+case ",$LOWER_OPTIONS," in *,ro,*) ;; *) exit 1 ;; esac
+printf '%s %s\n' "$LOWER_MOUNT_TARGET" "$LOWER_OPTIONS"
 INTEGRITY_ROOT="$LOWER_DIR"
 ```
+
+Keep both private mounts in place for the whole task and create every probe, staging, and per-run
+mount below the private task root. Making the protected lower private prevents later mount events
+at the source from propagating onto it; the private task-root self-bind prevents task mounts from
+propagating into peer mount namespaces. If the Docker daemon cannot see mounts made below this
+private root, the container visibility check in the probe below fails; stop instead of weakening
+propagation isolation. During cleanup, remove verified child mounts first, unmount the protected
+lower, remove only its now-empty root-owned mountpoint, and unmount the exact task-root self-bind
+last before discarding `RUN_ROOT`. Retain the disjoint durable `RESULTS_DIR` and its validated
+artifacts.
 
 Require `ro` as a distinct mount option before continuing. Record allocated/apparent size,
 dataset-appropriate critical file hashes, and a metadata fingerprint that covers every path's
@@ -363,23 +517,24 @@ every recursive read and content hash through `INTEGRITY_ROOT`, never through `P
 State Actor files below are examples, not a universal list for pre-populated snapshots:
 
 ```bash
-pristine_fingerprint() {
+pristine_fingerprint() (
+  set -o pipefail
   local integrity_root=${1:?set integrity root to the read-only bind}
   find "$integrity_root" -xdev \
     -printf '%P\0%y\0%s\0%A@\0%T@\0%C@\0%m\0%u\0%g\0%l\0' |
     LC_ALL=C sort -z |
     sha256sum
-}
+)
 
-du -sx --block-size=1 "$INTEGRITY_ROOT"
-du -sx --apparent-size --block-size=1 "$INTEGRITY_ROOT"
+du -sx --block-size=1 "$INTEGRITY_ROOT" || exit 1
+du -sx --apparent-size --block-size=1 "$INTEGRITY_ROOT" || exit 1
 sha256sum \
   "$INTEGRITY_ROOT/state-actor-manifest.json" \
   "$INTEGRITY_ROOT/.benchmarkoor-build.json" \
   "$INTEGRITY_ROOT/chainspec.json" \
   "$INTEGRITY_ROOT/genesis.json" \
-  "$INTEGRITY_ROOT/nodekey"
-pristine_fingerprint "$INTEGRITY_ROOT"
+  "$INTEGRITY_ROOT/nodekey" || exit 1
+pristine_fingerprint "$INTEGRITY_ROOT" || exit 1
 ```
 
 Before the real run, manually mount a small probe overlay with this read-only bind as `lowerdir`.
@@ -391,6 +546,8 @@ read-only bind:
 PROBE_ROOT=$(mktemp -d "$OVERLAY_TMP/benchmarkoor-overlay-probe.XXXXXX")
 CANARY=.benchmarkoor-overlay-canary
 mkdir "$PROBE_ROOT/upper" "$PROBE_ROOT/work" "$PROBE_ROOT/merged"
+test ! -e "$LOWER_DIR/$CANARY"
+test ! -L "$LOWER_DIR/$CANARY"
 
 (
   set -euo pipefail
@@ -398,9 +555,18 @@ mkdir "$PROBE_ROOT/upper" "$PROBE_ROOT/work" "$PROBE_ROOT/merged"
   sudo mount -t overlay overlay \
     -o "lowerdir=$LOWER_DIR,upperdir=$PROBE_ROOT/upper,workdir=$PROBE_ROOT/work" \
     "$PROBE_ROOT/merged"
+  test ! -e "$PROBE_ROOT/merged/$CANARY"
+  test ! -L "$PROBE_ROOT/merged/$CANARY"
   sudo touch "$PROBE_ROOT/merged/$CANARY"
   test -e "$PROBE_ROOT/upper/$CANARY"
   test ! -e "$LOWER_DIR/$CANARY"
+  HOST_CANARY_HASH=$(sha256sum "$PROBE_ROOT/merged/$CANARY" | awk '{print $1}')
+  CONTAINER_CANARY_HASH=$("${DOCKER[@]}" run --rm --network none --read-only \
+    --user 0:0 \
+    --mount "type=bind,src=$PROBE_ROOT/merged,dst=/benchmarkoor-probe,readonly" \
+    --entrypoint sha256sum "$LOCAL_IMAGE_ID" \
+    "/benchmarkoor-probe/$CANARY" | awk '{print $1}')
+  test "$CONTAINER_CANARY_HASH" = "$HOST_CANARY_HASH"
   sudo umount "$PROBE_ROOT/merged"
   trap - EXIT
 )
@@ -415,11 +581,13 @@ upstream runner config may otherwise misclassify published results.
 
 Run a 5-10-fixture smoke subset with the exact binary, config stack, image, and protected lower
 before either full suite. During smoke and production runs, periodically require the lower
-mount to remain `ro`, monitor free space, measure the current `upper` directory, and count matching
-OverlayFS mounts. Zero is valid during the handoff between fixtures; more than one means cleanup is
-lagging and the run must be stopped before mounts and copied-up data accumulate. For a long run,
-capture the exact benchmarkoor PID and use a separate free-space watchdog that sends `SIGINT` only
-when a predeclared floor is crossed. Never use a broad process match as the kill target.
+mount to remain `ro`, measure the current `upper` directory, and monitor free space on both the
+overlay and configured results filesystems. Compare device IDs and sample only once when those
+paths share a filesystem. Zero matching per-test OverlayFS mounts is valid during the handoff
+between fixtures; more than one means cleanup is lagging and the run must be stopped before mounts
+and copied-up data accumulate. For a long run, retain a pidfd or child-process handle and use a
+separate free-space watchdog that sends `SIGINT` through that stable handle only when a predeclared
+floor is crossed. Never use a bare PID or broad process match as the signal target.
 
 After benchmarkoor exits, require zero disposable benchmark overlay mounts, temporary overlay
 directories, containers, and benchmarkoor processes. A staged stateful pre-populated run retains
@@ -500,9 +668,12 @@ The essential runtime distinction is:
 
 Never infer the suite from `fixtures_subdir`: both can say `blockchain_tests_stateful_engine`.
 Require the selected file's `test-type`, suite name, fixture source, and rollback strategy to agree.
-Run benchmarkoor through the `BENCHMARKOOR_SUDO` array defined in the suite reference because
-native OverlayFS needs mount operations; Docker-group membership alone is insufficient. That
-wrapper also preserves only the required artifact credential when authentication is needed.
+Run benchmarkoor through the `BENCHMARKOOR_RUN` array defined in the suite reference because native
+OverlayFS needs mount operations, cleanup must remain task-scoped, and CPU controls need one
+host-wide owner. Docker-group membership alone is insufficient. The guarded runner forces both
+cleanup-on-start settings off after the privilege boundary, fixes the runtime to the local Docker
+daemon, keeps a persistent process-and-container recovery gate across process failure, and preserves
+only the required artifact credential when authentication is needed.
 
 ## Validate and summarize results
 
@@ -518,7 +689,7 @@ RUNS_DIR="$RESULTS_DIR/runs"
 test -d "$RUNS_DIR"
 
 find "$RUNS_DIR" -mindepth 1 -maxdepth 1 -type d -printf '%T@ %f\n' |
-  sort -nr | head
+  sort -nr | sed -n '1,10p'
 RUN_DIR="$RUNS_DIR/<run-id>"
 test -f "$RUN_DIR/config.json"
 jq '{status, test_counts, suite_hash, instance: {
