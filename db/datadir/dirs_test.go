@@ -91,3 +91,47 @@ func Test_RenameNewVersions(t *testing.T) {
 	mustDirNotExist(t, heimdallDir)
 	mustDirNotExist(t, d.Chaindata)
 }
+
+func Test_RenameOldVersions_SkipsCaplinSidecarDirs(t *testing.T) {
+	base := t.TempDir()
+	d := New(base)
+
+	blobFile := filepath.Join(d.CaplinBlobs, "v1-something.seg")
+	columnFile := filepath.Join(d.CaplinColumnData, "v1-something.seg")
+	touch(t, blobFile)
+	touch(t, columnFile)
+
+	controlFile := filepath.Join(d.Snap, "v1-000001-000002-headers.seg")
+	controlRenamed := filepath.Join(d.Snap, "v1.0-000001-000002-headers.seg")
+	touch(t, controlFile)
+
+	require.NoError(t, d.RenameOldVersions(false))
+
+	mustExist(t, blobFile)
+	mustExist(t, columnFile)
+
+	mustNotExist(t, controlFile)
+	mustExist(t, controlRenamed)
+}
+
+func Test_RenameNewVersions_SkipsCaplinSidecarDirs(t *testing.T) {
+	base := t.TempDir()
+	d := New(base)
+
+	blobFile := filepath.Join(d.CaplinBlobs, "v1.0-something.seg")
+	columnFile := filepath.Join(d.CaplinColumnData, "v1.0-something.seg")
+	touch(t, blobFile)
+	touch(t, columnFile)
+
+	controlFile := filepath.Join(d.Snap, "v1.0-000001-000002-headers.seg")
+	controlRenamed := filepath.Join(d.Snap, "v1-000001-000002-headers.seg")
+	touch(t, controlFile)
+
+	require.NoError(t, d.RenameNewVersions())
+
+	mustExist(t, blobFile)
+	mustExist(t, columnFile)
+
+	mustNotExist(t, controlFile)
+	mustExist(t, controlRenamed)
+}
