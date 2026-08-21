@@ -18,6 +18,7 @@ package logger
 
 import (
 	"context"
+	"encoding/hex"
 
 	"github.com/holiman/uint256"
 
@@ -40,14 +41,13 @@ type JsonStreamLogger struct {
 	ctx          context.Context
 	cfg          LogConfig
 	stream       jsonstream.Stream
+	hexEncodeBuf [128]byte
 	firstCapture bool
 	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
 
 	locations common.Hashes // For sorting
 	storage   map[accounts.Address]Storage
 	env       *tracing.VMContext
-
-	stagedHex common.Hash
 }
 
 // NewStructLogger returns a new logger
@@ -83,16 +83,27 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
-// writeMemoryWord writes a memory word as a JSON string "0x<hex>", padded to 32
-// bytes if the last word is short.
-func (l *JsonStreamLogger) writeMemoryWord(chunk []byte) {
+// hexWithPrefix encodes b as a 0x-prefixed hex string using the internal buffer.
+func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
+	l.hexEncodeBuf[0] = '0'
+	l.hexEncodeBuf[1] = 'x'
+	n := hex.Encode(l.hexEncodeBuf[2:], b)
+	return string(l.hexEncodeBuf[:2+n])
+}
+
+// writeMemoryWordRaw writes a memory word as a JSON string "0x<hex>" directly
+// to the stream without any heap allocations. Pads to 32 bytes if needed.
+func (l *JsonStreamLogger) writeMemoryWordRaw(chunk []byte) {
 	if len(chunk) < 32 {
-		l.stagedHex = common.Hash{}
-		copy(l.stagedHex[:], chunk)
-		l.stream.WriteHex(l.stagedHex[:])
-		return
+		var word [32]byte
+		copy(word[:], chunk)
+		hex.Encode(l.hexEncodeBuf[:], word[:])
+	} else {
+		hex.Encode(l.hexEncodeBuf[:], chunk)
 	}
-	l.stream.WriteHex(chunk)
+	l.stream.WriteRaw(`"0x`)
+	l.stream.Write(l.hexEncodeBuf[:64]) //nolint:errcheck
+	l.stream.WriteRaw(`"`)
 }
 
 func (l *JsonStreamLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
@@ -208,7 +219,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.writeMemoryWord(memory[i:end])
+			l.writeMemoryWordRaw(memory[i:end])
 		}
 		l.stream.WriteArrayEnd()
 	}
@@ -231,15 +242,15 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 			l.locations = append(l.locations, loc)
 		}
 		l.locations.Sort()
-		for i := range l.locations {
+		for _, loc := range l.locations {
+			value := s[loc]
 			if first {
 				first = false
 			} else {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteHexObjectField(l.locations[i][:])
-			l.stagedHex = s[l.locations[i]]
-			l.stream.WriteHex(l.stagedHex[:])
+			l.stream.WriteObjectField(l.hexWithPrefix(loc[:]))
+			l.stream.WriteString(l.hexWithPrefix(value[:]))
 		}
 		l.stream.WriteObjectEnd()
 	}

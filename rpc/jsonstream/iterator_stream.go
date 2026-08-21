@@ -25,7 +25,6 @@ import (
 // JsoniterStream implements the Stream interface by wrapping jsoniter.Stream
 type JsoniterStream struct {
 	stream *jsoniter.Stream
-	hex    hexWriter
 }
 
 // NewJsoniterStream creates a new JsoniterStream wrapped around the given jsoniter.Stream.
@@ -118,17 +117,6 @@ func (s *JsoniterStream) WriteFloat64(val float64) {
 
 func (s *JsoniterStream) WriteString(val string) {
 	s.stream.WriteString(val)
-}
-
-func (s *JsoniterStream) WriteHex(b []byte) {
-	s.stream.WriteRaw(`"0x`)
-	s.hex.writeBody(s.stream, b)
-	s.stream.WriteRaw(`"`)
-}
-
-func (s *JsoniterStream) WriteHexObjectField(b []byte) {
-	s.WriteHex(b)
-	s.stream.WriteRaw(`:`)
 }
 
 func (s *JsoniterStream) WriteObjectStart() {
