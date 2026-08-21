@@ -17,6 +17,7 @@
 package logger
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -136,29 +137,33 @@ func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
 }
 
 func BenchmarkAccessListTracerSeed(b *testing.B) {
-	const nAddrs, nSlots = 30, 20
-
-	prev := NewAccessListTracer(nil, nil, nil)
-	for a := range nAddrs {
-		address := common.BytesToAddress([]byte{byte(a + 1)})
-		for s := range nSlots {
-			prev.list.addSlot(address, common.BytesToHash([]byte{byte(s + 1)}))
+	// Real eth_createAccessList lists are small: a handful of addresses with a
+	// few slots each. The wide shapes are here to show where the crossover is.
+	for _, shape := range []struct{ nAddrs, nSlots int }{
+		{1, 1}, {1, 5}, {1, 17}, {3, 5}, {5, 20}, {30, 20},
+	} {
+		prev := NewAccessListTracer(nil, nil, nil)
+		for a := range shape.nAddrs {
+			address := common.BytesToAddress([]byte{byte(a + 1)})
+			for s := range shape.nSlots {
+				prev.list.addSlot(address, common.BytesToHash([]byte{byte(s + 1)}))
+			}
 		}
+		// AccessList() is built either way, so only the seeding half differs.
+		acl := prev.AccessList()
+		name := fmt.Sprintf("%dx%d", shape.nAddrs, shape.nSlots)
+
+		b.Run(name+"/roundTrip", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = NewAccessListTracer(acl, nil, nil)
+			}
+		})
+		b.Run(name+"/seedNew", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = prev.SeedNew(nil)
+			}
+		})
 	}
-
-	// AccessList() is built either way (the message needs it), so only the seeding
-	// half differs between the two.
-	acl := prev.AccessList()
-	b.Run("roundTrip", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			_ = NewAccessListTracer(acl, nil, nil)
-		}
-	})
-	b.Run("seedNew", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			_ = prev.SeedNew(nil)
-		}
-	})
 }
