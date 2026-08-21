@@ -257,7 +257,7 @@ func openExportDirs(dataDir string) (datadir.Dirs, error) {
 // mainnet that is >100 GB, and the retry would then hit ENOSPC partway through.
 func prepareScratchDir(tmpDir string) (string, error) {
 	scratch := filepath.Join(tmpDir, preimagesScratchDirName)
-	if err := os.RemoveAll(scratch); err != nil {
+	if err := dir.RemoveAll(scratch); err != nil {
 		return "", fmt.Errorf("clear scratch %s: %w", scratch, err)
 	}
 	if err := os.MkdirAll(scratch, 0o755); err != nil {
