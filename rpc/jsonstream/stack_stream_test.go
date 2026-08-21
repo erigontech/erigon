@@ -19,10 +19,15 @@ package jsonstream
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"runtime"
+	"strings"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	jsoniter "github.com/json-iterator/go"
 )
@@ -1064,4 +1069,134 @@ func (w *failingWriter) Write(p []byte) (n int, err error) {
 	}
 	w.bytesWritten += len(p)
 	return len(p), nil
+}
+
+// TestWriteKeepsBufferCapacity pins the reason Write is not jsoniter's: its
+// Write reslices the buffer forward, so cap() afterwards reports only the tail
+// and the grown array is neither reusable nor measurable.
+func TestWriteKeepsBufferCapacity(t *testing.T) {
+	body := strings.Repeat("x", 2<<20)
+
+	raw := jsoniter.NewStream(jsoniter.ConfigDefault, io.Discard, InitialBufferSize)
+	raw.WriteRaw(body)
+	raw.Write([]byte("\n")) //nolint:errcheck
+	require.Less(t, cap(raw.Buffer()), 2<<20, "jsoniter's Write loses the capacity it grew")
+
+	s := New(io.Discard).(*StackStream)
+	s.WriteRaw(body)
+	s.Write([]byte("\n")) //nolint:errcheck
+	require.NoError(t, s.Flush())
+	require.GreaterOrEqual(t, cap(s.stream.Buffer()), FlushThreshold,
+		"our Write must leave a usable buffer behind")
+}
+
+// TestReleaseDropsUnusableBuffers pins both ends of the pool guard. The oversized
+// case is the one that matters: an attack trace must not be pinned for the life
+// of the process.
+func TestReleaseDropsUnusableBuffers(t *testing.T) {
+	for _, tc := range []struct {
+		name string
+		size int
+	}{
+		{"oversized", maxPooledBuffer + 1},
+		{"degenerate", 0},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			streamPool = freshPool()
+			s := New(io.Discard).(*StackStream)
+			if tc.size > 0 {
+				s.WriteRaw(strings.Repeat("x", tc.size))
+				require.NoError(t, s.Flush())
+				require.Greater(t, cap(s.stream.Buffer()), maxPooledBuffer)
+			} else {
+				s.stream.SetBuffer(s.stream.Buffer()[:0:0])
+			}
+			Release(s)
+
+			fresh := New(io.Discard).(*StackStream)
+			c := cap(fresh.stream.Buffer())
+			require.GreaterOrEqual(t, c, InitialBufferSize, "pool handed out a degenerate buffer")
+			require.LessOrEqual(t, c, maxPooledBuffer, "pool kept an oversized buffer")
+		})
+	}
+}
+
+func freshPool() sync.Pool {
+	return sync.Pool{New: func() any {
+		return NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, FlushThreshold))
+	}}
+}
+
+// TestReleaseIgnoresUnpooledStreams covers callers that build their own stream
+// and hand Buffer() onward; releasing one must not put it in the pool.
+func TestReleaseIgnoresUnpooledStreams(t *testing.T) {
+	streamPool = freshPool()
+	unpooled := New(nil)
+	unpooled.WriteRaw(`"x"`)
+	Release(unpooled)
+
+	fresh := New(io.Discard)
+	require.NotSame(t, unpooled, fresh, "an unpooled stream must not reach the pool")
+	require.NotPanics(t, func() { Release(nil) })
+}
+
+// BenchmarkStreamPool models what an HTTP request actually does, including the
+// trailing Write that handleMsg performs; without it the benchmark only measures
+// WriteRaw and overstates the win.
+func BenchmarkStreamPool(b *testing.B) {
+	body := strings.Repeat("x", 32<<10)
+
+	b.Run("pooled", func(b *testing.B) {
+		streamPool = freshPool()
+		b.ReportAllocs()
+		for b.Loop() {
+			s := New(io.Discard)
+			s.WriteRaw(body)
+			s.Write([]byte("\n")) //nolint:errcheck
+			s.Flush()             //nolint:errcheck
+			Release(s)
+		}
+	})
+	b.Run("unpooled", func(b *testing.B) {
+		b.ReportAllocs()
+		for b.Loop() {
+			s := Wrap(jsoniter.NewStream(jsoniter.ConfigDefault, io.Discard, InitialBufferSize))
+			s.WriteRaw(body)
+			s.Write([]byte("\n")) //nolint:errcheck
+			s.Flush()             //nolint:errcheck
+		}
+	})
+}
+
+// TestReleaseTwiceIsSafe pins that a second release cannot hand one stream to
+// two requests.
+func TestReleaseTwiceIsSafe(t *testing.T) {
+	streamPool = freshPool()
+	s := New(io.Discard)
+	Release(s)
+	Release(s)
+
+	a, b := New(io.Discard), New(io.Discard)
+	require.NotSame(t, a, b, "the same stream was handed out twice")
+}
+
+// TestPooledStreamNeverGrows pins the reason pooled streams start at
+// FlushThreshold: a response that flushes at that size must never have to
+// reallocate, including after a GC has emptied the pool.
+func TestPooledStreamNeverGrows(t *testing.T) {
+	streamPool = freshPool()
+	body := strings.Repeat("x", FlushThreshold-1024)
+
+	for i := range 20 {
+		s := New(io.Discard).(*StackStream)
+		before := cap(s.stream.Buffer())
+		s.WriteRaw(body)
+		s.Write([]byte("\n")) //nolint:errcheck
+		require.NoError(t, s.Flush())
+		require.Equal(t, before, cap(s.stream.Buffer()), "request %d grew its buffer", i)
+		Release(s)
+		if i%5 == 4 {
+			runtime.GC()
+		}
+	}
 }

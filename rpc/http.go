@@ -317,6 +317,9 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	var stream jsonstream.Stream
 	if !s.disableStreaming {
 		stream = jsonstream.New(w)
+		// h.close waits on callWG inside serveSingleRequest, so every writer is
+		// done before this runs.
+		defer jsonstream.Release(stream)
 	}
 
 	errorMsg := s.serveSingleRequest(ctx, codec, stream)

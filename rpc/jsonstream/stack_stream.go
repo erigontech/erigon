@@ -42,6 +42,7 @@ const (
 type StackStream struct {
 	stream *jsoniter.Stream
 	stack  []stackItem
+	pooled bool // set by New, so Release cannot pool a caller's stream, or pool twice
 }
 
 // NewStackStream creates a new StackStream with the given jsoniter.Stream
@@ -64,16 +65,37 @@ func (s *StackStream) Reset(out io.Writer) {
 	s.stack = s.stack[:0]
 }
 
-// Write raw bytes to the stream
+// Write appends raw bytes. jsoniter's Stream.Write reslices the buffer forward
+// past its own capacity, which reallocates on the next append and leaves the
+// buffer unusable, so it is not used.
 func (s *StackStream) Write(content []byte) (int, error) {
 	s.popCommaOrField()
-	return s.stream.Write(content)
+	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
+	s.flushIfFull()
+	return len(content), nil
 }
 
 // WriteRaw writes raw content to the stream
 func (s *StackStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
 	s.popCommaOrField()
+	s.flushIfFull()
+}
+
+// flushIfFull hands the buffer over once it is full, so a large response streams
+// instead of being held whole.
+func (s *StackStream) flushIfFull() {
+	if len(s.stream.Buffer()) >= FlushThreshold {
+		s.stream.Flush() //nolint:errcheck
+	}
+}
+
+// reset rebinds to out, keeping the buffer and the stack's capacity.
+func (s *StackStream) reset(out io.Writer) {
+	s.stream.Reset(out)
+	s.stream.Error = nil
+	s.stream.Attachment = nil
+	s.stack = s.stack[:0]
 }
 
 // WriteNil writes a null value to the stream
@@ -176,6 +198,7 @@ func (s *StackStream) WriteFloat64(val float64) {
 func (s *StackStream) WriteString(val string) {
 	s.stream.WriteString(val)
 	s.popCommaOrField()
+	s.flushIfFull()
 }
 
 // WriteObjectStart writes the start of an object and adds it to the stack

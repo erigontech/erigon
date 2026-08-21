@@ -228,6 +228,8 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 					res.writeTo(stream)
 				}
 				_ = stream.Flush()
+				// The reply lives in buf, so the stream's own buffer is free.
+				jsonstream.Release(stream)
 				if buf.Len() > 0 {
 					answersWithNils[i] = buf.Bytes()
 				}
