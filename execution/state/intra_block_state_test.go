@@ -952,6 +952,46 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, b)
 }
 
+// requireSameObservableState fails when the two states disagree on any value
+// the test writes, so ApplyVersionedWrites is pinned against the single-process
+// reference rather than only against "did not return an error".
+func requireSameObservableState(t *testing.T, want, got *IntraBlockState, addrs []accounts.Address, keys []accounts.StorageKey) {
+	t.Helper()
+	for _, addr := range addrs {
+		wantBal, err := want.GetBalance(addr)
+		require.NoError(t, err)
+		gotBal, err := got.GetBalance(addr)
+		require.NoError(t, err)
+		require.Equal(t, wantBal, gotBal, "balance of %x", addr)
+
+		wantNonce, err := want.GetNonce(addr)
+		require.NoError(t, err)
+		gotNonce, err := got.GetNonce(addr)
+		require.NoError(t, err)
+		require.Equal(t, wantNonce, gotNonce, "nonce of %x", addr)
+
+		wantCode, err := want.GetCode(addr)
+		require.NoError(t, err)
+		gotCode, err := got.GetCode(addr)
+		require.NoError(t, err)
+		require.Equal(t, wantCode, gotCode, "code of %x", addr)
+
+		wantDead, err := want.HasSelfdestructed(addr)
+		require.NoError(t, err)
+		gotDead, err := got.HasSelfdestructed(addr)
+		require.NoError(t, err)
+		require.Equal(t, wantDead, gotDead, "selfdestruct of %x", addr)
+
+		for _, key := range keys {
+			wantVal, err := want.GetState(addr, key)
+			require.NoError(t, err)
+			gotVal, err := got.GetState(addr, key)
+			require.NoError(t, err)
+			require.Equal(t, wantVal, gotVal, "storage %x of %x", key, addr)
+		}
+	}
+}
+
 func TestApplyVersionedWrites(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
@@ -985,6 +1025,8 @@ func TestApplyVersionedWrites(t *testing.T) {
 	val2 := u256.U64(2)
 	balance2 := uint256.NewInt(200)
 	code := []byte{1, 2, 3}
+	addrs := []accounts.Address{addr1, addr2, addr3}
+	keys := []accounts.StorageKey{key1, key2}
 
 	// Tx0 write
 	_, err := states[0].GetOrNewStateObject(addr1)
@@ -1006,6 +1048,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	require.NoError(t, err)
 
 	require.NoError(t, sClean.ApplyVersionedWrites(states[0].VersionedWrites()))
+	requireSameObservableState(t, sSingleProcess, sClean, addrs, keys)
 
 	// Tx1 write
 	require.NoError(t, states[1].SetState(addr1, key2, val2))
@@ -1019,6 +1062,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	require.NoError(t, sSingleProcess.SetNonce(addr1, 1, tracing.NonceChangeUnspecified))
 
 	require.NoError(t, sClean.ApplyVersionedWrites(states[1].VersionedWrites()))
+	requireSameObservableState(t, sSingleProcess, sClean, addrs, keys)
 
 	// Tx2 write
 	require.NoError(t, states[2].SetState(addr1, key1, val2))
@@ -1032,19 +1076,27 @@ func TestApplyVersionedWrites(t *testing.T) {
 	require.NoError(t, sSingleProcess.SetNonce(addr1, 2, tracing.NonceChangeUnspecified))
 
 	require.NoError(t, sClean.ApplyVersionedWrites(states[2].VersionedWrites()))
+	requireSameObservableState(t, sSingleProcess, sClean, addrs, keys)
 
 	// Tx3 write
-	_, err = states[3].Selfdestruct(addr2, false)
+	// Materialize addr2 first: Selfdestruct on an object this state never read
+	// silently no-ops, so the write set would carry no SelfDestructPath entry.
+	_, err = states[3].GetOrNewStateObject(addr2)
 	require.NoError(t, err)
+	destructed, err := states[3].Selfdestruct(addr2, false)
+	require.NoError(t, err)
+	require.True(t, destructed)
 	require.NoError(t, states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified))
 	require.NoError(t, states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
 
-	_, err = sSingleProcess.Selfdestruct(addr2, false)
+	destructed, err = sSingleProcess.Selfdestruct(addr2, false)
 	require.NoError(t, err)
+	require.True(t, destructed)
 	require.NoError(t, sSingleProcess.SetCode(addr1, code, tracing.CodeChangeUnspecified))
 
 	require.NoError(t, sClean.ApplyVersionedWrites(states[3].VersionedWrites()))
+	requireSameObservableState(t, sSingleProcess, sClean, addrs, keys)
 }
 
 // TestMakeWriteSetClearsCodeDomainOnEmptyOverride pins that clearing an
@@ -1098,36 +1150,35 @@ func (r *erroringReader) ReadAccountData(address accounts.Address) (*accounts.Ac
 	return r.NoopReader.ReadAccountData(address)
 }
 
-// TestFinalizeTxPropagatesBalanceIncGetStateObjectError pins that a DB read
-// failure while materializing a pending ripemd balance increase aborts
-// FinalizeTx instead of being silently dropped, which would let the account's
-// balance increase go unrecorded.
-func TestFinalizeTxPropagatesBalanceIncGetStateObjectError(t *testing.T) {
+// TestPropagatesBalanceIncGetStateObjectError pins that a DB read failure while
+// materializing a pending ripemd touch aborts the call instead of being silently
+// dropped, which would skip the touch that state clearing and trie consistency
+// depend on.
+func TestPropagatesBalanceIncGetStateObjectError(t *testing.T) {
 	t.Parallel()
 
-	wantErr := errors.New("read failed")
-	reader := &erroringReader{NoopReader: NewNoopReader(), errAddr: ripemd, err: wantErr}
-	sdb := New(reader)
-	defer sdb.Close()
+	for _, tc := range []struct {
+		name string
+		call func(*IntraBlockState) error
+	}{
+		{"FinalizeTx", func(sdb *IntraBlockState) error {
+			return sdb.FinalizeTx(&chain.Rules{}, NewNoopWriter())
+		}},
+		{"CommitBlock", func(sdb *IntraBlockState) error {
+			return sdb.CommitBlock(&chain.Rules{}, NewNoopWriter())
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	require.NoError(t, sdb.AddBalance(ripemd, uint256.Int{}, tracing.BalanceChangeUnspecified))
+			wantErr := errors.New("read failed")
+			reader := &erroringReader{NoopReader: NewNoopReader(), errAddr: ripemd, err: wantErr}
+			sdb := New(reader)
+			defer sdb.Close()
 
-	err := sdb.FinalizeTx(&chain.Rules{}, NewNoopWriter())
-	require.ErrorIs(t, err, wantErr)
-}
+			require.NoError(t, sdb.AddBalance(ripemd, uint256.Int{}, tracing.BalanceChangeUnspecified))
 
-// TestCommitBlockPropagatesBalanceIncGetStateObjectError is the CommitBlock
-// counterpart of TestFinalizeTxPropagatesBalanceIncGetStateObjectError.
-func TestCommitBlockPropagatesBalanceIncGetStateObjectError(t *testing.T) {
-	t.Parallel()
-
-	wantErr := errors.New("read failed")
-	reader := &erroringReader{NoopReader: NewNoopReader(), errAddr: ripemd, err: wantErr}
-	sdb := New(reader)
-	defer sdb.Close()
-
-	require.NoError(t, sdb.AddBalance(ripemd, uint256.Int{}, tracing.BalanceChangeUnspecified))
-
-	err := sdb.CommitBlock(&chain.Rules{}, NewNoopWriter())
-	require.ErrorIs(t, err, wantErr)
+			require.ErrorIs(t, tc.call(sdb), wantErr)
+		})
+	}
 }
