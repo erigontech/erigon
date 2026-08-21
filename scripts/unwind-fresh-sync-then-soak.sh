@@ -387,6 +387,25 @@ if [[ -z "$DEPTHS" ]]; then
         done <<< "$SHUFFLED"
         echo "  DEPTHS=$DEPTHS (randomized, seed=$RANDOM_SEED)"
         echo "  REGIMES=$REGIMES"
+        # FORCE_REGIME=N overrides every iter's regime to N (e.g. 3 for
+        # mode-C, 4 for mode-D). Depths stay per-regime (each iter uses
+        # the FORCE_REGIME's [lo, hi] band). Used to reproduce a single
+        # class of failure without wasting iters on other regimes.
+        if [[ -n "${FORCE_REGIME:-}" ]]; then
+            fr="$FORCE_REGIME"
+            REGIMES=""
+            DEPTHS=""
+            lo=${R_LO[$fr]}
+            hi=${R_HI[$fr]}
+            for ((_i=1; _i<=ITER; _i++)); do
+                target=$(shuf -i "$lo-$hi" -n 1 \
+                    --random-source=<(openssl enc -aes-256-ctr -pass "pass:$RANDOM_SEED-fr-$_i" -nosalt < /dev/zero 2>/dev/null))
+                depth=$((HEAD_NOW - target))
+                DEPTHS="${DEPTHS:+$DEPTHS,}$depth"
+                REGIMES="${REGIMES:+$REGIMES,}$fr"
+            done
+            echo "  FORCE_REGIME=$fr overrode DEPTHS=$DEPTHS REGIMES=$REGIMES"
+        fi
     else
         rm -f "$RD_OUT"
         if [[ -z "$DEPTHS" ]]; then

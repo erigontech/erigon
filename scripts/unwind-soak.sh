@@ -535,6 +535,16 @@ for ((i=1; i<=ITER; i++)); do
         continue
     fi
 
+    # SCENARIO_3_MAX_ITER=N limits scenario 3 to iters ≤ N. Used for
+    # the mode-C-then-mode-B experiment: set to 1 so iter 1 runs
+    # scenario 3 (a single mode-C or mode-D unwind) and iters 2..ITER
+    # run scenario 1+2 only (mode-B regression tests). If mode-B
+    # starts failing after iter 1's scenario 3, direct evidence that
+    # the mode-C/D path corrupts state that mode-B then reads.
+    if [[ -n "${SCENARIO_3_MAX_ITER:-}" && "$i" -gt "$SCENARIO_3_MAX_ITER" ]]; then
+        continue
+    fi
+
     # Scenario 3: regime-driven depth from Phase 3.5. Target may land
     # in changeset / MDBX / per-step file / merged file — the CSV label
     # (S3_MODE) reflects that. mode-D is the target-in-merged-file case
