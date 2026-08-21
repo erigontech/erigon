@@ -348,7 +348,7 @@ func requireHashedOrder(t *testing.T, framed []byte) {
 		prevAccount, haveAccount = accountHash, true
 
 		haveSlot := false
-		for i := 0; i < slotCount; i++ {
+		for range slotCount {
 			slotHash := crypto.Keccak256Hash(framed[:preimageSlotLen])
 			framed = framed[preimageSlotLen:]
 			if haveSlot {
