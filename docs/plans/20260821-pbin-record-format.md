@@ -233,15 +233,15 @@ silent-misread case this task exists to prevent.
 `pbinAppendCell` and `pbinDecodeCell` are shared by branch records, the root record from `storeRoot`,
 and the state blob from `EncodeCurrentState`. This task changes all three layouts at once.
 
-- [ ] write a failing test pinning the new per-cell byte cost for each field combination
-- [ ] write a failing test that the state blob and the root record round-trip under the new layout
-- [ ] replace `pbinAppendLenAndVal` with a plain append for `accountAddr`, `storageAddr`, `leafValue` and `hash`
-- [ ] replace `pbinDecodeFixedVal`'s length read with a bounds check against the field's constant
-- [ ] keep the uvarint on `prefix.bitLen` — that length is genuinely variable
-- [ ] bump `pbinRecordFormat`
-- [ ] write tests that a record truncated inside each fixed field is rejected with a clear error
-- [ ] verify `TestPBinBranchCodecIsCanonical` still holds — one cell state, one spelling
-- [ ] run `go test ./execution/commitment/...` — must pass before task 4
+- [x] write a failing test pinning the new per-cell byte cost for each field combination
+- [x] write a failing test that the state blob and the root record round-trip under the new layout
+- [x] replace `pbinAppendLenAndVal` with a plain append for `accountAddr`, `storageAddr`, `leafValue` and `hash`
+- [x] replace `pbinDecodeFixedVal`'s length read with a bounds check against the field's constant
+- [x] keep the uvarint on `prefix.bitLen` — that length is genuinely variable
+- [x] bump `pbinRecordFormat`
+- [x] write tests that a record truncated inside each fixed field is rejected with a clear error
+- [x] verify `TestPBinBranchCodecIsCanonical` still holds — one cell state, one spelling
+- [x] run `go test ./execution/commitment/...` — must pass before task 4
 
 ### Task 4: Give the decoder the descent depth and digest cache
 

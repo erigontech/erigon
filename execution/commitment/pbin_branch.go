@@ -105,26 +105,22 @@ func pbinAppendCell(dst []byte, c *pbinCell) ([]byte, error) {
 	dst = c.prefix.appendPackedBits(dst)
 
 	if fields&pbinFieldAccountAddr != 0 {
-		dst = pbinAppendLenAndVal(dst, c.accountAddr[:c.accountAddrLen])
+		dst = append(dst, c.accountAddr[:c.accountAddrLen]...)
 	}
 	if fields&pbinFieldStorageAddr != 0 {
-		dst = pbinAppendLenAndVal(dst, c.storageAddr[:c.storageAddrLen])
+		dst = append(dst, c.storageAddr[:c.storageAddrLen]...)
 	}
 	if fields&pbinFieldLeafValue != 0 {
 		value, err := pbinRecordLeafValue(&c.Update)
 		if err != nil {
 			return nil, err
 		}
-		dst = pbinAppendLenAndVal(dst, value[:])
+		dst = append(dst, value[:]...)
 	}
 	if fields&pbinFieldHash != 0 {
-		dst = pbinAppendLenAndVal(dst, c.hash[:c.hashLen])
+		dst = append(dst, c.hash[:c.hashLen]...)
 	}
 	return dst, nil
-}
-
-func pbinAppendLenAndVal(dst, val []byte) []byte {
-	return append(binary.AppendUvarint(dst, uint64(len(val))), val...)
 }
 
 // pbinDecodeBranch fills both cells from a record. It rejects every spelling the
@@ -228,16 +224,8 @@ func pbinDecodePrefix(data []byte, pos int, c *pbinCell) (int, error) {
 }
 
 func pbinDecodeFixedVal(data []byte, pos int, dst []byte, want int) (int, error) {
-	l, n := binary.Uvarint(data[pos:])
-	if n <= 0 {
-		return 0, fmt.Errorf("%w: unreadable value length at offset %d", errPBinMalformedBranch, pos)
-	}
-	pos += n
-	if l != uint64(want) {
-		return 0, fmt.Errorf("%w: value of %d bytes, want %d", errPBinMalformedBranch, l, want)
-	}
 	if pos+want > len(data) {
-		return 0, fmt.Errorf("%w: value of %d bytes needs more than the %d left", errPBinMalformedBranch, want, len(data)-pos)
+		return 0, fmt.Errorf("%w: fixed value of %d bytes needs more than the %d left", errPBinMalformedBranch, want, len(data)-pos)
 	}
 	copy(dst, data[pos:pos+want])
 	return pos + want, nil

@@ -100,6 +100,57 @@ func TestPBinBranchCodecOmitsRecordHeader(t *testing.T) {
 	require.Equal(t, byte(pbinFieldBranch|pbinFieldHash), rec[0])
 }
 
+func TestPBinCellCodecFixedFieldCosts(t *testing.T) {
+	t.Parallel()
+
+	account := pbinTestEmptyCell()
+	account.kind = pbinNodeLeaf
+	account.accountAddrLen = length.Addr
+	account.hashLen = 0
+
+	accountWithHash := account
+	accountWithHash.hashLen = length.Hash
+
+	storage := pbinTestEmptyCell()
+	storage.kind = pbinNodeLeaf
+	storage.storageAddrLen = length.Addr + length.Hash
+
+	storageWithHash := storage
+	storageWithHash.hashLen = length.Hash
+
+	value := pbinTestChunkLeafCell(0x31, 0)
+	value.hashLen = 0
+
+	valueWithHash := value
+	valueWithHash.hashLen = length.Hash
+
+	branch := pbinTestEmptyCell()
+	branch.kind = pbinNodeBranch
+
+	for _, tc := range []struct {
+		name      string
+		cell      pbinCell
+		fixedSize int
+	}{
+		{"branch", branch, 0},
+		{"branch and hash", pbinTestBranchCell(0x01, 0), length.Hash},
+		{"account address", account, length.Addr},
+		{"account address and hash", accountWithHash, length.Addr + length.Hash},
+		{"storage address", storage, length.Addr + length.Hash},
+		{"storage address and hash", storageWithHash, length.Addr + 2*length.Hash},
+		{"record value", value, pbinValueLength},
+		{"record value and hash", valueWithHash, pbinValueLength + length.Hash},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			got, err := pbinAppendCell(nil, &tc.cell)
+			require.NoError(t, err)
+			require.Len(t, got, 2+tc.fixedSize)
+		})
+	}
+}
+
 func TestPBinBranchCodecRoundTripCellShapes(t *testing.T) {
 	t.Parallel()
 
@@ -188,8 +239,41 @@ func pbinTestCellBody(fields pbinCellFields, prefixBitLen uint64, prefix []byte,
 	return append(body, tail...)
 }
 
-func pbinTestLenAndVal(val []byte) []byte {
-	return append(binary.AppendUvarint(nil, uint64(len(val))), val...)
+func pbinTestFixedVal(val []byte) []byte {
+	return append([]byte(nil), val...)
+}
+
+func TestPBinDecodeRejectsTruncatedFixedFields(t *testing.T) {
+	t.Parallel()
+
+	account := pbinTestEmptyCell()
+	account.kind = pbinNodeLeaf
+	account.accountAddrLen = length.Addr
+	storage := pbinTestEmptyCell()
+	storage.kind = pbinNodeLeaf
+	storage.storageAddrLen = length.Addr + length.Hash
+	value := pbinTestChunkLeafCell(0x41, 0)
+	branch := pbinTestBranchCell(0x52, 0)
+
+	for _, tc := range []struct {
+		name string
+		cell pbinCell
+	}{
+		{"account address", account},
+		{"storage address", storage},
+		{"record value", value},
+		{"hash", branch},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			record, err := pbinAppendCell(nil, &tc.cell)
+			require.NoError(t, err)
+			_, err = pbinDecodeCell(record[:len(record)-1], 0, new(pbinCell))
+			require.Error(t, err)
+			require.ErrorContains(t, err, "fixed value")
+		})
+	}
 }
 
 // A declared bit count that disagrees with the bytes behind it must be rejected,
@@ -214,25 +298,26 @@ func TestPBinBranchDecodeRejects(t *testing.T) {
 		{"non-zero pad bits", pbinTestRecord(pbinTestCellBody(pbinFieldBranch, 3, []byte{0xFF}), body)},
 		{"bit count beyond the longest path", pbinTestRecord(pbinTestCellBody(pbinFieldBranch, pbinMaxPathBits+1, bytes.Repeat([]byte{0xFF}, 67)), body)},
 		{"truncated uvarint", pbinTestRecord([]byte{byte(pbinFieldBranch), 0x80}, body)},
-		{"hash longer than a digest", pbinTestRecord(pbinTestCellBody(pbinFieldBranch|pbinFieldHash, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 33))...), body)},
-		{"truncated hash", pbinTestRecord(pbinTestCellBody(pbinFieldBranch|pbinFieldHash, 0, nil, 32, 0xEE), body)},
-		{"account address of the wrong length", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 21))...), body)},
-		{"storage address of the wrong length", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldStorageAddr, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 51))...), body)},
+		{"hash with an extra byte", pbinTestRecord(pbinTestCellBody(pbinFieldBranch|pbinFieldHash, 0, nil, pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, 33))...), body)},
+		{"truncated hash", pbinTestRecord(pbinTestCellBody(pbinFieldBranch|pbinFieldHash, 0, nil, pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, 31))...), body)},
+		{"account address with an extra byte", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr, 0, nil, pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, 21))...), body)},
+		{"storage address with an extra byte", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldStorageAddr, 0, nil, pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, 51))...), body)},
 		{"trailing bytes", pbinTestRecord(body, body, []byte{0x00})},
 		// A leaf resolves its value through its plain key, so one without a plain
 		// key would hash a zero-valued state instead of failing.
 		{"leaf without a plain key", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf, 0, nil), body)},
 		{"leaf naming both plain keys", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr|pbinFieldStorageAddr, 0, nil,
-			append(pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr)), pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr+length.Hash))...)...))},
+			append(pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, length.Addr)), pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, length.Addr+length.Hash))...)...))},
 		// A record-resident value and a plain key are two answers to the same
 		// question; a branch has no value at all.
 		{"leaf naming a plain key and a record value", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr|pbinFieldLeafValue, 0, nil,
-			append(pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr)), pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, pbinValueLength))...)...))},
+			append(pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, length.Addr)), pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, pbinValueLength))...)...))},
 		{"branch carrying a record value", pbinTestRecord(pbinTestCellBody(pbinFieldBranch|pbinFieldLeafValue, 0, nil,
-			pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, pbinValueLength))...))},
+			pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, pbinValueLength))...))},
 		{"record value shorter than a leaf value", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldLeafValue, 0, nil,
-			pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, pbinValueLength-1))...))},
-		{"truncated record value", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldLeafValue, 0, nil, pbinValueLength, 0xEE), body)},
+			pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, pbinValueLength-1))...))},
+		{"truncated record value", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldLeafValue, 0, nil,
+			pbinTestFixedVal(bytes.Repeat([]byte{0xEE}, pbinValueLength-1))...), body)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()

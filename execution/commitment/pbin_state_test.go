@@ -87,6 +87,34 @@ func TestPBinStateBlobRoundTripsFlags(t *testing.T) {
 	require.Equal(t, storedRoot, root)
 }
 
+func TestPBinRootAndStateRoundTripFixedFields(t *testing.T) {
+	t.Parallel()
+
+	pph, ms := pbinTestEngine(t)
+	root := pbinTestLeafCell(0x63, 0)
+	pph.grid.root = root
+	pph.rootPresent = true
+	pph.rootChecked = true
+	pph.rootTouched = true
+
+	rootRecord, err := pbinAppendCell(nil, &root)
+	require.NoError(t, err)
+	require.NoError(t, ms.PutBranch(pbinRootKey, rootRecord, nil))
+
+	loaded := NewPBinPatriciaHashed(ms)
+	require.NoError(t, loaded.loadRoot())
+	require.Equal(t, root, loaded.grid.root)
+
+	state, err := pph.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	restored := NewPBinPatriciaHashed(ms)
+	require.NoError(t, restored.SetState(state))
+	require.Equal(t, root, restored.grid.root)
+	require.True(t, restored.rootPresent)
+	require.True(t, restored.rootChecked)
+	require.True(t, restored.rootTouched)
+}
+
 // Following the hex convention, no state blob resets the engine; the tree is
 // then found again through the stored root record rather than lost.
 func TestPBinSetStateEmptyResetsToStored(t *testing.T) {

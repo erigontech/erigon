@@ -29,7 +29,7 @@ const (
 	// pbinStateMarker opens every pbin blob. A hex blob opens with a root-flags
 	// byte ≤ 0x07, so the marker also refuses a cross-variant restore outright.
 	pbinStateMarker  = 0xB1
-	pbinRecordFormat = 2
+	pbinRecordFormat = 3
 
 	pbinStateRootPresent = 1
 	pbinStateRootChecked = 2
