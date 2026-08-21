@@ -566,7 +566,7 @@ func (pph *PBinPatriciaHashed) unfoldBranchNode(row int, depth int16, deleted bo
 		return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, pph.currentKey.bitLen)
 	}
 
-	_, afterMap, err := pbinDecodeBranch(data, &g.rows[row])
+	afterMap, err := pbinDecodeBranch(data, &g.rows[row])
 	if err != nil {
 		return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 	}
@@ -793,7 +793,7 @@ func (pph *PBinPatriciaHashed) dropSubtreeRecords(c *pbinCell, slot *pbinBitpath
 		if len(data) == 0 {
 			return fmt.Errorf("%w at %x (%d bits)", errPBinMissingBranch, key, path.bitLen)
 		}
-		_, afterMap, err := pbinDecodeBranch(data, &cells)
+		afterMap, err := pbinDecodeBranch(data, &cells)
 		if err != nil {
 			return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 		}
@@ -946,7 +946,7 @@ func (pph *PBinPatriciaHashed) materializeBranch(c *pbinCell, path *pbinBitpath)
 	pph.counters.materializeReads++
 
 	var cells [2]pbinCell
-	if _, _, err = pbinDecodeBranch(data, &cells); err != nil {
+	if _, err = pbinDecodeBranch(data, &cells); err != nil {
 		return fmt.Errorf("pbin: decode branch at %x: %w", key, err)
 	}
 	childPath := nodeKey

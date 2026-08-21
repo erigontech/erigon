@@ -210,17 +210,17 @@ silent-misread case this task exists to prevent.
 - Modify: `execution/commitment/pbin_fold_test.go`
 - Modify: `execution/commitment/pbin_unfold_test.go`
 
-- [ ] write a failing test asserting the encoded record no longer begins with the four header bytes
-- [ ] drop the two `AppendUint16` calls from `pbinBranchEncoder.encode` and always encode both cells
-- [ ] make `pbinDecodeBranch` reconstruct `afterMap` as `0b11` rather than reading it
-- [ ] keep `pbinCheckCellMaps` as an encode-time guard on the in-memory maps
-- [ ] update **both** production callers of `encode` if its signature changes: `foldBranch` and
-      `pbinWitnessContext.branchRecord`
-- [ ] update `unfoldBranchNode`, `dropSubtreeRecords` and `materializeBranch` for the new decode signature
-- [ ] bump `pbinRecordFormat`
-- [ ] write tests that a truncated record and a record with trailing bytes are still rejected
-- [ ] verify the root-pinning tests stay green
-- [ ] run `go test ./execution/commitment/...` — must pass before task 3
+- [x] write a failing test asserting the encoded record no longer begins with the four header bytes
+- [x] drop the two `AppendUint16` calls from `pbinBranchEncoder.encode` and always encode both cells
+- [x] make `pbinDecodeBranch` reconstruct `afterMap` as `0b11` rather than reading it
+- [x] keep `pbinCheckCellMaps` as an encode-time guard on the in-memory maps
+- [x] update **both** production callers of `encode` if its signature changes: `foldBranch` and
+      `pbinWitnessContext.branchRecord` (signature unchanged; existing callers remain valid)
+- [x] update `unfoldBranchNode`, `dropSubtreeRecords` and `materializeBranch` for the new decode signature
+- [x] bump `pbinRecordFormat`
+- [x] write tests that a truncated record and a record with trailing bytes are still rejected
+- [x] verify the root-pinning tests stay green
+- [x] run `go test ./execution/commitment/...` — must pass before task 3
 
 ### Task 3: Drop the uvarint length on every fixed-size field
 

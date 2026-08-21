@@ -83,12 +83,21 @@ func TestPBinBranchCodecRoundTripPrefixBitLengths(t *testing.T) {
 		require.NoErrorf(t, err, "bitLen %d", bitLen)
 
 		var got [2]pbinCell
-		touchMap, afterMap, err := pbinDecodeBranch(bytes.Clone(rec), &got)
+		afterMap, err := pbinDecodeBranch(bytes.Clone(rec), &got)
 		require.NoErrorf(t, err, "bitLen %d", bitLen)
-		require.Equal(t, uint16(0b11), touchMap)
 		require.Equal(t, uint16(0b11), afterMap)
 		require.Equalf(t, cells, got, "bitLen %d", bitLen)
 	}
+}
+
+func TestPBinBranchCodecOmitsRecordHeader(t *testing.T) {
+	t.Parallel()
+
+	cells := [2]pbinCell{pbinTestBranchCell(0xA5, 3), pbinTestBranchCell(0x5A, 7)}
+	var enc pbinBranchEncoder
+	rec, err := enc.encode(0b11, 0b11, &cells)
+	require.NoError(t, err)
+	require.Equal(t, byte(pbinFieldBranch|pbinFieldHash), rec[0])
 }
 
 func TestPBinBranchCodecRoundTripCellShapes(t *testing.T) {
@@ -109,8 +118,7 @@ func TestPBinBranchCodecRoundTripCellShapes(t *testing.T) {
 		{"both branches", 0b11, 0b11, [2]pbinCell{pbinTestBranchCell(0x01, 3), pbinTestBranchCell(0x02, 528)}},
 		{"leaf and branch", 0b11, 0b11, [2]pbinCell{pbinTestLeafCell(0x03, 271), pbinTestBranchCell(0x04, 5)}},
 		{"hashless account leaf", 0b11, 0b11, [2]pbinCell{accountLeaf, pbinTestLeafCell(0x05, 64)}},
-		{"only the right cell present", 0b10, 0b10, [2]pbinCell{pbinTestEmptyCell(), pbinTestBranchCell(0x07, 9)}},
-		{"deleted left cell", 0b11, 0b10, [2]pbinCell{pbinTestEmptyCell(), pbinTestBranchCell(0x08, 9)}},
+		{"maps do not control payload", 0b10, 0b10, [2]pbinCell{pbinTestBranchCell(0x07, 9), pbinTestBranchCell(0x08, 9)}},
 		{"record-resident chunk leaf", 0b11, 0b11, [2]pbinCell{pbinTestChunkLeafCell(0x09, 12), pbinTestBranchCell(0x0A, 21)}},
 		{"two chunk leaves", 0b11, 0b11, [2]pbinCell{pbinTestChunkLeafCell(0x0B, 0), pbinTestChunkLeafCell(0x0C, 528)}},
 	} {
@@ -122,10 +130,9 @@ func TestPBinBranchCodecRoundTripCellShapes(t *testing.T) {
 			require.NoError(t, err)
 
 			var got [2]pbinCell
-			touchMap, afterMap, err := pbinDecodeBranch(rec, &got)
+			afterMap, err := pbinDecodeBranch(rec, &got)
 			require.NoError(t, err)
-			require.Equal(t, tc.touchMap, touchMap)
-			require.Equal(t, tc.afterMap, afterMap)
+			require.Equal(t, uint16(0b11), afterMap)
 			require.Equal(t, tc.cells, got)
 		})
 	}
@@ -152,7 +159,7 @@ func TestPBinBranchCodecIsCanonical(t *testing.T) {
 			want := bytes.Clone(rec)
 
 			var got [2]pbinCell
-			_, _, err = pbinDecodeBranch(want, &got)
+			_, err = pbinDecodeBranch(want, &got)
 			require.NoError(t, err)
 
 			again, err := enc.encode(0b11, 0b11, &got)
@@ -164,10 +171,8 @@ func TestPBinBranchCodecIsCanonical(t *testing.T) {
 
 // pbinTestRecord assembles a record by hand so decode can be probed with bytes
 // the encoder would never emit.
-func pbinTestRecord(touchMap, afterMap uint16, bodies ...[]byte) []byte {
-	rec := make([]byte, 0, 4)
-	rec = binary.BigEndian.AppendUint16(rec, touchMap)
-	rec = binary.BigEndian.AppendUint16(rec, afterMap)
+func pbinTestRecord(bodies ...[]byte) []byte {
+	rec := make([]byte, 0)
 	for _, b := range bodies {
 		rec = append(rec, b...)
 	}
@@ -199,42 +204,40 @@ func TestPBinBranchDecodeRejects(t *testing.T) {
 		name string
 		rec  []byte
 	}{
-		{"truncated header", []byte{0x00, 0x03, 0x00}},
-		{"cell bit outside the arity", pbinTestRecord(0b100, 0b100, body)},
-		{"touched bit outside the arity", pbinTestRecord(0b1011, 0b11, body, body)},
-		{"missing cell body", pbinTestRecord(0b11, 0b11, body)},
-		{"unknown field bit", pbinTestRecord(0b01, 0b01, pbinTestCellBody(0x80, 0, nil))},
-		{"no node kind", pbinTestRecord(0b01, 0b01, pbinTestCellBody(0, 0, nil))},
-		{"both node kinds", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch|pbinFieldLeaf, 0, nil))},
-		{"prefix shorter than its bit count", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch, 16, []byte{0xFF}))},
-		{"prefix longer than its bit count", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch, 8, []byte{0xFF, 0xFF}))},
-		{"non-zero pad bits", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch, 3, []byte{0xFF}))},
-		{"bit count beyond the longest path", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch, pbinMaxPathBits+1, bytes.Repeat([]byte{0xFF}, 67)))},
-		{"truncated uvarint", pbinTestRecord(0b01, 0b01, []byte{byte(pbinFieldBranch), 0x80})},
-		{"hash longer than a digest", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch|pbinFieldHash, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 33))...))},
-		{"truncated hash", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch|pbinFieldHash, 0, nil, 32, 0xEE))},
-		{"account address of the wrong length", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 21))...))},
-		{"storage address of the wrong length", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldStorageAddr, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 51))...))},
-		{"trailing bytes", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch, 0, nil), []byte{0x00})},
+		{"missing first cell body", nil},
+		{"missing second cell body", pbinTestRecord(body)},
+		{"unknown field bit", pbinTestRecord(pbinTestCellBody(0x80, 0, nil), body)},
+		{"no node kind", pbinTestRecord(pbinTestCellBody(0, 0, nil), body)},
+		{"both node kinds", pbinTestRecord(pbinTestCellBody(pbinFieldBranch|pbinFieldLeaf, 0, nil), body)},
+		{"prefix shorter than its bit count", pbinTestRecord(pbinTestCellBody(pbinFieldBranch, 16, []byte{0xFF}), body)},
+		{"prefix longer than its bit count", pbinTestRecord(pbinTestCellBody(pbinFieldBranch, 8, []byte{0xFF, 0xFF}), body)},
+		{"non-zero pad bits", pbinTestRecord(pbinTestCellBody(pbinFieldBranch, 3, []byte{0xFF}), body)},
+		{"bit count beyond the longest path", pbinTestRecord(pbinTestCellBody(pbinFieldBranch, pbinMaxPathBits+1, bytes.Repeat([]byte{0xFF}, 67)), body)},
+		{"truncated uvarint", pbinTestRecord([]byte{byte(pbinFieldBranch), 0x80}, body)},
+		{"hash longer than a digest", pbinTestRecord(pbinTestCellBody(pbinFieldBranch|pbinFieldHash, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 33))...), body)},
+		{"truncated hash", pbinTestRecord(pbinTestCellBody(pbinFieldBranch|pbinFieldHash, 0, nil, 32, 0xEE), body)},
+		{"account address of the wrong length", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 21))...), body)},
+		{"storage address of the wrong length", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldStorageAddr, 0, nil, pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, 51))...), body)},
+		{"trailing bytes", pbinTestRecord(body, body, []byte{0x00})},
 		// A leaf resolves its value through its plain key, so one without a plain
 		// key would hash a zero-valued state instead of failing.
-		{"leaf without a plain key", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf, 0, nil))},
-		{"leaf naming both plain keys", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr|pbinFieldStorageAddr, 0, nil,
+		{"leaf without a plain key", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf, 0, nil), body)},
+		{"leaf naming both plain keys", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr|pbinFieldStorageAddr, 0, nil,
 			append(pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr)), pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr+length.Hash))...)...))},
 		// A record-resident value and a plain key are two answers to the same
 		// question; a branch has no value at all.
-		{"leaf naming a plain key and a record value", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr|pbinFieldLeafValue, 0, nil,
+		{"leaf naming a plain key and a record value", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldAccountAddr|pbinFieldLeafValue, 0, nil,
 			append(pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, length.Addr)), pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, pbinValueLength))...)...))},
-		{"branch carrying a record value", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldBranch|pbinFieldLeafValue, 0, nil,
+		{"branch carrying a record value", pbinTestRecord(pbinTestCellBody(pbinFieldBranch|pbinFieldLeafValue, 0, nil,
 			pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, pbinValueLength))...))},
-		{"record value shorter than a leaf value", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldLeafValue, 0, nil,
+		{"record value shorter than a leaf value", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldLeafValue, 0, nil,
 			pbinTestLenAndVal(bytes.Repeat([]byte{0xEE}, pbinValueLength-1))...))},
-		{"truncated record value", pbinTestRecord(0b01, 0b01, pbinTestCellBody(pbinFieldLeaf|pbinFieldLeafValue, 0, nil, pbinValueLength, 0xEE))},
+		{"truncated record value", pbinTestRecord(pbinTestCellBody(pbinFieldLeaf|pbinFieldLeafValue, 0, nil, pbinValueLength, 0xEE), body)},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var cells [2]pbinCell
-			_, _, err := pbinDecodeBranch(tc.rec, &cells)
+			_, err := pbinDecodeBranch(tc.rec, &cells)
 			require.Error(t, err)
 		})
 	}
@@ -277,7 +280,7 @@ func TestPBinBranchCodecDropsLoadedState(t *testing.T) {
 	require.NoError(t, err)
 
 	var got [2]pbinCell
-	_, _, err = pbinDecodeBranch(bytes.Clone(rec), &got)
+	_, err = pbinDecodeBranch(bytes.Clone(rec), &got)
 	require.NoError(t, err)
 	require.Equal(t, cellLoadNone, got[0].loaded)
 	require.Zero(t, got[0].Nonce)
@@ -296,7 +299,7 @@ func TestPBinBranchDecodeClearsReusedCells(t *testing.T) {
 	rec, err := enc.encode(0b11, 0b11, &want)
 	require.NoError(t, err)
 
-	_, _, err = pbinDecodeBranch(bytes.Clone(rec), &cells)
+	_, err = pbinDecodeBranch(bytes.Clone(rec), &cells)
 	require.NoError(t, err)
 	require.Equal(t, want, cells)
 }

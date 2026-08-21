@@ -20,7 +20,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/bits"
 
 	"github.com/erigontech/erigon/common/length"
 )
@@ -67,16 +66,13 @@ func (e *pbinBranchEncoder) encode(touchMap, afterMap uint16, cells *[2]pbinCell
 	if err := pbinCheckCellMaps(touchMap, afterMap); err != nil {
 		return nil, err
 	}
-	e.buf = binary.BigEndian.AppendUint16(e.buf[:0], touchMap)
-	e.buf = binary.BigEndian.AppendUint16(e.buf, afterMap)
+	e.buf = e.buf[:0]
 
 	var err error
-	for bitset := afterMap; bitset != 0; {
-		bit := bitset & -bitset
-		if e.buf, err = pbinAppendCell(e.buf, &cells[bits.TrailingZeros16(bit)]); err != nil {
+	for i := range cells {
+		if e.buf, err = pbinAppendCell(e.buf, &cells[i]); err != nil {
 			return nil, err
 		}
-		bitset ^= bit
 	}
 	return e.buf, nil
 }
@@ -133,30 +129,20 @@ func pbinAppendLenAndVal(dst, val []byte) []byte {
 
 // pbinDecodeBranch fills both cells from a record. It rejects every spelling the
 // encoder would not produce, so a record has one canonical form.
-func pbinDecodeBranch(data []byte, cells *[2]pbinCell) (touchMap, afterMap uint16, err error) {
+func pbinDecodeBranch(data []byte, cells *[2]pbinCell) (afterMap uint16, err error) {
 	cells[0].reset()
 	cells[1].reset()
 
-	if len(data) < 4 {
-		return 0, 0, fmt.Errorf("%w: %d bytes is shorter than the header", errPBinMalformedBranch, len(data))
-	}
-	touchMap, afterMap = binary.BigEndian.Uint16(data), binary.BigEndian.Uint16(data[2:])
-	if err := pbinCheckCellMaps(touchMap, afterMap); err != nil {
-		return 0, 0, err
-	}
-
-	pos := 4
-	for bitset := afterMap; bitset != 0; {
-		bit := bitset & -bitset
-		if pos, err = pbinDecodeCell(data, pos, &cells[bits.TrailingZeros16(bit)]); err != nil {
-			return 0, 0, err
+	pos := 0
+	for i := range cells {
+		if pos, err = pbinDecodeCell(data, pos, &cells[i]); err != nil {
+			return 0, err
 		}
-		bitset ^= bit
 	}
 	if pos != len(data) {
-		return 0, 0, fmt.Errorf("%w: %d trailing bytes", errPBinMalformedBranch, len(data)-pos)
+		return 0, fmt.Errorf("%w: %d trailing bytes", errPBinMalformedBranch, len(data)-pos)
 	}
-	return touchMap, afterMap, nil
+	return pbinCellBits, nil
 }
 
 func pbinDecodeCell(data []byte, pos int, c *pbinCell) (int, error) {
