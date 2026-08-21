@@ -1270,53 +1270,44 @@ func (s *WriteSet) addrs() map[accounts.Address]struct{} {
 // SelfDestructs before the reviving field writes) rather than relying on a flat
 // stream's element order.
 func (s *WriteSet) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[uint256.Int](nil))
-	}
-	s.assertLive()
-	return maps.All(s.balance)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint256.Int] { return s.balance })
 }
 func (s *WriteSet) Nonces() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[uint64](nil))
-	}
-	s.assertLive()
-	return maps.All(s.nonce)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint64] { return s.nonce })
 }
 func (s *WriteSet) Incarnations() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[uint64](nil))
-	}
-	s.assertLive()
-	return maps.All(s.incarnation)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint64] { return s.incarnation })
 }
 func (s *WriteSet) SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[bool](nil))
-	}
-	s.assertLive()
-	return maps.All(s.selfDestruct)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[bool] { return s.selfDestruct })
 }
 func (s *WriteSet) Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[accounts.Code](nil))
-	}
-	s.assertLive()
-	return maps.All(s.code)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[accounts.Code] { return s.code })
 }
 func (s *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.CodeHash]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[accounts.CodeHash](nil))
-	}
-	s.assertLive()
-	return maps.All(s.codeHash)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[accounts.CodeHash] { return s.codeHash })
 }
 func (s *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int](nil))
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int] {
+		return s.storage
+	})
+}
+
+// writeSetSeq defers both the liveness check and the map read to the moment the
+// sequence runs. A sequence built before ReleaseMaps would otherwise walk the
+// pooled maps and silently see nothing.
+func writeSetSeq[T any](s *WriteSet, pick func(*WriteSet) map[accounts.Address]T) iter.Seq2[accounts.Address, T] {
+	return func(yield func(accounts.Address, T) bool) {
+		if s == nil {
+			return
+		}
+		s.assertLive()
+		for addr, v := range pick(s) {
+			if !yield(addr, v) {
+				return
+			}
+		}
 	}
-	s.assertLive()
-	return maps.All(s.storage)
 }
 
 func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield func(WriteHeader) bool) bool {
@@ -1331,11 +1322,11 @@ func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield f
 // AllHeaders visits the type-agnostic header of every write; the value is read
 // typed-by-path from the per-path maps, so nothing is erased to an interface.
 func (s *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
-	s.assertLive()
 	return func(yield func(WriteHeader) bool) {
 		if s == nil {
 			return
 		}
+		s.assertLive()
 		if !eachWriteHeaderOf(s.address, yield) ||
 			!eachWriteHeaderOf(s.balance, yield) ||
 			!eachWriteHeaderOf(s.nonce, yield) ||

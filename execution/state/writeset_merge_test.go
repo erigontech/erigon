@@ -18,6 +18,7 @@ package state
 
 import (
 	"fmt"
+	"iter"
 	"maps"
 	"testing"
 
@@ -392,6 +393,49 @@ func TestWriteSetReleasedTripwire(t *testing.T) {
 	reused := &WriteSet{}
 	reused.ReleaseAndReset()
 	assert.Zero(t, reused.Count())
+}
+
+func drainSeq[V any](seq iter.Seq[V]) func() {
+	return func() {
+		for range seq {
+		}
+	}
+}
+
+func drainSeq2[K, V any](seq iter.Seq2[K, V]) func() {
+	return func() {
+		for range seq {
+		}
+	}
+}
+
+// The check must fire when the iterator runs, not when it is built: a sequence
+// taken before ReleaseMaps still points at the set, so consuming it afterwards
+// would walk the pooled maps and see nothing.
+func TestWriteSetReleasedTripwireLazyIterators(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	for _, tc := range []struct {
+		name string
+		take func(*WriteSet) func()
+	}{
+		{"Balances", func(s *WriteSet) func() { return drainSeq2(s.Balances()) }},
+		{"Nonces", func(s *WriteSet) func() { return drainSeq2(s.Nonces()) }},
+		{"Incarnations", func(s *WriteSet) func() { return drainSeq2(s.Incarnations()) }},
+		{"SelfDestructs", func(s *WriteSet) func() { return drainSeq2(s.SelfDestructs()) }},
+		{"Codes", func(s *WriteSet) func() { return drainSeq2(s.Codes()) }},
+		{"CodeHashes", func(s *WriteSet) func() { return drainSeq2(s.CodeHashes()) }},
+		{"Storages", func(s *WriteSet) func() { return drainSeq2(s.Storages()) }},
+		{"AllHeaders", func(s *WriteSet) func() { return drainSeq(s.AllHeaders()) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			released, _ := mergeIntoFixture()
+			consume := tc.take(released)
+			released.ReleaseMaps()
+			assert.Panics(t, consume)
+		})
+	}
 }
 
 func TestVersionedIOReleaseOutputMaps(t *testing.T) {
