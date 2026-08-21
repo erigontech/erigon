@@ -56,6 +56,15 @@ const (
 
 	preimagesFileName     = "framed.bin"
 	preimagesMetaFileName = "preimages.meta.json"
+
+	// Records are ordered by keccak256 of the plain key. A file written before that
+	// was pinned is shape-identical, so consumers must require this field rather than
+	// infer the order from the layout.
+	preimagesOrderKeccak256 = "keccak256"
+
+	// Scratch lives in a directory this command owns, so leftovers from a killed run
+	// can be cleared without touching anyone else's temp files.
+	preimagesScratchDirName = "export-preimages"
 )
 
 var exportPreimagesCommand = cli.Command{
@@ -74,6 +83,7 @@ var exportPreimagesCommand = cli.Command{
 type preimagesMeta struct {
 	Block     uint64 `json:"block"`
 	StateRoot string `json:"stateRoot"`
+	Order     string `json:"order"`
 	Accounts  uint64 `json:"accounts"`
 	Storage   uint64 `json:"storage"`
 }
@@ -89,7 +99,8 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	if tmpDir == "" {
 		tmpDir = dirs.Tmp
 	}
-	if err := os.MkdirAll(tmpDir, 0o755); err != nil {
+	tmpDir, err = prepareScratchDir(tmpDir)
+	if err != nil {
 		return err
 	}
 
@@ -142,7 +153,7 @@ func doExportPreimages(ctx context.Context, cliCtx *cli.Command) error {
 	}
 
 	metadata := preimagesMeta{
-		Block: blockNum, StateRoot: commitmentRoot.Hex(),
+		Block: blockNum, StateRoot: commitmentRoot.Hex(), Order: preimagesOrderKeccak256,
 		Accounts: stats.Accounts, Storage: stats.Slots,
 	}
 	metadataJSON, err := json.MarshalIndent(metadata, "", "  ")
@@ -206,7 +217,7 @@ func writePreimagesFile(
 	if err != nil {
 		return collected, err
 	}
-	stats, err = writeHashedPreimages(collector, countedWriter, ctx.Done(), reportWriting)
+	stats, err = writeHashedPreimages(ctx, collector, countedWriter, reportWriting)
 	if err != nil {
 		return stats, err
 	}
@@ -239,6 +250,20 @@ func openExportDirs(dataDir string) (datadir.Dirs, error) {
 		return dirs, fmt.Errorf("datadir is not a directory: %s", dirs.DataDir)
 	}
 	return dirs, nil
+}
+
+// prepareScratchDir gives the sort a directory of its own under tmpDir and empties it first.
+// Only collector.Close() unlinks the spill, so a SIGKILL or OOM mid-export strands it -- on
+// mainnet that is >100 GB, and the retry would then hit ENOSPC partway through.
+func prepareScratchDir(tmpDir string) (string, error) {
+	scratch := filepath.Join(tmpDir, preimagesScratchDirName)
+	if err := os.RemoveAll(scratch); err != nil {
+		return "", fmt.Errorf("clear scratch %s: %w", scratch, err)
+	}
+	if err := os.MkdirAll(scratch, 0o755); err != nil {
+		return "", err
+	}
+	return scratch, nil
 }
 
 func preparePreimagesOutput(outDir string) (framedPath, metaPath string, err error) {
@@ -285,6 +310,11 @@ func (stats exportPreimagesStats) sizeBytes() uint64 {
 // account's key is a strict prefix of its own slots' keys and of nothing else, so
 // the merge-sorted load emits each account immediately ahead of its slots, both
 // in the EIP-8347 order.
+//
+// Both domain scans are ascending by plain key and a storage key starts with its
+// address, so walking them together keeps the account for the storage run at hand:
+// that both reuses its hash across the run and rejects an orphaned slot here,
+// rather than after the whole key set has spilled to disk.
 func collectHashedPreimages(
 	ctx context.Context,
 	accounts, storage stream.KV,
@@ -297,32 +327,39 @@ func collectHashedPreimages(
 	// which takes a mutex on every call.
 	done := ctx.Done()
 
-	for accounts.HasNext() {
-		select {
-		case <-done:
-			return stats, ctx.Err()
-		default:
+	var accountAddr [preimageAddrLen]byte
+	var accountHash common.Hash
+	var hashedKey [2 * length.Hash]byte
+	haveAccount := false
+
+	nextAccount := func() error {
+		if !accounts.HasNext() {
+			haveAccount = false
+			return nil
 		}
 		accountKey, _, err := accounts.Next()
 		if err != nil {
-			return stats, err
+			return err
 		}
 		if len(accountKey) != preimageAddrLen {
-			return stats, fmt.Errorf("account: unexpected key length %d: %x", len(accountKey), accountKey)
+			return fmt.Errorf("account: unexpected key length %d: %x", len(accountKey), accountKey)
 		}
-		accountHash := crypto.Keccak256Hash(accountKey)
-		if err := collector.Collect(accountHash[:], accountKey); err != nil {
-			return stats, err
+		copy(accountAddr[:], accountKey)
+		accountHash = crypto.Keccak256Hash(accountAddr[:])
+		haveAccount = true
+		if err := collector.Collect(accountHash[:], accountAddr[:]); err != nil {
+			return err
 		}
 		stats.Accounts++
 		if onProgress != nil {
 			onProgress(stats)
 		}
+		return nil
 	}
 
-	var hashedKey [2 * length.Hash]byte
-	var lastAddress [preimageAddrLen]byte
-	haveAddress := false
+	if err := nextAccount(); err != nil {
+		return stats, err
+	}
 	for storage.HasNext() {
 		select {
 		case <-done:
@@ -337,20 +374,30 @@ func collectHashedPreimages(
 			return stats, fmt.Errorf("storage: unexpected key length %d: %x", len(storageKey), storageKey)
 		}
 		address, slotKey := storageKey[:preimageAddrLen], storageKey[preimageAddrLen:]
-		if !haveAddress || !bytes.Equal(lastAddress[:], address) {
-			copy(lastAddress[:], address)
-			accountHash := crypto.Keccak256Hash(address)
-			copy(hashedKey[:length.Hash], accountHash[:])
-			haveAddress = true
+		for haveAccount && bytes.Compare(accountAddr[:], address) < 0 {
+			if err := nextAccount(); err != nil {
+				return stats, err
+			}
+		}
+		if !haveAccount || !bytes.Equal(accountAddr[:], address) {
+			return stats, fmt.Errorf("storage slot %x under address %x has no matching account", slotKey, address)
 		}
 		slotHash := crypto.Keccak256Hash(slotKey)
+		copy(hashedKey[:length.Hash], accountHash[:])
 		copy(hashedKey[length.Hash:], slotHash[:])
 		if err := collector.Collect(hashedKey[:], slotKey); err != nil {
 			return stats, err
 		}
 		stats.Slots++
-		if onProgress != nil {
-			onProgress(stats)
+	}
+	for haveAccount {
+		select {
+		case <-done:
+			return stats, ctx.Err()
+		default:
+		}
+		if err := nextAccount(); err != nil {
+			return stats, err
 		}
 	}
 	return stats, nil
@@ -360,9 +407,9 @@ func collectHashedPreimages(
 // address[20] | slotCount[4, big-endian] | slotKey[32] * slotCount, so a record
 // is 24+32*slotCount bytes and only its fields are fixed width.
 func writeHashedPreimages(
+	ctx context.Context,
 	collector *etl.Collector,
 	writer io.Writer,
-	quit <-chan struct{},
 	onProgress func(exportPreimagesStats),
 ) (exportPreimagesStats, error) {
 	var stats exportPreimagesStats
@@ -390,6 +437,7 @@ func writeHashedPreimages(
 		}
 		stats.Accounts++
 		stats.Slots += slotCount
+		pending = false
 		if onProgress != nil {
 			onProgress(stats)
 		}
@@ -399,6 +447,9 @@ func writeHashedPreimages(
 	loadFunc := func(k, v []byte, _ etl.CurrentTableReader, _ etl.LoadNextFunc) error {
 		switch len(k) {
 		case length.Hash:
+			if len(v) != preimageAddrLen {
+				return fmt.Errorf("account hash %x: expected a %d-byte address, got %d bytes", k, preimageAddrLen, len(v))
+			}
 			if err := flushRecord(); err != nil {
 				return err
 			}
@@ -408,6 +459,9 @@ func writeHashedPreimages(
 			pending = true
 			return nil
 		case 2 * length.Hash:
+			if len(v) != preimageSlotLen {
+				return fmt.Errorf("slot under account hash %x: expected a %d-byte key, got %d bytes", k[:length.Hash], preimageSlotLen, len(v))
+			}
 			if !pending || !bytes.Equal(k[:length.Hash], accountHash[:]) {
 				return fmt.Errorf("storage slot %x under account hash %x has no matching account", v, k[:length.Hash])
 			}
@@ -418,7 +472,12 @@ func writeHashedPreimages(
 		}
 	}
 
-	if err := collector.Load(nil, "", loadFunc, etl.TransformArgs{Quit: quit}); err != nil {
+	if err := collector.Load(nil, "", loadFunc, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		// Load wraps a cancellation as "loadIntoTable : stopped", which no longer
+		// matches errors.Is(err, context.Canceled).
+		if ctxErr := ctx.Err(); ctxErr != nil {
+			return stats, ctxErr
+		}
 		return stats, err
 	}
 	// flushRecord mutates stats, so it cannot share a return statement with it.

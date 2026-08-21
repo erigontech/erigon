@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"encoding/json"
 	"io"
 	"os"
 	"path/filepath"
@@ -129,7 +130,7 @@ func exportPreimages(t *testing.T, ctx context.Context, accounts, storage stream
 	if err != nil {
 		return collected, err
 	}
-	written, err := writeHashedPreimages(collector, writer, ctx.Done(), opts.onWrite)
+	written, err := writeHashedPreimages(ctx, collector, writer, opts.onWrite)
 	if err != nil {
 		return written, err
 	}
@@ -170,10 +171,15 @@ func TestExportPreimages_OrdersByKeccakNotPlainKey(t *testing.T) {
 // multi-file merge instead of sorting one in-RAM buffer.
 func TestExportPreimages_OrderSurvivesSpillToDisk(t *testing.T) {
 	var accountPairs, storagePairs []kvPair
+	// The slot fill differs from the address fill, so a defect that shifts slot
+	// payloads onto the neighbouring record cannot pass the membership check.
+	slotFor := func(fill int) []byte { return slot(byte(255 - fill)) }
+	wantSlots := map[string][][]byte{}
 	for fill := 1; fill <= 200; fill++ {
 		address := addr(byte(fill))
 		accountPairs = append(accountPairs, kvPair{address, []byte{1}})
-		storagePairs = append(storagePairs, kvPair{storageKey(address, slot(byte(fill))), []byte{1}})
+		storagePairs = append(storagePairs, kvPair{storageKey(address, slotFor(fill)), []byte{1}})
+		wantSlots[string(address)] = [][]byte{slotFor(fill)}
 	}
 	var out bytes.Buffer
 
@@ -182,7 +188,7 @@ func TestExportPreimages_OrderSurvivesSpillToDisk(t *testing.T) {
 		exportOpts{bufferSize: 1 * datasize.KB})
 	require.NoError(t, err)
 	require.Equal(t, exportPreimagesStats{Accounts: 200, Slots: 200}, stats)
-	requireHashedOrder(t, out.Bytes())
+	requireHashedOrder(t, out.Bytes(), wantSlots)
 }
 
 func TestExportPreimages_AccountWithSlots(t *testing.T) {
@@ -274,7 +280,7 @@ func TestExportPreimages_InterleavesMultipleAccounts(t *testing.T) {
 	want = append(want, slot(0x03)...)
 	require.Equal(t, want, out.Bytes())
 	require.Equal(t, exportPreimagesStats{Accounts: 3, Slots: 3}, stats)
-	require.Equal(t, stats.sizeBytes(), uint64(out.Len()))
+	require.Equal(t, uint64(3*(20+4)+3*32), uint64(out.Len()))
 }
 
 func TestExportPreimages_SingleAccountNoStorage(t *testing.T) {
@@ -328,10 +334,13 @@ func TestWriteHashedPreimages_ReportsCompletedAccounts(t *testing.T) {
 	}, reports)
 }
 
-// requireHashedOrder re-parses the framed file and checks the EIP-8347 ordering:
-// records ascending by keccak256(address), slots ascending by keccak256(slotKey).
-func requireHashedOrder(t *testing.T, framed []byte) {
+// requireHashedOrder re-parses the framed file and checks the EIP-8347 ordering --
+// records ascending by keccak256(address), slots ascending by keccak256(slotKey) --
+// and that every record carries exactly the slots wantSlots maps to its address.
+// Order alone would pass a defect that shifts slot payloads between records.
+func requireHashedOrder(t *testing.T, framed []byte, wantSlots map[string][][]byte) {
 	t.Helper()
+	seenAccounts := 0
 	var prevAccount, prevSlot common.Hash
 	haveAccount := false
 	for len(framed) > 0 {
@@ -348,15 +357,22 @@ func requireHashedOrder(t *testing.T, framed []byte) {
 		prevAccount, haveAccount = accountHash, true
 
 		haveSlot := false
+		var gotSlots [][]byte
 		for range slotCount {
-			slotHash := crypto.Keccak256Hash(framed[:preimageSlotLen])
+			slotKey := framed[:preimageSlotLen]
+			slotHash := crypto.Keccak256Hash(slotKey)
 			framed = framed[preimageSlotLen:]
 			if haveSlot {
 				require.Negative(t, bytes.Compare(prevSlot[:], slotHash[:]), "slots out of keccak order")
 			}
 			prevSlot, haveSlot = slotHash, true
+			gotSlots = append(gotSlots, bytes.Clone(slotKey))
 		}
+		want := wantSlots[string(address)]
+		require.ElementsMatch(t, want, gotSlots, "record %x carries slots that are not its own", address)
+		seenAccounts++
 	}
+	require.Len(t, wantSlots, seenAccounts, "not every expected account reached the file")
 }
 
 // The accounts domain is walked to exhaustion before the first storage key, so on
@@ -377,7 +393,7 @@ func TestCollectHashedPreimages_CancellationWhileScanningAccounts(t *testing.T) 
 	require.ErrorIs(t, err, context.Canceled)
 }
 
-func TestCollectHashedPreimages_ReportsBothScans(t *testing.T) {
+func TestCollectHashedPreimages_ReportsPerAccountNotPerSlot(t *testing.T) {
 	accounts := &sliceKV{pairs: []kvPair{{addr(0xaa), []byte{1}}, {addr(0xbb), []byte{1}}}}
 	storage := &sliceKV{pairs: []kvPair{
 		{storageKey(addr(0xaa), slot(0x01)), []byte{1}},
@@ -390,12 +406,98 @@ func TestCollectHashedPreimages_ReportsBothScans(t *testing.T) {
 		onCollect: func(stats exportPreimagesStats) { reports = append(reports, stats) },
 	})
 	require.NoError(t, err)
-	// Every account is collected before the first slot, so the counts advance in
-	// two runs rather than interleaving.
+	// One report per account and none per slot: on mainnet the slot loop runs ~10^9
+	// times for a line that prints every 30s. Slot counts still show up, because the
+	// second account is only reached after the first account's slots are collected.
 	require.Equal(t, []exportPreimagesStats{
 		{Accounts: 1, Slots: 0},
-		{Accounts: 2, Slots: 0},
 		{Accounts: 2, Slots: 1},
-		{Accounts: 2, Slots: 2},
 	}, reports)
+}
+
+// A short value would leave the previous account's trailing bytes in the header and ship a
+// hybrid address. Neither guard downstream catches it: the record and size checks are both
+// derived from the same counts.
+func TestWriteHashedPreimages_RejectsShortValues(t *testing.T) {
+	address := addr(0xaa)
+	accountHash := crypto.Keccak256Hash(address)
+
+	t.Run("account", func(t *testing.T) {
+		collector := etl.NewCollector(t.Name(), t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), log.New())
+		defer collector.Close()
+		require.NoError(t, collector.Collect(accountHash[:], address[:preimageAddrLen-1]))
+
+		_, err := writeHashedPreimages(context.Background(), collector, io.Discard, nil)
+		require.ErrorContains(t, err, "20-byte address")
+	})
+
+	t.Run("slot", func(t *testing.T) {
+		collector := etl.NewCollector(t.Name(), t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), log.New())
+		defer collector.Close()
+		require.NoError(t, collector.Collect(accountHash[:], address))
+		slotHash := crypto.Keccak256Hash(slot(0x01))
+		require.NoError(t, collector.Collect(append(bytes.Clone(accountHash[:]), slotHash[:]...), slot(0x01)[:preimageSlotLen-1]))
+
+		_, err := writeHashedPreimages(context.Background(), collector, io.Discard, nil)
+		require.ErrorContains(t, err, "32-byte key")
+	})
+}
+
+// An orphaned slot must be rejected during the scan. Letting it reach the load means both
+// domains spill first - >100GB on mainnet - for a failure the first storage key already showed.
+func TestCollectHashedPreimages_RejectsOrphanBeforeDrainingStorage(t *testing.T) {
+	accounts := &sliceKV{pairs: []kvPair{{addr(0xbb), []byte{1}}}}
+	storagePairs := []kvPair{{storageKey(addr(0x11), slot(0x01)), []byte{1}}}
+	for fill := range 50 {
+		storagePairs = append(storagePairs, kvPair{storageKey(addr(0xbb), slot(byte(fill))), []byte{1}})
+	}
+	storage := &sliceKV{pairs: storagePairs}
+	var out bytes.Buffer
+
+	_, err := exportPreimages(t, context.Background(), accounts, storage, &out, exportOpts{})
+	require.ErrorContains(t, err, "no matching account")
+	require.Equal(t, 1, storage.next, "storage stream was drained past the orphan")
+	require.Zero(t, out.Len(), "nothing may be written once the scan has failed")
+}
+
+// A file written before the order was pinned is shape-identical to one written now, so the
+// metadata has to carry the order for a consumer to tell them apart.
+func TestPreimagesMetaRecordsKeccakOrder(t *testing.T) {
+	encoded, err := json.Marshal(preimagesMeta{Block: 1, StateRoot: "0x00", Order: preimagesOrderKeccak256})
+	require.NoError(t, err)
+	require.Contains(t, string(encoded), `"order":"keccak256"`)
+}
+
+func TestPrepareScratchDirClearsStaleSpill(t *testing.T) {
+	tmpDir := t.TempDir()
+	scratch, err := prepareScratchDir(tmpDir)
+	require.NoError(t, err)
+	stale := filepath.Join(scratch, "etl-tmp-from-a-killed-run")
+	require.NoError(t, os.WriteFile(stale, []byte("spill"), 0o644))
+
+	again, err := prepareScratchDir(tmpDir)
+	require.NoError(t, err)
+	require.Equal(t, scratch, again)
+	_, statErr := os.Stat(stale)
+	require.ErrorIs(t, statErr, os.ErrNotExist)
+}
+
+// Load is the longest phase, and it wraps a cancellation as "loadIntoTable : stopped".
+// Without mapping that back, Ctrl-C during it stops matching errors.Is(context.Canceled)
+// and the operator gets an error naming an empty table instead.
+func TestWriteHashedPreimages_CancellationKeepsContextErrorIdentity(t *testing.T) {
+	collector := etl.NewCollector(t.Name(), t.TempDir(), etl.NewSortableBuffer(etl.BufferOptimalSize), log.New())
+	defer collector.Close()
+	// Load only polls Quit every 1024 records, so the fixture has to outrun that.
+	var address [preimageAddrLen]byte
+	for fill := range 3000 {
+		binary.BigEndian.PutUint32(address[:4], uint32(fill))
+		accountHash := crypto.Keccak256Hash(address[:])
+		require.NoError(t, collector.Collect(accountHash[:], address[:]))
+	}
+
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+	_, err := writeHashedPreimages(ctx, collector, io.Discard, nil)
+	require.ErrorIs(t, err, context.Canceled)
 }
