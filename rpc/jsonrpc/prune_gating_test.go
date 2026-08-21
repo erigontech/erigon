@@ -256,6 +256,11 @@ var pruneGatingConfigs = []pruneGatingConfig{
 	// sentinel is chain history expiry rather than a no-op.
 	{name: "full_legacy_merge_chain", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode},
 		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight)},
+	// Both retentions carry the chain-history-expiry sentinel, the pair a legacy
+	// archive datadir and an operator asking for expiry on top of archive persist
+	// alike. This fixture holds every body, so it is the archive one.
+	{name: "legacy_archive_sentinel_pair", mode: prune.Mode{Initialised: true, History: prune.KeepPostMergeBlocksPruneMode, Blocks: prune.KeepPostMergeBlocksPruneMode},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight)},
 	{name: "blocks_receipts_follow_history", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode}, persistReceipts: true},
 	{name: "blocks_receipts_keep_all", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode, Receipts: prune.KeepAllReceiptsPruneMode}, persistReceipts: true},
 	{name: "minimal_receipts_keep_all", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: pruneGatingDistance, Receipts: prune.KeepAllReceiptsPruneMode}, persistReceipts: true},

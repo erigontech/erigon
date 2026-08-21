@@ -150,7 +150,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	avail := func(oldest uint64, dist prune.BlockAmount) CapabilityField {
 		o := hexutil.Uint64(oldest)
 		f := CapabilityField{OldestBlock: &o}
-		if d, ok := dist.(prune.Distance); ok && d != prune.KeepPostMergeBlocksPruneMode && d != prune.KeepAllBlocksPruneMode {
+		if d, ok := dist.(prune.Distance); ok && d.Enabled() {
 			f.DeleteStrategy = &DeleteStrategy{Type: deleteStrategyWindow, RetentionBlocks: hexutil.Uint64(d)}
 		}
 		return f
@@ -162,11 +162,16 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	// adjusted below using MergeHeight where applicable.
 	stateOldest := pruneMode.History.PruneTo(headBlock)
 	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
-	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains that have
-	// MergeHeight set (mainnet, sepolia, gnosis…), pre-merge blocks/tx segments are
-	// never downloaded, so the oldest available block is the merge point, not 0.
-	if pruneMode.Blocks == prune.KeepPostMergeBlocksPruneMode && chainConfig.MergeHeight != nil {
-		blocksOldest = *chainConfig.MergeHeight
+	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains with
+	// MergeHeight set, pre-merge blocks/tx segments are never downloaded, so the oldest
+	// available block is the merge point. The same sentinel also covers a legacy archive
+	// datadir, so the field follows the boundary the gate resolves.
+	expiry, expiryFrom, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if expiry && expiryFrom != nil {
+		blocksOldest = *expiryFrom
 	}
 
 	var stateproofs CapabilityField
@@ -201,14 +206,24 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	}
 	// Below Byzantium the receipt carries a post state the cache does not store, so
 	// those blocks are re-executed and reach only as far as history. This mirrors
-	// postStateCalculated, down to the shape that computes the post state at all.
-	if byzantium := chainConfig.ByzantiumBlock; byzantium != nil && receiptsOldest < *byzantium &&
-		(api._blockReader.FrozenBlocks() == 0 || keepExecutionProofs) {
-		if stateOldest < *byzantium {
+	// postStateCalculated, down to the shape that computes the post state at all and
+	// to a chain that never reaches the fork.
+	byzantium := uint64(math.MaxUint64)
+	if chainConfig.ByzantiumBlock != nil {
+		byzantium = *chainConfig.ByzantiumBlock
+	}
+	if receiptsOldest < byzantium && (api._blockReader.FrozenBlocks() == 0 || keepExecutionProofs) {
+		if stateOldest < byzantium {
 			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
 		} else {
-			receiptsOldest = *byzantium
+			receiptsOldest = byzantium
 		}
+	}
+	// The Bor state sync receipt is reconstructed from the state at the end of the block,
+	// so on Bor the receipts of a block reach only as far as history whatever the cache
+	// keeps. This mirrors borReceiptForBlock.
+	if chainConfig.Bor != nil {
+		receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
 	}
 	// Reading the receipts of a block needs its body too: the stored receipt carries no
 	// TxHash, so it is derived from the block's transaction.

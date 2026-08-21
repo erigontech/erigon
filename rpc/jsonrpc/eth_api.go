@@ -476,22 +476,42 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 }
 
 // holdsPreMergeBodies reports whether the datadir holds any body below the merge
-// point. The stored prune mode cannot answer that on its own where History carries
-// the same sentinel as Blocks: an archive datadir written before keep-all became the
-// Blocks default and an operator asking for chain-history expiry on top of archive
-// persist that pair alike, and the downloader reads it as expiry. The answer is a
-// property of the datadir, so it is resolved once.
+// point. The stored prune mode cannot answer that where History carries the same
+// sentinel as Blocks: a legacy archive datadir and chain-history expiry on top of
+// archive persist that pair alike, so what is on disk decides. MinimumBlockAvailable
+// reports zero both for segments starting at genesis and for a node whose body
+// segments have not arrived, so only an observation telling those apart is cached.
 func (api *BaseAPI) holdsPreMergeBodies(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
 	if holds := api._preMergeBodies.Load(); holds != nil {
 		return *holds, nil
+	}
+	if mergeHeight == 0 {
+		return false, nil
 	}
 	oldest, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
 	if err != nil {
 		return false, err
 	}
+	if oldest == 0 {
+		holds, err := api.hasBody(ctx, tx, mergeHeight-1)
+		if err != nil || !holds {
+			return false, err
+		}
+		api._preMergeBodies.Store(&holds)
+		return true, nil
+	}
 	holds := oldest < mergeHeight
 	api._preMergeBodies.Store(&holds)
 	return holds, nil
+}
+
+func (api *BaseAPI) hasBody(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
+	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, block)
+	if err != nil || !ok {
+		return false, err
+	}
+	body, _, err := api._blockReader.Body(ctx, tx, hash, block)
+	return body != nil, err
 }
 
 func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
@@ -574,56 +594,29 @@ func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uin
 }
 
 // checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.
-// Reading them needs the block body too: the stored receipt carries no TxHash, so
-// it is derived from the block's transaction, and the result is sized by the
-// transaction count. The blocks boundary therefore applies on top of receipt
-// availability.
+// Reading them needs the block body too: the stored receipt carries no TxHash, so it
+// is derived from the block's transaction, and the result is sized by the transaction
+// count. The blocks boundary therefore applies on top of receipt availability.
 func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
 	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
 		return err
 	}
-	err := api.checkReceiptsAvailable(ctx, tx, block)
-	if err == nil || !errors.Is(err, state.PrunedError) {
-		return err
-	}
-	if empty, emptyErr := api.blockHasNoReceipts(ctx, tx, block); emptyErr == nil && empty {
-		return nil
-	}
-	return err
+	return api.checkReceiptsAvailable(ctx, tx, block)
 }
 
-// blockHasNoReceipts reports whether the block has no receipt to read at all, in
-// which case its transaction count is the whole answer and neither the receipt
-// cache nor state history is consulted. A Bor block qualifies only where it carries
-// no state sync event: that receipt is reconstructed from state history even though
-// the body is empty.
-func (api *BaseAPI) blockHasNoReceipts(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return false, err
+// checkLogsAvailable gates a log query on the data it reads: the receipts of the
+// range, which are derived from the block's transactions, plus the log indices when
+// the filter searches them. The indices are retired at the history cutoff whatever
+// the receipt retention is. Every leg is a lower bound, so checking the first block
+// of the range covers all of it.
+func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, block); err != nil {
+		return err
 	}
-	header, err := api._blockReader.HeaderByNumber(ctx, tx, block)
-	if err != nil || header == nil {
-		return false, err
+	if !usesLogIndex(crit) {
+		return nil
 	}
-	body, txCount, err := api._blockReader.Body(ctx, tx, header.Hash(), block)
-	if err != nil || body == nil {
-		return false, err
-	}
-	if txCount != 0 {
-		return false, nil
-	}
-	if chainConfig.Bor == nil {
-		return true, nil
-	}
-	if api.bridgeReader == nil {
-		return false, nil
-	}
-	events, err := api.bridgeReader.Events(ctx, header.Hash(), block)
-	if err != nil {
-		return false, err
-	}
-	return len(events) == 0, nil
+	return api.checkPruneHistory(ctx, tx, block)
 }
 
 // checkBlockHistoryAvailable gates endpoints that re-execute a block: they read its

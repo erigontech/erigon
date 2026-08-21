@@ -156,20 +156,6 @@ func usesLogIndex(crit filters.FilterCriteria) bool {
 	return false
 }
 
-// checkLogsAvailable gates a log query on the data it reads: the receipts of the
-// range, which are derived from the block's transactions, plus the log indices when
-// the filter searches them. The indices are retired at the history cutoff whatever
-// the receipt retention is.
-func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
-	if err := api.checkBlockReceiptsAvailable(ctx, tx, block); err != nil {
-		return err
-	}
-	if !usesLogIndex(crit) {
-		return nil
-	}
-	return api.checkPruneHistory(ctx, tx, block)
-}
-
 // resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
 // block; otherwise negative tags are resolved against the chain, defaulting to the
 // latest executed block. With checkFuture, ranges past the latest executed block are
