@@ -299,8 +299,11 @@ func TestRebuildCommitmentFilesDefaultTargetIsProcessVariant(t *testing.T) {
 	require.NotEqual(t, hexRoot, binRoot)
 
 	// Mutates a process-wide flag, so this test never runs in parallel.
-	orig := statecfg.ExperimentalBinCommitment
-	t.Cleanup(func() { statecfg.ExperimentalBinCommitment = orig })
+	orig, origSuite := statecfg.ExperimentalBinCommitment, commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment = orig
+		require.NoError(t, commitment.SetPBinHashSuite(origSuite))
+	})
 	statecfg.ExperimentalBinCommitment = true
 
 	pickedDB, _, _ := rebuildVariantDatadir(t)
@@ -330,8 +333,11 @@ func TestRebuildCommitmentFilesBinTargetBindsHashSuite(t *testing.T) {
 // reading the suite back would silently answer keccak for --...hash=blake3.
 func TestDefaultRebuildTargetFollowsTheConfiguredHash(t *testing.T) {
 	// Mutates process-wide flags, so this test never runs in parallel.
-	bin, hash := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash
-	t.Cleanup(func() { statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash = bin, hash })
+	bin, hash, suite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
+	t.Cleanup(func() {
+		statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash = bin, hash
+		require.NoError(t, commitment.SetPBinHashSuite(suite))
+	})
 
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.BinCommitmentHash = commitment.PBinHashBlake3

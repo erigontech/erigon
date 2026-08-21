@@ -147,13 +147,24 @@ func writeErigonDBSettings(path string, s *ErigonDBSettings) error {
 //  3. Fresh datadir (neither file present): returns default settings without writing,
 //     so the downloader can provide the real erigondb.toml during header-chain phase.
 func ResolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader bool) (*ErigonDBSettings, error) {
-	return ResolveErigonDBSettingsWithRefsDefault(dirs, logger, noDownloader, nil)
+	return resolveErigonDBSettings(dirs, logger, noDownloader, nil, false)
 }
 
 // ResolveErigonDBSettingsWithRefsDefault is ResolveErigonDBSettings with an optional first-start
 // override: when refsFirstStart is non-nil and erigondb.toml is being created, it sets the initial
 // references_in_commitment_branches; an existing or downloader-delivered toml wins (override logged, ignored).
 func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger, noDownloader bool, refsFirstStart *bool) (*ErigonDBSettings, error) {
+	return resolveErigonDBSettings(dirs, logger, noDownloader, refsFirstStart, false)
+}
+
+// ResolveErigonDBSettingsForGenesis is ResolveErigonDBSettings for a chain whose genesis schedules
+// EIP-8297. A datadir being created for such a chain records the bin trie without anyone naming it
+// on the command line, so `erigon init` alone is enough; an existing toml still wins.
+func ResolveErigonDBSettingsForGenesis(dirs datadir.Dirs, logger log.Logger, noDownloader, binTrieScheduled bool) (*ErigonDBSettings, error) {
+	return resolveErigonDBSettings(dirs, logger, noDownloader, nil, binTrieScheduled)
+}
+
+func resolveErigonDBSettings(dirs datadir.Dirs, logger log.Logger, noDownloader bool, refsFirstStart *bool, binTrieScheduled bool) (*ErigonDBSettings, error) {
 	settingsPath := filepath.Join(dirs.Snap, ERIGONDB_SETTINGS_FILE)
 
 	settingsExists, err := dir.FileExist(settingsPath)
@@ -189,12 +200,15 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 	}
 
 	var trieVariant, trieHash *string
-	if statecfg.ExperimentalBinCommitment {
+	if statecfg.ExperimentalBinCommitment || binTrieScheduled {
 		v := TrieVariantBin
 		trieVariant = &v
 		h := statecfg.BinCommitmentHash
 		if h == "" {
-			h = commitment.PBinHashKeccak
+			// blake3 on a datadir being created, not keccak: geth and besu both hash the
+			// tree with BLAKE3, and a keccak tree agrees with no other client. An existing
+			// toml keeps whatever it recorded -- see TrieHashName.
+			h = commitment.PBinHashBlake3
 		}
 		trieHash = &h
 	}
@@ -208,6 +222,9 @@ func ResolveErigonDBSettingsWithRefsDefault(dirs datadir.Dirs, logger log.Logger
 	if preverifiedExists {
 		if statecfg.ExperimentalBinCommitment {
 			return nil, errors.New("--experimental.bin-commitment: this datadir already has hex commitment state; the bin trie needs a fresh datadir")
+		}
+		if binTrieScheduled {
+			return nil, errors.New("genesis schedules EIP-8297 but this datadir already has hex commitment state; the bin trie needs a fresh datadir")
 		}
 		settings := &ErigonDBSettings{
 			StepSize:                       config3.LegacyStepSize,

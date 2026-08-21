@@ -25,6 +25,9 @@ import (
 	"testing"
 
 	"github.com/davecgh/go-spew/spew"
+	dbstate "github.com/erigontech/erigon/db/state"
+	"github.com/erigontech/erigon/db/state/statecfg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/holiman/uint256"
 	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
@@ -278,25 +281,59 @@ func TestAmsterdamGenesisCarriesSlotNumber(t *testing.T) {
 // fails later, at the first forkchoiceUpdated, on a parent it never produced.
 //
 // No t.Parallel: withBinCommitment mutates process-global state.
-func TestBinaryTrieGenesisRefusesTheMPT(t *testing.T) {
+// The genesis alone selects the trie: no COMMITMENT_BIN, no flag, no ambient state.
+//
+// No t.Parallel: withBinCommitment mutates process-global state.
+func TestBinaryTrieGenesisSelectsTheTrie(t *testing.T) {
+	withBinCommitment(t, false)
+
+	zero := uint64(0)
+	dirs := datadir.New(t.TempDir())
+	cfg := amsterdamGenesisConfig(t)
+	cfg.BinaryTrieTime = &zero
+
+	_, _, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: cfg, Timestamp: 0}, dirs, log.Root())
+	require.NoError(t, err, "a PBT genesis must not need COMMITMENT_BIN to be set")
+
+	settings, err := dbstate.ResolveErigonDBSettings(dirs, log.Root(), true)
+	require.NoError(t, err)
+	require.Equal(t, dbstate.TrieVariantBin, settings.TrieVariantName(), "the datadir must record the bin trie")
+	require.Equal(t, commitment.PBinHashBlake3, settings.TrieHashName(),
+		"a datadir created for the tree takes blake3; keccak agrees with no other client")
+	require.True(t, statecfg.ExperimentalBinCommitment, "the process must be on the bin trie")
+}
+
+// The guard still has a job once the genesis selects the trie: a datadir already built hex
+// cannot serve a PBT chain, and saying so here beats failing later on an unknown parent.
+//
+// No t.Parallel: withBinCommitment mutates process-global state.
+func TestBinaryTrieGenesisRefusesAHexDatadir(t *testing.T) {
 	withBinCommitment(t, false)
 
 	zero, ten := uint64(0), uint64(10)
 	dirs := datadir.New(t.TempDir())
 
+	// Persist a hex erigondb.toml. GenesisToBlock alone would not: a hex datadir with a
+	// downloader running leaves the file for the downloader to deliver.
+	_, err := dbstate.ResolveErigonDBSettings(dirs, log.Root(), true)
+	require.NoError(t, err)
+
+	// Now a genesis that schedules the tree, onto that datadir.
 	cfg := amsterdamGenesisConfig(t)
 	cfg.BinaryTrieTime = &zero
-	_, _, err := genesiswrite.GenesisToBlock(&types.Genesis{Config: cfg}, dirs, log.Root())
+	_, _, err = genesiswrite.GenesisToBlock(&types.Genesis{Config: cfg, Timestamp: 0}, dirs, log.Root())
 	require.ErrorContains(t, err, "merkle-patricia")
 
-	// Before Amsterdam the tree is undefined, whichever trie the node runs.
-	cfg.AmsterdamTime = &ten
-	_, _, err = genesiswrite.GenesisToBlock(&types.Genesis{Config: cfg}, dirs, log.Root())
-	require.ErrorContains(t, err, "amsterdamTime")
+	// An unscheduled tree leaves that datadir alone.
+	_, _, err = genesiswrite.GenesisToBlock(&types.Genesis{Config: amsterdamGenesisConfig(t)}, dirs, log.Root())
+	require.NoError(t, err)
 
+	// Before Amsterdam the tree is undefined, whichever trie the node runs.
 	cfg = amsterdamGenesisConfig(t)
-	_, _, err = genesiswrite.GenesisToBlock(&types.Genesis{Config: cfg}, dirs, log.Root())
-	require.NoError(t, err, "an unscheduled binary trie leaves the MPT node alone")
+	cfg.AmsterdamTime = &ten
+	cfg.BinaryTrieTime = &zero
+	_, _, err = genesiswrite.GenesisToBlock(&types.Genesis{Config: cfg}, datadir.New(t.TempDir()), log.Root())
+	require.ErrorContains(t, err, "amsterdamTime")
 }
 
 // A tree scheduled after genesis is refused whichever trie the node runs: commitment is

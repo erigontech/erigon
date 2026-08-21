@@ -360,7 +360,10 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 	genesisTmpDB := mdbx.New(dbcfg.TemporaryDB, logger).InMem(dirs.Tmp).MapSize(genesisMapSize).GrowthStep(1 * datasize.MB).MustOpen()
 	defer genesisTmpDB.Close()
 
-	erigonDBSettings, err := dbstate.ResolveErigonDBSettings(dirs, logger, false)
+	// The genesis selects the trie: a chain that schedules EIP-8297 records the bin variant
+	// on a datadir being created, so `erigon init` needs no flag and no environment.
+	erigonDBSettings, err := dbstate.ResolveErigonDBSettingsForGenesis(dirs, logger, false,
+		g.Config != nil && g.Config.BinaryTrieTime != nil)
 	if err != nil {
 		return nil, nil, err
 	}
