@@ -116,7 +116,7 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 		return nil, err
 	}
 
-	blockSnaps, _, agg, _, _, _, err := allSnapshots(ctx, rawDB, logger)
+	blockSnaps, borSnaps, agg, _, _, _, err := allSnapshots(ctx, rawDB, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -125,5 +125,6 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 	if err != nil {
 		return nil, err
 	}
+	logSnapshotStats(ctx, db, blockSnaps, borSnaps, logger)
 	return db, nil
 }
