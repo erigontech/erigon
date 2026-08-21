@@ -116,7 +116,7 @@ Logo height overridden in CSS: **28px**
 ```
 "Erigon Client"
 ```
-Font: **Montserrat**, weight 800, letter-spacing 0.04em (applied via CSS)
+Font: **Quantify**, weight 700, letter-spacing 0.04em (applied via CSS)
 
 ### Left Nav Items
 | Label | Type |
@@ -154,7 +154,7 @@ Completely swizzled (`src/theme/Footer/index.tsx`) — not using the Docusaurus 
 - Single row: brand lockup → tagline → icon-only social buttons pushed right; then a divider and a bottom bar (copyright left, Privacy / Cookie / Contact / `hello@erigon.tech` right).
 - No link columns and no postal address. Those belong to the **full** footer, which is erigon.tech's, not a docs site's. Do not "fix" this footer by porting them back.
 - Nunito Sans throughout, with the `erigon.tech` wordmark in Quantify 700.
-- Every interactive element hovers Erigon Orange `#EF7716`.
+- Interactive elements use the contrast-safe dark orange `#A34E0B` in light mode and Erigon Orange `#EF7716` in dark mode.
 - Theme-aware surface via `--footer-*` custom properties in `src/css/custom.css`: white in light mode, black in dark. It is **not** always black — that was the previous five-column footer.
 - Both modes carry a 1px top edge. In light because a white footer on a white body has no edge of its own; in dark because `#000000` against the `#0A0A0A` page body is imperceptible.
 - Fine print is 0.55 alpha, deliberately not a mirrored 0.35: equal alpha is not equal perceived contrast across inverted surfaces, and 0.35 on white computes to 2.44:1, failing WCAG AA.
@@ -168,6 +168,7 @@ All fonts are self-hosted via `@font-face` (no CDN). Woff2 files live in `static
 @font-face { font-family: 'Nunito Sans';  src: url('/fonts/NunitoSans-Regular.woff2')    format('woff2'); font-weight: 400; }
 @font-face { font-family: 'Nunito Sans';  src: url('/fonts/NunitoSans-Bold.woff2')        format('woff2'); font-weight: 700; }
 @font-face { font-family: 'Nunito Sans';  src: url('/fonts/NunitoSans-ExtraBold.woff2')  format('woff2'); font-weight: 800; }
+@font-face { font-family: 'Quantify';     src: url('/fonts/Quantify.woff2')               format('woff2'); font-weight: 700; }
 ```
 
 ### Font Roles

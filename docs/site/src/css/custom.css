@@ -457,7 +457,7 @@ details.alert.alert--info summary {
 }
 
 :root {
-  --footer-accent: #EF7716;
+  --footer-accent: #A34E0B;
   --footer-bg: #FFFFFF;
   --footer-fg: #000000;
   --footer-tagline: rgba(0, 0, 0, 0.55);
@@ -469,6 +469,7 @@ details.alert.alert--info summary {
 }
 
 [data-theme='dark'] {
+  --footer-accent: #EF7716;
   --footer-bg: #000000;
   --footer-fg: #FFFFFF;
   --footer-tagline: rgba(255, 255, 255, 0.55);
