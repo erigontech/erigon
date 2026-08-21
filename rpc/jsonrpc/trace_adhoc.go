@@ -926,7 +926,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	header, err := api.headerByNumberInView(ctx, tx, blockNum)
+	header, err := api.canonicalHeaderByNumber(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -1134,7 +1134,7 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, err
 	}
 
-	header, err := api.headerInView(ctx, tx, hash, blockNumber)
+	header, err := api.headerByHashAndNumber(ctx, tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1331,7 +1331,7 @@ func (api *TraceAPIImpl) CallMany(ctx context.Context, calls json.RawMessage, pa
 		return nil, err
 	}
 
-	parentHeader, err := api.headerInView(ctx, tx, hash, blockNumber)
+	parentHeader, err := api.headerByHashAndNumber(ctx, tx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -1787,7 +1787,7 @@ func (api *TraceAPIImpl) RawTransaction(ctx context.Context, encodedTx hexutil.B
 		return nil, err
 	}
 
-	header, err := api.headerInView(ctx, dbtx, hash, blockNumber)
+	header, err := api.headerByHashAndNumber(ctx, dbtx, hash, blockNumber)
 	if err != nil {
 		return nil, err
 	}

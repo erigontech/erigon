@@ -160,7 +160,7 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 		if !ok || canonicalHash != *crit.BlockHash {
 			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-		body, _, err := api._blockReader.Body(ctx, tx, *crit.BlockHash, *number)
+		body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, *number)
 		if err != nil {
 			return 0, 0, err
 		}
@@ -243,7 +243,6 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, &rpc.CustomError{Message: errInvalidBlockRange, Code: rpc.ErrCodeInvalidParams}
 	}
 	if end > roaring.MaxUint32 {
-		// Committed view: must agree with the scan below.
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return nil, err

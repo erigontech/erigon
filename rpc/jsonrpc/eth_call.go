@@ -187,7 +187,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	engine := api.engine()
 
-	stateHeader, isLatest, err := api.headerByNumberOrHashInView(ctx, stateTx, stateSelector)
+	stateHeader, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, stateTx, stateSelector)
 	if err != nil {
 		return 0, err
 	}

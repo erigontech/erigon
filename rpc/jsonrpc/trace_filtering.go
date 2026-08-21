@@ -98,7 +98,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	header, err := api.headerByNumberInView(ctx, tx, blockNumber)
+	header, err := api.canonicalHeaderByNumber(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -801,7 +801,6 @@ func (api *TraceAPIImpl) callBlock(
 		pNo -= 1
 	}
 
-	parentNo := rpc.BlockNumber(pNo)
 	header := block.Header()
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
@@ -830,13 +829,6 @@ func (api *TraceAPIImpl) callBlock(
 	}
 
 	callParams := make([]TraceCallParam, 0, len(txs))
-
-	parentHash := block.ParentHash()
-	parentNrOrHash := rpc.BlockNumberOrHash{
-		BlockNumber:      &parentNo,
-		BlockHash:        &parentHash,
-		RequireCanonical: true,
-	}
 
 	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
 	if err != nil {
@@ -924,7 +916,7 @@ func (api *TraceAPIImpl) callBlock(
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
 	} else {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-			header, parentNrOrHash.RequireCanonical, gasBailOut /* gasBailout */, traceConfig)
+			header, true /* requireCanonical */, gasBailOut /* gasBailout */, traceConfig)
 	}
 
 	if cmErr != nil {
@@ -1140,7 +1132,6 @@ func (api *TraceAPIImpl) callTransaction(
 		pNo -= 1
 	}
 
-	parentNo := rpc.BlockNumber(pNo)
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
@@ -1174,13 +1165,6 @@ func (api *TraceAPIImpl) callTransaction(
 		if !ok {
 			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNumber, txIndex)
 		}
-	}
-
-	parentHash := header.ParentHash
-	parentNrOrHash := rpc.BlockNumberOrHash{
-		BlockNumber:      &parentNo,
-		BlockHash:        &parentHash,
-		RequireCanonical: true,
 	}
 
 	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
@@ -1230,7 +1214,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
-		header, parentNrOrHash.RequireCanonical, gasBailOut /* gasBailout */, txIndex, traceConfig)
+		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
 		return nil, cmErr

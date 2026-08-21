@@ -385,7 +385,7 @@ func (api *BaseAPI) blockWithSendersInView(ctx context.Context, tx kv.Tx, hash c
 	return block, nil
 }
 
-func (api *BaseAPI) headerInView(ctx context.Context, tx kv.Getter, hash common.Hash, number uint64) (*types.Header, error) {
+func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Getter, hash common.Hash, number uint64) (*types.Header, error) {
 	if api.blocksLRU != nil {
 		if block, ok := api.blocksLRU.Get(hash); ok && block != nil {
 			return block.HeaderNoCopy(), nil
@@ -394,7 +394,7 @@ func (api *BaseAPI) headerInView(ctx context.Context, tx kv.Getter, hash common.
 	return api._blockReader.Header(ctx, tx, hash, number)
 }
 
-func (api *BaseAPI) headerByNumberInView(ctx context.Context, tx kv.Getter, number uint64) (*types.Header, error) {
+func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, number uint64) (*types.Header, error) {
 	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
 	if err != nil {
 		return nil, err
@@ -402,7 +402,7 @@ func (api *BaseAPI) headerByNumberInView(ctx context.Context, tx kv.Getter, numb
 	if !ok {
 		return nil, nil
 	}
-	return api.headerInView(ctx, tx, hash, number)
+	return api.headerByHashAndNumber(ctx, tx, hash, number)
 }
 
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
@@ -431,17 +431,17 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	}
 	// One overlay view for both the tag resolution and the read: deriving a
 	// second one can miss a head whose overlay was unpublished in between.
-	return api.headerByNumberOrHashInView(ctx, api.filters.WithOverlay(tx), blockNrOrHash)
+	return api.canonicalHeaderByNumberOrHash(ctx, api.filters.WithOverlay(tx), blockNrOrHash)
 }
 
-// headerByNumberOrHashInView resolves and reads the header without selecting
-// an overlay. The caller must pass the same view used by dependent reads.
-func (api *BaseAPI) headerByNumberOrHashInView(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
+// canonicalHeaderByNumberOrHash resolves and reads from the transaction supplied by the caller.
+// It does not select an overlay, so callers can keep dependent reads on the same view.
+func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
 	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		return nil, false, err
 	}
-	header, err := api.headerInView(ctx, tx, hash, blockNum)
+	header, err := api.headerByHashAndNumber(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, false, err
 	}
@@ -459,7 +459,7 @@ func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, 
 	if err != nil {
 		return nil, err
 	}
-	return api.headerInView(ctx, overlayTx, h, n)
+	return api.headerByHashAndNumber(ctx, overlayTx, h, n)
 }
 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {
