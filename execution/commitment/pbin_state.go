@@ -28,7 +28,8 @@ import (
 const (
 	// pbinStateMarker opens every pbin blob. A hex blob opens with a root-flags
 	// byte ≤ 0x07, so the marker also refuses a cross-variant restore outright.
-	pbinStateMarker = 0xB1
+	pbinStateMarker  = 0xB1
+	pbinRecordFormat = 1
 
 	pbinStateRootPresent = 1
 	pbinStateRootChecked = 2
@@ -58,7 +59,7 @@ func (pph *PBinPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 	if pph.rootTouched {
 		flags |= pbinStateRootTouched
 	}
-	buf = append(buf, pbinStateMarker, flags, 0, 0)
+	buf = append(buf, pbinStateMarker, pbinRecordFormat, flags, 0, 0)
 	lenAt := len(buf) - 2
 	if pph.grid.root.kind != pbinNodeEmpty {
 		var err error
@@ -70,6 +71,22 @@ func (pph *PBinPatriciaHashed) EncodeCurrentState(buf []byte) ([]byte, error) {
 	return buf, nil
 }
 
+// IsPBinState reports whether buf starts with the pbin state marker.
+func IsPBinState(buf []byte) bool {
+	return len(buf) > 0 && buf[0] == pbinStateMarker
+}
+
+// ValidatePBinStateFormat checks the pbin state marker and record format.
+func ValidatePBinStateFormat(buf []byte) error {
+	if len(buf) < 2 || !IsPBinState(buf) {
+		return fmt.Errorf("%w: not a pbin blob", errPBinStateBlob)
+	}
+	if buf[1] != pbinRecordFormat {
+		return fmt.Errorf("%w: record format version %d, want %d", errPBinStateBlob, buf[1], pbinRecordFormat)
+	}
+	return nil
+}
+
 // SetState is the inverse of EncodeCurrentState; an empty blob resets the engine.
 func (pph *PBinPatriciaHashed) SetState(buf []byte) error {
 	if pph.grid.activeRows != 0 {
@@ -79,18 +96,24 @@ func (pph *PBinPatriciaHashed) SetState(buf []byte) error {
 	if len(buf) == 0 {
 		return nil
 	}
-	if len(buf) < 4 || buf[0] != pbinStateMarker {
+	if len(buf) < 2 || buf[0] != pbinStateMarker {
 		return fmt.Errorf("%w: not a pbin blob", errPBinStateBlob)
 	}
-	flags := buf[1]
+	if err := ValidatePBinStateFormat(buf); err != nil {
+		return err
+	}
+	if len(buf) < 5 {
+		return fmt.Errorf("%w: header is %d bytes, want at least 5", errPBinStateBlob, len(buf))
+	}
+	flags := buf[2]
 	if flags&^byte(pbinStateFlagsAll) != 0 {
 		return fmt.Errorf("%w: unknown flags %08b", errPBinStateBlob, flags)
 	}
-	if rootLen := int(binary.BigEndian.Uint16(buf[2:4])); len(buf) != 4+rootLen {
+	if rootLen := int(binary.BigEndian.Uint16(buf[3:5])); len(buf) != 5+rootLen {
 		return fmt.Errorf("%w: root cell of %d bytes in a %d-byte blob", errPBinStateBlob, rootLen, len(buf))
 	}
-	if len(buf) > 4 {
-		pos, err := pbinDecodeCell(buf, 4, &pph.grid.root)
+	if len(buf) > 5 {
+		pos, err := pbinDecodeCell(buf, 5, &pph.grid.root)
 		if err == nil && pos != len(buf) {
 			err = fmt.Errorf("%w: %d trailing bytes after the root cell", errPBinStateBlob, len(buf)-pos)
 		}

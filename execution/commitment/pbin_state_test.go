@@ -44,6 +44,8 @@ func TestPBinRestartRoundTripDeepPath(t *testing.T) {
 
 	blob, err := pph.EncodeCurrentState(nil)
 	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(blob), 2)
+	require.Equal(t, byte(pbinRecordFormat), blob[1])
 
 	restored := NewPBinPatriciaHashed(ms)
 	require.NoError(t, restored.SetState(blob))
@@ -126,6 +128,32 @@ func TestPBinSetStateRejectsForeignBlob(t *testing.T) {
 			require.ErrorIs(t, fresh.SetState(blob), errPBinStateBlob, "blob %x must be refused", blob)
 		})
 	}
+}
+
+func TestPBinSetStateRejectsUnsupportedRecordFormat(t *testing.T) {
+	t.Parallel()
+
+	pph, ms := pbinTestEngine(t)
+	blob, err := pph.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	blob[1] = 0x42
+
+	fresh := NewPBinPatriciaHashed(ms)
+	err = fresh.SetState(blob)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "record format")
+	require.ErrorContains(t, err, "66")
+}
+
+func TestPBinSetStateRejectsPreVersionBlob(t *testing.T) {
+	t.Parallel()
+
+	_, ms := pbinTestEngine(t)
+
+	legacy := []byte{pbinStateMarker, 0, 0, 0}
+	fresh := NewPBinPatriciaHashed(ms)
+	err := fresh.SetState(legacy)
+	require.ErrorIs(t, err, errPBinStateBlob)
 }
 
 // With a row still open, part of the tree lives in the grid arrays and a

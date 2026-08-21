@@ -184,17 +184,17 @@ digest cache and the descent depth. Task 6 plumbs that through before task 7 use
 - Modify: `execution/commitment/pbin_state_test.go`
 - Modify: `db/state/squeeze.go`
 
-- [ ] write a failing test that `SetState` refuses a blob whose version is not the current constant
-- [ ] write a failing test that a pre-version blob (old 4-byte header) is refused, not misread
-- [ ] add `pbinRecordFormat` in `pbin_state.go`, starting at the value for today's layout
-- [ ] write the version byte after `pbinStateMarker` in `EncodeCurrentState`, shifting the flags byte
+- [x] write a failing test that `SetState` refuses a blob whose version is not the current constant
+- [x] write a failing test that a pre-version blob (old 4-byte header) is refused, not misread
+- [x] add `pbinRecordFormat` in `pbin_state.go`, starting at the value for today's layout
+- [x] write the version byte after `pbinStateMarker` in `EncodeCurrentState`, shifting the flags byte
       and the `uint16` root length, and reject a mismatch in `SetState` naming both versions
-- [ ] **close the bypass**: `RebuildCommitmentFiles` passes `execctx.WithoutCommitmentSeek()` for
+- [x] **close the bypass**: `RebuildCommitmentFiles` passes `execctx.WithoutCommitmentSeek()` for
       `VariantBinPatriciaTrie`, which skips restoring the state blob and therefore skips this guard —
       exactly the flow `--resume` uses over an inherited datadir. Add an explicit format check on the
       rebuild path that does not depend on `SetState` running
-- [ ] write a test that a rebuild over an old-format datadir refuses instead of decoding
-- [ ] run `go test ./execution/commitment/... ./db/state/...` — must pass before task 2
+- [x] write a test that a rebuild over an old-format datadir refuses instead of decoding
+- [x] run `go test ./execution/commitment/... ./db/state/...` — must pass before task 2
 
 **Every later task that changes the record layout bumps `pbinRecordFormat` as part of that task.**
 Tasks 2, 3, 5 and 6 each say so. A commit that changes the layout without bumping is the

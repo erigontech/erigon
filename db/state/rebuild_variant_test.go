@@ -20,6 +20,7 @@
 package state_test
 
 import (
+	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
@@ -43,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment"
+	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -177,6 +179,27 @@ func rebuildVariantRestoredRoot(t *testing.T, db kv.TemporalRwDB, agg *state.Agg
 	return root
 }
 
+func rebuildVariantPutLegacyPBinState(t *testing.T, db kv.TemporalRwDB) {
+	t.Helper()
+	tx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), tx, log.New(),
+		execctx.WithTrieConfig(rebuildVariantTrieCfg(commitment.VariantHexPatriciaTrie)),
+		execctx.WithoutCommitmentSeek())
+	require.NoError(t, err)
+	defer sd.Close()
+
+	legacyTrieState := []byte{0xB1, 0, 0, 0}
+	stateValue := make([]byte, 18+len(legacyTrieState))
+	binary.BigEndian.PutUint16(stateValue[16:18], uint16(len(legacyTrieState)))
+	copy(stateValue[18:], legacyTrieState)
+	require.NoError(t, sd.DomainPut(kv.CommitmentDomain, tx, commitmentdb.KeyCommitmentState, stateValue, 0, nil))
+	require.NoError(t, sd.Flush(t.Context(), tx))
+	require.NoError(t, tx.Commit())
+}
+
 func rebuildVariantSettingsStayHex(t *testing.T, dirs datadir.Dirs) {
 	t.Helper()
 	settings, err := state.ResolveErigonDBSettings(dirs, log.New(), true)
@@ -239,6 +262,16 @@ func TestRebuildCommitmentFilesBinTargetOnHexDatadir(t *testing.T) {
 	rebuildVariantReportCounts(t, hexReport, hexRoot, commitment.VariantHexPatriciaTrie)
 	require.NotEqual(t, hexRoot, binRoot, "bin and hex commit different key spaces under different hashes")
 	require.Equal(t, hexRoot, rebuildVariantRestoredRoot(t, hexDB, hexAgg, commitment.VariantHexPatriciaTrie))
+}
+
+func TestRebuildCommitmentFilesBinTargetRejectsLegacyPBinState(t *testing.T) {
+	db, _, _ := rebuildVariantDatadir(t)
+	rebuildVariantPutLegacyPBinState(t, db)
+
+	_, _, err := state.RebuildCommitmentFiles(t.Context(), db, &rawdbv3.TxNums, log.New(), false,
+		state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie})
+	require.Error(t, err)
+	require.ErrorContains(t, err, "record format")
 }
 
 // The commitment files a rebuild left behind, by name and content: a resumed run
