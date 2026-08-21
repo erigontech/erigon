@@ -239,7 +239,7 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
 	if a.disableHistory {
 		cfg.Hist.HistoryDisabled = true
-		cfg.Hist.IiCfg.Disable = true
+		cfg.Hist.IiCfg.Enabled = false
 	}
 	a.d[cfg.Name], err = NewDomain(cfg, a.stepSize.Load(), a.stepsInFrozenFile.Load(), dirs, logger)
 	if err != nil {
@@ -255,7 +255,7 @@ func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datad
 		return fmt.Errorf("inverted index %s already registered", cfg.Name)
 	}
 	if a.disableHistory {
-		cfg.Disable = true
+		cfg.Enabled = false
 	}
 	ii, err := NewInvertedIndex(cfg, a.stepSize.Load(), a.stepsInFrozenFile.Load(), dirs, logger)
 	if err != nil {
@@ -461,7 +461,7 @@ func (a *Aggregator) ConfigureDomains() error {
 
 func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv.Domain) {
 	dd := a.d[dependent]
-	if dd.Disable || a.d[dependency].Disable {
+	if !dd.Enabled || !a.d[dependency].Enabled {
 		a.logger.Debug("skipping dependency between disabled domains", "dependency", dependency, "dependent", dependent)
 		return
 	}
@@ -483,7 +483,7 @@ func (a *Aggregator) AddDependencyBtwnDomains(dependency kv.Domain, dependent kv
 func (a *Aggregator) AddDependencyBtwnHistoryII(domain kv.Domain) {
 	// ii has checker on history dirtyFiles (same domain)
 	dd := a.d[domain]
-	if dd.HistCfg.SnapshotsDisabled || dd.HistCfg.HistoryDisabled || dd.Disable {
+	if dd.HistCfg.SnapshotsDisabled || dd.HistCfg.HistoryDisabled || !dd.Enabled {
 		a.logger.Debug("history or ii disabled, can't register dependency", "domain", domain.String())
 		return
 	}
@@ -662,7 +662,7 @@ func (a *Aggregator) openFolder() error {
 
 	eg, ctx := errgroup.WithContext(a.ctx)
 	for id, d := range a.d {
-		if d.Disable {
+		if !d.Enabled {
 			continue
 		}
 
@@ -672,7 +672,7 @@ func (a *Aggregator) openFolder() error {
 		})
 	}
 	for id, ii := range standaloneIIs {
-		if ii.Disable {
+		if !ii.Enabled {
 			continue
 		}
 		eg.Go(func() (err error) {
@@ -775,7 +775,7 @@ func (a *Aggregator) closeDirtyFiles() {
 	wg.Wait()
 }
 
-func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Disable = false }
+func (a *Aggregator) EnableDomain(domain kv.Domain) { a.d[domain].Enabled = true }
 
 func (a *Aggregator) setBuildAccessorsWorkers(i int) {
 	a.workers.trySet(func() {
@@ -1071,7 +1071,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 	ac := a.BeginFilesRo()
 	defer ac.Close()
 	for id, d := range a.d {
-		if d.Disable {
+		if !d.Enabled {
 			continue
 		}
 
@@ -1111,7 +1111,7 @@ func (a *Aggregator) buildFiles(ctx context.Context, step kv.Step) error {
 
 	// indices are built concurrently
 	for iikey, ii := range a.standaloneIIs() {
-		if ii.Disable {
+		if !ii.Enabled {
 			continue
 		}
 
@@ -1837,13 +1837,13 @@ func (a *Aggregator) dirtyFilesEndTxNumMinimax() uint64 {
 
 	ceiling := uint64(math.MaxUint64)
 	for id, d := range a.d {
-		if d == nil || d.Disable || a.unalignedDomain[id] {
+		if d == nil || !d.Enabled || a.unalignedDomain[id] {
 			continue
 		}
 		ceiling = _min(ceiling, d.dirtyFilesEndTxNumMinimax())
 	}
 	for id, ii := range a.standaloneIIs() {
-		if ii == nil || ii.Disable || a.unalignedIdx[id] {
+		if ii == nil || !ii.Enabled || a.unalignedIdx[id] {
 			continue
 		}
 		ceiling = _min(ceiling, ii.dirtyFilesEndTxNumMinimax())
@@ -1978,7 +1978,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 		}
 	}
 	for id, d := range at.d {
-		if d.d.Disable {
+		if !d.d.Enabled {
 			continue
 		}
 		r.domain[id] = d.findMergeRange(maxEndTxNum, domainMaxSpan, maxSpan)
@@ -2026,7 +2026,7 @@ func (at *AggregatorRoTx) findMergeRange(maxEndTxNum, stepSize, stepsInFrozenFil
 	}
 
 	for id, ii := range at.standaloneIIs() {
-		if ii.ii.Disable {
+		if !ii.ii.Enabled {
 			continue
 		}
 		r.invertedIndex[id] = ii.findMergeRange(maxEndTxNum, maxSpan)
@@ -2070,7 +2070,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	accStorageMerged := new(sync.WaitGroup)
 
 	for id := range at.d {
-		if at.d[id].d.Disable {
+		if !at.d[id].d.Enabled {
 			continue
 		}
 		if !r.domain[id].any() {
@@ -2108,7 +2108,7 @@ func (at *AggregatorRoTx) mergeFiles(ctx context.Context, files *visibleFilesFor
 	}
 
 	for id, rng := range r.invertedIndex {
-		if rng == nil || at.iis[id] == nil || at.iis[id].ii.Disable {
+		if rng == nil || at.iis[id] == nil || !at.iis[id].ii.Enabled {
 			continue
 		}
 
@@ -2144,14 +2144,14 @@ func (a *Aggregator) integrateMergedDirtyFiles(in *MergeResult) {
 	defer a.dirtyFilesLock.Unlock()
 
 	for id, d := range a.d {
-		if d.Disable {
+		if !d.Enabled {
 			continue
 		}
 		d.integrateMergedDirtyFiles(in.d[id], in.dIdx[id], in.dHist[id])
 	}
 
 	for id, ii := range a.standaloneIIs() {
-		if ii.Disable {
+		if !ii.Enabled {
 			continue
 		}
 		ii.integrateMergedDirtyFiles(in.iis[id])
@@ -2177,7 +2177,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) 
 	var deleted []string
 	var retired []*FilesItem
 	for id, d := range at.d {
-		if d.d.Disable {
+		if !d.d.Enabled {
 			continue
 		}
 		var names []string
@@ -2191,7 +2191,7 @@ func (a *Aggregator) cleanAfterMergeLocked(at *AggregatorRoTx, in *MergeResult) 
 		retired = append(retired, r...)
 	}
 	for id, ii := range at.standaloneIIs() {
-		if ii.ii.Disable {
+		if !ii.ii.Enabled {
 			continue
 		}
 		var names []string
@@ -2499,7 +2499,7 @@ type AggregatorRoTx struct {
 // erigon without `integration stage_exec --reset`. Meant to run once at startup.
 func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 	for _, dt := range at.d {
-		if dt == nil || dt.d.Disable {
+		if dt == nil || !dt.d.Enabled {
 			continue
 		}
 		if err := dt.checkFilesDBGap(tx); err != nil {
@@ -2507,7 +2507,7 @@ func (at *AggregatorRoTx) CheckFilesDBGap(tx kv.Tx) error {
 		}
 	}
 	for _, iit := range at.iis {
-		if iit == nil || iit.ii.Disable {
+		if iit == nil || !iit.ii.Enabled {
 			continue
 		}
 		if err := iit.checkFilesDBGap(tx); err != nil {

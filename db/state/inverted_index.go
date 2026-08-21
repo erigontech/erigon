@@ -198,7 +198,7 @@ func (ii *InvertedIndex) openList(ctx context.Context, fNames, accessorFiles []s
 }
 
 func (ii *InvertedIndex) openFolder(ctx context.Context, r *ScanDirsResult) (retiredFiles, error) {
-	if ii.Disable {
+	if !ii.Enabled {
 		return nil, nil
 	}
 	return ii.openList(ctx, r.iiFiles, r.accessorFiles)
