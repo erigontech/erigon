@@ -1143,9 +1143,10 @@ type OverlayTemporalReadView struct {
 var _ kv.TemporalTx = (*OverlayTemporalReadView)(nil)
 
 // NewTemporalReadView creates a read-only view whose table reads check the
-// overlay first. Temporal domain and history reads use temporalTx directly.
-// The temporalTx must be a fresh, independently-opened transaction; it is not
-// shared with the overlay's internal backing tx.
+// overlay first. Temporal reads use temporalTx, except GetAsOf and HistorySeek,
+// which first consult the overlay's DomainReader. The temporalTx must be a
+// fresh, independently-opened transaction; it is not shared with the overlay's
+// internal backing tx.
 func (m *MemoryMutation) NewTemporalReadView(temporalTx kv.TemporalTx) *OverlayTemporalReadView {
 	return &OverlayTemporalReadView{
 		MemoryMutation: m.newReadViewMut(temporalTx),
@@ -1172,7 +1173,7 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 	return f(v)
 }
 
-// Temporal methods — delegate to the independent temporal tx.
+// Temporal methods use the independent temporal transaction unless noted otherwise.
 
 func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	return v.temporalTx.GetLatest(name, k, opts)
