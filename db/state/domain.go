@@ -1663,6 +1663,33 @@ func (dt *DomainRoTx) unwind(ctx context.Context, rwTx kv.RwTx, step, txNumUnwin
 	if _, err := dt.ht.prune(ctx, rwTx, txNumUnwindTo, math.MaxUint64, math.MaxUint64, true, logEvery); err != nil {
 		return fmt.Errorf("[domain][%s] unwinding, prune history to txNum=%d, step %d: %w", dt.d.FilenameBase, txNumUnwindTo, step, err)
 	}
+
+	// Pair each shadow row we just wrote with a synthetic history
+	// entry, so retire's History.collate sees K in its .ef build for
+	// this step and doesn't produce a .kv-without-matching-.ef file
+	// (mode-D wrong-root shape). Aligned unwinds fall on a step
+	// boundary — the shadow row lands at the start of a fresh step
+	// and doesn't straddle, so no synth is needed.
+	if txNumUnwindTo > 0 && txNumUnwindTo%dt.d.stepSize != 0 {
+		historyTxN := txNumUnwindTo - 1
+		for i := range domainDiffs {
+			keyStr, value := domainDiffs[i].Key, domainDiffs[i].Value
+			if value == nil {
+				continue
+			}
+			key := common.ToBytesZeroCopy(keyStr)
+			// Same lastForKey filter as the shadow-value write above,
+			// so we synth once per (K, step) rather than once per diff.
+			lastForKey := i+1 == len(domainDiffs) || domainDiffs[i+1].Key[:len(domainDiffs[i+1].Key)-8] != keyStr[:len(keyStr)-8]
+			if !lastForKey {
+				continue
+			}
+			fullKey := key[:len(key)-8]
+			if err := putShadowHistorySynth(rwTx, dt.d, fullKey, value, historyTxN); err != nil {
+				return fmt.Errorf("[domain][%s] unwinding, synth history: %w", dt.d.FilenameBase, err)
+			}
+		}
+	}
 	return nil
 }
 
