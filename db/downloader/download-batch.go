@@ -5,12 +5,16 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync/atomic"
 
 	"github.com/anacrolix/sync"
 	"github.com/anacrolix/torrent"
 	"golang.org/x/sync/semaphore"
 )
+
+// Caps concurrent whole-file hashing by kept-snapshot seeding.
+var seedConcurrency = runtime.GOMAXPROCS(-1) * 16
 
 type downloadBatch struct {
 	d      *Downloader
@@ -70,14 +74,10 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 	return nil
 }
 
-// TryAcquire first: abandon() can cancel seedCtx while this goroutine is still on its way to its
-// own Acquire call, so a bare Acquire could reject already-runnable work.
 func (me *downloadBatch) goSeed(f func()) {
 	me.all.Go(func() {
-		if !me.seedSem.TryAcquire(1) {
-			if err := me.seedSem.Acquire(me.seedCtx, 1); err != nil {
-				return
-			}
+		if me.seedSem.Acquire(me.seedCtx, 1) != nil {
+			return
 		}
 		defer me.seedSem.Release(1)
 		f()
@@ -110,17 +110,21 @@ func (me *downloadBatch) doMetainfoTask(task func() func()) {
 	}
 }
 
-func (me *downloadBatch) abandon(abandoned bool) {
-	me.cancel(errors.New("download batch abandoned"))
-	if abandoned {
-		me.seedCancel(errors.New("download batch abandoned"))
+// A nil cause means the batch finished on its own, which still ends it but lets queued seeding run.
+func (me *downloadBatch) abandon(cause error) {
+	ended := errors.New("download batch abandoned")
+	// seedCtx is a d.ctx child, so it outlives the batch unless it is always released.
+	defer me.seedCancel(ended)
+	me.cancel(ended)
+	if cause != nil {
+		me.seedCancel(cause)
 	}
 	me.all.Wait()
 	me.d.decDownloadRequests()
 }
 
 func (me *downloadBatch) wait(ctx context.Context) (err error) {
-	defer func() { me.abandon(err != nil) }()
+	defer func() { me.abandon(cmp.Or(err, ctx.Err())) }()
 	for _, t := range me.torrents {
 		select {
 		case <-t.Complete().On():
