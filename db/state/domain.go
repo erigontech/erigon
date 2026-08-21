@@ -1259,7 +1259,7 @@ func (d *Domain) BuildMissedAccessors(ctx context.Context, g *errgroup.Group, ps
 }
 
 func buildHashMapAccessor(ctx context.Context, decomp *seg.Decompressor, compression seg.FileCompression, idxPath string, values bool, cfg recsplit.RecSplitArgs, ps *background.ProgressSet, logger log.Logger, testHook func(*recsplit.RecSplit)) (err error) {
-	seqView, err := decomp.OpenSequentialView(true)
+	seqView, err := decomp.OpenSequentialView()
 	if err != nil {
 		return err
 	}
@@ -1668,10 +1668,11 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 		panic("assert: miss-use " + f.FileName())
 	}
 	g := f.MakeGetter()
-	if dbg.FilesAsyncIOLiterals {
-		g.EnableAsyncLiteralWarm()
-	} else if dbg.FilesAsyncIO {
+	if dbg.FilesAsyncIO {
 		g.EnableResidencyGate()
+	}
+	if dbg.FilesAsyncIOMultiPage {
+		g.EnableMultiPageAsyncIO()
 	}
 	return seg.NewReader(g, d.Compression)
 }
