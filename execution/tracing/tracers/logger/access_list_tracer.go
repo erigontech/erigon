@@ -86,9 +86,7 @@ func (al accessList) cloneExcluding(excl map[common.Address]struct{}) accessList
 		}
 		storage := al[addr]
 		storage.order = len(cp)
-		if storage.slots != nil {
-			storage.slots = maps.Clone(storage.slots)
-		}
+		storage.slots = maps.Clone(storage.slots)
 		cp[addr] = storage
 	}
 	return cp
@@ -184,19 +182,24 @@ type AccessListTracer struct {
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
 func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state *state.IntraBlockState) *AccessListTracer {
-	excl := make(map[common.Address]struct{})
-	if exclude != nil {
-		excl = exclude
-	}
-	list := newAccessList()
+	t := newAccessListTracer(exclude, newAccessList(), state)
 	for _, al := range acl {
-		if _, ok := excl[al.Address]; ok {
+		if _, ok := t.excl[al.Address]; ok {
 			continue
 		}
-		list.addAddress(al.Address)
+		t.list.addAddress(al.Address)
 		for _, slot := range al.StorageKeys {
-			list.addSlot(al.Address, slot)
+			t.list.addSlot(al.Address, slot)
 		}
+	}
+	return t
+}
+
+// newAccessListTracer holds the construction both entry points share, so they
+// cannot drift.
+func newAccessListTracer(excl map[common.Address]struct{}, list accessList, state *state.IntraBlockState) *AccessListTracer {
+	if excl == nil {
+		excl = make(map[common.Address]struct{})
 	}
 	return &AccessListTracer{
 		excl:               excl,
@@ -208,17 +211,10 @@ func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct
 }
 
 // SeedNew returns a tracer that starts from a's accumulated list, for the next
-// convergence iteration. It copies the maps directly rather than round-tripping
-// through types.AccessList, and inherits a's exclusion set. The contract sets
-// start empty: they describe one execution, not the accumulated list.
+// convergence iteration, copying the maps directly rather than round-tripping
+// through types.AccessList.
 func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTracer {
-	return &AccessListTracer{
-		excl:               a.excl,
-		list:               a.list.cloneExcluding(a.excl),
-		state:              state,
-		createdContracts:   make(map[common.Address]struct{}),
-		usedBeforeCreation: make(map[common.Address]struct{}),
-	}
+	return newAccessListTracer(a.excl, a.list.cloneExcluding(a.excl), state)
 }
 
 func (a *AccessListTracer) Hooks() *tracing.Hooks {

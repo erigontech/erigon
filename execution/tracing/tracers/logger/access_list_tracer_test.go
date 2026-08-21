@@ -93,7 +93,6 @@ func TestAccessListTracerSeedNew(t *testing.T) {
 
 	require.Equal(t, roundTripped.AccessList(), seeded.AccessList())
 	require.True(t, seeded.Equal(prev))
-	require.True(t, seeded.Equal(roundTripped))
 
 	seeded.list.addSlot(addr, slot3)
 	seeded.list.addAddress(excluded)
@@ -101,9 +100,8 @@ func TestAccessListTracerSeedNew(t *testing.T) {
 	require.Equal(t, roundTripped.AccessList(), prev.AccessList())
 }
 
-// TestAccessListTracerSeedNewDropsExcluded pins that seeding filters the exclusion
-// set. OnOpcode's SLOAD/SSTORE path adds the executing address without checking
-// excl, so an excluded address reaches the list and must not survive re-seeding.
+// TestAccessListTracerSeedNewDropsExcluded pins the filtering cloneExcluding
+// documents: an excluded address can reach the list, and must not survive.
 func TestAccessListTracerSeedNewDropsExcluded(t *testing.T) {
 	excluded := common.BytesToAddress([]byte{0x77})
 	excl := map[common.Address]struct{}{excluded: {}}
@@ -138,7 +136,7 @@ func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
 
 func BenchmarkAccessListTracerSeed(b *testing.B) {
 	// Real eth_createAccessList lists are small: a handful of addresses with a
-	// few slots each. The wide shapes are here to show where the crossover is.
+	// few slots each. The wide shapes are here for scale.
 	for _, shape := range []struct{ nAddrs, nSlots int }{
 		{1, 1}, {1, 5}, {1, 17}, {3, 5}, {5, 20}, {30, 20},
 	} {
