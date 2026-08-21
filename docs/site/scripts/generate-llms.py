@@ -285,24 +285,133 @@ def strip_mdx(text):
 # index pages. After MDX stripping, they collapse to a structureless pile of
 # title/desc fragments. We detect the lp-card pattern and synthesize a clean
 # bullet list instead, keeping link structure intact for LLM consumption.
-_LANDING_CARD_RE = re.compile(
-    r'<Link\s[^>]*\bto=[\'"]([^\'"]+)[\'"][^>]*>'
-    r'(?:.*?)'
-    r'<div[^>]*\blp-card-title\b[^>]*>([^<]+)</div>'
-    r'(?:.*?)'
-    r'<div[^>]*\blp-card-desc\b[^>]*>([^<]+)</div>'
-    r'(?:.*?)'
-    r'</Link>',
-    re.DOTALL,
-)
-_LANDING_HERO_RE = re.compile(
-    r'<div[^>]*\blp-hero\b[^>]*>'
-    r'(?:.*?)'
-    r'<h1>([^<]+)</h1>'
-    r'(?:.*?)'
-    r'<p>([^<]+)</p>',
-    re.DOTALL,
-)
+# Two invariants hold this together:
+#   1. A field match must never cross a card boundary, so each <Link> block is
+#      matched first and the fields are read only inside it.
+#   2. The expected count must not be derived from a marker the parse consumes,
+#      or the count shrinks in step with the loss it exists to detect.
+# Attributes are matched order-independently; `to=` is read separately.
+_LANDING_CARD_LINK_RE = re.compile(
+    r'<Link\s([^>]*\blp-card\b[^>]*)>(.*?)</Link>', re.DOTALL)
+_LINK_TO_RE = re.compile(r'\bto=[\'"]([^\'"]+)[\'"]')
+# Field openings only. The text is taken to the matching close, because `.*?`
+# up to `</div>` stops at the first nested one and truncates silently.
+_CARD_TITLE_OPEN_RE = re.compile(r'<div[^>]*\blp-card-title\b[^>]*>')
+_CARD_DESC_OPEN_RE = re.compile(r'<div[^>]*\blp-card-desc\b[^>]*>')
+
+# Invariant 2 in practice: several signals are counted over the whole body and
+# the expected card count is the largest of them, so no single rename can shrink
+# both sides of the guard.
+_CARD_TITLE_MARKER_RE = re.compile(r'<div[^>]*\blp-card-title\b[^>]*>')
+_CARD_DESC_MARKER_RE = re.compile(r'<div[^>]*\blp-card-desc\b[^>]*>')
+
+# The markers above share the `lp-card` prefix, so they cannot vouch for each
+# other. The two counts below are progressively less name-dependent. Any
+# over-count raises — a false alarm, never a silent loss.
+_LANDING_GRID_OPEN_RE = re.compile(r'<div[^>]*\blp-grid\b[^>]*>')
+_LINK_TAG_RE = re.compile(r'<Link\s')
+_LINK_OPEN_RE = re.compile(r'<Link\b[^>]*>')
+
+
+def _card_shaped_link_count(raw_body):
+    """<Link> tags that wrap at least one <div> — a card's shape.
+
+    The only signal keyed to no class name, so a rename of the whole namespace
+    cannot zero every count at once. A prose link wraps text; a card wraps divs.
+    """
+    total = 0
+    for opening in _LINK_OPEN_RE.finditer(raw_body):
+        close = raw_body.find('</Link>', opening.end())
+        body = raw_body[opening.end():close if close != -1 else len(raw_body)]
+        if '<div' in body:
+            total += 1
+    return total
+_DIV_TAG_RE = re.compile(r'<div\b[^>]*?(/?)>|(</div>)', re.DOTALL)
+
+
+def _div_span_end(raw_body, start):
+    """Offset of the </div> closing the div opened before `start`.
+
+    Depth-matched rather than "next tag of the same kind": a wrapper div holds
+    nested divs, so a naive close lands inside it. Returns len(raw_body) when
+    the markup never balances, which over-counts rather than under-counts.
+    """
+    depth = 1
+    for tag in _DIV_TAG_RE.finditer(raw_body, start):
+        if tag.group(2):          # </div>
+            depth -= 1
+        elif not tag.group(1):    # <div ...>, not self-closing
+            depth += 1
+        if depth == 0:
+            return tag.start()
+    return len(raw_body)
+
+
+def _grid_link_count(raw_body):
+    """<Link> tags contained by a grid, counted grid by grid.
+
+    Bounded by the grid's own div rather than by the next grid or EOF: an
+    ordinary <Link> in the prose after a grid is page content, and counting it
+    as a card would abort a well-formed page.
+    """
+    total = 0
+    for opening in _LANDING_GRID_OPEN_RE.finditer(raw_body):
+        end = _div_span_end(raw_body, opening.end())
+        total += len(_LINK_TAG_RE.findall(raw_body[opening.end():end]))
+    return total
+
+
+_CODE_SPAN_RE = re.compile(r'`[^`]*`')
+# Tags that stand for a break in the text. These become a space; inline tags
+# (<strong>, <code>) are dropped outright, so punctuation stays attached.
+_BREAK_TAG_RE = re.compile(r'<\s*(?:br|/p|/div|/li|/h[1-6])\b[^>]*>', re.IGNORECASE)
+
+
+def _card_text(fragment):
+    """Flatten a card's inner HTML to plain text, collapsing whitespace.
+
+    Break tags become a space — dropping them welded `First<br />Second` into
+    one word. Inline code spans are masked first, so a literal like `<string>`
+    survives instead of being read as a tag and removed.
+    """
+    spans = []
+
+    def mask(match):
+        spans.append(match.group(0))
+        return f"\x00{len(spans) - 1}\x00"
+
+    masked = _CODE_SPAN_RE.sub(mask, fragment)
+    text = _BREAK_TAG_RE.sub(' ', masked)
+    text = re.sub(r'\s+', ' ', re.sub(r'<[^>]+>', '', text)).strip()
+    for i, span in enumerate(spans):
+        text = text.replace(f"\x00{i}\x00", span)
+    return re.sub(r'\s+', ' ', text).strip()
+
+
+def _card_field(block, opening_re):
+    """Flattened text of a card field, read to its matching closing div."""
+    opening = opening_re.search(block)
+    if not opening:
+        return None
+    end = _div_span_end(block, opening.end())
+    return _card_text(block[opening.end():end])
+# The hero is read inside its own div: a field pattern that cannot cross the
+# closing tag is the only way to keep an inline-markup heading from pushing the
+# match onto a later h1/p and dragging that stretch into the hero span.
+_LANDING_HERO_OPEN_RE = re.compile(r'<div[^>]*\blp-hero\b[^>]*>')
+_HERO_H1_RE = re.compile(r'<h1[^>]*>(.*?)</h1>', re.DOTALL)
+_HERO_P_RE = re.compile(r'<p[^>]*>(.*?)</p>', re.DOTALL)
+
+
+def _landing_hero(raw_body):
+    """(span, lead) for the hero block, or None. Lead is its first paragraph."""
+    opening = _LANDING_HERO_OPEN_RE.search(raw_body)
+    if not opening:
+        return None
+    end = _div_span_end(raw_body, opening.end())
+    inner = raw_body[opening.end():end]
+    para = _HERO_P_RE.search(inner)
+    return (opening.start(), end), _card_text(para.group(1)) if para else ""
 
 
 def synthesize_landing(raw_body):
@@ -311,29 +420,100 @@ def synthesize_landing(raw_body):
     Returns synthesized markdown, or None if no `lp-card` patterns are present.
     Card hrefs that start with `/` are rewritten to absolute BASE_URL form so
     bullets remain useful when the body is read out of context.
+
+    Cards become a link list; every other part of the page is kept as prose, in
+    document order, so a grid page contributes the same text to the corpus that
+    a reader sees.
     """
-    cards = list(_LANDING_CARD_RE.finditer(raw_body))
-    if not cards:
+    # Count first, parse second. Deciding "this is not a card grid" on an empty
+    # parse result would make total parser failure indistinguishable from an
+    # ordinary prose page: the caller would fall back to strip_mdx and the guard
+    # below would never run.
+    matches = list(_LANDING_CARD_LINK_RE.finditer(raw_body))
+    expected = max(
+        len(matches),
+        len(_CARD_TITLE_MARKER_RE.findall(raw_body)),
+        len(_CARD_DESC_MARKER_RE.findall(raw_body)),
+        _grid_link_count(raw_body),
+        _card_shaped_link_count(raw_body),
+    )
+    if not expected:
         return None
 
+    parsed = []
+    for m in matches:
+        attrs, block = m.groups()
+        href = _LINK_TO_RE.search(attrs)
+        title_text = _card_field(block, _CARD_TITLE_OPEN_RE)
+        desc_text = _card_field(block, _CARD_DESC_OPEN_RE)
+        # An empty or markup-only field flattens to "", which would otherwise
+        # emit `- [](url): ` and still satisfy the count guard.
+        if not href or not title_text or not desc_text:
+            continue
+        parsed.append((m, href.group(1), title_text, desc_text))
+
+    # A card that parses to nothing is invisible in the output, and `--check`
+    # only compares generated output against committed output — so a systematic
+    # parser regression stays green in CI while the corpus quietly loses pages.
+    if len(parsed) != expected:
+        raise SystemExit(
+            f"synthesize_landing dropped cards: parsed {len(parsed)} of "
+            f"{expected} expected "
+            f"(wrappers={len(matches)}, "
+            f"titles={len(_CARD_TITLE_MARKER_RE.findall(raw_body))}, "
+            f"descs={len(_CARD_DESC_MARKER_RE.findall(raw_body))}, "
+            f"grid_links={_grid_link_count(raw_body)}, "
+            f"card_shaped={_card_shaped_link_count(raw_body)})"
+        )
+
     out = []
-    hero = _LANDING_HERO_RE.search(raw_body)
+    hero = _landing_hero(raw_body)
     if hero:
-        lead = hero.group(2).strip()
+        hero_span, lead = hero
         if lead:
             out.append(lead)
             out.append("")
 
-    out.append("## Sections")
-    out.append("")
-    for m in cards:
-        href = m.group(1).strip()
-        if href.startswith("/"):
-            href = BASE_URL + href.rstrip("/")
-        title = m.group(2).strip()
-        desc = m.group(3).strip()
-        out.append(f"- [{title}]({href}): {desc}")
-    return "\n".join(out)
+    def prose(lo, hi):
+        """Page text between two offsets, minus the hero already emitted."""
+        if hero:
+            hs, he = hero_span
+            if lo < he and hi > hs:  # overlaps the hero — drop that part
+                head = strip_mdx(raw_body[lo:min(hi, hs)]).strip() if lo < hs else ""
+                tail = strip_mdx(raw_body[max(lo, he):hi]).strip() if hi > he else ""
+                return "\n\n".join(p for p in (head, tail) if p)
+        return strip_mdx(raw_body[lo:hi]).strip()
+
+    def emit(text):
+        if text:
+            out.append(text)
+            out.append("")
+
+    # Walk the page in order: prose, then each run of adjacent cards as a list.
+    # Consecutive cards separated by nothing but markup belong to one grid; a
+    # run ends wherever real prose appears, which is what keeps a heading
+    # between two grids (and the text around them) in place.
+    emit(prose(0, matches[0].start()))
+    heading_emitted = False
+    run = []
+    for i, (m, href, title, desc) in enumerate(parsed):
+        run.append((href, title, desc))
+        gap = prose(m.end(), parsed[i + 1][0].start()) if i + 1 < len(parsed) else prose(m.end(), len(raw_body))
+        if gap or i + 1 == len(parsed):
+            if not heading_emitted:
+                out.append("## Sections")
+                out.append("")
+                heading_emitted = True
+            for href_, title_, desc_ in run:
+                href_ = href_.strip()
+                if href_.startswith("/"):
+                    href_ = BASE_URL + href_.rstrip("/")
+                out.append(f"- [{title_}]({href_}): {desc_}")
+            out.append("")
+            run = []
+            emit(gap)
+
+    return "\n".join(out).rstrip()
 
 
 def file_to_url(filepath, route_prefix):
@@ -523,6 +703,17 @@ def build():
     lines.append("> Erigon is a high-performance Ethereum execution client known for its efficiency,")
     lines.append("> modularity, and minimal disk footprint. It features an integrated consensus layer")
     lines.append("> (Caplin), BitTorrent-based historical data distribution, and fast node synchronization.")
+    lines.append("")
+    # The only machine-readable route from this index to the full corpus. Pages
+    # advertise llms.txt via <link rel="describedby">, not llms-full.txt, so an
+    # agent that arrives here would otherwise have no way to reach it.
+    lines.append(
+        f"The text of every page listed below is also available as a single file: "
+        f"[llms-full.txt]({BASE_URL}/llms-full.txt). Pages are cleaned for machine "
+        f"reading — MDX components are stripped, and on card-grid landing pages "
+        f"each grid becomes a link list, with the page's prose kept around it in "
+        f"document order."
+    )
     lines.append("")
 
     current_section = None

@@ -71,7 +71,9 @@ export default async function createConfig(): Promise<Config> {
     markdown: {mermaid: true},
     themes: ['@docusaurus/theme-mermaid'],
 
-    customFields: {latestVersion},
+    // archivedVersions reaches src/theme/Root.tsx, which uses it to keep the
+    // llms.txt descriptor off archived routes the index does not cover.
+    customFields: {latestVersion, archivedVersions},
 
     headTags: [
       {
@@ -154,6 +156,15 @@ export default async function createConfig(): Promise<Config> {
           changefreq: 'weekly',
           priority: 0.5,
           ignorePatterns: ['/search'],
+          // The llms.txt artifacts live in static/, so Docusaurus never routes
+          // them and the default sitemap omits them — which leaves them
+          // unindexable by search. Append them explicitly. This is also how
+          // llms-full.txt stays reachable, since it is not advertised in head.
+          createSitemapItems: async ({defaultCreateSitemapItems, ...rest}) => [
+            ...(await defaultCreateSitemapItems(rest)),
+            {url: 'https://docs.erigon.tech/llms.txt', changefreq: 'weekly', priority: 0.5},
+            {url: 'https://docs.erigon.tech/llms-full.txt', changefreq: 'weekly', priority: 0.5},
+          ],
         },
       } satisfies Preset.Options],
     ],
