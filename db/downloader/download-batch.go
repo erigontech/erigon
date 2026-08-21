@@ -5,6 +5,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"runtime"
 	"sync/atomic"
 
 	"github.com/anacrolix/sync"
@@ -13,6 +14,7 @@ import (
 
 type downloadBatch struct {
 	d      *Downloader
+	ctx    context.Context
 	cancel context.CancelCauseFunc
 	// Tasks that must finish before abandoning the batch.
 	all      sync.WaitGroup
@@ -22,7 +24,11 @@ type downloadBatch struct {
 	finishedMetadataTasks atomic.Bool
 	// These must be run even if the batch is abandoned.
 	afterTasks chan func()
+	// Bounds concurrent metainfo derivation, each of which hashes a whole data file.
+	seedSlots chan struct{}
 }
+
+func maxConcurrentSeedKept() int { return runtime.GOMAXPROCS(-1) * 16 }
 
 // Waits for all the fetches to complete then fires off the thread-safe Torrent methods to configure
 // for downloading appropriately.
@@ -44,7 +50,7 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 		return err
 	}
 	if keptLocal {
-		me.all.Go(func() { me.d.seedKeptSnapshot(me.d.ctx, item.Name) })
+		me.all.Go(func() { me.seedKeptSnapshot(item.Name) })
 	}
 	if !snapshotTorrent.Ok {
 		return nil
@@ -60,6 +66,20 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 		})
 	})
 	return nil
+}
+
+// seedKeptSnapshot waits for a slot before deriving a metainfo: that hashes the whole data file
+// with a piece buffer per hash in flight, and a datadir of rsync'd snapshots needs one per item.
+// The wait watches d.ctx rather than the batch, because abandon cancels the batch on every path
+// including success, and a kept snapshot that is never registered is never seeded.
+func (me *downloadBatch) seedKeptSnapshot(name string) {
+	select {
+	case me.seedSlots <- struct{}{}:
+	case <-me.d.ctx.Done():
+		return
+	}
+	defer func() { <-me.seedSlots }()
+	me.d.seedKeptSnapshot(me.d.ctx, name)
 }
 
 func (me *downloadBatch) addAllItems(ctx context.Context, items []preverifiedSnapshot) error {

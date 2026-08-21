@@ -19,11 +19,13 @@ package downloader
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
+	"strings"
 	"sync"
 	"testing"
 	"time"
@@ -372,6 +374,18 @@ func (b *logBuffer) String() string {
 	return b.buf.String()
 }
 
+// requireLoggedForName asserts that msg and name appear on the same log line. Asserting them
+// separately cannot fail once any earlier warn has put name in the buffer.
+func requireLoggedForName(t *testing.T, logs *logBuffer, msg, name string) {
+	t.Helper()
+	for line := range strings.SplitSeq(logs.String(), "\n") {
+		if strings.Contains(line, msg) && strings.Contains(line, name) {
+			return
+		}
+	}
+	require.Failf(t, "log line not found", "no line carries both %q and %q:\n%s", msg, name, logs.String())
+}
+
 func newLocalSnapshotTest(t *testing.T) (d *Downloader, logs *logBuffer, name, path string) {
 	d = newDownloaderTest(t).downloader
 	logs = &logBuffer{}
@@ -395,8 +409,7 @@ func TestInvalidateDataRenamesLocalFile(t *testing.T) {
 
 	require.NoFileExists(path)
 	require.FileExists(path + ".part")
-	require.Contains(logs.String(), "invalidated local snapshot data", "rename must be logged at warn or louder")
-	require.Contains(logs.String(), name)
+	requireLoggedForName(t, logs, "invalidated local snapshot data", name)
 }
 
 // A stale metainfo doesn't rescue the data while the initial download is incomplete.
@@ -430,8 +443,7 @@ func TestKeepsLocalSnapshotAfterInitialDownload(t *testing.T) {
 
 			require.FileExists(path)
 			require.NoFileExists(path + ".part")
-			require.Contains(logs.String(), "keeping local snapshot")
-			require.Contains(logs.String(), name)
+			requireLoggedForName(t, logs, "keeping local snapshot", name)
 		})
 	}
 }
@@ -451,8 +463,7 @@ func TestDownloadsLocalSnapshotNotMatchingItsMetainfo(t *testing.T) {
 
 	require.FileExists(path, "the client completes in place, so the data must stay where it is")
 	require.NoFileExists(path+".part", "invalidation stays forbidden after the initial download")
-	require.Contains(logs.String(), "local snapshot does not match its own metainfo")
-	require.Contains(logs.String(), name)
+	requireLoggedForName(t, logs, "local snapshot does not match its own metainfo", name)
 }
 
 // Nothing local to protect: the preverified file is still downloaded.
@@ -676,6 +687,51 @@ func TestKeptLocalSnapshotIsSeeded(t *testing.T) {
 	_, registered := d.torrentsByName[name]
 	d.lock.RUnlock()
 	require.True(registered, "a kept snapshot must be registered, or it is never seeded")
+}
+
+// Deriving a metainfo hashes a whole data file, so the seeding tasks are bounded and wait for a
+// slot. That wait must observe the downloader shutting down, or a stop has to hash every remaining
+// kept snapshot before it can finish.
+func TestDownloaderShutdownDropsQueuedSeeding(t *testing.T) {
+	require := require.New(t)
+	d, _, name, _ := newLocalSnapshotTest(t)
+	markInitialDownloadComplete(t, d)
+
+	batch := downloadBatch{d: d}
+	g.MakeChanWithLen(&batch.afterTasks, 1)
+	// No slots, so the task can only queue.
+	g.MakeChanWithLen(&batch.seedSlots, 0)
+	batch.ctx, batch.cancel = context.WithCancelCause(d.ctx)
+	defer batch.cancel(errors.New("test done"))
+	d.stop()
+
+	require.NoError(batch.addDownload(preverifiedSnapshot{snaptype.Hex2InfoHash("aa"), name}))
+	batch.all.Wait()
+
+	d.lock.RLock()
+	_, registered := d.torrentsByName[name]
+	d.lock.RUnlock()
+	require.False(registered, "queued seeding ignored the downloader shutting down")
+}
+
+// A kept snapshot whose local .torrent cannot be parsed must still be seeded. BuildTorrentIfNeed
+// only checks that the path exists, so a corrupt file suppresses the derivation that the kept data
+// would otherwise supply, and the name never reaches torrentsByName.
+func TestKeptLocalSnapshotWithUnreadableMetainfoIsSeeded(t *testing.T) {
+	require := require.New(t)
+	d, _, name, path := newLocalSnapshotTest(t)
+	require.NoError(os.WriteFile(d.metainfoFilePathForName(name), []byte("not bencode"), 0o644))
+	markInitialDownloadComplete(t, d)
+	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
+	defer cancel()
+
+	require.NoError(d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), name))
+
+	require.FileExists(path)
+	d.lock.RLock()
+	_, registered := d.torrentsByName[name]
+	d.lock.RUnlock()
+	require.True(registered, "a corrupt .torrent left the kept snapshot unseedable")
 }
 
 // The snapshot stage writes preverified.toml mid-run, so the rule must be re-read, not cached from

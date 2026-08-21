@@ -782,8 +782,8 @@ func (d *Downloader) loadMetainfoFromDisk(name string) (mi *metainfo.MetaInfo, e
 	return metainfo.LoadFromFile(miPath)
 }
 
-// Loads metainfo from disk, removing it if it's invalid. Returns Some metainfo if it's valid. Logs
-// errors.
+// Loads metainfo from disk. Returns Some metainfo if it's valid, None if it is missing. An invalid
+// metainfo is returned as an error and left on disk.
 func (d *Downloader) maybeLoadMetainfoFromDisk(name string) (localMetainfo g.Option[*metainfo.MetaInfo], err error) {
 	miPath := d.metainfoFilePathForName(name)
 	mi, err := metainfo.LoadFromFile(miPath)
@@ -840,12 +840,12 @@ func (d *Downloader) startSnapshotsDownload(
 	}
 	g.MakeSliceWithCap(&batch.torrents, len(items))
 	g.MakeChanWithLen(&batch.afterTasks, len(items))
-	var batchCtx context.Context
-	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
+	g.MakeChanWithLen(&batch.seedSlots, maxConcurrentSeedKept())
+	batch.ctx, batch.cancel = context.WithCancelCause(d.ctx)
 
 	batch.all.Go(func() {
 		d.logDownload(
-			batchCtx,
+			batch.ctx,
 			items,
 			target,
 			func() log.Lvl {
@@ -1052,8 +1052,8 @@ func (d *Downloader) addPreverifiedSnapshotForDownload(
 	snapshotTorrent g.Option[*torrent.Torrent],
 	firstDownloader bool, // First add of this Torrent that asked to download. The caller is responsible for adding download tasks.
 	localMetainfo g.Option[*metainfo.MetaInfo],
-	// Local data was kept and no torrent is registered for it. The caller seeds it, off d.lock:
-	// deriving a metainfo hashes the whole file.
+	// Local data was kept and no torrent is registered for it. The caller seeds it off d.lock —
+	// see seedKeptSnapshot.
 	keptLocal bool,
 	err error,
 ) {
@@ -1193,11 +1193,31 @@ func (d *Downloader) prepareLocalDataForDownload(
 }
 
 // seedKeptSnapshot registers a kept local snapshot so it is seeded, deriving the metainfo when
-// none is on disk. Must run without d.lock: deriving it hashes the whole file.
+// none is on disk. Must run without d.lock: addCompleteTorrent takes it and the lock is not
+// reentrant, so calling this under it deadlocks. Deriving also hashes the whole file.
 func (d *Downloader) seedKeptSnapshot(ctx context.Context, name string) {
+	if err := d.removeMalformedMetainfo(name); err != nil {
+		d.log(log.LvlWarn, "cannot remove malformed metainfo", "err", err, "name", name)
+	}
 	if err := d.AddNewSeedableFile(ctx, name); err != nil && ctx.Err() == nil {
 		d.log(log.LvlWarn, "cannot seed kept local snapshot", "err", err, "name", name)
 	}
+}
+
+// BuildTorrentIfNeed only checks that the .torrent path exists, so metainfo that cannot be parsed
+// suppresses the derivation the kept data would otherwise supply, leaving the snapshot unseedable
+// for the life of the process. Remove it only when the bytes are confirmed malformed: a file we
+// could not read says nothing about its contents.
+func (d *Downloader) removeMalformedMetainfo(name string) error {
+	b, err := os.ReadFile(d.metainfoFilePathForName(name))
+	if err != nil {
+		return nil
+	}
+	if _, err := metainfo.Load(bytes.NewReader(b)); err == nil {
+		return nil
+	}
+	d.log(log.LvlWarn, "removing malformed metainfo, deriving a new one from kept data", "name", name)
+	return d.torrentFS.Delete(name)
 }
 
 func (d *Downloader) snapshotDataExists(name string) (bool, error) {
