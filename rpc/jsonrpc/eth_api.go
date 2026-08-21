@@ -431,12 +431,17 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	}
 	// One overlay view for both the tag resolution and the read: deriving a
 	// second one can miss a head whose overlay was unpublished in between.
-	overlayTx := api.filters.WithOverlay(tx)
-	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
+	return api.headerByNumberOrHashInView(ctx, api.filters.WithOverlay(tx), blockNrOrHash)
+}
+
+// headerByNumberOrHashInView resolves and reads the header without selecting
+// an overlay. The caller must pass the same view used by dependent reads.
+func (api *BaseAPI) headerByNumberOrHashInView(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		return nil, false, err
 	}
-	header, err := api.headerInView(ctx, overlayTx, hash, blockNum)
+	header, err := api.headerInView(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, false, err
 	}

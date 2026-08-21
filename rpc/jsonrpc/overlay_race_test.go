@@ -44,12 +44,14 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/rpc"
+	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/filters"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpccfg"
@@ -511,6 +513,20 @@ func TestHeaderHelpersDoNotReturnPublishedPendingHeader(t *testing.T) {
 		require.False(t, isLatest)
 		require.Nil(t, header)
 	})
+}
+
+func TestEstimateGasKeepsSelectedOverlayView(t *testing.T) {
+	base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
+	overlay := base.filters.LatestSD().BlockOverlay()
+	// A production forkchoice overlay advances Execution progress together with
+	// its state. The generic overlay fixture only installs block-table data.
+	require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, overlayHeader.Number.Uint64()))
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	_, err := api.EstimateGas(m.Ctx, &ethapi.CallArgs{From: &from, To: &to}, nil, nil, nil)
+	require.NoError(t, err)
 }
 
 func TestHeaderHelpersDoNotReselectOverlay(t *testing.T) {
