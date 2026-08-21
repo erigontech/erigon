@@ -24,7 +24,6 @@ import (
 	"os"
 	"path/filepath"
 	"sort"
-	"sync"
 	"sync/atomic"
 	"time"
 	"unsafe"
@@ -208,8 +207,7 @@ type Decompressor struct {
 
 	readAheadRefcnt atomic.Int32 // ref-counter: allow enable/disable read-ahead from goroutines. only when refcnt=0 - disable read-ahead once
 
-	residency     atomic.Pointer[residencyBitmap] // page-residency bitmap for the async-io gate; nil unless enabled
-	residencyOnce sync.Once                       //nolint:unused // Used only in Linux builds.
+	residency atomic.Pointer[residencyBitmap] // page-residency bitmap for the async-io gate; nil unless enabled
 }
 
 const (
@@ -708,7 +706,7 @@ func (d *Decompressor) OpenSequentialView() (*SequentialView, error) {
 	if dbg.SnapshotMadvSequential { // OpenRo already left it MADV_RANDOM
 		_ = mmap.MadviseSequential(h1)
 	}
-	// d.data is a sub-slice of d.mmapHandle1 starting after file headers
+	// d.data is a sub-slice of d._mmapHandle starting after file headers
 	// (version, feature flags, metadata). wordsStart is relative to d.data,
 	// so the file offset is: headerSize + wordsStart.
 	headerSize := d.size - int64(len(d.data))
