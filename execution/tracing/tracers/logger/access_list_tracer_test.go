@@ -21,8 +21,13 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var (
@@ -69,4 +74,44 @@ func TestNewAccessListTracerExcludedAddress(t *testing.T) {
 	if len(got) != 0 {
 		t.Fatalf("excluded prelude address must not contribute tuples, got %+v", got)
 	}
+}
+
+// countingOpContext counts the stack lookups, which is what the benchmark pins.
+type countingOpContext struct {
+	tracing.OpContext
+	stack      []uint256.Int
+	address    accounts.Address
+	stackReads int
+}
+
+func (c *countingOpContext) StackData() []uint256.Int  { c.stackReads++; return c.stack }
+func (c *countingOpContext) Address() accounts.Address { return c.address }
+func (c *countingOpContext) MemoryData() []byte        { return nil }
+
+// Storage and calls are a small minority of what executes.
+var benchOpcodes = func() []byte {
+	ops := make([]byte, 0, 256)
+	for range 40 {
+		ops = append(ops,
+			byte(vm.PUSH1), byte(vm.PUSH1), byte(vm.DUP1), byte(vm.SWAP1),
+			byte(vm.ADD), byte(vm.MSTORE), byte(vm.JUMPDEST), byte(vm.POP))
+	}
+	ops = append(ops, byte(vm.SLOAD), byte(vm.SSTORE), byte(vm.CALL), byte(vm.BALANCE))
+	return ops
+}()
+
+func BenchmarkAccessListTracerOnOpcode(b *testing.B) {
+	scope := &countingOpContext{
+		address: accounts.InternAddress(addr),
+		stack:   make([]uint256.Int, 8),
+	}
+	tracer := NewAccessListTracer(nil, nil, nil)
+
+	b.ReportAllocs()
+	i := 0
+	for b.Loop() {
+		tracer.OnOpcode(uint64(i), benchOpcodes[i%len(benchOpcodes)], 100, 3, scope, nil, 1, nil)
+		i++
+	}
+	b.ReportMetric(float64(scope.stackReads)/float64(i), "stackReads/op")
 }
