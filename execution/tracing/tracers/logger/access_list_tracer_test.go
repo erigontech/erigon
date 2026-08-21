@@ -21,8 +21,12 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var (
@@ -222,6 +226,25 @@ func TestAccessListTracerSeedNewDropsExcluded(t *testing.T) {
 	seeded := prev.SeedNew(nil)
 	require.Equal(t, NewAccessListTracer(prev.AccessList(), excl, nil).AccessList(), seeded.AccessList())
 	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot2}}}, seeded.AccessList())
+}
+
+// TestAccessListTracerSeedNewTracesOpcodes drives a seeded tracer through the
+// opcodes that write its contract sets, which the AccessList-only assertions
+// above never reach.
+func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
+	prev := NewAccessListTracer(nil, nil, nil)
+	prev.list.addSlot(addr, slot1)
+
+	seeded := prev.SeedNew(nil)
+	scope := &mockOpContext{
+		address: accounts.InternAddress(addr),
+		stack:   []uint256.Int{*new(uint256.Int).SetBytes(slot2[:])},
+	}
+	seeded.OnOpcode(0, byte(vm.SLOAD), 100, 3, scope, nil, 1, nil)
+
+	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot1, slot2}}}, seeded.AccessList())
+	require.True(t, seeded.UsedBeforeCreation(addr))
+	require.Empty(t, seeded.CreatedContracts())
 }
 
 func BenchmarkAccessListTracerSeed(b *testing.B) {

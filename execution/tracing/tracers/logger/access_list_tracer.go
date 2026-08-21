@@ -226,9 +226,11 @@ func (a *AccessListTracer) markUsedBeforeCreation(addr common.Address) {
 // stay nil: they describe one execution, and markCreated allocates on demand.
 func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTracer {
 	return &AccessListTracer{
-		excl:  a.excl,
-		list:  a.list.cloneExcluding(a.excl),
-		state: state,
+		excl:               a.excl,
+		list:               a.list.cloneExcluding(a.excl),
+		state:              state,
+		createdContracts:   make(map[common.Address]struct{}),
+		usedBeforeCreation: make(map[common.Address]struct{}),
 	}
 }
 
