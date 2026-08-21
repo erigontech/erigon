@@ -88,10 +88,12 @@ func (s *payloadPreparationScratch) resetForTargetSlot(targetSlot uint64) {
 // payloadPreparationGate separates short execution exclusion from the wider local block lifecycle.
 // Production and adoption hold the shared side only around execution-critical sections.
 // Preparation takes the exclusive side with TryLock, so it never queues ahead of them.
-// localBlockWork only suppresses older-head fallback; it does not extend the execution lock.
+// localBlockWork suppresses preparation while local block work is active. latestProducedSlot keeps
+// stale-head preparation suppressed until the produced block is selected or its slot has passed.
 type payloadPreparationGate struct {
-	executionWork  sync.RWMutex
-	localBlockWork atomic.Int64
+	executionWork      sync.RWMutex
+	localBlockWork     atomic.Int64
+	latestProducedSlot atomic.Uint64
 }
 
 func (p *preparedPayload) set(slot uint64, payloadID []byte, primedAt time.Time) {
@@ -155,6 +157,20 @@ func (g *payloadPreparationGate) beginLocalBlockWork() func() {
 
 func (g *payloadPreparationGate) localBlockWorkInFlight() bool {
 	return g.localBlockWork.Load() > 0
+}
+
+func (g *payloadPreparationGate) noteProducedBlock(slot uint64) {
+	for {
+		previous := g.latestProducedSlot.Load()
+		if previous >= slot || g.latestProducedSlot.CompareAndSwap(previous, slot) {
+			return
+		}
+	}
+}
+
+func (g *payloadPreparationGate) producedBlockPending(currentSlot, selectedSlot uint64) bool {
+	producedSlot := g.latestProducedSlot.Load()
+	return selectedSlot < producedSlot && (producedSlot == currentSlot || producedSlot == currentSlot+1)
 }
 
 // StartPayloadPreparation primes the execution layer for slots this node is due to propose.
@@ -255,13 +271,17 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		if !selected {
 			continue
 		}
+		if a.payloadPreparationGate.localBlockWorkInFlight() ||
+			a.payloadPreparationGate.producedBlockPending(currentSlot, selectedSlot) {
+			continue
+		}
 		if selectedSlot != currentSlot && shouldWaitForCurrentSlotHead(
 			currentSlot,
 			selectedSlot,
+			a.forkchoiceStore.HighestSeen(),
 			time.Now(),
 			a.ethClock.GetSlotTime(currentSlot),
 			attestationDue(a.beaconChainCfg, stateVersion),
-			a.payloadPreparationGate.localBlockWorkInFlight(),
 		) {
 			continue
 		}
@@ -279,17 +299,16 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		head, err := a.preparePayloadForWithScratch(prepareCtx, targetSlot, &scratch)
 		cancel()
 		outcome := slotHead{slot: targetSlot, head: head, generation: generation}
+		if isSettledPreparationOutcome(err) {
+			lastSettled = outcome
+		}
 		if err != nil {
-			if errors.Is(err, errNotOurProposal) || errors.Is(err, errNoPayloadID) {
-				lastSettled = outcome
-			}
 			if !isExpectedPreparationSkip(err) && time.Since(lastFailureLog) >= time.Minute {
 				logger.Warn("PayloadPreparation: failed", "slot", targetSlot, "err", err)
 				lastFailureLog = time.Now()
 			}
 			continue
 		}
-		lastSettled = outcome
 	}
 }
 
@@ -308,18 +327,17 @@ func maxPreparationLead(cfg *clparams.BeaconChainConfig) time.Duration {
 	return time.Duration(cfg.SecondsPerSlot) * time.Second
 }
 
-// An older selected head becomes usable only after the current slot's attestation deadline and
-// after local block work has finished. A future selected head is never valid here.
+// An older selected head becomes usable only after the attestation deadline when no current-slot
+// block is still being processed. A future head is invalid.
 func shouldWaitForCurrentSlotHead(
-	currentSlot, selectedSlot uint64,
+	currentSlot, selectedSlot, highestSeen uint64,
 	now, currentSlotStart time.Time,
 	attestationDeadline time.Duration,
-	localBlockWorkInFlight bool,
 ) bool {
 	if selectedSlot == currentSlot {
 		return false
 	}
-	if selectedSlot > currentSlot || localBlockWorkInFlight {
+	if selectedSlot > currentSlot || highestSeen >= currentSlot {
 		return true
 	}
 	return now.Before(currentSlotStart.Add(attestationDeadline))
@@ -339,11 +357,23 @@ func isExpectedPreparationSkip(err error) bool {
 		errors.Is(err, synced_data.ErrNotSynced)
 }
 
+func isSettledPreparationOutcome(err error) bool {
+	return err == nil ||
+		errors.Is(err, errNotOurProposal) ||
+		errors.Is(err, errNoPayloadID) ||
+		errors.Is(err, errPreparationTooLate)
+}
+
 func (a *ApiHandler) preparePayloadForWithScratch(
 	ctx context.Context,
 	targetSlot uint64,
 	scratch *payloadPreparationScratch,
-) (common.Hash, error) {
+) (preparedHead common.Hash, resultErr error) {
+	defer func() {
+		if isSettledPreparationOutcome(resultErr) {
+			scratch.state = nil
+		}
+	}()
 	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
 		return common.Hash{}, errPreparationTooLate
 	}
@@ -398,9 +428,9 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
-	// The state copy and epoch transition can cross the slot boundary. Do not start preparation once
-	// production may already be running for the target slot.
-	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= 0 {
+	// State derivation can consume most of the useful lead. Apply the same floor again so a late
+	// builder does not overlap production without providing meaningful warmup.
+	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
 		return baseBlockRoot, errPreparationTooLate
 	}
 	withdrawals, err := a.expectedWithdrawals(baseState, nil, stateVersion, targetSlot)

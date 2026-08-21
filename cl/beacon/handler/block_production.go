@@ -771,6 +771,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		block.GetExecutionValue().Uint64(),
 		consensusValue,
 	)
+	a.payloadPreparationGate.noteProducedBlock(targetSlot)
 
 	return resp, nil
 }

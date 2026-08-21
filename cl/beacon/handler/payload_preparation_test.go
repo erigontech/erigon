@@ -194,15 +194,14 @@ func TestShouldWaitForCurrentSlotHead(t *testing.T) {
 	tests := []struct {
 		name                 string
 		selectedSlot         uint64
+		highestSeen          uint64
 		now                  time.Time
-		localBlockWork       bool
 		wantWaitForFreshHead bool
 	}{
 		{
 			name:                 "current head",
 			selectedSlot:         10,
 			now:                  currentSlotStart,
-			localBlockWork:       true,
 			wantWaitForFreshHead: false,
 		},
 		{
@@ -224,10 +223,10 @@ func TestShouldWaitForCurrentSlotHead(t *testing.T) {
 			wantWaitForFreshHead: false,
 		},
 		{
-			name:                 "local block work still in flight",
+			name:                 "current block is still being processed",
 			selectedSlot:         9,
-			now:                  currentSlotStart.Add(attestationDeadline + time.Second),
-			localBlockWork:       true,
+			highestSeen:          10,
+			now:                  currentSlotStart.Add(attestationDeadline),
 			wantWaitForFreshHead: true,
 		},
 	}
@@ -235,7 +234,7 @@ func TestShouldWaitForCurrentSlotHead(t *testing.T) {
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			require.Equal(t, test.wantWaitForFreshHead, shouldWaitForCurrentSlotHead(
-				10, test.selectedSlot, test.now, currentSlotStart, attestationDeadline, test.localBlockWork,
+				10, test.selectedSlot, test.highestSeen, test.now, currentSlotStart, attestationDeadline,
 			))
 		})
 	}
@@ -340,17 +339,24 @@ func TestPreparePayloadLoopRunsImmediatelyWithSlotDeadline(t *testing.T) {
 
 func TestPreparePayloadLoopWaitsForCurrentSlotHead(t *testing.T) {
 	tests := []struct {
-		name          string
-		elapsed       time.Duration
-		shouldPrepare bool
+		name             string
+		elapsed          time.Duration
+		producedBlock    bool
+		currentBlockSeen bool
+		selectedCurrent  bool
+		localBlockWork   bool
+		shouldPrepare    bool
 	}{
-		{name: "before attestation deadline", elapsed: 3 * time.Second},
+		{name: "before attestation deadline"},
 		{name: "after empty-slot deadline", elapsed: 5 * time.Second, shouldPrepare: true},
+		{name: "produced block awaiting publication", elapsed: 5 * time.Second, producedBlock: true},
+		{name: "current block is still being processed", elapsed: 5 * time.Second, currentBlockSeen: true},
+		{name: "current head with local block work", selectedCurrent: true, localBlockWork: true},
 	}
 	for _, test := range tests {
 		t.Run(test.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
-			_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			_, _, _, _, postState, handler, _, syncedData, forkchoiceStore, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 			config := *handler.beaconChainCfg
 			config.SecondsPerSlot = 12
 			config.IntervalsPerSlot = 3
@@ -358,6 +364,16 @@ func TestPreparePayloadLoopWaitsForCurrentSlotHead(t *testing.T) {
 
 			currentSlot := postState.Slot() + 1
 			targetSlot := currentSlot + 1
+			if test.producedBlock {
+				handler.payloadPreparationGate.noteProducedBlock(currentSlot)
+			}
+			if test.currentBlockSeen {
+				forkchoiceStore.HighestSeenVal = currentSlot
+			}
+			if test.localBlockWork {
+				finishLocalBlockWork := handler.payloadPreparationGate.beginLocalBlockWork()
+				defer finishLocalBlockWork()
+			}
 			advancedState, err := postState.Copy()
 			require.NoError(t, err)
 			require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
@@ -366,8 +382,12 @@ func TestPreparePayloadLoopWaitsForCurrentSlotHead(t *testing.T) {
 			validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
 
 			baseBlockRoot := common.Hash{0x41}
+			selectedSlot := postState.Slot()
+			if test.selectedCurrent {
+				selectedSlot = currentSlot
+			}
 			syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
-			syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
+			syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, selectedSlot, true).AnyTimes()
 			syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
 			viewHead := syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
 				DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
@@ -710,10 +730,12 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 	clock.EXPECT().GetSlotTime(gomock.Any()).Return(time.Now().Add(6 * time.Second)).AnyTimes()
 	handler.ethClock = clock
 
-	primedHead, err := preparePayloadForTest(t, handler, targetSlot)
+	var scratch payloadPreparationScratch
+	primedHead, err := handler.preparePayloadForWithScratch(t.Context(), targetSlot, &scratch)
 	require.NoError(t, err)
 	require.Equal(t, baseBlockRoot, primedHead)
 	require.Positive(t, preparedWarmup(&handler.preparedPayload, targetSlot, payloadID, time.Now().Add(time.Second)))
+	require.Nil(t, scratch.state, "a settled preparation must release its copied state")
 }
 
 func TestPreparationGateRefusesActiveProduction(t *testing.T) {
@@ -738,6 +760,16 @@ func TestPreparationGateTracksOverlappingLocalBlockWork(t *testing.T) {
 	require.True(t, gate.localBlockWorkInFlight())
 	finishSecond()
 	require.False(t, gate.localBlockWorkInFlight())
+}
+
+func TestPreparationGateTracksProducedBlockUntilItsHeadIsSelected(t *testing.T) {
+	var gate payloadPreparationGate
+	gate.noteProducedBlock(10)
+
+	require.True(t, gate.producedBlockPending(9, 9), "an early production is pending")
+	require.True(t, gate.producedBlockPending(10, 9), "the signing round trip is pending")
+	require.False(t, gate.producedBlockPending(10, 10), "the produced head is selected")
+	require.False(t, gate.producedBlockPending(11, 10), "the produced slot has passed")
 }
 
 func TestAdoptProducedBlockHoldsPreparationGate(t *testing.T) {
@@ -1046,7 +1078,7 @@ func TestPreparePayloadForStopsWhenProductionStartsDuringStateCopy(t *testing.T)
 	require.ErrorIs(t, awaitErrorResult(t, result), errExecutionWorkInFlight)
 }
 
-func TestPreparePayloadForStopsWhenStateWorkCrossesTheSlotBoundary(t *testing.T) {
+func TestPreparePayloadForStopsWhenStateWorkConsumesMinimumLead(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -1066,12 +1098,14 @@ func TestPreparePayloadForStopsWhenStateWorkCrossesTheSlotBoundary(t *testing.T)
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	gomock.InOrder(
 		clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(minimumPreparationLead+time.Second)),
-		clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-time.Millisecond)),
+		clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(minimumPreparationLead/2)),
 	)
 	handler.ethClock = clock
 
-	_, err = preparePayloadForTest(t, handler, targetSlot)
+	var scratch payloadPreparationScratch
+	_, err = handler.preparePayloadForWithScratch(t.Context(), targetSlot, &scratch)
 	require.ErrorIs(t, err, errPreparationTooLate)
+	require.Nil(t, scratch.state, "an attempt that has become too late must release its copied state")
 }
 
 func TestPreparePayloadForRejectsChangedHeadBeforeStartingBuilder(t *testing.T) {
