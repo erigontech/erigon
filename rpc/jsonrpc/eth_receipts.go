@@ -293,7 +293,7 @@ func (api *APIImpl) getLogs(ctx context.Context, crit filters.FilterCriteria, li
 				Index:       log.Index,
 				Removed:     log.Removed,
 			},
-			BlockTimestamp: log.Timestamp,
+			BlockTimestamp: log.BlockTimestamp,
 		}
 	}
 

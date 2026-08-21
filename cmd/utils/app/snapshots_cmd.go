@@ -2911,7 +2911,7 @@ func doDecompressSpeed(ctx context.Context, cliCtx *cli.Command) error {
 		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView(true)
+		view, err := decompressor.OpenSequentialView()
 		if err != nil {
 			panic(err)
 		}
@@ -2927,7 +2927,7 @@ func doDecompressSpeed(ctx context.Context, cliCtx *cli.Command) error {
 		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView(true)
+		view, err := decompressor.OpenSequentialView()
 		if err != nil {
 			panic(err)
 		}
@@ -3550,7 +3550,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		return err
 	}
 
-	if err := caplinStateSnaps.RemoveOverlaps(); err != nil {
+	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
+		return err
+	}
+	if err := caplinStateSnaps.RemoveOverlaps(nil); err != nil {
 		return err
 	}
 

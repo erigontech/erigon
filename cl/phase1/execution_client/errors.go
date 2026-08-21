@@ -14,40 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build linux
-
-package seg
+package execution_client
 
 import (
-	"math"
+	"errors"
 
-	"github.com/erigontech/erigon/common/iouring"
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/rpc"
 )
 
-func (g *Getter) EnableAsyncLiteralWarm() {
-	g.literalWarmer = (*Getter).warmLiteral
-}
-
-func shouldWarmLiteral(offset, length uint64) bool {
-	if length == 0 {
-		return false
+// IsUnknownPayloadError reports an unknown-payload result from local or remote execution clients.
+func IsUnknownPayloadError(err error) bool {
+	if errors.Is(err, chainreader.ErrUnknownPayload) {
+		return true
 	}
-	end := offset + length
-	if end < offset {
-		return false
-	}
-	page := uint64(pageSize)
-	return offset/page != (end-1)/page
-}
-
-func (g *Getter) warmLiteral(offset, length uint64) {
-	if !shouldWarmLiteral(offset, length) || offset+length > math.MaxInt64 {
-		return
-	}
-	for length > 0 {
-		chunk := min(length, uint64(iouring.WarmBufSize))
-		iouring.WarmOne(int(g.d.f.Fd()), int64(offset), int(chunk))
-		offset += chunk
-		length -= chunk
-	}
+	var rpcErr rpc.Error
+	return errors.As(err, &rpcErr) && rpcErr.ErrorCode() == engine_helpers.UnknownPayloadErr.Code
 }

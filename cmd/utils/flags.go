@@ -2089,10 +2089,10 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		cfg.ExecWorkerCount = 1
 	}
 	// Disable io_uring experiments at startup when their reads cannot run.
-	if (dbg.FilesAsyncIO || dbg.FilesAsyncIOLiterals) && runtime.GOOS == "linux" && !iouring.Available() {
+	if (dbg.FilesAsyncIO || dbg.FilesAsyncIOMultiPage) && runtime.GOOS == "linux" && !iouring.Available() {
 		log.Warn("async file I/O is set but io_uring is unavailable (unsupported kernel, or blocked by a seccomp sandbox such as Docker's default profile); disabling it — reads will use ordinary blocking faults")
 		dbg.FilesAsyncIO = false
-		dbg.FilesAsyncIOLiterals = false
+		dbg.FilesAsyncIOMultiPage = false
 	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
 		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {

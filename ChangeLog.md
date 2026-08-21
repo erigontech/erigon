@@ -9,6 +9,7 @@
 
 - rpc: live logs returned by `eth_getFilterChanges` and `eth_subscribe("logs")` now include `blockTimestamp`, matching `eth_getLogs` and `eth_getFilterLogs` (#23296) — by @taratorio
 - node: RPC HTTP gzip compression moved from the cgo-based `go-libdeflate` to the pure-Go `klauspost/compress`, and fully buffered (one-shot) responses now compress at `BestSpeed` (level 1) instead of level 6; streaming responses were already at `BestSpeed`. Large one-shot responses gain ~10-14% latency and roughly half the compression CPU, in exchange for slightly larger compressed bodies (+2-8% wire size — relevant for operators who pay for egress). Also removes the libdeflate compressor pool and its `libdeflate_pool_*` metrics, eliminating the cgo leak class fixed in #22700 (#22882) — by @lupin012
+- rpc: `erigon_getLogs` and `erigon_getLatestLogs` renamed the log field `timestamp` to `blockTimestamp`, matching the name `eth_getLogs` and the other log-returning methods already use. Clients that read the `timestamp` key must be updated (#23337) - by @Sahil-4555
 
 ---
 
