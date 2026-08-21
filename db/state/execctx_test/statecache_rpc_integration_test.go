@@ -300,6 +300,45 @@ func TestEmbeddedRPCOverlayTxBoundAfterUnwindDoesNotRefillUnwoundAccount(t *test
 	require.Equal(t, v1, got)
 }
 
+func TestEmbeddedRPCCacheViewUsesSelectedOverlayGeneration(t *testing.T) {
+	ctx := t.Context()
+	db := newTestDb(t, 16)
+
+	rpcTx, err := db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer rpcTx.Rollback()
+
+	selectedDomains, err := execctx.NewSharedDomains(ctx, rpcTx, log.New())
+	require.NoError(t, err)
+	defer selectedDomains.Close()
+	require.NoError(t, selectedDomains.InitBlockOverlay(rpcTx, t.TempDir()))
+
+	key := make([]byte, 20)
+	key[0] = 0xaa
+	selectedValue := encAccount(1)
+	selectedDomains.SetTxNum(1)
+	require.NoError(t, selectedDomains.DomainPut(kv.AccountsDomain, rpcTx, key, selectedValue, 1, nil))
+
+	events := shards.NewEvents()
+	events.PublishOverlay(selectedDomains)
+	selectedTx := selectedDomains.BlockOverlay().NewReadView(rpcTx)
+
+	replacementDomains, err := execctx.NewSharedDomains(ctx, rpcTx, log.New())
+	require.NoError(t, err)
+	defer replacementDomains.Close()
+	replacementDomains.SetTxNum(2)
+	require.NoError(t, replacementDomains.DomainPut(kv.AccountsDomain, rpcTx, key, encAccount(2), 2, nil))
+	events.PublishOverlay(replacementDomains)
+
+	rpcCache := &execmodule.Cache{}
+	rpcCache.SetPublishedSD(events.LatestSD)
+	view, err := rpcCache.View(ctx, selectedTx)
+	require.NoError(t, err)
+	got, err := view.Get(key)
+	require.NoError(t, err)
+	require.Equal(t, selectedValue, got, "the cache view must use the state generation selected by its transaction")
+}
+
 func TestSharedDomainsNegativeCacheEntryUsesLastVisibleTxNum(t *testing.T) {
 	const stepSize = uint64(16)
 	ctx := t.Context()
