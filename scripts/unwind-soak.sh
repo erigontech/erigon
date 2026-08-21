@@ -483,6 +483,19 @@ scenario_test() {
     fi
     echo "$iter,$phase,$target,$pre_head,$post_head,$duration,$errors,$note" >> "$OUT"
     echo "iter $iter $phase: $note post_head=$post_head duration=${duration}s errors=$errors inv_missing=$post_missing/+$d_missing inv_extras=$post_extras/$d_extras"
+    # SNAPSHOT_BETWEEN_ITERS_DIR: when set, hardlink-snapshot SNAP_DIR
+    # into a per-iter subdir immediately after this scenario's CSV row.
+    # `cp -al` shares inodes with the live datadir, so unchanged files
+    # cost only their dirent — a full snapshot is ~seconds and tens of
+    # KB. Files that erigon later rewrites keep their old-inode copy in
+    # the snapshot, giving us a byte-exact "as it was at this iter's
+    # end" record. Errors on the copy (races with in-flight renames)
+    # are tolerated — the snapshot is a diagnostic, not a barrier.
+    if [[ -n "${SNAPSHOT_BETWEEN_ITERS_DIR:-}" && -d "$SNAP_DIR" ]]; then
+        local snap_dst="$SNAPSHOT_BETWEEN_ITERS_DIR/iter-${iter}-${phase}-post-${post_head}"
+        mkdir -p "$snap_dst"
+        cp -al "$SNAP_DIR"/. "$snap_dst"/ 2>/dev/null || true
+    fi
 }
 
 # emit CSV header if file is empty/new
@@ -495,6 +508,13 @@ echo "       scenario1_depth=$SCENARIO1_DEPTH scenario2_depth=$SCENARIO2_DEPTH s
 echo
 
 OVERALL_RC=0
+# Pre-loop baseline: capture the fresh-sync state before any setHead runs.
+if [[ -n "${SNAPSHOT_BETWEEN_ITERS_DIR:-}" && -d "$SNAP_DIR" ]]; then
+    baseline_dst="$SNAPSHOT_BETWEEN_ITERS_DIR/iter-0-baseline-freshsync"
+    mkdir -p "$baseline_dst"
+    cp -al "$SNAP_DIR"/. "$baseline_dst"/ 2>/dev/null || true
+    echo "snapshot-between-iters: baseline captured to $baseline_dst"
+fi
 for ((i=1; i<=ITER; i++)); do
     DEPTH=${DEPTHS[$((i-1))]}
     # Regime for scenario 3 comes from Phase 3.5 (regime-depths). Absent
@@ -505,26 +525,32 @@ for ((i=1; i<=ITER; i++)); do
     fi
     S3_MODE=$(regime2mode "$S3_REGIME")
 
-    # Scenario 1: shallow depth (default 50) — target ~always in the
-    # retained changeset → mode-A code path (no unwind).
-    scenario_test mode_a "$i" "$SCENARIO1_DEPTH" \
-        "$SETHEAD_PREFLIGHT_TIMEOUT_SEC" "$PREFLIGHT_RECOVERY_TIMEOUT_SEC" 1
-    if [[ $OVERALL_RC -ne 0 ]]; then
-        echo "iter $i: ABORTING — scenario 1 (mode_a) regression"
-        break
-    fi
+    # SKIP_SCENARIOS_1_2=1 short-circuits past both mode-A scenarios
+    # straight to scenario 3. Used when hunting a scenario-3 failure
+    # (mode-B/C/D) without spending time on mode-A warmups whose success
+    # depends on external factors like Caplin peer availability.
+    if [[ "${SKIP_SCENARIOS_1_2:-0}" != "1" ]]; then
+        # Scenario 1: shallow depth (default 50) — target ~always in the
+        # retained changeset → mode-A code path (no unwind).
+        scenario_test mode_a "$i" "$SCENARIO1_DEPTH" \
+            "$SETHEAD_PREFLIGHT_TIMEOUT_SEC" "$PREFLIGHT_RECOVERY_TIMEOUT_SEC" 1
+        if [[ $OVERALL_RC -ne 0 ]]; then
+            echo "iter $i: ABORTING — scenario 1 (mode_a) regression"
+            break
+        fi
 
-    # Scenario 2: SCENARIO2_DEPTH (default 300) — target still in the
-    # retained changeset → also mode-A. Kept as a separate row because
-    # the commitment-recompute step inside setHead can take as long as
-    # a genuine mode-B/C/D unwind when the pre/target span crosses a
-    # step boundary, so it uses the full setHead timeout budget rather
-    # than the preflight budget (iter-13 false-fail 2026-07 fix).
-    scenario_test mode_a "$i" "$SCENARIO2_DEPTH" \
-        "$SETHEAD_CALL_TIMEOUT_SEC" "$PREFLIGHT_RECOVERY_TIMEOUT_SEC" 1
-    if [[ $OVERALL_RC -ne 0 ]]; then
-        echo "iter $i: ABORTING — scenario 2 (mode_a, past-changeset baseline) regression"
-        break
+        # Scenario 2: SCENARIO2_DEPTH (default 300) — target still in the
+        # retained changeset → also mode-A. Kept as a separate row because
+        # the commitment-recompute step inside setHead can take as long as
+        # a genuine mode-B/C/D unwind when the pre/target span crosses a
+        # step boundary, so it uses the full setHead timeout budget rather
+        # than the preflight budget (iter-13 false-fail 2026-07 fix).
+        scenario_test mode_a "$i" "$SCENARIO2_DEPTH" \
+            "$SETHEAD_CALL_TIMEOUT_SEC" "$PREFLIGHT_RECOVERY_TIMEOUT_SEC" 1
+        if [[ $OVERALL_RC -ne 0 ]]; then
+            echo "iter $i: ABORTING — scenario 2 (mode_a, past-changeset baseline) regression"
+            break
+        fi
     fi
 
     # SKIP_SCENARIO_3=1 short-circuits after the two mode_a scenarios
@@ -562,13 +588,17 @@ for ((i=1; i<=ITER; i++)); do
     fi
 
     if [[ $OVERALL_RC -ne 0 ]]; then
-        echo "iter $i: ABORTING — scenario 3 (within-snapshots) regression"
-        LOG_OFFSET=0  # show full recent tail on abort
-        echo "--- last 200 non-noise log lines ---"
-        tail -c +"$((LOG_OFFSET + 1))" "$LOG" 2>/dev/null | \
-            grep -vE "Downloader.*Syncing|publishing DownloadComplete|forced bond|Handshake transport|peerSelector|stop force.bonding|sentry.*PeerEvent|chaintoml|storage-lifecycle|GossipManager|method=eth_|p2p.*GoodPeers|Forward Sync.*progress=" \
-            | tail -200
-        break
+        if [[ "${CONTINUE_ON_SCENARIO_3_FAIL:-0}" == "1" ]]; then
+            echo "iter $i: scenario 3 failed but CONTINUE_ON_SCENARIO_3_FAIL=1 — proceeding to iter $((i+1))"
+        else
+            echo "iter $i: ABORTING — scenario 3 (within-snapshots) regression"
+            LOG_OFFSET=0  # show full recent tail on abort
+            echo "--- last 200 non-noise log lines ---"
+            tail -c +"$((LOG_OFFSET + 1))" "$LOG" 2>/dev/null | \
+                grep -vE "Downloader.*Syncing|publishing DownloadComplete|forced bond|Handshake transport|peerSelector|stop force.bonding|sentry.*PeerEvent|chaintoml|storage-lifecycle|GossipManager|method=eth_|p2p.*GoodPeers|Forward Sync.*progress=" \
+                | tail -200
+            break
+        fi
     fi
 
     if [[ $i -lt $ITER ]]; then

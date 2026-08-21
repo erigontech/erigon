@@ -146,12 +146,16 @@ echo "  ports clear"
 
 # Phase 1: wipe.
 stage "Phase 1: wipe $DATADIR"
-if [[ ! -d "$DATADIR" ]]; then
-    echo "  datadir does not exist; creating fresh"
+if [[ "${SKIP_WIPE:-0}" == "1" ]]; then
+    echo "  SKIP_WIPE=1 — reusing existing datadir"
+else
+    if [[ ! -d "$DATADIR" ]]; then
+        echo "  datadir does not exist; creating fresh"
+    fi
+    rm -rf "$DATADIR"
+    mkdir -p "$DATADIR"
+    echo "  wiped + recreated"
 fi
-rm -rf "$DATADIR"
-mkdir -p "$DATADIR"
-echo "  wiped + recreated"
 
 # Phase 2: launch.
 stage "Phase 2: launch erigon ($LAUNCH_CMD)"
