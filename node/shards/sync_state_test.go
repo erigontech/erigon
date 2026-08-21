@@ -299,9 +299,9 @@ func TestBuildSyncingReplySnapshotDownloadKeepsCommittedProgress(t *testing.T) {
 	require.Equal(t, uint64(5_000_000), reply.CurrentBlock)
 }
 
-// The handoff pin ends where the reply is built: execution progress reaching the
-// commitment block means the handoff is over, so the reply switches back to the
-// stage shape and the state is latched off without any owner signalling the end.
+// Execution progress reaching the commitment block means the handoff is over for
+// this reader, so the reply switches back to the stage shape. The state itself
+// stays until its owner drops it: this tx may be ahead of the committed view.
 func TestBuildSyncingReplyHandoffEndsOnceExecutionReachesCommitmentBlock(t *testing.T) {
 	n, tx := newSyncStateFixture(t, 19_000_000)
 	n.NewLastBlockSeen(20_000_000)
@@ -311,7 +311,7 @@ func TestBuildSyncingReplyHandoffEndsOnceExecutionReachesCommitmentBlock(t *test
 	require.NoError(t, err)
 	require.Equal(t, uint64(19_000_000), reply.CurrentBlock)
 	require.Len(t, reply.Stages, len(stages.AllStages))
-	require.Nil(t, n.snapDownload.Load(), "handoff latched off")
+	require.NotNil(t, n.snapDownload.Load(), "only the owner drops the handoff")
 }
 
 // Committed progress below the commitment block is the pre-download position of
@@ -329,4 +329,38 @@ func TestBuildSyncingReplyHandoffSurvivesProgressBelowCommitmentBlock(t *testing
 	require.Equal(t, uint64(20_000_000), reply.LastNewBlockSeen)
 	require.Empty(t, reply.Stages)
 	require.NotNil(t, n.snapDownload.Load(), "handoff still pinned")
+}
+
+// The pipeline publishes with its rw tx (Hook.BeforeRun), which carries the
+// snapshots stage's uncommitted Execution bump. That observation must not end
+// the handoff for readers of the committed view: until the pipeline's first
+// commit, a poller still reads the pre-download position.
+func TestBuildSyncingReplyHandoffSurvivesUncommittedBumpObservation(t *testing.T) {
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+
+	setup, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer setup.Rollback()
+	require.NoError(t, stages.SaveStageProgress(setup, stages.Execution, 6_000_000))
+	require.NoError(t, setup.Commit())
+
+	n := NewNotifications(nil)
+	n.NewLastBlockSeen(20_000_000)
+	n.SetSnapshotDownloadHandoff(19_000_000)
+
+	pipelineTx, err := db.BeginRw(t.Context())
+	require.NoError(t, err)
+	defer pipelineTx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(pipelineTx, stages.Execution, 19_000_000))
+	fromPipeline, err := n.BuildSyncingReply(pipelineTx, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(19_000_000), fromPipeline.CurrentBlock)
+
+	poll, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer poll.Rollback()
+	reply, err := n.BuildSyncingReply(poll, 0)
+	require.NoError(t, err)
+	require.Equal(t, uint64(19_000_000), reply.CurrentBlock,
+		"a poll on the committed view must keep the pin until the bump commits")
 }

@@ -376,10 +376,11 @@ func (n *Notifications) ClearSnapshotDownload() {
 	n.snapDownload.Store(nil)
 }
 
-// ClearSnapshotDownloadPin ends the handoff on the paths where no committed
-// execution progress will ever end it, reporting whether it dropped one. An
-// in-flight sample is kept: after a failed download it is the last honest
-// progress the node can report.
+// ClearSnapshotDownloadPin ends the handoff, reporting whether it dropped one.
+// It is the only owner of that end: readers stop reporting the pin once they see
+// execution at the commitment block, but must not drop it, since the tx they read
+// can be ahead of the committed view. An in-flight sample is kept: after a failed
+// download it is the last honest progress the node can report.
 func (n *Notifications) ClearSnapshotDownloadPin() bool {
 	s := n.snapDownload.Load()
 	if s == nil || s.phase != snapHandoff {

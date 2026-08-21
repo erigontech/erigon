@@ -150,11 +150,10 @@ func TestProcessFrozenBlocksClearsPinOnSnapshotsStageFailure(t *testing.T) {
 }
 
 // A publish inside the pipeline reads the Execution bump while it is still
-// uncommitted (BeforeRun publishes with the pipeline's rw tx), which latches the
-// handoff off. If the pipeline then fails, that bump rolls back, so the drop must
-// still reach subscribers — otherwise the last reply they hold claims a position
-// the node never committed.
-func TestProcessFrozenBlocksPublishesDropAfterLatchedPin(t *testing.T) {
+// uncommitted (BeforeRun publishes with the pipeline's rw tx). If the pipeline
+// then fails, that bump rolls back, so the drop must still reach subscribers —
+// otherwise the last reply they hold claims a position the node never committed.
+func TestProcessFrozenBlocksPublishesDropAfterUncommittedBumpPublished(t *testing.T) {
 	const bumpedTo = 100
 	var hook *stageloop.Hook
 	pe, h, notifications := newPinTestExecutor(t, func(_ bool, _ *stagedsync.StageState, _ stagedsync.Unwinder, _ *execctx.SharedDomains, tx kv.TemporalRwTx, _ log.Logger) error {
