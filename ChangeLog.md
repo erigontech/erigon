@@ -1,110 +1,67 @@
 # Erigon v3.6.0 — Upstream Underbelly — TBD
 
+Erigon 3.6.0 focuses on bounded disk growth and faster state access. It is an in-place upgrade from 3.5.x: existing
+datadirs need no re-sync, and old and new commitment snapshot files can coexist while normal merges convert them.
+
+### Highlights
+
+- **Plain commitment snapshots.** Commitment branches no longer store shortened cross-file key references by default,
+  removing dereference I/O from state reads and merges at the cost of larger commitment files. Existing referenced files
+  remain readable and convert lazily; fresh syncs use the new 3.6 snapshot set (#14809, #21452, #21376) — by @awskii
+- **Pruned nodes now reclaim old state snapshots.** State history, indexes, optional commitment history, and the receipts
+  cache are retired once they fall outside their configured windows; fresh syncs also skip optional snapshots outside
+  those windows. This fixes unbounded snapshot growth on long-running `minimal` and other pruned nodes (#21306, #22123,
+  #21200, #22243, #22349) — by @AskAlexSharov, @JkLondon
+- **Faster state access and snapshot maintenance.** Sharded LRU state, code, and commitment caches replace whole-cache
+  resets; state-snapshot compression is 2–3x faster, dictionary-building merges are about 1.5x faster, and the mainnet
+  `.bt` pivot cache uses roughly one quarter of its previous heap (#22154, #21625, #22050, #21875) — by @mh0lt,
+  @sudeepdino008, @AskAlexSharov
+- **Glamsterdam devnet-6 support.** Adds EIP-8282 builder execution requests, EIP-2780, EIP-8038, EIP-8246, and the
+  devnet-6 revisions of EIP-7928/EIP-8037; Caplin tracks the Gloas alpha.11 request format, and BALs can be regenerated
+  throughout the weak-subjectivity period (#22091, #22093, #22053, #22060, #22122, #22136, #22161, #21764) — by
+  @domiwei, @taratorio. **Devnet/testing only — not scheduled on mainnet or any public testnet.**
+
 ### Breaking Changes
 
-#### `--prune.include-receipts`: historical receipts cache now off by default in all prune modes
+- **Downgrading after new commitment files are written is unsupported.** Erigon 3.5 cannot read the new plain `v2.2`
+  commitment files. Back up the datadir before upgrading if rollback is required; upgrading itself needs no re-sync
+  (#21452, #21376).
+- **Historical receipts are off by default on fresh datadirs in every prune mode.** Existing datadirs keep their stored
+  enable/disable setting. Without the cache, receipt and log RPCs re-execute within the state-history window at higher
+  latency. Blocks-mode operators who need receipts and logs back to genesis must use
+  `--prune.include-receipts --prune.receipts.distance=keep-all` (#22296, #22349) — by @yperbasis, @AskAlexSharov
+- **Idle polling filters expire after five minutes.** Clients using `eth_newFilter`, `eth_newBlockFilter`, or
+  `eth_newPendingTransactionFilter` must poll within the timeout or recreate the filter. Configure
+  `--rpc.subscription.filters.timeout`, or set it to `0` to disable eviction (#22261) — by @onelapahead
+- **JSON-RPC validation is stricter.** Quoted decimal block numbers such as `"3"` are rejected; use `"0x3"`, a bare
+  integer, or a named tag. `eth_simulateV1` now returns the specified `-38012` code when the base fee is too low instead
+  of `-32602` (#21985, #21418) — by @lupin012, @Sahil-4555
 
-The historical ("fat") receipts cache is no longer enabled by default on non-archive nodes. Previously
-`--prune.include-receipts` (formerly `--persist.receipts`, still accepted as an alias) defaulted on for every prune mode
-except `archive`; it now defaults off everywhere. The consensus layer was the consumer that justified retaining these
-receipts on pruned nodes, and it no longer needs them ([#21617](https://github.com/erigontech/erigon/issues/21617)).
+### Added and Changed
 
-**What changed:**
+#### RPC
 
-| `--prune.mode` | Before | After |
-|---|---|---|
-| `archive` | off | off |
-| `full` | on | off |
-| `blocks` | on | off |
-| `minimal` | on | off |
+- With `--prune.include-commitment-history`, `eth_getWitness` now builds and verifies a lean witness for any block within
+  retained history (#22099) — by @awskii
+- `eth_fillTransaction` fills missing fields and returns the unsigned raw transaction plus its JSON form, compatible
+  with geth; KZG generation from raw blobs is not included (#21870) — by @lupin012
+- `eth_getBalance`, `eth_getCode`, `eth_getStorageAt`, `eth_getTransactionCount`, `eth_getProof`, and
+  `eth_getStorageValues` now default an omitted block parameter to `latest` (#21586) — by @MysticRyuujin
+- `trace_block` and `trace_replayBlockTransactions` can include beacon-withdrawal balance changes through the optional
+  `IncludeWithdrawals` trace setting (#21592) — by @lupin012
 
-Receipts and logs stay available within a node's retention window regardless: without the cache they are re-executed on
-demand from state history, so `eth_getLogs` and `eth_getBlockReceipts` keep working, at higher latency. For `full` and
-`minimal` nodes the availability window is unchanged (receipts follow the state-history window either way). For `blocks`
-nodes the cache previously made receipts and logs queryable back to genesis; without it they follow the state-history
-window (last 262,144 blocks) — pass `--prune.include-receipts` if you rely on full-range `eth_getLogs`.
+#### Operations
 
-**Migration:** existing datadirs are unaffected — the receipts-cache setting is recorded at datadir creation and the
-stored value wins, so a node already syncing with the cache keeps it. Such a node now logs a startup notice that
-`--prune.include-receipts` differs from the value stored in the datadir; pass `--prune.include-receipts` explicitly to
-silence it. Only newly-created `full`/`minimal`/`blocks` datadirs start without the cache; pass
-`--prune.include-receipts` on a fresh datadir to opt back in.
+- Pruning flags now use readable policies: `--prune.distance.blocks` accepts `keep-post-merge` and `keep-all`, while
+  receipt and commitment-history caches have independent `--prune.*.distance` windows. The former receipt flag names
+  remain aliases (#22119, #21200, #22349) — by @yperbasis, @JkLondon, @AskAlexSharov
+- `erigon seg index --rebuild` rebuilds every snapshot accessor and index without deleting snapshot data (#21919) — by
+  @sudeepdino008
+- Caplin archive-state maintenance now removes frozen state rows from its indexing DB for reuse instead of growing the
+  DB without bound; compact effective-balance snapshots also cut the per-slot copy from about 266 MB to 18 MB on the
+  measured mainnet state (#22396, #22411) — by @awskii, @AskAlexSharov
 
-(#22296) — by @yperbasis
-
----
-
-#### CLI: receipts and commitment-history pruning flags moved under `--prune.*`
-
-The receipt cache and commitment history now share the `--prune.*` naming used by the rest of the pruning flags. All
-former names keep working as aliases, and stored datadir settings are unaffected.
-
-- `--persist.receipts` → `--prune.include-receipts` (alias: `--persist.receipts`, `--experiment.persist.receipts.v2`).
-- New `--prune.receipts.distance` (alias: `--persist.receipts.distance`) bounds how far back the receipt cache is kept:
-  a block count, `keep-all`, or empty/`0` (default) to follow the state-history window. Requires
-  `--prune.include-receipts`. Snapshots older than the window are skipped at download time.
-- `--prune.commitment-history.distance` now also accepts `keep-all` (in addition to a block count); empty or `0` still
-  keeps everything.
-
-(#22349) — by @AskAlexSharov
-
----
-
-#### JSON-RPC: block-number strings must use the `0x` hex format
-
-Quoted decimal strings (e.g., `"3"`) are no longer accepted as block-number
-parameters; use the canonical hex form (e.g., `"0x3"`) instead. Bare JSON
-integers (`3`) and named tags (`"latest"`, `"earliest"`, `"pending"`,
-`"safe"`, `"finalized"`) are unchanged.
-
-**What changed:**
-
-| Input | Before | After |
-|---|---|---|
-| `"3"` (quoted decimal) | accepted | rejected with `-32602` |
-| `"0x3"` (hex string) | accepted | accepted |
-| `3` (bare integer) | accepted | accepted |
-
-**Migration:** replace any quoted decimal block number with its `0x`
-equivalent — e.g., `"3"` → `"0x3"`, `"1000000"` → `"0xf4240"`.
-
----
-
-#### `eth_simulateV1`: base fee too low error code corrected to `-38012`
-
-Aligns Erigon with the `eth_simulateV1` error code specification ([NethermindEth/nethermind#11412](https://github.com/NethermindEth/nethermind/issues/11412)).
-
-**What changed:**
-
-| Aspect | Before | After |
-|---|---|---|
-| `ErrFeeCapTooLow` error code | `-32602` (generic "Invalid params") | `-38012` (spec-mandated "baseFeePerGas is too low") |
-
-**Migration:**
-
-- If your tooling matches on error code `-32602` to detect base-fee-too-low conditions in `eth_simulateV1` responses, update it to match `-38012` instead.
-
----
-
-#### JSON-RPC: idle polling filters are evicted after 5 minutes
-
-Filters created with `eth_newFilter`, `eth_newBlockFilter`, and `eth_newPendingTransactionFilter` are now evicted when not polled for 5 minutes, matching geth's stale-filter deadline. Previously they lived — and kept buffering data — until `eth_uninstallFilter` or a restart.
-
-**What changed:**
-
-| Aspect | Before | After |
-|---|---|---|
-| Idle polling filter | kept until uninstalled or restart | evicted after 5 minutes without a poll |
-| `eth_getFilterChanges` / `eth_getFilterLogs` on an evicted id | — | `filter not found` |
-
-**Migration:** poll more often than the timeout, or recreate the filter when `filter not found` is returned (as with geth). Tune with `--rpc.subscription.filters.timeout`; set it to 0 to restore the previous keep-forever behavior. (#22261 by @onelapahead)
-
-### Added
-
-#### CLI & Operations
-
-- `--prune.distance.blocks` now accepts readable policy names — `keep-post-merge` and `keep-all` — instead of the raw `MaxUint64`-based magic numbers (`18446744073709551615` / `18446744073709551614`); `--prune.distance` likewise accepts `keep-all`. Numeric values still work (#22119) — by @yperbasis
-- `--rpc.subscription.filters.timeout` — deadline for evicting idle RPC polling filters (default 5m; 0 disables). New `subscriptions_active` gauge and `subscriptions_created_total` / `subscriptions_unsubscribed_total` / `subscriptions_reaped_total` counters track the filter lifecycle (#22261) — by @onelapahead
+**Full Changelog**: https://github.com/erigontech/erigon/compare/v3.5.5...v3.6.0
 
 ---
 
