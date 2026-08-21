@@ -193,9 +193,64 @@ func UnwindTxLookup(u *UnwindState, s *StageState, tx kv.RwTx, cfg TxLookupCfg, 
 	return nil
 }
 
+// txLookupPruneByBlocks selects the pre-#19179 prune: walk canonical blocks in
+// [PruneProgress, CanPruneTo) and delete each block's lookup keys through ETL,
+// instead of scanning the whole hash-ordered table. Prototype switch for A/B.
+var txLookupPruneByBlocks = dbg.EnvBool("TXLOOKUP_PRUNE_BY_BLOCKS", false)
+
+// txLookupPruneBatch is how many blocks one ETL run covers. The original code
+// used 1, paying a collector per block; a batch amortises that and lets the
+// loader delete in key order across the whole batch.
+var txLookupPruneBatch = uint64(dbg.EnvInt("TXLOOKUP_PRUNE_BATCH", 100))
+
+func pruneTxLookupByBlocks(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) error {
+	logPrefix := s.LogPrefix()
+
+	blockTo := cfg.blockReader.CanPruneTo(s.ForwardProgress)
+	if blockTo == 0 {
+		return nil
+	}
+	blockFrom := s.PruneProgress
+	if blockFrom >= blockTo {
+		return nil
+	}
+
+	pruneTimeout := 250 * time.Millisecond
+	if s.CurrentSyncCycle.IsInitialCycle {
+		pruneTimeout = time.Hour
+	}
+
+	logEvery := time.NewTicker(logInterval)
+	defer logEvery.Stop()
+
+	started := time.Now()
+	blockNum := blockFrom
+	for blockNum < blockTo {
+		batchTo := min(blockTo, blockNum+txLookupPruneBatch)
+		if err := deleteTxLookupRange(tx, logPrefix, blockNum, batchTo, ctx, cfg, logger); err != nil {
+			return fmt.Errorf("prune TxLookup: %w", err)
+		}
+		blockNum = batchTo
+
+		select {
+		case <-logEvery.C:
+			logger.Info(fmt.Sprintf("[%s] progress", logPrefix), "blockNum", blockNum, "blockTo", blockTo)
+		default:
+		}
+		if time.Since(started) > pruneTimeout {
+			break
+		}
+	}
+	logger.Debug(fmt.Sprintf("[%s] prune by blocks", logPrefix), "from", blockFrom, "to", blockNum, "blockTo", blockTo)
+	return s.DoneAt(tx, blockNum)
+}
+
 func PruneTxLookup(s *PruneState, tx kv.RwTx, cfg TxLookupCfg, ctx context.Context, logger log.Logger) (err error) {
 	if dbg.NoPrune() {
 		return s.Done(tx)
+	}
+	if txLookupPruneByBlocks {
+		return pruneTxLookupByBlocks(s, tx, cfg, ctx, logger)
 	}
 	logPrefix := s.LogPrefix()
 

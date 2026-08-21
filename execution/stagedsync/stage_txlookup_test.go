@@ -23,9 +23,12 @@ import (
 	"encoding/binary"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/config3"
 	"github.com/erigontech/erigon/db/datadir"
@@ -38,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
+	"github.com/erigontech/erigon/execution/types"
 )
 
 const (
@@ -317,4 +321,178 @@ func mustGet(t *testing.T, tx kv.Tx, k []byte) []byte {
 	v, err := tx.GetOne(kv.TxLookup, k)
 	require.NoError(t, err)
 	return v
+}
+
+// ---------------------------------------------------------------------------
+// A/B: hash-ordered table scan (PruneTxLookup) vs the pre-#19179 block walk
+// (pruneTxLookupByBlocks). Both are driven through PruneTxLookup so the switch,
+// the bounds and the budget are the production ones.
+// ---------------------------------------------------------------------------
+
+// benchTxn is deterministic per (block, i) and its Hash() is a real txn hash, so
+// the block walk can rediscover the same keys the fixture wrote.
+func benchTxn(block, i uint64) types.Transaction {
+	var to common.Address
+	binary.BigEndian.PutUint64(to[:8], block)
+	return &types.LegacyTx{
+		CommonTx: types.CommonTx{Nonce: i, GasLimit: 21_000, To: &to, Value: *uint256.NewInt(block)},
+		GasPrice: *uint256.NewInt(1),
+	}
+}
+
+type txlBenchReader struct {
+	dbservices.FullBlockReader
+	frozen     *uint64
+	txPerBlock uint64
+}
+
+func (r txlBenchReader) CanPruneTo(cur uint64) uint64 {
+	return freezeblocks.CanDeleteTo(cur, *r.frozen)
+}
+func (r txlBenchReader) FrozenBlocks() uint64 { return *r.frozen }
+func (r txlBenchReader) TxnumReader() rawdbv3.TxNumsReader {
+	return freezeblocks.NewBlockReader(nil, nil).TxnumReader()
+}
+func (r txlBenchReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Body, error) {
+	txs := make([]types.Transaction, r.txPerBlock)
+	for i := range txs {
+		txs[i] = benchTxn(blockNum, uint64(i))
+	}
+	return &types.Body{Transactions: txs}, nil
+}
+
+type txlBenchCfg struct {
+	blocks, txPerBlock, frozen uint64
+}
+
+func (c txlBenchCfg) minTxNum(block uint64) uint64 {
+	if block == 0 {
+		return 0
+	}
+	return 2 + (block-1)*(c.txPerBlock+2)
+}
+func (c txlBenchCfg) maxTxNum(block uint64) uint64 {
+	if block == 0 {
+		return 1
+	}
+	return c.minTxNum(block) + c.txPerBlock + 1
+}
+
+func txlBenchFixture(tb testing.TB, c txlBenchCfg) (kv.TemporalRwTx, TxLookupCfg, *PruneState, *uint64) {
+	tb.Helper()
+	dir := tb.TempDir()
+	db := temporaltest.NewTestDB(tb, datadir.New(dir))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(tb, err)
+	tb.Cleanup(tx.Rollback)
+
+	txNums := freezeblocks.NewBlockReader(nil, nil).TxnumReader()
+	for b := uint64(0); b <= c.blocks; b++ {
+		require.NoError(tb, txNums.Append(tx, b, c.maxTxNum(b)))
+	}
+	val := make([]byte, 16)
+	for b := uint64(1); b <= c.blocks; b++ {
+		var hh common.Hash
+		binary.BigEndian.PutUint64(hh[:], b)
+		require.NoError(tb, tx.Put(kv.HeaderCanonical, hexutil.EncodeTs(b), hh[:]))
+		binary.BigEndian.PutUint64(val[:8], b)
+		for i := range c.txPerBlock {
+			binary.BigEndian.PutUint64(val[8:], c.minTxNum(b)+i+1)
+			h := benchTxn(b, i).Hash()
+			require.NoError(tb, tx.Put(kv.TxLookup, h[:], val))
+		}
+	}
+
+	frozen := new(uint64)
+	*frozen = c.frozen
+	cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(config3.DefaultPruneDistance)},
+		dir, txlBenchReader{frozen: frozen, txPerBlock: c.txPerBlock})
+	s := &PruneState{ID: stages.TxLookup, ForwardProgress: c.blocks,
+		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
+	return tx, cfg, s, frozen
+}
+
+func txlCountRows(tb testing.TB, tx kv.Tx) uint64 {
+	tb.Helper()
+	n, err := tx.Count(kv.TxLookup)
+	require.NoError(tb, err)
+	return n
+}
+
+func txlBenchSizes() txlBenchCfg {
+	return txlBenchCfg{
+		blocks:     uint64(dbg.EnvInt("TXL_BENCH_BLOCKS", 20_000)),
+		txPerBlock: uint64(dbg.EnvInt("TXL_BENCH_TXS", 20)),
+		frozen:     uint64(dbg.EnvInt("TXL_BENCH_FROZEN", 10_000)),
+	}
+}
+
+func BenchmarkPruneTxLookupBacklog(b *testing.B) {
+	c := txlBenchSizes()
+	for _, byBlocks := range []bool{false, true} {
+		b.Run(map[bool]string{false: "scan", true: "byblocks"}[byBlocks], func(b *testing.B) {
+			for b.Loop() {
+				b.StopTimer()
+				tx, cfg, s, _ := txlBenchFixture(b, c)
+				before := txlCountRows(b, tx)
+				txLookupPruneByBlocks = byBlocks
+				b.StartTimer()
+
+				require.NoError(b, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
+
+				b.StopTimer()
+				txLookupPruneByBlocks = false
+				b.ReportMetric(float64(before-txlCountRows(b, tx)), "rows_pruned")
+				b.StartTimer()
+			}
+		})
+	}
+}
+
+// The chain-tip cycle: the table is already pruned to the frontier and the
+// frontier then advances by one 1000-block quantum.
+func BenchmarkPruneTxLookupTip(b *testing.B) {
+	c := txlBenchSizes()
+	for _, byBlocks := range []bool{false, true} {
+		b.Run(map[bool]string{false: "scan", true: "byblocks"}[byBlocks], func(b *testing.B) {
+			for b.Loop() {
+				b.StopTimer()
+				tx, cfg, s, frozen := txlBenchFixture(b, c)
+				txLookupPruneByBlocks = byBlocks
+				require.NoError(b, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
+				*frozen += 1_000
+				s.ForwardProgress += 1_000
+				before := txlCountRows(b, tx)
+				b.StartTimer()
+
+				require.NoError(b, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
+
+				b.StopTimer()
+				txLookupPruneByBlocks = false
+				b.ReportMetric(float64(before-txlCountRows(b, tx)), "rows_pruned")
+				b.ReportMetric(float64(before), "rows_left")
+				b.StartTimer()
+			}
+		})
+	}
+}
+
+// Both implementations must leave the same table.
+func TestPruneTxLookupImplsAgree(t *testing.T) {
+	c := txlBenchCfg{blocks: 4_000, txPerBlock: 3, frozen: 2_000}
+	survivors := func(byBlocks bool) map[string]struct{} {
+		txLookupPruneByBlocks = byBlocks
+		defer func() { txLookupPruneByBlocks = false }()
+		tx, cfg, s, _ := txlBenchFixture(t, c)
+		require.NoError(t, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
+		out := map[string]struct{}{}
+		require.NoError(t, tx.ForEach(kv.TxLookup, nil, func(k, _ []byte) error {
+			out[string(k)] = struct{}{}
+			return nil
+		}))
+		return out
+	}
+	scan, byBlocks := survivors(false), survivors(true)
+	require.NotEmpty(t, scan)
+	require.Equal(t, scan, byBlocks)
 }
