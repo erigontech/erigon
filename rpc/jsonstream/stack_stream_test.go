@@ -1109,3 +1109,20 @@ func TestFlushErrorDoesNotBuffer(t *testing.T) {
 		"buffer grew to %d after the writer failed", len(s.stream.Buffer()))
 	require.Error(t, s.Error(), "the failure must still be reported")
 }
+
+// TestWriteReportsLatchedError pins that a caller which abandons work on a write
+// failure still sees one. Appending cannot fail on its own, so without the
+// latched error trace_filter would keep tracing for a client that is gone.
+func TestWriteReportsLatchedError(t *testing.T) {
+	s := New(goneWriter{}).(*StackStream)
+
+	var err error
+	body := strings.Repeat("x", 1024)
+	for range 2000 {
+		if _, err = s.Write([]byte(body)); err != nil {
+			break
+		}
+	}
+	require.Error(t, err, "Write never reported the writer failing")
+	require.Error(t, s.Error())
+}

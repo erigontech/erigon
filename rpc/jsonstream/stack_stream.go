@@ -65,14 +65,17 @@ func (s *StackStream) Reset(out io.Writer) {
 }
 
 // Write appends raw bytes. jsoniter's Stream.Write is not used: it exists to
-// satisfy io.Writer, so it reslices the buffer forward to keep whatever a short
-// write left, leaving no spare capacity. handleMsg ends every response with one
-// such call, which is enough to make the buffer unusable and cap() meaningless.
+// satisfy io.Writer, so it writes through on every call and reslices the buffer
+// forward to keep whatever a short write left, leaving nothing to append into.
+// On a response written item by item that costs a realloc each time, and defeats
+// flushing on a full buffer.
 func (s *StackStream) Write(content []byte) (int, error) {
 	s.popCommaOrField()
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
 	s.flushIfFull()
-	return len(content), nil
+	// Reporting the latched error keeps callers that abandon expensive work on a
+	// write failure working, now that appending itself cannot fail.
+	return len(content), s.stream.Error
 }
 
 // WriteRaw writes raw content to the stream
