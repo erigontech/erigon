@@ -33,7 +33,7 @@ import (
 // pre-commits its full configured capacity — the same demand-growth the state
 // caches use — reused across the CodeCache's content and size layers.
 //
-// Generation swaps (maybeGrow, Purge) are not fenced against writers — safe
+// Generation swaps (tryGrow, Purge) are not fenced against writers — safe
 // only for content-addressed layers, where a key's payload never changes: a
 // write lost in a retired generation is a benign miss, and an entry whose
 // removal a racing copy undid serves correct bytes until its stale stamp
@@ -49,10 +49,11 @@ type growLRU[V any] struct {
 	startCap uint32
 	maxCap   uint32
 
-	resizeMu sync.Mutex
-	curCap   atomic.Uint32
-	reserved int64
-	closed   bool
+	resizeMu   sync.Mutex
+	curCap     atomic.Uint32
+	reserved   int64
+	entryCount atomic.Int64
+	closed     bool
 }
 
 func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
@@ -76,9 +77,12 @@ func (g *growLRU[V]) newShards(capacity uint32) *freelru.ShardedLRU[uint64, V] {
 	if err != nil {
 		panic(fmt.Sprintf("growLRU: NewSharded(%d): %s", capacity, err))
 	}
-	if g.onEvict != nil {
-		lru.SetOnEvict(g.onEvict)
-	}
+	lru.SetOnEvict(func(key uint64, value V) {
+		g.entryCount.Add(-1)
+		if g.onEvict != nil {
+			g.onEvict(key, value)
+		}
+	})
 	return lru
 }
 
@@ -86,19 +90,24 @@ func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().Get(key) }
 
 func (g *growLRU[V]) Add(key uint64, value V) {
 	lru := g.cur.Load()
-	if curCap := g.curCap.Load(); curCap < g.maxCap && lru.Len() >= int(curCap) {
-		g.maybeGrow()
+	if curCap := g.curCap.Load(); curCap < g.maxCap && g.entryCount.Load() >= int64(curCap) {
+		g.tryGrow(lru)
 		lru = g.cur.Load()
 	}
+	g.entryCount.Add(1)
 	lru.Add(key, value)
 }
 
-func (g *growLRU[V]) maybeGrow() {
-	g.resizeMu.Lock()
+func (g *growLRU[V]) tryGrow(old *freelru.ShardedLRU[uint64, V]) {
+	if !g.resizeMu.TryLock() {
+		return
+	}
 	defer g.resizeMu.Unlock()
-	old := g.cur.Load()
+	if g.cur.Load() != old {
+		return
+	}
 	curCap := g.curCap.Load()
-	if curCap >= g.maxCap || old.Len() < int(curCap) {
+	if curCap >= g.maxCap {
 		return
 	}
 	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
@@ -129,6 +138,7 @@ func (g *growLRU[V]) Purge() {
 	g.reserved = int64(g.startCap) * g.avgBytes
 	g.curCap.Store(g.startCap)
 	g.cur.Store(g.newShards(g.startCap))
+	g.entryCount.Store(0)
 }
 
 // Close returns this LRU's envelope reservation. Idempotent.

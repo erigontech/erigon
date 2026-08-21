@@ -29,6 +29,117 @@ import (
 	"github.com/erigontech/erigon/common/maphash"
 )
 
+func TestGenericCache_PutDoesNotScanUnrelatedShards(t *testing.T) {
+	c := newGenericCacheEntries[[]byte](64*datasize.MB, genericCacheStartCapacity, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	require.Greater(t, c.shardCount, uint32(1))
+	lru := c.data.Load()
+	shardHeld := make(chan struct{})
+	releaseShard := make(chan struct{})
+	var held atomic.Bool
+	lru.SetOnEvict(func(key uint64, e entry[[]byte]) {
+		c.onEvict(key, e)
+		if held.CompareAndSwap(false, true) {
+			close(shardHeld)
+			<-releaseShard
+		}
+	})
+	evictDone := make(chan struct{})
+	go func() {
+		defer close(evictDone)
+		for i := uint64(0); ; i++ {
+			e := entry[[]byte]{size: 1}
+			c.currentSize.Add(1)
+			c.entryCount.Add(1)
+			if lru.Add(i, e) {
+				return
+			}
+		}
+	}()
+	<-shardHeld
+	const writers = 128
+	putDone := make(chan struct{}, writers)
+	for i := range writers {
+		key := make([]byte, 8)
+		binary.BigEndian.PutUint64(key, uint64(i)|uint64(1)<<63)
+		go func(key []byte) {
+			c.Put(key, []byte{1}, 1)
+			putDone <- struct{}{}
+		}(key)
+	}
+	completed := 0
+	timedOut := false
+	select {
+	case <-putDone:
+		completed++
+	case <-time.After(time.Second):
+		timedOut = true
+	}
+	close(releaseShard)
+	<-evictDone
+	for completed < writers {
+		<-putDone
+		completed++
+	}
+	if timedOut {
+		t.Fatal("puts waited for an unrelated LRU shard")
+	}
+}
+
+func TestGenericCache_GrowClaimDoesNotBlockWriters(t *testing.T) {
+	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	defer c.Close()
+	key := make([]byte, 8)
+	for i := uint64(0); c.Len() < genericCacheStartCapacity; i++ {
+		binary.BigEndian.PutUint64(key, i)
+		c.Put(key, []byte{1}, 1)
+	}
+	c.resizeMu.Lock()
+	const writers = 8
+	done := make(chan struct{}, writers)
+	for i := range writers {
+		go func() {
+			k := make([]byte, 8)
+			binary.BigEndian.PutUint64(k, uint64(1)<<63|uint64(i))
+			c.Put(k, []byte{1}, 1)
+			done <- struct{}{}
+		}()
+	}
+	completed := 0
+	timer := time.NewTimer(time.Second)
+	for completed < writers {
+		select {
+		case <-done:
+			completed++
+		case <-timer.C:
+			blocked := writers - completed
+			c.resizeMu.Unlock()
+			for completed < writers {
+				<-done
+				completed++
+			}
+			t.Fatalf("%d writers queued behind one cache grow", blocked)
+		}
+	}
+	if !timer.Stop() {
+		<-timer.C
+	}
+	c.resizeMu.Unlock()
+}
+
+func TestGenericCache_GrowClaimSurvivesTransientCountDrop(t *testing.T) {
+	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	defer c.Close()
+	key := make([]byte, 8)
+	for i := uint64(0); c.Len() < genericCacheStartCapacity; i++ {
+		binary.BigEndian.PutUint64(key, i)
+		c.Put(key, []byte{1}, 1)
+	}
+	before := c.data.Load()
+	c.entryCount.Add(-1)
+	c.tryGrow(before)
+	require.NotSame(t, before, c.data.Load(), "a claimed threshold crossing was discarded after the count changed")
+}
+
 // TestGenericCache_ConcurrentPutAcrossGrow guards the jump-grow data race:
 // curCap is written under resizeMu in maybeGrow but read on the put fast-path
 // outside it, so concurrent writers crossing the grow threshold raced on it
@@ -54,6 +165,7 @@ func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
 		})
 	}
 	wg.Wait()
+	require.Equal(t, c.data.Load().Len(), c.Len())
 }
 
 // A same-key put serialized by its stripe must never be undone by a grow: with
@@ -136,46 +248,48 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 //
 // A writer hammers fresh keys while the grow swaps generations; every key
 // that straddled the swap is then probed with a stale conditional put. The
-// grow is forced by lowering curCap over a lightly-populated cache, so
-// capacity eviction cannot explain a missing key.
+// live generation is filled to its natural capacity; holding resizeMu lets
+// the first candidate observe capacity pressure without growing before the
+// competing writers are released.
 func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 	fresh := []byte("fresh-value")
 	stale := []byte("stale-value")
 	for round := range 100 {
 		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 		key := make([]byte, 8)
-		for i := range 256 {
+		for i := 0; c.Len() < genericCacheStartCapacity; i++ {
 			binary.BigEndian.PutUint64(key, uint64(1+i))
 			c.Put(key, []byte{1}, 1)
 		}
 		before := c.data.Load()
-		c.curCap.Store(uint32(c.Len()))
-
+		c.resizeMu.Lock()
 		var candidates [][]byte
-		stop := make(chan struct{})
+		firstCandidate := make(chan struct{})
+		continueWrites := make(chan struct{})
 		var wg sync.WaitGroup
 		wg.Go(func() {
-			for j := 0; ; j++ {
-				select {
-				case <-stop:
-					return
-				default:
-				}
+			for j := range 32 {
 				k := make([]byte, 9)
 				k[0] = 0xfe
 				binary.BigEndian.PutUint64(k[1:], uint64(j))
 				c.Put(k, fresh, 10)
 				candidates = append(candidates, k)
+				if j == 0 {
+					close(firstCandidate)
+					<-continueWrites
+				}
 				if c.data.Load() != before {
 					return
 				}
 			}
 		})
-
+		<-firstCandidate
+		c.resizeMu.Unlock()
+		close(continueWrites)
 		binary.BigEndian.PutUint64(key, 0)
-		c.Put(key, []byte{1}, 1) // insert at the lowered cap → triggers the grow
-		close(stop)
+		c.Put(key, []byte{1}, 1)
 		wg.Wait()
+		require.NotSame(t, before, c.data.Load(), "round %d: grow did not happen", round)
 
 		for _, k := range candidates {
 			c.PutIfAbsent(k, stale, 5)
@@ -261,7 +375,7 @@ func TestGenericCache_GrowMigrationLossless(t *testing.T) {
 	}
 	before := c.data.Load()
 	c.Put([]byte("grow-trigger"), []byte{1}, 1)
-	require.NotEqual(t, before, c.data.Load(), "grow did not happen")
+	require.NotSame(t, before, c.data.Load(), "grow did not happen")
 
 	lost := 0
 	for _, k := range clustered {
@@ -301,6 +415,7 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 	c.Delete(a)
 	c.Delete(b)
 	require.Zero(t, c.SizeBytes(), "capacity eviction raced the update-path delta")
+	require.Zero(t, c.Len())
 }
 
 // The failure mode is a pre-Clear epoch stamped on post-Clear storage. If Clear
