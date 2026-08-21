@@ -61,8 +61,9 @@ func (p *Provider) FinalizeUnwind() error {
 	p.pendingTrimLock.Unlock()
 
 	hadRegen := regen != nil && len(regen.pairs) > 0
+	hadHistoryPairs := regen != nil && len(regen.historyPairs) > 0
 	hadRemovals := regen != nil && len(regen.removals) > 0
-	if (staged == nil || len(staged.names) == 0) && rebuilt == nil && !hadRegen && !hadRemovals {
+	if (staged == nil || len(staged.names) == 0) && rebuilt == nil && !hadRegen && !hadHistoryPairs && !hadRemovals {
 		return nil
 	}
 
@@ -252,6 +253,136 @@ func (p *Provider) FinalizeUnwind() error {
 		}
 	}
 
+	// Paired v4 history-family promotion. Each historyRegenPair carries
+	// a filtered .v + .ef pair sized to match the paired v4 .kv's window
+	// (baselineTxN, targetTxN]. Same .old-dance as the .kv pairs block:
+	//
+	//   1. Rename straddler .v, .ef + their .vi, .efi accessors → .old.
+	//   2. AllSnapshots.OpenFolder() to release the pre-rename mmaps.
+	//   3. Rename .regen .v/.ef → final v4 names.
+	//   4. Build paired .vi + .efi at v4 names (BuildHistoryAccessors /
+	//      BuildIndexAccessors — the aggregator's built-in
+	//      BuildMissedAccessors doesn't recognise v4-shaped history
+	//      items and would land accessors at step-form paths).
+	//   5. Aggregator.OpenFolder() to bring the new files + accessors
+	//      into the visible set.
+	//   6. Unlink the .old sidecars.
+	//
+	// Without this block the v4 .kv from the pairs block lands but its
+	// paired .v/.ef stays as the straddler — the mode-C-after-mode-C
+	// wrong-root the stage-2/3/4 stack is designed to fix.
+	if hadHistoryPairs {
+		var histAccessorOlds []string
+		for i := range regen.historyPairs {
+			hp := &regen.historyPairs[i]
+			if hp.efOldPath != "" {
+				if err := os.Rename(hp.efOldPath, hp.efOldPath+".old"); err != nil && !os.IsNotExist(err) && p.logger != nil {
+					p.logger.Warn("[storage] Provider.FinalizeUnwind: rename straddler .ef → .old failed (continuing)", "err", err, "path", hp.efOldPath)
+				}
+				histAccessorOlds = append(histAccessorOlds, p.renameHistoryAccessorsToOld(hp.efOldPath)...)
+			}
+			if hp.vOldPath != "" {
+				if err := os.Rename(hp.vOldPath, hp.vOldPath+".old"); err != nil && !os.IsNotExist(err) && p.logger != nil {
+					p.logger.Warn("[storage] Provider.FinalizeUnwind: rename straddler .v → .old failed (continuing)", "err", err, "path", hp.vOldPath)
+				}
+				histAccessorOlds = append(histAccessorOlds, p.renameHistoryAccessorsToOld(hp.vOldPath)...)
+			}
+		}
+		if p.AllSnapshots != nil {
+			if err := p.AllSnapshots.OpenFolder(); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: pre-history OpenFolder failed (continuing)", "err", err)
+			}
+		}
+		var histNewNames, histOldNames []string
+		for i := range regen.historyPairs {
+			hp := &regen.historyPairs[i]
+			if err := os.Rename(hp.efRegenPath, hp.efFinalPath); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename .ef.regen → final failed (continuing)", "err", err, "regen", hp.efRegenPath, "final", hp.efFinalPath)
+				continue
+			}
+			if err := os.Rename(hp.vRegenPath, hp.vFinalPath); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename .v.regen → final failed (continuing)", "err", err, "regen", hp.vRegenPath, "final", hp.vFinalPath)
+				continue
+			}
+			_ = dir.RemoveFile(hp.efFinalPath + ".torrent")
+			_ = dir.RemoveFile(hp.vFinalPath + ".torrent")
+
+			if p.Aggregator != nil {
+				if err := p.Aggregator.BuildIndexAccessors(context.Background(), hp.domain, hp.efFinalPath, hp.efFinalPath); err != nil && p.logger != nil {
+					p.logger.Warn("[storage] Provider.FinalizeUnwind: BuildIndexAccessors failed (continuing — .efi missing, .ef will be invisible until manual rebuild)", "err", err, "path", hp.efFinalPath)
+				}
+				if err := p.Aggregator.BuildHistoryAccessors(context.Background(), hp.domain, hp.vFinalPath, hp.efFinalPath, hp.vFinalPath); err != nil && p.logger != nil {
+					p.logger.Warn("[storage] Provider.FinalizeUnwind: BuildHistoryAccessors failed (continuing — .vi missing, .v will be invisible until manual rebuild)", "err", err, "path", hp.vFinalPath)
+				}
+			}
+			if p.Inventory != nil {
+				for _, path := range []string{hp.efFinalPath, hp.vFinalPath} {
+					entry := &snapshot.FileEntry{
+						Name:         historyInventoryName(path),
+						Local:        true,
+						Advertisable: true,
+					}
+					snapshot.PopulateFromName(entry)
+					if err := p.Inventory.AddFile(entry); err != nil && p.logger != nil {
+						p.logger.Warn("[storage] Provider.FinalizeUnwind: Inventory.AddFile for history regen failed", "name", entry.Name, "err", err)
+					}
+				}
+				if hp.efOldName != "" {
+					p.Inventory.RemoveFile(hp.efOldName)
+				}
+				if hp.vOldName != "" {
+					p.Inventory.RemoveFile(hp.vOldName)
+				}
+			}
+			histNewNames = append(histNewNames, filepath.Base(hp.efFinalPath), filepath.Base(hp.vFinalPath))
+			if hp.efOldPath != "" {
+				histOldNames = append(histOldNames, filepath.Base(hp.efOldPath))
+				_ = dir.RemoveFile(hp.efOldPath + ".torrent")
+			}
+			if hp.vOldPath != "" {
+				histOldNames = append(histOldNames, filepath.Base(hp.vOldPath))
+				_ = dir.RemoveFile(hp.vOldPath + ".torrent")
+			}
+		}
+
+		if p.Aggregator != nil {
+			if err := p.Aggregator.OpenFolder(); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: post-history OpenFolder failed (continuing)", "err", err)
+			}
+		}
+
+		if p.downloaderClient != nil && (len(histNewNames) > 0 || len(histOldNames) > 0) {
+			deletes := append(append([]string{}, histNewNames...), histOldNames...)
+			if err := p.downloaderClient.Delete(context.Background(), deletes); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: downloaderClient.Delete for history regen failed", "err", err, "files", len(deletes))
+			}
+		}
+
+		for i := range regen.historyPairs {
+			hp := &regen.historyPairs[i]
+			if hp.efOldPath != "" {
+				if err := dir.RemoveFile(hp.efOldPath + ".old"); err != nil && !os.IsNotExist(err) && p.logger != nil {
+					p.logger.Warn("[storage] Provider.FinalizeUnwind: remove straddler .ef.old failed (harmless leftover)", "err", err, "path", hp.efOldPath+".old")
+				}
+			}
+			if hp.vOldPath != "" {
+				if err := dir.RemoveFile(hp.vOldPath + ".old"); err != nil && !os.IsNotExist(err) && p.logger != nil {
+					p.logger.Warn("[storage] Provider.FinalizeUnwind: remove straddler .v.old failed (harmless leftover)", "err", err, "path", hp.vOldPath+".old")
+				}
+			}
+		}
+		for _, oldPath := range histAccessorOlds {
+			if err := dir.RemoveFile(oldPath); err != nil && !os.IsNotExist(err) && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: remove history accessor .old failed (harmless leftover)", "err", err, "path", oldPath)
+			}
+		}
+		if p.republishChainToml != nil {
+			if err := p.republishChainToml(); err != nil && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: republishChainToml after history regen failed (continuing)", "err", err)
+			}
+		}
+	}
+
 	// State-domain removal block. Files entirely past stepBoundary
 	// (FromStep >= stepBoundary, per planStateFileActions's
 	// actionRemove classification) contain state at steps that
@@ -359,10 +490,12 @@ func (p *Provider) FinalizeUnwind() error {
 			rebuildCount = len(rebuilt.paths)
 		}
 		regenCount := 0
+		historyRegenCount := 0
 		if regen != nil {
 			regenCount = len(regen.pairs)
+			historyRegenCount = len(regen.historyPairs)
 		}
-		p.logger.Info("[storage] Provider.FinalizeUnwind: deferred snapshot-trim ops executed", "deleted", fileCount, "rebuilt", rebuildCount, "regenerated", regenCount)
+		p.logger.Info("[storage] Provider.FinalizeUnwind: deferred snapshot-trim ops executed", "deleted", fileCount, "rebuilt", rebuildCount, "regenerated", regenCount, "historyRegenerated", historyRegenCount)
 	}
 	return nil
 }
@@ -472,6 +605,67 @@ func (p *Provider) removeAccessorSiblings(kvPath string) []string {
 	return removedBases
 }
 
+// renameHistoryAccessorsToOld is renameAccessorsToOld for .v/.ef
+// primaries: given a primary path like <snapDir>/history/v2.1-<d>.<a>-<b>.v
+// or <snapDir>/idx/v3.1-<d>.<a>-<b>.ef, rename the matching accessor
+// (.vi for .v, .efi for .ef) under <snapDir>/accessor/ to a .old sidecar
+// and unlink its .torrent. Returns the .old paths so the caller can
+// unlink them after the post-swap OpenFolder releases the mmaps.
+func (p *Provider) renameHistoryAccessorsToOld(primaryPath string) []string {
+	primaryBase := filepath.Base(primaryPath)
+	// primaryBase shape: v{maj}.{min}-{filenameBase}.{fromStep}-{toStep}.<ext>
+	_, after, ok := strings.Cut(primaryBase, "-")
+	if !ok {
+		return nil
+	}
+	var accessorExt string
+	switch {
+	case strings.HasSuffix(primaryBase, ".v"):
+		accessorExt = ".vi"
+	case strings.HasSuffix(primaryBase, ".ef"):
+		accessorExt = ".efi"
+	default:
+		return nil
+	}
+	suffix := strings.TrimSuffix(after, filepath.Ext(primaryBase))
+	if suffix == after {
+		return nil
+	}
+	primaryDir := filepath.Dir(primaryPath)
+	accessorDir := filepath.Join(filepath.Dir(primaryDir), "accessor")
+	matches, err := filepath.Glob(filepath.Join(accessorDir, "v*-"+suffix+accessorExt))
+	if err != nil {
+		return nil
+	}
+	var olds []string
+	for _, m := range matches {
+		oldPath := m + ".old"
+		if err := os.Rename(m, oldPath); err != nil {
+			if !os.IsNotExist(err) && p.logger != nil {
+				p.logger.Warn("[storage] Provider.FinalizeUnwind: rename history accessor → .old failed (continuing)", "err", err, "path", m)
+			}
+			continue
+		}
+		olds = append(olds, oldPath)
+		_ = dir.RemoveFile(m + ".torrent")
+	}
+	return olds
+}
+
+// historyInventoryName returns the Inventory-name for a .v or .ef file
+// path: "history/<basename>" for .v, "idx/<basename>" for .ef. Matches
+// the kind-subdir prefix scheme snapshot.PopulateFromName expects.
+func historyInventoryName(absPath string) string {
+	base := filepath.Base(absPath)
+	switch {
+	case strings.HasSuffix(base, ".v"):
+		return "history/" + base
+	case strings.HasSuffix(base, ".ef"):
+		return "idx/" + base
+	}
+	return base
+}
+
 // renameAccessorsToOld renames every accessor file (.bt / .kvi /
 // .kvei) sharing the regenerated .kv's domain + step-range to a .old
 // sidecar, and unlinks each accessor's .torrent sidecar. Without the
@@ -544,14 +738,21 @@ func (p *Provider) AbortUnwind() {
 	// into place — they're tx-orphan FS artifacts on rollback. Drop them
 	// so the pre-mode-B datadir is byte-identical to before the call.
 	regenCount := 0
+	historyRegenCount := 0
 	if regen != nil {
 		for _, pair := range regen.pairs {
 			_ = dir.RemoveFile(pair.regenPath)
 			regenCount++
 		}
+		for i := range regen.historyPairs {
+			hp := &regen.historyPairs[i]
+			_ = dir.RemoveFile(hp.efRegenPath)
+			_ = dir.RemoveFile(hp.vRegenPath)
+			historyRegenCount++
+		}
 	}
 
-	if (staged != nil && len(staged.names) > 0) || rebuilt != nil || regenCount > 0 {
+	if (staged != nil && len(staged.names) > 0) || rebuilt != nil || regenCount > 0 || historyRegenCount > 0 {
 		if p.logger != nil {
 			stagedCount := 0
 			if staged != nil {
@@ -561,7 +762,7 @@ func (p *Provider) AbortUnwind() {
 			if rebuilt != nil {
 				rebuiltCount = len(rebuilt.paths)
 			}
-			p.logger.Info("[storage] Provider.AbortUnwind: staged ops dropped", "staged", stagedCount, "rebuiltFilesDeleted", rebuiltCount, "regenFilesDeleted", regenCount)
+			p.logger.Info("[storage] Provider.AbortUnwind: staged ops dropped", "staged", stagedCount, "rebuiltFilesDeleted", rebuiltCount, "regenFilesDeleted", regenCount, "historyRegenFilesDeleted", historyRegenCount)
 		}
 	}
 }

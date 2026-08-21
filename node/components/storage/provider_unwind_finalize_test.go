@@ -244,6 +244,174 @@ func TestProvider_FinalizeUnwind_RegenStripsTorrentAndNotifiesDownloader(t *test
 	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
 }
 
+// TestProvider_AbortUnwind_UnlinksHistoryRegenFiles pins that on
+// rollback, historyRegenPair .regen files (the paired v4 .v / .ef
+// mode-C emits) are unlinked just like the regular .kv regens. Without
+// this the pre-mode-B datadir has orphaned .v.regen / .ef.regen
+// leftovers that a subsequent Provider.Unwind attempt would trip over.
+func TestProvider_AbortUnwind_UnlinksHistoryRegenFiles(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	efRegen := filepath.Join(tmpDir, "v4.0-accounts.100-200.ef.regen")
+	vRegen := filepath.Join(tmpDir, "v4.0-accounts.100-200.v.regen")
+	require.NoError(t, os.WriteFile(efRegen, []byte("ef-regen"), 0o600))
+	require.NoError(t, os.WriteFile(vRegen, []byte("v-regen"), 0o600))
+
+	p := &Provider{snapDir: tmpDir}
+	p.pendingRegen = &pendingRegenState{
+		historyPairs: []historyRegenPair{{
+			efRegenPath: efRegen,
+			vRegenPath:  vRegen,
+		}},
+	}
+
+	p.AbortUnwind()
+
+	_, err := os.Stat(efRegen)
+	require.True(t, os.IsNotExist(err), "AbortUnwind must unlink .ef.regen")
+	_, err = os.Stat(vRegen)
+	require.True(t, os.IsNotExist(err), "AbortUnwind must unlink .v.regen")
+	require.Nil(t, p.pendingRegen, "AbortUnwind must drain pendingRegen")
+}
+
+// TestProvider_FinalizeUnwind_HistoryPairSwapAndStraddlerRemoval pins
+// the FS layer of stage 5. Given a staged historyRegenPair pointing at
+// a straddler .v/.ef pair and their .regen replacements, FinalizeUnwind
+// must:
+//
+//  1. Rename the .regen files into their final v4-named locations.
+//  2. Remove the straddler .v/.ef files (they were the .old sidecars).
+//  3. Remove the .torrent sidecars for the straddlers.
+//
+// Accessor building (BuildHistoryAccessors / BuildIndexAccessors) is
+// exercised end-to-end by TestFinalizeUnwind_RenamesPairedHistoryV4 in
+// the integration test suite — this unit test uses a nil Aggregator so
+// the FS-only behaviour is isolated from the aggregator's real
+// side-effects.
+func TestProvider_FinalizeUnwind_HistoryPairSwapAndStraddlerRemoval(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	// Straddler on disk under history/ and idx/ subdirs.
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "history"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "idx"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "accessor"), 0o755))
+
+	efOldName := "idx/v3.1-accounts.310-311.ef"
+	efOldPath := filepath.Join(tmpDir, efOldName)
+	efOldTorrent := efOldPath + ".torrent"
+	vOldName := "history/v2.1-accounts.310-311.v"
+	vOldPath := filepath.Join(tmpDir, vOldName)
+	vOldTorrent := vOldPath + ".torrent"
+	require.NoError(t, os.WriteFile(efOldPath, []byte("old-ef"), 0o600))
+	require.NoError(t, os.WriteFile(efOldTorrent, []byte("stale-ef-torrent"), 0o600))
+	require.NoError(t, os.WriteFile(vOldPath, []byte("old-v"), 0o600))
+	require.NoError(t, os.WriteFile(vOldTorrent, []byte("stale-v-torrent"), 0o600))
+
+	// Regen counterparts.
+	efFinalPath := filepath.Join(tmpDir, "idx", "v4.0-accounts.121093750-121175226.ef")
+	vFinalPath := filepath.Join(tmpDir, "history", "v4.0-accounts.121093750-121175226.v")
+	efRegenPath := efFinalPath + ".regen"
+	vRegenPath := vFinalPath + ".regen"
+	require.NoError(t, os.WriteFile(efRegenPath, []byte("regen-ef"), 0o600))
+	require.NoError(t, os.WriteFile(vRegenPath, []byte("regen-v"), 0o600))
+
+	stub := &recordingDownloaderClient{}
+	p := &Provider{
+		snapDir:          tmpDir,
+		downloaderClient: stub,
+	}
+	p.pendingRegen = &pendingRegenState{
+		historyPairs: []historyRegenPair{{
+			efRegenPath: efRegenPath,
+			efFinalPath: efFinalPath,
+			efOldName:   efOldName,
+			efOldPath:   efOldPath,
+			vRegenPath:  vRegenPath,
+			vFinalPath:  vFinalPath,
+			vOldName:    vOldName,
+			vOldPath:    vOldPath,
+		}},
+	}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	// Final v4 pair in place.
+	efFinal, err := os.ReadFile(efFinalPath)
+	require.NoError(t, err, "regen .ef must be promoted to final")
+	require.Equal(t, "regen-ef", string(efFinal))
+	vFinal, err := os.ReadFile(vFinalPath)
+	require.NoError(t, err, "regen .v must be promoted to final")
+	require.Equal(t, "regen-v", string(vFinal))
+
+	// Straddlers gone (renamed to .old, then unlinked).
+	_, err = os.Stat(efOldPath)
+	require.True(t, os.IsNotExist(err), "straddler .ef must be removed")
+	_, err = os.Stat(vOldPath)
+	require.True(t, os.IsNotExist(err), "straddler .v must be removed")
+	_, err = os.Stat(efOldPath + ".old")
+	require.True(t, os.IsNotExist(err), ".ef.old sidecar must be unlinked")
+	_, err = os.Stat(vOldPath + ".old")
+	require.True(t, os.IsNotExist(err), ".v.old sidecar must be unlinked")
+
+	// Straddler .torrent sidecars removed.
+	_, err = os.Stat(efOldTorrent)
+	require.True(t, os.IsNotExist(err), "stale .ef.torrent must be removed")
+	_, err = os.Stat(vOldTorrent)
+	require.True(t, os.IsNotExist(err), "stale .v.torrent must be removed")
+
+	// Downloader Delete carries both new and old basenames.
+	deletes := stub.snapshotDeletes()
+	require.Len(t, deletes, 1)
+	// Order isn't asserted — we just need all four basenames present.
+	require.ElementsMatch(t, []string{
+		filepath.Base(efFinalPath),
+		filepath.Base(vFinalPath),
+		filepath.Base(efOldPath),
+		filepath.Base(vOldPath),
+	}, deletes[0])
+
+	require.Nil(t, p.pendingRegen, "FinalizeUnwind must drain pendingRegen")
+}
+
+// TestProvider_FinalizeUnwind_HistoryPairWithoutStraddler pins the
+// no-straddler skip: when historyPairs.efOldPath / vOldPath are empty
+// (fresh sync hasn't retired that step yet), FinalizeUnwind lands the
+// new v4 .v/.ef without trying to rename absent straddlers.
+func TestProvider_FinalizeUnwind_HistoryPairWithoutStraddler(t *testing.T) {
+	t.Parallel()
+	tmpDir := t.TempDir()
+
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "history"), 0o755))
+	require.NoError(t, os.MkdirAll(filepath.Join(tmpDir, "idx"), 0o755))
+
+	efFinalPath := filepath.Join(tmpDir, "idx", "v4.0-accounts.100-200.ef")
+	vFinalPath := filepath.Join(tmpDir, "history", "v4.0-accounts.100-200.v")
+	efRegenPath := efFinalPath + ".regen"
+	vRegenPath := vFinalPath + ".regen"
+	require.NoError(t, os.WriteFile(efRegenPath, []byte("regen-ef"), 0o600))
+	require.NoError(t, os.WriteFile(vRegenPath, []byte("regen-v"), 0o600))
+
+	p := &Provider{snapDir: tmpDir}
+	p.pendingRegen = &pendingRegenState{
+		historyPairs: []historyRegenPair{{
+			efRegenPath: efRegenPath,
+			efFinalPath: efFinalPath,
+			vRegenPath:  vRegenPath,
+			vFinalPath:  vFinalPath,
+			// no efOldPath, no vOldPath
+		}},
+	}
+
+	require.NoError(t, p.FinalizeUnwind())
+
+	_, err := os.Stat(efFinalPath)
+	require.NoError(t, err, "regen .ef promoted to final")
+	_, err = os.Stat(vFinalPath)
+	require.NoError(t, err, "regen .v promoted to final")
+}
+
 // TestProvider_FinalizeUnwind_RemovesEntirelyPastFiles is the load-
 // bearing integration test for the post-iter-3-mode_b fix. State-
 // domain .kv files entirely past the unwind boundary (per
