@@ -58,23 +58,28 @@ func (s *LazyFieldStream) ensure() {
 	}
 }
 
-func (s *LazyFieldStream) WriteNil()                   { s.ensure(); s.Stream.WriteNil() }
-func (s *LazyFieldStream) WriteTrue()                  { s.ensure(); s.Stream.WriteTrue() }
-func (s *LazyFieldStream) WriteFalse()                 { s.ensure(); s.Stream.WriteFalse() }
-func (s *LazyFieldStream) WriteBool(v bool)            { s.ensure(); s.Stream.WriteBool(v) }
-func (s *LazyFieldStream) WriteInt(v int)              { s.ensure(); s.Stream.WriteInt(v) }
-func (s *LazyFieldStream) WriteInt8(v int8)            { s.ensure(); s.Stream.WriteInt8(v) }
-func (s *LazyFieldStream) WriteInt16(v int16)          { s.ensure(); s.Stream.WriteInt16(v) }
-func (s *LazyFieldStream) WriteInt32(v int32)          { s.ensure(); s.Stream.WriteInt32(v) }
-func (s *LazyFieldStream) WriteInt64(v int64)          { s.ensure(); s.Stream.WriteInt64(v) }
-func (s *LazyFieldStream) WriteUint(v uint)            { s.ensure(); s.Stream.WriteUint(v) }
-func (s *LazyFieldStream) WriteUint8(v uint8)          { s.ensure(); s.Stream.WriteUint8(v) }
-func (s *LazyFieldStream) WriteUint16(v uint16)        { s.ensure(); s.Stream.WriteUint16(v) }
-func (s *LazyFieldStream) WriteUint32(v uint32)        { s.ensure(); s.Stream.WriteUint32(v) }
-func (s *LazyFieldStream) WriteUint64(v uint64)        { s.ensure(); s.Stream.WriteUint64(v) }
-func (s *LazyFieldStream) WriteFloat32(v float32)      { s.ensure(); s.Stream.WriteFloat32(v) }
-func (s *LazyFieldStream) WriteFloat64(v float64)      { s.ensure(); s.Stream.WriteFloat64(v) }
-func (s *LazyFieldStream) WriteString(v string)        { s.ensure(); s.Stream.WriteString(v) }
+func (s *LazyFieldStream) WriteNil()              { s.ensure(); s.Stream.WriteNil() }
+func (s *LazyFieldStream) WriteTrue()             { s.ensure(); s.Stream.WriteTrue() }
+func (s *LazyFieldStream) WriteFalse()            { s.ensure(); s.Stream.WriteFalse() }
+func (s *LazyFieldStream) WriteBool(v bool)       { s.ensure(); s.Stream.WriteBool(v) }
+func (s *LazyFieldStream) WriteInt(v int)         { s.ensure(); s.Stream.WriteInt(v) }
+func (s *LazyFieldStream) WriteInt8(v int8)       { s.ensure(); s.Stream.WriteInt8(v) }
+func (s *LazyFieldStream) WriteInt16(v int16)     { s.ensure(); s.Stream.WriteInt16(v) }
+func (s *LazyFieldStream) WriteInt32(v int32)     { s.ensure(); s.Stream.WriteInt32(v) }
+func (s *LazyFieldStream) WriteInt64(v int64)     { s.ensure(); s.Stream.WriteInt64(v) }
+func (s *LazyFieldStream) WriteUint(v uint)       { s.ensure(); s.Stream.WriteUint(v) }
+func (s *LazyFieldStream) WriteUint8(v uint8)     { s.ensure(); s.Stream.WriteUint8(v) }
+func (s *LazyFieldStream) WriteUint16(v uint16)   { s.ensure(); s.Stream.WriteUint16(v) }
+func (s *LazyFieldStream) WriteUint32(v uint32)   { s.ensure(); s.Stream.WriteUint32(v) }
+func (s *LazyFieldStream) WriteUint64(v uint64)   { s.ensure(); s.Stream.WriteUint64(v) }
+func (s *LazyFieldStream) WriteFloat32(v float32) { s.ensure(); s.Stream.WriteFloat32(v) }
+func (s *LazyFieldStream) WriteFloat64(v float64) { s.ensure(); s.Stream.WriteFloat64(v) }
+func (s *LazyFieldStream) WriteString(v string)   { s.ensure(); s.Stream.WriteString(v) }
+func (s *LazyFieldStream) WriteHex(b []byte)      { s.ensure(); s.Stream.WriteHex(b) }
+func (s *LazyFieldStream) WriteHexObjectField(b []byte) {
+	s.ensure()
+	s.Stream.WriteHexObjectField(b)
+}
 func (s *LazyFieldStream) WriteObjectStart()           { s.ensure(); s.Stream.WriteObjectStart() }
 func (s *LazyFieldStream) WriteArrayStart()            { s.ensure(); s.Stream.WriteArrayStart() }
 func (s *LazyFieldStream) WriteEmptyArray()            { s.ensure(); s.Stream.WriteEmptyArray() }

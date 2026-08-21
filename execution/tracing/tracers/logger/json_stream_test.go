@@ -19,12 +19,16 @@ package logger
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"maps"
+	"math/big"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -394,4 +398,64 @@ func TestStructLog_ErrorOmitempty(t *testing.T) {
 			t.Errorf("error message: got %q, want %q", msg, "out of gas")
 		}
 	})
+}
+
+// TestJsonStreamLogger_StorageEncodingManyKeys covers the separator handling when
+// more than one slot is emitted; a single-entry object never writes one.
+func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{}
+	want := map[string]string{}
+	for i := range 4 {
+		key := common.BigToHash(big.NewInt(int64(i + 1)))
+		val := common.BigToHash(big.NewInt(int64(100 + i)))
+		scope.stack = []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])}
+		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		want["0x"+hex.EncodeToString(key[:])] = "0x" + hex.EncodeToString(val[:])
+	}
+	// The logger writes a step's storage on the following step, so drive one more.
+	l.OnOpcode(99, byte(vm.STOP), 100, 0, scope, nil, 1, nil)
+
+	require.NoError(t, stream.ClosePending(0))
+	require.NoError(t, stream.Flush())
+	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+
+	var out struct {
+		StructLogs []struct {
+			Storage map[string]string `json:"storage"`
+		} `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+
+	got := map[string]string{}
+	multiSlot := false
+	for _, entry := range out.StructLogs {
+		maps.Copy(got, entry.Storage)
+		multiSlot = multiSlot || len(entry.Storage) > 1
+	}
+	require.True(t, multiSlot, "no step emitted more than one slot, so no separator was exercised")
+	require.Equal(t, want, got)
+}
+
+// TestJsonStreamLogger_ClosePendingAfterMemory pins that writing memory words keeps
+// the stream's auto-close stack balanced. Raw writes bypass the bookkeeping that
+// WriteString does, so an unbalanced stack makes ClosePending emit stray closers.
+func TestJsonStreamLogger_ClosePendingAfterMemory(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 32*4)}
+	for i := range 3 {
+		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+	}
+
+	require.NoError(t, stream.ClosePending(0))
+	require.NoError(t, stream.Flush())
+	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
 }

@@ -17,12 +17,17 @@
 package jsonstream
 
 import (
+	"bytes"
+	"encoding/hex"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	jsoniter "github.com/json-iterator/go"
 )
@@ -1064,4 +1069,126 @@ func (w *failingWriter) Write(p []byte) (n int, err error) {
 	}
 	w.bytesWritten += len(p)
 	return len(p), nil
+}
+
+// TestWriteHex covers the alloc-free hex writers on every Stream implementation,
+// including inputs longer than the internal encode chunk.
+func TestWriteHex(t *testing.T) {
+	streams := map[string]func(w io.Writer) Stream{
+		"jsoniter": func(w io.Writer) Stream {
+			return NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096))
+		},
+		"stack": func(w io.Writer) Stream {
+			return NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, w, 4096))
+		},
+	}
+
+	cases := map[string][]byte{
+		"empty":     {},
+		"one byte":  {0x0f},
+		"32 bytes":  bytes.Repeat([]byte{0xab}, 32),
+		"64 bytes":  bytes.Repeat([]byte{0xcd}, 64),
+		"65 bytes":  bytes.Repeat([]byte{0xef}, 65),
+		"199 bytes": bytes.Repeat([]byte{0x01}, 199),
+	}
+
+	for streamName, newStream := range streams {
+		for caseName, input := range cases {
+			t.Run(streamName+"/"+caseName, func(t *testing.T) {
+				var buf bytes.Buffer
+				s := newStream(&buf)
+				s.WriteObjectStart()
+				s.WriteHexObjectField(input)
+				s.WriteHex(input)
+				s.WriteObjectEnd()
+				require.NoError(t, s.Flush())
+
+				want := "0x" + hex.EncodeToString(input)
+				var got map[string]string
+				require.NoError(t, json.Unmarshal(buf.Bytes(), &got), "output: %s", buf.String())
+				require.Equal(t, map[string]string{want: want}, got)
+			})
+		}
+	}
+}
+
+// TestWriteHexThroughLazyField pins that the hex writers trigger the lazy field
+// name, like every other write method on that wrapper.
+func TestWriteHexThroughLazyField(t *testing.T) {
+	var buf bytes.Buffer
+	inner := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+	inner.WriteObjectStart()
+	lazy := NewLazyFieldStream(inner, "value", false)
+	lazy.WriteHex([]byte{0xde, 0xad})
+	require.True(t, lazy.Written())
+	inner.WriteObjectEnd()
+	require.NoError(t, inner.Flush())
+
+	var got map[string]string
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got), "output: %s", buf.String())
+	require.Equal(t, map[string]string{"value": "0xdead"}, got)
+}
+
+// TestWriteHexKeepsAutoCloseBalanced pins that the hex writers keep the
+// auto-close stack in step, so a stream truncated mid-object still closes into
+// valid JSON. A dangling field needs its null placeholder.
+func TestWriteHexKeepsAutoCloseBalanced(t *testing.T) {
+	key := bytes.Repeat([]byte{0x11}, 32)
+
+	t.Run("truncated after the field name", func(t *testing.T) {
+		var buf bytes.Buffer
+		s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s.WriteObjectStart()
+		s.WriteHexObjectField(key)
+		require.NoError(t, s.ClosePending(0))
+		require.NoError(t, s.Flush())
+		require.True(t, json.Valid(buf.Bytes()), "output: %s", buf.String())
+	})
+
+	t.Run("truncated after the value", func(t *testing.T) {
+		var buf bytes.Buffer
+		s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s.WriteObjectStart()
+		s.WriteHexObjectField(key)
+		s.WriteHex(key)
+		require.NoError(t, s.ClosePending(0))
+		require.NoError(t, s.Flush())
+		require.True(t, json.Valid(buf.Bytes()), "output: %s", buf.String())
+	})
+
+	t.Run("truncated after a separator", func(t *testing.T) {
+		var buf bytes.Buffer
+		s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))
+		s.WriteArrayStart()
+		s.WriteHex(key)
+		s.WriteMore()
+		s.WriteHex(key)
+		require.NoError(t, s.ClosePending(0))
+		require.NoError(t, s.Flush())
+		require.True(t, json.Valid(buf.Bytes()), "output: %s", buf.String())
+	})
+}
+
+func BenchmarkWriteHex(b *testing.B) {
+	word := bytes.Repeat([]byte{0xab}, 32)
+
+	b.Run("WriteHex", func(b *testing.B) {
+		s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096))
+		b.ReportAllocs()
+		for b.Loop() {
+			s.Reset(nil)
+			s.WriteHex(word)
+		}
+	})
+	b.Run("WriteString of an encoded string", func(b *testing.B) {
+		s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096))
+		b.ReportAllocs()
+		var buf [66]byte
+		buf[0], buf[1] = '0', 'x'
+		for b.Loop() {
+			s.Reset(nil)
+			hex.Encode(buf[2:], word)
+			s.WriteString(string(buf[:]))
+		}
+	})
 }

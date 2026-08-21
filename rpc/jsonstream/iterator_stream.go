@@ -119,6 +119,17 @@ func (s *JsoniterStream) WriteString(val string) {
 	s.stream.WriteString(val)
 }
 
+func (s *JsoniterStream) WriteHex(b []byte) {
+	s.stream.WriteRaw(`"0x`)
+	writeHexBody(s.stream, b)
+	s.stream.WriteRaw(`"`)
+}
+
+func (s *JsoniterStream) WriteHexObjectField(b []byte) {
+	s.WriteHex(b)
+	s.stream.WriteRaw(`:`)
+}
+
 func (s *JsoniterStream) WriteObjectStart() {
 	s.stream.WriteObjectStart()
 }

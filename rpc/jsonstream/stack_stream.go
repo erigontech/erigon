@@ -178,6 +178,23 @@ func (s *StackStream) WriteString(val string) {
 	s.popCommaOrField()
 }
 
+// WriteHex writes b as the JSON string "0x<hex>" without allocating.
+func (s *StackStream) WriteHex(b []byte) {
+	s.stream.WriteRaw(`"0x`)
+	writeHexBody(s.stream, b)
+	s.stream.WriteRaw(`"`)
+	s.popCommaOrField()
+}
+
+// WriteHexObjectField writes b as the JSON field name "0x<hex>" without allocating.
+func (s *StackStream) WriteHexObjectField(b []byte) {
+	s.stream.WriteRaw(`"0x`)
+	writeHexBody(s.stream, b)
+	s.stream.WriteRaw(`":`)
+	s.pop(ItemComma)
+	s.push(ItemField)
+}
+
 // WriteObjectStart writes the start of an object and adds it to the stack
 func (s *StackStream) WriteObjectStart() {
 	s.stream.WriteObjectStart()
