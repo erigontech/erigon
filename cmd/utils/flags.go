@@ -480,7 +480,7 @@ var (
 	}
 	RpcGetLogsMaxResults = cli.IntFlag{
 		Name:  "rpc.logs.maxresults",
-		Usage: "Maximum number of logs returned by eth_getLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
+		Usage: "Maximum number of logs returned by eth_getLogs, eth_getFilterLogs, erigon_getLogs, erigon_getLatestLogs (0 = unlimited)",
 		Value: 20_000,
 	}
 	RpcLogQueryLimit = cli.IntFlag{
