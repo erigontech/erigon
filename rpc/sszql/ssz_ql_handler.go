@@ -2,6 +2,7 @@ package sszql
 
 import (
 	"encoding/json"
+	"mime"
 	"net/http"
 	"strconv"
 	"strings"
@@ -16,6 +17,12 @@ func SSZQueryHandler() http.Handler {
 }
 
 func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
+
+	mt, _, err := mime.ParseMediaType(r.Header.Get("Content-Type"))
+	if err != nil || mt != sszQLContentType {
+		http.Error(w, "unsupported media type", http.StatusUnsupportedMediaType)
+		return
+	}
 
 	segment := r.PathValue("version")
 	if !strings.HasPrefix(segment, "v") {
@@ -47,8 +54,17 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 	var req SSZQLRequest
 
 	dec := json.NewDecoder(r.Body)
+	dec.DisallowUnknownFields()
 	if err := dec.Decode(&req); err != nil {
 		http.Error(w, "invalid JSON: "+err.Error(), http.StatusBadRequest)
+		return
+	}
+	if dec.More() {
+		http.Error(w, "invalid JSON: unexpected data after request body", http.StatusBadRequest)
+		return
+	}
+	if len(req.Queries) == 0 {
+		http.Error(w, "invalid JSON: queries must not be empty", http.StatusBadRequest)
 		return
 	}
 

@@ -111,10 +111,35 @@ func TestRouteRejectsBogusVersion(t *testing.T) {
 }
 
 func TestRouteInvalidJSON(t *testing.T) {
-	for _, body := range []string{"", "not json", `{"queries":`} {
+	for _, body := range []string{
+		"",
+		"not json",
+		`{"queries":`,
+		validQueryBody + `{"junk":1}`,
+		validQueryBody + `[1,2]`,
+		validQueryBody + `null`,
+		validQueryBody + `garbage`,
+		`null`,
+		`{}`,
+		`{"queries":[]}`,
+		`{"queries":null}`,
+		`[]`,
+		`123`,
+		`{"queries":[{"path":".a"}],"typo_field":1}`,
+	} {
 		rec := doRequest(t, http.MethodPost, "/eth/v1/execution/123/query", body)
 		if rec.Code != http.StatusBadRequest {
 			t.Errorf("body %q: got status %d, want %d", body, rec.Code, http.StatusBadRequest)
+		}
+	}
+}
+
+// Trailing whitespace is not junk; a client appending a newline must still be served.
+func TestRouteTrailingWhitespaceAccepted(t *testing.T) {
+	for _, body := range []string{validQueryBody + "\n", validQueryBody + "   ", validQueryBody + " \t\n"} {
+		rec := doRequest(t, http.MethodPost, "/eth/v1/execution/123/query", body)
+		if rec.Code != http.StatusOK {
+			t.Errorf("body %q: got status %d, want %d", body, rec.Code, http.StatusOK)
 		}
 	}
 }
