@@ -79,6 +79,34 @@ func RecomputeAtTxNumWithoutSD(
 	maxStep kv.Step,
 	stepSize uint64,
 ) (root []byte, encodedTrieState []byte, baselineTxNum uint64, branches *etl.Collector, err error) {
+	return recomputeAtTxNumWithoutSDInternal(ctx, tx, tmpDir, toTxNum, maxStep, stepSize, false)
+}
+
+// RecomputeAtTxNumWithoutSDBounded is the dual-root diagnostic variant.
+// Same as RecomputeAtTxNumWithoutSD but the plainReader falls back to
+// GetLatestFromFilesUpToStep(maxStep) instead of unbounded GetAsOf on
+// HistorySeek miss. Runs post-mismatch to test whether the unbounded
+// fallback is the root cause of the wrong compute root.
+func RecomputeAtTxNumWithoutSDBounded(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	tmpDir string,
+	toTxNum uint64,
+	maxStep kv.Step,
+	stepSize uint64,
+) (root []byte, encodedTrieState []byte, baselineTxNum uint64, branches *etl.Collector, err error) {
+	return recomputeAtTxNumWithoutSDInternal(ctx, tx, tmpDir, toTxNum, maxStep, stepSize, true)
+}
+
+func recomputeAtTxNumWithoutSDInternal(
+	ctx context.Context,
+	tx kv.TemporalTx,
+	tmpDir string,
+	toTxNum uint64,
+	maxStep kv.Step,
+	stepSize uint64,
+	boundedPlainReader bool,
+) (root []byte, encodedTrieState []byte, baselineTxNum uint64, branches *etl.Collector, err error) {
 	if tx == nil {
 		return nil, nil, 0, nil, fmt.Errorf("RecomputeAtTxNumWithoutSD: nil tx")
 	}
@@ -143,7 +171,12 @@ func RecomputeAtTxNumWithoutSD(
 	// files only (bounded to maxStep = the file containing toBlock's
 	// baseline) and rely on the trie's in-memory state (restored from
 	// baseline via SetState + folded by Process) for everything else.
-	plainReader := NewHistoryStateReader(tx, toTxNum+1)
+	var plainReader StateReader
+	if boundedPlainReader {
+		plainReader = NewHistoryStateReaderBounded(tx, toTxNum+1)
+	} else {
+		plainReader = NewHistoryStateReader(tx, toTxNum+1)
+	}
 	commitmentReader := NewStepBoundedFilesStateReader(tx, maxStep)
 	stateReader := NewCommitmentSplitStateReader(commitmentReader, plainReader, true /* withHistory */)
 
@@ -187,6 +220,21 @@ func RecomputeAtTxNumWithoutSD(
 	if baselineTxNum > 0 {
 		touchFromTxNum = baselineTxNum + 1
 	}
+	// mode-D residual wrong-root diagnostic (2026-08-19): reset the
+	// per-compute counters so post-compute log reflects THIS compute's
+	// HistorySeek hit/miss/divergence stats only.
+	HistReaderResetCounters()
+
+	// Snapshot the visible-file set at compute start so we can detect
+	// retire/merge flipping it mid-compute. If it changes, log a WARN
+	// at compute exit and dump both snapshots so we can correlate.
+	visibleAtEntry := map[kv.Domain]string{
+		kv.AccountsDomain:   summariseFiles(kv.AccountsDomain),
+		kv.StorageDomain:    summariseFiles(kv.StorageDomain),
+		kv.CodeDomain:       summariseFiles(kv.CodeDomain),
+		kv.CommitmentDomain: summariseFiles(kv.CommitmentDomain),
+	}
+
 	touchesByDomain := make(map[kv.Domain]uint64, 3)
 	// Per-domain FNV hash of the walked (key, txN) tuple sequence. Two
 	// runs of the same compute on the same visible-file set MUST produce
@@ -253,6 +301,29 @@ func RecomputeAtTxNumWithoutSD(
 	if err != nil {
 		return nil, nil, baselineTxNum, nil, fmt.Errorf("EncodeCurrentState: %w", err)
 	}
+	// mode-D residual wrong-root diagnostic (2026-08-19): log the
+	// hit/miss/divergence stats accumulated by HistoryStateReader.Read
+	// during trie.Process above.
+	logger.Info("[dbg-hist-reader] compute post-fold stats",
+		"toTxN", toTxNum,
+		"stateReads", histReaderCompareCount.Load(),
+		"histSeekHits", histReaderHitCount.Load(),
+		"histSeekMisses", histReaderMissCount.Load(),
+		"fallbackDivergences", histReaderDivergeCount.Load(),
+		"missedHistSeek", histReaderMissedHistSeek.Load())
+
+	// Detect retire/merge flipping the visible file set mid-compute.
+	for _, dom := range []kv.Domain{kv.AccountsDomain, kv.StorageDomain, kv.CodeDomain, kv.CommitmentDomain} {
+		exitFiles := summariseFiles(dom)
+		if exitFiles != visibleAtEntry[dom] {
+			logger.Warn("[dbg-visible-set] file set changed mid-compute",
+				"domain", dom.String(),
+				"toTxN", toTxNum,
+				"entry", visibleAtEntry[dom],
+				"exit", exitFiles)
+		}
+	}
+
 	logger.Info("[commitment-recompute-sdless] compute exit",
 		"toTxNum", toTxNum,
 		"baselineTxNum", baselineTxNum,

@@ -164,6 +164,28 @@ func (p *Provider) ensureCommitmentAtBlockCompute(ctx context.Context, tx kv.Tem
 		if branches != nil {
 			branches.Close()
 		}
+		// Dual-root diagnostic: re-run compute with the bounded plain
+		// reader (HistorySeek then GetLatestFromFilesUpToStep, no
+		// unbounded fallback). If bounded root matches the header, the
+		// unbounded fallback IS the wrong-root root cause and the fix
+		// is one-line (swap the reader). If it doesn't match either,
+		// the bug is elsewhere. Binary decision, logged once per
+		// mismatch, adds one extra compute run only on failure.
+		boundedRoot, _, _, boundedBranches, bErr := commitmentdb.RecomputeAtTxNumWithoutSDBounded(ctx, tx, tmpDir, lastTxNum, stepBoundary, stepSize)
+		if boundedBranches != nil {
+			boundedBranches.Close()
+		}
+		if p.logger != nil {
+			p.logger.Warn("[dbg-dual-root] compute mismatch",
+				"block", toBlock,
+				"baselineTxNum", baselineTxNum,
+				"unboundedRoot", fmt.Sprintf("%x", root),
+				"headerRoot", fmt.Sprintf("%x", header.Root),
+				"boundedRoot", fmt.Sprintf("%x", boundedRoot),
+				"boundedErr", bErr,
+				"boundedMatchesHeader", bErr == nil && common.Hash(boundedRoot) == header.Root,
+			)
+		}
 		return nil, fmt.Errorf("recomputed root %x does not match header stateRoot %x at block %d (baselineTxNum=%d)", root, header.Root, toBlock, baselineTxNum)
 	}
 

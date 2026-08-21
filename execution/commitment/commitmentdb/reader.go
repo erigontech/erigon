@@ -1,11 +1,66 @@
 package commitmentdb
 
 import (
+	"bytes"
 	"context"
 	"fmt"
+	"sync/atomic"
 
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
+
+// mode-D residual wrong-root diagnostic (2026-08-19).
+// HistoryStateReader.Read compares its unbounded GetAsOf fallback
+// against a step-bounded read AND verifies HistorySeek by directly
+// walking K's history in (txN, maxTxN] via TraceKey. This isolates
+// three classes of divergence:
+//
+//  1. Missed history entry: HistorySeek returned miss but K DOES
+//     have a post-target history entry — HistorySeek is buggy for
+//     this K. Smoking gun for wrong-root.
+//  2. Unbounded file-set contamination: HistorySeek correctly
+//     returned miss (no post-target history) but unbounded's file
+//     walk reads a value that DIFFERS from the shadow's diff-replayed
+//     value or from the step-bounded file walk — files were poisoned.
+//  3. Benign shadow/file skew: unbounded returns shadow (via
+//     getLatestFromDb gate satisfied), bounded returns file (skipped
+//     shadow). Both are internally correct, they just disagree
+//     because bounded doesn't consult shadow — happens for shallow
+//     unwinds where files.EndTxN aligns with target's step.
+//
+// All three cases dump a sample to log; class 1 fires a WARN-level
+// alarm because it's the class most likely to break the compute.
+var (
+	histReaderCompareCount   atomic.Uint64
+	histReaderHitCount       atomic.Uint64
+	histReaderMissCount      atomic.Uint64
+	histReaderDivergeCount   atomic.Uint64
+	histReaderSampleLogged   atomic.Uint64
+	histReaderMissedHistSeek atomic.Uint64 // class 1 count
+)
+
+// HistReaderResetCounters resets the diagnostic counters. Call before
+// each compute invocation so log output is per-compute.
+func HistReaderResetCounters() {
+	histReaderHitCount.Store(0)
+	histReaderMissCount.Store(0)
+	histReaderDivergeCount.Store(0)
+	histReaderSampleLogged.Store(0)
+	histReaderCompareCount.Store(0)
+	histReaderMissedHistSeek.Store(0)
+}
+
+// HistReaderLogCounters logs the diagnostic counters.
+func HistReaderLogCounters(domain kv.Domain, txN uint64) {
+	log.Info("[dbg-hist-reader] compute-fallback stats",
+		"domain", domain.String(),
+		"txN", txN,
+		"hits", histReaderHitCount.Load(),
+		"misses", histReaderMissCount.Load(),
+		"divergences", histReaderDivergeCount.Load(),
+		"missedHistSeek", histReaderMissedHistSeek.Load())
+}
 
 type StateReader interface {
 	WithHistory() bool
@@ -118,11 +173,154 @@ func (r *HistoryStateReader) CheckDataAvailable(kv.Domain, kv.Step) error {
 }
 
 func (r *HistoryStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
-	enc, _, err = r.roTx.GetAsOf(d, plainKey, r.limitReadAsOfTxNum)
-	if err != nil {
-		return enc, 0, fmt.Errorf("HistoryStateReader(GetAsOf) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, err)
+	histReaderCompareCount.Add(1)
+	histSeek, hOk, hErr := r.roTx.HistorySeek(d, plainKey, r.limitReadAsOfTxNum)
+	if hErr != nil {
+		return nil, 0, fmt.Errorf("HistoryStateReader(HistorySeek) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, hErr)
 	}
-	return enc, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
+	if hOk {
+		histReaderHitCount.Add(1)
+		return histSeek, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
+	}
+	histReaderMissCount.Add(1)
+
+	// HistorySeek miss — GetAsOf falls through to unbounded GetLatest.
+	// Sample 1-in-64 for cheap comparison. Only run the expensive
+	// TraceKey walk when unbounded != bounded (which is rare — in most
+	// mode-D runs it's ~0.1% of misses per the 2026-08-20 repros).
+	sampleN := histReaderMissCount.Load()
+	if sampleN&63 != 0 {
+		unboundedVal, _, uErr := r.roTx.GetAsOf(d, plainKey, r.limitReadAsOfTxNum)
+		if uErr != nil {
+			return nil, 0, fmt.Errorf("HistoryStateReader(GetAsOf) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, uErr)
+		}
+		return unboundedVal, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
+	}
+
+	// Sampled comparison path — cheap: 1 extra file read.
+	maxStep := kv.Step(r.limitReadAsOfTxNum/stepSize) + 1
+	unboundedVal, _, uErr := r.roTx.GetAsOf(d, plainKey, r.limitReadAsOfTxNum)
+	if uErr != nil {
+		return nil, 0, fmt.Errorf("HistoryStateReader(GetAsOf) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, uErr)
+	}
+	boundedVal, bEndStep, bFound, bErr := r.roTx.Debug().GetLatestFromFilesUpToStep(d, plainKey, maxStep)
+	if bErr != nil {
+		return nil, 0, fmt.Errorf("HistoryStateReader(GetLatestFromFilesUpToStep) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, bErr)
+	}
+	if bytes.Equal(unboundedVal, boundedVal) {
+		return unboundedVal, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
+	}
+	histReaderDivergeCount.Add(1)
+
+	// Divergence detected — pay for TraceKey verification + full log.
+	// This branch is rare (~0.01% of reads); overhead is bounded.
+	maxAllowedTxN := uint64(maxStep) * stepSize
+	sawEntryTxN, sawEntry := r.traceKeyForwardHead(d, plainKey, r.limitReadAsOfTxNum, maxAllowedTxN+stepSize*8)
+	histSeekMissedRealEntry := sawEntry && sawEntryTxN >= r.limitReadAsOfTxNum
+	if histSeekMissedRealEntry {
+		histReaderMissedHistSeek.Add(1)
+	}
+	if histReaderSampleLogged.Load() < 5000 {
+		histReaderSampleLogged.Add(1)
+		shadowVal, shadowStep, shadowFound, _ := r.roTx.Debug().GetLatestFromDB(d, plainKey)
+		unboundedFileVal, _, ubStartTxN, ubEndTxN, _ := r.roTx.Debug().GetLatestFromFiles(d, plainKey, 0)
+		ubFromFile := "unknown"
+		if shadowFound && bytes.Equal(unboundedVal, shadowVal) {
+			ubFromFile = "shadow"
+		} else if bytes.Equal(unboundedVal, unboundedFileVal) {
+			ubFromFile = "file"
+		}
+		log.Warn("[dbg-hist-reader] divergence",
+			"class", classifyDivergence(sawEntry, sawEntryTxN, r.limitReadAsOfTxNum, unboundedVal, boundedVal, shadowFound, shadowVal),
+			"domain", d.String(),
+			"key", fmt.Sprintf("%x", plainKey),
+			"txN", r.limitReadAsOfTxNum,
+			"maxStep", maxStep,
+			"unbounded", fmt.Sprintf("%x", unboundedVal),
+			"unboundedFromFile", ubFromFile,
+			"unboundedFileRange", fmt.Sprintf("[%d,%d)", ubStartTxN, ubEndTxN),
+			"bounded", fmt.Sprintf("%x", boundedVal),
+			"boundedFound", bFound,
+			"boundedFileEndStep", bEndStep,
+			"shadow", fmt.Sprintf("%x", shadowVal),
+			"shadowFound", shadowFound,
+			"shadowStep", shadowStep,
+			"histSeekSawEntryAt", sawEntryTxN,
+			"histSeekMissedRealEntry", histSeekMissedRealEntry)
+	}
+	return unboundedVal, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
+}
+
+// getUnboundedWithSource wraps GetAsOf's fallback path (via
+// GetLatestFromDB / GetLatestFromFiles) to return WHICH file the value
+// came from. The result should match plain GetAsOf but the return also
+// carries the file range so we can identify the contamination source.
+func (r *HistoryStateReader) getUnboundedWithSource(d kv.Domain, plainKey []byte) (v []byte, fileStartTxN, fileEndTxN uint64, fromShadow string, err error) {
+	// Try shadow first — matches getLatestFromDb's semantic (subject to
+	// the gate check which we can't cheaply replicate; we approximate by
+	// checking shadow directly and reporting "shadow" if it returned).
+	shadowVal, _, shadowFound, sErr := r.roTx.Debug().GetLatestFromDB(d, plainKey)
+	_ = sErr
+	// Read via files (matches getLatestFromFiles(k, 0) unbounded path).
+	fileVal, fileFound, startTxN, endTxN, fErr := r.roTx.Debug().GetLatestFromFiles(d, plainKey, 0)
+	if fErr != nil {
+		return nil, 0, 0, "", fErr
+	}
+	// Real GetAsOf outcome — this is what compute uses.
+	realVal, _, gErr := r.roTx.GetAsOf(d, plainKey, r.limitReadAsOfTxNum)
+	if gErr != nil {
+		return nil, 0, 0, "", gErr
+	}
+	// Tag the source of the real value.
+	if shadowFound && bytes.Equal(realVal, shadowVal) {
+		return realVal, 0, 0, "shadow", nil
+	}
+	if fileFound && bytes.Equal(realVal, fileVal) {
+		return realVal, startTxN, endTxN, "file", nil
+	}
+	return realVal, 0, 0, "unknown", nil
+}
+
+// traceKeyForwardHead walks K's history in (fromTxN, toTxN] and returns
+// the FIRST entry's txN. If no entries, returns (0, false).
+// Used to verify HistorySeek's not-found result: if TraceKey finds an
+// entry ≥ fromTxN+1 ≤ toTxN, HistorySeek missed it.
+func (r *HistoryStateReader) traceKeyForwardHead(d kv.Domain, plainKey []byte, fromTxN, toTxN uint64) (txN uint64, found bool) {
+	it, err := r.roTx.Debug().TraceKey(d, plainKey, fromTxN+1, toTxN)
+	if err != nil {
+		return 0, false
+	}
+	defer it.Close()
+	if !it.HasNext() {
+		return 0, false
+	}
+	firstTxN, _, terr := it.Next()
+	if terr != nil {
+		return 0, false
+	}
+	return firstTxN, true
+}
+
+// classifyDivergence returns a short class tag for the diagnostic log:
+//   - class-1: HistorySeek missed a real entry (SMOKING GUN)
+//   - class-2a: unbounded=shadow, bounded=file (benign shadow/file skew)
+//   - class-2b: unbounded=file, bounded=file, values differ (files disagree)
+//   - class-3: unbounded=shadow, bounded=file, bounded not found
+//   - class-other: unclassified
+func classifyDivergence(sawEntry bool, sawTxN, limitTxN uint64, unbounded, bounded []byte, shadowFound bool, shadowVal []byte) string {
+	if sawEntry && sawTxN >= limitTxN {
+		return "class-1-histSeek-missed-real-entry"
+	}
+	if shadowFound && bytes.Equal(unbounded, shadowVal) {
+		if len(bounded) == 0 {
+			return "class-3-shadow-vs-empty"
+		}
+		return "class-2a-unbounded=shadow-bounded=file"
+	}
+	if !shadowFound || !bytes.Equal(unbounded, shadowVal) {
+		return "class-2b-files-disagree"
+	}
+	return "class-other"
 }
 
 // AsOf reports the history txNum this reader resolves state at.
@@ -136,6 +334,53 @@ func (r *HistoryStateReader) Clone(tx kv.TemporalTx) StateReader {
 // accumulator), so it's identical to Clone.
 func (r *HistoryStateReader) CloneForWorker(_ context.Context, tx kv.TemporalTx) StateReader {
 	return NewHistoryStateReader(tx, r.limitReadAsOfTxNum)
+}
+
+// HistoryStateReaderBounded mirrors HistoryStateReader but replaces its
+// unbounded GetAsOf fallback with a step-bounded read that excludes
+// files whose endStep is past the target step. Used by Provider.Unwind's
+// dual-root diagnostic: after the current compute produces a wrong
+// root, re-run with this reader and log the resulting root — if it
+// matches the header stateRoot, the unbounded fallback IS the bug.
+type HistoryStateReaderBounded struct {
+	roTx               kv.TemporalTx
+	limitReadAsOfTxNum uint64
+}
+
+func NewHistoryStateReaderBounded(roTx kv.TemporalTx, limitReadAsOfTxNum uint64) *HistoryStateReaderBounded {
+	return &HistoryStateReaderBounded{roTx: roTx, limitReadAsOfTxNum: limitReadAsOfTxNum}
+}
+
+func (r *HistoryStateReaderBounded) WithHistory() bool                           { return true }
+func (r *HistoryStateReaderBounded) CheckDataAvailable(kv.Domain, kv.Step) error { return nil }
+
+func (r *HistoryStateReaderBounded) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
+	histSeek, hOk, hErr := r.roTx.HistorySeek(d, plainKey, r.limitReadAsOfTxNum)
+	if hErr != nil {
+		return nil, 0, fmt.Errorf("HistoryStateReaderBounded(HistorySeek) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, hErr)
+	}
+	if hOk {
+		return histSeek, kv.Step(r.limitReadAsOfTxNum / stepSize), nil
+	}
+	maxStep := kv.Step(r.limitReadAsOfTxNum/stepSize) + 1
+	boundedVal, endStep, found, bErr := r.roTx.Debug().GetLatestFromFilesUpToStep(d, plainKey, maxStep)
+	if bErr != nil {
+		return nil, 0, fmt.Errorf("HistoryStateReaderBounded(GetLatestFromFilesUpToStep) %q: (limitTxNum=%d): %w", d, r.limitReadAsOfTxNum, bErr)
+	}
+	if !found {
+		return nil, 0, nil
+	}
+	return boundedVal, endStep, nil
+}
+
+func (r *HistoryStateReaderBounded) AsOf() uint64 { return r.limitReadAsOfTxNum }
+
+func (r *HistoryStateReaderBounded) Clone(tx kv.TemporalTx) StateReader {
+	return NewHistoryStateReaderBounded(tx, r.limitReadAsOfTxNum)
+}
+
+func (r *HistoryStateReaderBounded) CloneForWorker(_ context.Context, tx kv.TemporalTx) StateReader {
+	return NewHistoryStateReaderBounded(tx, r.limitReadAsOfTxNum)
 }
 
 // FilesOnlyStateReader reads from .kv files only, capped at limitTxNum.
