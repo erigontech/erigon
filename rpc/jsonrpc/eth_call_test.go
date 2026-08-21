@@ -242,6 +242,29 @@ func TestCreateAccessListContractCreationWithoutFromDoesNotPanic(t *testing.T) {
 	require.NotNil(t, res)
 }
 
+// TestCreateAccessListTracesStorage covers a target that touches storage, which is
+// the path where the tracer writes its contract sets. A plain value transfer never
+// reaches it.
+func TestCreateAccessListTracesStorage(t *testing.T) {
+	m, bankAddress, contractAddress, _ := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	data := hexutil.Bytes(contractInvocationData(42))
+
+	for _, from := range []*common.Address{&bankAddress, nil} {
+		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: from,
+			To:   &contractAddress,
+			Data: &data,
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Empty(t, res.Error)
+		require.Len(t, *res.Accesslist, 1)
+		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
+		// store() writes slots 0x00..0x10.
+		require.Len(t, (*res.Accesslist)[0].StorageKeys, 17)
+	}
+}
+
 func TestCreateAccessList(t *testing.T) {
 	m, bankAddress, contractAddress, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)

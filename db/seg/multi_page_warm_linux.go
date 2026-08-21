@@ -55,7 +55,7 @@ func (g *Getter) warmMultiPageLiteral(offset, length uint64) {
 	}
 	for length > 0 {
 		chunk := min(length, uint64(iouring.WarmBufSize))
-		g.warm(int64(offset), int(chunk))
+		g.d.warm(int64(offset), int(chunk))
 		offset += chunk
 		length -= chunk
 	}
