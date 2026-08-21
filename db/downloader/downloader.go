@@ -840,12 +840,13 @@ func (d *Downloader) startSnapshotsDownload(
 	}
 	g.MakeSliceWithCap(&batch.torrents, len(items))
 	g.MakeChanWithLen(&batch.afterTasks, len(items))
-	var batchCtx context.Context
-	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.ctx, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
+	batch.seedSem = semaphore.NewWeighted(int64(runtime.GOMAXPROCS(-1) * 16))
 
 	batch.all.Go(func() {
 		d.logDownload(
-			batchCtx,
+			batch.ctx,
 			items,
 			target,
 			func() log.Lvl {
@@ -865,7 +866,7 @@ func (d *Downloader) startSnapshotsDownload(
 
 	defer func() {
 		if err != nil {
-			batch.abandon()
+			batch.abandon(true)
 		}
 	}()
 	err = batch.addAllItems(ctx, items)

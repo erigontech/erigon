@@ -25,6 +25,7 @@ import (
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,6 +34,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -676,6 +678,116 @@ func TestKeptLocalSnapshotIsSeeded(t *testing.T) {
 	_, registered := d.torrentsByName[name]
 	d.lock.RUnlock()
 	require.True(registered, "a kept snapshot must be registered, or it is never seeded")
+}
+
+// goSeed must never exceed seedSem's capacity.
+func TestGoSeedBoundsConcurrency(t *testing.T) {
+	require := require.New(t)
+	batch := &downloadBatch{}
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	defer batch.seedCancel(nil)
+	const limit = 3
+	batch.seedSem = semaphore.NewWeighted(limit)
+
+	const n = 10
+	var current, peak atomic.Int64
+	release := make(chan struct{})
+	for range n {
+		batch.goSeed(func() {
+			c := current.Add(1)
+			for {
+				p := peak.Load()
+				if c <= p || peak.CompareAndSwap(p, c) {
+					break
+				}
+			}
+			<-release
+			current.Add(-1)
+		})
+	}
+
+	require.Eventually(func() bool { return current.Load() == limit }, time.Second, time.Millisecond,
+		"only %d of %d tasks should be able to run concurrently", limit, n)
+	close(release)
+	batch.all.Wait()
+	require.EqualValues(limit, peak.Load())
+}
+
+// Cancelling seedCtx is genuine abandonment: it must drop queued goSeed tasks instead of running
+// them, independently of batch.ctx.
+func TestGoSeedAbandonsQueuedOnCancel(t *testing.T) {
+	require := require.New(t)
+	batch := &downloadBatch{}
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	const limit = 2
+	batch.seedSem = semaphore.NewWeighted(limit)
+
+	const n = 50
+	var started atomic.Int64
+	for range n {
+		batch.goSeed(func() {
+			started.Add(1)
+			time.Sleep(100 * time.Millisecond)
+		})
+	}
+
+	require.Eventually(func() bool { return started.Load() == limit }, time.Second, time.Millisecond,
+		"the first %d tasks should have started", limit)
+	batch.seedCancel(nil)
+
+	done := make(chan struct{})
+	go func() {
+		batch.all.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancelling seedCtx did not release goSeed tasks still waiting for a slot")
+	}
+	require.EqualValues(limit, started.Load(), "queued tasks must abandon rather than wait for a slot")
+}
+
+// abandon() on the ordinary success path cancels batch.ctx and then waits, without treating the
+// batch as abandoned. Bounded seed work queued behind a full semaphore must still all run, not
+// just whatever already held a slot.
+func TestGoSeedRunsAllOnSuccess(t *testing.T) {
+	require := require.New(t)
+	batch := &downloadBatch{}
+	batch.ctx, batch.cancel = context.WithCancelCause(context.Background())
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	defer batch.seedCancel(nil)
+	const limit = 2
+	batch.seedSem = semaphore.NewWeighted(limit)
+
+	const n = 50
+	var started, ran atomic.Int64
+	release := make(chan struct{})
+	for range n {
+		batch.goSeed(func() {
+			started.Add(1)
+			<-release
+			ran.Add(1)
+		})
+	}
+
+	require.Eventually(func() bool { return started.Load() == limit }, time.Second, time.Millisecond,
+		"only %d of %d tasks should be able to run concurrently", limit, n)
+
+	batch.cancel(nil)
+	close(release)
+
+	done := make(chan struct{})
+	go func() {
+		batch.all.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("batch.all.Wait() did not return once the release gate opened")
+	}
+	require.EqualValues(n, ran.Load(), "all queued seed work must run when the batch succeeds")
 }
 
 // The snapshot stage writes preverified.toml mid-run, so the rule must be re-read, not cached from

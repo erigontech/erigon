@@ -9,11 +9,13 @@ import (
 
 	"github.com/anacrolix/sync"
 	"github.com/anacrolix/torrent"
+	"golang.org/x/sync/semaphore"
 )
 
 type downloadBatch struct {
 	d      *Downloader
 	cancel context.CancelCauseFunc
+	ctx    context.Context
 	// Tasks that must finish before abandoning the batch.
 	all      sync.WaitGroup
 	torrents []*torrent.Torrent
@@ -22,6 +24,11 @@ type downloadBatch struct {
 	finishedMetadataTasks atomic.Bool
 	// These must be run even if the batch is abandoned.
 	afterTasks chan func()
+	// Caps concurrent seed hashing.
+	seedSem *semaphore.Weighted
+	// Cancelled only on genuine abandonment, unlike ctx which also ends on ordinary completion.
+	seedCancel context.CancelCauseFunc
+	seedCtx    context.Context
 }
 
 // Waits for all the fetches to complete then fires off the thread-safe Torrent methods to configure
@@ -44,7 +51,8 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 		return err
 	}
 	if keptLocal {
-		me.all.Go(func() { me.d.seedKeptSnapshot(me.d.ctx, item.Name) })
+		// Once queued, seeding must survive the batch: use d.ctx, not batch.ctx or seedCtx.
+		me.goSeed(func() { me.d.seedKeptSnapshot(me.d.ctx, item.Name) })
 	}
 	if !snapshotTorrent.Ok {
 		return nil
@@ -60,6 +68,20 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 		})
 	})
 	return nil
+}
+
+// TryAcquire first: abandon() can cancel seedCtx while this goroutine is still on its way to its
+// own Acquire call, so a bare Acquire could reject already-runnable work.
+func (me *downloadBatch) goSeed(f func()) {
+	me.all.Go(func() {
+		if !me.seedSem.TryAcquire(1) {
+			if err := me.seedSem.Acquire(me.seedCtx, 1); err != nil {
+				return
+			}
+		}
+		defer me.seedSem.Release(1)
+		f()
+	})
 }
 
 func (me *downloadBatch) addAllItems(ctx context.Context, items []preverifiedSnapshot) error {
@@ -88,14 +110,17 @@ func (me *downloadBatch) doMetainfoTask(task func() func()) {
 	}
 }
 
-func (me *downloadBatch) abandon() {
+func (me *downloadBatch) abandon(abandoned bool) {
 	me.cancel(errors.New("download batch abandoned"))
+	if abandoned {
+		me.seedCancel(errors.New("download batch abandoned"))
+	}
 	me.all.Wait()
 	me.d.decDownloadRequests()
 }
 
-func (me *downloadBatch) wait(ctx context.Context) error {
-	defer me.abandon()
+func (me *downloadBatch) wait(ctx context.Context) (err error) {
+	defer func() { me.abandon(err != nil) }()
 	for _, t := range me.torrents {
 		select {
 		case <-t.Complete().On():
