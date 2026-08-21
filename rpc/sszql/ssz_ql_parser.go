@@ -27,7 +27,6 @@ func parseQueries(req SSZQLRequest, res *SSZQLResponse) []SSZQuery {
 	return req.Queries
 }
 
-
 func parseAliases(aliases []Alias, res *SSZQLResponse) map[string]string {
 	m := make(map[string]string)
 

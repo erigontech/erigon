@@ -9,37 +9,35 @@ import (
 
 const sszQLContentType = "application/json"
 
-func SSZQueryHandler() http.Handler {
-	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
-		handleSSZQuery(w, r)
-	})
+const (
+	queryPattern              = "POST /eth/{version}/execution/{block_id}/query"
+	queryTrailingSlashPattern = queryPattern + "/{$}"
+)
+
+// RegisterHandlers routes the SSZ-QL query endpoint on mux. A request matching the
+// pattern with no "v<digits>" version goes to fallback rather than 404: the JSON-RPC
+// server answers on any path, so near-miss paths must keep reaching it.
+func RegisterHandlers(mux *http.ServeMux, fallback http.Handler) {
+	h := &queryHandler{fallback: fallback}
+	mux.Handle(queryPattern, h)
+	mux.Handle(queryTrailingSlashPattern, h)
 }
 
-func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
+type queryHandler struct {
+	fallback http.Handler
+}
 
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
+func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
+	version, ok := parseVersion(r.PathValue("version"))
+	if !ok {
+		h.fallback.ServeHTTP(w, r)
 		return
 	}
 
-	path := strings.Trim(r.URL.Path, "/")
-	parts := strings.Split(path, "/")
-
-	if len(parts) != 5 || parts[0] != "eth" || !strings.HasPrefix(parts[1], "v") || parts[2] != "execution" || parts[4] != "query" {
-		http.NotFound(w, nil)
-		return
-	}
-
-	version, err := strconv.Atoi(strings.TrimPrefix(parts[1], "v"))
-	if err != nil {
-		http.NotFound(w, nil)
-		return
-	}
-
-	block_id := parts[3]
+	block_id := r.PathValue("block_id")
 
 	if !isValidBlockAndVersion(block_id, version) {
-		http.NotFound(w, nil)
+		http.NotFound(w, r)
 		return
 	}
 
@@ -56,7 +54,17 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 	res := parseQuery(req, version, block_id)
 
 	writeQueryResponse(w, res)
+}
 
+func parseVersion(segment string) (int, bool) {
+	if !strings.HasPrefix(segment, "v") {
+		return 0, false
+	}
+	version, err := strconv.Atoi(strings.TrimPrefix(segment, "v"))
+	if err != nil {
+		return 0, false
+	}
+	return version, true
 }
 
 // TODO: Implement valid block_id checks with its version

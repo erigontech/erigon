@@ -8,49 +8,80 @@ import (
 	"testing"
 )
 
+const validQueryBody = `{"queries":[{"anchor":"execution_block","path":".transactions[0].to"}]}`
+
+const fallbackStatus = http.StatusTeapot
+
 func doRequest(t *testing.T, method, target, body string) *httptest.ResponseRecorder {
 	t.Helper()
-	req := httptest.NewRequest(method, target, strings.NewReader(body))
+	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		w.WriteHeader(fallbackStatus)
+	})
+	mux := http.NewServeMux()
+	mux.Handle("/", fallback)
+	RegisterHandlers(mux, fallback)
+
+	req := httptest.NewRequestWithContext(t.Context(), method, target, strings.NewReader(body))
 	rec := httptest.NewRecorder()
-	SSZQueryHandler().ServeHTTP(rec, req)
+	mux.ServeHTTP(rec, req)
 	return rec
 }
 
-const validQueryBody = `{"queries":[{"anchor":"execution_block","path":".transactions[0].to"}]}`
-
-func TestRouteMethodNotAllowed(t *testing.T) {
-	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch} {
-		rec := doRequest(t, method, "/eth/v1/execution/123/query", validQueryBody)
-		if rec.Code != http.StatusMethodNotAllowed {
-			t.Errorf("%s: got status %d, want %d", method, rec.Code, http.StatusMethodNotAllowed)
-		}
+func TestRouteMatchesQueryEndpoint(t *testing.T) {
+	for _, path := range []string{
+		"/eth/v1/execution/123/query",
+		"/eth/v6/execution/head/query",
+		"/eth/v1/execution/123/query/",
+	} {
+		t.Run(path, func(t *testing.T) {
+			rec := doRequest(t, http.MethodPost, path, validQueryBody)
+			if rec.Code != http.StatusOK {
+				t.Errorf("got status %d, want %d", rec.Code, http.StatusOK)
+			}
+		})
 	}
 }
 
-func TestRoutePathMatching(t *testing.T) {
+func TestRouteFallsThroughToJSONRPC(t *testing.T) {
 	tests := []struct {
 		name   string
+		method string
 		path   string
-		status int
 	}{
-		{"valid v1", "/eth/v1/execution/123/query", http.StatusOK},
-		{"valid v6", "/eth/v6/execution/head/query", http.StatusOK},
-		{"trailing slash tolerated", "/eth/v1/execution/123/query/", http.StatusOK},
-		{"too few segments", "/eth/v1/execution/query", http.StatusNotFound},
-		{"too many segments", "/eth/v1/execution/123/extra/query", http.StatusNotFound},
-		{"wrong root", "/beacon/v1/execution/123/query", http.StatusNotFound},
-		{"missing v prefix", "/eth/1/execution/123/query", http.StatusNotFound},
-		{"wrong domain", "/eth/v1/consensus/123/query", http.StatusNotFound},
-		{"wrong suffix", "/eth/v1/execution/123/prove", http.StatusNotFound},
-		{"non-numeric version", "/eth/vx/execution/123/query", http.StatusNotFound},
-		{"version too low", "/eth/v0/execution/123/query", http.StatusNotFound},
-		{"version too high", "/eth/v7/execution/123/query", http.StatusNotFound},
+		{"root", http.MethodPost, "/"},
+		{"two segments", http.MethodPost, "/eth/mainnet/query"},
+		{"seven segments", http.MethodPost, "/eth/a/b/c/d/e/query"},
+		{"too few segments", http.MethodPost, "/eth/v1/execution/query"},
+		{"too many segments", http.MethodPost, "/eth/v1/execution/123/extra/query"},
+		{"wrong root", http.MethodPost, "/beacon/v1/execution/123/query"},
+		{"wrong domain", http.MethodPost, "/eth/v1/consensus/123/query"},
+		{"wrong suffix", http.MethodPost, "/eth/v1/execution/123/prove"},
+		{"missing v prefix", http.MethodPost, "/eth/1/execution/123/query"},
+		{"non-numeric version", http.MethodPost, "/eth/vx/execution/123/query"},
+		{"health check on query path", http.MethodGet, "/eth/v1/execution/123/query"},
+		{"health check on near-miss path", http.MethodGet, "/eth/foo/query"},
+		{"put on query path", http.MethodPut, "/eth/v1/execution/123/query"},
+		{"delete on query path", http.MethodDelete, "/eth/v1/execution/123/query"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := doRequest(t, http.MethodPost, tt.path, validQueryBody)
-			if rec.Code != tt.status {
-				t.Errorf("path %q: got status %d, want %d", tt.path, rec.Code, tt.status)
+			rec := doRequest(t, tt.method, tt.path, validQueryBody)
+			if rec.Code != fallbackStatus {
+				t.Errorf("%s %q: got status %d, want fallback to JSON-RPC (%d)", tt.method, tt.path, rec.Code, fallbackStatus)
+			}
+		})
+	}
+}
+
+func TestRouteUnsupportedVersion(t *testing.T) {
+	for _, path := range []string{
+		"/eth/v0/execution/123/query",
+		"/eth/v7/execution/123/query",
+	} {
+		t.Run(path, func(t *testing.T) {
+			rec := doRequest(t, http.MethodPost, path, validQueryBody)
+			if rec.Code != http.StatusNotFound {
+				t.Errorf("got status %d, want %d", rec.Code, http.StatusNotFound)
 			}
 		})
 	}
