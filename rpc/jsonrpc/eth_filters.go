@@ -139,9 +139,6 @@ func (api *APIImpl) GetFilterLogs(ctx context.Context, index string) (types.RPCL
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
-	if ft, ok := api.filters.TouchSubscription(rpchelper.SubscriptionID(cutIndex)); !ok || ft != rpchelper.FilterTypeLogs {
-		return nil, rpc.ErrFilterNotFound
-	}
 	criteria, limits, ok := api.filters.LogFilterCriteria(rpchelper.LogsSubID(cutIndex))
 	if !ok {
 		return nil, rpc.ErrFilterNotFound
@@ -254,14 +251,14 @@ func (api *APIImpl) Logs(ctx context.Context, crit filters.FilterCriteria) (*rpc
 		return &rpc.Subscription{}, rpc.ErrNotificationsUnsupported
 	}
 	return subscribeRPC(ctx,
-		func() (<-chan *types.Log, func(), error) {
+		func() (<-chan *types.RPCLog, func(), error) {
 			logs, id, err := api.filters.SubscribeLogs(api.SubscribeLogsChannelSize, crit, rpchelper.ProtocolWS)
 			if err != nil {
 				return nil, nil, err
 			}
 			return logs, func() { api.filters.UnsubscribeLogs(id) }, nil
 		},
-		func(emit func(payload any), h *types.Log) {
+		func(emit func(payload any), h *types.RPCLog) {
 			if h != nil {
 				emit(h)
 			}

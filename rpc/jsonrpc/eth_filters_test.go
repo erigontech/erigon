@@ -17,7 +17,7 @@
 package jsonrpc
 
 import (
-	"encoding/json"
+	"errors"
 	"math/big"
 	"math/rand"
 	"strings"
@@ -112,6 +112,9 @@ func TestNewFilters(t *testing.T) {
 }
 
 func TestGetFilterLogsReturnsHistoricalLogs(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	mining := txpoolproto.NewMiningClient(conn)
@@ -130,18 +133,17 @@ func TestGetFilterLogsReturnsHistoricalLogs(t *testing.T) {
 		_, _ = api.UninstallFilter(ctx, filterID)
 	})
 
-	expectedJSON, err := json.Marshal(expected)
-	require.NoError(t, err)
 	for range 2 {
 		actual, err := api.GetFilterLogs(ctx, filterID)
 		require.NoError(t, err)
-		actualJSON, err := json.Marshal(actual)
-		require.NoError(t, err)
-		require.JSONEq(t, string(expectedJSON), string(actualJSON))
+		require.Equal(t, expected, actual)
 	}
 }
 
 func TestGetFilterLogsDoesNotConsumeFilterChanges(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
 	mining := txpoolproto.NewMiningClient(conn)
@@ -156,7 +158,10 @@ func TestGetFilterLogsDoesNotConsumeFilterChanges(t *testing.T) {
 		_, _ = api.UninstallFilter(ctx, filterID)
 	})
 
-	queued := &types.Log{Address: common.Address{1}}
+	queued := &types.RPCLog{
+		Log:            types.Log{Address: common.Address{1}},
+		BlockTimestamp: 123,
+	}
 	ff.AddLogs(rpchelper.LogsSubID(strings.TrimPrefix(filterID, "0x")), queued)
 
 	_, err = api.GetFilterLogs(ctx, filterID)
@@ -164,6 +169,34 @@ func TestGetFilterLogsDoesNotConsumeFilterChanges(t *testing.T) {
 	changes, err := api.GetFilterChanges(ctx, filterID)
 	require.NoError(t, err)
 	require.Equal(t, []any{queued}, changes)
+}
+
+func TestGetFilterLogsReturnsInvalidParamsWhenStoredRangeExceedsLimit(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	base := NewBaseApi(ff, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{
+		Dirs:            m.Dirs,
+		BlockRangeLimit: 1,
+	})
+	api := newEthApiForTest(base, m.DB, nil, nil)
+	filterID, err := api.NewFilter(ctx, filters.FilterCriteria{FromBlock: big.NewInt(0)})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = api.UninstallFilter(ctx, filterID)
+	})
+
+	_, err = api.GetFilterLogs(ctx, filterID)
+	require.Error(t, err)
+	var rpcErr rpc.Error
+	require.ErrorAs(t, err, &rpcErr)
+	require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+	require.Equal(t, errExceedBlockRange+": 1", rpcErr.Error())
 }
 
 func TestGetFilterLogsUsesStoredFilterCriteriaLimits(t *testing.T) {
@@ -224,6 +257,39 @@ func TestGetFilterLogsUsesStoredFilterCriteriaLimits(t *testing.T) {
 			require.NoError(t, err)
 		})
 	}
+}
+
+func TestGetFilterLogsDoesNotKeepFilterAlive(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	ctx, conn := rpcdaemontest.CreateTestGrpcConn(t, m)
+	mining := txpoolproto.NewMiningClient(conn)
+	config := rpchelper.DefaultFiltersConfig
+	config.RpcSubscriptionFiltersTimeout = 100 * time.Millisecond
+	ff := rpchelper.New(ctx, config, nil, nil, mining, func() {}, m.Log, nil)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	api := newEthApiForTest(newBaseApiWithFiltersForTest(ff, stateCache, m), m.DB, nil, nil)
+	filterID, err := api.NewFilter(ctx, filters.FilterCriteria{
+		FromBlock: big.NewInt(10),
+		ToBlock:   big.NewInt(10),
+	})
+	require.NoError(t, err)
+	t.Cleanup(func() {
+		_, _ = api.UninstallFilter(ctx, filterID)
+	})
+
+	deadline := time.Now().Add(5 * time.Second)
+	for time.Now().Before(deadline) {
+		_, err = api.GetFilterLogs(ctx, filterID)
+		if errors.Is(err, rpc.ErrFilterNotFound) {
+			return
+		}
+		require.NoError(t, err)
+		time.Sleep(25 * time.Millisecond)
+	}
+	t.Fatal("eth_getFilterLogs kept the filter alive")
 }
 
 func TestLogsSubscribeAndUnsubscribe_WithoutConcurrentMapIssue(t *testing.T) {

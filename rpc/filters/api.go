@@ -24,6 +24,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
@@ -37,6 +38,28 @@ import (
 type FilterCriteria bind.FilterQuery
 
 const MaxTopicPositions = 4
+
+func (criteria FilterCriteria) Clone() FilterCriteria {
+	cloned := criteria
+	if criteria.BlockHash != nil {
+		blockHash := *criteria.BlockHash
+		cloned.BlockHash = &blockHash
+	}
+	if criteria.FromBlock != nil {
+		cloned.FromBlock = new(big.Int).Set(criteria.FromBlock)
+	}
+	if criteria.ToBlock != nil {
+		cloned.ToBlock = new(big.Int).Set(criteria.ToBlock)
+	}
+	cloned.Addresses = slices.Clone(criteria.Addresses)
+	if criteria.Topics != nil {
+		cloned.Topics = make([][]common.Hash, len(criteria.Topics))
+		for i, topics := range criteria.Topics {
+			cloned.Topics[i] = slices.Clone(topics)
+		}
+	}
+	return cloned
+}
 
 type LogFilterOptions struct {
 	LogCount          uint64 `json:"logCount,omitempty"`

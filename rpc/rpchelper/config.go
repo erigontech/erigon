@@ -34,7 +34,7 @@ type FiltersConfig struct {
 	RpcSubscriptionFiltersMaxHeaders   int           // Maximum number of block headers to store per subscription. Default: 10000
 	RpcSubscriptionFiltersMaxTxs       int           // Maximum number of transactions to store per subscription. Default: 10000
 	RpcSubscriptionFiltersMaxAddresses int           // Maximum number of addresses accepted per log subscription. Default: 0 (no limit)
-	RpcSubscriptionFiltersMaxTopics    int           // Maximum topic alternatives accepted per log subscription. Default: 0 (no limit)
+	RpcSubscriptionFiltersMaxTopics    int           // Maximum topic alternatives accepted across all positions per log subscription. Default: 0 (no limit)
 	RpcSubscriptionFiltersTimeout      time.Duration // Timeout before idle filters are evicted. Default: 5m; 0 disables eviction
 }
 

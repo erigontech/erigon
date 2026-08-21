@@ -293,10 +293,10 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `100`
 * `--rpc.blockrange.limit value`: Sets the maximum block range for `eth_getLogs` and similar range queries.
   * Default: `1000`
-  * Applies to: `eth_getLogs`, `erigon_getLogs`
+  * Applies to: `eth_getLogs`, `eth_getFilterLogs`, `erigon_getLogs`
 * `--rpc.logs.maxresults value`: Sets the maximum number of log results returned per query.
   * Default: `20000`
-  * Applies to: `eth_getLogs`, `erigon_getLogs`, `erigon_getLatestLogs`
+  * Applies to: `eth_getLogs`, `eth_getFilterLogs`, `erigon_getLogs`, `erigon_getLatestLogs`
   * Set to `0` to remove the limit entirely (use with caution on large ranges).
   * Works in tandem with `--rpc.blockrange.limit`: both constraints apply independently — a query can be blocked by either limit.
 * `--rpc.logs.querylimit value`: Maximum number of alternative addresses or topics allowed per search position in the `eth_getLogs` filter criteria.
@@ -329,9 +329,9 @@ Flags for configuring various RPC servers and their behavior. See [Interacting w
   * Default: `10000`
 * `--rpc.subscription.filters.maxtxs value`: Maximum transactions to store per subscription.
   * Default: `10000`
-* `--rpc.subscription.filters.maxaddresses value`: Maximum addresses per subscription to filter logs by.
+* `--rpc.subscription.filters.maxaddresses value`: Maximum addresses accepted per log subscription.
   * Default: `0`
-* `--rpc.subscription.filters.maxtopics value`: Maximum topics per subscription to filter logs by.
+* `--rpc.subscription.filters.maxtopics value`: Maximum topic alternatives accepted across all positions per log subscription.
   * Default: `0`
 * `--rpc.subscription.filters.timeout value`: Timeout before idle subscription filters are evicted.
   * Default: `5m0s`

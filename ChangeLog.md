@@ -2,11 +2,12 @@
 
 ### Breaking Changes
 
-- rpc: `eth_getFilterLogs` now returns all logs matching the stored criteria without consuming the queue read by `eth_getFilterChanges`. It applies the same `rpc.blockrange.limit` and `rpc.logs.maxresults` checks as `eth_getLogs`, while address and topic limits remain those validated when the filter was created. Clients may now receive `-32602` for queries that exceed the historical query limits (#23296) — by @taratorio
+- rpc: `eth_getFilterLogs` now runs a historical query from the criteria stored by `eth_newFilter`; it neither drains the live-log queue read by `eth_getFilterChanges` nor refreshes the filter expiry deadline. Historical queries enforce `rpc.blockrange.limit` and `rpc.logs.maxresults`; an open-ended filter can start returning `-32602` as the chain head advances, and queries may surface initialization, pruned-history, or not-yet-executed errors. This can be a breaking change (#23296) — by @taratorio
 - rpc: `eth_newFilter` and `eth_subscribe("logs")` now reject criteria exceeding the per-filter `rpc.subscription.filters.maxaddresses` or `rpc.subscription.filters.maxtopics` limit with `-32602` instead of silently capping them. This can be a breaking change for nodes that configure either limit above `0`; both limits default to `0` (unlimited) (#23296) — by @taratorio
 
 ### Changed
 
+- rpc: live logs returned by `eth_getFilterChanges` and `eth_subscribe("logs")` now include `blockTimestamp`, matching `eth_getLogs` and `eth_getFilterLogs` (#23296) — by @taratorio
 - node: RPC HTTP gzip compression moved from the cgo-based `go-libdeflate` to the pure-Go `klauspost/compress`, and fully buffered (one-shot) responses now compress at `BestSpeed` (level 1) instead of level 6; streaming responses were already at `BestSpeed`. Large one-shot responses gain ~10-14% latency and roughly half the compression CPU, in exchange for slightly larger compressed bodies (+2-8% wire size — relevant for operators who pay for egress). Also removes the libdeflate compressor pool and its `libdeflate_pool_*` metrics, eliminating the cgo leak class fixed in #22700 (#22882) — by @lupin012
 
 ---
