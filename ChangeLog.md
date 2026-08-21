@@ -1,4 +1,4 @@
-# Erigon v3.6.0 — Upstream Underbelly — TBD
+# Erigon v3.6.0 — Upstream Underbelly — 2026-08-24
 
 Erigon 3.6.0 focuses on bounded disk growth and faster state access. It is an in-place upgrade from 3.5.x: existing
 datadirs need no re-sync, and old and new commitment snapshot files can coexist while normal merges convert them.
