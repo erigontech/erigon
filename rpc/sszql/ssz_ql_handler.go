@@ -9,32 +9,43 @@ import (
 
 const sszQLContentType = "application/json"
 
-const (
-	queryPattern              = "POST /eth/{version}/execution/{block_id}/query"
-	queryTrailingSlashPattern = queryPattern + "/{$}"
-)
-
-func RegisterHandlers(mux *http.ServeMux, fallback http.Handler) {
-	h := &queryHandler{fallback: fallback}
-	mux.Handle(queryPattern, h)
-	mux.Handle(queryTrailingSlashPattern, h)
+func SSZQueryHandler() http.Handler {
+	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		handleSSZQuery(w, r)
+	})
 }
 
-type queryHandler struct {
-	fallback http.Handler
-}
+func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 
-func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
-	version, ok := parseVersion(r.PathValue("version"))
-	if !ok {
-		h.fallback.ServeHTTP(w, r)
+	if r.Method != http.MethodPost {
+		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
 		return
 	}
 
-	block_id := r.PathValue("block_id")
+	path := strings.Trim(r.URL.Path, "/")
+	parts := strings.Split(path, "/")
+
+	if len(parts) != 5 || parts[0] != "eth" || !strings.HasPrefix(parts[1], "v") || parts[2] != "execution" || parts[4] != "query" {
+		http.NotFound(w, nil)
+		return
+	}
+
+	v := strings.TrimPrefix(parts[1], "v")
+	if len(v) > 1 && v[0] == '0' {
+		http.NotFound(w, nil)
+		return
+	}
+	parsed, err := strconv.ParseUint(v, 10, 8)
+	if err != nil {
+		http.NotFound(w, nil)
+		return
+	}
+	version := uint(parsed)
+
+	block_id := parts[3]
 
 	if !isValidBlockAndVersion(block_id, version) {
-		http.NotFound(w, r)
+		http.NotFound(w, nil)
 		return
 	}
 
@@ -51,27 +62,10 @@ func (h *queryHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	res := parseQuery(req, version, block_id)
 
 	writeQueryResponse(w, res)
+
 }
 
-func parseVersion(segment string) (int, bool) {
-	if !strings.HasPrefix(segment, "v") {
-		return 0, false
-	}
-
-	s := strings.TrimPrefix(segment, "v")
-	if len(s) > 1 && s[0] == '0' {
-		return 0, false
-	}
-	version, err := strconv.ParseUint(s, 10, 8)
-
-	if err != nil {
-		return 0, false
-	}
-	return int(version), true
-}
-
-// TODO: Implement valid block_id checks with its version
-func isValidBlockAndVersion(block_id string, version int) bool {
+func isValidBlockAndVersion(block_id string, version uint) bool {
 	if version < 1 || version > 6 {
 		return false
 	}

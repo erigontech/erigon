@@ -2,7 +2,7 @@ package sszql
 
 import "strconv"
 
-func parseQuery(request SSZQLRequest, version int, block_id string) SSZQLResponse {
+func parseQuery(request SSZQLRequest, version uint, block_id string) SSZQLResponse {
 	response := SSZQLResponse{
 		Paths:    make([]Path, 0),
 		Gindices: make([]Gindex, 0),
