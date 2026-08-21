@@ -10,20 +10,31 @@ import (
 
 const validQueryBody = `{"queries":[{"anchor":"execution_block","path":".transactions[0].to"}]}`
 
+// Stands in for the JSON-RPC server, which answers on any path.
 const fallbackStatus = http.StatusTeapot
 
-func doRequest(t *testing.T, method, target, body string) *httptest.ResponseRecorder {
-	t.Helper()
+// queryPattern mirrors the route registered in cmd/rpcdaemon/cli/config.go.
+const (
+	queryPattern              = "POST /eth/{version}/execution/{block_id}/query"
+	queryTrailingSlashPattern = queryPattern + "/{$}"
+)
+
+func newTestMux() *http.ServeMux {
 	fallback := http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		w.WriteHeader(fallbackStatus)
 	})
 	mux := http.NewServeMux()
 	mux.Handle("/", fallback)
-	RegisterHandlers(mux, fallback)
+	mux.Handle(queryPattern, SSZQueryHandler())
+	mux.Handle(queryTrailingSlashPattern, SSZQueryHandler())
+	return mux
+}
 
+func doRequest(t *testing.T, method, target, body string) *httptest.ResponseRecorder {
+	t.Helper()
 	req := httptest.NewRequestWithContext(t.Context(), method, target, strings.NewReader(body))
 	rec := httptest.NewRecorder()
-	mux.ServeHTTP(rec, req)
+	newTestMux().ServeHTTP(rec, req)
 	return rec
 }
 
@@ -44,39 +55,51 @@ func TestRouteMatchesQueryEndpoint(t *testing.T) {
 
 func TestRouteFallsThroughToJSONRPC(t *testing.T) {
 	tests := []struct {
-		name   string
-		method string
-		path   string
+		name string
+		path string
 	}{
-		{"root", http.MethodPost, "/"},
-		{"two segments", http.MethodPost, "/eth/mainnet/query"},
-		{"seven segments", http.MethodPost, "/eth/a/b/c/d/e/query"},
-		{"too few segments", http.MethodPost, "/eth/v1/execution/query"},
-		{"too many segments", http.MethodPost, "/eth/v1/execution/123/extra/query"},
-		{"wrong root", http.MethodPost, "/beacon/v1/execution/123/query"},
-		{"wrong domain", http.MethodPost, "/eth/v1/consensus/123/query"},
-		{"wrong suffix", http.MethodPost, "/eth/v1/execution/123/prove"},
-		{"missing v prefix", http.MethodPost, "/eth/1/execution/123/query"},
-		{"non-numeric version", http.MethodPost, "/eth/vx/execution/123/query"},
-		{"health check on query path", http.MethodGet, "/eth/v1/execution/123/query"},
-		{"health check on near-miss path", http.MethodGet, "/eth/foo/query"},
-		{"put on query path", http.MethodPut, "/eth/v1/execution/123/query"},
-		{"delete on query path", http.MethodDelete, "/eth/v1/execution/123/query"},
+		{"root", "/"},
+		{"two segments", "/eth/mainnet/query"},
+		{"seven segments", "/eth/a/b/c/d/e/query"},
+		{"too few segments", "/eth/v1/execution/query"},
+		{"too many segments", "/eth/v1/execution/123/extra/query"},
+		{"wrong root", "/beacon/v1/execution/123/query"},
+		{"wrong domain", "/eth/v1/consensus/123/query"},
+		{"wrong suffix", "/eth/v1/execution/123/prove"},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			rec := doRequest(t, tt.method, tt.path, validQueryBody)
+			rec := doRequest(t, http.MethodPost, tt.path, validQueryBody)
 			if rec.Code != fallbackStatus {
-				t.Errorf("%s %q: got status %d, want fallback to JSON-RPC (%d)", tt.method, tt.path, rec.Code, fallbackStatus)
+				t.Errorf("path %q: got status %d, want fallback to JSON-RPC (%d)", tt.path, rec.Code, fallbackStatus)
 			}
 		})
 	}
 }
 
-func TestRouteUnsupportedVersion(t *testing.T) {
+// Non-POST requests must reach the JSON-RPC server, which answers on any path.
+// That is what keeps the GET health-check shortcut working on this path.
+func TestRouteNonPostFallsThrough(t *testing.T) {
+	for _, method := range []string{http.MethodGet, http.MethodPut, http.MethodDelete, http.MethodPatch} {
+		rec := doRequest(t, method, "/eth/v1/execution/123/query", validQueryBody)
+		if rec.Code != fallbackStatus {
+			t.Errorf("%s: got status %d, want fallback to JSON-RPC (%d)", method, rec.Code, fallbackStatus)
+		}
+	}
+}
+
+// Version segments strconv.Atoi would have accepted as aliases of a valid version,
+// plus the out-of-range ones.
+func TestRouteRejectsBogusVersion(t *testing.T) {
 	for _, path := range []string{
 		"/eth/v0/execution/123/query",
 		"/eth/v7/execution/123/query",
+		"/eth/vx/execution/123/query",
+		"/eth/v+1/execution/123/query",
+		"/eth/v-1/execution/123/query",
+		"/eth/v01/execution/123/query",
+		"/eth/v0001/execution/123/query",
+		"/eth/v256/execution/123/query",
 	} {
 		t.Run(path, func(t *testing.T) {
 			rec := doRequest(t, http.MethodPost, path, validQueryBody)

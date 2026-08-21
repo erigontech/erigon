@@ -17,20 +17,13 @@ func SSZQueryHandler() http.Handler {
 
 func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 
-	if r.Method != http.MethodPost {
-		http.Error(w, "method not allowed", http.StatusMethodNotAllowed)
-		return
-	}
-
-	path := strings.Trim(r.URL.Path, "/")
-	parts := strings.Split(path, "/")
-
-	if len(parts) != 5 || parts[0] != "eth" || !strings.HasPrefix(parts[1], "v") || parts[2] != "execution" || parts[4] != "query" {
+	segment := r.PathValue("version")
+	if !strings.HasPrefix(segment, "v") {
 		http.NotFound(w, nil)
 		return
 	}
 
-	v := strings.TrimPrefix(parts[1], "v")
+	v := strings.TrimPrefix(segment, "v")
 	if len(v) > 1 && v[0] == '0' {
 		http.NotFound(w, nil)
 		return
@@ -42,7 +35,7 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	version := uint(parsed)
 
-	block_id := parts[3]
+	block_id := r.PathValue("block_id")
 
 	if !isValidBlockAndVersion(block_id, version) {
 		http.NotFound(w, nil)
