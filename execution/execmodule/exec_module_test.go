@@ -1585,7 +1585,9 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	require.Len(t, stored, 2)
 	for i, pb := range stored {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "stored block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "stored block %d", i+1)
 	}
 	err = m.DB.Update(ctx, func(tx kv.RwTx) error {
 		return tx.ForEach(kv.BlockAccessList, nil, func(k, _ []byte) error {
@@ -1605,14 +1607,18 @@ func TestGetPayloadBodiesRegenerateBlockAccessLists(t *testing.T) {
 	require.Len(t, byHash, 2)
 	for i, pb := range byHash {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "byHash block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "byHash block %d", i+1)
 	}
 	byRange, err := m.ExecModule.GetPayloadBodiesByRange(ctx, 1, 2)
 	require.NoError(t, err)
 	require.Len(t, byRange, 2)
 	for i, pb := range byRange {
 		require.NotNil(t, pb)
-		require.Equal(t, chainPack.Blocks[i].BlockAccessList(), pb.BlockAccessList, "byRange block %d", i+1)
+		expected, err := types.EncodeBlockAccessListBytes(chainPack.Blocks[i].BlockAccessList())
+		require.NoError(t, err)
+		require.Equal(t, expected, pb.BlockAccessList, "byRange block %d", i+1)
 	}
 }
 
@@ -2365,6 +2371,46 @@ func TestEIP8246NoBurnLogWhenCoinbaseSelfDestructs(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestInsertBlocksRejectsInvalidBlockAccessList(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	block := chainPack.Blocks[0]
+	header := block.Header()
+	invalidBAL := types.BlockAccessList{
+		{Address: accounts.InternAddress(common.Address{2})},
+		{Address: accounts.InternAddress(common.Address{1})},
+	}
+	encoded, err := types.EncodeBlockAccessListBytes(invalidBAL)
+	require.NoError(t, err)
+	balHash := crypto.Keccak256Hash(encoded)
+	header.BlockAccessListHash = &balHash
+	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(invalidBAL))
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+}
+
+func TestInsertBlocksRejectsBlockAccessListHashMismatch(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(t, execmoduletester.WithChainConfig(chain.AllProtocolChanges))
+	chainPack, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+
+	block := chainPack.Blocks[0]
+	header := block.Header()
+	bal := types.BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	wrongHash := common.Hash{1}
+	header.BlockAccessListHash = &wrongHash
+	block = types.NewBlockFromNetwork(header, block.Body(), types.NewBlockAccessListSidecar(bal))
+
+	_, err = m.InsertBlocks(t.Context(), []*types.Block{block})
+	require.ErrorIs(t, err, types.ErrInvalidBlockAccessList)
+	require.ErrorContains(t, err, "block access list hash mismatch")
+}
+
 // TestInsertBlocksWithBatchedFCU drives the Caplin persistent_block_collector
 // pattern: InsertBlocks(batch) → ForkChoiceUpdate(last block of batch),
 // repeated for each batch. Verifies parent TD continuity across batches —
@@ -2521,7 +2567,7 @@ func TestInsertBlocksWithBatchedFCU_BadBlockRecovery(t *testing.T) {
 		Transactions: chainPack.Blocks[5].Transactions(),
 		Uncles:       chainPack.Blocks[5].Uncles(),
 		Withdrawals:  chainPack.Blocks[5].Withdrawals(),
-	}, chainPack.Blocks[5].BlockAccessList())
+	}, chainPack.Blocks[5].BlockAccessListSidecar())
 
 	badRes, err := m.InsertBlocks(ctx, []*types.Block{badBlock6})
 	require.NoError(t, err)
@@ -2864,7 +2910,7 @@ func TestUpdateForkChoiceToNonGenesisBlockAtHeightZero(t *testing.T) {
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(&types.Genesis{Config: chain.AllProtocolChanges}))
 	fakeHeader := m.Genesis.Header()
 	fakeHeader.Extra = []byte("not the genesis")
-	fakeBlock := types.NewBlockWithHeader(fakeHeader)
+	fakeBlock := types.NewBlockWithHeader(fakeHeader, nil)
 	require.NotEqual(t, m.Genesis.Hash(), fakeBlock.Hash())
 	insRes, err := m.InsertBlocks(ctx, []*types.Block{fakeBlock})
 	require.NoError(t, err)
