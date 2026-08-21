@@ -496,16 +496,32 @@ func TestPrecompiledP256Verify(t *testing.T) {
 // what lets the caller keep it as return data without copying it first.
 func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
 	t.Parallel()
-	for addr, p := range allPrecompiles {
-		for _, size := range []int{32, 64, 96, 128, 192, 213} {
-			input := bytes.Repeat([]byte{0xa5}, size)
-			out, err := p.Run(input)
-			if err != nil || len(out) == 0 {
-				continue
+	var all []PrecompiledContract
+	for _, p := range allPrecompiles {
+		all = append(all, p)
+	}
+	for _, set := range []PrecompiledContracts{
+		PrecompiledContractsHomestead, PrecompiledContractsByzantium, PrecompiledContractsIstanbul,
+		PrecompiledContractsBerlin, PrecompiledContractsCancun, PrecompiledContractsNapoli,
+		PrecompiledContractsBhilai, PrecompiledContractsPrague, PrecompiledContractsOsaka,
+	} {
+		for _, p := range set {
+			all = append(all, p)
+		}
+	}
+
+	for _, p := range all {
+		{
+			for _, size := range []int{32, 64, 96, 128, 192, 213} {
+				input := bytes.Repeat([]byte{0xa5}, size)
+				out, err := p.Run(input)
+				if err != nil || len(out) == 0 {
+					continue
+				}
+				want := bytes.Clone(out)
+				clear(input)
+				require.Equal(t, want, out, "precompile %s output aliases its input (input size %d)", p.Name(), size)
 			}
-			want := bytes.Clone(out)
-			clear(input)
-			require.Equal(t, want, out, "precompile %x output aliases its input (input size %d)", addr, size)
 		}
 	}
 }
