@@ -55,7 +55,7 @@ func (g *Getter) readMultiPageLiteral(offset, length uint64) {
 	}
 	for length > 0 {
 		chunk := min(length, uint64(iouring.MaxReadSize))
-		g.blockingAsyncRead(int64(offset), int(chunk))
+		g.d.blockingAsyncRead(int64(offset), int(chunk))
 		offset += chunk
 		length -= chunk
 	}

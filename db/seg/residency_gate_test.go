@@ -36,7 +36,7 @@ import (
 // regionAround returns the page-aligned mmap slice covering [offset, offset+window)
 // within the getter's data, mirroring what the residency gate probes.
 func regionAround(g *Getter, offset uint64, window int) []byte {
-	full := g.d.mmapHandle1
+	full := g.d._mmapHandle
 	base := int(uintptr(unsafe.Pointer(&g.data[0])) - uintptr(unsafe.Pointer(&full[0])))
 	absStart := base + int(offset)
 	pg := os.Getpagesize()
@@ -85,9 +85,9 @@ func TestResidencyGateUsesBlockingAsyncIOOnReset(t *testing.T) {
 	// independent of the configured window size.
 	window := os.Getpagesize()
 	evict := func() {
-		require.NoError(t, unix.Madvise(d.mmapHandle1, unix.MADV_DONTNEED))
+		require.NoError(t, unix.Madvise(d._mmapHandle, unix.MADV_DONTNEED))
 		require.NoError(t, d.f.Sync())
-		require.NoError(t, unix.Fadvise(int(d.f.Fd()), 0, int64(len(d.mmapHandle1)), unix.FADV_DONTNEED))
+		require.NoError(t, unix.Fadvise(int(d.f.Fd()), 0, int64(len(d._mmapHandle)), unix.FADV_DONTNEED))
 	}
 	isResident := func(g *Getter) bool {
 		r, err := mmap.Resident(regionAround(g, pick.off, window))
@@ -112,4 +112,30 @@ func TestResidencyGateUsesBlockingAsyncIOOnReset(t *testing.T) {
 
 	w, _ := gg.Next(nil)
 	require.Equal(t, pick.w, w, "gated read must still return the correct word")
+}
+
+// Every reader of one file shares one bitmap and one rescan goroutine, including a
+// SequentialView that maps the file a second time.
+func TestResidencyBitmapIsPerFile(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	rb := d.residencyBitmap()
+	require.NotNil(t, rb)
+	require.Same(t, rb, d.residencyBitmap(), "a second call must not build another bitmap")
+
+	v, err := d.OpenSequentialView()
+	require.NoError(t, err)
+	defer v.Close()
+	require.Same(t, rb, v.MakeGetter().d.residencyBitmap(), "a view of the same file shares it")
+}
+
+// A closed Decompressor reports no bitmap instead of building one over the mapping
+// Close just released.
+func TestResidencyBitmapNilAfterClose(t *testing.T) {
+	d := prepareLoremDict(t)
+	require.NotNil(t, d.residencyBitmap())
+
+	d.Close()
+	require.Nil(t, d.residencyBitmap(), "no mapping left to probe")
 }

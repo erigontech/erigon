@@ -46,53 +46,66 @@ var residencyRefresh = time.Duration(dbg.EnvInt("RESIDENCY_REFRESH_SEC", 120)) *
 // the read does not hold the goroutine's P.
 func (g *Getter) EnableResidencyGate() { g.residencyGate = true }
 
-// residencyRegion returns the page-aligned mmap slice covering the word extent
-// at offset, along with its file offset. Returns nil when out of range.
-func (g *Getter) residencyRegion(offset uint64) (region []byte, fileOffset int64) {
-	full := g.d.mmapHandle1
-	if len(full) == 0 || len(g.data) == 0 {
-		return nil, 0
+// residencyRegion returns the page-aligned file extent covering the word at offset,
+// zero length when out of range. Works in file offsets, so a SequentialView reading
+// through its own mmap needs no special case.
+func (g *Getter) residencyRegion(offset uint64) (length int, fileOffset int64) {
+	if g.d == nil || len(g.data) == 0 {
+		return 0, 0
 	}
-	base := int(uintptr(unsafe.Pointer(&g.data[0])) - uintptr(unsafe.Pointer(&full[0])))
-	absStart := base + int(offset)
-	if absStart < 0 || absStart >= len(full) {
-		return nil, 0
+	absStart := int64(g.dataOffset + offset)
+	if absStart < 0 || absStart >= g.d.Size() {
+		return 0, 0
 	}
-	aligned := absStart &^ (pageSize - 1)
-	end := min(aligned+residencyWindow, len(full))
-	return full[aligned:end], int64(aligned)
+	aligned := absStart &^ int64(pageSize-1)
+	end := min(aligned+int64(residencyWindow), g.d.Size())
+	return int(end - aligned), aligned
 }
 
 func (g *Getter) ensureResident(offset uint64) {
 	if residencyWindow <= 0 { // RESIDENCY_WINDOW_PAGES=0 disables the gate
 		return
 	}
-	region, fileOffset := g.residencyRegion(offset)
-	if region == nil {
+	length, fileOffset := g.residencyRegion(offset)
+	if length == 0 {
 		return
 	}
-	rb := g.residencyBitmap()
+	rb := g.d.residencyBitmap()
+	if rb == nil {
+		return
+	}
 	first := int(fileOffset) / pageSize
-	last := first + (len(region)-1)/pageSize
+	last := first + (length-1)/pageSize
 	if rb.residentRange(first, last) {
 		return // believed resident — go straight to the mapping (a stale bit just faults)
 	}
-	g.blockingAsyncRead(fileOffset, len(region))
+	g.d.blockingAsyncRead(fileOffset, length)
 	rb.markRange(first, last)
 }
 
-func (g *Getter) residencyBitmap() *residencyBitmap {
-	if rb := g.d.residency.Load(); rb != nil {
+// residencyBitmap is per file: residency is a page-cache property every mapping of
+// the file shares, and mincore needs a mapping only as an access handle.
+func (d *Decompressor) residencyBitmap() *residencyBitmap {
+	if rb := d.residency.Load(); rb != nil {
 		return rb
 	}
-	g.d.residencyOnce.Do(func() {
-		g.d.residency.Store(newResidencyBitmap(g.d.mmapHandle1, int(g.d.f.Fd())))
-	})
-	return g.d.residency.Load()
+	if len(d._mmapHandle) == 0 { // closed: nothing left to probe
+		return nil
+	}
+	// Seed happens on the refresh goroutine's first pass, not here: a synchronous
+	// mincore of a multi-GB file would stall the exec worker that triggered init.
+	// Until the seed lands the bitmap reads all-cold, so early reads use blocking
+	// async I/O rather than faulting through the mapping.
+	rb := newResidencyBitmap((len(d._mmapHandle) + pageSize - 1) / pageSize)
+	if !d.residency.CompareAndSwap(nil, rb) {
+		return d.residency.Load() // lost the race; the winner owns the scan goroutine
+	}
+	go d.refreshResidencyLoop(rb)
+	return rb
 }
 
-func (g *Getter) blockingAsyncRead(fileOffset int64, n int) {
-	iouring.BlockingRead(int(g.d.f.Fd()), fileOffset, n)
+func (d *Decompressor) blockingAsyncRead(fileOffset int64, n int) {
+	iouring.BlockingRead(int(d.f.Fd()), fileOffset, n)
 }
 
 // residencyBitmap caches page-cache residency, one bit per mapped page, so the
@@ -100,8 +113,6 @@ func (g *Getter) blockingAsyncRead(fileOffset int64, n int) {
 // is a hint, kept honest by a periodic mincore rescan: a stale set bit costs one
 // mmap fault, a stale clear bit one cheap cache-hit io_uring read — both harmless.
 type residencyBitmap struct {
-	mmap   []byte
-	fd     int
 	nPages int
 	words  []uint64
 	done   chan struct{}
@@ -110,21 +121,12 @@ type residencyBitmap struct {
 	stopped bool
 }
 
-func newResidencyBitmap(m []byte, fd int) *residencyBitmap {
-	nPages := (len(m) + pageSize - 1) / pageSize
-	rb := &residencyBitmap{
-		mmap:   m,
-		fd:     fd,
+func newResidencyBitmap(nPages int) *residencyBitmap {
+	return &residencyBitmap{
 		nPages: nPages,
 		words:  make([]uint64, (nPages+63)/64),
 		done:   make(chan struct{}),
 	}
-	// Seed happens on the refresh goroutine's first tick, not here: a synchronous
-	// mincore of a multi-GB file would stall the exec worker that triggered init.
-	// Until the seed lands the bitmap reads all-cold, so early reads use blocking
-	// async I/O rather than faulting through the mapping.
-	go rb.refreshLoop()
-	return rb
 }
 
 func (rb *residencyBitmap) residentRange(first, last int) bool {
@@ -143,8 +145,8 @@ func (rb *residencyBitmap) markRange(first, last int) {
 	}
 }
 
-func (rb *residencyBitmap) refreshLoop() {
-	rb.refresh() // seed
+func (d *Decompressor) refreshResidencyLoop(rb *residencyBitmap) {
+	d.refreshResidency(rb) // seed
 	t := time.NewTicker(residencyRefresh)
 	defer t.Stop()
 	for {
@@ -152,7 +154,7 @@ func (rb *residencyBitmap) refreshLoop() {
 		case <-rb.done:
 			return
 		case <-t.C:
-			rb.refresh()
+			d.refreshResidency(rb)
 		}
 	}
 }
@@ -160,19 +162,25 @@ func (rb *residencyBitmap) refreshLoop() {
 // refresh rebuilds the whole bitmap from a chunked mincore scan of the mapping.
 // It replaces words wholesale; a concurrent markRange that gets clobbered is a
 // harmless false-negative (one extra io_uring next time).
-func (rb *residencyBitmap) refresh() {
+// Reads the mapping under rb.mu, after the stopped check, so no scan can begin
+// once Close has started unmapping.
+func (d *Decompressor) refreshResidency(rb *residencyBitmap) {
 	rb.mu.Lock()
 	defer rb.mu.Unlock()
 	if rb.stopped {
+		return
+	}
+	m := d._mmapHandle
+	if len(m) == 0 {
 		return
 	}
 	const chunkPages = 1 << 18 // 1GB per mincore call (256KB scratch), word-aligned
 	vec := make([]byte, chunkPages)
 	for p := 0; p < rb.nPages; p += chunkPages {
 		n := min(chunkPages, rb.nPages-p)
-		lenBytes := min(n*pageSize, len(rb.mmap)-p*pageSize)
+		lenBytes := min(n*pageSize, len(m)-p*pageSize)
 		_, _, errno := unix.Syscall(unix.SYS_MINCORE,
-			uintptr(unsafe.Pointer(&rb.mmap[p*pageSize])),
+			uintptr(unsafe.Pointer(&m[p*pageSize])),
 			uintptr(lenBytes),
 			uintptr(unsafe.Pointer(&vec[0])))
 		if errno != 0 {
