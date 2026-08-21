@@ -727,6 +727,10 @@ func (s *BaseRoSnapshots) SetRangeExtractor(t snaptype.Type, rangeExtractor snap
 	}
 }
 
+func (s *BaseRoSnapshots) SetKeepUnindexedlyCovered(v bool) {
+	s.keepUnindexedlyCovered = v
+}
+
 func (s *BaseRoSnapshots) SetIndexBuilder(t snaptype.Type, indexBuilder snaptype.IndexBuilder) {
 	if operators, ok := s.operators[t.Enum()]; ok {
 		operators.indexBuilder = indexBuilder

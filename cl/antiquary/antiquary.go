@@ -438,11 +438,16 @@ func (a *Antiquary) antiquate() error {
 	}
 
 	paths := a.sn.SegFileNames(from, to)
+	var onDelete func(l []string) error
 	if a.downloader != nil {
 		// Notify bittorent to seed the new snapshots
 		if err := a.downloader.Seed(a.ctx, paths); err != nil {
 			a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 		}
+		onDelete = func(l []string) error { return a.downloader.Delete(a.ctx, l) }
+	}
+	if err := a.sn.RemoveOverlaps(onDelete); err != nil {
+		a.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
 	}
 
 	return nil
@@ -513,11 +518,16 @@ func (a *Antiquary) antiquateBlobs() error {
 	}
 
 	paths := a.sn.SegFileNames(currentBlobsProgress, to)
+	var onDelete func(l []string) error
 	if a.downloader != nil {
 		// Notify bittorent to seed the new snapshots
 		if err := a.downloader.Seed(a.ctx, paths); err != nil {
 			a.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 		}
+		onDelete = func(l []string) error { return a.downloader.Delete(a.ctx, l) }
+	}
+	if err := a.sn.RemoveOverlaps(onDelete); err != nil {
+		a.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
 	}
 
 	roTx, err = a.mainDB.BeginRo(a.ctx)

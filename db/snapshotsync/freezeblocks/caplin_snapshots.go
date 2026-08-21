@@ -86,6 +86,7 @@ func NewCaplinSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.Beacon
 	})
 	c.SetIndexBuilder(snaptype.BeaconBlocks, beaconIdx)
 	c.SetIndexBuilder(snaptype.BlobSidecars, beaconIdx)
+	c.SetKeepUnindexedlyCovered(true)
 	return c
 }
 

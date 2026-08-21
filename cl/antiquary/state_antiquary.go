@@ -654,12 +654,17 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		}
 		// Prune only after OpenFolder: coverage must include the just-frozen range.
 		s.pruneFrozenStateTables(ctx, s.currentState.Slot())
+		var onDelete func(l []string) error
 		if s.downloader != nil {
 			paths := s.stateSn.SegFileNames(0, to)
 			// Notify bittorent to seed the new snapshots
 			if err := s.downloader.Seed(s.ctx, paths); err != nil {
 				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 			}
+			onDelete = func(l []string) error { return s.downloader.Delete(s.ctx, l) }
+		}
+		if err := s.stateSn.RemoveOverlaps(onDelete); err != nil {
+			s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
 		}
 	}
 
