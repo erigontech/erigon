@@ -48,57 +48,55 @@ func newAccessList() accessList {
 	return make(map[common.Address]accessListSlots)
 }
 
+// set allocates the slot map on first write, so an address that is only ever
+// touched as an address keeps a nil slots map.
+func (s *accessListSlots) set(slot common.Hash) {
+	if s.slots == nil {
+		s.slots = make(map[common.Hash]int)
+	}
+	if _, ok := s.slots[slot]; !ok {
+		s.slots[slot] = len(s.slots)
+	}
+}
+
 // addAddress adds an address to the accesslist.
 func (al accessList) addAddress(address common.Address) {
 	// Set address if not previously present
 	if _, present := al[address]; !present {
-		al[address] = accessListSlots{len(al), map[common.Hash]int{}}
+		al[address] = accessListSlots{order: len(al)}
 	}
 }
 
 // addSlot adds a storage slot to the accesslist.
 func (al accessList) addSlot(address common.Address, slot common.Hash) {
-	// Set address if not previously present
-	al.addAddress(address)
-
-	// Set the slot on the surely existent storage set
-	storage := al[address]
-	if _, ok := storage.slots[slot]; !ok {
-		storage.slots[slot] = len(storage.slots)
+	storage, present := al[address]
+	if !present {
+		storage.order = len(al)
+	}
+	newSlotMap := storage.slots == nil
+	storage.set(slot)
+	if newSlotMap {
+		al[address] = storage
 	}
 }
 
 // equal checks if the content of the current access list is the same as the
 // content of the other one.
 func (al accessList) equal(other accessList) bool {
-	// Cross reference the accounts first
+	// Equal sizes plus one-way containment implies set equality, so only al is walked.
 	if len(al) != len(other) {
 		return false
 	}
-	for addr := range al {
-		if _, ok := other[addr]; !ok {
-			return false
-		}
-	}
-	for addr := range other {
-		if _, ok := al[addr]; !ok {
-			return false
-		}
-	}
-	// Accounts match, cross reference the storage slots too
 	for addr, storage := range al {
-		otherStorage := other[addr]
-
+		otherStorage, ok := other[addr]
+		if !ok {
+			return false
+		}
 		if len(storage.slots) != len(otherStorage.slots) {
 			return false
 		}
 		for hash := range storage.slots {
 			if _, ok := otherStorage.slots[hash]; !ok {
-				return false
-			}
-		}
-		for hash := range otherStorage.slots {
-			if _, ok := storage.slots[hash]; !ok {
 				return false
 			}
 		}
@@ -158,9 +156,9 @@ type AccessListTracer struct {
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
 func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state *state.IntraBlockState) *AccessListTracer {
-	excl := make(map[common.Address]struct{})
-	if exclude != nil {
-		excl = exclude
+	excl := exclude
+	if excl == nil {
+		excl = make(map[common.Address]struct{})
 	}
 	list := newAccessList()
 	for _, al := range acl {
@@ -173,12 +171,26 @@ func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct
 		}
 	}
 	return &AccessListTracer{
-		excl:               excl,
-		list:               list,
-		state:              state,
-		createdContracts:   make(map[common.Address]struct{}),
-		usedBeforeCreation: make(map[common.Address]struct{}),
+		excl:  excl,
+		list:  list,
+		state: state,
 	}
+}
+
+// markCreated and markUsedBeforeCreation allocate on first write, so a txn that
+// creates no contract keeps both sets nil.
+func (a *AccessListTracer) markCreated(addr common.Address) {
+	if a.createdContracts == nil {
+		a.createdContracts = make(map[common.Address]struct{})
+	}
+	a.createdContracts[addr] = struct{}{}
+}
+
+func (a *AccessListTracer) markUsedBeforeCreation(addr common.Address) {
+	if a.usedBeforeCreation == nil {
+		a.usedBeforeCreation = make(map[common.Address]struct{})
+	}
+	a.usedBeforeCreation[addr] = struct{}{}
 }
 
 func (a *AccessListTracer) Hooks() *tracing.Hooks {
@@ -197,7 +209,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		slot := common.Hash(stackData[stackLen-1].Bytes32())
 		a.list.addSlot(addr.Value(), slot)
 		if _, ok := a.createdContracts[addr.Value()]; !ok {
-			a.usedBeforeCreation[addr.Value()] = struct{}{}
+			a.markUsedBeforeCreation(addr.Value())
 		}
 	}
 	if (op == vm.EXTCODECOPY || op == vm.EXTCODEHASH || op == vm.EXTCODESIZE || op == vm.BALANCE || op == vm.SELFDESTRUCT) && stackLen >= 1 {
@@ -205,7 +217,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
 			if _, ok := a.createdContracts[addr]; !ok {
-				a.usedBeforeCreation[addr] = struct{}{}
+				a.markUsedBeforeCreation(addr)
 			}
 		}
 	}
@@ -214,7 +226,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		if _, ok := a.excl[addr]; !ok {
 			a.list.addAddress(addr)
 			if _, ok := a.createdContracts[addr]; !ok {
-				a.usedBeforeCreation[addr] = struct{}{}
+				a.markUsedBeforeCreation(addr)
 			}
 		}
 	}
@@ -224,7 +236,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 			nonce, _ := a.state.GetNonce(scope.Address())
 			addr := types.CreateAddress(scope.Address().Value(), nonce)
 			if _, ok := a.excl[addr]; !ok {
-				a.createdContracts[addr] = struct{}{}
+				a.markCreated(addr)
 			}
 		}
 	}
@@ -240,7 +252,7 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 		salt := stackData[stackLen-4]
 		addr := types.CreateAddress2(scope.Address().Value(), salt.Bytes32(), inithash)
 		if _, ok := a.excl[addr]; !ok {
-			a.createdContracts[addr] = struct{}{}
+			a.markCreated(addr)
 		}
 	}
 }
