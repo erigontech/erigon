@@ -43,7 +43,7 @@ const (
 	blobLogInterval             = 30 * time.Second
 	blobBackfillWarningInterval = 4 * time.Minute
 	blocksBatchSize             = uint64(8)
-	maxBlobRetryRanges          = 32
+	maxBlobRetryRanges          = 1024
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
 	blobColumnBackfillTimeout = 30 * time.Second
@@ -424,7 +424,6 @@ func (b *BlobHistoryDownloader) addRetrySlot(slot uint64) {
 		if last >= 0 && (retryRange.start <= merged[last].end || retryRange.start-merged[last].end == 1) {
 			if retryRange.end > merged[last].end {
 				merged[last].end = retryRange.end
-				merged[last].cursor = retryRange.end
 			}
 			continue
 		}
@@ -442,7 +441,6 @@ func (b *BlobHistoryDownloader) addRetrySlot(slot uint64) {
 			}
 		}
 		b.retryRanges[nearest].end = b.retryRanges[nearest+1].end
-		b.retryRanges[nearest].cursor = b.retryRanges[nearest].end
 		b.retryRanges = append(b.retryRanges[:nearest+1], b.retryRanges[nearest+2:]...)
 	}
 }
@@ -577,9 +575,10 @@ func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock)
 
 func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeaconBlock) bool {
 	requestedBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(blocks))
-	for _, block := range blocks {
+	for i, block := range blocks {
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
+			b.addRetryBlocks(blocks[i:])
 			return false
 		}
 		if block.GetBlobKzgCommitments().Len() > 0 {
@@ -588,10 +587,12 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeacon
 		}
 		stored, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
 		if err != nil {
+			b.addRetryBlocks(blocks[i:])
 			return false
 		}
 		if stored > 0 {
 			if err := b.blobStorage.RemoveBlobSidecars(b.ctx, block.GetSlot(), blockRoot); err != nil {
+				b.addRetryBlocks(blocks[i:])
 				return false
 			}
 		}
