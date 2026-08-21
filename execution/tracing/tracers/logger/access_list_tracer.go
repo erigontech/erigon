@@ -209,12 +209,15 @@ func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct
 
 // SeedNew returns a tracer that starts from a's accumulated list, for the next
 // convergence iteration. It copies the maps directly rather than round-tripping
-// through types.AccessList, and inherits a's exclusion set.
+// through types.AccessList, and inherits a's exclusion set. The contract sets
+// start empty: they describe one execution, not the accumulated list.
 func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTracer {
 	return &AccessListTracer{
-		excl:  a.excl,
-		list:  a.list.cloneExcluding(a.excl),
-		state: state,
+		excl:               a.excl,
+		list:               a.list.cloneExcluding(a.excl),
+		state:              state,
+		createdContracts:   make(map[common.Address]struct{}),
+		usedBeforeCreation: make(map[common.Address]struct{}),
 	}
 }
 
