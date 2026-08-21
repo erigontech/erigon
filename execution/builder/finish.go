@@ -71,22 +71,26 @@ func finishBlock(ctx context.Context, tx kv.TemporalTx, cfg BuilderFinishCfg, lo
 	//	continue
 	//}
 
-	var blockAccessList []byte
+	var blockAccessList types.BlockAccessList
 	// Only embed the BAL hash in the header for Amsterdam+ chains.
 	// For pre-Amsterdam chains with ExperimentalBAL, the BAL is computed
 	// and validated but NOT included in the block header.
 	if current.BlockAccessList != nil && cfg.chainConfig.IsEIPEnabled(7928, current.Header.Time) {
-		var err error
-		blockAccessList, err = types.EncodeBlockAccessListBytes(current.BlockAccessList)
-		if err != nil {
-			return fmt.Errorf("encode block access list: %w", err)
-		}
+		blockAccessList = current.BlockAccessList
 	}
-	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals, blockAccessList)
+	var blockAccessListSidecar *types.BlockAccessListSidecar
 	if blockAccessList != nil {
-		hash := current.BlockAccessList.Hash()
-		block.HeaderNoCopy().BlockAccessListHash = &hash
+		blockAccessListSidecar = types.NewBlockAccessListSidecar(blockAccessList)
+		if err := blockAccessListSidecar.ValidateForBlock(current.Header.GasLimit); err != nil {
+			return fmt.Errorf("validate block access list: %w", err)
+		}
+		hash, err := blockAccessListSidecar.Hash()
+		if err != nil {
+			return fmt.Errorf("hash block access list: %w", err)
+		}
+		current.Header.BlockAccessListHash = &hash
 	}
+	block := types.NewBlockForAsembling(current.Header, current.Txns, current.Uncles, current.Receipts, current.Withdrawals, blockAccessListSidecar)
 	blockWithReceipts := &types.BlockWithReceipts{Block: block, Receipts: current.Receipts, Requests: current.Requests, BlockAccessList: current.BlockAccessList}
 	if dbg.LogHashMismatchReason() {
 		ethutils.LogReceipts(log.LvlInfo, "Block built", current.Receipts, current.Txns, cfg.chainConfig, current.Header, logger)

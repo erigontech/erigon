@@ -607,7 +607,7 @@ func aggregatorV3_RestartOnDatadir(t *testing.T, rc runCfg) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, someKey)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, someKey, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 }
@@ -887,7 +887,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			prev, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
+			prev, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[j], kv.GetLatestOptions{})
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
@@ -934,7 +934,7 @@ func TestAggregatorV3_SharedDomains(t *testing.T) {
 				Incarnation: 0,
 			}
 			buf := accounts.SerialiseV3(&acc)
-			prev, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[j])
+			prev, _, err := rwTx.GetLatest(kv.AccountsDomain, keys[j], kv.GetLatestOptions{})
 			require.NoError(t, err)
 
 			err = domains.DomainPut(kv.AccountsDomain, rwTx, keys[j], buf, txNum, prev)
