@@ -14,9 +14,6 @@ const (
 	queryTrailingSlashPattern = queryPattern + "/{$}"
 )
 
-// RegisterHandlers routes the SSZ-QL query endpoint on mux. A request matching the
-// pattern with no "v<digits>" version goes to fallback rather than 404: the JSON-RPC
-// server answers on any path, so near-miss paths must keep reaching it.
 func RegisterHandlers(mux *http.ServeMux, fallback http.Handler) {
 	h := &queryHandler{fallback: fallback}
 	mux.Handle(queryPattern, h)
