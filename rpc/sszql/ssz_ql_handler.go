@@ -57,11 +57,17 @@ func parseVersion(segment string) (int, bool) {
 	if !strings.HasPrefix(segment, "v") {
 		return 0, false
 	}
-	version, err := strconv.Atoi(strings.TrimPrefix(segment, "v"))
+
+	s := strings.TrimPrefix(segment, "v")
+	if len(s) > 1 && s[0] == '0' {
+		return 0, false
+	}
+	version, err := strconv.ParseUint(s, 10, 8)
+
 	if err != nil {
 		return 0, false
 	}
-	return version, true
+	return int(version), true
 }
 
 // TODO: Implement valid block_id checks with its version
