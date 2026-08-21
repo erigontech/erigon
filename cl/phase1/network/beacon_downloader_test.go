@@ -172,3 +172,49 @@ func TestForwardRequestMoreBoundsActiveProbes(t *testing.T) {
 	require.LessOrEqual(t, sentinel.maximum.Load(), int32(2))
 	require.Zero(t, sentinel.active.Load())
 }
+
+func TestForwardRequestMoreSynchronizesConcurrentProgressUpdates(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTimeout := forwardBeaconRequestTimeout
+	forwardBeaconRequestInterval = time.Millisecond
+	forwardBeaconRequestTimeout = 100 * time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardBeaconRequestTimeout = previousTimeout
+	})
+
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	sentinel := newCountingBlockingSentinel()
+	rpcClient, cfg := newContextBlockingBeaconRPC(ctx, sentinel)
+	downloader := NewForwardBeaconDownloader(ctx, rpcClient, cfg)
+
+	done := make(chan struct{})
+	go func() {
+		downloader.RequestMore(ctx)
+		close(done)
+	}()
+
+	stopUpdates := make(chan struct{})
+	updatesDone := make(chan struct{})
+	go func() {
+		defer close(updatesDone)
+		for slot := uint64(1); ; slot++ {
+			select {
+			case <-stopUpdates:
+				return
+			default:
+				downloader.SetHighestProcessedSlot(slot)
+			}
+		}
+	}()
+
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("RequestMore did not finish")
+	}
+	close(stopUpdates)
+	<-updatesDone
+	require.Positive(t, downloader.GetHighestProcessedSlot())
+}

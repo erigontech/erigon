@@ -111,6 +111,12 @@ func (f *ForwardBeaconDownloader) SetHighestProcessedSlot(highestSlotProcessed u
 	}
 }
 
+func (f *ForwardBeaconDownloader) progressSnapshot() (uint64, time.Time, uint64) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.highestSlotProcessed, f.highestSlotUpdateTime, f.minSlot
+}
+
 type peerAndBlocks struct {
 	peerId string
 	blocks []*cltypes.SignedBeaconBlock
@@ -133,7 +139,8 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 
 	// Fast path: when HTTP has been working, skip P2P probing entirely.
 	if f.httpPreferred.Load() && f.httpFallbackURL != "" {
-		httpStart := f.highestSlotProcessed + 1
+		highestSlotProcessed, _, _ := f.progressSnapshot()
+		httpStart := highestSlotProcessed + 1
 		httpBlocks, httpErr := fetchBlocksFromBeaconAPI(requestCtx, f.httpFallbackURL, httpStart, count+10, f.beaconCfg)
 		if httpErr == nil && len(httpBlocks) > 0 {
 			atomicResp.Store(peerAndBlocks{"http-fallback", httpBlocks})
@@ -180,12 +187,13 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 						return
 					}
+					highestSlotProcessed, highestSlotUpdateTime, minSlot := f.progressSnapshot()
 					var reqSlot uint64
-					if f.highestSlotProcessed > 2 {
-						reqSlot = f.highestSlotProcessed - 2
+					if highestSlotProcessed > 2 {
+						reqSlot = highestSlotProcessed - 2
 					}
-					if reqSlot < f.minSlot {
-						reqSlot = f.minSlot
+					if reqSlot < minSlot {
+						reqSlot = minSlot
 					}
 					// Request one extra block beyond the batch for GLOAS lookahead:
 					// the extra block lets determineFullGloasRoots check whether the
@@ -196,12 +204,12 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					// says peers SHOULD NOT serve blocks across fork boundaries in a
 					// single BeaconBlocksByRange response.
 					if f.beaconCfg != nil {
-						reqSlot, reqCount = f.capAtForkBoundary(reqSlot, reqCount)
+						reqSlot, reqCount = f.capAtForkBoundary(reqSlot, reqCount, highestSlotProcessed)
 					}
 
 					// leave a warning if we are stuck for more than 90 seconds
-					if time.Since(f.highestSlotUpdateTime) > 90*time.Second {
-						log.Trace("Forward beacon downloader gets stuck", "time", time.Since(f.highestSlotUpdateTime).Seconds(), "highestSlotProcessed", f.highestSlotProcessed)
+					if time.Since(highestSlotUpdateTime) > 90*time.Second {
+						log.Trace("Forward beacon downloader gets stuck", "time", time.Since(highestSlotUpdateTime).Seconds(), "highestSlotProcessed", highestSlotProcessed)
 					}
 					responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(probeCtx, reqSlot, reqCount)
 					if probeCtx.Err() != nil {
@@ -227,7 +235,8 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 							if len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 								return
 							}
-							httpStart := f.highestSlotProcessed + 1
+							latestHighestSlotProcessed, _, _ := f.progressSnapshot()
+							httpStart := latestHighestSlotProcessed + 1
 							httpBlocks, httpErr := fetchBlocksFromBeaconAPI(probeCtx, f.httpFallbackURL, httpStart, count+10, f.beaconCfg)
 							if probeCtx.Err() != nil {
 								return
@@ -433,7 +442,7 @@ func determineFullGloasRoots(blocks []*cltypes.SignedBeaconBlock, processCount i
 // the overlap slots are already processed, so we advance reqSlot past the
 // boundary instead of capping — otherwise the downloader re-requests the same
 // already-processed slots and never makes progress.
-func (f *ForwardBeaconDownloader) capAtForkBoundary(reqSlot, reqCount uint64) (uint64, uint64) {
+func (f *ForwardBeaconDownloader) capAtForkBoundary(reqSlot, reqCount, highestSlotProcessed uint64) (uint64, uint64) {
 	slotsPerEpoch := f.beaconCfg.SlotsPerEpoch
 	forkEpochs := []uint64{
 		f.beaconCfg.AltairForkEpoch,
@@ -463,7 +472,7 @@ func (f *ForwardBeaconDownloader) capAtForkBoundary(reqSlot, reqCount uint64) (u
 			break
 		}
 		// boundarySlot is in (reqSlot, endSlot).
-		if boundarySlot <= f.highestSlotProcessed+1 {
+		if boundarySlot <= highestSlotProcessed+1 {
 			// Already processed past this boundary — skip the pre-boundary
 			// overlap and start from the boundary so the request stays
 			// within a single fork.
