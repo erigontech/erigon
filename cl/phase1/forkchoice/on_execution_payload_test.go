@@ -29,9 +29,11 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	state2 "github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -67,6 +69,25 @@ type panickingUpdateDB struct {
 type blockRefreshForkGraph struct {
 	fork_graph.ForkGraph
 	block *cltypes.SignedBeaconBlock
+}
+
+type dataAvailabilityForkGraph struct {
+	fork_graph.ForkGraph
+	state    *state2.CachingBeaconState
+	stateErr error
+	block    *cltypes.SignedBeaconBlock
+}
+
+func (g dataAvailabilityForkGraph) HasEnvelope(common.Hash) bool {
+	return false
+}
+
+func (g dataAvailabilityForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
+	return g.state, g.stateErr
+}
+
+func (g dataAvailabilityForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	return g.block, g.block != nil
 }
 
 func (g blockRefreshForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -223,6 +244,78 @@ func TestPendingEnvelopeErrorClassification(t *testing.T) {
 	require.True(t, f.retryPendingEnvelopeError(ErrEIP7594ColumnDataNotAvailable, recent))
 	require.False(t, f.retryPendingEnvelopeError(ErrEIP7594ColumnDataNotAvailable, stale))
 	require.False(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: bad signature", errInvalidExecutionPayloadEnvelope), nil))
+}
+
+func TestOnExecutionPayloadRetainsEnvelopeWhenColumnDataIsUnavailable(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	cfg := &clparams.MainnetBeaconConfig
+	blockRoot := common.HexToHash("0x1234")
+	blockState := state2.New(cfg)
+	blockState.SetVersion(clparams.GloasVersion)
+	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+	commitments.Append(new(cltypes.KZGCommitment))
+	block := &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{
+		Slot: 64,
+		Body: &cltypes.BeaconBody{
+			Version: clparams.GloasVersion,
+			SignedExecutionPayloadBid: &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+				BlobKzgCommitments: *commitments,
+			}},
+		},
+	}}
+	payload := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
+	payload.SlotNumber = block.Block.Slot
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: blockRoot,
+		Payload:         payload,
+	}}
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	peerDas := das_mock.NewMockPeerDas(ctrl)
+	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, blockRoot).Return(false, nil)
+	syncedData := synced_data.NewSyncedDataManager(cfg, true)
+	f := &ForkChoiceStore{
+		forkGraph: dataAvailabilityForkGraph{
+			state: blockState,
+			block: block,
+		},
+		beaconCfg:                      cfg,
+		peerDas:                        peerDas,
+		syncedDataManager:              syncedData,
+		pendingEnvelopes:               pending,
+		pendingLocalSelfBuildEnvelopes: local,
+	}
+
+	err = f.OnExecutionPayload(context.Background(), envelope, true, false)
+	require.ErrorIs(t, err, ErrEIP7594ColumnDataNotAvailable)
+	retained, ok := pending.Peek(blockRoot)
+	require.True(t, ok)
+	require.Same(t, envelope, retained)
+}
+
+func TestApplyLocalSelfBuildEnvelopeRetainsTransientFailure(t *testing.T) {
+	blockRoot := common.HexToHash("0x1234")
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+		BeaconBlockRoot: blockRoot,
+		Payload:         cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig),
+	}}
+	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+	require.NoError(t, err)
+	f := &ForkChoiceStore{
+		forkGraph:                      dataAvailabilityForkGraph{stateErr: errors.New("temporary state read failure")},
+		beaconCfg:                      &clparams.MainnetBeaconConfig,
+		pendingEnvelopes:               pending,
+		pendingLocalSelfBuildEnvelopes: local,
+	}
+
+	require.Error(t, f.ApplyLocalSelfBuildEnvelope(context.Background(), envelope))
+	retained, ok := local.Peek(blockRoot)
+	require.True(t, ok)
+	require.Same(t, envelope, retained)
 }
 
 func TestRetryPendingExecutionPayloadEnvelopesDropsMissingIndexRepairEnvelope(t *testing.T) {
