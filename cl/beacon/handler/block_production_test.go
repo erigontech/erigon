@@ -947,6 +947,27 @@ func awaitErrorResult(t *testing.T, result <-chan error) error {
 	}
 }
 
+func runJoinedOperation(t *testing.T, unblock func(), operation func(context.Context) error) <-chan error {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	result := make(chan error, 1)
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		result <- operation(ctx)
+	}()
+	t.Cleanup(func() {
+		unblock()
+		cancel()
+		select {
+		case <-done:
+		case <-time.After(5 * time.Second):
+			t.Errorf("operation goroutine did not stop")
+		}
+	})
+	return result
+}
+
 // captureProductionLogs redirects the root logger for one test and returns everything written at
 // warning level or above. It deliberately does not filter by message: a record this package emits
 // under another name is exactly what a test asserting silence needs to see.
@@ -989,12 +1010,11 @@ func TestProductionDerivesPayloadAttributesOutsidePreparationGate(t *testing.T) 
 	// phase observable without relying on how long the state work takes.
 	derivationStarted, releaseDerivation := blockOnRootLogMessage(t,
 		"BlockProduction: no fee recipient from prepare_beacon_proposer, using zero address")
-	result := make(chan error, 1)
-	go func() {
-		_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+	result := runJoinedOperation(t, releaseDerivation, func(ctx context.Context) error {
+		_, _, err := handler.produceBeaconBody(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
 			targetSlot, common.Bytes96{}, common.Hash{})
-		result <- err
-	}()
+		return err
+	})
 
 	select {
 	case <-derivationStarted:
@@ -1050,12 +1070,11 @@ func TestProductionProcessesCollectedPayloadOutsidePreparationGate(t *testing.T)
 	// A non-empty request bundle reaches returned-payload processing and blocks before decoding, so
 	// the gate can be checked after collection without depending on processing speed.
 	processingStarted, releaseProcessing := blockOnRootLogMessage(t, "BlockProduction: Received requests bundle")
-	result := make(chan error, 1)
-	go func() {
-		_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+	result := runJoinedOperation(t, releaseProcessing, func(ctx context.Context) error {
+		_, _, err := handler.produceBeaconBody(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
 			targetSlot, common.Bytes96{}, common.Hash{})
-		result <- err
-	}()
+		return err
+	})
 
 	select {
 	case <-processingStarted:

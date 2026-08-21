@@ -47,6 +47,7 @@ type ForkChoiceStorageReader interface {
 	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	HighestSeen() uint64
+	BlockProcessing() bool
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash

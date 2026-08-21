@@ -50,6 +50,7 @@ type ForkChoiceStorageMock struct {
 	HeadSlotVal            uint64
 	HeadPayloadStatusVal   cltypes.PayloadStatus
 	HighestSeenVal         uint64
+	BlockProcessingVal     bool
 	JustifiedCheckpointVal solid.Checkpoint
 	JustifiedSlotVal       uint64
 	ProposerBoostRootVal   common.Hash
@@ -273,6 +274,10 @@ func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Has
 
 func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
+}
+
+func (f *ForkChoiceStorageMock) BlockProcessing() bool {
+	return f.BlockProcessingVal
 }
 
 func (f *ForkChoiceStorageMock) JustifiedCheckpoint() solid.Checkpoint {

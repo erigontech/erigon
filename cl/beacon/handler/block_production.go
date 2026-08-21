@@ -620,8 +620,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
-	// Payload preparation should not compete with a valid production request. Execution exclusion
-	// is narrower and is acquired only around execution-layer calls.
 	finishLocalBlockWork := a.payloadPreparationGate.beginLocalBlockWork()
 	defer finishLocalBlockWork()
 
@@ -1106,9 +1104,7 @@ func (a *ApiHandler) produceBeaconBody(
 		attrs := a.payloadBuildAttributes(
 			baseState, blockRoot, targetSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
 		)
-		// Hold the shared execution gate only around fork-choice update and payload collection.
-		// Preparation takes the exclusive side without queuing; state derivation and returned-payload
-		// processing stay outside.
+		// Only execution calls exclude preparation; state work and payload processing stay outside.
 		payload, bundles, requestsBundle, blockValue, err := func() (
 			*cltypes.Eth1Block,
 			*engine_types.BlobsBundle,
@@ -1137,7 +1133,7 @@ func (a *ApiHandler) produceBeaconBody(
 			slotStart := a.ethClock.GetSlotTime(targetSlot)
 			warmup, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(targetSlot, idBytes, builderStartedAt)
 			if preparedIDMismatch {
-				a.payloadPreparationLogger().Debug(
+				a.payloadPreparationLogger().Info(
 					"PayloadPreparation: prepared payload ID did not match production",
 					"slot", targetSlot,
 				)

@@ -521,7 +521,7 @@ func TestPostProposerPreferencesStoresValidatedPreferenceOnce(t *testing.T) {
 	handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{preference})
 
 	require.Equal(t, http.StatusOK, recorder.Code)
-	require.Equal(t, uint64(1), epbsPool.ProposerPreferencesGeneration())
+	require.Equal(t, uint64(1), epbsPool.ProposerPreferencesGeneration(preference.Message.ProposalSlot))
 }
 
 func TestPostBeaconPoolProposerPreferencesAcceptsBatchJSON(t *testing.T) {

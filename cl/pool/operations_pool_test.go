@@ -418,15 +418,21 @@ func TestEpbsPoolGetPreferenceExactLookup(t *testing.T) {
 
 func TestEpbsPoolTracksProposerPreferenceChanges(t *testing.T) {
 	p := NewEpbsPool()
-	require.Zero(t, p.ProposerPreferencesGeneration())
+	require.Zero(t, p.ProposerPreferencesGeneration(10))
 
 	p.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
 		ProposalSlot: 10, DependentRoot: common.Hash{0x01},
 	}})
-	require.Equal(t, uint64(1), p.ProposerPreferencesGeneration())
+	require.Equal(t, uint64(1), p.ProposerPreferencesGeneration(10))
 
 	p.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
 		ProposalSlot: 10, DependentRoot: common.Hash{0x01}, TargetGasLimit: 36_000_000,
 	}})
-	require.Equal(t, uint64(2), p.ProposerPreferencesGeneration())
+	require.Equal(t, uint64(2), p.ProposerPreferencesGeneration(10))
+
+	p.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: 11, DependentRoot: common.Hash{0x02},
+	}})
+	require.Equal(t, uint64(2), p.ProposerPreferencesGeneration(10))
+	require.Equal(t, uint64(1), p.ProposerPreferencesGeneration(11))
 }
