@@ -1,22 +1,19 @@
 # Erigon v3.6.0 — Upstream Underbelly — 2026-08-24
 
-Erigon 3.6.0 focuses on reclaiming pruned snapshot space and lowering the memory and CPU cost of state access and
-background maintenance. It is an in-place upgrade from 3.5.x: existing datadirs need no re-sync, and both referenced
-and plain commitment snapshots remain readable.
+Erigon 3.6.0 is headlined by **more reliable Caplin block production** and **pruned nodes reclaiming old snapshots**,
+with leaner state access and maintenance throughout. It is an in-place upgrade from 3.5.x — no re-sync required.
 
 ### Highlights
 
-- **More reliable Caplin block production.** Caplin primes the execution layer before a proposer slot, publishes the
-  fork-choice head before copying state, and encodes the execution and consensus client versions in default block
-  graffiti (#23437, #23172, #22303) — by @lystopad
+- **More reliable Caplin block production.** Caplin starts payload building before proposer slots and publishes fork
+  choice earlier, giving blocks more time to reach attesters (#23437, #23172) — by @lystopad
 - **Pruned nodes now reclaim old state snapshots.** State history, indexes, optional commitment history, and the receipts
   cache are retired once they fall outside their configured windows; fresh syncs also skip optional snapshots outside
   those windows. This fixes unbounded snapshot growth on long-running `minimal` and other pruned nodes (#21306, #22123,
   #21200, #22243, #22349) — by @AskAlexSharov, @JkLondon
-- **Plain commitment snapshots.** Commitment branches no longer store shortened cross-file key references by default,
-  removing dereference I/O from state reads and merges at the cost of larger commitment files. Existing per-datadir
-  settings are honored; if the setting is absent, 3.6 defaults new commitment merges to plain. Referenced files convert
-  lazily when plain writes are active, and fresh syncs use the new 3.6 snapshot set (#14809, #21452, #21376) — by @awskii
+- **Plain commitment snapshots.** New commitment files store values directly by default, speeding state reads and merges
+  at the cost of larger files. Existing per-datadir settings are honored; referenced files remain readable and convert
+  lazily when plain writes are active (#14809, #21452, #21376) — by @awskii
 - **Faster state access and snapshot maintenance.** Sharded LRU state, code, and commitment caches replace whole-cache
   resets; state-snapshot compression is 2–3x faster, dictionary-building merges are about 1.5x faster, and the mainnet
   `.bt` pivot cache uses roughly one quarter of its previous heap (#22154, #21625, #22050, #21875) — by @mh0lt,
@@ -34,7 +31,7 @@ and plain commitment snapshots remain readable.
 - **Idle polling filters expire after five minutes.** Clients using `eth_newFilter`, `eth_newBlockFilter`, or
   `eth_newPendingTransactionFilter` must poll within the timeout or recreate the filter. Configure
   `--rpc.subscription.filters.timeout`, or set it to `0` to disable eviction (#22261) — by @onelapahead
-- **JSON-RPC validation is stricter.** Quoted decimal block numbers such as `"3"` are rejected; use `"0x3"`, a bare
+- **JSON-RPC compatibility changes.** Quoted decimal block numbers such as `"3"` are rejected; use `"0x3"`, a bare
   integer, or a named tag. `eth_simulateV1` now returns the specified `-38012` code when the base fee is too low instead
   of `-32602` (#21985, #21418) — by @lupin012, @Sahil-4555
 
@@ -53,6 +50,7 @@ and plain commitment snapshots remain readable.
 
 #### Consensus layer and protocol
 
+- Default block graffiti now identifies both the execution and consensus clients (#22303) — by @lystopad
 - Caplin archive maintenance repairs truncated validator tables, removes frozen state rows from its indexing DB for
   reuse, and stores compact effective balances, cutting the measured per-slot copy from about 266 MB to 18 MB (#22385,
   #22396, #22411) — by @awskii, @AskAlexSharov
@@ -65,9 +63,9 @@ and plain commitment snapshots remain readable.
 
 #### Operations
 
-- Pruning flags now use readable policies: `--prune.distance.blocks` accepts `keep-post-merge` and `keep-all`, while
-  receipt and commitment-history caches have independent `--prune.*.distance` windows. The former receipt flag names
-  remain aliases (#22119, #21200, #22349) — by @yperbasis, @JkLondon, @AskAlexSharov
+- Pruning flags now use readable policies: `--prune.distance` accepts `keep-all`, and `--prune.distance.blocks` accepts
+  `keep-post-merge` and `keep-all`. Receipt and commitment-history caches have independent `--prune.*.distance` windows;
+  the former receipt flag names remain aliases (#22119, #21200, #22349) — by @yperbasis, @JkLondon, @AskAlexSharov
 - `erigon seg index --rebuild` rebuilds every snapshot accessor and index without deleting snapshot data (#21919) — by
   @sudeepdino008
 - The command-line layer now uses `urfave/cli/v3`. Normal flag handling remains compatible, and `--config` now applies
