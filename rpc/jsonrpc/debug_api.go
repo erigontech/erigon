@@ -163,7 +163,7 @@ func (api *DebugAPIImpl) StorageRangeAt(ctx context.Context, blockHash common.Ha
 	}
 
 	blockNrOrHash := rpc.BlockNumberOrHashWithHash(blockHash, true)
-	blockNumber, err := api.resolveCanonicalBlockNumberInCommittedView(ctx, tx, blockNrOrHash)
+	blockNumber, err := api.resolveCommittedBlockNumber(ctx, tx, blockNrOrHash)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return StorageRangeResult{}, nil
@@ -701,7 +701,7 @@ func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.Bloc
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, h, n)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), h, n)
 	if err != nil {
 		return nil, err
 	}
@@ -732,7 +732,7 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -811,7 +811,7 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 	if err != nil {
 		return nil, err
 	}
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, api.filters.WithOverlay(tx), txnHash)
 	if err != nil {
 		return nil, err
 	}

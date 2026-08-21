@@ -136,7 +136,7 @@ func (api *APIImpl) SimulateV1(ctx context.Context, req SimulationRequest, block
 		return nil, err
 	}
 
-	block, err := api.blockWithSendersInView(ctx, tx, blockHash, blockNumber)
+	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNumber)
 	if err != nil {
 		return nil, err
 	}

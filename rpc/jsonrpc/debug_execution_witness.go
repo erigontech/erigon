@@ -1368,7 +1368,7 @@ func (api *DebugAPIImpl) resolveWitnessBlock(
 		return nil, err
 	}
 
-	block, err := api.blockWithSendersInView(ctx, tx, hash, blockNum)
+	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, err
 	}

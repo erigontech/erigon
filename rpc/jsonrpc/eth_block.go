@@ -62,7 +62,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	var txs types.Transactions
 
 	for _, txHash := range txHashes {
-		blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
+		blockNumber, txNum, ok, err := api.txnLookup(ctx, api.filters.WithOverlay(tx), txHash)
 		if err != nil {
 			return nil, err
 		}
@@ -294,7 +294,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(ctx, tx, hash)
+	block, err := api.blockByHashWithSenders(ctx, api.filters.WithOverlay(tx), hash)
 	if err != nil {
 		return nil, err
 	}
@@ -535,7 +535,7 @@ func (api *APIImpl) lookupBorTx(ctx context.Context, chainConfig *chain.Config, 
 
 func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {
 	if blockNumber != rpc.PendingBlockNumber {
-		return api.blockByNumberWithSenders(ctx, tx, blockNumber.Uint64())
+		return api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNumber.Uint64())
 	}
 
 	if block := api.pendingBlock(); block != nil {

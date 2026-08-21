@@ -1283,7 +1283,7 @@ func TestGetRawReceipts(t *testing.T) {
 
 	testedNonEmpty := false
 	for i := uint64(0); i <= number; i++ {
-		block, err := api.blockByNumberWithSenders(ctx, tx, i)
+		block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), i)
 		require.NoError(err)
 		receipts, err := api.getReceipts(ctx, tx, block)
 		require.NoError(err)

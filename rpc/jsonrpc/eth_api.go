@@ -224,7 +224,7 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 		return cc, genesisBlock, nil
 	}
 
-	genesisBlock, err := api.blockByNumberWithSenders(ctx, tx, 0)
+	genesisBlock, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), 0)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -249,10 +249,10 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-// resolveCanonicalBlockNumberInCommittedView returns a block only when it is
-// canonical in tx. The overlay probe distinguishes an in-flight head from an
-// unavailable same-height generation without changing the selected view.
-func (api *BaseAPI) resolveCanonicalBlockNumberInCommittedView(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
+// resolveCommittedBlockNumber returns a block only when it is canonical in tx.
+// The overlay probe distinguishes an in-flight head from an unavailable
+// same-height generation without changing the selected transaction.
+func (api *BaseAPI) resolveCommittedBlockNumber(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
 	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	var blockNotFound rpc.BlockNotFoundErr
 	if !errors.As(err, &blockNotFound) {
@@ -276,15 +276,10 @@ func (api *BaseAPI) engine() rules.EngineReader {
 }
 
 func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
-	overlayTx := api.filters.WithOverlay(tx)
-	return api._txnReader.TxnLookup(ctx, overlayTx, txnHash)
+	return api._txnReader.TxnLookup(ctx, tx, txnHash)
 }
 
 func (api *BaseAPI) txnLookupWithBorFallback(ctx context.Context, tx kv.Tx, txnHash common.Hash, chainConfig *chain.Config) (blockNum uint64, txNum uint64, isBorStateSyncTxn bool, ok bool, err error) {
-	return api.txnLookupWithBorFallbackInView(ctx, api.filters.WithOverlay(tx), txnHash, chainConfig)
-}
-
-func (api *BaseAPI) txnLookupWithBorFallbackInView(ctx context.Context, tx kv.Tx, txnHash common.Hash, chainConfig *chain.Config) (blockNum uint64, txNum uint64, isBorStateSyncTxn bool, ok bool, err error) {
 	blockNum, txNum, ok, err = api._txnReader.TxnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return 0, 0, false, false, err
@@ -323,10 +318,6 @@ func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txN
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	return api.blockByNumberWithSendersInView(ctx, api.filters.WithOverlay(tx), number)
-}
-
-func (api *BaseAPI) blockByNumberWithSendersInView(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
 	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
 	if err != nil {
 		return nil, err
@@ -334,7 +325,7 @@ func (api *BaseAPI) blockByNumberWithSendersInView(ctx context.Context, tx kv.Tx
 	if !ok {
 		return nil, nil
 	}
-	return api.blockWithSendersInView(ctx, tx, hash, number)
+	return api.blockWithSenders(ctx, tx, hash, number)
 }
 
 func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
@@ -343,8 +334,7 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 			return it, nil
 		}
 	}
-	overlayTx := api.filters.WithOverlay(tx)
-	number, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
+	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -352,14 +342,10 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 		return nil, nil
 	}
 
-	return api.blockWithSendersInView(ctx, overlayTx, hash, *number)
+	return api.blockWithSenders(ctx, tx, hash, *number)
 }
 
 func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
-	return api.blockWithSendersInView(ctx, api.filters.WithOverlay(tx), hash, number)
-}
-
-func (api *BaseAPI) blockWithSendersInView(ctx context.Context, tx kv.Tx, hash common.Hash, number uint64) (*types.Block, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
 			return it, nil

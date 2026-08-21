@@ -50,7 +50,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -86,7 +86,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(ctx, tx, hash)
+	block, err := api.blockByHashWithSenders(ctx, api.filters.WithOverlay(tx), hash)
 	if err != nil {
 		return nil, err
 	}
@@ -125,7 +125,7 @@ func (api *APIImpl) GetUncleCountByBlockNumber(ctx context.Context, number rpc.B
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -158,7 +158,7 @@ func (api *APIImpl) GetUncleCountByBlockHash(ctx context.Context, hash common.Ha
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, *number)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, *number)
 	if err != nil {
 		return nil, err
 	}

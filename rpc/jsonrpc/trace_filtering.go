@@ -85,7 +85,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	blockNumber, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallbackInView(ctx, tx, txHash, chainConfig)
+	blockNumber, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, txHash, chainConfig)
 	if err != nil {
 		return nil, err
 	}
@@ -210,7 +210,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 	}
 
 	// Extract transactions from block
-	block, bErr := api.blockWithSendersInView(ctx, tx, hash, blockNum)
+	block, bErr := api.blockWithSenders(ctx, tx, hash, blockNum)
 	if bErr != nil {
 		return nil, bErr
 	}
@@ -337,7 +337,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {
-		fromBlock, err = api.resolveCanonicalBlockNumberInCommittedView(ctx, dbtx, *req.FromBlock)
+		fromBlock, err = api.resolveCommittedBlockNumber(ctx, dbtx, *req.FromBlock)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()
@@ -353,7 +353,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 			return err
 		}
 	} else {
-		toBlock, err = api.resolveCanonicalBlockNumberInCommittedView(ctx, dbtx, *req.ToBlock)
+		toBlock, err = api.resolveCommittedBlockNumber(ctx, dbtx, *req.ToBlock)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()

@@ -543,7 +543,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
-	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	blockNum, txNum, ok, err = api.txnLookup(ctx, api.filters.WithOverlay(tx), txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -586,7 +586,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	if isBorStateSyncTx {
-		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+		block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -621,7 +621,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	var postState *receipts.PostStateInfo = nil
 	if (commitmentHistory || api._blockReader.FrozenBlocks() == 0) && !chainConfig.IsByzantium(blockNum) {
-		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+		block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -671,7 +671,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
