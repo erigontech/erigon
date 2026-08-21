@@ -378,13 +378,13 @@ func (c txlBenchCfg) maxTxNum(block uint64) uint64 {
 	return c.minTxNum(block) + c.txPerBlock + 1
 }
 
-func txlBenchFixture(tb testing.TB, c txlBenchCfg) (kv.TemporalRwTx, TxLookupCfg, *PruneState, *uint64) {
+func txlBenchFixture(tb testing.TB, c txlBenchCfg) (kv.TemporalRwDB, TxLookupCfg, *uint64) {
 	tb.Helper()
 	dir := tb.TempDir()
 	db := temporaltest.NewTestDB(tb, datadir.New(dir))
 	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(tb, err)
-	tb.Cleanup(tx.Rollback)
+	defer tx.Rollback()
 
 	txNums := freezeblocks.NewBlockReader(nil, nil).TxnumReader()
 	for b := uint64(0); b <= c.blocks; b++ {
@@ -402,75 +402,92 @@ func txlBenchFixture(tb testing.TB, c txlBenchCfg) (kv.TemporalRwTx, TxLookupCfg
 			require.NoError(tb, tx.Put(kv.TxLookup, h[:], val))
 		}
 	}
+	require.NoError(tb, tx.Commit())
 
 	frozen := new(uint64)
 	*frozen = c.frozen
 	cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(config3.DefaultPruneDistance)},
 		dir, txlBenchReader{frozen: frozen, txPerBlock: c.txPerBlock})
-	s := &PruneState{ID: stages.TxLookup, ForwardProgress: c.blocks,
-		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
-	return tx, cfg, s, frozen
+	return db, cfg, frozen
 }
 
-func txlCountRows(tb testing.TB, tx kv.Tx) uint64 {
+func txlPruneOnce(tb testing.TB, db kv.TemporalRwDB, cfg TxLookupCfg, forward uint64, byBlocks bool) (pruned, left uint64) {
 	tb.Helper()
-	n, err := tx.Count(kv.TxLookup)
+	tx, err := db.BeginTemporalRw(context.Background())
 	require.NoError(tb, err)
-	return n
+	defer tx.Rollback()
+
+	before, err := tx.Count(kv.TxLookup)
+	require.NoError(tb, err)
+
+	txLookupPruneByBlocks = byBlocks
+	s := &PruneState{ID: stages.TxLookup, ForwardProgress: forward,
+		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
+	pp, err := stages.GetStagePruneProgress(tx, stages.TxLookup)
+	require.NoError(tb, err)
+	s.PruneProgress = pp
+	require.NoError(tb, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
+	txLookupPruneByBlocks = false
+
+	left, err = tx.Count(kv.TxLookup)
+	require.NoError(tb, err)
+	require.NoError(tb, tx.Commit())
+	return before - left, left
 }
 
 func txlBenchSizes() txlBenchCfg {
 	return txlBenchCfg{
-		blocks:     uint64(dbg.EnvInt("TXL_BENCH_BLOCKS", 20_000)),
-		txPerBlock: uint64(dbg.EnvInt("TXL_BENCH_TXS", 20)),
-		frozen:     uint64(dbg.EnvInt("TXL_BENCH_FROZEN", 10_000)),
+		blocks:     uint64(dbg.EnvInt("TXL_BENCH_BLOCKS", 3_000)),
+		txPerBlock: uint64(dbg.EnvInt("TXL_BENCH_TXS", 150)),
+		frozen:     uint64(dbg.EnvInt("TXL_BENCH_FROZEN", 1_000)),
 	}
 }
 
+func txlBenchDelta() uint64 { return uint64(dbg.EnvInt("TXL_BENCH_DELTA", 1_000)) }
+
+// One rotation over a table that has never been pruned: the backlog case an
+// upgraded node meets once.
 func BenchmarkPruneTxLookupBacklog(b *testing.B) {
 	c := txlBenchSizes()
 	for _, byBlocks := range []bool{false, true} {
 		b.Run(map[bool]string{false: "scan", true: "byblocks"}[byBlocks], func(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
-				tx, cfg, s, _ := txlBenchFixture(b, c)
-				before := txlCountRows(b, tx)
-				txLookupPruneByBlocks = byBlocks
+				db, cfg, _ := txlBenchFixture(b, c)
 				b.StartTimer()
 
-				require.NoError(b, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
+				pruned, left := txlPruneOnce(b, db, cfg, c.blocks, byBlocks)
 
 				b.StopTimer()
-				txLookupPruneByBlocks = false
-				b.ReportMetric(float64(before-txlCountRows(b, tx)), "rows_pruned")
+				b.ReportMetric(float64(pruned), "rows_pruned")
+				b.ReportMetric(float64(left), "rows_left")
+				db.Close()
 				b.StartTimer()
 			}
 		})
 	}
 }
 
-// The chain-tip cycle: the table is already pruned to the frontier and the
-// frontier then advances by one 1000-block quantum.
+// The steady chain-tip cycle: the table is already pruned to the frontier, then
+// the frontier advances by TXL_BENCH_DELTA blocks. The scan rewalks the whole
+// remaining table to collect that delta; the block walk visits only the delta.
 func BenchmarkPruneTxLookupTip(b *testing.B) {
-	c := txlBenchSizes()
+	c, delta := txlBenchSizes(), txlBenchDelta()
 	for _, byBlocks := range []bool{false, true} {
 		b.Run(map[bool]string{false: "scan", true: "byblocks"}[byBlocks], func(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
-				tx, cfg, s, frozen := txlBenchFixture(b, c)
-				txLookupPruneByBlocks = byBlocks
-				require.NoError(b, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
-				*frozen += 1_000
-				s.ForwardProgress += 1_000
-				before := txlCountRows(b, tx)
+				db, cfg, frozen := txlBenchFixture(b, c)
+				txlPruneOnce(b, db, cfg, c.blocks, byBlocks)
+				*frozen += delta
 				b.StartTimer()
 
-				require.NoError(b, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
+				pruned, left := txlPruneOnce(b, db, cfg, c.blocks+delta, byBlocks)
 
 				b.StopTimer()
-				txLookupPruneByBlocks = false
-				b.ReportMetric(float64(before-txlCountRows(b, tx)), "rows_pruned")
-				b.ReportMetric(float64(before), "rows_left")
+				b.ReportMetric(float64(pruned), "rows_pruned")
+				b.ReportMetric(float64(left), "rows_left")
+				db.Close()
 				b.StartTimer()
 			}
 		})
@@ -481,10 +498,12 @@ func BenchmarkPruneTxLookupTip(b *testing.B) {
 func TestPruneTxLookupImplsAgree(t *testing.T) {
 	c := txlBenchCfg{blocks: 4_000, txPerBlock: 3, frozen: 2_000}
 	survivors := func(byBlocks bool) map[string]struct{} {
-		txLookupPruneByBlocks = byBlocks
-		defer func() { txLookupPruneByBlocks = false }()
-		tx, cfg, s, _ := txlBenchFixture(t, c)
-		require.NoError(t, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
+		db, cfg, _ := txlBenchFixture(t, c)
+		defer db.Close()
+		txlPruneOnce(t, db, cfg, c.blocks, byBlocks)
+		tx, err := db.BeginTemporalRo(context.Background())
+		require.NoError(t, err)
+		defer tx.Rollback()
 		out := map[string]struct{}{}
 		require.NoError(t, tx.ForEach(kv.TxLookup, nil, func(k, _ []byte) error {
 			out[string(k)] = struct{}{}
