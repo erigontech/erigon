@@ -34,9 +34,9 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
-	"time"
 )
 
 const rpcEndpoint = "http://localhost:8545"
@@ -600,7 +600,7 @@ func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
 	}
 }
 
-// countingConn counts writes reaching the socket, which is what a small flush
+// flushConn counts writes reaching the socket, which is what a small flush
 // threshold multiplies.
 type flushConn struct {
 	net.Conn
