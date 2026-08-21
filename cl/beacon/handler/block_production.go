@@ -620,8 +620,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
-	finishLocalBlockWork := a.payloadPreparationGate.beginLocalBlockWork()
-	defer finishLocalBlockWork()
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
 
 	start := time.Now()
 
@@ -1104,45 +1104,38 @@ func (a *ApiHandler) produceBeaconBody(
 		attrs := a.payloadBuildAttributes(
 			baseState, blockRoot, targetSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
 		)
-		// Only execution calls exclude preparation; state work and payload processing stay outside.
-		payload, bundles, requestsBundle, blockValue, err := func() (
-			*cltypes.Eth1Block,
-			*engine_types.BlobsBundle,
-			*typesproto.RequestsBundle,
-			*big.Int,
-			error,
-		) {
-			finishExecutionWork := a.payloadPreparationGate.beginExecutionWork()
-			defer finishExecutionWork()
-
-			builderStartedAt := time.Now()
-			idBytes, err := a.engine.ForkChoiceUpdate(
-				ctx,
-				finalizedHash,
-				safeHash,
-				head,
-				attrs,
-				stateVersion,
+		builderStartedAt := time.Now()
+		idBytes, err := a.engine.ForkChoiceUpdate(
+			ctx,
+			finalizedHash,
+			safeHash,
+			head,
+			attrs,
+			stateVersion,
+		)
+		if err != nil {
+			executionErr = fmt.Errorf("produceBeaconBody: forkchoice update: %w", err)
+			return
+		}
+		if len(idBytes) == 0 {
+			executionErr = errors.New("produceBeaconBody: forkchoice update returned no payload ID (EL may be syncing)")
+			return
+		}
+		slotStart := a.ethClock.GetSlotTime(targetSlot)
+		warmup, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(targetSlot, idBytes, builderStartedAt)
+		if preparedIDMismatch {
+			a.logger.Info(
+				"PayloadPreparation: prepared payload ID did not match production",
+				"slot", targetSlot,
 			)
-			if err != nil {
-				return nil, nil, nil, nil, fmt.Errorf("forkchoice update: %w", err)
-			}
-			if len(idBytes) == 0 {
-				return nil, nil, nil, nil, errors.New("forkchoice update returned no payload ID (EL may be syncing)")
-			}
-			slotStart := a.ethClock.GetSlotTime(targetSlot)
-			warmup, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(targetSlot, idBytes, builderStartedAt)
-			if preparedIDMismatch {
-				a.payloadPreparationLogger().Info(
-					"PayloadPreparation: prepared payload ID did not match production",
-					"slot", targetSlot,
-				)
-			}
-			buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
-			return pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+		}
+		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
+		payload, bundles, requestsBundle, blockValue, err := pollAssembledPayload(
+			ctx, buildWindow, retryTime,
+			func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
 				return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
-			})
-		}()
+			},
+		)
 		if err != nil {
 			executionErr = fmt.Errorf("produceBeaconBody: %w", err)
 			return
@@ -1865,8 +1858,8 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, signedEnvelope ...*cltypes.SignedExecutionPayloadEnvelope) error {
-	finishLocalBlockWork := a.payloadPreparationGate.beginLocalBlockWork()
-	defer finishLocalBlockWork()
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
 
 	blkSSZ, err := blk.EncodeSSZ(nil)
 	if err != nil {
@@ -1983,8 +1976,9 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
-	// Start tracking before the goroutine so preparation cannot enter during scheduler handoff.
-	finishBlockStorage := a.payloadPreparationGate.beginLocalBlockWork()
+	// Acquire before starting the goroutine so preparation cannot enter between publication and
+	// background storage.
+	finishBlockStorage := a.payloadPreparationGate.beginBlockWork()
 	go func() {
 		defer finishBlockStorage()
 		if err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars); err != nil {
@@ -2188,9 +2182,32 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	// runs from the beacon API handler which may execute before the stage loop.
 	currentSlot := a.ethClock.GetCurrentSlot()
 	a.forkchoiceStore.OnTick(a.ethClock.GenesisTime() + currentSlot*a.beaconChainCfg.SecondsPerSlot)
-	headRoot, headState, err := a.adoptProducedBlock(ctx, block, blockRoot)
+
+	// Skip BLS re-verification for locally-produced blocks. The block was just
+	// built by this node, so re-verifying the signature is redundant. Additionally,
+	// AddChainSegment replays from the nearest checkpoint state, and the replayed
+	// state can produce a different proposer shuffling than the head state used
+	// during block production (especially on minimal preset with rapid epoch
+	// boundaries), causing VerifyBlockSignature to fail.
+	// TODO: fix the root cause in state replay so fullValidation can be re-enabled.
+	log.Warn("Skipping full validation for locally-produced block", "slot", block.Block.Slot, "proposer", block.Block.ProposerIndex)
+	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
+		return err
+	}
+	headRoot, headSlot, headState, err := a.selectedHeadState(blockRoot)
 	if err != nil {
 		return err
+	}
+	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
+	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
+	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
+	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
+		// Storing the block does not depend on the execution layer acknowledging the head in time,
+		// and the next head sends another update.
+		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
+			return err
+		}
+		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
 	}
 
 	if err := a.indiciesDB.View(ctx, func(tx kv.Tx) error {
@@ -2204,45 +2221,6 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	}
 
 	return nil
-}
-
-func (a *ApiHandler) adoptProducedBlock(
-	ctx context.Context,
-	block *cltypes.SignedBeaconBlock,
-	blockRoot common.Hash,
-) (common.Hash, *state.CachingBeaconState, error) {
-	// Adoption changes the execution head, so preparation must not concurrently start a builder
-	// from the previous head.
-	finishExecutionWork := a.payloadPreparationGate.beginExecutionWork()
-	defer finishExecutionWork()
-
-	// Skip BLS re-verification for locally-produced blocks. The block was just
-	// built by this node, so re-verifying the signature is redundant. Additionally,
-	// AddChainSegment replays from the nearest checkpoint state, and the replayed
-	// state can produce a different proposer shuffling than the head state used
-	// during block production (especially on minimal preset with rapid epoch
-	// boundaries), causing VerifyBlockSignature to fail.
-	// TODO: fix the root cause in state replay so fullValidation can be re-enabled.
-	log.Warn("Skipping full validation for locally-produced block", "slot", block.Block.Slot, "proposer", block.Block.ProposerIndex)
-	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
-		return common.Hash{}, nil, err
-	}
-	headRoot, headSlot, headState, err := a.selectedHeadState(blockRoot)
-	if err != nil {
-		return common.Hash{}, nil, err
-	}
-	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.FinalizedCheckpoint().Root)
-	safeHash := a.forkchoiceStore.GetFinalizedExecutionHash(a.forkchoiceStore.JustifiedCheckpoint().Root)
-	headVersion := a.beaconChainCfg.GetCurrentStateVersion(headSlot / a.beaconChainCfg.SlotsPerEpoch)
-	if _, err := a.engine.ForkChoiceUpdate(ctx, finalizedHash, safeHash, a.forkchoiceStore.GetEth1Hash(headRoot), nil, headVersion); err != nil {
-		// Storing the block does not depend on the execution layer acknowledging the head in time,
-		// and the next head sends another update.
-		if !errors.Is(err, execution_client.ErrForkChoiceUpdateTimeout) {
-			return common.Hash{}, nil, err
-		}
-		log.Debug("BlockProduction: forkchoice update timed out while storing block", "root", headRoot)
-	}
-	return headRoot, headState, nil
 }
 
 func (a *ApiHandler) selectedHeadState(auxiliaryRoot common.Hash) (common.Hash, uint64, *state.CachingBeaconState, error) {

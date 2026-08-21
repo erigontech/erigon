@@ -45,7 +45,7 @@ var (
 	errNoPayloadID            = errors.New("execution layer returned no payload id")
 	errHeadTooFarBack         = errors.New("head state is too far behind the slot to prepare")
 	errPreparationHeadChanged = errors.New("selected head changed while preparing payload")
-	errExecutionWorkInFlight  = errors.New("block production or local block adoption is using the execution layer")
+	errBlockWorkInFlight      = errors.New("block production, publication, or adoption is in progress")
 	errPreparationTooLate     = errors.New("slot is too close to prime a payload production would use")
 	errGloasPayloadPending    = errors.New("gloas parent payload decision is not ready")
 	errGloasReorgToEmpty      = errors.New("gloas EMPTY path cannot be primed from a FULL execution head")
@@ -86,18 +86,20 @@ func (s *payloadPreparationScratch) resetForTargetSlot(targetSlot uint64) {
 	if s.targetSlot == targetSlot {
 		return
 	}
-	s.state = nil
+	s.release()
 	s.targetSlot = targetSlot
 }
 
-// payloadPreparationGate separates short execution exclusion from the wider local block lifecycle.
-// Production and adoption hold the shared side only around execution-critical sections.
-// Preparation takes the exclusive side with TryLock, so it never queues ahead of them.
-// localBlockWork suppresses preparation while local block work is active. latestProducedSlot keeps
-// stale-head preparation suppressed until a head for that slot is selected or the slot has passed.
+func (s *payloadPreparationScratch) release() {
+	s.state = nil
+}
+
+// payloadPreparationGate gives real block work priority over speculative builder startup.
+// Production, publication, and adoption hold the shared side. Preparation checks that the gate is
+// idle before state work, then briefly takes the exclusive side only for StartPayloadBuild.
+// latestProducedSlot covers the signing interval when neither HTTP request holds the gate.
 type payloadPreparationGate struct {
-	executionWork      sync.RWMutex
-	localBlockWork     atomic.Int64
+	blockWork          sync.RWMutex
 	latestProducedSlot atomic.Uint64
 }
 
@@ -135,37 +137,24 @@ func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now t
 	return max(now.Sub(record.primedAt), 0), false
 }
 
-func (g *payloadPreparationGate) beginExecutionWork() func() {
-	g.executionWork.RLock()
-	return sync.OnceFunc(g.executionWork.RUnlock)
+func (g *payloadPreparationGate) beginBlockWork() func() {
+	g.blockWork.RLock()
+	return sync.OnceFunc(g.blockWork.RUnlock)
 }
 
 func (g *payloadPreparationGate) idle() bool {
-	if !g.executionWork.TryLock() {
+	if !g.blockWork.TryLock() {
 		return false
 	}
-	g.executionWork.Unlock()
+	g.blockWork.Unlock()
 	return true
 }
 
 func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
-	if !g.executionWork.TryLock() {
+	if !g.blockWork.TryLock() {
 		return nil, false
 	}
-	return g.executionWork.Unlock, true
-}
-
-// The wider lifecycle marker is reference-counted because local work can overlap. The returned
-// release is idempotent, so asynchronous and error cleanup paths may share it safely.
-func (g *payloadPreparationGate) beginLocalBlockWork() func() {
-	g.localBlockWork.Add(1)
-	return sync.OnceFunc(func() {
-		g.localBlockWork.Add(-1)
-	})
-}
-
-func (g *payloadPreparationGate) localBlockWorkInFlight() bool {
-	return g.localBlockWork.Load() > 0
+	return g.blockWork.Unlock, true
 }
 
 func (g *payloadPreparationGate) noteProducedBlock(slot uint64) {
@@ -192,7 +181,7 @@ func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) <-chan struct{
 	}
 	// Only the direct execution client exposes builder startup without a fork-choice update.
 	if _, ok := a.engine.(execution_client.PayloadBuilder); !ok {
-		a.payloadPreparationLogger().Info(
+		a.logger.Info(
 			"PayloadPreparation: disabled",
 			"reason", "execution client does not support direct payload building",
 		)
@@ -206,15 +195,8 @@ func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) <-chan struct{
 	return done
 }
 
-func (a *ApiHandler) payloadPreparationLogger() log.Logger {
-	if a.logger != nil {
-		return a.logger
-	}
-	return log.Root()
-}
-
 func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
-	logger := a.payloadPreparationLogger()
+	logger := a.logger
 	// Polling once per quarter slot gives a newly selected head several chances to trigger
 	// preparation. Most non-proposal ticks stop before copying state; a pre-Fulu epoch boundary
 	// needs state advancement before the proposer is known.
@@ -271,6 +253,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		// Before genesis the current slot clamps to zero, so the next slot can be arbitrarily far
 		// off; a builder primed that early hits its own cap before the slot even starts.
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
+		currentSlotStart := slotStart.Add(-time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
 		lead := time.Until(slotStart)
 		if lead > maxPreparationLead(a.beaconChainCfg) || lead <= minimumPreparationLead {
 			continue
@@ -279,16 +262,15 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		if !selected {
 			continue
 		}
-		if a.payloadPreparationGate.localBlockWorkInFlight() ||
-			a.payloadPreparationGate.producedBlockPending(currentSlot, selectedSlot) {
+		if a.payloadPreparationGate.producedBlockPending(currentSlot, selectedSlot) {
 			continue
 		}
-		if selectedSlot != currentSlot && shouldWaitForCurrentSlotHead(
+		if shouldWaitForCurrentSlotHead(
 			currentSlot,
 			selectedSlot,
 			a.forkchoiceStore.BlockProcessing(),
 			time.Now(),
-			a.ethClock.GetSlotTime(currentSlot),
+			currentSlotStart,
 			attestationDue(a.beaconChainCfg, currentVersion),
 		) {
 			continue
@@ -304,7 +286,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 			if currentVersion.AfterOrEqual(clparams.GloasVersion) {
 				if delay := gloasPayloadDecisionDelay(
 					time.Now(),
-					a.ethClock.GetSlotTime(currentSlot),
+					currentSlotStart,
 					time.Duration(a.beaconChainCfg.PayloadAttestationDueMs())*time.Millisecond,
 				); delay > 0 {
 					if err := common.Sleep(ctx, delay); err != nil {
@@ -338,15 +320,19 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		// to its EMPTY parent.
 		if current.gloasPath == gloasPayloadPathReorgToEmpty {
 			lastSettled = current
+			scratch.release()
 			continue
 		}
-		prepareCtx, cancel := context.WithDeadlineCause(ctx, slotStart, errPreparationTooLate)
+		prepareCtx, cancel := context.WithDeadlineCause(
+			ctx, slotStart.Add(-minimumPreparationLead), errPreparationTooLate,
+		)
 		head, err := a.preparePayloadForWithScratch(prepareCtx, targetSlot, &scratch)
 		cancel()
 		outcome := current
 		outcome.headRoot = head
 		if isSettledPreparationOutcome(err) {
 			lastSettled = outcome
+			scratch.release()
 		}
 		if err != nil && !isExpectedPreparationSkip(err) && time.Since(lastFailureLog) >= time.Minute {
 			logger.Warn("PayloadPreparation: failed", "slot", targetSlot, "err", err)
@@ -388,6 +374,9 @@ func shouldWaitForCurrentSlotHead(
 	now, currentSlotStart time.Time,
 	attestationDeadline time.Duration,
 ) bool {
+	if selectedSlot == currentSlot {
+		return false
+	}
 	if selectedSlot > currentSlot || blockProcessing {
 		return true
 	}
@@ -410,7 +399,7 @@ func isExpectedPreparationSkip(err error) bool {
 		errors.Is(err, errNoPayloadID) ||
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
-		errors.Is(err, errExecutionWorkInFlight) ||
+		errors.Is(err, errBlockWorkInFlight) ||
 		errors.Is(err, errPreparationTooLate) ||
 		errors.Is(err, errGloasPayloadPending) ||
 		errors.Is(err, errGloasReorgToEmpty) ||
@@ -431,12 +420,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	ctx context.Context,
 	targetSlot uint64,
 	scratch *payloadPreparationScratch,
-) (preparedHead common.Hash, resultErr error) {
-	defer func() {
-		if isSettledPreparationOutcome(resultErr) {
-			scratch.state = nil
-		}
-	}()
+) (common.Hash, error) {
 	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
 		return common.Hash{}, errPreparationTooLate
 	}
@@ -470,7 +454,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 			}
 		}
 		if !a.payloadPreparationGate.idle() {
-			return errExecutionWorkInFlight
+			return errBlockWorkInFlight
 		}
 		baseState, err = scratch.copyFrom(headState, a.beaconChainCfg)
 		return err
@@ -535,7 +519,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 
 	a.preparedPayload.set(targetSlot, payloadID, time.Now())
-	a.payloadPreparationLogger().Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot)
+	a.logger.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot)
 	return baseBlockRoot, nil
 }
 
@@ -573,7 +557,7 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 		}
 		finishAttempt, ok := a.payloadPreparationGate.tryBeginPreparation()
 		if !ok {
-			return nil, errExecutionWorkInFlight
+			return nil, errBlockWorkInFlight
 		}
 		payloadID, err := payloadBuilder.StartPayloadBuild(ctx, head, attrs)
 		finishAttempt()

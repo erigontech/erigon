@@ -27,7 +27,6 @@ import (
 	"net/http/httptest"
 	"strings"
 	"sync"
-	"sync/atomic"
 	"testing"
 	"time"
 
@@ -43,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -899,43 +897,6 @@ func (s *syncedBuffer) String() string {
 	return s.buf.String()
 }
 
-type blockingLogHandler struct {
-	message     string
-	entered     chan struct{}
-	release     chan struct{}
-	enteredOnce sync.Once
-	next        log.Handler
-}
-
-func (h *blockingLogHandler) Log(record *log.Record) error {
-	if record.Msg == h.message {
-		h.enteredOnce.Do(func() { close(h.entered) })
-		<-h.release
-	}
-	return h.next.Log(record)
-}
-
-func (h *blockingLogHandler) Enabled(context.Context, log.Lvl) bool {
-	return true
-}
-
-func blockOnRootLogMessage(t *testing.T, message string) (<-chan struct{}, func()) {
-	t.Helper()
-	blocker := &blockingLogHandler{
-		message: message,
-		entered: make(chan struct{}),
-		release: make(chan struct{}),
-		next:    log.Root().GetHandler(),
-	}
-	log.Root().SetHandler(blocker)
-	release := sync.OnceFunc(func() { close(blocker.release) })
-	t.Cleanup(func() {
-		release()
-		log.Root().SetHandler(blocker.next)
-	})
-	return blocker.entered, release
-}
-
 func awaitErrorResult(t *testing.T, result <-chan error) error {
 	t.Helper()
 	select {
@@ -945,27 +906,6 @@ func awaitErrorResult(t *testing.T, result <-chan error) error {
 		t.Fatal("operation did not finish")
 		return nil
 	}
-}
-
-func runJoinedOperation(t *testing.T, unblock func(), operation func(context.Context) error) <-chan error {
-	t.Helper()
-	ctx, cancel := context.WithCancel(t.Context())
-	result := make(chan error, 1)
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		result <- operation(ctx)
-	}()
-	t.Cleanup(func() {
-		unblock()
-		cancel()
-		select {
-		case <-done:
-		case <-time.After(5 * time.Second):
-			t.Errorf("operation goroutine did not stop")
-		}
-	})
-	return result
 }
 
 // captureProductionLogs redirects the root logger for one test and returns everything written at
@@ -986,116 +926,6 @@ func captureProductionLogs(t *testing.T) func() string {
 		}
 		return strings.Join(loud, "\n")
 	}
-}
-
-func TestProductionDerivesPayloadAttributesOutsidePreparationGate(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
-	targetSlot := postState.Slot() + 1
-
-	var gateHeldAtForkChoice atomic.Bool
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		DoAndReturn(func(context.Context, common.Hash, common.Hash, common.Hash, *engine_types.PayloadAttributes, clparams.StateVersion) ([]byte, error) {
-			finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation()
-			if ok {
-				finishPreparation()
-			}
-			gateHeldAtForkChoice.Store(!ok)
-			return nil, errors.New("stop after fork-choice entry")
-		})
-	handler.engine = engine
-
-	// The missing-recipient warning occurs before withdrawal and attribute derivation, making that
-	// phase observable without relying on how long the state work takes.
-	derivationStarted, releaseDerivation := blockOnRootLogMessage(t,
-		"BlockProduction: no fee recipient from prepare_beacon_proposer, using zero address")
-	result := runJoinedOperation(t, releaseDerivation, func(ctx context.Context) error {
-		_, _, err := handler.produceBeaconBody(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
-			targetSlot, common.Bytes96{}, common.Hash{})
-		return err
-	})
-
-	select {
-	case <-derivationStarted:
-	case productionErr := <-result:
-		releaseDerivation()
-		t.Fatalf("block production exited before payload derivation was observed: %v", productionErr)
-	case <-time.After(5 * time.Second):
-		releaseDerivation()
-		awaitErrorResult(t, result)
-		t.Fatal("payload derivation was not observed")
-	}
-	finishPreparation, preparationStarted := handler.payloadPreparationGate.tryBeginPreparation()
-	if preparationStarted {
-		finishPreparation()
-	}
-	releaseDerivation()
-	productionErr := awaitErrorResult(t, result)
-
-	require.True(t, preparationStarted, "payload derivation must not suppress preparation")
-	require.ErrorContains(t, productionErr, "stop after fork-choice entry")
-	require.True(t, gateHeldAtForkChoice.Load(), "fork choice must exclude preparation")
-}
-
-func TestProductionProcessesCollectedPayloadOutsidePreparationGate(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
-	targetSlot := postState.Slot() + 1
-	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
-	require.NoError(t, err)
-	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
-
-	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	var gateHeldDuringCollection atomic.Bool
-	engine := execution_client.NewMockExecutionEngine(ctrl)
-	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
-		Return(payloadID, nil)
-	engine.EXPECT().GetAssembledBlock(gomock.Any(), payloadID, clparams.ElectraVersion).
-		DoAndReturn(func(context.Context, []byte, clparams.StateVersion) (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-			finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation()
-			if ok {
-				finishPreparation()
-			}
-			gateHeldDuringCollection.Store(!ok)
-			return cltypes.NewEth1Block(clparams.ElectraVersion, handler.beaconChainCfg),
-				&engine_types.BlobsBundle{}, &typesproto.RequestsBundle{Requests: [][]byte{{0xff, 0}}}, nil, nil
-		})
-	handler.engine = engine
-
-	clock := eth_clock.NewMockEthereumClock(ctrl)
-	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-10 * time.Second))
-	handler.ethClock = clock
-
-	// A non-empty request bundle reaches returned-payload processing and blocks before decoding, so
-	// the gate can be checked after collection without depending on processing speed.
-	processingStarted, releaseProcessing := blockOnRootLogMessage(t, "BlockProduction: Received requests bundle")
-	result := runJoinedOperation(t, releaseProcessing, func(ctx context.Context) error {
-		_, _, err := handler.produceBeaconBody(ctx, 1, postState.Slot(), common.Hash{0x41}, postState,
-			targetSlot, common.Bytes96{}, common.Hash{})
-		return err
-	})
-
-	select {
-	case <-processingStarted:
-	case productionErr := <-result:
-		releaseProcessing()
-		t.Fatalf("block production exited before returned-payload processing was observed: %v", productionErr)
-	case <-time.After(5 * time.Second):
-		releaseProcessing()
-		awaitErrorResult(t, result)
-		t.Fatal("returned-payload processing was not observed")
-	}
-	finishPreparation, preparationStarted := handler.payloadPreparationGate.tryBeginPreparation()
-	if preparationStarted {
-		finishPreparation()
-	}
-	releaseProcessing()
-	productionErr := awaitErrorResult(t, result)
-
-	require.ErrorContains(t, productionErr, "unknown execution request type")
-	require.True(t, gateHeldDuringCollection.Load(), "payload collection must exclude preparation")
-	require.True(t, preparationStarted, "returned-payload processing must not suppress preparation")
 }
 
 func TestPollAssembledPayloadStaysQuietWhenAFailedPollRecovers(t *testing.T) {
