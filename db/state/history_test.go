@@ -2624,3 +2624,42 @@ func BenchmarkHistorySeekInFiles(b *testing.B) {
 		}
 	})
 }
+
+// BenchmarkHistoryRangePaged walks merged (page-compressed) history files, which is
+// where PagedReader decodes a page per Reset. BenchmarkHistoryRange_MultiFile keeps
+// its files un-merged, so it never reaches that path.
+func BenchmarkHistoryRangePaged(b *testing.B) {
+	logger := log.New()
+	ctx := b.Context()
+
+	db, h, txs := filledHistory(b, true, logger)
+	collateAndMergeHistory(b, db, h, txs, true)
+
+	tx, err := db.BeginRo(ctx)
+	require.NoError(b, err)
+	defer tx.Rollback()
+
+	ic := h.beginForTests()
+	defer ic.Close()
+
+	paged := false
+	for _, f := range ic.files {
+		if f.src.decompressor.CompressedPageValuesCount() > 1 {
+			paged = true
+			break
+		}
+	}
+	require.True(b, paged, "bench must run against page-compressed .v files, else it does not touch PagedReader")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		it, err := ic.HistoryRange(0, int(txs), order.Asc, -1, tx)
+		require.NoError(b, err)
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(b, err)
+		}
+		it.Close()
+	}
+}
