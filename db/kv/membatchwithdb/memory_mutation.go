@@ -1108,6 +1108,15 @@ func (m *MemoryMutation) IsOverlayReadView() bool {
 	return m != nil && m.memDb == nil
 }
 
+// SelectedDomainReader returns the domain reader captured by this overlay read
+// view. Mutable overlay owners do not represent a request-scoped selection.
+func (m *MemoryMutation) SelectedDomainReader() (DomainReader, bool) {
+	if !m.IsOverlayReadView() {
+		return nil, false
+	}
+	return m.DomainReader, true
+}
+
 // newReadViewMut is the internal constructor that returns the full
 // *MemoryMutation. Used by NewTemporalReadView which needs to embed it.
 func (m *MemoryMutation) newReadViewMut(tx kv.Tx) *MemoryMutation {
