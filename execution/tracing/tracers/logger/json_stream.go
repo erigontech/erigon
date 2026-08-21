@@ -104,7 +104,7 @@ func (l *JsonStreamLogger) writeMemoryWordRaw(chunk []byte) {
 		hex.Encode(l.hexEncodeBuf[:], chunk)
 	}
 	l.stream.WriteRaw(`"0x`)
-	l.stream.Write(l.hexEncodeBuf[:64]) //nolint:errcheck
+	l.stream.WriteRaw(common.ToStringZeroCopy(l.hexEncodeBuf[:64]))
 	l.stream.WriteRaw(`"`)
 }
 
@@ -257,4 +257,9 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteObjectEnd()
 	}
 	l.stream.WriteObjectEnd()
+
+	// Memory words used to drain through Stream.Write, which also drops the
+	// buffer's spare capacity. Draining once per step keeps a long trace from
+	// being held whole in memory, without that cost.
+	l.stream.Flush() //nolint:errcheck
 }

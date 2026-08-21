@@ -442,6 +442,22 @@ func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
+// TestJsonStreamLogger_MemoryDrainsToWriter pins that a long memory-enabled trace
+// keeps reaching the writer instead of accumulating in the stream's buffer.
+func TestJsonStreamLogger_MemoryDrainsToWriter(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 2048)}
+	for i := range 200 {
+		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+	}
+
+	require.NotZero(t, buf.Len(), "nothing reached the writer before Flush")
+}
+
 // TestJsonStreamLogger_ClosePendingAfterMemory pins that writing memory words keeps
 // the stream's auto-close stack balanced. Raw writes bypass the bookkeeping that
 // WriteString does, so an unbalanced stack makes ClosePending emit stray closers.
