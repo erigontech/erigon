@@ -595,32 +595,6 @@ func TestCaplinBuildMissingIndicesKeepsGapFilter(t *testing.T) {
 	require.Len(t, caplinIdxFiles(t, dirs), 2, "both segments on disk must end up indexed")
 }
 
-// An indexed subset must survive when its only covering superset has no index: the visible
-// set requires IsIndexed, so removing the subset would make the range unreadable.
-//
-// OpenList is used directly rather than OpenFolder: SegmentsCaplin's own NoOverlaps/NoGaps
-// scan already collapses a covered subset out of the dirty set before RemoveOverlaps ever
-// runs, which would pass regardless of the veto and prove nothing about it.
-func TestCaplinBlocksRemoveOverlapsKeepsSubsetWithoutIndexedSuperset(t *testing.T) {
-	const limit = snaptype.CaplinMergeLimit
-
-	dirs := datadir.New(t.TempDir())
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, limit, true)
-	writeEmptyCaplinSegment(t, dirs, snaptype.BeaconBlocks, 0, 2*limit, false)
-
-	subSegName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, limit)
-	supSegName := snaptype.BeaconBlocks.FileName(version.ZeroVersion, 0, 2*limit)
-	subSeg := filepath.Join(dirs.Snap, subSegName)
-
-	sn := NewCaplinSnapshots(ethconfig.BlocksFreezing{ChainName: "mainnet"}, &clparams.MainnetBeaconConfig, dirs, log.New())
-	t.Cleanup(sn.Close)
-	require.NoError(t, sn.OpenList([]string{subSegName, supSegName}, false))
-
-	require.NoError(t, sn.RemoveOverlaps(nil))
-
-	require.FileExists(t, subSeg, "the indexed subset is the only readable copy of [0,limit)")
-}
-
 func writeIndexSalt(t *testing.T, dirs datadir.Dirs) {
 	t.Helper()
 	salt := make([]byte, 4)

@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -661,7 +662,9 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 			if err := s.downloader.Seed(s.ctx, paths); err != nil {
 				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 			}
-			onDelete = func(l []string) error { return s.downloader.Delete(s.ctx, l) }
+			onDelete = func(l []string) error {
+				return s.downloader.Delete(s.ctx, absPaths(s.stateSn.Dir(), l))
+			}
 		}
 		if err := s.stateSn.RemoveOverlaps(onDelete); err != nil {
 			s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
@@ -669,6 +672,17 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	}
 
 	return nil
+}
+
+// absPaths re-roots names RemoveOverlaps reported relative to the caplin state dir. The
+// downloader is rooted at dirs.Snap and keys these torrents under caplin/, and it re-roots
+// only paths that arrive absolute — a relative name reaches it verbatim and matches nothing.
+func absPaths(dir string, names []string) []string {
+	out := make([]string, len(names))
+	for i, name := range names {
+		out[i] = filepath.Join(dir, name)
+	}
+	return out
 }
 
 func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.Tx) error {
