@@ -83,7 +83,7 @@ func TestPBinBranchCodecRoundTripPrefixBitLengths(t *testing.T) {
 		require.NoErrorf(t, err, "bitLen %d", bitLen)
 
 		var got [2]pbinCell
-		afterMap, err := pbinDecodeBranch(bytes.Clone(rec), &got)
+		afterMap, err := pbinDecodeBranch(bytes.Clone(rec), &got, 0, nil)
 		require.NoErrorf(t, err, "bitLen %d", bitLen)
 		require.Equal(t, uint16(0b11), afterMap)
 		require.Equalf(t, cells, got, "bitLen %d", bitLen)
@@ -98,6 +98,22 @@ func TestPBinBranchCodecOmitsRecordHeader(t *testing.T) {
 	rec, err := enc.encode(0b11, 0b11, &cells)
 	require.NoError(t, err)
 	require.Equal(t, byte(pbinFieldBranch|pbinFieldHash), rec[0])
+}
+
+func TestPBinBranchDecodeAcceptsDescentDepthAndDigestCache(t *testing.T) {
+	t.Parallel()
+
+	want := [2]pbinCell{pbinTestBranchCell(0xA5, 17), pbinTestLeafCell(0x5A, 31)}
+	var enc pbinBranchEncoder
+	record, err := enc.encode(0b11, 0b11, &want)
+	require.NoError(t, err)
+
+	keys := pbinDigestCache{sum: pbinBlake3Hash}
+	var got [2]pbinCell
+	afterMap, err := pbinDecodeBranch(record, &got, 17, &keys)
+	require.NoError(t, err)
+	require.Equal(t, uint16(0b11), afterMap)
+	require.Equal(t, want, got)
 }
 
 func TestPBinCellCodecFixedFieldCosts(t *testing.T) {
@@ -181,7 +197,7 @@ func TestPBinBranchCodecRoundTripCellShapes(t *testing.T) {
 			require.NoError(t, err)
 
 			var got [2]pbinCell
-			afterMap, err := pbinDecodeBranch(rec, &got)
+			afterMap, err := pbinDecodeBranch(rec, &got, 0, nil)
 			require.NoError(t, err)
 			require.Equal(t, uint16(0b11), afterMap)
 			require.Equal(t, tc.cells, got)
@@ -210,7 +226,7 @@ func TestPBinBranchCodecIsCanonical(t *testing.T) {
 			want := bytes.Clone(rec)
 
 			var got [2]pbinCell
-			_, err = pbinDecodeBranch(want, &got)
+			_, err = pbinDecodeBranch(want, &got, 0, nil)
 			require.NoError(t, err)
 
 			again, err := enc.encode(0b11, 0b11, &got)
@@ -269,7 +285,7 @@ func TestPBinDecodeRejectsTruncatedFixedFields(t *testing.T) {
 
 			record, err := pbinAppendCell(nil, &tc.cell)
 			require.NoError(t, err)
-			_, err = pbinDecodeCell(record[:len(record)-1], 0, new(pbinCell))
+			_, err = pbinDecodeCell(record[:len(record)-1], 0, new(pbinCell), 0, nil)
 			require.Error(t, err)
 			require.ErrorContains(t, err, "fixed value")
 		})
@@ -322,7 +338,7 @@ func TestPBinBranchDecodeRejects(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			t.Parallel()
 			var cells [2]pbinCell
-			_, err := pbinDecodeBranch(tc.rec, &cells)
+			_, err := pbinDecodeBranch(tc.rec, &cells, 0, nil)
 			require.Error(t, err)
 		})
 	}
@@ -365,7 +381,7 @@ func TestPBinBranchCodecDropsLoadedState(t *testing.T) {
 	require.NoError(t, err)
 
 	var got [2]pbinCell
-	_, err = pbinDecodeBranch(bytes.Clone(rec), &got)
+	_, err = pbinDecodeBranch(bytes.Clone(rec), &got, 0, nil)
 	require.NoError(t, err)
 	require.Equal(t, cellLoadNone, got[0].loaded)
 	require.Zero(t, got[0].Nonce)
@@ -384,7 +400,7 @@ func TestPBinBranchDecodeClearsReusedCells(t *testing.T) {
 	rec, err := enc.encode(0b11, 0b11, &want)
 	require.NoError(t, err)
 
-	_, err = pbinDecodeBranch(bytes.Clone(rec), &cells)
+	_, err = pbinDecodeBranch(bytes.Clone(rec), &cells, 0, nil)
 	require.NoError(t, err)
 	require.Equal(t, want, cells)
 }

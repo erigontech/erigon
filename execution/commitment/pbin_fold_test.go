@@ -176,7 +176,7 @@ func TestPBinFoldBranchMatchesOracle(t *testing.T) {
 			require.NotEmpty(t, data, "a branch fold stores its row")
 
 			var stored [2]pbinCell
-			afterMap, err := pbinDecodeBranch(data, &stored)
+			afterMap, err := pbinDecodeBranch(data, &stored, 0, nil)
 			require.NoError(t, err)
 			require.Equal(t, uint16(0b11), afterMap)
 			require.Equal(t, cells[0].prefix, stored[0].prefix)

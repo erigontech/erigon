@@ -113,7 +113,7 @@ func (pph *PBinPatriciaHashed) SetState(buf []byte) error {
 		return fmt.Errorf("%w: root cell of %d bytes in a %d-byte blob", errPBinStateBlob, rootLen, len(buf))
 	}
 	if len(buf) > 5 {
-		pos, err := pbinDecodeCell(buf, 5, &pph.grid.root)
+		pos, err := pbinDecodeCell(buf, 5, &pph.grid.root, 0, &pph.updateStream.keyDigest)
 		if err == nil && pos != len(buf) {
 			err = fmt.Errorf("%w: %d trailing bytes after the root cell", errPBinStateBlob, len(buf)-pos)
 		}

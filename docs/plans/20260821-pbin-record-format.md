@@ -251,15 +251,15 @@ and the state blob from `EncodeCurrentState`. This task changes all three layout
 - Modify: `execution/commitment/pbin_state.go`
 - Modify: `execution/commitment/pbin_cell_test.go`
 
-- [ ] write a failing test that the decode entry point accepts a descent depth and a digest source
-- [ ] thread both into `pbinDecodeBranch` and `pbinDecodeCell`
-- [ ] pass the values already held at every call site. There are five: `unfoldBranchNode`,
+- [x] write a failing test that the decode entry point accepts a descent depth and a digest source
+- [x] thread both into `pbinDecodeBranch` and `pbinDecodeCell`
+- [x] pass the values already held at every call site. There are five: `unfoldBranchNode`,
       `materializeBranch`, `dropSubtreeRecords`, `loadRoot`, and **`SetState`**, which decodes the
       state blob's root cell. `loadRoot` and `SetState` pass depth 0 — a root cell's prefix is the
       whole tree key
-- [ ] make no behaviour change in this task: the plumbing lands unused
-- [ ] write tests that every existing decode case is unaffected by the new parameters
-- [ ] run `go test ./execution/commitment/...` — must pass before task 5
+- [x] make no behaviour change in this task: the plumbing lands unused
+- [x] write tests that every existing decode case is unaffected by the new parameters
+- [x] run `go test ./execution/commitment/...` — must pass before task 5
 
 ### Task 5: Omit the prefix on storage leaf cells in branch records
 

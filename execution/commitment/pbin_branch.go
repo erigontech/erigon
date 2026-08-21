@@ -125,13 +125,13 @@ func pbinAppendCell(dst []byte, c *pbinCell) ([]byte, error) {
 
 // pbinDecodeBranch fills both cells from a record. It rejects every spelling the
 // encoder would not produce, so a record has one canonical form.
-func pbinDecodeBranch(data []byte, cells *[2]pbinCell) (afterMap uint16, err error) {
+func pbinDecodeBranch(data []byte, cells *[2]pbinCell, depth int16, keys *pbinDigestCache) (afterMap uint16, err error) {
 	cells[0].reset()
 	cells[1].reset()
 
 	pos := 0
 	for i := range cells {
-		if pos, err = pbinDecodeCell(data, pos, &cells[i]); err != nil {
+		if pos, err = pbinDecodeCell(data, pos, &cells[i], depth, keys); err != nil {
 			return 0, err
 		}
 	}
@@ -141,7 +141,7 @@ func pbinDecodeBranch(data []byte, cells *[2]pbinCell) (afterMap uint16, err err
 	return pbinCellBits, nil
 }
 
-func pbinDecodeCell(data []byte, pos int, c *pbinCell) (int, error) {
+func pbinDecodeCell(data []byte, pos int, c *pbinCell, depth int16, keys *pbinDigestCache) (int, error) {
 	if pos >= len(data) {
 		return 0, fmt.Errorf("%w: no cell body at offset %d", errPBinMalformedBranch, pos)
 	}
