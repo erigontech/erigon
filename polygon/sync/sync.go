@@ -732,7 +732,7 @@ func (s *Sync) reorganiseBridge(ctx context.Context, ccb *CanonicalChainBuilder,
 	canonicalHeaders := ccb.HeadersInRange(start, amount)
 	canonicalBlocks := make([]*types.Block, len(canonicalHeaders))
 	for i, header := range canonicalHeaders {
-		canonicalBlocks[i] = types.NewBlockWithHeader(header)
+		canonicalBlocks[i] = types.NewBlockWithHeader(header, nil)
 	}
 
 	return s.bridgeSync.ProcessNewBlocks(ctx, canonicalBlocks)
