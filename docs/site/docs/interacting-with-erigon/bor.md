@@ -6,6 +6,10 @@ sidebar_position: 10
 
 # bor
 
+:::note
+The final Erigon release series that officially supports Polygon is 3.1.\*. The `bor` namespace is still wired and `--chain=bor-mainnet` remains selectable, so this reference is kept for those releases — but see [Supported Networks](/fundamentals/supported-networks) before planning a new Polygon deployment.
+:::
+
 The `bor` namespace provides Polygon-specific RPC methods that are only available when running Erigon on Polygon networks (Mainnet, Amoy testnet, etc.). These methods expose functionality specific to the Bor consensus engine, including validator information, snapshots, and proposer sequences.
 
 The bor namespace must be explicitly enabled using the `--http.api` flag when starting the RPC Daemon and is only functional when running on Polygon networks with the Bor consensus engine.

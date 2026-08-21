@@ -44,6 +44,8 @@ kill -SIGUSR1 $(pidof erigon)
 # Stack traces are printed to the erigon log / stdout
 ```
 
+If the node is wedged and you are ready to lose it, `kill -SIGABRT <pid>` dumps the stacks and terminates that process in one step. Pass an explicit PID rather than `$(pidof erigon)`: `SIGABRT` is destructive, and on a host running more than one instance `pidof` would abort all of them.
+
 **Capture a CPU or heap profile via pprof** (requires `--pprof` flag at startup — default address `localhost:6060`; override with `--pprof.addr` and `--pprof.port`):
 
 ```bash
@@ -61,12 +63,46 @@ Attach the `.pprof` files and the goroutine dump to your GitHub issue.
 
 ## Hetzner Cloud / Dedicated Server Firewall Note
 
-Hetzner applies a stateless firewall at the network edge. Ensure the following ports are open for **both TCP and UDP, inbound and outbound**:
+Hetzner filters traffic at the network edge, and the two product lines need different rules:
 
-| Purpose        | Port  | Protocol |
-| -------------- | ----- | -------- |
-| P2P (Ethereum) | 30303 | TCP+UDP  |
-| P2P (Caplin)   | 9000  | TCP+UDP  |
+* **Cloud** — the firewall is stateful, so return traffic is handled for you. Outbound is allow-all, but only for as long as no outbound rule exists: per Hetzner's FAQ, *"If you define one or more outbound rules, the outbound direction also changes to implicit 'deny'"*. Adding outbound rules for the ports below would therefore cut off DNS, NTP and HTTPS — including the snapshot webseeds — and break the initial download. Define **inbound rules only** and leave the outbound list empty.
+* **Dedicated servers (Robot)** — the firewall is stateless, so return traffic needs an explicit rule of its own. Here you do need rules in both directions.
 
-Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure the firewall in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`.
+The ports to allow inbound:
+
+| Purpose                          | Port  | Protocol |
+| -------------------------------- | ----- | -------- |
+| P2P (execution layer)            | 30303 | TCP+UDP  |
+| Snapshot downloader (BitTorrent) | 42069 | TCP+UDP  |
+| Caplin DISCV5 discovery          | 4000  | UDP      |
+| Caplin DISCV5                    | 4001  | TCP      |
+
+This table is not exhaustive — it lists what a default node needs. See [Default ports](/fundamentals/default-ports) for every port Erigon can open, including the opt-in Shutter port.
+
+The Caplin ports are its defaults (`--caplin.discovery.port` and `--caplin.discovery.tcpport`); change the rules to match if you override them. If you run an **external** consensus client instead of Caplin, open the ports that client uses rather than the Caplin ones. Lighthouse, Teku and Nimbus default to `9000` TCP+UDP, and Lighthouse additionally uses `9001` UDP for QUIC; Prysm defaults to `13000` TCP and `12000` UDP. Check your client's own documentation rather than assuming `9000`.
+
+Without these, the node may appear to have peers (via the cloud dashboard) but will suffer poor block propagation. Configure Cloud firewalls in the Hetzner Cloud Console under **Firewalls** or via `hcloud firewall`; for dedicated servers the equivalent lives in the Robot panel under **Server → Firewall**.
+
+A public-facing Erigon node should also not attempt to peer with IPv4 ranges that are reserved for special use. Blocking them is worth doing explicitly on Hetzner, whose abuse and netscan detection flags outbound dials to reserved ranges — that is what prompted this note, rather than their firewall filtering the traffic. Do not apply this to a node using `--caplin.local-discovery`, which deliberately peers over private IPs. The authoritative list is the [IANA IPv4 Special-Purpose Address Registry](https://www.iana.org/assignments/iana-ipv4-special-registry/iana-ipv4-special-registry.xhtml) ([RFC 6890](https://datatracker.ietf.org/doc/html/rfc6890)); the ranges below are the ones commonly blocked for an Ethereum node (`100.64.0.0/10` comes from [RFC 6598](https://datatracker.ietf.org/doc/html/rfc6598), and `192.88.99.0/24` has since been deprecated by [RFC 7526](https://datatracker.ietf.org/doc/html/rfc7526) — blocking it remains correct):
+
+```text
+0.0.0.0/8             "This" Network                                RFC 1122, Section 3.2.1.3
+10.0.0.0/8            Private-Use Networks                          RFC 1918
+100.64.0.0/10         Carrier-Grade NAT (CGN)                       RFC 6598, Section 7
+127.0.0.0/8           Loopback                                      RFC 1122, Section 3.2.1.3
+169.254.0.0/16        Link Local                                    RFC 3927
+172.16.0.0/12         Private-Use Networks                          RFC 1918
+192.0.0.0/24          IETF Protocol Assignments                     RFC 5736
+192.0.2.0/24          TEST-NET-1                                    RFC 5737
+192.88.99.0/24        6to4 Relay Anycast                            RFC 3068
+192.168.0.0/16        Private-Use Networks                          RFC 1918
+198.18.0.0/15         Network Interconnect Device Benchmark Testing RFC 2544
+198.51.100.0/24       TEST-NET-2                                    RFC 5737
+203.0.113.0/24        TEST-NET-3                                    RFC 5737
+224.0.0.0/4           Multicast                                     RFC 3171
+240.0.0.0/4           Reserved for Future Use                       RFC 1112, Section 4
+255.255.255.255/32    Limited Broadcast                             RFC 919 and RFC 922, Section 7
+```
+
+A near-identical list expressed in [iptables syntax](https://ethereum.stackexchange.com/questions/6386/how-to-prevent-being-blacklisted-for-running-an-ethereum-client/13068#13068) is available on Stack Exchange. It covers 14 of the 16 ranges above, deliberately leaving out `127.0.0.0/8` and `255.255.255.255/32`: an `OUTPUT` drop on loopback would break Erigon's own inter-component traffic, such as the RPC Daemon reaching the core node on `127.0.0.1:9090`.
 
