@@ -21,6 +21,7 @@ package rpc
 
 import (
 	"encoding/json"
+	"errors"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -264,4 +265,36 @@ func TestCheckJwtSecretAuthScheme(t *testing.T) {
 			require.Equal(t, tc.want, CheckJwtSecret(httptest.NewRecorder(), r, secret))
 		})
 	}
+}
+
+// hangUpWriter accepts headers, then fails every body write, standing in for a
+// client that goes away mid-response.
+type hangUpWriter struct {
+	header http.Header
+	status int
+}
+
+func (w *hangUpWriter) Header() http.Header { return w.header }
+func (w *hangUpWriter) WriteHeader(s int)   { w.status = s }
+func (w *hangUpWriter) Write([]byte) (int, error) {
+	return 0, errors.New("connection reset by peer")
+}
+
+// TestUndeliveredResponseIsCounted pins that a response the client stopped
+// reading is recorded. The status is already sent by then, so the counter is the
+// only place a truncated reply can show up.
+func TestUndeliveredResponseIsCounted(t *testing.T) {
+	srv := NewServer(50, false, false, false /* disableStreaming */, log.Root(), 100)
+	require.NoError(t, srv.RegisterName("test", new(testService)))
+	defer srv.Stop()
+
+	before := undeliveredGauge.GetValueUint64()
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"test_echo","params":["x",1]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	srv.ServeHTTP(&hangUpWriter{header: make(http.Header)}, req)
+
+	require.Greater(t, undeliveredGauge.GetValueUint64(), before,
+		"a response the client stopped reading was not recorded")
 }

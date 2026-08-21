@@ -64,16 +64,37 @@ func (s *StackStream) Reset(out io.Writer) {
 	s.stack = s.stack[:0]
 }
 
-// Write raw bytes to the stream
+// Write appends raw bytes. jsoniter's Stream.Write is not used: it exists to
+// satisfy io.Writer, so it reslices the buffer forward to keep whatever a short
+// write left, leaving no spare capacity. handleMsg ends every response with one
+// such call, which is enough to make the buffer unusable and cap() meaningless.
 func (s *StackStream) Write(content []byte) (int, error) {
 	s.popCommaOrField()
-	return s.stream.Write(content)
+	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
+	s.flushIfFull()
+	return len(content), nil
 }
 
 // WriteRaw writes raw content to the stream
 func (s *StackStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
 	s.popCommaOrField()
+	s.flushIfFull()
+}
+
+// flushIfFull hands the buffer over once it is full, so a large response streams
+// instead of being held whole.
+func (s *StackStream) flushIfFull() {
+	if len(s.stream.Buffer()) < FlushThreshold {
+		return
+	}
+	if s.stream.Flush() != nil {
+		// The client is gone, so these bytes can never be delivered and every
+		// later Flush short-circuits on stream.Error without draining. Dropping
+		// them keeps a failed response from buffering whole; Error() keeps the
+		// failure itself.
+		s.stream.SetBuffer(s.stream.Buffer()[:0])
+	}
 }
 
 // WriteNil writes a null value to the stream
@@ -176,6 +197,7 @@ func (s *StackStream) WriteFloat64(val float64) {
 func (s *StackStream) WriteString(val string) {
 	s.stream.WriteString(val)
 	s.popCommaOrField()
+	s.flushIfFull()
 }
 
 // WriteObjectStart writes the start of an object and adds it to the stack

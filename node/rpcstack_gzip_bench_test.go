@@ -24,6 +24,8 @@ import (
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	jsoniter "github.com/json-iterator/go"
 	"io"
+	"math/rand"
+	"net"
 	"net/http"
 	"net/http/httptest"
 	"os"
@@ -32,6 +34,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"testing"
+
+	"github.com/stretchr/testify/require"
 	"time"
 )
 
@@ -593,5 +597,101 @@ func BenchmarkGzipPeakMemoryParallel(b *testing.B) {
 			sampler.Wait()
 			b.ReportMetric(float64(peak.Load())/(1<<20), "peak-heap-MiB")
 		})
+	}
+}
+
+// countingConn counts writes reaching the socket, which is what a small flush
+// threshold multiplies.
+type flushConn struct {
+	net.Conn
+	writes, bytes *atomic.Int64
+}
+
+func (c flushConn) Write(p []byte) (int, error) {
+	c.writes.Add(1)
+	c.bytes.Add(int64(len(p)))
+	return c.Conn.Write(p)
+}
+
+type flushListener struct {
+	net.Listener
+	writes, bytes *atomic.Int64
+}
+
+func (l flushListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return flushConn{c, l.writes, l.bytes}, nil
+}
+
+// BenchmarkStreamFlushThreshold sweeps how much a response buffers before it is
+// handed to the writer, with and without the gzip middleware, reporting the
+// socket writes each choice causes.
+func BenchmarkStreamFlushThreshold(b *testing.B) {
+	const responseSize = 8 << 20
+	// Structlog-shaped: hex that varies, so gzip sees a realistic ratio rather
+	// than the ~1000:1 of a repeated byte.
+	rng := rand.New(rand.NewSource(1))
+	chunks := make([]string, 64)
+	for i := range chunks {
+		var sb strings.Builder
+		for range 8 {
+			b := make([]byte, 32)
+			rng.Read(b)
+			fmt.Fprintf(&sb, `{"pc":%d,"op":"SSTORE","gas":%d,"stack":["0x%x"]},`, rng.Intn(9999), rng.Intn(999999), b)
+		}
+		chunks[i] = sb.String()
+	}
+
+	for _, gz := range []bool{false, true} {
+		for _, threshold := range []int{4 << 10, 16 << 10, 64 << 10, 256 << 10, 1 << 20} {
+			name := fmt.Sprintf("gzip=%v/flushAt=%dKiB", gz, threshold>>10)
+			b.Run(name, func(b *testing.B) {
+				var writes, bytesOut atomic.Int64
+				ln, err := net.Listen("tcp", "127.0.0.1:0")
+				require.NoError(b, err)
+
+				var h http.Handler = http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+					s := jsoniter.NewStream(jsoniter.ConfigDefault, w, threshold)
+					written := 0
+					for i := 0; written < responseSize; i++ {
+						c := chunks[i%len(chunks)]
+						s.WriteRaw(c)
+						written += len(c)
+						if len(s.Buffer()) >= threshold {
+							s.Flush() //nolint:errcheck
+						}
+					}
+					s.Flush() //nolint:errcheck
+				})
+				if gz {
+					h = newGzipHandler(h)
+				}
+				srv := &http.Server{Handler: h}
+				go srv.Serve(flushListener{ln, &writes, &bytesOut}) //nolint:errcheck
+				b.Cleanup(func() { srv.Close() })
+
+				url := "http://" + ln.Addr().String() + "/"
+				b.ResetTimer()
+				for b.Loop() {
+					req, _ := http.NewRequest(http.MethodGet, url, nil) //nolint:noctx
+					if gz {
+						req.Header.Set("Accept-Encoding", "gzip")
+					}
+					resp, err := http.DefaultClient.Do(req)
+					require.NoError(b, err)
+					_, err = io.Copy(io.Discard, resp.Body)
+					require.NoError(b, err)
+					resp.Body.Close()
+				}
+				b.StopTimer()
+
+				n := max(int64(b.N), 1)
+				b.ReportMetric(float64(writes.Load())/float64(n), "socketWrites/op")
+				b.ReportMetric(float64(bytesOut.Load())/float64(n)/(1<<10), "KiBout/op")
+			})
+		}
 	}
 }

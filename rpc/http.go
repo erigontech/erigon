@@ -333,7 +333,12 @@ func (s *Server) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 			w.Header().Set("Retry-After", "1")
 			w.WriteHeader(http.StatusServiceUnavailable)
 		}
-		stream.Flush()
+		if err := stream.Flush(); err != nil {
+			// The response is already partly on the wire, so the status cannot
+			// change: record it instead of dropping it.
+			undeliveredGauge.Inc()
+			s.logger.Trace("rpc: response not fully delivered", "url", r.URL.String(), "err", err)
+		}
 	}
 }
 

@@ -31,6 +31,9 @@ var (
 	rpcMetricsLabels   = map[bool]map[string]string{}
 	rpcRequestGauge    = metrics.GetOrCreateCounter("rpc_total")
 	failedReqeustGauge = metrics.GetOrCreateCounter("rpc_failure")
+	// A response the client stopped reading. Routine on its own -- someone
+	// cancels a long trace -- but a rising rate means truncated replies.
+	undeliveredGauge = metrics.GetOrCreateCounter("rpc_undelivered_total")
 )
 
 // PreAllocateRPCMetricLabels pre-allocates labels for all rpc methods inside API List
