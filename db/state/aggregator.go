@@ -98,7 +98,6 @@ type Aggregator struct {
 	visibilityLoweringForbidden atomic.Bool
 	snapshotBuildSema           *semaphore.Weighted
 
-	disableHistory      bool
 	branchCacheDisabled bool
 	skipFilesDBGapCheck bool
 	workers             workersCfg
@@ -237,10 +236,6 @@ func GetStateIndicesSalt(dirs datadir.Dirs, genNew bool, logger log.Logger) (sal
 }
 
 func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) (err error) {
-	if a.disableHistory {
-		cfg.Hist.HistoryDisabled = true
-		cfg.Hist.IiCfg.Enabled = false
-	}
 	a.d[cfg.Name], err = NewDomain(cfg, a.stepSize.Load(), a.stepsInFrozenFile.Load(), dirs, logger)
 	if err != nil {
 		return err
@@ -253,9 +248,6 @@ func (a *Aggregator) RegisterDomain(cfg statecfg.DomainCfg, salt *uint32, dirs d
 func (a *Aggregator) RegisterII(cfg statecfg.InvIdxCfg, salt *uint32, dirs datadir.Dirs, logger log.Logger) error {
 	if ii := a.searchII(cfg.Name); ii != nil {
 		return fmt.Errorf("inverted index %s already registered", cfg.Name)
-	}
-	if a.disableHistory {
-		cfg.Enabled = false
 	}
 	ii, err := NewInvertedIndex(cfg, a.stepSize.Load(), a.stepsInFrozenFile.Load(), dirs, logger)
 	if err != nil {
