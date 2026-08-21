@@ -150,6 +150,7 @@ type BaseAPI struct {
 	_genesis                  atomic.Pointer[types.Block]
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
+	_preMergeBodies           atomic.Pointer[bool]
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -437,7 +438,80 @@ func (api *BaseAPI) checkPruneHistory(ctx context.Context, tx kv.Tx, block uint6
 // checkPruneBlocks gates on block-body availability rather than state history — use for RPCs
 // that read block headers/bodies but do not require state (e.g. GetBlockByNumber, GetTransactionByHash).
 func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64) error {
+	expiry, mergeHeight, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
+	if err != nil {
+		return err
+	}
+	if expiry {
+		if mergeHeight == nil || block >= *mergeHeight {
+			return nil
+		}
+		return fmt.Errorf("%w: requested block %d, blocks are available from block %d", state.PrunedError, block, *mergeHeight)
+	}
 	return api.checkPruneField(tx, block, func(p *prune.Mode) prune.BlockAmount { return p.Blocks }, "blocks are available")
+}
+
+// blocksFollowChainHistoryExpiry reports whether block retention is the chain's
+// history-expiry policy rather than a window, which Distance.Enabled reads as "not
+// pruning" although pre-merge bodies are never downloaded.
+func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx) (bool, *uint64, error) {
+	p, err := api.pruneMode(tx)
+	if err != nil || p == nil {
+		return false, nil, err
+	}
+	if p.Blocks != prune.KeepPostMergeBlocksPruneMode {
+		return false, nil, nil
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return false, nil, err
+	}
+	if chainConfig.MergeHeight != nil && p.History == prune.KeepPostMergeBlocksPruneMode {
+		holds, err := api.holdsPreMergeBodies(ctx, tx, *chainConfig.MergeHeight)
+		if err != nil || holds {
+			return false, nil, err
+		}
+	}
+	return true, chainConfig.MergeHeight, nil
+}
+
+// holdsPreMergeBodies reports whether the datadir holds any body below the merge
+// point. The stored prune mode cannot answer that where History carries the same
+// sentinel as Blocks: a legacy archive datadir and chain-history expiry on top of
+// archive persist that pair alike, so what is on disk decides. MinimumBlockAvailable
+// reports zero both for segments starting at genesis and for a node whose body
+// segments have not arrived, so only an observation telling those apart is cached.
+func (api *BaseAPI) holdsPreMergeBodies(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
+	if holds := api._preMergeBodies.Load(); holds != nil {
+		return *holds, nil
+	}
+	if mergeHeight == 0 {
+		return false, nil
+	}
+	oldest, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	if oldest == 0 {
+		holds, err := api.hasBody(ctx, tx, mergeHeight-1)
+		if err != nil || !holds {
+			return false, err
+		}
+		api._preMergeBodies.Store(&holds)
+		return true, nil
+	}
+	holds := oldest < mergeHeight
+	api._preMergeBodies.Store(&holds)
+	return holds, nil
+}
+
+func (api *BaseAPI) hasBody(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
+	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, block)
+	if err != nil || !ok {
+		return false, err
+	}
+	body, _, err := api._blockReader.Body(ctx, tx, hash, block)
+	return body != nil, err
 }
 
 func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
@@ -462,15 +536,94 @@ func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mo
 	return nil
 }
 
-// checkReceiptsAvailable checks if receipts are available for the given block.
-// In case --prune.include-receipts which makes all historical receipts available even when state history is pruned.
+// checkReceiptsAvailable gates endpoints serving the receipts of a block. They come
+// from the receipt cache where it still covers the block, and otherwise from
+// re-executing it, which reaches only as far back as state history. Enabling the
+// cache says it exists on disk, not how much of it is kept: RCacheDomain is retired
+// on its own --prune.receipts.distance window when one is set, and alongside history
+// otherwise.
 func (api *BaseAPI) checkReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
-	persistReceipts, err := kvcfg.PersistReceipts.Enabled(tx)
+	computed, err := api.postStateCalculated(ctx, tx, block)
 	if err != nil {
 		return err
 	}
-	if persistReceipts {
+	if computed {
+		return api.checkPruneHistory(ctx, tx, block)
+	}
+	persisted, err := kvcfg.PersistReceipts.Enabled(tx)
+	if err != nil {
+		return err
+	}
+	if !persisted {
+		return api.checkPruneHistory(ctx, tx, block)
+	}
+	p, err := api.pruneMode(tx)
+	if err != nil || p == nil {
+		return err
+	}
+	switch amount := p.ReceiptsAmount(); {
+	case amount == prune.KeepAllReceiptsPruneMode:
 		return nil
+	case p.ReceiptsFollowHistory():
+		return api.checkPruneHistory(ctx, tx, block)
+	default:
+		err := api.checkPruneField(tx, block, func(*prune.Mode) prune.BlockAmount { return amount }, "receipts are available")
+		if err == nil || !errors.Is(err, state.PrunedError) {
+			return err
+		}
+		return api.checkPruneHistory(ctx, tx, block)
+	}
+}
+
+// postStateCalculated reports whether the receipts of this block carry a post state
+// that has to be computed, which is the case below Byzantium. The persistent cache
+// does not store that field, so those receipts are always re-executed and reach only
+// as far back as state history.
+func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	if chainConfig.IsByzantium(block) {
+		return false, nil
+	}
+	if api._blockReader.FrozenBlocks() == 0 {
+		return true, nil
+	}
+	return api.commitmentHistoryEnabled(tx)
+}
+
+// checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.
+// Reading them needs the block body too: the stored receipt carries no TxHash, so it
+// is derived from the block's transaction, and the result is sized by the transaction
+// count. The blocks boundary therefore applies on top of receipt availability.
+func (api *BaseAPI) checkBlockReceiptsAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
+	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+		return err
+	}
+	return api.checkReceiptsAvailable(ctx, tx, block)
+}
+
+// checkLogsAvailable gates a log query on the data it reads: the receipts of the
+// range, which are derived from the block's transactions, plus the log indices when
+// the filter searches them. The indices are retired at the history cutoff whatever
+// the receipt retention is. Every leg is a lower bound, so checking the first block
+// of the range covers all of it.
+func (api *BaseAPI) checkLogsAvailable(ctx context.Context, tx kv.Tx, block uint64, crit filters.FilterCriteria) error {
+	if err := api.checkBlockReceiptsAvailable(ctx, tx, block); err != nil {
+		return err
+	}
+	if !usesLogIndex(crit) {
+		return nil
+	}
+	return api.checkPruneHistory(ctx, tx, block)
+}
+
+// checkBlockHistoryAvailable gates endpoints that re-execute a block: they read its
+// transactions from the body and start from the state history preceding it.
+func (api *BaseAPI) checkBlockHistoryAvailable(ctx context.Context, tx kv.Tx, block uint64) error {
+	if err := api.checkPruneBlocks(ctx, tx, block); err != nil {
+		return err
 	}
 	return api.checkPruneHistory(ctx, tx, block)
 }

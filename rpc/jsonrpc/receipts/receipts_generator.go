@@ -506,6 +506,12 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		}
 	}
 
+	// A block with no transactions has no receipts to derive, and preparing an
+	// execution environment for it would need state history that may be pruned.
+	if len(block.Transactions()) == 0 {
+		return receipts, nil
+	}
+
 	var genEnv *ReceiptEnv
 	genEnv, err = g.PrepareEnv(ctx, block.HeaderNoCopy(), cfg, tx, 0)
 	if err != nil {

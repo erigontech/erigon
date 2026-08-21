@@ -93,6 +93,10 @@ var _ bridgeReader = mockBridgeReader{}
 type mockBridgeReader struct {
 	events []*types.Message
 	err    error
+	// stateSyncBlock is the block a state sync txn hash resolves to, mimicking the
+	// bridge index that is the only place such a txn can be looked up.
+	stateSyncBlock uint64
+	stateSyncFound bool
 }
 
 func (b mockBridgeReader) Events(context.Context, common.Hash, uint64) ([]*types.Message, error) {
@@ -100,7 +104,7 @@ func (b mockBridgeReader) Events(context.Context, common.Hash, uint64) ([]*types
 }
 
 func (b mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
-	panic("not called")
+	return b.stateSyncBlock, b.stateSyncFound, b.err
 }
 
 func TestBorStateSyncLogs_NoEvents(t *testing.T) {

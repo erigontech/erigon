@@ -104,6 +104,11 @@ func (api *BaseAPI) borReceiptForBlock(ctx context.Context, tx kv.TemporalTx, ch
 	if len(events) == 0 {
 		return nil, nil
 	}
+	// Reconstructed from the state at the end of the block, so this one needs history
+	// however long the receipts themselves are kept.
+	if err := api.checkPruneHistory(ctx, tx, block.NumberU64()); err != nil {
+		return nil, err
+	}
 	return api.borReceiptGenerator.GenerateBorReceipt(ctx, tx, block, events, chainConfig)
 }
 
@@ -136,22 +141,37 @@ func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
 	return false
 }
 
+// usesLogIndex reports whether the filter makes the query search LogAddrIdx or
+// LogTopicIdx. It tracks applyFiltersV3, which skips topic positions that are
+// empty because those match any topic.
+func usesLogIndex(crit filters.FilterCriteria) bool {
+	if len(crit.Addresses) > 0 {
+		return true
+	}
+	for _, position := range crit.Topics {
+		if len(position) > 0 {
+			return true
+		}
+	}
+	return false
+}
+
 // resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
 // block; otherwise negative tags are resolved against the chain, defaulting to the
 // latest executed block. With checkFuture, ranges past the latest executed block are
 // rejected as they are resolved.
 func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters.FilterCriteria, checkFuture bool) (begin, end uint64, err error) {
 	if crit.BlockHash != nil {
-		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
+		// Only the number is needed here, and the header outlives the body: reading
+		// the block instead would report a pruned one as missing, before the gate.
+		num, err := api._blockReader.HeaderNumber(ctx, api.filters.WithOverlay(tx), *crit.BlockHash)
 		if err != nil {
 			return 0, 0, err
 		}
-		if block == nil {
+		if num == nil {
 			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-
-		num := block.NumberU64()
-		return num, num, nil
+		return *num, *num, nil
 	}
 
 	latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
@@ -251,7 +271,7 @@ func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (t
 		return nil, fmt.Errorf("node is still initializing")
 	}
 
-	if err := api.BaseAPI.checkReceiptsAvailable(ctx, tx, begin); err != nil {
+	if err := api.BaseAPI.checkLogsAvailable(ctx, tx, begin, crit); err != nil {
 		return nil, err
 	}
 
@@ -463,6 +483,11 @@ func (api *BaseAPI) borStateSyncLogs(ctx context.Context, tx kv.TemporalTx, chai
 	if len(events) == 0 {
 		return nil, nil
 	}
+	// Reconstructed from end-of-block state like the state sync receipt, so an
+	// unfiltered query reaching this txn still needs history.
+	if err := api.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
+		return nil, err
+	}
 	return api.borReceiptGenerator.GenerateBorLogs(ctx, events, api._txNumReader, tx, header, chainConfig, txIndex, txNum)
 }
 
@@ -521,45 +546,29 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 	defer tx.Rollback()
 
-	var blockNum, txNum uint64
-	var ok bool
-
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return nil, err
 	}
-	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	// A Bor state sync txn is in no block body, so only the bridge can place it.
+	// Resolving it first is what lets the gate below measure its real block.
+	blockNum, txNum, isBorStateSyncTx, ok, err := api.txnLookupWithBorFallback(ctx, tx, txnHash, chainConfig)
 	if err != nil {
 		return nil, err
 	}
-	if !ok && chainConfig.Bor == nil {
+	if !ok {
 		return nil, nil
+	}
+
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)
+	if err != nil {
+		return nil, err
 	}
 
 	overlayTx := api.filters.WithOverlay(tx)
-
-	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	// Private API returns 0 if transaction is not found.
-	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
-
 	txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum, isBorStateSyncTx)
 	if err != nil {
 		return nil, err
-	}
-
-	if isBorStateSyncTx {
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-		if err != nil {
-			return nil, err
-		}
-	}
-
-	if !ok {
-		return nil, nil
 	}
 
 	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
@@ -648,7 +657,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNum)
 	if err != nil {
 		return nil, err
 	}
