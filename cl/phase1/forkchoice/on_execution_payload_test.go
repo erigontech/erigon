@@ -74,7 +74,7 @@ type blockRefreshForkGraph struct {
 type dataAvailabilityForkGraph struct {
 	fork_graph.ForkGraph
 	state    *state2.CachingBeaconState
-	stateErr error
+	stateErr *error
 	block    *cltypes.SignedBeaconBlock
 }
 
@@ -83,7 +83,10 @@ func (g dataAvailabilityForkGraph) HasEnvelope(common.Hash) bool {
 }
 
 func (g dataAvailabilityForkGraph) GetState(common.Hash, bool) (*state2.CachingBeaconState, error) {
-	return g.state, g.stateErr
+	if g.stateErr != nil && *g.stateErr != nil {
+		return nil, *g.stateErr
+	}
+	return g.state, nil
 }
 
 func (g dataAvailabilityForkGraph) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -276,10 +279,12 @@ func TestOnExecutionPayloadRetainsEnvelopeWhenColumnDataIsUnavailable(t *testing
 	peerDas := das_mock.NewMockPeerDas(ctrl)
 	peerDas.EXPECT().IsDataAvailable(block.Block.Slot, blockRoot).Return(false, nil)
 	syncedData := synced_data.NewSyncedDataManager(cfg, true)
+	var stateErr error
 	f := &ForkChoiceStore{
 		forkGraph: dataAvailabilityForkGraph{
-			state: blockState,
-			block: block,
+			state:    blockState,
+			stateErr: &stateErr,
+			block:    block,
 		},
 		beaconCfg:                      cfg,
 		peerDas:                        peerDas,
@@ -293,27 +298,14 @@ func TestOnExecutionPayloadRetainsEnvelopeWhenColumnDataIsUnavailable(t *testing
 	retained, ok := pending.Peek(blockRoot)
 	require.True(t, ok)
 	require.Same(t, envelope, retained)
-}
 
-func TestApplyLocalSelfBuildEnvelopeRetainsTransientFailure(t *testing.T) {
-	blockRoot := common.HexToHash("0x1234")
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+	stateErr = errors.New("temporary state read failure")
+	replacement := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
 		BeaconBlockRoot: blockRoot,
-		Payload:         cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig),
+		Payload:         payload,
 	}}
-	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
-	require.NoError(t, err)
-	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
-	require.NoError(t, err)
-	f := &ForkChoiceStore{
-		forkGraph:                      dataAvailabilityForkGraph{stateErr: errors.New("temporary state read failure")},
-		beaconCfg:                      &clparams.MainnetBeaconConfig,
-		pendingEnvelopes:               pending,
-		pendingLocalSelfBuildEnvelopes: local,
-	}
-
-	require.Error(t, f.ApplyLocalSelfBuildEnvelope(context.Background(), envelope))
-	retained, ok := local.Peek(blockRoot)
+	require.Error(t, f.OnExecutionPayload(context.Background(), replacement, false, false))
+	retained, ok = pending.Peek(blockRoot)
 	require.True(t, ok)
 	require.Same(t, envelope, retained)
 }
