@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
+	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
@@ -342,8 +343,9 @@ func benchTxn(block, i uint64) types.Transaction {
 
 type txlBenchReader struct {
 	dbservices.FullBlockReader
-	frozen     *uint64
-	txPerBlock uint64
+	frozen      *uint64
+	txPerBlock  uint64
+	bodyMissing func(blockNum uint64) bool
 }
 
 func (r txlBenchReader) CanPruneTo(cur uint64) uint64 {
@@ -354,6 +356,9 @@ func (r txlBenchReader) TxnumReader() rawdbv3.TxNumsReader {
 	return freezeblocks.NewBlockReader(nil, nil).TxnumReader()
 }
 func (r txlBenchReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) (*types.Body, error) {
+	if r.bodyMissing != nil && r.bodyMissing(blockNum) {
+		return nil, nil
+	}
 	txs := make([]types.Transaction, r.txPerBlock)
 	for i := range txs {
 		txs[i] = benchTxn(blockNum, uint64(i))
@@ -411,6 +416,16 @@ func txlBenchFixture(tb testing.TB, c txlBenchCfg) (kv.TemporalRwDB, TxLookupCfg
 	return db, cfg, frozen
 }
 
+// txlPageOps reports MDBX write-amplification counters — the quantity #23199 is
+// about, and the one wall-clock hides when the whole table is in page cache.
+func txlPageOps(tb testing.TB, db kv.TemporalRwDB) (cow, split, wops uint64) {
+	tb.Helper()
+	inner := db.(interface{ InternalDB() kv.RwDB }).InternalDB()
+	info, err := inner.(*mdbx2.MdbxKV).Env().Info(nil)
+	require.NoError(tb, err)
+	return info.PageOps.Cow, info.PageOps.Split, info.PageOps.Wops
+}
+
 func txlPruneOnce(tb testing.TB, db kv.TemporalRwDB, cfg TxLookupCfg, forward uint64, byBlocks bool) (pruned, left uint64) {
 	tb.Helper()
 	tx, err := db.BeginTemporalRw(context.Background())
@@ -454,13 +469,18 @@ func BenchmarkPruneTxLookupBacklog(b *testing.B) {
 			for b.Loop() {
 				b.StopTimer()
 				db, cfg, _ := txlBenchFixture(b, c)
+				cow0, split0, wops0 := txlPageOps(b, db)
 				b.StartTimer()
 
 				pruned, left := txlPruneOnce(b, db, cfg, c.blocks, byBlocks)
 
 				b.StopTimer()
+				cow1, split1, wops1 := txlPageOps(b, db)
 				b.ReportMetric(float64(pruned), "rows_pruned")
 				b.ReportMetric(float64(left), "rows_left")
+				b.ReportMetric(float64(cow1-cow0), "cow_pages")
+				b.ReportMetric(float64(split1-split0), "splits")
+				b.ReportMetric(float64(wops1-wops0), "wops")
 				db.Close()
 				b.StartTimer()
 			}
@@ -480,13 +500,18 @@ func BenchmarkPruneTxLookupTip(b *testing.B) {
 				db, cfg, frozen := txlBenchFixture(b, c)
 				txlPruneOnce(b, db, cfg, c.blocks, byBlocks)
 				*frozen += delta
+				cow0, split0, wops0 := txlPageOps(b, db)
 				b.StartTimer()
 
 				pruned, left := txlPruneOnce(b, db, cfg, c.blocks+delta, byBlocks)
 
 				b.StopTimer()
+				cow1, split1, wops1 := txlPageOps(b, db)
 				b.ReportMetric(float64(pruned), "rows_pruned")
 				b.ReportMetric(float64(left), "rows_left")
+				b.ReportMetric(float64(cow1-cow0), "cow_pages")
+				b.ReportMetric(float64(split1-split0), "splits")
+				b.ReportMetric(float64(wops1-wops0), "wops")
 				db.Close()
 				b.StartTimer()
 			}
@@ -514,4 +539,94 @@ func TestPruneTxLookupImplsAgree(t *testing.T) {
 	scan, byBlocks := survivors(false), survivors(true)
 	require.NotEmpty(t, scan)
 	require.Equal(t, scan, byBlocks)
+}
+
+// A block walk can only delete keys it can rediscover, so anything it cannot
+// read is retained while the watermark moves past it. The scan does not read
+// blocks at all.
+func TestPruneTxLookupRetainsWhatItCannotRead(t *testing.T) {
+	c := txlBenchCfg{blocks: 4_000, txPerBlock: 3, frozen: 2_000}
+	const blind = 500 // blocks whose body/header the walk cannot see
+
+	for _, tc := range []struct {
+		name string
+		hide func(tb testing.TB, db kv.TemporalRwDB, cfg *TxLookupCfg)
+	}{
+		{name: "body_gone", hide: func(tb testing.TB, _ kv.TemporalRwDB, cfg *TxLookupCfg) {
+			r := cfg.blockReader.(txlBenchReader)
+			r.bodyMissing = func(n uint64) bool { return n < blind }
+			cfg.blockReader = r
+		}},
+		{name: "canonical_marker_gone", hide: func(tb testing.TB, db kv.TemporalRwDB, _ *TxLookupCfg) {
+			tx, err := db.BeginTemporalRw(context.Background())
+			require.NoError(tb, err)
+			defer tx.Rollback()
+			for b := uint64(1); b < blind; b++ {
+				require.NoError(tb, tx.Delete(kv.HeaderCanonical, hexutil.EncodeTs(b)))
+			}
+			require.NoError(tb, tx.Commit())
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			for _, byBlocks := range []bool{false, true} {
+				db, cfg, _ := txlBenchFixture(t, c)
+				tc.hide(t, db, &cfg)
+				txlPruneOnce(t, db, cfg, c.blocks, byBlocks)
+
+				tx, err := db.BeginTemporalRo(context.Background())
+				require.NoError(t, err)
+				left := 0
+				for b := uint64(1); b < blind; b++ {
+					for i := range c.txPerBlock {
+						h := benchTxn(b, i).Hash()
+						v, err := tx.GetOne(kv.TxLookup, h[:])
+						require.NoError(t, err)
+						if v != nil {
+							left++
+						}
+					}
+				}
+				tx.Rollback()
+				db.Close()
+				if byBlocks {
+					require.Equal(t, int(blind-1)*int(c.txPerBlock), left, "block walk deleted rows it could not read")
+				} else {
+					require.Zero(t, left, "scan left rows behind")
+				}
+			}
+		})
+	}
+}
+
+// Rows whose block is not canonical any more — what an unwind leaves when the
+// canonical marker is gone before UnwindTxLookup runs. The walk never visits
+// such a key; the scan tests every key it passes.
+func TestPruneTxLookupOrphanRows(t *testing.T) {
+	c := txlBenchCfg{blocks: 4_000, txPerBlock: 3, frozen: 2_000}
+	orphan := benchTxn(1_000_000, 0).Hash() // no canonical header carries it
+	val := make([]byte, 16)
+	binary.BigEndian.PutUint64(val[:8], 1)
+	binary.BigEndian.PutUint64(val[8:], c.minTxNum(1)+1) // well below the bound
+
+	for _, byBlocks := range []bool{false, true} {
+		db, cfg, _ := txlBenchFixture(t, c)
+		tx, err := db.BeginTemporalRw(context.Background())
+		require.NoError(t, err)
+		require.NoError(t, tx.Put(kv.TxLookup, orphan[:], val))
+		require.NoError(t, tx.Commit())
+
+		txlPruneOnce(t, db, cfg, c.blocks, byBlocks)
+
+		ro, err := db.BeginTemporalRo(context.Background())
+		require.NoError(t, err)
+		got, err := ro.GetOne(kv.TxLookup, orphan[:])
+		require.NoError(t, err)
+		ro.Rollback()
+		db.Close()
+		if byBlocks {
+			require.NotNil(t, got, "block walk removed an orphan it cannot see")
+		} else {
+			require.Nil(t, got, "scan left an orphan below the bound")
+		}
+	}
 }
