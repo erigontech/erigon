@@ -56,9 +56,9 @@ Erigon 3.3 or earlier that have not already been rebased must first convert thei
 - Validation now rejects fork-inconsistent blocks and sidecars, truncated typed transactions, invalid fee relationships,
   and blob wrappers with trailing data (#22920, #23041, #22902, #23297) — by @yperbasis, @chfast
 - Default block graffiti now identifies both the execution and consensus clients (#22303) — by @lystopad
-- Caplin archive maintenance repairs truncated validator tables, removes frozen state rows from its indexing DB for
-  reuse, and stores compact effective balances, cutting the measured per-slot copy from about 266 MB to 18 MB (#22385,
-  #22396, #22411) — by @awskii, @AskAlexSharov
+- Caplin archive maintenance repairs truncated validator tables, backs off repeatedly failing retirement work, removes
+  frozen state rows from its indexing DB for reuse, and stores compact effective balances, cutting the measured per-slot
+  copy from about 266 MB to 18 MB (#22385, #22396, #22411, #23408) — by @awskii, @AskAlexSharov, @lystopad
 - Caplin advertises its bound ports, skips peers without TCP endpoints, and accepts Chiado libp2p bootstrap nodes
   (#22273, #22271, #23245) — by @MysticRyuujin, @domiwei
 - Glamsterdam devnet-6 support adds EIP-8282 builder execution requests, EIP-2780, EIP-8038, EIP-8246, and the devnet-6
@@ -74,6 +74,7 @@ Erigon 3.3 or earlier that have not already been rebased must first convert thei
   the former receipt flag names remain aliases (#22119, #21200, #22349) — by @yperbasis, @JkLondon, @AskAlexSharov
 - Missing E3 accessors are rebuilt automatically on restart. `erigon seg index --rebuild` rebuilds every snapshot
   accessor and index without deleting snapshot data (#22682, #21919) — by @AskAlexSharov, @sudeepdino008
+- Commitment preloading no longer stalls when a step budget fills exactly (#23153) — by @lystopad
 - The command-line layer now uses `urfave/cli/v3`. Normal flag handling remains compatible, and `--config` now applies
   to subcommands; operators with unusual invocation patterns should smoke-test them (#22130, #22546) — by
   @AskAlexSharov, @yperbasis, @lupin012
