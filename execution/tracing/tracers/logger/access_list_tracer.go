@@ -20,6 +20,7 @@
 package logger
 
 import (
+	"maps"
 	"slices"
 
 	"github.com/erigontech/erigon/common"
@@ -66,6 +67,29 @@ func (al accessList) addSlot(address common.Address, slot common.Hash) {
 	if _, ok := storage.slots[slot]; !ok {
 		storage.slots[slot] = len(storage.slots)
 	}
+}
+
+// cloneExcluding copies al without the excluded addresses, sharing no maps with
+// it and renumbering order so it stays dense. The exclusion is not redundant:
+// the SLOAD/SSTORE path of OnOpcode adds the executing address without
+// consulting excl, so an excluded address can be in al.
+func (al accessList) cloneExcluding(excl map[common.Address]struct{}) accessList {
+	byOrder := make([]common.Address, len(al))
+	for addr, storage := range al {
+		byOrder[storage.order] = addr
+	}
+
+	cp := make(accessList, len(al))
+	for _, addr := range byOrder {
+		if _, ok := excl[addr]; ok {
+			continue
+		}
+		storage := al[addr]
+		storage.order = len(cp)
+		storage.slots = maps.Clone(storage.slots)
+		cp[addr] = storage
+	}
+	return cp
 }
 
 // equal checks if the content of the current access list is the same as the
@@ -158,19 +182,24 @@ type AccessListTracer struct {
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
 func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state *state.IntraBlockState) *AccessListTracer {
-	excl := make(map[common.Address]struct{})
-	if exclude != nil {
-		excl = exclude
-	}
-	list := newAccessList()
+	t := newAccessListTracer(exclude, newAccessList(), state)
 	for _, al := range acl {
-		if _, ok := excl[al.Address]; ok {
+		if _, ok := t.excl[al.Address]; ok {
 			continue
 		}
-		list.addAddress(al.Address)
+		t.list.addAddress(al.Address)
 		for _, slot := range al.StorageKeys {
-			list.addSlot(al.Address, slot)
+			t.list.addSlot(al.Address, slot)
 		}
+	}
+	return t
+}
+
+// newAccessListTracer holds the construction both entry points share, so they
+// cannot drift.
+func newAccessListTracer(excl map[common.Address]struct{}, list accessList, state *state.IntraBlockState) *AccessListTracer {
+	if excl == nil {
+		excl = make(map[common.Address]struct{})
 	}
 	return &AccessListTracer{
 		excl:               excl,
@@ -179,6 +208,13 @@ func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct
 		createdContracts:   make(map[common.Address]struct{}),
 		usedBeforeCreation: make(map[common.Address]struct{}),
 	}
+}
+
+// SeedNew returns a tracer that starts from a's accumulated list, for the next
+// convergence iteration, copying the maps directly rather than round-tripping
+// through types.AccessList.
+func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTracer {
+	return newAccessListTracer(a.excl, a.list.cloneExcluding(a.excl), state)
 }
 
 func (a *AccessListTracer) Hooks() *tracing.Hooks {

@@ -122,15 +122,34 @@ type Preverified struct {
 }
 
 // keepNewest stores item under key unless an entry with an equal or newer version is already there.
-func keepNewest(best *btree.Map[string, PreverifiedItem], kept *btree.Map[string, snaptype.Version], key string, item PreverifiedItem, v snaptype.Version) {
+func keepNewest(best *btree.Map[string, PreverifiedItem], kept *btree.Map[string, snaptype.Version], key string, item PreverifiedItem, v snaptype.Version) (stored bool) {
 	if current, ok := kept.Get(key); ok && !current.Less(v) {
-		return
+		return false
 	}
 	best.Set(key, item)
 	kept.Set(key, v)
+	return true
 }
 
 const maxLoggedDroppedNames = 16
+
+// typeFilterDrops groups why Typed did not keep a preverified item. Only an unparsable
+// name is a defect: a manifest naming types this binary has no reader for, or shipping
+// several versions of one file, is the filter working.
+type typeFilterDrops struct {
+	unreadable      int // no snapshot type in this binary reads the file
+	superseded      int // a newer version of the same file was kept
+	outOfWindow     int // version outside the type's supported range
+	unparsable      int
+	unparsableNames []string
+}
+
+func (d *typeFilterDrops) unparsableItem(name string) {
+	d.unparsable++
+	if len(d.unparsableNames) < maxLoggedDroppedNames {
+		d.unparsableNames = append(d.unparsableNames, name)
+	}
+}
 
 // droppedNames returns the names in all that kept no longer contains, capped at
 // limit, along with the total dropped count.
@@ -154,6 +173,7 @@ func droppedNames(all, kept []PreverifiedItem, limit int) (names []string, dropp
 func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	var bestVersions btree.Map[string, PreverifiedItem]
 	var keptVersions btree.Map[string, snaptype.Version]
+	var drops typeFilterDrops
 
 	for _, p := range p.Items {
 		if strings.HasPrefix(p.Name, "salt") && strings.HasSuffix(p.Name, "txt") {
@@ -167,17 +187,20 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 
 		v, name, ok := strings.Cut(p.Name, "-")
 		if !ok {
+			drops.unparsableItem(p.Name)
 			continue
 		}
 
 		if strings.HasPrefix(p.Name, "caplin") {
 			caplinFile, _, known := snaptype.ParseFileName("caplin", filepath.Base(v+"-"+name))
 			if !known || caplinFile.Type == nil {
+				drops.unreadable++
 				continue
 			}
 
 			caplinVersion, err := ver.ParseVersion(strings.TrimPrefix(v, "caplin/"))
 			if err != nil {
+				drops.unparsableItem(p.Name)
 				continue
 			}
 			// One window for every caplin file, taken from BeaconBlocks: an .idx carries
@@ -185,9 +208,12 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 			// segment was kept. The per-type windows are identical today.
 			versions := snaptype.BeaconBlocks.Versions()
 			if caplinVersion.Less(versions.MinSupported) || versions.Current.Less(caplinVersion) {
+				drops.outOfWindow++
 				continue
 			}
-			keepNewest(&bestVersions, &keptVersions, "caplin/"+name, p, caplinVersion)
+			if !keepNewest(&bestVersions, &keptVersions, "caplin/"+name, p, caplinVersion) {
+				drops.superseded++
+			}
 			continue
 		}
 
@@ -210,6 +236,7 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 				bestVersions.Set(p.Name, p)
 				continue
 			}
+			drops.unparsableItem(p.Name)
 			continue
 		}
 
@@ -241,23 +268,24 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 		}
 
 		if !include {
+			drops.unreadable++
 			continue
 		}
 
 		version, err := ver.ParseVersion(v)
 		if err != nil {
+			drops.unparsableItem(p.Name)
 			continue
 		}
 
-		if version.Less(minVersion) {
+		if version.Less(minVersion) || preferredVersion.Less(version) {
+			drops.outOfWindow++
 			continue
 		}
 
-		if preferredVersion.Less(version) {
-			continue
+		if !keepNewest(&bestVersions, &keptVersions, name, p, version) {
+			drops.superseded++
 		}
-
-		keepNewest(&bestVersions, &keptVersions, name, p, version)
 	}
 
 	var versioned []PreverifiedItem
@@ -271,10 +299,21 @@ func (p Preverified) Typed(types []snaptype.Type) Preverified {
 	slices.SortFunc(versioned, func(i, j PreverifiedItem) int {
 		return strings.Compare(i.Name, j.Name)
 	})
+	if drops.unparsable > 0 {
+		log.Root().Warn("Preverified list has entries the type filter could not parse",
+			"count", drops.unparsable, "names", strings.Join(drops.unparsableNames, ","))
+	}
+	if drops.outOfWindow > 0 {
+		log.Root().Info("Preverified list has entries outside the versions this binary supports",
+			"count", drops.outOfWindow)
+	}
 	if len(p.Items) != len(versioned) {
 		names, dropped := droppedNames(p.Items, versioned, maxLoggedDroppedNames)
-		log.Root().Warn("Preverified list reduced after applying type filter",
-			"from", len(p.Items), "to", len(versioned), "dropped", dropped, "names", strings.Join(names, ","))
+		log.Root().Debug("Preverified list reduced after applying type filter",
+			"from", len(p.Items), "to", len(versioned), "dropped", dropped,
+			"unreadable", drops.unreadable, "superseded", drops.superseded,
+			"outOfWindow", drops.outOfWindow, "unparsable", drops.unparsable,
+			"names", strings.Join(names, ","))
 	} else {
 		log.Root().Debug("Preverified list has same len after applying type filter", "len", len(p.Items))
 	}
