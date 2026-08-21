@@ -123,9 +123,14 @@ func TestBlobHistoryDownloaderLocalOnlyPassChecksPeersOnce(t *testing.T) {
 
 func TestBlobHistoryDownloaderUnsyncedWaitObservesCancellation(t *testing.T) {
 	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
 	entered := make(chan struct{})
-	downloader := newBoundaryDownloader(t, 20, 0, 0, &boundaryBlockReader{})
+	downloader := newBoundaryDownloader(t, 20, 0, 0, &boundaryBlockReader{err: errors.New("retry ran while unsynced")})
 	downloader.ctx = ctx
+	downloader.retryStartSlot = 20
+	downloader.retryEndSlot = 20
+	downloader.retryCursorSlot = 20
+	downloader.retryActive = true
 	downloader.syncedChecker = boundarySyncedCheckerFunc(func() bool {
 		select {
 		case <-entered:
@@ -137,9 +142,13 @@ func TestBlobHistoryDownloaderUnsyncedWaitObservesCancellation(t *testing.T) {
 	done := make(chan error, 1)
 	go func() { done <- downloader.downloadOnce(false) }()
 
-	<-entered
-	cancel()
-	require.NoError(t, <-done)
+	select {
+	case <-entered:
+		cancel()
+		require.NoError(t, <-done)
+	case err := <-done:
+		require.Failf(t, "retry bypassed sync gate", "download exited before sync gate: %v", err)
+	}
 }
 
 func TestBlobHistoryDownloaderKeepsRetryTargetAtDenebStart(t *testing.T) {
@@ -150,7 +159,7 @@ func TestBlobHistoryDownloaderKeepsRetryTargetAtDenebStart(t *testing.T) {
 	require.Equal(t, denebStart, downloader.nextBackfillTargetSlot)
 }
 
-func TestBlobHistoryDownloaderSecondCompletedPassScansEntireUnfrozenRange(t *testing.T) {
+func TestBlobHistoryDownloaderSecondCompletedPassScansRecentUnfrozenRange(t *testing.T) {
 	const head = uint64(1_000)
 	reader := &boundaryBlockReader{block: cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)}
 	downloader := newBoundaryDownloader(t, head, 0, 0, reader)
@@ -159,9 +168,10 @@ func TestBlobHistoryDownloaderSecondCompletedPassScansEntireUnfrozenRange(t *tes
 	reader.slots = nil
 	require.NoError(t, downloader.downloadOnce(false))
 
-	require.Zero(t, downloader.nextBackfillTargetSlot)
-	require.Equal(t, head+1, uint64(len(reader.slots)))
-	require.Zero(t, reader.slots[len(reader.slots)-1])
+	recentFloor := head - clparams.MainnetBeaconConfig.SlotsPerEpoch*2
+	require.Equal(t, recentFloor, downloader.nextBackfillTargetSlot)
+	require.Equal(t, head-recentFloor+1, uint64(len(reader.slots)))
+	require.Equal(t, recentFloor, reader.slots[len(reader.slots)-1])
 }
 
 func TestBlobHistoryDownloaderFailedRecoveryContinuesScanAndNotifies(t *testing.T) {
@@ -192,7 +202,7 @@ func TestBlobHistoryDownloaderFailedRecoveryContinuesScanAndNotifies(t *testing.
 	require.True(t, downloader.backfillCompleted.Load())
 }
 
-func TestBlobHistoryDownloaderNonArchiveSecondPassScansEntireRetentionRange(t *testing.T) {
+func TestBlobHistoryDownloaderNonArchiveSecondPassScansRecentRange(t *testing.T) {
 	const head = uint64(1_000)
 	reader := &boundaryBlockReader{}
 	downloader := newBoundaryDownloader(t, head, 0, 0, reader)
@@ -203,9 +213,31 @@ func TestBlobHistoryDownloaderNonArchiveSecondPassScansEntireRetentionRange(t *t
 	reader.slots = nil
 	require.NoError(t, downloader.downloadOnce(false))
 
-	require.Zero(t, downloader.nextBackfillTargetSlot)
-	require.Equal(t, head+1, uint64(len(reader.slots)))
-	require.Zero(t, reader.slots[len(reader.slots)-1])
+	recentFloor := head - clparams.MainnetBeaconConfig.SlotsPerEpoch*2
+	require.Equal(t, recentFloor, downloader.nextBackfillTargetSlot)
+	require.Equal(t, head-recentFloor+1, uint64(len(reader.slots)))
+	require.Equal(t, recentFloor, reader.slots[len(reader.slots)-1])
+}
+
+func TestBlobHistoryDownloaderRetryRangeAdvancesByBoundedBatches(t *testing.T) {
+	reader := &boundaryBlockReader{}
+	downloader := newBoundaryDownloader(t, 1_000, 0, 1_000, reader)
+	downloader.retryStartSlot = 1
+	downloader.retryEndSlot = 20
+	downloader.retryCursorSlot = 20
+	downloader.retryActive = true
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, []uint64{20, 19, 18, 17, 16, 15, 14, 13}, reader.slots[:blocksBatchSize])
+	require.Equal(t, uint64(12), downloader.retryEndSlot)
+	require.Equal(t, uint64(12), downloader.retryCursorSlot)
+
+	reader.slots = nil
+	downloader.nextBackfillTargetSlot = downloader.HeadSlot()
+	require.NoError(t, downloader.downloadOnce(false))
+	require.Equal(t, []uint64{12, 11, 10, 9, 8, 7, 6, 5}, reader.slots[:blocksBatchSize])
+	require.Equal(t, uint64(4), downloader.retryEndSlot)
+	require.Equal(t, uint64(4), downloader.retryCursorSlot)
 }
 
 func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader freezeblocks.BeaconSnapshotReader) *BlobHistoryDownloader {

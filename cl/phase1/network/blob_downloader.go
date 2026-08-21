@@ -86,6 +86,10 @@ type BlobHistoryDownloader struct {
 	highestBackfilledSlot  atomic.Uint64
 	nextBackfillTargetSlot uint64
 	denebStartSlot         uint64
+	retryStartSlot         uint64
+	retryEndSlot           uint64
+	retryCursorSlot        uint64
+	retryActive            bool
 	// archiveBlobs indicates whether to archive all blobs or just recent ones
 	archiveBlobs bool
 	// immediateBlobsBackfilling indicates whether to backfill blobs immediately
@@ -228,8 +232,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 
 	prevLogSlot := currentSlot
 	prevTime := time.Now()
-	finalScanSlot := currentSlot
-
+	retryPending := true
 	targetSlot := b.nextBackfillTargetSlot
 	// in case of non-archive mode, we only backfill the last relevant epochs
 	if !b.archiveBlobs {
@@ -252,14 +255,17 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			}
 			continue
 		}
+		if retryPending {
+			if err := b.retryFailedRecoveries(); err != nil {
+				return err
+			}
+			retryPending = false
+		}
 
 		batch, visited, err := b.collectIncompleteBlocks(currentSlot, firstUnfrozenSlot)
 		if err != nil {
 			return err
 		}
-		scanned := max(visited, 1)
-		finalScanSlot = currentSlot - (scanned - 1)
-
 		if len(batch) > 0 {
 			select {
 			case <-b.ctx.Done():
@@ -305,7 +311,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	if shouldLog {
 		b.logger.Info("[BlobHistoryDownloader] Blob history download finished successfully")
 	}
-	b.nextBackfillTargetSlot = max(b.denebStartSlot, finalScanSlot-min(finalScanSlot, b.beaconCfg.SlotsPerEpoch*2))
+	b.nextBackfillTargetSlot = max(b.denebStartSlot, startSlot-min(startSlot, b.beaconCfg.SlotsPerEpoch*2))
 
 	b.backfillCompleted.Store(true)
 
@@ -317,6 +323,122 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	}
 
 	return nil
+}
+
+func (b *BlobHistoryDownloader) retryFailedRecoveries() error {
+	if !b.retryActive {
+		return nil
+	}
+	firstUnfrozenSlot := b.sn.FrozenBlobs()
+	if b.retryEndSlot < firstUnfrozenSlot {
+		b.retryActive = false
+		return nil
+	}
+	if b.retryStartSlot < firstUnfrozenSlot {
+		b.retryStartSlot = firstUnfrozenSlot
+	}
+	if b.retryCursorSlot < b.retryStartSlot || b.retryCursorSlot > b.retryEndSlot {
+		b.retryCursorSlot = b.retryEndSlot
+	}
+
+	attempts := blocksBatchSize
+	if span := b.retryEndSlot - b.retryStartSlot; span < blocksBatchSize-1 {
+		attempts = span + 1
+	}
+	for range attempts {
+		if !b.retryActive {
+			break
+		}
+		slot := b.retryCursorSlot
+		if slot == b.retryStartSlot {
+			b.retryCursorSlot = b.retryEndSlot
+		} else {
+			b.retryCursorSlot--
+		}
+
+		block, err := b.readRetryBlock(slot)
+		if err != nil {
+			return err
+		}
+		if block == nil || block.Version() < clparams.DenebVersion || block.GetBlobKzgCommitments() == nil {
+			b.resolveRetrySlot(slot)
+			continue
+		}
+		complete, err := b.retryBlock(block)
+		if err != nil {
+			return err
+		}
+		if complete {
+			b.resolveRetrySlot(slot)
+		}
+		if b.ctx.Err() != nil {
+			return nil
+		}
+	}
+	return nil
+}
+
+func (b *BlobHistoryDownloader) readRetryBlock(slot uint64) (*cltypes.SignedBeaconBlock, error) {
+	tx, err := b.indiciesDB.BeginRo(b.ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	return b.blockReader.ReadBeaconBlockBodyBySlot(b.ctx, tx, slot)
+}
+
+func (b *BlobHistoryDownloader) retryBlock(block *cltypes.SignedBeaconBlock) (bool, error) {
+	if block.Version() < clparams.FuluVersion {
+		blockRoot, err := block.Block.HashSSZ()
+		if err != nil {
+			return false, err
+		}
+		_, complete, err := b.storedBlobSidecarsComplete(b.ctx, block, blockRoot)
+		if err != nil {
+			return false, nil
+		}
+		if complete {
+			return true, nil
+		}
+	}
+	return b.processBatch([]*cltypes.SignedBeaconBlock{block}), nil
+}
+
+func (b *BlobHistoryDownloader) addRetrySlot(slot uint64) {
+	if !b.retryActive {
+		b.retryStartSlot = slot
+		b.retryEndSlot = slot
+		b.retryCursorSlot = slot
+		b.retryActive = true
+		return
+	}
+	b.retryStartSlot = min(b.retryStartSlot, slot)
+	b.retryEndSlot = max(b.retryEndSlot, slot)
+}
+
+func (b *BlobHistoryDownloader) addRetryBlocks(blocks []*cltypes.SignedBeaconBlock) {
+	for _, block := range blocks {
+		b.addRetrySlot(block.GetSlot())
+	}
+}
+
+func (b *BlobHistoryDownloader) resolveRetrySlot(slot uint64) {
+	if !b.retryActive || slot < b.retryStartSlot || slot > b.retryEndSlot {
+		return
+	}
+	if b.retryStartSlot == b.retryEndSlot {
+		b.retryActive = false
+		return
+	}
+	if slot == b.retryStartSlot {
+		b.retryStartSlot++
+	}
+	if slot == b.retryEndSlot {
+		b.retryEndSlot--
+	}
+	if b.retryCursorSlot < b.retryStartSlot || b.retryCursorSlot > b.retryEndSlot {
+		b.retryCursorSlot = b.retryEndSlot
+	}
 }
 
 func (b *BlobHistoryDownloader) peersAvailable() bool {
@@ -429,10 +551,16 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeacon
 	req, err := BlobsIdentifiersFromBlocks(requestedBlocks, b.beaconCfg)
 	if err != nil {
 		b.logger.Debug("[BlobHistoryDownloader] Error generating blob identifiers", "err", err)
+		for _, block := range requestedBlocks {
+			b.addRetrySlot(block.GetSlot())
+		}
 		return false
 	}
 	batch, err := newDenebRecoveryBatch(requestedBlocks, req)
 	if err != nil {
+		for _, block := range requestedBlocks {
+			b.addRetrySlot(block.GetSlot())
+		}
 		return false
 	}
 	_, err = requestBlobsForBackfill(b.ctx, b.rpc, batch.remaining, func(ctx context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
@@ -448,19 +576,22 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeacon
 	})
 	if err != nil {
 		b.logger.Debug("[BlobHistoryDownloader] Error requesting blobs", "err", err)
+		b.addRetryBlocks(requestedBlocks)
 		return false
 	}
+	complete := true
 	for _, block := range blocks {
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
 			return false
 		}
-		_, complete, err := b.storedBlobSidecarsComplete(b.ctx, block, blockRoot)
-		if err != nil || !complete {
-			return false
+		_, blockComplete, err := b.storedBlobSidecarsComplete(b.ctx, block, blockRoot)
+		if err != nil || !blockComplete {
+			b.addRetrySlot(block.GetSlot())
+			complete = false
 		}
 	}
-	return true
+	return complete
 }
 
 type blobIdentifierKey struct {
@@ -625,14 +756,17 @@ func (b *denebRecoveryBatch) remaining() *solid.ListSSZ[*cltypes.BlobIdentifier]
 // recoverFuluColumns recovers blobs from PeerDAS columns, bounding each attempt so
 // columns no peer still serves can't block the backfill indefinitely.
 func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaconBlock) bool {
-	for _, block := range blocks {
+	completeBatch := true
+	for i, block := range blocks {
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
+			b.addRetryBlocks(blocks[i:])
 			b.logger.Warn("[BlobHistoryDownloader] Failed to hash recovered block", "err", err, "slot", block.GetSlot())
 			return false
 		}
 		commitments := block.GetBlobKzgCommitments()
 		if commitments == nil {
+			b.addRetryBlocks(blocks[i:])
 			b.logger.Warn("[BlobHistoryDownloader] Blob recovery completed without commitments", "slot", block.GetSlot())
 			return false
 		}
@@ -640,6 +774,7 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 		stored, complete, err := b.storedBlobSidecarsComplete(ctx, block, blockRoot)
 		if err != nil {
 			cancel()
+			b.addRetryBlocks(blocks[i:])
 			b.logger.Warn("[BlobHistoryDownloader] Failed to read stored blobs", "err", err, "slot", block.GetSlot())
 			return false
 		}
@@ -647,6 +782,7 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 			if stored > 0 {
 				if err := b.blobStorage.RemoveBlobSidecars(ctx, block.GetSlot(), blockRoot); err != nil {
 					cancel()
+					b.addRetryBlocks(blocks[i:])
 					b.logger.Warn("[BlobHistoryDownloader] Failed to clear incomplete blob storage", "err", err, "slot", block.GetSlot())
 					return false
 				}
@@ -661,6 +797,7 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 		if stored > 0 {
 			if err := b.blobStorage.RemoveBlobSidecars(ctx, block.GetSlot(), blockRoot); err != nil {
 				cancel()
+				b.addRetryBlocks(blocks[i:])
 				b.logger.Warn("[BlobHistoryDownloader] Failed to clear incomplete blob storage", "err", err, "slot", block.GetSlot())
 				return false
 			}
@@ -669,17 +806,22 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 		err = peerDas.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block})
 		if err != nil {
 			cancel()
+			b.addRetryBlocks(blocks[i:])
 			b.logger.Warn("[BlobHistoryDownloader] Error recovering blobs from block", "err", err, "slot", block.GetSlot())
 			return false
 		}
 		stored, complete, err = b.waitForStoredBlobSidecars(ctx, block, blockRoot)
 		cancel()
 		if err != nil || !complete {
+			b.addRetrySlot(block.GetSlot())
+			completeBatch = false
 			b.logger.Warn("[BlobHistoryDownloader] Blob recovery did not satisfy durable postcondition", "err", err, "slot", block.GetSlot(), "stored", stored, "expected", commitments.Len())
-			return false
+			if b.ctx.Err() != nil {
+				return false
+			}
 		}
 	}
-	return true
+	return completeBatch
 }
 
 func (b *BlobHistoryDownloader) waitForStoredBlobSidecars(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash) (uint32, bool, error) {
