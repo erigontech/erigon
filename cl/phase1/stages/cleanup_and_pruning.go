@@ -25,12 +25,18 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 	if err := tx.Commit(); err != nil {
 		return err
 	}
-	cfg.blobStore.Prune()
+	// Pruning runs after the index tx is already committed, so a failure here is
+	// a disk-space-reclaim miss, not a correctness issue — log and keep going.
+	if err := cfg.blobStore.Prune(); err != nil {
+		logger.Warn("failed to prune blob store", "err", err)
+	}
 	columnKeepSlots := cfg.caplinConfig.ColumnKeepSlots
 	if columnKeepSlots == 0 {
 		// Default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH
 		columnKeepSlots = cfg.beaconCfg.MinEpochsForDataColumnSidecarsRequests * cfg.beaconCfg.SlotsPerEpoch
 	}
-	cfg.peerDas.Prune(columnKeepSlots)
+	if err := cfg.peerDas.Prune(columnKeepSlots); err != nil {
+		logger.Warn("failed to prune data columns", "err", err)
+	}
 	return nil
 }

@@ -19,6 +19,7 @@ package fork_graph
 import (
 	"errors"
 	"fmt"
+	"io/fs"
 	"slices"
 	"sync"
 	"sync/atomic"
@@ -200,7 +201,9 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f.headers.Store(common.Hash(anchorRoot), &anchorHeader)
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
 
-	f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true)
+	if err := f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true); err != nil {
+		panic(err)
+	}
 	// preallocate buffer
 	return f
 }
@@ -613,10 +616,14 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		f.finalizedCheckpoints.Delete(root)
 		f.headers.Delete(root)
 		f.blockRewards.Delete(root)
-		f.fs.Remove(getBeaconStateFilename(root))
+		if err := f.fs.Remove(getBeaconStateFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned beacon state file", "root", root, "err", err)
+		}
 		// [New in Gloas:EIP7732] Also remove envelope files
 		f.envelopeExists.Delete(root)
-		f.fs.Remove(getEnvelopeFilename(root))
+		if err := f.fs.Remove(getEnvelopeFilename(root)); err != nil && !errors.Is(err, fs.ErrNotExist) {
+			log.Debug("failed to remove pruned envelope file", "root", root, "err", err)
+		}
 	}
 	log.Debug("Pruned old blocks", "pruneSlot", pruneSlot)
 	return

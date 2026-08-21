@@ -19,6 +19,8 @@ package state_test
 import (
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 )
@@ -27,7 +29,8 @@ import (
 func BenchmarkStateRootNonCached(b *testing.B) {
 	for b.Loop() {
 		base := state.New(&clparams.MainnetBeaconConfig)
-		base.HashSSZ()
+		_, err := base.HashSSZ()
+		require.NoError(b, err)
 	}
 }
 
@@ -37,6 +40,7 @@ func BenchmarkStateRootCached(b *testing.B) {
 	// Re-use same fields
 	base := state.New(&clparams.MainnetBeaconConfig)
 	for b.Loop() {
-		base.HashSSZ()
+		_, err := base.HashSSZ()
+		require.NoError(b, err)
 	}
 }

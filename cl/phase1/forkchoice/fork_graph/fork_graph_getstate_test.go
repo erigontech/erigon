@@ -39,15 +39,18 @@ func TestGetState_InfiniteLoopOnMissingStateFile(t *testing.T) {
 	graph.headers.Store(fakeRoot, fakeHeader)
 
 	done := make(chan struct{})
+	var gotState *state.CachingBeaconState
+	var gotErr error
 	go func() {
 		defer close(done)
 		// getState should return (nil, nil), not loop forever.
-		graph.getState(fakeRoot, false, false)
+		gotState, gotErr = graph.getState(fakeRoot, false, false)
 	}()
 
 	select {
 	case <-done:
-		// getState returned — no infinite loop.
+		require.Nil(t, gotState)
+		require.NoError(t, gotErr)
 	case <-time.After(3 * time.Second):
 		t.Fatal("getState did not return within 3s — infinite loop detected")
 	}

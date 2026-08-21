@@ -156,9 +156,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	require.NoError(t, store.OnAttestation(testAttestation, false, false))
 	bs, err := store.GetStateAtBlockRoot(headRoot, true)
 	require.NoError(t, err)
-	sd.OnHeadState(bs)
-
-	require.NoError(t, err)
+	require.NoError(t, sd.OnHeadState(bs))
 }
 
 func TestForkChoiceChainBellatrix(t *testing.T) {
