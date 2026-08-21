@@ -24,24 +24,33 @@ import (
 	"github.com/erigontech/erigon/common/iouring"
 )
 
-func (g *Getter) EnableAsyncLiteralWarm() {
-	g.literalWarmer = (*Getter).warmLiteral
+func (g *Getter) EnableMultiPageAsyncIO() {
+	g.multiPageWarmer = (*Getter).warmMultiPageLiteral
+	g.multiPageLiteralMinWordLen = uint64(pageSize)
 }
 
-func shouldWarmLiteral(offset, length uint64) bool {
-	if length == 0 {
-		return false
+func multiPageWarmRange(offset, length uint64) (uint64, uint64, bool) {
+	page := uint64(pageSize)
+	if length <= page {
+		return 0, 0, false
 	}
 	end := offset + length
 	if end < offset {
-		return false
+		return 0, 0, false
 	}
-	page := uint64(pageSize)
-	return offset/page != (end-1)/page
+	// The metadata walk has already touched the page containing the literal start.
+	if remainder := offset % page; remainder != 0 {
+		offset += page - remainder
+	}
+	if offset >= end {
+		return 0, 0, false
+	}
+	return offset, end - offset, true
 }
 
-func (g *Getter) warmLiteral(offset, length uint64) {
-	if !shouldWarmLiteral(offset, length) || offset+length > math.MaxInt64 {
+func (g *Getter) warmMultiPageLiteral(offset, length uint64) {
+	offset, length, ok := multiPageWarmRange(offset, length)
+	if !ok || offset+length > math.MaxInt64 {
 		return
 	}
 	for length > 0 {

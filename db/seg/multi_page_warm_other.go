@@ -18,4 +18,4 @@
 
 package seg
 
-func (*Getter) EnableAsyncLiteralWarm() {}
+func (*Getter) EnableMultiPageAsyncIO() {}

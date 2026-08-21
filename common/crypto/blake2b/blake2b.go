@@ -96,18 +96,17 @@ func New256(key []byte) (hash.Hash, error) { return newDigest(Size256, key) }
 // and BinaryUnmarshaler for state (de)serialization as documented by hash.Hash.
 func New(size int, key []byte) (hash.Hash, error) { return newDigest(size, key) }
 
+// sigmaRounds is the length of the BLAKE2b message-schedule cycle: round i
+// permutes with precomputed[i%sigmaRounds]. The assembly unrolls a whole cycle
+// and loops over it, so a chunk boundary is only correct on a multiple of it.
+const sigmaRounds = 10
+
 // maxAsmRounds bounds the work a single assembly call does. Assembly is not
 // preemptible, so an unbounded rounds argument holds every P in stop-the-world
-// for the length of the call. It must stay a multiple of 10 so that the message
-// schedule realigns at a chunk boundary.
+// for the length of the call.
 const maxAsmRounds = 4090
 
-// The assembly unrolls the ten distinct message permutations of the round
-// function and loops over that block, so a chunk boundary is only correct on a
-// multiple of ten. Enforced at compile time: the expression is 0 when the
-// remainder is 0, and a negative untyped constant otherwise, which cannot
-// convert to uint. Builds at 4090, fails at 4096.
-const _ uint = -(maxAsmRounds % 10)
+const _ uint = -(maxAsmRounds % sigmaRounds) // compile-time check: multiple of sigmaRounds
 
 // F is a compression function for BLAKE2b. It takes as an argument the state
 // vector `h`, message block vector `m`, offset counter `t`, final block indicator
