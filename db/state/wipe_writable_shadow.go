@@ -170,7 +170,7 @@ func (a *Aggregator) WipeWritableShadowPast(ctx context.Context, tx kv.TemporalR
 		binary.BigEndian.PutUint64(stepBytes[:], ^stepContaining)
 		for _, p := range plans {
 			d := a.d[p.domain]
-			if err := applyReplay(tx, d, p.keys, p.target, stepBytes, lastTxNum); err != nil {
+			if err := applyReplay(tx, d, p.keys, p.target, stepBytes); err != nil {
 				return fmt.Errorf("WipeWritableShadowPast: apply boundary-step replay (%s): %w", d.FilenameBase, err)
 			}
 		}
@@ -374,7 +374,7 @@ func collectKeysChangedInRange(tx kv.TemporalRwTx, name kv.Domain, fromTs, toTs 
 // (run after key collection, before this call) already removes records
 // past lastTxNum; the writable shadow we just rewrote is the only thing
 // GetLatest reads.
-func applyReplay(tx kv.TemporalRwTx, d *Domain, keys [][]byte, targets [][]byte, stepBytes [8]byte, historyTxN uint64) error {
+func applyReplay(tx kv.TemporalRwTx, d *Domain, keys [][]byte, targets [][]byte, stepBytes [8]byte) error {
 	if len(keys) != len(targets) {
 		return fmt.Errorf("applyReplay: keys (%d) and targets (%d) length mismatch", len(keys), len(targets))
 	}
@@ -404,11 +404,10 @@ func applyReplay(tx kv.TemporalRwTx, d *Domain, keys [][]byte, targets [][]byte,
 				if err := tx.Put(d.ValuesTable, fullKey, nil); err != nil {
 					return fmt.Errorf("Put tombstone(%s, fullKey=%x): %w", d.ValuesTable, fullKey, err)
 				}
-			} else if err := tx.Put(d.ValuesTable, fullKey, targets[i]); err != nil {
-				return fmt.Errorf("Put(%s, fullKey=%x): %w", d.ValuesTable, fullKey, err)
+				continue
 			}
-			if err := putShadowHistorySynth(tx, d, k, targets[i], historyTxN); err != nil {
-				return err
+			if err := tx.Put(d.ValuesTable, fullKey, targets[i]); err != nil {
+				return fmt.Errorf("Put(%s, fullKey=%x): %w", d.ValuesTable, fullKey, err)
 			}
 		}
 		return nil
@@ -439,16 +438,14 @@ func applyReplay(tx kv.TemporalRwTx, d *Domain, keys [][]byte, targets [][]byte,
 			if perr := c.Put(k, stepBytes[:]); perr != nil {
 				return fmt.Errorf("Put tombstone(%s, key=%x): %w", d.ValuesTable, k, perr)
 			}
-		} else {
-			val := make([]byte, 0, 8+len(targets[i]))
-			val = append(val, stepBytes[:]...)
-			val = append(val, targets[i]...)
-			if perr := c.Put(k, val); perr != nil {
-				return fmt.Errorf("Put(%s, key=%x): %w", d.ValuesTable, k, perr)
-			}
+			continue
 		}
-		if err := putShadowHistorySynth(tx, d, k, targets[i], historyTxN); err != nil {
-			return err
+
+		val := make([]byte, 0, 8+len(targets[i]))
+		val = append(val, stepBytes[:]...)
+		val = append(val, targets[i]...)
+		if perr := c.Put(k, val); perr != nil {
+			return fmt.Errorf("Put(%s, key=%x): %w", d.ValuesTable, k, perr)
 		}
 	}
 	return nil
