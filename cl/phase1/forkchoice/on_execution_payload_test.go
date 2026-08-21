@@ -244,6 +244,7 @@ func TestPendingEnvelopeErrorClassification(t *testing.T) {
 	stale := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
 	stale.Message.Payload.SlotNumber = 63
 	require.True(t, f.retryPendingEnvelopeError(errors.New("temporary disk failure"), nil))
+	require.True(t, f.retryPendingEnvelopeError(errors.New("temporary disk failure"), stale))
 	require.True(t, f.retryPendingEnvelopeError(ErrEIP7594ColumnDataNotAvailable, recent))
 	require.False(t, f.retryPendingEnvelopeError(ErrEIP7594ColumnDataNotAvailable, stale))
 	require.False(t, f.retryPendingEnvelopeError(fmt.Errorf("%w: bad signature", errInvalidExecutionPayloadEnvelope), nil))

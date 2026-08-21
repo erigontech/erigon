@@ -48,7 +48,10 @@ var errELBehind = errors.New("EL behind: payload not processable yet")
 
 var errPayloadValidationAdmission = errors.New("payload validation admission canceled")
 
-var errInvalidExecutionPayloadEnvelope = errors.New("invalid execution payload envelope")
+var (
+	errInvalidExecutionPayloadEnvelope = errors.New("invalid execution payload envelope")
+	errPendingEnvelopeAgeBounded       = errors.New("pending execution payload envelope is age bounded")
+)
 
 // validateEnvelopeAgainstBlock validates the envelope against the block and state.
 // This includes:
@@ -428,7 +431,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	// and avoids a full state copy per envelope under the write lock.
 	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
 	if err != nil {
-		return false, fmt.Errorf("OnExecutionPayload: failed to get block state: %w", err)
+		return false, fmt.Errorf("%w: OnExecutionPayload: failed to get block state: %w", errPendingEnvelopeAgeBounded, err)
 	}
 	if blockState == nil {
 		if missingMode == queueMissingEnvelope {
@@ -723,7 +726,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 
 	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
 	if err != nil {
-		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to get block state: %w", err)
+		return false, fmt.Errorf("%w: applyLocalSelfBuildEnvelopeCoordinated: failed to get block state: %w", errPendingEnvelopeAgeBounded, err)
 	}
 	if blockState == nil {
 		if missingMode == queueMissingEnvelope {
