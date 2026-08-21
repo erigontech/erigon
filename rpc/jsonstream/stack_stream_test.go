@@ -17,12 +17,20 @@
 package jsonstream
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"net"
+	"net/http"
+	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	jsoniter "github.com/json-iterator/go"
 )
@@ -1064,4 +1072,104 @@ func (w *failingWriter) Write(p []byte) (n int, err error) {
 	}
 	w.bytesWritten += len(p)
 	return len(p), nil
+}
+
+// TestFlushIfFull pins that the stream flushes once its buffer fills, rather
+// than growing without bound, and that flushing does not change the output.
+func TestFlushIfFull(t *testing.T) {
+	var buf bytes.Buffer
+	s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, InitialBufferSize))
+	chunk := strings.Repeat("a", 512)
+
+	s.WriteArrayStart()
+	for i := range 40 {
+		if i > 0 {
+			s.WriteMore()
+		}
+		s.WriteString(chunk)
+	}
+	require.NotZero(t, buf.Len(), "nothing reached the writer while the buffer filled")
+	s.WriteArrayEnd()
+	require.NoError(t, s.Flush())
+
+	var got []string
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &got))
+	require.Len(t, got, 40)
+	for _, v := range got {
+		require.Equal(t, chunk, v)
+	}
+}
+
+// countingListener counts writes reaching the socket, which is what flushing in
+// small pieces multiplies. httptest.NewServer gives a real conn and the real
+// bufio/chunkWriter chain; ResponseRecorder would have neither.
+type countingListener struct {
+	net.Listener
+	writes, bytes *atomic.Int64
+}
+
+func (l countingListener) Accept() (net.Conn, error) {
+	c, err := l.Listener.Accept()
+	if err != nil {
+		return nil, err
+	}
+	return countingConn{c, l.writes, l.bytes}, nil
+}
+
+type countingConn struct {
+	net.Conn
+	writes, bytes *atomic.Int64
+}
+
+func (c countingConn) Write(p []byte) (int, error) {
+	c.writes.Add(1)
+	c.bytes.Add(int64(len(p)))
+	return c.Conn.Write(p)
+}
+
+// BenchmarkStreamToHTTP writes a large response through the real net/http writer
+// chain at several flush thresholds, reporting the socket writes each causes.
+// bufio only bypasses its own buffer for writes larger than it holds, so a small
+// threshold turns every flush into its own socket write.
+func BenchmarkStreamToHTTP(b *testing.B) {
+	const responseSize = 8 << 20
+	chunk := strings.Repeat("x", 1024)
+
+	for _, threshold := range []int{4 << 10, 64 << 10, 1 << 20} {
+		b.Run(fmt.Sprintf("flushAt=%dKiB", threshold>>10), func(b *testing.B) {
+			var writes, bytesOut atomic.Int64
+			ln, err := net.Listen("tcp", "127.0.0.1:0")
+			require.NoError(b, err)
+
+			srv := &http.Server{Handler: http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+				s := jsoniter.NewStream(jsoniter.ConfigDefault, w, InitialBufferSize)
+				written := 0
+				for written < responseSize {
+					s.WriteRaw(chunk)
+					written += len(chunk)
+					if len(s.Buffer()) >= threshold {
+						s.Flush() //nolint:errcheck
+					}
+				}
+				s.Flush() //nolint:errcheck
+			})}
+			go srv.Serve(countingListener{ln, &writes, &bytesOut}) //nolint:errcheck
+			b.Cleanup(func() { srv.Close() })
+
+			url := "http://" + ln.Addr().String() + "/"
+			b.ResetTimer()
+			for b.Loop() {
+				resp, err := http.Get(url) //nolint:noctx
+				require.NoError(b, err)
+				_, err = io.Copy(io.Discard, resp.Body)
+				require.NoError(b, err)
+				resp.Body.Close()
+			}
+			b.StopTimer()
+
+			n := max(int64(b.N), 1)
+			b.ReportMetric(float64(writes.Load())/float64(n), "socketWrites/op")
+			b.ReportMetric(float64(bytesOut.Load())/float64(max(writes.Load(), 1)), "B/socketWrite")
+		})
+	}
 }

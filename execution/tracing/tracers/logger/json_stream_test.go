@@ -21,10 +21,12 @@ import (
 	"context"
 	"encoding/json"
 	"errors"
+	"io"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -394,4 +396,93 @@ func TestStructLog_ErrorOmitempty(t *testing.T) {
 			t.Errorf("error message: got %q, want %q", msg, "out of gas")
 		}
 	})
+}
+
+// TestJsonStreamLogger_MemoryReachesWriter pins that a long memory-enabled trace
+// keeps reaching the writer instead of accumulating in the stream's buffer. The
+// flushing lives in the stream, so nothing in the logger has to ask for it.
+func TestJsonStreamLogger_MemoryReachesWriter(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 2048)}
+	for i := range 200 {
+		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+	}
+
+	require.NotZero(t, buf.Len(), "nothing reached the writer before Flush")
+}
+
+func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xab}, 256),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+
+	stream := jsonstream.New(io.Discard)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	b.ReportAllocs()
+	i := 0
+	for b.Loop() {
+		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		i++
+	}
+}
+
+// countingWriter discards but records how much a response actually produced.
+type countingWriter struct{ n int64 }
+
+func (w *countingWriter) Write(p []byte) (int, error) { w.n += int64(len(p)); return len(p), nil }
+
+// largeTrace drives the logger over enough opcodes to produce a response far
+// larger than any buffer, reporting the bytes written and the peak buffer.
+func largeTrace(tb testing.TB, steps int) (produced int64, peakBuffer int) {
+	tb.Helper()
+	var out countingWriter
+	stream := jsonstream.New(&out)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xab}, 4096),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+	for i := range steps {
+		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		if n := len(stream.Buffer()); n > peakBuffer {
+			peakBuffer = n
+		}
+	}
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(tb, stream.Flush())
+	return out.n, peakBuffer
+}
+
+// TestJsonStreamLogger_LargeTraceStaysBounded is the case streaming exists for:
+// a single transaction whose trace dwarfs any buffer. Nothing in the RPC layer
+// flushes inside one transaction, so without the stream flushing itself the
+// whole response is held in memory.
+func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
+	produced, peak := largeTrace(t, 20_000)
+
+	require.Greater(t, produced, int64(64<<20), "the trace must dwarf the buffer for this to mean anything")
+	require.Less(t, peak, 4*jsonstream.FlushThreshold,
+		"buffer peaked at %d for a %dMB response", peak, produced>>20)
+}
+
+func BenchmarkJsonStreamLogger_LargeTrace(b *testing.B) {
+	for b.Loop() {
+		produced, peak := largeTrace(b, 2_000)
+		b.ReportMetric(float64(produced>>20), "MB/op")
+		b.ReportMetric(float64(peak), "peakBuffer/op")
+	}
 }

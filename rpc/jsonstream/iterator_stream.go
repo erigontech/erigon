@@ -49,6 +49,15 @@ func (s *JsoniterStream) Write(content []byte) (int, error) {
 
 func (s *JsoniterStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
+	s.flushIfFull()
+}
+
+// flushIfFull hands the buffer to the writer once it has outgrown its initial
+// size, so a large response streams instead of being held whole.
+func (s *JsoniterStream) flushIfFull() {
+	if len(s.stream.Buffer()) >= InitialBufferSize {
+		s.stream.Flush() //nolint:errcheck
+	}
 }
 
 func (s *JsoniterStream) WriteNil() {
@@ -117,6 +126,7 @@ func (s *JsoniterStream) WriteFloat64(val float64) {
 
 func (s *JsoniterStream) WriteString(val string) {
 	s.stream.WriteString(val)
+	s.flushIfFull()
 }
 
 func (s *JsoniterStream) WriteObjectStart() {

@@ -74,6 +74,16 @@ func (s *StackStream) Write(content []byte) (int, error) {
 func (s *StackStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
 	s.popCommaOrField()
+	s.flushIfFull()
+}
+
+// flushIfFull hands the buffer to the writer once it has outgrown its initial
+// size, so a large response streams instead of being held whole. The output is
+// the same wherever it happens: Flush only moves bytes that are already final.
+func (s *StackStream) flushIfFull() {
+	if len(s.stream.Buffer()) >= InitialBufferSize {
+		s.stream.Flush() //nolint:errcheck
+	}
 }
 
 // WriteNil writes a null value to the stream
@@ -176,6 +186,7 @@ func (s *StackStream) WriteFloat64(val float64) {
 func (s *StackStream) WriteString(val string) {
 	s.stream.WriteString(val)
 	s.popCommaOrField()
+	s.flushIfFull()
 }
 
 // WriteObjectStart writes the start of an object and adds it to the stack
