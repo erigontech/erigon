@@ -155,6 +155,7 @@ type AccessListTracer struct {
 // the resulting accesslist.
 // An optional set of addresses to be excluded from the resulting accesslist can
 // also be specified.
+// state is borrowed for CREATE nonce lookups; the caller keeps ownership of it.
 func NewAccessListTracer(acl types.AccessList, exclude map[common.Address]struct{}, state *state.IntraBlockState) *AccessListTracer {
 	excl := exclude
 	if excl == nil {
@@ -255,16 +256,6 @@ func (a *AccessListTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, sc
 			a.markCreated(addr)
 		}
 	}
-}
-
-// Close returns the state borrowed for CREATE nonce lookups to its pools.
-// Idempotent.
-func (a *AccessListTracer) Close() {
-	if a.state == nil {
-		return
-	}
-	a.state.Close()
-	a.state = nil
 }
 
 // AccessList returns the current accesslist maintained by the tracer.

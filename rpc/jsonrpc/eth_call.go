@@ -1030,11 +1030,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
 
+	// Convergence re-runs the whole message, so the state is reset per iteration
+	// rather than rebuilt: Reset keeps the reader and the pooled maps behind it.
+	ibs := state.New(stateReader)
+	defer ibs.Close()
+
 	// One convergence iteration: a non-nil result means the access list converged,
 	// otherwise the returned tracer seeds the next iteration.
 	step := func(prevTracer *logger.AccessListTracer) (*accessListResult, *logger.AccessListTracer, error) {
-		ibs := state.New(stateReader)
-		defer ibs.Close()
+		ibs.Reset()
 
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
@@ -1063,7 +1067,6 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 
 		// Apply the transaction with the access list tracer
 		tracer := logger.NewAccessListTracer(accessList, excl, ibs)
-		defer tracer.Close()
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 
