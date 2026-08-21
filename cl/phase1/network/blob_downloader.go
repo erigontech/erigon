@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"sort"
 	"sync"
 	"sync/atomic"
 	"time"
@@ -42,10 +43,17 @@ const (
 	blobLogInterval             = 30 * time.Second
 	blobBackfillWarningInterval = 4 * time.Minute
 	blocksBatchSize             = uint64(8)
+	maxBlobRetryRanges          = 32
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
 	blobColumnBackfillTimeout = 30 * time.Second
 )
+
+type blobRetryRange struct {
+	start  uint64
+	end    uint64
+	cursor uint64
+}
 
 // SyncedChecker is an interface to check if the forkchoice is synced
 type SyncedChecker interface {
@@ -86,10 +94,8 @@ type BlobHistoryDownloader struct {
 	highestBackfilledSlot  atomic.Uint64
 	nextBackfillTargetSlot uint64
 	denebStartSlot         uint64
-	retryStartSlot         uint64
-	retryEndSlot           uint64
-	retryCursorSlot        uint64
-	retryActive            bool
+	retryRanges            []blobRetryRange
+	retryRangeCursor       uint64
 	// archiveBlobs indicates whether to archive all blobs or just recent ones
 	archiveBlobs bool
 	// immediateBlobsBackfilling indicates whether to backfill blobs immediately
@@ -326,34 +332,37 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 }
 
 func (b *BlobHistoryDownloader) retryFailedRecoveries() error {
-	if !b.retryActive {
+	if len(b.retryRanges) == 0 {
 		return nil
 	}
 	firstUnfrozenSlot := b.sn.FrozenBlobs()
-	if b.retryEndSlot < firstUnfrozenSlot {
-		b.retryActive = false
-		return nil
-	}
-	if b.retryStartSlot < firstUnfrozenSlot {
-		b.retryStartSlot = firstUnfrozenSlot
-	}
-	if b.retryCursorSlot < b.retryStartSlot || b.retryCursorSlot > b.retryEndSlot {
-		b.retryCursorSlot = b.retryEndSlot
-	}
-
-	attempts := blocksBatchSize
-	if span := b.retryEndSlot - b.retryStartSlot; span < blocksBatchSize-1 {
-		attempts = span + 1
-	}
-	for range attempts {
-		if !b.retryActive {
+	b.trimRetryRanges(firstUnfrozenSlot)
+	attemptedSlots := make(map[uint64]struct{}, blocksBatchSize)
+	for range blocksBatchSize {
+		var slot uint64
+		found := false
+		for range len(b.retryRanges) {
+			if len(b.retryRanges) == 0 {
+				break
+			}
+			rangeIndex := int(b.retryRangeCursor % uint64(len(b.retryRanges)))
+			retryRange := &b.retryRanges[rangeIndex]
+			slot = retryRange.cursor
+			if slot == retryRange.start {
+				retryRange.cursor = retryRange.end
+			} else {
+				retryRange.cursor--
+			}
+			b.retryRangeCursor++
+			if _, attempted := attemptedSlots[slot]; attempted {
+				continue
+			}
+			attemptedSlots[slot] = struct{}{}
+			found = true
 			break
 		}
-		slot := b.retryCursorSlot
-		if slot == b.retryStartSlot {
-			b.retryCursorSlot = b.retryEndSlot
-		} else {
-			b.retryCursorSlot--
+		if !found {
+			break
 		}
 
 		block, err := b.readRetryBlock(slot)
@@ -405,15 +414,37 @@ func (b *BlobHistoryDownloader) retryBlock(block *cltypes.SignedBeaconBlock) (bo
 }
 
 func (b *BlobHistoryDownloader) addRetrySlot(slot uint64) {
-	if !b.retryActive {
-		b.retryStartSlot = slot
-		b.retryEndSlot = slot
-		b.retryCursorSlot = slot
-		b.retryActive = true
-		return
+	b.retryRanges = append(b.retryRanges, blobRetryRange{start: slot, end: slot, cursor: slot})
+	sort.Slice(b.retryRanges, func(i, j int) bool {
+		return b.retryRanges[i].start < b.retryRanges[j].start
+	})
+	merged := b.retryRanges[:0]
+	for _, retryRange := range b.retryRanges {
+		last := len(merged) - 1
+		if last >= 0 && (retryRange.start <= merged[last].end || retryRange.start-merged[last].end == 1) {
+			if retryRange.end > merged[last].end {
+				merged[last].end = retryRange.end
+				merged[last].cursor = retryRange.end
+			}
+			continue
+		}
+		merged = append(merged, retryRange)
 	}
-	b.retryStartSlot = min(b.retryStartSlot, slot)
-	b.retryEndSlot = max(b.retryEndSlot, slot)
+	b.retryRanges = merged
+	for len(b.retryRanges) > maxBlobRetryRanges {
+		nearest := 0
+		nearestGap := b.retryRanges[1].start - b.retryRanges[0].end
+		for i := 1; i < len(b.retryRanges)-1; i++ {
+			gap := b.retryRanges[i+1].start - b.retryRanges[i].end
+			if gap < nearestGap {
+				nearest = i
+				nearestGap = gap
+			}
+		}
+		b.retryRanges[nearest].end = b.retryRanges[nearest+1].end
+		b.retryRanges[nearest].cursor = b.retryRanges[nearest].end
+		b.retryRanges = append(b.retryRanges[:nearest+1], b.retryRanges[nearest+2:]...)
+	}
 }
 
 func (b *BlobHistoryDownloader) addRetryBlocks(blocks []*cltypes.SignedBeaconBlock) {
@@ -423,22 +454,42 @@ func (b *BlobHistoryDownloader) addRetryBlocks(blocks []*cltypes.SignedBeaconBlo
 }
 
 func (b *BlobHistoryDownloader) resolveRetrySlot(slot uint64) {
-	if !b.retryActive || slot < b.retryStartSlot || slot > b.retryEndSlot {
+	for i := range b.retryRanges {
+		retryRange := &b.retryRanges[i]
+		if slot < retryRange.start || slot > retryRange.end {
+			continue
+		}
+		if retryRange.start == retryRange.end {
+			b.retryRanges = append(b.retryRanges[:i], b.retryRanges[i+1:]...)
+			return
+		}
+		if slot == retryRange.start {
+			retryRange.start++
+		} else if slot == retryRange.end {
+			retryRange.end--
+		}
+		if retryRange.cursor < retryRange.start || retryRange.cursor > retryRange.end {
+			retryRange.cursor = retryRange.end
+		}
 		return
 	}
-	if b.retryStartSlot == b.retryEndSlot {
-		b.retryActive = false
-		return
+}
+
+func (b *BlobHistoryDownloader) trimRetryRanges(firstUnfrozenSlot uint64) {
+	kept := b.retryRanges[:0]
+	for _, retryRange := range b.retryRanges {
+		if retryRange.end < firstUnfrozenSlot {
+			continue
+		}
+		if retryRange.start < firstUnfrozenSlot {
+			retryRange.start = firstUnfrozenSlot
+		}
+		if retryRange.cursor < retryRange.start || retryRange.cursor > retryRange.end {
+			retryRange.cursor = retryRange.end
+		}
+		kept = append(kept, retryRange)
 	}
-	if slot == b.retryStartSlot {
-		b.retryStartSlot++
-	}
-	if slot == b.retryEndSlot {
-		b.retryEndSlot--
-	}
-	if b.retryCursorSlot < b.retryStartSlot || b.retryCursorSlot > b.retryEndSlot {
-		b.retryCursorSlot = b.retryEndSlot
-	}
+	b.retryRanges = kept
 }
 
 func (b *BlobHistoryDownloader) peersAvailable() bool {

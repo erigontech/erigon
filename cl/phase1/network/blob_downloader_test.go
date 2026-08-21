@@ -474,7 +474,7 @@ func TestBlobHistoryDownloaderConservesEveryIncompleteFuluBlockAcrossPasses(t *t
 			require.NoError(t, downloader.downloadOnce(false))
 			require.NoError(t, downloader.downloadOnce(false))
 			require.Equal(t, tc.completionAttempt, attempts)
-			require.False(t, downloader.retryActive)
+			require.Empty(t, downloader.retryRanges)
 		})
 	}
 }
@@ -491,14 +491,11 @@ func TestBlobHistoryDownloaderRetryDropsAlreadyCompleteDenebBlock(t *testing.T) 
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
 	downloader.blobStorage = blobStorage
 	downloader.rpc = peer
-	downloader.retryStartSlot = block.Block.Slot
-	downloader.retryEndSlot = block.Block.Slot
-	downloader.retryCursorSlot = block.Block.Slot
-	downloader.retryActive = true
+	downloader.addRetrySlot(block.Block.Slot)
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Zero(t, peer.requests)
-	require.False(t, downloader.retryActive)
+	require.Empty(t, downloader.retryRanges)
 }
 
 func TestBlobHistoryDownloaderRetryRetainsDenebBlockOnStorageReadError(t *testing.T) {
@@ -520,14 +517,11 @@ func TestBlobHistoryDownloaderRetryRetainsDenebBlockOnStorageReadError(t *testin
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
 	downloader.blobStorage = blobStorage
 	downloader.rpc = peer
-	downloader.retryStartSlot = block.Block.Slot
-	downloader.retryEndSlot = block.Block.Slot
-	downloader.retryCursorSlot = block.Block.Slot
-	downloader.retryActive = true
+	downloader.addRetrySlot(block.Block.Slot)
 
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Zero(t, peer.requests)
-	require.True(t, downloader.retryActive)
+	require.Equal(t, []blobRetryRange{{start: block.Block.Slot, end: block.Block.Slot, cursor: block.Block.Slot}}, downloader.retryRanges)
 }
 
 func TestBlobHistoryDownloaderFuluRecoveryRejectsInvalidStoredSidecars(t *testing.T) {
