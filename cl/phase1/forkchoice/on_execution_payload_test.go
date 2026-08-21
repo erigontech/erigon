@@ -310,6 +310,40 @@ func TestOnExecutionPayloadRetainsEnvelopeWhenColumnDataIsUnavailable(t *testing
 	require.Same(t, envelope, retained)
 }
 
+func TestRetryPendingExecutionPayloadEnvelopesDropsStaleStorageFailure(t *testing.T) {
+	for _, localOrigin := range []bool{false, true} {
+		t.Run(fmt.Sprintf("local=%t", localOrigin), func(t *testing.T) {
+			blockRoot := common.HexToHash("0x1234")
+			payload := cltypes.NewEth1Block(clparams.GloasVersion, &clparams.MainnetBeaconConfig)
+			payload.SlotNumber = 63
+			envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
+				BeaconBlockRoot: blockRoot,
+				Payload:         payload,
+			}}
+			pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+			require.NoError(t, err)
+			local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
+			require.NoError(t, err)
+			origin := pending
+			if localOrigin {
+				origin = local
+			}
+			origin.Add(blockRoot, envelope)
+			stateErr := errors.New("persistent state read failure")
+			f := &ForkChoiceStore{
+				forkGraph:                      dataAvailabilityForkGraph{stateErr: &stateErr},
+				beaconCfg:                      &clparams.MainnetBeaconConfig,
+				pendingEnvelopes:               pending,
+				pendingLocalSelfBuildEnvelopes: local,
+			}
+			f.finalizedCheckpoint.Store(solid.Checkpoint{Epoch: 2})
+
+			f.RetryPendingExecutionPayloadEnvelopes(context.Background(), 1)
+			require.False(t, origin.Contains(blockRoot))
+		})
+	}
+}
+
 func TestRetryPendingExecutionPayloadEnvelopesDropsMissingIndexRepairEnvelope(t *testing.T) {
 	for _, localOrigin := range []bool{false, true} {
 		t.Run(fmt.Sprintf("local=%t", localOrigin), func(t *testing.T) {

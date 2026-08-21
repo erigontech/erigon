@@ -618,10 +618,10 @@ func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.
 	if errors.Is(err, errInvalidExecutionPayloadEnvelope) {
 		return false
 	}
-	if !errors.Is(err, ErrIgnore) && !errors.Is(err, ErrEIP7594ColumnDataNotAvailable) {
+	if pending == nil {
 		return true
 	}
-	if pending == nil || pending.Message == nil || pending.Message.Payload == nil {
+	if pending.Message == nil || pending.Message.Payload == nil {
 		return false
 	}
 	checkpoint := f.finalizedCheckpoint.Load()
