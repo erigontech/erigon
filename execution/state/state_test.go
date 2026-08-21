@@ -313,7 +313,8 @@ func TestSnapshot2(t *testing.T) {
 	so0Restored, err := state.getStateObject(stateobjaddr0, true)
 	require.NoError(t, err)
 	// Update lazily-loaded values before comparing.
-	so0Restored.GetState(storageaddr)
+	_, _, err = so0Restored.GetState(storageaddr)
+	require.NoError(t, err)
 	_, err = so0Restored.Code()
 	require.NoError(t, err)
 	// non-deleted is equal (restored)

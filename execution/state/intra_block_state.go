@@ -1068,7 +1068,10 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		return sdb.TouchAccount(addr)
 	}
 
-	prev, wasCommited, _ := sdb.getBalance(addr)
+	prev, wasCommited, err := sdb.getBalance(addr)
+	if err != nil {
+		return err
+	}
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		defer func() {
@@ -1458,7 +1461,10 @@ func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 		return nil
 	}
 
-	prev, wasCommited, _ := sdb.getBalance(addr)
+	prev, wasCommited, err := sdb.getBalance(addr)
+	if err != nil {
+		return err
+	}
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		defer func() {

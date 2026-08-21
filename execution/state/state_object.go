@@ -161,18 +161,21 @@ func (so *stateObject) markSelfdestructed() {
 }
 
 // GetState returns a value from account storage.
-func (so *stateObject) GetState(key accounts.StorageKey) (uint256.Int, bool) {
+func (so *stateObject) GetState(key accounts.StorageKey) (uint256.Int, bool, error) {
 	// If the fake storage is set, only lookup the state here (in the debugging mode)
 	if so.fakeStorage != nil {
-		return so.fakeStorage[key], false
+		return so.fakeStorage[key], false, nil
 	}
 	value, dirty := so.dirtyStorage[key]
 	if dirty {
-		return value, false
+		return value, false, nil
 	}
 	// Otherwise return the entry's original value
-	value, _ = so.GetCommittedState(key)
-	return value, true
+	value, err := so.GetCommittedState(key)
+	if err != nil {
+		return uint256.Int{}, false, err
+	}
+	return value, true, nil
 }
 
 // GetCommittedState retrieves a value from the committed account storage trie.
