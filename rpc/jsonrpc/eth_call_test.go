@@ -242,9 +242,6 @@ func TestCreateAccessListContractCreationWithoutFromDoesNotPanic(t *testing.T) {
 	require.NotNil(t, res)
 }
 
-// TestCreateAccessList covers the shapes go-ethereum pins in
-// ethclient/gethclient's testAccessList: a plain transfer, a storage-touching
-// call, a reverting contract creation, and a fee below the block base fee.
 func TestCreateAccessList(t *testing.T) {
 	m, bankAddress, contractAddress, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
 	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
