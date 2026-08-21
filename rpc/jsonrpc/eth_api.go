@@ -419,12 +419,18 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
 		return nil, false, nil
 	}
-	overlayTx := api.filters.WithOverlay(tx)
-	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
+	return api.canonicalHeaderByNumberOrHash(ctx, api.filters.WithOverlay(tx), blockNrOrHash)
+}
+
+// canonicalHeaderByNumberOrHash resolves the selector and header entirely
+// through tx. It never selects an overlay, allowing dependent reads to remain
+// on the same view.
+func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	if err != nil {
 		return nil, false, err
 	}
-	header, err := api.headerByHashAndNumber(ctx, overlayTx, hash, blockNum)
+	header, err := api.headerByHashAndNumber(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, false, err
 	}

@@ -170,56 +170,58 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	defer dbtx.Rollback()
 
-	// Use latest block by default
-	if blockNrOrHash == nil {
-		blockNrOrHash = &latestNumOrHash
+	requestedSelector := orLatest(blockNrOrHash)
+	stateSelector := requestedSelector
+	isPending := false
+	if number, ok := requestedSelector.Number(); ok && number == rpc.PendingBlockNumber {
+		stateSelector = latestNumOrHash
+		isPending = true
 	}
+	// Select once so header resolution, state reads, and EVM BLOCKHASH lookups
+	// cannot observe different overlay generations.
+	stateTx := api.filters.WithTemporalOverlay(dbtx)
 
-	chainConfig, err := api.chainConfig(ctx, dbtx)
+	chainConfig, err := api.chainConfig(ctx, stateTx)
 	if err != nil {
 		return 0, err
 	}
 	engine := api.engine()
 
-	header, isLatest, err := api.headerByNumberOrHash(ctx, dbtx, *blockNrOrHash)
+	stateHeader, isLatest, err := api.canonicalHeaderByNumberOrHash(ctx, stateTx, stateSelector)
 	if err != nil {
 		return 0, err
 	}
 
-	// try to check if it is a pending block
-	if header == nil {
-		b := api.filters.LastPendingBlock()
-		blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, *blockNrOrHash, dbtx, api._blockReader, api.filters)
-		if err != nil {
-			return 0, err
-		}
-		if b != nil && blockNum == b.NumberU64() {
-			header = b.HeaderNoCopy()
+	if stateHeader == nil {
+		return 0, fmt.Errorf("could not find the header %s in cache or db", requestedSelector.String())
+	}
+
+	header := stateHeader
+	stateBlockNum := stateHeader.Number.Uint64()
+	if isPending {
+		if pendingBlock := api.pendingBlock(); pendingBlock != nil {
+			pendingHeader := pendingBlock.HeaderNoCopy()
+			// A pending environment is valid only on top of the selected state head.
+			// A stale or missing template retains the established latest fallback.
+			if pendingHeader.Number.Uint64() == stateBlockNum+1 && pendingHeader.ParentHash == stateHeader.Hash() {
+				header = pendingHeader
+			}
 		}
 	}
 
-	if header == nil {
-		return 0, fmt.Errorf("could not find the header %s in cache or db", blockNrOrHash.String())
-	}
-
-	// Use overridden header for fork-detection and gas ceiling; keep original for
-	// DB lookups (state reader, prune history) which must reference the on-chain block.
 	effectiveHeader := blockOverrides.OverrideHeader(header)
 
-	blockNum := header.Number
-
-	err = api.BaseAPI.checkPruneHistory(ctx, dbtx, blockNum.Uint64())
+	err = api.BaseAPI.checkPruneHistory(ctx, stateTx, stateBlockNum)
 	if err != nil {
 		return 0, err
 	}
 
-	stateTx := api.filters.WithTemporalOverlay(dbtx)
-	err = rpchelper.CheckBlockExecuted(stateTx, header.Number.Uint64())
+	err = rpchelper.CheckBlockExecuted(stateTx, stateBlockNum)
 	if err != nil {
 		return 0, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, blockNum.Uint64(), isLatest, 0, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateStateReaderFromBlockNumber(ctx, stateTx, stateBlockNum, isLatest, 0, api.stateCache, api._txNumReader)
 	if err != nil {
 		return 0, err
 	}
@@ -300,7 +302,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		hi = api.GasCap
 	}
 
-	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, *blockNrOrHash, dbtx, api._blockReader, chainConfig, api.evmCallTimeout)
+	caller, err := transactions.NewReusableCaller(engine, stateReader, stateOverrides, blockOverrides, effectiveHeader, args, api.GasCap, requestedSelector, stateTx, api._blockReader, chainConfig, api.evmCallTimeout)
 	if err != nil {
 		return 0, err
 	}
