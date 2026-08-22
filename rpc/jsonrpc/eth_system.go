@@ -223,12 +223,6 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 			receiptsOldest = byzantium
 		}
 	}
-	// The Bor state sync receipt is reconstructed from the state at the end of the block,
-	// so on Bor the receipts of a block reach only as far as history whatever the cache
-	// keeps. This mirrors borReceiptForBlock.
-	if chainConfig.Bor != nil {
-		receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
-	}
 	// Reading the receipts of a block needs its body too: the stored receipt carries no
 	// TxHash, so it is derived from the block's transaction.
 	receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, blocksOldest, pruneMode.Blocks)

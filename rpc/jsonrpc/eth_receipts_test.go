@@ -17,16 +17,12 @@
 package jsonrpc
 
 import (
-	"context"
-	"errors"
 	"fmt"
 	"testing"
 
-	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
@@ -82,41 +78,8 @@ func TestAppendErigonLogs(t *testing.T) {
 			require.Len(t, got, tc.wantLen)
 			for i, l := range got[len(tc.logs):] {
 				assert.Equal(t, tc.filtered[i].Index, l.Log.Index)
-				assert.Equal(t, hexutil.Uint64(blockTime), l.Timestamp)
+				assert.Equal(t, hexutil.Uint64(blockTime), l.BlockTimestamp)
 			}
 		})
 	}
-}
-
-var _ bridgeReader = mockBridgeReader{}
-
-type mockBridgeReader struct {
-	events []*types.Message
-	err    error
-	// stateSyncBlock is the block a state sync txn hash resolves to, mimicking the
-	// bridge index that is the only place such a txn can be looked up.
-	stateSyncBlock uint64
-	stateSyncFound bool
-}
-
-func (b mockBridgeReader) Events(context.Context, common.Hash, uint64) ([]*types.Message, error) {
-	return b.events, b.err
-}
-
-func (b mockBridgeReader) EventTxnLookup(context.Context, common.Hash) (uint64, bool, error) {
-	return b.stateSyncBlock, b.stateSyncFound, b.err
-}
-
-func TestBorStateSyncLogs_NoEvents(t *testing.T) {
-	api := &BaseAPI{bridgeReader: mockBridgeReader{}}
-	logs, err := api.borStateSyncLogs(context.Background(), nil, nil, &types.Header{Number: *uint256.NewInt(1)}, 0, 0)
-	require.NoError(t, err)
-	assert.Empty(t, logs)
-}
-
-func TestBorStateSyncLogs_EventsError(t *testing.T) {
-	wantErr := errors.New("bridge down")
-	api := &BaseAPI{bridgeReader: mockBridgeReader{err: wantErr}}
-	_, err := api.borStateSyncLogs(context.Background(), nil, nil, &types.Header{Number: *uint256.NewInt(1)}, 0, 0)
-	require.ErrorIs(t, err, wantErr)
 }

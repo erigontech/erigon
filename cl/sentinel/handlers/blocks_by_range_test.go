@@ -25,7 +25,6 @@ import (
 	"io"
 	"testing"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -39,6 +38,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 func TestBlocksByRootHandler(t *testing.T) {
@@ -110,6 +110,8 @@ func TestBlocksByRootHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, firstByte[0], byte(0))
 
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
 	for i := 0; i < int(count); i++ {
 		forkDigest := make([]byte, 4)
 
@@ -126,7 +128,7 @@ func TestBlocksByRootHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
