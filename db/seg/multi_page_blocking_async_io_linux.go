@@ -24,29 +24,38 @@ import (
 	"github.com/erigontech/erigon/common/iouring"
 )
 
-func (g *Getter) EnableAsyncLiteralWarm() {
-	g.literalWarmer = (*Getter).warmLiteral
+func (g *Getter) EnableMultiPageBlockingAsyncIO() {
+	g.multiPageBlockingAsyncRead = (*Getter).readMultiPageLiteral
+	g.multiPageReadThreshold = uint64(pageSize)
 }
 
-func shouldWarmLiteral(offset, length uint64) bool {
-	if length == 0 {
-		return false
+func multiPageBlockingAsyncReadRange(offset, length uint64) (uint64, uint64, bool) {
+	page := uint64(pageSize)
+	if length <= page {
+		return 0, 0, false
 	}
 	end := offset + length
 	if end < offset {
-		return false
+		return 0, 0, false
 	}
-	page := uint64(pageSize)
-	return offset/page != (end-1)/page
+	// The metadata walk has already touched the page containing the literal start.
+	if remainder := offset % page; remainder != 0 {
+		offset += page - remainder
+	}
+	if offset >= end {
+		return 0, 0, false
+	}
+	return offset, end - offset, true
 }
 
-func (g *Getter) warmLiteral(offset, length uint64) {
-	if !shouldWarmLiteral(offset, length) || offset+length > math.MaxInt64 {
+func (g *Getter) readMultiPageLiteral(offset, length uint64) {
+	offset, length, ok := multiPageBlockingAsyncReadRange(offset, length)
+	if !ok || offset+length > math.MaxInt64 {
 		return
 	}
 	for length > 0 {
-		chunk := min(length, uint64(iouring.WarmBufSize))
-		iouring.WarmOne(int(g.d.f.Fd()), int64(offset), int(chunk))
+		chunk := min(length, uint64(iouring.MaxReadSize))
+		g.d.blockingAsyncRead(int64(offset), int(chunk))
 		offset += chunk
 		length -= chunk
 	}

@@ -26,19 +26,15 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 )
 
-// Pool of small rings for per-access warming: each goroutine borrows a ring,
-// does a single-read submit+wait (which releases the P via io_uring_enter),
-// and returns it. Sized to the expected number of concurrent cold readers.
+// Pool of small rings for blocking async reads. Each goroutine borrows a ring,
+// waits for one read, and returns it.
 
-// WarmBufSize is the largest region one WarmOne can pull in. Sized in pages so it
-// always covers the residency gate's max window (8 pages) on any page size — the
-// gate must cap its window at WarmBufSize so it never marks unwarmed pages resident.
-var WarmBufSize = 8 * os.Getpagesize()
+// MaxReadSize covers a maximum-size contract in one read. The
+// residency gate must cap its window at this size.
+var MaxReadSize = max(64*1024, 8*os.Getpagesize())
 
-// poolSize bounds concurrent warms at ~2*GOMAXPROCS: a blocking fault holds a P,
-// and an io_uring read frees it for one more, so beyond that rings sit idle. The
-// cap also keeps the per-process io_uring memory footprint small (each instance
-// pins kernel memory; hundreds of rings can exhaust it).
+// poolSize bounds concurrent reads at ~2*GOMAXPROCS because each io_uring read
+// releases a P for another goroutine. The cap also limits pinned kernel memory.
 func poolSize() int {
 	if n := dbg.EnvInt("RESIDENCY_IOURING_RINGS", 0); n > 0 {
 		return n
@@ -47,18 +43,16 @@ func poolSize() int {
 }
 
 type pooledRing struct {
-	r   *Ring
-	buf []byte
-	// reusable single-read argument slots, so a warm allocates nothing per call
+	r    *Ring
+	buf  []byte
 	offs [1]int64
 	lens [1]int
 	bufs [1][]byte
 }
 
 var (
-	// ringPool is nil when io_uring is unavailable — WarmOne then no-ops and reads
-	// fall back to ordinary blocking mmap faults. There is no crash: warming is an
-	// optimization, and skipping it is always safe.
+	// ringPool is nil when io_uring is unavailable. BlockingRead then no-ops and
+	// callers fall back to ordinary blocking mmap faults.
 	ringPool     chan *pooledRing
 	ringPoolOnce sync.Once
 )
@@ -75,27 +69,26 @@ func initPool() {
 			}
 			return
 		}
-		pool <- &pooledRing{r: r, buf: make([]byte, WarmBufSize)}
+		pool <- &pooledRing{r: r, buf: make([]byte, MaxReadSize)}
 	}
 	ringPool = pool
 }
 
-// WarmOne reads [off, off+length) via a pooled io_uring ring to populate the page
-// cache. It blocks for a free ring when the pool is drained (parking the goroutine,
-// freeing its P). A no-op if io_uring is unavailable — the caller's mmap read then
-// takes an ordinary blocking fault.
-func WarmOne(fd int, off int64, length int) {
+// BlockingRead reads [off, off+length) into an internal scratch buffer through
+// io_uring and waits for completion without holding the goroutine's P. It is a
+// no-op if io_uring is unavailable.
+func BlockingRead(fd int, off int64, length int) {
 	ringPoolOnce.Do(initPool)
 	if ringPool == nil {
 		return
 	}
-	if length > WarmBufSize {
-		length = WarmBufSize
+	if length > MaxReadSize {
+		length = MaxReadSize
 	}
 	pr := <-ringPool
 	pr.offs[0], pr.lens[0], pr.bufs[0] = off, length, pr.buf
-	if err := pr.r.BatchReadWarm(fd, pr.offs[:], pr.lens[:], pr.bufs[:]); err != nil {
-		pr.r.reset() // resync after a failed enter; the lost warm is a harmless extra fault
+	if err := pr.r.BlockingBatchRead(fd, pr.offs[:], pr.lens[:], pr.bufs[:]); err != nil {
+		pr.r.reset()
 	}
 	ringPool <- pr
 }
