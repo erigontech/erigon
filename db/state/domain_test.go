@@ -3860,3 +3860,32 @@ func TestDomain_GetLatestValSize(t *testing.T) {
 		check(t, db, d, txs)
 	})
 }
+
+// TestDomainDisabledDiscardsWrites pins that Enabled=false is a real master
+// switch: a writer taken from a disabled domain must drop everything instead of
+// quietly collecting and flushing into the DB tables.
+func TestDomainDisabledDiscardsWrites(t *testing.T) {
+	logger := log.New()
+	cfg := statecfg.Schema.AccountsDomain
+	cfg.Hist.IiCfg.Enabled = false
+	db, d := testDbAndDomainOfStep(t, cfg, 16, logger)
+	ctx := t.Context()
+
+	tx, err := db.BeginRw(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	dc := d.beginForTests()
+	defer dc.Close()
+	w := dc.NewWriter()
+	defer w.Close()
+
+	require.NoError(t, w.PutWithPrev([]byte("key"), []byte("value"), 0, nil))
+	require.NoError(t, w.Flush(ctx, tx))
+
+	for _, table := range d.Tables() {
+		n, err := tx.Count(table)
+		require.NoError(t, err)
+		require.Zerof(t, n, "table %s must stay empty", table)
+	}
+}
