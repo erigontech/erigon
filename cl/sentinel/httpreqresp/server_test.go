@@ -26,7 +26,6 @@ import (
 	"time"
 
 	"github.com/go-chi/chi/v5"
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/network"
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -34,6 +33,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 func TestMaxResponseBodySize(t *testing.T) {
@@ -116,7 +116,8 @@ func TestResponseCodeErrorMessageRejectsOverlongLengthVarint(t *testing.T) {
 func TestResponseCodeErrorMessageCapsDecodedMessage(t *testing.T) {
 	var body bytes.Buffer
 	body.WriteByte(0x01)
-	sw := snappy.NewBufferedWriter(&body)
+	sw := snappypool.Writer(&body)
+	defer snappypool.PutWriter(sw)
 	_, err := sw.Write(bytes.Repeat([]byte{'x'}, maxErrorMessageBytes+1))
 	require.NoError(t, err)
 	require.NoError(t, sw.Close())
