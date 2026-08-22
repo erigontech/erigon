@@ -575,10 +575,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		if !txPoolService.EnsureVersionCompatibility() {
 			rootCancel()
 		}
-		if _, err := readChainConfigFromDB(context.Background(), remoteKv); err != nil {
-			logger.Error("Failed to read remote chain config", "err", err)
-			rootCancel()
-		}
 		if remoteCE != nil {
 			if err := remoteCE.init(db, blockReader, remoteKvClient, logger); err != nil {
 				logger.Error("Failed to initialize remote rules engine", "err", err)

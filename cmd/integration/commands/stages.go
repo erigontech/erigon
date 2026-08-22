@@ -283,7 +283,7 @@ func init() {
 	withOutputCsvFile(cmdPrintTableSizes)
 	rootCmd.AddCommand(cmdPrintTableSizes)
 
-	// Snapshots: no Heimdall/Unwind, so withStageBase doesn't fit
+	// Snapshots: no Unwind, so withStageBase doesn't fit
 	withConfig(cmdStageSnapshots)
 	withDataDir(cmdStageSnapshots)
 	withChain(cmdStageSnapshots)
@@ -1144,9 +1144,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 		g := &errgroup.Group{}
 		g.Go(func() error {
 			_allSnapshotsSingleton.OptimisticalyOpenFolder()
-			return nil
-		})
-		g.Go(func() error {
 			return nil
 		})
 		g.Go(func() error {
