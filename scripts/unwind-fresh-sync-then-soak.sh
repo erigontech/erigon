@@ -409,6 +409,30 @@ if [[ -z "$DEPTHS" ]]; then
                 REGIMES="${REGIMES:+$REGIMES,}$fr"
             done
             echo "  FORCE_REGIME=$fr overrode DEPTHS=$DEPTHS REGIMES=$REGIMES"
+        elif [[ -n "${REGIME_CYCLE:-}" ]]; then
+            # REGIME_CYCLE=a,b,c,... cycles per-iter regimes through the
+            # given CSV pattern (iter 1 → a, iter 2 → b, ..., wrapping at
+            # end). Depths stay per-regime — each iter picks a random
+            # target in its regime's [lo, hi] band. Used by the mode-C
+            # v4 history-family verify (REGIME_CYCLE=3,3,2) to exercise
+            # the write path (mode-C emits paired v4 .v/.ef) alongside
+            # the read path (subsequent mode-C and mode-B read them back)
+            # without spending iters on regimes 1/4 that aren't under test.
+            IFS=',' read -ra RC_ARR <<< "$REGIME_CYCLE"
+            REGIMES=""
+            DEPTHS=""
+            for ((_i=1; _i<=ITER; _i++)); do
+                idx=$(( (_i - 1) % ${#RC_ARR[@]} ))
+                r=${RC_ARR[$idx]}
+                lo=${R_LO[$r]}
+                hi=${R_HI[$r]}
+                target=$(shuf -i "$lo-$hi" -n 1 \
+                    --random-source=<(openssl enc -aes-256-ctr -pass "pass:$RANDOM_SEED-rc-$_i" -nosalt < /dev/zero 2>/dev/null))
+                depth=$((HEAD_NOW - target))
+                DEPTHS="${DEPTHS:+$DEPTHS,}$depth"
+                REGIMES="${REGIMES:+$REGIMES,}$r"
+            done
+            echo "  REGIME_CYCLE=$REGIME_CYCLE overrode DEPTHS=$DEPTHS REGIMES=$REGIMES"
         fi
     else
         rm -f "$RD_OUT"
