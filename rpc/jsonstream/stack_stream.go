@@ -80,6 +80,7 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 func (s *StackStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
 	s.popCommaOrField()
+	flushIfFull(s.stream)
 }
 
 // WriteNil writes a null value to the stream
@@ -182,6 +183,7 @@ func (s *StackStream) WriteFloat64(val float64) {
 func (s *StackStream) WriteString(val string) {
 	s.stream.WriteString(val)
 	s.popCommaOrField()
+	flushIfFull(s.stream)
 }
 
 // WriteObjectStart writes the start of an object and adds it to the stack
