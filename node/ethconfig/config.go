@@ -251,11 +251,6 @@ type Config struct {
 
 	ExperimentalBAL bool
 
-	// URL to connect to Heimdall node
-	HeimdallURL string
-	// No heimdall service
-	WithoutHeimdall bool
-
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
@@ -267,7 +262,7 @@ type Config struct {
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
 
-	// PoS Single Slot finality
+	// PoS Single Slot finality. Read only by polygon/sync; goes with the polygon tree.
 	PolygonPosSingleSlotFinality        bool
 	PolygonPosSingleSlotFinalityBlockAt uint64
 

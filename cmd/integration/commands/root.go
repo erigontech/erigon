@@ -71,10 +71,8 @@ func dbCfg(label kv.Label, path string) kv2.MdbxOpts {
 
 func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain string, logger log.Logger) (tdb kv.TemporalRwDB, err error) {
 	migrationDBs := map[kv.Label]bool{
-		dbcfg.ChainDB:         true,
-		dbcfg.ConsensusDB:     true,
-		dbcfg.HeimdallDB:      true,
-		dbcfg.PolygonBridgeDB: true,
+		dbcfg.ChainDB:     true,
+		dbcfg.ConsensusDB: true,
 	}
 	if _, ok := migrationDBs[opts.GetLabel()]; !ok {
 		panic(opts.GetLabel())
@@ -116,7 +114,7 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 		return nil, err
 	}
 
-	blockSnaps, borSnaps, agg, _, _, _, err := allSnapshots(ctx, rawDB, logger)
+	blockSnaps, agg, _, err := allSnapshots(ctx, rawDB, logger)
 	if err != nil {
 		return nil, err
 	}
@@ -125,6 +123,6 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 	if err != nil {
 		return nil, err
 	}
-	logSnapshotStats(ctx, db, blockSnaps, borSnaps, logger)
+	logSnapshotStats(ctx, db, blockSnaps, logger)
 	return db, nil
 }
