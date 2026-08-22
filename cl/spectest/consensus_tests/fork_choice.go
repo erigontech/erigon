@@ -487,8 +487,10 @@ func doCheck(t *testing.T, stepstr string, store *forkchoice.ForkChoiceStore, e 
 	}
 	if e.HeadPayloadStatus != nil {
 		// Ensure head is computed so GetHeadPayloadStatus returns a fresh value.
-		_, _, err := store.GetHead(nil)
+		headRoot, _, err := store.GetHead(nil)
 		assert.NoError(t, err, stepstr)
-		assert.EqualValues(t, *e.HeadPayloadStatus, int(store.GetHeadPayloadStatus()), stepstr)
+		headPayloadStatus, matchesHead := store.GetHeadPayloadStatus(headRoot)
+		assert.True(t, matchesHead, stepstr)
+		assert.EqualValues(t, *e.HeadPayloadStatus, int(headPayloadStatus), stepstr)
 	}
 }

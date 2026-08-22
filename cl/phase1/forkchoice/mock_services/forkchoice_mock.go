@@ -50,6 +50,7 @@ type ForkChoiceStorageMock struct {
 	HeadSlotVal            uint64
 	HeadPayloadStatusVal   cltypes.PayloadStatus
 	HighestSeenVal         uint64
+	BlockProcessingVal     bool
 	JustifiedCheckpointVal solid.Checkpoint
 	JustifiedSlotVal       uint64
 	ProposerBoostRootVal   common.Hash
@@ -76,6 +77,7 @@ type ForkChoiceStorageMock struct {
 	Blocks                       map[common.Hash]*cltypes.SignedBeaconBlock
 	Envelopes                    map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	VerifiedPayloads             map[common.Hash]bool
+	OnExecutionPayloadFn         func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	OnExecutionPayloadErr        error
 	GetBeaconCommitteeMock       func(slot, committeeIndex uint64) ([]uint64, error)
 
@@ -87,6 +89,7 @@ type ForkChoiceStorageMock struct {
 	MockPeerDas *mock_services.MockPeerDas
 
 	ShouldExtendPayloadVal bool
+	ShouldBuildOnFullVal   *bool
 
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
@@ -274,6 +277,10 @@ func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 	return f.HighestSeenVal
 }
 
+func (f *ForkChoiceStorageMock) BlockProcessing() bool {
+	return f.BlockProcessingVal
+}
+
 func (f *ForkChoiceStorageMock) JustifiedCheckpoint() solid.Checkpoint {
 	return f.JustifiedCheckpointVal
 }
@@ -352,6 +359,9 @@ func (f *ForkChoiceStorageMock) OnBlock(
 }
 
 func (f *ForkChoiceStorageMock) OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error {
+	if f.OnExecutionPayloadFn != nil {
+		return f.OnExecutionPayloadFn(ctx, signedEnvelope, checkBlobData, validatePayload)
+	}
 	return f.OnExecutionPayloadErr
 }
 
@@ -458,15 +468,21 @@ func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot commo
 	return true
 }
 
-func (f *ForkChoiceStorageMock) GetHeadPayloadStatus() cltypes.PayloadStatus {
-	return f.HeadPayloadStatusVal
+func (f *ForkChoiceStorageMock) GetHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
+	if f.HeadVal != (common.Hash{}) && f.HeadVal != root {
+		return cltypes.PayloadStatusPending, false
+	}
+	return f.HeadPayloadStatusVal, true
 }
 
 func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {
 	return f.ShouldExtendPayloadVal
 }
 
-func (f *ForkChoiceStorageMock) ShouldBuildOnFull(head forkchoice.ForkChoiceNode) bool {
+func (f *ForkChoiceStorageMock) ShouldBuildOnFull(head forkchoice.ForkChoiceNode, proposalSlot uint64) bool {
+	if f.ShouldBuildOnFullVal != nil {
+		return *f.ShouldBuildOnFullVal
+	}
 	return true
 }
 

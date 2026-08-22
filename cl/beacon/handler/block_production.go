@@ -47,7 +47,6 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
@@ -215,29 +214,27 @@ func unpreparedGrabOffset(due time.Duration) time.Duration {
 	return due - due/payloadPublicationDivisor
 }
 
-// preparedGrabOffset is the earlier collection point available to a builder that was warmed before
-// the slot. The minimum-age check below preserves the build time available on the unprepared path.
+// preparedGrabOffset anchors the earliest collection window for a builder warmed before the slot.
+// Polling starts minPayloadPollingWindow before this offset to tolerate a brief unavailable result.
 func preparedGrabOffset(due time.Duration) time.Duration {
 	return due / payloadPublicationDivisor
 }
 
-// preparedPayloadMinimumAge is how long a primed builder must already have been running before
-// production may collect from it early. It is the gap between prepared and unprepared collection
-// offsets, so both paths give the builder the same total build time.
-func preparedPayloadMinimumAge(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
+// maximumPreparedAdvance caps how much payload preparation may advance collection. Even a builder
+// started far ahead is left running into the slot so it can include recent transactions.
+func maximumPreparedAdvance(cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion) time.Duration {
 	due := attestationDue(cfg, stateVersion)
 	return max(unpreparedGrabOffset(due)-preparedGrabOffset(due), 0)
 }
 
 // computeBlockBuilderWindow returns when to first poll for the assembled payload and when to stop,
-// reserving a publication margin before the attestation deadline.
-func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, prepared bool) blockBuilderWindow {
+// reserving a publication margin before the attestation deadline. Work completed before production
+// advances the first poll by the same duration, up to the prepared collection point.
+func computeBlockBuilderWindow(now, slotStart time.Time, cfg *clparams.BeaconChainConfig, stateVersion clparams.StateVersion, warmup time.Duration) blockBuilderWindow {
 	due := attestationDue(cfg, stateVersion)
 	grabBy := slotStart.Add(unpreparedGrabOffset(due))
-	firstGetAt := grabBy.Add(-minPayloadPollingWindow)
-	if prepared {
-		firstGetAt = slotStart.Add(preparedGrabOffset(due)).Add(-minPayloadPollingWindow)
-	}
+	advance := min(max(warmup, 0), maximumPreparedAdvance(cfg, stateVersion))
+	firstGetAt := grabBy.Add(-minPayloadPollingWindow).Add(-advance)
 	if firstGetAt.Before(now) {
 		firstGetAt = now
 	}
@@ -576,11 +573,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	r *http.Request,
 ) (*beaconhttp.BeaconResponse, error) {
 	ctx := r.Context()
-	// Cover the whole request so preparation cannot enter the execution layer while production is
-	// still deriving or collecting the block.
-	finishProduction := a.payloadPreparationGate.beginProduction()
-	defer finishProduction()
-
 	// parse request data
 	randaoRevealString := r.URL.Query().Get("randao_reveal")
 	var randaoReveal common.Bytes96
@@ -628,6 +620,8 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 			)
 		}
 	}
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
 
 	start := time.Now()
 
@@ -774,6 +768,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		block.GetExecutionValue().Uint64(),
 		consensusValue,
 	)
+	a.payloadPreparationGate.noteProducedBlock(a.ethClock.GetCurrentSlot(), targetSlot)
 
 	return resp, nil
 }
@@ -1046,56 +1041,24 @@ func (a *ApiHandler) produceBeaconBody(
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
 
-	// Build execution payload
-	latestExecutionPayload := baseState.LatestExecutionPayloadHeader()
-	head := latestExecutionPayload.BlockHash
-	// [GLOAS] In deferred payload processing, the EL head and withdrawal source depend on
-	// the head's payload status (FULL vs EMPTY). When FULL, we copy the state, apply the
-	// parent execution payload, and compute withdrawals from the mutated copy. When EMPTY,
-	// we use the cached payload_expected_withdrawals from state.
-	var gloasWithdrawalsState *state.CachingBeaconState // nil means use baseState for withdrawals
-	if stateVersion >= clparams.GloasVersion {
-		parentBid := baseState.GetLatestExecutionPayloadBid()
-		if parentBid != nil {
-			// Fork boundary: the initial bid created by UpgradeToGloas has
-			// ParentBlockHash == Hash32() (zero) because pre-GLOAS blocks have no
-			// parent bid. Pre-GLOAS blocks always had their payloads executed, so
-			// the EL head is parentBid.BlockHash (the last pre-GLOAS block hash).
-			isPreGloasParent := parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0
-			switch {
-			case isPreGloasParent:
-				head = parentBid.BlockHash
-			case a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
-				a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
-				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}):
-				head = parentBid.BlockHash
-				// Copy state and apply parent execution payload to compute correct withdrawals
-				stateCopy, err := baseState.Copy()
-				if err != nil {
-					return nil, 0, fmt.Errorf("produceBeaconBody: failed to copy state for FULL payload: %w", err)
-				}
-				envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(baseBlockRoot)
-				if err != nil {
-					return nil, 0, fmt.Errorf("produceBeaconBody: failed to read envelope for FULL payload: %w", err)
-				}
-				if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
-					return nil, 0, fmt.Errorf("produceBeaconBody: head is FULL but envelope/requests missing for root %x", baseBlockRoot)
-				}
-				stfMachine := &eth2.Impl{}
-				if err := stfMachine.ApplyParentExecutionPayload(stateCopy, envelope.Message.ExecutionRequests); err != nil {
-					return nil, 0, fmt.Errorf("produceBeaconBody: failed to apply parent execution payload: %w", err)
-				}
-				gloasWithdrawalsState = stateCopy
-				// Populate the block body's ParentExecutionRequests so
-				// ProcessParentExecutionPayload can verify the root match
-				// against the parent bid's ExecutionRequestsRoot.
-				beaconBody.ParentExecutionRequests = envelope.Message.ExecutionRequests
-			default:
-				head = parentBid.ParentBlockHash
-			}
-		} else {
-			head = baseState.GetLatestBlockHash()
+	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	if err != nil {
+		return nil, 0, fmt.Errorf("produceBeaconBody: execution payload source: %w", err)
+	}
+	head := payloadSource.head
+	var gloasWithdrawalsState *state.CachingBeaconState
+	if payloadSource.parentExecutionRequests != nil {
+		// A FULL Gloas parent must be applied before deriving this payload's withdrawals. Keep
+		// baseState unchanged because the other body-building steps also read it.
+		stateCopy, err := baseState.Copy()
+		if err != nil {
+			return nil, 0, fmt.Errorf("produceBeaconBody: copy state for FULL parent payload: %w", err)
 		}
+		if err := applyParentExecutionPayload(stateCopy, payloadSource.parentExecutionRequests); err != nil {
+			return nil, 0, fmt.Errorf("produceBeaconBody: apply FULL parent payload: %w", err)
+		}
+		gloasWithdrawalsState = stateCopy
+		beaconBody.ParentExecutionRequests = payloadSource.parentExecutionRequests
 	}
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (common.Hash{}) {
@@ -1109,23 +1072,7 @@ func (a *ApiHandler) produceBeaconBody(
 	if err != nil {
 		return nil, 0, err
 	}
-	var targetGasLimit *hexutil.Uint64
-	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		if parentBid := baseState.GetLatestExecutionPayloadBid(); parentBid != nil {
-			tgl := hexutil.Uint64(parentBid.GasLimit)
-			targetGasLimit = &tgl
-		}
-		if a.epbsPool != nil {
-			proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
-			dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
-			if err != nil {
-				log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
-			} else if pref, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot); ok && pref.Message != nil && pref.Message.ValidatorIndex == proposerIndex {
-				tgl := hexutil.Uint64(pref.Message.TargetGasLimit)
-				targetGasLimit = &tgl
-			}
-		}
-	}
+	targetGasLimit := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, stateVersion)
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
 	// One collector per concurrent body step. Sharing one would be a write-write race whenever
@@ -1175,15 +1122,28 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		prepared := a.preparedPayload.matches(
-			targetSlot, idBytes, time.Now(), preparedPayloadMinimumAge(a.beaconChainCfg, stateVersion),
+		warmup, preparedHead, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(targetSlot, idBytes, builderStartedAt)
+		if preparedIDMismatch {
+			a.logger.Info(
+				"PayloadPreparation: prepared payload ID did not match production",
+				"slot", targetSlot,
+				"preparedHead", preparedHead,
+				"productionHead", blockRoot,
+			)
+		}
+		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)
+		payload, bundles, requestsBundle, blockValue, err := pollAssembledPayload(
+			ctx, buildWindow, retryTime,
+			func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
+				return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
+			},
 		)
-		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, prepared)
-		payload, bundles, requestsBundle, blockValue, pollErr := pollAssembledPayload(ctx, buildWindow, retryTime, func() (*cltypes.Eth1Block, *engine_types.BlobsBundle, *typesproto.RequestsBundle, *big.Int, error) {
-			return a.engine.GetAssembledBlock(ctx, idBytes, stateVersion)
-		})
-		if pollErr != nil {
-			executionErr = fmt.Errorf("produceBeaconBody: %w", pollErr)
+		if err != nil {
+			executionErr = fmt.Errorf("produceBeaconBody: %w", err)
+			return
+		}
+		if bundles == nil {
+			executionErr = errors.New("produceBeaconBody: execution layer returned no blobs bundle")
 			return
 		}
 		// Determine block value
@@ -1900,6 +1860,9 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, signedEnvelope ...*cltypes.SignedExecutionPayloadEnvelope) error {
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
+
 	blkSSZ, err := blk.EncodeSSZ(nil)
 	if err != nil {
 		return err
@@ -2015,7 +1978,11 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
+	// Acquire before starting the goroutine so preparation cannot enter between publication and
+	// background storage.
+	finishBlockStorage := a.payloadPreparationGate.beginBlockWork()
 	go func() {
+		defer finishBlockStorage()
 		if err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars); err != nil {
 			log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
 		}
@@ -2187,9 +2154,6 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	sidecars []*cltypes.BlobSidecar,
 	columnSidecars []*cltypes.DataColumnSidecar,
 ) error {
-	finishProduction := a.payloadPreparationGate.beginProduction()
-	defer finishProduction()
-
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err

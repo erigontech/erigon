@@ -85,9 +85,10 @@ type preverifiedAppendListsSizes struct {
 }
 
 type ForkChoiceStore struct {
-	time            atomic.Uint64
-	highestSeen     atomic.Uint64
-	highestSeenRoot atomic.Value // common.Hash
+	time             atomic.Uint64
+	highestSeen      atomic.Uint64
+	highestSeenRoot  atomic.Value // common.Hash
+	blocksProcessing atomic.Int64
 	// all of *solid.Checkpoint type
 	justifiedCheckpoint           atomic.Value
 	finalizedCheckpoint           atomic.Value
@@ -495,6 +496,11 @@ func (f *ForkChoiceStore) IsBlobDataAvailable(slot uint64, blockRoot common.Hash
 // Highest seen returns highest seen slot
 func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
+}
+
+// BlockProcessing reports whether a block import is queued or active.
+func (f *ForkChoiceStore) BlockProcessing() bool {
+	return f.blocksProcessing.Load() > 0
 }
 
 // HighestSeenRoot returns the block root of the highest seen slot.

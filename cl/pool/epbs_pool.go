@@ -1,6 +1,8 @@
 package pool
 
 import (
+	"sync"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/common"
@@ -48,10 +50,22 @@ type EpbsPool struct {
 	// PayloadAttestations stores recently validated PayloadAttestationMessages for beacon API serving.
 	// Short-lived cache (~1 slot), keyed by (slot, validatorIndex).
 	PayloadAttestations *lru.Cache[PayloadAttestationKey, *cltypes.PayloadAttestationMessage]
+
+	proposerPreferenceGenerationsMu sync.Mutex
+	proposerPreferenceGenerations   map[uint64]uint64
+	latestProposerPreferenceSlot    uint64
 }
 
 func NewEpbsPool() *EpbsPool {
-	preferencesCache, err := lru.New[ProposerPreferencesKey, *cltypes.SignedProposerPreferences]("proposerPreferencesPool", epbsPreferencesPoolSize)
+	epbsPool := &EpbsPool{proposerPreferenceGenerations: make(map[uint64]uint64)}
+	preferencesCache, err := lru.NewWithEvict[ProposerPreferencesKey, *cltypes.SignedProposerPreferences](
+		"proposerPreferencesPool",
+		epbsPreferencesPoolSize,
+		func(key ProposerPreferencesKey, _ *cltypes.SignedProposerPreferences) {
+			// Eviction changes the effective preference just as an insertion does.
+			epbsPool.advanceProposerPreferenceGeneration(key.Slot)
+		},
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -63,11 +77,10 @@ func NewEpbsPool() *EpbsPool {
 	if err != nil {
 		panic(err)
 	}
-	return &EpbsPool{
-		ProposerPreferences: preferencesCache,
-		HighestBids:         highestBidsCache,
-		PayloadAttestations: payloadAttestationsCache,
-	}
+	epbsPool.ProposerPreferences = preferencesCache
+	epbsPool.HighestBids = highestBidsCache
+	epbsPool.PayloadAttestations = payloadAttestationsCache
+	return epbsPool
 }
 
 // GetPreferencesForSlot returns all stored proposer preferences that match the given slot,
@@ -88,4 +101,43 @@ func (p *EpbsPool) GetPreferencesForSlot(slot uint64) []*cltypes.SignedProposerP
 
 func (p *EpbsPool) GetPreference(slot uint64, dependentRoot common.Hash) (*cltypes.SignedProposerPreferences, bool) {
 	return p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: slot, DependentRoot: dependentRoot})
+}
+
+// AddProposerPreference stores a preference and advances its proposal slot's generation.
+func (p *EpbsPool) AddProposerPreference(preference *cltypes.SignedProposerPreferences) {
+	if preference == nil || preference.Message == nil {
+		return
+	}
+	slot := preference.Message.ProposalSlot
+	p.ProposerPreferences.Add(ProposerPreferencesKey{
+		Slot:          slot,
+		DependentRoot: preference.Message.DependentRoot,
+	}, preference)
+	p.advanceProposerPreferenceGeneration(slot)
+}
+
+func (p *EpbsPool) advanceProposerPreferenceGeneration(slot uint64) {
+	p.proposerPreferenceGenerationsMu.Lock()
+	defer p.proposerPreferenceGenerationsMu.Unlock()
+	if slot > p.latestProposerPreferenceSlot {
+		p.latestProposerPreferenceSlot = slot
+		// Generations are needed only while their proposal slots can remain in the cache.
+		for recordedSlot := range p.proposerPreferenceGenerations {
+			if recordedSlot < slot && slot-recordedSlot > epbsPreferencesPoolSize {
+				delete(p.proposerPreferenceGenerations, recordedSlot)
+			}
+		}
+	}
+	if slot < p.latestProposerPreferenceSlot && p.latestProposerPreferenceSlot-slot > epbsPreferencesPoolSize {
+		return
+	}
+	p.proposerPreferenceGenerations[slot]++
+}
+
+// ProposerPreferencesGeneration returns the current generation for one proposal slot.
+// Preferences for other slots do not change it.
+func (p *EpbsPool) ProposerPreferencesGeneration(slot uint64) uint64 {
+	p.proposerPreferenceGenerationsMu.Lock()
+	defer p.proposerPreferenceGenerationsMu.Unlock()
+	return p.proposerPreferenceGenerations[slot]
 }

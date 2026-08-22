@@ -125,10 +125,7 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 
 	// All checks passed — mark as seen and store in pool
 	s.seenCache.Add(seenKey, struct{}{})
-	s.epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{
-		Slot:          proposalSlot,
-		DependentRoot: preferences.DependentRoot,
-	}, msg)
+	s.epbsPool.AddProposerPreference(msg)
 
 	log.Trace("Processed proposer preferences via gossip",
 		"proposalSlot", proposalSlot,
