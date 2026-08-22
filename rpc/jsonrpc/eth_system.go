@@ -163,7 +163,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	stateOldest := pruneMode.History.PruneTo(headBlock)
 	blocksOldest := pruneMode.Blocks.PruneTo(headBlock)
 	// KeepPostMergeBlocksPruneMode uses chain-specific history expiry: on chains with
-	// MergeHeight set, pre-merge blocks/tx segments are never downloaded, so the oldest
+	// MergeHeight set, pre-merge transaction segments are never downloaded, so the oldest
 	// available block is the merge point. The same sentinel also covers a legacy archive
 	// datadir, so the field follows the boundary the gate resolves.
 	expiry, expiryFrom, err := api.blocksFollowChainHistoryExpiry(ctx, tx)
@@ -212,7 +212,11 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	if chainConfig.ByzantiumBlock != nil {
 		byzantium = *chainConfig.ByzantiumBlock
 	}
-	if receiptsOldest < byzantium && (api._blockReader.FrozenBlocks() == 0 || keepExecutionProofs) {
+	frozenBlocks, err := api.frozenBlocks(tx)
+	if err != nil {
+		return nil, err
+	}
+	if receiptsOldest < byzantium && (frozenBlocks == 0 || keepExecutionProofs) {
 		if stateOldest < byzantium {
 			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
 		} else {

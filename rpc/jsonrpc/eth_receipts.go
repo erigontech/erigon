@@ -610,8 +610,13 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 
+	frozenBlocks, err := api.frozenBlocks(tx)
+	if err != nil {
+		return nil, err
+	}
+
 	var postState *receipts.PostStateInfo = nil
-	if (commitmentHistory || api._blockReader.FrozenBlocks() == 0) && !chainConfig.IsByzantium(blockNum) {
+	if (commitmentHistory || frozenBlocks == 0) && !chainConfig.IsByzantium(blockNum) {
 		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
 		if err != nil {
 			return nil, err

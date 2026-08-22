@@ -17,6 +17,7 @@
 package jsonrpc
 
 import (
+	"bytes"
 	"fmt"
 	"math/big"
 	"testing"
@@ -25,7 +26,10 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/hexutil"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
@@ -462,9 +466,9 @@ func TestBlocksGateServesLegacyArchive(t *testing.T) {
 }
 
 // TestBlocksGateAppliesChainHistoryExpiry pins the legacy full shape, where the
-// blocks distance is a sentinel rather than a window: pre-merge bodies are never
-// downloaded on a chain that declares a merge point, so the gate must refuse below
-// it instead of reading the sentinel as "nothing is pruned".
+// blocks distance is a sentinel rather than a window: pre-merge transactions are
+// never downloaded on a chain that declares a merge point, so the gate must refuse
+// below it instead of reading the sentinel as "nothing is pruned".
 func TestBlocksGateAppliesChainHistoryExpiry(t *testing.T) {
 	t.Parallel()
 
@@ -1043,11 +1047,11 @@ func noByzantiumChainConfig() *chain.Config {
 	return cfg
 }
 
-// TestBlocksGateDoesNotSettleExpiryBeforeBodiesArrive pins that the archive/expiry
-// question is resolved only from an observation that answers it. A node whose body
-// segments have not arrived holds no body at all, which is not evidence of an archive
-// datadir and must not be recorded as one for the life of the process.
-func TestBlocksGateDoesNotSettleExpiryBeforeBodiesArrive(t *testing.T) {
+// TestBlocksGateDoesNotSettleExpiryBeforeBlocksArrive pins that the archive/expiry
+// question is resolved only from an observation that answers it. A node whose block
+// data has not arrived holds nothing, which is not evidence of an archive datadir and
+// must not be recorded as one for the life of the process.
+func TestBlocksGateDoesNotSettleExpiryBeforeBlocksArrive(t *testing.T) {
 	t.Parallel()
 
 	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
@@ -1070,17 +1074,7 @@ func TestBlocksGateDoesNotSettleExpiryBeforeBodiesArrive(t *testing.T) {
 		return hash
 	}
 	preMergeHash := canonicalHash(1)
-
-	readBody := func(hash common.Hash, num uint64) *types.Body {
-		tx, err := apis.eth.db.BeginTemporalRo(ctx)
-		require.NoError(t, err)
-		defer tx.Rollback()
-		body, _, err := apis.eth._blockReader.Body(ctx, tx, hash, num)
-		require.NoError(t, err)
-		return body
-	}
-	preMergeBody := readBody(preMergeHash, 1)
-	require.NotNil(t, preMergeBody)
+	preMergeBodyKey := dbutils.BlockBodyKey(1, preMergeHash)
 
 	oldestAvailable := func() uint64 {
 		tx, err := apis.eth.db.BeginTemporalRo(ctx)
@@ -1104,7 +1098,12 @@ func TestBlocksGateDoesNotSettleExpiryBeforeBodiesArrive(t *testing.T) {
 		require.NoError(t, rwTx.Commit())
 	}
 
+	var preMergeBody []byte
 	write(func(rwTx kv.TemporalRwTx) {
+		value, err := rwTx.GetOne(kv.BlockBody, preMergeBodyKey)
+		require.NoError(t, err)
+		require.NotEmpty(t, value)
+		preMergeBody = bytes.Clone(value)
 		for num := uint64(1); num <= pruneGatingChainLen; num++ {
 			rawdb.DeleteBody(rwTx, canonicalHash(num), num)
 		}
@@ -1114,10 +1113,10 @@ func TestBlocksGateDoesNotSettleExpiryBeforeBodiesArrive(t *testing.T) {
 		"holding no body is not evidence of an archive datadir")
 
 	write(func(rwTx kv.TemporalRwTx) {
-		require.NoError(t, rawdb.WriteBody(rwTx, preMergeHash, 1, preMergeBody))
+		require.NoError(t, rwTx.Put(kv.BlockBody, preMergeBodyKey, preMergeBody))
 	})
 	require.NoError(t, gateOnOldBlock(),
-		"a pre-merge body on disk makes the datadir an archive one")
+		"a readable pre-merge block on disk makes the datadir an archive one")
 }
 
 // TestCapabilitiesFollowTheResolvedBlocksBoundary pins the blocks field against the
@@ -1215,6 +1214,233 @@ func TestCapabilitiesTakeTheBorHistoryRequirement(t *testing.T) {
 	require.NotErrorIs(t, err, state.PrunedError, "the advertised oldest block must be served")
 	_, err = apis.eth.GetBlockReceipts(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(historyOldest-1)))
 	require.ErrorIs(t, err, state.PrunedError, "the block below it must be refused")
+}
+
+// TestBlocksGateAppliesExpiryWhenOldestIsMidChain pins the settled expiry shape: the
+// transaction segment spanning the merge point starts below it, so the oldest fully
+// available block lands mid-chain while older bodies are still on disk. Data starting
+// mid-chain is not evidence of an archive datadir, and the gate must refuse below the
+// merge point.
+func TestBlocksGateAppliesExpiryWhenOldestIsMidChain(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prune.KeepPostMergeBlocksPruneMode,
+			Blocks:      prune.KeepPostMergeBlocksPruneMode,
+		},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
+	})
+	ctx := t.Context()
+
+	rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for num := uint64(1); num <= 2; num++ {
+		hash, ok, err := apis.eth._blockReader.CanonicalHash(ctx, rwTx, num)
+		require.NoError(t, err)
+		require.True(t, ok)
+		rawdb.DeleteBody(rwTx, hash, num)
+	}
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	oldest, err := apis.eth._blockReader.MinimumBlockAvailable(ctx, tx)
+	require.NoError(t, err)
+	require.Greater(t, oldest, uint64(1))
+	require.Less(t, oldest, pruneGatingMergeHeight,
+		"the oldest available block must land strictly inside the pre-merge range")
+	require.Less(t, oldest, chainInfo.old.num, "the probed block's body must still be on disk")
+
+	err = apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", pruneGatingMergeHeight))
+
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, pruneGatingMergeHeight))
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.recent.num))
+}
+
+// TestBlocksGateRequiresPreMergeTransactions pins the other production expiry shape:
+// the downloader blacklists only transaction segments, so every pre-merge body stays
+// on disk while its transactions are missing. A pre-merge body is not evidence of an
+// archive datadir; only a readable early transaction is.
+func TestBlocksGateRequiresPreMergeTransactions(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prune.KeepPostMergeBlocksPruneMode,
+			Blocks:      prune.KeepPostMergeBlocksPruneMode,
+		},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
+	})
+	ctx := t.Context()
+
+	rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	txNumMin, err := apis.eth._txNumReader.Min(ctx, rwTx, 1)
+	require.NoError(t, err)
+	txNumMax, err := apis.eth._txNumReader.Max(ctx, rwTx, pruneGatingMergeHeight-1)
+	require.NoError(t, err)
+	for txNum := txNumMin; txNum <= txNumMax; txNum++ {
+		require.NoError(t, rwTx.Delete(kv.EthTx, hexutil.EncodeTs(txNum)))
+	}
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	oldest, err := apis.eth._blockReader.MinimumBlockAvailable(ctx, tx)
+	require.NoError(t, err)
+	require.LessOrEqual(t, oldest, uint64(1), "every body must stay on disk")
+	body, _, err := apis.eth._blockReader.Body(ctx, tx, chainInfo.old.hash, chainInfo.old.num)
+	require.NoError(t, err)
+	require.NotNil(t, body, "the pre-merge body the probe must not trust")
+
+	err = apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
+	require.ErrorIs(t, err, state.PrunedError)
+	require.Contains(t, err.Error(), fmt.Sprintf("blocks are available from block %d", pruneGatingMergeHeight))
+
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, pruneGatingMergeHeight))
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.recent.num))
+}
+
+// TestBlocksGateReopensWhenOlderBlocksArrive pins that a shape read as expiry is not
+// settled: snapshot minima are live availability, and older segments opening later
+// must reopen the gate. Only the archive observation is final.
+func TestBlocksGateReopensWhenOlderBlocksArrive(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prune.KeepPostMergeBlocksPruneMode,
+			Blocks:      prune.KeepPostMergeBlocksPruneMode,
+		},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
+	})
+	ctx := t.Context()
+
+	type rawBody struct{ key, value []byte }
+	var saved []rawBody
+	rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for num := uint64(1); num < pruneGatingMergeHeight; num++ {
+		hash, ok, err := apis.eth._blockReader.CanonicalHash(ctx, rwTx, num)
+		require.NoError(t, err)
+		require.True(t, ok)
+		key := dbutils.BlockBodyKey(num, hash)
+		value, err := rwTx.GetOne(kv.BlockBody, key)
+		require.NoError(t, err)
+		require.NotEmpty(t, value)
+		saved = append(saved, rawBody{key: key, value: bytes.Clone(value)})
+		rawdb.DeleteBody(rwTx, hash, num)
+	}
+	require.NoError(t, rwTx.Commit())
+
+	gateOnOldBlock := func() error {
+		tx, err := apis.eth.db.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		return apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
+	}
+	require.ErrorIs(t, gateOnOldBlock(), state.PrunedError,
+		"without pre-merge blocks the datadir reads as expiry")
+
+	rwTx, err = apis.rwDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for _, body := range saved {
+		require.NoError(t, rwTx.Put(kv.BlockBody, body.key, body.value))
+	}
+	require.NoError(t, rwTx.Commit())
+
+	require.NoError(t, gateOnOldBlock(),
+		"pre-merge blocks arriving later must reopen the gate")
+}
+
+// frozenBlocksPanicReader mirrors the remote block reader, whose FrozenBlocks panics
+// with "not supported": a gate reachable on a remote rpcdaemon must not call it.
+type frozenBlocksPanicReader struct{ dbservices.FullBlockReader }
+
+func (frozenBlocksPanicReader) FrozenBlocks() uint64 { panic("not supported") }
+
+// TestReceiptGatesSurviveARemoteBlockReader pins that the receipt gate and
+// eth_capabilities answer on a remote rpcdaemon: both need to know whether the datadir
+// holds frozen blocks, which the remote block reader cannot report.
+func TestReceiptGatesSurviveARemoteBlockReader(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode:        prune.ArchiveMode,
+		chainConfig: byzantiumChainConfig(pruneGatingByzantiumHeight),
+	})
+	apis.eth._blockReader = frozenBlocksPanicReader{apis.eth._blockReader}
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require.Less(t, chainInfo.old.num, pruneGatingByzantiumHeight,
+		"the probed block must be pre-Byzantium for this to test anything")
+	require.NotPanics(t, func() {
+		require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, chainInfo.old.num))
+	})
+	require.NotPanics(t, func() {
+		_, err := apis.eth.Capabilities(ctx)
+		require.NoError(t, err)
+	})
+}
+
+// TestLogsByHashGateAppliesOnCachedReceipts pins that a cached receipt set is gated
+// like an uncached one: availability can move while an entry is still cached, and a
+// cache hit must not answer below the advertised boundary.
+func TestLogsByHashGateAppliesOnCachedReceipts(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prune.KeepPostMergeBlocksPruneMode,
+			Blocks:      prune.KeepPostMergeBlocksPruneMode,
+		},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
+	})
+	ctx := t.Context()
+
+	roTx, err := apis.erigon.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer roTx.Rollback()
+	block, err := apis.erigon.blockByHashWithSenders(ctx, roTx, chainInfo.old.hash)
+	require.NoError(t, err)
+	require.NotNil(t, block)
+	_, err = apis.erigon.getReceipts(ctx, roTx, block)
+	require.NoError(t, err)
+	roTx.Rollback()
+	_, ok := apis.erigon.getCachedReceipts(ctx, chainInfo.old.hash)
+	require.True(t, ok, "the premise is a warm block-receipts cache")
+
+	rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for num := uint64(1); num < pruneGatingMergeHeight; num++ {
+		hash, ok, err := apis.eth._blockReader.CanonicalHash(ctx, rwTx, num)
+		require.NoError(t, err)
+		require.True(t, ok)
+		rawdb.DeleteBody(rwTx, hash, num)
+	}
+	require.NoError(t, rwTx.Commit())
+
+	_, err = apis.erigon.GetLogsByHash(ctx, chainInfo.old.hash)
+	require.ErrorIs(t, err, state.PrunedError)
 }
 
 // TestCapabilitiesTakeTheNoByzantiumRequirement pins the same pre-Byzantium

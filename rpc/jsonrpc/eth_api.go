@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -150,7 +151,7 @@ type BaseAPI struct {
 	_genesis                  atomic.Pointer[types.Block]
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
-	_preMergeBodies           atomic.Pointer[bool]
+	_preMergeData             atomic.Pointer[bool]
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -453,7 +454,7 @@ func (api *BaseAPI) checkPruneBlocks(ctx context.Context, tx kv.Tx, block uint64
 
 // blocksFollowChainHistoryExpiry reports whether block retention is the chain's
 // history-expiry policy rather than a window, which Distance.Enabled reads as "not
-// pruning" although pre-merge bodies are never downloaded.
+// pruning" although pre-merge transactions are never downloaded.
 func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx) (bool, *uint64, error) {
 	p, err := api.pruneMode(tx)
 	if err != nil || p == nil {
@@ -467,7 +468,7 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 		return false, nil, err
 	}
 	if chainConfig.MergeHeight != nil && p.History == prune.KeepPostMergeBlocksPruneMode {
-		holds, err := api.holdsPreMergeBodies(ctx, tx, *chainConfig.MergeHeight)
+		holds, err := api.holdsPreMergeBlockData(ctx, tx, *chainConfig.MergeHeight)
 		if err != nil || holds {
 			return false, nil, err
 		}
@@ -475,15 +476,16 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 	return true, chainConfig.MergeHeight, nil
 }
 
-// holdsPreMergeBodies reports whether the datadir holds any body below the merge
-// point. The stored prune mode cannot answer that where History carries the same
-// sentinel as Blocks: a legacy archive datadir and chain-history expiry on top of
-// archive persist that pair alike, so what is on disk decides. MinimumBlockAvailable
-// reports zero both for segments starting at genesis and for a node whose body
-// segments have not arrived, so only an observation telling those apart is cached.
-func (api *BaseAPI) holdsPreMergeBodies(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
-	if holds := api._preMergeBodies.Load(); holds != nil {
-		return *holds, nil
+// holdsPreMergeBlockData reports whether the datadir holds full blocks below the merge
+// point, which tells a legacy archive from chain-history expiry when the stored prune
+// mode carries the same sentinel for both. Neither a pre-merge body nor the oldest
+// available block answers on its own: expiry keeps pre-merge headers and bodies, and
+// the transaction segment spanning the merge point reaches below it. Only a readable
+// transaction of an early block does. Availability can widen while segments arrive,
+// so only the archive observation is settled and cached.
+func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
+	if holds := api._preMergeData.Load(); holds != nil && *holds {
+		return true, nil
 	}
 	if mergeHeight == 0 {
 		return false, nil
@@ -492,17 +494,73 @@ func (api *BaseAPI) holdsPreMergeBodies(ctx context.Context, tx kv.Tx, mergeHeig
 	if err != nil {
 		return false, err
 	}
-	if oldest == 0 {
-		holds, err := api.hasBody(ctx, tx, mergeHeight-1)
-		if err != nil || !holds {
+	// Zero is a snapshot set starting at genesis, one a database holding every block
+	// after it; anything higher starts mid-chain, however far below the merge point.
+	if oldest > 1 {
+		return false, nil
+	}
+	holds, err := api.hasEarlyTransaction(ctx, tx, mergeHeight)
+	if err != nil || !holds {
+		return false, err
+	}
+	api._preMergeData.Store(&holds)
+	return true, nil
+}
+
+// hasEarlyTransaction reports whether the chain's first transaction below limit is
+// readable. On a chain with no transaction there, a body is all an archive would
+// hold, so its presence decides.
+func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uint64) (bool, error) {
+	blockNum, found, err := api.firstBlockWithTxs(ctx, tx, limit)
+	if err != nil {
+		return false, err
+	}
+	if !found {
+		return api.hasBody(ctx, tx, limit-1)
+	}
+	txn, ok, err := api._blockReader.TxnByIdxInBlock(ctx, tx, blockNum, 0)
+	if err != nil {
+		return false, err
+	}
+	return ok && txn != nil, nil
+}
+
+// firstBlockWithTxs finds the lowest block below limit carrying a transaction. Every
+// block adds two system entries to the txnum sequence, so any block's maximum txnum
+// reads off a cumulative transaction count, which is monotone and makes the first
+// such block binary-searchable.
+func (api *BaseAPI) firstBlockWithTxs(ctx context.Context, tx kv.Tx, limit uint64) (uint64, bool, error) {
+	genesisMax, err := api._txNumReader.Max(ctx, tx, 0)
+	if err != nil {
+		return 0, false, err
+	}
+	hasTxsUpTo := func(blockNum uint64) (bool, error) {
+		maxTxNum, err := api._txNumReader.Max(ctx, tx, blockNum)
+		if err != nil {
 			return false, err
 		}
-		api._preMergeBodies.Store(&holds)
-		return true, nil
+		return maxTxNum > genesisMax+2*blockNum, nil
 	}
-	holds := oldest < mergeHeight
-	api._preMergeBodies.Store(&holds)
-	return holds, nil
+	lo, hi := uint64(1), limit-1
+	if hi < lo {
+		return 0, false, nil
+	}
+	if has, err := hasTxsUpTo(hi); err != nil || !has {
+		return 0, false, err
+	}
+	for lo < hi {
+		mid := (lo + hi) / 2
+		has, err := hasTxsUpTo(mid)
+		if err != nil {
+			return 0, false, err
+		}
+		if has {
+			hi = mid
+		} else {
+			lo = mid + 1
+		}
+	}
+	return lo, true, nil
 }
 
 func (api *BaseAPI) hasBody(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
@@ -587,10 +645,20 @@ func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uin
 	if chainConfig.IsByzantium(block) {
 		return false, nil
 	}
-	if api._blockReader.FrozenBlocks() == 0 {
+	frozenBlocks, err := api.frozenBlocks(tx)
+	if err != nil {
+		return false, err
+	}
+	if frozenBlocks == 0 {
 		return true, nil
 	}
 	return api.commitmentHistoryEnabled(tx)
+}
+
+// frozenBlocks mirrors the block reader's FrozenBlocks through the snapshots stage
+// progress, which a remote rpcdaemon can read where its block reader cannot answer.
+func (api *BaseAPI) frozenBlocks(tx kv.Tx) (uint64, error) {
+	return stages.GetStageProgress(tx, stages.Snapshots)
 }
 
 // checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.
