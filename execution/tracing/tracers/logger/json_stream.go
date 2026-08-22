@@ -85,11 +85,12 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
-// hexWithPrefix encodes b as a 0x-prefixed hex string using hexEncodeBuf.
-func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
+// hexWithPrefix encodes h into hexEncodeBuf as 0x-prefixed hex. It takes a hash
+// rather than a slice so the result is known to fit; the buffer is not resized.
+func (l *JsonStreamLogger) hexWithPrefix(h *common.Hash) string {
 	l.hexEncodeBuf[0] = '0'
 	l.hexEncodeBuf[1] = 'x'
-	n := hex.Encode(l.hexEncodeBuf[2:], b)
+	n := hex.Encode(l.hexEncodeBuf[2:], h[:])
 	return common.ToStringZeroCopy(l.hexEncodeBuf[:2+n])
 }
 
@@ -100,12 +101,10 @@ func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
 	return common.ToStringZeroCopy(append(b, '"'))
 }
 
-// hexQuotedBytes encodes b as a complete JSON string, quotes included, so the
-// caller can hand it to WriteRaw in one call. Same aliasing rule as
-// hexWithPrefix: hand it straight to the stream.
-func (l *JsonStreamLogger) hexQuotedBytes(b []byte) string {
+// hexQuotedHash is hexWithPrefix plus the quotes, ready for WriteRaw.
+func (l *JsonStreamLogger) hexQuotedHash(h *common.Hash) string {
 	l.hexEncodeBuf[0], l.hexEncodeBuf[1], l.hexEncodeBuf[2] = '"', '0', 'x'
-	n := hex.Encode(l.hexEncodeBuf[3:], b)
+	n := hex.Encode(l.hexEncodeBuf[3:], h[:])
 	l.hexEncodeBuf[3+n] = '"'
 	return common.ToStringZeroCopy(l.hexEncodeBuf[:4+n])
 }
@@ -269,8 +268,8 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 			} else {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteObjectField(l.hexWithPrefix(loc[:]))
-			l.stream.WriteRaw(l.hexQuotedBytes(value[:]))
+			l.stream.WriteObjectField(l.hexWithPrefix(loc))
+			l.stream.WriteRaw(l.hexQuotedHash(&value))
 		}
 		l.stream.WriteObjectEnd()
 	}

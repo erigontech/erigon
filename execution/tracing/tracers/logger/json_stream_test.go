@@ -584,17 +584,17 @@ func BenchmarkStackValueWrite(b *testing.B) {
 	})
 }
 
-// TestHexQuotedBytesMatchesHexWithPrefix pins the pre-quoted form against the
+// TestHexQuotedHashMatchesHexWithPrefix pins the pre-quoted form against the
 // one WriteString produced, which the RPC output has to stay identical to.
-func TestHexQuotedBytesMatchesHexWithPrefix(t *testing.T) {
+func TestHexQuotedHashMatchesHexWithPrefix(t *testing.T) {
 	l := &JsonStreamLogger{}
-	for _, n := range []int{0, 1, 4, 20, 32} {
-		b := make([]byte, n)
-		for i := range b {
-			b[i] = byte(i*7 + 1)
+	for _, seed := range []int{0, 1, 7, 255} {
+		var h common.Hash
+		for i := range h {
+			h[i] = byte(i*seed + 1)
 		}
-		want := `"` + l.hexWithPrefix(b) + `"`
-		require.Equal(t, want, l.hexQuotedBytes(b), "len=%d", n)
+		want := `"` + l.hexWithPrefix(&h) + `"`
+		require.Equal(t, want, l.hexQuotedHash(&h), "seed=%d", seed)
 	}
 }
 
