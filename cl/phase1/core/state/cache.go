@@ -242,6 +242,7 @@ func (b *CachingBeaconState) _refreshActiveBalancesIfNeeded() {
 	*b.totalActiveBalanceCache = 0
 
 	// Check global cache using block root at beginning of previous epoch
+	// overflow_false_positive
 	blockRootAtBegginingPrevEpoch, err := b.GetBlockRootAtSlot(((epoch - 1) * b.BeaconConfig().SlotsPerEpoch) - 1)
 	if err == nil {
 		if _, cachedBalance, ok := caches.ActiveValidatorsCacheGlobal.Get(epoch, blockRootAtBegginingPrevEpoch); ok && cachedBalance != 0 {

@@ -418,6 +418,7 @@ func recoverPlain(context *secp256k1.Context, sighash common.Hash, r, s, vb *uin
 	if vb.BitLen() > 8 {
 		return accounts.NilAddress, ErrInvalidSig
 	}
+	// overflow_false_positive
 	vByte := byte(vb.Uint64() - 27)
 	if !crypto.TransactionSignatureIsValid(vByte, r, s, !homestead) {
 		return accounts.NilAddress, ErrInvalidSig

@@ -595,6 +595,7 @@ func (db *DB) QuerySeeds(n int, maxAge time.Duration) []*Node {
 			// of hitting all existing nodes in very small databases.
 			ctr := id[0]
 			rand.Read(id[:])
+			// overflow_false_positive
 			id[0] = ctr + id[0]%16
 			var n *Node
 			for k, v, err := c.Seek(nodeKey(id)); k != nil && n == nil; k, v, err = c.Next() {

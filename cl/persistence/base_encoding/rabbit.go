@@ -113,6 +113,7 @@ func ReadRabbits(out []uint64, r io.Reader) ([]uint64, error) {
 		if err != nil {
 			return nil, err
 		}
+		// overflow_false_positive
 		if current+count < current {
 			return nil, fmt.Errorf("rabbit: index overflow at current=%d count=%d", current, count)
 		}
