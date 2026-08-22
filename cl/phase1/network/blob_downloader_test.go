@@ -122,7 +122,6 @@ func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing
 func TestBlobHistoryDownloaderMixedBatchAttemptsFuluAfterDenebFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil)
 
 	deneb := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 	deneb.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
@@ -604,11 +603,10 @@ func TestBlobHistoryDownloaderFuluBlockWithoutBlobsCompletes(t *testing.T) {
 	require.True(t, notified)
 }
 
-func TestBlobHistoryDownloaderFuluBlockWithoutBlobsClearsStaleMetadata(t *testing.T) {
+func TestBlobHistoryDownloaderFuluBlockWithoutBlobsIgnoresStaleMetadata(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).Times(2)
-	blobStorage.EXPECT().RemoveBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
 	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
 	block.Block.Slot = 100
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
@@ -794,60 +792,34 @@ func TestBlobHistoryDownloaderFailedDenebRequestWithholdsCompletionNotification(
 	require.False(t, downloader.backfillCompleted.Load())
 }
 
-func TestBlobHistoryDownloaderDenebWithoutBlobsRepairsStaleStorage(t *testing.T) {
-	tests := map[string]struct {
-		stored      uint32
-		removeErr   error
-		wantRemoved bool
-		wantDone    bool
-	}{
-		"clean":           {wantDone: true},
-		"stale":           {stored: 1, wantRemoved: true, wantDone: true},
-		"removal failure": {stored: 1, removeErr: errors.New("remove failed"), wantRemoved: true, wantDone: true},
-	}
-	for name, test := range tests {
-		t.Run(name, func(t *testing.T) {
-			ctrl := gomock.NewController(t)
-			blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-			countCalls := 2
-			if test.stored == 0 {
-				countCalls = 1
-			}
-			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(test.stored, nil).Times(countCalls)
-			if test.wantRemoved {
-				blobStorage.EXPECT().RemoveBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(test.removeErr)
-			}
-			block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
-			block.Block.Slot = 100
-			downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
-			downloader.blobStorage = blobStorage
-			notified := false
-			downloader.SetNotifyBlobBackfilled(func() { notified = true })
+func TestBlobHistoryDownloaderDenebWithoutBlobsIgnoresStaleStorage(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = 100
+	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
+	downloader.blobStorage = blobStorage
+	notified := false
+	downloader.SetNotifyBlobBackfilled(func() { notified = true })
 
-			require.NoError(t, downloader.downloadOnce(false))
-			require.Equal(t, test.wantDone, downloader.backfillCompleted.Load())
-			require.Equal(t, test.wantDone, notified)
-		})
-	}
+	require.NoError(t, downloader.downloadOnce(false))
+	require.True(t, downloader.backfillCompleted.Load())
+	require.True(t, notified)
 }
 
-func TestBlobHistoryDownloaderMixedDenebBatchRepairsZeroCommitmentStorage(t *testing.T) {
+func TestBlobHistoryDownloaderMixedDenebBatchIgnoresZeroCommitmentStorage(t *testing.T) {
 	for _, zeroFirst := range []bool{true, false} {
 		t.Run(map[bool]string{true: "zero first", false: "zero last"}[zeroFirst], func(t *testing.T) {
 			ctrl := gomock.NewController(t)
 			zero := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
 			zero.Block.Slot = 100
 			nonzero, sidecar := validDenebRecoverySidecar(t, 101)
-			zeroRoot, err := zero.Block.HashSSZ()
-			require.NoError(t, err)
 			nonzeroRoot, err := nonzero.Block.HashSSZ()
 			require.NoError(t, err)
 
 			blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
-			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), zeroRoot).Return(uint32(1), nil)
-			blobStorage.EXPECT().RemoveBlobSidecars(gomock.Any(), zero.Block.Slot, zeroRoot).Return(nil)
 			blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), nonzeroRoot, []*cltypes.BlobSidecar{sidecar}).Return(nil)
-			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), zeroRoot).Return(uint32(0), nil)
 			blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), nonzeroRoot).Return(uint32(1), nil)
 			blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), nonzero.Block.Slot, nonzeroRoot).Return([]*cltypes.BlobSidecar{sidecar}, true, nil)
 			blocks := []*cltypes.SignedBeaconBlock{nonzero, zero}

@@ -575,27 +575,11 @@ func (b *BlobHistoryDownloader) processBatch(batch []*cltypes.SignedBeaconBlock)
 
 func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeaconBlock) bool {
 	requestedBlocks := make([]*cltypes.SignedBeaconBlock, 0, len(blocks))
-	for i, block := range blocks {
-		blockRoot, err := block.Block.HashSSZ()
-		if err != nil {
-			b.addRetryBlocks(blocks[i:])
-			return false
-		}
-		if block.GetBlobKzgCommitments().Len() > 0 {
-			requestedBlocks = append(requestedBlocks, block)
+	for _, block := range blocks {
+		if block.GetBlobKzgCommitments().Len() == 0 {
 			continue
 		}
-		stored, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
-		if err != nil {
-			b.addRetryBlocks(blocks[i:])
-			return false
-		}
-		if stored > 0 {
-			if err := b.blobStorage.RemoveBlobSidecars(b.ctx, block.GetSlot(), blockRoot); err != nil {
-				b.addRetryBlocks(blocks[i:])
-				return false
-			}
-		}
+		requestedBlocks = append(requestedBlocks, block)
 	}
 	if len(requestedBlocks) == 0 {
 		return true
@@ -822,6 +806,9 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 			b.logger.Warn("[BlobHistoryDownloader] Blob recovery completed without commitments", "slot", block.GetSlot())
 			return false
 		}
+		if commitments.Len() == 0 {
+			continue
+		}
 		ctx, cancel := context.WithTimeout(b.ctx, b.columnBackfillTimeout)
 		stored, complete, err := b.storedBlobSidecarsComplete(ctx, block, blockRoot)
 		if err != nil {
@@ -829,18 +816,6 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 			b.addRetryBlocks(blocks[i:])
 			b.logger.Warn("[BlobHistoryDownloader] Failed to read stored blobs", "err", err, "slot", block.GetSlot())
 			return false
-		}
-		if commitments.Len() == 0 {
-			if stored > 0 {
-				if err := b.blobStorage.RemoveBlobSidecars(ctx, block.GetSlot(), blockRoot); err != nil {
-					cancel()
-					b.addRetryBlocks(blocks[i:])
-					b.logger.Warn("[BlobHistoryDownloader] Failed to clear incomplete blob storage", "err", err, "slot", block.GetSlot())
-					return false
-				}
-			}
-			cancel()
-			continue
 		}
 		if complete {
 			cancel()
@@ -897,10 +872,10 @@ func (b *BlobHistoryDownloader) storedBlobSidecarsComplete(ctx context.Context, 
 	if commitments == nil {
 		return 0, false, nil
 	}
-	stored, err := b.blobStorage.KzgCommitmentsCount(ctx, blockRoot)
 	if commitments.Len() == 0 {
-		return stored, stored == 0, err
+		return 0, true, nil
 	}
+	stored, err := b.blobStorage.KzgCommitmentsCount(ctx, blockRoot)
 	if err != nil || int(stored) != commitments.Len() {
 		return stored, false, err
 	}
