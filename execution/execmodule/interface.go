@@ -132,6 +132,12 @@ type ExecutionModule interface {
 	// blockHash and blockNumber.
 	ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error)
 
+	// PreExecute incrementally executes a flashblock's NEW transactions into the ONE
+	// maintained SharedDomains (carry-forward, OnTx once per tx, no finished-block checks),
+	// leaving a pre-executed block for a subsequent ValidateChain to finalise with zero
+	// re-execution. See execmodule.PreExecute.
+	PreExecute(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error)
+
 	// --- Fork choice ------------------------------------------------------
 
 	// UpdateForkChoice updates the canonical head, safe, and finalized block

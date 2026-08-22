@@ -248,7 +248,12 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	if unwindPoint == fv.currentHeight {
 		unwindPoint = 0
 	}
-	if fv.sharedDom != nil {
+	// Do NOT close the SD we are about to reuse. PreExecute (the flashblock
+	// pre-execution path) passes fv.sharedDom straight back in to carry the
+	// accumulated execution state forward across rounds — closing it here would
+	// destroy the very state being extended. When sd is a fresh SD (the normal
+	// ValidateChain path) sd != fv.sharedDom, so the old one is still closed.
+	if fv.sharedDom != nil && fv.sharedDom != sd {
 		fv.sharedDom.Close()
 	}
 	fv.sharedDom = sd
@@ -282,6 +287,16 @@ func (fv *ForkValidator) clear() {
 	}
 	fv.sharedDom = nil
 	fv.flashblockTxHashes = nil
+}
+
+// InFlashblock reports whether an in-progress flashblock is being built at blockNumber. Used by
+// InsertBlocks to AVOID clearing the extending-fork state when a flashblock update (a re-insert of
+// the same in-progress block number with a grown body) arrives — clearing would destroy the
+// accumulated PreExecute SharedDomains that the update carries forward.
+func (fv *ForkValidator) InFlashblock(blockNumber uint64) bool {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.extendingForkNumber != 0 && fv.extendingForkNumber == blockNumber && len(fv.flashblockTxHashes) > 0
 }
 
 // ClearWithUnwind wipes out current extending fork data.

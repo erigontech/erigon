@@ -63,7 +63,14 @@ func (e *ExecModule) InsertBlocks(ctx context.Context, blocks []*types.RawBlock)
 	}
 	defer e.semaphore.Release(1)
 	e.logger.Debug("ethereumExecutionModule.InsertBlocks: semaphore acquired", "wait", time.Since(start))
-	e.forkValidator.ClearWithUnwind()
+	// Do NOT clear the extending-fork state when this insert is a flashblock UPDATE — a re-insert of
+	// the in-progress block number with a grown body. Clearing would close the accumulated PreExecute
+	// SharedDomains, forcing the next PreExecute to re-execute the whole body from scratch. A normal
+	// insert (new/different block, or no flashblock in progress) still clears as before.
+	flashblockUpdate := len(blocks) == 1 && blocks[0].Header != nil && e.forkValidator.InFlashblock(blocks[0].Header.Number.Uint64())
+	if !flashblockUpdate {
+		e.forkValidator.ClearWithUnwind()
+	}
 	frozenBlocks := e.blockReader.FrozenBlocks()
 
 	// Open a read-only tx for the base data; writes accumulate in the

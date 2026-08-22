@@ -416,12 +416,20 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 				}
 
-				_, err = se.cfg.engine.Finalize(
-					se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
-					finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
+				// STEP 3a (cocoon flashblock): on the PRE-EXEC / fork-validation path, strip the
+				// per-round block-END. engine.Finalize applies withdrawals + end-of-block system calls;
+				// re-running it every round (as the body grows) repeatedly mutates state. The block-end
+				// belongs to the CLOSE half of the boundary pair and runs exactly ONCE at seal, so skip it
+				// here — the accumulating SharedDomains carries USER-tx state only. See FlashblockSkipBlockEnd.
+				skipBlockEnd := se.isForkValidation && dbg.FlashblockSkipBlockEnd
+				if !skipBlockEnd {
+					_, err = se.cfg.engine.Finalize(
+						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
+						finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
 
-				if err != nil {
-					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
+					if err != nil {
+						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
+					}
 				}
 
 				if startTxIndex == 0 && !isInitialCycle {
@@ -430,7 +438,13 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
 				checkReceipts := checkBloom && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber())
 
-				if txTask.BlockNumber() > 0 && startTxIndex == 0 {
+				// TEMP (cocoon flashblock): on the FORK-VALIDATION path with FLASHBLOCK_SKIP_POSTVALIDATION set,
+				// skip the finished-block gas/receipts/bloom assertion. The DAG intra-block flow runs ValidateChain
+				// over a MID-BLOCK flashblock whose header GasUsed/receipts are still being CALCULATED (not final),
+				// so this assertion cannot pass yet — but exec + notifications (RecentReceipts.Add above) already
+				// ran, which is what we need. Real block application (!isForkValidation) always checks.
+				skipPostValidation := se.isForkValidation && dbg.FlashblockSkipPostValidation
+				if txTask.BlockNumber() > 0 && startTxIndex == 0 && !skipPostValidation {
 					//Disable check for genesis. Maybe need somehow improve it in future - to satisfy TestExecutionSpec
 					// Block gas = max(regular, state). Pre-Amsterdam: blockStateGasUsed is 0.
 					blockGasUsed := max(se.blockGasUsed, se.blockStateGasUsed)

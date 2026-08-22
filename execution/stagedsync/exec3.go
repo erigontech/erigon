@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
+	"github.com/erigontech/erigon/execution/execobserver"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -119,7 +120,9 @@ func ExecV3(ctx context.Context,
 	initialCycle := execStage.CurrentSyncCycle.IsInitialCycle
 	hooks := cfg.vmConfig.Tracer
 	applyTx := rwTx
-	initialTxNum, blockNum, err := doms.SeekCommitment(ctx, applyTx)
+	// Resolve the execution START via SeekStart (commitment model by default; the PRE-EXEC model
+	// when PreExecute set an explicit flashblock resume point on the maintained SD).
+	initialTxNum, blockNum, err := doms.SeekStart(ctx, applyTx)
 	if err != nil {
 		return err
 	}
@@ -215,6 +218,9 @@ func ExecV3(ctx context.Context,
 
 		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
 		defer clean()
+	}
+	if isForkValidation { // TEMP FLASHBLOCK-DIAG: which executor runs for validation, + are there OnTx observers
+		logger.Info("[FLASHBLOCK-DIAG] validation exec", "parallel", parallel, "hasObservers", execobserver.HasObservers())
 	}
 	if parallel {
 		pe := &parallelExecutor{

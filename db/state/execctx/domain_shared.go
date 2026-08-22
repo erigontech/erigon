@@ -109,6 +109,12 @@ type SharedDomains struct {
 	logger log.Logger
 
 	txNum             uint64
+	// preExecStart, when set, makes SeekStart return this txNum as the execution START point instead
+	// of the persisted commitment — the PRE-EXEC start model (flashblock resume past the already-
+	// executed prefix in a maintained SD, whose advance SeekCommitment cannot recover because fork-
+	// validation never commits). SeekCommitment (the commitment start model) is left untouched.
+	preExecStart      uint64
+	preExecStartSet   bool
 	currentStep       kv.Step
 	trace             bool //nolint
 	commitmentCapture bool
@@ -640,6 +646,16 @@ func (sd *SharedDomains) SetTxNum(txNum uint64) {
 
 func (sd *SharedDomains) TxNum() uint64 { return sd.txNum }
 
+// SetPreExecStart selects the PRE-EXEC start model for SeekStart: execution resumes at txNum
+// (the flashblock prefix end) rather than the persisted commitment. Set by PreExecute per round.
+func (sd *SharedDomains) SetPreExecStart(txNum uint64) {
+	sd.preExecStart = txNum
+	sd.preExecStartSet = true
+}
+
+// ClearPreExecStart reverts SeekStart to the commitment start model.
+func (sd *SharedDomains) ClearPreExecStart() { sd.preExecStartSet = false }
+
 // SetDisableInlineTouchKey disables the TouchKey call inside DomainPut/DomainDel.
 // When the commitment calculator goroutine owns the Updates buffer, the inline
 // TouchKey must be disabled to avoid concurrent writes.
@@ -1162,6 +1178,27 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 		return 0, 0, err
 	}
 	sd.SetTxNum(txNum)
+	return txNum, blockNum, nil
+}
+
+// SeekStart returns the txNum/blockNum at which execution should START. It resolves one of two
+// models:
+//   - COMMITMENT (default): the persisted commitment, via SeekCommitment — normal chain execution.
+//   - PRE-EXEC: an explicit start set by PreExecute (SetPreExecStart) — the flashblock resume point
+//     past the already-executed prefix carried in a maintained SD. SeekCommitment cannot recover it
+//     because fork-validation never commits, so the start is fed explicitly.
+//
+// ExecV3 resolves its start point through here rather than calling SeekCommitment directly, so the
+// commitment model stays pure and the pre-exec model is a distinct, opt-in path.
+func (sd *SharedDomains) SeekStart(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
+	txNum, blockNum, err = sd.SeekCommitment(ctx, tx)
+	if err != nil {
+		return 0, 0, err
+	}
+	if sd.preExecStartSet {
+		txNum = sd.preExecStart
+		sd.SetTxNum(txNum)
+	}
 	return txNum, blockNum, nil
 }
 

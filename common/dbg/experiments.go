@@ -115,6 +115,24 @@ var (
 	BadBlockHalt          = EnvBool("BAD_BLOCK_HALT", false)
 	IgnoreBAL             = EnvBool("IGNORE_BAL", false)
 	BatchCommitments      = EnvBool("BATCH_COMMITMENTS", true)
+	// FlashblockSkipPostValidation TEMPORARILY skips the end-of-block gas/receipts/bloom
+	// validation (protocol.BlockPostValidation) on the FORK-VALIDATION path only. It lets the
+	// cocoon DAG intra-block "just execute" flow run ValidateChain over a MID-BLOCK flashblock
+	// (whose header GasUsed/receipts are not yet final — they are being calculated) without the
+	// finished-block assertions, while still executing + firing notifications. Real block
+	// application (FCU / applying-blocks) is unaffected. Temporary until the flashblock flow +
+	// slot-end assembly land — see cocoon venue_exec_on_round_plan.
+	FlashblockSkipPostValidation = EnvBool("FLASHBLOCK_SKIP_POSTVALIDATION", false)
+	// FlashblockSkipBlockEnd strips the per-round block-END (engine.Finalize: withdrawals +
+	// end-of-block system calls) on the FORK-VALIDATION / PreExecute path only. The cocoon DAG
+	// flashblock flow PreExecutes each committed round into ONE accumulating SharedDomains; the
+	// stock exec re-runs the block-end task at the shifted len(txs) position every round (op-rbuilder
+	// revert/reapply), applying withdrawals/system calls repeatedly. STEP 3a: the block-end belongs
+	// to the CLOSE half of the boundary pair and must run exactly ONCE at seal, not per round — so on
+	// pre-exec we skip it, leaving the body = USER txs only. Real block application (FCU / applying
+	// blocks) always runs Finalize. Temporary until the close/open seal lands — see cocoon
+	// venue_exec_on_round_plan.
+	FlashblockSkipBlockEnd = EnvBool("FLASHBLOCK_SKIP_BLOCKEND", false)
 	CaplinEfficientReorg  = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies     = EnvBool("USE_TX_DEPENDENCIES", false)
 	UseStateCache         = EnvBool("USE_STATE_CACHE", true)

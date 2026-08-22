@@ -379,6 +379,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 				if !errors.Is(cr.err, ErrWrongTrieRoot) {
 					return fmt.Errorf("[%s] commitment: %w", pe.logPrefix, cr.err)
 				}
+				// FLASHBLOCK: intra-block fork-validation carries header.Root=0 (the root is
+				// deferred to slot-end assembly, per the incremental builder — "we don't check
+				// the state root in incremental mode"), so the computed root necessarily
+				// mismatches. Skip the wrong-root rejection (and its unwind) so exec COMPLETES
+				// and its per-tx OnTx notifications flow to the settle observer. Temporary — see
+				// FlashblockSkipPostValidation.
+				if pe.isForkValidation && dbg.FlashblockSkipPostValidation {
+					pe.logger.Debug("[flashblock] skip wrong-trie-root", "block", cr.blockNum, "computed", cr.rootHash)
+					return nil
+				}
 				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",
 					pe.logPrefix, cr.blockNum, cr.rootHash, cr.err))
 				if initialCycle {
@@ -594,7 +604,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 					// per-block blockValidator was spawned earlier (~30 LOC up)
 					// and runs concurrently with the work above; Wait() joins it.
 					if err := blockValidatorWaiter.Wait(); err != nil {
-						return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err)
+						// FLASHBLOCK: during intra-block fork-validation the candidate header carries
+						// GasUsed=0 / Root=0 (block assembly is deferred), so the end-of-block
+						// gas/receipts/bloom check necessarily fails. Skip it here so exec still
+						// COMPLETES and its per-tx execobserver.OnTx notifications flow to the settle
+						// observer. Temporary — see FlashblockSkipPostValidation.
+						if pe.isForkValidation && dbg.FlashblockSkipPostValidation {
+							pe.logger.Debug("[flashblock] skip post-validation error", "block", applyResult.BlockNum, "err", err)
+						} else {
+							return fmt.Errorf("%w, block=%d, %v", rules.ErrInvalidBlock, applyResult.BlockNum, err)
+						}
 					}
 
 					if pe.cfg.chainConfig.IsAmsterdam(applyResult.BlockTime) || pe.cfg.experimentalBAL {
@@ -2840,10 +2859,18 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-				if _, err := pe.cfg.engine.Finalize(
-					pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, receipts,
-					tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
-					return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)), nil
+				// STEP 3a (cocoon flashblock): strip the per-round block-END on the PRE-EXEC /
+				// fork-validation path. Finalize (withdrawals + end-of-block system calls) belongs to the
+				// CLOSE half of the boundary pair and runs exactly ONCE at seal, not per round as the
+				// flashblock body grows — so skip it here; the accumulating SD carries USER-tx state only.
+				// See FlashblockSkipBlockEnd. Real block application always finalizes.
+				skipBlockEnd := pe.isForkValidation && dbg.FlashblockSkipBlockEnd
+				if !skipBlockEnd {
+					if _, err := pe.cfg.engine.Finalize(
+						pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, receipts,
+						tt.Withdrawals, chainReader, syscall, false, pe.logger); err != nil {
+						return be.invalidBlockResult(fmt.Errorf("%w: can't finalize block %d: %v", rules.ErrInvalidBlock, be.blockNum, err)), nil
+					}
 				}
 
 				// syscallIBS == ibs unconditionally now; no separate write
