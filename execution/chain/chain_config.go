@@ -45,10 +45,10 @@ import (
 // only via copier.CopyWithOption(..., DeepCopy: true) — a shallow copy leaves
 // pointer/map fields (ChainID, *Time, BlobSchedule, etc.) shared with the source.
 type Config struct {
-	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
+	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, gnosis
 	ChainID   *uint256.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
-	Rules RulesName `json:"consensus,omitempty"` // aura, bor, or ethash
+	Rules RulesName `json:"consensus,omitempty"` // aura or ethash
 
 	// *Block fields activate the corresponding hard fork at a certain block number,
 	// while *Time fields do so based on the block's time stamp.
@@ -398,10 +398,6 @@ func (c *Config) IsGrayGlacier(num uint64) bool {
 func (c *Config) IsShanghai(time uint64) bool {
 	return isForked(c.ShanghaiTime, time)
 }
-
-// Refer to https://forum.polygon.technology/t/pip-33-napoli-upgrade
-
-// Refer to https://forum.polygon.technology/t/pip-63-bhilai-hardfork
 
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time uint64) bool {
