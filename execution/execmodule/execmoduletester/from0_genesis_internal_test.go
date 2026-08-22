@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -115,7 +116,7 @@ func runFromZeroGenesisAllocPreservedAfterResetReExec(t *testing.T) {
 				return err
 			}
 			defer doms.Close()
-			r := state.NewReaderV3(doms.AsStateGetter(rTx))
+			r := state.NewReaderV3(doms.AsStateGetter(rTx, execctxapi.StateGetterOptions{}))
 			st := state.New(r)
 			defer st.Close()
 			b, err := st.GetBalance(dormantAddr)

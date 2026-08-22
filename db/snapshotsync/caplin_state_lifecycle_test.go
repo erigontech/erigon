@@ -258,3 +258,22 @@ func TestCaplinStateNilSnapshotsRemoveOverlapsIsNoop(t *testing.T) {
 	var s *CaplinStateSnapshots
 	require.NoError(t, s.RemoveOverlaps(nil))
 }
+
+// A dump that skips a hole and continues still creates the later files, and they must be
+// announced to the seeder even though the visible set is truncated at the gap.
+func TestCaplinStateSegFileNamesIncludesSegmentsPastAGap(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.BlockRoot
+
+	nearSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	farSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	require.Equal(t, uint64(49_999), s.BlocksAvailable(), "visible set must still stop at the gap")
+
+	paths := s.SegFileNames(0, 150_000)
+	require.Contains(t, paths, nearSeg)
+	require.Contains(t, paths, farSeg, "the segment past the gap must still be seedable")
+}

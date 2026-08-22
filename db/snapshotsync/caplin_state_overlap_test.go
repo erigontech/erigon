@@ -40,7 +40,12 @@ import (
 
 func writeCaplinStateFixture(t *testing.T, dir, table string, from, to uint64, logger log.Logger) (segPath, idxPath string) {
 	t.Helper()
-	segName := strings.ReplaceAll(snaptype.BeaconBlocks.FileName(version.ZeroVersion, from, to), "beaconblocks", table)
+	return writeCaplinStateFixtureVersion(t, dir, table, from, to, version.ZeroVersion, logger)
+}
+
+func writeCaplinStateFixtureVersion(t *testing.T, dir, table string, from, to uint64, v version.Version, logger log.Logger) (segPath, idxPath string) {
+	t.Helper()
+	segName := strings.ReplaceAll(snaptype.BeaconBlocks.FileName(v, from, to), "beaconblocks", table)
 	segPath = filepath.Join(dir, segName)
 
 	compressCfg := seg.DefaultCfg
@@ -258,4 +263,41 @@ func TestCaplinStateRemoveOverlapsWithSeveralTables(t *testing.T) {
 	for _, table := range tables {
 		require.Equal(t, []Range{{from: 0, to: 150_000}}, s.coveredRangesForType(table))
 	}
+}
+
+// An indexed subset must survive when its only covering superset has no index: the visible
+// set requires IsIndexed, so removing the subset would make the range unreadable.
+func TestCaplinStateRemoveOverlapsKeepsSubsetWithoutIndexedSuperset(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	subSeg, subIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 50_000, logger)
+	supSeg, supIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 100_000, logger)
+	require.NoError(t, dir2.RemoveFile(supIdx))
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.FileExists(t, subSeg, "the indexed subset is the only readable copy of [0,50k)")
+	require.FileExists(t, subIdx)
+	require.FileExists(t, supSeg)
+	require.Equal(t, []Range{{from: 0, to: 50_000}}, s.coveredRangesForType(table))
+}
+
+// The visible set serves the newest of two equal-range versions, so overlap removal must
+// delete the older one — deleting the newer would unlink the file readers are pointed at.
+func TestCaplinStateRemoveOverlapsKeepsNewestEqualRangeVersion(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	oldSeg, _ := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_0, logger)
+	newSeg, _ := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_1, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+	require.NoError(t, s.RemoveOverlaps(nil))
+
+	require.FileExists(t, newSeg, "the newest version is what View() serves")
+	require.NoFileExists(t, oldSeg)
 }

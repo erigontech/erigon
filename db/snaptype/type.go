@@ -238,15 +238,15 @@ var registeredTypes = map[Enum]Type{}
 var namedTypes = map[string]Type{}
 
 func RegisterType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
-	if enum >= MinCaplinEnum && enum < MinBorEnum {
+	if enum >= MinCaplinEnum && enum < MaxCaplinEnum {
 		panic(fmt.Sprintf("snaptype: enum %d is in the caplin range, cannot register %q", enum, name))
 	}
 	return register(enum, name, versions, rangeExtractor, indexes, indexBuilder)
 }
 
 func RegisterCaplinType(enum Enum, name string, versions Versions, rangeExtractor RangeExtractor, indexes []Index, indexBuilder IndexBuilder) Type {
-	if enum < MinCaplinEnum || enum >= MinBorEnum {
-		panic(fmt.Sprintf("snaptype: enum %d for %q outside caplin range [%d, %d)", enum, name, MinCaplinEnum, MinBorEnum))
+	if enum < MinCaplinEnum || enum >= MaxCaplinEnum {
+		panic(fmt.Sprintf("snaptype: enum %d for %q outside caplin range [%d, %d)", enum, name, MinCaplinEnum, MaxCaplinEnum))
 	}
 	return register(enum, name, versions, rangeExtractor, indexes, indexBuilder)
 }
@@ -413,8 +413,12 @@ type Enums struct {
 }
 
 const MinCoreEnum = 1
-const MinBorEnum = 50
+const MaxCaplinEnum = 50 // exclusive upper bound of the caplin enum range
 const MinCaplinEnum = 10
+
+// MinCaplinStateEnum is the first beacon-state type; BeaconBlocks and BlobSidecars occupy
+// the two slots below it, so a new caplin block type must go here, not at a free tail slot.
+const MinCaplinStateEnum = MinCaplinEnum + 2
 
 const MaxEnum = 54
 
