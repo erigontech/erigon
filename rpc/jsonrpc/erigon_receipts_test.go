@@ -434,6 +434,43 @@ func TestErigonGetLogsByHash_NonCanonicalHash_ReturnsError(t *testing.T) {
 	require.EqualError(t, err, fmt.Sprintf("hash %x is not currently canonical", orphanedBlock.Hash()))
 }
 
+func TestErigonGetLogsByHash_ReorgedBlock_NotServedFromCache(t *testing.T) {
+	m := execmoduletester.New(
+		t,
+		execmoduletester.WithGenesisSpec(&types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc:  types.GenesisAlloc{testAddr: {Balance: big.NewInt(1000000)}},
+		}),
+		execmoduletester.WithKey(testKey),
+	)
+	acc1Key, _ := crypto.HexToECDSA("8a1f9a8f95be41cd7ccb6168179afb4504aefe388d1e14474d32c45c72ce7b7a")
+	acc1Addr := crypto.PubkeyToAddress(acc1Key.PublicKey)
+	signer := types.LatestSignerForChainID(nil)
+
+	shortChain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+		if i == 0 {
+			tx, _ := types.SignTx(types.NewTransaction(block.TxNonce(testAddr), acc1Addr, uint256.NewInt(10000), params.TxGas, nil, nil), *signer, testKey)
+			block.AddTx(tx)
+		}
+	})
+	require.NoError(t, err)
+	longChain, err := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {})
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(shortChain))
+
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+	staleHash := shortChain.Blocks[0].Hash()
+
+	logs, err := api.GetLogsByHash(m.Ctx, staleHash)
+	require.NoError(t, err)
+	require.Len(t, logs, 1)
+
+	require.NoError(t, m.InsertChain(longChain))
+
+	_, err = api.GetLogsByHash(m.Ctx, staleHash)
+	require.EqualError(t, err, fmt.Sprintf("hash %x is not currently canonical", staleHash))
+}
+
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen)) *execmoduletester.ExecModuleTester {
