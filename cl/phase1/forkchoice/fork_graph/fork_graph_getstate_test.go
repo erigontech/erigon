@@ -25,7 +25,8 @@ func TestGetState_InfiniteLoopOnMissingStateFile(t *testing.T) {
 	anchorState := state.New(&clparams.MainnetBeaconConfig)
 	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
 
-	fg := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	fg, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
 	graph := fg.(*forkGraphDisk)
 
 	// Craft a fake root and header at a dump slot (slot % dumpSlotFrequency == 0).

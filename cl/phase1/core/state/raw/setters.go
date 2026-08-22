@@ -42,9 +42,11 @@ func (b *BeaconState) SetVersion(version clparams.StateVersion) {
 }
 
 func (b *BeaconState) SetSlot(slot uint64) error {
+	oldSlot := b.slot
 	b.slot = slot
 	if b.events.OnEpochBoundary != nil && b.slot%b.beaconConfig.SlotsPerEpoch == 0 {
 		if err := b.events.OnEpochBoundary(b.slot / b.beaconConfig.SlotsPerEpoch); err != nil {
+			b.slot = oldSlot
 			return err
 		}
 	}
@@ -351,12 +353,12 @@ func (b *BeaconState) SetValidatorAtIndex(index int, validator solid.Validator) 
 }
 
 func (b *BeaconState) ResetEpochParticipation() error {
-	b.previousEpochParticipation = b.currentEpochParticipation
 	if b.events.OnResetParticipation != nil {
-		if err := b.events.OnResetParticipation(b.previousEpochParticipation); err != nil {
+		if err := b.events.OnResetParticipation(b.currentEpochParticipation); err != nil {
 			return err
 		}
 	}
+	b.previousEpochParticipation = b.currentEpochParticipation
 	b.currentEpochParticipation = solid.NewParticipationBitList(b.validators.Length(), int(b.beaconConfig.ValidatorRegistryLimit))
 	b.markLeaf(CurrentEpochParticipationLeafIndex)
 	b.markLeaf(PreviousEpochParticipationLeafIndex)

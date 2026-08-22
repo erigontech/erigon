@@ -2452,7 +2452,7 @@ func (a *ApiHandler) electraMergedAttestationCandidates(s abstract.BeaconState) 
 				attData = att.Data
 			}
 			signatures = append(signatures, att.Signature[:])
-			// set commitee bit; cIndex is always < MaxCommitteesPerSlot, the
+			// set committee bit; cIndex is always < MaxCommitteesPerSlot, the
 			// vector's cap, so this cannot error.
 			_ = commiteeBits.SetBitAt(int(cIndex), true)
 			// append aggregation bits

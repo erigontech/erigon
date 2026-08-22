@@ -94,12 +94,14 @@ func TestForkChoiceBasic(t *testing.T) {
 	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 	localValidators := validator_params.NewValidatorParams()
 
+	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
 	store, err := forkchoice.NewForkChoiceStore(
 		ethClock,
 		anchorState,
 		nil, // execution engine
 		pool,
-		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}),
+		forkGraphDisk,
 		emitters,
 		sd,
 		blobStorage,
@@ -188,14 +190,16 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
 	localValidators := validator_params.NewValidatorParams()
 
+	forkGraphDisk, err := fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
+		Beacon: true,
+	})
+	require.NoError(t, err)
 	store, err := forkchoice.NewForkChoiceStore(
 		ethClock,
 		anchorState,
 		nil, // execution engine
 		pool,
-		fork_graph.NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{
-			Beacon: true,
-		}),
+		forkGraphDisk,
 		emitters,
 		sd,
 		blobStorage,

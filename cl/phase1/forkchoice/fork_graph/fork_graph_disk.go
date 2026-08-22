@@ -143,11 +143,11 @@ type forkGraphDisk struct {
 }
 
 // Initialize fork graph with a new state.
-func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) ForkGraph {
+func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_data.SyncedData, aferoFs afero.Fs, rcfg beacon_router_configuration.RouterConfiguration) (ForkGraph, error) {
 	farthestExtendingPath := make(map[common.Hash]bool)
 	anchorRoot, err := anchorState.BlockRoot()
 	if err != nil {
-		panic(err)
+		return nil, err
 	}
 	anchorHeader := anchorState.LatestBlockHeader()
 	if anchorState.Version() >= clparams.GloasVersion && anchorState.Slot() > 0 {
@@ -167,7 +167,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		if anchorHeader.Root == [32]byte{} {
 			stateHash, err := anchorState.HashSSZ()
 			if err != nil {
-				panic(err)
+				return nil, err
 			}
 			anchorHeader.Root = stateHash
 			anchorState.SetLatestBlockHeader(&anchorHeader)
@@ -177,7 +177,7 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 		}
 	} else {
 		if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
-			panic(err)
+			return nil, err
 		}
 		anchorState.SetPreviousStateRoot(anchorHeader.Root)
 	}
@@ -202,10 +202,10 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	f.sszBuffer = make([]byte, 0, (anchorState.EncodingSizeSSZ()*3)/2)
 
 	if err := f.DumpBeaconStateOnDisk(anchorRoot, anchorState, true); err != nil {
-		panic(err)
+		return nil, err
 	}
 	// preallocate buffer
-	return f
+	return f, nil
 }
 
 func (f *forkGraphDisk) AnchorSlot() uint64 {
