@@ -490,3 +490,52 @@ func TestPrecompiledP256Verify(t *testing.T) {
 	testJson("p256Verify", "100", t)
 	testJson("p256Verify-EIP-7951", "a100", t)
 }
+
+// precompileSuccessVectors names, per precompile address, a fixture holding at
+// least one input that precompile accepts. 0x02, 0x03 and 0x04 accept anything
+// and have no fixture.
+var precompileSuccessVectors = map[string]string{
+	"01": "ecRecover", "05": "modexp", "a5": "modexp_eip2565", "b5": "modexp_eip7883",
+	"06": "bn254Add", "07": "bn254ScalarMul", "08": "bn254Pairing", "09": "blake2F",
+	"0a": "pointEvaluation", "0b": "blsG1Add", "0c": "blsG1MultiExp", "0d": "blsG2Add",
+	"0e": "blsG2MultiExp", "0f": "blsPairing", "10": "blsMapG1", "11": "blsMapG2",
+	"100": "p256Verify", "a100": "p256Verify-EIP-7951",
+}
+
+// TestPrecompileOutputDoesNotAliasInput pins the invariant the CALL opcodes
+// rely on: a precompile's output never shares memory with its input, which is
+// what lets the caller keep it as return data without copying it first.
+func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
+	t.Parallel()
+
+	covered := map[common.Address]bool{}
+	check := func(addr common.Address, p PrecompiledContract, input []byte) {
+		out, err := p.Run(input)
+		if err != nil || len(out) == 0 {
+			return
+		}
+		want := bytes.Clone(out)
+		clear(input)
+		require.Equal(t, want, out, "precompile %s output aliases its input", p.Name())
+		covered[addr] = true
+	}
+
+	for hexAddr, fixture := range precompileSuccessVectors {
+		addr := common.HexToAddress(hexAddr)
+		p := allPrecompiles[addr]
+		require.NotNil(t, p, "no precompile at %s", hexAddr)
+		tests, err := loadJson(fixture)
+		require.NoError(t, err)
+		for _, test := range tests {
+			check(addr, p, common.Hex2Bytes(test.Input))
+		}
+	}
+	for _, hexAddr := range []string{"02", "03", "04"} {
+		addr := common.HexToAddress(hexAddr)
+		check(addr, allPrecompiles[addr], bytes.Repeat([]byte{0xa5}, 128))
+	}
+
+	for addr, p := range allPrecompiles {
+		require.True(t, covered[addr], "precompile %s at %x produced no non-empty output, so it was never checked", p.Name(), addr)
+	}
+}
