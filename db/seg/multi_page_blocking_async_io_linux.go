@@ -24,12 +24,12 @@ import (
 	"github.com/erigontech/erigon/common/iouring"
 )
 
-func (g *Getter) EnableMultiPageAsyncIO() {
-	g.multiPageWarmer = (*Getter).warmMultiPageLiteral
-	g.multiPageLiteralMinWordLen = uint64(pageSize)
+func (g *Getter) EnableMultiPageBlockingAsyncIO() {
+	g.multiPageBlockingAsyncRead = (*Getter).readMultiPageLiteral
+	g.multiPageReadThreshold = uint64(pageSize)
 }
 
-func multiPageWarmRange(offset, length uint64) (uint64, uint64, bool) {
+func multiPageBlockingAsyncReadRange(offset, length uint64) (uint64, uint64, bool) {
 	page := uint64(pageSize)
 	if length <= page {
 		return 0, 0, false
@@ -48,14 +48,14 @@ func multiPageWarmRange(offset, length uint64) (uint64, uint64, bool) {
 	return offset, end - offset, true
 }
 
-func (g *Getter) warmMultiPageLiteral(offset, length uint64) {
-	offset, length, ok := multiPageWarmRange(offset, length)
+func (g *Getter) readMultiPageLiteral(offset, length uint64) {
+	offset, length, ok := multiPageBlockingAsyncReadRange(offset, length)
 	if !ok || offset+length > math.MaxInt64 {
 		return
 	}
 	for length > 0 {
-		chunk := min(length, uint64(iouring.WarmBufSize))
-		g.warm(int64(offset), int(chunk))
+		chunk := min(length, uint64(iouring.MaxReadSize))
+		g.d.blockingAsyncRead(int64(offset), int(chunk))
 		offset += chunk
 		length -= chunk
 	}
