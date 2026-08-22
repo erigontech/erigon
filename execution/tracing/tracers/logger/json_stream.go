@@ -100,6 +100,16 @@ func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
 	return common.ToStringZeroCopy(append(b, '"'))
 }
 
+// hexQuotedBytes encodes b as a complete JSON string, quotes included, so the
+// caller can hand it to WriteRaw in one call. Same aliasing rule as
+// hexWithPrefix: hand it straight to the stream.
+func (l *JsonStreamLogger) hexQuotedBytes(b []byte) string {
+	l.hexEncodeBuf[0], l.hexEncodeBuf[1], l.hexEncodeBuf[2] = '"', '0', 'x'
+	n := hex.Encode(l.hexEncodeBuf[3:], b)
+	l.hexEncodeBuf[3+n] = '"'
+	return common.ToStringZeroCopy(l.hexEncodeBuf[:4+n])
+}
+
 // writeMemoryWordRaw writes a memory word as a JSON string "0x<hex>" directly
 // to the stream without any heap allocations. Pads to 32 bytes if needed.
 func (l *JsonStreamLogger) writeMemoryWordRaw(chunk []byte) {
@@ -251,15 +261,16 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 			l.locations = append(l.locations, loc)
 		}
 		l.locations.Sort()
-		for _, loc := range l.locations {
-			value := s[loc]
+		for i := range l.locations {
+			loc := &l.locations[i]
+			value := s[*loc]
 			if first {
 				first = false
 			} else {
 				l.stream.WriteMore()
 			}
 			l.stream.WriteObjectField(l.hexWithPrefix(loc[:]))
-			l.stream.WriteString(l.hexWithPrefix(value[:]))
+			l.stream.WriteRaw(l.hexQuotedBytes(value[:]))
 		}
 		l.stream.WriteObjectEnd()
 	}
