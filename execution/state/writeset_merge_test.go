@@ -18,6 +18,7 @@ package state
 
 import (
 	"fmt"
+	"iter"
 	"maps"
 	"testing"
 
@@ -26,6 +27,7 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -319,7 +321,10 @@ func TestWriteSetReleaseMaps(t *testing.T) {
 	merged := prev.MergeInto(next)
 
 	prev.ReleaseMaps()
-	assert.True(t, prev.IsEmpty(), "released set must be empty")
+	// Read the maps directly: the whole-set readers panic under assertions once
+	// the set is released, which is the point of the tripwire.
+	assert.Nil(t, prev.address, "released set must hand its maps back")
+	assert.Nil(t, prev.storage, "released set must hand its maps back")
 
 	// The entries merged shares with prev are prev's non-conflicting ones —
 	// prev's writes on a lost the merge and never entered merged.
@@ -354,6 +359,85 @@ func TestWriteSetReleaseMaps(t *testing.T) {
 	prev.ReleaseMaps()
 }
 
+// A set released for good must fail its whole-set readers under assertions:
+// the maps are pooled, so those reads would otherwise silently see nothing.
+func TestWriteSetReleasedTripwire(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	released, _ := mergeIntoFixture()
+	released.ReleaseMaps()
+	assert.Panics(t, func() { released.Count() })
+	assert.Panics(t, func() { released.IsEmpty() })
+	assert.Panics(t, func() {
+		for range released.AllHeaders() {
+		}
+	})
+	assert.Panics(t, func() {
+		for range released.Balances() {
+		}
+	})
+	assert.Panics(t, func() {
+		for range released.Storages() {
+		}
+	})
+
+	// A released set reads as empty, so an unguarded Merge would silently drop it.
+	assert.Panics(t, func() { released.Merge(&WriteSet{}) })
+
+	// A write checks fresh maps out of the pools, so the set is live again.
+	released.SetBalance(mergeAddr(0xd4), balanceWrite(mergeAddr(0xd4), 3, 0))
+	assert.Equal(t, 1, released.Count())
+
+	// ReleaseAndReset resets for reuse, so it must leave the set readable.
+	reused := &WriteSet{}
+	reused.ReleaseAndReset()
+	assert.Zero(t, reused.Count())
+}
+
+func drainSeq[V any](seq iter.Seq[V]) func() {
+	return func() {
+		for range seq {
+		}
+	}
+}
+
+func drainSeq2[K, V any](seq iter.Seq2[K, V]) func() {
+	return func() {
+		for range seq {
+		}
+	}
+}
+
+// The check must fire when the iterator runs, not when it is built: a sequence
+// taken before ReleaseMaps still points at the set, so consuming it afterwards
+// would walk the pooled maps and see nothing.
+func TestWriteSetReleasedTripwireLazyIterators(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	for _, tc := range []struct {
+		name string
+		take func(*WriteSet) func()
+	}{
+		{"Balances", func(s *WriteSet) func() { return drainSeq2(s.Balances()) }},
+		{"Nonces", func(s *WriteSet) func() { return drainSeq2(s.Nonces()) }},
+		{"Incarnations", func(s *WriteSet) func() { return drainSeq2(s.Incarnations()) }},
+		{"SelfDestructs", func(s *WriteSet) func() { return drainSeq2(s.SelfDestructs()) }},
+		{"Codes", func(s *WriteSet) func() { return drainSeq2(s.Codes()) }},
+		{"CodeHashes", func(s *WriteSet) func() { return drainSeq2(s.CodeHashes()) }},
+		{"Storages", func(s *WriteSet) func() { return drainSeq2(s.Storages()) }},
+		{"AllHeaders", func(s *WriteSet) func() { return drainSeq(s.AllHeaders()) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			released, _ := mergeIntoFixture()
+			consume := tc.take(released)
+			released.ReleaseMaps()
+			assert.Panics(t, consume)
+		})
+	}
+}
+
 func TestVersionedIOReleaseOutputMaps(t *testing.T) {
 	io := NewVersionedIO(2)
 	ws, _ := mergeIntoFixture()
@@ -365,7 +449,11 @@ func TestVersionedIOReleaseOutputMaps(t *testing.T) {
 	// Read the slots directly: the accessors panic under assertions once the
 	// outputs are released, which is the point of the guard.
 	for _, output := range io.outputs {
-		assert.True(t, output.IsEmpty(), "slots must be empty after release")
+		if output == nil {
+			continue
+		}
+		assert.Nil(t, output.address, "slots must hand their maps back after release")
+		assert.Nil(t, output.storage, "slots must hand their maps back after release")
 	}
 
 	// Empty and already-released IO must not panic.
