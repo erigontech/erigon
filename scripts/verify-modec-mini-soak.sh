@@ -63,10 +63,16 @@ DATADIR="$DATADIR" \
   REGIME_CYCLE="$REGIME_CYCLE" \
   RANDOMIZE_DEPTHS=true \
   SNAPSHOT_BETWEEN_ITERS_DIR="$out/snapshots-between-iters" \
-  STRESS_MODE=1 \
   RANDOM_SEED="modec-verify-cycle-${cycle}-$(date -u +%s | head -c 10)" \
   SETHEAD_CALL_TIMEOUT_SEC=3600 \
   bash scripts/unwind-fresh-sync-then-soak.sh > "$out/soak.log" 2>&1
+# Note: STRESS_MODE deliberately not set — verify needs the FULL recovery
+# window (default 1800s scaled by depth via recovery_timeout_for_depth) so
+# Caplin's post-unwind historical download completes before the next iter
+# fires. STRESS_MODE=1 caps recovery at STRESS_INTER_ITER_SEC=90s which
+# is fine for stress-testing setHead throughput but too short for a
+# regime-3 unwind that needs Caplin to re-download 30k+ historical
+# blocks (~15 min at hoodi cadence).
 rc=$?
 echo "$rc" > "$out/exit-code"
 
