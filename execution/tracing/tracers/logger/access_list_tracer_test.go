@@ -17,12 +17,17 @@
 package logger
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/holiman/uint256"
+
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 )
 
 var (
@@ -181,4 +186,94 @@ func TestAccessListTracerLazyAddressSets(t *testing.T) {
 
 	tracer.markCreated(addr)
 	require.Contains(t, tracer.CreatedContracts(), addr)
+}
+
+// TestAccessListTracerSeedNew pins that seeding directly from the accumulated maps
+// is observationally the same as the types.AccessList round-trip it replaces, and
+// that the two tracers share nothing.
+func TestAccessListTracerSeedNew(t *testing.T) {
+	excluded := common.BytesToAddress([]byte{0x09})
+	excl := map[common.Address]struct{}{excluded: {}}
+
+	prev := NewAccessListTracer(nil, excl, nil)
+	prev.list.addSlot(addr, slot1)
+	prev.list.addSlot(addr, slot2)
+	prev.list.addAddress(common.BytesToAddress([]byte{0x02, 0x72}))
+
+	seeded := prev.SeedNew(nil)
+	roundTripped := NewAccessListTracer(prev.AccessList(), excl, nil)
+
+	require.Equal(t, roundTripped.AccessList(), seeded.AccessList())
+	require.True(t, seeded.Equal(prev))
+
+	seeded.list.addSlot(addr, slot3)
+	seeded.list.addAddress(excluded)
+	require.False(t, seeded.Equal(prev), "the seeded tracer must not write through to its source")
+	require.Equal(t, roundTripped.AccessList(), prev.AccessList())
+}
+
+// TestAccessListTracerSeedNewDropsExcluded pins the filtering cloneExcluding
+// documents: an excluded address can reach the list, and must not survive.
+func TestAccessListTracerSeedNewDropsExcluded(t *testing.T) {
+	excluded := common.BytesToAddress([]byte{0x77})
+	excl := map[common.Address]struct{}{excluded: {}}
+
+	prev := NewAccessListTracer(nil, excl, nil)
+	prev.list.addSlot(excluded, slot1)
+	prev.list.addSlot(addr, slot2)
+
+	seeded := prev.SeedNew(nil)
+	require.Equal(t, NewAccessListTracer(prev.AccessList(), excl, nil).AccessList(), seeded.AccessList())
+	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot2}}}, seeded.AccessList())
+}
+
+// TestAccessListTracerSeedNewTracesOpcodes drives a seeded tracer through the
+// opcodes that write its contract sets, which the AccessList-only assertions
+// above never reach.
+func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
+	prev := NewAccessListTracer(nil, nil, nil)
+	prev.list.addSlot(addr, slot1)
+
+	seeded := prev.SeedNew(nil)
+	scope := &mockOpContext{
+		address: accounts.InternAddress(addr),
+		stack:   []uint256.Int{*new(uint256.Int).SetBytes(slot2[:])},
+	}
+	seeded.OnOpcode(0, byte(vm.SLOAD), 100, 3, scope, nil, 1, nil)
+
+	require.Equal(t, types.AccessList{{Address: addr, StorageKeys: []common.Hash{slot1, slot2}}}, seeded.AccessList())
+	require.True(t, seeded.UsedBeforeCreation(addr))
+	require.Empty(t, seeded.CreatedContracts())
+}
+
+func BenchmarkAccessListTracerSeed(b *testing.B) {
+	// Real eth_createAccessList lists are small: a handful of addresses with a
+	// few slots each. The wide shapes are here for scale.
+	for _, shape := range []struct{ nAddrs, nSlots int }{
+		{1, 1}, {1, 5}, {1, 17}, {3, 5}, {5, 20}, {30, 20},
+	} {
+		prev := NewAccessListTracer(nil, nil, nil)
+		for a := range shape.nAddrs {
+			address := common.BytesToAddress([]byte{byte(a + 1)})
+			for s := range shape.nSlots {
+				prev.list.addSlot(address, common.BytesToHash([]byte{byte(s + 1)}))
+			}
+		}
+		// AccessList() is built either way, so only the seeding half differs.
+		acl := prev.AccessList()
+		name := fmt.Sprintf("%dx%d", shape.nAddrs, shape.nSlots)
+
+		b.Run(name+"/roundTrip", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = NewAccessListTracer(acl, nil, nil)
+			}
+		})
+		b.Run(name+"/seedNew", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = prev.SeedNew(nil)
+			}
+		})
+	}
 }
