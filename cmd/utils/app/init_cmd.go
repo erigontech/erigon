@@ -19,6 +19,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"os"
 
 	"github.com/urfave/cli/v3"
@@ -75,11 +76,13 @@ func initGenesis(ctx context.Context, cliCtx *cli.Command) error {
 
 	genesis := new(types.Genesis)
 	if err := json.NewDecoder(file).Decode(genesis); err != nil {
-		utils.Fatalf("invalid genesis file: %v", err)
+		return fmt.Errorf("invalid genesis file %s: %w", genesisPath, err)
 	}
-
+	if genesis.Config == nil {
+		return fmt.Errorf("invalid genesis file %s: missing 'config'", genesisPath)
+	}
 	if genesis.Config.BorJSON != nil {
-		utils.Fatalf("%s carries a 'bor' config: Polygon is not supported, see https://github.com/0xPolygon/erigon", genesisPath)
+		return fmt.Errorf("%s carries a 'bor' config: Polygon is not supported, see https://github.com/0xPolygon/erigon", genesisPath)
 	}
 
 	// Open and initialise both full and light databases
