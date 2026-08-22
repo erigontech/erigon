@@ -39,6 +39,8 @@ import (
 
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
 
+var _ forkchoice.ForkChoiceStorage = (*ForkChoiceStorageMock)(nil)
+
 type ForkChoiceStorageMock struct {
 	Ancestors              map[uint64]forkchoice.ForkChoiceNode
 	AnchorSlotVal          uint64
@@ -51,7 +53,6 @@ type ForkChoiceStorageMock struct {
 	HeadPayloadStatusVal   cltypes.PayloadStatus
 	HighestSeenVal         uint64
 	JustifiedCheckpointVal solid.Checkpoint
-	JustifiedSlotVal       uint64
 	ProposerBoostRootVal   common.Hash
 	SlotVal                uint64
 	TimeVal                uint64
@@ -85,8 +86,6 @@ type ForkChoiceStorageMock struct {
 
 	// Mock for PeerDas
 	MockPeerDas *mock_services.MockPeerDas
-
-	ShouldExtendPayloadVal bool
 
 	// [New in Gloas:EIP7732] Execution payload status by execution block hash
 	ExecutionPayloadStatusMap map[common.Hash]execution_client.PayloadStatus
@@ -203,7 +202,6 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		HeadPayloadStatusVal:        cltypes.PayloadStatusFull,
 		HighestSeenVal:              0,
 		JustifiedCheckpointVal:      solid.Checkpoint{},
-		JustifiedSlotVal:            0,
 		ProposerBoostRootVal:        common.Hash{},
 		SlotVal:                     0,
 		TimeVal:                     0,
@@ -218,7 +216,6 @@ func NewForkChoiceStorageMock(t *testing.T) *ForkChoiceStorageMock {
 		Envelopes:                   make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope),
 		GetBeaconCommitteeMock:      nil,
 		Eth1Hashes:                  make(map[common.Hash]common.Hash),
-		ShouldExtendPayloadVal:      true,
 		SyncContributionPool:        makeSyncContributionPoolMock(t),
 		MockPeerDas:                 mockPeerDas,
 		ExecutionPayloadStatusMap:   make(map[common.Hash]execution_client.PayloadStatus),
@@ -276,10 +273,6 @@ func (f *ForkChoiceStorageMock) HighestSeen() uint64 {
 
 func (f *ForkChoiceStorageMock) JustifiedCheckpoint() solid.Checkpoint {
 	return f.JustifiedCheckpointVal
-}
-
-func (f *ForkChoiceStorageMock) JustifiedSlot() uint64 {
-	return f.JustifiedSlotVal
 }
 
 func (f *ForkChoiceStorageMock) ProposerBoostRoot() common.Hash {
@@ -462,10 +455,6 @@ func (f *ForkChoiceStorageMock) GetHeadPayloadStatus() cltypes.PayloadStatus {
 	return f.HeadPayloadStatusVal
 }
 
-func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {
-	return f.ShouldExtendPayloadVal
-}
-
 func (f *ForkChoiceStorageMock) ShouldBuildOnFull(head forkchoice.ForkChoiceNode) bool {
 	return true
 }
@@ -498,13 +487,6 @@ func (f *ForkChoiceStorageMock) GetCurrentParticipationIndicies(
 	panic("implement me")
 }
 
-func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(
-	blockRoot common.Hash,
-	idx uint64,
-) (common.Bytes48, error) {
-	panic("implement me")
-}
-
 // func (f *ForkChoiceStorageMock) OnSignedContributionAndProof(signedContribution *cltypes.SignedContributionAndProof, test bool) error {
 // 	f.SyncContributionPool.AddSyncContribution(nil, signedContribution.Message.Contribution)
 // 	return nil
@@ -512,10 +494,6 @@ func (f *ForkChoiceStorageMock) GetPublicKeyForValidator(
 
 func (f *ForkChoiceStorageMock) AddPreverifiedBlobSidecar(msg *cltypes.BlobSidecar) error {
 	return nil
-}
-
-func (f *ForkChoiceStorageMock) ValidateOnAttestation(attestation *solid.Attestation) error {
-	panic("implement me")
 }
 
 func (f *ForkChoiceStorageMock) ProcessAttestingIndicies(

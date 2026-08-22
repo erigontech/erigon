@@ -33,9 +33,9 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/handlers/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -45,7 +45,7 @@ import (
 func TestBlocksByHeadCountCap(t *testing.T) {
 	_, beaconCfg := clparams.GetConfigsByNetwork(1)
 	count := beaconCfg.MaxRequestBlocksDeneb + 5
-	blocks, roots := makeBlocksByHeadChain(t, 100, count)
+	blocks, roots := makeTestBlockChain(t, 100, count)
 
 	store, stream := setupBlocksByHeadTest(t, blocks, nil)
 	_ = store
@@ -60,7 +60,7 @@ func TestBlocksByHeadCountCap(t *testing.T) {
 }
 
 func TestBlocksByHeadParentChainTraversal(t *testing.T) {
-	blocks, roots := makeBlocksByHeadChain(t, 200, 4)
+	blocks, roots := makeTestBlockChain(t, 200, 4)
 	_, stream := setupBlocksByHeadTest(t, blocks, nil)
 
 	writeBlocksByHeadRequest(t, stream, roots[len(roots)-1], 3)
@@ -76,11 +76,11 @@ func TestBlocksByHeadParentChainTraversal(t *testing.T) {
 	require.Equal(t, roots[0], got[2].Block.ParentRoot)
 }
 
-func TestBlocksByHeadForkChoiceFallback(t *testing.T) {
-	blocks, roots := makeBlocksByHeadChain(t, 300, 1)
-	forkChoice := mock_services.NewForkChoiceStorageMock(t)
-	forkChoice.Blocks[roots[0]] = blocks[0]
-	_, stream := setupBlocksByHeadTest(t, nil, forkChoice)
+func TestBlocksByHeadChainDataFallback(t *testing.T) {
+	blocks, roots := makeTestBlockChain(t, 300, 1)
+	chainData := mock_services.NewChainDataReaderMock()
+	chainData.Blocks[roots[0]] = blocks[0]
+	_, stream := setupBlocksByHeadTest(t, nil, chainData)
 
 	writeBlocksByHeadRequest(t, stream, roots[0], 1)
 
@@ -98,7 +98,7 @@ func TestBlocksByHeadMissingRoot(t *testing.T) {
 }
 
 func TestBlocksByHeadZeroCount(t *testing.T) {
-	blocks, roots := makeBlocksByHeadChain(t, 400, 1)
+	blocks, roots := makeTestBlockChain(t, 400, 1)
 	_, stream := setupBlocksByHeadTest(t, blocks, nil)
 
 	writeBlocksByHeadRequest(t, stream, roots[0], 0)
@@ -109,7 +109,7 @@ func TestBlocksByHeadZeroCount(t *testing.T) {
 func setupBlocksByHeadTest(
 	t *testing.T,
 	blocks []*cltypes.SignedBeaconBlock,
-	forkChoice *mock_services.ForkChoiceStorageMock,
+	chainData *mock_services.ChainDataReaderMock,
 ) (*tests.MockBlockReader, network.Stream) {
 	t.Helper()
 
@@ -136,8 +136,8 @@ func setupBlocksByHeadTest(
 	for _, block := range blocks {
 		store.U[block.Block.Slot] = block
 	}
-	if forkChoice == nil {
-		forkChoice = mock_services.NewForkChoiceStorageMock(t)
+	if chainData == nil {
+		chainData = mock_services.NewChainDataReaderMock()
 	}
 
 	ethClock := getEthClock(t)
@@ -152,7 +152,7 @@ func setupBlocksByHeadTest(
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, forkChoice, nil, nil, nil, true,
+		nil, chainData, nil, nil, nil, true,
 	)
 	c.Start()
 
@@ -163,7 +163,7 @@ func setupBlocksByHeadTest(
 	return store, stream
 }
 
-func makeBlocksByHeadChain(t *testing.T, startSlot, count uint64) ([]*cltypes.SignedBeaconBlock, []common.Hash) {
+func makeTestBlockChain(t *testing.T, startSlot, count uint64) ([]*cltypes.SignedBeaconBlock, []common.Hash) {
 	t.Helper()
 
 	parentRoot := common.Hash{0x99}
