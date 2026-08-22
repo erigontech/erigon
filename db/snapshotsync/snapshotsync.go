@@ -187,7 +187,6 @@ func buildBlackListForPruning(
 
 type blockReader interface {
 	Snapshots() dbservices.BlockSnapshots
-	BorSnapshots() dbservices.BlockSnapshots
 	IterateFrozenBodies(tx kv.Getter, _ func(blockNum uint64, baseTxNum uint64, txCount uint64) error) error
 	FreezingCfg() ethconfig.BlocksFreezing
 	AllTypes() []snaptype.Type

@@ -1068,7 +1068,10 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 		return sdb.TouchAccount(addr)
 	}
 
-	prev, wasCommited, _ := sdb.getBalance(addr)
+	prev, wasCommited, err := sdb.getBalance(addr)
+	if err != nil {
+		return err
+	}
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		defer func() {
@@ -1458,7 +1461,10 @@ func (sdb *IntraBlockState) SubBalance(addr accounts.Address, amount uint256.Int
 		return nil
 	}
 
-	prev, wasCommited, _ := sdb.getBalance(addr)
+	prev, wasCommited, err := sdb.getBalance(addr)
+	if err != nil {
+		return err
+	}
 
 	if dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle())) {
 		defer func() {
@@ -2595,7 +2601,9 @@ func printAccount(eip161Enabled bool, isAura bool, addr accounts.Address, stateO
 func (sdb *IntraBlockState) FinalizeTx(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
-			sdb.getStateObject(addr, true)
+			if _, err := sdb.getStateObject(addr, true); err != nil {
+				return err
+			}
 		}
 	}
 	for addr := range sdb.journal.dirties {
@@ -2670,7 +2678,9 @@ func (sdb *IntraBlockState) SoftFinalise() {
 func (sdb *IntraBlockState) CommitBlock(chainRules *chain.Rules, stateWriter StateWriter) error {
 	for addr, bi := range sdb.balanceInc {
 		if !bi.transferred {
-			sdb.getStateObject(addr, true)
+			if _, err := sdb.getStateObject(addr, true); err != nil {
+				return err
+			}
 		}
 	}
 	return sdb.MakeWriteSet(chainRules, stateWriter)

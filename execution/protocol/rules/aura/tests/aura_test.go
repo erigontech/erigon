@@ -84,7 +84,7 @@ func TestEmptyBlock(t *testing.T) {
 		genesisBlock.Header().AuRaStep,
 	)
 
-	block := types.NewBlockWithHeader(header)
+	block := types.NewBlockWithHeader(header, nil)
 
 	headers, blocks, receipts := make([]*types.Header, 1), make(types.Blocks, 1), make([]types.Receipts, 1)
 	headers[0] = header
@@ -171,7 +171,7 @@ func TestEmptySystemAccountCreation(t *testing.T) {
 	require.NoError(err)
 
 	config := genesis.Config
-	blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
+	blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
 	chainRdr := stagedsync.ChainReader{Cfg: config, Db: tx, BlockReader: blockReader}
 	engine := rulesconfig.CreateRulesEngineBareBones(ctx, config, logger)
 	time := uint64(1)

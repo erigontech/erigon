@@ -69,7 +69,12 @@ func (cc *ExecutionClientDirect) NewPayload(
 		requestsHash = cltypes.ComputeExecutionRequestHash(executionRequestsList)
 	}
 
-	header, err := payload.RlpHeader(beaconParentRoot, requestsHash)
+	bal, err := DecodeAndValidateBlockAccessList(payload)
+	if err != nil {
+		return PayloadStatusInvalidated, err
+	}
+
+	header, err := payload.RlpHeader(beaconParentRoot, requestsHash, bal)
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
@@ -80,11 +85,6 @@ func (cc *ExecutionClientDirect) NewPayload(
 	if err != nil {
 		// invalid block
 		return PayloadStatusInvalidated, err
-	}
-
-	var bal []byte
-	if payload.Version() >= clparams.GloasVersion && payload.BlockAccessList != nil {
-		bal = payload.BlockAccessList.Bytes()
 	}
 
 	startInsertBlock := time.Now()

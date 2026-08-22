@@ -748,7 +748,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// A partial block records only suffix I/O, so it cannot be checked
 					// against a full-block BAL.
 					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
-						if err := bal.Process(rwTx, header, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
+						if err := bal.Process(header, block.BlockAccessList(), applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 							failInfra(err)
 							continue
 						}
@@ -2174,7 +2174,7 @@ func (result *execResult) finalizeTx(
 	vm *state.VersionMap,
 	stateReader state.StateReader,
 ) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
-	// Engine post-apply message (e.g. Bor fee-transfer logs).
+	// Engine post-apply message hook.
 	if err := result.runPostApplyMessageOnMinIBS(task, txTask, engine, vm, stateReader); err != nil {
 		return nil, state.ReadSet{}, nil, err
 	}
@@ -2188,7 +2188,7 @@ func (result *execResult) finalizeTx(
 }
 
 // runPostApplyMessageOnMinIBS runs the engine's PostApplyMessage callback
-// (e.g. Bor's AddFeeTransferLog) on a minimal IntraBlockState that serves as
+// on a minimal IntraBlockState that serves as
 // the log buffer, and appends the emitted logs to result.Logs so they reach
 // the receipt.
 func (result *execResult) runPostApplyMessageOnMinIBS(
