@@ -27,7 +27,6 @@ import (
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
@@ -49,7 +48,7 @@ func TestBlobDB(t *testing.T) {
 	s2 := cltypes.NewBlobSidecar(1, &cltypes.Blob{3}, common.Bytes48{5}, common.Bytes48{9}, &cltypes.SignedBeaconBlockHeader{Header: &cltypes.BeaconBlockHeader{Slot: 1}}, solid.NewHashVector(cltypes.CommitmentBranchSize))
 
 	//
-	bs := NewBlobStore(db, afero.NewMemMapFs(), &clparams.MainnetBeaconConfig)
+	bs := NewBlobStore(db, afero.NewMemMapFs())
 	blockRoot := common.Hash{1}
 	err := bs.WriteBlobSidecars(context.Background(), blockRoot, []*cltypes.BlobSidecar{s1, s2})
 	require.NoError(t, err)
@@ -106,7 +105,7 @@ func TestBlobStoreRemoveSucceedsWhenAFileIsAlreadyGone(t *testing.T) {
 	defer db.Close()
 
 	fs := afero.NewMemMapFs()
-	bs := NewBlobStore(db, fs, &clparams.MainnetBeaconConfig)
+	bs := NewBlobStore(db, fs)
 	root := common.Hash{4}
 	const slot = 12_345
 
@@ -130,12 +129,40 @@ func TestBlobStoreRemoveSucceedsWhenAFileIsAlreadyGone(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestBlobStoreRemoveDropsTheCountRowDespiteAFailureOnAMiddleIndex(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	fs := newRemoveFailingFs(afero.NewMemMapFs())
+	bs := NewBlobStore(db, fs)
+	root := common.Hash{6}
+	const slot = 12_345
+
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), root, []*cltypes.BlobSidecar{
+		testSidecar(slot, 0, 1), testSidecar(slot, 1, 2), testSidecar(slot, 2, 3),
+	}))
+
+	b := newBucketStore(t, fs)
+	_, failPath := b.path(slot, root, 1)
+	fs.failOn[failPath] = errInducedFailure
+
+	err := bs.RemoveBlobSidecars(t.Context(), slot, root)
+	require.ErrorIs(t, err, errInducedFailure)
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+	val, err := tx.GetOne(kv.BlockRootToKzgCommitments, root[:])
+	require.NoError(t, err)
+	require.Empty(t, val, "the count row should be dropped so the block reads as unknown, not permanently unavailable")
+}
+
 func TestBlobStoreBatchWriteDoesNotInterleaveWithAConcurrentWrite(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
 	fs := newCreateOrderFs(afero.NewMemMapFs())
-	bs := NewBlobStore(db, fs, &clparams.MainnetBeaconConfig)
+	bs := NewBlobStore(db, fs)
 
 	const slot = 100
 	batchRoot, otherRoot := common.Hash{1}, common.Hash{2}
@@ -175,11 +202,31 @@ func TestBlobStoreBatchWriteDoesNotInterleaveWithAConcurrentWrite(t *testing.T) 
 	require.Greater(t, other, lastOfBatch, "concurrent write interleaved with the batch: %v", order)
 }
 
+func TestBlobStoreReadReturnsACompletedWrite(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+
+	bs := NewBlobStore(db, afero.NewMemMapFs())
+	root := common.Hash{9}
+	const slot = 54_321
+
+	want := []*cltypes.BlobSidecar{testSidecar(slot, 0, 5), testSidecar(slot, 1, 6)}
+	require.NoError(t, bs.WriteBlobSidecars(t.Context(), root, want))
+
+	got, found, err := bs.ReadBlobSidecars(t.Context(), slot, root)
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Len(t, got, len(want))
+	for i := range want {
+		require.Equal(t, want[i].Blob, got[i].Blob)
+	}
+}
+
 func TestBlobStoreEmptyBatchRecordsItsZeroRowWithoutLocking(t *testing.T) {
 	db := setupTestDB(t)
 	defer db.Close()
 
-	bs := NewBlobStore(db, afero.NewMemMapFs(), &clparams.MainnetBeaconConfig).(*BlobStore)
+	bs := NewBlobStore(db, afero.NewMemMapFs()).(*BlobStore)
 	root := common.Hash{3}
 
 	for i := range bs.locks {

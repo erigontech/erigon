@@ -37,6 +37,22 @@ const (
 
 var errInducedFailure = errors.New("induced filesystem failure")
 
+type removeFailingFs struct {
+	afero.Fs
+	failOn map[string]error
+}
+
+func newRemoveFailingFs(fs afero.Fs) *removeFailingFs {
+	return &removeFailingFs{Fs: fs, failOn: map[string]error{}}
+}
+
+func (r *removeFailingFs) Remove(path string) error {
+	if err, ok := r.failOn[path]; ok {
+		return err
+	}
+	return r.Fs.Remove(path)
+}
+
 type countingFs struct {
 	afero.Fs
 	mu    sync.Mutex
@@ -105,6 +121,7 @@ type failRule struct {
 	writeBudget int
 	writeErr    error
 	syncErr     error
+	shortWrite  bool
 }
 
 type failingFs struct {
@@ -131,6 +148,16 @@ func (f *failingFs) failSyncAt(name string, err error) {
 	defer f.mu.Unlock()
 	r := f.rules[name]
 	r.syncErr = err
+	f.rules[name] = r
+}
+
+// failShortWrite makes every write to name return one byte fewer than requested with a
+// nil error, as a filesystem or pipe can do without failing outright.
+func (f *failingFs) failShortWrite(name string) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	r := f.rules[name]
+	r.shortWrite = true
 	f.rules[name] = r
 }
 
@@ -165,17 +192,18 @@ func (f *failingFs) OpenFile(name string, flag int, perm os.FileMode) (afero.Fil
 // wrap snapshots the rule, so each open of a path starts from a fresh write budget.
 func (f *failingFs) wrap(name string, fh afero.File) afero.File {
 	r := f.ruleFor(name)
-	if r.writeErr == nil && r.syncErr == nil {
+	if r.writeErr == nil && r.syncErr == nil && !r.shortWrite {
 		return fh
 	}
-	return &failingFile{File: fh, budget: r.writeBudget, writeErr: r.writeErr, syncErr: r.syncErr}
+	return &failingFile{File: fh, budget: r.writeBudget, writeErr: r.writeErr, syncErr: r.syncErr, shortWrite: r.shortWrite}
 }
 
 type failingFile struct {
 	afero.File
-	budget   int
-	writeErr error
-	syncErr  error
+	budget     int
+	writeErr   error
+	syncErr    error
+	shortWrite bool
 }
 
 func (f *failingFile) Write(p []byte) (int, error) {
@@ -187,6 +215,9 @@ func (f *failingFile) WriteString(s string) (int, error) {
 }
 
 func (f *failingFile) write(p []byte) (int, error) {
+	if f.shortWrite && len(p) > 0 {
+		return f.File.Write(p[:len(p)-1])
+	}
 	if f.writeErr == nil {
 		return f.File.Write(p)
 	}

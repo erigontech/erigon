@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
 )
 
@@ -38,17 +39,28 @@ const (
 	tmpSuffix       = ".tmp"
 )
 
+// ErrPruneNotStarted reports that pruning failed before any bucket was attempted, so the
+// store still holds everything the caller was about to stop advertising.
+var ErrPruneNotStarted = errors.New("prune did not start")
+
 // bucketStore holds sidecars under <slot/subdivisionSlot>/<blockRoot>_<index>.
 //
-// It never locks, so the caller picks the granularity. Reads need none: a write lands by
-// rename, so a reader sees the old file or the new one and never a partial. Writes do —
-// see write.
+// The caller picks the slot granularity. Reads need none: a write lands by rename, so a
+// reader sees the old file or the new one and never a partial. Writes do — see write.
 type bucketStore struct {
 	fs afero.Fs
+	// bucketLocks order a write into a bucket against pruneBelow removing that bucket. The
+	// slot stripe locks cannot: one bucket spans subdivisionSlot slots.
+	bucketLocks []sync.RWMutex
 }
 
 func (b *bucketStore) init(fs afero.Fs) {
 	b.fs = fs
+	b.bucketLocks = make([]sync.RWMutex, rwLocksCount)
+}
+
+func (b *bucketStore) forBucket(bucket uint64) *sync.RWMutex {
+	return &b.bucketLocks[bucket%rwLocksCount]
 }
 
 func (b *bucketStore) path(slot uint64, root common.Hash, idx uint64) (dir, file string) {
@@ -65,6 +77,9 @@ func (b *bucketStore) path(slot uint64, root common.Hash, idx uint64) (dir, file
 // (slot, root, idx) would share it and interleave into one file. Callers must
 // hold that slot's lock.
 func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Marshaler) (bool, error) {
+	l := b.forBucket(slot / subdivisionSlot)
+	l.RLock()
+	defer l.RUnlock()
 	dir, file := b.path(slot, root, idx)
 	created := false
 	if _, err := b.fs.Stat(file); err != nil {
@@ -83,7 +98,7 @@ func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Mar
 	}
 	if err := b.fs.Rename(tmp, file); err != nil {
 		b.fs.Remove(tmp)
-		if created {
+		if created || !isSharingViolation(err) {
 			return false, err
 		}
 		// Windows replaces via MoveFileEx, which needs delete access to the destination,
@@ -132,7 +147,10 @@ func (b *bucketStore) read(slot uint64, root common.Hash, idx uint64, out ssz.En
 	}
 	defer fh.Close()
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(fh, out, version); err != nil {
-		return false, err
+		// A sidecar that will not decode is a truncated pre-rename write; reporting it absent
+		// lets the caller re-fetch and overwrite it, which returning the error never does.
+		log.Warn("[blob_storage] discarding undecodable sidecar", "file", file, "err", err)
+		return false, nil
 	}
 	return true, nil
 }
@@ -174,6 +192,9 @@ type errWriter struct {
 
 func (e *errWriter) Write(p []byte) (int, error) {
 	n, err := e.w.Write(p)
+	if err == nil && n < len(p) {
+		err = io.ErrShortWrite
+	}
 	if err != nil && e.err == nil {
 		e.err = err
 	}
@@ -190,7 +211,7 @@ func (b *bucketStore) pruneBelow(slot uint64) error {
 	}
 	entries, err := afero.ReadDir(b.fs, ".")
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: %w", ErrPruneNotStarted, err)
 	}
 	var firstErr error
 	for _, entry := range entries {
@@ -207,18 +228,25 @@ func (b *bucketStore) pruneBelow(slot uint64) error {
 		if bucket >= cutoff {
 			continue
 		}
-		if err := b.fs.RemoveAll(name); err != nil && firstErr == nil {
+		if err := b.removeBucket(bucket, name); err != nil && firstErr == nil {
 			firstErr = err
 		}
 	}
 	return firstErr
 }
 
+func (b *bucketStore) removeBucket(bucket uint64, name string) error {
+	l := b.forBucket(bucket)
+	l.Lock()
+	defer l.Unlock()
+	return b.fs.RemoveAll(name)
+}
+
 type slotLocks struct {
 	locks []sync.RWMutex
 }
 
-func (s *slotLocks) init() {
+func (s *slotLocks) initLocks() {
 	s.locks = make([]sync.RWMutex, rwLocksCount)
 }
 

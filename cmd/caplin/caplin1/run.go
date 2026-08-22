@@ -84,7 +84,6 @@ import (
 
 func OpenCaplinDatabase(ctx context.Context,
 	beaconConfig *clparams.BeaconChainConfig,
-	ethClock eth_clock.EthereumClock,
 	dbPath string,
 	blobDir string,
 	engine execution_client.ExecutionEngine,
@@ -126,7 +125,7 @@ func OpenCaplinDatabase(ctx context.Context,
 			blobDB.Close() // close blob database here
 		}()
 	}
-	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir), beaconConfig), nil
+	return db, blob_storage.NewBlobStore(blobDB, afero.NewBasePathFs(afero.NewOsFs(), blobDir)), nil
 }
 
 func OpenCaplinIndexDb(ctx context.Context, dbPath string) (kv.RwDB, error) {
@@ -287,7 +286,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 	ethClock := eth_clock.NewEthereumClock(state.GenesisTime(), state.GenesisValidatorsRoot(), beaconConfig)
 
-	indexDB, blobStorage, err := OpenCaplinDatabase(ctx, beaconConfig, ethClock, dirs.CaplinIndexing, dirs.CaplinBlobs, engine, false)
+	indexDB, blobStorage, err := OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, engine, false)
 	if err != nil {
 		return err
 	}

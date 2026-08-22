@@ -379,6 +379,33 @@ func TestRemoveColumnSidecars(t *testing.T) {
 	assert.False(t, exists)
 }
 
+func TestRemoveColumnSidecarsContinuesPastAFailureOnAMiddleIndex(t *testing.T) {
+	fs := newRemoveFailingFs(afero.NewMemMapFs())
+	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
+	ctx := context.Background()
+	blockRoot := common.HexToHash("0x1234567890abcdef")
+	const slot = 1000
+
+	for i := range int64(3) {
+		require.NoError(t, storage.WriteColumnSidecars(ctx, blockRoot, i, createTestDataColumnSidecar(slot, i)))
+	}
+
+	impl := storage.(*dataColumnStorageImpl)
+	_, failPath := impl.path(slot, blockRoot, 1)
+	fs.failOn[failPath] = errInducedFailure
+
+	err := storage.RemoveColumnSidecars(ctx, slot, blockRoot, 0, 1, 2)
+	require.ErrorIs(t, err, errInducedFailure)
+
+	exists0, err := storage.ColumnSidecarExists(ctx, slot, blockRoot, 0)
+	require.NoError(t, err)
+	require.False(t, exists0, "index before the failing one should still be removed")
+
+	exists2, err := storage.ColumnSidecarExists(ctx, slot, blockRoot, 2)
+	require.NoError(t, err)
+	require.False(t, exists2, "index after the failing one should still be removed")
+}
+
 func TestWriteStream(t *testing.T) {
 	storage, _, _ := setupTestDataColumnStorage(t)
 	ctx := context.Background()

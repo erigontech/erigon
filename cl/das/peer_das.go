@@ -331,8 +331,11 @@ func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 
 func (d *peerdas) PruneBelow(slot uint64) error {
 	err := d.columnStorage.PruneBelow(slot)
-	// The floor advances even on error: pruneBelow attempts every bucket, so a failure leaves
-	// stragglers rather than an untouched store, and advertising it only understates what we hold.
+	if errors.Is(err, blob_storage.ErrPruneNotStarted) {
+		return err
+	}
+	// A partial failure still advances the floor: pruneBelow attempts every bucket, so it
+	// leaves stragglers rather than an untouched store, and the floor only understates them.
 	if slot == 0 {
 		d.state.SetEarliestAvailableSlot(0)
 	} else if slot > d.state.GetEarliestAvailableSlot() {

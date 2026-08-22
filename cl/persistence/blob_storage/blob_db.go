@@ -49,14 +49,13 @@ type BlobStorage interface {
 type BlobStore struct {
 	bucketStore
 	slotLocks
-	db                kv.RwDB
-	beaconChainConfig *clparams.BeaconChainConfig
+	db kv.RwDB
 }
 
-func NewBlobStore(db kv.RwDB, fs afero.Fs, beaconChainConfig *clparams.BeaconChainConfig) BlobStorage {
-	bs := &BlobStore{db: db, beaconChainConfig: beaconChainConfig}
+func NewBlobStore(db kv.RwDB, fs afero.Fs) BlobStorage {
+	bs := &BlobStore{db: db}
 	bs.bucketStore.init(fs)
-	bs.slotLocks.init()
+	bs.slotLocks.initLocks()
 	return bs
 }
 
@@ -73,12 +72,13 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Has
 	if len(blobSidecars) > 0 {
 		lock := bs.forSlot(blobSidecars[0].SignedBlockHeader.Header.Slot)
 		lock.Lock()
-		defer lock.Unlock()
-	}
-	for _, blobSidecar := range blobSidecars {
-		if _, err := bs.write(blobSidecar.SignedBlockHeader.Header.Slot, blockRoot, blobSidecar.Index, blobSidecar); err != nil {
-			return err
+		for _, blobSidecar := range blobSidecars {
+			if _, err := bs.write(blobSidecar.SignedBlockHeader.Header.Slot, blockRoot, blobSidecar.Index, blobSidecar); err != nil {
+				lock.Unlock()
+				return err
+			}
 		}
+		lock.Unlock()
 	}
 	val := make([]byte, 4)
 	binary.LittleEndian.PutUint32(val, uint32(len(blobSidecars)))
@@ -96,10 +96,6 @@ func (bs *BlobStore) WriteBlobSidecars(ctx context.Context, blockRoot common.Has
 
 // ReadBlobSidecars reads the sidecars from the database. it assumes that all blobSidecars are for the same blockRoot and we have all of them.
 func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoot common.Hash) ([]*cltypes.BlobSidecar, bool, error) {
-	lock := bs.forSlot(slot)
-	lock.RLock()
-	defer lock.RUnlock()
-
 	tx, err := bs.db.BeginRo(ctx)
 	if err != nil {
 		return nil, false, err
@@ -114,6 +110,10 @@ func (bs *BlobStore) ReadBlobSidecars(ctx context.Context, slot uint64, blockRoo
 		return nil, false, nil
 	}
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
+
+	lock := bs.forSlot(slot)
+	lock.RLock()
+	defer lock.RUnlock()
 
 	var blobSidecars []*cltypes.BlobSidecar
 	for i := range kzgCommitmentsLength {
@@ -176,15 +176,24 @@ func (bs *BlobStore) RemoveBlobSidecars(ctx context.Context, slot uint64, blockR
 		return nil
 	}
 	kzgCommitmentsLength := binary.LittleEndian.Uint32(val)
+	var firstErr error
 	for i := range kzgCommitmentsLength {
-		if err := bs.remove(slot, blockRoot, uint64(i)); err != nil {
-			return err
+		if err := bs.remove(slot, blockRoot, uint64(i)); err != nil && firstErr == nil {
+			firstErr = err
 		}
 	}
+	// Drop the row even after a partial failure: a file missing under a surviving row reads as
+	// unavailable forever, but a dropped row reads as unknown and lets the block be re-fetched.
 	if err := tx.Delete(kv.BlockRootToKzgCommitments, blockRoot[:]); err != nil {
-		return err
+		if firstErr == nil {
+			firstErr = err
+		}
+		return firstErr
 	}
-	return tx.Commit()
+	if err := tx.Commit(); err != nil && firstErr == nil {
+		firstErr = err
+	}
+	return firstErr
 }
 
 type sidecarsPayload struct {

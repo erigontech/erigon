@@ -90,7 +90,7 @@ func TestForkChoiceBasic(t *testing.T) {
 	genesisState, err := initial_state.GetGenesisState(t.Context(), 1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
-	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &clparams.MainnetBeaconConfig)
+	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	localValidators := validator_params.NewValidatorParams()
 
 	store, err := forkchoice.NewForkChoiceStore(
@@ -186,7 +186,7 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	genesisState, err := initial_state.GetGenesisState(t.Context(), 1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
-	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), &clparams.MainnetBeaconConfig)
+	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	localValidators := validator_params.NewValidatorParams()
 
 	store, err := forkchoice.NewForkChoiceStore(

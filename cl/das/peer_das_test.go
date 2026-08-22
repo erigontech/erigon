@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/common"
@@ -53,6 +54,7 @@ func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
 		{name: "does not move backwards", initial: 100, floor: 50, want: 100},
 		{name: "zero floor resets", initial: 100, floor: 0, want: 0},
 		{name: "advances after prune error", initial: 100, floor: 200, pruneErr: errors.New("prune failed"), want: 200},
+		{name: "does not advance when prune did not start", initial: 100, floor: 200, pruneErr: fmt.Errorf("readdir: %w", blob_storage.ErrPruneNotStarted), want: 100},
 	}
 
 	for _, test := range tests {

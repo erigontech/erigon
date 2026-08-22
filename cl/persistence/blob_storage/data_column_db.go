@@ -38,7 +38,7 @@ func NewDataColumnStore(fs afero.Fs, beaconChainConfig *clparams.BeaconChainConf
 		emitters:          emitters,
 	}
 	impl.bucketStore.init(fs)
-	impl.slotLocks.init()
+	impl.slotLocks.initLocks()
 	return impl
 }
 
@@ -98,13 +98,17 @@ func (s *dataColumnStorageImpl) RemoveColumnSidecars(ctx context.Context, slot u
 	lock := s.forSlot(slot)
 	lock.Lock()
 	defer lock.Unlock()
+	var firstErr error
 	for _, index := range columnIndices {
 		if err := s.remove(slot, blockRoot, uint64(index)); err != nil {
-			return fmt.Errorf("failed to remove column sidecar: %w", err)
+			if firstErr == nil {
+				firstErr = fmt.Errorf("failed to remove column sidecar: %w", err)
+			}
+			continue
 		}
 		log.Trace("removed data column sidecar", "slot", slot, "block_root", blockRoot.String(), "column_index", index)
 	}
-	return nil
+	return firstErr
 }
 
 func (s *dataColumnStorageImpl) WriteStream(w io.Writer, slot uint64, blockRoot common.Hash, idx uint64) error {

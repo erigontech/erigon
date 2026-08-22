@@ -83,7 +83,7 @@ func buildExAnteStore(tb testing.TB) *ForkChoiceStore {
 	gs, err := initial_state.GetGenesisState(tb.Context(), 1)
 	require.NoError(tb, err)
 	clk := eth_clock.NewEthereumClock(gs.GenesisTime(), gs.GenesisValidatorsRoot(), cfg)
-	bs := blob_storage.NewBlobStore(mdbxtest.NewTestDB(tb, dbcfg.ChainDB), afero.NewMemMapFs(), cfg)
+	bs := blob_storage.NewBlobStore(mdbxtest.NewTestDB(tb, dbcfg.ChainDB), afero.NewMemMapFs())
 	store, err := NewForkChoiceStore(clk, anchor, nil, pool.NewOperationsPool(cfg),
 		fork_graph.NewForkGraphDisk(anchor, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{}),
 		em, sd, bs, public_keys_registry.NewInMemoryPublicKeysRegistry(), validator_params.NewValidatorParams(), false, nil)

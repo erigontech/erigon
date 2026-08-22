@@ -18,10 +18,11 @@ package blob_storage
 
 import (
 	"bytes"
-	"fmt"
+	"io"
 	"path/filepath"
 	"slices"
 	"sync"
+	"syscall"
 	"testing"
 	"time"
 
@@ -179,7 +180,7 @@ func TestBucketStorePruneBelowPropagatesReaddirError(t *testing.T) {
 	fs := afero.NewBasePathFs(afero.NewOsFs(), filepath.Join(t.TempDir(), "missing-root"))
 	b := newBucketStore(t, fs)
 
-	require.Error(t, b.pruneBelow(3*subdivisionSlot))
+	require.ErrorIs(t, b.pruneBelow(3*subdivisionSlot), ErrPruneNotStarted)
 }
 
 func TestBucketStorePruneBelowContinuesPastRemoveAllError(t *testing.T) {
@@ -211,7 +212,7 @@ func TestBucketStorePruneBelowRemovesEachExpiredBucketOnce(t *testing.T) {
 
 func TestSlotLocksStripesBySlot(t *testing.T) {
 	var s slotLocks
-	s.init()
+	s.initLocks()
 
 	require.Same(t, s.forSlot(7), s.forSlot(7))
 	require.Same(t, s.forSlot(7), s.forSlot(7+rwLocksCount))
@@ -220,7 +221,7 @@ func TestSlotLocksStripesBySlot(t *testing.T) {
 
 func TestSlotLocksDoNotBlockOtherStripes(t *testing.T) {
 	var s slotLocks
-	s.init()
+	s.initLocks()
 
 	s.forSlot(7).Lock()
 	defer s.forSlot(7).Unlock()
@@ -355,6 +356,35 @@ func TestBucketStoreReadOfMissingFileIsNotFound(t *testing.T) {
 	require.False(t, found)
 }
 
+func TestBucketStoreReadOfATruncatedFileIsNotFound(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	b := newBucketStore(t, fs)
+	root := common.Hash{7}
+
+	_, err := b.write(12_345, root, 2, testSidecar(12_345, 2, 9))
+	require.NoError(t, err)
+
+	_, file := b.path(12_345, root, 2)
+	original, err := afero.ReadFile(fs, file)
+	require.NoError(t, err)
+	require.NoError(t, afero.WriteFile(fs, file, original[:len(original)/2], 0o644))
+
+	got := &cltypes.BlobSidecar{}
+	found, err := b.read(12_345, root, 2, got, clparams.DenebVersion)
+	require.NoError(t, err)
+	require.False(t, found)
+
+	created, err := b.write(12_345, root, 2, testSidecar(12_345, 2, 11))
+	require.NoError(t, err)
+	require.False(t, created)
+
+	got2 := &cltypes.BlobSidecar{}
+	found2, err := b.read(12_345, root, 2, got2, clparams.DenebVersion)
+	require.NoError(t, err)
+	require.True(t, found2)
+	require.Equal(t, byte(11), got2.Blob[0])
+}
+
 func TestBucketStoreWriteReportsCreatedOnlyOnce(t *testing.T) {
 	b := newBucketStore(t, afero.NewMemMapFs())
 	root := common.Hash{7}
@@ -462,32 +492,33 @@ func TestBucketStoreFailedSyncLeavesNothingBehind(t *testing.T) {
 	require.False(t, tmpExists)
 }
 
-func TestFacadePruneDoesNotBlockUnrelatedWork(t *testing.T) {
-	const (
-		removeAllDelay = 150 * time.Millisecond
-		oldBucketCount = 4
-	)
+func TestFacadePruneBlocksAWriteIntoTheBucketItRemoves(t *testing.T) {
+	const removeAllDelay = 150 * time.Millisecond
 
 	fs := newCountingFs(newSlowFs(afero.NewMemMapFs(), removeAllDelay))
 	storage := NewDataColumnStore(fs, globalBeaconConfig, beaconevents.NewEventEmitter())
-	for bucket := range oldBucketCount {
-		require.NoError(t, fs.MkdirAll(fmt.Sprintf("%d", bucket), 0o755))
-	}
+	require.NoError(t, fs.MkdirAll("0", 0o755))
 
-	const streamSlot = 5*subdivisionSlot + 1
-	streamRoot := common.Hash{1}
-	require.NoError(t, storage.WriteColumnSidecars(t.Context(), streamRoot, 0, createTestDataColumnSidecar(streamSlot, 0)))
+	const liveSlot = 5*subdivisionSlot + 1
+	liveRoot := common.Hash{1}
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), liveRoot, 0, createTestDataColumnSidecar(liveSlot, 0)))
 
 	pruneDone := make(chan error, 1)
-	go func() { pruneDone <- storage.PruneBelow(oldBucketCount * subdivisionSlot) }()
+	go func() { pruneDone <- storage.PruneBelow(subdivisionSlot) }()
 	require.Eventually(t, func() bool { return fs.count(opRemoveAll) > 0 }, time.Second, time.Millisecond)
 
-	started := time.Now()
-	writeSlot := uint64(4*subdivisionSlot + 1)
-	require.NoError(t, storage.WriteColumnSidecars(t.Context(), common.Hash{2}, 0, createTestDataColumnSidecar(writeSlot, 0)))
+	streamStarted := time.Now()
 	var streamed bytes.Buffer
-	require.NoError(t, storage.WriteStream(&streamed, streamSlot, streamRoot, 0))
-	require.Less(t, time.Since(started), oldBucketCount*removeAllDelay/2)
+	require.NoError(t, storage.WriteStream(&streamed, liveSlot, liveRoot, 0))
+	require.Less(t, time.Since(streamStarted), removeAllDelay/2)
+
+	liveStarted := time.Now()
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), common.Hash{2}, 0, createTestDataColumnSidecar(liveSlot+1, 0)))
+	require.Less(t, time.Since(liveStarted), removeAllDelay/2)
+
+	prunedStarted := time.Now()
+	require.NoError(t, storage.WriteColumnSidecars(t.Context(), common.Hash{3}, 0, createTestDataColumnSidecar(1, 0)))
+	require.GreaterOrEqual(t, time.Since(prunedStarted), removeAllDelay/2)
 
 	require.NoError(t, <-pruneDone)
 }
@@ -518,7 +549,6 @@ func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 
 			pruneDone := make(chan error, 1)
 			go func() { pruneDone <- storage.PruneBelow(subdivisionSlot) }()
-			<-fs.removeEntered
 
 			if tc.releaseWriteFirst {
 				close(fs.createRelease)
@@ -526,16 +556,17 @@ func TestFacadeWriteRacingPruneLeavesNoPartialFile(t *testing.T) {
 				stored, err := storage.ReadColumnSidecarByColumnIndex(t.Context(), slot, root, 0)
 				require.NoError(t, err)
 				require.Equal(t, uint64(0), stored.Index)
+				<-fs.removeEntered
 				close(fs.removeRelease)
 				require.NoError(t, <-pruneDone)
 			} else {
-				// Releasing both makes the goroutines runnable without ordering them, and
-				// Windows refuses to remove a directory holding an open temp handle, so
-				// neither outcome is guaranteed. Only the absence of a partial file is.
+				// The prune lock serializes write and prune regardless of release order, so
+				// releasing both gates up front still resolves one at a time and both sides
+				// still must succeed.
 				close(fs.removeRelease)
 				close(fs.createRelease)
-				<-writeDone
-				<-pruneDone
+				require.NoError(t, <-writeDone)
+				require.NoError(t, <-pruneDone)
 			}
 
 			tmpExists, err := afero.Exists(fs, file+tmpSuffix)
@@ -701,20 +732,48 @@ func TestBucketStoreWriteReportsRenameFailureWhenTheTargetIsGone(t *testing.T) {
 	_, err := b.write(12_345, root, 2, testSidecar(12_345, 2, 9))
 	require.ErrorIs(t, err, errInducedFailure)
 
-	// A rename that fails while the target survives is the Windows sharing case: the file
-	// already there is the one this write would have produced, so it is not an error.
 	fs.err = nil
 	_, err = b.write(12_345, root, 2, testSidecar(12_345, 2, 9))
 	require.NoError(t, err)
 
+	// A rename failure that is not a sharing violation always propagates, target present
+	// or not.
 	fs.err = errInducedFailure
 	created, err := b.write(12_345, root, 2, testSidecar(12_345, 2, 11))
-	require.NoError(t, err)
+	require.ErrorIs(t, err, errInducedFailure)
 	require.False(t, created)
 
-	// Same failure, but a concurrent prune took the target: nothing is stored and the
-	// caller must hear about it.
 	fs.dropDestination = true
 	_, err = b.write(12_345, root, 2, testSidecar(12_345, 2, 11))
 	require.ErrorIs(t, err, errInducedFailure)
+}
+
+func TestBucketStoreWriteRenameFailurePropagatesWhenNotASharingViolation(t *testing.T) {
+	fs := newRenameFailingFs(afero.NewMemMapFs(), nil)
+	b := newBucketStore(t, fs)
+	root := common.Hash{7}
+
+	_, err := b.write(12_345, root, 2, testSidecar(12_345, 2, 9))
+	require.NoError(t, err)
+
+	fs.err = syscall.ENOSPC
+	created, err := b.write(12_345, root, 2, testSidecar(12_345, 2, 11))
+	require.ErrorIs(t, err, syscall.ENOSPC)
+	require.False(t, created)
+}
+
+func TestBucketStoreWriteSurfacesAShortWriteFromTheFinalFlush(t *testing.T) {
+	fs := newFailingFs(afero.NewMemMapFs())
+	b := newBucketStore(t, fs)
+	root := common.Hash{7}
+	_, file := b.path(12_345, root, 2)
+	fs.failShortWrite(file + tmpSuffix)
+
+	created, err := b.write(12_345, root, 2, testSidecar(12_345, 2, 9))
+	require.ErrorIs(t, err, io.ErrShortWrite)
+	require.False(t, created)
+
+	exists, err := afero.Exists(fs, file)
+	require.NoError(t, err)
+	require.False(t, exists)
 }
