@@ -42,9 +42,9 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 	}
 	version := uint(parsed)
 
-	block_id := r.PathValue("block_id")
+	blockID := r.PathValue("blockID")
 
-	if !isValidBlockAndVersion(block_id, version) {
+	if !isValidBlockAndVersion(blockID, version) {
 		http.NotFound(w, nil)
 		return
 	}
@@ -68,13 +68,17 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res := parseQuery(req, version, block_id)
+	res, err := parseQuery(req, version, blockID)
+	if err != nil {
+		http.Error(w, "server error", http.StatusInternalServerError)
+		return
+	}
 
 	writeQueryResponse(w, res)
 
 }
 
-func isValidBlockAndVersion(block_id string, version uint) bool {
+func isValidBlockAndVersion(blockID string, version uint) bool {
 	if version < 1 || version > 6 {
 		return false
 	}

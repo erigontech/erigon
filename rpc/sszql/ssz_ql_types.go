@@ -16,7 +16,14 @@ type Leaf string
 
 type Result string
 
+type ResolvedPath struct {
+	Gindex Gindex
+	Leaf   Leaf
+	Value  Result
+}
+
 type Alias struct {
+	Anchor Anchor `json:"anchor"`
 	Path   Path   `json:"path"`
 	Filter Filter `json:"filter,omitempty"`
 	Alias  string `json:"alias"`
