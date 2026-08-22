@@ -1,4 +1,4 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,19 +14,8 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !linux
+//go:build !windows
 
-package seg
+package blob_storage
 
-// The blocking async I/O residency gate relies on mincore + io_uring and is Linux-only.
-// Off Linux these are no-ops so the cross-platform read path still compiles;
-// EnableResidencyGate is never called, and even if it were, ensureResident does
-// nothing.
-
-type residencyBitmap struct{}
-
-func (*residencyBitmap) stop() {}
-
-func (*Getter) EnableResidencyGate() {}
-
-func (*Getter) ensureResident(uint64) {}
+func isSharingViolation(error) bool { return false }
