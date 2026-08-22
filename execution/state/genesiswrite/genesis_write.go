@@ -197,7 +197,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		return newCfg, nil, err
 	}
 	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
-	if storedErr != nil && newCfg.Bor == nil {
+	if storedErr != nil {
 		return newCfg, nil, storedErr
 	}
 	if storedCfg == nil {

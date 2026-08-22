@@ -324,7 +324,7 @@ func (br *BlockRetire) PruneAncientBlocks(tx kv.RwTx, limit int, timeout time.Du
 
 	t := time.Now()
 
-	// PruneBlocks/PruneHeimdall delete the whole [from, to) range capped at limit in a
+	// PruneBlocks deletes the whole [from, to) range capped at limit in a
 	// single cursor pass; the sync loop re-enters each cycle, so no inner loop is needed.
 	if canDeleteTo := CanDeleteTo(currentProgress, br.blockReader.FrozenBlocks()); canDeleteTo > 0 {
 		if deleted, err = br.blockWriter.PruneBlocks(context.Background(), tx, canDeleteTo, limit); err != nil {
