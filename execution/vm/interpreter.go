@@ -312,14 +312,10 @@ func jumpTable(chainRules *chain.Rules, cfg Config) *JumpTable {
 		jt = &amsterdamInstructionSet
 	case chainRules.IsOsaka:
 		jt = &osakaInstructionSet
-	case chainRules.IsBhilai:
-		jt = &bhilaiInstructionSet
 	case chainRules.IsPrague:
 		jt = &pragueInstructionSet
 	case chainRules.IsCancun:
 		jt = &cancunInstructionSet
-	case chainRules.IsNapoli:
-		jt = &napoliInstructionSet
 	case chainRules.IsShanghai:
 		jt = &shanghaiInstructionSet
 	case chainRules.IsLondon:

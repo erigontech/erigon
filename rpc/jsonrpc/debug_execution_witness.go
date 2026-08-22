@@ -2114,9 +2114,9 @@ func execBlockStatelessly(result *ExecutionWitnessResult, block *types.Block, ch
 	allLogs := ibs.Logs()
 	statelessReceipts := types.Receipts{&types.Receipt{Logs: allLogs}}
 
-	// only Bor and AuRa engine use ChainReader. And the ChainReader is only used to read headers. This means their
-	// witness may need to be augmented with headers accessed during their engine.Finalize(). This is something that
-	// can be implemented later. For now use ChainReader = nil, as this is sufficient for Ethereum.
+	// only the AuRa engine uses ChainReader, and only to read headers, so its witness may need
+	// augmenting with headers accessed during engine.Finalize(). ChainReader = nil is sufficient
+	// for Ethereum.
 	_, err = engine.Finalize(chainConfig, types.CopyHeader(header), ibs, block.Uncles(), statelessReceipts, block.Withdrawals(), nil /* chainReader */, syscall, false /*skipReceiptsEval*/, log.Root())
 	if err != nil {
 		return common.Hash{}, stateless, fmt.Errorf("[statelessExec] engine.Finalize failed: %w", err)

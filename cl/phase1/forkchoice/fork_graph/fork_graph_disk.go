@@ -23,7 +23,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -131,9 +130,7 @@ type forkGraphDisk struct {
 	envelopeExists sync.Map // common.Hash -> struct{}
 
 	// reusable buffers
-	sszBuffer       []byte
-	sszSnappyWriter *snappy.Writer
-	sszSnappyReader *snappy.Reader
+	sszBuffer []byte
 
 	rcfg       beacon_router_configuration.RouterConfiguration
 	syncedData synced_data.SyncedData

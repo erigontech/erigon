@@ -510,14 +510,14 @@ func testEmbeddedRPCCacheViewDoesNotResurrectDeletedValue(t *testing.T, domain k
 	// and the SD's Close.
 	deleteDomains.Close()
 
-	oldValue, _, err := rpcTx.GetLatest(domain, key)
+	oldValue, _, err := rpcTx.GetLatest(domain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, value, oldValue)
 
 	freshTx, err := db.BeginTemporalRo(ctx)
 	require.NoError(t, err)
 	defer freshTx.Rollback()
-	freshValue, _, err := freshTx.GetLatest(domain, key)
+	freshValue, _, err := freshTx.GetLatest(domain, key, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Empty(t, freshValue)
 
