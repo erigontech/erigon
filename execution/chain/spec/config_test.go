@@ -140,6 +140,22 @@ func TestCheckCompatibleTimestampForks(t *testing.T) {
 			wantWhat:   "Amsterdam fork timestamp",
 			wantRewind: 99,
 		},
+		{
+			name:       "stored at genesis time, rescheduled, head past it",
+			stored:     &chain.Config{PragueTime: common.NewUint64(0)},
+			newcfg:     &chain.Config{PragueTime: common.NewUint64(200)},
+			headTime:   150,
+			wantWhat:   "Prague fork timestamp",
+			wantRewind: 0,
+		},
+		{
+			name:       "stored at time 1, rescheduled, head past it",
+			stored:     &chain.Config{PragueTime: common.NewUint64(1)},
+			newcfg:     &chain.Config{PragueTime: common.NewUint64(200)},
+			headTime:   150,
+			wantWhat:   "Prague fork timestamp",
+			wantRewind: 0,
+		},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.stored.CheckCompatible(tc.newcfg, 0, tc.headTime)
@@ -149,8 +165,31 @@ func TestCheckCompatibleTimestampForks(t *testing.T) {
 			}
 			require.NotNil(t, err, "a fork the chain is already past must not be reschedulable")
 			require.Equal(t, tc.wantWhat, err.What)
+			require.True(t, err.IsTimestampFork(), "a zero RewindToTime must not be mistaken for no conflict")
 			require.Equal(t, tc.wantRewind, err.RewindToTime)
 			require.Zero(t, err.RewindTo, "a timestamp fork rewinds by time, not by block")
+		})
+	}
+}
+
+func TestCheckCompatibleBpoAndBalancerTimestamps(t *testing.T) {
+	for _, tc := range []struct {
+		name           string
+		stored, newcfg *chain.Config
+		wantWhat       string
+	}{
+		{name: "BPO1", stored: &chain.Config{Bpo1Time: common.NewUint64(100)}, newcfg: &chain.Config{Bpo1Time: common.NewUint64(200)}, wantWhat: "BPO1 fork timestamp"},
+		{name: "BPO2", stored: &chain.Config{Bpo2Time: common.NewUint64(100)}, newcfg: &chain.Config{Bpo2Time: common.NewUint64(200)}, wantWhat: "BPO2 fork timestamp"},
+		{name: "BPO3", stored: &chain.Config{Bpo3Time: common.NewUint64(100)}, newcfg: &chain.Config{Bpo3Time: common.NewUint64(200)}, wantWhat: "BPO3 fork timestamp"},
+		{name: "BPO4", stored: &chain.Config{Bpo4Time: common.NewUint64(100)}, newcfg: &chain.Config{Bpo4Time: common.NewUint64(200)}, wantWhat: "BPO4 fork timestamp"},
+		{name: "BPO5", stored: &chain.Config{Bpo5Time: common.NewUint64(100)}, newcfg: &chain.Config{Bpo5Time: common.NewUint64(200)}, wantWhat: "BPO5 fork timestamp"},
+		{name: "Balancer", stored: &chain.Config{BalancerTime: common.NewUint64(100)}, newcfg: &chain.Config{BalancerTime: common.NewUint64(200)}, wantWhat: "Balancer fork timestamp"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.stored.CheckCompatible(tc.newcfg, 0, 150)
+			require.NotNil(t, err)
+			require.Equal(t, tc.wantWhat, err.What)
+			require.True(t, err.IsTimestampFork())
 		})
 	}
 }

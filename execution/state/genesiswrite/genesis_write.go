@@ -31,6 +31,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -223,7 +224,10 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			}
 		}
 		if keepStoredChainConfig {
-			newCfg = storedCfg
+			newCfg = new(chain.Config)
+			if err := copier.CopyWithOption(newCfg, storedCfg, copier.Option{DeepCopy: true}); err != nil {
+				return nil, nil, err
+			}
 			applyOverrides(newCfg)
 		}
 	}
@@ -239,7 +243,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			headTime = head.Time
 		}
 		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height, headTime)
-		if compatibilityErr != nil && *height != 0 && (compatibilityErr.RewindTo != 0 || compatibilityErr.RewindToTime != 0) {
+		if compatibilityErr != nil && *height != 0 && (compatibilityErr.RewindTo != 0 || compatibilityErr.IsTimestampFork()) {
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}
