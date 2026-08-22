@@ -445,7 +445,7 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 }
 
 func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {
-	return ht.newWriter(ht.h.dirs.Tmp, false)
+	return ht.newWriter(ht.h.dirs.Tmp, !ht.h.Enabled)
 }
 
 type historyBufferedWriter struct {
@@ -1190,7 +1190,7 @@ func (ht *HistoryRoTx) encodeTs(txNum uint64, key []byte) []byte {
 // HistorySeek searches history for a value of specified key before txNum
 // second return value is true if the value is found in the history (even if it is nil)
 func (ht *HistoryRoTx) HistorySeek(key []byte, txNum uint64, roTx kv.Tx) ([]byte, bool, error) {
-	if ht.h.Disable {
+	if !ht.h.Enabled {
 		return nil, false, nil
 	}
 

@@ -14,8 +14,16 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !linux
+//go:build windows
 
-package seg
+package blob_storage
 
-func (*Getter) EnableMultiPageAsyncIO() {}
+import (
+	"errors"
+
+	"golang.org/x/sys/windows"
+)
+
+func isSharingViolation(err error) bool {
+	return errors.Is(err, windows.ERROR_SHARING_VIOLATION) || errors.Is(err, windows.ERROR_ACCESS_DENIED)
+}
