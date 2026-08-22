@@ -1027,6 +1027,20 @@ func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 	require.ErrorContains(t, err, "not executed")
 }
 
+func TestTraceFilter_FutureFromBlockErrors(t *testing.T) {
+	t.Parallel()
+	m, _ := newHeaderAheadTester(t)
+	api := newTraceApiForTest(m)
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+
+	from := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
+	err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, new(bool), nil, stream)
+	require.ErrorContains(t, err, "not executed")
+}
+
 func TestTraceFilter_RejectsOverlayOnlyHead(t *testing.T) {
 	base, m, overlayHeader := newOverlayAheadTestAPI(t)
 	api := NewTraceAPI(base, m.DB, &rpccfg.TraceApiConfig{})

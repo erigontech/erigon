@@ -362,16 +362,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 			return err
 		}
 	}
-	if fromBlock > toBlock {
-		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
-	}
-
-	// The txnum index silently clamps a missing block to the last available
-	// txnum, so a not-yet-executed toBlock would be omitted without a trace.
-	if req.ToBlock != nil {
-		if err := rpchelper.CheckBlockExecuted(dbtx, toBlock); err != nil {
+	// The txnum index silently clamps a target past execution to the last
+	// available txnum, so either bound must be checked before comparing them.
+	if req.FromBlock != nil || req.ToBlock != nil {
+		if err := rpchelper.CheckBlockExecuted(dbtx, max(fromBlock, toBlock)); err != nil {
 			return err
 		}
+	}
+	if fromBlock > toBlock {
+		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
 	// if we've pruned this history away for this block then just return early
