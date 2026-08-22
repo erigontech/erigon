@@ -511,3 +511,113 @@ func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
 		i++
 	}
 }
+
+// fuzzPlan turns a fuzzer's bytes into a trace to emit. Every field is derived
+// rather than read directly so that any input produces a runnable plan.
+type fuzzPlan struct {
+	cfg      LogConfig
+	steps    int
+	stackLen int
+	memLen   int
+	rDataLen int
+	opCode   byte
+	withErr  bool
+	closeAt  int
+}
+
+func planFromSeed(seed []byte) fuzzPlan {
+	at := func(i int) int {
+		if len(seed) == 0 {
+			return 0
+		}
+		return int(seed[i%len(seed)])
+	}
+	p := fuzzPlan{
+		steps:    at(0) % 24,
+		stackLen: at(1) % 40,
+		memLen:   at(2) % 200,
+		rDataLen: at(3) % 40,
+		opCode:   byte(at(4)),
+		withErr:  at(5)&1 == 1,
+		closeAt:  at(6) % 4,
+	}
+	p.cfg = LogConfig{
+		EnableMemory:     at(7)&1 == 1,
+		DisableStack:     at(8)&1 == 1,
+		DisableStorage:   at(9)&1 == 1,
+		EnableReturnData: at(10)&1 == 1,
+		Limit:            at(11) % 8,
+	}
+	return p
+}
+
+// FuzzJsonStreamLoggerEmitsValidJSON drives the struct logger the way a trace
+// does and requires the result to parse. The interesting inputs are the ones
+// that stop early: a step limit, or a caller that closes the stream at a depth
+// it did not open, which is what happens when tracing is abandoned part way.
+func FuzzJsonStreamLoggerEmitsValidJSON(f *testing.F) {
+	for _, seed := range [][]byte{
+		{},
+		{5, 4, 64, 8, byte(vm.SSTORE), 0, 0, 0, 0, 0, 0, 0, 0},
+		{3, 2, 32, 0, byte(vm.MLOAD), 1, 1, 0, 0, 0, 1, 0, 0},
+		{9, 33, 199, 39, byte(vm.ADD), 1, 3, 1, 1, 1, 1, 1, 3},
+		{1, 0, 0, 0, byte(vm.STOP), 0, 2, 0, 0, 0, 0, 0, 1},
+	} {
+		f.Add(seed)
+	}
+
+	f.Fuzz(func(t *testing.T, seed []byte) {
+		p := planFromSeed(seed)
+
+		var buf bytes.Buffer
+		stream := jsonstream.New(&buf)
+		l := NewJsonStreamLogger(&p.cfg, t.Context(), stream)
+		l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+		stack := make([]uint256.Int, p.stackLen)
+		for i := range stack {
+			stack[i].SetUint64(uint64(i)*0x0123456789abcdef + 1)
+		}
+		scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, p.memLen), stack: stack}
+		rData := bytes.Repeat([]byte{0xcd}, p.rDataLen)
+
+		var opErr error
+		if p.withErr {
+			opErr = errors.New("execution reverted")
+		}
+		for i := range p.steps {
+			l.OnOpcode(uint64(i), p.opCode, 100, 3, scope, rData, 1, opErr)
+		}
+
+		// OnExit opens the envelope when nothing was captured, which is what the
+		// tracer always does before the RPC layer closes it.
+		l.OnExit(0, nil, 0, nil, false)
+
+		// Close the way the RPC layer does. Every route has to end at depth zero,
+		// but they get there differently: a finished trace closes what it opened,
+		// an abandoned one leans on ClosePending to repair it, and the error path
+		// closes back to the enclosing field first and finishes afterwards.
+		switch p.closeAt {
+		case 0:
+			stream.WriteArrayEnd()
+			stream.WriteObjectEnd()
+		case 1:
+			require.NoError(t, stream.ClosePending(0))
+		case 2:
+			require.NoError(t, stream.ClosePending(1))
+			require.NoError(t, stream.ClosePending(0))
+		default:
+			require.NoError(t, stream.ClosePending(uint(stream.Depth())))
+			require.NoError(t, stream.ClosePending(0))
+		}
+		require.NoError(t, stream.Flush())
+		require.Zero(t, stream.Depth(), "stream left open")
+
+		if buf.Len() == 0 {
+			return // nothing was emitted, nothing to parse
+		}
+		var out any
+		require.NoErrorf(t, json.Unmarshal(buf.Bytes(), &out),
+			"plan %+v produced invalid JSON: %s", p, buf.String())
+	})
+}

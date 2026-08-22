@@ -17,12 +17,15 @@
 package jsonstream
 
 import (
+	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	jsoniter "github.com/json-iterator/go"
 )
@@ -1064,4 +1067,124 @@ func (w *failingWriter) Write(p []byte) (n int, err error) {
 	}
 	w.bytesWritten += len(p)
 	return len(p), nil
+}
+
+// jsonOp is one call a well-behaved producer could make. A plan is always a
+// structurally valid document; the fuzzer's job is to cut it short.
+type jsonOp uint8
+
+const (
+	opObjectStart jsonOp = iota
+	opObjectEnd
+	opArrayStart
+	opArrayEnd
+	opField
+	opString
+	opInt
+	opBool
+	opNil
+	opMore
+)
+
+// planDocument emits the ops for one valid JSON document, recursing until the
+// budget runs out so that a seed of any shape terminates.
+func planDocument(seed []byte, at *int, depth int, out *[]jsonOp) {
+	next := func() int {
+		if len(seed) == 0 {
+			return 0
+		}
+		v := int(seed[*at%len(seed)])
+		*at++
+		return v
+	}
+	if depth > 4 {
+		*out = append(*out, opString)
+		return
+	}
+	switch next() % 5 {
+	case 0:
+		*out = append(*out, opObjectStart)
+		for n := next() % 4; n > 0; n-- {
+			if (*out)[len(*out)-1] != opObjectStart {
+				*out = append(*out, opMore)
+			}
+			*out = append(*out, opField)
+			planDocument(seed, at, depth+1, out)
+		}
+		*out = append(*out, opObjectEnd)
+	case 1:
+		*out = append(*out, opArrayStart)
+		for n := next() % 4; n > 0; n-- {
+			if (*out)[len(*out)-1] != opArrayStart {
+				*out = append(*out, opMore)
+			}
+			planDocument(seed, at, depth+1, out)
+		}
+		*out = append(*out, opArrayEnd)
+	case 2:
+		*out = append(*out, opString)
+	case 3:
+		*out = append(*out, opInt)
+	default:
+		*out = append(*out, opBool)
+	}
+}
+
+// FuzzClosePendingAlwaysYieldsValidJSON pins the guarantee StackStream exists
+// for: a producer that stops part way through still leaves a document that
+// parses, because ClosePending fills and closes whatever was open.
+func FuzzClosePendingAlwaysYieldsValidJSON(f *testing.F) {
+	for _, seed := range [][]byte{
+		{}, {0, 2, 0, 1}, {1, 3, 2, 2, 2}, {0, 1, 0, 1, 1, 3},
+		{0, 3, 1, 2, 0, 2, 4, 4}, {4, 4, 4}, {0, 2, 1, 1, 3, 3},
+	} {
+		f.Add(seed, uint8(3))
+	}
+
+	f.Fuzz(func(t *testing.T, seed []byte, stopAfter uint8) {
+		var ops []jsonOp
+		at := 0
+		planDocument(seed, &at, 0, &ops)
+		if len(ops) == 0 {
+			return
+		}
+		cut := min(int(stopAfter), len(ops))
+
+		var buf bytes.Buffer
+		s := New(&buf).(*StackStream)
+		for _, op := range ops[:cut] {
+			switch op {
+			case opObjectStart:
+				s.WriteObjectStart()
+			case opObjectEnd:
+				s.WriteObjectEnd()
+			case opArrayStart:
+				s.WriteArrayStart()
+			case opArrayEnd:
+				s.WriteArrayEnd()
+			case opField:
+				s.WriteObjectField("k")
+			case opString:
+				s.WriteString("v")
+			case opInt:
+				s.WriteInt(7)
+			case opBool:
+				s.WriteBool(true)
+			case opNil:
+				s.WriteNil()
+			case opMore:
+				s.WriteMore()
+			}
+		}
+		require.NoError(t, s.ClosePending(0))
+		require.NoError(t, s.Flush())
+		require.Zero(t, s.Depth(), "stack left open: %s", s.StackSummary())
+
+		if buf.Len() == 0 {
+			return
+		}
+		var out any
+		require.NoErrorf(t, json.Unmarshal(buf.Bytes(), &out),
+			"ops %v cut at %d produced invalid JSON: %s", ops, cut, buf.String())
+	})
 }
