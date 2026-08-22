@@ -594,6 +594,11 @@ var (
 		Value: "0MB",
 		Usage: "Amount of data to store in StateCache (enabled if no --datadir set). Set 0 to disable StateCache. Defaults to 0MB",
 	}
+	SSZQueryLanguageFlag = cli.BoolFlag{
+		Name:  "sszql",
+		Usage: "Enable SSZ Query Language endpoint for querying a subset of Execution Block data with proofs",
+		Value: false,
+	}
 
 	// Network Settings
 	MaxPeersFlag = cli.IntFlag{
