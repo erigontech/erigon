@@ -19,6 +19,7 @@ package app
 import (
 	"context"
 	"encoding/json"
+	"fmt"
 	"io"
 	"os"
 
@@ -80,7 +81,10 @@ func initGenesis(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	genesis := new(types.Genesis)
 	if err := json.Unmarshal(raw, genesis); err != nil {
-		utils.Fatalf("invalid genesis file: %v", err)
+		return fmt.Errorf("invalid genesis file %s: %w", genesisPath, err)
+	}
+	if genesis.Config == nil {
+		return fmt.Errorf("invalid genesis file %s: missing 'config'", genesisPath)
 	}
 
 	// chain.Config has no 'bor' field, so a Polygon genesis would otherwise
@@ -91,7 +95,7 @@ func initGenesis(ctx context.Context, cliCtx *cli.Command) error {
 		} `json:"config"`
 	}
 	if err := json.Unmarshal(raw, &probe); err == nil && len(probe.Config.Bor) > 0 && string(probe.Config.Bor) != "null" {
-		utils.Fatalf("%s carries a 'bor' config: Polygon is not supported, see https://github.com/0xPolygon/erigon", genesisPath)
+		return fmt.Errorf("%s carries a 'bor' config: Polygon is not supported, see https://github.com/0xPolygon/erigon", genesisPath)
 	}
 
 	// Open and initialise both full and light databases

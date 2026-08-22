@@ -1147,9 +1147,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 			return nil
 		})
 		g.Go(func() error {
-			return nil
-		})
-		g.Go(func() error {
 			err := _aggSingleton.OpenFolder()
 			if err != nil {
 				return fmt.Errorf("aggregator opening: %w", err)
