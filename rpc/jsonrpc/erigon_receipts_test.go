@@ -416,6 +416,24 @@ func TestGetLatestLogs_ExplicitRangeWithBlockCount_NoRangeCheck(t *testing.T) {
 	require.NoError(t, err)
 }
 
+func TestErigonGetLogsByHash_UnknownHash_ReturnsNull(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	logs, err := api.GetLogsByHash(m.Ctx, common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111"))
+	require.NoError(t, err)
+	require.Nil(t, logs)
+}
+
+func TestErigonGetLogsByHash_NonCanonicalHash_ReturnsError(t *testing.T) {
+	m, _, orphanedChain := rpcdaemontest.CreateTestExecModule(t)
+	api := NewErigonAPI(newBaseApiForTest(m), m.DB, nil)
+
+	orphanedBlock := orphanedChain[0].Blocks[0]
+	_, err := api.GetLogsByHash(m.Ctx, orphanedBlock.Hash())
+	require.EqualError(t, err, fmt.Sprintf("hash %x is not currently canonical", orphanedBlock.Hash()))
+}
+
 // newTestBackend creates a chain with a number of explicitly defined blocks and
 // wraps it into a mock backend.
 func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.BlockGen)) *execmoduletester.ExecModuleTester {
@@ -428,8 +446,9 @@ func mockWithGenerator(t *testing.T, blocks int, generator func(int, *blockgen.B
 		execmoduletester.WithKey(testKey),
 	)
 	if blocks > 0 {
-		chain, _ := m.GenerateChain(blocks, generator)
-		err := m.InsertChain(chain)
+		chain, err := m.GenerateChain(blocks, generator)
+		require.NoError(t, err)
+		err = m.InsertChain(chain)
 		require.NoError(t, err)
 	}
 	return m

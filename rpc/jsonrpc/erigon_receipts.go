@@ -50,7 +50,10 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 
 		blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(hash, true), tx, api._blockReader, api.filters)
 		if err != nil {
-			return nil, nil
+			if errors.As(err, &rpc.BlockNotFoundErr{}) {
+				return nil, nil
+			}
+			return nil, err
 		}
 		err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNumber)
 		if err != nil {
@@ -430,28 +433,3 @@ func (api *ErigonImpl) GetBlockReceiptsByBlockHash(ctx context.Context, cannonic
 
 	return result, nil
 }
-
-// GetLogsByNumber implements erigon_getLogsByHash. Returns all the logs that appear in a block given the block's hash.
-// func (api *ErigonImpl) GetLogsByNumber(ctx context.Context, number rpc.BlockNumber) ([][]*types.Log, error) {
-// 	tx, err := api.db.Begin(ctx, false)
-// 	if err != nil {
-// 		return nil, err
-// 	}
-// 	defer tx.Rollback()
-
-// 	number := rawdb.ReadHeaderNumber(tx, hash)
-// 	if number == nil {
-// 		return nil, fmt.Errorf("block not found: %x", hash)
-// 	}
-
-// 	receipts, err := getReceipts(ctx, tx, *number, hash)
-// 	if err != nil {
-// 		return nil, fmt.Errorf("getReceipts error: %w", err)
-// 	}
-
-// 	logs := make([][]*types.Log, len(receipts))
-// 	for i, receipt := range receipts {
-// 		logs[i] = receipt.Logs
-// 	}
-// 	return logs, nil
-// }
