@@ -47,7 +47,6 @@ import (
 )
 
 type CustomTraceCfg struct {
-	tmpdir   string
 	db       kv.TemporalRwDB
 	ExecArgs *exec.ExecArgs
 
@@ -139,6 +138,9 @@ func SpawnCustomTrace(cfg CustomTraceCfg, ctx context.Context, logger log.Logger
 		}); err != nil {
 			panic(err)
 		}
+		// rcache is off in the default schema, and a disabled domain discards writes.
+		// Producing it is an explicit request, so turn it on for this run.
+		cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator).EnableDomain(kv.RCacheDomain)
 	}
 
 	log.Info("[stage_custom_trace] start params", "produce", cfg.Produce)

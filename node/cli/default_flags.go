@@ -198,11 +198,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.NoDownloaderFlag,
 	&utils.DownloaderVerifyFlag,
 	&utils.HealthCheckFlag,
-	&utils.HeimdallURLFlag,
 	&utils.WebSeedsFlag,
-	&utils.WithoutHeimdallFlag,
-	&utils.BorBlockPeriodFlag,
-	&utils.BorBlockSizeFlag,
 	&utils.AAFlag,
 	&utils.EthStatsURLFlag,
 	&utils.OverrideOsakaFlag,
@@ -271,9 +267,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.ShutterP2pBootstrapNodesFlag,
 	&utils.ShutterP2pListenPortFlag,
 
-	&utils.PolygonPosSingleSlotFinalityFlag,
-	&utils.PolygonPosSingleSlotFinalityBlockAtFlag,
-	&utils.PolygonPosWitProtocolFlag,
+	&utils.WitProtocolFlag,
 
 	&utils.GDBMeFlag,
 

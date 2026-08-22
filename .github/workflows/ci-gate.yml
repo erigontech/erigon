@@ -28,9 +28,12 @@ concurrency:
 # pull-requests: write lets the gate call the `dequeuePullRequest` GraphQL
 # mutation on its own merge-group PR when a required check actually fails,
 # since GitHub does not auto-remove UNMERGEABLE entries from the queue.
+# checks: read lets the gate read a cancelled leaf's annotations, the only
+# signal that separates a `timeout-minutes` kill from an external cancel.
 # Reusable leaves inherit these from the caller.
 permissions:
   actions: write
+  checks: read
   contents: read
   pull-requests: write
 

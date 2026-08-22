@@ -15,6 +15,8 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
+	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -82,8 +84,13 @@ type commitmentCalculator struct {
 	// execLoop or apply loop. Only this goroutine reads/writes it.
 	updates *commitment.Updates
 
+	// spare is the other half of the compute buffer ring. handOffUpdates gives
+	// updates to the commitment context and rotates this one in; the context
+	// drains its buffer synchronously, so by the next rotation it is idle.
+	spare *commitment.Updates
+
 	// balUpdates is the per-block BAL fold buffer, Reset and reused across blocks
-	// instead of reallocated — avoids a fresh prefix-trie arena (16k-node slab) each block.
+	// instead of reallocated — reuse keeps the arena's grown slabs and ext chunks.
 	balUpdates *commitment.Updates
 
 	// state accumulates account/storage values across TX writes.
@@ -213,8 +220,10 @@ func newCommitmentCalculator(
 	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
 	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
 	calcUpdates := sdCtxUpdates.NewEmpty()
+	spareUpdates := sdCtxUpdates.NewEmpty()
 	if sdCtxUpdates.Mode() != commitment.ModeParallel {
 		calcUpdates.SetMode(commitment.ModeUpdate)
+		spareUpdates.SetMode(commitment.ModeUpdate)
 	}
 
 	// Open a persistent read-only TX for lazy-loading state from the domain.
@@ -244,6 +253,7 @@ func newCommitmentCalculator(
 		logPrefix:            logPrefix,
 		logger:               logger,
 		updates:              calcUpdates,
+		spare:                spareUpdates,
 		state:                newCalcState(asOfReader, logger, logPrefix),
 		asOfReader:           asOfReader,
 		roTx:                 roTx,
@@ -698,9 +708,7 @@ func (cc *commitmentCalculator) shadowCrossCheck(ctx context.Context, target com
 	}
 	cc.state.FlushToUpdates(cc.updates)
 	cc.state.ResetBlockFlags()
-	incUpdates := cc.updates
-	cc.updates = cc.updates.NewEmpty()
-	rh, err := cc.computeRootFromUpdates(ctx, target, incUpdates, cc.asOfReader)
+	rh, err := cc.computeRootFromUpdates(ctx, target, cc.handOffUpdates(), cc.asOfReader)
 	if err != nil {
 		cc.fail(ctx, target, fmt.Errorf("shadow incremental compute: %w", err))
 		return
@@ -771,6 +779,15 @@ type computeMode struct {
 	publishRoot bool   // with checkRoot, publish the successful root too (batch-boundary request), not just mismatches
 }
 
+// handOffUpdates returns the filled buffer for the caller to compute against and
+// rotates the spare into cc.updates.
+func (cc *commitmentCalculator) handOffUpdates() *commitment.Updates {
+	filled := cc.updates
+	cc.updates, cc.spare = cc.spare, filled
+	cc.updates.Reset()
+	return filled
+}
+
 // compute is the shared prologue/compute/footer for every calculator commitment
 // path; the per-call differences live in m.
 func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m computeMode) {
@@ -785,8 +802,7 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	}
 
 	sdCtx := cc.doms.GetCommitmentContext()
-	sdCtx.SetUpdates(cc.updates)
-	cc.updates = cc.updates.NewEmpty()
+	sdCtx.SetUpdates(cc.handOffUpdates())
 
 	cc.asOfReader.txNum = t.lastTxNum + 1
 	sdCtx.SetStateReader(cc.asOfReader)
@@ -973,14 +989,10 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 // Commitment domain reads use GetLatest since branches are only written
 // by the calculator sequentially.
 type asOfStateReader struct {
-	sd    *execctx.SharedDomains
-	roTx  kv.TemporalTx
-	txNum uint64
-	// workerCtx, when non-nil, carries this worker's lock-free metrics
-	// accumulator; the CommitmentDomain read routes through GetLatestContext so
-	// a concurrent trie-warmup worker doesn't write the shared main accumulator
-	// (a race) or take the global metrics lock. Nil on the main reader.
-	workerCtx context.Context
+	sd     *execctx.SharedDomains
+	roTx   kv.TemporalTx
+	getter execctxapi.StateGetter
+	txNum  uint64
 }
 
 func (r *asOfStateReader) WithHistory() bool { return false }
@@ -992,8 +1004,8 @@ func (r *asOfStateReader) CheckDataAvailable(d kv.Domain, step kv.Step) error {
 func (r *asOfStateReader) Read(d kv.Domain, plainKey []byte, stepSize uint64) (enc []byte, step kv.Step, err error) {
 	if d == kv.CommitmentDomain {
 		// Branches: use GetLatest — written only by this calculator, sequential.
-		if r.workerCtx != nil {
-			enc, step, err = r.sd.GetLatestContext(r.workerCtx, d, r.roTx, plainKey)
+		if r.getter != nil {
+			enc, step, err = r.getter.GetLatest(d, plainKey, kv.GetLatestOptions{})
 		} else {
 			enc, step, err = r.sd.GetLatest(d, r.roTx, plainKey)
 		}
@@ -1032,7 +1044,11 @@ func (r *asOfStateReader) Clone(tx kv.TemporalTx) commitmentdb.StateReader {
 // reader during block assembly, where trie-warmup runs concurrently — so it
 // must not write the shared main accumulator).
 func (r *asOfStateReader) CloneForWorker(workerCtx context.Context, tx kv.TemporalTx) commitmentdb.StateReader {
-	return &asOfStateReader{sd: r.sd, roTx: tx, txNum: r.txNum, workerCtx: workerCtx}
+	getterOpts := execctxapi.StateGetterOptions{}
+	if metrics := kvmetrics.MetricsFromContext(workerCtx); metrics != nil {
+		getterOpts = getterOpts.WithMetrics(metrics)
+	}
+	return &asOfStateReader{sd: r.sd, roTx: tx, getter: r.sd.AsStateGetter(tx, getterOpts), txNum: r.txNum}
 }
 
 // Keep imports used.

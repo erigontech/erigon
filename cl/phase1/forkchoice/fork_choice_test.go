@@ -19,7 +19,6 @@ package forkchoice_test
 import (
 	"context"
 	_ "embed"
-	"math"
 	"testing"
 
 	"github.com/spf13/afero"
@@ -45,7 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 //go:embed test_data/anchor_state.ssz_snappy
@@ -88,10 +87,10 @@ func TestForkChoiceBasic(t *testing.T) {
 	emitters := beaconevents.NewEventEmitter()
 
 	// Create required components
-	genesisState, err := initial_state.GetGenesisState(1) // Mainnet
+	genesisState, err := initial_state.GetGenesisState(t.Context(), 1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
-	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	localValidators := validator_params.NewValidatorParams()
 
 	store, err := forkchoice.NewForkChoiceStore(
@@ -184,10 +183,10 @@ func TestForkChoiceChainBellatrix(t *testing.T) {
 	sd := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 
 	// Create required components
-	genesisState, err := initial_state.GetGenesisState(1) // Mainnet
+	genesisState, err := initial_state.GetGenesisState(t.Context(), 1) // Mainnet
 	require.NoError(t, err)
 	ethClock := eth_clock.NewEthereumClock(genesisState.GenesisTime(), genesisState.GenesisValidatorsRoot(), &clparams.MainnetBeaconConfig)
-	blobStorage := blob_storage.NewBlobStore(memdb.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs(), math.MaxUint64, &clparams.MainnetBeaconConfig, ethClock)
+	blobStorage := blob_storage.NewBlobStore(mdbxtest.NewTestDB(t, dbcfg.ChainDB), afero.NewMemMapFs())
 	localValidators := validator_params.NewValidatorParams()
 
 	store, err := forkchoice.NewForkChoiceStore(

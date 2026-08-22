@@ -98,7 +98,7 @@ func (l *JSONLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope traci
 	if l.cfg.EnableReturnData {
 		log.ReturnData = rData
 	}
-	_ = l.encoder.Encode(log)
+	_ = l.encoder.Encode(log) //nolint:errchkjson
 }
 
 func (l *JSONLogger) OnFault(pc uint64, op byte, gas uint64, cost uint64, scope tracing.OpContext, depth int, err error) {
@@ -118,5 +118,5 @@ func (l *JSONLogger) OnExit(depth int, output []byte, gasUsed uint64, err error,
 	if err != nil {
 		errMsg = err.Error()
 	}
-	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), errMsg})
+	_ = l.encoder.Encode(endLog{common.Bytes2Hex(output), math.HexOrDecimal64(gasUsed), errMsg}) //nolint:errchkjson
 }

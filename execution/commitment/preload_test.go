@@ -17,10 +17,6 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// fakeReader returns a CommitmentReader backed by the synthetic tree. notFound
-// (path-strings) are treated as absent. valSz is the branch value size. If
-// failOnPath is non-empty, the reader returns an error when that path is
-// requested.
 func fakeReader(tree syntheticTree, notFound map[string]bool, valSz int, failOnPath string) CommitmentReader {
 	return func(prefix []byte) ([]byte, uint64, bool, error) {
 		path := string(nibbles.CompactToHex(prefix))
@@ -35,10 +31,6 @@ func fakeReader(tree syntheticTree, notFound map[string]bool, valSz int, failOnP
 	}
 }
 
-// TestContractTrunkPreload_ResumeAfterReaderError confirms that a reader error
-// mid-chunk leaves the failing entry (and its unexplored subtree) at the queue
-// head for a retry, and that entries pinned earlier in the same chunk are
-// accounted in PinnedTotal()/UsedBytes() despite the error return.
 func TestContractTrunkPreload_ResumeAfterReaderError(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	root := ""
@@ -92,9 +84,6 @@ func TestContractTrunkPreload_ResumeAfterReaderError(t *testing.T) {
 	}
 }
 
-// TestContractTrunkPreload_BudgetStopPreservesQueueHead confirms that a chunk
-// stopped by the budget leaves the unaffordable entry at the queue head rather
-// than losing it, and that a follow-on Run resumes from exactly there.
 func TestContractTrunkPreload_BudgetStopPreservesQueueHead(t *testing.T) {
 	hash, tree, _ := buildSyntheticTree(t)
 	const valSz = 100
@@ -140,9 +129,6 @@ func TestContractTrunkPreload_BudgetStopPreservesQueueHead(t *testing.T) {
 	}
 }
 
-// The wrapper used to log unconditionally after Run and dereference the cache
-// there, so a nil cache reached that block and panicked before the caller ever
-// saw Run's error. Only a non-nil logger reaches it.
 func TestPreloadContractTrunk_NilCacheWithLoggerReturnsError(t *testing.T) {
 	hash := make([]byte, 32)
 	reader := func(prefix []byte) ([]byte, uint64, bool, error) { return nil, 0, false, nil }
@@ -156,16 +142,11 @@ func TestPreloadContractTrunk_NilCacheWithLoggerReturnsError(t *testing.T) {
 	}
 }
 
-// TestContractTrunkPreload_StopsAtMaxDepth pins the walk's own termination
-// contract: a reader that keeps resolving branches must not drive the BFS past
-// maxStorageTrunkDepth, which its parallel twin already bounds explicitly.
 func TestContractTrunkPreload_StopsAtMaxDepth(t *testing.T) {
 	hash := make([]byte, 32)
 	for i := range hash {
 		hash[i] = byte(i)
 	}
-	// Every prefix resolves to a branch with exactly one child, so termination
-	// can only come from the depth ceiling, never from a not-found.
 	endless := func(prefix []byte) ([]byte, uint64, bool, error) {
 		v := make([]byte, 8)
 		v[3] = 1 // bitmap: child at nibble 0

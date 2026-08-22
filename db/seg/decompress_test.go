@@ -16,17 +16,22 @@
 package seg
 
 import (
+	"bufio"
 	"bytes"
 	"encoding/binary"
 	"fmt"
 	"math/rand"
 	"os"
 	"path/filepath"
+	"runtime"
 	"slices"
+	"strconv"
 	"strings"
 	"testing"
 	"time"
+	"unsafe"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/dir"
 
 	"github.com/stretchr/testify/require"
@@ -61,6 +66,41 @@ func prepareLoremDict(t *testing.T) *Decompressor {
 		t.Fatal(err)
 	}
 	return d
+}
+
+func TestNextReportsPackedLiteral(t *testing.T) {
+	tmpDir := t.TempDir()
+	file := filepath.Join(tmpDir, "literal.kv")
+	cfg := DefaultCfg
+	cfg.MinPatternScore = ^uint64(0)
+	c, err := NewCompressor(t.Context(), t.Name(), file, tmpDir, cfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+
+	word := make([]byte, 6*os.Getpagesize())
+	for i := range word {
+		word[i] = byte(i)
+	}
+	require.NoError(t, c.AddWord(word))
+	require.NoError(t, c.Compress())
+	c.Close()
+
+	d, err := NewDecompressor(file)
+	require.NoError(t, err)
+	defer d.Close()
+	require.Zero(t, d.dictWords)
+
+	g := d.MakeGetter()
+	require.Equal(t, d.wordsFileOffset, g.dataOffset)
+	g.EnableMultiPageBlockingAsyncIO()
+	var literalOffset, literalLength uint64
+	g.multiPageBlockingAsyncRead = func(_ *Getter, offset, length uint64) {
+		literalOffset, literalLength = offset, length
+	}
+	got, _ := g.Next(nil)
+
+	require.Equal(t, word, got)
+	require.Equal(t, uint64(len(word)), literalLength)
+	require.Equal(t, word, []byte(d._mmapHandle[literalOffset:literalOffset+literalLength]))
 }
 
 func TestDecompressSkip(t *testing.T) {
@@ -101,12 +141,10 @@ func TestOpenSequentialView(t *testing.T) {
 		want = append(want, w)
 	}
 
-	readAll := func(separateReadahead bool) [][]byte {
-		v, err := d.OpenSequentialView(separateReadahead)
-		require.NoError(t, err)
-		defer v.Close()
+	readAll := func(g *Getter) [][]byte {
 		var got [][]byte
-		vg := v.MakeGetter()
+		vg := g
+		require.Equal(t, d.wordsFileOffset, vg.dataOffset)
 		for vg.HasNext() {
 			w, _ := vg.Next(nil)
 			got = append(got, w)
@@ -114,10 +152,16 @@ func TestOpenSequentialView(t *testing.T) {
 		return got
 	}
 
-	require.Equal(t, want, readAll(true), "separate MADV_SEQUENTIAL mmap view")
-	require.Equal(t, want, readAll(false), "shared mmap view (MADV_NORMAL)")
-	// the shared view's Close must be a no-op on the decompressor's mmap: a subsequent read still works
-	require.Equal(t, want, readAll(true))
+	scan := func() [][]byte {
+		v, err := d.OpenSequentialView()
+		require.NoError(t, err)
+		defer v.Close()
+		return readAll(v.MakeGetter())
+	}
+	require.Equal(t, want, scan(), "separate MADV_SEQUENTIAL mmap view")
+	require.Equal(t, want, readAll(d.MakeGetter()), "shared mapping, no view")
+	// closing a view must leave the decompressor's own mmap readable
+	require.Equal(t, want, scan())
 }
 
 func TestDecompressMatchOK(t *testing.T) {
@@ -1217,4 +1261,118 @@ func TestDecompressRandomMatchBool(t *testing.T) {
 	if total != int(d.wordsCount) {
 		t.Fatalf("expected word count: %d, got %d\n", int(d.wordsCount), total)
 	}
+}
+
+// vmaAdvice reports the readahead hint the kernel holds for the VMA containing
+// addr, read back from /proc/self/smaps: `rr` is VM_RAND_READ, `sr` VM_SEQ_READ.
+func vmaAdvice(tb testing.TB, addr uintptr) string {
+	tb.Helper()
+	f, err := os.Open("/proc/self/smaps")
+	require.NoError(tb, err)
+	defer f.Close()
+
+	inRange := false
+	s := bufio.NewScanner(f)
+	for s.Scan() {
+		line := s.Text()
+		if flags, ok := strings.CutPrefix(line, "VmFlags:"); ok {
+			if !inRange {
+				continue
+			}
+			for fl := range strings.FieldsSeq(flags) {
+				switch fl {
+				case "rr":
+					return "random"
+				case "sr":
+					return "sequential"
+				}
+			}
+			return "normal"
+		}
+		dash := strings.IndexByte(line, '-')
+		if dash <= 0 {
+			continue
+		}
+		start, err := strconv.ParseUint(line[:dash], 16, 64)
+		if err != nil {
+			continue
+		}
+		rest := line[dash+1:]
+		sp := strings.IndexByte(rest, ' ')
+		if sp <= 0 {
+			continue
+		}
+		end, err := strconv.ParseUint(rest[:sp], 16, 64)
+		if err != nil {
+			continue
+		}
+		inRange = uint64(addr) >= start && uint64(addr) < end
+	}
+	require.NoError(tb, s.Err())
+	tb.Fatalf("no VMA covers %#x", addr)
+	return ""
+}
+
+// The scan must madvise a mapping of its own, never the one random readers fault
+// through. Touching the shared mapping is what disabled this feature before.
+func TestSequentialViewLeavesSharedMappingRandom(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	linux := runtime.GOOS == "linux"
+	shared := uintptr(unsafe.Pointer(&d._mmapHandle[0]))
+	if linux {
+		require.Equal(t, "random", vmaAdvice(t, shared), "NewDecompressor leaves the shared mapping MADV_RANDOM")
+	}
+
+	v, err := d.OpenSequentialView()
+	require.NoError(t, err)
+	require.NotNil(t, v.ownMap, "a separate-readahead view must own its mapping")
+	own := uintptr(unsafe.Pointer(&v.ownMap[0]))
+	require.NotEqual(t, shared, own, "the view must not hand back the decompressor's mapping")
+
+	if linux {
+		if dbg.SnapshotMadvSequential {
+			require.Equal(t, "sequential", vmaAdvice(t, own), "the view's own VMA carries the scan hint")
+		}
+		require.Equal(t, "random", vmaAdvice(t, shared), "the shared VMA keeps MADV_RANDOM while the view is open")
+	}
+
+	v.Close()
+	if linux {
+		require.Equal(t, "random", vmaAdvice(t, shared), "and after the view is closed")
+	}
+}
+
+// Scanning through the decompressor's own getter must leave its advice alone;
+// setting MADV_NORMAL here is what forced the original revert.
+func TestSharedScanKeepsAdviceRandom(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	g := d.MakeGetter()
+	for g.HasNext() {
+		g.Next(nil)
+	}
+	if runtime.GOOS == "linux" {
+		require.Equal(t, "random", vmaAdvice(t, uintptr(unsafe.Pointer(&d._mmapHandle[0]))),
+			"reading through the shared mapping must not change its advice")
+	}
+}
+
+// The gate resolves word positions as dataOffset+pos, so every Getter must report
+// the same file offset for data[0] whichever mmap it reads through.
+func TestGetterDataOffsetIsFileOffset(t *testing.T) {
+	d := prepareLoremDict(t)
+	defer d.Close()
+
+	want := uint64(d.size) - uint64(len(d.data[d.wordsStart:]))
+	require.Equal(t, want, d.MakeGetter().dataOffset)
+
+	own, err := d.OpenSequentialView()
+	require.NoError(t, err)
+	defer own.Close()
+	require.Equal(t, want, own.MakeGetter().dataOffset, "a view with its own mmap reads the same file offsets")
+
+	require.Equal(t, want, d.MakeGetter().dataOffset)
 }
