@@ -118,6 +118,11 @@ const (
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
 	// Stateless witnesses received over the wit protocol
+	// Renamed from BorWitnesses/BorWitnessSizes: the WIT side-protocol is not
+	// Polygon-specific, it only ever had a Polygon-prefixed name.
+	BorWitnessesDeprecated    = "BorWitnesses"
+	BorWitnessSizesDeprecated = "BorWitnessSizes"
+
 	Witnesses    = "Witnesses"    // block_num_u64 + block_hash -> witness
 	WitnessSizes = "WitnessSizes" // block_num_u64 + block_hash -> witness size (uint64)
 
@@ -474,6 +479,10 @@ var ChaindataDeprecatedTables = []string{
 	StorageChangeSetDeprecated,
 	E2AccountsHistory,
 	E2StorageHistory,
+
+	// Renamed to Witnesses / WitnessSizes; dropped by `drop_bor_witness_tables`.
+	BorWitnessesDeprecated,
+	BorWitnessSizesDeprecated,
 }
 
 // Diagnostics tables
