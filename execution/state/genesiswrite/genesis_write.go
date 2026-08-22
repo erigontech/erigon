@@ -30,6 +30,7 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -224,16 +225,26 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			}
 		}
 		if keepStoredChainConfig {
-			newCfg = storedCfg
+			newCfg = new(chain.Config)
+			if err := copier.CopyWithOption(newCfg, storedCfg, copier.Option{DeepCopy: true}); err != nil {
+				return nil, nil, err
+			}
 			applyOverrides(newCfg)
 		}
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
-	height := rawdb.ReadHeaderNumber(tx, rawdb.ReadHeadHeaderHash(tx))
+	headHash := rawdb.ReadHeadHeaderHash(tx)
+	height := rawdb.ReadHeaderNumber(tx, headHash)
 	if height != nil {
-		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height)
-		if compatibilityErr != nil && *height != 0 && compatibilityErr.RewindTo != 0 {
+		// The head's time, not just its number: the post-merge forks are scheduled by
+		// timestamp and cannot be compared against a block number.
+		var headTime uint64
+		if head := rawdb.ReadHeader(tx, headHash, *height); head != nil {
+			headTime = head.Time
+		}
+		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height, headTime)
+		if compatibilityErr != nil && *height != 0 && (compatibilityErr.RewindTo != 0 || compatibilityErr.IsTimestampFork()) {
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}

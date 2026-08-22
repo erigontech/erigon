@@ -140,6 +140,38 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	require.Equal(t, uint64(2), seq)
 }
 
+// Mutates the shared chain.AllProtocolChanges singleton via applyOverrides, so it must not
+// run concurrently with other tests that read it.
+func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	origOsakaTime := chain.AllProtocolChanges.OsakaTime
+	defer func() { chain.AllProtocolChanges.OsakaTime = origOsakaTime }()
+
+	logger := log.New()
+	baseCfg := &chain.Config{ChainID: uint256.NewInt(1), OsakaTime: common.NewUint64(1)}
+	gspec := &types.Genesis{Config: baseCfg}
+
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	chainBlocks, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainBlocks))
+
+	overrideOsakaTime := common.NewUint64(500)
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(m.DB, nil, "", overrideOsakaTime, nil, true, datadir.New(t.TempDir()), logger)
+
+	require.Error(t, err)
+	var compatErr *chain.ConfigCompatError
+	require.ErrorAs(t, err, &compatErr, "want *chain.ConfigCompatError, got %T: %v", err, err)
+	require.Equal(t, "Osaka fork timestamp", compatErr.What)
+	require.True(t, compatErr.IsTimestampFork())
+	require.Zero(t, compatErr.RewindToTime)
+}
+
 func TestAllocConstructor(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
@@ -295,6 +327,11 @@ func TestSetupGenesis(t *testing.T) {
 	)
 	logger := log.New()
 	oldcustomg.Config = &chain.Config{ChainID: uint256.NewInt(1), HomesteadBlock: common.NewUint64(2)}
+
+	// copier turns nil maps/slices into empty ones, so the expected value for the
+	// keepStoredChainConfig path has to be a deep copy too, not the original literal.
+	customgKeptStored := new(chain.Config)
+	require.NoError(t, copier.CopyWithOption(customgKeptStored, customg.Config, copier.Option{DeepCopy: true}))
 	tests := []struct {
 		wantErr    error
 		fn         func(t *testing.T, db kv.RwDB, tmpdir string) (*chain.Config, *types.Block, error)
@@ -333,7 +370,7 @@ func TestSetupGenesis(t *testing.T) {
 				return genesiswrite.CommitGenesisBlock(db, nil, "", datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
-			wantConfig: customg.Config,
+			wantConfig: customgKeptStored,
 		},
 		{
 			// Reproduces the hive EEST consume-rlp scenario:
@@ -346,7 +383,7 @@ func TestSetupGenesis(t *testing.T) {
 				return genesiswrite.CommitGenesisBlock(db, nil, networkname.Mainnet, datadir.New(tmpdir), logger)
 			},
 			wantHash:   customghash,
-			wantConfig: customg.Config,
+			wantConfig: customgKeptStored,
 		},
 		{
 			name: "custom block in DB, genesis == sepolia",
