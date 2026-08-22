@@ -157,7 +157,7 @@ func TestService(t *testing.T) {
 	require.True(t, replayNeeded)
 	require.Equal(t, uint64(0), replayBlockNum)
 
-	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)})
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)}, nil)
 	err = b.ReplayInitialBlock(ctx, genesis)
 	require.NoError(t, err)
 
@@ -265,7 +265,7 @@ func TestService_Unwind(t *testing.T) {
 	err := b.store.Prepare(ctx)
 	require.NoError(t, err)
 
-	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)})
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)}, nil)
 	err = b.ReplayInitialBlock(ctx, genesis)
 	require.NoError(t, err)
 
@@ -380,7 +380,7 @@ func setupOverrideTest(t *testing.T, ctx context.Context, borConfig borcfg.BorCo
 	require.True(t, replayNeeded)
 	require.Equal(t, uint64(0), replayBlockNum)
 
-	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)})
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)}, nil)
 	err = b.ReplayInitialBlock(ctx, genesis)
 	require.NoError(t, err)
 
@@ -525,7 +525,7 @@ func TestReaderEventsWithinTime(t *testing.T) {
 	require.True(t, replayNeeded)
 	require.Equal(t, uint64(0), replayBlockNum)
 
-	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)})
+	genesis := types.NewBlockWithHeader(&types.Header{Time: 1, Number: *uint256.NewInt(0)}, nil)
 	err = b.ReplayInitialBlock(ctx, genesis)
 	require.NoError(t, err)
 

@@ -111,7 +111,9 @@ func TestGetHeadersIncludesFinalized(t *testing.T) {
 			server := httptest.NewServer(handler.mux)
 			defer server.Close()
 
-			resp, err := http.Get(server.URL + "/eth/v1/beacon/headers?parent_root=0x" + common.Bytes2Hex(tc.parentRoot[:]))
+			req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/headers?parent_root=0x"+common.Bytes2Hex(tc.parentRoot[:]), nil)
+			require.NoError(t, err)
+			resp, err := server.Client().Do(req)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 			require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -151,7 +153,9 @@ func TestGetHeadHeaderIsCanonicalBeforeDatabasePromotion(t *testing.T) {
 
 	server := httptest.NewServer(handler.mux)
 	defer server.Close()
-	resp, err := http.Get(server.URL + "/eth/v1/beacon/headers/head")
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/headers/head", nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)

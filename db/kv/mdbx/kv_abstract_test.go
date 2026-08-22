@@ -335,8 +335,8 @@ func setupDatabases(t *testing.T, logger log.Logger) (writeDBs []kv.TemporalRwDB
 	writeDBs = []kv.TemporalRwDB{
 		temporaltest.NewTestDB(t, dirs1),
 		temporaltest.NewTestDB(t, dirs2),
-		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(),
-		//mdbx.New(dbcfg.ChainDB, logger).InMem(t, "").MustOpen(), // for remote db
+		//mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), "").MustOpen(),
+		//mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), "").MustOpen(), // for remote db
 	}
 
 	conn := bufconn.Listen(1024 * 1024)

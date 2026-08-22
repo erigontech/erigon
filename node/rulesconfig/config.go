@@ -34,11 +34,6 @@ import (
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
 	"github.com/erigontech/erigon/node"
 	"github.com/erigontech/erigon/node/nodecfg"
-	"github.com/erigontech/erigon/polygon/bor"
-	"github.com/erigontech/erigon/polygon/bor/borabi"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 // L2EngineFunc builds an L2 stack's rules engine for a chain configured
@@ -83,8 +78,7 @@ func l2Engine(name string) (L2EngineFunc, bool) {
 }
 
 func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainConfig *chain.Config, config any, noVerify bool,
-	withoutHeimdall bool, blockReader dbservices.FullBlockReader, readonly bool,
-	logger log.Logger, polygonBridge *bridge.Service, heimdallService *heimdall.Service,
+	blockReader dbservices.FullBlockReader, readonly bool, logger log.Logger,
 ) rules.Engine {
 	var eng rules.Engine
 
@@ -136,15 +130,6 @@ func CreateRulesEngine(ctx context.Context, nodeConfig *nodecfg.Config, chainCon
 				panic(err)
 			}
 		}
-	case *borcfg.BorConfig:
-		// If Matic bor consensus is requested, set it up
-		// In order to pass the ethereum transaction tests, we need to set the burn contract which is in the bor config
-		// Then, bor != nil will also be enabled for ethash. Only enable Bor for real if there is a validator contract present.
-		if chainConfig.Bor != nil && consensusCfg.ValidatorContract != "" {
-			stateReceiver := bor.NewStateReceiver(consensusCfg.StateReceiverContractAddress())
-			spanner := bor.NewChainSpanner(borabi.ValidatorSetContractABI(), chainConfig, withoutHeimdall, logger)
-			eng = bor.New(chainConfig, blockReader, spanner, stateReceiver, logger, polygonBridge, heimdallService)
-		}
 	}
 
 	if eng == nil {
@@ -164,8 +149,6 @@ func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, 
 	switch {
 	case chainConfig.Aura != nil:
 		consensusConfig = chainConfig.Aura
-	case chainConfig.Bor != nil:
-		consensusConfig = chainConfig.Bor
 	case chainConfig.L2 != nil:
 		consensusConfig = chainConfig.L2
 	default:
@@ -175,5 +158,5 @@ func CreateRulesEngineBareBones(ctx context.Context, chainConfig *chain.Config, 
 	}
 
 	return CreateRulesEngine(ctx, &nodecfg.Config{}, chainConfig, consensusConfig, true, /* noVerify */
-		true /* withoutHeimdall */, nil /* blockReader */, false /* readonly */, logger, nil, nil)
+		nil /* blockReader */, false /* readonly */, logger)
 }

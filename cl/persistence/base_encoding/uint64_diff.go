@@ -262,7 +262,7 @@ func ApplyCompressedSerializedValidatorListDiff(in, out []byte, diff []byte, rev
 		if n != validatorSSZSize {
 			return nil, fmt.Errorf("read %d bytes, expected %d", n, validatorSSZSize)
 		}
-		out = append(out, currValidator...)
+		out = append(out, currValidator...) //nolint:makezero
 	}
 
 	return out, nil

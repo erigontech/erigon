@@ -15,13 +15,10 @@ import (
 
 var cmtTiming = os.Getenv("ERIGON_CMT_TIMING") == "1"
 
-// deepStorageThreshold is the touched-slot count above which an account's storage subtree folds concurrently instead of streaming through its worker.
-// Set below the common hot-contract straggler size (~150 touched slots) so those subtrees fold in parallel rather than serializing through one nibble worker.
+// above this touched-slot count, storage subtree folds concurrently instead of streaming through one worker
 const deepStorageThreshold = 128
 
-// unfoldRootWall unfolds base at the root until row 0 forms the top-nibble mount wall,
-// consuming at most one nibble per step: a restored root extension sharing the probe's
-// leading nibble would otherwise unfold several levels at once and misplace the wall.
+// unfold one nibble per step (avoids misplacing the wall)
 func unfoldRootWall(ctx context.Context, base *HexPatriciaHashed) error {
 	zero := []byte{0}
 	for u := base.needUnfolding(zero); u > 0; u = base.needUnfolding(zero) {
@@ -35,8 +32,6 @@ func unfoldRootWall(ctx context.Context, base *HexPatriciaHashed) error {
 	return nil
 }
 
-// seedRootBase synthesizes a row-0 wall when the on-disk root has no branch, so foldMounted stops
-// at the mount boundary and returns cells excluding the mount nibble for empty and non-empty bases alike.
 func seedRootBase(base *HexPatriciaHashed) {
 	if base.activeRows != 0 {
 		return
@@ -52,9 +47,10 @@ func seedRootBase(base *HexPatriciaHashed) {
 	}
 }
 
-// if nibble set is -1 then subtrie is not mounted to the nibble, but limited by depth: eg do not fold mounted trie above depth 63
 func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
-	hph.Reset()
+	hph.rootTouched = false
+	hph.rootChecked = false
+	hph.rootPresent = true
 
 	hph.root = root.root
 
@@ -74,8 +70,6 @@ func (hph *HexPatriciaHashed) mountTo(root *HexPatriciaHashed, nibble int) {
 	copy(hph.grid[:n], root.grid[:n])
 }
 
-// stitchSplitCells drops each folded split cell into the base row at its top-nibble slot;
-// foldMounted already returns cells excluding the mount nibble, so they are stitched verbatim.
 func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]bool) {
 	for nib := range 16 {
 		if !present[nib] {
@@ -93,7 +87,6 @@ func stitchSplitCells(base *HexPatriciaHashed, cells *[16]cell, present *[16]boo
 	}
 }
 
-// processMounted folds each touched root-child subtree concurrently, stitches the resulting cells back into the base row, and folds the base up to the root.
 func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Updates) ([]byte, error) {
 	pu := updates.parallel
 	base := p.template
@@ -273,7 +266,6 @@ func (p *ParallelPatriciaHashed) newStorageWorker(ctx context.Context) (*HexPatr
 	return newDeferredStorageWorker(ctx, p.accountKeyLen, p.cfg, p.trieCtxFactory, traceW)
 }
 
-// setAccountStorageRoot writes the folded storage-root cell sr onto the account leaf.
 func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr cell) {
 	var c *cell
 	if w.activeRows == 0 {
@@ -281,17 +273,12 @@ func setAccountStorageRoot(w *HexPatriciaHashed, accHash []byte, sr cell) {
 	} else {
 		c = &w.grid[w.activeRows-1][accHash[w.currentKeyLen]]
 	}
-	// Drop any stale storage plain key so computeCellHash does not rehash the account's storage from
-	// a leftover slot instead of sr.
+	// drop stale storage plain key: computeCellHash would rehash storage from a leftover slot, not sr
 	c.storageAddrLen = 0
 	c.StorageLen = 0
 	c.Flags &^= StorageUpdate
 	c.loaded &^= cellLoadStorage
-	// Carry sr's navigation onto the account leaf: a single-child collapse's extension (or a single
-	// leaf's plain key) must persist, or a later re-touch unfolds to a storage-root branch record the
-	// collapse never wrote. computeCellHash reads c.extLen as the storage-root extension, so a hash-only
-	// root (multi-child or empty) must clear any extension a prior single-child collapse left on a reused
-	// cell, otherwise the leaf hashes extension(oldExt, sr.hash) instead of sr.hash.
+	// Carry sr's extension onto the leaf; a hash-only sr must still clear a leftover extension from a prior collapse.
 	if sr.storageAddrLen > 0 {
 		c.storageAddrLen = sr.storageAddrLen
 		copy(c.storageAddr[:], sr.storageAddr[:sr.storageAddrLen])

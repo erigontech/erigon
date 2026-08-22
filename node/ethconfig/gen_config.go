@@ -23,6 +23,7 @@ import (
 // MarshalTOML marshals as TOML.
 func (c Config) MarshalTOML() (interface{}, error) {
 	type Config struct {
+		StateCacheBudget                    datasize.ByteSize
 		Genesis                             *types.Genesis `toml:",omitempty"`
 		NetworkID                           uint64
 		EthDiscoveryURLs                    []string
@@ -45,8 +46,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		RPCTxFeeCap                         float64 `toml:",omitempty"`
 		StateStream                         bool
 		ExperimentalBAL                     bool
-		HeimdallURL                         string
-		WithoutHeimdall                     bool
 		Ethstats                            string
 		InternalCL                          bool
 		OverrideOsakaTime                   *uint64 `toml:",omitempty"`
@@ -63,6 +62,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 		WarmupKzgCtxOnInit                  bool
 	}
 	var enc Config
+	enc.StateCacheBudget = c.StateCacheBudget
 	enc.Genesis = c.Genesis
 	enc.NetworkID = c.NetworkID
 	enc.EthDiscoveryURLs = c.EthDiscoveryURLs
@@ -85,8 +85,6 @@ func (c Config) MarshalTOML() (interface{}, error) {
 	enc.RPCTxFeeCap = c.RPCTxFeeCap
 	enc.StateStream = c.StateStream
 	enc.ExperimentalBAL = c.ExperimentalBAL
-	enc.HeimdallURL = c.HeimdallURL
-	enc.WithoutHeimdall = c.WithoutHeimdall
 	enc.Ethstats = c.Ethstats
 	enc.InternalCL = c.InternalCL
 	enc.OverrideOsakaTime = c.OverrideOsakaTime
@@ -107,6 +105,7 @@ func (c Config) MarshalTOML() (interface{}, error) {
 // UnmarshalTOML unmarshals from TOML.
 func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	type Config struct {
+		StateCacheBudget                    *datasize.ByteSize
 		Genesis                             *types.Genesis `toml:",omitempty"`
 		NetworkID                           *uint64
 		EthDiscoveryURLs                    []string
@@ -129,8 +128,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 		RPCTxFeeCap                         *float64 `toml:",omitempty"`
 		StateStream                         *bool
 		ExperimentalBAL                     *bool
-		HeimdallURL                         *string
-		WithoutHeimdall                     *bool
 		Ethstats                            *string
 		InternalCL                          *bool
 		OverrideOsakaTime                   *uint64 `toml:",omitempty"`
@@ -149,6 +146,9 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	var dec Config
 	if err := unmarshal(&dec); err != nil {
 		return err
+	}
+	if dec.StateCacheBudget != nil {
+		c.StateCacheBudget = *dec.StateCacheBudget
 	}
 	if dec.Genesis != nil {
 		c.Genesis = dec.Genesis
@@ -215,12 +215,6 @@ func (c *Config) UnmarshalTOML(unmarshal func(interface{}) error) error {
 	}
 	if dec.ExperimentalBAL != nil {
 		c.ExperimentalBAL = *dec.ExperimentalBAL
-	}
-	if dec.HeimdallURL != nil {
-		c.HeimdallURL = *dec.HeimdallURL
-	}
-	if dec.WithoutHeimdall != nil {
-		c.WithoutHeimdall = *dec.WithoutHeimdall
 	}
 	if dec.Ethstats != nil {
 		c.Ethstats = *dec.Ethstats

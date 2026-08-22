@@ -24,11 +24,22 @@ func NewCaplinSchema(dirs datadir.Dirs, stepSize uint64, stateTypes snapshotsync
 	}
 
 	statemp := make(map[string]state.SnapNameSchema)
-	dataVer := snaptype.BeaconBlocks.Versions()
-	accessorVer := snaptype.BeaconBlocks.Indexes()[0].Version
-	stateSchemaVersion := state.NewE2SnapSchemaVersion(dataVer, accessorVer)
 	for table := range stateTypes.KeyValueGetters {
-		statemp[table] = state.NewE2SnapSchemaWithStepAndDir(dirs.SnapCaplin, table, []string{table}, stepSize, stateSchemaVersion)
+		enum, ok := snaptype.ParseEnum(table)
+		if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MinBorEnum {
+			panic(fmt.Sprintf("Caplin schema: unknown state table %s", table))
+		}
+		snapt := enum.Type()
+		if snapt == nil || len(snapt.Indexes()) == 0 {
+			panic(fmt.Sprintf("Caplin schema: state table %s has no registered index", table))
+		}
+
+		indexTags := make([]string, len(snapt.Indexes()))
+		for i, index := range snapt.Indexes() {
+			indexTags[i] = index.Name
+		}
+		stateSchemaVersion := state.NewE2SnapSchemaVersion(snapt.Versions(), snapt.Indexes()[0].Version)
+		statemp[table] = state.NewE2SnapSchemaWithStepAndDir(dirs.SnapCaplin, snapt.Name(), indexTags, stepSize, stateSchemaVersion)
 	}
 
 	return CaplinSchema{blockAndBlobs: blockAndBlobs, state: statemp}
