@@ -1082,7 +1082,7 @@ func TestWriteStringFastMatchesJsoniter(t *testing.T) {
 		strings.Repeat("clean", 40),
 		strings.Repeat("clean", 40) + `"`,
 		`"` + strings.Repeat("clean", 40),
-		"<html>&amp;", "unicode é世界", "  ",
+		"<html>&amp;", "unicode é€😀", "  ",
 	}
 	r := rand.New(rand.NewSource(5))
 	for range 20000 {
