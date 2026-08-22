@@ -624,7 +624,7 @@ func (f *ForkChoiceStore) retryPendingEnvelopeError(err error, pending *cltypes.
 	if pending.Message == nil || pending.Message.Payload == nil {
 		return false
 	}
-	ageBounded := errors.Is(err, errPendingEnvelopeAgeBounded) || errors.Is(err, ErrIgnore) || errors.Is(err, ErrEIP7594ColumnDataNotAvailable)
+	ageBounded := errors.Is(err, errPendingEnvelopeAgeBounded) || errors.Is(err, errPayloadValidationAdmission) || errors.Is(err, ErrIgnore) || errors.Is(err, ErrEIP7594ColumnDataNotAvailable)
 	if !ageBounded {
 		return true
 	}

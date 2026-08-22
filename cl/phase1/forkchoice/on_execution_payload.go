@@ -477,6 +477,9 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	if validatePayload && f.engine != nil {
 		payloadStatus, validationErr := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot))
 		if errors.Is(validationErr, errPayloadValidationAdmission) {
+			if missingMode == queueMissingEnvelope && !f.forkGraph.HasEnvelope(beaconBlockRoot) {
+				f.pendingEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+			}
 			return false, validationErr
 		}
 		if f.forkGraph.HasEnvelope(beaconBlockRoot) {
@@ -668,17 +671,34 @@ func (f *ForkChoiceStore) runExecutionPayloadEnvelopeIndexWrite(ctx context.Cont
 
 func (f *ForkChoiceStore) writeExecutionPayloadEnvelopeIndices(ctx context.Context, blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, applied bool) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if !applied {
-		persisted, err := f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
+		indexed, err := f.executionPayloadEnvelopeIndicesAreWellFormed(ctx, blockRoot)
 		if err != nil {
 			return nil, err
 		}
-		signedEnvelope = persisted
+		if indexed {
+			return signedEnvelope, nil
+		}
+		signedEnvelope, err = f.forkGraph.ReadEnvelopeFromDisk(blockRoot)
+		if err != nil {
+			return signedEnvelope, err
+		}
 	}
 	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
 		return signedEnvelope, errors.New("persisted execution payload envelope is incomplete")
 	}
 	indexed := false
 	err := f.db.View(ctx, func(tx kv.Tx) error {
+		blockNumberBytes, err := tx.GetOne(kv.BlockRootToBlockNumber, blockRoot[:])
+		if err != nil {
+			return err
+		}
+		blockHashBytes, err := tx.GetOne(kv.BlockRootToBlockHash, blockRoot[:])
+		if err != nil {
+			return err
+		}
+		if len(blockNumberBytes) != 4 || len(blockHashBytes) != len(common.Hash{}) {
+			return nil
+		}
 		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, blockRoot)
 		if err != nil {
 			return err
@@ -697,6 +717,23 @@ func (f *ForkChoiceStore) writeExecutionPayloadEnvelopeIndices(ctx context.Conte
 		return beacon_indicies.WriteExecutionPayloadEnvelopeIndicies(tx, blockRoot, signedEnvelope.Message)
 	})
 	return signedEnvelope, err
+}
+
+func (f *ForkChoiceStore) executionPayloadEnvelopeIndicesAreWellFormed(ctx context.Context, blockRoot common.Hash) (bool, error) {
+	indexed := false
+	err := f.db.View(ctx, func(tx kv.Tx) error {
+		blockNumber, err := tx.GetOne(kv.BlockRootToBlockNumber, blockRoot[:])
+		if err != nil {
+			return err
+		}
+		blockHash, err := tx.GetOne(kv.BlockRootToBlockHash, blockRoot[:])
+		if err != nil {
+			return err
+		}
+		indexed = len(blockNumber) == 4 && len(blockHash) == len(common.Hash{}) && common.BytesToHash(blockHash) != (common.Hash{})
+		return nil
+	})
+	return indexed, err
 }
 
 // applyLocalSelfBuildEnvelope coordinates fork-choice ownership around local envelope processing.
@@ -756,6 +793,9 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 	if f.engine != nil {
 		payloadStatus, validationErr := f.validatePayloadWithEL(ctx, envelope, block, common.Hash(beaconBlockRoot))
 		if errors.Is(validationErr, errPayloadValidationAdmission) {
+			if missingMode == queueMissingEnvelope && !f.forkGraph.HasEnvelope(beaconBlockRoot) {
+				f.pendingLocalSelfBuildEnvelopes.Add(beaconBlockRoot, signedEnvelope)
+			}
 			return false, validationErr
 		}
 		if f.forkGraph.HasEnvelope(beaconBlockRoot) {
