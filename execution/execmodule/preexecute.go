@@ -164,5 +164,10 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 	if validationError != nil {
 		res.ValidationError = validationError.Error()
 	}
+	// Surface the root the executor computed this round off the maintained SD (STEP 3b: the seal
+	// will build the sealed header from this instead of the deferred Root{}).
+	if root := doms.LastComputedRoot(); len(root) > 0 {
+		res.ComputedRoot = common.BytesToHash(root)
+	}
 	return res, nil
 }

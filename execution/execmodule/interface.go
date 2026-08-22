@@ -67,6 +67,10 @@ type ValidationResult struct {
 	ValidationStatus ExecutionStatus
 	LatestValidHash  common.Hash
 	ValidationError  string
+	// ComputedRoot is the state root the executor computed over the (accumulated) state during
+	// this call. On the flashblock PreExecute path this is the per-round root over the body
+	// executed so far (Root is otherwise deferred to seal). Zero when no commitment ran.
+	ComputedRoot common.Hash
 }
 
 // ForkChoiceResult is the native return type for UpdateForkChoice.
