@@ -113,7 +113,6 @@ func init() {
 	withExperimentalCommitment(cmdCommitmentRebuild)
 	withUnwind(cmdCommitmentRebuild)
 	withIntegrityChecks(cmdCommitmentRebuild)
-	withHeimdall(cmdCommitmentRebuild)
 	withChaosMonkey(cmdCommitmentRebuild)
 	withYes(cmdCommitmentRebuild)
 	withClearCommitment(cmdCommitmentRebuild)

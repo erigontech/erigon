@@ -731,16 +731,9 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 	if block == nil {
 		return nil, nil
 	}
-	chainConfig, err := api.chainConfig(ctx, tx)
+	receipts, err := api.getReceipts(ctx, tx, block)
 	if err != nil {
 		return nil, err
-	}
-	receipts, borReceipt, err := api.getReceiptsWithBor(ctx, tx, chainConfig, block)
-	if err != nil {
-		return nil, err
-	}
-	if borReceipt != nil {
-		receipts = append(receipts, borReceipt)
 	}
 
 	result := make([]hexutil.Bytes, len(receipts))
@@ -799,10 +792,6 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
@@ -817,19 +806,7 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, err
 	}
 
-	// Private API returns 0 if transaction is not found.
-	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
-	if isBorStateSyncTx {
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, nil
-		}
-	}
-
-	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, isBorStateSyncTx)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
 	if err != nil {
 		return nil, err
 	}
