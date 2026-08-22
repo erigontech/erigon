@@ -18,10 +18,10 @@
 
 package seg
 
-// The async-io residency gate relies on mincore + io_uring and is Linux-only.
+// The blocking async I/O residency gate relies on mincore + io_uring and is Linux-only.
 // Off Linux these are no-ops so the cross-platform read path still compiles;
-// EnableResidencyGate is never called (dbg.FilesAsyncIO stays off), and even if
-// it were, ensureResident does nothing.
+// EnableResidencyGate is never called, and even if it were, ensureResident does
+// nothing.
 
 type residencyBitmap struct{}
 
