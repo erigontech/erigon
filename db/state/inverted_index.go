@@ -150,6 +150,37 @@ func (ii *InvertedIndex) efAccessorNewFilePathV4(fromTxN, toTxN uint64) string {
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", version.V4_0.String(), ii.FilenameBase, fromTxN, toTxN))
 }
 
+// isRawTxNItem — sibling of Domain.isRawTxNItem for InvertedIndex.
+// Reports true when a FilesItem's endTxNum is not step-aligned — the
+// signature of a mode-C paired v4 .ef file whose honest endTxN =
+// lastTxN+1 lands mid-step.
+func (ii *InvertedIndex) isRawTxNItem(item *FilesItem) bool {
+	return item.endTxNum%ii.stepSize != 0
+}
+
+// v4FilesForStep returns the on-disk paths of every dirtyFiles v4 .ef
+// item whose range starts at step*stepSize — i.e. mode-C paired
+// inverted-index files anchored at THIS step's start. Sibling of
+// Domain.v4FilesForStep.
+func (ii *InvertedIndex) v4FilesForStep(step kv.Step) []string {
+	var paths []string
+	targetStart := uint64(step) * ii.stepSize
+	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if !ii.isRawTxNItem(item) {
+			return true
+		}
+		if item.startTxNum != targetStart {
+			return true
+		}
+		if item.decompressor == nil {
+			return true
+		}
+		paths = append(paths, item.decompressor.FilePath())
+		return true
+	})
+	return paths
+}
+
 func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))

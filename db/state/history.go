@@ -118,6 +118,40 @@ func (h *History) vAccessorNewFilePathV4(fromTxN, toTxN uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", version.V4_0.String(), h.FilenameBase, fromTxN, toTxN))
 }
 
+// isRawTxNItem — sibling of Domain.isRawTxNItem for History files.
+// Reports true when a FilesItem's endTxNum is not step-aligned — the
+// signature of a mode-C paired v4 .v file whose honest endTxN =
+// lastTxN+1 lands mid-step.
+func (h *History) isRawTxNItem(item *FilesItem) bool {
+	return item.endTxNum%h.stepSize != 0
+}
+
+// v4FilesForStep returns the on-disk paths of every dirtyFiles v4 .v
+// item whose range starts at step*stepSize — i.e. mode-C paired
+// history files anchored at THIS step's start. Retire's History.collate
+// must merge their content into the step-aligned .v output so pre-target
+// history entries emitted by mode-C's paired v4 emit aren't lost.
+// Sibling of Domain.v4FilesForStep — same predicate, different
+// dirtyFiles source.
+func (h *History) v4FilesForStep(step kv.Step) []string {
+	var paths []string
+	targetStart := uint64(step) * h.stepSize
+	h.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if !h.isRawTxNItem(item) {
+			return true
+		}
+		if item.startTxNum != targetStart {
+			return true
+		}
+		if item.decompressor == nil {
+			return true
+		}
+		paths = append(paths, item.decompressor.FilePath())
+		return true
+	})
+	return paths
+}
+
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, fromStep, toStep)
 }

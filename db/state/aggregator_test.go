@@ -1279,6 +1279,98 @@ func TestAggregator_BuildIndexAccessors_ProducesEFI(t *testing.T) {
 	require.NoError(t, err, "missing .efi at %s", efiPath)
 }
 
+// TestHistory_v4FilesForStep_ReturnsAnchoredV4V pins the enumeration
+// contract that History.collate will use to compose MDBX + v4 into the
+// step-aligned .v output (stage 8 of the mode-C v4 history-family
+// reconstitute plan). Mirrors Domain.v4FilesForStep's predicate:
+// isRawTxNItem AND startTxNum == step*stepSize.
+func TestHistory_v4FilesForStep_ReturnsAnchoredV4V(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 100)
+	ctx := t.Context()
+	h := agg.d[kv.AccountsDomain].History
+
+	// Build a v4 .v pair anchored at step start (fromTxN==step*stepSize)
+	// and integrate its FilesItem into History.dirtyFiles.
+	const step = kv.Step(10)
+	baseTxN := uint64(step) * h.stepSize
+	_, vPath := buildV4HistoryPairForTest(t, ctx, agg, kv.AccountsDomain, []byte("k"), baseTxN, []uint64{baseTxN + 1, baseTxN + 2})
+
+	// Open the .v as a decompressor and add a matching FilesItem to
+	// History.dirtyFiles — that's what OpenFolder does after
+	// FinalizeUnwind's rename lands.
+	vDec, err := seg.NewDecompressor(vPath)
+	require.NoError(t, err)
+	t.Cleanup(vDec.Close)
+	// Simulate a v4 item: startTxNum=baseTxN, endTxNum=baseTxN+3 (mid-step).
+	item := newFilesItem(baseTxN, baseTxN+3)
+	item.decompressor = vDec
+	h.dirtyFiles.Set(item)
+
+	got := h.v4FilesForStep(step)
+	require.Len(t, got, 1)
+	require.Equal(t, vPath, got[0])
+}
+
+// TestHistory_v4FilesForStep_ExcludesStepAlignedAndOtherAnchors:
+// step-aligned files (endTxN divides stepSize) and v4s anchored at a
+// different step must NOT be returned.
+func TestHistory_v4FilesForStep_ExcludesStepAlignedAndOtherAnchors(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 100)
+	ctx := t.Context()
+	h := agg.d[kv.AccountsDomain].History
+
+	const step = kv.Step(10)
+	baseTxN := uint64(step) * h.stepSize
+
+	// step-aligned .v (endTxN == (step+1)*stepSize) — not a v4.
+	_, alignedPath := buildV4HistoryPairForTest(t, ctx, agg, kv.AccountsDomain, []byte("a"), baseTxN, []uint64{baseTxN + 1})
+	alignedDec, err := seg.NewDecompressor(alignedPath)
+	require.NoError(t, err)
+	t.Cleanup(alignedDec.Close)
+	alignedItem := newFilesItem(baseTxN, uint64(step+1)*h.stepSize) // endTxN aligned
+	alignedItem.decompressor = alignedDec
+	h.dirtyFiles.Set(alignedItem)
+
+	// v4 anchored at a DIFFERENT step (step+1).
+	otherBase := uint64(step+1) * h.stepSize
+	_, otherPath := buildV4HistoryPairForTest(t, ctx, agg, kv.AccountsDomain, []byte("b"), otherBase, []uint64{otherBase + 1})
+	otherDec, err := seg.NewDecompressor(otherPath)
+	require.NoError(t, err)
+	t.Cleanup(otherDec.Close)
+	otherItem := newFilesItem(otherBase, otherBase+3)
+	otherItem.decompressor = otherDec
+	h.dirtyFiles.Set(otherItem)
+
+	got := h.v4FilesForStep(step)
+	require.Empty(t, got, "step-aligned items and other-anchor v4s must not be returned for step %d", step)
+}
+
+// TestInvertedIndex_v4FilesForStep_ReturnsAnchoredV4EF is the .ef
+// sibling of TestHistory_v4FilesForStep_ReturnsAnchoredV4V.
+func TestInvertedIndex_v4FilesForStep_ReturnsAnchoredV4EF(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 100)
+	ctx := t.Context()
+	ii := agg.d[kv.AccountsDomain].History.InvertedIndex
+
+	const step = kv.Step(20)
+	baseTxN := uint64(step) * ii.stepSize
+	efPath, _ := buildV4HistoryPairForTest(t, ctx, agg, kv.AccountsDomain, []byte("k"), baseTxN, []uint64{baseTxN + 1, baseTxN + 2})
+
+	efDec, err := seg.NewDecompressor(efPath)
+	require.NoError(t, err)
+	t.Cleanup(efDec.Close)
+	item := newFilesItem(baseTxN, baseTxN+3)
+	item.decompressor = efDec
+	ii.dirtyFiles.Set(item)
+
+	got := ii.v4FilesForStep(step)
+	require.Len(t, got, 1)
+	require.Equal(t, efPath, got[0])
+}
+
 // TestAggregator_BuildHistoryAccessors_RejectsUnparseableBaseName — the
 // parser rejects non-v4 shapes loudly instead of writing accessors at
 // wrong coords.
