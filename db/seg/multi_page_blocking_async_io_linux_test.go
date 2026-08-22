@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/mmap"
 )
 
-func TestMultiPageWarmRange(t *testing.T) {
+func TestMultiPageBlockingAsyncReadRange(t *testing.T) {
 	page := uint64(os.Getpagesize())
 	tests := []struct {
 		name       string
@@ -53,7 +53,7 @@ func TestMultiPageWarmRange(t *testing.T) {
 
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
-			offset, length, ok := multiPageWarmRange(tt.offset, tt.length)
+			offset, length, ok := multiPageBlockingAsyncReadRange(tt.offset, tt.length)
 			require.Equal(t, tt.wantOffset, offset)
 			require.Equal(t, tt.wantLength, length)
 			require.Equal(t, tt.wantOK, ok)
@@ -61,7 +61,7 @@ func TestMultiPageWarmRange(t *testing.T) {
 	}
 }
 
-func TestMultiPageAsyncIOSkipsPageSizedWord(t *testing.T) {
+func TestMultiPageBlockingAsyncIOSkipsPageSizedWord(t *testing.T) {
 	tmpDir := t.TempDir()
 	fileName := filepath.Join(tmpDir, "page-sized.kv")
 	cfg := DefaultCfg
@@ -79,9 +79,9 @@ func TestMultiPageAsyncIOSkipsPageSizedWord(t *testing.T) {
 	defer d.Close()
 
 	g := d.MakeGetter()
-	g.EnableMultiPageAsyncIO()
+	g.EnableMultiPageBlockingAsyncIO()
 	called := false
-	g.multiPageWarmer = func(_ *Getter, _, _ uint64) {
+	g.multiPageBlockingAsyncRead = func(_ *Getter, _, _ uint64) {
 		called = true
 	}
 	got, _ := g.Next(nil)
@@ -90,9 +90,9 @@ func TestMultiPageAsyncIOSkipsPageSizedWord(t *testing.T) {
 	require.False(t, called)
 }
 
-func TestMultiPageLiteralWarm(t *testing.T) {
+func TestMultiPageBlockingAsyncIO(t *testing.T) {
 	page := os.Getpagesize()
-	file, err := os.CreateTemp(t.TempDir(), "multi-page-warm-*.kv")
+	file, err := os.CreateTemp(t.TempDir(), "multi-page-blocking-async-io-*.kv")
 	require.NoError(t, err)
 	defer file.Close()
 
@@ -116,9 +116,9 @@ func TestMultiPageLiteralWarm(t *testing.T) {
 	require.False(t, resident)
 
 	g := &Getter{d: &Decompressor{f: file}}
-	g.EnableMultiPageAsyncIO()
-	require.NotNil(t, g.multiPageWarmer)
-	g.multiPageWarmer(g, 0, uint64(len(region)))
+	g.EnableMultiPageBlockingAsyncIO()
+	require.NotNil(t, g.multiPageBlockingAsyncRead)
+	g.multiPageBlockingAsyncRead(g, 0, uint64(len(region)))
 
 	resident, err = mmap.Resident(region)
 	require.NoError(t, err)
