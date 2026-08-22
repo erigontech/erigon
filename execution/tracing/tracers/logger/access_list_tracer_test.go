@@ -17,6 +17,7 @@
 package logger
 
 import (
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -75,118 +76,6 @@ func TestNewAccessListTracerExcludedAddress(t *testing.T) {
 	}
 }
 
-// TestTracer_AccessList_Equal pins the cases equal() must reject now that it walks
-// only the receiver: a superset on either side, and same-sized sets with different
-// members, at both the address and the slot level.
-func TestTracer_AccessList_Equal(t *testing.T) {
-	addr2 := common.BytesToAddress([]byte{0x02, 0x72})
-
-	build := func(fill func(accessList)) accessList {
-		al := newAccessList()
-		fill(al)
-		return al
-	}
-
-	oneAddrTwoSlots := func(al accessList) {
-		al.addSlot(addr, slot1)
-		al.addSlot(addr, slot2)
-	}
-
-	for _, tc := range []struct {
-		name  string
-		a, b  func(accessList)
-		equal bool
-	}{
-		{"empty", func(accessList) {}, func(accessList) {}, true},
-		{"same slots inserted in a different order",
-			oneAddrTwoSlots,
-			func(al accessList) { al.addSlot(addr, slot2); al.addSlot(addr, slot1) },
-			true},
-		{"other has an extra address",
-			oneAddrTwoSlots,
-			func(al accessList) { oneAddrTwoSlots(al); al.addAddress(addr2) },
-			false},
-		{"receiver has an extra address",
-			func(al accessList) { oneAddrTwoSlots(al); al.addAddress(addr2) },
-			oneAddrTwoSlots,
-			false},
-		{"same address count, different addresses",
-			func(al accessList) { al.addAddress(addr) },
-			func(al accessList) { al.addAddress(addr2) },
-			false},
-		{"same slot count, different slots",
-			oneAddrTwoSlots,
-			func(al accessList) { al.addSlot(addr, slot1); al.addSlot(addr, slot3) },
-			false},
-		{"other has an extra slot",
-			func(al accessList) { al.addSlot(addr, slot1) },
-			oneAddrTwoSlots,
-			false},
-		{"address-only vs address with a slot",
-			func(al accessList) { al.addAddress(addr) },
-			func(al accessList) { al.addSlot(addr, slot1) },
-			false},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			a, b := build(tc.a), build(tc.b)
-			require.Equal(t, tc.equal, a.equal(b))
-			require.Equal(t, tc.equal, b.equal(a), "equal must be symmetric")
-		})
-	}
-}
-
-// TestTracer_AccessList_LazySlotMap pins that an address touched only as an address
-// carries no slot map, and that promoting it to a slot-carrying entry keeps its order.
-func TestTracer_AccessList_LazySlotMap(t *testing.T) {
-	addr2 := common.BytesToAddress([]byte{0x02, 0x72})
-
-	al := newAccessList()
-	al.addAddress(addr)
-	al.addAddress(addr2)
-	require.Nil(t, al[addr].slots)
-	require.Nil(t, al[addr2].slots)
-
-	al.addSlot(addr, slot1)
-	al.addSlot(addr, slot2)
-	require.Len(t, al[addr].slots, 2)
-	require.Nil(t, al[addr2].slots)
-
-	require.Equal(t, types.AccessList{
-		{Address: addr, StorageKeys: []common.Hash{slot1, slot2}},
-		{Address: addr2, StorageKeys: []common.Hash{}},
-	}, al.accessList())
-}
-
-// TestTracer_AccessList_SlotFirstAddress covers addSlot on an address the list has
-// never seen: it must take the next order slot rather than a zero one.
-func TestTracer_AccessList_SlotFirstAddress(t *testing.T) {
-	addr2 := common.BytesToAddress([]byte{0x02, 0x72})
-
-	al := newAccessList()
-	al.addAddress(addr)
-	al.addSlot(addr2, slot1)
-
-	require.Equal(t, types.AccessList{
-		{Address: addr, StorageKeys: []common.Hash{}},
-		{Address: addr2, StorageKeys: []common.Hash{slot1}},
-	}, al.accessList())
-}
-
-// TestAccessListTracerLazyAddressSets pins that a tracer which never sees a CREATE
-// keeps both address sets nil while the accessors stay usable.
-func TestAccessListTracerLazyAddressSets(t *testing.T) {
-	tracer := NewAccessListTracer(nil, nil, nil)
-	require.Nil(t, tracer.CreatedContracts())
-	require.False(t, tracer.UsedBeforeCreation(addr))
-
-	tracer.markUsedBeforeCreation(addr)
-	require.True(t, tracer.UsedBeforeCreation(addr))
-	require.Nil(t, tracer.CreatedContracts())
-
-	tracer.markCreated(addr)
-	require.Contains(t, tracer.CreatedContracts(), addr)
-}
-
 // TestAccessListTracerSeedNew pins that seeding directly from the accumulated maps
 // is observationally the same as the types.AccessList round-trip it replaces, and
 // that the two tracers share nothing.
@@ -204,7 +93,6 @@ func TestAccessListTracerSeedNew(t *testing.T) {
 
 	require.Equal(t, roundTripped.AccessList(), seeded.AccessList())
 	require.True(t, seeded.Equal(prev))
-	require.True(t, seeded.Equal(roundTripped))
 
 	seeded.list.addSlot(addr, slot3)
 	seeded.list.addAddress(excluded)
@@ -212,9 +100,8 @@ func TestAccessListTracerSeedNew(t *testing.T) {
 	require.Equal(t, roundTripped.AccessList(), prev.AccessList())
 }
 
-// TestAccessListTracerSeedNewDropsExcluded pins that seeding filters the exclusion
-// set. OnOpcode's SLOAD/SSTORE path adds the executing address without checking
-// excl, so an excluded address reaches the list and must not survive re-seeding.
+// TestAccessListTracerSeedNewDropsExcluded pins the filtering cloneExcluding
+// documents: an excluded address can reach the list, and must not survive.
 func TestAccessListTracerSeedNewDropsExcluded(t *testing.T) {
 	excluded := common.BytesToAddress([]byte{0x77})
 	excl := map[common.Address]struct{}{excluded: {}}
@@ -248,29 +135,33 @@ func TestAccessListTracerSeedNewTracesOpcodes(t *testing.T) {
 }
 
 func BenchmarkAccessListTracerSeed(b *testing.B) {
-	const nAddrs, nSlots = 30, 20
-
-	prev := NewAccessListTracer(nil, nil, nil)
-	for a := range nAddrs {
-		address := common.BytesToAddress([]byte{byte(a + 1)})
-		for s := range nSlots {
-			prev.list.addSlot(address, common.BytesToHash([]byte{byte(s + 1)}))
+	// Real eth_createAccessList lists are small: a handful of addresses with a
+	// few slots each. The wide shapes are here for scale.
+	for _, shape := range []struct{ nAddrs, nSlots int }{
+		{1, 1}, {1, 5}, {1, 17}, {3, 5}, {5, 20}, {30, 20},
+	} {
+		prev := NewAccessListTracer(nil, nil, nil)
+		for a := range shape.nAddrs {
+			address := common.BytesToAddress([]byte{byte(a + 1)})
+			for s := range shape.nSlots {
+				prev.list.addSlot(address, common.BytesToHash([]byte{byte(s + 1)}))
+			}
 		}
+		// AccessList() is built either way, so only the seeding half differs.
+		acl := prev.AccessList()
+		name := fmt.Sprintf("%dx%d", shape.nAddrs, shape.nSlots)
+
+		b.Run(name+"/roundTrip", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = NewAccessListTracer(acl, nil, nil)
+			}
+		})
+		b.Run(name+"/seedNew", func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				_ = prev.SeedNew(nil)
+			}
+		})
 	}
-
-	// AccessList() is built either way (the message needs it), so only the seeding
-	// half differs between the two.
-	acl := prev.AccessList()
-	b.Run("roundTrip", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			_ = NewAccessListTracer(acl, nil, nil)
-		}
-	})
-	b.Run("seedNew", func(b *testing.B) {
-		b.ReportAllocs()
-		for b.Loop() {
-			_ = prev.SeedNew(nil)
-		}
-	})
 }

@@ -1047,7 +1047,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			}
 		}
 
-		// Retrieve the current access list to expand
+		// The message needs the list; the next tracer is seeded from the maps.
 		accessList := prevTracer.AccessList()
 		log.Trace("Creating access list", "input", accessList)
 
