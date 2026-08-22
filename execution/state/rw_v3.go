@@ -224,7 +224,6 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 			}
 
 			// Contract creation: clear stale storage before writing new account.
-			// Matches Writer.CreateContract which calls DomainDelPrefix.
 			//
 			// An address with no committed account holds no committed storage:
 			// storage is only written for an account that exists, and deleting
