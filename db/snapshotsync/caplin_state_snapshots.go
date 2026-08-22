@@ -25,6 +25,7 @@ import (
 	"fmt"
 	"math"
 	"os"
+	"path"
 	"path/filepath"
 	"runtime/debug"
 	"slices"
@@ -136,6 +137,10 @@ func MakeCaplinStateSnapshotsTypes(db kv.RoDB) SnapshotTypes {
 	}
 }
 
+// caplinDownloaderPrefix is how the downloader names caplin state files: it is rooted at
+// dirs.Snap while these live in dirs.SnapCaplin. See snapshotsync.go and downloader/util.go.
+const caplinDownloaderPrefix = "caplin"
+
 // value: chunked(ssz(SignedBeaconBlocks))
 // slot       -> beacon_slot_segment_offset
 
@@ -229,11 +234,26 @@ func (s *CaplinStateSnapshots) Close() {
 	s.BaseRoSnapshots.Close()
 }
 
+// RemoveOverlaps re-keys the removed names before reporting them. The base reports paths
+// relative to this collection's dir, but the downloader is rooted at dirs.Snap and registers
+// caplin files as caplin/<name>, always slash-separated — filepath.Join would miss on Windows.
 func (s *CaplinStateSnapshots) RemoveOverlaps(onDelete func(l []string) error) error {
 	if s == nil {
 		return nil
 	}
+	if onDelete != nil {
+		notify := onDelete
+		onDelete = func(l []string) error { return notify(downloaderKeys(l)) }
+	}
 	return s.BaseRoSnapshots.RemoveOverlaps(onDelete)
+}
+
+func downloaderKeys(names []string) []string {
+	keys := make([]string, len(names))
+	for i, name := range names {
+		keys[i] = path.Join(caplinDownloaderPrefix, filepath.ToSlash(name))
+	}
+	return keys
 }
 
 func (s *CaplinStateSnapshots) IndicesMax() uint64 {
