@@ -36,7 +36,6 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
@@ -45,50 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// the following 2 functions are replica for the test
-// This is a replica of `bor.GetValidatorBytes` function
-// This was needed because currently, `IsNapoli` will always return false.
-func GetValidatorBytesTest(h *Header) []byte {
-	if len(h.Extra) < ExtraVanityLength+ExtraSealLength {
-		log.Error("length of extra is less than vanity and seal")
-		return nil
-	}
-
-	var blockExtraData BlockExtraDataTest
-	if err := rlp.DecodeBytes(h.Extra[ExtraVanityLength:len(h.Extra)-ExtraSealLength], &blockExtraData); err != nil {
-		log.Error("error while decoding block extra data", "err", err)
-		return nil
-	}
-
-	return blockExtraData.ValidatorBytes
-}
-
-func GetTxDependencyTest(b *Block) [][]uint64 {
-	if len(b.header.Extra) < ExtraVanityLength+ExtraSealLength {
-		log.Error("length of extra less is than vanity and seal")
-		return nil
-	}
-
-	var blockExtraData BlockExtraDataTest
-	if err := rlp.DecodeBytes(b.header.Extra[ExtraVanityLength:len(b.header.Extra)-ExtraSealLength], &blockExtraData); err != nil {
-		log.Error("error while decoding block extra data", "err", err)
-		return nil
-	}
-
-	return blockExtraData.TxDependency
-}
-
-type BlockExtraDataTest struct {
-	// Validator bytes of bor
-	ValidatorBytes []byte
-
-	// length of TxDependency          ->   n (n = number of transactions in the block)
-	// length of TxDependency[i]       ->   k (k = a whole number)
-	// k elements in TxDependency[i]   ->   transaction indexes on which transaction i is dependent on
-	TxDependency [][]uint64
-}
-
-func TestTxDependencyBlockDecoding(t *testing.T) {
+func TestBlockDecodingNestedRLPExtra(t *testing.T) {
 	t.Parallel()
 
 	blockEnc := common.FromHex("f90270f9026ba00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000948888f1f195afa192cfee860698584c030f4c9db1a0ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000080832fefd8825208845506eb07b8710000000000000000000000000000000000000000000000000000000000000000cf8776616c20736574c6c20201c201800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498880000000000000000c0c0")
@@ -108,12 +64,6 @@ func TestTxDependencyBlockDecoding(t *testing.T) {
 	check("MixDigest", block.MixDigest(), common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
 	check("Root", block.Root(), common.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
 	check("Time", block.Time(), uint64(1426516743))
-
-	validatorBytes := GetValidatorBytesTest(block.header)
-	txDependency := GetTxDependencyTest(&block)
-
-	check("validatorBytes", validatorBytes, []byte("val set"))
-	check("txDependency", txDependency, [][]uint64{{2, 1}, {1, 0}})
 
 	ourBlockEnc, err := rlp.EncodeToBytes(&block)
 

@@ -728,9 +728,9 @@ func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	baseDir, require := t.TempDir(), require.New(t)
 
-	steps := []uint64{500_000, 100_000}
+	steps := []uint64{500_000}
 
-	for i, chain := range []string{networkname.Mainnet, networkname.Amoy} {
+	for i, chain := range []string{networkname.Mainnet} {
 		step := steps[i]
 		dir := filepath.Join(baseDir, chain)
 		chainSnapshotCfg, _ := snapcfg.KnownCfg(chain)
@@ -826,8 +826,8 @@ func TestParseCompressedFileName(t *testing.T) {
 		"v1-accounts.24-28.ef":                &fstest.MapFile{},
 		"v1.0-accounts.24-28.ef":              &fstest.MapFile{},
 		"salt-blocks.txt":                     &fstest.MapFile{},
-		"v1.0-022695-022696-transactions-to-block.idx":                     &fstest.MapFile{},
-		"v1-022695-022696-transactions-to-block.idx":                       &fstest.MapFile{},
+		"v1.0-022695-022696-transactions-to-block.idx": &fstest.MapFile{},
+		"v1-022695-022696-transactions-to-block.idx":   &fstest.MapFile{},
 		"preverified.toml":                                                 &fstest.MapFile{},
 		"idx/v1-tracesto.40-44.ef":                                         &fstest.MapFile{},
 		"v1.0-021700-021800-bodies.seg.torrent":                            &fstest.MapFile{},

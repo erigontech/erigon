@@ -67,7 +67,7 @@ func TestBlockReaderPrefersTxBlockView(t *testing.T) {
 	}
 	require.NoError(t, snapshots.OpenFolder())
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	// Pin a view, then retire the [0, mergeLimit) tx segment from the live set.
 	tx := blockFilesTxStub{view: snapshots.View()}
@@ -96,7 +96,7 @@ func TestBlockReaderRejectsTxWithoutBlockView(t *testing.T) {
 	defer snapshots.Close()
 	require.NoError(t, snapshots.OpenFolder())
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	require.Panics(t, func() {
 		blockReader.viewSingleFile(nil, snaptype2.Transactions, 0)
@@ -116,7 +116,7 @@ func TestIntegrityChecksUseTxBlockView(t *testing.T) {
 	defer snapshots.Close()
 	require.NoError(t, snapshots.OpenFolder())
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	require.Panics(t, func() {
 		_ = blockReader.IntegrityTxnID(t.Context(), blockFilesTxStub{}, true)
@@ -151,7 +151,7 @@ func TestBlockNumberUsesTxBlockView(t *testing.T) {
 	}
 	require.NoError(t, snapshots.OpenFolder())
 
-	txBlockIndex := TxBlockIndexFromBlockReader(NewBlockReader(snapshots, nil))
+	txBlockIndex := TxBlockIndexFromBlockReader(NewBlockReader(snapshots))
 	blockNum, ok, err := txBlockIndex.BlockNumber(t.Context(), tx, 1)
 	require.NoError(t, err)
 	require.False(t, ok, "bodies integrated after the view was pinned must be invisible to the tx")
@@ -174,7 +174,7 @@ func TestFrozenBlocksInViewUsesTxBlockView(t *testing.T) {
 	}
 	require.NoError(t, snapshots.OpenFolder())
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	tx := blockFilesTxStub{view: snapshots.View()}
 	defer tx.view.Close()

@@ -99,12 +99,10 @@ type FullBlockReader interface {
 
 	FrozenBlocks() uint64
 	FrozenBlocksInView(tx kv.Getter) uint64
-	FrozenBorBlocks(align bool) uint64
 	FreezingCfg() ethconfig.BlocksFreezing
 	CanPruneTo(currentBlockInDB uint64) (canPruneBlocksTo uint64)
 
 	Snapshots() BlockSnapshots
-	BorSnapshots() BlockSnapshots
 
 	Ready(ctx context.Context) <-chan error
 

@@ -28,12 +28,7 @@ import (
 // A re-added Bor chainspec registration would silently make these chains
 // selectable again, so pin that they stay unresolvable.
 func TestPolygonChainsUnsupported(t *testing.T) {
-	for _, name := range []string{
-		networkname.BorMainnet,
-		networkname.Amoy,
-		networkname.Mumbai,
-		networkname.BorDevnet,
-	} {
+	for _, name := range []string{"bor-mainnet", "amoy", "mumbai", "bor-devnet"} {
 		t.Run(name, func(t *testing.T) {
 			_, err := chainspec.ChainSpecByName(name)
 			require.Error(t, err)
