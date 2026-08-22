@@ -1058,13 +1058,26 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// We are inside the `blockResult != nil` branch, so at least one
 				// complete (non-partial) block has been applied in this batch.
 				// That is enough to safely trigger a batch commit on size.
+				//
+				// cocoon flashblock: during PRE-EXECUTE accumulation the block is left
+				// PARTIAL — block-end (systemEnd) is skipped (skipBlockEnd) so there is
+				// no seal to commit. Skip the commitment trigger too: computing a root
+				// over a part-executed block would produce a misleading per-round root
+				// (state without the block-end effects). The root is computed exactly
+				// once at the CLOSE (ValidateChain, FlashblockAccumulating unset), after
+				// systemEnd completes. "No root during accumulation."
+				accumulating := pe.isForkValidation && pe.doms.FlashblockAccumulating()
 				switch execLoopShouldExit(blockResult, sizeEst, batchLimit, pe.maxBlockNum, dbg.StopAfterBlock) {
 				case execLoopExitMaxReached:
 					pe.reachedMaxBlock.Store(true)
-					pe.triggerBatchCommitment(ctx)
+					if !accumulating {
+						pe.triggerBatchCommitment(ctx)
+					}
 					return nil
 				case execLoopExitSizeLimit, execLoopExitExhausted, execLoopExitStopAfter:
-					pe.triggerBatchCommitment(ctx)
+					if !accumulating {
+						pe.triggerBatchCommitment(ctx)
+					}
 					return nil
 				}
 			}
