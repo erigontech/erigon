@@ -880,6 +880,133 @@ func TestAccountRange(t *testing.T) {
 	})
 }
 
+func TestAccountRangeBlockTags(t *testing.T) {
+	m, chainPack, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newDebugApiForTest(m)
+	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf55")
+
+	// The test chain has 13 blocks (1–13). Set up forkchoice state with
+	// distinct positions so we can prove each tag resolves to its own block:
+	//   finalized = block 3
+	//   safe      = block 5
+	//   head      = block 10
+	finalizedBlock := chainPack.Blocks[2] // index 2 = block 3
+	safeBlock := chainPack.Blocks[4]      // index 4 = block 5
+	headBlock := chainPack.Blocks[9]      // index 9 = block 10
+
+	err := m.DB.Update(t.Context(), func(tx kv.RwTx) error {
+		rawdb.WriteForkchoiceFinalized(tx, finalizedBlock.Hash())
+		rawdb.WriteForkchoiceSafe(tx, safeBlock.Hash())
+		rawdb.WriteForkchoiceHead(tx, headBlock.Hash())
+		return nil
+	})
+	require.NoError(t, err)
+
+	t.Run("safe tag matches concrete block", func(t *testing.T) {
+		safeTag := rpc.SafeBlockNumber
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &safeTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		concreteNum := rpc.BlockNumber(safeBlock.NumberU64())
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
+	})
+
+	t.Run("finalized tag matches concrete block", func(t *testing.T) {
+		finalizedTag := rpc.FinalizedBlockNumber
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &finalizedTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		concreteNum := rpc.BlockNumber(finalizedBlock.NumberU64())
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
+	})
+
+	t.Run("safe and finalized return different state when blocks differ", func(t *testing.T) {
+		safeTag := rpc.SafeBlockNumber
+		safeResult, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &safeTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		finalizedTag := rpc.FinalizedBlockNumber
+		finalizedResult, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &finalizedTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		// Blocks 3 and 5 should have different state roots since they're different blocks.
+		require.NotEqual(t, safeResult.Root, finalizedResult.Root)
+	})
+
+	t.Run("latest tag matches forkchoice head", func(t *testing.T) {
+		latestTag := rpc.LatestBlockNumber
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		concreteNum := rpc.BlockNumber(headBlock.NumberU64())
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
+	})
+
+	t.Run("latestExecuted tag matches execution head", func(t *testing.T) {
+		latestExecutedTag := rpc.LatestExecutedBlockNumber
+		byTag, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestExecutedTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		concreteNum := rpc.BlockNumber(chainPack.Blocks[len(chainPack.Blocks)-1].NumberU64())
+		byNumber, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &concreteNum}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		require.Equal(t, byNumber, byTag)
+	})
+
+	t.Run("pending tag is rejected", func(t *testing.T) {
+		pendingTag := rpc.PendingBlockNumber
+		_, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &pendingTag}, addr[:], 10, true, true, nil)
+		require.Error(t, err)
+		require.Contains(t, err.Error(), "pending block not supported")
+	})
+
+	t.Run("earliest tag returns genesis state root", func(t *testing.T) {
+		earliestTag := rpc.EarliestBlockNumber
+		result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &earliestTag}, addr[:], 10, true, true, nil)
+		require.NoError(t, err)
+
+		tx, err := m.DB.BeginTemporalRo(m.Ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		genesis, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, 0)
+		require.NoError(t, err)
+		require.Equal(t, fmt.Sprintf("%x", genesis.Root), result.Root)
+	})
+}
+
+// TestAccountRange_UsesCommittedBlockResolution pins that AccountRange resolves
+// block tags against committed state, not the block overlay. With the overlay
+// head one past the MDBX-committed chain, "latest" must resolve to the committed
+// head — the overlay-only block has no committed state for NewDumper.
+func TestAccountRange_UsesCommittedBlockResolution(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+	addr := common.HexToAddress("0x0100000000000000000000000000000000000000")
+
+	latestTag := rpc.LatestBlockNumber
+	result, err := api.AccountRange(m.Ctx, rpc.BlockNumberOrHash{BlockNumber: &latestTag}, addr[:], 10, true, true, nil)
+	require.NoError(t, err)
+
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	committedHead, err := m.BlockReader.HeaderByNumber(m.Ctx, tx, overlayRaceChainSize)
+	require.NoError(t, err)
+	require.Equal(t, fmt.Sprintf("%x", committedHead.Root), result.Root,
+		"must resolve to the committed head, not the overlay-only block")
+}
+
 func TestGetModifiedAccountsByNumber(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	api := newDebugApiForTest(m)
