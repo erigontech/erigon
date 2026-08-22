@@ -555,8 +555,6 @@ var ChaindataTablesCfg = TableCfg{
 var AuRaTablesCfg = TableCfg{
 	Epoch:        {},
 	PendingEpoch: {},
-	Witnesses:    {Flags: DupSort},
-	WitnessSizes: {Flags: DupSort},
 }
 
 var TxpoolTablesCfg = TableCfg{}
