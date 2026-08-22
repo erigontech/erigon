@@ -244,7 +244,7 @@ func TestBlobHistoryDownloaderRetryRangesRemainFairAcrossSparseFailures(t *testi
 	downloader.addRetrySlot(1)
 	downloader.addRetrySlot(1_000_000)
 
-	require.NoError(t, downloader.retryFailedRecoveries())
+	require.NoError(t, downloader.retryFailedRecoveries(0))
 	require.Equal(t, []uint64{1, 1_000_000}, reader.slots)
 }
 
@@ -264,10 +264,10 @@ func TestBlobHistoryDownloaderRetryRangeExtensionPreservesProgress(t *testing.T)
 	downloader.blobStorage = blobStorage
 	downloader.retryRanges = []blobRetryRange{{start: 1, end: blocksBatchSize * 2, cursor: blocksBatchSize * 2}}
 
-	require.NoError(t, downloader.retryFailedRecoveries())
+	require.NoError(t, downloader.retryFailedRecoveries(0))
 	reader.slots = nil
 	downloader.addRetrySlot(blocksBatchSize*2 + 1)
-	require.NoError(t, downloader.retryFailedRecoveries())
+	require.NoError(t, downloader.retryFailedRecoveries(0))
 
 	require.Contains(t, reader.slots, uint64(1))
 }
@@ -295,7 +295,7 @@ func TestBlobHistoryDownloaderRetriesThirtyThreeSparseFailuresWithoutDenseFallba
 		require.Equal(t, retryRange.start, retryRange.end)
 	}
 	for range (failureCount + int(blocksBatchSize) - 1) / int(blocksBatchSize) {
-		require.NoError(t, downloader.retryFailedRecoveries())
+		require.NoError(t, downloader.retryFailedRecoveries(0))
 	}
 	for slot := range blocks {
 		require.Contains(t, reader.slots, slot)
@@ -318,6 +318,21 @@ func TestBlobHistoryDownloaderRetryRangeOverflowConservesEveryFailure(t *testing
 		}
 		require.Truef(t, contained, "retry slot %d was discarded", slot)
 	}
+}
+
+func TestBlobHistoryDownloaderDropsRetriesBeforeNonArchiveRetentionFloor(t *testing.T) {
+	retention := clparams.MainnetBeaconConfig.MinSlotsForBlobsSidecarsRequest()
+	headSlot := retention + 10
+	expiredSlot := uint64(9)
+	reader := &boundaryBlockReader{}
+	downloader := newBoundaryDownloader(t, headSlot, 0, 0, reader)
+	downloader.archiveBlobs = false
+	downloader.immediateBlobsBackfilling = true
+	downloader.addRetrySlot(expiredSlot)
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.NotContains(t, reader.slots, expiredSlot)
+	require.Empty(t, downloader.retryRanges)
 }
 
 func newBoundaryDownloader(t *testing.T, headSlot, frozenBlobs, targetSlot uint64, reader freezeblocks.BeaconSnapshotReader) *BlobHistoryDownloader {
