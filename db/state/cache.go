@@ -58,11 +58,9 @@ func (c *DomainGetFromFileCache) LogStats(dt kv.Domain) {
 	}
 }
 
+const domainGetFromFileCacheFreeListCap = 32
+
 func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
-	d := &domainVisible{
-		name:  name,
-		files: files,
-	}
 	limit := domainGetFromFileCacheLimit
 	if name == kv.CodeDomain {
 		limit /= 10 // CodeDomain has compressed values - means cache will store values (instead of pointers to mmap)
@@ -70,22 +68,34 @@ func newDomainVisible(name kv.Domain, files visibleFiles) *domainVisible {
 	if limit == 0 {
 		domainGetFromFileCacheEnabled = false
 	}
-	d.caches = &sync.Pool{New: func() any { return NewDomainGetFromFileCache(limit) }}
-	return d
+	return &domainVisible{
+		name:       name,
+		files:      files,
+		caches:     make(chan *DomainGetFromFileCache, domainGetFromFileCacheFreeListCap),
+		cacheLimit: limit,
+	}
 }
 
 func (v *domainVisible) newGetFromFileCache() *DomainGetFromFileCache {
 	if !domainGetFromFileCacheEnabled {
 		return nil
 	}
-	return v.caches.Get().(*DomainGetFromFileCache)
+	select {
+	case c := <-v.caches:
+		return c
+	default:
+		return NewDomainGetFromFileCache(v.cacheLimit)
+	}
 }
 func (v *domainVisible) returnGetFromFileCache(c *DomainGetFromFileCache) {
 	if c == nil {
 		return
 	}
 	c.LogStats(v.name)
-	v.caches.Put(c)
+	select {
+	case v.caches <- c:
+	default:
+	}
 }
 
 var (
