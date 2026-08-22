@@ -56,8 +56,8 @@ func (reset *Reset) Run() (err error) {
 	if reset.RemoveLocal {
 		// Left over from Polygon support; harmless on chains that never had them.
 		for _, extraDir := range []slashName{
-			"heimdall",
-			"polygon-bridge",
+			dbcfg.HeimdallDB,
+			dbcfg.PolygonBridgeDB,
 		} {
 			// Probably shouldn't log these unless they existed, it would confuse the user for
 			// unrelated chains.

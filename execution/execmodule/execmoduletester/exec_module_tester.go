@@ -430,6 +430,8 @@ func applyOptions(opts []Option) options {
 	// engine depends on genesis
 	if opt.engine == nil {
 		switch {
+		case opt.genesis.Config.Bor != nil:
+			panic("Polygon is not supported")
 		case opt.genesis.Config.TerminalTotalDifficultyPassed:
 			opt.engine = merge.NewFaker(ethash.NewFaker())
 		default:

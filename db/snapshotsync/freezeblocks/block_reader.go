@@ -384,7 +384,7 @@ func (r *BlockReader) Snapshots() dbservices.BlockSnapshots   { return r.sn }
 func (r *BlockReader) Ready(ctx context.Context) <-chan error { return r.sn.Ready(ctx) }
 
 func (r *BlockReader) AllTypes() []snaptype.Type {
-	return append([]snaptype.Type{}, r.sn.Types()...)
+	return slices.Clone(r.sn.Types())
 }
 
 func (r *BlockReader) FrozenBlocks() uint64 { return r.sn.BlocksAvailable() }
