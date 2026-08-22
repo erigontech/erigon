@@ -20,9 +20,11 @@ import (
 	"errors"
 	"fmt"
 	"math"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
+	"github.com/stretchr/testify/require"
 
 	jsoniter "github.com/json-iterator/go"
 )
@@ -1064,4 +1066,26 @@ func (w *failingWriter) Write(p []byte) (n int, err error) {
 	}
 	w.bytesWritten += len(p)
 	return len(p), nil
+}
+
+var errWriterGone = errors.New("client gone")
+
+type goneWriter struct{}
+
+func (goneWriter) Write([]byte) (int, error) { return 0, errWriterGone }
+
+// TestFlushErrorDoesNotBuffer pins that a disconnected client cannot make a
+// response accumulate. jsoniter's Flush returns early on a latched error without
+// truncating, so ignoring it would restore the unbounded growth this bounds.
+func TestFlushErrorDoesNotBuffer(t *testing.T) {
+	s := New(goneWriter{}).(*StackStream)
+
+	chunk := strings.Repeat("x", 4096)
+	for range 2000 {
+		s.WriteRaw(chunk)
+	}
+
+	require.Less(t, len(s.stream.Buffer()), 2*FlushThreshold,
+		"buffer grew to %d after the writer failed", len(s.stream.Buffer()))
+	require.Error(t, s.Error(), "the failure must still be reported")
 }
