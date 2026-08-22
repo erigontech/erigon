@@ -887,6 +887,15 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 	collation.Close()
 
+	// Compose any pre-existing mode-C paired v4 .v/.ef files anchored at
+	// this step's start into the just-finalized MDBX-only outputs.
+	// No-op when h.v4FilesForStep(step) returns empty. Must happen before
+	// the Decompressor.Open calls below so accessors index the merged
+	// content, not the MDBX-only tail.
+	if err = h.mergeV4IntoStepFile(ctx, step, collation.historyPath, collation.efHistoryPath); err != nil {
+		return HistoryFiles{}, fmt.Errorf("merge %s v4 into step file: %w", h.FilenameBase, err)
+	}
+
 	efHistoryDecomp, err = seg.NewDecompressor(collation.efHistoryPath)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.FilenameBase, err)

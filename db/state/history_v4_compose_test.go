@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
@@ -241,6 +242,107 @@ func TestHistory_mergeV4AndMDBXHistoryFiles_OverlappingTxNsError(t *testing.T) {
 	err := h.mergeV4AndMDBXHistoryFiles(ctx, baseTxN, v4EF, v4V, mdbxEF, mdbxV, outEF, outV)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "txN range overlap")
+}
+
+// TestHistory_buildFiles_MergesV4WhenPresent pins the wire contract
+// of stage 8c: History.buildFiles must call mergeV4IntoStepFile between
+// Compress and Decompressor.Open so the accessor (.vi) indexes the
+// MERGED content, not the MDBX-only tail. Constructs a collation-like
+// pair with just one key K, then adds a v4 pair for the same step but a
+// different key L. After buildFiles, the .ef must contain BOTH keys and
+// the .vi must resolve entries for both.
+func TestHistory_buildFiles_MergesV4WhenPresent(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 100)
+	ctx := t.Context()
+	h := agg.d[kv.AccountsDomain].History
+
+	const step = kv.Step(7)
+	baseTxN := uint64(step) * h.stepSize
+
+	// Build a v4 (.v, .ef) at the aggregator's v4 naming for step 7,
+	// covering the first-half range only. Contents: key L at txN
+	// baseTxN+5, baseTxN+6.
+	v4EFPath, v4VPath := buildV4HistoryPairForTest(t, ctx, agg, kv.AccountsDomain, []byte("L-key-long-enough-for-recsplit"), baseTxN, []uint64{baseTxN + 5, baseTxN + 6})
+	// Register the v4 in dirtyFiles so v4FilesForStep(7) finds it.
+	v4VDec, err := seg.NewDecompressor(v4VPath)
+	require.NoError(t, err)
+	t.Cleanup(v4VDec.Close)
+	v4VItem := newFilesItem(baseTxN, baseTxN+7)
+	v4VItem.decompressor = v4VDec
+	h.dirtyFiles.Set(v4VItem)
+
+	v4EFDec, err := seg.NewDecompressor(v4EFPath)
+	require.NoError(t, err)
+	t.Cleanup(v4EFDec.Close)
+	v4EFItem := newFilesItem(baseTxN, baseTxN+7)
+	v4EFItem.decompressor = v4EFDec
+	h.InvertedIndex.dirtyFiles.Set(v4EFItem)
+
+	// Build a synthetic "MDBX-only" collation via HistoryCollation with a
+	// key K in the second-half range. We fabricate the compressors that
+	// buildFiles will Compress + read back.
+	collVPath := h.vNewFilePath(step, step+1)
+	collEFPath := h.efNewFilePath(step, step+1)
+
+	cfg := seg.DefaultCfg
+	cfg.MinPatternScore = 1
+	cfg.Workers = 1
+
+	efComp, err := seg.NewCompressor(ctx, "coll-ef", collEFPath, h.dirs.Tmp, cfg, log.LvlDebug, h.logger)
+	require.NoError(t, err)
+	efWriter := seg.NewWriter(efComp, h.InvertedIndex.Compression)
+
+	vComp, err := seg.NewCompressor(ctx, "coll-v", collVPath, h.dirs.Tmp, cfg.WithValuesOnCompressedPage(1), log.LvlDebug, h.logger)
+	require.NoError(t, err)
+	vWriter := seg.NewPagedWriter(ctx, seg.NewWriter(vComp, h.Compression), true, 1)
+
+	// Write MDBX-only entry for key K at txN baseTxN+50, baseTxN+60.
+	kKey := []byte("K-key-long-enough-for-recsplit")
+	kTxNs := []uint64{baseTxN + 50, baseTxN + 60}
+	builder := multiencseq.NewBuilder(baseTxN, uint64(len(kTxNs)), kTxNs[len(kTxNs)-1])
+	for _, txN := range kTxNs {
+		builder.AddOffset(txN)
+	}
+	builder.Build()
+	_, err = efWriter.Write(kKey)
+	require.NoError(t, err)
+	_, err = efWriter.Write(builder.AppendBytes(nil))
+	require.NoError(t, err)
+	for _, txN := range kTxNs {
+		hk := make([]byte, 8+len(kKey))
+		binary.BigEndian.PutUint64(hk, txN)
+		copy(hk[8:], kKey)
+		require.NoError(t, vWriter.Add(hk, []byte("kv-value")))
+	}
+	require.NoError(t, vWriter.Flush())
+
+	coll := HistoryCollation{
+		efHistoryComp: efWriter, // buildFiles will Compress this
+		efHistoryPath: collEFPath,
+		efBaseTxNum:   baseTxN,
+		historyComp:   vWriter, // buildFiles will Compress this
+		historyPath:   collVPath,
+	}
+
+	// Now run buildFiles — this should Compress, run mergeV4IntoStepFile,
+	// then build accessors over the MERGED content.
+	files, err := h.buildFiles(ctx, step, coll, background.NewProgressSet())
+	require.NoError(t, err)
+	defer files.CleanupOnError()
+
+	// Inspect the merged .ef: must contain BOTH keys in ascending order.
+	efReader := h.InvertedIndex.dataReader(files.efHistoryDecomp)
+	efReader.Reset(0)
+	var mergedKeys [][]byte
+	for efReader.HasNext() {
+		k, _ := efReader.Next(nil)
+		mergedKeys = append(mergedKeys, append([]byte(nil), k...))
+		require.True(t, efReader.HasNext(), "key without paired seq")
+		_, _ = efReader.Next(nil)
+	}
+	// Alphabetical: K-key < L-key, so the merged order is [K, L].
+	require.Equal(t, [][]byte{kKey, []byte("L-key-long-enough-for-recsplit")}, mergedKeys)
 }
 
 // TestHistory_mergeV4IntoStepFile_NoV4Present pins the no-op branch:
