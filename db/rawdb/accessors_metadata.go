@@ -31,7 +31,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
@@ -50,11 +49,7 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 	}
 
 	if config.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		if err := jsoniter.ConfigFastest.Unmarshal(config.BorJSON, borConfig); err != nil {
-			return nil, fmt.Errorf("invalid chain config 'bor' JSON: %x, %w", hash, err)
-		}
-		config.Bor = borConfig
+		return nil, fmt.Errorf("chain config %x carries a 'bor' section: Polygon is not supported, see https://github.com/0xPolygon/erigon", hash)
 	}
 	return &config, nil
 }
@@ -63,14 +58,6 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 	if cfg == nil {
 		return nil
-	}
-
-	if cfg.Bor != nil {
-		borJSON, err := jsoniter.ConfigFastest.Marshal(cfg.Bor)
-		if err != nil {
-			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
-		}
-		cfg.BorJSON = borJSON
 	}
 
 	// L2 resolution from L2JSON is owned by the registering L2 package, so

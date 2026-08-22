@@ -901,7 +901,7 @@ func (c *Bor) FinalizeAndAssemble(chainConfig *chain.Config, header *types.Heade
 
 func (c *Bor) Initialize(config *chain.Config, chain rules.ChainHeaderReader, header *types.Header,
 	state *state.IntraBlockState, syscall rules.SysCallCustom, logger log.Logger, tracer *tracing.Hooks) error {
-	if chain != nil && chain.Config().IsBhilai(header.Number.Uint64()) {
+	if chain != nil && c.config.IsBhilai(header.Number.Uint64()) {
 		if err := misc.StoreBlockHashesEip2935(header, state); err != nil {
 			return err
 		}

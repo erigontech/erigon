@@ -428,10 +428,7 @@ const (
 )
 
 func GetPruneMarkerSafeThreshold(blockReader dbservices.FullBlockReader) uint64 {
-	snapProgress := min(blockReader.FrozenBorBlocks(false), blockReader.FrozenBlocks())
-	if blockReader.BorSnapshots() == nil {
-		snapProgress = blockReader.FrozenBlocks()
-	}
+	snapProgress := blockReader.FrozenBlocks()
 	if snapProgress < pruneMarkerSafeThreshold {
 		return 0
 	}
