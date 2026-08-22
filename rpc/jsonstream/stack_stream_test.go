@@ -827,16 +827,12 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 	assert.Equal(t, `{"raw":42,"normal":42}`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
 
-	// Test using Write method
+	// Test writing already-encoded JSON held as bytes
 	ss.Reset(nil)
 	ss.WriteArrayStart()
-	n, err := ss.Write([]byte(`"hello"`))
-	assert.NoError(t, err)
-	assert.Equal(t, 7, n)
+	ss.WriteRawBytes([]byte(`"hello"`))
 	ss.WriteMore()
-	n, err = ss.Write([]byte(`123`))
-	assert.NoError(t, err)
-	assert.Equal(t, 3, n)
+	ss.WriteRawBytes([]byte(`123`))
 	ss.WriteArrayEnd()
 
 	assert.Equal(t, `["hello",123]`, string(ss.Buffer()))

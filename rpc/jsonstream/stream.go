@@ -27,7 +27,9 @@ type Stream interface {
 
 	Buffer() []byte
 	Reset(out io.Writer)
-	Write(content []byte) (int, error)
+	// Error reports a failure to deliver what has been written. Value writers
+	// cannot fail, so this and Flush are the only places one shows up.
+	Error() error
 	// WriteRawBytes writes already-encoded JSON, like WriteRaw does for a string.
 	// Nothing is escaped or validated, and the bytes stay buffered.
 	WriteRawBytes(content []byte)
