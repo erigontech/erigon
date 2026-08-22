@@ -116,7 +116,7 @@ func (s *JsoniterStream) WriteFloat64(val float64) {
 }
 
 func (s *JsoniterStream) WriteString(val string) {
-	s.stream.WriteString(val)
+	writeStringFast(s.stream, val)
 }
 
 func (s *JsoniterStream) WriteObjectStart() {
