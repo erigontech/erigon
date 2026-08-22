@@ -1511,3 +1511,35 @@ func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
 	require.Equal(t, coinbaseBalance.WriteHeader.Version, coinbaseAddress.WriteHeader.Version,
 		"AddressPath sibling must share version with the BalancePath write")
 }
+
+// TestFinalizeTxSimple_SenderIsCoinbase_ZeroTipForcesEmit verifies the write-side
+// coinbase-consistency fix: when the worker wrote the coinbase balance directly
+// (sender==coinbase) but the net change is zero, calcFees must still emit the
+// coinbase BalancePath write (and its AddressPath sibling) so the whole-account
+// record stays current instead of leaving the worker's raw gas-debit value with
+// no consistent sibling.
+func TestFinalizeTxSimple_SenderIsCoinbase_ZeroTipForcesEmit(t *testing.T) {
+	t.Parallel()
+	const (
+		preBlockBal  = uint64(1_000_000)
+		postDebitBal = uint64(979_000)
+	)
+	s := senderIsCoinbaseScenario(t, 0, preBlockBal, 0 /* tip */, false)
+
+	s.txOut.SetBalance(s.coinbase, &state.VersionedWrite[uint256.Int]{
+		WriteHeader: state.WriteHeader{Address: s.coinbase, Path: state.BalancePath},
+		Val:         *uint256.NewInt(postDebitBal),
+	})
+
+	writes := s.runFinalizeTx(t, nil)
+
+	coinbaseWrite := findBalance(writes, s.coinbase)
+	require.NotNil(t, coinbaseWrite,
+		"calcFees must force-emit a coinbase BalancePath write at zero tip when the worker wrote the coinbase directly, keeping the whole-account record current")
+	assert.Equal(t, *uint256.NewInt(postDebitBal), coinbaseWrite.Val,
+		"force-emitted coinbase balance must be the worker's post-debit value")
+
+	addrWrite := findAddress(writes, s.coinbase)
+	require.NotNil(t, addrWrite,
+		"the AddressPath sibling must be emitted alongside so a whole-account read sees the current balance")
+}

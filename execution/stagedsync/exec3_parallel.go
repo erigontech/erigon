@@ -2408,8 +2408,10 @@ func (result *execResult) calcFees(
 	coinbaseEmptyCodeHash := coinbaseAcc == nil || coinbaseAcc.IsEmptyCodeHash()
 	coinbaseSelfdestructed := false
 	coinbaseCreatedContract := false
+	cbOverride := false
 	if bw, ok := result.TxOut.GetBalance(result.Coinbase); ok {
 		newCoinbaseBalance = bw.Val
+		cbOverride = true
 	}
 	if nw, ok := result.TxOut.GetNonce(result.Coinbase); ok {
 		coinbaseNonce = nw.Val
@@ -2447,7 +2449,15 @@ func (result *execResult) calcFees(
 	// nothing produces no write. Serial withholds a created-empty account
 	// (withholdCreatedEmptyAccounts) rather than emit a delete, so synthesizing a
 	// SelfDestructPath here would diverge from the canonical block access list.
-	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance
+	//
+	// cbOverride: a sender==coinbase tx's worker wrote the coinbase balance
+	// directly (the gas debit). calcFees must always re-materialize the coinbase
+	// here — Balance and its AddressPath sibling together — even when the net
+	// change is zero, so the coinbase's whole-account record stays current and
+	// consistent with its balance cell. Otherwise the worker's raw gas-debit value
+	// (and a missing/stale AddressPath sibling) is left behind, and a later tx that
+	// reads the coinbase whole-account gets a stale embedded balance.
+	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || cbOverride
 
 	addWrites := &state.WriteSet{}
 	if emitCoinbase {
