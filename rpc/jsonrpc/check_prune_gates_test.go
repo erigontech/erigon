@@ -27,12 +27,12 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
@@ -229,6 +229,40 @@ func TestReceiptsGateFollowsHistoryWherePostStateIsComputed(t *testing.T) {
 		"a pre-Byzantium receipt inside history is re-executed")
 	require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, pruneGatingByzantiumHeight+1),
 		"from the fork on, the kept cache answers")
+}
+
+// TestReceiptsGateReadsFrozenBlocksNotStageProgress pins where the "does the datadir
+// hold frozen blocks" question is answered: the block reader. The snapshots stage
+// progress is no proxy — the stage records the minimum sync progress on a node with
+// no snapshot file at all, so reading it makes a fresh chain skip the post-state
+// computation and serve pre-Byzantium receipts with status instead of root.
+func TestReceiptsGateReadsFrozenBlocksNotStageProgress(t *testing.T) {
+	t.Parallel()
+
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepAllBlocksPruneMode,
+			Receipts: prune.KeepAllReceiptsPruneMode,
+		},
+		persistReceipts: true,
+		chainConfig:     byzantiumChainConfig(pruneGatingByzantiumHeight),
+	})
+	ctx := t.Context()
+
+	rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	require.NoError(t, stages.SaveStageProgress(rwTx, stages.Snapshots, pruneGatingChainLen))
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	historyOldest := pruneGatingDistance.PruneTo(pruneGatingChainLen)
+	err = apis.eth.checkReceiptsAvailable(ctx, tx, historyOldest-1)
+	require.ErrorIs(t, err, state.PrunedError,
+		"no snapshot file is on disk, so the post state is still computed and follows history")
 }
 
 // TestBlockReceiptsGateCombinesBothBoundaries pins that the composed gate rejects
@@ -1199,39 +1233,6 @@ func TestBlocksGateReopensWhenOlderBlocksArrive(t *testing.T) {
 
 	require.NoError(t, gateOnOldBlock(),
 		"pre-merge blocks arriving later must reopen the gate")
-}
-
-// frozenBlocksPanicReader mirrors the remote block reader, whose FrozenBlocks panics
-// with "not supported": a gate reachable on a remote rpcdaemon must not call it.
-type frozenBlocksPanicReader struct{ dbservices.FullBlockReader }
-
-func (frozenBlocksPanicReader) FrozenBlocks() uint64 { panic("not supported") }
-
-// TestReceiptGatesSurviveARemoteBlockReader pins that the receipt gate and
-// eth_capabilities answer on a remote rpcdaemon: both need to know whether the datadir
-// holds frozen blocks, which the remote block reader cannot report.
-func TestReceiptGatesSurviveARemoteBlockReader(t *testing.T) {
-	t.Parallel()
-
-	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
-		mode:        prune.ArchiveMode,
-		chainConfig: byzantiumChainConfig(pruneGatingByzantiumHeight),
-	})
-	apis.eth._blockReader = frozenBlocksPanicReader{apis.eth._blockReader}
-	ctx := t.Context()
-	tx, err := apis.eth.db.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	defer tx.Rollback()
-
-	require.Less(t, chainInfo.old.num, pruneGatingByzantiumHeight,
-		"the probed block must be pre-Byzantium for this to test anything")
-	require.NotPanics(t, func() {
-		require.NoError(t, apis.eth.checkReceiptsAvailable(ctx, tx, chainInfo.old.num))
-	})
-	require.NotPanics(t, func() {
-		_, err := apis.eth.Capabilities(ctx)
-		require.NoError(t, err)
-	})
 }
 
 // TestLogsByHashGateAppliesOnCachedReceipts pins that a cached receipt set is gated

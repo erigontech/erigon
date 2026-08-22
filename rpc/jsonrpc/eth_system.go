@@ -212,11 +212,7 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	if chainConfig.ByzantiumBlock != nil {
 		byzantium = *chainConfig.ByzantiumBlock
 	}
-	frozenBlocks, err := api.frozenBlocks(tx)
-	if err != nil {
-		return nil, err
-	}
-	if receiptsOldest < byzantium && (frozenBlocks == 0 || keepExecutionProofs) {
+	if receiptsOldest < byzantium && (api._blockReader.FrozenBlocks() == 0 || keepExecutionProofs) {
 		if stateOldest < byzantium {
 			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
 		} else {

@@ -139,8 +139,18 @@ func (r *RemoteBlockReader) HeaderByNumber(ctx context.Context, tx kv.Getter, bl
 }
 func (r *RemoteBlockReader) Snapshots() dbservices.BlockSnapshots  { panic("not implemented") }
 func (r *RemoteBlockReader) AllTypes() []snaptype.Type             { panic("not implemented") }
-func (r *RemoteBlockReader) FrozenBlocks() uint64                  { panic("not supported") }
 func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not supported") }
+
+// FrozenBlocks is answered by the backend. The signature leaves no way to surface an
+// error, so a failed call reports zero, the conservative answer for every caller.
+func (r *RemoteBlockReader) FrozenBlocks() uint64 {
+	reply, err := r.client.FrozenBlocks(context.Background(), &emptypb.Empty{})
+	if err != nil {
+		log.Warn("[frozen-blocks] backend did not answer", "err", err)
+		return 0
+	}
+	return reply.FrozenBlocks
+}
 
 func (r *RemoteBlockReader) HeaderByHash(ctx context.Context, tx kv.Getter, hash common.Hash) (*types.Header, error) {
 	blockNum, err := r.HeaderNumber(ctx, tx, hash)

@@ -535,3 +535,7 @@ func (s *EthBackendServer) MinimumBlockAvailable(ctx context.Context, req *empty
 	blockNum, err := s.blockReader.MinimumBlockAvailable(ctx, tx)
 	return &remoteproto.MinimumBlockAvailableReply{BlockNum: blockNum}, err
 }
+
+func (s *EthBackendServer) FrozenBlocks(ctx context.Context, req *emptypb.Empty) (*remoteproto.FrozenBlocksReply, error) {
+	return &remoteproto.FrozenBlocksReply{FrozenBlocks: s.blockReader.FrozenBlocks()}, nil
+}

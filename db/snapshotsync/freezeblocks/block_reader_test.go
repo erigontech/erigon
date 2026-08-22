@@ -18,6 +18,7 @@ package freezeblocks
 
 import (
 	"context"
+	"errors"
 	"os"
 	"path/filepath"
 	"testing"
@@ -25,6 +26,8 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
+	"google.golang.org/grpc"
+	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
@@ -43,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/ethconfig"
+	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
 
 // createTestSegmentFile creates a minimal snapshot segment file for testing
@@ -602,4 +606,34 @@ func TestTxBlockView_StaleUntilReopen(t *testing.T) {
 	// Fix: reopening the tx's underlying-files view exposes the bodies.
 	rwTx.(kv.CanReopenUnderlyingFilesTx).ForceReopenUnderlyingFilesTx()
 	require.Positive(t, bodiesInTxView())
+}
+
+// frozenBlocksBackendClient stubs the one call under test; every other method of the
+// embedded interface stays nil and panics if reached.
+type frozenBlocksBackendClient struct {
+	remoteproto.ETHBACKENDClient
+	reply *remoteproto.FrozenBlocksReply
+	err   error
+}
+
+func (c frozenBlocksBackendClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	return c.reply, c.err
+}
+
+// TestRemoteBlockReaderFrozenBlocks pins that the remote reader answers FrozenBlocks
+// through the backend instead of panicking: the receipt gates and eth_capabilities
+// reach it on a remote rpcdaemon. The signature leaves no way to surface an error, so
+// a failed call reports zero, the conservative answer for every caller.
+func TestRemoteBlockReaderFrozenBlocks(t *testing.T) {
+	t.Parallel()
+
+	reader := NewRemoteBlockReader(frozenBlocksBackendClient{reply: &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}})
+	require.NotPanics(t, func() {
+		require.Equal(t, uint64(42), reader.FrozenBlocks())
+	})
+
+	failing := NewRemoteBlockReader(frozenBlocksBackendClient{err: errors.New("backend down")})
+	require.NotPanics(t, func() {
+		require.Zero(t, failing.FrozenBlocks())
+	})
 }

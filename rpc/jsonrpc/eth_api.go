@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/rules"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -614,20 +613,10 @@ func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uin
 	if chainConfig.IsByzantium(block) {
 		return false, nil
 	}
-	frozenBlocks, err := api.frozenBlocks(tx)
-	if err != nil {
-		return false, err
-	}
-	if frozenBlocks == 0 {
+	if api._blockReader.FrozenBlocks() == 0 {
 		return true, nil
 	}
 	return api.commitmentHistoryEnabled(tx)
-}
-
-// frozenBlocks mirrors the block reader's FrozenBlocks through the snapshots stage
-// progress, which a remote rpcdaemon can read where its block reader cannot answer.
-func (api *BaseAPI) frozenBlocks(tx kv.Tx) (uint64, error) {
-	return stages.GetStageProgress(tx, stages.Snapshots)
 }
 
 // checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.
