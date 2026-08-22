@@ -284,7 +284,7 @@ func TestOverloadedRequestGets503(t *testing.T) {
 	require.NoError(t, srv.RegisterName("test", new(overloadService)))
 
 	body := `{"jsonrpc":"2.0","id":1,"method":"test_reject","params":[]}`
-	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
 	req.Header.Set("Content-Type", "application/json")
 	rec := httptest.NewRecorder()
 	srv.ServeHTTP(rec, req)
