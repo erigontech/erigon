@@ -165,8 +165,8 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(m.DB, nil, "", overrideOsakaTime, nil, true, datadir.New(t.TempDir()), logger)
 
 	require.Error(t, err)
-	compatErr, ok := err.(*chain.ConfigCompatError)
-	require.True(t, ok, "want *chain.ConfigCompatError, got %T: %v", err, err)
+	var compatErr *chain.ConfigCompatError
+	require.ErrorAs(t, err, &compatErr, "want *chain.ConfigCompatError, got %T: %v", err, err)
 	require.Equal(t, "Osaka fork timestamp", compatErr.What)
 	require.True(t, compatErr.IsTimestampFork())
 	require.Zero(t, compatErr.RewindToTime)
