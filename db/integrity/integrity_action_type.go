@@ -46,7 +46,7 @@ const (
 
 	// HistoryNoSystemTxs verifies system transactions don't appear at block start.
 	// Samples history data to ensure the first transaction in each block's history
-	// is not a system transaction (except genesis). Used in Polygon chain validation.
+	// is not a system transaction (except genesis).
 	HistoryNoSystemTxs Check = "HistoryNoSystemTxs"
 
 	// ReceiptsNoDups validates receipt data monotonicity. Checks that cumulative gas used

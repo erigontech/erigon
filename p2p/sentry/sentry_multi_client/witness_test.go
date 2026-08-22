@@ -73,13 +73,13 @@ func addTestWitnessData(db kv.TemporalRwDB, hash common.Hash, witnessData []byte
 	}
 
 	witnessKey := dbutils.HeaderKey(blockNumber, hash)
-	err = tx.Put(kv.BorWitnesses, witnessKey, witnessData)
+	err = tx.Put(kv.Witnesses, witnessKey, witnessData)
 	if err != nil {
 		return err
 	}
 
 	sizeBytes := dbutils.EncodeBlockNumber(uint64(len(witnessData)))
-	err = tx.Put(kv.BorWitnessSizes, witnessKey, sizeBytes)
+	err = tx.Put(kv.WitnessSizes, witnessKey, sizeBytes)
 	if err != nil {
 		return err
 	}

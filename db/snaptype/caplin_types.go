@@ -45,5 +45,5 @@ func init() {
 }
 
 func IsCaplinType(t Enum) bool {
-	return t >= MinCaplinEnum && t < MinBorEnum
+	return t >= MinCaplinEnum && t < MaxCaplinEnum
 }

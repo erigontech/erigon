@@ -19,7 +19,6 @@ package datadir
 import (
 	"errors"
 	"fmt"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"io/fs"
 	"os"
 	"path/filepath"
@@ -416,7 +415,7 @@ func (d *Dirs) RenameNewVersions() error {
 
 	// Left over from Polygon support: remove the aux DB dirs if an old datadir still has them.
 	if d.DataDir != "" {
-		for _, legacy := range []string{dbcfg.PolygonBridgeDB, dbcfg.HeimdallDB} {
+		for _, legacy := range []string{"polygon-bridge", "heimdall"} {
 			if err := dir.RemoveAll(filepath.Join(d.DataDir, legacy)); err != nil && !os.IsNotExist(err) {
 				return err
 			}

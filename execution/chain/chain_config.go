@@ -45,10 +45,10 @@ import (
 // only via copier.CopyWithOption(..., DeepCopy: true) — a shallow copy leaves
 // pointer/map fields (ChainID, *Time, BlobSchedule, etc.) shared with the source.
 type Config struct {
-	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
+	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, gnosis
 	ChainID   *uint256.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
 
-	Rules RulesName `json:"consensus,omitempty"` // aura, bor, or ethash
+	Rules RulesName `json:"consensus,omitempty"` // aura or ethash
 
 	// *Block fields activate the corresponding hard fork at a certain block number,
 	// while *Time fields do so based on the block's time stamp.
@@ -127,12 +127,9 @@ type Config struct {
 	Ethash *EthashConfig `json:"ethash,omitempty"`
 	Aura   *AuRaConfig   `json:"aura,omitempty"`
 
-	Bor     BorConfig       `json:"-"`
-	BorJSON json.RawMessage `json:"bor,omitempty"`
-
 	// L2 carries opaque L2-chain-specific config. L2JSON is decoded from the
 	// chainspec JSON verbatim; the registering L2 package unmarshals it into
-	// L2 at spec-registration time, same contract as BorJSON/Bor.
+	// L2 at spec-registration time.
 	L2     L2Config        `json:"-"`
 	L2JSON json.RawMessage `json:"l2,omitempty"`
 
@@ -255,24 +252,6 @@ var (
 	}
 )
 
-type BorConfig interface {
-	fmt.Stringer
-	IsAgra(num uint64) bool
-	GetAgraBlock() *uint64
-	IsNapoli(num uint64) bool
-	GetNapoliBlock() *uint64
-	IsAhmedabad(number uint64) bool
-	GetAhmedabadBlock() *uint64
-	IsBhilai(num uint64) bool
-	GetBhilaiBlock() *uint64
-	IsRio(num uint64) bool
-	GetRioBlock() *uint64
-	StateReceiverContractAddress() accounts.Address
-	CalculateSprintNumber(number uint64) uint64
-	CalculateSprintLength(number uint64) uint64
-	CalculateCoinbase(number uint64) accounts.Address
-}
-
 // L2Config is the resolved implementation of an L2 stack's chain-specific
 // config, registered by the L2 package at spec-registration time.
 type L2Config interface {
@@ -293,18 +272,6 @@ func timestampToTime(unixSec uint64) *time.Time {
 
 func (c *Config) String() string {
 	engine := c.getEngine()
-
-	if c.Bor != nil {
-		return fmt.Sprintf("{ChainID: %v, Agra: %s, Napoli: %s, Ahmedabad: %s, Bhilai: %s, Rio: %s, Engine: %v}",
-			c.ChainID,
-			uint64PtrStr(c.Bor.GetAgraBlock()),
-			uint64PtrStr(c.Bor.GetNapoliBlock()),
-			uint64PtrStr(c.Bor.GetAhmedabadBlock()),
-			uint64PtrStr(c.Bor.GetBhilaiBlock()),
-			uint64PtrStr(c.Bor.GetRioBlock()),
-			engine,
-		)
-	}
 
 	var b strings.Builder
 	fmt.Fprintf(&b, "{ChainID: %v, Terminal Total Difficulty: %v", c.ChainID, c.TerminalTotalDifficulty)
@@ -349,8 +316,6 @@ func (c *Config) getEngine() string {
 	switch {
 	case c.Ethash != nil:
 		return c.Ethash.String()
-	case c.Bor != nil:
-		return c.Bor.String()
 	case c.Aura != nil:
 		return c.Aura.String()
 	default:
@@ -433,10 +398,6 @@ func (c *Config) IsGrayGlacier(num uint64) bool {
 func (c *Config) IsShanghai(time uint64) bool {
 	return isForked(c.ShanghaiTime, time)
 }
-
-// Refer to https://forum.polygon.technology/t/pip-33-napoli-upgrade
-
-// Refer to https://forum.polygon.technology/t/pip-63-bhilai-hardfork
 
 // IsCancun returns whether time is either equal to the Cancun fork time or greater.
 func (c *Config) IsCancun(time uint64) bool {
@@ -559,9 +520,6 @@ func (c *Config) GetMaxRlpBlockSize(time uint64) int {
 }
 
 func (c *Config) SecondsPerSlot() uint64 {
-	if c.Bor != nil {
-		return 2 // Polygon
-	}
 	if c.Aura != nil {
 		return 5 // Gnosis
 	}

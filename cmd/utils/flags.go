@@ -1488,7 +1488,7 @@ func setEtherbase(ctx *cli.Command, cfg *ethconfig.Config) {
 		}
 	}
 
-	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.Dev || chainName == networkname.BorDevnet {
+	if chainName := ctx.String(ChainFlag.Name); chainName == networkname.Dev {
 		if etherbase == "" {
 			cfg.Builder.Etherbase = devnetEtherbase
 		}

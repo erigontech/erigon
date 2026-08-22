@@ -22,6 +22,7 @@ package rawdb
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"fmt"
 
 	jsoniter "github.com/json-iterator/go"
@@ -48,7 +49,12 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 		return nil, fmt.Errorf("invalid chain config JSON: %x, %w", hash, err)
 	}
 
-	if config.BorJSON != nil {
+	// chain.Config no longer has a 'bor' field, so a stored Polygon config would
+	// otherwise load with its consensus settings silently dropped.
+	var probe struct {
+		Bor json.RawMessage `json:"bor"`
+	}
+	if err := jsoniter.ConfigFastest.Unmarshal(data, &probe); err == nil && len(probe.Bor) > 0 && !bytes.Equal(probe.Bor, []byte("null")) {
 		return nil, fmt.Errorf("chain config %x carries a 'bor' section: Polygon is not supported, see https://github.com/0xPolygon/erigon", hash)
 	}
 	return &config, nil

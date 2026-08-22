@@ -20,6 +20,7 @@ import (
 	"context"
 	"encoding/json"
 	"fmt"
+	"io"
 	"os"
 
 	"github.com/urfave/cli/v3"
@@ -74,14 +75,26 @@ func initGenesis(ctx context.Context, cliCtx *cli.Command) error {
 	}
 	defer file.Close()
 
+	raw, err := io.ReadAll(file)
+	if err != nil {
+		utils.Fatalf("Failed to read genesis file: %v", err)
+	}
 	genesis := new(types.Genesis)
-	if err := json.NewDecoder(file).Decode(genesis); err != nil {
+	if err := json.Unmarshal(raw, genesis); err != nil {
 		return fmt.Errorf("invalid genesis file %s: %w", genesisPath, err)
 	}
 	if genesis.Config == nil {
 		return fmt.Errorf("invalid genesis file %s: missing 'config'", genesisPath)
 	}
-	if genesis.Config.BorJSON != nil {
+
+	// chain.Config has no 'bor' field, so a Polygon genesis would otherwise
+	// initialise with its consensus settings silently dropped.
+	var probe struct {
+		Config struct {
+			Bor json.RawMessage `json:"bor"`
+		} `json:"config"`
+	}
+	if err := json.Unmarshal(raw, &probe); err == nil && len(probe.Config.Bor) > 0 && string(probe.Config.Bor) != "null" {
 		return fmt.Errorf("%s carries a 'bor' config: Polygon is not supported, see https://github.com/0xPolygon/erigon", genesisPath)
 	}
 
