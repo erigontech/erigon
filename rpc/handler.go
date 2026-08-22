@@ -32,7 +32,6 @@ import (
 	"sync"
 	"time"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -111,7 +110,7 @@ func HandleError(err error, stream jsonstream.Stream) {
 			stream.WriteObjectField("data")
 			data, derr := json.Marshal(de.ErrorData())
 			if derr == nil {
-				stream.WriteRaw(common.ToStringZeroCopy(data))
+				stream.WriteRawBytes(data)
 			} else {
 				stream.WriteString(derr.Error())
 			}
@@ -245,7 +244,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				out.WriteMore()
 			}
 			wrote = true
-			_, _ = out.Write(answer)
+			out.WriteRawBytes(answer)
 		}
 		out.WriteArrayEnd()
 		if wrote {
@@ -651,7 +650,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	stream.WriteMore()
 	if msg.ID != nil {
 		stream.WriteObjectField("id")
-		stream.WriteRaw(common.ToStringZeroCopy(msg.ID))
+		stream.WriteRawBytes(msg.ID)
 		stream.WriteMore()
 	}
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
@@ -680,7 +679,7 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 			buf, err = json.Marshal(msg.errorResponse(err))
 		}
 		if err == nil {
-			stream.WriteRaw(common.ToStringZeroCopy(buf))
+			stream.WriteRawBytes(buf)
 		}
 		return
 	}
@@ -689,10 +688,10 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	stream.WriteString(msg.Version)
 	stream.WriteMore()
 	stream.WriteObjectField("id")
-	stream.WriteRaw(common.ToStringZeroCopy(msg.ID))
+	stream.WriteRawBytes(msg.ID)
 	stream.WriteMore()
 	stream.WriteObjectField("result")
-	stream.WriteRaw(common.ToStringZeroCopy(msg.Result))
+	stream.WriteRawBytes(msg.Result)
 	stream.WriteObjectEnd()
 }
 
