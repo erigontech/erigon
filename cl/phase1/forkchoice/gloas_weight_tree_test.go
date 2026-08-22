@@ -665,3 +665,19 @@ func TestApplyWeightDeltaDoesNotUnderflow(t *testing.T) {
 	require.Equal(t, uint64(7), applyWeightDelta(10, 3, false))
 	require.Zero(t, applyWeightDelta(3, 10, false))
 }
+
+func TestGetHeadPayloadStatusRequiresMatchingRoot(t *testing.T) {
+	headRoot := common.Hash{0x41}
+	store := &ForkChoiceStore{
+		headHash:          headRoot,
+		headPayloadStatus: cltypes.PayloadStatusFull,
+	}
+
+	status, ok := store.GetHeadPayloadStatus(headRoot)
+	require.True(t, ok)
+	require.Equal(t, cltypes.PayloadStatusFull, status)
+
+	status, ok = store.GetHeadPayloadStatus(common.Hash{0x42})
+	require.False(t, ok)
+	require.Equal(t, cltypes.PayloadStatusPending, status)
+}

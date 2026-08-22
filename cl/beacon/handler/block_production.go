@@ -768,7 +768,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		block.GetExecutionValue().Uint64(),
 		consensusValue,
 	)
-	a.payloadPreparationGate.noteProducedBlock(targetSlot)
+	a.payloadPreparationGate.noteProducedBlock(a.ethClock.GetCurrentSlot(), targetSlot)
 
 	return resp, nil
 }
@@ -1122,11 +1122,13 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		warmup, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(targetSlot, idBytes, builderStartedAt)
+		warmup, preparedHead, preparedIDMismatch := a.preparedPayload.warmupAndMismatch(targetSlot, idBytes, builderStartedAt)
 		if preparedIDMismatch {
 			a.logger.Info(
 				"PayloadPreparation: prepared payload ID did not match production",
 				"slot", targetSlot,
+				"preparedHead", preparedHead,
+				"productionHead", blockRoot,
 			)
 		}
 		buildWindow := computeBlockBuilderWindow(builderStartedAt, slotStart, a.beaconChainCfg, stateVersion, warmup)

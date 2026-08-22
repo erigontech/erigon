@@ -61,6 +61,7 @@ const minimumPreparationLead = 500 * time.Millisecond
 
 type preparedPayloadRecord struct {
 	id       []byte
+	head     common.Hash
 	primedAt time.Time
 }
 
@@ -103,7 +104,7 @@ type payloadPreparationGate struct {
 	latestProducedSlot atomic.Uint64
 }
 
-func (p *preparedPayload) set(slot uint64, payloadID []byte, primedAt time.Time) {
+func (p *preparedPayload) set(slot uint64, payloadID []byte, head common.Hash, primedAt time.Time) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	if p.payloads == nil {
@@ -115,26 +116,27 @@ func (p *preparedPayload) set(slot uint64, payloadID []byte, primedAt time.Time)
 			delete(p.payloads, recorded)
 		}
 	}
-	// Re-recording the same EL builder must preserve its original warmup start.
+	// Re-recording the same EL builder must preserve its original warmup and head identity.
 	if previous, ok := p.payloads[slot]; ok && bytes.Equal(previous.id, payloadID) && previous.primedAt.Before(primedAt) {
 		primedAt = previous.primedAt
+		head = previous.head
 	}
-	p.payloads[slot] = preparedPayloadRecord{id: bytes.Clone(payloadID), primedAt: primedAt}
+	p.payloads[slot] = preparedPayloadRecord{id: bytes.Clone(payloadID), head: head, primedAt: primedAt}
 }
 
-// warmupAndMismatch returns inherited build time for an exact payload-ID match. It also reports
-// when the slot has a prepared record but production chose another payload ID.
-func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now time.Time) (time.Duration, bool) {
+// warmupAndMismatch returns inherited build time for an exact payload-ID match. For a mismatch it
+// also returns the head from which the prepared builder started.
+func (p *preparedPayload) warmupAndMismatch(slot uint64, payloadID []byte, now time.Time) (time.Duration, common.Hash, bool) {
 	p.mu.Lock()
 	defer p.mu.Unlock()
 	record, ok := p.payloads[slot]
 	if !ok || len(payloadID) == 0 {
-		return 0, false
+		return 0, common.Hash{}, false
 	}
 	if !bytes.Equal(record.id, payloadID) {
-		return 0, true
+		return 0, record.head, true
 	}
-	return max(now.Sub(record.primedAt), 0), false
+	return max(now.Sub(record.primedAt), 0), record.head, false
 }
 
 func (g *payloadPreparationGate) beginBlockWork() func() {
@@ -154,13 +156,17 @@ func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
 	if !g.blockWork.TryLock() {
 		return nil, false
 	}
-	return g.blockWork.Unlock, true
+	return sync.OnceFunc(g.blockWork.Unlock), true
 }
 
-func (g *payloadPreparationGate) noteProducedBlock(slot uint64) {
+func (g *payloadPreparationGate) noteProducedBlock(currentSlot, producedSlot uint64) {
+	// The marker covers only work that can bridge the current-to-next-slot boundary.
+	if producedSlot < currentSlot || producedSlot-currentSlot > 1 {
+		return
+	}
 	for {
 		previous := g.latestProducedSlot.Load()
-		if previous >= slot || g.latestProducedSlot.CompareAndSwap(previous, slot) {
+		if previous >= producedSlot || g.latestProducedSlot.CompareAndSwap(previous, producedSlot) {
 			return
 		}
 	}
@@ -214,7 +220,8 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 	var lastSettled preparationKey
 	var lastFailureLog time.Time
 	var scratch payloadPreparationScratch
-	for immediate := true; ; immediate = false {
+	immediate := true
+	for {
 		if immediate {
 			select {
 			case <-ctx.Done():
@@ -228,6 +235,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 			case <-ticker.C:
 			}
 		}
+		immediate = false
 
 		currentSlot := a.ethClock.GetCurrentSlot()
 		targetSlot := currentSlot + 1
@@ -292,6 +300,9 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 					if err := common.Sleep(ctx, delay); err != nil {
 						return
 					}
+					// Re-read the head and payload decision at the deadline. Waiting for the next
+					// periodic tick can consume the rest of the preparation window.
+					immediate = true
 					continue
 				}
 			}
@@ -518,7 +529,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		return baseBlockRoot, errPreparationHeadChanged
 	}
 
-	a.preparedPayload.set(targetSlot, payloadID, time.Now())
+	a.preparedPayload.set(targetSlot, payloadID, baseBlockRoot, time.Now())
 	a.logger.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot)
 	return baseBlockRoot, nil
 }
@@ -555,12 +566,7 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 		if !selected || selectedRoot != baseBlockRoot {
 			return nil, errPreparationHeadChanged
 		}
-		finishAttempt, ok := a.payloadPreparationGate.tryBeginPreparation()
-		if !ok {
-			return nil, errBlockWorkInFlight
-		}
-		payloadID, err := payloadBuilder.StartPayloadBuild(ctx, head, attrs)
-		finishAttempt()
+		payloadID, err := a.startPayloadBuildAttempt(ctx, payloadBuilder, head, attrs)
 		if err == nil {
 			return payloadID, nil
 		}
@@ -572,6 +578,20 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 			return nil, context.Cause(ctx)
 		}
 	}
+}
+
+func (a *ApiHandler) startPayloadBuildAttempt(
+	ctx context.Context,
+	payloadBuilder execution_client.PayloadBuilder,
+	head common.Hash,
+	attrs *engine_types.PayloadAttributes,
+) ([]byte, error) {
+	finishAttempt, ok := a.payloadPreparationGate.tryBeginPreparation()
+	if !ok {
+		return nil, errBlockWorkInFlight
+	}
+	defer finishAttempt()
+	return payloadBuilder.StartPayloadBuild(ctx, head, attrs)
 }
 
 // payloadBuildAttributes is shared because production reuses a prepared builder only when every
@@ -642,7 +662,10 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 }
 
 func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSlot uint64) gloasPayloadPath {
-	status := a.forkchoiceStore.GetHeadPayloadStatus()
+	status, matchesHead := a.forkchoiceStore.GetHeadPayloadStatus(baseBlockRoot)
+	if !matchesHead {
+		return gloasPayloadPathPending
+	}
 	switch status {
 	case cltypes.PayloadStatusPending:
 		return gloasPayloadPathPending

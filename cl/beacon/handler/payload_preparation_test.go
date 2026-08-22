@@ -52,7 +52,7 @@ import (
 )
 
 func preparedWarmup(p *preparedPayload, slot uint64, payloadID []byte, now time.Time) time.Duration {
-	warmup, _ := p.warmupAndMismatch(slot, payloadID, now)
+	warmup, _, _ := p.warmupAndMismatch(slot, payloadID, now)
 	return warmup
 }
 
@@ -94,6 +94,7 @@ type payloadPreparationLoopRun struct {
 	currentSlot     uint64
 	targetSlot      uint64
 	targetSlotStart time.Time
+	timeout         time.Duration
 	shouldPrepare   bool
 	checkBuild      func(common.Hash, *engine_types.PayloadAttributes)
 }
@@ -120,6 +121,9 @@ func runPayloadPreparationLoop(t *testing.T, ctrl *gomock.Controller, run payloa
 	timeout := 300 * time.Millisecond
 	if run.shouldPrepare {
 		timeout = 5 * time.Second
+	}
+	if run.timeout > 0 {
+		timeout = run.timeout
 	}
 	ctx, cancel := context.WithTimeout(t.Context(), timeout)
 	defer cancel()
@@ -187,7 +191,7 @@ func TestPreparedPayloadMatchesOnlyTheSamePrime(t *testing.T) {
 
 	require.Zero(t, preparedWarmup(&p, 10, id, now), "nothing primed yet")
 
-	p.set(10, id, now.Add(-time.Second))
+	p.set(10, id, common.Hash{}, now.Add(-time.Second))
 	require.Equal(t, time.Second, preparedWarmup(&p, 10, id, now))
 
 	// A different payload ID means production selected another build, so the prepared record must
@@ -202,8 +206,8 @@ func TestPreparedPayloadKeepsTheEarliestMatchingPrime(t *testing.T) {
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	firstPrime := time.Unix(100, 0)
 
-	p.set(10, id, firstPrime)
-	p.set(10, id, firstPrime.Add(time.Second))
+	p.set(10, id, common.Hash{}, firstPrime)
+	p.set(10, id, common.Hash{}, firstPrime.Add(time.Second))
 
 	require.Equal(t, 2*time.Second, preparedWarmup(&p, 10, id, firstPrime.Add(2*time.Second)))
 }
@@ -444,7 +448,7 @@ func TestPreparePayloadLoopWaitsForCurrentSlotHead(t *testing.T) {
 			currentSlot := postState.Slot() + 1
 			targetSlot := currentSlot + 1
 			if test.producedBlock {
-				handler.payloadPreparationGate.noteProducedBlock(currentSlot)
+				handler.payloadPreparationGate.noteProducedBlock(currentSlot, currentSlot)
 			}
 			if test.highestSeenCurrent {
 				forkchoiceStore.HighestSeenVal = currentSlot
@@ -488,9 +492,11 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 		elapsed       time.Duration
 		staleHead     bool
 		reorgToEmpty  bool
+		timeout       time.Duration
 		shouldPrepare bool
 	}{
 		{name: "stale head before PTC deadline", elapsed: 4 * time.Second, staleHead: true},
+		{name: "wakeup at PTC deadline", elapsed: 8900 * time.Millisecond, timeout: 2 * time.Second, shouldPrepare: true},
 		{name: "after PTC deadline", elapsed: 9100 * time.Millisecond, shouldPrepare: true},
 		{name: "FULL head with EMPTY decision", elapsed: 9100 * time.Millisecond, reorgToEmpty: true},
 	} {
@@ -531,6 +537,7 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 				currentSlot:     currentSlot,
 				targetSlot:      targetSlot,
 				targetSlotStart: currentSlotStart.Add(12 * time.Second),
+				timeout:         test.timeout,
 				shouldPrepare:   test.shouldPrepare,
 				checkBuild: func(head common.Hash, _ *engine_types.PayloadAttributes) {
 					require.Equal(t, parentHash, head)
@@ -1094,14 +1101,41 @@ func TestPreparationGateBlockWorkReleaseIsIdempotent(t *testing.T) {
 	finishPreparation()
 }
 
+func TestPayloadBuildPanicReleasesPreparationGate(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	baseBlockRoot := common.Hash{0x41}
+	syncedData.(*sync_mock_services.MockSyncedData).EXPECT().SelectedHead().Return(baseBlockRoot, uint64(10), true)
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		panic("payload builder panic")
+	}
+	handler.engine = engine
+
+	require.Panics(t, func() {
+		_, _ = handler.startPayloadBuildForPreparation(t.Context(), baseBlockRoot, common.Hash{0x42}, new(engine_types.PayloadAttributes))
+	})
+
+	finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation()
+	require.True(t, ok, "a failed builder attempt must not strand the preparation gate")
+	finishPreparation()
+}
+
 func TestPreparationGateTracksProducedBlockUntilSlotHeadIsSelected(t *testing.T) {
 	var gate payloadPreparationGate
-	gate.noteProducedBlock(10)
+	gate.noteProducedBlock(9, 10)
 
 	require.True(t, gate.producedBlockPending(9, 9), "an early production is pending")
 	require.True(t, gate.producedBlockPending(10, 9), "the signing round trip is pending")
 	require.False(t, gate.producedBlockPending(10, 10), "a head for the produced slot is selected")
 	require.False(t, gate.producedBlockPending(11, 10), "the produced slot has passed")
+}
+
+func TestPreparationGateIgnoresProducedBlocksOutsideCurrentWindow(t *testing.T) {
+	var gate payloadPreparationGate
+	gate.noteProducedBlock(10, 20)
+
+	require.False(t, gate.producedBlockPending(19, 10), "a far-future request must not schedule a later preparation blackout")
 }
 
 func TestProductionUsesTargetSlotRandao(t *testing.T) {
@@ -1168,13 +1202,13 @@ func TestProductionUsesPreparedWarmupForPayloadCollection(t *testing.T) {
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
 
 	config := *handler.beaconChainCfg
-	config.SecondsPerSlot = 8
+	config.SecondsPerSlot = 40
 	config.IntervalsPerSlot = 4
 	handler.beaconChainCfg = &config
 	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
-	handler.preparedPayload.set(targetSlot, payloadID, time.Now().Add(-2*time.Second))
+	handler.preparedPayload.set(targetSlot, payloadID, common.Hash{}, time.Now().Add(-10*time.Second))
 
-	ctx, cancel := context.WithTimeout(t.Context(), 300*time.Millisecond)
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
 	defer cancel()
 	collectionStarted := false
 	engine := execution_client.NewMockExecutionEngine(ctrl)
@@ -1188,9 +1222,9 @@ func TestProductionUsesPreparedWarmupForPayloadCollection(t *testing.T) {
 		})
 	handler.engine = engine
 
-	// With the one-second warmup cap, this slot collects immediately. Ignoring warmup would delay
-	// the first poll by about one second, beyond the request context.
-	slotStart := time.Now().Add(-500 * time.Millisecond)
+	// With the five-second warmup cap, this slot collects immediately. Ignoring warmup would delay
+	// the first poll by more than four seconds, beyond the request context.
+	slotStart := time.Now().Add(-3 * time.Second)
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetSlotTime(targetSlot).Return(slotStart)
 	handler.ethClock = clock
@@ -1211,7 +1245,9 @@ func TestProductionLogsPreparedPayloadIDMismatch(t *testing.T) {
 	targetSlot := postState.Slot() + 1
 	preparedID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	productionID := []byte{8, 7, 6, 5, 4, 3, 2, 1}
-	handler.preparedPayload.set(targetSlot, preparedID, time.Now().Add(-time.Second))
+	preparedHead := common.Hash{0x51}
+	productionHead := common.Hash{0x41}
+	handler.preparedPayload.set(targetSlot, preparedID, preparedHead, time.Now().Add(-time.Second))
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -1224,11 +1260,15 @@ func TestProductionLogsPreparedPayloadIDMismatch(t *testing.T) {
 	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-10 * time.Second))
 	handler.ethClock = clock
 
-	_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+	_, _, err := handler.produceBeaconBody(t.Context(), 1, postState.Slot(), productionHead, postState,
 		targetSlot, common.Bytes96{}, common.Hash{})
 
 	require.Error(t, err)
 	require.Contains(t, output.String(), "prepared payload ID did not match production")
+	require.Contains(t, output.String(), "preparedHead")
+	require.Contains(t, output.String(), preparedHead.Hex())
+	require.Contains(t, output.String(), "productionHead")
+	require.Contains(t, output.String(), productionHead.Hex())
 	require.Contains(t, output.String(), "lvl=info")
 }
 
@@ -1627,13 +1667,13 @@ func TestPreparedPayloadKeepsConsecutiveSlots(t *testing.T) {
 
 	// Consecutive proposals: priming slot 11 must not evict slot 10, whose block may still be
 	// in production.
-	p.set(10, first, now)
-	p.set(11, second, now)
+	p.set(10, first, common.Hash{}, now)
+	p.set(11, second, common.Hash{}, now)
 	require.Positive(t, preparedWarmup(&p, 10, first, now.Add(time.Second)))
 	require.Positive(t, preparedWarmup(&p, 11, second, now.Add(time.Second)))
 
 	// Records old enough that they can no longer be produced are dropped, so the map is bounded.
-	p.set(10+preparedPayloadRetainSlots+1, []byte{3, 3, 3, 3, 3, 3, 3, 3}, now)
+	p.set(10+preparedPayloadRetainSlots+1, []byte{3, 3, 3, 3, 3, 3, 3, 3}, common.Hash{}, now)
 	require.Zero(t, preparedWarmup(&p, 10, first, now.Add(time.Second)))
 }
 
@@ -1642,7 +1682,7 @@ func TestPreparedPayloadCopiesTheID(t *testing.T) {
 	id := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	now := time.Unix(100, 0)
 
-	p.set(10, id, now)
+	p.set(10, id, common.Hash{}, now)
 	id[0] = 0xff
 
 	// The caller's buffer must not be able to invalidate, or forge, a later match.

@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"cmp"
+	"context"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -810,7 +811,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	// Process through forkchoice so the local node marks the block as FULL.
 	// checkBlobData=false because gossip validation handles it; validatePayload=true
 	// so the EL receives NewPayload for the execution payload.
-	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, false, true); err != nil {
+	if err := a.processExecutionPayloadEnvelope(r.Context(), signedEnvelope); err != nil {
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
 		} else {
@@ -832,6 +833,12 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	}
 
 	w.WriteHeader(http.StatusOK)
+}
+
+func (a *ApiHandler) processExecutionPayloadEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
+	defer finishBlockWork()
+	return a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true)
 }
 
 // ---- Execution Payload Bid ----

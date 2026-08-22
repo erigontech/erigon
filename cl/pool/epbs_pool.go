@@ -52,11 +52,20 @@ type EpbsPool struct {
 	PayloadAttestations *lru.Cache[PayloadAttestationKey, *cltypes.PayloadAttestationMessage]
 
 	proposerPreferenceGenerationsMu sync.Mutex
-	proposerPreferenceGenerations   *lru.Cache[uint64, uint64]
+	proposerPreferenceGenerations   map[uint64]uint64
+	latestProposerPreferenceSlot    uint64
 }
 
 func NewEpbsPool() *EpbsPool {
-	preferencesCache, err := lru.New[ProposerPreferencesKey, *cltypes.SignedProposerPreferences]("proposerPreferencesPool", epbsPreferencesPoolSize)
+	epbsPool := &EpbsPool{proposerPreferenceGenerations: make(map[uint64]uint64)}
+	preferencesCache, err := lru.NewWithEvict[ProposerPreferencesKey, *cltypes.SignedProposerPreferences](
+		"proposerPreferencesPool",
+		epbsPreferencesPoolSize,
+		func(key ProposerPreferencesKey, _ *cltypes.SignedProposerPreferences) {
+			// Eviction changes the effective preference just as an insertion does.
+			epbsPool.advanceProposerPreferenceGeneration(key.Slot)
+		},
+	)
 	if err != nil {
 		panic(err)
 	}
@@ -68,16 +77,10 @@ func NewEpbsPool() *EpbsPool {
 	if err != nil {
 		panic(err)
 	}
-	preferenceGenerations, err := lru.New[uint64, uint64]("proposerPreferencesGeneration", epbsPreferencesPoolSize)
-	if err != nil {
-		panic(err)
-	}
-	return &EpbsPool{
-		ProposerPreferences:           preferencesCache,
-		HighestBids:                   highestBidsCache,
-		PayloadAttestations:           payloadAttestationsCache,
-		proposerPreferenceGenerations: preferenceGenerations,
-	}
+	epbsPool.ProposerPreferences = preferencesCache
+	epbsPool.HighestBids = highestBidsCache
+	epbsPool.PayloadAttestations = payloadAttestationsCache
+	return epbsPool
 }
 
 // GetPreferencesForSlot returns all stored proposer preferences that match the given slot,
@@ -110,10 +113,25 @@ func (p *EpbsPool) AddProposerPreference(preference *cltypes.SignedProposerPrefe
 		Slot:          slot,
 		DependentRoot: preference.Message.DependentRoot,
 	}, preference)
+	p.advanceProposerPreferenceGeneration(slot)
+}
+
+func (p *EpbsPool) advanceProposerPreferenceGeneration(slot uint64) {
 	p.proposerPreferenceGenerationsMu.Lock()
 	defer p.proposerPreferenceGenerationsMu.Unlock()
-	generation, _ := p.proposerPreferenceGenerations.Get(slot)
-	p.proposerPreferenceGenerations.Add(slot, generation+1)
+	if slot > p.latestProposerPreferenceSlot {
+		p.latestProposerPreferenceSlot = slot
+		// Generations are needed only while their proposal slots can remain in the cache.
+		for recordedSlot := range p.proposerPreferenceGenerations {
+			if recordedSlot < slot && slot-recordedSlot > epbsPreferencesPoolSize {
+				delete(p.proposerPreferenceGenerations, recordedSlot)
+			}
+		}
+	}
+	if slot < p.latestProposerPreferenceSlot && p.latestProposerPreferenceSlot-slot > epbsPreferencesPoolSize {
+		return
+	}
+	p.proposerPreferenceGenerations[slot]++
 }
 
 // ProposerPreferencesGeneration returns the current generation for one proposal slot.
@@ -121,6 +139,5 @@ func (p *EpbsPool) AddProposerPreference(preference *cltypes.SignedProposerPrefe
 func (p *EpbsPool) ProposerPreferencesGeneration(slot uint64) uint64 {
 	p.proposerPreferenceGenerationsMu.Lock()
 	defer p.proposerPreferenceGenerationsMu.Unlock()
-	generation, _ := p.proposerPreferenceGenerations.Get(slot)
-	return generation
+	return p.proposerPreferenceGenerations[slot]
 }

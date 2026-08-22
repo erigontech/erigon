@@ -436,3 +436,23 @@ func TestEpbsPoolTracksProposerPreferenceChanges(t *testing.T) {
 	require.Equal(t, uint64(2), p.ProposerPreferencesGeneration(10))
 	require.Equal(t, uint64(1), p.ProposerPreferencesGeneration(11))
 }
+
+func TestEpbsPoolAdvancesGenerationWhenPreferenceIsEvicted(t *testing.T) {
+	p := NewEpbsPool()
+	targetSlot := uint64(10)
+	targetRoot := common.Hash{0x01}
+	p.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: targetSlot, DependentRoot: targetRoot,
+	}})
+	initialGeneration := p.ProposerPreferencesGeneration(targetSlot)
+
+	for slot := targetSlot + 1; slot <= targetSlot+epbsPreferencesPoolSize; slot++ {
+		p.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+			ProposalSlot: slot, DependentRoot: common.Hash{byte(slot)},
+		}})
+	}
+
+	_, found := p.GetPreference(targetSlot, targetRoot)
+	require.False(t, found)
+	require.Greater(t, p.ProposerPreferencesGeneration(targetSlot), initialGeneration)
+}

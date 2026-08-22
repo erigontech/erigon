@@ -143,12 +143,14 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	return f.getHead(auxilliaryState)
 }
 
-// GetHeadPayloadStatus returns the payload status of the current head node.
-// Must be called after GetHead has been called (head is cached).
-func (f *ForkChoiceStore) GetHeadPayloadStatus() cltypes.PayloadStatus {
+// GetHeadPayloadStatus returns the cached head's payload status only when its root still matches.
+func (f *ForkChoiceStore) GetHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	return f.headPayloadStatus
+	if f.headHash != root {
+		return cltypes.PayloadStatusPending, false
+	}
+	return f.headPayloadStatus, true
 }
 
 // getHeadGloas returns the head using GLOAS fork choice rules.

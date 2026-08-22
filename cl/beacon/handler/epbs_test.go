@@ -165,6 +165,26 @@ func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "invalid execution payload")
 }
 
+func TestPostExecutionPayloadEnvelopeSuppressesPreparationDuringExecutionWork(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	fcu.OnExecutionPayloadFn = func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+		finishPreparation, started := handler.payloadPreparationGate.tryBeginPreparation()
+		if started {
+			finishPreparation()
+		}
+		require.False(t, started, "payload preparation must not overlap local envelope execution")
+		return nil
+	}
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
 func TestPostPtcDutiesDoesNotCapValidatorCount(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
