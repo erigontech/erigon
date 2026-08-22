@@ -170,10 +170,13 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	defer dbtx.Rollback()
 
-	// Use latest block by default
-	if blockNrOrHash == nil {
-		blockNrOrHash = &latestNumOrHash
+	selector := orLatest(blockNrOrHash)
+	// A pending header cannot be paired safely with state on this path, so
+	// preserve EstimateGas's latest-state fallback for pending requests.
+	if number, ok := selector.Number(); ok && number == rpc.PendingBlockNumber {
+		selector = latestNumOrHash
 	}
+	blockNrOrHash = &selector
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {
