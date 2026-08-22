@@ -154,7 +154,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		payloadExpectedWithdrawals:   solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ()),
 		ptcWindow:                    solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(cfg.PtcSize)),
 	}
-	state.init()
+	_ = state.init() // always returns nil; see init's body
 	return state
 }
 

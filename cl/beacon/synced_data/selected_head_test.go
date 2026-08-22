@@ -108,18 +108,18 @@ func TestViewHeadStateWithIdentityStaysInOneGeneration(t *testing.T) {
 	manager := NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	manager.headState = state.New(&clparams.MainnetBeaconConfig)
 	manager.stateHead.Store(&headIdentity{root: common.Hash{0xaa}, slot: 100})
-	manager.headState.SetSlot(100)
+	require.NoError(t, manager.headState.SetSlot(100))
 
 	var writers sync.WaitGroup
 	writers.Go(func() {
 		for range 10_000 {
 			manager.mu.Lock()
-			manager.headState.SetSlot(99)
+			require.NoError(t, manager.headState.SetSlot(99))
 			manager.stateHead.Store(&headIdentity{root: common.Hash{0xbb}, slot: 99})
 			manager.mu.Unlock()
 
 			manager.mu.Lock()
-			manager.headState.SetSlot(100)
+			require.NoError(t, manager.headState.SetSlot(100))
 			manager.stateHead.Store(&headIdentity{root: common.Hash{0xaa}, slot: 100})
 			manager.mu.Unlock()
 		}

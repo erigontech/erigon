@@ -61,7 +61,12 @@ func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	state := &CachingBeaconState{
 		BeaconState: raw.New(cfg),
 	}
-	state.InitBeaconState()
+	// A freshly constructed, empty, default-version state has no active
+	// validators and is at slot 0, so InitBeaconState's fallible steps
+	// (proposer-index computation on an empty set, phase0 participation
+	// init) are no-ops here; real population happens via a later
+	// DecodeSSZ/CopyInto call, which reruns and checks this properly.
+	_ = state.InitBeaconState()
 	return state
 }
 
@@ -285,7 +290,9 @@ func (b *CachingBeaconState) InitBeaconState() error {
 	b.totalActiveBalanceCache = nil
 	b._refreshActiveBalancesIfNeeded()
 	b.previousStateRoot = common.Hash{}
-	b.initCaches()
+	if err := b.initCaches(); err != nil {
+		return err
+	}
 	if err := b._updateProposerIndex(); err != nil {
 		return err
 	}

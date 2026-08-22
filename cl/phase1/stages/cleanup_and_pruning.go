@@ -27,6 +27,9 @@ func cleanupAndPruning(ctx context.Context, logger log.Logger, cfg *Cfg, args Ar
 		return err
 	}
 
+	// Pruning runs after the index tx is already committed, so a failure here is
+	// a disk-space-reclaim miss, not a correctness issue — log and keep going.
+	//
 	// Block pruning cuts against the stage's observed head; hot sidecar retention
 	// cuts against wall-clock progress so a stalled stage does not retain data forever.
 	currentSlot := cfg.ethClock.GetCurrentSlot()
