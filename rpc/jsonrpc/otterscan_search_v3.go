@@ -79,7 +79,7 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 		}
 
 		if mustReadBlock {
-			block, err = api.blockByNumberWithSenders(ctx, tx, blockNum)
+			block, err = api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNum)
 			if err != nil {
 				return nil, nil, false, err
 			}

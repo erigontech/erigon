@@ -219,7 +219,7 @@ func (api *BaseAPI) chainConfigWithGenesis(ctx context.Context, tx kv.Tx) (*chai
 		return cc, genesisBlock, nil
 	}
 
-	genesisBlock, err := api.blockByNumberWithSenders(ctx, tx, 0)
+	genesisBlock, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), 0)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -243,13 +243,35 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	}
 	return api.filters.LastPendingBlock()
 }
+
+// resolveCommittedBlockNumber returns a block only when it is canonical in tx.
+// The overlay probe distinguishes an in-flight head from an unavailable
+// same-height generation without changing the selected transaction.
+func (api *BaseAPI) resolveCommittedBlockNumber(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
+	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	var blockNotFound rpc.BlockNotFoundErr
+	if !errors.As(err, &blockNotFound) {
+		return blockNumber, err
+	}
+
+	overlayBlockNumber, _, _, overlayErr := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, api.filters.WithOverlay(tx), api._blockReader, nil)
+	if overlayErr != nil {
+		return 0, overlayErr
+	}
+	if err := rpchelper.CheckBlockExecuted(tx, overlayBlockNumber); err != nil {
+		return 0, err
+	}
+
+	// Execution progress alone is insufficient after an overlay reorg: tx still exposes state for the committed canonical block.
+	return 0, fmt.Errorf("block %s is not available in the committed view", blockNrOrHash.String())
+}
+
 func (api *BaseAPI) engine() rules.EngineReader {
 	return api._engine
 }
 
 func (api *BaseAPI) txnLookup(ctx context.Context, tx kv.Tx, txnHash common.Hash) (blockNum uint64, txNum uint64, ok bool, err error) {
-	overlayTx := api.filters.WithOverlay(tx)
-	return api._txnReader.TxnLookup(ctx, overlayTx, txnHash)
+	return api._txnReader.TxnLookup(ctx, tx, txnHash)
 }
 
 // txnIndexInBlock derives the in-block txn index from a global txNum.
@@ -265,14 +287,14 @@ func (api *BaseAPI) txnIndexInBlock(ctx context.Context, tx kv.Tx, blockNum, txN
 }
 
 func (api *BaseAPI) blockByNumberWithSenders(ctx context.Context, tx kv.Tx, number uint64) (*types.Block, error) {
-	blockNumber, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(number)), tx, api._blockReader, api.filters)
+	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
 	if err != nil {
-		if errors.As(err, &rpc.BlockNotFoundErr{}) {
-			return nil, nil
-		}
 		return nil, err
 	}
-	return api.blockWithSenders(ctx, tx, hash, blockNumber)
+	if !ok {
+		return nil, nil
+	}
+	return api.blockWithSenders(ctx, tx, hash, number)
 }
 
 func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash common.Hash) (*types.Block, error) {
@@ -281,8 +303,7 @@ func (api *BaseAPI) blockByHashWithSenders(ctx context.Context, tx kv.Tx, hash c
 			return it, nil
 		}
 	}
-	overlayTx := api.filters.WithOverlay(tx)
-	number, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
+	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -299,8 +320,7 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 			return it, nil
 		}
 	}
-	overlayTx := api.filters.WithOverlay(tx)
-	block, _, err := api._blockReader.BlockWithSenders(ctx, overlayTx, hash, number)
+	block, _, err := api._blockReader.BlockWithSenders(ctx, tx, hash, number)
 	if err != nil {
 		return nil, err
 	}
@@ -323,6 +343,26 @@ func (api *BaseAPI) blockWithSenders(ctx context.Context, tx kv.Tx, hash common.
 	return block, nil
 }
 
+func (api *BaseAPI) headerByHashAndNumber(ctx context.Context, tx kv.Getter, hash common.Hash, number uint64) (*types.Header, error) {
+	if api.blocksLRU != nil {
+		if block, ok := api.blocksLRU.Get(hash); ok && block != nil {
+			return block.HeaderNoCopy(), nil
+		}
+	}
+	return api._blockReader.Header(ctx, tx, hash, number)
+}
+
+func (api *BaseAPI) canonicalHeaderByNumber(ctx context.Context, tx kv.Getter, number uint64) (*types.Header, error) {
+	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, number)
+	if err != nil {
+		return nil, err
+	}
+	if !ok {
+		return nil, nil
+	}
+	return api.headerByHashAndNumber(ctx, tx, hash, number)
+}
+
 func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash common.Hash) (uint64, error) {
 	if api.blocksLRU != nil {
 		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
@@ -341,20 +381,19 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 
 }
 
-// headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
+// headerByNumberOrHash selects one overlay view and resolves a canonical header
+// through it. Pending is left to callers because they must select its header
+// together with matching state.
 func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
-	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		return nil, false, nil
+	}
+	overlayTx := api.filters.WithOverlay(tx)
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
 	if err != nil {
 		return nil, false, err
 	}
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
-			return it.HeaderNoCopy(), isLatest, nil
-		}
-	}
-
-	overlayTx := api.filters.WithOverlay(tx)
-	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
+	header, err := api.headerByHashAndNumber(ctx, overlayTx, hash, blockNum)
 	if err != nil {
 		return nil, false, err
 	}
@@ -363,18 +402,16 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 }
 
 func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), tx, api._blockReader, api.filters)
+	// Keep the pending policy consistent with headerByNumberOrHash.
+	if number == rpc.PendingBlockNumber {
+		return nil, nil
+	}
+	overlayTx := api.filters.WithOverlay(tx)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(number), overlayTx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
-
-	if api.blocksLRU != nil {
-		if it, ok := api.blocksLRU.Get(h); ok && it != nil {
-			return it.HeaderNoCopy(), nil
-		}
-	}
-	overlayTx := api.filters.WithOverlay(tx)
-	return api._blockReader.Header(ctx, overlayTx, h, n)
+	return api.headerByHashAndNumber(ctx, overlayTx, h, n)
 }
 
 func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx) (*types.Header, error) {
@@ -384,7 +421,8 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 		}
 	}
 
-	number, err := api._blockReader.HeaderNumber(ctx, tx, hash)
+	overlayTx := api.filters.WithOverlay(tx)
+	number, err := api._blockReader.HeaderNumber(ctx, overlayTx, hash)
 	if err != nil {
 		return nil, err
 	}
@@ -392,7 +430,7 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 	if number == nil {
 		return nil, nil
 	}
-	return api._blockReader.Header(ctx, tx, hash, *number)
+	return api._blockReader.Header(ctx, overlayTx, hash, *number)
 }
 
 // checks the pruning state to see if we would hold information about this

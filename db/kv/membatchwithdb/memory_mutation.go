@@ -590,6 +590,11 @@ func (m *MemoryMutation) Commit() error {
 }
 
 func (m *MemoryMutation) Rollback() {
+	if m.memDb == nil {
+		// A read view owns neither the shared memory transaction nor its backing transaction.
+		m.statelessCursors = nil
+		return
+	}
 	m.memTx.Rollback()
 	m.memDb.Close()
 	m.statelessCursors = nil
@@ -1091,10 +1096,16 @@ func (m *MemoryMutation) Unwind(ctx context.Context, txNumUnwindTo uint64, chang
 // methods also use it when it implements kv.TemporalTx.
 //
 // The returned kv.TemporalTx only exposes read methods. Callers cannot write
-// to the overlay through this view. The caller must not Close the returned
-// view (it doesn't own the memDb).
+// to the overlay through this view. Rollback and Close leave the shared overlay
+// and the caller's transaction open because the view owns neither one.
 func (m *MemoryMutation) NewReadView(tx kv.Tx) kv.TemporalTx {
 	return m.newReadViewMut(tx)
+}
+
+// IsOverlayReadView reports whether this transaction already uses a specific
+// overlay generation.
+func (m *MemoryMutation) IsOverlayReadView() bool {
+	return m != nil && m.memDb == nil
 }
 
 // newReadViewMut is the internal constructor that returns the full
@@ -1131,10 +1142,11 @@ type OverlayTemporalReadView struct {
 
 var _ kv.TemporalTx = (*OverlayTemporalReadView)(nil)
 
-// NewTemporalReadView creates a temporal read-only view that checks the overlay's
-// mem layer first, then falls back to temporalTx for DB reads. The temporalTx
-// must be a fresh, independently-opened transaction — it is NOT shared with the
-// overlay's internal backing tx.
+// NewTemporalReadView creates a read-only view whose table reads check the
+// overlay first. Temporal reads use temporalTx, except GetAsOf and HistorySeek,
+// which first consult the overlay's DomainReader. The temporalTx must be a
+// fresh, independently-opened transaction; it is not shared with the overlay's
+// internal backing tx.
 func (m *MemoryMutation) NewTemporalReadView(temporalTx kv.TemporalTx) *OverlayTemporalReadView {
 	return &OverlayTemporalReadView{
 		MemoryMutation: m.newReadViewMut(temporalTx),
@@ -1161,7 +1173,7 @@ func (v *OverlayTemporalReadView) Apply(_ context.Context, f func(tx kv.Tx) erro
 	return f(v)
 }
 
-// Temporal methods — delegate to the independent temporal tx.
+// Temporal methods use the independent temporal transaction unless noted otherwise.
 
 func (v *OverlayTemporalReadView) GetLatest(name kv.Domain, k []byte, opts kv.GetLatestOptions) ([]byte, kv.Step, error) {
 	return v.temporalTx.GetLatest(name, k, opts)

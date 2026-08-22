@@ -107,19 +107,35 @@ func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
 // resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
 // block; otherwise negative tags are resolved against the chain, defaulting to the
 // latest executed block. With checkFuture, ranges past the latest executed block are
-// rejected as they are resolved.
+// rejected as they are resolved. Tags resolve on the view tx exposes, since
+// callers scan logs through that same tx.
 func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters.FilterCriteria, checkFuture bool) (begin, end uint64, err error) {
 	if crit.BlockHash != nil {
-		block, err := api.blockByHashWithSenders(ctx, tx, *crit.BlockHash)
+		number, err := api._blockReader.HeaderNumber(ctx, tx, *crit.BlockHash)
 		if err != nil {
 			return 0, 0, err
 		}
-		if block == nil {
+		if number == nil {
 			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
 		}
-
-		num := block.NumberU64()
-		return num, num, nil
+		// The header-number index also covers non-canonical headers, and the log
+		// scan below is by block number: without this the caller would get the
+		// canonical block's logs for a side-chain hash.
+		canonicalHash, ok, err := api._blockReader.CanonicalHash(ctx, tx, *number)
+		if err != nil {
+			return 0, 0, err
+		}
+		if !ok || canonicalHash != *crit.BlockHash {
+			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
+		}
+		body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, *number)
+		if err != nil {
+			return 0, 0, err
+		}
+		if body == nil {
+			return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
+		}
+		return *number, *number, nil
 	}
 
 	latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
@@ -134,7 +150,6 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 			begin = uint64(fromBlock)
 		} else {
 			blockNum := rpc.BlockNumber(fromBlock)
-			// nil filters: resolve on the committed view, like the baseline above.
 			begin, _, _, err = rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNum), tx, api._blockReader, nil)
 			if err != nil {
 				return 0, 0, err
@@ -474,7 +489,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
-	blockNum, txNum, ok, err = api.txnLookup(ctx, tx, txnHash)
+	blockNum, txNum, ok, err = api.txnLookup(ctx, api.filters.WithOverlay(tx), txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -498,6 +513,9 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if err != nil {
 		return nil, err
 	}
+	if header == nil {
+		return nil, nil
+	}
 
 	txn, ok, err := api._blockReader.TxnByIdxInBlock(ctx, overlayTx, header.Number.Uint64(), txnIndex)
 	if err != nil {
@@ -515,7 +533,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 
 	var postState *receipts.PostStateInfo = nil
 	if (commitmentHistory || api._blockReader.FrozenBlocks() == 0) && !chainConfig.IsByzantium(blockNum) {
-		block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+		block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -565,7 +583,7 @@ func (api *APIImpl) GetBlockReceipts(ctx context.Context, numberOrHash rpc.Block
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}

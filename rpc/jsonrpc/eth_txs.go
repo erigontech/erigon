@@ -48,7 +48,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, api.filters.WithOverlay(tx), txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -129,7 +129,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 	defer tx.Rollback()
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
-	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, api.filters.WithOverlay(tx), hash)
 	if err != nil {
 		return nil, err
 	}
@@ -187,7 +187,7 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByBlockHashAndIndex
-	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
+	block, err := api.blockByHashWithSenders(ctx, api.filters.WithOverlay(tx), blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -223,7 +223,7 @@ func (api *APIImpl) GetRawTransactionByBlockHashAndIndex(ctx context.Context, bl
 		return nil, err
 	}
 
-	block, err := api.blockByHashWithSenders(ctx, tx, blockHash)
+	block, err := api.blockByHashWithSenders(ctx, api.filters.WithOverlay(tx), blockHash)
 	if err != nil {
 		return nil, err
 	}
@@ -271,7 +271,7 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, blockNum)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -321,7 +321,7 @@ func (api *APIImpl) GetRawTransactionByBlockNumberAndIndex(ctx context.Context, 
 		return nil, err
 	}
 
-	block, err := api.blockByNumberWithSenders(ctx, tx, blockNum)
+	block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNum)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
