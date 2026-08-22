@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/prune"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/blockreplay"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol/rules/ethash"
@@ -100,6 +101,9 @@ func setupEphemeralReplay(tb testing.TB, fx *blockreplay.Fixture) (*ephemeralRep
 	require.NoError(tb, err)
 	bal, err := fx.BAL()
 	require.NoError(tb, err)
+	if block.BlockAccessList() == nil && bal != nil {
+		block = block.WithBlockAccessListSidecar(types.NewBlockAccessListSidecar(bal))
+	}
 
 	br, err := blockreplay.NewMemBlockReader(fx)
 	require.NoError(tb, err)
@@ -167,7 +171,7 @@ func (r *ephemeralReplay) verify(tx kv.TemporalRwTx, doms *execctx.SharedDomains
 	if diffs := writeSet.Diff(expected); len(diffs) > 0 {
 		return fmt.Errorf("write-set has extra writes (%d): %s", len(diffs), strings.Join(diffs, " | "))
 	}
-	got, err := blockreplay.CollectOutputs(state.NewReaderV3(doms.AsStateGetter(tx)), expected)
+	got, err := blockreplay.CollectOutputs(state.NewReaderV3(doms.AsStateGetter(tx, execctxapi.StateGetterOptions{})), expected)
 	if err != nil {
 		return err
 	}

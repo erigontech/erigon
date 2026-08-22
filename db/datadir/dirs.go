@@ -31,7 +31,6 @@ import (
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/db/kv/dbcfg"
 )
 
 // Dirs is the file system folder the node should use for any data storage
@@ -414,16 +413,14 @@ func (d *Dirs) RenameNewVersions() error {
 
 	log.Info(fmt.Sprintf("Renamed %d directories to old format and removed %d unsupported files", renamed, removed))
 
-	//eliminate polygon-bridge && heimdall && chaindata just in case
+	// Left over from Polygon support: remove the aux DB dirs if an old datadir still has them.
 	if d.DataDir != "" {
-		if err := dir.RemoveAll(filepath.Join(d.DataDir, dbcfg.PolygonBridgeDB)); err != nil && !os.IsNotExist(err) {
-			return err
+		for _, legacy := range []string{"polygon-bridge", "heimdall"} {
+			if err := dir.RemoveAll(filepath.Join(d.DataDir, legacy)); err != nil && !os.IsNotExist(err) {
+				return err
+			}
+			log.Info(fmt.Sprintf("Removed %s directory: %s", legacy, filepath.Join(d.DataDir, legacy)))
 		}
-		log.Info(fmt.Sprintf("Removed polygon-bridge directory: %s", filepath.Join(d.DataDir, dbcfg.PolygonBridgeDB)))
-		if err := dir.RemoveAll(filepath.Join(d.DataDir, dbcfg.HeimdallDB)); err != nil && !os.IsNotExist(err) {
-			return err
-		}
-		log.Info(fmt.Sprintf("Removed heimdall directory: %s", filepath.Join(d.DataDir, dbcfg.HeimdallDB)))
 		if d.Chaindata != "" {
 			if err := dir.RemoveAll(d.Chaindata); err != nil && !os.IsNotExist(err) {
 				return err

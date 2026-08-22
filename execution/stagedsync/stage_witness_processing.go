@@ -28,7 +28,6 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 )
@@ -83,8 +82,8 @@ func NewWitnessProcessingCfg(witnessBuffer *WitnessBuffer) WitnessProcessingCfg 
 	}
 }
 
-func StageWitnessProcessingCfg(chainConfig *chain.Config, witnessBuffer *WitnessBuffer) *WitnessProcessingCfg {
-	if chainConfig.Bor != nil && witnessBuffer != nil {
+func StageWitnessProcessingCfg(witnessBuffer *WitnessBuffer) *WitnessProcessingCfg {
+	if witnessBuffer != nil {
 		cfg := NewWitnessProcessingCfg(witnessBuffer)
 		return &cfg
 	}
@@ -111,13 +110,13 @@ func SpawnStageWitnessProcessing(tx kv.RwTx, cfg WitnessProcessingCfg, logger lo
 	for _, witness := range witnesses {
 		key := dbutils.HeaderKey(witness.BlockNumber, witness.BlockHash)
 
-		if err := tx.Put(kv.BorWitnesses, key, witness.Data); err != nil {
+		if err := tx.Put(kv.Witnesses, key, witness.Data); err != nil {
 			return err
 		}
 
 		sizeBytes := make([]byte, 8)
 		binary.BigEndian.PutUint64(sizeBytes, uint64(len(witness.Data)))
-		if err := tx.Put(kv.BorWitnessSizes, key, sizeBytes); err != nil {
+		if err := tx.Put(kv.WitnessSizes, key, sizeBytes); err != nil {
 			return err
 		}
 	}
@@ -175,16 +174,16 @@ func cleanupOldWitnesses(tx kv.RwTx, currentBlockNum uint64, logger log.Logger) 
 	cutoffBlockNum := currentBlockNum - wit.RetentionBlocks
 	logger.Debug("cleaning up old witness data", "current_block", currentBlockNum, "cutoff_block", cutoffBlockNum)
 
-	cursor, err := tx.RwCursor(kv.BorWitnesses)
+	cursor, err := tx.RwCursor(kv.Witnesses)
 	if err != nil {
-		return fmt.Errorf("failed to create BorWitnesses cursor: %w", err)
+		return fmt.Errorf("failed to create Witnesses cursor: %w", err)
 	}
 	defer cursor.Close()
 
 	deletedCount := 0
 	for k, _, err := cursor.First(); k != nil; k, _, err = cursor.Next() {
 		if err != nil {
-			return fmt.Errorf("error iterating BorWitnesses: %w", err)
+			return fmt.Errorf("error iterating Witnesses: %w", err)
 		}
 
 		blockNum := binary.BigEndian.Uint64(k[:8])
@@ -192,7 +191,7 @@ func cleanupOldWitnesses(tx kv.RwTx, currentBlockNum uint64, logger log.Logger) 
 			if err := cursor.DeleteCurrent(); err != nil {
 				return fmt.Errorf("failed to delete witness: %w", err)
 			}
-			if err := tx.Delete(kv.BorWitnessSizes, k); err != nil {
+			if err := tx.Delete(kv.WitnessSizes, k); err != nil {
 				return fmt.Errorf("failed to delete witness size: %w", err)
 			}
 			deletedCount++
@@ -210,21 +209,21 @@ func cleanupOldWitnesses(tx kv.RwTx, currentBlockNum uint64, logger log.Logger) 
 
 // cleanupWitnessesForUnwind removes witness data for blocks that are being unwound
 func cleanupWitnessesForUnwind(tx kv.RwTx, fromBlock uint64) error {
-	cursor, err := tx.RwCursor(kv.BorWitnesses)
+	cursor, err := tx.RwCursor(kv.Witnesses)
 	if err != nil {
-		return fmt.Errorf("failed to create BorWitnesses cursor: %w", err)
+		return fmt.Errorf("failed to create Witnesses cursor: %w", err)
 	}
 	defer cursor.Close()
 
 	deletedCount := 0
 	for k, _, err := cursor.Seek(hexutil.EncodeTs(fromBlock)); k != nil; k, _, err = cursor.Next() {
 		if err != nil {
-			return fmt.Errorf("error iterating BorWitnesses: %w", err)
+			return fmt.Errorf("error iterating Witnesses: %w", err)
 		}
 		if err := cursor.DeleteCurrent(); err != nil {
 			return fmt.Errorf("failed to delete witness during unwind: %w", err)
 		}
-		if err := tx.Delete(kv.BorWitnessSizes, k); err != nil {
+		if err := tx.Delete(kv.WitnessSizes, k); err != nil {
 			return fmt.Errorf("failed to delete witness size during unwind: %w", err)
 		}
 		deletedCount++

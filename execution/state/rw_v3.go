@@ -1414,7 +1414,7 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	r.addr = address.Value()
 	// this is an optimization, but also checks the account is checked in the domain
 	// for being deleted on unwind before we try to access the storage
-	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:]); len(enc) == 0 {
+	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{}); len(enc) == 0 {
 		return false, err
 	}
 	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, r.addr[:])
@@ -1428,7 +1428,7 @@ func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account,
 
 func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {
 	r.addr = address.Value()
-	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:])
+	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1458,7 +1458,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	keyValue := key.Value()
 	copy(r.composite[:length.Addr], addressValue[:])
 	copy(r.composite[length.Addr:], keyValue[:])
-	enc, _, err := r.getter.GetLatest(kv.StorageDomain, r.composite[:])
+	enc, _, err := r.getter.GetLatest(kv.StorageDomain, r.composite[:], kv.GetLatestOptions{})
 	if err != nil {
 		return uint256.Int{}, false, err
 	}

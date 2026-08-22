@@ -106,6 +106,9 @@ type ApiHandler struct {
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
 
+	preparedPayload        preparedPayload
+	payloadPreparationGate payloadPreparationGate
+
 	// Validator data structures
 	validatorParams *validator_params.ValidatorParams
 	// unregisteredProposers remembers which proposers have already been warned about, so the
@@ -116,7 +119,7 @@ type ApiHandler struct {
 	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
 	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
 	syncMessagePool                    sync_contribution_pool.SyncContributionPool
-	committeeSub                       *committee_subscription.CommitteeSubscribeMgmt
+	committeeSub                       committee_subscription.CommitteeSubscribe
 	attestationProducer                attestation_producer.AttestationDataProducer
 	slotWaitedForAttestationProduction *lru.Cache[uint64, struct{}]
 	aggregatePool                      aggregation.AggregationPool
@@ -174,7 +177,7 @@ func NewApiHandler(
 	attestationProducer attestation_producer.AttestationDataProducer,
 	engine execution_client.ExecutionEngine,
 	syncMessagePool sync_contribution_pool.SyncContributionPool,
-	committeeSub *committee_subscription.CommitteeSubscribeMgmt,
+	committeeSub committee_subscription.CommitteeSubscribe,
 	aggregatePool aggregation.AggregationPool,
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionAndProofs services.SyncContributionService,
