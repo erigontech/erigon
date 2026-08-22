@@ -111,9 +111,7 @@ func HandleError(err error, stream jsonstream.Stream) {
 			stream.WriteObjectField("data")
 			data, derr := json.Marshal(de.ErrorData())
 			if derr == nil {
-				if _, err := stream.Write(data); err != nil {
-					stream.WriteNil()
-				}
+				stream.WriteRaw(common.ToStringZeroCopy(data))
 			} else {
 				stream.WriteString(derr.Error())
 			}
@@ -653,7 +651,7 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 	stream.WriteMore()
 	if msg.ID != nil {
 		stream.WriteObjectField("id")
-		stream.Write(msg.ID)
+		stream.WriteRaw(common.ToStringZeroCopy(msg.ID))
 		stream.WriteMore()
 	}
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
