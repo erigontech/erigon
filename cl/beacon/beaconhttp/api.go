@@ -27,6 +27,7 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/fork_graph"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/ssz"
@@ -51,12 +52,22 @@ var (
 )
 
 func WrapEndpointError(err error) *EndpointError {
-	e := &EndpointError{}
-	if errors.As(err, e) {
-		return e
+	// Handlers build these with NewEndpointError, so the pointer form is the one that carries a
+	// deliberate code; matching only the value form would silently turn it into a 500.
+	var byPointer *EndpointError
+	if errors.As(err, &byPointer) {
+		return byPointer
+	}
+	byValue := EndpointError{}
+	if errors.As(err, &byValue) {
+		return &byValue
 	}
 	if errors.Is(err, fork_graph.ErrStateNotFound) {
 		return NewEndpointError(http.StatusNotFound, ErrorCantFindBeaconState)
+	}
+	// A node without a head state is transiently unavailable, not faulty.
+	if errors.Is(err, synced_data.ErrNotSynced) {
+		return NewEndpointError(http.StatusServiceUnavailable, err)
 	}
 	return NewEndpointError(http.StatusInternalServerError, err)
 }

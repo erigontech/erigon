@@ -84,11 +84,14 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 }
 
 // hexWithPrefix encodes b as a 0x-prefixed hex string using the internal buffer.
+// The result aliases hexEncodeBuf, so it is invalidated by anything that writes
+// that buffer, writeMemoryWordRaw included. Hand it straight to the stream,
+// which copies it in.
 func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
 	l.hexEncodeBuf[0] = '0'
 	l.hexEncodeBuf[1] = 'x'
 	n := hex.Encode(l.hexEncodeBuf[2:], b)
-	return string(l.hexEncodeBuf[:2+n])
+	return common.ToStringZeroCopy(l.hexEncodeBuf[:2+n])
 }
 
 // writeMemoryWordRaw writes a memory word as a JSON string "0x<hex>" directly
