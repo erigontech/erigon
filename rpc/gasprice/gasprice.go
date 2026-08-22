@@ -47,6 +47,23 @@ type OracleBackend interface {
 	GetReceiptsGasUsed(ctx context.Context, block *types.Block) (types.Receipts, error)
 	PendingBlockAndReceipts() (*types.Block, types.Receipts)
 
+	// CanonicalHashes returns the canonical hashes of [from, to] on the
+	// backend's view, one entry per height. Heights the view has no canonical
+	// marker for (beyond the head, or pruned) get the zero hash. It resolves
+	// the whole range at once because a per-height lookup is a remote round
+	// trip in rpcdaemon mode.
+	CanonicalHashes(ctx context.Context, from, to uint64) ([]common.Hash, error)
+
+	// FrozenBlocks returns the frozen (snapshot) boundary: the canonical
+	// number-to-hash mapping at or below it is immutable.
+	FrozenBlocks() (uint64, error)
+
+	// HeaderByHashNumber and BlockByHashNumber fetch by an already-resolved
+	// canonical (hash, number) pair, so a cached entry can never name a
+	// different block than the one processed.
+	HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error)
+	BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error)
+
 	// Fork opens a new TemporalTx and returns a goroutine-local backend together
 	// with a cleanup function (call via defer cleanup()).
 	// If the backend does not support forking, it returns (nil, nil, nil) and

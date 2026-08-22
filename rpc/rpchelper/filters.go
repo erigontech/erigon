@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/concurrent"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/rlp"
 	"github.com/erigontech/erigon/execution/types"
@@ -1172,36 +1173,69 @@ func (ff *Filters) LatestSD() *execctx.SharedDomains {
 // WithOverlay returns a read view backed by the latest block overlay if one
 // is available, otherwise returns the given tx unchanged. The read view uses
 // the overlay's in-memory data for table lookups, falling back to the caller's tx
-// for data not in the overlay.
+// for data not in the overlay. A tx that is already an overlay view is
+// returned unchanged (see membatchwithdb.CarriesOverlayView).
 // Safe to call on a nil receiver.
 func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
-	if ff == nil {
+	if membatchwithdb.CarriesOverlayView(tx) {
 		return tx
 	}
-	sd := ff.LatestSD()
-	if sd == nil {
-		return tx
-	}
-	if overlay := sd.BlockOverlay(); overlay != nil {
+	if overlay := ff.LatestOverlay(); overlay != nil {
 		return overlay.NewReadView(tx)
 	}
 	return tx
 }
 
+// OverlaySnapshot returns the published block overlay together with its
+// publish sequence number as one coherent pair, or (nil, 0) in remote mode
+// where no overlay is ever published.
+func (ff *Filters) OverlaySnapshot() (*membatchwithdb.MemoryMutation, uint64) {
+	if ff == nil || ff.events == nil {
+		return nil, 0
+	}
+	sd, seq := ff.events.OverlaySnapshot()
+	if sd == nil {
+		return nil, seq
+	}
+	return sd.BlockOverlay(), seq
+}
+
+// BeginTemporalRoWithOverlay opens a read tx and pins it to the block overlay
+// published at that moment, as one consistent pair: a commit or (un)publish
+// landing between the overlay capture and the tx open can leave a head block
+// visible in neither layer, so the tx is reopened whenever the publish
+// sequence number moves around the open. Under sustained publish churn the
+// last capture is served anyway — a slightly stale pinned view beats a
+// client-visible error. The returned handle reads through the pinned view
+// and its Rollback releases the underlying tx.
+func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.TemporalRoDB) (kv.TemporalTx, error) {
+	const maxAttempts = 3
+	for attempt := 1; ; attempt++ {
+		overlay, seq := ff.OverlaySnapshot()
+		tx, err := db.BeginTemporalRo(ctx) //nolint:gocritic
+		if err != nil {
+			return nil, err
+		}
+		if _, current := ff.OverlaySnapshot(); current == seq || attempt == maxAttempts {
+			return PinToOverlay(tx, overlay), nil
+		}
+		tx.Rollback()
+	}
+}
+
+// LatestOverlay returns the block overlay behind the latest published SD, or nil.
+// Callers that must keep serving one consistent head across several txs (e.g. a
+// forked backend) pin this instance instead of re-resolving, which could observe
+// the overlay being unpublished mid-request.
+func (ff *Filters) LatestOverlay() *membatchwithdb.MemoryMutation {
+	overlay, _ := ff.OverlaySnapshot()
+	return overlay
+}
+
 // WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
 // avoiding repeated type assertions at callsites that need temporal access.
 func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
-	if ff == nil {
-		return tx
-	}
-	sd := ff.LatestSD()
-	if sd == nil {
-		return tx
-	}
-	if overlay := sd.BlockOverlay(); overlay != nil {
-		return overlay.NewReadView(tx)
-	}
-	return tx
+	return ff.WithOverlay(tx).(kv.TemporalTx)
 }
 
 func (ff *Filters) incrementMetrics(ft FilterType, protocol SubProtocol) {

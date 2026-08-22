@@ -58,9 +58,19 @@ type Events struct {
 	hasReceiptSubscriptions     bool
 	lock                        sync.RWMutex
 
-	// latestSD holds the most recently published SharedDomains from FCU.
+	// latestPub holds the most recently published SharedDomains from FCU
+	// together with its publish sequence number, as one atomic snapshot so
+	// readers can never observe the SD and the sequence out of step.
 	// Accessible lock-free for the builder and RPC layer.
-	latestSD atomic.Pointer[execctx.SharedDomains]
+	latestPub atomic.Pointer[overlayPub]
+}
+
+// overlayPub pairs a published SharedDomains with a monotonic publish
+// sequence number. The first publish gets seq 1, so seq 0 uniquely means
+// "nothing was ever published".
+type overlayPub struct {
+	sd  *execctx.SharedDomains
+	seq uint64
 }
 
 func NewEvents() *Events {
@@ -266,9 +276,13 @@ func (e *Events) AddOverlaySubscription() (chan *execctx.SharedDomains, func()) 
 // PublishOverlay sends the SharedDomains to all in-process subscribers.
 // The SD is shared read-only; the background commit goroutine owns its lifecycle.
 func (e *Events) PublishOverlay(sd *execctx.SharedDomains) {
-	e.latestSD.Store(sd)
 	e.lock.Lock()
 	defer e.lock.Unlock()
+	seq := uint64(1)
+	if prev := e.latestPub.Load(); prev != nil {
+		seq = prev.seq + 1
+	}
+	e.latestPub.Store(&overlayPub{sd: sd, seq: seq})
 	for _, ch := range e.overlaySubscriptions {
 		common.PrioritizedSend(ch, sd)
 	}
@@ -276,7 +290,20 @@ func (e *Events) PublishOverlay(sd *execctx.SharedDomains) {
 
 // LatestSD returns the most recently published SharedDomains, or nil.
 func (e *Events) LatestSD() *execctx.SharedDomains {
-	return e.latestSD.Load()
+	sd, _ := e.OverlaySnapshot()
+	return sd
+}
+
+// OverlaySnapshot returns the published SharedDomains together with its
+// publish sequence number as one coherent pair. Comparing the sequence around
+// a tx open detects any publish landing in between — including a
+// publish/unpublish cycle that leaves the SD pointer unchanged.
+func (e *Events) OverlaySnapshot() (*execctx.SharedDomains, uint64) {
+	p := e.latestPub.Load()
+	if p == nil {
+		return nil, 0
+	}
+	return p.sd, p.seq
 }
 
 func (e *Events) OnNewPendingLogs(logs types.Logs) {
