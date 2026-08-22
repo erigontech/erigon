@@ -8,7 +8,7 @@ type Filter string
 
 type Anchor string
 
-type Gindex int64
+type Gindex uint64
 
 type Proof string
 
@@ -32,7 +32,7 @@ type SSZQuery struct {
 type SSZQLRequest struct {
 	Aliases       []Alias    `json:"aliases,omitempty"`
 	Queries       []SSZQuery `json:"queries"`
-	IncludeProofs bool       `json:"include_proof,omitempty"`
+	IncludeProofs bool       `json:"include_proofs,omitempty"`
 	Multiproof    bool       `json:"multiproof,omitempty"`
 }
 

@@ -9,8 +9,8 @@ func parseQuery(request SSZQLRequest, version uint, block_id string) SSZQLRespon
 		Leaves:   make([]Leaf, 0),
 		Results:  make([]Result, 0),
 	}
-	parseQueries(request, &response)
 	parseAliases(request.Aliases, &response)
+	parseQueries(request, &response)
 	if request.IncludeProofs {
 		generateProof(&response)
 	}
@@ -22,6 +22,8 @@ func parseQueries(req SSZQLRequest, res *SSZQLResponse) []SSZQuery {
 	for i, query := range req.Queries {
 		res.Paths = append(res.Paths, query.Path)
 		res.Results = append(res.Results, Result("query "+strconv.Itoa(i)+" result"))
+		res.Gindices = append(res.Gindices, Gindex(1))
+		res.Leaves = append(res.Leaves, Leaf("0xabcdef"))
 	}
 
 	return req.Queries
