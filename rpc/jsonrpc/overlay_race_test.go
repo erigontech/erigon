@@ -484,7 +484,7 @@ func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {
 	require.NoError(t, err)
 	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
 
-	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	header, err := api.GetRawHeader(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber))
@@ -503,7 +503,7 @@ func TestHeaderHelpersDoNotReturnPublishedPendingHeader(t *testing.T) {
 	require.NoError(t, err)
 	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
 
-	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()

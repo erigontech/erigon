@@ -49,6 +49,8 @@ type Stream interface {
 	WriteUint64(val uint64)
 	WriteFloat32(val float32)
 	WriteFloat64(val float64)
+	// WriteString and WriteObjectField must consume val before returning:
+	// callers pass views over reusable buffers.
 	WriteString(val string)
 
 	// JSON structure methods
