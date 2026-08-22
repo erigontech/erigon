@@ -31,8 +31,10 @@ var (
 	rpcMetricsLabels   = map[bool]map[string]string{}
 	rpcRequestGauge    = metrics.GetOrCreateCounter("rpc_total")
 	failedReqeustGauge = metrics.GetOrCreateCounter("rpc_failure")
-	// A response the client stopped reading. Routine on its own -- someone
-	// cancels a long trace -- but a rising rate means truncated replies.
+	// A streamed response the client stopped reading. Routine on its own --
+	// someone cancels a long trace -- but a rising rate means truncated replies.
+	// Batch and non-streaming replies do not go through the stream, so they are
+	// not counted here.
 	undeliveredGauge = metrics.GetOrCreateCounter("rpc_undelivered_total")
 )
 

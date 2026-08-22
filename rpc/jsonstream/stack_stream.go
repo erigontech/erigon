@@ -61,6 +61,7 @@ func (s *StackStream) Buffer() []byte {
 // Reset resets the underlying jsoniter.Stream and clears the stack
 func (s *StackStream) Reset(out io.Writer) {
 	s.stream.Reset(out)
+	s.stream.Error = nil
 	s.stack = s.stack[:0]
 }
 

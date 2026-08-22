@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -1124,4 +1125,18 @@ func TestWriteReportsLatchedError(t *testing.T) {
 	}
 	require.Error(t, err, "Write never reported the writer failing")
 	require.Error(t, s.Error())
+}
+
+// TestResetClearsLatchedError pins that a reused stream does not carry a dead
+// writer's error into the next response, where it would drop every flush.
+func TestResetClearsLatchedError(t *testing.T) {
+	s := New(goneWriter{}).(*StackStream)
+	s.WriteRaw(strings.Repeat("x", 2*FlushThreshold))
+	require.Error(t, s.Error())
+
+	var out bytes.Buffer
+	s.Reset(&out)
+	s.WriteRaw("ok")
+	require.NoError(t, s.Flush())
+	require.Equal(t, "ok", out.String())
 }
