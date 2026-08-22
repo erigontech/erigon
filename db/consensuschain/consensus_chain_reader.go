@@ -23,9 +23,9 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/types"
 )
@@ -33,11 +33,16 @@ import (
 type Reader struct {
 	config      *chain.Config
 	tx          kv.Tx
-	blockReader services.FullBlockReader
+	blockReader dbservices.FullBlockReader
 	logger      log.Logger
 }
 
-func NewReader(config *chain.Config, tx kv.Tx, blockReader services.FullBlockReader, logger log.Logger) *Reader {
+// logger is used only on read-error paths, so a nil one stays invisible until
+// something fails. log.Logger is an interface, and calling it then panics.
+func NewReader(config *chain.Config, tx kv.Tx, blockReader dbservices.FullBlockReader, logger log.Logger) *Reader {
+	if logger == nil {
+		logger = log.Root()
+	}
 	return &Reader{config, tx, blockReader, logger}
 }
 
@@ -88,8 +93,7 @@ func (cr Reader) GetTd(hash common.Hash, number uint64) *uint256.Int {
 	}
 	return td
 }
-func (cr Reader) FrozenBlocks() uint64              { return cr.blockReader.FrozenBlocks() }
-func (cr Reader) FrozenBorBlocks(align bool) uint64 { return cr.blockReader.FrozenBorBlocks(align) }
+func (cr Reader) FrozenBlocks() uint64 { return cr.blockReader.FrozenBlocks() }
 func (cr Reader) GetBlock(hash common.Hash, number uint64) *types.Block {
 	b, _, _ := cr.blockReader.BlockWithSenders(context.Background(), cr.tx, hash, number)
 	return b

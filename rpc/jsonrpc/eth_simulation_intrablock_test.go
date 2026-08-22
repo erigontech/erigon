@@ -13,6 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -38,8 +39,7 @@ func TestSimulationIntraBlockHasStorageRAMBatch(t *testing.T) {
 
 	// Build an in-memory temporal DB (no files on disk).
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).
-		InMem(t, dirs.Chaindata).
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).
 		GrowthStep(32 * datasize.MB).
 		MapSize(2 * datasize.GB).
 		MustOpen()
@@ -69,7 +69,9 @@ func TestSimulationIntraBlockHasStorageRAMBatch(t *testing.T) {
 	slotKey := accounts.InternKey(common.Hash{}) // slot 0x00...00
 	slotVal := slotKey.Value()                   // [32]byte
 
-	storageKey := append(addrVal[:], slotVal[:]...)
+	storageKey := make([]byte, 0, len(addrVal)+len(slotVal))
+	storageKey = append(storageKey, addrVal[:]...)
+	storageKey = append(storageKey, slotVal[:]...)
 
 	// firstMinTxNum = 0: this is the canonical base state (before any simulated blocks).
 	// The contract does NOT exist in the canonical chain (empty DB), so RangeAsOf(0)

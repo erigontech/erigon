@@ -41,7 +41,7 @@ func TestFeeHistory(t *testing.T) {
 	}
 
 	overMaxQuery := make([]float64, 101)
-	for i := 0; i < 101; i++ {
+	for i := range 101 {
 		overMaxQuery[i] = float64(1)
 	}
 
@@ -80,7 +80,7 @@ func TestFeeHistory(t *testing.T) {
 			m := newTestBackend(t) //, big.NewInt(16), c.pending)
 			defer m.Close()
 
-			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewSimple(), m.BlockReader, false, rpccfg.DefaultEvmCallTimeout, m.Engine, m.Dirs, nil, 0, 0)
+			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 			tx, err := m.DB.BeginTemporalRo(m.Ctx)
 			require.NoError(t, err)
 			defer tx.Rollback()
@@ -117,7 +117,7 @@ func TestFeeHistory(t *testing.T) {
 			if len(blobBaseFeeRatio) != c.expCount {
 				t.Fatalf("Test case %d: blobBaseFeeRatio array length mismatch, want %d, got %d", i, c.expCount, len(blobBaseFeeRatio))
 			}
-			if err != c.expErr && !errors.Is(err, c.expErr) {
+			if !errors.Is(err, c.expErr) {
 				t.Fatalf("Test case %d: error mismatch, want %v, got %v", i, c.expErr, err)
 			}
 		}()

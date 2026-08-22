@@ -68,7 +68,6 @@ func getSyncCommitteeFromState(s *state.CachingBeaconState) *solid.SyncCommittee
 		return s.CurrentSyncCommittee()
 	}
 	return s.NextSyncCommittee()
-
 }
 
 func (s *syncContributionPoolImpl) AddSyncContribution(headState *state.CachingBeaconState, contribution *cltypes.Contribution) error {
@@ -174,7 +173,7 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 			}
 			utils.FlipBitOn(contribution.AggregationBits, int(i-startSubCommittee))
 			// Note: it's possible that one validator appears multiple times in the subcommittee.
-			signatures = append(signatures, common.Copy(message.Signature[:]))
+			signatures = append(signatures, bytes.Clone(message.Signature[:]))
 		}
 	}
 	if len(signatures) == 0 {
@@ -182,7 +181,7 @@ func (s *syncContributionPoolImpl) AddSyncCommitteeMessage(headState *state.Cach
 		return errors.New("validator not found in sync committee")
 	}
 	// Compute the aggregated signature.
-	signatures = append(signatures, common.Copy(contribution.Signature[:]))
+	signatures = append(signatures, bytes.Clone(contribution.Signature[:]))
 	aggregatedSignature, err := bls.AggregateSignatures(signatures)
 	if err != nil {
 		return err
@@ -237,7 +236,7 @@ func (s *syncContributionPoolImpl) GetSyncAggregate(slot uint64, beaconBlockRoot
 			continue
 		}
 		for i := range contribution.AggregationBits {
-			for j := 0; j < 8; j++ {
+			for j := range 8 {
 				bitIndex := i*8 + j
 				participated := utils.IsBitOn(contribution.AggregationBits, bitIndex)
 				if participated {

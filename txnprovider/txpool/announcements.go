@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"sort"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
 )
 
@@ -64,7 +63,7 @@ func (a Announcements) Swap(i, j int) {
 	a.sizes[i], a.sizes[j] = a.sizes[j], a.sizes[i]
 	ii := i * length.Hash
 	jj := j * length.Hash
-	for k := 0; k < length.Hash; k++ {
+	for range length.Hash {
 		a.hashes[ii], a.hashes[jj] = a.hashes[jj], a.hashes[ii]
 		ii++
 		jj++
@@ -120,9 +119,9 @@ func (a Announcements) Copy() Announcements {
 		return a
 	}
 	c := Announcements{
-		ts:     common.Copy(a.ts),
+		ts:     bytes.Clone(a.ts),
 		sizes:  make([]uint32, len(a.sizes)),
-		hashes: common.Copy(a.hashes),
+		hashes: bytes.Clone(a.hashes),
 	}
 	copy(c.sizes, a.sizes)
 	return c
@@ -145,7 +144,7 @@ func (h Hashes) Less(i, j int) bool {
 func (h Hashes) Swap(i, j int) {
 	ii := i * length.Hash
 	jj := j * length.Hash
-	for k := 0; k < length.Hash; k++ {
+	for range length.Hash {
 		h[ii], h[jj] = h[jj], h[ii]
 		ii++
 		jj++

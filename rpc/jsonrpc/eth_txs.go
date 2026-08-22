@@ -20,7 +20,6 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"fmt"
 
 	"github.com/holiman/uint256"
 
@@ -31,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -54,15 +52,6 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	if err != nil {
 		return nil, err
 	}
-
-	// Private API returns 0 if transaction is not found.
-	isBorStateSyncTx := blockNum == 0 && chainConfig.Bor != nil
-	if isBorStateSyncTx {
-		blockNum, ok, err = api.bridgeReader.EventTxnLookup(ctx, txnHash)
-		if err != nil {
-			return nil, err
-		}
-	}
 	if ok {
 		err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum)
 		if err != nil {
@@ -70,13 +59,9 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 
 		overlayTx := api.filters.WithOverlay(tx)
-		txNumMin, err := api._txNumReader.Min(ctx, overlayTx, blockNum)
+		txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum)
 		if err != nil {
 			return nil, err
-		}
-
-		if txNumMin+1 > txNum && !isBorStateSyncTx {
-			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
 		}
 
 		header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
@@ -96,27 +81,18 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 			baseFee = header.BaseFee
 		}
 
-		// if no transaction was found then we return nil
-		if isBorStateSyncTx {
-			borTx := bortypes.NewBorTransaction()
-			_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
-			if err != nil {
-				return nil, err
-			}
-			return ethapi.NewRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(txCount), chainConfig.ChainID), nil
-		}
-
-		var txnIndex = txNum - txNumMin - 1
-
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, int(txnIndex))
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 		if err != nil {
 			return nil, err
 		}
+		if !ok {
+			return nil, nil
+		}
 
-		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, txnIndex, baseFee), nil
+		return ethapi.NewRPCTransaction(txn, blockHash, blockTime, blockNum, uint64(txnIndex), baseFee), nil
 	}
 
-	curHeader := rawdb.ReadCurrentHeader(tx)
+	curHeader := rawdb.ReadCurrentHeader(api.filters.WithOverlay(tx))
 	if curHeader == nil {
 		return nil, nil
 	}
@@ -166,20 +142,16 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 		return nil, err
 	}
 
-	txNumMin, err := api._txNumReader.Min(ctx, tx, blockNum)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
 	if err != nil {
 		return nil, err
 	}
-	if txNumMin+1 > txNum {
-		return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNum)
-	}
-	txnIndex := int(txNum - txNumMin - 1)
-	txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
 	if err != nil {
 		return nil, err
 	}
 
-	if txn != nil {
+	if ok {
 		var buf bytes.Buffer
 		err = txn.MarshalBinary(&buf)
 		return buf.Bytes(), err
@@ -203,10 +175,6 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 
 	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), tx, api._blockReader, api.filters)
 	if err != nil {
@@ -230,17 +198,8 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	txs := block.Transactions()
 	idx := uint64(txIndex)
 	n := uint64(len(txs))
-	if idx > n {
+	if idx >= n {
 		return nil, nil // not error
-	} else if idx == n {
-		borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, block.NumberU64(), block.Hash())
-		if err != nil {
-			return nil, err
-		}
-		if borTx == nil {
-			return nil, nil // not error
-		}
-		return ethapi.NewRPCBorTransaction(borTx, borTxHash, block.Hash(), block.NumberU64(), idx, chainConfig.ChainID), nil
 	}
 
 	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.Time(), block.NumberU64(), idx, block.BaseFee()), nil
@@ -282,10 +241,6 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 
 	if blockNr == rpc.PendingBlockNumber {
 		b, err := api.blockByNumber(ctx, blockNr, tx)
@@ -327,17 +282,8 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	txs := block.Transactions()
 	idx := uint64(txIndex)
 	n := uint64(len(txs))
-	if idx > n {
+	if idx >= n {
 		return nil, nil // not error
-	} else if idx == n {
-		borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, blockNum, hash)
-		if err != nil {
-			return nil, err
-		}
-		if borTx == nil {
-			return nil, nil
-		}
-		return ethapi.NewRPCBorTransaction(borTx, borTxHash, hash, blockNum, idx, chainConfig.ChainID), nil
 	}
 
 	return ethapi.NewRPCTransaction(txs[txIndex], hash, block.Time(), blockNum, idx, block.BaseFee()), nil

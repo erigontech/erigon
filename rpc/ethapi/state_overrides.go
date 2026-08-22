@@ -21,7 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"math/big"
-	"sort"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -96,9 +96,9 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	for addr := range *so {
 		addrs = append(addrs, addr)
 	}
-	sort.Slice(addrs, func(i, j int) bool {
-		ai, aj := addrs[i].Value(), addrs[j].Value()
-		return bytes.Compare(ai[:], aj[:]) < 0
+	slices.SortFunc(addrs, func(a, b accounts.Address) int {
+		av, bv := a.Value(), b.Value()
+		return bytes.Compare(av[:], bv[:])
 	})
 
 	err := so.override(ibs, addrs)
@@ -144,8 +144,8 @@ func (so *StateOverrides) Override(ibs *state.IntraBlockState, precompiles vm.Pr
 	// detection in multi-block eth_simulateV1 when a prior simulated block
 	// deployed a contract at the overridden address.
 	// State overrides are simulation-only mutations and must not trigger
-	// consensus rules like EIP-161.
+	// EIP-161 empty-account clearing.
 	noEIP161Rules := *rules
-	noEIP161Rules.IsSpuriousDragon = false
+	noEIP161Rules.DisabledEIPs = append(slices.Clone(rules.DisabledEIPs), 161)
 	return ibs.FinalizeTx(&noEIP161Rules, state.NewNoopWriter())
 }

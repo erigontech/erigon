@@ -43,6 +43,7 @@ type JsonStreamLogger struct {
 	stream       jsonstream.Stream
 	hexEncodeBuf [128]byte
 	firstCapture bool
+	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
 
 	locations common.Hashes // For sorting
 	storage   map[accounts.Address]Storage
@@ -83,11 +84,14 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 }
 
 // hexWithPrefix encodes b as a 0x-prefixed hex string using the internal buffer.
+// The result aliases hexEncodeBuf, so it is invalidated by anything that writes
+// that buffer, writeMemoryWordRaw included. Hand it straight to the stream,
+// which copies it in.
 func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
 	l.hexEncodeBuf[0] = '0'
 	l.hexEncodeBuf[1] = 'x'
 	n := hex.Encode(l.hexEncodeBuf[2:], b)
-	return string(l.hexEncodeBuf[:2+n])
+	return common.ToStringZeroCopy(l.hexEncodeBuf[:2+n])
 }
 
 // writeMemoryWordRaw writes a memory word as a JSON string "0x<hex>" directly
@@ -126,6 +130,13 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		return
 	default:
 	}
+	// check if already captured the specified number of opcode steps. Execution
+	// keeps going, we just stop recording. Must happen before anything is written
+	// to the stream, otherwise a dangling separator would be emitted.
+	if l.cfg.Limit != 0 && l.cfg.Limit <= l.opcodeSteps {
+		return
+	}
+	l.opcodeSteps++
 	if !l.firstCapture {
 		l.stream.WriteMore()
 	} else {
@@ -207,10 +218,7 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteObjectField("memory")
 		l.stream.WriteArrayStart()
 		for i := 0; i < len(memory); i += 32 {
-			end := i + 32
-			if end > len(memory) {
-				end = len(memory)
-			}
+			end := min(i+32, len(memory))
 			if i > 0 {
 				l.stream.WriteMore()
 			}

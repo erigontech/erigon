@@ -193,7 +193,7 @@ func Test_CheckEmptyFutureForkTablesTolerated(t *testing.T) {
 			delFile(t, dirs.SnapCaplin, fmt.Sprintf("v1.0-%06d-%06d-%s.idx", r.fromStep, r.toStep, table))
 		}
 	}
-	for i := 0; i < 30; i++ {
+	for range 30 {
 		require.NoError(t, checkIfCaplinSnapshotsPublishable(dirs, true))
 	}
 }

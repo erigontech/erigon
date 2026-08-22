@@ -23,7 +23,6 @@
 package discover
 
 import (
-	"fmt"
 	"net"
 	"slices"
 	"time"
@@ -44,7 +43,7 @@ func checkClockDrift() {
 		return
 	}
 	if drift < -driftThreshold || drift > driftThreshold {
-		log.Warn(fmt.Sprintf("[p2p] System clock seems off by %v, which can prevent network connectivity", drift))
+		log.Warn("[p2p] System clock seems off, which can prevent network connectivity", "drift", drift)
 		log.Warn("[p2p] Please enable network time synchronisation in system settings.")
 	} else {
 		log.Trace("[p2p] NTP sanity check done", "drift", drift)
@@ -72,36 +71,41 @@ func sntpDrift(measurements int) (time.Duration, error) {
 	// Execute each of the measurements
 	drifts := []time.Duration{}
 	for i := 0; i < measurements+2; i++ {
-		// Dial the NTP server and send the time retrieval request
-		conn, err := net.DialUDP("udp", nil, addr)
-		if err != nil {
+		if err := func() error {
+			// Dial the NTP server and send the time retrieval request
+			conn, err := net.DialUDP("udp", nil, addr)
+			if err != nil {
+				return err
+			}
+			defer conn.Close()
+
+			sent := time.Now()
+			if _, err = conn.Write(request); err != nil {
+				return err
+			}
+			// Retrieve the reply and calculate the elapsed time
+			conn.SetDeadline(time.Now().Add(5 * time.Second))
+
+			reply := make([]byte, 48)
+			if _, err = conn.Read(reply); err != nil {
+				return err
+			}
+			elapsed := time.Since(sent)
+
+			// Reconstruct the time from the reply data
+			sec := uint64(reply[43]) | uint64(reply[42])<<8 | uint64(reply[41])<<16 | uint64(reply[40])<<24
+			frac := uint64(reply[47]) | uint64(reply[46])<<8 | uint64(reply[45])<<16 | uint64(reply[44])<<24
+
+			nanosec := sec*1e9 + (frac*1e9)>>32
+
+			t := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(nanosec))
+
+			// Calculate the drift based on an assumed answer time of RRT/2
+			drifts = append(drifts, sent.Sub(t)+elapsed/2)
+			return nil
+		}(); err != nil {
 			return 0, err
 		}
-		defer conn.Close()
-
-		sent := time.Now()
-		if _, err = conn.Write(request); err != nil {
-			return 0, err
-		}
-		// Retrieve the reply and calculate the elapsed time
-		conn.SetDeadline(time.Now().Add(5 * time.Second))
-
-		reply := make([]byte, 48)
-		if _, err = conn.Read(reply); err != nil {
-			return 0, err
-		}
-		elapsed := time.Since(sent)
-
-		// Reconstruct the time from the reply data
-		sec := uint64(reply[43]) | uint64(reply[42])<<8 | uint64(reply[41])<<16 | uint64(reply[40])<<24
-		frac := uint64(reply[47]) | uint64(reply[46])<<8 | uint64(reply[45])<<16 | uint64(reply[44])<<24
-
-		nanosec := sec*1e9 + (frac*1e9)>>32
-
-		t := time.Date(1900, 1, 1, 0, 0, 0, 0, time.UTC).Add(time.Duration(nanosec))
-
-		// Calculate the drift based on an assumed answer time of RRT/2
-		drifts = append(drifts, sent.Sub(t)+elapsed/2)
 	}
 	// Calculate average drift (drop two extremities to avoid outliers)
 	slices.Sort(drifts)

@@ -71,7 +71,7 @@ func TestHasCallback(t *testing.T) {
 
 	assert.Nil(t, err, "Subscribe failed")
 
-	if bus.HasCallback(reflect.TypeOf("String")) {
+	if bus.HasCallback(reflect.TypeFor[string]()) {
 		t.Fail()
 	}
 	if !bus.HasCallback() {
@@ -173,9 +173,7 @@ func TestSubcribeOnceAsync(t *testing.T) {
 		t.Fail()
 	}
 
-	var cb func(a int, out *[]int)
-
-	if bus.HasCallback(reflect.TypeOf(cb)) {
+	if bus.HasCallback(reflect.TypeFor[func(a int, out *[]int)]()) {
 		t.Fail()
 	}
 }

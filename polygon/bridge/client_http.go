@@ -17,11 +17,12 @@
 package bridge
 
 import (
+	"cmp"
 	"context"
 	"errors"
 	"fmt"
 	"net/url"
-	"sort"
+	"slices"
 	"time"
 
 	"github.com/erigontech/erigon/common/log/v3"
@@ -97,8 +98,8 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 			fromID += uint64(StateEventsFetchLimit)
 		}
 
-		sort.SliceStable(eventRecords, func(i, j int) bool {
-			return eventRecords[i].ID < eventRecords[j].ID
+		slices.SortStableFunc(eventRecords, func(a, b *EventRecordWithTime) int {
+			return cmp.Compare(a.ID, b.ID)
 		})
 
 		return eventRecords, nil
@@ -141,8 +142,8 @@ func (c *HttpClient) FetchStateSyncEvents(ctx context.Context, fromID uint64, to
 		fromID += uint64(StateEventsFetchLimit)
 	}
 
-	sort.SliceStable(eventRecords, func(i, j int) bool {
-		return eventRecords[i].ID < eventRecords[j].ID
+	slices.SortStableFunc(eventRecords, func(a, b *EventRecordWithTime) int {
+		return cmp.Compare(a.ID, b.ID)
 	})
 
 	return eventRecords, nil

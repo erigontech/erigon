@@ -158,9 +158,11 @@ func (tm *TestMatcher) CheckFailureForName(name string, err error) error {
 func (tm *TestMatcher) Walk(t *testing.T, dir string, runTest any) {
 	// Walk the directory.
 	dirinfo, err := os.Stat(dir)
-	if os.IsNotExist(err) || !dirinfo.IsDir() {
-		fmt.Fprintf(os.Stderr, "can't find test files in %s, did you clone the tests submodule?\n", dir)
-		t.Skip("missing test files")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !dirinfo.IsDir() {
+		t.Fatalf("test path is not a directory: %s", dir)
 	}
 	err = filepath.WalkDir(dir, func(path string, d os.DirEntry, err error) error {
 		if err != nil {
@@ -243,16 +245,15 @@ func readJSONFile(fn string, value any) error {
 func jsoniterErrorOffset(err error) (int64, bool) {
 	const marker = ", error found in #"
 	msg := err.Error()
-	idx := strings.Index(msg, marker)
-	if idx < 0 {
+	_, rest, found := strings.Cut(msg, marker)
+	if !found {
 		return 0, false
 	}
-	rest := msg[idx+len(marker):]
-	end := strings.IndexByte(rest, ' ')
-	if end < 0 {
+	numStr, _, found := strings.Cut(rest, " ")
+	if !found {
 		return 0, false
 	}
-	n, parseErr := strconv.ParseInt(rest[:end], 10, 64)
+	n, parseErr := strconv.ParseInt(numStr, 10, 64)
 	if parseErr != nil {
 		return 0, false
 	}

@@ -96,9 +96,7 @@ func ExampleSubscriptionScope() {
 	// Run a subscriber in the background.
 	divsub := app.SubscribeResults('/', divs)
 	mulsub := app.SubscribeResults('*', muls)
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer fmt.Println("subscriber exited")
 		defer divsub.Unsubscribe()
 		defer mulsub.Unsubscribe()
@@ -114,7 +112,7 @@ func ExampleSubscriptionScope() {
 				return
 			}
 		}
-	}()
+	})
 
 	// Interact with the app.
 	app.Calc('/', 22, 11)

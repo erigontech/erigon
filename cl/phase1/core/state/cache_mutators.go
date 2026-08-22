@@ -72,7 +72,7 @@ func (b *CachingBeaconState) SlashValidator(slashedInd uint64, whistleblowerInd 
 	}
 	proposerInd, err := b.GetBeaconProposerIndex()
 	if err != nil {
-		return 0, fmt.Errorf("unable to get beacon proposer index: %v", err)
+		return 0, fmt.Errorf("unable to get beacon proposer index: %w", err)
 	}
 	if whistleblowerInd == nil {
 		whistleblowerInd = new(uint64)
@@ -143,6 +143,9 @@ func (b *CachingBeaconState) ComputeExitEpochAndUpdateChurn(exitBalance uint64) 
 		ComputeActivationExitEpoch(b.BeaconConfig(), Epoch(b)),
 	)
 	perEpochChurn := GetActivationExitChurnLimit(b)
+	if b.Version() >= clparams.GloasVersion {
+		perEpochChurn = GetExitChurnLimit(b)
+	}
 
 	var exitBalanceToConsume uint64
 	if b.EarliestExitEpoch() < earliestExitEpoch {

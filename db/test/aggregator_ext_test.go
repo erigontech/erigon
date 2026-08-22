@@ -17,6 +17,7 @@
 package test
 
 import (
+	"bytes"
 	"encoding/binary"
 	"encoding/hex"
 	"math"
@@ -31,7 +32,6 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
@@ -103,7 +104,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, nil)
 		require.NoError(t, err)
 
-		keys[txNum-1] = append(addr, loc...)
+		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		if (txNum+1)%stepSize == 0 {
 			trieState, err := hph.EncodeCurrentState(nil)
@@ -136,14 +137,14 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 	require.NoError(t, dir.RemoveAll(dirs.Chaindata))
 
 	// open new db and aggregator instances
-	newDb := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).MustOpen()
+	newDb := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	t.Cleanup(newDb.Close)
 
 	newAgg := state.New(agg.Dirs()).StepSize(stepSize).StepsInFrozenFile(config3.DefaultStepsInFrozenFile).MustOpen(ctx, newDb)
 	t.Cleanup(newAgg.Close)
 	require.NoError(t, newAgg.OpenFolder())
 
-	db, _ = temporal.New(newDb, newAgg)
+	db, _ = temporal.New(newDb, newAgg, nil)
 
 	tx, err = db.BeginTemporalRw(t.Context())
 	require.NoError(t, err)
@@ -162,7 +163,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 		if uint64(i+1) >= txs-stepSize {
 			continue // finishtx always stores last agg step in db which we deleted, so missing  values which were not aggregated is expected
 		}
-		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr])
+		stored, _, err := tx.GetLatest(kv.AccountsDomain, key[:length.Addr], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		if len(stored) == 0 {
 			miss++
@@ -175,7 +176,7 @@ func TestAggregatorV3_RestartOnFiles(t *testing.T) {
 
 		require.Equal(t, i+1, int(acc.Nonce))
 
-		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.NotEmpty(t, storedV)
 		_ = key[0]
@@ -207,7 +208,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	require.NoError(t, err)
 	defer domains.Close()
 
-	var latestCommitTxNum uint64
+	var latestCommitTxNum atomic.Uint64
 	commit := func(txn uint64) error {
 		err = domains.Flush(ctx, tx)
 		require.NoError(t, err)
@@ -222,7 +223,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 		domains, err = execctx.NewSharedDomains(t.Context(), tx, log.New())
 		require.NoError(t, err)
-		atomic.StoreUint64(&latestCommitTxNum, txn)
+		latestCommitTxNum.Store(txn)
 		return nil
 	}
 
@@ -243,7 +244,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 		n, err = rnd.Read(loc)
 		require.NoError(t, err)
 		require.Equal(t, length.Hash, n)
-		keys[txNum-1] = append(addr, loc...)
+		keys[txNum-1] = append(addr, loc...) //nolint:makezero
 
 		acc := accounts.Account{
 			Nonce:       1,
@@ -265,10 +266,10 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 	require.NoError(t, commit(txNum))
 
 	half := txs / 2
-	for txNum = txNum + 1; txNum <= txs; txNum++ {
+	for txNum++; txNum <= txs; txNum++ {
 		addr, loc := keys[txNum-1-half][:length.Addr], keys[txNum-1-half][length.Addr:]
 
-		prev, _, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half])
+		prev, _, err := tx.GetLatest(kv.AccountsDomain, keys[txNum-1-half], kv.GetLatestOptions{})
 		require.NoError(t, err)
 		err = domains.DomainPut(kv.StorageDomain, tx, composite(addr, loc), []byte{addr[0], loc[0]}, txNum, prev)
 		require.NoError(t, err)
@@ -283,7 +284,7 @@ func TestAggregatorV3_ReplaceCommittedKeys(t *testing.T) {
 
 	for i, key := range keys {
 
-		storedV, _, err := tx.GetLatest(kv.StorageDomain, key)
+		storedV, _, err := tx.GetLatest(kv.StorageDomain, key, kv.GetLatestOptions{})
 		require.NotNil(t, storedV, "key %x not found %d", key, i)
 		require.NoError(t, err)
 		require.Equal(t, key[0], storedV[0])
@@ -432,11 +433,11 @@ func TestAggregatorV3_Merge(t *testing.T) {
 	require.NoError(t, err)
 	defer roTx.Rollback()
 
-	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1)
+	v, _, err := roTx.GetLatest(kv.CommitmentDomain, commKey1, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, maxWrite, binary.BigEndian.Uint64(v))
 
-	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2)
+	v, _, err = roTx.GetLatest(kv.CommitmentDomain, commKey2, kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, otherMaxWrite, binary.BigEndian.Uint64(v))
 }
@@ -513,7 +514,7 @@ func TestAggregatorV3_PruneSmallBatches(t *testing.T) {
 	require.NoError(t, err)
 	defer buildTx.Rollback()
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		_, err = buildTx.PruneSmallBatches(t.Context(), time.Second*3)
 		require.NoError(t, err)
 	}
@@ -656,7 +657,7 @@ func TestAggregatorV3_MergeValTransform(t *testing.T) {
 	require.NoError(t, err)
 	defer rwTx.Rollback()
 
-	agg.ForTestReplaceKeysInValues(kv.CommitmentDomain, true)
+	agg.ForTestReferencesInCommitmentBranches(kv.CommitmentDomain, true)
 
 	domains, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
 	require.NoError(t, err)
@@ -733,13 +734,13 @@ func TestAggregatorV3_BuildFiles_WithReorgDepth(t *testing.T) {
 	ctx := t.Context()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
 	agg := state.NewTest(dirs).ReorgBlockDepth(5).StepSize(2).Logger(logger).MustOpen(ctx, db)
 	t.Cleanup(agg.Close)
 	err := agg.OpenFolder()
 	require.NoError(t, err)
-	tdb, err := temporal.New(db, agg)
+	tdb, err := temporal.New(db, agg, nil)
 	require.NoError(t, err)
 	t.Cleanup(tdb.Close)
 	tx, err := tdb.BeginTemporalRw(ctx)
@@ -797,7 +798,7 @@ func extractKVErrIterator(t *testing.T, it stream.KV) map[string][]byte {
 	for it.HasNext() {
 		k, v, err := it.Next()
 		require.NoError(t, err)
-		accounts[hex.EncodeToString(k)] = common.Copy(v)
+		accounts[hex.EncodeToString(k)] = bytes.Clone(v)
 	}
 
 	return accounts
@@ -812,7 +813,6 @@ func generateSharedDomainsUpdates(t *testing.T, domains *execctx.SharedDomains, 
 			usedKeys[k] = struct{}{}
 		}
 		if txNum%commitEvery == 0 {
-			// domains.SetTrace(true)
 			stateRootHash, err := domains.ComputeCommitment(t.Context(), tx, true, txNum/commitEvery, txNum, "", nil)
 			require.NoErrorf(t, err, "txNum=%d", txNum)
 			_ = stateRootHash
@@ -844,7 +844,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 	const maxStorageKeys = 10
 	usedKeys := make(map[string]struct{}, keysCount)
 
-	for j := uint64(0); j < keysCount; j++ {
+	for range keysCount {
 		key, existed := getKey()
 
 		r := rnd.IntN(101)
@@ -915,7 +915,7 @@ func generateSharedDomainsUpdatesForTx(t *testing.T, domains *execctx.SharedDoma
 			sk := make([]byte, length.Hash+length.Addr)
 			copy(sk, key)
 
-			for i := 0; i < maxStorageKeys; i++ {
+			for range maxStorageKeys {
 				loc := generateRandomKeyBytes(rnd, 32)
 				copy(sk[length.Addr:], loc)
 				usedKeys[string(sk)] = struct{}{}

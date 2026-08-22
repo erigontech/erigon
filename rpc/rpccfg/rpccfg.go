@@ -21,6 +21,8 @@ package rpccfg
 
 import (
 	"time"
+
+	"github.com/erigontech/erigon/db/datadir"
 )
 
 // HTTPTimeouts represents the configuration params for the HTTP RPC server.
@@ -60,6 +62,60 @@ const DefaultOverlayGetLogsTimeout = 5 * time.Minute
 const DefaultOverlayReplayBlockTimeout = 10 * time.Second
 const DefaultRpcTxSyncDefaultTimeout = 25 * time.Second
 const DefaultRpcTxSyncMaxTimeout = 1 * time.Minute
+const DefaultGasCap = 50_000_000
+
+type BaseApiConfig struct {
+	SingleNodeMode    bool
+	EvmCallTimeout    time.Duration // 0 → DefaultEvmCallTimeout
+	Dirs              datadir.Dirs
+	BlockRangeLimit   int
+	GetLogsMaxResults int
+	LogQueryLimit     int
+}
+
+// EthApiConfig defines the configurable parameters for EthAPI
+type EthApiConfig struct {
+	GasCap                      uint64
+	FeeCap                      float64
+	ReturnDataLimit             int
+	AllowUnprotectedTxs         bool
+	MaxGetProofRewindBlockCount int
+	SubscribeLogsChannelSize    int
+	RpcTxSyncDefaultTimeout     time.Duration
+	RpcTxSyncMaxTimeout         time.Duration
+}
+
+// DebugApiConfig defines the configurable parameters for the debug_ namespace
+type DebugApiConfig struct {
+	GasCap            uint64
+	GethCompatibility bool // Geth-compatible storage iteration order for debug_storageRangeAt
+}
+
+// DefaultDebugApiConfig returns the DebugApiConfig used outside the RPC daemon
+// (e.g. block-test runners), where no HttpCfg is available.
+func DefaultDebugApiConfig() *DebugApiConfig {
+	return &DebugApiConfig{GasCap: DefaultGasCap}
+}
+
+// TraceApiConfig defines the configurable parameters for the trace_ namespace
+type TraceApiConfig struct {
+	MaxTraces     uint64
+	GasCap        uint64
+	Compatibility bool // Bug for bug compatibility with OpenEthereum
+}
+
+// GraphQLApiConfig defines the configurable parameters for the GraphQL API
+type GraphQLApiConfig struct {
+	GasCap          uint64
+	ReturnDataLimit int
+}
+
+// OverlayApiConfig defines the configurable parameters for the overlay_ namespace
+type OverlayApiConfig struct {
+	GasCap                    uint64
+	OverlayGetLogsTimeout     time.Duration
+	OverlayReplayBlockTimeout time.Duration
+}
 
 var SlowLogBlackList = []string{
 	"eth_getBlock", "eth_getBlockByNumber", "eth_getBlockByHash", "eth_blockNumber",

@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/common"
@@ -29,13 +28,12 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/vm"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -75,19 +73,15 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 			return nil, err
 		}
 
-		txNumMin, err := api._txNumReader.Min(ctx, tx, blockNumber)
+		txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNumber, txNum)
 		if err != nil {
 			return nil, err
 		}
-		if txNumMin+1 > txNum {
-			return nil, fmt.Errorf("uint underflow txnums error txNum: %d, txNumMin: %d, blockNum: %d", txNum, txNumMin, blockNumber)
-		}
-		txnIndex := int(txNum - txNumMin - 1)
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNumber, txnIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNumber, txnIndex)
 		if err != nil {
 			return nil, err
 		}
-		if txn == nil {
+		if !ok {
 			return nil, nil // not error, see https://github.com/erigontech/erigon/issues/1645
 		}
 		txs = append(txs, txn)
@@ -112,6 +106,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		}
 	}
 	ibs := state.New(stateReader)
+	defer ibs.Close()
 
 	parent, _ := api.headerByNumber(ctx, rpc.BlockNumber(stateBlockNumber), tx)
 	if parent == nil {
@@ -147,30 +142,15 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 	// Get a new instance of the EVM
 	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vm.Config{})
 
-	// evmPtr is updated atomically each time evm is recreated in the loop,
-	// so the AfterFunc callback always cancels the current instance.
-	var evmPtr atomic.Pointer[vm.EVM]
-	evmPtr.Store(evm)
-
 	timeoutMilliSeconds := int64(5000)
 	if timeoutMilliSecondsPtr != nil {
 		timeoutMilliSeconds = *timeoutMilliSecondsPtr
 	}
 	timeout := time.Millisecond * time.Duration(timeoutMilliSeconds)
-	// Setup context so it may be cancelled the call has completed
-	// or, in case of unmetered gas, setup a context with a timeout.
-	var cancel context.CancelFunc
-	if timeout > 0 {
-		ctx, cancel = context.WithTimeout(ctx, timeout)
-	} else {
-		ctx, cancel = context.WithCancel(ctx)
-	}
-	// Make sure the context is cancelled when the call has completed
-	// this makes sure resources are cleaned up.
-	defer cancel()
 
-	stop := context.AfterFunc(ctx, func() { evmPtr.Load().Cancel() })
-	defer stop()
+	_, storeEVM, cleanup := setupEVMTimeout(ctx, timeout)
+	defer cleanup()
+	storeEVM(evm)
 
 	// Setup the gas pool (also for unmetered requests)
 	// and apply the message.
@@ -189,7 +169,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		msg.SetCheckGas(false)
 		// Recreate EVM with the correct txCtx for this transaction
 		evm = vm.NewEVM(blockCtx, protocol.NewEVMTxContext(msg), ibs, chainConfig, vm.Config{})
-		evmPtr.Store(evm)
+		storeEVM(evm)
 		// Execute the transaction message
 		result, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, false /* gasBailout */, engine)
 		if err != nil {
@@ -198,7 +178,7 @@ func (api *APIImpl) CallBundle(ctx context.Context, txHashes []common.Hash, stat
 		if evm.Cancelled() {
 			return nil, fmt.Errorf("execution aborted (timeout = %v)", timeout)
 		}
-		if err = ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
+		if err := ibs.FinalizeTx(rules, state.NewNoopWriter()); err != nil {
 			return nil, err
 		}
 
@@ -245,7 +225,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 			}
 			return nil, err
 		}
-		if err = api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum); err != nil {
+		if err := api.BaseAPI.checkPruneBlocks(ctx, tx, blockNum); err != nil {
 			return nil, err
 		}
 		b, err = api.blockByNumber(ctx, rpc.BlockNumber(blockNum), tx)
@@ -261,16 +241,7 @@ func (api *APIImpl) GetBlockByNumber(ctx context.Context, number rpc.BlockNumber
 	}
 	additionalFields := make(map[string]any)
 
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, b.NumberU64(), b.Hash())
-	if err != nil {
-		return nil, err
-	}
-
-	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, borTx, borTxHash, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(b, true, fullTx, additionalFields)
 	if err == nil && number == rpc.PendingBlockNumber {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -321,16 +292,7 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 	number := block.NumberU64()
 
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-	borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, block.NumberU64(), block.Hash())
-	if err != nil {
-		return nil, err
-	}
-
-	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, borTx, borTxHash, additionalFields)
+	response, err := ethapi.RPCMarshalBlockEx(block, true, fullTx, additionalFields)
 	if err == nil && int64(number) == rpc.PendingBlockNumber.Int64() {
 		// Pending blocks need to nil out a few fields
 		for _, field := range []string{"hash", "nonce", "miner"} {
@@ -339,6 +301,81 @@ func (api *APIImpl) GetBlockByHash(ctx context.Context, numberOrHash rpc.BlockNu
 	}
 
 	return response, err
+}
+
+// GetBlockAccessList returns the block access list for a given block (EIP-7928).
+func (api *APIImpl) GetBlockAccessList(ctx context.Context, numberOrHash rpc.BlockNumberOrHash) ([]*ethapi.RPCAccountAccess, error) {
+	tx, err := api.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, err
+	}
+	defer tx.Rollback()
+	data, err := api.blockAccessListBytes(ctx, tx, numberOrHash)
+	if errors.Is(err, errBlockAccessListNotFound) {
+		return nil, nil
+	}
+	if err != nil {
+		return nil, err
+	}
+	bal, err := types.DecodeBlockAccessListBytes(data)
+	if err != nil {
+		return nil, err
+	}
+	return ethapi.MarshalBlockAccessList(bal), nil
+}
+
+var errBlockAccessListNotFound = errors.New("block access list not found")
+
+func blockAccessListResourceNotFoundError() *rpc.CustomError {
+	return &rpc.CustomError{Code: -32001, Message: "Resource not found"}
+}
+
+func blockAccessListPrunedHistoryError() *rpc.CustomError {
+	return &rpc.CustomError{Code: 4444, Message: "Pruned history unavailable"}
+}
+
+func (api *BaseAPI) blockAccessListBytes(ctx context.Context, tx kv.TemporalTx, numberOrHash rpc.BlockNumberOrHash) ([]byte, error) {
+	if numberOrHash.BlockNumber != nil && *numberOrHash.BlockNumber == rpc.PendingBlockNumber {
+		return nil, errBlockAccessListNotFound
+	}
+	blockNum, blockHash, _, err := rpchelper.GetCanonicalBlockNumber(ctx, numberOrHash, tx, api._blockReader, api.filters)
+	if err != nil {
+		if errors.As(err, &rpc.BlockNotFoundErr{}) {
+			return nil, errBlockAccessListNotFound
+		}
+		return nil, err
+	}
+	header, err := api._blockReader.Header(ctx, tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if header == nil {
+		return nil, errBlockAccessListNotFound
+	}
+	chainConfig, err := api.chainConfig(ctx, tx)
+	if err != nil {
+		return nil, err
+	}
+	if !chainConfig.IsAmsterdam(header.Time) {
+		return nil, blockAccessListResourceNotFoundError()
+	}
+	data, err := rawdb.ReadBlockAccessListBytes(tx, blockHash, blockNum)
+	if err != nil {
+		return nil, err
+	}
+	if len(data) == 0 {
+		data, err = api.balRegenerator.GetBlockAccessListBytes(ctx, chainConfig, tx, blockHash, blockNum)
+		if errors.Is(err, state.PrunedError) {
+			return nil, blockAccessListPrunedHistoryError()
+		}
+		if err != nil {
+			return nil, err
+		}
+	}
+	if len(data) == 0 {
+		return nil, blockAccessListPrunedHistoryError()
+	}
+	return data, nil
 }
 
 // GetBlockTransactionCountByNumber implements eth_getBlockTransactionCountByNumber. Returns the number of transactions in a block given the block's block number.
@@ -393,19 +430,6 @@ func (api *APIImpl) GetBlockTransactionCountByNumber(ctx context.Context, blockN
 		return nil, nil
 	}
 
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	borTx, _, err := api.lookupBorTx(ctx, chainConfig, blockNum, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	if borTx != nil {
-		txCount++
-	}
-
 	numOfTx := hexutil.Uint(txCount)
 
 	return &numOfTx, nil
@@ -436,39 +460,9 @@ func (api *APIImpl) GetBlockTransactionCountByHash(ctx context.Context, blockHas
 		return nil, err
 	}
 
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
-
-	borTx, _, err := api.lookupBorTx(ctx, chainConfig, blockNum, blockHash)
-	if err != nil {
-		return nil, err
-	}
-	if borTx != nil {
-		txCount++
-	}
-
 	numOfTx := hexutil.Uint(txCount)
 
 	return &numOfTx, nil
-}
-
-// lookupBorTx checks whether the given block has a Bor state-sync transaction.
-// Returns the synthetic transaction and its hash, or (nil, Hash{}, nil) if none.
-func (api *APIImpl) lookupBorTx(ctx context.Context, chainConfig *chain.Config, blockNum uint64, blockHash common.Hash) (types.Transaction, common.Hash, error) {
-	if chainConfig.Bor == nil {
-		return nil, common.Hash{}, nil
-	}
-	borTxHash := bortypes.ComputeBorTxHash(blockNum, blockHash)
-	_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borTxHash)
-	if err != nil {
-		return nil, common.Hash{}, err
-	}
-	if !ok {
-		return nil, common.Hash{}, nil
-	}
-	return bortypes.NewBorTransaction(), borTxHash, nil
 }
 
 func (api *APIImpl) blockByNumber(ctx context.Context, blockNumber rpc.BlockNumber, tx kv.Tx) (*types.Block, error) {

@@ -50,7 +50,9 @@ func init() {
 }
 
 func initTypes() {
-	borTypes := append(snaptype2.BlockSnapshotTypes, SnapshotTypes()...)
+	borTypes := make([]snaptype.Type, 0, len(snaptype2.BlockSnapshotTypes)+len(SnapshotTypes())+len(snaptype2.E3StateTypes))
+	borTypes = append(borTypes, snaptype2.BlockSnapshotTypes...)
+	borTypes = append(borTypes, SnapshotTypes()...)
 	borTypes = append(borTypes, snaptype2.E3StateTypes...)
 
 	snapcfg.RegisterKnownTypes(networkname.Mumbai, borTypes)
@@ -145,7 +147,7 @@ func (e EventRangeExtractor) Extract(ctx context.Context, blockFrom, blockTo uin
 			if lvl >= log.LvlInfo {
 				dbg.ReadMemStats(&m)
 			}
-			logger.Log(lvl, "[bor snapshots] Dumping bor events", "block num", blockNum,
+			logger.Log(lvl, "[bor snapshots] Dumping bor events", "blockNum", blockNum,
 				"alloc", common.ByteCount(m.Alloc), "sys", common.ByteCount(m.Sys),
 			)
 		default:
@@ -537,7 +539,7 @@ func buildValueIndex(ctx context.Context, version version.Versions, sn snaptype.
 			nextPos, _ = g.Skip()
 			binary.BigEndian.PutUint64(key[:], i)
 			i++
-			if err = rs.AddKey(key[:], offset); err != nil {
+			if err := rs.AddKey(key[:], offset); err != nil {
 				return err
 			}
 			select {

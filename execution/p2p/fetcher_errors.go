@@ -17,9 +17,10 @@
 package p2p
 
 import (
+	"cmp"
 	"errors"
 	"fmt"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/types"
@@ -183,9 +184,9 @@ func lowestHeadersNum(headers []*types.Header) (uint64, bool) {
 		return 0, false
 	}
 
-	sort.Slice(headers, func(i, j int) bool {
-		return headers[i].Number.Uint64() < headers[j].Number.Uint64()
+	lowest := slices.MinFunc(headers, func(a, b *types.Header) int {
+		return cmp.Compare(a.Number.Uint64(), b.Number.Uint64())
 	})
 
-	return headers[0].Number.Uint64(), true
+	return lowest.Number.Uint64(), true
 }

@@ -108,7 +108,6 @@ type EngineXTestRunner struct {
 	preAllocs          map[PreAllocHash]*PreAlloc
 	mu                 sync.Mutex
 	testers            map[Fork]map[PreAllocHash]testerEntry
-	wg                 sync.WaitGroup
 	profileHook        RequestProfileHook
 	warmupKzgCtxOnInit bool
 }
@@ -138,15 +137,15 @@ func (extr *EngineXTestRunner) Close() error {
 	extr.mu.Lock()
 	var entries []testerEntry
 	for _, perAlloc := range extr.testers {
-		for _, entry := range perAlloc {
-			entries = append(entries, entry)
+		for i := range perAlloc {
+			entries = append(entries, perAlloc[i])
 		}
 	}
 	extr.testers = nil
 	extr.mu.Unlock()
 	var errs []error
-	for _, entry := range entries {
-		err := extr.evict(entry)
+	for i := range entries {
+		err := extr.evict(entries[i])
 		if err != nil {
 			errs = append(errs, err)
 		}
@@ -326,6 +325,10 @@ func (extr *EngineXTestRunner) createTester(fork Fork, preAllocHash PreAllocHash
 			v := uint64(*env.BlobGasUsed)
 			genesis.BlobGasUsed = &v
 		}
+		if env.SlotNumber != nil {
+			v := uint64(*env.SlotNumber)
+			genesis.SlotNumber = &v
+		}
 	} else {
 		// Old format: genesis parsed directly from JSON
 		genesis = alloc.Genesis
@@ -475,7 +478,7 @@ func processFcu(ctx context.Context, tester EngineApiTester, head common.Hash, v
 			case "3":
 				r, err = tester.EngineApiClient.ForkchoiceUpdatedV3(ctx, &fcu, nil)
 			case "4":
-				r, err = tester.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil)
+				r, err = tester.EngineApiClient.ForkchoiceUpdatedV4(ctx, &fcu, nil, nil)
 			default:
 				return nil, "", fmt.Errorf("unsupported fcu version: %s", version)
 			}
@@ -537,6 +540,7 @@ type EngineXEnvironment struct {
 	BaseFee       *math.HexOrDecimal64 `json:"currentBaseFee"`
 	ExcessBlobGas *math.HexOrDecimal64 `json:"currentExcessBlobGas"`
 	BlobGasUsed   *math.HexOrDecimal64 `json:"currentBlobGasUsed"`
+	SlotNumber    *math.HexOrDecimal64 `json:"slotNumber"`
 }
 
 type Fork string

@@ -30,7 +30,7 @@ type Span struct {
 	Id                SpanId       `json:"span_id" yaml:"span_id"`
 	StartBlock        uint64       `json:"start_block" yaml:"start_block"`
 	EndBlock          uint64       `json:"end_block" yaml:"end_block"`
-	ValidatorSet      ValidatorSet `json:"validator_set,omitempty" yaml:"validator_set"`
+	ValidatorSet      ValidatorSet `json:"validator_set" yaml:"validator_set"`
 	SelectedProducers []Validator  `json:"selected_producers,omitempty" yaml:"selected_producers"`
 	ChainID           string       `json:"bor_chain_id,omitempty" yaml:"bor_chain_id"`
 }

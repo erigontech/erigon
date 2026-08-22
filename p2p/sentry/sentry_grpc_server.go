@@ -30,6 +30,7 @@ import (
 	"net"
 	"slices"
 	"sort"
+	"strconv"
 	"sync"
 	"sync/atomic"
 	"syscall"
@@ -39,8 +40,6 @@ import (
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/time/rate"
 	"google.golang.org/grpc"
-	"google.golang.org/grpc/health"
-	"google.golang.org/grpc/health/grpc_health_v1"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
@@ -60,8 +59,6 @@ import (
 	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 const (
@@ -561,7 +558,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockHeadersMsg:
@@ -571,7 +568,7 @@ func runPeer(
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetBlockBodiesMsg:
@@ -580,7 +577,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockBodiesMsg:
@@ -590,7 +587,7 @@ func runPeer(
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetBlockAccessListsMsg:
@@ -601,7 +598,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockAccessListsMsg:
@@ -613,7 +610,7 @@ func runPeer(
 			givePermit = true
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetReceiptsMsg:
@@ -622,7 +619,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] GetReceiptsMsg", peerID))
@@ -632,7 +629,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 			//log.Info(fmt.Sprintf("[%s] ReceiptsMsg", peerID))
@@ -650,7 +647,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			if newBlockHashesExceedsCap(b) {
 				return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: NewBlockHashes exceeds %d entries", maxBlockHashesPerMsg))
@@ -662,7 +659,7 @@ func runPeer(
 			}
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			//log.Debug("NewBlockMsg from", "peerId", fmt.Sprintf("%x", peerID)[:20], "name", peerInfo.peer.Name())
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
@@ -673,7 +670,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.GetPooledTransactionsMsg:
@@ -683,7 +680,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.TransactionsMsg:
@@ -693,7 +690,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.PooledTransactionsMsg:
@@ -703,7 +700,7 @@ func runPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		case eth.BlockRangeUpdateMsg:
@@ -717,13 +714,13 @@ func runPeer(
 			}
 			send(eth.ToProto[protocol][msg.Code], peerID, b)
 		default:
-			logger.Error(fmt.Sprintf("[p2p] Unknown message code: %d, peerID=%v", msg.Code, hex.EncodeToString(peerID[:])))
+			logger.Error("[p2p] Unknown message code", "code", msg.Code, "peer", hex.EncodeToString(peerID[:]))
 		}
 
-		msgType := eth.ToProto[protocol][msg.Code]
-		msgCap := cap.String()
-
-		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), true, msgType.String(), msgCap, int(msg.Size))
+		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
+			msgType := eth.ToProto[protocol][msg.Code]
+			trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), true, msgType.String(), cap.String(), int(msg.Size))
+		}
 
 		msg.Discard()
 		peerInfo.ClearDeadlines(time.Now(), givePermit)
@@ -789,19 +786,19 @@ func runWitPeer(
 
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 			send(wit.ToProto[protocol][msg.Code], peerID, b)
 		case wit.NewWitnessMsg:
 			// add hashes to peer
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 
 			var query wit.NewWitnessPacket
 			if err := rlp.DecodeBytes(b, &query); err != nil {
-				logger.Error("decoding NewWitnessMsg: %w, data: %x", err, b)
+				logger.Error("[sentry] decoding NewWitnessMsg", "err", err, "data", hex.EncodeToString(b))
 				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "decoding NewWitnessMsg")
 			}
 
@@ -816,12 +813,12 @@ func runWitPeer(
 			// add hashes to peer
 			b := make([]byte, msg.Size)
 			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error(fmt.Sprintf("%s: reading msg into bytes: %v", hex.EncodeToString(peerID[:]), err))
+				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
 			}
 
 			var query wit.NewWitnessHashesPacket
 			if err := rlp.DecodeBytes(b, &query); err != nil {
-				logger.Error("decoding NewWitnessHashesMsg: %w, data: %x", err, b)
+				logger.Error("[sentry] decoding NewWitnessHashesMsg", "err", err, "data", hex.EncodeToString(b))
 				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "decoding NewWitnessHashesMsg")
 			}
 
@@ -866,7 +863,7 @@ func runWitPeer(
 				}
 			}
 		default:
-			logger.Error(fmt.Sprintf("%s: unknown message code: %d", hex.EncodeToString(pubkey[:]), msg.Code))
+			logger.Error("unknown message code", "peer", hex.EncodeToString(pubkey[:]), "code", msg.Code)
 		}
 	}
 }
@@ -886,20 +883,7 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 	}
 	grpcServer := grpcutil.NewServer(100, nil)
 	sentryproto.RegisterSentryServer(grpcServer, ss)
-	var healthServer *health.Server
-	if healthCheck {
-		healthServer = health.NewServer()
-		grpc_health_v1.RegisterHealthServer(grpcServer, healthServer)
-	}
-
-	go func() {
-		if healthCheck {
-			defer healthServer.Shutdown()
-		}
-		if err1 := grpcServer.Serve(lis); err1 != nil {
-			ss.logger.Error("Sentry gRPC server fail", "err", err1)
-		}
-	}()
+	grpcutil.StartServerOnListener(grpcServer, lis, healthCheck, ss.logger, "Sentry gRPC server fail")
 	return grpcServer, nil
 }
 
@@ -1369,7 +1353,9 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		}
 
 		protocolName, protocolVersion := ss.protocolForMessageID(msgID)
-		trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgID.String(), fmt.Sprintf("%s/%d", protocolName, protocolVersion), len(data))
+		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
+			trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgID.String(), protocolName+"/"+strconv.FormatUint(uint64(protocolVersion), 10), len(data))
+		}
 
 		// Select the rw for the message's subprotocol. eth and wit live on
 		// the same RLPx connection but at different code offsets — writing
@@ -1395,10 +1381,8 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
 			ss.removePeer(peerInfo.ID(), p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
-		} else {
-			if ttl > 0 {
-				peerInfo.AddDeadline(time.Now().Add(ttl))
-			}
+		} else if ttl > 0 {
+			peerInfo.AddDeadline(time.Now().Add(ttl))
 		}
 	}, ss.logger)
 }

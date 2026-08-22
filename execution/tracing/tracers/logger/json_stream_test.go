@@ -19,12 +19,16 @@ package logger
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"io"
+	"math/big"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -108,6 +112,98 @@ func captureOnOpcodeWithReturnData(t *testing.T, cfg *LogConfig, memory []byte, 
 		t.Fatal("no structLog entry in output")
 	}
 	return outer.StructLogs[0]
+}
+
+// captureOnOpcodes runs n OnOpcode calls through a single logger and returns every
+// structLog entry that made it to the stream. The pc of each step is set to its
+// index so callers can assert which steps were kept.
+func captureOnOpcodes(t *testing.T, cfg *LogConfig, n int) []map[string]json.RawMessage {
+	t.Helper()
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(cfg, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{}
+	for i := range n {
+		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+	}
+
+	// Mirror what ExecuteTraceTx does to close the stream after execution.
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	stream.Flush()
+
+	var outer struct {
+		StructLogs []map[string]json.RawMessage `json:"structLogs"`
+	}
+	if err := json.Unmarshal(buf.Bytes(), &outer); err != nil {
+		t.Fatalf("invalid JSON output: %v\nraw: %s", err, buf.Bytes())
+	}
+	return outer.StructLogs
+}
+
+// TestJsonStreamLogger_Limit verifies that LogConfig.Limit caps the number of
+// structLog entries emitted by the opcode logger, as required by the TraceConfig
+// `limit` field in execution-apis (src/schemas/opcode-tracer.yaml):
+//
+//	"Maximum number of opcode steps to capture. Zero means no limit. When the
+//	 limit is reached, execution continues but no further StructLog entries are
+//	 recorded."
+func TestJsonStreamLogger_Limit(t *testing.T) {
+	const steps = 5
+	tests := []struct {
+		name  string
+		limit int
+		want  int
+	}{
+		{"limit zero means unlimited", 0, steps},
+		{"limit of one keeps a single entry", 1, 1},
+		{"limit below step count truncates", 2, 2},
+		{"limit equal to step count keeps all", steps, steps},
+		{"limit above step count keeps all", steps + 3, steps},
+	}
+
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			logs := captureOnOpcodes(t, &LogConfig{Limit: tt.limit}, steps)
+			if len(logs) != tt.want {
+				t.Fatalf("structLogs count: got %d, want %d", len(logs), tt.want)
+			}
+			// The limit truncates the tail: the entries kept must be the first
+			// ones executed, in order.
+			for i, entry := range logs {
+				var pc uint64
+				if err := json.Unmarshal(entry["pc"], &pc); err != nil {
+					t.Fatalf("cannot parse pc of entry %d: %v", i, err)
+				}
+				if pc != uint64(i) {
+					t.Errorf("entry %d: got pc %d, want %d", i, pc, i)
+				}
+			}
+		})
+	}
+}
+
+// TestJsonStreamLogger_LimitDoesNotCorruptJSON verifies that suppressed steps emit
+// nothing at all — in particular no dangling separator that would break the array.
+func TestJsonStreamLogger_LimitDoesNotCorruptJSON(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{Limit: 1}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{}
+	for i := range 4 {
+		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+	}
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	stream.Flush()
+
+	if !json.Valid(buf.Bytes()) {
+		t.Fatalf("output is not valid JSON: %s", buf.Bytes())
+	}
 }
 
 // TestJsonStreamLogger_MemoryEncoding verifies that memory words are emitted as
@@ -302,4 +398,116 @@ func TestStructLog_ErrorOmitempty(t *testing.T) {
 			t.Errorf("error message: got %q, want %q", msg, "out of gas")
 		}
 	})
+}
+
+// TestJsonStreamLogger_StorageEncodingManyKeys covers the separator handling when
+// more than one slot is emitted; a single-entry object never writes one.
+func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{}
+	want := map[string]string{}
+	for i := range 4 {
+		key := common.BigToHash(big.NewInt(int64(i + 1)))
+		val := common.BigToHash(big.NewInt(int64(100 + i)))
+		scope.stack = []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])}
+		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		want["0x"+hex.EncodeToString(key[:])] = "0x" + hex.EncodeToString(val[:])
+	}
+
+	// Close the way the production epilogue does: ClosePending would repair an
+	// imbalance into valid JSON and hide exactly what this pins.
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(t, stream.Flush())
+	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+
+	var out struct {
+		StructLogs []struct {
+			Storage map[string]string `json:"storage"`
+		} `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	require.NotEmpty(t, out.StructLogs)
+
+	// Storage accumulates, so the last step carries every pair and exercises
+	// three separators.
+	require.Equal(t, want, out.StructLogs[len(out.StructLogs)-1].Storage)
+}
+
+// TestJsonStreamLogger_StorageWithMemory drives both users of hexEncodeBuf in a
+// single step, which is what the aliasing in hexWithPrefix depends on.
+func TestJsonStreamLogger_StorageWithMemory(t *testing.T) {
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xcd}, 64),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+	l.OnOpcode(0, byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(t, stream.Flush())
+
+	var out struct {
+		StructLogs []struct {
+			Memory  []string          `json:"memory"`
+			Storage map[string]string `json:"storage"`
+		} `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out), "output: %s", buf.Bytes())
+	require.Len(t, out.StructLogs, 1)
+
+	word := "0x" + strings.Repeat("cd", 32)
+	require.Equal(t, []string{word, word}, out.StructLogs[0].Memory)
+	require.Equal(t, map[string]string{
+		"0x" + hex.EncodeToString(key[:]): "0x" + hex.EncodeToString(val[:]),
+	}, out.StructLogs[0].Storage)
+}
+
+// TestJsonStreamLogger_ClosePendingAfterMemory pins that writing memory words keeps
+// the stream's auto-close stack balanced: one word spans three stream calls, and
+// only the first may consume a pending comma or field.
+func TestJsonStreamLogger_ClosePendingAfterMemory(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 32*4)}
+	for i := range 3 {
+		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+	}
+
+	require.NoError(t, stream.ClosePending(0))
+	require.NoError(t, stream.Flush())
+	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+}
+
+func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xab}, 256),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+
+	stream := jsonstream.New(io.Discard)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	b.ReportAllocs()
+	i := 0
+	for b.Loop() {
+		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		i++
+	}
 }

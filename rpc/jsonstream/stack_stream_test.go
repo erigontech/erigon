@@ -152,7 +152,7 @@ func TestStackStream_ClosePendingObjects_Object(t *testing.T) {
 	// Incomplete JSON at this point
 	assert.Equal(t, `{"name":"John","age":`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
-	assert.Equal(t, 2, ss.CurrentDepth()) // Object, Field
+	assert.Equal(t, 2, ss.Depth()) // Object, Field
 
 	// Close pending objects if necessary
 	err := ss.closeAllPendingElements()
@@ -180,7 +180,7 @@ func TestStackStream_ClosePendingObjects_Array(t *testing.T) {
 	// Incomplete JSON at this point
 	assert.Equal(t, `[1,2,`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
-	assert.Equal(t, 2, ss.CurrentDepth()) // Array, Field
+	assert.Equal(t, 2, ss.Depth()) // Array, Field
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
@@ -216,7 +216,7 @@ func TestStackStream_ClosePendingObjects_ComplexNested(t *testing.T) {
 	// Incomplete JSON at this point
 	assert.Equal(t, `{"person":{"name":"John","address":{"city":"New York","zip":`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
-	assert.Equal(t, 4, ss.CurrentDepth()) // Object, Object, Object, Field
+	assert.Equal(t, 4, ss.Depth()) // Object, Object, Object, Field
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
@@ -253,7 +253,7 @@ func TestStackStream_ClosePendingObjects_ComplexNestedWithArray(t *testing.T) {
 	// Incomplete JSON at this point
 	assert.Equal(t, `[{"person":{"name":"John","address":{"city":"New York","zip":`, string(ss.Buffer()))
 	assert.False(t, ss.IsComplete())
-	assert.Equal(t, 5, ss.CurrentDepth()) // Array, Object, Object, Object, Field
+	assert.Equal(t, 5, ss.Depth()) // Array, Object, Object, Object, Field
 
 	// Flush closing pending objects if necessary
 	err := ss.closeAllPendingElements()
@@ -703,7 +703,7 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 	const nestingDepth = 50
 
 	// Open nested objects
-	for i := 0; i < nestingDepth; i++ {
+	for i := range nestingDepth {
 		ss.WriteObjectStart()
 		ss.WriteObjectField(fmt.Sprintf("level%d", i))
 	}
@@ -712,13 +712,13 @@ func TestStackStream_ExtremeNesting(t *testing.T) {
 	ss.WriteString("deep value")
 
 	// Close all objects
-	for i := 0; i < nestingDepth; i++ {
+	for range nestingDepth {
 		ss.WriteObjectEnd()
 	}
 
 	// Verify the structure is complete
 	assert.True(t, ss.IsComplete())
-	assert.Equal(t, 0, ss.CurrentDepth())
+	assert.Equal(t, 0, ss.Depth())
 
 	// Verify the JSON is valid by parsing it back
 	var result any
@@ -782,23 +782,23 @@ func TestStackStream_StackManipulationEdgeCases(t *testing.T) {
 
 	// Test 1: Popping from an empty stack should not panic
 	ss.pop(ItemObject)
-	assert.Equal(t, 0, ss.CurrentDepth())
+	assert.Equal(t, 0, ss.Depth())
 
 	// Test 2: Popping an item that doesn't match the top of the stack does nothing
 	ss.push(ItemArray)
 	ss.pop(ItemObject)
-	assert.Equal(t, 1, ss.CurrentDepth()) // Stack should still have the array
+	assert.Equal(t, 1, ss.Depth()) // Stack should still have the array
 
 	// Test 3: Multiple pushes and pops
 	ss.Reset(nil)
 	ss.push(ItemObject)
 	ss.push(ItemField)
 	ss.push(ItemComma)
-	assert.Equal(t, 3, ss.CurrentDepth())
+	assert.Equal(t, 3, ss.Depth())
 
 	ss.pop(ItemComma)
 	ss.pop(ItemField)
-	assert.Equal(t, 1, ss.CurrentDepth())
+	assert.Equal(t, 1, ss.Depth())
 
 	// Test 4: Verify stack state with StackSummary
 	summary := ss.StackSummary()
@@ -952,6 +952,104 @@ func TestStackStream_BufferAsStringWithErrors(t *testing.T) {
 	assert.Error(t, err)
 	assert.Equal(t, "", result)
 	assert.Equal(t, "write failed", err.Error())
+}
+
+// TestStackStream_Depth verifies that Depth() tracks nesting level correctly.
+func TestStackStream_Depth(t *testing.T) {
+	json := jsoniter.ConfigCompatibleWithStandardLibrary
+	stream := json.BorrowStream(nil)
+	defer json.ReturnStream(stream)
+	ss := NewStackStream(stream)
+
+	assert.Equal(t, 0, ss.Depth())
+	ss.WriteArrayStart()
+	assert.Equal(t, 1, ss.Depth())
+	ss.WriteObjectStart()
+	assert.Equal(t, 2, ss.Depth())
+	ss.WriteObjectField("k")
+	assert.Equal(t, 3, ss.Depth()) // ItemField on stack
+	ss.WriteString("v")
+	assert.Equal(t, 2, ss.Depth()) // ItemField consumed
+	ss.WriteObjectEnd()
+	assert.Equal(t, 1, ss.Depth())
+	ss.WriteArrayEnd()
+	assert.Equal(t, 0, ss.Depth())
+}
+
+// TestStackStream_ClosePendingPreservesStack verifies the fix: ClosePending(N) closes
+// elements above depth N and leaves the first N entries on the stack intact so that
+// subsequent writes continue inside the preserved nesting level.
+func TestStackStream_ClosePendingPreservesStack(t *testing.T) {
+	newSS := func() *StackStream {
+		json := jsoniter.ConfigCompatibleWithStandardLibrary
+		stream := json.BorrowStream(nil)
+		t.Cleanup(func() { json.ReturnStream(stream) })
+		return NewStackStream(stream)
+	}
+
+	t.Run("nothing_to_close_when_at_target_depth", func(t *testing.T) {
+		ss := newSS()
+		ss.WriteArrayStart()  // depth 1
+		ss.WriteObjectStart() // depth 2
+		ss.WriteObjectField("txHash")
+		ss.WriteString("0xabc") // depth back to 2
+
+		assert.Equal(t, 2, ss.Depth())
+		err := ss.ClosePending(2) // nothing above depth 2
+		assert.NoError(t, err)
+		assert.Equal(t, 2, ss.Depth()) // stack preserved
+
+		// Can still write inside the tx object
+		ss.WriteMore()
+		ss.WriteObjectField("error")
+		ss.WriteString("oops")
+		ss.WriteObjectEnd()
+		ss.WriteArrayEnd()
+
+		assert.Equal(t, `[{"txHash":"0xabc","error":"oops"}]`, string(ss.Buffer()))
+		assert.Equal(t, 0, ss.Depth())
+	})
+
+	t.Run("closes_inner_structures_above_target_depth", func(t *testing.T) {
+		ss := newSS()
+		ss.WriteArrayStart()  // depth 1
+		ss.WriteObjectStart() // depth 2  ← tx object
+		txDepth := ss.Depth()
+
+		// Tracer starts writing result: opens a nested object
+		ss.WriteObjectField("result")
+		ss.WriteObjectStart() // depth 3  ← partial result
+		ss.WriteObjectField("structLogs")
+		ss.WriteArrayStart() // depth 4  ← partial array, left open on error
+
+		assert.Equal(t, 4, ss.Depth())
+		err := ss.ClosePending(uint(txDepth)) // close everything above tx object
+		assert.NoError(t, err)
+		assert.Equal(t, txDepth, ss.Depth()) // back to tx object level
+
+		// The tx object is still open; write the error field and close it
+		ss.WriteMore()
+		ss.WriteObjectField("error")
+		ss.WriteString("trace failed")
+		ss.WriteObjectEnd()
+		ss.WriteArrayEnd()
+
+		assert.Equal(t, 0, ss.Depth())
+		// Output must be valid: partial result closed, error inside tx object
+		assert.Equal(t,
+			`[{"result":{"structLogs":[]},"error":"trace failed"}]`,
+			string(ss.Buffer()),
+		)
+	})
+
+	t.Run("targetDepth_beyond_stack_depth_is_safe", func(t *testing.T) {
+		ss := newSS()
+		ss.WriteObjectStart() // depth 1
+		depth := ss.Depth()
+		err := ss.ClosePending(uint(depth) + 10) // targetDepth > stack depth: clamped
+		assert.NoError(t, err)
+		assert.Equal(t, depth, ss.Depth()) // clamped to actual depth, no panic
+	})
 }
 
 // Helper type for testing error conditions

@@ -37,7 +37,7 @@ func TestProcessSyncCommittee(t *testing.T) {
 	s := state.New(&clparams.MainnetBeaconConfig)
 	currentCommittee := &solid.SyncCommittee{}
 	nextCommittee := &solid.SyncCommittee{}
-	for i := 0; i < validatorNum; i++ {
+	for i := range validatorNum {
 		var pubKey [48]byte
 		binary.BigEndian.PutUint64(pubKey[:], uint64(i))
 		v := solid.NewValidator()

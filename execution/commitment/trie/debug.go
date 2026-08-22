@@ -174,7 +174,7 @@ func printDiffSide(n Node, w io.Writer, ind string, key string) {
 		fmt.Fprintf(w, "short %x(", n.reference())
 		keyHex := n.Key
 		hexV := make([]byte, len(keyHex))
-		for i := 0; i < len(hexV); i++ {
+		for i := range hexV {
 			hexV[i] = []byte(indices[keyHex[i]])[0]
 		}
 		fmt.Fprintf(w, "%s:", string(hexV))
@@ -214,14 +214,15 @@ func printDiff(n1, n2 Node, w io.Writer, ind string, key string) {
 		if n, ok := n2.(*FullNode); ok {
 			for i, child := range &n1.Children {
 				child2 := n.Children[i]
-				if child == nil {
+				switch {
+				case child == nil:
 					if child2 != nil {
 						fmt.Fprintf(w, "%s%s:(nil/%x %T)\n", ind, indices[i], child2.reference(), child2)
 					}
-				} else if child2 == nil {
+				case child2 == nil:
 					fmt.Fprintf(w, "%s%s:(%T/nil)\n", ind, indices[i], child)
 					printDiffSide(child, w, ind, key+indices[i])
-				} else {
+				default:
 					fmt.Fprintf(w, "%s%s:", ind, indices[i])
 					printDiff(child, child2, w, "  "+ind, key+indices[i])
 					fmt.Fprintf(w, "\n")
@@ -263,7 +264,7 @@ func printDiff(n1, n2 Node, w io.Writer, ind string, key string) {
 			if bytes.Equal(n1.Key, n.Key) {
 				keyHex := n1.Key
 				hexV := make([]byte, len(keyHex))
-				for i := 0; i < len(hexV); i++ {
+				for i := range hexV {
 					hexV[i] = []byte(indices[keyHex[i]])[0]
 				}
 				fmt.Fprintf(w, "%s:", string(hexV))

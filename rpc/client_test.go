@@ -106,16 +106,18 @@ func TestClientErrorData(t *testing.T) {
 	}
 
 	// Check code.
-	if e, ok := err.(Error); !ok {
-		t.Fatalf("client did not return rpc.Error, got %#v", e)
-	} else if e.ErrorCode() != (testError{}.ErrorCode()) {
-		t.Fatalf("wrong error code %d, want %d", e.ErrorCode(), testError{}.ErrorCode())
+	var errCode Error
+	if !errors.As(err, &errCode) {
+		t.Fatalf("client did not return rpc.Error, got %#v", err)
+	} else if errCode.ErrorCode() != (testError{}.ErrorCode()) {
+		t.Fatalf("wrong error code %d, want %d", errCode.ErrorCode(), testError{}.ErrorCode())
 	}
 	// Check data.
-	if e, ok := err.(DataError); !ok {
-		t.Fatalf("client did not return rpc.DataError, got %#v", e)
-	} else if e.ErrorData() != (testError{}.ErrorData()) {
-		t.Fatalf("wrong error data %#v, want %#v", e.ErrorData(), testError{}.ErrorData())
+	var errData DataError
+	if !errors.As(err, &errData) {
+		t.Fatalf("client did not return rpc.DataError, got %#v", err)
+	} else if errData.ErrorData() != (testError{}.ErrorData()) {
+		t.Fatalf("wrong error data %#v, want %#v", errData.ErrorData(), testError{}.ErrorData())
 	}
 }
 
@@ -318,8 +320,7 @@ func runCancelCallers(t *testing.T, client *Client, maxContextCancelTimeout time
 		ncallers = 10
 	)
 	caller := func(index int) {
-		defer wg.Done()
-		for i := 0; i < nreqs; i++ {
+		for range nreqs {
 			var (
 				ctx     context.Context
 				cancel  func()
@@ -342,9 +343,10 @@ func runCancelCallers(t *testing.T, client *Client, maxContextCancelTimeout time
 			cancel()
 		}
 	}
-	wg.Add(ncallers)
-	for i := 0; i < ncallers; i++ {
-		go caller(i)
+	for i := range ncallers {
+		wg.Go(func() {
+			caller(i)
+		})
 	}
 	wg.Wait()
 }
@@ -441,7 +443,7 @@ func TestClientSubscribe(t *testing.T) {
 	if err != nil {
 		t.Fatal("can't subscribe:", err)
 	}
-	for i := 0; i < count; i++ {
+	for i := range count {
 		if val := <-nc; val != i {
 			t.Fatalf("value mismatch: got %d, want %d", val, i)
 		}
@@ -511,7 +513,7 @@ func TestClientCloseUnsubscribeRace(t *testing.T) {
 	server := newTestServer(logger)
 	defer server.Stop()
 
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		client := DialInProc(server, logger)
 		nc := make(chan int)
 		sub, err := client.Subscribe(context.Background(), "nftest", nc, "someSubscription", 3, 1)
@@ -554,14 +556,14 @@ func TestClientNotificationStorm(t *testing.T) {
 		defer sub.Unsubscribe()
 
 		// Process each notification, try to run a call in between each of them.
-		for i := 0; i < count; i++ {
+		for i := range count {
 			select {
 			case val := <-nc:
 				if val != i {
 					t.Fatalf("(%d/%d) unexpected value %d", i, count, val)
 				}
 			case err := <-sub.Err():
-				if wantError && err != ErrSubscriptionQueueOverflow {
+				if wantError && !errors.Is(err, ErrSubscriptionQueueOverflow) {
 					t.Fatalf("(%d/%d) got error %q, want %q", i, count, err, ErrSubscriptionQueueOverflow)
 				} else if !wantError {
 					t.Fatalf("(%d/%d) got unexpected error %q", i, count, err)
@@ -675,7 +677,7 @@ func TestClientReconnect(t *testing.T) {
 	logger := log.New()
 	startServer := func(addr string) (*Server, net.Listener) {
 		srv := newTestServer(logger)
-		l, err := net.Listen("tcp", addr)
+		l, err := net.Listen("tcp", addr) //nolint:noctx
 		if err != nil {
 			t.Fatal("can't listen:", err)
 		}

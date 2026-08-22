@@ -11,18 +11,18 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/execution/types"
 )
 
 // --- test helpers ---
 
 type testBlockReader struct {
-	services.FullBlockReader
+	dbservices.FullBlockReader
 }
 
 func (r *testBlockReader) MinimumBlockAvailable(context.Context, kv.Tx) (uint64, error) {
@@ -68,7 +68,7 @@ func newTestProvider(t *testing.T, db kv.RoDB) *StatusDataProvider {
 func TestGetStatusData_ReturnsDistinctProtobufs(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 
@@ -90,12 +90,11 @@ func TestGetStatusData_ReturnsDistinctProtobufs(t *testing.T) {
 func TestGetStatusData_CacheInvalidatedByHeaderNotification(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 
-	ctx, cancel := context.WithCancel(context.Background())
-	defer cancel()
+	ctx := t.Context()
 
 	// First call populates cache.
 	sd1, err := p.GetStatusData(ctx)
@@ -129,20 +128,20 @@ func TestGetStatusData_CacheInvalidatedByHeaderNotification(t *testing.T) {
 func TestGetStatusData_ConcurrentCallsCoalesce(t *testing.T) {
 	t.Parallel()
 
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedTestHeader(t, db, 42, 100)
 	p := newTestProvider(t, db)
 
 	ctx := context.Background()
 	errs := make(chan error, 10)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go func() {
 			_, err := p.GetStatusData(ctx)
 			errs <- err
 		}()
 	}
 
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		require.NoError(t, <-errs)
 	}
 }

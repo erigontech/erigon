@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing/tracers/logger"
 	"github.com/erigontech/erigon/execution/vm"
@@ -45,48 +46,6 @@ import (
 func TestStateCornerCases(t *testing.T) {
 	stateTestSetup(t)
 	runStateTests(t, new(testutil.TestMatcher), filepath.Join(cornersDir, "state"))
-}
-
-// TestLegacyCancunState runs legacy ethereum/tests GeneralStateTests fixtures
-// (state-test format, non-EEST) at the Cancun-era snapshot, under
-// legacy-tests/LegacyTests/Cancun/GeneralStateTests. The fixtures cover all
-// pre-merge fork variants (Frontier through London, plus Paris/Shanghai/Cancun)
-// — the EEST static_tests exercised by `evm statetest` don't carry every
-// variant (e.g. RevertPrecompiledTouch_d3 in Berlin/Istanbul/London catches
-// the ripemd-touch state-clearing path that the Hive `legacy-cancun`
-// simulator flagged). Run them locally so that class of regression is
-// caught on CI rather than only by the weekly out-of-tree Hive run.
-func TestLegacyCancunState(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	stateTestSetup(t)
-
-	st := new(testutil.TestMatcher)
-	// Slow tests
-	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
-	// Very slow tests
-	st.SkipLoad(`^stTimeConsuming/`)
-	// EVM perf-stress fixtures (loopMul, loopExp, performanceTester) overrun
-	// the 1h package timeout under -race instrumentation.
-	st.SkipLoad(`^VMTests/vmPerformance/`)
-
-	// Pre-existing Constantinople-only divergences from geth — see
-	// https://github.com/erigontech/erigon/issues/20894. Geth's local runner
-	// walks LegacyTests/Constantinople/GeneralStateTests (an older snapshot
-	// that doesn't include these fixtures) so it never exercises them
-	// locally even though it generated them. Skip-loading the whole file
-	// means we lose non-Constantinople coverage of these six fixtures, which
-	// is acceptable: the d3 RIPEMD-160 touch case this test was added to
-	// catch is in stRevertTest/RevertPrecompiledTouch.json, not these.
-	st.SkipLoad(`^stSStoreTest/sstoreGas\.json`)
-	st.SkipLoad(`^stCreateTest/CREATE_HighNonce\.json`)
-	st.SkipLoad(`^stCreate2/CREATE2_HighNonce\.json`)
-	st.SkipLoad(`^stCreate2/CREATE2_HighNonceDelegatecall\.json`)
-	st.SkipLoad(`^stPreCompiledContracts2/CallEcrecover_Overflow\.json`)
-	st.SkipLoad(`^stPreCompiledContracts2/ecrecoverShortBuff\.json`)
-
-	runStateTests(t, st, filepath.Join(legacyDir, "LegacyTests", "Cancun", "GeneralStateTests"))
 }
 
 // stateTestSetup applies the parallel/log/Windows-skip boilerplate shared by
@@ -122,7 +81,12 @@ func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
 				withTrace(t, func(vmconfig vm.Config) error {
 					tx := beginRwNoContention(t, db)
 					defer tx.Rollback()
-					_, _, err = test.Run(t, tx, subtest, vmconfig, dirs)
+					sd, sdErr := execctx.NewSharedDomains(context.Background(), tx, log.New())
+					if sdErr != nil {
+						return sdErr
+					}
+					defer sd.Close()
+					_, _, err = test.Run(t, sd, tx, subtest, vmconfig)
 					tx.Rollback()
 					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors

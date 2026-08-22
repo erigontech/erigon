@@ -253,7 +253,21 @@ func (oracle *Oracle) resolveBlockRange(ctx context.Context, lastBlock rpc.Block
 	}
 	if lastBlock == rpc.LatestBlockNumber {
 		lastBlock = headBlock
-	} else if pendingBlock == nil && lastBlock > headBlock {
+	} else if lastBlock < 0 {
+		// we have known reserved values for special block markers that can be negative
+		if lastBlock < rpc.LatestExecutedBlockNumber {
+			return nil, nil, 0, 0, fmt.Errorf("invalid block number %d", lastBlock)
+		}
+		lastBlockHeader, err := oracle.backend.HeaderByNumber(ctx, lastBlock)
+		if err != nil {
+			return nil, nil, 0, 0, err
+		}
+		if lastBlockHeader == nil {
+			return nil, nil, 0, 0, nil
+		}
+		lastBlock = rpc.BlockNumber(lastBlockHeader.Number.Uint64())
+	}
+	if pendingBlock == nil && lastBlock > headBlock {
 		return nil, nil, 0, 0, fmt.Errorf("%w: requested %d, head %d", ErrRequestBeyondHead, lastBlock, headBlock)
 	}
 	if maxHistory != 0 {
@@ -334,13 +348,14 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	}
 
 	var (
-		next         = oldestBlock
 		blockResults = make([]blockResult, blocks)
 		reward       = make([][]*big.Int, blocks)
 		baseFee      = make([]*uint256.Int, blocks+1)
 		gasUsedRatio = make([]float64, blocks)
 		blobBaseFee  = make([]*uint256.Int, blocks+1)
 	)
+	var next atomic.Uint64
+	next.Store(oldestBlock)
 
 	// Pre-fetch chain config once using the main backend (safe: single goroutine).
 	chainconfig := oracle.backend.ChainConfig()
@@ -351,7 +366,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 	// to using the main backend sequentially; the others exit immediately to
 	// avoid concurrent access on the shared transaction.
 	g, fetchCtx := errgroup.WithContext(ctx)
-	var seqOnce int32 // CAS flag: 0 = available, 1 = sequential mode claimed
+	var seqOnce atomic.Int32 // CAS flag: 0 = available, 1 = sequential mode claimed
 	for range maxBlockFetchers {
 		g.Go(func() error {
 			localBackend, cleanup, forkErr := oracle.backend.Fork(fetchCtx)
@@ -361,7 +376,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			if localBackend == nil {
 				// Fork not supported: allow exactly one goroutine to proceed
 				// sequentially on the shared backend; the others exit.
-				if !atomic.CompareAndSwapInt32(&seqOnce, 0, 1) {
+				if !seqOnce.CompareAndSwap(0, 1) {
 					return nil
 				}
 				localBackend = oracle.backend
@@ -373,7 +388,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				if err := fetchCtx.Err(); err != nil {
 					return err
 				}
-				blockNumber := atomic.AddUint64(&next, 1) - 1
+				blockNumber := next.Add(1) - 1
 				if blockNumber > lastBlock {
 					return nil
 				}
@@ -389,14 +404,15 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				}
 
 				fees := &blockFees{blockNumber: blockNumber}
-				if isPending {
+				switch {
+				case isPending:
 					fees.block, fees.receipts = pendingBlock, pendingReceipts
-				} else if len(rewardPercentiles) != 0 {
+				case len(rewardPercentiles) != 0:
 					fees.block, fees.err = localBackend.BlockByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
 					if fees.block != nil && fees.err == nil {
 						fees.receipts, fees.err = localBackend.GetReceiptsGasUsed(fetchCtx, fees.block)
 					}
-				} else {
+				default:
 					fees.header, fees.err = localBackend.HeaderByNumber(fetchCtx, rpc.BlockNumber(blockNumber))
 				}
 				if fees.block != nil {
@@ -424,7 +440,7 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 			}
 		})
 	}
-	if err = g.Wait(); err != nil {
+	if err := g.Wait(); err != nil {
 		return common.Big0, nil, nil, nil, nil, nil, err
 	}
 

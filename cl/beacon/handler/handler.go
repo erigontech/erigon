@@ -20,6 +20,7 @@ import (
 	"errors"
 	"net/http"
 	"sync"
+	"sync/atomic"
 
 	"github.com/go-chi/chi/v5"
 
@@ -51,6 +52,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
@@ -104,12 +106,20 @@ type ApiHandler struct {
 	routerCfg *beacon_router_configuration.RouterConfiguration
 	logger    log.Logger
 
+	preparedPayload        preparedPayload
+	payloadPreparationGate payloadPreparationGate
+
 	// Validator data structures
-	validatorParams                    *validator_params.ValidatorParams
+	validatorParams *validator_params.ValidatorParams
+	// unregisteredProposers remembers which proposers have already been warned about, so the
+	// warning is once per proposer rather than once per proposal.
+	unregisteredProposers              *lru.Cache[uint64, struct{}]
 	blobBundles                        *lru.Cache[common.Bytes48, BlobBundle] // Keep recent bundled blobs from the execution layer.
 	engine                             execution_client.ExecutionEngine
+	elClientVersion                    atomic.Pointer[engine_types.ClientVersionV1] // Cached execution client version for default graffiti.
+	elClientVersionFetching            atomic.Bool                                  // Guards a single in-flight background elClientVersion fetch.
 	syncMessagePool                    sync_contribution_pool.SyncContributionPool
-	committeeSub                       *committee_subscription.CommitteeSubscribeMgmt
+	committeeSub                       committee_subscription.CommitteeSubscribe
 	attestationProducer                attestation_producer.AttestationDataProducer
 	slotWaitedForAttestationProduction *lru.Cache[uint64, struct{}]
 	aggregatePool                      aggregation.AggregationPool
@@ -167,7 +177,7 @@ func NewApiHandler(
 	attestationProducer attestation_producer.AttestationDataProducer,
 	engine execution_client.ExecutionEngine,
 	syncMessagePool sync_contribution_pool.SyncContributionPool,
-	committeeSub *committee_subscription.CommitteeSubscribeMgmt,
+	committeeSub committee_subscription.CommitteeSubscribe,
 	aggregatePool aggregation.AggregationPool,
 	syncCommitteeMessagesService services.SyncCommitteeMessagesService,
 	syncContributionAndProofs services.SyncContributionService,
@@ -195,6 +205,10 @@ func NewApiHandler(
 		blobSnapshots = caplinSnapshots
 	}
 
+	unregisteredProposers, err := lru.New[uint64, struct{}]("unregisteredProposers", 1024)
+	if err != nil {
+		panic(err)
+	}
 	slotWaitedForAttestationProduction, err := lru.New[uint64, struct{}]("slotWaitedForAttestationProduction", 1024)
 	if err != nil {
 		panic(err)
@@ -223,6 +237,7 @@ func NewApiHandler(
 		caplinStateSnapshots:               caplinStateSnapshots,
 		peerDas:                            peerDas,
 		slotWaitedForAttestationProduction: slotWaitedForAttestationProduction,
+		unregisteredProposers:              unregisteredProposers,
 		randaoMixesPool: sync.Pool{New: func() any {
 			return solid.NewHashVector(int(beaconChainConfig.EpochsPerHistoricalVector))
 		}},
@@ -263,6 +278,7 @@ func (a *ApiHandler) Init() {
 		a.init()
 	})
 }
+
 func (a *ApiHandler) init() {
 	r := chi.NewRouter()
 	a.mux = r
@@ -356,7 +372,9 @@ func (a *ApiHandler) init() {
 					r.Get("/blob_sidecars/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconBlobSidecars))
 					// [New in Gloas:EIP7732]
 					r.Get("/execution_payload_envelope/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconExecutionPayloadEnvelope))
+					r.Get("/execution_payload_envelopes/{block_id}", beaconhttp.HandleEndpointFunc(a.GetEthV1BeaconExecutionPayloadEnvelope))
 					r.Post("/execution_payload_envelope", a.PostEthV1BeaconExecutionPayloadEnvelope)
+					r.Post("/execution_payload_envelopes", a.PostEthV1BeaconExecutionPayloadEnvelope)
 					r.Post("/execution_payload_bid", a.PostEthV1BeaconExecutionPayloadBid)
 					r.Route("/states", func(r chi.Router) {
 						r.Route("/{state_id}", func(r chi.Router) {
@@ -401,14 +419,15 @@ func (a *ApiHandler) init() {
 					r.Post("/liveness/{epoch}", beaconhttp.HandleEndpointFunc(a.liveness))
 					// [New in Gloas:EIP7732]
 					r.Get("/payload_attestation_data/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorPayloadAttestationData))
+					r.Post("/proposer_preferences", a.PostEthV1ValidatorProposerPreferences)
 					r.Get("/execution_payload_bid/{slot}/{builder_index}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadBid))
 					r.Get("/execution_payload_envelope/{slot}/{builder_index}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelope))
+					r.Get("/execution_payload_envelopes/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorExecutionPayloadEnvelopeBySlot))
 					if a.routerCfg.Builder {
 						r.Post("/register_validator", beaconhttp.HandleEndpointFunc(a.PostEthV1BuilderRegisterValidator))
 					}
 				})
 			}
-
 		})
 		r.Route("/v2", func(r chi.Router) {
 			if a.routerCfg.Debug {
@@ -439,6 +458,9 @@ func (a *ApiHandler) init() {
 			}
 			if a.routerCfg.Validator {
 				r.Route("/validator", func(r chi.Router) {
+					r.Route("/duties", func(r chi.Router) {
+						r.Get("/proposer/{epoch}", beaconhttp.HandleEndpointFunc(a.getDutiesProposerV2))
+					})
 					r.Get("/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock)) // deprecate
 					r.Get("/aggregate_attestation", beaconhttp.HandleEndpointFunc(a.GetEthV2ValidatorAggregateAttestation))
 					r.Post("/aggregate_and_proofs", a.PostEthV1ValidatorAggregatesAndProof) // reuse
@@ -459,16 +481,39 @@ func (a *ApiHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	a.mux.ServeHTTP(w, r)
 }
 
-func (a *ApiHandler) getHead() (common.Hash, uint64, int, error) {
+func (a *ApiHandler) getStateHead() (common.Hash, uint64, int, error) {
 	if a.enableMemoizedHeadState {
-		if a.syncedData.Syncing() {
+		blockRoot, blockSlot, ok := a.syncedData.StateHead()
+		if !ok {
 			return common.Hash{}, 0, http.StatusServiceUnavailable, errors.New("beacon node is syncing")
 		}
-		return a.syncedData.HeadRoot(), a.syncedData.HeadSlot(), 0, nil
+		return blockRoot, blockSlot, 0, nil
 	}
 	blockRoot, blockSlot, err := a.forkchoiceStore.GetHead(nil)
 	if err != nil {
 		return common.Hash{}, 0, http.StatusInternalServerError, err
 	}
 	return blockRoot, blockSlot, 0, nil
+}
+
+func (a *ApiHandler) getSelectedHead() (common.Hash, uint64, int, error) {
+	if !a.enableMemoizedHeadState {
+		return a.getStateHead()
+	}
+	stateRoot, stateSlot, stateReady := a.syncedData.StateHead()
+	if !stateReady {
+		return common.Hash{}, 0, http.StatusServiceUnavailable, errors.New("beacon node is syncing")
+	}
+	if blockRoot, blockSlot, ok := a.syncedData.SelectedHead(); ok {
+		return blockRoot, blockSlot, 0, nil
+	}
+	return stateRoot, stateSlot, 0, nil
+}
+
+func (a *ApiHandler) viewHeadStateWithIdentity(fn synced_data.ViewHeadStateWithIdentityFn) error {
+	err := a.syncedData.ViewHeadStateWithIdentity(fn)
+	if errors.Is(err, synced_data.ErrNotSynced) {
+		return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, err)
+	}
+	return err
 }

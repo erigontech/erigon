@@ -84,5 +84,4 @@ func TestStateEvents(t *testing.T) {
 		require.True(t, slashed)
 		return nil
 	}, events)
-
 }

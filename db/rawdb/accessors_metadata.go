@@ -31,10 +31,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
 )
-
-var json = jsoniter.ConfigFastest
 
 // ReadChainConfig retrieves the consensus settings based on the given genesis hash.
 func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
@@ -52,11 +49,7 @@ func ReadChainConfig(db kv.Getter, hash common.Hash) (*chain.Config, error) {
 	}
 
 	if config.BorJSON != nil {
-		borConfig := &borcfg.BorConfig{}
-		if err := jsoniter.ConfigFastest.Unmarshal(config.BorJSON, borConfig); err != nil {
-			return nil, fmt.Errorf("invalid chain config 'bor' JSON: %x, %w", hash, err)
-		}
-		config.Bor = borConfig
+		return nil, fmt.Errorf("chain config %x carries a 'bor' section: Polygon is not supported, see https://github.com/0xPolygon/erigon", hash)
 	}
 	return &config, nil
 }
@@ -67,12 +60,17 @@ func WriteChainConfig(db kv.Putter, hash common.Hash, cfg *chain.Config) error {
 		return nil
 	}
 
-	if cfg.Bor != nil {
-		borJSON, err := jsoniter.ConfigFastest.Marshal(cfg.Bor)
+	// L2 resolution from L2JSON is owned by the registering L2 package, so
+	// only the raw payload round-trips here; a present L2JSON is the source
+	// of truth and is not clobbered by re-marshalling the resolved value.
+	// A `"l2": null` payload counts as absent, so the resolved value still
+	// backfills it rather than persisting the literal `null`.
+	if cfg.L2 != nil && (len(cfg.L2JSON) == 0 || bytes.Equal(cfg.L2JSON, []byte("null"))) {
+		l2JSON, err := jsoniter.ConfigFastest.Marshal(cfg.L2)
 		if err != nil {
-			return fmt.Errorf("failed to JSON encode chain config 'bor': %w", err)
+			return fmt.Errorf("failed to JSON encode chain config 'l2': %w", err)
 		}
-		cfg.BorJSON = borJSON
+		cfg.L2JSON = l2JSON
 	}
 
 	data, err := jsoniter.ConfigFastest.Marshal(cfg)

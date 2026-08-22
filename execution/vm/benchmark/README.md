@@ -60,17 +60,20 @@ Targets the #1 gas consumer: cross-contract CALL overhead.
 
 Hot paths: `evm.call()`, CallContext pool, snapshot push/pop, access list management.
 
-### B: Storage Access (`bench_storage_test.go`)
+### B: State Access (`bench_storage_test.go`)
 
-Targets SLOAD/SSTORE which account for 6% of DeFi gas.
+Targets SLOAD/SSTORE which account for 6% of DeFi gas, plus account reads.
 
 - `BenchmarkSLOADCold` — 10/50/100/500 cold SLOADs (2100 gas each, EIP-2929)
 - `BenchmarkSLOADWarm` — warm SLOAD loops (100 gas each)
 - `BenchmarkSSTORE` — zero-to-nonzero (20K), nonzero-to-nonzero (5K), nonzero-to-zero (refund)
 - `BenchmarkTransientStorage` — TLOAD/TSTORE (EIP-1153)
 - `BenchmarkStorageDiversity` — 100/1000 unique slot accesses
+- `BenchmarkAddressDiversity` — BALANCE over 16/256/1024 distinct warm accounts
+  (16 hits the address intern table; 256 and 1024 measure its conflict misses)
 
-Hot paths: `IntraBlockState.GetState()`, dirty/origin/DB cache hierarchy.
+Hot paths: `IntraBlockState.GetState()`, dirty/origin/DB cache hierarchy, the
+EVM address intern table.
 
 ### C: Token Transfers (`bench_token_transfer_test.go`)
 
@@ -90,6 +93,13 @@ Targets opcode dispatch overhead in `interpreter.go:Run()`.
 - `BenchmarkMemoryOps` — MSTORE/MLOAD fixed + growing memory
 - `BenchmarkKeccak256` — SHA3 at 32B/256B/4KB input sizes
 - `BenchmarkMixedCompute` — realistic opcode mix (60% stack, 20% arith, 10% mem, 10% control)
+
+### E: Compute-Heavy Contract (`bench_snailtracer_test.go`)
+
+The cross-client reference workload for interpreter throughput: one long frame of
+arithmetic, memory and jumps with almost no state access.
+
+- `BenchmarkSnailtracer` — renders one pixel with the Snailtracer ray tracer
 
 ## Running
 

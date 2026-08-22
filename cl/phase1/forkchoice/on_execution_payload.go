@@ -263,6 +263,9 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	if envelope.ExecutionRequests != nil {
 		executionRequestsList = cltypes.GetExecutionRequestsList(f.beaconCfg, envelope.ExecutionRequests)
 	}
+	if executionRequestsList == nil {
+		executionRequestsList = []hexutil.Bytes{}
+	}
 
 	// Call NewPayload to validate execution payload with EL
 	timeStartExec := time.Now()
@@ -285,14 +288,14 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 		log.Warn("validatePayloadWithEL: EL could not process payload (EL behind)",
 			"beaconBlockRoot", beaconBlockRoot, "blockHash", executionBlockHash, "err", err)
 		if optErr := f.optimisticStore.AddOptimisticCandidate(beaconBlockRoot, block.Block); optErr != nil {
-			return fmt.Errorf("failed to add block to optimistic store: %v", optErr)
+			return fmt.Errorf("failed to add block to optimistic store: %w", optErr)
 		}
 		return errELBehind
 	case execution_client.PayloadStatusNotValidated:
 		log.Trace("validatePayloadWithEL: payload is not validated yet", "beaconBlockRoot", beaconBlockRoot)
 		// optimistic block candidate
 		if err := f.optimisticStore.AddOptimisticCandidate(beaconBlockRoot, block.Block); err != nil {
-			return fmt.Errorf("failed to add block to optimistic store: %v", err)
+			return fmt.Errorf("failed to add block to optimistic store: %w", err)
 		}
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", err)
@@ -304,7 +307,7 @@ func (f *ForkChoiceStore) validatePayloadWithEL(
 	}
 
 	if err != nil {
-		return fmt.Errorf("validatePayloadWithEL: newPayload failed: %v", err)
+		return fmt.Errorf("validatePayloadWithEL: newPayload failed: %w", err)
 	}
 
 	return nil
@@ -346,9 +349,9 @@ func (f *ForkChoiceStore) applyEnvelopeLocked(ctx context.Context, signedEnvelop
 		return false, nil
 	}
 
-	// Get block state for verification.
-	// ProcessExecutionPayloadEnvelope backfills the header root as part of verification,
-	// but we don't want that to affect the canonical block state.
+	// Envelope verification only reads the state (the consume-once
+	// PreviousStateRoot it takes is restored), so the shared reference is safe
+	// and avoids a full state copy per envelope under the write lock.
 	blockState, err := f.forkGraph.GetState(beaconBlockRoot, false)
 	if err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to get block state: %w", err)

@@ -20,6 +20,7 @@ import (
 	"crypto/sha256"
 	"fmt"
 	"io"
+	"math"
 	"os"
 	"path/filepath"
 	"testing"
@@ -123,7 +124,7 @@ func TestIndexLookup(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer rs.Close()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 				t.Fatal(err)
 			}
@@ -133,7 +134,7 @@ func TestIndexLookup(t *testing.T) {
 		}
 		idx := MustOpen(indexFile)
 		defer idx.Close()
-		for i := 0; i < 100; i++ {
+		for i := range 100 {
 			reader := NewIndexReader(idx)
 			offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			assert.True(t, ok)
@@ -215,6 +216,30 @@ func TestFindBijectionSmallBuckets(t *testing.T) {
 	}
 }
 
+// findSplit masks partition indexes with maxFanout-1 instead of bounds-checking them.
+// That is only correct while every reachable (leafSize, m) keeps fanout - and the
+// largest index a key can land in - below maxFanout.
+func TestSplitParamsFanoutBound(t *testing.T) {
+	for leafSize := uint16(1); leafSize <= MaxLeafSize; leafSize++ {
+		primaryAggrBound := leafSize * uint16(math.Max(2, math.Ceil(0.35*float64(leafSize)+1./2.)))
+		secondaryAggrBound := primaryAggrBound * 2
+		if leafSize >= 7 {
+			secondaryAggrBound = primaryAggrBound * uint16(math.Ceil(0.21*float64(leafSize)+9./10.))
+		}
+		// m == MaxUint16 is excluded: splitParams computes m+1, which wraps to 0 and
+		// yields unit 0. Unreachable for real bucket sizes and unrelated to the mask.
+		for m := leafSize + 1; m < math.MaxUint16; m++ {
+			fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
+			if fanout > maxFanout {
+				t.Fatalf("fanout %d > maxFanout %d at leafSize=%d m=%d", fanout, maxFanout, leafSize, m)
+			}
+			if j := (m - 1) / unit; j >= fanout {
+				t.Fatalf("index %d >= fanout %d at leafSize=%d m=%d unit=%d", j, fanout, leafSize, m, unit)
+			}
+		}
+	}
+}
+
 func TestFindSplit(t *testing.T) {
 	const (
 		leafSize           = uint16(8)
@@ -232,9 +257,8 @@ func TestFindSplit(t *testing.T) {
 	}
 
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-	count := make([]uint16, secondaryAggrBound)
 
-	salt := findSplit(bucket, 0, fanout, unit, count)
+	salt := findSplit(bucket, 0, fanout, unit)
 
 	// Verify: each partition gets exactly 'unit' keys (except possibly the last)
 	partitionCounts := make([]uint16, fanout)
@@ -267,9 +291,8 @@ func TestFindSplitSecondaryAggr(t *testing.T) {
 	}
 
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
-	count := make([]uint16, secondaryAggrBound)
 
-	salt := findSplit(bucket, 0, fanout, unit, count)
+	salt := findSplit(bucket, 0, fanout, unit)
 
 	partitionCounts := make([]uint16, fanout)
 	for _, key := range bucket {
@@ -308,11 +331,10 @@ func BenchmarkFindSplit(b *testing.B) {
 	}
 	fanout, unit := splitParams(m, leafSize, primaryAggrBound, secondaryAggrBound)
 	salt := uint64(0x6453cec3f7376937) // startSeed[1]
-	count := make([]uint16, secondaryAggrBound)
 
 	for b.Loop() {
 		for i := range buckets {
-			findSplit(buckets[i][:], salt, fanout, unit, count)
+			findSplit(buckets[i][:], salt, fanout, unit)
 		}
 	}
 }
@@ -348,7 +370,7 @@ func BenchmarkBuild(b *testing.B) {
 
 	// Pre-allocate all keys outside the benchmark loop
 	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
+	for j := range KeysN {
 		keys[j] = fmt.Appendf(nil, "key %d", j)
 	}
 	b.ResetTimer()
@@ -367,7 +389,7 @@ func BenchmarkBuild(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		for j := 0; j < KeysN; j++ {
+		for j := range KeysN {
 			if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
 				b.Fatal(err)
 			}
@@ -389,7 +411,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 	const KeysN = 1_000_000
 
 	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
+	for j := range KeysN {
 		keys[j] = fmt.Appendf(nil, "key %d", j)
 	}
 
@@ -416,7 +438,7 @@ func BenchmarkAddKeyAndBuild(b *testing.B) {
 					b.Fatal(err)
 				}
 				b.StartTimer()
-				for j := 0; j < KeysN; j++ {
+				for j := range KeysN {
 					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
 						b.Fatal(err)
 					}
@@ -445,7 +467,7 @@ func TestTwoLayerIndex(t *testing.T) {
 			t.Fatal(err)
 		}
 		defer rs.Close()
-		for i := 0; i < N; i++ {
+		for i := range N {
 			if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 				t.Fatal(err)
 			}
@@ -456,7 +478,7 @@ func TestTwoLayerIndex(t *testing.T) {
 
 		idx := MustOpen(indexFile)
 		defer idx.Close()
-		for i := 0; i < N; i++ {
+		for i := range N {
 			reader := NewIndexReader(idx)
 			e, _ := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 			if e != uint64(i) {
@@ -516,7 +538,7 @@ func TestIndexLookupParallel(t *testing.T) {
 				t.Fatal(err)
 			}
 			defer rs.Close()
-			for i := 0; i < N; i++ {
+			for i := range N {
 				if err = rs.AddKey(fmt.Appendf(nil, "key %d", i), uint64(i*17)); err != nil {
 					t.Fatal(err)
 				}
@@ -526,7 +548,7 @@ func TestIndexLookupParallel(t *testing.T) {
 			}
 			idx := MustOpen(indexFile)
 			defer idx.Close()
-			for i := 0; i < N; i++ {
+			for i := range N {
 				reader := NewIndexReader(idx)
 				offset, ok := reader.Lookup(fmt.Appendf(nil, "key %d", i))
 				assert.True(t, ok)
@@ -604,7 +626,7 @@ func BenchmarkBuildParallel(b *testing.B) {
 	const KeysN = 1_000_000
 
 	keys := make([][]byte, KeysN)
-	for j := 0; j < KeysN; j++ {
+	for j := range KeysN {
 		keys[j] = fmt.Appendf(nil, "key %d", j)
 	}
 
@@ -627,7 +649,7 @@ func BenchmarkBuildParallel(b *testing.B) {
 				if err != nil {
 					b.Fatal(err)
 				}
-				for j := 0; j < KeysN; j++ {
+				for j := range KeysN {
 					if err = rs.AddKey(keys[j], uint64(j*17)); err != nil {
 						b.Fatal(err)
 					}

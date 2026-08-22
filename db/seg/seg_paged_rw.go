@@ -99,6 +99,15 @@ func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 	}
 	return
 }
+
+// clear rewinds the page without dropping compressionBuf, which the next page
+// decodes into. limit=0 keeps HasNext false until a page is actually read.
+func (r *Page) clear() {
+	r.i, r.limit = 0, 0
+	r.kOffset, r.vOffset = 0, 0
+	r.kLens, r.vLens, r.data = nil, nil, nil
+}
+
 func (r *Page) HasNext() bool { return r.limit > r.i }
 func (r *Page) Next() (k, v []byte) {
 	kLen := be.Uint32(r.kLens[r.i*4:])
@@ -164,7 +173,7 @@ func (g *PagedReader) Reset(offset uint64) {
 	g.file.Reset(offset)
 	g.currentPageOffset = offset
 	g.nextPageOffset = offset
-	g.page = &Page{} // TODO: optimize
+	g.page.clear()
 	if g.file.HasNext() {
 		g.NextPage()
 	}
@@ -179,9 +188,9 @@ func (g *PagedReader) Reset(offset uint64) {
 //		for {
 //			var keys [][]byte
 //			fst, _ := g.page.First()
-//			fst = common.Copy(fst)
+//			fst = bytes.Clone(fst)
 //			lst, _ := g.page.Last()
-//			lst = common.Copy(lst)
+//			lst = bytes.Clone(lst)
 //			fmt.Printf("page: %d, offset=%d, keys: %d %x-%x\n", i, g.currentPageOffset, len(keys), fst, lst)
 //			i++
 //			if !g.HasNextPage() {
@@ -277,7 +286,6 @@ type PagedWriter struct {
 	keys, vals         []byte
 	kLengths, vLengths []uint32
 
-	pageBuf            []byte // reusable buffer for bytesUncompressedTo in sync path
 	compressionBuf     []byte
 	compressionEnabled bool
 
@@ -305,15 +313,17 @@ func (c *PagedWriter) initWorkers() {
 	c.pendingResults = make(map[int]*pageResult, queueDepth)
 	c.eg, c.egCtx = errgroup.WithContext(c.ctx)
 
-	var workerWg sync.WaitGroup
-	workerWg.Add(c.numWorkers)
+	workerEg, workerCtx := errgroup.WithContext(c.egCtx)
 	for range c.numWorkers {
-		c.eg.Go(func() error {
-			defer workerWg.Done()
-			return c.compressionWorker(c.egCtx)
+		workerEg.Go(func() error {
+			return c.compressionWorker(workerCtx)
 		})
 	}
-	go func() { workerWg.Wait(); close(c.resultCh) }()
+	c.eg.Go(func() error {
+		err := workerEg.Wait()
+		close(c.resultCh)
+		return err
+	})
 	c.eg.Go(c.reducer)
 }
 

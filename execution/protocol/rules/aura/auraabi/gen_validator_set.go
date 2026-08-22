@@ -139,7 +139,7 @@ func bindValidatorSet(address common.Address, caller bind.ContractCaller, transa
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_ValidatorSet *ValidatorSetRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_ValidatorSet *ValidatorSetRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _ValidatorSet.Contract.ValidatorSetCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -150,7 +150,7 @@ func (_ValidatorSet *ValidatorSetRaw) Transfer(opts *bind.TransactOpts) (types.T
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_ValidatorSet *ValidatorSetRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_ValidatorSet *ValidatorSetRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _ValidatorSet.Contract.ValidatorSetTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -158,7 +158,7 @@ func (_ValidatorSet *ValidatorSetRaw) Transact(opts *bind.TransactOpts, method s
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_ValidatorSet *ValidatorSetCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_ValidatorSet *ValidatorSetCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _ValidatorSet.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -169,7 +169,7 @@ func (_ValidatorSet *ValidatorSetTransactorRaw) Transfer(opts *bind.TransactOpts
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_ValidatorSet *ValidatorSetTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_ValidatorSet *ValidatorSetTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _ValidatorSet.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -177,7 +177,7 @@ func (_ValidatorSet *ValidatorSetTransactorRaw) Transact(opts *bind.TransactOpts
 //
 // Solidity: function emitInitiateChangeCallable() view returns(bool)
 func (_ValidatorSet *ValidatorSetCaller) EmitInitiateChangeCallable(opts *bind.CallOpts) (bool, error) {
-	var out []interface{}
+	var out []any
 	err := _ValidatorSet.contract.Call(opts, &out, "emitInitiateChangeCallable")
 
 	if err != nil {
@@ -208,7 +208,7 @@ func (_ValidatorSet *ValidatorSetCallerSession) EmitInitiateChangeCallable() (bo
 //
 // Solidity: function getValidators() returns(address[] validators)
 func (_ValidatorSet *ValidatorSetCaller) GetValidators(opts *bind.CallOpts) ([]common.Address, error) {
-	var out []interface{}
+	var out []any
 	err := _ValidatorSet.contract.Call(opts, &out, "getValidators")
 
 	if err != nil {
@@ -239,7 +239,7 @@ func (_ValidatorSet *ValidatorSetCallerSession) GetValidators() ([]common.Addres
 //
 // Solidity: function shouldValidatorReport(address _reportingValidator, address _maliciousValidator, uint256 _blockNumber) view returns(bool)
 func (_ValidatorSet *ValidatorSetCaller) ShouldValidatorReport(opts *bind.CallOpts, _reportingValidator common.Address, _maliciousValidator common.Address, _blockNumber *big.Int) (bool, error) {
-	var out []interface{}
+	var out []any
 	err := _ValidatorSet.contract.Call(opts, &out, "shouldValidatorReport", _reportingValidator, _maliciousValidator, _blockNumber)
 
 	if err != nil {
@@ -391,7 +391,7 @@ func (_ValidatorSet *ValidatorSetFilterer) InitiateChangeEventID() common.Hash {
 // Solidity: event InitiateChange(bytes32 indexed _parent_hash, address[] _new_set)
 func (_ValidatorSet *ValidatorSetFilterer) FilterInitiateChange(opts *bind.FilterOpts, _parent_hash [][32]byte) (*ValidatorSetInitiateChangeIterator, error) {
 
-	var _parent_hashRule []interface{}
+	var _parent_hashRule []any
 	for _, _parent_hashItem := range _parent_hash {
 		_parent_hashRule = append(_parent_hashRule, _parent_hashItem)
 	}
@@ -408,7 +408,7 @@ func (_ValidatorSet *ValidatorSetFilterer) FilterInitiateChange(opts *bind.Filte
 // Solidity: event InitiateChange(bytes32 indexed _parent_hash, address[] _new_set)
 func (_ValidatorSet *ValidatorSetFilterer) WatchInitiateChange(opts *bind.WatchOpts, sink chan<- *ValidatorSetInitiateChange, _parent_hash [][32]byte) (event.Subscription, error) {
 
-	var _parent_hashRule []interface{}
+	var _parent_hashRule []any
 	for _, _parent_hashItem := range _parent_hash {
 		_parent_hashRule = append(_parent_hashRule, _parent_hashItem)
 	}

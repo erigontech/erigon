@@ -1,16 +1,25 @@
 package p2p
 
 import (
+	"bytes"
 	"context"
 	"crypto/ecdsa"
 	"net"
 	"path/filepath"
+	"strconv"
 	"time"
+
+	"github.com/OffchainLabs/go-bitfield"
+	"github.com/libp2p/go-libp2p"
+	pubsub "github.com/libp2p/go-libp2p-pubsub"
+	"github.com/libp2p/go-libp2p/core/host"
+	"github.com/libp2p/go-libp2p/core/metrics"
+	"github.com/libp2p/go-libp2p/core/peer"
+	"github.com/multiformats/go-multiaddr"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	elp2p "github.com/erigontech/erigon/p2p"
@@ -18,12 +27,6 @@ import (
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/enr"
 	p2pnat "github.com/erigontech/erigon/p2p/nat"
-	"github.com/libp2p/go-libp2p"
-	pubsub "github.com/libp2p/go-libp2p-pubsub"
-	"github.com/libp2p/go-libp2p/core/host"
-	"github.com/libp2p/go-libp2p/core/metrics"
-	"github.com/libp2p/go-libp2p/core/peer"
-	"github.com/prysmaticlabs/go-bitfield"
 )
 
 type P2PConfig struct {
@@ -115,6 +118,9 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	if err != nil {
 		return nil, err
 	}
+	if port := hostTCPPort(host); port != 0 {
+		cfg.TCPPort = port
+	}
 
 	p := p2pManager{
 		cfg:         cfg,
@@ -155,6 +161,21 @@ func NewP2Pmanager(ctx context.Context, cfg *P2PConfig, logger log.Logger, ethCl
 	return &p, nil
 }
 
+func hostTCPPort(h host.Host) uint {
+	for _, addr := range h.Network().ListenAddresses() {
+		v, err := addr.ValueForProtocol(multiaddr.P_TCP)
+		if err != nil {
+			continue
+		}
+		port, err := strconv.ParseUint(v, 10, 16)
+		if err != nil || port == 0 {
+			continue
+		}
+		return uint(port)
+	}
+	return 0
+}
+
 func (p *p2pManager) Pubsub() *pubsub.PubSub {
 	return p.pubsub
 }
@@ -189,7 +210,7 @@ func (p *p2pManager) setupENR() error {
 	if p.cfg.SubscribeAllTopics {
 		// Advertise all 64 attestation subnets and all 4 sync committee subnets
 		// so that peers see us as a useful node and keep us connected.
-		for i := 0; i < 64; i++ {
+		for i := range 64 {
 			initialAttnets.SetBitAt(uint64(i), true)
 		}
 		initialSyncnets = bitfield.Bitvector4{byte(0x0f)}
@@ -245,7 +266,7 @@ func (s *p2pManager) UpdateENRAttSubnets(subnetIndex int, on bool) {
 		log.Error("[Sentinel] Could not load AttSubnetKey", "err", err)
 		return
 	}
-	subnetField = common.Copy(subnetField)
+	subnetField = bytes.Clone(subnetField)
 	if subnetIndex < 0 {
 		log.Error("[Sentinel] Subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
 		return
@@ -270,7 +291,7 @@ func (s *p2pManager) UpdateENRSyncNets(subnetIndex int, on bool) {
 		log.Error("[Sentinel] Could not load SyncCommsSubnetKey", "err", err)
 		return
 	}
-	subnetField = common.Copy(subnetField)
+	subnetField = bytes.Clone(subnetField)
 	if len(subnetField) <= subnetIndex/8 {
 		log.Error("[Sentinel] Sync subnet index out of range", "subnetIndex", subnetIndex, "len", len(subnetField))
 		return

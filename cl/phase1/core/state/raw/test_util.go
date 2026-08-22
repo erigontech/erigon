@@ -30,5 +30,4 @@ func GetTestState() *BeaconState {
 	state := New(&clparams.MainnetBeaconConfig)
 	utils.DecodeSSZSnappy(state, denebState, int(clparams.DenebVersion))
 	return state
-
 }

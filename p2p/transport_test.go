@@ -51,9 +51,7 @@ func TestProtocolHandshake(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	wg.Add(2)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		defer fd0.Close()
 		frame := newRLPX(fd0, &prv1.PublicKey)
 		rpubkey, err := frame.doEncHandshake(prv0)
@@ -77,9 +75,8 @@ func TestProtocolHandshake(t *testing.T) {
 			return
 		}
 		frame.close(DiscQuitting)
-	}()
-	go func() {
-		defer wg.Done()
+	})
+	wg.Go(func() {
 		defer fd1.Close()
 		rlpx := newRLPX(fd1, nil)
 		rpubkey, err := rlpx.doEncHandshake(prv1)
@@ -106,7 +103,7 @@ func TestProtocolHandshake(t *testing.T) {
 		if err := ExpectMsg(rlpx, discMsg, []DiscReason{DiscQuitting}); err != nil {
 			t.Errorf("error receiving disconnect: %v", err)
 		}
-	}()
+	})
 	wg.Wait()
 }
 
@@ -196,6 +193,34 @@ func TestDisconnectMessagePayloadDecode(t *testing.T) {
 
 	// empty payload
 	reason, err = DisconnectMessagePayloadDecode(bytes.NewBuffer([]byte{}))
+	if err != nil {
+		t.Error(err)
+	}
+	if reason != DiscRequested {
+		t.Fail()
+	}
+
+	// non-canonical integer (leading zero bytes): a peer encodes reason 0 as the
+	// bare byte 0x00 instead of the canonical empty string. Strict RLP rejects it.
+	reason, err = DisconnectMessagePayloadDecode(bytes.NewBuffer([]byte{0x00}))
+	if err != nil {
+		t.Error(err)
+	}
+	if reason != DiscRequested {
+		t.Fail()
+	}
+
+	// non-canonical size: reason wrapped in a length-prefixed single byte.
+	reason, err = DisconnectMessagePayloadDecode(bytes.NewBuffer([]byte{0x81, 0x00}))
+	if err != nil {
+		t.Error(err)
+	}
+	if reason != DiscRequested {
+		t.Fail()
+	}
+
+	// oversized/garbage payload must not error or allocate unbounded memory.
+	reason, err = DisconnectMessagePayloadDecode(bytes.NewBuffer(make([]byte, 1<<20)))
 	if err != nil {
 		t.Error(err)
 	}

@@ -21,6 +21,7 @@ package p2p
 
 import (
 	"bytes"
+	"errors"
 	"fmt"
 	"io"
 	"runtime"
@@ -52,13 +53,13 @@ func ExampleMsgPipe() {
 
 func TestMsgPipeUnblockWrite(t *testing.T) {
 loop:
-	for i := 0; i < 100; i++ {
+	for range 100 {
 		rw1, rw2 := MsgPipe()
 		done := make(chan struct{})
 		go func() {
 			if err := SendItems(rw1, 1); err == nil {
 				t.Error("EncodeMsg returned nil error")
-			} else if err != ErrPipeClosed {
+			} else if !errors.Is(err, ErrPipeClosed) {
 				t.Errorf("EncodeMsg returned wrong error: got %v, want %v", err, ErrPipeClosed)
 			}
 			close(done)
@@ -83,7 +84,7 @@ loop:
 // This test should panic if concurrent close isn't implemented correctly.
 func TestMsgPipeConcurrentClose(t *testing.T) {
 	rw1, _ := MsgPipe()
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		go rw1.Close()
 	}
 }
@@ -94,7 +95,7 @@ func TestEOFSignal(t *testing.T) {
 	// empty reader
 	eof := make(chan struct{}, 1)
 	sig := &eofSignal{new(bytes.Buffer), 0, eof}
-	if n, err := sig.Read(rb); n != 0 || err != io.EOF {
+	if n, err := sig.Read(rb); n != 0 || !errors.Is(err, io.EOF) {
 		t.Errorf("Read returned unexpected values: (%v, %v)", n, err)
 	}
 	select {
@@ -121,7 +122,7 @@ func TestEOFSignal(t *testing.T) {
 	if n, err := sig.Read(rb); n != 4 || err != nil {
 		t.Errorf("Read returned unexpected values: (%v, %v)", n, err)
 	}
-	if n, err := sig.Read(rb); n != 0 || err != io.EOF {
+	if n, err := sig.Read(rb); n != 0 || !errors.Is(err, io.EOF) {
 		t.Errorf("Read returned unexpected values: (%v, %v)", n, err)
 	}
 	select {

@@ -5,7 +5,6 @@ import (
 	"fmt"
 	"math"
 	"path/filepath"
-	"sort"
 	"strconv"
 	"strings"
 	"sync"
@@ -61,6 +60,7 @@ var (
 	V1_2                Version  = Version{1, 2}
 	V2_0                Version  = Version{2, 0}
 	V2_1                Version  = Version{2, 1}
+	V2_2                Version  = Version{2, 2}
 	V1_0_standart       Versions = Versions{V1_0, V1_0}
 	V1_1_standart       Versions = Versions{V1_1, V1_0}
 	V1_2_standart       Versions = Versions{V1_2, V1_0}
@@ -185,12 +185,22 @@ func (v Versions) String() string {
 }
 
 func (v Versions) Supports(ver Version) bool {
-	return ver.GreaterOrEqual(v.MinSupported) && ver.LessOrEqual(v.Current)
+	if ver.Less(v.MinSupported) {
+		return false
+	}
+	// A minor bump only changes a file's content, not how it is read, so a newer
+	// minor within a supported major stays readable; only a newer major changes
+	// read logic and must be rejected.
+	if ver.Major == v.Current.Major {
+		return true
+	}
+	return ver.LessOrEqual(v.Current)
 }
 
 var mustSupportLogOnce sync.Once
 
-// MustSupport panics if ver is outside [MinSupported, Current].
+// MustSupport panics if ver is unsupported: older than MinSupported, or a newer
+// major than Current (a newer minor within a supported major is allowed).
 func (v Versions) MustSupport(ver Version, filename string) {
 	if v.Supports(ver) {
 		return
@@ -203,42 +213,70 @@ func (v Versions) MustSupport(ver Version, filename string) {
 		)
 	} else {
 		msg = fmt.Sprintf(
-			"Snapshot file is newer than this Erigon build supports: file=%s, highest_supported=<%s. To fix, either upgrade Erigon to a newer release, or align snapshots by command: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
-			filename, v.Current,
+			"Snapshot file is newer than this Erigon build supports: file=%s, highest_supported=v%d.x. To fix, either upgrade Erigon to a newer release, or align snapshots by command: `erigon snapshots reset --datadir $DATADIR --chain $CHAIN`",
+			filename, v.Current.Major,
 		)
 	}
 	mustSupportLogOnce.Do(func() { log.Error(msg) })
 	panic(msg)
 }
 
-// FindFilesWithVersionsByPattern return an filepath by pattern
+// FindFilesWithVersionsByPattern returns the highest-version file matching pattern.
 func FindFilesWithVersionsByPattern(pattern string) (string, Version, bool, error) {
-	matches, err := filepath.Glob(pattern)
+	groups, err := GroupByMaskedName(pattern)
 	if err != nil {
-		return "", Version{}, false, fmt.Errorf("invalid pattern: %w", err)
+		return "", Version{}, false, err
 	}
-
-	if len(matches) == 0 {
+	var best VersionedFile
+	found := false
+	for _, g := range groups {
+		for i := range g {
+			if !found || g[i].Version.Cmp(best.Version) > 0 {
+				best, found = g[i], true
+			}
+		}
+	}
+	if !found {
 		return "", Version{}, false, nil
 	}
-	if len(matches) > 1 {
-		sort.Slice(matches, func(i, j int) bool {
-			_, fName1 := filepath.Split(matches[i])
-			version1, _ := ParseVersion(fName1)
+	return best.Path, best.Version, true, nil
+}
 
-			_, fName2 := filepath.Split(matches[j])
-			version2, _ := ParseVersion(fName2)
+// VersionedFile is a file paired with the version parsed from its name.
+type VersionedFile struct {
+	Path    string
+	Name    string
+	Version Version
+}
 
-			return version1.Less(version2)
-		})
-		_, fName := filepath.Split(matches[len(matches)-1])
-		ver, _ := ParseVersion(fName)
-
-		return matches[len(matches)-1], ver, true, nil
+// GroupByMaskedName is FindFilesWithVersionsByPattern without the collapse to the
+// highest version: it globs pattern and groups every match by its version-masked
+// name, so a key holding more than one entry is the same logical file present under
+// multiple versions. Pass "<dir>/*" to scan a whole directory. Unversioned matches
+// (e.g. salt-blocks.txt, subdirectories) and .tmp leftovers are skipped.
+func GroupByMaskedName(pattern string) (map[string][]VersionedFile, error) {
+	matches, err := filepath.Glob(pattern)
+	if err != nil {
+		return nil, fmt.Errorf("invalid pattern: %w", err)
 	}
-	_, fName := filepath.Split(matches[0])
-	ver, _ := ParseVersion(fName)
-	return matches[0], ver, true, nil
+	groups := map[string][]VersionedFile{}
+	for _, path := range matches {
+		name := filepath.Base(path)
+		if filepath.Ext(name) == ".tmp" {
+			continue
+		}
+		masked, err := ReplaceVersionWithMask(name)
+		if err != nil {
+			continue // unversioned file or directory
+		}
+		ver, _ := ParseVersion(name)
+		groups[masked] = append(groups[masked], VersionedFile{
+			Path:    path,
+			Name:    name,
+			Version: ver,
+		})
+	}
+	return groups, nil
 }
 
 // MatchVersionedFile searches for files matching a pattern within a pre-scanned list.

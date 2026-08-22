@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"io"
 	"sync"
 
 	"github.com/klauspost/compress/zstd"
@@ -29,21 +30,18 @@ import (
 	"github.com/erigontech/erigon/cl/persistence/base_encoding"
 	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/pool"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 )
 
-// make a buffer pool
-var bufferPool = &sync.Pool{
-	New: func() any {
-		return new(bytes.Buffer)
-	},
-}
-
-// make a zstd writer pool
+// Encoder options must not change the output: these bytes are copied verbatim into
+// the caplin .seg files.
 var zstdWriterPool = &sync.Pool{
 	New: func() any {
-		encoder, err := zstd.NewWriter(nil, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+		encoder, err := zstd.NewWriter(nil,
+			zstd.WithEncoderLevel(zstd.SpeedBetterCompression),
+			zstd.WithLowerEncoderMem(true))
 		if err != nil {
 			panic(err)
 		}
@@ -51,7 +49,14 @@ var zstdWriterPool = &sync.Pool{
 	},
 }
 
-func putWriter(v *zstd.Encoder) {
+// getZstdWriter returns a pooled encoder writing to w. Release with putZstdWriter.
+func getZstdWriter(w io.Writer) *zstd.Encoder {
+	encoder := zstdWriterPool.Get().(*zstd.Encoder)
+	encoder.Reset(w)
+	return encoder
+}
+
+func putZstdWriter(v *zstd.Encoder) {
 	v.Reset(nil)
 	zstdWriterPool.Put(v)
 }
@@ -350,20 +355,18 @@ func WriteBeaconBlock(ctx context.Context, tx kv.RwTx, block *cltypes.SignedBeac
 		return err
 	}
 	// take a buffer and encoder
-	buf := bufferPool.Get().(*bytes.Buffer)
-	defer bufferPool.Put(buf)
-	encoder := zstdWriterPool.Get().(*zstd.Encoder)
-	defer putWriter(encoder)
-	buf.Reset()
-	encoder.Reset(buf)
+	buf := pool.GetBuffer()
+	defer pool.PutBuffer(buf)
+	encoder := getZstdWriter(buf)
+	defer putZstdWriter(encoder)
 	_, err = snapshot_format.WriteBlockForSnapshot(encoder, block, nil)
 	if err != nil {
 		return err
 	}
-	if err := encoder.Flush(); err != nil {
+	if err := encoder.Close(); err != nil {
 		return err
 	}
-	if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot), common.Copy(buf.Bytes())); err != nil {
+	if err := tx.Put(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot), bytes.Clone(buf.Bytes())); err != nil {
 		return err
 	}
 	return nil
@@ -478,7 +481,7 @@ func ReadSignedHeaderByBlockRoot(ctx context.Context, tx kv.Tx, blockRoot common
 		return nil, false, nil
 	}
 	if err := h.DecodeSSZ(headerBytes, 0); err != nil {
-		return nil, false, fmt.Errorf("failed to decode BeaconHeader: %v", err)
+		return nil, false, fmt.Errorf("failed to decode BeaconHeader: %w", err)
 	}
 	canonical, err := ReadCanonicalBlockRoot(tx, h.Header.Slot)
 	if err != nil {
@@ -516,6 +519,6 @@ func AddBlockRootToParentRootsIndex(tx kv.RwTx, parentRoot, blockRoot common.Has
 		}
 	}
 
-	roots = append(common.Copy(roots), blockRoot[:]...)
+	roots = append(bytes.Clone(roots), blockRoot[:]...)
 	return tx.Put(kv.ParentRootToBlockRoots, parentRoot[:], roots)
 }

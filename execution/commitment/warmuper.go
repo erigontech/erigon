@@ -19,6 +19,7 @@ package commitment
 import (
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"sync"
 	"sync/atomic"
@@ -31,29 +32,23 @@ import (
 	"github.com/erigontech/erigon/execution/commitment/nibbles"
 )
 
-// TrieContextFactory creates new PatriciaContext instances for parallel warmup.
-type TrieContextFactory func() (PatriciaContext, func())
+type TrieContextFactory func(ctx context.Context) (PatriciaContext, func())
 
-// WarmupConfig contains configuration for pre-warming MDBX page cache
-// during commitment processing.
 type WarmupConfig struct {
-	Enabled           bool
-	EnableWarmupCache bool // If true, cache warmed data for use during trie processing
-	CtxFactory        TrieContextFactory
-	NumWorkers        int
-	MaxDepth          int
-	LogPrefix         string
+	Enabled    bool
+	CtxFactory TrieContextFactory
+	NumWorkers int
+	MaxDepth   int
+	LogPrefix  string
 }
 
-const WarmupMaxDepth = 128 // covers full key paths for both account keys (64 nibbles) and storage keys (128 nibbles)
+const WarmupMaxDepth = 128
 
-// WarmupStats contains statistics about the warmup phase.
 type WarmupStats struct {
 	KeysProcessed uint64
 	Duration      time.Duration
 }
 
-// Warmuper manages parallel warmup of MDBX page cache by pre-reading trie data.
 type Warmuper struct {
 	ctx        context.Context
 	cancel     context.CancelFunc
@@ -62,25 +57,16 @@ type Warmuper struct {
 	numWorkers int
 	logPrefix  string
 
-	// Work channel for incoming keys
 	work chan warmupWorkItem
-	// Worker group
-	g *errgroup.Group
+	g    *errgroup.Group
 
-	// Cache for storing warmed data to be used during trie processing
-	cache *WarmupCache
-
-	// Stats
 	keysProcessed atomic.Uint64
 	startTime     time.Time
 
-	// Per-slot in-flight warm-item counts; the per-key path stays lock-free, mu/cond engage
-	// only on the drain-to-zero and WaitBufferFree paths.
 	outstanding [arenaRingSize]atomic.Int64
 	mu          sync.Mutex
 	cond        *sync.Cond
 
-	// State
 	started atomic.Bool
 	closed  atomic.Bool
 }
@@ -91,7 +77,6 @@ type warmupWorkItem struct {
 	gen        uint64
 }
 
-// NewWarmuper creates a new Warmuper instance.
 func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 	ctx, cancel := context.WithCancel(ctx)
 	w := &Warmuper{
@@ -102,73 +87,13 @@ func NewWarmuper(ctx context.Context, cfg WarmupConfig) *Warmuper {
 		numWorkers: cfg.NumWorkers,
 		logPrefix:  cfg.LogPrefix,
 	}
-	if cfg.EnableWarmupCache {
-		w.cache = NewWarmupCache()
-	}
 	w.cond = sync.NewCond(&w.mu)
 	return w
 }
 
-// Cache returns the warmup cache, or nil if caching is disabled.
-func (w *Warmuper) Cache() *WarmupCache {
-	return w.cache
-}
-
-// branchFromCacheOrDB reads branch data from cache if available, otherwise from DB and caches it.
-func (w *Warmuper) branchFromCacheOrDB(trieCtx PatriciaContext, prefix []byte) ([]byte, error) {
-	if w.cache != nil {
-		if data, found := w.cache.GetBranch(prefix); found {
-			return data, nil
-		}
-	}
-	branchData, _, err := trieCtx.Branch(prefix)
-	if err != nil {
-		return nil, err
-	}
-	if w.cache != nil && len(branchData) > 0 {
-		w.cache.PutBranch(prefix, branchData)
-	}
-	return branchData, nil
-}
-
-// accountFromCacheOrDB reads account data from cache if available, otherwise from DB and caches it.
-func (w *Warmuper) accountFromCacheOrDB(trieCtx PatriciaContext, plainKey []byte) (*Update, error) {
-	if w.cache != nil {
-		if update, found := w.cache.GetAccount(plainKey); found {
-			return update, nil
-		}
-	}
-	update, err := trieCtx.Account(plainKey)
-	if err != nil {
-		return nil, err
-	}
-	if w.cache != nil {
-		w.cache.PutAccount(plainKey, update)
-	}
-	return update, nil
-}
-
-// storageFromCacheOrDB reads storage data from cache if available, otherwise from DB and caches it.
-func (w *Warmuper) storageFromCacheOrDB(trieCtx PatriciaContext, plainKey []byte) (*Update, error) {
-	if w.cache != nil {
-		if update, found := w.cache.GetStorage(plainKey); found {
-			return update, nil
-		}
-	}
-	update, err := trieCtx.Storage(plainKey)
-	if err != nil {
-		return nil, err
-	}
-	if w.cache != nil {
-		w.cache.PutStorage(plainKey, update)
-	}
-	return update, nil
-}
-
-// Start initializes and starts the warmup workers.
 func (w *Warmuper) Start() {
 	if w.started.Swap(true) {
-		return // Already started
+		return
 	}
 	if w.numWorkers <= 0 {
 		return
@@ -179,9 +104,15 @@ func (w *Warmuper) Start() {
 
 	for i := 0; i < w.numWorkers; i++ {
 		w.g.Go(func() error {
-			trieCtx, cleanup := w.ctxFactory()
+			trieCtx, cleanup := w.ctxFactory(w.ctx)
 			if cleanup != nil {
 				defer cleanup()
+			}
+			if trieCtx == nil {
+				if err := w.ctx.Err(); err != nil {
+					return err
+				}
+				return errors.New("warmup trie context factory returned nil PatriciaContext")
 			}
 
 			for {
@@ -200,7 +131,7 @@ func (w *Warmuper) Start() {
 		})
 	}
 
-	// Wake any WaitBufferFree waiter on shutdown so it observes cancellation instead of blocking on undrained items.
+	// Wake WaitBufferFree on shutdown to avoid hanging on undrained items.
 	w.g.Go(func() error {
 		<-w.ctx.Done()
 		w.mu.Lock()
@@ -210,21 +141,18 @@ func (w *Warmuper) Start() {
 	})
 }
 
-// warmupKey performs the actual warmup for a single key by reading data to warm MDBX page cache.
-// If cache is enabled, the data is also stored in the cache for later use.
 func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDepth int) {
 	depth := startDepth
+	var compactBuf [maxCompactKeyLen]byte
 	for depth <= len(hashedKey) && depth <= w.maxDepth {
-		prefix := nibbles.HexToCompact(hashedKey[:depth])
+		prefix := nibbles.HexToCompactInto(compactBuf[:], hashedKey[:depth])
 
-		// Check cache first, then fall back to DB
-		branchData, err := w.branchFromCacheOrDB(trieCtx, prefix)
+		branchData, _, err := trieCtx.Branch(prefix)
 		if err != nil {
 			log.Debug(fmt.Sprintf("[%s][warmup] failed to get branch", w.logPrefix),
 				"prefix", common.Bytes2Hex(prefix), "error", err)
 		}
 
-		// Branch data format: 2-byte touch map + 2-byte bitmap + per-child data
 		if len(branchData) < 4 {
 			break
 		}
@@ -233,15 +161,6 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 			break
 		}
 		nextNibble := int(hashedKey[depth])
-
-		// Extract and prefetch account/storage addresses to warm page cache
-		cellAccounts, cellStorages := extractBranchCellAddresses(branchData, nextNibble)
-		for _, addr := range cellAccounts {
-			_, _ = w.accountFromCacheOrDB(trieCtx, addr)
-		}
-		for _, addr := range cellStorages {
-			_, _ = w.storageFromCacheOrDB(trieCtx, addr)
-		}
 
 		branchData = branchData[2:] // skip touch map
 
@@ -252,9 +171,8 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 			break
 		}
 
-		// Find position of our child's data
 		pos := 2
-		for n := 0; n < nextNibble; n++ {
+		for n := range nextNibble {
 			if bitmap&(uint16(1)<<n) != 0 {
 				if pos >= len(branchData) {
 					break
@@ -272,7 +190,10 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 		fieldBits := branchData[pos]
 		pos++
 
-		// Check if child has extension
+		if cellFields(fieldBits)&(fieldAccountAddr|fieldStorageAddr) != 0 {
+			break
+		}
+
 		hasExtension := (fieldBits & 1) != 0
 		if hasExtension && pos < len(branchData) {
 			extLen, n := binary.Uvarint(branchData[pos:])
@@ -286,18 +207,11 @@ func (w *Warmuper) warmupKey(trieCtx PatriciaContext, hashedKey []byte, startDep
 	}
 }
 
-// WarmKey submits a hashed key for warming. Call Start() first.
-// startDepth indicates the depth from which to start warming (based on divergence from previous key).
 func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int, gen uint64) {
 	if !w.started.Load() || w.numWorkers <= 0 || w.closed.Load() {
 		return
 	}
 	w.outstanding[gen%arenaRingSize].Add(1)
-	// Blocking By-Design!
-	// Speed of system is equal to speed of facing all page-faults during
-	// Or warmapers face them or main thread
-	// It means doesn't make much sense to unblock main thread if all Warmupers are loaded
-	// Anyway main thread can't run ahead of Warmupers (there are page-faults which will stop him)
 	select {
 	case w.work <- warmupWorkItem{hashedKey: hashedKey, startDepth: startDepth, gen: gen}:
 	case <-w.ctx.Done():
@@ -305,7 +219,6 @@ func (w *Warmuper) WarmKey(hashedKey []byte, startDepth int, gen uint64) {
 	}
 }
 
-// releaseGen decrements gen's ring-slot counter and wakes WaitBufferFree when the slot drains to zero.
 func (w *Warmuper) releaseGen(gen uint64) {
 	if w.outstanding[gen%arenaRingSize].Add(-1) == 0 {
 		w.mu.Lock()
@@ -314,7 +227,6 @@ func (w *Warmuper) releaseGen(gen uint64) {
 	}
 }
 
-// WaitBufferFree blocks until every in-flight warm item for slot completes, or returns the context error if canceled first.
 func (w *Warmuper) WaitBufferFree(slot int) error {
 	if slot < 0 || slot >= arenaRingSize {
 		return fmt.Errorf("invalid arena slot %d", slot)
@@ -333,7 +245,6 @@ func (w *Warmuper) WaitBufferFree(slot int) error {
 	return nil
 }
 
-// Wait waits for all warmup work to complete.
 func (w *Warmuper) Wait() error {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return nil
@@ -343,7 +254,6 @@ func (w *Warmuper) Wait() error {
 	return nil
 }
 
-// Stats returns statistics about the warmup.
 func (w *Warmuper) Stats() WarmupStats {
 	duration := time.Duration(0)
 	if !w.startTime.IsZero() {
@@ -355,7 +265,6 @@ func (w *Warmuper) Stats() WarmupStats {
 	}
 }
 
-// DrainPending discards queued work items, releasing each one's ring-slot counter so WaitBufferFree won't block on it.
 func (w *Warmuper) DrainPending() {
 	if !w.started.Load() || w.numWorkers <= 0 {
 		return
@@ -370,7 +279,6 @@ func (w *Warmuper) DrainPending() {
 	}
 }
 
-// CloseAndWait cancel and waits for all warmup work
 func (w *Warmuper) CloseAndWait() {
 	w.Close()
 	if w.g != nil {
@@ -378,13 +286,11 @@ func (w *Warmuper) CloseAndWait() {
 	}
 }
 
-// Close cancels all warmup work and releases resources.
 func (w *Warmuper) Close() {
 	if w.closed.Swap(true) {
-		return // Already closed
+		return
 	}
+	// w.work is never closed: that would race a concurrent WarmKey send into a
+	// panic and make DrainPending spin. ctx cancellation is the sole shutdown signal.
 	w.cancel()
-	if w.work != nil {
-		close(w.work)
-	}
 }

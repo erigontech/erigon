@@ -25,32 +25,30 @@ import (
 
 	"golang.org/x/sync/errgroup"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
-	"github.com/erigontech/erigon/db/services"
-	"github.com/erigontech/erigon/db/state"
 )
 
 // History - usually don't have anything attributed to 1-st system txs (except genesis)
-func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReader services.FullBlockReader) error {
+func HistoryCheckNoSystemTxs(ctx context.Context, db kv.TemporalRwDB, blockReader dbservices.FullBlockReader) error {
 	defer func(t time.Time) { log.Info("[integrity] HistoryNoSystemTxs done", "took", time.Since(t)) }(time.Now())
 	count := atomic.Uint64{}
 	logEvery := time.NewTicker(20 * time.Second)
 	defer logEvery.Stop()
-	g := &errgroup.Group{}
+	g, ctx := errgroup.WithContext(ctx)
 	g.SetLimit(estimate.AlmostAllCPUs())
 
 	skipForPerf := 11
 	prefixesDone, prefixesTotal := atomic.Uint64{}, atomic.Uint64{}
 	txNumsReader := blockReader.TxnumReader()
 
-	for j := 0; j < 256; j++ {
-		j := j
-		for jj := 0; jj < 255; jj++ {
-			jj := jj
+	for j := range 256 {
+		for jj := range 255 {
 			if (j+jj)%skipForPerf != 0 || (j+jj == 0) {
 				continue
 			}
@@ -83,7 +81,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 	txNumsReader rawdbv3.TxNumsReader,
 	logEvery *time.Ticker,
 	keysCnt, prefixesDone, prefixesTotal *atomic.Uint64) error {
-	agg := state.AggTx(tx)
+	stepSize := tx.Debug().StepSize()
 
 	var minStep uint64 = math.MaxUint64
 	keys, err := tx.Debug().RangeLatest(kv.AccountsDomain, prefixFrom, prefixTo, -1)
@@ -150,8 +148,8 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 			}
 
 			if int64(txNum) == _min {
-				minStep = min(minStep, txNum/agg.StepSize())
-				log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/agg.StepSize(), txNum, blk, key))
+				minStep = min(minStep, txNum/stepSize)
+				log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: minStep=%d, step=%d, txNum=%d, blockNum=%d, key=%x", minStep, txNum/stepSize, txNum, blk, key))
 				break
 			}
 		}
@@ -160,7 +158,7 @@ func HistoryCheckNoSystemTxsRange(ctx context.Context, prefixFrom, prefixTo []by
 
 		select {
 		case <-logEvery.C:
-			log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: progress=%d/%d, keys=%.3fm", prefixesDone.Load(), prefixesTotal.Load(), float64(keysCnt.Load())/1_000_000))
+			log.Info(fmt.Sprintf("[integrity] HistoryNoSystemTxs: progress=%d/%d, keys=%s", prefixesDone.Load(), prefixesTotal.Load(), common.PrettyCounter(keysCnt.Load())))
 		default:
 		}
 	}

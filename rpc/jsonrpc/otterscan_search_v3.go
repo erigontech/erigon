@@ -89,11 +89,11 @@ func (api *OtterscanAPIImpl) buildSearchResults(ctx context.Context, tx kv.Tempo
 			mustReadBlock = false
 		}
 
-		txn, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
+		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txIndex)
 		if err != nil {
 			return nil, nil, false, err
 		}
-		if txn == nil {
+		if !ok {
 			log.Warn("[rpc] txn not found", "blockNum", blockNum, "txIndex", txIndex)
 			continue
 		}

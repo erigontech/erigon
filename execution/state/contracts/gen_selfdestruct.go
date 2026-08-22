@@ -156,7 +156,7 @@ func bindSelfdestruct(address common.Address, caller bind.ContractCaller, transa
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Selfdestruct *SelfdestructRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Selfdestruct *SelfdestructRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Selfdestruct.Contract.SelfdestructCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -167,7 +167,7 @@ func (_Selfdestruct *SelfdestructRaw) Transfer(opts *bind.TransactOpts) (types.T
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Selfdestruct *SelfdestructRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Selfdestruct *SelfdestructRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Selfdestruct.Contract.SelfdestructTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -175,7 +175,7 @@ func (_Selfdestruct *SelfdestructRaw) Transact(opts *bind.TransactOpts, method s
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_Selfdestruct *SelfdestructCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_Selfdestruct *SelfdestructCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _Selfdestruct.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -186,7 +186,7 @@ func (_Selfdestruct *SelfdestructTransactorRaw) Transfer(opts *bind.TransactOpts
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_Selfdestruct *SelfdestructTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_Selfdestruct *SelfdestructTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _Selfdestruct.Contract.contract.Transact(opts, method, params...)
 }
 

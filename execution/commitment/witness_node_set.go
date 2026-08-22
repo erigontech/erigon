@@ -1,0 +1,55 @@
+// Copyright 2024 The Erigon Authors
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package commitment
+
+import (
+	"bytes"
+	"fmt"
+)
+
+type witnessNodeSet struct {
+	byHash map[string][]byte
+}
+
+func newWitnessNodeSet() *witnessNodeSet { return &witnessNodeSet{byHash: make(map[string][]byte)} }
+
+func (s *witnessNodeSet) onNode(rlp, hash []byte) {
+	k := string(hash)
+	if _, ok := s.byHash[k]; ok {
+		return
+	}
+	s.byHash[k] = bytes.Clone(rlp)
+}
+
+func (s *witnessNodeSet) nodes(root []byte) ([][]byte, error) {
+	if len(s.byHash) == 0 {
+		return nil, nil
+	}
+	rootKey := string(root)
+	r, ok := s.byHash[rootKey]
+	if !ok {
+		return nil, fmt.Errorf("witness root %x absent from captured node set", root)
+	}
+	out := make([][]byte, 0, len(s.byHash))
+	out = append(out, r) // RLPDecode requires index 0 to be the root
+	for k, v := range s.byHash {
+		if k != rootKey {
+			out = append(out, v)
+		}
+	}
+	return out, nil
+}

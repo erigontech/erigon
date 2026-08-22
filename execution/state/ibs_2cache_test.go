@@ -27,29 +27,29 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// writeIndex builds a lookup map from a VersionedWrites slice.
-// Key is (Address, Path, Key); value is the Val field.
-func writeIndex(writes VersionedWrites) map[AccountKey]any {
-	idx := make(map[AccountKey]any, len(writes))
-	for _, w := range writes {
-		idx[AccountKey{Path: w.Path, Key: w.Key}] = w.Val
-		// Keyed per-address via a composite; store per-address sub-map below.
-		_ = w.Address
+// writeIndex builds a lookup map from a WriteSet, keyed by (Path, Key) — the
+// address is not part of the key, so this assumes a single-address WriteSet
+// (use addrWriteIndex for multiple). Value is the typed Val field.
+func writeIndex(writes *WriteSet) map[AccountKey]any {
+	idx := make(map[AccountKey]any)
+	for h := range writes.AllHeaders() {
+		idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, h)
 	}
 	return idx
 }
 
 // addrWriteIndex is like writeIndex but scoped to a single address.
-func addrWriteIndex(writes VersionedWrites, addr accounts.Address) map[AccountKey]any {
+func addrWriteIndex(writes *WriteSet, addr accounts.Address) map[AccountKey]any {
 	idx := make(map[AccountKey]any)
-	for _, w := range writes {
-		if w.Address == addr {
-			idx[AccountKey{Path: w.Path, Key: w.Key}] = w.Val
+	for h := range writes.AllHeaders() {
+		if h.Address == addr {
+			idx[AccountKey{Path: h.Path, Key: h.Key}] = writeSetVal(writes, h)
 		}
 	}
 	return idx
@@ -66,8 +66,9 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
 
 	addr1 := accounts.InternAddress(common.HexToAddress("0x1111"))
@@ -89,12 +90,13 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	require.NoError(t, err)
 
 	// addr2: CreateAccount + balance only
-	ibs.CreateAccount(addr2, true)
+	err = ibs.CreateAccount(addr2, true)
+	require.NoError(t, err)
 	err = ibs.SetBalance(addr2, *uint256.NewInt(200), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
 
 	// Capture VersionedWrites BEFORE FinalizeTx (journal.dirties still intact).
-	writes := ibs.VersionedWrites(true)
+	writes := ibs.VersionedWrites()
 
 	// — addr1 checks —
 	idx1 := addrWriteIndex(writes, addr1)
@@ -115,7 +117,7 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	require.True(t, ok, "addr1: CodePath write missing from VersionedWrites")
 	gotCode1, err := ibs.GetCode(addr1)
 	require.NoError(t, err)
-	require.Equal(t, gotCode1, wcode1.([]byte), "addr1: code mismatch between stateObject and VersionedWrites")
+	require.Equal(t, gotCode1, wcode1.(accounts.Code).Bytes, "addr1: code mismatch between stateObject and VersionedWrites")
 
 	wstor1, ok := idx1[AccountKey{Path: StoragePath, Key: key1}]
 	require.True(t, ok, "addr1: StoragePath[key1] write missing from VersionedWrites")
@@ -151,12 +153,13 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xAAAA"))
 	key := accounts.InternKey(common.HexToHash("0x0001"))
 
 	ibs := NewWithVersionMap(reader, mvhm)
+	defer ibs.Close()
 	ibs.SetTxContext(1, 0)
 
 	// Pre-snapshot state
@@ -195,7 +198,7 @@ func TestSnapshotRandomWithVersionMap(t *testing.T) {
 	require.Equal(t, uint256.NewInt(11), &stor, "storage should be reverted to pre-snapshot value")
 
 	// VersionedWrites must reflect the same reverted values.
-	writes := ibs.VersionedWrites(true)
+	writes := ibs.VersionedWrites()
 	idx := addrWriteIndex(writes, addr)
 
 	wbal, ok := idx[AccountKey{Path: BalancePath, Key: accounts.NilKey}]
@@ -226,7 +229,7 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xBBBB"))
 	key := accounts.InternKey(common.HexToHash("0x0001"))
@@ -236,17 +239,19 @@ func TestCommittedStateWithVersionMap(t *testing.T) {
 
 	// — tx0 (txIndex 0) — writes val1, flushes to versionMap —
 	ibs0 := NewWithVersionMap(reader, mvhm)
+	defer ibs0.Close()
 	ibs0.SetTxContext(1, 0)
 
 	err := ibs0.SetState(addr, key, val1)
 	require.NoError(t, err)
 
 	// Capture and flush before FinalizeTx (journal.dirties still populated).
-	writes0 := ibs0.VersionedWrites(true)
+	writes0 := ibs0.VersionedWrites()
 	mvhm.FlushVersionedWrites(writes0, true, "")
 
 	// — tx1 (txIndex 1) — reads committed state before modifying —
 	ibs1 := NewWithVersionMap(reader, mvhm)
+	defer ibs1.Close()
 	ibs1.SetTxContext(1, 1)
 
 	// Before tx1 writes anything, committed state must be val1.
@@ -287,7 +292,8 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 
 	// — Block N: write state then commit to domains via Writer —
 	{
-		ibsN := New(NewReaderV3(domains.AsGetter(tx)))
+		ibsN := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+		defer ibsN.Close()
 		ibsN.SetTxContext(1, 0)
 
 		err := ibsN.SetBalance(addr, *wantBalance, tracing.BalanceChangeUnspecified)
@@ -303,7 +309,8 @@ func TestCrossBlockStateReadConsistency(t *testing.T) {
 	}
 
 	// — Block N+1: fresh IBS reads state that block N wrote to domains —
-	ibsN1 := New(NewReaderV3(domains.AsGetter(tx)))
+	ibsN1 := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer ibsN1.Close()
 
 	gotBal, err := ibsN1.GetBalance(addr)
 	require.NoError(t, err)
@@ -329,7 +336,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	addr := accounts.InternAddress(common.HexToAddress("0xEEEE"))
 	key := accounts.InternKey(common.HexToHash("0x0001"))
@@ -339,6 +346,7 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 
 	// — Step 1: produce VersionedWrites via a tx —
 	ibsTx := NewWithVersionMap(reader, mvhm)
+	defer ibsTx.Close()
 	ibsTx.SetTxContext(1, 0)
 
 	err := ibsTx.SetBalance(addr, wantBalance, tracing.BalanceChangeUnspecified)
@@ -348,11 +356,12 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	err = ibsTx.SetState(addr, key, wantStorage)
 	require.NoError(t, err)
 
-	writes := ibsTx.VersionedWrites(true)
+	writes := ibsTx.VersionedWrites()
 	require.NotEmpty(t, writes, "VersionedWrites must not be empty")
 
 	// — Step 2: apply VersionedWrites through existing round-trip path —
 	ibsApply := New(reader)
+	defer ibsApply.Close()
 	err = ibsApply.ApplyVersionedWrites(writes)
 	require.NoError(t, err)
 
@@ -361,7 +370,8 @@ func TestDomainApplyFromVersionedWrites(t *testing.T) {
 	require.NoError(t, err)
 
 	// — Step 3: read back from domains, assert correct state —
-	ibsRead := New(NewReaderV3(domains.AsGetter(tx)))
+	ibsRead := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	defer ibsRead.Close()
 
 	gotBal, err := ibsRead.GetBalance(addr)
 	require.NoError(t, err)

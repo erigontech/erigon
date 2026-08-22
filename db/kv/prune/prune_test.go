@@ -28,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	mdbx2 "github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/prune"
 )
 
@@ -36,8 +37,7 @@ const testDupSortTable = "TestDupSort"
 
 func openTestDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	return mdbx2.New(dbcfg.ChainDB, log.New()).
-		InMem(tb, tb.TempDir()).
+	return mdbxtest.InMem(tb, mdbx2.New(dbcfg.ChainDB, log.New()), tb.TempDir()).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{testTxLookupTable: {}}
 		}).MustOpen()
@@ -45,8 +45,7 @@ func openTestDB(tb testing.TB) kv.RwDB {
 
 func openTestDupSortDB(tb testing.TB) kv.RwDB {
 	tb.Helper()
-	return mdbx2.New(dbcfg.ChainDB, log.New()).
-		InMem(tb, tb.TempDir()).
+	return mdbxtest.InMem(tb, mdbx2.New(dbcfg.ChainDB, log.New()), tb.TempDir()).
 		WithTableCfg(func(_ kv.TableCfg) kv.TableCfg {
 			return kv.TableCfg{testDupSortTable: {Flags: kv.DupSort}}
 		}).MustOpen()
@@ -309,7 +308,7 @@ func TestDupSortPrune_SingleDupAllInRange(t *testing.T) {
 	const N = 50
 	const stepSize uint64 = 16
 	// 50 user keys; each gets a single dup at step=1 (txNum in [16,32)).
-	for i := uint64(0); i < N; i++ {
+	for i := range uint64(N) {
 		require.NoError(t, tx.Put(testDupSortTable, userKey(i), encodeStepVal(1, []byte{byte(i)})))
 	}
 
@@ -348,7 +347,7 @@ func TestDupSortPrune_MultipleDupsAllInRange(t *testing.T) {
 	const N = 50
 	const stepSize uint64 = 16
 	// Three dups per key, at steps 1,2,3 (txNums 16,32,48 — all < txTo=64).
-	for i := uint64(0); i < N; i++ {
+	for i := range uint64(N) {
 		k := userKey(i)
 		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(1, []byte{0xa})))
 		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(2, []byte{0xb})))
@@ -395,7 +394,7 @@ func TestDupSortPrune_MixedDupsPartialRange(t *testing.T) {
 	// Two dups per key:
 	//   - step 1 (txNum 16) — in range
 	//   - step 5 (txNum 80) — out of range when txTo=64
-	for i := uint64(0); i < N; i++ {
+	for i := range uint64(N) {
 		k := userKey(i)
 		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(1, []byte{0xa})))
 		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(5, []byte{0xe})))
@@ -439,7 +438,7 @@ func TestDupSortPrune_ProductionLike(t *testing.T) {
 	txTo := activeStep * stepSize
 
 	// Group A: 20 keys with dups only at old step 2 — should be fully deleted.
-	for i := uint64(0); i < 20; i++ {
+	for i := range uint64(20) {
 		k := userKey(i)
 		require.NoError(t, tx.Put(testDupSortTable, k, encodeStepVal(2, []byte{0x1})))
 	}

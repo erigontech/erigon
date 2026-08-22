@@ -56,10 +56,10 @@ const (
 	//   It makes .seg files "warm" - which is bad because they are big and
 	//      data-locality of touches is bad (and maybe need visit a lot of shards to find key).
 	//   Can add a built-in "existence filter" (like bloom/cuckoo/ribbon/xor-filter/fuse-filter); it will improve
-	//      data-locality - filters are small-enough and existance-chekcs will be co-located on disk.
+	//      data-locality - filters are small-enough and existence-checks will be co-located on disk.
 	//   But there are 2 additional properties we have in our data:
 	//      "keys are known", "keys are hashed" (.idx works on murmur3), ".idx can calc key-number by key".
-	//   It means: if we rely on this properties then we can do better than general-purpose-existance-filter.
+	//   It means: if we rely on this properties then we can do better than general-purpose-existence-filter.
 	//   Seems just an "array of 1-st bytes of key-hashes" is great alternative:
 	//      general-purpose-filter: 9bits/key, 0.3% false-positives, 3 mem access
 	//      first-bytes-array: 8bits/key, 1/256=0.4% false-positives, 1 mem access
@@ -76,12 +76,11 @@ var IncompatibleErr = errors.New("incompatible. can re-build such files by comma
 type Index struct {
 	offsetEf           *eliasfano32.EliasFano
 	f                  *os.File
-	mmapHandle2        *[mmap.MaxMapSize]byte // mmap handle for windows (this is used to close mmap)
 	filePath, fileName string
 
 	grData      []uint64
-	data        []byte // slice of correct size for the index to work with
-	mmapHandle1 []byte // mmap handle for unix (this is used to close mmap)
+	data        []byte  // slice of correct size for the index to work with
+	mmapHandle1 mmap.Ro // mmap handle for unix (this is used to close mmap)
 	golombRice  []uint32
 
 	dataStructureVersion version.DataStructureVersion
@@ -140,12 +139,12 @@ func OpenIndex(indexFilePath string) (_ *Index, err error) {
 	}
 	idx.size = stat.Size()
 	idx.modTime = stat.ModTime()
-	if idx.mmapHandle1, idx.mmapHandle2, err = mmap.Mmap(idx.f, int(idx.size)); err != nil {
+	if idx.mmapHandle1, err = mmap.OpenRo(idx.f, int(idx.size)); err != nil {
 		return nil, err
 	}
 	idx.data = idx.mmapHandle1[:idx.size]
 
-	if err = idx.init(); err != nil {
+	if err := idx.init(); err != nil {
 		return nil, err
 	}
 
@@ -217,7 +216,7 @@ func (idx *Index) init() (err error) {
 	startSeedLen := int(idx.data[offset])
 	offset++
 	idx.startSeed = make([]uint64, startSeedLen)
-	for i := 0; i < startSeedLen; i++ {
+	for i := range startSeedLen {
 		idx.startSeed[i] = binary.BigEndian.Uint64(idx.data[offset:])
 		offset += 8
 	}
@@ -282,12 +281,13 @@ func (idx *Index) init() (err error) {
 	golombParamSize := binary.BigEndian.Uint16(idx.data[offset:])
 	offset += 4
 	idx.golombRice = make([]uint32, golombParamSize)
-	for i := uint16(0); i < golombParamSize; i++ {
-		if i == 0 {
+	for i := range golombParamSize {
+		switch {
+		case i == 0:
 			idx.golombRice[i] = (bijMemo[i] << 27) | bijMemo[i]
-		} else if i <= idx.leafSize {
+		case i <= idx.leafSize:
 			idx.golombRice[i] = (bijMemo[i] << 27) | (uint32(1) << 16) | bijMemo[i]
-		} else {
+		default:
 			computeGolombRice(i, idx.golombRice, idx.leafSize, idx.primaryAggrBound, idx.secondaryAggrBound)
 		}
 	}
@@ -328,6 +328,19 @@ func (idx *Index) ForceExistenceFilterNormal() {
 		idx.existenceV2.MadvNormal()
 	}
 }
+func (idx *Index) ForceExistenceFilterRandom() {
+	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
+	if !existanceSupported {
+		return
+	}
+	if idx.dataStructureVersion == 1 {
+		idx.existenceV1.MadvRandom()
+		return
+	}
+	if idx.dataStructureVersion >= 2 {
+		idx.existenceV2.MadvRandom()
+	}
+}
 func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 	existanceSupported := idx.dataStructureVersion >= 1 && idx.lessFalsePositives && idx.keyCount > 0
 	if !existanceSupported {
@@ -344,16 +357,12 @@ func (idx *Index) ForceExistenceFilterInRAM() datasize.ByteSize {
 
 func onlyKnownFeatures(features Features) error {
 	for _, f := range SupportedFeatures {
-		features = features &^ f
+		features &^= f
 	}
 	if features != No {
 		return fmt.Errorf("%w. unknown features bitmap: %b", IncompatibleErr, features)
 	}
 	return nil
-}
-
-func (idx *Index) DataHandle() unsafe.Pointer {
-	return unsafe.Pointer(&idx.data[0])
 }
 
 func (idx *Index) Size() int64 { return idx.size }
@@ -379,7 +388,7 @@ func (idx *Index) Close() {
 	if idx == nil || idx.f == nil {
 		return
 	}
-	if err := mmap.Munmap(idx.mmapHandle1, idx.mmapHandle2); err != nil {
+	if err := idx.mmapHandle1.Unmap(); err != nil {
 		log.Log(dbg.FileCloseLogLevel, "unmap", "err", err, "file", idx.FileName(), "stack", dbg.Stack())
 	}
 	if err := idx.f.Close(); err != nil {
@@ -417,9 +426,6 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 		_, fName := filepath.Split(idx.filePath)
 		panic("no Lookup should be done when keyCount==0, please use Empty function to guard " + fName)
 	}
-	if idx.keyCount == 1 {
-		return 0, true
-	}
 	if idx.lessFalsePositives {
 		switch idx.dataStructureVersion {
 		case 1:
@@ -431,6 +437,12 @@ func (idx *Index) Lookup(bucketHash, fingerprint uint64) (uint64, bool) {
 				return 0, false
 			}
 		}
+	}
+	if idx.keyCount == 1 {
+		if !idx.enums {
+			return binary.BigEndian.Uint64(idx.data[9+idx.bytesPerRec:]) & idx.recMask, true
+		}
+		return 0, true
 	}
 
 	var gr GolombRiceReader

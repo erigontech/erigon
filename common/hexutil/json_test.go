@@ -24,6 +24,7 @@ import (
 	"math/bits"
 	"testing"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 )
 
@@ -49,6 +50,47 @@ func bigFromString(s string) *big.Int {
 }
 
 var errJSONEOF = errors.New("unexpected end of JSON input")
+
+var unmarshalBytesTests = []unmarshalTest{
+	{input: "", wantErr: errJSONEOF},
+	{input: "null", wantErr: errNonString(bytesT)},
+	{input: "10", wantErr: errNonString(bytesT)},
+	{input: `"0"`, wantErr: wrapTypeError(ErrMissingPrefix, bytesT)},
+	{input: `"0x0"`, wantErr: wrapTypeError(ErrOddLength, bytesT)},
+	{input: `"0xxx"`, wantErr: wrapTypeError(ErrSyntax, bytesT)},
+	{input: `"0x01zz01"`, wantErr: wrapTypeError(ErrSyntax, bytesT)},
+	{input: `""`, want: []byte{}},
+	{input: `"0x"`, want: []byte{}},
+	{input: `"0x02"`, want: []byte{0x02}},
+	{input: `"0X02"`, want: []byte{0x02}},
+	{input: `"0xffffffffff"`, want: []byte{0xff, 0xff, 0xff, 0xff, 0xff}},
+}
+
+func TestUnmarshalBytes(t *testing.T) {
+	for idx, test := range unmarshalBytesTests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			var v Bytes
+			err := json.Unmarshal([]byte(test.input), &v)
+			checkError(t, test.input, err, test.wantErr)
+			if test.want != nil {
+				require.EqualValues(t, test.want, []byte(v))
+			}
+		})
+	}
+}
+
+func TestBytesUnmarshalTextInvalidHex(t *testing.T) {
+	var v Bytes
+	require.ErrorIs(t, v.UnmarshalText([]byte("0x01zz01")), ErrSyntax)
+}
+
+func TestBytesUnmarshalJSONInvalidHex(t *testing.T) {
+	var v Bytes
+	err := json.Unmarshal([]byte(`"0x01zz01"`), &v)
+	var typeErr *json.UnmarshalTypeError
+	require.ErrorAs(t, err, &typeErr)
+	require.Equal(t, ErrSyntax.Error(), typeErr.Value)
+}
 
 var unmarshalBigTests = []unmarshalTest{
 	// invalid encoding
@@ -120,6 +162,136 @@ func TestMarshalBig(t *testing.T) {
 			require.Equal(t, want, string(out))
 			require.Equal(t, test.want, (*Big)(in).String())
 		})
+	}
+}
+
+var unmarshalU256Tests = []unmarshalTest{
+	// invalid encoding
+	{input: "", wantErr: errJSONEOF},
+	{input: "null", wantErr: errNonString(u256T)},
+	{input: "10", wantErr: errNonString(u256T)},
+	{input: `"0"`, wantErr: wrapTypeError(ErrMissingPrefix, u256T)},
+	{input: `"0x"`, wantErr: wrapTypeError(ErrEmptyNumber, u256T)},
+	{input: `"0x01"`, wantErr: wrapTypeError(ErrLeadingZero, u256T)},
+	{input: `"0xx"`, wantErr: wrapTypeError(ErrSyntax, u256T)},
+	{input: `"0x1zz01"`, wantErr: wrapTypeError(ErrSyntax, u256T)},
+	{
+		input:   `"0x10000000000000000000000000000000000000000000000000000000000000000"`,
+		wantErr: wrapTypeError(ErrBig256Range, u256T),
+	},
+	// valid encoding
+	{input: `""`, want: big.NewInt(0)},
+	{input: `"0x0"`, want: big.NewInt(0)},
+	{input: `"0x2"`, want: big.NewInt(0x2)},
+	{input: `"0x2F2"`, want: big.NewInt(0x2f2)},
+	{input: `"0X2F2"`, want: big.NewInt(0x2f2)},
+	{input: `"0x1122aaff"`, want: big.NewInt(0x1122aaff)},
+	{input: `"0xbBb"`, want: big.NewInt(0xbbb)},
+	{input: `"0xfffffffff"`, want: big.NewInt(0xfffffffff)},
+	{
+		input: `"0x112233445566778899aabbccddeeff"`,
+		want:  bigFromString("112233445566778899aabbccddeeff"),
+	},
+	{
+		input: `"0xffffffffffffffffffffffffffffffffffff"`,
+		want:  bigFromString("ffffffffffffffffffffffffffffffffffff"),
+	},
+	{
+		input: `"0xffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"`,
+		want:  bigFromString("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"),
+	},
+}
+
+func TestUnmarshalU256(t *testing.T) {
+	for idx, test := range unmarshalU256Tests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			var v U256
+			err := json.Unmarshal([]byte(test.input), &v)
+			checkError(t, test.input, err, test.wantErr)
+			if test.want != nil {
+				require.Equal(t, test.want.(*big.Int).Bytes(), v.ToInt().Bytes())
+			}
+		})
+	}
+}
+
+func TestBigToUint256(t *testing.T) {
+	tests := []struct {
+		input        *big.Int
+		want         *uint256.Int
+		wantOverflow bool
+	}{
+		{input: big.NewInt(0), want: uint256.NewInt(0)},
+		{input: big.NewInt(12345678), want: uint256.NewInt(12345678)},
+		{input: bigFromString("ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff"), want: new(uint256.Int).SetAllOne()},
+		// negative values wrap two's-complement style, they do not overflow
+		{input: big.NewInt(-1), want: new(uint256.Int).SetAllOne()},
+		{input: new(big.Int).Lsh(big.NewInt(1), 256), wantOverflow: true},
+	}
+	for idx, test := range tests {
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			got, overflow := (*Big)(test.input).ToUint256()
+			require.Equal(t, test.wantOverflow, overflow)
+			if !test.wantOverflow {
+				require.Equal(t, test.want, got)
+			}
+		})
+	}
+}
+
+// TestMarshalU256 pins U256's wire format to hexutil.Big's: for every value the
+// JSON bytes, text bytes, and String() must be identical between the two types.
+func TestMarshalU256(t *testing.T) {
+	for idx, test := range encodeBigTests {
+		in := test.input.(*big.Int)
+		if in.Sign() < 0 {
+			continue
+		}
+		t.Run(fmt.Sprintf("%d", idx), func(t *testing.T) {
+			u, overflow := uint256.FromBig(in)
+			require.False(t, overflow)
+			v := (*U256)(u)
+
+			out, err := json.Marshal(v)
+			require.NoError(t, err)
+			require.Equal(t, `"`+test.want+`"`, string(out))
+			require.Equal(t, test.want, v.String())
+
+			bigOut, err := json.Marshal((*Big)(in))
+			require.NoError(t, err)
+			require.Equal(t, string(bigOut), string(out))
+
+			appended, err := v.AppendText([]byte("prefix-"))
+			require.NoError(t, err)
+			require.Equal(t, "prefix-"+test.want, string(appended))
+		})
+	}
+}
+
+// TestMarshalU256WordBoundaries checks values around every 64-bit word boundary
+// of the uint256 representation against both uint256.Hex and Big's encoding.
+func TestMarshalU256WordBoundaries(t *testing.T) {
+	values := []*uint256.Int{new(uint256.Int).SetAllOne()}
+	one := uint256.NewInt(1)
+	for _, shift := range []uint{1, 4, 63, 64, 65, 127, 128, 129, 191, 192, 193, 255} {
+		v := new(uint256.Int).Lsh(one, shift)
+		values = append(values, v, new(uint256.Int).Sub(v, one), new(uint256.Int).Add(v, one))
+	}
+	for _, u := range values {
+		want := u.Hex()
+		v := (*U256)(u)
+
+		out, err := json.Marshal(v)
+		require.NoError(t, err)
+		require.Equal(t, `"`+want+`"`, string(out))
+
+		bigOut, err := json.Marshal((*Big)(u.ToBig()))
+		require.NoError(t, err)
+		require.Equal(t, string(bigOut), string(out))
+
+		var back U256
+		require.NoError(t, json.Unmarshal(out, &back))
+		require.Equal(t, *u, uint256.Int(back))
 	}
 }
 

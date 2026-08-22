@@ -36,7 +36,7 @@ func TestSizeConstrainedCache(t *testing.T) {
 	lru := NewSizeConstrainedCache[testKey, []byte](100)
 	var want uint64
 	// Add 11 items of 10 byte each. First item should be swapped out
-	for i := 0; i < 11; i++ {
+	for i := range 11 {
 		k := mkKey(i)
 		v := fmt.Sprintf("value-%04d", i)
 		lru.Add(k, []byte(v))
@@ -74,7 +74,7 @@ func TestSizeConstrainedCacheOverflow(t *testing.T) {
 	lru := NewSizeConstrainedCache[testKey, []byte](100)
 
 	// Add 10 items of 10 byte each, filling the cache
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		k := mkKey(i)
 		v := fmt.Sprintf("value-%04d", i)
 		lru.Add(k, []byte(v))
@@ -115,7 +115,7 @@ func TestSizeConstrainedCacheSameItem(t *testing.T) {
 	// Add one 10 byte-item 10 times.
 	k := mkKey(0)
 	v := fmt.Sprintf("value-%04d", 0)
-	for i := 0; i < 10; i++ {
+	for range 10 {
 		lru.Add(k, []byte(v))
 	}
 
@@ -130,7 +130,7 @@ func TestSizeConstrainedCacheEmpties(t *testing.T) {
 	lru := NewSizeConstrainedCache[testKey, []byte](100)
 
 	// This test abuses the lru a bit, using different keys for identical value(s).
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		lru.Add(testKey{byte(i)}, []byte{})
 		lru.Add(testKey{byte(255 - i)}, nil)
 	}
@@ -142,7 +142,7 @@ func TestSizeConstrainedCacheEmpties(t *testing.T) {
 		t.Fatalf("size wrong, have %d want %d", have, want)
 	}
 
-	for i := 0; i < 10; i++ {
+	for i := range 10 {
 		if v, ok := lru.Get(testKey{byte(i)}); !ok {
 			t.Fatalf("test %d: expected presence", i)
 		} else if v == nil {

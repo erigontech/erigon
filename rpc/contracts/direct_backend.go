@@ -48,7 +48,8 @@ func NewDirectBackend(api jsonrpc.EthAPI) DirectBackend {
 }
 
 func (b DirectBackend) CodeAt(ctx context.Context, account common.Address, blockNum *uint256.Int) ([]byte, error) {
-	return b.api.GetCode(ctx, account, BlockNumArg(blockNum))
+	blockNrOrHash := BlockNumArg(blockNum)
+	return b.api.GetCode(ctx, account, &blockNrOrHash)
 }
 
 func (b DirectBackend) CallContract(ctx context.Context, callMsg bind.CallMsg, blockNum *uint256.Int) ([]byte, error) {
@@ -59,11 +60,13 @@ func (b DirectBackend) CallContract(ctx context.Context, callMsg bind.CallMsg, b
 }
 
 func (b DirectBackend) PendingCodeAt(ctx context.Context, account common.Address) ([]byte, error) {
-	return b.api.GetCode(ctx, account, PendingBlockNumArg())
+	blockNrOrHash := PendingBlockNumArg()
+	return b.api.GetCode(ctx, account, &blockNrOrHash)
 }
 
 func (b DirectBackend) PendingNonceAt(ctx context.Context, account common.Address) (uint64, error) {
-	count, err := b.api.GetTransactionCount(ctx, account, PendingBlockNumArg())
+	blockNrOrHash := PendingBlockNumArg()
+	count, err := b.api.GetTransactionCount(ctx, account, &blockNrOrHash)
 	if err != nil {
 		return 0, err
 	}
@@ -79,7 +82,8 @@ func (b DirectBackend) NonceAt(ctx context.Context, account common.Address, bloc
 		blockRef = rpc.BlockNumber(blockNumber.Int64()).AsBlockReference()
 	}
 
-	count, err := b.api.GetTransactionCount(ctx, account, rpc.BlockNumberOrHash(blockRef))
+	blockNrOrHash := rpc.BlockNumberOrHash(blockRef)
+	count, err := b.api.GetTransactionCount(ctx, account, &blockNrOrHash)
 	if err != nil {
 		return 0, err
 	}
@@ -197,25 +201,10 @@ func CallArgsFromCallMsg(callMsg bind.CallMsg) ethapi.CallArgs {
 		gas = (*hexutil.Uint64)(&callMsg.Gas)
 	}
 
-	var gasPrice *hexutil.Big
-	if callMsg.GasPrice != nil {
-		gasPrice = (*hexutil.Big)(callMsg.GasPrice.ToBig())
-	}
-
-	var feeCap *hexutil.Big
-	if callMsg.FeeCap != nil {
-		feeCap = (*hexutil.Big)(callMsg.FeeCap.ToBig())
-	}
-
-	var maxFeePerBlobGas *hexutil.Big
-	if callMsg.MaxFeePerBlobGas != nil {
-		maxFeePerBlobGas = (*hexutil.Big)(callMsg.MaxFeePerBlobGas.ToBig())
-	}
-
-	var value *hexutil.Big
-	if callMsg.Value != nil {
-		value = (*hexutil.Big)(callMsg.Value.ToBig())
-	}
+	gasPrice := (*hexutil.U256)(callMsg.GasPrice)
+	feeCap := (*hexutil.U256)(callMsg.FeeCap)
+	maxFeePerBlobGas := (*hexutil.U256)(callMsg.MaxFeePerBlobGas)
+	value := (*hexutil.U256)(callMsg.Value)
 
 	var data *hexutil.Bytes
 	if callMsg.Data != nil {

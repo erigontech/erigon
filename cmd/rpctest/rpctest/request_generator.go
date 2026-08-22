@@ -17,7 +17,6 @@
 package rpctest
 
 import (
-	"encoding/base64"
 	"fmt"
 	"net/http"
 	"strings"
@@ -179,8 +178,7 @@ func (g *RequestGenerator) getOverlayLogs2(prevBn uint64, bn uint64, account com
 
 func (g *RequestGenerator) accountRange(bn uint64, page []byte, num int) string { //nolint
 	const template = `{ "jsonrpc": "2.0", "method": "debug_accountRange", "params": ["0x%x", "%s", %d, false, false], "id":%d}`
-	encodedKey := base64.StdEncoding.EncodeToString(page)
-	return fmt.Sprintf(template, bn, encodedKey, num, g.reqID.Add(1))
+	return fmt.Sprintf(template, bn, hexutil.Encode(page), num, g.reqID.Add(1))
 }
 
 func (g *RequestGenerator) getProof(bn uint64, account common.Address, storageList []common.Hash) string {
@@ -378,4 +376,15 @@ func (g *RequestGenerator) Geth2(method, body string) CallResult {
 
 func (g *RequestGenerator) Erigon2(method, body string) CallResult {
 	return g.call2(Erigon, method, body)
+}
+
+func (g *RequestGenerator) latestBlockNumber() (uint64, error) {
+	var blockNumber EthBlockNumber
+	if res := g.Erigon("eth_blockNumber", g.blockNumber(), &blockNumber); res.Err != nil {
+		return 0, fmt.Errorf("could not get block number: %w", res.Err)
+	}
+	if blockNumber.Error != nil {
+		return 0, fmt.Errorf("error getting block number: %d %s", blockNumber.Error.Code, blockNumber.Error.Message)
+	}
+	return uint64(blockNumber.Number), nil
 }

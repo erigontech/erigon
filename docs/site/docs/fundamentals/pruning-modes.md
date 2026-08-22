@@ -1,7 +1,7 @@
 ---
 title: "Pruning Modes"
 description: "Full, minimal, blocks, and archive pruning modes explained — choose the right mode for your use case."
-sidebar_position: 2
+sidebar_position: 4
 ---
 
 
@@ -11,19 +11,23 @@ Erigon 3 supports four pruning modes that control how much chain history your no
 
 | **Pruning Mode**                                                        | **Flag**               | **Data Retained**                                                                                   | **Primary Use Case**                                                                     |
 | --------------------------------------------------------------------- | ---------------------- | --------------------------------------------------------------------------------------------------- | ---------------------------------------------------------------------------------------- |
-| <p>* <a href="#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | State and block data within the EIP-8252 window (last 262,144 blocks, ~36 days)                     | General users, DApp interaction, fastest sync.                                           |
-| \* [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | State and block data within the last 100,000 blocks (~14 days)                                      | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
+| <p><a href="#full-node">Full Node</a><br />(Default)</p> | `--prune.mode=full`    | State and block data within the EIP-8252 window (last 262,144 blocks, ~36 days)                     | General users, DApp interaction, fastest sync.                                           |
+| [Minimal Node](#minimal-node)                         | `--prune.mode=minimal` | State and block data within the last 100,000 blocks (~14 days)                                      | Solo staking, users with constrained hardware, maximum privacy for sending transactions. |
 | [Historical Blocks](#blocks-node)                                     | `--prune.mode=blocks`  | All block/transaction history, plus state within the EIP-8252 window                                | Users needing historical block data for research or indexing.                            |
 | [Archive Node](#archive-node)                            | `--prune.mode=archive` | All historical state and all blocks                                                                 | Developers, researchers, and RPC providers requiring full historical state access.       |
 
 By **default**, Erigon run as a [full node](#full-node), to change its behavior use the flag `--prune.mode <value>`.
 
-In order to switch type of node, you must first delete the `/chaindata` folder in the chosen `--datadir` directory and re-sync from scratch.
+In order to switch type of node, you must first delete the `/chaindata` folder in the chosen `--datadir` directory and re-sync from scratch. Pruning is not reversible — data a mode has already discarded can only be recovered by re-syncing — so pick the mode that covers the history you need before you start.
 
 :::tip
-**\* Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
+**Persisting receipts**, which are pre-calculated receipts, increase the requests-per-second (RPS) and improve the latency and throughput of all receipts and logs-related RPC calls.
 
-They are enabled by default for **Minimal** and **Full Node.** They can be activated or deactivated with the flag `--persist.receipts <value>` .
+As of v3.6 they are disabled by default in every pruning mode (previously they were enabled by default for all modes
+except Archive); enable them with the flag `--prune.include-receipts` (the former `--persist.receipts` still works as an
+alias). Without them, receipts and logs are re-derived on demand from state history, so the related RPC calls keep
+working within the node's state-history window, just with higher latency. On a Historical Blocks node, persisted
+receipts additionally extend receipts and logs availability from the state-history window back to genesis.
 :::
 
 ## Archive node
@@ -34,7 +38,9 @@ Archive are ideal for extensive research on the blockchain, developers, research
 
 ## Full node
 
-The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data within the **EIP-8252 reorg-retention window** — the last 262,144 blocks (~36.4 days), the inactivity-leak-bounded non-finality window across which an execution-layer client must be able to reconstruct state to handle any reorg without external sync. Older blocks, receipts, and state history are pruned. See [EIP-8252](https://github.com/ethereum/EIPs/pull/11601) for the rationale behind the constant.
+The default configuration in Erigon 3 is a Full Node. This setup is designed to offer significantly **faster sync times and reduced resource consumption** for daily operations compared to other clients. It maintains state and block data within the **EIP-8252 reorg-retention window** — the last 262,144 blocks (~36.4 days), the inactivity-leak-bounded non-finality window across which an execution-layer client must be able to reconstruct state to handle any reorg without external sync. Older blocks, receipts, and state history are pruned, so a Full Node cannot serve queries against them. For block and transaction history reaching further back, run a [Blocks Node](#blocks-node); receipts need their own flags on top, as that section explains. See [EIP-8252](https://github.com/ethereum/EIPs/pull/11601) for the rationale behind the constant.
+
+To keep every post-merge block instead of only the window — pruning pre-merge block data alone — set `--prune.distance.blocks=keep-post-merge`. Decide before the first start: pruning is not reversible, and block data already discarded comes back only by re-syncing.
 
 We strongly recommend running a Full Node whenever possible, as its reduced disk space requirements make it suitable for the majority of users. By running a Full Node, you directly support the network's **decentralization, resilience, and robustness**, aligning with Ethereum's distributed ethos.
 
@@ -44,4 +50,12 @@ The Minimal Node configuration (`--prune.mode=minimal`) is the smallest possible
 
 ## Blocks node
 
-The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144 blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users who need complete historical **block and receipt data** — for research, indexing, or block explorers — without paying the disk cost of an archive node's full historical **state**.
+The Blocks Node configuration (`--prune.mode=blocks`) keeps the **full block and transaction history** — every block
+back to genesis — while pruning **state history**. It retains state only within the EIP-8252 window (the last 262,144
+blocks), the same state-retention as a Full Node, but unlike a Full Node it never prunes older blocks. This suits users
+who need complete historical **block and transaction data** — for research, indexing, or block explorers — without
+paying the disk cost of an archive node's full historical **state**. For full-range **receipts and logs**
+(`eth_getLogs` / `eth_getBlockReceipts` back to genesis), add
+`--prune.include-receipts --prune.receipts.distance=keep-all`; with `--prune.include-receipts` alone the receipt cache
+follows the state-history window (the last 262,144 blocks), and without it receipts are re-derived from state history
+within that same window.

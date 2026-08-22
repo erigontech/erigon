@@ -40,14 +40,13 @@ func TestUint64SliceBasic(t *testing.T) {
 	require.NoError(t, err)
 
 	require.EqualValues(t, common.HexToHash("eb8cec5eaec74a32e8b9b56cc42f7627cef722f81081ead786c97a4df1c8be5d"), out)
-
 }
 
 func TestUint64SliceCopyTo(t *testing.T) {
 	num := 1000
 	set := solid.NewUint64ListSSZ(100_000)
 	set2 := solid.NewUint64ListSSZ(100_000)
-	for i := 0; i < num; i++ {
+	for i := range num {
 		set.Append(uint64(i))
 		set.HashSSZ()
 	}

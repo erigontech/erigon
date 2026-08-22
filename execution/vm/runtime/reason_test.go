@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -77,7 +78,7 @@ func newTestIBS(t *testing.T, tracer *tracing.Hooks) *Config {
 	require.NoError(t, err)
 	t.Cleanup(sd.Close)
 
-	ibs := state.New(state.NewReaderV3(sd.AsGetter(tx)))
+	ibs := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	ibs.SetHooks(tracer)
 
 	cfg := new(Config)
@@ -101,6 +102,7 @@ func TestCreateEmitsNonceChangeContractCreator(t *testing.T) {
 	initCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.RETURN)}
 
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
+	defer cfg.State.Close()
 
 	_, _, _, err := Create(initCode, cfg, 0)
 	require.NoError(t, err)
@@ -136,6 +138,7 @@ func TestCreateEmitsNonceChangeNewContract(t *testing.T) {
 	initCode := []byte{byte(vm.PUSH1), 0x00, byte(vm.PUSH1), 0x00, byte(vm.RETURN)}
 
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
+	defer cfg.State.Close()
 
 	_, contractAddr, _, err := Create(initCode, cfg, 0)
 	require.NoError(t, err)
@@ -187,6 +190,7 @@ func TestCreateEmitsCodeChangeContractCreation(t *testing.T) {
 	}
 
 	cfg := newTestIBS(t, recordingTracer(&nonceEvents, &codeEvents))
+	defer cfg.State.Close()
 
 	_, contractAddr, _, err := Create(initCode, cfg, 0)
 	require.NoError(t, err)
@@ -235,6 +239,7 @@ func TestCreateReasonOrdering(t *testing.T) {
 	}
 
 	cfg := newTestIBS(t, tracer)
+	defer cfg.State.Close()
 
 	_, _, _, err := Create(initCode, cfg, 0)
 	require.NoError(t, err)
@@ -264,6 +269,7 @@ func TestCodeChangeUnspecifiedOnSetup(t *testing.T) {
 	// Simple code: STOP
 	code := []byte{byte(vm.STOP)}
 	cfg := newTestIBS(t, tracer)
+	defer cfg.State.Close()
 
 	_, _, err := Execute(code, nil, cfg, t.TempDir())
 	require.NoError(t, err)
@@ -312,6 +318,7 @@ func TestReasonRoundTripThroughIBS(t *testing.T) {
 					},
 				}
 				cfg := newTestIBS(t, tracer)
+				defer cfg.State.Close()
 				addr := accounts.InternAddress(common.HexToAddress("0x01"))
 
 				require.NoError(t, cfg.State.SetNonce(addr, 1, reason))
@@ -340,6 +347,7 @@ func TestReasonRoundTripThroughIBS(t *testing.T) {
 					},
 				}
 				cfg := newTestIBS(t, tracer)
+				defer cfg.State.Close()
 				addr := accounts.InternAddress(common.HexToAddress("0x02"))
 
 				require.NoError(t, cfg.State.SetCode(addr, []byte{byte(vm.STOP)}, reason))

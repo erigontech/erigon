@@ -222,13 +222,13 @@ func TestDBInt64(t *testing.T) {
 	defer db.Close()
 
 	tests := nodeDBInt64Tests
-	for i := 0; i < len(tests); i++ {
+	for i := range tests {
 		// Insert the next value
 		if err := db.storeInt64(tests[i].key, tests[i].value); err != nil {
 			t.Errorf("test %d: failed to store value: %v", i, err)
 		}
 		// Check all existing and non existing values
-		for j := 0; j < len(tests); j++ {
+		for j := range tests {
 			num := db.fetchInt64(tests[j].key)
 			switch {
 			case j <= i && num != tests[j].value:
@@ -383,7 +383,7 @@ func TestDBSeedQuery(t *testing.T) {
 	const attempts = 15
 	var err error
 	tmpDir := t.TempDir()
-	for i := 0; i < attempts; i++ {
+	for range attempts {
 		if err = testSeedQuery(tmpDir); err == nil {
 			return
 		}

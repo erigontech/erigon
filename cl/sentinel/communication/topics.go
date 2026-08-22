@@ -24,34 +24,44 @@ import (
 
 const MaximumRequestClientUpdates = 128
 
-const ProtocolPrefix = "/eth2/beacon_chain/req"
-const EncodingProtocol = "/ssz_snappy"
+const (
+	ProtocolPrefix   = "/eth2/beacon_chain/req"
+	EncodingProtocol = "/ssz_snappy"
+)
 
 // request and response versions
-const Schema1 = "/1"
-const Schema2 = "/2"
-const Schema3 = "/3"
+const (
+	Schema1 = "/1"
+	Schema2 = "/2"
+	Schema3 = "/3"
+)
 
 // Request and Response topics
-const MetadataTopic = "/metadata"
-const PingTopic = "/ping"
-const StatusTopic = "/status"
-const GoodbyeTopic = "/goodbye"
-const BeaconBlocksByRangeTopic = "/beacon_blocks_by_range"
-const BeaconBlocksByRootTopic = "/beacon_blocks_by_root"
-const BeaconBlocksByHeadTopic = "/beacon_blocks_by_head"
-const BlobSidecarByRootTopic = "/blob_sidecars_by_root"
-const BlobSidecarByRangeTopic = "/blob_sidecars_by_range"
-const LightClientOptimisticUpdateTopic = "/light_client_optimistic_update"
-const LightClientFinalityUpdateTopic = "/light_client_finality_update"
-const LightClientBootstrapTopic = "/light_client_bootstrap"
-const LightClientUpdatesByRangeTopic = "/light_client_updates_by_range"
+const (
+	MetadataTopic                    = "/metadata"
+	PingTopic                        = "/ping"
+	StatusTopic                      = "/status"
+	GoodbyeTopic                     = "/goodbye"
+	BeaconBlocksByRangeTopic         = "/beacon_blocks_by_range"
+	BeaconBlocksByRootTopic          = "/beacon_blocks_by_root"
+	BeaconBlocksByHeadTopic          = "/beacon_blocks_by_head"
+	BlobSidecarByRootTopic           = "/blob_sidecars_by_root"
+	BlobSidecarByRangeTopic          = "/blob_sidecars_by_range"
+	LightClientOptimisticUpdateTopic = "/light_client_optimistic_update"
+	LightClientFinalityUpdateTopic   = "/light_client_finality_update"
+	LightClientBootstrapTopic        = "/light_client_bootstrap"
+	LightClientUpdatesByRangeTopic   = "/light_client_updates_by_range"
+)
 
-const DataColumnSidecarsByRangeTopic = "/data_column_sidecars_by_range"
-const DataColumnSidecarsByRootTopic = "/data_column_sidecars_by_root"
+const (
+	DataColumnSidecarsByRangeTopic = "/data_column_sidecars_by_range"
+	DataColumnSidecarsByRootTopic  = "/data_column_sidecars_by_root"
+)
 
-const ExecutionPayloadEnvelopesByRangeTopic = "/execution_payload_envelopes_by_range"
-const ExecutionPayloadEnvelopesByRootTopic = "/execution_payload_envelopes_by_root"
+const (
+	ExecutionPayloadEnvelopesByRangeTopic = "/execution_payload_envelopes_by_range"
+	ExecutionPayloadEnvelopesByRootTopic  = "/execution_payload_envelopes_by_root"
+)
 
 // Request and Response protocol ids
 var (

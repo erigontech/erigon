@@ -75,7 +75,8 @@ func (me *slogHandler) attrsToCtx(r slog.Record) (ret []any) {
 func (me *slogHandler) WithAttrs(attrs []slog.Attr) slog.Handler {
 	ret := *me
 	high := len(me.attrs)
-	ret.attrs = append(me.attrs[:high:high], attrs...)
+	ret.attrs = me.attrs[:high:high]
+	ret.attrs = append(ret.attrs, attrs...)
 	return &ret
 }
 

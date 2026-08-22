@@ -20,21 +20,20 @@ import (
 	"bytes"
 	"context"
 	"errors"
-	"math"
 
+	"google.golang.org/protobuf/proto"
 	"google.golang.org/protobuf/types/known/emptypb"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/services"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/builder"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/aa"
 	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -45,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/polygon/bridge"
 )
 
 // EthBackendAPIVersion
@@ -65,8 +63,7 @@ type EthBackendServer struct {
 	eth                   EthBackend
 	notifications         *shards.Notifications
 	db                    kv.TemporalRoDB
-	blockReader           services.FullBlockReader
-	bridgeStore           bridge.Store
+	blockReader           dbservices.FullBlockReader
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
 	logsFilter     *LogsFilterAggregator
@@ -88,8 +85,8 @@ type EthBackend interface {
 	SetHead(ctx context.Context, targetBlock uint64) error
 }
 
-func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader services.FullBlockReader,
-	bridgeStore bridge.Store, logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
+func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader dbservices.FullBlockReader,
+	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
 	s := &EthBackendServer{
 		ctx:                   ctx,
@@ -97,7 +94,6 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB
 		notifications:         notifications,
 		db:                    db,
 		blockReader:           blockReader,
-		bridgeStore:           bridgeStore,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
 		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events),
 		logger:                logger,
@@ -157,55 +153,12 @@ func (s *EthBackendServer) Version(context.Context, *emptypb.Empty) (*typesproto
 }
 
 func (s *EthBackendServer) Syncing(ctx context.Context, _ *emptypb.Empty) (*remoteproto.SyncingReply, error) {
-	highestBlock := s.notifications.LastNewBlockSeen.Load()
-	frozenBlocks := s.blockReader.FrozenBlocks()
-
 	tx, err := s.db.BeginRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
-
-	currentBlock, err := stages.GetStageProgress(tx, stages.Execution)
-	if err != nil {
-		return nil, err
-	}
-
-	if highestBlock < frozenBlocks {
-		highestBlock = frozenBlocks
-	}
-
-	reply := &remoteproto.SyncingReply{
-		CurrentBlock:     currentBlock,
-		FrozenBlocks:     frozenBlocks,
-		LastNewBlockSeen: highestBlock,
-		Syncing:          true,
-	}
-
-	// Maybe it is still downloading snapshots. Impossible to determine the highest block.
-	if highestBlock == 0 {
-		return reply, nil
-	}
-
-	// If the distance between the current block and the highest block is less than the reorg range, we are not syncing. abs(highestBlock - currentBlock) < reorgRange
-	reorgRange := 8
-	if math.Abs(float64(highestBlock)-float64(currentBlock)) < float64(reorgRange) {
-		reply.Syncing = false
-		return reply, nil
-	}
-
-	reply.Stages = make([]*remoteproto.SyncingReply_StageProgress, len(stages.AllStages))
-	for i, stage := range stages.AllStages {
-		progress, err := stages.GetStageProgress(tx, stage)
-		if err != nil {
-			return nil, err
-		}
-		reply.Stages[i] = &remoteproto.SyncingReply_StageProgress{}
-		reply.Stages[i].StageName = string(stage)
-		reply.Stages[i].BlockNumber = progress
-	}
-
-	return reply, nil
+	return s.notifications.BuildSyncingReply(tx, s.blockReader.FrozenBlocks())
 }
 
 func (s *EthBackendServer) PendingBlock(ctx context.Context, _ *emptypb.Empty) (*remoteproto.PendingBlockReply, error) {
@@ -265,6 +218,17 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 	defer clean()
 	newSnCh, newSnClean := s.notifications.Events.AddNewSnapshotSubscription()
 	defer newSnClean()
+	seedTx, err := s.db.BeginRo(subscribeServer.Context())
+	if err != nil {
+		return err
+	}
+	defer seedTx.Rollback()
+	syncStateCh, syncSeed, syncStateClean, err := s.notifications.SubscribeSyncState(seedTx, s.blockReader.FrozenBlocks())
+	seedTx.Rollback()
+	if err != nil {
+		return err
+	}
+	defer syncStateClean()
 	defer func() {
 		if err != nil {
 			if !errors.Is(err, context.Canceled) {
@@ -273,6 +237,17 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 		}
 	}()
 	_ = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT})
+	// A fresh stream missed any SYNCING event published before it connected,
+	// and an unchanged state is never re-published — send the seed so a
+	// transition during a connection gap is not lost forever. The seed is
+	// ordered against syncStateCh by construction.
+	seedData, err := proto.Marshal(syncSeed)
+	if err != nil {
+		return err
+	}
+	if err := subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: seedData}); err != nil {
+		return err
+	}
 	for {
 		select {
 		case <-s.ctx.Done():
@@ -281,7 +256,7 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 			return subscribeServer.Context().Err()
 		case headersRlp := <-ch:
 			for _, headerRlp := range headersRlp {
-				if err = subscribeServer.Send(&remoteproto.SubscribeReply{
+				if err := subscribeServer.Send(&remoteproto.SubscribeReply{
 					Type: remoteproto.Event_HEADER,
 					Data: headerRlp,
 				}); err != nil {
@@ -289,7 +264,15 @@ func (s *EthBackendServer) Subscribe(r *remoteproto.SubscribeRequest, subscribeS
 				}
 			}
 		case <-newSnCh:
-			if err = subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT}); err != nil {
+			if err := subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_NEW_SNAPSHOT}); err != nil {
+				return err
+			}
+		case syncState := <-syncStateCh:
+			data, err := proto.Marshal(syncState)
+			if err != nil {
+				return err
+			}
+			if err := subscribeServer.Send(&remoteproto.SubscribeReply{Type: remoteproto.Event_SYNCING, Data: data}); err != nil {
 				return err
 			}
 		}
@@ -471,45 +454,6 @@ func (s *EthBackendServer) SubscribeReceipts(server remoteproto.ETHBACKEND_Subsc
 	return errors.New("no receipts filter available")
 }
 
-func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remoteproto.BorTxnLookupRequest) (*remoteproto.BorTxnLookupReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	blockNum, ok, err := s.bridgeStore.EventTxnToBlockNum(ctx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
-	if err != nil {
-		return nil, err
-	}
-	return &remoteproto.BorTxnLookupReply{
-		BlockNumber: blockNum,
-		Present:     ok,
-	}, nil
-}
-
-func (s *EthBackendServer) BorEvents(ctx context.Context, req *remoteproto.BorEventsRequest) (*remoteproto.BorEventsReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	events, err := s.bridgeStore.EventsByBlock(ctx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	eventsRaw := make([][]byte, len(events))
-	for i, event := range events {
-		eventsRaw[i] = event
-	}
-
-	return &remoteproto.BorEventsReply{
-		EventRlps: eventsRaw,
-	}, nil
-}
-
 func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AAValidationRequest) (*remoteproto.AAValidationReply, error) {
 	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -552,7 +496,11 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 		return nil, err
 	}
 
-	totalGasLimit := preTxCost + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
+	totalGasLimit, ok := aaTxn.TotalGasLimit(preTxCost)
+	if !ok {
+		log.Info("RIP-7560 validation err", "err", "gas limits sum overflows uint64")
+		return &remoteproto.AAValidationReply{Valid: false}, nil
+	}
 	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(protocol.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
 	if err != nil {
 		log.Info("RIP-7560 validation err", "err", err.Error())

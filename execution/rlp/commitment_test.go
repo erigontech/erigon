@@ -23,7 +23,7 @@ import (
 
 func TestFastDoubleRlpForByteArrays(t *testing.T) {
 	t.Parallel()
-	for i := 0; i < 256; i++ {
+	for i := range 256 {
 		doTestWithByte(t, byte(i), 1)
 	}
 	doTestWithByte(t, 0x0, 10_000)
@@ -37,7 +37,7 @@ func doTestWithByte(t *testing.T, b byte, iterations int) {
 	var prefixBuf [8]byte
 	buffer := new(bytes.Buffer)
 
-	for i := 0; i < iterations; i++ {
+	for range iterations {
 		buffer.WriteByte(b)
 		source := buffer.Bytes()
 

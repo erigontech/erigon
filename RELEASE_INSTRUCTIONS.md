@@ -11,14 +11,6 @@ In the file `db/kv/remotedbserver/remotedbserver.go` there is variable `KvServic
 database schema, leading to data migrations.
 In most cases, it is enough to bump minor version. It is best to change both DB schema version and remote KV version together.
 
-## Compact the state domains if a regeneration is done
-
-If a regeneration is done, the state domains need to be compacted. This can be done by running the following command:
-````
-make integration
-./build/bin/integration compact_domains --datadir=<path to datadir> --replace-in-datadir
-````
-
 ## Update app.go
 
 After a release branch has been created, update `db/version/app.go`.

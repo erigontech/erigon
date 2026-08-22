@@ -2,7 +2,9 @@
  * Erigon brand colors — light and dark theme.
  * Primary: #EF7716 (Erigon Orange), Hover: #D4660F
  * Light bg: #FFFFFF, Dark bg: #0A0A0A
- * Fonts: Montserrat ExtraBold (headings), Nunito Sans (body)
+ * Fonts: Montserrat ExtraBold (headings), Nunito Sans (body),
+ *        Quantify 700 (brand wordmark — navbar title + footer brand, see
+ *        docusaurus-design-spec.md §7 Font Roles)
  */
 
 @font-face {
@@ -33,6 +35,14 @@
   font-family: 'Nunito Sans';
   src: url('/fonts/NunitoSans-ExtraBold.woff2') format('woff2');
   font-weight: 800;
+  font-style: normal;
+  font-display: swap;
+}
+
+@font-face {
+  font-family: 'Quantify';
+  src: url('/fonts/Quantify.woff2') format('woff2');
+  font-weight: 700;
   font-style: normal;
   font-display: swap;
 }
@@ -214,8 +224,8 @@ html {
 }
 .navbar__title {
   color: var(--ifm-navbar-link-color);
-  font-family: 'Montserrat', sans-serif;
-  font-weight: 800;
+  font-family: 'Quantify', sans-serif;
+  font-weight: 700;
   letter-spacing: 0.04em;
 }
 .navbar .clean-btn {

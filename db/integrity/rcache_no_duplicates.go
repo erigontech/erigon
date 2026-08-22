@@ -10,12 +10,12 @@ import (
 
 	"github.com/erigontech/erigon/common/estimate"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
-	"github.com/erigontech/erigon/db/services"
 )
 
-func CheckRCacheNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func CheckRCacheNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
 	defer func() {
 		log.Info("[integrity] RCacheNoDups: done", "err", err)
 	}()
@@ -47,7 +47,7 @@ func CheckRCacheNoDups(ctx context.Context, sc SamplerCfg, db kv.TemporalRoDB, b
 	return parallelChunkCheck(ctx, sc.NewSampler(), fromBlock, toBlock, db, blockReader, failFast, string(RCacheNoDups), RCacheNoDupsRange)
 }
 
-func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) (err error) {
+func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) (err error) {
 	if fromBlock > toBlock {
 		panic(fmt.Sprintf("fromBlock(%d) > toBlock(%d)", fromBlock, toBlock))
 	}
@@ -135,9 +135,9 @@ func RCacheNoDupsRange(ctx context.Context, fromBlock, toBlock uint64, db kv.Tem
 	return nil
 }
 
-type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool) error
+type chunkFn func(ctx context.Context, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool) error
 
-func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader services.FullBlockReader, failFast bool, prefix string, fn chunkFn) (err error) {
+func parallelChunkCheck(ctx context.Context, sampler *Sampler, fromBlock, toBlock uint64, db kv.TemporalRoDB, blockReader dbservices.FullBlockReader, failFast bool, prefix string, fn chunkFn) (err error) {
 	blockRange := toBlock - fromBlock + 1
 	if blockRange == 0 {
 		return nil

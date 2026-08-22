@@ -63,7 +63,7 @@ func TestEncodingCycle(t *testing.T) {
 func testEncodingCycle(data []byte) error {
 	proc, err := bitsetDecodeBytes(bitsetEncodeBytes(data), len(data))
 	if err != nil {
-		return fmt.Errorf("failed to decompress compressed data: %v", err)
+		return fmt.Errorf("failed to decompress compressed data: %w", err)
 	}
 	if !bytes.Equal(data, proc) {
 		return fmt.Errorf("compress/decompress mismatch: have %x, want %x", proc, data)
@@ -178,7 +178,7 @@ func benchmarkEncoding(b *testing.B, bytes int, fill float64) {
 	data := make([]byte, bytes)
 	bits := int(float64(bytes) * 8 * fill)
 
-	for i := 0; i < bits; i++ {
+	for range bits {
 		idx := random.Int63() % int64(len(data))
 		bit := uint(random.Int63() % 8)
 		data[idx] |= 1 << bit

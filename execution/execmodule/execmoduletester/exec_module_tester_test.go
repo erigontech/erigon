@@ -26,10 +26,19 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 )
 
+// CLI usage (e.g. evm blocktest via BlockTest.RunCLI) constructs the tester with
+// a nil testing.TB and owns its lifecycle. New must not dereference tb.
+func TestNewWithNilTB(t *testing.T) {
+	t.Parallel()
+	m := execmoduletester.New(nil)
+	require.NotNil(t, m)
+	m.Close()
+}
+
 func TestInsertChain(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 100, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(100, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(t, err)
@@ -40,7 +49,7 @@ func TestInsertChain(t *testing.T) {
 func TestReorgsWithInsertChain(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t)
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
+	chain, err := m.GenerateChain(10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(t, err)
@@ -48,16 +57,16 @@ func TestReorgsWithInsertChain(t *testing.T) {
 	err = m.InsertChain(chain)
 	require.NoError(t, err)
 	// Now generate three competing branches, one short and two longer ones
-	short, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	short, err := m.GenerateChainFrom(chain.TopBlock, 2, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(t, err)
-	long1, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 10, func(i int, b *blockgen.BlockGen) {
+	long1, err := m.GenerateChainFrom(chain.TopBlock, 10, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{2}) // Need to make headers different from short branch
 	})
 	require.NoError(t, err)
 	// Second long chain needs to be slightly shorter than the first long chain
-	long2, err := blockgen.GenerateChain(m.ChainConfig, chain.TopBlock, m.Engine, m.DB, 9, func(i int, b *blockgen.BlockGen) {
+	long2, err := m.GenerateChainFrom(chain.TopBlock, 9, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{3}) // Need to make headers different from short branch and another long branch
 	})
 	require.NoError(t, err)
@@ -68,7 +77,7 @@ func TestReorgsWithInsertChain(t *testing.T) {
 	err = m.InsertChain(long1)
 	require.NoError(t, err)
 	// another short chain
-	short2, err := blockgen.GenerateChain(m.ChainConfig, long1.TopBlock, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+	short2, err := m.GenerateChainFrom(long1.TopBlock, 2, func(i int, b *blockgen.BlockGen) {
 		b.SetCoinbase(common.Address{1})
 	})
 	require.NoError(t, err)

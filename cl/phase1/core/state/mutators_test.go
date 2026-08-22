@@ -33,7 +33,7 @@ const (
 func getTestStateBalances(t *testing.T) *state2.CachingBeaconState {
 	numVals := uint64(2048)
 	b := state2.New(&clparams.MainnetBeaconConfig)
-	for i := uint64(0); i < numVals; i++ {
+	for i := range numVals {
 		v := solid.NewValidator()
 		v.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 		b.AddValidator(v, i)
@@ -89,7 +89,6 @@ func TestDecreaseBalance(t *testing.T) {
 }
 
 func TestInitiatieValidatorExit(t *testing.T) {
-
 	v1 := solid.NewValidator()
 	v1.SetExitEpoch(clparams.MainnetBeaconConfig.FarFutureEpoch)
 	v1.SetActivationEpoch(0)

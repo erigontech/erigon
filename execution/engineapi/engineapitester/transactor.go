@@ -25,6 +25,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/requests"
@@ -74,11 +75,15 @@ func (t Transactor) CreateSimpleTransfer(
 	}
 
 	gasPriceU256, _ := uint256.FromBig(gasPrice)
+	gasLimit, err := t.rpcApiClient.EstimateGas(bind.CallMsg{From: fromAddr, To: &to, Value: amountU256}, requests.BlockNumbers.Pending)
+	if err != nil {
+		return nil, fmt.Errorf("failed to estimate gas: %w", err)
+	}
 	nonce := txnCount.Uint64()
 	txn := &types.LegacyTx{
 		CommonTx: types.CommonTx{
 			Nonce:    nonce,
-			GasLimit: 21_000,
+			GasLimit: gasLimit,
 			To:       &to,
 			Value:    *amountU256,
 		},

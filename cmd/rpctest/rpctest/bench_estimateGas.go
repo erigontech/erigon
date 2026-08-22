@@ -57,9 +57,10 @@ func BenchEthEstimateGas(erigonURL, gethURL string, needCompare bool, blockFrom,
 			continue
 		}
 
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 
-			nTransactions = nTransactions + 1
+			nTransactions++
 
 			var request string
 			request = reqGen.ethEstimateGas(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input)

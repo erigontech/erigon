@@ -136,7 +136,8 @@ func BenchDebugTraceTransaction(erigonUrl, gethUrl string, needCompare bool, blo
 			continue
 		}
 
-		for idx, txn := range b.Result.Transactions {
+		for idx := range b.Result.Transactions {
+			txn := &b.Result.Transactions[idx]
 			if idx%30 != 0 {
 				continue
 			}
@@ -174,17 +175,11 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 
 	reqGen := &RequestGenerator{}
 
-	var res CallResult
-
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
 
 	var nBlocks = 0
 	var nTransactions = 0
@@ -198,7 +193,8 @@ func BenchDebugTraceCall(erigonURL, gethURL string, needCompare bool, blockFrom 
 		}
 		nBlocks++
 
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 			nTransactions++
 
 			request := reqGen.debugTraceCall(txn.From, txn.To, &txn.Gas, &txn.GasPrice, &txn.Value, txn.Input, bn-1)

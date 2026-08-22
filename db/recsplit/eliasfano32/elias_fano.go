@@ -27,13 +27,12 @@ import (
 	"unsafe"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/edsrzf/mmap-go"
-
-	"github.com/erigontech/erigon/db/recsplit/efcommon"
 
 	"github.com/erigontech/erigon/common/bitutil"
 	"github.com/erigontech/erigon/common/dir"
+	"github.com/erigontech/erigon/common/mmap"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/recsplit/efcommon"
 )
 
 // EliasFano algo overview https://www.antoniomallia.it/sorted-integers-compression-with-elias-fano-encoding.html
@@ -71,7 +70,7 @@ type EliasFano struct {
 // EliasFano so heap-backed EliasFano carries no extra overhead.
 type OffHeapBuilder struct {
 	*EliasFano
-	backingMmap mmap.MMap
+	backingMmap mmap.Rw
 	backingFile *os.File
 }
 
@@ -147,7 +146,7 @@ func NewEliasFanoOffHeap(count uint64, maxOffset uint64, tmpFilePath string) (_ 
 	if err := fallocate(f, sizeBytes); err != nil {
 		return nil, fmt.Errorf("pre-allocate ef tmp file: %w", err)
 	}
-	m, err := mmap.MapRegion(f, int(sizeBytes), mmap.RDWR, 0, 0)
+	m, err := mmap.OpenRw(f, int(sizeBytes))
 	if err != nil {
 		return nil, fmt.Errorf("mmap ef tmp file: %w", err)
 	}
@@ -229,8 +228,20 @@ func (ef *EliasFano) ResetForWrite(count, maxOffset uint64) {
 	clear(ef.data)
 }
 
-// Build construct Elias Fano index for a given sequences
+const jumpOffsetOverflowMsg = "eliasfano32: superQ-block span exceeds the 32-bit jump offset"
+
+// Build constructs the Elias-Fano jump table; it panics if the sequence is too
+// sparse for the 32-bit jump offsets (unreachable for any realistic universe).
 func (ef *EliasFano) Build() {
+	if !ef.build() {
+		panic(jumpOffsetOverflowMsg)
+	}
+}
+
+// build fills the jump table, returning false (with the table left partial, so
+// the result must be discarded) when a jump offset exceeds 32 bits, so callers
+// can reject out-of-range sequences instead of panicking.
+func (ef *EliasFano) build() bool {
 	for i, c, lastSuperQ := uint64(0), uint64(0), uint64(0); i < uint64(ef.wordsUpperBits); i++ {
 		for word := ef.upperBits[i]; word != 0; word &= word - 1 { // iterate over set bits only; word &= word-1 clears the lowest set bit
 			b := uint64(bits.TrailingZeros64(word))
@@ -244,12 +255,9 @@ func (ef *EliasFano) Build() {
 				continue
 			}
 			// When c is multiple of 2^8 (256)
-			var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
-			// offset needs to be encoded as 16-bit integer, therefore the following check
-			if offset >= (1 << 32) {
-				fmt.Printf("ef.l=%x,ef.u=%x\n", ef.l, ef.u)
-				fmt.Printf("offset=%x,lastSuperQ=%x,i=%x,b=%x,c=%x\n", offset, lastSuperQ, i, b, c)
-				panic("")
+			offset := i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
+			if offset >= (1 << 32) {        // must fit the 32-bit jump slot
+				return false
 			}
 			// c % superQ is the bit index inside the group of 4096 bits
 			jumpSuperQ := (c / superQ) * superQSize
@@ -260,6 +268,7 @@ func (ef *EliasFano) Build() {
 			c++
 		}
 	}
+	return true
 }
 
 func (ef *EliasFano) get(i uint64) (val uint64, window uint64, sel int, currWord uint64, lower uint64) {
@@ -513,6 +522,11 @@ func (ef *EliasFano) Min() uint64 {
 
 func (ef *EliasFano) Count() uint64 {
 	return ef.count + 1
+}
+
+// AddedCount is the number of AddOffset calls so far (build-time position).
+func (ef *EliasFano) AddedCount() uint64 {
+	return ef.i
 }
 
 func (ef *EliasFano) Iterator() *EliasFanoIter {
@@ -860,9 +874,17 @@ func (ef *DoubleEliasFano) deriveFields() (int, int) {
 	return r.WordsCumKeys, r.WordsPosition
 }
 
-// Build construct double Elias Fano index for two given sequences
+// Build constructs the double Elias-Fano jump table; it panics if either
+// sequence is too sparse for the 32-bit jump offsets (unreachable in practice).
 func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
-	//fmt.Printf("cumKeys = %d\nposition = %d\n", cumKeys, position)
+	if !ef.build(cumKeys, position) {
+		panic(jumpOffsetOverflowMsg)
+	}
+}
+
+// build mirrors (*EliasFano).build: it returns false (jump table left partial)
+// on a jump offset exceeding 32 bits instead of panicking.
+func (ef *DoubleEliasFano) build(cumKeys []uint64, position []uint64) bool {
 	if len(cumKeys) != len(position) {
 		panic("len(cumKeys) != len(position)")
 	}
@@ -925,10 +947,9 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 			}
 			if (c & qMask) == 0 {
 				// When c is multiple of 2^8 (256)
-				var offset = i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
-				// offset needs to be encoded as 16-bit integer, therefore the following check
-				if offset >= (1 << 32) {
-					panic("")
+				offset := i*64 + b - lastSuperQ // offset can be either 0, 256, 512, 768, ..., up to 4096-256
+				if offset >= (1 << 32) {        // must fit the 32-bit jump slot
+					return false
 				}
 				// c % superQ is the bit index inside the group of 4096 bits
 				jumpSuperQ := (c / superQ) * (superQSize * 2)
@@ -950,9 +971,9 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 				ef.jump[(c/superQ)*(superQSize*2)+1] = lastSuperQ
 			}
 			if (c & qMask) == 0 {
-				var offset = i*64 + b - lastSuperQ
-				if offset >= (1 << 32) {
-					panic("")
+				offset := i*64 + b - lastSuperQ
+				if offset >= (1 << 32) { // must fit the 32-bit jump slot
+					return false
 				}
 				jumpSuperQ := (c / superQ) * (superQSize * 2)
 				jumpInsideSuperQ := 2*((c%superQ)/q) + 1
@@ -964,7 +985,7 @@ func (ef *DoubleEliasFano) Build(cumKeys []uint64, position []uint64) {
 			c++
 		}
 	}
-	//fmt.Printf("jump: %x\n", ef.jump)
+	return true
 }
 
 // setBits stores a value at bit position start.

@@ -11,7 +11,7 @@ import (
 func TestPendingELPayloadsDropOldestAtCap(t *testing.T) {
 	f := &ForkChoiceStore{}
 
-	for i := 0; i < maxPendingELPayloads+1; i++ {
+	for i := range maxPendingELPayloads + 1 {
 		f.addPendingELPayload(&cltypes.SignedBeaconBlock{
 			Block: &cltypes.BeaconBlock{Slot: uint64(i)},
 		}, nil)
@@ -26,7 +26,7 @@ func TestPendingELPayloadsDropOldestAtCap(t *testing.T) {
 func TestDrainPendingELPayloadsReleasesLargeBackingArray(t *testing.T) {
 	f := &ForkChoiceStore{}
 
-	for i := 0; i < pendingELPayloadsShrinkCap+1; i++ {
+	for range pendingELPayloadsShrinkCap + 1 {
 		f.addPendingELPayload(&cltypes.SignedBeaconBlock{}, nil)
 	}
 

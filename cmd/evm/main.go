@@ -21,11 +21,13 @@
 package main
 
 import (
+	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"os"
 
-	"github.com/urfave/cli/v2"
+	"github.com/urfave/cli/v3"
 
 	"github.com/erigontech/erigon/cmd/evm/internal/t8ntool"
 	"github.com/erigontech/erigon/cmd/utils/flags"
@@ -140,6 +142,10 @@ var (
 		Value: ".*",
 		Usage: "Run only those tests matching the regular expression.",
 	}
+	ExcludeFlag = cli.StringSliceFlag{
+		Name:  "exclude",
+		Usage: "Exclude tests whose fixture path or path::test identifier matches a regular expression.",
+	}
 	WorkersFlag = cli.Uint64Flag{
 		Name:  "workers",
 		Value: 1,
@@ -208,14 +214,18 @@ func init() {
 		&engineXTestCommand,
 		&zkevmTestCommand,
 		&stateTestCommand,
+		&rlpTestCommand,
+		&transactionTestCommand,
+		&difficultyTestCommand,
 		&stateTransitionCommand,
 	}
 }
 
 func main() {
-	if err := app.Run(os.Args); err != nil {
+	if err := app.Run(context.Background(), os.Args); err != nil {
 		code := 1
-		if ec, ok := err.(*t8ntool.NumberedError); ok {
+		var ec *t8ntool.NumberedError
+		if errors.As(err, &ec) {
 			code = ec.ExitCode()
 		}
 		_, printErr := fmt.Fprintln(os.Stderr, err)

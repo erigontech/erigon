@@ -253,11 +253,6 @@ func (s *StackStream) IsComplete() bool {
 	return len(s.stack) == 0
 }
 
-// CurrentDepth returns the current nesting depth
-func (s *StackStream) CurrentDepth() int {
-	return len(s.stack)
-}
-
 // StackSummary returns a summary of the current stack state for debugging
 func (s *StackStream) StackSummary() string {
 	if len(s.stack) == 0 {
@@ -280,44 +275,41 @@ func (s *StackStream) StackSummary() string {
 	return result.String()
 }
 
-// ClosePending properly closes all pending JSON elements on the stack to ensure validity even when an error occurs.
-// You can specify how many elements to skip from the end of the stack for cases when they are handled in the user code.
-// @param skipLast number of items to skip from the end of the stack
-func (s *StackStream) ClosePending(skipLast uint) error {
+// ClosePending closes all open JSON structures above targetDepth, leaving the first targetDepth
+// stack entries intact so subsequent writes continue inside that nesting level.
+func (s *StackStream) ClosePending(targetDepth uint) error {
 	stackLen := len(s.stack)
 	if stackLen == 0 {
 		return s.stream.Error
 	}
+	if targetDepth > uint(stackLen) {
+		targetDepth = uint(stackLen)
+	}
 
-	// Process the stack in reverse order
-	for i := stackLen - 1; i >= int(skipLast); i-- {
-		item := s.stack[i]
-
-		if item == ItemField {
+	for i := stackLen - 1; i >= int(targetDepth); i-- {
+		switch s.stack[i] {
+		case ItemField:
 			s.stream.WriteNil()
-		} else if item == ItemComma {
-			if i-1 < stackLen && s.stack[i-1] == ItemObject {
-				// The previous item is a JSON object: we must add a field after the comma to preserve format validity
+		case ItemComma:
+			if i > 0 && s.stack[i-1] == ItemObject {
+				// a trailing comma inside an object needs a placeholder field to stay valid
 				s.stream.WriteObjectField("")
 				s.stream.WriteString("")
 			} else {
-				// The previous item is a JSON array: write a nil value after the comma
 				s.stream.WriteNil()
 			}
-		} else if item == ItemArray {
-			// Close array
+		case ItemArray:
 			s.stream.WriteArrayEnd()
-		} else if item == ItemObject {
-			// Close object
+		case ItemObject:
 			s.stream.WriteObjectEnd()
 		}
 	}
 
-	s.stack = s.stack[:0]
-
-	// Return any error from the underlying stream
+	s.stack = s.stack[:targetDepth]
 	return s.stream.Error
 }
+
+func (s *StackStream) Depth() int { return len(s.stack) }
 
 // push adds an item to the stack
 func (s *StackStream) push(item stackItem) {

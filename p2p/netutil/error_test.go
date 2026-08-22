@@ -20,6 +20,7 @@
 package netutil
 
 import (
+	"errors"
 	"net"
 	"testing"
 	"time"
@@ -29,12 +30,14 @@ import (
 // errors that result from receiving a UDP packet larger
 // than the supplied receive buffer.
 func TestIsPacketTooBig(t *testing.T) {
-	listener, err := net.ListenPacket("udp", "127.0.0.1:0")
+	var lc net.ListenConfig
+	listener, err := lc.ListenPacket(t.Context(), "udp", "127.0.0.1:0")
 	if err != nil {
 		t.Fatal(err)
 	}
 	defer listener.Close()
-	sender, err := net.Dial("udp", listener.LocalAddr().String())
+	var dialer net.Dialer
+	sender, err := dialer.DialContext(t.Context(), "udp", listener.LocalAddr().String())
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -42,7 +45,7 @@ func TestIsPacketTooBig(t *testing.T) {
 
 	sendN := 1800
 	recvN := 300
-	for i := 0; i < 20; i++ {
+	for range 20 {
 		go func() {
 			buf := make([]byte, sendN)
 			for i := range buf {
@@ -55,7 +58,8 @@ func TestIsPacketTooBig(t *testing.T) {
 		listener.SetDeadline(time.Now().Add(1 * time.Second))
 		n, _, err := listener.ReadFrom(buf)
 		if err != nil {
-			if nerr, ok := err.(net.Error); ok && nerr.Timeout() {
+			var nerr net.Error
+			if errors.As(err, &nerr) && nerr.Timeout() {
 				continue
 			}
 			if !isPacketTooBig(err) {

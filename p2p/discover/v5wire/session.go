@@ -23,6 +23,7 @@ import (
 	"crypto/ecdsa"
 	crand "crypto/rand"
 	"encoding/binary"
+	"net/netip"
 	"time"
 
 	"github.com/erigontech/erigon/common/crypto"
@@ -49,7 +50,7 @@ type SessionCache struct {
 // sessionID identifies a session or handshake.
 type sessionID struct {
 	id   enode.ID
-	addr string
+	addr netip.AddrPort
 }
 
 // session contains session information
@@ -94,20 +95,20 @@ func (sc *SessionCache) nextNonce(s *session) (Nonce, error) {
 }
 
 // session returns the current session for the given node, if any.
-func (sc *SessionCache) session(id enode.ID, addr string) *session {
+func (sc *SessionCache) session(id enode.ID, addr netip.AddrPort) *session {
 	item, _ := sc.sessions.Get(sessionID{id, addr})
 	return item
 }
 
 // readKey returns the current read key for the given node.
-func (sc *SessionCache) readKey(id enode.ID, addr string) []byte {
+func (sc *SessionCache) readKey(id enode.ID, addr netip.AddrPort) []byte {
 	if s := sc.session(id, addr); s != nil {
 		return s.readKey
 	}
 	return nil
 }
 
-func (sc *SessionCache) readNode(id enode.ID, addr string) *enode.Node {
+func (sc *SessionCache) readNode(id enode.ID, addr netip.AddrPort) *enode.Node {
 	if s := sc.session(id, addr); s != nil {
 		return s.node
 	}
@@ -115,7 +116,7 @@ func (sc *SessionCache) readNode(id enode.ID, addr string) *enode.Node {
 }
 
 // storeNewSession stores new encryption keys in the cache.
-func (sc *SessionCache) storeNewSession(id enode.ID, addr string, s *session, n *enode.Node) {
+func (sc *SessionCache) storeNewSession(id enode.ID, addr netip.AddrPort, s *session, n *enode.Node) {
 	if n == nil {
 		panic("nil node in storeNewSession")
 	}
@@ -124,18 +125,18 @@ func (sc *SessionCache) storeNewSession(id enode.ID, addr string, s *session, n 
 }
 
 // getHandshake gets the handshake challenge we previously sent to the given remote node.
-func (sc *SessionCache) getHandshake(id enode.ID, addr string) *Whoareyou {
+func (sc *SessionCache) getHandshake(id enode.ID, addr netip.AddrPort) *Whoareyou {
 	return sc.handshakes[sessionID{id, addr}]
 }
 
 // storeSentHandshake stores the handshake challenge sent to the given remote node.
-func (sc *SessionCache) storeSentHandshake(id enode.ID, addr string, challenge *Whoareyou) {
+func (sc *SessionCache) storeSentHandshake(id enode.ID, addr netip.AddrPort, challenge *Whoareyou) {
 	challenge.sent = sc.clock.Now()
 	sc.handshakes[sessionID{id, addr}] = challenge
 }
 
 // deleteHandshake deletes handshake data for the given node.
-func (sc *SessionCache) deleteHandshake(id enode.ID, addr string) {
+func (sc *SessionCache) deleteHandshake(id enode.ID, addr netip.AddrPort) {
 	delete(sc.handshakes, sessionID{id, addr})
 }
 

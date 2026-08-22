@@ -103,8 +103,6 @@ func NewOracle(backend OracleBackend, params gaspricecfg.Config, cache Cache, hi
 		log.Warn("Sanitizing invalid gasprice oracle ignore price", "provided", params.IgnorePrice, "updated", ignorePrice)
 	}
 
-	setBorDefaultGpoIgnorePrice(backend.ChainConfig(), params, log)
-
 	return &Oracle{
 		backend:          backend,
 		maxPrice:         maxPrice,
@@ -228,8 +226,8 @@ func (oracle *Oracle) SuggestTipCap(ctx context.Context) (*uint256.Int, error) {
 func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64, count int) ([][]*uint256.Int, error) {
 	results := make([][]*uint256.Int, count)
 	var (
-		nextIdx uint64
-		seqOnce int32 // CAS flag: 0 = available, 1 = sequential mode claimed
+		nextIdx atomic.Uint64
+		seqOnce atomic.Int32 // CAS flag: 0 = available, 1 = sequential mode claimed
 	)
 	g, fetchCtx := errgroup.WithContext(ctx)
 	for range min(maxBlockFetchers, count) {
@@ -241,7 +239,7 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 			if localBackend == nil {
 				// Fork not supported: allow exactly one goroutine to proceed
 				// sequentially on the shared backend; the others exit.
-				if !atomic.CompareAndSwapInt32(&seqOnce, 0, 1) {
+				if !seqOnce.CompareAndSwap(0, 1) {
 					return nil
 				}
 				localBackend = oracle.backend
@@ -252,7 +250,7 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 				if err := fetchCtx.Err(); err != nil {
 					return err
 				}
-				idx := int(atomic.AddUint64(&nextIdx, 1)) - 1
+				idx := int(nextIdx.Add(1)) - 1
 				if idx >= count {
 					return nil
 				}
@@ -326,12 +324,4 @@ func (oracle *Oracle) getBlockPricesFromBackend(ctx context.Context, backend Ora
 		}
 	}
 	return nil
-}
-
-// setBorDefaultGpoIgnorePrice enforces gpo IgnorePrice to be equal to BorDefaultGpoIgnorePrice (25gwei by default)
-func setBorDefaultGpoIgnorePrice(chainConfig *chain.Config, gasPriceConfig gaspricecfg.Config, log log.Logger) {
-	if chainConfig.Bor != nil && gasPriceConfig.IgnorePrice != gaspricecfg.BorDefaultGpoIgnorePrice {
-		log.Warn("Sanitizing invalid bor gasprice oracle ignore price", "provided", gasPriceConfig.IgnorePrice, "updated", gaspricecfg.BorDefaultGpoIgnorePrice)
-		gasPriceConfig.IgnorePrice = gaspricecfg.BorDefaultGpoIgnorePrice
-	}
 }

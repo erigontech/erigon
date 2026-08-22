@@ -27,7 +27,6 @@ import (
 	"time"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/golang/snappy"
 	"go.uber.org/zap/buffer"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -40,11 +39,14 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/snappypool"
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
 
 const maxMessageLength = 18 * datasize.MB
+
+var errBlockForkSchemaSlotMismatch = errors.New("block schema fork disagrees with the fork implied by its slot")
 
 // blobSidecarRawBytes is the fixed SSZ size of a BlobSidecar (the blob dominates; fork-independent).
 func blobSidecarRawBytes() int { return (&cltypes.BlobSidecar{}).EncodingSizeSSZ() }
@@ -88,6 +90,10 @@ func NewBeaconRpcP2P(ctx context.Context, sentinel sentinelproto.SentinelClient,
 	return rpc
 }
 
+func (b *BeaconRpcP2P) MaxRequestPayloads() uint64 {
+	return b.beaconConfig.MaxRequestPayloadsLimit()
+}
+
 func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqData []byte, maxResponseBytes uint64) ([]*cltypes.SignedBeaconBlock, string, error) {
 	responses, pid, err := b.sendRequest(ctx, topic, reqData, maxResponseBytes)
 	if err != nil {
@@ -99,6 +105,10 @@ func (b *BeaconRpcP2P) sendBlocksRequest(ctx context.Context, topic string, reqD
 		responseChunk := cltypes.NewSignedBeaconBlock(b.beaconConfig, data.version)
 		if err := responseChunk.DecodeSSZ(data.raw, int(data.version)); err != nil {
 			return nil, pid, err
+		}
+		if !b.beaconConfig.ForkSchemaMatchesSlot(responseChunk.Block.Slot, responseChunk.Version()) {
+			b.BanPeer(pid)
+			return nil, pid, fmt.Errorf("%w: slot %d, decoded version %s", errBlockForkSchemaSlotMismatch, responseChunk.Block.Slot, responseChunk.Version())
 		}
 		responsePacket = append(responsePacket, responseChunk)
 	}
@@ -157,43 +167,16 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 	return ColumnSidecars, pid, nil
 }
 
-func (b *BeaconRpcP2P) SendColumnSidecarsByRangeReqV1(
-	ctx context.Context,
-	start, count uint64,
-	columns []uint64,
-) ([]*cltypes.DataColumnSidecar, string, error) {
-	req := &cltypes.ColumnSidecarsByRangeRequest{
-		StartSlot: start,
-		Count:     count,
-		Columns:   solid.NewUint64ListSSZ(int(b.beaconConfig.NumberOfColumns)),
-	}
-	for _, column := range columns {
-		req.Columns.Append(column)
-	}
-	var buffer buffer.Buffer
-	if err := ssz_snappy.EncodeAndWrite(&buffer, req); err != nil {
-		return nil, "", err
-	}
-
-	responsePacket, pid, err := b.sendRequest(ctx, communication.DataColumnSidecarsByRangeProtocolV1, buffer.Bytes(), communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), count*uint64(len(columns))))
-	if err != nil {
-		return nil, pid, err
-	}
-
-	ColumnSidecars := []*cltypes.DataColumnSidecar{}
-	for _, data := range responsePacket {
-		columnSidecar := &cltypes.DataColumnSidecar{}
-		if err := columnSidecar.DecodeSSZ(data.raw, int(data.version)); err != nil {
-			return nil, pid, err
-		}
-		ColumnSidecars = append(ColumnSidecars, columnSidecar)
-	}
-	return ColumnSidecars, pid, nil
-}
-
 // SendExecutionPayloadEnvelopesByRangeReq retrieves execution payload envelopes by slot range.
 // [New in Gloas:EIP7732]
 func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Context, start, count uint64) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+	maxRequestPayloads := b.MaxRequestPayloads()
+	if maxRequestPayloads == 0 {
+		return nil, "", errors.New("MAX_REQUEST_PAYLOADS is zero")
+	}
+	if count > maxRequestPayloads {
+		return nil, "", fmt.Errorf("execution payload envelopes by range count %d exceeds MAX_REQUEST_PAYLOADS %d", count, maxRequestPayloads)
+	}
 	var buf buffer.Buffer
 	if err := ssz_snappy.EncodeAndWrite(&buf, &cltypes.ExecutionPayloadEnvelopesByRangeRequest{
 		StartSlot: start,
@@ -223,7 +206,14 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 // SendExecutionPayloadEnvelopesByRootReq retrieves execution payload envelopes by block root.
 // [New in Gloas:EIP7732]
 func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Context, roots [][32]byte) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
-	var req solid.HashListSSZ = solid.NewHashList(int(b.beaconConfig.MaxRequestBlocksDeneb))
+	maxRequestPayloads := b.MaxRequestPayloads()
+	if maxRequestPayloads == 0 {
+		return nil, "", errors.New("MAX_REQUEST_PAYLOADS is zero")
+	}
+	if len(roots) > int(maxRequestPayloads) {
+		return nil, "", fmt.Errorf("execution payload envelopes by root count %d exceeds MAX_REQUEST_PAYLOADS %d", len(roots), maxRequestPayloads)
+	}
+	var req solid.HashListSSZ = solid.NewHashList(int(maxRequestPayloads))
 	for _, root := range roots {
 		req.Append(root)
 	}
@@ -353,8 +343,9 @@ type responseData struct {
 // parseResponseData parses the response data from a sentinel message and returns the parsed response data.
 func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([]responseData, string, error) {
 	if message.Error {
-		rd := snappy.NewReader(bytes.NewBuffer(message.Data))
+		rd := snappypool.Reader(bytes.NewReader(message.Data))
 		errBytes, _ := io.ReadAll(rd)
+		snappypool.PutReader(rd)
 		errMsg := string(errBytes)
 		log.Trace("received range req error", "err", errMsg, "raw", string(message.Data))
 		return nil, message.Peer.Pid, fmt.Errorf("peer error response: %s", errMsg)
@@ -362,6 +353,8 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 
 	responsePacket := []responseData{}
 	r := bytes.NewReader(message.Data)
+	sr := snappypool.Reader(r)
+	defer snappypool.PutReader(sr)
 	for {
 		forkDigest := make([]byte, 4)
 		if n, err := r.Read(forkDigest); err != nil {
@@ -385,7 +378,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 
 		// Read bytes using snappy into a new raw buffer of side encodedLn.
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(r)
+		sr.Reset(r)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])

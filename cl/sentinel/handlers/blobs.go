@@ -36,7 +36,6 @@ func (c *ConsensusHandlers) blobsSidecarsByRangeHandlerDeneb(s network.Stream) e
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByRangeHandler(s network.Stream, version clparams.StateVersion) error {
-
 	req := &cltypes.BlobsByRangeRequest{}
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err
@@ -112,7 +111,6 @@ func (c *ConsensusHandlers) blobsSidecarsByIdsHandlerDeneb(s network.Stream) err
 }
 
 func (c *ConsensusHandlers) blobsSidecarsByIdsHandler(s network.Stream, version clparams.StateVersion) error {
-
 	req := solid.NewStaticListSSZ[*cltypes.BlobIdentifier](40269, 40)
 	if err := ssz_snappy.DecodeAndReadNoForkDigest(s, req, version); err != nil {
 		return err

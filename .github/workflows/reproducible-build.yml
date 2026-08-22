@@ -8,6 +8,10 @@ defaults:
   run:
     shell: bash
 
+permissions:
+  contents: read
+  actions: write
+
 jobs:
   reproducible-build:
     strategy:
@@ -17,9 +21,12 @@ jobs:
           - macos-15
           - windows-2025
     runs-on: ${{ matrix.os }}
+    timeout-minutes: 60
 
     steps:
-      - uses: actions/checkout@v6
+      - uses: actions/checkout@v7
+        with:
+          persist-credentials: false
 
       - uses: ./.github/actions/setup-erigon
         id: erigon

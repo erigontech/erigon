@@ -21,6 +21,7 @@
 package types
 
 import (
+	"bytes"
 	"encoding/binary"
 	"errors"
 	"fmt"
@@ -605,6 +606,16 @@ func (h *Header) Size() common.StorageSize {
 	return s
 }
 
+// HasBAL reports whether the header contains an EIP-7928 block access list commitment.
+func (h *Header) HasBAL() bool {
+	return h.BlockAccessListHash != nil
+}
+
+// HasNonEmptyBAL reports whether the commitment is for a non-empty block access list.
+func (h *Header) HasNonEmptyBAL() bool {
+	return h.HasBAL() && *h.BlockAccessListHash != empty.BlockAccessListHash
+}
+
 // SanityCheck checks a few basic things -- these checks are way beyond what
 // any 'sane' production values should hold, and can mainly be used to prevent
 // that the unbounded fields are stuffed with junk data to add processing
@@ -711,7 +722,7 @@ func (b BaseTxnID) LastSystemTx(txAmount uint32) uint64 { return b.U64() + uint6
 // this structure does rlp decode only for
 // "tx related" data
 //
-// must use `rlp.DecodeBytesPartial` to decode
+// decode from bytes with `DecodeRLPBytes`, not `rlp.DecodeBytes`
 type BodyOnlyTxn struct {
 	BaseTxnID BaseTxnID
 	TxCount   uint32
@@ -723,15 +734,25 @@ func (b *BodyOnlyTxn) DecodeRLP(s *rlp.Stream) error {
 	if err != nil {
 		return err
 	}
-	// decode BaseTxId
-	if err = s.Decode(&b.BaseTxnID); err != nil {
-		return err
+	baseTxnID, err := s.Uint64()
+	if err != nil {
+		return fmt.Errorf("read BaseTxnID: %w", err)
 	}
-	// decode TxCount
-	if err = s.Decode(&b.TxCount); err != nil {
-		return err
+	txCount, err := s.Uint32()
+	if err != nil {
+		return fmt.Errorf("read TxCount: %w", err)
 	}
+	b.BaseTxnID, b.TxCount = BaseTxnID(baseTxnID), txCount
 	return nil
+}
+
+// DecodeRLPBytes reads only the leading txn fields, so rlp.DecodeBytes would reject
+// the unread tail. Going through DecodeRLP directly also skips a reflect dispatch
+// that costs more than the decode itself.
+func (b *BodyOnlyTxn) DecodeRLPBytes(buf []byte) error {
+	s := rlp.NewBytesStream(buf)
+	defer rlp.PutStream(s)
+	return b.DecodeRLP(s)
 }
 
 type BodyForStorage struct {
@@ -745,9 +766,6 @@ type BodyForStorage struct {
 type RawBlock struct {
 	Header *Header
 	Body   *RawBody
-	// BlockAccessList holds the RLP-encoded block access list for Amsterdam+
-	// blocks.  Nil for pre-Amsterdam blocks.
-	BlockAccessList []byte
 }
 
 func (r RawBlock) EncodingSize() int {
@@ -802,6 +820,10 @@ type Block struct {
 	uncles       []*Header
 	transactions Transactions
 	withdrawals  []*Withdrawal
+
+	// bal is the EIP-7928 sidecar. The header carries its commitment; the
+	// sidecar itself is not part of the block's RLP encoding or hash.
+	bal *BlockAccessListSidecar
 
 	// binaryTransactions optionally caches the transactions' encodings (e.g. from
 	// an engine_newPayload payload) so RawBody() can skip re-encoding them.
@@ -907,7 +929,7 @@ func (rb *RawBody) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 	// end of Transactions
-	if err = s.ListEnd(); err != nil {
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
 	// decode Uncles
@@ -981,19 +1003,18 @@ func (bfs *BodyForStorage) DecodeRLP(s *rlp.Stream) error {
 		return err
 	}
 
-	// decode BaseTxId
-	if err = s.Decode(&bfs.BaseTxnID); err != nil {
-		return err
+	baseTxnID, err := s.Uint64()
+	if err != nil {
+		return fmt.Errorf("read BaseTxnID: %w", err)
 	}
-	// decode TxCount
-	if err = s.Decode(&bfs.TxCount); err != nil {
-		return err
+	txCount, err := s.Uint32()
+	if err != nil {
+		return fmt.Errorf("read TxCount: %w", err)
 	}
-	// decode Uncles
+	bfs.BaseTxnID, bfs.TxCount = BaseTxnID(baseTxnID), txCount
 	if err := decodeUncles(&bfs.Uncles, s); err != nil {
 		return err
 	}
-	// decode Withdrawals
 	bfs.Withdrawals = []*Withdrawal{}
 	if err := decodeWithdrawals(&bfs.Withdrawals, s); err != nil {
 		return err
@@ -1072,14 +1093,14 @@ func (bb *Body) DecodeRLP(s *rlp.Stream) error {
 	return s.ListEnd()
 }
 
-// NewBlock creates a new block. The input data is copied,
-// changes to header and to the field values will not affect the block.
+// NewBlock creates a new block. Header and body inputs are copied, while the
+// immutable BAL sidecar is retained.
 //
 // The values of TxHash, UncleHash, ReceiptHash, Bloom, and WithdrawalHash
 // in the header are ignored and set to the values derived from
 // the given txs, uncles, receipts, and withdrawals.
-func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
-	b := &Block{header: CopyHeader(header)}
+func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, bal *BlockAccessListSidecar) *Block {
+	b := &Block{header: CopyHeader(header), bal: bal}
 
 	// TODO: panic if len(txs) != len(receipts)
 	if len(txs) == 0 {
@@ -1108,12 +1129,13 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 		}
 	}
 
-	if withdrawals == nil {
+	switch {
+	case withdrawals == nil:
 		b.header.WithdrawalsHash = nil
-	} else if len(withdrawals) == 0 {
+	case len(withdrawals) == 0:
 		b.header.WithdrawalsHash = &empty.WithdrawalsHash
 		b.withdrawals = make(Withdrawals, len(withdrawals))
-	} else {
+	default:
 		h := DeriveSha(Withdrawals(withdrawals))
 		b.header.WithdrawalsHash = &h
 		b.withdrawals = make(Withdrawals, len(withdrawals))
@@ -1129,43 +1151,44 @@ func NewBlock(header *Header, txs []Transaction, uncles []*Header, receipts []*R
 }
 
 // NewBlockForAsembling - creating new block - which allow mutation of fileds. Use it for block-assembly
-func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal) *Block {
-	b := NewBlock(header, txs, uncles, receipts, withdrawals)
+func NewBlockForAsembling(header *Header, txs []Transaction, uncles []*Header, receipts []*Receipt, withdrawals []*Withdrawal, bal *BlockAccessListSidecar) *Block {
+	b := NewBlock(header, txs, uncles, receipts, withdrawals, bal)
 	b.header.mutable = true
 	return b
 }
 
 // NewBlockFromStorage like NewBlock but used to create Block object when read it from DB
 // in this case no reason to copy parts, or re-calculate headers fields - they are all stored in DB
-func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal) *Block {
+func NewBlockFromStorage(hash common.Hash, header *Header, txs []Transaction, uncles []*Header, withdrawals []*Withdrawal, bal *BlockAccessListSidecar) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals}
+	b := &Block{header: header, transactions: txs, uncles: uncles, withdrawals: withdrawals, bal: bal}
 	return b
 }
 
 // NewBlockFromStorageWithBinaryTxs is NewBlockFromStorage with a binaryTxs cache
 // (its length must match txs) that lets RawBody() skip re-encoding the transactions.
-func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal) *Block {
+func NewBlockFromStorageWithBinaryTxs(hash common.Hash, header *Header, txs []Transaction, binaryTxs BinaryTransactions, uncles []*Header, withdrawals []*Withdrawal, bal *BlockAccessListSidecar) *Block {
 	header.hash.Store(&hash)
-	b := &Block{header: header, transactions: txs, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals}
+	b := &Block{header: header, transactions: txs, binaryTransactions: binaryTxs, uncles: uncles, withdrawals: withdrawals, bal: bal}
 	return b
 }
 
 // NewBlockWithHeader creates a block with the given header data. The
 // header data is copied, changes to header and to the field values
 // will not affect the block.
-func NewBlockWithHeader(header *Header) *Block {
-	return &Block{header: CopyHeader(header)}
+func NewBlockWithHeader(header *Header, bal *BlockAccessListSidecar) *Block {
+	return &Block{header: CopyHeader(header), bal: bal}
 }
 
 // NewBlockFromNetwork like NewBlock but used to create Block object when assembled from devp2p network messages
 // when there is no reason to copy parts, or re-calculate headers fields.
-func NewBlockFromNetwork(header *Header, body *Body) *Block {
+func NewBlockFromNetwork(header *Header, body *Body, bal *BlockAccessListSidecar) *Block {
 	b := &Block{
 		header:       header,
 		transactions: body.Transactions,
 		uncles:       body.Uncles,
 		withdrawals:  body.Withdrawals,
+		bal:          bal,
 	}
 	return b
 }
@@ -1243,7 +1266,7 @@ func (bb *Block) DecodeRLP(s *rlp.Stream) error {
 
 	// decode header
 	var h Header
-	if err = h.DecodeRLP(s); err != nil {
+	if err := h.DecodeRLP(s); err != nil {
 		return err
 	}
 	bb.header = &h
@@ -1352,7 +1375,7 @@ func (b *Block) ParentHash() common.Hash  { return b.header.ParentHash }
 func (b *Block) TxHash() common.Hash      { return b.header.TxHash }
 func (b *Block) ReceiptHash() common.Hash { return b.header.ReceiptHash }
 func (b *Block) UncleHash() common.Hash   { return b.header.UncleHash }
-func (b *Block) Extra() []byte            { return common.Copy(b.header.Extra) }
+func (b *Block) Extra() []byte            { return bytes.Clone(b.header.Extra) }
 func (b *Block) BaseFee() *uint256.Int {
 	if b.header.BaseFee == nil {
 		return nil
@@ -1364,6 +1387,12 @@ func (b *Block) Withdrawals() Withdrawals            { return b.withdrawals }
 func (b *Block) ParentBeaconBlockRoot() *common.Hash { return b.header.ParentBeaconBlockRoot }
 func (b *Block) RequestsHash() *common.Hash          { return b.header.RequestsHash }
 func (b *Block) BlockAccessListHash() *common.Hash   { return b.header.BlockAccessListHash }
+
+// BlockAccessList returns the decoded EIP-7928 BAL sidecar.
+func (b *Block) BlockAccessList() BlockAccessList { return b.bal.BlockAccessList() }
+
+// BlockAccessListSidecar returns the block's immutable EIP-7928 sidecar.
+func (b *Block) BlockAccessListSidecar() *BlockAccessListSidecar { return b.bal }
 
 // Header returns a deep-copy of the entire block header using CopyHeader()
 func (b *Block) Header() *Header       { return CopyHeader(b.header) }
@@ -1529,6 +1558,7 @@ func (b *Block) Copy() *Block {
 		uncles:       uncles,
 		transactions: CopyTxs(b.transactions),
 		withdrawals:  withdrawals,
+		bal:          b.bal.copy(),
 	}
 	szCopy := b.size.Load()
 	newB.size.Store(szCopy)
@@ -1546,7 +1576,22 @@ func (b *Block) WithSeal(header *Header) *Block {
 		transactions: b.transactions,
 		uncles:       b.uncles,
 		withdrawals:  b.withdrawals,
+		bal:          b.bal,
 	}
+}
+
+// WithBlockAccessListSidecar returns a block sharing b's immutable data with the supplied sidecar.
+func (b *Block) WithBlockAccessListSidecar(bal *BlockAccessListSidecar) *Block {
+	newB := &Block{
+		header:             b.header,
+		transactions:       b.transactions,
+		uncles:             b.uncles,
+		withdrawals:        b.withdrawals,
+		bal:                bal,
+		binaryTransactions: b.binaryTransactions,
+	}
+	newB.size.Store(b.size.Load())
+	return newB
 }
 
 // Hash returns the keccak256 hash of b's header.
@@ -1607,16 +1652,18 @@ func encodeRLPGeneric[T rlpEncodable](arr []T, _len int, w io.Writer, b []byte) 
 }
 
 func decodeTxns(appendList *[]Transaction, s *rlp.Stream) error {
-	var err error
-	if _, err = s.List(); err != nil {
+	if _, err := s.List(); err != nil {
 		return err
 	}
-	var txn Transaction
 	blobTxnsAreWrappedWithBlobs := false
-	for txn, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs); err == nil; txn, err = DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs) {
+	for s.MoreDataInList() {
+		txn, err := DecodeRLPTransaction(s, blobTxnsAreWrappedWithBlobs)
+		if err != nil {
+			return err
+		}
 		*appendList = append(*appendList, txn)
 	}
-	return checkErrListEnd(s, err)
+	return s.ListEnd()
 }
 
 func decodeUncles(appendList *[]*Header, s *rlp.Stream) error {
@@ -1654,10 +1701,13 @@ func decodeWithdrawals(appendList *[]*Withdrawal, s *rlp.Stream) error {
 }
 
 func checkErrListEnd(s *rlp.Stream, err error) error {
-	if !errors.Is(err, rlp.EOL) {
+	// Match the bare EOL sentinel only. A wrapped EOL (e.g. a nested decoder
+	// returning fmt.Errorf("...: %w", rlp.EOL) on malformed input) is a real
+	// error and must propagate, not be treated as a clean end-of-list.
+	if err != rlp.EOL { //nolint:errorlint // intentional bare sentinel check
 		return err
 	}
-	if err = s.ListEnd(); err != nil {
+	if err := s.ListEnd(); err != nil {
 		return err
 	}
 	return nil

@@ -1,7 +1,7 @@
 ---
 title: "Performance Tricks"
 description: "OS-level tuning, memory settings, and tips to maximize sync throughput."
-sidebar_position: 9
+sidebar_position: 13
 ---
 
 # Performance Tricks

@@ -102,8 +102,8 @@ func (a *LogsFilterAggregator) removeLogsFilter(filterId LogsSubID) bool {
 
 // hasLogsFilter checks if a log filter identified by filterId is present in the LogsFilterAggregator.
 func (a *LogsFilterAggregator) hasLogsFilter(filterId LogsSubID) bool {
-	a.logsFilterLock.Lock()
-	defer a.logsFilterLock.Unlock()
+	a.logsFilterLock.RLock()
+	defer a.logsFilterLock.RUnlock()
 
 	_, ok := a.logsFilters.Get(filterId)
 	return ok

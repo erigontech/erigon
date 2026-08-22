@@ -24,7 +24,6 @@ import (
 	"math"
 	"os"
 	"slices"
-	"sort"
 	"strings"
 	"testing"
 	"time"
@@ -42,19 +41,22 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/stream"
+	"github.com/erigontech/erigon/db/kv/stream/streamtest"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func testDbAndHistory(tb testing.TB, largeValues bool, logger log.Logger) (kv.RwDB, *History) {
 	tb.Helper()
 	dirs := datadir.New(tb.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(tb, dirs.Chaindata).MustOpen()
+	db := mdbxtest.InMem(tb, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).MustOpen()
 	tb.Cleanup(db.Close)
 
 	//TODO: tests will fail if set histCfg.Compression = CompressKeys | CompressValues
@@ -107,61 +109,66 @@ func TestHistoryCollationsAndBuilds(t *testing.T) {
 			require.NotEmptyf(t, collation.efHistoryPath, "collation.efHistoryPath is empty")
 			require.NotNil(t, collation.efHistoryComp)
 
-			sf, err := h.buildFiles(ctx, kv.Step(i/h.stepSize), collation, background.NewProgressSet())
-			collation.Close()
-			require.NoError(t, err)
-			require.NotNil(t, sf)
-			defer sf.CleanupOnError()
+			if err := func() error {
+				sf, err := h.buildFiles(ctx, kv.Step(i/h.stepSize), collation, background.NewProgressSet())
+				collation.Close()
+				require.NoError(t, err)
+				require.NotNil(t, sf)
+				defer sf.CleanupOnError()
 
-			compressedPageValuesCount := sf.historyDecomp.CompressedPageValuesCount()
+				compressedPageValuesCount := sf.historyDecomp.CompressedPageValuesCount()
 
-			if sf.historyDecomp.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
-				compressedPageValuesCount = h.HistoryValuesOnCompressedPage
-			}
-
-			efReader := h.InvertedIndex.dataReader(sf.efHistoryDecomp)
-			hReader := seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
-
-			// ef contains all sorted keys
-			// for each key it has a list of txNums
-			// h contains all values for all keys ordered by key + txNum
-
-			var keyBuf, valBuf, hValBuf []byte
-			seenKeys := make([]string, 0)
-			for efReader.HasNext() {
-				keyBuf, _ = efReader.Next(nil)
-				valBuf, _ = efReader.Next(nil)
-
-				ef := multiencseq.ReadMultiEncSeq(i, valBuf)
-				efIt := ef.Iterator(0)
-
-				require.Contains(t, values, string(keyBuf), "key not found in values")
-				seenKeys = append(seenKeys, string(keyBuf))
-
-				vi := 0
-				updates, ok := values[string(keyBuf)]
-				require.Truef(t, ok, "key not found in values")
-				//require.Len(t, updates, int(ef.Count()), "updates count mismatch")
-
-				for efIt.HasNext() {
-					txNum, err := efIt.Next()
-					require.NoError(t, err)
-					require.Equalf(t, updates[vi].txNum, txNum, "txNum mismatch")
-
-					require.Truef(t, hReader.HasNext(), "hReader has no more values")
-					hValBuf, _ = hReader.Next(nil)
-					if updates[vi].value == nil {
-						require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
-					} else {
-						require.Equalf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
-					}
-					vi++
+				if sf.historyDecomp.CompressionFormatVersion() == seg.FileCompressionFormatV0 {
+					compressedPageValuesCount = h.HistoryValuesOnCompressedPage
 				}
-				values[string(keyBuf)] = updates[vi:]
-				require.True(t, slices.IsSorted(seenKeys))
+
+				efReader := h.InvertedIndex.dataReader(sf.efHistoryDecomp)
+				hReader := seg.NewPagedReader(h.dataReader(sf.historyDecomp), compressedPageValuesCount, true)
+
+				// ef contains all sorted keys
+				// for each key it has a list of txNums
+				// h contains all values for all keys ordered by key + txNum
+
+				var keyBuf, valBuf, hValBuf []byte
+				seenKeys := make([]string, 0)
+				for efReader.HasNext() {
+					keyBuf, _ = efReader.Next(nil)
+					valBuf, _ = efReader.Next(nil)
+
+					ef := multiencseq.ReadMultiEncSeq(i, valBuf)
+					efIt := ef.Iterator(0)
+
+					require.Contains(t, values, string(keyBuf), "key not found in values")
+					seenKeys = append(seenKeys, string(keyBuf))
+
+					vi := 0
+					updates, ok := values[string(keyBuf)]
+					require.Truef(t, ok, "key not found in values")
+					//require.Len(t, updates, int(ef.Count()), "updates count mismatch")
+
+					for efIt.HasNext() {
+						txNum, err := efIt.Next()
+						require.NoError(t, err)
+						require.Equalf(t, updates[vi].txNum, txNum, "txNum mismatch")
+
+						require.Truef(t, hReader.HasNext(), "hReader has no more values")
+						hValBuf, _ = hReader.Next(nil)
+						if updates[vi].value == nil {
+							require.Emptyf(t, hValBuf, "value at %d is not empty (not nil)", vi)
+						} else {
+							require.Equalf(t, updates[vi].value, hValBuf, "value at %d mismatch", vi)
+						}
+						vi++
+					}
+					values[string(keyBuf)] = updates[vi:]
+					require.True(t, slices.IsSorted(seenKeys))
+				}
+				h.integrateDirtyFiles(sf, i, i+h.stepSize)
+				lastAggergatedTx = i + h.stepSize
+				return nil
+			}(); err != nil {
+				require.NoError(t, err)
 			}
-			h.integrateDirtyFiles(sf, i, i+h.stepSize)
-			lastAggergatedTx = i + h.stepSize
 		}
 
 		for _, updates := range values {
@@ -297,7 +304,7 @@ func TestHistoryCollationBuild(t *testing.T) {
 		var vi int
 		for i := 0; i < len(keyWords); i++ {
 			ints := intArrs[i]
-			for j := 0; j < len(ints); j++ {
+			for j := range ints {
 				var txKey [8]byte
 				binary.BigEndian.PutUint64(txKey[:], ints[j])
 				offset, ok := r.Lookup2(txKey[:], []byte(keyWords[i]))
@@ -569,7 +576,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			err = writer.AddPrevValue(append(addr, val...), i, prev)
 			require.NoError(err)
 
-			prev = common.Copy(val)
+			prev = bytes.Clone(val)
 		}
 
 		require.NoError(writer.Flush(ctx, tx))
@@ -597,7 +604,7 @@ func TestHistoryCanPrune(t *testing.T) {
 			maxTxInSnaps := hc.files.EndTxNum()
 			require.Equal(t, (stepsTotal-stepKeepInDB)*16, maxTxInSnaps)
 
-			for i := uint64(0); i < stepsTotal; i++ {
+			for i := range stepsTotal {
 				cp, untilTx := hc.canPruneUntil(rwTx, h.stepSize*(i+1))
 				require.GreaterOrEqual(t, h.stepSize*(stepsTotal-stepKeepInDB), untilTx)
 				if i >= stepsTotal-stepKeepInDB {
@@ -633,7 +640,7 @@ func TestHistoryCanPrune(t *testing.T) {
 		hc := h.beginForTests()
 		defer hc.Close()
 
-		for i := uint64(0); i < stepsTotal; i++ {
+		for i := range stepsTotal {
 			t.Logf("step %d, until %d", i, (i+1)*h.stepSize)
 
 			cp, untilTx := hc.canPruneUntil(rwTx, (i+1)*h.stepSize)
@@ -848,7 +855,7 @@ func filledHistoryValues(tb testing.TB, largeValues bool, values map[string][]up
 		var flusher flusher
 		var keyFlushCount = 0
 		for key, upds := range values {
-			for i := 0; i < len(upds); i++ {
+			for i := range upds {
 				err := writer.AddPrevValue([]byte(key), upds[i].txNum, upds[i].value)
 				require.NoError(tb, err)
 			}
@@ -1112,7 +1119,7 @@ func checkHistoryNoDuplicates(t *testing.T, hc *HistoryRoTx) {
 				"duplicate history entry for key %x: same value %x at txNum=%d and txNum=%d",
 				key, val, prev.txNum, txNum)
 		}
-		prevByKey[ks] = prevEntry{val: common.Copy(val), txNum: txNum}
+		prevByKey[ks] = prevEntry{val: bytes.Clone(val), txNum: txNum}
 	}
 }
 
@@ -1329,7 +1336,8 @@ func TestHistoryScanFiles(t *testing.T) {
 		// Recreate domain and re-scan the files
 		scanDirsRes, err := scanDirs(h.dirs)
 		require.NoError(err)
-		require.NoError(h.openFolder(scanDirsRes))
+		_, err = h.openFolder(t.Context(), scanDirsRes)
+		require.NoError(err)
 		// Check the history
 		checkHistoryHistory(t, h, txs)
 	}
@@ -1561,7 +1569,7 @@ func TestHistoryRange2(t *testing.T) {
 				defer idxItDesc.Close()
 				descArr, err := stream.ToArrayU64(idxItDesc)
 				require.NoError(err)
-				stream.ExpectEqualU64(t, idxIt, stream.ReverseArray(descArr))
+				streamtest.ExpectEqualU64(t, idxIt, stream.ReverseArray(descArr))
 			}
 
 			it, err := hc.HistoryRange(2, 20, order.Asc, -1, roTx)
@@ -1860,9 +1868,7 @@ func Test_HistoryIterate_VariousKeysLen(t *testing.T) {
 			//vals = append(vals, fmt.Sprintf("%x", v))
 		}
 
-		sort.Slice(writtenKeys, func(i, j int) bool {
-			return bytes.Compare(writtenKeys[i], writtenKeys[j]) < 0
-		})
+		slices.SortFunc(writtenKeys, bytes.Compare)
 
 		require.Equal(fmt.Sprintf("%#x", writtenKeys[0]), fmt.Sprintf("%#x", keys[0]))
 		require.Len(keys, len(writtenKeys))
@@ -1908,7 +1914,7 @@ func TestHistory_OpenFolder(t *testing.T) {
 
 	scanDirsRes, err := scanDirs(h.dirs)
 	require.NoError(t, err)
-	err = h.openFolder(scanDirsRes)
+	_, err = h.openFolder(t.Context(), scanDirsRes)
 	require.NoError(t, err)
 	h.Close()
 }
@@ -2525,6 +2531,63 @@ func BenchmarkRangeAsOf_MultiFile(b *testing.B) {
 	b.ReportAllocs()
 	for b.Loop() {
 		it, err := ic.RangeAsOf(ctx, checkTxNum, nil, nil, order.Asc, -1, tx)
+		require.NoError(b, err)
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(b, err)
+		}
+		it.Close()
+	}
+}
+
+func TestMaxHistoryValLen(t *testing.T) {
+	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t.TempDir()).
+		PageSize(ethconfig.DefaultChainDBPageSize).
+		WithTableCfg(func(kv.TableCfg) kv.TableCfg {
+			return kv.TableCfg{kv.TblAccountHistoryVals: kv.TableCfgItem{Flags: kv.DupSort}}
+		}).MustOpen()
+	defer db.Close()
+
+	// historyLargeValues=false stores txNum+value as one dupsort value
+	put := func(valLen int) error {
+		return db.Update(t.Context(), func(tx kv.RwTx) error {
+			return tx.Put(kv.TblAccountHistoryVals, []byte("key"), make([]byte, 8+valLen))
+		})
+	}
+	require.NoError(t, put(maxHistoryValLen))
+	require.Error(t, put(maxHistoryValLen+1))
+}
+
+// BenchmarkHistoryRangePaged walks merged (page-compressed) history files, which is
+// where PagedReader decodes a page per Reset. BenchmarkHistoryRange_MultiFile keeps
+// its files un-merged, so it never reaches that path.
+func BenchmarkHistoryRangePaged(b *testing.B) {
+	logger := log.New()
+	ctx := b.Context()
+
+	db, h, txs := filledHistory(b, true, logger)
+	collateAndMergeHistory(b, db, h, txs, true)
+
+	tx, err := db.BeginRo(ctx)
+	require.NoError(b, err)
+	defer tx.Rollback()
+
+	ic := h.beginForTests()
+	defer ic.Close()
+
+	paged := false
+	for _, f := range ic.files {
+		if f.src.decompressor.CompressedPageValuesCount() > 1 {
+			paged = true
+			break
+		}
+	}
+	require.True(b, paged, "bench must run against page-compressed .v files, else it does not touch PagedReader")
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		it, err := ic.HistoryRange(0, int(txs), order.Asc, -1, tx)
 		require.NoError(b, err)
 		for it.HasNext() {
 			_, _, err := it.Next()

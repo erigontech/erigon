@@ -139,7 +139,7 @@ func bindBlockReward(address common.Address, caller bind.ContractCaller, transac
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_BlockReward *BlockRewardRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_BlockReward *BlockRewardRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _BlockReward.Contract.BlockRewardCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -150,7 +150,7 @@ func (_BlockReward *BlockRewardRaw) Transfer(opts *bind.TransactOpts) (types.Tra
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_BlockReward *BlockRewardRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_BlockReward *BlockRewardRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _BlockReward.Contract.BlockRewardTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -158,7 +158,7 @@ func (_BlockReward *BlockRewardRaw) Transact(opts *bind.TransactOpts, method str
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_BlockReward *BlockRewardCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_BlockReward *BlockRewardCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _BlockReward.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -169,7 +169,7 @@ func (_BlockReward *BlockRewardTransactorRaw) Transfer(opts *bind.TransactOpts) 
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_BlockReward *BlockRewardTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_BlockReward *BlockRewardTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _BlockReward.Contract.contract.Transact(opts, method, params...)
 }
 

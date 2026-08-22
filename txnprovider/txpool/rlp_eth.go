@@ -141,7 +141,7 @@ func parseAnnouncements(payload []byte, pos int) ([]byte, []uint32, []byte, int,
 		return nil, nil, nil, pos, fmt.Errorf("parse announcement payload: sizesLen %d is beyond the end of payload", sizesLen)
 	}
 	sizes := make([]uint32, typesLen)
-	for i := 0; i < len(sizes); i++ {
+	for i := range sizes {
 		if pos, sizes[i], err = rlp.ParseU32(payload, pos); err != nil {
 			return nil, nil, nil, pos, err
 		}

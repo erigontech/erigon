@@ -17,19 +17,23 @@
 package beacon_indicies
 
 import (
+	"bytes"
 	"context"
 	"errors"
+	"math/rand"
 	"testing"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/persistence/format/snapshot_format"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 type errorCursor struct {
@@ -47,7 +51,7 @@ func (c errorCursor) Close()                                   {}
 
 func setupTestDB(t *testing.T) kv.RwDB {
 	// Create an in-memory SQLite DB for testing purposes
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	return db
 }
 
@@ -83,6 +87,34 @@ func TestWriteBlockRoot(t *testing.T) {
 	canonicalRoot, err = ReadCanonicalBlockRoot(tx, *retrievedSlot)
 	require.NoError(t, err)
 	require.Equal(t, common.Hash(blockRoot), canonicalRoot)
+}
+
+func TestWriteBeaconBlockStoresCompleteZstdFrame(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = 42
+	block.EncodingSizeSSZ()
+
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	require.NoError(t, WriteBeaconBlock(context.Background(), tx, block))
+
+	stored, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+	require.NoError(t, err)
+	require.NotEmpty(t, stored)
+
+	dec, err := zstd.NewReader(nil)
+	require.NoError(t, err)
+	defer dec.Close()
+	// DecodeAll reads the whole frame to EOF, so it fails on the unterminated frame
+	// a Flush()-only encoder leaves behind — pinning that WriteBeaconBlock closes it.
+	_, err = dec.DecodeAll(stored, nil)
+	require.NoError(t, err)
 }
 
 func TestReadParentBlockRoot(t *testing.T) {
@@ -200,7 +232,6 @@ func TestReadBeaconBlockHeader(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, headerRoot, blockRoot)
-
 }
 
 func TestWriteExecutionBlockNumber(t *testing.T) {
@@ -351,4 +382,64 @@ func TestHasMorePrunableBeaconBlocksReturnsCursorError(t *testing.T) {
 
 	require.False(t, hasMore)
 	require.ErrorIs(t, err, wantErr)
+}
+
+// See zstdWriterPool for why the output has to stay byte-identical.
+func TestWriteBeaconBlockMatchesReferenceEncoderOptions(t *testing.T) {
+	db := setupTestDB(t)
+	defer db.Close()
+	tx, err := db.BeginRw(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	block.Block.Slot = 42
+	block.EncodingSizeSSZ()
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, WriteBeaconBlock(context.Background(), tx, block))
+	stored, err := tx.GetOne(kv.BeaconBlocks, dbutils.BlockBodyKey(block.Block.Slot, blockRoot))
+	require.NoError(t, err)
+
+	var want bytes.Buffer
+	enc, err := zstd.NewWriter(&want, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	require.NoError(t, err)
+	_, err = snapshot_format.WriteBlockForSnapshot(enc, block, nil)
+	require.NoError(t, err)
+	require.NoError(t, enc.Close())
+
+	require.Equal(t, want.Bytes(), stored)
+}
+
+// Window and history options only start to change the output once a payload crosses
+// the 128KiB block size, which a single beacon block stays well below.
+func TestZstdWriterPoolMatchesReferenceEncoderOptionsOnLargePayload(t *testing.T) {
+	payload := make([]byte, 4<<20)
+	r := rand.New(rand.NewSource(1))
+	for i := range payload {
+		if i%23 == 0 {
+			payload[i] = byte(r.Intn(256))
+		} else {
+			payload[i] = byte(i % 251)
+		}
+	}
+
+	var want bytes.Buffer
+	ref, err := zstd.NewWriter(&want, zstd.WithEncoderLevel(zstd.SpeedBetterCompression))
+	require.NoError(t, err)
+	_, err = ref.Write(payload)
+	require.NoError(t, err)
+	require.NoError(t, ref.Close())
+
+	// Twice, so a pooled encoder also has to match after reuse.
+	for range 2 {
+		var got bytes.Buffer
+		enc := getZstdWriter(&got)
+		_, err = enc.Write(payload)
+		require.NoError(t, err)
+		require.NoError(t, enc.Close())
+		putZstdWriter(enc)
+		require.Equal(t, want.Bytes(), got.Bytes())
+	}
 }

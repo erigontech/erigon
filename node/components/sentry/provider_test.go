@@ -17,6 +17,7 @@
 package sentry
 
 import (
+	"context"
 	"net"
 	"path/filepath"
 	"testing"
@@ -180,13 +181,18 @@ func TestProviderClose_StopsSharedP2PServer(t *testing.T) {
 	require.NotNil(t, srv)
 
 	addr := srv.NodeInfo().ListenAddr
-	c, err := net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	var dialer net.Dialer
+	dialCtx, dialCancel := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	c, err := dialer.DialContext(dialCtx, "tcp", addr)
+	dialCancel()
 	require.NoError(t, err, "listener should be up before Close")
 	c.Close()
 
 	require.NoError(t, p.Close())
 	require.Nil(t, p.sharedP2PServer, "Close must clear the shared server reference")
 
-	_, err = net.DialTimeout("tcp", addr, 200*time.Millisecond)
+	dialCtx2, dialCancel2 := context.WithTimeout(t.Context(), 200*time.Millisecond)
+	_, err = dialer.DialContext(dialCtx2, "tcp", addr)
+	dialCancel2()
 	require.Error(t, err, "Provider.Close must shut the shared p2p.Server's listener down")
 }

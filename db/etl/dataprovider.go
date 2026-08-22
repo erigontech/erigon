@@ -17,21 +17,19 @@
 package etl
 
 import (
-	"bufio"
 	"encoding/binary"
 	"fmt"
 	"io"
 	"os"
 	"path/filepath"
-	"sync"
 	"sync/atomic"
 
-	"github.com/c2h5oh/datasize"
 	"golang.org/x/sync/errgroup"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/mmap"
+	"github.com/erigontech/erigon/db/bufiopool"
 )
 
 type dataProvider interface {
@@ -42,11 +40,10 @@ type dataProvider interface {
 }
 
 type fileDataProvider struct {
-	file        *os.File
-	mmapReader  *mmapBytesReader       // zero-copy reader over mmap'd data
-	mmapData    []byte                 // mmap'd file content
-	mmapHandle2 *[mmap.MaxMapSize]byte // pointer handle for cleanup
-	wg          *errgroup.Group
+	file       *os.File
+	mmapReader *mmapBytesReader // zero-copy reader over mmap'd data
+	mmapData   mmap.Ro          // mmap'd file content
+	wg         *errgroup.Group
 }
 
 // mmapBytesReader tracks position for reading from mmap'd data
@@ -101,37 +98,16 @@ func FlushToDisk(logPrefix string, b Buffer, tmpdir string, lvl log.Lvl) (dataPr
 	return provider, nil
 }
 
-var bufioWriterPool = sync.Pool{New: func() any { return bufio.NewWriterSize(nil, int(512*datasize.KB)) }}
-
-func getBufioWriter(w io.Writer) *bufio.Writer {
-	bw := bufioWriterPool.Get().(*bufio.Writer)
-	bw.Reset(w)
-	return bw
-}
-
-// Reset(nil) before Put is required: without it the pool entry retains a
-// reference to the underlying io.Writer/io.Reader, keeping it alive until the
-// next GC cycle or until the entry is reused — whichever comes first.
-func putBufioWriter(w *bufio.Writer) { w.Reset(nil); bufioWriterPool.Put(w) }
-
 func sortAndFlush(b Buffer, tmpdir string) (*os.File, error) {
 	b.Sort()
-
-	// if we are going to create files in the system temp dir, we don't need any
-	// subfolders.
-	if tmpdir != "" {
-		if err := os.MkdirAll(tmpdir, 0755); err != nil {
-			return nil, err
-		}
-	}
 
 	bufferFile, err := os.CreateTemp(tmpdir, "erigon-sortable-buf-")
 	if err != nil {
 		return nil, err
 	}
 
-	w := getBufioWriter(bufferFile)
-	defer putBufioWriter(w)
+	w := bufiopool.Writer(bufferFile)
+	defer bufiopool.PutWriter(w)
 
 	if err = b.Write(w); err != nil {
 		return bufferFile, fmt.Errorf("error writing entries to disk: %w", err)
@@ -167,7 +143,7 @@ func (p *fileDataProvider) initMmap() error {
 	if fi.Size() == 0 {
 		return io.EOF
 	}
-	p.mmapData, p.mmapHandle2, err = mmap.Mmap(p.file, int(fi.Size()))
+	p.mmapData, err = mmap.OpenRo(p.file, int(fi.Size()))
 	if err != nil {
 		return fmt.Errorf("mmap failed: %w", err)
 	}
@@ -220,9 +196,8 @@ func (p *fileDataProvider) Dispose() {
 	p.Wait()
 
 	if p.mmapData != nil {
-		_ = mmap.Munmap(p.mmapData, p.mmapHandle2)
+		_ = p.mmapData.Unmap()
 		p.mmapData = nil
-		p.mmapHandle2 = nil
 		p.mmapReader = nil
 	}
 

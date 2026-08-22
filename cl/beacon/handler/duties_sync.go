@@ -17,10 +17,11 @@
 package handler
 
 import (
+	"cmp"
 	"encoding/json"
 	"fmt"
 	"net/http"
-	"sort"
+	"slices"
 	"strconv"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
@@ -87,7 +88,8 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	if !ok {
 		syncCommittee, err = state_accessors.ReadCurrentSyncCommittee(
 			state_accessors.GetValFnTxAndSnapshot(tx, snRoTx),
-			a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch))
+			a.beaconChainCfg.RoundSlotToSyncCommitteePeriod(startSlotAtEpoch),
+		)
 		if syncCommittee == nil {
 			log.Warn("could not find sync committee for epoch", "epoch", epoch, "period", period)
 			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find sync committee for epoch %d", epoch))
@@ -119,14 +121,15 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 	for idx, committeeParticipantPublicKey := range syncCommittee.GetCommittee() {
 		committeeParticipantIndex, _, err := a.syncedData.ValidatorIndexByPublicKey(committeeParticipantPublicKey)
 		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x: %s", committeeParticipantPublicKey, err))
+			return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("could not find validator with public key %x: %w", committeeParticipantPublicKey, err))
 		}
 		if _, ok := dutiesSet[committeeParticipantIndex]; !ok {
 			continue
 		}
 		dutiesSet[committeeParticipantIndex].ValidatorSyncCommitteeIndicies = append(
 			dutiesSet[committeeParticipantIndex].ValidatorSyncCommitteeIndicies,
-			strconv.FormatUint(uint64(idx), 10))
+			strconv.FormatUint(uint64(idx), 10),
+		)
 	}
 	// Now we can convert the map to a slice
 	duties := make([]*syncDutyResponse, 0, len(dutiesSet))
@@ -136,8 +139,8 @@ func (a *ApiHandler) getSyncDuties(w http.ResponseWriter, r *http.Request) (*bea
 		}
 		duties = append(duties, duty)
 	}
-	sort.Slice(duties, func(i, j int) bool {
-		return duties[i].ValidatorIndex < duties[j].ValidatorIndex
+	slices.SortFunc(duties, func(a, b *syncDutyResponse) int {
+		return cmp.Compare(a.ValidatorIndex, b.ValidatorIndex)
 	})
 
 	return newBeaconResponse(duties).WithOptimistic(a.forkchoiceStore.IsHeadOptimistic()), nil

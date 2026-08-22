@@ -262,7 +262,7 @@ func Exp(base, exponent *big.Int) *big.Int {
 	baseCopy := new(big.Int).Set(base)
 
 	for _, word := range exponent.Bits() {
-		for i := 0; i < wordBits; i++ {
+		for range wordBits {
 			if word&1 == 1 {
 				U256(result.Mul(result, baseCopy))
 			}

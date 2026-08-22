@@ -55,6 +55,10 @@ type account struct {
 	CodeHash *common.Hash                `json:"codeHash,omitempty"`
 	Nonce    uint64                      `json:"nonce,omitempty"`
 	Storage  map[common.Hash]common.Hash `json:"storage,omitempty"`
+	// empty records whether the account existed before the tx, decided at first
+	// lookup (before Storage is populated by SLOAD/SSTORE) so that later reads of
+	// its own storage during the tx don't retroactively make it look non-empty.
+	empty bool
 }
 
 func (a *account) exists() bool {
@@ -72,7 +76,6 @@ type prestateTracer struct {
 	post      state
 	create    bool
 	to        accounts.Address
-	gasLimit  uint64 // Amount of gas bought for the whole tx
 	config    prestateTracerConfig
 	interrupt atomic.Bool           // Atomic flag to signal execution interruption
 	reason    atomic.Pointer[error] // Reason for the interruption, populated by Stop
@@ -121,21 +124,6 @@ func newPrestateTracer(ctx *tracers.Context, cfg json.RawMessage) (*tracers.Trac
 	}, nil
 }
 
-// CaptureEnd is called after the call finishes to finalize the tracing.
-func (t *prestateTracer) CaptureEnd(output []byte, gasUsed uint64, err error) {
-	if t.config.DiffMode {
-		return
-	}
-
-	if t.create {
-		// Keep existing account prior to contract creation at that address
-		if s := t.pre[t.to]; s != nil && !s.exists() {
-			// Exclude newly created contract.
-			delete(t.pre, t.to)
-		}
-	}
-}
-
 // ExitHook is invoked when the processing of a message ends.
 func (t *prestateTracer) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {
 	if reverted {
@@ -152,6 +140,12 @@ func (t *prestateTracer) OnExit(depth int, output []byte, gasUsed uint64, err er
 
 // OnOpcode implements the EVMLogger interface to trace a single step of VM execution.
 func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scope tracing.OpContext, rData []byte, depth int, err error) {
+	// A faulted opcode (e.g. out-of-gas at the opcode itself) never performs its
+	// account/storage access in consensus terms, so it must not contribute to the
+	// prestate. Mirrors go-ethereum (PR #26848).
+	if err != nil {
+		return
+	}
 	// Skip if tracing was interrupted
 	if t.interrupt.Load() {
 		return
@@ -200,10 +194,9 @@ func (t *prestateTracer) OnOpcode(pc uint64, opcode byte, gas, cost uint64, scop
 		size := stackData[stackLen-3]
 		init, err := tracers.GetMemoryCopyPadded(scope.MemoryData(), int64(offset.Uint64()), int64(size.Uint64()))
 		if err != nil {
-			t.Stop(fmt.Errorf("failed to copy CREATE2 in prestate tracer input err: %s", err))
 			return
 		}
-		inithash := accounts.InternCodeHash(crypto.HashData(init))
+		inithash := accounts.InternCodeHash(crypto.Keccak256Hash(init))
 		salt := stackData[stackLen-4]
 		addr := accounts.InternAddress(types.CreateAddress2(caller.Value(), salt.Bytes32(), inithash))
 		t.lookupAccount(addr)
@@ -236,15 +229,14 @@ func (t *prestateTracer) OnTxStart(env *tracing.VMContext, tx types.Transaction,
 	t.lookupAccount(env.Coinbase)
 
 	// Add accounts with authorizations to the prestate before they get applied.
-	var b [32]byte
-	data := bytes.NewBuffer(nil)
-	for _, auth := range tx.GetAuthorizations() {
-		data.Reset()
-		addr, err := auth.RecoverSigner(data, b[:])
+	auths := tx.GetAuthorizations()
+	for i := range auths {
+		auth := &auths[i]
+		addr, err := auth.RecoverSigner()
 		if err != nil {
 			continue
 		}
-		t.lookupAccount(accounts.InternAddress(*addr))
+		t.lookupAccount(accounts.InternAddress(addr))
 	}
 
 	if t.create && t.config.DiffMode {
@@ -269,8 +261,8 @@ func (t *prestateTracer) OnTxEnd(receipt *types.Receipt, err error) {
 	if t.config.IncludeEmpty {
 		return
 	}
-	for addr := range t.pre {
-		if s := t.pre[addr]; s != nil && !s.exists() {
+	for addr, s := range t.pre {
+		if s.empty {
 			delete(t.pre, addr)
 		}
 	}
@@ -398,9 +390,10 @@ func (t *prestateTracer) lookupAccount(addr accounts.Address) {
 
 	if len(code) > 0 {
 		acc.Code = &code
-		codeHash := crypto.HashData(code)
+		codeHash := crypto.Keccak256Hash(code)
 		acc.CodeHash = &codeHash
 	}
+	acc.empty = !acc.exists()
 	// The code must be fetched first for the emptiness check.
 	if t.config.DisableCode {
 		acc.Code = nil

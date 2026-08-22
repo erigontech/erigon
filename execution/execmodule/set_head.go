@@ -58,6 +58,12 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer e.semaphore.Release(1)
 
+	resumeReadAhead, err := e.suspendReadAhead(ctx)
+	if err != nil {
+		return fmt.Errorf("suspend read-ahead: %w", err)
+	}
+	defer resumeReadAhead()
+
 	tx, err := e.db.BeginTemporalRw(ctx)
 	if err != nil {
 		return fmt.Errorf("failed to begin rw transaction: %w", err)
@@ -103,6 +109,14 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 	}
 	defer sd.Close()
 
+	// Wire the shared state cache so unwindExec3 invalidates it (epoch bump +
+	// floor lower). Without this, the SD has no cache attached during the unwind,
+	// so sd.Unwind's invalidation is a no-op, the cache keeps pre-unwind values,
+	// and the next FCU re-execution reads them and computes a stale state root
+	// (BadBlock). Mirrors ValidateChain/forkchoice.
+	sd.SetStateCache(e.stateCache)
+	sd.SetCodeStore(e.codeStore)
+
 	// Set the unwind point and run the unwind
 	if err := e.pipelineExecutor.UnwindTo(targetBlock, stagedsync.StagedUnwind, tx); err != nil {
 		return fmt.Errorf("failed to set unwind point: %w", err)
@@ -144,13 +158,10 @@ func (e *ExecModule) SetHead(ctx context.Context, targetBlock uint64) error {
 		return fmt.Errorf("failed to save block hashes stage progress: %w", err)
 	}
 
-	// Flush and commit
-	if err := sd.Flush(ctx, tx); err != nil {
-		return fmt.Errorf("failed to flush shared domains: %w", err)
-	}
-
-	if err := tx.Commit(); err != nil {
-		return fmt.Errorf("failed to commit transaction: %w", err)
+	// sd.Commit flushes + commits as one unit and applies the BranchCache only
+	// after the commit succeeds, so a failed commit can't leave it poisoned.
+	if err := sd.Commit(ctx, tx); err != nil {
+		return fmt.Errorf("failed to commit shared domains: %w", err)
 	}
 
 	e.logger.Info("SetHead: successfully rewound chain", "targetBlock", targetBlock, "previousHead", currentHead)

@@ -13,9 +13,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-var (
-	ErrExpiryInThePast = errors.New("expiry is in the past")
-)
+var ErrExpiryInThePast = errors.New("expiry is in the past")
 
 type TopicSubscription struct {
 	topic     *pubsub.Topic
@@ -154,7 +152,7 @@ func (t *TopicSubscriptions) SubscribeWithExpiry(topic string, expiry time.Time)
 		if err != nil {
 			return err
 		}
-		log.Info("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
+		log.Debug("[GossipManager] Subscribed to topic", "topic", topic, "expiration", expiry)
 		sub.sub = s
 
 		// update ENR only on first subscription, not on expiry renewal

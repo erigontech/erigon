@@ -156,7 +156,7 @@ func bindKeyperSetManager(address common.Address, caller bind.ContractCaller, tr
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_KeyperSetManager *KeyperSetManagerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_KeyperSetManager *KeyperSetManagerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _KeyperSetManager.Contract.KeyperSetManagerCaller.contract.Call(opts, result, method, params...)
 }
 
@@ -167,7 +167,7 @@ func (_KeyperSetManager *KeyperSetManagerRaw) Transfer(opts *bind.TransactOpts) 
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_KeyperSetManager *KeyperSetManagerRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.KeyperSetManagerTransactor.contract.Transact(opts, method, params...)
 }
 
@@ -175,7 +175,7 @@ func (_KeyperSetManager *KeyperSetManagerRaw) Transact(opts *bind.TransactOpts, 
 // sets the output to result. The result type might be a single field for simple
 // returns, a slice of interfaces for anonymous returns and a struct for named
 // returns.
-func (_KeyperSetManager *KeyperSetManagerCallerRaw) Call(opts *bind.CallOpts, result *[]interface{}, method string, params ...interface{}) error {
+func (_KeyperSetManager *KeyperSetManagerCallerRaw) Call(opts *bind.CallOpts, result *[]any, method string, params ...any) error {
 	return _KeyperSetManager.Contract.contract.Call(opts, result, method, params...)
 }
 
@@ -186,7 +186,7 @@ func (_KeyperSetManager *KeyperSetManagerTransactorRaw) Transfer(opts *bind.Tran
 }
 
 // Transact invokes the (paid) contract method with params as input values.
-func (_KeyperSetManager *KeyperSetManagerTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...interface{}) (types.Transaction, error) {
+func (_KeyperSetManager *KeyperSetManagerTransactorRaw) Transact(opts *bind.TransactOpts, method string, params ...any) (types.Transaction, error) {
 	return _KeyperSetManager.Contract.contract.Transact(opts, method, params...)
 }
 
@@ -194,7 +194,7 @@ func (_KeyperSetManager *KeyperSetManagerTransactorRaw) Transact(opts *bind.Tran
 //
 // Solidity: function DEFAULT_ADMIN_ROLE() view returns(bytes32)
 func (_KeyperSetManager *KeyperSetManagerCaller) DEFAULTADMINROLE(opts *bind.CallOpts) ([32]byte, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "DEFAULT_ADMIN_ROLE")
 
 	if err != nil {
@@ -225,7 +225,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) DEFAULTADMINROLE() ([32]
 //
 // Solidity: function PAUSER_ROLE() view returns(bytes32)
 func (_KeyperSetManager *KeyperSetManagerCaller) PAUSERROLE(opts *bind.CallOpts) ([32]byte, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "PAUSER_ROLE")
 
 	if err != nil {
@@ -256,7 +256,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) PAUSERROLE() ([32]byte, 
 //
 // Solidity: function getKeyperSetActivationBlock(uint64 index) view returns(uint64)
 func (_KeyperSetManager *KeyperSetManagerCaller) GetKeyperSetActivationBlock(opts *bind.CallOpts, index uint64) (uint64, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "getKeyperSetActivationBlock", index)
 
 	if err != nil {
@@ -287,7 +287,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) GetKeyperSetActivationBl
 //
 // Solidity: function getKeyperSetAddress(uint64 index) view returns(address)
 func (_KeyperSetManager *KeyperSetManagerCaller) GetKeyperSetAddress(opts *bind.CallOpts, index uint64) (common.Address, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "getKeyperSetAddress", index)
 
 	if err != nil {
@@ -318,7 +318,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) GetKeyperSetAddress(inde
 //
 // Solidity: function getKeyperSetIndexByBlock(uint64 blockNumber) view returns(uint64)
 func (_KeyperSetManager *KeyperSetManagerCaller) GetKeyperSetIndexByBlock(opts *bind.CallOpts, blockNumber uint64) (uint64, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "getKeyperSetIndexByBlock", blockNumber)
 
 	if err != nil {
@@ -349,7 +349,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) GetKeyperSetIndexByBlock
 //
 // Solidity: function getNumKeyperSets() view returns(uint64)
 func (_KeyperSetManager *KeyperSetManagerCaller) GetNumKeyperSets(opts *bind.CallOpts) (uint64, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "getNumKeyperSets")
 
 	if err != nil {
@@ -380,7 +380,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) GetNumKeyperSets() (uint
 //
 // Solidity: function getRoleAdmin(bytes32 role) view returns(bytes32)
 func (_KeyperSetManager *KeyperSetManagerCaller) GetRoleAdmin(opts *bind.CallOpts, role [32]byte) ([32]byte, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "getRoleAdmin", role)
 
 	if err != nil {
@@ -411,7 +411,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) GetRoleAdmin(role [32]by
 //
 // Solidity: function hasRole(bytes32 role, address account) view returns(bool)
 func (_KeyperSetManager *KeyperSetManagerCaller) HasRole(opts *bind.CallOpts, role [32]byte, account common.Address) (bool, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "hasRole", role, account)
 
 	if err != nil {
@@ -442,7 +442,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) HasRole(role [32]byte, a
 //
 // Solidity: function initializer() view returns(address)
 func (_KeyperSetManager *KeyperSetManagerCaller) Initializer(opts *bind.CallOpts) (common.Address, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "initializer")
 
 	if err != nil {
@@ -473,7 +473,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) Initializer() (common.Ad
 //
 // Solidity: function paused() view returns(bool)
 func (_KeyperSetManager *KeyperSetManagerCaller) Paused(opts *bind.CallOpts) (bool, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "paused")
 
 	if err != nil {
@@ -504,7 +504,7 @@ func (_KeyperSetManager *KeyperSetManagerCallerSession) Paused() (bool, error) {
 //
 // Solidity: function supportsInterface(bytes4 interfaceId) view returns(bool)
 func (_KeyperSetManager *KeyperSetManagerCaller) SupportsInterface(opts *bind.CallOpts, interfaceId [4]byte) (bool, error) {
-	var out []interface{}
+	var out []any
 	err := _KeyperSetManager.contract.Call(opts, &out, "supportsInterface", interfaceId)
 
 	if err != nil {
@@ -1376,15 +1376,15 @@ func (_KeyperSetManager *KeyperSetManagerFilterer) RoleAdminChangedEventID() com
 // Solidity: event RoleAdminChanged(bytes32 indexed role, bytes32 indexed previousAdminRole, bytes32 indexed newAdminRole)
 func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleAdminChanged(opts *bind.FilterOpts, role [][32]byte, previousAdminRole [][32]byte, newAdminRole [][32]byte) (*KeyperSetManagerRoleAdminChangedIterator, error) {
 
-	var roleRule []interface{}
+	var roleRule []any
 	for _, roleItem := range role {
 		roleRule = append(roleRule, roleItem)
 	}
-	var previousAdminRoleRule []interface{}
+	var previousAdminRoleRule []any
 	for _, previousAdminRoleItem := range previousAdminRole {
 		previousAdminRoleRule = append(previousAdminRoleRule, previousAdminRoleItem)
 	}
-	var newAdminRoleRule []interface{}
+	var newAdminRoleRule []any
 	for _, newAdminRoleItem := range newAdminRole {
 		newAdminRoleRule = append(newAdminRoleRule, newAdminRoleItem)
 	}
@@ -1401,15 +1401,15 @@ func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleAdminChanged(opts *
 // Solidity: event RoleAdminChanged(bytes32 indexed role, bytes32 indexed previousAdminRole, bytes32 indexed newAdminRole)
 func (_KeyperSetManager *KeyperSetManagerFilterer) WatchRoleAdminChanged(opts *bind.WatchOpts, sink chan<- *KeyperSetManagerRoleAdminChanged, role [][32]byte, previousAdminRole [][32]byte, newAdminRole [][32]byte) (event.Subscription, error) {
 
-	var roleRule []interface{}
+	var roleRule []any
 	for _, roleItem := range role {
 		roleRule = append(roleRule, roleItem)
 	}
-	var previousAdminRoleRule []interface{}
+	var previousAdminRoleRule []any
 	for _, previousAdminRoleItem := range previousAdminRole {
 		previousAdminRoleRule = append(previousAdminRoleRule, previousAdminRoleItem)
 	}
-	var newAdminRoleRule []interface{}
+	var newAdminRoleRule []any
 	for _, newAdminRoleItem := range newAdminRole {
 		newAdminRoleRule = append(newAdminRoleRule, newAdminRoleItem)
 	}
@@ -1542,15 +1542,15 @@ func (_KeyperSetManager *KeyperSetManagerFilterer) RoleGrantedEventID() common.H
 // Solidity: event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender)
 func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleGranted(opts *bind.FilterOpts, role [][32]byte, account []common.Address, sender []common.Address) (*KeyperSetManagerRoleGrantedIterator, error) {
 
-	var roleRule []interface{}
+	var roleRule []any
 	for _, roleItem := range role {
 		roleRule = append(roleRule, roleItem)
 	}
-	var accountRule []interface{}
+	var accountRule []any
 	for _, accountItem := range account {
 		accountRule = append(accountRule, accountItem)
 	}
-	var senderRule []interface{}
+	var senderRule []any
 	for _, senderItem := range sender {
 		senderRule = append(senderRule, senderItem)
 	}
@@ -1567,15 +1567,15 @@ func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleGranted(opts *bind.
 // Solidity: event RoleGranted(bytes32 indexed role, address indexed account, address indexed sender)
 func (_KeyperSetManager *KeyperSetManagerFilterer) WatchRoleGranted(opts *bind.WatchOpts, sink chan<- *KeyperSetManagerRoleGranted, role [][32]byte, account []common.Address, sender []common.Address) (event.Subscription, error) {
 
-	var roleRule []interface{}
+	var roleRule []any
 	for _, roleItem := range role {
 		roleRule = append(roleRule, roleItem)
 	}
-	var accountRule []interface{}
+	var accountRule []any
 	for _, accountItem := range account {
 		accountRule = append(accountRule, accountItem)
 	}
-	var senderRule []interface{}
+	var senderRule []any
 	for _, senderItem := range sender {
 		senderRule = append(senderRule, senderItem)
 	}
@@ -1708,15 +1708,15 @@ func (_KeyperSetManager *KeyperSetManagerFilterer) RoleRevokedEventID() common.H
 // Solidity: event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender)
 func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleRevoked(opts *bind.FilterOpts, role [][32]byte, account []common.Address, sender []common.Address) (*KeyperSetManagerRoleRevokedIterator, error) {
 
-	var roleRule []interface{}
+	var roleRule []any
 	for _, roleItem := range role {
 		roleRule = append(roleRule, roleItem)
 	}
-	var accountRule []interface{}
+	var accountRule []any
 	for _, accountItem := range account {
 		accountRule = append(accountRule, accountItem)
 	}
-	var senderRule []interface{}
+	var senderRule []any
 	for _, senderItem := range sender {
 		senderRule = append(senderRule, senderItem)
 	}
@@ -1733,15 +1733,15 @@ func (_KeyperSetManager *KeyperSetManagerFilterer) FilterRoleRevoked(opts *bind.
 // Solidity: event RoleRevoked(bytes32 indexed role, address indexed account, address indexed sender)
 func (_KeyperSetManager *KeyperSetManagerFilterer) WatchRoleRevoked(opts *bind.WatchOpts, sink chan<- *KeyperSetManagerRoleRevoked, role [][32]byte, account []common.Address, sender []common.Address) (event.Subscription, error) {
 
-	var roleRule []interface{}
+	var roleRule []any
 	for _, roleItem := range role {
 		roleRule = append(roleRule, roleItem)
 	}
-	var accountRule []interface{}
+	var accountRule []any
 	for _, accountItem := range account {
 		accountRule = append(accountRule, accountItem)
 	}
-	var senderRule []interface{}
+	var senderRule []any
 	for _, senderItem := range sender {
 		senderRule = append(senderRule, senderItem)
 	}

@@ -53,6 +53,12 @@ type IsMining interface {
 	IsMining() bool
 }
 
+// NoMining reports that this process never mines. The standalone txpool and
+// rpcdaemon run without a miner.
+type NoMining struct{}
+
+func (NoMining) IsMining() bool { return false }
+
 func NewMiningServer(ctx context.Context, isMining IsMining, ethashApi *ethash.API, logger log.Logger) *MiningServer {
 	return &MiningServer{ctx: ctx, isMining: isMining, ethash: ethashApi, logger: logger}
 }
@@ -150,7 +156,7 @@ func (s *MiningServer) OnMinedBlock(req *txpoolproto.OnMinedBlockRequest, reply 
 }
 
 func (s *MiningServer) BroadcastMinedBlock(block *types.Block) error {
-	s.logger.Debug("BroadcastMinedBlock", "block hash", block.Hash(), "block number", block.Number(), "root", block.Root(), "gas", block.GasUsed())
+	s.logger.Debug("BroadcastMinedBlock", "blockHash", block.Hash(), "blockNum", block.Number(), "root", block.Root(), "gas", block.GasUsed())
 	var buf bytes.Buffer
 	if err := block.EncodeRLP(&buf); err != nil {
 		return err

@@ -22,17 +22,18 @@ import (
 	"slices"
 	"sync"
 
+	"github.com/libp2p/go-libp2p/core/peer"
+
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/cl/validator/sync_contribution_pool"
+	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
-	"github.com/libp2p/go-libp2p/core/peer"
 )
 
 type seenSyncCommitteeMessage struct {
@@ -199,6 +200,6 @@ func verifySyncCommitteeMessageSignature(s *state.CachingBeaconState, msg *cltyp
 	if err != nil {
 		return nil, nil, nil, err
 	}
-	signingRoot := utils.Sha256(msg.BeaconBlockRoot[:], domain)
+	signingRoot := crypto.Sha256(msg.BeaconBlockRoot[:], domain)
 	return msg.Signature[:], signingRoot[:], publicKey[:], nil
 }

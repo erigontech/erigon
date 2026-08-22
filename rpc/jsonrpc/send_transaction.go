@@ -103,7 +103,10 @@ func (api *APIImpl) SendRawTransactionSync(ctx context.Context, encodedTx hexuti
 	criteria := filters.ReceiptsFilterCriteria{
 		TransactionHashes: []common.Hash{hash},
 	}
-	receiptsCh, id := api.filters.SubscribeReceipts(128, criteria)
+	receiptsCh, id, err := api.filters.SubscribeReceipts(128, criteria)
+	if err != nil {
+		return nil, err
+	}
 	defer api.filters.UnsubscribeReceipts(id)
 
 	// Theoretically, we should subscribe *before* submitting the transaction, but then we couldn't filter by hash.

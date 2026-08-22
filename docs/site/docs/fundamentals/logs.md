@@ -1,7 +1,7 @@
 ---
 title: "Logs"
 description: "Log levels, structured logging, and how to interpret Erigon output."
-sidebar_position: 10
+sidebar_position: 15
 ---
 
 

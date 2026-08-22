@@ -61,5 +61,4 @@ func TestSyncReward(t *testing.T) {
 
 	require.Equal(t, uint64(0x190), partReward)
 	require.Equal(t, uint64(0x39), propReward)
-
 }

@@ -28,10 +28,16 @@ import (
 
 // DialInProc attaches an in-process connection to the given RPC server.
 func DialInProc(handler *Server, logger log.Logger) *Client {
-	initctx := context.Background()
-	c, _ := newClient(initctx, func(context.Context) (ServerCodec, error) {
+	return DialInProcWithContext(context.Background(), handler, logger)
+}
+
+// DialInProcWithContext is like DialInProc but uses connCtx as the base
+// context for every handler invocation on the connection (see
+// Server.ServeCodecWithContext).
+func DialInProcWithContext(connCtx context.Context, handler *Server, logger log.Logger) *Client {
+	c, _ := newClient(connCtx, func(context.Context) (ServerCodec, error) {
 		p1, p2 := net.Pipe()
-		go handler.ServeCodec(NewCodec(p1), 0)
+		go handler.ServeCodecWithContext(connCtx, NewCodec(p1), 0)
 		return NewCodec(p2), nil
 	}, logger)
 	return c

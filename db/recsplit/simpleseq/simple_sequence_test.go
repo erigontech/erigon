@@ -323,7 +323,7 @@ func TestReadSimpleSequence(t *testing.T) {
 func makeSequence(n int) *SimpleSequence {
 	base := uint64(1_000_000)
 	s := NewSimpleSequence(base, uint64(n))
-	for i := 0; i < n; i++ {
+	for i := range n {
 		s.AddOffset(base + uint64(i)*7 + 1)
 	}
 	return s

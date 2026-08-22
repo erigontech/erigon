@@ -19,7 +19,7 @@ runs:
         time du -hs "${{ inputs.modcache-path }}" || true
         time du -hs "${{ inputs.modcache-path }}/cache/download" || true
 
-    - uses: actions/cache/save@v4
+    - uses: actions/cache/save@v5
       if: ${{ always() }}
       with:
         path: ${{ inputs.modcache-path }}/cache/download

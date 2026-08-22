@@ -163,7 +163,7 @@ func TestMerge(t *testing.T) {
 		require.Equal(t, uint64(20), result.Count())
 		require.Equal(t, uint64(1000), result.Min())
 		require.Equal(t, uint64(1038), result.Max())
-		for i := uint64(0); i < 20; i++ {
+		for i := range uint64(20) {
 			require.Equal(t, 1000+i*2, result.Get(i))
 		}
 	})
@@ -211,7 +211,7 @@ func TestMergeSorted(t *testing.T) {
 		require.Equal(t, uint64(20), result.Count())
 		require.Equal(t, uint64(1000), result.Min())
 		require.Equal(t, uint64(1038), result.Max())
-		for i := uint64(0); i < 20; i++ {
+		for i := range uint64(20) {
 			require.Equal(t, 1000+i*2, result.Get(i))
 		}
 	})
@@ -353,7 +353,7 @@ func BenchmarkMerge(b *testing.B) {
 
 	raw1 := func() []byte {
 		sb := NewBuilder(baseNum, n, baseNum+n*2-2)
-		for i := uint64(0); i < n; i++ {
+		for i := range uint64(n) {
 			sb.AddOffset(baseNum + i*2)
 		}
 		sb.Build()
@@ -361,7 +361,7 @@ func BenchmarkMerge(b *testing.B) {
 	}()
 	raw2 := func() []byte {
 		sb := NewBuilder(baseNum, n, baseNum+n*2+n*2-2)
-		for i := uint64(0); i < n; i++ {
+		for i := range uint64(n) {
 			sb.AddOffset(baseNum + n*2 + i*2)
 		}
 		sb.Build()

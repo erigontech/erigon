@@ -39,7 +39,8 @@ func BenchTraceReplayTransaction(erigonUrl, gethUrl string, needCompare bool, bl
 		if skip {
 			continue
 		}
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 
 			request := reqGen.traceReplayTransaction(txn.Hash)
 			errCtx := fmt.Sprintf("block %d, txn %s", bn, txn.Hash)

@@ -18,8 +18,9 @@ package handler
 
 import (
 	"bytes"
+	"cmp"
 	"net/http"
-	"sort"
+	"slices"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -46,7 +47,6 @@ func (a *ApiHandler) getDepositContract(w http.ResponseWriter, r *http.Request) 
 		ChainId         uint64 `json:"chain_id,string"`
 		DepositContract string `json:"address"`
 	}{ChainId: a.beaconChainCfg.DepositChainID, DepositContract: a.beaconChainCfg.DepositContractAddress}), nil
-
 }
 
 func (a *ApiHandler) getForkSchedule(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -59,11 +59,11 @@ func (a *ApiHandler) getForkSchedule(w http.ResponseWriter, r *http.Request) (*b
 		})
 	}
 	// Sort the responses by epoch
-	sort.Slice(response, func(i, j int) bool {
-		if response[i].Epoch == response[j].Epoch {
-			return bytes.Compare(response[i].CurrentVersion[:], response[j].CurrentVersion[:]) < 0
+	slices.SortFunc(response, func(a, b cltypes.Fork) int {
+		if a.Epoch == b.Epoch {
+			return bytes.Compare(a.CurrentVersion[:], b.CurrentVersion[:])
 		}
-		return response[i].Epoch < response[j].Epoch
+		return cmp.Compare(a.Epoch, b.Epoch)
 	})
 	previousVersion := utils.Uint32ToBytes4(uint32(a.beaconChainCfg.GenesisForkVersion))
 	for i := range response {

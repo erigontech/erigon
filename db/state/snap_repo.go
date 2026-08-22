@@ -3,6 +3,7 @@ package state
 import (
 	"fmt"
 	"path/filepath"
+	"slices"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datastruct/btindex"
@@ -44,10 +45,6 @@ type SnapshotRepo struct {
 	integrity *DependencyIntegrityChecker
 
 	logger log.Logger
-}
-
-func NewSnapshotRepoForForkable(id kv.ForkableId, logger log.Logger) *SnapshotRepo {
-	return NewSnapshotRepo(Registry.Name(id), FromForkable(id), Registry.SnapshotConfig(id), logger)
 }
 
 func NewSnapshotRepo(name string, entity UniversalEntity, cfg *SnapshotConfig, logger log.Logger) *SnapshotRepo {
@@ -126,10 +123,8 @@ func (f *SnapshotRepo) DeleteFilesAfterMerge(files []*FilesItem) {
 			if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
 				f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: remove", "f", file.decompressor.FileName())
 			}
-		} else {
-			if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
-				f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: mark as canDelete=true", "f", file.decompressor.FileName())
-			}
+		} else if f.schema.DataTag() == traceFileLife && file.decompressor != nil {
+			f.logger.Warn("[agg.dbg] DeleteFilesAfterMerge: mark as canDelete=true", "f", file.decompressor.FileName())
 		}
 	}
 }
@@ -192,7 +187,7 @@ func (f *SnapshotRepo) DirtyFilesWithNoHashAccessors() (l []*FilesItem) {
 	files := make([]string, accCount)
 
 	return fileItemsWithMissedAccessors(f.dirtyFiles.Items(), f.stepSize, func(fromStep, toStep kv.Step) []string {
-		for i := uint16(0); i < accCount; i++ {
+		for i := range accCount {
 			files[i], _ = p.AccessorIdxFile(v, RootNum(fromStep.ToTxNum(ss)), RootNum(toStep.ToTxNum(ss)), i)
 		}
 		return files
@@ -225,9 +220,10 @@ func (f *SnapshotRepo) CloseFilesAfterRootNum(after RootNum) {
 }
 
 func (f *SnapshotRepo) CloseVisibleFilesAfterRootNum(after RootNum) {
-	var i int
-	for i = len(f.current) - 1; i >= 0; i-- {
-		if f.current[i].endTxNum <= uint64(after) {
+	i := -1
+	for idx, item := range slices.Backward(f.current) {
+		if item.endTxNum <= uint64(after) {
+			i = idx
 			break
 		}
 	}
@@ -394,7 +390,7 @@ func (f *SnapshotRepo) openDirtyFiles(dirEntries []string) error {
 				f.logger.Error("SnapshotRepo.openDirtyFiles btindex path", "err", err, "f", fPath)
 			} else {
 				r := seg.NewReader(item.decompressor.MakeGetter(), p.DataFileCompression())
-				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, btindex.DefaultBtreeM, r); err != nil {
+				if item.bindex, err = btindex.OpenBtreeIndexWithDecompressor(fPath, r); err != nil {
 					_, fName := filepath.Split(fPath)
 					f.logger.Error("SnapshotRepo.openDirtyFiles", "err", err, "f", fName)
 					// don't interrupt on error. other files maybe good
@@ -434,7 +430,7 @@ func (f *SnapshotRepo) loadDirtyFiles(aps []string) {
 			f.logger.Trace("can't parse file name", "file", ap)
 			continue
 		}
-		dirtyFile := newFilesItemWithSnapConfig(fileInfo.From, fileInfo.To, f.cfg)
+		dirtyFile := newFilesItem(fileInfo.From, fileInfo.To)
 
 		if _, has := f.dirtyFiles.Get(dirtyFile); !has {
 			f.dirtyFiles.Set(dirtyFile)
@@ -483,9 +479,9 @@ func getFreezingRange(rootFrom, rootTo RootNum, cfg *SnapshotConfig) (freezeFrom
 	if from%mergeLimit == 0 {
 		maxJump = mergeLimit
 	} else {
-		for i := len(cfg.MergeStages) - 1; i >= 0; i-- {
-			if from%cfg.MergeStages[i] == 0 {
-				maxJump = cfg.MergeStages[i]
+		for _, stage := range slices.Backward(cfg.MergeStages) {
+			if from%stage == 0 {
+				maxJump = stage
 				break
 			}
 		}
@@ -502,9 +498,9 @@ func getFreezingRange(rootFrom, rootTo RootNum, cfg *SnapshotConfig) (freezeFrom
 	case jump >= cfg.MergeStages[0]:
 		// else find if a merge step can be used
 		// assuming merge step multiple of each other
-		for i := len(cfg.MergeStages) - 1; i >= 0; i-- {
-			if jump >= cfg.MergeStages[i] {
-				_freezeTo = _freezeFrom + cfg.MergeStages[i]
+		for _, stage := range slices.Backward(cfg.MergeStages) {
+			if jump >= stage {
+				_freezeTo = _freezeFrom + stage
 				break
 			}
 		}

@@ -20,11 +20,11 @@ import (
 	"bytes"
 	"context"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"testing"
 
-	"github.com/golang/snappy"
 	"github.com/libp2p/go-libp2p"
 	"github.com/libp2p/go-libp2p/core/peer"
 	"github.com/libp2p/go-libp2p/core/protocol"
@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 func TestBlocksByRangeHandler(t *testing.T) {
@@ -101,7 +102,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		return
 	}
 
-	reqData := common.Copy(reqBuf.Bytes())
+	reqData := bytes.Clone(reqBuf.Bytes())
 	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
 	require.NoError(t, err)
 
@@ -113,10 +114,12 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, firstByte[0], byte(0))
 
+	sr := snappypool.Reader(stream)
+	defer snappypool.PutReader(sr)
 	for i := 0; i < len(blockRoots); i++ {
 		forkDigest := make([]byte, 4)
 		_, err := stream.Read(forkDigest)
-		if err != nil && err != io.EOF {
+		if err != nil && !errors.Is(err, io.EOF) {
 			require.NoError(t, err)
 		}
 
@@ -124,7 +127,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		require.NoError(t, err)
 
 		raw := make([]byte, encodedLn)
-		sr := snappy.NewReader(stream)
+		sr.Reset(stream)
 		bytesRead := 0
 		for bytesRead < int(encodedLn) {
 			n, err := sr.Read(raw[bytesRead:])
@@ -158,9 +161,9 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	}
 
 	_, err = stream.Read(make([]byte, 1))
-	if err != io.EOF {
+	if !errors.Is(err, io.EOF) {
 		t.Fatal("Stream is not empty")
 	}
 
-	defer indiciesDB.Close()
+	indiciesDB.Close()
 }

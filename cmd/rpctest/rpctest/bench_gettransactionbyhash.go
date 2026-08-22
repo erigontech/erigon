@@ -95,7 +95,8 @@ func BenchEthGetTransactionByHash(ctx context.Context, erigonURL, gethURL string
 		}
 
 		nTransactions += len(b.Result.Transactions)
-		for _, txn := range b.Result.Transactions {
+		for i := range b.Result.Transactions {
+			txn := &b.Result.Transactions[i]
 			select {
 			case teeToGetTxs <- txn.Hash:
 			case <-ctx.Done():

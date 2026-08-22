@@ -14,7 +14,6 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
@@ -27,6 +26,18 @@ func (e *EngineServer) SSZRESTHandler() http.Handler {
 	return http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
 		e.handleSSZREST(w, r)
 	})
+}
+
+func (e *EngineServer) beaconChainConfig() *clparams.BeaconChainConfig {
+	if cfg := e.beaconCfg.Load(); cfg != nil {
+		return cfg
+	}
+	if e.config != nil {
+		if _, cfg, _, err := clparams.GetConfigsByNetworkName(e.config.ChainName); err == nil {
+			return cfg
+		}
+	}
+	return &clparams.MainnetBeaconConfig
 }
 
 func (e *EngineServer) handleSSZREST(w http.ResponseWriter, r *http.Request) {
@@ -225,7 +236,7 @@ func (e *EngineServer) handleSSZGetPayload(w http.ResponseWriter, r *http.Reques
 			return
 		}
 		sv, _ := sszGetPayloadVersion(version)
-		out, err := encodeGetPayloadResponse(resp, sv)
+		out, err := encodeGetPayloadResponse(e.beaconChainConfig(), resp, sv)
 		if err != nil {
 			writeSSZError(w, http.StatusInternalServerError, err.Error())
 			return
@@ -289,7 +300,7 @@ func (e *EngineServer) handleSSZForkchoice(w http.ResponseWriter, r *http.Reques
 	case 3:
 		resp, err = e.ForkchoiceUpdatedV3(r.Context(), &state, attrs)
 	case 4:
-		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs)
+		resp, err = e.ForkchoiceUpdatedV4(r.Context(), &state, attrs, nil)
 	}
 	if err != nil {
 		writeEngineError(w, err)
@@ -394,8 +405,6 @@ func (e *EngineServer) handleSSZClientVersion(w http.ResponseWriter, r *http.Req
 	writeSSZBytes(w, out)
 }
 
-func ptr[T any](v T) *T { return &v }
-
 func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter, r *http.Request) {
 	body, err := readSSZBody(r)
 	if err != nil {
@@ -416,5 +425,3 @@ func (e *EngineServer) handleSSZCapabilities(w http.ResponseWriter, r *http.Requ
 	}
 	writeSSZBytes(w, out)
 }
-
-func hashesToCommon(in []common.Hash) []common.Hash { return in }

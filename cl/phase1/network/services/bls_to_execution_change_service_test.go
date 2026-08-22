@@ -18,7 +18,11 @@ package services
 
 import (
 	"context"
+	"sync"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -27,10 +31,8 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/pool"
-	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
-	"go.uber.org/mock/gomock"
+	"github.com/erigontech/erigon/common/crypto"
 )
 
 type blsToExecutionChangeTestContext struct {
@@ -105,7 +107,7 @@ func syncHeadState(t *testing.T, syncedData *synced_data.SyncedDataManager, st *
 }
 
 func matchingWithdrawalCredentials(cfg *clparams.BeaconChainConfig, from common.Bytes48) common.Hash {
-	hashedFrom := utils.Sha256(from[:])
+	hashedFrom := crypto.Sha256(from[:])
 	wc := common.Hash{byte(cfg.BLSWithdrawalPrefixByte)}
 	copy(wc[1:], hashedFrom[1:])
 	return wc
@@ -126,6 +128,7 @@ func TestBlsToExecutionChangeProcessMessage(t *testing.T) {
 			prepare: func(t *testing.T, testCtx *blsToExecutionChangeTestContext, _ *state.CachingBeaconState, msg *SignedBLSToExecutionChangeForGossip) {
 				testCtx.operationsPool.BLSToExecutionChangesPool.Insert(msg.SignedBLSToExecutionChange.Signature, msg.SignedBLSToExecutionChange)
 			},
+			wantErr:    ErrIgnore,
 			wantInPool: true,
 		},
 		{
@@ -191,15 +194,81 @@ func TestBlsToExecutionChangeProcessMessage(t *testing.T) {
 			tt.prepare(t, testCtx, st, msg)
 
 			err := testCtx.service.ProcessMessage(context.Background(), nil, msg)
-			if tt.wantErr != nil {
+			switch {
+			case tt.wantErr != nil:
 				require.ErrorIs(t, err, tt.wantErr)
-			} else if tt.wantErrString != "" {
+			case tt.wantErrString != "":
 				require.ErrorContains(t, err, tt.wantErrString)
-			} else {
+			default:
 				require.NoError(t, err)
 			}
 			require.Equal(t, tt.wantInPool, testCtx.operationsPool.BLSToExecutionChangesPool.Has(msg.SignedBLSToExecutionChange.Signature))
 			require.True(t, testCtx.gomockCtrl.Satisfied())
+		})
+	}
+}
+
+func TestBlsToExecutionChangeIgnoresSeenValidatorAfterPoolPrune(t *testing.T) {
+	const validatorIndex = uint64(1)
+	testCtx, st := setupBLSToExecutionChangeTest(t)
+	msg := newSignedBLSToExecutionChangeForGossip(validatorIndex)
+	st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(
+		int(validatorIndex),
+		matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From),
+	)
+	syncHeadState(t, testCtx.syncedData, st)
+	testCtx.gomockCtrl.RecordCall(
+		testCtx.mockFuncs,
+		"ComputeSigningRoot",
+		msg.SignedBLSToExecutionChange.Message,
+		gomock.Any(),
+	).Return([32]byte{}, nil).Times(1)
+	testCtx.gomockCtrl.RecordCall(
+		testCtx.mockFuncs,
+		"BlsVerifyMultipleSignatures",
+		gomock.Any(),
+		gomock.Any(),
+		gomock.Any(),
+	).Return(true, nil).Times(1)
+
+	require.NoError(t, testCtx.service.ProcessMessage(context.Background(), nil, msg))
+	require.True(t, testCtx.operationsPool.BLSToExecutionChangesPool.DeleteIfExist(msg.SignedBLSToExecutionChange.Signature))
+	credentials := matchingWithdrawalCredentials(testCtx.beaconCfg, msg.SignedBLSToExecutionChange.Message.From)
+	credentials[0] = byte(testCtx.beaconCfg.ETH1AddressWithdrawalPrefixByte)
+	st.ValidatorSet().SetWithdrawalCredentialForValidatorAtIndex(int(validatorIndex), credentials)
+	syncHeadState(t, testCtx.syncedData, st)
+
+	require.ErrorIs(t, testCtx.service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
+	require.True(t, testCtx.gomockCtrl.Satisfied())
+}
+
+func TestBlsToExecutionChangeStoresOneVerifiedChangePerValidator(t *testing.T) {
+	const validatorIndex = uint64(1)
+	testCtx, _ := setupBLSToExecutionChangeTest(t)
+	service := testCtx.service.(*blsToExecutionChangeService)
+	const variants = 32
+	var wg sync.WaitGroup
+	for i := range variants {
+		change := newSignedBLSToExecutionChangeForGossip(validatorIndex).SignedBLSToExecutionChange
+		change.Signature[0] = byte(i + 1)
+		wg.Go(func() {
+			service.storeVerifiedChange(change)
+		})
+	}
+	wg.Wait()
+
+	require.Len(t, testCtx.operationsPool.BLSToExecutionChangesPool.Raw(), 1)
+}
+
+func TestBlsToExecutionChangeRejectsIncompleteMessage(t *testing.T) {
+	testCtx, _ := setupBLSToExecutionChangeTest(t)
+	for _, msg := range []*SignedBLSToExecutionChangeForGossip{
+		nil,
+		{},
+		{SignedBLSToExecutionChange: &cltypes.SignedBLSToExecutionChange{}},
+	} {
+		require.NotPanics(t, func() {
+			require.Error(t, testCtx.service.ProcessMessage(context.Background(), nil, msg))
 		})
 	}
 }

@@ -17,8 +17,9 @@ concurrency:
   queue: max
 
 permissions:
-  actions: read
   contents: read
+  actions: write
+  pull-requests: read
 
 jobs:
   sonar:
