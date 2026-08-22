@@ -152,6 +152,39 @@ func (h *History) v4FilesForStep(step kv.Step) []string {
 	return paths
 }
 
+// retireSubsumedV4ItemsInRange marks every dirtyFiles v4 .v item whose
+// range is wholly contained within [rangeStart, rangeEnd) for retirement
+// (removes from dirtyFiles, sets canDelete=true) and returns the removed
+// items. Sibling of Domain.retireSubsumedV4ItemsInRange for History .v
+// files — retire integrates a step-aligned .v that now contains the v4's
+// data (via mergeV4IntoStepFile), so the v4 pair is redundant and safe to
+// drop. Physical reclaim happens once the last RO reader releases.
+// Caller holds h.dirtyFilesLock.
+func (h *History) retireSubsumedV4ItemsInRange(rangeStart, rangeEnd uint64) []*FilesItem {
+	if rangeEnd <= rangeStart {
+		return nil
+	}
+	var items []*FilesItem
+	h.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if !h.isRawTxNItem(item) {
+			return true
+		}
+		if item.startTxNum < rangeStart || item.startTxNum >= rangeEnd {
+			return true
+		}
+		if item.endTxNum > rangeEnd {
+			return true
+		}
+		items = append(items, item)
+		return true
+	})
+	if len(items) == 0 {
+		return nil
+	}
+	retire(mvcc.RetireReasonMerged, h.dirtyFiles, items, h.FilenameBase, h.logger)
+	return items
+}
+
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, fromStep, toStep)
 }

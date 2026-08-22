@@ -1371,6 +1371,69 @@ func TestInvertedIndex_v4FilesForStep_ReturnsAnchoredV4EF(t *testing.T) {
 	require.Equal(t, efPath, got[0])
 }
 
+// TestAggregator_subsumedV4ItemsForStepLocked_RetiresHistoryAndIdx pins
+// stage 8d's extension: after the step-integrate that would drop a v4
+// .kv from dirtyFiles, the paired v4 .v and .ef must ALSO retire (so
+// they don't linger in dirtyFiles once the step-full .v/.ef contain
+// their data via mergeV4IntoStepFile). Constructs a v4 pair anchored at
+// step start, calls subsumedV4ItemsForStepLocked over the step range,
+// asserts BOTH history and idx items are returned + removed from
+// dirtyFiles.
+func TestAggregator_subsumedV4ItemsForStepLocked_RetiresHistoryAndIdx(t *testing.T) {
+	t.Parallel()
+	_, agg := testDbAndAggregatorv3(t, 100)
+	ctx := t.Context()
+	h := agg.d[kv.AccountsDomain].History
+	ii := h.InvertedIndex
+
+	const step = kv.Step(3)
+	baseTxN := uint64(step) * h.stepSize
+
+	efPath, vPath := buildV4HistoryPairForTest(t, ctx, agg, kv.AccountsDomain, []byte("k"), baseTxN, []uint64{baseTxN + 5})
+
+	vDec, err := seg.NewDecompressor(vPath)
+	require.NoError(t, err)
+	t.Cleanup(vDec.Close)
+	vItem := newFilesItem(baseTxN, baseTxN+50) // mid-step endTxN — v4-shape
+	vItem.decompressor = vDec
+	h.dirtyFiles.Set(vItem)
+
+	efDec, err := seg.NewDecompressor(efPath)
+	require.NoError(t, err)
+	t.Cleanup(efDec.Close)
+	efItem := newFilesItem(baseTxN, baseTxN+50)
+	efItem.decompressor = efDec
+	ii.dirtyFiles.Set(efItem)
+
+	agg.dirtyFilesLock.Lock()
+	retired := agg.subsumedV4ItemsForStepLocked(baseTxN, uint64(step+1)*h.stepSize)
+	agg.dirtyFilesLock.Unlock()
+
+	// Retired set must include both the history .v item and the idx .ef
+	// item (the .kv item wasn't added in this test — check just the two
+	// new sources).
+	require.GreaterOrEqual(t, len(retired), 2, "expected at least 2 retired items (v + ef), got %d", len(retired))
+
+	// Both dirtyFiles collections should no longer contain the items.
+	histStillPresent := false
+	h.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if item == vItem {
+			histStillPresent = true
+		}
+		return true
+	})
+	require.False(t, histStillPresent, "History v4 .v item must be removed from dirtyFiles after retire")
+
+	idxStillPresent := false
+	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if item == efItem {
+			idxStillPresent = true
+		}
+		return true
+	})
+	require.False(t, idxStillPresent, "InvertedIndex v4 .ef item must be removed from dirtyFiles after retire")
+}
+
 // TestAggregator_BuildHistoryAccessors_RejectsUnparseableBaseName — the
 // parser rejects non-v4 shapes loudly instead of writing accessors at
 // wrong coords.

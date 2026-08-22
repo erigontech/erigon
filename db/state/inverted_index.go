@@ -181,6 +181,33 @@ func (ii *InvertedIndex) v4FilesForStep(step kv.Step) []string {
 	return paths
 }
 
+// retireSubsumedV4ItemsInRange — sibling of Domain.retireSubsumedV4ItemsInRange
+// for InvertedIndex .ef files. Same wholly-contained predicate.
+func (ii *InvertedIndex) retireSubsumedV4ItemsInRange(rangeStart, rangeEnd uint64) []*FilesItem {
+	if rangeEnd <= rangeStart {
+		return nil
+	}
+	var items []*FilesItem
+	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if !ii.isRawTxNItem(item) {
+			return true
+		}
+		if item.startTxNum < rangeStart || item.startTxNum >= rangeEnd {
+			return true
+		}
+		if item.endTxNum > rangeEnd {
+			return true
+		}
+		items = append(items, item)
+		return true
+	})
+	if len(items) == 0 {
+		return nil
+	}
+	retire(mvcc.RetireReasonMerged, ii.dirtyFiles, items, ii.FilenameBase, ii.logger)
+	return items
+}
+
 func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string {
 	if fromStep == toStep {
 		panic(fmt.Sprintf("assert: fromStep(%d) == toStep(%d)", fromStep, toStep))

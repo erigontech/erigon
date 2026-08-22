@@ -1618,8 +1618,11 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 // subsumedV4ItemsForStepLocked retires every mode-C v4 boundary file
 // whose range is wholly contained in the just-integrated step-aligned
 // range [txNumFrom, txNumTo) and returns them so the caller attaches
-// them to the outgoing visible generation. Caller holds
-// dirtyFilesLock.
+// them to the outgoing visible generation. Covers the state .kv side
+// (d.retireSubsumedV4ItemsInRange) AND the paired history .v + inverted
+// index .ef sides (d.History / d.History.InvertedIndex) so the mode-C
+// paired v4 family retires as a unit once the step-full integration
+// supersedes it. Caller holds dirtyFilesLock.
 func (a *Aggregator) subsumedV4ItemsForStepLocked(txNumFrom, txNumTo uint64) []*FilesItem {
 	stepSize := a.stepSize.Load()
 	if stepSize == 0 {
@@ -1637,6 +1640,12 @@ func (a *Aggregator) subsumedV4ItemsForStepLocked(txNumFrom, txNumTo uint64) []*
 			continue
 		}
 		out = append(out, d.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)...)
+		if d.History != nil {
+			out = append(out, d.History.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)...)
+			if d.History.InvertedIndex != nil {
+				out = append(out, d.History.InvertedIndex.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)...)
+			}
+		}
 	}
 	return out
 }
@@ -2618,7 +2627,10 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
 // subsumedV4ItemsFromMergeLocked collects retired v4 items across
 // every domain covered by the merge result. Merge widths differ
 // per-domain, so the check runs per merged item using its actual
-// [startTxNum, endTxNum) window. Caller holds dirtyFilesLock.
+// [startTxNum, endTxNum) window. Covers state .kv, paired history .v,
+// and paired inverted index .ef — each merged item's range is checked
+// against the corresponding entity's dirtyFiles. Caller holds
+// dirtyFilesLock.
 func (a *Aggregator) subsumedV4ItemsFromMergeLocked(in *MergeResult) []*FilesItem {
 	if in == nil {
 		return nil
@@ -2632,14 +2644,24 @@ func (a *Aggregator) subsumedV4ItemsFromMergeLocked(in *MergeResult) []*FilesIte
 		if d.Disable {
 			continue
 		}
-		merged := in.d[id]
-		if merged == nil {
+		if merged := in.d[id]; merged != nil &&
+			merged.startTxNum%stepSize == 0 && merged.endTxNum%stepSize == 0 {
+			out = append(out, d.retireSubsumedV4ItemsInRange(merged.startTxNum, merged.endTxNum)...)
+		}
+		if d.History == nil {
 			continue
 		}
-		if merged.startTxNum%stepSize != 0 || merged.endTxNum%stepSize != 0 {
+		if mergedHist := in.dHist[id]; mergedHist != nil &&
+			mergedHist.startTxNum%stepSize == 0 && mergedHist.endTxNum%stepSize == 0 {
+			out = append(out, d.History.retireSubsumedV4ItemsInRange(mergedHist.startTxNum, mergedHist.endTxNum)...)
+		}
+		if d.History.InvertedIndex == nil {
 			continue
 		}
-		out = append(out, d.retireSubsumedV4ItemsInRange(merged.startTxNum, merged.endTxNum)...)
+		if mergedIdx := in.dIdx[id]; mergedIdx != nil &&
+			mergedIdx.startTxNum%stepSize == 0 && mergedIdx.endTxNum%stepSize == 0 {
+			out = append(out, d.History.InvertedIndex.retireSubsumedV4ItemsInRange(mergedIdx.startTxNum, mergedIdx.endTxNum)...)
+		}
 	}
 	return out
 }
