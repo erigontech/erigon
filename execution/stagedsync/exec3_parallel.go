@@ -585,6 +585,16 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 						}
 					}
 
+					// FLASHBLOCK accumulation (see serial path + SharedDomains.AppendFlashblockReceipts):
+					// append this round's new-tx receipts to the maintained SD's full-body accumulator so
+					// the seal derives the COMPUTED fields with zero re-execution. MUST be OUTSIDE the
+					// !isPartial block above — flashblock UPDATE rounds are partial, and their receipts are
+					// exactly what we need to accumulate. The count-equals-body-txs harness assert guards
+					// against a full-set (double-count) reconstruction here.
+					if pe.isForkValidation && pe.doms != nil {
+						pe.doms.AppendFlashblockReceipts(applyResult.Receipts)
+					}
+
 					if applyResult.BlockNum > lastBlockResult.BlockNum {
 						uncommittedBlocks++
 						pe.doms.SetTxNum(applyResult.lastTxNum)

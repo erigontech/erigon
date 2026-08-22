@@ -40,6 +40,7 @@ import (
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
+	"github.com/erigontech/erigon/execution/types"
 
 	"github.com/erigontech/erigon/db/state/statecfg"
 )
@@ -119,6 +120,11 @@ type SharedDomains struct {
 	// The flashblock PreExecute path surfaces it (the executor computes the root each round but
 	// discards it under FlashblockSkipPostValidation) without an out-of-band recompute.
 	lastComputedRoot  []byte
+	// flashblockReceipts accumulates, in body order, the per-round receipts of the in-progress
+	// flashblock block. The SD is the natural home: it is fresh per block (auto-reset) and carried
+	// forward across rounds, exactly matching the accumulation lifecycle — so the seal derives
+	// ReceiptHash/Bloom/GasUsed over the full body with ZERO re-execution.
+	flashblockReceipts types.Receipts
 	currentStep       kv.Step
 	trace             bool //nolint
 	commitmentCapture bool
@@ -664,6 +670,21 @@ func (sd *SharedDomains) ClearPreExecStart() { sd.preExecStartSet = false }
 // or nil if none has run. Used by the flashblock PreExecute path to surface the per-round
 // computed root without an out-of-band recompute. Safe to read after exec completes.
 func (sd *SharedDomains) LastComputedRoot() []byte { return sd.lastComputedRoot }
+
+// AppendFlashblockReceipts appends a flashblock round's new-tx receipts to this SD's accumulated
+// full-body receipt list (in body order). Called by the executor per round on the fork-validation
+// path. Because the SD is fresh per block and carried forward across rounds, the accumulation is
+// naturally scoped to the in-progress block with no explicit reset.
+func (sd *SharedDomains) AppendFlashblockReceipts(r types.Receipts) {
+	if len(r) == 0 {
+		return
+	}
+	sd.flashblockReceipts = append(sd.flashblockReceipts, r...)
+}
+
+// FlashblockReceipts returns the receipts accumulated across the in-progress flashblock's rounds,
+// in body order (the seal input).
+func (sd *SharedDomains) FlashblockReceipts() types.Receipts { return sd.flashblockReceipts }
 
 // SetDisableInlineTouchKey disables the TouchKey call inside DomainPut/DomainDel.
 // When the commitment calculator goroutine owns the Updates buffer, the inline

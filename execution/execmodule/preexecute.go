@@ -99,7 +99,9 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 			defer doms.ClearPreExecStart()
 		}
 	} else {
-		// First round: fresh SD + overlay, exactly like ValidateChain opens one.
+		// First round: fresh SD + overlay, exactly like ValidateChain opens one. The fresh SD starts
+		// with an empty flashblock receipt accumulator, so this block's seal derives the COMPUTED
+		// header fields over ONLY this block's body — no explicit reset needed.
 		if doms, err = execctx.NewSharedDomains(ctx, roTx, e.logger); err != nil {
 			return ValidationResult{}, err
 		}
@@ -169,5 +171,8 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 	if root := doms.LastComputedRoot(); len(root) > 0 {
 		res.ComputedRoot = common.BytesToHash(root)
 	}
+	// Surface the accumulated flashblock receipt count (== body txs executed so far) — the seal
+	// derives ReceiptHash/Bloom/GasUsed from these accumulated receipts (STEP 3b slice 2b).
+	res.FlashblockReceiptCount = len(doms.FlashblockReceipts())
 	return res, nil
 }

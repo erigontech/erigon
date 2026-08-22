@@ -435,6 +435,15 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 				if startTxIndex == 0 && !isInitialCycle {
 					se.cfg.notifications.RecentReceipts.Add(blockReceipts, txTask.Txs, txTask.Header)
 				}
+				// FLASHBLOCK accumulation: on the fork-validation path, APPEND this round's new-tx
+				// receipts (blockReceipts is this round's new txs — the prefix was skipped) to the
+				// maintained SD's full-body accumulator. Unlike RecentReceipts (gated to startTxIndex==0,
+				// replaces per block), this appends every round so the seal derives the COMPUTED header
+				// fields over the full body with ZERO re-execution. The SD is fresh per block + carried
+				// across rounds, so accumulation is naturally block-scoped. See SharedDomains.AppendFlashblockReceipts.
+				if se.isForkValidation && se.doms != nil {
+					se.doms.AppendFlashblockReceipts(blockReceipts)
+				}
 				checkBloom := !se.cfg.vmConfig.StatelessExec && !se.cfg.vmConfig.NoReceipts
 				checkReceipts := checkBloom && se.cfg.chainConfig.IsByzantium(txTask.BlockNumber())
 

@@ -71,6 +71,10 @@ type ValidationResult struct {
 	// this call. On the flashblock PreExecute path this is the per-round root over the body
 	// executed so far (Root is otherwise deferred to seal). Zero when no commitment ran.
 	ComputedRoot common.Hash
+	// FlashblockReceiptCount is the number of receipts accumulated across the in-progress
+	// flashblock's rounds so far (== the number of body txs executed). Seal input; 0 off the
+	// flashblock path.
+	FlashblockReceiptCount int
 }
 
 // ForkChoiceResult is the native return type for UpdateForkChoice.
