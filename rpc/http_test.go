@@ -30,6 +30,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/rpc/jsonstream"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/require"
@@ -269,26 +270,36 @@ func TestCheckJwtSecretAuthScheme(t *testing.T) {
 	}
 }
 
-// overloadService stands in for a method whose DB gate rejected the request.
+// overloadService stands in for a method whose DB gate rejected the request,
+// once per callback shape: a plain method answers through writeTo, a streamable
+// one writes its own envelope before the rejection happens.
 type overloadService struct{}
 
 func (*overloadService) Reject(context.Context) (string, error) { return "", kv.ErrReadTxLimitExceeded }
+
+func (*overloadService) RejectStreaming(_ context.Context, _ jsonstream.Stream) error {
+	return kv.ErrReadTxLimitExceeded
+}
 
 // TestOverloadedRequestGets503 pins that a request rejected by the DB gate
 // answers 503, not 200. The JSON-RPC error body is written before ServeHTTP can
 // set the status, so anything that puts those bytes on the wire early makes
 // net/http commit 200 and discard the real status.
 func TestOverloadedRequestGets503(t *testing.T) {
-	srv := NewServer(50, false, false, false /* disableStreaming */, log.Root(), 100)
-	defer srv.Stop()
-	require.NoError(t, srv.RegisterName("test", new(overloadService)))
+	for _, method := range []string{"test_reject", "test_rejectStreaming"} {
+		t.Run(method, func(t *testing.T) {
+			srv := NewServer(50, false, false, false /* disableStreaming */, log.Root(), 100)
+			defer srv.Stop()
+			require.NoError(t, srv.RegisterName("test", new(overloadService)))
 
-	body := `{"jsonrpc":"2.0","id":1,"method":"test_reject","params":[]}`
-	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
-	req.Header.Set("Content-Type", "application/json")
-	rec := httptest.NewRecorder()
-	srv.ServeHTTP(rec, req)
+			body := `{"jsonrpc":"2.0","id":1,"method":"` + method + `","params":[]}`
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/", strings.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			rec := httptest.NewRecorder()
+			srv.ServeHTTP(rec, req)
 
-	require.Equal(t, http.StatusServiceUnavailable, rec.Code, "body: %s", rec.Body.String())
-	require.Contains(t, rec.Body.String(), ErrMsgServerOverloaded)
+			require.Equal(t, http.StatusServiceUnavailable, rec.Code, "body: %s", rec.Body.String())
+			require.Contains(t, rec.Body.String(), ErrMsgServerOverloaded)
+		})
+	}
 }
