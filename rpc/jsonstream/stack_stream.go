@@ -64,12 +64,6 @@ func (s *StackStream) Reset(out io.Writer) {
 	s.stack = s.stack[:0]
 }
 
-// Write raw bytes to the stream
-func (s *StackStream) Write(content []byte) (int, error) {
-	s.popCommaOrField()
-	return s.stream.Write(content)
-}
-
 // WriteRawBytes writes already-encoded JSON held as bytes.
 func (s *StackStream) WriteRawBytes(content []byte) {
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
