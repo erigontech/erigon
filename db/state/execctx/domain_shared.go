@@ -116,10 +116,6 @@ type SharedDomains struct {
 	// validation never commits). SeekCommitment (the commitment start model) is left untouched.
 	preExecStart      uint64
 	preExecStartSet   bool
-	// lastComputedRoot holds the state root from the most recent computeCommitment on this SD.
-	// The flashblock PreExecute path surfaces it (the executor computes the root each round but
-	// discards it under FlashblockSkipPostValidation) without an out-of-band recompute.
-	lastComputedRoot  []byte
 	// flashblockReceipts accumulates, in body order, the per-round receipts of the in-progress
 	// flashblock block. The SD is the natural home: it is fresh per block (auto-reset) and carried
 	// forward across rounds, exactly matching the accumulation lifecycle — so the seal derives
@@ -671,11 +667,6 @@ func (sd *SharedDomains) SetPreExecStart(txNum uint64) {
 
 // ClearPreExecStart reverts SeekStart to the commitment start model.
 func (sd *SharedDomains) ClearPreExecStart() { sd.preExecStartSet = false }
-
-// LastComputedRoot returns the state root from the most recent computeCommitment on this SD,
-// or nil if none has run. Used by the flashblock PreExecute path to surface the per-round
-// computed root without an out-of-band recompute. Safe to read after exec completes.
-func (sd *SharedDomains) LastComputedRoot() []byte { return sd.lastComputedRoot }
 
 // AppendFlashblockReceipts appends a flashblock round's new-tx receipts to this SD's accumulated
 // full-body receipt list (in body order). Called by the executor per round on the fork-validation
@@ -1280,13 +1271,6 @@ func (sd *SharedDomains) computeCommitment(ctx context.Context, tx kv.TemporalTx
 		return nil, err
 	}
 	rootHash, err = sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
-	if err == nil && len(rootHash) > 0 {
-		// Retain the root so the PreExecute path can read it off the maintained SD after exec
-		// (copied: rootHash may alias a reused calculator buffer). Both computeCommitment callers
-		// — ComputeCommitment and the parallel ComputeCommitmentLocked — pass through here, so the
-		// capture is executor-path-agnostic. Read happens-after this write via the exec join.
-		sd.lastComputedRoot = append(sd.lastComputedRoot[:0], rootHash...)
-	}
 	return rootHash, err
 }
 

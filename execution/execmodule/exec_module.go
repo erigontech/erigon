@@ -636,9 +636,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if validationError != nil {
 		result.ValidationError = validationError.Error()
 	}
-	// Surface the sealed state root the executor computed over the accumulated SD (the CLOSE runs
-	// block-end here, so this is the FINAL sealed root, not the deferred per-round PreExecute root).
-	if root := doms.LastComputedRoot(); len(root) > 0 {
+	// Surface the sealed state root by READING the validated SD's commitment trie (the same
+	// in-tree pattern as exec_module_test.go / preexecute.go: GetCommitmentContext().Trie().RootHash()).
+	// ValidateChain runs block-end here — the CLOSE — so ComputeCommitment has set the FINAL sealed
+	// root in the commitment trie; we read it back rather than via the removed LastComputedRoot hack.
+	if root, rerr := doms.GetCommitmentContext().Trie().RootHash(); rerr == nil && len(root) > 0 {
 		result.ComputedRoot = common.BytesToHash(root)
 	}
 	return result, nil
