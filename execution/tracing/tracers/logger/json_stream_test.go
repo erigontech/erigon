@@ -579,3 +579,41 @@ func BenchmarkStackValueWrite(b *testing.B) {
 		}
 	})
 }
+
+// TestHexQuotedBytesMatchesHexWithPrefix pins the pre-quoted form against the
+// one WriteString produced, which the RPC output has to stay identical to.
+func TestHexQuotedBytesMatchesHexWithPrefix(t *testing.T) {
+	l := &JsonStreamLogger{}
+	for _, n := range []int{0, 1, 4, 20, 32} {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = byte(i*7 + 1)
+		}
+		want := `"` + l.hexWithPrefix(b) + `"`
+		require.Equal(t, want, l.hexQuotedBytes(b), "len=%d", n)
+	}
+}
+
+// BenchmarkOnOpcodeStorage covers the shape debug_traceTransaction takes by
+// default: two hex strings per touched slot, accumulating across steps.
+func BenchmarkOnOpcodeStorage(b *testing.B) {
+	for _, slots := range []int{1, 8, 32} {
+		b.Run(fmt.Sprintf("slots=%d", slots), func(b *testing.B) {
+			l := NewJsonStreamLogger(&LogConfig{}, context.Background(), jsonstream.New(io.Discard))
+			l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+			scope := &mockOpContext{}
+			for i := range slots {
+				key := common.BigToHash(big.NewInt(int64(i + 1)))
+				val := common.BigToHash(big.NewInt(int64(1000 + i)))
+				scope.stack = []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])}
+				l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+			}
+			b.ReportAllocs()
+			i := 0
+			for b.Loop() {
+				l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+				i++
+			}
+		})
+	}
+}
