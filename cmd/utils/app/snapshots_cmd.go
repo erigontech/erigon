@@ -80,7 +80,6 @@ import (
 	"github.com/erigontech/erigon/db/state/stats"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/diagnostics/mem"
-	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/verify"
 	"github.com/erigontech/erigon/node/debug"
@@ -88,8 +87,6 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig/features"
 	"github.com/erigontech/erigon/node/logging"
 	"github.com/erigontech/erigon/node/rulesconfig"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
 )
 
 func joinFlags(lists ...[]cli.Flag) (res []cli.Flag) {
@@ -1630,7 +1627,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	cfg := ethconfig.NewSnapCfg(false, true, true, chainConfig.ChainName)
 
 	res, clean, err := openSnaps(ctx, cfg, dirs, chainDB, logger)
-	borSnaps, blockRetire, agg := res.BorSnaps, res.BlockRetire, res.Aggregator
+	blockRetire, agg := res.BlockRetire, res.Aggregator
 	if err != nil {
 		return err
 	}
@@ -1639,7 +1636,6 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	defer blockRetire.MadvNormal().DisableReadAhead()
 
 	blockReader, _ := blockRetire.IO()
-	heimdallStore, _ := blockRetire.BorStore()
 	db, err := temporal.New(chainDB, agg, res.BlockSnaps)
 	if err != nil {
 		return err
@@ -1676,25 +1672,6 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 			return doPublishable(dirs, chainDB)
 		case integrity.CaplinStateRoots:
 			return integrity.CheckCaplinStateRoots(ctx, dirs, failFast, logger)
-		case integrity.BorEvents:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorEvents skipped because not bor chain")
-				return nil
-			}
-			snapshots := blockReader.BorSnapshots().(*heimdall.RoSnapshots)
-			return bridge.ValidateBorEvents(ctx, db, blockReader, snapshots, 0, 0, failFast)
-		case integrity.BorSpans:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorSpans skipped because not bor chain")
-				return nil
-			}
-			return heimdall.ValidateBorSpans(ctx, logger, dirs, heimdallStore, borSnaps, failFast)
-		case integrity.BorCheckpoints:
-			if !CheckBorChain(chainConfig.ChainName) {
-				logger.Info("BorCheckpoints skipped because not bor chain")
-				return nil
-			}
-			return heimdall.ValidateBorCheckpoints(ctx, logger, dirs, heimdallStore, borSnaps, failFast)
 		case integrity.ReceiptsNoDups:
 			return integrity.CheckReceiptsNoDups(ctx, sc, db, blockReader, failFast)
 		case integrity.RCacheNoDups:
@@ -2028,7 +2005,7 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	}
 	defer clean()
 
-	blockReader := freezeblocks.NewBlockReader(snaps.BlockSnaps, snaps.BorSnaps)
+	blockReader := freezeblocks.NewBlockReader(snaps.BlockSnaps, nil)
 
 	agg := snaps.Aggregator
 	db, err := temporal.New(chainDB, agg, snaps.BlockSnaps)
@@ -2105,10 +2082,6 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 		}
 	}
 	return integrityErr
-}
-
-func CheckBorChain(chainName string) bool {
-	return slices.Contains([]string{networkname.BorMainnet, networkname.Amoy, networkname.BorE2ETestChain2Val, networkname.BorDevnet}, chainName)
 }
 
 func checkIfCaplinSnapshotsPublishable(dirs datadir.Dirs, emptyOk bool) error {
@@ -2913,7 +2886,7 @@ func doDecompressSpeed(ctx context.Context, cliCtx *cli.Command) error {
 		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView(true)
+		view, err := decompressor.OpenSequentialView()
 		if err != nil {
 			panic(err)
 		}
@@ -2929,7 +2902,7 @@ func doDecompressSpeed(ctx context.Context, cliCtx *cli.Command) error {
 		//defer decompressor.MadvSequential().DisableReadAhead()
 
 		t := time.Now()
-		view, err := decompressor.OpenSequentialView(true)
+		view, err := decompressor.OpenSequentialView()
 		if err != nil {
 			panic(err)
 		}
@@ -3064,14 +3037,6 @@ func lsDatadir(ctx context.Context, dirs datadir.Dirs, logger log.Logger) error 
 	defer blockSnaps.Close()
 	blockSnaps.Ls()
 
-	heimdall.RecordWayPoints(true) // needed to load checkpoints and milestones snapshots
-	borSnaps := heimdall.NewRoSnapshots(cfg, dirs.Snap, logger)
-	if err := borSnaps.OpenFolder(); err != nil {
-		return err
-	}
-	defer borSnaps.Close()
-	borSnaps.Ls()
-
 	if agg, err := tryOpenAgg(ctx, dirs, chainDB, logger); err == nil {
 		defer agg.Close()
 		agg.LS()
@@ -3107,7 +3072,6 @@ func tryOpenChaindata(ctx context.Context, dirs datadir.Dirs, logger log.Logger)
 
 type OpenSnapsResult struct {
 	BlockSnaps       *blocksnapshots.RoSnapshots
-	BorSnaps         *heimdall.RoSnapshots
 	CaplinSnaps      *freezeblocks.CaplinSnapshots
 	CaplinStateSnaps *snapshotsync.CaplinStateSnapshots
 	BlockRetire      *freezeblocks.BlockRetire
@@ -3130,11 +3094,6 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		return
 	}
 	res.BlockSnaps.LogStat("block")
-	heimdall.RecordWayPoints(true) // needed to load checkpoints and milestones snapshots
-	res.BorSnaps = heimdall.NewRoSnapshots(cfg, dirs.Snap, logger)
-	if err = res.BorSnaps.OpenFolder(); err != nil {
-		return
-	}
 
 	var beaconConfig *clparams.BeaconChainConfig
 	_, beaconConfig, _, err = clparams.GetConfigsByNetworkName(chainConfig.ChainName)
@@ -3159,32 +3118,16 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		res.CaplinStateSnaps.LogStat("caplin-state")
 	}
 
-	//res.BorSnaps.LogStat("bor")
-	var bridgeStore bridge.Store
-	var heimdallStore heimdall.Store
-	if chainConfig.Bor != nil {
-		res.BorSnaps.DownloadComplete() // mark as ready
-		bridgeStore = bridge.NewSnapshotStore(bridge.NewMdbxStore(dirs.DataDir, logger, true, 0), res.BorSnaps, chainConfig.Bor)
-		if err = bridgeStore.Prepare(ctx); err != nil {
-			return
-		}
-		heimdallStore = heimdall.NewSnapshotStore(heimdall.NewMdbxStore(logger, dirs.DataDir, true, 0), res.BorSnaps)
-		if err = heimdallStore.Prepare(ctx); err != nil {
-			return
-		}
-	}
-
-	blockReader := freezeblocks.NewBlockReader(res.BlockSnaps, res.BorSnaps)
+	blockReader := freezeblocks.NewBlockReader(res.BlockSnaps, nil)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	res.BlockRetire = freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, heimdallStore, bridgeStore, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
+	res.BlockRetire = freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, nil, nil, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
 
 	res.Aggregator = openAgg(ctx, dirs, chainDB, logger)
 	res.Aggregator.SetSnapshotBuildSema(blockSnapBuildSema)
 
 	clean = func() {
 		defer res.BlockSnaps.Close()
-		defer res.BorSnaps.Close()
 		defer res.CaplinSnaps.Close()
 		defer res.Aggregator.Close()
 		defer res.BlockRetire.Close() // LIFO: drain the retire before agg/snaps close
@@ -3540,9 +3483,6 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 	}
 
 	blocksInSnapshots := blockReader.FrozenBlocks()
-	if chainConfig.Bor != nil {
-		blocksInSnapshots = min(blocksInSnapshots, blockReader.FrozenBorBlocks(false))
-	}
 	logger.Info("retiring blocks", "from", blocksInSnapshots, "to", to)
 	if err := br.BuildFiles(ctx, blocksInSnapshots, to, log.LvlInfo, dbservices.NoopSeederClient{}, nil); err != nil {
 		return err
@@ -3552,7 +3492,10 @@ func doRetireCommand(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs
 		return err
 	}
 
-	if err := caplinStateSnaps.RemoveOverlaps(); err != nil {
+	if err := caplinStateSnaps.BuildMissingIndices(ctx, logger); err != nil {
+		return err
+	}
+	if err := caplinStateSnaps.RemoveOverlaps(nil); err != nil {
 		return err
 	}
 

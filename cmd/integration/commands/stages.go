@@ -83,12 +83,6 @@ import (
 	"github.com/erigontech/erigon/node/shards"
 	"github.com/erigontech/erigon/p2p/sentry"
 	"github.com/erigontech/erigon/p2p/sentry/sentry_multi_client"
-	"github.com/erigontech/erigon/polygon/bor/borcfg"
-	"github.com/erigontech/erigon/polygon/bridge"
-	"github.com/erigontech/erigon/polygon/heimdall"
-	"github.com/erigontech/erigon/polygon/heimdall/poshttp"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 // makeStageCmd creates a cobra command that opens the DB, runs stageFn, and handles errors.
@@ -275,15 +269,6 @@ var cmdRunMigrations = &cobra.Command{
 		if exists, err := dir.Exist(consensus); err == nil && exists {
 			migrateDB(dbcfg.ConsensusDB, consensus)
 		}
-		// Migrations must be applied also to the Bor heimdall and polygon-bridge DBs.
-		heimdall := strings.Replace(chaindata, "chaindata", "heimdall", 1)
-		if exists, err := dir.Exist(heimdall); err == nil && exists {
-			migrateDB(dbcfg.HeimdallDB, heimdall)
-		}
-		polygonBridge := strings.Replace(chaindata, "chaindata", "polygon-bridge", 1)
-		if exists, err := dir.Exist(polygonBridge); err == nil && exists {
-			migrateDB(dbcfg.PolygonBridgeDB, polygonBridge)
-		}
 	},
 }
 
@@ -361,13 +346,11 @@ func init() {
 	withDataDir(cmdRemoveMigration)
 	withMigration(cmdRemoveMigration)
 	withChain(cmdRemoveMigration)
-	withHeimdall(cmdRemoveMigration)
 	rootCmd.AddCommand(cmdRemoveMigration)
 
 	withConfig(cmdRunMigrations)
 	withDataDir(cmdRunMigrations)
 	withChain(cmdRunMigrations)
-	withHeimdall(cmdRunMigrations)
 	rootCmd.AddCommand(cmdRunMigrations)
 }
 
@@ -1095,10 +1078,9 @@ func stageTxLookup(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) e
 }
 
 func printAllStages(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
-	sn, borSn, _, _, _, _, _ := allSnapshots(ctx, db, logger) // ignore error here to get some stat.
+	sn, _, _, _ := allSnapshots(ctx, db, logger) // ignore error here to get some stat.
 	defer sn.Close()
-	defer borSn.Close()
-	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn, borSn) })
+	return db.ViewTemporal(ctx, func(tx kv.TemporalTx) error { return printStages(tx, sn) })
 }
 
 func printAppliedMigrations(migrationsDB kv.RwDB, ctx context.Context, logger log.Logger) error {
@@ -1127,13 +1109,10 @@ func removeMigration(migrationsDB kv.RwDB, ctx context.Context) error {
 
 var openSnapshotOnce sync.Once
 var _allSnapshotsSingleton *blocksnapshots.RoSnapshots
-var _allBorSnapshotsSingleton *heimdall.RoSnapshots
 var _allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
 var _aggSingleton *dbstate.Aggregator
-var _bridgeStoreSingleton bridge.Store
-var _heimdallStoreSingleton heimdall.Store
 
-func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksnapshots.RoSnapshots, *heimdall.RoSnapshots, *dbstate.Aggregator, *freezeblocks.CaplinSnapshots, bridge.Store, heimdall.Store, error) {
+func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksnapshots.RoSnapshots, *dbstate.Aggregator, *freezeblocks.CaplinSnapshots, error) {
 	var err error
 
 	openSnapshotOnce.Do(func() {
@@ -1147,9 +1126,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 		snapCfg := ethconfig.NewSnapCfg(true, true, true, chainConfig.ChainName)
 
 		_allSnapshotsSingleton = blocksnapshots.NewRoSnapshots(snapCfg, dirs.Snap, logger)
-		_allBorSnapshotsSingleton = heimdall.NewRoSnapshots(snapCfg, dirs.Snap, logger)
-		_bridgeStoreSingleton = bridge.NewSnapshotStore(bridge.NewDbStore(db), _allBorSnapshotsSingleton, chainConfig.Bor)
-		_heimdallStoreSingleton = heimdall.NewSnapshotStore(heimdall.NewDbStore(db), _allBorSnapshotsSingleton)
 		var erigonDBSettings *dbstate.ErigonDBSettings
 		if erigonDBSettings, err = dbstate.ResolveErigonDBSettings(dirs, logger, false); err != nil {
 			return
@@ -1168,7 +1144,6 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 			return nil
 		})
 		g.Go(func() error {
-			_allBorSnapshotsSingleton.OptimisticalyOpenFolder()
 			return nil
 		})
 		g.Go(func() error {
@@ -1197,20 +1172,19 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 		}
 
 		_allSnapshotsSingleton.LogStat("blocks")
-		//_allBorSnapshotsSingleton.LogStat("bor")
 	})
 
 	if err != nil {
 		log.Error("[snapshots] failed to open", "err", err)
-		return nil, nil, nil, nil, nil, nil, err
+		return nil, nil, nil, err
 	}
-	return _allSnapshotsSingleton, _allBorSnapshotsSingleton, _aggSingleton, _allCaplinSnapshotsSingleton, _bridgeStoreSingleton, _heimdallStoreSingleton, nil
+	return _allSnapshotsSingleton, _aggSingleton, _allCaplinSnapshotsSingleton, nil
 }
 
 // logSnapshotStats needs a temporal tx: resolving txNum to block reads block files,
 // which only a tx pinning a block-files view may do.
-func logSnapshotStats(ctx context.Context, db kv.TemporalRoDB, blockSnaps *blocksnapshots.RoSnapshots, borSnaps *heimdall.RoSnapshots, logger log.Logger) {
-	txNums := freezeblocks.NewBlockReader(blockSnaps, borSnaps).TxnumReader()
+func logSnapshotStats(ctx context.Context, db kv.TemporalRoDB, blockSnaps *blocksnapshots.RoSnapshots, logger log.Logger) {
+	txNums := freezeblocks.NewBlockReader(blockSnaps, nil).TxnumReader()
 	_ = db.View(ctx, func(tx kv.Tx) error {
 		stats.LogStats(dbstate.AggTx(tx), tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
 			histBlockNumProgress, _, err := txNums.FindBlockNum(ctx, tx, endTxNumMinimax)
@@ -1229,11 +1203,11 @@ var _blockWriterSingleton *blockio.BlockWriter
 
 func blocksIO(db kv.RoDB, logger log.Logger) (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {
-		sn, borSn, _, _, _, _, err := allSnapshots(context.Background(), db, logger)
+		sn, _, _, err := allSnapshots(context.Background(), db, logger)
 		if err != nil {
 			panic(err)
 		}
-		_blockReaderSingleton = freezeblocks.NewBlockReader(sn, borSn)
+		_blockReaderSingleton = freezeblocks.NewBlockReader(sn, nil)
 		_blockWriterSingleton = blockio.NewBlockWriter()
 	})
 	return _blockReaderSingleton, _blockWriterSingleton
@@ -1279,15 +1253,12 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	cfg.Dirs = dirs
 	dbReadConcurrency := runtime.GOMAXPROCS(-1) * 16
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	blockReader, blockWriter, allSn, borSn, bridgeStore, heimdallStore, _, err := eth.SetUpBlockReader(ctx, db, dirs, &cfg, chainConfig, dbReadConcurrency, logger, blockSnapBuildSema)
+	blockReader, blockWriter, allSn, _, err := eth.SetUpBlockReader(ctx, db, dirs, &cfg, chainConfig, dbReadConcurrency, logger, blockSnapBuildSema)
 	if err != nil {
 		panic(err)
 	}
 	cfg.Snapshot = allSn.Cfg()
-	if borSn != nil {
-		borSn.DownloadComplete() // mark as ready
-	}
-	engine := initRulesEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, bridgeStore, heimdallStore, logger)
+	engine := initRulesEngine(ctx, chainConfig, cfg.Dirs.DataDir, db, blockReader, logger)
 
 	statusDataProvider := sentry.NewStatusDataProvider(
 		db,
@@ -1314,7 +1285,7 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 		panic(err)
 	}
 	notifications := shards.NewNotifications(nil)
-	blockRetire := freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, heimdallStore, bridgeStore, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
+	blockRetire := freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, db, nil, nil, chainConfig, &cfg, notifications.Events, blockSnapBuildSema, logger)
 	stageList := stageloop.NewDefaultStages(context.Background(), db, &cfg, sentryControlServer, notifications, nil, blockReader, blockRetire, nil, nil, exec.NewBlockReadAheader())
 	sync := stagedsync.New(cfg.Sync, stageList, stagedsync.DefaultUnwindOrder, stagedsync.DefaultPruneOrder, logger, stages.ModeApplyingBlocks)
 	return blockRetire, blockRetire.Close, engine, vmConfig, sync
@@ -1336,55 +1307,17 @@ func stage(st *stagedsync.Sync, tx kv.Tx, stage stages.SyncStage) *stagedsync.St
 	return res
 }
 
-func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader dbservices.FullBlockReader, bridgeStore bridge.Store, heimdallStore heimdall.Store, logger log.Logger) rules.Engine {
+func initRulesEngine(ctx context.Context, cc *chain2.Config, dir string, db kv.RwDB, blockReader dbservices.FullBlockReader, logger log.Logger) rules.Engine {
 	config := ethconfig.Defaults
-	var polygonBridge *bridge.Service
-	var heimdallService *heimdall.Service
-	var heimdallClient heimdall.Client
-	var bridgeClient bridge.Client
 	var rulesConfig any
 	switch {
 	case cc.Aura != nil:
 		rulesConfig = &config.Aura
-	case cc.Bor != nil:
-		rulesConfig = cc.Bor
-		config.HeimdallURL = HeimdallURL
-		if !config.WithoutHeimdall {
-			heimdallClient = heimdall.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
-			bridgeClient = bridge.NewHttpClient(config.HeimdallURL, logger, poshttp.WithApiVersioner(ctx))
-		} else {
-			heimdallClient = heimdall.NewIdleClient(config.Builder)
-			bridgeClient = bridge.NewIdleClient()
-		}
-		borConfig := rulesConfig.(*borcfg.BorConfig)
-
-		polygonBridge = bridge.NewService(bridge.ServiceConfig{
-			Store:        bridgeStore,
-			Logger:       logger,
-			BorConfig:    borConfig,
-			EventFetcher: bridgeClient,
-		})
-
-		if err := heimdallStore.Prepare(ctx); err != nil {
-			panic(err)
-		}
-
-		if err := bridgeStore.Prepare(ctx); err != nil {
-			panic(err)
-		}
-
-		heimdallService = heimdall.NewService(heimdall.ServiceConfig{
-			Store:     heimdallStore,
-			BorConfig: borConfig,
-			Client:    heimdallClient,
-			Logger:    logger,
-		})
-
 	default:
 		rulesConfig = &config.Ethash
 	}
 	return rulesconfig.CreateRulesEngine(ctx, &nodecfg.Config{Dirs: datadir.New(dir)}, cc, rulesConfig,
-		false /* noVerify */, config.WithoutHeimdall, blockReader, db.ReadOnly(), logger, polygonBridge, heimdallService)
+		false /* noVerify */, blockReader, db.ReadOnly(), logger)
 }
 
 func readGenesis(chain string) *types.Genesis {

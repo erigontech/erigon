@@ -1,4 +1,4 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -14,16 +14,21 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
-//go:build !linux
+package execution_client
 
-package iouring
+import (
+	"errors"
 
-// WarmOne is unreachable off Linux: the residency probe (mmap.Resident) is a
-// no-op there, so the gate never warms. It panics rather than silently no-op
-// because there is no fallback path — io_uring is Linux-only.
-func WarmOne(fd int, off int64, length int) {
-	panic("iouring: io_uring warming is only available on linux")
+	"github.com/erigontech/erigon/execution/engineapi/engine_helpers"
+	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/rpc"
+)
+
+// IsUnknownPayloadError reports an unknown-payload result from local or remote execution clients.
+func IsUnknownPayloadError(err error) bool {
+	if errors.Is(err, chainreader.ErrUnknownPayload) {
+		return true
+	}
+	var rpcErr rpc.Error
+	return errors.As(err, &rpcErr) && rpcErr.ErrorCode() == engine_helpers.UnknownPayloadErr.Code
 }
-
-// Available reports io_uring support: always false off Linux.
-func Available() bool { return false }

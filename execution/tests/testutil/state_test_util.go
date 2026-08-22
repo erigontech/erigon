@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/misc"
@@ -311,8 +312,8 @@ func (t *StateTest) RunNoVerify(tb testing.TB, sd *execctx.SharedDomains, tx kv.
 		root = common.BytesToHash(rootBytes)
 	}()
 
-	// Read through sd.AsGetter so execution sees never-Flushed pre-state held in sd.mem.
-	r := rpchelper.NewLatestStateReader(sd.AsGetter(tx))
+	// Read through sd.AsStateGetter so execution sees never-Flushed pre-state held in sd.mem.
+	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	w := rpchelper.NewLatestStateWriter(tx, sd, (*freezeblocks.BlockReader)(nil), writeBlockNr)
 	statedb = state.New(r)
 
@@ -437,8 +438,8 @@ func MakePreState(rules *chain.Rules, tx kv.TemporalRwTx, alloc types.GenesisAll
 
 // Loads pre-state into the caller-owned sd; closing sd without Flush discards it (keeps test state out of the branch cache).
 func MakePreStateInto(rules *chain.Rules, sd *execctx.SharedDomains, tx kv.TemporalRwTx, alloc types.GenesisAlloc, blockNr uint64) (*state.IntraBlockState, error) {
-	// Read through sd.AsGetter so SetCode/SetBalance see prior pre-state held in sd.mem.
-	r := rpchelper.NewLatestStateReader(sd.AsGetter(tx))
+	// Read through sd.AsStateGetter so SetCode/SetBalance see prior pre-state held in sd.mem.
+	r := rpchelper.NewLatestStateReader(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	statedb := state.New(r)
 	statedb.SetTxContext(blockNr, 0)
 	for addr, a := range alloc {

@@ -266,10 +266,11 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		}
 		available := balance.ToBig()
 		if args.Value != nil {
-			if args.Value.ToInt().Cmp(available) >= 0 {
+			value := args.Value.ToInt()
+			if value.Cmp(available) >= 0 {
 				return 0, errors.New("insufficient funds for transfer")
 			}
-			available.Sub(available, args.Value.ToInt())
+			available.Sub(available, value)
 		}
 
 		allowance := new(big.Int).Div(available, feeCap)
@@ -278,7 +279,7 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 		if allowance.IsUint64() && hi > allowance.Uint64() {
 			transfer := args.Value
 			if transfer == nil {
-				transfer = new(hexutil.Big)
+				transfer = new(hexutil.U256)
 			}
 			log.Warn("Gas estimation capped by limited funds", "original", hi, "balance", balance,
 				"sent", transfer.ToInt(), "maxFeePerGas", feeCap, "fundable", allowance)
@@ -1029,11 +1030,15 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		prevTracer = logger.NewAccessListTracer(*args.AccessList, excl, nil)
 	}
 
+	// Convergence re-runs the whole message, so the state is reset per iteration
+	// rather than rebuilt: Reset keeps the reader and the pooled maps behind it.
+	ibs := state.New(stateReader)
+	defer ibs.Close()
+
 	// One convergence iteration: a non-nil result means the access list converged,
 	// otherwise the returned tracer seeds the next iteration.
 	step := func(prevTracer *logger.AccessListTracer) (*accessListResult, *logger.AccessListTracer, error) {
-		ibs := state.New(stateReader)
-		defer ibs.Close()
+		ibs.Reset()
 
 		// Override the fields of specified contracts before execution.
 		if stateOverrides != nil {
@@ -1042,7 +1047,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 			}
 		}
 
-		// Retrieve the current access list to expand
+		// The message needs the list; the next tracer is seeded from the maps.
 		accessList := prevTracer.AccessList()
 		log.Trace("Creating access list", "input", accessList)
 
@@ -1061,8 +1066,7 @@ func (api *APIImpl) CreateAccessList(ctx context.Context, args ethapi2.CallArgs,
 		}
 
 		// Apply the transaction with the access list tracer
-		tracer := logger.NewAccessListTracer(accessList, excl, ibs)
-		defer tracer.Close()
+		tracer := prevTracer.SeedNew(ibs)
 		config := vm.Config{Tracer: tracer.Hooks(), NoBaseFee: true}
 		txCtx := protocol.NewEVMTxContext(msg)
 

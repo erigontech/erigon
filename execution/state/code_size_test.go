@@ -24,6 +24,7 @@ import (
 	"testing"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -52,33 +53,25 @@ func TestReproduceCrash(t *testing.T) {
 
 	txNum := uint64(1)
 	tsw := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	tsr := state.NewReaderV3(sd.AsGetter(tx))
+	tsr := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	intraBlockState := state.New(tsr)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.CreateAccount(contract, true))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 1st tx")
 	// Start the 2nd transaction
-	intraBlockState.SetState(contract, storageKey1, *value1)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.SetState(contract, storageKey1, *value1))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 2nd tx")
 	// Start the 3rd transaction
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	intraBlockState.SetState(contract, storageKey2, *value2)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, intraBlockState.SetState(contract, storageKey2, *value2))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 3rd tx")
 	// Start the 4th transaction - clearing both storage cells
-	intraBlockState.SubBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	intraBlockState.SetState(contract, storageKey1, *value0)
-	intraBlockState.SetState(contract, storageKey2, *value0)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.SubBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, intraBlockState.SetState(contract, storageKey1, *value0))
+	require.NoError(t, intraBlockState.SetState(contract, storageKey2, *value0))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 4th tx")
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
@@ -89,19 +82,17 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
 
-	r, tsw := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, tsw := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
+	require.NoError(t, intraBlockState.CreateAccount(contract, true))
 
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
 
-	intraBlockState.SetCode(contract, oldCode, tracing.CodeChangeUnspecified)
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.SetCode(contract, oldCode, tracing.CodeChangeUnspecified))
+	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 1st tx")
 	rh1, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	//t.Logf("stateRoot %x", rh1)
@@ -111,11 +102,9 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
 	newCode := []byte{0x04, 0x04, 0x04, 0x04}
-	intraBlockState.SetCode(contract, newCode, tracing.CodeChangeUnspecified)
+	require.NoError(t, intraBlockState.SetCode(contract, newCode, tracing.CodeChangeUnspecified))
 
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 2nd tx")
 
 	trieCode, tcErr = r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
@@ -136,20 +125,18 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	blockNum, txNum := uint64(1), uint64(3)
 	_ = blockNum
 
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
+	require.NoError(t, intraBlockState.CreateAccount(contract, true))
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
-	intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified)
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, w), "finalising 1st tx")
 	if err := intraBlockState.CommitBlock(&chain.Rules{}, w); err != nil {
 		t.Errorf("error committing block: %v", err)
 	}
@@ -174,20 +161,18 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	blockNum := uint64(1)
 	txNum := uint64(3)
 
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
+	require.NoError(t, intraBlockState.CreateAccount(contract, true))
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
-	intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified)
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, w), "finalising 1st tx")
 	if err := intraBlockState.CommitBlock(&chain.Rules{}, w); err != nil {
 		t.Errorf("error committing block: %v", err)
 	}
