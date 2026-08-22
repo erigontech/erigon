@@ -84,8 +84,23 @@ func txlMaxTxNum(block uint64) uint64 {
 	return txlMinTxNum(block) + txlTxPerBlock + 1
 }
 
-func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders, staleFloor, resumeFrom uint64) (kv.TemporalRwTx, TxLookupCfg, *PruneState) {
+// txlFixture builds one table plus the saved prune record a scenario starts from.
+// At most one of staleFloor / resumeFrom may be set: both describe the same record.
+type txlFixture struct {
+	firstHeader   uint64 // lowest block that keeps a kv.Headers row
+	pruneProgress uint64 // stages.TxLookup prune watermark
+	senders       uint64 // stages.Senders and stages.Execution progress
+	staleFloor    uint64 // TxFrom of a record left by a pre-fix binary
+	resumeFrom    uint64 // block whose key the interrupted rotation parked on
+	frozen        uint64 // blocks in snapshots; zero means txlFrozen
+}
+
+func (f txlFixture) build(t *testing.T) (kv.TemporalRwTx, TxLookupCfg, *PruneState) {
 	t.Helper()
+	frozen := f.frozen
+	if frozen == 0 {
+		frozen = txlFrozen
+	}
 	dir := t.TempDir()
 	db := temporaltest.NewTestDB(t, datadir.New(dir))
 	tx, err := db.BeginTemporalRw(context.Background())
@@ -105,40 +120,39 @@ func txLookupFixture(t *testing.T, firstHeader, pruneProgress, senders, staleFlo
 			h := txlTxHash(b, i)
 			require.NoError(t, tx.Put(kv.TxLookup, h[:], val))
 		}
-		if b >= firstHeader {
+		if b >= f.firstHeader {
 			var hh common.Hash
 			binary.BigEndian.PutUint64(hh[:], b)
 			require.NoError(t, tx.Put(kv.Headers, dbutils.HeaderKey(b, hh), []byte{1}))
 		}
 	}
-	if pruneProgress > 0 {
-		require.NoError(t, stages.SaveStagePruneProgress(tx, stages.TxLookup, pruneProgress))
+	if f.pruneProgress > 0 {
+		require.NoError(t, stages.SaveStagePruneProgress(tx, stages.TxLookup, f.pruneProgress))
 	}
-	if senders > 0 {
-		require.NoError(t, stages.SaveStageProgress(tx, stages.Senders, senders))
-		require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, senders))
+	if f.senders > 0 {
+		require.NoError(t, stages.SaveStageProgress(tx, stages.Senders, f.senders))
+		require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, f.senders))
 	}
-	// Both describe the single kv.TxLookup prune record, so at most one may be set.
-	require.False(t, resumeFrom > 0 && staleFloor > 0, "resumeFrom and staleFloor write the same record")
+	require.False(t, f.resumeFrom > 0 && f.staleFloor > 0, "resumeFrom and staleFloor write the same record")
 	switch {
-	case resumeFrom > 0:
+	case f.resumeFrom > 0:
 		// an interrupted rotation under the current floor: must be resumed, not restarted
-		h := txlTxHash(resumeFrom, 0)
+		h := txlTxHash(f.resumeFrom, 0)
 		require.NoError(t, state.SavePruneValProgress(tx, kv.TxLookup, &prune.Stat{
 			TxFrom: 0, TxTo: 1, ValueProgress: prune.InProgress, LastPrunedValue: h[:],
 		}))
-	case staleFloor > 0:
+	case f.staleFloor > 0:
 		// what a pre-fix binary left: non-zero floor, TxTo from Max(blockTo), rotation Done
 		h := txlTxHash(txlBlocks/2, 0)
 		require.NoError(t, state.SavePruneValProgress(tx, kv.TxLookup, &prune.Stat{
-			TxFrom: staleFloor, TxTo: txlMaxTxNum(txlBlockTo()),
+			TxFrom: f.staleFloor, TxTo: txlMaxTxNum(txlBlockTo()),
 			ValueProgress: prune.Done, LastPrunedValue: h[:],
 		}))
 	}
 
 	cfg := StageTxLookupCfg(prune.Mode{Initialised: true, History: prune.Distance(config3.DefaultPruneDistance)},
-		dir, txlBlockReader{frozen: txlFrozen})
-	s := &PruneState{ID: stages.TxLookup, ForwardProgress: txlBlocks, PruneProgress: pruneProgress,
+		dir, &txlBlockReader{frozen: frozen})
+	s := &PruneState{ID: stages.TxLookup, ForwardProgress: txlBlocks, PruneProgress: f.pruneProgress,
 		CurrentSyncCycle: CurrentSyncCycleInfo{IsInitialCycle: true}}
 	return tx, cfg, s
 }
@@ -160,22 +174,24 @@ func txlBlockRows(t *testing.T, tx kv.Tx, block uint64) int {
 // The bound is the snapshot frontier: rows below it duplicate the .idx files.
 func txlBlockTo() uint64 { return freezeblocks.CanDeleteTo(txlBlocks, txlFrozen) }
 
-// The floor must not track the bound: kv.Headers is deleted to the same frontier,
-// and SpawnTxLookup sets PruneProgress to FrozenBlocks().
+// The bound comes from the snapshot frontier alone. Each case varies an input the
+// removed floor used to read and asserts the same rows go — a guard against a floor
+// creeping back in, since kv.Headers is deleted to that same frontier and
+// SpawnTxLookup sets PruneProgress to FrozenBlocks().
 func TestPruneTxLookupFloor(t *testing.T) {
 	for _, tc := range []struct {
-		name                                            string
-		firstHeader, pruneProgress, senders, staleFloor uint64
+		name string
+		fx   txlFixture
 	}{
-		{name: "headers_from_genesis", firstHeader: 1},
-		{name: "headers_pruned_to_frontier", firstHeader: txlBlockTo()},
-		{name: "headers_pruned_past_frontier", firstHeader: txlBlocks - 1},
-		{name: "forward_stage_watermark", firstHeader: 1, pruneProgress: txlFrozen},
-		{name: "senders_fallback", firstHeader: txlBlocks + 1, senders: 500},
-		{name: "stale_rotation", firstHeader: 1, staleFloor: txlMinTxNum(txlBlocks / 2)},
+		{"headers_from_genesis", txlFixture{firstHeader: 1}},
+		{"headers_kept_to_the_bound", txlFixture{firstHeader: txlBlockTo()}},
+		{"headers_kept_above_the_bound", txlFixture{firstHeader: txlBlocks - 1}},
+		{"prune_watermark_at_the_frontier", txlFixture{firstHeader: 1, pruneProgress: txlFrozen}},
+		{"no_headers_senders_behind_the_bound", txlFixture{firstHeader: txlBlocks + 1, senders: 500}},
+		{"stale_rotation", txlFixture{firstHeader: 1, staleFloor: txlMinTxNum(txlBlocks / 2)}},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			tx, cfg, s := txLookupFixture(t, tc.firstHeader, tc.pruneProgress, tc.senders, tc.staleFloor, 0)
+			tx, cfg, s := tc.fx.build(t)
 			require.NoError(t, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
 
 			to := txlBlockTo()
@@ -194,7 +210,7 @@ func TestPruneTxLookupFloor(t *testing.T) {
 // every cycle would mean no rotation ever completes.
 func TestPruneTxLookupResumesInterruptedRotation(t *testing.T) {
 	const resumeAt = txlBlocks / 2
-	tx, cfg, s := txLookupFixture(t, 1, 0, 0, 0, resumeAt)
+	tx, cfg, s := txlFixture{firstHeader: 1, resumeFrom: resumeAt}.build(t)
 	require.NoError(t, PruneTxLookup(s, tx, cfg, context.Background(), log.New()))
 
 	// rows before the saved cursor are not visited this pass — proof it resumed
@@ -211,7 +227,7 @@ func TestPruneTxLookupResumesInterruptedRotation(t *testing.T) {
 // coverage it never achieved and short-circuit the pass that would catch them.
 func TestPruneTxLookupRotationRecordsItsStartBound(t *testing.T) {
 	ctx, logger := context.Background(), log.New()
-	tx, cfg, s := txLookupFixture(t, 1, 0, 0, 0, txlBlocks/2)
+	tx, cfg, s := txlFixture{firstHeader: 1, resumeFrom: txlBlocks / 2}.build(t)
 
 	// the interrupted rotation started at a lower bound than the current one
 	started, err := state.GetPruneValProgress(tx, []byte(kv.TxLookup))
@@ -232,7 +248,7 @@ func TestPruneTxLookupRotationRecordsItsStartBound(t *testing.T) {
 // rescanned once per payload to collect a single block of rows.
 func TestPruneTxLookupSkipsRescanAfterRotation(t *testing.T) {
 	ctx, logger := context.Background(), log.New()
-	tx, cfg, s := txLookupFixture(t, 1, 0, 0, 0, 0)
+	tx, cfg, s := txlFixture{firstHeader: 1}.build(t)
 
 	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
 	first, err := state.GetPruneValProgress(tx, []byte(kv.TxLookup))
@@ -254,11 +270,37 @@ func TestPruneTxLookupSkipsRescanAfterRotation(t *testing.T) {
 	require.NotNil(t, got, "rescanned the whole table though the bound had not moved")
 }
 
+// The short-circuit is keyed on the bound, not on the rotation alone: once
+// snapshots grow, blocks the last rotation spared fall below the new bound and
+// must still go. Dropping the bound check would stop the stage pruning for good
+// after its first completed rotation.
+func TestPruneTxLookupPrunesAfterBoundAdvance(t *testing.T) {
+	ctx, logger := context.Background(), log.New()
+	tx, cfg, s := txlFixture{firstHeader: 1}.build(t)
+
+	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
+	first, err := state.GetPruneValProgress(tx, []byte(kv.TxLookup))
+	require.NoError(t, err)
+	require.Equal(t, prune.Done, first.ValueProgress)
+
+	to := txlBlockTo()
+	require.EqualValues(t, txlTxPerBlock, txlBlockRows(t, tx, to), "pruned the exclusive bound")
+
+	reader := cfg.blockReader.(*txlBlockReader)
+	reader.frozen = txlFrozen + 100
+	advanced := freezeblocks.CanDeleteTo(txlBlocks, reader.frozen)
+	require.Greater(t, advanced, to, "frontier did not move: hard limit pins the bound")
+
+	require.NoError(t, PruneTxLookup(s, tx, cfg, ctx, logger))
+	require.Zero(t, txlBlockRows(t, tx, advanced-1), "short-circuited though the bound had advanced")
+	require.EqualValues(t, txlTxPerBlock, txlBlockRows(t, tx, advanced), "pruned the advanced bound")
+}
+
 // Drives one table through the whole prune lifecycle, asserting the state machine
 // at each step rather than each step in isolation.
 func TestPruneTxLookupLifecycle(t *testing.T) {
 	ctx, logger := context.Background(), log.New()
-	tx, cfg, s := txLookupFixture(t, 1, 0, 0, 0, 0)
+	tx, cfg, s := txlFixture{firstHeader: 1}.build(t)
 	progress := func() *prune.Stat {
 		st, err := state.GetPruneValProgress(tx, []byte(kv.TxLookup))
 		require.NoError(t, err)
