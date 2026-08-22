@@ -368,7 +368,7 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 // RPCMarshalHeader converts the given header to the RPC output .
 func RPCMarshalHeader(head *types.Header) map[string]any {
 	result := map[string]any{
-		"number":           (*hexutil.Big)(head.Number.ToBig()),
+		"number":           (*hexutil.U256)(&head.Number),
 		"hash":             head.Hash(),
 		"parentHash":       head.ParentHash,
 		"nonce":            head.Nonce,
@@ -377,7 +377,7 @@ func RPCMarshalHeader(head *types.Header) map[string]any {
 		"logsBloom":        head.Bloom,
 		"stateRoot":        head.Root,
 		"miner":            head.Coinbase,
-		"difficulty":       (*hexutil.Big)(head.Difficulty.ToBig()),
+		"difficulty":       (*hexutil.U256)(&head.Difficulty),
 		"extraData":        hexutil.Bytes(head.Extra),
 		"size":             hexutil.Uint64(head.Size()),
 		"gasLimit":         hexutil.Uint64(head.GasLimit),
@@ -387,7 +387,7 @@ func RPCMarshalHeader(head *types.Header) map[string]any {
 		"receiptsRoot":     head.ReceiptHash,
 	}
 	if head.BaseFee != nil {
-		result["baseFeePerGas"] = (*hexutil.Big)(head.BaseFee.ToBig())
+		result["baseFeePerGas"] = (*hexutil.U256)(head.BaseFee)
 	}
 	if head.WithdrawalsHash != nil {
 		result["withdrawalsRoot"] = head.WithdrawalsHash
@@ -424,7 +424,7 @@ func RPCMarshalHeader(head *types.Header) map[string]any {
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
 func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]any, error) {
-	fields := RPCMarshalHeader(block.Header())
+	fields := RPCMarshalHeader(block.HeaderNoCopy())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
 		fields["transactions"] = make([]any, 0)
