@@ -17,6 +17,7 @@
 package stagedsync
 
 import (
+	"bytes"
 	"context"
 	"testing"
 
@@ -27,6 +28,7 @@ import (
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -265,4 +267,66 @@ func TestComputeAheadCap_StopsComputeAhead(t *testing.T) {
 	cc.maybeComputeAhead(context.Background(), 5) // must return before computeBlockFromBAL
 
 	assert.False(t, cc.computedAhead[5], "a compute-ahead past the coalesce block M must not run")
+}
+
+// TestContiguityGuard_ChainNeverRecovers pins that one block without a BAL ends
+// compute-ahead for the whole batch: the chain is anchored at the last block that
+// advanced the commitment domain, so every later block reads a stale baseline and
+// stays on the incremental path, however contiguous it is with its own predecessor.
+func TestContiguityGuard_ChainNeverRecovers(t *testing.T) {
+	defer func(prev bool) { dbg.BALDrivenCommitment = prev }(dbg.BALDrivenCommitment)
+	defer func(prev bool) { dbg.IgnoreBAL = prev }(dbg.IgnoreBAL)
+	dbg.BALDrivenCommitment = true
+	dbg.IgnoreBAL = false
+
+	ctx := context.Background()
+	cc := &commitmentCalculator{
+		signalCtx:     ctx,
+		pending:       map[uint64]*pendingBlock{},
+		computedAhead: map[uint64]bool{},
+		balRoots:      map[uint64][]byte{},
+		hasFirstBlock: true,
+		firstBlockNum: 5,
+		perBlockFrom:  1 << 62, // all blocks pre-window, so none owns a changeset
+		// Block 5 computed ahead, block 6 had no BAL and never advanced the domain.
+		hasComputedAhead:       true,
+		lastComputedAheadBlock: 5,
+		hasSeenBlockResult:     true,
+	}
+
+	for n := uint64(7); n <= 12; n++ {
+		cc.lastBlockResultSeen = n - 1 // gate open: only the contiguity guard may reject
+		cc.pending[n] = &pendingBlock{
+			req:  &blockRequest{blockNum: n, bal: make(types.BlockAccessList, 1)},
+			mode: calcModeBALDriven,
+		}
+		cc.maybeComputeAhead(ctx, n)
+		assert.False(t, cc.computedAhead[n], "block %d must not compute ahead across the gap at block 6", n)
+		assert.True(t, cc.computeAheadStopped, "the fall back to incremental must be reported at block %d", n)
+	}
+	assert.Equal(t, uint64(5), cc.lastComputedAheadBlock, "the chain must stay anchored at block 5")
+}
+
+func TestHandOffUpdatesRotatesTwoBuffers(t *testing.T) {
+	first := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	second := commitment.NewUpdates(commitment.ModeParallel, t.TempDir(), commitment.KeyToHexNibbleHash)
+	cc := &commitmentCalculator{updates: first, spare: second}
+
+	touch := func(u *commitment.Updates, addr byte) {
+		u.TouchPlainKey(string(bytes.Repeat([]byte{addr}, 20)), nil, u.TouchAccount)
+	}
+
+	touch(cc.updates, 1)
+	handed := cc.handOffUpdates()
+	require.Same(t, first, handed, "the filled buffer must be the one handed off")
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
+	require.Same(t, second, cc.updates, "the spare must rotate in")
+	require.Zero(t, cc.updates.Size(), "the rotated-in buffer must be empty")
+
+	touch(cc.updates, 2)
+	handed = cc.handOffUpdates()
+	require.Same(t, second, handed)
+	require.NotZero(t, handed.Size(), "the handed-off buffer must keep the updates it will be folded from")
+	require.Same(t, first, cc.updates, "rotation must reuse the first buffer, not allocate")
+	require.Zero(t, cc.updates.Size(), "the reused buffer must be reset before refilling")
 }

@@ -227,18 +227,18 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 				if !hasELBlock {
 					hasELBlock, err = cfg.engine.HasBlock(ctx, payloadBlockHash)
 					if err != nil {
-						return false, fmt.Errorf("error retrieving whether execution payload is present: %s", err)
+						return false, fmt.Errorf("error retrieving whether execution payload is present: %w", err)
 					}
 				}
 
 				if !hasELBlock {
 					if blk.Version() >= clparams.GloasVersion {
 						if err := cfg.executionBlocksCollector.AddGloasBlock(blk.Block, envelope); err != nil {
-							return false, fmt.Errorf("error adding gloas block to execution blocks collector: %s", err)
+							return false, fmt.Errorf("error adding gloas block to execution blocks collector: %w", err)
 						}
 					} else {
 						if err := cfg.executionBlocksCollector.AddBlock(blk.Block); err != nil {
-							return false, fmt.Errorf("error adding block to execution blocks collector: %s", err)
+							return false, fmt.Errorf("error adding block to execution blocks collector: %w", err)
 						}
 					}
 					if currEth1Progress.Load()%100 == 0 {

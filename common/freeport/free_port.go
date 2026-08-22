@@ -58,7 +58,7 @@ func NextFreePort() (int, error) {
 		}
 
 		portNum = nextPortNum(portNum)
-		listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.FormatInt(portNum, 10))
+		listener, err := net.Listen("tcp", "127.0.0.1:"+strconv.FormatInt(portNum, 10)) //nolint:noctx
 		if err != nil {
 			continue
 		}

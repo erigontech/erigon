@@ -27,6 +27,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -67,7 +68,7 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 		return nil, fmt.Errorf("listStorageKeys cannot open tx: %w", err)
 	}
 	defer tx.Rollback()
-	a, err := rpchelper.NewLatestStateReader(tx).ReadAccountData(accounts.InternAddress(account))
+	a, err := rpchelper.NewLatestStateReader(execctx.NewTemporalTxStateGetter(tx)).ReadAccountData(accounts.InternAddress(account))
 	if err != nil {
 		return nil, err
 	} else if a == nil {
@@ -75,7 +76,12 @@ func (api *ParityAPIImpl) ListStorageKeys(ctx context.Context, account common.Ad
 	}
 
 	bn := rawdb.ReadCurrentBlockNumber(tx)
-	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn)
+	if bn == nil {
+		return nil, errors.New("current block number not found")
+	}
+	// Min(bn+1) is the first txNum past bn — the state the latest-state account
+	// read above sees. Min(bn) would scan storage as of the end of bn-1.
+	minTxNum, err := api._txNumReader.Min(ctx, tx, *bn+1)
 	if err != nil {
 		return nil, err
 	}

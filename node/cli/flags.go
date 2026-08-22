@@ -225,6 +225,7 @@ func BuildEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeCfg *nodecfg.
 }
 
 // ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
+//
 // Deprecated: use BuildEthConfig instead.
 func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	applyRemainingEthFlags(ctx, cfg, logger)

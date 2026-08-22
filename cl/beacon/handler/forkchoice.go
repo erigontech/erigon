@@ -29,7 +29,7 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 	if a.syncedData.Syncing() {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
 	}
-	root, slot, statusCode, err := a.getHead()
+	root, slot, statusCode, err := a.getSelectedHead()
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
@@ -38,7 +38,7 @@ func (a *ApiHandler) GetEthV2DebugBeaconHeads(w http.ResponseWriter, r *http.Req
 			map[string]any{
 				"slot":                 strconv.FormatUint(slot, 10),
 				"root":                 root,
-				"execution_optimistic": false,
+				"execution_optimistic": a.forkchoiceStore.IsRootOptimistic(root),
 			},
 		},
 	), nil

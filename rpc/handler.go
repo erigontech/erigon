@@ -95,8 +95,8 @@ func HandleError(err error, stream jsonstream.Stream) {
 		stream.WriteObjectField("error")
 		stream.WriteObjectStart()
 		stream.WriteObjectField("code")
-		ec, ok := err.(Error)
-		if ok {
+		var ec Error
+		if errors.As(err, &ec) {
 			stream.WriteInt(ec.ErrorCode())
 		} else {
 			stream.WriteInt(ErrCodeDefault)
@@ -104,8 +104,8 @@ func HandleError(err error, stream jsonstream.Stream) {
 		stream.WriteMore()
 		stream.WriteObjectField("message")
 		stream.WriteString(err.Error())
-		de, ok := err.(DataError)
-		if ok {
+		var de DataError
+		if errors.As(err, &de) {
 			stream.WriteMore()
 			stream.WriteObjectField("data")
 			data, derr := json.Marshal(de.ErrorData())
@@ -198,9 +198,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
-		// Batch items below run concurrently and write into private per-item buffers;
-		// see withoutGzipStreamingHook for why the hook must not reach them.
-		cp.ctx = withoutGzipStreamingHook(cp.ctx)
+		// Batch items below run concurrently and write into private per-item buffers.
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
 		answersWithNils := make([][]byte, len(calls))
 		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
@@ -648,11 +646,6 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		return msg.response(result)
 	}
 
-	// Switch gzip middleware to streaming mode before writing any response data.
-	if flush, ok := ctx.Value(httpFlusherContextKey{}).(func()); ok && flush != nil {
-		flush()
-	}
-
 	stream.WriteObjectStart()
 	stream.WriteObjectField("jsonrpc")
 	stream.WriteString("2.0")
@@ -681,8 +674,13 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
-		buf, _ := json.Marshal(msg)
-		_, _ = stream.Write(buf)
+		buf, err := json.Marshal(msg)
+		if err != nil {
+			buf, err = json.Marshal(msg.errorResponse(err))
+		}
+		if err == nil {
+			_, _ = stream.Write(buf)
+		}
 		return
 	}
 	stream.WriteObjectStart()

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"crypto/ecdsa"
+	"errors"
 	"math/big"
 	"sync"
 	"sync/atomic"
@@ -1154,7 +1155,9 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		}, clparams.CapellaVersion)
 		require.Nil(t, resp)
 		require.Error(t, err)
-		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+		var rpcErr rpc.Error
+		require.True(t, errors.As(err, &rpcErr))
+		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 
 	t.Run("withdrawals before Shanghai returns invalid payload attributes", func(t *testing.T) {
@@ -1194,7 +1197,9 @@ func TestForkchoiceUpdatedV2PayloadAttributesWithdrawalsValidation(t *testing.T)
 		}, clparams.CapellaVersion)
 		require.Nil(t, resp)
 		require.Error(t, err)
-		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+		var rpcErr rpc.Error
+		require.True(t, errors.As(err, &rpcErr))
+		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 }
 
@@ -1241,7 +1246,9 @@ func TestForkchoiceUpdatedV2ValidatesAttributesWhenSyncing(t *testing.T) {
 	}, clparams.CapellaVersion)
 	require.Nil(t, resp)
 	require.Error(t, err)
-	require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+	var rpcErr rpc.Error
+	require.True(t, errors.As(err, &rpcErr))
+	require.Equal(t, -38003, rpcErr.ErrorCode())
 }
 
 // TestForkchoiceUpdatedV3DefersAttributesValidationWhenSyncing pins the
@@ -1336,7 +1343,9 @@ func TestForkchoiceUpdatedV3RejectsMissingBeaconRootWhenValid(t *testing.T) {
 	}, clparams.DenebVersion)
 	require.Nil(t, resp)
 	require.Error(t, err)
-	require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+	var rpcErr rpc.Error
+	require.True(t, errors.As(err, &rpcErr))
+	require.Equal(t, -38003, rpcErr.ErrorCode())
 }
 
 // ---------------------------------------------------------------------------
@@ -1422,7 +1431,9 @@ func TestValidatePayloadAttributesPostFCU_AmsterdamGate(t *testing.T) {
 		}
 		err := srv.validatePayloadAttributesPostFCU(clparams.FuluVersion, attrs)
 		require.Error(t, err)
-		require.Equal(t, -38003, err.(rpc.Error).ErrorCode())
+		var rpcErr rpc.Error
+		require.True(t, errors.As(err, &rpcErr))
+		require.Equal(t, -38003, rpcErr.ErrorCode())
 	})
 
 	t.Run("pre-V4 without SlotNumber allowed", func(t *testing.T) {

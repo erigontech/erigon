@@ -38,7 +38,6 @@ type TraceConfig struct {
 	StateOverrides *ethapi.StateOverrides
 	BlockOverrides *ethapi.BlockOverrides
 
-	BorTraceEnabled    *bool
 	TxIndex            *hexutil.Uint
 	IncludeWithdrawals *bool
 }

@@ -86,9 +86,7 @@ type SimulatedBackend struct {
 	pendingReaderTx kv.TemporalTx
 	pendingState    *state.IntraBlockState // Currently pending state that will be the active on request
 
-	rmLogsFeed event.Feed
-	chainFeed  event.Feed
-	logsFeed   event.Feed
+	logsFeed event.Feed
 }
 
 func NewSimulatedBackendWithConfig(t *testing.T, alloc types.GenesisAlloc, config *chain.Config, gasLimit uint64) *SimulatedBackend {

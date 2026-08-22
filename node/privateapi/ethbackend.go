@@ -44,7 +44,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/erigontech/erigon/node/shards"
-	"github.com/erigontech/erigon/polygon/bridge"
 )
 
 // EthBackendAPIVersion
@@ -65,7 +64,6 @@ type EthBackendServer struct {
 	notifications         *shards.Notifications
 	db                    kv.TemporalRoDB
 	blockReader           dbservices.FullBlockReader
-	bridgeStore           bridge.Store
 	latestBlockBuiltStore *builder.LatestBlockBuiltStore
 
 	logsFilter     *LogsFilterAggregator
@@ -88,7 +86,7 @@ type EthBackend interface {
 }
 
 func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB, notifications *shards.Notifications, blockReader dbservices.FullBlockReader,
-	bridgeStore bridge.Store, logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
+	logger log.Logger, latestBlockBuiltStore *builder.LatestBlockBuiltStore, chainConfig *chain.Config,
 ) *EthBackendServer {
 	s := &EthBackendServer{
 		ctx:                   ctx,
@@ -96,7 +94,6 @@ func NewEthBackendServer(ctx context.Context, eth EthBackend, db kv.TemporalRwDB
 		notifications:         notifications,
 		db:                    db,
 		blockReader:           blockReader,
-		bridgeStore:           bridgeStore,
 		logsFilter:            NewLogsFilterAggregator(notifications.Events),
 		receiptsFilter:        NewReceiptsFilterAggregator(notifications.Events),
 		logger:                logger,
@@ -457,45 +454,6 @@ func (s *EthBackendServer) SubscribeReceipts(server remoteproto.ETHBACKEND_Subsc
 	return errors.New("no receipts filter available")
 }
 
-func (s *EthBackendServer) BorTxnLookup(ctx context.Context, req *remoteproto.BorTxnLookupRequest) (*remoteproto.BorTxnLookupReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	blockNum, ok, err := s.bridgeStore.EventTxnToBlockNum(ctx, gointerfaces.ConvertH256ToHash(req.BorTxHash))
-	if err != nil {
-		return nil, err
-	}
-	return &remoteproto.BorTxnLookupReply{
-		BlockNumber: blockNum,
-		Present:     ok,
-	}, nil
-}
-
-func (s *EthBackendServer) BorEvents(ctx context.Context, req *remoteproto.BorEventsRequest) (*remoteproto.BorEventsReply, error) {
-	tx, err := s.db.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
-	events, err := s.bridgeStore.EventsByBlock(ctx, gointerfaces.ConvertH256ToHash(req.BlockHash), req.BlockNum)
-	if err != nil {
-		return nil, err
-	}
-
-	eventsRaw := make([][]byte, len(events))
-	for i, event := range events {
-		eventsRaw[i] = event
-	}
-
-	return &remoteproto.BorEventsReply{
-		EventRlps: eventsRaw,
-	}, nil
-}
-
 func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AAValidationRequest) (*remoteproto.AAValidationReply, error) {
 	tx, err := s.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -538,7 +496,11 @@ func (s *EthBackendServer) AAValidation(ctx context.Context, req *remoteproto.AA
 		return nil, err
 	}
 
-	totalGasLimit := preTxCost + aaTxn.ValidationGasLimit + aaTxn.PaymasterValidationGasLimit + aaTxn.GasLimit + aaTxn.PostOpGasLimit
+	totalGasLimit, ok := aaTxn.TotalGasLimit(preTxCost)
+	if !ok {
+		log.Info("RIP-7560 validation err", "err", "gas limits sum overflows uint64")
+		return &remoteproto.AAValidationReply{Valid: false}, nil
+	}
 	_, _, err = aa.ValidateAATransaction(aaTxn, ibs, new(protocol.GasPool).AddGas(totalGasLimit), header, evm, s.chainConfig)
 	if err != nil {
 		log.Info("RIP-7560 validation err", "err", err.Error())

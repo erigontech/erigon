@@ -46,7 +46,7 @@ func Bench7(erigonURL, gethURL string) error {
 	for nextKey != nil {
 		var sr DebugStorageRange
 		if err := post(client, erigonURL, fmt.Sprintf(template, blockhash, i, to, *nextKey, 1024, reqID), &sr); err != nil {
-			return fmt.Errorf("Could not get storageRange: %v\n", err)
+			return fmt.Errorf("Could not get storageRange: %w\n", err)
 		}
 		if sr.Error != nil {
 			fmt.Printf("Error getting storageRange: %d %s\n", sr.Error.Code, sr.Error.Message)
@@ -65,7 +65,7 @@ func Bench7(erigonURL, gethURL string) error {
 	for nextKeyG != nil {
 		var srg DebugStorageRange
 		if err := post(client, gethURL, fmt.Sprintf(template, blockhash, i, to, *nextKeyG, 1024, reqID), &srg); err != nil {
-			return fmt.Errorf("Could not get storageRange: %v\n", err)
+			return fmt.Errorf("Could not get storageRange: %w\n", err)
 		}
 		if srg.Error != nil {
 			fmt.Printf("Error getting storageRange: %d %s\n", srg.Error.Code, srg.Error.Message)

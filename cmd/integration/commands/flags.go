@@ -50,7 +50,6 @@ var (
 	migration                    string
 	integrityFast, integritySlow bool
 	file                         string
-	HeimdallURL                  string
 	txtrace                      bool   // Whether to trace the execution (should only be used together with `block`)
 	chain                        string // Which chain to use (mainnet, sepolia, etc.)
 	outputCsvFile                string
@@ -175,7 +174,6 @@ func withDataDir(cmd *cobra.Command) {
 
 func withExperimentalCommitment(cmd *cobra.Command) {
 	cmd.Flags().BoolVar(&statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Name, statecfg.ExperimentalParallelCommitment, utils.ExperimentalParallelCommitmentFlag.Usage)
-	cmd.Flags().BoolVar(&statecfg.ExperimentalStreamingCommitment, utils.ExperimentalStreamingCommitmentFlag.Name, statecfg.ExperimentalStreamingCommitment, utils.ExperimentalStreamingCommitmentFlag.Usage)
 }
 
 func withBatchSize(cmd *cobra.Command) {
@@ -202,10 +200,6 @@ func withTxTrace(cmd *cobra.Command) {
 func withChain(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&chain, "chain", "", "pick a chain to assume (mainnet, sepolia, etc.)")
 	must(cmd.MarkFlagRequired("chain"))
-}
-
-func withHeimdall(cmd *cobra.Command) {
-	cmd.Flags().StringVar(&HeimdallURL, "bor.heimdall", "http://localhost:1317", "URL of Heimdall service")
 }
 
 func withWorkers(cmd *cobra.Command) {
@@ -236,7 +230,6 @@ func withStageBase(cmd *cobra.Command) {
 	withDataDir(cmd)
 	withChain(cmd)
 	withChaosMonkey(cmd)
-	withHeimdall(cmd)
 	withUnwind(cmd)
 }
 

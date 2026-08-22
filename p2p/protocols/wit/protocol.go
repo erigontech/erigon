@@ -1,7 +1,6 @@
 package wit
 
 import (
-	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/common"
@@ -54,17 +53,6 @@ const (
 	NewWitnessHashesMsg = 0x01 // announces witness availability
 	GetWitnessMsg       = 0x02 // witness request
 	WitnessMsg          = 0x03 // witness response
-)
-
-var (
-	errNoStatusMsg             = errors.New("no status message")
-	errMsgTooLarge             = errors.New("message too long")
-	errDecode                  = errors.New("invalid message")
-	errInvalidMsgCode          = errors.New("invalid message code")
-	errProtocolVersionMismatch = errors.New("protocol version mismatch")
-	errNetworkIDMismatch       = errors.New("network ID mismatch")
-	errGenesisMismatch         = errors.New("genesis mismatch")
-	errForkIDRejected          = errors.New("fork ID rejected")
 )
 
 // Packet represents a p2p message in the `wit` protocol.

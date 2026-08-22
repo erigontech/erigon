@@ -388,6 +388,9 @@ type getFinalizedExecutionHashForkGraph struct {
 	addChainSegmentStatus fork_graph.ChainSegmentInsertionResult
 	addChainSegmentErr    error
 	addChainSegmentCalled bool
+	anchorRoot            common.Hash
+	anchorSlot            uint64
+	currentJustified      solid.Checkpoint
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeaconBlock, bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
@@ -433,7 +436,7 @@ func (g *getFinalizedExecutionHashForkGraph) stateCopyModes() []bool {
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetCurrentJustifiedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
-	panic("not used")
+	return g.currentJustified, true
 }
 
 func (g *getFinalizedExecutionHashForkGraph) GetFinalizedCheckpoint(common.Hash) (solid.Checkpoint, bool) {
@@ -449,11 +452,11 @@ func (g *getFinalizedExecutionHashForkGraph) MarkHeaderAsInvalid(common.Hash) {
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AnchorSlot() uint64 {
-	panic("not used")
+	return g.anchorSlot
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AnchorRoot() common.Hash {
-	panic("not used")
+	return g.anchorRoot
 }
 
 func (g *getFinalizedExecutionHashForkGraph) Prune(uint64) error {
