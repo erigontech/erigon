@@ -125,6 +125,12 @@ type SharedDomains struct {
 	// forward across rounds, exactly matching the accumulation lifecycle — so the seal derives
 	// ReceiptHash/Bloom/GasUsed over the full body with ZERO re-execution.
 	flashblockReceipts types.Receipts
+	// flashblockAccumulating marks this SD as a flashblock PRE-EXECUTE accumulation round (set by
+	// PreExecute). When set, exec SKIPS the per-round block-END (engine.Finalize): the block-end
+	// belongs to the CLOSE, which runs exactly once via ValidateChain (a fresh SD → flag unset →
+	// block-end runs). This is the clean discriminator between the two isForkValidation entry points
+	// (PreExecute accumulation vs ValidateChain close), replacing the global FlashblockSkipBlockEnd.
+	flashblockAccumulating bool
 	currentStep       kv.Step
 	trace             bool //nolint
 	commitmentCapture bool
@@ -685,6 +691,14 @@ func (sd *SharedDomains) AppendFlashblockReceipts(r types.Receipts) {
 // FlashblockReceipts returns the receipts accumulated across the in-progress flashblock's rounds,
 // in body order (the seal input).
 func (sd *SharedDomains) FlashblockReceipts() types.Receipts { return sd.flashblockReceipts }
+
+// SetFlashblockAccumulating marks this SD as a flashblock PreExecute accumulation round (block-end
+// skipped). PreExecute sets true; ValidateChain (the close, on a fresh SD) leaves it false so the
+// block-end runs exactly once at the seal.
+func (sd *SharedDomains) SetFlashblockAccumulating(v bool) { sd.flashblockAccumulating = v }
+
+// FlashblockAccumulating reports whether this SD is a flashblock accumulation round (skip block-end).
+func (sd *SharedDomains) FlashblockAccumulating() bool { return sd.flashblockAccumulating }
 
 // SetDisableInlineTouchKey disables the TouchKey call inside DomainPut/DomainDel.
 // When the commitment calculator goroutine owns the Updates buffer, the inline

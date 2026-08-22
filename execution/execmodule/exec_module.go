@@ -636,6 +636,11 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if validationError != nil {
 		result.ValidationError = validationError.Error()
 	}
+	// Surface the sealed state root the executor computed over the accumulated SD (the CLOSE runs
+	// block-end here, so this is the FINAL sealed root, not the deferred per-round PreExecute root).
+	if root := doms.LastComputedRoot(); len(root) > 0 {
+		result.ComputedRoot = common.BytesToHash(root)
+	}
 	return result, nil
 }
 

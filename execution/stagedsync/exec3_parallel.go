@@ -2869,12 +2869,11 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 
 				chainReader := consensuschain.NewReader(pe.cfg.chainConfig, applyTx, pe.cfg.blockReader, pe.logger)
-				// STEP 3a (cocoon flashblock): strip the per-round block-END on the PRE-EXEC /
-				// fork-validation path. Finalize (withdrawals + end-of-block system calls) belongs to the
-				// CLOSE half of the boundary pair and runs exactly ONCE at seal, not per round as the
-				// flashblock body grows — so skip it here; the accumulating SD carries USER-tx state only.
-				// See FlashblockSkipBlockEnd. Real block application always finalizes.
-				skipBlockEnd := pe.isForkValidation && dbg.FlashblockSkipBlockEnd
+				// cocoon flashblock: skip the per-round block-END Finalize during PRE-EXECUTE accumulation
+				// (FlashblockAccumulating) — the systemEnd task still RUNS (drives round completion +
+				// commitment), but its withdrawals + end-of-block system calls run exactly ONCE at the
+				// CLOSE (ValidateChain, flag unset). Real block application (!isForkValidation) finalizes.
+				skipBlockEnd := pe.isForkValidation && pe.doms.FlashblockAccumulating()
 				if !skipBlockEnd {
 					if _, err := pe.cfg.engine.Finalize(
 						pe.cfg.chainConfig, types.CopyHeader(tt.Header), ibs, tt.Uncles, receipts,

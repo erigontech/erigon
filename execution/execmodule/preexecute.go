@@ -115,6 +115,10 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 		}
 	}
 
+	// Mark this as a flashblock accumulation round → exec skips the per-round block-END (it belongs
+	// to the CLOSE, which runs once via ValidateChain over a fresh SD where this flag is unset).
+	doms.SetFlashblockAccumulating(true)
+
 	tx := doms.BlockOverlay()
 
 	// Flush the InsertBlocks overlay (this round's block header/body) into the exec overlay so
@@ -166,9 +170,11 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 	if validationError != nil {
 		res.ValidationError = validationError.Error()
 	}
-	// Surface the root the executor computed this round off the maintained SD (STEP 3b: the seal
-	// will build the sealed header from this instead of the deferred Root{}).
-	if root := doms.LastComputedRoot(); len(root) > 0 {
+	// Surface the state root by READING the accumulated SD's commitment trie — the same in-tree
+	// pattern as exec_module_test.go:113 (extendingSd.GetCommitmentCtx().Trie().RootHash()). Exec sets
+	// this in the commitment trie when it computes commitment at block-end; we read it back rather than
+	// capturing it out-of-band (the old LastComputedRoot hack read on the wrong/fresh SD → zero).
+	if root, rerr := doms.GetCommitmentContext().Trie().RootHash(); rerr == nil && len(root) > 0 {
 		res.ComputedRoot = common.BytesToHash(root)
 	}
 	// Surface the accumulated flashblock receipt count (== body txs executed so far) — the seal

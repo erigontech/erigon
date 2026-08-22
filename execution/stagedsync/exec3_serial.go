@@ -416,17 +416,15 @@ func (se *serialExecutor) executeBlock(ctx context.Context, tasks []exec.Task, i
 					}
 				}
 
-				// STEP 3a (cocoon flashblock): on the PRE-EXEC / fork-validation path, strip the
-				// per-round block-END. engine.Finalize applies withdrawals + end-of-block system calls;
-				// re-running it every round (as the body grows) repeatedly mutates state. The block-end
-				// belongs to the CLOSE half of the boundary pair and runs exactly ONCE at seal, so skip it
-				// here — the accumulating SharedDomains carries USER-tx state only. See FlashblockSkipBlockEnd.
-				skipBlockEnd := se.isForkValidation && dbg.FlashblockSkipBlockEnd
+				// cocoon flashblock: skip the per-round block-END Finalize during PRE-EXECUTE accumulation
+				// (FlashblockAccumulating) — the systemEnd task still RUNS (it drives round completion +
+				// commitment, so it cannot be skipped/removed), but its withdrawals + end-of-block system
+				// calls must run exactly ONCE, at the CLOSE (ValidateChain, where the flag is unset).
+				skipBlockEnd := se.isForkValidation && se.doms.FlashblockAccumulating()
 				if !skipBlockEnd {
 					_, err = se.cfg.engine.Finalize(
 						se.cfg.chainConfig, types.CopyHeader(txTask.Header), ibs, txTask.Uncles,
 						finalizeReceipts, txTask.Withdrawals, chainReader, syscall, false, se.logger)
-
 					if err != nil {
 						return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 					}

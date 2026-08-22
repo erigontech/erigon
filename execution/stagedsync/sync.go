@@ -373,6 +373,29 @@ func (e *ErrLoopExhausted) Is(err error) bool {
 	return errors.As(err, &errExhausted)
 }
 
+// ErrPartialBlock is the inverse of ErrLoopExhausted: where ErrLoopExhausted means "hit a limit, MORE
+// work remains, resume forward" (and commits what's done), ErrPartialBlock means "stopped SHORT of
+// completion — the block is intentionally PART-EXECUTED (real txs applied, block-end/seal NOT run)."
+// It is the clean stop-short signal for the cocoon flashblock ACCUMULATION path: PreExecute leaves a
+// part-executed block each round and returns this rather than finalizing/committing (which would seal
+// per round and leave the close with nothing). Handled NON-FATALLY (like ErrLoopExhausted) but WITHOUT
+// running commitment — the block is left partial for the CLOSE (ValidateChain) to complete. Skipping the
+// systemEnd task without this signal HANGS the apply loop (it is the missing completion signal).
+type ErrPartialBlock struct {
+	BlockNum uint64
+	TxNum    uint64
+	Reason   string
+}
+
+func (e *ErrPartialBlock) Error() string {
+	return fmt.Sprintf("partial block: blockNum=%d, txNum=%d, reason=%s", e.BlockNum, e.TxNum, e.Reason)
+}
+
+func (e *ErrPartialBlock) Is(err error) bool {
+	var errPartial *ErrPartialBlock
+	return errors.As(err, &errPartial)
+}
+
 func (s *Sync) Run(sd *execctx.SharedDomains, tx kv.TemporalRwTx, initialCycle, firstCycle bool) (more bool, err error) {
 	s.prevUnwindPoint = nil
 	s.timings = s.timings[:0]
