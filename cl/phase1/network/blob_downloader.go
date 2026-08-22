@@ -240,10 +240,12 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	prevTime := time.Now()
 	retryPending := true
 	targetSlot := b.nextBackfillTargetSlot
+	retryFloor := uint64(0)
 	// in case of non-archive mode, we only backfill the last relevant epochs
 	if !b.archiveBlobs {
 		retentionFloor := currentSlot - min(currentSlot, b.beaconCfg.MinSlotsForBlobsSidecarsRequest())
 		targetSlot = max(targetSlot, retentionFloor)
+		retryFloor = retentionFloor
 	}
 
 	if shouldLog {
@@ -262,7 +264,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			continue
 		}
 		if retryPending {
-			if err := b.retryFailedRecoveries(); err != nil {
+			if err := b.retryFailedRecoveries(retryFloor); err != nil {
 				return err
 			}
 			retryPending = false
@@ -331,11 +333,11 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	return nil
 }
 
-func (b *BlobHistoryDownloader) retryFailedRecoveries() error {
+func (b *BlobHistoryDownloader) retryFailedRecoveries(retryFloor uint64) error {
 	if len(b.retryRanges) == 0 {
 		return nil
 	}
-	firstUnfrozenSlot := b.sn.FrozenBlobs()
+	firstUnfrozenSlot := max(retryFloor, b.sn.FrozenBlobs())
 	b.trimRetryRanges(firstUnfrozenSlot)
 	attemptedSlots := make(map[uint64]struct{}, blocksBatchSize)
 	for range blocksBatchSize {
