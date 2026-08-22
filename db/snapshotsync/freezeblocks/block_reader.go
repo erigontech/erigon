@@ -83,6 +83,18 @@ func (r *RemoteBlockReader) RawTransactions(ctx context.Context, tx kv.Getter, f
 	panic("not implemented")
 }
 
+func (r *RemoteBlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.Hash, blockNum uint64) ([]common.Hash, error) {
+	body, err := r.BodyWithTransactions(ctx, tx, hash, blockNum)
+	if err != nil || body == nil {
+		return nil, err
+	}
+	hashes := make([]common.Hash, len(body.Transactions))
+	for i, txn := range body.Transactions {
+		hashes[i] = txn.Hash()
+	}
+	return hashes, nil
+}
+
 func (r *RemoteBlockReader) FirstTxnNumNotInSnapshots(_ kv.Getter) uint64 {
 	panic("not implemented")
 }
@@ -716,6 +728,80 @@ func (r *BlockReader) Header(ctx context.Context, tx kv.Getter, hash common.Hash
 	return h, nil
 }
 
+// TxnHashes returns the block's txn hashes without decoding the transactions.
+// Both the snapshot and the db hold each txn as the RLP that rawdb.WriteTransactions
+// wrote, and a txn hash is a pure function of it - see types.TxnHashFromRLP.
+func (r *BlockReader) TxnHashes(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) ([]common.Hash, error) {
+	var dbgPrefix string
+	dbgLogs := dbg.Enabled(ctx)
+	if dbgLogs {
+		dbgPrefix = fmt.Sprintf("[dbg] BlockReader(idxMax=%d,segMax=%d).TxnHashes(hash=%x,blk=%d) -> ", r.sn.IndicesMax(), r.sn.SegmentsMax(), hash, blockHeight)
+	}
+
+	maxBlockNumInFiles := r.sn.BlocksAvailable()
+	if blockHeight == 0 || maxBlockNumInFiles == 0 || blockHeight > maxBlockNumInFiles {
+		if tx == nil {
+			if dbgLogs {
+				log.Info(dbgPrefix + "RoTx is nil")
+			}
+			return nil, nil
+		}
+		hashes, err := rawdb.ReadBodyTxnHashes(tx, hash, blockHeight)
+		if err != nil {
+			return nil, err
+		}
+		if hashes != nil {
+			return hashes, nil
+		}
+		if dbgLogs {
+			log.Info(dbgPrefix + "found in db=false")
+		}
+		// not in the db, so fall through to the files, as BodyWithTransactions does
+	}
+
+	// One view for both segments: the txn ids read from the bodies file must be
+	// looked up in a transactions file of the same generation.
+	view, release := r.view(tx)
+	defer release()
+
+	seg, ok := view.Segment(snaptype2.Bodies, blockHeight)
+	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix + "no bodies file for this block num")
+		}
+		return nil, nil
+	}
+	body, baseTxnID, txCount, buf, err := r.bodyFromSnapshot(blockHeight, seg, nil)
+	if err != nil {
+		return nil, err
+	}
+	if body == nil {
+		if dbgLogs {
+			log.Info(dbgPrefix + "got nil body from file")
+		}
+		return nil, nil
+	}
+	if txCount == 0 { // nothing to hash, so the transactions segment is not needed
+		return []common.Hash{}, nil
+	}
+
+	txnSeg, ok := view.Segment(snaptype2.Transactions, blockHeight)
+	if !ok {
+		if dbgLogs {
+			log.Info(dbgPrefix+"no transactions file for this block num", "r.sn.BlocksAvailable()", r.sn.BlocksAvailable(), "r.sn.idxMax", r.sn.IndicesMax(), "r.sn.segmetntsMax", r.sn.SegmentsMax())
+		}
+		return nil, nil
+	}
+	hashes, err := r.txnHashesFromSnapshot(baseTxnID, txCount, txnSeg, buf)
+	if err != nil {
+		return nil, err
+	}
+	if hashes == nil && dbgLogs {
+		log.Info(dbgPrefix + "no transactions index for this block num")
+	}
+	return hashes, nil
+}
+
 func (r *BlockReader) BodyWithTransactions(ctx context.Context, tx kv.Getter, hash common.Hash, blockHeight uint64) (body *types.Body, err error) {
 	var dbgPrefix string
 	dbgLogs := dbg.Enabled(ctx)
@@ -1139,6 +1225,47 @@ func BodyForStorageFromSnapshot(blockHeight uint64, sn *snapshotsync.VisibleSegm
 	}
 
 	return b, buf, nil
+}
+
+// txnHashesFromSnapshot mirrors txsFromSnapshot but hashes each record's raw RLP
+// instead of decoding it. Unlike txsFromSnapshot a segment ending early is an error,
+// not a nil result - see rawdb.CanonicalTransactionHashes.
+func (r *BlockReader) txnHashesFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte) (hashes []common.Hash, err error) {
+	defer func() {
+		if rec := recover(); rec != nil {
+			panic(fmt.Errorf("%+v, snapshot: %d-%d, trace: %s", rec, txsSeg.From(), txsSeg.To(), dbg.Stack()))
+		}
+	}() // avoid crash because Erigon's core does many things
+
+	idxTxnHash := txsSeg.Src().Index(snaptype2.Indexes.TxnHash)
+	if idxTxnHash == nil {
+		return nil, nil
+	}
+	if baseTxnID < idxTxnHash.BaseDataID() {
+		return nil, fmt.Errorf(".idx file has wrong baseDataID? %d<%d, %s", baseTxnID, idxTxnHash.BaseDataID(), txsSeg.Src().FileName())
+	}
+
+	hashes = make([]common.Hash, txCount)
+	if txCount == 0 { // OrdinalLookup below is unchecked, and its ordinal may not exist
+		return hashes, nil
+	}
+	txnOffset := idxTxnHash.OrdinalLookup(baseTxnID - idxTxnHash.BaseDataID())
+	gg := txsSeg.Src().MakeGetter()
+	gg.Reset(txnOffset)
+	for i := range txCount {
+		if !gg.HasNext() {
+			return nil, fmt.Errorf("segment %s ended after %d of %d txns, txnID %d", txsSeg.Src().FileName(), i, txCount, baseTxnID+uint64(i))
+		}
+		buf, _ = gg.Next(buf[:0])
+		if len(buf) < 1+20 {
+			return nil, fmt.Errorf("segment %s has too short record: len(buf)=%d < 21", txsSeg.Src().FileName(), len(buf))
+		}
+		if hashes[i], err = types.TxnHashFromRLP(buf[1+20:]); err != nil {
+			return nil, fmt.Errorf("txn %d of %d, txnID %d, %s: %w", i, txCount, baseTxnID+uint64(i), txsSeg.Src().FileName(), err)
+		}
+	}
+
+	return hashes, nil
 }
 
 func (r *BlockReader) txsFromSnapshot(baseTxnID uint64, txCount uint32, txsSeg *snapshotsync.VisibleSegment, buf []byte) (txs []types.Transaction, senders []common.Address, err error) {
