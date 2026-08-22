@@ -2601,3 +2601,34 @@ func TestHistoryStreamsKeepInvariant2(t *testing.T) {
 		streamtest.RequireInvariant2KV(t, it)
 	})
 }
+
+// BenchmarkHistoryRangePaged walks merged (page-compressed) history files, which is
+// where PagedReader decodes a page per Reset. BenchmarkHistoryRange_MultiFile keeps
+// its files un-merged, so it never reaches that path.
+func BenchmarkHistoryRangePaged(b *testing.B) {
+	logger := log.New()
+	ctx := b.Context()
+
+	db, h, txs := filledHistory(b, true, logger)
+	collateAndMergeHistory(b, db, h, txs, true)
+
+	tx, err := db.BeginRo(ctx)
+	require.NoError(b, err)
+	defer tx.Rollback()
+
+	ic := h.beginForTests()
+	defer ic.Close()
+	requirePagedHistoryFiles(b, ic)
+
+	b.ResetTimer()
+	b.ReportAllocs()
+	for b.Loop() {
+		it, err := ic.HistoryRange(0, int(txs), order.Asc, -1, tx)
+		require.NoError(b, err)
+		for it.HasNext() {
+			_, _, err := it.Next()
+			require.NoError(b, err)
+		}
+		it.Close()
+	}
+}
