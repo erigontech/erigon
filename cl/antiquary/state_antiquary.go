@@ -21,7 +21,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"path/filepath"
 	"sync"
 	"time"
 
@@ -622,67 +621,73 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 	// site needs a maxSlotsPerCommit batch and the snapgen site a fresh dump.
 	s.pruneFrozenStateTables(ctx, s.currentState.Slot())
 
-	if s.snapgen {
-		blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
-		from := s.stateSn.BlocksAvailable() + 1
-		if from+blocksPerStatefulFile+safetyMargin > s.currentState.Slot() {
-			return nil
+	dumpedTo, err := s.dumpCaplinStateIfDue(ctx)
+	if err != nil {
+		return err
+	}
+
+	if s.stateSn != nil {
+		// Before seeding, so a subset superseded by the dump is not hashed and announced
+		// microseconds before it is unlinked. Outside the snapgen block because downloaded
+		// files overlap too, and snapgen is off by default.
+		if err := s.stateSn.RemoveOverlaps(func(l []string) error {
+			if s.downloader == nil {
+				return nil
+			}
+			return s.downloader.Delete(ctx, l)
+		}); err != nil {
+			s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
 		}
-		to := s.currentState.Slot()
-		if to < (safetyMargin + blocksPerStatefulFile) {
-			return nil
-		}
-		to -= (safetyMargin + blocksPerStatefulFile)
-		if from >= to {
-			return nil
-		}
-		if err := s.stateSn.DumpCaplinState(
-			ctx,
-			to,
-			blocksPerStatefulFile,
-			s.sn.Salt,
-			s.dirs,
-			1,
-			log.LvlInfo,
-			s.logger,
-		); err != nil {
-			return err
-		}
-		// Open the new files before collecting paths so the seeder sees them;
-		// seed from 0 since a per-type resume can dump a new type from genesis.
-		if err := s.stateSn.OpenFolder(); err != nil {
-			return err
-		}
-		// Prune only after OpenFolder: coverage must include the just-frozen range.
-		s.pruneFrozenStateTables(ctx, s.currentState.Slot())
-		var onDelete func(l []string) error
-		if s.downloader != nil {
-			paths := s.stateSn.SegFileNames(0, to)
+		if dumpedTo != 0 && s.downloader != nil {
 			// Notify bittorent to seed the new snapshots
-			if err := s.downloader.Seed(s.ctx, paths); err != nil {
+			if err := s.downloader.Seed(ctx, s.stateSn.SegFileNames(0, dumpedTo)); err != nil {
 				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 			}
-			onDelete = func(l []string) error {
-				return s.downloader.Delete(s.ctx, absPaths(s.stateSn.Dir(), l))
-			}
-		}
-		if err := s.stateSn.RemoveOverlaps(onDelete); err != nil {
-			s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
 		}
 	}
 
 	return nil
 }
 
-// absPaths re-roots names RemoveOverlaps reported relative to the caplin state dir. The
-// downloader is rooted at dirs.Snap and keys these torrents under caplin/, and it re-roots
-// only paths that arrive absolute — a relative name reaches it verbatim and matches nothing.
-func absPaths(dir string, names []string) []string {
-	out := make([]string, len(names))
-	for i, name := range names {
-		out[i] = filepath.Join(dir, name)
+// dumpCaplinStateIfDue freezes a new state range once enough slots have accumulated past the
+// safety margin. It reports the slot dumped to, or 0 when snapgen is off or nothing was due.
+func (s *Antiquary) dumpCaplinStateIfDue(ctx context.Context) (uint64, error) {
+	if !s.snapgen {
+		return 0, nil
 	}
-	return out
+	blocksPerStatefulFile := uint64(snaptype.CaplinMergeLimit * 5)
+	from := s.stateSn.BlocksAvailable() + 1
+	if from+blocksPerStatefulFile+safetyMargin > s.currentState.Slot() {
+		return 0, nil
+	}
+	to := s.currentState.Slot()
+	if to < (safetyMargin + blocksPerStatefulFile) {
+		return 0, nil
+	}
+	to -= (safetyMargin + blocksPerStatefulFile)
+	if from >= to {
+		return 0, nil
+	}
+	if err := s.stateSn.DumpCaplinState(
+		ctx,
+		to,
+		blocksPerStatefulFile,
+		s.sn.Salt,
+		s.dirs,
+		1,
+		log.LvlInfo,
+		s.logger,
+	); err != nil {
+		return 0, err
+	}
+	// Open the new files before collecting paths so the seeder sees them;
+	// seed from 0 since a per-type resume can dump a new type from genesis.
+	if err := s.stateSn.OpenFolder(); err != nil {
+		return 0, err
+	}
+	// Prune only after OpenFolder: coverage must include the just-frozen range.
+	s.pruneFrozenStateTables(ctx, s.currentState.Slot())
+	return to, nil
 }
 
 func (s *Antiquary) initializeStateAntiquaryIfNeeded(ctx context.Context, tx kv.Tx) error {

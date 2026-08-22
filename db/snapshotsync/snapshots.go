@@ -1588,8 +1588,10 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 		if err != nil {
 			return err
 		}
-		if err := onDelete(relativePaths); err != nil {
-			return fmt.Errorf("onDelete: %w", err)
+		if len(relativePaths) > 0 {
+			if err := onDelete(relativePaths); err != nil {
+				return fmt.Errorf("onDelete: %w", err)
+			}
 		}
 	}
 

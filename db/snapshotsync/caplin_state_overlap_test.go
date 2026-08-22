@@ -301,3 +301,48 @@ func TestCaplinStateRemoveOverlapsKeepsNewestEqualRangeVersion(t *testing.T) {
 	require.FileExists(t, newSeg, "the newest version is what View() serves")
 	require.NoFileExists(t, oldSeg)
 }
+
+func TestCaplinStateRemoveOverlapsReportsDownloaderKeys(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
+	subSeg, subIdx := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	var reported []string
+	require.NoError(t, s.RemoveOverlaps(func(l []string) error {
+		reported = append(reported, l...)
+		return nil
+	}))
+
+	require.NoFileExists(t, subSeg)
+	// The downloader is rooted at dirs.Snap and stores these under a slash-separated
+	// caplin/ key; filepath.Join would report caplin\... on Windows and match nothing.
+	require.Contains(t, reported, "caplin/"+filepath.Base(subSeg))
+	require.Contains(t, reported, "caplin/"+filepath.Base(subIdx))
+	for _, name := range reported {
+		require.NotContains(t, name, `\`, "downloader keys are slash-separated")
+	}
+}
+
+func TestCaplinStateRemoveOverlapsSkipsTheCallbackWithNothingToRemove(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 150_000, 200_000, logger)
+	require.False(t, hasDiskOverlap(t, dirs.SnapCaplin, table))
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	called := 0
+	require.NoError(t, s.RemoveOverlaps(func(l []string) error {
+		called++
+		return nil
+	}))
+	require.Zero(t, called, "steady state must not cost a downloader round-trip")
+}
