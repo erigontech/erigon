@@ -19,6 +19,8 @@ package logger
 import (
 	"context"
 	"encoding/hex"
+	"maps"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -250,24 +252,16 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("storage")
 		l.stream.WriteObjectStart()
-		first := true
-		// Sort storage by locations for easier comparison with geth
-		if l.locations != nil {
-			l.locations = l.locations[:0]
-		}
+		// Sorted by location for easier comparison with geth
 		s := l.storage[contractAddr]
-		for loc := range s {
-			l.locations = append(l.locations, loc)
-		}
+		l.locations = slices.AppendSeq(l.locations[:0], maps.Keys(s))
 		l.locations.Sort()
 		for i := range l.locations {
-			loc := &l.locations[i]
-			value := s[*loc]
-			if first {
-				first = false
-			} else {
+			if i > 0 {
 				l.stream.WriteMore()
 			}
+			loc := &l.locations[i]
+			value := s[*loc]
 			l.stream.WriteObjectField(l.hexWithPrefix(loc))
 			l.stream.WriteRaw(l.hexQuotedHash(&value))
 		}
