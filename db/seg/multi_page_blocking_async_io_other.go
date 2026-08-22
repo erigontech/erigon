@@ -1,4 +1,4 @@
-// Copyright 2025 The Erigon Authors
+// Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
 //
 // Erigon is free software: you can redistribute it and/or modify
@@ -18,15 +18,4 @@
 
 package seg
 
-// The blocking async I/O residency gate relies on mincore + io_uring and is Linux-only.
-// Off Linux these are no-ops so the cross-platform read path still compiles;
-// EnableResidencyGate is never called, and even if it were, ensureResident does
-// nothing.
-
-type residencyBitmap struct{}
-
-func (*residencyBitmap) stop() {}
-
-func (*Getter) EnableResidencyGate() {}
-
-func (*Getter) ensureResident(uint64) {}
+func (*Getter) EnableMultiPageBlockingAsyncIO() {}
