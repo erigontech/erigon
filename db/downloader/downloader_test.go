@@ -19,12 +19,14 @@ package downloader
 import (
 	"bytes"
 	"context"
+	"errors"
 	"fmt"
 	"io/fs"
 	"os"
 	"path/filepath"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 	"time"
 
@@ -33,6 +35,7 @@ import (
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 	"golang.org/x/sync/errgroup"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -658,6 +661,17 @@ func TestGrpcDownloadKeepsLocalDataAfterInitialDownload(t *testing.T) {
 	require.NoFileExists(path + ".part")
 }
 
+// testStartSingleDownloadAndWait starts a snapshot download and waits for it with a live context.
+func (d *Downloader) testStartSingleDownloadAndWait(ctx context.Context, infoHash metainfo.Hash, name string) error {
+	wait, err := d.startSnapshotsDownload(ctx, []preverifiedSnapshot{
+		{infoHash, name},
+	}, "testing")
+	if err != nil {
+		return err
+	}
+	return wait(ctx)
+}
+
 // A kept snapshot still has to be seeded. With no torrent registered the name is absent from
 // torrentsByName, so allActiveSnapshots and PublishLocalChainToml never see it, and a seedbox
 // silently stops serving a file it holds.
@@ -665,10 +679,8 @@ func TestKeptLocalSnapshotIsSeeded(t *testing.T) {
 	require := require.New(t)
 	d, _, name, path := newLocalSnapshotTest(t)
 	markInitialDownloadComplete(t, d)
-	ctx, cancel := context.WithTimeout(t.Context(), 30*time.Second)
-	defer cancel()
 
-	require.NoError(d.testStartSingleDownloadNoWait(ctx, snaptype.Hex2InfoHash("aa"), name))
+	require.NoError(d.testStartSingleDownloadAndWait(t.Context(), snaptype.Hex2InfoHash("aa"), name))
 
 	require.FileExists(path)
 	require.NoFileExists(path + ".part")
@@ -676,6 +688,196 @@ func TestKeptLocalSnapshotIsSeeded(t *testing.T) {
 	_, registered := d.torrentsByName[name]
 	d.lock.RUnlock()
 	require.True(registered, "a kept snapshot must be registered, or it is never seeded")
+}
+
+// goSeed must never exceed seedSem's capacity.
+func TestGoSeedBoundsConcurrency(t *testing.T) {
+	require := require.New(t)
+	batch := &downloadBatch{}
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	defer batch.seedCancel(nil)
+	const limit = 3
+	batch.seedSem = semaphore.NewWeighted(limit)
+
+	const n = 10
+	var current, peak atomic.Int64
+	release := make(chan struct{})
+	for range n {
+		batch.goSeed(func() {
+			c := current.Add(1)
+			for {
+				p := peak.Load()
+				if c <= p || peak.CompareAndSwap(p, c) {
+					break
+				}
+			}
+			<-release
+			current.Add(-1)
+		})
+	}
+
+	require.Eventually(func() bool { return current.Load() == limit }, time.Second, time.Millisecond,
+		"only %d of %d tasks should be able to run concurrently", limit, n)
+	close(release)
+	batch.all.Wait()
+	require.EqualValues(limit, peak.Load())
+}
+
+// Cancelling seedCtx is genuine abandonment: it must drop queued goSeed tasks instead of running
+// them, independently of batch.ctx.
+func TestGoSeedAbandonsQueuedOnCancel(t *testing.T) {
+	require := require.New(t)
+	batch := &downloadBatch{}
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	const limit = 2
+	batch.seedSem = semaphore.NewWeighted(limit)
+
+	const n = 50
+	var started atomic.Int64
+	release := make(chan struct{})
+	for range n {
+		batch.goSeed(func() {
+			started.Add(1)
+			<-release
+		})
+	}
+
+	require.Eventually(func() bool { return started.Load() == limit }, time.Second, time.Millisecond,
+		"the first %d tasks should have started", limit)
+	batch.seedCancel(nil)
+	require.EqualValues(limit, started.Load(), "queued tasks must abandon rather than wait for a slot")
+	close(release)
+
+	done := make(chan struct{})
+	go func() {
+		batch.all.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("cancelling seedCtx did not release goSeed tasks still waiting for a slot")
+	}
+}
+
+// goSeed waits on seedCtx, not batch.ctx, so cancelling batch.ctx alone must not drop seed work
+// still queued behind a full semaphore — it must all eventually run.
+func TestGoSeedRunsAllOnSuccess(t *testing.T) {
+	require := require.New(t)
+	batch := &downloadBatch{}
+	batch.ctx, batch.cancel = context.WithCancelCause(context.Background())
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	defer batch.seedCancel(nil)
+	const limit = 2
+	batch.seedSem = semaphore.NewWeighted(limit)
+
+	const n = 50
+	var started, ran atomic.Int64
+	release := make(chan struct{})
+	for range n {
+		batch.goSeed(func() {
+			started.Add(1)
+			<-release
+			ran.Add(1)
+		})
+	}
+
+	require.Eventually(func() bool { return started.Load() == limit }, time.Second, time.Millisecond,
+		"only %d of %d tasks should be able to run concurrently", limit, n)
+
+	batch.cancel(nil)
+	close(release)
+
+	done := make(chan struct{})
+	go func() {
+		batch.all.Wait()
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("batch.all.Wait() did not return once the release gate opened")
+	}
+	require.EqualValues(n, ran.Load(), "all queued seed work must run when the batch succeeds")
+}
+
+// writeKeptLocalSnapshots writes n snapshot files that keep-local under startSnapshotsDownload (no
+// metainfo backs their preverified hash). Content embeds the name so distinct items hash to
+// distinct infohashes; identical content would collide and one would appear to lose the race for a
+// reason unrelated to seedConcurrency.
+func writeKeptLocalSnapshots(t *testing.T, d *Downloader, n, size int) (items []preverifiedSnapshot, names []string) {
+	t.Helper()
+	for i := range n {
+		name := fmt.Sprintf("domain/v2.0-accounts.%d-%d.kv", i, i+1)
+		path := d.filePathForName(name)
+		require.NoError(t, os.MkdirAll(filepath.Dir(path), 0o755))
+		buf := make([]byte, size)
+		copy(buf, name)
+		require.NoError(t, os.WriteFile(path, buf, 0o644))
+		names = append(names, name)
+		items = append(items, preverifiedSnapshot{snaptype.Hex2InfoHash("aa"), name})
+	}
+	return
+}
+
+// startSnapshotsDownload wires seedConcurrency into the real seeding path: at most that many
+// kept-local snapshots seed concurrently, and abandoning the batch (a cancelled wait ctx) drops
+// whatever is still queued behind the bound instead of leaking it past the batch's own lifetime.
+func TestKeptLocalSeedingRespectsBoundAndAbandonCause(t *testing.T) {
+	const bound = 2
+	previous := seedConcurrency
+	seedConcurrency = bound
+	t.Cleanup(func() { seedConcurrency = previous })
+	const n = bound + 4
+
+	t.Run("success", func(t *testing.T) {
+		require := require.New(t)
+		d := newDownloaderTest(t).downloader
+		markInitialDownloadComplete(t, d)
+
+		items, names := writeKeptLocalSnapshots(t, d, n, 64)
+
+		wait, err := d.startSnapshotsDownload(t.Context(), items, "testing")
+		require.NoError(err)
+		require.NoError(wait(t.Context()))
+
+		d.lock.RLock()
+		defer d.lock.RUnlock()
+		for _, name := range names {
+			_, registered := d.torrentsByName[name]
+			require.True(registered, name)
+		}
+	})
+
+	t.Run("abandoned", func(t *testing.T) {
+		require := require.New(t)
+		d := newDownloaderTest(t).downloader
+		markInitialDownloadComplete(t, d)
+
+		// Large enough that hashing one file outlasts dispatching and cancelling the rest, so a
+		// slot can't free up and let a queued item past the bound before the cancel lands.
+		const fileSize = 16 << 20
+		items, names := writeKeptLocalSnapshots(t, d, n, fileSize)
+
+		wait, err := d.startSnapshotsDownload(t.Context(), items, "testing")
+		require.NoError(err)
+
+		ctx, cancel := context.WithCancelCause(t.Context())
+		dropped := errors.New("abandon queued kept-local seeding")
+		cancel(dropped)
+		require.ErrorIs(wait(ctx), dropped,
+			"dropping queued seeding must not report success, or the caller publishes chain.toml for it")
+
+		d.lock.RLock()
+		defer d.lock.RUnlock()
+		registered := 0
+		for _, name := range names {
+			if _, ok := d.torrentsByName[name]; ok {
+				registered++
+			}
+		}
+		require.LessOrEqual(registered, bound, "abandonment must drop seeding still queued behind the bound")
+	})
 }
 
 // The snapshot stage writes preverified.toml mid-run, so the rule must be re-read, not cached from
