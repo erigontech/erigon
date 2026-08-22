@@ -153,21 +153,21 @@ func TestEnumRangeDisjointness(t *testing.T) {
 		}
 	}
 	for _, typ := range snaptype.CaplinSnapshotTypes {
-		if e := typ.Enum(); e < snaptype.MinCaplinEnum || e >= snaptype.MinBorEnum {
-			t.Errorf("caplin type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCaplinEnum, snaptype.MinBorEnum)
+		if e := typ.Enum(); e < snaptype.MinCaplinEnum || e >= snaptype.MaxCaplinEnum {
+			t.Errorf("caplin type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCaplinEnum, snaptype.MaxCaplinEnum)
 		}
 	}
 	for _, typ := range snaptype.CaplinStateSnapshotTypes {
-		if e := typ.Enum(); e < snaptype.MinCaplinEnum || e >= snaptype.MinBorEnum {
-			t.Errorf("caplin state type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCaplinEnum, snaptype.MinBorEnum)
+		if e := typ.Enum(); e < snaptype.MinCaplinEnum || e >= snaptype.MaxCaplinEnum {
+			t.Errorf("caplin state type %q enum %d outside [%d, %d)", typ.Name(), e, snaptype.MinCaplinEnum, snaptype.MaxCaplinEnum)
 		}
 	}
 }
 
 func TestEnumRangeLayout(t *testing.T) {
 	if !(snaptype.MinCoreEnum < snaptype.MinCaplinEnum &&
-		snaptype.MinCaplinEnum < snaptype.MinBorEnum &&
-		snaptype.MinBorEnum < snaptype.MaxEnum) {
-		t.Fatalf("enum ranges are not ordered: core=%d caplin=%d bor=%d max=%d", snaptype.MinCoreEnum, snaptype.MinCaplinEnum, snaptype.MinBorEnum, snaptype.MaxEnum)
+		snaptype.MinCaplinEnum < snaptype.MaxCaplinEnum &&
+		snaptype.MaxCaplinEnum < snaptype.MaxEnum) {
+		t.Fatalf("enum ranges are not ordered: core=%d caplin=%d caplinMax=%d max=%d", snaptype.MinCoreEnum, snaptype.MinCaplinEnum, snaptype.MaxCaplinEnum, snaptype.MaxEnum)
 	}
 }

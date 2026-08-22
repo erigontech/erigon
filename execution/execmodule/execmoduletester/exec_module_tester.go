@@ -765,7 +765,6 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
 	mock.StateCache = &execmodule.Cache{}
-	onlySnapDownloadOnStart := cfg.Genesis.Config.Bor != nil
 
 	accum := &execmodule.Accumulation{
 		Accumulator:    mock.Notifications.Accumulator,
@@ -787,7 +786,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		engine,
 		cfg.Sync,
 		cfg.FcuBackgroundPrune,
-		onlySnapDownloadOnStart,
+		false, /* onlySnapDownloadOnStart */
 		readAheader,
 		func() error { return nil },
 	)

@@ -225,7 +225,6 @@ func SysCallContractWithEVM(evm *vm.EVM, contract accounts.Address, data []byte,
 }
 
 func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainConfig *chain.Config, ibs *state.IntraBlockState, blockContext evmtypes.BlockContext, constCall bool, vmCfg vm.Config) (result []byte, err error) {
-	isBor := chainConfig.Bor != nil
 	msg := types.NewMessage(
 		params.SystemAddress,
 		contract,
@@ -245,12 +244,7 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 	vmConfig.RestoreState = constCall
 	vmConfig.Tracer = nil // set to nil to avoid trace sysCallContract
 	// Create a new context to be used in the EVM environment
-	var txContext evmtypes.TxContext
-	if isBor {
-		txContext = evmtypes.TxContext{}
-	} else {
-		txContext = NewEVMTxContext(msg)
-	}
+	txContext := NewEVMTxContext(msg)
 	if evm == nil || evm.ChainConfig() != chainConfig {
 		evm = vm.NewEVM(blockContext, txContext, ibs, chainConfig, vmConfig)
 	} else {
@@ -273,10 +267,6 @@ func sysCallContract(evm *vm.EVM, contract accounts.Address, data []byte, chainC
 		*msg.Value(),
 		false,
 	)
-	if isBor && err != nil {
-		return nil, nil
-	}
-
 	return ret, err
 }
 

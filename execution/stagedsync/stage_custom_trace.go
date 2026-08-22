@@ -318,9 +318,6 @@ func AssertReceipts(ctx context.Context, cfg *exec.ExecArgs, db kv.TemporalRoDB,
 	if !dbg.AssertEnabled {
 		return
 	}
-	if cfg.ChainConfig.Bor != nil { //TODO: enable me
-		return nil
-	}
 	return integrity.ReceiptsNoDupsRange(ctx, fromBlock, toBlock, db, cfg.BlockReader, true)
 }
 
@@ -355,20 +352,7 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 				var logIndexAfterTx uint32
 				var cumGasUsed uint64
 
-				if txTask.IsBlockEnd() { // block changed
-					if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
-						// get last receipt and store the last log index + 1
-						lastReceipt := blockResult.Receipts[txTask.TxIndex-1]
-						if lastReceipt == nil {
-							return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
-						}
-						if len(lastReceipt.Logs) > 0 {
-							firstIndex := lastReceipt.Logs[len(lastReceipt.Logs)-1].Index + 1
-							logIndexAfterTx = uint32(firstIndex) + uint32(len(result.Logs))
-							cumGasUsed = lastReceipt.CumulativeGasUsed
-						}
-					}
-				} else {
+				if !txTask.IsBlockEnd() {
 					if txTask.TxIndex >= 0 {
 						receipt := blockResult.Receipts[txTask.TxIndex]
 						if receipt != nil {
@@ -391,12 +375,6 @@ func customTraceBatch(ctx context.Context, produce Produce, cfg *exec.ExecArgs, 
 				var receipt *types.Receipt
 				if !txTask.IsBlockEnd() {
 					receipt = result.Receipt
-				} else if cfg.ChainConfig.Bor != nil && txTask.TxIndex >= 1 {
-					// issue: https://github.com/erigontech/erigon/issues/16037
-					receipt = blockResult.Receipts[txTask.TxIndex-1]
-					if receipt == nil {
-						return fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
-					}
 				}
 				if err := receipts.Append(putter, receipt, txTask.TxNum); err != nil {
 					return err
