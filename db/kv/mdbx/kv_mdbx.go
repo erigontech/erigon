@@ -1205,7 +1205,7 @@ func (tx *MdbxTx) ClearTable(bucket string) error {
 
 // DeleteRange removes keys in [from, to) using mdbx's native bulk range-delete,
 // which cuts whole pages and branches out of the B-tree at once. to==nil deletes
-// through the last key. Returns the number of keys removed.
+// through the last key. Returns the number of entries removed.
 func (tx *MdbxTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 	beginC, err := tx.RwCursor(table)
 	if err != nil {
@@ -1241,6 +1241,56 @@ func (tx *MdbxTx) DeleteRange(table string, from, to []byte) (uint64, error) {
 		}
 	}
 	return begin.DeleteRange(end, endIncluding)
+}
+
+// DeleteBefore removes every key < to (to==nil clears the whole table) using
+// mdbx's native bunch-delete, which cuts whole pages and branches out of the
+// B-tree at once. Returns the number of entries removed.
+func (tx *MdbxTx) DeleteBefore(table string, to []byte) (uint64, error) {
+	c, err := tx.RwCursor(table)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+
+	if to != nil {
+		k, _, err := c.Seek(to) // smallest key >= to
+		if err != nil {
+			return 0, err
+		}
+		if k != nil { // everything strictly before this position is < to
+			return rawCursor(c).RangeDel(mdbx.DeleteBeforeExcluding)
+		}
+	}
+	// to==nil, or no key >= to: every key is < to, so clear the table.
+	k, _, err := c.Last()
+	if err != nil {
+		return 0, err
+	}
+	if k == nil {
+		return 0, nil
+	}
+	return rawCursor(c).RangeDel(mdbx.DeleteBeforeIncluding)
+}
+
+// DeleteAfter removes every key >= from (from==nil clears the whole table) using
+// mdbx's native bunch-delete, which cuts whole pages and branches out of the
+// B-tree at once. Returns the number of entries removed.
+func (tx *MdbxTx) DeleteAfter(table string, from []byte) (uint64, error) {
+	c, err := tx.RwCursor(table)
+	if err != nil {
+		return 0, err
+	}
+	defer c.Close()
+
+	k, _, err := c.Seek(from) // Seek(nil) => first key
+	if err != nil {
+		return 0, err
+	}
+	if k == nil { // nothing >= from
+		return 0, nil
+	}
+	return rawCursor(c).RangeDel(mdbx.DeleteAfterIncluding)
 }
 
 func (tx *MdbxTx) DropTable(bucket string) error {
