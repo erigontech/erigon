@@ -276,7 +276,7 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData,
+		d.Nodes, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
 	}
 	renamed := 0
 	torrentsRemoved := 0
@@ -350,7 +350,7 @@ func (d *Dirs) RenameNewVersions() error {
 	directories := []string{
 		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
 		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
-		d.Nodes, d.CaplinBlobs, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis, d.CaplinColumnData,
+		d.Nodes, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
 	}
 	var renamed, removed int
 
