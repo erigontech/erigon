@@ -31,9 +31,9 @@ import (
 const (
 	BlobCommitmentVersionKZG uint8 = 0x01
 	PrecompileInputLength    int   = 192
-	CellsPerBlob                   = goethkzg.CellsPerExtBlob //128
-	DataPerBlob                    = CellsPerBlob / 2         //64
-	CellProofsPerBlob              = CellsPerBlob             //128
+	// DataPerBlob is the minimum number of cells (out of goethkzg.CellsPerExtBlob)
+	// needed to recover a blob via Reed-Solomon decoding.
+	DataPerBlob = goethkzg.CellsPerExtBlob / 2 //64
 )
 
 type VersionedHash [32]byte

@@ -49,11 +49,11 @@ func randBlob() goethkzg.Blob {
 	return blob
 }
 
-// randCellIndices picks n random unique indices from [0, CellsPerBlob) in sorted order.
+// randCellIndices picks n random unique indices from [0, goethkzg.CellsPerExtBlob) in sorted order.
 func randCellIndices(rng *mrand.Rand, n int) []uint64 {
-	perm := rng.Perm(CellsPerBlob)
+	perm := rng.Perm(goethkzg.CellsPerExtBlob)
 	indices := make([]uint64, n)
-	for i := 0; i < n; i++ {
+	for i := range n {
 		indices[i] = uint64(perm[i])
 	}
 	slices.Sort(indices)
@@ -64,8 +64,8 @@ func randCellIndices(rng *mrand.Rand, n int) []uint64 {
 type testBlobData struct {
 	blobs       []goethkzg.Blob
 	commitments []goethkzg.KZGCommitment
-	cells       []goethkzg.Cell     // flat: blobs[i] cells at [i*CellsPerBlob : (i+1)*CellsPerBlob]
-	proofs      []goethkzg.KZGProof // flat: blobs[i] proofs at [i*CellsPerBlob : (i+1)*CellsPerBlob]
+	cells       []goethkzg.Cell     // flat: blobs[i] cells at [i*goethkzg.CellsPerExtBlob : (i+1)*goethkzg.CellsPerExtBlob]
+	proofs      []goethkzg.KZGProof // flat: blobs[i] proofs at [i*goethkzg.CellsPerExtBlob : (i+1)*goethkzg.CellsPerExtBlob]
 }
 
 func newTestBlobData(t *testing.T, blobCount int) *testBlobData {
@@ -199,8 +199,8 @@ func TestVerifyPartialCells(t *testing.T) {
 		var partialProofs []goethkzg.KZGProof
 		for i := range blobCount {
 			for _, idx := range indices {
-				partialCells = append(partialCells, d.cells[i*CellsPerBlob+int(idx)])
-				partialProofs = append(partialProofs, d.proofs[i*CellProofsPerBlob+int(idx)])
+				partialCells = append(partialCells, d.cells[i*goethkzg.CellsPerExtBlob+int(idx)])
+				partialProofs = append(partialProofs, d.proofs[i*goethkzg.CellsPerExtBlob+int(idx)])
 			}
 		}
 		if err := VerifyCells(partialCells, d.commitments, partialProofs, indices); err != nil {
@@ -218,8 +218,8 @@ func TestVerifyCellsWithCorruptedCells(t *testing.T) {
 	var partialProofs []goethkzg.KZGProof
 	for i := range blobCount {
 		for _, idx := range indices {
-			partialCells = append(partialCells, d.cells[i*CellsPerBlob+int(idx)])
-			partialProofs = append(partialProofs, d.proofs[i*CellProofsPerBlob+int(idx)])
+			partialCells = append(partialCells, d.cells[i*goethkzg.CellsPerExtBlob+int(idx)])
+			partialProofs = append(partialProofs, d.proofs[i*goethkzg.CellsPerExtBlob+int(idx)])
 		}
 	}
 	// Corrupt the first cell
@@ -241,8 +241,8 @@ func TestVerifyCellsWithCorruptedProofs(t *testing.T) {
 	var partialProofs []goethkzg.KZGProof
 	for i := range blobCount {
 		for _, idx := range indices {
-			partialCells = append(partialCells, d.cells[i*CellsPerBlob+int(idx)])
-			partialProofs = append(partialProofs, d.proofs[i*CellProofsPerBlob+int(idx)])
+			partialCells = append(partialCells, d.cells[i*goethkzg.CellsPerExtBlob+int(idx)])
+			partialProofs = append(partialProofs, d.proofs[i*goethkzg.CellsPerExtBlob+int(idx)])
 		}
 	}
 	// Swap first and last proof
@@ -273,9 +273,11 @@ func TestVerifyCellsValidation(t *testing.T) {
 	t.Run("proofs not multiple of commitments", func(t *testing.T) {
 		// 2 proofs, 0 commitments would fail on "no commitments" first,
 		// so use 3 proofs with 2 commitments to hit the modular check.
-		threeProofs := append(proofs, proofs[0])
-		threeCells := append(cells, cells[0])
-		threeIndices := append(indices, indices[0])
+		// cells/proofs are reslices of d.cells/d.proofs with spare capacity,
+		// so append must run on a clone to avoid clobbering the shared fixture.
+		threeProofs := append(slices.Clone(proofs), proofs[0])
+		threeCells := append(slices.Clone(cells), cells[0])
+		threeIndices := append(indices, indices[0]) //nolint:gocritic // indices is a cap-2 literal, so this always allocates a new array
 		commitments := []goethkzg.KZGCommitment{d.commitments[0], d.commitments[0]}
 		if err := VerifyCells(threeCells, commitments, threeProofs, threeIndices); err == nil {
 			t.Fatal("expected error for mismatched proofs/commitments count")
@@ -293,6 +295,31 @@ func TestVerifyCellsValidation(t *testing.T) {
 	})
 }
 
+// TestVerifyCellsRejectsUnorderedOrDuplicateIndices pins the same ascending,
+// duplicate-free cellIndices contract that RecoverBlobs already enforces via
+// the underlying library's isAscending check.
+func TestVerifyCellsRejectsUnorderedOrDuplicateIndices(t *testing.T) {
+	d := newTestBlobData(t, 1)
+	commitments := d.commitments[:1]
+
+	t.Run("duplicate indices", func(t *testing.T) {
+		indices := []uint64{7, 7}
+		cells := []goethkzg.Cell{d.cells[7], d.cells[7]}
+		proofs := []goethkzg.KZGProof{d.proofs[7], d.proofs[7]}
+		if err := VerifyCells(cells, commitments, proofs, indices); err == nil {
+			t.Fatal("expected error for duplicate cellIndices")
+		}
+	})
+	t.Run("unordered indices", func(t *testing.T) {
+		indices := []uint64{1, 0}
+		cells := []goethkzg.Cell{d.cells[1], d.cells[0]}
+		proofs := []goethkzg.KZGProof{d.proofs[1], d.proofs[0]}
+		if err := VerifyCells(cells, commitments, proofs, indices); err == nil {
+			t.Fatal("expected error for unordered cellIndices")
+		}
+	})
+}
+
 // ---------------------------------------------------------------------------
 // RecoverBlobs
 // ---------------------------------------------------------------------------
@@ -302,13 +329,13 @@ func TestRecoverBlob(t *testing.T) {
 
 	for iter := range 50 {
 		rng := mrand.New(mrand.NewSource(int64(iter)))
-		numCells := DataPerBlob + rng.Intn(CellsPerBlob-DataPerBlob+1)
+		numCells := DataPerBlob + rng.Intn(goethkzg.CellsPerExtBlob-DataPerBlob+1)
 		indices := randCellIndices(rng, numCells)
 
 		var partialCells []goethkzg.Cell
 		for bi := range 3 {
 			for _, idx := range indices {
-				partialCells = append(partialCells, d.cells[bi*CellsPerBlob+int(idx)])
+				partialCells = append(partialCells, d.cells[bi*goethkzg.CellsPerExtBlob+int(idx)])
 			}
 		}
 		recovered, err := RecoverBlobs(partialCells, indices)
@@ -355,7 +382,7 @@ func TestRecoverBlobWithInsufficientCells(t *testing.T) {
 	var partialCells []goethkzg.Cell
 	for bi := range blobCount {
 		for _, idx := range indices {
-			partialCells = append(partialCells, d.cells[bi*CellsPerBlob+int(idx)])
+			partialCells = append(partialCells, d.cells[bi*goethkzg.CellsPerExtBlob+int(idx)])
 		}
 	}
 	_, err := RecoverBlobs(partialCells, indices)
@@ -363,6 +390,72 @@ func TestRecoverBlobWithInsufficientCells(t *testing.T) {
 		t.Fatalf("expected error with only %d cells, got none", len(indices))
 	}
 	expectedErr := "insufficient cells for recovery"
+	if err.Error() != expectedErr {
+		t.Fatalf("expected error %q, got %q", expectedErr, err.Error())
+	}
+}
+
+// TestRecoverBlobsRejectsNonMultipleCellCount guards the case where a caller hands
+// RecoverBlobs a cell count that isn't an exact multiple of len(cellIndices):
+// without this check, blobCount truncates via integer division and the remainder
+// cells are silently dropped instead of raising an error.
+func TestRecoverBlobsRejectsNonMultipleCellCount(t *testing.T) {
+	d := newTestBlobData(t, 1)
+
+	indices := make([]uint64, DataPerBlob)
+	for i := range indices {
+		indices[i] = uint64(i)
+	}
+	// 100 cells is not a multiple of len(indices)=64.
+	cells := d.cells[:100]
+
+	_, err := RecoverBlobs(cells, indices)
+	if err == nil {
+		t.Fatal("expected error for non-multiple cell count")
+	}
+	expectedErr := "len(cells) must be a multiple of len(cellIndices)"
+	if err.Error() != expectedErr {
+		t.Fatalf("expected error %q, got %q", expectedErr, err.Error())
+	}
+}
+
+// TestRecoverBlobsRejectsTooManyIndices guards against a cellIndices slice longer
+// than goethkzg.CellsPerExtBlob, which cannot correspond to any real blob.
+func TestRecoverBlobsRejectsTooManyIndices(t *testing.T) {
+	d := newTestBlobData(t, 2)
+
+	indices := make([]uint64, goethkzg.CellsPerExtBlob+1)
+	for i := range indices {
+		indices[i] = uint64(i)
+	}
+	cells := d.cells[:len(indices)]
+
+	_, err := RecoverBlobs(cells, indices)
+	if err == nil {
+		t.Fatal("expected error for too many cellIndices")
+	}
+	expectedErr := "too many cellIndices"
+	if err.Error() != expectedErr {
+		t.Fatalf("expected error %q, got %q", expectedErr, err.Error())
+	}
+}
+
+// TestVerifyCellsRejectsInvalidCellCountForBlobCount guards the case where
+// len(cells)/len(cellIndices) doesn't match len(commitments): the cells given
+// don't slice evenly into one set of cellIndices per commitment.
+func TestVerifyCellsRejectsInvalidCellCountForBlobCount(t *testing.T) {
+	d := newTestBlobData(t, 1)
+
+	indices := []uint64{0, 1}
+	cells := d.cells[:8]
+	proofs := d.proofs[:8]
+	commitments := []goethkzg.KZGCommitment{d.commitments[0], d.commitments[0]}
+
+	err := VerifyCells(cells, commitments, proofs, indices)
+	if err == nil {
+		t.Fatal("expected error for invalid cell count for blob count")
+	}
+	expectedErr := "invalid number of cells for blob count"
 	if err.Error() != expectedErr {
 		t.Fatalf("expected error %q, got %q", expectedErr, err.Error())
 	}

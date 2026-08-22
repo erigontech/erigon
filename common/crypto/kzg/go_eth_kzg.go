@@ -137,12 +137,16 @@ func validateCellIndices(cells []goethkzg.Cell, cellIndices []uint64) error {
 		return errors.New("no cellIndices given")
 	case len(cellIndices) > len(cells):
 		return errors.New("less cells than cellIndices")
-	case len(cellIndices) > CellsPerBlob:
+	case len(cellIndices) > goethkzg.CellsPerExtBlob:
 		return errors.New("too many cellIndices")
 	case len(cells)%len(cellIndices) != 0:
 		return errors.New("len(cells) must be a multiple of len(cellIndices)")
 	}
-	// The library checks the canonical ordering of indices, so we don't have to do it here.
+	for i := 1; i < len(cellIndices); i++ {
+		if cellIndices[i] <= cellIndices[i-1] {
+			return errors.New("cellIndices must be strictly ascending")
+		}
+	}
 	return nil
 }
 
