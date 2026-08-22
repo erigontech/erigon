@@ -20,6 +20,7 @@
 package rpc
 
 import (
+	"context"
 	"encoding/json"
 	"io"
 	"net/http"
@@ -27,6 +28,8 @@ import (
 	"strings"
 	"testing"
 	"time"
+
+	"github.com/erigontech/erigon/db/kv"
 
 	"github.com/golang-jwt/jwt/v4"
 	"github.com/stretchr/testify/require"
@@ -264,4 +267,28 @@ func TestCheckJwtSecretAuthScheme(t *testing.T) {
 			require.Equal(t, tc.want, CheckJwtSecret(httptest.NewRecorder(), r, secret))
 		})
 	}
+}
+
+// overloadService stands in for a method whose DB gate rejected the request.
+type overloadService struct{}
+
+func (*overloadService) Reject(context.Context) (string, error) { return "", kv.ErrReadTxLimitExceeded }
+
+// TestOverloadedRequestGets503 pins that a request rejected by the DB gate
+// answers 503, not 200. The JSON-RPC error body is written before ServeHTTP can
+// set the status, so anything that puts those bytes on the wire early makes
+// net/http commit 200 and discard the real status.
+func TestOverloadedRequestGets503(t *testing.T) {
+	srv := NewServer(50, false, false, false /* disableStreaming */, log.Root(), 100)
+	defer srv.Stop()
+	require.NoError(t, srv.RegisterName("test", new(overloadService)))
+
+	body := `{"jsonrpc":"2.0","id":1,"method":"test_reject","params":[]}`
+	req := httptest.NewRequest(http.MethodPost, "/", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	rec := httptest.NewRecorder()
+	srv.ServeHTTP(rec, req)
+
+	require.Equal(t, http.StatusServiceUnavailable, rec.Code, "body: %s", rec.Body.String())
+	require.Contains(t, rec.Body.String(), ErrMsgServerOverloaded)
 }

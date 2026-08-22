@@ -32,6 +32,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -292,7 +293,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		if needWriteStream {
 			h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer()))
 		} else {
-			stream.Write([]byte("\n"))
+			stream.WriteRaw("\n")
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
@@ -672,6 +673,8 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // writeTo writes a success response's already-encoded Result (and id) directly rather than
 // re-encoding it; any other message falls back to json.Marshal. Output equals json.Marshal(msg)
 // except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
+// The bytes go through WriteRaw rather than Write so they stay buffered: Write reaches the
+// underlying writer immediately, which commits the HTTP status before ServeHTTP can set it.
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
 		buf, err := json.Marshal(msg)
@@ -679,7 +682,7 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 			buf, err = json.Marshal(msg.errorResponse(err))
 		}
 		if err == nil {
-			_, _ = stream.Write(buf)
+			stream.WriteRaw(common.ToStringZeroCopy(buf))
 		}
 		return
 	}
@@ -688,10 +691,10 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	stream.WriteString(msg.Version)
 	stream.WriteMore()
 	stream.WriteObjectField("id")
-	_, _ = stream.Write(msg.ID)
+	stream.WriteRaw(common.ToStringZeroCopy(msg.ID))
 	stream.WriteMore()
 	stream.WriteObjectField("result")
-	_, _ = stream.Write(msg.Result)
+	stream.WriteRaw(common.ToStringZeroCopy(msg.Result))
 	stream.WriteObjectEnd()
 }
 
