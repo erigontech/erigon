@@ -1,8 +1,12 @@
 package sszql
 
-import "strconv"
+import (
+	"strconv"
 
-func parseQuery(request SSZQLRequest, version uint, blockID string) (SSZQLResponse, error) {
+	"github.com/erigontech/erigon/rpc"
+)
+
+func parseQuery(request SSZQLRequest, version uint, blockID rpc.BlockNumberOrHash) (SSZQLResponse, error) {
 	response := SSZQLResponse{
 		Paths:    make([]Path, 0),
 		Gindices: make([]Gindex, 0),
@@ -28,7 +32,7 @@ func parseQuery(request SSZQLRequest, version uint, blockID string) (SSZQLRespon
 	return response, nil
 }
 
-func parseQueries(req SSZQLRequest, res *SSZQLResponse, blockID string, aliases map[string]string) error {
+func parseQueries(req SSZQLRequest, res *SSZQLResponse, blockID rpc.BlockNumberOrHash, aliases map[string]string) error {
 	for _, query := range req.Queries {
 		resolvedPath, err := resolvePath(query.Path, query.Anchor, blockID)
 		if err != nil {
@@ -43,7 +47,7 @@ func parseQueries(req SSZQLRequest, res *SSZQLResponse, blockID string, aliases 
 	return nil
 }
 
-func parseAliases(aliases []Alias, res *SSZQLResponse, blockID string) (map[string]string, error) {
+func parseAliases(aliases []Alias, res *SSZQLResponse, blockID rpc.BlockNumberOrHash) (map[string]string, error) {
 	m := make(map[string]string)
 
 	for _, alias := range aliases {
@@ -58,7 +62,7 @@ func parseAliases(aliases []Alias, res *SSZQLResponse, blockID string) (map[stri
 	return m, nil
 }
 
-func resolvePath(path Path, anchor Anchor, blockID string) (ResolvedPath, error) {
+func resolvePath(path Path, anchor Anchor, blockID rpc.BlockNumberOrHash) (ResolvedPath, error) {
 	response := ResolvedPath{
 		Gindex: Gindex(99),
 		Leaf:   Leaf("0xabcdef"),

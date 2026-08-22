@@ -16,6 +16,11 @@ type Leaf string
 
 type Result string
 
+type VersionRange struct {
+	Min uint
+	Max uint
+}
+
 type ResolvedPath struct {
 	Gindex Gindex
 	Leaf   Leaf
