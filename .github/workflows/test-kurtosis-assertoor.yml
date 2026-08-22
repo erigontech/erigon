@@ -6,12 +6,12 @@ env:
   # Pinned versions of third-party containers — bump here when upgrading.
   # These are cached via actions/cache (docker save/load) to avoid re-pulling
   # on every run and to eliminate Docker Hub rate-limit exposure.
-  # The immutable tags a suite .io pins — released CL/VC clients, assertoor and
-  # glamsterdam's genesis generator — are loaded at job start from those files
+  # The tags a suite .io pins — released CL/VC clients, assertoor, glamsterdam's
+  # genesis generator and spamoor — are loaded at job start from those files
   # (single source of truth) by the "Load image versions" step, so the cache can't
-  # drift from what kurtosis runs. Mutable tags (glamsterdam's devnet lighthouse,
-  # spamoor, snooper) stay live so a run never serves a stale client. The tags
-  # below aren't pinned in any .io, so they stay here.
+  # drift from what kurtosis runs. glamsterdam's devnet lighthouse stays live: it
+  # is a client under test, so serving a stale build would quietly change what the
+  # suite covers. The tags below aren't pinned in any .io, so they stay here.
   # Kurtosis CLI pinned so its infra images (engine/core/files-artifacts-expander
   # are tagged with the CLI version) can be cached too. The vector and fluent-bit
   # tags are dictated by the Kurtosis release — sync them when bumping (see
@@ -37,6 +37,10 @@ env:
   # it publishes only :latest, so the cache serves the `latest` digest from the last
   # warm rather than tracking live `latest`.
   ETH2_VAL_TOOLS_IMAGE: "protolambda/eth2-val-tools:latest"
+  # rpc-snooper is the EL/CL traffic proxy the snooper_enabled suites launch. The
+  # ethereum-package pins no tag for it, so the cache serves the `latest` digest
+  # from the last warm rather than tracking live `latest`.
+  KURTOSIS_SNOOPER_IMAGE: "ethpandaops/rpc-snooper:latest"
   GENESIS_GENERATOR_IMAGE: "ethpandaops/ethereum-genesis-generator:4.0.4"
   CAPLIN_GENESIS_GENERATOR_IMAGE: "ethpandaops/ethereum-genesis-generator:3.3.7"
   KURTOSIS_PYTHON_IMAGE: "python:3.11-alpine"
@@ -217,6 +221,7 @@ jobs:
           lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
           genesis_glamsterdam=$(yq -e '.ethereum_genesis_generator_params.image' "$glamsterdam_io")
+          spamoor_glamsterdam=$(yq -e '.spamoor_params.image' "$glamsterdam_io")
           lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' "$caplin_io")
           # pectra's clients and caplin-minimal's assertoor are warmed under the tag
           # another suite pins. Bumping one alone leaves it out of the cache, which
@@ -242,6 +247,7 @@ jobs:
             echo "LIGHTHOUSE_IMAGE=$lighthouse"
             echo "TEKU_IMAGE=$teku"
             echo "GLAMSTERDAM_GENESIS_GENERATOR_IMAGE=$genesis_glamsterdam"
+            echo "GLAMSTERDAM_SPAMOOR_IMAGE=$spamoor_glamsterdam"
             echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
           # Every cached tag stays spelled out in the cache key so a glance at the
@@ -251,8 +257,9 @@ jobs:
           for image in "$lighthouse" "$lighthouse_vc" "$teku" "$assertoor" \
             "kurtosis:$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
             "$KURTOSIS_CURL_JQ_IMAGE" "$KURTOSIS_TRAEFIK_IMAGE" "$KURTOSIS_ALPINE_IMAGE" \
-            "$ETH2_VAL_TOOLS_IMAGE" "$pectra" "$glamsterdam" "$GENESIS_GENERATOR_IMAGE" \
-            "$CAPLIN_GENESIS_GENERATOR_IMAGE" "$genesis_glamsterdam" "$KURTOSIS_PYTHON_IMAGE"; do
+            "$ETH2_VAL_TOOLS_IMAGE" "$KURTOSIS_SNOOPER_IMAGE" "$pectra" "$glamsterdam" \
+            "$GENESIS_GENERATOR_IMAGE" "$CAPLIN_GENESIS_GENERATOR_IMAGE" \
+            "$genesis_glamsterdam" "$spamoor_glamsterdam" "$KURTOSIS_PYTHON_IMAGE"; do
             key="$key-${image##*/}"
           done
           [ ${#key} -le 512 ] \
@@ -297,6 +304,8 @@ jobs:
           pull "${GENESIS_GENERATOR_IMAGE}"
           pull "${CAPLIN_GENESIS_GENERATOR_IMAGE}"
           pull "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}"
+          pull "${GLAMSTERDAM_SPAMOOR_IMAGE}"
+          pull "${KURTOSIS_SNOOPER_IMAGE}"
           pull "${KURTOSIS_PYTHON_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
           docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
@@ -316,6 +325,8 @@ jobs:
           docker save "${GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/genesis-generator.tar
           docker save "${CAPLIN_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/caplin-genesis-generator.tar
           docker save "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/glamsterdam-genesis-generator.tar
+          docker save "${GLAMSTERDAM_SPAMOOR_IMAGE}" -o /tmp/docker-cache/spamoor.tar
+          docker save "${KURTOSIS_SNOOPER_IMAGE}" -o /tmp/docker-cache/rpc-snooper.tar
           docker save "${KURTOSIS_PYTHON_IMAGE}" -o /tmp/docker-cache/python.tar
 
       - name: Save third-party containers to cache
@@ -455,6 +466,7 @@ jobs:
           lighthouse=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "lighthouse") | .cl_image' "$reg")
           teku=$(yq -e '.participants_matrix.cl[] | select(.cl_type == "teku") | .cl_image' "$reg")
           genesis_glamsterdam=$(yq -e '.ethereum_genesis_generator_params.image' "$glamsterdam_io")
+          spamoor_glamsterdam=$(yq -e '.spamoor_params.image' "$glamsterdam_io")
           lighthouse_vc=$(yq -e '.participants[] | select(.vc_type == "lighthouse") | .vc_image' "$caplin_io")
           # pectra's clients and caplin-minimal's assertoor are warmed under the tag
           # another suite pins. Bumping one alone leaves it out of the cache, which
@@ -480,6 +492,7 @@ jobs:
             echo "LIGHTHOUSE_IMAGE=$lighthouse"
             echo "TEKU_IMAGE=$teku"
             echo "GLAMSTERDAM_GENESIS_GENERATOR_IMAGE=$genesis_glamsterdam"
+            echo "GLAMSTERDAM_SPAMOOR_IMAGE=$spamoor_glamsterdam"
             echo "LIGHTHOUSE_VC_IMAGE=$lighthouse_vc"
           } >> "$GITHUB_ENV"
           # Every cached tag stays spelled out in the cache key so a glance at the
@@ -489,8 +502,9 @@ jobs:
           for image in "$lighthouse" "$lighthouse_vc" "$teku" "$assertoor" \
             "kurtosis:$KURTOSIS_VERSION" "$KURTOSIS_VECTOR_IMAGE" "$KURTOSIS_FLUENTBIT_IMAGE" \
             "$KURTOSIS_CURL_JQ_IMAGE" "$KURTOSIS_TRAEFIK_IMAGE" "$KURTOSIS_ALPINE_IMAGE" \
-            "$ETH2_VAL_TOOLS_IMAGE" "$pectra" "$glamsterdam" "$GENESIS_GENERATOR_IMAGE" \
-            "$CAPLIN_GENESIS_GENERATOR_IMAGE" "$genesis_glamsterdam" "$KURTOSIS_PYTHON_IMAGE"; do
+            "$ETH2_VAL_TOOLS_IMAGE" "$KURTOSIS_SNOOPER_IMAGE" "$pectra" "$glamsterdam" \
+            "$GENESIS_GENERATOR_IMAGE" "$CAPLIN_GENESIS_GENERATOR_IMAGE" \
+            "$genesis_glamsterdam" "$spamoor_glamsterdam" "$KURTOSIS_PYTHON_IMAGE"; do
             key="$key-${image##*/}"
           done
           [ ${#key} -le 512 ] \
@@ -525,6 +539,8 @@ jobs:
           docker load -i /tmp/docker-cache/genesis-generator.tar
           docker load -i /tmp/docker-cache/caplin-genesis-generator.tar
           docker load -i /tmp/docker-cache/glamsterdam-genesis-generator.tar
+          docker load -i /tmp/docker-cache/spamoor.tar
+          docker load -i /tmp/docker-cache/rpc-snooper.tar
           docker load -i /tmp/docker-cache/python.tar
 
       - name: Pull third-party containers and save to cache
@@ -557,6 +573,8 @@ jobs:
           pull "${GENESIS_GENERATOR_IMAGE}"
           pull "${CAPLIN_GENESIS_GENERATOR_IMAGE}"
           pull "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}"
+          pull "${GLAMSTERDAM_SPAMOOR_IMAGE}"
+          pull "${KURTOSIS_SNOOPER_IMAGE}"
           pull "${KURTOSIS_PYTHON_IMAGE}"
           docker save "${LIGHTHOUSE_IMAGE}" -o /tmp/docker-cache/lighthouse.tar
           docker save "${LIGHTHOUSE_VC_IMAGE}" -o /tmp/docker-cache/lighthouse-vc.tar
@@ -576,6 +594,8 @@ jobs:
           docker save "${GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/genesis-generator.tar
           docker save "${CAPLIN_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/caplin-genesis-generator.tar
           docker save "${GLAMSTERDAM_GENESIS_GENERATOR_IMAGE}" -o /tmp/docker-cache/glamsterdam-genesis-generator.tar
+          docker save "${GLAMSTERDAM_SPAMOOR_IMAGE}" -o /tmp/docker-cache/spamoor.tar
+          docker save "${KURTOSIS_SNOOPER_IMAGE}" -o /tmp/docker-cache/rpc-snooper.tar
           docker save "${KURTOSIS_PYTHON_IMAGE}" -o /tmp/docker-cache/python.tar
 
       # An uncovered tag would otherwise be pulled inside `kurtosis run`, where a
