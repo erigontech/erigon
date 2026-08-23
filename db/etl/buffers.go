@@ -44,7 +44,7 @@ const (
 	//BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
 
-	entryLocSize = 16 // sizeof(entryLoc): insertionOrder(4) + offset(4) + keyLen(4) + valLen(4)
+	entryLocSize = 24 // sizeof(entryLoc): insertionOrder(4) + offset(4) + keyLen(4) + valLen(4) + keyPrefix(8)
 )
 
 // writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
@@ -131,6 +131,16 @@ type entryLoc struct {
 	offset         int32
 	keyLen         int32
 	valLen         int32
+	keyPrefix      uint64 // see keyPrefixOf
+}
+
+// keyPrefixOf packs the first 8 key bytes big-endian, zero-padded. Ordering
+// uint64s then matches ordering the bytes, so Sort settles most pairs without
+// touching data at all; equal prefixes fall back to the full comparison.
+func keyPrefixOf(k []byte) uint64 {
+	var buf [8]byte
+	copy(buf[:], k)
+	return binary.BigEndian.Uint64(buf[:])
 }
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
@@ -156,6 +166,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 		keyLen:         int32(len(k)),         //nolint:gosec
 		valLen:         int32(len(v)),         //nolint:gosec
 		insertionOrder: int32(len(b.entries)), //nolint:gosec
+		keyPrefix:      keyPrefixOf(k),
 	}
 	if k == nil {
 		e.keyLen = -1
@@ -213,6 +224,12 @@ func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
 	data := b.data
 	cmp := func(a, b entryLoc) int {
+		if a.keyPrefix != b.keyPrefix {
+			if a.keyPrefix < b.keyPrefix {
+				return -1
+			}
+			return 1
+		}
 		aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
 		bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
 		if c := bytes.Compare(aKey, bKey); c != 0 {
