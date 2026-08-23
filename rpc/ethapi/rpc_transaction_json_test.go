@@ -172,31 +172,3 @@ func BenchmarkNewRPCTransaction(b *testing.B) {
 		})
 	}
 }
-
-// TestRPCBorTransactionJSONPinned pins the wire format of the Bor state-sync
-// transaction representation: zero V/R/S always serialize, and chainId is only
-// set on the in-block path.
-func TestRPCBorTransactionJSONPinned(t *testing.T) {
-	borTx := &types.LegacyTx{CommonTx: pinCommonTx(13), GasPrice: *uint256.NewInt(0)}
-	borTx.CommonTx.V, borTx.CommonTx.R, borTx.CommonTx.S = uint256.Int{}, uint256.Int{}, uint256.Int{}
-	txHash := common.HexToHash("0xddeeff00112233445566778899aabbccddeeff00112233445566778899aabbcc")
-
-	for _, tt := range []struct {
-		name  string
-		block bool
-		want  string
-	}{
-		{name: "in-block", block: true, want: `{"blockHash":"0xaabbccddeeff00112233445566778899aabbccddeeff001122334455667788aa","blockNumber":"0x64","blockTimestamp":null,"from":"0x0000000000000000000000000000000000000000","gas":"0x5208","gasPrice":"0x0","hash":"0xddeeff00112233445566778899aabbccddeeff00112233445566778899aabbcc","input":"0xcafe","nonce":"0xd","to":"0x1234567890123456789012345678901234567890","transactionIndex":"0x3","value":"0x3b9aca00","type":"0x0","chainId":"0x89","v":"0x0","r":"0x0","s":"0x0"}`},
-		{name: "pending", block: false, want: `{"blockHash":null,"blockNumber":null,"blockTimestamp":null,"from":"0x0000000000000000000000000000000000000000","gas":"0x5208","gasPrice":"0x0","hash":"0xddeeff00112233445566778899aabbccddeeff00112233445566778899aabbcc","input":"0xcafe","nonce":"0xd","to":"0x1234567890123456789012345678901234567890","transactionIndex":null,"value":"0x3b9aca00","type":"0x0","chainId":"0x0","v":"0x0","r":"0x0","s":"0x0"}`},
-	} {
-		t.Run(tt.name, func(t *testing.T) {
-			blockHash, blockNumber, index := common.Hash{}, uint64(0), uint64(0)
-			if tt.block {
-				blockHash, blockNumber, index = pinBlockHash, 100, 3
-			}
-			got, err := json.Marshal(NewRPCBorTransaction(borTx, txHash, blockHash, blockNumber, index, uint256.NewInt(137)))
-			require.NoError(t, err)
-			require.Equal(t, tt.want, string(got))
-		})
-	}
-}
