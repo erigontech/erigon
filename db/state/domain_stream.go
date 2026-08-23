@@ -20,8 +20,10 @@ import (
 	"bytes"
 	"container/heap"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
+	"sync"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -505,11 +507,34 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 		}
 	}
 
+	// Seek every file concurrently. Each seek is an independent cold random read
+	// of that file's .bt/.kv pages, so running them together is what lets the
+	// device overlap them; done one by one they queue behind each other. Goroutine
+	// i only touches file i, its own reader and its own result slot.
+	cursors := make([]*btindex.Cursor, len(dt.files))
+	seekErrs := make([]error, len(dt.files))
+	readers := make([]*seg.Reader, len(dt.files))
+	for i := range dt.files {
+		readers[i] = dt.reusableReader(i) // lazily allocated - must not race
+	}
+	var wg sync.WaitGroup
+	for i := 1; i < len(dt.files); i++ {
+		wg.Add(1)
+		go func(i int) {
+			defer wg.Done()
+			cursors[i], seekErrs[i] = dt.files[i].src.bindex.Seek(readers[i], prefix)
+		}(i)
+	}
+	if len(dt.files) > 0 {
+		cursors[0], seekErrs[0] = dt.files[0].src.bindex.Seek(readers[0], prefix)
+	}
+	wg.Wait()
+	if err := errors.Join(seekErrs...); err != nil {
+		return err
+	}
+
 	for i, item := range dt.files {
-		cursor, err := item.src.bindex.Seek(dt.reusableReader(i), prefix)
-		if err != nil {
-			return err
-		}
+		cursor := cursors[i]
 		if cursor == nil {
 			continue
 		}
@@ -519,6 +544,8 @@ func (dt *DomainRoTx) debugIteratePrefixLatest(prefix []byte, ramIter btree2.Map
 			val := cursor.Value()
 			txNum := item.endTxNum - 1 // !important: .kv files have semantic [from, t)
 			heap.Push(cpPtr, &CursorItem{t: FILE_CURSOR, key: key, val: val, btCursor: cursor, endTxNum: txNum, reverse: true})
+		} else {
+			cursor.Close()
 		}
 	}
 

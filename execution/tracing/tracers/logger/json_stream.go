@@ -19,8 +19,6 @@ package logger
 import (
 	"context"
 	"encoding/hex"
-	"maps"
-	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -87,11 +85,14 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
-// hexWithPrefix encodes b as a 0x-prefixed hex string using hexEncodeBuf.
+// hexWithPrefix encodes b as a 0x-prefixed hex string using the internal buffer.
+// The result aliases hexEncodeBuf, so it is invalidated by anything that writes
+// that buffer, writeMemoryWordRaw included. Hand it straight to the stream,
+// which copies it in.
 func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
 	l.hexEncodeBuf[0] = '0'
 	l.hexEncodeBuf[1] = 'x'
-	n := hex.Encode(l.hexEncodeBuf[2:], h[:])
+	n := hex.Encode(l.hexEncodeBuf[2:], b)
 	return common.ToStringZeroCopy(l.hexEncodeBuf[:2+n])
 }
 
@@ -243,25 +244,27 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("storage")
 		l.stream.WriteObjectStart()
-		// Sorted by location for easier comparison with geth
+		first := true
+		// Sort storage by locations for easier comparison with geth
+		if l.locations != nil {
+			l.locations = l.locations[:0]
+		}
 		s := l.storage[contractAddr]
-		l.locations = slices.AppendSeq(l.locations[:0], maps.Keys(s))
+		for loc := range s {
+			l.locations = append(l.locations, loc)
+		}
 		l.locations.Sort()
-		for i := range l.locations {
-			if i > 0 {
+		for _, loc := range l.locations {
+			value := s[loc]
+			if first {
+				first = false
+			} else {
 				l.stream.WriteMore()
 			}
-			loc := &l.locations[i]
-			value := s[*loc]
-			l.stream.WriteObjectField(l.hexWithPrefix(loc))
-			l.stream.WriteRaw(l.hexQuotedHash(&value))
+			l.stream.WriteObjectField(l.hexWithPrefix(loc[:]))
+			l.stream.WriteString(l.hexWithPrefix(value[:]))
 		}
 		l.stream.WriteObjectEnd()
 	}
 	l.stream.WriteObjectEnd()
-
-	// Memory words used to drain through Stream.Write, which also drops the
-	// buffer's spare capacity. Draining once per step keeps a long trace from
-	// being held whole in memory, without that cost.
-	l.stream.Flush() //nolint:errcheck
 }
