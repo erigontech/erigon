@@ -28,6 +28,8 @@ import (
 	"github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"time"
+
 	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
@@ -473,12 +475,14 @@ func (rs *StateV3) CommitStepBoundary(ctx context.Context, roTx kv.TemporalTx, b
 
 func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *types.Receipt, cummulativeBlobGas uint64, logs []*types.Log, traceFroms map[accounts.Address]struct{}, traceTos map[accounts.Address]struct{}, historyExecution bool, skipReceiptCache bool) error {
 	domains := rs.domains
+	tStart := time.Now()
 	for addr := range traceFroms {
 		rs.traceAddr = addr.Value()
 		if err := domains.IndexAdd(kv.TracesFromIdx, rs.traceAddr[:], txNum); err != nil {
 			return err
 		}
 	}
+	tFrom := time.Now()
 
 	for addr := range traceTos {
 		rs.traceAddr = addr.Value()
@@ -486,17 +490,28 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 			return err
 		}
 	}
+	tTo := time.Now()
 
+	nTopics := 0
 	for _, lg := range logs {
 		if err := domains.IndexAdd(kv.LogAddrIdx, lg.Address[:], txNum); err != nil {
 			return err
 		}
 		for i := range lg.Topics {
+			nTopics++
 			if err := domains.IndexAdd(kv.LogTopicIdx, lg.Topics[i][:], txNum); err != nil {
 				return err
 			}
 		}
 	}
+	tLogs := time.Now()
+	defer func() {
+		if took := time.Since(tStart); took >= dbg.ToLogSlowTxn {
+			log.Warn("[dbg] slow applyLogsAndTraces4", "took", took, "txNum", txNum,
+				"tracesFrom", tFrom.Sub(tStart), "tracesTo", tTo.Sub(tFrom), "logs", tLogs.Sub(tTo), "receipts", time.Since(tLogs),
+				"nFrom", len(traceFroms), "nTo", len(traceTos), "nLogs", len(logs), "nTopics", nTopics)
+		}
+	}()
 
 	var putter kv.TemporalPutDel
 

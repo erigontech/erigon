@@ -24,10 +24,12 @@ import (
 	"io"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 )
@@ -97,14 +99,23 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if c.buf == nil && c.allocator != nil {
+		t := time.Now()
 		c.buf = c.allocator.Get()
 		c.bufType = getTypeByBuffer(c.buf)
+		if took := time.Since(t); took >= dbg.ToLogSlowTxn {
+			log.Warn("[dbg] slow etl bufGet", "took", took, "collector", c.logPrefix)
+		}
 	}
 	c.buf.Put(k, v)
 	if !c.buf.CheckFlushSize() {
 		return nil
 	}
-	return c.flushBuffer(false)
+	t := time.Now()
+	err := c.flushBuffer(false)
+	if took := time.Since(t); took >= dbg.ToLogSlowTxn {
+		log.Warn("[dbg] slow etl flushBuffer", "took", took, "collector", c.logPrefix, "providers", len(c.dataProviders))
+	}
+	return err
 }
 
 // Collect does copy `k` and `v`
