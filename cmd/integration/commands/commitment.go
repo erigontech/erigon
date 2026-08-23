@@ -141,6 +141,12 @@ func init() {
 	withConvertFlags(cmdCommitmentConvert)
 	commitmentCmd.AddCommand(cmdCommitmentConvert)
 
+	// commitment convert-format
+	withChain(cmdCommitmentConvertFormat)
+	withDataDir(cmdCommitmentConvertFormat)
+	withConfig(cmdCommitmentConvertFormat)
+	commitmentCmd.AddCommand(cmdCommitmentConvertFormat)
+
 	// commitment visualize
 	cmdCommitmentVisualize.Flags().StringVar(&visualizeOutputDir, "output", "", "existing directory to store output HTML. By default, same as commitment files")
 	cmdCommitmentVisualize.Flags().IntVarP(&visualizeConcurrency, "concurrency", "j", 4, "amount of concurrently processed files")
@@ -950,6 +956,56 @@ func commitmentConvert(db kv.TemporalRwDB, ctx context.Context, logger log.Logge
 	// nil-guarded closeFiles), but MadvNormal would dereference freed mmap.
 
 	return dbstate.ConvertCommitmentFiles(ctx, acRo, opts, logger)
+}
+
+// integration commitment convert-format
+var cmdCommitmentConvertFormat = &cobra.Command{
+	Use:   "convert-format",
+	Short: "Rewrite binary-trie commitment .kv files into the current pbin record format",
+	Long: `Offline, one-way converter for a datadir built before the pbin record format
+carried a version. It drops the touchMap/afterMap header and the per-field
+lengths from every branch record, omits the prefix on storage leaves, and adds
+the format byte to the trie state blob.
+
+Every rewritten record is read back at its own depth and compared before it is
+written, so a record whose omitted prefix is not the derivable one fails the run
+rather than shipping.
+
+Files already in the current format are left alone, so the command is safe to
+re-run. Originals are preserved at <datadir>/snapshots/backup/domains/;
+"integration commitment convert --restore" moves them back.
+
+Example:
+  integration commitment convert-format --datadir /path/to/datadir --chain mainnet`,
+	Run: func(cmd *cobra.Command, args []string) {
+		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err != nil {
+			logger.Error("Opening DB", "error", err)
+			return
+		}
+		defer db.Close()
+
+		if err := commitmentConvertFormat(db, ctx, logger); err != nil {
+			if !errors.Is(err, context.Canceled) {
+				logger.Error(err.Error())
+			}
+			return
+		}
+	},
+}
+
+func commitmentConvertFormat(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
+	agg.PresetOfflineMerge()
+	agg.SetSnapshotBuildSema(semaphore.NewWeighted(int64(runtime.NumCPU())))
+	agg.DisableAllDependencies()
+	defer agg.MadvNormal().DisableReadAhead()
+
+	acRo := agg.BeginFilesRo()
+	defer acRo.Close()
+
+	return dbstate.ConvertPBinRecordFiles(ctx, acRo, logger)
 }
 
 // integration commitment visualize
