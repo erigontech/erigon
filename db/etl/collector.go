@@ -47,17 +47,12 @@ func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
 	}
-	//if cast, ok := b.(*sortableBuffer); ok {
-	//	log.Warn("[dbg] return buf", "cap(cast.data)", cap(cast.data), "cap(cast.lens)", cap(cast.lens))
-	//}
+	b.Reset() // release the data chunks now: an idle pooled buffer must not pin them
 	a.p.Put(b)
 }
 func (a *Allocator) Get() Buffer {
 	b := a.p.Get().(Buffer)
 	b.Reset()
-	if n := int(EtlPrealloc); n > 0 {
-		b.Prealloc(n/512, n)
-	}
 	return b
 }
 
