@@ -129,6 +129,11 @@ var (
 	// BAL_DRIVEN_COMMITMENT=false (or IGNORE_BAL=true) to fall back to the
 	// incremental path if it ever misbehaves.
 	BALDrivenCommitment = EnvBool("BAL_DRIVEN_COMMITMENT", true)
+	// CommitmentAfterExec removes the overlap between block execution and the
+	// commitment calculator: the exec loop waits for the calculator to finish
+	// block N before it starts block N+1. Off by default; on, the two phases
+	// never contend for SharedDomains.changesetMu, at the cost of the overlap.
+	CommitmentAfterExec = EnvBool("COMMITMENT_AFTER_EXEC", false)
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.

@@ -200,6 +200,47 @@ type commitmentCalculator struct {
 
 	wg   sync.WaitGroup
 	done chan struct{}
+
+	// processedThrough is the highest block whose blockResult the calculator
+	// has fully handled (computed or merely accumulated). processedWake is
+	// closed and replaced on every advance so waiters can select on it.
+	processedMu      sync.Mutex
+	processedThrough uint64
+	processedWake    chan struct{}
+}
+
+// markProcessed publishes that blockNum's blockResult is fully handled.
+func (cc *commitmentCalculator) markProcessed(blockNum uint64) {
+	cc.processedMu.Lock()
+	defer cc.processedMu.Unlock()
+	if blockNum <= cc.processedThrough {
+		return
+	}
+	cc.processedThrough = blockNum
+	close(cc.processedWake)
+	cc.processedWake = make(chan struct{})
+}
+
+// WaitProcessed blocks until the calculator has handled blockNum, the
+// calculator stops, or ctx is cancelled. It is the COMMITMENT_AFTER_EXEC
+// barrier: with it the exec loop never runs a block alongside a commitment.
+func (cc *commitmentCalculator) WaitProcessed(ctx context.Context, blockNum uint64) error {
+	for {
+		cc.processedMu.Lock()
+		reached := cc.processedThrough >= blockNum
+		wake := cc.processedWake
+		cc.processedMu.Unlock()
+		if reached {
+			return nil
+		}
+		select {
+		case <-wake:
+		case <-cc.done:
+			return nil
+		case <-ctx.Done():
+			return ctx.Err()
+		}
+	}
 }
 
 func newCommitmentCalculator(
@@ -267,6 +308,7 @@ func newCommitmentCalculator(
 		forcePerBlockCompute: forcePerBlockCompute,
 		perBlockFrom:         perBlockFrom,
 		done:                 make(chan struct{}),
+		processedWake:        make(chan struct{}),
 	}, nil
 }
 
@@ -472,6 +514,7 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		delete(cc.computedAhead, blockNum)
 		delete(cc.balRoots, blockNum)
 		cc.maybeComputeAhead(ctx, blockNum+1)
+		cc.markProcessed(blockNum)
 
 	case *commitComputeRequest:
 		// Explicit compute signal from the apply loop at batch boundary.
