@@ -106,7 +106,12 @@ func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 			log.Warn("[dbg] slow etl bufGet", "took", took, "collector", c.logPrefix)
 		}
 	}
+	tPut := time.Now()
 	c.buf.Put(k, v)
+	if took := time.Since(tPut); took >= dbg.ToLogSlowTxn {
+		log.Warn("[dbg] slow etl bufPut", "took", took, "collector", c.logPrefix,
+			"len", c.buf.Len(), "sizeLimit", c.buf.SizeLimit(), "kv", len(k)+len(v))
+	}
 	if !c.buf.CheckFlushSize() {
 		return nil
 	}
