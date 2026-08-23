@@ -549,6 +549,8 @@ func BenchmarkOnOpcodeStackDepth(b *testing.B) {
 			for b.Loop() {
 				l.OnOpcode(uint64(i), byte(vm.ADD), 100, 3, scope, nil, 1, nil)
 				i++
+				// Nothing else drains this stream, and every iteration appends to it.
+				_ = l.stream.Flush()
 			}
 		})
 	}
@@ -567,6 +569,7 @@ func BenchmarkStackValueWrite(b *testing.B) {
 			for i := range vals {
 				s.WriteString(vals[i].Hex())
 			}
+			_ = s.Flush()
 		}
 	})
 	b.Run("WriteRaw_hexQuoted", func(b *testing.B) {
@@ -576,6 +579,7 @@ func BenchmarkStackValueWrite(b *testing.B) {
 			for i := range vals {
 				l.stream.WriteRaw(l.hexQuoted(&vals[i]))
 			}
+			_ = l.stream.Flush()
 		}
 	})
 }
