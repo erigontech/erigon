@@ -1716,3 +1716,52 @@ func BenchmarkPublishVsViewBindLock(b *testing.B) {
 		})
 	}
 }
+
+// The O(1) entry counter that replaced freelru's all-shard Len on the grow
+// check must not drift from the LRU's real length on any mutation path.
+func TestGenericCache_LenTracksLRU(t *testing.T) {
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](8*datasize.MB, 256, func(v []byte) int { return len(v) }, ModeEvictLRU))
+	key := func(i int) []byte {
+		k := make([]byte, 8)
+		binary.BigEndian.PutUint64(k, uint64(i))
+		return k
+	}
+	check := func(phase string) {
+		t.Helper()
+		require.Equal(t, c.data.Load().lru.Len(), c.Len(), "entry counter drifted after %s", phase)
+	}
+
+	for i := range 500 {
+		c.Put(key(i), []byte("v"), 10)
+	}
+	check("inserts")
+
+	for i := range 200 {
+		c.Put(key(i), []byte("updated"), 20)
+	}
+	check("updates")
+
+	for i := range 100 {
+		c.Delete(key(i))
+	}
+	check("deletes")
+
+	// Floor 15 leaves the txNum-10 entries live and strands the txNum-20 ones,
+	// which their next read drops.
+	c.Unwind(15)
+	for i := 100; i < 500; i++ {
+		c.Get(key(i))
+	}
+	check("stale drops")
+
+	before := c.data.Load()
+	for i := 500; i < 4000; i++ {
+		c.Put(key(i), []byte("v"), 30)
+	}
+	require.NotEqual(t, before, c.data.Load(), "grow did not happen")
+	check("grow")
+
+	c.Clear()
+	require.Equal(t, 0, c.Len())
+	check("clear")
+}

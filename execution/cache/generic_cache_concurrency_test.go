@@ -417,3 +417,49 @@ func TestGenericCache_StatsResetAtomicWithDelete_NoPhantomEvictions(t *testing.T
 	total += c.evictions.Swap(0)
 	require.Zero(t, total, "intentional removals surfaced in the evictions metric")
 }
+
+// The entry counter is maintained by the insert path (+1) and freelru's
+// OnEvict (-1) instead of by locking every shard, so it must still agree with
+// the LRU's real length after concurrent inserts, updates, deletes and
+// capacity evictions have raced across several grow steps.
+func TestGenericCache_LenCounterUnderConcurrency(t *testing.T) {
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](8*datasize.MB, 256, func(v []byte) int { return len(v) }, ModeEvictLRU))
+
+	const workers = 8
+	const perWorker = 4000
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			k := make([]byte, 8)
+			for i := range perWorker {
+				binary.BigEndian.PutUint64(k, uint64(w*perWorker+i))
+				c.Put(k, []byte("v"), uint64(i))
+				binary.BigEndian.PutUint64(k, uint64(w*perWorker+i/2))
+				c.Put(k, []byte("updated"), uint64(i))
+				if i%16 == 0 {
+					binary.BigEndian.PutUint64(k, uint64(w*perWorker+i/4))
+					c.Delete(k)
+				}
+			}
+		})
+	}
+	wg.Wait()
+
+	require.Equal(t, c.data.Load().lru.Len(), c.Len(), "entry counter drifted from the LRU")
+}
+
+// Parallel inserts into a cache that is still below its ceiling — the window
+// where every insert runs the grow check.
+func BenchmarkGenericCacheParallelPutGrow(b *testing.B) {
+	c := NewGenericCacheWithAvg[[]byte](256*datasize.MB, 96, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	defer c.Close()
+	var seq atomic.Uint64
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		k := make([]byte, 8)
+		for pb.Next() {
+			binary.BigEndian.PutUint64(k, seq.Add(1))
+			c.Put(k, []byte("0123456789abcdef"), 1)
+		}
+	})
+}
