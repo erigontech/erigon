@@ -1657,20 +1657,6 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 }
 
 func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.TemporalTx) (blockResult *blockResult, err error) {
-	prStarted := time.Now()
-	defer func() {
-		took := time.Since(prStarted)
-		if took > time.Millisecond {
-			mxProcessResultsSeconds.Observe(took.Seconds())
-		}
-		if took >= slowStageThreshold {
-			bn := uint64(0)
-			if blockResult != nil && blockResult.Block != nil {
-				bn = blockResult.Block.NumberU64()
-			}
-			log.Warn("[dbg] slow processResults", "took", took, "blockNum", bn)
-		}
-	}()
 	rwsIt := pe.rws.Iter()
 	for rwsIt.HasNext() && blockResult == nil {
 		txResult := rwsIt.PopNext()
@@ -2707,6 +2693,21 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	if !ok {
 		return nil, fmt.Errorf("unexpected task type: %T", res.Task)
 	}
+
+	prStarted := time.Now()
+	defer func() {
+		took := time.Since(prStarted)
+		if took > time.Millisecond {
+			mxProcessResultsSeconds.Observe(took.Seconds())
+		}
+		if took >= slowStageThreshold {
+			bn := uint64(0)
+			if res != nil {
+				bn = res.BlockNumber()
+			}
+			log.Warn("[dbg] slow nextResult", "took", took, "blockNum", bn)
+		}
+	}()
 
 	tx := task.index
 	be.results[tx] = &execResult{TxResult: res}
