@@ -603,14 +603,9 @@ func (sd *SharedDomains) AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGe
 	return &stateGetter{sd: sd, tx: tx, m: metrics, view: sd.cacheViewFor(tx)}
 }
 
-// DomainReader is the read-only view of the shared domain used by the parallel
-// executor's exec flow. Holding the domain as this interface — rather than the
-// full *SharedDomains — keeps exec's state access read-only: the mutators
-// (DomainPut, ApplyStateWrites, SetChangesetAccumulator, Flush, …) are not in the
-// method set, so an exec-side write does not compile. State writes are the apply
-// loop's job. It extends membatchwithdb.DomainReader (the memory-batch fallback
-// reader) with the getter/iterate methods the exec finalize readers need, so the
-// lineage from the base reader is explicit. *SharedDomains is its sole implementer.
+// DomainReader is the read-only domain view held by the parallel executor's exec
+// flow, so exec-side writes don't compile. Extends membatchwithdb.DomainReader
+// with the getter/iterate methods the finalize readers need.
 type DomainReader interface {
 	membatchwithdb.DomainReader
 	AsGetter(tx kv.TemporalTx) execctxapi.StateGetter
@@ -618,23 +613,17 @@ type DomainReader interface {
 	IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error
 }
 
-// AsGetter is the metrics-free execution getter used by the parallel-exec
-// finalize readers and tests. It delegates to AsStateGetter with no per-read
-// metrics.
+// AsGetter returns a metrics-free execution getter.
 func (sd *SharedDomains) AsGetter(tx kv.TemporalTx) execctxapi.StateGetter {
 	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 }
 
-// AsGetterNoMetrics is an explicit-intent alias of AsGetter (collects no
-// metrics), for concurrent callers (RPC/engine) where that is deliberate.
+// AsGetterNoMetrics is an explicit-intent alias of AsGetter for concurrent callers.
 func (sd *SharedDomains) AsGetterNoMetrics(tx kv.TemporalTx) execctxapi.StateGetter {
 	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})
 }
 
-// AsGetterMetered returns a getter that records reads into the caller's own
-// per-worker metrics instance m. m must be single-owner (one goroutine); the
-// caller hands it off via MergeMetrics at task end (a lock per task, not per
-// read) and allocates a fresh instance. Used by parallel-exec workers.
+// AsGetterMetered returns a getter that records reads into the caller's single-owner metrics instance m.
 func (sd *SharedDomains) AsGetterMetered(tx kv.TemporalTx, m *kvmetrics.DomainMetrics) execctxapi.StateGetter {
 	return sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}.WithMetrics(m))
 }

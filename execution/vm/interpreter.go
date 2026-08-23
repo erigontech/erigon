@@ -79,27 +79,18 @@ type CallContext struct {
 	cachedKey     accounts.StorageKey
 	cachedAddr    accounts.Address
 
-	// Frame-local SLOAD value cache: memoizes the storage slots this frame has
-	// read/written so repeated SLOADs of the same slot skip the state read. The
-	// frame's storage address is fixed (scope.Contract.Address()), so the key is
-	// the slot alone. Kept coherent by opSstore (write-through) and cleared after
-	// a sub-call returns (a callee may have written this frame's storage via
-	// DELEGATECALL/CALLCODE or reentrancy).
+	// Frame-local read cache; invalidated on sub-call return (see invalidateFrameCaches)
+	// since a callee can change this frame's storage.
 	slotCache map[accounts.StorageKey]uint256.Int
 
-	// Frame-local account-field caches (BALANCE / EXTCODESIZE / EXTCODEHASH),
-	// keyed by the queried address. Only the state read is memoized; the BAL
-	// MarkAddressAccess side-effect still runs on every access. Another account's
-	// balance/code can only change via a sub-call (value transfer, CREATE,
-	// reentrancy) or a terminal op (SELFDESTRUCT), so these are cleared on
-	// sub-call return alongside slotCache — no write-through path exists.
+	// Frame-local read caches; invalidated on sub-call return (see invalidateFrameCaches)
+	// since a callee can change any account's balance or code.
 	balanceCache  map[accounts.Address]uint256.Int
 	codeSizeCache map[accounts.Address]uint64
 	codeHashCache map[accounts.Address]uint256.Int
 
-	// cachesOff disables the frame-local read caches for this frame. Set when a
-	// tracer/instruction trace is active so traced execution takes the canonical
-	// per-read path — the same reason inline dispatch is disabled under tracing.
+	// cachesOff disables the frame-local read caches so traced execution takes the
+	// canonical per-read path.
 	cachesOff bool
 
 	// Contract carries pointers, so it must precede the pointer-free Stack:
@@ -167,10 +158,7 @@ func getCallContext(contract Contract, input []byte, gas mdgas.MdGas) *CallConte
 	return ctx
 }
 
-// invalidateFrameCaches drops this frame's memoized state reads after a
-// sub-call returns: the callee may have written this frame's storage
-// (delegatecall/callcode) or changed any account's balance/code via a value
-// transfer, CREATE, or reentrancy.
+// invalidateFrameCaches drops memoized reads after a sub-call may have mutated shared state.
 func (c *CallContext) invalidateFrameCaches() {
 	clear(c.slotCache)
 	clear(c.balanceCache)
@@ -649,13 +637,7 @@ func (evm *EVM) Run(contract Contract, gas mdgas.MdGas, input []byte, readOnly b
 	return res, callContext.Gas(), mdgas.MdGasUsage{}, err
 }
 
-// runOptimized is the interpreter loop for the trace-free case (no tracer,
-// no instruction trace). It drops everything that exists only to feed the
-// tracer — the pcCopy/gasCopy/callGas/cost snapshots, the per-op OnOpcode/
-// OnGasChange/OnFault and instruction-print branches — so the gas charge is a
-// single clean deduct (constant, then dynamic regular, then state) with no
-// tracing-driven ordering or bookkeeping. Dispatched from Run only when
-// !anyTrace, so it is never reached with a tracer active.
+// runOptimized is the trace-free interpreter loop: a single clean gas deduct with no tracer bookkeeping.
 func (evm *EVM) runOptimized(callContext *CallContext, contract *Contract) (res []byte, err error) {
 	pc := uint64(0)
 	inline := !evm.config.NoInlineDispatch

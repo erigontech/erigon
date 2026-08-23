@@ -9,7 +9,7 @@ import (
 // PrevBlockReader is a per-worker committed-base reader whose prev-block chain is
 // swapped per task via SetBlock, so one long-lived worker reader can serve every
 // block: it holds a stable raw base and, for the block a task belongs to, layers
-// the finalized-but-not-yet-committed prior blocks (PrevBlockList.Below) in
+// the finalized-but-not-yet-committed prior blocks (PrevBlockList.Before) in
 // front of it. SetBlock is called once per task (window-sized rebuild, cheap);
 // the read methods carry no per-read allocation. The IBS holds one stable
 // PrevBlockReader, so switching blocks never rebuilds the IBS.

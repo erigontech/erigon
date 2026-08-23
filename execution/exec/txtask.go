@@ -116,10 +116,7 @@ type TxResult struct {
 
 	// CollectorWrites holds collector-format writes (all 4 account fields per
 	// address) produced during worker execution, with fee-calc balance
-	// adjustments folded in during finalize. It is not the commit source — the
-	// parallel commit builds its write set from the versionMap — so this is
-	// vestigial and slated for removal once the last self-referential fee update
-	// is dropped.
+	// adjustments folded in during finalize.
 	CollectorWrites *state.WriteSet
 
 	// WorkerValidated: the worker walked TxIn against the versionMap right after
@@ -998,15 +995,6 @@ func NewResultsQueue(channelLimit, heapLimit int) *ResultsQueue {
 }
 
 func (q ResultsQueue) FirstTxNumLocked() uint64 { return (*q.results)[0].Version().TxNum }
-
-// BufferedLen is the number of completed results buffered in the in-order heap
-// (produced by workers but not yet drained via PopNext). A large value means
-// workers are completing work that is stuck behind the in-order gate.
-func (q ResultsQueue) BufferedLen() int {
-	q.RLock()
-	defer q.RUnlock()
-	return q.results.Len()
-}
 
 type ResultsQueueIter struct {
 	*PriorityQueueIter[*TxResult]

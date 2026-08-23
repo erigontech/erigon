@@ -26,20 +26,10 @@ import (
 )
 
 // runGoInline executes a burst of consecutive hot opcodes with constant-folded
-// prologues: the per-op gas cost and stack bounds are inlined, so the loop
-// never loads the 56-byte operation struct from the jump table nor runs the
-// generic dynamic-gas / memory-sizing / tracing machinery. It advances pc and
-// returns at the first opcode it does not handle (halt=false, err=nil, pc left
-// at that opcode) so the caller runs it via the generic jump-table path and
-// re-enters; on STOP (or running off the end) it returns halt=true; on a fault
-// it returns the typed error.
-//
-// The switch is kept deliberately small — the fast loop's advantage is
-// switch-size sensitive (instruction cache / branch predictor), so only the
-// hottest constant-gas, no-memory, no-host ops are inlined. The stack
-// manipulation reuses the same Stack methods the opXXX functions use; only the
-// prologue is folded, and the folded constants are asserted against the jump
-// table (assertInlineConsts) and pinned to it by the equivalence oracle.
+// prologues. It advances pc and returns at the first opcode it does not handle
+// (halt=false, err=nil, pc left at that opcode) for the caller to run via the
+// generic jump-table path; on STOP or running off the end it returns halt=true;
+// on a fault it returns the typed error.
 func (evm *EVM) runGoInline(cc *CallContext, contract *Contract, pc uint64) (uint64, bool, error) {
 	codeLen := uint64(len(contract.Code))
 	stack := &cc.Stack

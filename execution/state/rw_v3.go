@@ -59,7 +59,6 @@ func NewStateV3(domains *execctx.SharedDomains, persistReceiptsCacheV2 bool, log
 		domains:                domains,
 		logger:                 logger,
 		persistReceiptsCacheV2: persistReceiptsCacheV2,
-		//trace: true,
 	}
 }
 
@@ -198,13 +197,9 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 				sdPreservedBalance := d.balance != nil && !d.balance.IsZero()
 				pureDelete := !sdPreservedBalance && d.nonce == nil && d.incarnation == nil && d.codeHash == nil
 				if blockCache != nil {
-					// Route the account+code delete and storage-prefix wipe through
-					// the cache so they're recorded in writeLog order. A later
-					// SELFDESTRUCT must supersede an earlier put for the same address
-					// in the same block; a direct domain delete (applied immediately,
-					// before the block-end Flush replays the earlier put) would be
-					// overwritten by that replay — TestDeleteRecreateSlotsAcrossManyBlocks
-					// block 31 (destruct → resurrect → destruct in one block).
+					// A later SELFDESTRUCT must supersede an earlier put for the same
+					// address in the same block; a direct domain delete would be
+					// overwritten by the block-end Flush replaying the earlier put.
 					blockCache.DeleteAccount(addr, txNum)
 					if !domains.InlineTouchKeyDisabled() {
 						domains.GetCommitmentContext().TouchKey(kv.AccountsDomain, string(address[:]), nil)
@@ -880,7 +875,6 @@ func NewWriter(tx kv.TemporalPutDel, accumulator *shards.Accumulator, txNum uint
 		tx:          tx,
 		accumulator: accumulator,
 		txNum:       txNum,
-		//trace: true,
 	}
 }
 
@@ -958,20 +952,10 @@ func (w *Writer) DeleteAccount(address accounts.Address, original *accounts.Acco
 	if w.trace {
 		fmt.Printf("del acc: %x\n", address)
 	}
-	//TODO: move logic from SD
-	//if err := w.tx.DomainDelPrefix(kv.StorageDomain, address[:]); err != nil {
-	//	return err
-	//}
-	//if err := w.tx.DomainDel(kv.CodeDomain, address[:], nil); err != nil {
-	//	return err
-	//}
 	addressValue := address.Value()
 	if err := w.tx.DomainDel(kv.AccountsDomain, addressValue[:], w.txNum, nil); err != nil {
 		return err
 	}
-	// if w.accumulator != nil { TODO: investigate later. basically this will always panic. keeping this out should be fine anyway.
-	// 	w.accumulator.DeleteAccount(address)
-	// }
 	return nil
 }
 
@@ -1031,7 +1015,6 @@ type ReaderV3 struct {
 
 func NewReaderV3(getter execctxapi.StateGetter) *ReaderV3 {
 	return &ReaderV3{
-		//trace:  true,
 		getter: getter,
 	}
 }
@@ -1067,9 +1050,6 @@ func (r *ReaderV3) TracePrefix() string {
 //     going directly to sd.mem. At block boundary, Flush writes the final
 //     state to SharedDomains. This ensures sd.mem only changes at block
 //     boundaries, eliminating cross-thread races.
-//
-// This is the embryonic BlockState from the IBS refactor plan
-// (github.com/erigontech/erigon/issues/19623).
 //
 // Thread-safe: multiple worker goroutines share one cache per block.
 type BlockStateCache struct {

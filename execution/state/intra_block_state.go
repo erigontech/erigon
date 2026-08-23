@@ -1036,7 +1036,6 @@ func (sdb *IntraBlockState) AddBalance(addr accounts.Address, amount uint256.Int
 			}
 
 			if sdb.tracingHooks != nil && sdb.tracingHooks.OnBalanceChange != nil {
-				// TODO: discuss if we should ignore error
 				prev := new(uint256.Int)
 				amount := amount
 				if dbg.TraceDomainIO || (dbg.TraceTransactionIO && (sdb.trace || dbg.TraceAccount(addr.Handle()))) {
@@ -1967,7 +1966,7 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 		// stateReader returned a committed value from SharedDomains. Read
 		// SelfDestructPath directly from the versionMap (not via versionedReadCore
 		// which itself short-circuits on the same flag). Use the same pattern
-		// as CreateAccount (line 1628).
+		// as CreateAccount.
 		if destructed, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && destructed {
 			// Only honour if the current tx hasn't already resurrected.
 			localResurrected := false
@@ -2158,15 +2157,14 @@ func (sdb *IntraBlockState) CreateAccount(addr accounts.Address, contractCreatio
 				} else if sdb.versionMap != nil {
 					// Fresh-IBS worker path (e.g. InsertChain parallel executor): no stateObjects
 					// cache, but the versionMap may have SelfDestructPath=true from a prior tx.
-					// versionedReadCore returns false for SelfDestructPath via the early-exit at
-					// lines 459-462 — bypass it here so we correctly set selfdestructed=true.
+					// versionedReadCore short-circuits SelfDestructPath, so read the versionMap directly here.
 					if d, res, ok := sdb.versionMap.ReadSelfDestruct(addr, sdb.txIndex); ok && res.Status() == MVReadResultDone && d {
 						destructed = true
 					}
 				}
 			}
 
-			// Honour same-block revival (#21319): a prior tx's self-destruct is
+			// Honour same-block revival: a prior tx's self-destruct is
 			// overridden by a later tx that revived the account to a non-empty
 			// state (a value transfer leaving balance/nonce/code behind). A value-0
 			// no-op transfer that leaves it empty does NOT revive it (EIP-161
@@ -3104,8 +3102,6 @@ func traceWrite[T any](sdb *IntraBlockState, vw *VersionedWrite[T]) {
 		hdr.Address, AccountKey{Path: hdr.Path, Key: hdr.Key}, vw.Val, hdr.Version.TxIndex, hdr.Version.Incarnation)
 }
 
-// versionedWriteSelfDestruct returns the SelfDestructPath write for addr
-// in the dirty per-tx write set, if any.
 // accountLifecycle returns the complete self-destruct verdict for the current
 // tx, layering the tx's own field-level SelfDestruct write over the versionMap
 // floor — the account-level analogue of what versionedReadCore does per field.

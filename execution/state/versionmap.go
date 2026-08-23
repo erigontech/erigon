@@ -48,12 +48,7 @@ func (p AccountPath) String() string {
 	}
 }
 
-// AccountPath enum values. The numeric order matters: AsBlockAccessList
-// sorts writes by Path to ensure deterministic processing. SelfDestructPath
-// MUST precede BalancePath because updateWrite zeroes non-zero balance writes
-// in the same tx as a selfdestruct — the selfDestructed flag must be set
-// before balance writes are evaluated. Do not reorder without reviewing
-// updateWrite in versionedio.go.
+// Numeric order is load-bearing: SelfDestructPath must precede BalancePath so the selfDestructed flag is set before balance writes are evaluated.
 const (
 	AddressPath AccountPath = iota
 	SelfDestructPath
@@ -90,11 +85,7 @@ func (k AccountKey) String() string {
 // rather than a runtime panic — and the storage layer carries the typed
 // value end-to-end (no interface box on writes).
 //
-// Invariant — per-field independence: no consumer treats AddressEntry as
-// a transactional whole. Reads, writes, mark-estimate/complete, delete
-// and validation all operate at (Path, Key) granularity. Helpers that
-// look like address-level operations (DeleteAll, StorageKeys) are pure
-// iterations of per-field operations.
+// Per-field granular: every operation is (Path,Key)-scoped; no consumer treats the entry as a transactional whole.
 type AddressEntry struct {
 	Address        *btree.Map[int, *WriteCell[*accounts.Account]]
 	SelfDestruct   *btree.Map[int, *WriteCell[bool]]
@@ -111,14 +102,8 @@ type AddressEntry struct {
 	mu sync.RWMutex
 }
 
-// putCell sets or updates a typed cell at txIdx. Caller must hold e.mu.Lock().
-// Returns the (possibly newly-created) cell map for the caller to assign back
-// to its AddressEntry field. `getCell` is the per-T pool fetcher (e.g.
-// getCellBalance for the BalancePath); it is a static function-value, so
-// passing it costs no allocation. The write path uses pool-supplied cells
-// instead of `&WriteCell[T]{...}` literals — Delete/DeleteAll return them
-// to the same pool for reuse across blocks.
-func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, txIdx, incarnation int, flag statusFlag, value T, getCell func() *WriteCell[T], eq func(a, b T) bool) *btree.Map[int, *WriteCell[T]] {
+// putCell sets/updates a typed cell at txIdx; caller holds e.mu.Lock(). Returns the (possibly new) map to assign back.
+func putCell[T any](vm *VersionMap, cells *btree.Map[int, *WriteCell[T]], addr accounts.Address, path AccountPath, txIdx, incarnation int, flag statusFlag, value T, getCell func() *WriteCell[T]) *btree.Map[int, *WriteCell[T]] {
 	vm.assertUnsealed(txIdx, addr, path, accounts.NilKey)
 	if cells == nil {
 		cells = &btree.Map[int, *WriteCell[T]]{}
@@ -155,25 +140,12 @@ func markCellFlag[T any](cells *btree.Map[int, *WriteCell[T]], txIdx int, flag s
 }
 
 type VersionMap struct {
-	// s maps address → *AddressEntry as a sync.Map so account lookup is
-	// lock-free on the read hot path (no shared reader-counter to contend on).
-	// Each AddressEntry carries its own RWMutex guarding that account's cells,
-	// so reads/writes of different accounts never contend — the global RWMutex
-	// this replaced serialised every access. Per-read conflict detection is
-	// unchanged; only the lock granularity moved from global to per-account.
+	// address -> *AddressEntry; sync.Map so account lookup is lock-free. Each entry's RWMutex guards only its own cells.
 	s      sync.Map // accounts.Address -> *AddressEntry
 	trace  bool
 	HasBAL bool // When true, all significant writes are pre-populated from BAL
 
-	// sealed/sealedArmed enforce the invariant that a finalized tx's cells are
-	// immutable: once tx T is sealed (finalized), no write/delete may touch a cell
-	// at TxIndex <= T. sealedArmed defaults false so a zero-value VersionMap never
-	// fires; sealed then holds the highest sealed TxIndex (system txs use negative
-	// indices, so an armed flag is cleaner than a numeric sentinel). A violation is
-	// a scheduling bug — a stale speculative incarnation flushing after its tx
-	// finalized — that would corrupt the committed prefix; see assertUnsealed.
-	// SealUpTo has a single writer (the in-order finalize sweep); assertUnsealed
-	// has many (workers), coordinated by the atomics.
+	// sealed/sealedArmed enforce that a finalized tx's cells are immutable: no write/delete at TxIndex <= sealed. SealUpTo is single-writer; assertUnsealed is many-reader.
 	sealed      atomic.Int64
 	sealedArmed atomic.Bool
 }
@@ -281,7 +253,7 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Address = putCell(vm, e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellAccount, nil)
+	e.Address = putCell(vm, e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellAccount)
 }
 
 // WriteOriginAddressOnce seeds addr's committed pre-block account at originIndex
@@ -299,63 +271,63 @@ func (vm *VersionMap) WriteOriginAddressOnce(addr accounts.Address, value *accou
 			return
 		}
 	}
-	e.Address = putCell(vm, e.Address, addr, AddressPath, originIndex, 0, flagFor(true), value, getCellAccount, nil)
+	e.Address = putCell(vm, e.Address, addr, AddressPath, originIndex, 0, flagFor(true), value, getCellAccount)
 }
 
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellSelfDestruct, nil)
+	e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellSelfDestruct)
 }
 
 func (vm *VersionMap) WriteBalance(addr accounts.Address, v Version, value uint256.Int, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Balance = putCell(vm, e.Balance, addr, BalancePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellBalance, eqUint256)
+	e.Balance = putCell(vm, e.Balance, addr, BalancePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellBalance)
 }
 
 func (vm *VersionMap) WriteNonce(addr accounts.Address, v Version, value uint64, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Nonce = putCell(vm, e.Nonce, addr, NoncePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellNonce, eqUint64)
+	e.Nonce = putCell(vm, e.Nonce, addr, NoncePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellNonce)
 }
 
 func (vm *VersionMap) WriteIncarnation(addr accounts.Address, v Version, value uint64, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellIncarnation, eqUint64)
+	e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellIncarnation)
 }
 
 func (vm *VersionMap) WriteCode(addr accounts.Address, v Version, value accounts.Code, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.Code = putCell(vm, e.Code, addr, CodePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCode, nil)
+	e.Code = putCell(vm, e.Code, addr, CodePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCode)
 }
 
 func (vm *VersionMap) WriteCodeHash(addr accounts.Address, v Version, value accounts.CodeHash, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.CodeHash = putCell(vm, e.CodeHash, addr, CodeHashPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeHash, eqCodeHash)
+	e.CodeHash = putCell(vm, e.CodeHash, addr, CodeHashPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeHash)
 }
 
 func (vm *VersionMap) WriteCodeSize(addr accounts.Address, v Version, value int, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeSize, eqInt)
+	e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCodeSize)
 }
 
 func (vm *VersionMap) WriteCreateContract(addr accounts.Address, v Version, value bool, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
 	defer e.mu.Unlock()
-	e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCreateContract, nil)
+	e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellCreateContract)
 }
 
 func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKey, v Version, value uint256.Int, complete bool) {
@@ -365,7 +337,7 @@ func (vm *VersionMap) WriteStorage(addr accounts.Address, key accounts.StorageKe
 	if e.Storage == nil {
 		e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 	}
-	e.Storage[key] = putCell(vm, e.Storage[key], addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellStorage, eqUint256)
+	e.Storage[key] = putCell(vm, e.Storage[key], addr, StoragePath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellStorage)
 }
 
 // entryOrCreate returns the AddressEntry for addr, creating it if absent. The
@@ -575,47 +547,20 @@ func (vm *VersionMap) LatestTxIndex(addr accounts.Address, path AccountPath, key
 	return fk, true
 }
 
-// AccountLifecycleState enumerates an account's existence at a given txIdx,
-// resolved once from the SelfDestruct + revival signals so that every consumer
-// — readers, validation, the create decision — branches on the SAME verdict
-// instead of each re-deriving it from raw ReadSelfDestruct. The recurring bug
-// class this removes is a divergence: one site (a reader) records one lifecycle
-// version while another site (the validator) resolves a different one, so a valid
-// read can never re-validate and the tx livelocks to the incarnation cap.
+// AccountLifecycleState enumerates an account's existence at a given txIdx, resolved once so readers, validation and the create decision branch on the same verdict.
 type AccountLifecycleState uint8
 
 const (
-	// LifecycleLive: no Done SelfDestruct=true in effect at txIdx — normal floor
-	// reads, no storage wipe.
+	// LifecycleLive: no Done SelfDestruct=true in effect at txIdx.
 	LifecycleLive AccountLifecycleState = iota
-	// LifecycleAbsent: destroyed and net-absent — no revival above the destruct and
-	// no EIP-8246 balance/nonce preserved. The account reads as gone: every
-	// field/storage read is zero/absent, and a pre-block base read of it is NOT
-	// stale (must not be invalidated).
+	// LifecycleAbsent: destroyed with no revival above it; the account reads as gone and a pre-block base read of it is not stale.
 	LifecycleAbsent
-	// LifecycleRevived: destroyed but re-created above the destruct — a live
-	// re-create (AddressPath ≥ destroyedAt, catching same-tx metamorphic SD+CREATE2)
-	// or a Balance/Nonce/CodeHash write > destroyedAt. The account exists with a
-	// fresh incarnation: storage written on/before the destruct is wiped
-	// (unwritten-since slots read zero) and stale base reads ARE invalidated.
-	//
-	// EIP-8246 balance-preserve is deliberately not resolved here: its cell
-	// signature is indistinguishable from a pre-Cancun credit to a doomed account,
-	// so only a fork-aware caller can decide whether it still exists.
+	// LifecycleRevived: destroyed but re-created above the destruct; storage on/before the destruct is wiped and stale base reads are invalidated.
+	// EIP-8246 balance-preserve is not resolved here: only a fork-aware caller can decide whether the account still exists.
 	LifecycleRevived
 )
 
-// AccountLifecycleAt resolves an account's lifecycle in one pass: the state, the
-// canonical version dependent reads must anchor on, and the destruct (wipe) TxIndex.
-//
-// canonicalVer is the single point of agreement between reader and validator: the
-// LATEST SelfDestruct cell (destruct, or the revival that flipped it) — exactly what
-// the validator's ReadStatus(SelfDestructPath) resolves. A reader that records a
-// storage-zero (or field-zero) dependency MUST use canonicalVer, never the wipe
-// version, or it will disagree with the validator once a revival sits above the wipe.
-//
-// destroyedAt is the wiping SelfDestruct's TxIndex (found even when hidden under a
-// revival), for readers deciding whether a slot's last write predates the wipe.
+// AccountLifecycleAt resolves an account's lifecycle in one pass: the state, the canonical version dependent reads must anchor on, and the destruct (wipe) TxIndex.
 func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (state AccountLifecycleState, canonicalVer Version, destroyedAt int) {
 	if vm == nil {
 		return LifecycleLive, Version{}, 0
@@ -624,21 +569,13 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 	if e == nil {
 		return LifecycleLive, Version{}, 0
 	}
-	// The whole verdict must be resolved under a single RLock: a concurrent flush to
-	// this address is atomic under e.mu, so composing it from several separate reads
-	// could observe the account at different points in time and return an internally
-	// inconsistent lifecycle — the exact reader/validator divergence this resolver
-	// exists to prevent.
+	// The whole verdict must be resolved under a single RLock so it cannot observe the account mid-flush and return an internally inconsistent lifecycle.
 	e.mu.RLock()
 	defer e.mu.RUnlock()
 	if e.SelfDestruct == nil {
 		return LifecycleLive, Version{}, 0
 	}
 
-	// One descend of the SelfDestruct cells yields both the latest cell — which fixes
-	// canonicalVer, mirroring what the validator resolves via ReadSelfDestruct — and
-	// the highest Done wipe (destroyedAt), even when a later SelfDestruct=false revival
-	// hides the wipe.
 	var latest *WriteCell[bool]
 	var latestIdx, wipeInc int
 	haveLatest := false
@@ -656,9 +593,6 @@ func (vm *VersionMap) AccountLifecycleAt(addr accounts.Address, txIdx int) (stat
 	if !wiped {
 		return LifecycleLive, Version{}, 0
 	}
-	// canonicalVer = the latest SD cell when it is Done (a SelfDestruct=false revival
-	// above the wipe supersedes it); an in-flight estimate on top is not authoritative,
-	// so fall back to the wipe — exactly ReadSelfDestruct's Done/Dependency semantics.
 	if latest.flag == FlagDone {
 		canonicalVer = Version{TxIndex: latestIdx, Incarnation: latest.incarnation}
 	} else {
@@ -695,24 +629,13 @@ func highestBelow[T any](cells *btree.Map[int, *WriteCell[T]], limit int) (int, 
 	return hi, ok
 }
 
-// IsNetAbsent reports whether the account reads as gone at txIdx — LifecycleAbsent:
-// a wiping SELFDESTRUCT with no revival above it and no EIP-8246 balance/nonce
-// preserved. The single "is it gone" verdict every reader and the create decision
-// share, so they cannot diverge (see AccountLifecycleAt for the full state model).
+// IsNetAbsent reports whether the account reads as gone at txIdx (LifecycleAbsent; see AccountLifecycleAt).
 func (vm *VersionMap) IsNetAbsent(addr accounts.Address, txIdx int) bool {
 	state, _, _ := vm.AccountLifecycleAt(addr, txIdx)
 	return state == LifecycleAbsent
 }
 
-// netAbsentDestruct reports whether a lower tx left addr net-ABSENT via a
-// create+self-destruct (EIP-6780): a self-destruct cell (committed or in-flight)
-// with no revival above it — no live re-create (AddressPath cell) and no field
-// write (Balance/Nonce/CodeHash) above the destruct. Such an account was absent
-// and empty both at the pre-block base and after the lower tx, so a base read of
-// it (absent AddressPath, empty/zero property) is not stale and must not be
-// invalidated by the create/destruct cross-checks. Returns false when there is no
-// destruct or the account was revived; those keep the normal cross-checks, so a
-// live re-create or an incarnation bump still invalidates a stale base read.
+// netAbsentDestruct reports whether a lower tx left addr net-absent via create+self-destruct with no revival above it, so a base read of it is not stale (see IsNetAbsent).
 func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool {
 	destructed, sdRR, ok := vm.ReadSelfDestruct(addr, txIndex)
 	if !ok || !destructed || (sdRR.Status() != MVReadResultDone && sdRR.Status() != MVReadResultDependency) {
@@ -742,12 +665,6 @@ func (vm *VersionMap) netAbsentDestruct(addr accounts.Address, txIndex int) bool
 	return true
 }
 
-// FlushVersionedWrites atomically flushes all writes to the version map
-// under a single lock acquisition. This prevents concurrent readers from
-// observing a partially-flushed state (e.g. seeing an AddressPath write
-// but not the corresponding CodePath write from the same transaction),
-// which could cause non-deterministic BAL (EIP-7928) hashes during
-// parallel execution.
 // FlushVersionedWrites routes a tx's typed write collections into the version
 // map. Each cell is positioned by the write's (txIndex, incarnation), so the
 // per-path loop order does not affect the result.
@@ -792,38 +709,38 @@ func (vm *VersionMap) flushVersionedWrites(writes *WriteSet, complete bool, trac
 		e := vm.entryOrCreate(addr)
 		e.mu.Lock()
 		if vw, ok := writes.address[addr]; ok {
-			e.Address = putCell(vm, e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, feeBalFlag, vw.Val, getCellAccount, nil)
+			e.Address = putCell(vm, e.Address, addr, AddressPath, vw.Version.TxIndex, vw.Version.Incarnation, feeBalFlag, vw.Val, getCellAccount)
 		}
 		if vw, ok := writes.selfDestruct[addr]; ok {
-			e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellSelfDestruct, nil)
+			e.SelfDestruct = putCell(vm, e.SelfDestruct, addr, SelfDestructPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellSelfDestruct)
 		}
 		if vw, ok := writes.balance[addr]; ok {
-			e.Balance = putCell(vm, e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, feeBalFlag, vw.Val, getCellBalance, eqUint256)
+			e.Balance = putCell(vm, e.Balance, addr, BalancePath, vw.Version.TxIndex, vw.Version.Incarnation, feeBalFlag, vw.Val, getCellBalance)
 		}
 		if vw, ok := writes.nonce[addr]; ok {
-			e.Nonce = putCell(vm, e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellNonce, eqUint64)
+			e.Nonce = putCell(vm, e.Nonce, addr, NoncePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellNonce)
 		}
 		if vw, ok := writes.incarnation[addr]; ok {
-			e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellIncarnation, eqUint64)
+			e.Incarnation = putCell(vm, e.Incarnation, addr, IncarnationPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellIncarnation)
 		}
 		if vw, ok := writes.code[addr]; ok {
-			e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCode, nil)
+			e.Code = putCell(vm, e.Code, addr, CodePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCode)
 		}
 		if vw, ok := writes.codeHash[addr]; ok {
-			e.CodeHash = putCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeHash, eqCodeHash)
+			e.CodeHash = putCell(vm, e.CodeHash, addr, CodeHashPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeHash)
 		}
 		if vw, ok := writes.codeSize[addr]; ok {
-			e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeSize, eqInt)
+			e.CodeSize = putCell(vm, e.CodeSize, addr, CodeSizePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCodeSize)
 		}
 		if vw, ok := writes.createContract[addr]; ok {
-			e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCreateContract, nil)
+			e.CreateContract = putCell(vm, e.CreateContract, addr, CreateContractPath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellCreateContract)
 		}
 		if inner, ok := writes.storage[addr]; ok {
 			if e.Storage == nil {
 				e.Storage = map[accounts.StorageKey]*btree.Map[int, *WriteCell[uint256.Int]]{}
 			}
 			for key, vw := range inner {
-				e.Storage[key] = putCell(vm, e.Storage[key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellStorage, eqUint256)
+				e.Storage[key] = putCell(vm, e.Storage[key], addr, StoragePath, vw.Version.TxIndex, vw.Version.Incarnation, flag, vw.Val, getCellStorage)
 			}
 		}
 		e.mu.Unlock()
@@ -1087,7 +1004,6 @@ func liveStorage(vm *VersionMap, a accounts.Address, k accounts.StorageKey, tx i
 
 func eqUint256(a, b uint256.Int) bool { return a.Eq(&b) }
 func eqUint64(a, b uint64) bool       { return a == b }
-func eqInt(a, b int) bool             { return a == b }
 func eqCodeHash(a, b accounts.CodeHash) bool {
 	return a == b
 }
@@ -1109,18 +1025,7 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 	switch rr.Status() {
 	case MVReadResultDone:
 		if source != MapRead {
-			// When BAL is present, significant writes for BalancePath,
-			// NoncePath, CodePath and StoragePath are pre-populated in the
-			// VersionMap before execution.  If a read of one of those paths
-			// was from storage (no VersionMap entry at execution time) but
-			// the VersionMap now has an entry from a concurrent worker
-			// flush, the entry is a BAL-filtered no-op write and the read
-			// value is still correct.
-			//
-			// AddressPath and other paths are NOT pre-populated by the BAL,
-			// so a new VersionMap entry means a real state change from a
-			// concurrent worker (e.g. account creation) and must trigger
-			// invalidation.
+			// With BAL, Balance/Nonce/Code/Storage are pre-populated, so a Done entry where the read saw storage is a BAL no-op and stays valid; other paths mean a real concurrent change and must invalidate.
 			isBALPrePopulatedPath := path == BalancePath || path == NoncePath ||
 				path == CodePath || path == StoragePath
 			if !vm.HasBAL || !isBALPrePopulatedPath {
@@ -1140,10 +1045,9 @@ func (vm *VersionMap) validateReadImpl(txIndex int, addr accounts.Address, path 
 			}
 		} else {
 			valid = checkVersion(version, rr.Version())
-			// An AddressPath read resolved to the seeded origin (-1) is the committed
-			// baseline, equivalent to a storage read of a non-existent cell; re-run the
-			// create/destruct cross-checks the storage-read path does so a concurrent
-			// lower-tx create or SELFDESTRUCT still invalidates it.
+			// An origin AddressPath read is the committed baseline; re-run the
+			// create/destruct cross-checks so a concurrent lower-tx create or
+			// SELFDESTRUCT still invalidates it.
 			if valid == VersionValid && path == AddressPath && rr.Version().TxIndex == originIndex {
 				valid = vm.validateReadImpl(txIndex, addr, SelfDestructPath, accounts.StorageKey{}, StorageRead,
 					version, vm.ReadStatus(addr, SelfDestructPath, accounts.StorageKey{}, txIndex), nil, checkVersion, traceInvalid, tracePrefix, true)

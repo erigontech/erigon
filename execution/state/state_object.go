@@ -76,7 +76,6 @@ type stateObject struct {
 	db       *IntraBlockState
 
 	// Write caches.
-	//trie Trie // storage trie, which becomes non-nil on first access
 	code accounts.Code // contract bytecode, hash + canonical bytes
 
 	originStorage Storage // Storage cache of original entries to dedup rewrites

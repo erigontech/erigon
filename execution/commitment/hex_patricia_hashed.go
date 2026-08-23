@@ -1163,11 +1163,8 @@ func (hph *HexPatriciaHashed) computeCellHash(cell *cell, depth int16, buf []byt
 				// cell.setFromUpdate(update)
 			}
 
-			// A storage slot read as zero is absent from the trie — never a leaf.
-			// A single persisted slot can be left behind by a self-destruct whose
-			// subtree deletion could not drop it (deleteStorageSubtreeBranches only
-			// removes branch records, not a lone leaf); folding its now-zero value
-			// as a leaf would give the recreated account a non-empty storage root.
+			// A zero-valued single persisted slot (self-destruct leftover) must not
+			// fold as a leaf, or the recreated account gets a non-empty storage root.
 			if cell.StorageLen == 0 && singleton {
 				storageRootHash = empty.RootHash
 				storageRootHashIsSet = true
@@ -2176,12 +2173,8 @@ func (hph *HexPatriciaHashed) detectCascadingCollapseAtRow(row int) {
 
 // deleteStorageSubtreeBranches tombstones every persisted commitment branch under
 // a self-destructed account's storage subtree, so a later recreate at the same
-// address cannot fold in stale branches. It walks the persisted subtree by point
-// read (branchFromCacheOrDB) following child pointers — bounded to the account's
-// real branches — rather than a domain range scan, which on the step-sharded
-// commitment domain maps every file. Each branch is deleted through the normal
-// branch-update path (empty branch → branchCache.Invalidate on flush). prefix is
-// the branch's key in nibbles.
+// address cannot fold in stale branches. It uses bounded point reads rather than a
+// domain range scan, which on the step-sharded commitment domain would map every file.
 func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error {
 	branch, err := hph.branchFromCacheOrDB(nibbles.HexToCompact(prefix))
 	if err != nil {
@@ -2223,11 +2216,9 @@ func (hph *HexPatriciaHashed) deleteStorageSubtreeBranches(prefix []byte) error 
 	return hph.branchEncoder.CollectUpdate(hph.ctx, nibbles.HexToCompact(prefix), 0, maps.Bitmap, 0, nil, false)
 }
 
-// resetAccountStorageRoot clears the in-grid account cell's storage-root
-// reference so a self-destructed account rebuilds from empty storage rather than
-// re-mounting its old subtree during this Process. hashedKey is the 64-nibble
-// hashed account key. The persisted subtree branches are tombstoned by
-// deleteStorageSubtreeBranches (called first in updateCell).
+// resetAccountStorageRoot clears the in-grid account cell's storage-root reference
+// so a self-destructed account rebuilds from empty storage rather than re-mounting
+// its old subtree (persisted branches are tombstoned by deleteStorageSubtreeBranches).
 func (hph *HexPatriciaHashed) resetAccountStorageRoot(hashedKey []byte) {
 	if hph.activeRows == 0 {
 		return

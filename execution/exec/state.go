@@ -129,24 +129,14 @@ type WorkerContext struct {
 	dirs datadir.Dirs
 
 	metrics *WorkerMetrics
-	// readMetrics is this worker's private domain read-metrics accumulator
-	// (lock-free, single-owner). The worker's state reader records into it; at
-	// task end it is folded into the per-batch log aggregate and the collector
-	// accumulator, then reset (a lock per task, not per read).
+	// per-worker, single-owner domain read-metrics accumulator.
 	readMetrics *kvmetrics.DomainMetrics
-	// collectorAcc retains this worker's reads destined for the process-level
-	// collector. At task end the task's readMetrics is folded in, then a
-	// non-blocking TrySend hands it off (and a fresh one is allocated). If the
-	// collector buffer is momentarily full the send is skipped and the worker
-	// keeps adding to the same accumulator — so the collector path never blocks
-	// execution and never drops counts. Flushed (blocking) when Run exits.
-	collectorAcc *kvmetrics.DomainMetrics
 }
 
 // installWorkerGetHash replaces the EVM's GetHash function with one that
 // uses the worker's own chainTx for BLOCKHASH lookups, avoiding any share
 // of the executeBlocks goroutine's roTx across worker goroutines (data
-// race). chainTx is already overlay-aware (see resetTx) so headers staged
+// race). chainTx is already overlay-aware (see bindTx) so headers staged
 // in the BlockOverlay but not yet flushed to MDBX are visible.
 func (rw *WorkerContext) installWorkerGetHash(txTask Task) {
 	header := txTask.BlockHeader()
@@ -182,10 +172,9 @@ func NewWorkerContext(ctx context.Context, background bool, metrics *WorkerMetri
 
 		evm: vm.NewEVM(evmtypes.BlockContext{}, evmtypes.TxContext{}, nil, chainConfig, vm.Config{}),
 
-		dirs:         dirs,
-		metrics:      metrics,
-		readMetrics:  kvmetrics.NewDomainMetrics(),
-		collectorAcc: kvmetrics.NewDomainMetrics(),
+		dirs:        dirs,
+		metrics:     metrics,
+		readMetrics: kvmetrics.NewDomainMetrics(),
 	}
 	w.ibs = state.New(w.stateReader)
 	return w
@@ -479,7 +468,6 @@ func NewWorkersPool(ctx context.Context, accumulator *shards.Accumulator, backgr
 				return
 			}
 		}
-		//applyWorker.ResetTx(nil)
 	}
 	applyWorker = NewWorkerContext(ctx, false, nil, chainDb, blockReader, chainConfig, genesis, engine, dirs, logger)
 

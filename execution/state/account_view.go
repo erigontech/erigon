@@ -179,7 +179,7 @@ func (v *VersionedAccountView) Empty() bool {
 // Account composes the whole account at txIdx from the versionMap (seeded origin
 // base plus field cells below txIdx), or nil if it does not exist there. Used as
 // the apply base — stateObject-free. Correct only when every account written this
-// block has its origin seeded (see seedOrigin + the calcFees coinbase/burnt seed).
+// block has its origin seeded.
 func (v *VersionedAccountView) Account() *accounts.Account {
 	if !v.exists() {
 		return nil

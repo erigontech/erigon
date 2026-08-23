@@ -115,13 +115,7 @@ type commitmentCalculator struct {
 	// arrives after a per-block computation already covered this block.
 	lastComputedBlock uint64
 
-	// hasComputed disambiguates lastComputedBlock=0: without this flag,
-	// "never computed" and "computed block 0 (genesis)" both look like
-	// lastComputedBlock=0. The commitComputeRequest dedup check would
-	// then skip computing the very first batch when its lastBlockResult
-	// is block 0 — leaving the genesis commitment unwritten to sd, which
-	// breaks SeekCommitment for the next exec3 cycle (it falls back to
-	// stage progress instead of finding a commitment state).
+	// hasComputed disambiguates lastComputedBlock=0 (see forcePerBlockCompute).
 	hasComputed bool
 
 	// in receives the same applyResult stream as the apply loop,
@@ -183,6 +177,11 @@ type commitmentCalculator struct {
 	// multiple blocks together and the deferred buffer dedupes branch
 	// prefixes across the batch — those merged updates flush into the
 	// LAST block's changeset, which is wrong for per-block unwind.
+	//
+	// The genesis case (lastComputedBlock=0, block 0) needs the separate
+	// hasComputed flag to disambiguate "never computed" from "computed
+	// genesis": without it the first batch's genesis commitment is never
+	// written to sd, breaking SeekCommitment for the next exec3 cycle.
 	forcePerBlockCompute bool
 
 	// perBlockFrom is the batch's changeset window start: blocks >= it
@@ -390,14 +389,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		cc.lastBlockResultSeen = r.BlockNum
 		cc.hasSeenBlockResult = true
 
-		// Break logic: in per-block mode, compute at every block boundary.
-		// Skip the first block if it's a partial block (resumed mid-block).
-		// `forcePerBlockCompute` overrides dbg.BatchCommitments to mirror
-		// serial's gate (exec3_serial.go around the `if !dbg.BatchCommitments
-		// || shouldGenerateChangesets || ...` check) — per-block compute is
-		// required when changesets must record per-block branch deltas
-		// (reorg support, KeepExecutionProofs). Blocks from the changeset
-		// window (perBlockFrom) onward compute per-block for the same reason.
+		// Break logic: in per-block mode, compute at every block boundary
+		// (see forcePerBlockCompute). Skip the first block if it's a partial
+		// block (resumed mid-block).
 		commitStart := time.Now()
 		switch {
 		case cc.computedAhead[r.BlockNum]:
@@ -458,10 +452,6 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 				"stage", stageWall, "exec", execActive, "commit", commitActive,
 				"overlap", overlap, "gap", gap, "residual", residual)
 		}
-		// In BatchCommitments mode (without forcePerBlockCompute): just
-		// accumulate — compute only on explicit commitComputeRequest from
-		// the apply loop.
-
 		// Block N is done; its boundary opens the compute-ahead gate for N+1.
 		delete(cc.pending, r.BlockNum)
 		delete(cc.computedAhead, r.BlockNum)
@@ -722,22 +712,10 @@ func (cc *commitmentCalculator) fail(ctx context.Context, br *blockResult, err e
 	cc.publish(ctx, commitmentResult{blockNum: br.BlockNum, blockHash: br.BlockHash, txNum: br.lastTxNum, err: err})
 }
 
-// shouldComputeOnRequest decides whether a commitComputeRequest should
-// trigger a fresh ComputeCommitment vs. publish an empty result. Returns
-// true when there is a blockResult to compute against AND either:
-//
-//	(a) we haven't computed at all yet — covers the very first batch
-//	    which may be just genesis at blockNum=0; without this, the
-//	    genesis commitment would never be written to sd because
-//	    lastBlockResult.BlockNum=0 fails the > lastComputedBlock=0 check
-//	    (the same blockNum=0 ambiguity as SeekCommitment's stageProgress
-//	    fallback), leaving SeekCommitment in a subsequent exec3 cycle
-//	    to fall back to stage progress instead of finding a commitment
-//	    state — which then forces re-execution of block 0 and corrupts
-//	    the next batch's commitment.
-//
-//	(b) a new block boundary advanced past the last computed one.
-
+// shouldComputeOnRequest returns true when there's a blockResult and either
+// nothing has been computed yet (covers a genesis-only first batch where
+// blockNum=0 fails the "> lastComputedBlock" check) or a new boundary advanced
+// past the last computed one.
 func (cc *commitmentCalculator) shouldComputeOnRequest() bool {
 	if cc.lastBlockResult == nil {
 		return false
@@ -919,21 +897,12 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 }
 
 // computeWithBlockAccumulator runs ComputeCommitment with the changeset
-// accumulator switched to block N's saved changeset (looked up by hash) so
-// that any branch writes during compute (mid-process inline flushes from
-// `pendingPrefixes` collisions, plus the [state] write at end via
-// encodeAndStoreCommitmentState) land in block N's CS rather than whatever
-// the exec loop has installed as current.
+// accumulator switched to block N's saved changeset, looked up by hash so its
+// branch writes and [state] write land in N's own CS.
 //
-// IMPORTANT: hash-aware lookup is mandatory here. pastChangesAccumulator
-// can hold multiple changesets per block number after a fork-bounce
-// (canonical block 1 + forks[i] block 1 with different hashes), and a
-// number-only GetChangesetByBlockNum returns the first match in
-// non-deterministic map iteration order. That non-determinism caused the
-// calculator's [state] write for canonical block 1 to land in the fork's
-// block 1 CS during the TestBlockchainHeaderchainReorgConsistency
-// reproducer, leaving canonical block 1's CS without [state] and producing
-// off-by-one wrong-trie-root chains on the next iteration's re-execution.
+// The hash-aware lookup is required because pastChangesAccumulator can hold
+// multiple changesets per block number after a fork-bounce, so a number-only
+// lookup is non-deterministic.
 //
 // If block N's CS hasn't been saved yet it falls through to the live
 // accumulator, which — because the lookup is under changesetMu — is still N's
@@ -942,7 +911,6 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 // Also annotates the pending deferred update (set inside ComputeCommitment
 // when defer mode is on) with the block's hash, so the next call's
 // FlushPendingUpdates uses the same hash-aware routing.
-
 func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context, t commitTarget) ([]byte, error) {
 	defer func() {
 		// Stamp the pending update (if any was set during ComputeCommitment)

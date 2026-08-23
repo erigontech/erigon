@@ -276,11 +276,7 @@ type readPathResult struct {
 // wrappers return their defaultV; AddressPath reads avoid recursing back
 // through getStateObject).
 //
-// versionedReadCore writes its discriminated result into *r (caller
-// allocates on the stack).  This avoids a ~256-byte return-value copy
-// per call — the readPathResult struct is large because it bundles
-// every outcome's source field; pointer-passing keeps the struct in
-// the caller's stack frame and the core mutates it in place.
+// Result is written into *r (caller stack) to avoid a large return-value copy per read.
 func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPath, key accounts.StorageKey, commited bool, skipStorage bool, r *readPathResult) {
 	// Callers pass a fresh, zero-valued *r (a stack `var r readPathResult`), so no
 	// re-zero here — that would be a redundant 256-byte memclr on every read.

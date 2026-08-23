@@ -30,8 +30,7 @@ type calcAccountState struct {
 	CodeHash    [32]byte
 	Incarnation uint64
 	Deleted     bool
-	// dirty tracks whether this account was modified in the current block
-	dirty bool
+	dirty       bool
 }
 
 // calcDomainReader provides lazy-load reads for calcState using the
@@ -82,10 +81,8 @@ func (r *calcDomainReader) ReadAccountStorage(addr accounts.Address, key account
 // asOfStateReader. Subsequent writes overwrite the local copy. At block boundary,
 // the accumulated state is fed to the trie's Updates buffer.
 type calcState struct {
-	accounts map[accounts.Address]*calcAccountState
-	// storageState holds the accumulated value for each slot
+	accounts     map[accounts.Address]*calcAccountState
 	storageState map[accounts.Address]map[accounts.StorageKey]uint256.Int
-	// storageDirty tracks which slots were modified in the current block
 	storageDirty map[accounts.Address]map[accounts.StorageKey]bool
 
 	// sdSubtree holds addresses self-destructed in the current block (whether or

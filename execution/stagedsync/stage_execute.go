@@ -250,13 +250,9 @@ func stateChangesStreamAtUnwind(ctx context.Context,
 ) error {
 	var currentInc uint64
 
-	// TODO: why we don't call accumulator.ChangeCode???
 	handle := func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-		// TODO: This is broken - becuase it does not handle the way value changes
-		// for previous steps are represented - they will pass nil values here
-		// which will look like a delete (12/11/25 - I've not fixed this as it has
-		// been here for a while and I'm not sure what if anything receives these
-		// changes at what it does with them)
+		// Value changes from previous steps arrive with nil values, which are
+		// indistinguishable from a delete here.
 		if len(k) == length.Addr {
 			if len(v) > 0 {
 				var account accounts.Account
@@ -572,11 +568,7 @@ func PruneExecutionStage(ctx context.Context, s *PruneState, tx kv.TemporalRwTx,
 	//  - stop prune when `tx.SpaceDirty()` is big
 	//  - and set ~500ms timeout
 	// because on slow disks - prune is slower. but for now - let's tune for nvme first, and add `tx.SpaceDirty()` check later https://github.com/erigontech/erigon/issues/11635
-	// 2026-04: tip-mode commitment-domain prune throughput exceeded the prior
-	// /2 budget. Use a base budget of one-third of a slot and extend it
-	// adaptively when there is a large prunable backlog, capped at two-thirds
-	// of a slot so FCU still has time. The proper fix is a background prune
-	// that defers to FCU when work is pending — out of scope here.
+	// Base budget is one-third of a slot, extended adaptively up to two-thirds when the prunable backlog is large.
 	baseTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*1000/3) * time.Millisecond
 	maxTimeout := time.Duration(cfg.chainConfig.SecondsPerSlot()*2000/3) * time.Millisecond
 	stagePruneTimeout := baseTimeout

@@ -840,7 +840,6 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	start := time.Now()
 	// E2 state root check was in another stage - means we did flush state even if state root will not match
 	// And Unwind expecting it
-	// TODO: route stage updates through block overlay once serial path initialises one
 	if !parallel {
 		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
 			return false, times, err

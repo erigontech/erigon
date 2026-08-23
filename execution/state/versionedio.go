@@ -167,13 +167,7 @@ func (s *ReadSet) SetStorage(addr accounts.Address, key accounts.StorageKey, tr 
 	inner[key] = tr
 }
 
-// ReadsAccount reports whether this read-set accessed any account-level field
-// (whole-account, balance, nonce, incarnation, code*, self-destruct, create) of
-// addr. Used to detect a coinbase access: under dependency-ordered validation a
-// tx that reads the coinbase is implicitly dependent on all prior txs (every tx
-// credits fees to the coinbase), so it must fall back to the total-order gate —
-// a constraint that total ordering fulfils implicitly today and must become
-// explicit once validation is dependency-ordered.
+// ReadsAccount reports any account-level read of addr (used for the coinbase total-order fallback).
 func (s *ReadSet) ReadsAccount(addr accounts.Address) bool {
 	if _, ok := s.address[addr]; ok {
 		return true
@@ -756,13 +750,8 @@ type WriteSet struct {
 	storage        map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]
 }
 
-// vwMapPool[T] pools the per-path map[Address]*VersionedWrite[T] containers
-// themselves, not just the *VersionedWrite[T] values (those are in vwPool*).
-// put() walks no entries — by contract, callers release every VW to its
-// vwPool before put() — but it does call clear() so the map header survives
-// with cleared buckets ready for the next checkout.  Pooling the container
-// preserves bucket capacity across txs; clear() is precisely the behaviour
-// pool-resident containers want.
+// vwMapPool[T] pools the per-path map[Address]*VersionedWrite[T] containers themselves (values live in vwPool*).
+// put() calls clear() rather than freeing, so the map keeps its bucket capacity across txs; callers must release every VW to its vwPool first.
 type vwMapPool[T any] struct{ p sync.Pool }
 
 func newVWMapPool[T any]() *vwMapPool[T] {
@@ -1435,15 +1424,7 @@ func (s *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 	}
 }
 
-// ReleaseAndReset returns every *VersionedWrite[T] held by the set to its
-// typed sync.Pool, then returns the per-path maps to their map-pools.
-// Called at tx-finalize so both the VW values and the map buckets cycle
-// through pools rather than getting GC'd.
-//
-// Per-path sequence: walk the map releasing each value first; then the
-// map-pool's put() does clear() + Put, preserving the bucket array for
-// the next tx's checkout.  Pool-resident containers want clear() — the
-// usual "clear doesn't free memory" critique becomes a feature here.
+// ReleaseAndReset returns every *VersionedWrite[T] to its typed pool, then the per-path maps to their map-pools (see vwMapPool). Called at tx-finalize.
 func (s *WriteSet) ReleaseAndReset() {
 	for _, vw := range s.address {
 		releaseVWAddress(vw)
@@ -1803,11 +1784,7 @@ func versionedUpdateStorage(vm *VersionMap, addr accounts.Address, key accounts.
 	return uint256.Int{}, false
 }
 
-// applyVersionedUpdates applies updated from the version map to the account before returning it, this is necessary
-// for the account obkect becuase the state reader/.writer api's treat the subfileds as a group and this
-// may lead to updated from pervious transactions being missed where we only update a subset of the fiels as these won't
-// be recored as reads and hence the varification process will miss them.  We don't want to creat a fail but
-// we do  want to capture the updates
+// applyVersionedUpdates overlays versionMap field cells onto account, so field-only updates from prior txs are not missed when only a subset of fields was read.
 func (vr versionedStateReader) applyVersionedUpdates(address accounts.Address, account accounts.Account) accounts.Account {
 	if update, ok := versionedUpdateBalance(vr.versionMap, address, vr.txIndex); ok {
 		account.Balance = update
@@ -1973,10 +1950,7 @@ func SetAccountFieldFromMap(out *WriteSet, vm *VersionMap, addr accounts.Address
 	return false
 }
 
-// NewAccountFieldZeroWrite returns a typed *VersionedWrite[T] for path
-// holding the zero value (used by the SD-earlier fallback that emits
-// post-destruction defaults).  Path must be Balance/Nonce/Incarnation/CodeHash.
-// SetAccountFieldZero sets the post-destruction zero value for path into out.
+// SetAccountFieldZero sets the post-destruction zero value for path into out. Path must be Balance/Nonce/Incarnation/CodeHash.
 func SetAccountFieldZero(out *WriteSet, addr accounts.Address, path AccountPath, ver Version) {
 	switch path {
 	case BalancePath:
@@ -1990,10 +1964,7 @@ func SetAccountFieldZero(out *WriteSet, addr accounts.Address, path AccountPath,
 	}
 }
 
-// NewAccountFieldWriteFromAccount returns a typed *VersionedWrite[T]
-// populated from acc (may be nil — falls back to zero values except for
-// CodeHash which becomes EmptyCodeHash).
-// SetAccountFieldFromAccount sets path's value from acc into out.
+// SetAccountFieldFromAccount sets path's value from acc into out (acc may be nil — falls back to zero, except CodeHash becomes EmptyCodeHash).
 func SetAccountFieldFromAccount(out *WriteSet, addr accounts.Address, path AccountPath, ver Version, acc *accounts.Account) {
 	switch path {
 	case BalancePath:
@@ -2799,9 +2770,8 @@ func (account *accountState) applyWriteBalance(val uint256.Int, accessIndex uint
 		}
 		// Skip balance writes that match the pre-block (initial) balance,
 		// but ONLY when no intermediate balance changes have been recorded.
-		// If intermediate changes exist (e.g. tx58 sets balance=0xa141,
-		// tx78 restores initial 0x16ffd), the restoring write MUST be
-		// recorded so parallel executors see the correct value at tx78.
+		// If intermediate changes exist, a write restoring the initial value
+		// MUST still be recorded so parallel executors see the correct value.
 		if account.initialBalanceValue != nil && val.Eq(account.initialBalanceValue) && len(account.balance.changes.entries) == 0 {
 			account.setBalanceValue(val)
 			return

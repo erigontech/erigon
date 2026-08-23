@@ -357,17 +357,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// via its own Updates buffer (TouchUpdates from VersionedWrites).
 	pe.rs.Domains().SetDisableInlineTouchKey(true)
 	defer pe.rs.Domains().SetDisableInlineTouchKey(false)
-	// Parallel exec needs in-mem history reads enabled for the calculator
-	// goroutine. Capture the caller's setting first and restore it on exit
-	// — the previous defer-to-false (b72aa7b4f7 #20805) hardcoded the
-	// post-exec value to false regardless of what the caller had set,
-	// which broke post-exec callers (engine API forkchoice_updated's
-	// GetAsOf, post-batch trie-root computation, RPC reads) with
-	// "GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled"
-	// or with partial-state reads. Repro: EEST
-	// test_gas_limit_below_minimum[gas_limit_5000] in parallel mode; same
-	// root cause likely behind mainnet from-0 parallel wrong-trie-root at
-	// block 131578.
+	// Capture and restore the caller's InMemHistoryReads; forcing it false on exit
+	// breaks post-exec callers (forkchoice GetAsOf, RPC reads) that need in-mem history.
 	prevInMemHistoryReads := pe.rs.Domains().InMemHistoryReads()
 	pe.rs.Domains().SetInMemHistoryReads(true)
 	defer pe.rs.Domains().SetInMemHistoryReads(prevInMemHistoryReads)
@@ -834,11 +825,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					blockUpdateCount = 0
 					blockApplyCount = 0
 
-					// ClearAccountsCache moved to execLoop (producer side).
-					// blockApplied removed — state writes and Flush happen in
-					// the execLoop before the blockResult crosses the channel.
-					// The apply loop only does indexes.
-
 					// Commitment is computed by the commitmentCalculator goroutine.
 					// Post-execution validation (receipts, BAL) runs here. The
 					// per-block blockValidator was spawned earlier (~30 LOC up)
@@ -891,8 +877,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 						// was *before* this block was applied so the next run reproduces
 						// the stop point with the same input. Returning would run deferred
 						// commit/flush paths and overwrite the very state we want to
-						// preserve. Mirrors the design documented in PR #19803 — debug
-						// only, never set in production.
+						// preserve. Debug only, never set in production.
 						os.Exit(0)
 					}
 				}
@@ -1225,7 +1210,6 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 			if ok {
 				pe.lastExecutedBlockNum.Store(int64(blockResult.BlockNum))
 				pe.execCount.Add(int64(blockExecutor.cntExec))
-				pe.abortCount.Add(int64(blockExecutor.cntAbort))
 				pe.invalidCount.Add(int64(blockExecutor.cntValidationFail))
 				pe.readCount.Add(blockExecutor.blockIO.ReadCount())
 				pe.writeCount.Add(blockExecutor.blockIO.WriteCount())
@@ -1245,7 +1229,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 						"wait", npWait, "process", npProc,
 						"busy", busy, "workers", pe.workerCount, "occ", fmt.Sprintf("%.2f", occ),
 						"tasks", len(blockExecutor.tasks), "exec", blockExecutor.cntExec,
-						"spec", blockExecutor.cntSpecExec, "abort", blockExecutor.cntAbort,
+						"spec", blockExecutor.cntSpecExec,
 						"valFail", blockExecutor.cntValidationFail,
 						"spineUsPerIter", fmt.Sprintf("%.1f", float64(npProc.Nanoseconds())/float64(max(1, blockExecutor.cntExec))/1e3))
 					npWait, npProc = 0, 0
@@ -1418,9 +1402,6 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 		executor.results = append(executor.results, nil)
 		executor.txIncarnations = append(executor.txIncarnations, 0)
 		executor.execFailed = append(executor.execFailed, 0)
-		executor.execAborted = append(executor.execAborted, 0)
-
-		executor.estimateDeps[len(executor.tasks)-1] = []int{}
 
 		executor.execTasks.pushPending(i)
 		executor.validateTasks.pushPending(i)
@@ -2478,8 +2459,7 @@ func (result *execResult) calcFees(
 			// a freshly-credited coinbase (no pre-block storage entry, no
 			// versionMap AddressPath) and Empty() returns true — charging the
 			// stale CallNewAccountGas (+25000) for a CALL-with-value to the
-			// coinbase mid-tx. Mainnet block 25151825 tx 31's SD+CREATE2-on-
-			// coinbase MEV pattern surfaced this divergence.
+			// coinbase mid-tx.
 			addrAcc := &accounts.Account{Balance: newCoinbaseBalance}
 			if coinbaseAcc != nil {
 				addrAcc.Nonce = coinbaseAcc.Nonce
@@ -2744,23 +2724,6 @@ type blockExecutor struct {
 	tasks   []*execTask
 	results []*execResult
 
-	// settledInput[tx]==true marks a task that was dispatched when every
-	// preceding task had already validated — so it executed against fully
-	// settled MVCC state, with no lower-indexed worker still in flight.
-	//
-	// It is set at dispatch time (scheduleExecution), which is the only point
-	// the "ran on settled input" property can be asserted: a result-time check
-	// would miss that the task may have executed speculatively, earlier, on
-	// state a since-validated predecessor has since changed.
-	//
-	// Used solely to classify a genuine (IsError) execution abort: an error
-	// raised against settled input is real invalid-block data, not a
-	// speculative-execution artifact, so the block can be rejected on the
-	// first such error instead of re-executing to the incarnation limit.
-	// It is NEVER consulted by the validator verdict — a result is committed
-	// only if validation explicitly passes it (issue #21319).
-	settledInput map[int]bool
-
 	// Execution tasks stores the state of each execution task
 	execTasks execStatusList
 
@@ -2779,12 +2742,6 @@ type blockExecutor struct {
 	// Tracks the incarnation number of each transaction
 	txIncarnations []int
 
-	// A map that stores the estimated dependency of a transaction if it is aborted without any known dependency
-	estimateDeps map[int][]int
-
-	// A map that records whether a transaction result has been speculatively validated
-	preValidated map[int]bool
-
 	// Time records when the parallel execution starts
 	begin time.Time
 
@@ -2792,7 +2749,7 @@ type blockExecutor struct {
 	profile bool
 
 	// Stats for debugging purposes
-	cntExec, cntSpecExec, cntSuccess, cntAbort, cntTotalValidations, cntValidationFail, cntFinalized int
+	cntExec, cntSpecExec, cntTotalValidations, cntValidationFail, cntFinalized int
 
 	// finalizedResults stores the finalized execResult snapshot per TX.
 	// Prevents the publish loop from seeing a different incarnation's
@@ -2810,7 +2767,7 @@ type blockExecutor struct {
 	blobGasUsed           uint64
 	gasPool               *protocol.GasPool
 
-	execFailed, execAborted []int
+	execFailed []int
 
 	// Stores the execution statistics for the last incarnation of each task
 	stats map[int]ExecutionStat
@@ -2909,9 +2866,6 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		begin:               time.Now(),
 		stats:               map[int]ExecutionStat{},
 		finalizedResults:    map[int]*execResult{},
-		settledInput:        map[int]bool{},
-		estimateDeps:        map[int][]int{},
-		preValidated:        map[int]bool{},
 		blockIO:             &state.VersionedIO{},
 		versionMap:          state.NewVersionMap(accessList),
 		profile:             profile,
@@ -3132,7 +3086,6 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 				}, false, "") != state.VersionValid {
 				be.finRevalFires++
 				be.validateTasks.clearComplete(tx)
-				be.preValidated[tx] = false
 				be.signalSelfLoopReexec(tx)
 				break
 			}
@@ -3253,9 +3206,7 @@ func (be *blockExecutor) waitDep(tx, target int) bool {
 }
 
 // selfLoopWatchdog wakes every parked self-loop worker when the workers' context
-// is cancelled, so shutdown/error never strands one in waitFrontier. Under
-// SELF_LOOP_DEBUG it also periodically dumps the frontier/park state to expose a
-// stall.
+// is cancelled, so shutdown/error never strands one in waitFrontier.
 func (be *blockExecutor) selfLoopWatchdog(ctx context.Context) {
 	done := func() { be.slDoneOnce.Do(func() { close(be.slDone) }) }
 	<-ctx.Done()
@@ -3314,7 +3265,6 @@ func (be *blockExecutor) revalidateCommittedDependents(changedTx int, oldWrites 
 		be.cntValidationFail++
 		be.execFailed[tx]++
 		be.validateTasks.clearComplete(tx)
-		be.preValidated[tx] = false
 		// The committed worker is still alive, parked on slReexec. Signal it to
 		// re-execute in place (it owns its incarnation, so no re-dispatch and no
 		// be.txIncarnations sync); leave execTasks complete so the re-sent result
@@ -3431,7 +3381,7 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			be.cntValidationFail++
 			be.execFailed[tx]++
 			if dbg.TraceTransactionIO && be.txIncarnations[tx] > 1 {
-				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx], "aborted", be.execAborted[tx])
+				fmt.Println(be.blockNum, "FAILED", tx, be.txIncarnations[tx], "failed", be.execFailed[tx])
 			}
 			be.validateTasks.clearInProgress(tx)
 			if r := be.revalidateCommittedDependents(tx, nil); r != nil {
@@ -3441,7 +3391,6 @@ func (be *blockExecutor) runDepOrderValidation(pe *parallelExecutor, applyTx kv.
 			// slReexec. Signal an in-place re-exec (it owns its incarnation) and leave
 			// execTasks complete so the re-sent result re-validates without going
 			// through the dispatch path — same as revalidateCommittedDependents.
-			be.preValidated[tx] = false
 			be.signalSelfLoopReexec(tx)
 		}
 
@@ -3526,7 +3475,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		be.execTasks.markComplete(tx)
 		be.execTasks.removeDependency(tx)
 	}
-	be.cntSuccess++
 
 	// do validations ...
 	var stateReader state.StateReader
@@ -3678,12 +3626,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			pe.RLock()
 			var reader state.StateReader
 			if finalTask.IsHistoric() {
-				// Chain blockCache → sd.mem → applyTx so the block-finalize
-				// IBS (withdrawals, EIP-7002/7251 system calls) sees every
-				// prior-tx write from the current block. Omitting blockCache
-				// here was the root cause of the trie-root race at block
-				// 24839300: a tip-adjacent historic block's withdrawal read
-				// the pre-block balance and stomped tx 28's in-block update.
+				// Historic block-finalize must chain blockCache → sd.mem → applyTx so withdrawals see prior-tx in-block writes.
 				reader = pe.prevBlockBase(state.NewHistoryReaderV3WithBlockCache(applyTx, pe.domainsRead(), be.blockStateCache, finalVersion.TxNum), be.blockNum)
 			} else {
 				reader = pe.prevBlockBase(state.NewCurrentCachedReaderV3(pe.domainsRead().AsGetterNoMetrics(applyTx), be.blockStateCache), be.blockNum)
@@ -3705,9 +3648,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// writes land only in BlockStateCache and never reach the
 				// commitment calculator's txResult feed — producing a wrong
 				// trie root whenever an EIP-7002/7251 SSTORE changes a
-				// previously-untouched slot (see the 24839762 race where
-				// slots 0x01/0x03 of the EIP-7002 predeploy ended with
-				// stale value 0x01 instead of cleared).
+				// previously-untouched slot.
 				//
 				// Main ibs uses HistoryReaderV3WithBlockCache in historic
 				// mode (see finalTask.IsHistoric() branch above), so it can
@@ -3902,7 +3843,6 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			// worker at the bumped incarnation so its versionMap flush stays
 			// monotonic over the one the exited worker left.
 			if be.selfLoopDispatched[nextTx] {
-				be.settledInput[nextTx] = isNextValidated
 				be.cntExec++
 				dispatched++
 				continue
@@ -3914,16 +3854,11 @@ func (be *blockExecutor) scheduleExecution(ctx context.Context, pe *parallelExec
 			pe.dispatchRunSelfLoop(be, tv)
 			budget--
 
-			// Commit side-effects only after successful enqueue. Record whether
-			// this dispatch runs against fully settled input (every predecessor
-			// already validated) so a genuine error from it can be classified
-			// without re-execution — see the settledInput field doc.
-			be.settledInput[nextTx] = isNextValidated
 			if !isNextValidated {
 				be.cntSpecExec++
 			}
 			if dbg.TraceTransactionIO && be.txIncarnations[nextTx] > 1 {
-				fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "maxValidated", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx], "aborted", be.execAborted[nextTx])
+				fmt.Println(be.blockNum, "EXEC", nextTx, be.txIncarnations[nextTx], "maxValidated", maxValidated, be.blockIO.HasReads(nextTx), "failed", be.execFailed[nextTx])
 			}
 			be.cntExec++
 			dispatched++
