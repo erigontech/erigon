@@ -76,17 +76,60 @@ func TestNewAccessListTracerExcludedAddress(t *testing.T) {
 	}
 }
 
-// countingOpContext counts the stack lookups, which is what the benchmark pins.
-type countingOpContext struct {
+type testOpContext struct {
 	tracing.OpContext
-	stack      []uint256.Int
-	address    accounts.Address
+	stack   []uint256.Int
+	address accounts.Address
+}
+
+func (c *testOpContext) StackData() []uint256.Int  { return c.stack }
+func (c *testOpContext) Address() accounts.Address { return c.address }
+func (c *testOpContext) MemoryData() []byte        { return nil }
+
+// countingOpContext counts stack lookups. Kept out of the benchmark: the counter
+// runs once per opcode before this change and once per stack-using opcode after,
+// so timing it would credit the change with removing its own instrumentation.
+type countingOpContext struct {
+	testOpContext
 	stackReads int
 }
 
-func (c *countingOpContext) StackData() []uint256.Int  { c.stackReads++; return c.stack }
-func (c *countingOpContext) Address() accounts.Address { return c.address }
-func (c *countingOpContext) MemoryData() []byte        { return nil }
+func (c *countingOpContext) StackData() []uint256.Int { c.stackReads++; return c.stack }
+
+func TestOnOpcodeReadsStackOnlyWhenUsed(t *testing.T) {
+	for _, tc := range []struct {
+		op    vm.OpCode
+		reads int
+	}{
+		{vm.ADD, 0},
+		{vm.PUSH1, 0},
+		{vm.MSTORE, 0},
+		{vm.JUMPDEST, 0},
+		{vm.POP, 0},
+		{vm.CREATE, 0}, // reads the account nonce, not the stack
+		{vm.SLOAD, 1},
+		{vm.SSTORE, 1},
+		{vm.BALANCE, 1},
+		{vm.EXTCODESIZE, 1},
+		{vm.EXTCODEHASH, 1},
+		{vm.EXTCODECOPY, 1},
+		{vm.SELFDESTRUCT, 1},
+		{vm.CALL, 1},
+		{vm.CALLCODE, 1},
+		{vm.DELEGATECALL, 1},
+		{vm.STATICCALL, 1},
+		{vm.CREATE2, 1},
+	} {
+		t.Run(tc.op.String(), func(t *testing.T) {
+			scope := &countingOpContext{testOpContext: testOpContext{
+				address: accounts.InternAddress(addr),
+				stack:   make([]uint256.Int, 8),
+			}}
+			NewAccessListTracer(nil, nil, nil).OnOpcode(0, byte(tc.op), 100, 3, scope, nil, 1, nil)
+			require.Equal(t, tc.reads, scope.stackReads)
+		})
+	}
+}
 
 // Storage and calls are a small minority of what executes.
 var benchOpcodes = func() []byte {
@@ -101,7 +144,7 @@ var benchOpcodes = func() []byte {
 }()
 
 func BenchmarkAccessListTracerOnOpcode(b *testing.B) {
-	scope := &countingOpContext{
+	scope := &testOpContext{
 		address: accounts.InternAddress(addr),
 		stack:   make([]uint256.Int, 8),
 	}
@@ -113,5 +156,4 @@ func BenchmarkAccessListTracerOnOpcode(b *testing.B) {
 		tracer.OnOpcode(uint64(i), benchOpcodes[i%len(benchOpcodes)], 100, 3, scope, nil, 1, nil)
 		i++
 	}
-	b.ReportMetric(float64(scope.stackReads)/float64(i), "stackReads/op")
 }
