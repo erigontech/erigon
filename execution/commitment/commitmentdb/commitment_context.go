@@ -422,7 +422,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 			mxCommitmentTook.Observe(took.Seconds())
 		}
 		if took >= 2*slowStageThreshold {
-			log.Warn("[dbg] slow commitment", "took", took, "blockNum", blockNum, "txNum", txNum)
+			log.Warn("[dbg] slow commitment", "took", took, "blockNum", blockNum)
 		}
 	}()
 
