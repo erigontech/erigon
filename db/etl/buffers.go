@@ -175,6 +175,41 @@ type sortableBuffer struct {
 
 func (b *sortableBuffer) chunkSize() int { return 1 << b.chunkShift }
 
+// chunkPool recycles full-size chunks across buffers: a fresh make([]byte)
+// would zero a megabyte and fault in cold pages on every buffer fill. Chunks
+// are handed out dirty — Put always copies over the bytes it later reads.
+var chunkPool = sync.Pool{
+	New: func() any {
+		c := make([]byte, 1<<etlChunkShift)
+		return &c
+	},
+}
+
+// etlChunkPoolWarm chunks are seeded into the pool at startup so the first
+// buffers to fill do not pay for the allocation.
+var etlChunkPoolWarm = dbg.EnvInt("ETL_CHUNK_POOL_WARM", 64)
+
+func init() {
+	for range etlChunkPoolWarm {
+		c := make([]byte, 1<<etlChunkShift)
+		chunkPool.Put(&c)
+	}
+}
+
+// getChunk returns a chunk of size bytes, pooled when it is the standard size.
+func getChunk(size int) []byte {
+	if size != 1<<etlChunkShift {
+		return make([]byte, size)
+	}
+	return *chunkPool.Get().(*[]byte)
+}
+
+func putChunk(c []byte) {
+	if len(c) == 1<<etlChunkShift {
+		chunkPool.Put(&c)
+	}
+}
+
 // reserve returns the offset of n contiguous free bytes. An entry never spans
 // chunks; one wider than a chunk gets its own, filling the slots it covers.
 func (b *sortableBuffer) reserve(n int) int {
@@ -183,7 +218,7 @@ func (b *sortableBuffer) reserve(n int) int {
 		// Start the wide chunk past every chunk already allocated, so that
 		// offset>>chunkShift addresses it rather than a narrow chunk.
 		span := (n + size - 1) / size * size
-		c := make([]byte, span)
+		c := getChunk(span)
 		off := len(b.chunks) * size
 		for range span / size {
 			b.chunks = append(b.chunks, c)
@@ -195,7 +230,7 @@ func (b *sortableBuffer) reserve(n int) int {
 		b.next += size - pos
 	}
 	for len(b.chunks)*size < b.next+max(n, 1) {
-		b.chunks = append(b.chunks, make([]byte, size))
+		b.chunks = append(b.chunks, getChunk(size))
 	}
 	off := b.next
 	b.next += n
@@ -264,13 +299,18 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 		b.entries = make([]entryLoc, 0, predictKeysAmount)
 	}
 	for len(b.chunks)*b.chunkSize() < predictDataSize {
-		b.chunks = append(b.chunks, make([]byte, b.chunkSize()))
+		b.chunks = append(b.chunks, getChunk(b.chunkSize()))
 	}
 	return b
 }
 
 func (b *sortableBuffer) Reset() {
 	b.entries = b.entries[:0]
+	for i, c := range b.chunks {
+		putChunk(c)
+		b.chunks[i] = nil
+	}
+	b.chunks = b.chunks[:0]
 	b.next = 0
 	b.dataLen = 0
 }

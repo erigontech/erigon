@@ -495,10 +495,10 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	require.Equal(t, 1, see)
 	c.Close()
 
-	// buffers are not lost
+	// buffers are not lost: entries keep their capacity, chunks go back to the pool
 	require.Zero(t, buf.dataLen)
 	require.Empty(t, buf.entries)
-	require.NotEmpty(t, buf.chunks)
+	require.Empty(t, buf.chunks)
 	require.NotZero(t, cap(buf.entries))
 
 	// teset that no data visible
