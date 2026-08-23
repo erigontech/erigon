@@ -214,11 +214,6 @@ func (b *sortableBuffer) reserve(n int) int {
 	return off
 }
 
-func (b *sortableBuffer) at(offset, length int) []byte {
-	c, pos := b.locate(offset)
-	return c[pos : pos+length]
-}
-
 // A key and its value always share a chunk, so callers locate once and slice both.
 func (b *sortableBuffer) locate(offset int) ([]byte, int) {
 	return b.chunks[offset/chunkSize], offset % chunkSize
@@ -329,10 +324,10 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 	for i := range b.entries {
 		e := &b.entries[i]
 		kLen, vLen := int(e.keyLen), int(e.valLen)
-		keyOffset := int(e.offset)
-		valOffset := keyOffset
+		c, pos := b.locate(int(e.offset))
+		valPos := pos
 		if kLen > 0 {
-			valOffset += kLen
+			valPos += kLen
 		}
 		// write key
 		n := binary.PutVarint(numBuf[:], int64(e.keyLen))
@@ -340,7 +335,7 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 			return err
 		}
 		if kLen > 0 {
-			if _, err := w.Write(b.at(keyOffset, kLen)); err != nil {
+			if _, err := w.Write(c[pos : pos+kLen]); err != nil {
 				return err
 			}
 		}
@@ -350,7 +345,7 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 			return err
 		}
 		if vLen > 0 {
-			if _, err := w.Write(b.at(valOffset, vLen)); err != nil {
+			if _, err := w.Write(c[valPos : valPos+vLen]); err != nil {
 				return err
 			}
 		}
