@@ -496,9 +496,9 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	c.Close()
 
 	// buffers are not lost
-	require.Empty(t, buf.data)
+	require.Zero(t, buf.dataLen)
 	require.Empty(t, buf.entries)
-	require.NotZero(t, cap(buf.data))
+	require.NotEmpty(t, buf.chunks)
 	require.NotZero(t, cap(buf.entries))
 
 	// teset that no data visible
@@ -1573,4 +1573,59 @@ func TestCollectorWithAllocatorDrawsBufferLazily(t *testing.T) {
 	v, err := tx.GetOne(table, []byte{1})
 	require.NoError(err)
 	require.Equal([]byte{1}, v)
+}
+
+// TestSortableBufferChunkBoundaries pins the chunked layout: entries that cross
+// a chunk, an entry wider than a chunk, and the same after Reset.
+func TestSortableBufferChunkBoundaries(t *testing.T) {
+	const shift = 12 // 4KB chunks
+	chunkSize := 1 << shift
+
+	type kv struct{ k, v []byte }
+	mk := func(seed byte, n int) []byte {
+		b := make([]byte, n)
+		for i := range b {
+			b[i] = seed + byte(i%7)
+		}
+		return b
+	}
+	want := []kv{
+		{mk(1, 8), mk(2, chunkSize/2)}, // fits
+		{mk(3, 8), mk(4, chunkSize/2)}, // forces a boundary skip
+		{mk(5, 8), mk(6, chunkSize*3)}, // wider than a chunk
+		{mk(7, 8), mk(8, 16)},          // lands after the oversize chunk
+	}
+
+	buf := NewSortableBuffer(64 * datasize.MB)
+	buf.chunkShift = shift
+
+	for round := range 2 { // second round exercises reuse after Reset
+		for _, e := range want {
+			buf.Put(e.k, e.v)
+		}
+		require.Equal(t, len(want), buf.Len(), "round %d", round)
+
+		for i, e := range want {
+			k, v := buf.Get(i)
+			require.Equal(t, e.k, k, "round %d key %d", round, i)
+			require.Equal(t, e.v, v, "round %d val %d", round, i)
+		}
+
+		buf.Sort()
+		var prev []byte
+		for i := range buf.Len() {
+			k, _ := buf.Get(i)
+			if prev != nil {
+				require.LessOrEqual(t, bytes.Compare(prev, k), 0, "round %d not sorted at %d", round, i)
+			}
+			prev = append(prev[:0], k...)
+		}
+
+		var out bytes.Buffer
+		require.NoError(t, buf.Write(&out))
+		require.NotZero(t, out.Len())
+
+		buf.Reset()
+		require.Zero(t, buf.Len())
+	}
 }
