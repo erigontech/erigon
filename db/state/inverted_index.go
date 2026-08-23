@@ -222,6 +222,28 @@ func (ii *InvertedIndex) efAccessorFileNameMask(fromStep, toStep kv.Step) string
 	return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep)
 }
 
+// efFileNameMaskForItem — sibling of Domain.kvFileNameMaskForItem for
+// InvertedIndex .ef files. Dispatches between step-form and v4 raw-txN
+// masks using isRawTxNItem. Same rationale as History.vFileNameMaskForItem
+// — mode-C paired v4 .ef items need this dispatch to have their
+// decompressor opened by openDirtyFiles.
+func (ii *InvertedIndex) efFileNameMaskForItem(item *FilesItem) string {
+	if ii.isRawTxNItem(item) {
+		return fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(ii.stepSize)
+	return ii.efFileNameMask(fromStep, toStep)
+}
+
+// efAccessorFileNameMaskForItem — sibling for the .efi accessor.
+func (ii *InvertedIndex) efAccessorFileNameMaskForItem(item *FilesItem) string {
+	if ii.isRawTxNItem(item) {
+		return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(ii.stepSize)
+	return ii.efAccessorFileNameMask(fromStep, toStep)
+}
+
 var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)
 
 func (ii *InvertedIndex) openHashMapAccessor(fPath string) (*recsplit.Index, error) {

@@ -192,6 +192,31 @@ func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
 }
 
+// vFileNameMaskForItem — sibling of Domain.kvFileNameMaskForItem for
+// History .v files. Dispatches between the legacy step-form mask
+// ("*-<base>.<fromStep>-<toStep>.v") and the v4 raw-txN mask
+// ("*-<base>.<fromTxN>-<toTxN>.v") using isRawTxNItem. openDirtyFiles
+// calls this so a mode-C paired v4 .v item lands its decompressor
+// instead of failing MatchVersionedFile (which would leave the
+// item.decompressor nil, hiding it from v4FilesForStep and blocking
+// mergeV4IntoStepFile from ever firing).
+func (h *History) vFileNameMaskForItem(item *FilesItem) string {
+	if h.isRawTxNItem(item) {
+		return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(h.stepSize)
+	return h.vFileNameMask(fromStep, toStep)
+}
+
+// vAccessorFileNameMaskForItem — sibling for the .vi accessor.
+func (h *History) vAccessorFileNameMaskForItem(item *FilesItem) string {
+	if h.isRawTxNItem(item) {
+		return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, item.startTxNum, item.endTxNum)
+	}
+	fromStep, toStep := item.StepRange(h.stepSize)
+	return h.vAccessorFileNameMask(fromStep, toStep)
+}
+
 func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {
 	accessor, err := recsplit.OpenIndex(fPath)
 	if err != nil {

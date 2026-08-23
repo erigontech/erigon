@@ -567,13 +567,12 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 		default:
 		}
 		item := iter.Item()
-		fromStep, toStep := item.StepRange(h.stepSize)
 		if item.isStaleOnDisk() {
 			h.logger.Debug("[agg] History.openDirtyFiles: file replaced on disk since open, reopening", "f", item.decompressor.FileName())
 			item.closeFiles()
 		}
 		if item.decompressor == nil {
-			fNameMask := h.vFileNameMask(fromStep, toStep)
+			fNameMask := h.vFileNameMaskForItem(item)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dataEntries, h.dirs.SnapHistory)
 			if err != nil {
 				fName := filepath.Base(fPath)
@@ -601,7 +600,7 @@ func (h *History) openDirtyFiles(ctx context.Context, dataEntries, accessorEntri
 		}
 
 		if item.index == nil {
-			fNameMask := h.vAccessorFileNameMask(fromStep, toStep)
+			fNameMask := h.vAccessorFileNameMaskForItem(item)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, h.dirs.SnapAccessors)
 			if err != nil {
 				fName := filepath.Base(fPath)
@@ -635,13 +634,12 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 		default:
 		}
 		item := iter.Item()
-		fromStep, toStep := item.StepRange(ii.stepSize)
 		if item.isStaleOnDisk() {
 			ii.logger.Debug("[agg] InvertedIndex.openDirtyFiles: file replaced on disk since open, reopening", "f", item.decompressor.FileName())
 			item.closeFiles()
 		}
 		if item.decompressor == nil {
-			fNameMask := ii.efFileNameMask(fromStep, toStep)
+			fNameMask := ii.efFileNameMaskForItem(item)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, dataEntries, ii.dirs.SnapIdx)
 			if err != nil {
 				fName := filepath.Base(fPath)
@@ -671,7 +669,7 @@ func (ii *InvertedIndex) openDirtyFiles(ctx context.Context, dataEntries, access
 		}
 
 		if item.index == nil {
-			fNameMask := ii.efAccessorFileNameMask(fromStep, toStep)
+			fNameMask := ii.efAccessorFileNameMaskForItem(item)
 			fPath, fileVer, ok, err := version.MatchVersionedFile(fNameMask, accessorEntries, ii.dirs.SnapAccessors)
 			if err != nil {
 				fName := filepath.Base(fPath)
