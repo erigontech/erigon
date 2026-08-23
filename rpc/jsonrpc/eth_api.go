@@ -421,7 +421,7 @@ func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx,
 }
 
 func (api *BaseAPI) headerByNumber(ctx context.Context, number rpc.BlockNumber, tx kv.Tx) (*types.Header, error) {
-	// Keep the pending policy consistent with headerByNumberOrHash.
+	// Pending headers are not stored in the block tables; do not substitute latest.
 	if number == rpc.PendingBlockNumber {
 		return nil, nil
 	}
