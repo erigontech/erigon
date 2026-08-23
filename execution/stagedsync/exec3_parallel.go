@@ -108,7 +108,9 @@ type parallelExecutor struct {
 	// calculator to drain.
 	applyResultsCh  chan applyResult
 	commitResultsCh chan applyResult
-	maxBlockNum     uint64 // set before execLoop; exec loop exits when reached
+	// calculator is read-only for the exec loop: the COMMITMENT_AFTER_EXEC barrier.
+	calculator  *commitmentCalculator
+	maxBlockNum uint64 // set before execLoop; exec loop exits when reached
 	// accumulator for txpool state-diff notifications; set before execLoop
 	// starts so that AuRa system-call nonce changes are emitted per block.
 	accumulator *shards.Accumulator
@@ -346,6 +348,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 	if err != nil {
 		return nil, nil, err
 	}
+	pe.calculator = calculator
 	calculator.Start(ctx)
 	defer calculator.Stop()
 
@@ -1232,6 +1235,12 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// and cancelling would join context.Canceled onto the reported error.
 				if blockResult.Err != nil {
 					return nil
+				}
+
+				if dbg.CommitmentAfterExec && pe.calculator != nil {
+					if err := pe.calculator.WaitProcessed(ctx, blockResult.BlockNum); err != nil {
+						return err
+					}
 				}
 
 				pe.Lock()
