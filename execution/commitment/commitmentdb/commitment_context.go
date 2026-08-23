@@ -33,7 +33,7 @@ var (
 	mxCommitmentRunning = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook    = metrics.GetOrCreateSummary("domain_commitment_took")
 	// slowStageThreshold is the debug-branch trigger for per-stage slow logs.
-	slowStageThreshold = time.Duration(dbg.EnvInt("SLOW_STAGE_MS", 60)) * time.Millisecond
+	slowStageThreshold = time.Duration(dbg.EnvInt("SLOW_STAGE_MS", 70)) * time.Millisecond
 )
 
 type sd interface {
