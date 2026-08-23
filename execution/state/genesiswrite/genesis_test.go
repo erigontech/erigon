@@ -140,6 +140,27 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	require.Equal(t, uint64(2), seq)
 }
 
+// The fresh-DB path overrides genesis.Config, and MainnetGenesisBlock hands back the
+// package-level config, so without a copy --override.osaka rewrites it process-wide.
+func TestCommitGenesisBlockOverrideLeavesTheSpecConfigAlone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	// MainnetGenesisBlock's Config is the mainnetChainConfig singleton, which is a
+	// different object from chainspec.Mainnet.Config -- that one is its own ReadChainConfig.
+	orig := chainspec.MainnetGenesisBlock().Config.OsakaTime
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+
+	cfg, _, err := genesiswrite.CommitGenesisBlockWithOverride(
+		db, nil, "", common.NewUint64(1765000000), nil, false, dirs, log.New())
+	require.NoError(t, err)
+	require.Equal(t, uint64(1765000000), *cfg.OsakaTime, "the override must reach the returned config")
+	require.Equal(t, orig, chainspec.MainnetGenesisBlock().Config.OsakaTime,
+		"applyOverrides must not write through into the shared genesis config")
+}
+
 func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

@@ -159,6 +159,9 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			genesis = chainspec.MainnetGenesisBlock()
 			custom = false
 		}
+		// Same singleton as at the keepStoredChainConfig path below: MainnetGenesisBlock
+		// hands back the package-level mainnetChainConfig, so override it on a copy.
+		genesis.Config = genesis.Config.Copy()
 		applyOverrides(genesis.Config)
 		block, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
