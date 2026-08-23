@@ -667,13 +667,9 @@ func (sd *SharedDomains) flushRequestMetrics() {
 // the public Set/Get acquire the same Mutex and would self-deadlock.
 func (sd *SharedDomains) LockChangesetAccumulator() {
 	sd.changesetMu.Lock()
-	sd.changesetLockedAt = time.Now()
 }
 
 func (sd *SharedDomains) UnlockChangesetAccumulator() {
-	if held := time.Since(sd.changesetLockedAt); held >= dbg.ToLogSlowTxn {
-		log.Warn("[dbg] slow changesetMu hold", "held", held)
-	}
 	sd.changesetMu.Unlock()
 }
 
