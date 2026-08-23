@@ -2919,6 +2919,23 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	cntInvalid := 0
 	var stateReader state.StateReader
 
+	{
+		prStarted := time.Now()
+		defer func() {
+			took := time.Since(prStarted)
+			if took > time.Millisecond {
+				mxProcessResultsSeconds.Observe(took.Seconds())
+			}
+			if took >= 4*dbg.ToLogSlowTxn {
+				bn := uint64(0)
+				if res != nil {
+					bn = res.BlockNumber()
+				}
+				log.Warn("[dbg] slow nextResult1", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+			}
+		}()
+	}
+
 	for i := 0; i < len(toValidate); i++ {
 
 		be.cntTotalValidations++
@@ -3183,6 +3200,23 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	}
 
+	{
+		prStarted := time.Now()
+		defer func() {
+			took := time.Since(prStarted)
+			if took > time.Millisecond {
+				mxProcessResultsSeconds.Observe(took.Seconds())
+			}
+			if took >= 4*dbg.ToLogSlowTxn {
+				bn := uint64(0)
+				if res != nil {
+					bn = res.BlockNumber()
+				}
+				log.Warn("[dbg] slow nextResult2", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+			}
+		}()
+	}
+
 	maxValidated := be.validateTasks.maxComplete()
 	be.scheduleExecution(ctx, pe)
 
@@ -3260,6 +3294,23 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
+		{
+			prStarted := time.Now()
+			defer func() {
+				took := time.Since(prStarted)
+				if took > time.Millisecond {
+					mxProcessResultsSeconds.Observe(took.Seconds())
+				}
+				if took >= 4*dbg.ToLogSlowTxn {
+					bn := uint64(0)
+					if res != nil {
+						bn = res.BlockNumber()
+					}
+					log.Warn("[dbg] slow nextResult3", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+				}
+			}()
+		}
+
 		var allDeps map[int]map[int]bool
 
 		var deps state.DAG
