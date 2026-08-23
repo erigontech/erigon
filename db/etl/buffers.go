@@ -86,8 +86,7 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 // cap), so hot collectors amortize growth while never-full ones stay small.
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 
-// EtlPrealloc pre-sizes a pooled buffer's data slice on checkout. 0 keeps the
-// grow-on-demand behaviour.
+// EtlPrealloc pre-sizes a pooled buffer on checkout. 0 keeps grow-on-demand.
 var EtlPrealloc = dbg.EnvDataSize("ETL_PREALLOC", 0)
 var SmallSortableBuffers = NewAllocator(&sync.Pool{
 	New: func() any {
@@ -180,22 +179,26 @@ func (b *sortableBuffer) chunkSize() int { return 1 << b.chunkShift }
 // chunks; one wider than a chunk gets its own, filling the slots it covers.
 func (b *sortableBuffer) reserve(n int) int {
 	size := b.chunkSize()
-	if pos := b.next & (size - 1); pos != 0 && pos+n > size {
-		b.next += size - pos
-	}
-	span := (max(n, 1) + size - 1) / size * size
-	for len(b.chunks)*size < b.next+max(n, 1) {
+	if n > size {
+		// Start the wide chunk past every chunk already allocated, so that
+		// offset>>chunkShift addresses it rather than a narrow chunk.
+		span := (n + size - 1) / size * size
 		c := make([]byte, span)
+		off := len(b.chunks) * size
 		for range span / size {
 			b.chunks = append(b.chunks, c)
 		}
+		b.next = off + span
+		return off
+	}
+	if pos := b.next & (size - 1); pos+n > size {
+		b.next += size - pos
+	}
+	for len(b.chunks)*size < b.next+max(n, 1) {
+		b.chunks = append(b.chunks, make([]byte, size))
 	}
 	off := b.next
-	if n > size {
-		b.next = off + span
-	} else {
-		b.next = off + n
-	}
+	b.next += n
 	return off
 }
 

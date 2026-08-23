@@ -1598,6 +1598,8 @@ func TestSortableBufferChunkBoundaries(t *testing.T) {
 
 	buf := NewSortableBuffer(64 * datasize.MB)
 	buf.chunkShift = shift
+	// Prealloc first: an oversize entry must not be placed into a narrow chunk.
+	buf.Prealloc(4, chunkSize*4)
 
 	for round := range 2 { // second round exercises reuse after Reset
 		for _, e := range want {
