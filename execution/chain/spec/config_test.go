@@ -296,6 +296,37 @@ func TestCheckConfigForkOrderTimestamps(t *testing.T) {
 	require.Contains(t, err.Error(), "cancunTime")
 }
 
+// Copy must not turn a nil slice into an empty one: newValidatorSetFromJson tests
+// List before Multi, so an empty non-nil List reads as a validator set with no
+// validators at all, at every nesting depth of the Aura config.
+func TestConfigCopyKeepsAuraValidators(t *testing.T) {
+	for _, name := range []string{networkname.Gnosis, networkname.Chiado} {
+		spec, err := chainspec.ChainSpecByName(name)
+		require.NoError(t, err)
+		require.NotNil(t, spec.Config.Aura, "chain %s", name)
+
+		src := spec.Config.Aura.Validators
+		dst := spec.Config.Copy().Aura.Validators
+		require.Equal(t, src.List == nil, dst.List == nil, "chain %s: top-level List nil-ness", name)
+		require.Len(t, dst.Multi, len(src.Multi), "chain %s", name)
+		for block, want := range src.Multi {
+			got := dst.Multi[block]
+			require.NotNil(t, got, "chain %s: multi[%d] lost", name, block)
+			require.Equal(t, want.List == nil, got.List == nil,
+				"chain %s: multi[%d] List nil-ness", name, block)
+		}
+	}
+}
+
+// Copy exists so applyOverrides cannot write through into a shared config.
+func TestConfigCopyIsolatesReassignment(t *testing.T) {
+	src := &chain.Config{OsakaTime: common.NewUint64(1)}
+	cp := src.Copy()
+	cp.OsakaTime = common.NewUint64(500)
+	require.Equal(t, uint64(1), *src.OsakaTime)
+	require.Equal(t, uint64(500), *cp.OsakaTime)
+}
+
 // Every shipped chainspec must satisfy the ordering check the previous test added.
 func TestRegisteredChainSpecsForkOrder(t *testing.T) {
 	for _, name := range []string{

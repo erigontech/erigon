@@ -28,7 +28,6 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/generics"
@@ -43,11 +42,8 @@ import (
 // that any network, identified by its genesis block, can have its own
 // set of configuration options.
 //
-// Config must be copied only with jinzhu/copier (it contains a sync.Once), and
-// only via copier.CopyWithOption(..., DeepCopy: true) — a shallow copy leaves
-// pointer/map fields (ChainID, *Time, BlobSchedule, etc.) shared with the source.
-// DeepCopy does not reach the interface fields: Bor and L2 stay the same value in
-// the copy, so mutating either writes through into the config it was copied from.
+// Config holds a sync.Once, so it must never be copied by assignment. Use Copy, which
+// leaves that Once zeroed and shares every pointer, map and slice with the source.
 type Config struct {
 	ChainName string       `json:"chainName"` // chain name, eg: mainnet, sepolia, bor-mainnet
 	ChainID   *uint256.Int `json:"chainId"`   // chainId identifies the current chain and is used for replay protection
@@ -702,11 +698,13 @@ type forkTimestamp struct {
 	name       string // the config field, as it is spelled in JSON
 	what       string // how the fork is named in a compatibility error
 	timestamp  *uint64
-	outOfOrder bool // chain-specific fork, exempt from the ordering check
+	outOfOrder bool // exempt from the ordering check
 }
 
-// forkTimestamps is the one inventory of time-based forks. checkCompatibleTimestamps
-// walks it positionally against another config's, so both must stay in this order.
+// forkTimestamps is the one inventory of time-based forks. CheckConfigForkOrder reads it
+// as a monotonic sequence, so an entry belongs in its chronological slot rather than at
+// the end, and anything whose slot is not settled is marked outOfOrder -- a wrong guess
+// there refuses a valid schedule at startup, which is worse than a missed inversion.
 func (c *Config) forkTimestamps() []forkTimestamp {
 	return []forkTimestamp{
 		{name: "shanghaiTime", what: "Shanghai fork timestamp", timestamp: c.ShanghaiTime},
@@ -718,7 +716,7 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 		{name: "bpo3Time", what: "BPO3 fork timestamp", timestamp: c.Bpo3Time},
 		{name: "bpo4Time", what: "BPO4 fork timestamp", timestamp: c.Bpo4Time},
 		{name: "bpo5Time", what: "BPO5 fork timestamp", timestamp: c.Bpo5Time},
-		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime},
+		{name: "amsterdamTime", what: "Amsterdam fork timestamp", timestamp: c.AmsterdamTime, outOfOrder: true},
 		{name: "balancerTime", what: "Balancer fork timestamp", timestamp: c.BalancerTime, outOfOrder: true},
 	}
 }
@@ -751,8 +749,10 @@ func (c *Config) CheckConfigForkOrder() error {
 		}
 	}
 
-	// Time-based forks are all optional -- every one of them is still ahead of some
-	// supported chain -- so only their ordering relative to each other is checked.
+	// Time-based forks are all optional -- every one is still ahead of some supported
+	// chain -- so only their ordering relative to each other is checked. Amsterdam is
+	// exempt because no shipped spec schedules it yet and BPO3-5 may well follow it;
+	// Balancer because Gnosis schedules it below its own osakaTime.
 	var lastTime forkTimestamp
 	for _, fork := range c.forkTimestamps() {
 		if fork.timestamp == nil || fork.outOfOrder {
@@ -912,25 +912,24 @@ func rewindTarget(stored, scheduled *uint64) *uint64 {
 	}
 }
 
-// Copy deep-copies the config. Config holds a sync.Once, so jinzhu/copier is the only
-// safe copier, and it turns a nil map or slice into an empty one -- inert on disk since
-// all six are omitempty, but reflect.DeepEqual separates them, so they are put back.
-// Interface fields (Bor, L2) are not reached by DeepCopy and stay shared with the source.
-func (c *Config) Copy() (*Config, error) {
+// Copy returns a config whose fields can be reassigned without the original seeing it.
+// Every pointer, map and slice is shared with the source, so a caller that mutates
+// through one still writes into the original -- reassigning a field is what this is for.
+//
+// Deliberately not a deep copy. jinzhu/copier's DeepCopy turns a nil map or slice into an
+// empty one at every nesting depth, and Aura.Validators tells the two apart: a nil List
+// with Multi set is a multi validator set, an empty non-nil List is a set with no
+// validators at all. Only parseBlobScheduleOnce and its cache are left zeroed, so the
+// copy parses its own blob schedule.
+func (c *Config) Copy() *Config {
 	cp := new(Config)
-	if err := copier.CopyWithOption(cp, c, copier.Option{DeepCopy: true}); err != nil {
-		return nil, err
-	}
-	src, dst := reflect.ValueOf(*c), reflect.ValueOf(cp).Elem()
+	src, dst := reflect.ValueOf(c).Elem(), reflect.ValueOf(cp).Elem()
 	for i := range src.NumField() {
-		switch src.Field(i).Kind() {
-		case reflect.Map, reflect.Slice:
-			if src.Field(i).IsNil() && dst.Field(i).CanSet() {
-				dst.Field(i).SetZero()
-			}
+		if dst.Field(i).CanSet() {
+			dst.Field(i).Set(src.Field(i))
 		}
 	}
-	return cp, nil
+	return cp
 }
 
 func uint64PtrStr(p *uint64) string {
