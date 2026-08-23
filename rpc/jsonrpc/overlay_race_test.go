@@ -486,7 +486,7 @@ func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {
 	require.NoError(t, err)
 	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
 
-	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	header, err := api.GetRawHeader(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber))
@@ -505,7 +505,7 @@ func TestHeaderHelpersDoNotReturnPublishedPendingHeader(t *testing.T) {
 	require.NoError(t, err)
 	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
 
-	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -516,8 +516,8 @@ func TestHeaderHelpersDoNotReturnPublishedPendingHeader(t *testing.T) {
 		require.Nil(t, header)
 	})
 
-	t.Run("headerByNumberOrHash", func(t *testing.T) {
-		header, isLatest, err := base.headerByNumberOrHash(m.Ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber))
+	t.Run("canonicalHeaderByNumberOrHash", func(t *testing.T) {
+		header, isLatest, err := base.canonicalHeaderByNumberOrHash(m.Ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber))
 		require.NoError(t, err)
 		require.False(t, isLatest)
 		require.Nil(t, header)
@@ -540,19 +540,22 @@ func TestEstimateGasKeepsSelectedOverlayView(t *testing.T) {
 
 func TestHeaderHelpersDoNotReselectOverlay(t *testing.T) {
 	tests := []struct {
-		name string
-		call func(context.Context, *BaseAPI, kv.Tx) (*types.Header, error)
+		name       string
+		wantProbes int
+		call       func(context.Context, *BaseAPI, kv.Tx) (*types.Header, error)
 	}{
 		{
-			name: "headerByNumber",
+			name:       "headerByNumber",
+			wantProbes: 1,
 			call: func(ctx context.Context, api *BaseAPI, tx kv.Tx) (*types.Header, error) {
 				return api.headerByNumber(ctx, rpc.LatestBlockNumber, tx)
 			},
 		},
 		{
-			name: "headerByNumberOrHash",
+			name:       "canonicalHeaderByNumberOrHash",
+			wantProbes: 0,
 			call: func(ctx context.Context, api *BaseAPI, tx kv.Tx) (*types.Header, error) {
-				header, _, err := api.headerByNumberOrHash(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
+				header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber))
 				return header, err
 			},
 		},
@@ -580,7 +583,7 @@ func TestHeaderHelpersDoNotReselectOverlay(t *testing.T) {
 			require.NoError(t, err)
 			require.NotNil(t, header)
 			require.Equal(t, committedHeader.Hash(), header.Hash())
-			require.Equal(t, 1, probeTx.probes)
+			require.Equal(t, test.wantProbes, probeTx.probes)
 		})
 	}
 }
@@ -1040,6 +1043,20 @@ func TestTraceFilter_FutureToBlockErrors(t *testing.T) {
 
 	to := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
 	err := api.Filter(m.Ctx, TraceFilterRequest{ToBlock: &to}, new(bool), nil, stream)
+	require.ErrorContains(t, err, "not executed")
+}
+
+func TestTraceFilter_FutureFromBlockErrors(t *testing.T) {
+	t.Parallel()
+	m, _ := newHeaderAheadTester(t)
+	api := newTraceApiForTest(m)
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+
+	from := rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayRaceChainSize + 1))
+	err := api.Filter(m.Ctx, TraceFilterRequest{FromBlock: &from}, new(bool), nil, stream)
 	require.ErrorContains(t, err, "not executed")
 }
 

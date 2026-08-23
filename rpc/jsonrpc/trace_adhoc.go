@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
-	ptracer "github.com/erigontech/erigon/polygon/tracer"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -77,7 +76,6 @@ type TraceCallParam struct {
 	AccessList           *types.AccessList `json:"accessList"`
 	txHash               *common.Hash
 	traceTypes           []string
-	isBorStateSyncTxn    bool
 }
 
 // TraceCallResult is the response to `trace_call` method
@@ -913,7 +911,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	blockNum, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, txHash, chainConfig)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -934,7 +932,7 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, nil
 	}
 
-	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, isBorStateSyncTxn)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
 	if err != nil {
 		return nil, err
 	}
@@ -1391,7 +1389,6 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 		return nil, nil, err
 	}
 	engine := api.engine()
-	noop := state.NewNoopWriter()
 
 	// Setup context so it may be cancelled the call has completed
 	// or, in case of unmetered gas, setup a context with a timeout.
@@ -1482,50 +1479,18 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			sd = &StateDiff{sdMap: sdMap}
 		}
 
-		var finalizeTxStateWriter state.StateWriter
-		if sd != nil {
-			finalizeTxStateWriter = sd
-		} else {
-			finalizeTxStateWriter = noop
+		ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
+		if tracer != nil {
+			ibs.SetHooks(tracer.Hooks)
 		}
+		txCtx := protocol.NewEVMTxContext(msg)
+		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
-		var txFinalized bool
-		var execResult *evmtypes.ExecutionResult
-		if args.isBorStateSyncTxn {
-			txFinalized = true
-			var stateSyncEvents []*types.Message
-			stateSyncEvents, err = api.bridgeReader.Events(ctx, header.Hash(), header.Number.Uint64())
-			if err != nil {
-				return nil, nil, err
-			}
-
-			execResult, err = ptracer.TraceBorStateSyncTxnTraceAPI(
-				ctx,
-				&vmConfig,
-				chainConfig,
-				ibs,
-				finalizeTxStateWriter,
-				blockCtx,
-				header.Hash(),
-				header.Number.Uint64(),
-				header.Time,
-				stateSyncEvents,
-				tracer,
-			)
-		} else {
-			ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
-			if tracer != nil {
-				ibs.SetHooks(tracer.Hooks)
-			}
-			txCtx := protocol.NewEVMTxContext(msg)
-			evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
-			gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-
-			if tracer != nil && tracer.Hooks.OnTxStart != nil {
-				tracer.Hooks.OnTxStart(evm.GetVMContext(), txns[txIndex], msg.From())
-			}
-			execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, engine)
+		if tracer != nil && tracer.Hooks.OnTxStart != nil {
+			tracer.Hooks.OnTxStart(evm.GetVMContext(), txns[txIndex], msg.From())
 		}
+		execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /* gasBailout */, engine)
 		if err != nil {
 			if tracer != nil && tracer.Hooks.OnTxEnd != nil {
 				tracer.Hooks.OnTxEnd(nil, err)
@@ -1544,10 +1509,8 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			if err := func() error {
 				initialIbs := state.New(cloneReader)
 				defer initialIbs.Close()
-				if !txFinalized {
-					if err := ibs.FinalizeTx(chainRules, sd); err != nil {
-						return err
-					}
+				if err := ibs.FinalizeTx(chainRules, sd); err != nil {
+					return err
 				}
 				if sd != nil {
 					return sd.CompareStates(initialIbs, ibs)
@@ -1556,7 +1519,7 @@ func (api *TraceAPIImpl) doCallBlock(ctx context.Context, dbtx kv.Tx, stateReade
 			}(); err != nil {
 				return nil, nil, err
 			}
-		} else if !txFinalized {
+		} else {
 			// Write into stateCache even when no stateDiff is requested: a later
 			// stateDiff call resets ibs and rebuilds its state from the cache.
 			if err := ibs.FinalizeTx(chainRules, cachedWriter); err != nil {
@@ -1640,7 +1603,6 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 
 	traceResult := &TraceCallResult{Trace: []*ParityTrace{}, TransactionHash: args.txHash}
 	vmConfig := vm.Config{}
-	var tracer *tracers.Tracer
 	if traceTypeTrace || traceTypeVmTrace {
 		var ot OeTracer
 		ot.config, err = parseOeTracerConfig(traceConfig)
@@ -1657,7 +1619,6 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 			traceResult.VmTrace = &VmTrace{Ops: []*VmTraceOp{}}
 		}
 		vmConfig.Tracer = ot.Tracer().Hooks
-		tracer = ot.Tracer()
 	}
 
 	// Clone the state cache before applying the changes for diff after transaction execution, clone is discarded
@@ -1676,44 +1637,12 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	}
 
 	ibs.Reset()
-	var finalizeTxStateWriter state.StateWriter
-	if sd != nil {
-		finalizeTxStateWriter = sd
-	} else {
-		finalizeTxStateWriter = noop
-	}
+	ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
+	txCtx := protocol.NewEVMTxContext(msg)
+	evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
+	gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
 
-	var txFinalized bool
-	var execResult *evmtypes.ExecutionResult
-	if args.isBorStateSyncTxn {
-		txFinalized = true
-		var stateSyncEvents []*types.Message
-		stateSyncEvents, err = api.bridgeReader.Events(ctx, header.Hash(), header.Number.Uint64())
-		if err != nil {
-			return nil, err
-		}
-
-		execResult, err = ptracer.TraceBorStateSyncTxnTraceAPI(
-			ctx,
-			&vmConfig,
-			chainConfig,
-			ibs,
-			finalizeTxStateWriter,
-			blockCtx,
-			header.Hash(),
-			header.Number.Uint64(),
-			header.Time,
-			stateSyncEvents,
-			tracer,
-		)
-	} else {
-		ibs.SetTxContext(blockCtx.BlockNumber, txIndex)
-		txCtx := protocol.NewEVMTxContext(msg)
-		evm := vm.NewEVM(blockCtx, txCtx, ibs, chainConfig, vmConfig)
-		gp := new(protocol.GasPool).AddGas(msg.Gas()).AddBlobGas(msg.BlobGas())
-
-		execResult, err = protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
-	}
+	execResult, err := protocol.ApplyMessage(evm, msg, gp, true /* refunds */, gasBailout /*gasBailout*/, engine)
 	if err != nil {
 		return nil, fmt.Errorf("first run for txIndex %d error: %w", txIndex, err)
 	}
@@ -1723,10 +1652,8 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 	if traceTypeStateDiff {
 		initialIbs := state.New(cloneReader)
 		defer initialIbs.Close()
-		if !txFinalized {
-			if err := ibs.FinalizeTx(chainRules, sd); err != nil {
-				return nil, err
-			}
+		if err := ibs.FinalizeTx(chainRules, sd); err != nil {
+			return nil, err
 		}
 
 		if sd != nil {
@@ -1739,10 +1666,8 @@ func (api *TraceAPIImpl) doCall(ctx context.Context, dbtx kv.Tx, stateReader sta
 			return nil, err
 		}
 	} else {
-		if !txFinalized {
-			if err := ibs.FinalizeTx(chainRules, noop); err != nil {
-				return nil, err
-			}
+		if err := ibs.FinalizeTx(chainRules, noop); err != nil {
+			return nil, err
 		}
 		if err := ibs.CommitBlock(chainRules, cachedWriter); err != nil {
 			return nil, err

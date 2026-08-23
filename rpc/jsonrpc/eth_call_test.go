@@ -60,6 +60,7 @@ import (
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/rpc"
@@ -76,11 +77,21 @@ func TestEstimateGas(t *testing.T) {
 	api := newTestEthAPIWithFilters(t, m)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
-	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
+	args := &ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}, nil, nil, nil)
-	require.NoError(t, err)
+	}
+
+	t.Run("latest by default", func(t *testing.T) {
+		_, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
+		require.NoError(t, err)
+	})
+
+	t.Run("pending without pending block", func(t *testing.T) {
+		pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
+		_, err := api.EstimateGas(context.Background(), args, &pending, nil, nil)
+		require.NoError(t, err)
+	})
 }
 
 func TestEstimateGasPendingUsesPendingHeader(t *testing.T) {
@@ -304,6 +315,156 @@ func TestStateCallMethodsRejectPendingTag(t *testing.T) {
 		_, err := graphqlAPI.Call(ctx, rpc.PendingBlockNumber, ethapi.CallArgs{})
 		require.ErrorIs(t, err, errPendingStateNotSupported)
 	})
+}
+
+// TestCreateAccessListTracesStorage covers a target that touches storage, which is
+// the path where the tracer writes its contract sets. A plain value transfer never
+// reaches it.
+func TestCreateAccessListTracesStorage(t *testing.T) {
+	m, bankAddress, contractAddress, _ := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, stubTxPoolClient{}, nil)
+	data := hexutil.Bytes(contractInvocationData(42))
+
+	for _, from := range []*common.Address{&bankAddress, nil} {
+		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: from,
+			To:   &contractAddress,
+			Data: &data,
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Empty(t, res.Error)
+		require.Len(t, *res.Accesslist, 1)
+		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
+		// store() writes slots 0x00..0x10.
+		require.Len(t, (*res.Accesslist)[0].StorageKeys, 17)
+	}
+}
+
+func TestCreateAccessList(t *testing.T) {
+	m, bankAddress, contractAddress, receiverAddress := chainWithDeployedContractAndConfig(t, chain.AllProtocolChanges)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+	latest := rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber)
+
+	bankNonce, err := api.GetTransactionCount(context.Background(), bankAddress, &latest)
+	require.NoError(t, err)
+
+	storeData := hexutil.Bytes(contractInvocationData(42))
+	// Init code that writes slot 0x81 and then reverts, so the tracer has to report
+	// a slot the transaction did not keep.
+	revertingInit := hexutil.Bytes(hexutil.MustDecode("0x608060806080608155fd"))
+
+	t.Run("plain transfer touches nothing", func(t *testing.T) {
+		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: &bankAddress,
+			To:   &receiverAddress,
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Empty(t, res.Error)
+		require.Empty(t, *res.Accesslist)
+	})
+
+	t.Run("call reports the touched contract and its slots", func(t *testing.T) {
+		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: &bankAddress,
+			To:   &contractAddress,
+			Data: &storeData,
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Empty(t, res.Error)
+		require.Len(t, *res.Accesslist, 1)
+		require.Equal(t, contractAddress, (*res.Accesslist)[0].Address)
+		// store() writes slots 0x00..0x10.
+		require.Len(t, (*res.Accesslist)[0].StorageKeys, 17)
+	})
+
+	t.Run("reverting creation still reports its slot", func(t *testing.T) {
+		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:  &bankAddress,
+			Nonce: bankNonce,
+			Data:  &revertingInit,
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Equal(t, vm.ErrExecutionReverted.Error(), res.Error)
+		require.Len(t, *res.Accesslist, 1)
+		require.Equal(t, types.CreateAddress(bankAddress, uint64(*bankNonce)), (*res.Accesslist)[0].Address)
+		require.Equal(t, []common.Hash{common.HexToHash("0x81")}, (*res.Accesslist)[0].StorageKeys)
+	})
+
+	t.Run("fee below the block base fee is rejected", func(t *testing.T) {
+		gasPrice := (*hexutil.U256)(uint256.NewInt(1))
+		_, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:     &bankAddress,
+			To:       &receiverAddress,
+			GasPrice: gasPrice,
+		}, nil, nil, nil)
+		require.ErrorContains(t, err, "fee cap less than block base fee")
+	})
+
+	t.Run("sender and precompiles are excluded", func(t *testing.T) {
+		identity := common.BytesToAddress([]byte{4})
+		// CALL(gas, addr, value=0, argsOffset=0, argsLen=0, retOffset=0, retLen=0); POP
+		callTo := func(addr common.Address) []byte {
+			code := []byte{
+				byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH1), 0,
+				byte(vm.PUSH1), 0, byte(vm.PUSH1), 0, byte(vm.PUSH20),
+			}
+			code = append(code, addr[:]...)
+			return append(code, byte(vm.PUSH3), 0x01, 0x86, 0xa0, byte(vm.CALL), byte(vm.POP))
+		}
+		data := hexutil.Bytes(append(callTo(identity), callTo(contractAddress)...))
+
+		res, err := api.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From:  &bankAddress,
+			Nonce: bankNonce,
+			Data:  &data,
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Empty(t, res.Error)
+
+		got := make([]common.Address, 0, len(*res.Accesslist))
+		for _, tuple := range *res.Accesslist {
+			got = append(got, tuple.Address)
+		}
+		require.Contains(t, got, contractAddress, "a plain call target belongs in the list")
+		require.NotContains(t, got, bankAddress, "the sender is pre-warmed by EIP-2929")
+		require.NotContains(t, got, identity, "precompiles are pre-warmed by EIP-2929")
+	})
+
+	t.Run("berlin plain transfer costs the intrinsic gas", func(t *testing.T) {
+		mBerlin, bank, _, recv := chainWithDeployedContract(t)
+		apiBerlin := newEthApiForTest(newBaseApiForTest(mBerlin), mBerlin.DB, nil, nil)
+		res, err := apiBerlin.CreateAccessList(context.Background(), ethapi.CallArgs{
+			From: &bank,
+			To:   &recv,
+		}, nil, nil, nil)
+		require.NoError(t, err)
+		require.Empty(t, *res.Accesslist)
+		require.Equal(t, hexutil.Uint64(params.TxGas), res.GasUsed)
+	})
+}
+
+// TestCreateAccessListConvergesOnCleanState pins that every convergence iteration
+// starts from the pre-state. Seeding the converged list makes the run execute
+// exactly once, which is the oracle for the multi-iteration run beside it.
+func TestCreateAccessListConvergesOnCleanState(t *testing.T) {
+	m, bankAddress, contractAddress, _ := chainWithDeployedContract(t)
+	api := newEthApiForTest(newBaseApiForTest(m), m.DB, nil, nil)
+
+	data := hexutil.Bytes(contractInvocationData(42))
+	args := ethapi.CallArgs{From: &bankAddress, To: &contractAddress, Data: &data}
+
+	converged, err := api.CreateAccessList(context.Background(), args, nil, nil, nil)
+	require.NoError(t, err)
+	require.Empty(t, converged.Error)
+	require.NotEmpty(t, *converged.Accesslist, "store() must touch storage, else this converges in one pass and proves nothing")
+
+	seeded := args
+	seeded.AccessList = converged.Accesslist
+	single, err := api.CreateAccessList(context.Background(), seeded, nil, nil, nil)
+	require.NoError(t, err)
+	require.Empty(t, single.Error)
+	require.Equal(t, *single.Accesslist, *converged.Accesslist)
+	require.Equal(t, single.GasUsed, converged.GasUsed)
 }
 
 func TestEthCallNonCanonical(t *testing.T) {
