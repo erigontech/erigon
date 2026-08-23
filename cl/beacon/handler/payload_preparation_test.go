@@ -387,6 +387,22 @@ func TestPreparePayloadLoopStopsWithZeroSlotDuration(t *testing.T) {
 	})
 }
 
+func TestPreparePayloadLoopWarnsWhenGloasWindowIsTooShort(t *testing.T) {
+	var output bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	handler := &ApiHandler{
+		beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 2},
+		logger:         logger,
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	handler.preparePayloadLoop(ctx)
+
+	require.Contains(t, output.String(), "Gloas preparation window is too short")
+}
+
 func TestPreparePayloadLoopRunsImmediatelyWithPreparationDeadline(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
@@ -506,6 +522,7 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 			currentSlot := postState.Slot()
 			targetSlot := currentSlot + 1
 			baseBlockRoot := common.Hash{0x41}
+			forkchoiceStore.HeadVal = baseBlockRoot
 			parentHash := common.Hash{0xa1}
 			postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 				ParentBlockHash: parentHash,
@@ -551,11 +568,13 @@ func TestPreparePayloadLoopUsesCurrentForkTimingAtGloasTransition(t *testing.T) 
 	for _, test := range []struct {
 		name            string
 		elapsed         time.Duration
+		currentInGloas  bool
 		selectedCurrent bool
 		shouldPrepare   bool
 	}{
 		{name: "current Fulu head", elapsed: 8 * time.Second, selectedCurrent: true, shouldPrepare: true},
 		{name: "stale Fulu head before Fulu deadline", elapsed: 4 * time.Second},
+		{name: "Fulu head in first Gloas slot", elapsed: 8 * time.Second, currentInGloas: true, shouldPrepare: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
@@ -574,9 +593,13 @@ func TestPreparePayloadLoopUsesCurrentForkTimingAtGloasTransition(t *testing.T) 
 			headState := state.New(&config)
 			require.NoError(t, postState.CopyInto(headState))
 			require.NoError(t, headState.UpgradeToFulu())
-			currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+			lastFuluSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+			currentSlot := lastFuluSlot
+			if test.currentInGloas {
+				currentSlot++
+			}
 			targetSlot := currentSlot + 1
-			require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, currentSlot))
+			require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, lastFuluSlot))
 			preForkHead := common.Hash{0xa1}
 			executionHeader := headState.LatestExecutionPayloadHeader()
 			executionHeader.BlockHash = preForkHead
@@ -586,7 +609,10 @@ func TestPreparePayloadLoopUsesCurrentForkTimingAtGloasTransition(t *testing.T) 
 			require.NoError(t, err)
 			validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
 			baseBlockRoot := common.Hash{0x41}
-			selectedSlot := currentSlot - 1
+			selectedSlot := lastFuluSlot - 1
+			if test.currentInGloas {
+				selectedSlot = lastFuluSlot
+			}
 			if test.selectedCurrent {
 				selectedSlot = currentSlot
 			}
@@ -600,6 +626,7 @@ func TestPreparePayloadLoopUsesCurrentForkTimingAtGloasTransition(t *testing.T) 
 				currentSlot:     currentSlot,
 				targetSlot:      targetSlot,
 				targetSlotStart: currentSlotStart.Add(24 * time.Second),
+				timeout:         time.Second,
 				shouldPrepare:   test.shouldPrepare,
 				checkBuild: func(head common.Hash, attrs *engine_types.PayloadAttributes) {
 					require.Equal(t, preForkHead, head)
@@ -897,6 +924,7 @@ func TestPreparePayloadForStartsGloasSelfBuildOnFullParent(t *testing.T) {
 	postState, handler, syncedData, forkchoiceStore, validatorParams := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseBlockRoot
 	parentHash := common.Hash{0xa1}
 	fullHash := common.Hash{0xb2}
 	const defaultGasLimit = uint64(30_000_000)
@@ -965,6 +993,7 @@ func TestPreparePayloadForWaitsForResolvedGloasHead(t *testing.T) {
 	postState, handler, syncedData, forkchoiceStore, validatorParams := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseBlockRoot
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		ParentBlockHash: common.Hash{0xa1},
 		BlockHash:       common.Hash{0xb2},
@@ -1002,6 +1031,7 @@ func TestPreparePayloadForSkipsGloasReorgToEmpty(t *testing.T) {
 	postState, handler, syncedData, forkchoiceStore, validatorParams := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseBlockRoot
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		ParentBlockHash: common.Hash{0xa1},
 		BlockHash:       common.Hash{0xb2},
@@ -1040,6 +1070,7 @@ func TestExecutionPayloadSourceMarksReorgToEmptyAfterNegativePtcDecision(t *test
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseBlockRoot
 	parentHash := common.Hash{0xa1}
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		ParentBlockHash: parentHash,
@@ -1056,6 +1087,24 @@ func TestExecutionPayloadSourceMarksReorgToEmptyAfterNegativePtcDecision(t *test
 	require.Equal(t, parentHash, source.head)
 	require.Equal(t, gloasPayloadPathReorgToEmpty, source.gloasPath)
 	require.Nil(t, source.parentExecutionRequests)
+}
+
+func TestExecutionPayloadSourceRejectsPendingGloasDecision(t *testing.T) {
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	targetSlot := postState.Slot() + 1
+	baseBlockRoot := common.Hash{0x41}
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: common.Hash{0xa1},
+		BlockHash:       common.Hash{0xb2},
+		Slot:            postState.Slot(),
+	})
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
+
+	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+
+	require.ErrorIs(t, err, errGloasPayloadPending)
+	require.Equal(t, executionPayloadSource{}, source)
 }
 
 func setupGloasPreparationTest(t *testing.T) (
@@ -1129,6 +1178,15 @@ func TestPreparationGateTracksProducedBlockUntilSlotHeadIsSelected(t *testing.T)
 	require.True(t, gate.producedBlockPending(10, 9), "the signing round trip is pending")
 	require.False(t, gate.producedBlockPending(10, 10), "a head for the produced slot is selected")
 	require.False(t, gate.producedBlockPending(11, 10), "the produced slot has passed")
+}
+
+func TestPreparationGateTracksProductionThatFinishesAfterItsSlot(t *testing.T) {
+	var gate payloadPreparationGate
+	gate.noteProducedBlock(11, 10)
+
+	require.True(t, gate.producedBlockPending(11, 9), "the late signing round trip is pending")
+	require.False(t, gate.producedBlockPending(11, 10), "a head for the produced slot is selected")
+	require.False(t, gate.producedBlockPending(12, 9), "the signing marker expires after one slot")
 }
 
 func TestPreparationGateIgnoresProducedBlocksOutsideCurrentWindow(t *testing.T) {
@@ -1308,6 +1366,39 @@ func TestPreparePayloadForRetriesWhileTheExecutionLayerIsBusy(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, baseBlockRoot, head)
 	require.Equal(t, 2, buildAttempts)
+}
+
+func TestPreparePayloadBuildBacksOffWhileExecutionHeadDiffers(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	handler := &ApiHandler{}
+	baseBlockRoot := common.Hash{0x41}
+	syncedData := sync_mock_services.NewMockSyncedData(ctrl)
+	syncedData.EXPECT().SelectedHead().Return(baseBlockRoot, uint64(10), true).AnyTimes()
+	handler.syncedData = syncedData
+
+	buildAttempts := 0
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		buildAttempts++
+		if buildAttempts == 1 {
+			return nil, execution_client.ErrPayloadBuildHeadMismatch
+		}
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	handler.engine = engine
+	ctx, cancel := context.WithTimeout(t.Context(), 5*time.Second)
+	defer cancel()
+	minimumObservedBackoff := 400 * time.Millisecond
+	startedAt := time.Now()
+
+	payloadID, err := handler.startPayloadBuildForPreparation(
+		ctx, baseBlockRoot, common.Hash{0x42}, new(engine_types.PayloadAttributes),
+	)
+
+	require.NoError(t, err)
+	require.Len(t, payloadID, 8)
+	require.Equal(t, 2, buildAttempts)
+	require.GreaterOrEqual(t, time.Since(startedAt), minimumObservedBackoff)
 }
 
 func TestPreparePayloadForStopsRetryWhenTheHeadChanges(t *testing.T) {

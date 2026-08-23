@@ -469,7 +469,7 @@ func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot commo
 }
 
 func (f *ForkChoiceStorageMock) GetHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
-	if f.HeadVal != (common.Hash{}) && f.HeadVal != root {
+	if f.HeadVal != root {
 		return cltypes.PayloadStatusPending, false
 	}
 	return f.HeadPayloadStatusVal, true

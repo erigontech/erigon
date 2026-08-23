@@ -703,6 +703,12 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 				return
 			}
 		} else if a.epbsPool != nil {
+			if _, err := clservices.ValidateProposerPreferenceSlot(
+				a.ethClock, a.beaconChainCfg, req.Message.ProposalSlot,
+			); err != nil {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				return
+			}
 			a.epbsPool.AddProposerPreference(req)
 		}
 

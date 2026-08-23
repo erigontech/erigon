@@ -474,11 +474,12 @@ func newTestPayloadAttestationMessage(t *testing.T, validatorIndex uint64, beaco
 func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.epbsPool = pool.NewEpbsPool()
+	proposalSlot := handler.ethClock.GetCurrentSlot() + 4
 	body, err := json.Marshal([]*cltypes.SignedProposerPreferences{
 		{
 			Message: &cltypes.ProposerPreferences{
 				DependentRoot:  common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111"),
-				ProposalSlot:   32,
+				ProposalSlot:   proposalSlot,
 				ValidatorIndex: 1,
 				FeeRecipient:   common.HexToAddress("0x2222222222222222222222222222222222222222"),
 				TargetGasLimit: 30_000_000,
@@ -487,7 +488,7 @@ func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 		{
 			Message: &cltypes.ProposerPreferences{
 				DependentRoot:  common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333"),
-				ProposalSlot:   33,
+				ProposalSlot:   proposalSlot + 1,
 				ValidatorIndex: 2,
 				FeeRecipient:   common.HexToAddress("0x4444444444444444444444444444444444444444"),
 				TargetGasLimit: 30_000_001,
@@ -504,12 +505,12 @@ func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	_, ok := handler.epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{
-		Slot:          32,
+		Slot:          proposalSlot,
 		DependentRoot: common.HexToHash("0x1111111111111111111111111111111111111111111111111111111111111111"),
 	})
 	require.True(t, ok)
 	_, ok = handler.epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{
-		Slot:          33,
+		Slot:          proposalSlot + 1,
 		DependentRoot: common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333"),
 	})
 	require.True(t, ok)
@@ -544,14 +545,31 @@ func TestPostProposerPreferencesStoresValidatedPreferenceOnce(t *testing.T) {
 	require.Equal(t, uint64(1), epbsPool.ProposerPreferencesGeneration(preference.Message.ProposalSlot))
 }
 
+func TestPostProposerPreferencesRejectsFarFutureSlotWithoutService(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.epbsPool = pool.NewEpbsPool()
+	preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		DependentRoot: common.Hash{0x11},
+		ProposalSlot:  1 << 60,
+	}}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", http.NoBody)
+
+	handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{preference})
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Zero(t, handler.epbsPool.ProposerPreferencesGeneration(preference.Message.ProposalSlot))
+}
+
 func TestPostBeaconPoolProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.epbsPool = pool.NewEpbsPool()
+	proposalSlot := handler.ethClock.GetCurrentSlot() + 4
 	body, err := json.Marshal([]*cltypes.SignedProposerPreferences{
 		{
 			Message: &cltypes.ProposerPreferences{
 				DependentRoot:  common.HexToHash("0x5555555555555555555555555555555555555555555555555555555555555555"),
-				ProposalSlot:   34,
+				ProposalSlot:   proposalSlot,
 				ValidatorIndex: 3,
 				FeeRecipient:   common.HexToAddress("0x6666666666666666666666666666666666666666"),
 				TargetGasLimit: 30_000_002,
@@ -568,7 +586,7 @@ func TestPostBeaconPoolProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	_, ok := handler.epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{
-		Slot:          34,
+		Slot:          proposalSlot,
 		DependentRoot: common.HexToHash("0x5555555555555555555555555555555555555555555555555555555555555555"),
 	})
 	require.True(t, ok)

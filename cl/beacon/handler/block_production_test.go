@@ -755,6 +755,7 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	targetSlot := baseBlock.Slot + 1
 	baseBlockRoot, err := baseBlock.HashSSZ()
 	require.NoError(t, err)
+	fcu.HeadVal = baseBlockRoot
 
 	// GLOAS deferred payload: the mock returns GetHeadPayloadStatus=FULL and ShouldBuildOnFull=true,
 	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.

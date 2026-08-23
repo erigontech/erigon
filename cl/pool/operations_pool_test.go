@@ -428,13 +428,14 @@ func TestEpbsPoolTracksProposerPreferenceChanges(t *testing.T) {
 	p.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
 		ProposalSlot: 10, DependentRoot: common.Hash{0x01}, TargetGasLimit: 36_000_000,
 	}})
-	require.Equal(t, uint64(2), p.ProposerPreferencesGeneration(10))
+	updatedGeneration := p.ProposerPreferencesGeneration(10)
+	require.NotEqual(t, uint64(1), updatedGeneration)
 
 	p.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
 		ProposalSlot: 11, DependentRoot: common.Hash{0x02},
 	}})
-	require.Equal(t, uint64(2), p.ProposerPreferencesGeneration(10))
-	require.Equal(t, uint64(1), p.ProposerPreferencesGeneration(11))
+	require.Equal(t, updatedGeneration, p.ProposerPreferencesGeneration(10))
+	require.NotZero(t, p.ProposerPreferencesGeneration(11))
 }
 
 func TestEpbsPoolAdvancesGenerationWhenPreferenceIsEvicted(t *testing.T) {
@@ -454,5 +455,24 @@ func TestEpbsPoolAdvancesGenerationWhenPreferenceIsEvicted(t *testing.T) {
 
 	_, found := p.GetPreference(targetSlot, targetRoot)
 	require.False(t, found)
-	require.Greater(t, p.ProposerPreferencesGeneration(targetSlot), initialGeneration)
+	require.NotEqual(t, initialGeneration, p.ProposerPreferencesGeneration(targetSlot))
+}
+
+func TestEpbsPoolFarFuturePreferenceDoesNotFreezeOlderSlotGeneration(t *testing.T) {
+	p := NewEpbsPool()
+	targetSlot := uint64(10)
+	p.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: targetSlot, DependentRoot: common.Hash{0x01},
+	}})
+	initialGeneration := p.ProposerPreferencesGeneration(targetSlot)
+
+	p.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: 1 << 60, DependentRoot: common.Hash{0x02},
+	}})
+	p.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: targetSlot, DependentRoot: common.Hash{0x03},
+	}})
+
+	require.NotZero(t, p.ProposerPreferencesGeneration(targetSlot))
+	require.NotEqual(t, initialGeneration, p.ProposerPreferencesGeneration(targetSlot))
 }

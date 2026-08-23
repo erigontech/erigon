@@ -59,6 +59,11 @@ const preparedPayloadRetainSlots = 2
 // overlap production without giving the builder useful warmup.
 const minimumPreparationLead = 500 * time.Millisecond
 
+const (
+	payloadBuildBusyRetryDelay         = 100 * time.Millisecond
+	payloadBuildHeadMismatchRetryDelay = 500 * time.Millisecond
+)
+
 type preparedPayloadRecord struct {
 	id       []byte
 	head     common.Hash
@@ -160,8 +165,8 @@ func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
 }
 
 func (g *payloadPreparationGate) noteProducedBlock(currentSlot, producedSlot uint64) {
-	// The marker covers only work that can bridge the current-to-next-slot boundary.
-	if producedSlot < currentSlot || producedSlot-currentSlot > 1 {
+	// The signing interval can cross one slot boundary, but no more.
+	if !slotsWithinOne(currentSlot, producedSlot) {
 		return
 	}
 	for {
@@ -174,7 +179,14 @@ func (g *payloadPreparationGate) noteProducedBlock(currentSlot, producedSlot uin
 
 func (g *payloadPreparationGate) producedBlockPending(currentSlot, selectedSlot uint64) bool {
 	producedSlot := g.latestProducedSlot.Load()
-	return selectedSlot < producedSlot && (producedSlot == currentSlot || producedSlot == currentSlot+1)
+	return selectedSlot < producedSlot && slotsWithinOne(currentSlot, producedSlot)
+}
+
+func slotsWithinOne(first, second uint64) bool {
+	if first > second {
+		return first-second <= 1
+	}
+	return second-first <= 1
 }
 
 // StartPayloadPreparation primes the execution layer for slots this node is due to propose.
@@ -210,6 +222,15 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 	if tick <= 0 {
 		logger.Warn("PayloadPreparation: disabled because the slot duration is zero")
 		return
+	}
+	gloasWindow := time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second -
+		time.Duration(a.beaconChainCfg.PayloadAttestationDueMs())*time.Millisecond
+	if gloasWindow <= minimumPreparationLead {
+		logger.Warn(
+			"PayloadPreparation: Gloas preparation window is too short",
+			"available", gloasWindow,
+			"minimum", minimumPreparationLead,
+		)
 	}
 	// Preparation is silent on a node that rarely proposes, so say once that it is running:
 	// otherwise a loop that never started looks exactly like one with nothing to do.
@@ -291,7 +312,8 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		var gloasPath gloasPayloadPath
 		var proposerPreferencesGeneration uint64
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
-			if currentVersion.AfterOrEqual(clparams.GloasVersion) {
+			selectedVersion := a.beaconChainCfg.GetCurrentStateVersion(selectedSlot / a.beaconChainCfg.SlotsPerEpoch)
+			if currentVersion.AfterOrEqual(clparams.GloasVersion) && selectedVersion.AfterOrEqual(clparams.GloasVersion) {
 				if delay := gloasPayloadDecisionDelay(
 					time.Now(),
 					currentSlotStart,
@@ -306,7 +328,6 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 					continue
 				}
 			}
-			selectedVersion := a.beaconChainCfg.GetCurrentStateVersion(selectedSlot / a.beaconChainCfg.SlotsPerEpoch)
 			if selectedVersion.AfterOrEqual(clparams.GloasVersion) {
 				gloasPath = a.resolveGloasPayloadPath(selectedRoot, targetSlot)
 				if gloasPath == gloasPayloadPathPending {
@@ -394,8 +415,7 @@ func shouldWaitForCurrentSlotHead(
 	return now.Before(currentSlotStart.Add(attestationDeadline))
 }
 
-// A Gloas proposal must wait through the current slot's PTC window. This also keeps an empty-slot
-// fallback from priming a stale head while a current-slot block can still arrive.
+// A Gloas head needs the current slot's PTC decision before its FULL or EMPTY parent is known.
 func gloasPayloadDecisionDelay(
 	now, currentSlotStart time.Time,
 	payloadAttestationDeadline time.Duration,
@@ -495,9 +515,6 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	if err != nil {
 		return baseBlockRoot, err
 	}
-	if payloadSource.gloasPath == gloasPayloadPathPending {
-		return baseBlockRoot, errGloasPayloadPending
-	}
 	if payloadSource.gloasPath == gloasPayloadPathReorgToEmpty {
 		return baseBlockRoot, errGloasReorgToEmpty
 	}
@@ -574,7 +591,11 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 			!errors.Is(err, chainreader.ErrExecutionBusy) {
 			return nil, err
 		}
-		if err := common.Sleep(ctx, 100*time.Millisecond); err != nil {
+		retryDelay := payloadBuildBusyRetryDelay
+		if errors.Is(err, execution_client.ErrPayloadBuildHeadMismatch) {
+			retryDelay = payloadBuildHeadMismatchRetryDelay
+		}
+		if err := common.Sleep(ctx, retryDelay); err != nil {
 			return nil, context.Cause(ctx)
 		}
 	}
@@ -644,6 +665,9 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	}
 
 	path := a.resolveGloasPayloadPath(baseBlockRoot, targetSlot)
+	if path == gloasPayloadPathPending {
+		return executionPayloadSource{}, errGloasPayloadPending
+	}
 	if path != gloasPayloadPathFull {
 		return executionPayloadSource{head: parentBid.ParentBlockHash, gloasPath: path}, nil
 	}
