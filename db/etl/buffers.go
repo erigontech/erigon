@@ -238,8 +238,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	b.entries = append(b.entries, e)
 }
 
-// Size counts the bytes of every chunk taken so far, minus the unused tail of
-// the chunk being filled - so it tracks RAM held, not just bytes stored.
+// Size counts the stored bytes plus the tails wasted by the chunks already filled.
 func (b *sortableBuffer) Size() int {
 	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + len(b.entries)*entryLocSize
 }
