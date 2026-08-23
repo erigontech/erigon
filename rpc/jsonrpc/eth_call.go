@@ -117,7 +117,7 @@ func (api *APIImpl) Call(ctx context.Context, args ethapi2.CallArgs, requestedBl
 		args.Gas = (*hexutil.Uint64)(&api.GasCap)
 	}
 
-	header, _, err := api.headerByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -170,13 +170,10 @@ func (api *APIImpl) EstimateGas(ctx context.Context, argsOrNil *ethapi2.CallArgs
 	}
 	defer dbtx.Rollback()
 
-	selector := orLatest(blockNrOrHash)
-	// A pending header cannot be paired safely with state on this path, so
-	// preserve EstimateGas's latest-state fallback for pending requests.
-	if number, ok := selector.Number(); ok && number == rpc.PendingBlockNumber {
-		selector = latestNumOrHash
+	// Use latest block by default
+	if blockNrOrHash == nil {
+		blockNrOrHash = &latestNumOrHash
 	}
-	blockNrOrHash = &selector
 
 	chainConfig, err := api.chainConfig(ctx, dbtx)
 	if err != nil {

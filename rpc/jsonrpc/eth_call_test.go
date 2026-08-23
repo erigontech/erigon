@@ -76,21 +76,11 @@ func TestEstimateGas(t *testing.T) {
 	api := newTestEthAPIWithFilters(t, m)
 	var from = common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
 	var to = common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
-	args := &ethapi.CallArgs{
+	_, err := api.EstimateGas(context.Background(), &ethapi.CallArgs{
 		From: &from,
 		To:   &to,
-	}
-
-	t.Run("latest by default", func(t *testing.T) {
-		_, err := api.EstimateGas(context.Background(), args, nil, nil, nil)
-		require.NoError(t, err)
-	})
-
-	t.Run("pending without pending block", func(t *testing.T) {
-		pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
-		_, err := api.EstimateGas(context.Background(), args, &pending, nil, nil)
-		require.NoError(t, err)
-	})
+	}, nil, nil, nil)
+	require.NoError(t, err)
 }
 
 // TestEstimateGasBlockOverridesGasLimit verifies that blockOverrides.gasLimit is

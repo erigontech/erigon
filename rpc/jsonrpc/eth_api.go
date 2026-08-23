@@ -381,19 +381,38 @@ func (api *BaseAPI) headerNumberByHash(ctx context.Context, tx kv.Tx, hash commo
 
 }
 
-// headerByNumberOrHash selects one overlay view and resolves a canonical header
-// through it. Pending is left to callers because they must select its header
-// together with matching state.
+// headerByNumberOrHash - intent to read recent headers only, tries from the lru cache before reading from the db
 func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
-	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
-		return nil, false, nil
-	}
-	overlayTx := api.filters.WithOverlay(tx)
-	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
 	if err != nil {
 		return nil, false, err
 	}
-	header, err := api.headerByHashAndNumber(ctx, overlayTx, hash, blockNum)
+	if api.blocksLRU != nil {
+		if it, ok := api.blocksLRU.Get(hash); ok && it != nil {
+			return it.HeaderNoCopy(), isLatest, nil
+		}
+	}
+
+	overlayTx := api.filters.WithOverlay(tx)
+	header, err := api._blockReader.HeaderByNumber(ctx, overlayTx, blockNum)
+	if err != nil {
+		return nil, false, err
+	}
+	// header can be nil
+	return header, isLatest, nil
+}
+
+// canonicalHeaderByNumberOrHash resolves the selector and header through tx.
+// It never selects an overlay, so callers can keep dependent reads on one view.
+func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (*types.Header, bool, error) {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		return nil, false, nil
+	}
+	blockNum, hash, isLatest, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
+	if err != nil {
+		return nil, false, err
+	}
+	header, err := api.headerByHashAndNumber(ctx, tx, hash, blockNum)
 	if err != nil {
 		return nil, false, err
 	}
