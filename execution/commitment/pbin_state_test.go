@@ -44,6 +44,8 @@ func TestPBinRestartRoundTripDeepPath(t *testing.T) {
 
 	blob, err := pph.EncodeCurrentState(nil)
 	require.NoError(t, err)
+	require.GreaterOrEqual(t, len(blob), 2)
+	require.Equal(t, byte(pbinRecordFormat), blob[1])
 
 	restored := NewPBinPatriciaHashed(ms)
 	require.NoError(t, restored.SetState(blob))
@@ -83,6 +85,35 @@ func TestPBinStateBlobRoundTripsFlags(t *testing.T) {
 	root, err := restored.RootHash()
 	require.NoError(t, err)
 	require.Equal(t, storedRoot, root)
+}
+
+func TestPBinRootAndStateRoundTripFixedFields(t *testing.T) {
+	t.Parallel()
+
+	pph, ms := pbinTestEngine(t)
+	root := pbinTestLeafCell(0x63, 0)
+	pph.grid.root = root
+	pph.rootPresent = true
+	pph.rootChecked = true
+	pph.rootTouched = true
+
+	rootRecord, err := pbinAppendCell(nil, &root, false)
+	require.NoError(t, err)
+	require.NoError(t, ms.PutBranch(pbinRootKey, rootRecord, nil))
+
+	loaded := NewPBinPatriciaHashed(ms)
+	require.NoError(t, loaded.loadRoot())
+	require.Equal(t, root, loaded.grid.root)
+
+	state, err := pph.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	require.Equal(t, rootRecord, state[5:])
+	restored := NewPBinPatriciaHashed(ms)
+	require.NoError(t, restored.SetState(state))
+	require.Equal(t, root, restored.grid.root)
+	require.True(t, restored.rootPresent)
+	require.True(t, restored.rootChecked)
+	require.True(t, restored.rootTouched)
 }
 
 // Following the hex convention, no state blob resets the engine; the tree is
@@ -126,6 +157,32 @@ func TestPBinSetStateRejectsForeignBlob(t *testing.T) {
 			require.ErrorIs(t, fresh.SetState(blob), errPBinStateBlob, "blob %x must be refused", blob)
 		})
 	}
+}
+
+func TestPBinSetStateRejectsUnsupportedRecordFormat(t *testing.T) {
+	t.Parallel()
+
+	pph, ms := pbinTestEngine(t)
+	blob, err := pph.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	blob[1] = 0x42
+
+	fresh := NewPBinPatriciaHashed(ms)
+	err = fresh.SetState(blob)
+	require.Error(t, err)
+	require.ErrorContains(t, err, "record format")
+	require.ErrorContains(t, err, "66")
+}
+
+func TestPBinSetStateRejectsPreVersionBlob(t *testing.T) {
+	t.Parallel()
+
+	_, ms := pbinTestEngine(t)
+
+	legacy := []byte{pbinStateMarker, 0, 0, 0}
+	fresh := NewPBinPatriciaHashed(ms)
+	err := fresh.SetState(legacy)
+	require.ErrorIs(t, err, errPBinStateBlob)
 }
 
 // With a row still open, part of the tree lives in the grid arrays and a

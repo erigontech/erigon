@@ -963,6 +963,24 @@ func bindPBinHashSuite(name string) (func(), error) {
 	return func() { _ = commitment.SetPBinHashSuite(prev) }, nil
 }
 
+func validatePBinRebuildState(stateValue []byte) error {
+	if len(stateValue) < 18 {
+		return nil
+	}
+	stateLen := int(binary.BigEndian.Uint16(stateValue[16:18]))
+	if stateLen == 0 || len(stateValue) < 18+stateLen {
+		return nil
+	}
+	trieState := stateValue[18 : 18+stateLen]
+	if !commitment.IsPBinState(trieState) {
+		return nil
+	}
+	if err := commitment.ValidatePBinStateFormat(trieState); err != nil {
+		return fmt.Errorf("commitment rebuild: invalid pbin state: %w", err)
+	}
+	return nil
+}
+
 // RebuildCommitmentFiles recreates commitment files from existing accounts and storage kv files
 // If some commitment exists, they will be accepted as correct and next kv range will be processed.
 // DB expected to be empty, committed into db keys will be not processed.
@@ -983,6 +1001,21 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 	}
 
 	a := rwDb.(HasAgg).Agg().(*Aggregator)
+	if target.Variant == commitment.VariantBinPatriciaTrie {
+		roTx, err := rwDb.BeginTemporalRo(ctx)
+		if err != nil {
+			return nil, nil, err
+		}
+		defer roTx.Rollback() //nolint:gocritic
+		stateValue, _, readErr := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		roTx.Rollback()
+		if readErr != nil {
+			return nil, nil, readErr
+		}
+		if err := validatePBinRebuildState(stateValue); err != nil {
+			return nil, nil, err
+		}
+	}
 
 	// disable hard alignment; allowing commitment and storage/account to have
 	// different visibleFiles

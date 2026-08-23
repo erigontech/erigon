@@ -20,7 +20,6 @@ import (
 	"encoding/binary"
 	"errors"
 	"fmt"
-	"math/bits"
 
 	"github.com/erigontech/erigon/common/length"
 )
@@ -67,21 +66,18 @@ func (e *pbinBranchEncoder) encode(touchMap, afterMap uint16, cells *[2]pbinCell
 	if err := pbinCheckCellMaps(touchMap, afterMap); err != nil {
 		return nil, err
 	}
-	e.buf = binary.BigEndian.AppendUint16(e.buf[:0], touchMap)
-	e.buf = binary.BigEndian.AppendUint16(e.buf, afterMap)
+	e.buf = e.buf[:0]
 
 	var err error
-	for bitset := afterMap; bitset != 0; {
-		bit := bitset & -bitset
-		if e.buf, err = pbinAppendCell(e.buf, &cells[bits.TrailingZeros16(bit)]); err != nil {
+	for i := range cells {
+		if e.buf, err = pbinAppendCell(e.buf, &cells[i], true); err != nil {
 			return nil, err
 		}
-		bitset ^= bit
 	}
 	return e.buf, nil
 }
 
-func pbinAppendCell(dst []byte, c *pbinCell) ([]byte, error) {
+func pbinAppendCell(dst []byte, c *pbinCell, omitStoragePrefix bool) ([]byte, error) {
 	var fields pbinCellFields
 	switch c.kind {
 	case pbinNodeLeaf:
@@ -105,61 +101,49 @@ func pbinAppendCell(dst []byte, c *pbinCell) ([]byte, error) {
 	}
 
 	dst = append(dst, byte(fields))
-	dst = binary.AppendUvarint(dst, uint64(c.prefix.bitLen))
-	dst = c.prefix.appendPackedBits(dst)
+	if !omitStoragePrefix || fields&pbinFieldStorageAddr == 0 {
+		dst = binary.AppendUvarint(dst, uint64(c.prefix.bitLen))
+		dst = c.prefix.appendPackedBits(dst)
+	}
 
 	if fields&pbinFieldAccountAddr != 0 {
-		dst = pbinAppendLenAndVal(dst, c.accountAddr[:c.accountAddrLen])
+		dst = append(dst, c.accountAddr[:c.accountAddrLen]...)
 	}
 	if fields&pbinFieldStorageAddr != 0 {
-		dst = pbinAppendLenAndVal(dst, c.storageAddr[:c.storageAddrLen])
+		dst = append(dst, c.storageAddr[:c.storageAddrLen]...)
 	}
 	if fields&pbinFieldLeafValue != 0 {
 		value, err := pbinRecordLeafValue(&c.Update)
 		if err != nil {
 			return nil, err
 		}
-		dst = pbinAppendLenAndVal(dst, value[:])
+		dst = append(dst, value[:]...)
 	}
 	if fields&pbinFieldHash != 0 {
-		dst = pbinAppendLenAndVal(dst, c.hash[:c.hashLen])
+		dst = append(dst, c.hash[:c.hashLen]...)
 	}
 	return dst, nil
 }
 
-func pbinAppendLenAndVal(dst, val []byte) []byte {
-	return append(binary.AppendUvarint(dst, uint64(len(val))), val...)
-}
-
 // pbinDecodeBranch fills both cells from a record. It rejects every spelling the
 // encoder would not produce, so a record has one canonical form.
-func pbinDecodeBranch(data []byte, cells *[2]pbinCell) (touchMap, afterMap uint16, err error) {
+func pbinDecodeBranch(data []byte, cells *[2]pbinCell, depth int16, keys *pbinDigestCache) (afterMap uint16, err error) {
 	cells[0].reset()
 	cells[1].reset()
 
-	if len(data) < 4 {
-		return 0, 0, fmt.Errorf("%w: %d bytes is shorter than the header", errPBinMalformedBranch, len(data))
-	}
-	touchMap, afterMap = binary.BigEndian.Uint16(data), binary.BigEndian.Uint16(data[2:])
-	if err := pbinCheckCellMaps(touchMap, afterMap); err != nil {
-		return 0, 0, err
-	}
-
-	pos := 4
-	for bitset := afterMap; bitset != 0; {
-		bit := bitset & -bitset
-		if pos, err = pbinDecodeCell(data, pos, &cells[bits.TrailingZeros16(bit)]); err != nil {
-			return 0, 0, err
+	pos := 0
+	for i := range cells {
+		if pos, err = pbinDecodeCell(data, pos, &cells[i], depth, keys, true); err != nil {
+			return 0, err
 		}
-		bitset ^= bit
 	}
 	if pos != len(data) {
-		return 0, 0, fmt.Errorf("%w: %d trailing bytes", errPBinMalformedBranch, len(data)-pos)
+		return 0, fmt.Errorf("%w: %d trailing bytes", errPBinMalformedBranch, len(data)-pos)
 	}
-	return touchMap, afterMap, nil
+	return pbinCellBits, nil
 }
 
-func pbinDecodeCell(data []byte, pos int, c *pbinCell) (int, error) {
+func pbinDecodeCell(data []byte, pos int, c *pbinCell, depth int16, keys *pbinDigestCache, omitStoragePrefix bool) (int, error) {
 	if pos >= len(data) {
 		return 0, fmt.Errorf("%w: no cell body at offset %d", errPBinMalformedBranch, pos)
 	}
@@ -187,9 +171,12 @@ func pbinDecodeCell(data []byte, pos int, c *pbinCell) (int, error) {
 		return 0, fmt.Errorf("%w: cell fields %08b name no single node kind", errPBinMalformedBranch, fields)
 	}
 
-	pos, err := pbinDecodePrefix(data, pos, c)
-	if err != nil {
-		return 0, err
+	var err error
+	if !omitStoragePrefix || fields&pbinFieldStorageAddr == 0 {
+		pos, err = pbinDecodePrefix(data, pos, c)
+		if err != nil {
+			return 0, err
+		}
 	}
 	if fields&pbinFieldAccountAddr != 0 {
 		if pos, err = pbinDecodeFixedVal(data, pos, c.accountAddr[:], length.Addr); err != nil {
@@ -202,6 +189,16 @@ func pbinDecodeCell(data []byte, pos int, c *pbinCell) (int, error) {
 			return 0, err
 		}
 		c.storageAddrLen = length.Addr + length.Hash
+		if omitStoragePrefix {
+			if keys == nil {
+				return 0, fmt.Errorf("%w: storage leaf prefix needs a digest cache", errPBinMalformedBranch)
+			}
+			storageKey := pbinPathFromBytes(keys.storageKey(c.storageAddr[:length.Addr], c.storageAddr[length.Addr:]))
+			if depth < 0 || depth > storageKey.bitLen {
+				return 0, fmt.Errorf("%w: storage leaf at depth %d exceeds its %d-bit key", errPBinMalformedBranch, depth, storageKey.bitLen)
+			}
+			c.prefix = storageKey.slice(depth, storageKey.bitLen)
+		}
 	}
 	if fields&pbinFieldLeafValue != 0 {
 		if pos, err = pbinDecodeFixedVal(data, pos, c.Storage[:], pbinValueLength); err != nil {
@@ -242,16 +239,8 @@ func pbinDecodePrefix(data []byte, pos int, c *pbinCell) (int, error) {
 }
 
 func pbinDecodeFixedVal(data []byte, pos int, dst []byte, want int) (int, error) {
-	l, n := binary.Uvarint(data[pos:])
-	if n <= 0 {
-		return 0, fmt.Errorf("%w: unreadable value length at offset %d", errPBinMalformedBranch, pos)
-	}
-	pos += n
-	if l != uint64(want) {
-		return 0, fmt.Errorf("%w: value of %d bytes, want %d", errPBinMalformedBranch, l, want)
-	}
 	if pos+want > len(data) {
-		return 0, fmt.Errorf("%w: value of %d bytes needs more than the %d left", errPBinMalformedBranch, want, len(data)-pos)
+		return 0, fmt.Errorf("%w: fixed value of %d bytes needs more than the %d left", errPBinMalformedBranch, want, len(data)-pos)
 	}
 	copy(dst, data[pos:pos+want])
 	return pos + want, nil

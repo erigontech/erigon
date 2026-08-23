@@ -42,9 +42,8 @@ func pbinTestSpecCell(t *testing.T, kind pbinNodeKind, spec string) pbinCell {
 	c.prefix = pbinTestPathFromBits(t, pbinTestBitSpec(t, spec))
 	switch kind {
 	case pbinNodeLeaf:
-		// A stored leaf always names a plain key; a record without one is rejected.
-		c.storageAddrLen = length.Addr + length.Hash
-		c.storageAddr[0], c.storageAddr[1] = 0xB1, byte(len(spec))
+		c.accountAddrLen = length.Addr
+		c.accountAddr[0], c.accountAddr[1] = 0xB1, byte(len(spec))
 	case pbinNodeBranch:
 		c.hash = common.Hash{0xB1, byte(len(spec))}
 		c.hashLen = length.Hash
@@ -62,7 +61,7 @@ func pbinTestPutRecord(t *testing.T, ms *MockState, path pbinBitpath, cells [2]p
 
 func pbinTestPutRootCell(t *testing.T, ms *MockState, c pbinCell) {
 	t.Helper()
-	rec, err := pbinAppendCell(nil, &c)
+	rec, err := pbinAppendCell(nil, &c, false)
 	require.NoError(t, err)
 	require.NoError(t, ms.PutBranch(pbinRootKey, rec, nil))
 }
