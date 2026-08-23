@@ -573,7 +573,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		// Apply deferred branch writes under the pending update's block
 		// changeset, then save it back. All accesses under changesetMu —
 		// see concurrency contract on the wrappers above.
-		defer sd.SwapChangesetAccumulatorLocked(cs)()
+		defer sd.SwapForCommitLocked(cs)()
 
 		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
 			return err
@@ -726,11 +726,41 @@ func (sd *SharedDomains) SwapChangesetAccumulatorLocked(acc *changeset.StateChan
 	return func() { sd.setChangesetAccumulatorLocked(prev) }
 }
 
+// commitmentDiffSwapper is implemented by TemporalMemBatch for the
+// commitment-scoped swap (see SwapCommitmentDiffLocked).
+type commitmentDiffSwapper interface {
+	SetCommitmentDiff(acc *changeset.StateChangeSet)
+	CommitmentDiff() *kv.DomainDiff
+}
+
+// SwapCommitmentDiffLocked points the commitment writer's diff at acc and
+// returns a func restoring the previous one. Unlike
+// SwapChangesetAccumulatorLocked it leaves every other domain writer alone, so
+// apply-side writes are unaffected and need not be locked out.
+func (sd *SharedDomains) SwapCommitmentDiffLocked(acc *changeset.StateChangeSet) (restore func()) {
+	h, ok := sd.mem.(commitmentDiffSwapper)
+	if !ok {
+		return sd.SwapChangesetAccumulatorLocked(acc)
+	}
+	prev := h.CommitmentDiff()
+	h.SetCommitmentDiff(acc)
+	return func() { sd.mem.(interface{ SetCommitmentDiffRaw(*kv.DomainDiff) }).SetCommitmentDiffRaw(prev) }
+}
+
+// swapForCommitLocked routes to the commitment-scoped swap when
+// COMMITMENT_SCOPED_SWAP is set, else to the global one.
+func (sd *SharedDomains) SwapForCommitLocked(acc *changeset.StateChangeSet) func() {
+	if dbg.CommitmentScopedSwap {
+		return sd.SwapCommitmentDiffLocked(acc)
+	}
+	return sd.SwapChangesetAccumulatorLocked(acc)
+}
+
 // DetachChangesetAccumulatorLocked installs a nil changeset accumulator and
 // returns a func that restores the previous one. Callers must hold
 // changesetMu.
 func (sd *SharedDomains) DetachChangesetAccumulatorLocked() (restore func()) {
-	return sd.SwapChangesetAccumulatorLocked(nil)
+	return sd.SwapForCommitLocked(nil)
 }
 
 // GetChangesetByBlockNum returns the saved changeset for a given block
@@ -1829,7 +1859,7 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	// changesetMu via LockChangesetAccumulator (re-acquiring would
 	// self-deadlock). All other domains are written by the apply goroutine
 	// and need to serialize against the swap.
-	if !lockHeld && domain != kv.CommitmentDomain {
+	if !lockHeld && domain != kv.CommitmentDomain && !dbg.CommitmentScopedSwap {
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()
 	}

@@ -134,6 +134,10 @@ var (
 	// block N before it starts block N+1. Off by default; on, the two phases
 	// never contend for SharedDomains.changesetMu, at the cost of the overlap.
 	CommitmentAfterExec = EnvBool("COMMITMENT_AFTER_EXEC", false)
+	// CommitmentScopedSwap narrows the calculator's changeset-accumulator swap
+	// to CommitmentDomain — the only domain it writes — so apply-side DomainPut
+	// no longer has to take changesetMu.
+	CommitmentScopedSwap = EnvBool("COMMITMENT_SCOPED_SWAP", false)
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
