@@ -2279,7 +2279,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 
 	if taskDur := time.Since(start); taskDur > 1*time.Millisecond {
 		mxTxnExecSeconds.Observe(taskDur.Seconds())
-		if taskDur >= dbg.ToLogSlowTxn {
+		if taskDur >= 2*dbg.ToLogSlowTxn {
 			log.Warn("[dbg] slow txn exec", "took", taskDur,
 				"blockNum", ev.Task.(*exec.TxTask).BlockNumber(), "txIndex", ev.version.TxIndex,
 				"incarnation", ev.version.Incarnation)
