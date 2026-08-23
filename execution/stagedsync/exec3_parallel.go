@@ -2277,7 +2277,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		return result
 	}
 
-	if taskDur := time.Since(start); taskDur > time.Millisecond {
+	if taskDur := time.Since(start); taskDur > 1*time.Millisecond {
 		mxTxnExecSeconds.Observe(taskDur.Seconds())
 		if taskDur >= slowStageThreshold {
 			log.Warn("[dbg] slow txn exec", "took", taskDur,
