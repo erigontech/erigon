@@ -357,6 +357,14 @@ func (writes *WriteSet) Normalize(vm *VersionMap, blockNum uint64, txIndex int, 
 	allAddresses := make(map[accounts.Address]bool)
 	writes.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
 
+	normalize2Started := time.Now()
+	defer func() {
+		took := time.Since(normalize2Started)
+		if took >= slowNormalizeThreshold/2 {
+			log.Warn("[dbg] slow WriteSet.Normalize2", "took", took, "blockNum", blockNum, "txIndex", txIndex)
+		}
+	}()
+
 	for addr := range allAddresses {
 		if sdSet[addr] {
 			// Don't fill account fields for SD'd addresses — same rationale as
@@ -431,6 +439,14 @@ func (writes *WriteSet) Normalize(vm *VersionMap, blockNum uint64, txIndex int, 
 			}
 		}
 	}
+
+	normalize3Started := time.Now()
+	defer func() {
+		took := time.Since(normalizeStarted)
+		if took >= slowNormalizeThreshold/2 {
+			log.Warn("[dbg] slow WriteSet.Normalize3", "took", took, "blockNum", blockNum, "txIndex", txIndex)
+		}
+	}()
 
 	// CodePath must travel with CodeHashPath: the case above and the fill loop
 	// recover an account's codeHash but not its code, so a validated writeset
