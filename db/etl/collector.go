@@ -53,9 +53,6 @@ func (a *Allocator) Put(b Buffer) {
 func (a *Allocator) Get() Buffer {
 	b := a.p.Get().(Buffer)
 	b.Reset()
-	if n := int(EtlPrealloc); n > 0 {
-		b.Prealloc(n/512, n)
-	}
 	return b
 }
 
