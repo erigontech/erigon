@@ -856,8 +856,7 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	// header.Number to applyTx in this batch and a fresh RO snapshot would
 	// miss it, silently falling back to the previous block's max txNum via
 	// c.Last(). Pairing that stale txNum with header.Number in
-	// KeyCommitmentState makes the next iter's SeekCommitment loop back —
-	// see issue #21171.
+	// KeyCommitmentState makes the next iter's SeekCommitment loop back.
 	txNumsReader := cfg.blockReader.TxnumReader()
 	blockTxNum, err := txNumsReader.Max(ctx, applyTx, header.Number.Uint64())
 	if err != nil {

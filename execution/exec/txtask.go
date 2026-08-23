@@ -407,27 +407,12 @@ func (t *TxTask) GasPool() *protocol.GasPool {
 	if t.gasPool != nil {
 		return t.gasPool
 	}
-	// Parallel exec paths never set the per-task gas pool because workers
-	// cannot safely share the block pool (SubGas is a write — concurrent
-	// workers would race on speculative tx depletion). The shared block
-	// pool is consumed in the post-execution validation loop.
-	//
-	// Returning nil here would make preCheck's CheckBlockGasInclusion
-	// silently no-op (gp==nil short-circuit), so a tx whose gas exceeds
-	// the block limit slips past that check and fails on the next one in
-	// preCheck order (CheckEip1559TxGasFeeCap → ErrFeeCapTooLow when
-	// feeCap < baseFee). Serial returns ErrGasLimitReached for the same
-	// tx; the eest engine matrix asserts the serial error variant and
-	// rejects the parallel one (issue surfaced on PR #21017's
-	// hive-eest parallel legs as GAS_ALLOWANCE_EXCEEDED vs
-	// INSUFFICIENT_MAX_FEE_PER_GAS).
-	//
-	// Hand out a fresh per-invocation pool sized to the block gas limit
-	// so CheckBlockGasInclusion fires for the "tx alone exceeds the block
-	// limit" case (pool depletion across multiple txs is still caught
-	// post-execution by the validation loop against the shared pool).
-	// Each Execute call gets its own pool, so retries at higher
-	// incarnations start with a fresh budget.
+	// Workers can't share the block gas pool (SubGas races on speculative
+	// depletion), so hand out a fresh per-invocation pool sized to the block
+	// limit. Returning nil would make preCheck's CheckBlockGasInclusion no-op,
+	// letting a tx that alone exceeds the block limit slip past and fail later
+	// with the wrong error variant (serial returns ErrGasLimitReached). Cross-tx
+	// depletion is still caught post-execution against the shared pool.
 	if t.Header == nil || t.Config == nil {
 		return nil
 	}
