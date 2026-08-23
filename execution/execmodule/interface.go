@@ -75,6 +75,13 @@ type ValidationResult struct {
 	// flashblock's rounds so far (== the number of body txs executed). Seal input; 0 off the
 	// flashblock path.
 	FlashblockReceiptCount int
+	// GasUsed, ReceiptHash and Bloom are the SEALED output-side header fields the CLOSE derives
+	// over the accumulated flashblock receipts (doms.FlashblockReceipts()) with ZERO re-execution —
+	// the read-and-package seal. Set only at the close (FlashblockAccumulating unset, receipts present);
+	// combined with ComputedRoot they are exactly the computed fields of the sealed header H1.
+	GasUsed     uint64
+	ReceiptHash common.Hash
+	Bloom       types.Bloom
 }
 
 // ForkChoiceResult is the native return type for UpdateForkChoice.

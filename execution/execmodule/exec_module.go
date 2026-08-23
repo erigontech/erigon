@@ -663,6 +663,24 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	if root, rerr := doms.GetCommitmentContext().Trie().RootHash(); rerr == nil && len(root) > 0 {
 		result.ComputedRoot = common.BytesToHash(root)
 	}
+	// Seal the OUTPUT-SIDE header fields off the accumulated flashblock receipts (read-and-package,
+	// zero re-execution): the close ran block-end so these are final. Each round executed only its
+	// NEW txs against a per-round gas pool, so the accumulated receipts carry per-ROUND cumulative gas
+	// (each round restarts at its first tx). Restamp CumulativeGasUsed as a running sum of the per-tx
+	// GasUsed across the full body so it is block-cumulative — otherwise GasUsed AND ReceiptHash (which
+	// encodes CumulativeGasUsed) diverge from a one-shot full execution. Then GasUsed is the last
+	// receipt's (now block-)cumulative gas and ReceiptHash/Bloom derive exactly as block assembly does.
+	if fbReceipts := doms.FlashblockReceipts(); len(fbReceipts) > 0 {
+		var cum uint64
+		for _, r := range fbReceipts {
+			cum += r.GasUsed
+			r.CumulativeGasUsed = cum
+		}
+		result.FlashblockReceiptCount = len(fbReceipts)
+		result.GasUsed = cum
+		result.ReceiptHash = types.DeriveSha(fbReceipts)
+		result.Bloom = types.CreateBloom(fbReceipts)
+	}
 	return result, nil
 }
 
