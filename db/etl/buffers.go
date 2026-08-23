@@ -33,15 +33,15 @@ import (
 )
 
 const (
-	//SliceBuffer - just simple slice w
+	// SliceBuffer - just simple slice w
 	SortableSliceBuffer = iota
-	//SortableAppendBuffer - map[k] [v1 v2 v3]
+	// SortableAppendBuffer - map[k] [v1 v2 v3]
 	SortableAppendBuffer
 	// SortableOldestAppearedBuffer - buffer that keeps only the oldest entries.
 	// if first v1 was added under key K, then v2; only v1 will stay
 	SortableOldestAppearedBuffer
 
-	//BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
+	// BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
 
 	entryLocSize = 16 // sizeof(entryLoc): insertionOrder(4) + offset(4) + keyLen(4) + valLen(4)
@@ -87,7 +87,7 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 var SmallSortableBuffers = NewAllocator(&sync.Pool{
 	New: func() any {
-		return NewSortableBuffer(etlSmallBufRAM).Prealloc(1_024, int(etlSmallBufRAM/32))
+		return NewSortableBuffer(etlSmallBufRAM).Prealloc(int(etlSmallBufRAM/512), int(etlSmallBufRAM)) // SortableBuffer does Prealloc only metadata slices - not buffers itself
 	},
 })
 var etlLargeBufRAM = BufferOptimalSize
@@ -380,6 +380,7 @@ func (b *appendSortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *appendSortableBuffer) Len() int {
 	return len(b.entries)
 }
+
 func (b *appendSortableBuffer) Sort() {
 	b.sortedBuf = b.sortedBuf[:0]
 	if cap(b.sortedBuf) < len(b.entries) {
@@ -402,11 +403,13 @@ func (b *appendSortableBuffer) Swap(i, j int) {
 func (b *appendSortableBuffer) Get(i int) ([]byte, []byte) {
 	return b.sortedBuf[i].key, b.sortedBuf[i].value
 }
+
 func (b *appendSortableBuffer) Reset() {
 	b.sortedBuf = nil
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }
+
 func (b *appendSortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.entries = make(map[string][]byte, predictKeysAmount) // maps have no cap(), always recreate
 	if cap(b.sortedBuf) < predictKeysAmount {
@@ -478,11 +481,13 @@ func (b *oldestEntrySortableBuffer) Swap(i, j int) {
 func (b *oldestEntrySortableBuffer) Get(i int) ([]byte, []byte) {
 	return b.sortedBuf[i].key, b.sortedBuf[i].value
 }
+
 func (b *oldestEntrySortableBuffer) Reset() {
 	b.sortedBuf = nil
 	b.entries = make(map[string][]byte)
 	b.size = 0
 }
+
 func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	b.entries = make(map[string][]byte, predictKeysAmount) // maps have no cap(), always recreate
 	if cap(b.sortedBuf) < predictKeysAmount {
@@ -494,6 +499,7 @@ func (b *oldestEntrySortableBuffer) Prealloc(predictKeysAmount, predictDataSize 
 func (b *oldestEntrySortableBuffer) Write(w io.Writer) error {
 	return writeSortedEntries(w, b.sortedBuf)
 }
+
 func (b *oldestEntrySortableBuffer) CheckFlushSize() bool {
 	return b.size >= b.optimalSize
 }
