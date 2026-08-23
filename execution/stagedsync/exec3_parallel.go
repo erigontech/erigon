@@ -2686,6 +2686,37 @@ func (be *blockExecutor) tooManyRetries(tx, txIndex int, label string, origin er
 		rules.ErrInvalidBlock, be.number(), txIndex, be.tasks[tx].TxHash(), label, be.txIncarnations[tx], len(be.tasks)))
 }
 
+// nrSegs times consecutive segments of a single nextResult call. Plain
+// deferred stopwatches would all end at function return and measure nested
+// suffixes instead of disjoint spans.
+type nrSegs struct {
+	last  time.Time
+	start time.Time
+	names [8]string
+	durs  [8]time.Duration
+	n     int
+}
+
+func (s *nrSegs) mark(name string) {
+	if s.n >= len(s.durs) {
+		return
+	}
+	now := time.Now()
+	s.names[s.n], s.durs[s.n] = name, now.Sub(s.last)
+	s.n++
+	s.last = now
+}
+
+func (s *nrSegs) total() time.Duration { return s.last.Sub(s.start) }
+
+func (s *nrSegs) logCtx() []any {
+	ctx := make([]any, 0, 2*s.n)
+	for i := 0; i < s.n; i++ {
+		ctx = append(ctx, s.names[i], s.durs[i])
+	}
+	return ctx
+}
+
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
 	task, ok := res.Task.(*taskVersion)
 
@@ -2694,6 +2725,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	tx := task.index
+	now := time.Now()
+	segs := nrSegs{last: now, start: now}
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
 		prStarted := time.Now()
@@ -2839,18 +2872,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w", rules.ErrInvalidBlock, be.number(), res.Version().TxIndex, task.TxHash(), res.Err)), nil
 		}
 	} else {
-		prStarted := time.Now()
 		defer func() {
-			took := time.Since(prStarted)
+			segs.mark("tail")
+			took := segs.total()
 			if took > time.Millisecond {
 				mxProcessResultsSeconds.Observe(took.Seconds())
 			}
 			if took >= 4*dbg.ToLogSlowTxn {
-				bn := uint64(0)
-				if res != nil {
-					bn = res.BlockNumber()
-				}
-				log.Warn("[dbg] slow nextResult", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+				log.Warn("[dbg] slow nextResult", append([]any{"took", took, "blockNum", res.BlockNumber(), "txidx", res.Version().TxIndex}, segs.logCtx()...)...)
 			}
 		}()
 
@@ -3183,42 +3212,12 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	}
 
-	{
-		prStarted := time.Now()
-		defer func() {
-			took := time.Since(prStarted)
-			if took > time.Millisecond {
-				mxProcessResultsSeconds.Observe(took.Seconds())
-			}
-			if took >= 4*dbg.ToLogSlowTxn {
-				bn := uint64(0)
-				if res != nil {
-					bn = res.BlockNumber()
-				}
-				log.Warn("[dbg] slow nextResult2", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
-			}
-		}()
-	}
+	segs.mark("validate")
 
 	maxValidated := be.validateTasks.maxComplete()
 	be.scheduleExecution(ctx, pe)
 
-	{
-		prStarted := time.Now()
-		defer func() {
-			took := time.Since(prStarted)
-			if took > time.Millisecond {
-				mxProcessResultsSeconds.Observe(took.Seconds())
-			}
-			if took >= 4*dbg.ToLogSlowTxn {
-				bn := uint64(0)
-				if res != nil {
-					bn = res.BlockNumber()
-				}
-				log.Warn("[dbg] slow nextResult3", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
-			}
-		}()
-	}
+	segs.mark("schedule")
 
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
@@ -3293,41 +3292,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	}
 
-	{
-		prStarted := time.Now()
-		defer func() {
-			took := time.Since(prStarted)
-			if took > time.Millisecond {
-				mxProcessResultsSeconds.Observe(took.Seconds())
-			}
-			if took >= 4*dbg.ToLogSlowTxn {
-				bn := uint64(0)
-				if res != nil {
-					bn = res.BlockNumber()
-				}
-				log.Warn("[dbg] slow nextResult4", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
-			}
-		}()
-	}
+	segs.mark("publish")
 
 	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
-		{
-			prStarted := time.Now()
-			defer func() {
-				took := time.Since(prStarted)
-				if took > time.Millisecond {
-					mxProcessResultsSeconds.Observe(took.Seconds())
-				}
-				if took >= 4*dbg.ToLogSlowTxn {
-					bn := uint64(0)
-					if res != nil {
-						bn = res.BlockNumber()
-					}
-					log.Warn("[dbg] slow nextResult3", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
-				}
-			}()
-		}
-
 		var allDeps map[int]map[int]bool
 
 		var deps state.DAG
