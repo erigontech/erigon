@@ -780,10 +780,10 @@ Erigon 3.1 introduces a new snapshot format while continuing to support the old 
 ### Snapshots Upgrade Options
 
 * `erigon snapshots update-to-new-ver-format --datadir /your/datadir`: converts your existing snapshots in place to the latest format, **keeping your data**. Quicker, but you won't get the full performance benefits of freshly built snapshots.
-* `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and the Heimdall / Polygon-bridge DBs) and removes any snapshot files **not** in the preverified set (locally generated files, and torrents with a mismatched hash). Preverified snapshots already on disk are **kept**; on the next start Erigon downloads only **missing or incorrect** snapshots and rebuilds state.
+* `erigon snapshots reset --datadir /your/datadir`: **destructive** — deletes `chaindata/` (and any leftover `heimdall/` and `polygon-bridge/` directories from a former Polygon datadir) and removes any snapshot files **not** in the preverified set (locally generated files, and torrents with a mismatched hash). Preverified snapshots already on disk are **kept**; on the next start Erigon downloads only **missing or incorrect** snapshots and rebuilds state.
 
 :::warning
-`erigon snapshots reset` does **not** reuse your `chaindata/` — it deletes the chaindata DB (and the Heimdall / Polygon-bridge DBs) and any locally generated or mismatched snapshots, then rebuilds state on the next start (downloading only missing or incorrect snapshots). Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
+`erigon snapshots reset` does **not** reuse your `chaindata/` — it deletes the chaindata DB (and any leftover Polygon aux directories) and any locally generated or mismatched snapshots, then rebuilds state on the next start (downloading only missing or incorrect snapshots). Back up your `--datadir` first, and prefer `update-to-new-ver-format` if you want to keep your current data.
 :::
 
 Choose `update-to-new-ver-format` to convert your data in place, or `reset` for a clean reset to the preverified snapshot set.
@@ -2451,19 +2451,7 @@ Flags related to consensus mechanisms and network forks.
   * Default: `false`
 * `--builder.maxblobs value`: Caps the number of blobs included in a locally built block.
   * Default: unset — the protocol maximum applies. Setting it to `0` excludes blob transactions from built blocks entirely.
-* `--bor.heimdall value`: The URL of the Heimdall service.
-  * Default: `http://localhost:1317`
-* `--bor.withoutheimdall`: Runs without the Heimdall service.
-  * Default: `false`
-* `--bor.period`: Overrides the bor block period.
-  * Default: `false`
-* `--bor.minblocksize`: Ignores the bor block period and waits for `blocksize` transactions.
-  * Default: `false`
-* `--polygon.pos.ssf`: Enables Polygon PoS Single Slot Finality.
-  * Default: `false`
-* `--polygon.pos.ssf.block value`: Enables Polygon PoS Single Slot Finality from a specific block.
-  * Default: `0`
-* `--polygon.wit-protocol`: Enables the WIT protocol (`wit/0`) for stateless witness data exchange. Primarily useful on Bor (Polygon) chains — the witness buffer is only populated there — and must be set explicitly.
+* `--wit-protocol`: Enables the WIT protocol (`wit/0`) for stateless witness data exchange. Must be set explicitly. Accepts `--polygon.wit-protocol` as a deprecated alias.
   * Default: `false`
 
 ### Sentry
@@ -7015,7 +7003,6 @@ The ETHBACKEND interface provides access to Ethereum-specific backend services i
 | Peers           | Returns information about connected peers           |
 | AddPeer         | Adds a peer to the node                             |
 | PendingBlock    | Returns the pending block                           |
-| BorEvent        | Returns Bor-specific events (Polygon networks only) |
 
 ***
 
@@ -7051,53 +7038,6 @@ The Downloader interface provides access to snapshot downloading and torrent man
 | Delete       | Removes files from download queue  |
 | Completed    | Checks if downloads are completed  |
 | SetLogPrefix | Sets logging prefix for Downloader |
-
-***
-
-## Polygon Bridge Backend gRPC API
-
-These gRPC APIs are specifically designed for Polygon's Bor consensus mechanism and are only active when running Erigon with Polygon network configuration. The services provide essential functionality for bridge event processing and validator management required by the Polygon network architecture.
-
-### Bridge Backend Methods
-
-**Version Method:**
-
-* `Version()` - Returns the service version number.
-
-**Transaction Lookup:**
-
-* `BorTxnLookup(BorTxnLookupRequest)` - Looks up Bor transaction information by hash.
-
-**Event Retrieval:**
-
-* `BorEvents(BorEventsRequest)` - Retrieves bridge events for a specific block.
-
-### Bridge Backend Implementation
-
-The server implementation is found in `polygon/bridge/server.go` where the `BackendServer` struct implements the `BridgeBackendServer` interface:
-
-* The `BorTxnLookup` method implementation shows how it handles transaction lookups.
-* The `BorEvents` method retrieves bridge events for a given block.
-
-## Heimdall Backend gRPC API
-
-The Heimdall Backend service provides APIs for validator and consensus-related functionality.
-
-### Heimdall Backend Methods
-
-**Version Method:**
-
-* `Version()` - Returns the service version number.
-
-**Producer Information:**
-
-* `Producers(BorProducersRequest)` - Retrieves validator/producer information for a specific block.
-
-## Service Integration
-
-Both services are integrated into the main Ethereum backend when Bor consensus is configured. In the main backend initialization, you can see how these services are set up.
-
-The Bridge and Heimdall services are created with their respective RPC servers.
 
 ***
 

@@ -416,7 +416,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// KV RPC + Notifications stay in backend.go — Notifications is an
 	// execution-layer concern that will move to the execution component.
-	kvRPC := remotedbserver.NewKvServer(ctx, temporalDb, allSnapshots, nil, temporalDb.Debug(), logger)
+	kvRPC := remotedbserver.NewKvServer(ctx, temporalDb, allSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
 
@@ -1210,7 +1210,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
 	allSnapshots := blocksnapshots.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots)
 
 	_, knownSnapCfg := snapcfg.KnownCfg(chainConfig.ChainName)
 	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3 || !knownSnapCfg
