@@ -51,6 +51,10 @@ import (
 // Returns an error if multiple v4 items exist.
 func (h *History) mergeV4IntoStepFile(ctx context.Context, step kv.Step, vFinalPath, efFinalPath string) (err error) {
 	v4VPaths := h.v4FilesForStep(step)
+	// TEMP-INSTR-2026-08-23 [dbg-merge-v4] entry log so we can see whether
+	// retire's collate finds the v4 for this step. Strip once stage 8f
+	// verifies the merge fires end-to-end.
+	h.logger.Warn("[dbg-merge-v4] entry", "filenameBase", h.FilenameBase, "step", step, "vFinalPath", vFinalPath, "v4Count", len(v4VPaths), "v4Paths", v4VPaths)
 	if len(v4VPaths) == 0 {
 		return nil
 	}
@@ -83,7 +87,16 @@ func (h *History) mergeV4IntoStepFile(ctx context.Context, step kv.Step, vFinalP
 	}()
 
 	baseTxN := uint64(step) * h.stepSize
-	return h.mergeV4AndMDBXHistoryFiles(ctx, baseTxN, v4EFPath, v4VPath, mdbxEFPath, mdbxVPath, efFinalPath, vFinalPath)
+	h.logger.Warn("[dbg-merge-v4] merging",
+		"filenameBase", h.FilenameBase, "step", step, "baseTxN", baseTxN,
+		"v4V", v4VPath, "v4EF", v4EFPath,
+		"mdbxV", mdbxVPath, "mdbxEF", mdbxEFPath,
+		"outV", vFinalPath, "outEF", efFinalPath)
+	if err := h.mergeV4AndMDBXHistoryFiles(ctx, baseTxN, v4EFPath, v4VPath, mdbxEFPath, mdbxVPath, efFinalPath, vFinalPath); err != nil {
+		return err
+	}
+	h.logger.Warn("[dbg-merge-v4] merged OK", "filenameBase", h.FilenameBase, "step", step)
+	return nil
 }
 
 // mergeV4AndMDBXHistoryFiles is the core merge: two sorted-by-key

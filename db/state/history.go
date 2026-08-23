@@ -925,6 +925,12 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	// No-op when h.v4FilesForStep(step) returns empty. Must happen before
 	// the Decompressor.Open calls below so accessors index the merged
 	// content, not the MDBX-only tail.
+	// TEMP-INSTR-2026-08-23 [dbg-buildfiles-v4] wire trace: confirms
+	// History.buildFiles fires for this step during retire — pair with
+	// [dbg-merge-v4] entry to determine whether v4 was found in dirtyFiles.
+	h.logger.Warn("[dbg-buildfiles-v4] pre-merge",
+		"filenameBase", h.FilenameBase, "step", step,
+		"historyPath", collation.historyPath, "efHistoryPath", collation.efHistoryPath)
 	if err = h.mergeV4IntoStepFile(ctx, step, collation.historyPath, collation.efHistoryPath); err != nil {
 		return HistoryFiles{}, fmt.Errorf("merge %s v4 into step file: %w", h.FilenameBase, err)
 	}

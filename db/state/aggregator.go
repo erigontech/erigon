@@ -1639,13 +1639,23 @@ func (a *Aggregator) subsumedV4ItemsForStepLocked(txNumFrom, txNumTo uint64) []*
 		if d.Disable {
 			continue
 		}
-		out = append(out, d.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)...)
+		kvRetired := d.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)
+		var histRetired, idxRetired []*FilesItem
 		if d.History != nil {
-			out = append(out, d.History.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)...)
+			histRetired = d.History.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)
 			if d.History.InvertedIndex != nil {
-				out = append(out, d.History.InvertedIndex.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)...)
+				idxRetired = d.History.InvertedIndex.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)
 			}
 		}
+		if len(kvRetired) > 0 || len(histRetired) > 0 || len(idxRetired) > 0 {
+			log.Warn("[dbg-subsumed-v4] step-retire",
+				"filenameBase", d.FilenameBase,
+				"txNumFrom", txNumFrom, "txNumTo", txNumTo,
+				"kv", len(kvRetired), "hist", len(histRetired), "idx", len(idxRetired))
+		}
+		out = append(out, kvRetired...)
+		out = append(out, histRetired...)
+		out = append(out, idxRetired...)
 	}
 	return out
 }
