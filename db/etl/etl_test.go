@@ -488,10 +488,10 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	require.Equal(t, 1, see)
 	c.Close()
 
-	// buffers are not lost
-	require.Empty(t, buf.data)
+	// buffers are not lost: entries keep their cap, data chunks went back to the pool
+	require.Empty(t, buf.chunks)
 	require.Empty(t, buf.entries)
-	require.NotZero(t, cap(buf.data))
+	require.Zero(t, buf.Size())
 	require.NotZero(t, cap(buf.entries))
 
 	// teset that no data visible
@@ -1531,4 +1531,118 @@ func TestVmtouchMmap(t *testing.T) {
 		}
 	}
 	vmtouch("AFTER full scan")
+}
+
+// TestCollectorWithAllocatorDrawsBufferLazily pins the lazy-draw contract:
+// an allocator-backed collector must not take a pooled buffer until the
+// first Collect, so never-written collectors (common when a batch writer
+// set is built upfront) cost no buffer at all.
+func TestCollectorWithAllocatorDrawsBufferLazily(t *testing.T) {
+	logger := log.New()
+	_, tx := mdbxtest.NewTestTx(t)
+	require := require.New(t)
+	table := kv.ChaindataTables[0]
+
+	var draws atomic.Int64
+	pool := &sync.Pool{New: func() any {
+		draws.Add(1)
+		return NewSortableBuffer(BufferOptimalSize)
+	}}
+	allocator := NewAllocator(pool)
+
+	empty := NewCollectorWithAllocator(t.Name()+"-empty", "", allocator, logger)
+	defer empty.Close()
+	require.NoError(empty.Flush())
+	require.NoError(empty.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+	empty.Close()
+	require.Zero(draws.Load(), "empty collector must not draw from the pool")
+
+	c := NewCollectorWithAllocator(t.Name(), "", allocator, logger)
+	defer c.Close()
+	require.NoError(c.Collect([]byte{1}, []byte{1}))
+	require.EqualValues(1, draws.Load(), "first Collect draws exactly one pooled buffer")
+	require.NoError(c.Load(tx, table, IdentityLoadFunc, TransformArgs{}))
+	v, err := tx.GetOne(table, []byte{1})
+	require.NoError(err)
+	require.Equal([]byte{1}, v)
+}
+
+// TestSortableBufferChunks pins the chunked layout: key/value bytes live in
+// fixed-size chunks, so a growing buffer never re-allocates and copies the
+// bytes it already holds.
+func TestSortableBufferChunks(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+
+	const entries = 512
+	val := bytes.Repeat([]byte{0xAB}, 16*1024) // 512*16KB = 8MB of values
+	key := make([]byte, 8)
+	for i := range entries {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		buf.Put(key, val)
+	}
+
+	require.Equal(t, entries, buf.Len())
+	require.Greater(t, len(buf.chunks), 1, "data must be split into chunks")
+	for i, c := range buf.chunks {
+		require.Equal(t, dataChunkSize, cap(c), "chunk %d", i)
+	}
+
+	for i := range entries {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		k, v := buf.Get(i)
+		require.Equal(t, key, k, "entry %d", i)
+		require.Equal(t, val, v, "entry %d", i)
+	}
+}
+
+// TestSortableBufferOversizedEntry: an entry bigger than one chunk gets a chunk
+// of its own - Get must still return one contiguous slice per key and value.
+func TestSortableBufferOversizedEntry(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+
+	big := bytes.Repeat([]byte{0xCD}, dataChunkSize+7)
+	buf.Put([]byte{0x01}, []byte("small"))
+	buf.Put([]byte{0x02}, big)
+	buf.Put([]byte{0x03}, []byte("after"))
+
+	k, v := buf.Get(1)
+	require.Equal(t, []byte{0x02}, k)
+	require.Equal(t, big, v)
+	k, v = buf.Get(2)
+	require.Equal(t, []byte{0x03}, k)
+	require.Equal(t, []byte("after"), v)
+
+	w := bytes.NewBuffer(nil)
+	require.NoError(t, buf.Write(w))
+	m := &mmapBytesReader{data: w.Bytes()}
+	for i := range buf.Len() {
+		wantK, wantV := buf.Get(i)
+		gotK, err := readField(m)
+		require.NoError(t, err)
+		gotV, err := readField(m)
+		require.NoError(t, err)
+		require.Equal(t, wantK, gotK)
+		require.Equal(t, wantV, gotV)
+	}
+}
+
+// TestSortableBufferResetReleasesChunks: Reset hands the chunks back to the
+// shared pool, so an idle pooled buffer doesn't pin the RAM it once needed.
+func TestSortableBufferResetReleasesChunks(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+	val := bytes.Repeat([]byte{0xEF}, 16*1024)
+	for i := range 512 {
+		buf.Put(binary.BigEndian.AppendUint64(nil, uint64(i)), val)
+	}
+	require.NotEmpty(t, buf.chunks)
+
+	buf.Reset()
+	require.Empty(t, buf.chunks)
+	require.Zero(t, buf.Size())
+	require.Zero(t, buf.Len())
+
+	buf.Put([]byte{0x01}, []byte("reused"))
+	k, v := buf.Get(0)
+	require.Equal(t, []byte{0x01}, k)
+	require.Equal(t, []byte("reused"), v)
 }
