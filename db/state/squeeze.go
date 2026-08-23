@@ -964,12 +964,18 @@ func bindPBinHashSuite(name string) (func(), error) {
 }
 
 func validatePBinRebuildState(stateValue []byte) error {
-	if len(stateValue) < 18 {
+	if len(stateValue) == 0 {
 		return nil
 	}
+	if len(stateValue) < 18 {
+		return fmt.Errorf("commitment rebuild: commitment state is %d bytes, too short for a header", len(stateValue))
+	}
 	stateLen := int(binary.BigEndian.Uint16(stateValue[16:18]))
-	if stateLen == 0 || len(stateValue) < 18+stateLen {
+	if stateLen == 0 {
 		return nil
+	}
+	if len(stateValue) < 18+stateLen {
+		return fmt.Errorf("commitment rebuild: trie state claims %d bytes, %d present", stateLen, len(stateValue)-18)
 	}
 	trieState := stateValue[18 : 18+stateLen]
 	if !commitment.IsPBinState(trieState) {
