@@ -207,6 +207,10 @@ type ExecModule struct {
 	lastParameters *builder.Parameters
 	builderFunc    builder.BlockBuilderFunc
 	builders       map[uint64]*builder.BlockBuilder
+	// preconfirmedBlocks holds payloads the PRECONFIRM assemble variant sealed synchronously from the
+	// maintained (preconfirmed) extending-fork flashblock — keyed by payload id, returned by
+	// GetAssembledBlock. Distinct from `builders` (the from-scratch async path). See assemblePreconfirmed.
+	preconfirmedBlocks map[uint64]*types.BlockWithReceipts
 
 	// Changes accumulator
 	hook  *stageloop.Hook
@@ -269,6 +273,7 @@ func NewExecModule(
 		forkValidator:           forkValidator,
 		pipelineExecutor:        pipelineExecutor,
 		builders:                make(map[uint64]*builder.BlockBuilder),
+		preconfirmedBlocks:      make(map[uint64]*types.BlockWithReceipts),
 		builderFunc:             builderFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
@@ -422,7 +427,13 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		}, nil
 	}
 	defer e.semaphore.Release(1)
+	return e.validateChainLocked(ctx, blockHash, blockNumber)
+}
 
+// validateChainLocked is ValidateChain's body with the exec-module semaphore ALREADY held. Split out so
+// the preconfirm-assemble path (AssembleBlock holds the semaphore) can drive the same close/seal without
+// a re-entrant TryAcquire that would return Busy. Callers MUST hold e.semaphore.
+func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	e.hook.LastNewBlockSeen(blockNumber) // used by eth_syncing
 	e.currentContext.ResetPendingUpdates()
 	e.logger.Debug("[execmodule] validating chain", "number", blockNumber, "hash", blockHash)
@@ -733,7 +744,13 @@ func (e *ExecModule) IngestSealedFlashblock(ctx context.Context, sealed *types.H
 		return fmt.Errorf("IngestSealedFlashblock: semaphore acquire: %w", err)
 	}
 	defer e.semaphore.Release(1)
+	return e.ingestSealedFlashblockLocked(ctx, sealed)
+}
 
+// ingestSealedFlashblockLocked is IngestSealedFlashblock's body with the exec-module semaphore ALREADY
+// held, so the preconfirm-assemble path (AssembleBlock holds the semaphore) can re-key the sealed block
+// without a re-entrant acquire. Callers MUST hold e.semaphore.
+func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *types.Header) error {
 	body, oldHash, number, err := e.GetPreExecutedBody(ctx)
 	if err != nil {
 		return err
