@@ -133,11 +133,17 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 	}
 	doms.SetStateCache(e.stateCache)
 
-	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
-		if !reuse {
+	// On a CARRY-FORWARD (reuse) round we are extending the SAME in-progress block with more txs; the
+	// maintained SD already holds the accumulated state and its commitment trie the progressive fold.
+	// unwindToCommonCanonical unwinds that trie back to the block's PARENT (common canonical ancestor) —
+	// correct when validating a fresh fork, but here it DISCARDS the prior round's fold, so each round
+	// would fold only its own txs onto the parent and the seal would diverge. Skip it on reuse; run it
+	// only on the first (fresh-SD) round to align to the parent before executing the block.
+	if !reuse {
+		if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 			doms.Close()
+			return ValidationResult{}, err
 		}
-		return ValidationResult{}, err
 	}
 
 	// EXECUTE only the new txs into the maintained SD (offset resumes past the prefix). The

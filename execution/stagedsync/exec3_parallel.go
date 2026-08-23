@@ -1059,25 +1059,18 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				// complete (non-partial) block has been applied in this batch.
 				// That is enough to safely trigger a batch commit on size.
 				//
-				// cocoon flashblock: during PRE-EXECUTE accumulation the block is left
-				// PARTIAL — block-end (systemEnd) is skipped (skipBlockEnd) so there is
-				// no seal to commit. Skip the commitment trigger too: computing a root
-				// over a part-executed block would produce a misleading per-round root
-				// (state without the block-end effects). The root is computed exactly
-				// once at the CLOSE (ValidateChain, FlashblockAccumulating unset), after
-				// systemEnd completes. "No root during accumulation."
-				accumulating := pe.isForkValidation && pe.doms.FlashblockAccumulating()
+				// cocoon flashblock: the commitment MUST run every round (including
+				// accumulation rounds) so the progressive trie folds each round's writes;
+				// accumulation rounds are marked isPartial (see nextResult) so the
+				// calculator computes WITHOUT the root check (computeWithoutCheck) while
+				// still folding — the authoritative seal is checked once at the CLOSE.
 				switch execLoopShouldExit(blockResult, sizeEst, batchLimit, pe.maxBlockNum, dbg.StopAfterBlock) {
 				case execLoopExitMaxReached:
 					pe.reachedMaxBlock.Store(true)
-					if !accumulating {
-						pe.triggerBatchCommitment(ctx)
-					}
+					pe.triggerBatchCommitment(ctx)
 					return nil
 				case execLoopExitSizeLimit, execLoopExitExhausted, execLoopExitStopAfter:
-					if !accumulating {
-						pe.triggerBatchCommitment(ctx)
-					}
+					pe.triggerBatchCommitment(ctx)
 					return nil
 				}
 			}
@@ -2809,6 +2802,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		isPartial := len(be.tasks) > 0 && be.tasks[0].Version().TxIndex != -1
+		// cocoon flashblock: "partial" == an ACCUMULATION round (block-end/Finalize suppressed via
+		// skipBlockEnd). The CLOSE (FlashblockAccumulating unset) is the complete block. This drives the
+		// commitment calculator to computeWithoutCheck (fold, NO root check) on every accumulation round —
+		// so the trie folds progressively each run — and computeAndCheck only at the close. The default
+		// "first task != systemBegin" heuristic mislabels round 1 (starts at systemBegin ⇒ !partial ⇒ it
+		// would be checked/sealed early) and the close (starts at block-end ⇒ partial ⇒ never sealed).
+		if pe.isForkValidation && pe.doms != nil {
+			isPartial = pe.doms.FlashblockAccumulating()
+		}
 
 		txTask := be.tasks[len(be.tasks)-1].Task
 

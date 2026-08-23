@@ -1226,6 +1226,10 @@ func (sd *SharedDomains) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (
 // ExecV3 resolves its start point through here rather than calling SeekCommitment directly, so the
 // commitment model stays pure and the pre-exec model is a distinct, opt-in path.
 func (sd *SharedDomains) SeekStart(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
+	// SeekCommitment RESTORES the commitment trie from the persisted commitment state — that is how
+	// the accumulated (progressive) trie is loaded each round; do NOT skip it. Then, if a PRE-EXEC
+	// resume point is set (maintained flashblock SD), override only the START txNum so exec resumes
+	// past the already-executed prefix (the trie stays the restored accumulated state).
 	txNum, blockNum, err = sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return 0, 0, err

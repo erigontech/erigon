@@ -512,25 +512,48 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	}
 	defer roTx.Rollback()
 
-	doms, err := execctx.NewSharedDomains(ctx, roTx, e.logger)
-	if err != nil {
-		return ValidationResult{}, err
-	}
-	// NOTE: do NOT defer doms.Close(). On the success path, ownership of
-	// doms transfers to forkValidator.sharedDom inside ValidatePayload —
-	// later phases (MergeExtendingFork, NotifyCurrentHeight) close it.
-	// We Close explicitly only on the early-return error paths below.
-	doms.SetInMemHistoryReads(inMemHistoryReads)
+	// A flashblock CLOSE reuses the maintained accumulating SD (fv.sharedDom) directly as the
+	// validate SD — "the preexec SD becomes the validate SD." No fresh SD, no VersionedIO transfer:
+	// the block's whole body already executed into THIS SD across the PreExecute rounds, and its
+	// commitment trie has folded each round's diff. The close unsets FlashblockAccumulating (so the
+	// block-end task runs engine.Finalize) and resumes execution PAST the full prefix (SetPreExecStart
+	// at the block-end position) so no body tx re-executes — only the block-end/seal runs. The final
+	// ComputeCommitment folds any remaining diff and yields the SAME root a one-shot full execution
+	// would (the trie is a function of the final key→value set, not the fold order/splitting).
+	reuseClose := flashUpdate.IsUpdate && flashUpdate.SD != nil
+	var doms *execctx.SharedDomains
+	var tx kv.TemporalRwTx
+	if reuseClose {
+		doms = flashUpdate.SD
+		doms.BlockOverlay().UpdateTxn(roTx)
+		doms.SetInMemHistoryReads(true)
+		doms.SetFlashblockAccumulating(false)
+		if minTxNum, merr := e.blockReader.TxnumReader().Min(ctx, roTx, blockNumber); merr == nil {
+			doms.SetPreExecStart(minTxNum + uint64(flashUpdate.PrefixLen))
+			defer doms.ClearPreExecStart()
+		}
+		tx = doms.BlockOverlay()
+	} else {
+		doms, err = execctx.NewSharedDomains(ctx, roTx, e.logger)
+		if err != nil {
+			return ValidationResult{}, err
+		}
+		// NOTE: do NOT defer doms.Close(). On the success path, ownership of
+		// doms transfers to forkValidator.sharedDom inside ValidatePayload —
+		// later phases (MergeExtendingFork, NotifyCurrentHeight) close it.
+		// We Close explicitly only on the early-return error paths below.
+		doms.SetInMemHistoryReads(inMemHistoryReads)
 
-	if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
-		doms.Close()
-		return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
-	}
-	var tx kv.TemporalRwTx = doms.BlockOverlay()
+		if err := doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
+			doms.Close()
+			return ValidationResult{}, fmt.Errorf("ValidateChain: init block overlay: %w", err)
+		}
+		tx = doms.BlockOverlay()
 
-	// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
-	if e.currentContext != nil {
-		doms.SetParent(e.currentContext)
+		// Chain to the canonical generation so head-extending reads and fork unwind sets resolve via the parent link.
+		if e.currentContext != nil {
+			doms.SetParent(e.currentContext)
+		}
 	}
 
 	// Flush block overlay data (headers, bodies, TDs from InsertBlocks) into
@@ -542,22 +565,19 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 	// e.currentContext in an inconsistent state for UpdateForkChoice.
 	if e.currentContext != nil && e.currentContext.BlockOverlay() != nil {
 		if err := e.currentContext.BlockOverlay().Flush(ctx, tx); err != nil {
-			doms.Close()
+			if !reuseClose {
+				doms.Close()
+			}
 			return ValidationResult{}, fmt.Errorf("ValidateChain: flush overlay to validation tx: %w", err)
 		}
-	}
-
-	// Transfer VersionedIO/VersionMap from the previous flashblock's SD to the
-	// new SD so the executor can detect already-executed transactions.
-	if flashUpdate.IsUpdate && flashUpdate.SD != nil {
-		doms.SetVersionedIO(flashUpdate.SD.GetVersionedIO())
-		doms.SetVersionMap(flashUpdate.SD.GetVersionMap())
 	}
 
 	// Set state cache in SharedDomains for use during state reading
 	doms.SetStateCache(e.stateCache)
 	if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
-		doms.Close()
+		if !reuseClose {
+			doms.Close()
+		}
 		return ValidationResult{}, err
 	}
 

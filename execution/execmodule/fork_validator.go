@@ -176,8 +176,15 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	hash := header.Hash()
 	number := header.Number.Uint64()
 
+	// A flashblock CLOSE reuses the maintained accumulating SD (sd == fv.sharedDom) with accumulation
+	// now off. The accumulation rounds already ran the block's body through this same ValidatePayload
+	// path, so the block hash is BOTH in validHashes and marked canonical — but block-end (systemEnd/
+	// Finalize) has NOT run yet (it belongs to the close). The "already validated / already canonical"
+	// short-circuits below would skip the close's block-end seal entirely. Force the close to execute.
+	flashblockClose := sd != nil && sd == fv.sharedDom && !sd.FlashblockAccumulating()
+
 	// If the block is stored within the side fork it means it was already validated.
-	if _, ok := fv.validHashes.Get(hash); ok {
+	if _, ok := fv.validHashes.Get(hash); ok && !flashblockClose {
 		status = engine_types.ValidStatus
 		latestValidHash = hash
 		return
@@ -193,7 +200,7 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	if criticalError != nil {
 		return
 	}
-	if foundCanonical {
+	if foundCanonical && !flashblockClose {
 		status = engine_types.ValidStatus
 		latestValidHash = header.Hash()
 		return
@@ -410,7 +417,14 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 		fv.extendingForkNumber = 0
 		return
 	}
-	fv.validHashes.Add(hash, true)
+	// A flashblock PRE-EXECUTE accumulation round must NOT mark the block hash validated: block-end
+	// (systemEnd/Finalize) has not run yet, so the block is not fully sealed. The final round's hash is
+	// identical to the CLOSE's hash (same body), so adding it here would make the close's ValidatePayload
+	// short-circuit on the validHashes cache and skip the block-end seal entirely. Only the CLOSE
+	// (FlashblockAccumulating unset) records the fully-validated hash.
+	if !sd.FlashblockAccumulating() {
+		fv.validHashes.Add(hash, true)
+	}
 
 	_, criticalError = rawdb.WriteRawBodyIfNotExists(tx, hash, number, body)
 	if criticalError != nil {
