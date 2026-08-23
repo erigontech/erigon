@@ -2418,6 +2418,12 @@ func (result *execResult) calcFees(
 	// re-creates the account) to match serial.
 	coinbaseWasContract := !coinbaseEmptyCodeHash || coinbaseHasCodeHashWrite || coinbaseCreatedContract
 	burnCoinbaseTip := !chainRules.IsAmsterdam && coinbaseSelfdestructed && coinbaseWasContract
+	// A contract coinbase self-destructed this tx with no same-tx re-create is
+	// net-absent afterwards: its committed code/nonce are wiped and a later fee
+	// credit revives it balance-only (EmptyCodeHash). The pre-block base read
+	// (coinbaseAcc) still carries the stale live code, so the emit below must
+	// materialize the revived-codeless account rather than propagate that code.
+	coinbaseNetDestructed := burnCoinbaseTip && !coinbaseCreatedContract
 	if !burnCoinbaseTip {
 		newCoinbaseBalance.Add(&newCoinbaseBalance, &result.ExecutionResult.FeeTipped)
 	}
@@ -2461,13 +2467,15 @@ func (result *execResult) calcFees(
 			// stale CallNewAccountGas (+25000) for a CALL-with-value to the
 			// coinbase mid-tx.
 			addrAcc := &accounts.Account{Balance: newCoinbaseBalance}
-			if coinbaseAcc != nil {
+			if coinbaseAcc != nil && !coinbaseNetDestructed {
 				addrAcc.Nonce = coinbaseAcc.Nonce
 				addrAcc.Incarnation = coinbaseAcc.Incarnation
 				addrAcc.CodeHash = coinbaseAcc.CodeHash
 			} else {
-				addrAcc.Nonce = coinbaseNonce
 				addrAcc.CodeHash = accounts.EmptyCodeHash
+				if !coinbaseNetDestructed {
+					addrAcc.Nonce = coinbaseNonce
+				}
 			}
 			addWrites.SetAddress(result.Coinbase, &state.VersionedWrite[*accounts.Account]{
 				WriteHeader: state.WriteHeader{
@@ -2481,11 +2489,17 @@ func (result *execResult) calcFees(
 			// domain (self-destructed earlier, no re-create), a CodeHashPath read
 			// resolves from its own cell, not the AddressPath account — so without
 			// this sibling it reads back as absent (NilCodeHash) instead of the
-			// revived account's EmptyCodeHash. Gated to the revival case
-			// (coinbaseAcc == nil): a coinbase present in the domain reads its code
-			// hash correctly there, and emitting a cell would add a spurious entry
-			// to the EIP-7928 block access list for an ordinary fee credit.
-			if coinbaseAcc == nil {
+			// revived account's EmptyCodeHash. A pre-Amsterdam coinbase destructed
+			// in an earlier tx and revived balance-only here reads LifecycleRevived
+			// off its AddressPath, but the per-path CodeHash revival check requires
+			// a CodeHashPath write strictly above the destruct — so emit one at this
+			// tx too, else a later tx's EXTCODEHASH of the coinbase reads NilCodeHash.
+			// Gated to the revival cases: a coinbase present in the domain reads its
+			// code hash correctly, and an unconditional emit would add a spurious
+			// EIP-7928 block-access-list entry for an ordinary fee credit.
+			cbLifecycle, _, _ := vm.AccountLifecycleAt(result.Coinbase, txIndex)
+			coinbaseRevivedCodeless := !chainRules.IsAmsterdam && cbLifecycle == state.LifecycleRevived && addrAcc.CodeHash == accounts.EmptyCodeHash
+			if coinbaseAcc == nil || coinbaseNetDestructed || coinbaseRevivedCodeless {
 				addWrites.SetCodeHash(result.Coinbase, &state.VersionedWrite[accounts.CodeHash]{
 					WriteHeader: state.WriteHeader{
 						Address: result.Coinbase,
