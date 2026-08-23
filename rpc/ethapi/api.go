@@ -365,7 +365,9 @@ func FormatLogs(logs []logger.StructLog) []StructLogRes {
 	return logger.FormatLogs(logs)
 }
 
-// RPCMarshalHeader converts the given header to the RPC output .
+// RPCMarshalHeader converts the given header to the RPC output. The result aliases
+// head: quantities, byte slices and optional hashes go in without a copy, so the
+// caller must pass a header nobody will mutate.
 func RPCMarshalHeader(head *types.Header) map[string]any {
 	result := map[string]any{
 		"number":           (*hexutil.U256)(&head.Number),
