@@ -261,6 +261,14 @@ func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args Tr
 }
 
 func (c *Collector) Close() {
+	// Providers first: a KeepInRAM one reads straight from `buf`, whose chunks
+	// Reset hands to a pool that other collectors draw from.
+	if c.dataProviders != nil { //idempotency
+		for _, p := range c.dataProviders {
+			p.Dispose()
+		}
+		c.dataProviders = nil
+	}
 	if c.buf != nil { //idempotency
 		if c.allocator != nil {
 			c.allocator.Put(c.buf)
@@ -268,12 +276,6 @@ func (c *Collector) Close() {
 		} else {
 			c.buf.Reset()
 		}
-	}
-	if c.dataProviders != nil { //idempotency
-		for _, p := range c.dataProviders {
-			p.Dispose()
-		}
-		c.dataProviders = nil
 	}
 	c.allFlushed = false
 }
