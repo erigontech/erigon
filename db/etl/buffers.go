@@ -22,7 +22,6 @@ import (
 	"fmt"
 	"io"
 	"math"
-	"math/bits"
 	"slices"
 	"sort"
 	"strconv"
@@ -126,19 +125,12 @@ var (
 
 // Bytes live in chunks rather than one slice, so filling a buffer never
 // reallocates and copies what is already stored.
-var chunkShift = chunkShiftOf(dbg.EnvDataSize("ETL_CHUNK", 1*datasize.MB))
-
-// chunkShiftOf rounds size up to a power of two, bounded to [4KB, 1GB]: outside
-// that an offset degenerates to one chunk per entry, or overflows int32.
-func chunkShiftOf(size datasize.ByteSize) uint {
-	s := max(min(int(size), 1<<30), 1<<12)
-	return uint(bits.Len(uint(s - 1)))
-}
+const chunkSize = 1 << 20 // 1MB
 
 // chunkPool recycles full-size chunks across buffers.
 var chunkPool = sync.Pool{
 	New: func() any {
-		c := make([]byte, 1<<chunkShift)
+		c := make([]byte, chunkSize)
 		return &c
 	},
 }
@@ -149,27 +141,27 @@ var etlChunkPoolWarm = dbg.EnvInt("ETL_CHUNK_POOL_WARM", 64)
 
 func init() {
 	for range etlChunkPoolWarm {
-		c := make([]byte, 1<<chunkShift)
+		c := make([]byte, chunkSize)
 		chunkPool.Put(&c)
 	}
 }
 
 // getChunk returns size bytes, pooled when size is the standard chunk.
 func getChunk(size int) []byte {
-	if size != 1<<chunkShift {
+	if size != chunkSize {
 		return make([]byte, size)
 	}
 	return *chunkPool.Get().(*[]byte)
 }
 
 func putChunk(c []byte) {
-	if len(c) == 1<<chunkShift {
+	if len(c) == chunkSize {
 		chunkPool.Put(&c)
 	}
 }
 
 // entryLoc locates a key/value pair. offset is global: chunk index is
-// offset>>chunkShift, position within it offset&mask. keyLen/valLen -1 is nil.
+// offset/chunkSize, position within it offset%chunkSize. keyLen/valLen -1 is nil.
 type entryLoc struct {
 	insertionOrder int32 // enables stable sort via unstable SortFunc
 	offset         int32
@@ -192,8 +184,6 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 	}
 	return &sortableBuffer{
 		optimalSize: int(bufferOptimalSize.Bytes()),
-		chunkShift:  chunkShift,
-		chunkMask:   1<<chunkShift - 1,
 	}
 }
 
@@ -203,38 +193,28 @@ type sortableBuffer struct {
 	next        int // global offset of the next free byte
 	dataLen     int
 	optimalSize int
-	chunkShift  uint
-	chunkMask   int
-}
-
-func (b *sortableBuffer) chunkSize() int { return 1 << b.chunkShift }
-
-// setChunkShift keeps chunkMask in step with chunkShift.
-func (b *sortableBuffer) setChunkShift(shift uint) {
-	b.chunkShift, b.chunkMask = shift, 1<<shift-1
 }
 
 // reserve returns the offset of n contiguous free bytes. An entry never spans
 // chunks; one wider than a chunk gets its own, filling the slots it covers.
 func (b *sortableBuffer) reserve(n int) int {
-	size := b.chunkSize()
-	if n > size {
+	if n > chunkSize {
 		// Start the wide chunk past every chunk already allocated, so that
-		// offset>>chunkShift addresses it rather than a narrow chunk.
-		span := (n + size - 1) / size * size
+		// offset/chunkSize addresses it rather than a narrow chunk.
+		span := (n + chunkSize - 1) / chunkSize * chunkSize
 		c := getChunk(span)
-		off := len(b.chunks) * size
-		for range span / size {
+		off := len(b.chunks) * chunkSize
+		for range span / chunkSize {
 			b.chunks = append(b.chunks, c)
 		}
 		b.next = off + span
 		return off
 	}
-	if pos := b.next & (size - 1); pos+n > size {
-		b.next += size - pos
+	if pos := b.next % chunkSize; pos+n > chunkSize {
+		b.next += chunkSize - pos
 	}
-	for len(b.chunks)*size < b.next+max(n, 1) {
-		b.chunks = append(b.chunks, getChunk(size))
+	for len(b.chunks)*chunkSize < b.next+max(n, 1) {
+		b.chunks = append(b.chunks, getChunk(chunkSize))
 	}
 	off := b.next
 	b.next += n
@@ -249,7 +229,7 @@ func (b *sortableBuffer) at(offset, length int) []byte {
 // locate resolves an offset to its chunk and the position within it. A key and
 // its value share a chunk, so callers resolve once and slice both.
 func (b *sortableBuffer) locate(offset int) ([]byte, int) {
-	return b.chunks[offset>>b.chunkShift], offset & b.chunkMask
+	return b.chunks[offset/chunkSize], offset % chunkSize
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
@@ -308,8 +288,8 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 	if cap(b.entries) < predictKeysAmount {
 		b.entries = make([]entryLoc, 0, predictKeysAmount)
 	}
-	for len(b.chunks)*b.chunkSize() < predictDataSize {
-		b.chunks = append(b.chunks, getChunk(b.chunkSize()))
+	for len(b.chunks)*chunkSize < predictDataSize {
+		b.chunks = append(b.chunks, getChunk(chunkSize))
 	}
 	return b
 }

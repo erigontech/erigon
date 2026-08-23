@@ -1578,8 +1578,6 @@ func TestCollectorWithAllocatorDrawsBufferLazily(t *testing.T) {
 // TestSortableBufferChunkBoundaries pins the chunked layout: entries that cross
 // a chunk, an entry wider than a chunk, and the same after Reset.
 func TestSortableBufferChunkBoundaries(t *testing.T) {
-	const shift = 12 // 4KB chunks
-	chunkSize := 1 << shift
 
 	type kv struct{ k, v []byte }
 	mk := func(seed byte, n int) []byte {
@@ -1597,7 +1595,6 @@ func TestSortableBufferChunkBoundaries(t *testing.T) {
 	}
 
 	buf := NewSortableBuffer(64 * datasize.MB)
-	buf.setChunkShift(shift)
 	// Prealloc first: an oversize entry must not be placed into a narrow chunk.
 	buf.Prealloc(4, chunkSize*4)
 
