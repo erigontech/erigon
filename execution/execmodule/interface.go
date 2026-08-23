@@ -153,6 +153,18 @@ type ExecutionModule interface {
 	// re-execution. See execmodule.PreExecute.
 	PreExecute(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error)
 
+	// GetPreExecutedBody returns the node's locally pre-executed in-progress flashblock body
+	// (accumulated from the DAG across PreExecute rounds) plus the deferred in-progress hash and
+	// number. Lets the newPayload for a DAG-preconfirmed flashblock be body-LESS — each node
+	// supplies the body locally rather than from the wire. See execmodule.GetPreExecutedBody.
+	GetPreExecutedBody(ctx context.Context) (*types.RawBody, common.Hash, uint64, error)
+
+	// IngestSealedFlashblock is the newPayload step for a sealed flashblock: given only the sealed
+	// HEADER (the payload message is body-less), it materialises the block by pairing the header with
+	// the node's OWN pre-executed body and re-points the extending fork to it — NO re-execution — so a
+	// subsequent normal UpdateForkChoice canonicalises it. See execmodule.IngestSealedFlashblock.
+	IngestSealedFlashblock(ctx context.Context, sealed *types.Header) error
+
 	// --- Fork choice ------------------------------------------------------
 
 	// UpdateForkChoice updates the canonical head, safe, and finalized block

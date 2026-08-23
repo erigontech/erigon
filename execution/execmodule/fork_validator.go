@@ -435,6 +435,21 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 	return
 }
 
+// SealInPlace re-keys a freshly-closed flashblock from its deferred-output in-progress hash to the
+// SEALED header hash. After the CLOSE, validateAndStorePayload set extendingForkHeadHash and validHashes
+// to the in-progress (zero-output) hash; the exec module has now materialised the real-root header H1 in
+// the block overlay. Point the extending fork at H1 and mark it valid, so a normal FCU(H1) takes the
+// merge-extending-fork fast path (no re-execution) and canonicalises the correct header. The maintained
+// sharedDom (already holding the sealed state) and extendingForkNumber are unchanged.
+func (fv *ForkValidator) SealInPlace(oldHash, newHash common.Hash) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	if fv.extendingForkHeadHash == oldHash {
+		fv.extendingForkHeadHash = newHash
+	}
+	fv.validHashes.Add(newHash, true)
+}
+
 // GetTimings returns the timings of the last block validation.
 func (fv *ForkValidator) GetTimings(hash common.Hash) BlockTimings {
 	fv.lock.Lock()

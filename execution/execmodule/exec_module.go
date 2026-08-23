@@ -681,7 +681,97 @@ func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, b
 		result.ReceiptHash = types.DeriveSha(fbReceipts)
 		result.Bloom = types.CreateBloom(fbReceipts)
 	}
+	// The CLOSE is pure COMPUTE (assemble): it runs block-end over the maintained SD and returns the
+	// sealed output side, but does NOT write the sealed block or re-key the fork validator. Writing the
+	// real-root header H1 into the overlay + re-pointing the extending fork is the newPayload step —
+	// IngestSealedFlashblock — so a proposer and its peers share ONE ingest path (getPayload assembles,
+	// newPayload ingests, FCU canonicalises).
 	return result, nil
+}
+
+// GetPreExecutedBody returns this node's locally pre-executed in-progress flashblock body (the txs it
+// accumulated across PreExecute rounds from the DAG) plus the deferred in-progress hash and number. The
+// newPayload for a DAG-preconfirmed flashblock is body-LESS — it carries only the sealed HEADER — so each
+// node supplies the body from HERE rather than from the wire (the transmission optimization: the body was
+// already delivered as DAG tx hashes and pre-executed). Empty extending fork ⇒ error.
+func (e *ExecModule) GetPreExecutedBody(ctx context.Context) (*types.RawBody, common.Hash, uint64, error) {
+	oldHash, number, sd := e.forkValidator.ExtendingFork()
+	if sd == nil || oldHash == (common.Hash{}) {
+		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: no in-progress flashblock")
+	}
+	if e.currentContext == nil || e.currentContext.BlockOverlay() == nil {
+		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: no block overlay")
+	}
+	roTx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: begin ro: %w", err)
+	}
+	defer roTx.Rollback()
+	ov := e.currentContext.BlockOverlay()
+	ov.UpdateTxn(roTx)
+	body, err := e.blockReader.BodyWithTransactions(ctx, ov, oldHash, number)
+	if err != nil {
+		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: read body: %w", err)
+	}
+	if body == nil {
+		return nil, common.Hash{}, 0, fmt.Errorf("GetPreExecutedBody: body %x not found", oldHash)
+	}
+	return body.RawBody(), oldHash, number, nil
+}
+
+// IngestSealedFlashblock is the newPayload step for a freshly-sealed flashblock: given only the sealed
+// HEADER H1 (produced by the assemble/CLOSE, carrying the real Root/GasUsed/ReceiptHash/Bloom — the
+// payload message is body-LESS), it materialises H1 in the currentContext block overlay by pairing it
+// with the node's OWN pre-executed body (GetPreExecutedBody — NOT a transmitted body), copies the
+// deferred block's TD onto H1.Hash(), and re-points the extending fork from the deferred hash to H1 with
+// NO re-execution (the body already executed during PreExecute, and the sealed state is the extending
+// fork's maintained SharedDomains). A subsequent NORMAL FCU(H1) then takes the merge-extending-fork fast
+// path and canonicalises the correct real-root header ("FCU works as before"). Idempotent when H1 is
+// already the extending-fork head.
+func (e *ExecModule) IngestSealedFlashblock(ctx context.Context, sealed *types.Header) error {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return fmt.Errorf("IngestSealedFlashblock: semaphore acquire: %w", err)
+	}
+	defer e.semaphore.Release(1)
+
+	body, oldHash, number, err := e.GetPreExecutedBody(ctx)
+	if err != nil {
+		return err
+	}
+	newHash := sealed.Hash()
+	if newHash == oldHash {
+		return nil // already sealed in place
+	}
+
+	roTx, err := e.db.BeginTemporalRo(ctx)
+	if err != nil {
+		return fmt.Errorf("IngestSealedFlashblock: begin ro: %w", err)
+	}
+	defer roTx.Rollback()
+
+	ov := e.currentContext.BlockOverlay()
+	ov.UpdateTxn(roTx)
+
+	td, err := rawdb.ReadTd(ov, oldHash, number)
+	if err != nil {
+		return fmt.Errorf("IngestSealedFlashblock: read TD: %w", err)
+	}
+	if td == nil {
+		td = new(uint256.Int)
+	}
+	if err := rawdb.WriteHeader(ov, sealed); err != nil {
+		return fmt.Errorf("IngestSealedFlashblock: write header: %w", err)
+	}
+	if err := rawdb.WriteTd(ov, newHash, number, *td); err != nil {
+		return fmt.Errorf("IngestSealedFlashblock: write TD: %w", err)
+	}
+	if _, err := rawdb.WriteRawBodyIfNotExists(ov, newHash, number, body); err != nil {
+		return fmt.Errorf("IngestSealedFlashblock: write body: %w", err)
+	}
+	e.forkValidator.SealInPlace(oldHash, newHash)
+	e.logger.Debug("[execmodule] flashblock sealed (newPayload ingest)",
+		"number", number, "deferredHash", oldHash, "sealedHash", newHash, "root", sealed.Root)
+	return nil
 }
 
 func (e *ExecModule) purgeBadChain(ctx context.Context, tx kv.RwTx, latestValidHash, headHash common.Hash) error {
