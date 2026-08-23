@@ -2699,7 +2699,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if took > time.Millisecond {
 			mxProcessResultsSeconds.Observe(took.Seconds())
 		}
-		if took >= 2*dbg.ToLogSlowTxn {
+		if took >= 4*dbg.ToLogSlowTxn {
 			bn := uint64(0)
 			if res != nil {
 				bn = res.BlockNumber()
