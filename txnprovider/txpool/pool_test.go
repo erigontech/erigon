@@ -2478,3 +2478,39 @@ func TestQueuedTxnPromotedAfterStaleAddLocal(t *testing.T) {
 	asrt.Equal(1, pending, "queued tx must be promoted after re-evaluation")
 	asrt.Equal(0, queued, "queued must be empty after promotion")
 }
+
+// probeFeeCalculator runs fn from the middle of fromDB, where CurrentFees is called.
+type probeFeeCalculator struct{ fn func() }
+
+func (p probeFeeCalculator) CurrentFees(*chain.Config, kv.Getter) (uint64, uint64, uint64, uint64, error) {
+	p.fn()
+	return 0, 0, 0, 0, nil
+}
+
+// The state-changes stream is consumed as soon as Run starts, so OnNewBlock can land
+// while start() is still loading. Both write p.senders, so the load must hold p.lock.
+func TestFromDBLoadsUnderPoolLock(t *testing.T) {
+	req := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	poolDB := memdb.NewTestPoolDB(t)
+
+	var pool *TxPool
+	var lockHeld bool
+	probe := probeFeeCalculator{fn: func() {
+		if pool.lock.TryLock() {
+			pool.lock.Unlock()
+			return
+		}
+		lockHeld = true
+	}}
+
+	pool, err := New(ctx, make(chan Announcements, 100), poolDB, coreDB, txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil,
+		log.New(), WithFeeCalculator(probe))
+	req.NoError(err)
+	req.NoError(pool.start(ctx))
+	req.True(lockHeld, "fromDB must hold p.lock while it populates the pool")
+}
