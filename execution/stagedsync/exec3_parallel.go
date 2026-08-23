@@ -2693,24 +2693,24 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		return nil, fmt.Errorf("unexpected task type: %T", res.Task)
 	}
 
-	prStarted := time.Now()
-	defer func() {
-		took := time.Since(prStarted)
-		if took > time.Millisecond {
-			mxProcessResultsSeconds.Observe(took.Seconds())
-		}
-		if took >= 4*dbg.ToLogSlowTxn {
-			bn := uint64(0)
-			if res != nil {
-				bn = res.BlockNumber()
-			}
-			log.Warn("[dbg] slow nextResult", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex, "res.Err", res.Err != nil)
-		}
-	}()
-
 	tx := task.index
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
+		prStarted := time.Now()
+		defer func() {
+			took := time.Since(prStarted)
+			if took > time.Millisecond {
+				mxProcessResultsSeconds.Observe(took.Seconds())
+			}
+			if took >= dbg.ToLogSlowTxn {
+				bn := uint64(0)
+				if res != nil {
+					bn = res.BlockNumber()
+				}
+				log.Warn("[dbg] slow nextResult err", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+			}
+		}()
+
 		var execErr protocol.ErrExecAbortError
 		if errors.As(res.Err, &execErr) {
 			if res.Version().Incarnation > len(be.tasks) {
@@ -2839,6 +2839,21 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w", rules.ErrInvalidBlock, be.number(), res.Version().TxIndex, task.TxHash(), res.Err)), nil
 		}
 	} else {
+		prStarted := time.Now()
+		defer func() {
+			took := time.Since(prStarted)
+			if took > time.Millisecond {
+				mxProcessResultsSeconds.Observe(took.Seconds())
+			}
+			if took >= 4*dbg.ToLogSlowTxn {
+				bn := uint64(0)
+				if res != nil {
+					bn = res.BlockNumber()
+				}
+				log.Warn("[dbg] slow nextResult", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+			}
+		}()
+
 		txVersion := res.Version()
 
 		be.blockIO.RecordReads(txVersion, res.TxIn)
