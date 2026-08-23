@@ -118,7 +118,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, blockNum uint64, txIndex int, 
 	normalizeStarted := time.Now()
 	defer func() {
 		took := time.Since(normalizeStarted)
-		if took > 100*time.Millisecond {
+		if took > 1*time.Millisecond {
 			mxNormalizeTook.Observe(took.Seconds())
 		}
 		if took >= slowNormalizeThreshold {
