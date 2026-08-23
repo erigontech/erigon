@@ -105,6 +105,9 @@ type Downloader struct {
 	activeDownloadRequests     int
 	zeroActiveDownloadRequests sync.Cond
 
+	// Caps concurrent whole-file hashing by kept-snapshot seeding across all batches.
+	seedSem *semaphore.Weighted
+
 	// Synchronizes state-sensitive changes to things affected by Downloader.Close.
 	lock           sync.RWMutex
 	torrentClient  *torrent.Client
@@ -329,6 +332,7 @@ func New(ctx context.Context, cfg *downloadercfg.Cfg, logger log.Logger) (*Downl
 	d.logConfig()
 
 	d.ctx, d.stop = context.WithCancel(context.Background())
+	d.seedSem = semaphore.NewWeighted(int64(defaultSeedConcurrency()))
 
 	return d, nil
 }
@@ -840,13 +844,13 @@ func (d *Downloader) startSnapshotsDownload(
 	}
 	g.MakeSliceWithCap(&batch.torrents, len(items))
 	g.MakeChanWithLen(&batch.afterTasks, len(items))
-	batch.ctx, batch.cancel = context.WithCancelCause(d.ctx)
+	var batchCtx context.Context
+	batchCtx, batch.cancel = context.WithCancelCause(d.ctx)
 	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
-	batch.seedSem = semaphore.NewWeighted(int64(seedConcurrency))
 
 	batch.all.Go(func() {
 		d.logDownload(
-			batch.ctx,
+			batchCtx,
 			items,
 			target,
 			func() log.Lvl {
@@ -866,7 +870,7 @@ func (d *Downloader) startSnapshotsDownload(
 
 	defer func() {
 		if err != nil {
-			batch.abandon(err)
+			batch.end(ctx, err)
 		}
 	}()
 	err = batch.addAllItems(ctx, items)

@@ -661,8 +661,11 @@ func TestGrpcDownloadKeepsLocalDataAfterInitialDownload(t *testing.T) {
 	require.NoFileExists(path + ".part")
 }
 
-// testStartSingleDownloadAndWait starts a snapshot download and waits for it with a live context.
+// testStartSingleDownloadAndWait starts a snapshot download and waits for it with a live context,
+// bounded so a hang fails this test instead of the whole package.
 func (d *Downloader) testStartSingleDownloadAndWait(ctx context.Context, infoHash metainfo.Hash, name string) error {
+	ctx, cancel := context.WithTimeout(ctx, 30*time.Second)
+	defer cancel()
 	wait, err := d.startSnapshotsDownload(ctx, []preverifiedSnapshot{
 		{infoHash, name},
 	}, "testing")
@@ -690,18 +693,19 @@ func TestKeptLocalSnapshotIsSeeded(t *testing.T) {
 	require.True(registered, "a kept snapshot must be registered, or it is never seeded")
 }
 
-// goSeed must never exceed seedSem's capacity.
+// goSeed must never exceed the seed semaphore's capacity.
 func TestGoSeedBoundsConcurrency(t *testing.T) {
 	require := require.New(t)
-	batch := &downloadBatch{}
+	const limit = 3
+	batch := &downloadBatch{d: &Downloader{seedSem: semaphore.NewWeighted(limit)}}
 	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
 	defer batch.seedCancel(nil)
-	const limit = 3
-	batch.seedSem = semaphore.NewWeighted(limit)
 
 	const n = 10
 	var current, peak atomic.Int64
 	release := make(chan struct{})
+	closeRelease := sync.OnceFunc(func() { close(release) })
+	defer closeRelease()
 	for range n {
 		batch.goSeed(func() {
 			c := current.Add(1)
@@ -718,23 +722,27 @@ func TestGoSeedBoundsConcurrency(t *testing.T) {
 
 	require.Eventually(func() bool { return current.Load() == limit }, time.Second, time.Millisecond,
 		"only %d of %d tasks should be able to run concurrently", limit, n)
-	close(release)
+	closeRelease()
 	batch.all.Wait()
 	require.EqualValues(limit, peak.Load())
 }
 
 // Cancelling seedCtx is genuine abandonment: it must drop queued goSeed tasks instead of running
-// them, independently of batch.ctx.
+// them, independently of the batch's own cancellation.
 func TestGoSeedAbandonsQueuedOnCancel(t *testing.T) {
 	require := require.New(t)
-	batch := &downloadBatch{}
-	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
 	const limit = 2
-	batch.seedSem = semaphore.NewWeighted(limit)
+	batch := &downloadBatch{d: &Downloader{seedSem: semaphore.NewWeighted(limit)}}
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
+	// Guaranteed even if the require.Eventually below fails and testify unwinds this goroutine
+	// with FailNow, which would otherwise strand every goroutine dispatched below.
+	defer batch.seedCancel(nil)
 
 	const n = 50
 	var started atomic.Int64
 	release := make(chan struct{})
+	closeRelease := sync.OnceFunc(func() { close(release) })
+	defer closeRelease()
 	for range n {
 		batch.goSeed(func() {
 			started.Add(1)
@@ -746,7 +754,7 @@ func TestGoSeedAbandonsQueuedOnCancel(t *testing.T) {
 		"the first %d tasks should have started", limit)
 	batch.seedCancel(nil)
 	require.EqualValues(limit, started.Load(), "queued tasks must abandon rather than wait for a slot")
-	close(release)
+	closeRelease()
 
 	done := make(chan struct{})
 	go func() {
@@ -760,20 +768,21 @@ func TestGoSeedAbandonsQueuedOnCancel(t *testing.T) {
 	}
 }
 
-// goSeed waits on seedCtx, not batch.ctx, so cancelling batch.ctx alone must not drop seed work
-// still queued behind a full semaphore — it must all eventually run.
+// goSeed waits on seedCtx, not the batch's own cancellation, so cancelling the batch alone must
+// not drop seed work still queued behind a full semaphore — it must all eventually run.
 func TestGoSeedRunsAllOnSuccess(t *testing.T) {
 	require := require.New(t)
-	batch := &downloadBatch{}
-	batch.ctx, batch.cancel = context.WithCancelCause(context.Background())
+	const limit = 2
+	batch := &downloadBatch{d: &Downloader{seedSem: semaphore.NewWeighted(limit)}}
+	_, batch.cancel = context.WithCancelCause(context.Background())
 	batch.seedCtx, batch.seedCancel = context.WithCancelCause(context.Background())
 	defer batch.seedCancel(nil)
-	const limit = 2
-	batch.seedSem = semaphore.NewWeighted(limit)
 
 	const n = 50
 	var started, ran atomic.Int64
 	release := make(chan struct{})
+	closeRelease := sync.OnceFunc(func() { close(release) })
+	defer closeRelease()
 	for range n {
 		batch.goSeed(func() {
 			started.Add(1)
@@ -786,7 +795,7 @@ func TestGoSeedRunsAllOnSuccess(t *testing.T) {
 		"only %d of %d tasks should be able to run concurrently", limit, n)
 
 	batch.cancel(nil)
-	close(release)
+	closeRelease()
 
 	done := make(chan struct{})
 	go func() {
@@ -804,7 +813,7 @@ func TestGoSeedRunsAllOnSuccess(t *testing.T) {
 // writeKeptLocalSnapshots writes n snapshot files that keep-local under startSnapshotsDownload (no
 // metainfo backs their preverified hash). Content embeds the name so distinct items hash to
 // distinct infohashes; identical content would collide and one would appear to lose the race for a
-// reason unrelated to seedConcurrency.
+// reason unrelated to the seed bound.
 func writeKeptLocalSnapshots(t *testing.T, d *Downloader, n, size int) (items []preverifiedSnapshot, names []string) {
 	t.Helper()
 	for i := range n {
@@ -820,19 +829,17 @@ func writeKeptLocalSnapshots(t *testing.T, d *Downloader, n, size int) (items []
 	return
 }
 
-// startSnapshotsDownload wires seedConcurrency into the real seeding path: at most that many
-// kept-local snapshots seed concurrently, and abandoning the batch (a cancelled wait ctx) drops
-// whatever is still queued behind the bound instead of leaking it past the batch's own lifetime.
+// startSnapshotsDownload wires d.seedSem into the real seeding path: at most that many kept-local
+// snapshots seed concurrently, and abandoning the batch (a cancelled wait ctx) drops whatever is
+// still queued behind the bound instead of leaking it past the batch's own lifetime.
 func TestKeptLocalSeedingRespectsBoundAndAbandonCause(t *testing.T) {
 	const bound = 2
-	previous := seedConcurrency
-	seedConcurrency = bound
-	t.Cleanup(func() { seedConcurrency = previous })
 	const n = bound + 4
 
 	t.Run("success", func(t *testing.T) {
 		require := require.New(t)
 		d := newDownloaderTest(t).downloader
+		d.seedSem = semaphore.NewWeighted(bound)
 		markInitialDownloadComplete(t, d)
 
 		items, names := writeKeptLocalSnapshots(t, d, n, 64)
@@ -852,12 +859,15 @@ func TestKeptLocalSeedingRespectsBoundAndAbandonCause(t *testing.T) {
 	t.Run("abandoned", func(t *testing.T) {
 		require := require.New(t)
 		d := newDownloaderTest(t).downloader
+		d.seedSem = semaphore.NewWeighted(bound)
 		markInitialDownloadComplete(t, d)
 
-		// Large enough that hashing one file outlasts dispatching and cancelling the rest, so a
-		// slot can't free up and let a queued item past the bound before the cancel lands.
-		const fileSize = 16 << 20
-		items, names := writeKeptLocalSnapshots(t, d, n, fileSize)
+		// Hold every seed slot so each goSeed task deterministically queues behind the bound,
+		// whatever the scheduler does, instead of racing file hashing against the cancel below.
+		require.NoError(d.seedSem.Acquire(context.Background(), bound))
+		defer d.seedSem.Release(bound)
+
+		items, names := writeKeptLocalSnapshots(t, d, n, 64)
 
 		wait, err := d.startSnapshotsDownload(t.Context(), items, "testing")
 		require.NoError(err)
@@ -865,19 +875,99 @@ func TestKeptLocalSeedingRespectsBoundAndAbandonCause(t *testing.T) {
 		ctx, cancel := context.WithCancelCause(t.Context())
 		dropped := errors.New("abandon queued kept-local seeding")
 		cancel(dropped)
-		require.ErrorIs(wait(ctx), dropped,
-			"dropping queued seeding must not report success, or the caller publishes chain.toml for it")
+
+		done := make(chan error, 1)
+		go func() { done <- wait(ctx) }()
+		select {
+		case err := <-done:
+			require.ErrorIs(err, dropped,
+				"dropping queued seeding must not report success, or the caller publishes chain.toml for it")
+		case <-time.After(30 * time.Second):
+			t.Fatal("wait did not return after the caller cancelled")
+		}
 
 		d.lock.RLock()
 		defer d.lock.RUnlock()
-		registered := 0
 		for _, name := range names {
-			if _, ok := d.torrentsByName[name]; ok {
-				registered++
-			}
+			_, registered := d.torrentsByName[name]
+			require.False(registered, "abandonment must drop seeding still queued behind the held bound: %s", name)
 		}
-		require.LessOrEqual(registered, bound, "abandonment must drop seeding still queued behind the bound")
 	})
+}
+
+// A batch that fails for its own reasons — here, one of its torrents closing — must still seed
+// kept-local items it already queued: only the caller's own ctx may drop queued seeding.
+func TestKeptLocalSeedingSurvivesTorrentClosed(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+	markInitialDownloadComplete(t, d)
+	d.seedSem = semaphore.NewWeighted(1)
+	d.incDownloadRequests()
+
+	_, names := writeKeptLocalSnapshots(t, d, 2, 64)
+
+	pendingName := "a.seg"
+	snapshotTorrent, _, _, keptLocal, err := d.addPreverifiedSnapshotForDownload(snaptype.Hex2InfoHash("bb"), pendingName)
+	require.NoError(err)
+	require.False(keptLocal)
+	require.True(snapshotTorrent.Ok)
+
+	batch := &downloadBatch{d: d}
+	batch.torrents = append(batch.torrents, snapshotTorrent.Value)
+	_, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
+
+	// Only one of the two can hold the seed semaphore's single slot; the other queues behind it,
+	// gated the same way so it stays queued until end()'s cancel-or-not decision has been made.
+	gate := make(chan struct{})
+	for _, name := range names {
+		batch.goSeed(func() {
+			<-gate
+			d.seedKeptSnapshot(batch.seedCtx, name)
+		})
+	}
+
+	require.NoError(d.Delete(pendingName))
+
+	done := make(chan error, 1)
+	go func() { done <- batch.wait(t.Context()) }()
+
+	require.Never(func() bool { return batch.seedCtx.Err() != nil }, 100*time.Millisecond, time.Millisecond,
+		"a torrent closing for its own reasons must not cancel queued kept-local seeding")
+	close(gate)
+
+	select {
+	case err := <-done:
+		require.ErrorContains(err, "unexpectedly closed")
+	case <-time.After(30 * time.Second):
+		t.Fatal("wait did not return after the gate opened")
+	}
+
+	d.lock.RLock()
+	defer d.lock.RUnlock()
+	for _, name := range names {
+		_, registered := d.torrentsByName[name]
+		require.True(registered, "kept-local seeding must survive an unrelated torrent closing: %s", name)
+	}
+}
+
+// A second end() call must be a no-op: activeDownloadRequests tracks one increment per
+// startSnapshotsDownload call and must not go negative from a duplicate decrement.
+func TestEndIsIdempotent(t *testing.T) {
+	require := require.New(t)
+	d := newDownloaderTest(t).downloader
+	d.incDownloadRequests()
+
+	batch := &downloadBatch{d: d}
+	_, batch.cancel = context.WithCancelCause(d.ctx)
+	batch.seedCtx, batch.seedCancel = context.WithCancelCause(d.ctx)
+
+	batch.end(t.Context(), errors.New("first end"))
+	batch.end(t.Context(), errors.New("second end"))
+
+	d.activeDownloadRequestsLock.Lock()
+	defer d.activeDownloadRequestsLock.Unlock()
+	require.Zero(d.activeDownloadRequests, "a second end call must not decrement activeDownloadRequests again")
 }
 
 // The snapshot stage writes preverified.toml mid-run, so the rule must be re-read, not cached from

@@ -10,16 +10,18 @@ import (
 
 	"github.com/anacrolix/sync"
 	"github.com/anacrolix/torrent"
-	"golang.org/x/sync/semaphore"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
-// Caps concurrent whole-file hashing by kept-snapshot seeding.
-var seedConcurrency = runtime.GOMAXPROCS(-1) * 16
+// Seeding a kept snapshot hashes the whole file, so the work is CPU-bound with a sequential read:
+// GOMAXPROCS sets the scale and the doubling covers read stalls. BuildTorrentFilesIfNeed can afford
+// far more because most of its files already have a .torrent and short-circuit; these rarely do.
+func defaultSeedConcurrency() int { return max(1, runtime.GOMAXPROCS(-1)*2) }
 
 type downloadBatch struct {
 	d      *Downloader
 	cancel context.CancelCauseFunc
-	ctx    context.Context
 	// Tasks that must finish before abandoning the batch.
 	all      sync.WaitGroup
 	torrents []*torrent.Torrent
@@ -28,11 +30,11 @@ type downloadBatch struct {
 	finishedMetadataTasks atomic.Bool
 	// These must be run even if the batch is abandoned.
 	afterTasks chan func()
-	// Caps concurrent seed hashing.
-	seedSem *semaphore.Weighted
-	// Cancelled only on genuine abandonment, unlike ctx which also ends on ordinary completion.
-	seedCancel context.CancelCauseFunc
-	seedCtx    context.Context
+	// Cancelled only when the caller goes away, unlike cancel which also fires on ordinary completion.
+	seedCancel  context.CancelCauseFunc
+	seedCtx     context.Context
+	seedDropped atomic.Int64
+	ended       sync.Once
 }
 
 // Waits for all the fetches to complete then fires off the thread-safe Torrent methods to configure
@@ -55,8 +57,7 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 		return err
 	}
 	if keptLocal {
-		// Once queued, seeding must survive the batch: use d.ctx, not batch.ctx or seedCtx.
-		me.goSeed(func() { me.d.seedKeptSnapshot(me.d.ctx, item.Name) })
+		me.goSeed(func() { me.d.seedKeptSnapshot(me.seedCtx, item.Name) })
 	}
 	if !snapshotTorrent.Ok {
 		return nil
@@ -76,10 +77,11 @@ func (me *downloadBatch) addDownload(item preverifiedSnapshot) error {
 
 func (me *downloadBatch) goSeed(f func()) {
 	me.all.Go(func() {
-		if me.seedSem.Acquire(me.seedCtx, 1) != nil {
+		if me.d.seedSem.Acquire(me.seedCtx, 1) != nil {
+			me.seedDropped.Add(1)
 			return
 		}
-		defer me.seedSem.Release(1)
+		defer me.d.seedSem.Release(1)
 		f()
 	})
 }
@@ -110,25 +112,30 @@ func (me *downloadBatch) doMetainfoTask(task func() func()) {
 	}
 }
 
-// A nil cause means the batch finished on its own, which still ends it but lets queued seeding run.
-func (me *downloadBatch) abandon(cause error) {
-	ended := errors.New("download batch abandoned")
-	// seedCtx is a d.ctx child, so it outlives the batch unless it is always released.
-	defer me.seedCancel(ended)
-	me.cancel(ended)
-	if cause != nil {
-		me.seedCancel(cause)
-	}
-	me.all.Wait()
-	me.d.decDownloadRequests()
+// Queued seeding is dropped only when ctx goes away, including a cancel arriving during the join.
+// A batch that failed for its own reasons still seeds what it holds.
+func (me *downloadBatch) end(ctx context.Context, cause error) {
+	me.ended.Do(func() {
+		ended := cmp.Or(cause, errors.New("download batch ended"))
+		me.cancel(ended)
+		stop := context.AfterFunc(ctx, func() { me.seedCancel(context.Cause(ctx)) })
+		defer stop()
+		// seedCtx is a d.ctx child, so it outlives the batch unless it is always released.
+		defer me.seedCancel(ended)
+		me.all.Wait()
+		if dropped := me.seedDropped.Load(); dropped > 0 {
+			me.d.log(log.LvlWarn, "dropped queued kept-local seeding", "count", dropped)
+		}
+		me.d.decDownloadRequests()
+	})
 }
 
 func (me *downloadBatch) wait(ctx context.Context) (err error) {
 	// An all-kept-local batch has no torrents, so the loop below never samples ctx: a cancelled
-	// caller must still surface as an error, or dropped seeding reports success.
+	// caller must still surface as an error, or seeding it dropped reports success.
 	defer func() {
 		err = cmp.Or(err, context.Cause(ctx))
-		me.abandon(err)
+		me.end(ctx, err)
 	}()
 	for _, t := range me.torrents {
 		select {
