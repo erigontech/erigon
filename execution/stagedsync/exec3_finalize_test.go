@@ -2104,3 +2104,43 @@ func BenchmarkCalcFees(b *testing.B) {
 		}
 	}
 }
+
+// An Estimate cell need not come from a destruct to make a live coinbase read
+// empty: an invalidated tx that only moved the balance leaves a lone Estimate
+// BalancePath=0 over a funded account, which the balance floor serves.
+func TestCalcFees_EstimateBalanceAloneDoesNotPruneCoinbase(t *testing.T) {
+	t.Parallel()
+	coinbase := fAddr("coinbase")
+
+	reader := newMapStateReader()
+	reader.accounts[coinbase] = &accounts.Account{Balance: *uint256.NewInt(5_000_000), Incarnation: 1}
+
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+	version := state.Version{BlockNum: 1, TxNum: 3, TxIndex: 2}
+	txTask := &exec.TxTask{
+		Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+		Config:          chain.TestChainBerlinConfig,
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	task := &taskVersion{
+		execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+		version:  version,
+	}
+	result := &execResult{TxResult: &exec.TxResult{
+		Task:            task,
+		ExecutionResult: evmtypes.ExecutionResult{BurntContractAddress: accounts.NilAddress},
+		Coinbase:        coinbase,
+	}}
+	result.TxOut = &state.WriteSet{}
+
+	vm := state.NewVersionMap(nil)
+	spend := state.Version{TxIndex: 1}
+	vm.WriteBalance(coinbase, spend, uint256.Int{}, true)
+	vm.MarkEstimate(coinbase, state.BalancePath, accounts.NilKey, spend.TxIndex)
+
+	writes, _, err := result.calcFees(task, vm, reader, &chain.Rules{IsSpuriousDragon: true}, nil)
+	require.NoError(t, err)
+	_, pruned := writes.GetSelfDestruct(coinbase)
+	require.False(t, pruned, "a funded coinbase must not be deleted on an in-flight zero balance")
+	require.True(t, writes.IsEmpty(), "a live coinbase with no tip needs no write at all")
+}
