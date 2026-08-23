@@ -2650,7 +2650,7 @@ func TestFromDBLoadsUnderPoolLock(t *testing.T) {
 		// write pair, which -race reports and the Go runtime aborts on. Locked,
 		// OnNewBlock cannot start yet, so the window closes on the deadline instead.
 		deadline := time.After(200 * time.Millisecond)
-		for i := 0; i < senderCount; i++ {
+		for i := range senderCount {
 			pool.senders.getOrCreateID(testAddr(i), logger)
 			select {
 			case <-onNewBlockDone:
