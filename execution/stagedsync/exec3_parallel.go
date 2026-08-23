@@ -2330,7 +2330,7 @@ var (
 	mxBlockExecSeconds      = metrics.GetOrCreateSummary("exec3_block_exec_seconds")
 	mxTxnExecSeconds        = metrics.GetOrCreateSummary("exec3_txn_exec_seconds")
 	mxProcessResultsSeconds = metrics.GetOrCreateSummary("exec3_process_results_seconds")
-	slowStageThreshold      = time.Duration(dbg.EnvInt("SLOW_STAGE_MS", 100)) * time.Millisecond
+	slowStageThreshold      = time.Duration(dbg.EnvInt("SLOW_STAGE_MS", 200)) * time.Millisecond
 )
 
 type blockExecMetrics struct {
