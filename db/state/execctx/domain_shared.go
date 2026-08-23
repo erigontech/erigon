@@ -295,7 +295,8 @@ type SharedDomains struct {
 	// global current-changeset-accumulator pointer against DomainPut/DomainDel:
 	// without it a block N+1 write can land in block N's changeset during the
 	// swap+compute+restore window, so a later unwind reads stale prev-values.
-	changesetMu sync.Mutex
+	changesetMu       sync.Mutex
+	changesetLockedAt time.Time
 
 	// branchCache is the aggregator-scope commitment-branch cache. It sits
 	// behind sd.mem and sd.parent.mem in the read chain (consulted only after
@@ -668,8 +669,17 @@ func (sd *SharedDomains) flushRequestMetrics() {
 // Inside the locked window callers must use the *Locked variants
 // (SwapChangesetAccumulatorLocked / DetachChangesetAccumulatorLocked) —
 // the public Set/Get acquire the same Mutex and would self-deadlock.
-func (sd *SharedDomains) LockChangesetAccumulator()   { sd.changesetMu.Lock() }
-func (sd *SharedDomains) UnlockChangesetAccumulator() { sd.changesetMu.Unlock() }
+func (sd *SharedDomains) LockChangesetAccumulator() {
+	sd.changesetMu.Lock()
+	sd.changesetLockedAt = time.Now()
+}
+
+func (sd *SharedDomains) UnlockChangesetAccumulator() {
+	if held := time.Since(sd.changesetLockedAt); held >= dbg.ToLogSlowTxn {
+		log.Warn("[dbg] slow changesetMu hold", "held", held)
+	}
+	sd.changesetMu.Unlock()
+}
 
 // SetChangesetAccumulator installs the given accumulator as the global
 // "current" target for DomainPut/DomainDel diff recording. Locks
