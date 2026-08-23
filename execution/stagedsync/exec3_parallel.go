@@ -1236,7 +1236,7 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 		if blockDur > time.Millisecond {
 			mxBlockExecSeconds.Observe(blockDur.Seconds())
 		}
-		if blockDur >= 5*dbg.ToLogSlowTxn {
+		if blockDur >= 6*dbg.ToLogSlowTxn {
 			log.Warn("[dbg] slow block exec", "took", blockDur, "blockNum", be.number(), "txs", len(be.tasks))
 		}
 	}
