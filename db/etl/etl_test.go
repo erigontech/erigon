@@ -496,9 +496,10 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	c.Close()
 
 	// buffers are not lost
-	require.Empty(t, buf.data)
+	require.Zero(t, buf.dataLen)
 	require.Empty(t, buf.entries)
-	require.NotZero(t, cap(buf.data))
+	require.NotEmpty(t, buf.chunks)
+	require.NotZero(t, cap(buf.chunks[0]))
 	require.NotZero(t, cap(buf.entries))
 
 	// teset that no data visible
