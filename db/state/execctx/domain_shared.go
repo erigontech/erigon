@@ -649,22 +649,20 @@ func (sd *SharedDomains) flushRequestMetrics() {
 	sd.reqMetrics = nil
 }
 
-// LockChangesetAccumulator and UnlockChangesetAccumulator bracket a
-// swap+use+restore sequence on the global accumulator pointer (see
-// changesetMu doc on the SharedDomains struct for the layering rationale).
-// Apply-side DomainPut/DomainDel take the same lock briefly so they
-// cannot record into a swapped accumulator that does not belong to the
-// block they are writing for.
+// LockChangesetAccumulator and UnlockChangesetAccumulator bracket the
+// calculator's swap+use+restore of the commitment writer's diff. It
+// serializes against the exec loop's per-block SetChangesetAccumulator;
+// apply-side DomainPut/DomainDel no longer take it, because the swap
+// leaves their writers alone (see SwapCommitmentDiffLocked).
 //
-// Holders MUST pair Lock with Unlock and MUST keep the critical section
-// short — currently the calculator's per-block ComputeCommitment runs
-// inside this lock, which serializes apply-side writes for the duration
-// of compute. That cost goes away once the post-hoc-from-sd-entries
-// derivation lands and this lock + the swap dance can both be deleted.
+// The calculator's per-block ComputeCommitment still runs inside this
+// lock, so the exec loop's accumulator install waits on it. That goes
+// away once the post-hoc-from-sd-entries derivation lands and this lock
+// + the swap dance can both be deleted.
 //
 // Inside the locked window callers must use the *Locked variants
-// (SwapChangesetAccumulatorLocked / DetachChangesetAccumulatorLocked) —
-// the public Set/Get acquire the same Mutex and would self-deadlock.
+// (SwapCommitmentDiffLocked / DetachChangesetAccumulatorLocked) — the
+// public Set/Get acquire the same Mutex and would self-deadlock.
 func (sd *SharedDomains) LockChangesetAccumulator()   { sd.changesetMu.Lock() }
 func (sd *SharedDomains) UnlockChangesetAccumulator() { sd.changesetMu.Unlock() }
 
