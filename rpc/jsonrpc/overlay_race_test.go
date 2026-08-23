@@ -44,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/tests/blockgen"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -497,6 +498,23 @@ func TestGetRawBlock_PinsOverlayView(t *testing.T) {
 	block, err := api.GetRawBlock(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayHeader.Number.Uint64())))
 	require.NoError(t, err)
 	require.NotNil(t, block)
+}
+
+func TestGetRawReceipts_PinsOverlayView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader, events := newOverlayAheadTestAPIWithEvents(t)
+	overlay := events.LatestSD().BlockOverlay()
+	require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, overlayHeader.Number.Uint64()))
+	base._blockReader = &unpublishOverlayBlockReader{
+		FullBlockReader: base._blockReader,
+		events:          events,
+		blockNumber:     overlayHeader.Number.Uint64(),
+	}
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	receipts, err := api.GetRawReceipts(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayHeader.Number.Uint64())))
+	require.NoError(t, err)
+	require.NotNil(t, receipts)
 }
 
 func TestGetRawTransaction_PinsOverlayView(t *testing.T) {

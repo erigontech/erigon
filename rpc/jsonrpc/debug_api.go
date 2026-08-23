@@ -720,7 +720,8 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 	}
 	defer tx.Rollback()
 
-	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, api.filters)
+	overlayTx := api.filters.WithTemporalOverlay(tx)
+	blockNum, blockHash, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, api.filters)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645
@@ -728,19 +729,19 @@ func (api *DebugAPIImpl) GetRawReceipts(ctx context.Context, blockNrOrHash rpc.B
 		return nil, err
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockNum)
+	block, err := api.blockWithSenders(ctx, overlayTx, blockHash, blockNum)
 	if err != nil {
 		return nil, err
 	}
 	if block == nil {
 		return nil, nil
 	}
-	receipts, err := api.getReceipts(ctx, tx, block)
+	receipts, err := api.getReceipts(ctx, overlayTx, block)
 	if err != nil {
 		return nil, err
 	}
