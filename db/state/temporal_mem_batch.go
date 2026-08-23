@@ -27,10 +27,13 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"time"
 
 	btree2 "github.com/tidwall/btree"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/changeset"
@@ -117,8 +120,15 @@ func (sd *TemporalMemBatch) SetInMemHistoryReads(v bool) { sd.inMemHistoryReads 
 func (sd *TemporalMemBatch) InMemHistoryReads() bool     { return sd.inMemHistoryReads }
 
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
+	t0 := time.Now()
 	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum)
-	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
+	t1 := time.Now()
+	err := sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
+	if took := time.Since(t0); took >= dbg.ToLogSlowTxn {
+		log.Warn("[dbg] slow memBatch DomainPut", "took", took, "domain", domain, "txNum", txNum,
+			"putLatest", t1.Sub(t0), "putHistory", time.Since(t1), "vLen", len(v), "prevLen", len(preval))
+	}
+	return err
 }
 
 func (sd *TemporalMemBatch) DomainDel(domain kv.Domain, k string, txNum uint64, preval []byte) error {
