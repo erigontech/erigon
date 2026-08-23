@@ -768,7 +768,17 @@ func (e *ExecModule) IngestSealedFlashblock(ctx context.Context, sealed *types.H
 	if _, err := rawdb.WriteRawBodyIfNotExists(ov, newHash, number, body); err != nil {
 		return fmt.Errorf("IngestSealedFlashblock: write body: %w", err)
 	}
-	e.forkValidator.SealInPlace(oldHash, newHash)
+	// Remove the DEFERRED (zero-output) in-progress block so the post-newPayload state is IDENTICAL to a
+	// normal newPayload: exactly ONE block at this height (the sealed H1). The deferred ibHash is a scratch
+	// artifact of the flashblock accumulation — leaving it would strand an orphan header/body/TD at height N.
+	rawdb.DeleteHeader(ov, oldHash, number)
+	rawdb.DeleteBody(ov, oldHash, number)
+	if err := ov.Delete(kv.HeaderTD, dbutils.HeaderKey(number, oldHash)); err != nil {
+		return fmt.Errorf("IngestSealedFlashblock: delete deferred TD: %w", err)
+	}
+	if err := e.forkValidator.SealInPlace(oldHash, newHash); err != nil {
+		return fmt.Errorf("IngestSealedFlashblock: seal in place: %w", err)
+	}
 	e.logger.Debug("[execmodule] flashblock sealed (newPayload ingest)",
 		"number", number, "deferredHash", oldHash, "sealedHash", newHash, "root", sealed.Root)
 	return nil

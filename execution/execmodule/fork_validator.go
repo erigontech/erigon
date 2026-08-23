@@ -441,13 +441,27 @@ func (fv *ForkValidator) validateAndStorePayload(ctx context.Context, sd *execct
 // the block overlay. Point the extending fork at H1 and mark it valid, so a normal FCU(H1) takes the
 // merge-extending-fork fast path (no re-execution) and canonicalises the correct header. The maintained
 // sharedDom (already holding the sealed state) and extendingForkNumber are unchanged.
-func (fv *ForkValidator) SealInPlace(oldHash, newHash common.Hash) {
+func (fv *ForkValidator) SealInPlace(oldHash, newHash common.Hash) error {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 	if fv.extendingForkHeadHash == oldHash {
 		fv.extendingForkHeadHash = newHash
 	}
 	fv.validHashes.Add(newHash, true)
+	// The extending fork's SD block-overlay recorded HeadHeaderKey = oldHash (the executed in-progress
+	// header) during fork-validation StateStep. On the merge-extending-fork FCU, MergeExtendingFork
+	// flushes THIS overlay into the FCU tx (domain_shared.go), which would clobber the FCU's own
+	// HeadHeaderKey=newHash with the stale oldHash — and stage_finish then copies that into the head
+	// block hash, yielding a head/blockHash mismatch. Rewrite it to the sealed newHash here so the merge
+	// replays the correct head. (After this, the merged FCU state is identical to a normal newPayload's.)
+	if fv.sharedDom != nil {
+		if ov := fv.sharedDom.BlockOverlay(); ov != nil {
+			if err := rawdb.WriteHeadHeaderHash(ov, newHash); err != nil {
+				return err
+			}
+		}
+	}
+	return nil
 }
 
 // GetTimings returns the timings of the last block validation.
