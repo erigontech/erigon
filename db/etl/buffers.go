@@ -166,6 +166,9 @@ type entryLoc struct {
 // keyPrefixOf packs the first 8 key bytes big-endian, zero-padded, so comparing
 // prefixes as uint64 orders them the same as comparing the bytes.
 func keyPrefixOf(k []byte) uint64 {
+	if len(k) >= 8 {
+		return binary.BigEndian.Uint64(k)
+	}
 	var buf [8]byte
 	copy(buf[:], k)
 	return binary.BigEndian.Uint64(buf[:])
