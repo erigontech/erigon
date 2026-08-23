@@ -3376,6 +3376,23 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			receipts.DeriveFields(blockReceipts, be.hash())
 		}
 
+		{
+			prStarted := time.Now()
+			defer func() {
+				took := time.Since(prStarted)
+				if took > time.Millisecond {
+					mxProcessResultsSeconds.Observe(took.Seconds())
+				}
+				if took >= 4*dbg.ToLogSlowTxn {
+					bn := uint64(0)
+					if res != nil {
+						bn = res.BlockNumber()
+					}
+					log.Warn("[dbg] slow nextResult4", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+				}
+			}()
+		}
+
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
 		// side so finalize writes go to the BlockStateCache before the Flush.
 		var finalizeWrites *state.WriteSet
@@ -3486,6 +3503,23 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return nil, err
 				}
 			}
+		}
+
+		{
+			prStarted := time.Now()
+			defer func() {
+				took := time.Since(prStarted)
+				if took > time.Millisecond {
+					mxProcessResultsSeconds.Observe(took.Seconds())
+				}
+				if took >= 4*dbg.ToLogSlowTxn {
+					bn := uint64(0)
+					if res != nil {
+						bn = res.BlockNumber()
+					}
+					log.Warn("[dbg] slow nextResult5", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+				}
+			}()
 		}
 
 		// Send finalize txResult through the channel for index writes.
