@@ -85,6 +85,10 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 // the data they actually see; grown capacity survives reuse (Reset preserves
 // cap), so hot collectors amortize growth while never-full ones stay small.
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
+
+// EtlPrealloc pre-sizes a pooled buffer's data slice on checkout. 0 keeps the
+// grow-on-demand behaviour.
+var EtlPrealloc = dbg.EnvDataSize("ETL_PREALLOC", 0)
 var SmallSortableBuffers = NewAllocator(&sync.Pool{
 	New: func() any {
 		return NewSortableBuffer(etlSmallBufRAM)
