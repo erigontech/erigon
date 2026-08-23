@@ -28,8 +28,12 @@ import (
 const (
 	// pbinStateMarker opens every pbin blob. A hex blob opens with a root-flags
 	// byte ≤ 0x07, so the marker also refuses a cross-variant restore outright.
-	pbinStateMarker  = 0xB1
-	pbinRecordFormat = 4
+	pbinStateMarker = 0xB1
+	// Above pbinStateFlagsAll on purpose. A pre-version blob is
+	// marker|flags|rootLen, so its flags byte occupies the offset the format byte
+	// now holds; any value at or below 0x07 is a real legacy blob that would
+	// validate as a current one.
+	pbinRecordFormat = 0x10
 
 	pbinStateRootPresent = 1
 	pbinStateRootChecked = 2

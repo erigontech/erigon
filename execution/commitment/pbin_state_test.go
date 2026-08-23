@@ -185,6 +185,17 @@ func TestPBinSetStateRejectsPreVersionBlob(t *testing.T) {
 	require.ErrorIs(t, err, errPBinStateBlob)
 }
 
+func TestPBinRejectsEveryPreVersionFlagsByte(t *testing.T) {
+	t.Parallel()
+
+	_, ms := pbinTestEngine(t)
+	for flags := byte(0); flags <= pbinStateFlagsAll; flags++ {
+		legacy := []byte{pbinStateMarker, flags, 0, 0}
+		require.ErrorIs(t, ValidatePBinStateFormat(legacy), errPBinStateBlob, "flags %08b", flags)
+		require.ErrorIs(t, NewPBinPatriciaHashed(ms).SetState(legacy), errPBinStateBlob, "flags %08b", flags)
+	}
+}
+
 // With a row still open, part of the tree lives in the grid arrays and a
 // root-cell snapshot would silently drop it.
 func TestPBinStateRefusesOpenRows(t *testing.T) {
