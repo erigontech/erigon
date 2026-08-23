@@ -505,10 +505,12 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 		}
 	}
 	tLogs := time.Now()
+	tVer, tPutDel, tMeta := tLogs, tLogs, tLogs
 	defer func() {
 		if took := time.Since(tStart); took >= dbg.ToLogSlowTxn {
 			log.Warn("[dbg] slow applyLogsAndTraces4", "took", took, "txNum", txNum,
-				"tracesFrom", tFrom.Sub(tStart), "tracesTo", tTo.Sub(tFrom), "logs", tLogs.Sub(tTo), "receipts", time.Since(tLogs),
+				"tracesFrom", tFrom.Sub(tStart), "tracesTo", tTo.Sub(tFrom), "logs", tLogs.Sub(tTo),
+				"rcptVer", tVer.Sub(tLogs), "rcptPutDel", tPutDel.Sub(tVer), "rcptMeta", tMeta.Sub(tPutDel), "rcptCache", time.Since(tMeta),
 				"nFrom", len(traceFroms), "nTo", len(traceTos), "nLogs", len(logs), "nTopics", nTopics)
 		}
 	}()
@@ -521,10 +523,13 @@ func (rs *StateV3) applyLogsAndTraces4(tx kv.TemporalTx, txNum uint64, receipt *
 			if !rawtemporaldb.ReceiptStoresFirstLogIdx(tx) {
 				blockLogIndex += uint32(len(receipt.Logs))
 			}
+			tVer = time.Now()
 			putter = domains.AsPutDel(tx)
+			tPutDel = time.Now()
 			if err := rs.receiptsWriter.AppendMetadata(putter, blockLogIndex, receipt.CumulativeGasUsed, cummulativeBlobGas, txNum); err != nil {
 				return err
 			}
+			tMeta = time.Now()
 		}
 	}
 

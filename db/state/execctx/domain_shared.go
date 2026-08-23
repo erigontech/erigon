@@ -1773,10 +1773,12 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
+	tStart := time.Now()
 	ks := string(k)
 	if !sd.disableInlineTouchKey {
 		sd.sdCtx.TouchKey(domain, ks, v)
 	}
+	tTouch := time.Now()
 	if prevVal == nil {
 		var err error
 		prevVal, _, err = sd.GetLatest(domain, roTx, k)
@@ -1784,6 +1786,14 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 			return err
 		}
 	}
+	tGet := time.Now()
+	tLock, tPut := tGet, tGet
+	defer func() {
+		if took := time.Since(tStart); took >= dbg.ToLogSlowTxn {
+			log.Warn("[dbg] slow domainPut", "took", took, "domain", domain, "txNum", txNum,
+				"touchKey", tTouch.Sub(tStart), "getLatest", tGet.Sub(tTouch), "lock", tLock.Sub(tGet), "memPut", tPut.Sub(tLock))
+		}
+	}()
 	switch domain {
 	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
 		if bytes.Equal(prevVal, v) {
@@ -1813,7 +1823,10 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		sd.changesetMu.Lock()
 		defer sd.changesetMu.Unlock()
 	}
-	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
+	tLock = time.Now()
+	err := sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
+	tPut = time.Now()
+	return err
 }
 
 // DomainDel
