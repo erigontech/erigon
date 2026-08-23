@@ -1236,7 +1236,7 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 		if blockDur > time.Millisecond {
 			mxBlockExecSeconds.Observe(blockDur.Seconds())
 		}
-		if blockDur >= 5*toLogSlowTxnThreshold {
+		if blockDur >= 5*dbg.ToLogSlowTxn {
 			log.Warn("[dbg] slow block exec", "took", blockDur, "blockNum", be.number(), "txs", len(be.tasks))
 		}
 	}
@@ -2279,7 +2279,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 
 	if taskDur := time.Since(start); taskDur > 1*time.Millisecond {
 		mxTxnExecSeconds.Observe(taskDur.Seconds())
-		if taskDur >= toLogSlowTxnThreshold {
+		if taskDur >= dbg.ToLogSlowTxn {
 			log.Warn("[dbg] slow txn exec", "took", taskDur,
 				"blockNum", ev.Task.(*exec.TxTask).BlockNumber(), "txIndex", ev.version.TxIndex,
 				"incarnation", ev.version.Incarnation)
@@ -2316,7 +2316,6 @@ var (
 	mxBlockExecSeconds      = metrics.GetOrCreateSummary("exec3_block_exec_seconds")
 	mxTxnExecSeconds        = metrics.GetOrCreateSummary("exec3_txn_exec_seconds")
 	mxProcessResultsSeconds = metrics.GetOrCreateSummary("exec3_process_results_seconds")
-	toLogSlowTxnThreshold   = time.Duration(dbg.EnvInt("SLOW_STAGE_MS", 100)) * time.Millisecond
 )
 
 type blockExecMetrics struct {
@@ -2700,7 +2699,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		if took > time.Millisecond {
 			mxProcessResultsSeconds.Observe(took.Seconds())
 		}
-		if took >= toLogSlowTxnThreshold {
+		if took >= dbg.ToLogSlowTxn {
 			bn := uint64(0)
 			if res != nil {
 				bn = res.BlockNumber()

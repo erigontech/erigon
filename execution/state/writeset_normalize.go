@@ -21,6 +21,7 @@ import (
 
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/types"
@@ -33,10 +34,6 @@ import (
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
 
 var mxNormalizeTook = metrics.GetOrCreateSummary("exec3_normalize_seconds")
-
-// slowNormalizeThreshold is the debug-branch trigger for dumping write-set
-// geometry, so outlier shapes can be reproduced in the benchmark.
-const slowNormalizeThreshold = 100 * time.Millisecond
 
 // sdCascadeStats accumulates the cost of the self-destruct storage cascade.
 // domainTook is split from vmTook because only the former walks the domain
@@ -121,7 +118,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, blockNum uint64, txIndex int, 
 		if took > 1*time.Millisecond {
 			mxNormalizeTook.Observe(took.Seconds())
 		}
-		if took >= slowNormalizeThreshold {
+		if took >= dbg.ToLogSlowTxn {
 			logSlowNormalize(writes, filtered, took, blockNum, txIndex, incarnation, sdStats)
 		}
 	}()
