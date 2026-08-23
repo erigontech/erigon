@@ -2705,7 +2705,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			if res != nil {
 				bn = res.BlockNumber()
 			}
-			log.Warn("[dbg] slow nextResult", "took", took, "blockNum", bn)
+			log.Warn("[dbg] slow nextResult", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
 		}
 	}()
 
