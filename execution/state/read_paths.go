@@ -883,7 +883,7 @@ func SeedOrigin(vm *VersionMap, addr accounts.Address, acc *accounts.Account) {
 		return
 	}
 	origin := *acc
-	vm.WriteAddress(addr, Version{TxIndex: originIndex}, &origin, true)
+	vm.WriteOriginAddressOnce(addr, &origin)
 }
 
 // seedStorageOrigin records a cold slot's committed value as its versionMap

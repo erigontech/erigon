@@ -284,6 +284,24 @@ func (vm *VersionMap) WriteAddress(addr accounts.Address, v Version, value *acco
 	e.Address = putCell(vm, e.Address, addr, AddressPath, v.TxIndex, v.Incarnation, flagFor(complete), value, getCellAccount, nil)
 }
 
+// WriteOriginAddressOnce seeds addr's committed pre-block account at originIndex
+// only if no origin cell exists yet. Origin is the immutable pre-block base for
+// the life of the block; re-seeding it corrupts every fall-through read (calcFees
+// obtains the coinbase via a floor-composed reader, so a re-seed would publish a
+// mid-block, tip-inflated balance as the base). Mirrors the seed-once discipline
+// seedStorageOrigin already applies to storage slots.
+func (vm *VersionMap) WriteOriginAddressOnce(addr accounts.Address, value *accounts.Account) {
+	e := vm.entryOrCreate(addr)
+	e.mu.Lock()
+	defer e.mu.Unlock()
+	if e.Address != nil {
+		if _, ok := e.Address.Get(originIndex); ok {
+			return
+		}
+	}
+	e.Address = putCell(vm, e.Address, addr, AddressPath, originIndex, 0, flagFor(true), value, getCellAccount, nil)
+}
+
 func (vm *VersionMap) WriteSelfDestruct(addr accounts.Address, v Version, value bool, complete bool) {
 	e := vm.entryOrCreate(addr)
 	e.mu.Lock()
