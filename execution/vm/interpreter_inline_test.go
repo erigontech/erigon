@@ -35,8 +35,8 @@ func runInlineOracle(t *testing.T, self accounts.Address, code []byte, noInline 
 	s := state.NewWithVersionMap(r, state.NewVersionMap(nil))
 	s.SetVersion(0)
 	defer s.Release(false)
-	s.CreateAccount(self, true)
-	s.SetCode(self, code, tracing.CodeChangeUnspecified)
+	require.NoError(t, s.CreateAccount(self, true))
+	require.NoError(t, s.SetCode(self, code, tracing.CodeChangeUnspecified))
 
 	vmctx := evmtypes.BlockContext{
 		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
@@ -96,8 +96,8 @@ func benchRunVersionedCfg(b *testing.B, self accounts.Address, code []byte, cfg 
 	r := state.NewReaderV3(sd.AsGetter(tx))
 	s := state.NewWithVersionMap(r, state.NewVersionMap(nil))
 	s.SetVersion(0)
-	s.CreateAccount(self, true)
-	s.SetCode(self, code, tracing.CodeChangeUnspecified)
+	require.NoError(b, s.CreateAccount(self, true))
+	require.NoError(b, s.SetCode(self, code, tracing.CodeChangeUnspecified))
 	vmctx := evmtypes.BlockContext{
 		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {

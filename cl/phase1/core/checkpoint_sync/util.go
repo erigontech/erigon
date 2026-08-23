@@ -147,6 +147,11 @@ func readLocalStateFile(dirs datadir.Dirs, beaconCfg *clparams.BeaconChainConfig
 	if err := bs.DecodeSSZ(decompressed, int(beaconCfg.GetCurrentStateVersion(epoch))); err != nil {
 		return nil, fmt.Errorf("could not decode local %s state: %w", kind, err)
 	}
+	if fileName == clparams.LatestFinalizedStateFileName {
+		if err := RestoreFinalizedStateRoot(afero.NewBasePathFs(afero.NewOsFs(), dirs.CaplinLatest), snappyEncoded, bs); err != nil {
+			return nil, err
+		}
+	}
 	return bs, nil
 }
 

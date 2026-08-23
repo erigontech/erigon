@@ -150,10 +150,6 @@ func SpawnStageSnapshots(s *StageState, ctx context.Context, tx kv.RwTx, cfg Sna
 	if !cfg.blockReader.Snapshots().DownloadReady() {
 		cfg.blockReader.Snapshots().DownloadComplete()
 	}
-	if cfg.chainConfig.Bor != nil && !cfg.blockReader.BorSnapshots().DownloadReady() {
-		cfg.blockReader.BorSnapshots().DownloadComplete()
-	}
-
 	return nil
 }
 
@@ -259,12 +255,6 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 		if err := cfg.blockReader.Snapshots().OpenFolder(); err != nil {
 			return err
 		}
-
-		if cfg.chainConfig.Bor != nil {
-			if err := cfg.blockReader.BorSnapshots().OpenFolder(); err != nil {
-				return err
-			}
-		}
 		if err := agg.OpenFolder(); err != nil {
 			return err
 		}
@@ -360,13 +350,8 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 // On restart (headersProgress > 0), E2 indexing is skipped at startup. Missing indices
 // will be built in the background via BuildFilesInBackground (called from SnapshotsPrune
 // on every sync cycle).
-// Exception: Bor chains always index synchronously because BuildFiles has an early-exit
-// guard for Bor data readiness that may skip BuildMissedIndicesIfNeed.
 func buildOrDeferE2Indices(ctx context.Context, s *StageState, cfg SnapshotsCfg, headersProgress uint64) error {
-	isBor := cfg.chainConfig.Bor != nil
-	canDefer := headersProgress > 0 && !isBor
-
-	if !canDefer {
+	if headersProgress == 0 {
 		if err := cfg.blockRetire.BuildMissedIndicesIfNeed(ctx, s.LogPrefix(), cfg.notifier.Events); err != nil {
 			return err
 		}

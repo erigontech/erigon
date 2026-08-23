@@ -89,7 +89,6 @@ The ETHBACKEND interface provides access to Ethereum-specific backend services i
 | Peers           | Returns information about connected peers           |
 | AddPeer         | Adds a peer to the node                             |
 | PendingBlock    | Returns the pending block                           |
-| BorEvent        | Returns Bor-specific events (Polygon networks only) |
 
 ***
 
@@ -125,53 +124,6 @@ The Downloader interface provides access to snapshot downloading and torrent man
 | Delete       | Removes files from download queue  |
 | Completed    | Checks if downloads are completed  |
 | SetLogPrefix | Sets logging prefix for Downloader |
-
-***
-
-## Polygon Bridge Backend gRPC API
-
-These gRPC APIs are specifically designed for Polygon's Bor consensus mechanism and are only active when running Erigon with Polygon network configuration. The services provide essential functionality for bridge event processing and validator management required by the Polygon network architecture.
-
-### Bridge Backend Methods
-
-**Version Method:**
-
-* `Version()` - Returns the service version number.
-
-**Transaction Lookup:**
-
-* `BorTxnLookup(BorTxnLookupRequest)` - Looks up Bor transaction information by hash.
-
-**Event Retrieval:**
-
-* `BorEvents(BorEventsRequest)` - Retrieves bridge events for a specific block.
-
-### Bridge Backend Implementation
-
-The server implementation is found in `polygon/bridge/server.go` where the `BackendServer` struct implements the `BridgeBackendServer` interface:
-
-* The `BorTxnLookup` method implementation shows how it handles transaction lookups.
-* The `BorEvents` method retrieves bridge events for a given block.
-
-## Heimdall Backend gRPC API
-
-The Heimdall Backend service provides APIs for validator and consensus-related functionality.
-
-### Heimdall Backend Methods
-
-**Version Method:**
-
-* `Version()` - Returns the service version number.
-
-**Producer Information:**
-
-* `Producers(BorProducersRequest)` - Retrieves validator/producer information for a specific block.
-
-## Service Integration
-
-Both services are integrated into the main Ethereum backend when Bor consensus is configured. In the main backend initialization, you can see how these services are set up.
-
-The Bridge and Heimdall services are created with their respective RPC servers.
 
 ***
 

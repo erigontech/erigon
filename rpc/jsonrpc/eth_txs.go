@@ -30,7 +30,6 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces"
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -49,7 +48,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 	}
 
 	// https://www.quicknode.com/docs/ethereum/eth_getTransactionByHash
-	blockNum, txNum, isBorStateSyncTx, ok, err := api.txnLookupWithBorFallback(ctx, tx, txnHash, chainConfig)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -60,7 +59,7 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		}
 
 		overlayTx := api.filters.WithOverlay(tx)
-		txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum, isBorStateSyncTx)
+		txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum)
 		if err != nil {
 			return nil, err
 		}
@@ -80,16 +79,6 @@ func (api *APIImpl) GetTransactionByHash(ctx context.Context, txnHash common.Has
 		var baseFee *uint256.Int
 		if chainConfig.IsLondon(blockNum) && blockHash != (common.Hash{}) {
 			baseFee = header.BaseFee
-		}
-
-		// if no transaction was found then we return nil
-		if isBorStateSyncTx {
-			borTx := bortypes.NewBorTransaction()
-			_, txCount, err := api._blockReader.Body(ctx, tx, blockHash, blockNum)
-			if err != nil {
-				return nil, err
-			}
-			return ethapi.NewRPCBorTransaction(borTx, txnHash, blockHash, blockNum, uint64(txCount), chainConfig.ChainID), nil
 		}
 
 		txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
@@ -153,7 +142,7 @@ func (api *APIImpl) GetRawTransactionByHash(ctx context.Context, hash common.Has
 		return nil, err
 	}
 
-	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum, false)
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
 	if err != nil {
 		return nil, err
 	}
@@ -186,10 +175,6 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 
 	blockNum, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(blockHash, true), tx, api._blockReader, api.filters)
 	if err != nil {
@@ -213,17 +198,8 @@ func (api *APIImpl) GetTransactionByBlockHashAndIndex(ctx context.Context, block
 	txs := block.Transactions()
 	idx := uint64(txIndex)
 	n := uint64(len(txs))
-	if idx > n {
+	if idx >= n {
 		return nil, nil // not error
-	} else if idx == n {
-		borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, block.NumberU64(), block.Hash())
-		if err != nil {
-			return nil, err
-		}
-		if borTx == nil {
-			return nil, nil // not error
-		}
-		return ethapi.NewRPCBorTransaction(borTx, borTxHash, block.Hash(), block.NumberU64(), idx, chainConfig.ChainID), nil
 	}
 
 	return ethapi.NewRPCTransaction(txs[txIndex], block.Hash(), block.Time(), block.NumberU64(), idx, block.BaseFee()), nil
@@ -265,10 +241,6 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 		return nil, err
 	}
 	defer tx.Rollback()
-	chainConfig, err := api.chainConfig(ctx, tx)
-	if err != nil {
-		return nil, err
-	}
 
 	if blockNr == rpc.PendingBlockNumber {
 		b, err := api.blockByNumber(ctx, blockNr, tx)
@@ -310,17 +282,8 @@ func (api *APIImpl) GetTransactionByBlockNumberAndIndex(ctx context.Context, blo
 	txs := block.Transactions()
 	idx := uint64(txIndex)
 	n := uint64(len(txs))
-	if idx > n {
+	if idx >= n {
 		return nil, nil // not error
-	} else if idx == n {
-		borTx, borTxHash, err := api.lookupBorTx(ctx, chainConfig, blockNum, hash)
-		if err != nil {
-			return nil, err
-		}
-		if borTx == nil {
-			return nil, nil
-		}
-		return ethapi.NewRPCBorTransaction(borTx, borTxHash, hash, blockNum, idx, chainConfig.ChainID), nil
 	}
 
 	return ethapi.NewRPCTransaction(txs[txIndex], hash, block.Time(), blockNum, idx, block.BaseFee()), nil

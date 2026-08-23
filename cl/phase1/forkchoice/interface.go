@@ -143,7 +143,7 @@ type ForkChoiceStorageWriter interface {
 	ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	// [New in Gloas:EIP7732] OnPayloadAttestationMessage processes a PTC attestation message from gossip.
 	// Returns error if validation fails (REJECT), nil if accepted or ignored.
-	OnPayloadAttestationMessage(msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error
+	OnPayloadAttestationMessage(ctx context.Context, msg *cltypes.PayloadAttestationMessage, isFromBlock bool) error
 	// [New in Gloas:EIP7732] StoreAnchorEnvelope persists an envelope to disk and updates
 	// eth2Roots without running state transition. Used during checkpoint sync where the
 	// finalized state already incorporates the envelope's effects but subsequent blocks

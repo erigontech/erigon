@@ -221,13 +221,13 @@ func NewWitnessCacheBuilderAPI(
 	db kv.TemporalRoDB, eth rpchelper.ApiBackend,
 	filters *rpchelper.Filters, stateCache kvcache.Cache,
 	blockReader dbservices.FullBlockReader, cfg *httpcfg.HttpCfg,
-	engine rules.Engine, bridgeReader bridgeReader,
+	engine rules.Engine,
 ) (*witnessResultCache, *DebugAPIImpl) {
 	if !enable {
 		return nil, nil
 	}
 	cache := newWitnessResultCache(cfg.WitnessCacheBlocks, witnessCacheMaxBytes(cfg.WitnessCacheMaxMB), headCapture, headCapture)
-	base := NewBaseApi(filters, stateCache, blockReader, engine, bridgeReader, NewBaseApiConfig(cfg))
+	base := NewBaseApi(filters, stateCache, blockReader, engine, NewBaseApiConfig(cfg))
 	impl := NewPrivateDebugAPI(base, db, eth, NewDebugApiConfig(cfg))
 	impl.witnessCache = cache
 	return cache, impl

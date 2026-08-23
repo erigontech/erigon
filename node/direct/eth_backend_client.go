@@ -351,14 +351,6 @@ func (s *EthBackendClientDirect) PendingBlock(ctx context.Context, in *emptypb.E
 	return s.server.PendingBlock(ctx, in)
 }
 
-func (s *EthBackendClientDirect) BorTxnLookup(ctx context.Context, in *remoteproto.BorTxnLookupRequest, opts ...grpc.CallOption) (*remoteproto.BorTxnLookupReply, error) {
-	return s.server.BorTxnLookup(ctx, in)
-}
-
-func (s *EthBackendClientDirect) BorEvents(ctx context.Context, in *remoteproto.BorEventsRequest, opts ...grpc.CallOption) (*remoteproto.BorEventsReply, error) {
-	return s.server.BorEvents(ctx, in)
-}
-
 func (s *EthBackendClientDirect) AAValidation(ctx context.Context, in *remoteproto.AAValidationRequest, opts ...grpc.CallOption) (*remoteproto.AAValidationReply, error) {
 	return s.server.AAValidation(ctx, in)
 }

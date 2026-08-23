@@ -117,22 +117,14 @@ const (
 	Epoch        = "DevEpoch"        // block_num_u64+block_hash->transition_proof
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
-	// BOR
-	BorTxLookup                = "BlockBorTransactionLookup"  // transaction_hash -> block_num_u64
-	BorEvents                  = "BorEvents"                  // event_id -> event_payload
-	BorEventNums               = "BorEventNums"               // block_num -> event_id (last event_id in that block)
-	BorEventProcessedBlocks    = "BorEventProcessedBlocks"    // block_num -> block_time, tracks processed blocks in the bridge, used for unwinds and restarts, gets pruned
-	BorEventTimes              = "BorEventTimes"              // timestamp -> event_id
-	BorSpans                   = "BorSpans"                   // span_id -> span (in JSON encoding)
-	BorSpansIndex              = "BorSpansIndex"              // span.StartBlockNumber -> span.Id
-	BorMilestones              = "BorMilestones"              // milestone_id -> milestone (in JSON encoding)
-	BorMilestoneEnds           = "BorMilestoneEnds"           // start block_num -> milestone_id (first block of milestone)
-	BorCheckpoints             = "BorCheckpoints"             // checkpoint_id -> checkpoint (in JSON encoding)
-	BorCheckpointEnds          = "BorCheckpointEnds"          // start block_num -> checkpoint_id (first block of checkpoint)
-	BorProducerSelections      = "BorProducerSelections"      // span_id -> span selection with accumulated proposer priorities (in JSON encoding)
-	BorProducerSelectionsIndex = "BorProducerSelectionsIndex" // span.StartBlockNumber -> span.Id
-	BorWitnesses               = "BorWitnesses"               // block_num_u64 + block_hash -> witness
-	BorWitnessSizes            = "BorWitnessSizes"            // block_num_u64 + block_hash -> witness size (uint64)
+	// Stateless witnesses received over the wit protocol
+	// Renamed from BorWitnesses/BorWitnessSizes: the WIT side-protocol is not
+	// Polygon-specific, it only ever had a Polygon-prefixed name.
+	BorWitnessesDeprecated    = "BorWitnesses"
+	BorWitnessSizesDeprecated = "BorWitnessSizes"
+
+	Witnesses    = "Witnesses"    // block_num_u64 + block_hash -> witness
+	WitnessSizes = "WitnessSizes" // block_num_u64 + block_hash -> witness size (uint64)
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -341,21 +333,8 @@ var ChaindataTables = []string{
 	HeaderTD,
 	Epoch,
 	PendingEpoch,
-	BorTxLookup,
-	BorEvents,
-	BorEventNums,
-	BorEventProcessedBlocks,
-	BorEventTimes,
-	BorSpans,
-	BorSpansIndex,
-	BorMilestones,
-	BorMilestoneEnds,
-	BorCheckpoints,
-	BorCheckpointEnds,
-	BorProducerSelections,
-	BorProducerSelectionsIndex,
-	BorWitnesses,
-	BorWitnessSizes,
+	Witnesses,
+	WitnessSizes,
 	TblAccountVals,
 	TblAccountHistoryKeys,
 	TblAccountHistoryVals,
@@ -477,9 +456,7 @@ var SentryTables = []string{
 	Inodes,
 	NodeRecords,
 }
-var ConsensusTables = ChaindataTables //TODO: move bor tables from chaintables to `ConsensusTables`
-var HeimdallTables = ChaindataTables
-var PolygonBridgeTables = ChaindataTables
+var ConsensusTables = ChaindataTables
 var DownloaderTables = []string{
 	BittorrentCompletion,
 	BittorrentInfo,
@@ -502,6 +479,10 @@ var ChaindataDeprecatedTables = []string{
 	StorageChangeSetDeprecated,
 	E2AccountsHistory,
 	E2StorageHistory,
+
+	// Renamed to Witnesses / WitnessSizes; dropped by `drop_bor_witness_tables`.
+	BorWitnessesDeprecated,
+	BorWitnessSizesDeprecated,
 }
 
 // Diagnostics tables
@@ -585,31 +566,11 @@ var AuRaTablesCfg = TableCfg{
 	PendingEpoch: {},
 }
 
-var BorTablesCfg = TableCfg{
-	BorTxLookup:                {Flags: DupSort},
-	BorEvents:                  {Flags: DupSort},
-	BorEventNums:               {Flags: DupSort},
-	BorEventProcessedBlocks:    {Flags: DupSort},
-	BorEventTimes:              {Flags: DupSort},
-	BorSpans:                   {Flags: DupSort},
-	BorSpansIndex:              {Flags: DupSort},
-	BorProducerSelectionsIndex: {Flags: DupSort},
-	BorCheckpoints:             {Flags: DupSort},
-	BorCheckpointEnds:          {Flags: DupSort},
-	BorMilestones:              {Flags: DupSort},
-	BorMilestoneEnds:           {Flags: DupSort},
-	BorProducerSelections:      {Flags: DupSort},
-	BorWitnesses:               {Flags: DupSort},
-	BorWitnessSizes:            {Flags: DupSort},
-}
-
 var TxpoolTablesCfg = TableCfg{}
 var SentryTablesCfg = TableCfg{}
 var ConsensusTablesCfg = TableCfg{}
 var DownloaderTablesCfg = TableCfg{}
 var DiagnosticsTablesCfg = TableCfg{}
-var HeimdallTablesCfg = TableCfg{}
-var PolygonBridgeTablesCfg = TableCfg{}
 var MigrationsTablesCfg = TableCfg{Migrations: {}}
 
 func TablesCfgByLabel(label Label) TableCfg {
@@ -626,10 +587,6 @@ func TablesCfgByLabel(label Label) TableCfg {
 		return DownloaderTablesCfg
 	case dbcfg.DiagnosticsDB:
 		return DiagnosticsTablesCfg
-	case dbcfg.HeimdallDB:
-		return HeimdallTablesCfg
-	case dbcfg.PolygonBridgeDB:
-		return PolygonBridgeTablesCfg
 	case dbcfg.ConsensusDB:
 		return ConsensusTablesCfg
 	default:
@@ -696,19 +653,6 @@ func reinit() {
 		_, ok := DiagnosticsTablesCfg[name]
 		if !ok {
 			DiagnosticsTablesCfg[name] = TableCfgItem{}
-		}
-	}
-
-	for _, name := range HeimdallTables {
-		_, ok := HeimdallTablesCfg[name]
-		if !ok {
-			HeimdallTablesCfg[name] = TableCfgItem{}
-		}
-	}
-	for _, name := range PolygonBridgeTables {
-		_, ok := PolygonBridgeTablesCfg[name]
-		if !ok {
-			PolygonBridgeTablesCfg[name] = TableCfgItem{}
 		}
 	}
 }

@@ -44,11 +44,11 @@ func runVersioned(t *testing.T, self accounts.Address, code []byte, lib accounts
 	s.SetVersion(0)
 	defer s.Release(false)
 
-	s.CreateAccount(self, true)
-	s.SetCode(self, code, tracing.CodeChangeUnspecified)
+	require.NoError(t, s.CreateAccount(self, true))
+	require.NoError(t, s.SetCode(self, code, tracing.CodeChangeUnspecified))
 	if libCode != nil {
-		s.CreateAccount(lib, true)
-		s.SetCode(lib, libCode, tracing.CodeChangeUnspecified)
+		require.NoError(t, s.CreateAccount(lib, true))
+		require.NoError(t, s.SetCode(lib, libCode, tracing.CodeChangeUnspecified))
 	}
 
 	vmctx := evmtypes.BlockContext{
@@ -78,8 +78,8 @@ func runVersionedFunded(t *testing.T, self accounts.Address, code []byte, fund u
 	s.SetVersion(0)
 	defer s.Release(false)
 
-	s.CreateAccount(self, true)
-	s.SetCode(self, code, tracing.CodeChangeUnspecified)
+	require.NoError(t, s.CreateAccount(self, true))
+	require.NoError(t, s.SetCode(self, code, tracing.CodeChangeUnspecified))
 	require.NoError(t, s.AddBalance(self, fund, tracing.BalanceChangeUnspecified))
 
 	vmctx := evmtypes.BlockContext{
@@ -119,8 +119,8 @@ func benchRunVersioned(b *testing.B, self accounts.Address, code []byte) func() 
 	r := state.NewReaderV3(sd.AsGetter(tx))
 	s := state.NewWithVersionMap(r, state.NewVersionMap(nil))
 	s.SetVersion(0)
-	s.CreateAccount(self, true)
-	s.SetCode(self, code, tracing.CodeChangeUnspecified)
+	require.NoError(b, s.CreateAccount(self, true))
+	require.NoError(b, s.SetCode(self, code, tracing.CodeChangeUnspecified))
 	vmctx := evmtypes.BlockContext{
 		CanTransfer: func(evmtypes.IntraBlockState, accounts.Address, uint256.Int) (bool, error) { return true, nil },
 		Transfer: func(evmtypes.IntraBlockState, accounts.Address, accounts.Address, uint256.Int, bool, *chain.Rules) error {

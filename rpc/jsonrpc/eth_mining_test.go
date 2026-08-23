@@ -45,7 +45,7 @@ func TestPendingBlock(t *testing.T) {
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	engine := ethash.NewFaker()
-	api := newEthApiForTest(NewBaseApi(ff, stateCache, m.BlockReader, engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), nil, nil, nil)
+	api := newEthApiForTest(NewBaseApi(ff, stateCache, m.BlockReader, engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs}), nil, nil, nil)
 	expect := uint64(12345)
 	b, err := rlp.EncodeToBytes(types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(expect)}, nil))
 	require.NoError(t, err)

@@ -162,7 +162,7 @@ type Provider struct {
 	Sentries []sentryproto.SentryClient
 
 	// Multiplexer is a single SentryClient that fans out calls across all
-	// Sentries. Used by the execution-P2P layer and by polygon sync.
+	// Sentries. Used by the execution-P2P layer.
 	Multiplexer sentryproto.SentryClient
 
 	// Client is the multi-sentry client — ownership of the header and body
@@ -434,14 +434,14 @@ func (p *Provider) buildStatusAndExecutionP2P() {
 // MultiClientDeps gathers the late-binding inputs needed to construct the
 // multi-sentry Client. These aren't known at Configure/Initialize time
 // because the consensus engine and the per-chain max-peers callback are
-// built AFTER sentries (polygon heimdall + engine rules come between).
+// built AFTER sentries (engine rules come between).
 // Callers run BuildMultiClient once those are ready.
 type MultiClientDeps struct {
 	// Dirs is the datadir root; the MultiClient uses it for per-sentry
 	// peer persistence and any local caches.
 	Dirs datadir.Dirs
 
-	// Engine is the consensus engine (ethash, clique, Bor, Aura, etc).
+	// Engine is the consensus engine (ethash, clique, Aura, etc).
 	// The MultiClient uses it to validate incoming headers during
 	// anchor-based backward download.
 	Engine rules.Engine

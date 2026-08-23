@@ -135,7 +135,7 @@ func TestBlockRetireSkipsOnGap(t *testing.T) {
 	require.NoError(t, rawdb.WriteHeader(rwTx, prunedBoundaryHeader))
 	require.NoError(t, rwTx.Commit())
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 	br := &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
@@ -173,7 +173,7 @@ func TestBlockRetireContiguous(t *testing.T) {
 	require.NoError(t, rawdb.WriteHeader(rwTx, nextHeader))
 	require.NoError(t, rwTx.Commit())
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 	br := &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
@@ -221,7 +221,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	require.NoError(t, rwTx.Commit())
 
 	// DB starts right after snapshots, retirement should be allowed.
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 	br := &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
@@ -243,7 +243,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	requireSegmentFilesExist(t, dirs.Snap, ver, 1, 1000, snaptype2.Enums.Transactions)
 	requireSegmentFilesExist(t, dirs.Snap, ver, 1000, 2000, snaptype2.Enums.Transactions)
 
-	blockReader = NewBlockReader(reopenedSnapshots, nil)
+	blockReader = NewBlockReader(reopenedSnapshots)
 	br = &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
@@ -264,7 +264,7 @@ func TestBlockRetireFallback(t *testing.T) {
 	defer restoredSnapshots.Close()
 	require.Equal(t, uint64(1999), restoredSnapshots.SegmentsMax())
 
-	blockReader = NewBlockReader(restoredSnapshots, nil)
+	blockReader = NewBlockReader(restoredSnapshots)
 	br = &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
@@ -321,7 +321,7 @@ func TestBlockRetireAllOverlapped(t *testing.T) {
 	defer reopened.Close()
 	require.Equal(t, uint64(1999), reopened.SegmentsMax())
 
-	blockReader := NewBlockReader(reopened, nil)
+	blockReader := NewBlockReader(reopened)
 	br := &BlockRetire{
 		db:          db,
 		blockReader: blockReader,
@@ -346,7 +346,7 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 
 	db := temporaltest.NewTestDB(t, dirs)
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 	require.Greater(t, snapshots.BlocksAvailable(), uint64(0))
 
 	tx, err := db.BeginRo(t.Context())
@@ -397,7 +397,7 @@ func TestBlockReaderGenesisBlockWithSnapshots(t *testing.T) {
 
 func TestCanonicalHashCache_DBHit(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
 
 	// Write a canonical hash to the DB
 	rwTx, err := db.BeginRw(context.Background())
@@ -431,7 +431,7 @@ func TestCanonicalHashCache_DBHit(t *testing.T) {
 
 func TestCanonicalHashCache_Miss(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
 
 	tx, err := db.BeginRo(context.Background())
 	require.NoError(t, err)
@@ -450,7 +450,7 @@ func TestCanonicalHashCache_Miss(t *testing.T) {
 
 func TestCanonicalHashCache_MultipleBlocks(t *testing.T) {
 	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
 
 	// Write multiple canonical hashes
 	rwTx, err := db.BeginRw(context.Background())
@@ -538,7 +538,7 @@ func TestCanonicalHashCache_SnapshotPath(t *testing.T) {
 	createTestSegmentFile(t, from, to, snaptype2.Enums.Transactions, dirs.Snap, ver, logger)
 
 	db := temporaltest.NewTestDB(t, dirs)
-	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles(), nil)
+	blockReader := NewBlockReader(db.(HasBlockFiles).DebugBlockFiles())
 
 	// No canonical hash written to DB → CanonicalHash must fall through to snapshot path.
 	tx, err := db.BeginRo(context.Background())
@@ -574,7 +574,7 @@ func TestTxBlockView_StaleUntilReopen(t *testing.T) {
 	logger := log.New()
 
 	snapshots := db.(HasBlockFiles).DebugBlockFiles()
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	// Begin the tx BEFORE any block segments exist: it pins an empty view.
 	rwTx, err := db.BeginRw(t.Context())

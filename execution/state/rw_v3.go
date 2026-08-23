@@ -237,17 +237,22 @@ func ApplyWrites(writes WriteSetView, domains *execctx.SharedDomains, roTx kv.Te
 			}
 
 			// Contract creation: clear stale storage before writing new account.
-			// Matches Writer.CreateContract which calls DomainDelPrefix.
 			//
-			// The wipe only matters when a prior incarnation left storage behind
-			// (self-destruct→recreate, CREATE2-over-storage, pre-Cancun EIP-7610).
-			// A fresh CREATE has incarnation 1 (prevIncarnation 0), so there is no
-			// prior storage and DomainDelPrefix's IteratePrefix scan over sd.mem +
-			// every storage .kv file is a guaranteed no-op. Skip it only when we
-			// can prove prevIncarnation==0; a missing incarnation falls through to
-			// wiping, so the skip can never drop a required wipe.
-			if d.createContract && (d.incarnation == nil || *d.incarnation > 1) {
-				if err := delPrefixTimed(address[:]); err != nil {
+			// An address with no committed account holds no committed storage:
+			// storage is only written for an account that exists, and deleting
+			// an account wipes its storage prefix. So probe the account first —
+			// that read is served by the per-file existence filters, while the
+			// prefix walk has to seek the .bt index of every storage .kv file.
+			if d.createContract {
+				prevAcc, err := getLatestAcct(address[:])
+				if err != nil {
+					return err
+				}
+				if len(prevAcc) == 0 {
+					if err := assertNoCommittedStorage(domains, roTx, address[:]); err != nil {
+						return err
+					}
+				} else if err := delPrefixTimed(address[:]); err != nil {
 					return err
 				}
 			}
@@ -884,6 +889,26 @@ func (w *Writer) SetPutDel(tx kv.TemporalPutDel) { w.tx = tx }
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil
+}
+
+// assertNoCommittedStorage panics when addr has committed storage but no
+// committed account, so a violation of that invariant surfaces instead of
+// silently skipping a storage wipe. No-op unless asserts are enabled.
+func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) error {
+	if !dbg.AssertEnabled {
+		return nil
+	}
+	found := 0
+	if err := domains.IteratePrefix(kv.StorageDomain, addr, roTx, func(k, v []byte) (bool, error) {
+		found++
+		return false, nil
+	}); err != nil {
+		return err
+	}
+	if found > 0 {
+		panic(fmt.Sprintf("createContract: %x has storage but no account", addr))
+	}
+	return nil
 }
 
 func (w *Writer) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {

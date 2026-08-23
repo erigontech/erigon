@@ -295,6 +295,26 @@ func TestMarshalU256WordBoundaries(t *testing.T) {
 	}
 }
 
+func BenchmarkU256AppendText(b *testing.B) {
+	buf := make([]byte, 0, 66)
+	for _, tc := range []struct {
+		name string
+		v    *uint256.Int
+	}{
+		{"small", uint256.NewInt(42)},
+		{"u64", uint256.NewInt(0x1234567890abcdef)},
+		{"full", new(uint256.Int).SetAllOne()},
+	} {
+		v := U256(*tc.v)
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			for b.Loop() {
+				buf, _ = v.AppendText(buf[:0])
+			}
+		})
+	}
+}
+
 var unmarshalUint16Tests = []unmarshalTest{
 	// invalid encoding
 	{input: "", wantErr: errJSONEOF},

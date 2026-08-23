@@ -169,7 +169,7 @@ func NewCaplinStateSnapshots(cfg ethconfig.BlocksFreezing, beaconCfg *clparams.B
 	typeEnums := make(map[string]snaptype.Enum, len(snapshotTypes.KeyValueGetters))
 	for name := range snapshotTypes.KeyValueGetters {
 		enum, ok := snaptype.ParseEnum(name)
-		if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MinBorEnum {
+		if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MaxCaplinEnum {
 			panic(fmt.Sprintf("caplin state snapshot type %q is not registered", name))
 		}
 		typ := enum.Type()
@@ -482,7 +482,7 @@ func simpleIdx(ctx context.Context, sn snaptype.FileInfo, salt uint32, tmpDir st
 
 func caplinStateFileName(snapName string, fromSlot, toSlot uint64) (string, error) {
 	enum, ok := snaptype.ParseEnum(snapName)
-	if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MinBorEnum {
+	if !ok || enum < snaptype.MinCaplinStateEnum || enum >= snaptype.MaxCaplinEnum {
 		return "", fmt.Errorf("unknown caplin state snapshot type %q", snapName)
 	}
 	typ := enum.Type()

@@ -22,9 +22,13 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
+	"github.com/erigontech/erigon/cl/persistence/blob_storage"
+	blob_storage_mock_services "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/httpreqresp"
 	"github.com/erigontech/erigon/common"
 )
@@ -36,6 +40,37 @@ import (
 func initTestBeaconConfig(cfg *clparams.BeaconChainConfig) {
 	if clparams.GetBeaconConfig() == nil {
 		clparams.InitGlobalStaticConfig(cfg, &clparams.CaplinConfig{})
+	}
+}
+
+func TestPeerDasPruneBelowUpdatesEarliestAvailableSlot(t *testing.T) {
+	tests := []struct {
+		name           string
+		initial, floor uint64
+		pruneErr       error
+		want           uint64
+	}{
+		{name: "advances", initial: 0, floor: 100, want: 100},
+		{name: "does not move backwards", initial: 100, floor: 50, want: 100},
+		{name: "zero floor resets", initial: 100, floor: 0, want: 0},
+		{name: "advances after prune error", initial: 100, floor: 200, pruneErr: errors.New("prune failed"), want: 200},
+		{name: "does not advance when prune did not start", initial: 100, floor: 200, pruneErr: fmt.Errorf("readdir: %w", blob_storage.ErrPruneNotStarted), want: 100},
+	}
+
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			columnStorage := blob_storage_mock_services.NewMockDataColumnStorage(ctrl)
+			columnStorage.EXPECT().PruneBelow(test.floor).Return(test.pruneErr)
+			cfg := clparams.MainnetBeaconConfig
+			state := peerdasstate.NewPeerDasState(&cfg, &clparams.NetworkConfig{})
+			state.SetEarliestAvailableSlot(test.initial)
+			d := &peerdas{state: state, columnStorage: columnStorage}
+
+			err := d.PruneBelow(test.floor)
+			require.ErrorIs(t, err, test.pruneErr)
+			require.Equal(t, test.want, state.GetEarliestAvailableSlot())
+		})
 	}
 }
 

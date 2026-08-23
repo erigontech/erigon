@@ -245,7 +245,7 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 		DBReadConcurrency: httpcfg.DefaultDBReadConcurrency(),
 	}
 
-	db, backend, txPool, mining, stateCache, blockReader, engine, ff, bridgeReader, heimdallReader, err :=
+	db, backend, txPool, mining, stateCache, blockReader, engine, ff, err :=
 		cli.RemoteServices(ctx, cfg, logger, rootCancel)
 	if err != nil {
 		return fmt.Errorf("failed to initialize datadir services: %w", err)
@@ -254,16 +254,10 @@ func runDatadirMode(ctx context.Context, logger log.Logger, dataDir, privAPI, lo
 	if engine != nil {
 		defer engine.Close()
 	}
-	if bridgeReader != nil {
-		defer bridgeReader.Close()
-	}
-	if heimdallReader != nil {
-		defer heimdallReader.Close()
-	}
 
 	// Create the JSON-RPC APIs and serve them over an in-process connection —
 	// same path as rpcdaemon.
-	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, bridgeReader, heimdallReader, nil, nil)
+	apiList := jsonrpc.APIList(db, backend, txPool, mining, ff, stateCache, blockReader, cfg, engine, logger, nil, nil)
 	rpcSrv := rpc.NewServer(cfg.RpcBatchConcurrency, cfg.TraceRequests, cfg.DebugSingleRequest, cfg.RpcStreamingDisable, logger, cfg.RPCSlowLogThreshold)
 	defer rpcSrv.Stop()
 	for _, api := range apiList {

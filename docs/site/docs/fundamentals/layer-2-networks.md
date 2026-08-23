@@ -1,6 +1,6 @@
 ---
 title: "Layer 2 Networks"
-description: "Running Erigon for Polygon PoS, Bor, and other Layer 2 networks."
+description: "Running Erigon for Optimism, Arbitrum, and other Layer 2 networks."
 sidebar_position: 9
 ---
 

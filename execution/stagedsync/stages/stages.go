@@ -40,7 +40,7 @@ var (
 	Senders           SyncStage = "Senders"           // "From" recovered from signatures, bodies re-written
 	Execution         SyncStage = "Execution"         // Executing each block w/o building a trie
 	CustomTrace       SyncStage = "CustomTrace"       // Executing each block w/o building a trie
-	WitnessProcessing SyncStage = "WitnessProcessing" // Process buffered witness data for Polygon chains
+	WitnessProcessing SyncStage = "WitnessProcessing" // Process witnesses buffered from the wit protocol
 	TxLookup          SyncStage = "TxLookup"          // Generating transactions lookup index
 	Finish            SyncStage = "Finish"            // Nominal stage after all other stages
 )

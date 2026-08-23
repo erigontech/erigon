@@ -22,7 +22,6 @@ import (
 	"io"
 	"os"
 
-	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -30,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/snappypool"
 )
 
 // maxSSZObjectSize is a generous upper bound for any single SSZ object
@@ -59,20 +59,17 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *stat
 	}
 	defer file.Close()
 
-	if f.sszSnappyReader == nil {
-		f.sszSnappyReader = snappy.NewReader(file)
-	} else {
-		f.sszSnappyReader.Reset(file)
-	}
+	sr := snappypool.Reader(file)
+	defer snappypool.PutReader(sr)
 	// Read the version
 	v := []byte{0}
-	if _, err := f.sszSnappyReader.Read(v); err != nil {
+	if _, err := sr.Read(v); err != nil {
 		return nil, fmt.Errorf("failed to read hard fork version: %w, root: %x", err, blockRoot)
 	}
 	// Read the length
 	lengthBytes := make([]byte, 8)
 	var n int
-	n, err = io.ReadFull(f.sszSnappyReader, lengthBytes)
+	n, err = io.ReadFull(sr, lengthBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
@@ -89,7 +86,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *stat
 	} else {
 		f.sszBuffer = f.sszBuffer[:length]
 	}
-	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
+	n, err = io.ReadFull(sr, f.sszBuffer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
@@ -106,7 +103,7 @@ func (f *forkGraphDisk) readBeaconStateFromDisk(blockRoot common.Hash) (bs *stat
 	// the block's state_root. Older state files won't have this field;
 	// in that case we leave previousStateRoot as zero (HashSSZ fallback).
 	var prevRoot [32]byte
-	if _, readErr := io.ReadFull(f.sszSnappyReader, prevRoot[:]); readErr == nil {
+	if _, readErr := io.ReadFull(sr, prevRoot[:]); readErr == nil {
 		bs.SetPreviousStateRoot(common.Hash(prevRoot))
 	}
 
@@ -133,46 +130,41 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 	}
 	defer dumpedFile.Close()
 
-	if f.sszSnappyWriter == nil {
-		f.sszSnappyWriter = snappy.NewBufferedWriter(dumpedFile)
-	} else {
-		f.sszSnappyWriter.Reset(dumpedFile)
-	}
+	sw := snappypool.Writer(dumpedFile)
+	defer snappypool.PutWriter(sw)
 
 	// First write the hard fork version
-	if _, err := f.sszSnappyWriter.Write([]byte{byte(version)}); err != nil {
+	if _, err := sw.Write([]byte{byte(version)}); err != nil {
 		log.Error("failed to write hard fork version", "err", err)
 		return err
 	}
 	// Second write the length
 	length := make([]byte, 8)
 	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
-	if _, err := f.sszSnappyWriter.Write(length); err != nil {
+	if _, err := sw.Write(length); err != nil {
 		log.Error("failed to write length", "err", err)
 		return err
 	}
 	// Lastly dump the state
-	if _, err := f.sszSnappyWriter.Write(f.sszBuffer); err != nil {
+	if _, err := sw.Write(f.sszBuffer); err != nil {
 		log.Error("failed to write ssz buffer", "err", err)
 		return err
 	}
-	// Write the authoritative state root so it can be restored on load.
-	// Use the stored block header's Root (set from block.StateRoot in AddChainSegment)
-	// rather than the state's PreviousStateRoot cache field, which can be stale if
-	// a concurrent block arrival modified f.currentState between GetStateAtBlockRoot
-	// and the copy in OnHeadStateWithBlockRoot.
+	// A skipped-slot state root differs from the latest block header's state root.
 	var stateRootToWrite common.Hash
-	if hdr, ok := f.GetHeader(blockRoot); ok {
+	if bs.Version() >= clparams.GloasVersion && bs.LatestBlockHeader().Slot < bs.Slot() {
+		stateRootToWrite = bs.PeekPreviousStateRoot()
+	} else if hdr, ok := f.GetHeader(blockRoot); ok {
 		stateRootToWrite = hdr.Root
 	} else {
 		// Fallback for anchor state or cases where header isn't stored yet
 		stateRootToWrite = bs.PeekPreviousStateRoot()
 	}
-	if _, err := f.sszSnappyWriter.Write(stateRootToWrite[:]); err != nil {
+	if _, err := sw.Write(stateRootToWrite[:]); err != nil {
 		log.Error("failed to write previousStateRoot", "err", err)
 		return err
 	}
-	if err = f.sszSnappyWriter.Flush(); err != nil {
+	if err = sw.Flush(); err != nil {
 		log.Error("failed to flush snappy writer", "err", err)
 		return err
 	}
@@ -215,16 +207,13 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	}
 	defer file.Close()
 
-	if f.sszSnappyReader == nil {
-		f.sszSnappyReader = snappy.NewReader(file)
-	} else {
-		f.sszSnappyReader.Reset(file)
-	}
+	sr := snappypool.Reader(file)
+	defer snappypool.PutReader(sr)
 
 	// Read the length
 	lengthBytes := make([]byte, 8)
 	var n int
-	n, err = io.ReadFull(f.sszSnappyReader, lengthBytes)
+	n, err = io.ReadFull(sr, lengthBytes)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read length: %w, root: %x", err, blockRoot)
 	}
@@ -241,7 +230,7 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 	} else {
 		f.sszBuffer = f.sszBuffer[:envelopeLength]
 	}
-	n, err = io.ReadFull(f.sszSnappyReader, f.sszBuffer)
+	n, err = io.ReadFull(sr, f.sszBuffer)
 	if err != nil {
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
@@ -282,25 +271,22 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	}
 	defer dumpedFile.Close()
 
-	if f.sszSnappyWriter == nil {
-		f.sszSnappyWriter = snappy.NewBufferedWriter(dumpedFile)
-	} else {
-		f.sszSnappyWriter.Reset(dumpedFile)
-	}
+	sw := snappypool.Writer(dumpedFile)
+	defer snappypool.PutWriter(sw)
 
 	// Write the length
 	length := make([]byte, 8)
 	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
-	if _, err := f.sszSnappyWriter.Write(length); err != nil {
+	if _, err := sw.Write(length); err != nil {
 		log.Error("failed to write length", "err", err)
 		return err
 	}
 	// Write the envelope
-	if _, err := f.sszSnappyWriter.Write(f.sszBuffer); err != nil {
+	if _, err := sw.Write(f.sszBuffer); err != nil {
 		log.Error("failed to write ssz buffer", "err", err)
 		return err
 	}
-	if err = f.sszSnappyWriter.Flush(); err != nil {
+	if err = sw.Flush(); err != nil {
 		log.Error("failed to flush snappy writer", "err", err)
 		return err
 	}

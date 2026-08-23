@@ -32,8 +32,6 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
-	polygontracer "github.com/erigontech/erigon/polygon/tracer"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/ethapi"
 	"github.com/erigontech/erigon/rpc/jsonstream"
@@ -90,11 +88,6 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 		config = &tracersConfig.TraceConfig{}
 	}
 
-	if config.BorTraceEnabled == nil {
-		var disabled bool
-		config.BorTraceEnabled = &disabled
-	}
-
 	chainConfig, err := api.chainConfig(ctx, tx)
 	if err != nil {
 		return err
@@ -130,32 +123,10 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 	txns := block.Transactions()
 
-	var borStateSyncTxn types.Transaction
-
-	if *config.BorTraceEnabled {
-		borStateSyncTxHash := bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxHash)
-
-		if err != nil {
-			return err
-		}
-		if ok {
-			borStateSyncTxn = bortypes.NewBorTransaction()
-			txns = append(txns, borStateSyncTxn)
-		}
-	}
-
 	var gasUsed uint64
 	inner := jsonstream.NewLazyFieldStream(stream, "result", true)
 	for txnIndex, txn := range txns {
-		isBorStateSyncTxn := borStateSyncTxn == txn
-		var txnHash common.Hash
-		if isBorStateSyncTxn {
-			txnHash = bortypes.ComputeBorTxHash(block.NumberU64(), block.Hash())
-		} else {
-			txnHash = txn.Hash()
-		}
+		txnHash := txn.Hash()
 
 		stream.WriteObjectStart()
 		stream.WriteObjectField("txHash")
@@ -169,30 +140,7 @@ func (api *DebugAPIImpl) traceBlock(ctx context.Context, blockNrOrHash rpc.Block
 
 		inner.ResetField()
 
-		if isBorStateSyncTxn {
-			var stateSyncEvents []*types.Message
-			stateSyncEvents, err = api.bridgeReader.Events(ctx, block.Hash(), blockNumber)
-			if err != nil {
-				return err
-			}
-
-			var _gasUsed uint64
-			_gasUsed, err = polygontracer.TraceBorStateSyncTxnDebugAPI(
-				ctx,
-				chainConfig,
-				config,
-				ibs,
-				block.Hash(),
-				block.NumberU64(),
-				block.Time(),
-				blockCtx,
-				inner,
-				api.evmCallTimeout,
-				stateSyncEvents,
-				txnIndex,
-			)
-			gasUsed += _gasUsed
-		} else {
+		{
 			msg, asMessageErr := txn.AsMessage(*signer, block.BaseFee(), rules)
 			if asMessageErr != nil {
 				err = fmt.Errorf("convert transaction %s to message: %w", txnHash, asMessageErr)
@@ -256,16 +204,12 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return err
 	}
 	// Retrieve the transaction and assemble its EVM context
-	blockNum, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, hash, chainConfig)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, tx, hash)
 	if err != nil {
 		return err
 	}
 	if !ok {
 		return fmt.Errorf("transaction not found")
-	}
-	if isBorStateSyncTxn && (config == nil || config.BorTraceEnabled == nil || !*config.BorTraceEnabled) {
-		stream.WriteEmptyArray() // matches maticnetwork/bor API behaviour for consistency
-		return nil
 	}
 
 	if blockNum == 0 {
@@ -287,18 +231,12 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 		return nil
 	}
 
-	var txnIndex int
-	if isBorStateSyncTxn {
-		// bor state sync txn is appended at the end of the block
-		txnIndex = block.Transactions().Len()
-	} else {
-		txnIndex, err = api.txnIndexInBlock(ctx, tx, blockNum, txNum, false)
-		if err != nil {
-			return err
-		}
-		if txnIndex >= block.Transactions().Len() {
-			return fmt.Errorf("transaction %#x not found", hash)
-		}
+	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
+	if err != nil {
+		return err
+	}
+	if txnIndex >= block.Transactions().Len() {
+		return fmt.Errorf("transaction %#x not found", hash)
 	}
 	engine := api.engine()
 
@@ -322,29 +260,6 @@ func (api *DebugAPIImpl) TraceTransaction(ctx context.Context, hash common.Hash,
 				return err
 			}
 		}
-	}
-
-	if isBorStateSyncTxn {
-		stateSyncEvents, err := api.bridgeReader.Events(ctx, block.Hash(), blockNum)
-		if err != nil {
-			return err
-		}
-
-		_, err = polygontracer.TraceBorStateSyncTxnDebugAPI(
-			ctx,
-			chainConfig,
-			config,
-			ibs,
-			block.Hash(),
-			blockNum,
-			block.Time(),
-			blockCtx,
-			stream,
-			api.evmCallTimeout,
-			stateSyncEvents,
-			txnIndex,
-		)
-		return err
 	}
 
 	msg, txCtx, err := transactions.ComputeTxContext(ibs, engine, rules, signer, block, chainConfig, txnIndex)

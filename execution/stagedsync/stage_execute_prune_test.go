@@ -39,7 +39,7 @@ func TestRetireCutoffs_ConvertsBlockDistanceToTxNum(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
 	db := temporaltest.NewTestDB(t, dirs)
 	snaps := db.(freezeblocks.HasBlockFiles).DebugBlockFiles()
-	br := freezeblocks.NewBlockReader(snaps, nil)
+	br := freezeblocks.NewBlockReader(snaps)
 
 	ctx := context.Background()
 	tx, err := db.BeginRw(ctx)

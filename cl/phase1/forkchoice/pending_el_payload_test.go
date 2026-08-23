@@ -35,6 +35,24 @@ func TestDrainPendingELPayloadsReleasesLargeBackingArray(t *testing.T) {
 	require.Nil(t, f.pendingELPayloads)
 }
 
+func TestDrainPendingELPayloadsLimitPreservesRemainingOrder(t *testing.T) {
+	f := &ForkChoiceStore{}
+	for i := range 5 {
+		f.addPendingELPayload(&cltypes.SignedBeaconBlock{
+			Block: &cltypes.BeaconBlock{Slot: uint64(i + 1)},
+		}, nil)
+	}
+
+	first := f.DrainPendingELPayloadsLimit(2)
+	require.Equal(t, []uint64{1, 2}, []uint64{first[0].Block.Block.Slot, first[1].Block.Block.Slot})
+	remaining := f.DrainPendingELPayloads()
+	require.Equal(t, []uint64{3, 4, 5}, []uint64{
+		remaining[0].Block.Block.Slot,
+		remaining[1].Block.Block.Slot,
+		remaining[2].Block.Block.Slot,
+	})
+}
+
 func TestPendingELPayloadsDeduplicateByEnvelopeRoot(t *testing.T) {
 	f := &ForkChoiceStore{}
 	root := common.HexToHash("0x1234")

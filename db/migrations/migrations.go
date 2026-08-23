@@ -57,6 +57,7 @@ var migrations = map[kv.Label][]Migration{
 		dbSchemaVersion6,
 		dbSchemaVersion7,
 		dropLegacyE2Tables,
+		dropBorWitnessTables,
 	},
 	dbcfg.TxPoolDB: {},
 	dbcfg.SentryDB: {},

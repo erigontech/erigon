@@ -222,10 +222,10 @@ func ResetTxLookup(tx kv.RwTx) error {
 }
 
 func ResetWitnesses(tx kv.RwTx) error {
-	if err := tx.ClearTable(kv.BorWitnesses); err != nil {
+	if err := tx.ClearTable(kv.Witnesses); err != nil {
 		return err
 	}
-	if err := tx.ClearTable(kv.BorWitnessSizes); err != nil {
+	if err := tx.ClearTable(kv.WitnessSizes); err != nil {
 		return err
 	}
 	if err := stages.SaveStageProgress(tx, stages.WitnessProcessing, 0); err != nil {
@@ -428,10 +428,7 @@ const (
 )
 
 func GetPruneMarkerSafeThreshold(blockReader dbservices.FullBlockReader) uint64 {
-	snapProgress := min(blockReader.FrozenBorBlocks(false), blockReader.FrozenBlocks())
-	if blockReader.BorSnapshots() == nil {
-		snapProgress = blockReader.FrozenBlocks()
-	}
+	snapProgress := blockReader.FrozenBlocks()
 	if snapProgress < pruneMarkerSafeThreshold {
 		return 0
 	}

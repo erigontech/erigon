@@ -133,9 +133,6 @@ If using network-attached storage, apply these optimizations:
 # Reduce disk latency impact
 export SNAPSHOT_MADV_RND=false
 --db.pagesize=64kb
-
-# For Polygon networks
---sync.loop.block.limit=10000
 ```
 
 ### Memory Locking for Performance

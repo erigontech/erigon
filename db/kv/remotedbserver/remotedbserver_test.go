@@ -43,7 +43,7 @@ func (tx *getLatestOptionsTx) GetLatest(_ kv.Domain, _ []byte, opts kv.GetLatest
 
 func TestGetLatestForwardsMaxStep(t *testing.T) {
 	tx := &getLatestOptionsTx{}
-	s := NewKvServer(t.Context(), nil, nil, nil, nil, log.New())
+	s := NewKvServer(t.Context(), nil, nil, nil, log.New())
 	s.txs[1] = &threadSafeTx{TemporalTx: tx}
 	maxStep := uint64(0)
 	_, err := s.GetLatest(t.Context(), &remoteproto.GetLatestReq{TxId: 1, Table: kv.AccountsDomain.String(), Latest: true, MaxStep: &maxStep})
@@ -53,7 +53,7 @@ func TestGetLatestForwardsMaxStep(t *testing.T) {
 
 func TestGetLatestForwardsBranchCache(t *testing.T) {
 	tx := &getLatestOptionsTx{}
-	s := NewKvServer(t.Context(), nil, nil, nil, nil, log.New())
+	s := NewKvServer(t.Context(), nil, nil, nil, log.New())
 	s.txs[1] = &threadSafeTx{TemporalTx: tx}
 	_, err := s.GetLatest(t.Context(), &remoteproto.GetLatestReq{TxId: 1, Table: kv.CommitmentDomain.String(), Latest: true, BranchCache: true})
 	require.NoError(t, err)
@@ -79,7 +79,7 @@ func TestKvServer_renew(t *testing.T) {
 		return nil
 	}))
 
-	s := NewKvServer(ctx, db, nil, nil, nil, log.New())
+	s := NewKvServer(ctx, db, nil, nil, log.New())
 	g, ctx := errgroup.WithContext(ctx)
 	testCase := func() error {
 		id, err := s.begin(ctx)
@@ -141,33 +141,16 @@ func TestKVServerSnapshotsReturnsSnapshots(t *testing.T) {
 	historySnapshots := NewMockSnapshots(ctrl)
 	historySnapshots.EXPECT().Files().Return([]string{"history"}).Times(1)
 
-	s := NewKvServer(ctx, nil, blockSnapshots, nil, historySnapshots, log.New())
+	s := NewKvServer(ctx, nil, blockSnapshots, historySnapshots, log.New())
 	reply, err := s.Snapshots(ctx, nil)
 	require.NoError(t, err)
 	require.Equal(t, []string{"headers.seg", "bodies.seg"}, reply.BlocksFiles)
 	require.Equal(t, []string{"history"}, reply.HistoryFiles)
 }
 
-func TestKVServerSnapshotsReturnsBorSnapshots(t *testing.T) {
-	ctx := t.Context()
-	ctrl := gomock.NewController(t)
-	blockSnapshots := NewMockSnapshots(ctrl)
-	blockSnapshots.EXPECT().Files().Return([]string{"headers.seg", "bodies.seg"}).Times(1)
-	borSnapshots := NewMockSnapshots(ctrl)
-	borSnapshots.EXPECT().Files().Return([]string{"borevents.seg", "borspans.seg"}).Times(1)
-	historySnapshots := NewMockSnapshots(ctrl)
-	historySnapshots.EXPECT().Files().Return([]string{"history"}).Times(1)
-
-	s := NewKvServer(ctx, nil, blockSnapshots, borSnapshots, historySnapshots, log.New())
-	reply, err := s.Snapshots(ctx, nil)
-	require.NoError(t, err)
-	require.Equal(t, []string{"headers.seg", "bodies.seg", "borevents.seg", "borspans.seg"}, reply.BlocksFiles)
-	require.Equal(t, []string{"history"}, reply.HistoryFiles)
-}
-
 func TestKVServerSnapshotsReturnsEmptyIfNoBlockSnapshots(t *testing.T) {
 	ctx := t.Context()
-	s := NewKvServer(ctx, nil, nil, nil, nil, log.New())
+	s := NewKvServer(ctx, nil, nil, nil, log.New())
 	reply, err := s.Snapshots(ctx, nil)
 	require.NoError(t, err)
 	require.Empty(t, reply.BlocksFiles)

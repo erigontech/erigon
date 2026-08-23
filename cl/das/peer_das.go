@@ -48,12 +48,13 @@ type gloasBlockData struct {
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
+	Start(ctx context.Context)
 	// [Modified in Gloas:EIP7732] Changed from []*SignedBlindedBeaconBlock to []ColumnSyncableSignedBlock
 	// to support both pre-GLOAS (blinded) and GLOAS (non-blinded) blocks
 	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error)
-	Prune(keepSlotDistance uint64) error
+	PruneBelow(slot uint64) error
 	UpdateValidatorsCustody(cgc uint64)
 	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
 	IsBlobAlreadyRecovered(blockRoot common.Hash) bool
@@ -88,10 +89,10 @@ type peerdas struct {
 	blockReader    freezeblocks.BeaconSnapshotReader
 	indiciesDB     kv.RoDB
 	gloasDataCache *lru.Cache[common.Hash, *gloasBlockData] // cache for GLOAS block data (~1KB per entry)
+	startOnce      sync.Once
 }
 
 func NewPeerDas(
-	ctx context.Context,
 	rpc *rpc.BeaconRpcP2P,
 	beaconConfig *clparams.BeaconChainConfig,
 	caplinConfig *clparams.CaplinConfig,
@@ -128,12 +129,17 @@ func NewPeerDas(
 		indiciesDB:     indiciesDB,
 		gloasDataCache: gloasDataCache,
 	}
-	p.resubscribeGossip()
-	for range numOfBlobRecoveryWorkers {
-		go p.blobsRecoverWorker(ctx)
-	}
-	go p.syncColumnDataWorker(ctx)
 	return p
+}
+
+func (d *peerdas) Start(ctx context.Context) {
+	d.startOnce.Do(func() {
+		d.resubscribeGossip()
+		for range numOfBlobRecoveryWorkers {
+			go d.blobsRecoverWorker(ctx)
+		}
+		go d.syncColumnDataWorker(ctx)
+	})
 }
 
 func (d *peerdas) StateReader() peerdasstate.PeerDasStateReader {
@@ -329,21 +335,19 @@ func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 	}
 }
 
-func (d *peerdas) Prune(keepSlotDistance uint64) error {
-	if err := d.columnStorage.Prune(keepSlotDistance); err != nil {
+func (d *peerdas) PruneBelow(slot uint64) error {
+	err := d.columnStorage.PruneBelow(slot)
+	if errors.Is(err, blob_storage.ErrPruneNotStarted) {
 		return err
 	}
-
-	curSlot := d.ethClock.GetCurrentSlot()
-	if curSlot < keepSlotDistance {
+	// A partial failure still advances the floor: pruneBelow attempts every bucket, so it
+	// leaves stragglers rather than an untouched store, and the floor only understates them.
+	if slot == 0 {
 		d.state.SetEarliestAvailableSlot(0)
-	} else {
-		earliestSlot := curSlot - keepSlotDistance
-		if earliestSlot > d.state.GetEarliestAvailableSlot() {
-			d.state.SetEarliestAvailableSlot(earliestSlot)
-		}
+	} else if slot > d.state.GetEarliestAvailableSlot() {
+		d.state.SetEarliestAvailableSlot(slot)
 	}
-	return nil
+	return err
 }
 
 type recoverBlobsRequest struct {

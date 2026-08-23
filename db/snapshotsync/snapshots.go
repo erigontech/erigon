@@ -518,7 +518,7 @@ type BaseRoSnapshots struct {
 	operators map[snaptype.Enum]*retireOperators
 	alignMin  bool // do we want to align all visible segments to the minimum available
 	// keepUnindexedlyCovered opts RemoveOverlaps into refusing to unlink a subset whose only
-	// covering superset has no index. EL/bor rely on the plain behaviour; caplin state does not.
+	// covering superset has no index. EL relies on the plain behaviour; caplin state does not.
 	keepUnindexedlyCovered bool
 
 	// (type, from, to) of files a producer is currently building — a merge
@@ -1032,7 +1032,6 @@ func reclaimSegments(segs retiredSegments) {
 func (s *BaseRoSnapshots) idxAvailability() uint64 {
 	// Use-Cases:
 	//   1. developers can add new types in future. and users will not have files of this type
-	//   2. some types are network-specific. example: borevents exists only on Bor-consensus networks
 	//   3. user can manually remove 1 .idx file: `rm snapshots/v1.0-type1-0000-1000.idx`
 	//   4. user can manually remove all .idx files of given type: `rm snapshots/*type1*.idx`
 	//   5. file-types may have different height: 10 headers, 10 bodies, 9 transactions (for example if `kill -9` came during files building/merge). still need index all 3 types.

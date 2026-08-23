@@ -2,7 +2,6 @@ syntax = "proto3";
 
 import "google/protobuf/empty.proto";
 import "types/types.proto";
-import "remote/bor.proto";
 
 package remote;
 
@@ -69,10 +68,6 @@ service ETHBACKEND {
 
   // PendingBlock returns latest built block.
   rpc PendingBlock(google.protobuf.Empty) returns (PendingBlockReply);
-
-  rpc BorTxnLookup(BorTxnLookupRequest) returns (BorTxnLookupReply);
-
-  rpc BorEvents(BorEventsRequest) returns (BorEventsReply);
 
   rpc AAValidation(AAValidationRequest) returns (AAValidationReply);
 

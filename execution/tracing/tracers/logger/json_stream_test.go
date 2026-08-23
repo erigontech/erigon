@@ -19,12 +19,17 @@ package logger
 import (
 	"bytes"
 	"context"
+	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
+	"io"
+	"math/big"
 	"strings"
 	"testing"
 
 	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/tracing"
@@ -392,6 +397,189 @@ func TestStructLog_ErrorOmitempty(t *testing.T) {
 		}
 		if msg != "out of gas" {
 			t.Errorf("error message: got %q, want %q", msg, "out of gas")
+		}
+	})
+}
+
+// TestJsonStreamLogger_StorageEncodingManyKeys covers the separator handling when
+// more than one slot is emitted; a single-entry object never writes one.
+func TestJsonStreamLogger_StorageEncodingManyKeys(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{}
+	want := map[string]string{}
+	for i := range 4 {
+		key := common.BigToHash(big.NewInt(int64(i + 1)))
+		val := common.BigToHash(big.NewInt(int64(100 + i)))
+		scope.stack = []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])}
+		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		want["0x"+hex.EncodeToString(key[:])] = "0x" + hex.EncodeToString(val[:])
+	}
+
+	// Close the way the production epilogue does: ClosePending would repair an
+	// imbalance into valid JSON and hide exactly what this pins.
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(t, stream.Flush())
+	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+
+	var out struct {
+		StructLogs []struct {
+			Storage map[string]string `json:"storage"`
+		} `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out))
+	require.NotEmpty(t, out.StructLogs)
+
+	// Storage accumulates, so the last step carries every pair and exercises
+	// three separators.
+	require.Equal(t, want, out.StructLogs[len(out.StructLogs)-1].Storage)
+}
+
+// TestJsonStreamLogger_StorageWithMemory drives both users of hexEncodeBuf in a
+// single step, which is what the aliasing in hexWithPrefix depends on.
+func TestJsonStreamLogger_StorageWithMemory(t *testing.T) {
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xcd}, 64),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+	l.OnOpcode(0, byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(t, stream.Flush())
+
+	var out struct {
+		StructLogs []struct {
+			Memory  []string          `json:"memory"`
+			Storage map[string]string `json:"storage"`
+		} `json:"structLogs"`
+	}
+	require.NoError(t, json.Unmarshal(buf.Bytes(), &out), "output: %s", buf.Bytes())
+	require.Len(t, out.StructLogs, 1)
+
+	word := "0x" + strings.Repeat("cd", 32)
+	require.Equal(t, []string{word, word}, out.StructLogs[0].Memory)
+	require.Equal(t, map[string]string{
+		"0x" + hex.EncodeToString(key[:]): "0x" + hex.EncodeToString(val[:]),
+	}, out.StructLogs[0].Storage)
+}
+
+// TestJsonStreamLogger_ClosePendingAfterMemory pins that writing memory words keeps
+// the stream's auto-close stack balanced: one word spans three stream calls, and
+// only the first may consume a pending comma or field.
+func TestJsonStreamLogger_ClosePendingAfterMemory(t *testing.T) {
+	var buf bytes.Buffer
+	stream := jsonstream.New(&buf)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 32*4)}
+	for i := range 3 {
+		l.OnOpcode(uint64(i), byte(vm.MLOAD), 100, 3, scope, nil, 1, nil)
+	}
+
+	require.NoError(t, stream.ClosePending(0))
+	require.NoError(t, stream.Flush())
+	require.True(t, json.Valid(buf.Bytes()), "output is not valid JSON: %s", buf.Bytes())
+}
+
+func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xab}, 256),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+
+	stream := jsonstream.New(io.Discard)
+	l := NewJsonStreamLogger(&LogConfig{EnableMemory: true}, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	b.ReportAllocs()
+	i := 0
+	for b.Loop() {
+		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		i++
+	}
+}
+
+// TestHexQuotedMatchesUint256Hex pins the stack encoding against uint256.Hex,
+// which the RPC output has to stay byte-identical to. The interesting cases are
+// the nibble boundaries: Hex counts nibbles, not bytes, so 0xf is one digit and
+// 0x10 is two.
+func TestHexQuotedMatchesUint256Hex(t *testing.T) {
+	l := &JsonStreamLogger{}
+	for _, str := range []string{
+		"0", "1", "f", "10", "ff", "100",
+		"1234567890abcdef",
+		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		"0000000000000000000000000000000000000000000000000000000000000001",
+		"8000000000000000000000000000000000000000000000000000000000000000",
+	} {
+		v := new(uint256.Int).SetBytes(common.FromHex("0x" + str))
+		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
+	}
+}
+
+// BenchmarkOnOpcodeStackDepth shows the scaling: the saved allocation is per
+// stack slot per step, and a real trace is not two slots deep.
+func BenchmarkOnOpcodeStackDepth(b *testing.B) {
+	for _, depth := range []int{2, 8, 16, 32} {
+		b.Run(fmt.Sprintf("depth=%d", depth), func(b *testing.B) {
+			stack := make([]uint256.Int, depth)
+			for i := range stack {
+				stack[i].SetUint64(uint64(i)*0x0123456789abcdef + 1)
+			}
+			scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 256), stack: stack}
+			l := NewJsonStreamLogger(&LogConfig{}, context.Background(), jsonstream.New(io.Discard))
+			l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+			b.ReportAllocs()
+			i := 0
+			for b.Loop() {
+				l.OnOpcode(uint64(i), byte(vm.ADD), 100, 3, scope, nil, 1, nil)
+				i++
+				// Nothing else drains this stream, and every iteration appends to it.
+				_ = l.stream.Flush()
+			}
+		})
+	}
+}
+
+func BenchmarkStackValueWrite(b *testing.B) {
+	vals := make([]uint256.Int, 16)
+	for i := range vals {
+		vals[i].SetUint64(uint64(i)*0x0123456789abcdef + 1)
+	}
+
+	b.Run("WriteString_Hex", func(b *testing.B) {
+		s := jsonstream.New(io.Discard)
+		b.ReportAllocs()
+		for b.Loop() {
+			for i := range vals {
+				s.WriteString(vals[i].Hex())
+			}
+			_ = s.Flush()
+		}
+	})
+	b.Run("WriteRaw_hexQuoted", func(b *testing.B) {
+		l := &JsonStreamLogger{stream: jsonstream.New(io.Discard)}
+		b.ReportAllocs()
+		for b.Loop() {
+			for i := range vals {
+				l.stream.WriteRaw(l.hexQuoted(&vals[i]))
+			}
+			_ = l.stream.Flush()
 		}
 	})
 }

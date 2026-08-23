@@ -11,7 +11,7 @@ import (
 var (
 	// Decoder side: saw 2x higher throughput (parallel RPC with much decoding if use `zstdDecPool` (sync.Pool) vs single `zstd.NewReader`. So, keep pool for decoders.
 	// Encoder side: saw high mem use when using pool of encoders. And probably we don't need high-throughput on writes (they are usually in background). So, keep 1 encoder - it inside using GOMAXPROCS concurrency limit (see zstd.WithDecoderConcurrency).
-	zstdEnc, _  = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true))
+	zstdEnc, _  = zstd.NewWriter(nil, zstd.WithEncoderCRC(false), zstd.WithZeroFrames(true), zstd.WithLowerEncoderMem(true))
 	zstdDecPool = sync.Pool{
 		New: func() any {
 			dec, _ := zstd.NewReader(nil, zstd.IgnoreChecksum(true))
@@ -21,7 +21,10 @@ var (
 )
 
 func putDec(dec *zstd.Decoder) {
-	_ = dec.Reset(nil)
+	// Reset fails only on a closed decoder, which can never be revived.
+	if err := dec.Reset(nil); err != nil {
+		return
+	}
 	zstdDecPool.Put(dec)
 }
 

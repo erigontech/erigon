@@ -30,8 +30,8 @@
 - [Snapshots Management](https://docs.erigon.tech/fundamentals/snapshots-management): Understand and manage Erigon snapshot files — check disk usage by category, compare node type estimates, and migrate to v3.5 snapshot formats.
 - [Caplin](https://docs.erigon.tech/fundamentals/caplin): Erigon's built-in consensus layer — run a full node without an external CL client.
 - [CLI Reference](https://docs.erigon.tech/fundamentals/configuring-erigon): Complete CLI flag reference for Erigon — all startup options, environment variables, and configuration settings.
-- [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, Polygon, and all other chains Erigon can sync.
-- [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Running Erigon for Polygon PoS, Bor, and other Layer 2 networks.
+- [Supported Networks](https://docs.erigon.tech/fundamentals/supported-networks): Mainnet, testnets, Gnosis, and all other chains Erigon can sync.
+- [Layer 2 Networks](https://docs.erigon.tech/fundamentals/layer-2-networks): Running Erigon for Optimism, Arbitrum, and other Layer 2 networks.
 - [Default ports](https://docs.erigon.tech/fundamentals/default-ports): Default listening ports for each Erigon service and how to override them.
 - [NAT](https://docs.erigon.tech/fundamentals/nat): Configure NAT traversal settings for proper peer discovery behind routers and firewalls.
 - [Optimizing Storage](https://docs.erigon.tech/fundamentals/optimizing-storage): Pruning, snapshots, and techniques to minimize disk footprint.
@@ -64,7 +64,6 @@
 - [trace](https://docs.erigon.tech/interacting-with-erigon/trace): trace_ namespace: OpenEthereum-compatible transaction and block traces.
 - [txpool](https://docs.erigon.tech/interacting-with-erigon/txpool): txpool_ namespace: inspect pending and queued transactions in the mempool.
 - [admin](https://docs.erigon.tech/interacting-with-erigon/admin): admin_ namespace: peer management, node info, and datadir inspection.
-- [bor](https://docs.erigon.tech/interacting-with-erigon/bor): bor_ namespace: Polygon-specific APIs for Bor consensus layer interaction.
 - [ots](https://docs.erigon.tech/interacting-with-erigon/ots): ots_ namespace: Otterscan block explorer extensions for efficient state queries.
 - [internal](https://docs.erigon.tech/interacting-with-erigon/internal): internal_ namespace: node internals and low-level diagnostic endpoints.
 - [gRPC](https://docs.erigon.tech/interacting-with-erigon/grpc): High-performance binary interface for programmatic Erigon access via gRPC.

@@ -90,7 +90,8 @@ func TestVersionedWritesMatchStateObjects(t *testing.T) {
 	require.NoError(t, err)
 
 	// addr2: CreateAccount + balance only
-	ibs.CreateAccount(addr2, true)
+	err = ibs.CreateAccount(addr2, true)
+	require.NoError(t, err)
 	err = ibs.SetBalance(addr2, *uint256.NewInt(200), tracing.BalanceChangeUnspecified)
 	require.NoError(t, err)
 

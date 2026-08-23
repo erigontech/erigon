@@ -186,9 +186,8 @@ func NewMultiClient(
 	enableWitProtocol bool,
 	logger log.Logger,
 ) (*MultiClient, error) {
-	// Initialize witness buffer for Polygon chains with witness protocol enabled
 	var witnessBuffer *stagedsync.WitnessBuffer
-	if chainConfig.Bor != nil && enableWitProtocol {
+	if enableWitProtocol {
 		witnessBuffer = stagedsync.NewWitnessBuffer()
 	}
 
@@ -497,7 +496,7 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *sentryproto
 		}
 		headers[witnessBlockHash] = header
 		key := dbutils.HeaderKey(header.Number.Uint64(), witnessBlockHash)
-		sizeBytes, err := tx.GetOne(kv.BorWitnessSizes, key)
+		sizeBytes, err := tx.GetOne(kv.WitnessSizes, key)
 		if err != nil {
 			return fmt.Errorf("reading witness size for hash %x: %w", witnessBlockHash, err)
 		}
@@ -532,7 +531,7 @@ func (cs *MultiClient) getBlockWitnesses(ctx context.Context, inreq *sentryproto
 					continue
 				}
 				key := dbutils.HeaderKey(header.Number.Uint64(), witnessPage.Hash)
-				queriedBytes, err := tx.GetOne(kv.BorWitnesses, key)
+				queriedBytes, err := tx.GetOne(kv.Witnesses, key)
 				if err != nil {
 					return fmt.Errorf("reading witness for hash %x: %w", witnessPage.Hash, err)
 				}
