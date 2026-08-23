@@ -442,7 +442,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, blockNum uint64, txIndex int, 
 
 	normalize3Started := time.Now()
 	defer func() {
-		took := time.Since(normalizeStarted)
+		took := time.Since(normalize3Started)
 		if took >= slowNormalizeThreshold/2 {
 			log.Warn("[dbg] slow WriteSet.Normalize3", "took", took, "blockNum", blockNum, "txIndex", txIndex)
 		}
