@@ -27,6 +27,7 @@ import (
 	"net/http/pprof" //nolint:gosec
 	"os"
 	"path/filepath"
+	runtimepprof "runtime/pprof"
 	"strings"
 
 	"github.com/felixge/fgprof"
@@ -375,6 +376,34 @@ func Exit() {
 	_ = Handler.StopPyroscopeProfiler()
 	_ = Handler.StopCPUProfile()
 	_ = Handler.StopGoTrace()
+	writePerfProfiles()
+}
+
+// writePerfProfiles dumps the sampling profiles that PERF_PROFILES enables to
+// files, so short-lived commands can be profiled without the pprof HTTP server
+// outliving them.
+func writePerfProfiles() {
+	if !dbg.PerfProfiles {
+		return
+	}
+	dir := dbg.EnvString("PERF_PROFILES_DIR", ".")
+	for _, name := range []string{"mutex", "block", "goroutine", "heap"} {
+		p := runtimepprof.Lookup(name)
+		if p == nil {
+			continue
+		}
+		path := filepath.Join(dir, name+".pprof")
+		f, err := os.Create(path)
+		if err != nil {
+			log.Warn("[pprof] can not create profile file", "path", path, "err", err)
+			continue
+		}
+		if err := p.WriteTo(f, 0); err != nil {
+			log.Warn("[pprof] can not write profile", "path", path, "err", err)
+		}
+		f.Close()
+		log.Info("[pprof] profile written", "path", path)
+	}
 }
 
 // RaiseFdLimit raises out the number of allowed file handles per process
