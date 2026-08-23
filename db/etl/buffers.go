@@ -98,11 +98,15 @@ var LargeSortableBuffers = NewAllocator(&sync.Pool{
 })
 
 const (
-	// sortableBuffer stores key/value bytes in dataChunkSize blocks. entryLoc.offset
-	// packs the chunk index and the offset inside the chunk, so the index range is
-	// what limits one buffer to maxDataChunks.
+	// sortableBuffer stores key/value bytes in chunks of a power-of-two size, so
+	// entryLoc.offset can pack the chunk index with the offset inside the chunk
+	// and splitting the two is a shift and a mask. 1MB is also the least a
+	// collector can hold once it takes a chunk at all.
 	dataChunkBits = 20
-	dataChunkSize = 1 << dataChunkBits
+	dataChunkSize = 1 << dataChunkBits // 1MB
+
+	// The chunk index takes what is left of a positive int32, so one buffer
+	// addresses 2GB - the ceiling NewSortableBuffer already puts on optimalSize.
 	maxDataChunks = math.MaxInt32>>dataChunkBits + 1
 )
 
