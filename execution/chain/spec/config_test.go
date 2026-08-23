@@ -25,12 +25,14 @@ import (
 
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 
+	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
 
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/chain/networkname"
 )
 
 func TestCheckCompatible(t *testing.T) {
@@ -58,6 +60,12 @@ func TestCheckCompatible(t *testing.T) {
 				StoredConfig: common.NewUint64(0),
 				NewConfig:    nil,
 				RewindTo:     0,
+				// AllProtocolChanges schedules Shanghai at 0, and the new config
+				// unschedules it, so the timestamp axis conflicts at headTime 0 too.
+				WhatTime:     "Shanghai fork timestamp",
+				StoredTime:   common.NewUint64(0),
+				NewTime:      nil,
+				RewindToTime: 0,
 			},
 		},
 		{
@@ -69,6 +77,12 @@ func TestCheckCompatible(t *testing.T) {
 				StoredConfig: common.NewUint64(0),
 				NewConfig:    common.NewUint64(1),
 				RewindTo:     0,
+				// AllProtocolChanges schedules Shanghai at 0, and the new config
+				// unschedules it, so the timestamp axis conflicts at headTime 0 too.
+				WhatTime:     "Shanghai fork timestamp",
+				StoredTime:   common.NewUint64(0),
+				NewTime:      nil,
+				RewindToTime: 0,
 			},
 		},
 		{
@@ -109,9 +123,8 @@ func TestCheckCompatible(t *testing.T) {
 	}
 }
 
-// Post-merge forks are scheduled by timestamp. Before this they were compared against
-// nothing at all, so one could be rescheduled on a chain already past it and the node would
-// run a different schedule from its peers with no error.
+// Post-merge forks are scheduled by timestamp, so they compare against the head's
+// time rather than its number.
 func TestCheckCompatibleTimestampForks(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
@@ -166,8 +179,9 @@ func TestCheckCompatibleTimestampForks(t *testing.T) {
 				return
 			}
 			require.NotNil(t, err, "a fork the chain is already past must not be reschedulable")
-			require.Equal(t, tc.wantWhat, err.What)
-			require.True(t, err.IsTimestampFork(), "a zero RewindToTime must not be mistaken for no conflict")
+			require.Equal(t, tc.wantWhat, err.WhatTime)
+			require.True(t, err.HasTimestampConflict(), "a zero RewindToTime must not be mistaken for no conflict")
+			require.False(t, err.HasBlockConflict(), "no block fork conflicts in this case")
 			require.Equal(t, tc.wantRewind, err.RewindToTime)
 			require.Zero(t, err.RewindTo, "a timestamp fork rewinds by time, not by block")
 		})
@@ -190,9 +204,108 @@ func TestCheckCompatibleBpoAndBalancerTimestamps(t *testing.T) {
 		t.Run(tc.name, func(t *testing.T) {
 			err := tc.stored.CheckCompatible(tc.newcfg, 0, 150)
 			require.NotNil(t, err)
-			require.Equal(t, tc.wantWhat, err.What)
-			require.True(t, err.IsTimestampFork())
+			require.Equal(t, tc.wantWhat, err.WhatTime)
+			require.True(t, err.HasTimestampConflict())
 		})
+	}
+}
+
+// A block conflict the chain cannot rewind past must not hide a timestamp one behind
+// it: checkCompatibleBlocks returns at its first conflict, and every modern chain has
+// SpuriousDragon at block 0, so "EIP155 chain ID" alone would mask the whole axis.
+func TestCheckCompatibleBlockConflictDoesNotMaskTimestamp(t *testing.T) {
+	for _, tc := range []struct {
+		name             string
+		stored, newcfg   *chain.Config
+		head, headTime   uint64
+		wantWhat         string
+		wantWhatTime     string
+		wantRewind       uint64
+		wantRewindToTime uint64
+	}{
+		{
+			name:             "zero-rewind block conflict alongside a timestamp one",
+			stored:           &chain.Config{HomesteadBlock: common.NewUint64(0), PragueTime: common.NewUint64(100)},
+			newcfg:           &chain.Config{PragueTime: common.NewUint64(900)},
+			head:             50,
+			headTime:         150,
+			wantWhat:         "Homestead fork block",
+			wantWhatTime:     "Prague fork timestamp",
+			wantRewind:       0,
+			wantRewindToTime: 99,
+		},
+		{
+			name:             "both axes conflict, both rewind targets survive",
+			stored:           &chain.Config{HomesteadBlock: common.NewUint64(10), PragueTime: common.NewUint64(100)},
+			newcfg:           &chain.Config{HomesteadBlock: common.NewUint64(20), PragueTime: common.NewUint64(900)},
+			head:             50,
+			headTime:         150,
+			wantWhat:         "Homestead fork block",
+			wantWhatTime:     "Prague fork timestamp",
+			wantRewind:       9,
+			wantRewindToTime: 99,
+		},
+		{
+			name:         "a chain ID change must not swallow the timestamp axis",
+			stored:       &chain.Config{ChainID: uint256.NewInt(1), SpuriousDragonBlock: common.NewUint64(0), PragueTime: common.NewUint64(100)},
+			newcfg:       &chain.Config{ChainID: uint256.NewInt(2), SpuriousDragonBlock: common.NewUint64(0), PragueTime: common.NewUint64(900)},
+			head:         50,
+			headTime:     150,
+			wantWhat:     "EIP155 chain ID",
+			wantWhatTime: "Prague fork timestamp",
+			// SpuriousDragon sits at block 0, so there is nothing to rewind to.
+			wantRewind:       0,
+			wantRewindToTime: 99,
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			err := tc.stored.CheckCompatible(tc.newcfg, tc.head, tc.headTime)
+			require.NotNil(t, err)
+			require.Equal(t, tc.wantWhat, err.What)
+			require.Equal(t, tc.wantWhatTime, err.WhatTime)
+			require.True(t, err.HasBlockConflict())
+			require.True(t, err.HasTimestampConflict(),
+				"the timestamp conflict must survive the block one, or the caller writes the moved schedule")
+			require.Equal(t, tc.wantRewind, err.RewindTo)
+			require.Equal(t, tc.wantRewindToTime, err.RewindToTime)
+			require.Contains(t, err.Error(), tc.wantWhat)
+			require.Contains(t, err.Error(), tc.wantWhatTime)
+		})
+	}
+}
+
+// CheckConfigForkOrder walked the block forks only, so a schedule that runs backwards
+// in time was accepted and committed.
+func TestCheckConfigForkOrderTimestamps(t *testing.T) {
+	require.NoError(t, (&chain.Config{
+		ShanghaiTime: common.NewUint64(100),
+		CancunTime:   common.NewUint64(200),
+		PragueTime:   common.NewUint64(200),
+	}).CheckConfigForkOrder(), "equal and ascending timestamps are both fine")
+
+	require.NoError(t, (&chain.Config{
+		ShanghaiTime: common.NewUint64(100),
+		PragueTime:   common.NewUint64(200),
+	}).CheckConfigForkOrder(), "an unscheduled fork in the middle is not a gap")
+
+	err := (&chain.Config{
+		ShanghaiTime: common.NewUint64(200),
+		CancunTime:   common.NewUint64(100),
+	}).CheckConfigForkOrder()
+	require.Error(t, err, "cancun cannot activate before shanghai")
+	require.Contains(t, err.Error(), "shanghaiTime")
+	require.Contains(t, err.Error(), "cancunTime")
+}
+
+// Every shipped chainspec must satisfy the ordering check the previous test added.
+func TestRegisteredChainSpecsForkOrder(t *testing.T) {
+	for _, name := range []string{
+		networkname.Mainnet, networkname.Sepolia, networkname.Hoodi,
+		networkname.Gnosis, networkname.Chiado, networkname.Test, networkname.Bloatnet,
+	} {
+		spec, err := chainspec.ChainSpecByName(name)
+		require.NoError(t, err)
+		require.NoError(t, spec.Config.CheckConfigForkOrder(), "chain %s", name)
 	}
 }
 

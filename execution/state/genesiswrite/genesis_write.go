@@ -30,7 +30,6 @@ import (
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
-	"github.com/jinzhu/copier"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/empty"
@@ -191,17 +190,22 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			return genesis.Config, nil, err
 		}
 	}
-	// Get the existing chain configuration.
-	newCfg := configOrDefault(genesis, chainName, storedHash)
-	applyOverrides(newCfg)
-	if err := newCfg.CheckConfigForkOrder(); err != nil {
-		return newCfg, nil, err
+	// Get the existing chain configuration. configOrDefault can return a package-level
+	// singleton -- chain.AllProtocolChanges, or a chainspec's own *chain.Config -- so the
+	// overrides go onto a copy or they rewrite the schedule for every later reader.
+	newCfg, err := configOrDefault(genesis, chainName, storedHash).Copy()
+	if err != nil {
+		return nil, nil, err
 	}
+	applyOverrides(newCfg)
 	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
 	if storedErr != nil && newCfg.Bor == nil {
 		return newCfg, nil, storedErr
 	}
 	if storedCfg == nil {
+		if err := newCfg.CheckConfigForkOrder(); err != nil {
+			return newCfg, nil, err
+		}
 		logger.Warn("Found genesis block without chain config")
 		err1 := rawdb.WriteChainConfig(tx, storedHash, newCfg)
 		if err1 != nil {
@@ -225,12 +229,19 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			}
 		}
 		if keepStoredChainConfig {
-			newCfg = new(chain.Config)
-			if err := copier.CopyWithOption(newCfg, storedCfg, copier.Option{DeepCopy: true}); err != nil {
-				return nil, nil, err
+			stored, err := storedCfg.Copy()
+			if err != nil {
+				return newCfg, nil, err
 			}
+			newCfg = stored
 			applyOverrides(newCfg)
 		}
+	}
+	// The ordering check runs here, not on configOrDefault's result: under
+	// keepStoredChainConfig that one is discarded, so validating it rejects a schedule
+	// the node never adopts and passes the one it does.
+	if err := newCfg.CheckConfigForkOrder(); err != nil {
+		return newCfg, nil, err
 	}
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
@@ -240,11 +251,19 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		// The head's time, not just its number: the post-merge forks are scheduled by
 		// timestamp and cannot be compared against a block number.
 		var headTime uint64
-		if head := rawdb.ReadHeader(tx, headHash, *height); head != nil {
+		head := rawdb.ReadHeader(tx, headHash, *height)
+		if head == nil {
+			// ReadHeader only sees kv.Headers, which is pruned to the snapshot frontier
+			// while kv.HeaderNumber survives well below it. Comparing against time 0
+			// would pass every timestamp fork, so say so rather than default silently.
+			logger.Warn("Genesis: head header missing, skipping the timestamp fork compatibility check",
+				"hash", headHash, "number", *height)
+		} else {
 			headTime = head.Time
 		}
 		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height, headTime)
-		if compatibilityErr != nil && *height != 0 && (compatibilityErr.RewindTo != 0 || compatibilityErr.IsTimestampFork()) {
+		if compatibilityErr != nil && *height != 0 &&
+			(compatibilityErr.RewindTo != 0 || compatibilityErr.HasTimestampConflict()) {
 			return newCfg, storedBlock, compatibilityErr
 		}
 	}
