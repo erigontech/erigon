@@ -158,6 +158,7 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 	return &sortableBuffer{
 		optimalSize: int(bufferOptimalSize.Bytes()),
 		chunkShift:  etlChunkShift,
+		chunkMask:   1<<etlChunkShift - 1,
 	}
 }
 
@@ -168,9 +169,15 @@ type sortableBuffer struct {
 	dataLen     int
 	optimalSize int
 	chunkShift  uint
+	chunkMask   int
 }
 
 func (b *sortableBuffer) chunkSize() int { return 1 << b.chunkShift }
+
+// setChunkShift keeps chunkMask in step with chunkShift.
+func (b *sortableBuffer) setChunkShift(shift uint) {
+	b.chunkShift, b.chunkMask = shift, 1<<shift-1
+}
 
 // reserve returns the offset of n contiguous free bytes. An entry never spans
 // chunks; one wider than a chunk gets its own, filling the slots it covers.
@@ -200,9 +207,14 @@ func (b *sortableBuffer) reserve(n int) int {
 }
 
 func (b *sortableBuffer) at(offset, length int) []byte {
-	c := b.chunks[offset>>b.chunkShift]
-	pos := offset & (b.chunkSize() - 1)
+	c, pos := b.locate(offset)
 	return c[pos : pos+length]
+}
+
+// locate resolves an offset to its chunk and the position within it. A key and
+// its value share a chunk, so callers resolve once and slice both.
+func (b *sortableBuffer) locate(offset int) ([]byte, int) {
+	return b.chunks[offset>>b.chunkShift], offset & b.chunkMask
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
@@ -223,8 +235,9 @@ func (b *sortableBuffer) Put(k, v []byte) {
 		e.valLen = -1
 	}
 	b.entries = append(b.entries, e)
-	copy(b.at(off, len(k)), k)
-	copy(b.at(off+len(k), len(v)), v)
+	c, pos := b.locate(off)
+	copy(c[pos:], k)
+	copy(c[pos+len(k):], v)
 	b.dataLen += len(k) + len(v)
 }
 
@@ -237,19 +250,19 @@ func (b *sortableBuffer) Len() int {
 func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 	e := &b.entries[i]
 	kLen, vLen := int(e.keyLen), int(e.valLen)
-	keyOffset := int(e.offset)
-	valOffset := keyOffset
+	c, pos := b.locate(int(e.offset))
+	valPos := pos
 	if kLen > 0 {
-		valOffset += kLen
+		valPos += kLen
 	}
 	var key, val []byte
 	if kLen > 0 {
-		key = b.at(keyOffset, kLen)
+		key = c[pos : pos+kLen]
 	} else if kLen == 0 {
 		key = []byte{}
 	}
 	if vLen > 0 {
-		val = b.at(valOffset, vLen)
+		val = c[valPos : valPos+vLen]
 	} else if vLen == 0 {
 		val = []byte{}
 	}
@@ -280,8 +293,10 @@ func (b *sortableBuffer) Sort() {
 			}
 			return 1
 		}
-		xKey := b.at(int(x.offset), int(max(x.keyLen, 0)))
-		yKey := b.at(int(y.offset), int(max(y.keyLen, 0)))
+		xc, xp := b.locate(int(x.offset))
+		yc, yp := b.locate(int(y.offset))
+		xKey := xc[xp : xp+int(max(x.keyLen, 0))]
+		yKey := yc[yp : yp+int(max(y.keyLen, 0))]
 		if c := bytes.Compare(xKey, yKey); c != 0 {
 			return c
 		}
