@@ -375,9 +375,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 			return genesisErr
 		}
 		if compatErr != nil {
-			// The rejected config stays in memory but is not written, so this process and
-			// anything reading the config from the database disagree on the schedule.
-			logger.Error("Incompatible chain config, the stored one was left in place", "err", compatErr)
+			// The rejected config is not written but is still what this process runs, so
+			// it and anything reading the config from the database disagree on the schedule.
+			logger.Error("Incompatible chain config: the database keeps the stored schedule, this process runs the rejected one",
+				"err", compatErr)
 		}
 
 		return nil

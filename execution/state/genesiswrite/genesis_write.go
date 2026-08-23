@@ -193,10 +193,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// Get the existing chain configuration. configOrDefault can return a package-level
 	// singleton -- chain.AllProtocolChanges, or a chainspec's own *chain.Config -- so the
 	// overrides go onto a copy or they rewrite the schedule for every later reader.
-	newCfg, err := configOrDefault(genesis, chainName, storedHash).Copy()
-	if err != nil {
-		return nil, nil, err
-	}
+	newCfg := configOrDefault(genesis, chainName, storedHash).Copy()
 	applyOverrides(newCfg)
 	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
 	if storedErr != nil && newCfg.Bor == nil {
@@ -229,11 +226,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			}
 		}
 		if keepStoredChainConfig {
-			stored, err := storedCfg.Copy()
-			if err != nil {
-				return newCfg, nil, err
-			}
-			newCfg = stored
+			newCfg = storedCfg.Copy()
 			applyOverrides(newCfg)
 		}
 	}
@@ -253,10 +246,12 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		var headTime uint64
 		head := rawdb.ReadHeader(tx, headHash, *height)
 		if head == nil {
-			// ReadHeader only sees kv.Headers, which is pruned to the snapshot frontier
-			// while kv.HeaderNumber survives well below it. Comparing against time 0
-			// would pass every timestamp fork, so say so rather than default silently.
-			logger.Warn("Genesis: head header missing, skipping the timestamp fork compatibility check",
+			// ReadHeader sees only kv.Headers, and FillDBFromSnapshots writes the head's
+			// kv.HeaderNumber marker and HeadHeaderKey without it, so a freshly
+			// snapshot-synced node lands here normally. headTime then stays 0, at which
+			// every fork scheduled after genesis compares as not yet active, and a
+			// rescheduled one is written without ever being checked.
+			logger.Warn("Genesis: head header missing, comparing the timestamp forks against time 0 -- a rescheduled fork will be accepted unchecked",
 				"hash", headHash, "number", *height)
 		} else {
 			headTime = head.Time
