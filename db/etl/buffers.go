@@ -123,11 +123,8 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-// Bytes live in chunks rather than one slice, so filling a buffer never
-// reallocates and copies what is already stored.
-const chunkSize = 1 << 20 // 1MB
+var chunkSize = int(dbg.EnvDataSize("ETL_CHUNK", 1*datasize.MB))
 
-// chunkPool recycles full-size chunks across buffers.
 var chunkPool = sync.Pool{
 	New: func() any {
 		c := make([]byte, chunkSize)
@@ -135,18 +132,15 @@ var chunkPool = sync.Pool{
 	},
 }
 
-// etlChunkPoolWarm chunks are seeded at startup so the first buffers to fill do
-// not pay for the allocation.
-var etlChunkPoolWarm = dbg.EnvInt("ETL_CHUNK_POOL_WARM", 64)
+var chunkPoolWarm = dbg.EnvInt("ETL_CHUNK_POOL_WARM", 64)
 
 func init() {
-	for range etlChunkPoolWarm {
+	for range chunkPoolWarm {
 		c := make([]byte, chunkSize)
 		chunkPool.Put(&c)
 	}
 }
 
-// getChunk returns size bytes, pooled when size is the standard chunk.
 func getChunk(size int) []byte {
 	if size != chunkSize {
 		return make([]byte, size)
@@ -160,8 +154,7 @@ func putChunk(c []byte) {
 	}
 }
 
-// entryLoc locates a key/value pair. offset is global: chunk index is
-// offset/chunkSize, position within it offset%chunkSize. keyLen/valLen -1 is nil.
+// entryLoc locates a key/value pair. keyLen/valLen of -1 means a nil slice.
 type entryLoc struct {
 	insertionOrder int32 // enables stable sort via unstable SortFunc
 	offset         int32
@@ -196,11 +189,11 @@ type sortableBuffer struct {
 }
 
 // reserve returns the offset of n contiguous free bytes. An entry never spans
-// chunks; one wider than a chunk gets its own, filling the slots it covers.
+// chunks, so the tail of a chunk that cannot hold it is skipped.
 func (b *sortableBuffer) reserve(n int) int {
 	if n > chunkSize {
-		// Start the wide chunk past every chunk already allocated, so that
-		// offset/chunkSize addresses it rather than a narrow chunk.
+		// Past every allocated chunk, so offset/chunkSize finds this wide one
+		// and not a narrow chunk that cannot hold n.
 		span := (n + chunkSize - 1) / chunkSize * chunkSize
 		c := getChunk(span)
 		off := len(b.chunks) * chunkSize
@@ -226,8 +219,7 @@ func (b *sortableBuffer) at(offset, length int) []byte {
 	return c[pos : pos+length]
 }
 
-// locate resolves an offset to its chunk and the position within it. A key and
-// its value share a chunk, so callers resolve once and slice both.
+// A key and its value always share a chunk, so callers locate once and slice both.
 func (b *sortableBuffer) locate(offset int) ([]byte, int) {
 	return b.chunks[offset/chunkSize], offset % chunkSize
 }
