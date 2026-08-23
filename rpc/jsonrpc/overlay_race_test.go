@@ -144,6 +144,19 @@ type rejectOverlayTxnReader struct {
 	dbservices.TxnReader
 }
 
+type unpublishOverlayTxnReader struct {
+	dbservices.TxnReader
+	events *shards.Events
+}
+
+func (r unpublishOverlayTxnReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
+	blockNum, txNum, ok, err := r.TxnReader.TxnLookup(ctx, tx, txnHash)
+	if err == nil && ok {
+		r.events.PublishOverlay(nil)
+	}
+	return blockNum, txNum, ok, err
+}
+
 func (r rejectOverlayTxnReader) TxnLookup(ctx context.Context, tx kv.Getter, txnHash common.Hash) (uint64, uint64, bool, error) {
 	if view, ok := tx.(interface{ IsOverlayReadView() bool }); ok && view.IsOverlayReadView() {
 		return 0, 0, false, errors.New("unexpected overlay transaction lookup")
@@ -484,6 +497,24 @@ func TestGetRawBlock_PinsOverlayView(t *testing.T) {
 	block, err := api.GetRawBlock(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayHeader.Number.Uint64())))
 	require.NoError(t, err)
 	require.NotNil(t, block)
+}
+
+func TestGetRawTransaction_PinsOverlayView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader, events := newOverlayAheadTestAPIWithEvents(t)
+	overlay := events.LatestSD().BlockOverlay()
+	txn := signOverlayRaceTestTx(t, m, 1)
+	require.NoError(t, rawdb.WriteBody(overlay, overlayHeader.Hash(), overlayHeader.Number.Uint64(), &types.Body{Transactions: []types.Transaction{txn}}))
+	minTxNum, err := base._txNumReader.Min(m.Ctx, overlay, overlayHeader.Number.Uint64())
+	require.NoError(t, err)
+	block := types.NewBlockFromStorage(overlayHeader.Hash(), overlayHeader, []types.Transaction{txn}, nil, nil, nil)
+	rawdb.WriteTxLookupEntries(overlay, block, minTxNum)
+	base._txnReader = unpublishOverlayTxnReader{TxnReader: base._txnReader, events: events}
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	encoded, err := api.GetRawTransaction(m.Ctx, txn.Hash())
+	require.NoError(t, err)
+	require.Equal(t, marshalOverlayRaceTestTx(t, txn), []byte(encoded))
 }
 
 func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {

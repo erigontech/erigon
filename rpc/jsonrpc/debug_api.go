@@ -801,7 +801,8 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, txNum, ok, err := api.txnLookup(ctx, api.filters.WithOverlay(tx), txnHash)
+	overlayTx := api.filters.WithOverlay(tx)
+	blockNum, txNum, ok, err := api.txnLookup(ctx, overlayTx, txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -810,17 +811,17 @@ func (api *DebugAPIImpl) GetRawTransaction(ctx context.Context, txnHash common.H
 		return nil, nil
 	}
 
-	err = api.BaseAPI.checkPruneHistory(ctx, tx, blockNum)
+	err = api.BaseAPI.checkPruneHistory(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}
 
-	txnIndex, err := api.txnIndexInBlock(ctx, tx, blockNum, txNum)
+	txnIndex, err := api.txnIndexInBlock(ctx, overlayTx, blockNum, txNum)
 	if err != nil {
 		return nil, err
 	}
 
-	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, tx, blockNum, txnIndex)
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, overlayTx, blockNum, txnIndex)
 	if err != nil {
 		return nil, err
 	}
