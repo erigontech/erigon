@@ -42,6 +42,10 @@ func (g payloadVoteForkGraph) HasEnvelope(common.Hash) bool {
 	return g.hasEnvelope
 }
 
+func (g payloadVoteForkGraph) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return nil, nil
+}
+
 func (g payloadVoteForkGraph) DumpEnvelopeOnDisk(blockRoot common.Hash, _ *cltypes.SignedExecutionPayloadEnvelope) error {
 	if g.dumpedEnvelope != nil {
 		*g.dumpedEnvelope = blockRoot
