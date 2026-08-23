@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"runtime"
 	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -192,4 +193,84 @@ func TestCodeCache_ClearFencesStartedPut(t *testing.T) {
 
 	_, ok := cc.Get(addr)
 	require.False(t, ok, "Clear must remove a write that started in the retiring generation")
+}
+
+// The O(1) entry counter that replaced freelru's all-shard Len on growLRU's add
+// path must not drift from the LRU's real length on any mutation path.
+func TestGrowLRU_LenTracksLRU(t *testing.T) {
+	var evictions int
+	g := newGrowLRU[uint64](8*datasize.MB, 16, func(uint64, uint64) { evictions++ })
+	defer g.Close()
+	check := func(phase string) {
+		t.Helper()
+		require.Equal(t, g.cur.Load().lru.Len(), g.Len(), "entry counter drifted after %s", phase)
+	}
+	// growLRU hashes keys with the identity function, so spread the shard-selection
+	// bits the way its real maphash/keccak-derived keys do.
+	key := func(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
+
+	for i := range uint64(500) {
+		g.Add(key(i), i)
+	}
+	check("adds")
+	require.Equal(t, 500, g.Len(), "500 distinct keys must fit below the 1024-slot start capacity")
+
+	for i := range uint64(100) {
+		g.Remove(key(i))
+	}
+	check("removes")
+	require.Equal(t, 100, evictions, "the caller's OnEvict must still fire for each removal")
+
+	before := g.cur.Load()
+	for i := uint64(500); i < 4000; i++ {
+		g.Add(key(i), i)
+	}
+	require.NotEqual(t, before, g.cur.Load(), "grow did not happen")
+	check("grow")
+
+	g.Purge()
+	require.Equal(t, 0, g.Len())
+	check("purge")
+}
+
+// CodeCache drives three growLRU layers through putContentLocked, which removes
+// a stale entry before re-adding it; concurrent puts of distinct code must still
+// leave each layer's counter equal to its LRU's real length.
+func TestCodeCache_GrowLRULenCounterUnderConcurrency(t *testing.T) {
+	cc := closeOnCleanup(t, NewCodeCache(8*datasize.MB, 8*datasize.MB))
+
+	const workers = 8
+	const perWorker = 3000
+	var wg sync.WaitGroup
+	for w := range workers {
+		wg.Go(func() {
+			addr := make([]byte, 20)
+			code := make([]byte, 40)
+			for i := range perWorker {
+				binary.BigEndian.PutUint64(addr[12:], uint64(w*perWorker+i))
+				binary.BigEndian.PutUint64(code, uint64(w*perWorker+i))
+				cc.Put(addr, code, uint64(i))
+			}
+		})
+	}
+	wg.Wait()
+
+	require.Equal(t, cc.hashToCode.cur.Load().lru.Len(), cc.hashToCode.Len(), "hashToCode counter drifted")
+	require.Equal(t, cc.codeHashToCode.cur.Load().lru.Len(), cc.codeHashToCode.Len(), "codeHashToCode counter drifted")
+	require.Equal(t, cc.codeSizeByCodeHash.cur.Load().lru.Len(), cc.codeSizeByCodeHash.Len(), "codeSizeByCodeHash counter drifted")
+}
+
+// Parallel adds while the LRU is still below its ceiling — the window where
+// every add runs the grow check.
+func BenchmarkGrowLRUParallelAddGrow(b *testing.B) {
+	g := newGrowLRU[uint64](256*datasize.MB, 48, nil)
+	defer g.Close()
+	var seq atomic.Uint64
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		for pb.Next() {
+			n := seq.Add(1) * 0x9E3779B97F4A7C15
+			g.Add(n, n)
+		}
+	})
 }
