@@ -667,30 +667,30 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 	if validationError != nil {
 		result.ValidationError = validationError.Error()
 	}
-	// Surface the sealed state root by READING the validated SD's commitment trie (the same
-	// in-tree pattern as exec_module_test.go / preexecute.go: GetCommitmentContext().Trie().RootHash()).
-	// ValidateChain runs block-end here — the CLOSE — so ComputeCommitment has set the FINAL sealed
-	// root in the commitment trie; we read it back rather than via the removed LastComputedRoot hack.
-	if root, rerr := doms.GetCommitmentContext().Trie().RootHash(); rerr == nil && len(root) > 0 {
-		result.ComputedRoot = common.BytesToHash(root)
-	}
-	// Seal the OUTPUT-SIDE header fields off the accumulated flashblock receipts (read-and-package,
-	// zero re-execution): the close ran block-end so these are final. Each round executed only its
-	// NEW txs against a per-round gas pool, so the accumulated receipts carry per-ROUND cumulative gas
-	// (each round restarts at its first tx). Restamp CumulativeGasUsed as a running sum of the per-tx
-	// GasUsed across the full body so it is block-cumulative — otherwise GasUsed AND ReceiptHash (which
-	// encodes CumulativeGasUsed) diverge from a one-shot full execution. Then GasUsed is the last
-	// receipt's (now block-)cumulative gas and ReceiptHash/Bloom derive exactly as block assembly does.
-	if fbReceipts := doms.FlashblockReceipts(); len(fbReceipts) > 0 {
-		var cum uint64
-		for _, r := range fbReceipts {
-			cum += r.GasUsed
-			r.CumulativeGasUsed = cum
+	// Surface the sealed output side ONLY on a successful close. On a FAILED validation the fork validator
+	// CLOSES the SD, so GetCommitmentContext() returns nil and reading the trie would nil-deref and crash
+	// the node — a bad block must return BadBlock, not panic. Read the sealed root off the validated SD's
+	// commitment trie (same pattern as preexecute.go), then seal the OUTPUT-SIDE header fields off the
+	// accumulated flashblock receipts (zero re-exec): block-end ran, so these are final. Each round used a
+	// per-round gas pool, so restamp CumulativeGasUsed as the running sum across the full body (else GasUsed
+	// AND ReceiptHash diverge from a one-shot full execution).
+	if validationStatus == ExecutionStatusSuccess {
+		if cc := doms.GetCommitmentContext(); cc != nil {
+			if root, rerr := cc.Trie().RootHash(); rerr == nil && len(root) > 0 {
+				result.ComputedRoot = common.BytesToHash(root)
+			}
 		}
-		result.FlashblockReceiptCount = len(fbReceipts)
-		result.GasUsed = cum
-		result.ReceiptHash = types.DeriveSha(fbReceipts)
-		result.Bloom = types.CreateBloom(fbReceipts)
+		if fbReceipts := doms.FlashblockReceipts(); len(fbReceipts) > 0 {
+			var cum uint64
+			for _, r := range fbReceipts {
+				cum += r.GasUsed
+				r.CumulativeGasUsed = cum
+			}
+			result.FlashblockReceiptCount = len(fbReceipts)
+			result.GasUsed = cum
+			result.ReceiptHash = types.DeriveSha(fbReceipts)
+			result.Bloom = types.CreateBloom(fbReceipts)
+		}
 	}
 	// The CLOSE is pure COMPUTE (assemble): it runs block-end over the maintained SD and returns the
 	// sealed output side, but does NOT write the sealed block or re-key the fork validator. Writing the

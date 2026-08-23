@@ -176,15 +176,18 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 	if validationError != nil {
 		res.ValidationError = validationError.Error()
 	}
-	// Surface the state root by READING the accumulated SD's commitment trie — the same in-tree
-	// pattern as exec_module_test.go:113 (extendingSd.GetCommitmentCtx().Trie().RootHash()). Exec sets
-	// this in the commitment trie when it computes commitment at block-end; we read it back rather than
-	// capturing it out-of-band (the old LastComputedRoot hack read on the wrong/fresh SD → zero).
-	if root, rerr := doms.GetCommitmentContext().Trie().RootHash(); rerr == nil && len(root) > 0 {
-		res.ComputedRoot = common.BytesToHash(root)
+	// Surface the output side ONLY on a successful pre-exec. On a FAILED round (e.g. a nonce gap in the
+	// accumulated body) the fork validator CLOSES the SD (fork_validator.go), so GetCommitmentContext()
+	// returns nil and reading the trie would nil-deref and CRASH the whole node — a bad round must fail
+	// gracefully as BadBlock, not panic. Surface the state root by reading the accumulated SD's commitment
+	// trie (same in-tree pattern as exec_module_test.go), and the accumulated flashblock receipt count.
+	if validationStatus == ExecutionStatusSuccess {
+		if cc := doms.GetCommitmentContext(); cc != nil {
+			if root, rerr := cc.Trie().RootHash(); rerr == nil && len(root) > 0 {
+				res.ComputedRoot = common.BytesToHash(root)
+			}
+		}
+		res.FlashblockReceiptCount = len(doms.FlashblockReceipts())
 	}
-	// Surface the accumulated flashblock receipt count (== body txs executed so far) — the seal
-	// derives ReceiptHash/Bloom/GasUsed from these accumulated receipts (STEP 3b slice 2b).
-	res.FlashblockReceiptCount = len(doms.FlashblockReceipts())
 	return res, nil
 }
