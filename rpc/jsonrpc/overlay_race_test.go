@@ -328,6 +328,20 @@ func marshalOverlayRaceTestTx(t *testing.T, txn types.Transaction) []byte {
 	return buf.Bytes()
 }
 
+func newOverlayTransactionTestData(t *testing.T) (*BaseAPI, *execmoduletester.ExecModuleTester, types.Transaction) {
+	t.Helper()
+	base, m, overlayHeader, events := newOverlayAheadTestAPIWithEvents(t)
+	overlay := events.LatestSD().BlockOverlay()
+	txn := signOverlayRaceTestTx(t, m, 1)
+	require.NoError(t, rawdb.WriteBody(overlay, overlayHeader.Hash(), overlayHeader.Number.Uint64(), &types.Body{Transactions: []types.Transaction{txn}}))
+	minTxNum, err := base._txNumReader.Min(m.Ctx, overlay, overlayHeader.Number.Uint64())
+	require.NoError(t, err)
+	block := types.NewBlockFromStorage(overlayHeader.Hash(), overlayHeader, []types.Transaction{txn}, nil, nil, nil)
+	rawdb.WriteTxLookupEntries(overlay, block, minTxNum)
+	base._txnReader = unpublishOverlayTxnReader{TxnReader: base._txnReader, events: events}
+	return base, m, txn
+}
+
 // TestGetBlockByTimestamp_SeesOverlayHead pins that GetBlockByTimestamp resolves
 // "current" through the block overlay: querying a timestamp at or after the
 // overlay head must return that in-flight block, not the last MDBX-committed one.
@@ -400,6 +414,29 @@ func TestGetTransactionByHash_PendingTx_UsesOverlayHead(t *testing.T) {
 		"pending tx gas price must be derived from the overlay head's base fee, not the stale MDBX head")
 }
 
+func TestTransactionByHashMethodsPinOverlayView(t *testing.T) {
+	t.Run("transaction", func(t *testing.T) {
+		base, m, txn := newOverlayTransactionTestData(t)
+		pool := &overlayRaceTxPoolClient{transactionsReply: &txpoolproto.TransactionsReply{RlpTxs: [][]byte{nil}}}
+		api := newEthApiForTest(base, m.DB, pool, nil)
+
+		got, err := api.GetTransactionByHash(m.Ctx, txn.Hash())
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		require.Equal(t, txn.Hash(), got.Hash)
+	})
+
+	t.Run("raw transaction", func(t *testing.T) {
+		base, m, txn := newOverlayTransactionTestData(t)
+		pool := &overlayRaceTxPoolClient{transactionsReply: &txpoolproto.TransactionsReply{RlpTxs: [][]byte{nil}}}
+		api := newEthApiForTest(base, m.DB, pool, nil)
+
+		got, err := api.GetRawTransactionByHash(m.Ctx, txn.Hash())
+		require.NoError(t, err)
+		require.Equal(t, marshalOverlayRaceTestTx(t, txn), []byte(got))
+	})
+}
+
 // newOverlayRacePendingPool signs a single pending tx from m.Address and wraps
 // it in an overlayRaceTxPoolClient.All reply, as txpool_content/contentFrom expect.
 func newOverlayRacePendingPool(t *testing.T, m *execmoduletester.ExecModuleTester) (*overlayRaceTxPoolClient, types.Transaction) {
@@ -446,6 +483,21 @@ func TestGetBlockTransactionCountByHash_SeesOverlayHead(t *testing.T) {
 	byHash, err := api.GetBlockTransactionCountByHash(m.Ctx, overlayHeader.Hash())
 	require.NoError(t, err)
 	require.NotNil(t, byHash, "by-hash count must see the overlay head the by-number count sees")
+	require.Equal(t, *byNumber, *byHash)
+}
+
+func TestGetUncleCountByBlockHash_SeesOverlayHead(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayAheadTestAPI(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	byNumber, err := api.GetUncleCountByBlockNumber(m.Ctx, rpc.BlockNumber(overlayHeader.Number.Uint64()))
+	require.NoError(t, err)
+	require.NotNil(t, byNumber)
+
+	byHash, err := api.GetUncleCountByBlockHash(m.Ctx, overlayHeader.Hash())
+	require.NoError(t, err)
+	require.NotNil(t, byHash)
 	require.Equal(t, *byNumber, *byHash)
 }
 
@@ -519,20 +571,28 @@ func TestGetRawReceipts_PinsOverlayView(t *testing.T) {
 
 func TestGetRawTransaction_PinsOverlayView(t *testing.T) {
 	t.Parallel()
-	base, m, overlayHeader, events := newOverlayAheadTestAPIWithEvents(t)
-	overlay := events.LatestSD().BlockOverlay()
-	txn := signOverlayRaceTestTx(t, m, 1)
-	require.NoError(t, rawdb.WriteBody(overlay, overlayHeader.Hash(), overlayHeader.Number.Uint64(), &types.Body{Transactions: []types.Transaction{txn}}))
-	minTxNum, err := base._txNumReader.Min(m.Ctx, overlay, overlayHeader.Number.Uint64())
-	require.NoError(t, err)
-	block := types.NewBlockFromStorage(overlayHeader.Hash(), overlayHeader, []types.Transaction{txn}, nil, nil, nil)
-	rawdb.WriteTxLookupEntries(overlay, block, minTxNum)
-	base._txnReader = unpublishOverlayTxnReader{TxnReader: base._txnReader, events: events}
+	base, m, txn := newOverlayTransactionTestData(t)
 	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
 
 	encoded, err := api.GetRawTransaction(m.Ctx, txn.Hash())
 	require.NoError(t, err)
 	require.Equal(t, marshalOverlayRaceTestTx(t, txn), []byte(encoded))
+}
+
+func TestWithTemporalOverlayPreservesFreezeInfo(t *testing.T) {
+	t.Parallel()
+	base, m, _ := newOverlayAheadTestAPI(t)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	want := tx.FreezeInfo()
+	view := base.filters.WithTemporalOverlay(tx)
+	var got kv.FreezeInfo
+	require.NotPanics(t, func() {
+		got = view.FreezeInfo()
+	})
+	require.Equal(t, want, got)
 }
 
 func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {

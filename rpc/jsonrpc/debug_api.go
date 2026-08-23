@@ -130,9 +130,7 @@ func (api *DebugAPIImpl) SetHead(ctx context.Context, number hexutil.Uint64) err
 	}
 	defer tx.Rollback()
 
-	// Overlay-aware head, so setHead(N) isn't rejected as future while N's
-	// commit is still in flight.
-	currentHead, err := rpchelper.GetLatestBlockNumber(api.filters.WithOverlay(tx))
+	currentHead, err := rpchelper.GetLatestBlockNumber(tx)
 	if err != nil {
 		return err
 	}

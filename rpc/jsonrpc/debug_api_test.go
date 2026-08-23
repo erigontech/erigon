@@ -1570,12 +1570,14 @@ func TestSetHead(t *testing.T) {
 	roTx.Rollback()
 	require.Greater(t, head, uint64(1), "test chain must have at least 2 blocks")
 
-	// Helper to build a DebugAPIImpl wired to a mockEthBackend
-	makeAPI := func(mock *mockEthBackend) *DebugAPIImpl {
-		backendServer := privateapi.NewEthBackendServer(ctx, mock, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), nil)
+	makeAPIWithBase := func(m *execmoduletester.ExecModuleTester, base *BaseAPI, mock *mockEthBackend) *DebugAPIImpl {
+		backendServer := privateapi.NewEthBackendServer(m.Ctx, mock, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), nil)
 		backendClient := direct.NewEthBackendClientDirect(backendServer)
 		backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
-		return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, &rpccfg.DebugApiConfig{})
+		return NewPrivateDebugAPI(base, m.DB, backend, &rpccfg.DebugApiConfig{})
+	}
+	makeAPI := func(mock *mockEthBackend) *DebugAPIImpl {
+		return makeAPIWithBase(m, newBaseApiForTest(m), mock)
 	}
 
 	// Rewinding one block below the current head is the simplest valid rewind.
@@ -1607,6 +1609,16 @@ func TestSetHead(t *testing.T) {
 		require.Error(t, err)
 		require.Contains(t, err.Error(), "in the future")
 		require.False(t, mock.setHeadCalled, "backend must not be called for a future block")
+	})
+
+	t.Run("overlay-only head is rejected", func(t *testing.T) {
+		base, overlayTester, overlayHeader := newOverlayAheadTestAPI(t)
+		mock := &mockEthBackend{}
+		api := makeAPIWithBase(overlayTester, base, mock)
+
+		err := api.SetHead(overlayTester.Ctx, hexutil.Uint64(overlayHeader.Number.Uint64()))
+		require.ErrorContains(t, err, "in the future")
+		require.False(t, mock.setHeadCalled, "backend must not be called for an uncommitted block")
 	})
 
 	// A far-future block number must be rejected.

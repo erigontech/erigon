@@ -1202,7 +1202,7 @@ func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
 		return tx
 	}
 	if overlay := sd.BlockOverlay(); overlay != nil {
-		return overlay.NewReadView(tx)
+		return overlay.NewTemporalReadView(tx)
 	}
 	return tx
 }
