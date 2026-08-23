@@ -26,6 +26,7 @@ import (
 	"sort"
 	"strconv"
 	"sync"
+	"unsafe"
 
 	"github.com/c2h5oh/datasize"
 
@@ -81,9 +82,9 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 
 // etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold so a full
 // set of domain/history/index flush collectors (~17 per batch writer) stays
-// around 512 MB when all run full. Pooled buffers start empty and grow with
-// the data they actually see; grown capacity survives reuse (Reset preserves
-// cap), so hot collectors amortize growth while never-full ones stay small.
+// around 512 MB when all run full. Pooled buffers start empty and take chunks
+// as they fill; Reset returns those chunks to the shared dataChunks pool, so an
+// idle buffer doesn't pin the RAM its busiest run needed.
 var etlSmallBufRAM = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 var SmallSortableBuffers = NewAllocator(&sync.Pool{
 	New: func() any {
@@ -96,6 +97,31 @@ var LargeSortableBuffers = NewAllocator(&sync.Pool{
 		return NewSortableBuffer(etlLargeBufRAM)
 	},
 })
+
+const (
+	// sortableBuffer stores key/value bytes in dataChunkSize blocks. entryLoc.offset
+	// packs the chunk index and the offset inside the chunk, so the index range is
+	// what limits one buffer to maxDataChunks.
+	dataChunkBits = 20
+	dataChunkSize = 1 << dataChunkBits
+	maxDataChunks = math.MaxInt32>>dataChunkBits + 1
+)
+
+// dataChunks are shared by all sortableBuffer instances: a buffer takes chunks as
+// it fills and gives them back on Reset, instead of pinning its peak size forever.
+var dataChunks = sync.Pool{New: func() any {
+	c := make([]byte, dataChunkSize)
+	return &c
+}}
+
+func getDataChunk() []byte { return *dataChunks.Get().(*[]byte) }
+
+func putDataChunk(c []byte) {
+	if len(c) != dataChunkSize { // private chunk of an oversized entry
+		return
+	}
+	dataChunks.Put(&c)
+}
 
 type Buffer interface {
 	// Put does copy `k` and `v`
@@ -123,9 +149,10 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-// entryLoc stores the location of a key/value pair within sortableBuffer.data.
-// Key occupies data[offset : offset+keyLen], value follows at data[offset+max(0,keyLen) : ...+valLen].
-// keyLen/valLen of -1 indicates nil.
+// entryLoc stores the location of a key/value pair inside sortableBuffer.
+// offset packs the chunk index and the offset inside that chunk:
+// idx<<dataChunkBits | off. Key occupies chunk[off : off+keyLen], value follows
+// right after it. keyLen/valLen of -1 indicates nil.
 type entryLoc struct {
 	insertionOrder int32 // enables stable sort via unstable SortFunc
 	offset         int32
@@ -143,16 +170,49 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 }
 
 type sortableBuffer struct {
-	entries     []entryLoc
-	data        []byte
+	entries []entryLoc
+	// chunks hold the key/value bytes. Growing by chunk instead of by one big
+	// slice keeps Put from re-allocating and copying everything collected so
+	// far. All chunks are dataChunkSize, except the private chunk an entry
+	// larger than that gets. cur is the chunk being filled.
+	chunks      [][]byte
+	bases       []unsafe.Pointer
+	cur         []byte
+	curBase     int32 // packed location of cur's first byte: curIdx<<dataChunkBits
+	curOff      int32
+	chunkBytes  int
 	optimalSize int
+}
+
+// nextChunk starts a chunk able to hold n bytes. An entry never straddles
+// chunks, so Get can hand out direct references.
+func (b *sortableBuffer) nextChunk(n int) {
+	if len(b.chunks) >= maxDataChunks {
+		panic(fmt.Sprintf("etl: sortableBuffer exceeded %d chunks", maxDataChunks))
+	}
+	if n > dataChunkSize {
+		b.cur = make([]byte, n)
+	} else {
+		b.cur = getDataChunk()
+	}
+	b.chunks = append(b.chunks, b.cur)
+	b.bases = append(b.bases, unsafe.Pointer(&b.cur[0]))
+	b.curBase = int32(len(b.chunks)-1) << dataChunkBits //nolint:gosec
+	b.curOff = 0
+	b.chunkBytes += len(b.cur)
+}
+
+// entryData points at e's first byte: the key, immediately followed by the value.
+// bases[i] is chunks[i]'s first byte - one load per lookup instead of a slice
+// header, which the sort comparator does twice per comparison.
+func (b *sortableBuffer) entryData(e *entryLoc) unsafe.Pointer {
+	return unsafe.Add(b.bases[e.offset>>dataChunkBits], e.offset&(dataChunkSize-1))
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
 	e := entryLoc{
-		offset:         int32(len(b.data)),    //nolint:gosec
 		keyLen:         int32(len(k)),         //nolint:gosec
 		valLen:         int32(len(v)),         //nolint:gosec
 		insertionOrder: int32(len(b.entries)), //nolint:gosec
@@ -163,11 +223,26 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	if v == nil {
 		e.valLen = -1
 	}
+	if n := len(k) + len(v); n > 0 {
+		off := b.curOff
+		if int(off)+n > len(b.cur) {
+			b.nextChunk(n)
+			off = 0
+		}
+		data := b.cur[off:]
+		copy(data, k)
+		copy(data[len(k):], v)
+		e.offset = b.curBase | off
+		b.curOff = off + int32(n) //nolint:gosec
+	}
 	b.entries = append(b.entries, e)
-	b.data = append(append(b.data, k...), v...)
 }
 
-func (b *sortableBuffer) Size() int { return len(b.data) + len(b.entries)*entryLocSize }
+// Size counts the bytes of every chunk taken so far, minus the unused tail of
+// the chunk being filled - so it tracks RAM held, not just bytes stored.
+func (b *sortableBuffer) Size() int {
+	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + len(b.entries)*entryLocSize
+}
 
 func (b *sortableBuffer) Len() int {
 	return len(b.entries)
@@ -176,21 +251,23 @@ func (b *sortableBuffer) Len() int {
 func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 	e := &b.entries[i]
 	kLen, vLen := int(e.keyLen), int(e.valLen)
-	keyOffset := int(e.offset)
-	valOffset := keyOffset
-	if kLen > 0 {
-		valOffset += kLen
-	}
 	var key, val []byte
-	if kLen > 0 {
-		key = b.data[keyOffset : keyOffset+kLen]
-	} else if kLen == 0 {
+	if kLen == 0 {
 		key = []byte{}
 	}
-	if vLen > 0 {
-		val = b.data[valOffset : valOffset+vLen]
-	} else if vLen == 0 {
+	if vLen == 0 {
 		val = []byte{}
+	}
+	if kLen <= 0 && vLen <= 0 {
+		return key, val
+	}
+	p := b.entryData(e)
+	if kLen > 0 {
+		key = unsafe.Slice((*byte)(p), kLen)
+		p = unsafe.Add(p, kLen)
+	}
+	if vLen > 0 {
+		val = unsafe.Slice((*byte)(p), vLen)
 	}
 	return key, val
 }
@@ -199,23 +276,35 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 	if cap(b.entries) < predictKeysAmount {
 		b.entries = make([]entryLoc, 0, predictKeysAmount)
 	}
-	if cap(b.data) < predictDataSize {
-		b.data = make([]byte, 0, predictDataSize)
+	if n := predictDataSize/dataChunkSize + 1; cap(b.chunks) < n {
+		b.chunks = slices.Grow(b.chunks, n)
+		b.bases = slices.Grow(b.bases, n)
 	}
 	return b
 }
 
 func (b *sortableBuffer) Reset() {
 	b.entries = b.entries[:0]
-	b.data = b.data[:0]
+	for i, c := range b.chunks {
+		putDataChunk(c)
+		b.chunks[i], b.bases[i] = nil, nil
+	}
+	b.chunks, b.bases = b.chunks[:0], b.bases[:0]
+	b.cur, b.curBase, b.curOff = nil, 0, 0
+	b.chunkBytes = 0
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
-	data := b.data
+	bases := b.bases
+	key := func(e entryLoc) []byte {
+		if e.keyLen <= 0 {
+			return nil
+		}
+		p := unsafe.Add(bases[e.offset>>dataChunkBits], e.offset&(dataChunkSize-1))
+		return unsafe.Slice((*byte)(p), e.keyLen)
+	}
 	cmp := func(a, b entryLoc) int {
-		aKey := data[a.offset : a.offset+max(a.keyLen, 0)]
-		bKey := data[b.offset : b.offset+max(b.keyLen, 0)]
-		if c := bytes.Compare(aKey, bKey); c != 0 {
+		if c := bytes.Compare(key(a), key(b)); c != 0 {
 			return c
 		}
 		return int(a.insertionOrder - b.insertionOrder) // StableSort: preserve insertion order for duplicate keys
@@ -235,10 +324,9 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 	for i := range b.entries {
 		e := &b.entries[i]
 		kLen, vLen := int(e.keyLen), int(e.valLen)
-		keyOffset := int(e.offset)
-		valOffset := keyOffset
-		if kLen > 0 {
-			valOffset += kLen
+		var p unsafe.Pointer
+		if kLen > 0 || vLen > 0 {
+			p = b.entryData(e)
 		}
 		// write key
 		n := binary.PutVarint(numBuf[:], int64(e.keyLen))
@@ -246,9 +334,10 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 			return err
 		}
 		if kLen > 0 {
-			if _, err := w.Write(b.data[keyOffset : keyOffset+kLen]); err != nil {
+			if _, err := w.Write(unsafe.Slice((*byte)(p), kLen)); err != nil {
 				return err
 			}
+			p = unsafe.Add(p, kLen)
 		}
 		// write value
 		n = binary.PutVarint(numBuf[:], int64(e.valLen))
@@ -256,7 +345,7 @@ func (b *sortableBuffer) Write(w io.Writer) error {
 			return err
 		}
 		if vLen > 0 {
-			if _, err := w.Write(b.data[valOffset : valOffset+vLen]); err != nil {
+			if _, err := w.Write(unsafe.Slice((*byte)(p), vLen)); err != nil {
 				return err
 			}
 		}
