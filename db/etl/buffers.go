@@ -123,15 +123,9 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-// Bytes live in chunks rather than one slice, so filling a buffer never
-// reallocates and copies what is already stored.
-var etlChunkShift = clampChunkShift(dbg.EnvInt("ETL_CHUNK_SHIFT", 20)) // 1MB
-
-// clampChunkShift bounds the chunk to [4KB, 1GB] — outside that an offset
-// either degenerates to one chunk per entry or overflows int32.
-func clampChunkShift(v int) uint {
-	return uint(min(max(v, 12), 30))
-}
+// Bytes live in chunks of 1<<chunkShift rather than one slice, so filling a
+// buffer never reallocates and copies what is already stored.
+const chunkShift = 20 // 1MB
 
 // entryLoc locates a key/value pair. offset is global: chunk index is
 // offset>>chunkShift, position within it offset&mask. keyLen/valLen -1 is nil.
@@ -157,8 +151,8 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 	}
 	return &sortableBuffer{
 		optimalSize: int(bufferOptimalSize.Bytes()),
-		chunkShift:  etlChunkShift,
-		chunkMask:   1<<etlChunkShift - 1,
+		chunkShift:  chunkShift,
+		chunkMask:   1<<chunkShift - 1,
 	}
 }
 
