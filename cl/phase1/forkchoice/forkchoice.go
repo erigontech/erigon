@@ -498,7 +498,8 @@ func (f *ForkChoiceStore) HighestSeen() uint64 {
 	return f.highestSeen.Load()
 }
 
-// BlockProcessing reports whether a block import is queued or active.
+// BlockProcessing reports whether an OnBlock call is waiting for the store lock or is active.
+// Blocks parked between network-service retries have not entered OnBlock and are not counted.
 func (f *ForkChoiceStore) BlockProcessing() bool {
 	return f.blocksProcessing.Load() > 0
 }

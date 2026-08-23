@@ -101,9 +101,11 @@ func (s *payloadPreparationScratch) release() {
 }
 
 // payloadPreparationGate gives real block work priority over speculative builder startup.
-// Production, publication, and adoption hold the shared side. Preparation checks that the gate is
-// idle before state work, then briefly takes the exclusive side only for StartPayloadBuild.
-// latestProducedSlot covers the signing interval when neither HTTP request holds the gate.
+// Handler-owned production, publication, adoption, and envelope execution hold the shared side.
+// Preparation checks that the gate is idle before state work, then briefly takes the exclusive
+// side only for StartPayloadBuild. latestProducedSlot covers the signing interval when neither
+// HTTP request holds the gate. Network imports do not use this gate; BlockProcessing provides
+// only an advisory pre-copy check for active OnBlock calls.
 type payloadPreparationGate struct {
 	blockWork          sync.RWMutex
 	latestProducedSlot atomic.Uint64
