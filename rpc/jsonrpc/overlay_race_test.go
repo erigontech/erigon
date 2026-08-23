@@ -476,6 +476,16 @@ func TestGetRawHeader_PinsOverlayView(t *testing.T) {
 	require.NotNil(t, header)
 }
 
+func TestGetRawBlock_PinsOverlayView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader := newOverlayUnpublishTestAPI(t)
+	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+
+	block, err := api.GetRawBlock(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayHeader.Number.Uint64())))
+	require.NoError(t, err)
+	require.NotNil(t, block)
+}
+
 func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ff := rpchelper.New(m.Ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
