@@ -1612,3 +1612,31 @@ func TestSortableBufferResetReleasesChunks(t *testing.T) {
 	require.Equal(t, []byte{0x01}, k)
 	require.Equal(t, []byte("reused"), v)
 }
+
+// disposeProbe records whether the collector still owned its data chunks when
+// the provider was disposed.
+type disposeProbe struct {
+	buf          *sortableBuffer
+	sawOwnChunks bool
+}
+
+func (p *disposeProbe) Next() ([]byte, []byte, error) { return nil, nil, io.EOF }
+func (p *disposeProbe) Wait() error                   { return nil }
+func (p *disposeProbe) String() string                { return "disposeProbe" }
+func (p *disposeProbe) Dispose()                      { p.sawOwnChunks = len(p.buf.chunks) > 0 }
+
+// TestCloseDisposesProvidersBeforeBuffer: KeepInRAM hands out a provider backed
+// by the collector's own buffer, and Reset gives that buffer's chunks to a pool
+// other collectors draw from. So Close must be done with every provider before
+// it recycles the buffer.
+func TestCloseDisposesProvidersBeforeBuffer(t *testing.T) {
+	allocator := NewAllocator(&sync.Pool{New: func() any { return NewSortableBuffer(BufferOptimalSize) }})
+	c := NewCollectorWithAllocator(t.Name(), t.TempDir(), allocator, log.New())
+	require.NoError(t, c.Collect([]byte{1}, []byte{2}))
+
+	probe := &disposeProbe{buf: c.buf.(*sortableBuffer)}
+	c.dataProviders = append(c.dataProviders, probe)
+	c.Close()
+
+	require.True(t, probe.sawOwnChunks, "buffer was recycled before its providers were disposed")
+}
