@@ -32,8 +32,6 @@ import (
 var (
 	mxCommitmentRunning = metrics.GetOrCreateGauge("domain_running_commitment")
 	mxCommitmentTook    = metrics.GetOrCreateSummary("domain_commitment_took")
-	// slowStageThreshold is the debug-branch trigger for per-stage slow logs.
-	slowStageThreshold = time.Duration(dbg.EnvInt("SLOW_STAGE_MS", 50)) * time.Millisecond
 )
 
 type sd interface {
@@ -421,7 +419,7 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 		if took > time.Millisecond {
 			mxCommitmentTook.Observe(took.Seconds())
 		}
-		if took >= 4*slowStageThreshold {
+		if took >= 8*dbg.ToLogSlowTxn {
 			log.Warn("[dbg] slow commitment", "took", took, "blockNum", blockNum)
 		}
 	}()
