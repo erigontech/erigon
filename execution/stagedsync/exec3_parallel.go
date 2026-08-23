@@ -2690,11 +2690,32 @@ func (be *blockExecutor) tooManyRetries(tx, txIndex int, label string, origin er
 // deferred stopwatches would all end at function return and measure nested
 // suffixes instead of disjoint spans.
 type nrSegs struct {
-	last  time.Time
-	start time.Time
-	names [8]string
-	durs  [8]time.Duration
-	n     int
+	last   time.Time
+	start  time.Time
+	names  [12]string
+	durs   [12]time.Duration
+	n      int
+	cnames [4]string
+	cvals  [4]int64
+	cn     int
+}
+
+// add records a duration that is not delimited by mark boundaries, e.g. time
+// accumulated over the iterations of an inner loop.
+func (s *nrSegs) add(name string, d time.Duration) {
+	if s.n >= len(s.durs) {
+		return
+	}
+	s.names[s.n], s.durs[s.n] = name, d
+	s.n++
+}
+
+func (s *nrSegs) count(name string, v int64) {
+	if s.cn >= len(s.cvals) {
+		return
+	}
+	s.cnames[s.cn], s.cvals[s.cn] = name, v
+	s.cn++
 }
 
 func (s *nrSegs) mark(name string) {
@@ -2710,9 +2731,12 @@ func (s *nrSegs) mark(name string) {
 func (s *nrSegs) total() time.Duration { return s.last.Sub(s.start) }
 
 func (s *nrSegs) logCtx() []any {
-	ctx := make([]any, 0, 2*s.n)
+	ctx := make([]any, 0, 2*(s.n+s.cn))
 	for i := 0; i < s.n; i++ {
 		ctx = append(ctx, s.names[i], s.durs[i])
+	}
+	for i := 0; i < s.cn; i++ {
+		ctx = append(ctx, s.cnames[i], s.cvals[i])
 	}
 	return ctx
 }
@@ -3219,6 +3243,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 
 	segs.mark("schedule")
 
+	var dWrites, dIndexes, dSend time.Duration
+	nPublished := int64(0)
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
 
@@ -3272,27 +3298,38 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			// Apply state writes to sd.mem and block cache.
+			tStep := time.Now()
 			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
 				nil, applyResult.rules, be.blockStateCache); err != nil {
 				return nil, err
 			}
+			dWrites += time.Since(tStep)
 
 			// Apply per-tx indexes (logs, traces, receipt cache) here in the
 			// exec loop, on the SAME goroutine that owns sd.mem mutations.
 			// Doing this in the apply loop instead used to race with the next
 			// tx / block-end ApplyStateWrites on SharedDomains.mem.
+			tStep = time.Now()
 			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
 				applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
 				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
 			}
+			dIndexes += time.Since(tStep)
 
+			tStep = time.Now()
 			if err := be.sendResult(ctx, &applyResult, false); err != nil {
 				return nil, err
 			}
+			dSend += time.Since(tStep)
+			nPublished++
 		}
 	}
 
 	segs.mark("publish")
+	segs.add("pubWrites", dWrites)
+	segs.add("pubIndexes", dIndexes)
+	segs.add("pubSend", dSend)
+	segs.count("nPublished", nPublished)
 
 	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
 		var allDeps map[int]map[int]bool
