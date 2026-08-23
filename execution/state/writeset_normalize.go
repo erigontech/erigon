@@ -52,7 +52,7 @@ type sdCascadeStats struct {
 
 // logSlowNormalize dumps the geometry of a write set whose Normalize ran long.
 // Everything it counts is walked only on the slow path.
-func logSlowNormalize(writes, filtered *WriteSet, took time.Duration, txIndex, incarnation int, sd sdCascadeStats) {
+func logSlowNormalize(writes, filtered *WriteSet, took time.Duration, blockNum uint64, txIndex, incarnation int, sd sdCascadeStats) {
 	dirty := make(map[accounts.Address]struct{})
 	writes.forEachFieldAddr(func(addr accounts.Address) { dirty[addr] = struct{}{} })
 
@@ -69,7 +69,7 @@ func logSlowNormalize(writes, filtered *WriteSet, took time.Duration, txIndex, i
 	}
 
 	log.Warn("[dbg] slow WriteSet.Normalize",
-		"took", took, "txIndex", txIndex, "incarnation", incarnation,
+		"took", took, "blockNum", blockNum, "txIndex", txIndex, "incarnation", incarnation,
 		"dirtyAddrs", len(dirty), "selfDestructs", selfDestructs,
 		"storageAddrs", storageAddrs, "storageSlots", storageSlots, "widestAddr", widestAddr,
 		"balance", len(writes.balance), "nonce", len(writes.nonce),
@@ -108,7 +108,7 @@ func logSlowNormalize(writes, filtered *WriteSet, took time.Duration, txIndex, i
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
-func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
+func (writes *WriteSet) Normalize(vm *VersionMap, blockNum uint64, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys func(addr accounts.Address) []accounts.StorageKey, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
 	filtered := &WriteSet{}
 	if writes == nil {
 		return filtered, nil
@@ -122,7 +122,7 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			mxNormalizeTook.Observe(took.Seconds())
 		}
 		if took >= slowNormalizeThreshold {
-			logSlowNormalize(writes, filtered, took, txIndex, incarnation, sdStats)
+			logSlowNormalize(writes, filtered, took, blockNum, txIndex, incarnation, sdStats)
 		}
 	}()
 

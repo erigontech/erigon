@@ -1230,8 +1230,15 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 	// maps yet - see blockExecutor.completeBlock.
 	pe.writeCount.Add(be.blockIO.WriteCount())
 	if !be.execStarted.IsZero() {
-		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
+		blockDur := time.Since(be.execStarted)
+		pe.blockExecMetrics.Duration.Add(blockDur)
 		pe.blockExecMetrics.BlockCount.Add(1)
+		if blockDur > time.Millisecond {
+			mxBlockExecSeconds.Observe(blockDur.Seconds())
+		}
+		if blockDur >= slowStageThreshold {
+			log.Warn("[dbg] slow block exec", "took", blockDur, "blockNum", be.number(), "txs", len(be.tasks))
+		}
 	}
 }
 
@@ -1650,6 +1657,20 @@ func (pe *parallelExecutor) scheduleNextPending(ctx context.Context) {
 }
 
 func (pe *parallelExecutor) processResults(ctx context.Context, applyTx kv.TemporalTx) (blockResult *blockResult, err error) {
+	prStarted := time.Now()
+	defer func() {
+		took := time.Since(prStarted)
+		if took > time.Millisecond {
+			mxProcessResultsSeconds.Observe(took.Seconds())
+		}
+		if took >= slowStageThreshold {
+			bn := uint64(0)
+			if blockResult != nil && blockResult.Block != nil {
+				bn = blockResult.Block.NumberU64()
+			}
+			log.Warn("[dbg] slow processResults", "took", took, "blockNum", bn)
+		}
+	}()
 	rwsIt := pe.rws.Iter()
 	for rwsIt.HasNext() && blockResult == nil {
 		txResult := rwsIt.PopNext()
@@ -2252,10 +2273,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	dirs datadir.Dirs,
 	calcFees bool) (result *exec.TxResult) {
 
-	var start time.Time
-	if ev.profile {
-		start = time.Now()
-	}
+	start := time.Now()
 
 	// Don't run post apply message during the state transition it is handled in finalize
 	postApplyMessage := evm.Context.PostApplyMessage
@@ -2273,6 +2291,14 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		return result
 	}
 
+	if taskDur := time.Since(start); taskDur > time.Millisecond {
+		mxTxnExecSeconds.Observe(taskDur.Seconds())
+		if taskDur >= slowStageThreshold {
+			log.Warn("[dbg] slow txn exec", "took", taskDur,
+				"blockNum", ev.Task.(*exec.TxTask).BlockNumber(), "txIndex", ev.version.TxIndex,
+				"incarnation", ev.version.Incarnation)
+		}
+	}
 	if ev.profile {
 		ev.statsMutex.Lock()
 		ev.stats[ev.version.TxIndex] = ExecutionStat{
@@ -2299,6 +2325,13 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 func (ev *taskVersion) Version() state.Version {
 	return ev.version
 }
+
+var (
+	mxBlockExecSeconds      = metrics.GetOrCreateSummary("exec3_block_exec_seconds")
+	mxTxnExecSeconds        = metrics.GetOrCreateSummary("exec3_txn_exec_seconds")
+	mxProcessResultsSeconds = metrics.GetOrCreateSummary("exec3_process_results_seconds")
+	slowStageThreshold      = time.Duration(dbg.EnvInt("SLOW_STAGE_MS", 50)) * time.Millisecond
+)
 
 type blockExecMetrics struct {
 	BlockCount atomic.Int64
@@ -3084,7 +3117,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
-					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
+					normWrites, normErr := rawWrites.Normalize(be.versionMap, be.number(), txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
 					if domainKeysErr != nil {
 						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
 					}
@@ -3355,7 +3388,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
 				var normErr error
-				finalizeWrites, normErr = writes.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
+				finalizeWrites, normErr = writes.Normalize(be.versionMap, be.number(), finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
 				if domainKeysErr != nil {
 					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
 				}

@@ -595,7 +595,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 					if ws == nil || ws.IsEmpty() {
 						continue
 					}
-					normalized, normErr := ws.Normalize(b.versionMap, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
+					normalized, normErr := ws.Normalize(b.versionMap, b.header.Number.Uint64(), i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, config.IsAmsterdam(b.header.Time))
 					if domainKeysErr != nil {
 						return nil, nil, fmt.Errorf("iterate storage prefix for block write normalization: %w", domainKeysErr)
 					}
