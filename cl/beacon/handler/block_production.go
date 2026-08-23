@@ -1072,7 +1072,7 @@ func (a *ApiHandler) produceBeaconBody(
 	if err != nil {
 		return nil, 0, err
 	}
-	targetGasLimit := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, stateVersion)
+	targetGasLimit, _ := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, stateVersion)
 	var executionPayload *cltypes.Eth1Block
 	var executionValue uint64
 	// One collector per concurrent body step. Sharing one would be a write-write race whenever

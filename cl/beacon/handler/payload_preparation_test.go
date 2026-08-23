@@ -82,7 +82,8 @@ func (e *payloadBuildEngine) StartPayloadBuild(
 func preparePayloadForTest(t *testing.T, handler *ApiHandler, targetSlot uint64) (common.Hash, error) {
 	t.Helper()
 	var scratch payloadPreparationScratch
-	return handler.preparePayloadForWithScratch(t.Context(), targetSlot, &scratch)
+	result, err := handler.preparePayloadForWithScratch(t.Context(), targetSlot, &scratch)
+	return result.headRoot, err
 }
 
 type payloadPreparationLoopRun struct {
@@ -638,6 +639,101 @@ func TestPreparePayloadLoopUsesCurrentForkTimingAtGloasTransition(t *testing.T) 
 	}
 }
 
+func TestPreparePayloadLoopMemoizesThePreferenceGenerationItUsed(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(
+		t, clparams.ElectraVersion, log.Root(), false,
+	)
+	config := *handler.beaconChainCfg
+	config.SecondsPerSlot = 4
+	config.IntervalsPerSlot = 3
+	currentEpoch := postState.Slot() / config.SlotsPerEpoch
+	config.FuluForkEpoch = currentEpoch
+	config.GloasForkEpoch = currentEpoch + 1
+	config.InitializeForkSchedule()
+	handler.beaconChainCfg = &config
+
+	headState := state.New(&config)
+	require.NoError(t, postState.CopyInto(headState))
+	require.NoError(t, headState.UpgradeToFulu())
+	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+	targetSlot := currentSlot + 1
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, currentSlot))
+	const defaultGasLimit = uint64(30_000_000)
+	executionHeader := headState.LatestExecutionPayloadHeader()
+	executionHeader.BlockHash = common.Hash{0xa1}
+	executionHeader.GasLimit = defaultGasLimit
+	headState.SetLatestExecutionPayloadHeader(executionHeader)
+
+	proposerIndex, err := headState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+	targetState, err := headState.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(targetState, targetSlot))
+	dependentRoot, err := state.GetProposerDependentRoot(targetState, targetSlot/config.SlotsPerEpoch)
+	require.NoError(t, err)
+
+	handler.epbsPool = pool.NewEpbsPool()
+	baseBlockRoot := common.Hash{0x41}
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	viewCount := 0
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			viewCount++
+			if viewCount == 1 {
+				handler.epbsPool.AddProposerPreference(&cltypes.SignedProposerPreferences{
+					Message: &cltypes.ProposerPreferences{
+						ProposalSlot:   targetSlot,
+						DependentRoot:  dependentRoot,
+						ValidatorIndex: proposerIndex,
+						TargetGasLimit: 36_000_000,
+					},
+				})
+			}
+			return view(headState, baseBlockRoot, currentSlot)
+		}).AnyTimes()
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(2500 * time.Millisecond)).AnyTimes()
+	handler.ethClock = clock
+
+	ctx, cancel := context.WithTimeout(t.Context(), 3*time.Second)
+	defer cancel()
+	var builtGasLimits []uint64
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(_ context.Context, _ common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
+		require.NotNil(t, attrs.TargetGasLimit)
+		builtGasLimits = append(builtGasLimits, uint64(*attrs.TargetGasLimit))
+		if len(builtGasLimits) == 1 {
+			// Fill the cache with other slots so the preference used by this attempt is evicted and
+			// its generation is pruned back to zero before the attempt settles.
+			for offset := uint64(1); offset <= 64; offset++ {
+				handler.epbsPool.AddProposerPreference(&cltypes.SignedProposerPreferences{
+					Message: &cltypes.ProposerPreferences{
+						ProposalSlot:  targetSlot + offset,
+						DependentRoot: common.Hash{byte(offset)},
+					},
+				})
+			}
+			_, found := handler.epbsPool.GetPreference(targetSlot, dependentRoot)
+			require.False(t, found)
+			require.Zero(t, handler.epbsPool.ProposerPreferencesGeneration(targetSlot))
+		} else {
+			cancel()
+		}
+		return bytes.Repeat([]byte{byte(len(builtGasLimits))}, 8), nil
+	}
+	handler.engine = engine
+
+	handler.preparePayloadLoop(ctx)
+
+	require.Equal(t, []uint64{36_000_000, defaultGasLimit}, builtGasLimits)
+}
+
 func TestInvalidProductionRequestDoesNotWaitForPreparation(t *testing.T) {
 	handler := &ApiHandler{}
 	finishPreparation, ok := handler.payloadPreparationGate.tryBeginPreparation()
@@ -913,9 +1009,9 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 	handler.ethClock = clock
 
 	var scratch payloadPreparationScratch
-	primedHead, err := handler.preparePayloadForWithScratch(t.Context(), targetSlot, &scratch)
+	result, err := handler.preparePayloadForWithScratch(t.Context(), targetSlot, &scratch)
 	require.NoError(t, err)
-	require.Equal(t, baseBlockRoot, primedHead)
+	require.Equal(t, baseBlockRoot, result.headRoot)
 	require.Positive(t, preparedWarmup(&handler.preparedPayload, targetSlot, payloadID, time.Now().Add(time.Second)))
 }
 

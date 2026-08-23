@@ -358,10 +358,15 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		prepareCtx, cancel := context.WithDeadlineCause(
 			ctx, slotStart.Add(-minimumPreparationLead), errPreparationTooLate,
 		)
-		head, err := a.preparePayloadForWithScratch(prepareCtx, targetSlot, &scratch)
+		result, err := a.preparePayloadForWithScratch(prepareCtx, targetSlot, &scratch)
 		cancel()
 		outcome := current
-		outcome.headRoot = head
+		outcome.headRoot = result.headRoot
+		// State derivation can overlap preference updates. Memoize the generation paired with the
+		// attributes this attempt used, rather than the generation sampled before state work.
+		if result.preferenceGenerationResolved {
+			outcome.proposerPreferencesGeneration = result.preferenceGeneration
+		}
 		if isSettledPreparationOutcome(err) {
 			lastSettled = outcome
 			scratch.release()
@@ -447,13 +452,20 @@ func isSettledPreparationOutcome(err error) bool {
 		errors.Is(err, errGloasReorgToEmpty)
 }
 
+type payloadPreparationResult struct {
+	headRoot                     common.Hash
+	preferenceGeneration         uint64
+	preferenceGenerationResolved bool
+}
+
 func (a *ApiHandler) preparePayloadForWithScratch(
 	ctx context.Context,
 	targetSlot uint64,
 	scratch *payloadPreparationScratch,
-) (common.Hash, error) {
+) (payloadPreparationResult, error) {
+	var result payloadPreparationResult
 	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
-		return common.Hash{}, errPreparationTooLate
+		return result, errPreparationTooLate
 	}
 	var (
 		baseBlockRoot      common.Hash
@@ -467,6 +479,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	// a builder that production can never match.
 	if err := a.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
 		baseBlockRoot = root
+		result.headRoot = root
 		// Beyond the proposer lookahead the index has to be reshuffled from the seed, which is far
 		// too costly to repeat every tick on a large validator set.
 		slotsPerEpoch := a.beaconChainCfg.SlotsPerEpoch
@@ -490,17 +503,17 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		baseState, err = scratch.copyFrom(headState, a.beaconChainCfg)
 		return err
 	}); err != nil {
-		return baseBlockRoot, err
+		return result, err
 	}
 
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
-		return baseBlockRoot, err
+		return result, err
 	}
 	if lookupAfterAdvance {
 		var err error
 		proposerIndex, feeRecipient, err = a.registeredProposer(baseState, targetSlot)
 		if err != nil {
-			return baseBlockRoot, err
+			return result, err
 		}
 	}
 
@@ -508,27 +521,31 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	// State derivation can consume most of the useful lead. Apply the same floor again so a late
 	// builder does not overlap production without providing meaningful warmup.
 	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
-		return baseBlockRoot, errPreparationTooLate
+		return result, errPreparationTooLate
 	}
-	targetGasLimit := a.targetGasLimitForProposal(baseState, targetSlot, proposerIndex, stateVersion)
+	targetGasLimit, preferenceGeneration := a.targetGasLimitForProposal(
+		baseState, targetSlot, proposerIndex, stateVersion,
+	)
+	result.preferenceGeneration = preferenceGeneration
+	result.preferenceGenerationResolved = true
 	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
 	if err != nil {
-		return baseBlockRoot, err
+		return result, err
 	}
 	if payloadSource.gloasPath == gloasPayloadPathReorgToEmpty {
-		return baseBlockRoot, errGloasReorgToEmpty
+		return result, errGloasReorgToEmpty
 	}
 	var withdrawalsState *state.CachingBeaconState
 	if payloadSource.parentExecutionRequests != nil {
 		// The scratch state is private to preparation, so the FULL parent can be applied in place.
 		if err := applyParentExecutionPayload(baseState, payloadSource.parentExecutionRequests); err != nil {
-			return baseBlockRoot, fmt.Errorf("prepare payload: apply parent execution payload: %w", err)
+			return result, fmt.Errorf("prepare payload: apply parent execution payload: %w", err)
 		}
 		withdrawalsState = baseState
 	}
 	withdrawals, err := a.expectedWithdrawals(baseState, withdrawalsState, stateVersion, targetSlot)
 	if err != nil {
-		return baseBlockRoot, err
+		return result, err
 	}
 	slotNumber := hexutil.Uint64(targetSlot)
 	attrs := a.payloadBuildAttributes(
@@ -536,19 +553,19 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	)
 	payloadID, err := a.startPayloadBuildForPreparation(ctx, baseBlockRoot, payloadSource.head, attrs)
 	if err != nil {
-		return baseBlockRoot, err
+		return result, err
 	}
 	if len(payloadID) == 0 {
-		return baseBlockRoot, errNoPayloadID
+		return result, errNoPayloadID
 	}
 	selectedRoot, _, selected := a.syncedData.SelectedHead()
 	if !selected || selectedRoot != baseBlockRoot {
-		return baseBlockRoot, errPreparationHeadChanged
+		return result, errPreparationHeadChanged
 	}
 
 	a.preparedPayload.set(targetSlot, payloadID, baseBlockRoot, time.Now())
 	a.logger.Info("PayloadPreparation: primed execution layer", "slot", targetSlot, "proposer", proposerIndex, "head", baseBlockRoot)
-	return baseBlockRoot, nil
+	return result, nil
 }
 
 func (a *ApiHandler) registeredProposer(beaconState *state.CachingBeaconState, targetSlot uint64) (uint64, common.Address, error) {
@@ -713,13 +730,15 @@ func applyParentExecutionPayload(beaconState *state.CachingBeaconState, requests
 	return transition.DefaultMachine.ApplyParentExecutionPayload(beaconState, requests)
 }
 
+// targetGasLimitForProposal returns the effective limit and the preference generation observed
+// with it. Preparation memoizes both so a concurrent preference update invalidates its result.
 func (a *ApiHandler) targetGasLimitForProposal(
 	baseState *state.CachingBeaconState,
 	targetSlot, proposerIndex uint64,
 	stateVersion clparams.StateVersion,
-) *hexutil.Uint64 {
+) (*hexutil.Uint64, uint64) {
 	if stateVersion.Before(clparams.GloasVersion) {
-		return nil
+		return nil, 0
 	}
 	var targetGasLimit *hexutil.Uint64
 	if parentBid := baseState.GetLatestExecutionPayloadBid(); parentBid != nil {
@@ -727,18 +746,18 @@ func (a *ApiHandler) targetGasLimitForProposal(
 		targetGasLimit = &gasLimit
 	}
 	if a.epbsPool == nil {
-		return targetGasLimit
+		return targetGasLimit, 0
 	}
 	proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
 	dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
 	if err != nil {
 		log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
-		return targetGasLimit
+		return targetGasLimit, a.epbsPool.ProposerPreferencesGeneration(targetSlot)
 	}
-	preference, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot)
-	if !ok || preference.Message == nil || preference.Message.ValidatorIndex != proposerIndex {
-		return targetGasLimit
+	preference, ok, generation := a.epbsPool.GetPreferenceWithGeneration(targetSlot, dependentRoot)
+	if !ok || preference == nil || preference.Message == nil || preference.Message.ValidatorIndex != proposerIndex {
+		return targetGasLimit, generation
 	}
 	gasLimit := hexutil.Uint64(preference.Message.TargetGasLimit)
-	return &gasLimit
+	return &gasLimit, generation
 }

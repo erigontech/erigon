@@ -104,6 +104,18 @@ func (p *EpbsPool) GetPreference(slot uint64, dependentRoot common.Hash) (*cltyp
 	return p.ProposerPreferences.Get(ProposerPreferencesKey{Slot: slot, DependentRoot: dependentRoot})
 }
 
+// GetPreferenceWithGeneration observes the preference and its slot generation between complete
+// preference updates, so a caller cannot pair a new preference with an older generation.
+func (p *EpbsPool) GetPreferenceWithGeneration(
+	slot uint64,
+	dependentRoot common.Hash,
+) (*cltypes.SignedProposerPreferences, bool, uint64) {
+	p.proposerPreferenceUpdatesMu.Lock()
+	defer p.proposerPreferenceUpdatesMu.Unlock()
+	preference, found := p.GetPreference(slot, dependentRoot)
+	return preference, found, p.ProposerPreferencesGeneration(slot)
+}
+
 // AddProposerPreference stores a preference and advances its proposal slot's generation.
 func (p *EpbsPool) AddProposerPreference(preference *cltypes.SignedProposerPreferences) {
 	if preference == nil || preference.Message == nil {
