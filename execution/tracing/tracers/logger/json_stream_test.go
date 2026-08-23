@@ -617,3 +617,74 @@ func BenchmarkOnOpcodeStorage(b *testing.B) {
 		})
 	}
 }
+
+// TestHexQuotedMatchesUint256Hex pins the stack encoding against uint256.Hex,
+// which the RPC output has to stay byte-identical to. The interesting cases are
+// the nibble boundaries: Hex counts nibbles, not bytes, so 0xf is one digit and
+// 0x10 is two.
+func TestHexQuotedMatchesUint256Hex(t *testing.T) {
+	l := &JsonStreamLogger{}
+	for _, str := range []string{
+		"0", "1", "f", "10", "ff", "100",
+		"1234567890abcdef",
+		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		"0000000000000000000000000000000000000000000000000000000000000001",
+		"8000000000000000000000000000000000000000000000000000000000000000",
+	} {
+		v := new(uint256.Int).SetBytes(common.FromHex("0x" + str))
+		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
+	}
+}
+
+// BenchmarkOnOpcodeStackDepth shows the scaling: the saved allocation is per
+// stack slot per step, and a real trace is not two slots deep.
+func BenchmarkOnOpcodeStackDepth(b *testing.B) {
+	for _, depth := range []int{2, 8, 16, 32} {
+		b.Run(fmt.Sprintf("depth=%d", depth), func(b *testing.B) {
+			stack := make([]uint256.Int, depth)
+			for i := range stack {
+				stack[i].SetUint64(uint64(i)*0x0123456789abcdef + 1)
+			}
+			scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 256), stack: stack}
+			l := NewJsonStreamLogger(&LogConfig{}, context.Background(), jsonstream.New(io.Discard))
+			l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+			b.ReportAllocs()
+			i := 0
+			for b.Loop() {
+				l.OnOpcode(uint64(i), byte(vm.ADD), 100, 3, scope, nil, 1, nil)
+				i++
+				// Nothing else drains this stream, and every iteration appends to it.
+				_ = l.stream.Flush()
+			}
+		})
+	}
+}
+
+func BenchmarkStackValueWrite(b *testing.B) {
+	vals := make([]uint256.Int, 16)
+	for i := range vals {
+		vals[i].SetUint64(uint64(i)*0x0123456789abcdef + 1)
+	}
+
+	b.Run("WriteString_Hex", func(b *testing.B) {
+		s := jsonstream.New(io.Discard)
+		b.ReportAllocs()
+		for b.Loop() {
+			for i := range vals {
+				s.WriteString(vals[i].Hex())
+			}
+			_ = s.Flush()
+		}
+	})
+	b.Run("WriteRaw_hexQuoted", func(b *testing.B) {
+		l := &JsonStreamLogger{stream: jsonstream.New(io.Discard)}
+		b.ReportAllocs()
+		for b.Loop() {
+			for i := range vals {
+				l.stream.WriteRaw(l.hexQuoted(&vals[i]))
+			}
+			_ = l.stream.Flush()
+		}
+	})
+}

@@ -40,9 +40,11 @@ import (
 // a track record of modified storage which is used in reporting snapshots of the
 // contract their storage.
 type JsonStreamLogger struct {
-	ctx          context.Context
-	cfg          LogConfig
-	stream       jsonstream.Stream
+	ctx    context.Context
+	cfg    LogConfig
+	stream jsonstream.Stream
+	// Scratch for the hex helpers below. Every result aliases it, so only one is
+	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
 	firstCapture bool
 	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
@@ -85,10 +87,8 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
-// hexWithPrefix encodes h into hexEncodeBuf as 0x-prefixed hex. It takes a hash
-// rather than a slice so the result is known to fit; the buffer is not resized.
-// The result aliases it, so hand it straight to the stream.
-func (l *JsonStreamLogger) hexWithPrefix(h *common.Hash) string {
+// hexWithPrefix encodes b as a 0x-prefixed hex string using hexEncodeBuf.
+func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
 	l.hexEncodeBuf[0] = '0'
 	l.hexEncodeBuf[1] = 'x'
 	n := hex.Encode(l.hexEncodeBuf[2:], h[:])
@@ -100,14 +100,6 @@ func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
 	l.hexEncodeBuf[0] = '"'
 	b, _ := hexutil.U256(*v).AppendText(l.hexEncodeBuf[:1])
 	return common.ToStringZeroCopy(append(b, '"'))
-}
-
-// hexQuotedHash is hexWithPrefix plus the quotes, ready for WriteRaw.
-func (l *JsonStreamLogger) hexQuotedHash(h *common.Hash) string {
-	l.hexEncodeBuf[0], l.hexEncodeBuf[1], l.hexEncodeBuf[2] = '"', '0', 'x'
-	n := hex.Encode(l.hexEncodeBuf[3:], h[:])
-	l.hexEncodeBuf[3+n] = '"'
-	return common.ToStringZeroCopy(l.hexEncodeBuf[:4+n])
 }
 
 // writeMemoryWordRaw writes a memory word as a JSON string "0x<hex>" directly
