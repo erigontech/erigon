@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"math/bits"
 	"slices"
 	"sort"
 	"strconv"
@@ -123,9 +124,49 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-// Bytes live in chunks of 1<<chunkShift rather than one slice, so filling a
-// buffer never reallocates and copies what is already stored.
-const chunkShift = 20 // 1MB
+// Bytes live in chunks rather than one slice, so filling a buffer never
+// reallocates and copies what is already stored.
+var chunkShift = chunkShiftOf(dbg.EnvDataSize("ETL_CHUNK", 1*datasize.MB))
+
+// chunkShiftOf rounds size up to a power of two, bounded to [4KB, 1GB]: outside
+// that an offset degenerates to one chunk per entry, or overflows int32.
+func chunkShiftOf(size datasize.ByteSize) uint {
+	s := max(min(int(size), 1<<30), 1<<12)
+	return uint(bits.Len(uint(s - 1)))
+}
+
+// chunkPool recycles full-size chunks across buffers.
+var chunkPool = sync.Pool{
+	New: func() any {
+		c := make([]byte, 1<<chunkShift)
+		return &c
+	},
+}
+
+// etlChunkPoolWarm chunks are seeded at startup so the first buffers to fill do
+// not pay for the allocation.
+var etlChunkPoolWarm = dbg.EnvInt("ETL_CHUNK_POOL_WARM", 64)
+
+func init() {
+	for range etlChunkPoolWarm {
+		c := make([]byte, 1<<chunkShift)
+		chunkPool.Put(&c)
+	}
+}
+
+// getChunk returns size bytes, pooled when size is the standard chunk.
+func getChunk(size int) []byte {
+	if size != 1<<chunkShift {
+		return make([]byte, size)
+	}
+	return *chunkPool.Get().(*[]byte)
+}
+
+func putChunk(c []byte) {
+	if len(c) == 1<<chunkShift {
+		chunkPool.Put(&c)
+	}
+}
 
 // entryLoc locates a key/value pair. offset is global: chunk index is
 // offset>>chunkShift, position within it offset&mask. keyLen/valLen -1 is nil.
@@ -181,7 +222,7 @@ func (b *sortableBuffer) reserve(n int) int {
 		// Start the wide chunk past every chunk already allocated, so that
 		// offset>>chunkShift addresses it rather than a narrow chunk.
 		span := (n + size - 1) / size * size
-		c := make([]byte, span)
+		c := getChunk(span)
 		off := len(b.chunks) * size
 		for range span / size {
 			b.chunks = append(b.chunks, c)
@@ -193,7 +234,7 @@ func (b *sortableBuffer) reserve(n int) int {
 		b.next += size - pos
 	}
 	for len(b.chunks)*size < b.next+max(n, 1) {
-		b.chunks = append(b.chunks, make([]byte, size))
+		b.chunks = append(b.chunks, getChunk(size))
 	}
 	off := b.next
 	b.next += n
@@ -268,13 +309,18 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 		b.entries = make([]entryLoc, 0, predictKeysAmount)
 	}
 	for len(b.chunks)*b.chunkSize() < predictDataSize {
-		b.chunks = append(b.chunks, make([]byte, b.chunkSize()))
+		b.chunks = append(b.chunks, getChunk(b.chunkSize()))
 	}
 	return b
 }
 
 func (b *sortableBuffer) Reset() {
 	b.entries = b.entries[:0]
+	for i, c := range b.chunks {
+		putChunk(c)
+		b.chunks[i] = nil
+	}
+	b.chunks = b.chunks[:0]
 	b.next = 0
 	b.dataLen = 0
 }
