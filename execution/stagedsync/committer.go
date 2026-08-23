@@ -980,7 +980,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	//
 	// Inside the lock we must use the *Locked variants — the public
 	// counterparts re-acquire the same Mutex and would self-deadlock.
-	defer cc.doms.SwapChangesetAccumulatorLocked(cs)()
+	defer cc.doms.SwapForCommitLocked(cs)()
 	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
 }
 
