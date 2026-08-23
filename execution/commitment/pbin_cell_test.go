@@ -564,3 +564,29 @@ func TestPBinGridBounds(t *testing.T) {
 	require.Equal(t, pbinGridRows, len(g.depths))
 	require.Equal(t, 2, len(g.rows[0]))
 }
+
+// A branch cell never owns a plain key, so the encoder cannot spell one. Left
+// admissible, the omitted-prefix path would rebuild a full leaf path for what is
+// only a partial extension.
+func TestPBinBranchCodecRejectsBranchCellWithAddress(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name string
+		mut  func(*pbinCell)
+	}{
+		{"storage address", func(c *pbinCell) { c.storageAddrLen = length.Addr + length.Hash }},
+		{"account address", func(c *pbinCell) { c.accountAddrLen = length.Addr }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			c := pbinTestBranchCell(0xA5, 12)
+			tc.mut(&c)
+			rec, err := pbinAppendCell(nil, &c, false)
+			require.NoError(t, err)
+
+			var got pbinCell
+			_, err = pbinDecodeCell(rec, 0, &got, 0, nil, false)
+			require.ErrorIs(t, err, errPBinMalformedBranch)
+		})
+	}
+}

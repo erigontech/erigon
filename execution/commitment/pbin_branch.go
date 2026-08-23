@@ -164,8 +164,10 @@ func pbinDecodeCell(data []byte, pos int, c *pbinCell, depth int16, keys *pbinDi
 		}
 	case pbinFieldBranch:
 		c.kind = pbinNodeBranch
-		if fields&pbinFieldLeafValue != 0 {
-			return 0, fmt.Errorf("%w: branch cell carries a leaf value", errPBinMalformedBranch)
+		// A branch owns no plain key, so an address here would also make the
+		// omitted-prefix path rebuild a whole leaf path for a partial extension.
+		if fields&pbinFieldValue != 0 {
+			return 0, fmt.Errorf("%w: branch cell carries a value field", errPBinMalformedBranch)
 		}
 	default:
 		return 0, fmt.Errorf("%w: cell fields %08b name no single node kind", errPBinMalformedBranch, fields)
