@@ -2001,12 +2001,10 @@ func (sdb *IntraBlockState) getStateObject(addr accounts.Address, recordRead boo
 	}
 	obj := newObject(sdb, addr, account, account)
 	if code != nil {
-		// When code is loaded from the version map (written by a prior tx),
-		// synchronise the stateObject's CodeHash with the actual code.
-		// Without this fix, the stale CodeHash causes the "revert to original"
-		// optimisation in SetCode to incorrectly delete code writes when
-		// clearing a delegation that was set by a prior transaction in the
-		// same block.
+		// Code loaded from the version map (written by a prior tx) must carry a
+		// matching CodeHash: a stale hash lets SetCode's revert-to-original
+		// optimisation wrongly delete code writes when clearing a same-block
+		// delegation.
 		codeHash := accounts.InternCodeHash(crypto.Keccak256Hash(code))
 		obj.code = accounts.Code{Hash: codeHash, Bytes: code}
 		if codeHash != obj.data.CodeHash {
