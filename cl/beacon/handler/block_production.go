@@ -75,8 +75,6 @@ const (
 	BlockPublishingValidationConsensusAndEquivocation BlockPublishingValidation = "consensus_and_equivocation"
 )
 
-var errBuilderNotEnabled = errors.New("builder is not enabled")
-
 const (
 	caplinClientCode = "CN"
 	caplinClientName = "caplin"
@@ -784,6 +782,7 @@ func (a *ApiHandler) produceBlock(
 	graffiti common.Hash,
 ) (block *cltypes.BlindOrExecutionBeaconBlock, err error) {
 	defer func() { reportProductionFailure(err, targetSlot) }()
+	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
 
 	var wg sync.WaitGroup
 	// produce beacon body
@@ -833,18 +832,18 @@ func (a *ApiHandler) produceBlock(
 		builderHeader *builder.ExecutionHeader
 		builderErr    error
 	)
-	wg.Go(func() {
-		start := time.Now()
-		defer func() {
-			a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
-		}()
-		if a.routerCfg.Builder && a.builderClient != nil {
-			builderHeader, builderErr = a.getBuilderPayload(ctx, baseState, targetSlot)
-			if builderErr != nil && !errors.Is(builderErr, errBuilderNotEnabled) {
+	if stateVersion.Before(clparams.GloasVersion) && a.routerCfg.Builder && a.builderClient != nil {
+		wg.Go(func() {
+			start := time.Now()
+			defer func() {
+				a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
+			}()
+			builderHeader, builderErr = a.getMEVBoostPayload(ctx, baseState, targetSlot)
+			if builderErr != nil {
 				log.Warn("Failed to get builder payload", "err", builderErr)
 			}
-		}
-	})
+		})
+	}
 	// wait for both tasks to finish
 	wg.Wait()
 
@@ -867,7 +866,6 @@ func (a *ApiHandler) produceBlock(
 		ParentRoot:    baseBlockRoot,
 		Cfg:           a.beaconChainCfg,
 	}
-	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
 	if !a.routerCfg.Builder || builderErr != nil || stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		// directly return the block if:
 		// 1. builder is not enabled
@@ -940,15 +938,11 @@ func (a *ApiHandler) produceBlock(
 	return block, nil
 }
 
-func (a *ApiHandler) getBuilderPayload(
+func (a *ApiHandler) getMEVBoostPayload(
 	ctx context.Context,
 	baseState *state.CachingBeaconState,
 	targetSlot uint64,
 ) (*builder.ExecutionHeader, error) {
-	if !a.routerCfg.Builder || a.builderClient == nil {
-		return nil, errBuilderNotEnabled
-	}
-
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil, err
@@ -958,15 +952,7 @@ func (a *ApiHandler) getBuilderPayload(
 	if err != nil {
 		return nil, err
 	}
-	// get the parent hash of base execution block
-	// [Modified in Gloas:EIP7732] LatestExecutionPayloadHeader is stale in GLOAS;
-	// use GetLatestBlockHash which returns the correct hash from the bid.
-	var parentHash common.Hash
-	if baseState.Version() >= clparams.GloasVersion {
-		parentHash = baseState.GetLatestBlockHash()
-	} else {
-		parentHash = baseState.LatestExecutionPayloadHeader().BlockHash
-	}
+	parentHash := baseState.LatestExecutionPayloadHeader().BlockHash
 	header, err := a.builderClient.GetHeader(ctx, int64(targetSlot), parentHash, pubKey)
 	if err != nil {
 		return nil, err

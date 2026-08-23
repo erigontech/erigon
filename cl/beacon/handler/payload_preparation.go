@@ -220,13 +220,14 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 	// Polling once per quarter slot gives a newly selected head several chances to trigger
 	// preparation. Most non-proposal ticks stop before copying state; a pre-Fulu epoch boundary
 	// needs state advancement before the proposer is known.
-	tick := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second / 4
+	slotDuration := time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second
+	tick := slotDuration / 4
 	if tick <= 0 {
 		logger.Warn("PayloadPreparation: disabled because the slot duration is zero")
 		return
 	}
-	gloasWindow := time.Duration(a.beaconChainCfg.SecondsPerSlot)*time.Second -
-		time.Duration(a.beaconChainCfg.PayloadAttestationDueMs())*time.Millisecond
+	payloadAttestationDeadline := time.Duration(a.beaconChainCfg.PayloadAttestationDueMs()) * time.Millisecond
+	gloasWindow := slotDuration - payloadAttestationDeadline
 	if gloasWindow <= minimumPreparationLead {
 		logger.Warn(
 			"PayloadPreparation: Gloas preparation window is too short",
@@ -284,9 +285,9 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		// Before genesis the current slot clamps to zero, so the next slot can be arbitrarily far
 		// off; a builder primed that early hits its own cap before the slot even starts.
 		slotStart := a.ethClock.GetSlotTime(targetSlot)
-		currentSlotStart := slotStart.Add(-time.Duration(a.beaconChainCfg.SecondsPerSlot) * time.Second)
+		currentSlotStart := slotStart.Add(-slotDuration)
 		lead := time.Until(slotStart)
-		if lead > maxPreparationLead(a.beaconChainCfg) || lead <= minimumPreparationLead {
+		if lead > slotDuration || lead <= minimumPreparationLead {
 			continue
 		}
 		selectedRoot, selectedSlot, selected := a.syncedData.SelectedHead()
@@ -319,7 +320,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 				if delay := gloasPayloadDecisionDelay(
 					time.Now(),
 					currentSlotStart,
-					time.Duration(a.beaconChainCfg.PayloadAttestationDueMs())*time.Millisecond,
+					payloadAttestationDeadline,
 				); delay > 0 {
 					if err := common.Sleep(ctx, delay); err != nil {
 						return
@@ -399,12 +400,6 @@ const (
 	gloasPayloadPathReorgToEmpty
 )
 
-// maxPreparationLead bounds how far ahead of a slot priming is worthwhile. One slot is all a live
-// chain ever offers, since preparation only ever targets the slot after the current one.
-func maxPreparationLead(cfg *clparams.BeaconChainConfig) time.Duration {
-	return time.Duration(cfg.SecondsPerSlot) * time.Second
-}
-
 // An older selected head becomes usable only after the attestation deadline when no current-slot
 // block is still being processed. A future head is invalid.
 func shouldWaitForCurrentSlotHead(
@@ -433,14 +428,11 @@ func gloasPayloadDecisionDelay(
 // isExpectedPreparationSkip reports whether there was simply nothing to prepare, as opposed to a
 // failure worth reporting.
 func isExpectedPreparationSkip(err error) bool {
-	return errors.Is(err, errNotOurProposal) ||
-		errors.Is(err, errNoPayloadID) ||
+	return isSettledPreparationOutcome(err) ||
 		errors.Is(err, errHeadTooFarBack) ||
 		errors.Is(err, errPreparationHeadChanged) ||
 		errors.Is(err, errBlockWorkInFlight) ||
-		errors.Is(err, errPreparationTooLate) ||
 		errors.Is(err, errGloasPayloadPending) ||
-		errors.Is(err, errGloasReorgToEmpty) ||
 		errors.Is(err, context.DeadlineExceeded) ||
 		errors.Is(err, context.Canceled) ||
 		errors.Is(err, synced_data.ErrNotSynced)

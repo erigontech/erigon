@@ -99,6 +99,32 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
 }
 
+func TestGloasProductionDoesNotRequestMEVBoostHeader(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	postState, handler, _, _, _ := setupGloasPreparationTest(t)
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: common.Hash{0xa1},
+		BlockHash:       common.Hash{0xb2},
+		Slot:            postState.Slot(),
+	})
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	builderClient.EXPECT().GetHeader(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
+	handler.builderClient = builderClient
+
+	_, err := handler.produceBlock(
+		t.Context(),
+		1,
+		postState.Slot(),
+		common.Hash{0x41},
+		postState,
+		postState.Slot()+1,
+		common.Bytes96{},
+		common.Hash{},
+	)
+
+	require.ErrorIs(t, err, errGloasPayloadPending)
+}
+
 func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
 	for _, version := range []clparams.StateVersion{clparams.Phase0Version, clparams.AltairVersion} {
 		t.Run(version.String(), func(t *testing.T) {
