@@ -272,13 +272,14 @@ func CopyFile(from, to string) error {
 	return nil
 }
 
-// VersionedDirs lists the trees that can hold version-prefixed file names. The
-// Snap* subdirs are absent because they live under d.Snap, which WalkDir recurses
-// into; caplin blobs and column data are absent because a sidecar is named
-// <blockRoot>_<index>.
+// VersionedDirs lists the trees that can hold version-prefixed file names. Caplin
+// blobs and column data are absent because a sidecar is named <blockRoot>_<index>.
+// The Snap* subdirs stay even though they live under d.Snap: WalkDir roots on
+// Lstat, so a datadir whose snapshots/ is a symlink is reached only by naming them.
 func (d *Dirs) VersionedDirs() []string {
 	return []string{
-		d.Chaindata, d.Tmp, d.Snap, d.Downloader, d.TxPool,
+		d.Chaindata, d.Tmp, d.SnapIdx, d.SnapHistory, d.SnapDomain,
+		d.SnapAccessors, d.SnapCaplin, d.Downloader, d.TxPool, d.Snap,
 		d.Nodes, d.CaplinIndexing, d.CaplinLatest, d.CaplinGenesis,
 	}
 }
@@ -310,9 +311,8 @@ func (d *Dirs) RenameOldVersions(cmdCommand bool) error {
 					return nil
 				}
 
-				parent := filepath.Dir(path)
-				if strings.Contains(name, "commitment") &&
-					(parent == d.SnapAccessors || parent == d.SnapHistory || parent == d.SnapIdx) {
+				if strings.Contains(entry.Name(), "commitment") &&
+					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
 					// remove the file instead of renaming
 					if err := dir.RemoveFile(path); err != nil {
 						return fmt.Errorf("failed to remove file %s: %w", path, err)
@@ -369,9 +369,8 @@ func (d *Dirs) RenameNewVersions() error {
 			}
 
 			if strings.HasPrefix(dirEntry.Name(), "v1.0-") {
-				parent := filepath.Dir(path)
 				if strings.Contains(dirEntry.Name(), "commitment") &&
-					(parent == d.SnapAccessors || parent == d.SnapHistory || parent == d.SnapIdx) {
+					(dirPath == d.SnapAccessors || dirPath == d.SnapHistory || dirPath == d.SnapIdx) {
 					// remove the file instead of renaming
 					if err := dir.RemoveFile(path); err != nil {
 						return fmt.Errorf("failed to remove file %s: %w", path, err)

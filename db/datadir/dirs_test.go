@@ -206,3 +206,50 @@ func Test_RenameVersions_CommitmentInIndexDirs(t *testing.T) {
 		})
 	}
 }
+
+// WalkDir roots on Lstat, so a symlinked snapshots/ is descended only because the
+// Snap* subdirs are named in VersionedDirs. db/datadir/reset handles that layout
+// deliberately, so collapsing them onto d.Snap would silently skip the whole tree.
+func Test_RenameOldVersions_SymlinkedSnapshotsDir(t *testing.T) {
+	base := t.TempDir()
+	external := t.TempDir()
+	require.NoError(t, os.Symlink(external, filepath.Join(base, SnapDir)))
+
+	d := New(base)
+	require.NoError(t, os.MkdirAll(d.SnapDomain, 0o755))
+
+	oldName := filepath.Join(d.SnapDomain, "v1-accounts.0-1.kv")
+	newName := filepath.Join(d.SnapDomain, "v1.0-accounts.0-1.kv")
+	touch(t, oldName)
+
+	require.NoError(t, d.RenameOldVersions(false))
+
+	mustNotExist(t, oldName)
+	mustExist(t, newName)
+}
+
+// A stale v1-*.torrent with nothing to rename still has to reset the downloader,
+// or its DB keeps indexing the torrents that were just deleted.
+func Test_RenameOldVersions_TorrentOnlyResetsDownloader(t *testing.T) {
+	t.Run("torrent_only", func(t *testing.T) {
+		d := New(t.TempDir())
+		torrent := filepath.Join(d.Downloader, "v1-000001-000002-headers.seg.torrent")
+		touch(t, torrent)
+
+		require.NoError(t, d.RenameOldVersions(false))
+
+		mustNotExist(t, torrent)
+		mustDirNotExist(t, d.Downloader)
+	})
+
+	t.Run("nothing_stale", func(t *testing.T) {
+		d := New(t.TempDir())
+		keep := filepath.Join(d.Snap, "v1.0-000001-000002-headers.seg")
+		touch(t, keep)
+
+		require.NoError(t, d.RenameOldVersions(false))
+
+		mustExist(t, keep)
+		mustDirExist(t, d.Downloader)
+	})
+}
