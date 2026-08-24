@@ -225,6 +225,11 @@ func (cc *commitmentCalculator) markProcessed(blockNum uint64) {
 // calculator stops, or ctx is cancelled. It is the COMMITMENT_AFTER_EXEC
 // barrier: with it the exec loop never runs a block alongside a commitment.
 func (cc *commitmentCalculator) WaitProcessed(ctx context.Context, blockNum uint64) error {
+	if cc.in == nil {
+		// Exec-only (DISCARD_COMMITMENT): loop() never runs, so nothing ever
+		// marks a block processed and every escape below is unreachable.
+		return nil
+	}
 	for {
 		cc.processedMu.Lock()
 		reached := cc.processedThrough >= blockNum
