@@ -225,15 +225,6 @@ func (r failOverlayHeaderNumberBlockReader) HeaderNumber(ctx context.Context, tx
 	return r.FullBlockReader.HeaderNumber(ctx, tx, hash)
 }
 
-type failBodyReadBlockReader struct {
-	dbservices.FullBlockReader
-	err error
-}
-
-func (r failBodyReadBlockReader) Body(context.Context, kv.Getter, common.Hash, uint64) (*types.Body, uint32, error) {
-	return nil, 0, r.err
-}
-
 type failBlockWithSendersReader struct {
 	dbservices.FullBlockReader
 	err error
@@ -1261,21 +1252,24 @@ func TestGetLogsBlockHashRequiresBody(t *testing.T) {
 	require.Nil(t, logs)
 }
 
-func TestGetLogsBlockHashDoesNotDecodeBody(t *testing.T) {
+func TestResolveLogsRangeBlockHashDoesNotDecodeBody(t *testing.T) {
 	t.Parallel()
 	m := execmoduletester.New(t)
 	chainPack := insertOverlayRaceChain(t, m)
 	base := newBaseApiForTest(m)
-	base._blockReader = failBodyReadBlockReader{
+	base._blockReader = failBlockWithSendersReader{
 		FullBlockReader: base._blockReader,
 		err:             errors.New("unexpected full body read"),
 	}
-	api := newEthApiForTest(base, m.DB, nil, nil)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
 	hash := chainPack.TopBlock.Hash()
 
-	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &hash})
+	begin, end, err := base.resolveLogsRange(m.Ctx, tx, filters.FilterCriteria{BlockHash: &hash}, true)
 	require.NoError(t, err)
-	require.Empty(t, logs)
+	require.Equal(t, chainPack.TopBlock.NumberU64(), begin)
+	require.Equal(t, begin, end)
 }
 
 type rejectTxNumsAboveIndex struct {
