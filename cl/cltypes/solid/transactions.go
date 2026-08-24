@@ -17,6 +17,7 @@
 package solid
 
 import (
+	"bytes"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -37,15 +38,41 @@ type TransactionsSSZ struct {
 }
 
 func (t *TransactionsSSZ) UnmarshalJSON(buf []byte) error {
-	tmp := []hexutil.Bytes{}
 	t.root = common.Hash{}
-	if err := json.Unmarshal(buf, &tmp); err != nil {
+	decoder := json.NewDecoder(bytes.NewReader(buf))
+	token, err := decoder.Token()
+	if err != nil {
 		return err
 	}
-	t.underlying = nil
-	for _, tx := range tmp {
-		t.underlying = append(t.underlying, tx)
+	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
+		return fmt.Errorf("expected JSON array")
 	}
+	transactions := make([][]byte, 0, int(min(t.maxTransactions(), 16)))
+	for decoder.More() {
+		if uint64(len(transactions)) >= t.maxTransactions() {
+			return fmt.Errorf("transactions exceed decoder resource limit %d", t.maxTransactions())
+		}
+		var encoded json.RawMessage
+		if err := decoder.Decode(&encoded); err != nil {
+			return err
+		}
+		encoded = bytes.TrimSpace(encoded)
+		if len(encoded) > 4 && uint64((len(encoded)-4+1)/2) > t.maxBytes() {
+			return fmt.Errorf("transaction %d exceeds decoder byte limit %d", len(transactions), t.maxBytes())
+		}
+		var transaction hexutil.Bytes
+		if err := json.Unmarshal(encoded, &transaction); err != nil {
+			return err
+		}
+		transactions = append(transactions, transaction)
+	}
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return err
+	}
+	t.underlying = transactions
 	return nil
 }
 

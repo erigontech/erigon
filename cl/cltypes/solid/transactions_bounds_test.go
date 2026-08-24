@@ -22,7 +22,35 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/common/ssz"
+	"github.com/stretchr/testify/require"
 )
+
+func TestTransactionsSSZUnmarshalJSONRejectsTransactionLimit(t *testing.T) {
+	txs := NewTransactionsSSZWithLimits(2, 4)
+
+	err := txs.UnmarshalJSON([]byte(`["0x01", "0x02", "0x03"]`))
+
+	require.Error(t, err)
+	require.Empty(t, txs.UnderlyngReference())
+}
+
+func TestTransactionsSSZUnmarshalJSONRejectsTransactionByteLimit(t *testing.T) {
+	txs := NewTransactionsSSZWithLimits(2, 2)
+
+	err := txs.UnmarshalJSON([]byte(`["0x010203"]`))
+
+	require.Error(t, err)
+	require.Empty(t, txs.UnderlyngReference())
+}
+
+func TestTransactionsSSZUnmarshalJSONAcceptsConfiguredLimits(t *testing.T) {
+	txs := NewTransactionsSSZWithLimits(2, 2)
+
+	err := txs.UnmarshalJSON([]byte(`["0x0102", "0x0304"]`))
+
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{1, 2}, {3, 4}}, txs.UnderlyngReference())
+}
 
 func TestTransactionsSSZ_DecodeSSZ_BoundsCheck(t *testing.T) {
 	tests := []struct {
