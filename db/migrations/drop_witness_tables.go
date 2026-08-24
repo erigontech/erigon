@@ -24,8 +24,8 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 )
 
-var dropBorWitnessTables = Migration{
-	Name: "drop_bor_witness_tables",
+var dropWitnessTables = Migration{
+	Name: "drop_witness_tables",
 	Up: func(db kv.RwDB, _ datadir.Dirs, _ []byte, BeforeCommit Callback, _ log.Logger) error {
 		tx, err := db.BeginRw(context.Background())
 		if err != nil {
@@ -34,8 +34,8 @@ var dropBorWitnessTables = Migration{
 		defer tx.Rollback()
 
 		for _, table := range []string{
-			kv.BorWitnessesDeprecated,
-			kv.BorWitnessSizesDeprecated,
+			kv.WitnessesDeprecated,
+			kv.WitnessSizesDeprecated,
 		} {
 			if err := tx.DropTable(table); err != nil {
 				return err

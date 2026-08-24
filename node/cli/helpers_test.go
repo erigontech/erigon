@@ -49,6 +49,13 @@ func buildHttpCfg(t *testing.T, args []string) nodecfg.Config {
 	return result
 }
 
+func TestDefaultFlagsDoNotExposeWitProtocol(t *testing.T) {
+	for _, flag := range DefaultFlags {
+		require.NotContains(t, flag.Names(), "wit-protocol")
+		require.NotContains(t, flag.Names(), "polygon.wit-protocol")
+	}
+}
+
 // TestOnUsageErrorHandler verifies that the custom OnUsageError handler
 // prints the error and help hint when called directly
 func TestOnUsageErrorHandler(t *testing.T) {
