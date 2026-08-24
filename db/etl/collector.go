@@ -45,7 +45,7 @@ func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
 	}
-	b.Reset() // release the data chunks now: an idle pooled buffer must not pin them
+	b.Reset() // return the buffer's chunks to the pool now — see dataChunks in buffers.go
 	a.p.Put(b)
 }
 func (a *Allocator) Get() Buffer {
