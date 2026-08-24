@@ -28,6 +28,7 @@ import (
 	"strings"
 	"sync"
 	"time"
+	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -46,10 +47,10 @@ type dataWithTxNum struct {
 	txNum uint64
 }
 
-// Padded to a cache line so per-domain locks don't false-share.
+// Sized to a cache-line multiple so neighboring per-domain locks don't false-share.
 type paddedRWMutex struct {
 	sync.RWMutex
-	_ [40]byte
+	_ [64 - unsafe.Sizeof(sync.RWMutex{})%64]byte
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
