@@ -37,7 +37,8 @@ var (
 		Name:        networkname.Chapel,
 		GenesisHash: common.HexToHash("0x6d3c66c5357ec91d5c43af47e234a939b22557cbb552dc45bebbceeed90fbe34"),
 		Config:      chapelChainConfig,
-		Bootnodes:   chapelBootnodes,
+		Bootnodes:   chapelPeers,
+		StaticPeers: chapelPeers,
 		Genesis:     ChapelGenesisBlock(),
 	}
 )

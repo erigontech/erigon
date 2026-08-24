@@ -128,10 +128,11 @@ var chiadoBootnodes = []string{
 const dnsPrefix = "enrtree://AKA3AM6LPBYEUDMVNU3BSVQJ5AD45Y7YPOHJLEF6W26QOE4VTUDPE@"
 
 func StaticPeerURLsOfChain(chain string) []string {
-	switch chain {
-	case networkname.Sepolia:
+	if chain == networkname.Sepolia {
 		return sepoliaStaticPeers
-	default:
-		return []string{}
 	}
+	if spec, err := ChainSpecByName(chain); err == nil && len(spec.StaticPeers) > 0 {
+		return spec.StaticPeers
+	}
+	return []string{}
 }
