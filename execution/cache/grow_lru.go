@@ -95,7 +95,7 @@ func (g *growLRU[V]) Add(key uint64, value V) {
 		g.maybeGrow()
 		gen = g.cur.Load()
 	}
-	gen.add(key, value)
+	gen.addIfAbsent(key, value)
 }
 
 func (g *growLRU[V]) maybeGrow() {
