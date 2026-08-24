@@ -119,8 +119,6 @@ const (
 
 	BorWitnessesDeprecated    = "BorWitnesses"
 	BorWitnessSizesDeprecated = "BorWitnessSizes"
-	WitnessesDeprecated       = "Witnesses"
-	WitnessSizesDeprecated    = "WitnessSizes"
 
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
@@ -475,8 +473,6 @@ var ChaindataDeprecatedTables = []string{
 	E2StorageHistory,
 	BorWitnessesDeprecated,
 	BorWitnessSizesDeprecated,
-	WitnessesDeprecated,
-	WitnessSizesDeprecated,
 }
 
 // Diagnostics tables
