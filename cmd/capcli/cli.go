@@ -1035,6 +1035,9 @@ type BlobArchiveStoreCheck struct {
 	chainCfg
 	outputFolder
 	FromSlot uint64 `help:"from slot" default:"0"`
+	// A partial sidecar set is still worth refetching one blob for, so discarding it is
+	// opt-in: the audit has to be safe to run on a datadir you intend to publish from.
+	RemoveMismatched bool `name:"remove-mismatched" help:"delete the stored sidecars and index entry of every mismatched slot instead of only reporting it" default:"false"`
 }
 
 func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
@@ -1068,6 +1071,7 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 		return err
 	}
 	defer tx.Rollback()
+	var mismatched uint64
 	for i := b.FromSlot; i >= targetSlot; i-- {
 		blk, err := snr.ReadBeaconBlockBodyBySlot(ctx, tx, i)
 		if err != nil {
@@ -1096,13 +1100,16 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 			wantBlobs = c.Len()
 		}
 		if haveBlobs != uint32(wantBlobs) {
-			if err := blobStorage.RemoveBlobSidecars(ctx, i, blockRoot); err != nil {
-				return err
+			mismatched++
+			if b.RemoveMismatched {
+				if err := blobStorage.RemoveBlobSidecars(ctx, i, blockRoot); err != nil {
+					return err
+				}
 			}
-			log.Warn("Slot", "slot", i, "have", haveBlobs, "want", wantBlobs)
+			log.Warn("Slot", "slot", i, "blockRoot", fmt.Sprintf("%x", blockRoot), "have", haveBlobs, "want", wantBlobs, "removed", b.RemoveMismatched)
 		}
 	}
-	log.Info("Blob archive store check passed")
+	log.Info("Blob archive store check finished", "mismatchedSlots", mismatched, "scannedFrom", b.FromSlot, "scannedTo", targetSlot, "removed", b.RemoveMismatched)
 	return nil
 }
 
