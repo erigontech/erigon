@@ -841,6 +841,30 @@ func TestStackStream_MixedWriteOperations(t *testing.T) {
 
 	assert.Equal(t, `["hello",123]`, string(ss.Buffer()))
 	assert.True(t, ss.IsComplete())
+
+	// Test using WriteRawBytes: it must clear the pending field, or ClosePending
+	// appends a placeholder null right after the value just written.
+	ss.Reset(nil)
+	ss.WriteObjectStart()
+	ss.WriteObjectField("result")
+	ss.WriteRawBytes([]byte(`{"gas":21000}`))
+	assert.Equal(t, 1, ss.Depth())
+	assert.NoError(t, ss.ClosePending(0))
+
+	assert.Equal(t, `{"result":{"gas":21000}}`, string(ss.Buffer()))
+	assert.True(t, ss.IsComplete())
+
+	// Same for a pending comma inside an array.
+	ss.Reset(nil)
+	ss.WriteArrayStart()
+	ss.WriteRawBytes([]byte(`1`))
+	ss.WriteMore()
+	ss.WriteRawBytes([]byte(`2`))
+	assert.Equal(t, 1, ss.Depth())
+	assert.NoError(t, ss.ClosePending(0))
+
+	assert.Equal(t, `[1,2]`, string(ss.Buffer()))
+	assert.True(t, ss.IsComplete())
 }
 
 // TestStackStream_IncompleteStructuresWithFlush tests flushing with various incomplete structures
