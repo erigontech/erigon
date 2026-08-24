@@ -513,14 +513,23 @@ func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
 	}
 }
 
-// countingWriter discards but records how much a response actually produced.
-type countingWriter struct{ n int64 }
+// countingWriter discards but records how much a response actually produced,
+// and how many separate Write calls it took to deliver it.
+type countingWriter struct {
+	n      int64
+	writes int
+}
 
-func (w *countingWriter) Write(p []byte) (int, error) { w.n += int64(len(p)); return len(p), nil }
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.n += int64(len(p))
+	w.writes++
+	return len(p), nil
+}
 
 // largeTrace drives the logger over enough opcodes to produce a response far
-// larger than any buffer, reporting the bytes written and the peak buffer.
-func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakBuffer int) {
+// larger than any buffer, reporting the bytes written, the peak buffer, and
+// how many separate writes reached the underlying io.Writer.
+func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakBuffer, writes int) {
 	tb.Helper()
 	var out countingWriter
 	stream := jsonstream.New(&out)
@@ -542,7 +551,7 @@ func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakB
 	stream.WriteArrayEnd()
 	stream.WriteObjectEnd()
 	require.NoError(tb, stream.Flush())
-	return out.n, peakBuffer
+	return out.n, peakBuffer, out.writes
 }
 
 // TestJsonStreamLogger_LargeTraceStaysBounded covers the case streaming exists
@@ -556,10 +565,13 @@ func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
 		"memory enabled": {EnableMemory: true},
 	} {
 		t.Run(name, func(t *testing.T) {
-			produced, peak := largeTrace(t, 20_000, cfg)
+			steps := 20_000
+			produced, peak, writes := largeTrace(t, steps, cfg)
 			require.Greater(t, produced, int64(1<<20), "the trace must dwarf the buffer to mean anything")
 			require.Less(t, peak, 4*jsonstream.FlushThreshold,
 				"buffer peaked at %d for a %dMB response", peak, produced>>20)
+			require.Less(t, writes, steps,
+				"%d writes for %d steps: memory words must batch through the buffer, not forward one write per word", writes, steps)
 		})
 	}
 }
