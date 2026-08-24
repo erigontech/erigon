@@ -244,9 +244,10 @@ func (api *BaseAPI) pendingBlock() *types.Block {
 	return api.filters.LastPendingBlock()
 }
 
-// resolveCommittedBlockNumber returns a block only when it is canonical in tx.
-// The overlay probe distinguishes an in-flight head from an unavailable
-// same-height generation without changing the selected transaction.
+// resolveCommittedBlockNumber resolves a selector only when its canonical block
+// is available in tx. If tx cannot resolve it, the overlay probe distinguishes
+// an unknown selector from a known block that is unavailable in the committed
+// view. The probe never changes the selected transaction.
 func (api *BaseAPI) resolveCommittedBlockNumber(ctx context.Context, tx kv.Tx, blockNrOrHash rpc.BlockNumberOrHash) (uint64, error) {
 	blockNumber, _, _, err := rpchelper.GetCanonicalBlockNumber(ctx, blockNrOrHash, tx, api._blockReader, nil)
 	var blockNotFound rpc.BlockNotFoundErr
@@ -262,7 +263,8 @@ func (api *BaseAPI) resolveCommittedBlockNumber(ctx context.Context, tx kv.Tx, b
 		return 0, err
 	}
 
-	// Execution progress alone is insufficient after an overlay reorg: tx still exposes state for the committed canonical block.
+	// Execution progress alone is insufficient after an overlay reorg because tx
+	// still exposes state for the previously committed canonical block.
 	return 0, fmt.Errorf("block %s is not available in the committed view", blockNrOrHash.String())
 }
 
@@ -398,7 +400,6 @@ func (api *BaseAPI) headerByNumberOrHash(ctx context.Context, tx kv.Tx, blockNrO
 	if err != nil {
 		return nil, false, err
 	}
-	// header can be nil
 	return header, isLatest, nil
 }
 
@@ -416,7 +417,6 @@ func (api *BaseAPI) canonicalHeaderByNumberOrHash(ctx context.Context, tx kv.Tx,
 	if err != nil {
 		return nil, false, err
 	}
-	// header can be nil
 	return header, isLatest, nil
 }
 

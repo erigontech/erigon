@@ -560,7 +560,7 @@ func getBeginEnd(ctx context.Context, tx kv.Tx, api *OverlayAPIImpl, crit filter
 		return 0, 0, fmt.Errorf("end (%d) < begin (%d)", end, begin)
 	}
 	if end > roaring.MaxUint32 {
-		// Resolve the range limit through tx because the workers scan committed history.
+		// Keep the open-ended bound on the same transaction as the other range limits.
 		latest, err := rpchelper.GetLatestBlockNumber(tx)
 		if err != nil {
 			return 0, 0, err

@@ -649,7 +649,7 @@ type AccountResult struct {
 	CodeHash common.Hash    `json:"codeHash"`
 }
 
-// GetRawHeader implements debug_getRawHeader - returns a an RLP-encoded header, given a block number or hash
+// GetRawHeader implements debug_getRawHeader and returns an RLP-encoded header for a block number or hash.
 func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
 	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
 		if api.pendingBlock() != nil {

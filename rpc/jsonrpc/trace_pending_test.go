@@ -31,9 +31,9 @@ import (
 	"github.com/erigontech/erigon/rpc/rpccfg"
 )
 
-// Every tracing method rejects "pending": they replay on the committed view, which
-// holds no pending block, so accepting the tag would answer for the latest executed
-// block and report it as pending.
+// Tracing methods with a block selector reject "pending": they replay on the
+// committed view, which has no pending block. Accepting the tag would answer
+// for the latest executed block and report it as pending.
 func TestTracingRejectsPendingTag(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ctx := context.Background()
