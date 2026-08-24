@@ -209,6 +209,8 @@ type DirtySegment struct {
 	frozen bool
 
 	canDelete atomic.Bool
+	// keepIdxFiles marks a segment whose index files a same-range survivor also resolves to.
+	keepIdxFiles atomic.Bool
 }
 
 func NewDirtySegment(segType snaptype.Type, version snaptype.Version, from uint64, to uint64, frozen bool) *DirtySegment {
@@ -322,6 +324,7 @@ func (s *DirtySegment) FilePaths(basePath string) (relativePaths []string) {
 		if err != nil {
 			log.Warn("FilesItem.FilePaths: can't make basePath path", "err", err, "basePath", basePath, "path", relativePaths[i])
 		}
+		relativePaths[i] = filepath.ToSlash(relativePaths[i])
 	}
 	return relativePaths
 }
@@ -378,11 +381,13 @@ func (s *DirtySegment) closeAndRemoveFiles() {
 		if s.Decompressor != nil {
 			toRemove = append(toRemove, s.FilePath())
 		}
-		for _, index := range s.indexes {
-			if index == nil {
-				continue
+		if !s.keepIdxFiles.Load() {
+			for _, index := range s.indexes {
+				if index == nil {
+					continue
+				}
+				toRemove = append(toRemove, index.FilePath())
 			}
-			toRemove = append(toRemove, index.FilePath())
 		}
 		s.closeIdx()
 		s.closeSeg()
@@ -1394,9 +1399,11 @@ func (s *BaseRoSnapshots) detachNotInList(protect []string) retiredSegments {
 	detached := make([]*DirtySegment, 0, total)
 	for _, t := range s.enums {
 		toDelete := make([]*DirtySegment, 0, s.dirty[t].Len())
+		keptRanges := make(map[Range]struct{})
 		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
 			for _, seg := range segs {
 				if _, ok := protectFiles[seg.FileName()]; ok {
+					keptRanges[seg.Range] = struct{}{}
 					continue
 				}
 				toDelete = append(toDelete, seg)
@@ -1404,6 +1411,11 @@ func (s *BaseRoSnapshots) detachNotInList(protect []string) retiredSegments {
 			return true
 		})
 		for _, seg := range toDelete {
+			// openIdx masks the version, so a kept segment of the same range resolves to
+			// the very files this one holds; unlinking them strips the survivor's index.
+			if _, shared := keptRanges[seg.Range]; shared {
+				seg.keepIdxFiles.Store(true)
+			}
 			s.dirty[t].Delete(seg)
 		}
 		detached = append(detached, toDelete...)
@@ -1569,14 +1581,17 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 		keepNames = append(keepNames, keepSegments[i].Name())
 	}
 
+	idxList, err := snaptype.IdxFiles(s.dir)
+	if err != nil {
+		return err
+	}
+	idxList, supersededIdx := supersededEqualRangeVersions(idxList)
+	_, accessorsToRemove := findOverlaps(idxList)
+	accessorsToRemove = append(accessorsToRemove, supersededIdx...)
+
 	// Notify the seeder before deletion. Includes idx overlaps whose .seg is already gone
 	// (kill between deletes): those have no DirtySegment, so reclamation can't reach them.
 	if onDelete != nil {
-		idxList, err := snaptype.IdxFiles(s.dir)
-		if err != nil {
-			return err
-		}
-		_, accessorsToRemove := findOverlaps(idxList)
 		toRemove := make([]string, 0, len(segmentsToRemove)+len(accessorsToRemove))
 		for i := range segmentsToRemove {
 			toRemove = append(toRemove, segmentsToRemove[i].Path)
@@ -1608,6 +1623,18 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 		s.recalcVisibleFiles(s.alignMin, retired)
 	}()
 
+	// The older index of an equal-range pair is what no segment resolves to once the newer
+	// one exists, so reclamation never reaches it: unlink it here instead of leaking it.
+	if len(supersededIdx) > 0 {
+		held := s.heldIdxPaths()
+		for i := range supersededIdx {
+			if _, ok := held[supersededIdx[i].Path]; ok {
+				continue
+			}
+			_ = dir.RemoveFile(supersededIdx[i].Path)
+		}
+	}
+
 	// remove .tmp files
 	//TODO: it may remove Caplin's useful .tmp files - re-think. Keep it here for backward-compatibility for now.
 	tmpFiles, err := snaptype.TmpFiles(s.dir)
@@ -1620,6 +1647,27 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	return nil
 }
 
+// heldIdxPaths is every index file a dirty segment still has open, so a superseded index
+// a reader resolved before its newer sibling landed is not unlinked out from under it.
+func (s *BaseRoSnapshots) heldIdxPaths() map[string]struct{} {
+	s.dirtyLock.RLock()
+	defer s.dirtyLock.RUnlock()
+	held := make(map[string]struct{})
+	for _, t := range s.enums {
+		s.dirty[t].Walk(func(segs []*DirtySegment) bool {
+			for _, seg := range segs {
+				for _, index := range seg.indexes {
+					if index != nil {
+						held[index.FilePath()] = struct{}{}
+					}
+				}
+			}
+			return true
+		})
+	}
+	return held
+}
+
 func toRelativePaths(basePath string, absolutePaths []string) (relativePaths []string, err error) {
 	relativePaths = make([]string, len(absolutePaths))
 	for i, f := range absolutePaths {
@@ -1627,6 +1675,7 @@ func toRelativePaths(basePath string, absolutePaths []string) (relativePaths []s
 		if err != nil {
 			return nil, fmt.Errorf("rel: %w", err)
 		}
+		relativePaths[i] = filepath.ToSlash(relativePaths[i])
 	}
 	return relativePaths, nil
 }

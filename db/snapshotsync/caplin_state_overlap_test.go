@@ -346,3 +346,31 @@ func TestCaplinStateRemoveOverlapsSkipsTheCallbackWithNothingToRemove(t *testing
 	}))
 	require.Zero(t, called, "steady state must not cost a downloader round-trip")
 }
+
+// The index list needs the same equal-range filtering as the segment list. findOverlaps
+// marks the newer of two equal ranges as the overlapped one, so without it the surviving
+// segment's own index is what gets reported to the downloader and unlinked.
+func TestCaplinStateRemoveOverlapsReportsOlderEqualRangeIndex(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	oldSeg, oldIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_0, logger)
+	newSeg, newIdx := writeCaplinStateFixtureVersion(t, dirs.SnapCaplin, table, 0, 50_000, version.V1_1, logger)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	var reported []string
+	require.NoError(t, s.RemoveOverlaps(func(l []string) error {
+		reported = append(reported, l...)
+		return nil
+	}))
+
+	require.Contains(t, reported, "caplin/"+filepath.Base(oldIdx))
+	require.NotContains(t, reported, "caplin/"+filepath.Base(newIdx),
+		"unregistering the kept segment's index leaves it unusable after restart")
+	require.FileExists(t, newSeg)
+	require.FileExists(t, newIdx, "openIdx resolves the highest version for both segments")
+	require.NoFileExists(t, oldSeg)
+	require.NoFileExists(t, oldIdx, "the same-range index of the removed segment must go with it")
+}

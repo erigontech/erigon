@@ -146,7 +146,7 @@ func ensureCantLeaveDir(fName, root string) (string, error) {
 		if !filepath.IsLocal(newFName) {
 			return fName, fmt.Errorf("file=%s, is outside of snapshots dir", fName)
 		}
-		fName = newFName
+		fName = filepath.ToSlash(newFName)
 	}
 	if !filepath.IsLocal(fName) {
 		return fName, fmt.Errorf("relative paths are not allowed: %s", fName)

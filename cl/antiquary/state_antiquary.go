@@ -626,27 +626,36 @@ func (s *Antiquary) IncrementBeaconState(ctx context.Context, to uint64) error {
 		return err
 	}
 
-	if s.stateSn != nil {
-		// Before seeding, so a subset superseded by the dump is not hashed and announced
-		// microseconds before it is unlinked. Outside the snapgen block because downloaded
-		// files overlap too, and snapgen is off by default.
-		if err := s.stateSn.RemoveOverlaps(func(l []string) error {
-			if s.downloader == nil {
-				return nil
-			}
-			return s.downloader.Delete(ctx, l)
-		}); err != nil {
-			s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
-		}
-		if dumpedTo != 0 && s.downloader != nil {
-			// Notify bittorent to seed the new snapshots
-			if err := s.downloader.Seed(ctx, s.stateSn.SegFileNames(0, dumpedTo)); err != nil {
-				s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
-			}
-		}
-	}
+	s.removeStateOverlapsAndSeed(ctx, dumpedTo)
 
 	return nil
+}
+
+// removeStateOverlapsAndSeed runs overlap removal before seeding, so a subset superseded by
+// the dump is not hashed and announced microseconds before it is unlinked. It is outside the
+// snapgen block because downloaded files overlap too and snapgen is off by default.
+func (s *Antiquary) removeStateOverlapsAndSeed(ctx context.Context, dumpedTo uint64) {
+	if s.stateSn == nil {
+		return
+	}
+	removeErr := s.stateSn.RemoveOverlaps(func(l []string) error {
+		if s.downloader == nil {
+			return nil
+		}
+		return s.downloader.Delete(ctx, l)
+	})
+	if removeErr != nil {
+		s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", removeErr)
+	}
+	// A failed removal retires nothing, so SegFileNames still lists the superseded subsets:
+	// seeding would announce exactly what was just handed to Delete.
+	if removeErr == nil && dumpedTo != 0 && s.downloader != nil {
+		// From 0, not from the dump's own start: a per-type resume can dump a new type
+		// from genesis, and those files need announcing too.
+		if err := s.downloader.Seed(ctx, s.stateSn.SegFileNames(0, dumpedTo)); err != nil {
+			s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+		}
+	}
 }
 
 // dumpCaplinStateIfDue freezes a new state range once enough slots have accumulated past the
@@ -665,6 +674,10 @@ func (s *Antiquary) dumpCaplinStateIfDue(ctx context.Context) (uint64, error) {
 		return 0, nil
 	}
 	to -= (safetyMargin + blocksPerStatefulFile)
+	// planStateDump floors toSlot to a whole file; comparing against the unaligned value
+	// reports a dump the planner never scheduled, and the caller re-seeds on every
+	// finalized update until the next boundary.
+	to = (to / blocksPerStatefulFile) * blocksPerStatefulFile
 	if from >= to {
 		return 0, nil
 	}
@@ -680,8 +693,7 @@ func (s *Antiquary) dumpCaplinStateIfDue(ctx context.Context) (uint64, error) {
 	); err != nil {
 		return 0, err
 	}
-	// Open the new files before collecting paths so the seeder sees them;
-	// seed from 0 since a per-type resume can dump a new type from genesis.
+	// Open the new files so the caller's SegFileNames sees them.
 	if err := s.stateSn.OpenFolder(); err != nil {
 		return 0, err
 	}
