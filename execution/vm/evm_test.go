@@ -19,6 +19,7 @@ package vm
 import (
 	"math"
 	"testing"
+	"unsafe"
 )
 
 // TestDeriveFrameExecutionGasUsed covers the EIP-8037 cases where the formula
@@ -112,5 +113,17 @@ func TestDeriveFrameExecutionGasUsed(t *testing.T) {
 					tc.inputTotal, tc.gasRemainingTotal, tc.stateGasUsed, got, tc.want)
 			}
 		})
+	}
+}
+
+// TestEVMFitsItsSizeClass keeps EVM inside the allocation size class its field
+// order was chosen for. The bound is one-sided: shrinking EVM is free, growing
+// it past the class is what costs a size class per allocation.
+func TestEVMFitsItsSizeClass(t *testing.T) {
+	t.Parallel()
+
+	if got := unsafe.Sizeof(EVM{}); got > evmSizeClass {
+		t.Fatalf("sizeof(EVM) = %d, above the %d-byte size class: pack the new field into "+
+			"existing padding, or raise evmSizeClass knowing every EVM allocation grows", got, evmSizeClass)
 	}
 }

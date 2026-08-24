@@ -90,7 +90,7 @@ func (s *SentinelServer) SubscribeGossip(data *sentinelproto.SubscriptionData, s
 
 func (s *SentinelServer) requestPeer(ctx context.Context, pid peer.ID, req *sentinelproto.RequestData) (*sentinelproto.ResponseData, error) {
 	// prepare the http request
-	httpReq, err := http.NewRequest("GET", "http://service.internal/", bytes.NewBuffer(req.Data))
+	httpReq, err := http.NewRequestWithContext(ctx, "GET", "http://service.internal/", bytes.NewBuffer(req.Data))
 	if err != nil {
 		return nil, err
 	}

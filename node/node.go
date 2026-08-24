@@ -43,7 +43,6 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
-	"github.com/erigontech/erigon/db/kv/memdb"
 	"github.com/erigontech/erigon/db/migrations"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/version"
@@ -308,8 +307,6 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 		name = "chaindata"
 	case dbcfg.TxPoolDB:
 		name = "txpool"
-	case dbcfg.PolygonBridgeDB:
-		name = "polygon-bridge"
 	case dbcfg.ConsensusDB:
 		if len(name) == 0 {
 			return nil, errors.New("expected a consensus name")
@@ -320,7 +317,7 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	var db kv.RwDB
 	if config.Dirs.DataDir == "" {
-		db = memdb.New(nil, "", label)
+		db = mdbx.New(label, logger).InMem("").MustOpen()
 		return db, nil
 	}
 

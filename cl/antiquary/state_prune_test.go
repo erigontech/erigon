@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -86,7 +86,7 @@ func slotRange(from, to uint64) []uint64 {
 }
 
 func TestPruneStateTablesBelowBoundary(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	boundaryFn := func(string) uint64 { return 50 }
 
@@ -108,7 +108,7 @@ func TestPruneStateTablesBelowBoundary(t *testing.T) {
 }
 
 func TestPruneStateTablesSparseKeysJumpToBoundary(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedStateSlots(t, db, kv.BlockRoot, []uint64{0, 32, 64})
 
 	next, err := pruneStateTables(t.Context(), db, []string{kv.BlockRoot}, func(string) uint64 { return 50 }, 0, 1000, log.New())
@@ -143,7 +143,7 @@ func (t *cancelOnCommitTx) Commit() error {
 }
 
 func TestPruneStateTablesResumesAfterDeadline(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	boundaryFn := func(string) uint64 { return 50 }
 
@@ -165,7 +165,7 @@ func TestPruneStateTablesResumesAfterDeadline(t *testing.T) {
 }
 
 func TestPruneStateTablesBatchCommits(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	commits := &atomic.Int64{}
 	counting := &commitCountingDB{RwDB: db, commits: commits}
@@ -179,7 +179,7 @@ func TestPruneStateTablesBatchCommits(t *testing.T) {
 }
 
 func TestPruneStateTablesResumesAtInterruptedTable(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	tables := []string{kv.BlockRoot, kv.StateRoot, kv.EpochData}
 	for _, table := range tables {
 		seedStateSlots(t, db, table, slotRange(0, 100))
@@ -209,7 +209,7 @@ func TestPruneStateTablesResumesAtInterruptedTable(t *testing.T) {
 }
 
 func TestPruneStateTablesErrorReturnsFailingTable(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	tables := []string{kv.BlockRoot, "NonexistentTable"}
 
@@ -230,7 +230,7 @@ func TestStatePruneBudget(t *testing.T) {
 }
 
 func TestStatePruneEnvConfig(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	newA := func() *Antiquary {
 		return NewAntiquary(context.Background(), nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, nil, nil, log.New(), true, true, true, false, nil)
 	}
@@ -245,7 +245,7 @@ func TestStatePruneEnvConfig(t *testing.T) {
 }
 
 func TestStatePruneBacklog(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 	a := NewAntiquary(ctx, nil, nil, nil, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), nil, db, nil, nil, nil, nil, log.New(), true, true, true, false, nil)
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {
@@ -268,7 +268,7 @@ func TestStatePruneBacklog(t *testing.T) {
 }
 
 func TestFloorStatePruneMarkers(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
 	t.Cleanup(stateSn.Close)
@@ -286,7 +286,7 @@ func TestFloorStatePruneMarkers(t *testing.T) {
 }
 
 func TestStatePruneKillSwitch(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	ctx := context.Background()
 	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
@@ -317,7 +317,7 @@ func TestStatePruneKillSwitch(t *testing.T) {
 }
 
 func TestPruneFrozenStateTablesCapsBoundaryToFlushed(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	ctx := context.Background()
 	stateSn := snapshotsync.NewCaplinStateSnapshots(ethconfig.BlocksFreezing{}, &clparams.MainnetBeaconConfig, datadir.New(t.TempDir()), snapshotsync.MakeCaplinStateSnapshotsTypes(db), log.New())
@@ -348,7 +348,7 @@ func TestStatePruneWiredIntoAntiquaryCycle(t *testing.T) {
 	const boundary = uint64(10)
 
 	run := func(disabled bool) (int64, []uint64) {
-		db := memdb.NewTestDB(t, dbcfg.ChainDB)
+		db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 		reader := tests.LoadChain(blocks, postState, db, t)
 		seedStateSlots(t, db, kv.BlockRoot, slotRange(0, boundary))
 		sn := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
@@ -388,7 +388,7 @@ func TestStatePruneWiredIntoAntiquaryCycle(t *testing.T) {
 }
 
 func TestPruneStateTablesRotationAndZeroBoundary(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	seedStateSlots(t, db, kv.BlockRoot, slotRange(0, 100))
 	seedStateSlots(t, db, kv.StateRoot, slotRange(0, 100))
 	seedStateSlots(t, db, kv.EpochData, slotRange(0, 10))

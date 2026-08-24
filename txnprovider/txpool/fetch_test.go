@@ -34,7 +34,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/direct"
 	"github.com/erigontech/erigon/node/gointerfaces"
@@ -243,7 +243,7 @@ func decodeHex(in string) []byte {
 func TestOnNewBlock(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
-	_, db := memdb.NewTestDB(t, dbcfg.ChainDB), memdb.NewTestDB(t, dbcfg.TxPoolDB)
+	_, db := mdbxtest.NewTestDB(t, dbcfg.ChainDB), mdbxtest.NewTestDB(t, dbcfg.TxPoolDB)
 	ctrl := gomock.NewController(t)
 
 	stream := remoteproto.NewMockKV_StateChangesClient[*remoteproto.StateChangeBatch](ctrl)

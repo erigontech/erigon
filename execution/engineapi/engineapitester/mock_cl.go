@@ -19,7 +19,6 @@ package engineapitester
 import (
 	"context"
 	"fmt"
-	"math/big"
 	"strings"
 	"time"
 
@@ -68,8 +67,8 @@ func NewMockCl(logger log.Logger, elClient *engineapi.JsonRpcClient, genesis *ty
 		state: &MockClState{
 			ParentElBlock:     genesis.Hash(),
 			ParentElTimestamp: genesis.Time(),
-			ParentClBlockRoot: big.NewInt(999_999_999),
-			ParentRandao:      big.NewInt(0),
+			ParentClBlockRoot: *uint256.NewInt(999_999_999),
+			ParentRandao:      uint256.Int{},
 		},
 	}
 	for _, opt := range opts {
@@ -122,7 +121,7 @@ func (cl *MockCl) StartBuilding(ctx context.Context, opts ...BlockBuildingOption
 			return nil, enginetypes.PayloadAttributes{}, fmt.Errorf("start building: wait error: %w", err)
 		}
 	}
-	parentBeaconBlockRoot := common.BigToHash(cl.state.ParentClBlockRoot)
+	parentBeaconBlockRoot := common.U256ToHash(cl.state.ParentClBlockRoot)
 	slotNumber := cl.state.NextSlotNumber()
 	withdrawals := make([]*types.Withdrawal, 0)
 	if options.withdrawals != nil {
@@ -130,7 +129,7 @@ func (cl *MockCl) StartBuilding(ctx context.Context, opts ...BlockBuildingOption
 	}
 	payloadAttributes := enginetypes.PayloadAttributes{
 		Timestamp:             hexutil.Uint64(timestamp),
-		PrevRandao:            common.BigToHash(cl.state.ParentRandao),
+		PrevRandao:            common.U256ToHash(cl.state.ParentRandao),
 		SuggestedFeeRecipient: cl.suggestedFeeRecipient,
 		Withdrawals:           withdrawals,
 		ParentBeaconBlockRoot: &parentBeaconBlockRoot,
@@ -262,8 +261,10 @@ func (cl *MockCl) UpdateForkChoice(ctx context.Context, p *MockClPayload) error 
 	// move forward
 	cl.state.ParentElBlock = head
 	cl.state.ParentElTimestamp = p.ExecutionPayload.Timestamp.Uint64()
-	cl.state.ParentClBlockRoot = new(big.Int).Add(p.ParentBeaconBlockRoot.Big(), big.NewInt(1))
-	cl.state.ParentRandao = new(big.Int).Add(p.ExecutionPayload.PrevRandao.Big(), big.NewInt(1))
+	cl.state.ParentClBlockRoot = p.ParentBeaconBlockRoot.U256()
+	cl.state.ParentClBlockRoot.AddUint64(&cl.state.ParentClBlockRoot, 1)
+	cl.state.ParentRandao = p.ExecutionPayload.PrevRandao.U256()
+	cl.state.ParentRandao.AddUint64(&cl.state.ParentRandao, 1)
 	return nil
 }
 
@@ -351,8 +352,8 @@ type MockClPayload struct {
 type MockClState struct {
 	ParentElBlock     common.Hash
 	ParentElTimestamp uint64
-	ParentClBlockRoot *big.Int
-	ParentRandao      *big.Int
+	ParentClBlockRoot uint256.Int
+	ParentRandao      uint256.Int
 	SlotNumber        uint64
 }
 

@@ -94,8 +94,8 @@ var debugTraceTransactionNoRefundTests = []struct {
 
 func TestGetRawBlockAccessListRPCSpec(t *testing.T) {
 	chainPack, client := newBlockAccessListRPCFixture(t)
-	availableRaw := marshalHexBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
-	emptyRaw := marshalHexBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
+	availableRaw := marshalBlockAccessListBytesJSON(t, chainPack.Blocks[1].BlockAccessList())
+	emptyRaw := marshalBlockAccessListBytesJSON(t, chainPack.Blocks[2].BlockAccessList())
 	cases := []blockAccessListRPCCase{
 		{name: "available by number", selector: "0x2", want: availableRaw},
 		{name: "available by tag", selector: "safe", want: availableRaw},
@@ -122,7 +122,7 @@ func TestTraceBlockByNumber(t *testing.T) {
 	}
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	baseApi := NewBaseApi(nil, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 	ethApi := newEthApiForTest(baseApi, m.DB, nil, nil)
 	api := NewPrivateDebugAPI(baseApi, m.DB, nil, &rpccfg.DebugApiConfig{})
 	for _, tt := range debugTraceTransactionTests {
@@ -373,7 +373,7 @@ func TestTraceErrorPathsWriteNoStream(t *testing.T) {
 	from := common.Address{0xFF}
 	to := common.Address{0x01}
 	gas := hexutil.Uint64(21000)
-	gasPrice := hexutil.Big(*big.NewInt(1e9))
+	gasPrice := hexutil.U256(*uint256.NewInt(1e9))
 	traceCallArgs := ethapi.CallArgs{From: &from, To: &to, Gas: &gas, GasPrice: &gasPrice}
 	for _, tc := range []struct {
 		name   string
@@ -451,11 +451,11 @@ func TestDebugTraceCallBlockOverridesBaseFeeAffectsGasPrice(t *testing.T) {
 		From:                 &c.bankAddress,
 		To:                   &contractAddr,
 		Gas:                  newUint64(100_000),
-		MaxFeePerGas:         (*hexutil.Big)(big.NewInt(100)),
-		MaxPriorityFeePerGas: (*hexutil.Big)(big.NewInt(2)),
+		MaxFeePerGas:         (*hexutil.U256)(uint256.NewInt(100)),
+		MaxPriorityFeePerGas: (*hexutil.U256)(uint256.NewInt(2)),
 	}
 	returnValue := callDebugTraceCall(t, c.debugAPI(), args, &ethapi.BlockOverrides{
-		BaseFeePerGas: (*hexutil.Big)(big.NewInt(10)),
+		BaseFeePerGas: (*hexutil.U256)(uint256.NewInt(10)),
 	})
 	// effective gas price = BaseFeePerGas(10) + MaxPriorityFeePerGas(2) = 12 = 0xc
 	require.Equal(t, "0x000000000000000000000000000000000000000000000000000000000000000c", returnValue)
@@ -971,19 +971,21 @@ func TestGetModifiedAccountsByNumber(t *testing.T) {
 		result, err = api.GetModifiedAccountsByNumber(m.Ctx, rpc.FinalizedBlockNumber, nil)
 		require.NoError(t, err)
 		require.NotEmpty(t, result)
+	})
 
-		// Non-nil filters with a LastPendingBlock exceeding latest executed block should return an error
+	t.Run("pending tag uses committed view", func(t *testing.T) {
 		ff := rpchelper.New(t.Context(), rpchelper.FiltersConfig{}, nil, nil, nil, func() {}, log.New(), nil)
-		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)})
+		pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)}, nil)
 		payload, err := rlp.EncodeToBytes(pendingBlock)
 		require.NoError(t, err)
 		ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
 
-		baseWithFilters := NewBaseApi(ff, m.StateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+		baseWithFilters := NewBaseApi(ff, m.StateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 		apiWithFilters := NewPrivateDebugAPI(baseWithFilters, m.DB, nil, &rpccfg.DebugApiConfig{})
 
-		_, err = apiWithFilters.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
-		require.Error(t, err)
+		result, err := apiWithFilters.GetModifiedAccountsByNumber(m.Ctx, rpc.PendingBlockNumber, nil)
+		require.NoError(t, err)
+		require.NotEmpty(t, result)
 	})
 }
 
@@ -1519,7 +1521,7 @@ func TestSetHead(t *testing.T) {
 
 	// Helper to build a DebugAPIImpl wired to a mockEthBackend
 	makeAPI := func(mock *mockEthBackend) *DebugAPIImpl {
-		backendServer := privateapi.NewEthBackendServer(ctx, mock, m.DB, m.Notifications, m.BlockReader, nil, logger, builder.NewLatestBlockBuiltStore(), nil)
+		backendServer := privateapi.NewEthBackendServer(ctx, mock, m.DB, m.Notifications, m.BlockReader, logger, builder.NewLatestBlockBuiltStore(), nil)
 		backendClient := direct.NewEthBackendClientDirect(backendServer)
 		backend := rpcservices.NewRemoteBackend(backendClient, m.DB, m.BlockReader)
 		return NewPrivateDebugAPI(newBaseApiForTest(m), m.DB, backend, &rpccfg.DebugApiConfig{})

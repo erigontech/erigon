@@ -9,8 +9,6 @@ import (
 	"github.com/holiman/uint256"
 )
 
-// benchTouchKeys builds n pre-nibblized keys, used with keyHasherNoop so keccak
-// does not drown the collection cost being measured.
 func benchTouchKeys(n int) []string {
 	rnd := rand.New(rand.NewSource(1))
 	keys := make([]string, n)
@@ -27,16 +25,12 @@ func benchTouchKeys(n int) []string {
 	return keys
 }
 
-// BenchmarkTouchCollect_ModeDirect times the collection side alone (TouchPlainKey
-// with a pre-hashed key, keyHasherNoop) so the backend cost is not drowned by keccak.
 func BenchmarkTouchCollect_ModeDirect(b *testing.B) {
 	for _, n := range []int{5_000, 100_000, 500_000} {
 		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {
 			keys := benchTouchKeys(n)
 			val := []byte("v")
 
-			// Long-lived Updates, reset between rounds: steady-state collection like
-			// a node reusing one SharedDomains across commitment cycles.
 			ut := NewUpdates(ModeDirect, b.TempDir(), keyHasherNoop)
 			defer ut.Close()
 
@@ -53,9 +47,6 @@ func BenchmarkTouchCollect_ModeDirect(b *testing.B) {
 	}
 }
 
-// BenchmarkTouchDirect mimics WriteSet.TouchUpdates: one Update built at the
-// call site per write. Building it inline is deliberate — the caller-side
-// escape behaviour is part of what is measured.
 func BenchmarkTouchDirect(b *testing.B) {
 	for _, mode := range []Mode{ModeUpdate, ModeDirect, ModeParallel} {
 		for _, n := range []int{5_000, 100_000} {
@@ -66,6 +57,8 @@ func BenchmarkTouchDirect(b *testing.B) {
 
 				b.ReportAllocs()
 				for b.Loop() {
+					// Update is built inline: hoisting it out of the loop would stop
+					// this benchmark from measuring what it exists to measure.
 					for i, k := range keys {
 						ut.TouchPlainKeyDirect(k, &Update{
 							Flags:   BalanceUpdate,
@@ -81,8 +74,6 @@ func BenchmarkTouchDirect(b *testing.B) {
 	}
 }
 
-// BenchmarkTouchDirectMerge touches every key twice, exercising the ModeUpdate
-// merge-into-existing branch as well as the insert branch.
 func BenchmarkTouchDirectMerge(b *testing.B) {
 	for _, n := range []int{5_000, 100_000} {
 		b.Run(fmt.Sprintf("n=%d", n), func(b *testing.B) {

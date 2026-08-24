@@ -130,7 +130,9 @@ func getBeaconBlobsStatus(t *testing.T, f blobsTestFixture) int {
 func requestBeaconBlobs(t *testing.T, baseURL string, f blobsTestFixture) *http.Response {
 	t.Helper()
 
-	resp, err := http.Get(baseURL + "/eth/v1/beacon/blobs/" + strconv.FormatUint(f.slot, 10) + "?versioned_hashes=" + f.versionedHash.Hex())
+	req, err := http.NewRequestWithContext(t.Context(), "GET", baseURL+"/eth/v1/beacon/blobs/"+strconv.FormatUint(f.slot, 10)+"?versioned_hashes="+f.versionedHash.Hex(), nil)
+	require.NoError(t, err)
+	resp, err := http.DefaultClient.Do(req)
 	require.NoError(t, err)
 	return resp
 }
@@ -195,7 +197,9 @@ func TestBlobSidecarsResponseEnvelope(t *testing.T) {
 	server := httptest.NewServer(f.handler.mux)
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/eth/v1/beacon/blob_sidecars/" + strconv.FormatUint(f.slot, 10))
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/blob_sidecars/"+strconv.FormatUint(f.slot, 10), nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)
@@ -230,7 +234,9 @@ func TestBlobSidecarsEmptyResponseEnvelope(t *testing.T) {
 	server := httptest.NewServer(f.handler.mux)
 	defer server.Close()
 
-	resp, err := http.Get(server.URL + "/eth/v1/beacon/blob_sidecars/" + strconv.FormatUint(f.slot, 10))
+	req, err := http.NewRequestWithContext(t.Context(), "GET", server.URL+"/eth/v1/beacon/blob_sidecars/"+strconv.FormatUint(f.slot, 10), nil)
+	require.NoError(t, err)
+	resp, err := server.Client().Do(req)
 	require.NoError(t, err)
 	defer resp.Body.Close()
 	require.Equal(t, http.StatusOK, resp.StatusCode)

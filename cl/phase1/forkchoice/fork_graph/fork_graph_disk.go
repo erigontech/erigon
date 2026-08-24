@@ -23,7 +23,6 @@ import (
 	"sync"
 	"sync/atomic"
 
-	"github.com/golang/snappy"
 	"github.com/spf13/afero"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
@@ -131,9 +130,7 @@ type forkGraphDisk struct {
 	envelopeExists sync.Map // common.Hash -> struct{}
 
 	// reusable buffers
-	sszBuffer       []byte
-	sszSnappyWriter *snappy.Writer
-	sszSnappyReader *snappy.Reader
+	sszBuffer []byte
 
 	rcfg       beacon_router_configuration.RouterConfiguration
 	syncedData synced_data.SyncedData
@@ -150,30 +147,21 @@ func NewForkGraphDisk(anchorState *state.CachingBeaconState, syncedData synced_d
 	}
 	anchorHeader := anchorState.LatestBlockHeader()
 	if anchorState.Version() >= clparams.GloasVersion && anchorState.Slot() > 0 {
-		// GLOAS checkpoint/anchor sync fix: the first transitionSlot for this
-		// anchor needs to record the correct state root (computed with
-		// LatestBlockHeader.Root == zero) into stateRoots. Two cases arise:
-		//
-		// Fresh checkpoint sync: Root is zero per spec (process_block_header
-		// zeroes it). We compute HashSSZ with Root=0 (the correct value),
-		// fill in Root, and cache it as PreviousStateRoot.
-		//
-		// Restart from disk: a previous run already filled in Root and
-		// serialized the state. Root is now that same correct hash (the one
-		// originally computed with Root=0). HashSSZ would return a different
-		// (wrong) value because Root is non-zero, so we must NOT recompute;
-		// instead we use the stored Root directly as PreviousStateRoot.
-		if anchorHeader.Root == [32]byte{} {
-			stateHash, err := anchorState.HashSSZ()
-			if err != nil {
-				panic(err)
+		stateHash := anchorState.PeekPreviousStateRoot()
+		if stateHash == (common.Hash{}) {
+			if anchorHeader.Slot == anchorState.Slot() && anchorHeader.Root != (common.Hash{}) {
+				stateHash = anchorHeader.Root
+			} else {
+				stateHash, err = anchorState.HashSSZ()
+				if err != nil {
+					panic(err)
+				}
 			}
-			anchorHeader.Root = stateHash
-			anchorState.SetLatestBlockHeader(&anchorHeader)
-			anchorState.SetPreviousStateRoot(stateHash)
-		} else {
-			anchorState.SetPreviousStateRoot(anchorHeader.Root)
 		}
+		if anchorHeader.Root == (common.Hash{}) {
+			anchorHeader.Root = stateHash
+		}
+		anchorState.SetPreviousStateRoot(stateHash)
 	} else {
 		if anchorHeader.Root, err = anchorState.HashSSZ(); err != nil {
 			panic(err)

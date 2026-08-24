@@ -61,10 +61,11 @@ const (
 	// seenPayloadAttestationCacheSize: PTC has 512 validators per slot.
 	// With clock disparity, we may see attestations for ~2 slots.
 	// 512 * 4 = 2048 provides safety margin.
-	seenPayloadAttestationCacheSize        = 2048
-	pendingPayloadAttestationExpiry        = 30 * time.Second
-	pendingPayloadAttestationCheckInterval = 100 * time.Millisecond
-	maxPendingAttestations                 = 2048
+	seenPayloadAttestationCacheSize            = 2048
+	pendingPayloadAttestationExpiry            = 30 * time.Second
+	pendingPayloadAttestationCheckInterval     = 100 * time.Millisecond
+	maxPendingAttestations                     = 2048
+	maxConcurrentPayloadAttestationValidations = clparams.PtcSize
 )
 
 type payloadAttestationService struct {
@@ -80,6 +81,7 @@ type payloadAttestationService struct {
 	pendingAttestations sync.Map // pendingPayloadAttestationKey -> *pendingPayloadAttestationJob
 	pendingCount        atomic.Int32
 	pendingCond         *sync.Cond
+	validationAdmission chan struct{}
 }
 
 // NewPayloadAttestationService creates a new payload attestation service.
@@ -102,6 +104,7 @@ func NewPayloadAttestationService(
 		emitters:              emitters,
 		seenAttestationsCache: seenCache,
 		pendingCond:           sync.NewCond(&sync.Mutex{}),
+		validationAdmission:   make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
 	go s.loop(ctx)
 	return s
@@ -166,16 +169,22 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 	if blockHeader.Slot != slot {
 		return fmt.Errorf("%w: payload attestation slot %d does not match referenced block slot %d", ErrIgnore, slot, blockHeader.Slot)
 	}
+	select {
+	case s.validationAdmission <- struct{}{}:
+		defer func() { <-s.validationAdmission }()
+	case <-ctx.Done():
+		return fmt.Errorf("%w: payload attestation validation canceled: %v", ErrIgnore, ctx.Err()) //nolint:errorlint // converting cancellation to IGNORE
+	}
 
 	// Process through forkchoice which handles:
 	// [IGNORE] block state not found
 	// [REJECT] validator is not in PTC
 	// [REJECT] signature verification
-	if err := s.forkchoiceStore.OnPayloadAttestationMessage(msg, false); err != nil {
+	if err := s.forkchoiceStore.OnPayloadAttestationMessage(ctx, msg, false); err != nil {
 		// Preserve IGNORE vs REJECT distinction from forkchoice
 		// forkchoice.ErrIgnore != services.ErrIgnore, so we need to convert
-		if errors.Is(err, forkchoice.ErrIgnore) {
-			return fmt.Errorf("%w: %v", ErrIgnore, err)
+		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
+			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: forkchoice.ErrIgnore must not stay matchable
 		}
 		return fmt.Errorf("forkchoice rejected payload attestation: %w", err)
 	}
