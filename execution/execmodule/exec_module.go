@@ -556,7 +556,12 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 		doms.BlockOverlay().UpdateTxn(roTx)
 		doms.SetInMemHistoryReads(true)
 		doms.SetFlashblockAccumulating(false)
-		if minTxNum, merr := e.blockReader.TxnumReader().Min(ctx, roTx, blockNumber); merr == nil {
+		// SINGLE-CHAIN ([[consensus_advance_untested_regression]]): resolve this block's Min txNum through
+		// the block OVERLAY, not the base roTx. On a frontier block the predecessor's MaxTxNum index entry
+		// lives only in the (copied) overlay — never the committed DB — so Min via roTx computes off stale
+		// committed state (Max(prev) misses the frontier predecessor) and lands the resume point inside the
+		// PRIOR block. The overlay merges the copied index → Min returns THIS block's true start.
+		if minTxNum, merr := e.blockReader.TxnumReader().Min(ctx, doms.BlockOverlay(), blockNumber); merr == nil {
 			doms.SetPreExecStart(minTxNum + uint64(flashUpdate.PrefixLen))
 			defer doms.ClearPreExecStart()
 		}
@@ -695,6 +700,24 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 		if cc := doms.GetCommitmentContext(); cc != nil {
 			if root, rerr := cc.Trie().RootHash(); rerr == nil && len(root) > 0 {
 				result.ComputedRoot = common.BytesToHash(root)
+			}
+		}
+		// FRONTIER POSITION SAVE ([[consensus_advance_untested_regression]], user 2026-08-24 "parent view"):
+		// the fork-validation close reads the root off the folded trie but — unlike the normal FCU path
+		// (computeAndCheckCommitmentV3) — never persists the commitment "state" marker (KeyCommitmentState)
+		// into THIS SD. On the frontier chain that SD is PARKED as the successor block's read-through parent,
+		// and BOTH the successor's SeekCommitment AND the FCU merge (otherTxNum) read block N's position from
+		// it. Without the marker they fall through to the predecessor's position → the successor builds on the
+		// wrong block and the merge is a zero-diff (the DB position never advances). Persist it here (trie is
+		// already folded → ComputeCommitment hits the updateCount==0 save-only path, cheap). reuseClose only:
+		// the frontier flow parks this SD; a plain fork-validation SD is discarded, so the write is harmless
+		// there but unnecessary.
+		if reuseClose {
+			bn := header.Number.Uint64()
+			if blockTxNum, terr := e.blockReader.TxnumReader().Max(ctx, tx, bn); terr == nil {
+				if _, cerr := doms.ComputeCommitment(ctx, tx, true, bn, blockTxNum, "frontier-close", nil); cerr != nil {
+					return ValidationResult{}, fmt.Errorf("frontier close: save commitment state: %w", cerr)
+				}
 			}
 		}
 		if fbReceipts := doms.FlashblockReceipts(); len(fbReceipts) > 0 {

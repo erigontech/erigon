@@ -648,7 +648,7 @@ func (sd *TemporalMemBatch) Close() {
 	sd.ClearRam()
 }
 
-func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
+func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error {
 	other, ok := o.(*TemporalMemBatch)
 	if !ok {
 		return fmt.Errorf("Can't merge %T into *TemporalMemBatch", o)
@@ -761,7 +761,13 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 		}
 	}
 
-	other.Close()
+	// closeOther=false ([[consensus_advance_untested_regression]] merge-vs-parenting): when the source is a
+	// frontier block kept alive as its successor's read-through parent, do NOT close it here — its domain data
+	// (copied above, non-destructively) must stay readable via GetLatest until the block is retired. Closing
+	// here is what invalidated the parked SD and broke parenting past the first hop. Retirement closes it.
+	if closeOther {
+		other.Close()
+	}
 	return nil
 }
 

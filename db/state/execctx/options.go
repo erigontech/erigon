@@ -20,10 +20,18 @@ import "github.com/erigontech/erigon/execution/commitment"
 
 type sharedDomainOptions struct {
 	trieCfg commitment.TrieConfig
+	parent  *SharedDomains
 }
 
 // SharedDomainOption configures NewSharedDomains.
 type SharedDomainOption func(*sharedDomainOptions)
+
+// WithParent attaches a read-through parent SD BEFORE the constructor's initial SeekCommitment, so a fresh
+// frontier block positions its trie on the parent's LIVE commitment (parenting) instead of the lagging DB.
+// See [[consensus_advance_untested_regression]] merge-vs-parenting.
+func WithParent(parent *SharedDomains) SharedDomainOption {
+	return func(o *sharedDomainOptions) { o.parent = parent }
+}
 
 // WithTrieConfig replaces the trie configuration wholesale; the caller owns Variant.
 func WithTrieConfig(cfg commitment.TrieConfig) SharedDomainOption {

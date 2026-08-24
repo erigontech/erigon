@@ -2,13 +2,44 @@ package execmodule
 
 import (
 	"context"
+	"fmt"
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
 )
+
+// copyFrontierChainTables propagates the single frontier chain's raw-table bookkeeping — canonical hashes
+// (kv.HeaderCanonical) and the txNum index (kv.MaxTxNum) — from a predecessor frontier block's overlay (src)
+// into a successor's overlay (dst), so the successor continues ONE chain from the last committed hash. These
+// entries live only in overlay mem for an uncommitted frontier block (never the committed DB), and raw
+// tables do not chain through SetParent, so they must be copied. src's own backing tx is per-round and
+// already rolled back, so give it a live one (roTx) for the read; only raw index/hash tables are touched
+// (no commitment domain), so this does not disturb src's commitment trie.
+func copyFrontierChainTables(src, dst *membatchwithdb.MemoryMutation, roTx kv.TemporalTx) error {
+	src.UpdateTxn(roTx)
+	for _, table := range []string{kv.HeaderCanonical, kv.MaxTxNum} {
+		c, err := src.Cursor(table)
+		if err != nil {
+			return err
+		}
+		for k, v, cerr := c.First(); k != nil; k, v, cerr = c.Next() {
+			if cerr != nil {
+				c.Close()
+				return cerr
+			}
+			if putErr := dst.Put(table, common.Copy(k), common.Copy(v)); putErr != nil {
+				c.Close()
+				return putErr
+			}
+		}
+		c.Close()
+	}
+	return nil
+}
 
 // PreExecute is the flashblock PRE-EXECUTION entry, sitting beside ValidateChain and
 // sharing the same fork-validator SharedDomains so a subsequent ValidateChain / newPayload
@@ -79,6 +110,7 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 	defer roTx.Rollback()
 
 	var doms *execctx.SharedDomains
+	var frontierExtension bool // set when this fresh block extends a LIVE frontier parent (parenting)
 	if reuse {
 		// CARRY FORWARD: reuse the in-progress flashblock SD. Refresh its overlay's backing tx
 		// (the prior round's roTx is gone) while keeping the accumulated in-memory state, so the
@@ -99,29 +131,54 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 			defer doms.ClearPreExecStart()
 		}
 	} else {
+		// Frontier SD chain ([[venue_exec_on_round_plan]]): the PREVIOUS block's still-live pre-executed
+		// SD (parked on the fork validator's stack, or the current extending fork when this is its
+		// successor) — the decoupled-boundary/under-load case where the predecessor opened but has not
+		// canonicalised yet. Capture it BEFORE constructing the SD so its initial SeekCommitment resolves
+		// through the parent's LIVE commitment, not the lagging DB. Fall back to currentContext (canonical)
+		// when no live frontier parent.
+		var frontierParent *execctx.SharedDomains
+		if p := e.forkValidator.NewestFrontierSD(); p != nil {
+			frontierParent = p
+		} else if _, extNum, extSD := e.forkValidator.ExtendingFork(); extSD != nil && extNum < blockNumber {
+			frontierParent = extSD
+		}
+		parent := frontierParent
+		if parent == nil {
+			parent = e.currentContext
+		}
+		frontierExtension = frontierParent != nil
+
 		// First round: fresh SD + overlay, exactly like ValidateChain opens one. The fresh SD starts
 		// with an empty flashblock receipt accumulator, so this block's seal derives the COMPUTED
-		// header fields over ONLY this block's body — no explicit reset needed.
-		if doms, err = execctx.NewSharedDomains(ctx, roTx, e.logger); err != nil {
+		// header fields over ONLY this block's body — no explicit reset needed. WithParent attaches the
+		// read-through parent BEFORE the constructor's SeekCommitment so the block positions its trie on the
+		// parent's live state (parenting), not the lagging DB ([[consensus_advance_untested_regression]]).
+		if doms, err = execctx.NewSharedDomains(ctx, roTx, e.logger, execctx.WithParent(parent)); err != nil {
 			return ValidationResult{}, err
 		}
 		doms.SetInMemHistoryReads(false)
+
 		if err = doms.InitBlockOverlay(roTx, roTx.Debug().Dirs().Tmp); err != nil {
 			doms.Close()
 			return ValidationResult{}, err
 		}
-		// Frontier SD chain ([[venue_exec_on_round_plan]]): parent this new block's SD against the
-		// PREVIOUS block's still-live pre-executed SD when one is parked on the fork validator's
-		// auxiliary stack (i.e. the previous block opened but has not canonicalised yet — the
-		// decoupled-boundary/under-load case). That carries the previous block's accumulated state
-		// forward so this block reads the true frontier, not stale canonical state. Recursive
-		// read-through then walks parent→…→DB. Fall back to currentContext (canonical) only when no
-		// previous frontier SD is parked — the steady-state case where the previous block already
-		// canonicalised. The link is captured ONCE here, at open, and is immutable for this block.
-		if parent := e.forkValidator.NewestFrontierSD(); parent != nil {
-			doms.SetParent(parent)
-		} else if e.currentContext != nil {
-			doms.SetParent(e.currentContext)
+
+		// SINGLE-CHAIN PROPAGATION ([[consensus_advance_untested_regression]]): the frontier is ONE linear
+		// chain from the last committed ("known-good") hash, so FCU sees a single chain. But its per-block
+		// bookkeeping — canonical hashes (kv.HeaderCanonical) and the txNum index (kv.MaxTxNum) — lives only
+		// in the predecessor's overlay, never the committed DB, and raw tables do NOT chain through SetParent
+		// (that read-through only covers domains). Copy that chain state from the frontier parent's overlay
+		// into THIS block's overlay so it CONTINUES the one chain (AppendCanonicalTxNums then computes off
+		// the parent's true max; the close finds the parent's canonical hash) rather than starting a detached
+		// one off stale genesis. Self-contained in this block's mem → survives UpdateTxn, needs no live parent.
+		if frontierParent != nil {
+			if pov := frontierParent.BlockOverlay(); pov != nil {
+				if err = copyFrontierChainTables(pov, doms.BlockOverlay(), roTx); err != nil {
+					doms.Close()
+					return ValidationResult{}, fmt.Errorf("copy frontier chain tables: %w", err)
+				}
+			}
 		}
 	}
 
@@ -149,7 +206,14 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 	// correct when validating a fresh fork, but here it DISCARDS the prior round's fold, so each round
 	// would fold only its own txs onto the parent and the seal would diverge. Skip it on reuse; run it
 	// only on the first (fresh-SD) round to align to the parent before executing the block.
-	if !reuse {
+	//
+	// ALSO skip it on a FRONTIER EXTENSION ([[consensus_advance_untested_regression]] merge-vs-parenting):
+	// the block already opened positioned on its live frontier PARENT (WithParent → the constructor's
+	// SeekCommitment restored the parent's commitment). unwindToCommonCanonical would re-align it to the
+	// canonical DB instead — but the frontier parent is NOT yet in the DB (FCU lags), so the unwind reads
+	// the predecessor-of-parent's stale state and OVERWRITES the correct parent position (the bug: block N+1
+	// reset to block N-1). Parenting is the source of truth here, not the lagging DB.
+	if !reuse && !frontierExtension {
 		if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 			doms.Close()
 			return ValidationResult{}, err

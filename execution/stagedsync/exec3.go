@@ -42,7 +42,6 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
-	"github.com/erigontech/erigon/execution/execobserver"
 	"github.com/erigontech/erigon/execution/protocol"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
@@ -81,6 +80,13 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 		return 0, 0, 0, 0, err
 	}
 	if !ok {
+		// Not in the txNum index. If currentTxNum is exactly the first txNum after the last known block,
+		// this is the CLEAN START of the next block (a not-yet-canonical frontier block, whose txNum range
+		// the canonical index doesn't carry) — not a mid-block resume. restoreTxNum only exists to find
+		// where IN the block to begin; a clean boundary start means offset 0 at block last+1.
+		if currentTxNum == lastTxNum+1 {
+			return currentTxNum, maxTxNum, 0, lastBlockNum + 1, nil
+		}
 		lb, lt, _ := txNumsReader.Last(applyTx)
 		fb, ft, _ := txNumsReader.First(applyTx)
 		return 0, 0, 0, 0, fmt.Errorf("seems broken TxNums index not filled. can't find blockNum of txNum=%d; in db: (%d-%d, %d-%d)", inputTxNum, fb, lb, ft, lt)
@@ -218,9 +224,6 @@ func ExecV3(ctx context.Context,
 
 		readAhead, clean = exec.BlocksReadAhead(ctx, 2, cfg.db, cfg.engine, cfg.blockReader)
 		defer clean()
-	}
-	if isForkValidation { // TEMP FLASHBLOCK-DIAG: which executor runs for validation, + are there OnTx observers
-		logger.Info("[FLASHBLOCK-DIAG] validation exec", "parallel", parallel, "hasObservers", execobserver.HasObservers())
 	}
 	if parallel {
 		pe := &parallelExecutor{

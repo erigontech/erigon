@@ -140,7 +140,7 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 		if err != nil {
 			return err
 		}
-		err = sd.Merge(ctx, sdTxNum, fv.sharedDom, otherTxNum)
+		err = sd.Merge(ctx, sdTxNum, fv.sharedDom, otherTxNum, true /* closeOther: canonical spend-and-close */)
 		if err != nil {
 			return err
 		}

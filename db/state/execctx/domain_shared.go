@@ -211,6 +211,10 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 	sd.branchCache = branchCache
 	sd.sdCtx = commitmentdb.NewSharedDomainsCommitmentContext(sd, commitment.ModeDirect, tx.Debug().Dirs().Tmp, trieCfg)
 
+	// Attach the read-through parent BEFORE SeekCommitment so a frontier block resolves its start position
+	// from the parent's LIVE commitment (parenting), not the lagging DB. See merge-vs-parenting.
+	sd.parent = o.parent
+
 	_, blockNum, err := sd.SeekCommitment(ctx, tx)
 	if err != nil {
 		return sd, err
@@ -267,12 +271,15 @@ type changesetSwitcher interface {
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
 }
 
-func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *SharedDomains, otherTxNum uint64) error {
+// Merge folds `other`'s state into sd. closeOther (the default true) spends and closes `other`; false keeps
+// `other` fully alive and readable afterward so it can remain a live read-through parent (frontier
+// parenting). See [[consensus_advance_untested_regression]] merge-vs-parenting.
+func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *SharedDomains, otherTxNum uint64, closeOther bool) error {
 	if sdTxNum > otherTxNum {
 		return fmt.Errorf("can't merge backwards: txnum: %d > %d", sdTxNum, otherTxNum)
 	}
 
-	if err := sd.mem.Merge(other.mem); err != nil {
+	if err := sd.mem.Merge(other.mem, closeOther); err != nil {
 		return err
 	}
 
@@ -284,9 +291,13 @@ func (sd *SharedDomains) Merge(ctx context.Context, sdTxNum uint64, other *Share
 		}
 	}
 
-	// Transfer pending commitment update from other to sd (other's mem is invalidated after merge)
-	if otherUpd := other.sdCtx.TakePendingUpdate(); otherUpd != nil {
-		sd.sdCtx.SetPendingUpdate(otherUpd)
+	// Transfer pending commitment update from other to sd. Skipped when NOT closing `other`:
+	// TakePendingUpdate is destructive (removes it from other), which would break other as a live parent. In
+	// the frontier flow the close flushed other's pending before the merge, so there is nothing to transfer.
+	if closeOther {
+		if otherUpd := other.sdCtx.TakePendingUpdate(); otherUpd != nil {
+			sd.sdCtx.SetPendingUpdate(otherUpd)
+		}
 	}
 
 	sd.txNum = otherTxNum
@@ -856,10 +867,24 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// No need to populate stateCache here — mem is checked first on every read,
 	// so the value is already accessible without caching it again.
 	if v, step, ok := sd.mem.GetLatest(domain, k); ok {
-		if dbg.KVReadLevelledMetrics {
-			sd.metrics.UpdateCacheReads(domain, start)
+		// COMMITMENT read-through ([[consensus_advance_untested_regression]], user 2026-08-24 "read from
+		// block 1's sd"): an EMPTY (len 0) commitment-branch hit in THIS sd's mem is never a usable value —
+		// a mid-trie branch is either present (non-empty) or absent, and unfoldBranchNode errors on empty
+		// ("empty branch data read during unfold"). On the FRONTIER CHAIN (sd.parent != nil), block N+1's
+		// close can hold a transient empty root-branch entry in its own mem that would SHADOW block N's real
+		// branch in the parent SD. Treat the empty commitment hit as a MISS ONLY when a parent chain exists,
+		// so the read falls through to the parent (block N's live SD) then DB. GATED on sd.parent != nil so
+		// the normal single-SD path (no frontier) keeps the original short-circuit and empty-shadow semantics
+		// (branch-cache coherence across batches depends on it). Non-commitment domains keep short-circuit.
+		if !(domain == kv.CommitmentDomain && len(v) == 0 && sd.parent != nil) {
+			if dbg.KVReadLevelledMetrics {
+				sd.metrics.UpdateCacheReads(domain, start)
+			}
+			return v, step, nil
 		}
-		return v, step, nil
+		if step > 0 {
+			maxStep = step
+		}
 	} else {
 		if step > 0 {
 			maxStep = step
@@ -873,7 +898,15 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 	// branchCache / maxStep path must run — delegating the whole read to the parent would
 	// bypass the child's caches and corrupt commitment-branch reads). The backing tx is the
 	// canonical, FCU-flushed state at the chain root, so one DB read serves any depth.
-	for p := sd.parent; p != nil; p = p.parent {
+	// A parent whose SD has been Closed (Close sets sdCtx=nil and tears down its mem batch) has already
+	// had its contents persisted to the durable DB — reading its torn-down mem would be wrong. Detach any
+	// closed ancestor at the head of the chain so reads fall through to the persisted DB state, and skip a
+	// closed parent mid-walk. This is what makes "close the SD once its contents are persisted" safe: the
+	// child either reads the live parent's mem, or (once the parent is closed+persisted) reads the DB.
+	for sd.parent != nil && sd.parent.sdCtx == nil {
+		sd.parent = sd.parent.parent
+	}
+	for p := sd.parent; p != nil && p.sdCtx != nil; p = p.parent {
 		if v, step, ok := p.mem.GetLatest(domain, k); ok {
 			if dbg.KVReadLevelledMetrics {
 				sd.metrics.UpdateCacheReads(domain, start)

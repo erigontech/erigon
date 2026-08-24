@@ -54,6 +54,10 @@ type BoundaryAssembler interface {
 // time by the cocoon node for a chain whose builder is the incremental/DAG model.
 func (e *ExecModule) SetBoundaryAssembler(ba BoundaryAssembler) {
 	e.boundaryAssembler = ba
+	// A DAG-boundary producer runs the decoupled frontier: block N+1 pre-execs on N's still-live SD
+	// while N's FCU lags. Arm the fork validator to KEEP the canonicalised block's SD alive (park it)
+	// so the successor reads N's live commitment. Off for normal sync/reorg (drop-on-merge as before).
+	e.forkValidator.SetFrontierMode(true)
 }
 
 func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {

@@ -522,7 +522,11 @@ type TemporalMemBatch interface {
 	DomainDel(domain Domain, k string, txNum uint64, preval []byte) error
 	GetLatest(domain Domain, key []byte) (v []byte, step Step, ok bool)
 	GetDiffset(tx RwTx, blockHash common.Hash, blockNumber uint64) ([DomainLen][]DomainEntryDiff, bool, error)
-	Merge(other TemporalMemBatch) error
+	// Merge folds `other` into this batch. When closeOther is true (the default — the source is spent) the
+	// source is closed/invalidated afterward. When false, `other` is left fully intact and readable so it can
+	// continue serving as a live read-through parent (frontier parenting), and is closed later at its own
+	// retirement. See [[consensus_advance_untested_regression]] merge-vs-parenting.
+	Merge(other TemporalMemBatch, closeOther bool) error
 	ClearRam()
 	IndexAdd(table InvertedIdx, key []byte, txNum uint64) (err error)
 	IteratePrefix(domain Domain, prefix []byte, roTx Tx, it func(k []byte, v []byte) (cont bool, err error)) error

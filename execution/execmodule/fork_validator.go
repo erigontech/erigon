@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"os"
 	"sync"
 	"time"
 
@@ -69,6 +68,12 @@ type ForkValidator struct {
 	// oldest, next to canonicalise). Popped+released on flush (FCU). Empty in steady state
 	// (depth 1 = just sharedDom). See preExecStack methods below.
 	preExecStack []*preExecGen
+	// frontierMode arms the decoupled-boundary lifecycle (DAG-L2 producer, set via SetFrontierMode from
+	// ExecModule.SetBoundaryAssembler). When true, MergeExtendingFork PARKS the canonicalised block's SD
+	// (keep-alive) so the successor block reads its live commitment through the parent chain, and retires
+	// parked gens STRICTLY below the canonicalised number. When false (normal sync/reorg), the merged SD
+	// is dropped on canonicalisation exactly as before. See [[consensus_advance_untested_regression]].
+	frontierMode bool
 	// pipeline executor used for fork validation (ValidateBlock).
 	executor    *PipelineExecutor
 	blockReader services.FullBlockReader
@@ -108,7 +113,6 @@ func (fv *ForkValidator) pushPreExec(sd *execctx.SharedDomains, headHash common.
 		return
 	}
 	fv.preExecStack = append(fv.preExecStack, &preExecGen{sd: sd, headHash: headHash, number: number})
-	fmt.Fprintf(os.Stderr, "[FRONTIER-DIAG] park num=%d depth=%d\n", number, len(fv.preExecStack)) // TEMP
 }
 
 // NewestFrontierSD returns the SD of the most-recently-parked pre-exec generation (the
@@ -145,6 +149,13 @@ func newForkValidator(ctx context.Context, currentHeight uint64, executor *Pipel
 }
 
 // ExtendingForkHeadHash return the fork head hash of the fork that extends the canonical chain.
+// SetFrontierMode arms/disarms the decoupled-boundary keep-alive lifecycle (see frontierMode field).
+func (fv *ForkValidator) SetFrontierMode(on bool) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	fv.frontierMode = on
+}
+
 func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
@@ -186,7 +197,10 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 		if err != nil {
 			return err
 		}
-		err = sd.Merge(ctx, sdTxNum, fv.sharedDom, otherTxNum)
+		// closeOther = !frontierMode: in the frontier flow keep block N's SD alive+readable as its
+		// successor's read-through parent (parenting), rather than closing it in the merge (which broke
+		// parenting past the first hop). Canonical/normal flow closes it as before.
+		err = sd.Merge(ctx, sdTxNum, fv.sharedDom, otherTxNum, !fv.frontierMode)
 		if err != nil {
 			return err
 		}
@@ -202,8 +216,27 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	// parent. Under the current serialized boundary the stack is empty and this is a no-op;
 	// under the decoupled boundary it bounds memory (the OOM guard). See
 	// [[venue_exec_on_round_plan]].
-	fv.retireParkedUpTo(ctx, tx, fv.extendingForkNumber)
-	// Clean extending fork data
+	// Retire parked gens. In frontierMode retire STRICTLY BELOW the block just canonicalised (its own SD
+	// is kept parked as the successor's read-through frontier); otherwise retire ≤ (legacy behaviour).
+	retireUpTo := fv.extendingForkNumber
+	if fv.frontierMode {
+		fv.retireParkedUpTo(ctx, tx, retireUpTo, false /* strictlyBelow → keep the just-canonicalised gen */)
+		// FRONTIER KEEP-ALIVE ([[consensus_advance_untested_regression]], user 2026-08-24): do NOT drop this
+		// block's SD on canonicalisation. The successor block N+1 reads N's commitment trie THROUGH this SD
+		// (read-through parent) — the just-committed DB can be INCOMPLETE for that read (a near-root
+		// commitment branch is empty/absent until N is fully durable → "empty branch data read during
+		// unfold" when N+1 closes). Park N's SD so N+1 reads N's LIVE, complete commitment; it is retired one
+		// step later, when N+1 canonicalises, by which point N is fully durable. This is the "each preexec
+		// block moves preexec→currentContext in turn" lifecycle: the FCU promotes N into the canonical state
+		// but keeps N's preexec SD alive until the frontier moves past it.
+		if fv.sharedDom != nil {
+			fv.pushPreExec(fv.sharedDom, fv.extendingForkHeadHash, fv.extendingForkNumber)
+		}
+	} else {
+		fv.retireParkedUpTo(ctx, tx, retireUpTo, true /* inclusive ≤ — legacy */)
+	}
+	// Clean the ACTIVE extending-fork slot (its SD now lives on the park stack in frontierMode; legacy just
+	// clears the reference exactly as before — its state was transferred into the canonical SD by the merge).
 	fv.sharedDom = nil
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingForkNumber = 0
@@ -218,13 +251,14 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 // parked gen that fails to flush is still removed to avoid an unbounded stack, since its
 // state is either already durable (canonicalised) or will be re-derived on the next open.
 // Caller must hold fv.lock.
-func (fv *ForkValidator) retireParkedUpTo(ctx context.Context, tx kv.TemporalTx, upTo uint64) {
-	if len(fv.preExecStack) > 0 {
-		fmt.Fprintf(os.Stderr, "[FRONTIER-DIAG] retire upTo=%d depth=%d\n", upTo, len(fv.preExecStack)) // TEMP
-	}
+func (fv *ForkValidator) retireParkedUpTo(ctx context.Context, tx kv.TemporalTx, upTo uint64, inclusive bool) {
 	kept := fv.preExecStack[:0]
 	for _, g := range fv.preExecStack {
-		if g.number <= upTo {
+		// inclusive=true → retire ≤ upTo (legacy). inclusive=false → retire STRICTLY BELOW upTo: the
+		// just-canonicalised block's own SD (g.number == upTo) is kept parked as the read-through frontier
+		// for its successor; it retires when the NEXT block canonicalises.
+		retire := g.number < upTo || (inclusive && g.number == upTo)
+		if retire {
 			if g.sd != nil {
 				// Best-effort flush: a parked gen at/below the canonicalised block either has
 				// its state already durable (via the active-block merge / a prior FCU) or it
@@ -242,6 +276,24 @@ func (fv *ForkValidator) retireParkedUpTo(ctx context.Context, tx kv.TemporalTx,
 
 type HasDiff interface {
 	Diff() (*membatchwithdb.MemoryDiff, error)
+}
+
+// isPreExecutedLive reports whether (hash, number) is a block this validator has already PRE-EXECUTED
+// and still holds LIVE in memory — the active extending fork, or a parked frontier generation. Such a
+// block is a valid BASE for its successor: its full post-execution state lives in the SharedDomains the
+// successor chains to (preexecute SetParent), so ValidatePayload must NOT re-assemble+re-execute it as an
+// unvalidated side fork (which replays its txs against its own already-applied state → "nonce too low").
+// Caller must hold fv.lock.
+func (fv *ForkValidator) isPreExecutedLive(hash common.Hash, number uint64) bool {
+	if fv.sharedDom != nil && fv.extendingForkHeadHash == hash && fv.extendingForkNumber == number {
+		return true
+	}
+	for _, g := range fv.preExecStack {
+		if g.sd != nil && g.headHash == hash && g.number == number {
+			return true
+		}
+	}
+	return false
 }
 
 // ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
@@ -290,9 +342,17 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	// Let's assemble the side fork backwards
 	currentHash := header.ParentHash
 	unwindPoint := number - 1
+	baseIsPreExecLive := false // true when the side-fork base is a live in-memory frontier block, not canonical
 	foundCanonical, criticalError = fv.blockReader.IsCanonical(fv.ctx, tx, currentHash, unwindPoint)
 	if criticalError != nil {
 		return
+	}
+	// The parent may not be CANONICAL yet — it may be a still-live block on the EXTENDING chain (the
+	// frontier this block chains to). That is a valid base: its state is in the SD we chain to, so stop
+	// the side-fork assembly here rather than re-executing it.
+	if !foundCanonical && fv.isPreExecutedLive(currentHash, unwindPoint) {
+		foundCanonical = true
+		baseIsPreExecLive = true
 	}
 
 	logger.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
@@ -331,7 +391,20 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 		if criticalError != nil {
 			return
 		}
+		// Stop at any pre-executed LIVE ancestor on the extending chain (FCU may canonicalise several
+		// blocks at once, so a run of extending blocks can still be un-canonicalised here). Its state is
+		// already in memory on the frontier stack — do not re-execute it.
+		if !foundCanonical && fv.isPreExecutedLive(currentHash, unwindPoint) {
+			foundCanonical = true
+			baseIsPreExecLive = true
+		}
 		logger.Debug("Execution ForkValidator.ValidatePayload", "foundCanonical", foundCanonical, "currentHash", currentHash, "unwindPoint", unwindPoint)
+	}
+	// A pre-executed LIVE base is chained in memory (SetParent) — it is NOT a canonical ancestor to unwind
+	// to, and trying would read its (non-existent) canonical hash. There is nothing to unwind: the SD
+	// already carries the base's state via the parent chain. Skip the unwind.
+	if baseIsPreExecLive {
+		unwindPoint = 0
 	}
 	// Do not set an unwind point if we are already there.
 	if unwindPoint == fv.currentHeight {
