@@ -230,16 +230,16 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRangeReq(ctx context.Conte
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
 		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
-			return nil, pid, err
+			return envelopes, pid, err
 		}
 		envelope := &cltypes.SignedExecutionPayloadEnvelope{
 			Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(b.beaconConfig, data.version),
 		}
 		if err := envelope.DecodeSSZStrict(data.raw, int(data.version)); err != nil {
-			return nil, pid, fmt.Errorf("execution payload envelope by range decode: %w", err)
+			return envelopes, pid, fmt.Errorf("execution payload envelope by range decode: %w", err)
 		}
 		if err := envelope.ValidateForConfig(b.beaconConfig); err != nil {
-			return nil, pid, fmt.Errorf("execution payload envelope by range validation: %w", err)
+			return envelopes, pid, fmt.Errorf("execution payload envelope by range validation: %w", err)
 		}
 		envelopes = append(envelopes, envelope)
 	}
@@ -273,16 +273,16 @@ func (b *BeaconRpcP2P) SendExecutionPayloadEnvelopesByRootReq(ctx context.Contex
 	envelopes := make([]*cltypes.SignedExecutionPayloadEnvelope, 0, len(responsePacket))
 	for _, data := range responsePacket {
 		if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(data.version); err != nil {
-			return nil, pid, err
+			return envelopes, pid, err
 		}
 		envelope := &cltypes.SignedExecutionPayloadEnvelope{
 			Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(b.beaconConfig, data.version),
 		}
 		if err := envelope.DecodeSSZStrict(data.raw, int(data.version)); err != nil {
-			return nil, pid, fmt.Errorf("execution payload envelope by root decode: %w", err)
+			return envelopes, pid, fmt.Errorf("execution payload envelope by root decode: %w", err)
 		}
 		if err := envelope.ValidateForConfig(b.beaconConfig); err != nil {
-			return nil, pid, fmt.Errorf("execution payload envelope by root validation: %w", err)
+			return envelopes, pid, fmt.Errorf("execution payload envelope by root validation: %w", err)
 		}
 		envelopes = append(envelopes, envelope)
 	}

@@ -17,6 +17,7 @@
 package network
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync"
@@ -27,8 +28,13 @@ import (
 	"github.com/stretchr/testify/require"
 	"google.golang.org/grpc"
 
+	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/rpc"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 )
@@ -252,6 +258,22 @@ func TestRequestEnvelopesFranticallyBoundsRangeFallbackAttempt(t *testing.T) {
 	require.ErrorIs(t, <-done, context.Canceled)
 }
 
+type envelopeResponseSentinel struct {
+	sentinelproto.SentinelClient
+	response []byte
+}
+
+func (s *envelopeResponseSentinel) SendRequest(context.Context, *sentinelproto.RequestData, ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	return &sentinelproto.ResponseData{
+		Data: s.response,
+		Peer: &sentinelproto.Peer{Pid: "mixed-response-peer"},
+	}, nil
+}
+
+func (s *envelopeResponseSentinel) PeersInfo(context.Context, *sentinelproto.PeersInfoRequest, ...grpc.CallOption) (*sentinelproto.PeersInfoResponse, error) {
+	return &sentinelproto.PeersInfoResponse{}, nil
+}
+
 func TestAcceptEnvelopeResponsesKeepsOnlyRequestedRoots(t *testing.T) {
 	requestedRoot := common.Hash{1}
 	unsolicitedRoot := common.Hash{2}
@@ -272,4 +294,62 @@ func TestAcceptEnvelopeResponsesKeepsOnlyRequestedRoots(t *testing.T) {
 
 	require.Same(t, requestedEnvelope, received[requestedRoot])
 	require.NotContains(t, received, unsolicitedRoot)
+}
+
+func TestRequestEnvelopesByRangeRetainsValidatedPrefixOnError(t *testing.T) {
+	client, requestedRoot, block := newMixedEnvelopeResponseClient(t)
+	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{}
+
+	requestEnvelopesByRange(
+		context.Background(),
+		client,
+		[]*cltypes.SignedBeaconBlock{block},
+		map[common.Hash]struct{}{requestedRoot: {}},
+		received,
+	)
+
+	require.Contains(t, received, requestedRoot)
+	require.Equal(t, requestedRoot, received[requestedRoot].Message.BeaconBlockRoot)
+}
+
+func TestRequestEnvelopesByRootRetainsValidatedPrefixOnError(t *testing.T) {
+	client, requestedRoot, _ := newMixedEnvelopeResponseClient(t)
+
+	envelopes, err := requestEnvelopesByRoot(context.Background(), client, [][32]byte{requestedRoot, {2}})
+
+	require.Error(t, err)
+	require.Len(t, envelopes, 1)
+	require.Equal(t, requestedRoot, envelopes[0].Message.BeaconBlockRoot)
+}
+
+func newMixedEnvelopeResponseClient(t *testing.T) (*rpc.BeaconRpcP2P, common.Hash, *cltypes.SignedBeaconBlock) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxBuilderDepositRequestsPerPayload = 1
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+
+	requestedRoot := common.Hash{1}
+	valid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	valid.Message.BeaconBlockRoot = requestedRoot
+	invalid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	invalid.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	invalid.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, valid, gloasDigest[:]...))
+	require.NoError(t, response.WriteByte(0))
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, invalid, gloasDigest[:]...))
+	client := rpc.NewBeaconRpcP2P(
+		context.Background(),
+		&envelopeResponseSentinel{response: response.Bytes()},
+		&cfg,
+		clock,
+		nil,
+	)
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	return client, requestedRoot, block
 }
