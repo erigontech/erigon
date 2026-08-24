@@ -1196,3 +1196,44 @@ func TestWrapAsExecAbort_PreservesOriginError(t *testing.T) {
 		})
 	}
 }
+
+// TestCommitmentBarrierCtxSurvivesTerminalCancel pins the barrier's context
+// choice. decideStop publishes the stopCause — cancelling the exec-loop ctx —
+// before completeBlock reaches the COMMITMENT_AFTER_EXEC barrier, so a barrier
+// that waits on that ctx returns immediately and completeBlock errors out
+// before triggerBatchCommitment. That silently drops the batch-end commitment:
+// state flushes for the whole range while the commitment domain stays at the
+// previous boundary.
+func TestCommitmentBarrierCtxSurvivesTerminalCancel(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	cancel()
+
+	require.Error(t, commitmentBarrierCtx(ctx, false).Err(),
+		"non-terminal blocks must still abort the barrier on cancellation")
+	require.NoError(t, commitmentBarrierCtx(ctx, true).Err(),
+		"terminal blocks must wait past the stopCause so triggerBatchCommitment still runs")
+}
+
+// TestWaitProcessedWithoutCommitStreamReturns covers exec-only
+// (DISCARD_COMMITMENT): commitResults is nil, so the calculator's loop never
+// runs and nothing ever calls markProcessed. Every escape in WaitProcessed is
+// then unreachable — processedWake is never closed, done needs Stop() (deferred
+// behind the parked exec loop) and ctx needs decideStop — so the barrier must
+// not wait at all.
+func TestWaitProcessedWithoutCommitStreamReturns(t *testing.T) {
+	cc := &commitmentCalculator{
+		in:            nil,
+		done:          make(chan struct{}),
+		processedWake: make(chan struct{}),
+	}
+
+	done := make(chan error, 1)
+	go func() { done <- cc.WaitProcessed(context.Background(), 1) }()
+
+	select {
+	case err := <-done:
+		require.NoError(t, err)
+	case <-time.After(2 * time.Second):
+		t.Fatal("WaitProcessed parked with no commit stream: nothing can ever mark a block processed")
+	}
+}
