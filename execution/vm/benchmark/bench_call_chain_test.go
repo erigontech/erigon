@@ -8,9 +8,11 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/program"
+	"github.com/erigontech/erigon/execution/vm/runtime"
 )
 
 // Cross-contract call addresses (raw, for Push)
@@ -260,6 +262,11 @@ func BenchmarkDeepStacks(b *testing.B) {
 			code = append(code, byte(vm.ADDRESS), byte(vm.GAS), byte(vm.CALL))
 			deployContract(b, statedb, addrContract, code)
 
+			const existingDepthCoverage = 16
+			if depth := tracedMaxDepth(b, statedb, addrContract, vmenv.Context.GasLimit); depth <= existingDepthCoverage {
+				b.Fatalf("call chain only reached depth %d, want > %d", depth, existingDepthCoverage)
+			}
+
 			callComplete(b, vmenv, addrContract, nil)
 			for b.Loop() {
 				callComplete(b, vmenv, addrContract, nil)
@@ -297,12 +304,57 @@ func BenchmarkDeepCallsWithMemory(b *testing.B) {
 				deployContract(b, statedb, a.interned, memChainCode(next, tc.words))
 			}
 
+			requireChainReachesLeaf(b, statedb, addrs[0].interned, addrs[len(addrs)-1].interned, vmenv.Context.GasLimit)
+
 			callComplete(b, vmenv, addrs[0].interned, nil)
 			for b.Loop() {
 				callComplete(b, vmenv, addrs[0].interned, nil)
 			}
 		})
 	}
+}
+
+// tracedEnv returns an EVM sharing statedb with the caller's benchmark EVM,
+// with the given tracer hooks wired in. It exists only for untimed
+// validation calls, so it never touches the config the timed loop runs with.
+func tracedEnv(statedb *state.IntraBlockState, gasLimit uint64, hooks *tracing.Hooks) *vm.EVM {
+	return runtime.NewEnv(&runtime.Config{
+		ChainConfig: cancunConfig(),
+		Origin:      addrSender,
+		Coinbase:    accounts.ZeroAddress,
+		BlockNumber: 1,
+		Time:        1,
+		GasLimit:    gasLimit,
+		Difficulty:  uint256.NewInt(0),
+		State:       statedb,
+		EVMConfig:   vm.Config{Tracer: hooks},
+	})
+}
+
+// tracedMaxDepth runs one untimed call against addr, with a call-depth tracer
+// wired in, and returns the deepest frame it reached (0 for the entry call
+// itself, 1 for its first child, and so on). A chain that breaks partway — a
+// missing or out-of-gas child — still returns without error and burns gas, so
+// neither of those checks alone catches it; the caller must compare the
+// returned depth against what the chain was built to reach.
+func tracedMaxDepth(b *testing.B, statedb *state.IntraBlockState, addr accounts.Address, gasLimit uint64) int {
+	b.Helper()
+	var maxDepth int
+	env := tracedEnv(statedb, gasLimit, &tracing.Hooks{
+		OnEnter: func(depth int, _ byte, _, _ accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+			if depth > maxDepth {
+				maxDepth = depth
+			}
+		},
+	})
+
+	snap := statedb.PushSnapshot()
+	if _, _, err := prepareAndCall(env, addr, nil); err != nil {
+		b.Fatal(err)
+	}
+	statedb.RevertToSnapshot(snap, nil)
+	statedb.PopSnapshot(snap)
+	return maxDepth
 }
 
 // memChainCode fills words of memory a word at a time, the way solidity grows
@@ -317,4 +369,44 @@ func memChainCode(next *common.Address, words int) []byte {
 		return p.Return(0, 32).Bytes()
 	}
 	return p.StaticCall(nil, *next, 0, words*32, 0, 32).Op(vm.POP, vm.STOP).Bytes()
+}
+
+// requireChainReachesLeaf proves the memChainCode chain rooted at entry
+// actually reaches leaf. Every intermediate frame drops its STATICCALL's
+// success value and stops regardless, so a missing, broken, or underfunded
+// child still lets the top-level call complete normally with gas spent —
+// callComplete's own checks pass either way. It runs the chain once with a
+// tracer wired in and checks that the leaf's own frame returned 32 bytes, the
+// size memChainCode's leaf Returns; a call into an address with no code — the
+// leaf never deployed, or a broken link short-circuiting the chain — still
+// enters that frame but exits with empty output, so the size alone tells
+// them apart. STATICCALL forbids state writes, which rules out a storage
+// marker here.
+func requireChainReachesLeaf(b *testing.B, statedb *state.IntraBlockState, entry, leaf accounts.Address, gasLimit uint64) {
+	b.Helper()
+	leafDepth, leafOutputLen := -1, -1
+	env := tracedEnv(statedb, gasLimit, &tracing.Hooks{
+		OnEnter: func(depth int, _ byte, _, to accounts.Address, _ bool, _ []byte, _ uint64, _ uint256.Int, _ []byte) {
+			if to == leaf {
+				leafDepth = depth
+			}
+		},
+		OnExit: func(depth int, output []byte, _ uint64, _ error, _ bool) {
+			if depth == leafDepth {
+				leafOutputLen = len(output)
+			}
+		},
+	})
+
+	snap := statedb.PushSnapshot()
+	if _, _, err := prepareAndCall(env, entry, nil); err != nil {
+		b.Fatal(err)
+	}
+	statedb.RevertToSnapshot(snap, nil)
+	statedb.PopSnapshot(snap)
+
+	const wantOutputLen = 32
+	if leafOutputLen != wantOutputLen {
+		b.Fatalf("call chain did not reach the leaf at %s (leaf output len=%d, want %d)", leaf, leafOutputLen, wantOutputLen)
+	}
 }
