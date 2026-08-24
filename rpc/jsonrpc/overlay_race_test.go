@@ -86,6 +86,25 @@ func newOverlayAheadTestAPI(t *testing.T) (base *BaseAPI, m *execmoduletester.Ex
 	return base, m, overlayHeader
 }
 
+func newPublishedOverlayTestBase(t *testing.T, m *execmoduletester.ExecModuleTester) (*BaseAPI, *execctx.SharedDomains, *shards.Events) {
+	t.Helper()
+
+	overlayRoTx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	t.Cleanup(overlayRoTx.Rollback)
+	doms, err := execctx.NewSharedDomains(m.Ctx, overlayRoTx, m.Log)
+	require.NoError(t, err)
+	t.Cleanup(doms.Close)
+	require.NoError(t, doms.InitBlockOverlay(overlayRoTx, m.Dirs.Tmp))
+
+	events := shards.NewEvents()
+	events.PublishOverlay(doms)
+	t.Cleanup(func() { events.PublishOverlay(nil) })
+	ff := rpchelper.New(m.Ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, events)
+	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
+	return newBaseApiWithFiltersForTest(ff, stateCache, m), doms, events
+}
+
 func newOverlayAheadTestAPIWithEvents(t *testing.T) (base *BaseAPI, m *execmoduletester.ExecModuleTester, overlayHeader *types.Header, events *shards.Events) {
 	t.Helper()
 
@@ -95,15 +114,7 @@ func newOverlayAheadTestAPIWithEvents(t *testing.T) (base *BaseAPI, m *execmodul
 	m = execmoduletester.New(t, execmoduletester.WithChainConfig(&cfg))
 
 	c := insertOverlayRaceChain(t, m)
-
-	ctx := m.Ctx
-	overlayRoTx, err := m.DB.BeginTemporalRo(ctx)
-	require.NoError(t, err)
-	t.Cleanup(overlayRoTx.Rollback)
-	doms, err := execctx.NewSharedDomains(ctx, overlayRoTx, m.Log)
-	require.NoError(t, err)
-	t.Cleanup(doms.Close)
-	require.NoError(t, doms.InitBlockOverlay(overlayRoTx, m.Dirs.Tmp))
+	base, doms, events := newPublishedOverlayTestBase(t, m)
 
 	const overlayGasLimit = 30_000_000
 	overlayNumber := uint64(overlayRaceChainSize) + 1
@@ -125,12 +136,6 @@ func newOverlayAheadTestAPIWithEvents(t *testing.T) (base *BaseAPI, m *execmodul
 	rawdb.WriteForkchoiceHead(overlay, hash)
 	require.NoError(t, rawdb.WriteCanonicalHash(overlay, hash, overlayNumber))
 	require.NoError(t, rawdb.WriteBody(overlay, hash, overlayNumber, &types.Body{}))
-
-	events = shards.NewEvents()
-	events.PublishOverlay(doms)
-	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, events)
-	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base = newBaseApiWithFiltersForTest(ff, stateCache, m)
 
 	return base, m, overlayHeader, events
 }
@@ -471,6 +476,23 @@ func TestGetTransactionReceiptRejectsMismatchedTransaction(t *testing.T) {
 	require.Nil(t, receipt)
 }
 
+func TestGetBlockReceiptsPinsOverlayView(t *testing.T) {
+	base, m, overlayHeader, events := newOverlayAheadTestAPIWithEvents(t)
+	overlay := events.LatestSD().BlockOverlay()
+	require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, overlayHeader.Number.Uint64()))
+	base._blockReader = &unpublishOverlayBlockReader{
+		FullBlockReader: base._blockReader,
+		events:          events,
+		blockNumber:     overlayHeader.Number.Uint64(),
+	}
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	receipts, err := api.GetBlockReceipts(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.BlockNumber(overlayHeader.Number.Uint64())))
+	require.NoError(t, err)
+	require.NotNil(t, receipts)
+	require.Empty(t, receipts)
+}
+
 // newOverlayRacePendingPool signs a single pending tx from m.Address and wraps
 // it in an overlayRaceTxPoolClient.All reply, as txpool_content/contentFrom expect.
 func newOverlayRacePendingPool(t *testing.T, m *execmoduletester.ExecModuleTester) (*overlayRaceTxPoolClient, types.Transaction) {
@@ -782,6 +804,32 @@ func TestOtterscanTransactionLookupUsesCommittedView(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, txn)
 	require.Nil(t, block)
+}
+
+func TestOtterscanSearchUsesCommittedView(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base, _, _ := newPublishedOverlayTestBase(t, m)
+
+	var committedHash common.Hash
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		var ok bool
+		var err error
+		committedHash, ok, err = m.BlockReader.CanonicalHash(m.Ctx, tx, overlayRaceChainSize)
+		if err != nil {
+			return err
+		}
+		require.True(t, ok)
+		return nil
+	}))
+	reorgHeader := writeOverlayReorgHeader(t, base, m)
+	require.NotEqual(t, committedHash, reorgHeader.Hash())
+
+	addr := common.HexToAddress("0x537e697c7ab75a26f9ecf0ce810e3154dfcaaf44")
+	results, err := NewOtterscanAPI(base, m.DB, 25).SearchTransactionsAfter(m.Ctx, addr, 3, 10)
+	require.NoError(t, err)
+	require.NotEmpty(t, results.Txs)
+	require.Equal(t, committedHash, *results.Txs[0].BlockHash)
+	require.Equal(t, committedHash, results.Receipts[0]["blockHash"])
 }
 
 func TestReplayTransactionHandlesMissingHeader(t *testing.T) {
