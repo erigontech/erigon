@@ -257,6 +257,15 @@ func newCommitmentCalculator(
 	blockRequests chan *blockRequest,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
+	// This calculator folds block N while the exec loop already writes N+1 into
+	// sd.mem; both settings below are what keep that read-safe.
+	if !doms.InMemHistoryReads() {
+		return nil, errors.New("commitmentCalculator: in-mem history reads must be enabled")
+	}
+	if !doms.InlineTouchKeyDisabled() {
+		return nil, errors.New("commitmentCalculator: inline TouchKey must be disabled")
+	}
+
 	// ModeUpdate carries values in its btree for the trie to read; the parallel
 	// trie reads leaf values from the as-of reader, so keep its ModeParallel buffer.
 	sdCtxUpdates := doms.GetCommitmentContext().GetUpdates()
