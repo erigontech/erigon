@@ -32,11 +32,6 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	versionRange := VersionRange{
-		Min: 1,
-		Max: 1,
-	}
-
 	segment := r.PathValue("version")
 	if !strings.HasPrefix(segment, "v") {
 		writeQueryError(w, http.StatusNotFound, "invalid version segment")
@@ -54,11 +49,6 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 	version := uint(parsed)
-
-	if version < versionRange.Min || version > versionRange.Max {
-		writeQueryError(w, http.StatusNotFound, "unsupported API version")
-		return
-	}
 
 	blockID := r.PathValue("blockID")
 
@@ -92,14 +82,22 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	res, err := parseQuery(req, version, bnh)
+	var res SSZQLResponse
+
+	switch version {
+	case 1:
+		res, err = parseQueryV1(req, version, bnh)
+	default:
+		writeQueryError(w, http.StatusNotFound, "unsupported API version")
+		return
+	}
+
 	if err != nil {
 		writeQueryError(w, http.StatusInternalServerError, "internal error")
 		return
 	}
 
 	writeQueryResponse(w, res)
-
 }
 
 func isValidBlockAndVersion(blockID string, version uint) bool {

@@ -6,7 +6,7 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
-func parseQuery(request SSZQLRequest, version uint, blockID rpc.BlockNumberOrHash) (SSZQLResponse, error) {
+func parseQueryV1(request SSZQLRequest, version uint, blockID rpc.BlockNumberOrHash) (SSZQLResponse, error) {
 	response := SSZQLResponse{
 		Paths:    make([]Path, 0),
 		Gindices: make([]Gindex, 0),
