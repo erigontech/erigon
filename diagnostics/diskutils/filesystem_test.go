@@ -17,6 +17,7 @@
 package diskutils
 
 import (
+	"errors"
 	"strings"
 	"testing"
 
@@ -60,6 +61,73 @@ func TestFilesystemType(t *testing.T) {
 	fsType, err := FilesystemType(t.TempDir())
 	require.NoError(t, err)
 	require.NotEmpty(t, fsType)
+}
+
+func TestUnrecommendedByType(t *testing.T) {
+	fsTypeOf := func(dirPath string) (string, error) {
+		switch dirPath {
+		case "/data", "/data/chaindata":
+			return "zfs", nil
+		case "/snap", "/snap/domain":
+			return "btrfs", nil
+		case "/fast":
+			return "ext4", nil
+		case "/xfs":
+			return "XFS", nil
+		}
+		return "", errors.New("no such mount")
+	}
+
+	groups, failed := unrecommendedByType(
+		[]string{"/fast", "/data", "/snap", "/xfs", "/data/chaindata", "/snap/domain", "/gone"}, fsTypeOf)
+
+	require.Equal(t, []fsGroup{
+		{fsType: "zfs", paths: []string{"/data"}},
+		{fsType: "btrfs", paths: []string{"/snap"}},
+	}, groups)
+	require.Len(t, failed, 1)
+	require.Error(t, failed["/gone"])
+}
+
+func TestUnrecommendedByTypeKeepsSeparateMounts(t *testing.T) {
+	fsTypeOf := func(dirPath string) (string, error) {
+		switch dirPath {
+		case "/data":
+			return "ext4", nil
+		case "/data/chaindata", "/mnt/snap":
+			return "zfs", nil
+		}
+		return "", errors.New("no such mount")
+	}
+
+	groups, _ := unrecommendedByType([]string{"/data", "/data/chaindata", "/mnt/snap"}, fsTypeOf)
+
+	require.Equal(t, []fsGroup{{fsType: "zfs", paths: []string{"/data/chaindata", "/mnt/snap"}}}, groups)
+}
+
+func TestUnrecommendedByTypeAncestorReplacesDescendant(t *testing.T) {
+	fsTypeOf := func(string) (string, error) { return "zfs", nil }
+
+	groups, _ := unrecommendedByType([]string{"/data/chaindata", "/data-other", "/data"}, fsTypeOf)
+
+	require.Equal(t, []fsGroup{{fsType: "zfs", paths: []string{"/data-other", "/data"}}}, groups)
+}
+
+func TestUnrecommendedByTypeAllRecommended(t *testing.T) {
+	fsTypeOf := func(string) (string, error) { return "ext4", nil }
+
+	groups, failed := unrecommendedByType([]string{"/a", "/b"}, fsTypeOf)
+
+	require.Empty(t, groups)
+	require.Empty(t, failed)
+}
+
+func TestUnrecommendedByTypeSkipsDuplicatePaths(t *testing.T) {
+	fsTypeOf := func(string) (string, error) { return "zfs", nil }
+
+	groups, _ := unrecommendedByType([]string{"/data", "/data", ""}, fsTypeOf)
+
+	require.Equal(t, []fsGroup{{fsType: "zfs", paths: []string{"/data"}}}, groups)
 }
 
 func TestFsTypeFromMountinfo(t *testing.T) {

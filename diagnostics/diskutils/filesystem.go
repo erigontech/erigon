@@ -17,6 +17,7 @@
 package diskutils
 
 import (
+	"path/filepath"
 	"slices"
 	"strings"
 
@@ -31,17 +32,66 @@ func IsRecommendedFilesystem(fsType string) bool {
 	return slices.Contains(recommendedFilesystems, strings.ToLower(fsType))
 }
 
-// WarnUnlessRecommendedFilesystem logs a warning when dirPath does not sit on
-// ext4 or XFS, the only filesystems Erigon measures performance on.
-func WarnUnlessRecommendedFilesystem(logger log.Logger, dirPath string) {
-	fsType, err := FilesystemType(dirPath)
-	if err != nil {
+// CheckFilesystem logs a warning for each filesystem behind dirPaths that is
+// neither ext4 nor XFS, the only ones Erigon measures performance on. Erigon
+// dirs can live on separate mounts, so they are reported per filesystem type.
+func CheckFilesystem(logger log.Logger, dirPaths ...string) {
+	groups, failed := unrecommendedByType(dirPaths, FilesystemType)
+	for dirPath, err := range failed {
 		logger.Debug("[diskutils] Cannot detect filesystem type", "path", dirPath, "err", err)
+	}
+	for _, group := range groups {
+		logger.Warn("[diskutils] Filesystem is neither ext4 nor XFS, performance is unverified",
+			"fstype", group.fsType, "paths", strings.Join(group.paths, ", "), "see", filesystemDocsURL)
+	}
+}
+
+type fsGroup struct {
+	fsType string
+	paths  []string
+}
+
+func unrecommendedByType(dirPaths []string, fsTypeOf func(string) (string, error)) ([]fsGroup, map[string]error) {
+	var groups []fsGroup
+	failed := map[string]error{}
+	seen := map[string]bool{"": true}
+
+	for _, dirPath := range dirPaths {
+		if seen[dirPath] {
+			continue
+		}
+		seen[dirPath] = true
+
+		fsType, err := fsTypeOf(dirPath)
+		if err != nil {
+			failed[dirPath] = err
+			continue
+		}
+		if IsRecommendedFilesystem(fsType) {
+			continue
+		}
+		if i := slices.IndexFunc(groups, func(g fsGroup) bool { return g.fsType == fsType }); i >= 0 {
+			groups[i].add(dirPath)
+			continue
+		}
+		groups = append(groups, fsGroup{fsType: fsType, paths: []string{dirPath}})
+	}
+	return groups, failed
+}
+
+// add keeps only the topmost dirs, so dirs sharing one mount are reported once.
+func (g *fsGroup) add(dirPath string) {
+	if slices.ContainsFunc(g.paths, func(p string) bool { return isAncestor(p, dirPath) }) {
 		return
 	}
-	if IsRecommendedFilesystem(fsType) {
-		return
+	g.paths = slices.DeleteFunc(g.paths, func(p string) bool { return isAncestor(dirPath, p) })
+	g.paths = append(g.paths, dirPath)
+}
+
+func isAncestor(ancestor, descendant string) bool {
+	if ancestor == descendant {
+		return true
 	}
-	logger.Warn("[diskutils] Filesystem is neither ext4 nor XFS, performance is unverified",
-		"path", dirPath, "fstype", fsType, "see", filesystemDocsURL)
+	prefix := strings.TrimSuffix(ancestor, string(filepath.Separator)) + string(filepath.Separator)
+	return strings.HasPrefix(descendant, prefix)
 }
