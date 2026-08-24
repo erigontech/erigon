@@ -17,6 +17,7 @@
 package network
 
 import (
+	"bytes"
 	"context"
 	"errors"
 	"sync/atomic"
@@ -514,6 +515,8 @@ func TestBlobHistoryDownloaderRetryRetainsDenebBlockOnStorageReadError(t *testin
 	}).AnyTimes()
 	peer := &countingBlobPeerClient{}
 	downloader := newBoundaryDownloader(t, block.Block.Slot, 0, block.Block.Slot, &boundaryBlockReader{block: block})
+	var logs bytes.Buffer
+	downloader.logger.SetHandler(log.StreamHandler(&logs, log.LogfmtFormat()))
 	downloader.blobStorage = blobStorage
 	downloader.rpc = peer
 	downloader.addRetrySlot(block.Block.Slot)
@@ -521,6 +524,9 @@ func TestBlobHistoryDownloaderRetryRetainsDenebBlockOnStorageReadError(t *testin
 	require.NoError(t, downloader.downloadOnce(false))
 	require.Zero(t, peer.requests)
 	require.Equal(t, []blobRetryRange{{start: block.Block.Slot, end: block.Block.Slot, cursor: block.Block.Slot}}, downloader.retryRanges)
+	require.Contains(t, logs.String(), "Failed to read stored blob sidecars during retry")
+	require.Contains(t, logs.String(), "slot=100")
+	require.Contains(t, logs.String(), wantErr.Error())
 }
 
 func TestBlobHistoryDownloaderFuluRecoveryRejectsInvalidStoredSidecars(t *testing.T) {
