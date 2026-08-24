@@ -126,9 +126,10 @@ var (
 	// publishing; without it the BAL-driven root is published directly.
 	BALShadowCompute = EnvBool("BAL_SHADOW_COMPUTE", false)
 	// CommitmentAfterExec makes the exec loop wait for the commitment
-	// calculator to finish block N before starting N+1, so the two never
-	// contend for SharedDomains.changesetMu. Diagnostic: it trades the
-	// exec/commitment overlap for the absence of that contention.
+	// calculator to handle block N's result before starting N+1. Diagnostic:
+	// it trades the block-level exec/commitment overlap for most of the
+	// SharedDomains.changesetMu contention. Mid-block computes (step-edge
+	// checkpoints) still run alongside exec.
 	CommitmentAfterExec  = EnvBool("COMMITMENT_AFTER_EXEC", false)
 	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
 	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)

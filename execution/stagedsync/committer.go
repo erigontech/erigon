@@ -208,7 +208,8 @@ func (cc *commitmentCalculator) markProcessed(blockNum uint64) {
 
 // WaitProcessed blocks until the calculator has handled blockNum, the
 // calculator stops, or ctx is cancelled. It is the COMMITMENT_AFTER_EXEC
-// barrier: with it the exec loop never runs a block alongside a commitment.
+// barrier: it serializes block-end handling against exec, not the mid-block
+// step-edge computes.
 func (cc *commitmentCalculator) WaitProcessed(ctx context.Context, blockNum uint64) error {
 	if cc.in == nil {
 		// No commit stream: loop() never runs, so nothing ever marks a block
@@ -336,15 +337,38 @@ func (cc *commitmentCalculator) loop(ctx context.Context) {
 				in = nil
 				continue
 			}
+			reqs = cc.drainBlockRequests(ctx, reqs)
 			cc.handleMessage(ctx, result)
 		case req, ok := <-reqs:
-			if !ok {
-				reqs = nil
-				continue
-			}
-			cc.handleBlockRequest(ctx, req)
+			reqs = cc.acceptBlockRequest(ctx, reqs, req, ok)
 		}
 	}
+}
+
+// acceptBlockRequest handles a request received from reqs, returning the channel
+// to keep selecting on — nil once it is closed.
+func (cc *commitmentCalculator) acceptBlockRequest(ctx context.Context, reqs chan *blockRequest, req *blockRequest, ok bool) chan *blockRequest {
+	if !ok {
+		return nil
+	}
+	cc.handleBlockRequest(ctx, req)
+	return reqs
+}
+
+// drainBlockRequests handles every buffered request, returning nil once the
+// channel is closed. A block's request is always sent before the exec that
+// produces its result, so draining before handling a result keeps that order
+// past select, which would otherwise let the result drop the request as stale.
+func (cc *commitmentCalculator) drainBlockRequests(ctx context.Context, reqs chan *blockRequest) chan *blockRequest {
+	for reqs != nil {
+		select {
+		case req, ok := <-reqs:
+			reqs = cc.acceptBlockRequest(ctx, reqs, req, ok)
+		default:
+			return reqs
+		}
+	}
+	return nil
 }
 
 // perBlockCompute reports whether the given block computes commitment at its
