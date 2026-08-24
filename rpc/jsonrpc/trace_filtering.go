@@ -411,22 +411,15 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	engine := api.engine()
 
 	var json = jsoniter.ConfigCompatibleWithStandardLibrary
-	// The result array opens on the first exported trace so that an error
-	// before it yields an error-only response instead of "result" plus "error".
-	first := true
-	beginItem := func() {
-		if first {
-			stream.WriteArrayStart()
-			first = false
-		} else {
-			stream.WriteMore()
-		}
-	}
 	// Execute all transactions in picked blocks
 
 	count := uint64(^uint(0)) // this just makes it easier to use below
 	if req.Count != nil {
 		count = *req.Count
+	}
+	if count == 0 {
+		stream.WriteEmptyArray()
+		return nil
 	}
 	after := uint64(0) // this just makes it easier to use below
 	if req.After != nil {
@@ -435,6 +428,37 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 	vmConfig := vm.Config{}
 	nSeen := uint64(0)
 	nExported := uint64(0)
+	// The result array opens on the first exported trace so that an error
+	// before it yields an error-only response instead of "result" plus "error".
+	first := true
+	// exportTrace returns done=true once count traces were exported: the array
+	// is sealed and the scan must stop, so a later failure in traces the client
+	// never asked for cannot invalidate a complete response.
+	exportTrace := func(tr any) (done bool, err error) {
+		nSeen++
+		b, err := json.Marshal(tr)
+		if err != nil {
+			return false, err
+		}
+		if nSeen <= after {
+			return false, nil
+		}
+		if first {
+			stream.WriteArrayStart()
+			first = false
+		} else {
+			stream.WriteMore()
+		}
+		if _, err := stream.Write(b); err != nil {
+			return false, err
+		}
+		nExported++
+		if nExported == count {
+			stream.WriteArrayEnd()
+			return true, nil
+		}
+		return false, nil
+	}
 	includeAll := len(fromAddresses) == 0 && len(toAddresses) == 0
 
 	var lastBlockHash common.Hash
@@ -564,35 +588,25 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 			// Block reward section, handle specially
 			minerReward, uncleRewards := ethash.AccumulateRewards(chainConfig, lastHeader, body.Uncles)
 			if _, ok := toAddresses[lastHeader.Coinbase]; ok || includeAll {
-				nSeen++
 				tr := newRewardTrace(lastBlockHash, blockNum, lastHeader.Coinbase, rewardTypeBlock, minerReward.ToBig())
-				b, err := json.Marshal(tr)
+				done, err := exportTrace(tr)
 				if err != nil {
 					return err
 				}
-				if nSeen > after && nExported < count {
-					beginItem()
-					if _, err := stream.Write(b); err != nil {
-						return err
-					}
-					nExported++
+				if done {
+					return nil
 				}
 			}
 			for i, uncle := range body.Uncles {
 				if _, ok := toAddresses[uncle.Coinbase]; ok || includeAll {
 					if i < len(uncleRewards) {
-						nSeen++
 						tr := newRewardTrace(lastBlockHash, blockNum, uncle.Coinbase, rewardTypeUncle, uncleRewards[i].ToBig())
-						b, err := json.Marshal(tr)
+						done, err := exportTrace(tr)
 						if err != nil {
 							return err
 						}
-						if nSeen > after && nExported < count {
-							beginItem()
-							if _, err := stream.Write(b); err != nil {
-								return err
-							}
-							nExported++
+						if done {
+							return nil
 						}
 					}
 				}
@@ -624,21 +638,16 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 		isIntersectionMode := req.Mode == TraceFilterModeIntersection
 		for _, pt := range traceResult.Trace {
 			if includeAll || filterTrace(pt, fromAddresses, toAddresses, isIntersectionMode) {
-				nSeen++
 				pt.BlockHash = &lastBlockHash
 				pt.BlockNumber = &blockNum
 				pt.TransactionHash = &txHash
 				pt.TransactionPosition = &txIndexU64
-				b, err := json.Marshal(pt)
+				done, err := exportTrace(pt)
 				if err != nil {
 					return err
 				}
-				if nSeen > after && nExported < count {
-					beginItem()
-					if _, err := stream.Write(b); err != nil {
-						return err
-					}
-					nExported++
+				if done {
+					return nil
 				}
 			}
 		}

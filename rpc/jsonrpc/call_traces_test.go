@@ -475,3 +475,100 @@ func TestFilterErrorAfterExportedTracesKeepsValidJSON(t *testing.T) {
 		}
 	}
 }
+
+// TestFilterCountSatisfiedIgnoresLaterErrors checks that once count traces
+// were exported the scan stops: a failure in a transaction the client never
+// asked to see must not turn a complete page into an RPC error.
+func TestFilterCountSatisfiedIgnoresLaterErrors(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	from, to := rpc.BlockNumber(1), rpc.BlockNumber(3)
+	count := uint64(1)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+		Count:     &count,
+	}
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
+	}, stream)
+	require.NoError(t, err)
+
+	var traces []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stream.Buffer(), &traces))
+	require.Len(t, traces, 1)
+	require.JSONEq(t, `"reward"`, string(traces[0]["type"]))
+}
+
+// TestFilterAfterSkipsTracesBeforeExporting pins the after/count pagination:
+// after skips the first matches without exporting them, count then bounds the
+// exported page.
+func TestFilterAfterSkipsTracesBeforeExporting(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	from, to := rpc.BlockNumber(1), rpc.BlockNumber(2)
+	after, count := uint64(1), uint64(1)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+		After:     &after,
+		Count:     &count,
+	}
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), nil, stream)
+	require.NoError(t, err)
+
+	var traces []map[string]json.RawMessage
+	require.NoError(t, json.Unmarshal(stream.Buffer(), &traces))
+	require.Len(t, traces, 1)
+	require.JSONEq(t, `"reward"`, string(traces[0]["type"]))
+	require.JSONEq(t, `2`, string(traces[0]["blockNumber"]))
+}
+
+// TestFilterZeroCountReturnsEmptyArray checks that count=0 yields [] without
+// tracing anything, so it cannot fail on transactions it will never export.
+func TestFilterZeroCountReturnsEmptyArray(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	c := newBaseFeeTestChain(t, delayedSpuriousDragonConfig())
+	c.mineProtectedTxAtBlock3(t)
+	api := c.traceAPI()
+
+	from, to := rpc.BlockNumber(1), rpc.BlockNumber(3)
+	count := uint64(0)
+	traceReq := TraceFilterRequest{
+		FromBlock: &rpc.BlockNumberOrHash{BlockNumber: &from},
+		ToBlock:   &rpc.BlockNumberOrHash{BlockNumber: &to},
+		Count:     &count,
+	}
+
+	s := jsoniter.ConfigDefault.BorrowStream(nil)
+	defer jsoniter.ConfigDefault.ReturnStream(s)
+	stream := jsonstream.Wrap(s)
+	err := api.Filter(context.Background(), traceReq, new(bool), &config.TraceConfig{
+		BlockOverrides: &ethapi.BlockOverrides{Number: (*hexutil.U256)(uint256.NewInt(1))},
+	}, stream)
+	require.NoError(t, err)
+	require.Equal(t, "[]", string(stream.Buffer()))
+}
