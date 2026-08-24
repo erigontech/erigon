@@ -24,6 +24,7 @@ import (
 	"encoding/json"
 	"fmt"
 	"os"
+	"reflect"
 	"strings"
 	"testing"
 	"time"
@@ -502,6 +503,37 @@ var precompileSuccessVectors = map[string]string{
 	"100": "p256Verify", "a100": "p256Verify-EIP-7951",
 }
 
+// precompiledContractSets is every fork's live precompile set.
+var precompiledContractSets = []PrecompiledContracts{
+	PrecompiledContractsHomestead, PrecompiledContractsByzantium, PrecompiledContractsIstanbul,
+	PrecompiledContractsBerlin, PrecompiledContractsCancun, PrecompiledContractsNapoli,
+	PrecompiledContractsBhilai, PrecompiledContractsPrague, PrecompiledContractsOsaka,
+}
+
+// checkNoAlias runs p against rawInput from a backing buffer with spare capacity
+// beyond the input's length, mirroring the two-index slice Memory.GetPtr hands a
+// precompile at runtime, then overwrites every backing byte -- clearing to zero
+// cannot show through a byte that was already zero -- so any aliasing anywhere
+// in that backing array is observable. Reports whether the call produced the
+// non-empty success a coverage requirement needs.
+func checkNoAlias(t *testing.T, p PrecompiledContract, rawInput []byte) bool {
+	t.Helper()
+	buf := make([]byte, len(rawInput), len(rawInput)+64)
+	copy(buf, rawInput)
+	input := buf[:len(rawInput)]
+
+	out, err := p.Run(input)
+	if err != nil || len(out) == 0 {
+		return false
+	}
+	want := bytes.Clone(out)
+	for i := range buf {
+		buf[i] ^= 0xff
+	}
+	require.Equal(t, want, out, "precompile %s output aliases its input", p.Name())
+	return true
+}
+
 // TestPrecompileOutputDoesNotAliasInput pins the invariant the CALL opcodes
 // rely on: a precompile's output never shares memory with its input, which is
 // what lets the caller keep it as return data without copying it first.
@@ -509,17 +541,6 @@ func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
 	t.Parallel()
 
 	covered := map[common.Address]bool{}
-	check := func(addr common.Address, p PrecompiledContract, input []byte) {
-		out, err := p.Run(input)
-		if err != nil || len(out) == 0 {
-			return
-		}
-		want := bytes.Clone(out)
-		clear(input)
-		require.Equal(t, want, out, "precompile %s output aliases its input", p.Name())
-		covered[addr] = true
-	}
-
 	for hexAddr, fixture := range precompileSuccessVectors {
 		addr := common.HexToAddress(hexAddr)
 		p := allPrecompiles[addr]
@@ -527,15 +548,52 @@ func TestPrecompileOutputDoesNotAliasInput(t *testing.T) {
 		tests, err := loadJson(fixture)
 		require.NoError(t, err)
 		for _, test := range tests {
-			check(addr, p, common.Hex2Bytes(test.Input))
+			if checkNoAlias(t, p, common.Hex2Bytes(test.Input)) {
+				covered[addr] = true
+			}
 		}
 	}
 	for _, hexAddr := range []string{"02", "03", "04"} {
 		addr := common.HexToAddress(hexAddr)
-		check(addr, allPrecompiles[addr], bytes.Repeat([]byte{0xa5}, 128))
+		if checkNoAlias(t, allPrecompiles[addr], bytes.Repeat([]byte{0xa5}, 128)) {
+			covered[addr] = true
+		}
 	}
-
 	for addr, p := range allPrecompiles {
 		require.True(t, covered[addr], "precompile %s at %x produced no non-empty output, so it was never checked", p.Name(), addr)
+	}
+
+	// allPrecompiles is hand-maintained and can omit a fork-only implementation,
+	// such as the Byzantium bn254 wrappers that later forks superseded at the
+	// same address. Cover every concrete type each live fork set actually runs.
+	fixtureByAddr := make(map[common.Address]string, len(precompileSuccessVectors))
+	for hexAddr, fixture := range precompileSuccessVectors {
+		fixtureByAddr[common.HexToAddress(hexAddr)] = fixture
+	}
+	seenTypes := map[reflect.Type]bool{}
+	for _, p := range allPrecompiles {
+		seenTypes[reflect.TypeOf(p)] = true
+	}
+	for _, set := range precompiledContractSets {
+		for addr, p := range set {
+			typ := reflect.TypeOf(p)
+			if seenTypes[typ] {
+				continue
+			}
+			seenTypes[typ] = true
+
+			a := addr.Value()
+			fixture, ok := fixtureByAddr[a]
+			require.True(t, ok, "no success-vector fixture for precompile %s at %s", p.Name(), a)
+			tests, err := loadJson(fixture)
+			require.NoError(t, err)
+			ran := false
+			for _, test := range tests {
+				if checkNoAlias(t, p, common.Hex2Bytes(test.Input)) {
+					ran = true
+				}
+			}
+			require.True(t, ran, "precompile %s produced no non-empty output, so it was never checked", p.Name())
+		}
 	}
 }
