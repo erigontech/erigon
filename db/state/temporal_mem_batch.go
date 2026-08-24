@@ -52,10 +52,13 @@ type dataWithTxNum struct {
 	dir   iodir
 }
 
-// Sized to a cache-line multiple so neighboring per-domain locks don't false-share.
+// Prevents false sharing between neighboring per-domain locks on widespread
+// platforms with 128 mod (cache line size) = 0 — the sync.Pool poolLocal pad
+// pattern. The 128-byte stride keeps lock bodies off a shared 64-byte line
+// for any base alignment of the array.
 type paddedRWMutex struct {
 	sync.RWMutex
-	_ [64 - unsafe.Sizeof(sync.RWMutex{})%64]byte
+	_ [128 - unsafe.Sizeof(sync.RWMutex{})%128]byte
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
