@@ -29,6 +29,8 @@ import (
 	"path/filepath"
 	"slices"
 	"strings"
+	"sync"
+	"sync/atomic"
 	"testing"
 
 	"github.com/c2h5oh/datasize"
@@ -1538,7 +1540,7 @@ func TestVmtouchMmap(t *testing.T) {
 // set is built upfront) cost no buffer at all.
 func TestCollectorWithAllocatorDrawsBufferLazily(t *testing.T) {
 	logger := log.New()
-	_, tx := mdbxtest.NewTestTx(t)
+	_, tx := memdb.NewTestTx(t)
 	require := require.New(t)
 	table := kv.ChaindataTables[0]
 
