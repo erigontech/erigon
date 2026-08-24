@@ -681,13 +681,18 @@ func (api *DebugAPIImpl) GetRawHeader(ctx context.Context, blockNrOrHash rpc.Blo
 
 // Implements debug_getRawBlock - Returns an RLP-encoded block
 func (api *DebugAPIImpl) GetRawBlock(ctx context.Context, blockNrOrHash rpc.BlockNumberOrHash) (hexutil.Bytes, error) {
+	if number, ok := blockNrOrHash.Number(); ok && number == rpc.PendingBlockNumber {
+		if api.pendingBlock() != nil {
+			return nil, nil
+		}
+	}
 	tx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
 		return nil, err
 	}
 	defer tx.Rollback()
 	overlayTx := api.filters.WithOverlay(tx)
-	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, api.filters)
+	n, h, _, err := rpchelper.GetBlockNumber(ctx, blockNrOrHash, overlayTx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil // waiting for spec: not error, see Geth and https://github.com/erigontech/erigon/issues/1645

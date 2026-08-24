@@ -234,6 +234,15 @@ func (r failBodyReadBlockReader) Body(context.Context, kv.Getter, common.Hash, u
 	return nil, 0, r.err
 }
 
+type failBlockWithSendersReader struct {
+	dbservices.FullBlockReader
+	err error
+}
+
+func (r failBlockWithSendersReader) BlockWithSenders(context.Context, kv.Getter, common.Hash, uint64) (*types.Block, []common.Address, error) {
+	return nil, nil, r.err
+}
+
 type publishOverlayOnSecondProbeTx struct {
 	kv.Tx
 	probes  int
@@ -651,7 +660,7 @@ func TestWithTemporalOverlayPreservesFreezeInfo(t *testing.T) {
 	require.Equal(t, want, got)
 }
 
-func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {
+func TestRawHeaderAndBlockReturnNullForPublishedPendingBlock(t *testing.T) {
 	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
 	ff := rpchelper.New(m.Ctx, rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, m.Log, nil)
 	pendingBlock := types.NewBlockWithHeader(&types.Header{Number: *uint256.NewInt(100)}, nil)
@@ -660,11 +669,24 @@ func TestGetRawHeaderReturnsNullForPublishedPendingBlock(t *testing.T) {
 	ff.HandlePendingBlock(&txpoolproto.OnPendingBlockReply{RplBlock: payload})
 
 	base := NewBaseApi(ff, kvcache.New(kvcache.DefaultCoherentConfig), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+	base._blockReader = failBlockWithSendersReader{
+		FullBlockReader: base._blockReader,
+		err:             errors.New("pending selector reached block storage"),
+	}
 	api := NewPrivateDebugAPI(base, m.DB, nil, &rpccfg.DebugApiConfig{})
+	pending := rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber)
 
-	header, err := api.GetRawHeader(m.Ctx, rpc.BlockNumberOrHashWithNumber(rpc.PendingBlockNumber))
-	require.NoError(t, err)
-	require.Nil(t, header)
+	tests := map[string]func() (any, error){
+		"header": func() (any, error) { return api.GetRawHeader(m.Ctx, pending) },
+		"block":  func() (any, error) { return api.GetRawBlock(m.Ctx, pending) },
+	}
+	for name, call := range tests {
+		t.Run(name, func(t *testing.T) {
+			result, err := call()
+			require.NoError(t, err)
+			require.Nil(t, result)
+		})
+	}
 }
 
 func TestHeaderHelpersDoNotReturnPublishedPendingHeader(t *testing.T) {
@@ -804,6 +826,32 @@ func TestOtterscanTransactionLookupUsesCommittedView(t *testing.T) {
 	require.NoError(t, err)
 	require.Nil(t, txn)
 	require.Nil(t, block)
+}
+
+func TestCallBundleUsesCommittedTransactionLookup(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base._txnReader = rejectOverlayTxnReader{TxnReader: base._txnReader}
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	result, err := api.CallBundle(
+		m.Ctx,
+		[]common.Hash{{1}},
+		rpc.BlockNumberOrHashWithNumber(rpc.LatestBlockNumber),
+		nil,
+	)
+	require.NoError(t, err)
+	require.Nil(t, result)
+}
+
+func TestOtterscanTraceUsesUncachedCommittedState(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base := newBaseApiForTest(m)
+	base.stateCache = rejectStateCache{}
+	api := NewOtterscanAPI(base, m.DB, 25)
+
+	result, err := api.TraceTransaction(m.Ctx, common.HexToHash(debugTraceTransactionTests[0].txHash))
+	require.NoError(t, err)
+	require.NotNil(t, result)
 }
 
 func TestOtterscanSearchUsesCommittedView(t *testing.T) {
