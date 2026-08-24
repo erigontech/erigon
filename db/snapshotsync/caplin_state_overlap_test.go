@@ -374,3 +374,42 @@ func TestCaplinStateRemoveOverlapsReportsOlderEqualRangeIndex(t *testing.T) {
 	require.NoFileExists(t, oldSeg)
 	require.NoFileExists(t, oldIdx, "the same-range index of the removed segment must go with it")
 }
+
+// A live reader pins the generation holding the retired subset, so its file is still on disk
+// at the next cadence. Rescanning the directory must not build a second DirtySegment for it:
+// the next removal would retire that one too, costing an fd and a mapping every cadence for
+// as long as the reader lasts.
+func TestCaplinStateRemoveOverlapsDoesNotReopenPendingUnlink(t *testing.T) {
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	table := kv.PendingDepositsDump
+
+	writeCaplinStateFixture(t, dirs.SnapCaplin, table, 0, 150_000, logger)
+	subSeg, _ := writeCaplinStateFixture(t, dirs.SnapCaplin, table, 100_000, 150_000, logger)
+	subName := filepath.Base(subSeg)
+
+	s := openTestCaplinStateSnapshots(t, dirs, table, logger)
+
+	pin := s.View()
+	defer pin.Close()
+
+	require.NoError(t, s.RemoveOverlaps(nil))
+	require.FileExists(t, subSeg, "the pin must defer the unlink, or this test proves nothing")
+
+	for range 3 {
+		require.NoError(t, s.OpenFolder())
+	}
+
+	count, total := 0, 0
+	for _, typ := range s.Types() {
+		s.WalkDirtySegments(typ.Enum(), func(seg *DirtySegment) bool {
+			total++
+			if seg.FileName() == subName {
+				count++
+			}
+			return true
+		})
+	}
+	require.NotZero(t, total, "walk must reach the dirty set, else a zero count proves nothing")
+	require.Zero(t, count, "a retired segment awaiting unlink must not be reopened")
+}

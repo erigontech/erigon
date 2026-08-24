@@ -976,6 +976,30 @@ func (s *BaseRoSnapshots) releaseVisible(v *snapshotVisible) {
 	}
 }
 
+// pendingUnlinkNames is every retired segment still on disk because a live reader pins the
+// generation holding it. A directory rescan sees those files, and reopening one builds a
+// second DirtySegment that the next removal retires again: one fd and mapping per scan for
+// as long as the pin lasts. Must be called with dirtyLock held.
+func (s *BaseRoSnapshots) pendingUnlinkNames() map[string]struct{} {
+	var names map[string]struct{}
+	cur := s.visible.Load()
+	for h := s.oldestVisible; h != nil; h = h.next {
+		for _, sn := range h.retired {
+			if !sn.canDelete.Load() {
+				continue // already gone from disk; nothing to reopen
+			}
+			if names == nil {
+				names = make(map[string]struct{})
+			}
+			names[sn.FileName()] = struct{}{}
+		}
+		if h == cur {
+			break
+		}
+	}
+	return names
+}
+
 // reclaimRetiredLocked walks the oldest->newest chain from the head, collecting the
 // retired files of every fully-drained generation older than the current one. Must be
 // called with dirtyLock held; the returned files are deleted by the caller off-lock.
@@ -1198,12 +1222,16 @@ func (s *BaseRoSnapshots) openSegments(fileNames []string, open bool, optimistic
 	// A repeated name resolves to the same DirtySegment twice and would schedule two
 	// concurrent OpenIdxIfNeed on it, which race on its index slice.
 	seen := make(map[string]struct{}, len(fileNames))
+	pendingUnlink := s.pendingUnlinkNames()
 
 	for _, fName := range fileNames {
 		if _, dup := seen[fName]; dup {
 			continue
 		}
 		seen[fName] = struct{}{}
+		if _, dead := pendingUnlink[fName]; dead {
+			continue
+		}
 
 		f, isState, ok := snaptype.ParseFileName(s.dir, fName)
 		if !ok || isState || f.Type == nil || snaptype.IsTorrentPartial(f.Ext) {
