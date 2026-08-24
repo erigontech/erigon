@@ -1655,9 +1655,7 @@ func doIntegrity(ctx context.Context, cliCtx *cli.Command) (retErr error) {
 	runCheck := func(ctx context.Context, chk integrity.Check) error {
 		switch chk {
 		case integrity.BlocksTxnID:
-			return db.View(ctx, func(tx kv.Tx) error {
-				return blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(ctx, tx, failFast)
-			})
+			return blockReader.(*freezeblocks.BlockReader).IntegrityTxnID(ctx, failFast)
 		case integrity.HeaderNoGaps:
 			return integrity.NoGapsInCanonicalHeaders(ctx, db, blockReader, failFast)
 		case integrity.Blocks:
@@ -2005,7 +2003,7 @@ func doVerifyHistory(ctx context.Context, cliCtx *cli.Command, logger log.Logger
 	}
 	defer clean()
 
-	blockReader := freezeblocks.NewBlockReader(snaps.BlockSnaps, nil)
+	blockReader := freezeblocks.NewBlockReader(snaps.BlockSnaps)
 
 	agg := snaps.Aggregator
 	db, err := temporal.New(chainDB, agg, snaps.BlockSnaps)
@@ -3118,10 +3116,10 @@ func openSnaps(ctx context.Context, cfg ethconfig.BlocksFreezing, dirs datadir.D
 		res.CaplinStateSnaps.LogStat("caplin-state")
 	}
 
-	blockReader := freezeblocks.NewBlockReader(res.BlockSnaps, nil)
+	blockReader := freezeblocks.NewBlockReader(res.BlockSnaps)
 	blockWriter := blockio.NewBlockWriter()
 	blockSnapBuildSema := semaphore.NewWeighted(int64(dbg.BuildSnapshotAllowance))
-	res.BlockRetire = freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, nil, nil, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
+	res.BlockRetire = freezeblocks.NewBlockRetire(ctx, estimate.CompressSnapshot.Workers(), dirs, blockReader, blockWriter, chainDB, chainConfig, &ethconfig.Defaults, nil, blockSnapBuildSema, logger)
 
 	res.Aggregator = openAgg(ctx, dirs, chainDB, logger)
 	res.Aggregator.SetSnapshotBuildSema(blockSnapBuildSema)

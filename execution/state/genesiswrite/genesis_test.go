@@ -404,7 +404,7 @@ func TestSetupGenesis(t *testing.T) {
 			tmpdir := t.TempDir()
 			dirs := datadir.New(tmpdir)
 			db := temporaltest.NewTestDB(t, dirs)
-			blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
+			blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
 			config, genesis, err := test.fn(t, db, tmpdir)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {
