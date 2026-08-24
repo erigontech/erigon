@@ -19,7 +19,6 @@ package node
 import (
 	"bytes"
 	"compress/gzip"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"io"
 	"net/http"
 	"net/http/httptest"
@@ -27,10 +26,12 @@ import (
 	"testing"
 	"time"
 
+	"github.com/klauspost/compress/zstd"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common/pool"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 // decompressGzip reads a gzip-compressed body and returns the raw bytes.
@@ -40,6 +41,17 @@ func decompressGzip(t *testing.T, r io.Reader) []byte {
 	require.NoError(t, err)
 	defer gz.Close()
 	data, err := io.ReadAll(gz)
+	require.NoError(t, err)
+	return data
+}
+
+// decompressZstd reads a zstd-compressed body and returns the raw bytes.
+func decompressZstd(t *testing.T, r io.Reader) []byte {
+	t.Helper()
+	zr, err := zstd.NewReader(r)
+	require.NoError(t, err)
+	defer zr.Close()
+	data, err := io.ReadAll(zr)
 	require.NoError(t, err)
 	return data
 }
@@ -325,6 +337,12 @@ func TestZstdNegotiation(t *testing.T) {
 	})))
 	defer srv.Close()
 
+	// DisableCompression stops http.Transport from injecting its own
+	// Accept-Encoding and auto-decoding the response, so the "" case below
+	// reaches the server with the header genuinely absent, not set to an empty
+	// value, and the wire bytes reach the test unmangled either way.
+	transport := &http.Transport{DisableCompression: true}
+
 	for _, tc := range []struct {
 		accept, want string
 	}{
@@ -339,22 +357,58 @@ func TestZstdNegotiation(t *testing.T) {
 		t.Run(tc.accept, func(t *testing.T) {
 			req, err := http.NewRequest(http.MethodGet, srv.URL, nil) //nolint:noctx
 			require.NoError(t, err)
-			// http.Transport adds gzip itself unless the header is set.
-			req.Header.Set("Accept-Encoding", tc.accept)
-			resp, err := http.DefaultTransport.RoundTrip(req)
+			if tc.accept != "" {
+				req.Header.Set("Accept-Encoding", tc.accept)
+			}
+			resp, err := transport.RoundTrip(req)
 			require.NoError(t, err)
 			defer resp.Body.Close()
 
 			require.Equal(t, tc.want, resp.Header.Get("Content-Encoding"))
-			n, err := io.Copy(io.Discard, resp.Body)
-			require.NoError(t, err)
-			if tc.want == "" {
-				require.EqualValues(t, len(body), n, "an unencoded body must arrive whole")
-			} else {
-				require.Less(t, n, int64(len(body)), "an encoded body must be smaller")
+			switch tc.want {
+			case "gzip":
+				require.Equal(t, []byte(body), decompressGzip(t, resp.Body))
+			case "zstd":
+				require.Equal(t, []byte(body), decompressZstd(t, resp.Body))
+			default:
+				got, err := io.ReadAll(resp.Body)
+				require.NoError(t, err)
+				require.Equal(t, []byte(body), got, "an unencoded body must arrive whole")
 			}
 		})
 	}
+}
+
+// TestZstdHandlerStreaming verifies that a handler which calls Flush() mid-response
+// still produces a fully decodable zstd stream. A dropped final frame or a
+// malformed mid-stream block would only show up as a short, undecodable body --
+// exactly what a size-only check cannot catch.
+func TestZstdHandlerStreaming(t *testing.T) {
+	parts := [][]byte{
+		[]byte(`{"jsonrpc":"2.0","result":`),
+		[]byte(`"hello"`),
+		[]byte(`}`),
+	}
+	srv := httptest.NewServer(newGzipHandler(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		for _, p := range parts {
+			_, _ = w.Write(p)
+		}
+		// Pad past minGzipBodySize: below it a response is sent verbatim.
+		_, _ = w.Write(bytes.Repeat([]byte(" "), minGzipBodySize))
+		w.(http.Flusher).Flush()
+	})))
+	defer srv.Close()
+
+	req, err := http.NewRequest(http.MethodGet, srv.URL, nil) //nolint:noctx
+	require.NoError(t, err)
+	req.Header.Set("Accept-Encoding", "zstd")
+	resp, err := http.DefaultTransport.RoundTrip(req)
+	require.NoError(t, err)
+	defer resp.Body.Close()
+
+	require.Equal(t, "zstd", resp.Header.Get("Content-Encoding"))
+	want := append([]byte(`{"jsonrpc":"2.0","result":"hello"}`), bytes.Repeat([]byte(" "), minGzipBodySize)...)
+	require.Equal(t, want, decompressZstd(t, resp.Body))
 }
 
 // TestCompressionMetricsAttributed pins that zstd responses are counted, not
@@ -369,9 +423,10 @@ func TestCompressionMetricsAttributed(t *testing.T) {
 	for _, tc := range []struct {
 		accept  string
 		in, out metrics.Counter
+		decode  func(*testing.T, io.Reader) []byte
 	}{
-		{"gzip", gzipInBytes, gzipOutBytes},
-		{"zstd", zstdInBytes, zstdOutBytes},
+		{"gzip", gzipInBytes, gzipOutBytes, decompressGzip},
+		{"zstd", zstdInBytes, zstdOutBytes, decompressZstd},
 	} {
 		t.Run(tc.accept, func(t *testing.T) {
 			beforeIn, beforeOut := tc.in.GetValueUint64(), tc.out.GetValueUint64()
@@ -381,9 +436,8 @@ func TestCompressionMetricsAttributed(t *testing.T) {
 			req.Header.Set("Accept-Encoding", tc.accept)
 			resp, err := http.DefaultTransport.RoundTrip(req)
 			require.NoError(t, err)
-			_, err = io.Copy(io.Discard, resp.Body)
-			require.NoError(t, err)
-			resp.Body.Close()
+			defer resp.Body.Close()
+			require.Equal(t, []byte(body), tc.decode(t, resp.Body), "body must round-trip unchanged")
 
 			require.Greater(t, tc.in.GetValueUint64(), beforeIn, "raw bytes were not counted")
 			require.Greater(t, tc.out.GetValueUint64(), beforeOut, "wire bytes were not counted")

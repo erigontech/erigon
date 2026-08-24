@@ -184,8 +184,10 @@ func (h *virtualHostHandler) ServeHTTP(w http.ResponseWriter, r *http.Request) {
 	http.Error(w, "invalid host specified", http.StatusForbidden)
 }
 
-// minGzipBodySize is the minimum response body size to compress. Responses
-// smaller than this are sent as-is: gzip framing overhead would exceed savings.
+// minGzipBodySize is the minimum response body size to compress, for gzip and
+// zstd alike -- gzhttp carries one MinSize threshold for both encoders.
+// Responses smaller than this are sent as-is: framing overhead would exceed
+// savings.
 const minGzipBodySize = 1024
 
 // Raw and compressed byte counters: out/in gives the live compression ratio,
