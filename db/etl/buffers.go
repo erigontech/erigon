@@ -88,7 +88,7 @@ var (
 	etlSmallBufRAM       = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
-			return NewSortableBuffer(etlSmallBufRAM).Prealloc(int(etlSmallBufRAM/512), int(etlSmallBufRAM)) // SortableBuffer does Prealloc only metadata slices - not buffers itself
+			return NewSortableBuffer(etlSmallBufRAM)
 		},
 	})
 )
