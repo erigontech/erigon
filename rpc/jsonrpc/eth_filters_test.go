@@ -180,7 +180,7 @@ func TestGetFilterLogsReturnsInvalidParamsWhenStoredRangeExceedsLimit(t *testing
 	mining := txpoolproto.NewMiningClient(conn)
 	ff := rpchelper.New(ctx, rpchelper.DefaultFiltersConfig, nil, nil, mining, func() {}, m.Log, nil)
 	stateCache := kvcache.New(kvcache.DefaultCoherentConfig)
-	base := NewBaseApi(ff, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{
+	base := NewBaseApi(ff, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{
 		Dirs:            m.Dirs,
 		BlockRangeLimit: 1,
 	})
@@ -236,7 +236,7 @@ func TestGetFilterLogsUsesStoredFilterCriteriaLimits(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			test.filterConf.RpcSubscriptionFiltersTimeout = rpchelper.DefaultFilterTimeout
 			ff := rpchelper.New(ctx, test.filterConf, nil, nil, mining, func() {}, m.Log, nil)
-			base := NewBaseApi(ff, stateCache, m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{
+			base := NewBaseApi(ff, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{
 				Dirs:          m.Dirs,
 				LogQueryLimit: 1,
 			})
