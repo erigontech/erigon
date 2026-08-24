@@ -58,22 +58,22 @@ type entry[T any] struct {
 	epoch uint32 // unwind generation the entry was written in
 }
 
-// lruGen is one generation of the sharded LRU plus an O(1) live-entry count.
+// lruGen is one generation of a sharded LRU plus an O(1) live-entry count.
 // freelru's own Len RLocks every shard, so the grow check — which every insert
 // runs while the cache is below its ceiling — cannot use it without serialising
 // writers that would otherwise touch disjoint shards.
-type lruGen[T any] struct {
-	lru *freelru.ShardedLRU[uint64, entry[T]]
+type lruGen[V any] struct {
+	lru *freelru.ShardedLRU[uint64, V]
 	n   atomic.Int64
 }
 
-func (g *lruGen[T]) len() int { return int(g.n.Load()) }
+func (g *lruGen[V]) len() int { return int(g.n.Load()) }
 
 // add inserts a key the LRU does not already hold — every call site removes an
 // existing one first — so the count rises by one; a capacity eviction inside
 // freelru fires OnEvict, which takes it back down.
-func (g *lruGen[T]) add(h uint64, e entry[T]) (evicted bool) {
-	evicted = g.lru.Add(h, e)
+func (g *lruGen[V]) add(h uint64, v V) (evicted bool) {
+	evicted = g.lru.Add(h, v)
 	g.n.Add(1)
 	return evicted
 }
@@ -85,7 +85,7 @@ type GenericCache[T any] struct {
 	// held — on a jump-grow (fully copied generation) and on Clear (fresh
 	// empty one) — so no write lands in a retired generation and no reader
 	// sees a partial copy (see maybeGrow, Clear).
-	data      atomic.Pointer[lruGen[T]]
+	data      atomic.Pointer[lruGen[entry[T]]]
 	capacityB datasize.ByteSize
 	mode      Mode
 
@@ -218,12 +218,12 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 // entry. The callback must not feed the evictions metric — it also fires for
 // intentional Removes — so capacity evictions are counted from Add's evicted
 // return at the call sites.
-func (c *GenericCache[T]) newShards(capacity, shards uint32) *lruGen[T] {
+func (c *GenericCache[T]) newShards(capacity, shards uint32) *lruGen[entry[T]] {
 	lru, err := freelru.NewShardedWithSize[uint64, entry[T]](shards, capacity, capacity+capacity/4, u64identity)
 	if err != nil {
 		panic(err)
 	}
-	g := &lruGen[T]{lru: lru}
+	g := &lruGen[entry[T]]{lru: lru}
 	lru.SetOnEvict(func(_ uint64, e entry[T]) {
 		c.currentSize.Add(-int64(e.size))
 		g.n.Add(-1)
