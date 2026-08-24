@@ -129,10 +129,10 @@ func requestEnvelopesByRoot(ctx context.Context, r *rpc.BeaconRpcP2P, roots [][3
 	for start := 0; start < len(roots); start += maxRoots {
 		end := min(start+maxRoots, len(roots))
 		responses, _, err := r.SendExecutionPayloadEnvelopesByRootReq(ctx, roots[start:end])
+		envelopes = append(envelopes, responses...)
 		if err != nil {
 			return envelopes, err
 		}
-		envelopes = append(envelopes, responses...)
 	}
 	return envelopes, nil
 }
@@ -177,10 +177,10 @@ func requestEnvelopesByRange(ctx context.Context, r *rpc.BeaconRpcP2P, blocks []
 	for offset := uint64(0); offset < count; offset += maxCount {
 		chunkCount := min(maxCount, count-offset)
 		envelopes, _, err := r.SendExecutionPayloadEnvelopesByRangeReq(ctx, startSlot+offset, chunkCount)
+		acceptEnvelopeResponses(envelopes, requestedRoots, received)
 		if err != nil {
 			log.Debug("envelope fetch: by-range error", "err", err)
 			return
 		}
-		acceptEnvelopeResponses(envelopes, requestedRoots, received)
 	}
 }
