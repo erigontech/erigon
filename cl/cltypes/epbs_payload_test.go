@@ -291,6 +291,17 @@ func TestSignedExecutionPayloadBidDecodePreservesMessageLimit(t *testing.T) {
 	require.Same(t, message, target.Message)
 }
 
+func TestSignedExecutionPayloadBidStrictDecodeInitializesMessage(t *testing.T) {
+	source := &SignedExecutionPayloadBid{Message: executionPayloadBidWithCommitments(1)}
+	encoded, err := source.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	var decoded SignedExecutionPayloadBid
+	require.NoError(t, decoded.DecodeSSZStrict(encoded, int(clparams.GloasVersion)))
+	require.NotNil(t, decoded.Message)
+	require.Equal(t, 1, decoded.Message.BlobKzgCommitments.Len())
+}
+
 func TestExecutionPayloadBidClonePreservesProgressiveLimit(t *testing.T) {
 	bid := &ExecutionPayloadBid{
 		BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](1, 48),
