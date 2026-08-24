@@ -76,7 +76,7 @@ The amount of disk space recommended and RAM you need depends on the [pruning mo
 | Full (Default) | 419.04 GB | 2 TB | 16 GB | 32 GB |
 | Minimal | 478.40 GB | 1 TB | 16 GB | 64 GB |
 
-_Current Disk Usage measured as of 2026-08-24; usage grows over time as the chain grows._
+_Current Disk Usage measured as of 2026-07-19; usage grows over time as the chain grows._
 
 | **Pruning Mode**  | **Current Disk Usage** | **Disk Size (Recommended)** | **RAM (Required)** | **RAM (Recommended)** |
 | -------------- | ---------------------- | --------------------------- | ------------------ | --------------------- |
@@ -84,7 +84,7 @@ _Current Disk Usage measured as of 2026-08-24; usage grows over time as the chai
 | Full (Default) | 220.10 GB    | 1 TB                        | 8 GB               | 16 GB                 |
 | Minimal        | 304.67 GB | 500 GB                      | 8 GB               | 16 GB                 |
 
-_Current Disk Usage measured as of 2026-08-24; usage grows over time as the chain grows._
+_Current Disk Usage measured as of 2026-07-21; usage grows over time as the chain grows._
 
 | **Pruning Mode** | **Current Disk Usage** |
 | -------------- | ---------------------- |
