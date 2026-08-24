@@ -21,7 +21,9 @@ import (
 	"errors"
 	"os"
 	"path/filepath"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/assert"
@@ -636,4 +638,60 @@ func TestRemoteBlockReaderFrozenBlocks(t *testing.T) {
 	require.NotPanics(t, func() {
 		require.Zero(t, failing.FrozenBlocks())
 	})
+}
+
+type countingFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+	calls atomic.Int64
+}
+
+func (c *countingFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	c.calls.Add(1)
+	return &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}, nil
+}
+
+type stalledFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+}
+
+func (c stalledFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	<-ctx.Done()
+	return nil, ctx.Err()
+}
+
+// TestRemoteBlockReaderFrozenBlocksCachesValue pins that the getter does not perform a
+// live RPC on every call: receipt and capability handlers reach it while holding read
+// transactions, so repeated calls within the TTL must be answered from the cache.
+func TestRemoteBlockReaderFrozenBlocksCachesValue(t *testing.T) {
+	t.Parallel()
+
+	client := &countingFrozenBlocksClient{}
+	reader := NewRemoteBlockReader(client)
+
+	require.Equal(t, uint64(42), reader.FrozenBlocks())
+	require.Equal(t, uint64(42), reader.FrozenBlocks())
+	require.EqualValues(t, 1, client.calls.Load())
+
+	reader.frozenBlocksTTL = 0
+	require.Equal(t, uint64(42), reader.FrozenBlocks())
+	require.EqualValues(t, 2, client.calls.Load())
+}
+
+// TestRemoteBlockReaderFrozenBlocksStalledBackend pins that a connected but
+// unresponsive backend cannot hold the caller forever: the internal context bounds the
+// call and the getter falls back to the last known value (zero before any success).
+func TestRemoteBlockReaderFrozenBlocksStalledBackend(t *testing.T) {
+	t.Parallel()
+
+	reader := NewRemoteBlockReader(stalledFrozenBlocksClient{})
+	reader.frozenBlocksTimeout = 50 * time.Millisecond
+
+	done := make(chan uint64, 1)
+	go func() { done <- reader.FrozenBlocks() }()
+	select {
+	case v := <-done:
+		require.Zero(t, v)
+	case <-time.After(2 * time.Second):
+		t.Fatal("FrozenBlocks did not return with a stalled backend")
+	}
 }
