@@ -111,6 +111,7 @@ func ClStagesCfg(
 		forkChoice,
 		caplinConfig.ArchiveBlobs,
 		caplinConfig.ImmediateBlobsBackfilling,
+		caplinConfig.BlobRepairEndpoints,
 		log.Root(),
 	)
 

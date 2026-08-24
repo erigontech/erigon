@@ -47,6 +47,10 @@ type CaplinConfig struct {
 	ImmediateBlobsBackfilling bool
 	BlobPruningDisabled       bool
 	SnapshotGenerationEnabled bool
+	// BlobRepairEndpoints are beacon API base URLs consulted, in order, for blob sidecars
+	// no peer will serve any more. Erigon never rebuilds sidecars from custodied columns,
+	// so without a source a missed reconstruction is permanent.
+	BlobRepairEndpoints []string
 	// ColumnKeepSlots is the number of slots to keep PeerDAS data column sidecars.
 	// Default: MIN_EPOCHS_FOR_DATA_COLUMN_SIDECARS_REQUESTS * SLOTS_PER_EPOCH (4096 * 32 = 131072, ~18 days).
 	// Increase for DA oracle nodes or rollups that need longer history; decrease only if disk is constrained

@@ -1067,6 +1067,11 @@ var (
 		Usage: "set the cors' allow origins",
 		Value: cli.NewStringSlice(),
 	}
+	CaplinBlobRepairEndpointsFlag = cli.StringFlag{
+		Name:  "caplin.blob-repair-endpoints",
+		Usage: "comma separated beacon API base URLs to fetch blob sidecars from when no peer serves them any more (e.g. http://host:5555). Tried in order",
+		Value: "",
+	}
 	CaplinCustomConfigFlag = cli.StringFlag{
 		Name:  "caplin.custom-config",
 		Usage: "set the custom config for caplin",
@@ -1834,6 +1839,11 @@ func setCaplin(ctx *cli.Context, cfg *ethconfig.Config) {
 	}
 
 	cfg.CaplinConfig.ImmediateBlobsBackfilling = ctx.Bool(CaplinImmediateBlobBackfillFlag.Name)
+	for _, e := range strings.Split(ctx.String(CaplinBlobRepairEndpointsFlag.Name), ",") {
+		if e = strings.TrimSpace(e); e != "" {
+			cfg.CaplinConfig.BlobRepairEndpoints = append(cfg.CaplinConfig.BlobRepairEndpoints, e)
+		}
+	}
 	cfg.CaplinConfig.SnapshotGenerationEnabled = ctx.Bool(CaplinEnableSnapshotGeneration.Name)
 	cfg.CaplinConfig.DisabledCheckpointSync = ctx.Bool(CaplinDisableCheckpointSyncFlag.Name)
 	cfg.CaplinConfig.ColumnKeepSlots = ctx.Uint64(CaplinColumnKeepSlotsFlag.Name)

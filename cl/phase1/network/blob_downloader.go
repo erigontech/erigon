@@ -94,6 +94,8 @@ type BlobHistoryDownloader struct {
 	// gapSlots are the slots the last pass attempted and still could not fill
 	gapsMu   sync.RWMutex
 	gapSlots map[uint64]struct{}
+	// remoteBlobs supplies sidecars for gaps no peer will serve; inert unless configured
+	remoteBlobs *remoteBlobSource
 
 	// notifyBlobBackfilled is called when blob backfilling is complete
 	notifyBlobBackfilled func()
@@ -114,6 +116,7 @@ func NewBlobHistoryDownloader(
 	peerDasGetter PeerDasGetter,
 	archiveBlobs bool,
 	immediateBlobsBackfilling bool,
+	blobRepairEndpoints []string,
 	logger log.Logger,
 ) *BlobHistoryDownloader {
 	targetSlot := beaconCfg.DenebForkEpoch * beaconCfg.SlotsPerEpoch
@@ -132,6 +135,7 @@ func NewBlobHistoryDownloader(
 		immediateBlobsBackfilling:        immediateBlobsBackfilling,
 		columnBackfillTimeout:            blobColumnBackfillTimeout,
 		columnBackfillOutOfWindowTimeout: blobColumnBackfillOutOfWindowTimeout,
+		remoteBlobs:                      newRemoteBlobSource(blobRepairEndpoints, logger),
 		logger:                           logger,
 	}
 }
@@ -299,6 +303,8 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 	// Completion is still signalled with gaps outstanding: the ranges below them are
 	// dumpable and withholding the notification would strand those too. The antiquary
 	// stops at the first gap on its own, so the operator needs it named here.
+	b.repairBlobGapsFromRemote()
+
 	if gaps, lowest, highest := b.blobGapSummary(); gaps > 0 {
 		b.logger.Warn("[BlobHistoryDownloader] Blob history download finished with gaps no peer would serve",
 			"gapSlots", gaps, "lowest", lowest, "highest", highest,
