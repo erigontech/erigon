@@ -134,6 +134,23 @@ func TestUnrecommendedByTypeAncestorReplacesDescendant(t *testing.T) {
 	require.Equal(t, []fsGroup{{fsType: "zfs", paths: []string{"/data-other", "/data"}}}, groups)
 }
 
+func TestIsAncestorAcceptsAnySeparator(t *testing.T) {
+	// dirPaths can arrive using either separator style regardless of GOOS
+	// (e.g. Windows paths from filepath.Join use '\', test/config paths use
+	// '/'), so isAncestor must not hardcode the host's filepath.Separator.
+	for _, tc := range []struct {
+		ancestor, descendant string
+		want                 bool
+	}{
+		{`C:\data`, `C:\data\chaindata`, true},
+		{"/data", "/data/chaindata", true},
+		{`C:\data`, `C:\data-other`, false},
+		{"/data", "/data-other", false},
+	} {
+		require.Equal(t, tc.want, isAncestor(tc.ancestor, tc.descendant), "%s -> %s", tc.ancestor, tc.descendant)
+	}
+}
+
 func TestUnrecommendedByTypeAllRecommended(t *testing.T) {
 	fsTypeOf := func(string) (string, error) { return "ext4", nil }
 

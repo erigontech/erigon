@@ -17,7 +17,6 @@
 package diskutils
 
 import (
-	"path/filepath"
 	"slices"
 	"strings"
 
@@ -88,10 +87,16 @@ func (g *fsGroup) add(dirPath string) {
 	g.paths = append(g.paths, dirPath)
 }
 
+// isAncestor treats both '/' and '\' as path separators regardless of GOOS,
+// since dirPaths can arrive already using either style.
 func isAncestor(ancestor, descendant string) bool {
 	if ancestor == descendant {
 		return true
 	}
-	prefix := strings.TrimSuffix(ancestor, string(filepath.Separator)) + string(filepath.Separator)
-	return strings.HasPrefix(descendant, prefix)
+	trimmed := strings.TrimRight(ancestor, `/\`)
+	if trimmed == "" || !strings.HasPrefix(descendant, trimmed) || len(descendant) <= len(trimmed) {
+		return false
+	}
+	next := descendant[len(trimmed)]
+	return next == '/' || next == '\\'
 }
