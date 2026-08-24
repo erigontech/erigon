@@ -17,7 +17,6 @@
 package snaptype
 
 import (
-	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/version"
 )
@@ -102,32 +101,3 @@ var (
 		LatestExecutionPayloadBidTable,
 	}
 )
-
-var caplinStateIntroducedIn = map[Enum]clparams.StateVersion{
-	InactivityScores.Enum():                  clparams.AltairVersion,
-	NextSyncCommittee.Enum():                 clparams.AltairVersion,
-	CurrentSyncCommittee.Enum():              clparams.AltairVersion,
-	PendingConsolidations.Enum():             clparams.ElectraVersion,
-	PendingPartialWithdrawals.Enum():         clparams.ElectraVersion,
-	PendingDeposits.Enum():                   clparams.ElectraVersion,
-	PendingConsolidationsDump.Enum():         clparams.ElectraVersion,
-	PendingPartialWithdrawalsDump.Enum():     clparams.ElectraVersion,
-	PendingDepositsDump.Enum():               clparams.ElectraVersion,
-	Builders.Enum():                          clparams.GloasVersion,
-	BuildersDump.Enum():                      clparams.GloasVersion,
-	BuilderPendingWithdrawals.Enum():         clparams.GloasVersion,
-	BuilderPendingWithdrawalsDump.Enum():     clparams.GloasVersion,
-	PayloadExpectedWithdrawals.Enum():        clparams.GloasVersion,
-	PayloadExpectedWithdrawalsDump.Enum():    clparams.GloasVersion,
-	ExecutionPayloadAvailabilityTable.Enum(): clparams.GloasVersion,
-	BuilderPendingPaymentsTable.Enum():       clparams.GloasVersion,
-	PtcWindowTable.Enum():                    clparams.GloasVersion,
-	LatestExecutionPayloadBidTable.Enum():    clparams.GloasVersion,
-}
-
-func CaplinStateIntroducedIn(enum Enum) clparams.StateVersion {
-	if version, ok := caplinStateIntroducedIn[enum]; ok {
-		return version
-	}
-	return clparams.Phase0Version
-}

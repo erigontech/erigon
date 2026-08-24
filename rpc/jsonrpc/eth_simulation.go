@@ -37,6 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
@@ -676,7 +677,7 @@ func (s *simulator) newStateReaderForBlock(
 	}
 
 	if latest {
-		return state.NewReaderV3(sharedDomains.AsStateGetter(tx)), minTxNum, firstMinTxNum, nil
+		return state.NewReaderV3(sharedDomains.AsStateGetter(tx, execctxapi.StateGetterOptions{})), minTxNum, firstMinTxNum, nil
 	}
 
 	if minTxNum < state.StateHistoryStartTxNum(tx) {
@@ -1136,8 +1137,8 @@ func newSimulateStateReader(ttx, tx kv.TemporalTx, tsd, sd *execctx.SharedDomain
 	// reads them it must fall back to the real DB (via the original tx), not to the empty temp DB (via ttx).
 	return &commitmentdb.CommitmentReplayStateReader{
 		SplitStateReader: commitmentdb.NewCommitmentSplitStateReader(
-			commitmentdb.NewLatestStateReader(ttx, tsd),
-			commitmentdb.NewLatestStateReader(tx, sd),
+			commitmentdb.NewLatestStateReader(ttx, tsd, commitmentdb.LatestStateReaderOptions{}),
+			commitmentdb.NewLatestStateReader(tx, sd, commitmentdb.LatestStateReaderOptions{}),
 			false,
 		),
 	}

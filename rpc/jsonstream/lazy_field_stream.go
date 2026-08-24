@@ -81,3 +81,4 @@ func (s *LazyFieldStream) WriteEmptyArray()            { s.ensure(); s.Stream.Wr
 func (s *LazyFieldStream) WriteEmptyObject()           { s.ensure(); s.Stream.WriteEmptyObject() }
 func (s *LazyFieldStream) Write(p []byte) (int, error) { s.ensure(); return s.Stream.Write(p) }
 func (s *LazyFieldStream) WriteRaw(v string)           { s.ensure(); s.Stream.WriteRaw(v) }
+func (s *LazyFieldStream) WriteRawBytes(v []byte)      { s.ensure(); s.Stream.WriteRawBytes(v) }

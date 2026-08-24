@@ -57,19 +57,13 @@ import (
 	"github.com/erigontech/erigon/p2p/dnsdisc"
 	"github.com/erigontech/erigon/p2p/enode"
 	"github.com/erigontech/erigon/p2p/protocols/eth"
-	"github.com/erigontech/erigon/p2p/protocols/wit"
 	"github.com/erigontech/erigon/p2p/sentry/libsentry"
-
-	_ "github.com/erigontech/erigon/polygon/chain" // Register Polygon chains
 )
 
 const (
 	// handshakeTimeout is the maximum allowed time for the `eth` handshake to
 	// complete before dropping the connection.= as malicious.
 	handshakeTimeout = 5 * time.Second
-	// ethProtocolTimeout is the maximum allowed time for the ETH protocol to be ready
-	// before dropping the connection. This prevents goroutine leaks and DOS attacks.
-	ethProtocolTimeout = 30 * time.Second
 	// awaitStatusTimeout caps how long an inbound peer's Protocol.Run waits
 	// for the multi-client's first SetStatus to populate ss.statusData. It
 	// only matters during the startup window when the shared p2p.Server is
@@ -86,19 +80,8 @@ type PeerInfo struct {
 	deadlines        []time.Time // Request deadlines
 	latestDealine    time.Time
 	minBlock, height uint64
-	// ethRw and witRw are the per-subprotocol MsgReadWriters this peer is
-	// using. They live on the SAME RLPx connection but have different code
-	// offsets, so writePeer must select the right one for the message's
-	// protocol — pinning a single "canonical" rw routes wit frames onto
-	// the eth offset (or vice versa) and breaks the receiving side. The
-	// respective Protocol.Run sets each via SetEthRw / SetWitRw before
-	// announcing the peer as ready.
-	ethRw                 p2p.MsgReadWriter
-	witRw                 p2p.MsgReadWriter
-	protocol, witProtocol uint
-	knownWitnesses        *wit.KnownCache // Set of witness hashes (`witness.Headers[0].Hash()`) known to be known by this peer
-	ethReady              chan struct{}
-	ethReadyOnce          sync.Once
+	rw               p2p.MsgReadWriter
+	protocol         uint
 
 	ctx       context.Context
 	ctxCancel context.CancelFunc
@@ -117,11 +100,6 @@ type PeerInfo struct {
 type PeerRef struct {
 	pi     *PeerInfo
 	height uint64
-}
-
-// WitnessRequest tracks when a witness request was initiated (for deduplication and cleanup)
-type WitnessRequest struct {
-	RequestedAt time.Time
 }
 
 // PeersByMinBlock is the priority queue of peers. Used to select certain number of peers considered to be "best available"
@@ -160,17 +138,16 @@ func (bp *PeersByMinBlock) Pop() any {
 	return x
 }
 
-func NewPeerInfo(peer *p2p.Peer) *PeerInfo {
+func NewPeerInfo(peer *p2p.Peer, rw p2p.MsgReadWriter) *PeerInfo {
 	ctx, cancel := context.WithCancel(context.Background())
 
 	p := &PeerInfo{
-		peer:           peer,
-		ethReady:       make(chan struct{}),
-		knownWitnesses: wit.NewKnownCache(wit.MaxKnownWitnesses),
-		removed:        make(chan struct{}),
-		tasks:          make(chan func(), 32),
-		ctx:            ctx,
-		ctxCancel:      cancel,
+		peer:      peer,
+		rw:        rw,
+		removed:   make(chan struct{}),
+		tasks:     make(chan func(), 32),
+		ctx:       ctx,
+		ctxCancel: cancel,
 	}
 
 	p.lock.RLock()
@@ -199,44 +176,6 @@ func (pi *PeerInfo) ID() [64]byte {
 	return pi.peer.Pubkey()
 }
 
-// SetEthRw stores the eth protoRW for this peer. Called by the eth Run
-// after getOrCreatePeer so writePeer can route eth-protocol messages
-// through the eth offset on the RLPx connection regardless of which
-// Protocol.Run created the shared PeerInfo first.
-func (pi *PeerInfo) SetEthRw(rw p2p.MsgReadWriter) {
-	pi.lock.Lock()
-	pi.ethRw = rw
-	pi.lock.Unlock()
-}
-
-// EthRw returns the eth-subprotocol MsgReadWriter, or nil if the eth Run
-// hasn't attached it yet (which means this peer isn't yet ready for eth
-// outbound — writePeer must skip).
-func (pi *PeerInfo) EthRw() p2p.MsgReadWriter {
-	pi.lock.RLock()
-	defer pi.lock.RUnlock()
-	return pi.ethRw
-}
-
-// SetWitRw stores the wit protoRW for this peer (called by the wit Run).
-// Outbound wit messages (GET_BLOCK_WITNESS_W0 etc.) must go through this
-// rw, never through the eth one — they use a different protocol offset.
-func (pi *PeerInfo) SetWitRw(rw p2p.MsgReadWriter) {
-	pi.lock.Lock()
-	pi.witRw = rw
-	pi.lock.Unlock()
-}
-
-// WitRw returns the wit-subprotocol MsgReadWriter, or nil if the wit Run
-// hasn't attached it yet (e.g. peer doesn't advertise wit). Callers
-// targeting wit messages must treat nil as "this peer doesn't speak wit"
-// and skip the write.
-func (pi *PeerInfo) WitRw() p2p.MsgReadWriter {
-	pi.lock.RLock()
-	defer pi.lock.RUnlock()
-	return pi.witRw
-}
-
 // AddDeadline adds given deadline to the list of deadlines
 // Deadlines must be added in the chronological order for the function
 // ClearDeadlines to work correctly (it uses binary search)
@@ -253,7 +192,7 @@ func (pi *PeerInfo) Height() uint64 {
 	return pi.height
 }
 
-// SetEthProtocol sets protocol version and marks the ETH protocol as ready
+// SetEthProtocol sets the negotiated ETH protocol version.
 func (pi *PeerInfo) SetEthProtocol(version uint) {
 	if version == 0 {
 		return
@@ -262,8 +201,6 @@ func (pi *PeerInfo) SetEthProtocol(version uint) {
 	pi.lock.Lock()
 	pi.protocol = version
 	pi.lock.Unlock()
-
-	pi.ethReadyOnce.Do(func() { close(pi.ethReady) })
 }
 
 // EthProtocol returns the negotiated eth protocol version, or 0 if the eth
@@ -275,51 +212,6 @@ func (pi *PeerInfo) EthProtocol() uint {
 	pi.lock.RLock()
 	defer pi.lock.RUnlock()
 	return pi.protocol
-}
-
-// SetWitProtocol stores the negotiated wit protocol version (called by
-// the wit Run once getOrCreatePeer returns). Mirrors SetEthProtocol's
-// locking discipline.
-func (pi *PeerInfo) SetWitProtocol(version uint) {
-	pi.lock.Lock()
-	pi.witProtocol = version
-	pi.lock.Unlock()
-}
-
-// WitProtocol returns the negotiated wit protocol version, or 0 if the
-// peer doesn't speak wit (or wit Run hasn't fired yet).
-func (pi *PeerInfo) WitProtocol() uint {
-	pi.lock.RLock()
-	defer pi.lock.RUnlock()
-	return pi.witProtocol
-}
-
-// WaitForEth blocks until the ETH handshake completes or returns a disconnect reason
-func (pi *PeerInfo) WaitForEth(ctx context.Context) *p2p.PeerError {
-	if !pi.peer.RunningProtocol(eth.ProtocolName) {
-		return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscProtocolError, nil, "wit protocol requires eth capability")
-	}
-
-	pi.lock.RLock()
-	ready := pi.protocol != 0
-	readyCh := pi.ethReady
-	pi.lock.RUnlock()
-
-	if ready {
-		return nil
-	}
-
-	timeoutCtx, cancel := context.WithTimeout(ctx, ethProtocolTimeout)
-	defer cancel()
-
-	select {
-	case <-readyCh:
-		return nil
-	case <-pi.removed:
-		return pi.RemoveReason()
-	case <-timeoutCtx.Done():
-		return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, timeoutCtx.Err(), "wit protocol waiting for eth handshake cancelled")
-	}
 }
 
 // SetIncreasedHeight updates PeerInfo.height only if newHeight is higher (threadsafe)
@@ -430,12 +322,6 @@ func (pi *PeerInfo) RemoveReason() *p2p.PeerError {
 	default:
 		return nil
 	}
-}
-
-func (pi *PeerInfo) AddKnownWitness(hash common.Hash) {
-	pi.lock.Lock()
-	defer pi.lock.Unlock()
-	pi.knownWitnesses.Add(hash)
 }
 
 // ConvertH512ToPeerID ensures the return type is [64]byte
@@ -745,131 +631,6 @@ func trackPeerStatistics(peerName string, peerID string, inbound bool, msgType s
 		diaglib.Send(stats)
 	}
 }
-func runWitPeer(
-	ctx context.Context,
-	peerID [64]byte,
-	rw p2p.MsgReadWriter,
-	peerInfo *PeerInfo,
-	send func(msgId sentryproto.MessageId, peerID [64]byte, b []byte),
-	hasSubscribers func(msgId sentryproto.MessageId) bool,
-	getWitnessRequest func(hash common.Hash, peerID [64]byte) bool,
-	logger log.Logger,
-) *p2p.PeerError {
-	if err := peerInfo.WaitForEth(ctx); err != nil {
-		return err
-	}
-
-	protocol := uint(wit.WIT1)
-	pubkey := peerInfo.peer.Pubkey()
-	logger.Debug("[wit] wit protocol active", "peer", hex.EncodeToString(pubkey[:]), "version", protocol)
-	for {
-		if err := common.Stopped(ctx.Done()); err != nil {
-			return p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscQuitting, ctx.Err(), "sentry.runPeer: context stopped")
-		}
-		if err := peerInfo.RemoveReason(); err != nil {
-			return err
-		}
-
-		msg, err := rw.ReadMsg()
-		if err != nil {
-			return p2p.NewPeerError(p2p.PeerErrorMessageReceive, p2p.DiscNetworkError, err, "sentry.runPeer: ReadMsg error")
-		}
-
-		if msg.Size > wit.MaxMessageSize {
-			msg.Discard()
-			return p2p.NewPeerError(p2p.PeerErrorMessageSizeLimit, p2p.DiscSubprotocolError, nil, fmt.Sprintf("sentry.runPeer: message is too large %d, limit %d", msg.Size, eth.ProtocolMaxMsgSize))
-		}
-
-		switch msg.Code {
-		case wit.GetWitnessMsg, wit.WitnessMsg:
-			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
-				continue
-			}
-
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
-			}
-			send(wit.ToProto[protocol][msg.Code], peerID, b)
-		case wit.NewWitnessMsg:
-			// add hashes to peer
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
-			}
-
-			var query wit.NewWitnessPacket
-			if err := rlp.DecodeBytes(b, &query); err != nil {
-				logger.Error("[sentry] decoding NewWitnessMsg", "err", err, "data", hex.EncodeToString(b))
-				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "decoding NewWitnessMsg")
-			}
-
-			peerInfo.AddKnownWitness(query.Witness.Header().Hash())
-
-			// send to client to add witness to db
-			if !hasSubscribers(wit.ToProto[protocol][msg.Code]) {
-				continue
-			}
-			send(wit.ToProto[protocol][msg.Code], peerID, b)
-		case wit.NewWitnessHashesMsg:
-			// add hashes to peer
-			b := make([]byte, msg.Size)
-			if _, err := io.ReadFull(msg.Payload, b); err != nil {
-				logger.Error("reading msg into bytes", "peer", hex.EncodeToString(peerID[:]), "err", err)
-			}
-
-			var query wit.NewWitnessHashesPacket
-			if err := rlp.DecodeBytes(b, &query); err != nil {
-				logger.Error("[sentry] decoding NewWitnessHashesMsg", "err", err, "data", hex.EncodeToString(b))
-				return p2p.NewPeerError(p2p.PeerErrorInvalidMessage, p2p.DiscSubprotocolError, err, "decoding NewWitnessHashesMsg")
-			}
-
-			for _, hash := range query.Hashes {
-				peerInfo.AddKnownWitness(hash)
-			}
-
-			// process each announced block hash with deduplication
-			for _, hash := range query.Hashes {
-				shouldRequest := getWitnessRequest(hash, peerID)
-				if !shouldRequest {
-					continue // already being requested by another peer
-				}
-
-				// send GetWitnessMsg request starting from page 0
-				getWitnessReq := wit.GetWitnessPacket{
-					RequestId: rand.Uint64(),
-					GetWitnessRequest: &wit.GetWitnessRequest{
-						WitnessPages: []wit.WitnessPageRequest{
-							{
-								Hash: hash,
-								Page: 0,
-							},
-						},
-					},
-				}
-
-				reqData, err := rlp.EncodeToBytes(&getWitnessReq)
-				if err != nil {
-					logger.Error("encoding GetWitnessMsg request", "err", err, "hash", hash)
-					continue
-				}
-
-				if err := rw.WriteMsg(p2p.Msg{
-					Code:    wit.GetWitnessMsg,
-					Size:    uint32(len(reqData)),
-					Payload: bytes.NewReader(reqData),
-				}); err != nil {
-					logger.Debug("sending GetWitnessMsg request", "err", err, "hash", hash)
-				} else {
-					logger.Debug("sent GetWitnessMsg request", "hash", hash, "page", 0, "peer", hex.EncodeToString(peerID[:]))
-				}
-			}
-		default:
-			logger.Error("unknown message code", "peer", hex.EncodeToString(pubkey[:]), "code", msg.Code)
-		}
-	}
-}
-
 func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, healthCheck bool) (*grpc.Server, error) {
 	// STARTING GRPC SERVER
 	ss.logger.Info("Starting Sentry gRPC server", "on", sentryAddr)
@@ -891,15 +652,14 @@ func grpcSentryServer(ctx context.Context, sentryAddr string, ss *GrpcServer, he
 
 func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, readNodeInfo func() *eth.NodeInfo, cfg *p2p.Config, protocol uint, logger log.Logger, bootnodes []string, dnsNetwork string) *GrpcServer {
 	ss := &GrpcServer{
-		ctx:                   ctx,
-		p2p:                   cfg,
-		peersStreams:          NewPeersStreams(),
-		logger:                logger,
-		ethVersion:            protocol,
-		activeWitnessRequests: make(map[common.Hash]*WitnessRequest),
-		bootnodes:             bootnodes,
-		dnsNetwork:            dnsNetwork,
-		statusReady:           make(chan struct{}),
+		ctx:          ctx,
+		p2p:          cfg,
+		peersStreams: NewPeersStreams(),
+		logger:       logger,
+		ethVersion:   protocol,
+		bootnodes:    bootnodes,
+		dnsNetwork:   dnsNetwork,
+		statusReady:  make(chan struct{}),
 	}
 	ss.peers.Store(NewPeerStore())
 
@@ -953,13 +713,10 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 
 			// handshake is successful
 			logger.Trace("[p2p] Received status message OK", "peerId", printablePeerID, "name", peer.Name(), "caps", peer.Caps())
-			peerInfo, err := ss.getOrCreatePeer(peer, eth.ProtocolName)
+			peerInfo, err := ss.getOrCreatePeer(peer, rw)
 			if err != nil {
 				return err
 			}
-			// Attach the eth subprotocol rw so writePeer can route
-			// eth-protocol outbound at the right RLPx offset.
-			peerInfo.SetEthRw(rw)
 			peerInfo.SetEthProtocol(protocol)
 
 			if protocol >= direct.ETH69 {
@@ -996,72 +753,7 @@ func NewGrpcServer(ctx context.Context, dialCandidates func() enode.Iterator, re
 			return nil
 		},
 		//Attributes: []enr.Entry{eth.CurrentENREntry(chainConfig, genesisHash, headHeight)},
-		FromProto: eth.FromProto[protocol],
-		ToProto:   eth.ToProto[protocol],
 	})
-
-	// Add WIT protocol if enabled
-	if cfg.EnableWitProtocol {
-		log.Debug("[wit] running wit protocol")
-		ss.Protocols = append(ss.Protocols, p2p.Protocol{
-			Name:           wit.ProtocolName,
-			Version:        wit.ProtocolVersions[0],
-			Length:         wit.ProtocolLengths[wit.ProtocolVersions[0]],
-			DialCandidates: nil,
-			Run: func(peer *p2p.Peer, rw p2p.MsgReadWriter) *p2p.PeerError {
-				peerID := peer.Pubkey()
-				peerInfo, err := ss.getOrCreatePeer(peer, wit.ProtocolName)
-				if err != nil {
-					return err
-				}
-				peerInfo.SetWitRw(rw)
-				peerInfo.SetWitProtocol(wit.ProtocolVersions[0])
-				// In shared-Server mode wit/0 is deduped to one sentry; if
-				// no eth Run ever fires on this sentry for this peer (which
-				// is the common case — wit lives on sentry[0], eth/* on the
-				// version sentry), nothing else tears down the goodPeers
-				// entry or the PeerInfo task-channel worker. Close is
-				// idempotent (it nil-checks pi.tasks) so it's safe even
-				// when eth Run also runs and defers Close on its side.
-				defer ss.deletePeer(peerID)
-				defer peerInfo.Close()
-
-				return runWitPeer(
-					ctx,
-					peerID,
-					rw,
-					peerInfo,
-					ss.send,
-					ss.hasSubscribers,
-					ss.getWitnessRequest,
-					logger,
-				)
-			},
-			NodeInfo: func() any {
-				return readNodeInfo()
-			},
-			PeerInfo: func(peerID [64]byte) any {
-				return nil
-			},
-			FromProto: wit.FromProto[wit.ProtocolVersions[0]],
-			ToProto:   wit.ToProto[wit.ProtocolVersions[0]],
-		})
-	}
-
-	// start cleanup routine for stale witness requests
-	go func() {
-		ticker := time.NewTicker(1 * time.Minute)
-		defer ticker.Stop()
-
-		for {
-			select {
-			case <-ctx.Done():
-				return
-			case <-ticker.C:
-				ss.cleanupOldWitnessRequests()
-			}
-		}
-	}()
 
 	return ss
 }
@@ -1092,15 +784,8 @@ func Sentry(ctx context.Context, dirs datadir.Dirs, sentryAddr string, discovery
 }
 
 // PeerStore is the per-peer state registry shared by GrpcServers that back
-// the same p2p.Server. With wit/0 deduped to a single GrpcServer in shared-
-// Server mode, the wit Run and the negotiated eth/* Run land on different
-// sentries; without a shared store they each create their own PeerInfo and
-// wit's WaitForEth never observes the eth handshake complete, so the peer
-// would be disconnected after ethProtocolTimeout. The shared store keeps
-// one PeerInfo per peer regardless of which sentry's Run touched it first.
-//
-// Each GrpcServer owns its own PeerStore by default (set up in
-// NewGrpcServer); SetSharedPeerStore swaps in a coordinator-supplied store.
+// the same p2p.Server. Each GrpcServer owns a store by default; the shared
+// server coordinator replaces it before accepting peers.
 type PeerStore struct {
 	mu    sync.RWMutex
 	peers map[[64]byte]*PeerInfo
@@ -1147,17 +832,10 @@ type GrpcServer struct {
 	logger               log.Logger
 	bootnodes            []string // chain-specific bootnodes, used if p2pConfig has none
 	dnsNetwork           string   // chain-specific DNS discovery URL
-	// witness request tracking
-	activeWitnessRequests map[common.Hash]*WitnessRequest
-	witnessRequestMutex   sync.RWMutex
 }
 
 // SetSharedPeerStore swaps in a coordinator-supplied PeerStore so several
 // GrpcServers backing the same p2p.Server can see one PeerInfo per peer.
-// This is what makes wit/0 (deduped to a single sentry) and the negotiated
-// eth/* (on a different sentry) share the same eth-ready signal — without
-// it, wit's WaitForEth would time out and disconnect every peer after
-// ethProtocolTimeout.
 //
 // Must be called BEFORE SetP2PServer / srv.Start; the helpers that look up
 // the store don't synchronise on the field itself, so concurrent peer Run
@@ -1204,40 +882,6 @@ func (ss *GrpcServer) SetP2PServer(srv *p2p.Server) error {
 	return nil
 }
 
-// cleanupOldWitnessRequests removes witness requests that have been active for too long
-func (ss *GrpcServer) cleanupOldWitnessRequests() {
-	ss.witnessRequestMutex.Lock()
-	defer ss.witnessRequestMutex.Unlock()
-
-	timeout := 1 * time.Minute
-	now := time.Now()
-
-	for hash, req := range ss.activeWitnessRequests {
-		if now.Sub(req.RequestedAt) > timeout {
-			ss.logger.Debug("cleaning up stale witness request", "hash", hash, "age", now.Sub(req.RequestedAt))
-			delete(ss.activeWitnessRequests, hash)
-		}
-	}
-}
-
-// getWitnessRequest checks if we should request a witness
-func (ss *GrpcServer) getWitnessRequest(hash common.Hash, peerID [64]byte) bool {
-	ss.witnessRequestMutex.Lock()
-	defer ss.witnessRequestMutex.Unlock()
-
-	if _, exists := ss.activeWitnessRequests[hash]; exists {
-		return false
-	}
-
-	witnessReq := &WitnessRequest{
-		RequestedAt: time.Now(),
-	}
-	ss.activeWitnessRequests[hash] = witnessReq
-
-	ss.logger.Debug("initiating new witness request", "hash", hash, "peer", hex.EncodeToString(peerID[:]))
-	return true
-}
-
 func (ss *GrpcServer) rangePeers(f func(peerInfo *PeerInfo) bool) {
 	store := ss.peers.Load()
 	store.mu.RLock()
@@ -1266,11 +910,8 @@ func (ss *GrpcServer) getPeer(peerID [64]byte) (peerInfo *PeerInfo) {
 	return peerInfo
 }
 
-// getOrCreatePeer gets or creates PeerInfo. The subprotocol-specific
-// MsgReadWriter is NOT stored here — callers must follow up with
-// peerInfo.SetEthRw or peerInfo.SetWitRw so writePeer can route outbound
-// messages to the correct offset (see PeerInfo.ethRw/witRw).
-func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, protocolName string) (*PeerInfo, *p2p.PeerError) {
+// getOrCreatePeer gets or creates PeerInfo.
+func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, rw p2p.MsgReadWriter) (*PeerInfo, *p2p.PeerError) {
 	peerID := peer.Pubkey()
 
 	store := ss.peers.Load()
@@ -1279,29 +920,13 @@ func (ss *GrpcServer) getOrCreatePeer(peer *p2p.Peer, protocolName string) (*Pee
 
 	existingPeerInfo := store.peers[peerID]
 	if existingPeerInfo == nil {
-		peerInfo := NewPeerInfo(peer)
+		peerInfo := NewPeerInfo(peer, rw)
 		store.peers[peerID] = peerInfo
 		return peerInfo, nil
 	}
 
-	// allow one connection per protocol — use the lock-protected accessors
-	// because the corresponding setters (SetEthProtocol, SetWitProtocol)
-	// write under pi.lock; a bare read here would race with a concurrent
-	// handshake on the same peer.
-	if protocolName == eth.ProtocolName {
-		if existingPeerInfo.EthProtocol() != 0 {
-			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
-		}
-
-		return existingPeerInfo, nil
-	}
-
-	if protocolName == wit.ProtocolName {
-		if existingPeerInfo.WitProtocol() != 0 {
-			return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
-		}
-
-		return existingPeerInfo, nil
+	if existingPeerInfo.EthProtocol() != 0 {
+		return nil, p2p.NewPeerError(p2p.PeerErrorDiscReason, p2p.DiscAlreadyConnected, nil, "peer already has connection")
 	}
 
 	return existingPeerInfo, nil
@@ -1333,13 +958,6 @@ func (ss *GrpcServer) deletePeer(peerID [64]byte) {
 	delete(store.peers, peerID)
 }
 
-// writePeer sends a message to a peer over the correct RLPx subprotocol
-// offset. msgID must be the high-level sentryproto.MessageId — it's used
-// to look up the subprotocol (eth vs wit) and pick the corresponding
-// PeerInfo.{Eth,Wit}Rw. Routing by numeric msgcode would be wrong:
-// eth and wit reuse the same low code values (e.g. msgcode 0x01 is both
-// eth.NewBlockHashesMsg and wit.NewWitnessHashesMsg), so a numeric lookup
-// can match the wrong subprotocol and emit frames at the wrong offset.
 func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sentryproto.MessageId, msgcode uint64, data []byte, ttl time.Duration) {
 	peerInfo.Async(func() {
 		// Async enqueue can win the race against Remove closing pi.removed, so a
@@ -1354,33 +972,11 @@ func (ss *GrpcServer) writePeer(logPrefix string, peerInfo *PeerInfo, msgID sent
 		default:
 		}
 
-		protocolName, protocolVersion := ss.protocolForMessageID(msgID)
 		if diaglib.TypeOf(diaglib.PeerStatisticMsgUpdate{}).Enabled() {
-			trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgID.String(), protocolName+"/"+strconv.FormatUint(uint64(protocolVersion), 10), len(data))
+			trackPeerStatistics(peerInfo.peer.Fullname(), peerInfo.peer.ID().String(), false, msgID.String(), eth.ProtocolName+"/"+strconv.FormatUint(uint64(peerInfo.EthProtocol()), 10), len(data))
 		}
 
-		// Select the rw for the message's subprotocol. eth and wit live on
-		// the same RLPx connection but at different code offsets — writing
-		// a wit message via the eth rw (or vice versa) puts it at the wrong
-		// offset and the receiver disconnects on protocol error.
-		var rw p2p.MsgReadWriter
-		switch protocolName {
-		case eth.ProtocolName:
-			rw = peerInfo.EthRw()
-		case wit.ProtocolName:
-			rw = peerInfo.WitRw()
-		}
-		if rw == nil {
-			// Peer hasn't (yet) attached the subprotocol this message
-			// belongs to. Common case: a wit broadcast aimed at every
-			// good peer, some of which negotiated only eth. Treat as a
-			// successful no-op rather than disconnecting.
-			ss.logger.Trace("[sentry] writePeer drop: subprotocol rw not attached",
-				"protocol", protocolName, "msgID", msgID.String(),
-				"peerID", peerInfo.peer.ID().String())
-			return
-		}
-		err := rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
+		err := peerInfo.rw.WriteMsg(p2p.Msg{Code: msgcode, Size: uint32(len(data)), Payload: bytes.NewReader(data)})
 		if err != nil {
 			ss.removePeer(peerInfo.ID(), p2p.NewPeerError(p2p.PeerErrorMessageSend, p2p.DiscNetworkError, err, fmt.Sprintf("%s writePeer msgcode=%d", logPrefix, msgcode)))
 		} else if ttl > 0 {
@@ -1557,8 +1153,7 @@ func (ss *GrpcServer) SendMessageById(_ context.Context, inreq *sentryproto.Send
 	// With a shared PeerStore every sentry resolves the same PeerInfo, so only
 	// the sentry matching the peer's negotiated eth version may write — same
 	// rule as SendMessageToAll — or the peer receives one copy per sentry.
-	if protocolName, _ := ss.protocolForMessageID(inreq.Data.Id); protocolName == eth.ProtocolName &&
-		!protocolVersions.Contains(peerInfo.EthProtocol()) {
+	if !protocolVersions.Contains(peerInfo.EthProtocol()) {
 		return reply, nil
 	}
 
@@ -1571,23 +1166,9 @@ func (ss *GrpcServer) messageCode(id sentryproto.MessageId) (code uint64, protoc
 	protocolVersions = mapset.NewSet[uint]()
 	for i := 0; i < len(ss.Protocols); i++ {
 		version := ss.Protocols[i].Version
-		if val, ok := ss.Protocols[i].FromProto[id]; ok {
+		if val, ok := eth.FromProto[version][id]; ok {
 			code = val // assuming that the code doesn't change between protocol versions
 			protocolVersions.Add(version)
-		}
-	}
-	return
-}
-
-// protocolForMessageID returns the subprotocol name and version that
-// declares the given sentryproto.MessageId. Lookup is by MessageId (which
-// is globally unique across subprotocols), unlike a lookup by numeric
-// msgcode which would be ambiguous: eth and wit reuse the same low code
-// values within their respective offsets.
-func (ss *GrpcServer) protocolForMessageID(id sentryproto.MessageId) (protocolName string, protocolVersion uint) {
-	for i := 0; i < len(ss.Protocols); i++ {
-		if _, ok := ss.Protocols[i].FromProto[id]; ok {
-			return ss.Protocols[i].Name, ss.Protocols[i].Version
 		}
 	}
 	return
@@ -1659,21 +1240,7 @@ func (ss *GrpcServer) SendMessageToAll(ctx context.Context, req *sentryproto.Out
 }
 
 func (ss *GrpcServer) HandShake(context.Context, *emptypb.Empty) (*sentryproto.HandShakeReply, error) {
-	reply := &sentryproto.HandShakeReply{}
-	reply.Protocol = direct.UintToProtocolMap[ss.Protocols[0].Version]
-
-	for _, protocol := range ss.Protocols[1:] { // noop if no extra protocols
-		v, ok := direct.UintToSideProtocolMap[protocol.Version]
-		if !ok {
-			continue
-		}
-
-		if _, ok = direct.SupportedSideProtocols[v]; ok {
-			reply.SideProtocols = append(reply.SideProtocols, v)
-		}
-	}
-
-	return reply, nil
+	return &sentryproto.HandShakeReply{Protocol: direct.UintToProtocolMap[ss.Protocols[0].Version]}, nil
 }
 
 func (ss *GrpcServer) startP2PServer() (*p2p.Server, error) {
@@ -1772,8 +1339,8 @@ func (ss *GrpcServer) Peers(_ context.Context, _ *emptypb.Empty) (*sentryproto.P
 	// can see every PeerInfo; filtering here is what keeps node/eth
 	// Ethereum.Peers aggregation from N-fold-duplicating the result and
 	// what lets the multi-sentry router map each peer to the correct
-	// sentry's gRPC client. protocol==0 is also dropped (RLPx-only,
-	// wit-only, or in-flight handshake entries).
+	// sentry's gRPC client. protocol==0 is also dropped for in-flight
+	// handshake entries.
 	var reply sentryproto.PeersReply
 	ss.rangePeers(func(peerInfo *PeerInfo) bool {
 		// Read once via the locked accessor — pi.protocol is written under

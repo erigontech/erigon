@@ -64,7 +64,7 @@ func (api *APIImpl) GetUncleByBlockNumberAndIndex(ctx context.Context, number rp
 		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
-	uncle := types.NewBlockWithHeader(uncles[index])
+	uncle := types.NewBlockWithHeader(uncles[index], nil)
 	return ethapi.RPCMarshalBlock(uncle, false, false, additionalFields)
 }
 
@@ -100,7 +100,7 @@ func (api *APIImpl) GetUncleByBlockHashAndIndex(ctx context.Context, hash common
 		log.Trace("Requested uncle not found", "number", block.Number(), "hash", hash, "index", index)
 		return nil, nil
 	}
-	uncle := types.NewBlockWithHeader(uncles[index])
+	uncle := types.NewBlockWithHeader(uncles[index], nil)
 
 	return ethapi.RPCMarshalBlock(uncle, false, false, additionalFields)
 }
