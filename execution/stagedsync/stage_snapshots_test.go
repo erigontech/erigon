@@ -279,9 +279,9 @@ func TestSnapshotDownloadProgressReporterStopPinsCommitmentBlockOnSuccess(t *tes
 	require.Equal(t, uint64(commitBlock), h.currentBlock(t))
 }
 
-// A download that stopped at 40% must not report 100%: an operator watching
-// eth_syncing through a failing stage would see it oscillate real% → 100%.
-func TestSnapshotDownloadProgressReporterStopKeepsLastSampleOnFailure(t *testing.T) {
+// A download that failed at 40% must not report 100%: an operator watching
+// eth_syncing through a failing download would see it oscillate real% → 100%.
+func TestSnapshotDownloadProgressReporterStopKeepsLastSampleOnDownloadFailure(t *testing.T) {
 	h := newSeededReporterHarness(t, 499_000)
 
 	stop := startSnapshotDownloadProgressReporter(t.Context(), h.cfg)
