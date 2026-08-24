@@ -37,8 +37,8 @@ The `snapshots uploader` command starts a version of erigon customized for uploa
 a remote location.
 
 It breaks the stage execution process after the senders stage and then uses the snapshot stage to send
-uploaded headers, bodies and (in the case of polygon) bor spans and events to snapshot files. Because
-this process avoids execution in run signifigantly faster than a standard erigon configuration.
+uploaded headers and bodies to snapshot files. Because this process avoids execution in run
+signifigantly faster than a standard erigon configuration.
 
 The uploader uses rclone to send seedable (100K or 500K blocks) to a remote storage location specified
 in the rclone config file.
@@ -58,15 +58,15 @@ The following configuration can be used to upload blocks from genesis where:
 |                                                    |                                                                                                                                                                            |
 |----------------------------------------------------|----------------------------------------------------------------------------------------------------------------------------------------------------------------------------|
 | sync.loop.prune.limit=500000                       | Sets the records to be pruned to the database to 500,000 per iteration (as opposed to 100)                                                                                 |
-| upload.location=r2:erigon-v2-snapshots-bor-mainnet | Specified the rclone location to upload snapshot to                                                                                                                        |
+| upload.location=r2:erigon-v2-snapshots-mainnet     | Specified the rclone location to upload snapshot to                                                                                                                        |
 | upload.from=earliest                               | Sets the upload start location to be the earliest available block, which will be 0 in the case of a fresh installation, or specified by the last block in the chaindata db |
 | upload.snapshot.limit=1500000                      | Tells the uploader to keep a maximum 1,500,000 blocks in the `snapshots` before deleting the aged snapshot                                                                 |
 | snapshot.version=2                                 | Indivates the version to be appended to snapshot file names when they are creatated                                                                                        |
 
 ```shell
-erigon/build/bin/erigon snapshots uploader --datadir=~/snapshots/bor-mainnet --chain=bor-mainnet \
-  --bor.heimdall=https://heimdall-api.polygon.technology --sync.loop.prune.limit=500000 \
-  --upload.location=r2:erigon-v2-snapshots-bor-mainnet --upload.from=earliest --snapshot.version=2 \
+erigon/build/bin/erigon snapshots uploader --datadir=~/snapshots/mainnet --chain=mainnet \
+  --sync.loop.prune.limit=500000 --upload.from=earliest --snapshot.version=2 \
+  --upload.location=r2:erigon-v2-snapshots-mainnet \
   --upload.snapshot.limit=1500000 
 ```
 
