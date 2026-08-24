@@ -1655,12 +1655,14 @@ func (s *BaseRoSnapshots) RemoveOverlaps(onDelete func(l []string) error) error 
 	// one exists, so reclamation never reaches it: unlink it here instead of leaking it.
 	if len(supersededIdx) > 0 {
 		held := s.heldIdxPaths()
+		orphans := make([]string, 0, len(supersededIdx))
 		for i := range supersededIdx {
 			if _, ok := held[supersededIdx[i].Path]; ok {
 				continue
 			}
-			_ = dir.RemoveFile(supersededIdx[i].Path)
+			orphans = append(orphans, supersededIdx[i].Path)
 		}
+		removeOldFiles(orphans) // pairs each file with its .torrent, as reclamation does
 	}
 
 	// remove .tmp files

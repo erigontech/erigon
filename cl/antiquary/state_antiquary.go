@@ -21,6 +21,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"path/filepath"
 	"sync"
 	"time"
 
@@ -638,23 +639,40 @@ func (s *Antiquary) removeStateOverlapsAndSeed(ctx context.Context, dumpedTo uin
 	if s.stateSn == nil {
 		return
 	}
-	removeErr := s.stateSn.RemoveOverlaps(func(l []string) error {
+	dropped := map[string]struct{}{}
+	if err := s.stateSn.RemoveOverlaps(func(l []string) error {
+		for _, name := range l {
+			dropped[filepath.Base(name)] = struct{}{}
+		}
 		if s.downloader == nil {
 			return nil
 		}
 		return s.downloader.Delete(ctx, l)
-	})
-	if removeErr != nil {
-		s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", removeErr)
+	}); err != nil {
+		s.logger.Warn("[Antiquary] Failed to remove overlaps", "err", err)
 	}
-	// A failed removal retires nothing, so SegFileNames still lists the superseded subsets:
-	// seeding would announce exactly what was just handed to Delete.
-	if removeErr == nil && dumpedTo != 0 && s.downloader != nil {
-		// From 0, not from the dump's own start: a per-type resume can dump a new type
-		// from genesis, and those files need announcing too.
-		if err := s.downloader.Seed(ctx, s.stateSn.SegFileNames(0, dumpedTo)); err != nil {
-			s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
+	if dumpedTo == 0 || s.downloader == nil {
+		return
+	}
+	// A removal that failed part-way leaves superseded subsets in the dirty set SegFileNames
+	// walks, and announcing one re-adds what Delete was just asked to drop. Skipping the seed
+	// outright instead would strand this dump until the next file period, since dumpedTo is
+	// not carried forward — so drop just the names that went to Delete.
+	// From 0, not from the dump's own start: a per-type resume can dump a new type from
+	// genesis, and those files need announcing too.
+	all := s.stateSn.SegFileNames(0, dumpedTo)
+	names := make([]string, 0, len(all))
+	for _, name := range all {
+		if _, ok := dropped[filepath.Base(name)]; ok {
+			continue
 		}
+		names = append(names, name)
+	}
+	if len(names) == 0 {
+		return
+	}
+	if err := s.downloader.Seed(ctx, names); err != nil {
+		s.logger.Warn("[Antiquary] Failed to add items to bittorent", "err", err)
 	}
 }
 
