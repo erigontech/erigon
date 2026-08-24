@@ -3519,6 +3519,8 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
+		segs.mark("finalize")
+
 		{
 			prStarted := time.Now()
 			defer func() {
@@ -3556,10 +3558,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
+		segs.mark("finalizeSend")
+
 		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now visible.
 		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
 			return nil, err
 		}
+
+		segs.mark("cacheFlush")
 
 		be.result = &blockResult{
 			Block:            be.block,
