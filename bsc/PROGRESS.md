@@ -69,8 +69,12 @@ All diagnosed from raw bytes / trace logs against the live Chapel network. Items
 `--chain=chapel` defaults in `cmd/utils/flags.go`, each behind `ctx.IsSet` so an explicit
 flag still wins.
 
-1. **eth/68 not advertised.** Default is `[eth/69,70,71]`; BSC rejects eth/69 and its eth/70
-   status keeps TD, so eth/68 is the only version that negotiates. → **now a default.**
+1. **eth/68 not advertised.** Default is `[eth/69,70,71]`. BSC advertises `[eth/70, eth/68]`
+   and prefers 70, but its eth/70 `StatusPacket` keeps `TD` *and* takes the eth/69 block-range
+   fields (`EarliestBlock`, `LatestBlock`, `LatestBlockHash`), which does not match our
+   `StatusPacket69` (no TD). So eth/68 is the only version we can decode today, and pinning to
+   it is a limitation on our side, not a gap in BSC. → **now a default.** Supporting BSC's
+   eth/70 needs a BSC-specific status variant; worth doing, since 70 is their primary.
 2. **Discovery was v5-only.** BSC enodes are discv4, and BSC publishes no DNS node list, so
    discv5 has nothing to resolve. → **now a default** (`v4=true`, `v5=false`).
 3. **BSC bootstraps via static peers, not bootnodes.** bsc-geth ships Chapel's peers as
@@ -107,6 +111,7 @@ flag still wins.
 No p2p flags needed — protocol version, discovery and static peers all come from the chain
 default. Expect `[bsc] new block hash number=… hash=…` within a second or two.
 
-Note on the listen port: the default is also set to `:30311` to match bsc-geth, but unlike the
-other three settings this is convention, not a requirement — reth-bsc listens on reth's
-default `:30303` and dials BSC peers at `:30311` without trouble.
+The listen port is left at Erigon's default. bsc-geth compiles in `:30311` and its mainnet
+`config.toml` sets it, but the listen port has no bearing on dialling peers at their `:30311`
+— reth-bsc listens on reth's default `:30303` and works. Pass `--port` if inbound
+reachability on the conventional port matters.
