@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcache"
+	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
@@ -118,26 +119,50 @@ var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
 var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
 
 func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
-	var context *execctx.SharedDomains
-	if c.execModule != nil {
+	// An overlay read view carries the state generation selected with its table
+	// overlay. A later global publication must not replace that selection.
+	domains, hasSelection, err := selectedSharedDomains(tx)
+	if err != nil {
+		return nil, err
+	}
+	if !hasSelection && c.execModule != nil {
 		c.execModule.lock.RLock()
-		context = c.execModule.currentContext
+		domains = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
 	}
 	// Fall back to the published SD from Events while an FCU commits
 	// (currentContext is nil but the SD is still valid in memory).
-	if context == nil && c.publishedSD != nil {
-		context = c.publishedSD()
+	if !hasSelection && domains == nil && c.publishedSD != nil {
+		domains = c.publishedSD()
 	}
 
 	var view *CacheView
-	if context != nil {
-		view = &CacheView{context: context, getter: context.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
+	if domains != nil {
+		view = &CacheView{context: domains, getter: domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
 	} else {
 		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
 	return view, nil
 }
+
+func selectedSharedDomains(tx kv.TemporalTx) (*execctx.SharedDomains, bool, error) {
+	selection, ok := tx.(interface {
+		SelectedDomainReader() (membatchwithdb.DomainReader, bool)
+	})
+	if !ok {
+		return nil, false, nil
+	}
+	reader, selected := selection.SelectedDomainReader()
+	if !selected {
+		return nil, false, nil
+	}
+	domains, ok := reader.(*execctx.SharedDomains)
+	if !ok {
+		return nil, true, fmt.Errorf("unsupported selected domain reader %T", reader)
+	}
+	return domains, true, nil
+}
+
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
 func (c *Cache) Evict() int                                  { return 0 }
 func (c *Cache) Len() int                                    { return 0 }
