@@ -165,8 +165,8 @@ var snapshotDownloadProgressInterval = 2 * time.Second
 // block to bridge the handoff to execution — or clears it when no
 // commitment block came with the snapshots (execution restarts from genesis).
 // No-op when the downloader can't report progress or the target is unknown.
-func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg) func(downloadErr error, commitBlock uint64) {
-	noop := func(error, uint64) {}
+func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg) func(downloadErr error, downloadCompleted bool, commitBlock uint64) {
+	noop := func(error, bool, uint64) {}
 	provider, ok := cfg.snapshotDownloader.(dbservices.DownloadProgressProvider)
 	if !ok {
 		return noop
@@ -252,12 +252,14 @@ func startSnapshotDownloadProgressReporter(ctx context.Context, cfg SnapshotsCfg
 		}
 	}()
 
-	return func(downloadErr error, commitBlock uint64) {
+	return func(downloadErr error, downloadCompleted bool, commitBlock uint64) {
 		cancel()
 		<-stopped
 		// A failed download must not claim 100%, and clearing would fabricate 0:
-		// keep the last honest sample.
-		if downloadErr != nil {
+		// keep the last honest sample. A failure after the download completed is
+		// different — the sample would outlive a node that syncs on regardless,
+		// so fall through to the same clear-or-pin as on success.
+		if downloadErr != nil && !downloadCompleted {
 			return
 		}
 		// Without a commitment block execution starts from genesis, so a handoff
@@ -353,15 +355,16 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	// Only this phase reports progress: the header-chain phase above downloads a
 	// small subset, so its ratio would jump backwards once the full set is known.
 	var commitBlock uint64
+	var downloadCompleted bool
 	stopReporter := startSnapshotDownloadProgressReporter(ctx, cfg)
 	defer func() {
 		// A panic unwinds with err == nil; stopping as a success would clear the
 		// last honest sample. Stop as a failure instead, then keep unwinding.
 		if r := recover(); r != nil {
-			stopReporter(fmt.Errorf("snapshots stage panic: %v", r), 0)
+			stopReporter(fmt.Errorf("snapshots stage panic: %v", r), downloadCompleted, 0)
 			panic(r)
 		}
-		stopReporter(err, commitBlock)
+		stopReporter(err, downloadCompleted, commitBlock)
 	}()
 
 	if err := snapshotsync.SyncSnapshots(
@@ -382,6 +385,7 @@ func DownloadAndIndexSnapshotsIfNeed(s *StageState, ctx context.Context, tx kv.R
 	); err != nil {
 		return err
 	}
+	downloadCompleted = true
 
 	if cfg.afterDownload != nil {
 		if err := cfg.afterDownload(ctx); err != nil {

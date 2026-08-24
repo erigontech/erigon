@@ -88,7 +88,7 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 	reply := &remoteproto.SyncingReply{
 		CurrentBlock:     currentBlock,
 		FrozenBlocks:     frozenBlocks,
-		LastNewBlockSeen: highestBlock,
+		LastNewBlockSeen: max(currentBlock, highestBlock),
 		Syncing:          true,
 	}
 

@@ -364,3 +364,12 @@ func TestBuildSyncingReplyHandoffSurvivesUncommittedBumpObservation(t *testing.T
 	require.Equal(t, uint64(19_000_000), reply.CurrentBlock,
 		"a poll on the committed view must keep the pin until the bump commits")
 }
+
+// At the handoff the pinned reply raises LastNewBlockSeen to the commitment
+// block; the next reply rebuilds it from LastNewBlockSeen alone and would step
+// it back below CurrentBlock.
+func TestBuildSyncingReplyLastNewBlockSeenNeverBelowCurrentBlock(t *testing.T) {
+	reply := buildReplyForTest(t, 25_722_999, 0, 25_723_236)
+	require.Equal(t, uint64(25_723_236), reply.CurrentBlock)
+	require.GreaterOrEqual(t, reply.LastNewBlockSeen, reply.CurrentBlock)
+}
