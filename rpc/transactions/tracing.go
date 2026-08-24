@@ -259,7 +259,10 @@ func ExecuteTraceTx(
 			return err
 		}
 
-		stream.WriteRawBytes(r)
+		_, err = stream.Write(r)
+		if err != nil {
+			return err
+		}
 	}
 
 	return nil
