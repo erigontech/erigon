@@ -281,10 +281,11 @@ func (*overloadService) RejectStreaming(_ context.Context, _ jsonstream.Stream) 
 	return kv.ErrReadTxLimitExceeded
 }
 
-// TestOverloadedRequestGets503 pins that a request rejected by the DB gate
-// answers 503, not 200. The JSON-RPC error body is written before ServeHTTP can
-// set the status, so anything that puts those bytes on the wire early makes
-// net/http commit 200 and discard the real status.
+// TestOverloadedRequestGets503 pins that a single request rejected by the DB gate
+// answers 503, not 200, on the streaming path. The JSON-RPC error body is written
+// before ServeHTTP can set the status, so anything that puts those bytes on the
+// wire early makes net/http commit 200 and discard the real status. Batch requests
+// and disabled streaming answer 200 through plumbing this test does not reach.
 func TestOverloadedRequestGets503(t *testing.T) {
 	for _, method := range []string{"test_reject", "test_rejectStreaming"} {
 		t.Run(method, func(t *testing.T) {

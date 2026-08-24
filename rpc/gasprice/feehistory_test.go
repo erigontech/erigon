@@ -80,7 +80,7 @@ func TestFeeHistory(t *testing.T) {
 			m := newTestBackend(t) //, big.NewInt(16), c.pending)
 			defer m.Close()
 
-			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, nil, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+			baseApi := jsonrpc.NewBaseApi(nil, kvcache.NewLatestBatchCache(), m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
 			tx, err := m.DB.BeginTemporalRo(m.Ctx)
 			require.NoError(t, err)
 			defer tx.Rollback()

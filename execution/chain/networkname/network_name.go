@@ -22,29 +22,20 @@ import (
 )
 
 const (
-	Mainnet             = "mainnet"
-	Sepolia             = "sepolia"
-	Hoodi               = "hoodi"
-	Dev                 = "dev"
-	Mumbai              = "mumbai"
-	Amoy                = "amoy"
-	BorMainnet          = "bor-mainnet"
-	BorDevnet           = "bor-devnet"
-	Gnosis              = "gnosis"
-	BorE2ETestChain2Val = "bor-e2e-test-2Val"
-	Chiado              = "chiado"
-	Test                = "test"
-	Bloatnet            = "bloatnet"
+	Mainnet  = "mainnet"
+	Sepolia  = "sepolia"
+	Hoodi    = "hoodi"
+	Dev      = "dev"
+	Gnosis   = "gnosis"
+	Chiado   = "chiado"
+	Test     = "test"
+	Bloatnet = "bloatnet"
 )
 
 var All = []string{
 	Mainnet,
 	Sepolia,
 	Hoodi,
-	Mumbai,
-	Amoy,
-	BorMainnet,
-	BorDevnet,
 	Gnosis,
 	Chiado,
 	Test,
