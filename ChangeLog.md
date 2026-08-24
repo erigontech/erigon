@@ -63,6 +63,7 @@ created with Erigon 3.3 or earlier that have not already been rebased must use t
   copy from about 266 MB to 18 MB (#22385, #22396, #22411, #23408) — by @awskii, @AskAlexSharov, @lystopad
 - Caplin advertises its bound ports, skips peers without TCP endpoints, and accepts Chiado libp2p bootstrap nodes
   (#22273, #22271, #23245) — by @MysticRyuujin, @domiwei
+- A deadlock in the transaction pool that could wedge block-producing nodes during high load has been resolved (#23360) — by @lystopad
 - Glamsterdam devnet-6 support adds EIP-8282 builder execution requests, EIP-2780, EIP-8038, EIP-8246, and the devnet-6
   revisions of EIP-7928/EIP-8037; Caplin tracks the Gloas alpha.11 request format, and BALs can be regenerated throughout
   retained state history, extending beyond the weak-subjectivity period (#22091, #22093, #22053, #22060, #22122,
