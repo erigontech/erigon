@@ -70,16 +70,13 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 	var wg sync.WaitGroup
 	for d := range kv.DomainLen {
 		domain := kv.Domain(d)
-		wg.Add(2)
-		go func() {
-			defer wg.Done()
+		wg.Go(func() {
 			for i := range keysPerDomain {
 				key := fmt.Sprintf("%s-%03d", domain, i)
 				sd.putLatest(domain, key, []byte(key), uint64(i))
 			}
-		}()
-		go func() {
-			defer wg.Done()
+		})
+		wg.Go(func() {
 			for i := range keysPerDomain {
 				key := fmt.Sprintf("%s-%03d", domain, i)
 				if v, _, ok := sd.GetLatest(domain, []byte(key)); ok && string(v) != key {
@@ -87,15 +84,13 @@ func TestTemporalMemBatchConcurrentDomainAccess(t *testing.T) {
 				}
 				sd.HasPrefixInRAM(domain, []byte(key))
 			}
-		}()
+		})
 	}
-	wg.Add(1)
-	go func() {
-		defer wg.Done()
+	wg.Go(func() {
 		for range 50 {
 			sd.Unwind(cutoff, nil)
 		}
-	}()
+	})
 	wg.Wait()
 
 	sd.Unwind(cutoff, nil)
