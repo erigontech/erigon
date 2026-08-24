@@ -50,11 +50,14 @@ func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 		}).
 		AnyTimes()
 
+	cfg := clparams.MainnetBeaconConfig
 	b := &BlobHistoryDownloader{
-		ctx:                   context.Background(),
-		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
-		columnBackfillTimeout: 50 * time.Millisecond,
-		logger:                log.New(),
+		ctx:                              context.Background(),
+		beaconCfg:                        &cfg,
+		peerDasGetter:                    staticPeerDasGetter{pd: peerDas},
+		columnBackfillTimeout:            50 * time.Millisecond,
+		columnBackfillOutOfWindowTimeout: 50 * time.Millisecond,
+		logger:                           log.New(),
 	}
 
 	fulu := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)

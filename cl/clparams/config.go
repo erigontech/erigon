@@ -404,6 +404,13 @@ func (b *BeaconChainConfig) MinSlotsForBlobsSidecarsRequest() uint64 {
 	return b.MinEpochsForBlobSidecarsRequests * b.SlotsPerEpoch
 }
 
+// MinSlotsForDataColumnSidecarsRequest is the window peers must serve data columns for.
+// It is configured separately from the blob window and can be much shorter: gnosis raises
+// MIN_EPOCHS_FOR_BLOB_SIDECARS_REQUESTS to 16384 but leaves columns at the 4096 default.
+func (b *BeaconChainConfig) MinSlotsForDataColumnSidecarsRequest() uint64 {
+	return b.MinEpochsForDataColumnSidecarsRequests * b.SlotsPerEpoch
+}
+
 type ConfigDurationSec time.Duration
 
 func (d *ConfigDurationSec) MarshalJSON() ([]byte, error) {

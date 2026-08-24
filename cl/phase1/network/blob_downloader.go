@@ -43,6 +43,9 @@ const (
 	// bounds a fulu block's column recovery; columns past the custody window are
 	// unfetchable and would otherwise block forever.
 	blobColumnBackfillTimeout = 30 * time.Second
+	// out-of-window columns are a long shot, so they get one quick try instead of a
+	// deadline that would stall an archive backfill for days
+	blobColumnBackfillOutOfWindowTimeout = 2 * time.Second
 )
 
 // SyncedChecker is an interface to check if the forkchoice is synced
@@ -81,6 +84,8 @@ type BlobHistoryDownloader struct {
 	immediateBlobsBackfilling bool
 	// columnBackfillTimeout bounds each fulu block's PeerDAS column recovery
 	columnBackfillTimeout time.Duration
+	// columnBackfillOutOfWindowTimeout bounds it for blocks past the serving window
+	columnBackfillOutOfWindowTimeout time.Duration
 
 	running           atomic.Bool
 	backfillCompleted atomic.Bool
@@ -109,20 +114,21 @@ func NewBlobHistoryDownloader(
 ) *BlobHistoryDownloader {
 	targetSlot := beaconCfg.DenebForkEpoch * beaconCfg.SlotsPerEpoch
 	return &BlobHistoryDownloader{
-		ctx:                       ctx,
-		beaconCfg:                 beaconCfg,
-		rpc:                       rpc,
-		indiciesDB:                indiciesDB,
-		blobStorage:               blobStorage,
-		blockReader:               blockReader,
-		sn:                        sn,
-		syncedChecker:             syncedChecker,
-		peerDasGetter:             peerDasGetter,
-		targetSlot:                targetSlot,
-		archiveBlobs:              archiveBlobs,
-		immediateBlobsBackfilling: immediateBlobsBackfilling,
-		columnBackfillTimeout:     blobColumnBackfillTimeout,
-		logger:                    logger,
+		ctx:                              ctx,
+		beaconCfg:                        beaconCfg,
+		rpc:                              rpc,
+		indiciesDB:                       indiciesDB,
+		blobStorage:                      blobStorage,
+		blockReader:                      blockReader,
+		sn:                               sn,
+		syncedChecker:                    syncedChecker,
+		peerDasGetter:                    peerDasGetter,
+		targetSlot:                       targetSlot,
+		archiveBlobs:                     archiveBlobs,
+		immediateBlobsBackfilling:        immediateBlobsBackfilling,
+		columnBackfillTimeout:            blobColumnBackfillTimeout,
+		columnBackfillOutOfWindowTimeout: blobColumnBackfillOutOfWindowTimeout,
+		logger:                           logger,
 	}
 }
 
@@ -397,11 +403,25 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 	peerDas := b.peerDasGetter.GetPeerDas()
 	for _, block := range blocks {
 		// [Modified in Gloas:EIP7732] Use ColumnSyncableSignedBlock interface
-		ctx, cancel := context.WithTimeout(b.ctx, b.columnBackfillTimeout)
+		ctx, cancel := context.WithTimeout(b.ctx, b.columnRecoveryTimeout(block.GetSlot()))
 		err := peerDas.DownloadColumnsAndRecoverBlobs(ctx, []cltypes.ColumnSyncableSignedBlock{block})
 		cancel()
 		if err != nil {
 			b.logger.Warn("[BlobHistoryDownloader] Error recovering blobs from block", "err", err, "slot", block.GetSlot())
 		}
 	}
+}
+
+// columnRecoveryTimeout gives blocks past the data-column serving window a much shorter
+// deadline. Peers only have to answer inside it, so out-of-window attempts nearly always
+// burn the whole timeout; an archive backfill spanning weeks pays that per block and takes
+// days. They stay best-effort rather than skipped because retention is a floor, not a cap,
+// and an archive peer may still answer.
+func (b *BlobHistoryDownloader) columnRecoveryTimeout(slot uint64) time.Duration {
+	head := b.headSlot.Load()
+	window := b.beaconCfg.MinSlotsForDataColumnSidecarsRequest()
+	if head > window && slot < head-window {
+		return b.columnBackfillOutOfWindowTimeout
+	}
+	return b.columnBackfillTimeout
 }
