@@ -272,6 +272,85 @@ func TestIsWalkDomain(t *testing.T) {
 	}
 }
 
+// TestLocalHistoryCoversWalk pins the fast-path guard added to
+// ensureHistoryForUnwindWalk: when every walked step × walk domain has a
+// local .v file covering it, the ensure step must return true so the
+// caller skips the preverified-registry starvation error.
+//
+// Motivation: cycle 6 iter 5 mode_a #2 hit the starvation error because
+// preverified had no entries for steps 310-314 (past preverified's
+// horizon), even though local retire had produced them. The fast path
+// prevents that class of false-positive.
+func TestLocalHistoryCoversWalk(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	historyDir := filepath.Join(dir, "history")
+	require.NoError(t, os.MkdirAll(historyDir, 0o755))
+
+	// Full coverage of steps 310-313 for all four walk domains.
+	fullSet := []string{
+		"v2.1-accounts.310-311.v", "v2.1-accounts.311-312.v", "v2.1-accounts.312-313.v", "v2.1-accounts.313-314.v",
+		"v2.1-storage.310-311.v", "v2.1-storage.311-312.v", "v2.1-storage.312-313.v", "v2.1-storage.313-314.v",
+		"v2.1-code.310-311.v", "v2.1-code.311-312.v", "v2.1-code.312-313.v", "v2.1-code.313-314.v",
+		"v2.1-receipt.310-311.v", "v2.1-receipt.311-312.v", "v2.1-receipt.312-313.v", "v2.1-receipt.313-314.v",
+	}
+	for _, name := range fullSet {
+		require.NoError(t, os.WriteFile(filepath.Join(historyDir, name), []byte("x"), 0o644))
+	}
+
+	// baseline=310 walkEnd=314 — covers full range, all four domains present.
+	require.True(t, localHistoryCoversWalk(dir, 310, 314, testStepSize))
+
+	// baseline=310 walkEnd=315 — extends past local coverage.
+	require.False(t, localHistoryCoversWalk(dir, 310, 315, testStepSize))
+
+	// baseline==walkEnd → trivially covered (empty range).
+	require.True(t, localHistoryCoversWalk(dir, 310, 310, testStepSize))
+	require.True(t, localHistoryCoversWalk(dir, 313, 310, testStepSize))
+}
+
+// TestLocalHistoryCoversWalk_MissingDomainFails pins the per-domain
+// coverage requirement: even if accounts/storage/code are fully covered,
+// missing receipt coverage counts as starvation.
+func TestLocalHistoryCoversWalk_MissingDomainFails(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	historyDir := filepath.Join(dir, "history")
+	require.NoError(t, os.MkdirAll(historyDir, 0o755))
+	// Only 3 of the 4 walk domains present.
+	for _, name := range []string{
+		"v2.1-accounts.310-311.v",
+		"v2.1-storage.310-311.v",
+		"v2.1-code.310-311.v",
+	} {
+		require.NoError(t, os.WriteFile(filepath.Join(historyDir, name), []byte("x"), 0o644))
+	}
+	require.False(t, localHistoryCoversWalk(dir, 310, 311, testStepSize),
+		"receipt domain missing → coverage incomplete")
+}
+
+// TestLocalHistoryCoversWalk_MergedFileCoversRange pins that a merged
+// multi-step .v file (v2.2-accounts.288-304.v) satisfies coverage for
+// every step in its [288, 304) range, not just one — retire+merge
+// widen files and both shapes contribute to local coverage.
+func TestLocalHistoryCoversWalk_MergedFileCoversRange(t *testing.T) {
+	t.Parallel()
+
+	dir := t.TempDir()
+	historyDir := filepath.Join(dir, "history")
+	require.NoError(t, os.MkdirAll(historyDir, 0o755))
+	// One merged file per domain spanning steps 288-303 (4 steps).
+	for _, dom := range []string{"accounts", "storage", "code", "receipt"} {
+		name := "v2.2-" + dom + ".288-304.v"
+		require.NoError(t, os.WriteFile(filepath.Join(historyDir, name), []byte("x"), 0o644))
+	}
+	// Walk over any subrange of the merged file's coverage — should pass.
+	require.True(t, localHistoryCoversWalk(dir, 288, 304, testStepSize))
+	require.True(t, localHistoryCoversWalk(dir, 290, 300, testStepSize))
+}
+
 func TestLocalCommitmentBaselineStep(t *testing.T) {
 	t.Parallel()
 

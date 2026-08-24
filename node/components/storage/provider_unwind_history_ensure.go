@@ -141,18 +141,30 @@ func (p *Provider) ensureHistoryForUnwindWalk(ctx context.Context, opts UnwindOp
 	}
 
 	needed := neededPreverifiedHistoryForWalk(cfg.Preverified.Items, baselineStep, coverEndStep, stepSize)
+
+	// Fast path: walk range fully covered by files already on disk.
+	// Preverified need not carry it — locally-retired .v/.ef from
+	// forward-exec (post any earlier iter) satisfy the compute walk
+	// without a download. Only fires the preverified-starvation error
+	// when neither preverified NOR local coverage exists (the real
+	// failure the guard was meant to catch: source publisher has no
+	// history retention AND we have no local production).
+	if localHistoryCoversWalk(p.snapDir, baselineStep, walkEndStep, stepSize) {
+		return noop, nil
+	}
+
 	if len(needed) == 0 {
 		// File starvation is a first-class error, not a silent noop:
-		// the walk range is non-empty but the preverified registry has
-		// no history entries covering it. Aborting the unwind here is
-		// strictly better than letting the compute run against missing
-		// history (0 touches → baseline root returned unchanged →
-		// header mismatch cascade). Recovery is a config problem —
-		// either the source publisher class lacks history retention
-		// (add an archive publisher) or the preverified registry is
-		// stale (LoadRemotePreverified didn't repopulate).
+		// the walk range is non-empty, preverified has no coverage,
+		// AND local files don't cover it either. Aborting is strictly
+		// better than letting the compute run against missing history
+		// (0 touches → baseline root returned unchanged → header
+		// mismatch cascade). Recovery is a config problem — either
+		// the source publisher class lacks history retention (add an
+		// archive publisher) or the preverified registry is stale
+		// (LoadRemotePreverified didn't repopulate).
 		return noop, fmt.Errorf(
-			"history starvation: walk range (%d, %d] × {accounts,storage,code,receipt} is non-empty but the preverified registry has no history entries covering it (baseline=%d walkEnd=%d spanSteps=%d)",
+			"history starvation: walk range (%d, %d] × {accounts,storage,code,receipt} is non-empty but neither the preverified registry nor local files cover it (baseline=%d walkEnd=%d spanSteps=%d)",
 			baselineStep, walkEndStep, baselineStep, walkEndStep, walkEndStep-baselineStep)
 	}
 
@@ -244,6 +256,80 @@ func (p *Provider) discardDownloadedHistory(ctx context.Context, paths []string,
 			p.logger.Debug("[storage] Provider.Unwind: remove temp history torrent failed", "path", torrentPath, "err", err)
 		}
 	}
+}
+
+// localHistoryCoversWalk reports whether the compute walk range
+// (baselineStep, walkEndStep] is fully covered by .v files already on
+// disk for every walk domain (accounts/storage/code/receipt). Each
+// step in the range must have at least one .v file whose [fromStep,
+// toStep) range contains it, for every domain.
+//
+// Coverage math for a step S in the walk range: at least one file with
+// fromStep <= S AND toStep > S. Merged files (spans > 1 step) and mode-C
+// v4 files (raw-txN naming with mid-step endTxN) both qualify —
+// parseStateFileStepRange normalises both to step coords, and any file
+// whose step range brackets S is a valid coverage source.
+//
+// Returns true only when EVERY (domain, step) tuple has coverage.
+// Called by ensureHistoryForUnwindWalk as a fast path: local coverage
+// means no download is needed, even when the preverified registry has
+// nothing for the range (which is normal past preverified's horizon).
+func localHistoryCoversWalk(snapDir string, baselineStep, walkEndStep, stepSize uint64) bool {
+	if baselineStep >= walkEndStep {
+		return true
+	}
+	historyDir := filepath.Join(snapDir, "history")
+	entries, err := os.ReadDir(historyDir)
+	if err != nil {
+		return false
+	}
+	// Per-domain coverage: coverage[domain][step] = true when at least
+	// one file on disk covers (domain, step). Domains use the same walk
+	// set as isWalkDomain — accounts/storage/code/receipt.
+	type domCov map[string]map[uint64]bool
+	coverage := make(domCov)
+	for _, dom := range []string{"accounts", "storage", "code", "receipt"} {
+		coverage[dom] = make(map[uint64]bool)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() {
+			continue
+		}
+		name := entry.Name()
+		if !strings.HasSuffix(name, ".v") {
+			continue
+		}
+		if !isWalkDomain("history/" + name) {
+			continue
+		}
+		fromStep, toStep, ok := parseStateFileStepRange(name, stepSize)
+		if !ok {
+			continue
+		}
+		// Identify which domain this file belongs to. isWalkDomain
+		// already gated us to one of the four; extract the substring.
+		var dom string
+		for _, d := range []string{"accounts", "storage", "code", "receipt"} {
+			if strings.Contains(name, "-"+d+".") {
+				dom = d
+				break
+			}
+		}
+		if dom == "" {
+			continue
+		}
+		for s := fromStep; s < toStep; s++ {
+			coverage[dom][s] = true
+		}
+	}
+	for _, dom := range []string{"accounts", "storage", "code", "receipt"} {
+		for s := baselineStep; s < walkEndStep; s++ {
+			if !coverage[dom][s] {
+				return false
+			}
+		}
+	}
+	return true
 }
 
 // highestLocalHistoryStep scans snapDir/history for `.v` files of the
