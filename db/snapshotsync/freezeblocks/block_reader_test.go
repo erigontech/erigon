@@ -582,7 +582,9 @@ func TestTxBlockView_StaleUntilReopen(t *testing.T) {
 	defer rwTx.Rollback()
 
 	bodiesInTxView := func() int {
-		return len(blockReader.view(rwTx).Bodies())
+		view, release := blockReader.view(rwTx)
+		defer release()
+		return len(view.Bodies())
 	}
 	require.Equal(t, 0, bodiesInTxView())
 

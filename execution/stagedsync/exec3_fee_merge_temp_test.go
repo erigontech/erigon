@@ -83,7 +83,7 @@ func TestRecordFeeMerge_RevalidationReleasesSupersededTemp(t *testing.T) {
 	be.awaitMapReleases()
 
 	require.Same(t, second, be.feeMergeTemp[0].writes)
-	require.Equal(t, 0, first.Count(), "the superseded fee-merge temp must be released")
+	require.True(t, first.Released(), "the superseded fee-merge temp must be released")
 	require.Equal(t, 1, second.Count())
 }
 
@@ -155,7 +155,7 @@ func TestRecordWorkerWrites_DropsCreditedTemp(t *testing.T) {
 
 	require.Nil(t, be.creditedWrites(version, be.blockIO.WriteSet(version.TxIndex)),
 		"a re-executed tx must be credited again, not handed the stale credit")
-	require.Equal(t, 0, tip.Count(), "the displaced fee-merge temp must be released")
+	require.True(t, tip.Released(), "the displaced fee-merge temp must be released")
 	require.Equal(t, 1, reTxOut.Count(), "the new TxOut must survive")
 }
 
@@ -198,7 +198,7 @@ func TestRecordFeeMerge_ReleaseKeepsSharedWrites(t *testing.T) {
 	be.recordFeeMerge(version, temp1, tipWrites, feeCreditNew)
 	be.awaitMapReleases()
 
-	require.Equal(t, 0, temp1.Count())
+	require.True(t, temp1.Released(), "the superseded set's maps must go back to the pool")
 	require.Same(t, tipWrites, be.blockIO.WriteSet(version.TxIndex))
 	vw, ok := tipWrites.GetBalance(shared)
 	require.True(t, ok, "entry shared with the released temp must still be reachable")
@@ -230,7 +230,7 @@ func TestRecordFeeMerge_RetractsVanishedCredit(t *testing.T) {
 	require.Nil(t, r.credited())
 
 	r.be.awaitMapReleases()
-	require.Equal(t, 0, merged.Count(), "the retracted merge product must be released")
+	require.True(t, merged.Released(), "the retracted merge product must be released")
 }
 
 // A Recorded round has nothing to do, and doing it anyway is not free: the
@@ -251,7 +251,7 @@ func TestRecordFeeMerge_RecordedRoundKeepsTheCredit(t *testing.T) {
 	require.Same(t, merged, r.recorded(), "a Recorded round must not replace the recorded set")
 	require.Same(t, merged, r.credited(), "nor drop the temp that says it is credited")
 	r.be.awaitMapReleases()
-	require.NotEqual(t, 0, merged.Count(), "nor release the maps the recorded set still holds")
+	require.False(t, merged.Released(), "nor release the maps the recorded set still holds")
 	_, _, ok := r.vm.ReadSelfDestruct(s.coinbase, version.TxIndex+1)
 	require.True(t, ok, "the credit must stay visible to later txs")
 }
