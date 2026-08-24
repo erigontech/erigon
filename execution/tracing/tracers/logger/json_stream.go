@@ -19,6 +19,8 @@ package logger
 import (
 	"context"
 	"encoding/hex"
+	"maps"
+	"slices"
 
 	"github.com/holiman/uint256"
 
@@ -38,9 +40,11 @@ import (
 // a track record of modified storage which is used in reporting snapshots of the
 // contract their storage.
 type JsonStreamLogger struct {
-	ctx          context.Context
-	cfg          LogConfig
-	stream       jsonstream.Stream
+	ctx    context.Context
+	cfg    LogConfig
+	stream jsonstream.Stream
+	// Scratch for the hex helpers below. Every result aliases it, so only one is
+	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
 	firstCapture bool
 	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
@@ -83,15 +87,28 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
-// hexWithPrefix encodes b as a 0x-prefixed hex string using the internal buffer.
-// The result aliases hexEncodeBuf, so it is invalidated by anything that writes
-// that buffer, writeMemoryWordRaw included. Hand it straight to the stream,
-// which copies it in.
-func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
+// hexWithPrefix encodes h into hexEncodeBuf as 0x-prefixed hex. It takes a hash
+// rather than a slice so the result is known to fit; the buffer is not resized.
+func (l *JsonStreamLogger) hexWithPrefix(h *common.Hash) string {
 	l.hexEncodeBuf[0] = '0'
 	l.hexEncodeBuf[1] = 'x'
-	n := hex.Encode(l.hexEncodeBuf[2:], b)
+	n := hex.Encode(l.hexEncodeBuf[2:], h[:])
 	return common.ToStringZeroCopy(l.hexEncodeBuf[:2+n])
+}
+
+// hexQuoted encodes v as a complete JSON string, quotes included, for WriteRaw.
+func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
+	l.hexEncodeBuf[0] = '"'
+	b, _ := hexutil.U256(*v).AppendText(l.hexEncodeBuf[:1])
+	return common.ToStringZeroCopy(append(b, '"'))
+}
+
+// hexQuotedHash is hexWithPrefix plus the quotes, ready for WriteRaw.
+func (l *JsonStreamLogger) hexQuotedHash(h *common.Hash) string {
+	l.hexEncodeBuf[0], l.hexEncodeBuf[1], l.hexEncodeBuf[2] = '"', '0', 'x'
+	n := hex.Encode(l.hexEncodeBuf[3:], h[:])
+	l.hexEncodeBuf[3+n] = '"'
+	return common.ToStringZeroCopy(l.hexEncodeBuf[:4+n])
 }
 
 // writeMemoryWordRaw writes a memory word as a JSON string "0x<hex>" directly
@@ -209,11 +226,11 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("stack")
 		l.stream.WriteArrayStart()
-		for i, stackValue := range stack {
+		for i := range stack {
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(stackValue.Hex())
+			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
 		}
 		l.stream.WriteArrayEnd()
 	}
@@ -239,25 +256,18 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("storage")
 		l.stream.WriteObjectStart()
-		first := true
-		// Sort storage by locations for easier comparison with geth
-		if l.locations != nil {
-			l.locations = l.locations[:0]
-		}
+		// Sorted by location for easier comparison with geth
 		s := l.storage[contractAddr]
-		for loc := range s {
-			l.locations = append(l.locations, loc)
-		}
+		l.locations = slices.AppendSeq(l.locations[:0], maps.Keys(s))
 		l.locations.Sort()
-		for _, loc := range l.locations {
-			value := s[loc]
-			if first {
-				first = false
-			} else {
+		for i := range l.locations {
+			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteObjectField(l.hexWithPrefix(loc[:]))
-			l.stream.WriteString(l.hexWithPrefix(value[:]))
+			loc := &l.locations[i]
+			value := s[*loc]
+			l.stream.WriteObjectField(l.hexWithPrefix(loc))
+			l.stream.WriteRaw(l.hexQuotedHash(&value))
 		}
 		l.stream.WriteObjectEnd()
 	}
