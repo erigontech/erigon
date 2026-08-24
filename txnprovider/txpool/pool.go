@@ -1549,11 +1549,11 @@ func (p *TxPool) addTxns(blockNum uint64, cacheView kvcache.CacheView, senders *
 		if _, ok := p.senderLastActivity[senderID]; !ok {
 			p.senderLastActivity[senderID] = blockNum
 		}
-		nonce, balance, _, err := senders.info(cacheView, senderID)
+		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, discardReasons, err
 		}
-		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger)
+		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
 	p.promote(pendingBaseFee, pendingBlobFee, &announcements, logger)
@@ -1631,21 +1631,21 @@ func (p *TxPool) addTxnsOnNewBlock(blockNum uint64, cacheView kvcache.CacheView,
 	for senderID := range sendersWithChangedState {
 		// Reset the dormancy timer: this sender had a real on-chain state change.
 		p.senderLastActivity[senderID] = blockNum
-		nonce, balance, _, err := senders.info(cacheView, senderID)
+		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, err
 		}
-		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger)
+		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
 	// Don't touch senderLastActivity for queuedSenders — these senders did not
 	// change state on-chain, so the dormancy timer should not be reset.
 	for senderID := range queuedSenders {
-		nonce, balance, _, err := senders.info(cacheView, senderID)
+		nonce, balance, codeHash, err := senders.info(cacheView, senderID)
 		if err != nil {
 			return announcements, err
 		}
-		p.onSenderStateChange(senderID, nonce, balance, blockGasLimit, logger)
+		p.onSenderStateChange(senderID, nonce, balance, codeHash, blockGasLimit, logger)
 	}
 
 	return announcements, nil
@@ -2105,12 +2105,14 @@ func (p *TxPool) removeMined(byNonce *BySenderAndNonce, minedTxns []*TxnSlot) er
 // which sub pool they will need to go to. Since this depends on other transactions from the same sender by with lower
 // nonces, and also affect other transactions from the same sender with higher nonce, it loops through all transactions
 // for a given senderID
-func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, blockGasLimit uint64, logger log.Logger) {
+func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, senderBalance uint256.Int, senderCodeHash accounts.CodeHash, blockGasLimit uint64, logger log.Logger) {
 
 	noGapsNonce := senderNonce
 	cumulativeRequiredBalance := uint256.NewInt(0)
 	minFeeCap := uint256.NewInt(0).SetAllOne()
 	minTip := uint64(math.MaxUint64)
+	senderHasCode := !senderCodeHash.IsEmpty()
+	senderTxnKept := false
 	var toDel []*metaTxn                       // can't delete items while iterate them
 	var toDelReasons []txpoolcfg.DiscardReason // parallel reasons slice for toDel
 
@@ -2120,6 +2122,12 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 		switch {
 		case senderNonce > mt.TxnSlot.Nonce:
 			deleteAndContinueReasonLog = "low nonce"
+		case senderHasCode && senderTxnKept:
+			deleteAndContinueReasonLog = "delegated sender transaction limit"
+			discardReason = txpoolcfg.DelegatedTxnLimit
+		case senderHasCode && mt.TxnSlot.Nonce != senderNonce:
+			deleteAndContinueReasonLog = "delegated sender nonce gap"
+			discardReason = txpoolcfg.DelegatedNonceGap
 		case p.cfg.MaxNonceGap > 0 && mt.TxnSlot.Nonce > noGapsNonce && mt.TxnSlot.Nonce-noGapsNonce > p.cfg.MaxNonceGap:
 			// Evict "zombie" queued transactions whose nonce is so far ahead of the sender's
 			// on-chain nonce (accounting for any consecutive txns already in the pool) that they
@@ -2139,6 +2147,9 @@ func (p *TxPool) onSenderStateChange(senderID uint64, senderNonce uint64, sender
 			toDel = append(toDel, mt)
 			toDelReasons = append(toDelReasons, discardReason)
 			return true
+		}
+		if senderHasCode {
+			senderTxnKept = true
 		}
 
 		if minFeeCap.Gt(mt.TxnSlot.GetFeeCap()) {

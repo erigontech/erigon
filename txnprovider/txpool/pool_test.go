@@ -269,6 +269,54 @@ func TestAddLocalTxnsAllowsDelegatedSenderReplacement(t *testing.T) {
 	require.Contains(t, pool.byHash, string(replacement.IDHash[:]))
 }
 
+func TestOnNewBlockLimitsNewlyDelegatedSender(t *testing.T) {
+	ctx, pool, _, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
+
+	var txns TxnSlots
+	for i := range 3 {
+		nonce := uint64(i)
+		txn := newTestTxnSlot(nonce, 0, 1, 2, 21_000)
+		txn.IDHash[0] = byte(nonce + 1)
+		txns.Append(txn, sender[:], true)
+	}
+
+	reasons, err := pool.AddLocalTxns(ctx, txns)
+	require.NoError(t, err)
+	require.Equal(t, []txpoolcfg.DiscardReason{
+		txpoolcfg.Success,
+		txpoolcfg.Success,
+		txpoolcfg.Success,
+	}, reasons)
+
+	account := accounts3.Account{
+		Nonce:    1,
+		Balance:  *uint256.NewInt(common.Ether),
+		CodeHash: testDelegationCodeHash(),
+	}
+	writeTestSenderState(t, ctx, coreDB, log.New(), sender, accounts3.SerialiseV3(&account), 1)
+	change := &remoteproto.StateChangeBatch{
+		StateVersionId:      1,
+		PendingBlockBaseFee: 1,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 1,
+			BlockHash:   gointerfaces.ConvertHashToH256(common.Hash{1}),
+			Changes: []*remoteproto.AccountChange{{
+				Action:  remoteproto.Action_UPSERT,
+				Address: gointerfaces.ConvertAddressToH160(sender),
+				Data:    accounts3.SerialiseV3(&account),
+			}},
+		}},
+	}
+	require.NoError(t, pool.OnNewBlock(ctx, change, TxnSlots{}, TxnSlots{}, TxnSlots{}))
+
+	pending, baseFee, queued := pool.CountContent()
+	require.Equal(t, 1, pending+baseFee+queued)
+	require.NotContains(t, pool.byHash, string(txns.Txns[0].IDHash[:]))
+	require.Contains(t, pool.byHash, string(txns.Txns[1].IDHash[:]))
+	require.NotContains(t, pool.byHash, string(txns.Txns[2].IDHash[:]))
+}
+
 func TestFromDBSkipsInvalidTransactions(t *testing.T) {
 	ctx, pool, poolDB, coreDB, sender := newTestPoolWithFundedSender(t, accounts.EmptyCodeHash)
 
