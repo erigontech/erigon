@@ -503,8 +503,8 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 }
 
 // FlushPendingUpdates applies the pending deferred commitment update.
-// It sets the corresponding block's changeset as the accumulator
-// so writes go directly to the correct changeset.
+// It redirects the commitment writer's diff at the corresponding block's
+// changeset so the branch writes land in the correct changeset.
 //
 // The inner swap mutates the commitment writer's diff, which the exec loop
 // also rewrites via SetChangesetAccumulator — hence changesetMu, taken here
@@ -706,9 +706,9 @@ func (sd *SharedDomains) SwapCommitmentDiffLocked(acc *changeset.StateChangeSet)
 	return func() { h.SetCommitmentDiffRaw(prev) }
 }
 
-// DetachChangesetAccumulatorLocked installs a nil changeset accumulator and
-// returns a func that restores the previous one. Callers must hold
-// changesetMu.
+// DetachChangesetAccumulatorLocked detaches the commitment writer's diff
+// (no changeset recording) and returns a func that restores the previous
+// one. Callers must hold changesetMu.
 func (sd *SharedDomains) DetachChangesetAccumulatorLocked() (restore func()) {
 	return sd.SwapCommitmentDiffLocked(nil)
 }
