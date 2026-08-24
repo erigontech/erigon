@@ -214,3 +214,19 @@ func TestNewRPCTransaction_AccessList_AllZeroSig(t *testing.T) {
 	require.EqualValues(t, 0, result.R.ToInt().Int64())
 	require.EqualValues(t, 0, result.S.ToInt().Int64())
 }
+
+// A blob call with no maxFeePerBlobGas (debug_traceCall accepts one) must
+// default the cap to zero rather than dereference the missing field.
+func TestToTransactionBlobWithoutMaxFeePerBlobGas(t *testing.T) {
+	to := common.HexToAddress("0x1234567890123456789012345678901234567890")
+	args := CallArgs{
+		To:                  &to,
+		BlobVersionedHashes: []common.Hash{{1}},
+	}
+
+	txn, err := args.ToTransaction(1_000_000, uint256.NewInt(7))
+	require.NoError(t, err)
+	blobTx, ok := txn.(*types.BlobTx)
+	require.True(t, ok)
+	require.True(t, blobTx.MaxFeePerBlobGas.IsZero())
+}

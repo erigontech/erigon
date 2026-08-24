@@ -108,7 +108,6 @@ type EngineXTestRunner struct {
 	preAllocs          map[PreAllocHash]*PreAlloc
 	mu                 sync.Mutex
 	testers            map[Fork]map[PreAllocHash]testerEntry
-	wg                 sync.WaitGroup
 	profileHook        RequestProfileHook
 	warmupKzgCtxOnInit bool
 }

@@ -26,7 +26,6 @@ import (
 
 	"github.com/spf13/cobra"
 
-	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/cmd/utils"
 	"github.com/erigontech/erigon/cmd/utils/flags"
 	"github.com/erigontech/erigon/common"
@@ -201,7 +200,7 @@ func doTxpool(ctx context.Context, logger log.Logger) error {
 		return err
 	}
 
-	miningGrpcServer := privateapi.NewMiningServer(ctx, &rpcdaemontest.IsMiningMock{}, nil, logger)
+	miningGrpcServer := privateapi.NewMiningServer(ctx, privateapi.NoMining{}, nil, logger)
 	grpcServer, err := txpool.StartGrpc(ctx, txpoolGrpcServer, miningGrpcServer, txpoolApiAddr, nil, logger)
 	if err != nil {
 		return err

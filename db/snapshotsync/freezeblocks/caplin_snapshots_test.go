@@ -42,7 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/dbutils"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/recsplit"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync"
@@ -56,7 +56,7 @@ import (
 // nil snCfg. This test uses toSlot=CaplinMergeLimit so the loop body executes
 // (doesn't break early), exercising the exact code path that panicked.
 func TestDumpBeaconBlocksNoPanic(t *testing.T) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 
 	// toSlot == CaplinMergeLimit: toSlot-fromSlot is not < blocksPerFile,
@@ -73,7 +73,7 @@ func TestDumpBeaconBlocksNoPanic(t *testing.T) {
 // Compress fsyncs and renames before returning.
 func TestDumpBeaconBlocksRangeBuildsSegAndIdx(t *testing.T) {
 	ctx := t.Context()
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 
 	require.NoError(t, db.Update(ctx, func(tx kv.RwTx) error {

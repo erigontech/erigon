@@ -66,9 +66,6 @@ func touchBatch(t *testing.T, ms *MockState, ut *Updates, keys [][]byte, upds []
 	}
 }
 
-// Process must consume the ModeParallel collection the way HashSort consumes
-// ModeDirect/ModeUpdate: a carried Updates buffer starts every block empty, so block N+1
-// folds only its own touches instead of the union of everything since batch start.
 func TestModeParallel_ProcessConsumesUpdates(t *testing.T) {
 	t.Parallel()
 	k1, u1, k2, u2, kc, uc := lifecycleCorpus()
@@ -103,8 +100,6 @@ func TestModeParallel_ProcessConsumesUpdates(t *testing.T) {
 	})
 }
 
-// A failed Process must leave the collection intact so the caller's retry folds the
-// block's touches; only a successful fold consumes them.
 func TestModeParallel_ErrorKeepsCollection(t *testing.T) {
 	t.Parallel()
 	k1, u1, _, _, _, _ := lifecycleCorpus()

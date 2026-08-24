@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
@@ -26,7 +26,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1)
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
@@ -228,7 +228,7 @@ func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 	ctx := t.Context()
 
 	newDB := func(withBlocks bool) *DB {
-		mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+		mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 		dirs := datadir.New(t.TempDir())
 		agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
 		t.Cleanup(agg.Close)
@@ -265,7 +265,7 @@ func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
@@ -327,7 +327,7 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
@@ -390,7 +390,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1)
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)

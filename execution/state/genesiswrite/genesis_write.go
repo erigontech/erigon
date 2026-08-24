@@ -43,6 +43,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	chainspec "github.com/erigontech/erigon/execution/chain/spec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -51,7 +52,6 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
-	polygonchain "github.com/erigontech/erigon/polygon/chain"
 )
 
 // GenesisMismatchError is raised when trying to overwrite an existing
@@ -196,7 +196,7 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		return newCfg, nil, err
 	}
 	storedCfg, storedErr := rawdb.ReadChainConfig(tx, storedHash)
-	if storedErr != nil && newCfg.Bor == nil {
+	if storedErr != nil {
 		return newCfg, nil, storedErr
 	}
 	if storedCfg == nil {
@@ -392,14 +392,14 @@ func GenesisToBlock(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*ty
 
 	head.Root = common.BytesToHash(rh)
 
-	return types.NewBlock(head, nil, nil, nil, withdrawals), ibs, nil
+	return types.NewBlock(head, nil, nil, nil, withdrawals, nil), ibs, nil
 }
 
 func ComputeGenesisCommitment(ctx context.Context, g *types.Genesis, tx kv.TemporalTx, sd *execctx.SharedDomains, head *types.Header) ([]byte, *state.IntraBlockState, error) {
 	blockNum := uint64(0)
 	txNum := uint64(1) // 2 system txs in begin/end of block. Attribute state-writes to first, consensus state-changes to second
 
-	r, w := state.NewReaderV3(sd.AsGetter(tx)), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
+	r, w := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})), state.NewWriter(sd.AsPutDel(tx), nil, txNum)
 
 	statedb := state.NewWithVersionMap(r, &state.VersionMap{})
 	statedb.SetTrace(false)
@@ -553,17 +553,11 @@ func GenesisWithoutStateToBlock(g *types.Genesis) (head *types.Header, withdrawa
 		}
 		if g.SlotNumber != nil {
 			head.SlotNumber = g.SlotNumber
+		} else {
+			head.SlotNumber = new(uint64)
 		}
 	}
 
-	// these fields need to be overridden for Bor running in a kurtosis devnet
-	if g.Config != nil && g.Config.Bor != nil && g.Config.ChainID.Uint64() == polygonchain.BorKurtosisDevnetChainId {
-		withdrawals = []*types.Withdrawal{}
-		head.BlobGasUsed = new(uint64)
-		head.ExcessBlobGas = new(uint64)
-		emptyHash := common.HexToHash("0x0")
-		head.ParentBeaconBlockRoot = &emptyHash
-	}
 	return
 }
 
@@ -577,15 +571,4 @@ func sortedAllocAddresses(m types.GenesisAlloc) []common.Address {
 		return bytes.Compare(a[:], b[:])
 	})
 	return addrs
-}
-
-func sortedAllocKeys(m types.GenesisAlloc) []string {
-	keys := make([]string, len(m))
-	i := 0
-	for k := range m {
-		keys[i] = string(k[:])
-		i++
-	}
-	slices.Sort(keys)
-	return keys
 }

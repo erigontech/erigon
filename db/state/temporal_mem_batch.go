@@ -38,24 +38,14 @@ import (
 	"github.com/erigontech/erigon/db/state/kvmetrics"
 )
 
-type iodir int
-
-const (
-	get iodir = iota
-	put
-)
-
 type dataWithTxNum struct {
 	data  []byte
 	txNum uint64
-	dir   iodir
 }
 
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
 type TemporalMemBatch struct {
 	stepSize uint64
-
-	getCacheSize int
 
 	// inMemHistoryReads: accumulate all writes with txNums so GetAsOf can answer time-travel
 	// queries from in-flight state (needed for RPC reads during live chain-tip execution).
@@ -461,6 +451,25 @@ func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSe
 		}
 	}
 }
+
+// SetCommitmentDiff redirects only the commitment writer's diff, leaving every
+// other domain writer pointed at the live accumulator.
+func (sd *TemporalMemBatch) SetCommitmentDiff(acc *changeset.StateChangeSet) {
+	if acc == nil {
+		sd.domainWriters[kv.CommitmentDomain].SetDiff(nil)
+		return
+	}
+	sd.domainWriters[kv.CommitmentDomain].SetDiff(&acc.Diffs[kv.CommitmentDomain])
+}
+
+func (sd *TemporalMemBatch) CommitmentDiff() *kv.DomainDiff {
+	return sd.domainWriters[kv.CommitmentDomain].Diff()
+}
+
+func (sd *TemporalMemBatch) SetCommitmentDiffRaw(d *kv.DomainDiff) {
+	sd.domainWriters[kv.CommitmentDomain].SetDiff(d)
+}
+
 func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
 	sd.pastChangesLock.Lock()
 	defer sd.pastChangesLock.Unlock()
