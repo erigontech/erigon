@@ -241,3 +241,80 @@ func deployDeFiContracts(b testing.TB, statedb *state.IntraBlockState) {
 		Op(vm.STOP).Bytes()
 	deployContract(b, statedb, addrRouter, routerCode)
 }
+
+// BenchmarkDeepStacks recurses into itself until gas runs out, with a nearly
+// full stack in every frame. Ported from go-ethereum's BenchmarkLargeDeepStacks
+// and BenchmarkShortDeepStacks. It measures CallContext acquisition at depth,
+// where every context carries a 32 KB Stack.
+func BenchmarkDeepStacks(b *testing.B) {
+	for _, pushes := range []int{8, 512} {
+		b.Run(fmt.Sprintf("pushes-%d", pushes), func(b *testing.B) {
+			b.ReportAllocs()
+			vmenv := benchConfig(b, 10_000_000)
+			statedb := vmenv.IntraBlockState()
+
+			code := make([]byte, 0, pushes+3)
+			for range pushes {
+				code = append(code, byte(vm.PUSH0))
+			}
+			code = append(code, byte(vm.ADDRESS), byte(vm.GAS), byte(vm.CALL))
+			deployContract(b, statedb, addrContract, code)
+
+			callComplete(b, vmenv, addrContract, nil)
+			for b.Loop() {
+				callComplete(b, vmenv, addrContract, nil)
+			}
+		})
+	}
+}
+
+// BenchmarkDeepCallsWithMemory runs a STATICCALL chain where every frame
+// expands memory before calling the next, so all frames hold memory at once.
+// The two shallow cases match mainnet call trees, where a DeFi router or
+// aggregator nests under twenty frames and each ABI-encodes a few KB; the
+// deep case is a stress shape that mainnet gas costs do not reach.
+func BenchmarkDeepCallsWithMemory(b *testing.B) {
+	for _, tc := range []struct {
+		name  string
+		depth int
+		words int
+	}{
+		{"defi/depth-8/1KiB", 8, 32},
+		{"aggregator/depth-16/4KiB", 16, 128},
+		{"stress/depth-64/8KiB", 64, 256},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			vmenv := benchConfig(b, 30_000_000)
+			statedb := vmenv.IntraBlockState()
+
+			addrs := makeAddrs(tc.depth)
+			for i, a := range addrs {
+				var next *common.Address
+				if i < len(addrs)-1 {
+					next = &addrs[i+1].raw
+				}
+				deployContract(b, statedb, a.interned, memChainCode(next, tc.words))
+			}
+
+			callComplete(b, vmenv, addrs[0].interned, nil)
+			for b.Loop() {
+				callComplete(b, vmenv, addrs[0].interned, nil)
+			}
+		})
+	}
+}
+
+// memChainCode fills words of memory a word at a time, the way solidity grows
+// its free memory pointer, then hands the region to next as calldata. A leaf
+// (next == nil) returns instead of calling on.
+func memChainCode(next *common.Address, words int) []byte {
+	p := program.New()
+	for w := range words {
+		p.Push(0xFF).Push(w * 32).Op(vm.MSTORE)
+	}
+	if next == nil {
+		return p.Return(0, 32).Bytes()
+	}
+	return p.StaticCall(nil, *next, 0, words*32, 0, 32).Op(vm.POP, vm.STOP).Bytes()
+}
