@@ -78,6 +78,21 @@ func (g *lruGen[V]) add(h uint64, v V) (evicted bool) {
 	return evicted
 }
 
+// addIfAbsent is add's counterpart for a caller that cannot guarantee this
+// generation lacks h — growLRU's grow is not fenced against writers (see its
+// doc comment), so a same-key Remove/Add pair can land on a generation a
+// concurrent grow already copied the key into. freelru.Add replaces an
+// existing key in place without firing OnEvict, so the count must rise only
+// when the key was actually absent.
+func (g *lruGen[V]) addIfAbsent(h uint64, v V) (evicted bool) {
+	existed := g.lru.Contains(h)
+	evicted = g.lru.Add(h, v)
+	if !existed {
+		g.n.Add(1)
+	}
+	return evicted
+}
+
 // GenericCache is a sharded, LRU-evicting bounded cache for key-value
 // data. Eviction mode is fixed at construction (see policy.go).
 type GenericCache[T any] struct {

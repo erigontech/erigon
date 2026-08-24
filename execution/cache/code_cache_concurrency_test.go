@@ -233,6 +233,42 @@ func TestGrowLRU_LenTracksLRU(t *testing.T) {
 	check("purge")
 }
 
+// growLRU's generation swap is not fenced against writers (see its doc
+// comment): a grow can copy a key into the new generation before a same-key
+// Remove/Add pair (putContentLocked's stale-entry refresh) observes the swap.
+// The Remove then lands on the retired generation while the Add lands on the
+// new one, which already holds the copy — freelru.Add replaces it in place
+// without firing OnEvict, so the counter must not increment again.
+func TestGrowLRU_GrowRaceReplaceDoesNotDoubleCount(t *testing.T) {
+	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
+	defer g.Close()
+
+	h := uint64(7)
+	g.Add(h, 1)
+	gen1 := g.cur.Load()
+
+	// Build the next generation exactly like maybeGrow's copy loop, and
+	// publish it while h is still present in gen1.
+	newCap := g.curCap.Load() * genericCacheGrowFactor
+	gen2 := g.newShards(newCap)
+	for _, k := range gen1.lru.Keys() {
+		if v, ok := gen1.lru.Get(k); ok {
+			gen2.add(k, v)
+		}
+	}
+	g.cur.Store(gen2)
+	g.curCap.Store(newCap)
+
+	// The writer's Remove call raced ahead of the swap and landed on the
+	// retired generation.
+	gen1.lru.Remove(h)
+	// Its Add call now targets gen2, which already holds h from the copy.
+	g.Add(h, 2)
+
+	require.Equal(t, gen2.lru.Len(), g.Len(),
+		"counter must not double-count a grow-copied key replaced in place")
+}
+
 // CodeCache drives three growLRU layers through putContentLocked, which removes
 // a stale entry before re-adding it; concurrent puts of distinct code must still
 // leave each layer's counter equal to its LRU's real length.
