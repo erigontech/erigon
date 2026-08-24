@@ -1038,6 +1038,7 @@ type BlobArchiveStoreCheck struct {
 	// A partial sidecar set is still worth refetching one blob for, so discarding it is
 	// opt-in: the audit has to be safe to run on a datadir you intend to publish from.
 	RemoveMismatched bool `name:"remove-mismatched" help:"delete the stored sidecars and index entry of every mismatched slot instead of only reporting it" default:"false"`
+	BelowFrozen      bool `name:"below-frozen" help:"keep scanning below the frozen blob frontier, where an empty store is expected" default:"false"`
 }
 
 func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
@@ -1065,7 +1066,14 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 	}
 	snr := freezeblocks.NewBeaconSnapshotReader(csn, nil, beaconConfig)
 
-	targetSlot := beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch
+	// Antiquation deletes a slot's sidecars from the store once they are in a segment, so
+	// below the frozen frontier an empty store is correct and every blob-carrying slot
+	// would be reported as missing. check-blobs-snapshots-count covers that range instead.
+	targetSlot := max(beaconConfig.DenebForkEpoch*beaconConfig.SlotsPerEpoch, csn.FrozenBlobs())
+	if b.BelowFrozen {
+		targetSlot = beaconConfig.DenebForkEpoch * beaconConfig.SlotsPerEpoch
+	}
+	log.Info("Scanning blob store", "from", b.FromSlot, "to", targetSlot, "frozenBlobs", csn.FrozenBlobs())
 	tx, err := db.BeginRo(ctx)
 	if err != nil {
 		return err
