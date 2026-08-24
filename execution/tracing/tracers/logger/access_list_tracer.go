@@ -214,8 +214,8 @@ func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTrac
 	return newAccessListTracer(a.excl, a.list.cloneExcluding(a.excl), state)
 }
 
-// markCreated and markUsedBeforeCreation allocate on first write, so a txn that
-// creates no contract keeps both sets nil.
+// markCreated and markUsedBeforeCreation each allocate their set lazily, on
+// its own first insertion.
 func (a *AccessListTracer) markCreated(addr common.Address) {
 	if a.createdContracts == nil {
 		a.createdContracts = make(map[common.Address]struct{})
@@ -304,8 +304,13 @@ func (a *AccessListTracer) AccessListSorted() types.AccessList {
 	return a.list.accessListSorted()
 }
 
-// CreatedContracts returns the set of all addresses of contracts created during txn execution.
+// CreatedContracts returns the set of all addresses of contracts created during
+// txn execution. It always returns a writable map, allocating it on first call
+// if no CREATE has happened yet.
 func (a *AccessListTracer) CreatedContracts() map[common.Address]struct{} {
+	if a.createdContracts == nil {
+		a.createdContracts = make(map[common.Address]struct{})
+	}
 	return a.createdContracts
 }
 
