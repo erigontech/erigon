@@ -253,9 +253,9 @@ func BenchmarkDeepStacks(b *testing.B) {
 			vmenv := benchConfig(b, 10_000_000)
 			statedb := vmenv.IntraBlockState()
 
-			code := make([]byte, pushes)
-			for i := range code {
-				code[i] = byte(vm.PUSH0)
+			code := make([]byte, 0, pushes+3)
+			for range pushes {
+				code = append(code, byte(vm.PUSH0))
 			}
 			code = append(code, byte(vm.ADDRESS), byte(vm.GAS), byte(vm.CALL))
 			deployContract(b, statedb, addrContract, code)
