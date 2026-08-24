@@ -26,7 +26,7 @@ import (
 const maxLightClientsPerRequest = 100
 
 func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream) error {
-	lc := c.forkChoiceReader.NewestLightClientUpdate()
+	lc := c.chainDataReader.NewestLightClientUpdate()
 	if lc == nil {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
@@ -47,7 +47,7 @@ func (c *ConsensusHandlers) optimisticLightClientUpdateHandler(s network.Stream)
 }
 
 func (c *ConsensusHandlers) finalityLightClientUpdateHandler(s network.Stream) error {
-	lc := c.forkChoiceReader.NewestLightClientUpdate()
+	lc := c.chainDataReader.NewestLightClientUpdate()
 	if lc == nil {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
@@ -74,7 +74,7 @@ func (c *ConsensusHandlers) lightClientBootstrapHandler(s network.Stream) error 
 		return err
 	}
 
-	lc, has := c.forkChoiceReader.GetLightClientBootstrap(root.Root)
+	lc, has := c.chainDataReader.GetLightClientBootstrap(root.Root)
 	if !has {
 		return ssz_snappy.EncodeAndWrite(s, &emptyString{}, ResourceUnavailablePrefix)
 	}
@@ -112,7 +112,7 @@ func (c *ConsensusHandlers) lightClientUpdatesByRangeHandler(s network.Stream) e
 	notFoundPrev := false
 	// Fetch from [start_period, start_period + count]
 	for i := req.StartPeriod; i < endPeriod; i++ {
-		update, has := c.forkChoiceReader.GetLightClientUpdate(i)
+		update, has := c.chainDataReader.GetLightClientUpdate(i)
 		if !has {
 			notFoundPrev = true
 			continue

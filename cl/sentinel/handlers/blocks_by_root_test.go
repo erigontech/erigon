@@ -35,9 +35,9 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
-	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/communication"
 	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
+	"github.com/erigontech/erigon/cl/sentinel/handlers/mock_services"
 	"github.com/erigontech/erigon/cl/sentinel/peers"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
@@ -89,7 +89,7 @@ func TestBlocksByRangeHandler(t *testing.T) {
 		nil,
 		beaconCfg,
 		ethClock,
-		nil, &mock_services.ForkChoiceStorageMock{}, nil, nil, nil, true,
+		nil, &mock_services.ChainDataReaderMock{}, nil, nil, nil, true,
 	)
 	c.Start()
 	var req solid.HashListSSZ = solid.NewHashList(len(expBlocks))
@@ -166,4 +166,87 @@ func TestBlocksByRangeHandler(t *testing.T) {
 	}
 
 	indiciesDB.Close()
+}
+
+func TestBlocksByRootChainDataFallback(t *testing.T) {
+	ctx := context.Background()
+
+	host, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host.Close() })
+
+	host1, err := libp2p.New(libp2p.ListenAddrStrings("/ip4/127.0.0.1/tcp/0"))
+	require.NoError(t, err)
+	t.Cleanup(func() { host1.Close() })
+
+	err = host.Connect(ctx, peer.AddrInfo{
+		ID:    host1.ID(),
+		Addrs: host1.Addrs(),
+	})
+	require.NoError(t, err)
+
+	peersPool := peers.NewPool(host)
+	_, indiciesDB := setupStore(t)
+	t.Cleanup(func() { indiciesDB.Close() })
+	store := tests.NewMockBlockReader()
+
+	blocks, blockRoots := makeTestBlockChain(t, 100, 1)
+	chainData := mock_services.NewChainDataReaderMock()
+	chainData.Blocks[blockRoots[0]] = blocks[0]
+
+	ethClock := getEthClock(t)
+	_, beaconCfg := clparams.GetConfigsByNetwork(1)
+	c := NewConsensusHandlers(
+		ctx,
+		store,
+		indiciesDB,
+		host,
+		peersPool,
+		&clparams.NetworkConfig{},
+		nil,
+		beaconCfg,
+		ethClock,
+		nil, chainData, nil, nil, nil, true,
+	)
+	c.Start()
+
+	var req solid.HashListSSZ = solid.NewHashList(1)
+	req.Append(blockRoots[0])
+	var reqBuf bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&reqBuf, req))
+
+	stream, err := host1.NewStream(ctx, host.ID(), protocol.ID(communication.BeaconBlocksByRootProtocolV2))
+	require.NoError(t, err)
+
+	_, err = stream.Write(bytes.Clone(reqBuf.Bytes()))
+	require.NoError(t, err)
+
+	firstByte := make([]byte, 1)
+	_, err = io.ReadFull(stream, firstByte)
+	require.NoError(t, err)
+	require.Equal(t, byte(0), firstByte[0])
+
+	forkDigest := make([]byte, 4)
+	_, err = io.ReadFull(stream, forkDigest)
+	require.NoError(t, err)
+
+	respForkDigest := binary.BigEndian.Uint32(forkDigest)
+	require.NotZero(t, respForkDigest)
+
+	encodedLn, _, err := ssz_snappy.ReadUvarint(stream)
+	require.NoError(t, err)
+
+	raw := make([]byte, encodedLn)
+	sr := snappy.NewReader(stream)
+	_, err = io.ReadFull(sr, raw)
+	require.NoError(t, err)
+
+	version, err := ethClock.StateVersionByForkDigest(utils.Uint32ToBytes4(respForkDigest))
+	require.NoError(t, err)
+
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, version)
+	require.NoError(t, block.DecodeSSZ(raw, int(version)))
+	require.Equal(t, blocks[0].Block.Slot, block.Block.Slot)
+	require.Equal(t, blocks[0].Block.StateRoot, block.Block.StateRoot)
+	require.Equal(t, blocks[0].Block.ParentRoot, block.Block.ParentRoot)
 }

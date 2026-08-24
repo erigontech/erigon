@@ -48,7 +48,6 @@ type ForkChoiceStorageReader interface {
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
 	HighestSeen() uint64
 	JustifiedCheckpoint() solid.Checkpoint
-	JustifiedSlot() uint64
 	ProposerBoostRoot() common.Hash
 	GetStateAtBlockRoot(
 		blockRoot common.Hash,
@@ -90,9 +89,6 @@ type ForkChoiceStorageReader interface {
 	// [New in Gloas:EIP7732] GetHeadPayloadStatus returns the payload status of the current
 	// head node (FULL, EMPTY, or PENDING). Must be called after GetHead.
 	GetHeadPayloadStatus() cltypes.PayloadStatus
-	// [New in Gloas:EIP7732] ShouldExtendPayload returns whether the payload for the given
-	// root should be extended. Used by prepare_execution_payload to decide FULL vs EMPTY path.
-	ShouldExtendPayload(root common.Hash) bool
 	// [New in Gloas:EIP7732] ShouldBuildOnFull returns whether the proposer should build on
 	// the full payload for the given head node. Used for proposer reorg of unavailable blocks.
 	ShouldBuildOnFull(head ForkChoiceNode) bool
@@ -109,7 +105,6 @@ type ForkChoiceStorageReader interface {
 	GetPendingPartialWithdrawals(blockRoot common.Hash) (*solid.ListSSZ[*solid.PendingPartialWithdrawal], bool)
 	GetProposerLookahead(slot uint64) (solid.Uint64VectorSSZ, bool)
 
-	ValidateOnAttestation(attestation *solid.Attestation) error
 	IsRootOptimistic(root common.Hash) bool
 	IsHeadOptimistic() bool
 	GetPeerDas() das.PeerDas
