@@ -447,6 +447,7 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 }
 
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
+func (w *DomainBufferedWriter) Diff() *kv.DomainDiff        { return w.diff }
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled

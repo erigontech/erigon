@@ -252,6 +252,9 @@ type changesetHolder interface {
 	GetChangesetAccumulator() *changeset.StateChangeSet
 	SetChangesetAccumulator(acc *changeset.StateChangeSet)
 	SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet)
+	SetCommitmentDiff(acc *changeset.StateChangeSet)
+	SetCommitmentDiffRaw(d *kv.DomainDiff)
+	CommitmentDiff() *kv.DomainDiff
 }
 
 func (w *witnessMemBatch) GetChangesetByBlockNum(blockNumber uint64) (common.Hash, *changeset.StateChangeSet) {
@@ -268,4 +271,13 @@ func (w *witnessMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSet)
 }
 func (w *witnessMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
 	w.TemporalMemBatch.(changesetHolder).SavePastChangesetAccumulator(blockHash, blockNumber, acc)
+}
+func (w *witnessMemBatch) SetCommitmentDiff(acc *changeset.StateChangeSet) {
+	w.TemporalMemBatch.(changesetHolder).SetCommitmentDiff(acc)
+}
+func (w *witnessMemBatch) SetCommitmentDiffRaw(d *kv.DomainDiff) {
+	w.TemporalMemBatch.(changesetHolder).SetCommitmentDiffRaw(d)
+}
+func (w *witnessMemBatch) CommitmentDiff() *kv.DomainDiff {
+	return w.TemporalMemBatch.(changesetHolder).CommitmentDiff()
 }
