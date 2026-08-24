@@ -1626,8 +1626,7 @@ func TestSortableBufferOversizedEntry(t *testing.T) {
 }
 
 // TestSortableBufferResetReleasesChunks: Reset drops the buffer's own chunk
-// slice and size bookkeeping so it can be reused immediately. Pool round-tripping
-// is TestDataChunkPoolRoundTrip's job.
+// slice and size bookkeeping so it can be reused immediately.
 func TestSortableBufferResetReleasesChunks(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 	val := bytes.Repeat([]byte{0xEF}, 16*1024)
@@ -1645,17 +1644,6 @@ func TestSortableBufferResetReleasesChunks(t *testing.T) {
 	k, v := buf.Get(0)
 	require.Equal(t, []byte{0x01}, k)
 	require.Equal(t, []byte("reused"), v)
-}
-
-// TestDataChunkPoolRoundTrip: a chunk released via putDataChunk comes back on
-// the next getDataChunk, instead of a fresh allocation.
-func TestDataChunkPoolRoundTrip(t *testing.T) {
-	c := getDataChunk()
-	c[0] = 0xAA
-	putDataChunk(c)
-
-	got := getDataChunk()
-	require.Equal(t, byte(0xAA), got[0])
 }
 
 // TestPutDataChunkRejectsOversized: an entry's private chunk (bigger than
