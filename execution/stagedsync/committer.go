@@ -208,7 +208,8 @@ func (cc *commitmentCalculator) markProcessed(blockNum uint64) {
 
 // WaitProcessed blocks until the calculator has handled blockNum, the
 // calculator stops, or ctx is cancelled. It is the COMMITMENT_AFTER_EXEC
-// barrier: with it the exec loop never runs a block alongside a commitment.
+// barrier: it serializes block-end handling against exec, not the mid-block
+// step-edge computes.
 func (cc *commitmentCalculator) WaitProcessed(ctx context.Context, blockNum uint64) error {
 	if cc.in == nil {
 		// Exec-only (DISCARD_COMMITMENT): loop() never runs, so nothing ever
