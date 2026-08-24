@@ -290,6 +290,7 @@ func (e *ExecModule) unwindIfNeeded(
 			err = fmt.Errorf("updateForkChoice: %w", err)
 			return nil, err
 		}
+		e.observeStateTransition(ctx, StateTransitionUnwindComplete)
 	}
 	// SD.Unwind (inside RunUnwind) tx-aware-invalidates the BranchCache by
 	// the unwound txNum, so no whole-cache clear is needed here.
@@ -419,6 +420,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		}
 		if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
 			dispatcher.PublishOverlay(nil)
+			e.observeStateTransition(ctx, StateTransitionOverlayCleared)
 		}
 		currentContext.Close()
 		currentContext = nil
@@ -716,6 +718,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
+		e.observeStateTransition(ctx, StateTransitionCommitComplete)
 
 		// Prune: background by default (fcuBackgroundPrune=true). RunPrune
 		// shares the pipeline Sync with the next FCU's RunLoop, so the
@@ -796,6 +799,7 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 	// before any StateChangeBatch arrives, so it can buffer events properly.
 	e.logger.Debug("[dispatchNotifications] publishing SD")
 	dispatcher.PublishOverlay(sd)
+	e.observeStateTransition(e.backgroundCtx, StateTransitionOverlayPublished)
 
 	e.logger.Debug("[dispatchNotifications] dispatching", "finishBefore", finishProgressBefore, "finishAfter", finishProgressAfter)
 	if err := dispatcher.Dispatch(

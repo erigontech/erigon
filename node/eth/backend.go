@@ -671,7 +671,10 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		blobGetter = backend.txPool
 	}
 
-	execmoduleCache := &execmodule.Cache{}
+	execmoduleCache, ok := stack.Config().Http.StateCache.LocalCache.(*execmodule.Cache)
+	if !ok || execmoduleCache == nil {
+		execmoduleCache = execmodule.NewCache(nil)
+	}
 	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
 	httpRpcCfg := stack.Config().Http
 	httpRpcCfg.StateCache.LocalCache = execmoduleCache

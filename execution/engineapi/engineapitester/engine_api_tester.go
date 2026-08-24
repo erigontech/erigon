@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
 	"github.com/erigontech/erigon/execution/engineapi"
+	"github.com/erigontech/erigon/execution/execmodule"
 	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/protocol/rules/merge"
@@ -267,6 +268,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		RpcTxSyncDefaultTimeout:  rpccfg.DefaultRpcTxSyncDefaultTimeout,
 		RpcTxSyncMaxTimeout:      rpccfg.DefaultRpcTxSyncMaxTimeout,
 	}
+	if args.StateTransitionObserver != nil {
+		httpConfig.StateCache.LocalCache = execmodule.NewCache(args.StateTransitionObserver)
+	}
 
 	nodeKeyConfig := p2p.NodeKeyConfig{}
 	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(args.DataDir))
@@ -433,17 +437,18 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 }
 
 type EngineApiTesterInitArgs struct {
-	Logger                 log.Logger
-	DataDir                string
-	Genesis                *types.Genesis
-	CoinbaseKey            *ecdsa.PrivateKey
-	EthConfigTweaker       func(*ethconfig.Config)
-	MockClState            *MockClState
-	NoEmptyBlock1          bool
-	EngineApiClientTimeout *time.Duration
-	DisableTxPool          bool
-	DisableSentry          bool
-	MdbxDBSizeLimit        datasize.ByteSize
+	Logger                  log.Logger
+	DataDir                 string
+	Genesis                 *types.Genesis
+	CoinbaseKey             *ecdsa.PrivateKey
+	EthConfigTweaker        func(*ethconfig.Config)
+	MockClState             *MockClState
+	NoEmptyBlock1           bool
+	EngineApiClientTimeout  *time.Duration
+	DisableTxPool           bool
+	DisableSentry           bool
+	MdbxDBSizeLimit         datasize.ByteSize
+	StateTransitionObserver execmodule.StateTransitionObserver
 }
 
 type EngineApiTester struct {

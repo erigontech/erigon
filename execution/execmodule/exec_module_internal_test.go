@@ -19,7 +19,9 @@ package execmodule
 import (
 	"context"
 	"errors"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/c2h5oh/datasize"
 	"github.com/holiman/uint256"
@@ -30,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/dbservices"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/types"
 )
 
@@ -73,6 +76,54 @@ func (r sideForkReader) BodyWithTransactions(_ context.Context, _ kv.Getter, has
 		return r.forkBody, nil
 	}
 	return nil, nil
+}
+
+func TestCacheViewObserverRunsSynchronouslyAfterBinding(t *testing.T) {
+	type observation struct {
+		ctx   context.Context
+		point StateTransitionPoint
+	}
+	type viewResult struct {
+		view kvcache.CacheView
+		err  error
+	}
+
+	observed := make(chan observation, 1)
+	release := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseObserver := func() { releaseOnce.Do(func() { close(release) }) }
+	t.Cleanup(releaseObserver)
+	ctx := t.Context()
+	cache := NewCache(func(ctx context.Context, point StateTransitionPoint) {
+		observed <- observation{ctx: ctx, point: point}
+		<-release
+	})
+	result := make(chan viewResult, 1)
+	go func() {
+		view, err := cache.View(ctx, nil)
+		result <- viewResult{view: view, err: err}
+	}()
+
+	select {
+	case got := <-observed:
+		require.Equal(t, ctx, got.ctx)
+		require.Equal(t, StateTransitionRPCViewBound, got.point)
+	case <-time.After(time.Second):
+		t.Fatal("cache view observer was not called")
+	}
+	select {
+	case <-result:
+		t.Fatal("cache view returned before the observer was released")
+	default:
+	}
+	releaseObserver()
+	select {
+	case got := <-result:
+		require.NoError(t, got.err)
+		require.NotNil(t, got.view)
+	case <-time.After(time.Second):
+		t.Fatal("cache view did not return after the observer was released")
+	}
 }
 
 // The module is the one owner of the domain state cache: callers pass a byte

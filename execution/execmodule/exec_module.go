@@ -104,8 +104,14 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 // the SD is the authoritative source, so the coherent cache's state-tracking
 // machinery is unnecessary.
 type Cache struct {
-	execModule  *ExecModule
-	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events
+	execModule              *ExecModule
+	publishedSD             func() *execctx.SharedDomains // returns the latest published SD from Events
+	stateTransitionObserver StateTransitionObserver
+}
+
+// NewCache creates the RPC state cache bridge with an optional lifecycle observer.
+func NewCache(observer StateTransitionObserver) *Cache {
+	return &Cache{stateTransitionObserver: observer}
 }
 
 // SetPublishedSD wires the Cache to fall back to the published SD from Events
@@ -117,25 +123,26 @@ func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
 var _ kvcache.Cache = (*Cache)(nil)         // compile-time interface check
 var _ kvcache.CacheView = (*CacheView)(nil) // compile-time interface check
 
-func (c *Cache) View(_ context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
-	var context *execctx.SharedDomains
+func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, error) {
+	var sd *execctx.SharedDomains
 	if c.execModule != nil {
 		c.execModule.lock.RLock()
-		context = c.execModule.currentContext
+		sd = c.execModule.currentContext
 		c.execModule.lock.RUnlock()
 	}
 	// Fall back to the published SD from Events while an FCU commits
 	// (currentContext is nil but the SD is still valid in memory).
-	if context == nil && c.publishedSD != nil {
-		context = c.publishedSD()
+	if sd == nil && c.publishedSD != nil {
+		sd = c.publishedSD()
 	}
 
 	var view *CacheView
-	if context != nil {
-		view = &CacheView{context: context, getter: context.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
+	if sd != nil {
+		view = &CacheView{context: sd, getter: sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})}
 	} else {
 		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
+	c.observeStateTransition(ctx, StateTransitionRPCViewBound)
 	return view, nil
 }
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
@@ -230,6 +237,8 @@ type ExecModule struct {
 	codeStore   *cache.CodeStore
 	readAheader *exec.BlockReadAheader
 
+	stateTransitionObserver StateTransitionObserver
+
 	stopNode func() error
 }
 
@@ -297,6 +306,7 @@ func NewExecModule(
 
 	if stateCache != nil {
 		stateCache.execModule = em
+		em.stateTransitionObserver = stateCache.stateTransitionObserver
 	}
 	return em
 }
