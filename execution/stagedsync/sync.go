@@ -198,7 +198,6 @@ func New(cfg ethconfig.Sync, stagesList []*Stage, unwindOrder UnwindOrder, prune
 		stageMap[s.ID] = s
 	}
 
-	// on non-Polygon chains, WitnessProcessing stage is not run
 	var filteredUnwindOrder UnwindOrder
 	for _, stageIndex := range unwindOrder {
 		if _, exists := stageMap[stageIndex]; exists {

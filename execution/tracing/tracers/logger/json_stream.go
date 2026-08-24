@@ -38,9 +38,11 @@ import (
 // a track record of modified storage which is used in reporting snapshots of the
 // contract their storage.
 type JsonStreamLogger struct {
-	ctx          context.Context
-	cfg          LogConfig
-	stream       jsonstream.Stream
+	ctx    context.Context
+	cfg    LogConfig
+	stream jsonstream.Stream
+	// Scratch for the hex helpers below. Every result aliases it, so only one is
+	// live at a time: hand it to the stream, which copies, before encoding the next.
 	hexEncodeBuf [128]byte
 	firstCapture bool
 	opcodeSteps  int // steps captured so far; executed-but-suppressed ones don't count
@@ -83,15 +85,19 @@ func (l *JsonStreamLogger) OnSystemCallStartV2(env *tracing.VMContext) {
 	l.env = env
 }
 
-// hexWithPrefix encodes b as a 0x-prefixed hex string using the internal buffer.
-// The result aliases hexEncodeBuf, so it is invalidated by anything that writes
-// that buffer, writeMemoryWordRaw included. Hand it straight to the stream,
-// which copies it in.
+// hexWithPrefix encodes b as a 0x-prefixed hex string using hexEncodeBuf.
 func (l *JsonStreamLogger) hexWithPrefix(b []byte) string {
 	l.hexEncodeBuf[0] = '0'
 	l.hexEncodeBuf[1] = 'x'
 	n := hex.Encode(l.hexEncodeBuf[2:], b)
 	return common.ToStringZeroCopy(l.hexEncodeBuf[:2+n])
+}
+
+// hexQuoted encodes v as a complete JSON string, quotes included, for WriteRaw.
+func (l *JsonStreamLogger) hexQuoted(v *uint256.Int) string {
+	l.hexEncodeBuf[0] = '"'
+	b, _ := hexutil.U256(*v).AppendText(l.hexEncodeBuf[:1])
+	return common.ToStringZeroCopy(append(b, '"'))
 }
 
 // writeMemoryWordRaw writes a memory word as a JSON string "0x<hex>" directly
@@ -205,11 +211,11 @@ func (l *JsonStreamLogger) OnOpcode(pc uint64, typ byte, gas, cost uint64, scope
 		l.stream.WriteMore()
 		l.stream.WriteObjectField("stack")
 		l.stream.WriteArrayStart()
-		for i, stackValue := range stack {
+		for i := range stack {
 			if i > 0 {
 				l.stream.WriteMore()
 			}
-			l.stream.WriteString(stackValue.Hex())
+			l.stream.WriteRaw(l.hexQuoted(&stack[i]))
 		}
 		l.stream.WriteArrayEnd()
 	}
