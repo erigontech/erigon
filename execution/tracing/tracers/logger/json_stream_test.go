@@ -617,6 +617,8 @@ func BenchmarkOnOpcodeStorage(b *testing.B) {
 			for b.Loop() {
 				l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
 				i++
+				// Nothing else drains this stream, and every iteration appends to it.
+				_ = l.stream.Flush()
 			}
 		})
 	}
