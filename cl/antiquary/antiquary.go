@@ -230,32 +230,44 @@ func (a *Antiquary) Loop() error {
 	if a.states {
 		go a.loopStates(a.ctx)
 	}
+	blocks := &retirementStep{
+		run:     a.antiquate,
+		onError: func(err error) { log.Warn("[Antiquary] Failed to antiquate", "err", err) },
+	}
+	blobs := &retirementStep{
+		run:     a.antiquateBlobs,
+		onError: func(err error) { log.Error("[Antiquary] Failed to antiquate blobs", "err", err) },
+	}
+
 	// Check for snapshots retirement every 3 minutes
 	retirementTicker := time.NewTicker(12 * time.Second)
 	defer retirementTicker.Stop()
 	for {
 		select {
 		case <-retirementTicker.C:
-			if !a.backfilled.Load() {
-				continue
-			}
-
-			if err := a.antiquate(); err != nil {
-				log.Warn("[Antiquary] Failed to antiquate", "err", err)
-			}
-			if a.cfg.DenebForkEpoch == math.MaxUint64 {
-				continue
-			}
-			if !a.blobBackfilled.Load() {
-				continue
-			}
-			if err := a.antiquateBlobs(); err != nil {
-				log.Error("[Antiquary] Failed to antiquate blobs", "err", err)
-			}
+			a.retirementTick(blocks, blobs)
 		case <-a.ctx.Done():
+			return nil
 		}
 	}
 }
+
+func (a *Antiquary) retirementTick(blocks, blobs *retirementStep) {
+	if !a.backfilled.Load() {
+		return
+	}
+	blocks.attempt(a.shuttingDown)
+
+	if a.cfg.DenebForkEpoch == math.MaxUint64 {
+		return
+	}
+	if !a.blobBackfilled.Load() {
+		return
+	}
+	blobs.attempt(a.shuttingDown)
+}
+
+func (a *Antiquary) shuttingDown() bool { return a.ctx.Err() != nil }
 
 // weight for the semaphore to build only one type of snapshots at a time
 // for now all of them have the same weight
