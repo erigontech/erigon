@@ -447,6 +447,7 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 }
 
 func (w *DomainBufferedWriter) SetDiff(diff *kv.DomainDiff) { w.diff = diff }
+func (w *DomainBufferedWriter) Diff() *kv.DomainDiff        { return w.diff }
 
 func (dt *DomainRoTx) newWriter(tmpdir string, discard bool) *DomainBufferedWriter {
 	discardHistory := discard || dt.d.HistoryDisabled
@@ -1670,11 +1671,11 @@ func (d *Domain) dataReader(f *seg.Decompressor) *seg.Reader {
 		panic("assert: miss-use " + f.FileName())
 	}
 	g := f.MakeGetter()
-	if dbg.FilesAsyncIO {
+	if dbg.FilesBlockingAsyncIO {
 		g.EnableResidencyGate()
 	}
-	if dbg.FilesAsyncIOMultiPage {
-		g.EnableMultiPageAsyncIO()
+	if dbg.FilesBlockingAsyncIOMultiPage {
+		g.EnableMultiPageBlockingAsyncIO()
 	}
 	return seg.NewReader(g, d.Compression)
 }

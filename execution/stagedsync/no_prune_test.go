@@ -54,7 +54,7 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 		{kv.BlockAccessList, "b1", "ba1"},
 		{kv.BlockAccessList, "b2", "ba2"},
 		{kv.TxLookup, "t1", "tl1"},
-		{kv.BorWitnesses, "w1", "wit1"},
+		{kv.Witnesses, "w1", "wit1"},
 	}
 	for _, s := range seeds {
 		require.NoError(t, tx.Put(s.table, []byte(s.key), []byte(s.value)))
@@ -70,7 +70,7 @@ func TestNoPruneSkipsAllPruneStages(t *testing.T) {
 		}
 		return n
 	}
-	tracked := []string{kv.ChangeSets3, kv.BlockAccessList, kv.TxLookup, kv.BorWitnesses}
+	tracked := []string{kv.ChangeSets3, kv.BlockAccessList, kv.TxLookup, kv.Witnesses}
 	pre := map[string]int{}
 	for _, table := range tracked {
 		pre[table] = countRows(t, table)
