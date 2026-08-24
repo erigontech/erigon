@@ -1,9 +1,11 @@
 # Erigon v3.6.0 — Upstream Underbelly — 2026-08-24
 
-Erigon 3.6.0 is headlined by **more reliable Caplin block production** and **pruned nodes reclaiming old snapshots**,
-with leaner state access and maintenance throughout. Most 3.5 users can upgrade without re-syncing. Datadirs created with
-Erigon 3.3 or earlier that have not already been rebased must first convert their snapshot layout with
-`erigon seg step-rebase --new-step-size=390625`.
+Erigon 3.6.0 is headlined by **more reliable Caplin block production**, **pruned nodes reclaiming old snapshots**, and
+**plain commitment snapshots**, with leaner state access and maintenance throughout. Most 3.5 users can upgrade without
+re-syncing. To benefit immediately from the new plain commitment format, existing users should install 3.6, then run
+`erigon seg reset --datadir=<path>` before starting the node; the next start will re-sync using the new snapshots. Datadirs
+created with Erigon 3.3 or earlier that have not already been rebased must use this reset path or run
+`erigon seg step-rebase --datadir=<path> --new-step-size=390625` before their first normal 3.6 start.
 
 ### Highlights
 
