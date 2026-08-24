@@ -48,6 +48,9 @@ var errELBehind = errors.New("EL behind: payload not processable yet")
 
 var errPayloadValidationAdmission = errors.New("payload validation admission canceled")
 
+// ErrExecutionPayloadEnvelopeIndicesPending reports a persisted envelope whose database indices are queued for retry.
+var ErrExecutionPayloadEnvelopeIndicesPending = errors.New("execution payload envelope indices pending")
+
 var (
 	errInvalidExecutionPayloadEnvelope = errors.New("invalid execution payload envelope")
 	errPendingEnvelopeAgeBounded       = errors.New("pending execution payload envelope is age bounded")
@@ -627,7 +630,7 @@ func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signe
 	indexEnvelope, err := f.ensureExecutionPayloadEnvelopeIndices(ctx, common.Hash(beaconBlockRoot), signedEnvelope, applied)
 	if err != nil {
 		f.pendingLocalSelfBuildEnvelopes.Add(common.Hash(beaconBlockRoot), indexEnvelope)
-		return fmt.Errorf("ApplyLocalSelfBuildEnvelope: failed to write execution payload indices: %w", err)
+		return fmt.Errorf("%w: ApplyLocalSelfBuildEnvelope failed to write execution payload indices: %w", ErrExecutionPayloadEnvelopeIndicesPending, err)
 	}
 
 	return nil

@@ -127,7 +127,7 @@ func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
 	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
 }
 
-// DecodeSSZStrict rejects non-canonical nested SSZ offsets.
+// DecodeSSZStrict applies canonical SSZ rules supported by nested block types.
 func (b *SignedBeaconBlock) DecodeSSZStrict(buf []byte, s int) error {
 	return ssz2.UnmarshalSSZStrict(buf, s, b.Block, b.Signature[:])
 }
@@ -206,7 +206,7 @@ func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
-// DecodeSSZStrict rejects non-canonical nested SSZ offsets.
+// DecodeSSZStrict applies canonical SSZ rules supported by nested block types.
 func (b *BeaconBlock) DecodeSSZStrict(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZStrict(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
@@ -529,7 +529,7 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 	return b.decodeSSZ(buf, version, false)
 }
 
-// DecodeSSZStrict rejects non-canonical nested SSZ offsets.
+// DecodeSSZStrict applies canonical SSZ rules supported by nested block types.
 func (b *BeaconBody) DecodeSSZStrict(buf []byte, version int) error {
 	return b.decodeSSZ(buf, version, true)
 }

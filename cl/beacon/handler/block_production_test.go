@@ -120,6 +120,26 @@ func TestBroadcastSelfBuildEnvelopeContinuesQueuedApply(t *testing.T) {
 	require.False(t, cached)
 }
 
+func TestBroadcastSelfBuildEnvelopeContinuesWhenIndicesArePending(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+	fcu.ApplyLocalSelfBuildEnvelopeErr = fmt.Errorf("index write failed: %w", forkchoice.ErrExecutionPayloadEnvelopeIndicesPending)
+
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.HexToHash("0x1234")
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(h.beaconChainCfg), Signature: common.Bytes96{1}}
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(nil)
+
+	require.NoError(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope))
+	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.False(t, cached)
+}
+
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,

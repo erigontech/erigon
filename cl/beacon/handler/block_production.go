@@ -2310,10 +2310,14 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 	// goroutine) has not finished yet — the forkchoice store queues the envelope in
 	// pendingEnvelopes and OnBlock will pick it up. Debug-level to avoid noisy logs.
 	if err := a.forkchoiceStore.ApplyLocalSelfBuildEnvelope(ctx, signedEnvelope); err != nil {
-		if !errors.Is(err, forkchoice.ErrIgnore) {
+		switch {
+		case errors.Is(err, forkchoice.ErrIgnore):
+			a.logger.Debug("Self-build envelope queued for pending processing", "err", err, "blockRoot", blockRoot)
+		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
+			a.logger.Debug("Self-build envelope indices queued for retry", "err", err, "blockRoot", blockRoot)
+		default:
 			return fmt.Errorf("failed to apply self-build envelope: %w", err)
 		}
-		a.logger.Debug("Self-build envelope queued for pending processing", "err", err, "blockRoot", blockRoot)
 	}
 	a.selfBuildPayloads.Remove(bid.Message.BlockHash)
 
