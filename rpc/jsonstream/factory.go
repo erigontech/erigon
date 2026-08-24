@@ -31,6 +31,10 @@ const (
 	escapeHi = ^uint64(0) / 255 * 128
 )
 
+// hasLess reports, per byte lane, whether that byte of x is less than n.
+// Exact only for n <= 128: the &^ x term discards any lane whose high bit is
+// set, so for larger n it silently misses bytes in [128, n). needsEscape only
+// calls this with n == 0x20, where the bound holds.
 func hasLess(x, n uint64) uint64 { return (x - escapeLo*n) &^ x & escapeHi }
 func hasByte(x, n uint64) uint64 { v := x ^ (escapeLo * n); return (v - escapeLo) &^ v & escapeHi }
 
@@ -53,10 +57,11 @@ func needsEscape(val string) bool {
 	return false
 }
 
-// writeStringFast copies a string that needs no escaping in one go. jsoniter
-// appends it a byte at a time, testing each one, so its cost grows with length
-// where a scan plus a copy does not. Under eight bytes there is no word to scan
-// and its loop is already the cheaper option.
+// writeStringFast copies a string that needs no escaping in one go. Both this
+// and jsoniter's byte-at-a-time WriteString are linear in length, but the SWAR
+// scan plus bulk copy has a much smaller constant factor for longer strings.
+// Under eight bytes there is no word to scan and jsoniter's loop is already
+// the cheaper option.
 func writeStringFast(stream *jsoniter.Stream, val string) {
 	if len(val) < 8 || needsEscape(val) {
 		stream.WriteString(val)

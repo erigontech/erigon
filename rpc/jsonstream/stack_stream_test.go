@@ -1116,6 +1116,9 @@ func BenchmarkWriteString(b *testing.B) {
 			b.ReportAllocs()
 			for b.Loop() {
 				s.WriteString(tc.val)
+				if err := s.Flush(); err != nil {
+					b.Fatal(err)
+				}
 			}
 		})
 	}
