@@ -436,6 +436,7 @@ func versionedReadCore(s *IntraBlockState, addr accounts.Address, path AccountPa
 						ReadHeader: ReadHeader{Source: MapRead, Version: sdVersion},
 						Val:        true,
 					})
+					s.recordWipedRead(addr, path, key, sdVersion)
 					// Per-path revival misses account-level life: a balance-only
 					// credit (fee, transfer) revives the account without writing a
 					// CodeHash entry, and a live account's wiped code hash is
