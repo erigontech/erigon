@@ -1238,7 +1238,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 				}
 
 				if dbg.CommitmentAfterExec && pe.calculator != nil {
-					if err := pe.calculator.WaitProcessed(ctx, blockResult.BlockNum); err != nil {
+					if err := pe.calculator.WaitProcessed(commitmentBarrierCtx(ctx, terminal), blockResult.BlockNum); err != nil {
 						return err
 					}
 				}
@@ -1372,6 +1372,18 @@ func (pe *parallelExecutor) processRequest(ctx context.Context, execRequest *exe
 	}
 
 	return nil
+}
+
+// commitmentBarrierCtx returns the context the COMMITMENT_AFTER_EXEC barrier
+// waits on. On a terminal block the stopCause is already published, so ctx is
+// cancelled: waiting on it would return before triggerBatchCommitment and drop
+// the batch-end commitment. The blockResult was sent with mustDeliver, so the
+// calculator always reaches markProcessed and the wait still ends.
+func commitmentBarrierCtx(ctx context.Context, terminal bool) context.Context {
+	if terminal {
+		return context.WithoutCancel(ctx)
+	}
+	return ctx
 }
 
 // applyLoopMissingBlocks returns the blockNums in txResultBlocks that
