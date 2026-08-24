@@ -766,7 +766,10 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		block.GetExecutionValue().Uint64(),
 		consensusValue,
 	)
-	a.payloadPreparationGate.noteProducedBlock(a.ethClock.GetCurrentSlot(), targetSlot)
+	signingWindow := attestationDue(a.beaconChainCfg, block.Version()) / payloadPublicationDivisor
+	a.payloadPreparationGate.noteProducedBlock(
+		a.ethClock.GetCurrentSlot(), targetSlot, time.Now().Add(signingWindow),
+	)
 
 	return resp, nil
 }
@@ -1848,6 +1851,7 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, signedEnvelope ...*cltypes.SignedExecutionPayloadEnvelope) error {
 	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
 	defer finishBlockWork()
+	defer a.payloadPreparationGate.clearProducedBlock(blk.Block.Slot)
 
 	blkSSZ, err := blk.EncodeSSZ(nil)
 	if err != nil {

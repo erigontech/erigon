@@ -101,15 +101,16 @@ func (s *payloadPreparationScratch) release() {
 	s.state = nil
 }
 
-// payloadPreparationGate gives real block work priority over speculative builder startup.
-// Handler-owned production, publication, adoption, and envelope execution hold the shared side.
-// Preparation checks that the gate is idle before state work, then briefly takes the exclusive
-// side only for StartPayloadBuild. latestProducedSlot covers the signing interval when neither
-// HTTP request holds the gate. Network imports do not use this gate; BlockProcessing provides
-// only an advisory pre-copy check for active OnBlock calls.
+// payloadPreparationGate gives block work priority over speculative builder startup. Its exclusive
+// side is always acquired with TryLock, so nested shared holds cannot deadlock.
 type payloadPreparationGate struct {
-	blockWork          sync.RWMutex
-	latestProducedSlot atomic.Uint64
+	blockWork     sync.RWMutex
+	producedBlock atomic.Pointer[producedBlockMarker]
+}
+
+type producedBlockMarker struct {
+	slot      uint64
+	expiresAt time.Time
 }
 
 func (p *preparedPayload) set(slot uint64, payloadID []byte, head common.Hash, primedAt time.Time) {
@@ -167,22 +168,41 @@ func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
 	return sync.OnceFunc(g.blockWork.Unlock), true
 }
 
-func (g *payloadPreparationGate) noteProducedBlock(currentSlot, producedSlot uint64) {
+func (g *payloadPreparationGate) noteProducedBlock(currentSlot, producedSlot uint64, expiresAt time.Time) {
 	// The signing interval can cross one slot boundary, but no more.
 	if !slotsWithinOne(currentSlot, producedSlot) {
 		return
 	}
+	next := &producedBlockMarker{slot: producedSlot, expiresAt: expiresAt}
 	for {
-		previous := g.latestProducedSlot.Load()
-		if previous >= producedSlot || g.latestProducedSlot.CompareAndSwap(previous, producedSlot) {
+		previous := g.producedBlock.Load()
+		if previous != nil {
+			if previous.slot > producedSlot ||
+				(previous.slot == producedSlot && !expiresAt.After(previous.expiresAt)) {
+				return
+			}
+		}
+		if g.producedBlock.CompareAndSwap(previous, next) {
 			return
 		}
 	}
 }
 
-func (g *payloadPreparationGate) producedBlockPending(currentSlot, selectedSlot uint64) bool {
-	producedSlot := g.latestProducedSlot.Load()
-	return selectedSlot < producedSlot && slotsWithinOne(currentSlot, producedSlot)
+func (g *payloadPreparationGate) clearProducedBlock(slot uint64) {
+	for {
+		marker := g.producedBlock.Load()
+		if marker == nil || marker.slot != slot || g.producedBlock.CompareAndSwap(marker, nil) {
+			return
+		}
+	}
+}
+
+func (g *payloadPreparationGate) producedBlockPending(currentSlot, selectedSlot uint64, now time.Time) bool {
+	marker := g.producedBlock.Load()
+	return marker != nil &&
+		now.Before(marker.expiresAt) &&
+		selectedSlot < marker.slot &&
+		slotsWithinOne(currentSlot, marker.slot)
 }
 
 func slotsWithinOne(first, second uint64) bool {
@@ -248,6 +268,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 
 	var lastSettled preparationKey
 	var lastFailureLog time.Time
+	var lastPendingLog time.Time
 	var scratch payloadPreparationScratch
 	immediate := true
 	for {
@@ -299,7 +320,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		if !selected {
 			continue
 		}
-		if a.payloadPreparationGate.producedBlockPending(currentSlot, selectedSlot) {
+		if a.payloadPreparationGate.producedBlockPending(currentSlot, selectedSlot, time.Now()) {
 			continue
 		}
 		if shouldWaitForCurrentSlotHead(
@@ -320,11 +341,17 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		var gloasPath gloasPayloadPath
 		var proposerPreferencesGeneration uint64
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+			if err := a.precheckRegisteredProposer(selectedRoot, targetSlot); err != nil {
+				if !isExpectedPreparationSkip(err) && time.Since(lastFailureLog) >= time.Minute {
+					logger.Warn("PayloadPreparation: proposer check failed", "slot", targetSlot, "err", err)
+					lastFailureLog = time.Now()
+				}
+				continue
+			}
 			selectedVersion := a.beaconChainCfg.GetCurrentStateVersion(selectedSlot / a.beaconChainCfg.SlotsPerEpoch)
 			// Only a current-slot Gloas head depends on the current slot's PTC decision. An
 			// older selected head has already crossed its payload-decision boundary.
 			if selectedSlot == currentSlot &&
-				currentVersion.AfterOrEqual(clparams.GloasVersion) &&
 				selectedVersion.AfterOrEqual(clparams.GloasVersion) {
 				if delay := gloasPayloadDecisionDelay(
 					time.Now(),
@@ -343,6 +370,10 @@ func (a *ApiHandler) preparePayloadLoopWith(
 			if selectedVersion.AfterOrEqual(clparams.GloasVersion) {
 				gloasPath = a.resolveGloasPayloadPath(selectedRoot, targetSlot)
 				if gloasPath == gloasPayloadPathPending {
+					if time.Since(lastPendingLog) >= time.Minute {
+						logger.Warn("PayloadPreparation: Gloas payload path is still pending", "slot", targetSlot, "head", selectedRoot)
+						lastPendingLog = time.Now()
+					}
 					continue
 				}
 			}
@@ -472,9 +503,6 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	scratch *payloadPreparationScratch,
 ) (payloadPreparationResult, error) {
 	var result payloadPreparationResult
-	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
-		return result, errPreparationTooLate
-	}
 	var (
 		baseBlockRoot      common.Hash
 		proposerIndex      uint64
@@ -490,13 +518,13 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		result.headRoot = root
 		// Beyond the proposer lookahead the index has to be reshuffled from the seed, which is far
 		// too costly to repeat every tick on a large validator set.
-		slotsPerEpoch := a.beaconChainCfg.SlotsPerEpoch
-		if targetSlot/slotsPerEpoch > headState.Slot()/slotsPerEpoch+a.beaconChainCfg.MinSeedLookahead {
+		if a.proposerLookupTooFarAhead(headState, targetSlot) {
 			return errHeadTooFarBack
 		}
 
 		// Fulu's proposer lookahead is valid across the next epoch, so reject an unregistered
 		// proposer before copying and advancing the full state.
+		slotsPerEpoch := a.beaconChainCfg.SlotsPerEpoch
 		lookupAfterAdvance = targetSlot/slotsPerEpoch > headState.Slot()/slotsPerEpoch && headState.Version().Before(clparams.FuluVersion)
 		var err error
 		if !lookupAfterAdvance {
@@ -587,6 +615,29 @@ func (a *ApiHandler) registeredProposer(beaconState *state.CachingBeaconState, t
 		return proposerIndex, common.Address{}, errNotOurProposal
 	}
 	return proposerIndex, feeRecipient, nil
+}
+
+func (a *ApiHandler) proposerLookupTooFarAhead(beaconState *state.CachingBeaconState, targetSlot uint64) bool {
+	slotsPerEpoch := a.beaconChainCfg.SlotsPerEpoch
+	return targetSlot/slotsPerEpoch > beaconState.Slot()/slotsPerEpoch+a.beaconChainCfg.MinSeedLookahead
+}
+
+func (a *ApiHandler) precheckRegisteredProposer(headRoot common.Hash, targetSlot uint64) error {
+	return a.syncedData.ViewHeadStateWithIdentity(func(headState *state.CachingBeaconState, root common.Hash, _ uint64) error {
+		if root != headRoot {
+			return errPreparationHeadChanged
+		}
+		if a.proposerLookupTooFarAhead(headState, targetSlot) {
+			return errHeadTooFarBack
+		}
+		// Before Fulu, finding the proposer may require an epoch transition. The normal
+		// preparation path performs that lookup after it advances the copied state.
+		if headState.Version().Before(clparams.FuluVersion) {
+			return nil
+		}
+		_, _, err := a.registeredProposer(headState, targetSlot)
+		return err
+	})
 }
 
 // startPayloadBuildForPreparation retries only when the execution head is still catching up or the

@@ -165,8 +165,13 @@ func TestGetHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, selectedRoot, publishedRoot)
 	require.Equal(t, selectedSlot, publishedSlot)
+	recomputedRoot, recomputedSlot, recomputedStatus, err := store.getHeadGloasWithPayloadStatus()
+	require.NoError(t, err)
+	require.Equal(t, selectedRoot, recomputedRoot)
+	require.Equal(t, selectedSlot, recomputedSlot)
 	expectedStatus, matchesHead := store.GetHeadPayloadStatus(root)
 	require.True(t, matchesHead)
+	require.Equal(t, expectedStatus, recomputedStatus)
 
 	store.mu.Lock()
 	store.headHash = common.Hash{}
@@ -177,7 +182,6 @@ func TestGetHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	require.True(t, matchesHead, "an invalidated cache must be recomputed for the selected root")
 	require.Equal(t, expectedStatus, status)
 }
-
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
 

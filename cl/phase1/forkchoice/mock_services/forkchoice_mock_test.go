@@ -17,6 +17,7 @@
 package mock_services
 
 import (
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -38,4 +39,34 @@ func TestGetHeadPayloadStatusRequiresMatchingHead(t *testing.T) {
 	status, matches = store.GetHeadPayloadStatus(root)
 	require.True(t, matches)
 	require.Equal(t, cltypes.PayloadStatusEmpty, status)
+}
+
+func TestGetHeadPayloadStatusRefreshIsConcurrentSafe(t *testing.T) {
+	root := common.Hash{0x41}
+	store := &ForkChoiceStorageMock{
+		HeadVal:              root,
+		HeadPayloadStatusVal: cltypes.PayloadStatusFull,
+	}
+	store.HeadPayloadStatusInvalidated.Store(true)
+
+	var calls sync.WaitGroup
+	results := make(chan struct {
+		status  cltypes.PayloadStatus
+		matches bool
+	}, 32)
+	for range 32 {
+		calls.Go(func() {
+			status, matches := store.GetHeadPayloadStatus(root)
+			results <- struct {
+				status  cltypes.PayloadStatus
+				matches bool
+			}{status: status, matches: matches}
+		})
+	}
+	calls.Wait()
+	close(results)
+	for result := range results {
+		require.True(t, result.matches)
+		require.Equal(t, cltypes.PayloadStatusFull, result.status)
+	}
 }

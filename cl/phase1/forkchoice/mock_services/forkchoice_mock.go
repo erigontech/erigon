@@ -18,6 +18,7 @@ package mock_services
 
 import (
 	"context"
+	"sync/atomic"
 	"testing"
 
 	"go.uber.org/mock/gomock"
@@ -49,7 +50,7 @@ type ForkChoiceStorageMock struct {
 	HeadVal                      common.Hash
 	HeadSlotVal                  uint64
 	HeadPayloadStatusVal         cltypes.PayloadStatus
-	HeadPayloadStatusInvalidated bool
+	HeadPayloadStatusInvalidated atomic.Bool
 	HighestSeenVal               uint64
 	BlockProcessingVal           bool
 	JustifiedCheckpointVal       solid.Checkpoint
@@ -272,7 +273,7 @@ func (f *ForkChoiceStorageMock) GetFinalizedExecutionHash(eth2Root common.Hash) 
 }
 
 func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Hash, uint64, error) {
-	f.HeadPayloadStatusInvalidated = false
+	f.HeadPayloadStatusInvalidated.Store(false)
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
@@ -475,7 +476,7 @@ func (f *ForkChoiceStorageMock) GetHeadPayloadStatus(root common.Hash) (cltypes.
 	if f.GetHeadPayloadStatusFn != nil {
 		return f.GetHeadPayloadStatusFn(root)
 	}
-	if f.HeadPayloadStatusInvalidated {
+	if f.HeadPayloadStatusInvalidated.Load() {
 		_, _, _ = f.GetHead(nil)
 	}
 	if f.HeadVal != root {

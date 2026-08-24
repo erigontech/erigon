@@ -144,21 +144,17 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 }
 
 // GetHeadPayloadStatus returns the current head's payload status only when its root matches.
-// It refreshes an invalidated head cache before checking the root and status together.
+// It returns an invalidated cache's recomputed root and status from the same fork-choice view.
 func (f *ForkChoiceStore) GetHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
-	for range 2 {
-		status, matches, ready := f.cachedHeadPayloadStatus(root)
-		if ready {
-			return status, matches
-		}
-		if _, _, err := f.GetHead(nil); err != nil {
-			return cltypes.PayloadStatusPending, false
-		}
+	status, matches, ready := f.cachedHeadPayloadStatus(root)
+	if ready {
+		return status, matches
 	}
-	// A concurrent import can invalidate the first refresh. Bound the retry so sustained fork-choice
-	// activity cannot hold proposal handling in this method.
-	status, matches, _ := f.cachedHeadPayloadStatus(root)
-	return status, matches
+	head, _, status, err := f.getHeadGloasWithPayloadStatus()
+	if err != nil || head != root {
+		return cltypes.PayloadStatusPending, false
+	}
+	return status, true
 }
 
 func (f *ForkChoiceStore) cachedHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool, bool) {
@@ -176,34 +172,39 @@ func (f *ForkChoiceStore) cachedHeadPayloadStatus(root common.Hash) (cltypes.Pay
 // getHeadGloas returns the head using GLOAS fork choice rules.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) getHeadGloas() (common.Hash, uint64, error) {
+	head, slot, _, err := f.getHeadGloasWithPayloadStatus()
+	return head, slot, err
+}
+
+func (f *ForkChoiceStore) getHeadGloasWithPayloadStatus() (common.Hash, uint64, cltypes.PayloadStatus, error) {
 	for {
 		justifiedCheckpoint := f.justifiedCheckpoint.Load().(solid.Checkpoint)
 		// Fetch the checkpoint state before acquiring f.mu (it can read from disk);
 		// a nil state degrades to zero attestation weight, as before.
 		cs, _ := f.getCheckpointState(justifiedCheckpoint)
 
-		headHash, headSlot, ok, err := func() (common.Hash, uint64, bool, error) {
+		headHash, headSlot, payloadStatus, ok, err := func() (common.Hash, uint64, cltypes.PayloadStatus, bool, error) {
 			f.mu.Lock()
 			defer f.mu.Unlock()
 
 			if f.justifiedCheckpoint.Load().(solid.Checkpoint) != justifiedCheckpoint {
-				return common.Hash{}, 0, false, nil
+				return common.Hash{}, 0, cltypes.PayloadStatusPending, false, nil
 			}
 			head, slot, err := f.computeHeadGloasWithAnchorFallback(justifiedCheckpoint, cs)
 			if err != nil {
-				return common.Hash{}, 0, false, err
+				return common.Hash{}, 0, cltypes.PayloadStatusPending, false, err
 			}
 			f.headHash = head.Root
 			f.headSlot = slot
 			f.headPayloadStatus = head.PayloadStatus
 			f.publishSelectedHead(f.headHash, f.headSlot)
-			return f.headHash, f.headSlot, true, nil
+			return f.headHash, f.headSlot, f.headPayloadStatus, true, nil
 		}()
 		if err != nil {
-			return common.Hash{}, 0, err
+			return common.Hash{}, 0, cltypes.PayloadStatusPending, err
 		}
 		if ok {
-			return headHash, headSlot, nil
+			return headHash, headSlot, payloadStatus, nil
 		}
 	}
 }
