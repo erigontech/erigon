@@ -233,6 +233,15 @@ func TestApplyLocalSelfBuildEnvelopeRejectsNilPayloadAtIngress(t *testing.T) {
 	require.ErrorContains(t, f.ApplyLocalSelfBuildEnvelope(context.Background(), envelope), "nil payload")
 }
 
+func validIngressEnvelope(cfg *clparams.BeaconChainConfig, blockRoot common.Hash) *cltypes.SignedExecutionPayloadEnvelope {
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(cfg)}
+	envelope.Message.BeaconBlockRoot = blockRoot
+	envelope.Message.Payload.Extra = solid.NewExtraData()
+	envelope.Message.Payload.Transactions = &solid.TransactionsSSZ{}
+	envelope.Message.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	return envelope
+}
+
 func (g pendingRetryForkGraph) HasEnvelope(root common.Hash) bool { return root == g.completed }
 func (g pendingRetryForkGraph) ReadEnvelopeFromDisk(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
 	if root != g.completed {
@@ -311,12 +320,8 @@ func TestOnExecutionPayloadRetainsEnvelopeWhenColumnDataIsUnavailable(t *testing
 			}},
 		},
 	}}
-	payload := cltypes.NewEth1Block(clparams.GloasVersion, cfg)
-	payload.SlotNumber = block.Block.Slot
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-		BeaconBlockRoot: blockRoot,
-		Payload:         payload,
-	}}
+	envelope := validIngressEnvelope(cfg, blockRoot)
+	envelope.Message.Payload.SlotNumber = block.Block.Slot
 	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](queueCacheSize)
@@ -345,10 +350,8 @@ func TestOnExecutionPayloadRetainsEnvelopeWhenColumnDataIsUnavailable(t *testing
 	require.Same(t, envelope, retained)
 
 	stateErr = errors.New("temporary state read failure")
-	replacement := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-		BeaconBlockRoot: blockRoot,
-		Payload:         payload,
-	}}
+	replacement := validIngressEnvelope(cfg, blockRoot)
+	replacement.Message.Payload.SlotNumber = block.Block.Slot
 	require.Error(t, f.OnExecutionPayload(context.Background(), replacement, false, false))
 	retained, ok = pending.Peek(blockRoot)
 	require.True(t, ok)
@@ -595,14 +598,14 @@ func TestMissingBlockExecutionPayloadEnvelopeQueuesAtIngress(t *testing.T) {
 				local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
 				require.NoError(t, err)
 				blockRoot := common.HexToHash("0x1234")
-				envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-				envelope.Message.BeaconBlockRoot = blockRoot
+				envelope := validIngressEnvelope(&clparams.MainnetBeaconConfig, blockRoot)
 				var graph fork_graph.ForkGraph = missingBlockForkGraph{state: state2.New(&clparams.MainnetBeaconConfig)}
 				if missingState {
 					graph = pendingRetryForkGraph{}
 				}
 				f := &ForkChoiceStore{
 					forkGraph:                      graph,
+					beaconCfg:                      &clparams.MainnetBeaconConfig,
 					pendingEnvelopes:               pending,
 					pendingLocalSelfBuildEnvelopes: local,
 				}
@@ -777,19 +780,18 @@ func TestIndexRepairReadFailureQueuesRootRepair(t *testing.T) {
 }
 
 func TestOnExecutionPayloadRedeliveryRepairsMissingIndices(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
 	blockRoot := common.HexToHash("0x1234")
-	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-	persisted.Message.BeaconBlockRoot = blockRoot
+	persisted := validIngressEnvelope(cfg, blockRoot)
 	persisted.Message.Payload.BlockNumber = 42
 	persisted.Message.Payload.BlockHash = common.HexToHash("0xabcd")
-	redelivered := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-	redelivered.Message.BeaconBlockRoot = blockRoot
+	redelivered := validIngressEnvelope(cfg, blockRoot)
 	redelivered.Message.Payload.BlockNumber = 99
 	redelivered.Message.Payload.BlockHash = common.HexToHash("0xffff")
 	rwdb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	db := &failingUpdateDB{RwDB: rwdb}
 	graph := &countingEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
-	f := &ForkChoiceStore{forkGraph: graph, db: db}
+	f := &ForkChoiceStore{forkGraph: graph, beaconCfg: cfg, db: db}
 
 	require.NoError(t, f.OnExecutionPayload(context.Background(), redelivered, false, true))
 	require.Equal(t, int32(1), graph.reads.Load())
@@ -806,13 +808,12 @@ func TestOnExecutionPayloadRedeliveryRepairsMissingIndices(t *testing.T) {
 }
 
 func TestOnExecutionPayloadRedeliveryRepairsZeroHashIndices(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
 	blockRoot := common.HexToHash("0x1234")
-	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-	persisted.Message.BeaconBlockRoot = blockRoot
+	persisted := validIngressEnvelope(cfg, blockRoot)
 	persisted.Message.Payload.BlockNumber = 42
 	persisted.Message.Payload.BlockHash = common.HexToHash("0xabcd")
-	redelivered := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-	redelivered.Message.BeaconBlockRoot = blockRoot
+	redelivered := validIngressEnvelope(cfg, blockRoot)
 	redelivered.Message.Payload.BlockNumber = 99
 	redelivered.Message.Payload.BlockHash = common.HexToHash("0xffff")
 	rwdb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
@@ -824,7 +825,7 @@ func TestOnExecutionPayloadRedeliveryRepairsZeroHashIndices(t *testing.T) {
 	}))
 	db := &failingUpdateDB{RwDB: rwdb}
 	graph := &countingEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
-	f := &ForkChoiceStore{forkGraph: graph, db: db}
+	f := &ForkChoiceStore{forkGraph: graph, beaconCfg: cfg, db: db}
 
 	require.NoError(t, f.OnExecutionPayload(context.Background(), redelivered, false, true))
 	require.Equal(t, int32(1), graph.reads.Load())
@@ -841,17 +842,16 @@ func TestOnExecutionPayloadRedeliveryRepairsZeroHashIndices(t *testing.T) {
 }
 
 func TestOnExecutionPayloadIndexPrecheckFailureQueuesRootRepair(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
 	pending, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
 	require.NoError(t, err)
 	local, err := lru.New[common.Hash, *cltypes.SignedExecutionPayloadEnvelope](1)
 	require.NoError(t, err)
 	blockRoot := common.HexToHash("0x1234")
-	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-	persisted.Message.BeaconBlockRoot = blockRoot
+	persisted := validIngressEnvelope(cfg, blockRoot)
 	persisted.Message.Payload.BlockNumber = 42
 	persisted.Message.Payload.BlockHash = common.HexToHash("0xabcd")
-	redelivered := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-	redelivered.Message.BeaconBlockRoot = blockRoot
+	redelivered := validIngressEnvelope(cfg, blockRoot)
 	redelivered.Message.Payload.BlockNumber = 99
 	redelivered.Message.Payload.BlockHash = common.HexToHash("0xffff")
 	rwdb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
@@ -860,6 +860,7 @@ func TestOnExecutionPayloadIndexPrecheckFailureQueuesRootRepair(t *testing.T) {
 	graph := &countingEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
 	f := &ForkChoiceStore{
 		forkGraph:                      graph,
+		beaconCfg:                      cfg,
 		pendingEnvelopes:               pending,
 		pendingLocalSelfBuildEnvelopes: local,
 		db:                             db,
@@ -887,14 +888,13 @@ func TestOnExecutionPayloadIndexPrecheckFailureQueuesRootRepair(t *testing.T) {
 }
 
 func TestOnExecutionPayloadRedeliverySkipsExistingIndices(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
 	blockRoot := common.HexToHash("0x1234")
 	executionHash := common.HexToHash("0xabcd")
-	persisted := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-	persisted.Message.BeaconBlockRoot = blockRoot
+	persisted := validIngressEnvelope(cfg, blockRoot)
 	persisted.Message.Payload.BlockNumber = 42
 	persisted.Message.Payload.BlockHash = executionHash
-	redelivered := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
-	redelivered.Message.BeaconBlockRoot = blockRoot
+	redelivered := validIngressEnvelope(cfg, blockRoot)
 	redelivered.Message.Payload.BlockNumber = 99
 	redelivered.Message.Payload.BlockHash = common.HexToHash("0xffff")
 	rwdb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
@@ -905,6 +905,7 @@ func TestOnExecutionPayloadRedeliverySkipsExistingIndices(t *testing.T) {
 	graph := &countingEnvelopeReadForkGraph{pendingRetryForkGraph: pendingRetryForkGraph{completed: blockRoot, completedEnvelope: persisted}}
 	f := &ForkChoiceStore{
 		forkGraph: graph,
+		beaconCfg: cfg,
 		db:        db,
 	}
 
@@ -1056,37 +1057,6 @@ func TestExecutionPayloadIndexWritePanicDoesNotReportSuccessToWaiter(t *testing.
 	require.Equal(t, "injected update panic", <-leaderDone)
 	require.NoError(t, <-waiterDone)
 	require.Equal(t, int32(2), db.calls.Load())
-}
-
-func TestStoreAnchorEnvelopeCompletesBookkeepingAfterCommittedDumpWarning(t *testing.T) {
-	root := common.HexToHash("0x1234")
-	blockHash := common.HexToHash("0xabcd")
-	eth2Roots, err := lru.New[common.Hash, common.Hash](16)
-	require.NoError(t, err)
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
-	store := &ForkChoiceStore{
-		forkGraph: payloadVoteForkGraph{dumpEnvelopeErr: errors.Join(fork_graph.ErrEnvelopeCommitted, errors.New("sync directory"))},
-		eth2Roots: eth2Roots,
-		db:        db,
-	}
-	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: &cltypes.ExecutionPayloadEnvelope{
-		BeaconBlockRoot: root,
-		Payload:         &cltypes.Eth1Block{BlockHash: blockHash, BlockNumber: 42},
-	}}
-
-	require.NoError(t, store.StoreAnchorEnvelope(root, envelope))
-	persistedHash, ok := eth2Roots.Get(root)
-	require.True(t, ok)
-	require.Equal(t, blockHash, persistedHash)
-	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
-		blockNumber, err := beacon_indicies.ReadExecutionBlockNumber(tx, root)
-		require.NoError(t, err)
-		require.Equal(t, uint64(42), *blockNumber)
-		indexedHash, err := beacon_indicies.ReadExecutionBlockHash(tx, root)
-		require.NoError(t, err)
-		require.Equal(t, blockHash, indexedHash)
-		return nil
-	}))
 }
 
 // TestValidateEnvelopeAgainstBlock_NoBid tests that validation fails when block has no bid

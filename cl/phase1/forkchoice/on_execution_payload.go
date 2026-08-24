@@ -502,7 +502,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 	}
 
 	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
-	if err := f.persistEnvelope(beaconBlockRoot, signedEnvelope); err != nil {
+	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
 	}
 	if envelope.Payload != nil {
@@ -821,7 +821,7 @@ func (f *ForkChoiceStore) applyLocalSelfBuildEnvelopeCoordinated(ctx context.Con
 		}
 	}
 
-	if err := f.persistEnvelope(beaconBlockRoot, signedEnvelope); err != nil {
+	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
 		return false, fmt.Errorf("applyLocalSelfBuildEnvelopeCoordinated: failed to dump envelope: %w", err)
 	}
 	if envelope.Payload != nil {

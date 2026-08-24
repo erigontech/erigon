@@ -409,6 +409,34 @@ func TestExecutionPayloadEnvelopeRequestsRejectPreGloasResponseVersion(t *testin
 	}
 }
 
+func TestExecutionPayloadEnvelopeRequestsRejectConfiguredRequestLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxBuilderDepositRequestsPerPayload = 1
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, envelope, gloasDigest[:]...))
+
+	for _, request := range []func(*BeaconRpcP2P) error{
+		func(client *BeaconRpcP2P) error {
+			_, _, err := client.SendExecutionPayloadEnvelopesByRangeReq(context.Background(), 1, 1)
+			return err
+		},
+		func(client *BeaconRpcP2P) error {
+			_, _, err := client.SendExecutionPayloadEnvelopesByRootReq(context.Background(), [][32]byte{{1}})
+			return err
+		},
+	} {
+		client := &BeaconRpcP2P{ctx: context.Background(), sentinel: &blockResponseSentinel{response: response.Bytes()}, beaconConfig: &cfg, ethClock: clock}
+		require.ErrorContains(t, request(client), "builder deposits")
+	}
+}
+
 func TestMaxRequestPayloadsFallback(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxRequestPayloads = 0

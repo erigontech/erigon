@@ -532,6 +532,7 @@ func (e *ExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) error {
 	return e.decodeSSZ(buf, version, false)
 }
 
+// DecodeSSZStrict decodes an execution payload envelope using canonical SSZ rules.
 func (e *ExecutionPayloadEnvelope) DecodeSSZStrict(buf []byte, version int) error {
 	return e.decodeSSZ(buf, version, true)
 }
@@ -689,6 +690,7 @@ func (s *SignedExecutionPayloadEnvelope) DecodeSSZ(buf []byte, version int) erro
 	return s.decodeSSZ(buf, version, false)
 }
 
+// DecodeSSZStrict decodes a signed execution payload envelope using canonical SSZ rules.
 func (s *SignedExecutionPayloadEnvelope) DecodeSSZStrict(buf []byte, version int) error {
 	return s.decodeSSZ(buf, version, true)
 }

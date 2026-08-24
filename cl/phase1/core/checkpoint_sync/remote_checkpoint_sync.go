@@ -196,6 +196,9 @@ func (r *RemoteCheckpointSync) fetchEnvelope(ctx context.Context, stateURI strin
 	if err := envelope.DecodeSSZStrict(marshaled, int(version)); err != nil {
 		return nil, fmt.Errorf("finalized envelope decode failed: %w", err)
 	}
+	if err := envelope.ValidateForConfig(r.beaconConfig); err != nil {
+		return nil, fmt.Errorf("finalized envelope validation failed: %w", err)
+	}
 	log.Info("[Checkpoint Sync] Finalized envelope retrieved", "beaconBlockRoot", envelope.Message.BeaconBlockRoot)
 	return envelope, nil
 }

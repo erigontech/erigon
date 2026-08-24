@@ -104,6 +104,7 @@ func (e *ExtraData) DecodeSSZ(buf []byte, _ int) error {
 	return nil
 }
 
+// DecodeSSZStrict decodes extra data using canonical SSZ rules.
 func (e *ExtraData) DecodeSSZStrict(buf []byte, version int) error {
 	if len(buf) > maxExtraDataBytes {
 		return fmt.Errorf("%w: ExtraData SSZ data length %d exceeds limit %d", ssz.ErrTooBigList, len(buf), maxExtraDataBytes)
@@ -125,6 +126,7 @@ func (e *ExtraData) SetBytes(buf []byte) {
 	}
 }
 
+// ValidateBounds checks that extra data fits the protocol limit.
 func (e *ExtraData) ValidateBounds() error {
 	if e.l > maxExtraDataBytes {
 		return fmt.Errorf("extra data length %d exceeds limit %d", e.l, maxExtraDataBytes)

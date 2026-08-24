@@ -377,8 +377,9 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 				if block.Version() >= clparams.GloasVersion && !b.envelopesSkipped {
 					env, fetchErr := b.fetchSingleEnvelope(ctx, block)
 					if fetchErr != nil {
-						log.Warn("[BackwardBeaconDownloader] GLOAS envelope fetch failed for root-fetched block, treating as EMPTY",
+						log.Warn("[BackwardBeaconDownloader] GLOAS envelope fetch failed for root-fetched block, will retry",
 							"slot", block.Block.Slot, "err", fetchErr)
+						return nil
 					}
 					// env == nil && fetchErr == nil means HTTP 404: genuinely EMPTY.
 					envelope = env
@@ -707,7 +708,11 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	}
 
 	client := &http.Client{Timeout: 10 * time.Second}
-	reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/%d", b.httpFallbackURL, block.Block.Slot)
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return nil, fmt.Errorf("block root: %w", err)
+	}
+	reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/0x%x", b.httpFallbackURL, blockRoot)
 	req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 	if err != nil {
 		return nil, err
@@ -740,9 +745,8 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	if err := envelope.DecodeSSZStrict(body, int(version)); err != nil {
 		return nil, fmt.Errorf("envelope decode: %w", err)
 	}
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		return nil, fmt.Errorf("block root: %w", err)
+	if err := envelope.ValidateForConfig(b.beaconCfg); err != nil {
+		return nil, fmt.Errorf("envelope validation: %w", err)
 	}
 	if envelope.Message.BeaconBlockRoot != blockRoot {
 		return nil, fmt.Errorf("envelope block root %x does not match requested block root %x", envelope.Message.BeaconBlockRoot, blockRoot)

@@ -18,11 +18,15 @@ func TestExecutionRequestsStrictDecodeRejectsNonCanonicalOffset(t *testing.T) {
 	requests := NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 	encoded, err := requests.EncodeSSZ(nil)
 	require.NoError(t, err)
-	firstOffset := binary.LittleEndian.Uint32(encoded)
-	binary.LittleEndian.PutUint32(encoded, firstOffset+1)
-	encoded = append(encoded[:firstOffset], append([]byte{0}, encoded[firstOffset:]...)...)
+	fixedSize := uint32(len(encoded))
+	for offset := 0; offset < len(encoded); offset += 4 {
+		binary.LittleEndian.PutUint32(encoded[offset:], fixedSize+1)
+	}
+	encoded = append(encoded, 0)
 
 	decoded := NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	require.NoError(t, decoded.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	decoded = NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
 	require.Error(t, decoded.DecodeSSZStrict(encoded, int(clparams.GloasVersion)))
 }
 

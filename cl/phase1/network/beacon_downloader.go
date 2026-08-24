@@ -695,7 +695,7 @@ func fetchEnvelopesFromBeaconAPI(
 			sem <- struct{}{}
 			defer func() { <-sem }()
 
-			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/%d", baseURL, slot)
+			reqURL := fmt.Sprintf("%s/eth/v1/beacon/execution_payload_envelope/0x%x", baseURL, root)
 			req, err := http.NewRequestWithContext(ctx, "GET", reqURL, nil)
 			if err != nil {
 				return
@@ -722,6 +722,10 @@ func fetchEnvelopesFromBeaconAPI(
 			}
 			if err := envelope.DecodeSSZStrict(body, int(version)); err != nil {
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "slot", slot, "err", err)
+				return
+			}
+			if err := envelope.ValidateForConfig(beaconCfg); err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope validation failed", "slot", slot, "err", err)
 				return
 			}
 			if envelope.Message.BeaconBlockRoot != common.Hash(root) {

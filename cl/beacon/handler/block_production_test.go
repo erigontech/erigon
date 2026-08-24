@@ -43,9 +43,12 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	gossip_topic "github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
@@ -75,6 +78,46 @@ type updateFailingDB struct {
 
 func (db updateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
 	return errors.New("stop after persistence")
+}
+
+func TestBroadcastSelfBuildEnvelopeStopsPermanentApplyErrorBeforeGossip(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+	fcu.ApplyLocalSelfBuildEnvelopeErr = errors.New("invalid payload")
+
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.HexToHash("0x1234")
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(h.beaconChainCfg), Signature: common.Bytes96{1}}
+
+	err := h.broadcastSelfBuildEnvelope(context.Background(), block, envelope)
+	require.ErrorContains(t, err, "invalid payload")
+	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.True(t, cached)
+}
+
+func TestBroadcastSelfBuildEnvelopeContinuesQueuedApply(t *testing.T) {
+	_, _, _, _, _, h, _, _, fcu, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	h.gossipManager = gossipManager
+	fcu.ApplyLocalSelfBuildEnvelopeErr = forkchoice.ErrIgnore
+
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.HexToHash("0x1234")
+	h.selfBuildPayloads.Add(bid.Message.BlockHash, &selfBuildPayload{Payload: cltypes.NewEth1Block(clparams.GloasVersion, h.beaconChainCfg)})
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(h.beaconChainCfg), Signature: common.Bytes96{1}}
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip_topic.TopicNameExecutionPayload, gomock.Any()).Return(nil)
+
+	require.NoError(t, h.broadcastSelfBuildEnvelope(context.Background(), block, envelope))
+	_, cached := h.selfBuildPayloads.Get(bid.Message.BlockHash)
+	require.False(t, cached)
 }
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {

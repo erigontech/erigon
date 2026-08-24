@@ -267,13 +267,13 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		return nil, fmt.Errorf("corrupt envelope file: length %d exceeds max %d, root: %x", envelopeLength, clparams.MaxChunkSize, blockRoot)
 	}
 	ownedBuffer := make([]byte, envelopeLength)
-	n, err = io.ReadFull(sr, ownedBuffer)
+	n, err := io.ReadFull(sr, ownedBuffer)
 	if err != nil {
 		corrupt = isCorruptEnvelopeReadError(err, readTracker.err)
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
 	}
 	var trailing [1]byte
-	if _, readErr := io.ReadFull(f.envelopeSnappyReader, trailing[:]); readErr == nil {
+	if _, readErr := io.ReadFull(sr, trailing[:]); readErr == nil {
 		corrupt = true
 		return nil, fmt.Errorf("corrupt envelope file: trailing data after declared payload, root: %x", blockRoot)
 	} else if !errors.Is(readErr, io.EOF) {
@@ -387,7 +387,6 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 	sw := snappypool.Writer(dumpedFile)
 	defer snappypool.PutWriter(sw)
 
-	// Write the framing version and SSZ length.
 	length := make([]byte, 8)
 	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
 	if _, err := sw.Write([]byte{byte(envelope.Message.Payload.Version())}); err != nil {

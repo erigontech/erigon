@@ -108,8 +108,11 @@ func (s *executionPayloadService) IsMyGossipMessage(name string) bool {
 }
 
 func (s *executionPayloadService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if err := cltypes.ValidateExecutionPayloadEnvelopeVersion(version); err != nil {
+		return nil, err
+	}
 	obj := &cltypes.SignedExecutionPayloadEnvelope{
-		Message: cltypes.NewExecutionPayloadEnvelope(s.beaconCfg),
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(s.beaconCfg, version),
 	}
 	if err := obj.DecodeSSZStrict(data, int(version)); err != nil {
 		return nil, err

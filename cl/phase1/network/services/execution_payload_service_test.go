@@ -99,6 +99,20 @@ func TestExecutionPayloadServiceRejectsOversizedExtraDataSSZ(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestExecutionPayloadServiceRejectsUnsupportedEnvelopeVersions(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	encoded, err := newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, version := range []clparams.StateVersion{clparams.FuluVersion, clparams.StateVersion(255)} {
+		_, err := service.DecodeGossipMessage("", encoded, version)
+		require.ErrorContains(t, err, "unsupported execution payload envelope consensus version")
+	}
+	decoded, err := service.DecodeGossipMessage("", encoded, clparams.GloasVersion)
+	require.NoError(t, err)
+	require.NotNil(t, decoded)
+}
+
 func TestExecutionPayloadServiceRejectsMalformedEnvelopeBeforePendingHash(t *testing.T) {
 	service, _ := setupExecutionPayloadService(t)
 	envelope := newTestSignedEnvelope(100, common.HexToHash("0x1234"), 1)

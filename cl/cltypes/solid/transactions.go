@@ -138,6 +138,7 @@ func (t *TransactionsSSZ) EncodeSSZ(buf []byte) (dst []byte, err error) {
 	return dst, nil
 }
 
+// ValidateBounds checks transaction count and per-transaction byte limits.
 func (t *TransactionsSSZ) ValidateBounds(maxTransactions, maxBytesPerTransaction uint64) error {
 	if maxTransactions == 0 {
 		maxTransactions = clparams.MaxTransactionsPerPayloadDefault

@@ -2302,9 +2302,6 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 		}
 	}
 
-	// Remove from cache after use (regardless of path taken)
-	a.selfBuildPayloads.Remove(bid.Message.BlockHash)
-
 	// Process through forkchoice so the local node marks the block as FULL.
 	// Use ApplyLocalSelfBuildEnvelope instead of OnExecutionPayload: it skips BLS
 	// signature verification (we produced this envelope locally and may not have the
@@ -2313,8 +2310,12 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 	// goroutine) has not finished yet — the forkchoice store queues the envelope in
 	// pendingEnvelopes and OnBlock will pick it up. Debug-level to avoid noisy logs.
 	if err := a.forkchoiceStore.ApplyLocalSelfBuildEnvelope(ctx, signedEnvelope); err != nil {
+		if !errors.Is(err, forkchoice.ErrIgnore) {
+			return fmt.Errorf("failed to apply self-build envelope: %w", err)
+		}
 		a.logger.Debug("Self-build envelope queued for pending processing", "err", err, "blockRoot", blockRoot)
 	}
+	a.selfBuildPayloads.Remove(bid.Message.BlockHash)
 
 	// Only broadcast the envelope if it has a real BLS signature.
 	// Envelopes with InfiniteSignature (fallback when the VC doesn't provide a

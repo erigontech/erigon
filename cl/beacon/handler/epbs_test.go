@@ -172,7 +172,7 @@ func TestPostExecutionPayloadEnvelopeRejectsPreGloasVersion(t *testing.T) {
 	}
 	body, err := envelope.EncodeSSZ(nil)
 	require.NoError(t, err)
-	request := httptest.NewRequest(http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
+	request := httptest.NewRequestWithContext(context.Background(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	request.Header.Set("Eth-Consensus-Version", clparams.FuluVersion.String())
 	recorder := httptest.NewRecorder()
