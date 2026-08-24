@@ -438,7 +438,7 @@ func (p *Provider) emitPairedHistoryV4(
 	efOldPath := snapshot.ResolveExistingPath(p.snapDir, efEntry.Name)
 	vOldPath := snapshot.ResolveExistingPath(p.snapDir, vEntry.Name)
 
-	vComp, efComp := p.Aggregator.HistoryCompressions(kvDomain)
+	efComp, vComp := p.Aggregator.HistoryCompressions(kvDomain)
 	if err := TruncateStraddlerHistoryFile(ctx,
 		efOldPath, vOldPath,
 		efRegenPath, vRegenPath,

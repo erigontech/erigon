@@ -201,12 +201,16 @@ func TestHistory_mergeV4AndMDBXHistoryFiles_SameKeyConcatenatesTxNs(t *testing.T
 	require.Equal(t, [][][]byte{{[]byte("v-10"), []byte("v-20"), []byte("v-30"), []byte("v-40")}}, values)
 }
 
-// TestHistory_mergeV4AndMDBXHistoryFiles_OverlappingTxNsError: if v4 and
-// MDBX share the same (key, txN), the merge must error rather than emit
-// duplicates. The mode-C emit + wipeWritableShadowPast invariant makes
-// this impossible in practice, but the primitive defends against
-// accidental violations that would silently corrupt the history file.
-func TestHistory_mergeV4AndMDBXHistoryFiles_OverlappingTxNsError(t *testing.T) {
+// TestHistory_mergeV4AndMDBXHistoryFiles_OverlapDedupesToMDBX: when v4 and
+// MDBX share (key, txN) pairs — the expected shape after multi-iter mode-C
+// because WipeWritableShadowPast only prunes history at txN > lastTxN,
+// leaving txN <= lastTxN entries intact in both v4 and MDBX — the merge
+// drops v4's overlapping tail and keeps MDBX's values. Deterministic
+// execution guarantees the values would be identical anyway, so either
+// side wins; preferring MDBX matches the state-side priority-merge
+// convention (mergedStepSources in db/state/step_source.go where source[0]
+// = MDBX takes priority on duplicate keys).
+func TestHistory_mergeV4AndMDBXHistoryFiles_OverlapDedupesToMDBX(t *testing.T) {
 	t.Parallel()
 	_, agg := testDbAndAggregatorv3(t, 100)
 	ctx := t.Context()
@@ -221,16 +225,15 @@ func TestHistory_mergeV4AndMDBXHistoryFiles_OverlappingTxNsError(t *testing.T) {
 	outEF := tmp + "/out.ef"
 	outV := tmp + "/out.v"
 
-	// v4 covers txN 20 for K.
+	// v4 covers txN 10, 20 for K.
 	writePairedHistoryStepFileForTest(t, ctx, h, v4EF, v4V, baseTxN, []struct {
 		Key    []byte
 		TxNs   []uint64
 		Values [][]byte
 	}{
-		{Key: []byte("K"), TxNs: []uint64{20}, Values: [][]byte{[]byte("v4")}},
+		{Key: []byte("K"), TxNs: []uint64{10, 20}, Values: [][]byte{[]byte("v4-10"), []byte("v4-20")}},
 	})
-	// MDBX also covers txN 20 (invalid — WipeWritableShadowPast should
-	// have removed it), plus 30.
+	// MDBX covers txN 20, 30 — 20 overlaps v4.
 	writePairedHistoryStepFileForTest(t, ctx, h, mdbxEF, mdbxV, baseTxN, []struct {
 		Key    []byte
 		TxNs   []uint64
@@ -239,9 +242,13 @@ func TestHistory_mergeV4AndMDBXHistoryFiles_OverlappingTxNsError(t *testing.T) {
 		{Key: []byte("K"), TxNs: []uint64{20, 30}, Values: [][]byte{[]byte("mdbx-20"), []byte("mdbx-30")}},
 	})
 
-	err := h.mergeV4AndMDBXHistoryFiles(ctx, baseTxN, v4EF, v4V, mdbxEF, mdbxV, outEF, outV)
-	require.Error(t, err)
-	require.Contains(t, err.Error(), "txN range overlap")
+	require.NoError(t, h.mergeV4AndMDBXHistoryFiles(ctx, baseTxN, v4EF, v4V, mdbxEF, mdbxV, outEF, outV))
+
+	keys, txNs, values := readPairedHistoryStepFileForTest(t, outEF, outV, h.InvertedIndex.Compression, h.Compression, baseTxN)
+	require.Equal(t, [][]byte{[]byte("K")}, keys)
+	require.Equal(t, [][]uint64{{10, 20, 30}}, txNs, "overlapping txN=20 present once, v4-only txN=10 kept, MDBX-only txN=30 kept")
+	// MDBX wins on the overlap.
+	require.Equal(t, [][][]byte{{[]byte("v4-10"), []byte("mdbx-20"), []byte("mdbx-30")}}, values)
 }
 
 // TestHistory_buildFiles_MergesV4WhenPresent pins the wire contract

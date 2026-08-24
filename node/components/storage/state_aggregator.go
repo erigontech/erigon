@@ -61,10 +61,14 @@ type StateAggregator interface {
 	// returns a.Cfg(domain).Compression; mocks return CompressNone.
 	DomainCompression(domain kv.Domain) seg.FileCompression
 
-	// HistoryCompressions returns the (.v, .ef) compression settings for
-	// the domain's history/index files. Mode-C's paired-history v4 emit
-	// needs both to filter-copy a straddler in the source's wire format.
-	HistoryCompressions(domain kv.Domain) (vComp, efComp seg.FileCompression)
+	// HistoryCompressions returns the (.ef, .v) compression settings for
+	// the domain's inverted-index and history files, in that order —
+	// matching the (efPath, vPath) ordering used by the mode-C v4
+	// filter-copy primitive (TruncateStraddlerHistoryFile) and the
+	// EFFilePathV4/HistoryFilePathV4 path helpers. Uniform ordering
+	// removes a silent-hazard: an accidental caller unpacking as (a, b)
+	// and passing (a, b) would otherwise swap the pair.
+	HistoryCompressions(domain kv.Domain) (efComp, vComp seg.FileCompression)
 
 	// Unwind is the cross-cutting aggregator-side unwind step:
 	// invalidates every aggregator-lifetime cache keyed by txN past

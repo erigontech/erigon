@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"fmt"
+	"math"
 	"os"
 
 	"github.com/erigontech/erigon/common/dir"
@@ -207,26 +208,32 @@ func (h *History) mergeV4AndMDBXHistoryFiles(
 		}
 		mergedValues = mergedValues[:0]
 
+		// v4/MDBX overlap semantics: WipeWritableShadowPast only prunes
+		// history entries at txN > lastTxN, so MDBX post-wipe retains all
+		// (key, txN) tuples for txN <= lastTxN — the exact range v4
+		// covers. When both sides carry the same key AND MDBX's
+		// smallest txN falls inside v4's range, v4's overlapping tail is
+		// redundant (its values were originally copied FROM the same
+		// MDBX at emit time). Drop v4 entries at or past MDBX's first
+		// txN so the merged sequence stays strictly ascending without
+		// duplicates. Non-overlap case (mdbx.min > v4.max) keeps every
+		// v4 entry unchanged.
+		mdbxCutoff := uint64(math.MaxUint64)
+		if pickV4 && pickMDBX && len(mdbxCur.txNs) > 0 {
+			mdbxCutoff = mdbxCur.txNs[0]
+		}
 		if pickV4 {
-			mergedTxNs = append(mergedTxNs, v4Cur.txNs...)
-			for _, v := range v4Cur.values {
-				mergedValues = append(mergedValues, bytes.Clone(v))
+			for i, txN := range v4Cur.txNs {
+				if txN >= mdbxCutoff {
+					break
+				}
+				mergedTxNs = append(mergedTxNs, txN)
+				mergedValues = append(mergedValues, v4Cur.values[i])
 			}
 		}
 		if pickMDBX {
-			// txN disjointness invariant: MDBX's txNs are all > any v4 txN
-			// for this step. If both sides carry the same txN for the
-			// same key, that violates the invariant and would produce a
-			// duplicate history entry — surface it as an error.
-			if pickV4 && len(v4Cur.txNs) > 0 && len(mdbxCur.txNs) > 0 {
-				if mdbxCur.txNs[0] <= v4Cur.txNs[len(v4Cur.txNs)-1] {
-					return fmt.Errorf("mergeV4AndMDBXHistoryFiles: v4/MDBX txN range overlap for key %x: v4.max=%d mdbx.min=%d", outKey, v4Cur.txNs[len(v4Cur.txNs)-1], mdbxCur.txNs[0])
-				}
-			}
 			mergedTxNs = append(mergedTxNs, mdbxCur.txNs...)
-			for _, v := range mdbxCur.values {
-				mergedValues = append(mergedValues, bytes.Clone(v))
-			}
+			mergedValues = append(mergedValues, mdbxCur.values...)
 		}
 
 		if len(mergedTxNs) == 0 {

@@ -401,14 +401,20 @@ func (a *Aggregator) DomainCompression(domain kv.Domain) seg.FileCompression {
 	return a.d[domain].Compression
 }
 
-// HistoryCompressions returns the (.v, .ef) compression settings for the
-// domain's history/index files. Mode-C v4 paired-history emission needs
-// both to filter-copy a straddler in the source's wire format.
-func (a *Aggregator) HistoryCompressions(domain kv.Domain) (vComp, efComp seg.FileCompression) {
+// HistoryCompressions returns the (.ef, .v) compression settings for the
+// domain's inverted-index and history files, in that order — matching the
+// (efPath, vPath) ordering the mode-C v4 filter-copy primitive
+// (TruncateStraddlerHistoryFile) and the visible-file ordering in
+// EFFilePathV4 + HistoryFilePathV4 use. Keeping the return order
+// consistent with those call sites removes a silent hazard: an
+// accidental `a, b := HistoryCompressions(...)` then passed as
+// `(a, b)` to the truncate function would otherwise swap the pair with
+// no compile-time warning.
+func (a *Aggregator) HistoryCompressions(domain kv.Domain) (efComp, vComp seg.FileCompression) {
 	if int(domain) >= len(a.d) || a.d[domain] == nil || a.d[domain].History == nil {
 		return seg.CompressNone, seg.CompressNone
 	}
-	return a.d[domain].History.Compression, a.d[domain].History.InvertedIndex.Compression
+	return a.d[domain].History.InvertedIndex.Compression, a.d[domain].History.Compression
 }
 
 func (a *Aggregator) reloadSalt() error {
