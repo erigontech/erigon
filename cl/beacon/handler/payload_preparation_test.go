@@ -505,16 +505,17 @@ func TestPreparePayloadLoopWaitsForCurrentSlotHead(t *testing.T) {
 
 func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 	for _, test := range []struct {
-		name          string
-		elapsed       time.Duration
-		staleHead     bool
-		reorgToEmpty  bool
-		timeout       time.Duration
-		shouldPrepare bool
+		name            string
+		elapsed         time.Duration
+		staleHead       bool
+		invalidatedHead bool
+		reorgToEmpty    bool
+		timeout         time.Duration
+		shouldPrepare   bool
 	}{
-		{name: "stale head before PTC deadline", elapsed: 4 * time.Second, staleHead: true},
+		{name: "older head after empty-slot deadline", elapsed: 4 * time.Second, staleHead: true, shouldPrepare: true},
 		{name: "wakeup at PTC deadline", elapsed: 8900 * time.Millisecond, timeout: 2 * time.Second, shouldPrepare: true},
-		{name: "after PTC deadline", elapsed: 9100 * time.Millisecond, shouldPrepare: true},
+		{name: "invalidated head after PTC deadline", elapsed: 9100 * time.Millisecond, invalidatedHead: true, shouldPrepare: true},
 		{name: "FULL head with EMPTY decision", elapsed: 9100 * time.Millisecond, reorgToEmpty: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -532,6 +533,7 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 				Slot:            currentSlot,
 			})
 			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+			forkchoiceStore.HeadPayloadStatusInvalidated = test.invalidatedHead
 			if test.reorgToEmpty {
 				forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 				buildOnFull := false
@@ -732,6 +734,74 @@ func TestPreparePayloadLoopMemoizesThePreferenceGenerationItUsed(t *testing.T) {
 	handler.preparePayloadLoop(ctx)
 
 	require.Equal(t, []uint64{36_000_000, defaultGasLimit}, builtGasLimits)
+}
+
+func TestPreparePayloadLoopMemoizesTheGloasPathItBuilt(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	postState, handler, syncedData, forkchoiceStore, validatorParams := setupGloasPreparationTest(t)
+	config := *handler.beaconChainCfg
+	config.SecondsPerSlot = 6
+	config.IntervalsPerSlot = 3
+	handler.beaconChainCfg = &config
+
+	currentSlot := postState.Slot()
+	targetSlot := currentSlot + 1
+	baseBlockRoot := common.Hash{0x41}
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: common.Hash{0xa1},
+		BlockHash:       common.Hash{0xb2},
+		GasLimit:        30_000_000,
+		Slot:            currentSlot,
+	})
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+		},
+	}
+	statusReads := 0
+	forkchoiceStore.GetHeadPayloadStatusFn = func(root common.Hash) (cltypes.PayloadStatus, bool) {
+		require.Equal(t, baseBlockRoot, root)
+		statusReads++
+		if statusReads == 1 {
+			return cltypes.PayloadStatusEmpty, true
+		}
+		return cltypes.PayloadStatusFull, true
+	}
+
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
+	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, currentSlot, true).AnyTimes()
+	syncedDataMock.EXPECT().HeadRoot().Return(baseBlockRoot).AnyTimes()
+	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
+		DoAndReturn(func(view synced_data.ViewHeadStateWithIdentityFn) error {
+			return view(postState, baseBlockRoot, currentSlot)
+		}).AnyTimes()
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	targetSlotStart := time.Now().Add(4200 * time.Millisecond)
+	clock.EXPECT().GetCurrentSlot().Return(currentSlot).AnyTimes()
+	clock.EXPECT().GetSlotTime(targetSlot).Return(targetSlotStart).AnyTimes()
+	handler.ethClock = clock
+
+	ctx, cancel := context.WithTimeout(t.Context(), 3500*time.Millisecond)
+	defer cancel()
+	buildCount := 0
+	engine := newPayloadBuildEngine(t, ctrl)
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		buildCount++
+		if buildCount > 1 {
+			cancel()
+		}
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
+	}
+	handler.engine = engine
+
+	handler.preparePayloadLoop(ctx)
+
+	require.Equal(t, 1, buildCount, "the settled key must use the path that produced the payload ID")
 }
 
 func TestInvalidProductionRequestDoesNotWaitForPreparation(t *testing.T) {
@@ -1201,6 +1271,32 @@ func TestExecutionPayloadSourceRejectsPendingGloasDecision(t *testing.T) {
 
 	require.ErrorIs(t, err, errGloasPayloadPending)
 	require.Equal(t, executionPayloadSource{}, source)
+}
+
+func TestExecutionPayloadSourceRefreshesInvalidatedGloasHead(t *testing.T) {
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	targetSlot := postState.Slot() + 1
+	baseBlockRoot := common.Hash{0x41}
+	fullHash := common.Hash{0xb2}
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: common.Hash{0xa1},
+		BlockHash:       fullHash,
+		Slot:            postState.Slot(),
+	})
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	forkchoiceStore.HeadPayloadStatusInvalidated = true
+	forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+		Message: &cltypes.ExecutionPayloadEnvelope{
+			ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+		},
+	}
+
+	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+
+	require.NoError(t, err)
+	require.Equal(t, fullHash, source.head)
+	require.Equal(t, gloasPayloadPathFull, source.gloasPath)
 }
 
 func setupGloasPreparationTest(t *testing.T) (

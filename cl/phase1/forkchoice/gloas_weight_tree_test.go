@@ -129,7 +129,7 @@ func TestGetHeadPublishesAnchorFallback(t *testing.T) {
 	require.Equal(t, slot, selectedSlot)
 }
 
-func TestGetHeadPublishesGloasSelection(t *testing.T) {
+func TestGetHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.AltairForkEpoch = 0
 	cfg.BellatrixForkEpoch = 0
@@ -165,6 +165,17 @@ func TestGetHeadPublishesGloasSelection(t *testing.T) {
 	require.True(t, ok)
 	require.Equal(t, selectedRoot, publishedRoot)
 	require.Equal(t, selectedSlot, publishedSlot)
+	expectedStatus, matchesHead := store.GetHeadPayloadStatus(root)
+	require.True(t, matchesHead)
+
+	store.mu.Lock()
+	store.headHash = common.Hash{}
+	store.headPayloadStatus = cltypes.PayloadStatusPending
+	store.mu.Unlock()
+
+	status, matchesHead := store.GetHeadPayloadStatus(root)
+	require.True(t, matchesHead, "an invalidated cache must be recomputed for the selected root")
+	require.Equal(t, expectedStatus, status)
 }
 
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {

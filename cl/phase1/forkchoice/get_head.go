@@ -143,14 +143,34 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	return f.getHead(auxilliaryState)
 }
 
-// GetHeadPayloadStatus returns the cached head's payload status only when its root still matches.
+// GetHeadPayloadStatus returns the current head's payload status only when its root matches.
+// It refreshes an invalidated head cache before checking the root and status together.
 func (f *ForkChoiceStore) GetHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
+	for range 2 {
+		status, matches, ready := f.cachedHeadPayloadStatus(root)
+		if ready {
+			return status, matches
+		}
+		if _, _, err := f.GetHead(nil); err != nil {
+			return cltypes.PayloadStatusPending, false
+		}
+	}
+	// A concurrent import can invalidate the first refresh. Bound the retry so sustained fork-choice
+	// activity cannot hold proposal handling in this method.
+	status, matches, _ := f.cachedHeadPayloadStatus(root)
+	return status, matches
+}
+
+func (f *ForkChoiceStore) cachedHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool, bool) {
 	f.mu.RLock()
 	defer f.mu.RUnlock()
-	if f.headHash != root {
-		return cltypes.PayloadStatusPending, false
+	if f.headHash == (common.Hash{}) {
+		return cltypes.PayloadStatusPending, false, false
 	}
-	return f.headPayloadStatus, true
+	if f.headHash != root {
+		return cltypes.PayloadStatusPending, false, true
+	}
+	return f.headPayloadStatus, true, true
 }
 
 // getHeadGloas returns the head using GLOAS fork choice rules.

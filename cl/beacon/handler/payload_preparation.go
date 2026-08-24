@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
@@ -185,10 +186,7 @@ func (g *payloadPreparationGate) producedBlockPending(currentSlot, selectedSlot 
 }
 
 func slotsWithinOne(first, second uint64) bool {
-	if first > second {
-		return first-second <= 1
-	}
-	return second-first <= 1
+	return math.AbsoluteDifference(first, second) <= 1
 }
 
 // StartPayloadPreparation primes the execution layer for slots this node is due to propose.
@@ -316,7 +314,11 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		var proposerPreferencesGeneration uint64
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			selectedVersion := a.beaconChainCfg.GetCurrentStateVersion(selectedSlot / a.beaconChainCfg.SlotsPerEpoch)
-			if currentVersion.AfterOrEqual(clparams.GloasVersion) && selectedVersion.AfterOrEqual(clparams.GloasVersion) {
+			// Only a current-slot Gloas head depends on the current slot's PTC decision. An
+			// older selected head has already crossed its payload-decision boundary.
+			if selectedSlot == currentSlot &&
+				currentVersion.AfterOrEqual(clparams.GloasVersion) &&
+				selectedVersion.AfterOrEqual(clparams.GloasVersion) {
 				if delay := gloasPayloadDecisionDelay(
 					time.Now(),
 					currentSlotStart,
@@ -365,8 +367,11 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		cancel()
 		outcome := current
 		outcome.headRoot = result.headRoot
-		// State derivation can overlap preference updates. Memoize the generation paired with the
-		// attributes this attempt used, rather than the generation sampled before state work.
+		// State derivation can overlap the PTC decision and preference updates. Memoize the inputs
+		// this attempt actually used, rather than the values sampled before state work.
+		if result.gloasPathResolved {
+			outcome.gloasPath = result.gloasPath
+		}
 		if result.preferenceGenerationResolved {
 			outcome.proposerPreferencesGeneration = result.preferenceGeneration
 		}
@@ -448,6 +453,8 @@ func isSettledPreparationOutcome(err error) bool {
 
 type payloadPreparationResult struct {
 	headRoot                     common.Hash
+	gloasPath                    gloasPayloadPath
+	gloasPathResolved            bool
 	preferenceGeneration         uint64
 	preferenceGenerationResolved bool
 }
@@ -512,8 +519,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 
 	stateVersion := a.beaconChainCfg.GetCurrentStateVersion(targetSlot / a.beaconChainCfg.SlotsPerEpoch)
-	// State derivation can consume most of the useful lead. Apply the same floor again so a late
-	// builder does not overlap production without providing meaningful warmup.
+	// State derivation can consume the entry lead, so enforce the same floor again.
 	if time.Until(a.ethClock.GetSlotTime(targetSlot)) <= minimumPreparationLead {
 		return result, errPreparationTooLate
 	}
@@ -526,6 +532,8 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	if err != nil {
 		return result, err
 	}
+	result.gloasPath = payloadSource.gloasPath
+	result.gloasPathResolved = true
 	if payloadSource.gloasPath == gloasPayloadPathReorgToEmpty {
 		return result, errGloasReorgToEmpty
 	}

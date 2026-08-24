@@ -40,22 +40,23 @@ import (
 // Make mocks with maps and simple setters and getters, panic on methods from ForkChoiceStorageWriter
 
 type ForkChoiceStorageMock struct {
-	Ancestors              map[uint64]forkchoice.ForkChoiceNode
-	AnchorSlotVal          uint64
-	AnchorRootVal          common.Hash
-	FinalizedCheckpointVal solid.Checkpoint
-	FinalizedSlotVal       uint64
-	LowestAvailableSlotVal *uint64
-	HeadVal                common.Hash
-	HeadSlotVal            uint64
-	HeadPayloadStatusVal   cltypes.PayloadStatus
-	HighestSeenVal         uint64
-	BlockProcessingVal     bool
-	JustifiedCheckpointVal solid.Checkpoint
-	JustifiedSlotVal       uint64
-	ProposerBoostRootVal   common.Hash
-	SlotVal                uint64
-	TimeVal                uint64
+	Ancestors                    map[uint64]forkchoice.ForkChoiceNode
+	AnchorSlotVal                uint64
+	AnchorRootVal                common.Hash
+	FinalizedCheckpointVal       solid.Checkpoint
+	FinalizedSlotVal             uint64
+	LowestAvailableSlotVal       *uint64
+	HeadVal                      common.Hash
+	HeadSlotVal                  uint64
+	HeadPayloadStatusVal         cltypes.PayloadStatus
+	HeadPayloadStatusInvalidated bool
+	HighestSeenVal               uint64
+	BlockProcessingVal           bool
+	JustifiedCheckpointVal       solid.Checkpoint
+	JustifiedSlotVal             uint64
+	ProposerBoostRootVal         common.Hash
+	SlotVal                      uint64
+	TimeVal                      uint64
 
 	ParticipationVal map[uint64]*solid.ParticipationBitList
 
@@ -79,6 +80,7 @@ type ForkChoiceStorageMock struct {
 	VerifiedPayloads             map[common.Hash]bool
 	OnExecutionPayloadFn         func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	OnExecutionPayloadErr        error
+	GetHeadPayloadStatusFn       func(common.Hash) (cltypes.PayloadStatus, bool)
 	GetBeaconCommitteeMock       func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
@@ -270,6 +272,7 @@ func (f *ForkChoiceStorageMock) GetFinalizedExecutionHash(eth2Root common.Hash) 
 }
 
 func (f *ForkChoiceStorageMock) GetHead(_ *state.CachingBeaconState) (common.Hash, uint64, error) {
+	f.HeadPayloadStatusInvalidated = false
 	return f.HeadVal, f.HeadSlotVal, nil
 }
 
@@ -469,6 +472,12 @@ func (f *ForkChoiceStorageMock) IsBlobDataAvailable(slot uint64, blockRoot commo
 }
 
 func (f *ForkChoiceStorageMock) GetHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
+	if f.GetHeadPayloadStatusFn != nil {
+		return f.GetHeadPayloadStatusFn(root)
+	}
+	if f.HeadPayloadStatusInvalidated {
+		_, _, _ = f.GetHead(nil)
+	}
 	if f.HeadVal != root {
 		return cltypes.PayloadStatusPending, false
 	}
