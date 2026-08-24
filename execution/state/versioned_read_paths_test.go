@@ -159,6 +159,29 @@ func TestVersionedRead_DestructedStorageRecordsBALReadAfterRevert(t *testing.T) 
 	require.Equal(t, []accounts.StorageKey{key}, blockAccessList[0].StorageReads)
 }
 
+func TestVersionedRead_DestructedStaleStorageUsesStorageVersion(t *testing.T) {
+	t.Parallel()
+	addr := accounts.InternAddress([20]byte{0xc9})
+	key := accounts.InternKey([32]byte{0x01})
+	vm := NewVersionMap(nil)
+	storageVersion := Version{TxIndex: 0}
+	vm.WriteStorage(addr, key, storageVersion, *uint256.NewInt(1), true)
+	vm.WriteSelfDestruct(addr, Version{TxIndex: 1}, true, true)
+	ibs := NewWithVersionMap(&emptyReader{}, vm)
+	defer ibs.Close()
+	ibs.SetTxContext(1, 2)
+	value, err := ibs.GetState(addr, key)
+	require.NoError(t, err)
+	require.True(t, value.IsZero())
+	reads := ibs.VersionedReads()
+	read, ok := reads.GetStorage(addr, key)
+	require.True(t, ok)
+	require.Equal(t, storageVersion, read.Version)
+	io := NewVersionedIO(3)
+	io.RecordReads(Version{TxIndex: 2}, reads)
+	require.Equal(t, VersionValid, vm.ValidateVersion(2, io, validateEqualVersion, true, false, false, ""))
+}
+
 // CodePath is exempt from the SelfDestruct short-circuit. Even if SD
 // is active, a CodePath read must fall through to the actual code-read
 // branches rather than returning zero.
