@@ -322,8 +322,6 @@ func newCommitmentCalculator(
 }
 
 func (cc *commitmentCalculator) Start(ctx context.Context) {
-	cc.logger.Warn("[dbg] calculator mode", "batchCommitments", dbg.BatchCommitments,
-		"forcePerBlockCompute", cc.forcePerBlockCompute, "perBlockFrom", cc.perBlockFrom)
 	cc.wg.Go(func() {
 		cc.loop(ctx)
 	})
