@@ -24,15 +24,21 @@ import (
 	"strings"
 )
 
+// maxMountinfoLine covers the longest lines seen in practice, e.g. an
+// overlay2 mount's lowerdir= superoption listing many image layers, well
+// past bufio.Scanner's default 64KB bufio.MaxScanTokenSize.
+const maxMountinfoLine = 1 << 20
+
 // fsTypeFromMountinfo returns the filesystem type of the mount whose major:minor
 // device ID is devID. Format: mountID parentID major:minor root mountPoint
 // options [optional fields] - fsType source superOptions
 func fsTypeFromMountinfo(mountinfo io.Reader, devID string) (string, error) {
 	scanner := bufio.NewScanner(mountinfo)
+	scanner.Buffer(make([]byte, 0, 64*1024), maxMountinfoLine)
 	for scanner.Scan() {
 		fields := strings.Fields(scanner.Text())
 		separator := slices.Index(fields, "-")
-		if separator < 3 || separator+1 >= len(fields) {
+		if separator < 6 || separator+1 >= len(fields) {
 			continue
 		}
 		if fields[2] == devID {

@@ -54,10 +54,10 @@ type fsGroup struct {
 func unrecommendedByType(dirPaths []string, fsTypeOf func(string) (string, error)) ([]fsGroup, map[string]error) {
 	var groups []fsGroup
 	failed := map[string]error{}
-	seen := map[string]bool{"": true}
+	seen := map[string]bool{}
 
 	for _, dirPath := range dirPaths {
-		if seen[dirPath] {
+		if dirPath == "" || seen[dirPath] {
 			continue
 		}
 		seen[dirPath] = true
@@ -70,7 +70,7 @@ func unrecommendedByType(dirPaths []string, fsTypeOf func(string) (string, error
 		if IsRecommendedFilesystem(fsType) {
 			continue
 		}
-		if i := slices.IndexFunc(groups, func(g fsGroup) bool { return g.fsType == fsType }); i >= 0 {
+		if i := slices.IndexFunc(groups, func(g fsGroup) bool { return strings.EqualFold(g.fsType, fsType) }); i >= 0 {
 			groups[i].add(dirPath)
 			continue
 		}

@@ -253,8 +253,7 @@ func (n *Node) openDataDir(ctx context.Context) error {
 		break
 	}
 
-	dirs := n.config.Dirs
-	diskutils.CheckFilesystem(n.logger, instdir, dirs.Chaindata, dirs.Snap, dirs.SnapDomain)
+	diskutils.CheckFilesystem(n.logger, n.config.Dirs.All()...)
 	return nil
 }
 

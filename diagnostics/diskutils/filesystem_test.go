@@ -18,6 +18,7 @@ package diskutils
 
 import (
 	"errors"
+	"runtime"
 	"strings"
 	"testing"
 
@@ -59,6 +60,10 @@ func TestIsRecommendedFilesystem(t *testing.T) {
 
 func TestFilesystemType(t *testing.T) {
 	fsType, err := FilesystemType(t.TempDir())
+	if runtime.GOOS != "linux" && runtime.GOOS != "darwin" && runtime.GOOS != "windows" {
+		require.Error(t, err) // filesystem_other.go: no detector on this platform
+		return
+	}
 	require.NoError(t, err)
 	require.NotEmpty(t, fsType)
 }
@@ -105,6 +110,22 @@ func TestUnrecommendedByTypeKeepsSeparateMounts(t *testing.T) {
 	require.Equal(t, []fsGroup{{fsType: "zfs", paths: []string{"/data/chaindata", "/mnt/snap"}}}, groups)
 }
 
+func TestUnrecommendedByTypeGroupsAcrossCase(t *testing.T) {
+	fsTypeOf := func(dirPath string) (string, error) {
+		switch dirPath {
+		case "/data":
+			return "ZFS", nil
+		case "/mnt/snap":
+			return "zfs", nil
+		}
+		return "", errors.New("no such mount")
+	}
+
+	groups, _ := unrecommendedByType([]string{"/data", "/mnt/snap"}, fsTypeOf)
+
+	require.Equal(t, []fsGroup{{fsType: "ZFS", paths: []string{"/data", "/mnt/snap"}}}, groups)
+}
+
 func TestUnrecommendedByTypeAncestorReplacesDescendant(t *testing.T) {
 	fsTypeOf := func(string) (string, error) { return "zfs", nil }
 
@@ -146,6 +167,29 @@ func TestFsTypeFromMountinfo(t *testing.T) {
 		require.NoError(t, err, tc.devID)
 		require.Equal(t, tc.want, got, tc.devID)
 	}
+}
+
+func TestFsTypeFromMountinfoLongLine(t *testing.T) {
+	// An overlay2 lowerdir= superoption listing many image layers can push a
+	// single line well past bufio.Scanner's default 64KB token limit. devID
+	// "9:99" appears only on this line, so a match proves the long line itself
+	// was scanned rather than an earlier line in the sample.
+	longSuperOptions := "lowerdir=" + strings.Repeat("/var/lib/docker/overlay2/layer:", 8000)
+	line := "64 27 9:99 / /var/lib/docker/overlay rw,relatime - overlay overlay " + longSuperOptions + "\n"
+
+	got, err := fsTypeFromMountinfo(strings.NewReader(mountinfoSample+line), "9:99")
+	require.NoError(t, err)
+	require.Equal(t, "overlay", got)
+}
+
+func TestFsTypeFromMountinfoRejectsSeparatorBeforeSixFixedFields(t *testing.T) {
+	// The six fixed fields (mountID parentID major:minor root mountPoint options)
+	// come before any optional field, so "-" can never legitimately appear
+	// before index 6; a line where it does is malformed and must not match.
+	malformed := "21 27 0:99 / - ext4 /dev/sda3 rw\n"
+
+	_, err := fsTypeFromMountinfo(strings.NewReader(malformed), "0:99")
+	require.Error(t, err)
 }
 
 func TestFsTypeFromMountinfoUnknownDevice(t *testing.T) {
