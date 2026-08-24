@@ -230,22 +230,6 @@ func (a *AccessListTracer) SeedNew(state *state.IntraBlockState) *AccessListTrac
 	return newAccessListTracer(a.excl, a.list.cloneExcluding(a.excl), state)
 }
 
-// markCreated and markUsedBeforeCreation allocate on first write, so a txn that
-// creates no contract keeps both sets nil.
-func (a *AccessListTracer) markCreated(addr common.Address) {
-	if a.createdContracts == nil {
-		a.createdContracts = make(map[common.Address]struct{})
-	}
-	a.createdContracts[addr] = struct{}{}
-}
-
-func (a *AccessListTracer) markUsedBeforeCreation(addr common.Address) {
-	if a.usedBeforeCreation == nil {
-		a.usedBeforeCreation = make(map[common.Address]struct{})
-	}
-	a.usedBeforeCreation[addr] = struct{}{}
-}
-
 func (a *AccessListTracer) Hooks() *tracing.Hooks {
 	return &tracing.Hooks{
 		OnOpcode: a.OnOpcode,
