@@ -70,6 +70,12 @@ func (s *StackStream) Write(content []byte) (int, error) {
 	return s.stream.Write(content)
 }
 
+// WriteRawBytes writes already-encoded JSON held as bytes.
+func (s *StackStream) WriteRawBytes(content []byte) {
+	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
+	s.popCommaOrField()
+}
+
 // WriteRaw writes raw content to the stream
 func (s *StackStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
