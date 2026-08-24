@@ -216,10 +216,8 @@ func newCommitmentCalculator(
 	blockRequests chan *blockRequest,
 	out chan commitmentResult,
 ) (*commitmentCalculator, error) {
-	// The calculator folds block N while the exec loop already writes block N+1
-	// into sd.mem. Both invariants below are what keep that safe: as-of reads
-	// need every version retained, and the Updates buffer this calculator owns
-	// must not be mutated by an apply-side TouchKey.
+	// This calculator folds block N while the exec loop already writes N+1 into
+	// sd.mem; both settings below are what keep that read-safe.
 	if !doms.InMemHistoryReads() {
 		return nil, errors.New("commitmentCalculator: in-mem history reads must be enabled")
 	}

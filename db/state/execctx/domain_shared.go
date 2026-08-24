@@ -506,11 +506,9 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 // It sets the corresponding block's changeset as the accumulator
 // so writes go directly to the correct changeset.
 //
-// Concurrency contract: the inner swap (set cs_N → apply → restore prev)
-// mutates the commitment writer's diff, which the exec loop also rewrites
-// via SetChangesetAccumulator. Caller passes `lockHeld=true` when it
-// already holds changesetMu (calc path); `false` when FlushPendingUpdates
-// should acquire it itself (Flush / standalone callers).
+// The inner swap mutates the commitment writer's diff, which the exec loop
+// also rewrites via SetChangesetAccumulator — hence changesetMu, taken here
+// unless lockHeld says the caller already holds it.
 func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.TemporalTx) error {
 	return sd.flushPendingUpdates(ctx, tx, false)
 }
@@ -689,11 +687,9 @@ func (sd *SharedDomains) getChangesetAccumulatorLocked() *changeset.StateChangeS
 	return nil
 }
 
-// commitmentDiffSwapper is the commitment-scoped subset of the mem batch's
-// changeset API. Every kv.TemporalMemBatch behind SharedDomains must implement
-// it: a wrapper that does not forward these would fall back to redirecting all
-// domain writers, which is only safe while DomainPut takes changesetMu — it
-// does not (see the changesetMu doc on the SharedDomains struct).
+// commitmentDiffSwapper must be implemented by every mem batch behind
+// SharedDomains: the only alternative is redirecting all domain writers,
+// which is unsafe now that DomainPut takes no lock.
 type commitmentDiffSwapper interface {
 	SetCommitmentDiff(acc *changeset.StateChangeSet)
 	SetCommitmentDiffRaw(d *kv.DomainDiff)
@@ -701,9 +697,8 @@ type commitmentDiffSwapper interface {
 }
 
 // SwapCommitmentDiffLocked points the commitment writer's diff at acc and
-// returns a func restoring the previous one. It leaves every other domain
-// writer alone, so apply-side writes are unaffected and need not be locked out.
-// Callers must hold changesetMu.
+// returns a func restoring the previous one. Every other domain writer is left
+// alone, so apply-side writes need no lock. Callers must hold changesetMu.
 func (sd *SharedDomains) SwapCommitmentDiffLocked(acc *changeset.StateChangeSet) (restore func()) {
 	h := sd.mem.(commitmentDiffSwapper)
 	prev := h.CommitmentDiff()

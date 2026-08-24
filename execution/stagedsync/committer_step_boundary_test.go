@@ -573,9 +573,7 @@ func setupStepTest(t *testing.T) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.Sha
 	doms, err := execctx.NewSharedDomains(ctx, tx, logger)
 	require.NoError(t, err)
 	t.Cleanup(doms.Close)
-	// Match parallel exec: the calculator owns the Updates buffer, so writes
-	// feed it through handleMessage rather than an inline TouchKey.
-	doms.SetDisableInlineTouchKey(true)
+	doms.SetDisableInlineTouchKey(true) // as parallel exec does: the calculator owns Updates
 	return db, tx, doms
 }
 
