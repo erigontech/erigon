@@ -41,9 +41,7 @@ func flushIfFull(stream *jsoniter.Stream) {
 		// Discarded, not retried: jsoniter latches err on the stream, so every
 		// later Flush returns it without draining and these bytes can never
 		// reach the client. Keeping them would hold the whole response for a
-		// client that stopped reading, which is the thing this bound exists to
-		// prevent. The failure survives on the stream and the final Flush in
-		// ServeHTTP reports it.
+		// client that stopped reading, which is what this bound exists to prevent.
 		stream.SetBuffer(stream.Buffer()[:0])
 	}
 }

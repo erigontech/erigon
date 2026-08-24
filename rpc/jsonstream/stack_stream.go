@@ -80,7 +80,6 @@ func (s *StackStream) WriteRawBytes(content []byte) {
 func (s *StackStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
 	s.popCommaOrField()
-	flushIfFull(s.stream)
 }
 
 // WriteNil writes a null value to the stream
@@ -183,7 +182,6 @@ func (s *StackStream) WriteFloat64(val float64) {
 func (s *StackStream) WriteString(val string) {
 	s.stream.WriteString(val)
 	s.popCommaOrField()
-	flushIfFull(s.stream)
 }
 
 // WriteObjectStart writes the start of an object and adds it to the stack
@@ -332,7 +330,9 @@ func (s *StackStream) pop(item stackItem) {
 	}
 }
 
-// popCommaOrField is a helper method for the common case of popping ItemComma or ItemField from the stack
+// popCommaOrField pops ItemComma or ItemField after a value was written, and
+// hands the buffer over if that value filled it. Every writer goes through here,
+// so the bound holds for numbers and raw bytes as much as for strings.
 func (s *StackStream) popCommaOrField() {
 	if len(s.stack) > 0 {
 		top := s.stack[len(s.stack)-1]
@@ -340,4 +340,5 @@ func (s *StackStream) popCommaOrField() {
 			s.stack = s.stack[:len(s.stack)-1]
 		}
 	}
+	flushIfFull(s.stream)
 }
