@@ -194,8 +194,6 @@ linters:
           |p2p/sentry\
           |p2p/sentry/libsentry\
           |plugins/auth\
-          |polygon/bor\
-          |polygon/tests\
           |rpc\
           |rpc/jsonrpc\
           |rpc/rpchelper\

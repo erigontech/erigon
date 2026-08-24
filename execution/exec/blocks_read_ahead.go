@@ -545,7 +545,7 @@ func blocksReadAheadFunc(ctx context.Context, tx kv.Tx, blockNum uint64, engine 
 	if block == nil {
 		return nil
 	}
-	_, _ = engine.Author(block.HeaderNoCopy()) // Bor consensus: this calc is heavy and has cache
+	_, _ = engine.Author(block.HeaderNoCopy()) // heavy on some engines and cached
 
 	ttx, ok := tx.(kv.TemporalTx)
 	if !ok {
