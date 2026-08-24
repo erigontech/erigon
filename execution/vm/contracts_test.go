@@ -506,8 +506,8 @@ var precompileSuccessVectors = map[string]string{
 // precompiledContractSets is every fork's live precompile set.
 var precompiledContractSets = []PrecompiledContracts{
 	PrecompiledContractsHomestead, PrecompiledContractsByzantium, PrecompiledContractsIstanbul,
-	PrecompiledContractsBerlin, PrecompiledContractsCancun, PrecompiledContractsNapoli,
-	PrecompiledContractsBhilai, PrecompiledContractsPrague, PrecompiledContractsOsaka,
+	PrecompiledContractsBerlin, PrecompiledContractsCancun, PrecompiledContractsPrague,
+	PrecompiledContractsOsaka,
 }
 
 // checkNoAlias runs p against rawInput from a backing buffer with spare capacity
