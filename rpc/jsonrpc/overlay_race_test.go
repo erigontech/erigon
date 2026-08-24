@@ -736,6 +736,20 @@ func TestReplayTransactionUsesCommittedTxnLookup(t *testing.T) {
 	require.Nil(t, result)
 }
 
+func TestOtterscanTransactionLookupUsesCommittedView(t *testing.T) {
+	base, m, _ := newOverlayAheadTestAPI(t)
+	base._txnReader = rejectOverlayTxnReader{TxnReader: base._txnReader}
+	api := NewOtterscanAPI(base, m.DB, 25)
+	tx, err := m.DB.BeginTemporalRo(m.Ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	txn, block, _, _, _, err := api.getTransactionByHash(m.Ctx, tx, common.Hash{1})
+	require.NoError(t, err)
+	require.Nil(t, txn)
+	require.Nil(t, block)
+}
+
 func TestReplayTransactionHandlesMissingHeader(t *testing.T) {
 	base, m, _ := newOverlayAheadTestAPI(t)
 	tx, err := m.DB.BeginTemporalRo(m.Ctx)
@@ -867,6 +881,24 @@ func TestGetLogsBlockHashUsesCommittedView(t *testing.T) {
 	logs, err := api.GetLogs(m.Ctx, filters.FilterCriteria{BlockHash: &hash})
 	require.EqualError(t, err, fmt.Sprintf("block not found: %x", hash))
 	require.Nil(t, logs)
+}
+
+func TestErigonGetLogsByHashPinsOverlayView(t *testing.T) {
+	t.Parallel()
+	base, m, overlayHeader, events := newOverlayAheadTestAPIWithEvents(t)
+	overlay := events.LatestSD().BlockOverlay()
+	require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, overlayHeader.Number.Uint64()))
+	base._blockReader = &unpublishOverlayBlockReader{
+		FullBlockReader: base._blockReader,
+		events:          events,
+		blockNumber:     overlayHeader.Number.Uint64(),
+	}
+	api := NewErigonAPI(base, m.DB, nil)
+
+	logs, err := api.GetLogsByHash(m.Ctx, overlayHeader.Hash())
+	require.NoError(t, err)
+	require.NotNil(t, logs)
+	require.Empty(t, logs)
 }
 
 // TestGetLogs_UsesCommittedFromTag pins that eth_getLogs resolves a "latest"
