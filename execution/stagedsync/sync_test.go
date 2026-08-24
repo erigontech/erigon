@@ -32,7 +32,7 @@ import (
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
-func TestNewFiltersMissingUnwindStages(t *testing.T) {
+func TestNewKeepsMissingUnwindStagesAsNil(t *testing.T) {
 	headerStage := &Stage{ID: stages.Headers}
 	state := New(
 		ethconfig.Defaults.Sync,
@@ -43,10 +43,10 @@ func TestNewFiltersMissingUnwindStages(t *testing.T) {
 		stages.ModeApplyingBlocks,
 	)
 
-	require.Equal(t, []*Stage{headerStage}, state.unwindOrder)
+	require.Equal(t, []*Stage{nil, headerStage}, state.unwindOrder)
 }
 
-func TestNewFiltersMissingPruneStages(t *testing.T) {
+func TestNewKeepsMissingPruneStagesAsNil(t *testing.T) {
 	headerStage := &Stage{ID: stages.Headers}
 	state := New(
 		ethconfig.Defaults.Sync,
@@ -57,7 +57,7 @@ func TestNewFiltersMissingPruneStages(t *testing.T) {
 		stages.ModeApplyingBlocks,
 	)
 
-	require.Equal(t, []*Stage{headerStage}, state.pruningOrder)
+	require.Equal(t, []*Stage{nil, headerStage}, state.pruningOrder)
 }
 
 func TestStagesSuccess(t *testing.T) {
