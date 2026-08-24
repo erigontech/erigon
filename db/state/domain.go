@@ -546,8 +546,13 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 	// that bridge (surfaced by 2026-08-06 postfix soak run 5 iter 4).
 	// Non-v4 items at StartStep >= lowerBound still close — the crash-
 	// recovery invariant for legitimately-ahead partial files stands.
-	// History + InvertedIndex don't emit v4 shapes, so their predicate
-	// stays untouched.
+	//
+	// History + InvertedIndex now also emit v4 shapes (mode-C paired v4
+	// .v/.ef, added 2026-08-22); their v4 items need the same pin, or
+	// the very-next Aggregator.OpenFolder pass after FinalizeUnwind
+	// closes them before mergeV4IntoStepFile can find them at retire
+	// time. Surfaced by 2026-08-23 cycle 5 diagnostic (v4Count=0 at
+	// retire despite the v4 .v being on disk with .vi built).
 	domainPred := func(item *FilesItem) bool {
 		if item.StartStep(d.stepSize) < lowerBound {
 			return false
@@ -564,6 +569,21 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 		if item.StartStep(d.stepSize) < lowerBound {
 			return false
 		}
+		if d.History.isRawTxNItem(item) {
+			return false
+		}
+		if item.decompressor != nil {
+			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("step %d not complete", lowerBound))
+		}
+		return true
+	}
+	iiPred := func(item *FilesItem) bool {
+		if item.StartStep(d.stepSize) < lowerBound {
+			return false
+		}
+		if d.History.InvertedIndex.isRawTxNItem(item) {
+			return false
+		}
 		if item.decompressor != nil {
 			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("step %d not complete", lowerBound))
 		}
@@ -571,7 +591,7 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 	}
 	d.dirtyFiles.CloseIf(domainPred)
 	d.History.dirtyFiles.CloseIf(historyPred)
-	d.History.InvertedIndex.dirtyFiles.CloseIf(historyPred)
+	d.History.InvertedIndex.dirtyFiles.CloseIf(iiPred)
 }
 
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) {
