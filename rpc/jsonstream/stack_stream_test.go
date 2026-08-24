@@ -19,12 +19,16 @@ package jsonstream
 import (
 	"errors"
 	"fmt"
+	"io"
 	"math"
+	"math/rand"
+	"strings"
 	"testing"
 
 	"github.com/stretchr/testify/assert"
 
 	jsoniter "github.com/json-iterator/go"
+	"github.com/stretchr/testify/require"
 )
 
 func (s *StackStream) closeAllPendingElements() error {
@@ -1064,4 +1068,58 @@ func (w *failingWriter) Write(p []byte) (n int, err error) {
 	}
 	w.bytesWritten += len(p)
 	return len(p), nil
+}
+
+// TestWriteStringFastMatchesJsoniter pins that bulk-copying a clean string
+// produces exactly what jsoniter's per-byte path would have, including the
+// escapes it applies and the ones it deliberately does not (HTML characters are
+// left alone: Erigon uses WriteString, not WriteStringWithHTMLEscaped).
+func TestWriteStringFastMatchesJsoniter(t *testing.T) {
+	cases := []string{
+		"", "a", "abc", "1234567", "12345678", "123456789",
+		"0x" + strings.Repeat("ab", 32),
+		`has "quotes"`, `back\slash`, "tab\there", "nl\nhere", "\x00\x01\x1f",
+		strings.Repeat("clean", 40),
+		strings.Repeat("clean", 40) + `"`,
+		`"` + strings.Repeat("clean", 40),
+		"<html>&amp;", "unicode é€😀", "  ",
+	}
+	r := rand.New(rand.NewSource(5))
+	for range 20000 {
+		b := make([]byte, r.Intn(70))
+		for i := range b {
+			b[i] = byte(r.Intn(256))
+		}
+		cases = append(cases, string(b))
+	}
+
+	for _, val := range cases {
+		want := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64)
+		want.WriteString(val)
+
+		got := jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64)
+		writeStringFast(got, val)
+
+		require.Equal(t, string(want.Buffer()), string(got.Buffer()), "value %q", val)
+	}
+}
+
+func BenchmarkWriteString(b *testing.B) {
+	for _, tc := range []struct{ name, val string }{
+		{"op3", "ADD"},
+		{"hex18", "0x1234567890abcdef"},
+		{"hex66", "0x" + strings.Repeat("ab", 32)},
+		{"escaped", `a "quoted" value`},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			s := New(io.Discard)
+			b.ReportAllocs()
+			for b.Loop() {
+				s.WriteString(tc.val)
+				if err := s.Flush(); err != nil {
+					b.Fatal(err)
+				}
+			}
+		})
+	}
 }

@@ -174,7 +174,7 @@ func (s *StackStream) WriteFloat64(val float64) {
 
 // WriteString writes a string value to the stream
 func (s *StackStream) WriteString(val string) {
-	s.stream.WriteString(val)
+	writeStringFast(s.stream, val)
 	s.popCommaOrField()
 }
 
