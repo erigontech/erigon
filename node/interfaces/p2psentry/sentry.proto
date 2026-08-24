@@ -57,9 +57,6 @@ enum MessageId {
   // ======= eth 68 protocol ===========
   NEW_POOLED_TRANSACTION_HASHES_68 = 32;
 
-  reserved 33 to 36;
-  reserved "GET_BLOCK_WITNESS_W0", "BLOCK_WITNESS_W0", "NEW_WITNESS_W0", "NEW_WITNESS_HASHES_W0";
-
   // ======= eth 69 protocol ===========
   STATUS_69 = 37;
   GET_RECEIPTS_69 = 38;
@@ -151,9 +148,6 @@ message StatusData {
 }
 
 enum Protocol {
-  reserved 5;
-  reserved "WIT0";
-
   ETH65 = 0;
   ETH66 = 1;
   ETH67 = 2;
@@ -166,9 +160,6 @@ enum Protocol {
 message SetStatusReply {}
 
 message HandShakeReply {
-  reserved 2;
-  reserved "side_protocols";
-
   Protocol protocol = 1;
 }
 

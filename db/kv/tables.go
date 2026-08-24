@@ -117,9 +117,6 @@ const (
 	Epoch        = "DevEpoch"        // block_num_u64+block_hash->transition_proof
 	PendingEpoch = "DevPendingEpoch" // block_num_u64+block_hash->transition_proof
 
-	BorWitnessesDeprecated    = "BorWitnesses"
-	BorWitnessSizesDeprecated = "BorWitnessSizes"
-
 	// Downloader
 	BittorrentCompletion = "BittorrentCompletion"
 	BittorrentInfo       = "BittorrentInfo"
@@ -471,8 +468,6 @@ var ChaindataDeprecatedTables = []string{
 	StorageChangeSetDeprecated,
 	E2AccountsHistory,
 	E2StorageHistory,
-	BorWitnessesDeprecated,
-	BorWitnessSizesDeprecated,
 }
 
 // Diagnostics tables

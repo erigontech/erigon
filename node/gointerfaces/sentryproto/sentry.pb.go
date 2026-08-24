@@ -1742,9 +1742,9 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x10max_block_height\x18\x05 \x01(\x04R\x0emaxBlockHeight\x12$\n" +
 	"\x0emax_block_time\x18\x06 \x01(\x04R\fmaxBlockTime\x120\n" +
 	"\x14minimum_block_height\x18\a \x01(\x04R\x12minimumBlockHeight\"\x10\n" +
-	"\x0eSetStatusReply\"T\n" +
+	"\x0eSetStatusReply\">\n" +
 	"\x0eHandShakeReply\x12,\n" +
-	"\bprotocol\x18\x01 \x01(\x0e2\x10.sentry.ProtocolR\bprotocolJ\x04\b\x02\x10\x03R\x0eside_protocols\"6\n" +
+	"\bprotocol\x18\x01 \x01(\x0e2\x10.sentry.ProtocolR\bprotocol\"6\n" +
 	"\x0fMessagesRequest\x12#\n" +
 	"\x03ids\x18\x01 \x03(\x0e2\x11.sentry.MessageIdR\x03ids\"3\n" +
 	"\n" +
@@ -1773,7 +1773,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\fAddPeerReply\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"+\n" +
 	"\x0fRemovePeerReply\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess*\xf4\a\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess*\x9f\a\n" +
 	"\tMessageId\x12\r\n" +
 	"\tSTATUS_65\x10\x00\x12\x18\n" +
 	"\x14GET_BLOCK_HEADERS_65\x10\x01\x12\x14\n" +
@@ -1814,9 +1814,9 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x0fGET_RECEIPTS_70\x10(\x12\x0f\n" +
 	"\vRECEIPTS_70\x10)\x12\x1d\n" +
 	"\x19GET_BLOCK_ACCESS_LISTS_71\x10*\x12\x19\n" +
-	"\x15BLOCK_ACCESS_LISTS_71\x10+\"\x04\b!\x10$*\x14GET_BLOCK_WITNESS_W0*\x10BLOCK_WITNESS_W0*\x0eNEW_WITNESS_W0*\x15NEW_WITNESS_HASHES_W0*\x17\n" +
+	"\x15BLOCK_ACCESS_LISTS_71\x10+*\x17\n" +
 	"\vPenaltyKind\x12\b\n" +
-	"\x04Kick\x10\x00*c\n" +
+	"\x04Kick\x10\x00*W\n" +
 	"\bProtocol\x12\t\n" +
 	"\x05ETH65\x10\x00\x12\t\n" +
 	"\x05ETH66\x10\x01\x12\t\n" +
@@ -1824,7 +1824,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x05ETH68\x10\x03\x12\t\n" +
 	"\x05ETH69\x10\x04\x12\t\n" +
 	"\x05ETH70\x10\x06\x12\t\n" +
-	"\x05ETH71\x10\a\"\x04\b\x05\x10\x05*\x04WIT02\xd5\n" +
+	"\x05ETH71\x10\a2\xd5\n" +
 	"\n" +
 	"\x06Sentry\x127\n" +
 	"\tSetStatus\x12\x12.sentry.StatusData\x1a\x16.sentry.SetStatusReply\x12C\n" +
