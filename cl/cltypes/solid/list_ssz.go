@@ -146,6 +146,7 @@ func (l *ListSSZ[T]) DecodeSSZ(buf []byte, version int) error {
 	return l.decodeSSZ(buf, version, false)
 }
 
+// DecodeSSZStrict decodes the list using canonical SSZ rules.
 func (l *ListSSZ[T]) DecodeSSZStrict(buf []byte, version int) error {
 	return l.decodeSSZ(buf, version, true)
 }
@@ -239,6 +240,7 @@ func (l *ListSSZ[T]) Len() int {
 	return len(l.list)
 }
 
+// ValidateBounds checks that the list does not exceed the configured limit.
 func (l *ListSSZ[T]) ValidateBounds(limit int) error {
 	if len(l.list) > limit {
 		return fmt.Errorf("list has %d elements, max %d", len(l.list), limit)

@@ -53,6 +53,7 @@ func (e *ExecutionRequests) effectiveVersion() clparams.StateVersion {
 	return e.version
 }
 
+// Version returns the consensus version of the execution requests.
 func (e *ExecutionRequests) Version() clparams.StateVersion {
 	return e.effectiveVersion()
 }
@@ -126,6 +127,7 @@ func (e *ExecutionRequests) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations, e.BuilderDeposits, e.BuilderExits)
 }
 
+// DecodeSSZStrict decodes execution requests using canonical SSZ rules.
 func (e *ExecutionRequests) DecodeSSZStrict(buf []byte, version int) error {
 	e.initializeDecodeLists(version)
 	if e.effectiveVersion() < clparams.GloasVersion {

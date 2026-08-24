@@ -19,6 +19,7 @@ import (
 	"github.com/erigontech/erigon/cl/antiquary/tests"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/persistence/genesisdb"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
@@ -44,6 +45,24 @@ func newMockHttpServer(expectedState *state.CachingBeaconState, sent *bool) *htt
 		*sent = true
 	}))
 	return mockServer
+}
+
+func TestCheckpointEnvelopeRejectsConfiguredRequestLimit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxBuilderDepositRequestsPerPayload = 1
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, _ *http.Request) {
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+
+	syncer := &RemoteCheckpointSync{beaconConfig: &cfg, net: chainspec.MainnetChainID, timeout: CheckpointHttpTimeout}
+	_, err = syncer.fetchEnvelope(context.Background(), server.URL+"/eth/v2/debug/beacon/states/finalized")
+	require.ErrorContains(t, err, "builder deposits")
 }
 
 // newMockFailingHttpServer creates a mock HTTP server that always fails with 500 so remote

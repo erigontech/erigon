@@ -1179,7 +1179,15 @@ func fetchEnvelopesFromBeaconAPI(
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope decode failed", "root", common.Hash(root), "err", err)
 				return
 			}
-			if envelope.Message == nil || envelope.Message.BeaconBlockRoot != common.Hash(root) {
+			if envelope.Message == nil {
+				return
+			}
+			if err := envelope.ValidateForConfig(beaconCfg); err != nil {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope validation failed", "slot", slot, "err", err)
+				return
+			}
+			if envelope.Message.BeaconBlockRoot != common.Hash(root) {
+				log.Debug("[ForwardBeaconDownloader] HTTP envelope block root mismatch", "slot", slot, "requested", common.Hash(root), "received", envelope.Message.BeaconBlockRoot)
 				return
 			}
 			results[idx] = envResult{hash: common.Hash(root), envelope: envelope}

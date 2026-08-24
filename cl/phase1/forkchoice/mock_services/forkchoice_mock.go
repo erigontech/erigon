@@ -87,6 +87,7 @@ type ForkChoiceStorageMock struct {
 	VerifiedPayloads                    map[common.Hash]bool
 	OnBlockErr                          error
 	OnExecutionPayloadErr               error
+	ApplyLocalSelfBuildEnvelopeErr      error
 	OnExecutionPayloadFn                func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	OnExecutionPayloadAtFn              func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool, time.Time) error
 	ValidateBlockForPublishingFn        func(*cltypes.SignedBeaconBlock, bool) error
@@ -452,7 +453,7 @@ func (f *ForkChoiceStorageMock) ValidateExecutionPayloadEnvelope(_ context.Conte
 }
 
 func (f *ForkChoiceStorageMock) ApplyLocalSelfBuildEnvelope(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
-	return nil
+	return f.ApplyLocalSelfBuildEnvelopeErr
 }
 
 func (f *ForkChoiceStorageMock) StoreAnchorEnvelope(blockRoot common.Hash, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {

@@ -1295,6 +1295,9 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelopeHTTP(ctx context.Context, 
 	if envelope.Message == nil {
 		return nil, fmt.Errorf("envelope block root mismatch: requested %x", blockRoot)
 	}
+	if err := envelope.ValidateForConfig(b.beaconCfg); err != nil {
+		return nil, fmt.Errorf("envelope validation: %w", err)
+	}
 	if envelope.Message.BeaconBlockRoot != blockRoot {
 		return nil, fmt.Errorf("envelope block root %x does not match requested block root %x", envelope.Message.BeaconBlockRoot, blockRoot)
 	}
