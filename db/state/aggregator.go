@@ -1621,23 +1621,42 @@ func (a *Aggregator) IntegrateDirtyFiles(sf *AggV3StaticFiles, txNumFrom, txNumT
 	a.recalcVisibleFiles(retired)
 }
 
+// retireSubsumedV4Family retires every mode-C v4 item — state .kv,
+// paired history .v, paired inverted-index .ef — for one domain across
+// [rangeStart, rangeEnd). Returns the removed items so the caller can
+// attach them to the outgoing visible generation. Data-driven over the
+// domain's three dirtyFiles trees so a future entity that grows v4
+// support only needs an entry added here rather than a new special
+// case in every caller. Caller holds dirtyFilesLock.
+func retireSubsumedV4Family(d *Domain, rangeStart, rangeEnd uint64) []*FilesItem {
+	kvRetired := d.retireSubsumedV4ItemsInRange(rangeStart, rangeEnd)
+	var histRetired, idxRetired []*FilesItem
+	if d.History != nil {
+		histRetired = d.History.retireSubsumedV4ItemsInRange(rangeStart, rangeEnd)
+		if d.History.InvertedIndex != nil {
+			idxRetired = d.History.InvertedIndex.retireSubsumedV4ItemsInRange(rangeStart, rangeEnd)
+		}
+	}
+	if len(kvRetired) > 0 || len(histRetired) > 0 || len(idxRetired) > 0 {
+		log.Warn("[dbg-subsumed-v4] retire",
+			"filenameBase", d.FilenameBase,
+			"rangeStart", rangeStart, "rangeEnd", rangeEnd,
+			"kv", len(kvRetired), "hist", len(histRetired), "idx", len(idxRetired))
+	}
+	out := make([]*FilesItem, 0, len(kvRetired)+len(histRetired)+len(idxRetired))
+	out = append(out, kvRetired...)
+	out = append(out, histRetired...)
+	out = append(out, idxRetired...)
+	return out
+}
+
 // subsumedV4ItemsForStepLocked retires every mode-C v4 boundary file
-// whose range is wholly contained in the just-integrated step-aligned
-// range [txNumFrom, txNumTo) and returns them so the caller attaches
-// them to the outgoing visible generation. Covers the state .kv side
-// (d.retireSubsumedV4ItemsInRange) AND the paired history .v + inverted
-// index .ef sides (d.History / d.History.InvertedIndex) so the mode-C
-// paired v4 family retires as a unit once the step-full integration
-// supersedes it. Caller holds dirtyFilesLock.
+// (across .kv, .v, .ef) whose range is wholly contained in the
+// just-integrated step-aligned range [txNumFrom, txNumTo). Caller holds
+// dirtyFilesLock.
 func (a *Aggregator) subsumedV4ItemsForStepLocked(txNumFrom, txNumTo uint64) []*FilesItem {
 	stepSize := a.stepSize.Load()
-	if stepSize == 0 {
-		return nil
-	}
-	if txNumFrom%stepSize != 0 || txNumTo%stepSize != 0 {
-		return nil
-	}
-	if txNumTo <= txNumFrom {
+	if stepSize == 0 || txNumFrom%stepSize != 0 || txNumTo%stepSize != 0 || txNumTo <= txNumFrom {
 		return nil
 	}
 	var out []*FilesItem
@@ -1645,23 +1664,7 @@ func (a *Aggregator) subsumedV4ItemsForStepLocked(txNumFrom, txNumTo uint64) []*
 		if d.Disable {
 			continue
 		}
-		kvRetired := d.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)
-		var histRetired, idxRetired []*FilesItem
-		if d.History != nil {
-			histRetired = d.History.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)
-			if d.History.InvertedIndex != nil {
-				idxRetired = d.History.InvertedIndex.retireSubsumedV4ItemsInRange(txNumFrom, txNumTo)
-			}
-		}
-		if len(kvRetired) > 0 || len(histRetired) > 0 || len(idxRetired) > 0 {
-			log.Warn("[dbg-subsumed-v4] step-retire",
-				"filenameBase", d.FilenameBase,
-				"txNumFrom", txNumFrom, "txNumTo", txNumTo,
-				"kv", len(kvRetired), "hist", len(histRetired), "idx", len(idxRetired))
-		}
-		out = append(out, kvRetired...)
-		out = append(out, histRetired...)
-		out = append(out, idxRetired...)
+		out = append(out, retireSubsumedV4Family(d, txNumFrom, txNumTo)...)
 	}
 	return out
 }
@@ -2640,13 +2643,12 @@ func (a *Aggregator) IntegrateMergedDirtyFiles(in *MergeResult) {
 	a.cleanAfterMergeLocked(at, in)
 }
 
-// subsumedV4ItemsFromMergeLocked collects retired v4 items across
-// every domain covered by the merge result. Merge widths differ
-// per-domain, so the check runs per merged item using its actual
-// [startTxNum, endTxNum) window. Covers state .kv, paired history .v,
-// and paired inverted index .ef — each merged item's range is checked
-// against the corresponding entity's dirtyFiles. Caller holds
-// dirtyFilesLock.
+// subsumedV4ItemsFromMergeLocked collects retired v4 items across every
+// domain covered by the merge result. Merge widths differ per-entity
+// (state .kv vs paired history .v vs paired inverted-index .ef), so each
+// entity's merged range is checked independently against its own
+// dirtyFiles via retireSubsumedV4In (a small helper that guards for nil
+// merged + step-alignment). Caller holds dirtyFilesLock.
 func (a *Aggregator) subsumedV4ItemsFromMergeLocked(in *MergeResult) []*FilesItem {
 	if in == nil {
 		return nil
@@ -2655,29 +2657,29 @@ func (a *Aggregator) subsumedV4ItemsFromMergeLocked(in *MergeResult) []*FilesIte
 	if stepSize == 0 {
 		return nil
 	}
+	retireSubsumedV4In := func(entity interface {
+		retireSubsumedV4ItemsInRange(uint64, uint64) []*FilesItem
+	}, merged *FilesItem) []*FilesItem {
+		if entity == nil || merged == nil ||
+			merged.startTxNum%stepSize != 0 || merged.endTxNum%stepSize != 0 {
+			return nil
+		}
+		return entity.retireSubsumedV4ItemsInRange(merged.startTxNum, merged.endTxNum)
+	}
 	var out []*FilesItem
 	for id, d := range a.d {
 		if d.Disable {
 			continue
 		}
-		if merged := in.d[id]; merged != nil &&
-			merged.startTxNum%stepSize == 0 && merged.endTxNum%stepSize == 0 {
-			out = append(out, d.retireSubsumedV4ItemsInRange(merged.startTxNum, merged.endTxNum)...)
-		}
+		out = append(out, retireSubsumedV4In(d, in.d[id])...)
 		if d.History == nil {
 			continue
 		}
-		if mergedHist := in.dHist[id]; mergedHist != nil &&
-			mergedHist.startTxNum%stepSize == 0 && mergedHist.endTxNum%stepSize == 0 {
-			out = append(out, d.History.retireSubsumedV4ItemsInRange(mergedHist.startTxNum, mergedHist.endTxNum)...)
-		}
+		out = append(out, retireSubsumedV4In(d.History, in.dHist[id])...)
 		if d.History.InvertedIndex == nil {
 			continue
 		}
-		if mergedIdx := in.dIdx[id]; mergedIdx != nil &&
-			mergedIdx.startTxNum%stepSize == 0 && mergedIdx.endTxNum%stepSize == 0 {
-			out = append(out, d.History.InvertedIndex.retireSubsumedV4ItemsInRange(mergedIdx.startTxNum, mergedIdx.endTxNum)...)
-		}
+		out = append(out, retireSubsumedV4In(d.History.InvertedIndex, in.dIdx[id])...)
 	}
 	return out
 }
