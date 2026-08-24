@@ -2597,6 +2597,11 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 }
 
 func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) error {
+	// The state-changes stream is already live when the pool loads, so OnNewBlock can
+	// write the same senders maps and sub-pools while this runs.
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
 		if err != nil {

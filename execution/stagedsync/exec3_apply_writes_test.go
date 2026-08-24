@@ -222,3 +222,43 @@ func TestApplyStateWritesClearsCodeDomain(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, got)
 }
+
+// A CREATE landing on an address that already holds committed storage must wipe
+// that storage. The wipe runs before the account write so its
+// GetLatest(kv.AccountsDomain) probe still tells the account-absent skip from
+// the prefix delete.
+func TestApplyStateWritesCreateContractWipesCommittedStorage(t *testing.T) {
+	if testing.Short() {
+		t.Skip("requires mdbx")
+	}
+
+	tx, domains := setup2CacheTest(t)
+	rs := state.NewStateV3Buffered(state.NewStateV3(domains, false, log.New()))
+
+	addr := accounts.InternAddress(common.HexToAddress("0xc0ffee"))
+	addrVal := addr.Value()
+	seed := accounts.Account{Nonce: 1, Balance: *uint256.NewInt(7)}
+	require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, addrVal[:], accounts.SerialiseV3(&seed), 0, nil))
+
+	slotVal := common.HexToHash("0x01")
+	composite := append(append([]byte{}, addrVal[:]...), slotVal[:]...)
+	require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, composite, []byte{0xaa}, 0, nil))
+
+	countSlots := func() int {
+		n := 0
+		require.NoError(t, domains.IteratePrefix(kv.StorageDomain, addrVal[:], tx, func(k, v []byte) (bool, error) {
+			n++
+			return true, nil
+		}))
+		return n
+	}
+	require.Equal(t, 1, countSlots(), "seeded storage must be visible before the create")
+
+	writes := newWS().
+		createContract(addr, state.Version{}, true).
+		nonce(addr, state.Version{}, 1).
+		build()
+	require.NoError(t, rs.ApplyStateWrites(context.Background(), tx, 1, 100, writes, nil, &chain.Rules{}, nil))
+
+	require.Zero(t, countSlots(), "CREATE over an existing account must clear its committed storage")
+}
