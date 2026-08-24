@@ -36,7 +36,7 @@ func TestNormalize_PropagatesStateReadError(t *testing.T) {
 		WriteHeader: WriteHeader{Address: addr, Path: StoragePath, Key: kVM, Version: Version{TxIndex: 0}},
 		Val:         *uint256.NewInt(7),
 	})
-	_, err := ws.Normalize(vm, 0, 0, &errAccountReader{}, nil, false /*emptyRemoval*/, false /*isAura*/, false /*eip8246*/)
+	_, err := ws.Normalize(vm, 0, 0, 0, &errAccountReader{}, nil, false /*emptyRemoval*/, false /*isAura*/, false /*eip8246*/)
 	require.Error(t, err, "a stateReader ReadAccountData failure must be returned, not swallowed")
 }
 
@@ -62,11 +62,11 @@ func TestNormalize_IncarnationFilter(t *testing.T) {
 		return ws
 	}
 	// Normalized at incarnation 0: the incarnation-1 write is filtered out.
-	out0, _ := build().Normalize(vm, 0, 0, &minimalStateReader{}, nil, false, false, false)
+	out0, _ := build().Normalize(vm, 0, 0, 0, &minimalStateReader{}, nil, false, false, false)
 	_, ok0 := out0.GetCreateContract(addr)
 	require.False(t, ok0, "write from a non-matching incarnation must be dropped")
 	// Normalized at incarnation 1: kept.
-	out1, _ := build().Normalize(vm, 0, 1, &minimalStateReader{}, nil, false, false, false)
+	out1, _ := build().Normalize(vm, 0, 0, 1, &minimalStateReader{}, nil, false, false, false)
 	_, ok1 := out1.GetCreateContract(addr)
 	require.True(t, ok1, "write from the matching incarnation must be kept")
 }
@@ -99,7 +99,7 @@ func TestNormalize_SelfDestructDeletesVmAndDomainStorageSlots(t *testing.T) {
 		Val:         *uint256.NewInt(0),
 	})
 
-	out, _ := ws.Normalize(vm, 1, 0, &minimalStateReader{}, domainKeys, false /*emptyRemoval*/, false /*isAura*/, false /*eip8246*/)
+	out, _ := ws.Normalize(vm, 0, 1, 0, &minimalStateReader{}, domainKeys, false /*emptyRemoval*/, false /*isAura*/, false /*eip8246*/)
 
 	_, sdOK := out.GetSelfDestruct(addr)
 	require.True(t, sdOK, "self-destruct must be retained")
@@ -130,11 +130,11 @@ func TestNormalize_SelfDestructBalanceRetention_EIP8246(t *testing.T) {
 		})
 		return ws
 	}
-	pre, _ := build().Normalize(vm, 1, 0, &minimalStateReader{}, nil, false, false, false /*eip8246*/)
+	pre, _ := build().Normalize(vm, 0, 1, 0, &minimalStateReader{}, nil, false, false, false /*eip8246*/)
 	_, preBal := pre.GetBalance(addr)
 	require.False(t, preBal, "pre-8246 SD drops the balance write")
 
-	post, _ := build().Normalize(vm, 1, 0, &minimalStateReader{}, nil, false, false, true /*eip8246*/)
+	post, _ := build().Normalize(vm, 0, 1, 0, &minimalStateReader{}, nil, false, false, true /*eip8246*/)
 	_, postBal := post.GetBalance(addr)
 	require.True(t, postBal, "EIP-8246 SD retains the balance write")
 }
@@ -179,7 +179,7 @@ func TestNormalize_SelfDestructDropsAccountFieldAndStorageWrites(t *testing.T) {
 		Val:         *uint256.NewInt(42),
 	})
 
-	out, err := ws.Normalize(NewVersionMap(nil), 1, 0, &minimalStateReader{}, nil, false /*emptyRemoval*/, false /*isAura*/, false /*eip8246*/)
+	out, err := ws.Normalize(NewVersionMap(nil), 0, 1, 0, &minimalStateReader{}, nil, false /*emptyRemoval*/, false /*isAura*/, false /*eip8246*/)
 	require.NoError(t, err)
 
 	_, sdOK := out.GetSelfDestruct(addr)

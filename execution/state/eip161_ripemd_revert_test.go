@@ -68,7 +68,7 @@ func normalizeTouchThenRevert(t *testing.T, addr accounts.Address) bool {
 	if writes == nil {
 		return false
 	}
-	normalized, err := writes.Normalize(vm, 0, 0, reader, nil, true /*emptyRemoval*/, false /*isAura*/, false)
+	normalized, err := writes.Normalize(vm, 0, 0, 0, reader, nil, true /*emptyRemoval*/, false /*isAura*/, false)
 	require.NoError(t, err)
 	if normalized == nil {
 		return false

@@ -1983,7 +1983,7 @@ func TestParallelBlockEndLogsCountEachSyscallOnce(t *testing.T) {
 	pe.cfg.engine = &logEmittingSyscallEngine{Engine: ethash.NewFaker(), contract: accounts.InternAddress(contract), calls: syscalls}
 	pe.cfg.vmConfig = &vm.Config{}
 
-	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 4), nil, false, nil)
+	be := newBlockExec(newParallelTestBlock(1), new(protocol.GasPool).AddGas(10_000_000), nil, make(chan applyResult, 4), nil, false, nil, nil)
 	eTask := &execTask{Task: txTask, index: 0}
 	be.tasks = []*execTask{eTask}
 	be.results = []*execResult{nil}

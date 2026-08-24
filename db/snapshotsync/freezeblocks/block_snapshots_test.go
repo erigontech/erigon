@@ -94,7 +94,7 @@ func TestBlockReaderRejectsTxWithoutBlockView(t *testing.T) {
 	defer snapshots.Close()
 	require.NoError(t, snapshots.OpenFolder())
 
-	blockReader := NewBlockReader(snapshots, nil)
+	blockReader := NewBlockReader(snapshots)
 
 	require.Panics(t, func() {
 		blockReader.viewSingleFile(nil, snaptype2.Transactions, 0)
