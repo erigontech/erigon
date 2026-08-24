@@ -47,10 +47,6 @@ func (s *JsoniterStream) WriteRawBytes(content []byte) {
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
 }
 
-func (s *JsoniterStream) WriteRawBytes(content []byte) {
-	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
-}
-
 func (s *JsoniterStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
 }
