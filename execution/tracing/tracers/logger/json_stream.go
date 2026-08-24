@@ -123,8 +123,12 @@ func (l *JsonStreamLogger) writeMemoryWordRaw(chunk []byte) {
 		hex.Encode(l.hexEncodeBuf[:], chunk)
 	}
 	l.stream.WriteRaw(`"0x`)
-	l.stream.WriteRaw(common.ToStringZeroCopy(l.hexEncodeBuf[:64]))
+	l.stream.WriteRawBytes(l.hexEncodeBuf[:64])
 	l.stream.WriteRaw(`"`)
+	// Write used to forward this to the client on every word, and it is the only
+	// thing draining the tracer's stream. Keep that, or a memory dump grows the
+	// buffer to the size of the whole trace.
+	_ = l.stream.Flush()
 }
 
 func (l *JsonStreamLogger) OnExit(depth int, output []byte, gasUsed uint64, err error, reverted bool) {

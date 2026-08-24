@@ -43,10 +43,6 @@ func (s *JsoniterStream) Reset(out io.Writer) {
 	s.stream.Error = nil
 }
 
-func (s *JsoniterStream) Write(content []byte) (int, error) {
-	return s.stream.Write(content)
-}
-
 func (s *JsoniterStream) WriteRawBytes(content []byte) {
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
 }

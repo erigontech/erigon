@@ -627,7 +627,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 					} else {
 						stream.WriteMore()
 					}
-					if _, err := stream.Write(b); err != nil {
+					stream.WriteRawBytes(b)
+					// Hand each trace over as it is produced, so a client that stopped
+					// reading ends the walk instead of paying for the rest of the range.
+					if err := stream.Flush(); err != nil {
 						return err
 					}
 					nExported++
@@ -656,7 +659,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 							} else {
 								stream.WriteMore()
 							}
-							if _, err := stream.Write(b); err != nil {
+							stream.WriteRawBytes(b)
+							// Hand each trace over as it is produced, so a client that stopped
+							// reading ends the walk instead of paying for the rest of the range.
+							if err := stream.Flush(); err != nil {
 								return err
 							}
 							nExported++
@@ -733,7 +739,10 @@ func (api *TraceAPIImpl) filterV3(ctx context.Context, dbtx kv.TemporalTx, fromB
 					} else {
 						stream.WriteMore()
 					}
-					if _, err := stream.Write(b); err != nil {
+					stream.WriteRawBytes(b)
+					// Hand each trace over as it is produced, so a client that stopped
+					// reading ends the walk instead of paying for the rest of the range.
+					if err := stream.Flush(); err != nil {
 						return err
 					}
 					nExported++
