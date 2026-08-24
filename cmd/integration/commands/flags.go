@@ -224,7 +224,7 @@ func withErigondbDomainStepsInFrozenFile(cmd *cobra.Command) {
 		utils.ErigondbDomainStepsInFrozenFileFlag.Usage)
 }
 
-// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, heimdall, unwind.
+// withStageBase applies flags common to most stage commands: config, datadir, chain, chaos monkey, unwind.
 func withStageBase(cmd *cobra.Command) {
 	withConfig(cmd)
 	withDataDir(cmd)

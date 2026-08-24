@@ -123,6 +123,5 @@ func openDB(ctx context.Context, opts kv2.MdbxOpts, applyMigrations bool, chain 
 	if err != nil {
 		return nil, err
 	}
-	logSnapshotStats(ctx, db, blockSnaps, logger)
 	return db, nil
 }

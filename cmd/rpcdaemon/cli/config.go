@@ -418,7 +418,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		allSnapshots = blocksnapshots.NewRoSnapshots(cfg.Snap, cfg.Dirs.Snap, logger)
 		allSnapshots.DownloadComplete()
 
-		blockReader = freezeblocks.NewBlockReader(allSnapshots, nil)
+		blockReader = freezeblocks.NewBlockReader(allSnapshots)
 		txNumsReader := blockReader.TxnumReader()
 
 		if err := dbstate.CheckSnapshotsCompatibility(cfg.Dirs); err != nil {
@@ -432,13 +432,6 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		agg, err := dbstate.New(cfg.Dirs).Logger(logger).WithErigonDBSettings(erigonDBSettings).Open(ctx, rawDB)
 		if err != nil {
 			return nil, nil, nil, nil, nil, nil, nil, ff, fmt.Errorf("create aggregator: %w", err)
-		}
-
-		// Built before the snapshot stats below and before onNewSnapshot fires: both
-		// resolve txNum to block, which needs a tx pinning a block-files view.
-		db, err = temporal.New(rawDB, agg, allSnapshots)
-		if err != nil {
-			return nil, nil, nil, nil, nil, nil, nil, nil, err
 		}
 
 		// To povide good UX - immediatly can read snapshots after RPCDaemon start, even if Erigon is down
@@ -456,7 +449,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 			allSnapshots.LogStat("remote")
 			_ = agg.OpenFolder() //TODO: must use analog of `OptimisticReopenWithDB`
 
-			db.View(context.Background(), func(tx kv.Tx) error {
+			rawDB.View(context.Background(), func(tx kv.Tx) error {
 				aggTx := agg.BeginFilesRo()
 				defer aggTx.Close()
 				stats.LogStats(aggTx, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
@@ -484,7 +477,7 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 				if err = agg.OpenFolder(); err != nil {
 					logger.Error("[snapshots] reopen", "err", err)
 				} else {
-					db.View(context.Background(), func(tx kv.Tx) error {
+					rawDB.View(context.Background(), func(tx kv.Tx) error {
 						ac := agg.BeginFilesRo()
 						defer ac.Close()
 						stats.LogStats(ac, tx, logger, func(endTxNumMinimax uint64) (uint64, error) {
@@ -499,6 +492,10 @@ func RemoteServices(ctx context.Context, cfg *httpcfg.HttpCfg, logger log.Logger
 		}
 		onNewSnapshot()
 
+		db, err = temporal.New(rawDB, agg, allSnapshots)
+		if err != nil {
+			return nil, nil, nil, nil, nil, nil, nil, nil, err
+		}
 		stateCache = kvcache.NewLatestBatchCache()
 	}
 	// If DB can't be configured - used PrivateApiAddr as remote DB
