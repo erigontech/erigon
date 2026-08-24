@@ -127,13 +127,10 @@ func (h *History) mergeV4AndMDBXHistoryFiles(
 	}
 	defer mdbxCur.Close()
 
-	// Open destination compressors.
-	pageValuesCount := 1
-	if v4Cur.vPageValuesCount > 0 {
-		pageValuesCount = v4Cur.vPageValuesCount
-	} else if mdbxCur.vPageValuesCount > 0 {
-		pageValuesCount = mdbxCur.vPageValuesCount
-	}
+	// Open destination compressors. openHistoryEFVCursor clamps
+	// vPageValuesCount to >= 1 for each side, so v4Cur.vPageValuesCount
+	// is always usable.
+	pageValuesCount := v4Cur.vPageValuesCount
 
 	cfg := seg.DefaultCfg
 	cfg.MinPatternScore = 1

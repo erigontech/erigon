@@ -1279,6 +1279,14 @@ func (ht *HistoryRoTx) historySeekInFiles(key []byte, txNum uint64) ([]byte, boo
 	return v, true, nil
 }
 
+// HistoryKey encodes a history-entry key as 8-byte big-endian txN prefix
+// followed by the raw key. Used as the sort key inside a .v paged
+// history file — one entry per (txNum, key) state change, ordered by
+// (key, txN) to match the .ef iteration order.
+func HistoryKey(txNum uint64, key []byte, buf []byte) []byte {
+	return historyKey(txNum, key, buf)
+}
+
 func historyKey(txNum uint64, key []byte, buf []byte) []byte {
 	if buf == nil || cap(buf) < 8+len(key) {
 		buf = make([]byte, 8+len(key))

@@ -1815,11 +1815,11 @@ func (a *Aggregator) BuildHistoryAccessors(ctx context.Context, domain kv.Domain
 		return fmt.Errorf("BuildHistoryAccessors: domain %s has no history", domain)
 	}
 
-	fromTxN, _, err := parseV4VBaseName(filepath.Base(finalVPath))
+	fromTxN, toTxN, err := parseV4VBaseName(filepath.Base(finalVPath))
 	if err != nil {
 		return fmt.Errorf("BuildHistoryAccessors(%s): %w", domain, err)
 	}
-	viPath := h.vAccessorNewFilePathV4(fromTxN, mustParseV4VToTxN(finalVPath))
+	viPath := h.vAccessorNewFilePathV4(fromTxN, toTxN)
 
 	histDec, err := seg.NewDecompressor(vDataPath)
 	if err != nil {
@@ -1837,14 +1837,6 @@ func (a *Aggregator) BuildHistoryAccessors(ctx context.Context, domain kv.Domain
 	// efBaseTxNum for the paired v4 .ef equals its fromTxN (the file's
 	// startTxNum in the multiencseq encoding).
 	return h.buildVI(ctx, viPath, histDec, efDec, fromTxN, ps)
-}
-
-// mustParseV4VToTxN is a helper that re-parses the finalVPath for its toTxN.
-// parseV4VBaseName returns both — this indirection keeps BuildHistoryAccessors
-// readable without a temporary variable that names the ignored value.
-func mustParseV4VToTxN(finalVPath string) uint64 {
-	_, toTxN, _ := parseV4VBaseName(filepath.Base(finalVPath))
-	return toTxN
 }
 
 // BuildIndexAccessors builds the .efi sidecar for a v4 .ef file. dataPath is

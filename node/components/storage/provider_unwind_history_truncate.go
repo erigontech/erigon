@@ -19,12 +19,12 @@ package storage
 import (
 	"bytes"
 	"context"
-	"encoding/binary"
 	"fmt"
 
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/recsplit/multiencseq"
 	"github.com/erigontech/erigon/db/seg"
+	"github.com/erigontech/erigon/db/state"
 )
 
 // TruncateStraddlerHistoryFile reads (oldEFPath, oldVPath) and writes filtered
@@ -167,7 +167,7 @@ func TruncateStraddlerHistoryFile(
 		}
 
 		for i, txN := range keptTxNums {
-			hkBuf = historyKeyLocal(txN, keyBuf, hkBuf)
+			hkBuf = state.HistoryKey(txN, keyBuf, hkBuf)
 			if err = vWriter.Add(hkBuf, keptValues[i]); err != nil {
 				return fmt.Errorf("write v entry key=%x txN=%d to %s: %w", keyBuf, txN, newVPath, err)
 			}
@@ -190,16 +190,4 @@ func TruncateStraddlerHistoryFile(
 	vCompClosed = true
 
 	return nil
-}
-
-// historyKeyLocal duplicates db/state.historyKey (which is unexported).
-// Encoding: 8-byte BE txN prefix concatenated with the key.
-func historyKeyLocal(txNum uint64, key []byte, buf []byte) []byte {
-	if cap(buf) < 8+len(key) {
-		buf = make([]byte, 8+len(key))
-	}
-	buf = buf[:8+len(key)]
-	binary.BigEndian.PutUint64(buf, txNum)
-	copy(buf[8:], key)
-	return buf
 }
