@@ -332,7 +332,8 @@ func newOverlayTransactionTestData(t *testing.T) (*BaseAPI, *execmoduletester.Ex
 	t.Helper()
 	base, m, overlayHeader, events := newOverlayAheadTestAPIWithEvents(t)
 	overlay := events.LatestSD().BlockOverlay()
-	txn := signOverlayRaceTestTx(t, m, 1)
+	require.NoError(t, stages.SaveStageProgress(overlay, stages.Execution, overlayHeader.Number.Uint64()))
+	txn := signOverlayRaceTestTx(t, m, 0)
 	require.NoError(t, rawdb.WriteBody(overlay, overlayHeader.Hash(), overlayHeader.Number.Uint64(), &types.Body{Transactions: []types.Transaction{txn}}))
 	minTxNum, err := base._txNumReader.Min(m.Ctx, overlay, overlayHeader.Number.Uint64())
 	require.NoError(t, err)
@@ -435,6 +436,39 @@ func TestTransactionByHashMethodsPinOverlayView(t *testing.T) {
 		require.NoError(t, err)
 		require.Equal(t, marshalOverlayRaceTestTx(t, txn), []byte(got))
 	})
+}
+
+func TestGetTransactionReceiptPinsOverlayView(t *testing.T) {
+	base, m, txn := newOverlayTransactionTestData(t)
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	receipt, err := api.GetTransactionReceipt(m.Ctx, txn.Hash())
+	require.NoError(t, err)
+	require.NotNil(t, receipt)
+	require.Equal(t, txn.Hash(), receipt["transactionHash"])
+}
+
+func TestGetTransactionReceiptRejectsMismatchedTransaction(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	base := newBaseApiForTest(m)
+
+	const blockNumber = uint64(6)
+	var txNum uint64
+	require.NoError(t, m.DB.View(m.Ctx, func(tx kv.Tx) error {
+		minTxNum, err := base._txNumReader.Min(m.Ctx, tx, blockNumber)
+		if err != nil {
+			return err
+		}
+		txNum = minTxNum + 1
+		return nil
+	}))
+
+	base._txnReader = staticTxnReader{TxnReader: base._txnReader, blockNumber: blockNumber, txNum: txNum}
+	api := newEthApiForTest(base, m.DB, nil, nil)
+
+	receipt, err := api.GetTransactionReceipt(m.Ctx, common.Hash{0xff})
+	require.NoError(t, err)
+	require.Nil(t, receipt)
 }
 
 // newOverlayRacePendingPool signs a single pending tx from m.Address and wraps

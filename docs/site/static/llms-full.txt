@@ -4950,6 +4950,10 @@ For API usage refer to the below official resources:
 * [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 * [https://ethereum.github.io/execution-apis/](https://ethereum.github.io/execution-apis/)
 
+### Pending state
+
+Erigon does not support the `pending` block tag for `eth_call`, `eth_createAccessList`, `eth_getProof`, `eth_getWitness`, `eth_getTxWitness`, or `eth_simulateV1`. These methods need a block header and state from the same view, and Erigon cannot currently acquire a matching pending-state view. They return `pending state is not supported` instead of executing against a different block. Other `eth` methods keep their existing pending behavior.
+
 ### eth\_getProof
 
 `eth_getProof` returns Merkle proofs for account state and storage slots, as defined in [EIP-1186](https://eips.ethereum.org/EIPS/eip-1186). It is stable and production-ready as of Erigon v3.4.
@@ -7278,6 +7282,10 @@ GraphQL shares the same port as the HTTP JSON-RPC server (default `8545`). It do
 Erigon follows the GraphQL schema maintained in [`ethereum/execution-apis`](https://github.com/ethereum/execution-apis), which is kept in sync with major clients such as Geth and Besu. For human-readable field descriptions and query examples, the [Geth GraphQL reference](https://geth.ethereum.org/docs/interacting-with-geth/rpc/graphql) is a useful companion.
 
 The schema includes queries for blocks, transactions, accounts, logs, and pending state, as well as the `sendRawTransaction` mutation.
+
+## Pending calls
+
+The GraphQL `call` field does not support execution against a pending block. Erigon returns `pending state is not supported` because it cannot currently acquire a pending block header and matching state in one view. Other pending-state fields keep their existing behavior.
 
 ## Example Query
 

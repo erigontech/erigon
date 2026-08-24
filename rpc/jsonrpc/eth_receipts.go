@@ -481,15 +481,16 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, err
 	}
 	defer tx.Rollback()
+	overlayTx := api.filters.WithTemporalOverlay(tx)
 
 	var blockNum, txNum uint64
 	var ok bool
 
-	chainConfig, err := api.chainConfig(ctx, tx)
+	chainConfig, err := api.chainConfig(ctx, overlayTx)
 	if err != nil {
 		return nil, err
 	}
-	blockNum, txNum, ok, err = api.txnLookup(ctx, api.filters.WithOverlay(tx), txnHash)
+	blockNum, txNum, ok, err = api.txnLookup(ctx, overlayTx, txnHash)
 	if err != nil {
 		return nil, err
 	}
@@ -497,9 +498,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		return nil, nil
 	}
 
-	overlayTx := api.filters.WithOverlay(tx)
-
-	err = api.BaseAPI.checkReceiptsAvailable(ctx, tx, blockNum)
+	err = api.BaseAPI.checkReceiptsAvailable(ctx, overlayTx, blockNum)
 	if err != nil {
 		return nil, err
 	}
@@ -524,16 +523,19 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	if !ok {
 		return nil, nil
 	}
+	if txn.Hash() != txnHash {
+		return nil, nil
+	}
 
 	// Check if we have commitment history: this is required to know if state root will be computed for historical state.
-	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
+	commitmentHistory, err := api.commitmentHistoryEnabled(overlayTx)
 	if err != nil {
 		return nil, err
 	}
 
 	var postState *receipts.PostStateInfo = nil
 	if (commitmentHistory || api._blockReader.FrozenBlocks() == 0) && !chainConfig.IsByzantium(blockNum) {
-		block, err := api.blockByNumberWithSenders(ctx, api.filters.WithOverlay(tx), blockNum)
+		block, err := api.blockByNumberWithSenders(ctx, overlayTx, blockNum)
 		if err != nil {
 			return nil, err
 		}
@@ -547,7 +549,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 		}
 	}
 
-	receipt, err := api.getReceipt(ctx, chainConfig, tx, header, txn, txnIndex, txNum, postState)
+	receipt, err := api.getReceipt(ctx, chainConfig, overlayTx, header, txn, txnIndex, txNum, postState)
 	if err != nil {
 		return nil, err
 	}
