@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -123,6 +124,53 @@ func TestGloasProductionDoesNotRequestMEVBoostHeader(t *testing.T) {
 	)
 
 	require.ErrorIs(t, err, errGloasPayloadPending)
+}
+
+func TestProductionUsesLocalPayloadWhenBuilderClientIsMissing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
+	require.True(t, handler.routerCfg.Builder)
+	require.Nil(t, handler.builderClient)
+
+	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	payload := cltypes.NewEth1Block(clparams.ElectraVersion, handler.beaconChainCfg)
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(handler.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(payloadID, nil)
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), payloadID, clparams.ElectraVersion).
+		Return(
+			payload,
+			&engine_types.BlobsBundle{},
+			nil,
+			big.NewInt(7),
+			nil,
+		)
+	handler.engine = engine
+
+	clock := eth_clock.NewMockEthereumClock(ctrl)
+	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(-10 * time.Second))
+	handler.ethClock = clock
+
+	block, err := handler.produceBlock(
+		t.Context(),
+		1,
+		postState.Slot(),
+		common.Hash{0x41},
+		postState,
+		targetSlot,
+		common.Bytes96{},
+		common.Hash{},
+	)
+
+	require.NoError(t, err)
+	require.NotNil(t, block.BeaconBody)
+	require.False(t, block.IsBlinded())
+	require.Equal(t, uint64(7), block.ExecutionValue.Uint64())
 }
 
 func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {

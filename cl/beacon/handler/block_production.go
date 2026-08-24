@@ -831,20 +831,19 @@ func (a *ApiHandler) produceBlock(
 	})
 
 	// get the builder payload
-	var (
-		builderHeader *builder.ExecutionHeader
-		builderErr    error
-	)
+	var builderHeader *builder.ExecutionHeader
 	if stateVersion.Before(clparams.GloasVersion) && a.routerCfg.Builder && a.builderClient != nil {
 		wg.Go(func() {
 			start := time.Now()
 			defer func() {
 				a.logger.Debug("MevBoost", "slot", targetSlot, "duration", time.Since(start))
 			}()
-			builderHeader, builderErr = a.getMEVBoostPayload(ctx, baseState, targetSlot)
-			if builderErr != nil {
-				log.Warn("Failed to get builder payload", "err", builderErr)
+			header, err := a.getMEVBoostPayload(ctx, baseState, targetSlot)
+			if err != nil {
+				log.Warn("Failed to get builder payload", "err", err)
+				return
 			}
+			builderHeader = header
 		})
 	}
 	// wait for both tasks to finish
@@ -869,12 +868,8 @@ func (a *ApiHandler) produceBlock(
 		ParentRoot:    baseBlockRoot,
 		Cfg:           a.beaconChainCfg,
 	}
-	if !a.routerCfg.Builder || builderErr != nil || stateVersion.AfterOrEqual(clparams.GloasVersion) {
-		// directly return the block if:
-		// 1. builder is not enabled
-		// 2. failed to get builder payload
-		// 3. GLOAS: MEV-Boost blinded blocks not supported; builders use ePBS gossip bids
-
+	// A relay result is optional; without a usable header, keep the locally built payload.
+	if builderHeader == nil {
 		// GLOAS: check epbsPool for an external builder bid that beats the local value.
 		if stateVersion.AfterOrEqual(clparams.GloasVersion) && a.epbsPool != nil {
 			selfBid := beaconBody.SignedExecutionPayloadBid.Message
