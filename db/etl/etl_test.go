@@ -495,7 +495,7 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	require.Equal(t, 1, see)
 	c.Close()
 
-	// buffers are not lost: entries keep their cap, data chunks went back to the pool
+	// buffer state resets for reuse: entries keep their cap, chunks are cleared
 	require.Empty(t, buf.chunks)
 	require.Empty(t, buf.entries)
 	require.Zero(t, buf.Size())
@@ -624,9 +624,8 @@ func TestAppendAcrossProviders(t *testing.T) {
 }
 
 // TestAppendAcrossMemProviders tests that value concatenation works correctly
-// when multiple memoryDataProviders have the same key. GetRef returns zero-copy
-// slices into sortableBuffer.data — appending to prevV without copying would
-// corrupt adjacent entries in the buffer.
+// when multiple memoryDataProviders have the same key, across providers backed
+// by different buffer types (file-flushed and in-memory).
 func TestAppendAcrossMemProviders(t *testing.T) {
 	tmpdir := t.TempDir()
 
@@ -917,7 +916,7 @@ func TestMixedProvidersInterleavedKeys(t *testing.T) {
 }
 
 // TestMixedProvidersZeroCopyIntegrity verifies that zero-copy slices from
-// memoryDataProvider (GetRef) are not corrupted by subsequent Next() calls.
+// memoryDataProvider (Get) are not corrupted by subsequent Next() calls.
 func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	tmpdir := t.TempDir()
 
@@ -927,7 +926,7 @@ func TestMixedProvidersZeroCopyIntegrity(t *testing.T) {
 	fileProvider, err := FlushToDisk("test", fileBuf, tmpdir, log.LvlInfo)
 	require.NoError(t, err)
 
-	// Memory provider with multiple keys - GetRef returns slices into sortableBuffer.data
+	// Memory provider with multiple keys - Get returns slices into sortableBuffer.chunks
 	memBuf := NewSortableBuffer(BufferOptimalSize)
 	memBuf.Put([]byte("bbb"), []byte("mem-bbb"))
 	memBuf.Put([]byte("ccc"), []byte("mem-ccc"))
@@ -1634,8 +1633,9 @@ func TestSortableBufferOversizedEntry(t *testing.T) {
 	}
 }
 
-// TestSortableBufferResetReleasesChunks: Reset hands the chunks back to the
-// shared pool, so an idle pooled buffer doesn't pin the RAM it once needed.
+// TestSortableBufferResetReleasesChunks: Reset drops the buffer's own chunk
+// slice and size bookkeeping so it can be reused immediately. Pool round-tripping
+// is TestDataChunkPoolRoundTrip's job.
 func TestSortableBufferResetReleasesChunks(t *testing.T) {
 	buf := NewSortableBuffer(256 * datasize.MB)
 	val := bytes.Repeat([]byte{0xEF}, 16*1024)
@@ -1653,6 +1653,28 @@ func TestSortableBufferResetReleasesChunks(t *testing.T) {
 	k, v := buf.Get(0)
 	require.Equal(t, []byte{0x01}, k)
 	require.Equal(t, []byte("reused"), v)
+}
+
+// TestDataChunkPoolRoundTrip: a chunk released via putDataChunk comes back on
+// the next getDataChunk, instead of a fresh allocation.
+func TestDataChunkPoolRoundTrip(t *testing.T) {
+	c := getDataChunk()
+	c[0] = 0xAA
+	putDataChunk(c)
+
+	got := getDataChunk()
+	require.Equal(t, byte(0xAA), got[0])
+}
+
+// TestPutDataChunkRejectsOversized: an entry's private chunk (bigger than
+// dataChunkSize) must never enter the shared pool — a later getDataChunk
+// handing it out under a normal chunk index would corrupt an unrelated buffer.
+func TestPutDataChunkRejectsOversized(t *testing.T) {
+	oversized := make([]byte, dataChunkSize+7)
+	putDataChunk(oversized)
+
+	got := getDataChunk()
+	require.Len(t, got, dataChunkSize)
 }
 
 // disposeProbe records whether the collector still owned its data chunks when

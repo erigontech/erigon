@@ -79,11 +79,10 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold so a full
-// set of domain/history/index flush collectors (~17 per batch writer) stays
-// around 512 MB when all run full. Pooled buffers start empty and take chunks
-// as they fill; Reset returns those chunks to the shared dataChunks pool, so an
-// idle buffer doesn't pin the RAM its busiest run needed.
+// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold:
+// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
+// 17*(256Mb/8) = 512Mb for all collectors combined. Buffers pool their
+// chunks — see dataChunks below.
 var (
 	etlSmallBufRAM       = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
@@ -111,7 +110,10 @@ const (
 	dataChunkSize = 1 << dataChunkBits // 1MB
 
 	// The chunk index takes what is left of a positive int32, so one buffer
-	// addresses 2GB - the ceiling NewSortableBuffer already puts on optimalSize.
+	// addresses at most maxDataChunks*dataChunkSize bytes (~2GB); nextChunk
+	// panics past that. NewSortableBuffer's MaxInt32 bound on optimalSize
+	// does not fully rule this out, since Put can grow the buffer past
+	// optimalSize before CheckFlushSize is checked.
 	maxDataChunks = math.MaxInt32>>dataChunkBits + 1
 )
 
@@ -242,7 +244,8 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	b.entries = append(b.entries, e)
 }
 
-// Size counts the stored bytes plus the tails wasted by the chunks already filled.
+// Size counts the stored bytes, the tail wasted by the chunk still filling, and
+// entryLocSize bytes of metadata per entry.
 func (b *sortableBuffer) Size() int {
 	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + len(b.entries)*entryLocSize
 }
