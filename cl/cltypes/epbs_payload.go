@@ -401,25 +401,6 @@ func (e *ExecutionPayloadBid) decodeSSZ(buf []byte, version int, strict bool) er
 	return ssz2.UnmarshalSSZ(buf, version, schema...)
 }
 
-func (e *ExecutionPayloadBid) DecodeSSZStrict(buf []byte, version int) error {
-	e.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
-	return ssz2.UnmarshalSSZStrict(
-		buf, version,
-		e.ParentBlockHash[:],
-		e.ParentBlockRoot[:],
-		e.BlockHash[:],
-		e.PrevRandao[:],
-		e.FeeRecipient[:],
-		&e.GasLimit,
-		&e.BuilderIndex,
-		&e.Slot,
-		&e.Value,
-		&e.ExecutionPayment,
-		&e.BlobKzgCommitments,
-		e.ExecutionRequestsRoot[:],
-	)
-}
-
 func (e *ExecutionPayloadBid) Clone() clonable.Clonable {
 	commitments := e.BlobKzgCommitments.Clone().(*solid.ListSSZ[*KZGCommitment])
 	commitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
@@ -503,15 +484,6 @@ func (s *SignedExecutionPayloadBid) decodeSSZ(buf []byte, version int, strict bo
 		return ssz2.UnmarshalSSZStrict(buf, version, s.Message, s.Signature[:])
 	}
 	return ssz2.UnmarshalSSZ(buf, version, s.Message, s.Signature[:])
-}
-
-func (s *SignedExecutionPayloadBid) DecodeSSZStrict(buf []byte, version int) error {
-	if s.Message == nil {
-		s.Message = &ExecutionPayloadBid{
-			BlobKzgCommitments: *solid.NewStaticProgressiveListSSZ[*KZGCommitment](maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48),
-		}
-	}
-	return ssz2.UnmarshalSSZStrict(buf, version, s.Message, s.Signature[:])
 }
 
 func (s *SignedExecutionPayloadBid) Clone() clonable.Clonable {
