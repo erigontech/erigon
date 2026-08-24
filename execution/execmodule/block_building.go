@@ -30,6 +30,32 @@ import (
 	"github.com/erigontech/erigon/rpc"
 )
 
+// BoundaryAssembler is the DAG-driven L2 block-production hook. On such an L2, AssembleBlock defers to
+// this instead of building from-scratch from the txpool: the implementation (the cocoon rollup driver)
+// inserts a block-end MARKER carrying the CL's proposer attributes into the ordering layer and WAITS
+// (bounded, inside the CL assembly delay) for it to appear in the committed stream — the consensus point
+// at which every node agrees the block ends — then seals the already-pre-executed body (zero re-execution)
+// and returns it. The interface lives in erigon and is implemented in cocoon (dependency inversion:
+// erigon cannot import cocoon). See [[dag_start_end_system_tx]].
+type BoundaryAssembler interface {
+	// BeginBoundary inserts the block-end marker carrying params' attrs into the ordering layer and returns
+	// IMMEDIATELY (non-blocking). Called from AssembleBlock, which must return a PayloadID promptly — the CL's
+	// ForkChoiceUpdate blocks on it, so it cannot wait here for the DAG round trip.
+	BeginBoundary(ctx context.Context, params *builder.Parameters) error
+	// AwaitBoundary blocks (bounded, the CL assembly delay) until the marker has committed and the block's
+	// body is fully pre-executed + recorded as the extending-fork flashblock (so a follow-up assemblePreconfirmed
+	// seals it with zero re-execution). Called from GetAssembledBlock, the GetPayload path — and CRUCIALLY the
+	// caller must NOT hold the exec semaphore while awaiting, or the commits-handler PreExecute (which needs the
+	// semaphore to record the body) deadlocks against it. Returns an error if the marker does not commit in time.
+	AwaitBoundary(ctx context.Context, params *builder.Parameters) error
+}
+
+// SetBoundaryAssembler installs the DAG-L2 boundary assembler (see BoundaryAssembler). Called at wiring
+// time by the cocoon node for a chain whose builder is the incremental/DAG model.
+func (e *ExecModule) SetBoundaryAssembler(ba BoundaryAssembler) {
+	e.boundaryAssembler = ba
+}
+
 func (e *ExecModule) checkWithdrawalsPresence(time uint64, withdrawals []*types.Withdrawal) error {
 	if !e.config.IsShanghai(time) && withdrawals != nil {
 		return &rpc.InvalidParamsError{Message: "withdrawals before shanghai"}
@@ -75,15 +101,34 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 	params.PayloadId = e.nextPayloadId
 	e.lastParameters = params
 
-	// PRECONFIRM VARIANT: if a preconfirm producer (op-stack sequencer or the DAG driver) has already
-	// accumulated a matching in-progress flashblock in the fork validator, SEAL it synchronously and hand
-	// it back directly — no from-scratch build, no body re-execution. General base-erigon path; falls
-	// through to the normal builder when there is no matching preconfirmed block.
+	// DAG-L2 BOUNDARY ASSEMBLE: on a DAG-driven L2 the CL's FCU-with-attributes does NOT build from-scratch
+	// from the txpool. It inserts a block-end MARKER carrying these attrs into the ordering layer and WAITS
+	// (bounded, inside this assembly delay — the "one DAG round trip" the boundary costs) for the marker to
+	// appear in the committed stream, the point every node agrees the block ends; then seals the already-
+	// pre-executed body (zero re-execution). The marker carrying params gives attribute agreement for free
+	// (pre-exec ran under these same attrs, sourced from this FCU). See [[dag_start_end_system_tx]].
+	if e.boundaryAssembler != nil {
+		// Insert the block-end marker NOW (non-blocking) so it starts committing during the CL assembly
+		// delay, and record the params so GetAssembledBlock can AwaitBoundary + seal. MUST NOT wait here —
+		// the CL's ForkChoiceUpdate blocks on AssembleBlock returning a PayloadID.
+		if err := e.boundaryAssembler.BeginBoundary(ctx, params); err != nil {
+			return AssembleBlockResult{}, err
+		}
+		e.pendingBoundaryMu.Lock()
+		e.pendingBoundary[e.nextPayloadId] = params
+		e.pendingBoundaryMu.Unlock()
+		e.logger.Info("[ForkChoiceUpdated] DAG boundary begun", "payload", e.nextPayloadId, "parent", params.ParentHash)
+		return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
+	}
+
+	// PRECONFIRM VARIANT: if a preconfirm producer (op-stack sequencer) has accumulated a matching in-progress
+	// flashblock in the fork validator, SEAL it synchronously and hand it back directly — no from-scratch build,
+	// no body re-execution. Falls through to the builder when none.
 	if br, ok, err := e.assemblePreconfirmed(ctx, params); err != nil {
 		return AssembleBlockResult{}, err
 	} else if ok {
 		e.preconfirmedBlocks[e.nextPayloadId] = br
-		e.logger.Info("[ForkChoiceUpdated] preconfirm assemble", "payload", e.nextPayloadId, "hash", br.Block.Hash())
+		e.logger.Info("[ForkChoiceUpdated] preconfirm assemble", "payload", e.nextPayloadId, "num", br.Block.NumberU64(), "hash", br.Block.Hash(), "txs", len(br.Block.Transactions()))
 		return AssembleBlockResult{PayloadID: e.nextPayloadId}, nil
 	}
 
@@ -133,6 +178,8 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	// proposer attributes the FCU supplies — otherwise the sealed header (in-progress header + output)
 	// would be inconsistent with the requested block. Disagreement ⇒ fall back to the from-scratch builder.
 	if inHdr.ParentHash != params.ParentHash || !preconfirmAttrsMatch(inHdr, params) {
+		// The accumulated flashblock's attributes diverge from the FCU params — fall back to the
+		// from-scratch builder rather than seal a header inconsistent with the requested block.
 		return nil, false, nil
 	}
 
@@ -205,7 +252,43 @@ func blockValue(br *types.BlockWithReceipts, baseFee *uint256.Int) *uint256.Int 
 	return blockValue
 }
 
-func (e *ExecModule) GetAssembledBlock(_ context.Context, payloadID uint64) (AssembledBlockResult, error) {
+func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error) {
+	// DAG BOUNDARY: complete a boundary assemble whose marker was inserted (non-blocking) by AssembleBlock.
+	// AwaitBoundary FIRST, WITHOUT the semaphore — the commits-handler PreExecute needs the semaphore to
+	// record the body, so holding it here would deadlock the wait. Then acquire the semaphore and seal via
+	// assemblePreconfirmed (zero re-execution; the marker carried these attrs so its checks match).
+	e.pendingBoundaryMu.Lock()
+	params, isBoundary := e.pendingBoundary[payloadID]
+	e.pendingBoundaryMu.Unlock()
+	if isBoundary {
+		if err := e.boundaryAssembler.AwaitBoundary(ctx, params); err != nil {
+			// Marker not committed in time (e.g. a quiet DAG at boot). Drop it and return no block — the CL
+			// skips this slot and retries; nothing to canonicalise yet. Not fatal.
+			e.pendingBoundaryMu.Lock()
+			delete(e.pendingBoundary, payloadID)
+			e.pendingBoundaryMu.Unlock()
+			e.logger.Info("[GetPayload] DAG boundary not ready, skipping slot", "payload", payloadID, "err", err)
+			return AssembledBlockResult{}, nil
+		}
+		if !e.semaphore.TryAcquire(1) {
+			return AssembledBlockResult{Busy: true}, nil
+		}
+		defer e.semaphore.Release(1)
+		e.pendingBoundaryMu.Lock()
+		delete(e.pendingBoundary, payloadID)
+		e.pendingBoundaryMu.Unlock()
+		br, ok, err := e.assemblePreconfirmed(ctx, params)
+		if err != nil {
+			return AssembledBlockResult{}, err
+		}
+		if !ok {
+			e.logger.Warn("[GetPayload] DAG boundary body recorded but preconfirm not ready", "payload", payloadID)
+			return AssembledBlockResult{}, nil
+		}
+		e.logger.Info("[GetPayload] DAG boundary sealed", "payload", payloadID, "num", br.Block.NumberU64(), "hash", br.Block.Hash(), "txs", len(br.Block.Transactions()))
+		return AssembledBlockResult{Block: br, BlockValue: blockValue(br, br.Block.Header().BaseFee)}, nil
+	}
+
 	if !e.semaphore.TryAcquire(1) {
 		return AssembledBlockResult{Busy: true}, nil
 	}

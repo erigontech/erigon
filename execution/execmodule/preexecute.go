@@ -110,7 +110,17 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 			doms.Close()
 			return ValidationResult{}, err
 		}
-		if e.currentContext != nil {
+		// Frontier SD chain ([[venue_exec_on_round_plan]]): parent this new block's SD against the
+		// PREVIOUS block's still-live pre-executed SD when one is parked on the fork validator's
+		// auxiliary stack (i.e. the previous block opened but has not canonicalised yet — the
+		// decoupled-boundary/under-load case). That carries the previous block's accumulated state
+		// forward so this block reads the true frontier, not stale canonical state. Recursive
+		// read-through then walks parent→…→DB. Fall back to currentContext (canonical) only when no
+		// previous frontier SD is parked — the steady-state case where the previous block already
+		// canonicalised. The link is captured ONCE here, at open, and is immutable for this block.
+		if parent := e.forkValidator.NewestFrontierSD(); parent != nil {
+			doms.SetParent(parent)
+		} else if e.currentContext != nil {
 			doms.SetParent(e.currentContext)
 		}
 	}

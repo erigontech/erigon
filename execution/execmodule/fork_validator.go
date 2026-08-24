@@ -20,6 +20,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"os"
 	"sync"
 	"time"
 
@@ -57,6 +58,17 @@ type ForkValidator struct {
 	extendingForkHeadHash common.Hash
 	extendingForkNumber   uint64
 	maxReorgDepth         uint64
+	// preExecStack is an AUXILIARY chain of older, not-yet-canonical pre-executed SDs
+	// (frontier SD chain, [[venue_exec_on_round_plan]]). It sits ALONGSIDE the single
+	// sharedDom above — sharedDom stays the ACTIVE in-progress block exactly as before,
+	// and every existing method keeps operating on it unchanged. The stack holds only the
+	// PREVIOUS blocks' SDs that were pushed at OPEN (instead of being closed) so they
+	// survive as read-through parents while their FCU is still pending. Under load the
+	// pre-exec frontier outruns FCU; the stack lets block N+1 read N's carried-forward
+	// state instead of stale canonical. Ordered oldest→newest (tail = frontierParent's
+	// oldest, next to canonicalise). Popped+released on flush (FCU). Empty in steady state
+	// (depth 1 = just sharedDom). See preExecStack methods below.
+	preExecStack []*preExecGen
 	// pipeline executor used for fork validation (ValidateBlock).
 	executor    *PipelineExecutor
 	blockReader services.FullBlockReader
@@ -75,6 +87,40 @@ type ForkValidator struct {
 	// Flashblock state: tracks tx hashes already executed for the
 	// in-progress block so we can detect prefix-extension updates.
 	flashblockTxHashes []common.Hash
+}
+
+// preExecGen is one older, not-yet-canonical pre-executed SharedDomains parked on the
+// auxiliary preExecStack. It carries only what FCU needs to flush+retire it in order:
+// the SD itself and the block it belongs to. It does NOT duplicate the active-block
+// bookkeeping (flashblockTxHashes/notifications) — those stay on the ForkValidator for
+// the single active sharedDom.
+type preExecGen struct {
+	sd       *execctx.SharedDomains
+	headHash common.Hash
+	number   uint64
+}
+
+// pushPreExec parks an outgoing in-progress SD on the auxiliary stack at block OPEN, so
+// it survives as the read-through parent of the next block instead of being closed.
+// Caller must hold fv.lock.
+func (fv *ForkValidator) pushPreExec(sd *execctx.SharedDomains, headHash common.Hash, number uint64) {
+	if sd == nil {
+		return
+	}
+	fv.preExecStack = append(fv.preExecStack, &preExecGen{sd: sd, headHash: headHash, number: number})
+	fmt.Fprintf(os.Stderr, "[FRONTIER-DIAG] park num=%d depth=%d\n", number, len(fv.preExecStack)) // TEMP
+}
+
+// NewestFrontierSD returns the SD of the most-recently-parked pre-exec generation (the
+// parent a newly-opening block should chain to), or nil if the stack is empty. Takes the
+// lock — safe to call from PreExecute (which does not hold fv.lock).
+func (fv *ForkValidator) NewestFrontierSD() *execctx.SharedDomains {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	if len(fv.preExecStack) == 0 {
+		return nil
+	}
+	return fv.preExecStack[len(fv.preExecStack)-1].sd
 }
 
 func newForkValidator(ctx context.Context, currentHeight uint64, executor *PipelineExecutor, blockReader services.FullBlockReader, maxReorgDepth uint64) *ForkValidator {
@@ -150,12 +196,48 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	fv.timingsCache.Add(fv.extendingForkHeadHash, timings)
 	fv.extendingForkNotifications.Accumulator.CopyAndReset(target.Accumulator)
 	fv.extendingForkNotifications.RecentReceipts.CopyAndReset(target.RecentReceipts)
+	// Retire any parked pre-exec generations that are at/below the block just canonicalised
+	// (their state is now durable in the DB via the merge above / prior FCUs). Frontier SD
+	// chain retire step: flush+release TAIL-FIRST so a still-live child never reads a closed
+	// parent. Under the current serialized boundary the stack is empty and this is a no-op;
+	// under the decoupled boundary it bounds memory (the OOM guard). See
+	// [[venue_exec_on_round_plan]].
+	fv.retireParkedUpTo(ctx, tx, fv.extendingForkNumber)
 	// Clean extending fork data
 	fv.sharedDom = nil
 	fv.extendingForkHeadHash = common.Hash{}
 	fv.extendingForkNumber = 0
 	fv.extendingForkNotifications = nil
 	return nil
+}
+
+// retireParkedUpTo flushes+releases parked pre-exec generations whose block number is ≤
+// upTo, oldest-first (tail-first). Called from the FCU merge once a block canonicalises:
+// the parked predecessors' state is now durable in the DB, so their SDs can be released and
+// the auxiliary stack shrinks back toward empty. Best-effort on flush error (logged) — a
+// parked gen that fails to flush is still removed to avoid an unbounded stack, since its
+// state is either already durable (canonicalised) or will be re-derived on the next open.
+// Caller must hold fv.lock.
+func (fv *ForkValidator) retireParkedUpTo(ctx context.Context, tx kv.TemporalTx, upTo uint64) {
+	if len(fv.preExecStack) > 0 {
+		fmt.Fprintf(os.Stderr, "[FRONTIER-DIAG] retire upTo=%d depth=%d\n", upTo, len(fv.preExecStack)) // TEMP
+	}
+	kept := fv.preExecStack[:0]
+	for _, g := range fv.preExecStack {
+		if g.number <= upTo {
+			if g.sd != nil {
+				// Best-effort flush: a parked gen at/below the canonicalised block either has
+				// its state already durable (via the active-block merge / a prior FCU) or it
+				// will be re-derived on the next open, so a flush error must not wedge FCU nor
+				// leak the stack — release regardless.
+				_ = g.sd.FlushPendingUpdates(ctx, tx)
+				g.sd.Close()
+			}
+			continue
+		}
+		kept = append(kept, g)
+	}
+	fv.preExecStack = kept
 }
 
 type HasDiff interface {
@@ -258,10 +340,23 @@ func (fv *ForkValidator) ValidatePayload(ctx context.Context, sd *execctx.Shared
 	// Do NOT close the SD we are about to reuse. PreExecute (the flashblock
 	// pre-execution path) passes fv.sharedDom straight back in to carry the
 	// accumulated execution state forward across rounds — closing it here would
-	// destroy the very state being extended. When sd is a fresh SD (the normal
-	// ValidateChain path) sd != fv.sharedDom, so the old one is still closed.
+	// destroy the very state being extended.
+	//
+	// When sd is a FRESH SD (a new block opening) the old sharedDom is being displaced.
+	// Two cases:
+	//  - SUCCESSOR opening (new block number > old): under the decoupled boundary the old
+	//    block may not have canonicalised yet, and the fresh block's SD is parented to it
+	//    (preexecute SetParent). Closing it would destroy the read-through parent, so PARK
+	//    it on the auxiliary preExecStack; FCU flushes+releases it in order later.
+	//  - Same/lower number (a fork replacement at this height, or a normal single-block
+	//    flow where the previous block already canonicalised): the old SD is obsolete →
+	//    close it, exactly as before.
 	if fv.sharedDom != nil && fv.sharedDom != sd {
-		fv.sharedDom.Close()
+		if number > fv.extendingForkNumber && fv.extendingForkNumber != 0 {
+			fv.pushPreExec(fv.sharedDom, fv.extendingForkHeadHash, fv.extendingForkNumber)
+		} else {
+			fv.sharedDom.Close()
+		}
 	}
 	fv.sharedDom = sd
 	// Use the validation pipeline's own notifications object so that state

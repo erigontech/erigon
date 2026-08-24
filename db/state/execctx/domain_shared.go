@@ -866,17 +866,21 @@ func (sd *SharedDomains) GetLatest(domain kv.Domain, tx kv.TemporalTx, k []byte)
 		}
 	}
 
-	// Check parent's mem batch (read-through chaining for child SDs)
-	if sd.parent != nil {
-		if v, step, ok := sd.parent.mem.GetLatest(domain, k); ok {
+	// Read-through chaining: on a local mem miss, walk the parent chain's mem batches
+	// (parent → parent.parent → …) so a frontier SD stack of arbitrary depth resolves
+	// against the newest ancestor that holds the key. Only a miss through the WHOLE chain
+	// falls through to THIS sd's own backing-tx read below (the child's stateCache /
+	// branchCache / maxStep path must run — delegating the whole read to the parent would
+	// bypass the child's caches and corrupt commitment-branch reads). The backing tx is the
+	// canonical, FCU-flushed state at the chain root, so one DB read serves any depth.
+	for p := sd.parent; p != nil; p = p.parent {
+		if v, step, ok := p.mem.GetLatest(domain, k); ok {
 			if dbg.KVReadLevelledMetrics {
 				sd.metrics.UpdateCacheReads(domain, start)
 			}
 			return v, step, nil
-		} else {
-			if step > 0 && step < maxStep {
-				maxStep = step
-			}
+		} else if step > 0 && step < maxStep {
+			maxStep = step
 		}
 	}
 

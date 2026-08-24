@@ -212,6 +212,22 @@ type ExecModule struct {
 	// GetAssembledBlock. Distinct from `builders` (the from-scratch async path). See assemblePreconfirmed.
 	preconfirmedBlocks map[uint64]*types.BlockWithReceipts
 
+	// boundaryAssembler, when set (a DAG-driven L2), makes AssembleBlock DEFER block production to the
+	// ordering layer instead of building from-scratch from the txpool. The CL's FCU-with-attributes calls
+	// in; the assembler inserts a block-end MARKER carrying those attrs into the DAG and WAITS (bounded,
+	// inside the CL assembly delay) for the marker to appear in the committed stream — the point at which
+	// every node agrees the block ends ([[dag_start_end_system_tx]]). It then seals the pre-executed body
+	// (zero re-execution) and returns it. nil ⇒ standard txpool/from-scratch builder. Set via
+	// SetBoundaryAssembler (dependency inversion: the interface lives here, the cocoon rollup driver
+	// implements it — erigon cannot import cocoon).
+	boundaryAssembler BoundaryAssembler
+	// pendingBoundary maps a payload id to the build params for a DAG boundary assemble whose marker was
+	// inserted by AssembleBlock (BeginBoundary) but whose body+seal is completed lazily in GetAssembledBlock
+	// (AwaitBoundary + assemblePreconfirmed). Guarded by pendingBoundaryMu because AssembleBlock (writer,
+	// holds the semaphore) and GetAssembledBlock (reader, must check BEFORE acquiring the semaphore) race.
+	pendingBoundary   map[uint64]*builder.Parameters
+	pendingBoundaryMu sync.Mutex
+
 	// Changes accumulator
 	hook  *stageloop.Hook
 	accum *Accumulation
@@ -274,6 +290,7 @@ func NewExecModule(
 		pipelineExecutor:        pipelineExecutor,
 		builders:                make(map[uint64]*builder.BlockBuilder),
 		preconfirmedBlocks:      make(map[uint64]*types.BlockWithReceipts),
+		pendingBoundary:         make(map[uint64]*builder.Parameters),
 		builderFunc:             builderFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
