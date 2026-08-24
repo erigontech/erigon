@@ -76,7 +76,7 @@ type Collector struct {
 }
 
 func NewCollectorWithAllocator(logPrefix, tmpdir string, allocator *Allocator, logger log.Logger) *Collector {
-	c := NewCollector(logPrefix, tmpdir, allocator.Get(), logger)
+	c := &Collector{logPrefix: logPrefix, tmpdir: tmpdir, logLvl: log.LvlInfo, logger: logger}
 	c.Allocator(allocator)
 	return c
 }
@@ -92,6 +92,7 @@ func (c *Collector) SortAndFlushInBackground(v bool) *Collector {
 func (c *Collector) extractNextFunc(originalK, k []byte, v []byte) error {
 	if c.buf == nil && c.allocator != nil {
 		c.buf = c.allocator.Get()
+		c.bufType = getTypeByBuffer(c.buf)
 	}
 	c.buf.Put(k, v)
 	if !c.buf.CheckFlushSize() {
@@ -115,7 +116,7 @@ func (c *Collector) Allocator(a *Allocator) *Collector {
 }
 
 func (c *Collector) flushBuffer(canStoreInRam bool) error {
-	if c.buf.Len() == 0 {
+	if c.buf == nil || c.buf.Len() == 0 {
 		return nil
 	}
 
@@ -168,9 +169,6 @@ func (c *Collector) Flush() error {
 }
 
 func (c *Collector) Load(db kv.RwTx, toBucket string, loadFunc LoadFunc, args TransformArgs) error {
-	if c.buf == nil && c.allocator != nil {
-		c.buf = c.allocator.Get()
-	}
 	args.BufferType = c.bufType
 
 	if !c.allFlushed {
