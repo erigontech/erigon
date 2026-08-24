@@ -236,6 +236,9 @@ func TestGetPayloadV2AcceptsShanghaiPayload(t *testing.T) {
 func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) {
 	t.Parallel()
 
+	emptyBAL := []byte{0xc0}
+	sidecar, err := types.DecodeBlockAccessListSidecar(emptyBAL)
+	require.NoError(t, err)
 	baseFee := uint256.NewInt(1_000_000_000)
 	emptyBALHash := empty.BlockAccessListHash
 	header := &types.Header{
@@ -245,16 +248,34 @@ func TestAssembledBlockToPayloadResponseIncludesCanonicalEmptyBAL(t *testing.T) 
 		GasLimit:            30_000_000,
 		BlockAccessListHash: &emptyBALHash,
 	}
-	block := types.NewBlockWithHeader(header)
-	br := &types.BlockWithReceipts{Block: block, BlockAccessList: make(types.BlockAccessList, 0), Requests: make(types.FlatRequests, 0)}
+	block := types.NewBlockWithHeader(header, sidecar)
+	br := &types.BlockWithReceipts{Block: block, Requests: make(types.FlatRequests, 0)}
 
 	resp, err := assembledBlockToPayloadResponse(br, uint256.NewInt(0), clparams.GloasVersion)
 	require.NoError(t, err)
 
-	emptyBAL, err := types.EncodeBlockAccessListBytes(make(types.BlockAccessList, 0))
-	require.NoError(t, err)
 	require.NotNil(t, resp.ExecutionPayload.BlockAccessList)
 	require.Equal(t, hexutil.Bytes(emptyBAL), *resp.ExecutionPayload.BlockAccessList)
+}
+
+func TestAssembledBlockToPayloadResponseReturnsSidecarEncodingError(t *testing.T) {
+	t.Parallel()
+
+	balHash := common.Hash{1}
+	header := &types.Header{
+		Number:              *uint256.NewInt(101),
+		BaseFee:             uint256.NewInt(1_000_000_000),
+		GasLimit:            30_000_000,
+		BlockAccessListHash: &balHash,
+	}
+	sidecar := types.NewBlockAccessListSidecar(types.BlockAccessList{nil})
+	block := types.NewBlockWithHeader(header, sidecar)
+	br := &types.BlockWithReceipts{Block: block, Requests: make(types.FlatRequests, 0)}
+
+	resp, err := assembledBlockToPayloadResponse(br, uint256.NewInt(0), clparams.GloasVersion)
+
+	require.Nil(t, resp)
+	require.ErrorContains(t, err, "encode block access list")
 }
 
 // newProposingEngineServerForGetPayloadTests returns a server on a Prague-window
@@ -294,7 +315,7 @@ func minimalPayloadBlock(timestamp uint64, requests types.FlatRequests) *types.B
 		BaseFee:  baseFee,
 		GasLimit: 30_000_000,
 	}
-	block := types.NewBlockWithHeader(header)
+	block := types.NewBlockWithHeader(header, nil)
 	return &types.BlockWithReceipts{
 		Block:    block,
 		Requests: requests,
@@ -317,7 +338,7 @@ func blobPayloadBlock(chainID *uint256.Int, wrapperVersion byte, commitments, bl
 		BaseFee:  uint256.NewInt(1_000_000_000),
 		GasLimit: 30_000_000,
 	}
-	block := types.NewBlock(header, []types.Transaction{wrappedTxn}, nil, nil, nil)
+	block := types.NewBlock(header, []types.Transaction{wrappedTxn}, nil, nil, nil, nil)
 	return &types.BlockWithReceipts{
 		Block:    block,
 		Requests: make(types.FlatRequests, 0),
@@ -340,7 +361,7 @@ func (s *getPayloadStubModule) GetAssembledBlock(ctx context.Context, payloadID 
 	return s.getAssembledBlockFunc(ctx, payloadID)
 }
 func (s *getPayloadStubModule) Ready(_ context.Context) (bool, error) { return true, nil }
-func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.RawBlock) (execmodule.ExecutionStatus, error) {
+func (s *getPayloadStubModule) InsertBlocks(_ context.Context, _ []*types.Block) (execmodule.ExecutionStatus, error) {
 	panic("not implemented")
 }
 func (s *getPayloadStubModule) ValidateChain(_ context.Context, _ common.Hash, _ uint64) (execmodule.ValidationResult, error) {

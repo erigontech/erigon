@@ -159,9 +159,12 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			// flushed back to the versionMap, so without this a resurrect TX
 			// that re-writes a slot to its pre-SD value is wrongly dropped as a
 			// no-op (TestDeleteRecreateSlotsAcrossManyBlocks).
+			// Range-scan: a re-creation flushes SelfDestruct=false above the
+			// wiping true cell, and a same-value write-back over the wiped slot
+			// is not a no-op just because the pre-destruct cell held that value.
 			sdTxIdx, sdOk := -1, false
-			if v, sd, _ := vm.ReadSelfDestruct(h.Address, txIndex); sd.Status() == MVReadResultDone && v {
-				sdTxIdx, sdOk = sd.Version().TxIndex, true
+			if sdVer, ok := vm.FindDoneSelfDestructInRange(h.Address, 0, txIndex, true); ok {
+				sdTxIdx, sdOk = sdVer.TxIndex, true
 			}
 			// No-op filter: compare against origin (what this TX would have read).
 			// First check versionMap floor (prior TX's write in this block).
@@ -180,13 +183,11 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 					continue
 				}
 			case stateReader != nil:
-				// SD-then-revival: latest SelfDestructPath may be false (a
-				// later TxIdx revived), but the SD's per-slot DELETE cascade
-				// already fixed the baseline at zero for any post-SD write.
-				// History scan catches that; the sdOk latest-value read above
-				// misses it. Narrower than an IncarnationPath probe: pure
-				// CREATE (no prior SD=true) doesn't wipe pre-existing storage,
-				// so its same-value SSTOREs still no-op against pre-block.
+				// No destruct in this block at all (the range-scan above owns
+				// every SD-then-revival shape): compare against the pre-block
+				// value. Narrower than an IncarnationPath probe: pure CREATE
+				// (no prior SD=true) doesn't wipe pre-existing storage, so its
+				// same-value SSTOREs still no-op against pre-block.
 				if vm.AnyDoneSelfDestructEquals(h.Address, txIndex-1, true) {
 					if writeVal.IsZero() {
 						continue

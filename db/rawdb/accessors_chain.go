@@ -460,9 +460,9 @@ func CanonicalTransactions(db kv.Getter, txnID uint64, amount uint32) ([]types.T
 	txs := make([]types.Transaction, amount)
 	i := uint32(0)
 	if err := db.ForAmount(kv.EthTx, hexutil.EncodeTs(txnID), amount, func(k, v []byte) error {
-		var decodeErr error
-		if txs[i], decodeErr = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); decodeErr != nil {
-			return decodeErr
+		var err error
+		if txs[i], err = types.UnmarshalTransactionFromBinary(v, false /* blobTxnsAreWrappedWithBlobs */); err != nil {
+			return err
 		}
 		i++
 		return nil
@@ -607,6 +607,15 @@ func ReadBlockAccessListBytes(db kv.Getter, hash common.Hash, number uint64) ([]
 		return nil, err
 	}
 	return data, nil
+}
+
+// ReadBlockAccessList reads and decodes the block access list sidecar.
+func ReadBlockAccessList(db kv.Getter, hash common.Hash, number uint64) (types.BlockAccessList, error) {
+	data, err := ReadBlockAccessListBytes(db, hash, number)
+	if err != nil || len(data) == 0 {
+		return nil, err
+	}
+	return types.DecodeBlockAccessListBytes(data)
 }
 
 // WriteBlockAccessListBytes stores the RLP-encoded block access list sidecar for
@@ -794,13 +803,7 @@ func TruncateTd(tx kv.RwTx, blockFrom uint64) error {
 	return nil
 }
 
-// ReadBlock retrieves an entire block corresponding to the hash, assembling it
-// back from the stored header and body. If either the header or body could not
-// be retrieved nil is returned.
-//
-// Note, due to concurrent download of header and block body the header and thus
-// canonical hash can be stored in the database but the body data not (yet).
-func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
+func readBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	header := ReadHeader(tx, hash, number)
 	if header == nil {
 		return nil
@@ -809,15 +812,13 @@ func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
 	if body == nil {
 		return nil
 	}
-	block := types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals)
-	// Carry the BAL sidecar (secondary storage) so a block reconstructed from the
-	// DB carries its BAL like its header/body. Only Amsterdam+ blocks have one.
-	if header.HasBAL() {
-		if bal, err := ReadBlockAccessListBytes(tx, hash, number); err == nil && len(bal) > 0 {
-			block.SetBlockAccessList(bal)
-		}
-	}
-	return block
+	return types.NewBlockFromStorage(hash, header, body.Transactions, body.Uncles, body.Withdrawals, nil)
+}
+
+// ReadBlock retrieves an entire block corresponding to the hash, assembling it
+// back from the stored header and body. If either part is unavailable, it returns nil.
+func ReadBlock(tx kv.Getter, hash common.Hash, number uint64) *types.Block {
+	return readBlock(tx, hash, number)
 }
 
 // HasBlock - is more efficient than ReadBlock because doesn't read transactions.
@@ -828,7 +829,7 @@ func HasBlock(db kv.Getter, hash common.Hash, number uint64) bool {
 }
 
 func ReadBlockWithSenders(db kv.Getter, hash common.Hash, number uint64) (*types.Block, []common.Address, error) {
-	block := ReadBlock(db, hash, number)
+	block := readBlock(db, hash, number)
 	if block == nil {
 		return nil, nil, nil
 	}

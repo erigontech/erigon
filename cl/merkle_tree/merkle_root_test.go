@@ -20,12 +20,13 @@ import (
 	_ "embed"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
-	"github.com/stretchr/testify/require"
 )
 
 //go:embed testdata/serialized.ssz_snappy
@@ -77,4 +78,21 @@ func TestProgressiveContainerProofRejectsOversizedSchema(t *testing.T) {
 
 	_, err := merkle_tree.ProgressiveContainerProofAll(0, schema...)
 	require.Error(t, err)
+}
+
+func TestBitlistRootWithLimitNoSentinel(t *testing.T) {
+	const limit = 2048
+
+	empty, err := merkle_tree.BitlistRootWithLimit([]byte{}, limit)
+	require.NoError(t, err)
+
+	for _, malformed := range [][]byte{{0x00}, {0xff, 0x00}} {
+		root, err := merkle_tree.BitlistRootWithLimit(malformed, limit)
+		require.NoError(t, err)
+		require.Equal(t, empty, root)
+	}
+
+	wellFormed, err := merkle_tree.BitlistRootWithLimit([]byte{0x03}, limit)
+	require.NoError(t, err)
+	require.NotEqual(t, empty, wellFormed)
 }

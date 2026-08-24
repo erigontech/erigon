@@ -146,10 +146,6 @@ type TxPool struct {
 	totalBlobsInPool        atomic.Uint64
 	shanghaiTime            *uint64
 	isPostShanghai          atomic.Bool
-	agraBlock               *uint64
-	isPostAgra              atomic.Bool
-	bhilaiBlock             *uint64
-	isPostBhilai            atomic.Bool
 	cancunTime              *uint64
 	isPostCancun            atomic.Bool
 	pragueTime              *uint64
@@ -266,10 +262,6 @@ func New(
 	res.avgBlockTimeMs.Store(12_000)
 
 	res.shanghaiTime = chainConfig.ShanghaiTime
-	if chainConfig.Bor != nil {
-		res.agraBlock = chainConfig.Bor.GetAgraBlock()
-		res.bhilaiBlock = chainConfig.Bor.GetBhilaiBlock()
-	}
 	res.cancunTime = chainConfig.CancunTime
 	res.pragueTime = chainConfig.PragueTime
 	res.osakaTime = chainConfig.OsakaTime
@@ -725,10 +717,36 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 	availableGas mdgas.FullMdGas,
 	yielded mapset.Set[[32]byte], availableRlpSpace int) (bool, int, error) {
 
+	// sync.Cond has no notion of a context, so a caller that goes away while parked below would
+	// sleep until the next block broadcast the condition, or forever while the chain is stalled.
+	// Broadcasting on cancellation wakes it; every waiter rechecks its own condition anyway. The
+	// broadcast takes the lock so it cannot land between the check below and the wait, which is the
+	// window where a wakeup would be lost.
+	stopWatching, watcherDone := make(chan struct{}), make(chan struct{})
+	go func() {
+		defer close(watcherDone)
+		select {
+		case <-ctx.Done():
+			p.lock.Lock()
+			p.lastSeenCond.Broadcast()
+			p.lock.Unlock()
+		case <-stopWatching:
+		}
+	}()
+	// Joined rather than merely told to stop: with the context already ended the watcher can pick
+	// either case, and one that picked cancellation would otherwise take the lock after this call
+	// had returned. Registered before the lock is taken, so it runs after the lock is released.
+	defer func() {
+		close(stopWatching)
+		<-watcherDone
+	}()
+
 	p.lock.Lock()
 	for last := p.lastSeenBlock.Load(); last < onTopOf; last = p.lastSeenBlock.Load() {
 		select {
 		case <-ctx.Done():
+			// Leaving with the lock held would stop every later pool operation, not just this one.
+			p.lock.Unlock()
 			return false, 0, ctx.Err()
 		default:
 			// continue
@@ -757,8 +775,8 @@ func (p *TxPool) best(ctx context.Context, n int, txns *TxnsRlp, onTopOf uint64,
 
 	best := p.pending.best
 
-	isEIP3860 := p.isShanghai() || p.isAgra()
-	isEIP7623 := p.isPrague() || p.isBhilai()
+	isEIP3860 := p.isShanghai()
+	isEIP7623 := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
 
 	txns.Resize(uint(min(n, len(best.ms))))
@@ -973,8 +991,8 @@ func toBlobs(_blobs [][]byte) []*goethkzg.Blob {
 }
 
 func (p *TxPool) validateTx(txn *TxnSlot, isLocal bool, stateCache kvcache.CacheView) (txpoolcfg.DiscardReason, error) {
-	isEIP3860 := p.isShanghai() || p.isAgra()
-	isPrague := p.isPrague() || p.isBhilai()
+	isEIP3860 := p.isShanghai()
+	isPrague := p.isPrague()
 	isAmsterdam := p.isAmsterdam()
 	isEIP7954 := isAmsterdam
 	if txn.IsCreation() {
@@ -1255,50 +1273,6 @@ func isTimeBasedForkActivated(isPostFlag *atomic.Bool, forkTime *uint64) bool {
 
 func (p *TxPool) isShanghai() bool {
 	return isTimeBasedForkActivated(&p.isPostShanghai, p.shanghaiTime)
-}
-
-func (p *TxPool) isBlockNumBasedForkActivated(isPostFlag *atomic.Bool, forkBlockNum *uint64) bool {
-	// once this flag has been set for the first time we no longer need to check the block
-	set := isPostFlag.Load()
-	if set {
-		return true
-	}
-	if forkBlockNum == nil {
-		return false
-	}
-	forkBlock := *forkBlockNum
-
-	// a zero here means the fork is always active
-	if forkBlock == 0 {
-		isPostFlag.Swap(true)
-		return true
-	}
-
-	tx, err := p._chainDB.BeginRo(context.Background())
-	if err != nil {
-		return false
-	}
-	defer tx.Rollback()
-
-	headBlock, err := chain.CurrentBlockNumber(tx)
-	if headBlock == nil || err != nil {
-		return false
-	}
-	// A new block is built on top of the head block, so when the head is forkBlock-1,
-	// the new block should use the new fork rules.
-	activated := (*headBlock + 1) >= forkBlock
-	if activated {
-		isPostFlag.Swap(true)
-	}
-	return activated
-}
-
-func (p *TxPool) isAgra() bool {
-	return p.isBlockNumBasedForkActivated(&p.isPostAgra, p.agraBlock)
-}
-
-func (p *TxPool) isBhilai() bool {
-	return p.isBlockNumBasedForkActivated(&p.isPostBhilai, p.bhilaiBlock)
 }
 
 func (p *TxPool) isCancun() bool {
@@ -2623,6 +2597,11 @@ func (p *TxPool) flushLocked(tx kv.RwTx) (err error) {
 }
 
 func (p *TxPool) fromDB(ctx context.Context, tx kv.Tx, coreTx kv.TemporalTx) error {
+	// The state-changes stream is already live when the pool loads, so OnNewBlock can
+	// write the same senders maps and sub-pools while this runs.
+	p.lock.Lock()
+	defer p.lock.Unlock()
+
 	if p.lastSeenBlock.Load() == 0 {
 		lastSeenBlock, err := LastSeenBlock(tx)
 		if err != nil {

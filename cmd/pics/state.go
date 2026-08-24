@@ -36,7 +36,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx"
 	"github.com/erigontech/erigon/execution/abi/bind"
 	"github.com/erigontech/erigon/execution/abi/bind/backends"
 	"github.com/erigontech/erigon/execution/chain"
@@ -305,8 +305,8 @@ func initialState1() error {
 	}
 
 	var tokenContract *contracts.Token
-	// We generate the blocks without plainstant because it's not supported in blockgen.GenerateChain
-	chain, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 8, func(i int, block *blockgen.BlockGen) {
+	// We generate the blocks without plain state because GenerateChain does not support it.
+	chain, err := m.GenerateChain(8, func(i int, block *blockgen.BlockGen) {
 		var (
 			txn types.Transaction
 			txs []types.Transaction
@@ -422,7 +422,7 @@ func initialState1() error {
 		return err
 	}
 
-	emptyKv := memdb.New(nil, "", dbcfg.ChainDB)
+	emptyKv := mdbx.New(dbcfg.ChainDB, log.New()).InMem("").MustOpen()
 	if err := stateDatabaseComparison(emptyKv, m.DB, 0); err != nil {
 		return err
 	}

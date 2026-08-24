@@ -79,7 +79,7 @@ var (
 
 	SnapshotMadvRnd = EnvBool("SNAPSHOT_MADV_RND", true)
 	// kill-switch: set SNAPSHOT_MADV_SEQUENTIAL=false to skip MADV_SEQUENTIAL in seg.OpenSequentialView
-	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", false)
+	SnapshotMadvSequential = EnvBool("SNAPSHOT_MADV_SEQUENTIAL", true)
 	OnlyCreateDB           = EnvBool("ONLY_CREATE_DB", false)
 
 	CaplinSyncedDataMangerDeadlockDetection = EnvBool("CAPLIN_SYNCED_DATA_MANAGER_DEADLOCK_DETECTION", false)
@@ -112,6 +112,8 @@ var (
 	TraceApply            = EnvBool("TRACE_APPLY", false)
 	TraceTouchKey         = EnvBool("TRACE_TOUCH_KEY", false)
 	TraceBlockAccessLists = EnvBool("TRACE_BLOCK_ACCESS_LISTS", false)
+	TraceReexec           = EnvBool("TRACE_REEXEC", false)
+	TraceBALFeed          = EnvBool("TRACE_BAL_FEED", false)
 	TraceBlocks           = EnvUints("TRACE_BLOCKS", ",", nil)
 	TraceTxIndexes        = EnvInts("TRACE_TXINDEXES", ",", nil)
 	TraceUnwinds          = EnvBool("TRACE_UNWINDS", false)
@@ -128,25 +130,22 @@ var (
 	// BALShadowCompute (requires BALDrivenCommitment) also computes each
 	// BAL-driven block incrementally and asserts both roots match before
 	// publishing; without it the BAL-driven root is published directly.
-	BALShadowCompute     = EnvBool("BAL_SHADOW_COMPUTE", false)
-	CaplinEfficientReorg = EnvBool("CAPLIN_EFFICIENT_REORG", true)
-	UseTxDependencies    = EnvBool("USE_TX_DEPENDENCIES", false)
-	UseStateCache        = EnvBool("USE_STATE_CACHE", true)
-	UseCodeStore         = EnvBool("USE_CODE_STORE", true)
-	DisableAdaptivePin   = EnvBool("DISABLE_ADAPTIVE_PIN", false)
-	AssertStateCache     = EnvBool("ASSERT_STATE_CACHE", false)
-	ReadAhead            = EnvBool("READ_AHEAD", true)
-	// FilesAsyncIO warms cold state .kv pages via io_uring before the mmap read, so
-	// a would-be blocking page fault becomes a non-blocking read that releases the
-	// goroutine's P. Linux + io_uring only; self-disables (reads use ordinary faults)
-	// if io_uring is unavailable. Not free when on: each gated .kv file runs a
-	// background goroutine that mincore-rescans it every RESIDENCY_REFRESH_SEC
-	// (default 120s) — a real page-table-walk cost across a full datadir. Experimental,
-	// off by default.
-	FilesAsyncIO = EnvBool("FILES_ASYNC_IO", false)
+	BALShadowCompute              = EnvBool("BAL_SHADOW_COMPUTE", false)
+	CaplinEfficientReorg          = EnvBool("CAPLIN_EFFICIENT_REORG", true)
+	UseTxDependencies             = EnvBool("USE_TX_DEPENDENCIES", false)
+	UseStateCache                 = EnvBool("USE_STATE_CACHE", true)
+	UseCodeStore                  = EnvBool("USE_CODE_STORE", true)
+	DisableAdaptivePin            = EnvBool("DISABLE_ADAPTIVE_PIN", true)
+	AssertStateCache              = EnvBool("ASSERT_STATE_CACHE", false)
+	ReadAhead                     = EnvBool("READ_AHEAD", true)
+	ReadAheadWorkers              = EnvInt("READ_AHEAD_WORKERS", estimate.AllCPUs())
+	ReadAheadWait                 = EnvBool("READ_AHEAD_WAIT", false)
+	ReadAheadBALCode              = EnvBool("READ_AHEAD_BAL_CODE", false)
+	ReadAheadTxCode               = EnvBool("READ_AHEAD_TX_CODE", false)
+	FilesBlockingAsyncIO          = EnvBool("FILES_BLOCKING_ASYNC_IO", false)
+	FilesBlockingAsyncIOMultiPage = EnvBool("FILES_BLOCKING_ASYNC_IO_MULTI_PAGE", true)
 
-	BorValidateHeaderTime = EnvBool("BOR_VALIDATE_HEADER_TIME", true)
-	TraceDeletion         = EnvBool("TRACE_DELETION", false)
+	TraceDeletion = EnvBool("TRACE_DELETION", false)
 
 	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
 	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())

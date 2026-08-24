@@ -89,30 +89,20 @@ var (
 	}
 )
 
-// Trie represents commitment variant.
 type Trie interface {
-	// RootHash produces root hash of the trie
 	RootHash() (hash []byte, err error)
 
-	// SetTraceWriter sets the trace writer; nil disables tracing
 	SetTraceWriter(io.Writer)
 	EnableCsvMetrics(filePathPrefix string)
 
-	// Variant returns commitment trie variant
 	Variant() TrieVariant
 
-	// Reset Drops everything from the trie
 	Reset()
 
-	// Set context for state IO
 	ResetContext(ctx PatriciaContext)
 
-	// Process updates. If warmup.Enabled is true, pre-warms MDBX page cache in parallel.
-	// onProgress (optional) is called periodically with commitment progress info.
 	Process(ctx context.Context, updates *Updates, logPrefix string, onProgress func(*CommitProgress), warmup WarmupConfig) (rootHash []byte, err error)
 
-	// Release returns the trie to a pool for reuse. After calling Release,
-	// the caller must not use the trie.
 	Release()
 }
 
@@ -123,41 +113,27 @@ type CommitProgress struct {
 }
 
 type PatriciaContext interface {
-	// GetBranch load branch node and fill up the cells
-	// For each cell, it sets the cell type, clears the modified flag, fills the hash,
-	// and for the extension, account, and leaf type, the `l` and `k`
 	Branch(prefix []byte) ([]byte, kv.Step, error)
-	// store branch data
+	// Implementations must copy prefix and data rather than retain them: callers may pass
+	// pooled buffers that are recycled for a later, unrelated update.
 	PutBranch(prefix []byte, data []byte, prevData []byte) error
-	// fetch account with given plain key
 	Account(plainKey []byte) (*Update, error)
-	// fetch storage with given plain key
 	Storage(plainKey []byte) (*Update, error)
 }
 
 type TrieVariant string
 
 const (
-	// VariantHexPatriciaTrie used as default commitment approach
-	VariantHexPatriciaTrie      TrieVariant = "hex-patricia-hashed"
-	VariantParallelHexPatricia  TrieVariant = "hex-parallel-patricia-hashed"
-	VariantStreamingHexPatricia TrieVariant = "hex-streaming-patricia-hashed"
+	VariantHexPatriciaTrie     TrieVariant = "hex-patricia-hashed"
+	VariantParallelHexPatricia TrieVariant = "hex-parallel-patricia-hashed"
 )
 
-// InitializeTrieAndUpdates constructs the trie + updates buffer from cfg.
 func InitializeTrieAndUpdates(mode Mode, tmpdir string, cfg TrieConfig) (Trie, *Updates) {
 	switch cfg.Variant {
 	case VariantParallelHexPatricia:
 		// ParallelPatriciaHashed requires ModeParallel to allocate the prefix-trie state it reads.
 		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
 		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
-		return trie, tree
-	case VariantStreamingHexPatricia:
-		trie := NewParallelPatriciaHashed(nil, length.Addr, cfg)
-		sc := NewStreamingCommitter(nil, length.Addr, cfg)
-		trie.SetStreamingCommitter(sc)
-		tree := NewUpdates(ModeParallel, tmpdir, KeyToHexNibbleHash)
-		tree.SetStreamingCommitter(sc)
 		return trie, tree
 	case VariantHexPatriciaTrie:
 		fallthrough
@@ -199,15 +175,13 @@ func (p cellFields) String() string {
 	return sb.String()
 }
 
-// cellEncodeData contains only the fields needed for EncodeBranch.
-// This is much smaller than cell (which has hashedExtension[128], Update, etc.)
 // TODO: unify with cell by shrinking cell struct to eliminate this separate type
 type cellEncodeData struct {
 	extension   [64]byte
-	accountAddr [20]byte                        // common.Address
-	storageAddr [length.Addr + length.Hash]byte // 20 + 32 = 52 bytes
-	hash        [32]byte                        // common.Hash
-	stateHash   [32]byte                        // common.Hash
+	accountAddr [20]byte
+	storageAddr [length.Addr + length.Hash]byte
+	hash        [32]byte
+	stateHash   [32]byte
 
 	extLen         int16
 	accountAddrLen int16
@@ -216,7 +190,6 @@ type cellEncodeData struct {
 	stateHashLen   int16
 }
 
-// cellEncodeDataFromCell extracts the encoding-relevant fields from a cell into a cellEncodeData.
 func cellEncodeDataFromCell(c *cell) cellEncodeData {
 	var d cellEncodeData
 	d.extLen = c.extLen
@@ -232,84 +205,83 @@ func cellEncodeDataFromCell(c *cell) cellEncodeData {
 	return d
 }
 
-// DeferredBranchUpdate holds the data needed to perform a branch update later.
-// This allows collecting updates during the fold phase and running computeCellHash + EncodeBranch in parallel.
 type DeferredBranchUpdate struct {
-	prefix []byte
-	// Branch encoding produced at collect time, before merging with prev; kept
-	// separate so a later apply can re-merge against a different predecessor.
-	raw BranchData
-	// Previous data from ctx.Branch (for merging)
-	prev []byte
-	// Result after merging (filled during apply)
+	prefix  []byte
+	raw     BranchData
+	prev    []byte
 	encoded BranchData
 }
 
-// Global pool for deferred branch updates.
-var deferredUpdatePool = sync.Pool{
+var deferredUpdatePool = &sync.Pool{
 	New: func() any {
 		return &DeferredBranchUpdate{}
 	},
 }
 
-// Metrics for getDeferredUpdate - use atomics for thread safety
 var getDeferredUpdateCount atomic.Int64
 
-// ResetDeferredUpdateMetrics resets the getDeferredUpdate metrics.
 func ResetDeferredUpdateMetrics() {
 	getDeferredUpdateCount.Store(0)
 }
 
-// GetDeferredUpdateMetrics returns the count for getDeferredUpdate calls.
 func GetDeferredUpdateMetrics() int64 {
 	return getDeferredUpdateCount.Load()
 }
 
-// getDeferredUpdate gets a DeferredBranchUpdate from the global pool and copies the
-// prefix, the collect-time raw encoding, and the predecessor. The copies transfer to
-// whoever the apply hands them to (putBranch retains prefix and data), so pooled
-// objects never keep their backing arrays.
 func getDeferredUpdate(prefix []byte, raw, prev []byte) *DeferredBranchUpdate {
 	getDeferredUpdateCount.Add(1)
 	upd := deferredUpdatePool.Get().(*DeferredBranchUpdate)
 
-	upd.prefix = bytes.Clone(prefix)
-	upd.raw = bytes.Clone(raw)
+	upd.prefix = reuseBytes(upd.prefix, prefix)
+	upd.raw = reuseBytes(upd.raw, raw)
+	// prev stays cloned: it is the one argument that is legitimately nil or empty, and
+	// callers read a nil prev as "look up the previous value". Deriving that shape from a
+	// recycled buffer's capacity rather than from the input is not worth one allocation.
 	upd.prev = bytes.Clone(prev)
 	upd.encoded = nil
 
 	return upd
 }
 
+// reuseBytes copies src into dst's backing array, matching bytes.Clone's nil handling:
+// a nil src yields nil, so pool history cannot change the result's nil-ness. Callers
+// distinguish a nil prev ("look it up") from an empty one ("known absent").
+func reuseBytes(dst, src []byte) []byte {
+	if src == nil {
+		return nil
+	}
+	if cap(dst) == 0 {
+		dst = make([]byte, 0, len(src)) // non-nil even for an empty src, as bytes.Clone is
+	}
+	return append(dst[:0], src...)
+}
+
+// capLen hides a recycled buffer's leftover capacity, so what a callback sees is derived
+// from the input rather than from whichever update last used the pooled object.
+func capLen(b []byte) []byte {
+	if b == nil {
+		return nil
+	}
+	return slices.Clip(b)
+}
+
 // putDeferredUpdate returns a DeferredBranchUpdate to the global pool.
-// Clears slice references so pooled objects don't hold stale memory.
 func putDeferredUpdate(upd *DeferredBranchUpdate) {
 	if upd != nil {
-		upd.prefix = nil
-		upd.raw = nil
 		upd.prev = nil
 		upd.encoded = nil
 		deferredUpdatePool.Put(upd)
 	}
 }
 
-// PendingCommitmentUpdate stores deferred branch updates for a specific block.
-// Used by the commitment context to defer branch update application until a later flush.
 type PendingCommitmentUpdate struct {
 	BlockNum uint64
-	// BlockHash is the hash of the block these deferred updates were
-	// generated for. It disambiguates pastChangesAccumulator lookups when
-	// multiple changesets exist for the same block number (e.g. during a
-	// fork-bounce reorg test where canonical and fork chains both saved a
-	// block 1 changeset). Without the hash, GetChangesetByBlockNum returns
-	// the first match it iterates — non-deterministic and wrong in that
-	// scenario.
+	// BlockHash disambiguates changeset lookups sharing a block number.
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
 }
 
-// Clear returns all deferred updates to the pool and nils the slice.
 func (p *PendingCommitmentUpdate) Clear() {
 	for _, upd := range p.Deferred {
 		putDeferredUpdate(upd)
@@ -317,17 +289,17 @@ func (p *PendingCommitmentUpdate) Clear() {
 	p.Deferred = nil
 }
 
+// BranchCache is populated by SharedDomains.Commit, not by this encoder.
 type BranchEncoder struct {
 	buf       *bytes.Buffer
 	bitmapBuf [binary.MaxVarintLen64]byte
 	merger    *BranchMerger
 	metrics   *Metrics
 
-	// Deferred updates support
 	deferUpdates       bool
-	maxDeferredUpdates int // flush threshold; 0 = use DefaultMaxDeferredUpdates from config
+	maxDeferredUpdates int
 	deferred           []*DeferredBranchUpdate
-	pendingPrefixes    *maphash.NonConcurrentMap[struct{}] // tracks pending prefixes to detect duplicates
+	pendingPrefixes    *maphash.NonConcurrentMap[struct{}]
 }
 
 func NewBranchEncoder(sz uint64) *BranchEncoder {
@@ -337,8 +309,6 @@ func NewBranchEncoder(sz uint64) *BranchEncoder {
 	}
 }
 
-// setDeferUpdates enables or disables deferred update collection.
-// When enabled, CollectUpdate will store updates in a cache instead of applying them immediately.
 func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	be.deferUpdates = defer_
 	if defer_ {
@@ -351,12 +321,10 @@ func (be *BranchEncoder) setDeferUpdates(defer_ bool) {
 	}
 }
 
-// DeferUpdatesEnabled returns whether deferred update collection is enabled.
 func (be *BranchEncoder) DeferUpdatesEnabled() bool {
 	return be.deferUpdates
 }
 
-// HasPendingPrefix returns true if the given prefix has a pending deferred update.
 func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
 	if be.pendingPrefixes == nil {
 		return false
@@ -365,7 +333,6 @@ func (be *BranchEncoder) HasPendingPrefix(prefix []byte) bool {
 	return found
 }
 
-// ClearDeferred clears the deferred updates list and returns all objects to the pool.
 func (be *BranchEncoder) ClearDeferred() {
 	for _, upd := range be.deferred {
 		putDeferredUpdate(upd)
@@ -377,12 +344,10 @@ func (be *BranchEncoder) ClearDeferred() {
 	ResetDeferredUpdateMetrics()
 }
 
-// encodeDeferredUpdate encodes a branch update using the provided encoder and merger.
-// Cell hashes are already computed during fold() before cells were copied.
 func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error {
 	if len(upd.prev) > 0 {
 		if bytes.Equal(upd.prev, upd.raw) {
-			upd.encoded = nil // skip unchanged
+			upd.encoded = nil
 			return nil
 		}
 		merged, err := merger.Merge(upd.prev, upd.raw)
@@ -396,7 +361,7 @@ func mergeDeferredUpdate(upd *DeferredBranchUpdate, merger *BranchMerger) error 
 	return nil
 }
 
-// ApplyDeferredUpdates encodes branch updates concurrently and writes them.
+// putBranch is bound by the same no-retain rule as PatriciaContext.PutBranch.
 func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
@@ -411,11 +376,11 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	return nil
 }
 
-// Pool for worker mergers to avoid per-call allocations.
 var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512) }}
 
-// ApplyDeferredBranchUpdates encodes deferred branch updates concurrently and writes them.
-// Returns the number of updates successfully written.
+// Returns the number of updates written. putBranch must copy prefix and data rather than
+// retain them: they are pooled and reused for a later, unrelated update. prevData is
+// cloned per update and carries no such constraint.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
@@ -428,7 +393,6 @@ func ApplyDeferredBranchUpdates(
 		numWorkers = 1
 	}
 
-	// Sequential fast path: avoids goroutine overhead for small batches.
 	if numWorkers == 1 || len(deferred) <= numWorkers {
 		merger := workerMergerPool.Get().(*BranchMerger)
 		defer workerMergerPool.Put(merger)
@@ -441,7 +405,7 @@ func ApplyDeferredBranchUpdates(
 			if upd.encoded == nil {
 				continue
 			}
-			if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+			if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
 				return written, err
 			}
 			written++
@@ -450,8 +414,6 @@ func ApplyDeferredBranchUpdates(
 		return written, nil
 	}
 
-	// Workers merge disjoint index ranges in place; per-item channel handoff costs more
-	// than the merging itself, so the write pass below stays sequential over the slice.
 	chunk := (len(deferred) + numWorkers - 1) / numWorkers
 	errs := make([]error, numWorkers)
 	var wg sync.WaitGroup
@@ -483,9 +445,9 @@ func ApplyDeferredBranchUpdates(
 	var written int
 	for _, upd := range deferred {
 		if upd.encoded == nil {
-			continue // skip unchanged
+			continue
 		}
-		if err := putBranch(upd.prefix, upd.encoded, upd.prev); err != nil {
+		if err := putBranch(capLen(upd.prefix), capLen(upd.encoded), capLen(upd.prev)); err != nil {
 			return written, err
 		}
 		written++
@@ -525,7 +487,7 @@ func (be *BranchEncoder) CollectUpdate(
 
 	if len(prev) > 0 {
 		if bytes.Equal(prev, update) {
-			return nil // do not write the same data for prefix
+			return nil
 		}
 		update, err = be.merger.Merge(prev, update)
 		if err != nil {
@@ -538,7 +500,6 @@ func (be *BranchEncoder) CollectUpdate(
 	if err := ctx.PutBranch(prefixCopy, updateCopy, prev); err != nil {
 		return err
 	}
-	// BranchCache population is owned by SharedDomains.Commit, not the encoder.
 	if be.metrics != nil {
 		be.metrics.updateBranch.Add(1)
 	}
@@ -546,11 +507,6 @@ func (be *BranchEncoder) CollectUpdate(
 	return nil
 }
 
-// CollectDeferredUpdate stores a branch update job for later parallel processing.
-// Unlike CollectUpdate, this does NOT call EncodeBranch immediately - it copies the cellEncodeData
-// and defers encoding for parallel execution later.
-// Cell hashes are already computed during fold() before this is called.
-// Flushes pending updates if a duplicate prefix is detected or if deferred count exceeds maxDeferredUpdates.
 func (be *BranchEncoder) CollectDeferredUpdate(
 	ctx PatriciaContext,
 	prefix []byte,
@@ -558,7 +514,6 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 	cells *[16]cellEncodeData,
 	isNew bool,
 ) error {
-	// Flush if duplicate prefix or too many deferred updates
 	limit := be.maxDeferredUpdates
 	if limit == 0 {
 		limit = DefaultMaxDeferredUpdates
@@ -588,11 +543,8 @@ func (be *BranchEncoder) CollectDeferredUpdate(
 		prev = []byte{}
 	}
 
-	// Track this prefix as pending
 	be.pendingPrefixes.Set(prefix, struct{}{})
 
-	// Encoding is cheap and runs on the fold worker; only the merge with prev is left
-	// for apply time, when a duplicate prefix may substitute a newer predecessor.
 	raw, err := be.EncodeBranch(bitmap, touchMap, afterMap, cells)
 	if err != nil {
 		return err
@@ -612,8 +564,6 @@ func (be *BranchEncoder) putUvarAndVal(size uint64, val []byte) error {
 	return nil
 }
 
-// EncodeBranch encodes branch data from cellEncodeData. Pure serializer with no side effects.
-// Result should be copied before next call to EncodeBranch, underlying slice is reused.
 func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *[16]cellEncodeData) (BranchData, error) {
 	be.buf.Reset()
 
@@ -682,7 +632,6 @@ func (be *BranchEncoder) EncodeBranch(bitmap, touchMap, afterMap uint16, cells *
 
 type BranchData []byte
 
-// ChildCount returns the number of children present in the branch.
 func (branchData BranchData) ChildCount() int {
 	if len(branchData) < 4 {
 		return 0
@@ -690,8 +639,10 @@ func (branchData BranchData) ChildCount() int {
 	return bits.OnesCount16(binary.BigEndian.Uint16(branchData[2:4]))
 }
 
+func (branchData BranchData) IsTombstone() bool { return len(branchData) == 0 }
+
 func (branchData BranchData) String() string {
-	if len(branchData) == 0 {
+	if branchData.IsTombstone() {
 		return ""
 	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
@@ -711,7 +662,6 @@ func (branchData BranchData) String() string {
 			pos++
 			var err error
 			if pos, err = cell.fillFromFields(branchData, pos, fields); err != nil {
-				// This is used for test output, so ok to panic
 				panic(err)
 			}
 			sb.WriteString("{")
@@ -743,9 +693,7 @@ func (branchData BranchData) String() string {
 
 var errShortenedKeyFound = errors.New("shortened key found")
 
-// HasShortenedKeys reports whether the branch carries any shortened (referenced) key — a key
-// field whose length is not length.Addr (account) / length.Addr+length.Hash (storage), i.e. a
-// varint file offset. A malformed branch reports true: treat as referenced, never under-report.
+// A malformed branch reports true: treat as referenced, never under-report.
 func (branchData BranchData) HasShortenedKeys() bool {
 	_, err := branchData.ReplacePlainKeys(nil, func(key []byte, isStorage bool) ([]byte, error) {
 		if isStorage {
@@ -760,11 +708,7 @@ func (branchData BranchData) HasShortenedKeys() bool {
 	return err != nil
 }
 
-// if fn returns nil, the original key will be kept from branchData.
-// Uses span-based lazy copy: unchanged regions of branchData are copied in bulk
-// only when a key actually changes. When no keys change, returns branchData as-is
-// with zero copies. When the caller passes nil or an undersized buffer, newData
-// is auto-sized to len(branchData) on first use.
+// If fn returns nil, the original key is kept.
 func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte, isStorage bool) (newKey []byte, err error)) (BranchData, error) {
 	if len(branchData) < 4 {
 		return branchData, nil
@@ -779,7 +723,7 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 
 	pos := 4
 	anyChanged := false
-	spanStart := 0 // start of current unchanged span in branchData
+	spanStart := 0
 	for bitset, j := touchMap&afterMap, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		fields := cellFields(branchData[pos])
@@ -906,22 +850,20 @@ func (branchData BranchData) ReplacePlainKeys(newData []byte, fn func(key []byte
 	if !anyChanged {
 		return branchData, nil
 	}
-	// Flush remaining unchanged span
 	newData = append(newData, branchData[spanStart:]...)
 	return newData, nil
 }
 
-// IsComplete determines whether given branch data is complete, meaning that all information about all the children is present
-// Each of 16 children of a branch node have two attributes
-// touch - whether this child has been modified or deleted in this branchData (corresponding bit in touchMap is set)
-// after - whether after this branchData application, the child is present in the tree or not (corresponding bit in afterMap is set)
 func (branchData BranchData) IsComplete() bool {
+	if len(branchData) < 4 {
+		return false
+	}
 	touchMap := binary.BigEndian.Uint16(branchData[0:])
 	afterMap := binary.BigEndian.Uint16(branchData[2:])
 	return ^touchMap&afterMap == 0
 }
 
-// MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
+// branch2 shadows branch1 where both touch the same cell.
 func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []byte) (BranchData, error) {
 	if branchData2 == nil {
 		return branchData, nil
@@ -945,7 +887,6 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 	for bitset, j := bitmap1|bitmap2, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		if bitmap2&bit != 0 {
-			// Add fields from branchData2
 			fields := cellFields(branchData2[pos2])
 			newData = append(newData, byte(fields))
 			pos2++
@@ -968,7 +909,7 @@ func (branchData BranchData) MergeHexBranches(branchData2 BranchData, newData []
 			}
 		}
 		if bitmap1&bit != 0 {
-			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1
+			add := (touchMap2&bit == 0) && (afterMap2&bit != 0)
 			fields := cellFields(branchData[pos1])
 			if add {
 				newData = append(newData, byte(fields))
@@ -1023,7 +964,7 @@ func (branchData BranchData) decodeCells() (touchMap, afterMap uint16, row [16]*
 }
 
 func (branchData BranchData) Validate(branchKey []byte) error {
-	if len(branchData) == 0 {
+	if branchData.IsTombstone() {
 		return nil
 	}
 	_, afterMap, row, err := branchData.decodeCells()
@@ -1111,7 +1052,7 @@ func NewHexBranchMerger(capacity uint64) *BranchMerger {
 	return &BranchMerger{buf: make([]byte, capacity)}
 }
 
-// MergeHexBranches combines two branchData, number 2 coming after (and potentially shadowing) number 1
+// branch2 shadows branch1 where both touch the same cell.
 func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData, error) {
 	if len(branch2) == 0 {
 		return branch1, nil
@@ -1139,7 +1080,6 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 	for bitset, j := bitmap1|bitmap2, 0; bitset != 0; j++ {
 		bit := bitset & -bitset
 		if bitmap2&bit != 0 {
-			// Add fields from branch2
 			fields := cellFields(branch2[pos2])
 			m.buf = append(m.buf, byte(fields))
 			pos2++
@@ -1166,7 +1106,7 @@ func (m *BranchMerger) Merge(branch1 BranchData, branch2 BranchData) (BranchData
 			}
 		}
 		if bitmap1&bit != 0 {
-			add := (touchMap2&bit == 0) && (afterMap2&bit != 0) // Add fields from branchData1
+			add := (touchMap2&bit == 0) && (afterMap2&bit != 0)
 			fields := cellFields(branch1[pos1])
 			if add {
 				m.buf = append(m.buf, byte(fields))
@@ -1238,7 +1178,6 @@ type BranchStat struct {
 	IsRoot        bool
 }
 
-// do not add stat of root node to other branch stat
 func (bs *BranchStat) Collect(other *BranchStat) {
 	if other == nil {
 		return
@@ -1289,7 +1228,6 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 	stat.ValSize = uint64(len(branch))
 	stat.IsRoot = true
 
-	// if key is not "state" then we are interested in the branch data
 	if !bytes.Equal(key, []byte("state")) {
 		stat.IsRoot = false
 
@@ -1297,7 +1235,7 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 		if err != nil {
 			return nil
 		}
-		stat.TAMapsSize = uint64(2 + 2) // touchMap + afterMap
+		stat.TAMapsSize = uint64(2 + 2)
 		stat.CellCount = uint64(bits.OnesCount16(tm & am))
 
 		medians := make(map[string][]int16)
@@ -1359,7 +1297,6 @@ func DecodeBranchAndCollectStat(key, branch []byte, tv TrieVariant) *BranchStat 
 	return stat
 }
 
-// Defines how to evaluate commitments
 type Mode uint
 
 const (
@@ -1368,12 +1305,6 @@ const (
 	ModeUpdate   Mode = 2
 	ModeParallel Mode = 3
 )
-
-// streamingSink receives touched keys for a StreamingCommitter's fold; plainKey
-// and update must stay valid until the committer's Process call.
-type streamingSink interface {
-	TouchKey(hashedKey, plainKey []byte, update *Update)
-}
 
 func (m Mode) String() string {
 	switch m {
@@ -1391,66 +1322,36 @@ func (m Mode) String() string {
 }
 
 type Updates struct {
-	hasher keyHasher
-	keys   map[string]struct{} // plain keys to keep only unique keys in etl
-	etl    *etl.Collector      // all-in-one collector
-	// Sorted by hashedKey first, with plainKey as a tiebreaker (see
-	// keyUpdateLessFn). Trie traversal must happen in hashedKey order so
-	// Process's fold/unfold operates on adjacent paths; iterating by
-	// plainKey produced a divergent root and was the root cause of the
-	// eip1153/eip7778/eip7976/eip7825 wrong-trie-root failures. ModeDirect
-	// achieves the same ordering via its etl collector keyed on hashedKey;
-	// this btree must match.
-	tree    *btree.BTreeG[*KeyUpdate]
-	treeIdx map[string]*KeyUpdate // plainKey → btree entry for O(1) lookup in ModeUpdate
-	mode    Mode
-	tmpdir  string
-
-	// parallel holds the prefix trie of touched hashed keys; nil outside ModeParallel.
+	hasher   keyHasher
+	keys     map[string]struct{}
+	etl      *etl.Collector
+	tree     *btree.BTreeG[*KeyUpdate]
+	treeIdx  map[string]*KeyUpdate
+	mode     Mode
+	tmpdir   string
 	parallel *parallelUpdate
 
-	// direct accumulates ModeDirect touches in insertion order; once directBytes
-	// crosses directMemLimit the entries are replayed into an etl collector and
-	// collection continues there (etl != nil marks the spilled state).
 	direct         []KeyUpdate
 	directBytes    int
 	directMemLimit int
 
-	// streaming (ModeParallel only) forwards every touched key to streamer.
-	streaming bool
-	streamer  streamingSink
+	batchSlab []KeyUpdate
 
-	batchSlab []KeyUpdate // grow-only slab for HashSort batch (avoids per-key heap allocs)
-
-	// Ring of byte arenas for HashSort key copies; a slot is reused only after its prior generation's warm items drain.
 	arenas   [arenaRingSize][]byte
 	curArena int
 	gen      uint64
 
-	// addrCache reuses the nibblized keccak(addr) prefix across a run of storage
-	// keys sharing one address (whale storage). Enabled only when hasher is the
-	// nibblizing hasher whose key layout the reuse assumes (addrCacheReuse).
 	addrCache      addrHashCache
 	addrCacheReuse bool
 }
 
-// arenaRingSize is how many byte arenas HashSort cycles; raising it only adds memory headroom, never affects correctness.
 const arenaRingSize = 2
 
-// arenaAlloc appends b to the byte arena and returns the sub-slice.
-// The returned slice is valid until the arena is reset.
-// The arena must have sufficient capacity (via arenaEnsureCap) before
-// accumulating a batch; if capacity is exceeded, arenaAlloc falls back
-// to an independent heap allocation to keep previously returned
-// sub-slices valid.
 func (t *Updates) arenaAlloc(b []byte) []byte {
 	arena := t.arenas[t.curArena]
 	off := len(arena)
 	needed := off + len(b)
 	if needed > cap(arena) {
-		// Arena capacity exceeded — fall back to an independent allocation.
-		// This keeps previously returned sub-slices valid while avoiding a
-		// panic that would crash a production node.
 		result := make([]byte, len(b))
 		copy(result, b)
 		return result
@@ -1461,7 +1362,6 @@ func (t *Updates) arenaAlloc(b []byte) []byte {
 	return arena[off:needed]
 }
 
-// arenaEnsureCap reserves at least c bytes in every ring buffer; call before a batch so a mid-batch grow can't reallocate and invalidate returned sub-slices.
 func (t *Updates) arenaEnsureCap(c int) {
 	for i := range t.arenas {
 		if cap(t.arenas[i]) < c {
@@ -1470,7 +1370,6 @@ func (t *Updates) arenaEnsureCap(c int) {
 	}
 }
 
-// IsConcurrentCommitment reports whether commitment runs in the parallel mode.
 func (t *Updates) IsConcurrentCommitment() bool {
 	return t.mode == ModeParallel
 }
@@ -1479,15 +1378,10 @@ type keyHasher func(key []byte) []byte
 
 func keyHasherNoop(key []byte) []byte { return key }
 
-// hasherReusesAddrPrefix reports whether h is the nibblizing hasher whose key
-// layout keyToHexNibbleHashCached assumes; only then may the address-prefix
-// cache be used in place of h.
 func hasherReusesAddrPrefix(h keyHasher) bool {
 	return reflect.ValueOf(h).Pointer() == reflect.ValueOf(KeyToHexNibbleHash).Pointer()
 }
 
-// hashKey nibblizes key, reusing the cached address prefix for a run of storage
-// keys sharing one address when the configured hasher permits it.
 func (t *Updates) hashKey(key []byte) []byte {
 	if t.addrCacheReuse {
 		return keyToHexNibbleHashCached(key, &t.addrCache)
@@ -1495,13 +1389,8 @@ func (t *Updates) hashKey(key []byte) []byte {
 	return t.hasher(key)
 }
 
-// NewEmpty creates a fresh Updates matching the receiver. The streaming sink must
-// carry over, or a buffer rotated mid-stream silently computes a stale root.
 func (t *Updates) NewEmpty() *Updates {
-	n := NewUpdates(t.mode, t.tmpdir, t.hasher)
-	n.streamer = t.streamer
-	n.streaming = t.streaming
-	return n
+	return NewUpdates(t.mode, t.tmpdir, t.hasher)
 }
 
 func NewUpdates(m Mode, tmpdir string, hasher keyHasher) *Updates {
@@ -1557,16 +1446,10 @@ func (t *Updates) initCollector() {
 	t.etl.SortAndFlushInBackground(true)
 }
 
-// defaultDirectMemLimit bounds the in-memory ModeDirect collection; batches
-// beyond it (shard rebuilds, extreme sync batches) spill to the etl collector.
 const defaultDirectMemLimit = 512 << 20
 
-// directEntryOverhead approximates per-entry bookkeeping (KeyUpdate header +
-// slice growth) on top of the key bytes when accounting against directMemLimit.
 const directEntryOverhead = 48
 
-// plainKeyBytes converts a stored plain key for delivery, keeping the empty
-// value non-nil the way the etl collector delivers hashed-only touches.
 func plainKeyBytes(pk string) []byte {
 	if len(pk) == 0 {
 		return []byte{}
@@ -1574,8 +1457,6 @@ func plainKeyBytes(pk string) []byte {
 	return common.ToBytesZeroCopy(pk)
 }
 
-// collectDirect records one ModeDirect touch. hashedKey and plainKey must be
-// immutable: both are retained until HashSort consumes the batch.
 func (t *Updates) collectDirect(hashedKey []byte, plainKey string) {
 	if t.etl != nil {
 		if err := t.etl.Collect(hashedKey, plainKeyBytes(plainKey)); err != nil {
@@ -1590,8 +1471,6 @@ func (t *Updates) collectDirect(hashedKey []byte, plainKey string) {
 	}
 }
 
-// spillDirect replays the in-memory entries into a fresh collector in insertion
-// order, preserving the stable-sort tiebreak for duplicate hashed keys.
 func (t *Updates) spillDirect() {
 	t.initCollector()
 	for i := range t.direct {
@@ -1604,17 +1483,6 @@ func (t *Updates) spillDirect() {
 
 func (t *Updates) Mode() Mode { return t.mode }
 
-// SetStreamingCommitter forwards ModeParallel touches to sink; nil disables streaming.
-func (t *Updates) SetStreamingCommitter(sink streamingSink) {
-	t.streamer = sink
-	t.streaming = sink != nil
-}
-
-// Streaming reports whether touches are being forwarded to a StreamingCommitter.
-func (t *Updates) Streaming() bool { return t.streaming }
-
-// PlainKeys returns a copy of the set of plain keys that have been touched.
-// Meaningful only in ModeDirect and ModeParallel; nil otherwise.
 func (t *Updates) PlainKeys() map[string]struct{} {
 	if (t.mode != ModeDirect && t.mode != ModeParallel) || t.keys == nil {
 		return nil
@@ -1637,8 +1505,6 @@ func (t *Updates) Size() (updates uint64) {
 	}
 }
 
-// TouchPlainKey marks plainKey as updated and applies different fn for different key types
-// (different behaviour for Code, Account and Storage key modifications).
 func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, val []byte)) {
 	switch t.mode {
 	case ModeUpdate:
@@ -1660,9 +1526,6 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = struct{}{}
 		}
 	case ModeParallel:
-		// The dedup map only guards plain-key interning: every touch reaches the prefix
-		// trie and the streamer, so a same-block re-touch invalidates any eager fold of
-		// its split instead of leaving it stale.
 		keyBytes := common.ToBytesZeroCopy(key)
 		hashedKey := t.hashKey(keyBytes)
 		ik := keyBytes
@@ -1671,17 +1534,10 @@ func (t *Updates) TouchPlainKey(key string, val []byte, fn func(c *KeyUpdate, va
 			t.keys[key] = struct{}{}
 		}
 		t.parallel.Insert(hashedKey, ik, nil)
-		if t.streaming && t.streamer != nil {
-			t.streamer.TouchKey(hashedKey, ik, nil)
-		}
 	default:
 	}
 }
 
-// TouchPlainKeyDirect applies a pre-built Update to the key without
-// serialization/deserialization. Used by the commitment calculator which
-// receives aggregated state changes via channel instead of serialized bytes
-// from DomainPut.
 func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	if dbg.TraceTouchKey {
 		fmt.Printf("TOUCHDIRECT key=%x flags=%v balance=%s nonce=%d codeHash=%x\n",
@@ -1690,7 +1546,6 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	switch t.mode {
 	case ModeUpdate:
 		if existing, ok := t.treeIdx[key]; ok {
-			// Merge into existing entry
 			if update.Flags&DeleteUpdate != 0 {
 				existing.update.Flags = DeleteUpdate
 				existing.update.CodeHash = empty.CodeHash
@@ -1732,7 +1587,6 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 	case ModeParallel:
 		keyBytes := common.ToBytesZeroCopy(key)
 		hashedKey := t.hashKey(keyBytes)
-		// Carry the value so the fold uses it directly instead of re-reading ctx, which lags cc.state.
 		u := new(Update)
 		*u = *update
 		ik := keyBytes
@@ -1741,9 +1595,6 @@ func (t *Updates) TouchPlainKeyDirect(key string, update *Update) {
 			t.keys[key] = struct{}{}
 		}
 		t.parallel.Insert(hashedKey, ik, u)
-		if t.streaming && t.streamer != nil {
-			t.streamer.TouchKey(hashedKey, ik, u)
-		}
 	default:
 	}
 }
@@ -1754,7 +1605,6 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		if len(hashedKey) == 0 {
 			return
 		}
-		// string(hashedKey) copies the bytes, so the retained key is safe even if the caller reuses the slice.
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
 			t.collectDirect(common.ToBytesZeroCopy(dedupKey), "")
@@ -1766,7 +1616,6 @@ func (t *Updates) TouchHashedKey(hashedKey []byte) {
 		}
 		dedupKey := string(hashedKey)
 		if _, ok := t.keys[dedupKey]; !ok {
-			// Hashed-only touch has no plainKey; the parallel fold rejects such a terminator.
 			t.parallel.Insert(hashedKey, nil, nil)
 			t.keys[dedupKey] = struct{}{}
 		}
@@ -1783,7 +1632,7 @@ func (t *Updates) TouchAccount(c *KeyUpdate, val []byte) {
 		return
 	}
 	if c.update.Flags&DeleteUpdate != 0 {
-		c.update.Flags = 0 // also could invert with ^ but 0 is just a reset
+		c.update.Flags = 0
 	}
 
 	acc := accounts.Account{}
@@ -1853,11 +1702,6 @@ func (t *Updates) Close() {
 
 const hashSortBatchSize = 10_000
 
-// hashSortDirectInMem consumes the in-memory ModeDirect collection: a stable
-// sort by hashedKey (preserving touch order for duplicate hashed keys, like the
-// etl collector does), then warmup + fn per batch. Entry memory is stable for
-// the whole call, so no arena ring or WaitBufferFree gating is needed; gen and
-// curArena are deliberately left untouched for the arena-based paths.
 func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
 	slices.SortStableFunc(t.direct, func(a, b KeyUpdate) int {
 		return bytes.Compare(a.hashedKey, b.hashedKey)
@@ -1890,20 +1734,13 @@ func (t *Updates) hashSortDirectInMem(ctx context.Context, warmuper *Warmuper, f
 		}
 	}
 
-	// Zero consumed entries so retained hashedKey slices don't outlive the batch
-	// past the truncation (in-flight warmup items hold their own references).
 	clear(t.direct)
 	t.direct = t.direct[:0]
 	t.directBytes = 0
 	return nil
 }
 
-// HashSort sorts and applies fn to each key-value pair in the order of hashed keys.
-// Keys are processed in batches of 10k to control memory usage.
-// If warmuper is non-nil, keys are submitted for parallel warming before processing.
-// Caller is responsible for calling warmuper.Wait() after processing completes.
-// IMPORTANT: fn must not retain hk or pk slices after returning; they are backed by
-// reusable arena memory that is invalidated between batches.
+// fn must not retain hk or pk slices after returning: they're backed by reusable arena memory.
 func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, pk []byte, update *Update) error) error {
 	switch t.mode {
 	case ModeDirect:
@@ -1919,22 +1756,18 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				return err
 			}
 		}
-		// Pre-size the arena so a mid-batch grow can't reallocate and invalidate live sub-slices (≤180 B/key, 192 with headroom).
 		t.arenaEnsureCap(min(cnt, hashSortBatchSize) * 192)
 		t.arenas[t.curArena] = t.arenas[t.curArena][:0]
 		var prevKey []byte
 
 		err := t.etl.Load(nil, "", func(k, v []byte, table etl.CurrentTableReader, next etl.LoadNextFunc) error {
-			// Copy into arena since ETL may reuse buffers
 			hk := t.arenaAlloc(k)
 			pk := t.arenaAlloc(v)
 			t.batchSlab = append(t.batchSlab, KeyUpdate{hashedKey: hk, plainKey: unsafe.String(unsafe.SliceData(pk), len(pk))})
 
-			// Submit to warmuper with start depth based on divergence from previous key
 			if warmuper != nil {
 				startDepth := 0
 				if prevKey != nil {
-					// Find common prefix length
 					minLen := min(len(prevKey), len(hk))
 					for startDepth < minLen && prevKey[startDepth] == hk[startDepth] {
 						startDepth++
@@ -1944,7 +1777,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 				prevKey = append(prevKey[:0], hk...)
 			}
 
-			// Process batch when full
 			if len(t.batchSlab) >= hashSortBatchSize {
 				for i := range t.batchSlab {
 					select {
@@ -1974,7 +1806,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			return err
 		}
 
-		// Process remaining keys in final batch
 		for i := range t.batchSlab {
 			select {
 			case <-ctx.Done():
@@ -2057,7 +1888,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 			return processErr
 		}
 
-		// Process remaining keys in final batch
 		for i := range t.batchSlab {
 			select {
 			case <-ctx.Done():
@@ -2076,8 +1906,6 @@ func (t *Updates) HashSort(ctx context.Context, warmuper *Warmuper, fn func(hk, 
 	return nil
 }
 
-// consumeParallel drops the folded ModeParallel collection so the next block starts
-// empty — the ModeParallel counterpart of HashSort consuming ModeDirect/ModeUpdate.
 func (t *Updates) consumeParallel() {
 	if t.mode != ModeParallel {
 		return
@@ -2088,7 +1916,6 @@ func (t *Updates) consumeParallel() {
 	}
 }
 
-// Reset clears all updates
 func (t *Updates) Reset() {
 	switch t.mode {
 	case ModeDirect:
@@ -2133,15 +1960,9 @@ type KeyUpdate struct {
 	update    *Update
 }
 
-// keyUpdateLessFn orders KeyUpdate entries by hashedKey. Process requires
-// updates to arrive in hashedKey-sorted order so fold/unfold operates on
-// adjacent trie paths; iterating by plainKey produces a different trie
-// traversal sequence and yields a divergent root hash. ModeDirect achieves
-// this via its etl collector keyed on hashedKey; ModeUpdate's btree must
-// match that order.
-//
-// plainKey is used only as a tiebreaker (e.g. for TouchHashedKey entries
-// that share their hashedKey with a "real" entry).
+// keyUpdateLessFn orders by hashedKey first: Process requires hashedKey-sorted order for
+// fold/unfold to walk adjacent trie paths, else the root hash diverges. plainKey is only
+// a tiebreaker, e.g. for TouchHashedKey entries sharing a hashedKey with a "real" entry.
 func keyUpdateLessFn(i, j *KeyUpdate) bool {
 	if c := bytes.Compare(i.hashedKey, j.hashedKey); c != 0 {
 		return c < 0
@@ -2196,7 +2017,6 @@ func (u *Update) Reset() {
 	u.CodeHash = empty.CodeHash
 }
 
-// Copy creates a deep copy of the Update.
 func (u *Update) Copy() *Update {
 	if u == nil {
 		return nil

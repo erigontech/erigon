@@ -29,13 +29,14 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/state/changeset"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 func TestNoOverflowPages(t *testing.T) {
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(t, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, log.Root()), dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
 	t.Cleanup(db.Close)
 
 	ctx := t.Context()
@@ -211,7 +212,7 @@ func BenchmarkSerializeDiffSet(b *testing.B) {
 
 func BenchmarkWriteDiffSet(b *testing.B) {
 	dirs := datadir.New(b.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(b, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
+	db := mdbxtest.InMem(b, mdbx.New(dbcfg.ChainDB, log.Root()), dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
 	b.Cleanup(db.Close)
 
 	// Create a realistic StateChangeSet
@@ -228,7 +229,7 @@ func BenchmarkWriteDiffSet(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
 			tx.Rollback()
 			b.Fatal(err)
@@ -239,7 +240,7 @@ func BenchmarkWriteDiffSet(b *testing.B) {
 
 func BenchmarkWriteDiffSetLarge(b *testing.B) {
 	dirs := datadir.New(b.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, log.Root()).InMem(b, dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
+	db := mdbxtest.InMem(b, mdbx.New(dbcfg.ChainDB, log.Root()), dirs.Chaindata).PageSize(ethconfig.DefaultChainDBPageSize).MustOpen()
 	b.Cleanup(db.Close)
 
 	// Create a large StateChangeSet (simulating a heavy block)
@@ -256,7 +257,7 @@ func BenchmarkWriteDiffSetLarge(b *testing.B) {
 		if err != nil {
 			b.Fatal(err)
 		}
-		defer tx.Rollback()
+		defer tx.Rollback() //nolint:gocritic
 		if err := changeset.WriteDiffSet(tx, uint64(i), blockHash, diffSet); err != nil {
 			tx.Rollback()
 			b.Fatal(err)

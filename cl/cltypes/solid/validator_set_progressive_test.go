@@ -4,8 +4,9 @@ import (
 	"strconv"
 	"testing"
 
-	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/merkle_tree"
 )
 
 func TestValidatorSetProgressiveRootMatchesReference(t *testing.T) {

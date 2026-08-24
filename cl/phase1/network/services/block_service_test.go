@@ -35,7 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 )
 
 type attesterSlashingErrorStore struct {
@@ -48,7 +48,7 @@ func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing
 }
 
 func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *synced_data.SyncedDataManager, *eth_clock.MockEthereumClock, *mock_services.ForkChoiceStorageMock) {
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	cfg := &clparams.MainnetBeaconConfig
 	syncedDataManager := synced_data.NewSyncedDataManager(cfg, true)
 	ethClock := eth_clock.NewMockEthereumClock(ctrl)

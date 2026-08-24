@@ -5,10 +5,11 @@ import (
 	"errors"
 	"testing"
 
+	"github.com/stretchr/testify/require"
+
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/ssz"
-	"github.com/stretchr/testify/require"
 )
 
 func TestSignedExecutionPayloadEnvelopeCloneNilMessage(t *testing.T) {

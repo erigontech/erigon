@@ -92,7 +92,7 @@ func (a *ApiHandler) PostEthV1BeaconRewardsAttestations(w http.ResponseWriter, r
 	if err != nil {
 		return nil, err
 	}
-	_, headSlot, statusCode, err := a.getHead()
+	_, headSlot, statusCode, err := a.getSelectedHead()
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}

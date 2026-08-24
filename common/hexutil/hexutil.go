@@ -21,6 +21,8 @@ import (
 	"encoding/hex"
 	"math/big"
 	"strconv"
+
+	"github.com/holiman/uint256"
 )
 
 // Decode decodes a hex string with 0x prefix.
@@ -109,6 +111,50 @@ func DecodeBig(input string) (*big.Int, error) {
 	}
 	dec := new(big.Int).SetBits(words)
 	return dec, nil
+}
+
+// DecodeU256 decodes a hex string with 0x prefix as a quantity.
+// It accepts exactly what DecodeBig does, minus the big.Int round-trip:
+// numbers larger than 256 bits are not accepted.
+//
+// The result is returned by value so a caller that only reads it pays no
+// allocation; take its address to build a hexutil.U256.
+func DecodeU256(input string) (uint256.Int, error) {
+	var dec uint256.Int
+	raw, err := checkNumber(input)
+	if err != nil {
+		return dec, err
+	}
+	if len(raw) > 64 {
+		return dec, ErrBig256Range
+	}
+	// Fill one 64-bit word per 16 nibbles, least-significant word first, rather
+	// than shifting the whole 256-bit value once per nibble.
+	end := len(raw)
+	for i := 0; i < len(dec) && end > 0; i++ {
+		start := max(end-16, 0)
+		var word uint64
+		for ri := start; ri < end; ri++ {
+			nib := decodeNibble(raw[ri])
+			if nib == badNibble {
+				return uint256.Int{}, ErrSyntax
+			}
+			word = word<<4 | nib
+		}
+		dec[i] = word
+		end = start
+	}
+	return dec, nil
+}
+
+// MustDecodeU256 decodes a hex string with 0x prefix as a quantity.
+// It panics for invalid input.
+func MustDecodeU256(input string) uint256.Int {
+	dec, err := DecodeU256(input)
+	if err != nil {
+		panic(err)
+	}
+	return dec
 }
 
 // MustDecodeBig decodes a hex string with 0x prefix as a quantity.

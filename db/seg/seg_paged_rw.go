@@ -99,6 +99,15 @@ func (r *Page) Reset(v []byte, compressionEnabled bool) (n int) {
 	}
 	return
 }
+
+// clear rewinds the page without dropping compressionBuf, which the next page
+// decodes into. limit=0 keeps HasNext false until a page is actually read.
+func (r *Page) clear() {
+	r.i, r.limit = 0, 0
+	r.kOffset, r.vOffset = 0, 0
+	r.kLens, r.vLens, r.data = nil, nil, nil
+}
+
 func (r *Page) HasNext() bool { return r.limit > r.i }
 func (r *Page) Next() (k, v []byte) {
 	kLen := be.Uint32(r.kLens[r.i*4:])
@@ -164,7 +173,7 @@ func (g *PagedReader) Reset(offset uint64) {
 	g.file.Reset(offset)
 	g.currentPageOffset = offset
 	g.nextPageOffset = offset
-	g.page = &Page{} // TODO: optimize
+	g.page.clear()
 	if g.file.HasNext() {
 		g.NextPage()
 	}
@@ -277,7 +286,6 @@ type PagedWriter struct {
 	keys, vals         []byte
 	kLengths, vLengths []uint32
 
-	pageBuf            []byte // reusable buffer for bytesUncompressedTo in sync path
 	compressionBuf     []byte
 	compressionEnabled bool
 

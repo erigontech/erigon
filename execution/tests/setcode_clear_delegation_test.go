@@ -94,7 +94,7 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 				return signed
 			}
 
-			chainPack, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 2, func(i int, b *blockgen.BlockGen) {
+			chainPack, err := m.GenerateChain(2, func(i int, b *blockgen.BlockGen) {
 				b.SetCoinbase(common.Address{1})
 				switch i {
 				case 0:
@@ -109,7 +109,7 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 				var acc accounts.Account
 				var code []byte
 				require.NoError(t, m.DB.ViewTemporal(t.Context(), func(tx kv.TemporalTx) error {
-					accEnc, _, err := tx.GetLatest(kv.AccountsDomain, authority[:])
+					accEnc, _, err := tx.GetLatest(kv.AccountsDomain, authority[:], kv.GetLatestOptions{})
 					if err != nil {
 						return err
 					}
@@ -118,7 +118,7 @@ func TestSetCodeClearDelegationPurgesCodeDomain(t *testing.T) {
 							return err
 						}
 					}
-					codeVal, _, err := tx.GetLatest(kv.CodeDomain, authority[:])
+					codeVal, _, err := tx.GetLatest(kv.CodeDomain, authority[:], kv.GetLatestOptions{})
 					if err != nil {
 						return err
 					}

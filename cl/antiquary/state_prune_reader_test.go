@@ -38,7 +38,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/snapshotsync"
 	"github.com/erigontech/erigon/node/ethconfig"
 )
@@ -75,7 +75,7 @@ func (e *historicalReadEnv) readRoot(t *testing.T, ctx context.Context, slot uin
 func runStateAntiquaryWithSnapshots(t *testing.T, ctx context.Context, blocks []*cltypes.SignedBeaconBlock, preState, postState *state.CachingBeaconState) (*historicalReadEnv, datadir.Dirs) {
 	t.Helper()
 	cfg := &clparams.MainnetBeaconConfig
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	reader := tests.LoadChain(blocks, postState, db, t)
 	sd := synced_data.NewSyncedDataManager(cfg, true)
 	sd.OnHeadState(postState)
@@ -217,7 +217,7 @@ func TestPruneStateTailReadsAboveCoverage(t *testing.T) {
 // seeded only for that path, so taking the wrong branch cannot pass.
 func TestPruneStateBalancesForwardAndReverseDumpPaths(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
-	db := memdb.NewTestDB(t, dbcfg.ChainDB)
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	ctx := context.Background()
 	const valCount = uint64(4)
 	boundary := statePruneTestFileSlots

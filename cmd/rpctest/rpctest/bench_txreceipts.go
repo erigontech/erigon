@@ -43,18 +43,13 @@ func BenchTxReceipt(erigonURL, gethURL string, needCompare bool, blockFrom uint6
 		go vegetaWrite(true, []string{"eth_getTransactionReceipt"}, resultsCh)
 	}
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
-	}
-	fmt.Printf("Last block: %d\n", blockNumber.Number)
+	fmt.Printf("Last block: %d\n", lastBlock)
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		b, skip, err := fetchBlock(reqGen, bn, false, nil)
 		if err != nil {
@@ -96,21 +91,16 @@ func BenchBlockReceipts(erigonURL, gethURL string, needCompare bool, blockFrom u
 		go vegetaWrite(true, []string{"eth_getBlockReceipts"}, resultsCh)
 	}
 
-	var res CallResult
 	reqGen := &RequestGenerator{}
 
-	var blockNumber EthBlockNumber
-	res = reqGen.Erigon("eth_blockNumber", reqGen.blockNumber(), &blockNumber)
-	if res.Err != nil {
-		return fmt.Errorf("Could not get block number: %v\n", res.Err)
-	}
-	if blockNumber.Error != nil {
-		return fmt.Errorf("Error getting block number: %d %s\n", blockNumber.Error.Code, blockNumber.Error.Message)
+	lastBlock, err := reqGen.latestBlockNumber()
+	if err != nil {
+		return err
 	}
 	logEvery := time.NewTicker(logInterval)
 	defer logEvery.Stop()
 
-	log.Info("starting", "last_block", blockNumber.Number, "from", blockNumber, "to", blockTo)
+	log.Info("starting", "last_block", lastBlock, "from", blockFrom, "to", blockTo)
 	for bn := blockFrom; bn <= blockTo; bn++ {
 		request := reqGen.getBlockReceipts(bn)
 		errCtx := fmt.Sprintf("block %d", bn)

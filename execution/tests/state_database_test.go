@@ -1,0 +1,1624 @@
+// Copyright 2019 The go-ethereum Authors
+// (original work)
+// Copyright 2024 The Erigon Authors
+// (modifications)
+// This file is part of Erigon.
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
+
+package executiontests
+
+import (
+	"bytes"
+	"context"
+	"errors"
+	"math/big"
+	"testing"
+
+	"github.com/holiman/uint256"
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/execution/abi/bind"
+	"github.com/erigontech/erigon/execution/abi/bind/backends"
+	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
+	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/execution/state/contracts"
+	"github.com/erigontech/erigon/execution/tests/blockgen"
+	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
+)
+
+// Create revival problem
+func TestCreate2Revive(t *testing.T) {
+
+	// Configure and generate a sample block chain
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+		funds   = big.NewInt(1000000000)
+		gspec   = &types.Genesis{
+			Config: &chain.Config{
+				ChainID:               uint256.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   common.NewUint64(1),
+				ByzantiumBlock:        common.NewUint64(1),
+				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
+			},
+			Alloc: types.GenesisAlloc{
+				address.Value(): types.GenesisAccount{Balance: funds},
+			},
+		}
+		signer = types.LatestSignerForChainID(nil)
+	)
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+	var revive *contracts.Revive
+	// Change this address whenever you make any changes in the code of the revive contract in
+	// contracts/revive.sol
+	var create2address = accounts.InternAddress(common.HexToAddress("e70fd65144383e1189bd710b1e23b61e26315ff4"))
+
+	// There are 4 blocks
+	// In the first block, we deploy the "factory" contract Revive, which can create children contracts via CREATE2 opcode
+	// In the second block, we create the first child contract
+	// In the third block, we cause the first child contract to selfdestruct
+	// In the forth block, we create the second child contract, and we expect it to have a "clean slate" of storage,
+	// i.e. without any storage items that "inherited" from the first child contract by mistake
+	chain, err := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		switch i {
+		case 0:
+			contractAddress, txn, revive, err = contracts.DeployRevive(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 1:
+			txn, err = revive.Deploy(transactOpts, big.NewInt(0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 2:
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), create2address.Value(), uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = contractBackend.SendTransaction(context.Background(), txn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 3:
+			txn, err = revive.Deploy(transactOpts, big.NewInt(0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackend.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected account to exist")
+		}
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if exist {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 1
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 2
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
+		t.Fatal(err)
+	}
+
+	var key2 accounts.StorageKey
+	var check2 uint256.Int
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(create2address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected create2address to exist at the block 2", create2address.String())
+		}
+		// We expect number 0x42 in the position [2], because it is the block number 2
+		key2 = accounts.InternKey(common.BigToHash(big.NewInt(2)))
+		check2, err = st.GetState(create2address, key2)
+		require.NoError(t, err)
+		if check2.Uint64() != 0x42 {
+			t.Errorf("expected 0x42 in position 2, got: %x", check2.Uint64())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 3
+	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
+		t.Fatal(err)
+	}
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(create2address); err != nil {
+			t.Error(err)
+		} else if exist {
+			t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 4
+	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
+		t.Fatal(err)
+	}
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(create2address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected create2address to exist at the block 2", create2address.String())
+		}
+		// We expect number 0x42 in the position [4], because it is the block number 4
+		key4 := accounts.InternKey(common.BigToHash(big.NewInt(4)))
+		check4, err := st.GetState(create2address, key4)
+		require.NoError(t, err)
+		if check4.Uint64() != 0x42 {
+			t.Errorf("expected 0x42 in position 4, got: %x", check4.Uint64())
+		}
+		// We expect number 0x0 in the position [2], because it is the block number 4
+		check2, err = st.GetState(create2address, key2)
+		require.NoError(t, err)
+		if !check2.IsZero() {
+			t.Errorf("expected 0x0 in position 2, got: %x", check2)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+}
+
+// Polymorthic contracts via CREATE2
+func TestCreate2Polymorth(t *testing.T) {
+
+	// Configure and generate a sample block chain
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+		funds   = big.NewInt(1000000000)
+		gspec   = &types.Genesis{
+			Config: &chain.Config{
+				ChainID:               uint256.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   common.NewUint64(1),
+				ByzantiumBlock:        common.NewUint64(1),
+				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
+			},
+			Alloc: types.GenesisAlloc{
+				address.Value(): types.GenesisAccount{Balance: funds},
+			},
+		}
+		signer = types.LatestSignerForChainID(nil)
+	)
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+	var poly *contracts.Poly
+
+	// Change this address whenever you make any changes in the code of the poly contract in
+	// contracts/poly.sol
+	var create2address = accounts.InternAddress(common.HexToAddress("c66aa74c220476f244b7f45897a124d1a01ca8a8"))
+
+	// There are 5 blocks
+	// In the first block, we deploy the "factory" contract Poly, which can create children contracts via CREATE2 opcode
+	// In the second block, we create the first child contract
+	// In the third block, we cause the first child contract to selfdestruct
+	// In the forth block, we create the second child contract
+	// In the 5th block, we delete and re-create the child contract twice
+	chain, err := m.GenerateChain(5, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		switch i {
+		case 0:
+			contractAddress, txn, poly, err = contracts.DeployPoly(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 1:
+			txn, err = poly.Deploy(transactOpts, big.NewInt(0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 2:
+			// Trigger self-destruct
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), create2address.Value(), uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = contractBackend.SendTransaction(context.Background(), txn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 3:
+			txn, err = poly.Deploy(transactOpts, big.NewInt(0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 4:
+			// Trigger self-destruct
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), create2address.Value(), uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = contractBackend.SendTransaction(context.Background(), txn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+			// Recreate in the same block
+			txn, err = poly.Deploy(transactOpts, big.NewInt(0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+			// Trigger self-destruct
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), create2address.Value(), uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = contractBackend.SendTransaction(context.Background(), txn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+			// Recreate in the same block
+			txn, err = poly.Deploy(transactOpts, big.NewInt(0))
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackend.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected account to exist")
+		}
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if exist {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 1
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 2
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
+		t.Fatal(err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(create2address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected create2address to exist at the block 2", create2address.String())
+		}
+		code, err := st.GetCode(create2address)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(code, common.FromHex("6002ff")) {
+			t.Errorf("Expected CREATE2 deployed code 6002ff, got %x", code)
+		}
+		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
+			incarnation, err := st.GetIncarnation(create2address)
+			if err != nil {
+				return err
+			}
+			if incarnation != 1 {
+				t.Errorf("expected incarnation 1, got %d", incarnation)
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 3
+	if err = m.InsertChain(chain.Slice(2, 3)); err != nil {
+		t.Fatal(err)
+	}
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(create2address); err != nil {
+			t.Error(err)
+		} else if exist {
+			t.Error("expected create2address to be self-destructed at the block 3", create2address.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 4
+	if err = m.InsertChain(chain.Slice(3, 4)); err != nil {
+		t.Fatal(err)
+	}
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(create2address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected create2address to exist at the block 4", create2address.String())
+		}
+		code, err := st.GetCode(create2address)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(code, common.FromHex("6004ff")) {
+			t.Errorf("Expected CREATE2 deployed code 6004ff, got %x", code)
+		}
+		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
+			incarnation, err := st.GetIncarnation(create2address)
+			if err != nil {
+				return err
+			}
+			if incarnation != 2 {
+				t.Errorf("expected incarnation 2, got %d", incarnation)
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 5
+	if err = m.InsertChain(chain.Slice(4, 5)); err != nil {
+		t.Fatal(err)
+	}
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(create2address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected create2address to exist at the block 5", create2address.String())
+		}
+		code, err := st.GetCode(create2address)
+		if err != nil {
+			return err
+		}
+		if !bytes.Equal(code, common.FromHex("6005ff")) {
+			t.Errorf("Expected CREATE2 deployed code 6005ff, got %x", code)
+		}
+
+		if !m.HistoryV3 { //AccountsDomain: has no "incarnation" concept
+			incarnation, err := st.GetIncarnation(create2address)
+			if err != nil {
+				return err
+			}
+			if incarnation != 4 {
+				t.Errorf("expected incarnation 4 (two self-destructs and two-recreations within a block), got %d", incarnation)
+			}
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+}
+
+func TestReorgOverSelfDestruct(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+	// Configure and generate a sample block chain
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+		funds   = big.NewInt(1000000000)
+		gspec   = &types.Genesis{
+			Config: &chain.Config{
+				ChainID:               uint256.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   common.NewUint64(1),
+				ByzantiumBlock:        common.NewUint64(1),
+				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
+			},
+			Alloc: types.GenesisAlloc{
+				address.Value(): types.GenesisAccount{Balance: funds},
+			},
+		}
+	)
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+	var selfDestruct *contracts.Selfdestruct
+
+	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
+	chain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		switch i {
+		case 0:
+			contractAddress, txn, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 1:
+			txn, err = selfDestruct.Change(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 2:
+			txn, err = selfDestruct.Destruct(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackend.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
+	contractBackendLonger := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOptsLonger.GasLimit = 1000000
+
+	longerChain, err := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		if i == 0 {
+			_, txn, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackendLonger.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate long blocks")
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected account to exist")
+		}
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if exist {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	// BLOCK 1
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	var key0 = accounts.ZeroKey
+	var correctValueX uint256.Int
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+
+		// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
+		correctValueX, err = st.GetState(accounts.InternAddress(contractAddress), key0)
+		require.NoError(t, err)
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCKS 2 + 3
+	if err = m.InsertChain(chain.Slice(1, chain.Length())); err != nil {
+		t.Fatal(err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if exist {
+			t.Error("expected contractAddress to not exist at the block 3", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
+	if err = m.InsertChain(longerChain.Slice(1, 4)); err != nil {
+		t.Fatal(err)
+	}
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
+		}
+		valueX, err := st.GetState(accounts.InternAddress(contractAddress), key0)
+		require.NoError(t, err)
+		if valueX != correctValueX {
+			t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestReorgOverStateChange(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	t.Parallel()
+	// Configure and generate a sample block chain
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+		funds   = big.NewInt(1000000000)
+		gspec   = &types.Genesis{
+			Config: &chain.Config{
+				ChainID:               uint256.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   common.NewUint64(1),
+				ByzantiumBlock:        common.NewUint64(1),
+				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
+			},
+			Alloc: types.GenesisAlloc{
+				address.Value(): {Balance: funds},
+			},
+		}
+	)
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+	var selfDestruct *contracts.Selfdestruct
+
+	// Here we generate 3 blocks, two of which (the one with "Change" invocation and "Destruct" invocation will be reverted during the reorg)
+	chain, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		switch i {
+		case 0:
+			contractAddress, txn, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 1:
+			txn, err = selfDestruct.Change(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackend.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
+	contractBackendLonger := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOptsLonger.GasLimit = 1000000
+	longerChain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		if i == 0 {
+			_, txn, _, err = contracts.DeploySelfdestruct(transactOptsLonger, contractBackendLonger)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackendLonger.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate longer blocks: %v", err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected account to exist")
+		}
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if exist {
+
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 1
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	var key0 = accounts.ZeroKey
+	var correctValueX uint256.Int
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+
+		// Remember value of field "x" (storage item 0) after the first block, to check after rewinding
+		correctValueX, err = st.GetState(accounts.InternAddress(contractAddress), key0)
+		require.NoError(t, err)
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 2
+	if err = m.InsertChain(chain.Slice(1, chain.Length())); err != nil {
+		t.Fatal(err)
+	}
+
+	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
+	if err = m.InsertChain(longerChain.Slice(1, 3)); err != nil {
+		t.Fatal(err)
+	}
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected contractAddress to exist at the block 4", contractAddress.String())
+		}
+
+		// Reload blockchain from the database
+		valueX, err := st.GetState(accounts.InternAddress(contractAddress), key0)
+		require.NoError(t, err)
+		if valueX != correctValueX {
+			t.Fatalf("storage value has changed after reorg: %x, expected %x", valueX, correctValueX)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+}
+
+type BucketsStats struct {
+	Accounts     uint64
+	Storage      uint64
+	ChangeSetHAT uint64
+	ChangeSetHST uint64
+	HAT          uint64
+	HST          uint64
+}
+
+func (b BucketsStats) Size() uint64 {
+	return b.ChangeSetHST + b.ChangeSetHAT + b.HST + b.Storage + b.HAT + b.Accounts
+}
+
+func TestCreateOnExistingStorage(t *testing.T) {
+	t.Skip("Alex Sharov: seems it's not useful property in reality")
+
+	t.Parallel()
+	// Configure and generate a sample block chain
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+		// Address of the contract that will be deployed
+		contractAddr = common.HexToAddress("0x3a220f351252089d385b29beca14e27f204c296a")
+		funds        = big.NewInt(1000000000)
+		gspec        = &types.Genesis{
+			Config: &chain.Config{
+				ChainID:               uint256.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   common.NewUint64(1),
+				ByzantiumBlock:        common.NewUint64(1),
+				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
+			},
+			Alloc: types.GenesisAlloc{
+				address.Value(): {Balance: funds},
+				// Pre-existing storage item in an account without code
+				contractAddr: {Balance: funds, Storage: map[common.Hash]common.Hash{{}: common.HexToHash("0x42")}},
+			},
+		}
+	)
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	var err error
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+
+	// There is one block, and it ends up deploying Revive contract (could be any other contract, it does not really matter)
+	// On the address contractAddr, where there is a storage item in the genesis, but no contract code
+	// We expect the pre-existing storage items to be removed by the deployment
+	chain, err := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		if i == 0 {
+			contractAddress, txn, _, err = contracts.DeployRevive(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackend.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected account to exist")
+		}
+		if contractAddress != contractAddr {
+			t.Errorf("expected contract address to be %x, got: %x", contractAddr, contractAddress)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 1
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	var key0 = accounts.ZeroKey
+	var check0 uint256.Int
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+
+		check0, err = st.GetState(accounts.InternAddress(contractAddress), key0)
+		require.NoError(t, err)
+		if !check0.IsZero() {
+			t.Errorf("expected 0x00 in position 0, got: %x", check0.Bytes())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+func TestEip2200Gas(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	t.Parallel()
+	// Configure and generate a sample block chain
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+		funds   = big.NewInt(1000000000)
+		gspec   = &types.Genesis{
+			Config: &chain.Config{
+				ChainID:               uint256.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   common.NewUint64(1),
+				ByzantiumBlock:        common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
+				ConstantinopleBlock:   common.NewUint64(1),
+				IstanbulBlock:         common.NewUint64(1),
+			},
+			Alloc: types.GenesisAlloc{
+				address.Value(): {Balance: funds},
+			},
+		}
+	)
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+	var selfDestruct *contracts.Selfdestruct
+
+	// Here we generate 1 block with 2 transactions, first creates a contract with some initial values in the
+	// It activates the SSTORE pricing rules specific to EIP-2200 (istanbul)
+	chain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		if i == 0 {
+			contractAddress, txn, selfDestruct, err = contracts.DeploySelfdestruct(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+
+			transactOpts.GasPrice = big.NewInt(1)
+			txn, err = selfDestruct.Change(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackend.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	var balanceBefore uint256.Int
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected account to exist")
+		}
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if exist {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		balanceBefore, err = st.GetBalance(address)
+		return err
+	})
+	require.NoError(t, err)
+
+	// BLOCK 1
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+		balanceAfter, err := st.GetBalance(address)
+		if err != nil {
+			return err
+		}
+		gasSpent := big.NewInt(0).Sub(balanceBefore.ToBig(), balanceAfter.ToBig())
+		expectedGasSpent := big.NewInt(190373) //(192245) // In the incorrect version, it is 179645
+		if gasSpent.Cmp(expectedGasSpent) != 0 {
+			t.Errorf("Expected gas spent: %d, got %d", expectedGasSpent, gasSpent)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// Create contract, drop trie, reload trie from disk and add block with contract call
+func TestWrongIncarnation(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	t.Parallel()
+	// Configure and generate a sample block chain
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+		funds   = big.NewInt(1000000000)
+		gspec   = &types.Genesis{
+			Config: &chain.Config{
+				ChainID:               uint256.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   common.NewUint64(1),
+			},
+			Alloc: types.GenesisAlloc{
+				address.Value(): types.GenesisAccount{Balance: funds},
+			},
+		}
+	)
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+	var changer *contracts.Changer
+
+	chain, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		switch i {
+		case 0:
+			contractAddress, txn, changer, err = contracts.DeployChanger(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 1:
+			txn, err = changer.Change(transactOpts)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackend.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected account to exist")
+		}
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if exist {
+			t.Error("expected contractAddress to not exist before block 0", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 1
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		stateReader := m.NewStateReader(tx)
+		acc, err := stateReader.ReadAccountData(accounts.InternAddress(contractAddress))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if acc == nil {
+			t.Fatal(errors.New("acc not found"))
+		}
+
+		if acc.Incarnation != state.FirstContractIncarnation {
+			t.Fatal("Incorrect incarnation", acc.Incarnation)
+		}
+
+		st := state.New(stateReader)
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCKS 2
+	if err = m.InsertChain(chain.Slice(1, 2)); err != nil {
+		t.Fatal(err)
+	}
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		stateReader := m.NewStateReader(tx)
+		acc, err := stateReader.ReadAccountData(accounts.InternAddress(contractAddress))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if acc == nil {
+			t.Fatal(errors.New("acc not found"))
+		}
+		if acc.Incarnation != state.FirstContractIncarnation {
+			t.Fatal("Incorrect incarnation", acc.Incarnation)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+}
+
+// create acc, deploy to it contract, reorg to state without contract
+func TestWrongIncarnation2(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+	// Configure and generate a sample block chain
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+		funds   = big.NewInt(1000000000)
+		gspec   = &types.Genesis{
+			Config: &chain.Config{
+				ChainID:               uint256.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   common.NewUint64(1),
+			},
+			Alloc: types.GenesisAlloc{
+				address.Value(): types.GenesisAccount{Balance: funds},
+			},
+		}
+		signer = types.LatestSignerForChainID(nil)
+	)
+
+	knownContractAddress := common.HexToAddress("0xdb7d6ab1f17c6b31909ae466702703daef9269cf")
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOpts.GasLimit = 1000000
+
+	var contractAddress common.Address
+
+	chain, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		switch i {
+		case 0:
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = contractBackend.SendTransaction(context.Background(), txn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		case 1:
+			contractAddress, txn, _, err = contracts.DeployChanger(transactOpts, contractBackend)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackend.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate blocks: %v", err)
+	}
+
+	if knownContractAddress != contractAddress {
+		t.Errorf("Expected contractAddress: %x, got %x", knownContractAddress, contractAddress)
+	}
+
+	// Create a longer chain, with 4 blocks (with higher total difficulty) that reverts the change of stroage self-destruction of the contract
+	contractBackendLonger := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOptsLonger.GasLimit = 1000000
+	longerChain, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		if i == 0 {
+			txn, err = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), knownContractAddress, uint256.NewInt(1000), 1000000, new(uint256.Int), nil), *signer, key)
+			if err != nil {
+				t.Fatal(err)
+			}
+			err = contractBackendLonger.SendTransaction(context.Background(), txn)
+			if err != nil {
+				t.Fatal(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackendLonger.Commit()
+	})
+	if err != nil {
+		t.Fatalf("generate longer blocks: %v", err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(address); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected account to exist")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// BLOCK 1
+	if err = m.InsertChain(chain.Slice(0, 1)); err != nil {
+		t.Fatal(err)
+	}
+
+	// BLOCKS 2
+	if err = m.InsertChain(chain.Slice(1, chain.Length())); err != nil {
+		t.Fatal(err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(contractAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Error("expected contractAddress to exist at the block 1", contractAddress.String())
+		}
+
+		stateReader := m.NewStateReader(tx)
+		acc, err := stateReader.ReadAccountData(accounts.InternAddress(contractAddress))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if acc == nil {
+			t.Fatal(errors.New("acc not found"))
+		}
+		if acc.Incarnation != state.FirstContractIncarnation {
+			t.Fatal("wrong incarnation")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	// REORG of block 2 and 3, and insert new (empty) BLOCK 2, 3, and 4
+	if err = m.InsertChain(longerChain.Slice(1, longerChain.Length())); err != nil {
+		t.Fatal(err)
+	}
+
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		stateReader := m.NewStateReader(tx)
+		acc, err := stateReader.ReadAccountData(accounts.InternAddress(contractAddress))
+		if err != nil {
+			t.Fatal(err)
+		}
+		if acc == nil {
+			t.Fatal(errors.New("acc not found"))
+		}
+		if acc.Incarnation != state.NonContractIncarnation {
+			t.Fatal("wrong incarnation", acc.Incarnation)
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+}
+
+func TestRecreateAndRewind(t *testing.T) {
+	if testing.Short() {
+		t.Skip()
+	}
+
+	t.Parallel()
+	// Configure and generate a sample block chain
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+		funds   = big.NewInt(1000000000)
+		gspec   = &types.Genesis{
+			Config: chain.TestChainBerlinConfig,
+			Alloc: types.GenesisAlloc{
+				address.Value(): types.GenesisAccount{Balance: funds},
+			},
+		}
+	)
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+	contractBackend := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOpts, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOpts.GasLimit = 1000000
+	var revive *contracts.Revive2
+	var phoenix *contracts.Phoenix
+	var reviveAddress common.Address
+	var phoenixAddress common.Address
+
+	chain, err1 := m.GenerateChain(4, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		switch i {
+		case 0:
+			// Deploy phoenix factory
+			reviveAddress, txn, revive, err = contracts.DeployRevive2(transactOpts, contractBackend)
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+		case 1:
+			// Calculate the address of the Phoenix and create handle to phoenix contract
+			codeHash := crypto.Keccak256Hash(common.FromHex(contracts.PhoenixBin))
+			phoenixAddress = types.CreateAddress2(reviveAddress, [32]byte{}, accounts.InternCodeHash(codeHash))
+			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackend); err != nil {
+				panic(err)
+			}
+			// Deploy phoenix
+			if txn, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+			// Modify phoenix storage
+			if txn, err = phoenix.Increment(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+			if txn, err = phoenix.Increment(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+		case 2:
+			// Destruct the phoenix
+			if txn, err = phoenix.Die(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+		case 3:
+			// Recreate the phoenix, and change the storage
+			if txn, err = revive.Deploy(transactOpts, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+			if txn, err = phoenix.Increment(transactOpts); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackend.Commit()
+	})
+	if err1 != nil {
+		t.Fatalf("generate blocks: %v", err1)
+	}
+
+	contractBackendLonger := backends.NewSimulatedBackendWithConfig(t, gspec.Alloc, gspec.Config, gspec.GasLimit)
+	transactOptsLonger, err := bind.NewKeyedTransactorWithChainID(key, m.ChainConfig.ChainID)
+	require.NoError(t, err)
+	transactOptsLonger.GasLimit = 1000000
+	longerChain, err1 := m.GenerateChain(5, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+
+		switch i {
+		case 0:
+			// Deploy phoenix factory
+			reviveAddress, txn, revive, err = contracts.DeployRevive2(transactOptsLonger, contractBackendLonger)
+			if err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+		case 1:
+			// Calculate the address of the Phoenix and create handle to phoenix contract
+			codeHash := crypto.Keccak256Hash(common.FromHex(contracts.PhoenixBin))
+			phoenixAddress = types.CreateAddress2(reviveAddress, [32]byte{}, accounts.InternCodeHash(codeHash))
+			if phoenix, err = contracts.NewPhoenix(phoenixAddress, contractBackendLonger); err != nil {
+				panic(err)
+			}
+			// Deploy phoenix
+			if txn, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+			// Modify phoenix storage
+			if txn, err = phoenix.Increment(transactOptsLonger); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+			if txn, err = phoenix.Increment(transactOptsLonger); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+		case 2:
+			// Destruct the phoenix
+			if txn, err = phoenix.Die(transactOptsLonger); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+		case 3:
+			// Recreate the phoenix, but now with the empty storage
+			if txn, err = revive.Deploy(transactOptsLonger, [32]byte{}); err != nil {
+				panic(err)
+			}
+			block.AddTx(txn)
+		}
+		contractBackendLonger.Commit()
+	})
+	if err1 != nil {
+		t.Fatalf("generate longer blocks: %v", err1)
+	}
+
+	// BLOCKS 1 and 2
+	if err = m.InsertChain(chain.Slice(0, 2)); err != nil {
+		t.Fatal(err)
+	}
+
+	var key0 = accounts.ZeroKey
+	var check0 uint256.Int
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Errorf("expected phoenix %x to exist after first insert", phoenixAddress)
+		}
+
+		check0, _ := st.GetState(accounts.InternAddress(phoenixAddress), key0)
+		if check0.Cmp(uint256.NewInt(2)) != 0 {
+			t.Errorf("expected 0x02 in position 0, got: 0x%x", check0.Bytes())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Block 3 and 4
+	if err = m.InsertChain(chain.Slice(2, chain.Length())); err != nil {
+		t.Fatal(err)
+	}
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
+		}
+
+		check0, err = st.GetState(accounts.InternAddress(phoenixAddress), key0)
+		require.NoError(t, err)
+		if check0.Cmp(uint256.NewInt(1)) != 0 {
+			t.Errorf("expected 0x01 in position 0, got: 0x%x", check0.Bytes())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+	// Reorg
+	if err = m.InsertChain(longerChain); err != nil {
+		t.Fatal(err)
+	}
+	err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		st := state.New(m.NewStateReader(tx))
+		defer st.Close()
+		if exist, err := st.Exist(accounts.InternAddress(phoenixAddress)); err != nil {
+			t.Error(err)
+		} else if !exist {
+			t.Errorf("expected phoenix %x to exist after second insert", phoenixAddress)
+		}
+
+		check0, err = st.GetState(accounts.InternAddress(phoenixAddress), key0)
+		require.NoError(t, err)
+		if check0.Cmp(uint256.NewInt(0)) != 0 {
+			t.Errorf("expected 0x00 in position 0, got: 0x%x", check0.Bytes())
+		}
+		return nil
+	})
+	require.NoError(t, err)
+
+}
+func TestTxLookupUnwind(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+	t.Parallel()
+	var (
+		key, _  = crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+		address = accounts.InternAddress(crypto.PubkeyToAddress(key.PublicKey))
+		funds   = big.NewInt(1000000000)
+		gspec   = &types.Genesis{
+			Config: &chain.Config{
+				ChainID:               uint256.NewInt(1),
+				HomesteadBlock:        new(uint64),
+				TangerineWhistleBlock: new(uint64),
+				SpuriousDragonBlock:   common.NewUint64(1),
+				ByzantiumBlock:        common.NewUint64(1),
+				ConstantinopleBlock:   common.NewUint64(1),
+				PetersburgBlock:       common.NewUint64(1),
+			},
+			Alloc: types.GenesisAlloc{
+				address.Value(): types.GenesisAccount{Balance: funds},
+			},
+		}
+		signer = types.LatestSignerForChainID(nil)
+	)
+
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+	chain1, err := m.GenerateChain(2, func(i int, block *blockgen.BlockGen) {
+		var txn types.Transaction
+		var e error
+		if i == 1 {
+			txn, e = types.SignTx(types.NewTransaction(block.TxNonce(address.Value()), address.Value(), uint256.NewInt(0), 1000000, new(uint256.Int), nil), *signer, key)
+			if e != nil {
+				t.Fatal(e)
+			}
+			block.AddTx(txn)
+		}
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	chain2, err := m.GenerateChain(3, func(i int, block *blockgen.BlockGen) {
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err = m.InsertChain(chain1); err != nil {
+		t.Fatal(err)
+	}
+	if err = m.InsertChain(chain2); err != nil {
+		t.Fatal(err)
+	}
+	var count uint64
+	if err = m.DB.ViewTemporal(context.Background(), func(tx kv.TemporalTx) error {
+		var e error
+		if count, e = tx.Count(kv.TxLookup); e != nil {
+			return e
+		}
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+	if count != 0 {
+		t.Errorf("txlookup record expected to be deleted, got %d", count)
+	}
+}
+
+func newTestRwTx(tb testing.TB) (kv.TemporalRwDB, kv.TemporalRwTx, *execctx.SharedDomains) {
+	tb.Helper()
+	dirs := datadir.New(tb.TempDir())
+	db := temporaltest.NewTestDBWithStepSize(tb, dirs, 16)
+	tb.Cleanup(db.Close)
+	tx, err := db.BeginTemporalRw(context.Background()) //nolint:gocritic
+	require.NoError(tb, err)
+	tb.Cleanup(tx.Rollback)
+	domains, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(tb, err)
+	tb.Cleanup(domains.Close)
+	return db, tx, domains
+}

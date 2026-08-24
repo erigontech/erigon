@@ -22,6 +22,7 @@ package state
 import (
 	"bytes"
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"math"
 	"math/big"
@@ -36,10 +37,11 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
@@ -56,7 +58,8 @@ func TestSnapshotRandom(t *testing.T) {
 	err := quick.Check(func() bool {
 		return ts.run(t)
 	}, config)
-	if cerr, ok := err.(*quick.CheckError); ok {
+	var cerr *quick.CheckError
+	if errors.As(err, &cerr) {
 		test := cerr.In[0].(*snapshotTest)
 		t.Errorf("%v:\n%s", test.err, test)
 	} else if err != nil {
@@ -84,7 +87,7 @@ type snapshotTest struct {
 
 type testAction struct {
 	name   string
-	fn     func(testAction, *IntraBlockState)
+	fn     func(testAction, *IntraBlockState) error
 	args   []int64
 	noAddr bool
 }
@@ -94,95 +97,101 @@ func newTestAction(addr accounts.Address, r *rand.Rand) testAction {
 	actions := []testAction{
 		{
 			name: "SetBalance",
-			fn: func(a testAction, s *IntraBlockState) {
-				s.SetBalance(addr, u256.U64(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
+			fn: func(a testAction, s *IntraBlockState) error {
+				return s.SetBalance(addr, u256.U64(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "AddBalance",
-			fn: func(a testAction, s *IntraBlockState) {
-				s.AddBalance(addr, u256.U64(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
+			fn: func(a testAction, s *IntraBlockState) error {
+				return s.AddBalance(addr, u256.U64(uint64(a.args[0])), tracing.BalanceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetNonce",
-			fn: func(a testAction, s *IntraBlockState) {
-				s.SetNonce(addr, uint64(a.args[0]), tracing.NonceChangeUnspecified)
+			fn: func(a testAction, s *IntraBlockState) error {
+				return s.SetNonce(addr, uint64(a.args[0]), tracing.NonceChangeUnspecified)
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetState",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				var key common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				val := uint256.NewInt(uint64(a.args[1]))
-				s.SetState(addr, accounts.InternKey(key), *val)
+				return s.SetState(addr, accounts.InternKey(key), *val)
 			},
 			args: make([]int64, 2),
 		},
 		{
 			name: "SetCode",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				code := make([]byte, 16)
 				binary.BigEndian.PutUint64(code, uint64(a.args[0]))
 				binary.BigEndian.PutUint64(code[8:], uint64(a.args[1]))
-				s.SetCode(addr, code, tracing.CodeChangeUnspecified)
+				return s.SetCode(addr, code, tracing.CodeChangeUnspecified)
 			},
 			args: make([]int64, 2),
 		},
 		{
 			name: "CreateAccount",
-			fn: func(a testAction, s *IntraBlockState) {
-				s.CreateAccount(addr, true)
+			fn: func(a testAction, s *IntraBlockState) error {
+				return s.CreateAccount(addr, true)
 			},
 		},
 		{
 			name: "Selfdestruct",
-			fn: func(a testAction, s *IntraBlockState) {
-				s.Selfdestruct(addr, false)
+			fn: func(a testAction, s *IntraBlockState) error {
+				_, err := s.Selfdestruct(addr, false)
+				return err
 			},
 		},
 		{
 			name: "AddRefund",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				s.AddRefund(uint64(a.args[0]))
+				return nil
 			},
 			args:   make([]int64, 1),
 			noAddr: true,
 		},
 		{
 			name: "AddLog",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				data := make([]byte, 2)
 				binary.BigEndian.PutUint16(data, uint16(a.args[0]))
 				s.AddLog(&types.Log{Address: addr.Value(), Data: data})
+				return nil
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "AddAddressToAccessList",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				s.AddAddressToAccessList(addr)
+				return nil
 			},
 		},
 		{
 			name: "AddSlotToAccessList",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				s.AddSlotToAccessList(addr,
 					accounts.InternKey(common.Hash{byte(a.args[0])}))
+				return nil
 			},
 			args: make([]int64, 1),
 		},
 		{
 			name: "SetTransientState",
-			fn: func(a testAction, s *IntraBlockState) {
+			fn: func(a testAction, s *IntraBlockState) error {
 				var key common.Hash
 				binary.BigEndian.PutUint16(key[:], uint16(a.args[0]))
 				val := uint256.NewInt(uint64(a.args[1]))
 				s.SetTransientState(addr, accounts.InternKey(key), *val)
+				return nil
 			},
 			args: make([]int64, 2),
 		},
@@ -249,7 +258,7 @@ func (test *snapshotTest) run(t *testing.T) bool {
 		return false
 	}
 	var (
-		state        = New(NewReaderV3(tx))
+		state        = New(NewReaderV3(execctx.NewTemporalTxStateGetter(tx)))
 		snapshotRevs = make([]int, len(test.snapshots))
 		sindex       = 0
 	)
@@ -259,14 +268,21 @@ func (test *snapshotTest) run(t *testing.T) bool {
 			snapshotRevs[sindex] = state.PushSnapshot()
 			sindex++
 		}
-		action.fn(action, state)
+		if err := action.fn(action, state); err != nil {
+			test.err = err
+			return false
+		}
 	}
 	// Revert all snapshots in reverse order. Each revert must yield a state
 	// that is equivalent to fresh state with all actions up the snapshot applied.
 	for sindex--; sindex >= 0; sindex-- {
-		checkstate := New(NewReaderV3(tx))
+		checkstate := New(NewReaderV3(execctx.NewTemporalTxStateGetter(tx)))
 		for _, action := range test.actions[:test.snapshots[sindex]] {
-			action.fn(action, checkstate)
+			if err := action.fn(action, checkstate); err != nil {
+				test.err = err
+				checkstate.Close()
+				return false
+			}
 		}
 		state.RevertToSnapshot(snapshotRevs[sindex], nil)
 		state.PopSnapshot(snapshotRevs[sindex])
@@ -473,7 +489,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
@@ -483,7 +499,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -499,9 +515,10 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx1 write
-	states[1].GetOrNewStateObject(addr)
-	states[1].SetState(addr, key, val)
-	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+	_, err = states[1].GetOrNewStateObject(addr)
+	require.NoError(t, err)
+	require.NoError(t, states[1].SetState(addr, key, val))
+	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx1 read
@@ -525,8 +542,10 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	// IsVersioned guards in txtask.go) and instead commits via the write-set.
 	// Materialize explicitly here — as Tx1 does — so FinalizeTx's updateAccount
 	// marks the object deleted and the post-finalize read observes the wipe.
-	states[3].GetOrNewStateObject(addr)
-	states[3].Selfdestruct(addr, false)
+	_, err = states[3].GetOrNewStateObject(addr)
+	require.NoError(t, err)
+	_, err = states[3].Selfdestruct(addr, false)
+	require.NoError(t, err)
 
 	// Within Tx 3, the state should not change before finalize
 	v, err = states[3].GetState(addr, key)
@@ -534,7 +553,7 @@ func TestVersionMapReadWriteDelete(t *testing.T) {
 	assert.Equal(t, val, v)
 
 	// After finalizing Tx 3, the state will change
-	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	require.NoError(t, states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	v, err = states[3].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, uint256.Int{}, v)
@@ -555,7 +574,7 @@ func TestVersionMapRevert(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 
@@ -564,7 +583,7 @@ func TestVersionMapRevert(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -575,15 +594,16 @@ func TestVersionMapRevert(t *testing.T) {
 	balance := u256.U64(100)
 
 	// Tx0 write
-	states[0].GetOrNewStateObject(addr)
-	states[0].SetState(addr, key, val)
-	states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+	_, err := states[0].GetOrNewStateObject(addr)
+	require.NoError(t, err)
+	require.NoError(t, states[0].SetState(addr, key, val))
+	require.NoError(t, states[0].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx1 perform some ops and then revert
 	snapshot := states[1].PushSnapshot()
-	states[1].AddBalance(addr, u256.U64(100), tracing.BalanceChangeUnspecified)
-	states[1].SetState(addr, key, u256.U64(1))
+	require.NoError(t, states[1].AddBalance(addr, u256.U64(100), tracing.BalanceChangeUnspecified))
+	require.NoError(t, states[1].SetState(addr, key, u256.U64(1)))
 	v, err := states[1].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
@@ -591,7 +611,8 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.Equal(t, u256.U64(200), b)
 	assert.Equal(t, u256.U64(1), v)
 
-	states[1].Selfdestruct(addr, false)
+	_, err = states[1].Selfdestruct(addr, false)
+	require.NoError(t, err)
 
 	states[1].RevertToSnapshot(snapshot, nil)
 	states[1].PopSnapshot(snapshot)
@@ -602,7 +623,7 @@ func TestVersionMapRevert(t *testing.T) {
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	assert.Equal(t, balance, b)
-	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	require.NoError(t, states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx2 check the state and balance
@@ -619,7 +640,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 	states := []*IntraBlockState{s}
@@ -627,7 +648,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -643,16 +664,17 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, v)
 
 	// Tx0 write
-	states[0].SetState(addr, key, val)
+	require.NoError(t, states[0].SetState(addr, key, val))
 	v, err = states[0].GetState(addr, key)
 	assert.NoError(t, err)
 	assert.Equal(t, val, v)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx1 write
-	states[1].GetOrNewStateObject(addr)
-	states[1].SetState(addr, key, val)
-	states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified)
+	_, err = states[1].GetOrNewStateObject(addr)
+	require.NoError(t, err)
+	require.NoError(t, states[1].SetState(addr, key, val))
+	require.NoError(t, states[1].SetBalance(addr, balance, tracing.BalanceChangeUnspecified))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx2 read
@@ -686,7 +708,7 @@ func TestVersionMapMarkEstimate(t *testing.T) {
 			return VersionValid
 		}
 		return VersionInvalid
-	}, false, "")
+	}, true, false, false, "")
 	assert.Equal(t, VersionInvalid, valid, "commit-time validation catches the ESTIMATE dependency")
 
 	// Tx1 read again should get Tx0 vals
@@ -700,7 +722,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 
@@ -709,7 +731,7 @@ func TestVersionMapOverwrite(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -722,14 +744,15 @@ func TestVersionMapOverwrite(t *testing.T) {
 	balance2 := u256.U64(200)
 
 	// Tx0 write
-	states[0].GetOrNewStateObject(addr)
-	states[0].SetState(addr, key, val1)
-	states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
+	_, err := states[0].GetOrNewStateObject(addr)
+	require.NoError(t, err)
+	require.NoError(t, states[0].SetState(addr, key, val1))
+	require.NoError(t, states[0].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx1 write
-	states[1].SetState(addr, key, val2)
-	states[1].SetBalance(addr, balance2, tracing.BalanceChangeUnspecified)
+	require.NoError(t, states[1].SetState(addr, key, val2))
+	require.NoError(t, states[1].SetBalance(addr, balance2, tracing.BalanceChangeUnspecified))
 	v, err := states[1].GetState(addr, key)
 	assert.NoError(t, err)
 	b, err := states[1].GetBalance(addr)
@@ -791,7 +814,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	_, tx, domains := NewTestRwTx(t)
 
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 
@@ -800,7 +823,7 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -813,17 +836,18 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	val2 := u256.U64(2)
 
 	// Tx0 write
-	states[0].GetOrNewStateObject(addr)
+	_, err := states[0].GetOrNewStateObject(addr)
+	require.NoError(t, err)
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
 	// Tx2 write
-	states[2].SetState(addr, key2, val2)
+	require.NoError(t, states[2].SetState(addr, key2, val2))
 	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
 
 	// Tx1 write
 	tx1Snapshot := states[1].PushSnapshot()
-	states[1].SetState(addr, key1, val1)
-	states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified)
+	require.NoError(t, states[1].SetState(addr, key1, val1))
+	require.NoError(t, states[1].SetBalance(addr, balance1, tracing.BalanceChangeUnspecified))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
 	// Tx1 read
@@ -929,11 +953,51 @@ func TestVersionMapWriteNoConflict(t *testing.T) {
 	assert.Equal(t, uint256.Int{}, b)
 }
 
+// requireSameObservableState fails when the two states disagree on any value
+// the test writes, so ApplyVersionedWrites is pinned against the single-process
+// reference rather than only against "did not return an error".
+func requireSameObservableState(t *testing.T, want, got *IntraBlockState, addrs []accounts.Address, keys []accounts.StorageKey) {
+	t.Helper()
+	for _, addr := range addrs {
+		wantBal, err := want.GetBalance(addr)
+		require.NoError(t, err)
+		gotBal, err := got.GetBalance(addr)
+		require.NoError(t, err)
+		require.Equal(t, wantBal, gotBal, "balance of %x", addr)
+
+		wantNonce, err := want.GetNonce(addr)
+		require.NoError(t, err)
+		gotNonce, err := got.GetNonce(addr)
+		require.NoError(t, err)
+		require.Equal(t, wantNonce, gotNonce, "nonce of %x", addr)
+
+		wantCode, err := want.GetCode(addr)
+		require.NoError(t, err)
+		gotCode, err := got.GetCode(addr)
+		require.NoError(t, err)
+		require.Equal(t, wantCode, gotCode, "code of %x", addr)
+
+		wantDead, err := want.HasSelfdestructed(addr)
+		require.NoError(t, err)
+		gotDead, err := got.HasSelfdestructed(addr)
+		require.NoError(t, err)
+		require.Equal(t, wantDead, gotDead, "selfdestruct of %x", addr)
+
+		for _, key := range keys {
+			wantVal, err := want.GetState(addr, key)
+			require.NoError(t, err)
+			gotVal, err := got.GetState(addr, key)
+			require.NoError(t, err)
+			require.Equal(t, wantVal, gotVal, "storage %x of %x", key, addr)
+		}
+	}
+}
+
 func TestApplyVersionedWrites(t *testing.T) {
 	t.Parallel()
 	_, tx, domains := NewTestRwTx(t)
 	mvhm := NewVersionMap(nil)
-	reader := NewReaderV3(domains.AsGetter(tx))
+	reader := NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 	s := NewWithVersionMap(reader, mvhm)
 	defer s.Close()
 
@@ -947,7 +1011,7 @@ func TestApplyVersionedWrites(t *testing.T) {
 	// Create copies of the original state for each transition
 	for i := 1; i <= 4; i++ {
 		sCopy := NewWithVersionMap(reader, mvhm)
-		defer sCopy.Close()
+		defer sCopy.Close() //nolint:gocritic
 		sCopy.txIndex = i
 		states = append(states, sCopy)
 	}
@@ -962,60 +1026,78 @@ func TestApplyVersionedWrites(t *testing.T) {
 	val2 := u256.U64(2)
 	balance2 := uint256.NewInt(200)
 	code := []byte{1, 2, 3}
+	addrs := []accounts.Address{addr1, addr2, addr3}
+	keys := []accounts.StorageKey{key1, key2}
 
 	// Tx0 write
-	states[0].GetOrNewStateObject(addr1)
-	states[0].SetState(addr1, key1, val1)
-	states[0].SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified)
-	states[0].SetState(addr2, key2, val2)
-	states[0].GetOrNewStateObject(addr3)
-	states[0].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	_, err := states[0].GetOrNewStateObject(addr1)
+	require.NoError(t, err)
+	require.NoError(t, states[0].SetState(addr1, key1, val1))
+	require.NoError(t, states[0].SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified))
+	require.NoError(t, states[0].SetState(addr2, key2, val2))
+	_, err = states[0].GetOrNewStateObject(addr3)
+	require.NoError(t, err)
+	require.NoError(t, states[0].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[0].versionMap.FlushVersionedWrites(states[0].VersionedWrites(), true, "")
 
-	sSingleProcess.GetOrNewStateObject(addr1)
-	sSingleProcess.SetState(addr1, key1, val1)
-	sSingleProcess.SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified)
-	sSingleProcess.SetState(addr2, key2, val2)
-	sSingleProcess.GetOrNewStateObject(addr3)
+	_, err = sSingleProcess.GetOrNewStateObject(addr1)
+	require.NoError(t, err)
+	require.NoError(t, sSingleProcess.SetState(addr1, key1, val1))
+	require.NoError(t, sSingleProcess.SetBalance(addr1, *balance1, tracing.BalanceChangeUnspecified))
+	require.NoError(t, sSingleProcess.SetState(addr2, key2, val2))
+	_, err = sSingleProcess.GetOrNewStateObject(addr3)
+	require.NoError(t, err)
 
-	sClean.ApplyVersionedWrites(states[0].VersionedWrites())
+	require.NoError(t, sClean.ApplyVersionedWrites(states[0].VersionedWrites()))
+	requireSameObservableState(t, sSingleProcess, sClean, addrs, keys)
 
 	// Tx1 write
-	states[1].SetState(addr1, key2, val2)
-	states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	states[1].SetNonce(addr1, 1, tracing.NonceChangeUnspecified)
-	states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	require.NoError(t, states[1].SetState(addr1, key2, val2))
+	require.NoError(t, states[1].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
+	require.NoError(t, states[1].SetNonce(addr1, 1, tracing.NonceChangeUnspecified))
+	require.NoError(t, states[1].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[1].versionMap.FlushVersionedWrites(states[1].VersionedWrites(), true, "")
 
-	sSingleProcess.SetState(addr1, key2, val2)
-	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	sSingleProcess.SetNonce(addr1, 1, tracing.NonceChangeUnspecified)
+	require.NoError(t, sSingleProcess.SetState(addr1, key2, val2))
+	require.NoError(t, sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
+	require.NoError(t, sSingleProcess.SetNonce(addr1, 1, tracing.NonceChangeUnspecified))
 
-	sClean.ApplyVersionedWrites(states[1].VersionedWrites())
+	require.NoError(t, sClean.ApplyVersionedWrites(states[1].VersionedWrites()))
+	requireSameObservableState(t, sSingleProcess, sClean, addrs, keys)
 
 	// Tx2 write
-	states[2].SetState(addr1, key1, val2)
-	states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	states[2].SetNonce(addr1, 2, tracing.NonceChangeUnspecified)
-	states[2].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	require.NoError(t, states[2].SetState(addr1, key1, val2))
+	require.NoError(t, states[2].SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
+	require.NoError(t, states[2].SetNonce(addr1, 2, tracing.NonceChangeUnspecified))
+	require.NoError(t, states[2].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[2].versionMap.FlushVersionedWrites(states[2].VersionedWrites(), true, "")
 
-	sSingleProcess.SetState(addr1, key1, val2)
-	sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified)
-	sSingleProcess.SetNonce(addr1, 2, tracing.NonceChangeUnspecified)
+	require.NoError(t, sSingleProcess.SetState(addr1, key1, val2))
+	require.NoError(t, sSingleProcess.SetBalance(addr1, *balance2, tracing.BalanceChangeUnspecified))
+	require.NoError(t, sSingleProcess.SetNonce(addr1, 2, tracing.NonceChangeUnspecified))
 
-	sClean.ApplyVersionedWrites(states[2].VersionedWrites())
+	require.NoError(t, sClean.ApplyVersionedWrites(states[2].VersionedWrites()))
+	requireSameObservableState(t, sSingleProcess, sClean, addrs, keys)
 
 	// Tx3 write
-	states[3].Selfdestruct(addr2, false)
-	states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified)
-	states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0))
+	// Materialize addr2 first: Selfdestruct on an object this state never read
+	// silently no-ops, so the write set would carry no SelfDestructPath entry.
+	_, err = states[3].GetOrNewStateObject(addr2)
+	require.NoError(t, err)
+	destructed, err := states[3].Selfdestruct(addr2, false)
+	require.NoError(t, err)
+	require.True(t, destructed)
+	require.NoError(t, states[3].SetCode(addr1, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, states[3].FinalizeTx(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 	states[3].versionMap.FlushVersionedWrites(states[3].VersionedWrites(), true, "")
 
-	sSingleProcess.Selfdestruct(addr2, false)
-	sSingleProcess.SetCode(addr1, code, tracing.CodeChangeUnspecified)
+	destructed, err = sSingleProcess.Selfdestruct(addr2, false)
+	require.NoError(t, err)
+	require.True(t, destructed)
+	require.NoError(t, sSingleProcess.SetCode(addr1, code, tracing.CodeChangeUnspecified))
 
-	sClean.ApplyVersionedWrites(states[3].VersionedWrites())
+	require.NoError(t, sClean.ApplyVersionedWrites(states[3].VersionedWrites()))
+	requireSameObservableState(t, sSingleProcess, sClean, addrs, keys)
 }
 
 // TestMakeWriteSetClearsCodeDomainOnEmptyOverride pins that clearing an
@@ -1033,174 +1115,71 @@ func TestMakeWriteSetClearsCodeDomainOnEmptyOverride(t *testing.T) {
 	addrVal := addr.Value()
 	code := []byte{0x60, 0x00, 0x60, 0x00, 0xf3}
 
-	deploy := New(NewReaderV3(domains.AsGetter(tx)))
+	deploy := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer deploy.Close()
 	require.NoError(t, deploy.CreateAccount(addr, true))
 	require.NoError(t, deploy.SetNonce(addr, 1, tracing.NonceChangeUnspecified))
 	require.NoError(t, deploy.SetCode(addr, code, tracing.CodeChangeUnspecified))
 	require.NoError(t, deploy.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 0)))
 
-	got, _, err := domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
+	got, _, err := domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}).GetLatest(kv.CodeDomain, addrVal[:], kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Equal(t, code, got)
 
-	clear := New(NewReaderV3(domains.AsGetter(tx)))
+	clear := New(NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer clear.Close()
 	require.NoError(t, clear.SetCode(addr, []byte{}, tracing.CodeChangeUnspecified))
 	require.NoError(t, clear.MakeWriteSet(&chain.Rules{}, NewWriter(domains.AsPutDel(tx), nil, 1)))
 
-	got, _, err = domains.AsGetter(tx).GetLatest(kv.CodeDomain, addrVal[:])
+	got, _, err = domains.AsStateGetter(tx, execctxapi.StateGetterOptions{}).GetLatest(kv.CodeDomain, addrVal[:], kv.GetLatestOptions{})
 	require.NoError(t, err)
 	require.Empty(t, got, "clearing code must clear the CodeDomain entry")
 }
 
-// TestAddLogOnLogHookCopyContract pins the OnLog contract on the AddLog path:
-// the hook sees the emitted contents during the callback, and a copy taken then
-// stays intact after the buffer entry is reused by later blocks.
-func TestAddLogOnLogHookCopyContract(t *testing.T) {
-	t.Parallel()
+// erroringReader wraps NoopReader and fails ReadAccountData for one address,
+// simulating a DB read failure.
+type erroringReader struct {
+	*NoopReader
+	errAddr accounts.Address
+	err     error
+}
 
-	ibs := New(NewNoopReader())
-	var copied []*types.Log
-	ibs.SetHooks(&tracing.Hooks{
-		OnLog: func(l *types.Log) { copied = append(copied, l.Copy()) },
-	})
-
-	ibs.SetTxContext(1, 0)
-	ibs.AddLog(&types.Log{Address: common.Address{0x11}, Topics: []common.Hash{{0x01}}, Data: []byte{0x01}})
-	require.Len(t, copied, 1)
-
-	for i := range 1000 {
-		ibs.AddLog(&types.Log{Address: common.Address{0x22}, Data: []byte{byte(i)}})
+func (r *erroringReader) ReadAccountData(address accounts.Address) (*accounts.Account, error) {
+	if address == r.errAddr {
+		return nil, r.err
 	}
-	ibs.Reset()
-	ibs.SetTxContext(2, 0)
-	ibs.AddLog(&types.Log{Address: common.Address{0x33}, Data: []byte{0x99}})
-
-	require.Equal(t, common.Address{0x11}, copied[0].Address)
-	require.Equal(t, []common.Hash{{0x01}}, copied[0].Topics)
-	require.Equal(t, []byte{0x01}, []byte(copied[0].Data))
+	return r.NoopReader.ReadAccountData(address)
 }
 
-// TestNotifyLogHookGetsStableCopy pins the OnLog contract on the AllocLog path
-// the EVM's makeLog uses: the hook owns what it receives, so retaining it is
-// safe even though the buffer entry behind it is reused by a later block.
-func TestNotifyLogHookGetsStableCopy(t *testing.T) {
+// TestPropagatesBalanceIncGetStateObjectError pins that a DB read failure while
+// materializing a pending ripemd touch aborts the call instead of being silently
+// dropped, which would skip the touch that state clearing and trie consistency
+// depend on.
+func TestPropagatesBalanceIncGetStateObjectError(t *testing.T) {
 	t.Parallel()
 
-	ibs := New(NewNoopReader())
-	var handed []*types.Log
-	ibs.SetHooks(&tracing.Hooks{
-		OnLog: func(l *types.Log) { handed = append(handed, l) },
-	})
+	for _, tc := range []struct {
+		name string
+		call func(*IntraBlockState) error
+	}{
+		{"FinalizeTx", func(sdb *IntraBlockState) error {
+			return sdb.FinalizeTx(&chain.Rules{}, NewNoopWriter())
+		}},
+		{"CommitBlock", func(sdb *IntraBlockState) error {
+			return sdb.CommitBlock(&chain.Rules{}, NewNoopWriter())
+		}},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
 
-	emit := func(addr common.Address, topic common.Hash, data []byte) *types.Log {
-		lp := ibs.AllocLog(addr, 1, len(data))
-		lp.Topics[0] = topic
-		copy(lp.Data, data)
-		ibs.NotifyLog(lp)
-		return lp
+			wantErr := errors.New("read failed")
+			reader := &erroringReader{NoopReader: NewNoopReader(), errAddr: ripemd, err: wantErr}
+			sdb := New(reader)
+			defer sdb.Close()
+
+			require.NoError(t, sdb.AddBalance(ripemd, uint256.Int{}, tracing.BalanceChangeUnspecified))
+
+			require.ErrorIs(t, tc.call(sdb), wantErr)
+		})
 	}
-
-	ibs.SetTxContext(1, 0)
-	lp := emit(common.Address{0xaa}, common.Hash{0x01}, []byte{0x11, 0x22})
-	require.NotSame(t, lp, handed[0])
-
-	ibs.Reset()
-	ibs.SetTxContext(2, 0)
-	require.Same(t, lp, emit(common.Address{0xbb}, common.Hash{0x99}, []byte{0xde, 0xad}))
-
-	require.Equal(t, common.Hash{0x01}, handed[0].Topics[0])
-	require.Equal(t, []byte{0x11, 0x22}, []byte(handed[0].Data))
-	require.Equal(t, common.Hash{0x99}, handed[1].Topics[0])
-	require.Equal(t, []byte{0xde, 0xad}, []byte(handed[1].Data))
-}
-
-// TestAddLogKeepsCallerBlockNumber pins that BlockNumber stays a caller-assigned
-// field: execution/state does not know the block number, so a reused entry must
-// not carry the previous caller's value either.
-func TestAddLogKeepsCallerBlockNumber(t *testing.T) {
-	t.Parallel()
-
-	ibs := New(NewNoopReader())
-	ibs.SetTxContext(7, 0)
-	ibs.AddLog(&types.Log{Address: common.Address{0x01}, BlockNumber: 42})
-	ibs.AddLog(&types.Log{Address: common.Address{0x02}})
-
-	logs := ibs.GetRawLogs(0)
-	require.Len(t, logs, 2)
-	require.Equal(t, hexutil.Uint64(42), logs[0].BlockNumber)
-	require.Zero(t, logs[1].BlockNumber, "an unset BlockNumber must not inherit the previous log's")
-}
-
-// TestAllocLogPreservesCapacityAcrossRevert pins that fully reverting a tx's
-// logs (which truncates the outer buffer) and then logging again reuses the
-// inner buffer's capacity instead of dropping it — the same capacity Reset
-// preserves.
-func TestAllocLogPreservesCapacityAcrossRevert(t *testing.T) {
-	t.Parallel()
-
-	ibs := New(NewNoopReader())
-	ibs.SetTxContext(1, 0)
-	snap := ibs.PushSnapshot()
-	for i := range 8 {
-		ibs.AddLog(&types.Log{Address: common.Address{byte(i)}})
-	}
-	require.Len(t, ibs.logs, 2)
-	capBefore := cap(ibs.logs[1])
-	require.GreaterOrEqual(t, capBefore, 8)
-
-	ibs.RevertToSnapshot(snap, nil)
-	require.Len(t, ibs.logs, 1) // the tx's slot was truncated off the outer buffer
-
-	ibs.AddLog(&types.Log{Address: common.Address{0xff}})
-	require.Len(t, ibs.logs, 2)
-	require.Equal(t, capBefore, cap(ibs.logs[1]), "inner log buffer capacity must survive revert+relog")
-}
-
-func TestResetDropsOversizedLogDataBuffers(t *testing.T) {
-	t.Parallel()
-
-	ibs := New(NewNoopReader())
-	ibs.SetTxContext(1, 0)
-	small := ibs.AllocLog(common.Address{0x01}, 1, 8)
-	big := ibs.AllocLog(common.Address{0x02}, 1, maxReusableLogDataCap+1)
-
-	ibs.Reset()
-	ibs.SetTxContext(2, 0)
-	require.Same(t, small, ibs.AllocLog(common.Address{0x03}, 1, 8), "normal-size entry is reused")
-	relog := ibs.AllocLog(common.Address{0x04}, 1, 8)
-	require.NotSame(t, big, relog, "oversized entry must not survive Reset")
-	require.LessOrEqual(t, cap(relog.Data), maxReusableLogDataCap)
-}
-
-// TestLogIndexIsBlockWide pins that AddLog stamps a block-wide log index:
-// receipts.DeriveFields derives FirstLogIndexWithinBlock from Logs[0].Index, so
-// the counter must run across transactions, roll back with a reverted log, and
-// restart at zero on Reset.
-func TestLogIndexIsBlockWide(t *testing.T) {
-	t.Parallel()
-
-	ibs := New(NewNoopReader())
-	ibs.SetTxContext(1, 0)
-	ibs.AddLog(&types.Log{Address: common.Address{0x01}})
-	ibs.AddLog(&types.Log{Address: common.Address{0x02}})
-
-	ibs.SetTxContext(1, 1)
-	snap := ibs.PushSnapshot()
-	ibs.AddLog(&types.Log{Address: common.Address{0x03}})
-	ibs.RevertToSnapshot(snap, nil)
-	ibs.AddLog(&types.Log{Address: common.Address{0x04}})
-
-	tx0, tx1 := ibs.GetRawLogs(0), ibs.GetRawLogs(1)
-	require.Len(t, tx0, 2)
-	require.Len(t, tx1, 1)
-	require.Equal(t, hexutil.Uint(0), tx0[0].Index)
-	require.Equal(t, hexutil.Uint(1), tx0[1].Index)
-	require.Equal(t, hexutil.Uint(2), tx1[0].Index, "index continues across txs and reuses a reverted slot")
-
-	ibs.Reset()
-	ibs.SetTxContext(2, 0)
-	ibs.AddLog(&types.Log{Address: common.Address{0x05}})
-	require.Equal(t, hexutil.Uint(0), ibs.GetRawLogs(0)[0].Index, "next block restarts at zero")
 }

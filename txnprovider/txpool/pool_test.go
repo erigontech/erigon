@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"math"
 	"testing"
+	"time"
 
 	goethkzg "github.com/crate-crypto/go-eth-kzg"
 	"github.com/holiman/uint256"
@@ -36,7 +37,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/kvcache"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -118,7 +119,7 @@ func newTestPoolWithFundedSender(t *testing.T) (context.Context, *TxPool, kv.RwD
 	t.Cleanup(cancel)
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	poolDB := memdb.NewTestPoolDB(t)
+	poolDB := mdbxtest.NewTestPoolDB(t)
 	pool, err := New(
 		ctx,
 		make(chan Announcements, 1),
@@ -236,7 +237,7 @@ func TestBestRejectsTxnAboveAmsterdamStateGasTarget(t *testing.T) {
 	t.Cleanup(cancel)
 
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	pool, err := New(
 		ctx,
 		make(chan Announcements, 1),
@@ -320,7 +321,7 @@ func TestNonceFromAddress(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
@@ -546,7 +547,7 @@ func TestMultipleAuthorizations(t *testing.T) {
 
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -626,7 +627,7 @@ func TestReplaceWithHigherFee(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -729,7 +730,7 @@ func TestReverseNonces(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -844,7 +845,7 @@ func TestTxnPoke(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -1115,7 +1116,7 @@ func TestTooHighGasLimitTxnValidation(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -1263,7 +1264,7 @@ func TestAddLocalTxnsKeepsBatchOnSenderInfoError(t *testing.T) {
 
 	ch := make(chan Announcements, 1)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cache := kvcache.New(kvcache.DefaultCoherentConfig)
 	logger := log.New()
 
@@ -1308,7 +1309,7 @@ func TestBlobTxnReplacement(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -1560,7 +1561,7 @@ func TestDropRemoteAtNoGossip(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 
 	cfg := txpoolcfg.DefaultConfig
 	cfg.NoGossip = true
@@ -1666,7 +1667,7 @@ func TestBlobSlots(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -1757,7 +1758,7 @@ func TestOsakaProofShapeMismatchDiscardsCompletely(t *testing.T) {
 
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	cfg.TotalBlobPoolLimit = 2 // tight limit: one 2-blob txn fills it
 	ctx, cancel := context.WithCancel(context.Background())
@@ -1859,7 +1860,7 @@ func TestWrappedSixBlobTxnExceedsRlpLimit(t *testing.T) {
 
 	ch := make(chan Announcements, 1)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, testforks.Forks["Osaka"], nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
@@ -1881,7 +1882,7 @@ func TestGetBlobs(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 5)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
@@ -1970,7 +1971,7 @@ func TestGasLimitChanged(t *testing.T) {
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	cfg := txpoolcfg.DefaultConfig
 	sendersCache := kvcache.New(kvcache.DefaultCoherentConfig)
 	pool, err := New(ctx, ch, db, coreDB, cfg, sendersCache, chain.AllProtocolChanges, nil, nil, func() {}, nil, nil, log.New(), WithFeeCalculator(nil))
@@ -2047,7 +2048,7 @@ func BenchmarkProcessRemoteTxns(b *testing.B) {
 	require := require.New(b)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(b, datadir.New(b.TempDir()))
-	db := memdb.NewTestPoolDB(b)
+	db := mdbxtest.NewTestPoolDB(b)
 	ctx, cancel := context.WithCancel(context.Background())
 	b.Cleanup(cancel)
 	cfg := txpoolcfg.DefaultConfig
@@ -2133,7 +2134,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 	assert, require := assert.New(t), require.New(t)
 	ch := make(chan Announcements, 100)
 	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-	db := memdb.NewTestPoolDB(t)
+	db := mdbxtest.NewTestPoolDB(t)
 	ctx, cancel := context.WithCancel(context.Background())
 	t.Cleanup(cancel)
 
@@ -2221,7 +2222,7 @@ func TestZombieQueuedEviction(t *testing.T) {
 		// Clear the pool first by using a fresh pool
 		ch2 := make(chan Announcements, 100)
 		coreDB2 := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
-		db2 := memdb.NewTestPoolDB(t)
+		db2 := mdbxtest.NewTestPoolDB(t)
 		cfg2 := txpoolcfg.DefaultConfig
 		cfg2.MaxNonceGap = 10 // small gap for this test
 		pool2, err := New(ctx, ch2, db2, coreDB2, cfg2, kvcache.New(kvcache.DefaultCoherentConfig),
@@ -2580,4 +2581,95 @@ func TestOnNewBlockRefreshesDepthMetrics(t *testing.T) {
 	asrt.EqualValues(pending, pendingSubCounter.GetValue(), "pending gauge stale after OnNewBlock")
 	asrt.EqualValues(baseFee, basefeeSubCounter.GetValue(), "baseFee gauge stale after OnNewBlock")
 	asrt.EqualValues(queued, queuedSubCounter.GetValue(), "queued gauge stale after OnNewBlock")
+}
+
+// probeFeeCalculator runs fn from the middle of fromDB, where CurrentFees is called.
+type probeFeeCalculator struct{ fn func() }
+
+func (p probeFeeCalculator) CurrentFees(*chain.Config, kv.Getter) (uint64, uint64, uint64, uint64, error) {
+	p.fn()
+	return 0, 0, 0, 0, nil
+}
+
+// Run starts the state-changes goroutine before start(), so OnNewBlock can land while
+// the pool is still loading. Both write p.senders, so the load must hold p.lock.
+func TestFromDBLoadsUnderPoolLock(t *testing.T) {
+	req := require.New(t)
+	ctx, cancel := context.WithCancel(context.Background())
+	t.Cleanup(cancel)
+
+	logger := log.New()
+	coreDB := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	poolDB := mdbxtest.NewTestPoolDB(t)
+
+	const senderCount = 2_000
+	testAddr := func(i int) (addr common.Address) {
+		addr[0], addr[1] = byte(i), byte(i>>8)
+		return addr
+	}
+	acc := accounts3.Account{Nonce: 1, Balance: *uint256.NewInt(1 * common.Ether), CodeHash: accounts.EmptyCodeHash}
+	accData := accounts3.SerialiseV3(&acc)
+	changes := make([]*remoteproto.AccountChange, senderCount)
+	for i := range changes {
+		changes[i] = &remoteproto.AccountChange{
+			Action:  remoteproto.Action_UPSERT,
+			Address: gointerfaces.ConvertAddressToH160(testAddr(i)),
+			Data:    accData,
+		}
+	}
+	block := &remoteproto.StateChangeBatch{
+		PendingBlockBaseFee: 1_000_000,
+		BlockGasLimit:       1_000_000,
+		ChangeBatch: []*remoteproto.StateChange{{
+			BlockHeight: 0,
+			BlockHash:   gointerfaces.ConvertHashToH256([32]byte{}),
+			Changes:     changes,
+		}},
+	}
+
+	var pool *TxPool
+	var lockHeld bool
+	var onNewBlockErr error
+	onNewBlockDone := make(chan struct{})
+
+	probe := probeFeeCalculator{fn: func() {
+		// fromDB is half way through the load here.
+		if pool.lock.TryLock() {
+			pool.lock.Unlock()
+		} else {
+			lockHeld = true
+		}
+
+		go func() {
+			defer close(onNewBlockDone)
+			onNewBlockErr = pool.OnNewBlock(ctx, block, TxnSlots{}, TxnSlots{}, TxnSlots{})
+		}()
+
+		// Write the senders maps from the loading goroutine, spread out so the writes
+		// overlap the ones OnNewBlock makes. Unlocked that is an unsynchronised map
+		// write pair, which -race reports and the Go runtime aborts on. Locked,
+		// OnNewBlock cannot start yet, so the window closes on the deadline instead.
+		deadline := time.After(200 * time.Millisecond)
+		for i := range senderCount {
+			pool.senders.getOrCreateID(testAddr(i), logger)
+			select {
+			case <-onNewBlockDone:
+				return
+			case <-deadline:
+				return
+			default:
+			}
+			time.Sleep(20 * time.Microsecond)
+		}
+	}}
+
+	pool, err := New(ctx, make(chan Announcements, 100), poolDB, coreDB, txpoolcfg.DefaultConfig,
+		kvcache.New(kvcache.DefaultCoherentConfig), chain.AllProtocolChanges, nil, nil, func() {}, nil, nil,
+		logger, WithFeeCalculator(probe))
+	req.NoError(err)
+	req.NoError(pool.start(ctx))
+
+	<-onNewBlockDone
+	req.NoError(onNewBlockErr)
+	req.True(lockHeld, "fromDB must hold p.lock while it populates the pool")
 }

@@ -13,7 +13,7 @@ import (
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
-	"github.com/erigontech/erigon/db/kv/memdb"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
 	"github.com/erigontech/erigon/db/state"
@@ -26,7 +26,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1)
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)
@@ -82,7 +82,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, append(append([]byte{}, acc1[:]...), acc1slot1[:]...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(1)) // step num
-		wantValueBytes = append(wantValueBytes, byte(1))       // value we wrote to the storage slot
+		wantValueBytes = append(wantValueBytes, byte(1))       //nolint:makezero // value we wrote to the storage slot
 		require.Equal(t, wantValueBytes, v)
 		k, v, err = c1.Next()
 		require.NoError(t, err)
@@ -152,7 +152,7 @@ func TestTemporalTx_HasPrefix_StorageDomain(t *testing.T) {
 		require.Equal(t, append(append([]byte{}, acc2[:]...), acc2slot2[:]...), k)
 		wantValueBytes := make([]byte, 8)                      // 8 bytes for uint64 step num
 		binary.BigEndian.PutUint64(wantValueBytes, ^uint64(2)) // step num
-		wantValueBytes = append(wantValueBytes, byte(2))       // value we wrote to the storage slot
+		wantValueBytes = append(wantValueBytes, byte(2))       //nolint:makezero // value we wrote to the storage slot
 		require.Equal(t, wantValueBytes, v)
 		k, v, err = c2.Next() // acc1 storage from step 1 must not be there
 		require.NoError(t, err)
@@ -228,7 +228,7 @@ func TestTemporalTx_PinsBlockFilesView(t *testing.T) {
 	ctx := t.Context()
 
 	newDB := func(withBlocks bool) *DB {
-		mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+		mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 		dirs := datadir.New(t.TempDir())
 		agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
 		t.Cleanup(agg.Close)
@@ -265,7 +265,7 @@ func TestTemporalTx_DomainVisibleEndConcurrent(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
@@ -327,7 +327,7 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	agg := state.NewTest(dirs).StepSize(1).MustOpen(ctx, mdbxDb)
 	defer agg.Close()
@@ -359,12 +359,14 @@ func TestTemporalTx_ForceReopenRefreshesDomainVisibleEnd(t *testing.T) {
 	// Write past the RO tx's MVCC view and move the data into files, which are
 	// visible regardless of the DB read view.
 	for txNum := uint64(2); txNum <= 3; txNum++ {
-		rwTtx, err := temporalDb.BeginTemporalRw(ctx)
-		require.NoError(t, err)
-		defer rwTtx.Rollback()
-		require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTtx, storageK, []byte{byte(txNum)}, txNum, nil))
-		require.NoError(t, sd.Flush(ctx, rwTtx))
-		require.NoError(t, rwTtx.Commit())
+		func() {
+			rwTtx, err := temporalDb.BeginTemporalRw(ctx)
+			require.NoError(t, err)
+			defer rwTtx.Rollback()
+			require.NoError(t, sd.DomainPut(kv.StorageDomain, rwTtx, storageK, []byte{byte(txNum)}, txNum, nil))
+			require.NoError(t, sd.Flush(ctx, rwTtx))
+			require.NoError(t, rwTtx.Commit())
+		}()
 	}
 	require.NoError(t, agg.BuildFiles(3))
 
@@ -388,7 +390,7 @@ func TestTemporalTx_RangeAsOf_StorageDomain(t *testing.T) {
 	t.Parallel()
 	ctx := t.Context()
 
-	mdbxDb := memdb.NewTestDB(t, dbcfg.ChainDB)
+	mdbxDb := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
 	dirs := datadir.New(t.TempDir())
 	stepSize := uint64(1)
 	agg := state.NewTest(dirs).StepSize(stepSize).MustOpen(ctx, mdbxDb)

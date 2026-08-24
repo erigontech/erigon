@@ -151,7 +151,7 @@ func NewEth1BlockFromHeaderAndBody(header *types.Header, body *types.RawBody, be
 
 	if header.SlotNumber != nil {
 		// BlockAccessList is initialized empty here because types.RawBody does not
-		// carry the block access list bytes (only types.RawBlock does). In production,
+		// carry the block access list bytes. In production,
 		// GLOAS execution payloads arrive via the Engine API and are populated through
 		// SSZ decoding, not this constructor. This function is currently only called
 		// from test code.
@@ -402,12 +402,23 @@ func (b *Eth1Block) EncodingSizeSSZ() (size int) {
 
 // DecodeSSZ decodes the block in SSZ format.
 func (b *Eth1Block) DecodeSSZ(buf []byte, version int) error {
+	return b.decodeSSZ(buf, version, false)
+}
+
+func (b *Eth1Block) DecodeSSZStrict(buf []byte, version int) error {
+	return b.decodeSSZ(buf, version, true)
+}
+
+func (b *Eth1Block) decodeSSZ(buf []byte, version int, strict bool) error {
 	b.Extra = solid.NewExtraData()
 	b.Transactions = solid.NewTransactionsSSZWithLimits(b.beaconCfg.MaxTransactionsPerPayload, b.beaconCfg.MaxBytesPerTransaction)
 	b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	b.version = clparams.StateVersion(version)
 	if b.version >= clparams.GloasVersion {
 		b.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)
+	}
+	if strict {
+		return ssz2.UnmarshalSSZStrict(buf, version, b.getSchema()...)
 	}
 	return ssz2.UnmarshalSSZ(buf, version, b.getSchema()...)
 }
@@ -495,7 +506,7 @@ func (b *Eth1Block) getSchema() []any {
 }
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
-func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.Hash) (*types.Header, error) {
+func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.Hash, blockAccessList *types.BlockAccessListSidecar) (*types.Header, error) {
 	baseFee := new(uint256.Int)
 	_ = baseFee.UnmarshalSSZ(b.BaseFeePerGas[:])
 	// If the block version is Capella or later, calculate the withdrawals hash.
@@ -551,9 +562,16 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 	// Matches the engine API pattern in engine_server.go: keccak256(raw RLP bytes).
 	if b.version >= clparams.GloasVersion {
 		blockAccessListHash := new(common.Hash)
-		if b.BlockAccessList == nil || b.BlockAccessList.EncodingSizeSSZ() == 0 {
+		switch {
+		case blockAccessList != nil:
+			hash, err := blockAccessList.Hash()
+			if err != nil {
+				return nil, fmt.Errorf("hash block access list: %w", err)
+			}
+			*blockAccessListHash = hash
+		case b.BlockAccessList == nil || b.BlockAccessList.EncodingSizeSSZ() == 0:
 			*blockAccessListHash = empty.BlockAccessListHash
-		} else {
+		default:
 			*blockAccessListHash = crypto.Keccak256Hash(b.BlockAccessList.Bytes())
 		}
 		header.BlockAccessListHash = blockAccessListHash

@@ -122,7 +122,7 @@ func (gp *GasPool) ConsumeState(amount uint64) error {
 // stateGas is never consumed, so seeding it has no observable effect there.
 func (gp *GasPool) AddGas(amount uint64) *GasPool {
 	if gp == nil {
-		return gp
+		return nil
 	}
 	gp.mu.Lock()
 	defer gp.mu.Unlock()
@@ -147,7 +147,7 @@ func (gp *GasPool) Gas() uint64 {
 // AddBlobGas extends the blob-gas budget.
 func (gp *GasPool) AddBlobGas(amount uint64) *GasPool {
 	if gp == nil {
-		return gp
+		return nil
 	}
 	gp.mu.Lock()
 	defer gp.mu.Unlock()
