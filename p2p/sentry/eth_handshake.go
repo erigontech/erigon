@@ -163,8 +163,10 @@ func handShake[T StatusPacket](
 		}
 	}
 	// BSC (Parlia) networks send an UpgradeStatusMsg (0x0b) immediately after
-	// Status; the peer drops us if we neither send nor consume it.
-	if version >= eth.ETH68 && (status.NetworkId == 56 || status.NetworkId == 97 || status.NetworkId == 714) {
+	// Status; the peer drops us if we neither send nor consume it. Only on
+	// eth/68 — BSC's eth/70 handshake has no such round, so sending it there
+	// would block us waiting on a reply that never comes.
+	if version == eth.ETH68 && (status.NetworkId == 56 || status.NetworkId == 97 || status.NetworkId == 714) {
 		var upgradeStatus eth.UpgradeStatusPacket
 		extensionRaw, err := (&eth.UpgradeStatusExtension{}).Encode()
 		if err != nil {
