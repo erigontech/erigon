@@ -19,7 +19,9 @@ package solid
 import (
 	"bytes"
 	"encoding/json"
+	"errors"
 	"fmt"
+	"io"
 
 	"github.com/erigontech/erigon/cl/merkle_tree"
 	"github.com/erigontech/erigon/common"
@@ -106,7 +108,50 @@ func (l ListSSZ[T]) MarshalJSON() ([]byte, error) {
 }
 
 func (l *ListSSZ[T]) UnmarshalJSON(data []byte) error {
-	return json.Unmarshal(data, &l.list)
+	if bytes.Equal(bytes.TrimSpace(data), []byte("null")) {
+		l.list = nil
+		l.root = common.Hash{}
+		return nil
+	}
+	decoder := json.NewDecoder(bytes.NewReader(data))
+	token, err := decoder.Token()
+	if err != nil {
+		return err
+	}
+	if delimiter, ok := token.(json.Delim); !ok || delimiter != '[' {
+		return fmt.Errorf("expected JSON array")
+	}
+	list := make([]T, 0, min(l.limit, 16))
+	for decoder.More() {
+		if len(list) >= l.limit {
+			return fmt.Errorf("list exceeds decoder resource limit %d", l.limit)
+		}
+		var element T
+		if err := decoder.Decode(&element); err != nil {
+			return err
+		}
+		list = append(list, element)
+	}
+	if _, err := decoder.Token(); err != nil {
+		return err
+	}
+	if err := requireJSONEOF(decoder); err != nil {
+		return err
+	}
+	l.list = list
+	l.root = common.Hash{}
+	return nil
+}
+
+func requireJSONEOF(decoder *json.Decoder) error {
+	var trailing json.RawMessage
+	if err := decoder.Decode(&trailing); !errors.Is(err, io.EOF) {
+		if err == nil {
+			return fmt.Errorf("unexpected trailing JSON value")
+		}
+		return err
+	}
+	return nil
 }
 
 func NewDynamicListSSZFromList[T EncodableHashableSSZ](list []T, limit int) *ListSSZ[T] {

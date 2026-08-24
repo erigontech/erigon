@@ -386,11 +386,11 @@ func (e *ExecutionPayloadBid) UnmarshalJSON(data []byte) error {
 	if !ok || bytes.Equal(bytes.TrimSpace(commitments), []byte("null")) {
 		return errors.New("execution payload bid contains null blob KZG commitments")
 	}
+	e.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
 	type executionPayloadBid ExecutionPayloadBid
 	if err := json.Unmarshal(data, (*executionPayloadBid)(e)); err != nil {
 		return err
 	}
-	e.BlobKzgCommitments.EnsureStaticProgressive(maxBlobCommitmentsForConfig(clparams.GetBeaconConfig()), 48)
 	return nil
 }
 

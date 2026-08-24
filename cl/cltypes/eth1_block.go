@@ -273,6 +273,7 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 		BlockAccessList *solid.ByteListSSZ          `json:"block_access_list"`
 		SlotNumber      uint64                      `json:"slot_number,string"`
 	}
+	aux.Transactions = solid.NewTransactionsSSZWithLimits(b.beaconCfg.MaxTransactionsPerPayload, b.beaconCfg.MaxBytesPerTransaction)
 	aux.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	if b.version >= clparams.GloasVersion {
 		aux.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)
