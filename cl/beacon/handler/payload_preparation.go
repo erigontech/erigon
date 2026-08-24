@@ -214,6 +214,13 @@ func (a *ApiHandler) StartPayloadPreparation(ctx context.Context) <-chan struct{
 }
 
 func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
+	a.preparePayloadLoopWith(ctx, a.preparePayloadForWithScratch)
+}
+
+func (a *ApiHandler) preparePayloadLoopWith(
+	ctx context.Context,
+	prepare func(context.Context, uint64, *payloadPreparationScratch) (payloadPreparationResult, error),
+) {
 	logger := a.logger
 	// Polling once per quarter slot gives a newly selected head several chances to trigger
 	// preparation. Most non-proposal ticks stop before copying state; a pre-Fulu epoch boundary
@@ -363,7 +370,7 @@ func (a *ApiHandler) preparePayloadLoop(ctx context.Context) {
 		prepareCtx, cancel := context.WithDeadlineCause(
 			ctx, slotStart.Add(-minimumPreparationLead), errPreparationTooLate,
 		)
-		result, err := a.preparePayloadForWithScratch(prepareCtx, targetSlot, &scratch)
+		result, err := prepare(prepareCtx, targetSlot, &scratch)
 		cancel()
 		outcome := current
 		outcome.headRoot = result.headRoot
