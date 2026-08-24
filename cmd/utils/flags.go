@@ -1539,6 +1539,24 @@ func SetP2PConfig(ctx *cli.Command, cfg *p2p.Config, nodeName, datadir string, l
 		cfg.NetRestrict = list
 	}
 
+	if ctx.String(ChainFlag.Name) == networkname.Chapel {
+		// BSC rejects eth/69 and its eth/70 status packet keeps TD, so eth/68 is
+		// the only version that negotiates. Its bootstrap enodes are discv4 and
+		// it publishes no DNS node list, so discv5 has nothing to resolve.
+		if !ctx.IsSet(P2pProtocolVersionFlag.Name) {
+			cfg.ProtocolVersion = []uint{direct.ETH68}
+		}
+		if !ctx.IsSet(DiscoveryV4Flag.Name) {
+			cfg.DiscoveryV4 = true
+		}
+		if !ctx.IsSet(DiscoveryV5Flag.Name) {
+			cfg.DiscoveryV5 = false
+		}
+		if !ctx.IsSet(ListenPortFlag.Name) {
+			cfg.ListenAddr = ":30311"
+		}
+	}
+
 	if ctx.String(ChainFlag.Name) == networkname.Dev {
 		// --dev mode can't use p2p networking.
 		//cfg.MaxPeers = 0 // It can have peers otherwise local sync is not possible
