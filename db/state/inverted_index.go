@@ -150,62 +150,13 @@ func (ii *InvertedIndex) efAccessorNewFilePathV4(fromTxN, toTxN uint64) string {
 	return filepath.Join(ii.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.efi", version.V4_0.String(), ii.FilenameBase, fromTxN, toTxN))
 }
 
-// isRawTxNItem — sibling of Domain.isRawTxNItem for InvertedIndex.
-// Reports true when a FilesItem's endTxNum is not step-aligned — the
-// signature of a mode-C paired v4 .ef file whose honest endTxN =
-// lastTxN+1 lands mid-step.
-func (ii *InvertedIndex) isRawTxNItem(item *FilesItem) bool {
-	return item.endTxNum%ii.stepSize != 0
-}
-
-// v4FilesForStep returns the on-disk paths of every dirtyFiles v4 .ef
-// item whose range starts at step*stepSize — i.e. mode-C paired
-// inverted-index files anchored at THIS step's start. Sibling of
-// Domain.v4FilesForStep.
+// v4FilesForStep + retireSubsumedV4ItemsInRange thin wrappers over the
+// shared DirtyFiles helpers. See db/state/dirty_files.go.
 func (ii *InvertedIndex) v4FilesForStep(step kv.Step) []string {
-	var paths []string
-	targetStart := uint64(step) * ii.stepSize
-	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if !ii.isRawTxNItem(item) {
-			return true
-		}
-		if item.startTxNum != targetStart {
-			return true
-		}
-		if item.decompressor == nil {
-			return true
-		}
-		paths = append(paths, item.decompressor.FilePath())
-		return true
-	})
-	return paths
+	return ii.dirtyFiles.V4FilesForStep(ii.stepSize, step)
 }
-
-// retireSubsumedV4ItemsInRange — sibling of Domain.retireSubsumedV4ItemsInRange
-// for InvertedIndex .ef files. Same wholly-contained predicate.
 func (ii *InvertedIndex) retireSubsumedV4ItemsInRange(rangeStart, rangeEnd uint64) []*FilesItem {
-	if rangeEnd <= rangeStart {
-		return nil
-	}
-	var items []*FilesItem
-	ii.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if !ii.isRawTxNItem(item) {
-			return true
-		}
-		if item.startTxNum < rangeStart || item.startTxNum >= rangeEnd {
-			return true
-		}
-		if item.endTxNum > rangeEnd {
-			return true
-		}
-		items = append(items, item)
-		return true
-	})
-	if len(items) == 0 {
-		return nil
-	}
-	retire(mvcc.RetireReasonMerged, ii.dirtyFiles, items, ii.FilenameBase, ii.logger)
-	return items
+	return RetireSubsumedV4ItemsInRange(ii.dirtyFiles, ii.stepSize, ii.FilenameBase, ii.logger, rangeStart, rangeEnd)
 }
 
 func (ii *InvertedIndex) efAccessorFilePathMask(fromStep, toStep kv.Step) string {
@@ -222,26 +173,15 @@ func (ii *InvertedIndex) efAccessorFileNameMask(fromStep, toStep kv.Step) string
 	return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, fromStep, toStep)
 }
 
-// efFileNameMaskForItem — sibling of Domain.kvFileNameMaskForItem for
-// InvertedIndex .ef files. Dispatches between step-form and v4 raw-txN
-// masks using isRawTxNItem. Same rationale as History.vFileNameMaskForItem
-// — mode-C paired v4 .ef items need this dispatch to have their
-// decompressor opened by openDirtyFiles.
+// efFileNameMaskForItem / efAccessorFileNameMaskForItem — thin wrappers
+// over the shared FileNameMaskForItem helper. openDirtyFiles calls
+// these so a mode-C paired v4 .ef/.efi item lands its decompressor via
+// the correct raw-txN mask.
 func (ii *InvertedIndex) efFileNameMaskForItem(item *FilesItem) string {
-	if ii.isRawTxNItem(item) {
-		return fmt.Sprintf("*-%s.%d-%d.ef", ii.FilenameBase, item.startTxNum, item.endTxNum)
-	}
-	fromStep, toStep := item.StepRange(ii.stepSize)
-	return ii.efFileNameMask(fromStep, toStep)
+	return FileNameMaskForItem(item, ii.stepSize, ii.FilenameBase, "ef")
 }
-
-// efAccessorFileNameMaskForItem — sibling for the .efi accessor.
 func (ii *InvertedIndex) efAccessorFileNameMaskForItem(item *FilesItem) string {
-	if ii.isRawTxNItem(item) {
-		return fmt.Sprintf("*-%s.%d-%d.efi", ii.FilenameBase, item.startTxNum, item.endTxNum)
-	}
-	fromStep, toStep := item.StepRange(ii.stepSize)
-	return ii.efAccessorFileNameMask(fromStep, toStep)
+	return FileNameMaskForItem(item, ii.stepSize, ii.FilenameBase, "efi")
 }
 
 var invIdxExistenceForceInMem = dbg.EnvBool("INV_IDX_EXISTENCE_MEM", false)

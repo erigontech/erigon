@@ -78,7 +78,7 @@ func (d *Domain) dirtyFilesEndTxNumMinimax() uint64 {
 func (d *Domain) hasV4ItemPast(threshold uint64) bool {
 	found := false
 	d.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if item.endTxNum > threshold && d.isRawTxNItem(item) {
+		if item.endTxNum > threshold && item.IsRawTxN(d.stepSize) {
 			found = true
 			return false
 		}

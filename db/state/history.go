@@ -118,71 +118,15 @@ func (h *History) vAccessorNewFilePathV4(fromTxN, toTxN uint64) string {
 	return filepath.Join(h.dirs.SnapAccessors, fmt.Sprintf("%s-%s.%d-%d.vi", version.V4_0.String(), h.FilenameBase, fromTxN, toTxN))
 }
 
-// isRawTxNItem — sibling of Domain.isRawTxNItem for History files.
-// Reports true when a FilesItem's endTxNum is not step-aligned — the
-// signature of a mode-C paired v4 .v file whose honest endTxN =
-// lastTxN+1 lands mid-step.
-func (h *History) isRawTxNItem(item *FilesItem) bool {
-	return item.endTxNum%h.stepSize != 0
-}
-
-// v4FilesForStep returns the on-disk paths of every dirtyFiles v4 .v
-// item whose range starts at step*stepSize — i.e. mode-C paired
-// history files anchored at THIS step's start. Retire's History.collate
-// must merge their content into the step-aligned .v output so pre-target
-// history entries emitted by mode-C's paired v4 emit aren't lost.
-// Sibling of Domain.v4FilesForStep — same predicate, different
-// dirtyFiles source.
+// v4FilesForStep + retireSubsumedV4ItemsInRange thin wrappers over the
+// shared DirtyFiles helpers so callers can address the History entity
+// without repeating the (dirtyFiles, stepSize, filenameBase, logger)
+// tuple. See db/state/dirty_files.go for the actual predicate.
 func (h *History) v4FilesForStep(step kv.Step) []string {
-	var paths []string
-	targetStart := uint64(step) * h.stepSize
-	h.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if !h.isRawTxNItem(item) {
-			return true
-		}
-		if item.startTxNum != targetStart {
-			return true
-		}
-		if item.decompressor == nil {
-			return true
-		}
-		paths = append(paths, item.decompressor.FilePath())
-		return true
-	})
-	return paths
+	return h.dirtyFiles.V4FilesForStep(h.stepSize, step)
 }
-
-// retireSubsumedV4ItemsInRange marks every dirtyFiles v4 .v item whose
-// range is wholly contained within [rangeStart, rangeEnd) for retirement
-// (removes from dirtyFiles, sets canDelete=true) and returns the removed
-// items. Sibling of Domain.retireSubsumedV4ItemsInRange for History .v
-// files — retire integrates a step-aligned .v that now contains the v4's
-// data (via mergeV4IntoStepFile), so the v4 pair is redundant and safe to
-// drop. Physical reclaim happens once the last RO reader releases.
-// Caller holds h.dirtyFilesLock.
 func (h *History) retireSubsumedV4ItemsInRange(rangeStart, rangeEnd uint64) []*FilesItem {
-	if rangeEnd <= rangeStart {
-		return nil
-	}
-	var items []*FilesItem
-	h.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if !h.isRawTxNItem(item) {
-			return true
-		}
-		if item.startTxNum < rangeStart || item.startTxNum >= rangeEnd {
-			return true
-		}
-		if item.endTxNum > rangeEnd {
-			return true
-		}
-		items = append(items, item)
-		return true
-	})
-	if len(items) == 0 {
-		return nil
-	}
-	retire(mvcc.RetireReasonMerged, h.dirtyFiles, items, h.FilenameBase, h.logger)
-	return items
+	return RetireSubsumedV4ItemsInRange(h.dirtyFiles, h.stepSize, h.FilenameBase, h.logger, rangeStart, rangeEnd)
 }
 
 func (h *History) vFileNameMask(fromStep, toStep kv.Step) string {
@@ -192,29 +136,16 @@ func (h *History) vAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, fromStep, toStep)
 }
 
-// vFileNameMaskForItem — sibling of Domain.kvFileNameMaskForItem for
-// History .v files. Dispatches between the legacy step-form mask
-// ("*-<base>.<fromStep>-<toStep>.v") and the v4 raw-txN mask
-// ("*-<base>.<fromTxN>-<toTxN>.v") using isRawTxNItem. openDirtyFiles
-// calls this so a mode-C paired v4 .v item lands its decompressor
-// instead of failing MatchVersionedFile (which would leave the
-// item.decompressor nil, hiding it from v4FilesForStep and blocking
-// mergeV4IntoStepFile from ever firing).
+// vFileNameMaskForItem / vAccessorFileNameMaskForItem — thin wrappers
+// over the shared FileNameMaskForItem helper. openDirtyFiles calls
+// these so a mode-C paired v4 .v/.vi item lands its decompressor via
+// the correct raw-txN mask (a step-form mask would miss the on-disk
+// v4 file).
 func (h *History) vFileNameMaskForItem(item *FilesItem) string {
-	if h.isRawTxNItem(item) {
-		return fmt.Sprintf("*-%s.%d-%d.v", h.FilenameBase, item.startTxNum, item.endTxNum)
-	}
-	fromStep, toStep := item.StepRange(h.stepSize)
-	return h.vFileNameMask(fromStep, toStep)
+	return FileNameMaskForItem(item, h.stepSize, h.FilenameBase, "v")
 }
-
-// vAccessorFileNameMaskForItem — sibling for the .vi accessor.
 func (h *History) vAccessorFileNameMaskForItem(item *FilesItem) string {
-	if h.isRawTxNItem(item) {
-		return fmt.Sprintf("*-%s.%d-%d.vi", h.FilenameBase, item.startTxNum, item.endTxNum)
-	}
-	fromStep, toStep := item.StepRange(h.stepSize)
-	return h.vAccessorFileNameMask(fromStep, toStep)
+	return FileNameMaskForItem(item, h.stepSize, h.FilenameBase, "vi")
 }
 
 func (h *History) openHashMapAccessor(fPath string) (*recsplit.Index, error) {

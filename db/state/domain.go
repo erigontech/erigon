@@ -231,7 +231,7 @@ func (d *Domain) kvBtAccessorNewFilePathV4(fromTxN, toTxN uint64) string {
 // specific FilesItem — v4 form for raw-txN items, legacy step form
 // otherwise. Sibling of kvFileNameMaskForItem on the write side.
 func (d *Domain) kvBtAccessorPathForItem(item *FilesItem) string {
-	if d.isRawTxNItem(item) {
+	if item.IsRawTxN(d.stepSize) {
 		return d.kvBtAccessorNewFilePathV4(item.startTxNum, item.endTxNum)
 	}
 	fromStep, toStep := item.StepRange(d.stepSize)
@@ -240,7 +240,7 @@ func (d *Domain) kvBtAccessorPathForItem(item *FilesItem) string {
 
 // kvExistenceIdxPathForItem — sibling of kvBtAccessorPathForItem for .kvei.
 func (d *Domain) kvExistenceIdxPathForItem(item *FilesItem) string {
-	if d.isRawTxNItem(item) {
+	if item.IsRawTxN(d.stepSize) {
 		return d.kvExistenceIdxNewFilePathV4(item.startTxNum, item.endTxNum)
 	}
 	fromStep, toStep := item.StepRange(d.stepSize)
@@ -249,7 +249,7 @@ func (d *Domain) kvExistenceIdxPathForItem(item *FilesItem) string {
 
 // kviAccessorPathForItem — sibling of kvBtAccessorPathForItem for .kvi.
 func (d *Domain) kviAccessorPathForItem(item *FilesItem) string {
-	if d.isRawTxNItem(item) {
+	if item.IsRawTxN(d.stepSize) {
 		return d.kviAccessorNewFilePathV4(item.startTxNum, item.endTxNum)
 	}
 	fromStep, toStep := item.StepRange(d.stepSize)
@@ -328,125 +328,34 @@ func (d *Domain) kvBtAccessorFileNameMask(fromStep, toStep kv.Step) string {
 	return fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, fromStep, toStep)
 }
 
-// isRawTxNItem reports whether a FilesItem should be looked up on
-// disk via a raw-txnum-named mask (v4.0+) rather than the legacy
-// step-indexed mask. True when endTxNum is not step-aligned — the
-// signature of a mode-C boundary-regen file whose honest endTxN =
-// lastTxN+1 lands mid-step. False for every step-aligned file, which
-// keeps the legacy naming.
-func (d *Domain) isRawTxNItem(item *FilesItem) bool {
-	return item.endTxNum%d.stepSize != 0
-}
-
-// v4FilesForStep returns the on-disk paths of every dirtyFiles v4
-// item whose range starts at step*stepSize — i.e. mode-C boundary
-// files anchored at THIS step's start. Retire's collate must merge
-// their content into the step-aligned .kv output so pre-target
-// state emitted by mode-C v4 emit isn't clobbered by the retire's
-// MDBX-only build. See the mode-C v4 non-determinism track for the
-// failure this fix targets.
+// v4FilesForStep, retireSubsumedV4Items(InRange) and *FileNameMaskForItem
+// are thin wrappers over the shared FilesItem.IsRawTxN / DirtyFiles.*V4* /
+// FileNameMaskForItem helpers in db/state/dirty_files.go — the predicate
+// is a pure function of the item's endTxN vs the entity's stepSize (same
+// for Domain, History, InvertedIndex), so the logic lives once and each
+// entity supplies the (dirtyFiles, stepSize, filenameBase, ext) tuple.
 func (d *Domain) v4FilesForStep(step kv.Step) []string {
-	var paths []string
-	targetStart := uint64(step) * d.stepSize
-	d.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if !d.isRawTxNItem(item) {
-			return true
-		}
-		if item.startTxNum != targetStart {
-			return true
-		}
-		if item.decompressor == nil {
-			return true
-		}
-		paths = append(paths, item.decompressor.FilePath())
-		return true
-	})
-	return paths
+	return d.dirtyFiles.V4FilesForStep(d.stepSize, step)
 }
-
-// retireSubsumedV4Items marks every dirtyFiles v4 item whose range
-// is entirely covered by a step-aligned file for `step` for
-// retirement. Thin wrapper over retireSubsumedV4ItemsInRange for the
-// single-step integration case.
 func (d *Domain) retireSubsumedV4Items(step kv.Step) []*FilesItem {
 	stepStart := uint64(step) * d.stepSize
 	stepEnd := uint64(step+1) * d.stepSize
 	return d.retireSubsumedV4ItemsInRange(stepStart, stepEnd)
 }
-
-// retireSubsumedV4ItemsInRange marks every dirtyFiles v4 item whose
-// range is wholly contained within [rangeStart, rangeEnd) for
-// retirement (removes from dirtyFiles, sets canDelete=true) and
-// returns the removed items so the caller can attach them to the
-// outgoing visible generation. Physical reclaim happens once the last
-// reader of that generation releases — v4 decompressors held by
-// live RO views aren't surprised mid-read. Caller holds
-// d.dirtyFilesLock.
 func (d *Domain) retireSubsumedV4ItemsInRange(rangeStart, rangeEnd uint64) []*FilesItem {
-	if rangeEnd <= rangeStart {
-		return nil
-	}
-	var items []*FilesItem
-	d.dirtyFiles.Scan(func(item *FilesItem) bool {
-		if !d.isRawTxNItem(item) {
-			return true
-		}
-		if item.startTxNum < rangeStart || item.startTxNum >= rangeEnd {
-			return true
-		}
-		if item.endTxNum > rangeEnd {
-			return true
-		}
-		items = append(items, item)
-		return true
-	})
-	if len(items) == 0 {
-		return nil
-	}
-	retire(mvcc.RetireReasonMerged, d.dirtyFiles, items, d.FilenameBase, d.logger)
-	return items
+	return RetireSubsumedV4ItemsInRange(d.dirtyFiles, d.stepSize, d.FilenameBase, d.logger, rangeStart, rangeEnd)
 }
-
-// kvFileNameMaskForItem returns the mask that MatchVersionedFile
-// applies against on-disk names for THIS item's actual coordinates.
-// Dispatches between the legacy step-indexed form and the v4 raw-
-// txnum form using isRawTxNItem. openDirtyFiles calls this instead
-// of picking one form manually — it doesn't know upfront which
-// naming an item's on-disk file uses.
 func (d *Domain) kvFileNameMaskForItem(item *FilesItem) string {
-	if d.isRawTxNItem(item) {
-		return fmt.Sprintf("*-%s.%d-%d.kv", d.FilenameBase, item.startTxNum, item.endTxNum)
-	}
-	fromStep, toStep := item.StepRange(d.stepSize)
-	return d.kvFileNameMask(fromStep, toStep)
+	return FileNameMaskForItem(item, d.stepSize, d.FilenameBase, "kv")
 }
-
-// kviAccessorFileNameMaskForItem — sibling of kvFileNameMaskForItem
-// for the hash-map accessor. Same dispatch rule.
 func (d *Domain) kviAccessorFileNameMaskForItem(item *FilesItem) string {
-	if d.isRawTxNItem(item) {
-		return fmt.Sprintf("*-%s.%d-%d.kvi", d.FilenameBase, item.startTxNum, item.endTxNum)
-	}
-	fromStep, toStep := item.StepRange(d.stepSize)
-	return d.kviAccessorFileNameMask(fromStep, toStep)
+	return FileNameMaskForItem(item, d.stepSize, d.FilenameBase, "kvi")
 }
-
-// kvBtAccessorFileNameMaskForItem — sibling for the BT-index accessor.
 func (d *Domain) kvBtAccessorFileNameMaskForItem(item *FilesItem) string {
-	if d.isRawTxNItem(item) {
-		return fmt.Sprintf("*-%s.%d-%d.bt", d.FilenameBase, item.startTxNum, item.endTxNum)
-	}
-	fromStep, toStep := item.StepRange(d.stepSize)
-	return d.kvBtAccessorFileNameMask(fromStep, toStep)
+	return FileNameMaskForItem(item, d.stepSize, d.FilenameBase, "bt")
 }
-
-// kvExistenceIdxFileNameMaskForItem — sibling for the existence-filter accessor.
 func (d *Domain) kvExistenceIdxFileNameMaskForItem(item *FilesItem) string {
-	if d.isRawTxNItem(item) {
-		return fmt.Sprintf("*-%s.%d-%d.kvei", d.FilenameBase, item.startTxNum, item.endTxNum)
-	}
-	fromStep, toStep := item.StepRange(d.stepSize)
-	return d.kvExistenceIdxFileNameMask(fromStep, toStep)
+	return FileNameMaskForItem(item, d.stepSize, d.FilenameBase, "kvei")
 }
 
 // maxStepInDB - return the latest available step in db (at-least 1 value in such step)
@@ -553,11 +462,15 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 	// closes them before mergeV4IntoStepFile can find them at retire
 	// time. Surfaced by 2026-08-23 cycle 5 diagnostic (v4Count=0 at
 	// retire despite the v4 .v being on disk with .vi built).
-	domainPred := func(item *FilesItem) bool {
+	// One shared predicate — the "close-ahead-of-step, but pin v4" rule
+	// is a function of the item's endTxN and the entity's stepSize (all
+	// three entities have the same stepSize on a Domain), nothing entity-
+	// specific left after IsRawTxN moved to *FilesItem.
+	closeAheadPred := func(item *FilesItem) bool {
 		if item.StartStep(d.stepSize) < lowerBound {
 			return false
 		}
-		if d.isRawTxNItem(item) {
+		if item.IsRawTxN(d.stepSize) {
 			return false
 		}
 		if item.decompressor != nil {
@@ -565,33 +478,9 @@ func (d *Domain) closeFilesAfterStep(lowerBound kv.Step) {
 		}
 		return true
 	}
-	historyPred := func(item *FilesItem) bool {
-		if item.StartStep(d.stepSize) < lowerBound {
-			return false
-		}
-		if d.History.isRawTxNItem(item) {
-			return false
-		}
-		if item.decompressor != nil {
-			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("step %d not complete", lowerBound))
-		}
-		return true
-	}
-	iiPred := func(item *FilesItem) bool {
-		if item.StartStep(d.stepSize) < lowerBound {
-			return false
-		}
-		if d.History.InvertedIndex.isRawTxNItem(item) {
-			return false
-		}
-		if item.decompressor != nil {
-			log.Debug("[snapshots] closing", "file", item.decompressor.FileName(), "reason", fmt.Sprintf("step %d not complete", lowerBound))
-		}
-		return true
-	}
-	d.dirtyFiles.CloseIf(domainPred)
-	d.History.dirtyFiles.CloseIf(historyPred)
-	d.History.InvertedIndex.dirtyFiles.CloseIf(iiPred)
+	d.dirtyFiles.CloseIf(closeAheadPred)
+	d.History.dirtyFiles.CloseIf(closeAheadPred)
+	d.History.InvertedIndex.dirtyFiles.CloseIf(closeAheadPred)
 }
 
 func (d *Domain) scanDirtyFiles(fileNames []string) (garbageFiles []*FilesItem) {

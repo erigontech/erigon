@@ -197,6 +197,92 @@ func (i *FilesItem) StepCount(stepSize uint64) uint64 {
 	return uint64(toStep - fromStep)
 }
 
+// IsRawTxN reports whether this FilesItem's endTxNum is NOT step-aligned —
+// the signature of a mode-C v4.0 boundary file (or its paired v4 .v/.ef)
+// whose honest endTxN = lastTxN+1 lands mid-step. Callers that need to
+// dispatch between the legacy step-indexed filename form and the v4
+// raw-txN form use this predicate. Applies uniformly across Domain,
+// History, and InvertedIndex — the property is a function of the item's
+// endTxN vs the caller's stepSize, nothing entity-specific.
+func (i *FilesItem) IsRawTxN(stepSize uint64) bool {
+	return i.endTxNum%stepSize != 0
+}
+
+// V4FilesForStep returns the on-disk paths of every dirtyFiles v4 item
+// whose range starts at step*stepSize — i.e. mode-C boundary files
+// anchored at THIS step's start. Retire's collate composition (Domain's
+// stepSourcesForCollate and History.mergeV4IntoStepFile) merges their
+// content into the step-aligned output. Skips items whose decompressor
+// isn't open yet (openDirtyFiles has to have opened them first).
+func (df *DirtyFiles) V4FilesForStep(stepSize uint64, step kv.Step) []string {
+	var paths []string
+	targetStart := uint64(step) * stepSize
+	df.Scan(func(item *FilesItem) bool {
+		if !item.IsRawTxN(stepSize) {
+			return true
+		}
+		if item.startTxNum != targetStart {
+			return true
+		}
+		if item.decompressor == nil {
+			return true
+		}
+		paths = append(paths, item.decompressor.FilePath())
+		return true
+	})
+	return paths
+}
+
+// RetireSubsumedV4ItemsInRange marks every dirtyFiles v4 item whose
+// range is wholly contained within [rangeStart, rangeEnd) for retirement
+// (removes from dirtyFiles, sets canDelete=true) and returns the removed
+// items so the caller can attach them to the outgoing visible generation.
+// Physical reclaim happens once the last reader of that generation
+// releases — v4 decompressors held by live RO views aren't surprised
+// mid-read. Caller holds the enclosing entity's dirtyFilesLock.
+func RetireSubsumedV4ItemsInRange(df *DirtyFiles, stepSize uint64, filenameBase string, logger log.Logger, rangeStart, rangeEnd uint64) []*FilesItem {
+	if rangeEnd <= rangeStart {
+		return nil
+	}
+	var items []*FilesItem
+	df.Scan(func(item *FilesItem) bool {
+		if !item.IsRawTxN(stepSize) {
+			return true
+		}
+		if item.startTxNum < rangeStart || item.startTxNum >= rangeEnd {
+			return true
+		}
+		if item.endTxNum > rangeEnd {
+			return true
+		}
+		items = append(items, item)
+		return true
+	})
+	if len(items) == 0 {
+		return nil
+	}
+	retire(mvcc.RetireReasonMerged, df, items, filenameBase, logger)
+	return items
+}
+
+// FileNameMaskForItem picks the file-name mask MatchVersionedFile
+// applies against on-disk names for THIS item's actual coordinates.
+// Dispatches between the legacy step-indexed form
+// ("*-<base>.<fromStep>-<toStep>.<ext>") and the v4 raw-txN form
+// ("*-<base>.<fromTxN>-<toTxN>.<ext>") using IsRawTxN. openDirtyFiles
+// calls this so v4 items (mode-C boundary files) land their
+// decompressor via the correct name — a step-form mask would miss the
+// on-disk v4 file (cycle-5 bug: the v4 was in dirtyFiles but its
+// decompressor stayed nil because scanDirtyFiles added it under raw-txN
+// coords while openDirtyFiles looked for it under step-form coords).
+func FileNameMaskForItem(item *FilesItem, stepSize uint64, filenameBase, ext string) string {
+	if item.IsRawTxN(stepSize) {
+		return fmt.Sprintf("*-%s.%d-%d.%s", filenameBase, item.startTxNum, item.endTxNum, ext)
+	}
+	fromStep, toStep := item.StepRange(stepSize)
+	return fmt.Sprintf("*-%s.%d-%d.%s", filenameBase, fromStep, toStep, ext)
+}
+
 // isProperSubsetOf - when `j` covers `i` but not equal `i`
 func (i *FilesItem) isProperSubsetOf(j *FilesItem) bool {
 	return (j.startTxNum <= i.startTxNum && i.endTxNum <= j.endTxNum) && (j.startTxNum != i.startTxNum || i.endTxNum != j.endTxNum)
