@@ -1274,7 +1274,6 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 		blockReader,
 		statusDataProvider,
 		false,
-		false, /* enableWitProtocol */
 		logger,
 	)
 	if err != nil {
