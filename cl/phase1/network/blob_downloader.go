@@ -91,6 +91,10 @@ type BlobHistoryDownloader struct {
 	backfillCompleted atomic.Bool
 	logger            log.Logger
 
+	// gapSlots are the slots the last pass attempted and still could not fill
+	gapsMu   sync.RWMutex
+	gapSlots map[uint64]struct{}
+
 	// notifyBlobBackfilled is called when blob backfilling is complete
 	notifyBlobBackfilled func()
 
@@ -221,6 +225,10 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		return nil
 	}
 
+	// Each pass rebuilds the set from what it observes, so a slot restored out of band
+	// drops out instead of being reported as a gap forever.
+	b.resetBlobGaps()
+
 	logInterval := time.NewTicker(blobLogInterval)
 	defer logInterval.Stop()
 
@@ -270,6 +278,11 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			default:
 			}
 			b.processBatch(batch)
+			stillMissing, err := b.incompleteAfterAttempt(batch)
+			if err != nil {
+				return err
+			}
+			b.recordBlobGaps(stillMissing)
 			b.highestBackfilledSlot.Store(currentSlot)
 		}
 
@@ -283,7 +296,14 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		currentSlot -= step
 	}
 
-	if shouldLog {
+	// Completion is still signalled with gaps outstanding: the ranges below them are
+	// dumpable and withholding the notification would strand those too. The antiquary
+	// stops at the first gap on its own, so the operator needs it named here.
+	if gaps, lowest, highest := b.blobGapSummary(); gaps > 0 {
+		b.logger.Warn("[BlobHistoryDownloader] Blob history download finished with gaps no peer would serve",
+			"gapSlots", gaps, "lowest", lowest, "highest", highest,
+			"hint", "blob snapshots stop at the lowest gap until those sidecars are restored")
+	} else if shouldLog {
 		b.logger.Info("[BlobHistoryDownloader] Blob history download finished successfully")
 	}
 
