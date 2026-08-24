@@ -58,28 +58,20 @@ func TestReproduceCrash(t *testing.T) {
 	intraBlockState := state.New(tsr)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.CreateAccount(contract, true))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 1st tx")
 	// Start the 2nd transaction
-	intraBlockState.SetState(contract, storageKey1, *value1)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.SetState(contract, storageKey1, *value1))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 2nd tx")
 	// Start the 3rd transaction
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	intraBlockState.SetState(contract, storageKey2, *value2)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, intraBlockState.SetState(contract, storageKey2, *value2))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 3rd tx")
 	// Start the 4th transaction - clearing both storage cells
-	intraBlockState.SubBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	intraBlockState.SetState(contract, storageKey1, *value0)
-	intraBlockState.SetState(contract, storageKey2, *value0)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.SubBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, intraBlockState.SetState(contract, storageKey1, *value0))
+	require.NoError(t, intraBlockState.SetState(contract, storageKey2, *value0))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 4th tx")
 }
 
 func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
@@ -94,15 +86,13 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
+	require.NoError(t, intraBlockState.CreateAccount(contract, true))
 
 	oldCode := []byte{0x01, 0x02, 0x03, 0x04}
 
-	intraBlockState.SetCode(contract, oldCode, tracing.CodeChangeUnspecified)
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.SetCode(contract, oldCode, tracing.CodeChangeUnspecified))
+	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 1st tx")
 	rh1, err := sd.ComputeCommitment(context.Background(), tx, true, blockNum, txNum, "", nil)
 	require.NoError(t, err)
 	//t.Logf("stateRoot %x", rh1)
@@ -112,11 +102,9 @@ func TestChangeAccountCodeBetweenBlocks(t *testing.T) {
 	assert.Equal(t, oldCode, trieCode, "new code should be received")
 
 	newCode := []byte{0x04, 0x04, 0x04, 0x04}
-	intraBlockState.SetCode(contract, newCode, tracing.CodeChangeUnspecified)
+	require.NoError(t, intraBlockState.SetCode(contract, newCode, tracing.CodeChangeUnspecified))
 
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, tsw); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, tsw), "finalising 2nd tx")
 
 	trieCode, tcErr = r.ReadAccountCode(contract)
 	require.NoError(t, tcErr, "you can receive the new code")
@@ -142,15 +130,13 @@ func TestCacheCodeSizeSeparately(t *testing.T) {
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
+	require.NoError(t, intraBlockState.CreateAccount(contract, true))
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
-	intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified)
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, w), "finalising 1st tx")
 	if err := intraBlockState.CommitBlock(&chain.Rules{}, w); err != nil {
 		t.Errorf("error committing block: %v", err)
 	}
@@ -180,15 +166,13 @@ func TestCacheCodeSizeInTrie(t *testing.T) {
 	intraBlockState := state.New(r)
 	defer intraBlockState.Close()
 	// Start the 1st transaction
-	intraBlockState.CreateAccount(contract, true)
+	require.NoError(t, intraBlockState.CreateAccount(contract, true))
 
 	code := []byte{0x01, 0x02, 0x03, 0x04}
 
-	intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified)
-	intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified)
-	if err := intraBlockState.FinalizeTx(&chain.Rules{}, w); err != nil {
-		t.Errorf("error finalising 1st tx: %v", err)
-	}
+	require.NoError(t, intraBlockState.SetCode(contract, code, tracing.CodeChangeUnspecified))
+	require.NoError(t, intraBlockState.AddBalance(contract, *uint256.NewInt(1000000000), tracing.BalanceChangeUnspecified))
+	require.NoError(t, intraBlockState.FinalizeTx(&chain.Rules{}, w), "finalising 1st tx")
 	if err := intraBlockState.CommitBlock(&chain.Rules{}, w); err != nil {
 		t.Errorf("error committing block: %v", err)
 	}
