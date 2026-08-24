@@ -60,6 +60,37 @@ func TestBlockServiceGossipDecodeRejectsNonCanonicalParentExecutionRequests(t *t
 	require.Error(t, err)
 }
 
+func TestBlockServiceGossipDecodeRejectsNonCanonicalExecutionPayloadBid(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	commitment := new(cltypes.KZGCommitment)
+	commitment[0] = 1
+	block.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Append(commitment)
+
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encodedBid, err := block.Block.Body.SignedExecutionPayloadBid.EncodeSSZ(nil)
+	require.NoError(t, err)
+	bidStart := bytes.Index(encoded, encodedBid)
+	require.NotEqual(t, -1, bidStart)
+
+	const (
+		signedBidFixedSize = 100
+		bidOffsetPosition  = 188
+		bidFixedSize       = 224
+		commitmentSize     = 48
+	)
+	binary.LittleEndian.PutUint32(encoded[bidStart+signedBidFixedSize+bidOffsetPosition:], bidFixedSize+commitmentSize)
+
+	ordinary := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	require.NoError(t, ordinary.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	require.Zero(t, ordinary.Block.Body.SignedExecutionPayloadBid.Message.BlobKzgCommitments.Len())
+
+	service := &blockService{beaconCfg: cfg}
+	_, err = service.DecodeGossipMessage("", encoded, clparams.GloasVersion)
+	require.Error(t, err)
+}
+
 type attesterSlashingErrorStore struct {
 	forkchoice.ForkChoiceStorage
 	err error
