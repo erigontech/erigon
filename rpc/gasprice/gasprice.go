@@ -66,8 +66,11 @@ type OracleBackend interface {
 
 	// Fork opens a new TemporalTx and returns a goroutine-local backend together
 	// with a cleanup function (call via defer cleanup()).
-	// If the backend does not support forking, it returns (nil, nil, nil) and
-	// the caller should fall back to using the main backend sequentially.
+	// A (nil, nil, nil) return means no forked backend is available for this
+	// call — the backend may not support forking at all, or a concurrent reorg
+	// may have made a consistent fork momentarily impossible. It is a per-call
+	// answer, not a static capability: callers fall back to sequential reads on
+	// this backend for the current request and must not memoize the nil.
 	Fork(ctx context.Context) (OracleBackend, func(), error)
 }
 
@@ -254,8 +257,9 @@ func (oracle *Oracle) fetchBlockPricesParallel(ctx context.Context, head uint64,
 				return forkErr
 			}
 			if localBackend == nil {
-				// Fork not supported: allow exactly one goroutine to proceed
-				// sequentially on the shared backend; the others exit.
+				// No forked backend for this call (unsupported, or a concurrent
+				// reorg): exactly one goroutine proceeds sequentially on the
+				// shared backend; the others exit.
 				if !seqOnce.CompareAndSwap(0, 1) {
 					return nil
 				}

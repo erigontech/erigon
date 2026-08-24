@@ -1180,7 +1180,7 @@ func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 	if membatchwithdb.CarriesOverlayView(tx) {
 		return tx
 	}
-	if overlay := ff.LatestOverlay(); overlay != nil {
+	if overlay := ff.latestOverlay(); overlay != nil {
 		return overlay.NewReadView(tx)
 	}
 	return tx
@@ -1223,11 +1223,8 @@ func (ff *Filters) BeginTemporalRoWithOverlay(ctx context.Context, db kv.Tempora
 	}
 }
 
-// LatestOverlay returns the block overlay behind the latest published SD, or nil.
-// Callers that must keep serving one consistent head across several txs (e.g. a
-// forked backend) pin this instance instead of re-resolving, which could observe
-// the overlay being unpublished mid-request.
-func (ff *Filters) LatestOverlay() *membatchwithdb.MemoryMutation {
+// latestOverlay returns the block overlay behind the latest published SD, or nil.
+func (ff *Filters) latestOverlay() *membatchwithdb.MemoryMutation {
 	overlay, _ := ff.OverlaySnapshot()
 	return overlay
 }

@@ -403,8 +403,9 @@ func (oracle *Oracle) FeeHistory(ctx context.Context, blocks int, unresolvedLast
 				return forkErr
 			}
 			if localBackend == nil {
-				// Fork not supported: allow exactly one goroutine to proceed
-				// sequentially on the shared backend; the others exit.
+				// No forked backend for this call (unsupported, or a concurrent
+				// reorg): exactly one goroutine proceeds sequentially on the
+				// shared backend; the others exit.
 				if !seqOnce.CompareAndSwap(0, 1) {
 					return nil
 				}

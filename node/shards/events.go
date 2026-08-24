@@ -61,7 +61,9 @@ type Events struct {
 	// latestPub holds the most recently published SharedDomains from FCU
 	// together with its publish sequence number, as one atomic snapshot so
 	// readers can never observe the SD and the sequence out of step.
-	// Accessible lock-free for the builder and RPC layer.
+	// Reads are lock-free; the store is a load-modify-store (seq increments
+	// from the previous value), so publishers must hold e.lock to keep the
+	// sequence monotonic.
 	latestPub atomic.Pointer[overlayPub]
 }
 

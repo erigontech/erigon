@@ -24,6 +24,7 @@ import (
 	"context"
 	"encoding/binary"
 	"errors"
+	"fmt"
 	"math"
 	"math/big"
 	"math/rand"
@@ -354,12 +355,21 @@ func (m *mockOracleBackend) FrozenBlocks() (uint64, error) {
 	return m.frozen, nil
 }
 
-func (m *mockOracleBackend) HeaderByHashNumber(ctx context.Context, _ common.Hash, _ uint64) (*types.Header, error) {
-	return m.HeaderByNumber(ctx, 0)
+// The by-pair fetchers reject a (hash, number) pair that does not match
+// mockHeightHash, so any test going through them asserts the fetched block is
+// the one the cache key names.
+func (m *mockOracleBackend) HeaderByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Header, error) {
+	if hash != mockHeightHash(number) {
+		return nil, fmt.Errorf("mismatched pair: hash %x is not the canonical hash of height %d", hash, number)
+	}
+	return m.HeaderByNumber(ctx, rpc.BlockNumber(number))
 }
 
-func (m *mockOracleBackend) BlockByHashNumber(ctx context.Context, _ common.Hash, _ uint64) (*types.Block, error) {
-	return m.BlockByNumber(ctx, 0)
+func (m *mockOracleBackend) BlockByHashNumber(ctx context.Context, hash common.Hash, number uint64) (*types.Block, error) {
+	if hash != mockHeightHash(number) {
+		return nil, fmt.Errorf("mismatched pair: hash %x is not the canonical hash of height %d", hash, number)
+	}
+	return m.BlockByNumber(ctx, rpc.BlockNumber(number))
 }
 
 func (m *mockOracleBackend) Fork(_ context.Context) (gasprice.OracleBackend, func(), error) {
@@ -382,6 +392,13 @@ func TestFeeHistory_CanonicalHashErrorDegradesToUncached(t *testing.T) {
 	_, _, baseFee, _, _, _, err := oracle.FeeHistory(context.Background(), 3, rpc.LatestBlockNumber, nil)
 	require.NoError(t, err, "a cache-key resolution error must degrade to uncached, not fail the request")
 	require.Len(t, baseFee, 4)
+	fetchesAfterFirst := backend.headerCalls.Load()
+
+	_, _, baseFee, _, _, _, err = oracle.FeeHistory(context.Background(), 3, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, baseFee, 4)
+	require.Greater(t, backend.headerCalls.Load(), fetchesAfterFirst,
+		"blocks with unresolved hashes must not be memoized: falling back to a number key would keep serving a reorged sibling")
 }
 
 // TestFeeHistory_FrozenRangeCachesByNumberWithoutResolution pins that at or
@@ -407,6 +424,36 @@ func TestFeeHistory_FrozenRangeCachesByNumberWithoutResolution(t *testing.T) {
 	require.Empty(t, backend.resolvedRanges())
 	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
 		"the second request must be served from number-keyed cache entries")
+}
+
+// TestFeeHistory_WindowStraddlingFrozenBoundary pins the mixed regime: one
+// request whose window spans the frozen boundary keys the frozen part by
+// number and the hot part by hash, with the hash scan covering only the hot
+// part. The block-slot index and the hot-hash index run on different bases
+// there, and the mock rejects a mismatched (hash, number) pair — an off-by-one
+// between the two would pair a height with its neighbour's hash and cache one
+// block's fees under another's key.
+func TestFeeHistory_WindowStraddlingFrozenBoundary(t *testing.T) {
+	head := types.NewEmptyHeaderForAssembling()
+	head.Number.SetUint64(10)
+	head.GasLimit = 30_000_000
+	head.BaseFee = uint256.NewInt(1_000_000_000)
+
+	backend := &mockOracleBackend{head: head, frozen: 5}
+	oracle := gasprice.NewOracle(backend, gaspricecfg.Config{Blocks: 2, Percentile: 60}, jsonrpc.NewGasPriceCache(), gasprice.NewFeeHistoryCache(), log.New())
+
+	_, _, baseFee, _, _, _, err := oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, baseFee, 9)
+	require.Equal(t, [][2]uint64{{6, 10}}, backend.resolvedRanges(),
+		"only the part of the window above the frozen boundary must be resolved to hashes")
+	fetchesAfterFirst := backend.headerCalls.Load()
+
+	_, _, baseFee, _, _, _, err = oracle.FeeHistory(context.Background(), 8, rpc.LatestBlockNumber, nil)
+	require.NoError(t, err)
+	require.Len(t, baseFee, 9)
+	require.Equal(t, fetchesAfterFirst, backend.headerCalls.Load(),
+		"the second request must be served from the cache in both regimes")
 }
 
 // TestFeeHistory_HotRangeResolvedInOneScan pins the cost of the cache-key
