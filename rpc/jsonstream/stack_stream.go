@@ -330,7 +330,9 @@ func (s *StackStream) pop(item stackItem) {
 	}
 }
 
-// popCommaOrField is a helper method for the common case of popping ItemComma or ItemField from the stack
+// popCommaOrField pops ItemComma or ItemField after a value was written, and
+// hands the buffer over if that value filled it. Every writer goes through here,
+// so the bound holds for numbers and raw bytes as much as for strings.
 func (s *StackStream) popCommaOrField() {
 	if len(s.stack) > 0 {
 		top := s.stack[len(s.stack)-1]
@@ -338,4 +340,5 @@ func (s *StackStream) popCommaOrField() {
 			s.stack = s.stack[:len(s.stack)-1]
 		}
 	}
+	flushIfFull(s.stream)
 }
