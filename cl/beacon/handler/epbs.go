@@ -831,13 +831,14 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	// so the EL receives NewPayload for the execution payload.
 	var persistenceErr error
 	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, false, true); err != nil {
-		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
+		switch {
+		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
 			persistenceErr = err
-		} else if errors.Is(err, forkchoice.ErrIgnore) ||
+		case errors.Is(err, forkchoice.ErrIgnore) ||
 			errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
-			errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) {
+			errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
-		} else {
+		default:
 			beaconhttp.WrapEndpointError(err).WriteTo(w)
 			return
 		}
