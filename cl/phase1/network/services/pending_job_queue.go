@@ -56,6 +56,12 @@ func newPendingJobQueue[K comparable, M any](
 	tryProcess func(ctx context.Context, key K, msg M) (afterRemove func(), remove bool),
 	onExpired func(key K),
 ) *pendingJobQueue[K, M] {
+	if options.capacity <= 0 {
+		panic("pending job queue capacity must be positive")
+	}
+	if options.checkInterval <= 0 {
+		panic("pending job queue check interval must be positive")
+	}
 	if tryProcess == nil {
 		panic("pending job queue requires tryProcess")
 	}

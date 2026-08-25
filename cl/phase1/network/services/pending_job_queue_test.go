@@ -24,17 +24,21 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestPendingJobQueue() *pendingJobQueue[int, string] {
-	return newPendingJobQueue(pendingJobQueueOptions{
-		capacity:      1,
-		expiry:        time.Minute,
-		checkInterval: time.Millisecond,
-	},
+func newTestPendingJobQueueWithOptions(options pendingJobQueueOptions) *pendingJobQueue[int, string] {
+	return newPendingJobQueue(options,
 		func(context.Context, int, string) (func(), bool) {
 			return nil, false
 		},
 		func(int) {},
 	)
+}
+
+func newTestPendingJobQueue() *pendingJobQueue[int, string] {
+	return newTestPendingJobQueueWithOptions(pendingJobQueueOptions{
+		capacity:      1,
+		expiry:        time.Minute,
+		checkInterval: time.Millisecond,
+	})
 }
 
 func TestNewPendingJobQueueRejectsNilTryProcess(t *testing.T) {
@@ -65,6 +69,46 @@ func TestNewPendingJobQueueRejectsNilOnExpired(t *testing.T) {
 			nil,
 		)
 	})
+}
+
+func TestNewPendingJobQueueRejectsNonPositiveCapacity(t *testing.T) {
+	for _, test := range []struct {
+		name     string
+		capacity int32
+	}{
+		{name: "zero", capacity: 0},
+		{name: "negative", capacity: -1},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.PanicsWithValue(t, "pending job queue capacity must be positive", func() {
+				newTestPendingJobQueueWithOptions(pendingJobQueueOptions{
+					capacity:      test.capacity,
+					expiry:        time.Minute,
+					checkInterval: time.Millisecond,
+				})
+			})
+		})
+	}
+}
+
+func TestNewPendingJobQueueRejectsNonPositiveCheckInterval(t *testing.T) {
+	for _, test := range []struct {
+		name          string
+		checkInterval time.Duration
+	}{
+		{name: "zero", checkInterval: 0},
+		{name: "negative", checkInterval: -time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.PanicsWithValue(t, "pending job queue check interval must be positive", func() {
+				newTestPendingJobQueueWithOptions(pendingJobQueueOptions{
+					capacity:      1,
+					expiry:        time.Minute,
+					checkInterval: test.checkInterval,
+				})
+			})
+		})
+	}
 }
 
 func TestPendingJobQueueEnqueueSkipsKeyBuildAtCapacity(t *testing.T) {
