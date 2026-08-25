@@ -127,7 +127,7 @@ func (p *Provider) Initialize(deps Deps) error {
 		p.CurrentBlockNumber = currentBlock.NumberU64()
 	}
 
-	p.BlockRetire = freezeblocks.NewBlockRetire(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, nil, nil, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
+	p.BlockRetire = freezeblocks.NewBlockRetire(ctx, 1, config.Dirs, p.BlockReader, p.BlockWriter, p.ChainDB, p.ChainConfig, config, deps.DBEventNotifier, p.SegmentsBuildLimiter, logger)
 
 	// Serialize retirement's chain-DB reads against Aggregator commit+prune.
 	// Without this, retirement's db.View RO txs can overlap a commit and pin
