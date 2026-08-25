@@ -476,3 +476,43 @@ func BenchmarkGenericCacheParallelMixed(b *testing.B) {
 	hits, misses := c.hits.Load()-hits0, c.misses.Load()-misses0
 	b.ReportMetric(100*float64(hits)/float64(hits+misses), "hit%")
 }
+
+// Filling a cache from cold to a large working set. On the jump-grow lineage
+// this pays the migration copies; with slab-allocated elements there is nothing
+// to migrate. Uses only the public put path, so it runs unchanged on both.
+func BenchmarkGenericCacheFill(b *testing.B) {
+	const keys = 1 << 20
+	val := make([]byte, 32)
+	for b.Loop() {
+		c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, 88, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		k := make([]byte, 8)
+		for i := range uint64(keys) {
+			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
+			c.Put(k, val, 1)
+		}
+		c.Close()
+	}
+}
+
+// The longest a single put is held up while filling a cache from cold: on the
+// jump-grow lineage that is a migration copy, with slab-allocated elements it
+// is one slab allocation.
+func BenchmarkGenericCacheWorstPut(b *testing.B) {
+	const keys = 1 << 20
+	val := make([]byte, 32)
+	var worst time.Duration
+	for b.Loop() {
+		c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, 88, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		k := make([]byte, 8)
+		for i := range uint64(keys) {
+			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
+			start := time.Now()
+			c.Put(k, val, 1)
+			if d := time.Since(start); d > worst {
+				worst = d
+			}
+		}
+		c.Close()
+	}
+	b.ReportMetric(float64(worst.Microseconds()), "worst-put-us")
+}
