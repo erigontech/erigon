@@ -2033,11 +2033,29 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 		}
 		if _, hasSignedBlock := probe["signed_block"]; hasSignedBlock {
 			block := cltypes.NewDenebSignedBeaconBlock(a.beaconChainCfg, version)
-			if block != nil {
-				if err := json.Unmarshal(body, block); err == nil {
-					return block, nil
+			if block == nil {
+				return nil, errors.New("failed to create wrapped block")
+			}
+			rawEnvelope, hasEnvelope := probe["signed_execution_payload_envelope"]
+			hasNonNullEnvelope := hasEnvelope && !bytes.Equal(bytes.TrimSpace(rawEnvelope), []byte("null"))
+			if hasNonNullEnvelope {
+				block.SignedExecutionPayloadEnvelope = &cltypes.SignedExecutionPayloadEnvelope{
+					Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(a.beaconChainCfg, version),
 				}
 			}
+			if err := json.Unmarshal(body, block); err != nil {
+				return nil, fmt.Errorf("wrapped json: %w", err)
+			}
+			if block.SignedBlock == nil {
+				return nil, errors.New("wrapped json has null signed_block")
+			}
+			if hasNonNullEnvelope {
+				envelope := block.SignedExecutionPayloadEnvelope
+				if envelope == nil || envelope.Message == nil || envelope.Message.Payload == nil || envelope.Message.ExecutionRequests == nil {
+					return nil, errors.New("wrapped json has incomplete signed execution payload envelope")
+				}
+			}
+			return block, nil
 		}
 		// Fall back to plain SignedBeaconBlock (keys: "message", "signature")
 		if err := json.Unmarshal(body, signedBlock); err != nil {
@@ -2181,10 +2199,13 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
+	blockStored := make(chan error, 1)
 	go func() {
-		if err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars); err != nil {
+		err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars)
+		if err != nil {
 			log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
 		}
+		blockStored <- err
 	}()
 
 	log.Info(
@@ -2223,21 +2244,35 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
-	// [New in Gloas:EIP7732] For self-built blocks, construct and broadcast the
-	// SignedExecutionPayloadEnvelope so the block can transition from PENDING to FULL.
-	// If the validator client provided a signed envelope, use it directly (real BLS signature).
-	// Otherwise fall back to constructing one from the cache (legacy/fallback path).
+	// [New in Gloas:EIP7732] Publish the validator-signed envelope after local block integration.
 	if blk.Version() >= clparams.GloasVersion {
 		var validatorSignedEnvelope *cltypes.SignedExecutionPayloadEnvelope
 		if len(signedEnvelope) > 0 && signedEnvelope[0] != nil {
 			validatorSignedEnvelope = signedEnvelope[0]
 		}
-		if err := a.broadcastSelfBuildEnvelope(ctx, blk, validatorSignedEnvelope); err != nil {
-			a.logger.Error("Failed to broadcast self-build execution payload envelope", "err", err)
+		if err := publishSelfBuildEnvelopeAfterStorage(ctx, blockStored, func() error {
+			return a.broadcastSelfBuildEnvelope(ctx, blk, validatorSignedEnvelope)
+		}); err != nil {
+			return fmt.Errorf("failed to broadcast self-build execution payload envelope: %w", err)
 		}
 	}
 
 	return nil
+}
+
+func publishSelfBuildEnvelopeAfterStorage(ctx context.Context, blockStored <-chan error, publish func() error) error {
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case err := <-blockStored:
+		if err != nil {
+			return fmt.Errorf("failed to store block and blobs: %w", err)
+		}
+		return publish()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 // broadcastSelfBuildEnvelope validates and broadcasts the validator-signed envelope for a self-built Gloas block.

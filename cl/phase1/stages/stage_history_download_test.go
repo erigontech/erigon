@@ -92,22 +92,46 @@ func TestELBackfillFinished_NoGapUsesSlotFloor(t *testing.T) {
 	}
 }
 
-func TestCompleteHistoryBackfillWithholdsNotificationWhenEnvelopeRecoveryExhausts(t *testing.T) {
+func TestCompleteHistoryBackfillNotifiesAfterMoreThanThreeRecoveryAttempts(t *testing.T) {
 	skipped := []network.SkippedFullBlock{{Root: [32]byte{1}}}
 	attempts := 0
 	notified := false
 
 	completed := completeHistoryBackfill(
-		context.Background(), skipped, 3, 0,
+		context.Background(), skipped, 0,
 		func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock {
 			attempts++
+			if attempts == 5 {
+				return nil
+			}
+			return skipped
+		},
+		func() { notified = true },
+	)
+
+	require.True(t, completed)
+	require.Equal(t, 5, attempts)
+	require.True(t, notified)
+}
+
+func TestCompleteHistoryBackfillCancellationWithholdsNotification(t *testing.T) {
+	ctx, cancel := context.WithCancel(context.Background())
+	skipped := []network.SkippedFullBlock{{Root: [32]byte{1}}}
+	attempts := 0
+	notified := false
+
+	completed := completeHistoryBackfill(
+		ctx, skipped, 0,
+		func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock {
+			attempts++
+			cancel()
 			return skipped
 		},
 		func() { notified = true },
 	)
 
 	require.False(t, completed)
-	require.Equal(t, 3, attempts)
+	require.Equal(t, 1, attempts)
 	require.False(t, notified)
 }
 
@@ -118,7 +142,7 @@ func TestCompleteHistoryBackfillNotifiesAfterPartialEnvelopeRecoveryCompletes(t 
 	notified := false
 
 	completed := completeHistoryBackfill(
-		context.Background(), []network.SkippedFullBlock{first, second}, 3, 0,
+		context.Background(), []network.SkippedFullBlock{first, second}, 0,
 		func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
 			roots := make([][32]byte, len(pending))
 			for i := range pending {

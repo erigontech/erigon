@@ -297,6 +297,43 @@ func TestBroadcastSelfBuildEnvelopePublishesValidatedEnvelopeBeforePersistenceRe
 	require.True(t, cached)
 }
 
+func TestPublishSelfBuildEnvelopeAfterStorage(t *testing.T) {
+	t.Run("storage failure", func(t *testing.T) {
+		stored := make(chan error, 1)
+		stored <- errors.New("store failed")
+		called := false
+		err := publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, func() error {
+			called = true
+			return nil
+		})
+		require.ErrorContains(t, err, "store failed")
+		require.False(t, called)
+	})
+
+	t.Run("storage success", func(t *testing.T) {
+		stored := make(chan error, 1)
+		stored <- nil
+		called := false
+		require.NoError(t, publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, func() error {
+			called = true
+			return nil
+		}))
+		require.True(t, called)
+	})
+
+	t.Run("canceled", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		called := false
+		err := publishSelfBuildEnvelopeAfterStorage(ctx, make(chan error), func() error {
+			called = true
+			return nil
+		})
+		require.ErrorIs(t, err, context.Canceled)
+		require.False(t, called)
+	})
+}
+
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,
@@ -335,6 +372,53 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
+}
+
+func TestParseGloasRequestBeaconBlockAcceptsConfiguredWrappedJSON(t *testing.T) {
+	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+	wrapper := cltypes.NewDenebSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	wrapper.SignedBlock.Block.Slot = 123
+	wrapper.SignedExecutionPayloadEnvelope = &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(h.beaconChainCfg, clparams.GloasVersion),
+	}
+	payload := wrapper.SignedExecutionPayloadEnvelope.Message.Payload
+	payload.Extra = solid.NewExtraData()
+	payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1}})
+	payload.Withdrawals = solid.NewStaticListSSZFromList(
+		[]*cltypes.Withdrawal{{Index: 1}},
+		int(h.beaconChainCfg.MaxWithdrawalsPerPayload),
+		44,
+	)
+	body, err := json.Marshal(wrapper)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+
+	var parsed *cltypes.DenebSignedBeaconBlock
+	require.NotPanics(t, func() {
+		parsed, err = h.parseGloasRequestBeaconBlock(clparams.GloasVersion, request)
+	})
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), parsed.SignedBlock.Block.Slot)
+	require.NotNil(t, parsed.SignedExecutionPayloadEnvelope)
+	require.Equal(t, clparams.GloasVersion, parsed.SignedExecutionPayloadEnvelope.Message.Payload.Version())
+	require.Equal(t, clparams.GloasVersion, parsed.SignedExecutionPayloadEnvelope.Message.ExecutionRequests.Version())
+	require.Equal(t, 1, parsed.SignedExecutionPayloadEnvelope.Message.Payload.Withdrawals.Len())
+}
+
+func TestParseGloasRequestBeaconBlockRejectsMalformedWrappedEnvelope(t *testing.T) {
+	h := &ApiHandler{beaconChainCfg: &clparams.MainnetBeaconConfig}
+	request := httptest.NewRequestWithContext(
+		t.Context(),
+		http.MethodPost,
+		"/eth/v2/beacon/blocks",
+		strings.NewReader(`{"signed_block":{},"signed_execution_payload_envelope":1}`),
+	)
+	request.Header.Set("Content-Type", "application/json")
+
+	parsed, err := h.parseGloasRequestBeaconBlock(clparams.GloasVersion, request)
+	require.Error(t, err)
+	require.Nil(t, parsed)
 }
 
 func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
