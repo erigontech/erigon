@@ -6,6 +6,7 @@ package handler
 
 import (
 	"errors"
+	"fmt"
 	"net/http"
 	"net/http/httptest"
 	"testing"
@@ -87,4 +88,49 @@ func TestBuilderRouteStoreEvictsDeliveredRouteBeforeRejectingPromise(t *testing.
 	require.True(t, routes.Add(common.Hash{2}, "https://two.example"))
 	require.False(t, routes.Claim(firstRoot, "https://one.example"))
 	require.True(t, routes.Claim(common.Hash{2}, "https://two.example"))
+}
+
+func TestBuilderRouteStoreEvictsOldestDeliveredRoute(t *testing.T) {
+	now := time.Unix(100, 0)
+	routes := newBuilderRouteStore(2, time.Minute, func() time.Time { return now })
+	first := builderRouteKey{root: common.Hash{1}, url: "https://one.example"}
+	second := builderRouteKey{root: common.Hash{2}, url: "https://two.example"}
+	require.True(t, routes.Add(first.root, first.url))
+	require.True(t, routes.Claim(first.root, first.url))
+	routes.Complete(first.root, first.url, true)
+	now = now.Add(time.Second)
+	require.True(t, routes.Add(second.root, second.url))
+	require.True(t, routes.Claim(second.root, second.url))
+	routes.Complete(second.root, second.url, true)
+
+	require.True(t, routes.Add(common.Hash{3}, "https://three.example"))
+	_, firstExists := routes.routes[first]
+	_, secondExists := routes.routes[second]
+	require.False(t, firstExists)
+	require.True(t, secondExists)
+}
+
+func TestBuilderRouteStoreEqualExpiryUsesKeyTieBreak(t *testing.T) {
+	for _, reverse := range []bool{false, true} {
+		t.Run(fmt.Sprint("reverse=", reverse), func(t *testing.T) {
+			routes := newBuilderRouteStore(2, time.Minute, func() time.Time { return time.Unix(100, 0) })
+			lower := builderRouteKey{root: common.Hash{1}, url: "https://same.example"}
+			higher := builderRouteKey{root: common.Hash{2}, url: "https://same.example"}
+			keys := []builderRouteKey{lower, higher}
+			if reverse {
+				keys[0], keys[1] = keys[1], keys[0]
+			}
+			for _, key := range keys {
+				require.True(t, routes.Add(key.root, key.url))
+				require.True(t, routes.Claim(key.root, key.url))
+				routes.Complete(key.root, key.url, true)
+			}
+
+			require.True(t, routes.Add(common.Hash{3}, "https://three.example"))
+			_, lowerExists := routes.routes[lower]
+			_, higherExists := routes.routes[higher]
+			require.False(t, lowerExists)
+			require.True(t, higherExists)
+		})
+	}
 }

@@ -1079,6 +1079,16 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 	if parentBid == nil || len(entries) == 0 {
 		return nil
 	}
+	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
+	if err != nil {
+		return nil
+	}
+	expectedFeeRecipient := a.feeRecipientForProposal(proposerIndex, targetSlot)
+	defaultGasLimit := parentBid.GasLimit
+	if latestParentBid := baseState.GetLatestExecutionPayloadBid(); latestParentBid != nil {
+		defaultGasLimit = latestParentBid.GasLimit
+	}
+	targetGasLimit := a.proposalTargetGasLimit(baseState, targetSlot, proposerIndex, defaultGasLimit)
 	timeout := time.Second
 	if deadline, ok := ctx.Deadline(); ok {
 		remaining := time.Until(deadline)
@@ -1118,6 +1128,10 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 			bid.Message.ParentBlockHash != parentBid.ParentBlockHash || bid.Message.ParentBlockRoot != parentBid.ParentBlockRoot {
 			continue
 		}
+		if bid.Message.FeeRecipient != expectedFeeRecipient || bid.Message.GasLimit > targetGasLimit ||
+			bid.Message.ExecutionPayment > result.entry.MaxExecutionPayment {
+			continue
+		}
 		if builders == nil || bid.Message.BuilderIndex >= uint64(builders.Len()) {
 			continue
 		}
@@ -1142,6 +1156,28 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 		})
 	}
 	return candidates
+}
+
+func (a *ApiHandler) proposalTargetGasLimit(
+	baseState *state.CachingBeaconState,
+	targetSlot uint64,
+	proposerIndex uint64,
+	defaultGasLimit uint64,
+) uint64 {
+	if a.epbsPool == nil {
+		return defaultGasLimit
+	}
+	proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
+	dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
+	if err != nil {
+		log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
+		return defaultGasLimit
+	}
+	pref, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot)
+	if !ok || pref.Message == nil || pref.Message.ValidatorIndex != proposerIndex {
+		return defaultGasLimit
+	}
+	return pref.Message.TargetGasLimit
 }
 
 func (a *ApiHandler) getBuilderPayload(
@@ -1320,18 +1356,8 @@ func (a *ApiHandler) produceBeaconBody(
 	var targetGasLimit *hexutil.Uint64
 	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 		if parentBid := baseState.GetLatestExecutionPayloadBid(); parentBid != nil {
-			tgl := hexutil.Uint64(parentBid.GasLimit)
+			tgl := hexutil.Uint64(a.proposalTargetGasLimit(baseState, targetSlot, proposerIndex, parentBid.GasLimit))
 			targetGasLimit = &tgl
-		}
-		if a.epbsPool != nil {
-			proposalEpoch := state.GetEpochAtSlot(a.beaconChainCfg, targetSlot)
-			dependentRoot, err := state.GetProposerDependentRoot(baseState, proposalEpoch)
-			if err != nil {
-				log.Trace("Skipping proposer preferences target gas limit", "slot", targetSlot, "err", err)
-			} else if pref, ok := a.epbsPool.GetPreference(targetSlot, dependentRoot); ok && pref.Message != nil && pref.Message.ValidatorIndex == proposerIndex {
-				tgl := hexutil.Uint64(pref.Message.TargetGasLimit)
-				targetGasLimit = &tgl
-			}
 		}
 	}
 	var executionPayload *cltypes.Eth1Block

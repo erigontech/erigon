@@ -50,6 +50,7 @@ import (
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
+	"github.com/erigontech/erigon/cl/pool"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -245,6 +246,8 @@ func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *tes
 	externalBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 0)}
 	externalBid.Message.ParentBlockHash = parentBid.ParentBlockHash
 	externalBid.Message.ParentBlockRoot = baseRoot
+	externalBid.Message.FeeRecipient = common.Address{}
+	externalBid.Message.GasLimit = parentBid.GasLimit
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().RequestExecutionPayloadBid(
 		gomock.Any(), "https://builder.example", targetSlot, parentBid.ParentBlockHash, baseRoot, gomock.Any(), gomock.Any(), gomock.Any(),
@@ -263,6 +266,76 @@ func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *tes
 	block, err := handler.produceBlock(ctx, 100, postState.Slot(), baseRoot, postState, targetSlot, common.Bytes96{}, common.Hash{})
 	require.NoError(t, err)
 	require.Same(t, externalBid, block.BeaconBody.SignedExecutionPayloadBid)
+}
+
+func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
+	for _, tc := range []struct {
+		name          string
+		feeRecipient  common.Address
+		gasLimit      uint64
+		execPayment   uint64
+		maxPayment    uint64
+		preferenceGas uint64
+		want          int
+	}{
+		{name: "no P2P preference uses local defaults", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, want: 1},
+		{name: "wrong fee recipient", feeRecipient: common.Address{0x43}, gasLimit: 30_000_000},
+		{name: "gas limit at target", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, want: 1},
+		{name: "gas limit above target", feeRecipient: common.Address{0x42}, gasLimit: 30_000_001},
+		{name: "P2P gas preference at target", feeRecipient: common.Address{0x42}, gasLimit: 25_000_000, preferenceGas: 25_000_000, want: 1},
+		{name: "P2P gas preference above target", feeRecipient: common.Address{0x42}, gasLimit: 25_000_001, preferenceGas: 25_000_000},
+		{name: "execution payment at cap", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, execPayment: 5, maxPayment: 5, want: 1},
+		{name: "execution payment above cap", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, execPayment: 6, maxPayment: 5},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			handler.beaconChainCfg.FuluForkEpoch = 0
+			handler.beaconChainCfg.GloasForkEpoch = 0
+			handler.beaconChainCfg.InitializeForkSchedule()
+			require.NoError(t, postState.UpgradeToFulu())
+			require.NoError(t, postState.UpgradeToGloas())
+			postState.GetBuilders().Append(&cltypes.Builder{Pubkey: common.Bytes48{0x42}})
+			targetSlot := postState.Slot() + 1
+			proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
+			require.NoError(t, err)
+			validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
+			if tc.preferenceGas != 0 {
+				handler.epbsPool = pool.NewEpbsPool()
+				proposalEpoch := state.GetEpochAtSlot(handler.beaconChainCfg, targetSlot)
+				dependentRoot, err := state.GetProposerDependentRoot(postState, proposalEpoch)
+				require.NoError(t, err)
+				handler.epbsPool.ProposerPreferences.Add(
+					pool.ProposerPreferencesKey{Slot: targetSlot, DependentRoot: dependentRoot},
+					&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+						ProposalSlot: targetSlot, ValidatorIndex: proposerIndex, FeeRecipient: common.Address{0x42},
+						TargetGasLimit: tc.preferenceGas, DependentRoot: dependentRoot,
+					}},
+				)
+			}
+			parentBid := postState.GetLatestExecutionPayloadBid()
+			parentBid.GasLimit = 30_000_000
+			bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 1)}
+			bid.Message.ParentBlockHash = parentBid.ParentBlockHash
+			bid.Message.ParentBlockRoot = parentBid.ParentBlockRoot
+			bid.Message.FeeRecipient = tc.feeRecipient
+			bid.Message.GasLimit = tc.gasLimit
+			bid.Message.ExecutionPayment = tc.execPayment
+			builderClient := builder_mock.NewMockBuilderClient(ctrl)
+			builderClient.EXPECT().RequestExecutionPayloadBid(
+				gomock.Any(), "https://builder.example", targetSlot, parentBid.ParentBlockHash, parentBid.ParentBlockRoot,
+				gomock.Any(), gomock.Any(), gomock.Any(),
+			).Return(bid, nil)
+			handler.builderClient = builderClient
+			handler.executionPayloadBidService = acceptingExecutionPayloadBidService{}
+
+			candidates := handler.requestConfiguredBuilderBids(t.Context(), postState, targetSlot, common.Bytes48{}, parentBid, []*cltypes.BuilderEntry{{
+				URL: "https://builder.example", BuilderBoostFactor: 100, MaxExecutionPayment: tc.maxPayment,
+			}})
+
+			require.Len(t, candidates, tc.want)
+		})
+	}
 }
 
 func TestSelectGloasBidCapsExecutionPaymentAndAvoidsOverflow(t *testing.T) {
