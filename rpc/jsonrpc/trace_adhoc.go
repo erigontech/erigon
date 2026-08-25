@@ -1260,6 +1260,10 @@ func (api *TraceAPIImpl) Call(ctx context.Context, args TraceCallParam, traceTyp
 		return nil, fmt.Errorf("execution aborted (timeout = %v)", api.evmCallTimeout)
 	}
 
+	if !traceTypeTrace {
+		traceResult.Trace = []*ParityTrace{}
+	}
+
 	return traceResult, nil
 }
 

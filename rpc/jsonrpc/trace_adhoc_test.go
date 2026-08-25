@@ -1124,3 +1124,46 @@ func TestReplayTransactionSignerReflectsBlockOverridesNumber(t *testing.T) {
 	})
 	require.ErrorContains(t, err, "protected txn is not supported by signer")
 }
+
+func traceCallValueTransfer() TraceCallParam {
+	from := common.HexToAddress("0x71562b71999873db5b286df957af199ec94617f7")
+	to := common.HexToAddress("0x0d3ab14bbad3d99f4203bd7a11acb94882050e7e")
+	return TraceCallParam{From: &from, To: &to, Value: (*hexutil.Big)(big.NewInt(1))}
+}
+
+func TestTraceCallKeepsTraceEmptyWhenNotRequested(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+
+	for _, traceTypes := range [][]string{
+		{TraceTypeStateDiff},
+		{TraceTypeVmTrace},
+		{TraceTypeVmTrace, TraceTypeStateDiff},
+	} {
+		t.Run(strings.Join(traceTypes, "+"), func(t *testing.T) {
+			result, err := api.Call(context.Background(), traceCallValueTransfer(), traceTypes, &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+			require.NoError(t, err)
+			require.NotNil(t, result)
+			require.Empty(t, result.Trace)
+
+			// An unrequested trace must serialize as [], never as null.
+			encoded, err := json.Marshal(result)
+			require.NoError(t, err)
+			require.Contains(t, string(encoded), `"trace":[]`)
+		})
+	}
+}
+
+func TestTraceCallPopulatesTraceWhenRequested(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+
+	result, err := api.Call(context.Background(), traceCallValueTransfer(), []string{TraceTypeTrace}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.NotEmpty(t, result.Trace)
+	require.Nil(t, result.VmTrace)
+	require.Nil(t, result.StateDiff)
+}
