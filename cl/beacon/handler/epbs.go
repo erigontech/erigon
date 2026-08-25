@@ -906,16 +906,20 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	gossipValidated := false
 	emitGossipEvent := false
 	emitIntegrationEvents := false
+	var persistenceErr error
 	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, canonical, true); err != nil {
-		if canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
+			persistenceErr = err
+		} else if canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
-		}
-		if canonical && validation != BlockPublishingValidationGossip {
+		} else if canonical && validation != BlockPublishingValidationGossip {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
 		switch {
+		case persistenceErr != nil:
+			gossipValidated = true
 		case errors.Is(err, forkchoice.ErrIgnore):
 			persisted, _ := a.forkchoiceStore.ReadEnvelopeFromDisk(signedEnvelope.Message.BeaconBlockRoot)
 			if !signedExecutionPayloadEnvelopesEqual(persisted, signedEnvelope) {
@@ -998,6 +1002,10 @@ func (a *ApiHandler) postEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
+	}
+	if persistenceErr != nil {
+		beaconhttp.WrapEndpointError(persistenceErr).WriteTo(w)
+		return
 	}
 
 	w.WriteHeader(status)
