@@ -287,7 +287,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 
 func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
 	newCfg := func(nodiscover bool) *p2p.Config {
-		cfg, err := NewP2PConfig(nodiscover, datadir.New(t.TempDir()), "", "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false, false)
+		cfg, err := NewP2PConfig(nodiscover, datadir.New(t.TempDir()), "", "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false)
 		require.NoError(t, err)
 		return cfg
 	}

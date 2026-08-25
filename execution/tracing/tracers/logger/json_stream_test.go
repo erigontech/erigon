@@ -22,6 +22,7 @@ import (
 	"encoding/hex"
 	"encoding/json"
 	"errors"
+	"fmt"
 	"io"
 	"math/big"
 	"strings"
@@ -509,5 +510,179 @@ func BenchmarkJsonStreamLogger_OnOpcode(b *testing.B) {
 	for b.Loop() {
 		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
 		i++
+	}
+}
+
+// countingWriter discards but records how much a response actually produced,
+// and how many separate Write calls it took to deliver it.
+type countingWriter struct {
+	n      int64
+	writes int
+}
+
+func (w *countingWriter) Write(p []byte) (int, error) {
+	w.n += int64(len(p))
+	w.writes++
+	return len(p), nil
+}
+
+// largeTrace drives the logger over enough opcodes to produce a response far
+// larger than any buffer, reporting the bytes written, the peak buffer, and
+// how many separate writes reached the underlying io.Writer.
+func largeTrace(tb testing.TB, steps int, cfg *LogConfig) (produced int64, peakBuffer, writes int) {
+	tb.Helper()
+	var out countingWriter
+	stream := jsonstream.New(&out)
+	l := NewJsonStreamLogger(cfg, context.Background(), stream)
+	l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+	key := common.BigToHash(common.Big1)
+	val := common.BigToHash(common.Big2)
+	scope := &mockOpContext{
+		memory: bytes.Repeat([]byte{0xab}, 4096),
+		stack:  []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])},
+	}
+	for i := range steps {
+		l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+		if n := len(stream.Buffer()); n > peakBuffer {
+			peakBuffer = n
+		}
+	}
+	stream.WriteArrayEnd()
+	stream.WriteObjectEnd()
+	require.NoError(tb, stream.Flush())
+	return out.n, peakBuffer, out.writes
+}
+
+// TestJsonStreamLogger_LargeTraceStaysBounded covers the case streaming exists
+// for: one transaction whose trace dwarfs any buffer. Nothing in the RPC layer
+// flushes inside a transaction, so the stream has to do it. Memory tracing used
+// to bound it by accident, because writeMemoryWordRaw went through Write, which
+// flushed per 32-byte word; with memory off nothing drained at all.
+func TestJsonStreamLogger_LargeTraceStaysBounded(t *testing.T) {
+	for name, cfg := range map[string]*LogConfig{
+		"storage only":   {},
+		"memory enabled": {EnableMemory: true},
+	} {
+		t.Run(name, func(t *testing.T) {
+			steps := 20_000
+			produced, peak, writes := largeTrace(t, steps, cfg)
+			require.Greater(t, produced, int64(1<<20), "the trace must dwarf the buffer to mean anything")
+			require.Less(t, peak, 4*jsonstream.FlushThreshold,
+				"buffer peaked at %d for a %dMB response", peak, produced>>20)
+			require.Less(t, writes, steps,
+				"%d writes for %d steps: memory words must batch through the buffer, not forward one write per word", writes, steps)
+		})
+	}
+}
+
+// TestHexQuotedMatchesUint256Hex pins the stack encoding against uint256.Hex,
+// which the RPC output has to stay byte-identical to. The interesting cases are
+// the nibble boundaries: Hex counts nibbles, not bytes, so 0xf is one digit and
+// 0x10 is two.
+func TestHexQuotedMatchesUint256Hex(t *testing.T) {
+	l := &JsonStreamLogger{}
+	for _, str := range []string{
+		"0", "1", "f", "10", "ff", "100",
+		"1234567890abcdef",
+		"ffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffffff",
+		"0000000000000000000000000000000000000000000000000000000000000001",
+		"8000000000000000000000000000000000000000000000000000000000000000",
+	} {
+		v := new(uint256.Int).SetBytes(common.FromHex("0x" + str))
+		require.Equal(t, `"`+v.Hex()+`"`, l.hexQuoted(v), "value 0x%s", str)
+	}
+}
+
+// BenchmarkOnOpcodeStackDepth shows the scaling: the saved allocation is per
+// stack slot per step, and a real trace is not two slots deep.
+func BenchmarkOnOpcodeStackDepth(b *testing.B) {
+	for _, depth := range []int{2, 8, 16, 32} {
+		b.Run(fmt.Sprintf("depth=%d", depth), func(b *testing.B) {
+			stack := make([]uint256.Int, depth)
+			for i := range stack {
+				stack[i].SetUint64(uint64(i)*0x0123456789abcdef + 1)
+			}
+			scope := &mockOpContext{memory: bytes.Repeat([]byte{0xab}, 256), stack: stack}
+			l := NewJsonStreamLogger(&LogConfig{}, context.Background(), jsonstream.New(io.Discard))
+			l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+
+			b.ReportAllocs()
+			i := 0
+			for b.Loop() {
+				l.OnOpcode(uint64(i), byte(vm.ADD), 100, 3, scope, nil, 1, nil)
+				i++
+				// Nothing else drains this stream, and every iteration appends to it.
+				_ = l.stream.Flush()
+			}
+		})
+	}
+}
+
+func BenchmarkStackValueWrite(b *testing.B) {
+	vals := make([]uint256.Int, 16)
+	for i := range vals {
+		vals[i].SetUint64(uint64(i)*0x0123456789abcdef + 1)
+	}
+
+	b.Run("WriteString_Hex", func(b *testing.B) {
+		s := jsonstream.New(io.Discard)
+		b.ReportAllocs()
+		for b.Loop() {
+			for i := range vals {
+				s.WriteString(vals[i].Hex())
+			}
+			_ = s.Flush()
+		}
+	})
+	b.Run("WriteRaw_hexQuoted", func(b *testing.B) {
+		l := &JsonStreamLogger{stream: jsonstream.New(io.Discard)}
+		b.ReportAllocs()
+		for b.Loop() {
+			for i := range vals {
+				l.stream.WriteRaw(l.hexQuoted(&vals[i]))
+			}
+			_ = l.stream.Flush()
+		}
+	})
+}
+
+// TestHexQuotedHashMatchesHexWithPrefix pins the pre-quoted form against the
+// one WriteString produced, which the RPC output has to stay identical to.
+func TestHexQuotedHashMatchesHexWithPrefix(t *testing.T) {
+	l := &JsonStreamLogger{}
+	for _, seed := range []int{0, 1, 7, 255} {
+		var h common.Hash
+		for i := range h {
+			h[i] = byte(i*seed + 1)
+		}
+		want := `"` + l.hexWithPrefix(&h) + `"`
+		require.Equal(t, want, l.hexQuotedHash(&h), "seed=%d", seed)
+	}
+}
+
+// BenchmarkOnOpcodeStorage covers the shape debug_traceTransaction takes by
+// default: two hex strings per touched slot, accumulating across steps.
+func BenchmarkOnOpcodeStorage(b *testing.B) {
+	for _, slots := range []int{1, 8, 32} {
+		b.Run(fmt.Sprintf("slots=%d", slots), func(b *testing.B) {
+			l := NewJsonStreamLogger(&LogConfig{}, context.Background(), jsonstream.New(io.Discard))
+			l.env = &tracing.VMContext{IntraBlockState: &mockIBS{}}
+			scope := &mockOpContext{}
+			for i := range slots {
+				key := common.BigToHash(big.NewInt(int64(i + 1)))
+				val := common.BigToHash(big.NewInt(int64(1000 + i)))
+				scope.stack = []uint256.Int{*new(uint256.Int).SetBytes(val[:]), *new(uint256.Int).SetBytes(key[:])}
+				l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+			}
+			b.ReportAllocs()
+			i := 0
+			for b.Loop() {
+				l.OnOpcode(uint64(i), byte(vm.SSTORE), 100, 3, scope, nil, 1, nil)
+				i++
+				// Nothing else drains this stream, and every iteration appends to it.
+				_ = l.stream.Flush()
+			}
+		})
 	}
 }
