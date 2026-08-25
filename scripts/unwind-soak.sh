@@ -185,7 +185,16 @@ set_head_retry() {
 # into snapshot territory.
 SCENARIO1_DEPTH="${SCENARIO1_DEPTH:-${MODEA_DEPTH:-50}}"
 SCENARIO2_DEPTH="${SCENARIO2_DEPTH:-300}"
-SETHEAD_PREFLIGHT_TIMEOUT_SEC="${SETHEAD_PREFLIGHT_TIMEOUT_SEC:-${MODEA_SETHEAD_TIMEOUT_SEC:-120}}"
+# SETHEAD_PREFLIGHT_TIMEOUT_SEC bounds the mode_a #1 setHead curl call.
+# It has to cover the worst case where the previous iter's mode-B/C
+# post-commit wave (v4 boundary emit + retire + merge) is still holding
+# the exec-module semaphore when mode_a #1 fires. That wave can run
+# 5-10 min on hoodi at step boundaries; 120s was too tight and produced
+# false-fail iter-4-mode_a-hangs (cycle 9/10 signature). 600s gives
+# enough headroom for the v4 retire path without masking a real wedge.
+# See chaintoml-as-canonical-inventory-followup + v4-retire-cost-audit
+# memos for the underlying cost.
+SETHEAD_PREFLIGHT_TIMEOUT_SEC="${SETHEAD_PREFLIGHT_TIMEOUT_SEC:-${MODEA_SETHEAD_TIMEOUT_SEC:-600}}"
 PREFLIGHT_RECOVERY_TIMEOUT_SEC="${PREFLIGHT_RECOVERY_TIMEOUT_SEC:-${MODEA_RECOVERY_TIMEOUT_SEC:-900}}"
 
 # Forward-progress requirement: per-iter recovery must reach pre_head+N,
