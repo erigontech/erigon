@@ -1,16 +1,16 @@
 #!/usr/bin/env bash
 # Put a PR back into the merge queue when the queue evicted it for a CI
 # infrastructure failure — a dead runner or a broken runner network — rather
-# than a failure of the PR's own checks. Called by merge-queue-requeue.yml on
-# pull_request_target `dequeued` events.
+# than a failure of the PR's own checks. Called by merge-queue-requeue.yml.
 #
 # Exit 0 = handled (re-queued, or intentionally skipped with a logged reason).
 # Exit 1 = operational error (bad input, enqueue mutation failed).
 #
 # Inputs (env): PR_NUMBER; PR_NODE_ID (resolved via the API when empty);
-# DEQUEUE_REASON (optional, from the event payload); GH_TOKEN and
-# GITHUB_REPOSITORY for the API; MAX_REQUEUES (default 3 per rolling 24 h);
-# MQ_RUN_ID to classify a specific gate run instead of looking one up;
+# DEQUEUE_REASON (optional, from the event payload); GH_TOKEN for API reads and
+# comments; ENQUEUE_TOKEN for enqueuePullRequest; GITHUB_REPOSITORY for the
+# API; MAX_REQUEUES (default 3 per rolling 24 h); MQ_RUN_ID to classify a
+# specific gate run instead of looking one up;
 # MQ_DRY_RUN=1 to log mutations without performing them.
 # Test seam: MQ_NO_FETCH=1 reads MQ_RUNS_JSON, MQ_JOBS_JSON,
 # MQ_ANNOTATIONS_JSON ({"<job id>": ["<message>"]}), MQ_COMMENTS_JSON,
@@ -215,8 +215,12 @@ fi
 if dry_run; then
   echo "DRY-RUN: would enqueue PR #${PR_NUMBER} (${PR_NODE_ID})"
 else
+  if [ -z "${ENQUEUE_TOKEN:-}" ]; then
+    echo "::error::ENQUEUE_TOKEN is required to re-queue PR #${PR_NUMBER}."
+    exit 1
+  fi
   # shellcheck disable=SC2016
-  gh api graphql \
+  GH_TOKEN="$ENQUEUE_TOKEN" gh api graphql \
     -F id="$PR_NODE_ID" \
     -f query='mutation($id: ID!) {
       enqueuePullRequest(input: {pullRequestId: $id}) {

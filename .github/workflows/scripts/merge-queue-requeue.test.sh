@@ -121,6 +121,17 @@ run_output() {
   fi
 }
 
+run_file_match() {
+  local name="$1" file="$2" pattern="$3"
+  if grep -qE "$pattern" "$file"; then
+    printf 'ok   - %s\n' "$name"
+    pass=$((pass + 1))
+  else
+    printf 'FAIL - %s: %s does not match /%s/\n' "$name" "$file" "$pattern"
+    fail=$((fail + 1))
+  fi
+}
+
 # Hosted runner death (job "failure" + lost-communication annotation) -> requeue.
 run_output "runner death -> requeue" 0 \
   "would enqueue PR #23294" "not re-queuing" \
@@ -240,6 +251,19 @@ run_output "invalid PR number -> error" 1 \
   - "would enqueue" \
   PR_NUMBER=abc \
   MQ_JOBS_JSON="$JOBS_RUNNER_DEATH"
+
+run_file_match "failed gate dispatches trusted handler" "$here/../ci-gate.yml" \
+  'gh workflow run merge-queue-requeue\.yml'
+run_file_match "handler accepts workflow dispatch" "$here/../merge-queue-requeue.yml" \
+  '^  workflow_dispatch:$'
+run_file_match "handler mints a GitHub App token" "$here/../merge-queue-requeue.yml" \
+  'actions/create-github-app-token@'
+run_file_match "App token can manage the merge queue" "$here/../merge-queue-requeue.yml" \
+  'permission-merge-queues:[[:space:]]*write'
+run_file_match "handler passes a separate enqueue token" "$here/../merge-queue-requeue.yml" \
+  'ENQUEUE_TOKEN:.*steps\.app_token\.outputs\.token'
+run_file_match "enqueue mutation uses the App token" "$script" \
+  'GH_TOKEN="[$]ENQUEUE_TOKEN" gh api graphql'
 
 printf '\n%d passed, %d failed\n' "$pass" "$fail"
 [ "$fail" -eq 0 ]

@@ -201,6 +201,8 @@ jobs:
           REF: ${{ github.ref_name }}
           OWNER: ${{ github.repository_owner }}
           REPO_NAME: ${{ github.event.repository.name }}
+          DEFAULT_BRANCH: ${{ github.event.repository.default_branch }}
+          GATE_RUN_ID: ${{ github.run_id }}
         run: |
           pr_number=$(echo "$REF" | grep -oE 'pr-[0-9]+' | head -1 | cut -d- -f2)
           if [ -z "$pr_number" ]; then
@@ -224,10 +226,21 @@ jobs:
           fi
           echo "Dequeuing PR #$pr_number ($pr_id) after ci-gate failure"
           # shellcheck disable=SC2016
-          gh api graphql \
+          if ! gh api graphql \
             -F id="$pr_id" \
             -f query='mutation($id: ID!) {
               dequeuePullRequest(input: {id: $id}) {
                 mergeQueueEntry { position }
               }
-            }' || echo "::warning::dequeuePullRequest mutation failed (already dequeued, or insufficient permissions)"
+            }'; then
+            echo "::warning::dequeuePullRequest mutation failed (already dequeued, or insufficient permissions)"
+            exit 0
+          fi
+          echo "Dispatching infrastructure-failure classification for CI Gate run $GATE_RUN_ID"
+          gh workflow run merge-queue-requeue.yml \
+            --ref "$DEFAULT_BRANCH" \
+            -f pr_number="$pr_number" \
+            -f pr_node_id="$pr_id" \
+            -f run_id="$GATE_RUN_ID" \
+            -f dequeue_reason=CI_FAILURE \
+            || echo "::warning::Could not dispatch merge-queue-requeue.yml"
