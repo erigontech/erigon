@@ -383,6 +383,13 @@ func WithSentryProtocol(protocol uint) Option {
 	}
 }
 
+// WithStateTransitionObserver exposes execution lifecycle boundaries to tests.
+func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) Option {
+	return func(opts *options) {
+		opts.stateTransitionObserver = observer
+	}
+}
+
 type options struct {
 	stepSize                      *uint64
 	e2RetireStep                  *uint64
@@ -398,6 +405,7 @@ type options struct {
 	alwaysGenerateChangesets      *bool
 	maxReorgDepth                 *uint64
 	sentryProtocol                uint
+	stateTransitionObserver       execmodule.StateTransitionObserver
 	skipAmsterdamBuilderContracts bool
 }
 
@@ -763,7 +771,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
-	mock.StateCache = execmodule.NewCache(nil)
+	mock.StateCache = execmodule.NewCache(opt.stateTransitionObserver)
 
 	accum := &execmodule.Accumulation{
 		Accumulator:    mock.Notifications.Accumulator,
