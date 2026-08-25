@@ -173,19 +173,31 @@ func TestTracer_AccessList_SlotFirstAddress(t *testing.T) {
 	}, al.accessList())
 }
 
-// TestAccessListTracerLazyAddressSets pins that a tracer which never sees a CREATE
-// keeps both address sets nil while the accessors stay usable.
+// TestAccessListTracerLazyAddressSets pins that a fresh tracer leaves both
+// contract-address sets nil, and that markCreated/markUsedBeforeCreation
+// allocate them independently on first write.
 func TestAccessListTracerLazyAddressSets(t *testing.T) {
 	tracer := NewAccessListTracer(nil, nil, nil)
-	require.Nil(t, tracer.CreatedContracts())
+	require.Nil(t, tracer.createdContracts)
 	require.False(t, tracer.UsedBeforeCreation(addr))
 
 	tracer.markUsedBeforeCreation(addr)
 	require.True(t, tracer.UsedBeforeCreation(addr))
-	require.Nil(t, tracer.CreatedContracts())
+	require.Nil(t, tracer.createdContracts)
 
 	tracer.markCreated(addr)
 	require.Contains(t, tracer.CreatedContracts(), addr)
+}
+
+// TestAccessListTracerCreatedContractsWritable pins that CreatedContracts always
+// returns a writable map, even before any CREATE: callers writing through the
+// returned set must not panic on a nil map.
+func TestAccessListTracerCreatedContractsWritable(t *testing.T) {
+	tracer := NewAccessListTracer(nil, nil, nil)
+	got := tracer.CreatedContracts()
+	require.NotNil(t, got)
+	got[addr] = struct{}{}
+	require.Contains(t, tracer.createdContracts, addr)
 }
 
 // TestAccessListTracerSeedNew pins that seeding directly from the accumulated maps
