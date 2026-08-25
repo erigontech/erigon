@@ -487,23 +487,32 @@ func testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnFramingError(
 
 	valid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
 	valid.Message.BeaconBlockRoot = common.HexToHash("0x01")
-	var response bytes.Buffer
-	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, valid, gloasDigest[:]...))
-	require.NoError(t, response.WriteByte(0))
-	_, err = response.Write([]byte{1})
-	require.NoError(t, err)
+	for _, test := range []struct {
+		name string
+		tail []byte
+	}{
+		{"dangling response code", []byte{0}},
+		{"truncated fork digest", []byte{0, 1}},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var response bytes.Buffer
+			require.NoError(t, ssz_snappy.EncodeAndWrite(&response, valid, gloasDigest[:]...))
+			_, err := response.Write(test.tail)
+			require.NoError(t, err)
 
-	client := &BeaconRpcP2P{
-		ctx:          context.Background(),
-		sentinel:     &blockResponseSentinel{response: response.Bytes()},
-		beaconConfig: &cfg,
-		ethClock:     clock,
+			client := &BeaconRpcP2P{
+				ctx:          context.Background(),
+				sentinel:     &blockResponseSentinel{response: response.Bytes()},
+				beaconConfig: &cfg,
+				ethClock:     clock,
+			}
+			envelopes, pid, err := request(client)
+			require.Error(t, err)
+			require.Equal(t, "malicious-peer", pid)
+			require.Len(t, envelopes, 1)
+			require.Equal(t, valid.Message.BeaconBlockRoot, envelopes[0].Message.BeaconBlockRoot)
+		})
 	}
-	envelopes, pid, err := request(client)
-	require.Error(t, err)
-	require.Equal(t, "malicious-peer", pid)
-	require.Len(t, envelopes, 1)
-	require.Equal(t, valid.Message.BeaconBlockRoot, envelopes[0].Message.BeaconBlockRoot)
 }
 
 func testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnError(
@@ -601,4 +610,30 @@ func TestSendBeaconBlocksByRangeReqRejectsForkSchemaSlotMismatch(t *testing.T) {
 	require.Nil(t, blocks)
 	require.Equal(t, "malicious-peer", pid)
 	require.Equal(t, "malicious-peer", sentinel.bannedPeer)
+}
+
+func TestSendBeaconBlocksByRangeReqRejectsDanglingResponseCodeWithoutPartialResult(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	fuluDigest, err := clock.ComputeForkDigest(cfg.FuluForkEpoch)
+	require.NoError(t, err)
+
+	slot := cfg.FuluForkEpoch * cfg.SlotsPerEpoch
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.FuluVersion)
+	block.Block.Slot = slot
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, block, fuluDigest[:]...))
+	require.NoError(t, response.WriteByte(0))
+
+	client := &BeaconRpcP2P{
+		ctx:          context.Background(),
+		sentinel:     &blockResponseSentinel{response: response.Bytes()},
+		beaconConfig: &cfg,
+		ethClock:     clock,
+	}
+	blocks, pid, err := client.SendBeaconBlocksByRangeReq(context.Background(), slot, 1)
+	require.Error(t, err)
+	require.Nil(t, blocks)
+	require.Equal(t, "malicious-peer", pid)
 }

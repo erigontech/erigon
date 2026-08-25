@@ -87,7 +87,8 @@ func makeGloasEnvelopeForBlock(t *testing.T, block *cltypes.SignedBeaconBlock) (
 	requestsRoot, err := envelope.Message.ExecutionRequests.HashSSZ()
 	require.NoError(t, err)
 	bid.ExecutionRequestsRoot = requestsRoot
-	envelope.Message.Payload.BlockHash, err = envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsRoot, nil)
+	requestsHash := cltypes.ComputeExecutionRequestHash(cltypes.GetExecutionRequestsList(&clparams.MainnetBeaconConfig, envelope.Message.ExecutionRequests))
+	envelope.Message.Payload.BlockHash, err = envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
 	require.NoError(t, err)
 	bid.BlockHash = envelope.Message.Payload.BlockHash
 	root, err := block.Block.HashSSZ()
@@ -747,6 +748,50 @@ func TestEnvelopeHTTPFallbackRejectsBidCommitmentMismatch(t *testing.T) {
 	)
 	require.Zero(t, fetched)
 	require.Empty(t, received)
+}
+
+func TestInvalidP2PEnvelopeDoesNotSuppressHealthyHTTPFallback(t *testing.T) {
+	validP2PBlock := makeGloasBlock(9, hash(1), hash(2))
+	validP2PEnvelope, validP2PRoot := makeGloasEnvelopeForBlock(t, validP2PBlock)
+	httpBlock := makeGloasBlock(8, hash(3), hash(4))
+	httpEnvelope, httpRoot := makeGloasEnvelopeForBlock(t, httpBlock)
+
+	invalidP2PEnvelope := httpEnvelope.Clone().(*cltypes.SignedExecutionPayloadEnvelope)
+	invalidP2PEnvelope.Message.Payload.GasUsed++
+	received := map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope{
+		validP2PRoot: validP2PEnvelope,
+		httpRoot:     invalidP2PEnvelope,
+	}
+	filterEnvelopesByBlockCommitments(
+		&clparams.MainnetBeaconConfig,
+		received,
+		[]*cltypes.SignedBeaconBlock{validP2PBlock, httpBlock},
+	)
+	require.Contains(t, received, validP2PRoot)
+	require.NotContains(t, received, httpRoot)
+
+	encoded, err := httpEnvelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	httpRequests := 0
+	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {
+		httpRequests++
+		require.Contains(t, r.URL.Path, common.Bytes2Hex(httpRoot[:]))
+		_, _ = w.Write(encoded)
+	}))
+	defer server.Close()
+
+	fetched := fetchEnvelopesFromBeaconAPI(
+		context.Background(),
+		server.URL,
+		[]*cltypes.SignedBeaconBlock{validP2PBlock, httpBlock},
+		[][32]byte{validP2PRoot, httpRoot},
+		received,
+		&clparams.MainnetBeaconConfig,
+	)
+	require.Equal(t, 1, fetched)
+	require.Equal(t, 1, httpRequests)
+	require.Same(t, validP2PEnvelope, received[validP2PRoot])
+	require.Equal(t, httpEnvelope.Message.Payload.BlockHash, received[httpRoot].Message.Payload.BlockHash)
 }
 
 func TestEnvelopeHTTPFallbackRejectsConfiguredRequestLimit(t *testing.T) {

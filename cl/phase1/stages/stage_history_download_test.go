@@ -133,7 +133,7 @@ func TestRecoverSkippedEnvelopeRejectsBidCommitmentMismatchBeforeSideEffects(t *
 
 	require.False(t, recoverSkippedEnvelope(
 		context.Background(),
-		StageHistoryReconstructionCfg{},
+		StageHistoryReconstructionCfg{beaconCfg: &clparams.MainnetBeaconConfig},
 		network.SkippedFullBlock{Block: block, Root: root},
 		envelope,
 	))

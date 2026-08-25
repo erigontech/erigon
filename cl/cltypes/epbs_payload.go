@@ -528,7 +528,10 @@ func ValidateExecutionPayloadEnvelopeVersion(version clparams.StateVersion) erro
 }
 
 // ValidateExecutionPayloadEnvelopeCommitments verifies the envelope fields committed by a beacon block's execution payload bid.
-func ValidateExecutionPayloadEnvelopeCommitments(block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope) error {
+func ValidateExecutionPayloadEnvelopeCommitments(beaconCfg *clparams.BeaconChainConfig, block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope) error {
+	if beaconCfg == nil {
+		return errors.New("beacon chain config is nil")
+	}
 	if block == nil || block.Block == nil || block.Block.Body == nil {
 		return errors.New("beacon block is incomplete")
 	}
@@ -587,7 +590,8 @@ func ValidateExecutionPayloadEnvelopeCommitments(block *SignedBeaconBlock, signe
 	if requestsRoot != bid.ExecutionRequestsRoot {
 		return fmt.Errorf("envelope execution requests root %x does not match bid execution requests root %x", requestsRoot, bid.ExecutionRequestsRoot)
 	}
-	if _, err := envelope.Payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsRoot, nil); err != nil {
+	requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(beaconCfg, envelope.ExecutionRequests))
+	if _, err := envelope.Payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsHash, nil); err != nil {
 		return fmt.Errorf("validate envelope payload block hash: %w", err)
 	}
 	return nil

@@ -732,7 +732,7 @@ func fetchEnvelopesFromBeaconAPI(
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope block root mismatch", "slot", slot, "requested", common.Hash(root), "received", envelope.Message.BeaconBlockRoot)
 				return
 			}
-			if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(block, envelope); err != nil {
+			if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(beaconCfg, block, envelope); err != nil {
 				log.Debug("[ForwardBeaconDownloader] HTTP envelope block commitments mismatch", "slot", slot, "err", err)
 				return
 			}

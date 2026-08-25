@@ -21,6 +21,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"maps"
 	"net/http"
 	"slices"
 	"strings"
@@ -320,7 +321,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			envelope = envelopes[common.Hash(blockRoot)]
 		}
 		if envelope != nil {
-			if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(block, envelope); err != nil {
+			if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(b.beaconCfg, block, envelope); err != nil {
 				log.Debug("[BackwardBeaconDownloader] rejecting envelope with mismatched block commitments", "slot", block.Block.Slot, "err", err)
 				envelope = nil
 			}
@@ -385,7 +386,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 					envelope = env
 				}
 				if envelope != nil {
-					if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(block, envelope); err != nil {
+					if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(b.beaconCfg, block, envelope); err != nil {
 						log.Debug("[BackwardBeaconDownloader] rejecting root-fetched envelope with mismatched block commitments", "slot", block.Block.Slot, "err", err)
 						envelope = nil
 					}
@@ -508,6 +509,15 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		if fetched > 0 {
 			log.Debug("[BackwardBeaconDownloader] fetched envelopes from beacon API", "count", fetched)
 		}
+		if len(envelopes) < len(fetchRoots) && b.rpc != nil {
+			missingRoots := filterReceived(fetchRoots, envelopes)
+			p2pEnvelopes, err := RequestEnvelopesFrantically(ctx, b.rpc, missingRoots)
+			if err != nil {
+				log.Debug("[BackwardBeaconDownloader] failed to fill HTTP envelope gaps via P2P", "err", err)
+			}
+			filterEnvelopesByBlockCommitments(b.beaconCfg, p2pEnvelopes, responses)
+			maps.Copy(envelopes, p2pEnvelopes)
+		}
 		return envelopes, fetchRootSet, fullRootSet
 	}
 
@@ -515,6 +525,7 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 	if err != nil {
 		log.Debug("[BackwardBeaconDownloader] failed to fetch GLOAS envelopes via P2P", "err", err)
 	}
+	filterEnvelopesByBlockCommitments(b.beaconCfg, envelopes, responses)
 	// Fill in missing envelopes from the beacon API when an HTTP URL is configured.
 	if b.httpFallbackURL != "" && len(envelopes) < len(fetchRoots) {
 		if envelopes == nil {
@@ -554,13 +565,14 @@ func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context, 
 	if envelopes == nil {
 		envelopes = make(map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, len(roots))
 	}
+	blocks := make([]*cltypes.SignedBeaconBlock, len(skipped))
+	for i, skippedBlock := range skipped {
+		blocks[i] = skippedBlock.Block
+	}
+	filterEnvelopesByBlockCommitments(b.beaconCfg, envelopes, blocks)
 
 	// HTTP fallback for roots still missing after P2P.
 	if b.httpFallbackURL != "" && len(envelopes) < len(skipped) {
-		blocks := make([]*cltypes.SignedBeaconBlock, len(skipped))
-		for i, s := range skipped {
-			blocks[i] = s.Block
-		}
 		fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, blocks, roots, envelopes, b.beaconCfg)
 	}
 	for _, skippedBlock := range skipped {
@@ -569,13 +581,40 @@ func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context, 
 		if envelope == nil {
 			continue
 		}
-		if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(skippedBlock.Block, envelope); err != nil {
+		if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(b.beaconCfg, skippedBlock.Block, envelope); err != nil {
 			log.Debug("[BackwardBeaconDownloader] rejecting recovered envelope with mismatched block commitments", "root", root, "err", err)
 			delete(envelopes, root)
 		}
 	}
 
 	return envelopes
+}
+
+func filterEnvelopesByBlockCommitments(beaconCfg *clparams.BeaconChainConfig, envelopes map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, blocks []*cltypes.SignedBeaconBlock) {
+	if len(envelopes) == 0 {
+		return
+	}
+	blocksByRoot := make(map[common.Hash]*cltypes.SignedBeaconBlock, len(blocks))
+	for _, block := range blocks {
+		if block == nil || block.Block == nil {
+			continue
+		}
+		root, err := block.Block.HashSSZ()
+		if err == nil {
+			blocksByRoot[root] = block
+		}
+	}
+	for root, envelope := range envelopes {
+		block := blocksByRoot[root]
+		if block == nil {
+			delete(envelopes, root)
+			continue
+		}
+		if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(beaconCfg, block, envelope); err != nil {
+			log.Debug("[BackwardBeaconDownloader] rejecting P2P envelope with mismatched block commitments", "root", root, "err", err)
+			delete(envelopes, root)
+		}
+	}
 }
 
 // trySkipToExistingBlock attempts to skip ahead if the expected block already exists in the database.
@@ -784,7 +823,7 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	if envelope.Message.BeaconBlockRoot != blockRoot {
 		return nil, fmt.Errorf("envelope block root %x does not match requested block root %x", envelope.Message.BeaconBlockRoot, blockRoot)
 	}
-	if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(block, envelope); err != nil {
+	if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(b.beaconCfg, block, envelope); err != nil {
 		return nil, fmt.Errorf("envelope block commitments: %w", err)
 	}
 	return envelope, nil

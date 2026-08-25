@@ -64,10 +64,12 @@ func TestValidateExecutionPayloadEnvelopeCommitments(t *testing.T) {
 		envelope.Message.Payload.FeeRecipient = common.HexToAddress("0x24")
 		envelope.Message.Payload.GasLimit = 30_000_000
 		envelope.Message.BuilderIndex = 7
+		envelope.Message.ExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
 
 		requestsRoot, err := envelope.Message.ExecutionRequests.HashSSZ()
 		require.NoError(t, err)
-		envelope.Message.Payload.BlockHash, err = envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsRoot, nil)
+		requestsHash := ComputeExecutionRequestHash(GetExecutionRequestsList(&clparams.MainnetBeaconConfig, envelope.Message.ExecutionRequests))
+		envelope.Message.Payload.BlockHash, err = envelope.Message.Payload.ComputeBlockHash(&envelope.Message.ParentBeaconBlockRoot, requestsHash, nil)
 		require.NoError(t, err)
 		bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
 		bid.ParentBlockHash = envelope.Message.Payload.ParentHash
@@ -85,7 +87,7 @@ func TestValidateExecutionPayloadEnvelopeCommitments(t *testing.T) {
 	}
 
 	block, envelope := makePair(t)
-	require.NoError(t, ValidateExecutionPayloadEnvelopeCommitments(block, envelope))
+	require.NoError(t, ValidateExecutionPayloadEnvelopeCommitments(&clparams.MainnetBeaconConfig, block, envelope))
 
 	mutations := []struct {
 		name   string
@@ -109,7 +111,7 @@ func TestValidateExecutionPayloadEnvelopeCommitments(t *testing.T) {
 		t.Run(mutation.name, func(t *testing.T) {
 			block, envelope := makePair(t)
 			mutation.mutate(envelope)
-			require.Error(t, ValidateExecutionPayloadEnvelopeCommitments(block, envelope))
+			require.Error(t, ValidateExecutionPayloadEnvelopeCommitments(&clparams.MainnetBeaconConfig, block, envelope))
 		})
 	}
 }
