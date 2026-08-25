@@ -345,6 +345,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	var chainConfig *chain.Config
 	var genesis *types.Block
+	var compatErr *chain.ConfigCompatError
 	if err := rawChainDB.Update(context.Background(), func(tx kv.RwTx) error {
 
 		genesisConfig, err := rawdb.ReadGenesis(tx)
@@ -370,20 +371,17 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		}
 		var genesisErr error
 		chainConfig, genesis, genesisErr = genesiswrite.WriteGenesisBlock(tx, genesisSpec, config.Snapshot.ChainName, config.OverrideOsakaTime, config.OverrideAmsterdamTime, config.KeepStoredChainConfig, dirs, logger)
-		var compatErr *chain.ConfigCompatError
 		if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
 			return genesisErr
 		}
-		if compatErr != nil {
-			// The rejected config is not written but is still what this process runs, so
-			// it and anything reading the config from the database disagree on the schedule.
-			logger.Error("Incompatible chain config: the database keeps the stored schedule, this process runs the rejected one",
-				"err", compatErr)
-		}
-
 		return nil
 	}); err != nil {
-		panic(err)
+		return nil, err
+	}
+	// The rejected config is not written, so starting would run this process on a schedule
+	// the database contradicts, with no path back to agreement short of a rewind.
+	if compatErr != nil {
+		return nil, fmt.Errorf("incompatible chain config: %w", compatErr)
 	}
 	chainConfig.AllowAA = config.AllowAA
 	backend.chainConfig = chainConfig
