@@ -411,13 +411,13 @@ already the output's.
 
 ### Task 11: Verify acceptance criteria
 
-- [ ] verify every requirement in the Overview is implemented
-- [ ] verify the staging invariant holds: after `datadirCli` is reassigned, grep the driver
+- [x] verify every requirement in the Overview is implemented
+- [x] verify the staging invariant holds: after `datadirCli` is reassigned, grep the driver
       for any reference to a source path — there must be none
-- [ ] confirm no `t.Skip` was added by this branch
-- [ ] run `go test ./execution/commitment/... ./db/state/... -count=1`
-- [ ] run `go build ./cmd/integration/`
-- [ ] run `make lint` — must report 0 issues
+- [x] confirm no `t.Skip` was added by this branch
+- [x] run `go test ./execution/commitment/... ./db/state/... -count=1`
+- [x] run `go build ./cmd/integration/`
+- [x] run `make lint` — must report 0 issues
 
 ### Task 12: [Final] Update documentation
 
