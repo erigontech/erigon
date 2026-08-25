@@ -234,11 +234,11 @@ func TestGrowLRU_LenTracksLRU(t *testing.T) {
 }
 
 // growLRU's generation swap is not fenced against writers (see its doc
-// comment): a grow can copy a key into the new generation before a same-key
-// Remove/Add pair (putContentLocked's stale-entry refresh) observes the swap.
-// The Remove then lands on the retired generation while the Add lands on the
-// new one, which already holds the copy — freelru.Add replaces it in place
-// without firing OnEvict, so the counter must not increment again.
+// comment): a grow can copy a key into the new generation while a same-key
+// refresh (putContentLocked's stale-entry path) is in flight. Replace resolves
+// g.cur once so both halves land on the same generation; split across the swap,
+// the removal would hit the retired generation and the insert would replace the
+// copy in place without firing OnEvict, double-counting the key.
 func TestGrowLRU_GrowRaceReplaceDoesNotDoubleCount(t *testing.T) {
 	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
 	defer g.Close()
@@ -259,14 +259,20 @@ func TestGrowLRU_GrowRaceReplaceDoesNotDoubleCount(t *testing.T) {
 	g.cur.Store(gen2)
 	g.curCap.Store(newCap)
 
-	// The writer's Remove call raced ahead of the swap and landed on the
-	// retired generation.
-	gen1.lru.Remove(h)
-	// Its Add call now targets gen2, which already holds h from the copy.
-	g.Add(h, 2)
+	g.Replace(h, 2)
 
 	require.Equal(t, gen2.lru.Len(), g.Len(),
 		"counter must not double-count a grow-copied key replaced in place")
+	got, ok := g.Get(h)
+	require.True(t, ok)
+	require.Equal(t, uint64(2), got, "the refreshed value must be the one served")
+
+	// A refresh that resolved the retired generation must leave the live count alone.
+	live := g.Len()
+	gen1.lru.Remove(h)
+	gen1.add(h, 3)
+	require.Equal(t, live, g.Len(), "a write lost in the retired generation must not move the live counter")
+	require.Equal(t, gen1.lru.Len(), gen1.len(), "the retired generation's own counter must stay exact")
 }
 
 // CodeCache drives three growLRU layers through putContentLocked, which removes
@@ -309,4 +315,45 @@ func BenchmarkGrowLRUParallelAddGrow(b *testing.B) {
 			g.Add(n, n)
 		}
 	})
+}
+
+// The three stale drops on CodeCache's read path hold no put stripe, so they
+// interleave freely with a striped writer's stale-entry refresh while the LRU
+// grows. Whatever the interleaving, the live generation's counter must equal
+// its real length: an under-count wedges growth for good, because both grow
+// gates read the counter.
+func TestGrowLRU_CountExactUnderStripedRefreshAndUnstripedRemove(t *testing.T) {
+	g := newGrowLRU[uint64](8*datasize.MB, 16, nil)
+	defer g.Close()
+
+	const keySpace = 4096
+	key := func(i uint64) uint64 { return (i % keySpace) * 0x9E3779B97F4A7C15 }
+
+	var stripes [256]sync.Mutex
+	var wg sync.WaitGroup
+	for w := range 8 {
+		wg.Go(func() {
+			for i := range uint64(20000) {
+				h := key(uint64(w)*20000 + i)
+				stripe := &stripes[uint8(h)]
+				stripe.Lock()
+				if _, ok := g.Get(h); ok {
+					g.Replace(h, i)
+				} else {
+					g.Add(h, i)
+				}
+				stripe.Unlock()
+			}
+		})
+	}
+	wg.Go(func() {
+		for i := range uint64(60000) {
+			g.Remove(key(i))
+		}
+	})
+	wg.Wait()
+
+	gen := g.cur.Load()
+	require.Equal(t, gen.lru.Len(), gen.len(), "live generation's counter drifted from its real length")
+	require.NotEqual(t, g.startCap, g.curCap.Load(), "the LRU never grew, so the growth gates were not exercised")
 }
