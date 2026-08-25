@@ -381,19 +381,19 @@ already the output's.
 **Files:**
 - Create: `db/state/commitment_convert_pbin_e2e_test.go`
 
-- [ ] build a two-file legacy datadir: real bin commitment files via the existing `state_test`
+- [x] build a two-file legacy datadir: real bin commitment files via the existing `state_test`
       datadir helpers, each record rewritten backwards with `PBinEncodeLegacyRecord` and the
       state blob with `PBinEncodeLegacyState`
-- [ ] checksum the **whole** source datadir before the run, not just `snapshots/`
-- [ ] convert into an output datadir and assert non-commitment files arrive as hardlinks
+- [x] checksum the **whole** source datadir before the run, not just `snapshots/`
+- [x] convert into an output datadir and assert non-commitment files arrive as hardlinks
       (same inode)
-- [ ] assert commitment files are converted and decode under the current format
-- [ ] assert record counts equal, roots equal, sampled cells equal
-- [ ] assert the source checksum is unchanged, and separately that `<SRC>/temp` gained no
+- [x] assert commitment files are converted and decode under the current format
+- [x] assert record counts equal, roots equal, sampled cells equal
+- [x] assert the source checksum is unchanged, and separately that `<SRC>/temp` gained no
       files and `<SRC>/migrations` was not created — the compressor `.idt` and the recsplit
       temps are the regression this redesign exists to prevent, and a `snapshots/`-scoped
       check cannot see them
-- [ ] run `go test ./db/state/... -count=1` — must pass before task 10
+- [x] run `go test ./db/state/... -count=1` — must pass before task 10
 
 ### Task 10: Failure-mode coverage
 
