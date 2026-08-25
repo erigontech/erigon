@@ -79,7 +79,7 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		// Each boundary gets its own contract because an RPC assertion may fill
 		// StateCache; sharing a key could let one phase mask the next.
 		_, storageRefillAddress, storageRefill, _ := buildChurnChain(ctx, t, eat, 0, nil)
-		_, overlayPhaseAddress, overlayPhase, _ := buildChurnChain(ctx, t, eat, 0, nil)
+		_, publicationBoundaryAddress, publicationBoundary, _ := buildChurnChain(ctx, t, eat, 0, nil)
 		_, commitPhaseAddress, commitPhase, _ := buildChurnChain(ctx, t, eat, 0, nil)
 		_, databasePhaseAddress, databasePhase, _ := buildChurnChain(ctx, t, eat, 0, nil)
 		reorgTarget, err := eat.MockCl.BuildCanonicalBlock(ctx)
@@ -88,7 +88,7 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
 		require.NoError(t, err)
 		transactOpts.GasLimit = params.MaxTxnGasLimit
-		for _, churn := range []*contracts.StateChurn{storageRefill, overlayPhase, commitPhase, databasePhase} {
+		for _, churn := range []*contracts.StateChurn{storageRefill, publicationBoundary, commitPhase, databasePhase} {
 			applyStateChurnPoke(ctx, t, eat, churn, transactOpts, seed)
 		}
 		// This post-target deployment makes account and code removal part of the
@@ -107,7 +107,7 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		require.NoError(t, err)
 
 		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, storageRefillAddress, storageSlot), expectedStorage)
-		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, overlayPhaseAddress, storageSlot), expectedStorage)
+		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, publicationBoundaryAddress, storageSlot), expectedStorage)
 		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, commitPhaseAddress, storageSlot), expectedStorage)
 		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, databasePhaseAddress, storageSlot), expectedStorage)
 		assertContractRPCStatePresentWithZeroStorage(t, readContractRPCState(ctx, t, rpcClient, removedAccountAddress, storageSlot))
@@ -155,9 +155,10 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		})
 
 		unwindComplete.wait(t)
+		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, publicationBoundaryAddress, storageSlot), expectedStorage)
 		unwindComplete.release()
 		replacementOverlay.wait(t)
-		assertContractRPCStatePresentWithZeroStorage(t, readContractRPCState(ctx, t, rpcClient, overlayPhaseAddress, storageSlot))
+		assertContractRPCStatePresentWithZeroStorage(t, readContractRPCState(ctx, t, rpcClient, publicationBoundaryAddress, storageSlot))
 		replacementOverlay.release()
 
 		replacementCommitted.wait(t)
