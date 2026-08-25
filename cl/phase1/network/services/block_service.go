@@ -36,6 +36,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -160,6 +161,7 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 		return fmt.Errorf("%w: block is not from a future slot: %d > %d", ErrIgnore, currentSlot, msg.Block.Slot)
 	}
 	blockEpoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
+	var finalizedCheckpoint solid.Checkpoint
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
@@ -167,6 +169,7 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 		if blockEpoch <= headState.FinalizedCheckpoint().Epoch {
 			return fmt.Errorf("%w: block is not from a slot greater than the latest finalized slot: %d > %d", ErrIgnore, blockEpoch, headState.FinalizedCheckpoint().Epoch)
 		}
+		finalizedCheckpoint = headState.FinalizedCheckpoint()
 
 		if ok, err := eth2.VerifyBlockSignature(headState, msg); err != nil {
 			return err
@@ -191,6 +194,30 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 	}
 	if parentHeader.Slot >= msg.Block.Slot {
 		return ErrBlockYoungerThanParent
+	}
+	finalizedSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, b.beaconCfg.SlotsPerEpoch)
+	if !ok {
+		return errors.New("finalized checkpoint slot is not representable")
+	}
+	if b.forkchoiceStore.Ancestor(msg.Block.ParentRoot, finalizedSlot).Root != finalizedCheckpoint.Root {
+		return errors.New("finalized checkpoint is not an ancestor of block")
+	}
+	parentState, err := b.forkchoiceStore.GetStateAtBlockRoot(msg.Block.ParentRoot, true)
+	if err != nil {
+		return fmt.Errorf("get parent block state: %w", err)
+	}
+	if parentState == nil {
+		return errors.New("parent block state not found")
+	}
+	if err := transition.DefaultMachine.ProcessSlots(parentState, msg.Block.Slot); err != nil {
+		return fmt.Errorf("process parent state to block slot: %w", err)
+	}
+	expectedProposer, err := parentState.GetBeaconProposerIndexForSlot(msg.Block.Slot)
+	if err != nil {
+		return fmt.Errorf("get expected proposer: %w", err)
+	}
+	if msg.Block.ProposerIndex != expectedProposer {
+		return fmt.Errorf("block proposer index %d does not match expected proposer %d", msg.Block.ProposerIndex, expectedProposer)
 	}
 
 	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
@@ -221,20 +248,25 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 			return errors.New("bid.parent_block_root does not match block.parent_root")
 		}
 
-		// [IGNORE] The block's parent execution payload (defined by bid.parent_block_hash) has been seen
-		// (via gossip or non-gossip sources). A client MAY queue blocks for processing once the parent payload is retrieved.
-		// If execution_payload verification of block's execution payload parent by an execution node is complete:
-		// [REJECT] The block's execution payload parent (defined by bid.parent_block_hash) passes all validation.
-		parentBlockHash := bid.Message.ParentBlockHash
-		status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatus(parentBlockHash)
-		if !seen {
-			if schedule != nil {
-				schedule()
-			}
-			return fmt.Errorf("%w: parent execution payload not seen: %v", ErrIgnore, parentBlockHash)
+		parentBlock, ok := b.forkchoiceStore.GetBlock(msg.Block.ParentRoot)
+		if !ok || parentBlock == nil || parentBlock.Block == nil || parentBlock.Block.Body == nil {
+			return errors.New("parent block not found")
 		}
-		if status == execution_client.PayloadStatusInvalidated {
-			return errors.New("parent execution payload is invalid")
+		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
+		parentIsFull := parentBid != nil && parentBid.Message != nil && bid.Message.ParentBlockHash == parentBid.Message.BlockHash
+		if parentIsFull {
+			status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(msg.Block.ParentRoot)
+			if status == execution_client.PayloadStatusInvalidated {
+				return errors.New("parent execution payload is invalid")
+			}
+			if !seen || status != execution_client.PayloadStatusValidated {
+				if schedule != nil {
+					schedule()
+				}
+				return fmt.Errorf("%w: parent payload is not verified", ErrIgnore)
+			}
+		} else if bid.Message.ParentBlockHash != parentState.GetLatestBlockHash() {
+			return errors.New("bid does not build on the parent's execution head")
 		}
 	} else if msg.Block.Body.BlobKzgCommitments != nil && msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
 		// Pre-GLOAS: [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer

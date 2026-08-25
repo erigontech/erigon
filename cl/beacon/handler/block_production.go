@@ -2255,14 +2255,14 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		lenBlobs,
 	)
 	// Broadcast the block and its blobs
-	if err := a.gossipManager.Publish(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
-		a.logger.Error("Failed to publish block", "err", err)
+	if err := a.publishGossip(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
+		return err
 	}
 
 	if blk.Version() < clparams.FuluVersion {
 		for idx, blob := range blobsSidecarsBytes {
-			if err := a.gossipManager.Publish(ctx, gossip.TopicNameBlobSidecar(uint64(idx)), blob); err != nil {
-				a.logger.Error("Failed to publish blob sidecar", "err", err)
+			if err := a.publishGossip(ctx, gossip.TopicNameBlobSidecar(uint64(idx)), blob); err != nil {
+				return err
 			}
 		}
 	}
@@ -2275,8 +2275,8 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 				continue
 			}
 			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
-			if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
-				a.logger.Error("Failed to publish data column sidecar", "err", err)
+			if err := a.publishGossip(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
+				return err
 			}
 		}
 	}
@@ -2291,6 +2291,16 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
+	return nil
+}
+
+func (a *ApiHandler) publishGossip(ctx context.Context, topic string, data []byte) error {
+	if a.gossipManager == nil {
+		return errors.New("gossip publisher unavailable")
+	}
+	if err := a.gossipManager.Publish(ctx, topic, data); err != nil {
+		return fmt.Errorf("publish %s: %w", topic, err)
+	}
 	return nil
 }
 

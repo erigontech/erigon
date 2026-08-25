@@ -30,9 +30,15 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
@@ -153,7 +159,10 @@ func TestBlockServiceSuccess(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
-	blocks, _, post := tests.GetBellatrixRandom()
+	blocks, pre, post := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
 	require.NoError(t, syncedData.OnHeadState(post))
@@ -161,9 +170,170 @@ func TestBlockServiceSuccess(t *testing.T) {
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
 	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
+	finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
+	fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 
 	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
+}
+
+func TestBlockServiceGossipRejectsBlockOutsideFinalizedChain(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, post := tests.GetBellatrixRandom()
+	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	syncedData.OnHeadState(post)
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
+	fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: common.Hash{0xff}}
+
+	err := blockService.ValidateGossip(t.Context(), blocks[1])
+	require.ErrorContains(t, err, "finalized checkpoint is not an ancestor")
+}
+
+func TestBlockServiceGossipRejectsUnexpectedProposer(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, pre, post := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+	targetEpoch := blocks[1].Block.Slot / parentState.BeaconConfig().SlotsPerEpoch
+	mixPosition := (targetEpoch + parentState.BeaconConfig().EpochsPerHistoricalVector - parentState.BeaconConfig().MinSeedLookahead - 1) % parentState.BeaconConfig().EpochsPerHistoricalVector
+	foundUnexpectedProposer := false
+	for nonce := 1; nonce <= 255; nonce++ {
+		parentState.SetRandaoMixAt(int(mixPosition), common.Hash{byte(nonce)})
+		expected, proposerErr := parentState.GetBeaconProposerIndexForSlot(blocks[1].Block.Slot)
+		require.NoError(t, proposerErr)
+		if expected != blocks[1].Block.ProposerIndex {
+			foundUnexpectedProposer = true
+			break
+		}
+	}
+	require.True(t, foundUnexpectedProposer)
+
+	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	syncedData.OnHeadState(post)
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	fcu.Blocks[blocks[1].Block.ParentRoot] = blocks[0]
+	fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
+	finalizedSlot := post.FinalizedCheckpoint().Epoch * post.BeaconConfig().SlotsPerEpoch
+	fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
+
+	err = blockService.ValidateGossip(t.Context(), blocks[1])
+	require.ErrorContains(t, err, "does not match expected proposer")
+}
+
+func TestBlockServiceGossipWaitsForFullParentPayloadVerification(t *testing.T) {
+	service, child, fcu, parentRoot, parentBlockHash := newGloasGossipValidationFixture(t, nil)
+	fcu.ExecutionPayloadStatusMap[parentBlockHash] = execution_client.PayloadStatusValidated
+
+	err := service.ValidateGossip(t.Context(), child)
+	require.ErrorContains(t, err, "parent payload is not verified")
+	require.NotContains(t, fcu.PayloadStatusByRootMap, parentRoot)
+}
+
+func TestBlockServiceGossipAcceptsVerifiedFullParentPayload(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceGossipRejectsWrongEmptyParentExecutionHead(t *testing.T) {
+	service, child, _, _, _ := newGloasGossipValidationFixture(t, func(common.Hash, common.Hash) common.Hash {
+		return common.Hash{0x99}
+	})
+	require.ErrorContains(t, service.ValidateGossip(t.Context(), child), "does not build on the parent's execution head")
+}
+
+func TestBlockServiceGossipAcceptsEmptyParentExecutionHead(t *testing.T) {
+	service, child, _, _, _ := newGloasGossipValidationFixture(t, func(parentExecutionHead, _ common.Hash) common.Hash {
+		return parentExecutionHead
+	})
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func newGloasGossipValidationFixture(t *testing.T, childParentHash func(parentExecutionHead, parentBlockHash common.Hash) common.Hash) (BlockService, *cltypes.SignedBeaconBlock, *mock_services.ForkChoiceStorageMock, common.Hash, common.Hash) {
+	t.Helper()
+	ctrl := gomock.NewController(t)
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+	parentSlot := cfg.SlotsPerEpoch
+	childSlot := parentSlot + 1
+
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	validator := solid.NewValidator()
+	var pubkey [48]byte
+	copy(pubkey[:], bls.CompressPublicKey(privateKey.PublicKey()))
+	validator.SetPublicKey(pubkey)
+	validator.SetActivationEpoch(0)
+	validator.SetExitEpoch(cfg.FarFutureEpoch)
+	validator.SetEffectiveBalance(cfg.MaxEffectiveBalance)
+	parentState := state.New(&cfg)
+	parentState.SetVersion(clparams.GloasVersion)
+	parentState.SetSlot(parentSlot)
+	parentState.AddValidator(validator, cfg.MaxEffectiveBalance)
+	parentState.SetProposerLookahead(solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch)))
+	parentExecutionHead := common.Hash{0x11}
+	parentState.SetLatestBlockHash(parentExecutionHead)
+
+	parentBlockHash := common.Hash{0x22}
+	parent := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	parent.Block.Slot = parentSlot
+	parent.Block.ProposerIndex = 0
+	parent.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		ParentBlockHash: parentExecutionHead,
+		BlockHash:       parentBlockHash,
+	}}
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+
+	child := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	child.Block.Slot = childSlot
+	child.Block.ProposerIndex = 0
+	child.Block.ParentRoot = parentRoot
+	selectedParentHash := parentBlockHash
+	if childParentHash != nil {
+		selectedParentHash = childParentHash(parentExecutionHead, parentBlockHash)
+	}
+	child.Block.Body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		ParentBlockHash: selectedParentHash,
+		ParentBlockRoot: parentRoot,
+	}}
+	domain, err := parentState.GetDomain(cfg.DomainBeaconProposer, childSlot/cfg.SlotsPerEpoch)
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(child.Block, domain)
+	require.NoError(t, err)
+	copy(child.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+
+	db := mdbxtest.NewTestDB(t, dbcfg.ChainDB)
+	syncedDataManager := synced_data.NewSyncedDataManager(&cfg, true)
+	require.NoError(t, syncedDataManager.OnHeadState(parentState))
+	ethClock := eth_clock.NewMockEthereumClock(ctrl)
+	ethClock.EXPECT().GetCurrentSlot().Return(childSlot).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu := mock_services.NewForkChoiceStorageMock(t)
+	fcu.Headers[parentRoot] = parent.SignedBeaconBlockHeader().Header.Copy()
+	fcu.Blocks[parentRoot] = parent
+	fcu.StateAtBlockRootVal[parentRoot] = parentState
+	service := NewBlockService(t.Context(), db, fcu, syncedDataManager, ethClock, &cfg, nil)
+	return service, child, fcu, parentRoot, parentBlockHash
 }
 
 func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {

@@ -42,15 +42,15 @@ func BuildHeadV2Data(
 		return nil, errors.New("nil head state")
 	}
 
+	headEpoch := headSlot / beaconCfg.SlotsPerEpoch
 	genesisRoot := headRoot
 	var err error
-	if headSlot > 0 {
+	if headSlot > 0 && headEpoch <= 1 {
 		genesisRoot, err = headState.GetBlockRootAtSlot(0)
 		if err != nil {
 			return nil, fmt.Errorf("get genesis block root: %w", err)
 		}
 	}
-	headEpoch := headSlot / beaconCfg.SlotsPerEpoch
 	currentDependentRoot := genesisRoot
 	nextDependentRoot := genesisRoot
 	if headEpoch > 1 {
