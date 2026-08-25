@@ -244,6 +244,7 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 
 type newOptions struct {
 	stateTransitionObserver execmodule.StateTransitionObserver
+	rpcStateCacheDecorator  func(kvcache.Cache) kvcache.Cache
 }
 
 // NewOption configures Ethereum construction without adding runtime settings.
@@ -254,6 +255,13 @@ type NewOption func(*newOptions)
 func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) NewOption {
 	return func(options *newOptions) {
 		options.stateTransitionObserver = observer
+	}
+}
+
+// WithRPCStateCacheDecorator wraps the embedded RPC state cache during construction.
+func WithRPCStateCacheDecorator(decorator func(kvcache.Cache) kvcache.Cache) NewOption {
+	return func(options *newOptions) {
+		options.rpcStateCacheDecorator = decorator
 	}
 }
 
@@ -698,10 +706,14 @@ func New(
 		blobGetter = backend.txPool
 	}
 
-	execmoduleCache := execmodule.NewCache(options.stateTransitionObserver)
+	execmoduleCache := execmodule.NewCache()
 	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
+	var rpcStateCache kvcache.Cache = execmoduleCache
+	if options.rpcStateCacheDecorator != nil {
+		rpcStateCache = options.rpcStateCacheDecorator(rpcStateCache)
+	}
 	httpRpcCfg := stack.Config().Http
-	httpRpcCfg.StateCache.LocalCache = execmoduleCache
+	httpRpcCfg.StateCache.LocalCache = rpcStateCache
 	ethRpcClient, txPoolRpcClient, miningRpcClient, rpcDaemonStateCache, rpcFilters := rpcdaemoncli.EmbeddedServices(
 		ctx,
 		backend.chainDB,
@@ -914,6 +926,7 @@ func New(
 		false, /* onlySnapDownloadOnStart */
 		backend.readAheader,
 		backend.stopNode,
+		execmodule.WithStateTransitionObserver(options.stateTransitionObserver),
 	)
 	backend.execModule.SetPublishedSD(backend.notifications.Events.LatestSD)
 

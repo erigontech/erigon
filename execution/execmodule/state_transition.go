@@ -44,12 +44,6 @@ const (
 // lifecycle boundary. A blocking observer must return when its context ends.
 type StateTransitionObserver func(context.Context, StateTransitionPoint)
 
-func (c *Cache) observeStateTransition(ctx context.Context, point StateTransitionPoint) {
-	if c.stateTransitionObserver != nil {
-		c.stateTransitionObserver(ctx, point)
-	}
-}
-
 func (e *ExecModule) observeStateTransition(ctx context.Context, point StateTransitionPoint) {
 	if e.stateTransitionObserver != nil {
 		e.stateTransitionObserver(ctx, point)

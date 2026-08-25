@@ -104,15 +104,13 @@ func GetBlockHashFromMissingSegmentError(err error) (common.Hash, bool) {
 // the SD is the authoritative source, so the coherent cache's state-tracking
 // machinery is unnecessary.
 type Cache struct {
-	execModule              *ExecModule
-	publishedSD             func() *execctx.SharedDomains // returns the latest published SD from Events
-	stateTransitionObserver StateTransitionObserver
+	execModule  *ExecModule
+	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events
 }
 
-// NewCache creates the RPC state bridge. A nil observer disables test
-// instrumentation.
-func NewCache(observer StateTransitionObserver) *Cache {
-	return &Cache{stateTransitionObserver: observer}
+// NewCache creates the RPC state bridge.
+func NewCache() *Cache {
+	return &Cache{}
 }
 
 // SetPublishedSD wires the Cache to fall back to the published SD from Events
@@ -143,9 +141,6 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 	} else {
 		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
-	// Notify after selecting the getter so a paused request stays bound to this
-	// exact state view while forkchoice advances.
-	c.observeStateTransition(ctx, StateTransitionRPCViewBound)
 	return view, nil
 }
 func (c *Cache) OnNewBlock(sc *remoteproto.StateChangeBatch) {}
@@ -247,6 +242,17 @@ type ExecModule struct {
 
 var _ ExecutionModule = (*ExecModule)(nil) // compile-time interface check
 
+// ExecModuleOption configures execution-module construction.
+type ExecModuleOption func(*ExecModule)
+
+// WithStateTransitionObserver enables deterministic execution lifecycle hooks
+// for integration tests.
+func WithStateTransitionObserver(observer StateTransitionObserver) ExecModuleOption {
+	return func(module *ExecModule) {
+		module.stateTransitionObserver = observer
+	}
+}
+
 func NewExecModule(
 	ctx context.Context,
 	blockReader dbservices.FullBlockReader,
@@ -266,6 +272,7 @@ func NewExecModule(
 	onlySnapDownloadOnStart bool,
 	readAheader *exec.BlockReadAheader,
 	stopNode func() error,
+	opts ...ExecModuleOption,
 ) *ExecModule {
 	domainCache := newDomainStateCache(stateCacheBudget)
 	execctx.GuardAggregatorForCache(db, domainCache)
@@ -299,6 +306,9 @@ func NewExecModule(
 		readAheader:             readAheader,
 		stopNode:                stopNode,
 	}
+	for _, opt := range opts {
+		opt(em)
+	}
 
 	// Wire the process-global state cache into the read-ahead so its
 	// prefetches populate the same hashmap that SharedDomains.GetLatest
@@ -309,7 +319,6 @@ func NewExecModule(
 
 	if stateCache != nil {
 		stateCache.execModule = em
-		em.stateTransitionObserver = stateCache.stateTransitionObserver
 	}
 	return em
 }

@@ -41,6 +41,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
+	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/execution/builder/buildercfg"
 	"github.com/erigontech/erigon/execution/chain"
@@ -356,6 +357,9 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		logger,
 		nil,
 		eth.WithStateTransitionObserver(args.StateTransitionObserver),
+		eth.WithRPCStateCacheDecorator(func(cache kvcache.Cache) kvcache.Cache {
+			return withRPCViewObserver(cache, args.StateTransitionObserver)
+		}),
 	)
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("eth.New: %w", err)

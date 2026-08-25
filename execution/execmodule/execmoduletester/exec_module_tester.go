@@ -771,7 +771,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
-	mock.StateCache = execmodule.NewCache(opt.stateTransitionObserver)
+	mock.StateCache = execmodule.NewCache()
 
 	accum := &execmodule.Accumulation{
 		Accumulator:    mock.Notifications.Accumulator,
@@ -796,6 +796,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 		false, /* onlySnapDownloadOnStart */
 		readAheader,
 		func() error { return nil },
+		execmodule.WithStateTransitionObserver(opt.stateTransitionObserver),
 	)
 	mock.ForkValidator = mock.ExecModule.ForkValidator()
 
