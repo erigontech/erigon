@@ -26,6 +26,7 @@ import (
 	"io"
 	"math"
 	"math/big"
+	"math/bits"
 	"net/http"
 	"slices"
 	"strconv"
@@ -1182,14 +1183,14 @@ func selectGloasBid(localExecutionValueWei *big.Int, candidates []gloasBidCandid
 			continue
 		}
 		countedExecutionPayment := min(candidate.bid.Message.ExecutionPayment, candidate.maxExecutionPayment)
-		selectionValue := new(big.Int).Add(
-			new(big.Int).SetUint64(candidate.bid.Message.Value),
-			new(big.Int).SetUint64(countedExecutionPayment),
-		)
-		if selectionValue.Cmp(new(big.Int).SetUint64(candidate.minBid)) < 0 {
+		selectionValue, carry := bits.Add64(candidate.bid.Message.Value, countedExecutionPayment, 0)
+		if carry != 0 {
+			selectionValue = math.MaxUint64
+		}
+		if selectionValue < candidate.minBid {
 			continue
 		}
-		selectionValueWei := new(big.Int).Mul(selectionValue, big.NewInt(1_000_000_000))
+		selectionValueWei := new(big.Int).Mul(new(big.Int).SetUint64(selectionValue), big.NewInt(1_000_000_000))
 		weighted := new(big.Int).Mul(selectionValueWei, new(big.Int).SetUint64(candidate.boostFactor))
 		if best == nil || weighted.Cmp(bestWeighted) > 0 {
 			actualValue := new(big.Int).Add(
