@@ -71,7 +71,7 @@ type BackwardBeaconDownloader struct {
 	httpFallbackURL   string      // beacon API base URL for HTTP fallback when P2P fails
 	httpPreferred     atomic.Bool // set after first HTTP success; skips P2P probing
 
-	// Count consecutive batches where envelope fetch returned 0 for all FULL roots.
+	// Count consecutive fetches that missed the next required FULL root.
 	// After enough failures, skip envelope requirements and process blocks as EMPTY.
 	consecutiveEnvelopeFailures int
 	envelopesSkipped            bool // set when we give up on envelopes
@@ -320,13 +320,14 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 			envelope = envelopes[common.Hash(blockRoot)]
 		}
 
-		// A FULL block whose envelope could not be fetched must not be treated as
-		// EMPTY — unless we've exhausted retries (envelopesSkipped is set when
-		// consecutive batches fail envelope fetch entirely).
-		if _, isFull := fullRootSet[common.Hash(blockRoot)]; isFull && envelope == nil && !b.envelopesSkipped {
-			log.Warn("[BackwardBeaconDownloader] GLOAS FULL block envelope missing, will retry",
-				"slot", block.Block.Slot, "consecutiveFailures", b.consecutiveEnvelopeFailures)
-			return nil
+		_, isFull := fullRootSet[common.Hash(blockRoot)]
+		if isFull && !b.envelopesSkipped {
+			b.recordEnvelopeFetch(envelope != nil)
+			if envelope == nil && !b.envelopesSkipped {
+				log.Warn("[BackwardBeaconDownloader] GLOAS FULL block envelope missing, will retry",
+					"slot", block.Block.Slot, "consecutiveFailures", b.consecutiveEnvelopeFailures)
+				return nil
+			}
 		}
 
 		finished, err := b.onNewBlock(block, envelope)
@@ -337,7 +338,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 		}
 
 		// Record FULL blocks passing through without envelope for post-download recovery.
-		if _, isFull := fullRootSet[common.Hash(blockRoot)]; isFull && envelope == nil {
+		if isFull && envelope == nil {
 			b.skippedFullBlocks = append(b.skippedFullBlocks, SkippedFullBlock{Block: block, Root: blockRoot})
 		}
 
@@ -377,9 +378,14 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 				if block.Version() >= clparams.GloasVersion && !b.envelopesSkipped {
 					env, fetchErr := b.fetchSingleEnvelope(ctx, block)
 					if fetchErr != nil {
-						log.Warn("[BackwardBeaconDownloader] GLOAS envelope fetch failed for root-fetched block, will retry",
-							"slot", block.Block.Slot, "err", fetchErr)
-						return nil
+						b.recordEnvelopeFetch(false)
+						if !b.envelopesSkipped {
+							log.Warn("[BackwardBeaconDownloader] GLOAS envelope fetch failed for root-fetched block, will retry",
+								"slot", block.Block.Slot, "err", fetchErr)
+							return nil
+						}
+					} else {
+						b.recordEnvelopeFetch(true)
 					}
 					// env == nil && fetchErr == nil means HTTP 404: genuinely EMPTY.
 					envelope = env
@@ -390,6 +396,9 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 				if err != nil {
 					log.Warn("Error processing root-fetched block", "err", err)
 				} else {
+					if block.Version() >= clparams.GloasVersion && envelope == nil && b.envelopesSkipped {
+						b.skippedFullBlocks = append(b.skippedFullBlocks, SkippedFullBlock{Block: block, Root: blockRoot})
+					}
 					b.expectedRoot = block.Block.ParentRoot
 					if block.Block.Slot == 0 {
 						b.finished.Store(true)
@@ -490,21 +499,23 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		}
 	}
 
-	// Track consecutive batches where no envelopes could be fetched for FULL roots.
-	if len(envelopes) == 0 {
-		b.consecutiveEnvelopeFailures++
-		const maxConsecutiveFailures = 3
-		if b.consecutiveEnvelopeFailures >= maxConsecutiveFailures && !b.envelopesSkipped {
-			b.envelopesSkipped = true
-			log.Warn("[BackwardBeaconDownloader] too many consecutive envelope failures, treating FULL blocks as EMPTY",
-				"consecutiveFailures", b.consecutiveEnvelopeFailures)
-		}
-	} else {
+	return envelopes, fullRootSet
+}
+
+func (b *BackwardBeaconDownloader) recordEnvelopeFetch(success bool) {
+	if success {
 		b.consecutiveEnvelopeFailures = 0
 		b.envelopesSkipped = false
+		return
 	}
 
-	return envelopes, fullRootSet
+	b.consecutiveEnvelopeFailures++
+	const maxConsecutiveFailures = 3
+	if b.consecutiveEnvelopeFailures >= maxConsecutiveFailures && !b.envelopesSkipped {
+		b.envelopesSkipped = true
+		log.Warn("[BackwardBeaconDownloader] too many consecutive envelope failures, treating FULL blocks as EMPTY",
+			"consecutiveFailures", b.consecutiveEnvelopeFailures)
+	}
 }
 
 // SkippedFullBlocks returns FULL blocks that were processed without envelopes

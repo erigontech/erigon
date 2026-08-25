@@ -145,7 +145,7 @@ func (s *executionPayloadBidService) Names() []string {
 
 func (s *executionPayloadBidService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedExecutionPayloadBid, error) {
 	msg := &cltypes.SignedExecutionPayloadBid{}
-	if err := msg.DecodeSSZ(data, int(version)); err != nil {
+	if err := msg.DecodeSSZStrict(data, int(version)); err != nil {
 		return nil, err
 	}
 	return msg, nil

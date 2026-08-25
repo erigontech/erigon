@@ -954,6 +954,30 @@ func TestReadEnvelopeOwnsDecodedTransactions(t *testing.T) {
 	require.Equal(t, [][]byte{{1, 2, 3}}, persistedA.Message.Payload.Transactions.UnderlyngReference())
 }
 
+func TestReadEnvelopeReusesSharedBufferWithoutAliasingTransactions(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	rootA := common.HexToHash("0xa")
+	rootB := common.HexToHash("0xb")
+	addEnvelopeTestBlock(f, rootA, 1)
+	addEnvelopeTestBlock(f, rootB, 2)
+	envelopeA := testEnvelopeWithTransaction(rootA, []byte{1, 2, 3})
+	require.NoError(t, f.DumpEnvelopeOnDisk(rootA, envelopeA))
+	require.NoError(t, f.DumpEnvelopeOnDisk(rootB, testEnvelopeWithTransaction(rootB, []byte{9, 8, 7})))
+	encodedA, err := envelopeA.EncodeSSZ(nil)
+	require.NoError(t, err)
+	f.sszBuffer = bytes.Repeat([]byte{0xff}, len(encodedA))
+	sharedBuffer := &f.sszBuffer[0]
+
+	persistedA, err := f.ReadEnvelopeFromDisk(rootA)
+	require.NoError(t, err)
+	require.Same(t, sharedBuffer, &f.sszBuffer[0])
+	require.Equal(t, encodedA, f.sszBuffer)
+	_, err = f.ReadEnvelopeFromDisk(rootB)
+	require.NoError(t, err)
+	require.Equal(t, [][]byte{{1, 2, 3}}, persistedA.Message.Payload.Transactions.UnderlyngReference())
+}
+
 func TestReadEnvelopeTransactionsPreserveDecodeLimits(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxTransactionsPerPayload = 1

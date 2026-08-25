@@ -877,7 +877,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadBid(w http.ResponseWriter, r
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		if err := req.DecodeSSZ(octets, int(clparams.GloasVersion)); err != nil {
+		if err := req.DecodeSSZStrict(octets, int(clparams.GloasVersion)); err != nil {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}

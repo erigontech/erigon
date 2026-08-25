@@ -266,8 +266,12 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 		corrupt = true
 		return nil, fmt.Errorf("corrupt envelope file: length %d exceeds max %d, root: %x", envelopeLength, clparams.MaxChunkSize, blockRoot)
 	}
-	ownedBuffer := make([]byte, envelopeLength)
-	n, err := io.ReadFull(sr, ownedBuffer)
+	if envelopeLength > uint64(cap(f.sszBuffer)) {
+		f.sszBuffer = make([]byte, envelopeLength)
+	} else {
+		f.sszBuffer = f.sszBuffer[:envelopeLength]
+	}
+	n, err := io.ReadFull(sr, f.sszBuffer)
 	if err != nil {
 		corrupt = isCorruptEnvelopeReadError(err, readTracker.err)
 		return nil, fmt.Errorf("failed to read snappy buffer: %w, root: %x", err, blockRoot)
@@ -283,7 +287,7 @@ func (f *forkGraphDisk) readEnvelopeFromDiskLocked(blockRoot common.Hash) (envel
 	envelope = &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelopeWithVersion(f.beaconCfg, version),
 	}
-	if err = envelope.DecodeSSZStrict(ownedBuffer, int(version)); err != nil {
+	if err = envelope.DecodeSSZStrict(f.sszBuffer, int(version)); err != nil {
 		corrupt = true
 		return nil, fmt.Errorf("failed to decode envelope: %w, root: %x, len: %d", err, blockRoot, n)
 	}

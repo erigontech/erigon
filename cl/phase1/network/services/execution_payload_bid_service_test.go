@@ -2,6 +2,7 @@ package services
 
 import (
 	"context"
+	"encoding/binary"
 	"errors"
 	"sync"
 	"testing"
@@ -782,14 +783,24 @@ func TestExecutionPayloadBidServiceDecodeGossipMessage(t *testing.T) {
 	encoded, err := original.EncodeSSZ(nil)
 	require.NoError(t, err)
 
-	decoded, err := service.DecodeGossipMessage("peer123", encoded, clparams.GloasVersion)
-	require.NoError(t, err)
-	require.NotNil(t, decoded)
-	require.Equal(t, original.Message.Slot, decoded.Message.Slot)
-	require.Equal(t, original.Message.BuilderIndex, decoded.Message.BuilderIndex)
-	require.Equal(t, original.Message.Value, decoded.Message.Value)
-	require.Equal(t, original.Message.GasLimit, decoded.Message.GasLimit)
-	require.Equal(t, original.Message.ParentBlockHash, decoded.Message.ParentBlockHash)
+	for _, test := range []struct {
+		name    string
+		version clparams.StateVersion
+	}{
+		{name: "pre-Gloas", version: clparams.ElectraVersion},
+		{name: "Gloas", version: clparams.GloasVersion},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			decoded, err := service.DecodeGossipMessage("peer123", encoded, test.version)
+			require.NoError(t, err)
+			require.NotNil(t, decoded)
+			require.Equal(t, original.Message.Slot, decoded.Message.Slot)
+			require.Equal(t, original.Message.BuilderIndex, decoded.Message.BuilderIndex)
+			require.Equal(t, original.Message.Value, decoded.Message.Value)
+			require.Equal(t, original.Message.GasLimit, decoded.Message.GasLimit)
+			require.Equal(t, original.Message.ParentBlockHash, decoded.Message.ParentBlockHash)
+		})
+	}
 }
 
 func TestExecutionPayloadBidServiceDecodeGossipMessageInvalid(t *testing.T) {
@@ -799,6 +810,28 @@ func TestExecutionPayloadBidServiceDecodeGossipMessageInvalid(t *testing.T) {
 	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
 
 	_, err := service.DecodeGossipMessage("peer123", []byte{0x00, 0x01, 0x02}, clparams.GloasVersion)
+	require.Error(t, err)
+}
+
+func TestExecutionPayloadBidServiceDecodeGossipMessageRejectsNonCanonicalOffset(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+	original := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	encoded, err := original.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const signedBidFixedSize = 4 + 96
+	binary.LittleEndian.PutUint32(encoded, signedBidFixedSize+1)
+	encoded = append(encoded, 0)
+	copy(encoded[signedBidFixedSize+1:], encoded[signedBidFixedSize:])
+	encoded[signedBidFixedSize] = 0
+
+	var lax cltypes.SignedExecutionPayloadBid
+	require.NoError(t, lax.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+
+	_, err = service.DecodeGossipMessage("peer123", encoded, clparams.GloasVersion)
 	require.Error(t, err)
 }
 

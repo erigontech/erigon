@@ -2301,6 +2301,9 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 			Signature: common.Bytes96(bls.InfiniteSignature),
 		}
 	}
+	if err := validateSelfBuildEnvelopeForBlock(signedEnvelope, blk, bid, blockRoot); err != nil {
+		return err
+	}
 
 	// Process through forkchoice so the local node marks the block as FULL.
 	// Use ApplyLocalSelfBuildEnvelope instead of OnExecutionPayload: it skips BLS
@@ -2344,6 +2347,44 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 		}
 	}
 
+	return nil
+}
+
+func validateSelfBuildEnvelopeForBlock(
+	signedEnvelope *cltypes.SignedExecutionPayloadEnvelope,
+	block *cltypes.SignedBeaconBlock,
+	bid *cltypes.SignedExecutionPayloadBid,
+	blockRoot common.Hash,
+) error {
+	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
+		return errors.New("self-build envelope has nil payload")
+	}
+	envelope := signedEnvelope.Message
+	if envelope.BeaconBlockRoot != blockRoot {
+		return fmt.Errorf("self-build envelope beacon block root %x does not match published block root %x", envelope.BeaconBlockRoot, blockRoot)
+	}
+	if envelope.ParentBeaconBlockRoot != block.Block.ParentRoot {
+		return fmt.Errorf("self-build envelope parent beacon block root %x does not match published block parent root %x", envelope.ParentBeaconBlockRoot, block.Block.ParentRoot)
+	}
+	if envelope.Payload.SlotNumber != block.Block.Slot {
+		return fmt.Errorf("self-build envelope payload slot %d does not match published block slot %d", envelope.Payload.SlotNumber, block.Block.Slot)
+	}
+	if envelope.BuilderIndex != bid.Message.BuilderIndex {
+		return fmt.Errorf("self-build envelope builder index %d does not match bid builder index %d", envelope.BuilderIndex, bid.Message.BuilderIndex)
+	}
+	if envelope.Payload.BlockHash != bid.Message.BlockHash {
+		return fmt.Errorf("self-build envelope block hash %x does not match bid block hash %x", envelope.Payload.BlockHash, bid.Message.BlockHash)
+	}
+	if envelope.ExecutionRequests == nil {
+		return errors.New("self-build envelope has nil execution requests")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("hash self-build envelope execution requests: %w", err)
+	}
+	if requestsRoot != bid.Message.ExecutionRequestsRoot {
+		return fmt.Errorf("self-build envelope execution requests root %x does not match bid execution requests root %x", requestsRoot, bid.Message.ExecutionRequestsRoot)
+	}
 	return nil
 }
 
