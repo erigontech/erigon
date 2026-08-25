@@ -1268,8 +1268,7 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 			bid.Message.ParentBlockHash != parentBid.ParentBlockHash || bid.Message.ParentBlockRoot != parentBid.ParentBlockRoot {
 			continue
 		}
-		if bid.Message.FeeRecipient != expectedFeeRecipient || bid.Message.GasLimit > targetGasLimit ||
-			bid.Message.ExecutionPayment > result.entry.MaxExecutionPayment {
+		if bid.Message.FeeRecipient != expectedFeeRecipient || bid.Message.GasLimit > targetGasLimit {
 			continue
 		}
 		if builders == nil || bid.Message.BuilderIndex >= uint64(builders.Len()) {
