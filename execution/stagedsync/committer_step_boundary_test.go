@@ -19,7 +19,11 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
+	"fmt"
 	"math/rand"
+	"runtime"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -495,6 +499,54 @@ func TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow(t *testing.T)
 		"the checkpoint must NOT record commitment writes into the different live accumulator")
 }
 
+// TestHandleMessage_StepBoundaryFallsThroughToLiveWhenNotYetSaved pins the
+// cs==nil path TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow's
+// comment calls out as untested: block N's changeset is live but not yet
+// saved (SavePastChangesetAccumulator only runs at block end), so the
+// mid-block checkpoint must fall through to it — not drop the writes.
+func TestHandleMessage_StepBoundaryFallsThroughToLiveWhenNotYetSaved(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	const stepSize = uint64(16)
+	blockHash := common.Hash{0xAB}
+
+	db, tx, doms := setupStepTest(t)
+
+	// Block 1's own changeset is live, but not yet saved under its hash —
+	// GetChangesetByHash(1, blockHash) is nil here, exactly as it is for
+	// every mid-block step edge in the real exec loop.
+	liveCS := &changeset.StateChangeSet{}
+	doms.SetChangesetAccumulator(liveCS)
+
+	in := make(chan applyResult, 64)
+	out := make(chan commitmentResult, 64)
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out)
+	require.NoError(t, err)
+	defer cc.Stop()
+
+	const stepEdgeTxNum = stepSize - 1 // 15
+	rnd := rand.New(rand.NewSource(42))
+	for txNum := uint64(1); txNum <= stepEdgeTxNum; txNum++ {
+		addrBytes := make([]byte, length.Addr)
+		rnd.Read(addrBytes)
+		addr := accounts.InternAddress([20]byte(addrBytes))
+		bal := *uint256.NewInt(txNum * 1000)
+		acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+		buf := accounts.SerialiseV3(&acc)
+		require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+		cc.handleMessage(ctx, &txResult{
+			rules:     &chain.Rules{},
+			blockNum:  1,
+			blockHash: blockHash,
+			txNum:     txNum,
+			writes:    nonceBalanceWrites(addr, txNum, bal),
+		})
+	}
+
+	require.Positive(t, liveCS.Diffs[kv.CommitmentDomain].Len(),
+		"the checkpoint must fall through to the live changeset when block N's own hasn't been saved yet — dropping it loses these writes from the changeset entirely")
+}
+
 // TestHandleMessage_PreWindowPerBlockComputeDoesNotPolluteLiveChangeset guards
 // the block-boundary variant: forcePerBlockCompute makes even a pre-window block
 // compute per-block, so that compute must isolate or it leaks into a later
@@ -759,6 +811,111 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 					"iteration %d: block %d's request must be processed before its own result", i, i)
 			}
 		})
+	}
+}
+
+// TestComputeWithBlockAccumulator_ConcurrentRotation runs the calculator and a
+// changeset-rotating producer concurrently, with the calculator free to lag
+// behind the producer. It pins that every block's commitment diffs land in
+// that block's own saved changeset regardless of that lag — the genuinely
+// concurrent counterpart to TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow,
+// meant to be run with `go test -race`.
+//
+// Runs with deferred commitment updates both off and on, since each takes a
+// different code path to record this call's own branch writes.
+func TestComputeWithBlockAccumulator_ConcurrentRotation(t *testing.T) {
+	for _, deferUpdates := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deferUpdates=%v", deferUpdates), func(t *testing.T) {
+			testComputeWithBlockAccumulatorConcurrentRotation(t, deferUpdates)
+		})
+	}
+}
+
+func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdates bool) {
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	const numBlocks = uint64(24)
+	const txsPerBlock = uint64(5)
+
+	db, tx, doms := setupStepTest(t)
+	doms.SetDeferCommitmentUpdates(deferUpdates)
+
+	in := make(chan applyResult, 8)
+	out := make(chan commitmentResult, int(numBlocks)+8)
+	// perBlockFrom=1: every block owns its own changeset, matching the
+	// changeset-window exec loop's per-block accumulator install/save/clear.
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out)
+	require.NoError(t, err)
+	cc.Start(ctx)
+	t.Cleanup(cc.Stop)
+
+	// Adds extra contention on changesetMu from a third goroutine, unrelated
+	// to routing correctness but raising the odds of exposing any accumulator
+	// access that isn't actually serialized by the lock. Cleanup (not a
+	// manual stop at the end) so a require failure mid-test still stops it
+	// rather than leaving it spinning.
+	stopDistractor := make(chan struct{})
+	var distractorWG sync.WaitGroup
+	distractorWG.Add(1)
+	t.Cleanup(func() {
+		close(stopDistractor)
+		distractorWG.Wait()
+	})
+	go func() {
+		defer distractorWG.Done()
+		for {
+			select {
+			case <-stopDistractor:
+				return
+			default:
+				doms.GetChangesetAccumulator()
+				runtime.Gosched()
+			}
+		}
+	}()
+
+	changesets := make(map[uint64]*changeset.StateChangeSet, numBlocks)
+	rnd := rand.New(rand.NewSource(42))
+	var txNum uint64
+	for b := uint64(1); b <= numBlocks; b++ {
+		blockHash := common.Hash{byte(b)}
+		cs := &changeset.StateChangeSet{}
+		changesets[b] = cs
+		doms.SetChangesetAccumulator(cs)
+
+		var lastTx uint64
+		for range txsPerBlock {
+			txNum++
+			lastTx = txNum
+			addrBytes := make([]byte, length.Addr)
+			rnd.Read(addrBytes)
+			addr := accounts.InternAddress([20]byte(addrBytes))
+			bal := *uint256.NewInt(txNum * 1000)
+			acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+			buf := accounts.SerialiseV3(&acc)
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+			in <- &txResult{blockNum: b, blockHash: blockHash, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, txNum, bal)}
+		}
+
+		doms.SavePastChangesetAccumulator(blockHash, b, cs)
+		in <- newTestBlockResult(b, blockHash, lastTx, false)
+		doms.SetChangesetAccumulator(nil)
+	}
+	close(in)
+
+	// Range rather than Stop() first: out closes only after loop() returns
+	// (see TestLoop_BlockRequestBeatsSameNumberedResult). Root mismatches are
+	// expected here (no real state root is computed) and irrelevant — this
+	// test is about changeset routing, not root correctness.
+	for r := range out {
+		require.True(t, r.err == nil || errors.Is(r.err, ErrWrongTrieRoot),
+			"block %d: unexpected compute error: %v", r.blockNum, r.err)
+	}
+
+	for b := uint64(1); b <= numBlocks; b++ {
+		require.Positive(t, changesets[b].Diffs[kv.CommitmentDomain].Len(),
+			"block %d: no commitment diffs landed in its own saved changeset — a concurrent accumulator rotation may have misrouted them", b)
 	}
 }
 
