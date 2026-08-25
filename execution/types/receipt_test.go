@@ -546,34 +546,38 @@ func TestReceiptEncode(t *testing.T) {
 	})
 }
 
-// TestAccountAbstractionReceiptEncoding pins the built-in RIP-7560 receipt,
-// produced by aa.CreateAAReceipt, to the standard typed encoding.
+// TestAccountAbstractionReceiptEncoding pins type 5 to the standard typed
+// encoding. Both status values are covered because they encode to different
+// payloads (0x01 against the empty string).
 func TestAccountAbstractionReceiptEncoding(t *testing.T) {
 	t.Parallel()
 
-	r := &Receipt{
-		Type:              AccountAbstractionTxType,
-		Status:            ReceiptStatusSuccessful,
-		CumulativeGasUsed: 21000,
-		Logs: []*Log{{
-			Address: common.BytesToAddress([]byte{0x11}),
-			Topics:  []common.Hash{common.HexToHash("dead")},
-			Data:    []byte{0xff},
-		}},
+	for _, status := range []uint64{ReceiptStatusSuccessful, ReceiptStatusFailed} {
+		r := &Receipt{
+			Type:              AccountAbstractionTxType,
+			Status:            status,
+			CumulativeGasUsed: 21000,
+			Logs: []*Log{{
+				Address: common.BytesToAddress([]byte{0x11}),
+				Topics:  []common.Hash{common.HexToHash("dead")},
+				Data:    []byte{0xff},
+			}},
+		}
+		r.Bloom = CreateBloom(Receipts{r})
+
+		binary, err := r.MarshalBinary()
+		require.NoError(t, err)
+		require.Equal(t, byte(AccountAbstractionTxType), binary[0])
+
+		var buf bytes.Buffer
+		Receipts{r}.EncodeIndex(0, &buf)
+		require.Equal(t, binary, buf.Bytes())
+
+		got := new(Receipt)
+		require.NoError(t, got.UnmarshalBinary(binary))
+		require.Equal(t, r.Type, got.Type)
+		require.Equal(t, r.Status, got.Status)
+		require.Equal(t, r.CumulativeGasUsed, got.CumulativeGasUsed)
+		require.Equal(t, r.Logs, got.Logs)
 	}
-	r.Bloom = CreateBloom(Receipts{r})
-
-	binary, err := r.MarshalBinary()
-	require.NoError(t, err)
-	require.Equal(t, byte(AccountAbstractionTxType), binary[0])
-
-	var buf bytes.Buffer
-	Receipts{r}.EncodeIndex(0, &buf)
-	require.Equal(t, binary, buf.Bytes())
-
-	got := new(Receipt)
-	require.NoError(t, got.UnmarshalBinary(binary))
-	require.Equal(t, r.Type, got.Type)
-	require.Equal(t, r.CumulativeGasUsed, got.CumulativeGasUsed)
-	require.Equal(t, r.Logs, got.Logs)
 }
