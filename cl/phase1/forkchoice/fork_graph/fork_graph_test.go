@@ -69,6 +69,24 @@ func TestForkGraphInDisk(t *testing.T) {
 	require.Equal(t, PreValidated, status)
 }
 
+// TestNewForkGraphDiskReturnsErrorOnDumpFailure pins that a failure to
+// persist the anchor state to disk is returned as an error instead of
+// panicking during startup.
+func TestNewForkGraphDiskReturnsErrorOnDumpFailure(t *testing.T) {
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+
+	// A read-only filesystem rejects the O_CREATE|O_TRUNC|O_RDWR open that
+	// DumpBeaconStateOnDisk issues, simulating a disk-full or permission error.
+	failingFs := afero.NewReadOnlyFs(afero.NewMemMapFs())
+
+	require.NotPanics(t, func() {
+		graph, err := NewForkGraphDisk(anchorState, nil, failingFs, beacon_router_configuration.RouterConfiguration{})
+		require.Error(t, err)
+		require.Nil(t, graph)
+	})
+}
+
 func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
 	for _, tc := range []struct {
 		name       string

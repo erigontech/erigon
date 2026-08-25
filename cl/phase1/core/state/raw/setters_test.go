@@ -433,3 +433,48 @@ func TestValidatorSetterLeavesLeafCleanOnHookError(t *testing.T) {
 		})
 	}
 }
+
+// TestBeaconState_SetSlot_HookErrorLeavesStateUnchanged pins that an
+// OnEpochBoundary failure rolls back the slot write instead of leaving b.slot
+// updated with SlotLeafIndex undirtied, which would desync the cached hash
+// from the actual slot value.
+func TestBeaconState_SetSlot_HookErrorLeavesStateUnchanged(t *testing.T) {
+	state := GetTestState()
+	_, err := state.HashSSZ()
+	require.NoError(t, err)
+	require.False(t, state.isLeafDirty(SlotLeafIndex))
+
+	oldSlot := state.slot
+	epochBoundarySlot := (oldSlot/state.beaconConfig.SlotsPerEpoch + 1) * state.beaconConfig.SlotsPerEpoch
+
+	hookErr := errors.New("hook failed")
+	state.SetEvents(Events{OnEpochBoundary: func(uint64) error { return hookErr }})
+
+	require.ErrorIs(t, state.SetSlot(epochBoundarySlot), hookErr)
+	assert.Equal(t, oldSlot, state.slot)
+	assert.False(t, state.isLeafDirty(SlotLeafIndex))
+}
+
+// TestBeaconState_ResetEpochParticipation_HookErrorLeavesStateUnchanged pins
+// that an OnResetParticipation failure leaves both participation lists as
+// they were, rather than aliasing previousEpochParticipation to
+// currentEpochParticipation without completing the reset.
+func TestBeaconState_ResetEpochParticipation_HookErrorLeavesStateUnchanged(t *testing.T) {
+	state := GetTestState()
+	_, err := state.HashSSZ()
+	require.NoError(t, err)
+	require.False(t, state.isLeafDirty(CurrentEpochParticipationLeafIndex))
+	require.False(t, state.isLeafDirty(PreviousEpochParticipationLeafIndex))
+
+	oldCurrent := state.currentEpochParticipation
+	oldPrevious := state.previousEpochParticipation
+
+	hookErr := errors.New("hook failed")
+	state.SetEvents(Events{OnResetParticipation: func(*solid.ParticipationBitList) error { return hookErr }})
+
+	require.ErrorIs(t, state.ResetEpochParticipation(), hookErr)
+	assert.Same(t, oldCurrent, state.currentEpochParticipation)
+	assert.Same(t, oldPrevious, state.previousEpochParticipation)
+	assert.False(t, state.isLeafDirty(CurrentEpochParticipationLeafIndex))
+	assert.False(t, state.isLeafDirty(PreviousEpochParticipationLeafIndex))
+}
