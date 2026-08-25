@@ -97,6 +97,14 @@ type chainCfg struct {
 	Chain string `help:"chain" default:"mainnet"`
 }
 
+type initialAnchorEnvelopeDeferrer interface {
+	SetInitialBlockEnvelopeDeferred(common.Hash)
+}
+
+func deferInitialHistoryAnchorEnvelope(downloader initialAnchorEnvelopeDeferrer, anchorRoot common.Hash) {
+	downloader.SetInitialBlockEnvelopeDeferred(anchorRoot)
+}
+
 type outputFolder struct {
 	Datadir string `help:"datadir" default:"~/.local/share/erigon" type:"existingdir"`
 }
@@ -183,6 +191,7 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db, beaconConfig)
+	deferInitialHistoryAnchorEnvelope(downloader, bRoot)
 	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root(), nil, nil)
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }

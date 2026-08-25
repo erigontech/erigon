@@ -34,6 +34,8 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
@@ -160,6 +162,9 @@ func TestPostPayloadAttestationsRejectsUnsupportedContentType(t *testing.T) {
 
 func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
 	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload")
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
@@ -170,6 +175,56 @@ func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 
 	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), "invalid execution payload")
+}
+
+func TestPostExecutionPayloadEnvelopeDoesNotGossipPersistenceFailure(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	fcu.OnExecutionPayloadErr = fmt.Errorf("disk unavailable: %w", forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed)
+
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
+	}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "disk unavailable")
+}
+
+func TestPostExecutionPayloadEnvelopeGossipsWhenIndicesAreQueued(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+	fcu.OnExecutionPayloadErr = fmt.Errorf("index write unavailable: %w", forkchoice.ErrExecutionPayloadEnvelopeIndicesPending)
+
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
+	}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+		gomock.Any(),
+		gossip.TopicNameExecutionPayload,
+		gomock.Any(),
+	).Return(nil)
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsPreGloasVersion(t *testing.T) {

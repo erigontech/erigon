@@ -367,7 +367,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 				log.Debug("[BackwardBeaconDownloader] block matched via root lookup", "slot", block.Block.Slot, "root", common.Hash(blockRoot))
 
 				var envelope *cltypes.SignedExecutionPayloadEnvelope
-				fetchRoots, fullRoots := determineGloasEnvelopeRootsWithDeferredRoot([]*cltypes.SignedBeaconBlock{block}, b.prevBatchTopBlock, b.deferredEnvelopeRoot.Load())
+				fetchRoots, fullRoots := determineGloasEnvelopeRootsWithDeferredRoot([]*cltypes.SignedBeaconBlock{block}, b.prevBatchTopBlock, blockRoot, b.deferredEnvelopeRoot.Load())
 				shouldFetch := slices.Contains(fetchRoots, blockRoot)
 				isFull := slices.Contains(fullRoots, blockRoot)
 				if shouldFetch {
@@ -408,43 +408,55 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 
 // determineGloasEnvelopeRoots separates optimistic fetches from lookahead-confirmed FULL roots.
 func determineGloasEnvelopeRoots(responses []*cltypes.SignedBeaconBlock, prevBatchTopBlock *cltypes.SignedBeaconBlock) (fetchRoots, fullRoots [][32]byte) {
-	return determineGloasEnvelopeRootsWithDeferredRoot(responses, prevBatchTopBlock, nil)
+	if len(responses) == 0 {
+		return nil, nil
+	}
+	expectedRoot, err := responses[len(responses)-1].Block.HashSSZ()
+	if err != nil {
+		return nil, nil
+	}
+	return determineGloasEnvelopeRootsWithDeferredRoot(responses, prevBatchTopBlock, expectedRoot, nil)
 }
 
-func determineGloasEnvelopeRootsWithDeferredRoot(responses []*cltypes.SignedBeaconBlock, prevBatchTopBlock *cltypes.SignedBeaconBlock, deferredEnvelopeRoot *common.Hash) (fetchRoots, fullRoots [][32]byte) {
-	for i, block := range responses {
+func determineGloasEnvelopeRootsWithDeferredRoot(responses []*cltypes.SignedBeaconBlock, prevBatchTopBlock *cltypes.SignedBeaconBlock, expectedRoot common.Hash, deferredEnvelopeRoot *common.Hash) (fetchRoots, fullRoots [][32]byte) {
+	blocksByRoot := make(map[common.Hash]*cltypes.SignedBeaconBlock, len(responses))
+	for _, block := range responses {
+		root, err := block.Block.HashSSZ()
+		if err == nil {
+			blocksByRoot[root] = block
+		}
+	}
+
+	block := blocksByRoot[expectedRoot]
+	var child *cltypes.SignedBeaconBlock
+	if prevBatchTopBlock != nil && prevBatchTopBlock.Block.ParentRoot == expectedRoot {
+		child = prevBatchTopBlock
+	}
+	for block != nil {
+		root := expectedRoot
 		if block.Version() < clparams.GloasVersion {
+			child = block
+			expectedRoot = block.Block.ParentRoot
+			block = blocksByRoot[expectedRoot]
 			continue
 		}
 		bid := block.Block.Body.GetSignedExecutionPayloadBid()
-		if bid == nil || bid.Message == nil {
-			continue
-		}
-		// Determine the lookahead block (next higher slot in the chain).
-		var lookahead *cltypes.SignedBeaconBlock
-		if i+1 < len(responses) {
-			lookahead = responses[i+1]
-		} else {
-			lookahead = prevBatchTopBlock
-		}
-		if lookahead == nil {
-			root, err := block.Block.HashSSZ()
-			if err != nil {
-				continue
-			}
-			if deferredEnvelopeRoot == nil || *deferredEnvelopeRoot != root {
-				fetchRoots = append(fetchRoots, root)
-			}
-			continue
-		}
-		nextBid := lookahead.Block.Body.GetSignedExecutionPayloadBid()
-		if nextBid != nil && nextBid.Message != nil && nextBid.Message.ParentBlockHash == bid.Message.BlockHash {
-			root, err := block.Block.HashSSZ()
-			if err == nil {
-				fetchRoots = append(fetchRoots, root)
-				fullRoots = append(fullRoots, root)
+		if bid != nil && bid.Message != nil {
+			if child == nil {
+				if deferredEnvelopeRoot == nil || *deferredEnvelopeRoot != root {
+					fetchRoots = append(fetchRoots, root)
+				}
+			} else {
+				childBid := child.Block.Body.GetSignedExecutionPayloadBid()
+				if childBid != nil && childBid.Message != nil && childBid.Message.ParentBlockHash == bid.Message.BlockHash {
+					fetchRoots = append(fetchRoots, root)
+					fullRoots = append(fullRoots, root)
+				}
 			}
 		}
+		child = block
+		expectedRoot = block.Block.ParentRoot
+		block = blocksByRoot[expectedRoot]
 	}
 	return fetchRoots, fullRoots
 }
@@ -461,7 +473,7 @@ func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, resp
 		return nil, nil, nil
 	}
 
-	fetchRoots, fullRoots := determineGloasEnvelopeRootsWithDeferredRoot(responses, b.prevBatchTopBlock, b.deferredEnvelopeRoot.Load())
+	fetchRoots, fullRoots := determineGloasEnvelopeRootsWithDeferredRoot(responses, b.prevBatchTopBlock, b.expectedRoot, b.deferredEnvelopeRoot.Load())
 	fetchRootSet := make(map[common.Hash]struct{}, len(fetchRoots))
 	for _, r := range fetchRoots {
 		fetchRootSet[common.Hash(r)] = struct{}{}

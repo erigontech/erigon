@@ -20,6 +20,7 @@ import (
 	"context"
 	"math"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -160,4 +161,98 @@ func TestCompleteHistoryBackfillNotifiesAfterPartialEnvelopeRecoveryCompletes(t 
 	require.True(t, completed)
 	require.Equal(t, [][][32]byte{{first.Root, second.Root}, {second.Root}}, inputs)
 	require.True(t, notified)
+}
+
+func TestCompleteHistoryBackfillBoundsRecoveryAndRotatesFailures(t *testing.T) {
+	skipped := make([]network.SkippedFullBlock, 10)
+	for i := range skipped {
+		skipped[i].Root[0] = byte(i + 1)
+	}
+	inputs := make([][]byte, 0, 3)
+	notified := false
+
+	completed := completeHistoryBackfill(
+		context.Background(), skipped, 0,
+		func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+			roots := make([]byte, len(pending))
+			for i := range pending {
+				roots[i] = pending[i].Root[0]
+			}
+			inputs = append(inputs, roots)
+			if len(inputs) == 1 {
+				return pending[1:]
+			}
+			return nil
+		},
+		func() { notified = true },
+	)
+
+	require.True(t, completed)
+	require.Equal(t, [][]byte{
+		{1, 2, 3, 4, 5, 6, 7, 8},
+		{9, 10, 2, 3, 4, 5, 6, 7},
+		{8},
+	}, inputs)
+	require.True(t, notified)
+}
+
+func TestCompleteHistoryBackfillPacesOnlyZeroProgress(t *testing.T) {
+	t.Run("progress continues immediately", func(t *testing.T) {
+		ctx, cancel := context.WithTimeout(context.Background(), 250*time.Millisecond)
+		defer cancel()
+		skipped := []network.SkippedFullBlock{{Root: [32]byte{1}}, {Root: [32]byte{2}}}
+		attempts := 0
+
+		completed := completeHistoryBackfill(
+			ctx, skipped, time.Hour,
+			func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+				attempts++
+				if attempts == 1 {
+					return pending[1:]
+				}
+				return nil
+			},
+			func() {},
+		)
+
+		require.True(t, completed)
+		require.Equal(t, 2, attempts)
+	})
+
+	t.Run("zero progress waits", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		defer cancel()
+		skipped := []network.SkippedFullBlock{{Root: [32]byte{1}}}
+		attempted := make(chan struct{}, 2)
+		done := make(chan bool, 1)
+
+		go func() {
+			done <- completeHistoryBackfill(
+				ctx, skipped, time.Hour,
+				func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock {
+					attempted <- struct{}{}
+					return skipped
+				},
+				func() {},
+			)
+		}()
+
+		select {
+		case <-attempted:
+		case <-time.After(time.Second):
+			t.Fatal("recovery was not attempted")
+		}
+		select {
+		case <-attempted:
+			t.Fatal("zero-progress recovery retried without pacing")
+		case <-time.After(50 * time.Millisecond):
+		}
+		cancel()
+		select {
+		case completed := <-done:
+			require.False(t, completed)
+		case <-time.After(time.Second):
+			t.Fatal("recovery did not stop after cancellation")
+		}
+	})
 }

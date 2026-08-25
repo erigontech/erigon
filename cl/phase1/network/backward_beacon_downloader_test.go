@@ -62,6 +62,14 @@ func hash(b byte) common.Hash {
 	return h
 }
 
+func linkGloasChild(t *testing.T, parent, child *cltypes.SignedBeaconBlock) common.Hash {
+	t.Helper()
+	root, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	child.Block.ParentRoot = root
+	return root
+}
+
 // TestDetermineGloasFullRoots_EmptyBatch verifies that an empty batch returns no roots.
 func TestDetermineGloasFullRoots_EmptyBatch(t *testing.T) {
 	roots := determineGloasFullRoots(nil, nil)
@@ -95,12 +103,63 @@ func TestDetermineGloasEnvelopeRootsSingleBlockWithoutLookaheadIsOnlyOptimistic(
 	assert.Equal(t, expected, fetchRoots[0])
 }
 
+func TestDetermineGloasEnvelopeRootsNonChildCannotConfirmFull(t *testing.T) {
+	block := makeGloasBlock(100, hash(0xAA), hash(0x00))
+	nonChild := makeGloasBlock(101, hash(0xBB), hash(0xAA))
+	nonChild.Block.ParentRoot = hash(0xCC)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	_, fullRoots := determineGloasEnvelopeRoots([]*cltypes.SignedBeaconBlock{block, nonChild}, nil)
+
+	assert.NotContains(t, fullRoots, [32]byte(blockRoot))
+}
+
+func TestDetermineGloasEnvelopeRootsFindsNonAdjacentDirectChild(t *testing.T) {
+	block := makeGloasBlock(100, hash(0xAA), hash(0x00))
+	unrelated := makeGloasBlock(101, hash(0xCC), hash(0xDD))
+	child := makeGloasBlock(102, hash(0xBB), hash(0xAA))
+	blockRoot := linkGloasChild(t, block, child)
+
+	_, fullRoots := determineGloasEnvelopeRoots([]*cltypes.SignedBeaconBlock{block, unrelated, child}, nil)
+
+	assert.Contains(t, fullRoots, [32]byte(blockRoot))
+}
+
+func TestBackwardEnvelopeLookaheadFollowsAcceptedChild(t *testing.T) {
+	parent := makeGloasBlock(100, hash(0xAA), hash(0x00))
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	sideChild := makeGloasBlock(101, hash(0xBB), hash(0xAA))
+	sideChild.Block.ParentRoot = parentRoot
+	acceptedChild := makeGloasBlock(101, hash(0xCC), hash(0xDD))
+	acceptedChild.Block.ParentRoot = parentRoot
+	acceptedChildRoot, err := acceptedChild.Block.HashSSZ()
+	require.NoError(t, err)
+
+	downloader := &BackwardBeaconDownloader{
+		beaconCfg:       &clparams.MainnetBeaconConfig,
+		expectedRoot:    acceptedChildRoot,
+		httpFallbackURL: "://invalid",
+		onNewBlock: func(*cltypes.SignedBeaconBlock, *cltypes.SignedExecutionPayloadEnvelope) (bool, error) {
+			return false, nil
+		},
+	}
+	downloader.SetInitialBlockEnvelopeDeferred(acceptedChildRoot)
+	downloader.httpPreferred.Store(true)
+	downloader.slotToDownload.Store(acceptedChild.Block.Slot)
+
+	require.NoError(t, downloader.processResponses(context.Background(), []*cltypes.SignedBeaconBlock{parent, sideChild, acceptedChild}))
+	require.Empty(t, downloader.SkippedFullBlocks())
+}
+
 // TestDetermineGloasFullRoots_InBatch_Full verifies that a GLOAS block is identified as FULL
 // when the next block's bid.ParentBlockHash matches this block's bid.BlockHash.
 func TestDetermineGloasFullRoots_InBatch_Full(t *testing.T) {
 	// blk0 is FULL: blk1.ParentBlockHash == blk0.BlockHash
 	blk0 := makeGloasBlock(100, hash(0xAA), hash(0x00))
 	blk1 := makeGloasBlock(101, hash(0xBB), hash(0xAA)) // ParentBlockHash = blk0.BlockHash
+	linkGloasChild(t, blk0, blk1)
 	responses := []*cltypes.SignedBeaconBlock{blk0, blk1}
 
 	fetchRoots, roots := determineGloasEnvelopeRoots(responses, nil)
@@ -121,6 +180,7 @@ func TestDetermineGloasFullRoots_InBatch_Empty(t *testing.T) {
 	// blk0 is EMPTY: blk1.ParentBlockHash != blk0.BlockHash
 	blk0 := makeGloasBlock(100, hash(0xAA), hash(0x00))
 	blk1 := makeGloasBlock(101, hash(0xBB), hash(0xCC)) // ParentBlockHash != blk0.BlockHash
+	linkGloasChild(t, blk0, blk1)
 	responses := []*cltypes.SignedBeaconBlock{blk0, blk1}
 
 	fetchRoots, roots := determineGloasEnvelopeRoots(responses, nil)
@@ -138,6 +198,7 @@ func TestDetermineGloasFullRoots_CrossBatch_Full(t *testing.T) {
 	blk := makeGloasBlock(100, hash(0xAA), hash(0x00))
 	// prevBatchTopBlock is from the previous (higher-slot) batch; its ParentBlockHash = blk.BlockHash
 	prevTop := makeGloasBlock(101, hash(0xBB), hash(0xAA))
+	linkGloasChild(t, blk, prevTop)
 	responses := []*cltypes.SignedBeaconBlock{blk}
 
 	roots := determineGloasFullRoots(responses, prevTop)
@@ -154,10 +215,37 @@ func TestDetermineGloasFullRoots_CrossBatch_Empty(t *testing.T) {
 	blk := makeGloasBlock(100, hash(0xAA), hash(0x00))
 	// prevBatchTopBlock's ParentBlockHash != blk.BlockHash → blk is EMPTY
 	prevTop := makeGloasBlock(101, hash(0xBB), hash(0xCC))
+	linkGloasChild(t, blk, prevTop)
 	responses := []*cltypes.SignedBeaconBlock{blk}
 
 	roots := determineGloasFullRoots(responses, prevTop)
 	assert.Empty(t, roots)
+}
+
+func TestDetermineGloasEnvelopeRootsCrossBatchNonChildCannotConfirmFull(t *testing.T) {
+	block := makeGloasBlock(100, hash(0xAA), hash(0x00))
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	previousTop := makeGloasBlock(101, hash(0xBB), hash(0xAA))
+	previousTop.Block.ParentRoot = hash(0xCC)
+
+	_, fullRoots := determineGloasEnvelopeRootsWithDeferredRoot([]*cltypes.SignedBeaconBlock{block}, previousTop, blockRoot, nil)
+
+	assert.NotContains(t, fullRoots, [32]byte(blockRoot))
+}
+
+func TestDetermineGloasEnvelopeRootsCrossBatchUsesAcceptedPreviousChild(t *testing.T) {
+	parent := makeGloasBlock(100, hash(0xAA), hash(0x00))
+	parentRoot, err := parent.Block.HashSSZ()
+	require.NoError(t, err)
+	sideChild := makeGloasBlock(101, hash(0xBB), hash(0xAA))
+	sideChild.Block.ParentRoot = parentRoot
+	acceptedPreviousChild := makeGloasBlock(101, hash(0xCC), hash(0xDD))
+	acceptedPreviousChild.Block.ParentRoot = parentRoot
+
+	_, fullRoots := determineGloasEnvelopeRootsWithDeferredRoot([]*cltypes.SignedBeaconBlock{parent, sideChild}, acceptedPreviousChild, parentRoot, nil)
+
+	assert.NotContains(t, fullRoots, [32]byte(parentRoot))
 }
 
 // TestDetermineGloasFullRoots_Mixed verifies a batch with both FULL and EMPTY blocks.
@@ -171,6 +259,9 @@ func TestDetermineGloasFullRoots_Mixed(t *testing.T) {
 	blk1 := makeGloasBlock(101, hash(0x20), hash(0x10)) // parent = blk0.hash → blk0 FULL
 	blk2 := makeGloasBlock(102, hash(0x30), hash(0xFF)) // parent != blk1.hash → blk1 EMPTY
 	blk3 := makeGloasBlock(103, hash(0x40), hash(0x30)) // parent = blk2.hash → blk2 FULL
+	linkGloasChild(t, blk0, blk1)
+	linkGloasChild(t, blk1, blk2)
+	linkGloasChild(t, blk2, blk3)
 	responses := []*cltypes.SignedBeaconBlock{blk0, blk1, blk2, blk3}
 
 	fetchRoots, roots := determineGloasEnvelopeRoots(responses, nil)
@@ -194,6 +285,7 @@ func TestDetermineGloasFullRoots_MixedVersions(t *testing.T) {
 	gloasFull := makeGloasBlock(100, hash(0xAA), hash(0x00))
 	// lookahead confirms gloasFull is FULL
 	lookahead := makeGloasBlock(101, hash(0xBB), hash(0xAA))
+	linkGloasChild(t, gloasFull, lookahead)
 	responses := []*cltypes.SignedBeaconBlock{deneb, gloasFull, lookahead}
 
 	fetchRoots, roots := determineGloasEnvelopeRoots(responses, nil)
@@ -236,6 +328,7 @@ func TestBackwardRootFallbackConfirmedFullEnvelopeMissTransfersToRecovery(t *tes
 	child := makeGloasBlock(8, hash(3), hash(1))
 	root, err := block.Block.HashSSZ()
 	require.NoError(t, err)
+	child.Block.ParentRoot = root
 	encoded, err := block.EncodeSSZ(nil)
 	require.NoError(t, err)
 	server := httptest.NewServer(http.HandlerFunc(func(w http.ResponseWriter, r *http.Request) {

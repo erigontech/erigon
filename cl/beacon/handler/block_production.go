@@ -85,6 +85,9 @@ const (
 
 const minPayloadPollingWindow = 100 * time.Millisecond
 
+const selfBuildEnvelopePublicationWait = 30 * time.Second
+const selfBuildEnvelopeOwnerLifetime = 60 * time.Second
+
 // Polling for the assembled payload stops attestationDeadline/payloadPublicationDivisor before the
 // attestation deadline, reserving that margin for consensus processing, signing and gossip so the
 // produced block still reaches attesters in time to earn the proposer boost.
@@ -2199,13 +2202,12 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
-	blockStored := make(chan error, 1)
+	blockIntegrated := make(chan error, 1)
 	go func() {
-		err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars)
+		err := a.storeBlockAndBlobs(context.Background(), blk, blobsSidecars, columnsSidecars, blockIntegrated)
 		if err != nil {
 			log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
 		}
-		blockStored <- err
 	}()
 
 	log.Info(
@@ -2250,7 +2252,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		if len(signedEnvelope) > 0 && signedEnvelope[0] != nil {
 			validatorSignedEnvelope = signedEnvelope[0]
 		}
-		if err := publishSelfBuildEnvelopeAfterStorage(ctx, blockStored, validatorSignedEnvelope != nil, func(publicationCtx context.Context) error {
+		if err := publishSelfBuildEnvelopeAfterIntegration(ctx, blockIntegrated, validatorSignedEnvelope != nil, selfBuildEnvelopePublicationWait, selfBuildEnvelopeOwnerLifetime, func(publicationCtx context.Context) error {
 			return a.broadcastSelfBuildEnvelope(publicationCtx, blk, validatorSignedEnvelope)
 		}); err != nil {
 			return fmt.Errorf("failed to broadcast self-build execution payload envelope: %w", err)
@@ -2260,26 +2262,51 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	return nil
 }
 
-func publishSelfBuildEnvelopeAfterStorage(
+func publishSelfBuildEnvelopeAfterIntegration(
 	ctx context.Context,
-	blockStored <-chan error,
+	blockIntegrated <-chan error,
 	envelopeSupplied bool,
+	wait time.Duration,
+	ownerLifetime time.Duration,
 	publish func(context.Context) error,
 ) error {
 	if !envelopeSupplied {
 		return nil
 	}
-	publicationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	detachedCtx := context.WithoutCancel(ctx)
+	ownerCtx, cancelOwner := context.WithTimeout(detachedCtx, ownerLifetime)
+	published := make(chan error, 1)
+	go func() {
+		defer cancelOwner()
+		select {
+		case err := <-blockIntegrated:
+			if err != nil {
+				published <- fmt.Errorf("failed to integrate block and blobs: %w", err)
+				return
+			}
+			published <- publish(ownerCtx)
+		case <-ownerCtx.Done():
+			published <- ownerCtx.Err()
+		}
+	}()
+
+	waitCtx, cancel := context.WithTimeout(detachedCtx, wait)
 	defer cancel()
 	select {
-	case err := <-blockStored:
-		if err != nil {
-			return fmt.Errorf("failed to store block and blobs: %w", err)
-		}
-		return publish(publicationCtx)
-	case <-publicationCtx.Done():
-		return publicationCtx.Err()
+	case err := <-published:
+		return err
+	case <-waitCtx.Done():
+		return waitCtx.Err()
 	}
+}
+
+func runBlockStoragePhases(blockIntegrated chan<- error, integrate, finish func() error) error {
+	err := integrate()
+	blockIntegrated <- err
+	if err != nil {
+		return err
+	}
+	return finish()
 }
 
 // broadcastSelfBuildEnvelope validates and broadcasts the validator-signed envelope for a self-built Gloas block.
@@ -2378,19 +2405,34 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	block *cltypes.SignedBeaconBlock,
 	sidecars []*cltypes.BlobSidecar,
 	columnSidecars []*cltypes.DataColumnSidecar,
+	blockIntegrated chan<- error,
 ) error {
 	finishProduction := a.payloadPreparationGate.beginProduction()
 	defer finishProduction()
+	var blockRoot common.Hash
+	return runBlockStoragePhases(blockIntegrated, func() (err error) {
+		blockRoot, err = a.integrateBlockAndBlobs(ctx, block, sidecars, columnSidecars)
+		return err
+	}, func() error {
+		return a.finishBlockAndBlobs(ctx, block, blockRoot)
+	})
+}
 
+func (a *ApiHandler) integrateBlockAndBlobs(
+	ctx context.Context,
+	block *cltypes.SignedBeaconBlock,
+	sidecars []*cltypes.BlobSidecar,
+	columnSidecars []*cltypes.DataColumnSidecar,
+) (common.Hash, error) {
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
-		return err
+		return common.Hash{}, err
 	}
 	// TODO: write column sidecars if needed
 
 	if block.Version() < clparams.FuluVersion {
 		if err := a.blobStoage.WriteBlobSidecars(ctx, blockRoot, sidecars); err != nil {
-			return err
+			return common.Hash{}, err
 		}
 	}
 
@@ -2404,7 +2446,7 @@ func (a *ApiHandler) storeBlockAndBlobs(
 		}
 		return beacon_indicies.WriteBeaconBlockAndIndicies(ctx, tx, block, false)
 	}); err != nil {
-		return err
+		return common.Hash{}, err
 	}
 
 	// Advance fork choice time to the current slot so OnBlock accepts the block.
@@ -2422,8 +2464,12 @@ func (a *ApiHandler) storeBlockAndBlobs(
 	// TODO: fix the root cause in state replay so fullValidation can be re-enabled.
 	log.Warn("Skipping full validation for locally-produced block", "slot", block.Block.Slot, "proposer", block.Block.ProposerIndex)
 	if err := a.forkchoiceStore.OnBlock(ctx, block, true, false, false); err != nil {
-		return err
+		return common.Hash{}, err
 	}
+	return blockRoot, nil
+}
+
+func (a *ApiHandler) finishBlockAndBlobs(ctx context.Context, block *cltypes.SignedBeaconBlock, blockRoot common.Hash) error {
 	headRoot, headSlot, headState, err := a.selectedHeadState(blockRoot)
 	if err != nil {
 		return err

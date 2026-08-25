@@ -239,6 +239,12 @@ MainLoop:
 
 			// Handle blocks received on the response channel
 			for _, block := range blocks.Data {
+				if !ensureAnchorEnvelopeForChild(ctx, cfg.forkChoice, func(recoveryCtx context.Context) error {
+					return ensureAnchorEnvelopeOnce(recoveryCtx, cfg)
+				}, block) {
+					log.Debug("[chainTipSync] anchor envelope unavailable, preserving child for retry", "slot", block.Block.Slot)
+					continue
+				}
 				// Check if the parent block is known
 				if _, ok := cfg.forkChoice.GetHeader(block.Block.ParentRoot); !ok {
 					time.Sleep(time.Millisecond)
@@ -508,6 +514,54 @@ func advanceGloasEnvelopeRecoveryCursor(cfg *Cfg, scanRoot common.Hash, complete
 type selectedHeadEnvelopeStore interface {
 	HasEnvelope(common.Hash) bool
 	OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
+}
+
+type anchorEnvelopeStore interface {
+	AnchorRoot() common.Hash
+	HasEnvelope(common.Hash) bool
+	GetStateAtBlockRoot(common.Hash, bool) (*state.CachingBeaconState, error)
+}
+
+type anchorEnvelopeRecoverer func(context.Context) error
+
+func ensureAnchorEnvelopeForChild(
+	ctx context.Context,
+	store anchorEnvelopeStore,
+	recoverAnchor anchorEnvelopeRecoverer,
+	child *cltypes.SignedBeaconBlock,
+) bool {
+	if child == nil || child.Block == nil || child.Block.Body == nil {
+		return false
+	}
+	if child.Version() < clparams.GloasVersion {
+		return true
+	}
+	anchorRoot := store.AnchorRoot()
+	if anchorRoot == (common.Hash{}) || common.Hash(child.Block.ParentRoot) != anchorRoot {
+		return true
+	}
+	if store.HasEnvelope(anchorRoot) {
+		return true
+	}
+	anchorState, err := store.GetStateAtBlockRoot(anchorRoot, true)
+	if err != nil || anchorState == nil {
+		return false
+	}
+	anchorBid := anchorState.GetLatestExecutionPayloadBid()
+	childBid := child.Block.Body.GetSignedExecutionPayloadBid()
+	if anchorBid == nil || childBid == nil || childBid.Message == nil {
+		return false
+	}
+	if childBid.Message.ParentBlockHash != anchorBid.BlockHash {
+		return true
+	}
+	if recoverAnchor == nil {
+		return false
+	}
+	if err := recoverAnchor(ctx); err != nil {
+		log.Debug("[chainTipSync] failed to recover anchor envelope", "anchorRoot", anchorRoot, "err", err)
+	}
+	return store.HasEnvelope(anchorRoot)
 }
 
 type envelopeRequestFunc func(context.Context, [][32]byte) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, error)

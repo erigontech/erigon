@@ -37,6 +37,27 @@ type selectedHeadEnvelopeTestStore struct {
 	onExecutionPayload    func(*cltypes.SignedExecutionPayloadEnvelope) error
 }
 
+type anchorEnvelopeTestStore struct {
+	root     common.Hash
+	state    *state2.CachingBeaconState
+	envelope *cltypes.SignedExecutionPayloadEnvelope
+}
+
+func (s *anchorEnvelopeTestStore) AnchorRoot() common.Hash {
+	return s.root
+}
+
+func (s *anchorEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
+	return root == s.root && s.envelope != nil
+}
+
+func (s *anchorEnvelopeTestStore) GetStateAtBlockRoot(root common.Hash, _ bool) (*state2.CachingBeaconState, error) {
+	if root != s.root {
+		return nil, nil
+	}
+	return s.state, nil
+}
+
 func (s *selectedHeadEnvelopeTestStore) HasEnvelope(root common.Hash) bool {
 	s.mu.Lock()
 	defer s.mu.Unlock()
@@ -341,6 +362,31 @@ func TestGloasRecoveryUsesTargetForkVersion(t *testing.T) {
 
 	require.False(t, shouldRecoverMissingEnvelopes(&cfg, cfg.GloasForkEpoch*cfg.SlotsPerEpoch-1))
 	require.True(t, shouldRecoverMissingEnvelopes(&cfg, cfg.GloasForkEpoch*cfg.SlotsPerEpoch))
+}
+
+func TestChainTipAnchorEnvelopeRetriesAfterUnavailableResponse(t *testing.T) {
+	beaconCfg, anchorState, anchorBid, envelope, anchorRoot := validAnchorEnvelopeFixture(t, 1)
+	anchorState.SetLatestExecutionPayloadBid(anchorBid)
+	child := cltypes.NewSignedBeaconBlock(beaconCfg, clparams.GloasVersion)
+	child.Block.Slot = anchorBid.Slot + 1
+	child.Block.ParentRoot = anchorRoot
+	child.Block.Body.SyncAggregate = cltypes.NewSyncAggregate()
+	child.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash = anchorBid.BlockHash
+	store := &anchorEnvelopeTestStore{root: anchorRoot, state: anchorState}
+	requests := 0
+	recoverAnchor := func(context.Context) error {
+		requests++
+		if requests == 2 {
+			store.envelope = envelope
+		}
+		return nil
+	}
+
+	require.False(t, ensureAnchorEnvelopeForChild(context.Background(), store, recoverAnchor, child))
+	require.False(t, store.HasEnvelope(anchorRoot))
+	require.True(t, ensureAnchorEnvelopeForChild(context.Background(), store, recoverAnchor, child))
+	require.True(t, store.HasEnvelope(anchorRoot))
+	require.Equal(t, 2, requests)
 }
 
 func TestSelectedHeadEnvelopeRequestAttemptsOncePerHead(t *testing.T) {

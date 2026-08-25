@@ -298,13 +298,13 @@ func TestBroadcastSelfBuildEnvelopePublishesValidatedEnvelopeBeforePersistenceRe
 	require.True(t, cached)
 }
 
-func TestPublishSelfBuildEnvelopeAfterStorage(t *testing.T) {
-	t.Run("optional envelope absent does not wait for storage", func(t *testing.T) {
-		stored := make(chan error, 1)
+func TestPublishSelfBuildEnvelopeAfterIntegration(t *testing.T) {
+	t.Run("optional envelope absent does not wait for integration", func(t *testing.T) {
+		integrated := make(chan error, 1)
 		done := make(chan error, 1)
 		called := false
 		go func() {
-			done <- publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, false, func(context.Context) error {
+			done <- publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, false, time.Second, 2*time.Second, func(context.Context) error {
 				called = true
 				return nil
 			})
@@ -315,40 +315,40 @@ func TestPublishSelfBuildEnvelopeAfterStorage(t *testing.T) {
 			require.NoError(t, err)
 			require.False(t, called)
 		case <-time.After(100 * time.Millisecond):
-			stored <- nil
+			integrated <- nil
 			require.NoError(t, <-done)
-			t.Fatal("canonical block publication waited for asynchronous storage without an envelope")
+			t.Fatal("canonical block publication waited for asynchronous integration without an envelope")
 		}
 	})
 
 	t.Run("optional envelope absent", func(t *testing.T) {
-		stored := make(chan error, 1)
-		stored <- nil
+		integrated := make(chan error, 1)
+		integrated <- nil
 		called := false
-		require.NoError(t, publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, false, func(context.Context) error {
+		require.NoError(t, publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, false, time.Second, 2*time.Second, func(context.Context) error {
 			called = true
 			return nil
 		}))
 		require.False(t, called)
 	})
 
-	t.Run("storage failure", func(t *testing.T) {
-		stored := make(chan error, 1)
-		stored <- errors.New("store failed")
+	t.Run("integration failure", func(t *testing.T) {
+		integrated := make(chan error, 1)
+		integrated <- errors.New("integration failed")
 		called := false
-		err := publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, true, func(context.Context) error {
+		err := publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, true, time.Second, 2*time.Second, func(context.Context) error {
 			called = true
 			return nil
 		})
-		require.ErrorContains(t, err, "store failed")
+		require.ErrorContains(t, err, "integration failed")
 		require.False(t, called)
 	})
 
-	t.Run("storage success", func(t *testing.T) {
-		stored := make(chan error, 1)
-		stored <- nil
+	t.Run("integration success", func(t *testing.T) {
+		integrated := make(chan error, 1)
+		integrated <- nil
 		called := false
-		require.NoError(t, publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, true, func(context.Context) error {
+		require.NoError(t, publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, true, time.Second, 2*time.Second, func(context.Context) error {
 			called = true
 			return nil
 		}))
@@ -356,12 +356,12 @@ func TestPublishSelfBuildEnvelopeAfterStorage(t *testing.T) {
 	})
 
 	t.Run("canceled", func(t *testing.T) {
-		stored := make(chan error, 1)
-		stored <- nil
+		integrated := make(chan error, 1)
+		integrated <- nil
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		called := false
-		err := publishSelfBuildEnvelopeAfterStorage(ctx, stored, true, func(publicationCtx context.Context) error {
+		err := publishSelfBuildEnvelopeAfterIntegration(ctx, integrated, true, time.Second, 2*time.Second, func(publicationCtx context.Context) error {
 			called = true
 			require.NoError(t, publicationCtx.Err())
 			return nil
@@ -369,6 +369,89 @@ func TestPublishSelfBuildEnvelopeAfterStorage(t *testing.T) {
 		require.NoError(t, err)
 		require.True(t, called)
 	})
+}
+
+func TestPublishSelfBuildEnvelopeAfterIntegrationRetainsOwnerAfterRequestTimeout(t *testing.T) {
+	integrated := make(chan error, 1)
+	published := make(chan error, 2)
+
+	err := publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, true, 10*time.Millisecond, time.Second, func(ctx context.Context) error {
+		published <- ctx.Err()
+		return nil
+	})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	integrated <- nil
+	select {
+	case err := <-published:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("detached envelope owner did not publish after integration completed")
+	}
+
+	select {
+	case <-published:
+		t.Fatal("detached envelope owner published more than once")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestPublishSelfBuildEnvelopeAfterIntegrationOwnerExpiresWithoutIntegration(t *testing.T) {
+	integrated := make(chan error, 1)
+	published := make(chan struct{}, 1)
+
+	err := publishSelfBuildEnvelopeAfterIntegration(t.Context(), integrated, true, time.Second, 10*time.Millisecond, func(context.Context) error {
+		published <- struct{}{}
+		return nil
+	})
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+
+	integrated <- nil
+	select {
+	case <-published:
+		t.Fatal("expired envelope owner published after late integration")
+	case <-time.After(20 * time.Millisecond):
+	}
+}
+
+func TestRunBlockStoragePhasesSignalsIntegrationBeforeSuffixFailure(t *testing.T) {
+	integrated := make(chan error, 1)
+	finishStarted := make(chan struct{})
+	finishRelease := make(chan struct{})
+	done := make(chan error, 1)
+	suffixErr := errors.New("forkchoice update failed")
+
+	go func() {
+		done <- runBlockStoragePhases(integrated, func() error {
+			return nil
+		}, func() error {
+			close(finishStarted)
+			<-finishRelease
+			return suffixErr
+		})
+	}()
+
+	require.NoError(t, <-integrated)
+	<-finishStarted
+	close(finishRelease)
+	require.ErrorIs(t, <-done, suffixErr)
+}
+
+func TestRunBlockStoragePhasesDoesNotRunSuffixAfterIntegrationFailure(t *testing.T) {
+	integrated := make(chan error, 1)
+	integrationErr := errors.New("on block failed")
+	finished := false
+
+	err := runBlockStoragePhases(integrated, func() error {
+		return integrationErr
+	}, func() error {
+		finished = true
+		return nil
+	})
+
+	require.ErrorIs(t, err, integrationErr)
+	require.ErrorIs(t, <-integrated, integrationErr)
+	require.False(t, finished)
 }
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {

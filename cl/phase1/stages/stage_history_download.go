@@ -63,7 +63,10 @@ type StageHistoryReconstructionCfg struct {
 
 const logIntervalTime = 30 * time.Second
 
-const skippedEnvelopeRecoveryRetryInterval = 10 * time.Second
+const (
+	skippedEnvelopeRecoveryBatchSize     = 8
+	skippedEnvelopeRecoveryRetryInterval = 10 * time.Second
+)
 
 func StageHistoryReconstruction(downloader *network.BackwardBeaconDownloader, antiquary *antiquary.Antiquary, sn *freezeblocks.CaplinSnapshots, indiciesDB kv.RwDB, engine execution_client.ExecutionEngine, beaconCfg *clparams.BeaconChainConfig, caplinConfig clparams.CaplinConfig, waitForAllRoutines bool, startingRoot common.Hash, startinSlot uint64, tmpdir string, backfillingThrottling time.Duration, executionBlocksCollector block_collector.BlockCollector, blockReader freezeblocks.BeaconSnapshotReader, blobStorage blob_storage.BlobStorage, logger log.Logger, forkchoiceStore forkchoice.ForkChoiceStorage, blobDownloader *network.BlobHistoryDownloader) StageHistoryReconstructionCfg {
 	return StageHistoryReconstructionCfg{
@@ -446,7 +449,12 @@ func completeHistoryBackfill(
 			log.Warn("[BackwardBeaconDownloader] envelope recovery canceled", "remaining", len(pending), "err", err)
 			return false
 		}
-		pending = recoverEnvelopes(ctx, pending)
+		batchSize := min(skippedEnvelopeRecoveryBatchSize, len(pending))
+		failed := recoverEnvelopes(ctx, pending[:batchSize])
+		madeProgress := len(failed) < batchSize
+		next := make([]network.SkippedFullBlock, 0, len(pending)-batchSize+len(failed))
+		next = append(next, pending[batchSize:]...)
+		pending = append(next, failed...)
 		if len(pending) == 0 {
 			notifyBackfilled()
 			return true
@@ -456,6 +464,9 @@ func completeHistoryBackfill(
 			"attempt", attempt,
 			"recovered", len(skipped)-len(pending), "total", len(skipped), "remaining", len(pending))
 
+		if madeProgress {
+			continue
+		}
 		if retryInterval <= 0 {
 			continue
 		}
