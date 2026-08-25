@@ -35,6 +35,12 @@ type TxTypeSpec struct {
 	// must be self-contained and never call back into the signer's own
 	// dispatch. Nil means sender recovery rejects the type.
 	Sender func(txn Transaction, sg Signer) (accounts.Address, error)
+	// StandardReceiptPayload declares that this type's receipts carry the
+	// same payload as the built-in typed receipts. EIP-2718 leaves
+	// ReceiptPayload opaque and type-specific, so a type that adds consensus
+	// fields to it — as OP's deposit receipts do — must leave this false and
+	// gets no receipt encoding rather than a silently wrong one.
+	StandardReceiptPayload bool
 }
 
 var (
@@ -81,16 +87,16 @@ func builtinTxType(id byte) bool {
 	return false
 }
 
-// knownTypedTxType reports whether id is an EIP-2718 typed transaction type
-// this build knows: built-in or externally registered. Legacy is excluded — it
-// carries no type byte.
-func knownTypedTxType(id byte) bool {
+// hasStandardReceiptPayload reports whether id's receipts are the typed
+// receipt with the built-in payload. Legacy is excluded — it carries no type
+// byte — and a registered type has to opt in.
+func hasStandardReceiptPayload(id byte) bool {
 	if id == LegacyTxType {
 		return false
 	}
 	if builtinTxType(id) {
 		return true
 	}
-	_, ok := registeredTxType(id)
-	return ok
+	spec, ok := registeredTxType(id)
+	return ok && spec.StandardReceiptPayload
 }

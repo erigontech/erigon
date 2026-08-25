@@ -176,8 +176,9 @@ func registerFakeTxType(t *testing.T) {
 		return
 	}
 	RegisterTxType(fakeRegisteredTxType, TxTypeSpec{
-		New:           func() Transaction { return &fakeRegisteredTx{} },
-		UnmarshalJSON: unmarshalFakeRegisteredTxJSON,
+		New:                    func() Transaction { return &fakeRegisteredTx{} },
+		StandardReceiptPayload: true,
+		UnmarshalJSON:          unmarshalFakeRegisteredTxJSON,
 		Sender: func(txn Transaction, _ Signer) (accounts.Address, error) {
 			return txn.(*fakeRegisteredTx).sender, nil
 		},
@@ -406,6 +407,28 @@ func TestUnregisteredReceiptTypeRejected(t *testing.T) {
 	// The panic above is only a programming-error guard because a stored
 	// receipt cannot carry an unclaimed type into it.
 	stored, err := rlp.EncodeToBytes(&ReceiptForStorage{Type: unknownType, Status: ReceiptStatusSuccessful})
+	require.NoError(t, err)
+	require.ErrorContains(t, rlp.DecodeBytes(stored, new(ReceiptForStorage)), "invalid receipt type")
+}
+
+// A type whose ReceiptPayload is not the built-in one — OP's deposit receipts
+// add two consensus fields — must be refused rather than encoded as standard.
+func TestRegisteredTxTypeWithoutStandardReceiptPayload(t *testing.T) {
+	const customReceiptType = 0x7a
+
+	RegisterTxType(customReceiptType, TxTypeSpec{New: func() Transaction { return &fakeRegisteredTx{} }})
+	t.Cleanup(func() { unregisterTxType(customReceiptType) })
+
+	r := &Receipt{Type: customReceiptType, Status: ReceiptStatusSuccessful, CumulativeGasUsed: 1}
+	binary, err := r.MarshalBinary()
+	require.NoError(t, err)
+	require.ErrorIs(t, new(Receipt).UnmarshalBinary(binary), ErrTxTypeNotSupported)
+
+	require.Panics(t, func() {
+		Receipts{r}.EncodeIndex(0, new(bytes.Buffer))
+	}, "a type that never claimed the standard payload must not get one")
+
+	stored, err := rlp.EncodeToBytes((*ReceiptForStorage)(r))
 	require.NoError(t, err)
 	require.ErrorContains(t, rlp.DecodeBytes(stored, new(ReceiptForStorage)), "invalid receipt type")
 }

@@ -121,7 +121,8 @@ func (tx *externalTx) Sender(types.Signer) (accounts.Address, error) {
 func TestExternalPackageTxTypeEndToEnd(t *testing.T) {
 	want := accounts.InternAddress(common.HexToAddress("0xabcd"))
 	types.RegisterTxType(externalTxType, types.TxTypeSpec{
-		New: func() types.Transaction { return &externalTx{} },
+		New:                    func() types.Transaction { return &externalTx{} },
+		StandardReceiptPayload: true,
 		Sender: func(txn types.Transaction, _ types.Signer) (accounts.Address, error) {
 			return txn.(*externalTx).Sender(types.Signer{})
 		},

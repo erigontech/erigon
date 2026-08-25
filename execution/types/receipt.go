@@ -209,7 +209,7 @@ func (r *Receipt) decodeTyped(b []byte) error {
 	if len(b) <= 1 {
 		return errShortTypedReceipt
 	}
-	if !knownTypedTxType(b[0]) {
+	if !hasStandardReceiptPayload(b[0]) {
 		return ErrTxTypeNotSupported
 	}
 	var data receiptRLP
@@ -300,7 +300,7 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("read typed receipt: %w", err)
 		}
 		r.Type = b[0]
-		if !knownTypedTxType(r.Type) {
+		if !hasStandardReceiptPayload(r.Type) {
 			return ErrTxTypeNotSupported
 		}
 		inner := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
@@ -452,7 +452,7 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	if dec.Type, err = s.Uint8(); err != nil {
 		return fmt.Errorf("read Type: %w", err)
 	}
-	if dec.Type != LegacyTxType && !knownTypedTxType(dec.Type) {
+	if dec.Type != LegacyTxType && !hasStandardReceiptPayload(dec.Type) {
 		return fmt.Errorf("invalid receipt type %d", dec.Type)
 	}
 	kind, size, err := s.Kind()
@@ -531,10 +531,10 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		}
 		return
 	}
-	if !knownTypedTxType(r.Type) {
+	if !hasStandardReceiptPayload(r.Type) {
 		// Fail where the type is visible; the alternative surfaces as a
 		// receipts-root mismatch that names nothing.
-		panic(fmt.Sprintf("types: Receipts.EncodeIndex: unknown transaction type %d", r.Type))
+		panic(fmt.Sprintf("types: Receipts.EncodeIndex: transaction type %d has no standard receipt payload", r.Type))
 	}
 	if err := r.encodeTyped(data, w); err != nil {
 		panic(err)
