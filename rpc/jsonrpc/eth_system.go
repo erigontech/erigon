@@ -526,7 +526,7 @@ func (b *GasPriceOracleBackend) HeaderByNumber(ctx context.Context, number rpc.B
 }
 
 func (b *GasPriceOracleBackend) BlockByNumber(ctx context.Context, number rpc.BlockNumber) (*types.Block, error) {
-	return b.baseApi.blockByNumberWithSenders(ctx, b.tx, number.Uint64())
+	return b.baseApi.blockByNumberWithSenders(ctx, b.baseApi.filters.WithOverlay(b.tx), number.Uint64())
 }
 
 func (b *GasPriceOracleBackend) ChainConfig() *chain.Config {
@@ -561,7 +561,7 @@ func (b *GasPriceOracleBackend) PendingBlockAndReceipts() (*types.Block, types.R
 	if err != nil {
 		return nil, nil
 	}
-	block, err := b.baseApi.blockByNumberWithSenders(context.Background(), b.tx, latestNum)
+	block, err := b.baseApi.blockByNumberWithSenders(context.Background(), b.baseApi.filters.WithOverlay(b.tx), latestNum)
 	if err != nil || block == nil {
 		return nil, nil
 	}
