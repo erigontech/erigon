@@ -826,7 +826,7 @@ func TestDumpEnvelopeRejectsPrunedRoot(t *testing.T) {
 	require.False(t, exists)
 }
 
-func TestDumpEnvelopeRejectsTooManyTransactionsBeforeWriting(t *testing.T) {
+func TestDumpEnvelopeDoesNotApplyLegacyTransactionLimit(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxTransactionsPerPayload = 1
 	fs := afero.NewMemMapFs()
@@ -840,11 +840,10 @@ func TestDumpEnvelopeRejectsTooManyTransactionsBeforeWriting(t *testing.T) {
 	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
 	envelope.Payload.BlockAccessList = solid.NewByteListSSZ(cfg.MaxBytesPerTransaction)
 
-	err := f.DumpEnvelopeOnDisk(root, &cltypes.SignedExecutionPayloadEnvelope{Message: envelope})
-	require.ErrorContains(t, err, "too many transactions")
-	exists, existsErr := afero.Exists(fs, getEnvelopeFilename(root))
-	require.NoError(t, existsErr)
-	require.False(t, exists)
+	require.NoError(t, f.DumpEnvelopeOnDisk(root, &cltypes.SignedExecutionPayloadEnvelope{Message: envelope}))
+	decoded, err := f.ReadEnvelopeFromDisk(root)
+	require.NoError(t, err)
+	require.Len(t, decoded.Message.Payload.Transactions.UnderlyngReference(), 2)
 }
 
 func TestDumpEnvelopeAcceptsProtocolValidProgressiveDepositCount(t *testing.T) {
@@ -866,6 +865,29 @@ func TestDumpEnvelopeAcceptsProtocolValidProgressiveDepositCount(t *testing.T) {
 	decoded, err := f.ReadEnvelopeFromDisk(root)
 	require.NoError(t, err)
 	require.Equal(t, 16_385, decoded.Message.ExecutionRequests.Deposits.Len())
+}
+
+func TestDumpEnvelopeAcceptsProtocolValidProgressiveTransactionCount(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.HexToHash("0x1234")
+	addEnvelopeTestBlock(f, root, 1)
+	envelope := testEnvelopeWithTransaction(root, nil)
+	transactionCount := int(clparams.MainnetBeaconConfig.MaxTransactionsPerPayload) + 1
+	envelope.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions(make([][]byte, transactionCount))
+	require.LessOrEqual(t, uint64(envelope.EncodingSizeSSZ()), clparams.MaxChunkSize)
+	require.NoError(t, envelope.ValidateForConfig(&clparams.MainnetBeaconConfig))
+	require.NoError(t, envelope.ValidateForPersistence(&clparams.MainnetBeaconConfig))
+	wantRoot, err := envelope.HashSSZ()
+	require.NoError(t, err)
+
+	require.NoError(t, f.DumpEnvelopeOnDisk(root, envelope))
+	decoded, err := f.ReadEnvelopeFromDisk(root)
+	require.NoError(t, err)
+	require.Len(t, decoded.Message.Payload.Transactions.UnderlyngReference(), transactionCount)
+	gotRoot, err := decoded.HashSSZ()
+	require.NoError(t, err)
+	require.Equal(t, wantRoot, gotRoot)
 }
 
 func TestDumpEnvelopeRejectsRequestsPastConsensusLimitWithinDecoderGuard(t *testing.T) {
@@ -978,7 +1000,7 @@ func TestReadEnvelopeReusesSharedBufferWithoutAliasingTransactions(t *testing.T)
 	require.Equal(t, [][]byte{{1, 2, 3}}, persistedA.Message.Payload.Transactions.UnderlyngReference())
 }
 
-func TestReadEnvelopeTransactionsPreserveDecodeLimits(t *testing.T) {
+func TestReadEnvelopeTransactionsPreserveProgressiveDecodeLimits(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxTransactionsPerPayload = 1
 	fs := afero.NewMemMapFs()
@@ -991,7 +1013,8 @@ func TestReadEnvelopeTransactionsPreserveDecodeLimits(t *testing.T) {
 	require.NoError(t, err)
 	overLimit, err := solid.NewTransactionsSSZFromTransactions([][]byte{{1}, {2}}).EncodeSSZ(nil)
 	require.NoError(t, err)
-	require.ErrorContains(t, persisted.Message.Payload.Transactions.DecodeSSZ(overLimit, 0), "expected at most 1 transactions")
+	require.NoError(t, persisted.Message.Payload.Transactions.DecodeSSZ(overLimit, 0))
+	require.Len(t, persisted.Message.Payload.Transactions.UnderlyngReference(), 2)
 }
 
 func TestReadEnvelopeTransactionsDoNotRaceWithDump(t *testing.T) {

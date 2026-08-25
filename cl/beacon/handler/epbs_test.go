@@ -190,9 +190,10 @@ func TestPostExecutionPayloadEnvelopeRejectsPreGloasVersion(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "consensus version")
 }
 
-func TestPostExecutionPayloadEnvelopeRejectsJSONTransactionLimitBeforeForkchoice(t *testing.T) {
+func TestPostExecutionPayloadEnvelopeDoesNotApplyLegacyJSONTransactionLimit(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.MaxTransactionsPerPayload = 2
+	fcu.OnExecutionPayloadErr = errors.New("reached forkchoice")
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{
 		Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
 	}
@@ -206,8 +207,8 @@ func TestPostExecutionPayloadEnvelopeRejectsJSONTransactionLimitBeforeForkchoice
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
-	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-	require.False(t, fcu.HasEnvelope(envelope.Message.BeaconBlockRoot))
+	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "reached forkchoice")
 }
 
 func TestPostExecutionPayloadEnvelopeRejectsSecondJSONValueBeforeForkchoice(t *testing.T) {

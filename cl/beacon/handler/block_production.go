@@ -2240,17 +2240,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	return nil
 }
 
-// broadcastSelfBuildEnvelope constructs and broadcasts a SignedExecutionPayloadEnvelope
-// for a self-built GLOAS block. If the validator client provided a signed envelope
-// (via the block publish request), it is used directly with the real BLS signature.
-// Otherwise, the envelope is reconstructed from the cache as a fallback.
-//
-// The function:
-//  1. Broadcasts the envelope on the execution_payload gossip topic
-//  2. Processes the envelope through forkchoice (OnExecutionPayload) so the local
-//     node transitions the block from PENDING to FULL status
-//
-// [New in Gloas:EIP7732]
+// broadcastSelfBuildEnvelope validates and broadcasts the validator-signed envelope for a self-built Gloas block.
 func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltypes.SignedBeaconBlock, validatorSignedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
 	bid := blk.Block.Body.GetSignedExecutionPayloadBid()
 	if bid == nil || bid.Message == nil {
@@ -2266,86 +2256,39 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 		return fmt.Errorf("failed to compute block root: %w", err)
 	}
 
-	var signedEnvelope *cltypes.SignedExecutionPayloadEnvelope
-
-	if validatorSignedEnvelope != nil && validatorSignedEnvelope.Message != nil {
-		// Use the validator-signed envelope directly (real BLS signature).
-		signedEnvelope = validatorSignedEnvelope
-		log.Debug("BlockPublishing: using validator-signed execution payload envelope",
-			"slot", blk.Block.Slot, "blockRoot", blockRoot)
-	} else {
-		// Fallback: reconstruct from cache. This path uses InfiniteSignature and will
-		// fail BLS verification on other nodes — it exists only as a backward-compat
-		// safety net during the transition period.
-		cached, ok := a.selfBuildPayloads.Get(bid.Message.BlockHash)
-		if !ok {
-			return fmt.Errorf("self-build payload not found in cache for block hash %v", bid.Message.BlockHash)
-		}
-
-		log.Debug("BlockPublishing: no validator-signed envelope provided, falling back to InfiniteSignature (will fail BLS verification on peers)",
-			"slot", blk.Block.Slot, "blockRoot", blockRoot, "blockHash", bid.Message.BlockHash)
-
-		execReqs := cached.ExecutionRequests
-		if execReqs == nil {
-			execReqs = cltypes.NewExecutionRequestsWithVersion(a.beaconChainCfg, clparams.GloasVersion)
-		}
-		envelope := &cltypes.ExecutionPayloadEnvelope{
-			Payload:               cached.Payload,
-			ExecutionRequests:     execReqs,
-			BuilderIndex:          clparams.BuilderIndexSelfBuild,
-			BeaconBlockRoot:       blockRoot,
-			ParentBeaconBlockRoot: blk.Block.ParentRoot,
-		}
-		signedEnvelope = &cltypes.SignedExecutionPayloadEnvelope{
-			Message:   envelope,
-			Signature: common.Bytes96(bls.InfiniteSignature),
-		}
+	if validatorSignedEnvelope == nil || validatorSignedEnvelope.Message == nil {
+		return errors.New("validator-signed envelope is required for a self-build block")
 	}
+	signedEnvelope := validatorSignedEnvelope
 	if err := validateSelfBuildEnvelopeForBlock(signedEnvelope, blk, bid, blockRoot); err != nil {
 		return err
 	}
 
-	// Process through forkchoice so the local node marks the block as FULL.
-	// Use ApplyLocalSelfBuildEnvelope instead of OnExecutionPayload: it skips BLS
-	// signature verification (we produced this envelope locally and may not have the
-	// VC's private key) while still validating the payload with the EL via NewPayload.
-	// Note: this typically returns an error because OnBlock (running in a background
-	// goroutine) has not finished yet — the forkchoice store queues the envelope in
-	// pendingEnvelopes and OnBlock will pick it up. Debug-level to avoid noisy logs.
-	if err := a.forkchoiceStore.ApplyLocalSelfBuildEnvelope(ctx, signedEnvelope); err != nil {
+	applyErr := a.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true)
+	persistenceFailed := false
+	if applyErr != nil {
 		switch {
-		case errors.Is(err, forkchoice.ErrIgnore):
-			a.logger.Debug("Self-build envelope queued for pending processing", "err", err, "blockRoot", blockRoot)
-		case errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
-			a.logger.Debug("Self-build envelope indices queued for retry", "err", err, "blockRoot", blockRoot)
+		case errors.Is(applyErr, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending):
+			a.logger.Debug("Self-build envelope indices queued for retry", "err", applyErr, "blockRoot", blockRoot)
+		case errors.Is(applyErr, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed):
+			persistenceFailed = true
+			a.logger.Debug("Self-build envelope validated but not persisted", "err", applyErr, "blockRoot", blockRoot)
 		default:
-			return fmt.Errorf("failed to apply self-build envelope: %w", err)
+			return fmt.Errorf("failed to apply self-build envelope: %w", applyErr)
 		}
+	}
+
+	encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
+	if err != nil {
+		return fmt.Errorf("failed to encode self-build envelope: %w", err)
+	}
+	if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
+		return fmt.Errorf("failed to publish self-build execution payload envelope: %w", err)
+	}
+	if persistenceFailed {
+		return fmt.Errorf("published self-build envelope before local persistence retry: %w", applyErr)
 	}
 	a.selfBuildPayloads.Remove(bid.Message.BlockHash)
-
-	// Only broadcast the envelope if it has a real BLS signature.
-	// Envelopes with InfiniteSignature (fallback when the VC doesn't provide a
-	// pre-signed envelope) will fail BLS verification on peers, causing them to
-	// penalize and ban us. Process locally only until the VC supports envelope signing.
-	if signedEnvelope.Signature == common.Bytes96(bls.InfiniteSignature) {
-		log.Debug("BlockPublishing: skipping gossip of self-build envelope with InfiniteSignature (no valid BLS signature)",
-			"slot", blk.Block.Slot, "blockRoot", blockRoot, "blockHash", bid.Message.BlockHash)
-	} else {
-		// Broadcast the envelope on the execution_payload gossip topic
-		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
-		if err != nil {
-			return fmt.Errorf("failed to encode self-build envelope: %w", err)
-		}
-		if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
-			a.logger.Error("Failed to publish self-build execution payload envelope", "err", err, "blockRoot", blockRoot)
-		} else {
-			log.Debug("BlockPublishing: broadcast self-build execution payload envelope",
-				"slot", blk.Block.Slot,
-				"blockRoot", blockRoot,
-				"blockHash", bid.Message.BlockHash)
-		}
-	}
 
 	return nil
 }

@@ -689,8 +689,14 @@ func (s *SignedExecutionPayloadEnvelope) ValidateForPersistence(cfg *clparams.Be
 		return fmt.Errorf("execution payload envelope encoding size %d exceeds max %d", size, clparams.MaxChunkSize)
 	}
 	payload := s.Message.Payload
-	if err := payload.Transactions.ValidateBounds(cfg.MaxTransactionsPerPayload, cfg.MaxBytesPerTransaction); err != nil {
-		return fmt.Errorf("transactions exceed decoder resource limit: %w", err)
+	var transactionsErr error
+	if payload.Version() >= clparams.GloasVersion {
+		transactionsErr = payload.Transactions.ValidateProgressiveBounds()
+	} else {
+		transactionsErr = payload.Transactions.ValidateBounds(cfg.MaxTransactionsPerPayload, cfg.MaxBytesPerTransaction)
+	}
+	if transactionsErr != nil {
+		return fmt.Errorf("transactions exceed decoder resource limit: %w", transactionsErr)
 	}
 	if err := payload.BlockAccessList.ValidateBounds(cfg.MaxBytesPerTransaction); err != nil {
 		return fmt.Errorf("block access list exceeds decoder resource limit: %w", err)
@@ -707,6 +713,9 @@ func (s *SignedExecutionPayloadEnvelope) Static() bool {
 }
 
 func (s *SignedExecutionPayloadEnvelope) EncodeSSZ(buf []byte) ([]byte, error) {
+	if size := s.EncodingSizeSSZ(); size < 0 || uint64(size) > clparams.MaxChunkSize {
+		return nil, fmt.Errorf("execution payload envelope encoding size %d exceeds max %d", size, clparams.MaxChunkSize)
+	}
 	return ssz2.MarshalSSZ(buf, s.Message, s.Signature[:])
 }
 

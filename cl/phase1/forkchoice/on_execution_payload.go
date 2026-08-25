@@ -51,6 +51,9 @@ var errPayloadValidationAdmission = errors.New("payload validation admission can
 // ErrExecutionPayloadEnvelopeIndicesPending reports a persisted envelope whose database indices are queued for retry.
 var ErrExecutionPayloadEnvelopeIndicesPending = errors.New("execution payload envelope indices pending")
 
+// ErrExecutionPayloadEnvelopePersistenceFailed reports a validated envelope that could not be persisted.
+var ErrExecutionPayloadEnvelopePersistenceFailed = errors.New("execution payload envelope persistence failed")
+
 var (
 	errInvalidExecutionPayloadEnvelope = errors.New("invalid execution payload envelope")
 	errPendingEnvelopeAgeBounded       = errors.New("pending execution payload envelope is age bounded")
@@ -506,7 +509,7 @@ func (f *ForkChoiceStore) applyEnvelopeCoordinated(ctx context.Context, signedEn
 
 	// Persist envelope to disk — this marks the root as "has payload" in store.payloads
 	if err := f.forkGraph.DumpEnvelopeOnDisk(beaconBlockRoot, signedEnvelope); err != nil {
-		return false, fmt.Errorf("OnExecutionPayload: failed to dump envelope: %w", err)
+		return false, fmt.Errorf("%w: OnExecutionPayload: failed to dump envelope: %w", ErrExecutionPayloadEnvelopePersistenceFailed, err)
 	}
 	if envelope.Payload != nil {
 		f.eth2Roots.Add(beaconBlockRoot, envelope.Payload.BlockHash)
@@ -585,12 +588,15 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	// deadlock with postForkchoiceOperations (which holds MDBX tx then needs f.mu.RLock).
 	applied, err := f.applyEnvelope(ctx, signedEnvelope, checkBlobData, validatePayload, queueMissingEnvelope)
 	if err != nil {
+		if errors.Is(err, ErrExecutionPayloadEnvelopePersistenceFailed) {
+			f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), signedEnvelope)
+		}
 		return err
 	}
 	indexEnvelope, err := f.ensureExecutionPayloadEnvelopeIndices(ctx, common.Hash(beaconBlockRoot), signedEnvelope, applied)
 	if err != nil {
 		f.pendingEnvelopes.Add(common.Hash(beaconBlockRoot), indexEnvelope)
-		return fmt.Errorf("OnExecutionPayload: failed to write execution payload indices: %w", err)
+		return fmt.Errorf("%w: OnExecutionPayload: failed to write execution payload indices: %w", ErrExecutionPayloadEnvelopeIndicesPending, err)
 	}
 
 	return nil
@@ -625,6 +631,9 @@ func (f *ForkChoiceStore) ApplyLocalSelfBuildEnvelope(ctx context.Context, signe
 
 	applied, err := f.applyLocalSelfBuildEnvelope(ctx, signedEnvelope, queueMissingEnvelope)
 	if err != nil {
+		if errors.Is(err, ErrExecutionPayloadEnvelopePersistenceFailed) {
+			f.pendingLocalSelfBuildEnvelopes.Add(common.Hash(beaconBlockRoot), signedEnvelope)
+		}
 		return err
 	}
 	indexEnvelope, err := f.ensureExecutionPayloadEnvelopeIndices(ctx, common.Hash(beaconBlockRoot), signedEnvelope, applied)

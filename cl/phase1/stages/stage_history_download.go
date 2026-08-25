@@ -394,14 +394,16 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 			}
 		}
 
-		// Recover FULL blocks whose envelopes were skipped during backward download.
-		if skipped := cfg.downloader.SkippedFullBlocks(); len(skipped) > 0 {
-			if !recoverSkippedEnvelopesWithRetries(ctx, cfg, skipped) {
-				return
-			}
+		skipped := cfg.downloader.SkippedFullBlocks()
+		if !completeHistoryBackfill(
+			ctx, skipped, skippedEnvelopeRecoveryMaxAttempts, skippedEnvelopeRecoveryRetryInterval,
+			func(ctx context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+				return recoverSkippedEnvelopes(ctx, cfg, pending)
+			},
+			cfg.antiquary.NotifyBackfilled,
+		) {
+			return
 		}
-
-		cfg.antiquary.NotifyBackfilled()
 		if cfg.caplinConfig.ArchiveBlocks {
 			cfg.logger.Info("Full backfilling finished")
 		}
@@ -429,32 +431,48 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	return nil
 }
 
-func recoverSkippedEnvelopesWithRetries(ctx context.Context, cfg StageHistoryReconstructionCfg, skipped []network.SkippedFullBlock) bool {
+func completeHistoryBackfill(
+	ctx context.Context,
+	skipped []network.SkippedFullBlock,
+	maxAttempts int,
+	retryInterval time.Duration,
+	recoverEnvelopes func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock,
+	notifyBackfilled func(),
+) bool {
+	if len(skipped) == 0 {
+		notifyBackfilled()
+		return true
+	}
+
 	pending := skipped
-	for attempt := 1; attempt <= skippedEnvelopeRecoveryMaxAttempts; attempt++ {
-		pending = recoverSkippedEnvelopes(ctx, cfg, pending)
+	for attempt := 1; attempt <= maxAttempts; attempt++ {
+		pending = recoverEnvelopes(ctx, pending)
 		if len(pending) == 0 {
+			notifyBackfilled()
 			return true
 		}
 
-		if attempt == skippedEnvelopeRecoveryMaxAttempts {
-			log.Warn("[BackwardBeaconDownloader] envelope recovery incomplete, proceeding with gap",
+		if attempt == maxAttempts {
+			log.Warn("[BackwardBeaconDownloader] envelope recovery incomplete",
 				"recovered", len(skipped)-len(pending), "total", len(skipped), "remaining", len(pending))
-			return true
+			return false
 		}
 
 		log.Warn("[BackwardBeaconDownloader] envelope recovery incomplete, retrying",
-			"attempt", attempt, "maxAttempts", skippedEnvelopeRecoveryMaxAttempts,
+			"attempt", attempt, "maxAttempts", maxAttempts,
 			"recovered", len(skipped)-len(pending), "total", len(skipped), "remaining", len(pending))
 
+		if retryInterval <= 0 {
+			continue
+		}
 		select {
 		case <-ctx.Done():
 			log.Warn("[BackwardBeaconDownloader] envelope recovery canceled", "remaining", len(pending), "err", ctx.Err())
 			return false
-		case <-time.After(skippedEnvelopeRecoveryRetryInterval):
+		case <-time.After(retryInterval):
 		}
 	}
-	return true
+	return false
 }
 
 // recoverSkippedEnvelopes attempts to fetch execution payload envelopes for

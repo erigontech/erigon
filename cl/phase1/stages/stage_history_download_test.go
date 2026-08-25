@@ -17,8 +17,13 @@
 package stages
 
 import (
+	"context"
 	"math"
 	"testing"
+
+	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/phase1/network"
 )
 
 // clampProgress must never report a total below processed nor underflow, even
@@ -85,4 +90,50 @@ func TestELBackfillFinished_NoGapUsesSlotFloor(t *testing.T) {
 	if !elBackfillFinished(bellatrixSlot, 20_000_000, bellatrixSlot, noBlockFloor) {
 		t.Fatal("backfill must finish once the beacon-slot floor is reached")
 	}
+}
+
+func TestCompleteHistoryBackfillWithholdsNotificationWhenEnvelopeRecoveryExhausts(t *testing.T) {
+	skipped := []network.SkippedFullBlock{{Root: [32]byte{1}}}
+	attempts := 0
+	notified := false
+
+	completed := completeHistoryBackfill(
+		context.Background(), skipped, 3, 0,
+		func(context.Context, []network.SkippedFullBlock) []network.SkippedFullBlock {
+			attempts++
+			return skipped
+		},
+		func() { notified = true },
+	)
+
+	require.False(t, completed)
+	require.Equal(t, 3, attempts)
+	require.False(t, notified)
+}
+
+func TestCompleteHistoryBackfillNotifiesAfterPartialEnvelopeRecoveryCompletes(t *testing.T) {
+	first := network.SkippedFullBlock{Root: [32]byte{1}}
+	second := network.SkippedFullBlock{Root: [32]byte{2}}
+	inputs := make([][][32]byte, 0, 2)
+	notified := false
+
+	completed := completeHistoryBackfill(
+		context.Background(), []network.SkippedFullBlock{first, second}, 3, 0,
+		func(_ context.Context, pending []network.SkippedFullBlock) []network.SkippedFullBlock {
+			roots := make([][32]byte, len(pending))
+			for i := range pending {
+				roots[i] = pending[i].Root
+			}
+			inputs = append(inputs, roots)
+			if len(inputs) == 1 {
+				return []network.SkippedFullBlock{second}
+			}
+			return nil
+		},
+		func() { notified = true },
+	)
+
+	require.True(t, completed)
+	require.Equal(t, [][][32]byte{{first.Root, second.Root}, {second.Root}}, inputs)
+	require.True(t, notified)
 }
