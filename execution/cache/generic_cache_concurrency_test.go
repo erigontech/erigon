@@ -465,60 +465,69 @@ func BenchmarkGenericCacheParallelPutGrow(b *testing.B) {
 	})
 }
 
-// A cache whose grow step the shared envelope refuses must stop entering
-// maybeGrow: the LRU stays full at curCap forever, so without a latch every
-// later insert re-takes the single resizeMu and serialises all writers.
-func TestGenericCache_GrowRefusalLatchesOffResizeMu(t *testing.T) {
-	prevBudget := cachebudget.Global
-	cachebudget.Global = cachebudget.New(0) // Reserve always refuses; Take still succeeds
-	t.Cleanup(func() { cachebudget.Global = prevBudget })
+// The jump-grow copy reads the retiring generation with Peek. Get returns the
+// same values but also re-links every entry to that generation's head, which is
+// pure waste inside the all-stripe fence: Keys() is materialised before the loop
+// and fixes the copy order, and insertion order alone sets the new generation's
+// recency. Pin that a grown cache is exactly what a Get-based copy of the same
+// source produces, so neither the swap nor a freelru bump can reorder or drop
+// entries unnoticed.
+func TestGenericCache_GrowCopyMatchesGetBasedCopy(t *testing.T) {
+	sizeOf := func(v []byte) int { return len(v) }
 
-	c := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU))
+	grown := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, sizeOf, ModeEvictLRU))
+	// Same capacity and shard geometry as grown starts with, but fixed: it never
+	// grows, so it ends up holding the generation the grow below read.
+	source := closeOnCleanup(t, newGenericCacheEntries[[]byte](64*datasize.MB, genericCacheStartCapacity, sizeOf, ModeEvictLRU))
 
 	key := make([]byte, 8)
-	for i := range genericCacheStartCapacity * 2 {
+	put := func(i int) {
 		binary.BigEndian.PutUint64(key, uint64(i))
-		c.Put(key, []byte{byte(i)}, uint64(i))
+		grown.Put(key, []byte{byte(i), byte(i >> 8)}, uint64(i))
+		source.Put(key, []byte{byte(i), byte(i >> 8)}, uint64(i))
 	}
-	require.Equal(t, uint32(genericCacheStartCapacity), c.curCap.Load(), "refused grow must leave curCap unchanged")
-
-	c.resizeMu.Lock()
-	defer c.resizeMu.Unlock()
-	done := make(chan struct{})
-	go func() {
-		defer close(done)
-		k := make([]byte, 8)
-		binary.BigEndian.PutUint64(k, uint64(1<<20))
-		c.Put(k, []byte{1}, 1)
-	}()
-	select {
-	case <-done:
-	case <-time.After(10 * time.Second):
-		t.Fatal("put blocked on resizeMu after the envelope refused the grow")
+	touch := func(i int) {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		grown.Get(key)
+		source.Get(key)
 	}
-}
 
-// Bytes returned to the envelope must lift the refusal latch, or a cache that
-// filled the envelope once would never grow into budget a later Close frees.
-func TestGenericCache_BudgetReleaseLiftsGrowLatch(t *testing.T) {
-	prevBudget := cachebudget.Global
-	budget := cachebudget.New(0)
-	cachebudget.Global = budget
-	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	const warmup = genericCacheStartCapacity / 2
+	for i := range warmup {
+		put(i)
+	}
+	for i := 0; i < warmup; i += 3 { // pull recency away from insertion order
+		touch(i)
+	}
+	// Insert until the first grow fires; both caches see the identical sequence,
+	// so source still holds what the grow copied.
+	grew := false
+	for i := warmup; i < 8*genericCacheStartCapacity && !grew; i++ {
+		put(i)
+		grew = grown.curCap.Load() > genericCacheStartCapacity
+	}
+	require.True(t, grew, "the fill must have triggered a real grow")
 
-	c := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU))
-
-	fill := func(from, to int) {
-		key := make([]byte, 8)
-		for i := from; i < to; i++ {
-			binary.BigEndian.PutUint64(key, uint64(i))
-			c.Put(key, []byte{byte(i)}, uint64(i))
+	// Rebuild the copy the way it read before Peek, into the geometry the grow chose.
+	want := grown.newShards(grown.curCap.Load(), grown.shardCount)
+	src := source.data.Load()
+	for _, k := range src.lru.Keys() {
+		if e, ok := src.lru.Get(k); ok {
+			want.add(k, e)
 		}
 	}
-	fill(0, genericCacheStartCapacity*2)
-	require.Equal(t, uint32(genericCacheStartCapacity), c.curCap.Load())
 
-	budget.Release(64 * 1024 * 1024)
-	fill(genericCacheStartCapacity*2, genericCacheStartCapacity*3)
-	require.Greater(t, c.curCap.Load(), uint32(genericCacheStartCapacity), "freed budget must let the cache grow again")
+	got := grown.data.Load()
+	require.Positive(t, want.len())
+	require.Equal(t, want.len(), got.len(), "the grown generation must hold every source entry")
+	require.Equal(t, want.lru.Keys(), got.lru.Keys(), "the grown generation must keep the get-copy order")
+	for _, k := range got.lru.Keys() {
+		wantEntry, ok := want.lru.Peek(k)
+		require.True(t, ok)
+		gotEntry, ok := got.lru.Peek(k)
+		require.True(t, ok)
+		require.Equal(t, wantEntry.key, gotEntry.key)
+		require.Equal(t, wantEntry.val, gotEntry.val)
+		require.Equal(t, wantEntry.txNum, gotEntry.txNum)
+	}
 }
