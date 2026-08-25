@@ -30,7 +30,8 @@ type Stream interface {
 	Write(content []byte) (int, error)
 	// WriteRawBytes writes already-encoded JSON, like WriteRaw does for a string.
 	// Nothing is escaped or validated. Unlike Write, the bytes only reach the buffer,
-	// so an HTTP writer does not commit a status before the handler picks one.
+	// handed over once it passes FlushThreshold, so an HTTP writer does not commit a
+	// status before the handler picks one for a response that fits.
 	WriteRawBytes(content []byte)
 	WriteRaw(content string)
 	Flush() error
