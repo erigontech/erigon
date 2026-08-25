@@ -363,16 +363,18 @@ already the output's.
 **Files:**
 - Modify: `db/state/commitment_convert_pbin.go`
 - Modify: `db/state/commitment_convert_pbin_test.go`
+- Modify: `db/state/commitment_convert_export_test.go`
+- Modify: `cmd/integration/commands/commitment.go`
 
-- [ ] write a failing test that a record written under the wrong key is caught
-- [ ] write a failing test that `--verify.sample=0` disables the pass
-- [ ] implement strided sampling — every N-th record that took the legacy branch; a
+- [x] write a failing test that a record written under the wrong key is caught
+- [x] write a failing test that `--verify.sample=0` disables the pass
+- [x] implement strided sampling — every N-th record that took the legacy branch; a
       copied-verbatim record has no legacy header and must not enter the sample
-- [ ] implement the read-back as a **sequential** re-scan of the finished output file,
+- [x] implement the read-back as a **sequential** re-scan of the finished output file,
       comparing at the recorded positions via `CompareLegacy`. Open no index and name no
       accessor extension — `requiredAccessorsForCommitment` is config-driven and `.kvi` does
       not exist under `AGG_COMMITMENT_BT=1`
-- [ ] run `go test ./db/state/... -count=1` — must pass before task 9
+- [x] run `go test ./db/state/... -count=1` — must pass before task 9
 
 ### Task 9: End-to-end conversion test
 

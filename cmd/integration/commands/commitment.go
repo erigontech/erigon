@@ -1120,7 +1120,7 @@ func commitmentConvertFormat(db kv.TemporalRwDB, ctx context.Context, logger log
 	acRo := agg.BeginFilesRo()
 	defer acRo.Close()
 
-	return dbstate.ConvertPBinRecordFiles(ctx, acRo, logger)
+	return dbstate.ConvertPBinRecordFiles(ctx, acRo, logger, convertFormatVerifySample)
 }
 
 // integration commitment visualize

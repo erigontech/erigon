@@ -38,6 +38,7 @@ import (
 )
 
 var pbinConvertPairHook func()
+var pbinConvertAfterBuildHook func(string)
 
 // A pre-version branch record opens with the high byte of its touchMap, always
 // zero; a current one opens with a cell-fields byte, which always carries a kind
@@ -132,6 +133,59 @@ func verifyPBinPairCount(sourcePairs uint64, outputWords int) error {
 	outputPairs := uint64(outputWords / 2)
 	if outputPairs != sourcePairs {
 		return fmt.Errorf("pbin pair count: source has %d pairs, output has %d pairs", sourcePairs, outputPairs)
+	}
+	return nil
+}
+
+type pbinLegacySample struct {
+	pair   uint64
+	key    []byte
+	legacy []byte
+}
+
+func verifyPBinSamples(ctx context.Context, d *Domain, outputPath string, samples []pbinLegacySample) error {
+	if len(samples) == 0 {
+		return nil
+	}
+
+	decompressor, err := seg.NewDecompressor(outputPath)
+	if err != nil {
+		return fmt.Errorf("open sampled pbin output: %w", err)
+	}
+	defer decompressor.Close()
+
+	reader := d.dataReader(decompressor)
+	reader.Reset(0)
+	converter := commitment.NewPBinRecordConverter()
+	var key, value []byte
+	sampleIdx := 0
+	for pair := uint64(0); reader.HasNext(); pair++ {
+		select {
+		case <-ctx.Done():
+			return ctx.Err()
+		default:
+		}
+
+		key, _ = reader.Next(key[:0])
+		if !reader.HasNext() {
+			return fmt.Errorf("pbin sample read-back: output has no value at pair %d", pair)
+		}
+		value, _ = reader.Next(value[:0])
+		if sampleIdx >= len(samples) || samples[sampleIdx].pair != pair {
+			continue
+		}
+
+		sample := samples[sampleIdx]
+		if !bytes.Equal(key, sample.key) {
+			return fmt.Errorf("pbin sample read-back: output key at pair %d is %x, want %x", pair, key, sample.key)
+		}
+		if err := converter.CompareLegacy(sample.key, sample.legacy, value); err != nil {
+			return fmt.Errorf("pbin sample read-back at pair %d: %w", pair, err)
+		}
+		sampleIdx++
+	}
+	if sampleIdx != len(samples) {
+		return fmt.Errorf("pbin sample read-back: output ended before sample at pair %d", samples[sampleIdx].pair)
 	}
 	return nil
 }
@@ -243,7 +297,7 @@ func commitmentOutputComplete(paths []string) (bool, error) {
 	return true, nil
 }
 
-func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, logger log.Logger) (pairs uint64, err error) {
+func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, logger log.Logger, verifySample uint64) (pairs uint64, err error) {
 	vf, ok := file.(visibleFile)
 	if !ok {
 		return 0, fmt.Errorf("convertPBinFile %q: VisibleFile is not state.visibleFile (got %T)", file.Fullpath(), file)
@@ -307,6 +361,8 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 	reader := d.dataReader(vf.src.decompressor)
 	reader.Reset(0)
 	converter := commitment.NewPBinRecordConverter()
+	var legacyBranches uint64
+	var samples []pbinLegacySample
 	var key, value []byte
 	for reader.HasNext() {
 		key, _ = reader.Next(key[:0])
@@ -331,6 +387,16 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 			}
 		case pbinRecordIsLegacy(value):
 			outputValue, err = converter.ConvertBranch(key, value)
+			if err == nil {
+				legacyBranches++
+				if verifySample > 0 && legacyBranches%verifySample == 0 {
+					samples = append(samples, pbinLegacySample{
+						pair:   pairs,
+						key:    append([]byte(nil), key...),
+						legacy: append([]byte(nil), value...),
+					})
+				}
+			}
 		default:
 			outputValue = append([]byte(nil), value...)
 		}
@@ -361,6 +427,12 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 		return pairs, fmt.Errorf("convertPBinFile %q: build output: %w", file.Fullpath(), err)
 	}
 	static.CleanupOnError()
+	if pbinConvertAfterBuildHook != nil {
+		pbinConvertAfterBuildHook(outputPath)
+	}
+	if err := verifyPBinSamples(ctx, d, outputPath, samples); err != nil {
+		return pairs, fmt.Errorf("convertPBinFile %q: %w", file.Fullpath(), err)
+	}
 	cleanupOutput = false
 	logger.Info("[pbin_convert] converted", "file", filepath.Base(file.Fullpath()), "pairs", pairs)
 	return pairs, nil
@@ -369,7 +441,14 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 // ConvertPBinRecordFiles rewrites pre-version pbin commitment files in the
 // output datadir. Files already in the current format remain hardlinks to the
 // source datadir; converted files replace those links before they are written.
-func ConvertPBinRecordFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error {
+func ConvertPBinRecordFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger, verifySample ...uint64) error {
+	if len(verifySample) > 1 {
+		return fmt.Errorf("pbin conversion: expected at most one verify sample stride, got %d", len(verifySample))
+	}
+	var sampleStride uint64
+	if len(verifySample) == 1 {
+		sampleStride = verifySample[0]
+	}
 	files, err := commitmentFilesForConversion(at)
 	if err != nil {
 		return err
@@ -380,7 +459,7 @@ func ConvertPBinRecordFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 	}
 
 	for _, file := range files {
-		if _, err := convertPBinFile(ctx, at, file, logger); err != nil {
+		if _, err := convertPBinFile(ctx, at, file, logger, sampleStride); err != nil {
 			if errors.Is(err, errSkip) {
 				logger.Info("[pbin_convert] already current", "file", filepath.Base(file.Fullpath()))
 				continue

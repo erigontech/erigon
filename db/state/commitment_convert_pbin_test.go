@@ -238,6 +238,13 @@ func convertPBinOutputFixture(t *testing.T, fixture pbinOutputFixture) error {
 	return state.ConvertPBinRecordFiles(t.Context(), at, log.New())
 }
 
+func convertPBinOutputFixtureWithSample(t *testing.T, fixture pbinOutputFixture, sample uint64) error {
+	t.Helper()
+	at := fixture.output.BeginFilesRo()
+	defer at.Close()
+	return state.ConvertPBinRecordFiles(t.Context(), at, log.New(), sample)
+}
+
 func TestConvertPBinRecordFilesKeepsCurrentHardlink(t *testing.T) {
 	fixture := newPBinOutputFixture(t, false, false)
 	require.NoError(t, convertPBinOutputFixture(t, fixture))
@@ -421,11 +428,100 @@ func TestConvertPBinRecordFilesResumeRebuildsIncompleteShard(t *testing.T) {
 	assertPBinOutputComplete(t, fixture)
 }
 
+func TestConvertPBinRecordFilesSampleRejectsWrongKey(t *testing.T) {
+	fixture := newPBinOutputFixture(t, true, false)
+	state.SetPBinConvertAfterBuildHookForTest(func(path string) {
+		rewritePBinFileWithWrongBranchKey(t, fixture, path)
+	})
+	t.Cleanup(func() {
+		state.SetPBinConvertAfterBuildHookForTest(nil)
+	})
+
+	err := convertPBinOutputFixtureWithSample(t, fixture, 1)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "sample")
+	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
+	assertPBinOutputRemoved(t, fixture)
+}
+
+func TestConvertPBinRecordFilesSampleZeroDisablesReadBack(t *testing.T) {
+	fixture := newPBinOutputFixture(t, true, false)
+	state.SetPBinConvertAfterBuildHookForTest(func(path string) {
+		rewritePBinFileWithWrongBranchKey(t, fixture, path)
+	})
+	t.Cleanup(func() {
+		state.SetPBinConvertAfterBuildHookForTest(nil)
+	})
+
+	require.NoError(t, convertPBinOutputFixtureWithSample(t, fixture, 0))
+	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
+	assertPBinOutputComplete(t, fixture)
+}
+
+func TestConvertPBinRecordFilesSamplesOnlyLegacyBranches(t *testing.T) {
+	fixture := newPBinOutputFixture(t, true, false)
+	state.SetPBinConvertAfterBuildHookForTest(func(path string) {
+		rewritePBinFileWithWrongRootKey(t, fixture, path)
+	})
+	t.Cleanup(func() {
+		state.SetPBinConvertAfterBuildHookForTest(nil)
+	})
+
+	require.NoError(t, convertPBinOutputFixtureWithSample(t, fixture, 1))
+	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
+	assertPBinOutputComplete(t, fixture)
+}
+
 func rewritePBinFile(t *testing.T, fixture pbinOutputFixture, keys, values [][]byte) {
 	t.Helper()
 	config := fixture.output.Cfg(kv.CommitmentDomain)
 	require.NoError(t, dir.RemoveFile(fixture.outputPath))
 	comp, err := seg.NewCompressor(t.Context(), "pbin test rewrite", fixture.outputPath, fixture.output.Dirs().Tmp, config.CompressCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	writer := seg.NewWriter(comp, config.Compression)
+	for i := range keys {
+		_, err = writer.Write(keys[i])
+		require.NoError(t, err)
+		_, err = writer.Write(values[i])
+		require.NoError(t, err)
+	}
+	require.NoError(t, comp.Compress())
+	comp.Close()
+}
+
+func rewritePBinFileWithWrongBranchKey(t *testing.T, fixture pbinOutputFixture, path string) {
+	t.Helper()
+	keys, values := readKVFile(t, fixture.output, path)
+	for i, key := range keys {
+		if bytes.Equal(key, commitmentdb.KeyCommitmentState) || isPBinRootKey(key) || len(values[i]) == 0 {
+			continue
+		}
+		keys[i] = append(append([]byte(nil), key...), 0)
+		rewritePBinFileAt(t, fixture, path, keys, values)
+		return
+	}
+	require.Fail(t, "fixture has no branch record")
+}
+
+func rewritePBinFileWithWrongRootKey(t *testing.T, fixture pbinOutputFixture, path string) {
+	t.Helper()
+	keys, values := readKVFile(t, fixture.output, path)
+	for i, key := range keys {
+		if !isPBinRootKey(key) {
+			continue
+		}
+		keys[i] = append(append([]byte(nil), key...), 0)
+		rewritePBinFileAt(t, fixture, path, keys, values)
+		return
+	}
+	require.Fail(t, "fixture has no root record")
+}
+
+func rewritePBinFileAt(t *testing.T, fixture pbinOutputFixture, path string, keys, values [][]byte) {
+	t.Helper()
+	config := fixture.output.Cfg(kv.CommitmentDomain)
+	require.NoError(t, dir.RemoveFile(path))
+	comp, err := seg.NewCompressor(t.Context(), "pbin test post-build rewrite", path, fixture.output.Dirs().Tmp, config.CompressCfg, log.LvlDebug, log.New())
 	require.NoError(t, err)
 	writer := seg.NewWriter(comp, config.Compression)
 	for i := range keys {
