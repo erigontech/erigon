@@ -305,26 +305,11 @@ func (s *executionPayloadBidService) ValidateBid(_ context.Context, msg *cltypes
 	if bid.Slot <= parentHeader.Slot {
 		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", bid.Slot, parentHeader.Slot)
 	}
-	maxBlobs := int(s.beaconCfg.GetBlobParameters(state.GetEpochAtSlot(s.beaconCfg, bid.Slot)).MaxBlobsPerBlock)
-	if bid.BlobKzgCommitments.Len() > maxBlobs {
-		return fmt.Errorf("bid has too many blob_kzg_commitments: %d > %d", bid.BlobKzgCommitments.Len(), maxBlobs)
-	}
-	preferences, ok, err := s.matchingProposerPreferences(msg)
-	if err != nil {
+	if err := s.validateBidBlobLimit(bid); err != nil {
 		return err
-	}
-	if !ok || preferences.Message == nil {
-		return fmt.Errorf("%w: proposer preferences not available", ErrIgnore)
-	}
-	if bid.FeeRecipient != preferences.Message.FeeRecipient {
-		return fmt.Errorf("%w: bid fee recipient does not match proposer preferences", ErrIgnore)
 	}
 	if _, ok := s.forkchoiceStore.GetRecentExecutionPayloadStatus(bid.ParentBlockHash); !ok {
 		return fmt.Errorf("%w: parent_block_hash %v not known in fork choice", ErrIgnore, bid.ParentBlockHash)
-	}
-	parentGasLimit, ok := s.forkchoiceStore.GetExecutionPayloadGasLimit(bid.ParentBlockHash)
-	if !ok || !IsGasLimitTargetCompatible(parentGasLimit, bid.GasLimit, preferences.Message.TargetGasLimit) {
-		return fmt.Errorf("%w: bid gas limit is not compatible with proposer preferences", ErrIgnore)
 	}
 	compatible, err := s.isBidCompatibleWithHead(bid)
 	if err != nil {
@@ -412,6 +397,10 @@ func (s *executionPayloadBidService) validateBidStateless(bid *cltypes.Execution
 	if bid.ExecutionPayment != 0 {
 		return fmt.Errorf("bid execution_payment must be 0, got %d", bid.ExecutionPayment)
 	}
+	return s.validateBidBlobLimit(bid)
+}
+
+func (s *executionPayloadBidService) validateBidBlobLimit(bid *cltypes.ExecutionPayloadBid) error {
 	epoch := state.GetEpochAtSlot(s.beaconCfg, bid.Slot)
 	maxBlobsPerBlock := int(s.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock)
 	if bid.BlobKzgCommitments.Len() > maxBlobsPerBlock {

@@ -21,6 +21,7 @@ import (
 	"net/http"
 	"sync"
 	"sync/atomic"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 
@@ -159,12 +160,7 @@ type ApiHandler struct {
 	// Populated during block production alongside selfBuildPayloads.
 	// [New in Gloas:EIP7732]
 	selfBuildEnvelopes *lru.Cache[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]
-	builderRoutes      *lru.Cache[common.Hash, *builderRoute]
-}
-
-type builderRoute struct {
-	url       string
-	forwarded atomic.Bool
+	builderRoutes      *builderRouteStore
 }
 
 func NewApiHandler(
@@ -234,10 +230,7 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
-	builderRoutes, err := lru.New[common.Hash, *builderRoute]("builderRoutes", 16)
-	if err != nil {
-		panic(err)
-	}
+	builderRoutes := newBuilderRouteStore(builderRouteCapacity, builderRouteTTL, time.Now)
 	return &ApiHandler{
 		logger:                             logger,
 		validatorParams:                    validatorParams,
