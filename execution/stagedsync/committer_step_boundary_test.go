@@ -885,7 +885,7 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 		doms.SetChangesetAccumulator(cs)
 
 		var lastTx uint64
-		for i := uint64(0); i < txsPerBlock; i++ {
+		for range txsPerBlock {
 			txNum++
 			lastTx = txNum
 			addrBytes := make([]byte, length.Addr)

@@ -41,7 +41,7 @@ type sd interface {
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
 	// AsPutDelWithCommitmentDiff is AsPutDel, but routes commitment-domain
 	// writes into diff explicitly instead of through SetChangesetAccumulator
-	// — see SharedDomains.ComputeCommitmentWithDiff.
+	// — see SharedDomainsCommitmentContext.ComputeCommitmentWithDiff.
 	AsPutDelWithCommitmentDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
@@ -420,9 +420,12 @@ func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context
 
 // ComputeCommitmentWithDiff is ComputeCommitment, but this call's own
 // commitment-domain writes (branch nodes, the [state] marker) route directly
-// into diff instead of through whatever SetChangesetAccumulator installed —
-// see SharedDomains.ComputeCommitmentWithDiff for the full contract. diff may
-// be nil (no changeset recording).
+// into diff instead of through whatever SetChangesetAccumulator installed.
+// diff may be nil (no changeset recording, e.g. an isolated pre-window
+// block). Unlike ComputeCommitment, it does not flush the previous call's
+// pending deferred update itself — callers resolve and flush that
+// separately before calling this, since its target (the previous block's
+// own changeset) is independent of this call's diff.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithDiff(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), diff *kv.DomainDiff) (rootHash []byte, err error) {
 	return sdc.computeCommitment(ctx, tx, saveState, blockNum, txNum, logPrefix, onProgress, diff, true)
 }

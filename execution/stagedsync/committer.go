@@ -860,7 +860,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 		return nil, err
 	}
 
-	rh, err := cc.doms.ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, nil)
+	rh, err := cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -998,7 +998,7 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	} else if live := cc.doms.GetChangesetAccumulator(); live != nil {
 		diff = &live.Diffs[kv.CommitmentDomain]
 	}
-	return cc.doms.ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, diff)
+	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, diff)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via

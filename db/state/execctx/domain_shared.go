@@ -1996,22 +1996,6 @@ func (sd *SharedDomains) ComputeCommitment(ctx context.Context, tx kv.TemporalTx
 	return sd.sdCtx.ComputeCommitment(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress)
 }
 
-// ComputeCommitmentWithDiff is the parallel commitment calculator's variant:
-// it routes this call's own commitment-domain writes (branch nodes, the
-// [state] marker) directly into diff instead of through changesetMu — see
-// SharedDomainsCommitmentContext.ComputeCommitmentWithDiff and
-// DomainPutCommitmentDiff. diff may be nil (no changeset recording, e.g. an
-// isolated pre-window block).
-//
-// Unlike ComputeCommitment, it does not flush the previous call's pending
-// deferred update itself — that flush's target (the previous block's own
-// changeset) is independent of this call's diff, so callers resolve and
-// flush it separately (LockChangesetAccumulator + FlushPendingUpdatesLocked)
-// before calling this.
-func (sd *SharedDomains) ComputeCommitmentWithDiff(ctx context.Context, tx kv.TemporalTx, saveStateAfter bool, blockNum, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), diff *kv.DomainDiff) (rootHash []byte, err error) {
-	return sd.sdCtx.ComputeCommitmentWithDiff(ctx, tx, saveStateAfter, blockNum, txNum, logPrefix, onProgress, diff)
-}
-
 // EnableTrieWarmup enables parallel warmup of MDBX page cache during commitment.
 // It requires a DB to be enabled via EnableParaTrieDB.
 func (sd *SharedDomains) EnableTrieWarmup(trieWarmup bool) {
