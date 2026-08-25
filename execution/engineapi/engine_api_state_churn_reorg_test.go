@@ -26,7 +26,6 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
-	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/testlog"
 	"github.com/erigontech/erigon/execution/abi/bind"
@@ -294,15 +293,7 @@ func churnAndAssert(
 	transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
 	require.NoError(t, err)
 	transactOpts.GasLimit = params.MaxTxnGasLimit
-	coinbaseAddr := crypto.PubkeyToAddress(eat.CoinbaseKey.PublicKey)
 	for k := range pokes {
-		// Pin the nonce to the head state: the txpool's own pending-nonce view
-		// can be stale right after a reorg/restart (re-injected dead-fork txns,
-		// https://github.com/erigontech/erigon/issues/22299), and submission is
-		// retried while the pool digests the head change.
-		nonce, err := eat.RpcApiClient.GetTransactionCount(coinbaseAddr, rpc.LatestBlock)
-		require.NoError(t, err)
-		transactOpts.Nonce = nonce
 		var txn types.Transaction
 		require.Eventually(t, func() bool {
 			var err error
