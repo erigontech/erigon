@@ -418,6 +418,8 @@ func (b *builderClient) builderCall(ctx context.Context, method string, target b
 	var attemptTimeout time.Duration
 	if deadline, ok := ctx.Deadline(); ok && len(target.ips) > 1 {
 		attemptTimeout = time.Until(deadline) / time.Duration(len(target.ips))
+	} else if len(target.ips) > 1 {
+		attemptTimeout = time.Second
 	}
 	requestContext := context.WithValue(ctx, pinnedBuilderTargetKey{}, pinnedBuilderTarget{hostname: target.hostname, ips: target.ips, attemptTimeout: attemptTimeout})
 	request, err := http.NewRequestWithContext(requestContext, method, target.url, body)
