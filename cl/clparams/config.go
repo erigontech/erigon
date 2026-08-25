@@ -68,6 +68,8 @@ type CaplinConfig struct {
 	// CaplinMeVRelayUrl is optional and is used to connect to the external builder service.
 	// If it's set, the node will start in builder mode
 	MevRelayUrl string
+	// AllowPrivateBuilderURLs permits validator-configured builder URLs to resolve to private addresses.
+	AllowPrivateBuilderURLs bool
 	// EnableValidatorMonitor is used to enable the validator monitor metrics and corresponding logs
 	EnableValidatorMonitor bool
 

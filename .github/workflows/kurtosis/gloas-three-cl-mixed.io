@@ -20,7 +20,7 @@ participants:
   - cl_type: caplin
     cl_image: test/erigon:current
     cl_log_level: "debug"
-    cl_extra_params: ["--local-discovery", "--caplin.subscribe-all-topics"]
+    cl_extra_params: ["--local-discovery", "--caplin.subscribe-all-topics", "--caplin.builder.allow-private-urls"]
     el_type: erigon
     el_image: test/erigon:current
     el_log_level: "debug"

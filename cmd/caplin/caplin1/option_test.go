@@ -23,6 +23,13 @@ func TestWithBuilderSupportsDynamicValidatorAPIWithoutRelay(t *testing.T) {
 	require.NotNil(t, got.builderClient)
 }
 
+func TestBuilderTargetPolicyForConfig(t *testing.T) {
+	require.False(t, builderTargetPolicyForConfig(nil).AllowPrivate)
+	require.False(t, builderTargetPolicyForConfig(&clparams.CaplinConfig{}).AllowPrivate)
+	require.False(t, builderTargetPolicyForConfig(&clparams.CaplinConfig{CustomConfigPath: "config.yaml"}).AllowPrivate)
+	require.True(t, builderTargetPolicyForConfig(&clparams.CaplinConfig{AllowPrivateBuilderURLs: true}).AllowPrivate)
+}
+
 func TestBuilderOptionKeepsDynamicAndLegacyGatingIndependent(t *testing.T) {
 	t.Run("validator API without relay", func(t *testing.T) {
 		config := &clparams.CaplinConfig{}
