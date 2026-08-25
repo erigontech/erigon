@@ -79,6 +79,12 @@ func TestGetPayloadAttestationDueMs(t *testing.T) {
 	require.Equal(t, uint64(9000), f.getPayloadAttestationDueMs(10))
 }
 
+func TestComputeShufflingDependentSlotUsesGenesisInEarlyEpochs(t *testing.T) {
+	require.Zero(t, computeShufflingDependentSlot(0, 1, 32))
+	require.Zero(t, computeShufflingDependentSlot(1, 1, 32))
+	require.Equal(t, uint64(31), computeShufflingDependentSlot(2, 1, 32))
+}
+
 func TestShouldApplyProposerBoost_PreGloas(t *testing.T) {
 	// Mainnet config: 12s slots, 3 intervals, GLOAS not activated
 	// Threshold: 12/3 = 4 seconds into slot

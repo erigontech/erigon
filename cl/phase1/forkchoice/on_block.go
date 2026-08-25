@@ -95,13 +95,18 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 			f.mu.Unlock()
 		}
 	}()
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
 	start := time.Now()
 	blockRoot, err := block.Block.HashSSZ()
 	if err != nil {
 		return err
 	}
+	if block.Version() >= clparams.GloasVersion {
+		if _, ok := f.forkGraph.GetHeader(blockRoot); ok {
+			return nil
+		}
+	}
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	// Use the store's current slot (set via OnTick) to validate the block is not from the future.
 	// The spec says: assert get_current_slot(store) >= block.slot
 	if f.Slot() < block.Block.Slot {

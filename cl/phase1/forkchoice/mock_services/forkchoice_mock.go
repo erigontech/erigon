@@ -49,6 +49,8 @@ type ForkChoiceStorageMock struct {
 	HeadVal                common.Hash
 	HeadSlotVal            uint64
 	HeadPayloadStatusVal   cltypes.PayloadStatus
+	GetHeadNodeFn          func() (forkchoice.ForkChoiceNode, error)
+	GetStateAtBlockRootFn  func(common.Hash, bool) (*state.CachingBeaconState, error)
 	HighestSeenVal         uint64
 	JustifiedCheckpointVal solid.Checkpoint
 	JustifiedSlotVal       uint64
@@ -290,6 +292,9 @@ func (f *ForkChoiceStorageMock) GetStateAtBlockRoot(
 	blockRoot common.Hash,
 	alwaysCopy bool,
 ) (*state.CachingBeaconState, error) {
+	if f.GetStateAtBlockRootFn != nil {
+		return f.GetStateAtBlockRootFn(blockRoot, alwaysCopy)
+	}
 	st := f.StateAtBlockRootVal[blockRoot]
 	if st == nil || !alwaysCopy {
 		return st, nil
@@ -402,6 +407,15 @@ func (f *ForkChoiceStorageMock) ForkNodes() []forkchoice.ForkNode {
 	return f.WeightsMock
 }
 
+func (f *ForkChoiceStorageMock) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool {
+	for _, header := range f.Headers {
+		if header != nil && header.ParentRoot == blockRoot && header.Slot >= slot {
+			return true
+		}
+	}
+	return false
+}
+
 func (f *ForkChoiceStorageMock) Synced() bool {
 	return true
 }
@@ -462,11 +476,18 @@ func (f *ForkChoiceStorageMock) GetHeadPayloadStatus() cltypes.PayloadStatus {
 	return f.HeadPayloadStatusVal
 }
 
+func (f *ForkChoiceStorageMock) GetHeadNode() (forkchoice.ForkChoiceNode, error) {
+	if f.GetHeadNodeFn != nil {
+		return f.GetHeadNodeFn()
+	}
+	return forkchoice.ForkChoiceNode{Root: f.HeadVal, PayloadStatus: f.HeadPayloadStatusVal}, nil
+}
+
 func (f *ForkChoiceStorageMock) ShouldExtendPayload(root common.Hash) bool {
 	return f.ShouldExtendPayloadVal
 }
 
-func (f *ForkChoiceStorageMock) ShouldBuildOnFull(head forkchoice.ForkChoiceNode) bool {
+func (f *ForkChoiceStorageMock) ShouldBuildOnFull(head forkchoice.ForkChoiceNode, slot uint64) bool {
 	return true
 }
 

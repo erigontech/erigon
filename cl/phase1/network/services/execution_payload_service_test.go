@@ -47,6 +47,7 @@ func newTestSignedEnvelope(slot uint64, blockRoot common.Hash, builderIndex uint
 	envelope.BuilderIndex = builderIndex
 	// Initialize Eth1Block fields needed for HashSSZ
 	if envelope.Payload != nil {
+		envelope.Payload.SlotNumber = slot
 		envelope.Payload.Extra = solid.NewExtraData()
 		envelope.Payload.Transactions = &solid.TransactionsSSZ{}
 	}
@@ -130,7 +131,7 @@ func TestExecutionPayloadServiceSlotBelowFinalized(t *testing.T) {
 	// Add block to forkchoice
 	fcu.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{
 		Block: &cltypes.BeaconBlock{
-			Slot: 50,
+			Slot: 51,
 		},
 	}
 

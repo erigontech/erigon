@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/common"
 )
@@ -66,6 +67,22 @@ func TestOnPayloadAttestationMessageRejectsNil(t *testing.T) {
 	f := &ForkChoiceStore{}
 	require.Error(t, f.OnPayloadAttestationMessage(context.Background(), nil, false))
 	require.Error(t, f.OnPayloadAttestationMessage(context.Background(), &cltypes.PayloadAttestationMessage{}, false))
+}
+
+func TestOnPayloadAttestationMessageIgnoresUnavailableKnownBlockState(t *testing.T) {
+	root := common.HexToHash("0x1234")
+	contexts, err := newPayloadAttestationValidationContexts()
+	require.NoError(t, err)
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{root: {Slot: 100}},
+		states:  map[common.Hash]*state.CachingBeaconState{},
+	}
+	f := &ForkChoiceStore{forkGraph: graph, payloadAttestationContexts: contexts}
+	msg := &cltypes.PayloadAttestationMessage{Data: &cltypes.PayloadAttestationData{Slot: 100, BeaconBlockRoot: root}}
+
+	err = f.OnPayloadAttestationMessage(context.Background(), msg, true)
+
+	require.ErrorIs(t, err, ErrIgnore)
 }
 
 func TestApplyValidatedPayloadAttestationAcceptsOnlyFirstGossipVote(t *testing.T) {

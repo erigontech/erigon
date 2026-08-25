@@ -1055,20 +1055,24 @@ func (a *ApiHandler) produceBeaconBody(
 	// we use the cached payload_expected_withdrawals from state.
 	var gloasWithdrawalsState *state.CachingBeaconState // nil means use baseState for withdrawals
 	if stateVersion >= clparams.GloasVersion {
+		headNode, err := a.forkchoiceStore.GetHeadNode()
+		if err != nil {
+			return nil, 0, fmt.Errorf("produceBeaconBody: failed to snapshot fork choice head: %w", err)
+		}
+		if err := validateGloasHeadSnapshot(baseBlockRoot, headNode); err != nil {
+			return nil, 0, err
+		}
 		parentBid := baseState.GetLatestExecutionPayloadBid()
 		if parentBid != nil {
-			// Fork boundary: the initial bid created by UpgradeToGloas has
-			// ParentBlockHash == Hash32() (zero) because pre-GLOAS blocks have no
-			// parent bid. Pre-GLOAS blocks always had their payloads executed, so
-			// the EL head is parentBid.BlockHash (the last pre-GLOAS block hash).
-			isPreGloasParent := parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0
+			isPreGloasParent := baseBlockSlot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch
+			buildOnFull := !isPreGloasParent &&
+				headNode.PayloadStatus == cltypes.PayloadStatusFull &&
+				a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
+				a.forkchoiceStore.ShouldBuildOnFull(headNode, targetSlot)
+			head = gloasProposalExecutionHead(baseBlockSlot, a.beaconChainCfg, parentBid, buildOnFull)
 			switch {
 			case isPreGloasParent:
-				head = parentBid.BlockHash
-			case a.forkchoiceStore.GetHeadPayloadStatus() == cltypes.PayloadStatusFull &&
-				a.forkchoiceStore.HasEnvelope(baseBlockRoot) &&
-				a.forkchoiceStore.ShouldBuildOnFull(forkchoice.ForkChoiceNode{Root: baseBlockRoot, PayloadStatus: cltypes.PayloadStatusFull}):
-				head = parentBid.BlockHash
+			case buildOnFull:
 				// Copy state and apply parent execution payload to compute correct withdrawals
 				stateCopy, err := baseState.Copy()
 				if err != nil {
@@ -1090,8 +1094,6 @@ func (a *ApiHandler) produceBeaconBody(
 				// ProcessParentExecutionPayload can verify the root match
 				// against the parent bid's ExecutionRequestsRoot.
 				beaconBody.ParentExecutionRequests = envelope.Message.ExecutionRequests
-			default:
-				head = parentBid.ParentBlockHash
 			}
 		} else {
 			head = baseState.GetLatestBlockHash()
@@ -1433,6 +1435,20 @@ func (a *ApiHandler) produceBeaconBody(
 
 	beaconBody.ExecutionPayload = executionPayload
 	return beaconBody, executionValue, nil
+}
+
+func validateGloasHeadSnapshot(baseBlockRoot common.Hash, headNode forkchoice.ForkChoiceNode) error {
+	if headNode.Root != baseBlockRoot {
+		return fmt.Errorf("produceBeaconBody: fork choice head changed from %x to %x", baseBlockRoot, headNode.Root)
+	}
+	return nil
+}
+
+func gloasProposalExecutionHead(baseBlockSlot uint64, cfg *clparams.BeaconChainConfig, parentBid *cltypes.ExecutionPayloadBid, buildOnFull bool) common.Hash {
+	if baseBlockSlot/cfg.SlotsPerEpoch < cfg.GloasForkEpoch || buildOnFull {
+		return parentBid.BlockHash
+	}
+	return parentBid.ParentBlockHash
 }
 
 func (a *ApiHandler) getBlockOperations(s *state.CachingBeaconState, targetSlot uint64) (
@@ -2679,10 +2695,15 @@ func computeAttestationReward(
 	currentEpoch := state.Epoch(s)
 	stateSlot := s.Slot()
 	beaconConfig := s.BeaconConfig()
+	var parentSlot uint64
+	if s.Version() >= clparams.GloasVersion && s.GetLatestExecutionPayloadBid() != nil {
+		parentSlot = s.GetLatestExecutionPayloadBid().Slot
+	}
 
 	participationFlagsIndicies, err := s.GetAttestationParticipationFlagIndicies(
 		data,
 		stateSlot-data.Slot,
+		parentSlot,
 		false,
 	)
 	if err != nil {
