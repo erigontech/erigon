@@ -243,11 +243,13 @@ func (s *executionPayloadService) emitFullHeadUpdate(block *cltypes.SignedBeacon
 	if err != nil {
 		return
 	}
-	currentHeadRoot, currentHeadSlot, err := s.forkchoiceStore.GetHead(nil)
-	if err != nil || currentHeadRoot != headRoot || currentHeadSlot != headSlot {
-		return
-	}
-	s.emitters.State().SendHeadV2(headEvent)
+	s.emitters.WithHeadEventLock(func() {
+		currentHeadRoot, currentHeadSlot, err := s.forkchoiceStore.GetHead(nil)
+		if err != nil || currentHeadRoot != headRoot || currentHeadSlot != headSlot {
+			return
+		}
+		s.emitters.State().SendHeadV2(headEvent)
+	})
 }
 
 // queuePendingEnvelope adds an envelope to the pending queue for later processing

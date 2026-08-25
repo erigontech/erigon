@@ -938,11 +938,13 @@ func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot 
 	if err != nil {
 		return
 	}
-	currentRoot, currentSlot, err := a.forkchoiceStore.GetHead(nil)
-	if err != nil || currentRoot != headRoot || currentSlot != headSlot {
-		return
-	}
-	a.emitters.State().SendHeadV2(event)
+	a.emitters.WithHeadEventLock(func() {
+		currentRoot, currentSlot, err := a.forkchoiceStore.GetHead(nil)
+		if err != nil || currentRoot != headRoot || currentSlot != headSlot {
+			return
+		}
+		a.emitters.State().SendHeadV2(event)
+	})
 }
 
 func (a *ApiHandler) decodeExecutionPayloadEnvelopeRequest(w http.ResponseWriter, r *http.Request, contentType string, blobDataIncluded bool) (*cltypes.SignedExecutionPayloadEnvelope, *cltypes.SignedExecutionPayloadEnvelopeContents, error) {

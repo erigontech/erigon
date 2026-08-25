@@ -248,24 +248,28 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 }
 
 func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, string, bool, error)) error {
-	currentRoot, currentSlot, payloadStatus, executionOptimistic, err := getHead()
-	if err != nil {
-		return fmt.Errorf("failed to revalidate head event: %w", err)
-	}
-	if currentRoot != headRoot || currentSlot != headSlot || payloadStatus != headEvent.Data.PayloadStatus || executionOptimistic != headEvent.Data.ExecutionOptimistic {
-		return nil
-	}
-	emitter.State().SendHead(&beaconevents.HeadData{
-		Slot:                      headSlot,
-		Block:                     headRoot,
-		State:                     stateRoot,
-		EpochTransition:           true,
-		PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
-		CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
-		ExecutionOptimistic:       false,
+	var validationErr error
+	emitter.WithHeadEventLock(func() {
+		currentRoot, currentSlot, payloadStatus, executionOptimistic, err := getHead()
+		if err != nil {
+			validationErr = fmt.Errorf("failed to revalidate head event: %w", err)
+			return
+		}
+		if currentRoot != headRoot || currentSlot != headSlot || payloadStatus != headEvent.Data.PayloadStatus || executionOptimistic != headEvent.Data.ExecutionOptimistic {
+			return
+		}
+		emitter.State().SendHead(&beaconevents.HeadData{
+			Slot:                      headSlot,
+			Block:                     headRoot,
+			State:                     stateRoot,
+			EpochTransition:           true,
+			PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
+			CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
+			ExecutionOptimistic:       false,
+		})
+		emitter.State().SendHeadV2(headEvent)
 	})
-	emitter.State().SendHeadV2(headEvent)
-	return nil
+	return validationErr
 }
 
 func emitNextPaylodAttributesEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, s *state.CachingBeaconState) error {

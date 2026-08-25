@@ -174,6 +174,30 @@ func TestGloasEventFeedsDoNotBlockOnSlowSubscriber(t *testing.T) {
 	}
 }
 
+func TestHeadEventEmissionIsSerialized(t *testing.T) {
+	emitter := NewEventEmitter()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	second := make(chan struct{})
+	go emitter.WithHeadEventLock(func() {
+		close(entered)
+		<-release
+	})
+	<-entered
+	go emitter.WithHeadEventLock(func() { close(second) })
+	select {
+	case <-second:
+		t.Fatal("second head event entered before the first completed")
+	case <-time.After(10 * time.Millisecond):
+	}
+	close(release)
+	select {
+	case <-second:
+	case <-time.After(time.Second):
+		t.Fatal("second head event did not progress")
+	}
+}
+
 func TestGloasEventFeeds(t *testing.T) {
 	emitter := NewEventEmitter()
 	stateEvents := make(chan *EventStream, 1)
