@@ -82,6 +82,7 @@ type ForkChoiceStorageMock struct {
 	OnExecutionPayloadFn         func(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error
 	OnExecutionPayloadErr        error
 	GetHeadPayloadStatusFn       func(common.Hash) (cltypes.PayloadStatus, bool)
+	ReadEnvelopeFromDiskFn       func(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 	GetBeaconCommitteeMock       func(slot, committeeIndex uint64) ([]uint64, error)
 
 	Pool pool.OperationsPool
@@ -465,6 +466,9 @@ func (f *ForkChoiceStorageMock) IsPayloadVerified(blockRoot common.Hash) bool {
 }
 
 func (f *ForkChoiceStorageMock) ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	if f.ReadEnvelopeFromDiskFn != nil {
+		return f.ReadEnvelopeFromDiskFn(blockRoot)
+	}
 	return f.Envelopes[blockRoot], nil
 }
 

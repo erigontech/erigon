@@ -49,12 +49,24 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
+	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
 func preparedWarmup(p *preparedPayload, slot uint64, payloadID []byte, now time.Time) time.Duration {
 	warmup, _, _ := p.warmupAndMismatch(slot, payloadID, now)
 	return warmup
+}
+
+func requireExecutionWithdrawals(t *testing.T, expected []*cltypes.Withdrawal, actual []*types.Withdrawal) {
+	t.Helper()
+	require.Len(t, actual, len(expected))
+	for i, withdrawal := range expected {
+		require.Equal(t, withdrawal.Index, actual[i].Index)
+		require.Equal(t, withdrawal.Validator, actual[i].Validator)
+		require.Equal(t, withdrawal.Address, actual[i].Address)
+		require.Equal(t, withdrawal.Amount, actual[i].Amount)
+	}
 }
 
 type payloadBuildEngine struct {
@@ -808,27 +820,14 @@ func TestPreparePayloadLoopWarnsWhenGloasPathRemainsPending(t *testing.T) {
 	require.Contains(t, output.String(), "lvl=warn")
 }
 
-func TestExecutionPayloadSourceUsesPreForkParentForFirstGloasSlot(t *testing.T) {
-	config := clparams.MainnetBeaconConfig
-	baseState := state.New(&config)
-	preForkHead := common.Hash{0xa1}
-	baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{BlockHash: preForkHead})
-	handler := &ApiHandler{beaconChainCfg: &config}
-
-	source, err := handler.resolveExecutionPayloadSource(
-		baseState, common.Hash{0x41}, 1, clparams.GloasVersion,
-	)
-
-	require.NoError(t, err)
-	require.Equal(t, preForkHead, source.head)
-	require.Equal(t, gloasPayloadPathPreFork, source.gloasPath)
-}
-
-func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceEviction(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(
-		t, clparams.ElectraVersion, log.Root(), false,
-	)
+func setupFirstGloasPayloadStates(
+	t *testing.T,
+	handler *ApiHandler,
+	postState *state.CachingBeaconState,
+	preForkHead common.Hash,
+	parentGasLimit uint64,
+) (*state.CachingBeaconState, *state.CachingBeaconState, uint64, uint64, []*cltypes.Withdrawal) {
+	t.Helper()
 	config := *handler.beaconChainCfg
 	currentEpoch := postState.Slot() / config.SlotsPerEpoch
 	config.FuluForkEpoch = currentEpoch
@@ -842,19 +841,70 @@ func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceEviction
 	currentSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
 	targetSlot := currentSlot + 1
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(headState, currentSlot))
-	preForkHead := common.Hash{0xa1}
-	const parentGasLimit = uint64(30_000_000)
+	latestHeader := headState.LatestBlockHeader()
+	latestHeader.Slot = currentSlot
+	headState.SetLatestBlockHeader(&latestHeader)
 	executionHeader := headState.LatestExecutionPayloadHeader()
 	executionHeader.BlockHash = preForkHead
 	executionHeader.GasLimit = parentGasLimit
 	headState.SetLatestExecutionPayloadHeader(executionHeader)
 
-	proposerIndex, err := headState.GetBeaconProposerIndexForSlot(targetSlot)
-	require.NoError(t, err)
-	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
 	targetState, err := headState.Copy()
 	require.NoError(t, err)
 	require.NoError(t, transition.DefaultMachine.ProcessSlots(targetState, targetSlot))
+	expectedWithdrawals, err := state.GetExpectedWithdrawals(targetState, targetSlot/config.SlotsPerEpoch)
+	require.NoError(t, err)
+	require.NotEmpty(t, expectedWithdrawals.Withdrawals)
+	return headState, targetState, currentSlot, targetSlot, expectedWithdrawals.Withdrawals
+}
+
+func TestExecutionPayloadSourceUsesPreForkParentForFirstGloasSlot(t *testing.T) {
+	config := clparams.MainnetBeaconConfig
+	config.FuluForkEpoch = 1
+	config.GloasForkEpoch = 2
+	config.InitializeForkSchedule()
+	baseState := state.New(&config)
+	preForkSlot := config.GloasForkEpoch*config.SlotsPerEpoch - 1
+	baseState.SetSlot(preForkSlot + 2)
+	latestHeader := baseState.LatestBlockHeader()
+	latestHeader.Slot = preForkSlot
+	baseState.SetLatestBlockHeader(&latestHeader)
+	preForkHead := common.Hash{0xa1}
+	baseState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: common.Hash{0x91},
+		ParentBlockRoot: common.Hash{0x92},
+		BlockHash:       preForkHead,
+		Slot:            preForkSlot,
+	})
+	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore := mock_services.NewForkChoiceStorageMock(t)
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	handler := &ApiHandler{beaconChainCfg: &config, forkchoiceStore: forkchoiceStore}
+
+	source := handler.resolveExecutionPayloadSource(
+		baseState, baseBlockRoot, preForkSlot+2, clparams.GloasVersion,
+	)
+
+	require.Equal(t, preForkHead, source.head)
+	require.Equal(t, gloasPayloadPathPreFork, source.gloasPath)
+}
+
+func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceEviction(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, syncedData, _, validatorParams := setupTestingHandler(
+		t, clparams.ElectraVersion, log.Root(), false,
+	)
+	preForkHead := common.Hash{0xa1}
+	const parentGasLimit = uint64(30_000_000)
+	headState, targetState, currentSlot, targetSlot, expectedWithdrawals := setupFirstGloasPayloadStates(
+		t, handler, postState, preForkHead, parentGasLimit,
+	)
+	config := handler.beaconChainCfg
+
+	proposerIndex, err := headState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
 	dependentRoot, err := state.GetProposerDependentRoot(targetState, targetSlot/config.SlotsPerEpoch)
 	require.NoError(t, err)
 
@@ -890,6 +940,7 @@ func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceEviction
 	engine := newPayloadBuildEngine(t, ctrl)
 	engine.startPayloadBuild = func(_ context.Context, head common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
 		require.Equal(t, preForkHead, head)
+		requireExecutionWithdrawals(t, expectedWithdrawals, attrs.Withdrawals)
 		require.NotNil(t, attrs.SlotNumber)
 		require.Equal(t, hexutil.Uint64(targetSlot), *attrs.SlotNumber)
 		require.NotNil(t, attrs.TargetGasLimit)
@@ -903,6 +954,42 @@ func TestPreparePayloadForFirstGloasSlotUsesPreForkInputsAfterPreferenceEviction
 
 	require.NoError(t, err)
 	require.Equal(t, baseBlockRoot, result.headRoot)
+}
+
+func TestFirstGloasProductionUsesTransitionWithdrawals(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(
+		t, clparams.ElectraVersion, log.Root(), false,
+	)
+	preForkHead := common.Hash{0xa1}
+	_, baseState, currentSlot, targetSlot, expectedWithdrawals := setupFirstGloasPayloadStates(
+		t, handler, postState, preForkHead, 30_000_000,
+	)
+	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
+	require.NoError(t, err)
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
+
+	stopErr := errors.New("stop after fork-choice update")
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(
+		gomock.Any(), gomock.Any(), gomock.Any(), preForkHead, gomock.Any(), clparams.GloasVersion,
+	).DoAndReturn(func(
+		_ context.Context,
+		_, _, _ common.Hash,
+		attrs *engine_types.PayloadAttributes,
+		_ clparams.StateVersion,
+	) ([]byte, error) {
+		requireExecutionWithdrawals(t, expectedWithdrawals, attrs.Withdrawals)
+		return nil, stopErr
+	})
+	handler.engine = engine
+
+	_, _, err = handler.produceBeaconBody(
+		t.Context(), 3, currentSlot, common.Hash{0x41}, baseState, targetSlot,
+		common.Bytes96{}, common.Hash{},
+	)
+
+	require.ErrorIs(t, err, stopErr)
 }
 
 func TestPreparePayloadLoopMemoizesThePreferenceGenerationItUsed(t *testing.T) {
@@ -1435,9 +1522,8 @@ func TestExecutionPayloadSourceMarksReorgToEmptyAfterNegativePtcDecision(t *test
 	buildOnFull := false
 	forkchoiceStore.ShouldBuildOnFullVal = &buildOnFull
 
-	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+	source := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
 
-	require.NoError(t, err)
 	require.Equal(t, parentHash, source.head)
 	require.Equal(t, gloasPayloadPathReorgToEmpty, source.gloasPath)
 	require.Nil(t, source.parentExecutionRequests)
@@ -1456,9 +1542,8 @@ func TestExecutionPayloadSourceFallsBackToEmptyForPendingGloasDecision(t *testin
 	forkchoiceStore.HeadVal = baseBlockRoot
 	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusPending
 
-	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+	source := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
 
-	require.NoError(t, err)
 	require.Equal(t, parentHash, source.head)
 	require.Equal(t, gloasPayloadPathPending, source.gloasPath)
 	require.Nil(t, source.parentExecutionRequests)
@@ -1477,9 +1562,8 @@ func TestExecutionPayloadSourceFallsBackToEmptyWhenForkChoiceHeadMoves(t *testin
 	forkchoiceStore.HeadVal = common.Hash{0x42}
 	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 
-	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+	source := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
 
-	require.NoError(t, err)
 	require.Equal(t, parentHash, source.head)
 	require.Equal(t, gloasPayloadPathPending, source.gloasPath)
 	require.Nil(t, source.parentExecutionRequests)
@@ -1504,9 +1588,8 @@ func TestExecutionPayloadSourceRefreshesInvalidatedGloasHead(t *testing.T) {
 		},
 	}
 
-	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+	source := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
 
-	require.NoError(t, err)
 	require.Equal(t, fullHash, source.head)
 	require.Equal(t, gloasPayloadPathFull, source.gloasPath)
 }
@@ -1642,7 +1725,7 @@ func TestPreparationGateExpiresAndClearsProducedBlock(t *testing.T) {
 	require.False(t, gate.producedBlockPending(10, 9, expiresAt), "publication takes over the exclusion")
 }
 
-func TestPreparationGateMergesOverlappingProducedBlocks(t *testing.T) {
+func TestPreparationGateTracksOverlappingProducedBlocks(t *testing.T) {
 	for _, test := range []struct {
 		name       string
 		firstSlot  uint64
@@ -1674,6 +1757,24 @@ func TestPreparationGateMergesOverlappingProducedBlocks(t *testing.T) {
 			require.True(t, gate.producedBlockPending(11, 9, time.Unix(205, 0)), "the later expiry must remain pending")
 		})
 	}
+}
+
+func TestPreparationGateClearsOnlyThePublishedProducedBlock(t *testing.T) {
+	now := time.Unix(199, 0)
+	newGate := func() *payloadPreparationGate {
+		gate := new(payloadPreparationGate)
+		gate.noteProducedBlock(10, 10, time.Unix(190, 0), time.Unix(210, 0))
+		gate.noteProducedBlock(11, 11, time.Unix(195, 0), time.Unix(205, 0))
+		return gate
+	}
+
+	gate := newGate()
+	gate.clearProducedBlock(11)
+	require.True(t, gate.producedBlockPending(10, 9, now), "slot 10 may still be signing")
+
+	gate = newGate()
+	gate.clearProducedBlock(10)
+	require.True(t, gate.producedBlockPending(11, 10, now), "slot 11 may still be signing")
 }
 
 func TestPreparationGateReplacesAnExpiredHigherSlotMarker(t *testing.T) {

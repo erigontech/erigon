@@ -102,7 +102,14 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 
 func TestGloasProductionFallsBackToEmptyWithoutMEVBoost(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	postState, handler, _, _, _ := setupGloasPreparationTest(t)
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	var output syncedBuffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	handler.logger = logger
+	baseBlockRoot := common.Hash{0x41}
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 	parentHash := common.Hash{0xa1}
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		ParentBlockHash: parentHash,
@@ -123,7 +130,7 @@ func TestGloasProductionFallsBackToEmptyWithoutMEVBoost(t *testing.T) {
 		t.Context(),
 		1,
 		postState.Slot(),
-		common.Hash{0x41},
+		baseBlockRoot,
 		postState,
 		postState.Slot()+1,
 		common.Bytes96{},
@@ -131,6 +138,53 @@ func TestGloasProductionFallsBackToEmptyWithoutMEVBoost(t *testing.T) {
 	)
 
 	require.ErrorIs(t, err, stopErr)
+	require.Contains(t, output.String(), "building on EMPTY Gloas parent")
+	require.Contains(t, output.String(), "path=empty")
+}
+
+func TestGloasProductionFallsBackToEmptyWhenFullEnvelopeCannotBeRead(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	var output syncedBuffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	handler.logger = logger
+	baseBlockRoot := common.Hash{0x41}
+	parentHash := common.Hash{0xa1}
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: parentHash,
+		BlockHash:       common.Hash{0xb2},
+		Slot:            postState.Slot(),
+	})
+	forkchoiceStore.HeadVal = baseBlockRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+	forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{}
+	readErr := errors.New("envelope storage unavailable")
+	forkchoiceStore.ReadEnvelopeFromDiskFn = func(root common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+		require.Equal(t, baseBlockRoot, root)
+		return nil, readErr
+	}
+	stopErr := errors.New("stop after EMPTY-parent fork-choice update")
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(
+		gomock.Any(), gomock.Any(), gomock.Any(), parentHash, gomock.Any(), clparams.GloasVersion,
+	).Return(nil, stopErr)
+	handler.engine = engine
+
+	_, err := handler.produceBlock(
+		t.Context(),
+		1,
+		postState.Slot(),
+		baseBlockRoot,
+		postState,
+		postState.Slot()+1,
+		common.Bytes96{},
+		common.Hash{},
+	)
+
+	require.ErrorIs(t, err, stopErr)
+	require.Contains(t, output.String(), "building on EMPTY Gloas parent")
+	require.Contains(t, output.String(), readErr.Error())
 }
 
 func TestProductionUsesLocalPayloadWhenBuilderClientIsMissing(t *testing.T) {

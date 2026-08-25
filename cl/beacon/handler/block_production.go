@@ -277,19 +277,18 @@ func payloadAttributes(
 	return attrs
 }
 
-// expectedWithdrawals resolves the withdrawals for the payload being built. Under Gloas the source
-// depends on whether the head's payload was revealed: a FULL head is read from the state copy with
-// that payload applied, an EMPTY one from the expectation the state already cached.
+// expectedWithdrawals resolves the withdrawals for the payload being built. Under Gloas, FULL and
+// pre-fork parents compute them from the supplied state; EMPTY parents use the cached expectation.
 func (a *ApiHandler) expectedWithdrawals(
-	baseState, withParentPayload *state.CachingBeaconState,
+	baseState, computationState *state.CachingBeaconState,
 	stateVersion clparams.StateVersion,
 	targetSlot uint64,
 ) ([]*types.Withdrawal, error) {
 	epoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
-	if stateVersion.Before(clparams.GloasVersion) || withParentPayload != nil {
+	if stateVersion.Before(clparams.GloasVersion) || computationState != nil {
 		source := baseState
-		if withParentPayload != nil {
-			source = withParentPayload
+		if computationState != nil {
+			source = computationState
 		}
 		clWithdrawals, err := state.GetExpectedWithdrawals(source, epoch)
 		if err != nil {
@@ -1024,13 +1023,37 @@ func (a *ApiHandler) produceBeaconBody(
 	beaconBody.Graffiti = graffiti
 	beaconBody.Version = stateVersion
 
-	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
-	if err != nil {
-		return nil, 0, fmt.Errorf("produceBeaconBody: execution payload source: %w", err)
+	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
+	if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+		switch payloadSource.gloasPath {
+		case gloasPayloadPathPending:
+			fields := []any{
+				"slot", targetSlot,
+				"head", baseBlockRoot,
+				"path", payloadSource.gloasPath.String(),
+			}
+			if payloadSource.fallbackCause != nil {
+				fields = append(fields, "err", payloadSource.fallbackCause)
+			}
+			a.logger.Warn(
+				"BlockProduction: building on EMPTY Gloas parent",
+				fields...,
+			)
+		case gloasPayloadPathEmpty, gloasPayloadPathReorgToEmpty:
+			a.logger.Info(
+				"BlockProduction: building on EMPTY Gloas parent",
+				"slot", targetSlot,
+				"head", baseBlockRoot,
+				"path", payloadSource.gloasPath.String(),
+			)
+		}
 	}
 	head := payloadSource.head
 	var gloasWithdrawalsState *state.CachingBeaconState
-	if payloadSource.parentExecutionRequests != nil {
+	switch {
+	case payloadSource.gloasPath == gloasPayloadPathPreFork:
+		gloasWithdrawalsState = baseState
+	case payloadSource.parentExecutionRequests != nil:
 		// A FULL Gloas parent must be applied before deriving this payload's withdrawals. Keep
 		// baseState unchanged because the other body-building steps also read it.
 		stateCopy, err := baseState.Copy()

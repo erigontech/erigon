@@ -103,14 +103,9 @@ func (s *payloadPreparationScratch) release() {
 // payloadPreparationGate gives block work priority over speculative builder startup. Its exclusive
 // side is always acquired with TryLock, so nested shared holds cannot deadlock.
 type payloadPreparationGate struct {
-	blockWork       sync.RWMutex
-	producedBlockMu sync.Mutex
-	producedBlock   *producedBlockMarker
-}
-
-type producedBlockMarker struct {
-	slot      uint64
-	expiresAt time.Time
+	blockWork         sync.RWMutex
+	producedBlockMu   sync.Mutex
+	producedBlockEnds map[uint64]time.Time
 }
 
 func producedBlockSigningExpiry(completedAt, targetSlotStart time.Time, signingWindow time.Duration) time.Time {
@@ -185,39 +180,39 @@ func (g *payloadPreparationGate) noteProducedBlock(
 	}
 	g.producedBlockMu.Lock()
 	defer g.producedBlockMu.Unlock()
-
-	previous := g.producedBlock
-	if previous == nil || !completedAt.Before(previous.expiresAt) {
-		g.producedBlock = &producedBlockMarker{slot: producedSlot, expiresAt: expiresAt}
+	if g.producedBlockEnds == nil {
+		g.producedBlockEnds = make(map[uint64]time.Time)
+	}
+	for slot, expiry := range g.producedBlockEnds {
+		if !completedAt.Before(expiry) {
+			delete(g.producedBlockEnds, slot)
+		}
+	}
+	if previous, ok := g.producedBlockEnds[producedSlot]; ok && previous.After(expiresAt) {
 		return
 	}
-	// Keep the highest slot and latest expiry so neither overlapping signing round is forgotten.
-	next := &producedBlockMarker{
-		slot:      max(previous.slot, producedSlot),
-		expiresAt: expiresAt,
-	}
-	if previous.expiresAt.After(next.expiresAt) {
-		next.expiresAt = previous.expiresAt
-	}
-	g.producedBlock = next
+	g.producedBlockEnds[producedSlot] = expiresAt
 }
 
 func (g *payloadPreparationGate) clearProducedBlock(slot uint64) {
 	g.producedBlockMu.Lock()
 	defer g.producedBlockMu.Unlock()
-	if g.producedBlock != nil && g.producedBlock.slot == slot {
-		g.producedBlock = nil
-	}
+	delete(g.producedBlockEnds, slot)
 }
 
 func (g *payloadPreparationGate) producedBlockPending(currentSlot, selectedSlot uint64, now time.Time) bool {
 	g.producedBlockMu.Lock()
 	defer g.producedBlockMu.Unlock()
-	marker := g.producedBlock
-	return marker != nil &&
-		now.Before(marker.expiresAt) &&
-		selectedSlot < marker.slot &&
-		slotsWithinOne(currentSlot, marker.slot)
+	for slot, expiry := range g.producedBlockEnds {
+		if !now.Before(expiry) {
+			delete(g.producedBlockEnds, slot)
+			continue
+		}
+		if selectedSlot < slot && slotsWithinOne(currentSlot, slot) {
+			return true
+		}
+	}
+	return false
 }
 
 func slotsWithinOne(first, second uint64) bool {
@@ -456,6 +451,23 @@ const (
 	gloasPayloadPathReorgToEmpty
 )
 
+func (p gloasPayloadPath) String() string {
+	switch p {
+	case gloasPayloadPathPreFork:
+		return "pre-fork"
+	case gloasPayloadPathPending:
+		return "pending"
+	case gloasPayloadPathEmpty:
+		return "empty"
+	case gloasPayloadPathFull:
+		return "full"
+	case gloasPayloadPathReorgToEmpty:
+		return "full-to-empty"
+	default:
+		return "unknown"
+	}
+}
+
 // An older selected head becomes usable only after the attestation deadline when no current-slot
 // block is still being processed. A future head is invalid.
 func shouldWaitForCurrentSlotHead(
@@ -581,19 +593,23 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	)
 	result.preferenceGeneration = preferenceGeneration
 	result.preferenceGenerationResolved = true
-	payloadSource, err := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
-	if err != nil {
-		return result, err
-	}
+	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
 	result.gloasPath = payloadSource.gloasPath
 	result.gloasPathResolved = true
+	if payloadSource.fallbackCause != nil {
+		return result, payloadSource.fallbackCause
+	}
 	if payloadSource.gloasPath == gloasPayloadPathPending {
 		return result, errGloasPayloadPending
 	}
 	if gloasPathRequiresForkChoiceUpdate(payloadSource.gloasPath) {
 		return result, errGloasPathNeedsForkChoice
 	}
-	withdrawals, err := a.expectedWithdrawals(baseState, nil, stateVersion, targetSlot)
+	var withdrawalsState *state.CachingBeaconState
+	if payloadSource.gloasPath == gloasPayloadPathPreFork {
+		withdrawalsState = baseState
+	}
+	withdrawals, err := a.expectedWithdrawals(baseState, withdrawalsState, stateVersion, targetSlot)
 	if err != nil {
 		return result, err
 	}
@@ -733,47 +749,63 @@ type executionPayloadSource struct {
 	head                    common.Hash
 	parentExecutionRequests *cltypes.ExecutionRequests
 	gloasPath               gloasPayloadPath
+	fallbackCause           error
 }
 
 // resolveExecutionPayloadSource is shared by preparation and production so both choose the same
-// execution parent and FULL-parent requests. A pending Gloas decision returns its EMPTY-parent
-// fallback; the Pending path tells preparation to wait instead of priming that fallback.
+// execution parent and FULL-parent requests. A pending or unreadable FULL path returns its safe
+// EMPTY-parent fallback; preparation waits instead of priming that fallback.
 func (a *ApiHandler) resolveExecutionPayloadSource(
 	baseState *state.CachingBeaconState,
 	baseBlockRoot common.Hash,
 	targetSlot uint64,
 	stateVersion clparams.StateVersion,
-) (executionPayloadSource, error) {
+) executionPayloadSource {
 	if stateVersion.Before(clparams.GloasVersion) {
-		return executionPayloadSource{head: baseState.LatestExecutionPayloadHeader().BlockHash}, nil
+		return executionPayloadSource{head: baseState.LatestExecutionPayloadHeader().BlockHash}
 	}
 	parentBid := baseState.GetLatestExecutionPayloadBid()
 	if parentBid == nil {
-		return executionPayloadSource{head: baseState.GetLatestBlockHash(), gloasPath: gloasPayloadPathEmpty}, nil
+		return executionPayloadSource{head: baseState.GetLatestBlockHash(), gloasPath: gloasPayloadPathEmpty}
 	}
-	if parentBid.ParentBlockHash == (common.Hash{}) && parentBid.Slot == 0 {
-		return executionPayloadSource{head: parentBid.BlockHash, gloasPath: gloasPayloadPathPreFork}, nil
+	if a.isPreGloasParent(baseState) {
+		return executionPayloadSource{head: parentBid.BlockHash, gloasPath: gloasPayloadPathPreFork}
 	}
 
 	path := a.resolveGloasPayloadPath(baseBlockRoot, targetSlot)
 	if path == gloasPayloadPathPending {
-		return executionPayloadSource{head: parentBid.ParentBlockHash, gloasPath: path}, nil
+		return executionPayloadSource{head: parentBid.ParentBlockHash, gloasPath: path}
 	}
 	if path != gloasPayloadPathFull {
-		return executionPayloadSource{head: parentBid.ParentBlockHash, gloasPath: path}, nil
+		return executionPayloadSource{head: parentBid.ParentBlockHash, gloasPath: path}
 	}
 	envelope, err := a.forkchoiceStore.ReadEnvelopeFromDisk(baseBlockRoot)
 	if err != nil {
-		return executionPayloadSource{}, fmt.Errorf("read FULL parent payload envelope: %w", err)
+		return executionPayloadSource{
+			head:          parentBid.ParentBlockHash,
+			gloasPath:     gloasPayloadPathPending,
+			fallbackCause: fmt.Errorf("read FULL parent payload envelope: %w", err),
+		}
 	}
 	if envelope == nil || envelope.Message == nil || envelope.Message.ExecutionRequests == nil {
-		return executionPayloadSource{}, fmt.Errorf("FULL parent payload has no execution requests for root %x", baseBlockRoot)
+		return executionPayloadSource{
+			head:          parentBid.ParentBlockHash,
+			gloasPath:     gloasPayloadPathPending,
+			fallbackCause: fmt.Errorf("FULL parent payload has no execution requests for root %x", baseBlockRoot),
+		}
 	}
 	return executionPayloadSource{
 		head:                    parentBid.BlockHash,
 		parentExecutionRequests: envelope.Message.ExecutionRequests,
 		gloasPath:               path,
-	}, nil
+	}
+}
+
+func (a *ApiHandler) isPreGloasParent(baseState *state.CachingBeaconState) bool {
+	parentSlot := baseState.LatestBlockHeader().Slot
+	// Genesis has no preceding Gloas block even when the chain starts at this fork.
+	return parentSlot == a.beaconChainCfg.GenesisSlot ||
+		a.beaconChainCfg.GetCurrentStateVersion(parentSlot/a.beaconChainCfg.SlotsPerEpoch).Before(clparams.GloasVersion)
 }
 
 func (a *ApiHandler) resolveGloasPayloadPath(baseBlockRoot common.Hash, targetSlot uint64) gloasPayloadPath {

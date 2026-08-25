@@ -90,6 +90,8 @@ func (f *ForkChoiceStore) ProcessAttestingIndicies(
 ) {
 	f.mu.Lock()
 	defer f.mu.Unlock()
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
 	f.updateLatestMessages(attestation, attestionIndicies)
 }
 

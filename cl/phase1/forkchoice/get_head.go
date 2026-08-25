@@ -143,15 +143,18 @@ func (f *ForkChoiceStore) GetHead(auxilliaryState *state.CachingBeaconState) (co
 	return f.getHead(auxilliaryState)
 }
 
-// GetHeadPayloadStatus returns the current head's payload status only when its root matches.
-// It returns an invalidated cache's recomputed root and status from the same fork-choice view.
+// GetHeadPayloadStatus returns the payload status only when root is still the recomputed head.
 func (f *ForkChoiceStore) GetHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool) {
 	status, matches, ready := f.cachedHeadPayloadStatus(root)
 	if ready {
 		return status, matches
 	}
 	head, _, status, err := f.getHeadGloasWithPayloadStatus()
-	if err != nil || head != root {
+	if err != nil {
+		log.Warn("GetHeadPayloadStatus: failed to recompute Gloas head", "root", root, "err", err)
+		return cltypes.PayloadStatusPending, false
+	}
+	if head != root {
 		return cltypes.PayloadStatusPending, false
 	}
 	return status, true
