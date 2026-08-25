@@ -263,7 +263,8 @@ func (a *ApiHandler) preparePayloadLoopWith(
 	}
 	payloadAttestationDeadline := time.Duration(a.beaconChainCfg.PayloadAttestationDueMs()) * time.Millisecond
 	gloasWindow := slotDuration - payloadAttestationDeadline
-	if gloasWindow <= minimumPreparationLead {
+	if a.beaconChainCfg.GloasForkEpoch != a.beaconChainCfg.FarFutureEpoch &&
+		gloasWindow <= minimumPreparationLead {
 		logger.Warn(
 			"PayloadPreparation: Gloas preparation window is too short",
 			"available", gloasWindow,
@@ -415,10 +416,8 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		outcome.headRoot = result.headRoot
 		// State derivation can overlap the PTC decision and preference updates. Memoize the inputs
 		// this attempt actually used, rather than the values sampled before state work.
-		if result.gloasPathResolved {
+		if result.buildInputsResolved {
 			outcome.gloasPath = result.gloasPath
-		}
-		if result.preferenceGenerationResolved {
 			outcome.proposerPreferencesGeneration = result.preferenceGeneration
 		}
 		if isSettledPreparationOutcome(err) {
@@ -520,11 +519,10 @@ func gloasPathRequiresForkChoiceUpdate(path gloasPayloadPath) bool {
 }
 
 type payloadPreparationResult struct {
-	headRoot                     common.Hash
-	gloasPath                    gloasPayloadPath
-	gloasPathResolved            bool
-	preferenceGeneration         uint64
-	preferenceGenerationResolved bool
+	headRoot             common.Hash
+	gloasPath            gloasPayloadPath
+	preferenceGeneration uint64
+	buildInputsResolved  bool
 }
 
 func (a *ApiHandler) preparePayloadForWithScratch(
@@ -592,10 +590,9 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 		baseState, targetSlot, proposerIndex, stateVersion,
 	)
 	result.preferenceGeneration = preferenceGeneration
-	result.preferenceGenerationResolved = true
 	payloadSource := a.resolveExecutionPayloadSource(baseState, baseBlockRoot, targetSlot, stateVersion)
 	result.gloasPath = payloadSource.gloasPath
-	result.gloasPathResolved = true
+	result.buildInputsResolved = true
 	if payloadSource.fallbackCause != nil {
 		return result, payloadSource.fallbackCause
 	}
@@ -773,9 +770,6 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 	}
 
 	path := a.resolveGloasPayloadPath(baseBlockRoot, targetSlot)
-	if path == gloasPayloadPathPending {
-		return executionPayloadSource{head: parentBid.ParentBlockHash, gloasPath: path}
-	}
 	if path != gloasPayloadPathFull {
 		return executionPayloadSource{head: parentBid.ParentBlockHash, gloasPath: path}
 	}

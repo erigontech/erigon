@@ -149,6 +149,9 @@ func (f *ForkChoiceStore) GetHeadPayloadStatus(root common.Hash) (cltypes.Payloa
 	if ready {
 		return status, matches
 	}
+	if !f.trackGloasWeights() {
+		return cltypes.PayloadStatusPending, false
+	}
 	head, _, status, err := f.getHeadGloasWithPayloadStatus()
 	if err != nil {
 		log.Warn("GetHeadPayloadStatus: failed to recompute Gloas head", "root", root, "err", err)

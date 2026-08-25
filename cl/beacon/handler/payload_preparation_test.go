@@ -469,8 +469,9 @@ func TestPreparePayloadLoopWarnsWhenGloasWindowIsTooShort(t *testing.T) {
 	var output bytes.Buffer
 	logger := log.New()
 	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	config := payloadPreparationLoopConfig(2, 0, 0)
 	handler := &ApiHandler{
-		beaconChainCfg: &clparams.BeaconChainConfig{SecondsPerSlot: 2},
+		beaconChainCfg: &config,
 		logger:         logger,
 	}
 	ctx, cancel := context.WithCancel(t.Context())
@@ -479,6 +480,21 @@ func TestPreparePayloadLoopWarnsWhenGloasWindowIsTooShort(t *testing.T) {
 	handler.preparePayloadLoop(ctx)
 
 	require.Contains(t, output.String(), "Gloas preparation window is too short")
+}
+
+func TestPreparePayloadLoopDoesNotWarnAboutUnscheduledGloas(t *testing.T) {
+	var output bytes.Buffer
+	logger := log.New()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	config := clparams.MainnetBeaconConfig
+	config.SecondsPerSlot = 2
+	handler := &ApiHandler{beaconChainCfg: &config, logger: logger}
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	handler.preparePayloadLoop(ctx)
+
+	require.NotContains(t, output.String(), "Gloas preparation window is too short")
 }
 
 func TestPreparePayloadLoopRunsImmediatelyWithPreparationDeadline(t *testing.T) {
@@ -1036,15 +1052,15 @@ func TestPreparePayloadLoopMemoizesThePreferenceGenerationItUsed(t *testing.T) {
 			require.False(t, found)
 			require.Zero(t, handler.epbsPool.ProposerPreferencesGeneration(targetSlot))
 			return payloadPreparationResult{
-				headRoot:                     baseBlockRoot,
-				preferenceGeneration:         usedGeneration,
-				preferenceGenerationResolved: true,
+				headRoot:             baseBlockRoot,
+				preferenceGeneration: usedGeneration,
+				buildInputsResolved:  true,
 			}, nil
 		}
 		cancel()
 		return payloadPreparationResult{
-			headRoot:                     baseBlockRoot,
-			preferenceGenerationResolved: true,
+			headRoot:            baseBlockRoot,
+			buildInputsResolved: true,
 		}, nil
 	})
 
@@ -1086,9 +1102,9 @@ func TestPreparePayloadLoopMemoizesTheGloasPathItBuilt(t *testing.T) {
 		require.Equal(t, targetSlot, gotTargetSlot)
 		attempts++
 		return payloadPreparationResult{
-			headRoot:          baseBlockRoot,
-			gloasPath:         gloasPayloadPathFull,
-			gloasPathResolved: true,
+			headRoot:            baseBlockRoot,
+			gloasPath:           gloasPayloadPathFull,
+			buildInputsResolved: true,
 		}, nil
 	})
 
@@ -1169,6 +1185,21 @@ func TestPublishedBlockStorageSuppressesStaleHeadPreparation(t *testing.T) {
 		}
 		return ok
 	}, time.Second, 10*time.Millisecond)
+}
+
+func TestFailedBlockBroadcastKeepsProducedBlockMarker(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.DenebVersion)
+	block.Block.Slot = 1
+	commitment := cltypes.KZGCommitment{0x01}
+	block.Block.Body.BlobKzgCommitments.Append(&commitment)
+	completedAt := time.Now()
+	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
+
+	err := handler.broadcastBlock(t.Context(), block)
+
+	require.ErrorContains(t, err, "missing blob bundle")
+	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
 }
 
 func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {

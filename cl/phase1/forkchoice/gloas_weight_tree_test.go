@@ -116,6 +116,27 @@ func TestProcessAttestingIndiciesInvalidatesGloasHeadCache(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusPending, f.headPayloadStatus)
 }
 
+func TestProcessAttestingIndiciesKeepsPreGloasHeadCache(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	f := newGloasWeightTreeTestStore()
+	f.beaconCfg = &cfg
+	f.headHash = common.HexToHash("0xbeef")
+	f.headPayloadStatus = cltypes.PayloadStatusFull
+	attestation := &solid.Attestation{Data: &solid.AttestationData{
+		Slot:            1,
+		BeaconBlockRoot: common.HexToHash("0xaaaa"),
+		Target:          solid.Checkpoint{Epoch: 0},
+	}}
+
+	f.ProcessAttestingIndicies(attestation, []uint64{1})
+
+	require.Equal(t, common.HexToHash("0xbeef"), f.headHash)
+	require.Equal(t, cltypes.PayloadStatusFull, f.headPayloadStatus)
+	latestMessage, found := f.getLatestMessage(1)
+	require.True(t, found)
+	require.Equal(t, attestation.Data.BeaconBlockRoot, latestMessage.Root)
+}
+
 func TestGetHeadPublishesCachedSelection(t *testing.T) {
 	manager := synced_data.NewSyncedDataManager(&clparams.MainnetBeaconConfig, true)
 	manager.OnSelectedHead(common.Hash{0xaa}, 100)
@@ -208,6 +229,36 @@ func TestGetHeadPayloadStatusRefreshesGloasSelection(t *testing.T) {
 	require.True(t, matchesHead, "an invalidated cache must be recomputed for the selected root")
 	require.Equal(t, expectedStatus, status)
 }
+
+func TestGetHeadPayloadStatusDoesNotRunGloasForkChoiceBeforeFork(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	manager := synced_data.NewSyncedDataManager(&cfg, true)
+	root := common.Hash{0xaa}
+	checkpoint := solid.Checkpoint{Root: root}
+	graph := &getFinalizedExecutionHashForkGraph{
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			root: {Slot: 10},
+		},
+		blocks:           map[common.Hash]*cltypes.SignedBeaconBlock{},
+		currentJustified: checkpoint,
+	}
+	store := newGloasWeightTreeTestStore()
+	store.beaconCfg = &cfg
+	store.forkGraph = graph
+	store.syncedDataManager = manager
+	store.justifiedCheckpoint.Store(checkpoint)
+	store.finalizedCheckpoint.Store(solid.Checkpoint{})
+	store.proposerBoostRoot.Store(common.Hash{})
+	store.checkpointStates.Store(checkpoint, &checkpointState{beaconConfig: &cfg})
+
+	status, matchesHead := store.GetHeadPayloadStatus(root)
+
+	require.False(t, matchesHead)
+	require.Equal(t, cltypes.PayloadStatusPending, status)
+	_, _, selected := manager.SelectedHead()
+	require.False(t, selected, "a Gloas-only query must not publish a pre-Gloas head")
+}
+
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
 	f := newGloasWeightTreeTestStore()
 

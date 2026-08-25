@@ -1868,7 +1868,6 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, signedEnvelope ...*cltypes.SignedExecutionPayloadEnvelope) error {
 	finishBlockWork := a.payloadPreparationGate.beginBlockWork()
 	defer finishBlockWork()
-	defer a.payloadPreparationGate.clearProducedBlock(blk.Block.Slot)
 
 	blkSSZ, err := blk.EncodeSSZ(nil)
 	if err != nil {
@@ -2050,6 +2049,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 	}
 
+	a.payloadPreparationGate.clearProducedBlock(blk.Block.Slot)
 	return nil
 }
 

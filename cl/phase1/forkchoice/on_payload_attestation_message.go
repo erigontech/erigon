@@ -78,6 +78,25 @@ func (f *ForkChoiceStore) applyValidatedPayloadAttestation(
 	blockRoot common.Hash,
 	isFromBlock bool,
 ) error {
+	if err := f.recordPayloadAttestationVotes(validatorIndex, ptcIndices, data, blockRoot, isFromBlock); err != nil {
+		return err
+	}
+
+	// Do not hold ptcVoteMu while taking f.mu: block import takes them in the opposite order.
+	f.mu.Lock()
+	f.headHash = common.Hash{}
+	f.headPayloadStatus = cltypes.PayloadStatusPending
+	f.mu.Unlock()
+	return nil
+}
+
+func (f *ForkChoiceStore) recordPayloadAttestationVotes(
+	validatorIndex uint64,
+	ptcIndices []int,
+	data *cltypes.PayloadAttestationData,
+	blockRoot common.Hash,
+	isFromBlock bool,
+) error {
 	f.ptcVoteMu.Lock()
 	defer f.ptcVoteMu.Unlock()
 
