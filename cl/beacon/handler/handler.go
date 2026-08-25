@@ -159,7 +159,12 @@ type ApiHandler struct {
 	// Populated during block production alongside selfBuildPayloads.
 	// [New in Gloas:EIP7732]
 	selfBuildEnvelopes *lru.Cache[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]
-	builderRoutes      *lru.Cache[common.Hash, string]
+	builderRoutes      *lru.Cache[common.Hash, *builderRoute]
+}
+
+type builderRoute struct {
+	url       string
+	forwarded atomic.Bool
 }
 
 func NewApiHandler(
@@ -229,7 +234,7 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
-	builderRoutes, err := lru.New[common.Hash, string]("builderRoutes", 16)
+	builderRoutes, err := lru.New[common.Hash, *builderRoute]("builderRoutes", 16)
 	if err != nil {
 		panic(err)
 	}

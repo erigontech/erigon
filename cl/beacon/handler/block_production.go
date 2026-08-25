@@ -794,7 +794,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	if options := gloasBlockOptionsFromContext(ctx); options != nil && options.selectedBuilderURL != "" {
 		w.Header().Set("Eth-Builder-Url", options.selectedBuilderURL)
 		if root, err := block.ToExecution().Block.HashSSZ(); err == nil {
-			a.builderRoutes.Add(root, options.selectedBuilderURL)
+			a.builderRoutes.Add(root, &builderRoute{url: options.selectedBuilderURL})
 		}
 	}
 
@@ -878,9 +878,12 @@ func (a *ApiHandler) produceBlock(
 	// wait for both tasks to finish
 	wg.Wait()
 
-	if localErr != nil {
-		// if we failed to locally produce the beacon body, we should not proceed with the block production
+	if localErr != nil && (stateVersion.Before(clparams.GloasVersion) || beaconBody == nil) {
 		return nil, localErr
+	}
+	if localErr != nil {
+		blobs = nil
+		kzgProofs = nil
 	}
 	// prepare basic block
 	// Always use the post-ProcessSlots state to get the proposer index.
@@ -904,28 +907,30 @@ func (a *ApiHandler) produceBlock(
 		// 3. GLOAS: MEV-Boost blinded blocks not supported; builders use ePBS gossip bids
 
 		// GLOAS: check p2p and configured Builder API bids against the local value.
-		if stateVersion.AfterOrEqual(clparams.GloasVersion) && a.epbsPool != nil {
+		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
 			selfBid := beaconBody.SignedExecutionPayloadBid.Message
 			options := gloasBlockOptionsFromContext(ctx)
 			p2pMinBid := uint64(0)
-			if options != nil {
+			if options != nil && options.builderConfig != nil {
 				p2pMinBid = options.builderConfig.MinBid
 			}
 			candidates := make([]gloasBidCandidate, 0, 1)
-			bidKey := pool.HighestBidKey{
-				Slot:            targetSlot,
-				ParentBlockHash: selfBid.ParentBlockHash,
-				ParentBlockRoot: selfBid.ParentBlockRoot,
+			if a.epbsPool != nil {
+				bidKey := pool.HighestBidKey{
+					Slot:            targetSlot,
+					ParentBlockHash: selfBid.ParentBlockHash,
+					ParentBlockRoot: selfBid.ParentBlockRoot,
+				}
+				if externalBid, found := a.epbsPool.HighestBids.Get(bidKey); found {
+					candidates = append(candidates, gloasBidCandidate{
+						bid:                 externalBid,
+						boostFactor:         boostFactor,
+						maxExecutionPayment: math.MaxUint64,
+						minBid:              p2pMinBid,
+					})
+				}
 			}
-			if externalBid, found := a.epbsPool.HighestBids.Get(bidKey); found {
-				candidates = append(candidates, gloasBidCandidate{
-					bid:                 externalBid,
-					boostFactor:         boostFactor,
-					maxExecutionPayment: math.MaxUint64,
-					minBid:              p2pMinBid,
-				})
-			}
-			if options != nil && a.builderClient != nil {
+			if options != nil && options.builderConfig != nil && a.builderClient != nil {
 				proposerPubkey, pubkeyErr := baseState.ValidatorPublicKey(int(proposerIndex))
 				if pubkeyErr == nil {
 					candidates = append(candidates, a.requestConfiguredBuilderBids(ctx, baseState, targetSlot, proposerPubkey, selfBid, options.builderConfig.Builders)...)
@@ -947,6 +952,9 @@ func (a *ApiHandler) produceBlock(
 					options.selectedBuilderURL = selected.builderURL
 				}
 				return block, nil
+			}
+			if localErr != nil {
+				return nil, localErr
 			}
 		}
 
@@ -1422,6 +1430,13 @@ func (a *ApiHandler) produceBeaconBody(
 		} else {
 			head = baseState.GetLatestBlockHash()
 		}
+		pendingBid := beaconBody.SignedExecutionPayloadBid
+		if pendingBid == nil || pendingBid.Message == nil {
+			return nil, nil, errors.New("produceBeaconBody: missing Gloas execution payload bid")
+		}
+		pendingBid.Message.Slot = targetSlot
+		pendingBid.Message.ParentBlockRoot = baseBlockRoot
+		pendingBid.Message.ParentBlockHash = head
 	}
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)
 	if finalizedHash == (common.Hash{}) {
@@ -1712,11 +1727,14 @@ func (a *ApiHandler) produceBeaconBody(
 		})
 	}
 	wg.Wait()
-	if executionErr != nil {
-		return nil, nil, executionErr
-	}
 	if syncAggregateErr != nil {
 		return nil, nil, syncAggregateErr
+	}
+	if executionErr != nil {
+		if stateVersion.AfterOrEqual(clparams.GloasVersion) {
+			return beaconBody, nil, executionErr
+		}
+		return nil, nil, executionErr
 	}
 	if executionPayload == nil {
 		return nil, nil, errors.New("failed to produce execution payload")
@@ -1942,7 +1960,27 @@ func (a *ApiHandler) postBeaconBlocks(w http.ResponseWriter, r *http.Request, ap
 		}
 		return nil, beaconhttp.NewEndpointError(http.StatusInternalServerError, err)
 	}
+	a.forwardPublishedBlockToBuilder(r.Header.Get("Eth-Builder-Url"), block.SignedBlock)
 	return newBeaconResponse(nil), nil
+}
+
+func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cltypes.SignedBeaconBlock) {
+	if builderURL == "" || block == nil || block.Block == nil || block.Version() < clparams.GloasVersion || a.builderClient == nil || a.builderRoutes == nil {
+		return
+	}
+	root, err := block.Block.HashSSZ()
+	if err != nil {
+		return
+	}
+	route, ok := a.builderRoutes.Get(root)
+	if !ok || route == nil || route.url != builderURL || !route.forwarded.CompareAndSwap(false, true) {
+		return
+	}
+	go func() {
+		if err := a.builderClient.SubmitSignedBeaconBlock(context.Background(), builderURL, block); err != nil {
+			a.logger.Warn("Failed to forward signed block to builder", "err", err)
+		}
+	}()
 }
 
 func (a *ApiHandler) PostEthV1BlindedBlocks(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {

@@ -80,6 +80,7 @@ type ForkChoiceStorageMock struct {
 	Envelopes                           map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope
 	VerifiedPayloads                    map[common.Hash]bool
 	OnExecutionPayloadErr               error
+	OnTickFn                            func(uint64)
 	ValidateExecutionPayloadEnvelopeErr error
 	GetBeaconCommitteeMock              func(slot, committeeIndex uint64) ([]uint64, error)
 
@@ -398,6 +399,10 @@ func (f *ForkChoiceStorageMock) OnPayloadAttestationMessage(ctx context.Context,
 }
 
 func (f *ForkChoiceStorageMock) OnTick(time uint64) {
+	if f.OnTickFn != nil {
+		f.OnTickFn(time)
+		return
+	}
 	panic("implement me")
 }
 
