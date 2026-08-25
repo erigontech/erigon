@@ -164,8 +164,8 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			genesis = chainspec.MainnetGenesisBlock()
 			custom = false
 		}
-		// Same singleton as at the keepStoredChainConfig path below: MainnetGenesisBlock
-		// hands back the package-level mainnetChainConfig, so override it on a copy.
+		// genesis.Config is either a package-level config or the caller's own, so the
+		// overrides go onto a copy.
 		genesis.Config = genesis.Config.Copy()
 		applyOverrides(genesis.Config)
 		block, _, err1 := write(tx, genesis, dirs, logger)
@@ -233,6 +233,8 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			}
 		}
 		if keepStoredChainConfig {
+			// storedCfg is the receiver of CheckCompatible below, so overriding it in
+			// place would compare it against itself and find no conflict.
 			newCfg = storedCfg.Copy()
 			applyOverrides(newCfg)
 		}
@@ -248,10 +250,15 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	headHash := rawdb.ReadHeadHeaderHash(tx)
 	if height := rawdb.ReadHeaderNumber(tx, headHash); height != nil && *height != 0 {
 		// The head's time, not just its number: the post-merge forks are scheduled by
-		// timestamp and cannot be compared against a block number.
-		headTime, err := headTimestamp(tx, headHash, *height, chainName, dirs, logger)
-		if err != nil {
-			return newCfg, storedBlock, err
+		// timestamp and cannot be compared against a block number. Only a fork that moved
+		// can conflict on that axis, so an undatable head is fatal only to those -- a
+		// datadir whose head header is gone still starts on an unchanged schedule.
+		var headTime uint64
+		if !storedCfg.SameTimestampForks(newCfg) {
+			var err error
+			if headTime, err = headTimestamp(tx, headHash, *height, chainName, dirs, logger); err != nil {
+				return newCfg, storedBlock, err
+			}
 		}
 		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height, headTime)
 		if compatibilityErr != nil &&

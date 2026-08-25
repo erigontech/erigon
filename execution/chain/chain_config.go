@@ -721,6 +721,19 @@ func (c *Config) forkTimestamps() []forkTimestamp {
 	}
 }
 
+// SameTimestampForks reports whether every time-based fork is scheduled identically.
+// When they are, no head time can produce a timestamp conflict, so the caller need not
+// establish one.
+func (c *Config) SameTimestampForks(newcfg *Config) bool {
+	newTimes := newcfg.forkTimestamps()
+	for i, f := range c.forkTimestamps() {
+		if !numEqual(f.timestamp, newTimes[i].timestamp) {
+			return false
+		}
+	}
+	return true
+}
+
 // CheckConfigForkOrder checks that we don't "skip" any forks
 func (c *Config) CheckConfigForkOrder() error {
 	if c != nil && c.ChainID != nil && c.ChainID.Uint64() == 77 {

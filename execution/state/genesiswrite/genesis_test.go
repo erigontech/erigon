@@ -194,6 +194,22 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 		"applyOverrides must not write through into the shared config")
 }
 
+// dropHeadHeader deletes only the kv.Headers row, leaving HeadHeaderKey and the
+// kv.HeaderNumber marker as FillDBFromSnapshots leaves them.
+func dropHeadHeader(t *testing.T, db kv.RwDB) {
+	t.Helper()
+	require.NoError(t, db.Update(context.Background(), func(tx kv.RwTx) error {
+		headHash := rawdb.ReadHeadHeaderHash(tx)
+		height := rawdb.ReadHeaderNumber(tx, headHash)
+		require.NotNil(t, height)
+		require.NotZero(t, *height)
+		require.NoError(t, tx.Delete(kv.Headers, dbutils.HeaderKey(*height, headHash)))
+		require.Nil(t, rawdb.ReadHeader(tx, headHash, *height), "the header must be gone")
+		require.NotNil(t, rawdb.ReadHeaderNumber(tx, headHash), "its number marker must survive")
+		return nil
+	}))
+}
+
 func readStoredChainConfig(t *testing.T, db kv.RoDB) *chain.Config {
 	t.Helper()
 	var cfg *chain.Config
@@ -227,16 +243,7 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainBlocks))
 
-	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
-		headHash := rawdb.ReadHeadHeaderHash(tx)
-		height := rawdb.ReadHeaderNumber(tx, headHash)
-		require.NotNil(t, height)
-		require.NotZero(t, *height)
-		require.NoError(t, tx.Delete(kv.Headers, dbutils.HeaderKey(*height, headHash)))
-		require.Nil(t, rawdb.ReadHeader(tx, headHash, *height), "the header must be gone")
-		require.NotNil(t, rawdb.ReadHeaderNumber(tx, headHash), "its number marker must survive")
-		return nil
-	}))
+	dropHeadHeader(t, m.DB)
 
 	// No block snapshots in this datadir either, so the head time is unknowable and the
 	// rescheduled Osaka cannot be cleared.
@@ -246,6 +253,29 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 
 	storedCfg := readStoredChainConfig(t, m.DB)
 	require.Equal(t, uint64(1), *storedCfg.OsakaTime, "the stored schedule must be left alone")
+}
+
+// An unreadable head header is only fatal to a fork that moved: with the timestamp
+// schedule unchanged the head's time cannot change the answer, so the node still starts.
+func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	logger := log.New()
+	gspec := &types.Genesis{Config: &chain.Config{ChainID: uint256.NewInt(1), OsakaTime: common.NewUint64(1)}}
+
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	chainBlocks, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainBlocks))
+	dropHeadHeader(t, m.DB)
+
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
+		m.DB, nil, "", nil, nil, true, datadir.New(t.TempDir()), logger)
+	require.NoError(t, err)
 }
 
 func TestAllocConstructor(t *testing.T) {
