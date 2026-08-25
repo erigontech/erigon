@@ -26,6 +26,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/maphash"
 )
 
@@ -522,4 +523,72 @@ func TestGenericCache_GrowCopyMatchesGetBasedCopy(t *testing.T) {
 		require.Equal(t, wantEntry.val, gotEntry.val)
 		require.Equal(t, wantEntry.txNum, gotEntry.txNum)
 	}
+}
+
+// A cache whose next grow step the envelope cannot fund must stop entering
+// maybeGrow: the LRU stays full at curCap, so every later insert would re-take
+// the single resizeMu and serialise all writers.
+func TestGenericCache_UnfundableGrowKeepsResizeMuOffThePutPath(t *testing.T) {
+	prevBudget := cachebudget.Global
+	cachebudget.Global = cachebudget.New(0) // Reserve always refuses, Take still succeeds
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+
+	c := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU))
+
+	key := make([]byte, 8)
+	for i := range genericCacheStartCapacity * 2 {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		c.Put(key, []byte{byte(i)}, uint64(i))
+	}
+	require.Equal(t, uint32(genericCacheStartCapacity), c.curCap.Load(), "unfundable grow must leave curCap unchanged")
+
+	c.resizeMu.Lock()
+	defer c.resizeMu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		k := make([]byte, 8)
+		binary.BigEndian.PutUint64(k, uint64(1<<20))
+		c.Put(k, []byte{1}, 1)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("put blocked on resizeMu while the envelope could not fund a grow")
+	}
+}
+
+// Bytes another holder returns must be picked up with no explicit reset.
+func TestGenericCache_BudgetReleaseResumesGrow(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+
+	const capacityBytes = 64 * datasize.MB
+	sizeOf := func(v []byte) int { return len(v) }
+
+	sizer := NewGenericCache[[]byte](capacityBytes, sizeOf, ModeEvictLRU)
+	startBytes, stepBytes := sizer.reservedBytes, sizer.growStepBytes(sizer.curCap.Load())
+	sizer.Close()
+	require.Positive(t, stepBytes)
+
+	// Room for this cache plus one other holder the size of its first grow step.
+	budget := cachebudget.New(startBytes + stepBytes)
+	cachebudget.Global = budget
+	c := closeOnCleanup(t, NewGenericCache[[]byte](capacityBytes, sizeOf, ModeEvictLRU))
+	require.True(t, budget.Reserve(stepBytes), "the other holder must fit")
+	require.Equal(t, budget.Limit(), budget.Used(), "the envelope must start exactly full")
+
+	fill := func(from, to int) {
+		key := make([]byte, 8)
+		for i := from; i < to; i++ {
+			binary.BigEndian.PutUint64(key, uint64(i))
+			c.Put(key, []byte{byte(i)}, uint64(i))
+		}
+	}
+	fill(0, genericCacheStartCapacity*2)
+	require.Equal(t, uint32(genericCacheStartCapacity), c.curCap.Load(), "a full envelope must leave curCap unchanged")
+
+	budget.Release(stepBytes)
+	fill(genericCacheStartCapacity*2, genericCacheStartCapacity*3)
+	require.Greater(t, c.curCap.Load(), uint32(genericCacheStartCapacity), "freed budget must let the cache grow again")
 }

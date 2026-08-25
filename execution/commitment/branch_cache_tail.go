@@ -67,12 +67,17 @@ func (t *tailLRU) Get(key uint64) (*branchCacheEntry, bool) {
 
 func (t *tailLRU) Add(key uint64, entry *branchCacheEntry) {
 	lru := t.cur.Load()
-	// Avoid lru.Len() locks once fully grown.
-	if curCap := t.curCap.Load(); curCap < t.maxCap && lru.Len() >= int(curCap) {
+	// Avoid lru.Len() locks once fully grown, or once a step is unfundable.
+	if curCap := t.curCap.Load(); curCap < t.maxCap &&
+		cachebudget.Global.CanReserve(t.growStepBytes(curCap)) && lru.Len() >= int(curCap) {
 		t.maybeGrow()
 		lru = t.cur.Load()
 	}
 	lru.Add(key, entry)
+}
+
+func (t *tailLRU) growStepBytes(curCap uint32) int64 {
+	return int64(min(curCap*tailGrowFactor, t.maxCap)-curCap) * tailEntryBytes
 }
 
 func (t *tailLRU) maybeGrow() {
@@ -85,7 +90,7 @@ func (t *tailLRU) maybeGrow() {
 		return
 	}
 	newCap := min(curCap*tailGrowFactor, t.maxCap)
-	delta := int64(newCap-curCap) * tailEntryBytes
+	delta := t.growStepBytes(curCap)
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}

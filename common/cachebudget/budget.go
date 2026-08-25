@@ -72,6 +72,10 @@ func (b *Budget) Reserve(n int64) bool {
 	}
 }
 
+// CanReserve reports whether Reserve would currently succeed; the answer can go
+// stale the moment it returns.
+func (b *Budget) CanReserve(n int64) bool { return n <= 0 || b.used.Load()+n <= b.limit }
+
 // Take reserves n bytes unconditionally (may push used past limit). Used for a
 // cache's initial small allocation, which must always succeed so no cache is
 // born disabled.

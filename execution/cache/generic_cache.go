@@ -231,6 +231,10 @@ func (c *GenericCache[T]) newShards(capacity, shards uint32) *lruGen[entry[T]] {
 	return g
 }
 
+func (c *GenericCache[T]) growStepBytes(curCap uint32) int64 {
+	return int64(min(curCap*genericCacheGrowFactor, c.maxCap)-curCap) * c.avgEntryBytes
+}
+
 // maybeGrow jump-resizes the LRU one step larger when it is full, the ceiling
 // hasn't been reached, and the shared envelope can fund the step. Otherwise the
 // LRU keeps its size and freelru evicts within it. Must not be called with a
@@ -252,7 +256,7 @@ func (c *GenericCache[T]) maybeGrow() {
 		return
 	}
 	newCap := min(curCap*genericCacheGrowFactor, c.maxCap)
-	delta := int64(newCap-curCap) * c.avgEntryBytes
+	delta := c.growStepBytes(curCap)
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
@@ -440,7 +444,10 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// The insert lands before the grow (which must run outside the stripe), so
 	// it and any racers until the swap evict at the pre-grow cap — a transient
 	// bounded by the grow window.
-	needGrow := c.mode != ModeNoOp && curCap < c.maxCap && gen.len() >= int(curCap)
+	// A full LRU never drops back below curCap, so an unfundable step would
+	// otherwise re-enter maybeGrow on every write and serialise them on resizeMu.
+	needGrow := c.mode != ModeNoOp && curCap < c.maxCap && gen.len() >= int(curCap) &&
+		cachebudget.Global.CanReserve(c.growStepBytes(curCap))
 
 	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
 	// not a separate currentSize check: capacityEntries is derived from

@@ -97,7 +97,8 @@ func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().lru.Get(key
 // have carried it into the generation this resolves.
 func (g *growLRU[V]) Add(key uint64, value V) {
 	gen := g.cur.Load()
-	if curCap := g.curCap.Load(); curCap < g.maxCap && gen.len() >= int(curCap) {
+	if curCap := g.curCap.Load(); curCap < g.maxCap && gen.len() >= int(curCap) &&
+		cachebudget.Global.CanReserve(g.growStepBytes(curCap)) {
 		g.maybeGrow()
 		gen = g.cur.Load()
 	}
@@ -116,6 +117,10 @@ func (g *growLRU[V]) Replace(key uint64, value V) {
 	gen.add(key, value)
 }
 
+func (g *growLRU[V]) growStepBytes(curCap uint32) int64 {
+	return int64(min(curCap*genericCacheGrowFactor, g.maxCap)-curCap) * g.avgBytes
+}
+
 func (g *growLRU[V]) maybeGrow() {
 	g.resizeMu.Lock()
 	defer g.resizeMu.Unlock()
@@ -125,7 +130,7 @@ func (g *growLRU[V]) maybeGrow() {
 		return
 	}
 	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
-	delta := int64(newCap-curCap) * g.avgBytes
+	delta := g.growStepBytes(curCap)
 	if !cachebudget.Global.Reserve(delta) {
 		return
 	}
