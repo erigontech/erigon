@@ -1167,3 +1167,41 @@ func TestTraceCallPopulatesTraceWhenRequested(t *testing.T) {
 	require.Nil(t, result.VmTrace)
 	require.Nil(t, result.StateDiff)
 }
+
+func TestTraceCallWithoutTraceTypes(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+
+	result, err := api.Call(context.Background(), traceCallValueTransfer(), []string{}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, nil)
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Empty(t, result.Trace)
+	require.Nil(t, result.VmTrace)
+	require.Nil(t, result.StateDiff)
+}
+
+func TestRawTransactionWithoutTraceTypes(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+
+	encoded, _, _ := rawTxFromBlock(t, m, 6)
+
+	result, err := api.RawTransaction(context.Background(), encoded, []string{})
+	require.NoError(t, err)
+	require.NotNil(t, result)
+	require.Empty(t, result.Trace)
+	require.Nil(t, result.VmTrace)
+	require.Nil(t, result.StateDiff)
+}
+
+func TestTraceCallRejectsCustomTracerWithoutTraceType(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	latest := rpc.LatestBlockNumber
+
+	tracer := "callTracer"
+	_, err := api.Call(context.Background(), traceCallValueTransfer(), []string{TraceTypeStateDiff}, &rpc.BlockNumberOrHash{BlockNumber: &latest}, &config.TraceConfig{Tracer: &tracer})
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "does not support custom tracers")
+}
