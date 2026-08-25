@@ -242,9 +242,36 @@ func checkAndSetCommitmentHistoryFlag(tx kv.RwTx, logger log.Logger, dirs datadi
 	return nil
 }
 
+type newOptions struct {
+	stateTransitionObserver execmodule.StateTransitionObserver
+}
+
+// NewOption configures Ethereum construction without adding runtime settings.
+type NewOption func(*newOptions)
+
+// WithStateTransitionObserver enables deterministic execution lifecycle hooks
+// for integration tests.
+func WithStateTransitionObserver(observer execmodule.StateTransitionObserver) NewOption {
+	return func(options *newOptions) {
+		options.stateTransitionObserver = observer
+	}
+}
+
 // New creates a new Ethereum object (including the
 // initialisation of the common Ethereum object)
-func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger log.Logger, tracer *tracers.Tracer) (*Ethereum, error) {
+func New(
+	ctx context.Context,
+	stack *node.Node,
+	config *ethconfig.Config,
+	logger log.Logger,
+	tracer *tracers.Tracer,
+	opts ...NewOption,
+) (*Ethereum, error) {
+	options := newOptions{}
+	for _, opt := range opts {
+		opt(&options)
+	}
+
 	var kzgWarmupDone chan struct{}
 	if config.WarmupKzgCtxOnInit {
 		kzgWarmupDone = make(chan struct{})
@@ -671,10 +698,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 		blobGetter = backend.txPool
 	}
 
-	execmoduleCache, ok := stack.Config().Http.StateCache.LocalCache.(*execmodule.Cache)
-	if !ok || execmoduleCache == nil {
-		execmoduleCache = execmodule.NewCache(nil)
-	}
+	execmoduleCache := execmodule.NewCache(options.stateTransitionObserver)
 	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
 	httpRpcCfg := stack.Config().Http
 	httpRpcCfg.StateCache.LocalCache = execmoduleCache

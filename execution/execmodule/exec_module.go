@@ -109,7 +109,8 @@ type Cache struct {
 	stateTransitionObserver StateTransitionObserver
 }
 
-// NewCache creates the RPC state cache bridge with an optional lifecycle observer.
+// NewCache creates the RPC state bridge. A nil observer disables test
+// instrumentation.
 func NewCache(observer StateTransitionObserver) *Cache {
 	return &Cache{stateTransitionObserver: observer}
 }
@@ -142,6 +143,8 @@ func (c *Cache) View(ctx context.Context, tx kv.TemporalTx) (kvcache.CacheView, 
 	} else {
 		view = &CacheView{getter: execctx.NewTemporalTxStateGetter(tx)}
 	}
+	// Notify after selecting the getter so a paused request stays bound to this
+	// exact state view while forkchoice advances.
 	c.observeStateTransition(ctx, StateTransitionRPCViewBound)
 	return view, nil
 }

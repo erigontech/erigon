@@ -695,7 +695,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// released and flush/commit/prune can proceed without blocking the
 		// next FCU.
 		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash)
-		if err := e.dispatchNotificationsFromOverlay(currentContext, finishProgressBefore); err != nil {
+		if err := e.dispatchNotificationsFromOverlay(ctx, currentContext, finishProgressBefore); err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
 		}
 
@@ -775,7 +775,7 @@ func (e *ExecModule) logTimings(msg string, timings []any) {
 // domain flush, not the metadata overlay, owns its durable sequence advance.
 // Dispatch must finish before the execution semaphore is released so the next
 // FCU cannot overtake these notifications.
-func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains, finishProgressBefore uint64) error {
+func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *execctx.SharedDomains, finishProgressBefore uint64) error {
 	dispatcher := e.pipelineExecutor.Dispatcher()
 	if dispatcher == nil || e.accum == nil {
 		e.logger.Debug("[dispatchNotifications] skipped: dispatcher or accum nil", "dispatcherNil", dispatcher == nil, "accumNil", e.accum == nil)
@@ -799,7 +799,9 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(sd *execctx.SharedDomains,
 	// before any StateChangeBatch arrives, so it can buffer events properly.
 	e.logger.Debug("[dispatchNotifications] publishing SD")
 	dispatcher.PublishOverlay(sd)
-	e.observeStateTransition(e.backgroundCtx, StateTransitionOverlayPublished)
+	// Overlay publication is drop-tolerant; the observer supplies the blocking
+	// boundary required by deterministic integration tests.
+	e.observeStateTransition(ctx, StateTransitionOverlayPublished)
 
 	e.logger.Debug("[dispatchNotifications] dispatching", "finishBefore", finishProgressBefore, "finishAfter", finishProgressAfter)
 	if err := dispatcher.Dispatch(

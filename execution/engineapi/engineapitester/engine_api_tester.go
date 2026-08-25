@@ -268,10 +268,6 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		RpcTxSyncDefaultTimeout:  rpccfg.DefaultRpcTxSyncDefaultTimeout,
 		RpcTxSyncMaxTimeout:      rpccfg.DefaultRpcTxSyncMaxTimeout,
 	}
-	if args.StateTransitionObserver != nil {
-		httpConfig.StateCache.LocalCache = execmodule.NewCache(args.StateTransitionObserver)
-	}
-
 	nodeKeyConfig := p2p.NodeKeyConfig{}
 	nodeKey, err := nodeKeyConfig.LoadOrGenerateAndSave(nodeKeyConfig.DefaultPath(args.DataDir))
 	if err != nil {
@@ -353,7 +349,14 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("obtain jwt secret: %w", err)
 	}
-	ethBackend, err := eth.New(ctx, ethNode, &ethConfig, logger, nil)
+	ethBackend, err := eth.New(
+		ctx,
+		ethNode,
+		&ethConfig,
+		logger,
+		nil,
+		eth.WithStateTransitionObserver(args.StateTransitionObserver),
+	)
 	if err != nil {
 		return EngineApiTester{}, fmt.Errorf("eth.New: %w", err)
 	}

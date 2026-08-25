@@ -254,15 +254,28 @@ func buildChurnChain(
 	sums = append(sums, recordChurnSum(ctx, t, churn))
 
 	for k := range pokes {
-		txn, err := churn.Poke(transactOpts, big.NewInt(seed(k)))
-		require.NoError(t, err)
-		block, err := eat.MockCl.BuildCanonicalBlock(ctx)
-		require.NoError(t, err)
-		require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, block.ExecutionPayload, txn.Hash()))
+		block := applyStateChurnPoke(ctx, t, eat, churn, transactOpts, seed(k))
 		payloads = append(payloads, block)
 		sums = append(sums, recordChurnSum(ctx, t, churn))
 	}
 	return payloads, addr, churn, sums
+}
+
+func applyStateChurnPoke(
+	ctx context.Context,
+	t *testing.T,
+	eat engineapitester.EngineApiTester,
+	churn *contracts.StateChurn,
+	transactOpts *bind.TransactOpts,
+	seed int64,
+) *engineapitester.MockClPayload {
+	t.Helper()
+	txn, err := churn.Poke(transactOpts, big.NewInt(seed))
+	require.NoError(t, err)
+	block, err := eat.MockCl.BuildCanonicalBlock(ctx)
+	require.NoError(t, err)
+	require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, block.ExecutionPayload, txn.Hash()))
+	return block
 }
 
 // churnAndAssert applies pokes one block at a time on the tester's current

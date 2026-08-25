@@ -18,18 +18,30 @@ package execmodule
 
 import "context"
 
-// StateTransitionPoint identifies an RPC or forkchoice lifecycle boundary.
+// StateTransitionPoint identifies where an integration test may pause RPC view
+// binding or forkchoice processing.
 type StateTransitionPoint uint8
 
 const (
+	// StateTransitionRPCViewBound means the RPC getter has selected its
+	// SharedDomains or database view, but no state has been read yet.
 	StateTransitionRPCViewBound StateTransitionPoint = iota
+	// StateTransitionUnwindComplete means staged unwind replay has finished,
+	// before replacement canonical state is published.
 	StateTransitionUnwindComplete
+	// StateTransitionOverlayPublished means new RPC views can read the FCU result
+	// from SharedDomains before it is durable.
 	StateTransitionOverlayPublished
+	// StateTransitionCommitComplete means the FCU result is durable while the
+	// published SharedDomains remains available to RPC views.
 	StateTransitionCommitComplete
+	// StateTransitionOverlayCleared means new RPC views fall back to the
+	// committed database after SharedDomains is unpublished.
 	StateTransitionOverlayCleared
 )
 
-// StateTransitionObserver runs synchronously at each lifecycle boundary.
+// StateTransitionObserver is an integration-test hook that runs inline at each
+// lifecycle boundary. A blocking observer must return when its context ends.
 type StateTransitionObserver func(context.Context, StateTransitionPoint)
 
 func (c *Cache) observeStateTransition(ctx context.Context, point StateTransitionPoint) {

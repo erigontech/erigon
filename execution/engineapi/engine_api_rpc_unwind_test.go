@@ -73,89 +73,105 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
 		seed := firstNonZeroStateChurnSeed()
-		_, staleStorageAddress, staleStorage, _ := buildChurnChain(ctx, t, eat, 0, nil)
-		_, overlayReadAddress, overlayRead, _ := buildChurnChain(ctx, t, eat, 0, nil)
-		_, committedReadAddress, committedRead, _ := buildChurnChain(ctx, t, eat, 0, nil)
-		_, clearedReadAddress, clearedRead, _ := buildChurnChain(ctx, t, eat, 0, nil)
-		base, err := eat.MockCl.BuildCanonicalBlock(ctx)
+		// Each boundary gets its own contract because an RPC assertion may fill
+		// StateCache; sharing a key could let one phase mask the next.
+		_, storageRefillAddress, storageRefill, _ := buildChurnChain(ctx, t, eat, 0, nil)
+		_, overlayPhaseAddress, overlayPhase, _ := buildChurnChain(ctx, t, eat, 0, nil)
+		_, commitPhaseAddress, commitPhase, _ := buildChurnChain(ctx, t, eat, 0, nil)
+		_, databasePhaseAddress, databasePhase, _ := buildChurnChain(ctx, t, eat, 0, nil)
+		reorgTarget, err := eat.MockCl.BuildCanonicalBlock(ctx)
 		require.NoError(t, err)
 
-		for _, churn := range []*contracts.StateChurn{staleStorage, overlayRead, committedRead, clearedRead} {
-			applyStateChurnPoke(ctx, t, eat, churn, seed)
+		transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
+		require.NoError(t, err)
+		transactOpts.GasLimit = params.MaxTxnGasLimit
+		for _, churn := range []*contracts.StateChurn{storageRefill, overlayPhase, commitPhase, databasePhase} {
+			applyStateChurnPoke(ctx, t, eat, churn, transactOpts, seed)
 		}
-		_, staleAccountAddress, _, _ := buildChurnChain(ctx, t, eat, 0, nil)
+		// This post-target deployment makes account and code removal part of the
+		// unwind, while the earlier contracts exercise restored storage.
+		_, removedAccountAddress, _, _ := buildChurnChain(ctx, t, eat, 0, nil)
 		storageSlot := stateChurnStorageSlot(0)
 		expectedStorage := common.BigToHash(new(big.Int).SetUint64(stateChurnPokeValue(uint64(seed), 0)))
 
-		rpcClient, err := rpc.DialHTTPWithClient(eat.JsonRpcUrl, &http.Client{Timeout: rpcClientTimeout}, logger)
+		transport := http.DefaultTransport.(*http.Transport).Clone()
+		t.Cleanup(transport.CloseIdleConnections)
+		rpcClient, err := rpc.DialHTTPWithClient(
+			eat.JsonRpcUrl,
+			&http.Client{Transport: transport, Timeout: rpcClientTimeout},
+			logger,
+		)
 		require.NoError(t, err)
-		defer rpcClient.Close()
 
-		assertContractRPCStatePresent(t, readContractRPCState(ctx, t, rpcClient, staleStorageAddress, storageSlot), expectedStorage)
-		assertContractRPCStatePresent(t, readContractRPCState(ctx, t, rpcClient, overlayReadAddress, storageSlot), expectedStorage)
-		assertContractRPCStatePresent(t, readContractRPCState(ctx, t, rpcClient, committedReadAddress, storageSlot), expectedStorage)
-		assertContractRPCStatePresent(t, readContractRPCState(ctx, t, rpcClient, clearedReadAddress, storageSlot), expectedStorage)
-		assertContractRPCStateWithoutStorage(t, readContractRPCState(ctx, t, rpcClient, staleAccountAddress, storageSlot))
+		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, storageRefillAddress, storageSlot), expectedStorage)
+		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, overlayPhaseAddress, storageSlot), expectedStorage)
+		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, commitPhaseAddress, storageSlot), expectedStorage)
+		assertContractRPCStatePresentWithStorage(t, readContractRPCState(ctx, t, rpcClient, databasePhaseAddress, storageSlot), expectedStorage)
+		assertContractRPCStatePresentWithZeroStorage(t, readContractRPCState(ctx, t, rpcClient, removedAccountAddress, storageSlot))
 
-		next, err := eat.MockCl.BuildNewPayload(ctx)
+		oldHead, err := eat.MockCl.BuildNewPayload(ctx)
 		require.NoError(t, err)
-		status, err := eat.MockCl.InsertNewPayload(ctx, next)
+		status, err := eat.MockCl.InsertNewPayload(ctx, oldHead)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.ValidStatus, status.Status)
 
-		overlayA := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
-		advance := startAsync(func() (struct{}, error) {
-			return struct{}{}, eat.MockCl.UpdateForkChoice(ctx, next)
+		oldHeadOverlay := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
+		advanceToOldHead := startAsync(func() (struct{}, error) {
+			return struct{}{}, eat.MockCl.UpdateForkChoice(ctx, oldHead)
 		})
-		overlayA.wait(t)
+		oldHeadOverlay.wait(t)
 
-		oldViews := transitions.hold(t, execmodule.StateTransitionRPCViewBound, 3)
-		oldStorage := startAsync(func() (common.Hash, error) {
-			return readRPCStorage(ctx, rpcClient, staleStorageAddress, storageSlot)
+		// These requests stay bound to the old head across the reorg. Their MVCC
+		// reads may finish later, but they must not refill canonical cache entries.
+		preUnwindViews := transitions.hold(t, execmodule.StateTransitionRPCViewBound, 3)
+		delayedStorage := startAsync(func() (common.Hash, error) {
+			return readRPCStorage(ctx, rpcClient, storageRefillAddress, storageSlot)
 		})
-		oldCode := startAsync(func() (hexutil.Bytes, error) {
-			return readRPCCode(ctx, rpcClient, staleAccountAddress)
+		delayedCode := startAsync(func() (hexutil.Bytes, error) {
+			return readRPCCode(ctx, rpcClient, removedAccountAddress)
 		})
-		oldNonce := startAsync(func() (hexutil.Uint64, error) {
-			return readRPCNonce(ctx, rpcClient, staleAccountAddress)
+		delayedNonce := startAsync(func() (hexutil.Uint64, error) {
+			return readRPCNonce(ctx, rpcClient, removedAccountAddress)
 		})
-		oldViews.wait(t)
-		overlayA.release()
-		awaitAsync(t, advance)
-		assertCanonicalHead(ctx, t, eat, next)
+		preUnwindViews.wait(t)
+		oldHeadOverlay.release()
+		awaitAsync(t, advanceToOldHead)
+		assertCanonicalHead(ctx, t, eat, oldHead)
 
-		unwind := transitions.hold(t, execmodule.StateTransitionUnwindComplete, 1)
-		overlayB := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
-		committedB := transitions.hold(t, execmodule.StateTransitionCommitComplete, 1)
-		clearedB := transitions.hold(t, execmodule.StateTransitionOverlayCleared, 1)
-		reorg := startAsync(func() (struct{}, error) {
-			return struct{}{}, eat.MockCl.UpdateForkChoice(ctx, base)
+		unwindComplete := transitions.hold(t, execmodule.StateTransitionUnwindComplete, 1)
+		replacementOverlay := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
+		replacementCommitted := transitions.hold(t, execmodule.StateTransitionCommitComplete, 1)
+		replacementCleared := transitions.hold(t, execmodule.StateTransitionOverlayCleared, 1)
+		reorgToTarget := startAsync(func() (struct{}, error) {
+			return struct{}{}, eat.MockCl.UpdateForkChoice(ctx, reorgTarget)
 		})
 
-		unwind.wait(t)
-		unwind.release()
-		overlayB.wait(t)
-		assertContractRPCStateWithoutStorage(t, readContractRPCState(ctx, t, rpcClient, overlayReadAddress, storageSlot))
-		overlayB.release()
+		unwindComplete.wait(t)
+		unwindComplete.release()
+		replacementOverlay.wait(t)
+		assertContractRPCStatePresentWithZeroStorage(t, readContractRPCState(ctx, t, rpcClient, overlayPhaseAddress, storageSlot))
+		replacementOverlay.release()
 
-		committedB.wait(t)
-		assertContractRPCStateWithoutStorage(t, readContractRPCState(ctx, t, rpcClient, committedReadAddress, storageSlot))
-		committedB.release()
+		replacementCommitted.wait(t)
+		assertContractRPCStatePresentWithZeroStorage(t, readContractRPCState(ctx, t, rpcClient, commitPhaseAddress, storageSlot))
+		replacementCommitted.release()
 
-		clearedB.wait(t)
-		assertContractRPCStateWithoutStorage(t, readContractRPCState(ctx, t, rpcClient, clearedReadAddress, storageSlot))
-		clearedB.release()
-		awaitAsync(t, reorg)
-		assertCanonicalHead(ctx, t, eat, base)
+		replacementCleared.wait(t)
+		assertContractRPCStatePresentWithZeroStorage(t, readContractRPCState(ctx, t, rpcClient, databasePhaseAddress, storageSlot))
+		replacementCleared.release()
+		awaitAsync(t, reorgToTarget)
+		assertCanonicalHead(ctx, t, eat, reorgTarget)
 
-		oldViews.release()
-		require.Equal(t, expectedStorage, awaitAsync(t, oldStorage))
-		require.NotEmpty(t, awaitAsync(t, oldCode))
-		require.NotZero(t, awaitAsync(t, oldNonce))
+		preUnwindViews.release()
+		require.Equal(t, expectedStorage, awaitAsync(t, delayedStorage))
+		require.NotEmpty(t, awaitAsync(t, delayedCode))
+		require.NotZero(t, awaitAsync(t, delayedNonce))
 
+		// The first read may refill StateCache; the second proves that any refill
+		// remains canonical after delayed old-view reads finish.
 		for range 2 {
-			assertContractRPCStateWithoutStorage(t, readContractRPCState(ctx, t, rpcClient, staleStorageAddress, storageSlot))
-			assertContractRPCStateAbsent(t, readContractRPCState(ctx, t, rpcClient, staleAccountAddress, storageSlot))
+			assertContractRPCStatePresentWithZeroStorage(t, readContractRPCState(ctx, t, rpcClient, storageRefillAddress, storageSlot))
+			assertContractRPCStateAbsent(t, readContractRPCState(ctx, t, rpcClient, removedAccountAddress, storageSlot))
 		}
 	})
 }
@@ -183,6 +199,8 @@ func readContractRPCState(
 	return contractRPCState{storage: storage, code: code, nonce: nonce}
 }
 
+// These reads keep the caller's context because the test deliberately holds
+// requests in flight across a forkchoice update.
 func readRPCStorage(ctx context.Context, client *rpc.Client, address common.Address, storageSlot common.Hash) (common.Hash, error) {
 	var result common.Hash
 	err := client.CallContext(ctx, &result, "eth_getStorageAt", address, storageSlot, "latest")
@@ -201,14 +219,14 @@ func readRPCNonce(ctx context.Context, client *rpc.Client, address common.Addres
 	return result, err
 }
 
-func assertContractRPCStatePresent(t *testing.T, got contractRPCState, expectedStorage common.Hash) {
+func assertContractRPCStatePresentWithStorage(t *testing.T, got contractRPCState, expectedStorage common.Hash) {
 	t.Helper()
 	require.Equal(t, expectedStorage, got.storage)
 	require.NotEmpty(t, got.code)
 	require.NotZero(t, got.nonce)
 }
 
-func assertContractRPCStateWithoutStorage(t *testing.T, got contractRPCState) {
+func assertContractRPCStatePresentWithZeroStorage(t *testing.T, got contractRPCState) {
 	t.Helper()
 	require.Zero(t, got.storage)
 	require.NotEmpty(t, got.code)
@@ -220,24 +238,6 @@ func assertContractRPCStateAbsent(t *testing.T, got contractRPCState) {
 	require.Zero(t, got.storage)
 	require.Empty(t, got.code)
 	require.Zero(t, got.nonce)
-}
-
-func applyStateChurnPoke(
-	ctx context.Context,
-	t *testing.T,
-	eat engineapitester.EngineApiTester,
-	churn *contracts.StateChurn,
-	seed int64,
-) {
-	t.Helper()
-	transactOpts, err := bind.NewKeyedTransactorWithChainID(eat.CoinbaseKey, eat.ChainId())
-	require.NoError(t, err)
-	transactOpts.GasLimit = params.MaxTxnGasLimit
-	txn, err := churn.Poke(transactOpts, big.NewInt(seed))
-	require.NoError(t, err)
-	block, err := eat.MockCl.BuildCanonicalBlock(ctx)
-	require.NoError(t, err)
-	require.NoError(t, eat.TxnInclusionVerifier.VerifyTxnsInclusion(ctx, block.ExecutionPayload, txn.Hash()))
 }
 
 func uint256Word(value uint64) []byte {
@@ -293,6 +293,8 @@ func awaitAsync[T any](t *testing.T, result <-chan asyncResult[T]) T {
 	}
 }
 
+// stateTransitionController turns inline lifecycle callbacks into
+// deterministic barriers.
 type stateTransitionController struct {
 	mu    sync.Mutex
 	holds map[execmodule.StateTransitionPoint]*stateTransitionHold
