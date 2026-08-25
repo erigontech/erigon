@@ -816,11 +816,7 @@ func TestExecutionPayloadBidServicePendingExpiry(t *testing.T) {
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	key := mustPendingBidKey(t, msg)
-	service.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadBid]{
-		msg:          msg,
-		creationTime: time.Now().Add(-pendingBidExpiry - time.Second), // expired
-	})
-	service.pending.count.Store(1)
+	storePendingJob(t, service.pending, key, msg, time.Now().Add(-(pendingBidExpiry + time.Second)))
 
 	// Expiry is checked before the slot check, so no ethClock call is expected.
 	service.pending.processPending(context.Background())
@@ -838,11 +834,7 @@ func TestExecutionPayloadBidServicePendingStaleSlotDropped(t *testing.T) {
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	key := mustPendingBidKey(t, msg)
-	service.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadBid]{
-		msg:          msg,
-		creationTime: time.Now(),
-	})
-	service.pending.count.Store(1)
+	storePendingJob(t, service.pending, key, msg, time.Now())
 
 	// A stale slot removes the job before any dependency retry.
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(200))
@@ -855,7 +847,7 @@ func TestExecutionPayloadBidServicePendingStaleSlotDropped(t *testing.T) {
 }
 
 // TestExecutionPayloadBidServiceLoopProcessesQueuedBid exercises the real
-// polling loop, including its condition-variable wakeup and retry after the
+// polling loop, including its wake-up and retry after the
 // missing dependency becomes available.
 func TestExecutionPayloadBidServiceLoopProcessesQueuedBid(t *testing.T) {
 	ctrl := gomock.NewController(t)

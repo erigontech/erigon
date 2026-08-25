@@ -33,6 +33,22 @@ func canceledPendingQueueContext(t *testing.T) context.Context {
 	return ctx
 }
 
+func storePendingJob[K comparable, M any](
+	t *testing.T,
+	queue *pendingJobQueue[K, M],
+	key K,
+	msg M,
+	creationTime time.Time,
+) {
+	t.Helper()
+	_, loaded := queue.jobs.LoadOrStore(key, &pendingJob[M]{
+		msg:          msg,
+		creationTime: creationTime,
+	})
+	require.False(t, loaded)
+	queue.count.Add(1)
+}
+
 func newTestPendingJobQueueWithOptions(ctx context.Context, options pendingJobQueueOptions) *pendingJobQueue[int, string] {
 	return newPendingJobQueue(ctx, options,
 		func(context.Context, int, string) pendingJobDecision {

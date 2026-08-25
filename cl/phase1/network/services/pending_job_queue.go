@@ -73,9 +73,9 @@ type pendingJobQueue[K comparable, M any] struct {
 	processAfterRemove func(ctx context.Context, key K, msg M)
 	onExpired          func(key K)
 
-	jobs  sync.Map // K -> *pendingJob[M]
-	count atomic.Int32
-	cond  *sync.Cond
+	jobs     sync.Map // K -> *pendingJob[M]
+	count    atomic.Int32
+	wakeLoop chan struct{}
 
 	cancelLoop context.CancelFunc
 	loopWG     sync.WaitGroup
@@ -111,22 +111,13 @@ func newPendingJobQueue[K comparable, M any](
 		tryProcess:             tryProcess,
 		processAfterRemove:     processAfterRemove,
 		onExpired:              onExpired,
-		cond:                   sync.NewCond(&sync.Mutex{}),
+		wakeLoop:               make(chan struct{}, 1),
 		cancelLoop:             cancelLoop,
 		fullCounter:            pendingJobQueueRejectedCounter.WithLabelValues(options.name),
 	}
-	q.loopWG.Add(2)
-	go func() {
-		defer q.loopWG.Done()
+	q.loopWG.Go(func() {
 		q.loop(loopCtx)
-	}()
-	go func() {
-		defer q.loopWG.Done()
-		<-loopCtx.Done()
-		q.cond.L.Lock()
-		q.cond.Broadcast()
-		q.cond.L.Unlock()
-	}()
+	})
 	return q
 }
 
@@ -186,9 +177,11 @@ func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) pendingJobEnqueueRes
 		q.count.Add(-1)
 		return pendingJobDuplicate
 	}
-	q.cond.L.Lock()
-	q.cond.Signal()
-	q.cond.L.Unlock()
+	// Wake notifications may coalesce; count determines whether work remains.
+	select {
+	case q.wakeLoop <- struct{}{}:
+	default:
+	}
 	return pendingJobEnqueued
 }
 
@@ -203,17 +196,13 @@ func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
 // loop is the background goroutine that retries pending jobs.
 func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 	for {
-		q.cond.L.Lock()
 		for q.count.Load() == 0 {
 			select {
 			case <-ctx.Done():
-				q.cond.L.Unlock()
 				return
-			default:
+			case <-q.wakeLoop:
 			}
-			q.cond.Wait()
 		}
-		q.cond.L.Unlock()
 
 		ticker := time.NewTicker(q.checkInterval)
 		for q.count.Load() > 0 {

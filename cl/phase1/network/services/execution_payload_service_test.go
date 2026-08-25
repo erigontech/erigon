@@ -239,11 +239,7 @@ func TestExecutionPayloadServicePendingEnvelopeExpiry(t *testing.T) {
 		blockRoot:    blockRoot,
 		envelopeHash: envelopeHash,
 	}
-	impl.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope,
-		creationTime: time.Now().Add(-pendingEnvelopeExpiry - time.Second), // expired
-	})
-	impl.pending.count.Store(1)
+	storePendingJob(t, impl.pending, key, envelope, time.Now().Add(-(pendingEnvelopeExpiry + time.Second)))
 
 	// Process pending - should remove expired
 	impl.pending.processPending(ctx)
@@ -279,11 +275,7 @@ func TestExecutionPayloadServicePendingEnvelopeProcessing(t *testing.T) {
 		blockRoot:    blockRoot,
 		envelopeHash: envelopeHash,
 	}
-	impl.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope,
-		creationTime: time.Now(),
-	})
-	impl.pending.count.Store(1)
+	storePendingJob(t, impl.pending, key, envelope, time.Now())
 
 	// Block not yet available - should keep pending
 	impl.pending.processPending(ctx)
@@ -331,15 +323,8 @@ func TestExecutionPayloadServiceMultiplePendingForSameBlock(t *testing.T) {
 	hash2, _ := envelope2.HashSSZ()
 
 	// Add both as pending
-	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash1}, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope1,
-		creationTime: time.Now(),
-	})
-	impl.pending.jobs.Store(pendingEnvelopeKey{blockRoot, hash2}, &pendingJob[*cltypes.SignedExecutionPayloadEnvelope]{
-		msg:          envelope2,
-		creationTime: time.Now(),
-	})
-	impl.pending.count.Store(2)
+	storePendingJob(t, impl.pending, pendingEnvelopeKey{blockRoot, hash1}, envelope1, time.Now())
+	storePendingJob(t, impl.pending, pendingEnvelopeKey{blockRoot, hash2}, envelope2, time.Now())
 
 	// Add block
 	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{

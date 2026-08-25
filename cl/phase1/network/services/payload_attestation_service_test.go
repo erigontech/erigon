@@ -631,11 +631,7 @@ func TestPayloadAttestationServicePendingExpiry(t *testing.T) {
 
 	// Add expired job directly
 	key := mustPendingPayloadAttestationKey(t, blockRoot, msg)
-	service.pending.jobs.Store(key, &pendingJob[*cltypes.PayloadAttestationMessage]{
-		msg:          msg,
-		creationTime: time.Now().Add(-pendingPayloadAttestationExpiry - time.Second), // expired
-	})
-	service.pending.count.Store(1)
+	storePendingJob(t, service.pending, key, msg, time.Now().Add(-(pendingPayloadAttestationExpiry + time.Second)))
 
 	// Process pending - should remove expired
 	service.pending.processPending(context.Background())
@@ -656,11 +652,7 @@ func TestPayloadAttestationServicePendingSlotMismatch(t *testing.T) {
 
 	// Add pending job
 	key := mustPendingPayloadAttestationKey(t, blockRoot, msg)
-	service.pending.jobs.Store(key, &pendingJob[*cltypes.PayloadAttestationMessage]{
-		msg:          msg,
-		creationTime: time.Now(),
-	})
-	service.pending.count.Store(1)
+	storePendingJob(t, service.pending, key, msg, time.Now())
 
 	// Mock: slot 100 is no longer current
 	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(false)
@@ -684,11 +676,7 @@ func TestPayloadAttestationServicePendingProcessing(t *testing.T) {
 
 	// Add pending job
 	key := mustPendingPayloadAttestationKey(t, blockRoot, msg)
-	service.pending.jobs.Store(key, &pendingJob[*cltypes.PayloadAttestationMessage]{
-		msg:          msg,
-		creationTime: time.Now(),
-	})
-	service.pending.count.Store(1)
+	storePendingJob(t, service.pending, key, msg, time.Now())
 
 	// First process: slot ok, but block not available
 	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(true)
@@ -726,15 +714,8 @@ func TestPayloadAttestationServiceMultiplePendingForSameBlock(t *testing.T) {
 	msg2 := newTestPayloadAttestationMessage(100, 2, blockRoot)
 
 	// Add both as pending
-	service.pending.jobs.Store(mustPendingPayloadAttestationKey(t, blockRoot, msg1), &pendingJob[*cltypes.PayloadAttestationMessage]{
-		msg:          msg1,
-		creationTime: time.Now(),
-	})
-	service.pending.jobs.Store(mustPendingPayloadAttestationKey(t, blockRoot, msg2), &pendingJob[*cltypes.PayloadAttestationMessage]{
-		msg:          msg2,
-		creationTime: time.Now(),
-	})
-	service.pending.count.Store(2)
+	storePendingJob(t, service.pending, mustPendingPayloadAttestationKey(t, blockRoot, msg1), msg1, time.Now())
+	storePendingJob(t, service.pending, mustPendingPayloadAttestationKey(t, blockRoot, msg2), msg2, time.Now())
 
 	// Add block header
 	fcu.Headers[blockRoot] = &cltypes.BeaconBlockHeader{
