@@ -320,6 +320,22 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}
 			finalisedBlockNum = *bn
 		}
+		// PREFETCH PROMOTE-ONCE no-op: a re-FCU of the block PromoteBlock just canonicalised. On the frontier
+		// path the promoted gen is kept LIVE as its successor's read-through parent (retired only when the
+		// successor canonicalises), so an L2 CL re-sending FCU(head) every slot would otherwise re-pass
+		// HasLiveGen below and RE-PROMOTE the same block — re-merging it and tearing down the eager-opened
+		// successor frontier (block N+1 then fails to assemble: the live-stall bug). The stock duplicate-FCU
+		// short-circuit just below MISSES this because a frontier block's canonicalHash(N) can legitimately
+		// differ from the promoted head until a clean canonicalisation lands. Match on the promoted-head record
+		// instead and no-op (writeForkChoiceHashes + Success), leaving the frontier untouched.
+		if e.forkValidator.IsPromotedHead(blockHash, fcuHeader.Number.Uint64()) {
+			writeForkChoiceHashes(tx, blockHash, safeHash, finalizedHash)
+			sendForkchoiceResultWithoutWaiting(outcomeCh, ForkChoiceResult{
+				LatestValidHash: blockHash,
+				Status:          ExecutionStatusSuccess,
+			}, false)
+			return nil
+		}
 		// as per https://github.com/ethereum/execution-apis/pull/786
 		// we short circuit reorgs if:
 		//   1. the head is an ancestor of the last finalised block

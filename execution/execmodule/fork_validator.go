@@ -92,6 +92,16 @@ type ForkValidator struct {
 	// Flashblock state: tracks tx hashes already executed for the
 	// in-progress block so we can detect prefix-extension updates.
 	flashblockTxHashes []common.Hash
+
+	// promotedHash/promotedNumber record the LAST block canonicalised by PromoteBlock (the prefetch
+	// "promoted" lifecycle state). A prefetched gen is kept live after promotion (it stays the read-through
+	// parent of its successor until the successor canonicalises), so WITHOUT this record a re-FCU of the
+	// same head — routine for an L2 CL that re-sends FCU every slot — would re-pass HasLiveGen and
+	// re-promote (re-merge) the same block, republishing notifications and tearing down the eager-opened
+	// successor frontier. IsPromotedHead lets updateForkChoice treat a re-FCU of the already-promoted head
+	// as a true no-op. Promote-ONCE is a prefetch-lifecycle invariant (prefetched → promoted → retired).
+	promotedHash   common.Hash
+	promotedNumber uint64
 }
 
 // preExecGen is one older, not-yet-canonical pre-executed SharedDomains parked on the
@@ -335,7 +345,26 @@ func (fv *ForkValidator) PromoteBlock(ctx context.Context, tx kv.TemporalTx, sd 
 		fv.extendingForkNumber = 0
 		fv.extendingForkNotifications = nil
 	}
+	// Record the promoted head so a re-FCU of the same block is a true no-op (promote-once). ONLY in
+	// frontier mode: there a promoted gen is kept live (re-FCU would re-promote) AND canonicalHash(N) can
+	// diverge from the head so the stock duplicate-FCU short-circuit misses. In non-frontier mode the stock
+	// short-circuit already handles a duplicate FCU, and recording here would wrongly no-op a re-FCU that
+	// must still recover (e.g. state-ahead-of-txNums) — so leave it untouched.
+	if fv.frontierMode {
+		fv.promotedHash = blockHash
+		fv.promotedNumber = blockNumber
+	}
 	return true, nil
+}
+
+// IsPromotedHead reports whether (hash, number) is exactly the last block PromoteBlock canonicalised,
+// i.e. a re-FCU of the current promoted head. updateForkChoice uses this to no-op such a re-FCU instead
+// of re-promoting (which would re-merge the block and tear down the eager-opened successor frontier).
+// Caller must NOT hold fv.lock.
+func (fv *ForkValidator) IsPromotedHead(hash common.Hash, number uint64) bool {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.promotedHash != (common.Hash{}) && fv.promotedHash == hash && fv.promotedNumber == number
 }
 
 // ensureParked guarantees the given SD is present on the park stack (idempotent) — used after promoting a
