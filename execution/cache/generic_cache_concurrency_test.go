@@ -463,3 +463,63 @@ func BenchmarkGenericCacheParallelPutGrow(b *testing.B) {
 		}
 	})
 }
+
+// Keys() fixes the copy order before the loop and insertion order alone sets the
+// new generation's recency, so reading the retiring generation with Peek must
+// produce exactly the generation a Get-based copy would.
+func TestGenericCache_GrowCopyMatchesGetBasedCopy(t *testing.T) {
+	sizeOf := func(v []byte) int { return len(v) }
+
+	grown := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, sizeOf, ModeEvictLRU))
+	// Same start geometry but fixed, so it ends up holding what the grow read.
+	source := closeOnCleanup(t, newGenericCacheEntries[[]byte](64*datasize.MB, genericCacheStartCapacity, sizeOf, ModeEvictLRU))
+
+	key := make([]byte, 8)
+	put := func(i int) {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		grown.Put(key, []byte{byte(i), byte(i >> 8)}, uint64(i))
+		source.Put(key, []byte{byte(i), byte(i >> 8)}, uint64(i))
+	}
+	touch := func(i int) {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		grown.Get(key)
+		source.Get(key)
+	}
+
+	const warmup = genericCacheStartCapacity / 2
+	for i := range warmup {
+		put(i)
+	}
+	for i := 0; i < warmup; i += 3 { // pull recency away from insertion order
+		touch(i)
+	}
+	grew := false
+	for i := warmup; i < 8*genericCacheStartCapacity && !grew; i++ {
+		put(i)
+		grew = grown.curCap.Load() > genericCacheStartCapacity
+	}
+	require.True(t, grew, "the fill must have triggered a real grow")
+
+	// Rebuild the copy the way it read before Peek, in the grow's own geometry.
+	want := grown.newShards(grown.curCap.Load(), grown.shardCount)
+	src := source.data.Load()
+	for _, k := range src.lru.Keys() {
+		if e, ok := src.lru.Get(k); ok {
+			want.add(k, e)
+		}
+	}
+
+	got := grown.data.Load()
+	require.Positive(t, want.len())
+	require.Equal(t, want.len(), got.len(), "the grown generation must hold every source entry")
+	require.Equal(t, want.lru.Keys(), got.lru.Keys(), "the grown generation must keep the get-copy order")
+	for _, k := range got.lru.Keys() {
+		wantEntry, ok := want.lru.Peek(k)
+		require.True(t, ok)
+		gotEntry, ok := got.lru.Peek(k)
+		require.True(t, ok)
+		require.Equal(t, wantEntry.key, gotEntry.key)
+		require.Equal(t, wantEntry.val, gotEntry.val)
+		require.Equal(t, wantEntry.txNum, gotEntry.txNum)
+	}
+}
