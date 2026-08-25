@@ -26,15 +26,16 @@ import (
 
 func TestValidateChainHistoryCheckpoint(t *testing.T) {
 	t.Run("pre-Gloas", func(t *testing.T) {
-		require.NoError(t, validateChainHistoryCheckpoint(clparams.FuluVersion, 1))
+		require.NoError(t, validateChainHistoryCheckpoint(clparams.FuluVersion))
 	})
 
 	t.Run("Gloas genesis", func(t *testing.T) {
-		require.NoError(t, validateChainHistoryCheckpoint(clparams.GloasVersion, 0))
+		err := validateChainHistoryCheckpoint(clparams.GloasVersion)
+		require.ErrorContains(t, err, "does not support Gloas checkpoints")
 	})
 
 	t.Run("Gloas non-genesis", func(t *testing.T) {
-		err := validateChainHistoryCheckpoint(clparams.GloasVersion, 1)
-		require.ErrorContains(t, err, "does not support non-genesis Gloas checkpoints")
+		err := validateChainHistoryCheckpoint(clparams.GloasVersion)
+		require.ErrorContains(t, err, "does not support Gloas checkpoints")
 	})
 }

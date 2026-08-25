@@ -97,9 +97,9 @@ type chainCfg struct {
 	Chain string `help:"chain" default:"mainnet"`
 }
 
-func validateChainHistoryCheckpoint(version clparams.StateVersion, slot uint64) error {
-	if version >= clparams.GloasVersion && slot != 0 {
-		return errors.New("capcli chain does not support non-genesis Gloas checkpoints")
+func validateChainHistoryCheckpoint(version clparams.StateVersion) error {
+	if version >= clparams.GloasVersion {
+		return errors.New("capcli chain does not support Gloas checkpoints")
 	}
 	return nil
 }
@@ -159,7 +159,7 @@ func (c *Chain) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
-	if err := validateChainHistoryCheckpoint(bs.Version(), bs.Slot()); err != nil {
+	if err := validateChainHistoryCheckpoint(bs.Version()); err != nil {
 		return err
 	}
 
