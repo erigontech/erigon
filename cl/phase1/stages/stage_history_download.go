@@ -454,7 +454,8 @@ func completeHistoryBackfill(
 		madeProgress := len(failed) < batchSize
 		next := make([]network.SkippedFullBlock, 0, len(pending)-batchSize+len(failed))
 		next = append(next, pending[batchSize:]...)
-		pending = append(next, failed...)
+		next = append(next, failed...)
+		pending = next
 		if len(pending) == 0 {
 			notifyBackfilled()
 			return true
