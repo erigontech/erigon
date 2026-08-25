@@ -6,6 +6,7 @@ import (
 	"sync"
 	"time"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -36,6 +37,7 @@ type proposerPreferencesService struct {
 	beaconCfg         *clparams.BeaconChainConfig
 	epbsPool          *pool.EpbsPool
 	now               func() time.Time
+	emitters          *beaconevents.EventEmitter
 
 	storeMu sync.Mutex
 }
@@ -48,6 +50,7 @@ func NewProposerPreferencesService(
 	ethClock eth_clock.EthereumClock,
 	beaconCfg *clparams.BeaconChainConfig,
 	epbsPool *pool.EpbsPool,
+	emitters *beaconevents.EventEmitter,
 ) ProposerPreferencesService {
 	return &proposerPreferencesService{
 		syncedDataManager: syncedDataManager,
@@ -56,6 +59,7 @@ func NewProposerPreferencesService(
 		beaconCfg:         beaconCfg,
 		epbsPool:          epbsPool,
 		now:               time.Now,
+		emitters:          emitters,
 	}
 }
 
@@ -154,6 +158,9 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		Slot:          proposalSlot,
 		DependentRoot: preferences.DependentRoot,
 	}, msg)
+	if s.emitters != nil {
+		s.emitters.Operation().SendProposerPreferences(&beaconevents.VersionedSignedProposerPreferences{Version: clparams.GloasVersion.String(), Data: msg})
+	}
 
 	log.Trace("Processed proposer preferences via gossip",
 		"proposalSlot", proposalSlot,

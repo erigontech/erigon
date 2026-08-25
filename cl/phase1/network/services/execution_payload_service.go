@@ -189,6 +189,16 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
 
+	payloadEvent := &beaconevents.ExecutionPayloadGossipData{
+		Slot: block.Block.Slot, BuilderIndex: builderIndex, BlockHash: envelope.Payload.BlockHash, BlockRoot: beaconBlockRoot,
+	}
+	s.emitters.Operation().SendExecutionPayloadGossip(payloadEvent)
+	s.emitters.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{
+		Slot: block.Block.Slot, BuilderIndex: builderIndex, BlockHash: envelope.Payload.BlockHash, BlockRoot: beaconBlockRoot,
+		ExecutionOptimistic: s.forkchoiceStore.IsRootOptimistic(beaconBlockRoot),
+	})
+	s.emitFullHeadUpdate(block, beaconBlockRoot)
+
 	// Emit SSE event for execution_payload_available [New in Gloas:EIP7732]
 	s.emitters.Operation().SendExecutionPayloadAvailable(&beaconevents.ExecutionPayloadAvailableData{
 		Slot:      block.Block.Slot,
@@ -201,6 +211,40 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		"builderIndex", builderIndex)
 
 	return nil
+}
+
+func (s *executionPayloadService) emitFullHeadUpdate(block *cltypes.SignedBeaconBlock, blockRoot common.Hash) {
+	headRoot, headSlot, err := s.forkchoiceStore.GetHead(nil)
+	if err != nil || headRoot != blockRoot || s.beaconCfg.SlotsPerEpoch == 0 {
+		return
+	}
+	headState, err := s.forkchoiceStore.GetStateAtBlockRoot(blockRoot, true)
+	if err != nil || headState == nil {
+		return
+	}
+	epoch := headSlot / s.beaconCfg.SlotsPerEpoch
+	currentDependentRoot := s.forkchoiceStore.AnchorRoot()
+	nextDependentRoot := s.forkchoiceStore.AnchorRoot()
+	if epoch > 1 {
+		currentDependentRoot, err = headState.GetBlockRootAtSlot((epoch-1)*s.beaconCfg.SlotsPerEpoch - 1)
+		if err != nil {
+			return
+		}
+	}
+	if epoch > 0 {
+		nextDependentRoot, err = headState.GetBlockRootAtSlot(epoch*s.beaconCfg.SlotsPerEpoch - 1)
+		if err != nil {
+			return
+		}
+	}
+	s.emitters.State().SendHeadV2(&beaconevents.HeadV2Data{
+		Version: clparams.GloasVersion.String(),
+		Data: beaconevents.HeadV2Content{
+			Slot: headSlot, Block: headRoot, State: block.Block.StateRoot, PayloadStatus: "full",
+			EpochTransition: headSlot%s.beaconCfg.SlotsPerEpoch == 0, CurrentEpochDependentRoot: currentDependentRoot,
+			NextEpochDependentRoot: nextDependentRoot, ExecutionOptimistic: s.forkchoiceStore.IsRootOptimistic(blockRoot),
+		},
+	})
 }
 
 // queuePendingEnvelope adds an envelope to the pending queue for later processing

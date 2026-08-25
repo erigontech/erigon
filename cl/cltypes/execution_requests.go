@@ -111,6 +111,22 @@ func (e *ExecutionRequests) EncodeSSZ(buf []byte) ([]byte, error) {
 }
 
 func (e *ExecutionRequests) DecodeSSZ(buf []byte, version int) error {
+	e.initializeDecodeLists(version)
+	if e.effectiveVersion() < clparams.GloasVersion {
+		return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations)
+	}
+	return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations, e.BuilderDeposits, e.BuilderExits)
+}
+
+func (e *ExecutionRequests) DecodeSSZStrict(buf []byte, version int) error {
+	e.initializeDecodeLists(version)
+	if e.effectiveVersion() < clparams.GloasVersion {
+		return ssz2.UnmarshalSSZStrict(buf, version, e.Deposits, e.Withdrawals, e.Consolidations)
+	}
+	return ssz2.UnmarshalSSZStrict(buf, version, e.Deposits, e.Withdrawals, e.Consolidations, e.BuilderDeposits, e.BuilderExits)
+}
+
+func (e *ExecutionRequests) initializeDecodeLists(version int) {
 	decodedVersion := clparams.StateVersion(version)
 	if (e.effectiveVersion() >= clparams.GloasVersion) != (decodedVersion >= clparams.GloasVersion) {
 		e.Deposits = nil
@@ -121,10 +137,6 @@ func (e *ExecutionRequests) DecodeSSZ(buf []byte, version int) error {
 	}
 	e.version = decodedVersion
 	e.ensureLists()
-	if e.effectiveVersion() < clparams.GloasVersion {
-		return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations)
-	}
-	return ssz2.UnmarshalSSZ(buf, version, e.Deposits, e.Withdrawals, e.Consolidations, e.BuilderDeposits, e.BuilderExits)
 }
 
 func (e *ExecutionRequests) Clone() clonable.Clonable {

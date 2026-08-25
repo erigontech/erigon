@@ -102,3 +102,15 @@ func (f *operationFeed) SendExecutionPayloadAvailable(value *ExecutionPayloadAva
 		Data:  value,
 	})
 }
+
+func (f *operationFeed) SendExecutionPayload(value *ExecutionPayloadData) int {
+	return f.feed.Send(&EventStream{Event: OpExecutionPayload, Data: value})
+}
+
+func (f *operationFeed) SendExecutionPayloadGossip(value *ExecutionPayloadGossipData) int {
+	return f.feed.Send(&EventStream{Event: OpExecutionPayloadGossip, Data: value})
+}
+
+func (f *operationFeed) SendProposerPreferences(value *VersionedSignedProposerPreferences) int {
+	return f.feed.Send(&EventStream{Event: OpProposerPreferences, Data: value})
+}
