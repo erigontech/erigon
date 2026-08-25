@@ -61,16 +61,23 @@ func TestUpgradeToElectraPropagatesQueueExcessActiveBalanceError(t *testing.T) {
 	// Give validator 0 a compounding withdrawal credential and a balance above
 	// MinActivationBalance so UpgradeToElectra's QueueExcessActiveBalance path
 	// actually calls SetValidatorBalance (and so the OnNewValidatorBalance hook
-	// registered below) for it.
+	// registered below) for it. Activating it also keeps it out of the earlier
+	// "not yet active" loop, which writes a balance through the same hook.
 	var creds common.Hash
 	creds[0] = byte(s.BeaconConfig().CompoundingWithdrawalPrefix)
 	require.NoError(t, s.SetWithdrawalCredentialForValidatorAtIndex(0, creds))
+	require.NoError(t, s.SetActivationEpochForValidatorAtIndex(0, 0))
 	require.NoError(t, s.SetValidatorBalance(0, s.BeaconConfig().MinActivationBalance+1))
 
 	wantErr := errors.New("balance hook failed")
+	queued := false
 	s.SetEvents(raw.Events{
 		OnNewValidatorBalance: func(index int, balance uint64) error {
-			if index == 0 {
+			// QueueExcessActiveBalance trims down to MinActivationBalance; the
+			// "not yet active" loop zeroes instead, so this only matches the path
+			// under test.
+			if index == 0 && balance == s.BeaconConfig().MinActivationBalance {
+				queued = true
 				return wantErr
 			}
 			return nil
@@ -78,4 +85,5 @@ func TestUpgradeToElectraPropagatesQueueExcessActiveBalanceError(t *testing.T) {
 	})
 
 	require.ErrorIs(t, s.UpgradeToElectra(), wantErr)
+	require.True(t, queued, "error must come from QueueExcessActiveBalance, not another SetValidatorBalance caller")
 }

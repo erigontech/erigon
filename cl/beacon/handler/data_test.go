@@ -22,6 +22,7 @@ import (
 	"os"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/spf13/afero"
 	"github.com/stretchr/testify/require"
@@ -102,14 +103,20 @@ func defaultHarnessOpts(c harnessConfig) []beacontest.HarnessOption {
 	if c.forkmode == 1 {
 		require.NoError(c.t, sm.OnHeadState(postState))
 		var s *state.CachingBeaconState
-		for s == nil {
-			// ViewHeadState returns ErrNotSynced until OnHeadState above has
-			// taken effect; retry until it does.
-			_ = sm.ViewHeadState(func(headState *state.CachingBeaconState) error {
+		// ViewHeadState returns ErrNotSynced until OnHeadState above has taken effect.
+		var viewErr error
+		for range 1000 {
+			viewErr = sm.ViewHeadState(func(headState *state.CachingBeaconState) error {
 				s = headState
 				return nil
 			})
+			if viewErr == nil {
+				break
+			}
+			time.Sleep(time.Millisecond)
 		}
+		require.NoError(c.t, viewErr)
+		require.NotNil(c.t, s)
 		require.NoError(c.t, s.SetSlot(789274827847783))
 
 		fcu.HeadSlotVal = 128

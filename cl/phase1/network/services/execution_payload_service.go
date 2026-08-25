@@ -149,7 +149,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 		// marks the envelope as processed without ever notifying the EL, permanently
 		// breaking the chain.
 		if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, false, true); err != nil {
-			log.Debug("Failed to eagerly store pending execution payload envelope in forkchoice",
+			log.Warn("Failed to eagerly store pending execution payload envelope in forkchoice",
 				"beaconBlockRoot", beaconBlockRoot, "builderIndex", builderIndex, "err", err)
 		}
 		log.Trace("Queued execution payload envelope for later processing",

@@ -303,6 +303,9 @@ func (s *SingleAttestation) ToAttestation(memberIndexInCommittee int, committeeL
 	if err := committeeBits.SetBitAt(int(s.CommitteeIndex), true); err != nil {
 		return nil, fmt.Errorf("committee index out of range: %w", err)
 	}
+	if memberIndexInCommittee < 0 || memberIndexInCommittee >= committeeLen {
+		return nil, fmt.Errorf("member index %d out of range for committee of length %d", memberIndexInCommittee, committeeLen)
+	}
 	// flip the bit for the validator and also mark the last bit
 	bytes := make([]byte, committeeLen/8+1)
 	bytes[memberIndexInCommittee/8] |= 1 << (memberIndexInCommittee % 8)

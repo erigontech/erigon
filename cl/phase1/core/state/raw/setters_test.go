@@ -17,6 +17,7 @@
 package raw
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -370,4 +371,65 @@ func TestBeaconState_SetValidatorAtIndex(t *testing.T) {
 	validator := solid.NewValidator()
 	state.SetValidatorAtIndex(index, validator)
 	assert.Equal(t, validator, state.validators.Get(index))
+}
+
+// TestValidatorSetterLeavesLeafCleanOnHookError pins that a setter which aborts
+// on an event-hook error does not leave ValidatorsLeafIndex dirty: the state
+// would then re-hash the whole validators subtree for a write that never landed.
+func TestValidatorSetterLeavesLeafCleanOnHookError(t *testing.T) {
+	hookErr := errors.New("hook failed")
+	cases := []struct {
+		name   string
+		events Events
+		set    func(*BeaconState) error
+	}{
+		{
+			name:   "WithdrawalCredential",
+			events: Events{OnNewValidatorWithdrawalCredentials: func(int, []byte) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetWithdrawalCredentialForValidatorAtIndex(0, common.Hash{1}) },
+		},
+		{
+			name:   "ExitEpoch",
+			events: Events{OnNewValidatorExitEpoch: func(int, uint64) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetExitEpochForValidatorAtIndex(0, 1) },
+		},
+		{
+			name:   "WithdrawableEpoch",
+			events: Events{OnNewValidatorWithdrawableEpoch: func(int, uint64) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetWithdrawableEpochForValidatorAtIndex(0, 1) },
+		},
+		{
+			name:   "EffectiveBalance",
+			events: Events{OnNewValidatorEffectiveBalance: func(int, uint64) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetEffectiveBalanceForValidatorAtIndex(0, 1) },
+		},
+		{
+			name:   "ActivationEpoch",
+			events: Events{OnNewValidatorActivationEpoch: func(int, uint64) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetActivationEpochForValidatorAtIndex(0, 1) },
+		},
+		{
+			name:   "ActivationEligibilityEpoch",
+			events: Events{OnNewValidatorActivationEligibilityEpoch: func(int, uint64) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetActivationEligibilityEpochForValidatorAtIndex(0, 1) },
+		},
+		{
+			name:   "Slashed",
+			events: Events{OnNewValidatorSlashed: func(int, bool) error { return hookErr }},
+			set:    func(b *BeaconState) error { return b.SetValidatorSlashed(0, true) },
+		},
+	}
+
+	for _, tc := range cases {
+		t.Run(tc.name, func(t *testing.T) {
+			state := GetTestState()
+			_, err := state.HashSSZ()
+			require.NoError(t, err)
+			require.False(t, state.isLeafDirty(ValidatorsLeafIndex))
+
+			state.SetEvents(tc.events)
+			require.ErrorIs(t, tc.set(state), hookErr)
+			assert.False(t, state.isLeafDirty(ValidatorsLeafIndex))
+		})
+	}
 }

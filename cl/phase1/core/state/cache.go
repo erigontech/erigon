@@ -61,12 +61,11 @@ func New(cfg *clparams.BeaconChainConfig) *CachingBeaconState {
 	state := &CachingBeaconState{
 		BeaconState: raw.New(cfg),
 	}
-	// A freshly constructed, empty, default-version state has no active
-	// validators and is at slot 0, so InitBeaconState's fallible steps
-	// (proposer-index computation on an empty set, phase0 participation
-	// init) are no-ops here; real population happens via a later
-	// DecodeSSZ/CopyInto call, which reruns and checks this properly.
-	_ = state.InitBeaconState()
+	// An empty, default-version state cannot fail to initialize: the caches have
+	// constant positive sizes and there are no validators to walk.
+	if err := state.InitBeaconState(); err != nil {
+		panic(err)
+	}
 	return state
 }
 

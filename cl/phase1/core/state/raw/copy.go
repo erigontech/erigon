@@ -61,7 +61,7 @@ func (b *BeaconState) CopyInto(dst *BeaconState) error {
 	dst.previousJustifiedCheckpoint = b.previousJustifiedCheckpoint
 	dst.justificationBits = b.justificationBits.Copy()
 	if b.version == clparams.Phase0Version {
-		_ = dst.init() // always returns nil; see init's body
+		dst.init()
 		return nil
 	}
 	dst.currentSyncCommittee = b.currentSyncCommittee.Copy()

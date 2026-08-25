@@ -50,7 +50,9 @@ func (s *Service) submitAggregateAndProof(
 	}
 	aggregate, err := buildAggregateAttestation(single, validatorPosition, committeeLength, s.cfg)
 	if err != nil {
-		s.logger.Warn("[dev-validator] build aggregate attestation failed", "err", err)
+		s.logger.Warn("[dev-validator] build aggregate attestation failed",
+			"slot", slot, "committeeIndex", committeeIndex,
+			"committeeLength", committeeLength, "validatorPosition", validatorPosition, "err", err)
 		return
 	}
 
