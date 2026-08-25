@@ -3330,6 +3330,9 @@ func doUnmerge(ctx context.Context, cliCtx *cli.Command, dirs datadir.Dirs) erro
 	if info.Epoch {
 		step = snaptype.EpochMinSegmentSize
 	}
+	if segLen := info.To - info.From; step > segLen {
+		step = segLen
+	}
 	var compressor *seg.Compressor
 	compresCfg := seg.DefaultCfg
 	workers := estimate.CompressSnapshot.Workers()
