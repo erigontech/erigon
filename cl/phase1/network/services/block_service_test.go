@@ -164,7 +164,7 @@ func TestBlockServiceSuccess(t *testing.T) {
 	require.NoError(t, err)
 	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
 
-	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	service, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
 	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
@@ -175,7 +175,11 @@ func TestBlockServiceSuccess(t *testing.T) {
 	fcu.Ancestors[finalizedSlot] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 
-	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, blocks[1]))
+	require.True(t, service.(*blockService).seenBlocksCache.Contains(proposerIndexAndSlot{
+		proposerIndex: blocks[1].Block.ProposerIndex,
+		slot:          blocks[1].Block.Slot,
+	}))
 }
 
 func TestBlockServiceGossipRejectsBlockOutsideFinalizedChain(t *testing.T) {
@@ -194,6 +198,27 @@ func TestBlockServiceGossipRejectsBlockOutsideFinalizedChain(t *testing.T) {
 
 	err := blockService.ValidateGossip(t.Context(), blocks[1])
 	require.ErrorContains(t, err, "finalized checkpoint is not an ancestor")
+}
+
+func TestBlockServiceGossipUsesCheckpointSyncAnchorForFinalizedAncestor(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, pre, post := tests.GetBellatrixRandom()
+	parentState, err := pre.Copy()
+	require.NoError(t, err)
+	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
+	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	syncedData.OnHeadState(post)
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
+	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
+	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
+	fcu.Headers[blocks[1].Block.ParentRoot] = blocks[0].SignedBeaconBlockHeader().Header.Copy()
+	fcu.StateAtBlockRootVal[blocks[1].Block.ParentRoot] = parentState
+	fcu.AnchorSlotVal = blocks[0].Block.Slot
+	fcu.Ancestors[fcu.AnchorSlotVal] = forkchoice.ForkChoiceNode{Root: post.FinalizedCheckpoint().Root}
+
+	require.NoError(t, blockService.ValidateGossip(t.Context(), blocks[1]))
 }
 
 func TestBlockServiceGossipRejectsUnexpectedProposer(t *testing.T) {

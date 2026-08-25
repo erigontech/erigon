@@ -618,19 +618,47 @@ func TestDynamicBuilderDialAllFailAndCancellation(t *testing.T) {
 
 	t.Run("canceled dial stops fallback", func(t *testing.T) {
 		var dialed []string
+		ctx, cancel := context.WithCancel(t.Context())
+		defer cancel()
 		client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
 		client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) { return addresses, nil }
-		client.transport = newPinnedBuilderTransport(func(ctx context.Context, _, address string) (net.Conn, error) {
+		client.transport = newPinnedBuilderTransport(func(dialCtx context.Context, _, address string) (net.Conn, error) {
 			dialed = append(dialed, address)
-			<-ctx.Done()
-			return nil, ctx.Err()
+			cancel()
+			<-dialCtx.Done()
+			return nil, dialCtx.Err()
 		})
-		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
-		defer cancel()
 
-		require.ErrorIs(t, client.SubmitBuilderPreferences(ctx, "http://builder.example:18550", common.Bytes48{}, request), context.DeadlineExceeded)
+		require.ErrorIs(t, client.SubmitBuilderPreferences(ctx, "http://builder.example:18550", common.Bytes48{}, request), context.Canceled)
 		require.Equal(t, []string{"93.184.216.34:18550"}, dialed)
 	})
+}
+
+func TestDynamicBuilderDialBlackholeDoesNotConsumeFallbackDeadline(t *testing.T) {
+	addresses := []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}, {IP: net.ParseIP("93.184.216.35")}}
+	client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
+	client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) { return addresses, nil }
+	client.transport = newPinnedBuilderTransport(func(ctx context.Context, _, address string) (net.Conn, error) {
+		if address == "93.184.216.34:18550" {
+			<-ctx.Done()
+			return nil, ctx.Err()
+		}
+		clientConn, serverConn := net.Pipe()
+		go func() {
+			defer serverConn.Close()
+			request, err := http.ReadRequest(bufio.NewReader(serverConn))
+			if err == nil {
+				request.Body.Close()
+				_, _ = serverConn.Write([]byte("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"))
+			}
+		}()
+		return clientConn, nil
+	})
+	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
+	defer cancel()
+	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
+
+	require.NoError(t, client.SubmitBuilderPreferences(ctx, "http://builder.example:18550", common.Bytes48{}, request))
 }
 
 func TestPrivateBuilderTargetsRequireExplicitPolicy(t *testing.T) {
