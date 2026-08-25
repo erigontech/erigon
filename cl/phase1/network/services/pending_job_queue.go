@@ -34,8 +34,9 @@ type pendingJobQueueOptions struct {
 	checkInterval time.Duration
 }
 
-// pendingJobQueue retries dependency-blocked jobs until the service callback
-// requests their removal or they expire.
+// pendingJobQueue retries dependency-blocked jobs on the single processing loop
+// started by newPendingJobQueue. Jobs remain until the service callback requests
+// removal or they expire.
 type pendingJobQueue[K comparable, M any] struct {
 	capacity int32
 	expiry   time.Duration
@@ -173,6 +174,7 @@ func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 	}
 }
 
+// processPending must not run concurrently.
 func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 	q.jobs.Range(func(key, value any) bool {
 		k := key.(K)
