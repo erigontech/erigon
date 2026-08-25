@@ -510,25 +510,26 @@ var precompiledContractSets = []PrecompiledContracts{
 	PrecompiledContractsOsaka,
 }
 
-// checkNoAlias runs p against rawInput from a backing buffer with spare capacity
-// beyond the input's length, mirroring the two-index slice Memory.GetPtr hands a
-// precompile at runtime, then overwrites every backing byte -- clearing to zero
-// cannot show through a byte that was already zero -- so any aliasing anywhere
-// in that backing array is observable. Reports whether the call produced the
-// non-empty success a coverage requirement needs.
+// checkNoAlias runs p against rawInput from a backing array whose spare tail is
+// wider than any precompile output, mirroring the shorter-than-capacity slice
+// Memory.GetPtr hands a precompile at runtime, then flips every backing byte --
+// including the tail, which an output could alias without ever being written to.
+// Reports whether the call produced the non-empty success a coverage requirement
+// needs.
 func checkNoAlias(t *testing.T, p PrecompiledContract, rawInput []byte) bool {
 	t.Helper()
-	buf := make([]byte, len(rawInput), len(rawInput)+64)
-	copy(buf, rawInput)
-	input := buf[:len(rawInput)]
+	const spareTail = 512
+	backing := make([]byte, len(rawInput)+spareTail)
+	copy(backing, rawInput)
+	input := backing[:len(rawInput)]
 
 	out, err := p.Run(input)
 	if err != nil || len(out) == 0 {
 		return false
 	}
 	want := bytes.Clone(out)
-	for i := range buf {
-		buf[i] ^= 0xff
+	for i := range backing {
+		backing[i] ^= 0xff
 	}
 	require.Equal(t, want, out, "precompile %s output aliases its input", p.Name())
 	return true
