@@ -30,6 +30,34 @@ the fetch and publish surface, which phase 5 needs.
 Also: `StatusPacket.TD` is `*uint256.Int` **upstream** now, so phase-3 item 4 below is no
 longer ours to carry. `UpgradeStatusMsg` is still ours alone.
 
+## eth/70 — implemented, but not yet reachable on the live network
+
+BSC's eth/70 status keeps `TD` on top of eth/69's block-range fields, so its layout matches
+neither `StatusPacket` (TD + head) nor `StatusPacket69` (range, no TD). It is a third layout
+that exists nowhere in Ethereum, because Parlia's fork choice still breaks ties on total
+difficulty and BSC could not drop the field.
+
+bsc-geth and reth-bsc both solve this by forking the wire layer — bsc-geth redefines the
+structs outright (`StatusPacket68` legacy, `StatusPacket` = BSC eth/70), and reth-bsc builds
+against `bnb-chain/reth`, whose `UnifiedStatus` is a superset struct with per-version
+converters. Neither approach is open to us: BSC has to sit beside Ethereum in one tree. So we
+add a third member instead — `eth.StatusPacketBsc70`, joined to the `StatusPacket` type union
+that `handShake[T]` is already generic over, with its own encode/compat pair and one arm at
+the single dispatch point in `sentry_grpc_server.go`, gated on `isBscNetwork(networkID)`.
+Ethereum's eth/70 path is untouched: for Ethereum, eth/70's status is byte-identical to
+eth/69's, which is why `StatusPacket69` is named for the version that *introduced* the format
+and selected with `>=`.
+
+**Status: unit-tested, not network-tested.** `TestHandShakeBsc70` pins the layout (and fails if
+TD is dropped from the encoder). But **eth/70 landed in bsc-geth `v1.8.0-alpha`**, which is not
+released — the live Chapel nodes run v1.7.x and advertise eth/68 only. Advertising eth/70-only
+gets `err="useless peer"` from all four static peers: devp2p capability negotiation fails
+before any status is exchanged. So the code path cannot be exercised against a real peer today.
+
+Advertising `[eth/70, eth/68]` is still the right default: negotiation falls back to eth/68
+(verified — 526 announcements, zero useless-peer rejections), and eth/70 starts being used the
+moment BSC ships v1.8.0. Re-test with `--p2p.protocol=70` once it does.
+
 ## Phase 4 — blocks over devp2p, printed
 
 `node/eth/backend.go` sync dispatch (`func Start`) started sync only for `IsChainPoS` or
@@ -69,12 +97,10 @@ All diagnosed from raw bytes / trace logs against the live Chapel network. Items
 `--chain=chapel` defaults in `cmd/utils/flags.go`, each behind `ctx.IsSet` so an explicit
 flag still wins.
 
-1. **eth/68 not advertised.** Default is `[eth/69,70,71]`. BSC advertises `[eth/70, eth/68]`
-   and prefers 70, but its eth/70 `StatusPacket` keeps `TD` *and* takes the eth/69 block-range
-   fields (`EarliestBlock`, `LatestBlock`, `LatestBlockHash`), which does not match our
-   `StatusPacket69` (no TD). So eth/68 is the only version we can decode today, and pinning to
-   it is a limitation on our side, not a gap in BSC. → **now a default.** Supporting BSC's
-   eth/70 needs a BSC-specific status variant; worth doing, since 70 is their primary.
+1. **Wrong protocol versions advertised.** Default is `[eth/69,70,71]`; BSC speaks only
+   `[eth/70, eth/68]` — it rejects eth/69 (BEP-658: *"eth/69 is not supported in BSC"*) and has
+   no eth/71. → **now a default** of `[eth/70, eth/68]`. See the eth/70 section below for why
+   both are advertised.
 2. **Discovery was v5-only.** BSC enodes are discv4, and BSC publishes no DNS node list, so
    discv5 has nothing to resolve. → **now a default** (`v4=true`, `v5=false`).
 3. **BSC bootstraps via static peers, not bootnodes.** bsc-geth ships Chapel's peers as

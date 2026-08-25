@@ -182,6 +182,21 @@ type StatusPacket69 struct {
 	LatestBlockHash           common.Hash
 }
 
+// StatusPacketBsc70 is BSC's eth/70 status message. BSC took eth/69's
+// available-block-range fields but kept TD, because Parlia's fork choice still
+// breaks ties on total difficulty — so the layout matches neither StatusPacket
+// nor StatusPacket69 and only ever appears on BSC networks.
+type StatusPacketBsc70 struct {
+	ProtocolVersion uint32
+	NetworkID       uint64
+	TD              *uint256.Int
+	Genesis         common.Hash
+	ForkID          forkid.ID
+	EarliestBlock   uint64
+	LatestBlock     uint64
+	LatestBlockHash common.Hash
+}
+
 // UpgradeStatusPacket is BSC's post-Status handshake extension (bsc eth/67+).
 type UpgradeStatusPacket struct {
 	Extension *rlp.RawValue `rlp:"nil"`
@@ -476,6 +491,9 @@ func (*StatusPacket) Kind() byte   { return StatusMsg }
 
 func (*StatusPacket69) Name() string { return "Status" }
 func (*StatusPacket69) Kind() byte   { return StatusMsg }
+
+func (*StatusPacketBsc70) Name() string { return "Status" }
+func (*StatusPacketBsc70) Kind() byte   { return StatusMsg }
 
 func (*NewBlockHashesPacket) Name() string { return "NewBlockHashes" }
 func (*NewBlockHashesPacket) Kind() byte   { return NewBlockHashesMsg }

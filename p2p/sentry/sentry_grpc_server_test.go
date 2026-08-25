@@ -1528,3 +1528,78 @@ func TestGrpcServer_SendMessageById_SharedStore_NoDuplicateWrites(t *testing.T) 
 	time.Sleep(100 * time.Millisecond)
 	require.Equal(t, 1, rw.count(), "peer negotiated eth/70: only the eth/70 sentry must write")
 }
+
+// TestHandShakeBsc70 pins BSC's eth/70 status layout, which keeps TD on top of
+// the eth/69 block-range fields and so round-trips through neither
+// StatusPacket nor StatusPacket69.
+func TestHandShakeBsc70(t *testing.T) {
+	t.Parallel()
+	assert := assert.New(t)
+	require := require.New(t)
+
+	ctx := t.Context()
+
+	const chapelNetworkID = 97
+	sentry1RW := NewRLPReadWriter()
+	sentry1Status := createDummyStatusData(
+		chapelNetworkID, common.HexToHash("0x111"), big.NewInt(100), common.HexToHash("0xabc"), 1, 100,
+	)
+	sentry2RW := NewRLPReadWriter()
+	sentry2Status := createDummyStatusData(
+		chapelNetworkID, common.HexToHash("0x222"), big.NewInt(100), common.HexToHash("0xabc"), 1, 100,
+	)
+
+	var wg sync.WaitGroup
+
+	var reply1 *eth.StatusPacketBsc70
+	var peerErr1 *p2p.PeerError
+	wg.Go(func() {
+		reply1, peerErr1 = handShake[eth.StatusPacketBsc70](ctx, sentry1Status, sentry1RW, direct.ETH70, direct.ETH70, encodeStatusPacketBsc70, compatStatusPacketBsc70, handshakeTimeout)
+	})
+
+	var reply2 *eth.StatusPacketBsc70
+	var peerErr2 *p2p.PeerError
+	wg.Go(func() {
+		reply2, peerErr2 = handShake[eth.StatusPacketBsc70](ctx, sentry2Status, sentry2RW, direct.ETH70, direct.ETH70, encodeStatusPacketBsc70, compatStatusPacketBsc70, handshakeTimeout)
+	})
+
+	go func() {
+		for {
+			select {
+			case msg := <-sentry1RW.writeCh:
+				sentry2RW.readCh <- msg
+			case msg := <-sentry2RW.writeCh:
+				sentry1RW.readCh <- msg
+			case <-ctx.Done():
+				return
+			}
+		}
+	}()
+
+	wg.Wait()
+
+	assert.Nil(peerErr1)
+	require.NotNil(reply1)
+	assert.Equal(sentry2Status.BestHash, gointerfaces.ConvertHashToH256(reply1.LatestBlockHash))
+	assert.Equal(uint64(1), reply1.EarliestBlock)
+	assert.Equal(uint64(100), reply1.LatestBlock)
+	// TD is what makes this layout BSC-specific: eth/69 and later dropped it.
+	require.NotNil(reply1.TD)
+	assert.Equal(uint64(100), reply1.TD.Uint64())
+
+	assert.Nil(peerErr2)
+	require.NotNil(reply2)
+	assert.Equal(sentry1Status.BestHash, gointerfaces.ConvertHashToH256(reply2.LatestBlockHash))
+	require.NotNil(reply2.TD)
+	assert.Equal(uint64(100), reply2.TD.Uint64())
+}
+
+func TestIsBscNetwork(t *testing.T) {
+	t.Parallel()
+	for _, id := range []uint64{56, 97, 714} {
+		assert.True(t, isBscNetwork(id), "network %d should be BSC", id)
+	}
+	for _, id := range []uint64{1, 11155111, 100, 137} {
+		assert.False(t, isBscNetwork(id), "network %d should not be BSC", id)
+	}
+}
