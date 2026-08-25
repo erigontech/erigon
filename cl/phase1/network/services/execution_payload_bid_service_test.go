@@ -128,7 +128,7 @@ func addPreferencesToPoolWithRoot(epbsPool *pool.EpbsPool, slot uint64, dependen
 func newBidParentState(cfg *clparams.BeaconChainConfig, dependentRoot common.Hash) *state2.CachingBeaconState {
 	s := state2.New(cfg)
 	s.SetVersion(clparams.GloasVersion)
-	if err := s.SetSlot(100); err != nil {
+	if err := s.SetSlot(99); err != nil {
 		panic(err)
 	}
 	if err := s.SetBlockRootAt(63, dependentRoot); err != nil {
@@ -582,7 +582,7 @@ func TestExecutionPayloadBidServiceUsesGenesisDependentRootInEarlyEpoch(t *testi
 	fcMock.Ancestors[0] = forkchoice.ForkChoiceNode{Root: genesisRoot}
 	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{}
 	fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot] = newBidParentState(service.beaconCfg, genesisRoot)
-	fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot].SetSlot(0)
+	require.NoError(t, fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot].SetSlot(0))
 	fcMock.StateAtBlockRootVal[msg.Message.ParentBlockRoot].GetBuilders().Get(1).DepositEpoch = 0
 	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
 	addPreferencesToPoolWithRoot(epbsPool, 1, genesisRoot)
@@ -1170,7 +1170,7 @@ func TestExecutionPayloadBidServiceRejectsNonAdvancingKnownParentBeforeQueue(t *
 	service, _, ethClock, fc, _ := setupExecutionPayloadBidService(t, ctrl)
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
 	fc.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{Slot: 100}
-	fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot].SetSlot(100)
+	require.NoError(t, fc.StateAtBlockRootVal[msg.Message.ParentBlockRoot].SetSlot(100))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(100))
 
 	err := service.ProcessMessage(context.Background(), nil, msg)

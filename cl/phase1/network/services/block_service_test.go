@@ -190,7 +190,7 @@ func TestBlockServiceGossipRejectsBlockOutsideFinalizedChain(t *testing.T) {
 
 	blocks, _, post := tests.GetBellatrixRandom()
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -211,7 +211,7 @@ func TestBlockServiceGossipUsesCheckpointSyncAnchorForFinalizedAncestor(t *testi
 	require.NoError(t, err)
 	require.NoError(t, transition.TransitionState(parentState, blocks[0], nil, false))
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -235,7 +235,7 @@ func TestBlockServiceGossipRejectsUnexpectedProposer(t *testing.T) {
 	mixPosition := (targetEpoch + parentState.BeaconConfig().EpochsPerHistoricalVector - parentState.BeaconConfig().MinSeedLookahead - 1) % parentState.BeaconConfig().EpochsPerHistoricalVector
 	foundUnexpectedProposer := false
 	for nonce := 1; nonce <= 255; nonce++ {
-		parentState.SetRandaoMixAt(int(mixPosition), common.Hash{byte(nonce)})
+		require.NoError(t, parentState.SetRandaoMixAt(int(mixPosition), common.Hash{byte(nonce)}))
 		expected, proposerErr := parentState.GetBeaconProposerIndexForSlot(blocks[1].Block.Slot)
 		require.NoError(t, proposerErr)
 		if expected != blocks[1].Block.ProposerIndex {
@@ -246,7 +246,7 @@ func TestBlockServiceGossipRejectsUnexpectedProposer(t *testing.T) {
 	require.True(t, foundUnexpectedProposer)
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -478,8 +478,8 @@ func newGloasGossipValidationFixture(t *testing.T, childParentHash func(parentEx
 	validator.SetEffectiveBalance(cfg.MaxEffectiveBalance)
 	parentState := state.New(&cfg)
 	parentState.SetVersion(clparams.GloasVersion)
-	parentState.SetSlot(parentSlot)
-	parentState.AddValidator(validator, cfg.MaxEffectiveBalance)
+	require.NoError(t, parentState.SetSlot(parentSlot))
+	require.NoError(t, parentState.AddValidator(validator, cfg.MaxEffectiveBalance))
 	parentState.SetProposerLookahead(solid.NewUint64VectorSSZ(int((cfg.MinSeedLookahead + 1) * cfg.SlotsPerEpoch)))
 	parentExecutionHead := common.Hash{0x11}
 	parentState.SetLatestBlockHash(parentExecutionHead)
