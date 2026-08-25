@@ -284,15 +284,15 @@ Lands before the driver is replaced, so the build never goes red.
 converter needs those files present in the output — that is what lets the aggregator enumerate
 them and what makes "already current" a free no-op.
 
-- [ ] write a failing test that after converter staging the output holds every source file,
+- [x] write a failing test that after converter staging the output holds every source file,
       commitment included, each as the same inode
-- [ ] write a failing test covering the files `isCommitmentFileName` also matches —
+- [x] write a failing test covering the files `isCommitmentFileName` also matches —
       `history/*commitment*.v` and `idx/*commitment*.ef` with their accessors — since a
       substring test is not extension- or directory-scoped
-- [ ] add the commitment link walk, running after `stageRebuildOutput` so the rebuild path and
+- [x] add the commitment link walk, running after `stageRebuildOutput` so the rebuild path and
       `TestStageRebuildOutput`'s omission assertion are untouched
-- [ ] write a test that the rebuild path still omits commitment
-- [ ] run `go build ./cmd/integration/` and the command tests — must pass before task 5
+- [x] write a test that the rebuild path still omits commitment
+- [x] run `go build ./cmd/integration/` and the command tests — must pass before task 5
 
 ### Task 5: Classification pass and the direct seg write path
 

@@ -52,7 +52,10 @@ func sourceDatadirFixture(t *testing.T) datadir.Dirs {
 		require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapDomain, name), []byte(name), 0o644))
 	}
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapHistory, "v1.0-accounts.0-64.v"), []byte("acc-hist"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapHistory, "v1.0-commitment.0-64.v"), []byte("com-hist"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapIdx, "v1.0-commitment.0-64.ef"), []byte("com-idx"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapAccessors, "v1.0-commitment.0-64.vi"), []byte("com-vi"), 0o644))
+	require.NoError(t, os.WriteFile(filepath.Join(dirs.SnapAccessors, "v1.0-commitment.0-64.efi"), []byte("com-efi"), 0o644))
 	require.NoError(t, os.WriteFile(filepath.Join(dirs.Snap, "salt-state.txt"), []byte("salt"), 0o644))
 
 	refs := true
@@ -178,6 +181,53 @@ func TestStageRebuildOutputLinksInputsAndOmitsCommitment(t *testing.T) {
 	require.NoError(t, err)
 	_, err = os.Stat(filepath.Join(out.dirs.SnapIdx, "v1.0-commitment.0-64.ef"))
 	require.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(filepath.Join(out.dirs.SnapHistory, "v1.0-commitment.0-64.v"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(filepath.Join(out.dirs.SnapAccessors, "v1.0-commitment.0-64.vi"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+	_, err = os.Stat(filepath.Join(out.dirs.SnapAccessors, "v1.0-commitment.0-64.efi"))
+	require.ErrorIs(t, err, os.ErrNotExist)
+}
+
+func TestLinkCommitmentSnapshotsLinksAllCommitmentFiles(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), dbstate.RebuildTarget{}, false, log.New(), preserveSourceSettings)
+	require.NoError(t, err)
+
+	linked, err := linkCommitmentSnapshots(src.Snap, out.dirs.Snap)
+	require.NoError(t, err)
+	require.Equal(t, 6, linked)
+	require.NoError(t, filepath.WalkDir(src.Snap, func(srcPath string, entry os.DirEntry, err error) error {
+		if err != nil || entry.IsDir() || entry.Name() == dbstate.ERIGONDB_SETTINGS_FILE {
+			return err
+		}
+		require.True(t, entry.Type().IsRegular(), srcPath)
+		rel, err := filepath.Rel(src.Snap, srcPath)
+		require.NoError(t, err)
+		srcInfo, err := os.Stat(srcPath)
+		require.NoError(t, err)
+		outInfo, err := os.Stat(filepath.Join(out.dirs.Snap, rel))
+		require.NoError(t, err)
+		require.True(t, os.SameFile(srcInfo, outInfo), "%s must be a hardlink", rel)
+		return nil
+	}))
+
+	for _, name := range []string{
+		"domain/v1.0-commitment.0-64.kv",
+		"domain/v1.0-commitment.0-64.kvi",
+		"history/v1.0-commitment.0-64.v",
+		"idx/v1.0-commitment.0-64.ef",
+		"accessor/v1.0-commitment.0-64.vi",
+		"accessor/v1.0-commitment.0-64.efi",
+	} {
+		srcPath := filepath.Join(src.Snap, name)
+		outPath := filepath.Join(out.dirs.Snap, name)
+		srcInfo, err := os.Stat(srcPath)
+		require.NoError(t, err)
+		outInfo, err := os.Stat(outPath)
+		require.NoError(t, err)
+		require.True(t, os.SameFile(srcInfo, outInfo), "%s must be a hardlink", name)
+	}
 }
 
 func TestStageRebuildOutputLeavesSourceIntact(t *testing.T) {

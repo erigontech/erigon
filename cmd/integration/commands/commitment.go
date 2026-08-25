@@ -643,6 +643,43 @@ func linkSnapshotsExceptCommitment(srcRoot, dstRoot string) (int, error) {
 	return linked, err
 }
 
+func linkCommitmentSnapshots(srcRoot, dstRoot string) (int, error) {
+	linked := 0
+	err := filepath.WalkDir(srcRoot, func(p string, d os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		rel, err := filepath.Rel(srcRoot, p)
+		if err != nil {
+			return err
+		}
+		dst := filepath.Join(dstRoot, rel)
+		if d.IsDir() {
+			if rel == "." {
+				return nil
+			}
+			return os.MkdirAll(dst, 0o755)
+		}
+		if !d.Type().IsRegular() {
+			return fmt.Errorf("commitment convert-format: %s is not a regular file; the output can only be staged from a tree the hardlink walk can reproduce", p)
+		}
+		if !isCommitmentFileName(d.Name()) {
+			return nil
+		}
+		if _, err := os.Lstat(dst); err == nil {
+			return nil
+		} else if !os.IsNotExist(err) {
+			return err
+		}
+		if err := os.Link(p, dst); err != nil {
+			return fmt.Errorf("commitment convert-format: hardlink %s: %w (the output datadir must be on the same filesystem as the source)", rel, err)
+		}
+		linked++
+		return nil
+	})
+	return linked, err
+}
+
 // integration commitment rebuild
 var cmdCommitmentRebuild = &cobra.Command{
 	Use:   "rebuild",
@@ -1045,8 +1082,13 @@ Example:
 			return
 		}
 
-		out, err := stageRebuildOutput(datadir.Open(datadirCli), rebuildOutputDatadir, dbstate.RebuildTarget{}, resume, logger, preserveSourceSettings)
+		src := datadir.Open(datadirCli)
+		out, err := stageRebuildOutput(src, rebuildOutputDatadir, dbstate.RebuildTarget{}, resume, logger, preserveSourceSettings)
 		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+		if _, err := linkCommitmentSnapshots(src.Snap, out.dirs.Snap); err != nil {
 			logger.Error(err.Error())
 			return
 		}
