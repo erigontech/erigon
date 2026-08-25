@@ -770,10 +770,10 @@ func (p *commitmentDiffPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, 
 	return p.sd.DomainDelPrefix(domain, p.tx, prefix, txNum)
 }
 
-// AsPutDelWithCommitmentDiff is AsPutDel, but commitment-domain writes route
+// AsPutDelWithDiff is AsPutDel, but commitment-domain writes route
 // through diff explicitly rather than the shared SetChangesetAccumulator
 // target — see commitmentDiffPutDel.
-func (sd *SharedDomains) AsPutDelWithCommitmentDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel {
+func (sd *SharedDomains) AsPutDelWithDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel {
 	return &commitmentDiffPutDel{sd, tx, diff}
 }
 

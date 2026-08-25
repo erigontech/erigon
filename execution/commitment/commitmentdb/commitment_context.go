@@ -39,10 +39,10 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGetterOptions) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
-	// AsPutDelWithCommitmentDiff is AsPutDel, but routes commitment-domain
+	// AsPutDelWithDiff is AsPutDel, but routes commitment-domain
 	// writes into diff explicitly instead of through SetChangesetAccumulator
 	// — see SharedDomainsCommitmentContext.ComputeCommitmentWithDiff.
-	AsPutDelWithCommitmentDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel
+	AsPutDelWithDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
 	// read), tagged with source.
@@ -239,7 +239,7 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context, diff *kv.DomainDiff, useDiff bool) *TrieContext {
 	putter := sdc.sharedDomains.AsPutDel(tx)
 	if useDiff {
-		putter = sdc.sharedDomains.AsPutDelWithCommitmentDiff(tx, diff)
+		putter = sdc.sharedDomains.AsPutDelWithDiff(tx, diff)
 	}
 	mainTtx := &TrieContext{
 		putter:   putter,
