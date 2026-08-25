@@ -670,8 +670,8 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // writeTo writes a success response's already-encoded Result (and id) directly rather than
 // re-encoding it; any other message falls back to json.Marshal. Output equals json.Marshal(msg)
 // except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
-// The bytes go through WriteRaw rather than Write so they stay buffered: Write reaches the
-// underlying writer immediately, which commits the HTTP status before ServeHTTP can set it.
+// Nothing here may reach the underlying writer: the response must stay in the stream buffer
+// until the caller flushes, or the HTTP status is committed before ServeHTTP can set it.
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
 		buf, err := json.Marshal(msg)
