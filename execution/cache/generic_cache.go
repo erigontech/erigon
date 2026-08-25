@@ -44,6 +44,26 @@ const putStripeCount = 256
 // currentSize and reported via PrintStatsAndReset.
 const avgBytesPerEntry = 256
 
+// freelruSlotBytes is what a slot costs on top of the payload estimate: one
+// freelru element (hashed key, five uint32 list indices, an expiry) plus a
+// uint32 bucket index, doubled because the table is rounded up to a power of
+// two of capacity*5/4 and every capacity here is a power of two.
+// TestGenericCache_EnvelopeCoversSlotArray measures a real table against it.
+const freelruSlotBytes = 2 * (112 + 4)
+
+const maxCacheBytes = 1024 * 1024 * 1024
+
+// capFitsTable is the largest capacity served by the table this one already
+// pays for: above 4/5 of a power of two the element array doubles, and half of
+// it cannot be used.
+func capFitsTable(capacity uint32) uint32 {
+	fits := uint32(math.NextPowerOfTwo(uint64(capacity)+uint64(capacity)/4) / 5 * 4)
+	if fits == 0 || fits > capacity {
+		return capacity
+	}
+	return fits
+}
+
 // entry stores the full key alongside the value so callers can detect
 // hash collisions (the freelru shard key is the uint64 maphash of the
 // byte-string key — Go's randomized stdlib hasher, so collisions are
@@ -79,7 +99,7 @@ type GenericCache[T any] struct {
 	startCap      uint32
 	maxCap        uint32
 	curCap        atomic.Uint32
-	avgEntryBytes int64 // per-domain byte estimate; maps slot count ↔ envelope bytes
+	avgEntryBytes int64 // per-slot byte estimate; maps slot count ↔ envelope bytes
 	resizeMu      sync.Mutex
 	reservedBytes int64
 
@@ -151,12 +171,13 @@ func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uin
 	if avgBytes == 0 {
 		avgBytes = avgBytesPerEntry
 	}
-	// Absolute safety ceiling on the slot array.
-	maxCap := min(max(uint32(uint64(capacityBytes)/uint64(avgBytes)), genericCacheStartCapacity), 1<<24)
+	perSlot := int64(avgBytes) + freelruSlotBytes
+	budgeted := uint32(uint64(min(capacityBytes, maxCacheBytes)) / uint64(perSlot))
+	maxCap := max(capFitsTable(budgeted), genericCacheStartCapacity)
 	start := min(uint32(genericCacheStartCapacity), maxCap)
 	c := newGenericCacheEntries[T](capacityBytes, start, sizeFunc, mode)
 	c.maxCap = maxCap
-	c.avgEntryBytes = int64(avgBytes)
+	c.avgEntryBytes = perSlot
 	c.enveloped = true
 	// The initial slot array is small; take it unconditionally so no cache is
 	// born unable to hold anything.
