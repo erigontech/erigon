@@ -943,32 +943,6 @@ func (api *TraceAPIImpl) ReplayTransaction(ctx context.Context, txHash common.Ha
 		return nil, err
 	}
 
-	var traceTypeTrace, traceTypeStateDiff, traceTypeVmTrace bool
-	for _, traceType := range traceTypes {
-		switch traceType {
-		case TraceTypeTrace:
-			traceTypeTrace = true
-		case TraceTypeStateDiff:
-			traceTypeStateDiff = true
-		case TraceTypeVmTrace:
-			traceTypeVmTrace = true
-		default:
-			return nil, fmt.Errorf("unrecognized trace type: %s", traceType)
-		}
-	}
-	result := &TraceCallResult{}
-
-	result.Output = trace.Output
-	if traceTypeTrace {
-		result.Trace = trace.Trace
-	}
-	if traceTypeStateDiff {
-		result.StateDiff = trace.StateDiff
-	}
-	if traceTypeVmTrace {
-		result.VmTrace = trace.VmTrace
-	}
-
 	return trace, nil
 }
 

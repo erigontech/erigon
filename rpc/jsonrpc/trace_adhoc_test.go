@@ -1205,3 +1205,23 @@ func TestTraceCallRejectsCustomTracerWithoutTraceType(t *testing.T) {
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "does not support custom tracers")
 }
+
+func TestReplayTransactionInvalidType(t *testing.T) {
+	m, _, _ := rpcdaemontest.CreateTestExecModule(t)
+	api := newTraceApiForTest(m)
+	var txnHash common.Hash
+	if err := m.DB.View(context.Background(), func(tx kv.Tx) error {
+		b, err := m.BlockReader.BlockByNumber(m.Ctx, tx, 6)
+		if err != nil {
+			return err
+		}
+		txnHash = b.Transactions()[5].Hash()
+		return nil
+	}); err != nil {
+		t.Fatal(err)
+	}
+
+	_, err := api.ReplayTransaction(context.Background(), txnHash, []string{"unknown"}, new(bool), nil)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "unrecognized trace type")
+}
