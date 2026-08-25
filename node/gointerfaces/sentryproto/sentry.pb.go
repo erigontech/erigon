@@ -62,11 +62,6 @@ const (
 	MessageId_POOLED_TRANSACTIONS_66     MessageId = 31
 	// ======= eth 68 protocol ===========
 	MessageId_NEW_POOLED_TRANSACTION_HASHES_68 MessageId = 32
-	// ======= wit protocol ===========
-	MessageId_GET_BLOCK_WITNESS_W0  MessageId = 33
-	MessageId_BLOCK_WITNESS_W0      MessageId = 34
-	MessageId_NEW_WITNESS_W0        MessageId = 35
-	MessageId_NEW_WITNESS_HASHES_W0 MessageId = 36
 	// ======= eth 69 protocol ===========
 	MessageId_STATUS_69             MessageId = 37
 	MessageId_GET_RECEIPTS_69       MessageId = 38
@@ -114,10 +109,6 @@ var (
 		30: "RECEIPTS_66",
 		31: "POOLED_TRANSACTIONS_66",
 		32: "NEW_POOLED_TRANSACTION_HASHES_68",
-		33: "GET_BLOCK_WITNESS_W0",
-		34: "BLOCK_WITNESS_W0",
-		35: "NEW_WITNESS_W0",
-		36: "NEW_WITNESS_HASHES_W0",
 		37: "STATUS_69",
 		38: "GET_RECEIPTS_69",
 		39: "BLOCK_RANGE_UPDATE_69",
@@ -159,10 +150,6 @@ var (
 		"RECEIPTS_66":                      30,
 		"POOLED_TRANSACTIONS_66":           31,
 		"NEW_POOLED_TRANSACTION_HASHES_68": 32,
-		"GET_BLOCK_WITNESS_W0":             33,
-		"BLOCK_WITNESS_W0":                 34,
-		"NEW_WITNESS_W0":                   35,
-		"NEW_WITNESS_HASHES_W0":            36,
 		"STATUS_69":                        37,
 		"GET_RECEIPTS_69":                  38,
 		"BLOCK_RANGE_UPDATE_69":            39,
@@ -253,7 +240,6 @@ const (
 	Protocol_ETH69 Protocol = 4
 	Protocol_ETH70 Protocol = 6
 	Protocol_ETH71 Protocol = 7
-	Protocol_WIT0  Protocol = 5
 )
 
 // Enum value maps for Protocol.
@@ -266,7 +252,6 @@ var (
 		4: "ETH69",
 		6: "ETH70",
 		7: "ETH71",
-		5: "WIT0",
 	}
 	Protocol_value = map[string]int32{
 		"ETH65": 0,
@@ -276,7 +261,6 @@ var (
 		"ETH69": 4,
 		"ETH70": 6,
 		"ETH71": 7,
-		"WIT0":  5,
 	}
 )
 
@@ -1169,7 +1153,6 @@ func (*SetStatusReply) Descriptor() ([]byte, []int) {
 type HandShakeReply struct {
 	state         protoimpl.MessageState `protogen:"open.v1"`
 	Protocol      Protocol               `protobuf:"varint,1,opt,name=protocol,proto3,enum=sentry.Protocol" json:"protocol,omitempty"`
-	SideProtocols []Protocol             `protobuf:"varint,2,rep,packed,name=side_protocols,json=sideProtocols,proto3,enum=sentry.Protocol" json:"side_protocols,omitempty"`
 	unknownFields protoimpl.UnknownFields
 	sizeCache     protoimpl.SizeCache
 }
@@ -1209,13 +1192,6 @@ func (x *HandShakeReply) GetProtocol() Protocol {
 		return x.Protocol
 	}
 	return Protocol_ETH65
-}
-
-func (x *HandShakeReply) GetSideProtocols() []Protocol {
-	if x != nil {
-		return x.SideProtocols
-	}
-	return nil
 }
 
 type MessagesRequest struct {
@@ -1766,10 +1742,9 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x10max_block_height\x18\x05 \x01(\x04R\x0emaxBlockHeight\x12$\n" +
 	"\x0emax_block_time\x18\x06 \x01(\x04R\fmaxBlockTime\x120\n" +
 	"\x14minimum_block_height\x18\a \x01(\x04R\x12minimumBlockHeight\"\x10\n" +
-	"\x0eSetStatusReply\"w\n" +
+	"\x0eSetStatusReply\">\n" +
 	"\x0eHandShakeReply\x12,\n" +
-	"\bprotocol\x18\x01 \x01(\x0e2\x10.sentry.ProtocolR\bprotocol\x127\n" +
-	"\x0eside_protocols\x18\x02 \x03(\x0e2\x10.sentry.ProtocolR\rsideProtocols\"6\n" +
+	"\bprotocol\x18\x01 \x01(\x0e2\x10.sentry.ProtocolR\bprotocol\"6\n" +
 	"\x0fMessagesRequest\x12#\n" +
 	"\x03ids\x18\x01 \x03(\x0e2\x11.sentry.MessageIdR\x03ids\"3\n" +
 	"\n" +
@@ -1798,7 +1773,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\fAddPeerReply\x12\x18\n" +
 	"\asuccess\x18\x01 \x01(\bR\asuccess\"+\n" +
 	"\x0fRemovePeerReply\x12\x18\n" +
-	"\asuccess\x18\x01 \x01(\bR\asuccess*\xfe\a\n" +
+	"\asuccess\x18\x01 \x01(\bR\asuccess*\x9f\a\n" +
 	"\tMessageId\x12\r\n" +
 	"\tSTATUS_65\x10\x00\x12\x18\n" +
 	"\x14GET_BLOCK_HEADERS_65\x10\x01\x12\x14\n" +
@@ -1832,11 +1807,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\fNODE_DATA_66\x10\x1d\x12\x0f\n" +
 	"\vRECEIPTS_66\x10\x1e\x12\x1a\n" +
 	"\x16POOLED_TRANSACTIONS_66\x10\x1f\x12$\n" +
-	" NEW_POOLED_TRANSACTION_HASHES_68\x10 \x12\x18\n" +
-	"\x14GET_BLOCK_WITNESS_W0\x10!\x12\x14\n" +
-	"\x10BLOCK_WITNESS_W0\x10\"\x12\x12\n" +
-	"\x0eNEW_WITNESS_W0\x10#\x12\x19\n" +
-	"\x15NEW_WITNESS_HASHES_W0\x10$\x12\r\n" +
+	" NEW_POOLED_TRANSACTION_HASHES_68\x10 \x12\r\n" +
 	"\tSTATUS_69\x10%\x12\x13\n" +
 	"\x0fGET_RECEIPTS_69\x10&\x12\x19\n" +
 	"\x15BLOCK_RANGE_UPDATE_69\x10'\x12\x13\n" +
@@ -1845,7 +1816,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x19GET_BLOCK_ACCESS_LISTS_71\x10*\x12\x19\n" +
 	"\x15BLOCK_ACCESS_LISTS_71\x10+*\x17\n" +
 	"\vPenaltyKind\x12\b\n" +
-	"\x04Kick\x10\x00*a\n" +
+	"\x04Kick\x10\x00*W\n" +
 	"\bProtocol\x12\t\n" +
 	"\x05ETH65\x10\x00\x12\t\n" +
 	"\x05ETH66\x10\x01\x12\t\n" +
@@ -1853,8 +1824,7 @@ const file_p2psentry_sentry_proto_rawDesc = "" +
 	"\x05ETH68\x10\x03\x12\t\n" +
 	"\x05ETH69\x10\x04\x12\t\n" +
 	"\x05ETH70\x10\x06\x12\t\n" +
-	"\x05ETH71\x10\a\x12\b\n" +
-	"\x04WIT0\x10\x052\xd5\n" +
+	"\x05ETH71\x10\a2\xd5\n" +
 	"\n" +
 	"\x06Sentry\x127\n" +
 	"\tSetStatus\x12\x12.sentry.StatusData\x1a\x16.sentry.SetStatusReply\x12C\n" +
@@ -1951,60 +1921,59 @@ var file_p2psentry_sentry_proto_depIdxs = []int32{
 	32, // 15: sentry.StatusData.best_hash:type_name -> types.H256
 	16, // 16: sentry.StatusData.fork_data:type_name -> sentry.Forks
 	2,  // 17: sentry.HandShakeReply.protocol:type_name -> sentry.Protocol
-	2,  // 18: sentry.HandShakeReply.side_protocols:type_name -> sentry.Protocol
-	0,  // 19: sentry.MessagesRequest.ids:type_name -> sentry.MessageId
-	33, // 20: sentry.PeersReply.peers:type_name -> types.PeerInfo
-	2,  // 21: sentry.PeerCountPerProtocol.protocol:type_name -> sentry.Protocol
-	23, // 22: sentry.PeerCountReply.counts_per_protocol:type_name -> sentry.PeerCountPerProtocol
-	31, // 23: sentry.PeerByIdRequest.peer_id:type_name -> types.H512
-	33, // 24: sentry.PeerByIdReply.peer:type_name -> types.PeerInfo
-	31, // 25: sentry.PeerEvent.peer_id:type_name -> types.H512
-	3,  // 26: sentry.PeerEvent.event_id:type_name -> sentry.PeerEvent.PeerEventId
-	17, // 27: sentry.Sentry.SetStatus:input_type -> sentry.StatusData
-	9,  // 28: sentry.Sentry.PenalizePeer:input_type -> sentry.PenalizePeerRequest
-	10, // 29: sentry.Sentry.SetPeerLatestBlock:input_type -> sentry.SetPeerLatestBlockRequest
-	11, // 30: sentry.Sentry.SetPeerMinimumBlock:input_type -> sentry.SetPeerMinimumBlockRequest
-	12, // 31: sentry.Sentry.SetPeerBlockRange:input_type -> sentry.SetPeerBlockRangeRequest
-	34, // 32: sentry.Sentry.HandShake:input_type -> google.protobuf.Empty
-	5,  // 33: sentry.Sentry.SendMessageByMinBlock:input_type -> sentry.SendMessageByMinBlockRequest
-	6,  // 34: sentry.Sentry.SendMessageById:input_type -> sentry.SendMessageByIdRequest
-	7,  // 35: sentry.Sentry.SendMessageToRandomPeers:input_type -> sentry.SendMessageToRandomPeersRequest
-	4,  // 36: sentry.Sentry.SendMessageToAll:input_type -> sentry.OutboundMessageData
-	20, // 37: sentry.Sentry.Messages:input_type -> sentry.MessagesRequest
-	34, // 38: sentry.Sentry.Peers:input_type -> google.protobuf.Empty
-	22, // 39: sentry.Sentry.PeerCount:input_type -> sentry.PeerCountRequest
-	25, // 40: sentry.Sentry.PeerById:input_type -> sentry.PeerByIdRequest
-	27, // 41: sentry.Sentry.PeerEvents:input_type -> sentry.PeerEventsRequest
-	13, // 42: sentry.Sentry.AddPeer:input_type -> sentry.AddPeerRequest
-	14, // 43: sentry.Sentry.RemovePeer:input_type -> sentry.RemovePeerRequest
-	13, // 44: sentry.Sentry.AddTrustedPeer:input_type -> sentry.AddPeerRequest
-	14, // 45: sentry.Sentry.RemoveTrustedPeer:input_type -> sentry.RemovePeerRequest
-	34, // 46: sentry.Sentry.NodeInfo:input_type -> google.protobuf.Empty
-	18, // 47: sentry.Sentry.SetStatus:output_type -> sentry.SetStatusReply
-	34, // 48: sentry.Sentry.PenalizePeer:output_type -> google.protobuf.Empty
-	34, // 49: sentry.Sentry.SetPeerLatestBlock:output_type -> google.protobuf.Empty
-	34, // 50: sentry.Sentry.SetPeerMinimumBlock:output_type -> google.protobuf.Empty
-	34, // 51: sentry.Sentry.SetPeerBlockRange:output_type -> google.protobuf.Empty
-	19, // 52: sentry.Sentry.HandShake:output_type -> sentry.HandShakeReply
-	8,  // 53: sentry.Sentry.SendMessageByMinBlock:output_type -> sentry.SentPeers
-	8,  // 54: sentry.Sentry.SendMessageById:output_type -> sentry.SentPeers
-	8,  // 55: sentry.Sentry.SendMessageToRandomPeers:output_type -> sentry.SentPeers
-	8,  // 56: sentry.Sentry.SendMessageToAll:output_type -> sentry.SentPeers
-	15, // 57: sentry.Sentry.Messages:output_type -> sentry.InboundMessage
-	21, // 58: sentry.Sentry.Peers:output_type -> sentry.PeersReply
-	24, // 59: sentry.Sentry.PeerCount:output_type -> sentry.PeerCountReply
-	26, // 60: sentry.Sentry.PeerById:output_type -> sentry.PeerByIdReply
-	28, // 61: sentry.Sentry.PeerEvents:output_type -> sentry.PeerEvent
-	29, // 62: sentry.Sentry.AddPeer:output_type -> sentry.AddPeerReply
-	30, // 63: sentry.Sentry.RemovePeer:output_type -> sentry.RemovePeerReply
-	29, // 64: sentry.Sentry.AddTrustedPeer:output_type -> sentry.AddPeerReply
-	30, // 65: sentry.Sentry.RemoveTrustedPeer:output_type -> sentry.RemovePeerReply
-	35, // 66: sentry.Sentry.NodeInfo:output_type -> types.NodeInfoReply
-	47, // [47:67] is the sub-list for method output_type
-	27, // [27:47] is the sub-list for method input_type
-	27, // [27:27] is the sub-list for extension type_name
-	27, // [27:27] is the sub-list for extension extendee
-	0,  // [0:27] is the sub-list for field type_name
+	0,  // 18: sentry.MessagesRequest.ids:type_name -> sentry.MessageId
+	33, // 19: sentry.PeersReply.peers:type_name -> types.PeerInfo
+	2,  // 20: sentry.PeerCountPerProtocol.protocol:type_name -> sentry.Protocol
+	23, // 21: sentry.PeerCountReply.counts_per_protocol:type_name -> sentry.PeerCountPerProtocol
+	31, // 22: sentry.PeerByIdRequest.peer_id:type_name -> types.H512
+	33, // 23: sentry.PeerByIdReply.peer:type_name -> types.PeerInfo
+	31, // 24: sentry.PeerEvent.peer_id:type_name -> types.H512
+	3,  // 25: sentry.PeerEvent.event_id:type_name -> sentry.PeerEvent.PeerEventId
+	17, // 26: sentry.Sentry.SetStatus:input_type -> sentry.StatusData
+	9,  // 27: sentry.Sentry.PenalizePeer:input_type -> sentry.PenalizePeerRequest
+	10, // 28: sentry.Sentry.SetPeerLatestBlock:input_type -> sentry.SetPeerLatestBlockRequest
+	11, // 29: sentry.Sentry.SetPeerMinimumBlock:input_type -> sentry.SetPeerMinimumBlockRequest
+	12, // 30: sentry.Sentry.SetPeerBlockRange:input_type -> sentry.SetPeerBlockRangeRequest
+	34, // 31: sentry.Sentry.HandShake:input_type -> google.protobuf.Empty
+	5,  // 32: sentry.Sentry.SendMessageByMinBlock:input_type -> sentry.SendMessageByMinBlockRequest
+	6,  // 33: sentry.Sentry.SendMessageById:input_type -> sentry.SendMessageByIdRequest
+	7,  // 34: sentry.Sentry.SendMessageToRandomPeers:input_type -> sentry.SendMessageToRandomPeersRequest
+	4,  // 35: sentry.Sentry.SendMessageToAll:input_type -> sentry.OutboundMessageData
+	20, // 36: sentry.Sentry.Messages:input_type -> sentry.MessagesRequest
+	34, // 37: sentry.Sentry.Peers:input_type -> google.protobuf.Empty
+	22, // 38: sentry.Sentry.PeerCount:input_type -> sentry.PeerCountRequest
+	25, // 39: sentry.Sentry.PeerById:input_type -> sentry.PeerByIdRequest
+	27, // 40: sentry.Sentry.PeerEvents:input_type -> sentry.PeerEventsRequest
+	13, // 41: sentry.Sentry.AddPeer:input_type -> sentry.AddPeerRequest
+	14, // 42: sentry.Sentry.RemovePeer:input_type -> sentry.RemovePeerRequest
+	13, // 43: sentry.Sentry.AddTrustedPeer:input_type -> sentry.AddPeerRequest
+	14, // 44: sentry.Sentry.RemoveTrustedPeer:input_type -> sentry.RemovePeerRequest
+	34, // 45: sentry.Sentry.NodeInfo:input_type -> google.protobuf.Empty
+	18, // 46: sentry.Sentry.SetStatus:output_type -> sentry.SetStatusReply
+	34, // 47: sentry.Sentry.PenalizePeer:output_type -> google.protobuf.Empty
+	34, // 48: sentry.Sentry.SetPeerLatestBlock:output_type -> google.protobuf.Empty
+	34, // 49: sentry.Sentry.SetPeerMinimumBlock:output_type -> google.protobuf.Empty
+	34, // 50: sentry.Sentry.SetPeerBlockRange:output_type -> google.protobuf.Empty
+	19, // 51: sentry.Sentry.HandShake:output_type -> sentry.HandShakeReply
+	8,  // 52: sentry.Sentry.SendMessageByMinBlock:output_type -> sentry.SentPeers
+	8,  // 53: sentry.Sentry.SendMessageById:output_type -> sentry.SentPeers
+	8,  // 54: sentry.Sentry.SendMessageToRandomPeers:output_type -> sentry.SentPeers
+	8,  // 55: sentry.Sentry.SendMessageToAll:output_type -> sentry.SentPeers
+	15, // 56: sentry.Sentry.Messages:output_type -> sentry.InboundMessage
+	21, // 57: sentry.Sentry.Peers:output_type -> sentry.PeersReply
+	24, // 58: sentry.Sentry.PeerCount:output_type -> sentry.PeerCountReply
+	26, // 59: sentry.Sentry.PeerById:output_type -> sentry.PeerByIdReply
+	28, // 60: sentry.Sentry.PeerEvents:output_type -> sentry.PeerEvent
+	29, // 61: sentry.Sentry.AddPeer:output_type -> sentry.AddPeerReply
+	30, // 62: sentry.Sentry.RemovePeer:output_type -> sentry.RemovePeerReply
+	29, // 63: sentry.Sentry.AddTrustedPeer:output_type -> sentry.AddPeerReply
+	30, // 64: sentry.Sentry.RemoveTrustedPeer:output_type -> sentry.RemovePeerReply
+	35, // 65: sentry.Sentry.NodeInfo:output_type -> types.NodeInfoReply
+	46, // [46:66] is the sub-list for method output_type
+	26, // [26:46] is the sub-list for method input_type
+	26, // [26:26] is the sub-list for extension type_name
+	26, // [26:26] is the sub-list for extension extendee
+	0,  // [0:26] is the sub-list for field type_name
 }
 
 func init() { file_p2psentry_sentry_proto_init() }
