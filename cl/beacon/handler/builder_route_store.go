@@ -62,7 +62,15 @@ func (s *builderRouteStore) Add(root common.Hash, url string) bool {
 		return true
 	}
 	if len(s.routes) >= s.capacity {
-		return false
+		for existingKey, route := range s.routes {
+			if route.state == builderRouteDelivered {
+				delete(s.routes, existingKey)
+				break
+			}
+		}
+		if len(s.routes) >= s.capacity {
+			return false
+		}
 	}
 	s.routes[key] = &builderRoute{state: builderRouteIdle, expiresAt: now.Add(s.ttl)}
 	return true
