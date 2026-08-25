@@ -24,9 +24,9 @@ import (
 	"github.com/erigontech/erigon/execution/cache/slablru"
 )
 
-// shardedSlabLRU is a sharded LRU built at its final capacity. Elements are
-// slab-allocated, so residency follows what is stored rather than what is
-// configured and the cache never has to be resized.
+// shardedSlabLRU is a sharded LRU built at its final capacity. Its element
+// array grows by copy on demand, so residency follows what is stored rather
+// than what is configured and the table never has to be rehashed.
 //
 // Shards are selected on bits 16+ of the key: the low bits index buckets inside
 // a shard, so sharding on them would put every key of a shard in one bucket.
@@ -46,7 +46,12 @@ func newShardedSlabLRU[V any](capacity, shards uint32, onEvict func(uint64, V)) 
 	}
 	perShard := max((capacity+shards-1)/shards, 1)
 	for i := range s.shards {
-		l, err := slablru.New[uint64, V](perShard, u64identity)
+		// Size the table to a power of two of capacity+25%, as freelru's own
+		// sharded constructor does: it keeps the load factor off 1.0, and it is
+		// what selects the mask path for the bucket index. Without it the
+		// fallback keys off the high hash bits, which are the shard-selection
+		// bits and therefore constant inside a shard.
+		l, err := slablru.NewWithSize[uint64, V](perShard, uint32(nextPow2(uint64(perShard)+uint64(perShard)/4)), u64identity)
 		if err != nil {
 			panic(fmt.Sprintf("shardedSlabLRU: New(%d): %s", perShard, err))
 		}

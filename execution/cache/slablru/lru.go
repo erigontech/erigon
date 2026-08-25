@@ -67,11 +67,11 @@ const emptyBucket = math.MaxUint32
 // LRU implements a non-thread safe fixed size LRU cache.
 type LRU[K comparable, V any] struct {
 	buckets []uint32 // contains positions of bucket lists or 'emptyBucket'
-	// slabs holds the elements in fixed-size chunks appended on demand, so the
-	// table costs what it holds rather than what it may hold. Positions are
-	// dense and self-relative, so a new slab invalidates no stored index and
-	// capacity never needs a rehash.
-	slabs    []*[slabEntries]element[K, V]
+	// elements grows by doubling on demand, so the table costs what it holds
+	// rather than what it may hold. Positions are dense and self-relative, so
+	// growing is a plain copy: no stored index has to be rewritten and capacity
+	// never needs a rehash.
+	elements []element[K, V]
 	onEvict  OnEvictCallback[K, V]
 	hash     HashKeyCallback[K]
 	lifetime time.Duration
@@ -98,27 +98,26 @@ type Metrics struct {
 	Misses     uint64
 }
 
-// slabEntries is the elements per slab. It has to stay well under a shard's
-// capacity, or the first write to a shard allocates the whole thing and slabs
-// buy nothing. 256 x ~112 B is 28KB, one Go size class; measured on n0 it gives
-// the lowest worst-case put and fill memory, and access cost is flat from 128
-// to 8192 because the slab directory stays cache-resident either way.
-const (
-	slabEntries = 256
-	slabShift   = 8 // log2(slabEntries)
-	slabMask    = slabEntries - 1
-)
+// minElements is the first element allocation. Growth doubles from here, so a
+// cache holding little stays small and one that fills pays a handful of copies.
+const minElements = 256
 
 func (lru *LRU[K, V]) elem(pos uint32) *element[K, V] {
-	return &lru.slabs[pos>>slabShift][pos&slabMask]
+	return &lru.elements[pos]
 }
 
-// reserve makes pos addressable, appending a slab when it crosses into one that
-// does not exist yet.
+// reserve makes pos addressable. Element positions are dense and every stored
+// index -- bucket heads, both linked lists, head -- is an offset into this same
+// array, so a larger array is a memcpy with nothing to fix up. That is the whole
+// reason capacity can grow without a rehash.
 func (lru *LRU[K, V]) reserve(pos uint32) {
-	for uint32(len(lru.slabs)) <= pos>>slabShift {
-		lru.slabs = append(lru.slabs, new([slabEntries]element[K, V]))
+	if int(pos) < len(lru.elements) {
+		return
 	}
+	n := min(max(uint32(len(lru.elements))*2, minElements, pos+1), lru.cap)
+	next := make([]element[K, V], n)
+	copy(next, lru.elements)
+	lru.elements = next
 }
 
 // SetLifetime sets the default lifetime of LRU elements.

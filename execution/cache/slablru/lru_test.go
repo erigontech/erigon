@@ -396,31 +396,39 @@ func testMetrics(t *testing.T, cache Cache[uint64, uint64]) {
 	FatalIf(t, m.Collisions != 0, "Unexpected collisions: %d (!= %d)", m.Collisions, 0)
 }
 
-// The table costs what it holds, not what it may hold: elements arrive one slab
-// at a time, so a cache configured for a large capacity but holding little is
-// cheap and never has to be resized.
-func TestSlabsGrowOnDemand(t *testing.T) {
+// The table costs what it holds, not what it may hold: elements are allocated
+// by doubling, so a cache configured for a large capacity but holding little is
+// cheap, and growing is a copy rather than a rehash.
+func TestElementsGrowOnDemand(t *testing.T) {
 	const capacity = 1 << 20
 	lru, err := New[uint64, uint64](capacity, hashUint64)
 	FatalIf(t, err != nil, "Failed to create LRU: %v", err)
 
-	if len(lru.slabs) != 0 {
-		t.Fatalf("empty cache allocated %d slabs", len(lru.slabs))
+	if len(lru.elements) != 0 {
+		t.Fatalf("empty cache allocated %d elements", len(lru.elements))
 	}
-	for i := range uint64(slabEntries) {
+	for i := range uint64(minElements) {
 		lru.Add(i, i)
 	}
-	if len(lru.slabs) != 1 {
-		t.Fatalf("%d entries: got %d slabs, want 1", slabEntries, len(lru.slabs))
+	if len(lru.elements) != minElements {
+		t.Fatalf("%d entries: got %d elements, want %d", minElements, len(lru.elements), minElements)
 	}
-	lru.Add(slabEntries, slabEntries)
-	if len(lru.slabs) != 2 {
-		t.Fatalf("%d entries: got %d slabs, want 2", slabEntries+1, len(lru.slabs))
+	lru.Add(minElements, minElements)
+	if len(lru.elements) != 2*minElements {
+		t.Fatalf("%d entries: got %d elements, want %d", minElements+1, len(lru.elements), 2*minElements)
 	}
-	// Everything is still addressable across the slab boundary.
-	for i := range uint64(slabEntries + 1) {
+	// Everything survives the copy: positions are self-relative.
+	for i := range uint64(minElements + 1) {
 		v, ok := lru.Get(i)
-		FatalIf(t, !ok, "key %d lost across a slab boundary", i)
+		FatalIf(t, !ok, "key %d lost across a grow", i)
 		FatalIf(t, v != i, "key %d: got %d", i, v)
+	}
+
+	// The array never exceeds the eviction limit.
+	for i := range uint64(2 * capacity) {
+		lru.Add(i, i)
+	}
+	if len(lru.elements) != capacity {
+		t.Fatalf("full cache: got %d elements, want %d", len(lru.elements), capacity)
 	}
 }
