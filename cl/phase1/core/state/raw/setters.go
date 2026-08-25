@@ -88,23 +88,23 @@ func (b *BeaconState) SetStateRootAt(index int, root common.Hash) error {
 }
 
 func (b *BeaconState) SetWithdrawalCredentialForValidatorAtIndex(index int, creds common.Hash) error {
-	b.markLeaf(ValidatorsLeafIndex)
 	if b.events.OnNewValidatorWithdrawalCredentials != nil {
 		if err := b.events.OnNewValidatorWithdrawalCredentials(index, creds[:]); err != nil {
 			return err
 		}
 	}
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetWithdrawalCredentialForValidatorAtIndex(index, creds)
 	return nil
 }
 
 func (b *BeaconState) SetExitEpochForValidatorAtIndex(index int, epoch uint64) error {
-	b.markLeaf(ValidatorsLeafIndex)
 	if b.events.OnNewValidatorExitEpoch != nil {
 		if err := b.events.OnNewValidatorExitEpoch(index, epoch); err != nil {
 			return err
 		}
 	}
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetExitEpochForValidatorAtIndex(index, epoch)
 	return nil
 }
@@ -125,36 +125,34 @@ func (b *BeaconState) SetWithdrawableEpochForValidatorAtIndex(index int, epoch u
 }
 
 func (b *BeaconState) SetEffectiveBalanceForValidatorAtIndex(index int, balance uint64) error {
-	b.markLeaf(ValidatorsLeafIndex)
 	if b.events.OnNewValidatorEffectiveBalance != nil {
 		if err := b.events.OnNewValidatorEffectiveBalance(index, balance); err != nil {
 			return err
 		}
 	}
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetEffectiveBalanceForValidatorAtIndex(index, balance)
 	return nil
 }
 
 func (b *BeaconState) SetActivationEpochForValidatorAtIndex(index int, epoch uint64) error {
-	b.markLeaf(ValidatorsLeafIndex)
 	if b.events.OnNewValidatorActivationEpoch != nil {
 		if err := b.events.OnNewValidatorActivationEpoch(index, epoch); err != nil {
 			return err
 		}
 	}
-
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetActivationEpochForValidatorAtIndex(index, epoch)
 	return nil
 }
 
 func (b *BeaconState) SetActivationEligibilityEpochForValidatorAtIndex(index int, epoch uint64) error {
-	b.markLeaf(ValidatorsLeafIndex)
 	if b.events.OnNewValidatorActivationEligibilityEpoch != nil {
 		if err := b.events.OnNewValidatorActivationEligibilityEpoch(index, epoch); err != nil {
 			return err
 		}
 	}
-
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetActivationEligibilityEpochForValidatorAtIndex(index, epoch)
 	return nil
 }
@@ -209,13 +207,12 @@ func (b *BeaconState) SetValidatorSlashed(index int, slashed bool) error {
 	if index >= b.balances.Length() {
 		return ErrInvalidValidatorIndex
 	}
-	b.markLeaf(ValidatorsLeafIndex)
 	if b.events.OnNewValidatorSlashed != nil {
 		if err := b.events.OnNewValidatorSlashed(index, slashed); err != nil {
 			return err
 		}
 	}
-
+	b.markLeaf(ValidatorsLeafIndex)
 	b.validators.SetValidatorSlashed(index, slashed)
 	return nil
 }

@@ -154,7 +154,7 @@ func New(cfg *clparams.BeaconChainConfig) *BeaconState {
 		payloadExpectedWithdrawals:   solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), new(cltypes.Withdrawal).EncodingSizeSSZ()),
 		ptcWindow:                    solid.NewUint64VectorOfVectors(int((2+cfg.MinSeedLookahead)*cfg.SlotsPerEpoch), int(cfg.PtcSize)),
 	}
-	_ = state.init() // always returns nil; see init's body
+	state.init()
 	return state
 }
 
@@ -162,9 +162,8 @@ func (b *BeaconState) SetValidatorSet(validatorSet *solid.ValidatorSet) {
 	b.validators = validatorSet
 }
 
-func (b *BeaconState) init() error {
+func (b *BeaconState) init() {
 	b.touchedLeaves = make([]atomic.Uint32, StateLeafSizeLatest)
-	return nil
 }
 
 func (b *BeaconState) MarshalJSON() ([]byte, error) {
