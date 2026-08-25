@@ -2008,15 +2008,18 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		"blobs",
 		lenBlobs,
 	)
+	publicationSucceeded := true
 	// Broadcast the block and its blobs
 	if err := a.gossipManager.Publish(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
 		a.logger.Error("Failed to publish block", "err", err)
+		publicationSucceeded = false
 	}
 
 	if blk.Version() < clparams.FuluVersion {
 		for idx, blob := range blobsSidecarsBytes {
 			if err := a.gossipManager.Publish(ctx, gossip.TopicNameBlobSidecar(uint64(idx)), blob); err != nil {
 				a.logger.Error("Failed to publish blob sidecar", "err", err)
+				publicationSucceeded = false
 			}
 		}
 	}
@@ -2026,11 +2029,13 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 			columnSSZ, err := column.EncodeSSZ(nil)
 			if err != nil {
 				a.logger.Error("Failed to encode column sidecar", "err", err)
+				publicationSucceeded = false
 				continue
 			}
 			subnet := das.ComputeSubnetForDataColumnSidecar(column.Index)
 			if err := a.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
 				a.logger.Error("Failed to publish data column sidecar", "err", err)
+				publicationSucceeded = false
 			}
 		}
 	}
@@ -2046,10 +2051,13 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		}
 		if err := a.broadcastSelfBuildEnvelope(ctx, blk, validatorSignedEnvelope); err != nil {
 			a.logger.Error("Failed to broadcast self-build execution payload envelope", "err", err)
+			publicationSucceeded = false
 		}
 	}
 
-	a.payloadPreparationGate.clearProducedBlock(blk.Block.Slot)
+	if publicationSucceeded {
+		a.payloadPreparationGate.clearProducedBlock(blk.Block.Slot)
+	}
 	return nil
 }
 
@@ -2143,13 +2151,12 @@ func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltype
 			return fmt.Errorf("failed to encode self-build envelope: %w", err)
 		}
 		if err := a.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
-			a.logger.Error("Failed to publish self-build execution payload envelope", "err", err, "blockRoot", blockRoot)
-		} else {
-			log.Debug("BlockPublishing: broadcast self-build execution payload envelope",
-				"slot", blk.Block.Slot,
-				"blockRoot", blockRoot,
-				"blockHash", bid.Message.BlockHash)
+			return fmt.Errorf("failed to publish self-build execution payload envelope: %w", err)
 		}
+		log.Debug("BlockPublishing: broadcast self-build execution payload envelope",
+			"slot", blk.Block.Slot,
+			"blockRoot", blockRoot,
+			"blockHash", bid.Message.BlockHash)
 	}
 
 	return nil

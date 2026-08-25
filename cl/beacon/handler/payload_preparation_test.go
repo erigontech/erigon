@@ -36,10 +36,12 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/gossip"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	mock_services "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -1200,6 +1202,26 @@ func TestFailedBlockBroadcastKeepsProducedBlockMarker(t *testing.T) {
 
 	require.ErrorContains(t, err, "missing blob bundle")
 	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
+}
+
+func TestFailedBlockGossipKeepsProducedBlockMarker(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := blob_storage_mock.NewMockBlobStorage(ctrl)
+	storage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("stop after persistence"))
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.blobStoage = storage
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(errors.New("publish failed"))
+	handler.gossipManager = gossipManager
+
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
+	block.Block.Slot = 1
+	completedAt := time.Now()
+	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
+
+	require.NoError(t, handler.broadcastBlock(t.Context(), block))
+	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
+	require.Eventually(t, handler.payloadPreparationGate.idle, time.Second, 10*time.Millisecond)
 }
 
 func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {
