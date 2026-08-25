@@ -285,7 +285,7 @@ func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
 		{name: "P2P gas preference at target", feeRecipient: common.Address{0x42}, gasLimit: 25_000_000, preferenceGas: 25_000_000, want: 1},
 		{name: "P2P gas preference above target", feeRecipient: common.Address{0x42}, gasLimit: 25_000_001, preferenceGas: 25_000_000},
 		{name: "execution payment at cap", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, execPayment: 5, maxPayment: 5, want: 1},
-		{name: "execution payment above cap", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, execPayment: 6, maxPayment: 5},
+		{name: "execution payment above cap remains a candidate", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, execPayment: 6, maxPayment: 5, want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
