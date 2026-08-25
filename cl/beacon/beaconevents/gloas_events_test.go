@@ -63,6 +63,24 @@ func TestBuildHeadV2DataUsesGenesisRootInEpochZeroAndOne(t *testing.T) {
 	}
 }
 
+func TestBuildHeadV2DataDoesNotReadPrunedGenesisRoot(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 2
+	cfg.SlotsPerHistoricalRoot = 8
+	headState := state.New(&cfg)
+	headState.SetVersion(clparams.GloasVersion)
+	headState.SetSlot(10)
+	currentRoot := common.Hash{1}
+	nextRoot := common.Hash{2}
+	headState.SetBlockRootAt(7, currentRoot)
+	headState.SetBlockRootAt(1, nextRoot)
+
+	event, err := BuildHeadV2Data(&cfg, headState, 10, common.Hash{3}, common.Hash{4}, "full", false)
+	require.NoError(t, err)
+	require.Equal(t, currentRoot, event.Data.CurrentEpochDependentRoot)
+	require.Equal(t, nextRoot, event.Data.NextEpochDependentRoot)
+}
+
 func TestGloasEventFeedsDoNotBlockOnSlowSubscriber(t *testing.T) {
 	tests := []struct {
 		name      string

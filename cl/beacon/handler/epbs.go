@@ -788,6 +788,7 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	}
 	canonical := strings.Contains(r.URL.Path, "/execution_payload_envelopes")
 	blobDataIncluded := false
+	validation := BlockPublishingValidationGossip
 	if canonical {
 		if r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
 			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required")).WriteTo(w)
@@ -803,6 +804,11 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid Eth-Blob-Data-Included: %w", err)).WriteTo(w)
 			return
 		}
+		validation, err = a.parseBlockPublishingValidation(r, 2)
+		if err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
 	}
 	signedEnvelope, contents, err := a.decodeExecutionPayloadEnvelopeRequest(w, r, contentType, blobDataIncluded)
 	if err != nil {
@@ -813,6 +819,23 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	if signedEnvelope.Message == nil {
 		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("missing message in signed envelope")).WriteTo(w)
 		return
+	}
+	if validation == BlockPublishingValidationConsensusAndEquivocation {
+		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+		if !ok || block == nil || block.Block == nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelope block is unavailable")).WriteTo(w)
+			return
+		}
+		if a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, signedEnvelope.Message.BeaconBlockRoot) {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelope block has an equivocation")).WriteTo(w)
+			return
+		}
+	}
+	if validation == BlockPublishingValidationGossip {
+		if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(signedEnvelope); err != nil {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
 	}
 	contentsIntegrationFailed := false
 	if contents != nil {
@@ -831,10 +854,20 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	}
 	gossipValidated := false
 	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, canonical, true); err != nil {
+		if canonical && !blobDataIncluded && errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
 			status = http.StatusAccepted
 			gossipValidated = errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
+		} else if canonical && validation == BlockPublishingValidationGossip {
+			status = http.StatusAccepted
+			gossipValidated = true
+		} else if canonical {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
 		} else {
 			beaconhttp.WrapEndpointError(err).WriteTo(w)
 			return
@@ -866,15 +899,15 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		}
 	}
 
-	// Broadcast the envelope on the execution_payload gossip topic
-	if a.sentinel != nil {
+	if canonical || a.sentinel != nil {
 		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
 			return
 		}
-		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
-			a.logger.Debug("[Beacon REST] failed to publish execution payload envelope to gossip", "err", err)
+		if err := a.publishGossip(r.Context(), gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
+			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)
+			return
 		}
 	}
 

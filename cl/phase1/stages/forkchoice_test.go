@@ -256,3 +256,17 @@ func drainReorgEvent(t *testing.T, ctx context.Context, tx kv.RwTx, headSlot uin
 		}
 	}
 }
+
+func TestEmitHeadEventsDropsStaleSnapshot(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	ch := make(chan *beaconevents.EventStream, 2)
+	sub := emitter.State().Subscribe(ch)
+	defer sub.Unsubscribe()
+	headRoot := common.Hash{1}
+
+	err := emitHeadEventsIfCurrent(emitter, &beaconevents.HeadV2Data{}, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, error) {
+		return common.Hash{3}, 11, nil
+	})
+	require.NoError(t, err)
+	require.Empty(t, ch)
+}

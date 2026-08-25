@@ -357,7 +357,7 @@ func (b *builderClient) SubmitSignedBeaconBlock(ctx context.Context, builderURL 
 type builderTarget struct {
 	url      string
 	hostname string
-	ip       net.IP
+	ips      []net.IP
 }
 
 func (b *builderClient) builderEndpoint(ctx context.Context, policy BuilderTargetPolicy, rawURL string, path ...string) (builderTarget, error) {
@@ -390,7 +390,11 @@ func (b *builderClient) builderEndpoint(ctx context.Context, policy BuilderTarge
 			return builderTarget{}, fmt.Errorf("builder URL resolves to disallowed address %s", address.IP)
 		}
 	}
-	return builderTarget{url: target.JoinPath(path...).String(), hostname: hostname, ip: addresses[0].IP}, nil
+	validatedIPs := make([]net.IP, len(addresses))
+	for i, address := range addresses {
+		validatedIPs[i] = append(net.IP(nil), address.IP...)
+	}
+	return builderTarget{url: target.JoinPath(path...).String(), hostname: hostname, ips: validatedIPs}, nil
 }
 
 func isPublicBuilderIP(ip net.IP) bool {
@@ -411,7 +415,7 @@ type builderHTTPResponse struct {
 }
 
 func (b *builderClient) builderCall(ctx context.Context, method string, target builderTarget, headers map[string]string, body io.Reader) (*builderHTTPResponse, error) {
-	requestContext := context.WithValue(ctx, pinnedBuilderTargetKey{}, pinnedBuilderTarget{hostname: target.hostname, ip: target.ip})
+	requestContext := context.WithValue(ctx, pinnedBuilderTargetKey{}, pinnedBuilderTarget{hostname: target.hostname, ips: target.ips})
 	request, err := http.NewRequestWithContext(requestContext, method, target.url, body)
 	if err != nil {
 		return nil, err
@@ -466,7 +470,7 @@ type pinnedBuilderTargetKey struct{}
 
 type pinnedBuilderTarget struct {
 	hostname string
-	ip       net.IP
+	ips      []net.IP
 }
 
 func newPinnedBuilderTransport(dialContext func(context.Context, string, string) (net.Conn, error)) http.RoundTripper {
@@ -487,7 +491,22 @@ func newPinnedBuilderTransport(dialContext func(context.Context, string, string)
 		if !strings.EqualFold(host, pinned.hostname) {
 			return nil, errors.New("builder dial target does not match resolved host")
 		}
-		return dialContext(ctx, network, net.JoinHostPort(pinned.ip.String(), port))
+		var dialErrors []error
+		for _, ip := range pinned.ips {
+			if err := ctx.Err(); err != nil {
+				return nil, err
+			}
+			pinnedAddress := net.JoinHostPort(ip.String(), port)
+			conn, err := dialContext(ctx, network, pinnedAddress)
+			if err == nil {
+				return conn, nil
+			}
+			if ctx.Err() != nil {
+				return nil, ctx.Err()
+			}
+			dialErrors = append(dialErrors, fmt.Errorf("dial builder address %s: %w", pinnedAddress, err))
+		}
+		return nil, errors.Join(dialErrors...)
 	}
 	return transport
 }
