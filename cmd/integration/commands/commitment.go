@@ -1069,6 +1069,10 @@ Every rewritten record is read back at its own depth and compared before it is
 written, so a record whose omitted prefix is not the derivable one fails the run
 rather than shipping.
 
+An input record naming one cell triggers an intentional panic because it cannot
+come from the pbin folding algorithm. That failure can leave partial output;
+investigate the output and do not resume that run.
+
 Files already in the current format are left alone, so the command is safe to
 re-run. Originals are preserved at <datadir>/snapshots/backup/domains/;
 "integration commitment convert --restore" moves them back.

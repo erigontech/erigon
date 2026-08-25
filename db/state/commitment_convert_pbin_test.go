@@ -379,7 +379,28 @@ func TestConvertPBinRecordFilesRemovesOutputAfterStateFailure(t *testing.T) {
 	assertPBinOutputComplete(t, fixture)
 }
 
-func TestConvertPBinRecordFilesRemovesPartialOutputOnCancel(t *testing.T) {
+func TestConvertPBinRecordFilesPanicsOnSingleCellWithoutChangingSource(t *testing.T) {
+	fixture := newPBinOutputFixture(t, true, false)
+	keys, values := readKVFile(t, fixture.output, fixture.outputPath)
+	replaced := false
+	for i, key := range keys {
+		if bytes.Equal(key, commitmentdb.KeyCommitmentState) || isPBinRootKey(key) || len(values[i]) == 0 {
+			continue
+		}
+		values[i] = []byte{0, 1, 0, 1, 2, 0}
+		replaced = true
+		break
+	}
+	require.True(t, replaced, "fixture has no branch record")
+	rewritePBinFile(t, fixture, keys, values)
+	require.NoError(t, fixture.output.ReloadFiles())
+
+	require.Panics(t, func() { _ = convertPBinOutputFixture(t, fixture) })
+	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
+	assertPBinOutputRemoved(t, fixture)
+}
+
+func TestConvertPBinRecordFilesCancellationLeavesRunResumable(t *testing.T) {
 	fixture := newPBinOutputFixture(t, true, false)
 	ctx, cancel := context.WithCancel(t.Context())
 	var pairs atomic.Int32
@@ -399,6 +420,14 @@ func TestConvertPBinRecordFilesRemovesPartialOutputOnCancel(t *testing.T) {
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
 	assertPBinOutputRemoved(t, fixture)
+
+	state.SetPBinConvertPairHookForTest(nil)
+	linkPBinSourceFiles(t, fixture)
+	require.NoError(t, fixture.output.ReloadFiles())
+	require.NoError(t, convertPBinOutputFixture(t, fixture))
+	require.NoError(t, fixture.output.ReloadFiles())
+	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
+	assertPBinOutputComplete(t, fixture)
 }
 
 func TestConvertPBinRecordFilesResumeRebuildsIncompleteShard(t *testing.T) {

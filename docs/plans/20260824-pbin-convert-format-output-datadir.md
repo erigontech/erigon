@@ -401,13 +401,13 @@ already the output's.
 - Modify: `db/state/commitment_convert_pbin_test.go`
 - Modify: `cmd/integration/commands/commitment.go`
 
-- [ ] write a test that a legacy record naming one cell panics and the source stays unchanged
-- [ ] write a test that context cancellation mid-file leaves the run resumable and the source
+- [x] write a test that a legacy record naming one cell panics and the source stays unchanged
+- [x] write a test that context cancellation mid-file leaves the run resumable and the source
       untouched — a compressor fault has no injection point, and ctx-cancel is the reachable
       equivalent
-- [ ] document in the command help that a single-cell panic leaves a partial output that must
+- [x] document in the command help that a single-cell panic leaves a partial output that must
       be investigated, not resumed
-- [ ] run `go test ./db/state/... -count=1` — must pass before task 11
+- [x] run `go test ./db/state/... -count=1` — must pass before task 11
 
 ### Task 11: Verify acceptance criteria
 
