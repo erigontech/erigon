@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"math/rand"
 	"sync"
 	"testing"
@@ -774,7 +775,21 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 // counterpart to TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow
 // above, meant to be run with `go test -race` to catch an accumulator-pointer
 // race the single-goroutine tests can't reach.
+//
+// Runs with deferred commitment updates both off and on: exec3.go turns
+// deferral on for isApplyingBlocks/fork validation (the main chain-tip and
+// fork-validation path), which routes this call's own branch writes through
+// FlushPendingUpdates(Locked) on the NEXT compute rather than inline — a
+// different code path than the immediate-write case exercised with it off.
 func TestComputeWithBlockAccumulator_ConcurrentRotation(t *testing.T) {
+	for _, deferUpdates := range []bool{false, true} {
+		t.Run(fmt.Sprintf("deferUpdates=%v", deferUpdates), func(t *testing.T) {
+			testComputeWithBlockAccumulatorConcurrentRotation(t, deferUpdates)
+		})
+	}
+}
+
+func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdates bool) {
 	ctx := context.Background()
 	logger := log.New()
 	logger.SetHandler(log.DiscardHandler())
@@ -782,6 +797,7 @@ func TestComputeWithBlockAccumulator_ConcurrentRotation(t *testing.T) {
 	const txsPerBlock = uint64(5)
 
 	db, tx, doms := setupStepTest(t)
+	doms.SetDeferCommitmentUpdates(deferUpdates)
 
 	in := make(chan applyResult, 8)
 	out := make(chan commitmentResult, int(numBlocks)+8)
