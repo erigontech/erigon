@@ -23,9 +23,9 @@ import (
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// TxTypeSpec describes an externally registered transaction type's decode
-// facets. It is consulted only from the default arm of the built-in type
-// switches, so an unregistered id keeps today's behavior unchanged.
+// TxTypeSpec describes an externally registered transaction type. Registering
+// an id also admits it to the receipt encode and decode paths, so it decides
+// what bytes reach the receipts trie; an unregistered id is rejected there.
 type TxTypeSpec struct {
 	New func() Transaction
 	// UnmarshalJSON may be nil for types not submittable over JSON-RPC;

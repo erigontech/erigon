@@ -323,14 +323,6 @@ func TestRegisteredTxTypeNilJSONDecoder(t *testing.T) {
 	require.Error(t, err)
 }
 
-// rawReceiptList is a DerivableList of pre-encoded leaves, used to pin the
-// receipts root a registered type must derive to.
-type rawReceiptList [][]byte
-
-func (l rawReceiptList) Len() int { return len(l) }
-
-func (l rawReceiptList) EncodeIndex(i int, w *bytes.Buffer) { w.Write(l[i]) }
-
 func fakeRegisteredReceipt() *Receipt {
 	r := &Receipt{
 		Type:              fakeRegisteredTxType,
@@ -369,6 +361,13 @@ func TestRegisteredTxTypeReceiptRoundTrip(t *testing.T) {
 	require.Equal(t, want.Type, streamed.Type)
 	require.Equal(t, want.CumulativeGasUsed, streamed.CumulativeGasUsed)
 	require.Equal(t, want.Logs, streamed.Logs)
+
+	stored, err := rlp.EncodeToBytes((*ReceiptForStorage)(want))
+	require.NoError(t, err)
+	unstored := new(ReceiptForStorage)
+	require.NoError(t, rlp.DecodeBytes(stored, unstored))
+	require.Equal(t, want.Type, unstored.Type)
+	require.Equal(t, want.CumulativeGasUsed, unstored.CumulativeGasUsed)
 }
 
 func TestRegisteredTxTypeReceiptRoot(t *testing.T) {
@@ -382,7 +381,9 @@ func TestRegisteredTxTypeReceiptRoot(t *testing.T) {
 	Receipts{r}.EncodeIndex(0, &buf)
 	require.Equal(t, binary, buf.Bytes(), "EncodeIndex must agree with MarshalBinary")
 
-	require.Equal(t, DeriveSha(rawReceiptList{binary}), DeriveSha(Receipts{r}))
+	// Golden root over the single 0x7e-prefixed leaf.
+	want := common.HexToHash("0x10d0be5b17612ce56aca9e438311c8c76484f24346b5c911857a522aacec5d20")
+	require.Equal(t, want, DeriveSha(Receipts{r}))
 }
 
 func TestUnregisteredReceiptTypeRejected(t *testing.T) {
@@ -401,4 +402,10 @@ func TestUnregisteredReceiptTypeRejected(t *testing.T) {
 	require.Panics(t, func() {
 		Receipts{{Type: unknownType}}.EncodeIndex(0, new(bytes.Buffer))
 	}, "encoding an unclaimed type must fail loudly, not derive a wrong root")
+
+	// The panic above is only a programming-error guard because a stored
+	// receipt cannot carry an unclaimed type into it.
+	stored, err := rlp.EncodeToBytes(&ReceiptForStorage{Type: unknownType, Status: ReceiptStatusSuccessful})
+	require.NoError(t, err)
+	require.ErrorContains(t, rlp.DecodeBytes(stored, new(ReceiptForStorage)), "invalid receipt type")
 }

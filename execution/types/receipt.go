@@ -452,6 +452,9 @@ func (r *ReceiptForStorage) DecodeRLP(s *rlp.Stream) error {
 	if dec.Type, err = s.Uint8(); err != nil {
 		return fmt.Errorf("read Type: %w", err)
 	}
+	if dec.Type != LegacyTxType && !knownTypedTxType(dec.Type) {
+		return fmt.Errorf("invalid receipt type %d", dec.Type)
+	}
 	kind, size, err := s.Kind()
 	if err != nil {
 		return fmt.Errorf("read PostStateOrStatus: %w", err)
