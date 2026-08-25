@@ -314,6 +314,23 @@ func TestValidateDirectBidAllowsExecutionPayment(t *testing.T) {
 	require.NoError(t, service.ValidateBid(context.Background(), msg))
 }
 
+func TestValidateDirectBidUsesFrozenParentWhenHeadFlipsToSibling(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, ethClockMock, fcMock, _ := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1)
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	siblingRoot := common.Hash{0xfa}
+	fcMock.HeadVal = siblingRoot
+	fcMock.Headers[siblingRoot] = &cltypes.BeaconBlockHeader{ParentRoot: common.Hash{0xfb}, Slot: 99}
+	siblingBlock := cltypes.NewBeaconBlock(service.beaconCfg, clparams.GloasVersion)
+	siblingBlock.Body.SignedExecutionPayloadBid.Message.ParentBlockHash = common.Hash{0xfc}
+	siblingBlock.Body.SignedExecutionPayloadBid.Message.BlockHash = common.Hash{0xfd}
+	fcMock.Blocks[siblingRoot] = &cltypes.SignedBeaconBlock{Block: siblingBlock}
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	require.NoError(t, service.ValidateBid(context.Background(), msg))
+}
+
 func TestExecutionPayloadBidServiceWrongSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()

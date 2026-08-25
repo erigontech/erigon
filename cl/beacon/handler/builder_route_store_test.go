@@ -5,12 +5,15 @@
 package handler
 
 import (
+	"errors"
+	"net/http"
 	"net/http/httptest"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
 	"github.com/erigontech/erigon/common"
 )
 
@@ -27,13 +30,17 @@ func TestBuilderRouteStoreReaddingDeliveredRouteDoesNotRearm(t *testing.T) {
 	require.False(t, routes.Claim(root, url))
 }
 
-func TestBuilderRouteHeaderOmittedWhenRouteCapacityIsFull(t *testing.T) {
+func TestBuilderWinningResponseFailsWhenRouteCapacityIsFull(t *testing.T) {
 	handler := &ApiHandler{builderRoutes: newBuilderRouteStore(1, time.Minute, time.Now)}
 	require.True(t, handler.builderRoutes.Add(common.Hash{1}, "https://one.example"))
 	recorder := httptest.NewRecorder()
 
-	handler.setBuilderRouteHeader(recorder, common.Hash{2}, "https://two.example")
+	err := handler.setBuilderRouteHeader(recorder, common.Hash{2}, "https://two.example")
 
+	require.Error(t, err)
+	var endpointErr *beaconhttp.EndpointError
+	require.True(t, errors.As(err, &endpointErr))
+	require.Equal(t, http.StatusServiceUnavailable, endpointErr.Code)
 	require.Empty(t, recorder.Header().Get("Eth-Builder-Url"))
 }
 
@@ -67,5 +74,17 @@ func TestBuilderRouteStoreExpiryFreesCapacity(t *testing.T) {
 	now = now.Add(time.Minute)
 	require.True(t, routes.Add(common.Hash{2}, "https://two.example"))
 	require.False(t, routes.Claim(common.Hash{1}, "https://one.example"))
+	require.True(t, routes.Claim(common.Hash{2}, "https://two.example"))
+}
+
+func TestBuilderRouteStoreEvictsDeliveredRouteBeforeRejectingPromise(t *testing.T) {
+	routes := newBuilderRouteStore(1, time.Minute, time.Now)
+	firstRoot := common.Hash{1}
+	require.True(t, routes.Add(firstRoot, "https://one.example"))
+	require.True(t, routes.Claim(firstRoot, "https://one.example"))
+	routes.Complete(firstRoot, "https://one.example", true)
+
+	require.True(t, routes.Add(common.Hash{2}, "https://two.example"))
+	require.False(t, routes.Claim(firstRoot, "https://one.example"))
 	require.True(t, routes.Claim(common.Hash{2}, "https://two.example"))
 }
