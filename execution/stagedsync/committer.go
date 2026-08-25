@@ -983,9 +983,10 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// swap below mutates the global current-accumulator pointer; the
 	// deferred branch writes from block N-1 (flushed inside
 	// ComputeCommitmentLocked → FlushPendingUpdatesLocked) AND the [state]
-	// marker write at end of compute also touch that same global pointer
-	// and the per-domain diff fields. Holding changesetMu through all of
-	// it serializes against the apply goroutine's DomainPut/DomainDel.
+	// marker write at end of compute also touch that same global pointer.
+	// Holding changesetMu through all of it keeps the apply goroutine from
+	// rotating that pointer (SetChangesetAccumulator) mid-compute; apply's
+	// DomainPut/DomainDel no longer take this lock (see SwapCommitmentDiffLocked).
 	//
 	// Inside the lock we must use the *Locked variants — the public
 	// counterparts re-acquire the same Mutex and would self-deadlock.
