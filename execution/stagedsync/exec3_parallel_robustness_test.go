@@ -1237,3 +1237,72 @@ func TestWaitProcessedWithoutCommitStreamReturns(t *testing.T) {
 		t.Fatal("WaitProcessed parked with no commit stream: nothing can ever mark a block processed")
 	}
 }
+
+// TestWaitProcessedBarrier drives a live COMMITMENT_AFTER_EXEC barrier: the
+// waiter for block N must stay parked until the calculator marks N processed,
+// and must not be released by an earlier block's mark.
+func TestWaitProcessedBarrier(t *testing.T) {
+	newCalc := func() *commitmentCalculator {
+		return &commitmentCalculator{
+			in:            make(chan applyResult),
+			done:          make(chan struct{}),
+			processedWake: make(chan struct{}),
+		}
+	}
+
+	t.Run("released by the mark for the awaited block", func(t *testing.T) {
+		cc := newCalc()
+		done := make(chan error, 1)
+		go func() { done <- cc.WaitProcessed(context.Background(), 5) }()
+
+		cc.markProcessed(4)
+		select {
+		case <-done:
+			t.Fatal("barrier released by an earlier block's mark")
+		case <-time.After(100 * time.Millisecond):
+		}
+
+		cc.markProcessed(5)
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("barrier still parked after the awaited block was marked")
+		}
+	})
+
+	t.Run("already processed does not wait", func(t *testing.T) {
+		cc := newCalc()
+		cc.markProcessed(9)
+		require.NoError(t, cc.WaitProcessed(context.Background(), 5))
+	})
+
+	t.Run("released when the calculator stops", func(t *testing.T) {
+		cc := newCalc()
+		done := make(chan error, 1)
+		go func() { done <- cc.WaitProcessed(context.Background(), 5) }()
+
+		close(cc.done)
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+		case <-time.After(2 * time.Second):
+			t.Fatal("barrier outlived the calculator")
+		}
+	})
+
+	t.Run("released on cancellation", func(t *testing.T) {
+		cc := newCalc()
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() { done <- cc.WaitProcessed(ctx, 5) }()
+
+		cancel()
+		select {
+		case err := <-done:
+			require.ErrorIs(t, err, context.Canceled)
+		case <-time.After(2 * time.Second):
+			t.Fatal("barrier ignored cancellation")
+		}
+	})
+}

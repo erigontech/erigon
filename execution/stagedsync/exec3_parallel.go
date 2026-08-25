@@ -3896,15 +3896,3 @@ func normalizeWriteSet(writes *state.WriteSet, vm *state.VersionMap, txIndex int
 
 	return filtered
 }
-
-// commitmentBarrierCtx returns the context the COMMITMENT_AFTER_EXEC barrier
-// waits on. On a terminal block the stopCause is already published, so ctx is
-// cancelled: waiting on it would return before triggerBatchCommitment and drop
-// the batch-end commitment. The blockResult was sent with mustDeliver, so the
-// calculator always reaches markProcessed and the wait still ends.
-func commitmentBarrierCtx(ctx context.Context, terminal bool) context.Context {
-	if terminal {
-		return context.WithoutCancel(ctx)
-	}
-	return ctx
-}
