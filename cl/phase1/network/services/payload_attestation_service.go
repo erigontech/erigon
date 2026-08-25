@@ -213,13 +213,13 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 // queuePendingAttestation defers an attestation until its referenced block is available.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	key, err := s.buildPendingAttestationKey(blockRoot, msg)
+	_, err := s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
+		return s.buildPendingAttestationKey(blockRoot, msg)
+	})
 	if err != nil {
 		log.Warn("Failed to hash payload attestation for pending queue",
 			"blockRoot", blockRoot, "validatorIndex", msg.ValidatorIndex, "err", err)
-		return
 	}
-	s.pending.enqueueKey(key, msg)
 }
 
 func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error) {

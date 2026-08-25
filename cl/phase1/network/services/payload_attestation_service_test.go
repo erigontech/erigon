@@ -752,11 +752,16 @@ func TestPayloadAttestationServiceMultiplePendingForSameBlock(t *testing.T) {
 	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 2}))
 }
 
-func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {
+func TestPayloadAttestationServicePendingQueueCapSkipsHash(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	service, _, _ := setupPayloadAttestationService(t, ctrl)
+	keyBuilt := false
+	service.buildPendingAttestationKey = func(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error) {
+		keyBuilt = true
+		return pendingPayloadAttestationKeyFor(blockRoot, msg)
+	}
 
 	// Fill the queue to the cap
 	service.pending.count.Store(maxPendingAttestations)
@@ -767,6 +772,7 @@ func TestPayloadAttestationServicePendingQueueCap(t *testing.T) {
 	service.queuePendingAttestation(blockRoot, msg)
 
 	// Should still be at cap — new item was rejected
+	require.False(t, keyBuilt)
 	require.Equal(t, int32(maxPendingAttestations), service.pending.count.Load())
 	key := mustPendingPayloadAttestationKey(t, blockRoot, msg)
 	_, exists := service.pending.jobs.Load(key)
