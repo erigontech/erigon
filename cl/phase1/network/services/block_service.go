@@ -20,7 +20,6 @@ import (
 	"context"
 	"errors"
 	"fmt"
-	"sync"
 	"time"
 
 	"github.com/libp2p/go-libp2p/core/peer"
@@ -50,11 +49,6 @@ type proposerIndexAndSlot struct {
 	slot          uint64
 }
 
-type blockJob struct {
-	block        *cltypes.SignedBeaconBlock
-	creationTime time.Time
-}
-
 type blockService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	syncedData      *synced_data.SyncedDataManager
@@ -63,10 +57,10 @@ type blockService struct {
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
+	emitter         *beaconevents.EventEmitter
 
-	// blocks that should be scheduled for later execution (e.g missing blobs).
-	emitter                          *beaconevents.EventEmitter
-	blocksScheduledForLaterExecution sync.Map
+	// Blocks waiting for missing dependencies such as blobs.
+	blocksScheduledForLaterExecution *pendingJobQueue[common.Hash, *cltypes.SignedBeaconBlock]
 	// store the block in db
 	db kv.RwDB
 }
@@ -94,8 +88,20 @@ func NewBlockService(
 		emitter:         emitter,
 		db:              db,
 	}
-	go b.loop(ctx)
+	b.blocksScheduledForLaterExecution = b.newPendingBlockQueue(ctx)
 	return b
+}
+
+func (b *blockService) newPendingBlockQueue(ctx context.Context) *pendingJobQueue[common.Hash, *cltypes.SignedBeaconBlock] {
+	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		capacity:      maxPendingBlocks,
+		expiry:        blockJobExpiry,
+		checkInterval: blockJobsIntervalTick,
+	},
+		b.tryProcessPendingBlock,
+		func(blockRoot common.Hash) {
+			log.Trace("Pending block expired", "blockRoot", blockRoot)
+		})
 }
 
 func (b *blockService) Names() []string {
@@ -254,16 +260,16 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		blockNum = block.Block.Body.ExecutionPayload.BlockNumber
 	}
 	log.Trace("Block scheduled for later processing", "slot", block.Block.Slot, "block", blockNum)
-	blockRoot, err := block.Block.HashSSZ()
+	err := b.blocksScheduledForLaterExecution.enqueue(block, func() (common.Hash, error) {
+		blockRoot, err := block.Block.HashSSZ()
+		if err != nil {
+			return common.Hash{}, err
+		}
+		return common.Hash(blockRoot), nil
+	})
 	if err != nil {
 		log.Debug("Failed to hash block", "block", block, "error", err)
-		return
 	}
-
-	b.blocksScheduledForLaterExecution.Store(blockRoot, &blockJob{
-		block:        block,
-		creationTime: time.Now(),
-	})
 }
 
 // processAndStoreBlock processes and stores a block
@@ -320,29 +326,10 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 	log.Trace("import operations", "time", time.Since(start))
 }
 
-// loop is the main loop of the block service
-func (b *blockService) loop(ctx context.Context) {
-	ticker := time.NewTicker(blockJobsIntervalTick)
-	defer ticker.Stop()
-	for {
-		select {
-		case <-ctx.Done():
-			return
-		case <-ticker.C:
-		}
-		b.blocksScheduledForLaterExecution.Range(func(key, value any) bool {
-			blockJob := value.(*blockJob)
-			// check if it has expired
-			if time.Since(blockJob.creationTime) > blockJobExpiry {
-				b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
-				return true
-			}
-			if err := b.processAndStoreBlock(ctx, blockJob.block); err != nil {
-				log.Trace("Failed to process and store block", "block", blockJob.block, "error", err)
-				return true
-			}
-			b.blocksScheduledForLaterExecution.Delete(key.([32]byte))
-			return true
-		})
+func (b *blockService) tryProcessPendingBlock(ctx context.Context, _ common.Hash, block *cltypes.SignedBeaconBlock) (func(), bool) {
+	if err := b.processAndStoreBlock(ctx, block); err != nil {
+		log.Trace("Failed to process and store block", "block", block, "error", err)
+		return nil, false
 	}
+	return nil, true
 }

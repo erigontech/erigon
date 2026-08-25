@@ -29,6 +29,7 @@ const (
 	proposerSlashingCacheSize     = 100
 	operationSeenCacheSize        = 16_384
 	seenBlockCacheSize            = 1000 // SeenBlockCacheSize is the size of the cache for seen blocks.
+	maxPendingBlocks              = 1024
 	blockJobsIntervalTick         = 50 * time.Millisecond
 	blobJobsIntervalTick          = 5 * time.Millisecond
 	singleAttestationIntervalTick = 10 * time.Millisecond

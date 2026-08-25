@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
@@ -44,6 +45,17 @@ type attesterSlashingErrorStore struct {
 }
 
 func (s attesterSlashingErrorStore) OnAttesterSlashing(*cltypes.AttesterSlashing, bool) error {
+	return s.err
+}
+
+type blockProcessingErrorStore struct {
+	forkchoice.ForkChoiceStorage
+	err   error
+	calls int
+}
+
+func (s *blockProcessingErrorStore) OnBlock(context.Context, *cltypes.SignedBeaconBlock, bool, bool, bool) error {
+	s.calls++
 	return s.err
 }
 
@@ -164,6 +176,62 @@ func TestBlockServiceSuccess(t *testing.T) {
 	blocks[1].Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](100, 48)
 
 	require.NoError(t, blockService.ProcessMessage(context.Background(), nil, blocks[1]))
+}
+
+func TestBlockServicePendingQueueCap(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, _ := tests.GetBellatrixRandom()
+	serviceAPI, _, _, _ := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	service.blocksScheduledForLaterExecution = service.newPendingBlockQueue(canceledPendingQueueContext(t))
+	require.Equal(t, int32(maxPendingBlocks), service.blocksScheduledForLaterExecution.capacity)
+	service.blocksScheduledForLaterExecution.count.Store(maxPendingBlocks)
+
+	service.scheduleBlockForLaterProcessing(blocks[0])
+
+	require.Equal(t, int32(maxPendingBlocks), service.blocksScheduledForLaterExecution.count.Load())
+	root, err := blocks[0].Block.HashSSZ()
+	require.NoError(t, err)
+	_, exists := service.blocksScheduledForLaterExecution.jobs.Load(common.Hash(root))
+	require.False(t, exists)
+}
+
+func TestBlockServicePendingQueueDeduplicates(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, _ := tests.GetBellatrixRandom()
+	serviceAPI, _, _, _ := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	service.blocksScheduledForLaterExecution = service.newPendingBlockQueue(canceledPendingQueueContext(t))
+
+	service.scheduleBlockForLaterProcessing(blocks[0])
+	service.scheduleBlockForLaterProcessing(blocks[0])
+
+	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
+}
+
+func TestBlockServicePendingQueueRetainsProcessingFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, _ := tests.GetBellatrixRandom()
+	serviceAPI, _, _, forkchoiceStore := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	processingStore := &blockProcessingErrorStore{
+		ForkChoiceStorage: forkchoiceStore,
+		err:               errors.New("processing failed"),
+	}
+	service.forkchoiceStore = processingStore
+	service.blocksScheduledForLaterExecution = service.newPendingBlockQueue(canceledPendingQueueContext(t))
+
+	service.scheduleBlockForLaterProcessing(blocks[0])
+	service.blocksScheduledForLaterExecution.processPending(t.Context())
+
+	require.Equal(t, 1, processingStore.calls)
+	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
 }
 
 func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {

@@ -89,7 +89,7 @@ func (t *dataColumnSidecarTestSuite) SetupTest() {
 	}
 
 	t.dataColumnSidecarService = NewDataColumnSidecarService(
-		context.Background(),
+		canceledPendingQueueContext(t.T()),
 		t.beaconConfig,
 		t.mockEthClock,
 		t.mockForkChoice,
@@ -579,6 +579,73 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenBlockNotFound_S
 	err := t.dataColumnSidecarService.ProcessMessage(context.Background(), nil, sidecar)
 
 	t.Equal(ErrIgnore, err)
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
+	_, exists := service.pendingGloasSidecars.jobs.Load(seenGloasSidecarKey{
+		beaconBlockRoot: testBlockRoot,
+		index:           sidecar.Index,
+	})
+	t.True(exists)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueCap() {
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	t.Equal(int32(maxPendingGloasSidecars), service.pendingGloasSidecars.capacity)
+	service.pendingGloasSidecars.count.Store(maxPendingGloasSidecars)
+
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	service.scheduleSidecarForLaterProcessing(sidecar, nil)
+
+	t.Equal(int32(maxPendingGloasSidecars), service.pendingGloasSidecars.count.Load())
+	_, exists := service.pendingGloasSidecars.jobs.Load(seenGloasSidecarKey{
+		beaconBlockRoot: testBlockRoot,
+		index:           sidecar.Index,
+	})
+	t.False(exists)
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDeduplicates() {
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+
+	service.scheduleSidecarForLaterProcessing(sidecar, nil)
+	service.scheduleSidecarForLaterProcessing(sidecar, nil)
+
+	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsFinalizedSidecar() {
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	t.mockForkChoice.FinalizedSlotVal = testSlot
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	service.scheduleSidecarForLaterProcessing(sidecar, nil)
+
+	service.pendingGloasSidecars.processPending(t.T().Context())
+
+	t.Zero(service.pendingGloasSidecars.count.Load())
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueProcessesAvailableBlock() {
+	verifyDataColumnSidecarWithCommitments = t.mockFuncs.VerifyDataColumnSidecarWithCommitments
+	verifyDataColumnSidecarKZGProofsWithCommitments = t.mockFuncs.VerifyDataColumnSidecarKZGProofsWithCommitments
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarWithCommitments", gomock.Any(), gomock.Any()).Return(true)
+	t.mockFuncs.ctrl.RecordCall(t.mockFuncs, "VerifyDataColumnSidecarKZGProofsWithCommitments", gomock.Any(), gomock.Any()).Return(true)
+	t.mockForkChoice.Blocks[testBlockRoot] = createMockGloasBlock(testSlot, testBlockRoot)
+	t.mockColumnSidecarStorage.EXPECT().WriteColumnSidecars(gomock.Any(), testBlockRoot, int64(0), gomock.Any()).Return(nil)
+	t.mockPeerDas.EXPECT().TryScheduleRecover(testSlot, testBlockRoot).Return(nil)
+
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	service.scheduleSidecarForLaterProcessing(sidecar, nil)
+	service.pendingGloasSidecars.processPending(t.T().Context())
+
+	t.Zero(service.pendingGloasSidecars.count.Load())
+	_, seen := service.seenGloasSidecar.Get(seenGloasSidecarKey{
+		beaconBlockRoot: testBlockRoot,
+		index:           sidecar.Index,
+	})
+	t.True(seen)
 }
 
 // TestGloasProcessMessage_WhenSlotMismatch_ReturnsError tests slot mismatch validation
