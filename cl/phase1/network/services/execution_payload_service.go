@@ -89,6 +89,7 @@ func NewExecutionPayloadService(
 
 func (s *executionPayloadService) newPendingQueue(ctx context.Context) *pendingJobQueue[pendingEnvelopeKey, *cltypes.SignedExecutionPayloadEnvelope] {
 	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		name:          "execution_payload_envelope",
 		capacity:      maxPendingEnvelopes,
 		expiry:        pendingEnvelopeExpiry,
 		checkInterval: pendingEnvelopeCheckInterval,
@@ -200,7 +201,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 
 // queuePendingEnvelope defers an envelope until its referenced block is available.
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
-	err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
+	_, err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
 		envelopeHash, err := envelope.HashSSZ()
 		if err != nil {
 			return pendingEnvelopeKey{}, err

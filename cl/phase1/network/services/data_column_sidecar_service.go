@@ -107,6 +107,7 @@ func NewDataColumnSidecarService(
 
 func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Context) *pendingJobQueue[seenGloasSidecarKey, pendingGloasSidecar] {
 	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		name:          "gloas_data_column_sidecar",
 		capacity:      maxPendingGloasSidecars,
 		expiry:        pendingGloasSidecarExpiry,
 		checkInterval: pendingGloasSidecarTick,

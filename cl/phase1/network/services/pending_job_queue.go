@@ -21,6 +21,8 @@ import (
 	"sync"
 	"sync/atomic"
 	"time"
+
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 type pendingJob[M any] struct {
@@ -29,10 +31,20 @@ type pendingJob[M any] struct {
 }
 
 type pendingJobQueueOptions struct {
+	name          string
 	capacity      int32
 	expiry        time.Duration
 	checkInterval time.Duration
 }
+
+type pendingJobEnqueueResult uint8
+
+const (
+	pendingJobEnqueueError pendingJobEnqueueResult = iota
+	pendingJobEnqueued
+	pendingJobDuplicate
+	pendingJobQueueFull
+)
 
 type pendingJobDecision uint8
 
@@ -40,6 +52,12 @@ const (
 	pendingJobKeep pendingJobDecision = iota
 	pendingJobRemove
 	pendingJobRemoveThenProcess
+)
+
+var pendingJobQueueRejectedCounter = metrics.GetOrCreateCounterVec(
+	"caplin_pending_job_queue_rejected_total",
+	[]string{"queue"},
+	"Total pending jobs rejected because their queue was full",
 )
 
 // pendingJobQueue retries dependency-blocked jobs on the single processing loop
@@ -57,6 +75,8 @@ type pendingJobQueue[K comparable, M any] struct {
 	jobs  sync.Map // K -> *pendingJob[M]
 	count atomic.Int32
 	cond  *sync.Cond
+
+	fullCounter metrics.Counter
 }
 
 func newPendingJobQueue[K comparable, M any](
@@ -72,6 +92,9 @@ func newPendingJobQueue[K comparable, M any](
 	if options.checkInterval <= 0 {
 		panic("pending job queue check interval must be positive")
 	}
+	if options.name == "" {
+		panic("pending job queue name must not be empty")
+	}
 	if tryProcess == nil {
 		panic("pending job queue requires tryProcess")
 	}
@@ -84,24 +107,28 @@ func newPendingJobQueue[K comparable, M any](
 		processAfterRemove:     processAfterRemove,
 		onExpired:              onExpired,
 		cond:                   sync.NewCond(&sync.Mutex{}),
+		fullCounter:            pendingJobQueueRejectedCounter.WithLabelValues(options.name),
 	}
 	go q.loop(ctx)
 	return q
 }
 
-func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) {
-	if !q.reserve() {
-		return
+func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) pendingJobEnqueueResult {
+	if _, ok := q.jobs.Load(key); ok {
+		return pendingJobDuplicate
 	}
-	q.storeReserved(key, msg)
+	if !q.reserve() {
+		return pendingJobQueueFull
+	}
+	return q.storeReserved(key, msg)
 }
 
 // enqueueLazy reserves capacity before building the key so a full queue skips
-// potentially expensive work. The enqueue attempt owns its reservation until a
-// job is stored, so deferred cleanup must cover both errors and panics.
-func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
+// potentially expensive work. The enqueue attempt owns its reservation until
+// storage accepts or deduplicates it, so deferred cleanup covers errors and panics.
+func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) (pendingJobEnqueueResult, error) {
 	if !q.reserve() {
-		return nil
+		return pendingJobQueueFull, nil
 	}
 
 	reservationOwned := true
@@ -113,32 +140,34 @@ func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) e
 
 	key, err := buildKey()
 	if err != nil {
-		return err
+		return pendingJobEnqueueError, err
 	}
-	q.storeReserved(key, msg)
+	result := q.storeReserved(key, msg)
 	reservationOwned = false
-	return nil
+	return result, nil
 }
 
 func (q *pendingJobQueue[K, M]) reserve() bool {
 	if q.count.Add(1) > q.capacity {
 		q.count.Add(-1)
+		q.fullCounter.Inc()
 		return false
 	}
 	return true
 }
 
-func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) {
+func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) pendingJobEnqueueResult {
 	if _, loaded := q.jobs.LoadOrStore(key, &pendingJob[M]{
 		msg:          msg,
 		creationTime: time.Now(),
 	}); loaded {
 		q.count.Add(-1)
-	} else {
-		q.cond.L.Lock()
-		q.cond.Signal()
-		q.cond.L.Unlock()
+		return pendingJobDuplicate
 	}
+	q.cond.L.Lock()
+	q.cond.Signal()
+	q.cond.L.Unlock()
+	return pendingJobEnqueued
 }
 
 func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {

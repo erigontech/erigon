@@ -133,6 +133,7 @@ func NewExecutionPayloadBidService(
 
 func (s *executionPayloadBidService) newPendingQueue(ctx context.Context) *pendingJobQueue[pendingBidKey, *cltypes.SignedExecutionPayloadBid] {
 	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		name:          "execution_payload_bid",
 		capacity:      maxPendingBids,
 		expiry:        pendingBidExpiry,
 		checkInterval: pendingBidCheckInterval,

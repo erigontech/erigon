@@ -104,6 +104,7 @@ func NewPayloadAttestationService(
 
 func (s *payloadAttestationService) newPendingQueue(ctx context.Context) *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage] {
 	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		name:          "payload_attestation",
 		capacity:      maxPendingAttestations,
 		expiry:        pendingPayloadAttestationExpiry,
 		checkInterval: pendingPayloadAttestationCheckInterval,

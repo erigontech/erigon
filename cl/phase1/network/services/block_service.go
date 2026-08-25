@@ -94,6 +94,7 @@ func NewBlockService(
 
 func (b *blockService) newPendingBlockQueue(ctx context.Context) *pendingJobQueue[common.Hash, *cltypes.SignedBeaconBlock] {
 	return newPendingJobQueue(ctx, pendingJobQueueOptions{
+		name:          "beacon_block",
 		capacity:      maxPendingBlocks,
 		expiry:        blockJobExpiry,
 		checkInterval: blockJobsIntervalTick,
@@ -261,7 +262,7 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		blockNum = block.Block.Body.ExecutionPayload.BlockNumber
 	}
 	log.Trace("Block scheduled for later processing", "slot", block.Block.Slot, "block", blockNum)
-	err := b.blocksScheduledForLaterExecution.enqueueLazy(block, func() (common.Hash, error) {
+	_, err := b.blocksScheduledForLaterExecution.enqueueLazy(block, func() (common.Hash, error) {
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
 			return common.Hash{}, err
