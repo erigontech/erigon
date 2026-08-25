@@ -821,6 +821,7 @@ func (s *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 	if s == nil {
 		return nil
 	}
+	s.assertLive()
 	out := &WriteSet{}
 	for a, vw := range s.address {
 		if keep(vw.WriteHeader) {
@@ -1186,6 +1187,7 @@ func (s *WriteSet) forEachAddr(f func(accounts.Address)) {
 	if s == nil {
 		return
 	}
+	s.assertLive()
 	for a := range s.address {
 		f(a)
 	}
@@ -1198,6 +1200,7 @@ func (s *WriteSet) forEachFieldAddr(f func(accounts.Address)) {
 	if s == nil {
 		return
 	}
+	s.assertLive()
 	for a := range s.balance {
 		f(a)
 	}
@@ -1893,6 +1896,7 @@ func (s *WriteSet) TouchUpdates(updates *commitment.Updates) {
 	if s == nil {
 		return
 	}
+	s.assertLive()
 	for addr, w := range s.balance {
 		addrVal := addr.Value()
 		updates.TouchPlainKeyDirect(string(addrVal[:]), &commitment.Update{

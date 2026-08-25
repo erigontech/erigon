@@ -28,6 +28,7 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -498,3 +499,32 @@ func BenchmarkVersionedFeeMergeInto(b *testing.B) {
 }
 
 var sinkWS *WriteSet
+
+// The production consumers that walk a whole set do not go through the guarded
+// iterators: FlushVersionedWrites and Normalize traverse it by address, and
+// TouchUpdates and Filter walk the per-path maps directly. A released set reads
+// as empty, so each of these would silently treat it as having no writes.
+func TestWriteSetReleasedTripwireWholeSetConsumers(t *testing.T) {
+	defer func(prev bool) { dbg.AssertEnabled = prev }(dbg.AssertEnabled)
+	dbg.AssertEnabled = true
+
+	for _, tc := range []struct {
+		name    string
+		consume func(*WriteSet)
+	}{
+		{"FlushVersionedWrites", func(s *WriteSet) { NewVersionMap(nil).FlushVersionedWrites(s, true, "") }},
+		{"TouchUpdates", func(s *WriteSet) {
+			updates := commitment.NewUpdates(commitment.ModeUpdate, t.TempDir(), func(k []byte) []byte { return k })
+			s.TouchUpdates(updates)
+		}},
+		{"Filter", func(s *WriteSet) { s.Filter(func(WriteHeader) bool { return true }) }},
+		{"forEachAddr", func(s *WriteSet) { s.forEachAddr(func(accounts.Address) {}) }},
+		{"forEachFieldAddr", func(s *WriteSet) { s.forEachFieldAddr(func(accounts.Address) {}) }},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			released, _ := mergeIntoFixture()
+			released.ReleaseMaps()
+			assert.Panics(t, func() { tc.consume(released) })
+		})
+	}
+}
