@@ -155,6 +155,17 @@ func TestConvertFormatRegistersOutputFlags(t *testing.T) {
 	}
 }
 
+func TestConvertFormatHelpDescribesOutputDatadirModel(t *testing.T) {
+	help := cmdCommitmentConvertFormat.Long
+	require.Contains(t, help, "--output.datadir")
+	require.Contains(t, help, "--resume")
+	require.Contains(t, help, "--verify.sample")
+	require.Contains(t, help, "datadir remains unchanged")
+	require.NotContains(t, help, "backup/domains")
+	require.NotContains(t, help, "--restore")
+	require.NotContains(t, help, "--continue")
+}
+
 func TestStageRebuildOutputLinksInputsAndOmitsCommitment(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())

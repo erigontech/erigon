@@ -421,10 +421,10 @@ already the output's.
 
 ### Task 12: [Final] Update documentation
 
-- [ ] rewrite the `convert-format` long help for the output-datadir model — it currently says
+- [x] rewrite the `convert-format` long help for the output-datadir model — it currently says
       originals are preserved at `<datadir>/snapshots/backup/domains/` and restored with
       `integration commitment convert --restore`, both false under this design
-- [ ] move this plan to `docs/plans/completed/`
+- [x] move this plan to `docs/plans/completed/`
 
 ## Post-Completion
 

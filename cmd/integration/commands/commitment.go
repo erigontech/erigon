@@ -1073,12 +1073,19 @@ An input record naming one cell triggers an intentional panic because it cannot
 come from the pbin folding algorithm. That failure can leave partial output;
 investigate the output and do not resume that run.
 
-Files already in the current format are left alone, so the command is safe to
-re-run. Originals are preserved at <datadir>/snapshots/backup/domains/;
-"integration commitment convert --restore" moves them back.
+The command requires --output.datadir. It stages the source tree there with
+hardlinks, then replaces only legacy commitment files in the output. The source
+datadir remains unchanged; the output must be separate from the source and on
+the same filesystem. Files already in the current format stay hardlinked and
+are left alone.
+
+Use --resume to continue an interrupted conversion. Complete output shards are
+kept and incomplete shards are retried. Use --verify.sample=N to sequentially
+read back every N-th converted legacy branch record; zero disables this check.
+There is no backup or restore mode: remove the output datadir to discard it.
 
 Example:
-  integration commitment convert-format --datadir /path/to/datadir --chain mainnet`,
+  integration commitment convert-format --datadir /path/to/source --output.datadir /path/to/output --chain mainnet --verify.sample=1000`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
 		if err := requireConvertFormatOutput(rebuildOutputDatadir); err != nil {
