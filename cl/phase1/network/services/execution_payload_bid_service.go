@@ -90,7 +90,9 @@ type executionPayloadBidService struct {
 	validationStateMu    sync.Mutex
 	validationStateCache *lru.CacheWithTTL[bidValidationStateKey, *bidValidationStateEntry]
 
-	// Pending bids waiting for validation dependencies
+	// buildPendingBidKey is replaceable so HashSSZ failures can be tested.
+	buildPendingBidKey func(*cltypes.SignedExecutionPayloadBid) (pendingBidKey, error)
+	// pending retains bids until their validation dependencies are available.
 	pending *pendingJobQueue[pendingBidKey, *cltypes.SignedExecutionPayloadBid]
 }
 
@@ -123,6 +125,7 @@ func NewExecutionPayloadBidService(
 		emitters:             emitters,
 		seenCache:            seenCache,
 		validationStateCache: validationStateCache,
+		buildPendingBidKey:   pendingBidKeyFor,
 	}
 	s.pending = s.newPendingQueue()
 	go s.pending.loop(ctx)
@@ -482,18 +485,25 @@ func (s *executionPayloadBidService) validateBuilderAvailability(
 
 // queuePendingBid defers a bid until its validation dependencies are available.
 func (s *executionPayloadBidService) queuePendingBid(msg *cltypes.SignedExecutionPayloadBid) {
-	_ = s.pending.enqueue(msg, func() (pendingBidKey, error) {
-		return pendingBidKeyFor(msg), nil
+	err := s.pending.enqueue(msg, func() (pendingBidKey, error) {
+		return s.buildPendingBidKey(msg)
 	})
+	if err != nil {
+		log.Warn("Failed to hash execution payload bid for pending queue",
+			"slot", msg.Message.Slot, "builderIndex", msg.Message.BuilderIndex, "err", err)
+	}
 }
 
-func pendingBidKeyFor(msg *cltypes.SignedExecutionPayloadBid) pendingBidKey {
-	root, _ := msg.HashSSZ()
+func pendingBidKeyFor(msg *cltypes.SignedExecutionPayloadBid) (pendingBidKey, error) {
+	root, err := msg.HashSSZ()
+	if err != nil {
+		return pendingBidKey{}, err
+	}
 	return pendingBidKey{
 		builderIndex: msg.Message.BuilderIndex,
 		slot:         msg.Message.Slot,
 		messageRoot:  common.Hash(root),
-	}
+	}, nil
 }
 
 // tryProcessPendingBid retains bids with unavailable dependencies and removes

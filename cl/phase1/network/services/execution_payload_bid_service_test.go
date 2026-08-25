@@ -64,6 +64,7 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		emitters:             beaconevents.NewEventEmitter(),
 		seenCache:            seenCache,
 		validationStateCache: validationStateCache,
+		buildPendingBidKey:   pendingBidKeyFor,
 	}
 	service.pending = service.newPendingQueue()
 
@@ -85,6 +86,13 @@ func newTestSignedExecutionPayloadBid(slot uint64, builderIndex uint64, value ui
 		},
 		Signature: common.Bytes96{},
 	}
+}
+
+func mustPendingBidKey(t *testing.T, msg *cltypes.SignedExecutionPayloadBid) pendingBidKey {
+	t.Helper()
+	key, err := pendingBidKeyFor(msg)
+	require.NoError(t, err)
+	return key
 }
 
 // addPreferencesToPool adds a SignedProposerPreferences to the pool for the given slot.
@@ -692,9 +700,29 @@ func TestExecutionPayloadBidServicePendingQueueCap(t *testing.T) {
 
 	// Should still be at cap — new item was rejected
 	require.Equal(t, int32(maxPendingBids), service.pending.count.Load())
-	key := pendingBidKeyFor(msg)
+	key := mustPendingBidKey(t, msg)
 	_, exists := service.pending.jobs.Load(key)
 	require.False(t, exists)
+}
+
+func TestExecutionPayloadBidServicePendingQueueRejectsHashFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
+	service.buildPendingBidKey = func(*cltypes.SignedExecutionPayloadBid) (pendingBidKey, error) {
+		return pendingBidKey{}, errors.New("hash failed")
+	}
+
+	service.queuePendingBid(newTestSignedExecutionPayloadBid(100, 1, 1000))
+
+	require.Zero(t, service.pending.count.Load())
+	stored := 0
+	service.pending.jobs.Range(func(_, _ any) bool {
+		stored++
+		return true
+	})
+	require.Zero(t, stored)
 }
 
 func TestExecutionPayloadBidServicePendingQueueKeepsDistinctSameBuilderSlot(t *testing.T) {
@@ -711,10 +739,10 @@ func TestExecutionPayloadBidServicePendingQueueKeepsDistinctSameBuilderSlot(t *t
 	service.queuePendingBid(second)
 
 	require.Equal(t, int32(2), service.pending.count.Load())
-	stored, firstExists := service.pending.jobs.Load(pendingBidKeyFor(first))
+	stored, firstExists := service.pending.jobs.Load(mustPendingBidKey(t, first))
 	require.True(t, firstExists)
 	require.Same(t, first, stored.(*pendingJob[*cltypes.SignedExecutionPayloadBid]).msg)
-	stored, secondExists := service.pending.jobs.Load(pendingBidKeyFor(second))
+	stored, secondExists := service.pending.jobs.Load(mustPendingBidKey(t, second))
 	require.True(t, secondExists)
 	require.Same(t, second, stored.(*pendingJob[*cltypes.SignedExecutionPayloadBid]).msg)
 }
@@ -728,7 +756,7 @@ func TestExecutionPayloadBidServiceRemovePendingBidDoesNotRemoveOtherSameBuilder
 	second := newTestSignedExecutionPayloadBid(100, 1, 2000)
 
 	service.queuePendingBid(first)
-	firstKey := pendingBidKeyFor(first)
+	firstKey := mustPendingBidKey(t, first)
 	firstJob, exists := service.pending.jobs.Load(firstKey)
 	require.True(t, exists)
 
@@ -736,7 +764,7 @@ func TestExecutionPayloadBidServiceRemovePendingBidDoesNotRemoveOtherSameBuilder
 	require.True(t, service.pending.remove(firstKey, firstJob.(*pendingJob[*cltypes.SignedExecutionPayloadBid])))
 	require.Equal(t, int32(1), service.pending.count.Load())
 
-	current, exists := service.pending.jobs.Load(pendingBidKeyFor(second))
+	current, exists := service.pending.jobs.Load(mustPendingBidKey(t, second))
 	require.True(t, exists)
 	require.Same(t, second, current.(*pendingJob[*cltypes.SignedExecutionPayloadBid]).msg)
 }
@@ -774,7 +802,7 @@ func TestExecutionPayloadBidServicePendingExpiry(t *testing.T) {
 	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
-	key := pendingBidKeyFor(msg)
+	key := mustPendingBidKey(t, msg)
 	service.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadBid]{
 		msg:          msg,
 		creationTime: time.Now().Add(-pendingBidExpiry - time.Second), // expired
@@ -796,7 +824,7 @@ func TestExecutionPayloadBidServicePendingStaleSlotDropped(t *testing.T) {
 	service, _, ethClockMock, _, _ := setupExecutionPayloadBidService(t, ctrl)
 
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
-	key := pendingBidKeyFor(msg)
+	key := mustPendingBidKey(t, msg)
 	service.pending.jobs.Store(key, &pendingJob[*cltypes.SignedExecutionPayloadBid]{
 		msg:          msg,
 		creationTime: time.Now(),
