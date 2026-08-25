@@ -69,7 +69,9 @@ type payloadAttestationService struct {
 	// Cache to track seen attestations: (slot, validatorIndex) -> struct{}
 	seenAttestationsCache *lru.Cache[seenPayloadAttestationKey, struct{}]
 
-	// Pending attestations waiting for block to arrive
+	// buildPendingAttestationKey is replaceable so HashSSZ failures can be tested.
+	buildPendingAttestationKey func(common.Hash, *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error)
+	// pending retains attestations until their referenced blocks are available.
 	pending             *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage]
 	validationAdmission chan struct{}
 }
@@ -88,12 +90,13 @@ func NewPayloadAttestationService(
 		panic(err)
 	}
 	s := &payloadAttestationService{
-		forkchoiceStore:       forkchoiceStore,
-		ethClock:              ethClock,
-		netCfg:                netCfg,
-		emitters:              emitters,
-		seenAttestationsCache: seenCache,
-		validationAdmission:   make(chan struct{}, maxConcurrentPayloadAttestationValidations),
+		forkchoiceStore:            forkchoiceStore,
+		ethClock:                   ethClock,
+		netCfg:                     netCfg,
+		emitters:                   emitters,
+		seenAttestationsCache:      seenCache,
+		buildPendingAttestationKey: pendingPayloadAttestationKeyFor,
+		validationAdmission:        make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
 	s.pending = s.newPendingQueue()
 	go s.pending.loop(ctx)
@@ -209,18 +212,25 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 // queuePendingAttestation defers an attestation until its referenced block is available.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	_ = s.pending.enqueue(msg, func() (pendingPayloadAttestationKey, error) {
-		return pendingPayloadAttestationKeyFor(blockRoot, msg), nil
+	err := s.pending.enqueue(msg, func() (pendingPayloadAttestationKey, error) {
+		return s.buildPendingAttestationKey(blockRoot, msg)
 	})
+	if err != nil {
+		log.Warn("Failed to hash payload attestation for pending queue",
+			"blockRoot", blockRoot, "validatorIndex", msg.ValidatorIndex, "err", err)
+	}
 }
 
-func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) pendingPayloadAttestationKey {
-	root, _ := msg.HashSSZ()
+func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error) {
+	root, err := msg.HashSSZ()
+	if err != nil {
+		return pendingPayloadAttestationKey{}, err
+	}
 	return pendingPayloadAttestationKey{
 		blockRoot:      blockRoot,
 		validatorIndex: msg.ValidatorIndex,
 		messageRoot:    common.Hash(root),
-	}
+	}, nil
 }
 
 // tryProcessPendingAttestation drops stale messages and revalidates the rest
