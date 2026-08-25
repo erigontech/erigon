@@ -18,6 +18,7 @@ package cache
 
 import (
 	"encoding/binary"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -30,13 +31,9 @@ import (
 )
 
 // TestGenericCache_ConcurrentPutAcrossGrow guards the jump-grow data race:
-// curCap is written under resizeMu in maybeGrow but read on the put fast-path
-// outside it, so concurrent writers crossing the grow threshold raced on it
-// (surfaced by the -race eest shard). Many goroutines insert enough distinct
-// keys to trigger several grow steps while others put concurrently; run with
-// -race, this must stay clean.
+// Many goroutines insert enough distinct keys to cross several slab boundaries
+// while others put and read concurrently; run with -race, this must stay clean.
 func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
-	// Budget well above the start size (1024 slots) so maybeGrow fires repeatedly.
 	c := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU))
 
 	const workers = 8
@@ -111,7 +108,7 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 			}
 		})
 
-		// Cross the grow threshold so maybeGrow swaps the generation while the
+		// Cross several slab boundaries while the
 		// hot-key writer runs.
 		key := make([]byte, 8)
 		for i := range 3 * genericCacheStartCapacity {
@@ -127,68 +124,6 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 }
 
 // A conditional put must keep deferring to a live entry across a grow. The
-// vulnerable writer class: a put of a brand-new key that lands in the
-// retiring generation after the copy snapshotted Keys() is lost on the swap,
-// and a follow-up PutIfAbsent finds the key absent and installs its stale
-// value as live. With the fence the put either lands pre-fence (and is
-// migrated — Keys() is taken with every stripe held) or lands in the new
-// generation; either way the conditional put defers.
-//
-// A writer hammers fresh keys while the grow swaps generations; every key
-// that straddled the swap is then probed with a stale conditional put. The
-// grow is forced by lowering curCap over a lightly-populated cache, so
-// capacity eviction cannot explain a missing key.
-func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
-	fresh := []byte("fresh-value")
-	stale := []byte("stale-value")
-	for round := range 100 {
-		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
-		key := make([]byte, 8)
-		for i := range 256 {
-			binary.BigEndian.PutUint64(key, uint64(1+i))
-			c.Put(key, []byte{1}, 1)
-		}
-		before := c.data.Load()
-		c.curCap.Store(uint32(c.Len()))
-
-		var candidates [][]byte
-		stop := make(chan struct{})
-		var wg sync.WaitGroup
-		wg.Go(func() {
-			for j := 0; ; j++ {
-				select {
-				case <-stop:
-					return
-				default:
-				}
-				k := make([]byte, 9)
-				k[0] = 0xfe
-				binary.BigEndian.PutUint64(k[1:], uint64(j))
-				c.Put(k, fresh, 10)
-				candidates = append(candidates, k)
-				if c.data.Load() != before {
-					return
-				}
-			}
-		})
-
-		binary.BigEndian.PutUint64(key, 0)
-		c.Put(key, []byte{1}, 1) // insert at the lowered cap → triggers the grow
-		close(stop)
-		wg.Wait()
-
-		for _, k := range candidates {
-			c.PutIfAbsent(k, stale, 5)
-		}
-		for i, k := range candidates {
-			v, ok := c.Get(k)
-			require.True(t, ok, "round %d: candidate %d missing", round, i)
-			require.Equal(t, fresh, v,
-				"round %d: candidate %d: PutIfAbsent installed a stale value over a put lost in the retiring generation", round, i)
-		}
-		c.Close()
-	}
-}
 
 // A ModeNoOp admission must never observe the byte counter mid-update: the
 // update path removes the old entry before adding the new one, and a
@@ -220,56 +155,6 @@ func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
 				round, c.SizeBytes(), c.CapacityBytes())
 		}
 	}
-}
-
-// A grow must migrate every entry. Left to pick its own geometry per
-// generation, freelru chooses more, smaller shards as capacity rises, and a
-// new shard that overfills during the copy silently evicts — keys clustered
-// on the shard-selection bits vanish across a "grow", and a follow-up
-// conditional put can install a stale value in the hole. Seeding writes the
-// clustered keys after the pad so they are the newest in their shard and
-// cannot be seeding-eviction victims; only the migration can lose them.
-func TestGenericCache_GrowMigrationLossless(t *testing.T) {
-	c := NewGenericCacheWithAvg[[]byte](4*datasize.MB, 256, func(v []byte) int { return len(v) }, ModeEvictLRU)
-	defer c.Close()
-
-	// Keys sharing hash bits 16-23 land in one shard of any generation with up
-	// to 256 shards.
-	target := (maphash.Hash([]byte("cluster-seed")) >> 16) & 255
-	var clustered [][]byte
-	for i := 0; len(clustered) < 24; i++ {
-		k := make([]byte, 8)
-		binary.BigEndian.PutUint64(k, uint64(i))
-		if (maphash.Hash(k)>>16)&255 == target {
-			clustered = append(clustered, k)
-		}
-	}
-	pad := make([]byte, 9)
-	for j := 0; c.Len() < genericCacheStartCapacity-len(clustered); j++ {
-		binary.BigEndian.PutUint64(pad[1:], uint64(j))
-		c.Put(pad, []byte{1}, 1)
-	}
-	for _, k := range clustered {
-		c.Put(k, []byte("fresh"), 10)
-	}
-	for j := 1 << 20; c.Len() < genericCacheStartCapacity; j++ {
-		binary.BigEndian.PutUint64(pad[1:], uint64(j))
-		c.Put(pad, []byte{1}, 1)
-		if j > 1<<21 {
-			t.Fatal("seeding could not fill the cache to the grow threshold")
-		}
-	}
-	before := c.data.Load()
-	c.Put([]byte("grow-trigger"), []byte{1}, 1)
-	require.NotEqual(t, before, c.data.Load(), "grow did not happen")
-
-	lost := 0
-	for _, k := range clustered {
-		if _, ok := c.Get(k); !ok {
-			lost++
-		}
-	}
-	require.Zero(t, lost, "grow migration evicted clustered entries: per-shard capacity shrank across the swap")
 }
 
 // A capacity eviction is a size-subtracting writer the put stripes cannot
@@ -416,4 +301,102 @@ func TestGenericCache_StatsResetAtomicWithDelete_NoPhantomEvictions(t *testing.T
 	wg.Wait()
 	total += c.evictions.Swap(0)
 	require.Zero(t, total, "intentional removals surfaced in the evictions metric")
+}
+
+// Filling a cache from cold to a large working set. On the jump-grow lineage
+// this pays the migration copies; with slab-allocated elements there is nothing
+// to migrate. Uses only the public put path, so it runs unchanged on both.
+func BenchmarkGenericCacheFill(b *testing.B) {
+	const keys = 1 << 20
+	val := make([]byte, 32)
+	for b.Loop() {
+		c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, 88, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		k := make([]byte, 8)
+		for i := range uint64(keys) {
+			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
+			c.Put(k, val, 1)
+		}
+		c.Close()
+	}
+}
+
+// The longest a single put is held up while filling a cache from cold: on the
+// jump-grow lineage that is a migration copy, with slab-allocated elements it
+// is one slab allocation.
+func BenchmarkGenericCacheWorstPut(b *testing.B) {
+	const keys = 1 << 20
+	val := make([]byte, 32)
+	var worst time.Duration
+	for b.Loop() {
+		c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, 88, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		k := make([]byte, 8)
+		for i := range uint64(keys) {
+			binary.BigEndian.PutUint64(k, i*0x9E3779B97F4A7C15)
+			start := time.Now()
+			c.Put(k, val, 1)
+			if d := time.Since(start); d > worst {
+				worst = d
+			}
+		}
+		c.Close()
+	}
+	b.ReportMetric(float64(worst.Microseconds()), "worst-put-us")
+}
+
+// Steady-state throughput with many more goroutines than cores. Accesses are a
+// hot/cold mix -- a hot set about the size of the ceiling plus a long cold tail
+// -- and every miss fills read-through, so eviction runs continuously and the
+// measured hit rate lands near what the storage domain shows in production.
+// Both the hit and the miss path are therefore exercised in realistic
+// proportion; a benchmark that only hits, or only misses, says nothing here.
+func BenchmarkGenericCacheParallelMixed(b *testing.B) {
+	const (
+		hotKeys  = 1 << 20
+		coldKeys = 10 << 20
+		samples  = 8 << 20
+		hotPct   = 79
+	)
+	rnd := rand.New(rand.NewSource(1))
+	keys := make([]uint64, samples)
+	for i := range keys {
+		if rnd.Intn(100) < hotPct {
+			keys[i] = uint64(rnd.Intn(hotKeys)) * 0x9E3779B97F4A7C15
+		} else {
+			keys[i] = uint64(hotKeys+rnd.Intn(coldKeys)) * 0x9E3779B97F4A7C15
+		}
+	}
+
+	c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, 88,
+		func(v []byte) int { return len(v) }, ModeEvictLRU)
+	defer c.Close()
+	val := make([]byte, 32)
+
+	k := make([]byte, 8)
+	for _, key := range keys {
+		binary.BigEndian.PutUint64(k, key)
+		if _, ok := c.Get(k); !ok {
+			c.Put(k, val, 1)
+		}
+	}
+
+	hits0, misses0 := c.hits.Load(), c.misses.Load()
+	var stream atomic.Uint64
+	b.SetParallelism(64)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		// Each goroutine enters the shared stream at its own offset, so shard
+		// contention comes from hashing rather than from a shared cursor.
+		i := int(stream.Add(1)) * 7919
+		k := make([]byte, 8)
+		for pb.Next() {
+			binary.BigEndian.PutUint64(k, keys[i&(samples-1)])
+			i++
+			if _, ok := c.Get(k); !ok {
+				c.Put(k, val, 1)
+			}
+		}
+	})
+	b.StopTimer()
+	hits, misses := c.hits.Load()-hits0, c.misses.Load()-misses0
+	b.ReportMetric(100*float64(hits)/float64(hits+misses), "hit%")
 }

@@ -17,9 +17,15 @@
 package cache
 
 import (
+	"math/rand"
+	"slices"
+
+	"github.com/elastic/go-freelru"
+
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon/execution/cache/slablru"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1770,4 +1776,68 @@ func BenchmarkPublishVsViewBindLock(b *testing.B) {
 			b.ReportMetric(float64(reads.Load())/el.Seconds()/1e6, "Mreads/s")
 		})
 	}
+}
+
+// Slab-allocated elements cost one extra indirection per access. Positions are
+// handed out in insertion order, so walking keys in that order lets the
+// prefetcher hide the flat array's cost; these drive a shuffled order and a
+// fresh-key insert stream instead, which is what production does.
+func BenchmarkLRUFlatVsSlab(b *testing.B) {
+	const capacity = 1 << 20
+	val := entry[[]byte]{key: make([]byte, 32), val: make([]byte, 32), size: 88, txNum: 7}
+
+	keys := make([]uint64, capacity)
+	for i := range keys {
+		keys[i] = uint64(i) * 0x9E3779B97F4A7C15
+	}
+	shuffled := slices.Clone(keys)
+	rnd := rand.New(rand.NewSource(1))
+	rnd.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+
+	flat, err := freelru.New[uint64, entry[[]byte]](capacity, u64identity)
+	require.NoError(b, err)
+	slab, err := slablru.New[uint64, entry[[]byte]](capacity, u64identity)
+	require.NoError(b, err)
+	for _, k := range keys {
+		flat.Add(k, val)
+		slab.Add(k, val)
+	}
+
+	// A full cache taking fresh keys: every insert evicts, so the position it
+	// lands on is wherever the LRU tail happens to be.
+	b.Run("add-evicting/flat", func(b *testing.B) {
+		n := uint64(capacity)
+		for b.Loop() {
+			n++
+			flat.Add(n*0x9E3779B97F4A7C15, val)
+		}
+	})
+	b.Run("add-evicting/slab", func(b *testing.B) {
+		n := uint64(capacity)
+		for b.Loop() {
+			n++
+			slab.Add(n*0x9E3779B97F4A7C15, val)
+		}
+	})
+
+	b.Run("get-shuffled/flat", func(b *testing.B) {
+		for i := 0; b.Loop(); i++ {
+			flat.Get(shuffled[i&(capacity-1)])
+		}
+	})
+	b.Run("get-shuffled/slab", func(b *testing.B) {
+		for i := 0; b.Loop(); i++ {
+			slab.Get(shuffled[i&(capacity-1)])
+		}
+	})
+	b.Run("get-miss/flat", func(b *testing.B) {
+		for i := 0; b.Loop(); i++ {
+			flat.Get(^shuffled[i&(capacity-1)])
+		}
+	})
+	b.Run("get-miss/slab", func(b *testing.B) {
+		for i := 0; b.Loop(); i++ {
+			slab.Get(^shuffled[i&(capacity-1)])
+		}
+	})
 }
