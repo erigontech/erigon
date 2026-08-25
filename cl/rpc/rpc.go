@@ -140,9 +140,14 @@ func (b *BeaconRpcP2P) SendColumnSidecarsByRootIdentifierReq(
 
 	data := buffer.Bytes()
 	maxResponseBytes := communication.MaxWireResponseBytes(b.columnSidecarRawBytes(), uint64(filteredReq.Len())*b.beaconConfig.NumberOfColumns)
-	responsePacket, pid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes)
+	// Keep the peer we picked: sendRequestWithPeer reports an empty one on failure, and
+	// losing it here is what leaves the download error unattributable.
+	responsePacket, respPid, err := b.sendRequestWithPeer(ctx, communication.DataColumnSidecarsByRootProtocolV1, data, pid, maxResponseBytes)
 	if err != nil {
 		return nil, pid, err
+	}
+	if respPid != "" {
+		pid = respPid
 	}
 
 	ColumnSidecars := []*cltypes.DataColumnSidecar{}

@@ -89,6 +89,7 @@ type BlobHistoryDownloader struct {
 
 	running           atomic.Bool
 	backfillCompleted atomic.Bool
+	repairing         atomic.Bool
 	logger            log.Logger
 
 	// gapSlots are the slots the last pass attempted and still could not fill
@@ -182,8 +183,10 @@ func (b *BlobHistoryDownloader) Start() {
 func (b *BlobHistoryDownloader) run() {
 	defer b.running.Store(false)
 
+	go b.repairLoop()
+
 	// Do an initial download immediately
-	if err := b.downloadOnce(true); err != nil {
+	if err := b.downloadOnce(); err != nil {
 		b.logger.Error("[BlobHistoryDownloader] Error downloading blobs", "err", err)
 	}
 
@@ -198,7 +201,7 @@ func (b *BlobHistoryDownloader) run() {
 		case <-b.ctx.Done():
 			return
 		case <-downloadTimer.C:
-			if err := b.downloadOnce(false); err != nil {
+			if err := b.downloadOnce(); err != nil {
 				b.logger.Error("[BlobHistoryDownloader] Error downloading blobs", "err", err)
 			}
 			downloadTimer.Reset(blobDownloaderInterval)
@@ -212,7 +215,7 @@ func (b *BlobHistoryDownloader) run() {
 }
 
 // downloadOnce performs a single download pass
-func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
+func (b *BlobHistoryDownloader) downloadOnce() error {
 	currentSlot := b.headSlot.Load()
 	if currentSlot == 0 {
 		return nil // not initialized yet
@@ -250,9 +253,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		b.targetSlot = currentSlot - b.beaconCfg.SlotsPerEpoch*2
 	}()
 
-	if shouldLog {
-		b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards", "slot", currentSlot)
-	}
+	b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards", "slot", currentSlot, "to", targetSlot)
 
 	for currentSlot >= targetSlot {
 		if currentSlot <= b.sn.FrozenBlobs() {
@@ -273,12 +274,11 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 			case <-b.ctx.Done():
 				return b.ctx.Err()
 			case <-logInterval.C:
-				if shouldLog {
-					blkSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
-					prevLogSlot = currentSlot
-					prevTime = time.Now()
-					b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards", "slot", currentSlot, "blks/sec", fmt.Sprintf("%.1f", blkSec))
-				}
+				blkSec := float64(prevLogSlot-currentSlot) / time.Since(prevTime).Seconds()
+				prevLogSlot = currentSlot
+				prevTime = time.Now()
+				b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",
+					"slot", currentSlot, "to", targetSlot, "blks/sec", fmt.Sprintf("%.1f", blkSec))
 			default:
 			}
 			b.processBatch(batch)
@@ -309,7 +309,7 @@ func (b *BlobHistoryDownloader) downloadOnce(shouldLog bool) error {
 		b.logger.Warn("[BlobHistoryDownloader] Blob history download finished with gaps no peer would serve",
 			"gapSlots", gaps, "lowest", lowest, "highest", highest,
 			"hint", "blob snapshots stop at the lowest gap until those sidecars are restored")
-	} else if shouldLog {
+	} else {
 		b.logger.Info("[BlobHistoryDownloader] Blob history download finished successfully")
 	}
 

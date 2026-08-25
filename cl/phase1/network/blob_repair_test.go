@@ -74,3 +74,16 @@ func TestDrainBlobGapsIsInertWithoutBudgetOrWork(t *testing.T) {
 	require.Zero(t, filled)
 	require.Zero(t, attempted)
 }
+
+// The repair runs on its own goroutine because downloadOnce holds run()'s goroutine for
+// the length of a full walk. Both it and the end-of-pass call can therefore fire at once,
+// and two concurrent drains would fetch the same slots twice.
+func TestRepairIsSingleFlight(t *testing.T) {
+	b := &BlobHistoryDownloader{}
+
+	require.True(t, b.tryBeginRepair(), "first caller must win")
+	require.False(t, b.tryBeginRepair(), "second caller must be refused while one is running")
+
+	b.endRepair()
+	require.True(t, b.tryBeginRepair(), "must be reusable once the first finishes")
+}

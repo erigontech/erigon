@@ -18,6 +18,7 @@ package network
 
 import (
 	"errors"
+	"time"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
@@ -27,6 +28,10 @@ import (
 // thousands against a per-request timeout would otherwise occupy a single pass for hours;
 // the remainder is carried to the next one so progress stays steady and visible.
 const maxBlobRepairsPerPass = 256
+
+// blobRepairInterval paces the drain. Each tick fetches at most maxBlobRepairsPerPass
+// slots, so this bounds the load a repair puts on the endpoints it reads from.
+const blobRepairInterval = 60 * time.Second
 
 // drainBlobGaps repairs at most limit slots, oldest first, and reports how many it filled
 // and how many it tried. A slot no endpoint can serve is attempted and not filled; it does
@@ -47,13 +52,23 @@ func drainBlobGaps(slots []uint64, limit int, repair func(slot uint64) bool) (fi
 	return filled, attempted
 }
 
-// repairBlobGapsFromRemote drains the gaps the last pass could not fill through the
-// configured beacon-API endpoints. Sidecars are verified against the block before they
-// reach the store, so an endpoint cannot poison it.
+func (b *BlobHistoryDownloader) tryBeginRepair() bool {
+	return b.repairing.CompareAndSwap(false, true)
+}
+
+func (b *BlobHistoryDownloader) endRepair() { b.repairing.Store(false) }
+
+// repairBlobGapsFromRemote drains the recorded gaps through the configured beacon-API
+// endpoints. Sidecars are verified against the block before they reach the store, so an
+// endpoint cannot poison it.
 func (b *BlobHistoryDownloader) repairBlobGapsFromRemote() {
 	if !b.remoteBlobs.enabled() {
 		return
 	}
+	if !b.tryBeginRepair() {
+		return
+	}
+	defer b.endRepair()
 	slots := b.BlobGapSlots()
 	if len(slots) == 0 {
 		return
@@ -121,4 +136,23 @@ func (b *BlobHistoryDownloader) repairBlobGap(slot uint64) bool {
 		want = c.Len()
 	}
 	return int(stored) == want
+}
+
+// repairLoop drains gaps on its own schedule. downloadOnce holds run()'s goroutine for as
+// long as a full walk takes - hours on an archive node - so a repair driven from that
+// loop's select would never fire while there was anything to repair.
+func (b *BlobHistoryDownloader) repairLoop() {
+	if !b.remoteBlobs.enabled() {
+		return
+	}
+	ticker := time.NewTicker(blobRepairInterval)
+	defer ticker.Stop()
+	for {
+		select {
+		case <-b.ctx.Done():
+			return
+		case <-ticker.C:
+			b.repairBlobGapsFromRemote()
+		}
+	}
 }
