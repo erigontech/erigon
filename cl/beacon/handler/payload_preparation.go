@@ -602,9 +602,9 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	if gloasPathRequiresForkChoiceUpdate(payloadSource.gloasPath) {
 		return result, errGloasPathNeedsForkChoice
 	}
-	var withdrawalsState *state.CachingBeaconState
-	if payloadSource.gloasPath == gloasPayloadPathPreFork {
-		withdrawalsState = baseState
+	withdrawalsState, err := withdrawalsStateForExecutionPayloadSource(baseState, payloadSource)
+	if err != nil {
+		return result, fmt.Errorf("prepare payload: derive withdrawals state: %w", err)
 	}
 	withdrawals, err := a.expectedWithdrawals(baseState, withdrawalsState, stateVersion, targetSlot)
 	if err != nil {
@@ -614,7 +614,7 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	attrs := a.payloadBuildAttributes(
 		baseState, baseBlockRoot, targetSlot, feeRecipient, withdrawals, &slotNumber, targetGasLimit, stateVersion,
 	)
-	payloadID, err := a.startPayloadBuildForPreparation(ctx, baseBlockRoot, payloadSource.head, attrs)
+	payloadID, err := a.startPayloadBuildForPreparation(ctx, targetSlot, baseBlockRoot, payloadSource.head, attrs)
 	if err != nil {
 		return result, err
 	}
@@ -670,6 +670,7 @@ func (a *ApiHandler) precheckRegisteredProposer(headRoot common.Hash, targetSlot
 // in-process execution module is busy. Each attempt is non-blocking and separately gated.
 func (a *ApiHandler) startPayloadBuildForPreparation(
 	ctx context.Context,
+	targetSlot uint64,
 	baseBlockRoot common.Hash,
 	head common.Hash,
 	attrs *engine_types.PayloadAttributes,
@@ -682,11 +683,11 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 		if cause := context.Cause(ctx); cause != nil {
 			return nil, cause
 		}
-		selectedRoot, _, selected := a.syncedData.SelectedHead()
+		selectedRoot, selectedSlot, selected := a.syncedData.SelectedHead()
 		if !selected || selectedRoot != baseBlockRoot {
 			return nil, errPreparationHeadChanged
 		}
-		payloadID, err := a.startPayloadBuildAttempt(ctx, payloadBuilder, head, attrs)
+		payloadID, err := a.startPayloadBuildAttempt(ctx, payloadBuilder, targetSlot-1, selectedSlot, head, attrs)
 		if err == nil {
 			return payloadID, nil
 		}
@@ -707,6 +708,8 @@ func (a *ApiHandler) startPayloadBuildForPreparation(
 func (a *ApiHandler) startPayloadBuildAttempt(
 	ctx context.Context,
 	payloadBuilder execution_client.PayloadBuilder,
+	currentSlot uint64,
+	selectedSlot uint64,
 	head common.Hash,
 	attrs *engine_types.PayloadAttributes,
 ) ([]byte, error) {
@@ -715,6 +718,11 @@ func (a *ApiHandler) startPayloadBuildAttempt(
 		return nil, errBlockWorkInFlight
 	}
 	defer finishAttempt()
+	// Production records its marker while holding the shared side of this gate. Checking after
+	// taking the exclusive side closes the handoff race between production and signing.
+	if a.payloadPreparationGate.producedBlockPending(currentSlot, selectedSlot, time.Now()) {
+		return nil, errBlockWorkInFlight
+	}
 	return payloadBuilder.StartPayloadBuild(ctx, head, attrs)
 }
 
@@ -747,6 +755,28 @@ type executionPayloadSource struct {
 	parentExecutionRequests *cltypes.ExecutionRequests
 	gloasPath               gloasPayloadPath
 	fallbackCause           error
+}
+
+func withdrawalsStateForExecutionPayloadSource(
+	baseState *state.CachingBeaconState,
+	payloadSource executionPayloadSource,
+) (*state.CachingBeaconState, error) {
+	if payloadSource.gloasPath == gloasPayloadPathPreFork {
+		return baseState, nil
+	}
+	if payloadSource.parentExecutionRequests == nil {
+		return nil, nil
+	}
+	// Applying a FULL parent mutates Gloas withdrawal state. Other production inputs must keep
+	// reading the unmodified base state.
+	withdrawalsState, err := baseState.Copy()
+	if err != nil {
+		return nil, fmt.Errorf("copy state for FULL parent payload: %w", err)
+	}
+	if err := applyParentExecutionPayload(withdrawalsState, payloadSource.parentExecutionRequests); err != nil {
+		return nil, fmt.Errorf("apply FULL parent payload: %w", err)
+	}
+	return withdrawalsState, nil
 }
 
 // resolveExecutionPayloadSource is shared by preparation and production so both choose the same

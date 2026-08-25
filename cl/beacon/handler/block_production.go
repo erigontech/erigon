@@ -209,12 +209,16 @@ func attestationDue(cfg *clparams.BeaconChainConfig, stateVersion clparams.State
 // unpreparedGrabOffset is the normal payload collection deadline measured from the slot start. It
 // reserves the final publication share of the attestation window for processing, signing, and gossip.
 func unpreparedGrabOffset(due time.Duration) time.Duration {
-	return due - due/payloadPublicationDivisor
+	return due - payloadPublicationMargin(due)
 }
 
 // preparedGrabOffset anchors the earliest collection window for a builder warmed before the slot.
 // Polling starts minPayloadPollingWindow before this offset to tolerate a brief unavailable result.
 func preparedGrabOffset(due time.Duration) time.Duration {
+	return payloadPublicationMargin(due)
+}
+
+func payloadPublicationMargin(due time.Duration) time.Duration {
 	return due / payloadPublicationDivisor
 }
 
@@ -589,12 +593,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		graffiti = a.defaultGraffiti()
 	}
 
-	tx, err := a.indiciesDB.BeginRo(ctx)
-	if err != nil {
-		return nil, err
-	}
-	defer tx.Rollback()
-
 	targetSlotStr := chi.URLParam(r, "slot")
 	targetSlot, err := strconv.ParseUint(targetSlotStr, 10, 64)
 	if err != nil {
@@ -761,7 +759,7 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		block.GetExecutionValue().Uint64(),
 		consensusValue,
 	)
-	signingWindow := attestationDue(a.beaconChainCfg, block.Version()) / payloadPublicationDivisor
+	signingWindow := payloadPublicationMargin(attestationDue(a.beaconChainCfg, block.Version()))
 	completedAt := time.Now()
 	a.payloadPreparationGate.noteProducedBlock(
 		a.ethClock.GetCurrentSlot(), targetSlot,
@@ -961,16 +959,28 @@ func (a *ApiHandler) getMEVBoostPayload(
 	if !strings.EqualFold(header.Version, curVersion) {
 		return nil, fmt.Errorf("invalid version %s, expected %s", header.Version, curVersion)
 	}
-	if ethHeader := header.Data.Message.Header; ethHeader != nil {
-		ethHeader.SetVersion(baseState.Version())
+	message := &header.Data.Message
+	if message.Header == nil {
+		return nil, errors.New("missing execution payload header")
 	}
+	bidValue, ok := new(big.Int).SetString(message.Value, 10)
+	if !ok || bidValue.Sign() < 0 || bidValue.BitLen() > 256 {
+		return nil, errors.New("invalid builder bid value")
+	}
+	if message.BlobKzgCommitments == nil {
+		return nil, errors.New("missing blob KZG commitments")
+	}
+	if baseState.Version() >= clparams.ElectraVersion && message.ExecutionRequests == nil {
+		return nil, errors.New("missing execution requests")
+	}
+	message.Header.SetVersion(baseState.Version())
 	// check kzg commitments
-	if baseState.Version() >= clparams.DenebVersion && header.Data.Message.BlobKzgCommitments != nil {
-		if header.Data.Message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
-			return nil, fmt.Errorf("too many blob kzg commitments: %d", header.Data.Message.BlobKzgCommitments.Len())
+	if baseState.Version() >= clparams.DenebVersion {
+		if message.BlobKzgCommitments.Len() >= cltypes.MaxBlobsCommittmentsPerBlock {
+			return nil, fmt.Errorf("too many blob kzg commitments: %d", message.BlobKzgCommitments.Len())
 		}
-		for i := 0; i < header.Data.Message.BlobKzgCommitments.Len(); i++ {
-			c := header.Data.Message.BlobKzgCommitments.Get(i)
+		for i := 0; i < message.BlobKzgCommitments.Len(); i++ {
+			c := message.BlobKzgCommitments.Get(i)
 			if c == nil {
 				return nil, errors.New("nil blob kzg commitment")
 			}
@@ -979,9 +989,9 @@ func (a *ApiHandler) getMEVBoostPayload(
 			}
 		}
 	}
-	if baseState.Version() >= clparams.ElectraVersion && header.Data.Message.ExecutionRequests != nil {
+	if baseState.Version() >= clparams.ElectraVersion {
 		// check execution requests
-		r := header.Data.Message.ExecutionRequests
+		r := message.ExecutionRequests
 		if r.Deposits != nil && r.Deposits.Len() > int(a.beaconChainCfg.MaxDepositRequestsPerPayload) {
 			return nil, fmt.Errorf("too many deposit requests: %d", r.Deposits.Len())
 		}
@@ -1049,21 +1059,11 @@ func (a *ApiHandler) produceBeaconBody(
 		}
 	}
 	head := payloadSource.head
-	var gloasWithdrawalsState *state.CachingBeaconState
-	switch {
-	case payloadSource.gloasPath == gloasPayloadPathPreFork:
-		gloasWithdrawalsState = baseState
-	case payloadSource.parentExecutionRequests != nil:
-		// A FULL Gloas parent must be applied before deriving this payload's withdrawals. Keep
-		// baseState unchanged because the other body-building steps also read it.
-		stateCopy, err := baseState.Copy()
-		if err != nil {
-			return nil, 0, fmt.Errorf("produceBeaconBody: copy state for FULL parent payload: %w", err)
-		}
-		if err := applyParentExecutionPayload(stateCopy, payloadSource.parentExecutionRequests); err != nil {
-			return nil, 0, fmt.Errorf("produceBeaconBody: apply FULL parent payload: %w", err)
-		}
-		gloasWithdrawalsState = stateCopy
+	gloasWithdrawalsState, err := withdrawalsStateForExecutionPayloadSource(baseState, payloadSource)
+	if err != nil {
+		return nil, 0, fmt.Errorf("produceBeaconBody: derive withdrawals state: %w", err)
+	}
+	if payloadSource.parentExecutionRequests != nil {
 		beaconBody.ParentExecutionRequests = payloadSource.parentExecutionRequests
 	}
 	finalizedHash := a.forkchoiceStore.GetFinalizedExecutionHash(baseState.FinalizedCheckpoint().Root)

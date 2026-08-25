@@ -154,13 +154,28 @@ func (f *ForkChoiceStore) GetHeadPayloadStatus(root common.Hash) (cltypes.Payloa
 	}
 	head, _, status, err := f.getHeadGloasWithPayloadStatus()
 	if err != nil {
-		log.Warn("GetHeadPayloadStatus: failed to recompute Gloas head", "root", root, "err", err)
+		if f.shouldLogHeadPayloadStatusFailure(time.Now()) {
+			log.Warn("GetHeadPayloadStatus: failed to recompute Gloas head", "root", root, "err", err)
+		}
 		return cltypes.PayloadStatusPending, false
 	}
 	if head != root {
 		return cltypes.PayloadStatusPending, false
 	}
 	return status, true
+}
+
+func (f *ForkChoiceStore) shouldLogHeadPayloadStatusFailure(now time.Time) bool {
+	nowNanos := now.UnixNano()
+	for {
+		previous := f.headPayloadStatusLogAt.Load()
+		if previous != 0 && nowNanos-previous < int64(time.Minute) {
+			return false
+		}
+		if f.headPayloadStatusLogAt.CompareAndSwap(previous, nowNanos) {
+			return true
+		}
+	}
 }
 
 func (f *ForkChoiceStore) cachedHeadPayloadStatus(root common.Hash) (cltypes.PayloadStatus, bool, bool) {

@@ -35,6 +35,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconhttp"
+	"github.com/erigontech/erigon/cl/beacon/builder"
 	builder_mock "github.com/erigontech/erigon/cl/beacon/builder/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -188,6 +189,26 @@ func TestGloasProductionFallsBackToEmptyWhenFullEnvelopeCannotBeRead(t *testing.
 }
 
 func TestProductionUsesLocalPayloadWhenBuilderClientIsMissing(t *testing.T) {
+	requireProductionUsesLocalPayload(t, func(_ *gomock.Controller, handler *ApiHandler, _ uint64, _ clparams.StateVersion) {
+		require.Nil(t, handler.builderClient)
+	})
+}
+
+func TestProductionUsesLocalPayloadWhenBuilderBidIsMalformed(t *testing.T) {
+	requireProductionUsesLocalPayload(t, func(ctrl *gomock.Controller, handler *ApiHandler, targetSlot uint64, version clparams.StateVersion) {
+		header := validBuilderHeaderForTest(handler.beaconChainCfg, version)
+		header.Data.Message.Value = "not-a-number"
+		builderClient := builder_mock.NewMockBuilderClient(ctrl)
+		builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), gomock.Any(), gomock.Any()).Return(header, nil)
+		handler.builderClient = builderClient
+	})
+}
+
+func requireProductionUsesLocalPayload(
+	t *testing.T,
+	configureBuilder func(*gomock.Controller, *ApiHandler, uint64, clparams.StateVersion),
+) {
+	t.Helper()
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
@@ -195,7 +216,7 @@ func TestProductionUsesLocalPayloadWhenBuilderClientIsMissing(t *testing.T) {
 	require.NoError(t, err)
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
 	require.True(t, handler.routerCfg.Builder)
-	require.Nil(t, handler.builderClient)
+	configureBuilder(ctrl, handler, targetSlot, postState.Version())
 
 	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	payload := cltypes.NewEth1Block(clparams.ElectraVersion, handler.beaconChainCfg)
@@ -232,6 +253,81 @@ func TestProductionUsesLocalPayloadWhenBuilderClientIsMissing(t *testing.T) {
 	require.NotNil(t, block.BeaconBody)
 	require.False(t, block.IsBlinded())
 	require.Equal(t, uint64(7), block.ExecutionValue.Uint64())
+}
+
+func validBuilderHeaderForTest(cfg *clparams.BeaconChainConfig, version clparams.StateVersion) *builder.ExecutionHeader {
+	return &builder.ExecutionHeader{
+		Version: version.String(),
+		Data: builder.ExecutionHeaderData{Message: builder.ExecutionHeaderMessage{
+			Header:             cltypes.NewEth1Header(version),
+			BlobKzgCommitments: solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
+			ExecutionRequests:  cltypes.NewExecutionRequestsWithVersion(cfg, version),
+			Value:              "1",
+		}},
+	}
+}
+
+func TestGetMEVBoostPayloadRejectsMalformedHeader(t *testing.T) {
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+
+	for _, tc := range []struct {
+		name    string
+		mutate  func(*builder.ExecutionHeader)
+		wantErr string
+	}{
+		{
+			name:    "empty value",
+			mutate:  func(header *builder.ExecutionHeader) { header.Data.Message.Value = "" },
+			wantErr: "invalid builder bid value",
+		},
+		{
+			name:    "non-numeric value",
+			mutate:  func(header *builder.ExecutionHeader) { header.Data.Message.Value = "not-a-number" },
+			wantErr: "invalid builder bid value",
+		},
+		{
+			name:    "negative value",
+			mutate:  func(header *builder.ExecutionHeader) { header.Data.Message.Value = "-1" },
+			wantErr: "invalid builder bid value",
+		},
+		{
+			name: "value over uint256",
+			mutate: func(header *builder.ExecutionHeader) {
+				header.Data.Message.Value = new(big.Int).Lsh(big.NewInt(1), 256).String()
+			},
+			wantErr: "invalid builder bid value",
+		},
+		{
+			name:    "missing execution payload header",
+			mutate:  func(header *builder.ExecutionHeader) { header.Data.Message.Header = nil },
+			wantErr: "missing execution payload header",
+		},
+		{
+			name:    "missing blob commitments",
+			mutate:  func(header *builder.ExecutionHeader) { header.Data.Message.BlobKzgCommitments = nil },
+			wantErr: "missing blob KZG commitments",
+		},
+		{
+			name:    "missing execution requests",
+			mutate:  func(header *builder.ExecutionHeader) { header.Data.Message.ExecutionRequests = nil },
+			wantErr: "missing execution requests",
+		},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			header := validBuilderHeaderForTest(handler.beaconChainCfg, postState.Version())
+			tc.mutate(header)
+			builderClient := builder_mock.NewMockBuilderClient(ctrl)
+			builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), gomock.Any(), gomock.Any()).Return(header, nil)
+			handler.builderClient = builderClient
+
+			got, err := handler.getMEVBoostPayload(t.Context(), postState, targetSlot)
+
+			require.Nil(t, got)
+			require.ErrorContains(t, err, tc.wantErr)
+		})
+	}
 }
 
 func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {

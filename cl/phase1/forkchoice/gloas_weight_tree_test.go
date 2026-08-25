@@ -20,6 +20,7 @@ import (
 	"encoding/binary"
 	"math/rand"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -257,6 +258,15 @@ func TestGetHeadPayloadStatusDoesNotRunGloasForkChoiceBeforeFork(t *testing.T) {
 	require.Equal(t, cltypes.PayloadStatusPending, status)
 	_, _, selected := manager.SelectedHead()
 	require.False(t, selected, "a Gloas-only query must not publish a pre-Gloas head")
+}
+
+func TestHeadPayloadStatusWarningIsRateLimited(t *testing.T) {
+	store := newGloasWeightTreeTestStore()
+	startedAt := time.Unix(100, 0)
+
+	require.True(t, store.shouldLogHeadPayloadStatusFailure(startedAt))
+	require.False(t, store.shouldLogHeadPayloadStatusFailure(startedAt.Add(time.Minute-time.Nanosecond)))
+	require.True(t, store.shouldLogHeadPayloadStatusFailure(startedAt.Add(time.Minute)))
 }
 
 func TestSetUnequivocatingGrowsAmortized(t *testing.T) {
