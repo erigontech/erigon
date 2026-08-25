@@ -39,6 +39,15 @@ type FilterCriteria bind.FilterQuery
 
 const MaxTopicPositions = 4
 
+func (criteria FilterCriteria) ValidateTopicPositions() error {
+	if len(criteria.Topics) <= MaxTopicPositions {
+		return nil
+	}
+	return &rpc.InvalidParamsError{
+		Message: fmt.Sprintf("query exceeds the maximum of %d topics", MaxTopicPositions),
+	}
+}
+
 func (criteria FilterCriteria) Clone() FilterCriteria {
 	cloned := criteria
 	if criteria.BlockHash != nil {

@@ -82,15 +82,38 @@ func TestSubscribeLogsRejectsTooManyTopics(t *testing.T) {
 }
 
 func TestSubscribeLogsRejectsTooManyTopicPositions(t *testing.T) {
-	f := newTestFilters(t)
+	for _, protocol := range []SubProtocol{ProtocolHTTP, ProtocolWS} {
+		t.Run(string(protocol), func(t *testing.T) {
+			f := newTestFilters(t)
 
-	_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{
-		Topics: make([][]common.Hash, 5),
-	}, ProtocolHTTP)
-	var invalidParams *rpc.InvalidParamsError
-	require.ErrorAs(t, err, &invalidParams)
-	require.EqualError(t, err, "query exceeds the maximum of 4 topics")
-	require.Empty(t, id)
+			_, id, err := f.SubscribeLogs(8, filters.FilterCriteria{
+				Topics: make([][]common.Hash, filters.MaxTopicPositions+1),
+			}, protocol)
+			var invalidParams *rpc.InvalidParamsError
+			require.ErrorAs(t, err, &invalidParams)
+			require.EqualError(t, err, "query exceeds the maximum of 4 topics")
+			require.Empty(t, id)
+		})
+	}
+}
+
+func TestSubscribeLogsAcceptsTopicAlternativesInFourPositions(t *testing.T) {
+	criteria := filters.FilterCriteria{
+		Topics: [][]common.Hash{
+			{{1}, {2}},
+			{{3}, {4}},
+			{{5}, {6}},
+			{{7}, {8}},
+		},
+	}
+	for _, protocol := range []SubProtocol{ProtocolHTTP, ProtocolWS} {
+		t.Run(string(protocol), func(t *testing.T) {
+			f := newTestFilters(t)
+			_, id, err := f.SubscribeLogs(8, criteria, protocol)
+			require.NoError(t, err)
+			t.Cleanup(func() { f.UnsubscribeLogs(id) })
+		})
+	}
 }
 
 func TestSubscribeLogsDoesNotStoreCriteriaForWebSocket(t *testing.T) {
@@ -103,7 +126,7 @@ func TestSubscribeLogsDoesNotStoreCriteriaForWebSocket(t *testing.T) {
 	require.NoError(t, err)
 	t.Cleanup(func() { f.UnsubscribeLogs(id) })
 
-	_, _, ok := f.LogFilterCriteria(id)
+	_, ok := f.LogFilterCriteria(id)
 	require.False(t, ok)
 }
 
@@ -125,7 +148,7 @@ func TestSubscribeLogsOwnsStoredCriteria(t *testing.T) {
 	criteria.Addresses[0] = common.Address{3}
 	criteria.Topics[0][0] = common.Hash{4}
 
-	stored, _, ok := f.LogFilterCriteria(id)
+	stored, ok := f.LogFilterCriteria(id)
 	require.True(t, ok)
 	require.Equal(t, int64(1), stored.FromBlock.Int64())
 	require.Equal(t, int64(2), stored.ToBlock.Int64())

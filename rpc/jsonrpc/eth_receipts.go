@@ -48,16 +48,12 @@ var (
 	errInvalidBlockRange               = "invalid block range params"
 	errExceedBlockRange                = "query block range exceeds server limit, narrow your filter"
 	errBlockHashWithRange              = "can't specify fromBlock/toBlock with blockHash"
-	errExceedMaxTopics                 = fmt.Sprintf("query exceeds the maximum of %d topics", maxTopics)
 	errExceedLogResults                = "query returns too many logs, narrow your filter"
 	errRequestedBlockCountExceedsLimit = "requested blockCount exceeds server limit"
 	errRequestedLogCountExceedsLimit   = "requested logCount exceeds server limit"
 )
 
 const (
-	// The maximum number of topic criteria allowed, vm.LOG4 - vm.LOG0
-	maxTopics = filters.MaxTopicPositions
-
 	errExceedLogQueryLimit = "query exceeds the maximum of %d addresses or topics per search position"
 )
 
@@ -102,22 +98,6 @@ func exceedsLogQueryLimit(crit filters.FilterCriteria, limit int) bool {
 		}
 	}
 	return false
-}
-
-type getLogsLimits struct {
-	maxTopicPositions int
-	logQueryLimit     int
-	filterLimits      rpchelper.LogFilterLimits
-}
-
-func (limits getLogsLimits) validate(crit filters.FilterCriteria) error {
-	if limits.maxTopicPositions > 0 && len(crit.Topics) > limits.maxTopicPositions {
-		return &rpc.CustomError{Message: errExceedMaxTopics, Code: rpc.ErrCodeInvalidParams}
-	}
-	if exceedsLogQueryLimit(crit, limits.logQueryLimit) {
-		return &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, limits.logQueryLimit), Code: rpc.ErrCodeInvalidParams}
-	}
-	return limits.filterLimits.Validate(crit)
 }
 
 // resolveLogsRange resolves a filter's block range. A BlockHash pins the range to that
@@ -183,13 +163,10 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 
 // GetLogs implements eth_getLogs. Returns an array of logs matching a given filter object.
 func (api *APIImpl) GetLogs(ctx context.Context, crit filters.FilterCriteria) (types.RPCLogs, error) {
-	return api.getLogs(ctx, crit, getLogsLimits{
-		maxTopicPositions: maxTopics,
-		logQueryLimit:     api.logQueryLimit,
-	})
-}
+	if err := crit.ValidateTopicPositions(); err != nil {
+		return nil, err
+	}
 
-func (api *APIImpl) getLogs(ctx context.Context, crit filters.FilterCriteria, limits getLogsLimits) (types.RPCLogs, error) {
 	logs := types.RPCLogs{}
 
 	tx, beginErr := api.db.BeginTemporalRo(ctx)
@@ -198,8 +175,8 @@ func (api *APIImpl) getLogs(ctx context.Context, crit filters.FilterCriteria, li
 	}
 	defer tx.Rollback()
 
-	if err := limits.validate(crit); err != nil {
-		return nil, err
+	if exceedsLogQueryLimit(crit, api.logQueryLimit) {
+		return nil, &rpc.CustomError{Message: fmt.Sprintf(errExceedLogQueryLimit, api.logQueryLimit), Code: rpc.ErrCodeInvalidParams}
 	}
 
 	if crit.BlockHash != nil && (crit.FromBlock != nil || crit.ToBlock != nil) {

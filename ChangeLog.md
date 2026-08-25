@@ -2,8 +2,9 @@
 
 ### Breaking Changes
 
-- rpc: `eth_getFilterLogs` now runs a historical query from the criteria stored by `eth_newFilter`; it neither drains the live-log queue read by `eth_getFilterChanges` nor refreshes the filter expiry deadline. Historical queries enforce `rpc.blockrange.limit` and `rpc.logs.maxresults`; an open-ended filter can start returning `-32602` as the chain head advances, and queries may surface initialization, pruned-history, or not-yet-executed errors. This can be a breaking change (#23296) — by @taratorio
+- rpc: `eth_getFilterLogs` now runs a historical query from the criteria stored by `eth_newFilter`; it neither drains the live-log queue read by `eth_getFilterChanges` nor refreshes the filter expiry deadline. Historical queries enforce `rpc.blockrange.limit`, `rpc.logs.maxresults`, and `rpc.logs.querylimit`; a filter can return `-32602` when one of these limits is exceeded, and queries may surface initialization, pruned-history, or not-yet-executed errors. This can be a breaking change (#23296) — by @taratorio
 - rpc: `eth_newFilter` and `eth_subscribe("logs")` now reject criteria exceeding the per-filter `rpc.subscription.filters.maxaddresses` or `rpc.subscription.filters.maxtopics` limit with `-32602` instead of silently capping them. This can be a breaking change for nodes that configure either limit above `0`; both limits default to `0` (unlimited) (#23296) — by @taratorio
+- rpc: `eth_newFilter` and `eth_subscribe("logs")` now reject criteria with more than four topic positions with `-32602` instead of accepting a filter that cannot match any Ethereum log. This can be a breaking change (#23296) — by @taratorio
 
 ### Changed
 

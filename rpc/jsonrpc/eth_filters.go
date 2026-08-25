@@ -139,14 +139,11 @@ func (api *APIImpl) GetFilterLogs(ctx context.Context, index string) (types.RPCL
 		return nil, rpc.ErrNotificationsUnsupported
 	}
 	cutIndex := strings.TrimPrefix(index, "0x")
-	criteria, limits, ok := api.filters.LogFilterCriteria(rpchelper.LogsSubID(cutIndex))
+	criteria, ok := api.filters.LogFilterCriteria(rpchelper.LogsSubID(cutIndex))
 	if !ok {
 		return nil, rpc.ErrFilterNotFound
 	}
-	return api.getLogs(ctx, criteria, getLogsLimits{
-		maxTopicPositions: maxTopics,
-		filterLimits:      limits,
-	})
+	return api.GetLogs(ctx, criteria)
 }
 
 // subscribeRPC runs the shared subscription skeleton: subscription creation and a

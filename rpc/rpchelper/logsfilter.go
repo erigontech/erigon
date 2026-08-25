@@ -44,7 +44,6 @@ type LogsFilter struct {
 	topics          *concurrent.SyncMap[common.Hash, int]
 	topicsOriginal  [][]common.Hash // Original topic filters to be applied before distributing to individual subscribers
 	pollingCriteria *filters.FilterCriteria
-	pollingLimits   LogFilterLimits
 	sender          Sub[*types.RPCLog] // nil for aggregate subscriber, for appropriate stream server otherwise
 }
 
@@ -66,12 +65,11 @@ func NewLogsFilterAggregator() *LogsFilterAggregator {
 	}
 }
 
-func newLogsFilter(sender Sub[*types.RPCLog], criteria filters.FilterCriteria, pollingCriteria *filters.FilterCriteria, pollingLimits LogFilterLimits) *LogsFilter {
+func newLogsFilter(sender Sub[*types.RPCLog], criteria filters.FilterCriteria, pollingCriteria *filters.FilterCriteria) *LogsFilter {
 	filter := &LogsFilter{
 		addrs:           concurrent.NewSyncMap[common.Address, int](),
 		topics:          concurrent.NewSyncMap[common.Hash, int](),
 		pollingCriteria: pollingCriteria,
-		pollingLimits:   pollingLimits,
 		sender:          sender,
 	}
 	if len(criteria.Addresses) == 0 {
@@ -103,14 +101,14 @@ func (a *LogsFilterAggregator) insertLogsFilter(filter *LogsFilter) LogsSubID {
 	return filterId
 }
 
-func (a *LogsFilterAggregator) filterCriteria(filterId LogsSubID) (filters.FilterCriteria, LogFilterLimits, bool) {
+func (a *LogsFilterAggregator) filterCriteria(filterId LogsSubID) (filters.FilterCriteria, bool) {
 	a.logsFilterLock.RLock()
 	defer a.logsFilterLock.RUnlock()
 	filter, ok := a.logsFilters.Get(filterId)
 	if !ok || filter.pollingCriteria == nil {
-		return filters.FilterCriteria{}, LogFilterLimits{}, false
+		return filters.FilterCriteria{}, false
 	}
-	return *filter.pollingCriteria, filter.pollingLimits, true
+	return *filter.pollingCriteria, true
 }
 
 // removeLogsFilter removes a log filter identified by filterId from the LogsFilterAggregator.

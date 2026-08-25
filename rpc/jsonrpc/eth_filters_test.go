@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cmd/rpcdaemon/rpcdaemontest"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/length"
+	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv/kvcache"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/protocol/params"
@@ -45,6 +46,55 @@ import (
 
 func newBaseApiWithFiltersForTest(f *rpchelper.Filters, stateCache *kvcache.Coherent, m *execmoduletester.ExecModuleTester) *BaseAPI {
 	return NewBaseApi(f, stateCache, m.BlockReader, m.Engine, &rpccfg.BaseApiConfig{Dirs: m.Dirs})
+}
+
+func TestLogFilterEndpointsRejectTooManyTopicPositions(t *testing.T) {
+	filterManager := rpchelper.New(t.Context(), rpchelper.DefaultFiltersConfig, nil, nil, nil, func() {}, log.New(), nil)
+	api := &APIImpl{
+		BaseAPI:                  &BaseAPI{filters: filterManager},
+		SubscribeLogsChannelSize: 1,
+	}
+	criteria := filters.FilterCriteria{Topics: make([][]common.Hash, filters.MaxTopicPositions+1)}
+
+	closeNotifications := make(chan any)
+	t.Cleanup(func() { close(closeNotifications) })
+	subscriptionContext := rpc.ContextWithNotifier(t.Context(), rpc.NewLocalNotifier("eth", make(chan any, 1), closeNotifications))
+
+	tests := []struct {
+		name string
+		call func() error
+	}{
+		{
+			name: "eth_getLogs",
+			call: func() error {
+				_, err := api.GetLogs(t.Context(), criteria)
+				return err
+			},
+		},
+		{
+			name: "eth_newFilter",
+			call: func() error {
+				_, err := api.NewFilter(t.Context(), criteria)
+				return err
+			},
+		},
+		{
+			name: `eth_subscribe("logs")`,
+			call: func() error {
+				_, err := api.Logs(subscriptionContext, criteria)
+				return err
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			err := test.call()
+			var rpcErr rpc.Error
+			require.ErrorAs(t, err, &rpcErr)
+			require.Equal(t, rpc.ErrCodeInvalidParams, rpcErr.ErrorCode())
+			require.EqualError(t, err, "query exceeds the maximum of 4 topics")
+		})
+	}
 }
 
 func TestSubscriptionsRequireFiltersAndNotifier(t *testing.T) {
@@ -199,7 +249,7 @@ func TestGetFilterLogsReturnsInvalidParamsWhenStoredRangeExceedsLimit(t *testing
 	require.Equal(t, errExceedBlockRange+": 1", rpcErr.Error())
 }
 
-func TestGetFilterLogsUsesStoredFilterCriteriaLimits(t *testing.T) {
+func TestGetFilterLogsAppliesLogQueryLimitAtPollTime(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")
 	}
@@ -254,7 +304,7 @@ func TestGetFilterLogsUsesStoredFilterCriteriaLimits(t *testing.T) {
 			require.ErrorContains(t, err, "query exceeds the maximum of 1 addresses or topics per search position")
 
 			_, err = api.GetFilterLogs(ctx, filterID)
-			require.NoError(t, err)
+			require.ErrorContains(t, err, "query exceeds the maximum of 1 addresses or topics per search position")
 		})
 	}
 }

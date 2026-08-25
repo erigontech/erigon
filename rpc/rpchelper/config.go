@@ -38,18 +38,13 @@ type FiltersConfig struct {
 	RpcSubscriptionFiltersTimeout      time.Duration // Timeout before idle filters are evicted. Default: 5m; 0 disables eviction
 }
 
-// LogFilterLimits defines the criteria limits saved with a polling log filter.
+// LogFilterLimits defines configured resource limits for log subscriptions.
 type LogFilterLimits struct {
 	MaxAddresses         int
 	MaxTopicAlternatives int
 }
 
 func (limits LogFilterLimits) Validate(criteria filters.FilterCriteria) error {
-	if len(criteria.Topics) > filters.MaxTopicPositions {
-		return &rpc.InvalidParamsError{
-			Message: fmt.Sprintf("query exceeds the maximum of %d topics", filters.MaxTopicPositions),
-		}
-	}
 	if limits.MaxAddresses > 0 && len(criteria.Addresses) > limits.MaxAddresses {
 		return &rpc.InvalidParamsError{
 			Message: fmt.Sprintf("log filter has %d addresses, maximum is %d", len(criteria.Addresses), limits.MaxAddresses),

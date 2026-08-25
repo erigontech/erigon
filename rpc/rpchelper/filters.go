@@ -756,6 +756,9 @@ func (ff *Filters) sendReceiptsFilterUpdate() error {
 // and a subscription ID to manage the subscription. When the remote filter update fails, no subscription is
 // installed and the error is returned.
 func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, protocol SubProtocol) (<-chan *types.RPCLog, LogsSubID, error) {
+	if err := criteria.ValidateTopicPositions(); err != nil {
+		return nil, "", err
+	}
 	limits := ff.config.logFilterLimits()
 	if err := limits.Validate(criteria); err != nil {
 		return nil, "", err
@@ -771,7 +774,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 		}
 	}
 	sub := newChanSub[*types.RPCLog](size, protocol)
-	f := newLogsFilter(sub, criteria, pollingCriteria, limits)
+	f := newLogsFilter(sub, criteria, pollingCriteria)
 	id := ff.logsSubs.insertLogsFilter(f)
 
 	// Create a filter request based on the aggregated filters
@@ -796,7 +799,7 @@ func (ff *Filters) SubscribeLogs(size int, criteria filters.FilterCriteria, prot
 	return sub.ch, id, nil
 }
 
-func (ff *Filters) LogFilterCriteria(id LogsSubID) (filters.FilterCriteria, LogFilterLimits, bool) {
+func (ff *Filters) LogFilterCriteria(id LogsSubID) (filters.FilterCriteria, bool) {
 	return ff.logsSubs.filterCriteria(id)
 }
 

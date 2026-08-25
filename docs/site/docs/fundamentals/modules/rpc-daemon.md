@@ -38,7 +38,6 @@ When running RPC Daemon in Local or Remote deployment mode, use this command to 
 ./build/bin/rpcdaemon --help
 ```
 
-
 A summary of the available flags is shown below. It is not a verbatim dump — run `rpcdaemon --help` on your build for the authoritative, up-to-date listing (some defaults are host-dependent).
 
 ```text
