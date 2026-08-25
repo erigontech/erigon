@@ -65,6 +65,7 @@ var (
 	noHistory                       bool
 	rebuildOutputDatadir            string
 	rebuildMaxShardSteps            uint64
+	convertFormatVerifySample       uint64
 	erigondbDomainStepsInFrozenFile string
 	syncCfg                         = ethconfig.Defaults.Sync
 
@@ -153,6 +154,12 @@ func withResume(cmd *cobra.Command) {
 func withRebuildOutputDatadir(cmd *cobra.Command) {
 	cmd.Flags().StringVar(&rebuildOutputDatadir, "output.datadir", "", "datadir the rebuilt commitment files are written into; the source datadir stays a read-only input. Required for a bin target, whose files are indistinguishable from hex ones by name")
 	must(cmd.MarkFlagDirname("output.datadir"))
+}
+
+func withConvertFormatFlags(cmd *cobra.Command) {
+	withResume(cmd)
+	withRebuildOutputDatadir(cmd)
+	cmd.Flags().Uint64Var(&convertFormatVerifySample, "verify.sample", 0, "verify every N-th converted legacy branch record by sequential read-back; 0 disables sampling")
 }
 
 func withNoHistory(cmd *cobra.Command) {

@@ -145,6 +145,7 @@ func init() {
 	withChain(cmdCommitmentConvertFormat)
 	withDataDir(cmdCommitmentConvertFormat)
 	withConfig(cmdCommitmentConvertFormat)
+	withConvertFormatFlags(cmdCommitmentConvertFormat)
 	commitmentCmd.AddCommand(cmdCommitmentConvertFormat)
 
 	// commitment visualize
@@ -292,6 +293,13 @@ func requireRebuildOutput(target dbstate.RebuildTarget, outPath string) error {
 	return nil
 }
 
+func requireConvertFormatOutput(outPath string) error {
+	if outPath == "" {
+		return errors.New("commitment convert-format needs --output.datadir: the source datadir is a read-only input")
+	}
+	return nil
+}
+
 // refuseSqueezeForBinTarget rejects --squeeze for a bin rebuild. Squeeze rewrites
 // commitment values through BranchData, and a bin branch payload is not BranchData:
 // the same field bits name different things in the two encodings, so the pass would
@@ -322,9 +330,23 @@ func refuseRebuildIntoBinSource(target dbstate.RebuildTarget, src datadir.Dirs) 
 		src.DataDir, target.Variant, source.TrieHashName())
 }
 
-func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.RebuildTarget, resume bool, logger log.Logger) (*rebuildOutput, error) {
+type stageRebuildOutputMode uint8
+
+const (
+	writeTargetSettings stageRebuildOutputMode = iota
+	preserveSourceSettings
+)
+
+func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.RebuildTarget, resume bool, logger log.Logger, modes ...stageRebuildOutputMode) (*rebuildOutput, error) {
 	if outPath == "" {
 		return nil, errors.New("commitment rebuild: empty output datadir")
+	}
+	mode := writeTargetSettings
+	if len(modes) > 0 {
+		mode = modes[0]
+	}
+	if len(modes) > 1 {
+		return nil, errors.New("commitment rebuild: more than one output staging mode")
 	}
 	// Nesting either way makes the hardlink walk descend into what it is creating.
 	// Checked before datadir.New, which would create that tree inside the source.
@@ -350,7 +372,7 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 	}
 
 	o := &rebuildOutput{dirs: out, target: target, source: source}
-	if len(existing) > 0 {
+	if len(existing) > 0 && mode != preserveSourceSettings {
 		if err := requireKeptFilesMatchTarget(out, o.settings()); err != nil {
 			return nil, err
 		}
@@ -361,12 +383,24 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 		return nil, err
 	}
 
-	// The toml names the target before the rebuild starts, not after it finishes:
-	// the rebuild reopens this directory as a datadir, and the settings resolver
-	// refuses a bin run against a directory that reads as hex. It also leaves an
-	// interrupted run self-describing rather than passing its bin files off as hex.
-	if err := dbstate.WriteErigonDBSettings(out, o.settings()); err != nil {
-		return nil, err
+	if mode == preserveSourceSettings {
+		sourceSettingsPath := filepath.Join(src.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
+		outputSettingsPath := filepath.Join(out.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
+		settingsData, err := os.ReadFile(sourceSettingsPath)
+		if err != nil {
+			return nil, fmt.Errorf("commitment rebuild: read source erigondb.toml: %w", err)
+		}
+		if err := os.WriteFile(outputSettingsPath, settingsData, 0o644); err != nil {
+			return nil, fmt.Errorf("commitment rebuild: copy source erigondb.toml: %w", err)
+		}
+	} else {
+		// The toml names the target before the rebuild starts, not after it finishes:
+		// the rebuild reopens this directory as a datadir, and the settings resolver
+		// refuses a bin run against a directory that reads as hex. It also leaves an
+		// interrupted run self-describing rather than passing its bin files off as hex.
+		if err := dbstate.WriteErigonDBSettings(out, o.settings()); err != nil {
+			return nil, err
+		}
 	}
 	logger.Info("[commitment_rebuild] staged output datadir", "path", out.DataDir,
 		"linkedFiles", linked, "keptCommitmentFiles", len(existing))
@@ -407,11 +441,11 @@ func (o *rebuildOutput) settings() *dbstate.ErigonDBSettings {
 
 // pathsOverlap reports whether either path is the other or contains it.
 func pathsOverlap(a, b string) (bool, error) {
-	absA, err := filepath.Abs(a)
+	absA, err := resolvePathForOverlap(a)
 	if err != nil {
 		return false, err
 	}
-	absB, err := filepath.Abs(b)
+	absB, err := resolvePathForOverlap(b)
 	if err != nil {
 		return false, err
 	}
@@ -420,6 +454,33 @@ func pathsOverlap(a, b string) (bool, error) {
 	}
 	return strings.HasPrefix(absA, absB+string(filepath.Separator)) ||
 		strings.HasPrefix(absB, absA+string(filepath.Separator)), nil
+}
+
+func resolvePathForOverlap(path string) (string, error) {
+	abs, err := filepath.Abs(path)
+	if err != nil {
+		return "", err
+	}
+	abs = filepath.Clean(abs)
+	var missing []string
+	for {
+		resolved, err := filepath.EvalSymlinks(abs)
+		if err == nil {
+			for _, part := range slices.Backward(missing) {
+				resolved = filepath.Join(resolved, part)
+			}
+			return filepath.Clean(resolved), nil
+		}
+		if !errors.Is(err, fs.ErrNotExist) {
+			return "", err
+		}
+		parent := filepath.Dir(abs)
+		if parent == abs {
+			return abs, nil
+		}
+		missing = append(missing, filepath.Base(abs))
+		abs = parent
+	}
 }
 
 func isCommitmentFileName(name string) bool {
@@ -617,7 +678,7 @@ var cmdCommitmentRebuild = &cobra.Command{
 
 		var out *rebuildOutput
 		if rebuildOutputDatadir != "" {
-			if out, err = stageRebuildOutput(datadir.New(datadirCli), rebuildOutputDatadir, target, resume, logger); err != nil {
+			if out, err = stageRebuildOutput(datadir.Open(datadirCli), rebuildOutputDatadir, target, resume, logger); err != nil {
 				logger.Error(err.Error())
 				return
 			}
@@ -979,7 +1040,19 @@ Example:
   integration commitment convert-format --datadir /path/to/datadir --chain mainnet`,
 	Run: func(cmd *cobra.Command, args []string) {
 		logger, ctx := debug.SetupCobra(cmd, "integration"), cmd.Context()
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), true, chain, logger)
+		if err := requireConvertFormatOutput(rebuildOutputDatadir); err != nil {
+			logger.Error(err.Error())
+			return
+		}
+
+		out, err := stageRebuildOutput(datadir.Open(datadirCli), rebuildOutputDatadir, dbstate.RebuildTarget{}, resume, logger, preserveSourceSettings)
+		if err != nil {
+			logger.Error(err.Error())
+			return
+		}
+		datadirCli = out.dirs.DataDir
+
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return

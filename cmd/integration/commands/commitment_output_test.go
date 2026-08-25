@@ -24,6 +24,7 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dir"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
 	dbstate "github.com/erigontech/erigon/db/state"
@@ -140,6 +141,17 @@ func TestRequireRebuildOutputForBinTarget(t *testing.T) {
 	require.NoError(t, requireRebuildOutput(hex, ""))
 }
 
+func TestRequireConvertFormatOutput(t *testing.T) {
+	require.ErrorContains(t, requireConvertFormatOutput(""), "--output.datadir")
+	require.NoError(t, requireConvertFormatOutput(t.TempDir()))
+}
+
+func TestConvertFormatRegistersOutputFlags(t *testing.T) {
+	for _, name := range []string{"output.datadir", "resume", "verify.sample"} {
+		require.NotNil(t, cmdCommitmentConvertFormat.Flags().Lookup(name), name)
+	}
+}
+
 func TestStageRebuildOutputLinksInputsAndOmitsCommitment(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
@@ -204,6 +216,15 @@ func TestStageRebuildOutputRefusesSourceAsOutput(t *testing.T) {
 	require.Error(t, err)
 }
 
+func TestStageRebuildOutputRefusesSymlinkedOutput(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+	require.NoError(t, os.Symlink(src.DataDir, outPath))
+
+	_, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
+	require.ErrorContains(t, err, "overlaps the source datadir")
+}
+
 // Staging creates the output tree before it walks the source, so an output nested
 // in the source would have the walk descend into what it is writing.
 func TestStageRebuildOutputRefusesNestedOutput(t *testing.T) {
@@ -250,6 +271,47 @@ func TestRebuildOutputSettingsHexTargetCarriesSourceRefs(t *testing.T) {
 	require.Nil(t, final.TrieVariant)
 	require.Nil(t, final.TrieHash)
 	require.True(t, final.RefsInCommitmentBranches())
+}
+
+func TestConvertFormatOutputPreservesSourceSettings(t *testing.T) {
+	src := binSourceDatadirFixture(t)
+	settingsPath := filepath.Join(src.Snap, dbstate.ERIGONDB_SETTINGS_FILE)
+	sourceSettings, err := os.ReadFile(settingsPath)
+	require.NoError(t, err)
+
+	out, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), dbstate.RebuildTarget{}, false, log.New(), preserveSourceSettings)
+	require.NoError(t, err)
+
+	outputSettings, err := os.ReadFile(filepath.Join(out.dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE))
+	require.NoError(t, err)
+	require.Equal(t, sourceSettings, outputSettings)
+
+	sourceInfo, err := os.Stat(settingsPath)
+	require.NoError(t, err)
+	outputInfo, err := os.Stat(filepath.Join(out.dirs.Snap, dbstate.ERIGONDB_SETTINGS_FILE))
+	require.NoError(t, err)
+	require.False(t, os.SameFile(sourceInfo, outputInfo))
+}
+
+func TestConvertFormatStagingLeavesSourceSnapshotsUnchanged(t *testing.T) {
+	src := binSourceDatadirFixture(t)
+	before := snapshotTree(t, src.Snap)
+
+	_, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), dbstate.RebuildTarget{}, false, log.New(), preserveSourceSettings)
+	require.NoError(t, err)
+
+	require.Equal(t, before, snapshotTree(t, src.Snap))
+}
+
+func TestStageRebuildOutputDoesNotCreateSourceMigrations(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	require.NoError(t, dir.RemoveFile(src.Migrations))
+
+	_, err := stageRebuildOutput(src, filepath.Join(t.TempDir(), "out"), binTarget(t), false, log.New())
+	require.NoError(t, err)
+
+	_, err = os.Stat(src.Migrations)
+	require.ErrorIs(t, err, os.ErrNotExist)
 }
 
 // The output directory on its own is what a node is started on, so the settings

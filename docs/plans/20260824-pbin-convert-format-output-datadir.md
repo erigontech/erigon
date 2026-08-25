@@ -257,22 +257,22 @@ datadir both require a legacy `KeyCommitmentState` blob, and `pbinStateMarker`,
 
 Lands before the driver is replaced, so the build never goes red.
 
-- [ ] write a failing test that `convert-format` refuses a missing `--output.datadir`
-- [ ] parameterise `stageRebuildOutput` so the converter reuses it and copies the source
+- [x] write a failing test that `convert-format` refuses a missing `--output.datadir`
+- [x] parameterise `stageRebuildOutput` so the converter reuses it and copies the source
       `erigondb.toml` verbatim instead of writing a rebuild target's settings — `trie_variant
       = 'bin'` / `trie_hash = 'blake3'` must survive or the output reads as hex. Do not add a
       second stager, and do not duplicate the refusal tests it already has
-- [ ] reuse `withRebuildOutputDatadir`; its help already reads "the source datadir stays a
+- [x] reuse `withRebuildOutputDatadir`; its help already reads "the source datadir stays a
       read-only input". Add `--verify.sample`, and reuse `--resume` rather than adding
       `--continue` — `stageRebuildOutput`'s own refusal text names `--resume`, and a flag the
       command does not define would be unactionable advice
-- [ ] write a failing test that an `--output.datadir` symlinked into the source is refused;
+- [x] write a failing test that an `--output.datadir` symlinked into the source is refused;
       make `pathsOverlap` resolve symlinks before comparing (this also tightens the rebuild)
-- [ ] reassign `datadirCli = out.dirs.DataDir` after staging, and pass `false` for
+- [x] reassign `datadirCli = out.dirs.DataDir` after staging, and pass `false` for
       `applyMigrations` — mirroring `cmdCommitmentRebuild`
-- [ ] write a test that a staged run creates no `migrations/` directory in the source
-- [ ] write a test that staging leaves the source `snapshots/` tree unchanged
-- [ ] run `go build ./cmd/integration/` and the command tests — must pass before task 4
+- [x] write a test that a staged run creates no `migrations/` directory in the source
+- [x] write a test that staging leaves the source `snapshots/` tree unchanged
+- [x] run `go build ./cmd/integration/` and the command tests — must pass before task 4
 
 ### Task 4: Hardlink commitment files into the output
 
