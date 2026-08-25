@@ -311,13 +311,6 @@ func (s *executionPayloadBidService) ValidateBid(_ context.Context, msg *cltypes
 	if _, ok := s.forkchoiceStore.GetRecentExecutionPayloadStatus(bid.ParentBlockHash); !ok {
 		return fmt.Errorf("%w: parent_block_hash %v not known in fork choice", ErrIgnore, bid.ParentBlockHash)
 	}
-	compatible, err := s.isBidCompatibleWithHead(bid)
-	if err != nil {
-		return err
-	}
-	if !compatible {
-		return fmt.Errorf("%w: bid is not compatible with the current head branch", ErrIgnore)
-	}
 	validationStateEntry, err := s.bidValidationState(bid.ParentBlockRoot, bid.Slot)
 	if err != nil {
 		return err

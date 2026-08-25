@@ -242,7 +242,7 @@ func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *tes
 	handler.engine = engine
 
 	parentBid := postState.GetLatestExecutionPayloadBid()
-	externalBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 10)}
+	externalBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 0)}
 	externalBid.Message.ParentBlockHash = parentBid.ParentBlockHash
 	externalBid.Message.ParentBlockRoot = baseRoot
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
@@ -454,14 +454,14 @@ func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
 	blockRoot, err := block.Block.HashSSZ()
 	require.NoError(t, err)
 	require.True(t, handler.builderRoutes.Add(blockRoot, builderURL))
-	forwardedCh := make(chan struct{})
+	forwardedCh := make(chan struct{}, 2)
 	builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
 		func(_ context.Context, _ string, forwarded *cltypes.SignedBeaconBlock) error {
 			require.Equal(t, block.Block.Slot, forwarded.Block.Slot)
-			close(forwardedCh)
+			forwardedCh <- struct{}{}
 			return errors.New("builder unavailable")
 		},
-	)
+	).Times(2)
 	handler.builderClient = builderClient
 
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
@@ -471,10 +471,12 @@ func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
 
 	_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
 	require.NoError(t, err)
-	select {
-	case <-forwardedCh:
-	case <-time.After(time.Second):
-		t.Fatal("signed block was not forwarded to the winning builder")
+	for range 2 {
+		select {
+		case <-forwardedCh:
+		case <-time.After(time.Second):
+			t.Fatal("signed block was not forwarded to the winning builder")
+		}
 	}
 }
 
@@ -579,12 +581,14 @@ func TestForwardPublishedBlockToBuilderRetriesAfterFailure(t *testing.T) {
 
 	ctrl := gomock.NewController(t)
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
-	firstDone := make(chan struct{})
+	firstStarted := make(chan struct{})
+	releaseFirst := make(chan struct{})
 	secondDone := make(chan struct{})
 	gomock.InOrder(
 		builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, block).DoAndReturn(
 			func(context.Context, string, *cltypes.SignedBeaconBlock) error {
-				close(firstDone)
+				close(firstStarted)
+				<-releaseFirst
 				return errors.New("temporary failure")
 			},
 		),
@@ -599,19 +603,19 @@ func TestForwardPublishedBlockToBuilderRetriesAfterFailure(t *testing.T) {
 
 	handler.forwardPublishedBlockToBuilder(builderURL, block)
 	select {
-	case <-firstDone:
+	case <-firstStarted:
 	case <-time.After(time.Second):
-		t.Fatal("first submission did not finish")
+		t.Fatal("first submission did not start")
 	}
-	require.Eventually(t, func() bool {
+	for range 32 {
 		handler.forwardPublishedBlockToBuilder(builderURL, block)
-		select {
-		case <-secondDone:
-			return true
-		default:
-			return false
-		}
-	}, time.Second, time.Millisecond)
+	}
+	close(releaseFirst)
+	select {
+	case <-secondDone:
+	case <-time.After(time.Second):
+		t.Fatal("submission was not retried automatically")
+	}
 }
 
 func TestParseBlockPublishingValidationRejectsUnknownV2Value(t *testing.T) {

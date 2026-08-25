@@ -796,18 +796,24 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		consensusValue,
 	)
 	if options := gloasBlockOptionsFromContext(ctx); options != nil && options.selectedBuilderURL != "" {
-		if root, err := block.ToExecution().Block.HashSSZ(); err == nil {
-			a.setBuilderRouteHeader(w, root, options.selectedBuilderURL)
+		root, err := block.ToExecution().Block.HashSSZ()
+		if err != nil {
+			return nil, err
+		}
+		if err := a.setBuilderRouteHeader(w, root, options.selectedBuilderURL); err != nil {
+			return nil, err
 		}
 	}
 
 	return resp, nil
 }
 
-func (a *ApiHandler) setBuilderRouteHeader(w http.ResponseWriter, root common.Hash, builderURL string) {
-	if a.builderRoutes != nil && a.builderRoutes.Add(root, builderURL) {
-		w.Header().Set("Eth-Builder-Url", builderURL)
+func (a *ApiHandler) setBuilderRouteHeader(w http.ResponseWriter, root common.Hash, builderURL string) error {
+	if a.builderRoutes == nil || !a.builderRoutes.Add(root, builderURL) {
+		return beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("builder handoff capacity unavailable"))
 	}
+	w.Header().Set("Eth-Builder-Url", builderURL)
+	return nil
 }
 
 func (a *ApiHandler) produceBlock(
@@ -1838,11 +1844,16 @@ func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cl
 		return
 	}
 	go func() {
-		err := a.builderClient.SubmitSignedBeaconBlock(context.Background(), builderURL, block)
-		a.builderRoutes.Complete(root, builderURL, err == nil)
-		if err != nil {
-			a.logger.Warn("Failed to forward signed block to builder", "err", err)
+		var err error
+		for range 2 {
+			err = a.builderClient.SubmitSignedBeaconBlock(context.Background(), builderURL, block)
+			if err == nil {
+				a.builderRoutes.Complete(root, builderURL, true)
+				return
+			}
 		}
+		a.builderRoutes.Complete(root, builderURL, false)
+		a.logger.Warn("Failed to forward signed block to builder", "err", err)
 	}()
 }
 
