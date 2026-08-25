@@ -49,9 +49,8 @@ type pendingJobQueue[K comparable, M any] struct {
 	capacity int32
 	expiry   time.Duration
 	tick     time.Duration
-	// tryProcess decides whether a job stays queued, is removed, or is removed
-	// before further processing. Mutations made by tryProcess must remain safe if
-	// identity-checked removal fails. processAfterRemove runs only after successful
+	// Mutations in tryProcess must remain safe if the job is retried or removal
+	// loses the identity check. processAfterRemove runs only after successful
 	// removal, so it may safely re-enqueue the same key.
 	tryProcess         func(ctx context.Context, key K, msg M) pendingJobDecision
 	processAfterRemove func(ctx context.Context, key K, msg M)
@@ -101,11 +100,9 @@ func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) {
 	q.storeReserved(key, msg)
 }
 
-// enqueueLazy reserves capacity before building the key, so a full queue skips
-// potentially expensive key construction. A full queue or a duplicate key is a
-// silent no-op. Duplicates and key-building errors release their temporary
-// reservation; a stored job retains it until removal. The deferred release also
-// covers key-building panics.
+// enqueueLazy reserves capacity before building the key so a full queue skips
+// potentially expensive work. The enqueue attempt owns its reservation until a
+// job is stored, so deferred cleanup must cover both errors and panics.
 func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
 	if !q.reserve() {
 		return nil
