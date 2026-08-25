@@ -1185,6 +1185,9 @@ func newSync(ctx context.Context, db kv.TemporalRwDB, builderConfig *buildercfg.
 	if genesisErr != nil && !errors.As(genesisErr, &compatErr) {
 		panic(genesisErr)
 	}
+	if compatErr != nil {
+		logger.Warn("Incompatible chain config, continuing on the rejected one", "err", compatErr)
+	}
 	//logger.Info("Initialised chain configuration", "config", chainConfig)
 
 	var batchSize datasize.ByteSize

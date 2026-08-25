@@ -163,9 +163,11 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 			genesis = chainspec.MainnetGenesisBlock()
 			custom = false
 		}
-		// genesis.Config is either a package-level config or the caller's own, so the
-		// overrides go onto a copy.
-		genesis.Config = genesis.Config.Copy()
+		// Copy the struct, not just the config it points at: a named chain hands over the
+		// registered Genesis, and assigning the copied config back writes into it.
+		g := *genesis
+		g.Config = g.Config.Copy()
+		genesis = &g
 		applyOverrides(genesis.Config)
 		block, err1 := write(tx, genesis, dirs, logger)
 		if err1 != nil {
@@ -293,7 +295,12 @@ func headTimestamp(tx kv.Tx, hash common.Hash, number uint64, chainName string, 
 		return 0, err
 	}
 	if head == nil {
-		return 0, fmt.Errorf("head header %x at %d is in neither the database nor the block files, so the active timestamp forks are unknown", hash, number)
+		return 0, fmt.Errorf("head header %x at %d is in neither the database nor the block files, so the active timestamp forks are unknown; an unindexed header segment reads the same way, and `erigon snapshots index` rebuilds it", hash, number)
+	}
+	// The block files are indexed by height, not by hash, so a stale head marker would
+	// otherwise be dated with whatever block sits at that number.
+	if head.Hash() != hash {
+		return 0, fmt.Errorf("the block files hold %x at %d, not the head marker's %x", head.Hash(), number, hash)
 	}
 	return head.Time, nil
 }

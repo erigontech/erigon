@@ -163,6 +163,29 @@ func TestCommitGenesisBlockOverrideLeavesTheSpecConfigAlone(t *testing.T) {
 		"applyOverrides must not write through into the shared genesis config")
 }
 
+// The fresh-DB path reassigns genesis.Config on the caller's Genesis struct, and a named
+// chain hands over the registered one, so an override there outlives the call.
+func TestCommitGenesisBlockOverrideLeavesTheSpecGenesisAlone(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	spec, err := chainspec.ChainSpecByName(networkname.Sepolia)
+	require.NoError(t, err)
+	orig := spec.Genesis.Config.OsakaTime
+
+	dirs := datadir.New(t.TempDir())
+	db := temporaltest.NewTestDB(t, dirs)
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
+		db, spec.Genesis, networkname.Sepolia, common.NewUint64(1760500000), nil, false, dirs, log.New())
+	require.NoError(t, err)
+
+	after, err := chainspec.ChainSpecByName(networkname.Sepolia)
+	require.NoError(t, err)
+	require.Equal(t, orig, after.Genesis.Config.OsakaTime,
+		"applyOverrides must not reach the registered spec's Genesis")
+}
+
 func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	if testing.Short() {
 		t.Skip("slow test")

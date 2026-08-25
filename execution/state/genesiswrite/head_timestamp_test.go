@@ -65,6 +65,30 @@ func TestHeadTimestampFromBlockFiles(t *testing.T) {
 	require.Equal(t, head.Time, headTime)
 }
 
+// The snapshot lookup resolves by height, so a stale head marker would otherwise be dated
+// with whatever block sits at that number.
+func TestHeadTimestampRejectsHashMismatch(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	logger := log.New()
+	dirs := datadir.New(t.TempDir())
+	headers := []*types.Header{
+		{Number: *uint256.NewInt(0), Time: 1000, Difficulty: *uint256.NewInt(1), Extra: []byte{}},
+		{Number: *uint256.NewInt(1), Time: 2000, Difficulty: *uint256.NewInt(1), Extra: []byte{}},
+	}
+	writeHeaderSegment(t, dirs, headers)
+
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginRo(context.Background())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	_, err = headTimestamp(tx, common.Hash{9}, 1, "", dirs, logger)
+	require.Error(t, err, "a header at the right height but the wrong hash must not date the head")
+}
+
 // A head header that neither source has leaves the active timestamp forks unknown.
 func TestHeadTimestampUnresolvable(t *testing.T) {
 	if testing.Short() {

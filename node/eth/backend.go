@@ -363,7 +363,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 		h, err := rawdb.ReadCanonicalHash(tx, 0)
 		if err != nil {
-			panic(err)
+			return err
 		}
 		genesisSpec := config.Genesis
 		if h != (common.Hash{}) { // fallback to db content
