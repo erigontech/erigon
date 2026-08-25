@@ -40,6 +40,7 @@ type ForkGraph interface {
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
+	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
 	GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)

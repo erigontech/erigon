@@ -599,6 +599,27 @@ func (f *ForkChoiceStore) OnExecutionPayload(ctx context.Context, signedEnvelope
 	return nil
 }
 
+func (f *ForkChoiceStore) ValidateExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error {
+	if signedEnvelope == nil || signedEnvelope.Message == nil {
+		return errors.New("nil execution payload envelope")
+	}
+	blockRoot := common.Hash(signedEnvelope.Message.BeaconBlockRoot)
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	blockState, err := f.forkGraph.GetState(blockRoot, false)
+	if err != nil {
+		return fmt.Errorf("failed to get block state: %w", err)
+	}
+	if blockState == nil {
+		return fmt.Errorf("block state not found for beacon_block_root %v", blockRoot)
+	}
+	block, ok := f.forkGraph.GetBlock(blockRoot)
+	if !ok || block == nil {
+		return fmt.Errorf("block not found for beacon_block_root %v", blockRoot)
+	}
+	return f.validateEnvelopeAgainstBlock(signedEnvelope, block, blockState)
+}
+
 // ApplyLocalSelfBuildEnvelope processes a locally-produced self-build envelope
 // that carries InfiniteSignature. The CL node constructs these when the VC does
 // not provide a pre-signed envelope; the private key lives in the VC and is not

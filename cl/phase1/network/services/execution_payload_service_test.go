@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
 )
@@ -136,6 +137,123 @@ func TestExecutionPayloadServiceEmitsGossipAndImportedEvents(t *testing.T) {
 	require.Equal(t, beaconevents.StateHeadV2, headEvent.Event)
 	require.Equal(t, "full", headEvent.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
 	require.Equal(t, blockRoot, headEvent.Data.(*beaconevents.HeadV2Data).Data.Block)
+}
+
+func TestExecutionPayloadServiceEmitsGossipWhenValidatedEnvelopeWaitsForColumns(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	blockRoot := common.Hash{1}
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+	envelope := newTestSignedEnvelope(100, blockRoot, 7)
+
+	require.ErrorIs(t, service.ProcessMessage(t.Context(), nil, envelope), ErrIgnore)
+	select {
+	case event := <-events:
+		require.Equal(t, beaconevents.OpExecutionPayloadGossip, event.Event)
+		require.Equal(t, blockRoot, event.Data.(*beaconevents.ExecutionPayloadGossipData).BlockRoot)
+	default:
+		t.Fatal("validated gossip envelope did not emit execution_payload_gossip while waiting for columns")
+	}
+}
+
+func TestExecutionPayloadServiceDoesNotEmitStaleHeadV2AfterReorg(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	stateEvents := make(chan *beaconevents.EventStream, 1)
+	stateSubscription := emitter.State().Subscribe(stateEvents)
+	defer stateSubscription.Unsubscribe()
+
+	blockRoot := common.Hash{1}
+	reorgRoot := common.Hash{9}
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100, StateRoot: common.Hash{2}}}
+	headState := state.New(cfg)
+	headState.SetVersion(clparams.GloasVersion)
+	headState.SetSlot(100)
+	headState.SetBlockRootAt(63, common.Hash{3})
+	headState.SetBlockRootAt(95, common.Hash{4})
+	forkchoiceMock.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		require.Equal(t, blockRoot, root)
+		require.True(t, alwaysCopy)
+		forkchoiceMock.HeadVal = reorgRoot
+		return headState, nil
+	}
+	forkchoiceMock.HeadVal = blockRoot
+	forkchoiceMock.HeadSlotVal = 100
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 7)))
+	select {
+	case event := <-stateEvents:
+		t.Fatalf("emitted stale event after reorg: %#v", event)
+	default:
+	}
+}
+
+func TestExecutionPayloadServiceDoesNotEmitGossipWhenValidationFails(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	blockRoot := common.Hash{1}
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	forkchoiceMock.OnExecutionPayloadErr = errors.New("invalid envelope signature")
+
+	require.Error(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 7)))
+	select {
+	case event := <-events:
+		t.Fatalf("emitted gossip event for invalid envelope: %#v", event)
+	default:
+	}
+}
+
+func TestExecutionPayloadServiceProgressesWhileEventFeedIsBlocked(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	slow := make(chan *beaconevents.EventStream)
+	slowSubscription := emitter.Operation().Subscribe(slow)
+	defer slowSubscription.Unsubscribe()
+	ready := make(chan *beaconevents.EventStream)
+	readySubscription := emitter.Operation().Subscribe(ready)
+	defer readySubscription.Unsubscribe()
+	blockedSendDone := make(chan struct{})
+	go func() {
+		emitter.Operation().SendAttestation(&beaconevents.AttestationData{})
+		close(blockedSendDone)
+	}()
+	<-ready
+
+	blockRoot := common.Hash{1}
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100}}
+	processDone := make(chan error, 1)
+	ctx := t.Context()
+	go func() { processDone <- service.ProcessMessage(ctx, nil, newTestSignedEnvelope(100, blockRoot, 7)) }()
+	select {
+	case err := <-processDone:
+		require.NoError(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("execution payload gossip processing blocked on the event feed")
+	}
+
+	slowSubscription.Unsubscribe()
+	select {
+	case <-blockedSendDone:
+	case <-time.After(time.Second):
+		t.Fatal("legacy event send remained blocked after unsubscribe")
+	}
 }
 
 func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {

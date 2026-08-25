@@ -26,7 +26,7 @@ func (f *stateFeed) SendHead(value *HeadData) int {
 }
 
 func (f *stateFeed) SendHeadV2(value *HeadV2Data) int {
-	return f.feed.Send(&EventStream{Event: StateHeadV2, Data: value})
+	return f.feed.TrySend(&EventStream{Event: StateHeadV2, Data: value})
 }
 
 // The node has received a block (from P2P or API) that is successfully imported on the fork-choice on_block handler

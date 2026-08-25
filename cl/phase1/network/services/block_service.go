@@ -116,20 +116,10 @@ func (b *blockService) DecodeGossipMessage(_ peer.ID, data []byte, version clpar
 
 // ProcessMessage processes a block message according to https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltypes.SignedBeaconBlock) error {
+	if msg == nil || msg.Block == nil || msg.Block.Body == nil {
+		return errors.New("missing beacon block")
+	}
 	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
-	blockEpoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
-
-	if b.syncedData.Syncing() {
-		return fmt.Errorf("%w: syncing", ErrIgnore)
-	}
-
-	currentSlot := b.syncedData.HeadSlot()
-
-	// [IGNORE] The block is not from a future slot (with a MAXIMUM_GOSSIP_CLOCK_DISPARITY allowance) -- i.e. validate that
-	// signed_beacon_block.message.slot <= current_slot (a client MAY queue future blocks for processing at the appropriate slot).
-	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
-		return fmt.Errorf("%w: block is not from a future slot: %d > %d", ErrIgnore, currentSlot, msg.Block.Slot)
-	}
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
 	seenCacheKey := proposerIndexAndSlot{
@@ -139,6 +129,37 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if b.seenBlocksCache.Contains(seenCacheKey) {
 		return nil
 	}
+	if err := b.validateGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg) }); err != nil {
+		return err
+	}
+	b.publishBlockGossipEvent(msg)
+	// the rest of the validation is done in the forkchoice store
+	if err := b.processAndStoreBlock(ctx, msg); err != nil {
+		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
+			b.scheduleBlockForLaterProcessing(msg)
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+func (b *blockService) ValidateGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
+	return b.validateGossip(ctx, msg, nil)
+}
+
+func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeaconBlock, schedule func()) error {
+	if msg == nil || msg.Block == nil || msg.Block.Body == nil {
+		return errors.New("missing beacon block")
+	}
+	if b.syncedData.Syncing() {
+		return fmt.Errorf("%w: syncing", ErrIgnore)
+	}
+	currentSlot := b.syncedData.HeadSlot()
+	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
+		return fmt.Errorf("%w: block is not from a future slot: %d > %d", ErrIgnore, currentSlot, msg.Block.Slot)
+	}
+	blockEpoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
@@ -154,8 +175,8 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, ErrIgnore) {
-			b.scheduleBlockForLaterProcessing(msg)
+		if errors.Is(err, ErrIgnore) && schedule != nil {
+			schedule()
 		}
 		return err
 	}
@@ -163,7 +184,9 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
 	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
 	if !ok {
-		b.scheduleBlockForLaterProcessing(msg)
+		if schedule != nil {
+			schedule()
+		}
 		return fmt.Errorf("%w: parent header not found: %v", ErrIgnore, msg.Block.ParentRoot)
 	}
 	if parentHeader.Slot >= msg.Block.Slot {
@@ -205,8 +228,9 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		parentBlockHash := bid.Message.ParentBlockHash
 		status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatus(parentBlockHash)
 		if !seen {
-			// Parent execution payload not seen yet, queue for later
-			b.scheduleBlockForLaterProcessing(msg)
+			if schedule != nil {
+				schedule()
+			}
 			return fmt.Errorf("%w: parent execution payload not seen: %v", ErrIgnore, parentBlockHash)
 		}
 		if status == execution_client.PayloadStatusInvalidated {
@@ -216,15 +240,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		// Pre-GLOAS: [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer
 		// i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
 		return ErrInvalidCommitmentsCount
-	}
-	b.publishBlockGossipEvent(msg)
-	// the rest of the validation is done in the forkchoice store
-	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
-			b.scheduleBlockForLaterProcessing(msg)
-			return nil
-		}
-		return err
 	}
 	return nil
 }

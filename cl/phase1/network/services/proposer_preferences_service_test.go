@@ -281,6 +281,47 @@ func TestProposerPreferencesServiceEmitsEvent(t *testing.T) {
 	require.Equal(t, &beaconevents.VersionedSignedProposerPreferences{Version: "gloas", Data: msg}, event.Data)
 }
 
+func TestProposerPreferencesServiceProgressesWhileEventFeedIsBlocked(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, _, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
+	emitter := beaconevents.NewEventEmitter()
+	service.emitters = emitter
+	slow := make(chan *beaconevents.EventStream)
+	slowSubscription := emitter.Operation().Subscribe(slow)
+	defer slowSubscription.Unsubscribe()
+	ready := make(chan *beaconevents.EventStream)
+	readySubscription := emitter.Operation().Subscribe(ready)
+	defer readySubscription.Unsubscribe()
+	blockedSendDone := make(chan struct{})
+	go func() {
+		emitter.Operation().SendAttestation(&beaconevents.AttestationData{})
+		close(blockedSendDone)
+	}()
+	<-ready
+
+	msg := newTestSignedProposerPreferences(96, 42)
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(gloasMaximumClockDisparity) }
+	processDone := make(chan error, 1)
+	ctx := t.Context()
+	go func() { processDone <- service.ProcessMessage(ctx, nil, msg) }()
+	select {
+	case err := <-processDone:
+		require.NoError(t, err)
+	case <-time.After(5 * time.Second):
+		t.Fatal("proposer preferences processing blocked on the event feed")
+	}
+	stored, ok := epbsPool.GetPreference(96, testDependentRoot)
+	require.True(t, ok)
+	require.Same(t, msg, stored)
+
+	slowSubscription.Unsubscribe()
+	select {
+	case <-blockedSendDone:
+	case <-time.After(time.Second):
+		t.Fatal("legacy event send remained blocked after unsubscribe")
+	}
+}
+
 func TestProposerPreferencesServiceLookaheadClockDisparityBoundary(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	service, _, _, epbsPool, _ := setupProposerPreferencesService(t, ctrl)

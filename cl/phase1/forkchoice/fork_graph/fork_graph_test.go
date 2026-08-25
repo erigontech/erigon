@@ -336,6 +336,19 @@ func TestHasBlockChildAtOrAfterUsesValidatedChildren(t *testing.T) {
 	require.False(t, f.HasBlockChildAtOrAfter(parentRoot, 64))
 }
 
+func TestHasBlockEquivocation(t *testing.T) {
+	f := &forkGraphDisk{}
+	root := common.Hash{1}
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = 64
+	block.Block.ProposerIndex = 9
+	f.blocks.Store(root, block)
+
+	require.True(t, f.HasBlockEquivocation(64, 9, common.Hash{2}))
+	require.False(t, f.HasBlockEquivocation(64, 9, root))
+	require.False(t, f.HasBlockEquivocation(64, 8, common.Hash{2}))
+}
+
 func TestRemoveValidatedChildrenBulkKeepsSameSlotSurvivor(t *testing.T) {
 	f := &forkGraphDisk{children: make(map[common.Hash]*validatedChildren)}
 	parentRoot := common.Hash{1}

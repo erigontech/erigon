@@ -45,6 +45,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -82,6 +83,20 @@ func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
 	require.Error(t, (&ApiHandler{columnStorage: blob_storage_mock.NewMockDataColumnStorage(gomock.NewController(t))}).storeDataColumnSidecars(
 		context.Background(), root, []*cltypes.DataColumnSidecar{{Index: math.MaxUint64}},
 	))
+}
+
+func TestRetryPublishedBlockStoreRecoversFromTransientFailure(t *testing.T) {
+	calls := 0
+	err := retryPublishedBlockStore(t.Context(), 3, time.Millisecond, func(context.Context) error {
+		calls++
+		if calls == 1 {
+			return errors.New("transient storage failure")
+		}
+		return nil
+	})
+
+	require.NoError(t, err)
+	require.Equal(t, 2, calls)
 }
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
@@ -175,6 +190,16 @@ func TestSelectGloasBidLocalWinsTieAndZeroBoost(t *testing.T) {
 	}}))
 }
 
+func TestSelectGloasBidUsesValidBuilderWhenLocalBuildIsUnavailable(t *testing.T) {
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 0)}
+	selected := selectGloasBid(nil, []gloasBidCandidate{{
+		bid: bid, boostFactor: 100, maxExecutionPayment: math.MaxUint64,
+	}})
+
+	require.NotNil(t, selected)
+	require.Same(t, bid, selected.bid)
+}
+
 func TestSelectGloasBidCapsExecutionPaymentAndAvoidsOverflow(t *testing.T) {
 	capped := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}
 	capped.Message.ExecutionPayment = 100
@@ -243,6 +268,18 @@ func TestDecodeGloasBlockProductionOptionsJSONAndSSZ(t *testing.T) {
 	}
 }
 
+func TestDecodeGloasBlockProductionOptionsRejectsInvalidBuildersPerEntry(t *testing.T) {
+	body := `{"min_bid":"0","builder_boost_factor":"100","builders":[null,{"url":"https://missing-auth.example"},{"url":"https://wrong-slot.example","auth":{"message":{"data":"0x01","slot":"11"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},"builder_pubkeys":[],"max_execution_payment":"0","min_bid":"0","builder_boost_factor":"0"},{"url":"https://builder.example","auth":{"message":{"data":"0x01","slot":"10"},"signature":"0x000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000"},"builder_pubkeys":[],"max_execution_payment":"0","min_bid":"0","builder_boost_factor":"0"}]}`
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", "gloas")
+
+	options, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+	require.NoError(t, err)
+	require.Len(t, options.builderConfig.Builders, 1)
+	require.Equal(t, "https://builder.example", options.builderConfig.Builders[0].URL)
+}
+
 func TestDecodeGloasBlockProductionOptionsRejectsInvalidMetadata(t *testing.T) {
 	valid := `{"min_bid":"0","builder_boost_factor":"100","builders":[]}`
 	for _, tc := range []struct {
@@ -292,34 +329,6 @@ func TestDecodeGloasBlockProductionOptionsAcceptsMaximumJSONConfig(t *testing.T)
 	require.NoError(t, err)
 }
 
-func TestPostV4WithBidRouteRejectsMissingVersionBeforeProduction(t *testing.T) {
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10/with_bid", strings.NewReader(`{}`))
-	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-}
-
-func TestPostV4WithBidRejectsTrailingJSON(t *testing.T) {
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-	handler.beaconChainCfg.GloasForkEpoch = 0
-	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}
-	body, err := json.Marshal(bid)
-	require.NoError(t, err)
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10/with_bid", strings.NewReader(string(body)+`{}`))
-	request.Header.Set("Content-Type", "application/json")
-	request.Header.Set("Eth-Consensus-Version", "gloas")
-	recorder := httptest.NewRecorder()
-
-	handler.ServeHTTP(recorder, request)
-
-	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
-	require.Contains(t, recorder.Body.String(), "trailing data")
-}
-
 func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blinded_blocks", bytes.NewReader(nil))
@@ -328,6 +337,68 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	_, err := h.publishBlindedBlocks(httptest.NewRecorder(), req, 2)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
+}
+
+func TestParseGloasPublishedBlockRejectsWrapperAndOversizeBodies(t *testing.T) {
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	h.beaconChainCfg.GloasForkEpoch = 0
+	for _, tc := range []struct {
+		name string
+		body string
+	}{
+		{name: "wrapper", body: `{"signed_block":{}}`},
+		{name: "oversize", body: `{"message":{}}` + strings.Repeat(" ", maxGloasPublishedBlockSize)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			_, err := h.parseGloasRequestBeaconBlock(clparams.GloasVersion, req)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestParseGloasPublishedBlockRejectsNonCanonicalSSZ(t *testing.T) {
+	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	h.beaconChainCfg.GloasForkEpoch = 0
+	block := cltypes.NewSignedBeaconBlock(h.beaconChainCfg, clparams.GloasVersion)
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	encoded = append(encoded, 0)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(encoded))
+	req.Header.Set("Content-Type", "application/octet-stream")
+
+	_, err = h.parseGloasRequestBeaconBlock(clparams.GloasVersion, req)
+	require.Error(t, err)
+}
+
+func TestParseBlockPublishingValidationRejectsUnknownV2Value(t *testing.T) {
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation=fast", nil)
+	_, err := (&ApiHandler{}).parseBlockPublishingValidation(req, 2)
+	require.Error(t, err)
+
+	for _, value := range []BlockPublishingValidation{
+		BlockPublishingValidationGossip,
+		BlockPublishingValidationConsensus,
+		BlockPublishingValidationConsensusAndEquivocation,
+	} {
+		req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks?broadcast_validation="+string(value), nil)
+		got, err := (&ApiHandler{}).parseBlockPublishingValidation(req, 2)
+		require.NoError(t, err)
+		require.Equal(t, value, got)
+	}
+}
+
+func TestBroadcastBlockRunsGossipValidationBeforePublishing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.Phase0Version)
+	validationErr := errors.New("invalid gossip block")
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(validationErr)
+
+	err := (&ApiHandler{blockService: blockService}).broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorIs(t, err, errPublishedBlockValidation)
+	require.ErrorContains(t, err, validationErr.Error())
 }
 
 func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {

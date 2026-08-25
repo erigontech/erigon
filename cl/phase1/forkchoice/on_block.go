@@ -87,6 +87,14 @@ func collectOnBlockLatencyToUnixTime(ethClock eth_clock.EthereumClock, slot, cur
 }
 
 func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+	return f.onBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability, false)
+}
+
+func (f *ForkChoiceStore) OnBlockWithEquivocationCheck(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability bool) error {
+	return f.onBlock(ctx, block, newPayload, fullValidation, checkDataAvaiability, true)
+}
+
+func (f *ForkChoiceStore) onBlock(ctx context.Context, block *cltypes.SignedBeaconBlock, newPayload, fullValidation, checkDataAvaiability, rejectEquivocation bool) error {
 	f.mu.Lock()
 	unlocked := false
 	defer f.drainQueuedWork()
@@ -104,6 +112,9 @@ func (f *ForkChoiceStore) OnBlock(ctx context.Context, block *cltypes.SignedBeac
 		if _, ok := f.forkGraph.GetHeader(blockRoot); ok {
 			return nil
 		}
+	}
+	if rejectEquivocation && f.forkGraph.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, blockRoot) {
+		return errors.New("block conflicts with a previously validated proposal")
 	}
 	f.headHash = common.Hash{}
 	f.headPayloadStatus = cltypes.PayloadStatusPending

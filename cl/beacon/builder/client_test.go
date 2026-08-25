@@ -17,6 +17,7 @@
 package builder
 
 import (
+	"bufio"
 	"bytes"
 	"context"
 	_ "embed"
@@ -29,11 +30,13 @@ import (
 	"net/url"
 	"strconv"
 	"strings"
+	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+	"golang.org/x/sync/semaphore"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -444,6 +447,135 @@ func TestSubmitBuilderPreferences(t *testing.T) {
 		return builderTestResponse(r, http.StatusAccepted, "", nil), nil
 	}))
 	require.NoError(t, client.SubmitBuilderPreferences(context.Background(), "https://builder.example", proposer, request))
+}
+
+func TestSubmitBuilderPreferencesHasBoundedTimeoutAndError(t *testing.T) {
+	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
+	t.Run("timeout", func(t *testing.T) {
+		client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+			<-r.Context().Done()
+			return nil, r.Context().Err()
+		}))
+		started := time.Now()
+		err := client.SubmitBuilderPreferences(context.Background(), "https://builder.example", common.Bytes48{}, request)
+		require.ErrorIs(t, err, context.DeadlineExceeded)
+		require.Less(t, time.Since(started), 2*time.Second)
+	})
+
+	t.Run("error body", func(t *testing.T) {
+		client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+			return builderTestResponse(r, http.StatusBadRequest, strings.Repeat("x", 1<<20), nil), nil
+		}))
+		err := client.SubmitBuilderPreferences(context.Background(), "https://builder.example", common.Bytes48{}, request)
+		require.Error(t, err)
+		require.Less(t, len(err.Error()), 1024)
+		require.NotContains(t, err.Error(), "xxxx")
+	})
+}
+
+func TestDynamicBuilderCallsShareBoundedAdmission(t *testing.T) {
+	var active atomic.Int64
+	var maximum atomic.Int64
+	release := make(chan struct{})
+	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		current := active.Add(1)
+		defer active.Add(-1)
+		for current > maximum.Load() && !maximum.CompareAndSwap(maximum.Load(), current) {
+		}
+		select {
+		case <-release:
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
+		return builderTestResponse(r, http.StatusAccepted, "", nil), nil
+	}))
+	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
+
+	var wg sync.WaitGroup
+	for range defaultBuilderCallLimit + 8 {
+		wg.Go(func() {
+			_ = client.SubmitBuilderPreferences(t.Context(), "https://builder.example", common.Bytes48{}, request)
+		})
+	}
+	require.Eventually(t, func() bool { return maximum.Load() == defaultBuilderCallLimit }, time.Second, time.Millisecond)
+	close(release)
+	wg.Wait()
+	require.EqualValues(t, defaultBuilderCallLimit, maximum.Load())
+}
+
+func TestDynamicBuilderAdmissionCancellationDoesNotLeakPermit(t *testing.T) {
+	started := make(chan struct{}, 1)
+	release := make(chan struct{})
+	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		started <- struct{}{}
+		select {
+		case <-release:
+			return builderTestResponse(r, http.StatusAccepted, "", nil), nil
+		case <-r.Context().Done():
+			return nil, r.Context().Err()
+		}
+	}))
+	client.admission = semaphore.NewWeighted(1)
+	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
+	firstDone := make(chan error, 1)
+	go func() {
+		firstDone <- client.SubmitBuilderPreferences(t.Context(), "https://builder.example", common.Bytes48{}, request)
+	}()
+	<-started
+	waitingContext, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+	defer cancel()
+	require.ErrorIs(t, client.SubmitBuilderPreferences(waitingContext, "https://builder.example", common.Bytes48{}, request), context.DeadlineExceeded)
+	close(release)
+	require.NoError(t, <-firstDone)
+	require.NoError(t, client.SubmitBuilderPreferences(t.Context(), "https://builder.example", common.Bytes48{}, request))
+}
+
+func TestDynamicBuilderClientDoesNotRequireLegacyRelay(t *testing.T) {
+	client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
+	require.NotNil(t, client)
+	require.Nil(t, client.url)
+}
+
+func TestDynamicBuilderDialUsesValidatedAddress(t *testing.T) {
+	var dialed string
+	client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
+	client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+	}
+	client.transport = newPinnedBuilderTransport(func(_ context.Context, _, address string) (net.Conn, error) {
+		dialed = address
+		clientConn, serverConn := net.Pipe()
+		go func() {
+			defer serverConn.Close()
+			request, err := http.ReadRequest(bufio.NewReader(serverConn))
+			if err == nil {
+				request.Body.Close()
+				_, _ = serverConn.Write([]byte("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"))
+			}
+		}()
+		return clientConn, nil
+	})
+	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
+	require.NoError(t, client.SubmitBuilderPreferences(t.Context(), "http://builder.example:18550", common.Bytes48{}, request))
+	require.Equal(t, "93.184.216.34:18550", dialed)
+}
+
+func TestPrivateBuilderTargetsRequireExplicitPolicy(t *testing.T) {
+	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
+	rejected := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
+	rejected.lookupIP = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
+	}
+	require.Error(t, rejected.SubmitBuilderPreferences(t.Context(), "http://builder.local:18550", common.Bytes48{}, request))
+
+	allowed := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{AllowPrivate: true})
+	allowed.lookupIP = rejected.lookupIP
+	allowed.httpClient.Transport = mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		return builderTestResponse(r, http.StatusAccepted, "", nil), nil
+	})
+	allowed.transport = nil
+	require.NoError(t, allowed.SubmitBuilderPreferences(t.Context(), "http://builder.local:18550", common.Bytes48{}, request))
+	require.Error(t, allowed.SubmitSignedBeaconBlock(t.Context(), "http://builder.local:18550", cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)))
 }
 
 func TestSubmitSignedBeaconBlock(t *testing.T) {
