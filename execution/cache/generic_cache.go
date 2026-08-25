@@ -96,9 +96,15 @@ type GenericCache[T any] struct {
 	// grows past startCap, so it costs a few KB regardless of its configured
 	// budget. resizeMu serialises the resize and guards reservedBytes; curCap is
 	// atomic because the put fast-path reads it outside resizeMu.
-	startCap      uint32
-	maxCap        uint32
-	curCap        atomic.Uint32
+	startCap uint32
+	maxCap   uint32
+	curCap   atomic.Uint32
+	// growBlocked latches a refused grow step so a full cache stops taking
+	// resizeMu on every write: the LRU never drops below curCap again, so the
+	// fast-path gate would otherwise stay armed forever. It holds the envelope's
+	// Freed counter as sampled before the refusal (0 = growth still allowed), so
+	// bytes released elsewhere let the next write retry the step.
+	growBlocked   atomic.Uint64
 	avgEntryBytes int64 // per-domain byte estimate; maps slot count ↔ envelope bytes
 	resizeMu      sync.Mutex
 	reservedBytes int64
@@ -231,6 +237,13 @@ func (c *GenericCache[T]) newShards(capacity, shards uint32) *lruGen[entry[T]] {
 	return g
 }
 
+// canGrow reports whether a grow step is worth attempting: false while a
+// refusal is latched and the envelope has freed nothing since.
+func (c *GenericCache[T]) canGrow() bool {
+	blocked := c.growBlocked.Load()
+	return blocked == 0 || blocked != cachebudget.Global.Freed()+1
+}
+
 // maybeGrow jump-resizes the LRU one step larger when it is full, the ceiling
 // hasn't been reached, and the shared envelope can fund the step. Otherwise the
 // LRU keeps its size and freelru evicts within it. Must not be called with a
@@ -253,9 +266,12 @@ func (c *GenericCache[T]) maybeGrow() {
 	}
 	newCap := min(curCap*genericCacheGrowFactor, c.maxCap)
 	delta := int64(newCap-curCap) * c.avgEntryBytes
+	freed := cachebudget.Global.Freed()
 	if !cachebudget.Global.Reserve(delta) {
+		c.growBlocked.Store(freed + 1)
 		return
 	}
+	c.growBlocked.Store(0)
 	// Shards double with capacity only while per-shard capacity does not
 	// shrink. The selection bits nest across power-of-two counts, so each new
 	// shard receives a subset of exactly one old shard and the copy below can
@@ -274,7 +290,7 @@ func (c *GenericCache[T]) maybeGrow() {
 	}
 	copied, evicted := 0, 0
 	for _, k := range old.lru.Keys() {
-		if v, ok := old.lru.Get(k); ok {
+		if v, ok := old.lru.Peek(k); ok {
 			if next.add(k, v) {
 				evicted++
 			}
@@ -440,7 +456,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// The insert lands before the grow (which must run outside the stripe), so
 	// it and any racers until the swap evict at the pre-grow cap — a transient
 	// bounded by the grow window.
-	needGrow := c.mode != ModeNoOp && curCap < c.maxCap && gen.len() >= int(curCap)
+	needGrow := c.mode != ModeNoOp && curCap < c.maxCap && c.canGrow() && gen.len() >= int(curCap)
 
 	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
 	// not a separate currentSize check: capacityEntries is derived from
@@ -513,6 +529,7 @@ func (c *GenericCache[T]) Clear() {
 		cachebudget.Global.Release(c.reservedBytes - int64(c.startCap)*c.avgEntryBytes)
 		c.reservedBytes = int64(c.startCap) * c.avgEntryBytes
 	}
+	c.growBlocked.Store(0)
 	shards := initialShardCount(c.startCap, c.shardCeil)
 	next := c.newShards(c.startCap, shards) // allocate before excluding writers
 	for i := range c.putStripes {

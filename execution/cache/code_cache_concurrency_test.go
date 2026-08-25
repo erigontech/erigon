@@ -252,7 +252,7 @@ func TestGrowLRU_GrowRaceReplaceDoesNotDoubleCount(t *testing.T) {
 	newCap := g.curCap.Load() * genericCacheGrowFactor
 	gen2 := g.newShards(newCap)
 	for _, k := range gen1.lru.Keys() {
-		if v, ok := gen1.lru.Get(k); ok {
+		if v, ok := gen1.lru.Peek(k); ok {
 			gen2.add(k, v)
 		}
 	}

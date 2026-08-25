@@ -697,7 +697,7 @@ func (cc *commitmentCalculator) computeBlockFromBAL(ctx context.Context, pb *pen
 // commitment .kv lagging its account/storage .kv. The BAL index of a txNum is
 // txNum-firstTxNum (blockAccessIndex == TxIndex+1 and txNum == firstTxNum+
 // TxIndex+1), so applying changes at index ≤ edge-firstTxNum is the state as of
-// the edge. computeRootFromUpdates saves the checkpoint (ComputeCommitmentLocked
+// the edge. computeRootFromUpdates saves the checkpoint (ComputeCommitmentWithDiff
 // with saveStateAfter); the returned root is discarded — there is no header to
 // verify mid-block. Runs before the block-end compute so that builds on it.
 func (cc *commitmentCalculator) checkpointStepsFromBAL(ctx context.Context, req *blockRequest, emptyRemoval bool, eip8246 bool) error {
@@ -901,18 +901,23 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 	cc.publish(ctx, r)
 }
 
-// computeIsolated computes and flushes its own deferred updates under a nil
-// changeset accumulator, so a block that owns no changeset records into none.
+// computeIsolated computes and flushes its own deferred updates with no
+// changeset diff, so a block that owns no changeset records into none.
 func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, error) {
-	cc.doms.LockChangesetAccumulator()
-	defer cc.doms.UnlockChangesetAccumulator()
-	defer cc.doms.DetachChangesetAccumulatorLocked()()
+	// flushes the previous block's own pending update, hash-routed
+	if err := func() error {
+		cc.doms.LockChangesetAccumulator()
+		defer cc.doms.UnlockChangesetAccumulator()
+		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	}(); err != nil {
+		return nil, err
+	}
 
-	rh, err := cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+	rh, err := cc.doms.ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, nil)
 	if err != nil {
 		return nil, err
 	}
-	if err := cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx); err != nil {
+	if err := cc.doms.FlushPendingUpdatesWithDiff(ctx, cc.roTx, nil); err != nil {
 		return nil, err
 	}
 	return rh, nil
@@ -943,18 +948,10 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, target comm
 }
 
 // flushPendingUpdatesWithoutChangeset eagerly applies the pending deferred
-// update under a nil accumulator — a pre-window block's branch deltas must
-// not pend into the first window block's changeset-routed compute.
+// update with no changeset diff — a pre-window block's branch deltas must not
+// pend into the first window block's changeset-routed compute.
 func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, target commitTarget) {
-	// The closure bounds the locked window: publish must stay outside it —
-	// the send can block on the apply loop, which contends on changesetMu.
-	err := func() error {
-		cc.doms.LockChangesetAccumulator()
-		defer cc.doms.UnlockChangesetAccumulator()
-		defer cc.doms.DetachChangesetAccumulatorLocked()()
-		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
-	}()
-	if err != nil {
+	if err := cc.doms.FlushPendingUpdatesWithDiff(ctx, cc.roTx, nil); err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: target.blockNum,
 			txNum:    target.lastTxNum,
@@ -1021,29 +1018,32 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		}
 	}()
 
-	// Look up cs AND compute under changesetMu: reading cs before the lock races
-	// the apply loop's SavePastChangesetAccumulator + accumulator rotation, which
-	// would route this block's [state] write into the next block's changeset. The
-	// lock is required even on the cs==nil path — the internal FlushPendingUpdates
-	// mutates the same global accumulator pointer.
-	cc.doms.LockChangesetAccumulator()
-	defer cc.doms.UnlockChangesetAccumulator()
+	// GetChangesetByHash is self-contained (its own pastChangesLock, not
+	// changesetMu) and its result is used directly below as this call's own
+	// diff — no lock needed to keep it "fresh" against a concurrent rotation,
+	// since nothing here compares it against later-observed shared state.
 	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
-	if cs == nil {
-		return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+
+	// Flush block N-1's own pending update (hash-routed to N-1's saved
+	// changeset, independent of N's diff below) — the one remaining
+	// changesetMu window, brief rather than spanning the fold that follows.
+	if err := func() error {
+		cc.doms.LockChangesetAccumulator()
+		defer cc.doms.UnlockChangesetAccumulator()
+		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	}(); err != nil {
+		return nil, err
 	}
-	// LOAD-BEARING swap under the outer lock (already taken above). The
-	// swap below mutates the global current-accumulator pointer; the
-	// deferred branch writes from block N-1 (flushed inside
-	// ComputeCommitmentLocked → FlushPendingUpdatesLocked) AND the [state]
-	// marker write at end of compute also touch that same global pointer
-	// and the per-domain diff fields. Holding changesetMu through all of
-	// it serializes against the apply goroutine's DomainPut/DomainDel.
-	//
-	// Inside the lock we must use the *Locked variants — the public
-	// counterparts re-acquire the same Mutex and would self-deadlock.
-	defer cc.doms.SwapCommitmentDiffLocked(cs)()
-	return cc.doms.ComputeCommitmentLocked(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil)
+
+	// This call's own writes (branch nodes, the [state] marker, and any
+	// deferred update ComputeCommitment leaves pending) route directly into
+	// cs's diff — see DomainPutCommitmentDiff — so nothing here needs
+	// changesetMu against a concurrent SetChangesetAccumulator.
+	var diff *kv.DomainDiff
+	if cs != nil {
+		diff = &cs.Diffs[kv.CommitmentDomain]
+	}
+	return cc.doms.ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, diff)
 }
 
 // asOfStateReader reads account/storage/code at a specific txNum via

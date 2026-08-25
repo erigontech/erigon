@@ -416,6 +416,15 @@ func (d *Domain) Close() {
 }
 
 func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []byte) error {
+	return w.PutWithPrevDiff(k, v, txNum, preval, w.diff)
+}
+
+// PutWithPrevDiff is PutWithPrev with an explicit diff target instead of the
+// writer's own w.diff — for a caller that is its domain's sole writer and
+// wants to route this write's diff without going through SetDiff (which is
+// shared, mutable, and would otherwise need a lock to stay race-free against
+// a concurrent SetDiff from elsewhere).
+func (w *DomainBufferedWriter) PutWithPrevDiff(k, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 	// This call to update needs to happen before d.tx.Put() later, because otherwise the content of `preval`` slice is invalidated
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
@@ -426,8 +435,8 @@ func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []b
 		return err
 	}
 	t1 := time.Now()
-	if w.diff != nil {
-		w.diff.DomainUpdate(k, step, preval)
+	if diff != nil {
+		diff.DomainUpdate(k, step, preval)
 	}
 	t2 := time.Now()
 	err := w.addValue(k, v, step)
@@ -439,6 +448,12 @@ func (w *DomainBufferedWriter) PutWithPrev(k, v []byte, txNum uint64, preval []b
 }
 
 func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byte) (err error) {
+	return w.DeleteWithPrevDiff(k, txNum, prev, w.diff)
+}
+
+// DeleteWithPrevDiff is DeleteWithPrev with an explicit diff target — see
+// PutWithPrevDiff.
+func (w *DomainBufferedWriter) DeleteWithPrevDiff(k []byte, txNum uint64, prev []byte, diff *kv.DomainDiff) (err error) {
 	step := kv.Step(txNum / w.h.ii.stepSize)
 
 	// This call to update needs to happen before d.tx.Delete() later, because otherwise the content of `original`` slice is invalidated
@@ -448,8 +463,8 @@ func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byt
 	if err := w.h.AddPrevValue(k, txNum, prev); err != nil {
 		return err
 	}
-	if w.diff != nil {
-		w.diff.DomainUpdate(k, step, prev)
+	if diff != nil {
+		diff.DomainUpdate(k, step, prev)
 	}
 	return w.addValue(k, nil, step)
 }
