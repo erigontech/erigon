@@ -162,6 +162,15 @@ func (fv *ForkValidator) ExtendingForkHeadHash() common.Hash {
 	return fv.extendingForkHeadHash
 }
 
+// FrontierMode reports whether the decoupled-boundary keep-alive lifecycle is armed (the marker-driven
+// run-ahead flow). forkchoice uses it to gate parked-gen promotion (PromoteBlock) so non-frontier flows keep
+// the legacy single-active-fork merge path exactly as before.
+func (fv *ForkValidator) FrontierMode() bool {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.frontierMode
+}
+
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.lock.Lock()
@@ -244,6 +253,103 @@ func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalT
 	return nil
 }
 
+// PromoteBlock canonicalises the specific block the FCU chose (blockHash/blockNumber) into the canonical
+// sd — which, when the frontier runs AHEAD (the marker-driven atomic open opened N+1 before N's FCU), may be
+// a PARKED pre-exec generation BELOW the active extending-fork head, not the head itself. It merges that
+// block's SD into canonical with keep-alive (closeOther=false, so the block stays readable as its successor's
+// read-through parent), retires parked gens strictly below it, and LEAVES the active run-ahead frontier
+// intact. Returns (true,nil) when it promoted a live pre-exec gen (active head or parked); (false,nil) when
+// the target is not a live gen (the caller falls back to the normal RunLoop canonicalisation — unchanged for
+// non-run-ahead flows). Caller must NOT hold fv.lock.
+func (fv *ForkValidator) PromoteBlock(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, target *Accumulation, blockHash common.Hash, blockNumber uint64) (bool, error) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+
+	activeHead := fv.sharedDom != nil && fv.extendingForkHeadHash == blockHash && fv.extendingForkNumber == blockNumber
+	var promoteSD *execctx.SharedDomains
+	if activeHead {
+		promoteSD = fv.sharedDom
+	} else {
+		for _, g := range fv.preExecStack {
+			if g.sd != nil && g.headHash == blockHash && g.number == blockNumber {
+				promoteSD = g.sd
+				break
+			}
+		}
+	}
+	if promoteSD == nil {
+		return false, nil // not a live pre-exec block → caller uses the normal canonical path
+	}
+
+	start := time.Now()
+	// Merge the chosen block's state into the canonical sd. closeOther follows the legacy rule: in the
+	// frontier flow keep the block's SD alive (closeOther=false) so its successor keeps reading it as the
+	// read-through parent; the normal/non-frontier flow closes it as before. This makes the ACTIVE-HEAD case
+	// byte-for-byte identical to MergeExtendingFork in both modes (so non-frontier flows are unchanged).
+	if err := promoteSD.FlushPendingUpdates(ctx, tx); err != nil {
+		return false, err
+	}
+	sdTxNum, _, err := sd.SeekCommitment(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	otherTxNum, _, err := promoteSD.SeekCommitment(ctx, tx)
+	if err != nil {
+		return false, err
+	}
+	if err := sd.Merge(ctx, sdTxNum, promoteSD, otherTxNum, !fv.frontierMode); err != nil {
+		return false, err
+	}
+	timings, _ := fv.timingsCache.Get(blockHash)
+	timings[BlockTimingsFlushExtendingFork] = time.Since(start)
+	fv.timingsCache.Add(blockHash, timings)
+	if fv.extendingForkNotifications != nil {
+		fv.extendingForkNotifications.Accumulator.CopyAndReset(target.Accumulator)
+		fv.extendingForkNotifications.RecentReceipts.CopyAndReset(target.RecentReceipts)
+	}
+
+	if fv.frontierMode {
+		// Frontier flow: retire parked gens STRICTLY BELOW the promoted block (their state is now durable);
+		// keep the promoted block itself parked as its successor's read-through frontier.
+		fv.retireParkedUpTo(ctx, tx, blockNumber, false)
+		if activeHead {
+			// Caught-up: promoted the active head — park it (keep-alive) then clear the active slot.
+			fv.pushPreExec(fv.sharedDom, fv.extendingForkHeadHash, fv.extendingForkNumber)
+			fv.sharedDom = nil
+			fv.extendingForkHeadHash = common.Hash{}
+			fv.extendingForkNumber = 0
+			fv.extendingForkNotifications = nil
+		} else {
+			// Run-ahead: promoted a parked gen below the active head — kept parked by retireParkedUpTo above;
+			// the active extending fork (the frontier running ahead) is untouched and keeps accumulating.
+			if err := fv.ensureParked(promoteSD, blockHash, blockNumber); err != nil {
+				return false, err
+			}
+		}
+	} else {
+		// Legacy non-frontier flow: identical to MergeExtendingFork — retire ≤ inclusive, clear the active slot
+		// (its state was transferred into the canonical SD by the merge, which also closed it).
+		fv.retireParkedUpTo(ctx, tx, blockNumber, true)
+		fv.sharedDom = nil
+		fv.extendingForkHeadHash = common.Hash{}
+		fv.extendingForkNumber = 0
+		fv.extendingForkNotifications = nil
+	}
+	return true, nil
+}
+
+// ensureParked guarantees the given SD is present on the park stack (idempotent) — used after promoting a
+// parked gen, whose retire step keeps it but whose bookkeeping we normalise here. Caller must hold fv.lock.
+func (fv *ForkValidator) ensureParked(sd *execctx.SharedDomains, headHash common.Hash, number uint64) error {
+	for _, g := range fv.preExecStack {
+		if g.sd == sd {
+			return nil
+		}
+	}
+	fv.pushPreExec(sd, headHash, number)
+	return nil
+}
+
 // retireParkedUpTo flushes+releases parked pre-exec generations whose block number is ≤
 // upTo, oldest-first (tail-first). Called from the FCU merge once a block canonicalises:
 // the parked predecessors' state is now durable in the DB, so their SDs can be released and
@@ -294,6 +400,16 @@ func (fv *ForkValidator) isPreExecutedLive(hash common.Hash, number uint64) bool
 		}
 	}
 	return false
+}
+
+// HasLiveGen is the exported, locked form of isPreExecutedLive: reports whether (hash, number) is a live
+// pre-exec generation (the active extending fork or a parked frontier gen). forkchoice uses it to decide
+// whether an FCU target can be promoted from the frontier (PromoteBlock) — including a parked gen below the
+// run-ahead head — rather than re-executed via the normal canonical path.
+func (fv *ForkValidator) HasLiveGen(hash common.Hash, number uint64) bool {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	return fv.isPreExecutedLive(hash, number)
 }
 
 // ValidatePayload returns whether a payload is valid or invalid, or if cannot be determined, it will be accepted.
@@ -509,7 +625,12 @@ func (fv *ForkValidator) CheckFlashblockUpdate(blockNumber uint64, txs []types.T
 	fv.lock.Lock()
 	defer fv.lock.Unlock()
 
-	if fv.extendingForkNumber != blockNumber || len(fv.flashblockTxHashes) == 0 || fv.sharedDom == nil {
+	// Reuse the maintained SD whenever it is already open for THIS block number. An EMPTY (0-tx)
+	// in-progress block IS reusable: the marker-driven atomic open creates N+1's SD (parented to N's live
+	// SD) as an empty block at close, then the first content round carries forward into it with PrefixLen=0.
+	// (Previously a `len(flashblockTxHashes) == 0` guard forced a fresh SD here, discarding the eager-opened
+	// one — the reuse conflict that made the atomic open create a second SD.)
+	if fv.extendingForkNumber != blockNumber || fv.sharedDom == nil {
 		return FlashblockUpdate{}
 	}
 

@@ -495,7 +495,18 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
-	mergeExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash()
+	// The FCU target is canonicalised from the pre-exec frontier when it is the active extending-fork head
+	// (the caught-up case — legacy MergeExtendingFork, UNCHANGED) OR, only in the run-ahead frontier flow, a
+	// PARKED gen below the active head (the marker-driven atomic open opened N+1 before N's FCU → the FCU
+	// target N is a parked gen). Parked-gen promotion is gated on frontierMode so non-frontier flows keep the
+	// legacy single-active-fork path exactly as before.
+	// Canonicalise the FCU target from the pre-exec frontier when it is the active extending-fork head OR,
+	// only in the run-ahead frontier flow, a PARKED gen below the active head (the marker-driven atomic open
+	// opened N+1 before N's FCU). PromoteBlock handles all three (active head in either mode, parked gen in
+	// frontier mode) and is byte-identical to the legacy MergeExtendingFork for the non-frontier active head;
+	// it returns false only if the target vanished, in which case we fall through to normal canonicalisation.
+	mergeExtendingFork := blockHash == e.forkValidator.ExtendingForkHeadHash() ||
+		(e.forkValidator.FrontierMode() && e.forkValidator.HasLiveGen(blockHash, fcuHeader.Number.Uint64()))
 	stateFlushingInParallel := mergeExtendingFork && e.syncCfg.ParallelStateFlushing
 	if mergeExtendingFork {
 		e.logger.Debug("[updateForkchoice] Fork choice update: flushing in-memory state (built by previous newPayload)")
@@ -508,10 +519,17 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			}, false)
 			e.logHeadUpdated(blockHash, fcuHeader, 0, "head validated", false)
 		}
-		if err := e.forkValidator.MergeExtendingFork(ctx, tx, currentContext, e.accum); err != nil {
+		promoted, err := e.forkValidator.PromoteBlock(ctx, tx, currentContext, e.accum, blockHash, fcuHeader.Number.Uint64())
+		if err != nil {
 			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
 		}
-		rawdb.WriteHeadBlockHash(tx, blockHash)
+		if promoted {
+			rawdb.WriteHeadBlockHash(tx, blockHash)
+		} else {
+			// Target vanished between the check and here — fall through to the normal canonical path.
+			mergeExtendingFork = false
+			stateFlushingInParallel = false
+		}
 	}
 	// Run the forkchoice.
 	// TODO: rename initialCycle → atTip (inverted polarity) across stage/prune APIs.
