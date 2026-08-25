@@ -18,6 +18,8 @@ package cache
 
 import (
 	"encoding/binary"
+	"math"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -591,4 +593,33 @@ func TestGenericCache_BudgetReleaseResumesGrow(t *testing.T) {
 	budget.Release(stepBytes)
 	fill(genericCacheStartCapacity*2, genericCacheStartCapacity*3)
 	require.Greater(t, c.curCap.Load(), uint32(genericCacheStartCapacity), "freed budget must let the cache grow again")
+}
+
+// The envelope must cover what a cache actually allocates. freelru wraps every
+// value in an element carrying a key, five list indices and an expiry, and
+// over-allocates the table by 25% -- none of which the per-entry payload
+// estimate accounts for, so a byte budget used to buy ~2.5x the RAM it charged.
+func TestGenericCache_EnvelopeCoversSlotArray(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+	cachebudget.Global = cachebudget.New(math.MaxInt64)
+
+	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](1*datasize.GB, avgStorageEntryBytes,
+		func(v []byte) int { return len(v) }, ModeEvictLRU))
+
+	const slots = 262144
+	runtime.GC()
+	var before runtime.MemStats
+	runtime.ReadMemStats(&before)
+	gen := c.newShards(slots, c.shardCeil)
+	runtime.GC()
+	var after runtime.MemStats
+	runtime.ReadMemStats(&after)
+	runtime.KeepAlive(gen)
+
+	allocated := int64(after.HeapAlloc) - int64(before.HeapAlloc)
+	reserved := int64(slots) * c.avgEntryBytes
+	require.Positive(t, allocated)
+	require.GreaterOrEqual(t, reserved, allocated,
+		"envelope reserves %d B for %d slots but the table allocates %d B", reserved, slots, allocated)
 }
