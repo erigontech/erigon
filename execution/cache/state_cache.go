@@ -34,7 +34,7 @@ import (
 
 const (
 	DefaultAccountCacheBytes = 150 * datasize.MB
-	DefaultStorageCacheBytes = 1 * datasize.GB
+	DefaultStorageCacheBytes = 256 * datasize.MB
 
 	// Per-domain avg entry size used to translate the byte budget into the
 	// entry-count cap the underlying sharded LRU is sized against. Account
