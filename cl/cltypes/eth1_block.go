@@ -61,6 +61,13 @@ type Eth1Block struct {
 	beaconCfg *clparams.BeaconChainConfig
 }
 
+func newExecutionPayloadTransactions(version clparams.StateVersion, cfg *clparams.BeaconChainConfig) *solid.TransactionsSSZ {
+	if version >= clparams.GloasVersion {
+		return solid.NewProgressiveTransactionsSSZ()
+	}
+	return solid.NewTransactionsSSZWithLimits(cfg.MaxTransactionsPerPayload, cfg.MaxBytesPerTransaction)
+}
+
 // NewEth1Block creates a new Eth1Block.
 func NewEth1Block(version clparams.StateVersion, beaconCfg *clparams.BeaconChainConfig) *Eth1Block {
 	b := &Eth1Block{
@@ -273,7 +280,7 @@ func (b *Eth1Block) UnmarshalJSON(data []byte) error {
 		BlockAccessList *solid.ByteListSSZ          `json:"block_access_list"`
 		SlotNumber      uint64                      `json:"slot_number,string"`
 	}
-	aux.Transactions = solid.NewTransactionsSSZWithLimits(b.beaconCfg.MaxTransactionsPerPayload, b.beaconCfg.MaxBytesPerTransaction)
+	aux.Transactions = newExecutionPayloadTransactions(b.version, b.beaconCfg)
 	aux.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	if b.version >= clparams.GloasVersion {
 		aux.BlockAccessList = solid.NewByteListSSZ(b.beaconCfg.MaxBytesPerTransaction)
@@ -412,7 +419,7 @@ func (b *Eth1Block) DecodeSSZStrict(buf []byte, version int) error {
 
 func (b *Eth1Block) decodeSSZ(buf []byte, version int, strict bool) error {
 	b.Extra = solid.NewExtraData()
-	b.Transactions = solid.NewTransactionsSSZWithLimits(b.beaconCfg.MaxTransactionsPerPayload, b.beaconCfg.MaxBytesPerTransaction)
+	b.Transactions = newExecutionPayloadTransactions(clparams.StateVersion(version), b.beaconCfg)
 	b.Withdrawals = solid.NewStaticListSSZ[*Withdrawal](int(b.beaconCfg.MaxWithdrawalsPerPayload), 44)
 	b.version = clparams.StateVersion(version)
 	if b.version >= clparams.GloasVersion {

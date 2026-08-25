@@ -98,13 +98,15 @@ func TestExecutionPayloadEnvelopeValidationSeparatesProtocolAndPersistenceBounds
 	require.NoError(t, decoded.DecodeSSZStrict(encoded, int(clparams.GloasVersion)))
 	require.Equal(t, 16_385, decoded.Message.ExecutionRequests.Deposits.Len())
 
+	progressiveTransactions := validTestExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)
+	progressiveTransactions.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1}, {2}})
+	require.NoError(t, progressiveTransactions.ValidateForConfig(&cfg))
+	require.NoError(t, progressiveTransactions.ValidateForPersistence(&cfg))
+
 	for _, test := range []struct {
 		name   string
 		mutate func(*SignedExecutionPayloadEnvelope)
 	}{
-		{"transactions", func(e *SignedExecutionPayloadEnvelope) {
-			e.Message.Payload.Transactions = solid.NewTransactionsSSZFromTransactions([][]byte{{1}, {2}})
-		}},
 		{"block access list", func(e *SignedExecutionPayloadEnvelope) {
 			require.NoError(t, e.Message.Payload.BlockAccessList.SetBytes([]byte{1, 2}))
 		}},
@@ -126,6 +128,8 @@ func TestExecutionPayloadEnvelopeValidateForPersistenceRejectsOversizedEncoding(
 
 	require.Greater(t, uint64(envelope.EncodingSizeSSZ()), clparams.MaxChunkSize)
 	require.ErrorContains(t, envelope.ValidateForPersistence(&clparams.MainnetBeaconConfig), "exceeds max")
+	_, err := envelope.EncodeSSZ(nil)
+	require.ErrorContains(t, err, "exceeds max")
 }
 
 func TestExecutionPayloadEnvelopeValidateForPersistenceAllowsProgressiveListsPastConfiguredLimit(t *testing.T) {
