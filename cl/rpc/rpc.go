@@ -407,17 +407,15 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 	r := bytes.NewReader(message.Data)
 	sr := snappypool.Reader(r)
 	defer snappypool.PutReader(sr)
+	expectChunk := false
 	for {
 		forkDigest := make([]byte, 4)
-		if n, err := r.Read(forkDigest); err != nil {
-			if err == io.EOF {
+		if _, err := io.ReadFull(r, forkDigest); err != nil {
+			if err == io.EOF && !expectChunk {
 				break
 			}
-			return responsePacket, message.Peer.Pid, err
-		} else if n == 0 {
-			break
+			return responsePacket, message.Peer.Pid, fmt.Errorf("incomplete response fork digest: %w", err)
 		}
-
 		// Read varint for length of message.
 		encodedLn, _, err := ssz_snappy.ReadUvarint(r)
 		if err != nil {
@@ -463,6 +461,7 @@ func (b *BeaconRpcP2P) parseResponseData(message *sentinelproto.ResponseData) ([
 			log.Debug("failed to read byte", "err", err)
 			return responsePacket, message.Peer.Pid, err
 		}
+		expectChunk = true
 	}
 	return responsePacket, message.Peer.Pid, nil
 }
