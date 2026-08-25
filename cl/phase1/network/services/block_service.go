@@ -133,6 +133,7 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	if err := b.validateGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg) }); err != nil {
 		return err
 	}
+	b.seenBlocksCache.Add(seenCacheKey, struct{}{})
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
@@ -160,14 +161,17 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
 		return fmt.Errorf("%w: block is not from a future slot: %d > %d", ErrIgnore, currentSlot, msg.Block.Slot)
 	}
-	blockEpoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
 	var finalizedCheckpoint solid.Checkpoint
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
 		// [IGNORE] The block is from a slot greater than the latest finalized slot -- i.e. validate that signed_beacon_block.message.slot > compute_start_slot_at_epoch(store.finalized_checkpoint.epoch)
 		// (a client MAY choose to validate and store such blocks for additional purposes -- e.g. slashing detection, archive nodes, etc).
-		if blockEpoch <= headState.FinalizedCheckpoint().Epoch {
-			return fmt.Errorf("%w: block is not from a slot greater than the latest finalized slot: %d > %d", ErrIgnore, blockEpoch, headState.FinalizedCheckpoint().Epoch)
+		finalizedStartSlot, ok := safeMultiplyUint64(headState.FinalizedCheckpoint().Epoch, b.beaconCfg.SlotsPerEpoch)
+		if !ok {
+			return errors.New("finalized checkpoint slot is not representable")
+		}
+		if msg.Block.Slot <= finalizedStartSlot {
+			return fmt.Errorf("%w: block slot %d is not after finalized slot %d", ErrIgnore, msg.Block.Slot, finalizedStartSlot)
 		}
 		finalizedCheckpoint = headState.FinalizedCheckpoint()
 
@@ -195,9 +199,38 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 	if parentHeader.Slot >= msg.Block.Slot {
 		return ErrBlockYoungerThanParent
 	}
+	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
+	blockVersion := b.beaconCfg.GetCurrentStateVersion(epoch)
+	var gloasBid *cltypes.ExecutionPayloadBid
+	parentIsFull := false
+	if blockVersion >= clparams.GloasVersion {
+		signedBid := msg.Block.Body.GetSignedExecutionPayloadBid()
+		if signedBid == nil || signedBid.Message == nil {
+			return errors.New("missing signed_execution_payload_bid in GLOAS block")
+		}
+		gloasBid = signedBid.Message
+		parentBlock, ok := b.forkchoiceStore.GetBlock(msg.Block.ParentRoot)
+		if !ok || parentBlock == nil || parentBlock.Block == nil || parentBlock.Block.Body == nil {
+			return errors.New("parent block not found")
+		}
+		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
+		parentIsFull = parentBid != nil && parentBid.Message != nil && gloasBid.ParentBlockHash == parentBid.Message.BlockHash
+		if parentIsFull {
+			status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(msg.Block.ParentRoot)
+			if !seen || status != execution_client.PayloadStatusValidated {
+				if schedule != nil {
+					schedule()
+				}
+				return fmt.Errorf("%w: parent payload is not verified", ErrIgnore)
+			}
+		}
+	}
 	finalizedSlot, ok := safeMultiplyUint64(finalizedCheckpoint.Epoch, b.beaconCfg.SlotsPerEpoch)
 	if !ok {
 		return errors.New("finalized checkpoint slot is not representable")
+	}
+	if anchorSlot := b.forkchoiceStore.AnchorSlot(); finalizedSlot < anchorSlot {
+		finalizedSlot = anchorSlot
 	}
 	if b.forkchoiceStore.Ancestor(msg.Block.ParentRoot, finalizedSlot).Root != finalizedCheckpoint.Root {
 		return errors.New("finalized checkpoint is not an ancestor of block")
@@ -220,8 +253,6 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 		return fmt.Errorf("block proposer index %d does not match expected proposer %d", msg.Block.ProposerIndex, expectedProposer)
 	}
 
-	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
-	blockVersion := b.beaconCfg.GetCurrentStateVersion(epoch)
 	var maxBlobsPerBlock uint64
 	if blockVersion >= clparams.FuluVersion {
 		maxBlobsPerBlock = b.beaconCfg.GetBlobParameters(epoch).MaxBlobsPerBlock
@@ -232,40 +263,18 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 	// [Modified in Gloas:EIP7732] KZG commitments and execution payload validations moved from block.body to bid
 	if blockVersion >= clparams.GloasVersion {
 		// GLOAS: validate using bid = signed_execution_payload_bid.message
-		bid := msg.Block.Body.GetSignedExecutionPayloadBid()
-		if bid == nil || bid.Message == nil {
-			return errors.New("missing signed_execution_payload_bid in GLOAS block")
-		}
-
 		// [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer
 		// i.e. validate that len(bid.blob_kzg_commitments) <= get_blob_parameters(get_current_epoch(state)).max_blobs_per_block
-		if bid.Message.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
+		if gloasBid.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
 			return ErrInvalidCommitmentsCount
 		}
 
 		// [REJECT] The bid's parent (defined by bid.parent_block_root) equals the block's parent (defined by block.parent_root)
-		if bid.Message.ParentBlockRoot != msg.Block.ParentRoot {
+		if gloasBid.ParentBlockRoot != msg.Block.ParentRoot {
 			return errors.New("bid.parent_block_root does not match block.parent_root")
 		}
 
-		parentBlock, ok := b.forkchoiceStore.GetBlock(msg.Block.ParentRoot)
-		if !ok || parentBlock == nil || parentBlock.Block == nil || parentBlock.Block.Body == nil {
-			return errors.New("parent block not found")
-		}
-		parentBid := parentBlock.Block.Body.GetSignedExecutionPayloadBid()
-		parentIsFull := parentBid != nil && parentBid.Message != nil && bid.Message.ParentBlockHash == parentBid.Message.BlockHash
-		if parentIsFull {
-			status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(msg.Block.ParentRoot)
-			if status == execution_client.PayloadStatusInvalidated {
-				return errors.New("parent execution payload is invalid")
-			}
-			if !seen || status != execution_client.PayloadStatusValidated {
-				if schedule != nil {
-					schedule()
-				}
-				return fmt.Errorf("%w: parent payload is not verified", ErrIgnore)
-			}
-		} else if bid.Message.ParentBlockHash != parentState.GetLatestBlockHash() {
+		if !parentIsFull && gloasBid.ParentBlockHash != parentState.GetLatestBlockHash() {
 			return errors.New("bid does not build on the parent's execution head")
 		}
 	} else if msg.Block.Body.BlobKzgCommitments != nil && msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
