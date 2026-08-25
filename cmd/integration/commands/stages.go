@@ -32,6 +32,7 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/erigontech/mdbx-go/mdbx"
 	"github.com/erigontech/secp256k1"
+	"github.com/felixge/fgprof"
 	"github.com/spf13/cobra"
 	"golang.org/x/sync/errgroup"
 	"golang.org/x/sync/semaphore"
@@ -614,11 +615,55 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 	return tx.Commit()
 }
 
+// startExecProfiling starts CPU, mutex, and fgprof (whole-run wall-clock) profiling
+// for the duration of the caller's stage_exec run, and returns a func that stops them
+// and flushes cpu/heap/mutex/fgprof profiles to dirs.Tmp. The caller must defer it.
+func startExecProfiling(dirs datadir.Dirs, logger log.Logger) func() {
+	cpuFile := filepath.Join(dirs.Tmp, "stage_exec_cpu.pprof")
+	if err := debug.Handler.StartCPUProfile(cpuFile); err != nil {
+		logger.Warn("[stage_exec] failed to start CPU profile", "err", err)
+	}
+
+	debug.Handler.SetMutexProfileFraction(1)
+
+	fgprofFile, err := os.Create(filepath.Join(dirs.Tmp, "stage_exec_fgprof.pprof"))
+	if err != nil {
+		logger.Warn("[stage_exec] failed to create fgprof file", "err", err)
+	}
+	var stopFgprof func() error
+	if fgprofFile != nil {
+		stopFgprof = fgprof.Start(fgprofFile, fgprof.FormatPprof)
+	}
+
+	return func() {
+		if err := debug.Handler.StopCPUProfile(); err != nil {
+			logger.Warn("[stage_exec] failed to stop CPU profile", "err", err)
+		}
+		if err := debug.Handler.WriteMemProfile(filepath.Join(dirs.Tmp, "stage_exec_heap.pprof")); err != nil {
+			logger.Warn("[stage_exec] failed to write heap profile", "err", err)
+		}
+		if err := debug.Handler.WriteMutexProfile(filepath.Join(dirs.Tmp, "stage_exec_mutex.pprof")); err != nil {
+			logger.Warn("[stage_exec] failed to write mutex profile", "err", err)
+		}
+		debug.Handler.SetMutexProfileFraction(0)
+		if stopFgprof != nil {
+			if err := stopFgprof(); err != nil {
+				logger.Warn("[stage_exec] failed to write fgprof profile", "err", err)
+			}
+		}
+		if fgprofFile != nil {
+			fgprofFile.Close()
+		}
+	}
+}
+
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
+
+	defer startExecProfiling(dirs, logger)()
 
 	_, clean, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
