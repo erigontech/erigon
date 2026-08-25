@@ -216,20 +216,20 @@ Both a record encoder and a state-blob encoder are needed: Task 6's root check a
 datadir both require a legacy `KeyCommitmentState` blob, and `pbinStateMarker`,
 `pbinRecordFormat` and `pbinPath.appendPackedBits` are all unexported.
 
-- [ ] write a failing test that `PBinEncodeLegacyRecord` round-trips: current record in,
+- [x] write a failing test that `PBinEncodeLegacyRecord` round-trips: current record in,
       legacy bytes out, `ConvertBranch` back to the identical current record
-- [ ] add `func PBinEncodeLegacyRecord(key, current []byte) ([]byte, error)` — decode the
+- [x] add `func PBinEncodeLegacyRecord(key, current []byte) ([]byte, error)` — decode the
       current record, re-spell it in the legacy format
-- [ ] write a failing test that `PBinEncodeLegacyState` produces a blob `ConvertState` accepts
+- [x] write a failing test that `PBinEncodeLegacyState` produces a blob `ConvertState` accepts
       and `ValidatePBinStateFormat` rejects
-- [ ] add `func PBinEncodeLegacyState(current []byte) ([]byte, error)`
-- [ ] keep `pbinTestLegacyAppendCell` as-is — it is cell-level and its callers need shapes no
+- [x] add `func PBinEncodeLegacyState(current []byte) ([]byte, error)`
+- [x] keep `pbinTestLegacyAppendCell` as-is — it is cell-level and its callers need shapes no
       current record can express (a one-cell record, and a cell appended into a state blob),
       so it cannot be expressed in terms of the record-level encoder
-- [ ] update the file header comment, which currently says nothing outside the converter may
+- [x] update the file header comment, which currently says nothing outside the converter may
       use this — the corpus generators are now legitimate callers
-- [ ] write tests for the error cases: malformed input, a record that is already legacy
-- [ ] run `go test ./execution/commitment/ -count=1` — must pass before task 2
+- [x] write tests for the error cases: malformed input, a record that is already legacy
+- [x] run `go test ./execution/commitment/ -count=1` — must pass before task 2
 
 ### Task 2: Add CompareLegacy and LegacyStateRoot to the converter
 

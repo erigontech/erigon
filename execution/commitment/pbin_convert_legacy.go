@@ -24,10 +24,10 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// Reading the record format that predates pbinRecordFormat, for the one-way
-// conversion of a datadir built before it. A legacy record spells its cells
-// with a touchMap/afterMap header and a uvarint length on every field; the
-// current one spells neither. Nothing outside the converter may use this.
+// Reading and writing the record format that predates pbinRecordFormat. The
+// decoder serves the one-way datadir conversion, while the encoders also build
+// legacy test corpora. A legacy record spells its cells with a touchMap/afterMap
+// header and a uvarint length on every field; the current one spells neither.
 
 // PBinRecordConverter rewrites legacy records. It is not safe for concurrent use.
 type PBinRecordConverter struct {
@@ -37,6 +37,124 @@ type PBinRecordConverter struct {
 
 func NewPBinRecordConverter() *PBinRecordConverter {
 	return &PBinRecordConverter{keys: pbinDigestCache{sum: pbinSelectedSum}}
+}
+
+// PBinEncodeLegacyRecord rewrites a current branch record in the pre-version
+// format. The key is needed to restore storage prefixes omitted by the current
+// record format.
+func PBinEncodeLegacyRecord(key, current []byte) ([]byte, error) {
+	if len(current) > 0 && current[0] == 0 {
+		return nil, fmt.Errorf("pbin encode legacy: input is already a legacy record")
+	}
+
+	path, err := pbinDecodeBitPath(key)
+	if err != nil {
+		return nil, fmt.Errorf("pbin encode legacy: record key %x: %w", key, err)
+	}
+	converter := NewPBinRecordConverter()
+	var cells [2]pbinCell
+	if _, err = pbinDecodeBranch(current, &cells, path.bitLen+1, &converter.keys); err != nil {
+		return nil, fmt.Errorf("pbin encode legacy: record at %x: %w", key, err)
+	}
+
+	out := binary.BigEndian.AppendUint16(nil, pbinCellBits)
+	out = binary.BigEndian.AppendUint16(out, pbinCellBits)
+	for bit := range cells {
+		if out, err = pbinEncodeLegacyCell(out, &cells[bit]); err != nil {
+			return nil, fmt.Errorf("pbin encode legacy: record at %x: %w", key, err)
+		}
+	}
+	return out, nil
+}
+
+// PBinEncodeLegacyState rewrites a current trie state blob in the pre-version
+// format. The root cell keeps its flags and prefix, but its fields gain lengths.
+func PBinEncodeLegacyState(current []byte) ([]byte, error) {
+	if len(current) >= 2 && current[0] == pbinStateMarker && current[1] != pbinRecordFormat &&
+		current[1] <= pbinStateFlagsAll {
+		return nil, fmt.Errorf("pbin encode legacy: input is already a legacy state blob")
+	}
+	if err := ValidatePBinStateFormat(current); err != nil {
+		return nil, fmt.Errorf("pbin encode legacy: %w", err)
+	}
+	if len(current) < 5 {
+		return nil, fmt.Errorf("pbin encode legacy: %w: header is %d bytes, want at least 5", errPBinStateBlob, len(current))
+	}
+	flags := current[2]
+	if flags&^byte(pbinStateFlagsAll) != 0 {
+		return nil, fmt.Errorf("pbin encode legacy: %w: unknown flags %08b", errPBinStateBlob, flags)
+	}
+	rootLen := int(binary.BigEndian.Uint16(current[3:5]))
+	if len(current) != 5+rootLen {
+		return nil, fmt.Errorf("pbin encode legacy: %w: root cell of %d bytes in a %d-byte blob", errPBinStateBlob, rootLen, len(current))
+	}
+
+	out := []byte{pbinStateMarker, flags, 0, 0}
+	if rootLen == 0 {
+		return out, nil
+	}
+	var root pbinCell
+	pos, err := pbinDecodeCell(current, 5, &root, 0, nil, false)
+	if err != nil {
+		return nil, fmt.Errorf("pbin encode legacy: state root cell: %w", err)
+	}
+	if pos != len(current) {
+		return nil, fmt.Errorf("pbin encode legacy: %w: %d trailing bytes after the root cell", errPBinStateBlob, len(current)-pos)
+	}
+	if out, err = pbinEncodeLegacyCell(out, &root); err != nil {
+		return nil, fmt.Errorf("pbin encode legacy: state root cell: %w", err)
+	}
+	binary.BigEndian.PutUint16(out[2:4], uint16(len(out)-4))
+	return out, nil
+}
+
+func pbinEncodeLegacyCell(dst []byte, c *pbinCell) ([]byte, error) {
+	var fields pbinCellFields
+	switch c.kind {
+	case pbinNodeLeaf:
+		fields = pbinFieldLeaf
+	case pbinNodeBranch:
+		fields = pbinFieldBranch
+	default:
+		return nil, fmt.Errorf("%w: cell has no node kind", errPBinMalformedBranch)
+	}
+	if c.accountAddrLen > 0 {
+		fields |= pbinFieldAccountAddr
+	}
+	if c.storageAddrLen > 0 {
+		fields |= pbinFieldStorageAddr
+	}
+	if c.kind == pbinNodeLeaf && fields&pbinFieldValue == 0 {
+		fields |= pbinFieldLeafValue
+	}
+	if c.hashLen > 0 {
+		fields |= pbinFieldHash
+	}
+
+	dst = append(dst, byte(fields))
+	dst = binary.AppendUvarint(dst, uint64(c.prefix.bitLen))
+	dst = c.prefix.appendPackedBits(dst)
+	appendValue := func(value []byte) {
+		dst = binary.AppendUvarint(dst, uint64(len(value)))
+		dst = append(dst, value...)
+	}
+	if fields&pbinFieldAccountAddr != 0 {
+		appendValue(c.accountAddr[:c.accountAddrLen])
+	}
+	if fields&pbinFieldStorageAddr != 0 {
+		appendValue(c.storageAddr[:c.storageAddrLen])
+	}
+	if fields&pbinFieldLeafValue != 0 {
+		value, err := pbinRecordLeafValue(&c.Update)
+		if err != nil {
+			return nil, err
+		}
+		appendValue(value[:])
+	}
+	if fields&pbinFieldHash != 0 {
+		appendValue(c.hash[:c.hashLen])
+	}
+	return dst, nil
 }
 
 // ConvertBranch rewrites one legacy branch record. key is the record's own DB

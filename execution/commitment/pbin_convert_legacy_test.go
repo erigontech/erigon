@@ -81,6 +81,47 @@ func pbinTestLegacyRecord(touchMap, afterMap uint16, cells *[2]pbinCell) []byte 
 	return out
 }
 
+func TestPBinEncodeLegacyRecordRoundTrips(t *testing.T) {
+	t.Parallel()
+
+	path := pbinTestKeyPrefix(pbinTestBaseStorageKey(), 8)
+	key := pbinEncodeBitPath(&path)
+	cells := [2]pbinCell{
+		pbinTestBranchCell(0xA5, 3),
+		pbinTestChunkLeafCell(0x5A, 7),
+	}
+	var enc pbinBranchEncoder
+	current, err := enc.encode(pbinCellBits, pbinCellBits, &cells)
+	require.NoError(t, err)
+
+	legacy, err := PBinEncodeLegacyRecord(key, current)
+	require.NoError(t, err)
+
+	got, err := NewPBinRecordConverter().ConvertBranch(key, legacy)
+	require.NoError(t, err)
+	require.Equal(t, current, got)
+}
+
+func TestPBinEncodeLegacyRecordRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
+
+	path := pbinTestKeyPrefix(pbinTestBaseStorageKey(), 8)
+	_, err := PBinEncodeLegacyRecord(pbinEncodeBitPath(&path), []byte{byte(pbinFieldBranch)})
+	require.ErrorIs(t, err, errPBinMalformedBranch)
+}
+
+func TestPBinEncodeLegacyRecordRejectsAlreadyLegacyInput(t *testing.T) {
+	t.Parallel()
+
+	path := pbinTestKeyPrefix(pbinTestBaseStorageKey(), 8)
+	key := pbinEncodeBitPath(&path)
+	cells := [2]pbinCell{pbinTestBranchCell(0xA5, 3), pbinTestBranchCell(0x5A, 7)}
+	legacy := pbinTestLegacyRecord(pbinCellBits, pbinCellBits, &cells)
+
+	_, err := PBinEncodeLegacyRecord(key, legacy)
+	require.ErrorContains(t, err, "already a legacy record")
+}
+
 func TestPBinConvertBranchMatchesTheCurrentEncoder(t *testing.T) {
 	t.Parallel()
 
@@ -145,10 +186,9 @@ func TestPBinConvertStateMatchesTheCurrentBlob(t *testing.T) {
 	want, err := pph.EncodeCurrentState(nil)
 	require.NoError(t, err)
 
-	// The same root, spelled the way the pre-version format spelled it.
-	legacy := []byte{pbinStateMarker, want[2], 0, 0}
-	legacy = pbinTestLegacyAppendCell(legacy, &pph.grid.root)
-	binary.BigEndian.PutUint16(legacy[2:4], uint16(len(legacy)-4))
+	legacy, err := PBinEncodeLegacyState(want)
+	require.NoError(t, err)
+	require.Error(t, ValidatePBinStateFormat(legacy))
 
 	got, err := NewPBinRecordConverter().ConvertState(legacy)
 	require.NoError(t, err)
@@ -161,4 +201,21 @@ func TestPBinConvertStateMatchesTheCurrentBlob(t *testing.T) {
 	require.Equal(t, pph.grid.root.kind, fresh.grid.root.kind)
 	require.Equal(t, pph.grid.root.prefix, fresh.grid.root.prefix)
 	require.Equal(t, pph.grid.root.hash, fresh.grid.root.hash)
+}
+
+func TestPBinEncodeLegacyStateRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
+
+	for name, blob := range map[string][]byte{
+		"empty":          nil,
+		"marker only":    {pbinStateMarker},
+		"current header": {pbinStateMarker, pbinRecordFormat},
+		"truncated root": {pbinStateMarker, pbinRecordFormat, 0, 0, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := PBinEncodeLegacyState(blob)
+			require.Error(t, err)
+		})
+	}
 }
