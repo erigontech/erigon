@@ -313,6 +313,7 @@ func init() {
 	withStageBase(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
+	withLimit(cmdStageExec)
 	withPruneTo(cmdStageExec)
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
@@ -732,16 +733,17 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return err
 	}
+	doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	if err != nil {
+		return err
+	}
+	_, filesProgress, err := doms.SeekCommitment(ctx, tx)
+	doms.Close()
+	if err != nil {
+		return err
+	}
 	if execProgress == 0 { // then fallback to how much data we have in stat_snapshots
-		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
-		if err != nil {
-			panic(err)
-		}
-		_, execProgress, err = doms.SeekCommitment(ctx, tx)
-		if err != nil {
-			panic(err)
-		}
-		doms.Close()
+		execProgress = filesProgress
 	}
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
 		return err
@@ -749,6 +751,20 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 
 	if block == 0 {
 		block = sendersProgress
+	}
+	if limit > 0 {
+		from := max(execProgress, filesProgress)
+		if to := from + limit; block == 0 || to < block {
+			block = to
+		}
+	}
+
+	if progress := max(execProgress, filesProgress); block > 0 && block <= progress {
+		logger.Info("stage_exec: requested --block is behind current progress, nothing to do",
+			"block", block, "stage.progress", execProgress, "files.progress", filesProgress)
+		tx.Rollback()
+		tx = nil
+		return nil
 	}
 
 	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
