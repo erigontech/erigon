@@ -150,6 +150,23 @@ to the source; `--squeeze` is refused for a bin target. The run prints `commitme
 `rebuild_ranges` and `rebuild_shards` as tab-separated tables. Start a node on the output with
 `--experimental.bin-commitment` — the run writes the matching `erigondb.toml` there.
 
+## Convert legacy binary-trie record files
+
+To convert a pre-version binary-trie datadir without changing the source, stage it into a separate
+output datadir:
+
+```sh
+integration commitment convert-format --datadir=<src> --output.datadir=<out> \
+  --verify.sample=1000
+```
+
+The command is one-way and leaves the source unchanged. The output must be separate from the source
+and on the same filesystem because the staging step uses hardlinks. Current-format shards remain
+hardlinked; legacy shards are replaced in the output. An interrupted run can be resumed with
+`--resume`, and `--verify.sample=N` reads back every Nth converted legacy branch record (`0`
+disables sampling). A single-cell input is invalid and can leave partial output; inspect and remove
+that output before starting again rather than resuming it.
+
 ## How to re-generate optional Domain/Index
 
 ```sh

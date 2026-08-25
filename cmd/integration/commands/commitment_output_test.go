@@ -271,6 +271,27 @@ func TestStageRebuildOutputRefusesExistingCommitmentFiles(t *testing.T) {
 	require.Equal(t, "rebuilt", string(data))
 }
 
+func TestStageRebuildOutputRefusesExistingNonCommitmentFiles(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+	require.NoError(t, os.MkdirAll(filepath.Join(outPath, "snapshots"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outPath, "stale"), []byte("stale"), 0o644))
+
+	_, err := stageRebuildOutput(src, outPath, binTarget(t), false, log.New())
+	require.ErrorContains(t, err, "is not empty")
+	require.ErrorContains(t, err, "--resume")
+}
+
+func TestStageRebuildOutputResumeRefusesUnrelatedExistingFile(t *testing.T) {
+	src := sourceDatadirFixture(t)
+	outPath := filepath.Join(t.TempDir(), "out")
+	require.NoError(t, os.MkdirAll(filepath.Join(outPath, "snapshots"), 0o755))
+	require.NoError(t, os.WriteFile(filepath.Join(outPath, "snapshots", "stale"), []byte("stale"), 0o644))
+
+	_, err := stageRebuildOutput(src, outPath, binTarget(t), true, log.New())
+	require.ErrorContains(t, err, "unexpected file in resumed output")
+}
+
 func TestStageRebuildOutputRefusesSourceAsOutput(t *testing.T) {
 	src := sourceDatadirFixture(t)
 	_, err := stageRebuildOutput(src, src.DataDir, binTarget(t), false, log.New())
@@ -362,6 +383,11 @@ func TestConvertFormatStagingLeavesSourceSnapshotsUnchanged(t *testing.T) {
 	require.NoError(t, err)
 
 	require.Equal(t, before, snapshotTree(t, src.Snap))
+}
+
+func TestConvertFormatRequiresBinarySource(t *testing.T) {
+	require.ErrorContains(t, requireConvertFormatSource(sourceDatadirFixture(t)), "requires a binary-trie")
+	require.NoError(t, requireConvertFormatSource(binSourceDatadirFixture(t)))
 }
 
 func TestStageRebuildOutputDoesNotCreateSourceMigrations(t *testing.T) {

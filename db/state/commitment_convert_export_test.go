@@ -40,12 +40,12 @@ func SetPBinConvertPairHookForTest(fn func()) {
 	pbinConvertPairHook = fn
 }
 
-func SetPBinConvertAfterBuildHookForTest(fn func(string)) {
-	pbinConvertAfterBuildHook = fn
+func SetPBinConvertDropPairHookForTest(fn func(pair uint64) bool) {
+	pbinConvertDropPairHook = fn
 }
 
-func VerifyPBinPairCountForTest(sourcePairs uint64, outputWords int) error {
-	return verifyPBinPairCount(sourcePairs, outputWords)
+func SetPBinConvertAfterBuildHookForTest(fn func(string)) {
+	pbinConvertAfterBuildHook = fn
 }
 
 func VerifyPBinStateConversionForTest(source, converted []byte) error {

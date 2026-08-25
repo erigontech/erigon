@@ -235,7 +235,7 @@ func convertPBinOutputFixture(t *testing.T, fixture pbinOutputFixture) error {
 	t.Helper()
 	at := fixture.output.BeginFilesRo()
 	defer at.Close()
-	return state.ConvertPBinRecordFiles(t.Context(), at, log.New())
+	return state.ConvertPBinRecordFiles(t.Context(), at, log.New(), 0)
 }
 
 func convertPBinOutputFixtureWithSample(t *testing.T, fixture pbinOutputFixture, sample uint64) error {
@@ -314,12 +314,16 @@ func TestConvertPBinRecordFilesUsesDomainCodecForSmallShard(t *testing.T) {
 
 func TestConvertPBinRecordFilesRejectsDroppedRecord(t *testing.T) {
 	fixture := newPBinOutputFixture(t, true, false)
-	keys, _ := readKVFile(t, fixture.output, fixture.outputPath)
-	require.Greater(t, len(keys), 1)
+	state.SetPBinConvertDropPairHookForTest(func(pair uint64) bool { return pair == 1 })
+	t.Cleanup(func() {
+		state.SetPBinConvertDropPairHookForTest(nil)
+	})
 
-	err := state.VerifyPBinPairCountForTest(uint64(len(keys)), 2*(len(keys)-1))
+	err := convertPBinOutputFixture(t, fixture)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "pair count")
+	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
+	assertPBinOutputRemoved(t, fixture)
 }
 
 func TestConvertPBinRecordFilesRejectsMangledStateRoot(t *testing.T) {
@@ -415,7 +419,7 @@ func TestConvertPBinRecordFilesCancellationLeavesRunResumable(t *testing.T) {
 	})
 
 	at := fixture.output.BeginFilesRo()
-	err := state.ConvertPBinRecordFiles(ctx, at, log.New())
+	err := state.ConvertPBinRecordFiles(ctx, at, log.New(), 0)
 	at.Close()
 	require.ErrorIs(t, err, context.Canceled)
 	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))

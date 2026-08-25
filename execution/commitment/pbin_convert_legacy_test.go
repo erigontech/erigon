@@ -283,6 +283,9 @@ func TestPBinLegacyStateRoot(t *testing.T) {
 	got, err := NewPBinRecordConverter().LegacyStateRoot(legacy)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+	currentRoot, err := NewPBinRecordConverter().CurrentStateRoot(current)
+	require.NoError(t, err)
+	require.Equal(t, want, currentRoot)
 }
 
 func TestPBinLegacyStateRootRejectsMalformedInput(t *testing.T) {

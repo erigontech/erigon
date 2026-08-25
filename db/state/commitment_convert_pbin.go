@@ -38,6 +38,7 @@ import (
 )
 
 var pbinConvertPairHook func()
+var pbinConvertDropPairHook func(pair uint64) bool
 var pbinConvertAfterBuildHook func(string)
 
 // A pre-version branch record opens with the high byte of its touchMap, always
@@ -82,26 +83,6 @@ func pbinConvertState(conv *commitment.PBinRecordConverter, value []byte) ([]byt
 	return append(out, converted...), nil
 }
 
-func pbinCurrentStateRoot(value []byte) ([]byte, error) {
-	payload, _, err := pbinStatePayload(value)
-	if err != nil {
-		return nil, err
-	}
-	if err := commitment.ValidatePBinStateFormat(payload); err != nil {
-		return nil, fmt.Errorf("pbin state is not in current format: %w", err)
-	}
-	trie := commitment.NewPBinPatriciaHashed(nil)
-	defer trie.Release()
-	if err := trie.SetState(payload); err != nil {
-		return nil, fmt.Errorf("restore pbin state: %w", err)
-	}
-	root, err := trie.RootHash()
-	if err != nil {
-		return nil, fmt.Errorf("hash restored pbin state: %w", err)
-	}
-	return root, nil
-}
-
 func pbinVerifyStateConversion(conv *commitment.PBinRecordConverter, source, converted []byte) error {
 	sourcePayload, _, err := pbinStatePayload(source)
 	if err != nil {
@@ -109,14 +90,18 @@ func pbinVerifyStateConversion(conv *commitment.PBinRecordConverter, source, con
 	}
 	var sourceRoot []byte
 	if commitment.ValidatePBinStateFormat(sourcePayload) == nil {
-		sourceRoot, err = pbinCurrentStateRoot(source)
+		sourceRoot, err = conv.CurrentStateRoot(sourcePayload)
 	} else {
 		sourceRoot, err = conv.LegacyStateRoot(sourcePayload)
 	}
 	if err != nil {
 		return fmt.Errorf("read source state root: %w", err)
 	}
-	convertedRoot, err := pbinCurrentStateRoot(converted)
+	convertedPayload, _, err := pbinStatePayload(converted)
+	if err != nil {
+		return err
+	}
+	convertedRoot, err := conv.CurrentStateRoot(convertedPayload)
 	if err != nil {
 		return fmt.Errorf("read converted state root: %w", err)
 	}
@@ -378,6 +363,9 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 			return pairs, ctx.Err()
 		default:
 		}
+		if pbinConvertDropPairHook != nil && pbinConvertDropPairHook(pairs) {
+			continue
+		}
 		var outputValue []byte
 		switch {
 		case bytes.Equal(key, commitmentdb.KeyCommitmentState):
@@ -441,14 +429,7 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 // ConvertPBinRecordFiles rewrites pre-version pbin commitment files in the
 // output datadir. Files already in the current format remain hardlinks to the
 // source datadir; converted files replace those links before they are written.
-func ConvertPBinRecordFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger, verifySample ...uint64) error {
-	if len(verifySample) > 1 {
-		return fmt.Errorf("pbin conversion: expected at most one verify sample stride, got %d", len(verifySample))
-	}
-	var sampleStride uint64
-	if len(verifySample) == 1 {
-		sampleStride = verifySample[0]
-	}
+func ConvertPBinRecordFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger, sampleStride uint64) error {
 	files, err := commitmentFilesForConversion(at)
 	if err != nil {
 		return err

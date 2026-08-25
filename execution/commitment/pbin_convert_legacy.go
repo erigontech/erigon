@@ -298,6 +298,43 @@ func (c *PBinRecordConverter) LegacyStateRoot(blob []byte) ([]byte, error) {
 	return hash[:], nil
 }
 
+// CurrentStateRoot hashes the root cell in a current-format state blob without
+// restoring it into an engine that needs a database context.
+func (c *PBinRecordConverter) CurrentStateRoot(blob []byte) ([]byte, error) {
+	if err := ValidatePBinStateFormat(blob); err != nil {
+		return nil, err
+	}
+	if len(blob) < 5 {
+		return nil, fmt.Errorf("%w: header is %d bytes, want at least 5", errPBinStateBlob, len(blob))
+	}
+	flags := blob[2]
+	if flags&^byte(pbinStateFlagsAll) != 0 {
+		return nil, fmt.Errorf("%w: unknown flags %08b", errPBinStateBlob, flags)
+	}
+	rootLen := int(binary.BigEndian.Uint16(blob[3:5]))
+	if len(blob) != 5+rootLen {
+		return nil, fmt.Errorf("%w: root cell of %d bytes in a %d-byte blob", errPBinStateBlob, rootLen, len(blob))
+	}
+
+	var root pbinCell
+	if rootLen > 0 {
+		pos, err := pbinDecodeCell(blob, 5, &root, 0, &c.keys, false)
+		if err != nil {
+			return nil, fmt.Errorf("pbin state root: %w", err)
+		}
+		if pos != len(blob) {
+			return nil, fmt.Errorf("%w: %d trailing bytes after the root cell", errPBinStateBlob, len(blob)-pos)
+		}
+	}
+
+	hasher := pbinHasher{sum: c.keys.sum}
+	hash, err := hasher.cellHash(&root, new(pbinBitpath))
+	if err != nil {
+		return nil, fmt.Errorf("pbin state root: %w", err)
+	}
+	return hash[:], nil
+}
+
 func pbinLegacyDecodeBranch(data []byte, cells *[2]pbinCell) (touchMap, afterMap uint16, err error) {
 	cells[0].reset()
 	cells[1].reset()

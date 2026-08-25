@@ -239,7 +239,7 @@ Examples:
 				return
 			}
 			defer sd.Close()
-			reader := commitmentdb.NewLatestStateReader(tx, sd)
+			reader := commitmentdb.NewLatestStateReader(tx, sd, nil)
 			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
 				logger.Error("Failed to read branch", "error", err)
 				return
@@ -357,6 +357,15 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 		return nil, fmt.Errorf("commitment rebuild: output datadir %s overlaps the source datadir %s", outDataDir, src.DataDir)
 	}
 	out := datadir.New(outPath)
+	if !resume {
+		hasFiles, err := datadirHasFiles(out.DataDir)
+		if err != nil {
+			return nil, err
+		}
+		if hasFiles {
+			return nil, fmt.Errorf("commitment rebuild: output datadir %s is not empty; pass --resume to continue that run or point --output.datadir elsewhere", out.DataDir)
+		}
+	}
 
 	existing, err := commitmentFilesIn(out.SnapDomain)
 	if err != nil {
@@ -374,6 +383,11 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 	o := &rebuildOutput{dirs: out, target: target, source: source}
 	if len(existing) > 0 && mode != preserveSourceSettings {
 		if err := requireKeptFilesMatchTarget(out, o.settings()); err != nil {
+			return nil, err
+		}
+	}
+	if resume {
+		if err := validateStagedOutput(src, out); err != nil {
 			return nil, err
 		}
 	}
@@ -405,6 +419,74 @@ func stageRebuildOutput(src datadir.Dirs, outPath string, target dbstate.Rebuild
 	logger.Info("[commitment_rebuild] staged output datadir", "path", out.DataDir,
 		"linkedFiles", linked, "keptCommitmentFiles", len(existing))
 	return o, nil
+}
+
+func datadirHasFiles(root string) (bool, error) {
+	var hasFiles bool
+	err := filepath.WalkDir(root, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if path != root && !entry.IsDir() {
+			hasFiles = true
+		}
+		return nil
+	})
+	return hasFiles, err
+}
+
+func validateStagedOutput(src, out datadir.Dirs) error {
+	if _, err := os.Stat(out.DataDir); err != nil {
+		if os.IsNotExist(err) {
+			return nil
+		}
+		return err
+	}
+	return filepath.WalkDir(out.DataDir, func(path string, entry os.DirEntry, err error) error {
+		if err != nil {
+			return err
+		}
+		if entry.IsDir() {
+			return nil
+		}
+		rel, err := filepath.Rel(out.DataDir, path)
+		if err != nil {
+			return err
+		}
+		snapRel, err := filepath.Rel(out.Snap, path)
+		if err != nil {
+			return err
+		}
+		if snapRel == "." || strings.HasPrefix(snapRel, ".."+string(filepath.Separator)) {
+			return fmt.Errorf("commitment rebuild: unexpected file outside snapshots: %s", rel)
+		}
+		if snapRel == dbstate.ERIGONDB_SETTINGS_FILE {
+			return nil
+		}
+		commitmentRel, err := filepath.Rel(out.SnapDomain, path)
+		if err != nil {
+			return err
+		}
+		if commitmentRel != "." && !strings.HasPrefix(commitmentRel, ".."+string(filepath.Separator)) && isCommitmentFileName(entry.Name()) {
+			return nil
+		}
+		sourcePath := filepath.Join(src.Snap, snapRel)
+		sourceInfo, err := os.Stat(sourcePath)
+		if err != nil {
+			if os.IsNotExist(err) {
+				return fmt.Errorf("commitment rebuild: unexpected file in resumed output: %s", snapRel)
+			}
+			return err
+		}
+		outputInfo, err := entry.Info()
+		if err != nil {
+			return err
+		}
+		if !os.SameFile(sourceInfo, outputInfo) {
+			return fmt.Errorf("commitment rebuild: existing output file %s does not match source; remove it or restart with a clean output datadir", snapRel)
+		}
+		return nil
+	})
 }
 
 // requireKeptFilesMatchTarget refuses a --resume run under a scheme other than the
@@ -629,7 +711,14 @@ func linkSnapshotsExceptCommitment(srcRoot, dstRoot string) (int, error) {
 		if isCommitmentFileName(d.Name()) || d.Name() == dbstate.ERIGONDB_SETTINGS_FILE {
 			return nil
 		}
-		if _, err := os.Lstat(dst); err == nil {
+		if dstInfo, err := os.Lstat(dst); err == nil {
+			srcInfo, err := d.Info()
+			if err != nil {
+				return err
+			}
+			if !os.SameFile(srcInfo, dstInfo) {
+				return fmt.Errorf("commitment rebuild: existing output file %s does not match source; remove it or restart with a clean output datadir", rel)
+			}
 			return nil
 		} else if !os.IsNotExist(err) {
 			return err
@@ -1094,6 +1183,10 @@ Example:
 		}
 
 		src := datadir.Open(datadirCli)
+		if err := requireConvertFormatSource(src); err != nil {
+			logger.Error(err.Error())
+			return
+		}
 		out, err := stageRebuildOutput(src, rebuildOutputDatadir, dbstate.RebuildTarget{}, resume, logger, preserveSourceSettings)
 		if err != nil {
 			logger.Error(err.Error())
@@ -1105,7 +1198,7 @@ Example:
 		}
 		datadirCli = out.dirs.DataDir
 
-		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata), false, chain, logger)
+		db, err := openDB(ctx, dbCfg(dbcfg.ChainDB, chaindata).Readonly(true), false, chain, logger)
 		if err != nil {
 			logger.Error("Opening DB", "error", err)
 			return
@@ -1119,6 +1212,17 @@ Example:
 			return
 		}
 	},
+}
+
+func requireConvertFormatSource(src datadir.Dirs) error {
+	settings, err := dbstate.ReadErigonDBSettings(src)
+	if err != nil {
+		return fmt.Errorf("commitment convert-format: read source erigondb.toml: %w", err)
+	}
+	if settings.TrieVariantName() != dbstate.TrieVariantBin {
+		return fmt.Errorf("commitment convert-format requires a binary-trie source datadir, got %s", settings.TrieVariantName())
+	}
+	return nil
 }
 
 func commitmentConvertFormat(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
@@ -1283,7 +1387,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 			return fmt.Errorf("failed to create shared domains: %w", err)
 		}
 		defer sd.Close()
-		commitmentReader = commitmentdb.NewLatestStateReader(tx, sd)
+		commitmentReader = commitmentdb.NewLatestStateReader(tx, sd, nil)
 	}
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64
