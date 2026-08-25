@@ -301,7 +301,7 @@ func TestCheckConfigForkOrderTimestamps(t *testing.T) {
 // validators at all, at every nesting depth of the Aura config.
 func TestConfigCopyKeepsAuraValidators(t *testing.T) {
 	for _, name := range []string{networkname.Gnosis, networkname.Chiado} {
-		spec, err := chainspec.ChainSpecByName(name)
+		spec, err := ChainSpecByName(name)
 		require.NoError(t, err)
 		require.NotNil(t, spec.Config.Aura, "chain %s", name)
 

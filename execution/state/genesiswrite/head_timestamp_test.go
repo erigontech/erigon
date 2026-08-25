@@ -46,9 +46,17 @@ func TestHeadTimestampFromBlockFiles(t *testing.T) {
 
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	headers := []*types.Header{
-		{Number: *uint256.NewInt(0), Time: 1000, Difficulty: *uint256.NewInt(1), Extra: []byte{}},
-		{Number: *uint256.NewInt(1), Time: 2000, Difficulty: *uint256.NewInt(1), Extra: []byte{}},
+	// A whole 1000-block span: snaptype.FileName counts in units of 1000, so a shorter
+	// range names a segment covering nothing.
+	const segLen = 1000
+	headers := make([]*types.Header, segLen)
+	for i := range headers {
+		headers[i] = &types.Header{
+			Number:     *uint256.NewInt(uint64(i)),
+			Time:       1000 + uint64(i),
+			Difficulty: *uint256.NewInt(1),
+			Extra:      []byte{},
+		}
 	}
 	writeHeaderSegment(t, dirs, headers)
 
@@ -57,10 +65,10 @@ func TestHeadTimestampFromBlockFiles(t *testing.T) {
 	require.NoError(t, err)
 	defer tx.Rollback()
 
-	head := headers[1]
-	require.Nil(t, rawdb.ReadHeader(tx, head.Hash(), 1), "the database must not hold the head header")
+	head := headers[segLen-1]
+	require.Nil(t, rawdb.ReadHeader(tx, head.Hash(), segLen-1), "the database must not hold the head header")
 
-	headTime, err := headTimestamp(tx, head.Hash(), 1, "", dirs, logger)
+	headTime, err := headTimestamp(tx, head.Hash(), segLen-1, "", dirs, logger)
 	require.NoError(t, err)
 	require.Equal(t, head.Time, headTime)
 }

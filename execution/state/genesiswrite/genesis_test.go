@@ -177,7 +177,7 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chainBlocks, err := m.GenerateChain(1, nil)
+	chainBlocks, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainBlocks))
 
@@ -239,7 +239,7 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chainBlocks, err := m.GenerateChain(1, nil)
+	chainBlocks, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainBlocks))
 
@@ -268,7 +268,7 @@ func TestCommitGenesisBlockHeadHeaderOutsideTheDBUnchangedSchedule(t *testing.T)
 	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
 	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
 
-	chainBlocks, err := m.GenerateChain(1, nil)
+	chainBlocks, err := blockgen.GenerateChain(m.ChainConfig, m.Genesis, m.Engine, m.DB, 1, func(int, *blockgen.BlockGen) {})
 	require.NoError(t, err)
 	require.NoError(t, m.InsertChain(chainBlocks))
 	dropHeadHeader(t, m.DB)
