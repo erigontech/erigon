@@ -313,6 +313,7 @@ func init() {
 	withStageBase(cmdStageExec)
 	withReset(cmdStageExec)
 	withBlock(cmdStageExec)
+	withLimit(cmdStageExec)
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
 	withErigondbDomainStepsInFrozenFile(cmdStageExec)
@@ -559,7 +560,7 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 			if err != nil {
 				return err
 			}
-			withoutSenders.Body().SendersFromTxs() //remove senders info from txs
+			withoutSenders.Body().SendersFromTxs() // remove senders info from txs
 			txs := withoutSenders.Transactions()
 			if txs.Len() != len(senders) {
 				logger.Error("not equal amount of senders", "block", i, "db", len(senders), "expect", txs.Len())
@@ -707,16 +708,17 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return err
 	}
+	doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+	if err != nil {
+		return err
+	}
+	_, filesProgress, err := doms.SeekCommitment(ctx, tx)
+	doms.Close()
+	if err != nil {
+		return err
+	}
 	if execProgress == 0 { // then fallback to how much data we have in stat_snapshots
-		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
-		if err != nil {
-			panic(err)
-		}
-		_, execProgress, err = doms.SeekCommitment(ctx, tx)
-		if err != nil {
-			panic(err)
-		}
-		doms.Close()
+		execProgress = filesProgress
 	}
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
 		return err
@@ -725,8 +727,22 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if block == 0 {
 		block = sendersProgress
 	}
+	if limit > 0 {
+		from := max(execProgress, filesProgress)
+		if to := from + limit; block == 0 || to < block {
+			block = to
+		}
+	}
 
-	agg := (db.(dbstate.HasAgg).Agg()).(*dbstate.Aggregator)
+	if progress := max(execProgress, filesProgress); block > 0 && block <= progress {
+		logger.Info("stage_exec: requested --block is behind current progress, nothing to do",
+			"block", block, "stage.progress", execProgress, "files.progress", filesProgress)
+		tx.Rollback()
+		tx = nil
+		return nil
+	}
+
+	agg := db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 
 	// Both modes run each batch in its own rwtx + SharedDomains (execBlocksBatch),
 	// then collate+prune (which also kicks background file building). Release the
@@ -1052,7 +1068,7 @@ func printAppliedMigrations(migrationsDB kv.RwDB, ctx context.Context, logger lo
 		if err != nil {
 			return err
 		}
-		var appliedStrs = make([]string, len(applied))
+		appliedStrs := make([]string, len(applied))
 		i := 0
 		for k := range applied {
 			appliedStrs[i] = k
@@ -1070,10 +1086,12 @@ func removeMigration(migrationsDB kv.RwDB, ctx context.Context) error {
 	})
 }
 
-var openSnapshotOnce sync.Once
-var _allSnapshotsSingleton *blocksnapshots.RoSnapshots
-var _allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
-var _aggSingleton *dbstate.Aggregator
+var (
+	openSnapshotOnce             sync.Once
+	_allSnapshotsSingleton       *blocksnapshots.RoSnapshots
+	_allCaplinSnapshotsSingleton *freezeblocks.CaplinSnapshots
+	_aggSingleton                *dbstate.Aggregator
+)
 
 func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksnapshots.RoSnapshots, *dbstate.Aggregator, *freezeblocks.CaplinSnapshots, error) {
 	var err error
@@ -1156,9 +1174,11 @@ func allSnapshots(ctx context.Context, db kv.RoDB, logger log.Logger) (*blocksna
 	return _allSnapshotsSingleton, _aggSingleton, _allCaplinSnapshotsSingleton, nil
 }
 
-var openBlockReaderOnce sync.Once
-var _blockReaderSingleton dbservices.FullBlockReader
-var _blockWriterSingleton *blockio.BlockWriter
+var (
+	openBlockReaderOnce   sync.Once
+	_blockReaderSingleton dbservices.FullBlockReader
+	_blockWriterSingleton *blockio.BlockWriter
+)
 
 func blocksIO(db kv.RoDB, logger log.Logger) (dbservices.FullBlockReader, *blockio.BlockWriter) {
 	openBlockReaderOnce.Do(func() {
