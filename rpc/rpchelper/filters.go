@@ -1173,13 +1173,16 @@ func (ff *Filters) LatestSD() *execctx.SharedDomains {
 	return ff.latestSD.Load()
 }
 
-// WithOverlay returns a read view backed by the latest block overlay if one
-// is available, otherwise returns the given tx unchanged. The read view uses
-// the overlay's in-memory data for table lookups, falling back to the caller's tx
-// for data not in the overlay.
+func isOverlayReadView(tx kv.Tx) bool {
+	view, ok := tx.(interface{ IsOverlayReadView() bool })
+	return ok && view.IsOverlayReadView()
+}
+
+// WithOverlay preserves an existing overlay view or wraps tx with the currently
+// published overlay. A wrapped view keeps that generation across nested calls.
 // Safe to call on a nil receiver.
 func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
-	if ff == nil {
+	if ff == nil || isOverlayReadView(tx) {
 		return tx
 	}
 	sd := ff.LatestSD()
@@ -1195,7 +1198,7 @@ func (ff *Filters) WithOverlay(tx kv.Tx) kv.Tx {
 // WithTemporalOverlay is like WithOverlay but returns kv.TemporalTx directly,
 // avoiding repeated type assertions at callsites that need temporal access.
 func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
-	if ff == nil {
+	if ff == nil || isOverlayReadView(tx) {
 		return tx
 	}
 	sd := ff.LatestSD()
@@ -1203,7 +1206,7 @@ func (ff *Filters) WithTemporalOverlay(tx kv.TemporalTx) kv.TemporalTx {
 		return tx
 	}
 	if overlay := sd.BlockOverlay(); overlay != nil {
-		return overlay.NewReadView(tx)
+		return overlay.NewTemporalReadView(tx)
 	}
 	return tx
 }

@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
@@ -50,7 +49,6 @@ import (
 	"github.com/erigontech/erigon/execution/vm"
 	"github.com/erigontech/erigon/execution/vm/evmtypes"
 	"github.com/erigontech/erigon/node/shards"
-	bortypes "github.com/erigontech/erigon/polygon/bor/types"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/jsonstream"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -86,7 +84,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	blockNumber, txNum, isBorStateSyncTxn, ok, err := api.txnLookupWithBorFallback(ctx, tx, txHash, chainConfig)
+	blockNumber, txNum, ok, err := api.txnLookup(ctx, tx, txHash)
 	if err != nil {
 		return nil, err
 	}
@@ -99,7 +97,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	header, err := api.canonicalHeaderByNumber(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -107,7 +105,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, nil
 	}
 
-	txIndex, err := api.txnIndexInBlock(ctx, tx, blockNumber, txNum, isBorStateSyncTxn)
+	txIndex, err := api.txnIndexInBlock(ctx, tx, blockNumber, txNum)
 	if err != nil {
 		return nil, err
 	}
@@ -183,6 +181,9 @@ func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Addres
 
 // Block implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
+	if err := rejectPendingNumber(blockNr); err != nil {
+		return nil, err
+	}
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
@@ -191,7 +192,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -309,6 +310,16 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream jsonstream.Stream) error {
+	if req.FromBlock != nil {
+		if err := rejectPending(*req.FromBlock); err != nil {
+			return err
+		}
+	}
+	if req.ToBlock != nil {
+		if err := rejectPending(*req.ToBlock); err != nil {
+			return err
+		}
+	}
 	if gasBailOut == nil {
 		//nolint
 		gasBailOut = new(bool) // false by default
@@ -325,7 +336,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {
-		fromBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, api.filters)
+		fromBlock, err = api.resolveCommittedBlockNumber(ctx, dbtx, *req.FromBlock)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()
@@ -336,18 +347,24 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 
 	if req.ToBlock == nil {
-		headNumber, err := api._blockReader.HeaderNumber(ctx, dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		toBlock, err = rpchelper.GetLatestExecutedBlockNumber(dbtx)
 		if err != nil {
 			return err
 		}
-		toBlock = *headNumber
 	} else {
-		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, api.filters)
+		toBlock, err = api.resolveCommittedBlockNumber(ctx, dbtx, *req.ToBlock)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()
 				return nil // waiting for spec: not error for historical reasons
 			}
+			return err
+		}
+	}
+	// The txnum index silently clamps a target past execution to the last
+	// available txnum, so either bound must be checked before comparing them.
+	if req.FromBlock != nil || req.ToBlock != nil {
+		if err := rpchelper.CheckBlockExecuted(dbtx, max(fromBlock, toBlock)); err != nil {
 			return err
 		}
 	}
@@ -782,7 +799,6 @@ func (api *TraceAPIImpl) callBlock(
 		pNo -= 1
 	}
 
-	parentNo := rpc.BlockNumber(pNo)
 	header := block.Header()
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
@@ -792,39 +808,15 @@ func (api *TraceAPIImpl) callBlock(
 	rules := blockCtx.Rules(cfg)
 	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
 	txs := block.Transactions()
-	var borStateSyncTxn types.Transaction
-	var borStateSyncTxnHash common.Hash
-	if cfg.Bor != nil {
-		// check if this block has state sync txn
-		blockHash := block.Hash()
-		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
-
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
-
-		if err != nil {
-			return nil, nil, err
-		}
-		if ok {
-			borStateSyncTxn = bortypes.NewBorTransaction()
-			txs = append(txs, borStateSyncTxn)
-		}
-	}
 
 	callParams := make([]TraceCallParam, 0, len(txs))
 
-	parentHash := block.ParentHash()
-	parentNrOrHash := rpc.BlockNumberOrHash{
-		BlockNumber:      &parentNo,
-		BlockHash:        &parentHash,
-		RequireCanonical: true,
-	}
-
-	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, pNo, false, 0, api._txNumReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -848,25 +840,15 @@ func (api *TraceAPIImpl) callBlock(
 
 	msgs := make([]*types.Message, len(txs))
 	for i, txn := range txs {
-		isBorStateSyncTxn := txn == borStateSyncTxn
-		var txnHash common.Hash
-		var msg *types.Message
-		var err error
-		if isBorStateSyncTxn {
-			txnHash = borStateSyncTxnHash
-			// we use an empty message for bor state sync txn since it gets handled differently
-		} else {
-			txnHash = txn.Hash()
-			msg, err = txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
-			if err != nil {
-				return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
-			}
+		txnHash := txn.Hash()
+		msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
+		if err != nil {
+			return nil, nil, fmt.Errorf("convert txn into msg: %w", err)
 		}
 
 		callParams = append(callParams, TraceCallParam{
-			txHash:            &txnHash,
-			traceTypes:        traceTypes,
-			isBorStateSyncTxn: isBorStateSyncTxn,
+			txHash:     &txnHash,
+			traceTypes: traceTypes,
 		})
 
 		msgs[i] = msg
@@ -875,9 +857,8 @@ func (api *TraceAPIImpl) callBlock(
 	// Use parallel execution when replaying historical blocks without stateDiff or vmTrace:
 	// each tx can read its own pre-state independently from the temporal DB,
 	// so workers never share mutable state and need no conflict detection.
-	// Bor state-sync txns are excluded because they require bridgeReader.Events
-	// which uses the shared dbtx. vmTrace is excluded because the parallel path
-	// does not initialise traceResult.VmTrace.
+	// vmTrace is excluded because the parallel path does not initialise
+	// traceResult.VmTrace.
 	// When the parallel path is taken, ibs only has InitializeBlockExecution effects
 	// (no user-tx state); CalculateRewards is safe because rewards are header-derived.
 	hasStateDiff := false
@@ -901,11 +882,11 @@ func (api *TraceAPIImpl) callBlock(
 
 	var traces []*TraceCallResult
 	var cmErr error
-	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && borStateSyncTxn == nil && len(txs) > 1 {
+	if isHistoricalStateReader && !hasStateDiff && !hasVmTrace && len(txs) > 1 {
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
 	} else {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-			&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
+			header, true /* requireCanonical */, gasBailOut /* gasBailout */, traceConfig)
 	}
 
 	if cmErr != nil {
@@ -969,7 +950,6 @@ type blockTraceTxJob struct {
 // Preconditions (checked by the caller):
 //   - stateReader is a HistoricalStateReader (historical block, not latest)
 //   - no stateDiff is requested (stateDiff needs per-tx cloneCache isolation)
-//   - no Bor state-sync txn (it uses bridgeReader.Events via the shared dbtx)
 func (api *TraceAPIImpl) doCallBlockParallel(
 	ctx context.Context,
 	dbtx kv.TemporalTx,
@@ -1121,7 +1101,6 @@ func (api *TraceAPIImpl) callTransaction(
 		pNo -= 1
 	}
 
-	parentNo := rpc.BlockNumber(pNo)
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
@@ -1129,47 +1108,19 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 	rules := blockCtx.Rules(cfg)
 	signer := types.MakeSigner(cfg, blockCtx.BlockNumber, blockCtx.Time)
-	var txn types.Transaction
-	var borStateSyncTxnHash common.Hash
-	isBorStateSyncTxn := txIndex == -1 && cfg.Bor != nil
-	if isBorStateSyncTxn {
-		// check if this header has state sync txn
-		blockHash := header.Hash()
-		borStateSyncTxnHash = bortypes.ComputeBorTxHash(blockNumber, blockHash)
-
-		_, ok, err := api.bridgeReader.EventTxnLookup(ctx, borStateSyncTxnHash)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, errors.New("bridge transaction expected but not found")
-		}
-		txn = bortypes.NewBorTransaction()
-	} else {
-		var ok bool
-		var err error
-		txn, ok, err = api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
-		if err != nil {
-			return nil, err
-		}
-		if !ok {
-			return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNumber, txIndex)
-		}
-	}
-
-	parentHash := header.ParentHash
-	parentNrOrHash := rpc.BlockNumberOrHash{
-		BlockNumber:      &parentNo,
-		BlockHash:        &parentHash,
-		RequireCanonical: true,
-	}
-
-	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
+	txn, ok, err := api._txnReader.TxnByIdxInBlock(ctx, dbtx, blockNumber, txIndex)
 	if err != nil {
 		return nil, err
 	}
+	if !ok {
+		return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNumber, txIndex)
+	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	if err := rpchelper.CheckBlockExecuted(dbtx, blockNumber); err != nil {
+		return nil, err
+	}
+
+	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, pNo, false, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1191,27 +1142,19 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, err
 	}
 
-	var txnHash common.Hash
-	var msg *types.Message
-	if isBorStateSyncTxn {
-		txnHash = borStateSyncTxnHash
-		// we use an empty message for bor state sync txn since it gets handled differently
-	} else {
-		txnHash = txn.Hash()
-		msg, err = txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
-		if err != nil {
-			return nil, fmt.Errorf("convert txn into msg: %w", err)
-		}
+	txnHash := txn.Hash()
+	msg, err := txn.AsMessage(*signer, &blockCtx.BaseFee, rules)
+	if err != nil {
+		return nil, fmt.Errorf("convert txn into msg: %w", err)
 	}
 
 	callParam := TraceCallParam{
-		txHash:            &txnHash,
-		traceTypes:        traceTypes,
-		isBorStateSyncTxn: isBorStateSyncTxn,
+		txHash:     &txnHash,
+		traceTypes: traceTypes,
 	}
 
 	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
-		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
+		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
 		return nil, cmErr

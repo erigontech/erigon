@@ -107,6 +107,10 @@ func restoreTxNum(ctx context.Context, cfg *ExecuteBlockCfg, applyTx kv.Tx, curr
 	return inputTxNum, maxTxNum, offsetFromBlockBeginning, blockNum, nil
 }
 
+func shouldWaitForReadAhead(isValidatingBlocks bool) bool {
+	return dbg.ReadAheadWait && isValidatingBlocks
+}
+
 // execRange is the resolved block/txNum window the executor runs over. The
 // stage wrapper resolves it (SeekCommitment + restoreTxNum) and passes it in;
 // the exec core does not touch the stage's DB metadata to derive it.
@@ -202,6 +206,9 @@ func execV3(ctx context.Context,
 		}
 		defer doms.SetDeferCommitmentUpdates(false)
 	}
+	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
+		cfg.readAheader.WaitForWarmup(ctx)
+	}
 	// snapshots are often stored on chaper drives. don't expect low-read-latency and manually read-ahead.
 	// can't use OS-level ReadAhead - because Data >> RAM
 	// it also warmsup state a bit - by touching senders/coninbase accounts and code
@@ -227,6 +234,7 @@ func execV3(ctx context.Context,
 			blockSrc:          blockSrc,
 		},
 		workerCount: cfg.syncCfg.ExecWorkerCount,
+		syscallEVM:  protocol.NewSysCallEVM(cfg.chainConfig, *cfg.vmConfig),
 	}
 	pe.lastCommittedTxNum.Store(inputTxNum)
 	// blockNum is the next block to execute (from doms.BlockNum()), so the last
@@ -313,6 +321,9 @@ func execV3Serial(ctx context.Context,
 		doms.SetDeferCommitmentUpdates(true)
 	}
 	defer doms.SetDeferCommitmentUpdates(false)
+	if shouldWaitForReadAhead(isForkValidation) && cfg.readAheader != nil {
+		cfg.readAheader.WaitForWarmup(ctx)
+	}
 	if !initialCycle && isApplyingBlocks {
 		var clean func()
 
@@ -602,12 +613,12 @@ func (te *txExecutor) onBlockStart(ctx context.Context, block *types.Block) {
 	}
 }
 
-func blockAccessListBytes(blockTx kv.Getter, block *types.Block, blockNum uint64) ([]byte, error) {
-	data := block.BlockAccessList()
-	if len(data) == 0 && block.HeaderNoCopy().HasNonEmptyBAL() {
-		return rawdb.ReadBlockAccessListBytes(blockTx, block.Hash(), blockNum)
+func blockAccessList(blockTx kv.Getter, block *types.Block, blockNum uint64) (types.BlockAccessList, error) {
+	bal := block.BlockAccessList()
+	if bal == nil && block.HeaderNoCopy().HasNonEmptyBAL() {
+		return rawdb.ReadBlockAccessList(blockTx, block.Hash(), blockNum)
 	}
-	return data, nil
+	return bal, nil
 }
 
 func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, maxBlockNum uint64, blockLimit uint64, initialTxNum uint64, inputTxNum uint64, readAhead chan uint64, initialCycle bool, applyResults chan applyResult, blockRequests chan *blockRequest, commitResults chan applyResult) error {
@@ -694,16 +705,19 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			}
 			go warmTxsHashes(b)
 
-			// dbBAL is fed by the block source (src.next -> blockAndBAL), which
-			// prefers the payload-carried BAL and falls back to the DB sidecar.
+			blockBAL := dbBAL
 			header := b.HeaderNoCopy()
-			if dbBAL == nil && !dbg.IgnoreBAL && te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasBAL() {
+			executionBAL := blockBAL
+			if dbg.IgnoreBAL {
+				executionBAL = nil
+			}
+			if executionBAL == nil && !dbg.IgnoreBAL && te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL() {
 				te.logger.Debug("executing block without a BAL", "blockNum", blockNum)
 			}
 			if dbg.TraceBALFeed {
-				if dbBAL != nil {
-					fmt.Printf("BAL-FEED blk=%d accounts=%d\n", blockNum, len(dbBAL))
-				} else if te.cfg.chainConfig.IsAmsterdam(header.Time) {
+				if executionBAL != nil {
+					fmt.Printf("BAL-FEED blk=%d accounts=%d\n", blockNum, len(executionBAL))
+				} else if te.cfg.chainConfig.IsAmsterdam(header.Time) && header.HasNonEmptyBAL() {
 					fmt.Printf("BAL-MISSING blk=%d\n", blockNum)
 				}
 			}
@@ -772,7 +786,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 					firstTxNum: blockStartTxNum,
 					lastTxNum:  inputTxNum - 1,
 					blockTime:  header.Time,
-					bal:        dbBAL,
+					bal:        executionBAL,
 				}:
 				case <-ctx.Done():
 					return ctx.Err()
@@ -782,7 +796,7 @@ func (te *txExecutor) executeBlocks(ctx context.Context, startBlockNum uint64, m
 			case te.execRequests <- &execRequest{
 				block:         b,
 				gasPool:       protocol.NewGasPool(b.GasLimit(), te.cfg.chainConfig.GetMaxBlobGasPerBlock(b.Time())),
-				accessList:    dbBAL,
+				accessList:    executionBAL,
 				tasks:         txTasks,
 				applyResults:  applyResults,
 				commitResults: commitResults,
@@ -846,7 +860,7 @@ type FlushAndComputeCommitmentTimes struct {
 	ComputeCommitment time.Duration
 }
 
-// computeAndCheckCommitmentV3 - does write state to db and then check commitment
+// computeAndCheckCommitmentV3 records execution progress and checks the commitment.
 func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, applyTx kv.TemporalRwTx, doms *execctx.SharedDomains, cfg ExecuteBlockCfg, e *StageState, parallel bool, logger log.Logger, u Unwinder) (ok bool, times FlushAndComputeCommitmentTimes, err error) {
 	if header == nil {
 		return false, times, errors.New("header is nil")
@@ -859,9 +873,6 @@ func computeAndCheckCommitmentV3(ctx context.Context, header *types.Header, appl
 	if !parallel {
 		if err := e.Update(applyTx, header.Number.Uint64()); err != nil {
 			return false, times, err
-		}
-		if _, err := rawdb.IncrementStateVersion(applyTx); err != nil {
-			return false, times, fmt.Errorf("writing plain state version: %w", err)
 		}
 	}
 

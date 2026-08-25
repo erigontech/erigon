@@ -26,6 +26,7 @@ import (
 
 	"github.com/davecgh/go-spew/spew"
 	"github.com/holiman/uint256"
+	"github.com/jinzhu/copier"
 	"github.com/stretchr/testify/assert"
 	"github.com/stretchr/testify/require"
 
@@ -44,7 +45,6 @@ import (
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/state/genesiswrite"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
@@ -57,7 +57,7 @@ func TestGenesisBlockHashes(t *testing.T) {
 
 	t.Parallel()
 	logger := log.New()
-	db := testutil.TemporalDB(t)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	check := func(network string) {
 		spec, err := chainspec.ChainSpecByName(network)
 		require.NoError(t, err)
@@ -85,7 +85,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 	t.Parallel()
 	require := require.New(t)
 
-	block, ibs, err := genesiswrite.GenesisToBlock(t, chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
+	block, ibs, err := genesiswrite.GenesisToBlock(chainspec.MainnetGenesisBlock(), datadir.New(t.TempDir()), log.Root())
 	require.NoError(err)
 	ibs.Close()
 
@@ -101,7 +101,7 @@ func TestGenesisBlockRoots(t *testing.T) {
 		require.NoError(err)
 		require.False(spec.IsEmpty())
 
-		block, ibs, err = genesiswrite.GenesisToBlock(t, spec.Genesis, datadir.New(t.TempDir()), log.Root())
+		block, ibs, err = genesiswrite.GenesisToBlock(spec.Genesis, datadir.New(t.TempDir()), log.Root())
 		require.NoError(err)
 		ibs.Close()
 
@@ -121,7 +121,7 @@ func TestCommitGenesisIdempotency(t *testing.T) {
 	}
 	t.Parallel()
 	logger := log.New()
-	db := testutil.TemporalDB(t)
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
 	tx, err := db.BeginRw(context.Background())
 	require.NoError(t, err)
 	defer tx.Rollback()
@@ -220,7 +220,7 @@ func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 	// Ground truth for DomainDel's guard: the accounts domain must hold a
 	// non-empty entry for this address (not dangling storage under an absent account).
 	av := address.Value()
-	acc, _, err := tx.GetLatest(kv.AccountsDomain, av[:])
+	acc, _, err := tx.GetLatest(kv.AccountsDomain, av[:], kv.GetLatestOptions{})
 	require.NoError(err)
 	require.NotEmpty(acc, "storage-bearing empty alloc must produce a present accounts-domain entry")
 
@@ -244,6 +244,27 @@ func TestGenesisStorageBearingEmptyAccountIsPresent(t *testing.T) {
 	got, err := st.GetState(address, accounts.InternKey(slot))
 	require.NoError(err)
 	assert.Equal(u256.U64(0x2a), got, "storage slot must be readable")
+}
+
+func TestAmsterdamGenesisCarriesSlotNumber(t *testing.T) {
+	t.Parallel()
+
+	// Deep copy: chain.Config carries a sync.Once and a memoized map, and its own doc
+	// forbids copying it by value.
+	var cfg chain.Config
+	require.NoError(t, copier.CopyWithOption(&cfg, chain.AllProtocolChanges, copier.Option{DeepCopy: true}))
+	zero := uint64(0)
+	cfg.AmsterdamTime = &zero
+	head, _ := genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: &cfg})
+
+	// merge.VerifyHeader rejects an Amsterdam header without one (ErrMissingSlotNumber),
+	// and the genesis hash depends on it.
+	require.NotNil(t, head.SlotNumber, "Amsterdam genesis header must carry slotNumber")
+	require.Zero(t, *head.SlotNumber)
+
+	cfg.AmsterdamTime = nil
+	head, _ = genesiswrite.GenesisWithoutStateToBlock(&types.Genesis{Config: &cfg})
+	require.Nil(t, head.SlotNumber, "pre-Amsterdam genesis header must not carry slotNumber")
 }
 
 // See https://github.com/erigontech/erigon/pull/11264
@@ -383,7 +404,7 @@ func TestSetupGenesis(t *testing.T) {
 			tmpdir := t.TempDir()
 			dirs := datadir.New(tmpdir)
 			db := temporaltest.NewTestDB(t, dirs)
-			blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles(), nil)
+			blockReader := freezeblocks.NewBlockReader(db.(freezeblocks.HasBlockFiles).DebugBlockFiles())
 			config, genesis, err := test.fn(t, db, tmpdir)
 			// Check the return values.
 			if !reflect.DeepEqual(err, test.wantErr) {

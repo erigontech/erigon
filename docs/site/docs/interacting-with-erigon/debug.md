@@ -234,7 +234,7 @@ Returns Geth style transaction traces for a block by number.
 
 | Parameter   | Type              | Description                 |
 | ----------- | ----------------- | --------------------------- |
-| blockNumber | QUANTITY \| TAG   | Block number or tag         |
+| blockNumber | QUANTITY \| TAG   | Block number or tag; `pending` is not supported |
 | config      | Object (optional) | Trace configuration options |
 
 #### Example
@@ -285,7 +285,7 @@ Returns Geth style call trace.
 | Parameter     | Type                    | Description                                           |
 | ------------- | ----------------------- | ----------------------------------------------------- |
 | args          | Object                  | Call arguments (to, from, gas, gasPrice, value, data) |
-| blockNrOrHash | QUANTITY \| TAG \| DATA | Block number, tag, or hash                            |
+| blockNrOrHash | QUANTITY \| TAG \| DATA | Block number, tag, or hash; `pending` is not supported |
 | config        | Object (optional)       | Trace configuration options                           |
 
 #### Example
@@ -311,7 +311,7 @@ Returns Geth style traces for multiple call bundles.
 | Parameter       | Type              | Description                                        |
 | --------------- | ----------------- | -------------------------------------------------- |
 | bundles         | Array             | Array of transaction bundles to trace              |
-| simulateContext | Object            | Simulation context (blockNumber, transactionIndex) |
+| simulateContext | Object            | Simulation context; `blockNumber` does not support `pending` |
 | config          | Object (optional) | Trace configuration options                        |
 
 #### Example

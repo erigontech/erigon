@@ -122,11 +122,6 @@ func (b *BpsTree) compareKey(g *seg.Reader, key []byte, di uint64) int {
 
 type cursorGetter func(k, v []byte, di uint64, g *seg.Reader) *Cursor
 
-type BpsTreeIterator struct {
-	t *BpsTree
-	i uint64
-}
-
 //// If data[i] == key, returns 0 (equal) and value, nil err
 //// if data[i] <> key, returns comparation result and nil value and error -- to be able to compare later
 //func (b *BpsTree) matchKeyValue(g ArchiveGetter, i uint64, key []byte) (int, []byte, error) {
@@ -419,15 +414,40 @@ func (b *BpsTree) Seek(g *seg.Reader, seekKey []byte) (cur *Cursor, err error) {
 // If given key is nil, returns first key
 // If no exact match found, returns nil values
 func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint64, err error) {
-	if b.trace {
-		fmt.Printf("get   %x\n", key)
-	}
 	if len(key) == 0 && b.offt.Count() > 0 {
 		k0, v0, _, err := b.dataLookupFunc(0, g)
 		if err != nil || k0 != nil {
 			return nil, false, 0, err
 		}
 		return v0, true, 0, nil
+	}
+	ok, offset, err = b.seekExact(g, key)
+	if err != nil || !ok {
+		return nil, false, 0, err
+	}
+	v, _ = g.Next(nil)
+	return v, true, offset, nil
+}
+
+func (b *BpsTree) GetValSize(g *seg.Reader, key []byte) (size int, ok bool, err error) {
+	if len(key) == 0 && b.offt.Count() > 0 {
+		k0, v0, _, err := b.dataLookupFunc(0, g)
+		if err != nil || k0 != nil {
+			return 0, false, err
+		}
+		return len(v0), true, nil
+	}
+	ok, _, err = b.seekExact(g, key)
+	if err != nil || !ok {
+		return 0, false, err
+	}
+	_, size = g.Skip()
+	return size, true, nil
+}
+
+func (b *BpsTree) seekExact(g *seg.Reader, key []byte) (ok bool, offset uint64, err error) {
+	if b.trace {
+		fmt.Printf("get   %x\n", key)
 	}
 
 	l, r, klo, khi := b.bs(key) // l===r when key is found
@@ -457,8 +477,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 			cmp = bytes.Compare(key, km)
 			switch {
 			case cmp == 0:
-				v, _ = g.Next(nil)
-				return v, true, off, nil
+				return true, off, nil
 			case cmp < 0:
 				r = m
 				khi = append(khiArr[:0], km...)
@@ -477,7 +496,7 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				g.Reset(offset)
 			}
 			if cmp = g.MatchCmp(key); cmp < 0 {
-				return nil, false, 0, err
+				return false, 0, err
 			} else if cmp > 0 {
 				// on non-match MatchCmp resets position; skip key+value to advance
 				g.Skip()
@@ -485,19 +504,16 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 				l++
 				continue
 			}
-			v, _ = g.Next(nil)
-			offset = b.offt.Get(m)
-			return v, true, offset, nil
+			return true, b.offt.Get(m), nil
 		}
 
 		cmp = b.compareKey(g, key, m)
 		switch {
 		case cmp == 0:
 			if !g.HasNext() {
-				return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
+				return false, 0, fmt.Errorf("pair %d/%d key not found in %s", m, b.offt.Count(), g.FileName())
 			}
-			v, _ = g.Next(nil)
-			return v, true, b.offt.Get(m), nil
+			return true, b.offt.Get(m), nil
 		case cmp < 0:
 			r = m
 		default:
@@ -509,17 +525,16 @@ func (b *BpsTree) Get(g *seg.Reader, key []byte) (v []byte, ok bool, offset uint
 	}
 
 	if l >= b.offt.Count() {
-		return nil, false, 0, nil
+		return false, 0, nil
 	}
 	cmp = b.compareKey(g, key, l)
 	if cmp != 0 {
-		return nil, false, 0, nil
+		return false, 0, nil
 	}
 	if !g.HasNext() {
-		return nil, false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
+		return false, 0, fmt.Errorf("pair %d/%d key not found in %s", l, b.offt.Count(), g.FileName())
 	}
-	v, _ = g.Next(nil)
-	return v, true, b.offt.Get(l), nil
+	return true, b.offt.Get(l), nil
 }
 
 // interpMid estimates the index of searchKey within [l,r) by linear interpolation on

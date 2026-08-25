@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 )
 
 type StateChangeSet struct {
@@ -317,7 +318,10 @@ func deserializeKeys(in []byte) [kv.DomainLen][]kv.DomainEntryDiff {
 }
 
 const DiffChunkKeyLen = 48
-const DiffChunkLen = 4*1024 - 32
+
+// DiffChunkLen keeps 2 chunks inline in one mdbx leaf page - values bigger than half a page go to
+// overflow pages, which cost extra FreeList maintenance. See TestNoOverflowPages.
+const DiffChunkLen = int(ethconfig.DefaultChainDBPageSize)/2 - DiffChunkKeyLen - 32
 
 type threadSafeBuf struct {
 	b []byte
@@ -396,7 +400,7 @@ func ReadDiffSet(tx kv.Tx, blockNumber uint64, blockHash common.Hash) ([kv.Domai
 	}
 
 	key := make([]byte, 48)
-	val := make([]byte, 0, DiffChunkLen*chunkCount)
+	val := make([]byte, 0, DiffChunkLen*int(chunkCount))
 	for i := range chunkCount {
 		binary.BigEndian.PutUint64(key, blockNumber)
 		copy(key[8:], blockHash[:])

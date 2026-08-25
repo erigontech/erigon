@@ -17,6 +17,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol"
@@ -358,7 +359,7 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 				return result.Err
 			}
 			if result.Err != nil {
-				return fmt.Errorf("%w, txnIdx=%d, %v", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
+				return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, result.Err) //same as in stage_exec.go
 			}
 
 			se.txCount++
@@ -372,16 +373,11 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 			case txTask.IsBlockEnd() && txTask.BlockNumber() > 0:
 				//fmt.Printf("txNum=%d, blockNum=%d, finalisation of the block\n", txTask.TxNum, txTask.BlockNum)
 				// End of block transaction in a block
-				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsGetter(se.applyTx)))
+				ibs := state.New(state.NewReaderV3(se.rs.Domains().AsStateGetter(se.applyTx, execctxapi.StateGetterOptions{})))
 				defer ibs.Close()
 				ibs.SetTxContext(txTask.BlockNumber(), txTask.TxIndex)
 				syscall := func(contract accounts.Address, data []byte) ([]byte, error) {
-					ret, err := protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
-					if err != nil {
-						return nil, err
-					}
-					result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
-					return ret, err
+					return protocol.SysCallContract(contract, data, se.cfg.chainConfig, ibs, txTask.Header, se.cfg.engine, false /* constCall */, *se.cfg.vmConfig)
 				}
 
 				chainReader := consensuschain.NewReader(se.cfg.chainConfig, se.applyTx, se.cfg.blockReader, se.logger)
@@ -413,6 +409,8 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 				if err != nil {
 					return fmt.Errorf("%w, txnIdx=%d, %w", rules.ErrInvalidBlock, txTask.TxIndex, err)
 				}
+
+				result.Logs = append(result.Logs, ibs.GetRawLogs(txTask.TxIndex)...)
 
 				if priorComplete && !isInitialCycle {
 					se.cfg.notifications.RecentReceipts.Add(finalizeReceipts, txTask.Txs, txTask.Header)
@@ -508,44 +506,6 @@ func (se *serialExecutor) executeBlock(ctx context.Context, block *types.Block, 
 		var applyReceipt *types.Receipt
 		if txTask.TxIndex >= 0 && txTask.TxIndex-startTxIndex < len(blockReceipts) {
 			applyReceipt = blockReceipts[txTask.TxIndex-startTxIndex]
-		}
-
-		if txTask.IsBlockEnd() {
-			if se.cfg.chainConfig.Bor != nil && txTask.TxIndex >= 1 {
-				// get last receipt and store the last log index + 1
-				if len(blockReceipts) >= txTask.TxIndex-startTxIndex {
-					applyReceipt = blockReceipts[txTask.TxIndex-startTxIndex-1]
-				}
-
-				if applyReceipt == nil {
-					if startTxIndex > 0 {
-						// if we're in the startup block and the last tx has been skipped we'll
-						// need to run it as a historic tx to recover its logs
-						prevTask := *txTask
-						prevTask.HistoryExecution = true
-						prevTask.ResetTx(txTask.TxNum-1, txTask.TxIndex-1)
-						result := se.worker.RunTxTaskNoLock(&prevTask)
-						if result.Err != nil {
-							return false, fmt.Errorf("error while finding last receipt: %w", result.Err)
-						}
-						var cumulativeGasUsed uint64
-						var logIndexAfterTx uint32
-						if txTask.TxIndex > 1 {
-							cumulativeGasUsed, _, logIndexAfterTx, err = rawtemporaldb.ReceiptAsOf(se.applyTx, txTask.TxNum-2)
-							if err != nil {
-								return false, err
-							}
-						}
-						applyReceipt, err = result.CreateReceipt(txTask.TxIndex-1,
-							cumulativeGasUsed+result.ExecutionResult.ReceiptGasUsed, logIndexAfterTx)
-						if err != nil {
-							return false, err
-						}
-					} else {
-						return false, fmt.Errorf("receipt is nil but should be populated, txIndex=%d, block=%d", txTask.TxIndex-1, txTask.BlockNumber())
-					}
-				}
-			}
 		}
 
 		if !txTask.HistoryExecution {

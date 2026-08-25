@@ -95,8 +95,8 @@ func HandleError(err error, stream jsonstream.Stream) {
 		stream.WriteObjectField("error")
 		stream.WriteObjectStart()
 		stream.WriteObjectField("code")
-		ec, ok := err.(Error)
-		if ok {
+		var ec Error
+		if errors.As(err, &ec) {
 			stream.WriteInt(ec.ErrorCode())
 		} else {
 			stream.WriteInt(ErrCodeDefault)
@@ -104,15 +104,13 @@ func HandleError(err error, stream jsonstream.Stream) {
 		stream.WriteMore()
 		stream.WriteObjectField("message")
 		stream.WriteString(err.Error())
-		de, ok := err.(DataError)
-		if ok {
+		var de DataError
+		if errors.As(err, &de) {
 			stream.WriteMore()
 			stream.WriteObjectField("data")
 			data, derr := json.Marshal(de.ErrorData())
 			if derr == nil {
-				if _, err := stream.Write(data); err != nil {
-					stream.WriteNil()
-				}
+				stream.WriteRawBytes(data)
 			} else {
 				stream.WriteString(derr.Error())
 			}
@@ -198,9 +196,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 
 	// Process calls on a goroutine because they may block indefinitely:
 	h.startCallProc(func(cp *callProc) {
-		// Batch items below run concurrently and write into private per-item buffers;
-		// see withoutGzipStreamingHook for why the hook must not reach them.
-		cp.ctx = withoutGzipStreamingHook(cp.ctx)
+		// Batch items below run concurrently and write into private per-item buffers.
 		// All goroutines will place results right to this array. Because requests order must match reply orders.
 		answersWithNils := make([][]byte, len(calls))
 		// Bounded parallelism pattern explanation https://blog.golang.org/pipelines#TOC_9.
@@ -248,7 +244,7 @@ func (h *handler) handleBatch(msgs []*jsonrpcMessage) {
 				out.WriteMore()
 			}
 			wrote = true
-			_, _ = out.Write(answer)
+			out.WriteRawBytes(answer)
 		}
 		out.WriteArrayEnd()
 		if wrote {
@@ -294,7 +290,7 @@ func (h *handler) handleMsg(msg *jsonrpcMessage, stream jsonstream.Stream) {
 		if needWriteStream {
 			h.conn.WriteJSON(cp.ctx, rawResponse(stream.Buffer()))
 		} else {
-			stream.Write([]byte("\n"))
+			stream.WriteRaw("\n")
 		}
 		for _, n := range cp.notifiers {
 			n.activate()
@@ -648,18 +644,13 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 		return msg.response(result)
 	}
 
-	// Switch gzip middleware to streaming mode before writing any response data.
-	if flush, ok := ctx.Value(httpFlusherContextKey{}).(func()); ok && flush != nil {
-		flush()
-	}
-
 	stream.WriteObjectStart()
 	stream.WriteObjectField("jsonrpc")
 	stream.WriteString("2.0")
 	stream.WriteMore()
 	if msg.ID != nil {
 		stream.WriteObjectField("id")
-		stream.Write(msg.ID)
+		stream.WriteRawBytes(msg.ID)
 		stream.WriteMore()
 	}
 	rs := jsonstream.NewLazyFieldStream(stream, "result", false)
@@ -681,8 +672,13 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 // except '<', '>', '&' and U+2028/2029 in the id/result are left unescaped (valid JSON, same value).
 func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	if msg.Error != nil || msg.Result == nil || msg.ID == nil || msg.Version == "" || msg.Method != "" || msg.Params != nil {
-		buf, _ := json.Marshal(msg)
-		_, _ = stream.Write(buf)
+		buf, err := json.Marshal(msg)
+		if err != nil {
+			buf, err = json.Marshal(msg.errorResponse(err))
+		}
+		if err == nil {
+			stream.WriteRawBytes(buf)
+		}
 		return
 	}
 	stream.WriteObjectStart()
@@ -690,10 +686,10 @@ func (msg *jsonrpcMessage) writeTo(stream jsonstream.Stream) {
 	stream.WriteString(msg.Version)
 	stream.WriteMore()
 	stream.WriteObjectField("id")
-	_, _ = stream.Write(msg.ID)
+	stream.WriteRawBytes(msg.ID)
 	stream.WriteMore()
 	stream.WriteObjectField("result")
-	_, _ = stream.Write(msg.Result)
+	stream.WriteRawBytes(msg.Result)
 	stream.WriteObjectEnd()
 }
 

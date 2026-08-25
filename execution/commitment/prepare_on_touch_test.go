@@ -12,7 +12,6 @@ import (
 	"github.com/erigontech/erigon/common/length"
 )
 
-// preparedSplits holds one mounted HexPatriciaHashed per top-nibble split point.
 type preparedSplits struct {
 	base     *HexPatriciaHashed
 	splits   [16]*HexPatriciaHashed
@@ -107,7 +106,6 @@ func (ps *preparedSplits) release() {
 	}
 }
 
-// sortedTriples returns triples sorted by hashed key, the order followAndUpdate requires.
 type triple struct {
 	hk, pk []byte
 	upd    *Update

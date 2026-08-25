@@ -119,7 +119,7 @@ func TestResolveChainName(t *testing.T) {
 		{"--networkid=1 only → mainnet", []string{"--networkid=1"}, "mainnet"},
 		{"--networkid=11155111 only → sepolia (known id)", []string{"--networkid=11155111"}, "sepolia"},
 		{"--networkid=99999 only → empty (unknown id)", []string{"--networkid=99999"}, ""},
-		{"--networkid=1337 only → bor-devnet (registered id)", []string{"--networkid=1337"}, "bor-devnet"},
+		{"--networkid=100 only → gnosis (registered id)", []string{"--networkid=100"}, "gnosis"},
 		{"--networkid=99999 --chain=mainnet → mainnet (explicit chain wins)", []string{"--networkid=99999", "--chain=mainnet"}, "mainnet"},
 		{"--networkid=99999 --chain=sepolia → sepolia (explicit chain wins)", []string{"--networkid=99999", "--chain=sepolia"}, "sepolia"},
 		{"--networkid=1 --chain=sepolia → sepolia (explicit chain wins over mainnet id)", []string{"--networkid=1", "--chain=sepolia"}, "sepolia"},
@@ -287,7 +287,7 @@ func TestExecPerfFlags_OverrideDbg(t *testing.T) {
 
 func TestNewP2PConfig_DiscoveryDefaults(t *testing.T) {
 	newCfg := func(nodiscover bool) *p2p.Config {
-		cfg, err := NewP2PConfig(nodiscover, datadir.New(t.TempDir()), "", "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false, false)
+		cfg, err := NewP2PConfig(nodiscover, datadir.New(t.TempDir()), "", "none", 100, 1000, "test", nil, nil, 30303, direct.ETH68, false)
 		require.NoError(t, err)
 		return cfg
 	}

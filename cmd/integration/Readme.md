@@ -24,9 +24,6 @@ integration stage_exec --reset
 # Unwind single stage N blocks backward
 integration stage_exec --unwind=N
 
-# Run stage prune to block N
-integration stage_exec --prune.to=N
-
 # To remove all blocks (together with bodies/txs) from db 
 integration stage_headers --reset --datadir=<my_datadir> --chain=<my_chain>
 
@@ -60,13 +57,11 @@ For example:
 
 ## How to unwind node
 
-In Erigon3 - better do `rm -rf chaindata` (for bor maybe also need remove `polygon-bridge`, `bor`, `heimdall` folders
-until https://github.com/erigontech/erigon/issues/13674 is fixed)
+In Erigon3 - better do `rm -rf chaindata`
 
 ## Copy data to another db
 
-In Erigon3 - better do `rm -rf chaindata` (for bor maybe also need remove `polygon-bridge`, `bor`, `heimdall` folders
-until https://github.com/erigontech/erigon/issues/13674 is fixed)
+In Erigon3 - better do `rm -rf chaindata`
 
 ```sh
 0. You will need 2x disk space (can be different disks).
@@ -150,15 +145,6 @@ erigon snapshots rm-state --only-history --step=0-900
 
 # Dry-run first to see what would be deleted:
 erigon snapshots rm-state --only-history --step=0-900 --dry-run
-```
-
-## How to re-gen bor checkpoints
-
-```sh
-rm -rf datadir/heimdall
-rm -rf datadir/snapshots/*borch*
-# Start erigon, it will gen. Then:
-erigon snapshots integrity --datadir /erigon-data/ --check=BorCheckpoints
 ```
 
 ## Compact chaindata in-place

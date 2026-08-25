@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/kv/dbcfg"
 	"github.com/erigontech/erigon/db/kv/mdbx"
+	"github.com/erigontech/erigon/db/kv/mdbx/mdbxtest"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/state/statecfg"
 	"github.com/erigontech/erigon/db/version"
@@ -40,7 +41,7 @@ func testDbAndAggregatorSmallFrozen(t *testing.T, stepSize, stepsInFrozenFile ui
 	t.Helper()
 	logger := log.New()
 	dirs := datadir.New(t.TempDir())
-	db := mdbx.New(dbcfg.ChainDB, logger).InMem(t, dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
+	db := mdbxtest.InMem(t, mdbx.New(dbcfg.ChainDB, logger), dirs.Chaindata).GrowthStep(32 * datasize.MB).MapSize(2 * datasize.GB).MustOpen()
 	t.Cleanup(db.Close)
 	agg := NewTest(dirs).StepSize(stepSize).StepsInFrozenFile(stepsInFrozenFile).Logger(logger).MustOpen(t.Context(), db)
 	t.Cleanup(agg.Close)

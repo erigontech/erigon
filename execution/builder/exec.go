@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -116,7 +117,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	sd.SetTxNum(txNum)
 
 	stateWriter := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	// filterSd is a separate SharedDomains used only for filterBadTransactions.
 	// The filter makes speculative nonce/balance writes that may not match actual
@@ -134,7 +135,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	}
 	defer filterSd.Close()
 	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
-	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
+	filterReader := state.NewReaderV3(filterSd.AsStateGetter(filterMb, execctxapi.StateGetterOptions{}))
 
 	ibs := state.New(stateReader)
 	defer ibs.Close()
@@ -462,7 +463,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
 			isEoaCodeAllowed := false
-			if config.IsPrague(header.Time) || config.IsBhilai(header.Number.Uint64()) {
+			if config.IsPrague(header.Time) {
 				code, err := simStateReader.ReadAccountCode(senderAddress)
 				if err != nil {
 					return nil, err
