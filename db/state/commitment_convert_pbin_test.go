@@ -302,3 +302,48 @@ func TestConvertPBinRecordFilesUsesDomainCodecForSmallShard(t *testing.T) {
 	require.NotEmpty(t, keys)
 	require.Len(t, values, len(keys))
 }
+
+func TestConvertPBinRecordFilesRejectsDroppedRecord(t *testing.T) {
+	fixture := newPBinOutputFixture(t, true, false)
+	keys, _ := readKVFile(t, fixture.output, fixture.outputPath)
+	require.Greater(t, len(keys), 1)
+
+	err := state.VerifyPBinPairCountForTest(uint64(len(keys)), 2*(len(keys)-1))
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "pair count")
+}
+
+func TestConvertPBinRecordFilesRejectsMangledStateRoot(t *testing.T) {
+	fixture := newPBinOutputFixture(t, true, false)
+	keys, values := readKVFile(t, fixture.output, fixture.outputPath)
+	var legacy []byte
+	for i, key := range keys {
+		if bytes.Equal(key, commitmentdb.KeyCommitmentState) {
+			legacy = values[i]
+			break
+		}
+	}
+	require.NotEmpty(t, legacy)
+
+	converter := commitment.NewPBinRecordConverter()
+	var current []byte
+	if commitment.IsPBinState(legacy) {
+		var err error
+		current, err = converter.ConvertState(legacy)
+		require.NoError(t, err)
+	} else {
+		require.GreaterOrEqual(t, len(legacy), 18)
+		converted, err := converter.ConvertState(legacy[18:])
+		require.NoError(t, err)
+		current = append([]byte(nil), legacy[:18]...)
+		binary.BigEndian.PutUint16(current[16:18], uint16(len(converted)))
+		current = append(current, converted...)
+	}
+	require.Greater(t, len(current), 5)
+	mangled := append([]byte(nil), current...)
+	mangled[len(mangled)-1] ^= 1
+
+	err := state.VerifyPBinStateConversionForTest(legacy, mangled)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "state root")
+}

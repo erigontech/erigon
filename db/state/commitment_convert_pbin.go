@@ -77,6 +77,61 @@ func pbinConvertState(conv *commitment.PBinRecordConverter, value []byte) ([]byt
 	return append(out, converted...), nil
 }
 
+func pbinCurrentStateRoot(value []byte) ([]byte, error) {
+	payload, _, err := pbinStatePayload(value)
+	if err != nil {
+		return nil, err
+	}
+	if err := commitment.ValidatePBinStateFormat(payload); err != nil {
+		return nil, fmt.Errorf("pbin state is not in current format: %w", err)
+	}
+	trie := commitment.NewPBinPatriciaHashed(nil)
+	defer trie.Release()
+	if err := trie.SetState(payload); err != nil {
+		return nil, fmt.Errorf("restore pbin state: %w", err)
+	}
+	root, err := trie.RootHash()
+	if err != nil {
+		return nil, fmt.Errorf("hash restored pbin state: %w", err)
+	}
+	return root, nil
+}
+
+func pbinVerifyStateConversion(conv *commitment.PBinRecordConverter, source, converted []byte) error {
+	sourcePayload, _, err := pbinStatePayload(source)
+	if err != nil {
+		return err
+	}
+	var sourceRoot []byte
+	if commitment.ValidatePBinStateFormat(sourcePayload) == nil {
+		sourceRoot, err = pbinCurrentStateRoot(source)
+	} else {
+		sourceRoot, err = conv.LegacyStateRoot(sourcePayload)
+	}
+	if err != nil {
+		return fmt.Errorf("read source state root: %w", err)
+	}
+	convertedRoot, err := pbinCurrentStateRoot(converted)
+	if err != nil {
+		return fmt.Errorf("read converted state root: %w", err)
+	}
+	if !bytes.Equal(sourceRoot, convertedRoot) {
+		return fmt.Errorf("pbin state root mismatch: source %x, converted %x", sourceRoot, convertedRoot)
+	}
+	return nil
+}
+
+func verifyPBinPairCount(sourcePairs uint64, outputWords int) error {
+	if outputWords%2 != 0 {
+		return fmt.Errorf("pbin pair count: output has an odd word count %d", outputWords)
+	}
+	outputPairs := uint64(outputWords / 2)
+	if outputPairs != sourcePairs {
+		return fmt.Errorf("pbin pair count: source has %d pairs, output has %d pairs", sourcePairs, outputPairs)
+	}
+	return nil
+}
+
 func pbinFileHasLegacy(ctx context.Context, d *Domain, file *FilesItem) (bool, error) {
 	reader := d.dataReader(file.decompressor)
 	reader.Reset(0)
@@ -153,6 +208,11 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 	if !hasLegacy {
 		return 0, errSkip
 	}
+	sourceWords := vf.src.decompressor.Count()
+	if sourceWords%2 != 0 {
+		return 0, fmt.Errorf("convertPBinFile %q: source has an odd word count %d", file.Fullpath(), sourceWords)
+	}
+	sourcePairs := uint64(sourceWords / 2)
 
 	paths := commitmentOutputPaths(d, stepFrom, stepTo)
 	if err := removeCommitmentOutputFiles(paths); err != nil {
@@ -192,6 +252,9 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 		switch {
 		case bytes.Equal(key, commitmentdb.KeyCommitmentState):
 			outputValue, err = pbinConvertState(converter, value)
+			if err == nil {
+				err = pbinVerifyStateConversion(converter, value, outputValue)
+			}
 		case pbinRecordIsLegacy(value):
 			outputValue, err = converter.ConvertBranch(key, value)
 		default:
@@ -214,8 +277,11 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 		}
 	}
 
-	collation := Collation{valuesComp: comp, valuesPath: outputPath, valuesCount: comp.Count() / 2}
-	static, err := d.buildFileRange(ctx, stepFrom, stepTo, collation, background.NewProgressSet(), d.dirs.SnapDomain)
+	coll := Collation{valuesComp: comp, valuesPath: outputPath, valuesCount: comp.Count() / 2}
+	if err := verifyPBinPairCount(sourcePairs, coll.valuesComp.Count()); err != nil {
+		return pairs, fmt.Errorf("convertPBinFile %q: %w", file.Fullpath(), err)
+	}
+	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, background.NewProgressSet(), d.dirs.SnapDomain)
 	compOwned = false
 	if err != nil {
 		return pairs, fmt.Errorf("convertPBinFile %q: build output: %w", file.Fullpath(), err)

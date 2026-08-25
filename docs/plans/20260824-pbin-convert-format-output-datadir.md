@@ -327,15 +327,16 @@ already the output's.
 **Files:**
 - Modify: `db/state/commitment_convert_pbin.go`
 - Modify: `db/state/commitment_convert_pbin_test.go`
+- Modify: `db/state/commitment_convert_export_test.go`
 
-- [ ] write a failing test that a dropped record fails the run, using a corpus where the
+- [x] write a failing test that a dropped record fails the run, using a corpus where the
       written count and the source count genuinely differ
-- [ ] implement the count check against `coll.valuesComp.Count()/2`, not the write loop's own
+- [x] implement the count check against `coll.valuesComp.Count()/2`, not the write loop's own
       counter
-- [ ] write a failing test that a mangled state record fails the root check
-- [ ] implement the root check with `LegacyStateRoot` on the source blob and a restored engine
+- [x] write a failing test that a mangled state record fails the root check
+- [x] implement the root check with `LegacyStateRoot` on the source blob and a restored engine
       on the converted blob; set the bin globals in `t.Cleanup` and do not use `t.Parallel`
-- [ ] run `go test ./db/state/... -count=1` — must pass before task 7
+- [x] run `go test ./db/state/... -count=1` — must pass before task 7
 
 ### Task 7: Dispositions, --resume, and failure cleanup
 

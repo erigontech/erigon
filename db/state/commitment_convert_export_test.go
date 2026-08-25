@@ -16,6 +16,8 @@
 
 package state
 
+import "github.com/erigontech/erigon/execution/commitment"
+
 // Test-only bridge: convertCommitmentFile and its sentinels are package-private,
 // but the full-aggregator round-trip tests live in package state_test (the
 // aggregator-setup helpers — testDbAggregatorWithFiles, etc. — are defined
@@ -32,4 +34,12 @@ var (
 // resume integration test to cancel mid-Phase-1 deterministically.
 func SetConvertPhase1AfterFileHookForTest(fn func(idx int)) {
 	convertPhase1AfterFileHook = fn
+}
+
+func VerifyPBinPairCountForTest(sourcePairs uint64, outputWords int) error {
+	return verifyPBinPairCount(sourcePairs, outputWords)
+}
+
+func VerifyPBinStateConversionForTest(source, converted []byte) error {
+	return pbinVerifyStateConversion(commitment.NewPBinRecordConverter(), source, converted)
 }
