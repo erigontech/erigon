@@ -239,8 +239,20 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	if err != nil {
 		return err
 	}
-	// emit the head event
-	cfg.emitter.State().SendHead(&beaconevents.HeadData{
+	return emitHeadEventsIfCurrent(cfg.emitter, headEvent, headSlot, headRoot, stateRoot, func() (common.Hash, uint64, error) {
+		return cfg.forkChoice.GetHead(nil)
+	})
+}
+
+func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, error)) error {
+	currentRoot, currentSlot, err := getHead()
+	if err != nil {
+		return fmt.Errorf("failed to revalidate head event: %w", err)
+	}
+	if currentRoot != headRoot || currentSlot != headSlot {
+		return nil
+	}
+	emitter.State().SendHead(&beaconevents.HeadData{
 		Slot:                      headSlot,
 		Block:                     headRoot,
 		State:                     stateRoot,
@@ -249,7 +261,7 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 		CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
 		ExecutionOptimistic:       false,
 	})
-	cfg.emitter.State().SendHeadV2(headEvent)
+	emitter.State().SendHeadV2(headEvent)
 	return nil
 }
 

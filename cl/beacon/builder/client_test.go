@@ -22,6 +22,7 @@ import (
 	"context"
 	_ "embed"
 	"encoding/json"
+	"errors"
 	"fmt"
 	"io"
 	"math"
@@ -407,6 +408,12 @@ func TestBuilderTransportRejectsUnsafeTargets(t *testing.T) {
 	}
 	_, err := client.RequestExecutionPayloadBid(context.Background(), "https://builder.example", 1, common.Hash{}, common.Hash{}, common.Bytes48{}, validBuilderRequestAuth(), time.Second)
 	require.Error(t, err)
+
+	client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) {
+		return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}, {IP: net.ParseIP("10.0.0.1")}}, nil
+	}
+	_, err = client.RequestExecutionPayloadBid(context.Background(), "https://builder.example", 1, common.Hash{}, common.Hash{}, common.Bytes48{}, validBuilderRequestAuth(), time.Second)
+	require.Error(t, err)
 }
 
 func TestRequestExecutionPayloadBidBoundsResponseAndRefusesRedirect(t *testing.T) {
@@ -558,6 +565,72 @@ func TestDynamicBuilderDialUsesValidatedAddress(t *testing.T) {
 	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
 	require.NoError(t, client.SubmitBuilderPreferences(t.Context(), "http://builder.example:18550", common.Bytes48{}, request))
 	require.Equal(t, "93.184.216.34:18550", dialed)
+}
+
+func TestDynamicBuilderDialFallsBackAcrossValidatedAddresses(t *testing.T) {
+	addresses := []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}, {IP: net.ParseIP("93.184.216.35")}}
+	var lookups int
+	var dialed []string
+	client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
+	client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) {
+		lookups++
+		return addresses, nil
+	}
+	client.transport = newPinnedBuilderTransport(func(_ context.Context, _, address string) (net.Conn, error) {
+		dialed = append(dialed, address)
+		if address == "93.184.216.34:18550" {
+			return nil, errors.New("first address unavailable")
+		}
+		clientConn, serverConn := net.Pipe()
+		go func() {
+			defer serverConn.Close()
+			request, err := http.ReadRequest(bufio.NewReader(serverConn))
+			if err == nil {
+				request.Body.Close()
+				_, _ = serverConn.Write([]byte("HTTP/1.1 202 Accepted\r\nContent-Length: 0\r\nConnection: close\r\n\r\n"))
+			}
+		}()
+		return clientConn, nil
+	})
+	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
+
+	require.NoError(t, client.SubmitBuilderPreferences(t.Context(), "http://builder.example:18550", common.Bytes48{}, request))
+	require.Equal(t, 1, lookups)
+	require.Equal(t, []string{"93.184.216.34:18550", "93.184.216.35:18550"}, dialed)
+}
+
+func TestDynamicBuilderDialAllFailAndCancellation(t *testing.T) {
+	addresses := []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}, {IP: net.ParseIP("93.184.216.35")}}
+	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
+
+	t.Run("all fail", func(t *testing.T) {
+		var dialed []string
+		client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
+		client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) { return addresses, nil }
+		client.transport = newPinnedBuilderTransport(func(_ context.Context, _, address string) (net.Conn, error) {
+			dialed = append(dialed, address)
+			return nil, errors.New("unavailable")
+		})
+
+		require.Error(t, client.SubmitBuilderPreferences(t.Context(), "http://builder.example:18550", common.Bytes48{}, request))
+		require.Equal(t, []string{"93.184.216.34:18550", "93.184.216.35:18550"}, dialed)
+	})
+
+	t.Run("canceled dial stops fallback", func(t *testing.T) {
+		var dialed []string
+		client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
+		client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) { return addresses, nil }
+		client.transport = newPinnedBuilderTransport(func(ctx context.Context, _, address string) (net.Conn, error) {
+			dialed = append(dialed, address)
+			<-ctx.Done()
+			return nil, ctx.Err()
+		})
+		ctx, cancel := context.WithTimeout(t.Context(), 10*time.Millisecond)
+		defer cancel()
+
+		require.ErrorIs(t, client.SubmitBuilderPreferences(ctx, "http://builder.example:18550", common.Bytes48{}, request), context.DeadlineExceeded)
+		require.Equal(t, []string{"93.184.216.34:18550"}, dialed)
+	})
 }
 
 func TestPrivateBuilderTargetsRequireExplicitPolicy(t *testing.T) {

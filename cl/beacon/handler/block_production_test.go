@@ -44,11 +44,13 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	"github.com/erigontech/erigon/cl/gossip"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
@@ -416,6 +418,17 @@ func TestBroadcastBlockRunsGossipValidationBeforePublishing(t *testing.T) {
 	err := (&ApiHandler{blockService: blockService}).broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
 	require.ErrorIs(t, err, errPublishedBlockValidation)
 	require.ErrorContains(t, err, validationErr.Error())
+}
+
+func TestPublishGossipReturnsPublishFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, []byte{1}).Return(errors.New("gossip unavailable"))
+	handler := &ApiHandler{gossipManager: gossipManager}
+
+	err := handler.publishGossip(t.Context(), gossip.TopicNameBeaconBlock, []byte{1})
+
+	require.ErrorContains(t, err, "gossip unavailable")
 }
 
 func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
