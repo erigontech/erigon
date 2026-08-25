@@ -38,7 +38,6 @@ import (
 	"github.com/erigontech/erigon/db/kv/order"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol"
 	protocolrules "github.com/erigontech/erigon/execution/protocol/rules"
@@ -98,7 +97,7 @@ func (api *TraceAPIImpl) Transaction(ctx context.Context, txHash common.Hash, ga
 		return nil, err
 	}
 
-	header, err := api.headerByNumber(ctx, rpc.BlockNumber(blockNumber), tx)
+	header, err := api.canonicalHeaderByNumber(ctx, tx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
@@ -182,6 +181,9 @@ func newRewardTrace(blockHash common.Hash, blockNum uint64, author common.Addres
 
 // Block implements trace_block
 func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gasBailOut *bool, traceConfig *config.TraceConfig) (ParityTraces, error) {
+	if err := rejectPendingNumber(blockNr); err != nil {
+		return nil, err
+	}
 	if gasBailOut == nil {
 		gasBailOut = new(bool) // false by default
 	}
@@ -190,7 +192,7 @@ func (api *TraceAPIImpl) Block(ctx context.Context, blockNr rpc.BlockNumber, gas
 		return nil, err
 	}
 	defer tx.Rollback()
-	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, api.filters)
+	blockNum, hash, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(blockNr), tx, api._blockReader, nil)
 	if err != nil {
 		return nil, err
 	}
@@ -308,6 +310,16 @@ func traceFilterBitmapsV3(tx kv.TemporalTx, req TraceFilterRequest, from, to uin
 // NOTE: We do not store full traces - we just store index for each address
 // Pull blocks which have txs with matching address
 func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gasBailOut *bool, traceConfig *config.TraceConfig, stream jsonstream.Stream) error {
+	if req.FromBlock != nil {
+		if err := rejectPending(*req.FromBlock); err != nil {
+			return err
+		}
+	}
+	if req.ToBlock != nil {
+		if err := rejectPending(*req.ToBlock); err != nil {
+			return err
+		}
+	}
 	if gasBailOut == nil {
 		//nolint
 		gasBailOut = new(bool) // false by default
@@ -324,8 +336,7 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	if req.FromBlock == nil {
 		fromBlock = 0
 	} else {
-		// nil filters: resolve on the committed view, like the scan below.
-		fromBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.FromBlock, dbtx, api._blockReader, nil)
+		fromBlock, err = api.resolveCommittedBlockNumber(ctx, dbtx, *req.FromBlock)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()
@@ -336,13 +347,12 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 	}
 
 	if req.ToBlock == nil {
-		headNumber, err := api._blockReader.HeaderNumber(ctx, dbtx, rawdb.ReadHeadHeaderHash(dbtx))
+		toBlock, err = rpchelper.GetLatestExecutedBlockNumber(dbtx)
 		if err != nil {
 			return err
 		}
-		toBlock = *headNumber
 	} else {
-		toBlock, _, _, err = rpchelper.GetBlockNumber(ctx, *req.ToBlock, dbtx, api._blockReader, nil)
+		toBlock, err = api.resolveCommittedBlockNumber(ctx, dbtx, *req.ToBlock)
 		if err != nil {
 			if errors.As(err, &rpc.BlockNotFoundErr{}) {
 				stream.WriteEmptyArray()
@@ -351,16 +361,15 @@ func (api *TraceAPIImpl) Filter(ctx context.Context, req TraceFilterRequest, gas
 			return err
 		}
 	}
-	if fromBlock > toBlock {
-		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
-	}
-
-	// The txnum index silently clamps a missing block to the last available
-	// txnum, so a not-yet-executed toBlock would be omitted without a trace.
-	if req.ToBlock != nil {
-		if err := rpchelper.CheckBlockExecuted(dbtx, toBlock); err != nil {
+	// The txnum index silently clamps a target past execution to the last
+	// available txnum, so either bound must be checked before comparing them.
+	if req.FromBlock != nil || req.ToBlock != nil {
+		if err := rpchelper.CheckBlockExecuted(dbtx, max(fromBlock, toBlock)); err != nil {
 			return err
 		}
+	}
+	if fromBlock > toBlock {
+		return errors.New("invalid parameters: fromBlock cannot be greater than toBlock")
 	}
 
 	// if we've pruned this history away for this block then just return early
@@ -790,7 +799,6 @@ func (api *TraceAPIImpl) callBlock(
 		pNo -= 1
 	}
 
-	parentNo := rpc.BlockNumber(pNo)
 	header := block.Header()
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
@@ -803,19 +811,12 @@ func (api *TraceAPIImpl) callBlock(
 
 	callParams := make([]TraceCallParam, 0, len(txs))
 
-	parentHash := block.ParentHash()
-	parentNrOrHash := rpc.BlockNumberOrHash{
-		BlockNumber:      &parentNo,
-		BlockHash:        &parentHash,
-		RequireCanonical: true,
-	}
-
-	err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber)
+	err := rpchelper.CheckBlockExecuted(dbtx, blockNumber)
 	if err != nil {
 		return nil, nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, pNo, false, 0, api._txNumReader)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -885,7 +886,7 @@ func (api *TraceAPIImpl) callBlock(
 		traces, cmErr = api.doCallBlockParallel(ctx, dbtx, baseTxNum, txs, msgs, callParams, header, gasBailOut, traceConfig)
 	} else {
 		traces, _, cmErr = api.doCallBlock(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, txs, msgs, callParams,
-			&parentNrOrHash, header, gasBailOut /* gasBailout */, traceConfig)
+			header, true /* requireCanonical */, gasBailOut /* gasBailout */, traceConfig)
 	}
 
 	if cmErr != nil {
@@ -1100,7 +1101,6 @@ func (api *TraceAPIImpl) callTransaction(
 		pNo -= 1
 	}
 
-	parentNo := rpc.BlockNumber(pNo)
 	engine := api.engine()
 	blockCtx := transactions.NewEVMBlockContext(engine, header, true /* requireCanonical */, dbtx, api._blockReader, cfg)
 	if err := overrideBlockContext(traceConfig, &blockCtx); err != nil {
@@ -1116,18 +1116,11 @@ func (api *TraceAPIImpl) callTransaction(
 		return nil, fmt.Errorf("transaction not found at block %d, index %d", blockNumber, txIndex)
 	}
 
-	parentHash := header.ParentHash
-	parentNrOrHash := rpc.BlockNumberOrHash{
-		BlockNumber:      &parentNo,
-		BlockHash:        &parentHash,
-		RequireCanonical: true,
-	}
-
-	if err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(dbtx), blockNumber); err != nil {
+	if err := rpchelper.CheckBlockExecuted(dbtx, blockNumber); err != nil {
 		return nil, err
 	}
 
-	stateReader, err := rpchelper.CreateStateReader(ctx, dbtx, api._blockReader, parentNrOrHash, 0, api.filters, api.stateCache, api._txNumReader)
+	stateReader, err := rpchelper.CreateUncachedStateReaderFromBlockNumber(ctx, dbtx, pNo, false, 0, api._txNumReader)
 	if err != nil {
 		return nil, err
 	}
@@ -1161,7 +1154,7 @@ func (api *TraceAPIImpl) callTransaction(
 	}
 
 	trace, cmErr := api.doCall(ctx, dbtx, stateReader, stateCache, cachedWriter, ibs, msg, callParam,
-		&parentNrOrHash, header, gasBailOut /* gasBailout */, txIndex, traceConfig)
+		header, true /* requireCanonical */, gasBailOut /* gasBailout */, txIndex, traceConfig)
 
 	if cmErr != nil {
 		return nil, cmErr
