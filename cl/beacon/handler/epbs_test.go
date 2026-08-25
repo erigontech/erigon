@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -58,6 +59,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
+	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
 
@@ -263,6 +265,10 @@ func TestGetPayloadAttestationDataAcceptsMaximumSlot(t *testing.T) {
 	handler.ServeHTTP(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+type nonNilSentinelClient struct {
+	sentinelproto.SentinelClient
 }
 
 func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
@@ -1522,6 +1528,38 @@ func TestPostExecutionPayloadBidRejectsOversizedSSZ(t *testing.T) {
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(strings.Repeat("\x00", int(maxSignedExecutionPayloadBidSSZSize())+1)))
 	request.Header.Set("Content-Type", "application/octet-stream")
 	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadBidRejectsNonCanonicalSSZBeforeProcessingOrPublishing(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+	handler.executionPayloadBidService = mock_services.NewMockExecutionPayloadBidService(ctrl)
+	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
+	handler.sentinel = &nonNilSentinelClient{}
+
+	bid := &cltypes.SignedExecutionPayloadBid{
+		Message: newTestExecutionPayloadBid(12, 3, 1000),
+	}
+	body, err := bid.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const signedBidFixedSize = 4 + 96
+	binary.LittleEndian.PutUint32(body, signedBidFixedSize+1)
+	body = append(body, 0)
+	copy(body[signedBidFixedSize+1:], body[signedBidFixedSize:])
+	body[signedBidFixedSize] = 0
+
+	var lax cltypes.SignedExecutionPayloadBid
+	require.NoError(t, lax.DecodeSSZ(body, int(clparams.GloasVersion)))
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/octet-stream")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
