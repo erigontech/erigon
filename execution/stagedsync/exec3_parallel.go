@@ -1239,8 +1239,15 @@ func (pe *parallelExecutor) recordBlockExecMetrics(be *blockExecutor) {
 	// maps yet - see blockExecutor.completeBlock.
 	pe.writeCount.Add(be.blockIO.WriteCount())
 	if !be.execStarted.IsZero() {
-		pe.blockExecMetrics.Duration.Add(time.Since(be.execStarted))
+		blockDur := time.Since(be.execStarted)
+		pe.blockExecMetrics.Duration.Add(blockDur)
 		pe.blockExecMetrics.BlockCount.Add(1)
+		if blockDur > time.Millisecond {
+			mxBlockExecSeconds.Observe(blockDur.Seconds())
+		}
+		if blockDur >= 10*dbg.ToLogSlowTxn {
+			log.Warn("[dbg] slow block exec", "took", blockDur, "blockNum", be.number(), "txs", len(be.tasks))
+		}
 	}
 }
 
@@ -2273,10 +2280,7 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 	dirs datadir.Dirs,
 	calcFees bool) (result *exec.TxResult) {
 
-	var start time.Time
-	if ev.profile {
-		start = time.Now()
-	}
+	start := time.Now()
 
 	// Don't run post apply message during the state transition it is handled in finalize
 	postApplyMessage := evm.Context.PostApplyMessage
@@ -2294,6 +2298,14 @@ func (ev *taskVersion) Execute(evm *vm.EVM,
 		return result
 	}
 
+	if taskDur := time.Since(start); taskDur > 1*time.Millisecond {
+		mxTxnExecSeconds.Observe(taskDur.Seconds())
+		if taskDur >= 2*dbg.ToLogSlowTxn {
+			log.Warn("[dbg] slow txn exec", "took", taskDur,
+				"blockNum", ev.Task.(*exec.TxTask).BlockNumber(), "txIndex", ev.version.TxIndex,
+				"incarnation", ev.version.Incarnation)
+		}
+	}
 	if ev.profile {
 		ev.statsMutex.Lock()
 		ev.stats[ev.version.TxIndex] = ExecutionStat{
@@ -2320,6 +2332,12 @@ func (ev *taskVersion) Reset(evm *vm.EVM, ibs *state.IntraBlockState, callTracer
 func (ev *taskVersion) Version() state.Version {
 	return ev.version
 }
+
+var (
+	mxBlockExecSeconds      = metrics.GetOrCreateSummary("exec3_block_exec_seconds")
+	mxTxnExecSeconds        = metrics.GetOrCreateSummary("exec3_txn_exec_seconds")
+	mxProcessResultsSeconds = metrics.GetOrCreateSummary("exec3_process_results_seconds")
+)
 
 type blockExecMetrics struct {
 	BlockCount atomic.Int64
@@ -2673,6 +2691,61 @@ func (be *blockExecutor) tooManyRetries(tx, txIndex int, label string, origin er
 		rules.ErrInvalidBlock, be.number(), txIndex, be.tasks[tx].TxHash(), label, be.txIncarnations[tx], len(be.tasks)))
 }
 
+// nrSegs times consecutive segments of a single nextResult call. Plain
+// deferred stopwatches would all end at function return and measure nested
+// suffixes instead of disjoint spans.
+type nrSegs struct {
+	last   time.Time
+	start  time.Time
+	names  [12]string
+	durs   [12]time.Duration
+	n      int
+	cnames [4]string
+	cvals  [4]int64
+	cn     int
+}
+
+// add records a duration that is not delimited by mark boundaries, e.g. time
+// accumulated over the iterations of an inner loop.
+func (s *nrSegs) add(name string, d time.Duration) {
+	if s.n >= len(s.durs) {
+		return
+	}
+	s.names[s.n], s.durs[s.n] = name, d
+	s.n++
+}
+
+func (s *nrSegs) count(name string, v int64) {
+	if s.cn >= len(s.cvals) {
+		return
+	}
+	s.cnames[s.cn], s.cvals[s.cn] = name, v
+	s.cn++
+}
+
+func (s *nrSegs) mark(name string) {
+	if s.n >= len(s.durs) {
+		return
+	}
+	now := time.Now()
+	s.names[s.n], s.durs[s.n] = name, now.Sub(s.last)
+	s.n++
+	s.last = now
+}
+
+func (s *nrSegs) total() time.Duration { return s.last.Sub(s.start) }
+
+func (s *nrSegs) logCtx() []any {
+	ctx := make([]any, 0, 2*(s.n+s.cn))
+	for i := 0; i < s.n; i++ {
+		ctx = append(ctx, s.names[i], s.durs[i])
+	}
+	for i := 0; i < s.cn; i++ {
+		ctx = append(ctx, s.cnames[i], s.cvals[i])
+	}
+	return ctx
+}
+
 func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, res *exec.TxResult, applyTx kv.TemporalTx) (result *blockResult, err error) {
 	task, ok := res.Task.(*taskVersion)
 
@@ -2681,8 +2754,25 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 	}
 
 	tx := task.index
+	now := time.Now()
+	segs := nrSegs{last: now, start: now}
 	be.results[tx] = &execResult{TxResult: res}
 	if res.Err != nil {
+		prStarted := time.Now()
+		defer func() {
+			took := time.Since(prStarted)
+			if took > time.Millisecond {
+				mxProcessResultsSeconds.Observe(took.Seconds())
+			}
+			if took >= dbg.ToLogSlowTxn {
+				bn := uint64(0)
+				if res != nil {
+					bn = res.BlockNumber()
+				}
+				log.Warn("[dbg] slow nextResult err", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+			}
+		}()
+
 		var execErr protocol.ErrExecAbortError
 		if errors.As(res.Err, &execErr) {
 			if res.Version().Incarnation > len(be.tasks) {
@@ -2811,6 +2901,17 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			return be.invalidBlockResult(fmt.Errorf("%w: could not apply tx %d:%d [%v]: %w", rules.ErrInvalidBlock, be.number(), res.Version().TxIndex, task.TxHash(), res.Err)), nil
 		}
 	} else {
+		defer func() {
+			segs.mark("tail")
+			took := segs.total()
+			if took > time.Millisecond {
+				mxProcessResultsSeconds.Observe(took.Seconds())
+			}
+			if took >= 4*dbg.ToLogSlowTxn {
+				log.Warn("[dbg] slow nextResult", append([]any{"took", took, "blockNum", res.BlockNumber(), "txidx", res.Version().TxIndex}, segs.logCtx()...)...)
+			}
+		}()
+
 		txVersion := res.Version()
 
 		be.blockIO.RecordReads(txVersion, res.TxIn)
@@ -3089,7 +3190,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					}
 					// Mirror txtask.go's genesis rules-clobber so empty allocs (AuRa ZeroAddress) survive.
 					emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
-					normWrites, normErr := rawWrites.Normalize(be.versionMap, txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
+					normWrites, normErr := rawWrites.Normalize(be.versionMap, be.number(), txVersion.TxIndex, resultIncarnation, stateReader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, txTask.Rules().IsAmsterdam)
 					if domainKeysErr != nil {
 						return nil, fmt.Errorf("[parallel] iterate storage prefix for block write normalization: %w", domainKeysErr)
 					}
@@ -3140,9 +3241,15 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 	}
 
+	segs.mark("validate")
+
 	maxValidated := be.validateTasks.maxComplete()
 	be.scheduleExecution(ctx, pe)
 
+	segs.mark("schedule")
+
+	var dWrites, dIndexes, dSend time.Duration
+	nPublished := int64(0)
 	if be.publishTasks.minPending() != -1 {
 		toPublish := make(sort.IntSlice, 0, 2)
 
@@ -3196,25 +3303,38 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 
 			// Apply state writes to sd.mem and block cache.
+			tStep := time.Now()
 			if err := pe.rs.ApplyStateWrites(ctx, applyTx, applyResult.blockNum, applyResult.txNum, applyResult.writes,
 				nil, applyResult.rules, be.blockStateCache); err != nil {
 				return nil, err
 			}
+			dWrites += time.Since(tStep)
 
 			// Apply per-tx indexes (logs, traces, receipt cache) here in the
 			// exec loop, on the SAME goroutine that owns sd.mem mutations.
 			// Doing this in the apply loop instead used to race with the next
 			// tx / block-end ApplyStateWrites on SharedDomains.mem.
+			tStep = time.Now()
 			if err := pe.rs.ApplyTxIndexes(applyTx, applyResult.txNum, applyResult.receipt, applyResult.cumulativeBlobGasUsed,
 				applyResult.logs, applyResult.traceFroms, applyResult.traceTos); err != nil {
 				return nil, fmt.Errorf("ApplyTxIndexes block=%d txNum=%d: %w", applyResult.blockNum, applyResult.txNum, err)
 			}
+			dIndexes += time.Since(tStep)
 
+			tStep = time.Now()
 			if err := be.sendResult(ctx, &applyResult, false); err != nil {
 				return nil, err
 			}
+			dSend += time.Since(tStep)
+			nPublished++
 		}
 	}
+
+	segs.mark("publish")
+	segs.add("pubWrites", dWrites)
+	segs.add("pubIndexes", dIndexes)
+	segs.add("pubSend", dSend)
+	segs.count("nPublished", nPublished)
 
 	if be.publishTasks.countComplete() == len(be.tasks) && be.execTasks.countComplete() == len(be.tasks) {
 		var allDeps map[int]map[int]bool
@@ -3263,6 +3383,23 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			// blocks, skips partial ones — do it here, even when prior receipts
 			// couldn't be reconstructed (the suffix receipts still need blooms).
 			receipts.DeriveFields(blockReceipts, be.hash())
+		}
+
+		{
+			prStarted := time.Now()
+			defer func() {
+				took := time.Since(prStarted)
+				if took > time.Millisecond {
+					mxProcessResultsSeconds.Observe(took.Seconds())
+				}
+				if took >= 4*dbg.ToLogSlowTxn {
+					bn := uint64(0)
+					if res != nil {
+						bn = res.BlockNumber()
+					}
+					log.Warn("[dbg] slow nextResult4", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+				}
+			}()
 		}
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
@@ -3360,7 +3497,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				}
 				emptyRemoval := be.number() != 0 && pe.cfg.chainConfig.IsEIP161Enabled(be.number())
 				var normErr error
-				finalizeWrites, normErr = writes.Normalize(be.versionMap, finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
+				finalizeWrites, normErr = writes.Normalize(be.versionMap, be.number(), finalVersion.TxIndex, finalVersion.Incarnation, reader, domainStorageKeys, emptyRemoval, pe.cfg.chainConfig.Aura != nil, pe.cfg.chainConfig.IsAmsterdam(tt.Header.Time))
 				if domainKeysErr != nil {
 					return nil, fmt.Errorf("[parallel] finalize iterate storage prefix for block write normalization: %w", domainKeysErr)
 				}
@@ -3375,6 +3512,25 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					return nil, err
 				}
 			}
+		}
+
+		segs.mark("finalize")
+
+		{
+			prStarted := time.Now()
+			defer func() {
+				took := time.Since(prStarted)
+				if took > time.Millisecond {
+					mxProcessResultsSeconds.Observe(took.Seconds())
+				}
+				if took >= 4*dbg.ToLogSlowTxn {
+					bn := uint64(0)
+					if res != nil {
+						bn = res.BlockNumber()
+					}
+					log.Warn("[dbg] slow nextResult5", "took", took, "blockNum", bn, "txidx", res.Version().TxIndex)
+				}
+			}()
 		}
 
 		// Send finalize txResult through the channel for index writes.
@@ -3397,10 +3553,14 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			}
 		}
 
+		segs.mark("finalizeSend")
+
 		// Flush block state cache to sd.mem — all writes (per-TX + finalize) are now visible.
 		if err := be.blockStateCache.Flush(pe.rs.Domains(), applyTx); err != nil {
 			return nil, err
 		}
+
+		segs.mark("cacheFlush")
 
 		be.result = &blockResult{
 			Block:            be.block,

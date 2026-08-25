@@ -36,6 +36,8 @@ import (
 )
 
 var (
+	ToLogSlowTxn = time.Duration(EnvInt("SLOW_STAGE_MS", 100)) * time.Millisecond
+
 	MaxReorgDepth = EnvUint("MAX_REORG_DEPTH", 96)
 
 	WarmupTableWorkers = EnvUint("WARMUP_TABLE_WORKERS", 0)
