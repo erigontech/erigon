@@ -17,9 +17,15 @@
 package cache
 
 import (
+	"math/rand"
+	"slices"
+
+	"github.com/elastic/go-freelru"
+
 	"bytes"
 	"encoding/binary"
 	"fmt"
+	"github.com/erigontech/erigon/execution/cache/slablru"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -1772,51 +1778,66 @@ func BenchmarkPublishVsViewBindLock(b *testing.B) {
 	}
 }
 
-// The O(1) entry counter that replaced freelru's all-shard Len on the grow
-// check must not drift from the LRU's real length on any mutation path.
-func TestGenericCache_LenTracksLRU(t *testing.T) {
-	c := closeOnCleanup(t, NewGenericCacheWithAvg[[]byte](8*datasize.MB, 256, func(v []byte) int { return len(v) }, ModeEvictLRU))
-	key := func(i int) []byte {
-		k := make([]byte, 8)
-		binary.BigEndian.PutUint64(k, uint64(i))
-		return k
+// Slab-allocated elements cost one extra indirection per access. Positions are
+// handed out in insertion order, so walking keys in that order lets the
+// prefetcher hide the flat array's cost; these drive a shuffled order and a
+// fresh-key insert stream instead, which is what production does.
+func BenchmarkLRUFlatVsSlab(b *testing.B) {
+	const capacity = 1 << 20
+	val := entry[[]byte]{key: make([]byte, 32), val: make([]byte, 32), size: 88, txNum: 7}
+
+	keys := make([]uint64, capacity)
+	for i := range keys {
+		keys[i] = uint64(i) * 0x9E3779B97F4A7C15
 	}
-	check := func(phase string) {
-		t.Helper()
-		require.Equal(t, c.data.Load().lru.Len(), c.Len(), "entry counter drifted after %s", phase)
+	shuffled := slices.Clone(keys)
+	rnd := rand.New(rand.NewSource(1))
+	rnd.Shuffle(len(shuffled), func(i, j int) { shuffled[i], shuffled[j] = shuffled[j], shuffled[i] })
+
+	flat, err := freelru.New[uint64, entry[[]byte]](capacity, u64identity)
+	require.NoError(b, err)
+	slab, err := slablru.New[uint64, entry[[]byte]](capacity, u64identity)
+	require.NoError(b, err)
+	for _, k := range keys {
+		flat.Add(k, val)
+		slab.Add(k, val)
 	}
 
-	for i := range 500 {
-		c.Put(key(i), []byte("v"), 10)
-	}
-	check("inserts")
+	// A full cache taking fresh keys: every insert evicts, so the position it
+	// lands on is wherever the LRU tail happens to be.
+	b.Run("add-evicting/flat", func(b *testing.B) {
+		n := uint64(capacity)
+		for b.Loop() {
+			n++
+			flat.Add(n*0x9E3779B97F4A7C15, val)
+		}
+	})
+	b.Run("add-evicting/slab", func(b *testing.B) {
+		n := uint64(capacity)
+		for b.Loop() {
+			n++
+			slab.Add(n*0x9E3779B97F4A7C15, val)
+		}
+	})
 
-	for i := range 200 {
-		c.Put(key(i), []byte("updated"), 20)
-	}
-	check("updates")
-
-	for i := range 100 {
-		c.Delete(key(i))
-	}
-	check("deletes")
-
-	// Floor 15 leaves the txNum-10 entries live and strands the txNum-20 ones,
-	// which their next read drops.
-	c.Unwind(15)
-	for i := 100; i < 500; i++ {
-		c.Get(key(i))
-	}
-	check("stale drops")
-
-	before := c.data.Load()
-	for i := 500; i < 4000; i++ {
-		c.Put(key(i), []byte("v"), 30)
-	}
-	require.NotEqual(t, before, c.data.Load(), "grow did not happen")
-	check("grow")
-
-	c.Clear()
-	require.Equal(t, 0, c.Len())
-	check("clear")
+	b.Run("get-shuffled/flat", func(b *testing.B) {
+		for i := 0; b.Loop(); i++ {
+			flat.Get(shuffled[i&(capacity-1)])
+		}
+	})
+	b.Run("get-shuffled/slab", func(b *testing.B) {
+		for i := 0; b.Loop(); i++ {
+			slab.Get(shuffled[i&(capacity-1)])
+		}
+	})
+	b.Run("get-miss/flat", func(b *testing.B) {
+		for i := 0; b.Loop(); i++ {
+			flat.Get(^shuffled[i&(capacity-1)])
+		}
+	})
+	b.Run("get-miss/slab", func(b *testing.B) {
+		for i := 0; b.Loop(); i++ {
+			slab.Get(^shuffled[i&(capacity-1)])
+		}
+	})
 }
