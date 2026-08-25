@@ -86,7 +86,7 @@ func TestBlockServiceIgnoreSlot(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, _ := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(false).AnyTimes()
 
@@ -100,7 +100,7 @@ func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -116,7 +116,7 @@ func TestBlockServiceUnseenParentRoot(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -131,7 +131,7 @@ func TestBlockServiceYoungerThanParent(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -148,7 +148,7 @@ func TestBlockServiceInvalidCommitmentsPerBlock(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()
@@ -168,7 +168,7 @@ func TestBlockServiceSuccess(t *testing.T) {
 	blocks, _, post := tests.GetBellatrixRandom()
 
 	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
-	syncedData.OnHeadState(post)
+	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
 	fcu.FinalizedCheckpointVal = post.FinalizedCheckpoint()

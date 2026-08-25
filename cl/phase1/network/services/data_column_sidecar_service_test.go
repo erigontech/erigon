@@ -32,7 +32,7 @@ func init() {
 	initOnce.Do(func() {
 		defer func() {
 			// Recover from panic if config already initialized by another package
-			recover()
+			_ = recover()
 		}()
 		cfg := &clparams.BeaconChainConfig{
 			MaxBlobCommittmentsPerBlock: 6,

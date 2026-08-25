@@ -334,8 +334,8 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 	headState := state.New(&config)
 	require.NoError(t, postState.CopyInto(headState))
 	currentEpoch := headState.Slot() / config.SlotsPerEpoch
-	headState.SetRandaoMixAt(int(currentEpoch%config.EpochsPerHistoricalVector), common.Hash{0x51})
-	headState.SetRandaoMixAt(int(targetEpoch%config.EpochsPerHistoricalVector), common.Hash{0x52})
+	require.NoError(t, headState.SetRandaoMixAt(int(currentEpoch%config.EpochsPerHistoricalVector), common.Hash{0x51}))
+	require.NoError(t, headState.SetRandaoMixAt(int(targetEpoch%config.EpochsPerHistoricalVector), common.Hash{0x52}))
 	baseBlockRoot := common.Hash{0x41}
 	syncedData := synced_data.NewSyncedDataManager(&config, true)
 	require.NoError(t, syncedData.OnHeadStateWithBlockRoot(headState, baseBlockRoot))
@@ -411,8 +411,8 @@ func TestProductionUsesTargetSlotRandao(t *testing.T) {
 	wallClockEpoch := targetEpoch + 1
 	targetMix := common.Hash{0x11}
 	wallClockMix := common.Hash{0x22}
-	postState.SetRandaoMixAt(int(targetEpoch%handler.beaconChainCfg.EpochsPerHistoricalVector), targetMix)
-	postState.SetRandaoMixAt(int(wallClockEpoch%handler.beaconChainCfg.EpochsPerHistoricalVector), wallClockMix)
+	require.NoError(t, postState.SetRandaoMixAt(int(targetEpoch%handler.beaconChainCfg.EpochsPerHistoricalVector), targetMix))
+	require.NoError(t, postState.SetRandaoMixAt(int(wallClockEpoch%handler.beaconChainCfg.EpochsPerHistoricalVector), wallClockMix))
 
 	engine := newPayloadBuildEngine(t, ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -639,9 +639,9 @@ func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
 
 	headState := state.New(&config)
 	require.NoError(t, postState.CopyInto(headState))
-	headState.SetSlot(targetSlot - 1)
+	require.NoError(t, headState.SetSlot(targetSlot-1))
 	for i := 0; i < headState.ValidatorLength(); i += 2 {
-		headState.SetEffectiveBalanceForValidatorAtIndex(i, 0)
+		require.NoError(t, headState.SetEffectiveBalanceForValidatorAtIndex(i, 0))
 		require.NoError(t, headState.SetValidatorBalance(i, config.MaxEffectiveBalanceElectra))
 	}
 
@@ -649,7 +649,7 @@ func TestPreparePayloadForUsesPostEpochProposer(t *testing.T) {
 	var oldProposer, newProposer uint64
 	found := false
 	for nonce := byte(0); ; nonce++ {
-		headState.SetRandaoMixAt(int(mixPosition), common.Hash{nonce})
+		require.NoError(t, headState.SetRandaoMixAt(int(mixPosition), common.Hash{nonce}))
 		var err error
 		oldProposer, err = headState.GetBeaconProposerIndexForSlot(targetSlot)
 		require.NoError(t, err)
