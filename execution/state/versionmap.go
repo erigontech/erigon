@@ -802,9 +802,8 @@ func selfDestructWipesLocked(e *AddressEntry, path AccountPath, floor, txIdx int
 }
 
 // AnyEstimateAccountCell reports whether the account record addr reads at txIdx
-// rests on an in-flight incarnation. It spans the paths accountLiveSince weighs,
-// since either is answering whether the account is alive, plus SelfDestruct and
-// Incarnation, which a destruct can be the only writer of.
+// rests on an in-flight incarnation. Wider than the record's own fields: a
+// destruct can be the sole writer of SelfDestruct and Incarnation.
 func (vm *VersionMap) AnyEstimateAccountCell(addr accounts.Address, txIdx int) bool {
 	if vm == nil {
 		return false

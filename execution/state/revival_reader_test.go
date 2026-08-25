@@ -375,8 +375,7 @@ func TestVersionedStateReader_EstimateCreationIsNotADestruct(t *testing.T) {
 }
 
 // A recreate above the destruct restores the account, and the record and the code
-// readers have to serve the same contract. It cannot land at the destruct's own
-// TxIndex — see TestSelfdestructWriteSetShape.
+// readers have to serve the same contract.
 func TestVersionedStateReader_RecreateAboveDestructIsServedWhole(t *testing.T) {
 	t.Parallel()
 	addr := getAddress(109)
