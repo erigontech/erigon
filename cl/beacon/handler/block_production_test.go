@@ -298,11 +298,22 @@ func TestBroadcastSelfBuildEnvelopePublishesValidatedEnvelopeBeforePersistenceRe
 }
 
 func TestPublishSelfBuildEnvelopeAfterStorage(t *testing.T) {
+	t.Run("optional envelope absent", func(t *testing.T) {
+		stored := make(chan error, 1)
+		stored <- nil
+		called := false
+		require.NoError(t, publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, false, func(context.Context) error {
+			called = true
+			return nil
+		}))
+		require.False(t, called)
+	})
+
 	t.Run("storage failure", func(t *testing.T) {
 		stored := make(chan error, 1)
 		stored <- errors.New("store failed")
 		called := false
-		err := publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, func() error {
+		err := publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, true, func(context.Context) error {
 			called = true
 			return nil
 		})
@@ -314,7 +325,7 @@ func TestPublishSelfBuildEnvelopeAfterStorage(t *testing.T) {
 		stored := make(chan error, 1)
 		stored <- nil
 		called := false
-		require.NoError(t, publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, func() error {
+		require.NoError(t, publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, true, func(context.Context) error {
 			called = true
 			return nil
 		}))
@@ -322,15 +333,18 @@ func TestPublishSelfBuildEnvelopeAfterStorage(t *testing.T) {
 	})
 
 	t.Run("canceled", func(t *testing.T) {
+		stored := make(chan error, 1)
+		stored <- nil
 		ctx, cancel := context.WithCancel(t.Context())
 		cancel()
 		called := false
-		err := publishSelfBuildEnvelopeAfterStorage(ctx, make(chan error), func() error {
+		err := publishSelfBuildEnvelopeAfterStorage(ctx, stored, true, func(publicationCtx context.Context) error {
 			called = true
+			require.NoError(t, publicationCtx.Err())
 			return nil
 		})
-		require.ErrorIs(t, err, context.Canceled)
-		require.False(t, called)
+		require.NoError(t, err)
+		require.True(t, called)
 	})
 }
 

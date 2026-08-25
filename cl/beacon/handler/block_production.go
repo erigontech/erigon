@@ -2250,8 +2250,8 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		if len(signedEnvelope) > 0 && signedEnvelope[0] != nil {
 			validatorSignedEnvelope = signedEnvelope[0]
 		}
-		if err := publishSelfBuildEnvelopeAfterStorage(ctx, blockStored, func() error {
-			return a.broadcastSelfBuildEnvelope(ctx, blk, validatorSignedEnvelope)
+		if err := publishSelfBuildEnvelopeAfterStorage(ctx, blockStored, validatorSignedEnvelope != nil, func(publicationCtx context.Context) error {
+			return a.broadcastSelfBuildEnvelope(publicationCtx, blk, validatorSignedEnvelope)
 		}); err != nil {
 			return fmt.Errorf("failed to broadcast self-build execution payload envelope: %w", err)
 		}
@@ -2260,18 +2260,25 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	return nil
 }
 
-func publishSelfBuildEnvelopeAfterStorage(ctx context.Context, blockStored <-chan error, publish func() error) error {
-	if err := ctx.Err(); err != nil {
-		return err
-	}
+func publishSelfBuildEnvelopeAfterStorage(
+	ctx context.Context,
+	blockStored <-chan error,
+	envelopeSupplied bool,
+	publish func(context.Context) error,
+) error {
+	publicationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
+	defer cancel()
 	select {
 	case err := <-blockStored:
 		if err != nil {
 			return fmt.Errorf("failed to store block and blobs: %w", err)
 		}
-		return publish()
-	case <-ctx.Done():
-		return ctx.Err()
+		if !envelopeSupplied {
+			return nil
+		}
+		return publish(publicationCtx)
+	case <-publicationCtx.Done():
+		return publicationCtx.Err()
 	}
 }
 
