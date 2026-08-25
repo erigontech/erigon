@@ -305,21 +305,21 @@ them and what makes "already current" a free no-op.
 The new signature takes no destination: `datadirCli` was reassigned in Task 3, so `d.dirs` is
 already the output's.
 
-- [ ] write a failing test that a file holding no legacy record keeps its hardlink — same
+- [x] write a failing test that a file holding no legacy record keeps its hardlink — same
       inode as the source, nothing rewritten
-- [ ] write a failing test that a file holding a legacy record is replaced by a **different**
+- [x] write a failing test that a file holding a legacy record is replaced by a **different**
       inode, and that the source file's bytes are unchanged
-- [ ] implement the classification pass: scan for the first legacy record and stop there
-- [ ] implement the link removal — the `.kv` and every accessor sibling — before the
+- [x] implement the classification pass: scan for the first legacy record and stop there
+- [x] implement the link removal — the `.kv` and every accessor sibling — before the
       compressor opens, so no write ever goes through a shared inode
-- [ ] write a failing test that the output basename equals the source basename, and that a
+- [x] write a failing test that the output basename equals the source basename, and that a
       mismatch fails the run rather than writing
-- [ ] implement the direct write: `seg.NewCompressor` into `d.dirs.Tmp`, `d.dataWriter`,
+- [x] implement the direct write: `seg.NewCompressor` into `d.dirs.Tmp`, `d.dataWriter`,
       per-record dispatch, `Collation`, then `buildFileRange` with `static.CleanupOnError()`
-- [ ] write a test covering a sub-`DomainMinStepsToCompress` file, asserting it round-trips
+- [x] write a test covering a sub-`DomainMinStepsToCompress` file, asserting it round-trips
       through `d.dataReader` — the codec comes from `d.Compression` on both sides and no step
       rule is consulted
-- [ ] run `go test ./db/state/... -count=1` and `go build ./cmd/integration/` — must pass
+- [x] run `go test ./db/state/... -count=1` and `go build ./cmd/integration/` — must pass
       before task 6
 
 ### Task 6: Per-file verification
