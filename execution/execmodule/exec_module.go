@@ -720,17 +720,24 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 				}
 			}
 		}
-		if fbReceipts := doms.FlashblockReceipts(); len(fbReceipts) > 0 {
-			var cum uint64
-			for _, r := range fbReceipts {
-				cum += r.GasUsed
-				r.CumulativeGasUsed = cum
-			}
-			result.FlashblockReceiptCount = len(fbReceipts)
-			result.GasUsed = cum
-			result.ReceiptHash = types.DeriveSha(fbReceipts)
-			result.Bloom = types.CreateBloom(fbReceipts)
+		// Seal the OUTPUT-SIDE header fields off the accumulated flashblock receipts (zero re-exec).
+		// UNCONDITIONAL, including the EMPTY (0-tx heartbeat) block: DeriveSha(nil) = EmptyRootHash
+		// (0x56e81f17…) and CreateBloom(nil) = the zero bloom — exactly what a full re-execution +
+		// BlockPostValidation computes for an empty block. Gating this on len>0 left ReceiptHash at its
+		// ZERO value for an empty block, so the sealed header carried ReceiptHash=0x00.. and re-validation
+		// rejected it ("receiptHash mismatch: 56e81f17… != 0000…"). That is the cold-boot empty heartbeat
+		// block-1 that froze the DAG-L2 at block 0 (BoundaryAdvance only exercised NON-empty blocks, so it
+		// never caught this). GasUsed=0 and an empty bloom are the correct output side for a 0-tx block.
+		fbReceipts := doms.FlashblockReceipts()
+		var cum uint64
+		for _, r := range fbReceipts {
+			cum += r.GasUsed
+			r.CumulativeGasUsed = cum
 		}
+		result.FlashblockReceiptCount = len(fbReceipts)
+		result.GasUsed = cum
+		result.ReceiptHash = types.DeriveSha(fbReceipts)
+		result.Bloom = types.CreateBloom(fbReceipts)
 	}
 	// The CLOSE is pure COMPUTE (assemble): it runs block-end over the maintained SD and returns the
 	// sealed output side, but does NOT write the sealed block or re-key the fork validator. Writing the
