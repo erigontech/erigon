@@ -42,14 +42,14 @@ import (
 )
 
 var (
-	errNotOurProposal         = errors.New("next slot is not proposed by a registered validator")
-	errNoPayloadID            = errors.New("execution layer returned no payload id")
-	errHeadTooFarBack         = errors.New("head state is too far behind the slot to prepare")
-	errPreparationHeadChanged = errors.New("selected head changed while preparing payload")
-	errBlockWorkInFlight      = errors.New("block production, publication, or adoption is in progress")
-	errPreparationTooLate     = errors.New("slot is too close to prime a payload production would use")
-	errGloasPayloadPending    = errors.New("gloas parent payload decision is not ready")
-	errGloasReorgToEmpty      = errors.New("gloas EMPTY path cannot be primed from a FULL execution head")
+	errNotOurProposal           = errors.New("next slot is not proposed by a registered validator")
+	errNoPayloadID              = errors.New("execution layer returned no payload id")
+	errHeadTooFarBack           = errors.New("head state is too far behind the slot to prepare")
+	errPreparationHeadChanged   = errors.New("selected head changed while preparing payload")
+	errBlockWorkInFlight        = errors.New("block production, publication, or adoption is in progress")
+	errPreparationTooLate       = errors.New("slot is too close to prime a payload production would use")
+	errGloasPayloadPending      = errors.New("gloas parent payload decision is not ready")
+	errGloasPathNeedsForkChoice = errors.New("gloas payload path requires a fork-choice update before preparation")
 )
 
 // preparedPayloadRetainSlots keeps a primed record alive past the slot it was primed for, so
@@ -391,9 +391,7 @@ func (a *ApiHandler) preparePayloadLoopWith(
 		if current == lastSettled {
 			continue
 		}
-		// Direct preparation avoids fork choice, so it cannot move a FULL execution head back
-		// to its EMPTY parent.
-		if current.gloasPath == gloasPayloadPathReorgToEmpty {
+		if gloasPathRequiresForkChoiceUpdate(current.gloasPath) {
 			lastSettled = current
 			scratch.release()
 			continue
@@ -486,7 +484,12 @@ func isSettledPreparationOutcome(err error) bool {
 		errors.Is(err, errNotOurProposal) ||
 		errors.Is(err, errNoPayloadID) ||
 		errors.Is(err, errPreparationTooLate) ||
-		errors.Is(err, errGloasReorgToEmpty)
+		errors.Is(err, errGloasPathNeedsForkChoice)
+}
+
+// A direct builder start cannot change the EL head, so these paths must wait for production's FCU.
+func gloasPathRequiresForkChoiceUpdate(path gloasPayloadPath) bool {
+	return path == gloasPayloadPathFull || path == gloasPayloadPathReorgToEmpty
 }
 
 type payloadPreparationResult struct {
@@ -569,18 +572,13 @@ func (a *ApiHandler) preparePayloadForWithScratch(
 	}
 	result.gloasPath = payloadSource.gloasPath
 	result.gloasPathResolved = true
-	if payloadSource.gloasPath == gloasPayloadPathReorgToEmpty {
-		return result, errGloasReorgToEmpty
+	if payloadSource.gloasPath == gloasPayloadPathPending {
+		return result, errGloasPayloadPending
 	}
-	var withdrawalsState *state.CachingBeaconState
-	if payloadSource.parentExecutionRequests != nil {
-		// The scratch state is private to preparation, so the FULL parent can be applied in place.
-		if err := applyParentExecutionPayload(baseState, payloadSource.parentExecutionRequests); err != nil {
-			return result, fmt.Errorf("prepare payload: apply parent execution payload: %w", err)
-		}
-		withdrawalsState = baseState
+	if gloasPathRequiresForkChoiceUpdate(payloadSource.gloasPath) {
+		return result, errGloasPathNeedsForkChoice
 	}
-	withdrawals, err := a.expectedWithdrawals(baseState, withdrawalsState, stateVersion, targetSlot)
+	withdrawals, err := a.expectedWithdrawals(baseState, nil, stateVersion, targetSlot)
 	if err != nil {
 		return result, err
 	}
@@ -723,7 +721,8 @@ type executionPayloadSource struct {
 }
 
 // resolveExecutionPayloadSource is shared by preparation and production so both choose the same
-// execution parent and FULL-parent requests.
+// execution parent and FULL-parent requests. A pending Gloas decision returns its EMPTY-parent
+// fallback; the Pending path tells preparation to wait instead of priming that fallback.
 func (a *ApiHandler) resolveExecutionPayloadSource(
 	baseState *state.CachingBeaconState,
 	baseBlockRoot common.Hash,
@@ -743,7 +742,7 @@ func (a *ApiHandler) resolveExecutionPayloadSource(
 
 	path := a.resolveGloasPayloadPath(baseBlockRoot, targetSlot)
 	if path == gloasPayloadPathPending {
-		return executionPayloadSource{}, errGloasPayloadPending
+		return executionPayloadSource{head: parentBid.ParentBlockHash, gloasPath: path}, nil
 	}
 	if path != gloasPayloadPathFull {
 		return executionPayloadSource{head: parentBid.ParentBlockHash, gloasPath: path}, nil

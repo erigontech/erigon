@@ -100,17 +100,24 @@ func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
 	require.Contains(t, err.Error(), cltypes.ErrGloasCannotBlind.Error())
 }
 
-func TestGloasProductionDoesNotRequestMEVBoostHeader(t *testing.T) {
+func TestGloasProductionFallsBackToEmptyWithoutMEVBoost(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	postState, handler, _, _, _ := setupGloasPreparationTest(t)
+	parentHash := common.Hash{0xa1}
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
-		ParentBlockHash: common.Hash{0xa1},
+		ParentBlockHash: parentHash,
 		BlockHash:       common.Hash{0xb2},
 		Slot:            postState.Slot(),
 	})
 	builderClient := builder_mock.NewMockBuilderClient(ctrl)
 	builderClient.EXPECT().GetHeader(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).Times(0)
 	handler.builderClient = builderClient
+	stopErr := errors.New("stop after EMPTY-parent fork-choice update")
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(
+		gomock.Any(), gomock.Any(), gomock.Any(), parentHash, gomock.Any(), clparams.GloasVersion,
+	).Return(nil, stopErr)
+	handler.engine = engine
 
 	_, err := handler.produceBlock(
 		t.Context(),
@@ -123,7 +130,7 @@ func TestGloasProductionDoesNotRequestMEVBoostHeader(t *testing.T) {
 		common.Hash{},
 	)
 
-	require.ErrorIs(t, err, errGloasPayloadPending)
+	require.ErrorIs(t, err, stopErr)
 }
 
 func TestProductionUsesLocalPayloadWhenBuilderClientIsMissing(t *testing.T) {

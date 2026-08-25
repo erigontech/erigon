@@ -574,6 +574,7 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 		elapsed         time.Duration
 		staleHead       bool
 		invalidatedHead bool
+		fullHead        bool
 		reorgToEmpty    bool
 		timeout         time.Duration
 		shouldPrepare   bool
@@ -581,6 +582,7 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 		{name: "older head after empty-slot deadline", elapsed: 4 * time.Second, staleHead: true, shouldPrepare: true},
 		{name: "wakeup at PTC deadline", elapsed: 8900 * time.Millisecond, timeout: 2 * time.Second, shouldPrepare: true},
 		{name: "invalidated head after PTC deadline", elapsed: 9100 * time.Millisecond, invalidatedHead: true, shouldPrepare: true},
+		{name: "FULL head", elapsed: 9100 * time.Millisecond, fullHead: true},
 		{name: "FULL head with EMPTY decision", elapsed: 9100 * time.Millisecond, reorgToEmpty: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
@@ -599,6 +601,14 @@ func TestPreparePayloadLoopPrimesGloasAfterPayloadDecision(t *testing.T) {
 			})
 			forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
 			forkchoiceStore.HeadPayloadStatusInvalidated.Store(test.invalidatedHead)
+			if test.fullHead {
+				forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+				forkchoiceStore.Envelopes[baseBlockRoot] = &cltypes.SignedExecutionPayloadEnvelope{
+					Message: &cltypes.ExecutionPayloadEnvelope{
+						ExecutionRequests: cltypes.NewExecutionRequestsWithVersion(handler.beaconChainCfg, clparams.GloasVersion),
+					},
+				}
+			}
 			if test.reorgToEmpty {
 				forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 				buildOnFull := false
@@ -1283,7 +1293,7 @@ func TestPreparePayloadForStartsBuildWithCompleteAttributes(t *testing.T) {
 	require.Positive(t, preparedWarmup(&handler.preparedPayload, targetSlot, payloadID, time.Now().Add(time.Second)))
 }
 
-func TestPreparePayloadForStartsGloasSelfBuildOnFullParent(t *testing.T) {
+func TestPreparePayloadForSkipsGloasFullParent(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	postState, handler, syncedData, forkchoiceStore, validatorParams := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
@@ -1291,12 +1301,9 @@ func TestPreparePayloadForStartsGloasSelfBuildOnFullParent(t *testing.T) {
 	forkchoiceStore.HeadVal = baseBlockRoot
 	parentHash := common.Hash{0xa1}
 	fullHash := common.Hash{0xb2}
-	const defaultGasLimit = uint64(30_000_000)
-	const preferredGasLimit = uint64(36_000_000)
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
 		ParentBlockHash: parentHash,
 		BlockHash:       fullHash,
-		GasLimit:        defaultGasLimit,
 		Slot:            postState.Slot(),
 	})
 	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
@@ -1308,18 +1315,7 @@ func TestPreparePayloadForStartsGloasSelfBuildOnFullParent(t *testing.T) {
 
 	proposerIndex, err := postState.GetBeaconProposerIndexForSlot(targetSlot)
 	require.NoError(t, err)
-	feeRecipient := common.Address{0x11}
-	validatorParams.SetFeeRecipient(proposerIndex, feeRecipient)
-	advancedState, err := postState.Copy()
-	require.NoError(t, err)
-	require.NoError(t, transition.DefaultMachine.ProcessSlots(advancedState, targetSlot))
-	dependentRoot, err := state.GetProposerDependentRoot(advancedState, targetSlot/handler.beaconChainCfg.SlotsPerEpoch)
-	require.NoError(t, err)
-	handler.epbsPool = pool.NewEpbsPool()
-	handler.epbsPool.AddProposerPreference(&cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
-		ProposalSlot: targetSlot, DependentRoot: dependentRoot, ValidatorIndex: proposerIndex,
-		TargetGasLimit: preferredGasLimit,
-	}})
+	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x11})
 
 	syncedDataMock := syncedData.(*sync_mock_services.MockSyncedData)
 	syncedDataMock.EXPECT().ViewHeadStateWithIdentity(gomock.Any()).
@@ -1328,28 +1324,20 @@ func TestPreparePayloadForStartsGloasSelfBuildOnFullParent(t *testing.T) {
 		})
 	syncedDataMock.EXPECT().SelectedHead().Return(baseBlockRoot, postState.Slot(), true).AnyTimes()
 
-	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
+	buildStarted := false
 	engine := newPayloadBuildEngine(t, ctrl)
-	engine.startPayloadBuild = func(_ context.Context, head common.Hash, attrs *engine_types.PayloadAttributes) ([]byte, error) {
-		require.Equal(t, fullHash, head)
-		require.Equal(t, feeRecipient, attrs.SuggestedFeeRecipient)
-		require.Equal(t, &baseBlockRoot, attrs.ParentBeaconBlockRoot)
-		require.NotNil(t, attrs.Withdrawals)
-		require.NotNil(t, attrs.SlotNumber)
-		require.NotNil(t, attrs.TargetGasLimit)
-		require.Equal(t, hexutil.Uint64(targetSlot), *attrs.SlotNumber)
-		require.Equal(t, hexutil.Uint64(preferredGasLimit), *attrs.TargetGasLimit)
-		return payloadID, nil
+	engine.startPayloadBuild = func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error) {
+		buildStarted = true
+		return []byte{1, 2, 3, 4, 5, 6, 7, 8}, nil
 	}
 	handler.engine = engine
 	clock := eth_clock.NewMockEthereumClock(ctrl)
 	clock.EXPECT().GetSlotTime(targetSlot).Return(time.Now().Add(6 * time.Second)).AnyTimes()
 	handler.ethClock = clock
 
-	primedHead, err := preparePayloadForTest(t, handler, targetSlot)
-	require.NoError(t, err)
-	require.Equal(t, baseBlockRoot, primedHead)
-	require.Positive(t, preparedWarmup(&handler.preparedPayload, targetSlot, payloadID, time.Now().Add(time.Second)))
+	_, err = preparePayloadForTest(t, handler, targetSlot)
+	require.ErrorIs(t, err, errGloasPathNeedsForkChoice)
+	require.False(t, buildStarted)
 }
 
 func TestPreparePayloadForWaitsForResolvedGloasHead(t *testing.T) {
@@ -1426,7 +1414,7 @@ func TestPreparePayloadForSkipsGloasReorgToEmpty(t *testing.T) {
 	handler.ethClock = clock
 
 	_, err = preparePayloadForTest(t, handler, targetSlot)
-	require.ErrorIs(t, err, errGloasReorgToEmpty)
+	require.ErrorIs(t, err, errGloasPathNeedsForkChoice)
 	require.False(t, buildStarted)
 }
 
@@ -1453,12 +1441,13 @@ func TestExecutionPayloadSourceMarksReorgToEmptyAfterNegativePtcDecision(t *test
 	require.Nil(t, source.parentExecutionRequests)
 }
 
-func TestExecutionPayloadSourceRejectsPendingGloasDecision(t *testing.T) {
+func TestExecutionPayloadSourceFallsBackToEmptyForPendingGloasDecision(t *testing.T) {
 	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
 	targetSlot := postState.Slot() + 1
 	baseBlockRoot := common.Hash{0x41}
+	parentHash := common.Hash{0xa1}
 	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
-		ParentBlockHash: common.Hash{0xa1},
+		ParentBlockHash: parentHash,
 		BlockHash:       common.Hash{0xb2},
 		Slot:            postState.Slot(),
 	})
@@ -1467,8 +1456,31 @@ func TestExecutionPayloadSourceRejectsPendingGloasDecision(t *testing.T) {
 
 	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
 
-	require.ErrorIs(t, err, errGloasPayloadPending)
-	require.Equal(t, executionPayloadSource{}, source)
+	require.NoError(t, err)
+	require.Equal(t, parentHash, source.head)
+	require.Equal(t, gloasPayloadPathPending, source.gloasPath)
+	require.Nil(t, source.parentExecutionRequests)
+}
+
+func TestExecutionPayloadSourceFallsBackToEmptyWhenForkChoiceHeadMoves(t *testing.T) {
+	postState, handler, _, forkchoiceStore, _ := setupGloasPreparationTest(t)
+	targetSlot := postState.Slot() + 1
+	baseBlockRoot := common.Hash{0x41}
+	parentHash := common.Hash{0xa1}
+	postState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: parentHash,
+		BlockHash:       common.Hash{0xb2},
+		Slot:            postState.Slot(),
+	})
+	forkchoiceStore.HeadVal = common.Hash{0x42}
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+
+	source, err := handler.resolveExecutionPayloadSource(postState, baseBlockRoot, targetSlot, clparams.GloasVersion)
+
+	require.NoError(t, err)
+	require.Equal(t, parentHash, source.head)
+	require.Equal(t, gloasPayloadPathPending, source.gloasPath)
+	require.Nil(t, source.parentExecutionRequests)
 }
 
 func TestExecutionPayloadSourceRefreshesInvalidatedGloasHead(t *testing.T) {

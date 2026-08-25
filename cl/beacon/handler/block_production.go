@@ -651,10 +651,6 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 	// Get the base block slot from the state header (avoids needing ReadBlockByRoot at genesis).
 	baseBlockSlot := baseState.LatestBlockHeader().Slot
 
-	if _, _, err := a.forkchoiceStore.GetHead(nil); err != nil {
-		return nil, err
-	}
-
 	if err := transition.DefaultMachine.ProcessSlots(baseState, targetSlot); err != nil {
 		return nil, err
 	}
