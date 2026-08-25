@@ -9,10 +9,66 @@ import (
 )
 
 const (
-	epbsPreferencesPoolSize         = 64  // ~2 epochs of slots
-	epbsHighestBidsPoolSize         = 128 // multiple builders × parent hashes × a few slots
 	epbsPayloadAttestationsPoolSize = 512 // one slot's worth of PTC votes
 )
+
+type slotMap[K comparable, V any] struct {
+	mu      sync.RWMutex
+	values  map[K]V
+	slotFor func(K) uint64
+}
+
+func newSlotMap[K comparable, V any](slotFor func(K) uint64) *slotMap[K, V] {
+	return &slotMap[K, V]{values: make(map[K]V), slotFor: slotFor}
+}
+
+func (m *slotMap[K, V]) Add(key K, value V) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	m.values[key] = value
+	return false
+}
+
+func (m *slotMap[K, V]) Get(key K) (V, bool) {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	value, ok := m.values[key]
+	return value, ok
+}
+
+func (m *slotMap[K, V]) Keys() []K {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	keys := make([]K, 0, len(m.values))
+	for key := range m.values {
+		keys = append(keys, key)
+	}
+	return keys
+}
+
+func (m *slotMap[K, V]) Remove(key K) bool {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	if _, ok := m.values[key]; !ok {
+		return false
+	}
+	delete(m.values, key)
+	return true
+}
+
+func (m *slotMap[K, V]) PruneSlotsBefore(slot uint64) {
+	m.PruneSlots(func(entrySlot uint64) bool { return entrySlot < slot })
+}
+
+func (m *slotMap[K, V]) PruneSlots(remove func(uint64) bool) {
+	m.mu.Lock()
+	defer m.mu.Unlock()
+	for key := range m.values {
+		if remove(m.slotFor(key)) {
+			delete(m.values, key)
+		}
+	}
+}
 
 // ProposerPreferencesKey identifies a proposer preferences entry by slot and dependent root.
 // Different dependent roots (different forks) must not overwrite each other.
@@ -39,62 +95,53 @@ type HighestBidKey struct {
 // EpbsPool holds EPBS-related gossip data caches.
 // [New in Gloas:EIP7732]
 type EpbsPool struct {
-	// Individual cache operations are synchronized by the LRU. This mutex makes
-	// bid replacement atomic with conditional removal.
 	highestBidUpdatesMu sync.Mutex
-	highestBids         *lru.Cache[HighestBidKey, *cltypes.SignedExecutionPayloadBid]
+	HighestBids         *slotMap[HighestBidKey, *cltypes.SignedExecutionPayloadBid]
 
 	// ProposerPreferences stores validated SignedProposerPreferences keyed by (slot, dependent_root).
 	// Written by the proposer_preferences gossip service, read by the execution_payload_bid service.
-	ProposerPreferences *lru.Cache[ProposerPreferencesKey, *cltypes.SignedProposerPreferences]
-
+	ProposerPreferences *slotMap[ProposerPreferencesKey, *cltypes.SignedProposerPreferences]
 	// PayloadAttestations stores recently validated PayloadAttestationMessages for beacon API serving.
 	// Short-lived cache (~1 slot), keyed by (slot, validatorIndex).
 	PayloadAttestations *lru.Cache[PayloadAttestationKey, *cltypes.PayloadAttestationMessage]
 }
 
 func (p *EpbsPool) GetHighestBid(key HighestBidKey) (*cltypes.SignedExecutionPayloadBid, bool) {
-	return p.highestBids.Get(key)
+	return p.HighestBids.Get(key)
 }
 
 func (p *EpbsPool) HighestBidKeys() []HighestBidKey {
-	return p.highestBids.Keys()
+	return p.HighestBids.Keys()
 }
 
 // StoreHighestBid replaces the current entry for key.
 func (p *EpbsPool) StoreHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) {
 	p.highestBidUpdatesMu.Lock()
 	defer p.highestBidUpdatesMu.Unlock()
-	p.highestBids.Add(key, bid)
+	p.HighestBids.Add(key, bid)
 }
 
 // RemoveHighestBid preserves a concurrently stored replacement for the same key.
 func (p *EpbsPool) RemoveHighestBid(key HighestBidKey, bid *cltypes.SignedExecutionPayloadBid) bool {
 	p.highestBidUpdatesMu.Lock()
 	defer p.highestBidUpdatesMu.Unlock()
-	current, found := p.highestBids.Get(key)
+	current, found := p.HighestBids.Get(key)
 	if !found || current != bid {
 		return false
 	}
-	return p.highestBids.Remove(key)
+	return p.HighestBids.Remove(key)
 }
 
 func NewEpbsPool() *EpbsPool {
-	preferencesCache, err := lru.New[ProposerPreferencesKey, *cltypes.SignedProposerPreferences]("proposerPreferencesPool", epbsPreferencesPoolSize)
-	if err != nil {
-		panic(err)
-	}
-	highestBidsCache, err := lru.New[HighestBidKey, *cltypes.SignedExecutionPayloadBid]("highestBidsPool", epbsHighestBidsPoolSize)
-	if err != nil {
-		panic(err)
-	}
+	preferencesCache := newSlotMap[ProposerPreferencesKey, *cltypes.SignedProposerPreferences](func(key ProposerPreferencesKey) uint64 { return key.Slot })
+	highestBidsCache := newSlotMap[HighestBidKey, *cltypes.SignedExecutionPayloadBid](func(key HighestBidKey) uint64 { return key.Slot })
 	payloadAttestationsCache, err := lru.New[PayloadAttestationKey, *cltypes.PayloadAttestationMessage]("payloadAttestationsPool", epbsPayloadAttestationsPoolSize)
 	if err != nil {
 		panic(err)
 	}
 	return &EpbsPool{
 		ProposerPreferences: preferencesCache,
-		highestBids:         highestBidsCache,
+		HighestBids:         highestBidsCache,
 		PayloadAttestations: payloadAttestationsCache,
 	}
 }

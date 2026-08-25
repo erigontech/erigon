@@ -46,6 +46,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
 	"github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils"
@@ -105,6 +106,36 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 	// Attestation deadline is 3s; polling stops a quarter of it (750ms) earlier, at 2.25s.
 	require.Equal(t, slotStart.Add(2250*time.Millisecond).Add(-minPayloadPollingWindow), window.firstGetAt)
 	require.Equal(t, slotStart.Add(2250*time.Millisecond), window.pollUntil)
+}
+
+func TestGloasProposalExecutionHeadAtForkBoundary(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.SlotsPerEpoch = 32
+	cfg.GloasForkEpoch = 3
+	parentBid := &cltypes.ExecutionPayloadBid{
+		ParentBlockHash: common.HexToHash("0xaaaa"),
+		BlockHash:       common.HexToHash("0xbbbb"),
+	}
+
+	require.Equal(t, parentBid.BlockHash, gloasProposalExecutionHead(95, &cfg, parentBid, false))
+	require.Equal(t, parentBid.BlockHash, gloasProposalExecutionHead(90, &cfg, parentBid, false))
+	require.Equal(t, parentBid.ParentBlockHash, gloasProposalExecutionHead(96, &cfg, parentBid, false))
+}
+
+func TestValidateGloasHeadSnapshotRejectsMismatchedRoot(t *testing.T) {
+	baseRoot := common.HexToHash("0xa1")
+	headNode := forkchoice.ForkChoiceNode{
+		Root:          common.HexToHash("0xb2"),
+		PayloadStatus: cltypes.PayloadStatusFull,
+	}
+
+	err := validateGloasHeadSnapshot(baseRoot, headNode)
+	require.Error(t, err)
+	require.Contains(t, err.Error(), "fork choice head changed")
+	require.NoError(t, validateGloasHeadSnapshot(baseRoot, forkchoice.ForkChoiceNode{
+		Root:          baseRoot,
+		PayloadStatus: cltypes.PayloadStatusEmpty,
+	}))
 }
 
 func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
@@ -1552,6 +1583,8 @@ func TestCaplinBlockProductionWithWithdrawalRequest(t *testing.T) {
 	targetSlot := baseBlock.Slot + 1
 	baseBlockRoot, err := baseBlock.HashSSZ()
 	require.NoError(t, err)
+	fcu.HeadVal = baseBlockRoot
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 
 	beaconBody, execValue, err := h.produceBeaconBody(
 		ctx, 3, baseBlock.Slot, baseBlockRoot, postState, targetSlot,
@@ -1663,6 +1696,8 @@ func TestCaplinBlockProductionGlamsterdamSlotNumber(t *testing.T) {
 	targetSlot := baseBlock.Slot + 1
 	baseBlockRoot, err := baseBlock.HashSSZ()
 	require.NoError(t, err)
+	fcu.HeadVal = baseBlockRoot
+	fcu.HeadPayloadStatusVal = cltypes.PayloadStatusFull
 
 	// GLOAS deferred payload: the mock returns GetHeadPayloadStatus=FULL and ShouldBuildOnFull=true,
 	// so block production expects an envelope on disk. Provide one with empty ExecutionRequests.

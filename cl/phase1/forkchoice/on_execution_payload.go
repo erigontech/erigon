@@ -341,7 +341,16 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 
 	// Track payload status and gas limit by execution block hash for parent payload validation
 	executionBlockHash := envelope.Payload.BlockHash
-	f.executionPayloadStatus.Add(executionBlockHash, payloadStatus)
+	if guard, ok := f.forkGraph.(retainedBlockGuard); ok {
+		retained := guard.WithRetainedBlock(beaconBlockRoot, func() {
+			payloadStatus = f.markPayloadStatusRetainedLocked(beaconBlockRoot, executionBlockHash, payloadStatus)
+		})
+		if !retained {
+			return fmt.Errorf("%w: block disappeared during payload validation for beacon_block_root %v", ErrIgnore, beaconBlockRoot)
+		}
+	} else {
+		payloadStatus = f.markPayloadStatusLocked(beaconBlockRoot, executionBlockHash, payloadStatus)
+	}
 	f.executionPayloadGasLimit.Add(executionBlockHash, envelope.Payload.GasLimit)
 
 	switch payloadStatus {
@@ -364,11 +373,9 @@ func (f *ForkChoiceStore) applyPayloadValidationResultLocked(
 		}
 	case execution_client.PayloadStatusInvalidated:
 		log.Warn("validatePayloadWithEL: payload is invalid", "beaconBlockRoot", beaconBlockRoot, "err", validationErr)
-		f.markPayloadInvalidLocked(beaconBlockRoot, executionBlockHash)
 		return fmt.Errorf("%w: execution payload is invalid", errInvalidExecutionPayloadEnvelope)
 	case execution_client.PayloadStatusValidated:
 		log.Trace("validatePayloadWithEL: payload is validated", "beaconBlockRoot", beaconBlockRoot)
-		f.markPayloadVerifiedLocked(beaconBlockRoot, executionBlockHash)
 	}
 
 	if validationErr != nil {
