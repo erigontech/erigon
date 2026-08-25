@@ -705,8 +705,11 @@ func (sd *SharedDomains) getChangesetAccumulatorLocked() *changeset.StateChangeS
 	return nil
 }
 
-// commitmentBranchDiffWriter is implemented by every mem batch behind
-// SharedDomains to support DomainPutCommitmentDiff's explicit-diff routing.
+// commitmentBranchDiffWriter is implemented by the real mem batch backing
+// DomainPutCommitmentDiff's explicit-diff routing. A backing type that
+// doesn't implement it falls back to the shared, lockable write path (see
+// DomainPutCommitmentDiff) — e.g. execution/blockreplay's witnessMemBatch,
+// which never computes commitment and so never exercises this path.
 type commitmentBranchDiffWriter interface {
 	PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error
 }
@@ -721,15 +724,9 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 		return errors.New("DomainPutCommitmentDiff: trying to put nil value, not allowed")
 	}
 	ks := string(k)
-	if !sd.disableInlineTouchKey {
-		sd.sdCtx.TouchKey(kv.CommitmentDomain, ks, v)
-	}
-	if prevVal == nil {
-		var err error
-		prevVal, _, err = sd.GetLatest(kv.CommitmentDomain, roTx, k)
-		if err != nil {
-			return err
-		}
+	prevVal, err := sd.resolvePrevVal(kv.CommitmentDomain, roTx, ks, v, prevVal)
+	if err != nil {
+		return err
 	}
 	if bytes.Equal(prevVal, v) {
 		return nil
@@ -760,13 +757,16 @@ func (p *commitmentDiffPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum ui
 }
 
 func (p *commitmentDiffPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
-	// PutBranch (the only real caller of this wrapper) never calls DomainDel —
-	// branch removal goes through DomainPut with an empty, non-nil value. Kept
-	// as a plain passthrough for interface completeness.
+	if domain == kv.CommitmentDomain {
+		panic("commitmentDiffPutDel.DomainDel called for kv.CommitmentDomain: branch removal must go through DomainPut with an empty, non-nil value so it routes through the explicit diff")
+	}
 	return p.sd.DomainDel(domain, p.tx, k, txNum, prevVal)
 }
 
 func (p *commitmentDiffPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
+	if domain == kv.CommitmentDomain {
+		panic("commitmentDiffPutDel.DomainDelPrefix called for kv.CommitmentDomain: not supported by the explicit-diff routing path")
+	}
 	return p.sd.DomainDelPrefix(domain, p.tx, prefix, txNum)
 }
 
@@ -1845,27 +1845,12 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
 	ks := string(k)
-	if !sd.disableInlineTouchKey {
-		sd.sdCtx.TouchKey(domain, ks, v)
+	prevVal, err := sd.resolvePrevVal(domain, roTx, ks, v, prevVal)
+	if err != nil {
+		return err
 	}
-	if prevVal == nil {
-		var err error
-		prevVal, _, err = sd.GetLatest(domain, roTx, k)
-		if err != nil {
-			return err
-		}
-	}
-	switch domain {
-	case kv.CodeDomain, kv.AccountsDomain, kv.StorageDomain, kv.CommitmentDomain:
-		if bytes.Equal(prevVal, v) {
-			return nil
-		}
-	case kv.RCacheDomain:
-		//noop
-	default:
-		if bytes.Equal(prevVal, v) {
-			return nil
-		}
+	if domain != kv.RCacheDomain && bytes.Equal(prevVal, v) {
+		return nil
 	}
 
 	// The shared state cache is not updated here. The write remains isolated in
@@ -1873,6 +1858,23 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	// publishing it earlier could expose uncommitted, fork-specific state.
 
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
+}
+
+// resolvePrevVal runs DomainPut's shared prologue: touches ks for the
+// commitment fold, and resolves prevVal via GetLatest when the caller didn't
+// supply it.
+func (sd *SharedDomains) resolvePrevVal(domain kv.Domain, roTx kv.TemporalTx, ks string, v, prevVal []byte) ([]byte, error) {
+	if !sd.disableInlineTouchKey {
+		sd.sdCtx.TouchKey(domain, ks, v)
+	}
+	if prevVal == nil {
+		var err error
+		prevVal, _, err = sd.GetLatest(domain, roTx, common.ToBytesZeroCopy(ks))
+		if err != nil {
+			return nil, err
+		}
+	}
+	return prevVal, nil
 }
 
 // DomainDel

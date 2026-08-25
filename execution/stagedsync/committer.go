@@ -947,10 +947,6 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 // reproducer, leaving canonical block 1's CS without [state] and producing
 // off-by-one wrong-trie-root chains on the next iteration's re-execution.
 //
-// If block N's CS hasn't been saved yet it falls through to the live
-// accumulator, which — because the lookup is under changesetMu — is still N's
-// own (the apply loop can't rotate it while the lock is held).
-//
 // Also annotates the pending deferred update (set inside ComputeCommitment
 // when defer mode is on) with the block's hash, so the next call's
 // FlushPendingUpdates uses the same hash-aware routing.
@@ -984,11 +980,23 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 
 	// This call's own writes (branch nodes, the [state] marker, and any
 	// deferred update ComputeCommitment leaves pending) route directly into
-	// cs's diff — see DomainPutCommitmentDiff — so nothing here needs
-	// changesetMu against a concurrent SetChangesetAccumulator.
+	// diff — see DomainPutCommitmentDiff — so nothing here needs changesetMu
+	// against a concurrent SetChangesetAccumulator.
+	//
+	// A mid-block step-boundary compute always hits cs == nil: the exec loop
+	// only calls SavePastChangesetAccumulator once the whole block is done,
+	// so this falls back to whatever's currently live. That is guaranteed to
+	// still be N's own: the exec loop installs N's changeset before sending
+	// any of N's txResults, and only rotates away from it (on the same
+	// goroutine, strictly after the save) once N is fully done — so a nil
+	// GetChangesetByHash(N) result is itself proof the rotation away from N
+	// hasn't happened yet. Using nil here instead would silently drop this
+	// step's writes from the changeset.
 	var diff *kv.DomainDiff
 	if cs != nil {
 		diff = &cs.Diffs[kv.CommitmentDomain]
+	} else if live := cc.doms.GetChangesetAccumulator(); live != nil {
+		diff = &live.Diffs[kv.CommitmentDomain]
 	}
 	return cc.doms.ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, diff)
 }
