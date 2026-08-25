@@ -46,9 +46,7 @@ const (
 // started by newPendingJobQueue. Jobs remain until the service callback requests
 // removal or they expire.
 type pendingJobQueue[K comparable, M any] struct {
-	capacity int32
-	expiry   time.Duration
-	tick     time.Duration
+	pendingJobQueueOptions
 	// Mutations in tryProcess must remain safe if the job is retried or removal
 	// loses the identity check. processAfterRemove runs only after successful
 	// removal, so it may safely re-enqueue the same key.
@@ -81,13 +79,11 @@ func newPendingJobQueue[K comparable, M any](
 		panic("pending job queue requires onExpired")
 	}
 	q := &pendingJobQueue[K, M]{
-		capacity:           options.capacity,
-		expiry:             options.expiry,
-		tick:               options.checkInterval,
-		tryProcess:         tryProcess,
-		processAfterRemove: processAfterRemove,
-		onExpired:          onExpired,
-		cond:               sync.NewCond(&sync.Mutex{}),
+		pendingJobQueueOptions: options,
+		tryProcess:             tryProcess,
+		processAfterRemove:     processAfterRemove,
+		onExpired:              onExpired,
+		cond:                   sync.NewCond(&sync.Mutex{}),
 	}
 	go q.loop(ctx)
 	return q
@@ -176,7 +172,7 @@ func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 		}
 		q.cond.L.Unlock()
 
-		ticker := time.NewTicker(q.tick)
+		ticker := time.NewTicker(q.checkInterval)
 		for q.count.Load() > 0 {
 			select {
 			case <-ctx.Done():
