@@ -415,7 +415,11 @@ type builderHTTPResponse struct {
 }
 
 func (b *builderClient) builderCall(ctx context.Context, method string, target builderTarget, headers map[string]string, body io.Reader) (*builderHTTPResponse, error) {
-	requestContext := context.WithValue(ctx, pinnedBuilderTargetKey{}, pinnedBuilderTarget{hostname: target.hostname, ips: target.ips})
+	var attemptTimeout time.Duration
+	if deadline, ok := ctx.Deadline(); ok && len(target.ips) > 1 {
+		attemptTimeout = time.Until(deadline) / time.Duration(len(target.ips))
+	}
+	requestContext := context.WithValue(ctx, pinnedBuilderTargetKey{}, pinnedBuilderTarget{hostname: target.hostname, ips: target.ips, attemptTimeout: attemptTimeout})
 	request, err := http.NewRequestWithContext(requestContext, method, target.url, body)
 	if err != nil {
 		return nil, err
@@ -469,8 +473,9 @@ func (b *builderClient) builderAdmission() *semaphore.Weighted {
 type pinnedBuilderTargetKey struct{}
 
 type pinnedBuilderTarget struct {
-	hostname string
-	ips      []net.IP
+	hostname       string
+	ips            []net.IP
+	attemptTimeout time.Duration
 }
 
 func newPinnedBuilderTransport(dialContext func(context.Context, string, string) (net.Conn, error)) http.RoundTripper {
@@ -492,12 +497,18 @@ func newPinnedBuilderTransport(dialContext func(context.Context, string, string)
 			return nil, errors.New("builder dial target does not match resolved host")
 		}
 		var dialErrors []error
-		for _, ip := range pinned.ips {
+		for i, ip := range pinned.ips {
 			if err := ctx.Err(); err != nil {
 				return nil, err
 			}
 			pinnedAddress := net.JoinHostPort(ip.String(), port)
-			conn, err := dialContext(ctx, network, pinnedAddress)
+			attemptCtx := ctx
+			cancel := func() {}
+			if i+1 < len(pinned.ips) && pinned.attemptTimeout > 0 {
+				attemptCtx, cancel = context.WithTimeout(ctx, pinned.attemptTimeout)
+			}
+			conn, err := dialContext(attemptCtx, network, pinnedAddress)
+			cancel()
 			if err == nil {
 				return conn, nil
 			}

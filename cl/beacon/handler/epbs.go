@@ -858,6 +858,10 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
+		if canonical && validation != BlockPublishingValidationGossip {
+			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+			return
+		}
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
 			status = http.StatusAccepted
@@ -900,6 +904,13 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	}
 
 	if canonical || a.sentinel != nil {
+		if validation == BlockPublishingValidationConsensusAndEquivocation {
+			block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+			if !ok || block == nil || block.Block == nil || a.forkchoiceStore.HasBlockEquivocation(block.Block.Slot, block.Block.ProposerIndex, signedEnvelope.Message.BeaconBlockRoot) {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload envelope block has an equivocation")).WriteTo(w)
+				return
+			}
+		}
 		encodedSSZ, err := signedEnvelope.EncodeSSZ(nil)
 		if err != nil {
 			beaconhttp.NewEndpointError(http.StatusInternalServerError, err).WriteTo(w)

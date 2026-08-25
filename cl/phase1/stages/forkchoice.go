@@ -227,29 +227,32 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	if currentHeadRoot != headRoot || currentHeadSlot != headSlot {
 		return nil
 	}
+	payloadStatus := beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus())
+	executionOptimistic := cfg.forkChoice.IsHeadOptimistic()
 	headEvent, err := beaconevents.BuildHeadV2Data(
 		cfg.beaconCfg,
 		headState,
 		headSlot,
 		headRoot,
 		stateRoot,
-		beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus()),
-		cfg.forkChoice.IsHeadOptimistic(),
+		payloadStatus,
+		executionOptimistic,
 	)
 	if err != nil {
 		return err
 	}
-	return emitHeadEventsIfCurrent(cfg.emitter, headEvent, headSlot, headRoot, stateRoot, func() (common.Hash, uint64, error) {
-		return cfg.forkChoice.GetHead(nil)
+	return emitHeadEventsIfCurrent(cfg.emitter, headEvent, headSlot, headRoot, stateRoot, func() (common.Hash, uint64, string, bool, error) {
+		root, slot, err := cfg.forkChoice.GetHead(nil)
+		return root, slot, beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus()), cfg.forkChoice.IsHeadOptimistic(), err
 	})
 }
 
-func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, error)) error {
-	currentRoot, currentSlot, err := getHead()
+func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beaconevents.HeadV2Data, headSlot uint64, headRoot, stateRoot common.Hash, getHead func() (common.Hash, uint64, string, bool, error)) error {
+	currentRoot, currentSlot, payloadStatus, executionOptimistic, err := getHead()
 	if err != nil {
 		return fmt.Errorf("failed to revalidate head event: %w", err)
 	}
-	if currentRoot != headRoot || currentSlot != headSlot {
+	if currentRoot != headRoot || currentSlot != headSlot || payloadStatus != headEvent.Data.PayloadStatus || executionOptimistic != headEvent.Data.ExecutionOptimistic {
 		return nil
 	}
 	emitter.State().SendHead(&beaconevents.HeadData{
