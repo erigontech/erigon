@@ -193,7 +193,6 @@ linters:
           |p2p/rlpx\
           |p2p/sentry\
           |p2p/sentry/libsentry\
-          |plugins/auth\
           |rpc\
           |rpc/jsonrpc\
           |rpc/rpchelper\
