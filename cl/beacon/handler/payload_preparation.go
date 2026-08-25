@@ -22,7 +22,6 @@ import (
 	"errors"
 	"fmt"
 	"sync"
-	"sync/atomic"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
@@ -104,13 +103,21 @@ func (s *payloadPreparationScratch) release() {
 // payloadPreparationGate gives block work priority over speculative builder startup. Its exclusive
 // side is always acquired with TryLock, so nested shared holds cannot deadlock.
 type payloadPreparationGate struct {
-	blockWork     sync.RWMutex
-	producedBlock atomic.Pointer[producedBlockMarker]
+	blockWork       sync.RWMutex
+	producedBlockMu sync.Mutex
+	producedBlock   *producedBlockMarker
 }
 
 type producedBlockMarker struct {
 	slot      uint64
 	expiresAt time.Time
+}
+
+func producedBlockSigningExpiry(completedAt, targetSlotStart time.Time, signingWindow time.Duration) time.Time {
+	if completedAt.Before(targetSlotStart) {
+		completedAt = targetSlotStart
+	}
+	return completedAt.Add(signingWindow)
 }
 
 func (p *preparedPayload) set(slot uint64, payloadID []byte, head common.Hash, primedAt time.Time) {
@@ -168,37 +175,45 @@ func (g *payloadPreparationGate) tryBeginPreparation() (func(), bool) {
 	return sync.OnceFunc(g.blockWork.Unlock), true
 }
 
-func (g *payloadPreparationGate) noteProducedBlock(currentSlot, producedSlot uint64, expiresAt time.Time) {
+func (g *payloadPreparationGate) noteProducedBlock(
+	currentSlot, producedSlot uint64,
+	completedAt, expiresAt time.Time,
+) {
 	// The signing interval can cross one slot boundary, but no more.
 	if !slotsWithinOne(currentSlot, producedSlot) {
 		return
 	}
-	next := &producedBlockMarker{slot: producedSlot, expiresAt: expiresAt}
-	for {
-		previous := g.producedBlock.Load()
-		if previous != nil {
-			if previous.slot > producedSlot ||
-				(previous.slot == producedSlot && !expiresAt.After(previous.expiresAt)) {
-				return
-			}
-		}
-		if g.producedBlock.CompareAndSwap(previous, next) {
-			return
-		}
+	g.producedBlockMu.Lock()
+	defer g.producedBlockMu.Unlock()
+
+	previous := g.producedBlock
+	if previous == nil || !completedAt.Before(previous.expiresAt) {
+		g.producedBlock = &producedBlockMarker{slot: producedSlot, expiresAt: expiresAt}
+		return
 	}
+	// Keep the highest slot and latest expiry so neither overlapping signing round is forgotten.
+	next := &producedBlockMarker{
+		slot:      max(previous.slot, producedSlot),
+		expiresAt: expiresAt,
+	}
+	if previous.expiresAt.After(next.expiresAt) {
+		next.expiresAt = previous.expiresAt
+	}
+	g.producedBlock = next
 }
 
 func (g *payloadPreparationGate) clearProducedBlock(slot uint64) {
-	for {
-		marker := g.producedBlock.Load()
-		if marker == nil || marker.slot != slot || g.producedBlock.CompareAndSwap(marker, nil) {
-			return
-		}
+	g.producedBlockMu.Lock()
+	defer g.producedBlockMu.Unlock()
+	if g.producedBlock != nil && g.producedBlock.slot == slot {
+		g.producedBlock = nil
 	}
 }
 
 func (g *payloadPreparationGate) producedBlockPending(currentSlot, selectedSlot uint64, now time.Time) bool {
-	marker := g.producedBlock.Load()
+	g.producedBlockMu.Lock()
+	defer g.producedBlockMu.Unlock()
+	marker := g.producedBlock
 	return marker != nil &&
 		now.Before(marker.expiresAt) &&
 		selectedSlot < marker.slot &&

@@ -530,7 +530,8 @@ func TestPreparePayloadLoopWaitsForCurrentSlotHead(t *testing.T) {
 			currentSlot := postState.Slot() + 1
 			targetSlot := currentSlot + 1
 			if test.producedBlock {
-				handler.payloadPreparationGate.noteProducedBlock(currentSlot, currentSlot, time.Now().Add(time.Minute))
+				completedAt := time.Now()
+				handler.payloadPreparationGate.noteProducedBlock(currentSlot, currentSlot, completedAt, completedAt.Add(time.Minute))
 			}
 			if test.highestSeenCurrent {
 				forkchoiceStore.HighestSeenVal = currentSlot
@@ -1051,7 +1052,8 @@ func TestPublishedBlockStorageSuppressesStaleHeadPreparation(t *testing.T) {
 	handler.blobStoage = storage
 	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
 	block.Block.Slot = 1
-	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, time.Now().Add(time.Minute))
+	completedAt := time.Now()
+	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
 	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
 
 	require.NoError(t, handler.broadcastBlock(t.Context(), block))
@@ -1572,11 +1574,34 @@ func TestPayloadBuildPanicReleasesPreparationGate(t *testing.T) {
 	finishPreparation()
 }
 
+func TestProducedBlockSigningExpiryStartsAtTheLaterBoundary(t *testing.T) {
+	targetSlotStart := time.Unix(100, 0)
+	signingWindow := time.Second
+	for _, test := range []struct {
+		name        string
+		completedAt time.Time
+	}{
+		{name: "early production", completedAt: targetSlotStart.Add(-10 * time.Second)},
+		{name: "late production", completedAt: targetSlotStart.Add(2 * time.Second)},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			expectedStart := targetSlotStart
+			if test.completedAt.After(expectedStart) {
+				expectedStart = test.completedAt
+			}
+
+			expiresAt := producedBlockSigningExpiry(test.completedAt, targetSlotStart, signingWindow)
+
+			require.Equal(t, expectedStart.Add(signingWindow), expiresAt)
+		})
+	}
+}
+
 func TestPreparationGateTracksProducedBlockUntilSlotHeadIsSelected(t *testing.T) {
 	var gate payloadPreparationGate
 	expiresAt := time.Unix(200, 0)
 	now := expiresAt.Add(-time.Second)
-	gate.noteProducedBlock(9, 10, expiresAt)
+	gate.noteProducedBlock(9, 10, now, expiresAt)
 
 	require.True(t, gate.producedBlockPending(9, 9, now), "an early production is pending")
 	require.True(t, gate.producedBlockPending(10, 9, now), "the signing round trip is pending")
@@ -1588,7 +1613,7 @@ func TestPreparationGateTracksProductionThatFinishesAfterItsSlot(t *testing.T) {
 	var gate payloadPreparationGate
 	expiresAt := time.Unix(200, 0)
 	now := expiresAt.Add(-time.Second)
-	gate.noteProducedBlock(11, 10, expiresAt)
+	gate.noteProducedBlock(11, 10, now, expiresAt)
 
 	require.True(t, gate.producedBlockPending(11, 9, now), "the late signing round trip is pending")
 	require.False(t, gate.producedBlockPending(11, 10, now), "a head for the produced slot is selected")
@@ -1598,7 +1623,7 @@ func TestPreparationGateTracksProductionThatFinishesAfterItsSlot(t *testing.T) {
 func TestPreparationGateIgnoresProducedBlocksOutsideCurrentWindow(t *testing.T) {
 	var gate payloadPreparationGate
 	expiresAt := time.Unix(200, 0)
-	gate.noteProducedBlock(10, 20, expiresAt)
+	gate.noteProducedBlock(10, 20, expiresAt.Add(-time.Second), expiresAt)
 
 	require.False(t, gate.producedBlockPending(19, 10, expiresAt.Add(-time.Second)), "a far-future request must not schedule a later preparation blackout")
 }
@@ -1606,14 +1631,58 @@ func TestPreparationGateIgnoresProducedBlocksOutsideCurrentWindow(t *testing.T) 
 func TestPreparationGateExpiresAndClearsProducedBlock(t *testing.T) {
 	var gate payloadPreparationGate
 	expiresAt := time.Unix(200, 0)
-	gate.noteProducedBlock(10, 10, expiresAt)
+	completedAt := expiresAt.Add(-time.Second)
+	gate.noteProducedBlock(10, 10, completedAt, expiresAt)
 
 	require.True(t, gate.producedBlockPending(10, 9, expiresAt.Add(-time.Nanosecond)))
 	require.False(t, gate.producedBlockPending(10, 9, expiresAt), "an abandoned signing round trip must expire")
 
-	gate.noteProducedBlock(10, 10, expiresAt.Add(time.Second))
+	gate.noteProducedBlock(10, 10, completedAt, expiresAt.Add(time.Second))
 	gate.clearProducedBlock(10)
 	require.False(t, gate.producedBlockPending(10, 9, expiresAt), "publication takes over the exclusion")
+}
+
+func TestPreparationGateMergesOverlappingProducedBlocks(t *testing.T) {
+	for _, test := range []struct {
+		name       string
+		firstSlot  uint64
+		firstEnd   time.Time
+		secondSlot uint64
+		secondEnd  time.Time
+	}{
+		{
+			name:       "higher slot finishes first",
+			firstSlot:  11,
+			firstEnd:   time.Unix(200, 0),
+			secondSlot: 10,
+			secondEnd:  time.Unix(210, 0),
+		},
+		{
+			name:       "higher slot finishes second",
+			firstSlot:  10,
+			firstEnd:   time.Unix(210, 0),
+			secondSlot: 11,
+			secondEnd:  time.Unix(200, 0),
+		},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			var gate payloadPreparationGate
+			gate.noteProducedBlock(10, test.firstSlot, time.Unix(190, 0), test.firstEnd)
+			gate.noteProducedBlock(11, test.secondSlot, time.Unix(195, 0), test.secondEnd)
+
+			require.True(t, gate.producedBlockPending(11, 10, time.Unix(199, 0)), "the higher slot must remain pending")
+			require.True(t, gate.producedBlockPending(11, 9, time.Unix(205, 0)), "the later expiry must remain pending")
+		})
+	}
+}
+
+func TestPreparationGateReplacesAnExpiredHigherSlotMarker(t *testing.T) {
+	var gate payloadPreparationGate
+	gate.noteProducedBlock(10, 11, time.Unix(190, 0), time.Unix(200, 0))
+	gate.noteProducedBlock(11, 10, time.Unix(205, 0), time.Unix(210, 0))
+
+	require.True(t, gate.producedBlockPending(11, 9, time.Unix(205, 0)))
+	require.False(t, gate.producedBlockPending(11, 10, time.Unix(205, 0)), "the expired higher slot must not be retained")
 }
 
 func TestProductionUsesTargetSlotRandao(t *testing.T) {

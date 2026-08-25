@@ -763,8 +763,11 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		consensusValue,
 	)
 	signingWindow := attestationDue(a.beaconChainCfg, block.Version()) / payloadPublicationDivisor
+	completedAt := time.Now()
 	a.payloadPreparationGate.noteProducedBlock(
-		a.ethClock.GetCurrentSlot(), targetSlot, time.Now().Add(signingWindow),
+		a.ethClock.GetCurrentSlot(), targetSlot,
+		completedAt,
+		producedBlockSigningExpiry(completedAt, a.ethClock.GetSlotTime(targetSlot), signingWindow),
 	)
 
 	return resp, nil
