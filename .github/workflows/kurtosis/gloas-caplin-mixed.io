@@ -1,6 +1,6 @@
 participants:
   - cl_type: lighthouse
-    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-7
+    cl_image: ethpandaops/lighthouse:glamsterdam-devnet-8
     el_type: erigon
     el_image: test/erigon:current
     el_log_level: "debug"
@@ -17,7 +17,7 @@ participants:
     el_extra_params: ["--experimental.bal"]
     use_separate_vc: true
     vc_type: lighthouse
-    vc_image: ethpandaops/lighthouse:glamsterdam-devnet-7
+    vc_image: ethpandaops/lighthouse:glamsterdam-devnet-8
     count: 1
 global_log_level: 'debug'
 network_params:
@@ -27,7 +27,7 @@ network_params:
   fulu_fork_epoch: 0
   gloas_fork_epoch: 1
 ethereum_genesis_generator_params:
-  image: ethpandaops/ethereum-genesis-generator:6.1.4
+  image: ethpandaops/ethereum-genesis-generator:6.2.0
 additional_services: [assertoor]
 assertoor_params:
   run_stability_check: false
