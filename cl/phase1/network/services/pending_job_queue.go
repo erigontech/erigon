@@ -65,9 +65,10 @@ var pendingJobQueueRejectedCounter = metrics.GetOrCreateCounterVec(
 // removal or they expire.
 type pendingJobQueue[K comparable, M any] struct {
 	pendingJobQueueOptions
-	// Mutations in tryProcess must remain safe if the job is retried or removal
-	// loses the identity check. processAfterRemove runs only after successful
-	// removal, so it may safely re-enqueue the same key.
+	// tryProcess may run repeatedly for a job, and identity-checked removal may
+	// fail if the entry was replaced concurrently. Its mutations must be safe to
+	// repeat. processAfterRemove may safely re-enqueue the key because it runs
+	// only after successful removal.
 	tryProcess         func(ctx context.Context, key K, msg M) pendingJobDecision
 	processAfterRemove func(ctx context.Context, key K, msg M)
 	onExpired          func(key K)
@@ -145,8 +146,8 @@ func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) pendingJobEnqueueResult
 }
 
 // enqueueLazy reserves capacity before building the key so a full queue skips
-// potentially expensive work. The enqueue attempt owns its reservation until
-// storage accepts or deduplicates it, so deferred cleanup covers errors and panics.
+// potentially expensive work. Storage keeps or releases the reservation;
+// deferred cleanup handles key-construction errors and panics.
 func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) (pendingJobEnqueueResult, error) {
 	if !q.reserve() {
 		return pendingJobQueueFull, nil

@@ -46,7 +46,6 @@ type seenBidKey struct {
 	slot         uint64
 }
 
-// pendingBidKey identifies a queued bid.
 type pendingBidKey struct {
 	builderIndex uint64
 	slot         uint64
