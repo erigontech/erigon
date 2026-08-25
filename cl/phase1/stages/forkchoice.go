@@ -217,13 +217,20 @@ func updateCanonicalChainInTheDatabase(ctx context.Context, tx kv.RwTx, headSlot
 // emitHeadEvent emits the head event with the given head slot, head root, and head state.
 func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *state.CachingBeaconState) error {
 	headEpoch := headSlot / cfg.beaconCfg.SlotsPerEpoch
-	previous_duty_dependent_root, err := headState.GetBlockRootAtSlot((headEpoch-1)*cfg.beaconCfg.SlotsPerEpoch - 1)
-	if err != nil {
-		return fmt.Errorf("failed to get block root at slot for previous_duty_dependent_root: %w", err)
+	previous_duty_dependent_root := cfg.forkChoice.AnchorRoot()
+	current_duty_dependent_root := cfg.forkChoice.AnchorRoot()
+	var err error
+	if headEpoch > 1 {
+		previous_duty_dependent_root, err = headState.GetBlockRootAtSlot((headEpoch-1)*cfg.beaconCfg.SlotsPerEpoch - 1)
+		if err != nil {
+			return fmt.Errorf("failed to get block root at slot for previous_duty_dependent_root: %w", err)
+		}
 	}
-	current_duty_dependent_root, err := headState.GetBlockRootAtSlot(headEpoch*cfg.beaconCfg.SlotsPerEpoch - 1)
-	if err != nil {
-		return fmt.Errorf("failed to get block root at slot for current_duty_dependent_root: %w", err)
+	if headEpoch > 0 {
+		current_duty_dependent_root, err = headState.GetBlockRootAtSlot(headEpoch*cfg.beaconCfg.SlotsPerEpoch - 1)
+		if err != nil {
+			return fmt.Errorf("failed to get block root at slot for current_duty_dependent_root: %w", err)
+		}
 	}
 
 	stateRoot, err := headState.HashSSZ()
@@ -239,6 +246,18 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 		PreviousDutyDependentRoot: previous_duty_dependent_root,
 		CurrentDutyDependentRoot:  current_duty_dependent_root,
 		ExecutionOptimistic:       false,
+	})
+	currentEpochDependentRoot, nextEpochDependentRoot := previous_duty_dependent_root, current_duty_dependent_root
+	cfg.emitter.State().SendHeadV2(&beaconevents.HeadV2Data{
+		Version: headState.Version().String(),
+		Data: beaconevents.HeadV2Content{
+			Slot: headSlot, Block: headRoot, State: stateRoot,
+			PayloadStatus:             beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus()),
+			EpochTransition:           cfg.beaconCfg.SlotsPerEpoch != 0 && headSlot%cfg.beaconCfg.SlotsPerEpoch == 0,
+			CurrentEpochDependentRoot: currentEpochDependentRoot,
+			NextEpochDependentRoot:    nextEpochDependentRoot,
+			ExecutionOptimistic:       cfg.forkChoice.IsHeadOptimistic(),
+		},
 	})
 	return nil
 }

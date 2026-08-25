@@ -18,6 +18,7 @@ package services
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math"
 	"sync"
@@ -287,6 +288,56 @@ func (s *executionPayloadBidService) ProcessMessage(ctx context.Context, _ *uint
 	log.Trace("Processed execution payload bid via gossip", "slot", slot, "builderIndex", builderIndex,
 		"value", bid.Value, "parentBlockHash", bid.ParentBlockHash)
 	return nil
+}
+
+func (s *executionPayloadBidService) ValidateBid(_ context.Context, msg *cltypes.SignedExecutionPayloadBid) error {
+	if msg == nil || msg.Message == nil {
+		return errors.New("nil execution payload bid message")
+	}
+	bid := msg.Message
+	if !isCurrentOrNextSlot(s.ethClock, s.beaconCfg, s.now(), bid.Slot, gloasMaximumClockDisparity) {
+		return fmt.Errorf("%w: bid slot %d is not current or next slot", ErrIgnore, bid.Slot)
+	}
+	parentHeader, ok := s.forkchoiceStore.GetHeader(bid.ParentBlockRoot)
+	if !ok {
+		return fmt.Errorf("%w: parent_block_root %v not known in fork choice", ErrIgnore, bid.ParentBlockRoot)
+	}
+	if bid.Slot <= parentHeader.Slot {
+		return fmt.Errorf("bid slot %d is not greater than parent block slot %d", bid.Slot, parentHeader.Slot)
+	}
+	maxBlobs := int(s.beaconCfg.GetBlobParameters(state.GetEpochAtSlot(s.beaconCfg, bid.Slot)).MaxBlobsPerBlock)
+	if bid.BlobKzgCommitments.Len() > maxBlobs {
+		return fmt.Errorf("bid has too many blob_kzg_commitments: %d > %d", bid.BlobKzgCommitments.Len(), maxBlobs)
+	}
+	preferences, ok, err := s.matchingProposerPreferences(msg)
+	if err != nil {
+		return err
+	}
+	if !ok || preferences.Message == nil {
+		return fmt.Errorf("%w: proposer preferences not available", ErrIgnore)
+	}
+	if bid.FeeRecipient != preferences.Message.FeeRecipient {
+		return fmt.Errorf("%w: bid fee recipient does not match proposer preferences", ErrIgnore)
+	}
+	if _, ok := s.forkchoiceStore.GetRecentExecutionPayloadStatus(bid.ParentBlockHash); !ok {
+		return fmt.Errorf("%w: parent_block_hash %v not known in fork choice", ErrIgnore, bid.ParentBlockHash)
+	}
+	parentGasLimit, ok := s.forkchoiceStore.GetExecutionPayloadGasLimit(bid.ParentBlockHash)
+	if !ok || !IsGasLimitTargetCompatible(parentGasLimit, bid.GasLimit, preferences.Message.TargetGasLimit) {
+		return fmt.Errorf("%w: bid gas limit is not compatible with proposer preferences", ErrIgnore)
+	}
+	compatible, err := s.isBidCompatibleWithHead(bid)
+	if err != nil {
+		return err
+	}
+	if !compatible {
+		return fmt.Errorf("%w: bid is not compatible with the current head branch", ErrIgnore)
+	}
+	validationStateEntry, err := s.bidValidationState(bid.ParentBlockRoot, bid.Slot)
+	if err != nil {
+		return err
+	}
+	return s.validateBidAuthentication(msg, validationStateEntry)
 }
 
 func isCurrentOrNextSlot(clock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, now time.Time, slot uint64, disparity time.Duration) bool {

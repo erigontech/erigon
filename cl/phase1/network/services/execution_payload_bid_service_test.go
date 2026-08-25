@@ -248,6 +248,7 @@ func TestExecutionPayloadBidServiceOrdersHighestBeforeStatelessChecks(t *testing
 	ctrl := gomock.NewController(t)
 	service, _, ethClockMock, _, epbsPool := setupExecutionPayloadBidService(t, ctrl)
 	msg := newTestSignedExecutionPayloadBid(100, 1, 1)
+	msg.Message.ExecutionPayment = 10
 	msg.Message.ExecutionPayment = 1
 	epbsPool.HighestBids.Add(pool.HighestBidKey{
 		Slot: msg.Message.Slot, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot,
@@ -274,6 +275,21 @@ func TestExecutionPayloadBidServiceAuthenticatesAcceptedBidOnce(t *testing.T) {
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
 	require.Equal(t, 1, calls)
+}
+
+func TestValidateDirectBidDoesNotApplyGossipHighestFilter(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1)
+	addPreferencesToPool(epbsPool, 100)
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	epbsPool.HighestBids.Add(pool.HighestBidKey{
+		Slot: msg.Message.Slot, ParentBlockHash: msg.Message.ParentBlockHash, ParentBlockRoot: msg.Message.ParentBlockRoot,
+	}, newTestSignedExecutionPayloadBid(100, 2, 2))
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100)).Times(2)
+
+	require.NoError(t, service.ValidateBid(context.Background(), msg))
+	require.Error(t, service.ProcessMessage(context.Background(), nil, msg))
 }
 
 func TestExecutionPayloadBidServiceWrongSlot(t *testing.T) {

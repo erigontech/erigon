@@ -22,6 +22,7 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"math"
 	"math/big"
 	"net/http"
 	"net/http/httptest"
@@ -43,6 +44,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/fork"
+	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
@@ -76,6 +78,27 @@ type updateFailingDB struct {
 
 func (db updateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
 	return errors.New("stop after persistence")
+}
+
+func TestStoreDataColumnSidecars(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	storage := blob_storage_mock.NewMockDataColumnStorage(ctrl)
+	handler := &ApiHandler{columnStorage: storage}
+	root := common.Hash{1}
+	column := &cltypes.DataColumnSidecar{Index: 7}
+
+	storage.EXPECT().WriteColumnSidecars(gomock.Any(), root, int64(7), column).Return(nil)
+	require.NoError(t, handler.storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{column}))
+}
+
+func TestStoreDataColumnSidecarsRejectsInvalidInput(t *testing.T) {
+	root := common.Hash{1}
+	require.NoError(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, nil))
+	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{{}}))
+	require.Error(t, (&ApiHandler{}).storeDataColumnSidecars(context.Background(), root, []*cltypes.DataColumnSidecar{nil}))
+	require.Error(t, (&ApiHandler{columnStorage: blob_storage_mock.NewMockDataColumnStorage(gomock.NewController(t))}).storeDataColumnSidecars(
+		context.Background(), root, []*cltypes.DataColumnSidecar{{Index: math.MaxUint64}},
+	))
 }
 
 func TestBlockBuilderWindowPreGloas(t *testing.T) {
@@ -136,6 +159,182 @@ func TestValidateGloasHeadSnapshotRejectsMismatchedRoot(t *testing.T) {
 		Root:          baseRoot,
 		PayloadStatus: cltypes.PayloadStatusEmpty,
 	}))
+}
+
+func TestSelectGloasBidUsesGweiAndBoostSemantics(t *testing.T) {
+	localWei := big.NewInt(1_500_000_000)
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}
+	bid.Message.ExecutionPayment = 1
+
+	selected := selectGloasBid(localWei, []gloasBidCandidate{{
+		bid:                 bid,
+		boostFactor:         100,
+		maxExecutionPayment: 1,
+	}})
+
+	require.NotNil(t, selected)
+	require.Same(t, bid, selected.bid)
+	require.Equal(t, "2000000000", selected.executionValueWei.String())
+}
+
+func TestSelectGloasBidLocalWinsTieAndZeroBoost(t *testing.T) {
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 2)}
+
+	require.Nil(t, selectGloasBid(big.NewInt(2_000_000_000), []gloasBidCandidate{{
+		bid:                 bid,
+		boostFactor:         100,
+		maxExecutionPayment: 0,
+	}}))
+	require.Nil(t, selectGloasBid(big.NewInt(1), []gloasBidCandidate{{
+		bid:                 bid,
+		boostFactor:         0,
+		maxExecutionPayment: 0,
+	}}))
+}
+
+func TestSelectGloasBidCapsExecutionPaymentAndAvoidsOverflow(t *testing.T) {
+	capped := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}
+	capped.Message.ExecutionPayment = 100
+	overflow := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 2, ^uint64(0))}
+	overflow.Message.ExecutionPayment = ^uint64(0)
+
+	selected := selectGloasBid(big.NewInt(2_500_000_000), []gloasBidCandidate{
+		{bid: capped, boostFactor: 100, maxExecutionPayment: 1},
+		{bid: overflow, boostFactor: 1, maxExecutionPayment: ^uint64(0)},
+	})
+
+	require.NotNil(t, selected)
+	require.Same(t, overflow, selected.bid)
+	require.Equal(t, new(big.Int).Mul(new(big.Int).SetUint64(^uint64(0)), big.NewInt(1_000_000_000)), selected.executionValueWei)
+}
+
+func TestSelectGloasBidAppliesMinimumBidToCappedValue(t *testing.T) {
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 5)}
+	bid.Message.ExecutionPayment = 10
+	require.Nil(t, selectGloasBid(new(big.Int), []gloasBidCandidate{{
+		bid: bid, boostFactor: 100, maxExecutionPayment: 2, minBid: 8,
+	}}))
+	require.NotNil(t, selectGloasBid(new(big.Int), []gloasBidCandidate{{
+		bid: bid, boostFactor: 100, maxExecutionPayment: 3, minBid: 8,
+	}}))
+}
+
+func TestDecodeGloasBlockProductionOptionsJSONAndSSZ(t *testing.T) {
+	config := &cltypes.BuilderConfig{
+		MinBid:             4,
+		BuilderBoostFactor: 125,
+		Builders: []*cltypes.BuilderEntry{{
+			URL: "https://builder.example",
+			Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
+				Data: []byte("https://builder.example"), Slot: 10,
+			}},
+			BuilderPubkeys:      []common.Bytes48{{1}},
+			MaxExecutionPayment: 5,
+			MinBid:              6,
+			BuilderBoostFactor:  150,
+		}},
+	}
+	jsonBody, err := json.Marshal(config)
+	require.NoError(t, err)
+	sszBody, err := config.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name        string
+		contentType string
+		body        []byte
+	}{
+		{name: "json", contentType: "application/json", body: jsonBody},
+		{name: "ssz", contentType: "application/octet-stream", body: sszBody},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", bytes.NewReader(tc.body))
+			req.Header.Set("Content-Type", tc.contentType)
+			req.Header.Set("Eth-Consensus-Version", "gloas")
+			opts, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+			require.NoError(t, err)
+			require.True(t, opts.includePayload)
+			require.Equal(t, config.MinBid, opts.builderConfig.MinBid)
+			require.Equal(t, config.Builders[0].URL, opts.builderConfig.Builders[0].URL)
+		})
+	}
+}
+
+func TestDecodeGloasBlockProductionOptionsRejectsInvalidMetadata(t *testing.T) {
+	valid := `{"min_bid":"0","builder_boost_factor":"100","builders":[]}`
+	for _, tc := range []struct {
+		name    string
+		url     string
+		version string
+		body    string
+	}{
+		{name: "missing include payload", url: "/eth/v4/validator/blocks/10", version: "gloas", body: valid},
+		{name: "invalid include payload", url: "/eth/v4/validator/blocks/10?include_payload=sure", version: "gloas", body: valid},
+		{name: "missing version", url: "/eth/v4/validator/blocks/10?include_payload=true", body: valid},
+		{name: "wrong version", url: "/eth/v4/validator/blocks/10?include_payload=true", version: "fulu", body: valid},
+		{name: "missing body", url: "/eth/v4/validator/blocks/10?include_payload=true", version: "gloas"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, tc.url, strings.NewReader(tc.body))
+			req.Header.Set("Content-Type", "application/json")
+			if tc.version != "" {
+				req.Header.Set("Eth-Consensus-Version", tc.version)
+			}
+			_, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+			require.Error(t, err)
+		})
+	}
+}
+
+func TestDecodeGloasBlockProductionOptionsAcceptsMaximumJSONConfig(t *testing.T) {
+	config := &cltypes.BuilderConfig{Builders: make([]*cltypes.BuilderEntry, cltypes.MaxBuilderEntries)}
+	for i := range config.Builders {
+		authData := make([]byte, cltypes.MaxBuilderAuthDataSize)
+		authData[0] = byte(i)
+		config.Builders[i] = &cltypes.BuilderEntry{
+			URL:            "https://example.com/" + strings.Repeat("a", 2020) + fmt.Sprintf("%02d", i),
+			Auth:           &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{Data: authData, Slot: 10}},
+			BuilderPubkeys: make([]common.Bytes48, cltypes.MaxBuilderPubkeys),
+		}
+	}
+	body, err := json.Marshal(config)
+	require.NoError(t, err)
+	require.Greater(t, len(body), 1<<20)
+	require.LessOrEqual(t, len(body), maxBuilderConfigRequestSize)
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=false", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", "gloas")
+	_, err = decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+	require.NoError(t, err)
+}
+
+func TestPostV4WithBidRouteRejectsMissingVersionBeforeProduction(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10/with_bid", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostV4WithBidRejectsTrailingJSON(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, 1)}
+	body, err := json.Marshal(bid)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10/with_bid", strings.NewReader(string(body)+`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "trailing data")
 }
 
 func TestPublishBlindedBlocksRejectsGloas(t *testing.T) {
@@ -1482,6 +1681,30 @@ func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 	}, 5*time.Second, 10*time.Millisecond)
 	require.Contains(t, logs(), "blobSidecars=0")
 	require.Contains(t, logs(), "columnSidecars=0")
+}
+
+func TestSetupHeaderResponsePreservesExecutionValueAboveUint64(t *testing.T) {
+	h := &ApiHandler{}
+	rr := httptest.NewRecorder()
+	value := new(big.Int).Lsh(big.NewInt(1), 80)
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, false, value, new(big.Int))
+	require.Equal(t, value.String(), rr.Header().Get("Eth-Execution-Payload-Value"))
+}
+
+func TestBroadcastGloasBuilderBlockDoesNotRequireEnvelopeBlobsYet(t *testing.T) {
+	commitments := solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+	commitment := cltypes.KZGCommitment{1}
+	commitments.Append(&commitment)
+	columns, pending, err := collectPublishedPayloadData(commitments, true, func(common.Bytes48) (BlobBundle, bool) {
+		return BlobBundle{}, false
+	})
+	require.NoError(t, err)
+	require.True(t, pending)
+	require.Empty(t, columns)
+	_, _, err = collectPublishedPayloadData(commitments, false, func(common.Bytes48) (BlobBundle, bool) {
+		return BlobBundle{}, false
+	})
+	require.Error(t, err)
 }
 
 // TestCaplinBlockProductionWithWithdrawalRequest tests Caplin's produceBeaconBody

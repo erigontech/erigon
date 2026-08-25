@@ -23,6 +23,7 @@ import (
 	"errors"
 	"fmt"
 	"io"
+	"net"
 	"net/http"
 	"net/url"
 	"strconv"
@@ -40,11 +41,14 @@ var _ BuilderClient = &builderClient{}
 
 var ErrNoContent = errors.New("no http content")
 
+const maxBuilderResponseBodySize = 1 << 20
+
 type builderClient struct {
 	// ref: https://ethereum.github.io/builder-specs/#/
 	httpClient   *http.Client
 	url          *url.URL
 	beaconConfig *clparams.BeaconChainConfig
+	lookupIP     func(context.Context, string) ([]net.IPAddr, error)
 }
 
 func NewBlockBuilderClient(baseUrl string, beaconConfig *clparams.BeaconChainConfig) *builderClient {
@@ -200,6 +204,183 @@ func (b *builderClient) GetStatus(ctx context.Context) error {
 		return nil
 	}
 	return err
+}
+
+func (b *builderClient) SubmitBuilderPreferences(ctx context.Context, builderURL string, proposerPubkey common.Bytes48, request *cltypes.BuilderPreferencesRequest) error {
+	if request == nil {
+		return errors.New("nil builder preferences request")
+	}
+	payload, err := json.Marshal(request)
+	if err != nil {
+		return err
+	}
+	targetURL, err := b.builderEndpoint(ctx, builderURL, "eth", "v1", "builder", "builder_preferences", proposerPubkey.Hex())
+	if err != nil {
+		return err
+	}
+	response, err := b.builderCall(ctx, http.MethodPost, targetURL, map[string]string{
+		"Eth-Consensus-Version": clparams.GloasVersion.String(),
+	}, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	if response.status != http.StatusAccepted {
+		return fmt.Errorf("builder preferences: unexpected status code %d", response.status)
+	}
+	return nil
+}
+
+func (b *builderClient) RequestExecutionPayloadBid(ctx context.Context, builderURL string, slot uint64, parentHash, parentRoot common.Hash, proposerPubkey common.Bytes48, auth *cltypes.SignedBuilderRequestAuth, timeout time.Duration) (*cltypes.SignedExecutionPayloadBid, error) {
+	if auth == nil {
+		return nil, errors.New("nil builder request auth")
+	}
+	timeoutMilliseconds := timeout.Milliseconds()
+	if timeoutMilliseconds <= 0 {
+		return nil, errors.New("builder request timeout must be at least one millisecond")
+	}
+	requestContext, cancel := context.WithTimeout(ctx, timeout)
+	defer cancel()
+	payload, err := json.Marshal(auth)
+	if err != nil {
+		return nil, err
+	}
+	targetURL, err := b.builderEndpoint(requestContext, builderURL, "eth", "v1", "builder", "execution_payload_bid", strconv.FormatUint(slot, 10), parentHash.Hex(), parentRoot.Hex(), proposerPubkey.Hex())
+	if err != nil {
+		return nil, err
+	}
+	response, err := b.builderCall(requestContext, http.MethodPost, targetURL, map[string]string{
+		"Eth-Consensus-Version": clparams.GloasVersion.String(),
+		"Date-Milliseconds":     strconv.FormatInt(time.Now().UnixMilli(), 10),
+		"X-Timeout-Ms":          strconv.FormatInt(timeoutMilliseconds, 10),
+	}, bytes.NewReader(payload))
+	if err != nil {
+		return nil, err
+	}
+	if response.status == http.StatusNoContent {
+		return nil, nil
+	}
+	if response.status != http.StatusOK {
+		return nil, fmt.Errorf("execution payload bid: unexpected status code %d", response.status)
+	}
+	if response.header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
+		return nil, errors.New("execution payload bid response is missing the Gloas consensus version")
+	}
+	var responseBody struct {
+		Version string                             `json:"version"`
+		Data    *cltypes.SignedExecutionPayloadBid `json:"data"`
+	}
+	if err := json.Unmarshal(response.body, &responseBody); err != nil {
+		return nil, fmt.Errorf("decode execution payload bid: %w", err)
+	}
+	if responseBody.Version != clparams.GloasVersion.String() || responseBody.Data == nil || responseBody.Data.Message == nil {
+		return nil, errors.New("execution payload bid response is missing Gloas data")
+	}
+	return responseBody.Data, nil
+}
+
+func (b *builderClient) SubmitSignedBeaconBlock(ctx context.Context, builderURL string, block *cltypes.SignedBeaconBlock) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("nil signed beacon block")
+	}
+	payload, err := json.Marshal(block)
+	if err != nil {
+		return err
+	}
+	targetURL, err := b.builderEndpoint(ctx, builderURL, "eth", "v1", "builder", "beacon_blocks")
+	if err != nil {
+		return err
+	}
+	response, err := b.builderCall(ctx, http.MethodPost, targetURL, map[string]string{
+		"Eth-Consensus-Version": block.Version().String(),
+	}, bytes.NewReader(payload))
+	if err != nil {
+		return err
+	}
+	if response.status != http.StatusAccepted {
+		return fmt.Errorf("signed beacon block: unexpected status code %d", response.status)
+	}
+	return nil
+}
+
+func (b *builderClient) builderEndpoint(ctx context.Context, rawURL string, path ...string) (string, error) {
+	target, err := url.Parse(rawURL)
+	if err != nil {
+		return "", err
+	}
+	if (target.Scheme != "http" && target.Scheme != "https") || target.Host == "" || target.User != nil {
+		return "", errors.New("builder URL must be an HTTP(S) URL without user information")
+	}
+	hostname := target.Hostname()
+	if hostname == "localhost" {
+		return "", errors.New("builder URL resolves to a non-public address")
+	}
+	addresses := []net.IPAddr(nil)
+	if ip := net.ParseIP(hostname); ip != nil {
+		addresses = []net.IPAddr{{IP: ip}}
+	} else {
+		lookup := b.lookupIP
+		if lookup == nil {
+			lookup = net.DefaultResolver.LookupIPAddr
+		}
+		addresses, err = lookup(ctx, hostname)
+		if err != nil {
+			return "", fmt.Errorf("resolve builder URL: %w", err)
+		}
+	}
+	if len(addresses) == 0 {
+		return "", errors.New("builder URL has no resolved addresses")
+	}
+	for _, address := range addresses {
+		if !isPublicBuilderIP(address.IP) {
+			return "", fmt.Errorf("builder URL resolves to non-public address %s", address.IP)
+		}
+	}
+	return target.JoinPath(path...).String(), nil
+}
+
+func isPublicBuilderIP(ip net.IP) bool {
+	return ip != nil && ip.IsGlobalUnicast() && !ip.IsPrivate() && !ip.IsLoopback() && !ip.IsLinkLocalUnicast() && !ip.IsLinkLocalMulticast() && !ip.IsUnspecified()
+}
+
+type builderHTTPResponse struct {
+	body   []byte
+	header http.Header
+	status int
+}
+
+func (b *builderClient) builderCall(ctx context.Context, method, targetURL string, headers map[string]string, body io.Reader) (*builderHTTPResponse, error) {
+	request, err := http.NewRequestWithContext(ctx, method, targetURL, body)
+	if err != nil {
+		return nil, err
+	}
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Accept", "application/json")
+	for name, value := range headers {
+		request.Header.Set(name, value)
+	}
+	if b.httpClient == nil {
+		return nil, errors.New("nil builder HTTP client")
+	}
+	client := *b.httpClient
+	client.CheckRedirect = func(*http.Request, []*http.Request) error {
+		return errors.New("builder redirects are not allowed")
+	}
+	response, err := client.Do(request)
+	if err != nil {
+		return nil, err
+	}
+	defer response.Body.Close()
+	bodyBytes, err := io.ReadAll(io.LimitReader(response.Body, maxBuilderResponseBodySize+1))
+	if err != nil {
+		return nil, err
+	}
+	if len(bodyBytes) > maxBuilderResponseBodySize {
+		return nil, fmt.Errorf("builder response exceeds %d bytes", maxBuilderResponseBodySize)
+	}
+	if response.StatusCode < 200 || response.StatusCode >= 300 {
+		return nil, fmt.Errorf("builder returned status code %d: %s", response.StatusCode, string(bodyBytes))
+	}
+	return &builderHTTPResponse{body: bodyBytes, header: response.Header.Clone(), status: response.StatusCode}, nil
 }
 
 func httpCall[T any](ctx context.Context, client *http.Client, method, rawURL string, headers map[string]string, payloadReader io.Reader, body T) (*T, error) {
