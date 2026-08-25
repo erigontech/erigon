@@ -2039,8 +2039,8 @@ func (result *execResult) calcFees(
 	// must respect those writes — otherwise SelfDestructPath is emitted
 	// and Normalize's sdSet filter drops them.
 	//
-	// The delete cannot be taken back, so this pass stands down whenever the
-	// coinbase's emptiness rests on an in-flight incarnation.
+	// A delete drawn from an in-flight incarnation is published before the round
+	// that retracts it, and read there by consumers that record no read.
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
 		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
 		!vm.AnyEstimateAccountCell(result.Coinbase, txIndex)

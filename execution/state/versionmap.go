@@ -938,9 +938,9 @@ func (vm *VersionMap) FindDoneSelfDestructInRange(addr accounts.Address, lo, hi 
 }
 
 // findDoneSelfDestructLocked is the destruct scan every consumer shares, for
-// callers already holding e.mu. Estimate cells do not count: the readers built on
-// it record no read, and the EIP-161 delete a wrong verdict produces cannot be
-// pulled back out of an already-merged write set.
+// callers already holding e.mu. Estimate cells do not count: a verdict drawn from
+// one is published before the round that retracts it, and the reconstruction
+// readers consume it there without recording a read.
 func findDoneSelfDestructLocked(e *AddressEntry, lo, hi int, target bool) (Version, bool) {
 	if e.SelfDestruct == nil || hi <= lo {
 		return Version{}, false
