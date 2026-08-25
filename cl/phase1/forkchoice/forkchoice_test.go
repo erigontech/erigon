@@ -116,7 +116,7 @@ func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) 
 	cfg := clparams.MainnetBeaconConfig
 	finalizedRoot := common.Hash{0x42}
 	finalizedState := state.New(&cfg)
-	finalizedState.SetSlot(2 * cfg.SlotsPerEpoch)
+	require.NoError(t, finalizedState.SetSlot(2*cfg.SlotsPerEpoch))
 	validator := solid.NewValidatorFromParameters(
 		common.Bytes48{},
 		common.Hash{},
@@ -127,7 +127,7 @@ func TestUpdateCheckpointsPrunesOperationsWithExactFinalizedState(t *testing.T) 
 		3,
 		cfg.FarFutureEpoch,
 	)
-	finalizedState.AddValidator(validator, cfg.MaxEffectiveBalance)
+	require.NoError(t, finalizedState.AddValidator(validator, cfg.MaxEffectiveBalance))
 
 	operationsPool := pool.NewOperationsPool(&cfg)
 	exit := &cltypes.SignedVoluntaryExit{

@@ -27,6 +27,7 @@ import (
 	"slices"
 	"strings"
 	"sync"
+	"unsafe"
 
 	btree2 "github.com/tidwall/btree"
 
@@ -43,6 +44,15 @@ type dataWithTxNum struct {
 	txNum uint64
 }
 
+// Prevents false sharing between neighboring per-domain locks on widespread
+// platforms with 128 mod (cache line size) = 0 — the sync.Pool poolLocal pad
+// pattern. The 128-byte stride keeps lock bodies off a shared 64-byte line
+// for any base alignment of the array.
+type paddedRWMutex struct {
+	sync.RWMutex
+	_ [128 - unsafe.Sizeof(sync.RWMutex{})%128]byte
+}
+
 // TemporalMemBatch - temporal read-write interface - which storing updates in RAM. Don't forget to call `.Flush()`
 type TemporalMemBatch struct {
 	stepSize uint64
@@ -53,9 +63,9 @@ type TemporalMemBatch struct {
 	// Disable for offline commands (stage_exec etc.) — history reads come from disk anyway.
 	inMemHistoryReads bool
 
-	latestStateLock sync.RWMutex
-	domains         [kv.DomainLen]map[string][]dataWithTxNum
-	storage         *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
+	latestStateLocks [kv.DomainLen]paddedRWMutex
+	domains          [kv.DomainLen]map[string][]dataWithTxNum
+	storage          *btree2.Map[string, []dataWithTxNum] // TODO: replace hardcoded domain name to per-config configuration of available Guarantees/AccessMethods (range vs get)
 
 	domainWriters [kv.DomainLen]*DomainBufferedWriter
 	iiWriters     []*InvertedIndexBufferedWriter
@@ -116,6 +126,18 @@ func NewTemporalMemBatch(tx kv.TemporalTx, ioMetrics any) *TemporalMemBatch {
 func (sd *TemporalMemBatch) SetInMemHistoryReads(v bool) { sd.inMemHistoryReads = v }
 func (sd *TemporalMemBatch) InMemHistoryReads() bool     { return sd.inMemHistoryReads }
 
+func (sd *TemporalMemBatch) lockAllDomains() {
+	for i := range sd.latestStateLocks {
+		sd.latestStateLocks[i].Lock()
+	}
+}
+
+func (sd *TemporalMemBatch) unlockAllDomains() {
+	for i := range sd.latestStateLocks {
+		sd.latestStateLocks[i].Unlock()
+	}
+}
+
 func (sd *TemporalMemBatch) DomainPut(domain kv.Domain, k string, v []byte, txNum uint64, preval []byte) error {
 	sameTxNumUpdate := sd.putLatest(domain, k, v, txNum)
 	return sd.putHistory(domain, common.ToBytesZeroCopy(k), v, txNum, preval, sameTxNumUpdate)
@@ -142,8 +164,8 @@ func (sd *TemporalMemBatch) putHistory(domain kv.Domain, k, v []byte, txNum uint
 // putLatest reports whether this write is a same-txNum update of the key,
 // replacing the key's last entry in place instead of appending a version.
 func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, txNum uint64) (sameTxNumUpdate bool) {
-	sd.latestStateLock.Lock()
-	defer sd.latestStateLock.Unlock()
+	sd.latestStateLocks[domain].Lock()
+	defer sd.latestStateLocks[domain].Unlock()
 
 	var updateMetrics = func(domain kv.Domain, putKeySize int, putValueSize int) {
 		sd.metrics.Lock()
@@ -224,13 +246,13 @@ func (sd *TemporalMemBatch) putLatest(domain kv.Domain, key string, val []byte, 
 }
 
 func (sd *TemporalMemBatch) GetLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
-	sd.latestStateLock.RLock()
-	defer sd.latestStateLock.RUnlock()
+	sd.latestStateLocks[domain].RLock()
+	defer sd.latestStateLocks[domain].RUnlock()
 	return sd.getLatest(domain, key)
 }
 
 // getLatest is the lock-free implementation of GetLatest.
-// The caller must already hold latestStateLock (either RLock or Lock),
+// The caller must already hold the domain's lock (either RLock or Lock),
 // e.g. from within an IteratePrefix callback.
 func (sd *TemporalMemBatch) getLatest(domain kv.Domain, key []byte) (v []byte, step kv.Step, ok bool) {
 	var unwoundLatest = func(domain kv.Domain, key string) (v []byte, step kv.Step, ok bool) {
@@ -280,8 +302,8 @@ func (sd *TemporalMemBatch) GetAsOf(domain kv.Domain, key []byte, ts uint64) (v 
 	if !sd.inMemHistoryReads && domain != kv.ReceiptDomain {
 		return nil, false, errors.New("GetAsOf called on TemporalMemBatch with inMemHistoryReads disabled")
 	}
-	sd.latestStateLock.RLock()
-	defer sd.latestStateLock.RUnlock()
+	sd.latestStateLocks[domain].RLock()
+	defer sd.latestStateLocks[domain].RUnlock()
 
 	// unwoundLatest returns the pre-unwound-block value for a key that was
 	// modified by the unwound block. Only fires when ts is at-or-after the
@@ -346,15 +368,15 @@ func (sd *TemporalMemBatch) SizeEstimate() uint64 {
 	// CachePutSize is guarded by the metrics lock — the put path, Merge and the
 	// reset all mutate it under sd.metrics.Lock(), and MergeMetrics folds in a
 	// boundary worker's accumulator from another goroutine. Read under the same
-	// lock (not latestStateLock, which guards the domains map, not this counter).
+	// lock (not the domain locks, which guard the domains maps, not this counter).
 	sd.metrics.RLock()
 	defer sd.metrics.RUnlock()
 	return uint64(sd.metrics.CachePutSize)
 }
 
 func (sd *TemporalMemBatch) IteratePrefix(domain kv.Domain, prefix []byte, roTx kv.Tx, it func(k []byte, v []byte) (cont bool, err error)) error {
-	sd.latestStateLock.RLock()
-	defer sd.latestStateLock.RUnlock()
+	sd.latestStateLocks[domain].RLock()
+	defer sd.latestStateLocks[domain].RUnlock()
 	var ramIter btree2.MapIter[string, []dataWithTxNum]
 	if domain == kv.StorageDomain {
 		ramIter = sd.storage.Iter()
@@ -410,8 +432,8 @@ func (sd *TemporalMemBatch) HasPrefix(domain kv.Domain, prefix []byte, roTx kv.T
 // for the given domain whose key starts with prefix.  It never touches disk or
 // segment files — only the in-memory btree (StorageDomain) or the domain map.
 func (sd *TemporalMemBatch) HasPrefixInRAM(domain kv.Domain, prefix []byte) bool {
-	sd.latestStateLock.RLock()
-	defer sd.latestStateLock.RUnlock()
+	sd.latestStateLocks[domain].RLock()
+	defer sd.latestStateLocks[domain].RUnlock()
 
 	if domain == kv.StorageDomain {
 		prefixStr := common.ToStringZeroCopy(prefix)
@@ -451,6 +473,25 @@ func (sd *TemporalMemBatch) SetChangesetAccumulator(acc *changeset.StateChangeSe
 		}
 	}
 }
+
+// SetCommitmentDiff redirects only the commitment writer's diff, leaving every
+// other domain writer pointed at the live accumulator.
+func (sd *TemporalMemBatch) SetCommitmentDiff(acc *changeset.StateChangeSet) {
+	if acc == nil {
+		sd.domainWriters[kv.CommitmentDomain].SetDiff(nil)
+		return
+	}
+	sd.domainWriters[kv.CommitmentDomain].SetDiff(&acc.Diffs[kv.CommitmentDomain])
+}
+
+func (sd *TemporalMemBatch) CommitmentDiff() *kv.DomainDiff {
+	return sd.domainWriters[kv.CommitmentDomain].Diff()
+}
+
+func (sd *TemporalMemBatch) SetCommitmentDiffRaw(d *kv.DomainDiff) {
+	sd.domainWriters[kv.CommitmentDomain].SetDiff(d)
+}
+
 func (sd *TemporalMemBatch) SavePastChangesetAccumulator(blockHash common.Hash, blockNumber uint64, acc *changeset.StateChangeSet) {
 	sd.pastChangesLock.Lock()
 	defer sd.pastChangesLock.Unlock()
@@ -516,8 +557,8 @@ func (sd *TemporalMemBatch) GetDiffset(tx kv.RwTx, blockHash common.Hash, blockN
 
 // Unwind drops [unwindToTxNum, ∞)
 func (sd *TemporalMemBatch) Unwind(unwindToTxNum uint64, changeset *[kv.DomainLen][]kv.DomainEntryDiff) {
-	sd.latestStateLock.Lock()
-	defer sd.latestStateLock.Unlock()
+	sd.lockAllDomains()
+	defer sd.unlockAllDomains()
 
 	sd.unwindToTxNum = unwindToTxNum
 
@@ -726,7 +767,7 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch) error {
 }
 
 // flushLocked is the body of Flush, factored so the callback path can run it
-// inside latestStateLock without re-acquiring. PlainStateVersion advances here
+// holding all domain locks without re-acquiring. PlainStateVersion advances here
 // with the domain writes; metadata overlays must not advance it independently.
 func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 	if sd.unwindChangesetRaw != nil {
@@ -754,11 +795,11 @@ func (sd *TemporalMemBatch) flushLocked(ctx context.Context, tx kv.RwTx) error {
 // Flush writes the mem-batch to tx. With kv.WithFlushCallback options, the
 // registered per-domain callback is invoked for every (key, value, step, txNum)
 // tuple after the MDBX write succeeds, so a downstream cache can never be left
-// ahead of MDBX. Runs under latestStateLock so the callback's snapshot matches
+// ahead of MDBX. Runs under all domain locks so the callback's snapshot matches
 // flush-time state.
 func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.FlushOption) error {
-	sd.latestStateLock.Lock()
-	defer sd.latestStateLock.Unlock()
+	sd.lockAllDomains()
+	defer sd.unlockAllDomains()
 
 	if err := sd.flushLocked(ctx, tx); err != nil {
 		return err
@@ -800,8 +841,8 @@ func (sd *TemporalMemBatch) Flush(ctx context.Context, tx kv.RwTx, opts ...kv.Fl
 // FlushWithCommitmentCallback flushes the batch then invokes cb per
 // commitment-domain tuple under the lock.
 func (sd *TemporalMemBatch) FlushWithCommitmentCallback(ctx context.Context, tx kv.RwTx, cb execctx.CommitmentFlushCallback) error {
-	sd.latestStateLock.Lock()
-	defer sd.latestStateLock.Unlock()
+	sd.lockAllDomains()
+	defer sd.unlockAllDomains()
 
 	if err := sd.flushLocked(ctx, tx); err != nil {
 		return err
