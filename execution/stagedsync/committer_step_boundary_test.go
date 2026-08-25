@@ -19,7 +19,9 @@ package stagedsync
 import (
 	"bytes"
 	"context"
+	"errors"
 	"math/rand"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -759,6 +761,98 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 					"iteration %d: block %d's request must be processed before its own result", i, i)
 			}
 		})
+	}
+}
+
+// TestComputeWithBlockAccumulator_ConcurrentRotation drives the calculator on
+// its own goroutine (cc.Start) against a producer goroutine that mimics the
+// real exec loop's ordering (exec3_parallel.go): install a block's changeset,
+// write, save it, deliver the blockResult, clear, and move straight to the
+// next block with no wait for the calculator to catch up. It pins that every
+// block's commitment diffs land in that block's own saved changeset no matter
+// how far the calculator lags behind the producer — the genuinely concurrent
+// counterpart to TestHandleMessage_StepBoundaryRecordsIntoOwnChangesetInWindow
+// above, meant to be run with `go test -race` to catch an accumulator-pointer
+// race the single-goroutine tests can't reach.
+func TestComputeWithBlockAccumulator_ConcurrentRotation(t *testing.T) {
+	ctx := context.Background()
+	logger := log.New()
+	logger.SetHandler(log.DiscardHandler())
+	const numBlocks = uint64(24)
+	const txsPerBlock = uint64(5)
+
+	db, tx, doms := setupStepTest(t)
+
+	in := make(chan applyResult, 8)
+	out := make(chan commitmentResult, int(numBlocks)+8)
+	// perBlockFrom=1: every block owns its own changeset, matching the
+	// changeset-window exec loop's per-block accumulator install/save/clear.
+	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out)
+	require.NoError(t, err)
+	cc.Start(ctx)
+
+	// Adds extra contention on changesetMu from a third goroutine, unrelated
+	// to routing correctness but raising the odds of exposing any accumulator
+	// access that isn't actually serialized by the lock.
+	stopDistractor := make(chan struct{})
+	var distractorWG sync.WaitGroup
+	distractorWG.Add(1)
+	go func() {
+		defer distractorWG.Done()
+		for {
+			select {
+			case <-stopDistractor:
+				return
+			default:
+				doms.GetChangesetAccumulator()
+			}
+		}
+	}()
+
+	changesets := make(map[uint64]*changeset.StateChangeSet, numBlocks)
+	rnd := rand.New(rand.NewSource(42))
+	var txNum uint64
+	for b := uint64(1); b <= numBlocks; b++ {
+		blockHash := common.Hash{byte(b)}
+		cs := &changeset.StateChangeSet{}
+		changesets[b] = cs
+		doms.SetChangesetAccumulator(cs)
+
+		var lastTx uint64
+		for i := uint64(0); i < txsPerBlock; i++ {
+			txNum++
+			lastTx = txNum
+			addrBytes := make([]byte, length.Addr)
+			rnd.Read(addrBytes)
+			addr := accounts.InternAddress([20]byte(addrBytes))
+			bal := *uint256.NewInt(txNum * 1000)
+			acc := accounts.Account{Nonce: txNum, Balance: bal, CodeHash: accounts.EmptyCodeHash}
+			buf := accounts.SerialiseV3(&acc)
+			require.NoError(t, doms.DomainPut(kv.AccountsDomain, tx, addrBytes, buf, txNum, nil))
+			in <- &txResult{blockNum: b, blockHash: blockHash, txNum: txNum, rules: &chain.Rules{}, writes: nonceBalanceWrites(addr, txNum, bal)}
+		}
+
+		doms.SavePastChangesetAccumulator(blockHash, b, cs)
+		in <- newTestBlockResult(b, blockHash, lastTx, false)
+		doms.SetChangesetAccumulator(nil)
+	}
+	close(in)
+
+	// Range rather than Stop() first: out closes only after loop() returns
+	// (see TestLoop_BlockRequestBeatsSameNumberedResult). Root mismatches are
+	// expected here (no real state root is computed) and irrelevant — this
+	// test is about changeset routing, not root correctness.
+	for r := range out {
+		require.True(t, r.err == nil || errors.Is(r.err, ErrWrongTrieRoot),
+			"block %d: unexpected compute error: %v", r.blockNum, r.err)
+	}
+	cc.Stop()
+	close(stopDistractor)
+	distractorWG.Wait()
+
+	for b := uint64(1); b <= numBlocks; b++ {
+		require.Positive(t, changesets[b].Diffs[kv.CommitmentDomain].Len(),
+			"block %d: no commitment diffs landed in its own saved changeset — a concurrent accumulator rotation may have misrouted them", b)
 	}
 }
 
