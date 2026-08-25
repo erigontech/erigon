@@ -45,8 +45,9 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 		return nil, err
 	}
 	defer tx.Rollback()
+	overlayTx := api.filters.WithTemporalOverlay(tx)
 
-	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(hash, true), tx, api._blockReader, api.filters)
+	blockNumber, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithHash(hash, true), overlayTx, api._blockReader, nil)
 	if err != nil {
 		if errors.As(err, &rpc.BlockNotFoundErr{}) {
 			return nil, nil
@@ -55,21 +56,21 @@ func (api *ErigonImpl) GetLogsByHash(ctx context.Context, hash common.Hash) ([][
 	}
 	// The gate runs before the cache is consulted: availability can move while an
 	// entry is still cached, and a hit must not answer below the advertised boundary.
-	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, tx, blockNumber)
+	err = api.BaseAPI.checkBlockReceiptsAvailable(ctx, overlayTx, blockNumber)
 	if err != nil {
 		return nil, err
 	}
 
 	receipts, ok := api.getCachedReceipts(ctx, hash)
 	if !ok {
-		block, err := api.blockByHashWithSenders(ctx, tx, hash)
+		block, err := api.blockByHashWithSenders(ctx, overlayTx, hash)
 		if err != nil {
 			return nil, err
 		}
 		if block == nil {
 			return nil, nil
 		}
-		receipts, err = api.getReceipts(ctx, tx, block)
+		receipts, err = api.getReceipts(ctx, overlayTx, block)
 		if err != nil {
 			return nil, err
 		}

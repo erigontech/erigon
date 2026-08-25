@@ -147,7 +147,7 @@ func (api *OtterscanAPIImpl) runTracer(ctx context.Context, tx kv.TemporalTx, ha
 	}
 	engine := api.engine()
 
-	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, api.stateCache, api._txNumReader, tx, int(txIndex))
+	ibs, blockCtx, _, rules, signer, err := transactions.ComputeBlockContext(ctx, engine, block.HeaderNoCopy(), chainConfig, api._blockReader, nil, api._txNumReader, tx, int(txIndex))
 	if err != nil {
 		return nil, err
 	}
@@ -345,7 +345,7 @@ func (api *OtterscanAPIImpl) getBlockWithSenders(ctx context.Context, number rpc
 		return nil, nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, hash, n)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, n)
 	if err != nil {
 		return nil, nil, err
 	}
