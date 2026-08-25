@@ -665,7 +665,13 @@ func (sd *TemporalMemBatch) Merge(o kv.TemporalMemBatch, closeOther bool) error 
 	})
 
 	for domain, writer := range other.domainWriters {
-		sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer)
+		// Skip a nil writer: an EMPTY block (heartbeat) touches no state, so its untouched domains have no
+		// writer (domainWriters are created lazily on first write). Appending nil here poisons
+		// pastDomainWriters, which flushWriters/DiscardWrites deref WITHOUT the nil guard the domainWriters
+		// loop has — a nil-deref crash when an empty block's SD is merged/promoted (frontier run-ahead).
+		if writer != nil {
+			sd.pastDomainWriters[domain] = append(sd.pastDomainWriters[domain], writer)
+		}
 		other.domainWriters[domain] = nil
 	}
 
@@ -840,6 +846,9 @@ func (sd *TemporalMemBatch) flushWriters(ctx context.Context, tx kv.RwTx) error 
 	aggTx := AggTx(tx)
 	for _, ws := range sd.pastDomainWriters {
 		for i := len(ws) - 1; i >= 0; i-- {
+			if ws[i] == nil { // defensive: mirror the domainWriters nil guard below (empty-block merge)
+				continue
+			}
 			if err := ws[i].Flush(ctx, tx); err != nil {
 				return err
 			}
