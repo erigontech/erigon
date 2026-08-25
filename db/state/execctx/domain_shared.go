@@ -220,8 +220,13 @@ func NewSharedDomains(ctx context.Context, tx kv.TemporalTx, logger log.Logger, 
 		return sd, err
 	}
 
-	// ErrBehindCommitment is an environmental signal; sd is fully initialized.
-	if blockNum > 0 {
+	// ErrBehindCommitment is an environmental signal; sd is fully initialized. SKIP it for a FRONTIER block
+	// (a read-through parent is attached): such a block EXTENDS the canonical chain — its commitment resolves
+	// from the parent's LIVE (uncommitted) state, so it is EXPECTED to be ahead of the canonical TxNums index
+	// (which only advances at FCU). The frontier chains the txnum index through the parent itself
+	// (copyFrontierChainTables in PreExecute), so comparing against the canonical TxNums.Last here is wrong and
+	// spuriously trips ErrBehindCommitment (blocking a multi-deep extending branch that has not yet FCU'd).
+	if blockNum > 0 && sd.parent == nil {
 		lastBn, _, err := rawdbv3.TxNums.Last(tx)
 		if err != nil {
 			return sd, err

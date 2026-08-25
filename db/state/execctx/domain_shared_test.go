@@ -551,8 +551,8 @@ func TestSharedDomain_MergeUnwindAcrossStepBoundary(t *testing.T) {
 	sd2.SetTxNum(unwindTarget)
 
 	// Merge sd2 into sd1. Both sides carry a non-nil unwindChangeset, so
-	// TemporalMemBatch.Merge takes the raw-merge branch.
-	require.NoError(sd1.Merge(ctx, unwindTarget, sd2, unwindTarget))
+	// TemporalMemBatch.Merge takes the raw-merge branch. closeOther=true (canonical spend-and-close).
+	require.NoError(sd1.Merge(ctx, unwindTarget, sd2, unwindTarget, true))
 
 	// Flush replays the combined raw changeset against MDBX.
 	require.NoError(sd1.Flush(ctx, rwTx))
