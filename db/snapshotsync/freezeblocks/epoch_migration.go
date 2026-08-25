@@ -70,9 +70,17 @@ func sortedNoOverlaps(segs []snaptype.FileInfo) []snaptype.FileInfo {
 		if segs[i].From != segs[j].From {
 			return segs[i].From < segs[j].From
 		}
-		return segs[i].To < segs[j].To
+		return segs[i].To > segs[j].To
 	})
-	return snapshotsync.NoOverlaps(segs)
+	out := segs[:0:0]
+	var maxTo uint64
+	for i := range segs {
+		if len(out) == 0 || segs[i].To > maxTo {
+			out = append(out, segs[i])
+			maxTo = segs[i].To
+		}
+	}
+	return out
 }
 
 // classifyByType splits one dir scan into type t's epoch ("ep"-marked) and decimal segments, sorted
