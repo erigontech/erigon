@@ -41,9 +41,10 @@ type pendingJobQueue[K comparable, M any] struct {
 	capacity int32
 	expiry   time.Duration
 	tick     time.Duration
-	// tryProcess returns whether to remove the current job and an optional
-	// callback that runs only after identity-checked removal. This lets the
-	// callback enqueue the same key without the new job being deleted.
+	// tryProcess validates a job before mutating state and decides whether to remove
+	// it. Any mutation it performs must remain safe if identity-checked removal
+	// fails. afterRemove runs only after successful removal and contains effects
+	// that require that guarantee, including re-enqueuing the same key.
 	tryProcess func(ctx context.Context, key K, msg M) (afterRemove func(), remove bool)
 	onExpired  func(key K)
 
