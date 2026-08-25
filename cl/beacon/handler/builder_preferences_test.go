@@ -18,11 +18,14 @@ package handler
 
 import (
 	"bytes"
+	"context"
+	"encoding/json"
 	"errors"
 	"net/http"
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -113,4 +116,83 @@ func TestPostValidatorBuilderPreferencesAcceptsMaximumJSONList(t *testing.T) {
 	handler.PostEthV1ValidatorBuilderPreferences(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostValidatorBuilderPreferencesReportsMalformedJSONEntryAndContinues(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := mock_services.NewMockBuilderClient(ctrl)
+	valid := testBuilderPreferencesEntries()[1]
+	validJSON, err := valid.MarshalJSON()
+	require.NoError(t, err)
+	client.EXPECT().SubmitBuilderPreferences(gomock.Any(), valid.URL, valid.ProposerPubkey, gomock.Any()).Return(nil)
+	handler := &ApiHandler{builderClient: client}
+	body := append([]byte(`[{"url":7},`), validJSON...)
+	body = append(body, ']')
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/builder_preferences", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1ValidatorBuilderPreferences(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.Contains(t, recorder.Body.String(), `"index":0`)
+}
+
+func TestPostValidatorBuilderPreferencesRejectsStructurallyInvalidJSON(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	handler := &ApiHandler{builderClient: mock_services.NewMockBuilderClient(ctrl)}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/builder_preferences", strings.NewReader(`[{"url":7}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1ValidatorBuilderPreferences(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	require.NotContains(t, recorder.Body.String(), `"failures"`)
+}
+
+func TestPostValidatorBuilderPreferencesBoundsSlowEntriesAndContinues(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	client := mock_services.NewMockBuilderClient(ctrl)
+	entries := make(cltypes.BuilderPreferencesEntries, 40)
+	for i := range entries {
+		entries[i] = testBuilderPreferencesEntries()[0].Clone().(*cltypes.BuilderPreferencesEntry)
+		entries[i].ProposerPubkey[0] = byte(i + 1)
+	}
+	client.EXPECT().SubmitBuilderPreferences(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(
+		func(ctx context.Context, _ string, proposer common.Bytes48, _ *cltypes.BuilderPreferencesRequest) error {
+			if proposer == entries[len(entries)-1].ProposerPubkey {
+				return nil
+			}
+			select {
+			case <-time.After(100 * time.Millisecond):
+				return errors.New("slow failure")
+			case <-ctx.Done():
+				return ctx.Err()
+			}
+		},
+	).Times(len(entries))
+	handler := &ApiHandler{builderClient: client}
+	body, err := entries.MarshalJSON()
+	require.NoError(t, err)
+	requestContext, cancel := context.WithTimeout(t.Context(), time.Second)
+	defer cancel()
+	request := httptest.NewRequestWithContext(requestContext, http.MethodPost, "/eth/v1/validator/builder_preferences", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+	started := time.Now()
+
+	handler.PostEthV1ValidatorBuilderPreferences(recorder, request)
+
+	require.Less(t, time.Since(started), 500*time.Millisecond)
+	require.Equal(t, http.StatusBadRequest, recorder.Code)
+	var response poolingError
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Len(t, response.Failures, len(entries)-1)
+	for i, failure := range response.Failures {
+		require.Equal(t, i, failure.Index)
+	}
 }

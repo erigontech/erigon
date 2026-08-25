@@ -57,7 +57,6 @@ var validTopics = map[event.EventTopic]struct{}{
 	event.StateHeadV2:                      {},
 	event.StateLightClientOptimisticUpdate: {},
 	event.StatePayloadAttributes:           {},
-	event.StateFastConfirmation:            {},
 }
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {

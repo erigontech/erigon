@@ -444,6 +444,26 @@ func (f *forkGraphDisk) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint6
 	return children != nil && !isBelowPrunedBoundary(children.maxSlot, f.lowestAvailableBlock.Load()) && children.maxSlot >= slot
 }
 
+func (f *forkGraphDisk) HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool {
+	if slot < f.LowestAvailableSlot() {
+		return false
+	}
+	found := false
+	f.blocks.Range(func(key, value any) bool {
+		root, ok := key.(common.Hash)
+		if !ok || root == exceptRoot {
+			return true
+		}
+		block, ok := value.(*cltypes.SignedBeaconBlock)
+		if ok && block != nil && block.Block != nil && block.Block.Slot == slot && block.Block.ProposerIndex == proposerIndex {
+			found = true
+			return false
+		}
+		return true
+	})
+	return found
+}
+
 func (f *forkGraphDisk) addValidatedChild(parentRoot, childRoot common.Hash, slot uint64) {
 	f.childrenMu.Lock()
 	defer f.childrenMu.Unlock()

@@ -182,6 +182,37 @@ func (f *Feed) Send(value any) (nsent int) {
 	return nsent
 }
 
+// TrySend delivers to subscribers that can receive immediately and drops the value for the rest.
+func (f *Feed) TrySend(value any) (nsent int) {
+	rvalue := reflect.ValueOf(value)
+
+	f.once.Do(func() { f.init(rvalue.Type()) })
+	if f.etype != rvalue.Type() {
+		panic(feedTypeError{op: "TrySend", got: rvalue.Type(), want: f.etype})
+	}
+
+	select {
+	case <-f.sendLock:
+	default:
+		return 0
+	}
+	defer func() { f.sendLock <- struct{}{} }()
+
+	if !f.mu.TryLock() {
+		return 0
+	}
+	f.sendCases = append(f.sendCases, f.inbox...)
+	f.inbox = nil
+	f.mu.Unlock()
+
+	for i := firstSubSendCase; i < len(f.sendCases); i++ {
+		if f.sendCases[i].Chan.TrySend(rvalue) {
+			nsent++
+		}
+	}
+	return nsent
+}
+
 type feedSub struct {
 	feed    *Feed
 	channel reflect.Value

@@ -35,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/network/services"
 	mock_services "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
 	"github.com/erigontech/erigon/cl/pool"
@@ -213,7 +214,7 @@ func TestPostExecutionPayloadEnvelopesRejectsTrailingJSON(t *testing.T) {
 func TestPostExecutionPayloadEnvelopesEmitsImportedAndAvailableEvents(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.emitters = beaconevents.NewEventEmitter()
-	events := make(chan *beaconevents.EventStream, 2)
+	events := make(chan *beaconevents.EventStream, 3)
 	subscription := handler.emitters.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
 
@@ -235,12 +236,47 @@ func TestPostExecutionPayloadEnvelopesEmitsImportedAndAvailableEvents(t *testing
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
 	require.Equal(t, beaconevents.OpExecutionPayload, (<-events).Event)
 	select {
 	case event := <-events:
 		require.Equal(t, beaconevents.OpExecutionPayloadAvailable, event.Event)
 	case <-time.After(time.Second):
 		t.Fatal("execution_payload_available event was not emitted")
+	}
+}
+
+func TestPostExecutionPayloadEnvelopesEmitsGossipWhenWaitingForColumns(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := handler.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	root := common.Hash{2}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	envelope.Message.BeaconBlockRoot = root
+	envelope.Message.BuilderIndex = 4
+	fcu.Blocks = map[common.Hash]*cltypes.SignedBeaconBlock{
+		root: {Block: &cltypes.BeaconBlock{Slot: 13, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}},
+	}
+	fcu.OnExecutionPayloadErr = forkchoice.ErrEIP7594ColumnDataNotAvailable
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
+	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
+	select {
+	case event := <-events:
+		t.Fatalf("unexpected event %s", event.Event)
+	default:
 	}
 }
 
@@ -626,7 +662,7 @@ func TestGetValidatorExecutionPayloadEnvelopesBySlot(t *testing.T) {
 	slot := uint64(3)
 	envelope := cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)
 	envelope.BuilderIndex = 7
-	handler.selfBuildEnvelopes.Add(slot, envelope)
+	handler.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: envelope.BeaconBlockRoot}, envelope)
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/execution_payload_envelopes/3", http.NoBody)
 	recorder := httptest.NewRecorder()
@@ -644,7 +680,11 @@ func TestGetValidatorExecutionPayloadEnvelopeByBlockRoot(t *testing.T) {
 	root := common.HexToHash("0x1234")
 	envelope := cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)
 	envelope.BeaconBlockRoot = root
-	handler.selfBuildEnvelopes.Add(slot, envelope)
+	handler.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: root}, envelope)
+	otherRoot := common.HexToHash("0x5678")
+	otherEnvelope := cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)
+	otherEnvelope.BeaconBlockRoot = otherRoot
+	handler.selfBuildEnvelopes.Add(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: otherRoot}, otherEnvelope)
 
 	tests := []struct {
 		name string
@@ -653,7 +693,8 @@ func TestGetValidatorExecutionPayloadEnvelopeByBlockRoot(t *testing.T) {
 		want int
 	}{
 		{name: "matching current slot and root", slot: slot, root: root, want: http.StatusOK},
-		{name: "wrong root", slot: slot, root: common.HexToHash("0x5678"), want: http.StatusNotFound},
+		{name: "same slot alternate root", slot: slot, root: otherRoot, want: http.StatusOK},
+		{name: "wrong root", slot: slot, root: common.HexToHash("0x9999"), want: http.StatusNotFound},
 		{name: "old slot", slot: slot - 1, root: root, want: http.StatusNotFound},
 	}
 	for _, tt := range tests {

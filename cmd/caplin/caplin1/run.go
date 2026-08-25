@@ -318,13 +318,13 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	}
 
 	caplinOptions := []CaplinOption{}
-	if config.BeaconAPIRouter.Builder {
-		if config.RelayUrlExist() {
-			caplinOptions = append(caplinOptions, WithBuilder(config.MevRelayUrl, beaconConfig))
-		} else {
+	if builderOption, skippedLegacy := builderOptionForConfig(&config, beaconConfig); builderOption != nil {
+		caplinOptions = append(caplinOptions, builderOption)
+		if skippedLegacy {
 			log.Warn("builder api enable but relay url not set. Skipping builder mode")
-			config.BeaconAPIRouter.Builder = false
 		}
+	} else if skippedLegacy {
+		log.Warn("builder api enable but relay url not set. Skipping builder mode")
 	}
 	log.Info("Starting caplin")
 
@@ -634,6 +634,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			voluntaryExitService,
 			blsToExecutionChangeService,
 			proposerSlashingService,
+			blockService,
 			option.builderClient,
 			stateSnapshots,
 			gossipManager,
