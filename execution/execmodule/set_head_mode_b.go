@@ -56,9 +56,11 @@ const modeBRetireCancelTimeout = 60 * time.Second
 // step-crossing build case: a mode_a2 that lands within seconds of a
 // step boundary kicks off a full step-file build in the background,
 // which for a heavy step (hundreds of thousands of branches) can
-// exceed two minutes. Mode-B setHead arriving in that window then
-// waits for the build to finish.
-const modeBBuildQuiescenceTimeout = 5 * time.Minute
+// exceed several minutes. Mode-B setHead arriving in that window then
+// waits for the build to finish. Configurable via
+// ERIGON_MODE_B_BUILD_QUIESCENCE_TIMEOUT for tuning under heavier
+// ingest loads (see modeBQuiescenceTimeout above for the sibling knob).
+var modeBBuildQuiescenceTimeout = dbg.EnvDuration("ERIGON_MODE_B_BUILD_QUIESCENCE_TIMEOUT", 15*time.Minute)
 
 // setHeadModeB runs the past-diffset admin unwind path. Entered when
 // targetBlock < minUnwindableBlock AND the chain is aligned-mode AND
