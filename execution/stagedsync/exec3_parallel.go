@@ -727,7 +727,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					restoreCS := pe.bindBlockChangesetForFold(applyResult.BlockNum, applyResult.BlockHash)
 					var applyErr error
 					for _, r := range splitApplyBuf {
-						if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules, nil); err != nil {
+						if err := pe.rs.ApplyStateWrites(ctx, rwTx, r.blockNum, r.txNum, r.writes, nil, r.rules); err != nil {
 							applyErr = fmt.Errorf("splitApply state block=%d txNum=%d: %w", r.blockNum, r.txNum, err)
 							break
 						}
@@ -1115,7 +1115,7 @@ func (pe *parallelExecutor) execLoop(ctx context.Context) (err error) {
 
 	// np-phase exec-loop attribution: wall spent waiting for the next in-order
 	// result vs doing serial per-tx processing (Drain + processResults:
-	// validate + blockStateCache apply + ApplyTxIndexes). Reset per completed block.
+	// validate + apply + ApplyTxIndexes). Reset per completed block.
 	var npWait, npProc time.Duration
 	var npWaitStart, npProcStart time.Time
 
@@ -1829,7 +1829,6 @@ type blockResult struct {
 	Exhausted        *ErrLoopExhausted
 	Header           *types.Header      // for accumulator.StartChange in apply loop
 	Txs              types.Transactions // for accumulator.StartChange in apply loop
-	blockStateCache  *state.BlockStateCache
 
 	// Exec window for additive newPayload wall attribution: stamped when the
 	// block's execution completes (result built). The calculator pairs these
@@ -2796,10 +2795,6 @@ type blockExecutor struct {
 	finRevalChecks int64
 	finRevalFires  int64
 
-	// blockStateCache provides a stable pre-block snapshot of account data
-	// for GetCommittedState reads, unaffected by intra-block ApplyStateWrites.
-	blockStateCache *state.BlockStateCache
-
 	// execCpuNanos sums exec CPU across ALL incarnations (NEWPAYLOAD_PHASES only)
 	// for worker-occupancy attribution vs the npWait/npProc wall.
 	execCpuNanos atomic.Int64
@@ -2885,7 +2880,6 @@ func newBlockExec(blockNum uint64, blockHash common.Hash, gasPool *protocol.GasP
 		profile:             profile,
 		consumers:           consumers,
 		gasPool:             gasPool,
-		blockStateCache:     state.NewBlockStateCache(),
 		exhausted:           exhausted,
 		coinbaseFlushedUpTo: -1,
 		writeChangedPrev:    map[int]*state.WriteSet{},
@@ -2995,14 +2989,11 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 
 	if *stateReader == nil {
 		if txTask.IsHistoric() {
-			*stateReader = pe.prevBlockBase(state.NewHistoryReaderV3WithBlockCache(applyTx, pe.domainsRead(), be.blockStateCache, txTask.Version().TxNum), be.blockNum)
+			*stateReader = pe.prevBlockBase(state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.domainsRead(), txTask.Version().TxNum), be.blockNum)
 		} else {
-			// Use CachedReaderV3 with readCurrent=true so the
-			// finalize (including system TXs) reads from the
-			// BlockStateCache write buffer. This ensures the
-			// system TX sees all accumulated state from prior
-			// TXs in the block, not stale sd.mem values.
-			*stateReader = pe.prevBlockBase(state.NewCurrentCachedReaderV3(pe.domainsRead().AsGetterNoMetrics(applyTx), be.blockStateCache), be.blockNum)
+			// finalize (including system TXs) reads sd.mem for prior-tx in-block
+			// writes; the versionMap set on the IBS composes the intra-block view.
+			*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetterNoMetrics(applyTx)), be.blockNum)
 		}
 	}
 
@@ -3032,7 +3023,7 @@ func (be *blockExecutor) finalizeValidatedTx(pe *parallelExecutor, applyTx kv.Te
 		be.versionMap.FlushVersionedWrites(merged, true, "")
 
 		// Update CollectorWrites with fee-adjusted balances (coinbase /
-		// burnt) so the BlockStateCache sees the correct accumulated fees.
+		// burnt) so the apply fold records the correct accumulated fees.
 		if !txResult.CollectorWrites.IsEmpty() {
 			for addr, w := range addWrites.Balances() {
 				if existing, ok := txResult.CollectorWrites.GetBalance(addr); ok {
@@ -3111,9 +3102,9 @@ func (be *blockExecutor) advanceCoinbaseAndFinalize(pe *parallelExecutor, applyT
 			}
 			if *stateReader == nil {
 				if txTask.IsHistoric() {
-					*stateReader = pe.prevBlockBase(state.NewHistoryReaderV3WithBlockCache(applyTx, pe.domainsRead(), be.blockStateCache, txTask.Version().TxNum), be.blockNum)
+					*stateReader = pe.prevBlockBase(state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.domainsRead(), txTask.Version().TxNum), be.blockNum)
 				} else {
-					*stateReader = pe.prevBlockBase(state.NewCurrentCachedReaderV3(pe.domainsRead().AsGetter(applyTx), be.blockStateCache), be.blockNum)
+					*stateReader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetter(applyTx)), be.blockNum)
 				}
 			}
 			tipWrites, err := txResult.calcFees(taskVer, be.versionMap, *stateReader, txTask.Rules())
@@ -3630,7 +3621,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		// Block finalize: run engine.Finalize + MakeWriteSet on the producer
-		// side so finalize writes go to the BlockStateCache before the Flush.
+		// side so finalize writes land in the versionMap and the block writeset.
 		var finalizeWrites state.WriteSetView
 		if be.blockNum > 0 {
 			lastResult := be.results[len(be.results)-1]
@@ -3640,10 +3631,10 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			pe.RLock()
 			var reader state.StateReader
 			if finalTask.IsHistoric() {
-				// Historic block-finalize must chain blockCache → sd.mem → applyTx so withdrawals see prior-tx in-block writes.
-				reader = pe.prevBlockBase(state.NewHistoryReaderV3WithBlockCache(applyTx, pe.domainsRead(), be.blockStateCache, finalVersion.TxNum), be.blockNum)
+				// Historic block-finalize chains sd.mem → applyTx so withdrawals see prior-tx in-block writes.
+				reader = pe.prevBlockBase(state.NewHistoryReaderV3WithSharedDomains(applyTx, pe.domainsRead(), finalVersion.TxNum), be.blockNum)
 			} else {
-				reader = pe.prevBlockBase(state.NewCurrentCachedReaderV3(pe.domainsRead().AsGetterNoMetrics(applyTx), be.blockStateCache), be.blockNum)
+				reader = pe.prevBlockBase(state.NewReaderV3(pe.domainsRead().AsGetterNoMetrics(applyTx)), be.blockNum)
 			}
 			pe.RUnlock()
 
@@ -3659,7 +3650,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// dequeue, EIP-4788 beacon root) land in ibs.VersionedWrites
 				// and then in finalizeWrites via Normalize below. If we instead
 				// create a separate syscallIBS in historic mode, the syscall
-				// writes land only in BlockStateCache and never reach the
+				// writes land only in that IBS and never reach the
 				// commitment calculator's txResult feed — producing a wrong
 				// trie root whenever an EIP-7002/7251 SSTORE changes a
 				// previously-untouched slot.
@@ -3724,7 +3715,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 		}
 
 		// The apply loop folds the block's writes to sd.mem at block end (off the
-		// exec spine); nothing populates blockStateCache here.
+		// exec spine).
 
 		// The block is fully finalized here: every tx sealed, block-end writes in
 		// the versionMap. Publish it as an overlay so the next block reads its
@@ -3752,7 +3743,6 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			Exhausted:        be.exhausted,
 			Header:           header,
 			Txs:              txs,
-			blockStateCache:  be.blockStateCache,
 			execStartedAt:    be.execStarted,
 			execEndedAt:      time.Now(),
 		}

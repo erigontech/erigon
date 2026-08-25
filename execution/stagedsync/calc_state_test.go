@@ -789,9 +789,8 @@ func TestEIP8246_NormalizeApply_PreVsPost_BalanceHandling(t *testing.T) {
 // applySDToDomains seeds a pre-block contract into real domains, runs the
 // production normalize+apply pipeline for its self-destruct ending the tx with
 // postSDBalance (eip8246=true), and returns the accounts-domain record left
-// behind. useBlockCache selects the parallel-executor route (writes buffered
-// in a BlockStateCache and flushed at block end) vs direct domain writes.
-func applySDToDomains(t *testing.T, postSDBalance uint256.Int, useBlockCache bool) []byte {
+// behind.
+func applySDToDomains(t *testing.T, postSDBalance uint256.Int) []byte {
 	t.Helper()
 	tx, domains := setup2CacheTest(t)
 	addr := accounts.InternAddress(common.HexToAddress("0x8246E"))
@@ -810,15 +809,8 @@ func applySDToDomains(t *testing.T, postSDBalance uint256.Int, useBlockCache boo
 	vm.WriteBalance(addr, ver, postSDBalance, true)
 	rawView := state.NewVersionMapWriteView(rawWrites, vm, 0)
 	rs := state.NewStateV3(domains, false, log.New())
-	var blockCache *state.BlockStateCache
-	if useBlockCache {
-		blockCache = state.NewBlockStateCache()
-	}
-	err := rs.ApplyStateWrites(context.Background(), tx, 1, 1, rawView, nil, &chain.Rules{IsAmsterdam: true}, blockCache)
+	err := rs.ApplyStateWrites(context.Background(), tx, 1, 1, rawView, nil, &chain.Rules{IsAmsterdam: true})
 	require.NoError(t, err)
-	if useBlockCache {
-		require.NoError(t, blockCache.Flush(domains, tx))
-	}
 	enc, _, err := domains.GetLatest(kv.AccountsDomain, tx, addrVal[:])
 	require.NoError(t, err)
 	return enc
@@ -834,17 +826,9 @@ func TestEIP8246_ApplySDWrites_ZeroBalanceDeletesDomainRecord(t *testing.T) {
 	if testing.Short() {
 		t.Skip("requires mdbx")
 	}
-	for _, useBlockCache := range []bool{true, false} {
-		name := "direct"
-		if useBlockCache {
-			name = "blockCache"
-		}
-		t.Run(name, func(t *testing.T) {
-			enc := applySDToDomains(t, uint256.Int{}, useBlockCache)
-			assert.Empty(t, enc,
-				"zero-balance EIP-8246 self-destruct must delete the accounts-domain record, got %x", enc)
-		})
-	}
+	enc := applySDToDomains(t, uint256.Int{})
+	assert.Empty(t, enc,
+		"zero-balance EIP-8246 self-destruct must delete the accounts-domain record, got %x", enc)
 }
 
 func TestEIP8246_ApplySDWrites_PreservedBalanceLeavesBalanceOnlyRecord(t *testing.T) {
@@ -852,7 +836,7 @@ func TestEIP8246_ApplySDWrites_PreservedBalanceLeavesBalanceOnlyRecord(t *testin
 		t.Skip("requires mdbx")
 	}
 	postSDBalance := *uint256.NewInt(5)
-	enc := applySDToDomains(t, postSDBalance, true)
+	enc := applySDToDomains(t, postSDBalance)
 	require.NotEmpty(t, enc, "preserved-balance EIP-8246 self-destruct must leave an account record")
 	expected := accounts.NewAccount()
 	expected.Balance = postSDBalance

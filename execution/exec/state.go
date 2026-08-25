@@ -191,10 +191,9 @@ func (rw *WorkerContext) ResetState(rs *state.StateV3Buffered, chainTx kv.Tempor
 	if stateReader != nil {
 		rw.SetReader(stateReader)
 	} else {
-		// CachedReaderV3 caches account data on first read per block, giving a
-		// stable pre-block committed view for GetCommittedState. bindTx points
-		// its getter at chainTx (nil until a dispatch goroutine binds its roTx).
-		rw.SetReader(state.NewCachedReaderV3(nil, nil))
+		// bindTx points the reader's getter at chainTx (nil until a dispatch
+		// goroutine binds its roTx).
+		rw.SetReader(state.NewReaderV3(nil))
 	}
 
 	if stateWriter != nil {
@@ -342,20 +341,12 @@ func (rw *WorkerContext) SetReader(reader state.StateReader) {
 	}
 }
 
-// SetBlockStateCache updates the block-level account cache on the worker's
-// CachedReaderV3. Called before each block's workers start execution.
-func (rw *WorkerContext) SetBlockStateCache(cache *state.BlockStateCache) {
-	if cr, ok := rw.stateReader.(*state.CachedReaderV3); ok {
-		cr.SetBlockStateCache(cache)
-	}
-}
-
 // EnablePrevBlockReads makes the worker's IBS read its committed base through a
 // per-task reader over the finished-but-not-yet-committed prior blocks
-// (PREV_BLOCK_READS). The raw reader stays as rw.stateReader so the getter /
-// block-state-cache plumbing keeps targeting it; the per-task reader wraps it by
-// reference, so those in-place updates are seen. Call once after ResetState. Per
-// task the block is set via ibs.StateReader().(*PrevBlockReader).SetBlock.
+// (PREV_BLOCK_READS). The raw reader stays as rw.stateReader so the getter
+// plumbing keeps targeting it; the per-task reader wraps it by reference, so
+// those in-place updates are seen. Call once after ResetState. Per task the
+// block is set via ibs.StateReader().(*PrevBlockReader).SetBlock.
 func (rw *WorkerContext) EnablePrevBlockReads(reg *state.PrevBlockList) {
 	rw.ibs = state.New(state.NewPrevBlockReader(rw.stateReader, reg))
 }
@@ -370,12 +361,7 @@ func (rw *WorkerContext) RunTxTaskNoLock(txTask Task) *TxResult {
 		// the coinbase race investigation).
 		rw.SetReader(state.NewHistoryReaderV3WithSharedDomains(rw.chainTx, rw.rs.Domains(), txTask.Version().TxNum))
 	} else if !txTask.IsHistoric() && (rw.stateReader == nil || rw.historyMode) {
-		rw.SetReader(state.NewCachedReaderV3(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics), nil))
-	}
-
-	// Set the per-block committed state cache from the task.
-	if cache := txTask.GetBlockStateCache(); cache != nil {
-		rw.SetBlockStateCache(cache)
+		rw.SetReader(state.NewReaderV3(rw.rs.Domains().AsGetterMetered(rw.chainTx, rw.readMetrics)))
 	}
 
 	if rw.background && rw.chainTx == nil {

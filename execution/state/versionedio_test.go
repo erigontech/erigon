@@ -1021,10 +1021,9 @@ func TestGetVersionedAccount_PriorTxSelfDestruct_ReturnsNil(t *testing.T) {
 	vm.WriteIncarnation(addr,
 		Version{TxIndex: 3, Incarnation: 0}, uint64(1), true)
 
-	// Tx 4's worker IBS. The reader (analogous to CachedReaderV3) returns
-	// the pre-SD account directly — no versionMap-aware wrapper short-circuits
-	// the SD case. Only getVersionedAccount's versionMap check should convert
-	// that to nil.
+	// Tx 4's worker IBS. The base reader returns the pre-SD account directly —
+	// no versionMap-aware wrapper short-circuits the SD case. Only
+	// getVersionedAccount's versionMap check should convert that to nil.
 	ibs := New(reader)
 	ibs.SetTxContext(0, 4)
 	ibs.SetVersion(0)

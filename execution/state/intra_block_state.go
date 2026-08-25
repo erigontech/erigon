@@ -1304,7 +1304,7 @@ func (sdb *IntraBlockState) versionedAccountBase(addr accounts.Address, readStor
 			return nil, StorageRead, UnknownVersion, err
 		}
 
-		// CachedReaderV3 bypasses the versionMap, so a prior in-block SD'd
+		// The base reader bypasses the versionMap, so a prior in-block SD'd
 		// address still returns its pre-SD record. Without this gate the
 		// stale nonce/codeHash flows through the per-field refresh (which
 		// only overwrites fields a versionMap cell exists for), so Empty()

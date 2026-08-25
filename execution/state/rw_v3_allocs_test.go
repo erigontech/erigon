@@ -62,11 +62,6 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 	key := accounts.InternKey(common.Hash{0x22})
 	hr := NewHistoryReaderV3(histMockTx{val: accEnc}, 0)
 
-	cache := NewBlockStateCache()
-	cache.PutCommittedStorage(addr, key, make([]byte, 32))
-	cache.PutCommittedAccount(addr, &acc)
-	cr := NewCachedReaderV3(execctx.NewTemporalTxStateGetter(fixedTemporalTx{val: make([]byte, 32)}), cache)
-
 	for _, tc := range []struct {
 		name string
 		want float64
@@ -85,12 +80,6 @@ func TestStateReader_ReadMethods_Allocs(t *testing.T) {
 		{"HistoryReaderV3.ReadAccountCodeSize", 0, func() { _, _ = hr.ReadAccountCodeSize(addr) }},
 		{"HistoryReaderV3.ReadAccountData", 1, func() { _, _ = hr.ReadAccountData(addr) }},                 // 1: returns *accounts.Account
 		{"HistoryReaderV3.ReadAccountDataForDebug", 1, func() { _, _ = hr.ReadAccountDataForDebug(addr) }}, // 1: returns *accounts.Account
-
-		{"CachedReaderV3.ReadAccountStorage (cache hit)", 0, func() { _, _, _ = cr.ReadAccountStorage(addr, key) }},
-		{"CachedReaderV3.ReadAccountData (cache hit)", 1, func() { _, _ = cr.ReadAccountData(addr) }}, // 1: returns *accounts.Account
-		{"CachedReaderV3.ReadAccountCode", 0, func() { _, _ = cr.ReadAccountCode(addr) }},
-		{"CachedReaderV3.ReadAccountCodeSize", 0, func() { _, _ = cr.ReadAccountCodeSize(addr) }},
-		{"CachedReaderV3.HasStorage", 0, func() { _, _ = cr.HasStorage(addr) }},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			allocs := testing.AllocsPerRun(100, tc.fn)

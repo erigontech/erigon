@@ -244,7 +244,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if ws == nil || ws.IsEmpty() {
 				continue
 			}
-			if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, nil, false); err != nil {
+			if err := state.ApplyWrites(ws, sd, tx, blockHeight, txNum, nil, blockRules, false); err != nil {
 				return fmt.Errorf("apply versioned block writes: %w", err)
 			}
 		}
