@@ -42,6 +42,10 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal"
 	"github.com/erigontech/erigon/db/rawdb"
+	"github.com/erigontech/erigon/db/snapshotsync/blocksnapshots"
+	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
+	"github.com/erigontech/erigon/db/snaptype"
+	"github.com/erigontech/erigon/db/snaptype2"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/chain"
@@ -52,6 +56,7 @@ import (
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
+	"github.com/erigontech/erigon/node/ethconfig"
 	polygonchain "github.com/erigontech/erigon/polygon/chain"
 )
 
@@ -241,25 +246,15 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 	// Check config compatibility and write the config. Compatibility errors
 	// are returned to the caller unless we're already at block zero.
 	headHash := rawdb.ReadHeadHeaderHash(tx)
-	height := rawdb.ReadHeaderNumber(tx, headHash)
-	if height != nil {
+	if height := rawdb.ReadHeaderNumber(tx, headHash); height != nil && *height != 0 {
 		// The head's time, not just its number: the post-merge forks are scheduled by
 		// timestamp and cannot be compared against a block number.
-		var headTime uint64
-		head := rawdb.ReadHeader(tx, headHash, *height)
-		if head == nil {
-			// ReadHeader sees only kv.Headers, and FillDBFromSnapshots writes the head's
-			// kv.HeaderNumber marker and HeadHeaderKey without it, so a freshly
-			// snapshot-synced node lands here normally. headTime then stays 0, at which
-			// every fork scheduled after genesis compares as not yet active, and a
-			// rescheduled one is written without ever being checked.
-			logger.Warn("Genesis: head header missing, comparing the timestamp forks against time 0 -- a rescheduled fork will be accepted unchecked",
-				"hash", headHash, "number", *height)
-		} else {
-			headTime = head.Time
+		headTime, err := headTimestamp(tx, headHash, *height, chainName, dirs, logger)
+		if err != nil {
+			return newCfg, storedBlock, err
 		}
 		compatibilityErr := storedCfg.CheckCompatible(newCfg, *height, headTime)
-		if compatibilityErr != nil && *height != 0 &&
+		if compatibilityErr != nil &&
 			(compatibilityErr.RewindTo != 0 || compatibilityErr.HasTimestampConflict()) {
 			return newCfg, storedBlock, compatibilityErr
 		}
@@ -268,6 +263,32 @@ func WriteGenesisBlock(tx kv.RwTx, genesis *types.Genesis, chainName string, ove
 		return newCfg, nil, err
 	}
 	return newCfg, storedBlock, nil
+}
+
+// headTimestamp reads the head header's time, falling back to the block files: kv.Headers
+// holds no header for the snapshot-covered range while the kv.HeaderNumber marker and
+// HeadHeaderKey do, so a snapshot-synced node has the number without the header. Neither
+// source having it is an error rather than a time of 0, at which every fork scheduled
+// after genesis reads as inactive and a rescheduled one would be written unchecked.
+func headTimestamp(tx kv.Tx, hash common.Hash, number uint64, chainName string, dirs datadir.Dirs, logger log.Logger) (uint64, error) {
+	if head := rawdb.ReadHeader(tx, hash, number); head != nil {
+		return head.Time, nil
+	}
+	snaps := blocksnapshots.NewRoSnapshots(ethconfig.BlocksFreezing{ChainName: chainName}, dirs.Snap, logger)
+	defer snaps.Close()
+	if err := snaps.OpenSegments([]snaptype.Type{snaptype2.Headers}, false); err != nil {
+		return 0, fmt.Errorf("opening the header files to date head %x at %d: %w", hash, number, err)
+	}
+	// A nil tx keeps the lookup on these segments: a temporal tx carries its own pinned
+	// block-files view, which has nothing open this early in startup.
+	head, err := freezeblocks.NewBlockReader(snaps, nil).Header(context.Background(), nil, hash, number)
+	if err != nil {
+		return 0, err
+	}
+	if head == nil {
+		return 0, fmt.Errorf("head header %x at %d is in neither the database nor the block files, so the active timestamp forks are unknown", hash, number)
+	}
+	return head.Time, nil
 }
 
 func WriteGenesisState(g *types.Genesis, dirs datadir.Dirs, logger log.Logger) (*types.Block, *state.IntraBlockState, error) {

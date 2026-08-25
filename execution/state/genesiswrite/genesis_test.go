@@ -35,8 +35,10 @@ import (
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/db/datadir"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/chain/networkname"
@@ -190,6 +192,60 @@ func TestCommitGenesisBlockWithOverrideKeepStoredChainConfig(t *testing.T) {
 	require.Zero(t, compatErr.RewindToTime)
 	require.Equal(t, origOsakaTime, chain.AllProtocolChanges.OsakaTime,
 		"applyOverrides must not write through into the shared config")
+}
+
+func readStoredChainConfig(t *testing.T, db kv.RoDB) *chain.Config {
+	t.Helper()
+	var cfg *chain.Config
+	require.NoError(t, db.View(context.Background(), func(tx kv.Tx) error {
+		genesisHash, err := rawdb.ReadCanonicalHash(tx, 0)
+		if err != nil {
+			return err
+		}
+		cfg, err = rawdb.ReadChainConfig(tx, genesisHash)
+		return err
+	}))
+	require.NotNil(t, cfg)
+	return cfg
+}
+
+// A snapshot-synced datadir carries the head's kv.HeaderNumber marker and HeadHeaderKey
+// without the header itself: FillDBFromSnapshots writes the markers and never kv.Headers.
+// Defaulting the head time to 0 there reads every post-genesis fork as inactive.
+func TestCommitGenesisBlockHeadHeaderOutsideTheDB(t *testing.T) {
+	if testing.Short() {
+		t.Skip("slow test")
+	}
+
+	logger := log.New()
+	gspec := &types.Genesis{Config: &chain.Config{ChainID: uint256.NewInt(1), OsakaTime: common.NewUint64(1)}}
+
+	key, _ := crypto.HexToECDSA("b71c71a67e1177ad4e901695e1b4b9ee17ae16c6668d313eac2f96dbcda3f291")
+	m := execmoduletester.New(t, execmoduletester.WithGenesisSpec(gspec), execmoduletester.WithKey(key))
+
+	chainBlocks, err := m.GenerateChain(1, nil)
+	require.NoError(t, err)
+	require.NoError(t, m.InsertChain(chainBlocks))
+
+	require.NoError(t, m.DB.Update(context.Background(), func(tx kv.RwTx) error {
+		headHash := rawdb.ReadHeadHeaderHash(tx)
+		height := rawdb.ReadHeaderNumber(tx, headHash)
+		require.NotNil(t, height)
+		require.NotZero(t, *height)
+		require.NoError(t, tx.Delete(kv.Headers, dbutils.HeaderKey(*height, headHash)))
+		require.Nil(t, rawdb.ReadHeader(tx, headHash, *height), "the header must be gone")
+		require.NotNil(t, rawdb.ReadHeaderNumber(tx, headHash), "its number marker must survive")
+		return nil
+	}))
+
+	// No block snapshots in this datadir either, so the head time is unknowable and the
+	// rescheduled Osaka cannot be cleared.
+	_, _, err = genesiswrite.CommitGenesisBlockWithOverride(
+		m.DB, nil, "", common.NewUint64(500), nil, true, datadir.New(t.TempDir()), logger)
+	require.Error(t, err, "an unresolvable head time must not let a rescheduled fork through")
+
+	storedCfg := readStoredChainConfig(t, m.DB)
+	require.Equal(t, uint64(1), *storedCfg.OsakaTime, "the stored schedule must be left alone")
 }
 
 func TestAllocConstructor(t *testing.T) {
