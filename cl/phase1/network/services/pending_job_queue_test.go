@@ -24,8 +24,15 @@ import (
 	"github.com/stretchr/testify/require"
 )
 
-func newTestPendingJobQueueWithOptions(options pendingJobQueueOptions) *pendingJobQueue[int, string] {
-	return newPendingJobQueue(options,
+func canceledPendingQueueContext(t *testing.T) context.Context {
+	t.Helper()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+	return ctx
+}
+
+func newTestPendingJobQueueWithOptions(ctx context.Context, options pendingJobQueueOptions) *pendingJobQueue[int, string] {
+	return newPendingJobQueue(ctx, options,
 		func(context.Context, int, string) (func(), bool) {
 			return nil, false
 		},
@@ -33,8 +40,8 @@ func newTestPendingJobQueueWithOptions(options pendingJobQueueOptions) *pendingJ
 	)
 }
 
-func newTestPendingJobQueue() *pendingJobQueue[int, string] {
-	return newTestPendingJobQueueWithOptions(pendingJobQueueOptions{
+func newTestPendingJobQueue(t *testing.T) *pendingJobQueue[int, string] {
+	return newTestPendingJobQueueWithOptions(canceledPendingQueueContext(t), pendingJobQueueOptions{
 		capacity:      1,
 		expiry:        time.Minute,
 		checkInterval: time.Millisecond,
@@ -44,6 +51,7 @@ func newTestPendingJobQueue() *pendingJobQueue[int, string] {
 func TestNewPendingJobQueueRejectsNilTryProcess(t *testing.T) {
 	require.Panics(t, func() {
 		newPendingJobQueue[int, string](
+			t.Context(),
 			pendingJobQueueOptions{
 				capacity:      1,
 				expiry:        time.Minute,
@@ -58,6 +66,7 @@ func TestNewPendingJobQueueRejectsNilTryProcess(t *testing.T) {
 func TestNewPendingJobQueueRejectsNilOnExpired(t *testing.T) {
 	require.Panics(t, func() {
 		newPendingJobQueue[int, string](
+			t.Context(),
 			pendingJobQueueOptions{
 				capacity:      1,
 				expiry:        time.Minute,
@@ -81,7 +90,7 @@ func TestNewPendingJobQueueRejectsNonPositiveCapacity(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			require.PanicsWithValue(t, "pending job queue capacity must be positive", func() {
-				newTestPendingJobQueueWithOptions(pendingJobQueueOptions{
+				newTestPendingJobQueueWithOptions(t.Context(), pendingJobQueueOptions{
 					capacity:      test.capacity,
 					expiry:        time.Minute,
 					checkInterval: time.Millisecond,
@@ -101,7 +110,7 @@ func TestNewPendingJobQueueRejectsNonPositiveCheckInterval(t *testing.T) {
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			require.PanicsWithValue(t, "pending job queue check interval must be positive", func() {
-				newTestPendingJobQueueWithOptions(pendingJobQueueOptions{
+				newTestPendingJobQueueWithOptions(t.Context(), pendingJobQueueOptions{
 					capacity:      1,
 					expiry:        time.Minute,
 					checkInterval: test.checkInterval,
@@ -111,8 +120,39 @@ func TestNewPendingJobQueueRejectsNonPositiveCheckInterval(t *testing.T) {
 	}
 }
 
+func TestNewPendingJobQueueStartsProcessingLoop(t *testing.T) {
+	processed := make(chan string, 1)
+	queue := newPendingJobQueue(
+		t.Context(),
+		pendingJobQueueOptions{
+			capacity:      1,
+			expiry:        time.Minute,
+			checkInterval: time.Millisecond,
+		},
+		func(_ context.Context, _ int, msg string) (func(), bool) {
+			processed <- msg
+			return nil, true
+		},
+		func(int) {},
+	)
+
+	require.NoError(t, queue.enqueue("message", func() (int, error) {
+		return 1, nil
+	}))
+
+	select {
+	case msg := <-processed:
+		require.Equal(t, "message", msg)
+	case <-time.After(time.Second):
+		t.Fatal("pending job queue did not process the job")
+	}
+	require.Eventually(t, func() bool {
+		return queue.count.Load() == 0
+	}, time.Second, time.Millisecond)
+}
+
 func TestPendingJobQueueEnqueueSkipsKeyBuildAtCapacity(t *testing.T) {
-	queue := newTestPendingJobQueue()
+	queue := newTestPendingJobQueue(t)
 	queue.count.Store(queue.capacity)
 
 	keyBuilt := false
@@ -127,7 +167,7 @@ func TestPendingJobQueueEnqueueSkipsKeyBuildAtCapacity(t *testing.T) {
 }
 
 func TestPendingJobQueueEnqueueReleasesReservationOnKeyBuildPanic(t *testing.T) {
-	queue := newTestPendingJobQueue()
+	queue := newTestPendingJobQueue(t)
 
 	require.Panics(t, func() {
 		_ = queue.enqueue("message", func() (int, error) {
@@ -141,7 +181,7 @@ func TestPendingJobQueueAfterRemoveCanEnqueueSameKey(t *testing.T) {
 	var queue *pendingJobQueue[int, string]
 	afterRemoveCalled := false
 
-	queue = newPendingJobQueue(pendingJobQueueOptions{
+	queue = newPendingJobQueue(canceledPendingQueueContext(t), pendingJobQueueOptions{
 		capacity:      1,
 		expiry:        time.Minute,
 		checkInterval: time.Millisecond,

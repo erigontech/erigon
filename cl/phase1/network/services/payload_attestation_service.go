@@ -98,13 +98,12 @@ func NewPayloadAttestationService(
 		buildPendingAttestationKey: pendingPayloadAttestationKeyFor,
 		validationAdmission:        make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
-	s.pending = s.newPendingQueue()
-	go s.pending.loop(ctx)
+	s.pending = s.newPendingQueue(ctx)
 	return s
 }
 
-func (s *payloadAttestationService) newPendingQueue() *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage] {
-	return newPendingJobQueue(pendingJobQueueOptions{
+func (s *payloadAttestationService) newPendingQueue(ctx context.Context) *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage] {
+	return newPendingJobQueue(ctx, pendingJobQueueOptions{
 		capacity:      maxPendingAttestations,
 		expiry:        pendingPayloadAttestationExpiry,
 		checkInterval: pendingPayloadAttestationCheckInterval,

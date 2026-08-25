@@ -111,7 +111,7 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 		buildPendingAttestationKey: pendingPayloadAttestationKeyFor,
 		validationAdmission:        make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
-	service.pending = service.newPendingQueue()
+	service.pending = service.newPendingQueue(canceledPendingQueueContext(t))
 
 	return service, forkchoiceMock, ethClockMock
 }

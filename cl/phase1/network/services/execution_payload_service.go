@@ -83,13 +83,12 @@ func NewExecutionPayloadService(
 		emitters:           emitters,
 		seenEnvelopesCache: seenEnvelopesCache,
 	}
-	s.pending = s.newPendingQueue()
-	go s.pending.loop(ctx)
+	s.pending = s.newPendingQueue(ctx)
 	return s
 }
 
-func (s *executionPayloadService) newPendingQueue() *pendingJobQueue[pendingEnvelopeKey, *cltypes.SignedExecutionPayloadEnvelope] {
-	return newPendingJobQueue(pendingJobQueueOptions{
+func (s *executionPayloadService) newPendingQueue(ctx context.Context) *pendingJobQueue[pendingEnvelopeKey, *cltypes.SignedExecutionPayloadEnvelope] {
+	return newPendingJobQueue(ctx, pendingJobQueueOptions{
 		capacity:      maxPendingEnvelopes,
 		expiry:        pendingEnvelopeExpiry,
 		checkInterval: pendingEnvelopeCheckInterval,

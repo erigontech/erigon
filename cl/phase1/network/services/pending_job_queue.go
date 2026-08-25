@@ -52,6 +52,7 @@ type pendingJobQueue[K comparable, M any] struct {
 }
 
 func newPendingJobQueue[K comparable, M any](
+	ctx context.Context,
 	options pendingJobQueueOptions,
 	tryProcess func(ctx context.Context, key K, msg M) (afterRemove func(), remove bool),
 	onExpired func(key K),
@@ -68,7 +69,7 @@ func newPendingJobQueue[K comparable, M any](
 	if onExpired == nil {
 		panic("pending job queue requires onExpired")
 	}
-	return &pendingJobQueue[K, M]{
+	q := &pendingJobQueue[K, M]{
 		capacity:   options.capacity,
 		expiry:     options.expiry,
 		tick:       options.checkInterval,
@@ -76,6 +77,8 @@ func newPendingJobQueue[K comparable, M any](
 		onExpired:  onExpired,
 		cond:       sync.NewCond(&sync.Mutex{}),
 	}
+	go q.loop(ctx)
+	return q
 }
 
 // enqueue reserves capacity before building the key, so a full queue skips

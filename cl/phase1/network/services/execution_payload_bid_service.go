@@ -127,13 +127,12 @@ func NewExecutionPayloadBidService(
 		validationStateCache: validationStateCache,
 		buildPendingBidKey:   pendingBidKeyFor,
 	}
-	s.pending = s.newPendingQueue()
-	go s.pending.loop(ctx)
+	s.pending = s.newPendingQueue(ctx)
 	return s
 }
 
-func (s *executionPayloadBidService) newPendingQueue() *pendingJobQueue[pendingBidKey, *cltypes.SignedExecutionPayloadBid] {
-	return newPendingJobQueue(pendingJobQueueOptions{
+func (s *executionPayloadBidService) newPendingQueue(ctx context.Context) *pendingJobQueue[pendingBidKey, *cltypes.SignedExecutionPayloadBid] {
+	return newPendingJobQueue(ctx, pendingJobQueueOptions{
 		capacity:      maxPendingBids,
 		expiry:        pendingBidExpiry,
 		checkInterval: pendingBidCheckInterval,
