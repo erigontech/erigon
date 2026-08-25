@@ -357,15 +357,11 @@ func TestSelectGloasBidCapsExecutionPaymentAndAvoidsOverflow(t *testing.T) {
 	), selected.executionValueWei)
 }
 
-func TestSelectGloasBidOrdersDistinctTotalsAboveUint64(t *testing.T) {
+func TestSelectGloasBidSaturatesOverflowTotalsAndKeepsFirstTie(t *testing.T) {
 	a := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, math.MaxUint64-1)}
 	a.Message.ExecutionPayment = 2
 	b := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 2, math.MaxUint64)}
 	b.Message.ExecutionPayment = 2
-	expectedValueWei := new(big.Int).Mul(
-		new(big.Int).Add(new(big.Int).SetUint64(math.MaxUint64), big.NewInt(2)),
-		big.NewInt(1_000_000_000),
-	)
 
 	for _, bids := range [][]*cltypes.SignedExecutionPayloadBid{{a, b}, {b, a}} {
 		selected := selectGloasBid(nil, []gloasBidCandidate{
@@ -374,9 +370,29 @@ func TestSelectGloasBidOrdersDistinctTotalsAboveUint64(t *testing.T) {
 		})
 
 		require.NotNil(t, selected)
-		require.Same(t, b, selected.bid)
+		require.Same(t, bids[0], selected.bid)
+		expectedValueWei := new(big.Int).Mul(
+			new(big.Int).Add(
+				new(big.Int).SetUint64(bids[0].Message.Value),
+				new(big.Int).SetUint64(bids[0].Message.ExecutionPayment),
+			),
+			big.NewInt(1_000_000_000),
+		)
 		require.Equal(t, expectedValueWei, selected.executionValueWei)
 	}
+}
+
+func TestSelectGloasBidLocalWinsOneWeiAboveSaturatedExternal(t *testing.T) {
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(10, 1, math.MaxUint64)}
+	bid.Message.ExecutionPayment = 1
+	localValueWei := new(big.Int).Add(
+		new(big.Int).Mul(new(big.Int).SetUint64(math.MaxUint64), big.NewInt(1_000_000_000)),
+		big.NewInt(1),
+	)
+
+	require.Nil(t, selectGloasBid(localValueWei, []gloasBidCandidate{{
+		bid: bid, boostFactor: 100, maxExecutionPayment: 1,
+	}}))
 }
 
 func TestSelectGloasBidAppliesMinimumBidToCappedValue(t *testing.T) {
