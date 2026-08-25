@@ -33,9 +33,10 @@ func canceledPendingQueueContext(t *testing.T) context.Context {
 
 func newTestPendingJobQueueWithOptions(ctx context.Context, options pendingJobQueueOptions) *pendingJobQueue[int, string] {
 	return newPendingJobQueue(ctx, options,
-		func(context.Context, int, string) (func(), bool) {
-			return nil, false
+		func(context.Context, int, string) pendingJobDecision {
+			return pendingJobKeep
 		},
+		nil,
 		func(int) {},
 	)
 }
@@ -58,6 +59,7 @@ func TestNewPendingJobQueueRejectsNilTryProcess(t *testing.T) {
 				checkInterval: time.Millisecond,
 			},
 			nil,
+			nil,
 			func(int) {},
 		)
 	})
@@ -72,9 +74,10 @@ func TestNewPendingJobQueueRejectsNilOnExpired(t *testing.T) {
 				expiry:        time.Minute,
 				checkInterval: time.Millisecond,
 			},
-			func(context.Context, int, string) (func(), bool) {
-				return nil, false
+			func(context.Context, int, string) pendingJobDecision {
+				return pendingJobKeep
 			},
+			nil,
 			nil,
 		)
 	})
@@ -129,14 +132,15 @@ func TestNewPendingJobQueueStartsProcessingLoop(t *testing.T) {
 			expiry:        time.Minute,
 			checkInterval: time.Millisecond,
 		},
-		func(_ context.Context, _ int, msg string) (func(), bool) {
+		func(_ context.Context, _ int, msg string) pendingJobDecision {
 			processed <- msg
-			return nil, true
+			return pendingJobRemove
 		},
+		nil,
 		func(int) {},
 	)
 
-	require.NoError(t, queue.enqueue("message", func() (int, error) {
+	require.NoError(t, queue.enqueueLazy("message", func() (int, error) {
 		return 1, nil
 	}))
 
@@ -151,12 +155,24 @@ func TestNewPendingJobQueueStartsProcessingLoop(t *testing.T) {
 	}, time.Second, time.Millisecond)
 }
 
+func TestPendingJobQueueEnqueueKeyDeduplicates(t *testing.T) {
+	queue := newTestPendingJobQueue(t)
+
+	queue.enqueueKey(1, "original")
+	queue.enqueueKey(1, "duplicate")
+
+	require.Equal(t, int32(1), queue.count.Load())
+	stored, exists := queue.jobs.Load(1)
+	require.True(t, exists)
+	require.Equal(t, "original", stored.(*pendingJob[string]).msg)
+}
+
 func TestPendingJobQueueEnqueueSkipsKeyBuildAtCapacity(t *testing.T) {
 	queue := newTestPendingJobQueue(t)
 	queue.count.Store(queue.capacity)
 
 	keyBuilt := false
-	err := queue.enqueue("message", func() (int, error) {
+	err := queue.enqueueLazy("message", func() (int, error) {
 		keyBuilt = true
 		return 1, nil
 	})
@@ -170,7 +186,7 @@ func TestPendingJobQueueEnqueueReleasesReservationOnKeyBuildPanic(t *testing.T) 
 	queue := newTestPendingJobQueue(t)
 
 	require.Panics(t, func() {
-		_ = queue.enqueue("message", func() (int, error) {
+		_ = queue.enqueueLazy("message", func() (int, error) {
 			panic("key build failed")
 		})
 	})
@@ -186,22 +202,19 @@ func TestPendingJobQueueAfterRemoveCanEnqueueSameKey(t *testing.T) {
 		expiry:        time.Minute,
 		checkInterval: time.Millisecond,
 	},
-		func(_ context.Context, key int, _ string) (func(), bool) {
-			return func() {
-				afterRemoveCalled = true
-				_, exists := queue.jobs.Load(key)
-				require.False(t, exists)
-				require.NoError(t, queue.enqueue("replacement", func() (int, error) {
-					return key, nil
-				}))
-			}, true
+		func(context.Context, int, string) pendingJobDecision {
+			return pendingJobRemoveThenProcess
+		},
+		func(_ context.Context, key int, _ string) {
+			afterRemoveCalled = true
+			_, exists := queue.jobs.Load(key)
+			require.False(t, exists)
+			queue.enqueueKey(key, "replacement")
 		},
 		func(int) {},
 	)
 
-	require.NoError(t, queue.enqueue("original", func() (int, error) {
-		return 1, nil
-	}))
+	queue.enqueueKey(1, "original")
 
 	queue.processPending(t.Context())
 

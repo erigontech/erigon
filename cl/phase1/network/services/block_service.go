@@ -99,6 +99,7 @@ func (b *blockService) newPendingBlockQueue(ctx context.Context) *pendingJobQueu
 		checkInterval: blockJobsIntervalTick,
 	},
 		b.tryProcessPendingBlock,
+		nil,
 		func(blockRoot common.Hash) {
 			log.Trace("Pending block expired", "blockRoot", blockRoot)
 		})
@@ -260,7 +261,7 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 		blockNum = block.Block.Body.ExecutionPayload.BlockNumber
 	}
 	log.Trace("Block scheduled for later processing", "slot", block.Block.Slot, "block", blockNum)
-	err := b.blocksScheduledForLaterExecution.enqueue(block, func() (common.Hash, error) {
+	err := b.blocksScheduledForLaterExecution.enqueueLazy(block, func() (common.Hash, error) {
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
 			return common.Hash{}, err
@@ -326,10 +327,10 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 	log.Trace("import operations", "time", time.Since(start))
 }
 
-func (b *blockService) tryProcessPendingBlock(ctx context.Context, _ common.Hash, block *cltypes.SignedBeaconBlock) (func(), bool) {
+func (b *blockService) tryProcessPendingBlock(ctx context.Context, _ common.Hash, block *cltypes.SignedBeaconBlock) pendingJobDecision {
 	if err := b.processAndStoreBlock(ctx, block); err != nil {
 		log.Trace("Failed to process and store block", "block", block, "error", err)
-		return nil, false
+		return pendingJobKeep
 	}
-	return nil, true
+	return pendingJobRemove
 }

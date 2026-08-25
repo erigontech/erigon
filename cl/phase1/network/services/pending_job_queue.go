@@ -34,6 +34,14 @@ type pendingJobQueueOptions struct {
 	checkInterval time.Duration
 }
 
+type pendingJobDecision uint8
+
+const (
+	pendingJobKeep pendingJobDecision = iota
+	pendingJobRemove
+	pendingJobRemoveThenProcess
+)
+
 // pendingJobQueue retries dependency-blocked jobs on the single processing loop
 // started by newPendingJobQueue. Jobs remain until the service callback requests
 // removal or they expire.
@@ -41,12 +49,13 @@ type pendingJobQueue[K comparable, M any] struct {
 	capacity int32
 	expiry   time.Duration
 	tick     time.Duration
-	// tryProcess validates a job before mutating state and decides whether to remove
-	// it. Any mutation it performs must remain safe if identity-checked removal
-	// fails. afterRemove runs only after successful removal and contains effects
-	// that require that guarantee, including re-enqueuing the same key.
-	tryProcess func(ctx context.Context, key K, msg M) (afterRemove func(), remove bool)
-	onExpired  func(key K)
+	// tryProcess decides whether a job stays queued, is removed, or is removed
+	// before further processing. Mutations made by tryProcess must remain safe if
+	// identity-checked removal fails. processAfterRemove runs only after successful
+	// removal, so it may safely re-enqueue the same key.
+	tryProcess         func(ctx context.Context, key K, msg M) pendingJobDecision
+	processAfterRemove func(ctx context.Context, key K, msg M)
+	onExpired          func(key K)
 
 	jobs  sync.Map // K -> *pendingJob[M]
 	count atomic.Int32
@@ -56,7 +65,8 @@ type pendingJobQueue[K comparable, M any] struct {
 func newPendingJobQueue[K comparable, M any](
 	ctx context.Context,
 	options pendingJobQueueOptions,
-	tryProcess func(ctx context.Context, key K, msg M) (afterRemove func(), remove bool),
+	tryProcess func(ctx context.Context, key K, msg M) pendingJobDecision,
+	processAfterRemove func(ctx context.Context, key K, msg M),
 	onExpired func(key K),
 ) *pendingJobQueue[K, M] {
 	if options.capacity <= 0 {
@@ -72,23 +82,31 @@ func newPendingJobQueue[K comparable, M any](
 		panic("pending job queue requires onExpired")
 	}
 	q := &pendingJobQueue[K, M]{
-		capacity:   options.capacity,
-		expiry:     options.expiry,
-		tick:       options.checkInterval,
-		tryProcess: tryProcess,
-		onExpired:  onExpired,
-		cond:       sync.NewCond(&sync.Mutex{}),
+		capacity:           options.capacity,
+		expiry:             options.expiry,
+		tick:               options.checkInterval,
+		tryProcess:         tryProcess,
+		processAfterRemove: processAfterRemove,
+		onExpired:          onExpired,
+		cond:               sync.NewCond(&sync.Mutex{}),
 	}
 	go q.loop(ctx)
 	return q
 }
 
-// enqueue reserves capacity before building the key, so a full queue skips
+func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) {
+	if !q.reserve() {
+		return
+	}
+	q.storeReserved(key, msg)
+}
+
+// enqueueLazy reserves capacity before building the key, so a full queue skips
 // potentially expensive key construction. A full queue or a duplicate key is a
 // silent no-op. Duplicates and key-building errors release their temporary
 // reservation; a stored job retains it until removal. The deferred release also
 // covers key-building panics.
-func (q *pendingJobQueue[K, M]) enqueue(msg M, buildKey func() (K, error)) error {
+func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) error {
 	if !q.reserve() {
 		return nil
 	}
@@ -188,15 +206,23 @@ func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 			return true
 		}
 
-		afterRemove, remove := q.tryProcess(ctx, k, job.msg)
-		if !remove {
+		decision := q.tryProcess(ctx, k, job.msg)
+		switch decision {
+		case pendingJobKeep:
 			return true
+		case pendingJobRemove:
+		case pendingJobRemoveThenProcess:
+			if q.processAfterRemove == nil {
+				panic("pending job queue requires processAfterRemove")
+			}
+		default:
+			panic("invalid pending job decision")
 		}
 		if !q.remove(k, job) {
 			return true
 		}
-		if afterRemove != nil {
-			afterRemove()
+		if decision == pendingJobRemoveThenProcess {
+			q.processAfterRemove(ctx, k, job.msg)
 		}
 		return true
 	})

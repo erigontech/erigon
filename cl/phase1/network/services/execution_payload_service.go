@@ -94,6 +94,7 @@ func (s *executionPayloadService) newPendingQueue(ctx context.Context) *pendingJ
 		checkInterval: pendingEnvelopeCheckInterval,
 	},
 		s.tryProcessPendingEnvelope,
+		s.processPendingEnvelope,
 		func(key pendingEnvelopeKey) {
 			log.Trace("Pending envelope expired", "blockRoot", key.blockRoot)
 		})
@@ -199,7 +200,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 
 // queuePendingEnvelope defers an envelope until its referenced block is available.
 func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) {
-	err := s.pending.enqueue(envelope, func() (pendingEnvelopeKey, error) {
+	err := s.pending.enqueueLazy(envelope, func() (pendingEnvelopeKey, error) {
 		envelopeHash, err := envelope.HashSSZ()
 		if err != nil {
 			return pendingEnvelopeKey{}, err
@@ -214,16 +215,16 @@ func (s *executionPayloadService) queuePendingEnvelope(blockRoot common.Hash, en
 	}
 }
 
-// tryProcessPendingEnvelope removes and revalidates an envelope once its block arrives.
-func (s *executionPayloadService) tryProcessPendingEnvelope(ctx context.Context, key pendingEnvelopeKey, envelope *cltypes.SignedExecutionPayloadEnvelope) (func(), bool) {
+func (s *executionPayloadService) tryProcessPendingEnvelope(_ context.Context, key pendingEnvelopeKey, _ *cltypes.SignedExecutionPayloadEnvelope) pendingJobDecision {
 	block, ok := s.forkchoiceStore.GetBlock(key.blockRoot)
 	if !ok || block == nil {
-		return nil, false
+		return pendingJobKeep
 	}
+	return pendingJobRemoveThenProcess
+}
 
-	return func() {
-		if err := s.ProcessMessage(ctx, nil, envelope); err != nil {
-			log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
-		}
-	}, true
+func (s *executionPayloadService) processPendingEnvelope(ctx context.Context, key pendingEnvelopeKey, envelope *cltypes.SignedExecutionPayloadEnvelope) {
+	if err := s.ProcessMessage(ctx, nil, envelope); err != nil {
+		log.Trace("Failed to process pending envelope", "blockRoot", key.blockRoot, "err", err)
+	}
 }

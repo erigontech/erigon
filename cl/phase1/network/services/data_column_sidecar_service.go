@@ -51,7 +51,7 @@ type dataColumnSidecarService struct {
 	emitters             *beaconevents.EventEmitter
 
 	// [New in Gloas:EIP7732] Pending sidecars waiting for their blocks.
-	pendingGloasSidecars *pendingJobQueue[seenGloasSidecarKey, *pendingGloasSidecar]
+	pendingGloasSidecars *pendingJobQueue[seenGloasSidecarKey, pendingGloasSidecar]
 }
 
 type pendingGloasSidecar struct {
@@ -105,13 +105,14 @@ func NewDataColumnSidecarService(
 	return s
 }
 
-func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Context) *pendingJobQueue[seenGloasSidecarKey, *pendingGloasSidecar] {
+func (s *dataColumnSidecarService) newPendingGloasSidecarQueue(ctx context.Context) *pendingJobQueue[seenGloasSidecarKey, pendingGloasSidecar] {
 	return newPendingJobQueue(ctx, pendingJobQueueOptions{
 		capacity:      maxPendingGloasSidecars,
 		expiry:        pendingGloasSidecarExpiry,
 		checkInterval: pendingGloasSidecarTick,
 	},
 		s.tryProcessPendingGloasSidecar,
+		s.processPendingGloasSidecar,
 		func(key seenGloasSidecarKey) {
 			log.Debug("[dataColumnSidecarService] expired pending GLOAS sidecar",
 				"blockRoot", key.beaconBlockRoot.String(), "index", key.index)
@@ -393,44 +394,46 @@ func (s *dataColumnSidecarService) verifyProposerSignature(proposerIndex uint64,
 
 // scheduleSidecarForLaterProcessing queues a GLOAS sidecar until its block arrives.
 func (s *dataColumnSidecarService) scheduleSidecarForLaterProcessing(sidecar *cltypes.DataColumnSidecar, subnet *uint64) {
-	err := s.pendingGloasSidecars.enqueue(&pendingGloasSidecar{
+	key := seenGloasSidecarKey{
+		beaconBlockRoot: sidecar.BeaconBlockRoot,
+		index:           sidecar.Index,
+	}
+	s.pendingGloasSidecars.enqueueKey(key, pendingGloasSidecar{
 		sidecar: sidecar,
 		subnet:  subnet,
-	}, func() (seenGloasSidecarKey, error) {
-		return seenGloasSidecarKey{
-			beaconBlockRoot: sidecar.BeaconBlockRoot,
-			index:           sidecar.Index,
-		}, nil
 	})
-	if err != nil {
-		log.Warn("[dataColumnSidecarService] failed to queue GLOAS sidecar",
-			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "err", err)
-	}
 }
 
 func (s *dataColumnSidecarService) tryProcessPendingGloasSidecar(
-	ctx context.Context,
+	_ context.Context,
 	_ seenGloasSidecarKey,
-	pending *pendingGloasSidecar,
-) (func(), bool) {
+	pending pendingGloasSidecar,
+) pendingJobDecision {
 	sidecar := pending.sidecar
 	if sidecar.Slot <= s.forkChoice.FinalizedSlot() {
 		log.Debug("[dataColumnSidecarService] pending GLOAS sidecar slot is now finalized",
 			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
-		return nil, true
+		return pendingJobRemove
 	}
 	if _, ok := s.forkChoice.GetBlock(sidecar.BeaconBlockRoot); !ok {
-		return nil, false
+		return pendingJobKeep
 	}
-	return func() {
-		if err := s.processGloasMessage(ctx, pending.subnet, sidecar); err != nil {
-			if !errors.Is(err, ErrIgnore) {
-				log.Trace("[dataColumnSidecarService] failed to process pending GLOAS sidecar",
-					"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "err", err)
-			}
-			return
+	return pendingJobRemoveThenProcess
+}
+
+func (s *dataColumnSidecarService) processPendingGloasSidecar(
+	ctx context.Context,
+	_ seenGloasSidecarKey,
+	pending pendingGloasSidecar,
+) {
+	sidecar := pending.sidecar
+	if err := s.processGloasMessage(ctx, pending.subnet, sidecar); err != nil {
+		if !errors.Is(err, ErrIgnore) {
+			log.Trace("[dataColumnSidecarService] failed to process pending GLOAS sidecar",
+				"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index, "err", err)
 		}
-		log.Debug("[dataColumnSidecarService] successfully processed pending GLOAS sidecar",
-			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
-	}, true
+		return
+	}
+	log.Debug("[dataColumnSidecarService] successfully processed pending GLOAS sidecar",
+		"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
 }

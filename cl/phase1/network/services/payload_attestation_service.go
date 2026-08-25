@@ -109,6 +109,7 @@ func (s *payloadAttestationService) newPendingQueue(ctx context.Context) *pendin
 		checkInterval: pendingPayloadAttestationCheckInterval,
 	},
 		s.tryProcessPendingAttestation,
+		s.processPendingAttestation,
 		func(key pendingPayloadAttestationKey) {
 			log.Trace("Pending payload attestation expired", "blockRoot", key.blockRoot)
 		})
@@ -211,13 +212,13 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 
 // queuePendingAttestation defers an attestation until its referenced block is available.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
-	err := s.pending.enqueue(msg, func() (pendingPayloadAttestationKey, error) {
-		return s.buildPendingAttestationKey(blockRoot, msg)
-	})
+	key, err := s.buildPendingAttestationKey(blockRoot, msg)
 	if err != nil {
 		log.Warn("Failed to hash payload attestation for pending queue",
 			"blockRoot", blockRoot, "validatorIndex", msg.ValidatorIndex, "err", err)
+		return
 	}
+	s.pending.enqueueKey(key, msg)
 }
 
 func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error) {
@@ -234,19 +235,20 @@ func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.Payload
 
 // tryProcessPendingAttestation drops stale messages and revalidates the rest
 // once their referenced block arrives.
-func (s *payloadAttestationService) tryProcessPendingAttestation(ctx context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) (func(), bool) {
+func (s *payloadAttestationService) tryProcessPendingAttestation(_ context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) pendingJobDecision {
 	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Data.Slot) {
 		log.Trace("Pending payload attestation slot mismatch", "blockRoot", key.blockRoot)
-		return nil, true
+		return pendingJobRemove
 	}
 
 	if _, ok := s.forkchoiceStore.GetHeader(key.blockRoot); !ok {
-		return nil, false
+		return pendingJobKeep
 	}
+	return pendingJobRemoveThenProcess
+}
 
-	return func() {
-		if err := s.ProcessMessage(ctx, nil, msg); err != nil {
-			log.Trace("Failed to process pending payload attestation", "blockRoot", key.blockRoot, "err", err)
-		}
-	}, true
+func (s *payloadAttestationService) processPendingAttestation(ctx context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) {
+	if err := s.ProcessMessage(ctx, nil, msg); err != nil {
+		log.Trace("Failed to process pending payload attestation", "blockRoot", key.blockRoot, "err", err)
+	}
 }
