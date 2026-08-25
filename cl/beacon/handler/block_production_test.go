@@ -420,6 +420,84 @@ func TestBroadcastBlockRunsGossipValidationBeforePublishing(t *testing.T) {
 	require.ErrorContains(t, err, validationErr.Error())
 }
 
+func TestBroadcastBlockReleasesGossipReservationAfterPreparationFailure(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Body.BlobKzgCommitments.Append(&cltypes.KZGCommitment{1})
+	blobBundles, err := lru.New[common.Bytes48, BlobBundle]("test-blobs", 1)
+	require.NoError(t, err)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+	blockService.EXPECT().ReleaseGossipReservation(block)
+
+	err = (&ApiHandler{blockService: blockService, blobBundles: blobBundles}).broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorContains(t, err, "missing blob bundle")
+}
+
+func TestBroadcastBlockDoesNotStoreBeforeBlockPublication(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.Phase0Version, log.Root(), true)
+	block := blocks[1]
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+	blockService.EXPECT().ReleaseGossipReservation(block)
+	handler.blockService = blockService
+	storeCalled := make(chan struct{})
+	var closeStoreCalled sync.Once
+	blobStorage := blob_storage_mock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(context.Context, common.Hash, []*cltypes.BlobSidecar) error {
+		closeStoreCalled.Do(func() { close(storeCalled) })
+		return nil
+	}).AnyTimes()
+	handler.blobStoage = blobStorage
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(errors.New("block unavailable"))
+	handler.gossipManager = gossipManager
+
+	err := handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorContains(t, err, "block unavailable")
+	select {
+	case <-storeCalled:
+		t.Fatal("block storage started before beacon block publication succeeded")
+	case <-time.After(50 * time.Millisecond):
+	}
+}
+
+func TestBroadcastBlockKeepsGossipReservationAfterBlockPublication(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, blocks, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	block := blocks[1]
+	commitment := &cltypes.KZGCommitment{1}
+	block.Block.Body.BlobKzgCommitments = solid.NewStaticListSSZ[*cltypes.KZGCommitment](1, 48)
+	block.Block.Body.BlobKzgCommitments.Append(commitment)
+	handler.blobBundles.Add(common.Bytes48(*commitment), BlobBundle{
+		Commitment: common.Bytes48(*commitment),
+		Blob:       &cltypes.Blob{},
+		KzgProofs:  []common.Bytes48{{1}},
+	})
+	blockService := network_services_mock.NewMockBlockService(ctrl)
+	blockService.EXPECT().ValidateGossip(gomock.Any(), block).Return(nil)
+	blockService.EXPECT().CommitGossipReservation(block)
+	scheduled := make(chan struct{})
+	blockService.EXPECT().ScheduleBlockForLaterProcessing(block).Do(func(*cltypes.SignedBeaconBlock) { close(scheduled) })
+	handler.blockService = blockService
+	blobStorage := blob_storage_mock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().WriteBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(errors.New("storage unavailable")).AnyTimes()
+	handler.blobStoage = blobStorage
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBlobSidecar(uint64(0)), gomock.Any()).Return(errors.New("sidecar unavailable"))
+	handler.gossipManager = gossipManager
+
+	err := handler.broadcastBlock(t.Context(), block, BlockPublishingValidationGossip)
+	require.ErrorContains(t, err, "sidecar unavailable")
+	select {
+	case <-scheduled:
+	case <-time.After(time.Second):
+		t.Fatal("block was not scheduled after terminal local storage failure")
+	}
+}
+
 func TestPublishGossipReturnsPublishFailure(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	gossipManager := gossip_mock.NewMockGossip(ctrl)

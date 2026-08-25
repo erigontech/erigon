@@ -11,6 +11,9 @@ import (
 type BlockService interface {
 	serviceinterface.Service[*cltypes.SignedBeaconBlock]
 	ValidateGossip(context.Context, *cltypes.SignedBeaconBlock) error
+	CommitGossipReservation(*cltypes.SignedBeaconBlock)
+	ReleaseGossipReservation(*cltypes.SignedBeaconBlock)
+	ScheduleBlockForLaterProcessing(*cltypes.SignedBeaconBlock)
 }
 
 //go:generate mockgen -typed=true -destination=./mock_services/blob_sidecars_service_mock.go -package=mock_services . BlobSidecarsService

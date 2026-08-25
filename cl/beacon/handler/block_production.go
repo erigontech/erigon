@@ -2261,6 +2261,7 @@ func readBoundedBody(body io.Reader, limit int64) ([]byte, error) {
 }
 
 func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeaconBlock, validation BlockPublishingValidation) error {
+	releaseGossipReservation := false
 	if validation == BlockPublishingValidationGossip {
 		if a.blockService == nil {
 			return errors.New("block gossip validator unavailable")
@@ -2268,6 +2269,12 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		if err := a.blockService.ValidateGossip(ctx, blk); err != nil {
 			return fmt.Errorf("%w: %w", errPublishedBlockValidation, err)
 		}
+		releaseGossipReservation = true
+		defer func() {
+			if releaseGossipReservation {
+				a.blockService.ReleaseGossipReservation(blk)
+			}
+		}()
 	}
 	blkSSZ, err := blk.EncodeSSZ(nil)
 	if err != nil {
@@ -2377,12 +2384,6 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 		if err := store(ctx); err != nil {
 			return err
 		}
-	} else {
-		go func() {
-			if err := retryPublishedBlockStore(context.Background(), 3, 100*time.Millisecond, store); err != nil {
-				log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
-			}
-		}()
 	}
 
 	log.Info(
@@ -2397,6 +2398,16 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	// Broadcast the block and its blobs
 	if err := a.publishGossip(ctx, gossip.TopicNameBeaconBlock, blkSSZ); err != nil {
 		return err
+	}
+	if validation == BlockPublishingValidationGossip {
+		a.blockService.CommitGossipReservation(blk)
+		releaseGossipReservation = false
+		go func() {
+			if err := retryPublishedBlockStore(context.Background(), 3, 100*time.Millisecond, store); err != nil {
+				log.Error("BlockPublishing: Failed to store block and blobs", "err", err)
+				a.blockService.ScheduleBlockForLaterProcessing(blk)
+			}
+		}()
 	}
 
 	if blk.Version() < clparams.FuluVersion {

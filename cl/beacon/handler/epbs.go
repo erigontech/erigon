@@ -862,17 +862,18 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
 		}
-		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+		switch {
+		case errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable):
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
 			status = http.StatusAccepted
 			gossipValidated = errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
-		} else if canonical && validation == BlockPublishingValidationGossip {
+		case canonical && validation == BlockPublishingValidationGossip:
 			status = http.StatusAccepted
 			gossipValidated = true
-		} else if canonical {
+		case canonical:
 			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
 			return
-		} else {
+		default:
 			beaconhttp.WrapEndpointError(err).WriteTo(w)
 			return
 		}
