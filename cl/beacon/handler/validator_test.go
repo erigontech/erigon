@@ -77,6 +77,7 @@ func (t *validatorTestSuite) SetupTest() {
 		nil,
 		nil,
 		nil,
+		nil,
 		false,
 		nil,
 		nil,

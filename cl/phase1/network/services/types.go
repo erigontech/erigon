@@ -1,12 +1,17 @@
 package services
 
 import (
+	"context"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 )
 
 //go:generate mockgen -typed=true -destination=./mock_services/block_service_mock.go -package=mock_services . BlockService
-type BlockService serviceinterface.Service[*cltypes.SignedBeaconBlock]
+type BlockService interface {
+	serviceinterface.Service[*cltypes.SignedBeaconBlock]
+	ValidateGossip(context.Context, *cltypes.SignedBeaconBlock) error
+}
 
 //go:generate mockgen -typed=true -destination=./mock_services/blob_sidecars_service_mock.go -package=mock_services . BlobSidecarsService
 type BlobSidecarsService serviceinterface.Service[*cltypes.BlobSidecar]

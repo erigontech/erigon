@@ -149,8 +149,8 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	}
 
 	s.storeMu.Lock()
-	defer s.storeMu.Unlock()
 	if s.hasSeenPreference(seenKey) {
+		s.storeMu.Unlock()
 		return fmt.Errorf("%w: already seen proposer preferences from validator %d for slot %d with dependent root %v",
 			ErrIgnore, validatorIndex, proposalSlot, preferences.DependentRoot)
 	}
@@ -158,6 +158,7 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		Slot:          proposalSlot,
 		DependentRoot: preferences.DependentRoot,
 	}, msg)
+	s.storeMu.Unlock()
 	if s.emitters != nil {
 		s.emitters.Operation().SendProposerPreferences(&beaconevents.VersionedSignedProposerPreferences{Version: clparams.GloasVersion.String(), Data: msg})
 	}

@@ -783,6 +783,10 @@ func (f *ForkChoiceStore) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uin
 	return f.forkGraph.HasBlockChildAtOrAfter(blockRoot, slot)
 }
 
+func (f *ForkChoiceStore) HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool {
+	return f.forkGraph.HasBlockEquivocation(slot, proposerIndex, exceptRoot)
+}
+
 // HasEnvelope delegates to forkGraph.HasEnvelope.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {

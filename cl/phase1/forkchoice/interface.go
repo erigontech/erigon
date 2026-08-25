@@ -75,6 +75,7 @@ type ForkChoiceStorageReader interface {
 	// [New in Gloas:EIP7732] GetBlock returns the full block for a given block root.
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
 	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
+	HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool
 	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
 	HasEnvelope(blockRoot common.Hash) bool
 	// IsPayloadVerified reports whether the EL has fully validated the payload.
@@ -135,10 +136,18 @@ type ForkChoiceStorageWriter interface {
 		fullValidation bool,
 		checkDataAvaibility bool,
 	) error
+	OnBlockWithEquivocationCheck(
+		ctx context.Context,
+		block *cltypes.SignedBeaconBlock,
+		newPayload bool,
+		fullValidation bool,
+		checkDataAvaibility bool,
+	) error
 	// [New in Gloas:EIP7732] OnExecutionPayload processes an execution payload envelope from the builder.
 	// checkBlobData: verify blob data availability via PeerDAS
 	// validatePayload: call engine.NewPayload() to validate with EL
 	OnExecutionPayload(ctx context.Context, signedEnvelope *cltypes.SignedExecutionPayloadEnvelope, checkBlobData, validatePayload bool) error
+	ValidateExecutionPayloadEnvelope(signedEnvelope *cltypes.SignedExecutionPayloadEnvelope) error
 	// [New in Gloas:EIP7732] ApplyLocalSelfBuildEnvelope processes a locally-produced
 	// self-build envelope, skipping BLS signature verification. EL validation still runs.
 	// MUST only be called from the local block production path.

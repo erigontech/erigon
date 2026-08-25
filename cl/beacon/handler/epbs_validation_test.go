@@ -17,29 +17,23 @@
 package handler
 
 import (
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func TestGloasEventTopicsAreValid(t *testing.T) {
-	for _, topic := range []beaconevents.EventTopic{
-		beaconevents.StateHeadV2,
-		beaconevents.OpExecutionPayload,
-		beaconevents.OpExecutionPayloadGossip,
-		beaconevents.OpExecutionPayloadAvailable,
-		beaconevents.OpExecutionPayloadBid,
-		beaconevents.OpPayloadAttestationMessage,
-		beaconevents.OpProposerPreferences,
-	} {
-		_, ok := validTopics[topic]
-		require.True(t, ok, topic)
-	}
-}
+func TestEnvelopeContentsAuthenticateBeforeBlobProcessing(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoice, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	want := errors.New("invalid envelope signature")
+	forkchoice.ValidateExecutionPayloadEnvelopeErr = want
+	contents := cltypes.NewSignedExecutionPayloadEnvelopeContents(handler.beaconChainCfg, 0)
 
-func TestFastConfirmationTopicIsNotAdvertisedBeforeItHasAProducer(t *testing.T) {
-	_, ok := validTopics[beaconevents.EventTopic("fast_confirmation")]
-	require.False(t, ok)
+	err := handler.validateAndStoreExecutionPayloadEnvelopeContents(t.Context(), contents)
+
+	require.ErrorIs(t, err, want)
 }

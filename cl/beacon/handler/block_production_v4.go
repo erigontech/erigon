@@ -37,7 +37,6 @@ const maxBuilderConfigRequestSize = 2 << 20
 type gloasBlockProductionOptions struct {
 	builderConfig      *cltypes.BuilderConfig
 	includePayload     bool
-	suppliedBid        *cltypes.SignedExecutionPayloadBid
 	selectedBuilderURL string
 }
 
@@ -68,7 +67,7 @@ func decodeGloasBlockProductionOptions(w http.ResponseWriter, r *http.Request, t
 	switch contentType {
 	case "application/json":
 		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxBuilderConfigRequestSize))
-		if err := decoder.Decode(config); err != nil {
+		if err := decodeBuilderConfigJSON(decoder, config); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
@@ -85,15 +84,43 @@ func decodeGloasBlockProductionOptions(w http.ResponseWriter, r *http.Request, t
 	default:
 		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
 	}
-	for i, entry := range config.Builders {
-		if entry == nil || entry.Auth == nil || entry.Auth.Message == nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("builder %d has invalid auth", i))
+	validBuilders := make([]*cltypes.BuilderEntry, 0, len(config.Builders))
+	for _, entry := range config.Builders {
+		if entry == nil || entry.Auth == nil || entry.Auth.Message == nil || entry.Auth.Message.Slot != targetSlot {
+			continue
 		}
-		if entry.Auth.Message.Slot != targetSlot {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("builder %d auth slot %d does not match proposal slot %d", i, entry.Auth.Message.Slot, targetSlot))
+		validBuilders = append(validBuilders, entry)
+	}
+	config.Builders = validBuilders
+	return &gloasBlockProductionOptions{builderConfig: config, includePayload: includePayload}, nil
+}
+
+func decodeBuilderConfigJSON(decoder *json.Decoder, config *cltypes.BuilderConfig) error {
+	var raw struct {
+		MinBid             *uint64            `json:"min_bid,string"`
+		BuilderBoostFactor *uint64            `json:"builder_boost_factor,string"`
+		Builders           *[]json.RawMessage `json:"builders"`
+	}
+	decoder.DisallowUnknownFields()
+	if err := decoder.Decode(&raw); err != nil {
+		return err
+	}
+	if raw.MinBid == nil || raw.BuilderBoostFactor == nil || raw.Builders == nil {
+		return errors.New("builder config is missing a required field")
+	}
+	if len(*raw.Builders) > cltypes.MaxBuilderEntries {
+		return fmt.Errorf("builder count %d exceeds %d", len(*raw.Builders), cltypes.MaxBuilderEntries)
+	}
+	config.MinBid = *raw.MinBid
+	config.BuilderBoostFactor = *raw.BuilderBoostFactor
+	config.Builders = make([]*cltypes.BuilderEntry, 0, len(*raw.Builders))
+	for _, encoded := range *raw.Builders {
+		entry := new(cltypes.BuilderEntry)
+		if err := json.Unmarshal(encoded, entry); err == nil {
+			config.Builders = append(config.Builders, entry)
 		}
 	}
-	return &gloasBlockProductionOptions{builderConfig: config, includePayload: includePayload}, nil
+	return nil
 }
 
 func (a *ApiHandler) PostEthV4ValidatorBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
@@ -107,68 +134,6 @@ func (a *ApiHandler) PostEthV4ValidatorBlock(w http.ResponseWriter, r *http.Requ
 	options, err := decodeGloasBlockProductionOptions(w, r, targetSlot)
 	if err != nil {
 		return nil, err
-	}
-	r = r.WithContext(context.WithValue(r.Context(), gloasBlockProductionOptionsKey{}, options))
-	return a.GetEthV3ValidatorBlock(w, r)
-}
-
-func (a *ApiHandler) PostEthV4ValidatorBlockWithBid(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
-	targetSlot, err := strconv.ParseUint(chi.URLParam(r, "slot"), 10, 64)
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid slot: %w", err))
-	}
-	if a.beaconChainCfg.SlotsPerEpoch == 0 || targetSlot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("v4 block production is unavailable before Gloas"))
-	}
-	if r.Header.Get("Eth-Consensus-Version") != clparams.GloasVersion.String() {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("Gloas Eth-Consensus-Version header is required"))
-	}
-	includePayload := false
-	if value := r.URL.Query().Get("include_payload"); value != "" {
-		includePayload, err = strconv.ParseBool(value)
-		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid include_payload: %w", err))
-		}
-	}
-	boost := uint64(100)
-	if value := r.URL.Query().Get("builder_boost_factor"); value != "" {
-		boost, err = strconv.ParseUint(value, 10, 64)
-		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("invalid builder_boost_factor: %w", err))
-		}
-	}
-	bid := new(cltypes.SignedExecutionPayloadBid)
-	contentType, err := requestContentType(r)
-	if err != nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, err)
-	}
-	switch contentType {
-	case "application/json":
-		decoder := json.NewDecoder(http.MaxBytesReader(w, r.Body, maxEpbsJSONSize))
-		if err := decoder.Decode(bid); err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-		}
-		if err := decoder.Decode(new(any)); !errors.Is(err, io.EOF) {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("request body contains trailing data"))
-		}
-	case "application/octet-stream":
-		body, err := io.ReadAll(http.MaxBytesReader(w, r.Body, maxSignedExecutionPayloadBidSSZSize()))
-		if err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-		}
-		if err := bid.DecodeSSZ(body, int(clparams.GloasVersion)); err != nil {
-			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
-		}
-	default:
-		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
-	}
-	if bid.Message == nil || bid.Message.Slot != targetSlot {
-		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("execution payload bid slot does not match proposal slot"))
-	}
-	options := &gloasBlockProductionOptions{
-		builderConfig:  &cltypes.BuilderConfig{BuilderBoostFactor: boost},
-		includePayload: includePayload,
-		suppliedBid:    bid,
 	}
 	r = r.WithContext(context.WithValue(r.Context(), gloasBlockProductionOptionsKey{}, options))
 	return a.GetEthV3ValidatorBlock(w, r)

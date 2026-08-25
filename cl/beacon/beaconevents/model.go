@@ -84,7 +84,6 @@ const (
 	StateLightClientFinalityUpdate   EventTopic = "light_client_finality_update"
 	StateLightClientOptimisticUpdate EventTopic = "light_client_optimistic_update"
 	StatePayloadAttributes           EventTopic = "payload_attributes"
-	StateFastConfirmation            EventTopic = "fast_confirmation"
 )
 
 // State event data types

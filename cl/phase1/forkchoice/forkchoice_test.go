@@ -424,6 +424,10 @@ type getFinalizedExecutionHashForkGraph struct {
 	currentJustified      solid.Checkpoint
 }
 
+func (f *getFinalizedExecutionHashForkGraph) HasBlockEquivocation(uint64, uint64, common.Hash) bool {
+	return false
+}
+
 func (g *getFinalizedExecutionHashForkGraph) AddChainSegment(*cltypes.SignedBeaconBlock, bool) (*state.CachingBeaconState, fork_graph.ChainSegmentInsertionResult, error) {
 	g.addChainSegmentCalled = true
 	return nil, g.addChainSegmentStatus, g.addChainSegmentErr

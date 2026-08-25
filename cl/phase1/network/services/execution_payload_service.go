@@ -178,6 +178,9 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	// Process the execution payload through forkchoice
 	// Note: bid matching and signature verification are done in OnExecutionPayload.validateEnvelopeAgainstBlock
 	if err := s.forkchoiceStore.OnExecutionPayload(ctx, signedEnvelope, true, true); err != nil {
+		if errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
+			s.emitExecutionPayloadGossip(block, envelope)
+		}
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
 			errors.Is(err, context.Canceled) || errors.Is(err, context.DeadlineExceeded) {
 			return fmt.Errorf("%w: %v", ErrIgnore, err) //nolint:errorlint // converting, not wrapping: the forkchoice sentinels must not stay matchable
@@ -189,10 +192,7 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	// This ensures invalid envelopes (e.g., with forged signatures) don't block valid ones
 	s.seenEnvelopesCache.Add(seenKey, struct{}{})
 
-	payloadEvent := &beaconevents.ExecutionPayloadGossipData{
-		Slot: block.Block.Slot, BuilderIndex: builderIndex, BlockHash: envelope.Payload.BlockHash, BlockRoot: beaconBlockRoot,
-	}
-	s.emitters.Operation().SendExecutionPayloadGossip(payloadEvent)
+	s.emitExecutionPayloadGossip(block, envelope)
 	s.emitters.Operation().SendExecutionPayload(&beaconevents.ExecutionPayloadData{
 		Slot: block.Block.Slot, BuilderIndex: builderIndex, BlockHash: envelope.Payload.BlockHash, BlockRoot: beaconBlockRoot,
 		ExecutionOptimistic: s.forkchoiceStore.IsRootOptimistic(beaconBlockRoot),
@@ -213,6 +213,15 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 	return nil
 }
 
+func (s *executionPayloadService) emitExecutionPayloadGossip(block *cltypes.SignedBeaconBlock, envelope *cltypes.ExecutionPayloadEnvelope) {
+	s.emitters.Operation().SendExecutionPayloadGossip(&beaconevents.ExecutionPayloadGossipData{
+		Slot:         block.Block.Slot,
+		BuilderIndex: envelope.BuilderIndex,
+		BlockHash:    envelope.Payload.BlockHash,
+		BlockRoot:    envelope.BeaconBlockRoot,
+	})
+}
+
 func (s *executionPayloadService) emitFullHeadUpdate(block *cltypes.SignedBeaconBlock, blockRoot common.Hash) {
 	headRoot, headSlot, err := s.forkchoiceStore.GetHead(nil)
 	if err != nil || headRoot != blockRoot || s.beaconCfg.SlotsPerEpoch == 0 {
@@ -222,29 +231,23 @@ func (s *executionPayloadService) emitFullHeadUpdate(block *cltypes.SignedBeacon
 	if err != nil || headState == nil {
 		return
 	}
-	epoch := headSlot / s.beaconCfg.SlotsPerEpoch
-	currentDependentRoot := s.forkchoiceStore.AnchorRoot()
-	nextDependentRoot := s.forkchoiceStore.AnchorRoot()
-	if epoch > 1 {
-		currentDependentRoot, err = headState.GetBlockRootAtSlot((epoch-1)*s.beaconCfg.SlotsPerEpoch - 1)
-		if err != nil {
-			return
-		}
+	headEvent, err := beaconevents.BuildHeadV2Data(
+		s.beaconCfg,
+		headState,
+		headSlot,
+		headRoot,
+		block.Block.StateRoot,
+		"full",
+		s.forkchoiceStore.IsRootOptimistic(blockRoot),
+	)
+	if err != nil {
+		return
 	}
-	if epoch > 0 {
-		nextDependentRoot, err = headState.GetBlockRootAtSlot(epoch*s.beaconCfg.SlotsPerEpoch - 1)
-		if err != nil {
-			return
-		}
+	currentHeadRoot, currentHeadSlot, err := s.forkchoiceStore.GetHead(nil)
+	if err != nil || currentHeadRoot != headRoot || currentHeadSlot != headSlot {
+		return
 	}
-	s.emitters.State().SendHeadV2(&beaconevents.HeadV2Data{
-		Version: clparams.GloasVersion.String(),
-		Data: beaconevents.HeadV2Content{
-			Slot: headSlot, Block: headRoot, State: block.Block.StateRoot, PayloadStatus: "full",
-			EpochTransition: headSlot%s.beaconCfg.SlotsPerEpoch == 0, CurrentEpochDependentRoot: currentDependentRoot,
-			NextEpochDependentRoot: nextDependentRoot, ExecutionOptimistic: s.forkchoiceStore.IsRootOptimistic(blockRoot),
-		},
-	})
+	s.emitters.State().SendHeadV2(headEvent)
 }
 
 // queuePendingEnvelope adds an envelope to the pending queue for later processing

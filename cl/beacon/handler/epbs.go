@@ -814,21 +814,41 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("missing message in signed envelope")).WriteTo(w)
 		return
 	}
+	contentsIntegrationFailed := false
 	if contents != nil {
-		if err := a.storeExecutionPayloadEnvelopeContents(r.Context(), contents); err != nil {
-			beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
-			return
+		if err := a.validateAndStoreExecutionPayloadEnvelopeContents(r.Context(), contents); err != nil {
+			if !errors.Is(err, errExecutionPayloadEnvelopeIntegration) {
+				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)
+				return
+			}
+			contentsIntegrationFailed = true
 		}
 	}
 
 	status := http.StatusOK
+	if contentsIntegrationFailed {
+		status = http.StatusAccepted
+	}
+	gossipValidated := false
 	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, canonical, true); err != nil {
 		if errors.Is(err, forkchoice.ErrIgnore) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) {
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
 			status = http.StatusAccepted
+			gossipValidated = errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable)
 		} else {
 			beaconhttp.WrapEndpointError(err).WriteTo(w)
 			return
+		}
+	} else {
+		gossipValidated = true
+	}
+	if a.emitters != nil && gossipValidated && signedEnvelope.Message.Payload != nil {
+		block, ok := a.forkchoiceStore.GetBlock(signedEnvelope.Message.BeaconBlockRoot)
+		if ok && block != nil && block.Block != nil {
+			a.emitters.Operation().SendExecutionPayloadGossip(&beaconevents.ExecutionPayloadGossipData{
+				Slot: block.Block.Slot, BuilderIndex: signedEnvelope.Message.BuilderIndex,
+				BlockHash: signedEnvelope.Message.Payload.BlockHash, BlockRoot: signedEnvelope.Message.BeaconBlockRoot,
+			})
 		}
 	}
 	if status == http.StatusOK && a.emitters != nil {
@@ -870,28 +890,15 @@ func (a *ApiHandler) emitFullHeadV2(block *cltypes.SignedBeaconBlock, blockRoot 
 	if err != nil || headState == nil {
 		return
 	}
-	epoch := headSlot / a.beaconChainCfg.SlotsPerEpoch
-	currentRoot, nextRoot := a.forkchoiceStore.AnchorRoot(), a.forkchoiceStore.AnchorRoot()
-	if epoch > 1 {
-		currentRoot, err = headState.GetBlockRootAtSlot((epoch-1)*a.beaconChainCfg.SlotsPerEpoch - 1)
-		if err != nil {
-			return
-		}
+	event, err := beaconevents.BuildHeadV2Data(a.beaconChainCfg, headState, headSlot, headRoot, block.Block.StateRoot, "full", a.forkchoiceStore.IsRootOptimistic(blockRoot))
+	if err != nil {
+		return
 	}
-	if epoch > 0 {
-		nextRoot, err = headState.GetBlockRootAtSlot(epoch*a.beaconChainCfg.SlotsPerEpoch - 1)
-		if err != nil {
-			return
-		}
+	currentRoot, currentSlot, err := a.forkchoiceStore.GetHead(nil)
+	if err != nil || currentRoot != headRoot || currentSlot != headSlot {
+		return
 	}
-	a.emitters.State().SendHeadV2(&beaconevents.HeadV2Data{
-		Version: clparams.GloasVersion.String(),
-		Data: beaconevents.HeadV2Content{
-			Slot: headSlot, Block: headRoot, State: block.Block.StateRoot, PayloadStatus: "full",
-			EpochTransition: headSlot%a.beaconChainCfg.SlotsPerEpoch == 0, CurrentEpochDependentRoot: currentRoot,
-			NextEpochDependentRoot: nextRoot, ExecutionOptimistic: a.forkchoiceStore.IsRootOptimistic(blockRoot),
-		},
-	})
+	a.emitters.State().SendHeadV2(event)
 }
 
 func (a *ApiHandler) decodeExecutionPayloadEnvelopeRequest(w http.ResponseWriter, r *http.Request, contentType string, blobDataIncluded bool) (*cltypes.SignedExecutionPayloadEnvelope, *cltypes.SignedExecutionPayloadEnvelopeContents, error) {
@@ -933,6 +940,18 @@ func (a *ApiHandler) decodeExecutionPayloadEnvelopeRequest(w http.ResponseWriter
 	}
 	return signedEnvelope, contents, nil
 }
+
+func (a *ApiHandler) validateAndStoreExecutionPayloadEnvelopeContents(ctx context.Context, contents *cltypes.SignedExecutionPayloadEnvelopeContents) error {
+	if contents == nil || contents.SignedExecutionPayloadEnvelope == nil {
+		return errors.New("execution payload envelope contents has nil envelope")
+	}
+	if err := a.forkchoiceStore.ValidateExecutionPayloadEnvelope(contents.SignedExecutionPayloadEnvelope); err != nil {
+		return err
+	}
+	return a.storeExecutionPayloadEnvelopeContents(ctx, contents)
+}
+
+var errExecutionPayloadEnvelopeIntegration = errors.New("execution payload envelope integration failed")
 
 func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, contents *cltypes.SignedExecutionPayloadEnvelopeContents) error {
 	if contents == nil || contents.SignedExecutionPayloadEnvelope == nil || contents.SignedExecutionPayloadEnvelope.Message == nil {
@@ -986,15 +1005,18 @@ func (a *ApiHandler) storeExecutionPayloadEnvelopeContents(ctx context.Context, 
 			return fmt.Errorf("execution payload envelope column %d has invalid KZG proof", column.Index)
 		}
 	}
+	if len(columns) != 0 && a.columnStorage == nil {
+		return fmt.Errorf("%w: data column storage unavailable", errExecutionPayloadEnvelopeIntegration)
+	}
+	for _, column := range columns {
+		if err := a.columnStorage.WriteColumnSidecars(ctx, envelope.BeaconBlockRoot, int64(column.Index), column); err != nil {
+			return fmt.Errorf("%w: %w", errExecutionPayloadEnvelopeIntegration, err)
+		}
+	}
 	for _, bundle := range bundles {
 		a.blobBundles.Add(bundle.Commitment, bundle)
 	}
 	for _, column := range columns {
-		if a.columnStorage != nil {
-			if err := a.columnStorage.WriteColumnSidecars(ctx, envelope.BeaconBlockRoot, int64(column.Index), column); err != nil {
-				return err
-			}
-		}
 		if a.sentinel != nil {
 			encoded, err := column.EncodeSSZ(nil)
 			if err != nil {
@@ -1177,15 +1199,10 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelope(w http.ResponseWr
 			fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
 	}
 
-	// Look up the cached self-build envelope for this slot.
-	envelope, ok := a.selfBuildEnvelopes.Get(slot)
+	envelope, ok := a.selfBuildEnvelopeForSlot(slot, func(envelope *cltypes.ExecutionPayloadEnvelope) bool {
+		return envelope.BuilderIndex == builderIndex
+	})
 	if !ok || envelope == nil {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
-			fmt.Errorf("no execution payload envelope found for slot %d", slot))
-	}
-
-	// Validate that the requested builder_index matches the cached envelope.
-	if envelope.BuilderIndex != builderIndex {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			fmt.Errorf("no execution payload envelope found for slot %d with builder_index %d", slot, builderIndex))
 	}
@@ -1213,7 +1230,7 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeBySlot(w http.Resp
 			fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
 	}
 
-	envelope, ok := a.selfBuildEnvelopes.Get(slot)
+	envelope, ok := a.selfBuildEnvelopeForSlot(slot, nil)
 	if !ok || envelope == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
 			fmt.Errorf("no execution payload envelope found for slot %d", slot))
@@ -1245,11 +1262,25 @@ func (a *ApiHandler) GetEthV1ValidatorExecutionPayloadEnvelopeByBlockRoot(w http
 	if slot/a.beaconChainCfg.SlotsPerEpoch < a.beaconChainCfg.GloasForkEpoch {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, fmt.Errorf("execution payload envelopes not available before GLOAS fork"))
 	}
-	envelope, ok := a.selfBuildEnvelopes.Get(slot)
-	if !ok || envelope == nil || envelope.BeaconBlockRoot != root {
+	envelope, ok := a.selfBuildEnvelopes.Get(selfBuildEnvelopeKey{Slot: slot, BeaconBlockRoot: root})
+	if !ok || envelope == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("no execution payload envelope found for slot %d and block root %s", slot, root))
 	}
 	return newBeaconResponse(envelope).WithVersion(clparams.GloasVersion), nil
+}
+
+func (a *ApiHandler) selfBuildEnvelopeForSlot(slot uint64, accept func(*cltypes.ExecutionPayloadEnvelope) bool) (*cltypes.ExecutionPayloadEnvelope, bool) {
+	keys := a.selfBuildEnvelopes.Keys()
+	for _, key := range slices.Backward(keys) {
+		if key.Slot != slot {
+			continue
+		}
+		envelope, ok := a.selfBuildEnvelopes.Get(key)
+		if ok && envelope != nil && (accept == nil || accept(envelope)) {
+			return envelope, true
+		}
+	}
+	return nil, false
 }
 
 // ---- Helpers ----

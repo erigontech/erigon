@@ -74,10 +74,9 @@ type selfBuildPayload struct {
 	ExecutionRequests *cltypes.ExecutionRequests
 }
 
-type selfBuildEnvelopeStore interface {
-	Add(uint64, *cltypes.ExecutionPayloadEnvelope) bool
-	Get(uint64) (*cltypes.ExecutionPayloadEnvelope, bool)
-	Remove(uint64) bool
+type selfBuildEnvelopeKey struct {
+	Slot            uint64
+	BeaconBlockRoot common.Hash
 }
 
 type ApiHandler struct {
@@ -138,6 +137,7 @@ type ApiHandler struct {
 	voluntaryExitService             services.VoluntaryExitService
 	blsToExecutionChangeService      services.BLSToExecutionChangeService
 	proposerSlashingService          services.ProposerSlashingService
+	blockService                     services.BlockService
 	builderClient                    builder.BuilderClient
 	gossipManager                    gossip.Gossip
 	enableMemoizedHeadState          bool
@@ -158,9 +158,8 @@ type ApiHandler struct {
 	// GET /eth/v1/validator/execution_payload_envelope/{slot}/{builder_index}.
 	// Populated during block production alongside selfBuildPayloads.
 	// [New in Gloas:EIP7732]
-	selfBuildEnvelopeUpdatesMu sync.Mutex
-	selfBuildEnvelopes         selfBuildEnvelopeStore
-	builderRoutes              *lru.Cache[common.Hash, string]
+	selfBuildEnvelopes *lru.Cache[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]
+	builderRoutes      *lru.Cache[common.Hash, string]
 }
 
 func NewApiHandler(
@@ -194,6 +193,7 @@ func NewApiHandler(
 	voluntaryExitService services.VoluntaryExitService,
 	blsToExecutionChangeService services.BLSToExecutionChangeService,
 	proposerSlashingService services.ProposerSlashingService,
+	blockService services.BlockService,
 	builderClient builder.BuilderClient,
 	caplinStateSnapshots *snapshotsync.CaplinStateSnapshots,
 	gossipManager gossip.Gossip,
@@ -225,7 +225,7 @@ func NewApiHandler(
 	if err != nil {
 		panic(err)
 	}
-	selfBuildEnvelopes, err := lru.New[uint64, *cltypes.ExecutionPayloadEnvelope]("selfBuildEnvelopes", 4)
+	selfBuildEnvelopes, err := lru.New[selfBuildEnvelopeKey, *cltypes.ExecutionPayloadEnvelope]("selfBuildEnvelopes", 4)
 	if err != nil {
 		panic(err)
 	}
@@ -273,6 +273,7 @@ func NewApiHandler(
 		voluntaryExitService:             voluntaryExitService,
 		blsToExecutionChangeService:      blsToExecutionChangeService,
 		proposerSlashingService:          proposerSlashingService,
+		blockService:                     blockService,
 		builderClient:                    builderClient,
 		gossipManager:                    gossipManager,
 		enableMemoizedHeadState:          enableMemoizedHeadState,
@@ -489,7 +490,6 @@ func (a *ApiHandler) init() {
 			r.Get("/v3/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
 			r.Get("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV3ValidatorBlock))
 			r.Post("/v4/validator/blocks/{slot}", beaconhttp.HandleEndpointFunc(a.PostEthV4ValidatorBlock))
-			r.Post("/v4/validator/blocks/{slot}/with_bid", beaconhttp.HandleEndpointFunc(a.PostEthV4ValidatorBlockWithBid))
 		}
 	})
 }
