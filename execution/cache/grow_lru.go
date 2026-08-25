@@ -38,10 +38,12 @@ import (
 // write lost in a retired generation is a benign miss, and an entry whose
 // removal a racing copy undid serves correct bytes until its stale stamp
 // drops it on the next read. Do not reuse for mutable-per-key values — those
-// need GenericCache's fenced swap. The onEvict-maintained counters — this
-// type's per-generation entry count and the caller's byte counters — are
-// approximate across grow windows (a lost write is counted but never evicted;
-// a raced removal can subtract twice).
+// need GenericCache's fenced swap. Each generation's entry count stays exact
+// for that generation — every mutation resolves one generation and decrements
+// the one it acted on — which is what the grow gates rely on. The caller's
+// onEvict byte counters remain approximate across grow windows: a write lost in
+// a retired generation is counted but never evicted, and a removal a racing
+// copy undid subtracts twice.
 type growLRU[V any] struct {
 	cur      atomic.Pointer[lruGen[V]]
 	onEvict  func(uint64, V)
@@ -89,13 +91,29 @@ func (g *growLRU[V]) newShards(capacity uint32) *lruGen[V] {
 
 func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().lru.Get(key) }
 
+// Add inserts a key this LRU does not hold. Callers reach it through a put
+// stripe they have held since their own miss, and the read paths only ever
+// remove, so nothing can have inserted key in between and no grow copy can
+// have carried it into the generation this resolves.
 func (g *growLRU[V]) Add(key uint64, value V) {
 	gen := g.cur.Load()
 	if curCap := g.curCap.Load(); curCap < g.maxCap && gen.len() >= int(curCap) {
 		g.maybeGrow()
 		gen = g.cur.Load()
 	}
-	gen.addIfAbsent(key, value)
+	gen.add(key, value)
+}
+
+// Replace refreshes a key this LRU already holds. Resolving the generation once
+// is what keeps the count exact: a Remove and an Add that resolve g.cur
+// separately can straddle an unfenced grow, landing the removal on the retired
+// generation and the insert on a new one that already holds the copied key --
+// which freelru replaces in place without firing OnEvict. The entry count does
+// not change, so this never needs to grow.
+func (g *growLRU[V]) Replace(key uint64, value V) {
+	gen := g.cur.Load()
+	gen.lru.Remove(key)
+	gen.add(key, value)
 }
 
 func (g *growLRU[V]) maybeGrow() {

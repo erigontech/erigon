@@ -69,27 +69,12 @@ type lruGen[V any] struct {
 
 func (g *lruGen[V]) len() int { return int(g.n.Load()) }
 
-// add inserts a key the LRU does not already hold — every call site removes an
-// existing one first — so the count rises by one; a capacity eviction inside
-// freelru fires OnEvict, which takes it back down.
+// add inserts a key the LRU does not already hold — every call site proves that
+// first — so the count rises by one; a capacity eviction inside freelru fires
+// OnEvict, which takes it back down.
 func (g *lruGen[V]) add(h uint64, v V) (evicted bool) {
 	evicted = g.lru.Add(h, v)
 	g.n.Add(1)
-	return evicted
-}
-
-// addIfAbsent is add's counterpart for a caller that cannot guarantee this
-// generation lacks h — growLRU's grow is not fenced against writers (see its
-// doc comment), so a same-key Remove/Add pair can land on a generation a
-// concurrent grow already copied the key into. freelru.Add replaces an
-// existing key in place without firing OnEvict, so the count must rise only
-// when the key was actually absent.
-func (g *lruGen[V]) addIfAbsent(h uint64, v V) (evicted bool) {
-	existed := g.lru.Contains(h)
-	evicted = g.lru.Add(h, v)
-	if !existed {
-		g.n.Add(1)
-	}
 	return evicted
 }
 

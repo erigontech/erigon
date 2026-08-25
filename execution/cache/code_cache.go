@@ -208,13 +208,18 @@ func putContentLocked[T any](
 	counter *atomic.Int64,
 	keyCost int64,
 ) {
+	stale := false
 	if existing, ok := lru.Get(h); ok {
 		if txNum, epoch := stamp(existing); !coh.IsStale(txNum, epoch) {
 			return
 		}
-		lru.Remove(h) // stale — OnEvict decrements counter for the removed entry
+		stale = true
 	}
 	counter.Add(keyCost + valCost(newEntry))
+	if stale {
+		lru.Replace(h, newEntry) // OnEvict decrements counter for the replaced entry
+		return
+	}
 	lru.Add(h, newEntry) // evicts the coldest entry when full; its OnEvict decrements counter
 }
 
