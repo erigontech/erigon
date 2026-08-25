@@ -319,6 +319,12 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 		if envelopes != nil {
 			envelope = envelopes[common.Hash(blockRoot)]
 		}
+		if envelope != nil {
+			if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(block, envelope); err != nil {
+				log.Debug("[BackwardBeaconDownloader] rejecting envelope with mismatched block commitments", "slot", block.Block.Slot, "err", err)
+				envelope = nil
+			}
+		}
 
 		_, isFull := fullRootSet[common.Hash(blockRoot)]
 		_, isUnknown := fetchRootSet[common.Hash(blockRoot)]
@@ -377,6 +383,12 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 							"slot", block.Block.Slot, "confirmedFull", isFull, "err", fetchErr)
 					}
 					envelope = env
+				}
+				if envelope != nil {
+					if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(block, envelope); err != nil {
+						log.Debug("[BackwardBeaconDownloader] rejecting root-fetched envelope with mismatched block commitments", "slot", block.Block.Slot, "err", err)
+						envelope = nil
+					}
 				}
 				if shouldFetch && !isFull && envelope == nil {
 					log.Debug("[BackwardBeaconDownloader] unseeded GLOAS envelope unavailable for root-fetched block, preserving cursor", "slot", block.Block.Slot)
@@ -550,6 +562,17 @@ func (b *BackwardBeaconDownloader) RecoverSkippedEnvelopes(ctx context.Context, 
 			blocks[i] = s.Block
 		}
 		fetchEnvelopesFromBeaconAPI(ctx, b.httpFallbackURL, blocks, roots, envelopes, b.beaconCfg)
+	}
+	for _, skippedBlock := range skipped {
+		root := common.Hash(skippedBlock.Root)
+		envelope := envelopes[root]
+		if envelope == nil {
+			continue
+		}
+		if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(skippedBlock.Block, envelope); err != nil {
+			log.Debug("[BackwardBeaconDownloader] rejecting recovered envelope with mismatched block commitments", "root", root, "err", err)
+			delete(envelopes, root)
+		}
 	}
 
 	return envelopes
@@ -760,6 +783,9 @@ func (b *BackwardBeaconDownloader) fetchSingleEnvelope(ctx context.Context, bloc
 	}
 	if envelope.Message.BeaconBlockRoot != blockRoot {
 		return nil, fmt.Errorf("envelope block root %x does not match requested block root %x", envelope.Message.BeaconBlockRoot, blockRoot)
+	}
+	if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(block, envelope); err != nil {
+		return nil, fmt.Errorf("envelope block commitments: %w", err)
 	}
 	return envelope, nil
 }

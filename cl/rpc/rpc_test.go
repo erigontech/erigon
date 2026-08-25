@@ -462,6 +462,50 @@ func TestSendExecutionPayloadEnvelopesByRootReqReturnsValidatedPrefixOnError(t *
 	})
 }
 
+func TestSendExecutionPayloadEnvelopesByRangeReqReturnsValidatedPrefixOnFramingError(t *testing.T) {
+	testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnFramingError(t, func(client *BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+		return client.SendExecutionPayloadEnvelopesByRangeReq(context.Background(), 1, 2)
+	})
+}
+
+func TestSendExecutionPayloadEnvelopesByRootReqReturnsValidatedPrefixOnFramingError(t *testing.T) {
+	testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnFramingError(t, func(client *BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error) {
+		return client.SendExecutionPayloadEnvelopesByRootReq(context.Background(), [][32]byte{{1}, {2}})
+	})
+}
+
+func testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnFramingError(
+	t *testing.T,
+	request func(*BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error),
+) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(0, common.Hash{}, &cfg)
+	gloasDigest, err := clock.ComputeForkDigest(cfg.GloasForkEpoch)
+	require.NoError(t, err)
+
+	valid := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	valid.Message.BeaconBlockRoot = common.HexToHash("0x01")
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, valid, gloasDigest[:]...))
+	require.NoError(t, response.WriteByte(0))
+	_, err = response.Write([]byte{1})
+	require.NoError(t, err)
+
+	client := &BeaconRpcP2P{
+		ctx:          context.Background(),
+		sentinel:     &blockResponseSentinel{response: response.Bytes()},
+		beaconConfig: &cfg,
+		ethClock:     clock,
+	}
+	envelopes, pid, err := request(client)
+	require.Error(t, err)
+	require.Equal(t, "malicious-peer", pid)
+	require.Len(t, envelopes, 1)
+	require.Equal(t, valid.Message.BeaconBlockRoot, envelopes[0].Message.BeaconBlockRoot)
+}
+
 func testExecutionPayloadEnvelopeRequestReturnsValidatedPrefixOnError(
 	t *testing.T,
 	request func(*BeaconRpcP2P) ([]*cltypes.SignedExecutionPayloadEnvelope, string, error),

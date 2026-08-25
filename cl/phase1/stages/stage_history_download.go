@@ -152,6 +152,11 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 	// Set up onNewBlock callback
 	// [Modified in Gloas:EIP7732] envelope is non-nil for GLOAS FULL blocks, nil for EMPTY or pre-GLOAS.
 	cfg.downloader.SetOnNewBlock(func(blk *cltypes.SignedBeaconBlock, envelope *cltypes.SignedExecutionPayloadEnvelope) (finished bool, err error) {
+		if envelope != nil {
+			if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(blk, envelope); err != nil {
+				return false, fmt.Errorf("execution payload envelope commitments: %w", err)
+			}
+		}
 		tx, err := cfg.indiciesDB.BeginRw(ctx)
 		if err != nil {
 			return false, err
@@ -534,6 +539,10 @@ func recoverSkippedEnvelopes(ctx context.Context, cfg StageHistoryReconstruction
 }
 
 func recoverSkippedEnvelope(ctx context.Context, cfg StageHistoryReconstructionCfg, s network.SkippedFullBlock, env *cltypes.SignedExecutionPayloadEnvelope) bool {
+	if err := cltypes.ValidateExecutionPayloadEnvelopeCommitments(s.Block, env); err != nil {
+		log.Warn("[BackwardBeaconDownloader] envelope recovery: block commitments mismatch", "err", err)
+		return false
+	}
 	if cfg.executionBlocksCollector != nil {
 		if err := cfg.executionBlocksCollector.AddGloasBlock(s.Block.Block, env); err != nil {
 			log.Warn("[BackwardBeaconDownloader] envelope recovery: add block failed", "err", err)

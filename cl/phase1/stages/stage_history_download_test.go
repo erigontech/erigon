@@ -24,7 +24,10 @@ import (
 
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/phase1/network"
+	"github.com/erigontech/erigon/common"
 )
 
 // clampProgress must never report a total below processed nor underflow, even
@@ -113,6 +116,27 @@ func TestCompleteHistoryBackfillNotifiesAfterMoreThanThreeRecoveryAttempts(t *te
 	require.True(t, completed)
 	require.Equal(t, 5, attempts)
 	require.True(t, notified)
+}
+
+func TestRecoverSkippedEnvelopeRejectsBidCommitmentMismatchBeforeSideEffects(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = 9
+	block.Block.Body.SyncAggregate = cltypes.NewSyncAggregate()
+	block.Block.Body.GetSignedExecutionPayloadBid().Message.BlockHash = common.HexToHash("0x01")
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	envelope.Message.BeaconBlockRoot = root
+	envelope.Message.Payload.SlotNumber = block.Block.Slot
+	envelope.Message.Payload.BlockHash = common.HexToHash("0x02")
+
+	require.False(t, recoverSkippedEnvelope(
+		context.Background(),
+		StageHistoryReconstructionCfg{},
+		network.SkippedFullBlock{Block: block, Root: root},
+		envelope,
+	))
 }
 
 func TestCompleteHistoryBackfillCancellationWithholdsNotification(t *testing.T) {

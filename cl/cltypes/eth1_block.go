@@ -515,6 +515,26 @@ func (b *Eth1Block) getSchema() []any {
 
 // RlpHeader returns the equivalent types.Header struct with RLP-based fields.
 func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.Hash, blockAccessList *types.BlockAccessListSidecar) (*types.Header, error) {
+	header, err := b.rlpHeader(parentRoot, executionReqHash, blockAccessList)
+	if err != nil {
+		return nil, err
+	}
+	if header.Hash() != b.BlockHash {
+		return nil, fmt.Errorf("cannot derive rlp header: mismatching hash: %s != %s, %d", header.Hash(), b.BlockHash, header.Number)
+	}
+	return header, nil
+}
+
+// ComputeBlockHash derives the execution block hash from the payload fields.
+func (b *Eth1Block) ComputeBlockHash(parentRoot *common.Hash, executionReqHash common.Hash, blockAccessList *types.BlockAccessListSidecar) (common.Hash, error) {
+	header, err := b.rlpHeader(parentRoot, executionReqHash, blockAccessList)
+	if err != nil {
+		return common.Hash{}, err
+	}
+	return header.Hash(), nil
+}
+
+func (b *Eth1Block) rlpHeader(parentRoot *common.Hash, executionReqHash common.Hash, blockAccessList *types.BlockAccessListSidecar) (*types.Header, error) {
 	baseFee := new(uint256.Int)
 	_ = baseFee.UnmarshalSSZ(b.BaseFeePerGas[:])
 	// If the block version is Capella or later, calculate the withdrawals hash.
@@ -585,11 +605,6 @@ func (b *Eth1Block) RlpHeader(parentRoot *common.Hash, executionReqHash common.H
 		header.BlockAccessListHash = blockAccessListHash
 		slotNumber := b.SlotNumber
 		header.SlotNumber = &slotNumber
-	}
-
-	// If the header hash does not match the block hash, return an error.
-	if header.Hash() != b.BlockHash {
-		return nil, fmt.Errorf("cannot derive rlp header: mismatching hash: %s != %s, %d", header.Hash(), b.BlockHash, header.Number)
 	}
 
 	return header, nil

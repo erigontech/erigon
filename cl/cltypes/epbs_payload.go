@@ -527,6 +527,72 @@ func ValidateExecutionPayloadEnvelopeVersion(version clparams.StateVersion) erro
 	return nil
 }
 
+// ValidateExecutionPayloadEnvelopeCommitments verifies the envelope fields committed by a beacon block's execution payload bid.
+func ValidateExecutionPayloadEnvelopeCommitments(block *SignedBeaconBlock, signedEnvelope *SignedExecutionPayloadEnvelope) error {
+	if block == nil || block.Block == nil || block.Block.Body == nil {
+		return errors.New("beacon block is incomplete")
+	}
+	if signedEnvelope == nil || signedEnvelope.Message == nil || signedEnvelope.Message.Payload == nil {
+		return errors.New("execution payload envelope is incomplete")
+	}
+
+	envelope := signedEnvelope.Message
+	if envelope.Payload.Extra == nil || envelope.Payload.Transactions == nil || envelope.Payload.Withdrawals == nil {
+		return errors.New("execution payload envelope payload is incomplete")
+	}
+	blockRoot, err := block.Block.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("hash beacon block: %w", err)
+	}
+	if envelope.BeaconBlockRoot != blockRoot {
+		return fmt.Errorf("envelope beacon block root %x does not match block root %x", envelope.BeaconBlockRoot, blockRoot)
+	}
+	if envelope.ParentBeaconBlockRoot != block.Block.ParentRoot {
+		return fmt.Errorf("envelope parent beacon block root %x does not match block parent root %x", envelope.ParentBeaconBlockRoot, block.Block.ParentRoot)
+	}
+	if envelope.Payload.SlotNumber != block.Block.Slot {
+		return fmt.Errorf("envelope payload slot %d does not match block slot %d", envelope.Payload.SlotNumber, block.Block.Slot)
+	}
+
+	signedBid := block.Block.Body.GetSignedExecutionPayloadBid()
+	if signedBid == nil || signedBid.Message == nil {
+		return errors.New("beacon block has no execution payload bid")
+	}
+	bid := signedBid.Message
+	if envelope.BuilderIndex != bid.BuilderIndex {
+		return fmt.Errorf("envelope builder index %d does not match bid builder index %d", envelope.BuilderIndex, bid.BuilderIndex)
+	}
+	if envelope.Payload.ParentHash != bid.ParentBlockHash {
+		return fmt.Errorf("envelope payload parent hash %x does not match bid parent block hash %x", envelope.Payload.ParentHash, bid.ParentBlockHash)
+	}
+	if envelope.Payload.BlockHash != bid.BlockHash {
+		return fmt.Errorf("envelope payload block hash %x does not match bid block hash %x", envelope.Payload.BlockHash, bid.BlockHash)
+	}
+	if envelope.Payload.PrevRandao != bid.PrevRandao {
+		return fmt.Errorf("envelope payload prev randao %x does not match bid prev randao %x", envelope.Payload.PrevRandao, bid.PrevRandao)
+	}
+	if envelope.Payload.FeeRecipient != bid.FeeRecipient {
+		return fmt.Errorf("envelope payload fee recipient %x does not match bid fee recipient %x", envelope.Payload.FeeRecipient, bid.FeeRecipient)
+	}
+	if envelope.Payload.GasLimit != bid.GasLimit {
+		return fmt.Errorf("envelope payload gas limit %d does not match bid gas limit %d", envelope.Payload.GasLimit, bid.GasLimit)
+	}
+	if envelope.ExecutionRequests == nil {
+		return errors.New("execution payload envelope has no execution requests")
+	}
+	requestsRoot, err := envelope.ExecutionRequests.HashSSZ()
+	if err != nil {
+		return fmt.Errorf("hash execution requests: %w", err)
+	}
+	if requestsRoot != bid.ExecutionRequestsRoot {
+		return fmt.Errorf("envelope execution requests root %x does not match bid execution requests root %x", requestsRoot, bid.ExecutionRequestsRoot)
+	}
+	if _, err := envelope.Payload.RlpHeader(&envelope.ParentBeaconBlockRoot, requestsRoot, nil); err != nil {
+		return fmt.Errorf("validate envelope payload block hash: %w", err)
+	}
+	return nil
+}
+
 func (e *ExecutionPayloadEnvelope) HashSSZ() ([32]byte, error) {
 	return merkle_tree.ProgressiveContainerRootAll(
 		e.Payload,
