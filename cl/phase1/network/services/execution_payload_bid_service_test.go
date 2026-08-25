@@ -67,6 +67,7 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		buildPendingBidKey:   pendingBidKeyFor,
 	}
 	service.pending = service.newPendingQueue(canceledPendingQueueContext(t))
+	service.pending.stopAndWait()
 
 	return service, mockSyncedData, ethClockMock, fcMock, epbsPool
 }
@@ -856,9 +857,9 @@ func TestExecutionPayloadBidServiceLoopProcessesQueuedBid(t *testing.T) {
 
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100)).AnyTimes()
 
-	ctx, cancel := context.WithCancel(t.Context())
-	defer cancel()
-	service.pending = service.newPendingQueue(ctx)
+	pending := service.newPendingQueue(t.Context())
+	service.pending = pending
+	defer pending.stopAndWait()
 
 	require.ErrorIs(t, service.ProcessMessage(context.Background(), nil, msg), ErrIgnore)
 	require.Equal(t, int32(1), service.pending.count.Load())

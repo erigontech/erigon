@@ -76,6 +76,9 @@ type pendingJobQueue[K comparable, M any] struct {
 	count atomic.Int32
 	cond  *sync.Cond
 
+	cancelLoop context.CancelFunc
+	loopWG     sync.WaitGroup
+
 	fullCounter metrics.Counter
 }
 
@@ -101,16 +104,34 @@ func newPendingJobQueue[K comparable, M any](
 	if onExpired == nil {
 		panic("pending job queue requires onExpired")
 	}
+	loopCtx, cancelLoop := context.WithCancel(ctx)
 	q := &pendingJobQueue[K, M]{
 		pendingJobQueueOptions: options,
 		tryProcess:             tryProcess,
 		processAfterRemove:     processAfterRemove,
 		onExpired:              onExpired,
 		cond:                   sync.NewCond(&sync.Mutex{}),
+		cancelLoop:             cancelLoop,
 		fullCounter:            pendingJobQueueRejectedCounter.WithLabelValues(options.name),
 	}
-	go q.loop(ctx)
+	q.loopWG.Add(2)
+	go func() {
+		defer q.loopWG.Done()
+		q.loop(loopCtx)
+	}()
+	go func() {
+		defer q.loopWG.Done()
+		<-loopCtx.Done()
+		q.cond.L.Lock()
+		q.cond.Broadcast()
+		q.cond.L.Unlock()
+	}()
 	return q
+}
+
+func (q *pendingJobQueue[K, M]) stopAndWait() {
+	q.cancelLoop()
+	q.loopWG.Wait()
 }
 
 func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) pendingJobEnqueueResult {
@@ -180,14 +201,6 @@ func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
 
 // loop is the background goroutine that retries pending jobs.
 func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
-	// Wake any blocked Wait() on context cancellation to prevent deadlock.
-	go func() {
-		<-ctx.Done()
-		q.cond.L.Lock()
-		q.cond.Broadcast()
-		q.cond.L.Unlock()
-	}()
-
 	for {
 		q.cond.L.Lock()
 		for q.count.Load() == 0 {

@@ -173,6 +173,67 @@ func TestNewPendingJobQueueStartsProcessingLoop(t *testing.T) {
 	}, time.Second, time.Millisecond)
 }
 
+func TestPendingJobQueueStopWaitsForInFlightProcessing(t *testing.T) {
+	processing := make(chan context.Context)
+	processingReleased := make(chan struct{})
+	var releaseOnce sync.Once
+	releaseProcessing := func() {
+		releaseOnce.Do(func() { close(processingReleased) })
+	}
+
+	queue := newPendingJobQueue(
+		t.Context(),
+		pendingJobQueueOptions{
+			name:          t.Name(),
+			capacity:      1,
+			expiry:        time.Minute,
+			checkInterval: time.Millisecond,
+		},
+		func(ctx context.Context, _ int, _ string) pendingJobDecision {
+			processing <- ctx
+			<-processingReleased
+			return pendingJobRemove
+		},
+		nil,
+		func(int) {},
+	)
+	defer func() {
+		releaseProcessing()
+		queue.stopAndWait()
+	}()
+	require.Equal(t, pendingJobEnqueued, queue.enqueueKey(1, "message"))
+
+	var processingCtx context.Context
+	select {
+	case processingCtx = <-processing:
+	case <-time.After(time.Second):
+		t.Fatal("pending job queue did not start processing")
+	}
+
+	stopped := make(chan struct{})
+	go func() {
+		queue.stopAndWait()
+		close(stopped)
+	}()
+	select {
+	case <-processingCtx.Done():
+	case <-time.After(time.Second):
+		t.Fatal("pending job queue was not cancelled")
+	}
+	select {
+	case <-stopped:
+		t.Fatal("pending job queue reported completion while processing was still active")
+	default:
+	}
+
+	releaseProcessing()
+	select {
+	case <-stopped:
+	case <-time.After(time.Second):
+		t.Fatal("pending job queue did not stop")
+	}
+}
+
 func TestPendingJobQueueEnqueueKeyDeduplicates(t *testing.T) {
 	queue := newTestPendingJobQueue(t)
 
