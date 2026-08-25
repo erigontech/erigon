@@ -465,19 +465,14 @@ func BenchmarkGenericCacheParallelPutGrow(b *testing.B) {
 	})
 }
 
-// The jump-grow copy reads the retiring generation with Peek. Get returns the
-// same values but also re-links every entry to that generation's head, which is
-// pure waste inside the all-stripe fence: Keys() is materialised before the loop
-// and fixes the copy order, and insertion order alone sets the new generation's
-// recency. Pin that a grown cache is exactly what a Get-based copy of the same
-// source produces, so neither the swap nor a freelru bump can reorder or drop
-// entries unnoticed.
+// Keys() fixes the copy order before the loop and insertion order alone sets the
+// new generation's recency, so reading the retiring generation with Peek must
+// produce exactly the generation a Get-based copy would.
 func TestGenericCache_GrowCopyMatchesGetBasedCopy(t *testing.T) {
 	sizeOf := func(v []byte) int { return len(v) }
 
 	grown := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, sizeOf, ModeEvictLRU))
-	// Same capacity and shard geometry as grown starts with, but fixed: it never
-	// grows, so it ends up holding the generation the grow below read.
+	// Same start geometry but fixed, so it ends up holding what the grow read.
 	source := closeOnCleanup(t, newGenericCacheEntries[[]byte](64*datasize.MB, genericCacheStartCapacity, sizeOf, ModeEvictLRU))
 
 	key := make([]byte, 8)
@@ -499,8 +494,6 @@ func TestGenericCache_GrowCopyMatchesGetBasedCopy(t *testing.T) {
 	for i := 0; i < warmup; i += 3 { // pull recency away from insertion order
 		touch(i)
 	}
-	// Insert until the first grow fires; both caches see the identical sequence,
-	// so source still holds what the grow copied.
 	grew := false
 	for i := warmup; i < 8*genericCacheStartCapacity && !grew; i++ {
 		put(i)
@@ -508,7 +501,7 @@ func TestGenericCache_GrowCopyMatchesGetBasedCopy(t *testing.T) {
 	}
 	require.True(t, grew, "the fill must have triggered a real grow")
 
-	// Rebuild the copy the way it read before Peek, into the geometry the grow chose.
+	// Rebuild the copy the way it read before Peek, in the grow's own geometry.
 	want := grown.newShards(grown.curCap.Load(), grown.shardCount)
 	src := source.data.Load()
 	for _, k := range src.lru.Keys() {
@@ -530,4 +523,72 @@ func TestGenericCache_GrowCopyMatchesGetBasedCopy(t *testing.T) {
 		require.Equal(t, wantEntry.val, gotEntry.val)
 		require.Equal(t, wantEntry.txNum, gotEntry.txNum)
 	}
+}
+
+// A cache whose next grow step the envelope cannot fund must stop entering
+// maybeGrow: the LRU stays full at curCap, so every later insert would re-take
+// the single resizeMu and serialise all writers.
+func TestGenericCache_UnfundableGrowKeepsResizeMuOffThePutPath(t *testing.T) {
+	prevBudget := cachebudget.Global
+	cachebudget.Global = cachebudget.New(0) // Reserve always refuses, Take still succeeds
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+
+	c := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU))
+
+	key := make([]byte, 8)
+	for i := range genericCacheStartCapacity * 2 {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		c.Put(key, []byte{byte(i)}, uint64(i))
+	}
+	require.Equal(t, uint32(genericCacheStartCapacity), c.curCap.Load(), "unfundable grow must leave curCap unchanged")
+
+	c.resizeMu.Lock()
+	defer c.resizeMu.Unlock()
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		k := make([]byte, 8)
+		binary.BigEndian.PutUint64(k, uint64(1<<20))
+		c.Put(k, []byte{1}, 1)
+	}()
+	select {
+	case <-done:
+	case <-time.After(10 * time.Second):
+		t.Fatal("put blocked on resizeMu while the envelope could not fund a grow")
+	}
+}
+
+// Bytes another holder returns must be picked up with no explicit reset.
+func TestGenericCache_BudgetReleaseResumesGrow(t *testing.T) {
+	prevBudget := cachebudget.Global
+	t.Cleanup(func() { cachebudget.Global = prevBudget })
+
+	const capacityBytes = 64 * datasize.MB
+	sizeOf := func(v []byte) int { return len(v) }
+
+	sizer := NewGenericCache[[]byte](capacityBytes, sizeOf, ModeEvictLRU)
+	startBytes, stepBytes := sizer.reservedBytes, sizer.growStepBytes(sizer.curCap.Load())
+	sizer.Close()
+	require.Positive(t, stepBytes)
+
+	// Room for this cache plus one other holder the size of its first grow step.
+	budget := cachebudget.New(startBytes + stepBytes)
+	cachebudget.Global = budget
+	c := closeOnCleanup(t, NewGenericCache[[]byte](capacityBytes, sizeOf, ModeEvictLRU))
+	require.True(t, budget.Reserve(stepBytes), "the other holder must fit")
+	require.Equal(t, budget.Limit(), budget.Used(), "the envelope must start exactly full")
+
+	fill := func(from, to int) {
+		key := make([]byte, 8)
+		for i := from; i < to; i++ {
+			binary.BigEndian.PutUint64(key, uint64(i))
+			c.Put(key, []byte{byte(i)}, uint64(i))
+		}
+	}
+	fill(0, genericCacheStartCapacity*2)
+	require.Equal(t, uint32(genericCacheStartCapacity), c.curCap.Load(), "a full envelope must leave curCap unchanged")
+
+	budget.Release(stepBytes)
+	fill(genericCacheStartCapacity*2, genericCacheStartCapacity*3)
+	require.Greater(t, c.curCap.Load(), uint32(genericCacheStartCapacity), "freed budget must let the cache grow again")
 }

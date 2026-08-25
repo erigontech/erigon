@@ -54,10 +54,8 @@ type growLRU[V any] struct {
 
 	resizeMu sync.Mutex
 	curCap   atomic.Uint32
-	// growBlocked latches a refused grow step; see GenericCache.growBlocked.
-	growBlocked atomic.Uint64
-	reserved    int64
-	closed      bool
+	reserved int64
+	closed   bool
 }
 
 func newGrowLRU[V any](maxBytes datasize.ByteSize, avgBytes uint32, onEvict func(uint64, V)) *growLRU[V] {
@@ -99,7 +97,8 @@ func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().lru.Get(key
 // have carried it into the generation this resolves.
 func (g *growLRU[V]) Add(key uint64, value V) {
 	gen := g.cur.Load()
-	if curCap := g.curCap.Load(); curCap < g.maxCap && g.canGrow() && gen.len() >= int(curCap) {
+	if curCap := g.curCap.Load(); curCap < g.maxCap && gen.len() >= int(curCap) &&
+		cachebudget.Global.CanReserve(g.growStepBytes(curCap)) {
 		g.maybeGrow()
 		gen = g.cur.Load()
 	}
@@ -118,9 +117,8 @@ func (g *growLRU[V]) Replace(key uint64, value V) {
 	gen.add(key, value)
 }
 
-func (g *growLRU[V]) canGrow() bool {
-	blocked := g.growBlocked.Load()
-	return blocked == 0 || blocked != cachebudget.Global.Freed()+1
+func (g *growLRU[V]) growStepBytes(curCap uint32) int64 {
+	return int64(min(curCap*genericCacheGrowFactor, g.maxCap)-curCap) * g.avgBytes
 }
 
 func (g *growLRU[V]) maybeGrow() {
@@ -132,13 +130,10 @@ func (g *growLRU[V]) maybeGrow() {
 		return
 	}
 	newCap := min(curCap*genericCacheGrowFactor, g.maxCap)
-	delta := int64(newCap-curCap) * g.avgBytes
-	freed := cachebudget.Global.Freed()
+	delta := g.growStepBytes(curCap)
 	if !cachebudget.Global.Reserve(delta) {
-		g.growBlocked.Store(freed + 1)
 		return
 	}
-	g.growBlocked.Store(0)
 	next := g.newShards(newCap)
 	for _, k := range old.lru.Keys() {
 		if v, ok := old.lru.Peek(k); ok {
@@ -160,7 +155,6 @@ func (g *growLRU[V]) Purge() {
 	defer g.resizeMu.Unlock()
 	cachebudget.Global.Release(g.reserved - int64(g.startCap)*g.avgBytes)
 	g.reserved = int64(g.startCap) * g.avgBytes
-	g.growBlocked.Store(0)
 	g.curCap.Store(g.startCap)
 	g.cur.Store(g.newShards(g.startCap))
 }

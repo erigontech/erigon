@@ -47,7 +47,6 @@ const Divisor = 32
 type Budget struct {
 	limit int64
 	used  atomic.Int64
-	freed atomic.Uint64
 }
 
 func New(limit int64) *Budget { return &Budget{limit: limit} }
@@ -73,6 +72,10 @@ func (b *Budget) Reserve(n int64) bool {
 	}
 }
 
+// CanReserve reports whether Reserve would currently succeed; the answer can go
+// stale the moment it returns.
+func (b *Budget) CanReserve(n int64) bool { return n <= 0 || b.used.Load()+n <= b.limit }
+
 // Take reserves n bytes unconditionally (may push used past limit). Used for a
 // cache's initial small allocation, which must always succeed so no cache is
 // born disabled.
@@ -86,14 +89,8 @@ func (b *Budget) Take(n int64) {
 func (b *Budget) Release(n int64) {
 	if n > 0 {
 		b.used.Add(-n)
-		b.freed.Add(1)
 	}
 }
-
-// Freed changes whenever bytes return to the envelope. A cache that latched
-// itself off after a refused Reserve samples it to notice new room without
-// re-attempting the reservation on every write.
-func (b *Budget) Freed() uint64 { return b.freed.Load() }
 
 func (b *Budget) Limit() int64 { return b.limit }
 func (b *Budget) Used() int64  { return b.used.Load() }

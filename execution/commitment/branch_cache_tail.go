@@ -39,10 +39,7 @@ type tailLRU struct {
 
 	resizeMu sync.Mutex
 	curCap   atomic.Uint32
-	// growBlocked latches a refused grow step, so a full tail stops re-taking
-	// resizeMu — and the all-shard Len() below it — on every write.
-	growBlocked atomic.Uint64
-	reserved    int64
+	reserved int64
 }
 
 func newTailLRU(maxCapacity uint32) *tailLRU {
@@ -70,17 +67,17 @@ func (t *tailLRU) Get(key uint64) (*branchCacheEntry, bool) {
 
 func (t *tailLRU) Add(key uint64, entry *branchCacheEntry) {
 	lru := t.cur.Load()
-	// Avoid lru.Len() locks once fully grown or latched off.
-	if curCap := t.curCap.Load(); curCap < t.maxCap && t.canGrow() && lru.Len() >= int(curCap) {
+	// Avoid lru.Len() locks once fully grown, or once a step is unfundable.
+	if curCap := t.curCap.Load(); curCap < t.maxCap &&
+		cachebudget.Global.CanReserve(t.growStepBytes(curCap)) && lru.Len() >= int(curCap) {
 		t.maybeGrow()
 		lru = t.cur.Load()
 	}
 	lru.Add(key, entry)
 }
 
-func (t *tailLRU) canGrow() bool {
-	blocked := t.growBlocked.Load()
-	return blocked == 0 || blocked != cachebudget.Global.Freed()+1
+func (t *tailLRU) growStepBytes(curCap uint32) int64 {
+	return int64(min(curCap*tailGrowFactor, t.maxCap)-curCap) * tailEntryBytes
 }
 
 func (t *tailLRU) maybeGrow() {
@@ -93,13 +90,10 @@ func (t *tailLRU) maybeGrow() {
 		return
 	}
 	newCap := min(curCap*tailGrowFactor, t.maxCap)
-	delta := int64(newCap-curCap) * tailEntryBytes
-	freed := cachebudget.Global.Freed()
+	delta := t.growStepBytes(curCap)
 	if !cachebudget.Global.Reserve(delta) {
-		t.growBlocked.Store(freed + 1)
 		return
 	}
-	t.growBlocked.Store(0)
 	next := newTailShards(newCap)
 	for _, k := range old.Keys() {
 		if v, ok := old.Peek(k); ok {
@@ -121,7 +115,6 @@ func (t *tailLRU) reset() {
 	start := min(uint32(tailStartCapacity), t.maxCap)
 	cachebudget.Global.Release(t.reserved - int64(start)*tailEntryBytes)
 	t.reserved = int64(start) * tailEntryBytes
-	t.growBlocked.Store(0)
 	t.curCap.Store(start)
 	t.cur.Store(newTailShards(start))
 }
