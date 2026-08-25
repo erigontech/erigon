@@ -430,13 +430,21 @@ func (w *DomainBufferedWriter) PutWithPrevDiff(k, v []byte, txNum uint64, preval
 	if tracePutWithPrev != "" && tracePutWithPrev == w.h.ii.filenameBase {
 		fmt.Printf("PutWithPrev(%s, txn %d, key[%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, step, k, v, preval)
 	}
+	t0 := time.Now()
 	if err := w.h.AddPrevValue(k, txNum, preval); err != nil {
 		return err
 	}
+	t1 := time.Now()
 	if diff != nil {
 		diff.DomainUpdate(k, step, preval)
 	}
-	return w.addValue(k, v, step)
+	t2 := time.Now()
+	err := w.addValue(k, v, step)
+	if took := time.Since(t0); took >= dbg.ToLogSlowTxn {
+		log.Warn("[dbg] slow PutWithPrev", "took", took, "domain", w.h.ii.filenameBase, "txNum", txNum,
+			"addPrevValue", t1.Sub(t0), "diffUpdate", t2.Sub(t1), "addValue", time.Since(t2))
+	}
+	return err
 }
 
 func (w *DomainBufferedWriter) DeleteWithPrev(k []byte, txNum uint64, prev []byte) (err error) {

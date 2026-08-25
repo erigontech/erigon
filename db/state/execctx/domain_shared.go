@@ -1848,11 +1848,20 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
+	tStart := time.Now()
 	ks := string(k)
 	prevVal, err := sd.resolvePrevVal(domain, roTx, k, ks, v, prevVal)
 	if err != nil {
 		return err
 	}
+	tGet := time.Now()
+	tLock, tPut := tGet, tGet
+	defer func() {
+		if took := time.Since(tStart); took >= dbg.ToLogSlowTxn {
+			log.Warn("[dbg] slow domainPut", "took", took, "domain", domain, "txNum", txNum,
+				"resolvePrevVal", tGet.Sub(tStart), "lock", tLock.Sub(tGet), "memPut", tPut.Sub(tLock))
+		}
+	}()
 	if domain != kv.RCacheDomain && bytes.Equal(prevVal, v) {
 		return nil
 	}

@@ -246,7 +246,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 			if ws == nil || ws.IsEmpty() {
 				continue
 			}
-			normalized, normErr := ws.Normalize(ibs.VersionMap(), i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, blockRules.IsAmsterdam)
+			normalized, normErr := ws.Normalize(ibs.VersionMap(), blockHeight, i-1, 0, stateReader, domainStorageKeys, emptyRemoval, isAura, blockRules.IsAmsterdam)
 			if normErr != nil {
 				return fmt.Errorf("normalize block writes: %w", normErr)
 			}

@@ -126,7 +126,7 @@ func BenchmarkWriteSetNormalize(b *testing.B) {
 			reader := &minimalStateReader{}
 			// Guard the shape the numbers describe: the no-op filter must
 			// actually drop writes, else a regression in it stays invisible.
-			probe, err := ws.Normalize(vm, txIndex, 0, reader, nil, true, false, false)
+			probe, err := ws.Normalize(vm, 0, txIndex, 0, reader, nil, true, false, false)
 			if err != nil {
 				b.Fatal(err)
 			}
@@ -135,7 +135,7 @@ func BenchmarkWriteSetNormalize(b *testing.B) {
 			}
 			b.ReportAllocs()
 			for b.Loop() {
-				out, err := ws.Normalize(vm, txIndex, 0, reader, nil, true, false, false)
+				out, err := ws.Normalize(vm, 0, txIndex, 0, reader, nil, true, false, false)
 				if err != nil {
 					b.Fatal(err)
 				}

@@ -17,9 +17,12 @@
 package state
 
 import (
+	"time"
+
 	"github.com/holiman/uint256"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state/execctx"
@@ -32,6 +35,51 @@ import (
 // the recovered bytes didn't hash to the emitted codeHash; surfaced so the skip
 // isn't silent.
 var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_recovery_hash_mismatch")
+
+var mxNormalizeTook = metrics.GetOrCreateSummary("exec3_normalize_seconds")
+
+// sdCascadeStats accumulates the cost of the self-destruct storage cascade.
+// domainTook is split from vmTook because only the former walks the domain
+// files, whose per-call cost is set by the file count rather than by the number
+// of slots the address owns; took-vmTook-domainTook is the dedup.
+type sdCascadeStats struct {
+	calls      int
+	slots      int
+	took       time.Duration
+	vmTook     time.Duration
+	domainTook time.Duration
+}
+
+// logSlowNormalize dumps the geometry of a write set whose Normalize ran long.
+// Everything it counts is walked only on the slow path.
+func logSlowNormalize(writes, filtered *WriteSet, took time.Duration, blockNum uint64, txIndex, incarnation int, sd sdCascadeStats) {
+	dirty := make(map[accounts.Address]struct{})
+	writes.forEachFieldAddr(func(addr accounts.Address) { dirty[addr] = struct{}{} })
+
+	selfDestructs, storageAddrs, storageSlots, widestAddr := 0, 0, 0, 0
+	for _, vw := range writes.selfDestruct {
+		if vw.Val {
+			selfDestructs++
+		}
+	}
+	for _, inner := range writes.storage {
+		storageAddrs++
+		storageSlots += len(inner)
+		widestAddr = max(widestAddr, len(inner))
+	}
+
+	log.Warn("[dbg] slow WriteSet.Normalize",
+		"took", took, "blockNum", blockNum, "txIndex", txIndex, "incarnation", incarnation,
+		"dirtyAddrs", len(dirty), "selfDestructs", selfDestructs,
+		"storageAddrs", storageAddrs, "storageSlots", storageSlots, "widestAddr", widestAddr,
+		"balance", len(writes.balance), "nonce", len(writes.nonce),
+		"incarnations", len(writes.incarnation), "codeHash", len(writes.codeHash),
+		"code", len(writes.code), "codeSize", len(writes.codeSize),
+		"createContract", len(writes.createContract),
+		"sdCalls", sd.calls, "sdSlots", sd.slots, "sdTook", sd.took,
+		"sdDomainTook", sd.domainTook, "sdVMTook", sd.vmTook,
+		"in", writes.Count(), "out", filtered.Count())
+}
 
 // Normalize produces a clean write set from the versionMap's WriteSet
 // for a given TX. It matches the serial IBS MakeWriteSet behaviour:
@@ -60,37 +108,57 @@ var codePathRecoveryHashMismatch = metrics.GetOrCreateCounter("exec3_codepath_re
 // from the trie (wrong root in TestDeleteRecreateAccount / TestSelfDestructReceive
 // / TestEIP161AccountRemoval, all of which SD a contract whose storage predates
 // the block). Pass nil in unit tests that don't exercise pre-block storage.
-func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys StorageKeysFn, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
+func (writes *WriteSet) Normalize(vm *VersionMap, blockNum uint64, txIndex int, incarnation int, stateReader StateReader, domainStorageKeys StorageKeysFn, emptyRemoval bool, isAura bool, eip8246 bool) (*WriteSet, error) {
 	filtered := &WriteSet{}
 	if writes == nil {
 		return filtered, nil
 	}
 
+	var sdStats sdCascadeStats
+	normalizeStarted := time.Now()
+	defer func() {
+		took := time.Since(normalizeStarted)
+		if took > 1*time.Millisecond {
+			mxNormalizeTook.Observe(took.Seconds())
+		}
+		if took >= dbg.ToLogSlowTxn {
+			logSlowNormalize(writes, filtered, took, blockNum, txIndex, incarnation, sdStats)
+		}
+	}()
+
 	// sdStorageSlots returns the union of vm.StorageKeys (this batch) and
 	// domainStorageKeys (committed before this batch), deduped — the complete
 	// set of storage slots that must be DELETE'd when addr self-destructs.
 	sdStorageSlots := func(addr accounts.Address) ([]accounts.StorageKey, error) {
+		cascadeStarted := time.Now()
+		sdStats.calls++
 		seen := make(map[accounts.StorageKey]struct{})
 		var out []accounts.StorageKey
-		for _, k := range vm.StorageKeys(addr) {
+		vmStarted := time.Now()
+		vmKeys := vm.StorageKeys(addr)
+		sdStats.vmTook += time.Since(vmStarted)
+		for _, k := range vmKeys {
 			if _, ok := seen[k]; !ok {
 				seen[k] = struct{}{}
 				out = append(out, k)
 			}
 		}
-		if domainStorageKeys == nil {
-			return out, nil
-		}
-		committed, err := domainStorageKeys(addr)
-		if err != nil {
-			return nil, err
-		}
-		for _, k := range committed {
-			if _, ok := seen[k]; !ok {
-				seen[k] = struct{}{}
-				out = append(out, k)
+		if domainStorageKeys != nil {
+			domainStarted := time.Now()
+			committed, err := domainStorageKeys(addr)
+			sdStats.domainTook += time.Since(domainStarted)
+			if err != nil {
+				return nil, err
+			}
+			for _, k := range committed {
+				if _, ok := seen[k]; !ok {
+					seen[k] = struct{}{}
+					out = append(out, k)
+				}
 			}
 		}
+		sdStats.slots += len(out)
+		sdStats.took += time.Since(cascadeStarted)
 		return out, nil
 	}
 
@@ -296,6 +364,14 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	allAddresses := make(map[accounts.Address]bool)
 	writes.forEachFieldAddr(func(addr accounts.Address) { allAddresses[addr] = true })
 
+	normalize2Started := time.Now()
+	defer func() {
+		took := time.Since(normalize2Started)
+		if took >= dbg.ToLogSlowTxn/2 {
+			log.Warn("[dbg] slow WriteSet.Normalize2", "took", took, "blockNum", blockNum, "txIndex", txIndex)
+		}
+	}()
+
 	for addr := range allAddresses {
 		if sdSet[addr] {
 			// Don't fill account fields for SD'd addresses — same rationale as
@@ -370,6 +446,14 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 			}
 		}
 	}
+
+	normalize3Started := time.Now()
+	defer func() {
+		took := time.Since(normalize3Started)
+		if took >= dbg.ToLogSlowTxn/2 {
+			log.Warn("[dbg] slow WriteSet.Normalize3", "took", took, "blockNum", blockNum, "txIndex", txIndex)
+		}
+	}()
 
 	// CodePath must travel with CodeHashPath: the case above and the fill loop
 	// recover an account's codeHash but not its code, so a validated writeset

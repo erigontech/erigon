@@ -489,6 +489,9 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 			keysPerSec = uint64(float64(updateCount) / took.Seconds())
 		}
 		log.Debug("[commitment] processed", "block", blockNum, "txNum", txNum, "keys", common.PrettyCounter(updateCount), "keys/s", common.PrettyCounter(keysPerSec), "mode", sdc.variant, "bufmode", sdc.updates.Mode(), "spent", took, "rootHash", hex.EncodeToString(rootHash))
+		if took >= 8*dbg.ToLogSlowTxn {
+			log.Warn("[dbg] slow commitment", "took", took, "blockNum", blockNum)
+		}
 	}()
 	// Re-apply the trace writer before any trie operations (including the early-return
 	// RootHash below); GenerateWitness clears it, so it must be restored on each call.
