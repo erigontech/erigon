@@ -288,6 +288,110 @@ func TestFilterDirtyFiles_LowMajorParsesAsLegacy(t *testing.T) {
 	_ = version.V4_0
 }
 
+// TestFilesItem_IsRawTxN_TwoEdges pins that a v4 file with EITHER a
+// non-aligned startTxN OR a non-aligned endTxN is classified as v4.
+// The two-v4-then-merge lifecycle emits v4 #1 (aligned start, mid-step
+// end) and v4 #2 (mid-step start, aligned end); both must be caught by
+// the predicate so the merge scheduler, retire, and read-side mask
+// paths treat them uniformly.
+func TestFilesItem_IsRawTxN_TwoEdges(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+
+	// Standard step-aligned file — NOT v4.
+	require.False(t, (&FilesItem{startTxNum: 3000, endTxNum: 4000}).IsRawTxN(stepSize),
+		"aligned [3000, 4000) at stepSize=1000 is a step-form file, not v4")
+
+	// v4 #1 — aligned start, mid-step end (unwind emission).
+	require.True(t, (&FilesItem{startTxNum: 3000, endTxNum: 3512}).IsRawTxN(stepSize),
+		"v4 #1 [3000, 3512) has non-aligned end — must classify as v4")
+
+	// v4 #2 — mid-step start, aligned end (retire tail emission).
+	require.True(t, (&FilesItem{startTxNum: 3512, endTxNum: 4000}).IsRawTxN(stepSize),
+		"v4 #2 [3512, 4000) has non-aligned start — must classify as v4")
+
+	// Both edges non-aligned — still v4 (e.g. inner span produced by a
+	// hypothetical mid-merge state).
+	require.True(t, (&FilesItem{startTxNum: 3100, endTxNum: 3900}).IsRawTxN(stepSize),
+		"both-non-aligned [3100, 3900) must classify as v4")
+}
+
+// TestDirtyFiles_V4PairForStep_TilesStep pins the merge-scheduler's
+// pair-detection primitive: a v4 #1 [step*ss, cut) and v4 #2 [cut,
+// (step+1)*ss) together tile the step and must be returned as a
+// mergeable pair.
+func TestDirtyFiles_V4PairForStep_TilesStep(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+	df := newDirtyFiles()
+
+	v41 := &FilesItem{startTxNum: 3000, endTxNum: 3512}
+	v42 := &FilesItem{startTxNum: 3512, endTxNum: 4000}
+	df.Set(v41)
+	df.Set(v42)
+
+	got1, got2, ok := df.V4PairForStep(stepSize, kv.Step(3))
+	require.True(t, ok, "v4 #1 and v4 #2 together tile step 3 [3000, 4000); expected V4PairForStep ok=true")
+	require.Same(t, v41, got1, "v4 #1 pointer mismatch")
+	require.Same(t, v42, got2, "v4 #2 pointer mismatch")
+}
+
+// TestDirtyFiles_V4PairForStep_PartialReturnsFalse: only v4 #1 present
+// (v4 #2 hasn't been emitted by retire yet) — no pair. Prevents the
+// merge scheduler from proposing an aligned merge before the tail
+// exists.
+func TestDirtyFiles_V4PairForStep_PartialReturnsFalse(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+	df := newDirtyFiles()
+
+	// v4 #1 alone.
+	df.Set(&FilesItem{startTxNum: 3000, endTxNum: 3512})
+
+	_, _, ok := df.V4PairForStep(stepSize, kv.Step(3))
+	require.False(t, ok, "v4 #1 alone must not be reported as a mergeable pair")
+}
+
+// TestDirtyFiles_V4PairForStep_RejectsMismatchedBoundary pins invariant
+// #4 from the plan: v4 #1 ending at txN=X and v4 #2 starting at txN=X+G
+// (gap G > 0) MUST NOT be reported as a pair — the union would leave
+// a hole in the merged output.
+func TestDirtyFiles_V4PairForStep_RejectsMismatchedBoundary(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+	df := newDirtyFiles()
+
+	// v4 #1 ends at 3512, v4 #2 starts at 3513 — 1-txN gap.
+	df.Set(&FilesItem{startTxNum: 3000, endTxNum: 3512})
+	df.Set(&FilesItem{startTxNum: 3513, endTxNum: 4000})
+
+	_, _, ok := df.V4PairForStep(stepSize, kv.Step(3))
+	require.False(t, ok, "gap between v4 #1 end and v4 #2 start must reject pair")
+}
+
+// TestDirtyFiles_V4PairForStep_IgnoresOtherSteps: v4s for a different
+// step shouldn't count toward this step's pair.
+func TestDirtyFiles_V4PairForStep_IgnoresOtherSteps(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+	df := newDirtyFiles()
+
+	// Step 3 has a v4 #1 but no v4 #2. Step 5 has a complete v4 pair.
+	df.Set(&FilesItem{startTxNum: 3000, endTxNum: 3512}) // step 3 v4 #1
+	df.Set(&FilesItem{startTxNum: 5000, endTxNum: 5512}) // step 5 v4 #1
+	df.Set(&FilesItem{startTxNum: 5512, endTxNum: 6000}) // step 5 v4 #2
+
+	_, _, ok3 := df.V4PairForStep(stepSize, kv.Step(3))
+	require.False(t, ok3, "step 3 lacks a v4 #2 — no pair")
+
+	v41, v42, ok5 := df.V4PairForStep(stepSize, kv.Step(5))
+	require.True(t, ok5, "step 5 has a complete v4 pair")
+	require.Equal(t, uint64(5000), v41.startTxNum)
+	require.Equal(t, uint64(5512), v41.endTxNum)
+	require.Equal(t, uint64(5512), v42.startTxNum)
+	require.Equal(t, uint64(6000), v42.endTxNum)
+}
+
 func writeTestKVFile(t *testing.T, path, tmp string, logger log.Logger) {
 	t.Helper()
 	comp, err := seg.NewCompressor(t.Context(), "test", path, tmp, seg.DefaultCfg, log.LvlDebug, logger)

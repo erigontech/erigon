@@ -197,15 +197,50 @@ func (i *FilesItem) StepCount(stepSize uint64) uint64 {
 	return uint64(toStep - fromStep)
 }
 
-// IsRawTxN reports whether this FilesItem's endTxNum is NOT step-aligned —
-// the signature of a mode-C v4.0 boundary file (or its paired v4 .v/.ef)
-// whose honest endTxN = lastTxN+1 lands mid-step. Callers that need to
-// dispatch between the legacy step-indexed filename form and the v4
-// raw-txN form use this predicate. Applies uniformly across Domain,
-// History, and InvertedIndex — the property is a function of the item's
-// endTxN vs the caller's stepSize, nothing entity-specific.
+// IsRawTxN reports whether this FilesItem sits on a raw-txN boundary
+// (either edge non-aligned to stepSize) — the signature of the two-v4
+// file classes produced under the mode-C/D lifecycle. v4 #1 has an
+// aligned startTxN and mid-step endTxN (unwind emission at lastTxN+1);
+// v4 #2 has a mid-step startTxN and aligned endTxN (retire tail after
+// forward exec catches up). Both must classify as v4 so the merge
+// scheduler, retire, and read-side masks treat them uniformly. Applies
+// across Domain, History, and InvertedIndex — the property is purely
+// a function of the endpoints vs the caller's stepSize.
 func (i *FilesItem) IsRawTxN(stepSize uint64) bool {
-	return i.endTxNum%stepSize != 0
+	return i.startTxNum%stepSize != 0 || i.endTxNum%stepSize != 0
+}
+
+// V4PairForStep returns (v4 #1, v4 #2) when both exist in dirtyFiles
+// and together tile the step's txN range [step*stepSize,
+// (step+1)*stepSize) with no gap and no overlap. The merge scheduler
+// uses this to propose the aligned-range merge that consolidates the
+// two v4 files into the standard step-aligned output. Returns ok=false
+// (nil, nil, false) whenever the tiling is incomplete — including the
+// common "only v4 #1 exists so far, retire hasn't emitted the tail
+// yet" case.
+//
+// v4 #1: startTxNum == step*stepSize AND endTxNum % stepSize != 0
+// v4 #2: endTxNum == (step+1)*stepSize AND startTxNum % stepSize != 0
+// Tiling: v4 #1.endTxNum == v4 #2.startTxNum
+func (df *DirtyFiles) V4PairForStep(stepSize uint64, step kv.Step) (v41, v42 *FilesItem, ok bool) {
+	stepStart := uint64(step) * stepSize
+	stepEnd := stepStart + stepSize
+	df.Scan(func(item *FilesItem) bool {
+		switch {
+		case item.startTxNum == stepStart && item.endTxNum%stepSize != 0:
+			v41 = item
+		case item.endTxNum == stepEnd && item.startTxNum%stepSize != 0:
+			v42 = item
+		}
+		return true
+	})
+	if v41 == nil || v42 == nil {
+		return nil, nil, false
+	}
+	if v41.endTxNum != v42.startTxNum {
+		return nil, nil, false
+	}
+	return v41, v42, true
 }
 
 // V4FilesForStep returns the on-disk paths of every dirtyFiles v4 item
