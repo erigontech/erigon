@@ -51,11 +51,11 @@ func TestInsertChain(t *testing.T) {
 
 func TestStateTransitionObserver(t *testing.T) {
 	t.Parallel()
-	observed := make(map[execmodule.StateTransitionPoint]bool)
+	observed := make(map[execmodule.StateTransitionPoint]int)
 	var mu sync.Mutex
 	m := execmoduletester.New(t, execmoduletester.WithStateTransitionObserver(func(_ context.Context, point execmodule.StateTransitionPoint) {
 		mu.Lock()
-		observed[point] = true
+		observed[point]++
 		mu.Unlock()
 	}))
 	chain, err := m.GenerateChain(1, func(_ int, b *blockgen.BlockGen) {
@@ -72,8 +72,11 @@ func TestStateTransitionObserver(t *testing.T) {
 		execmodule.StateTransitionCommitComplete,
 		execmodule.StateTransitionOverlayCleared,
 	} {
-		require.Truef(t, observed[point], "state transition %d was not observed", point)
+		require.Positivef(t, observed[point], "state transition %d was not observed", point)
 	}
+	published := observed[execmodule.StateTransitionOverlayPublished]
+	require.Equal(t, published, observed[execmodule.StateTransitionCommitComplete], "each published FCU result must become durable")
+	require.Equal(t, published, observed[execmodule.StateTransitionOverlayCleared], "only a published overlay may emit a clear event")
 }
 
 func TestReorgsWithInsertChain(t *testing.T) {

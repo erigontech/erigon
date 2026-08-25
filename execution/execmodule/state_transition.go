@@ -26,7 +26,7 @@ const (
 	// StateTransitionRPCViewBound means the RPC getter has selected its
 	// SharedDomains or database view, but no state has been read yet.
 	StateTransitionRPCViewBound StateTransitionPoint = iota
-	// StateTransitionUnwindComplete means staged unwind replay has finished,
+	// StateTransitionUnwindComplete means forkchoice unwind replay has finished,
 	// before replacement canonical state is published.
 	StateTransitionUnwindComplete
 	// StateTransitionOverlayPublished means new RPC views can read the FCU result
@@ -36,7 +36,7 @@ const (
 	// published SharedDomains remains available to RPC views.
 	StateTransitionCommitComplete
 	// StateTransitionOverlayCleared means new RPC views fall back to the
-	// committed database after SharedDomains is unpublished.
+	// committed database after the FCU-published SharedDomains is unpublished.
 	StateTransitionOverlayCleared
 )
 

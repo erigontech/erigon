@@ -414,13 +414,17 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	// Clear the published overlay before closing the SD, so concurrent
 	// readers (e.g. a second FCU calling GetHeaderByHash) don't access
 	// a closed SharedDomains via Events.LatestSD().
+	overlayPublished := false
 	teardownOverlay := func() {
 		if currentContext == nil {
 			return
 		}
 		if dispatcher := e.pipelineExecutor.Dispatcher(); dispatcher != nil {
 			dispatcher.PublishOverlay(nil)
-			e.observeStateTransition(ctx, StateTransitionOverlayCleared)
+			if overlayPublished {
+				overlayPublished = false
+				e.observeStateTransition(ctx, StateTransitionOverlayCleared)
+			}
 		}
 		currentContext.Close()
 		currentContext = nil
@@ -695,8 +699,10 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		// released and flush/commit/prune can proceed without blocking the
 		// next FCU.
 		e.logger.Debug("[updateForkChoice] dispatching notifications", "head", blockHash)
-		if err := e.dispatchNotificationsFromOverlay(ctx, currentContext, finishProgressBefore); err != nil {
-			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", err), stateFlushingInParallel)
+		published, dispatchErr := e.dispatchNotificationsFromOverlay(ctx, currentContext, finishProgressBefore)
+		overlayPublished = published
+		if dispatchErr != nil {
+			return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("fcu: dispatch notifications: %w", dispatchErr), stateFlushingInParallel)
 		}
 
 		// Hand the semaphore to a background goroutine: FCU cleanup runs first,
@@ -774,25 +780,26 @@ func (e *ExecModule) logTimings(msg string, timings []any) {
 // SD's block overlay. The state version is supplied separately because the
 // domain flush, not the metadata overlay, owns its durable sequence advance.
 // Dispatch must finish before the execution semaphore is released so the next
-// FCU cannot overtake these notifications.
-func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *execctx.SharedDomains, finishProgressBefore uint64) error {
+// FCU cannot overtake these notifications. The result reports whether
+// publication happened, including when the later notification dispatch fails.
+func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *execctx.SharedDomains, finishProgressBefore uint64) (bool, error) {
 	dispatcher := e.pipelineExecutor.Dispatcher()
 	if dispatcher == nil || e.accum == nil {
 		e.logger.Debug("[dispatchNotifications] skipped: dispatcher or accum nil", "dispatcherNil", dispatcher == nil, "accumNil", e.accum == nil)
-		return nil
+		return false, nil
 	}
 	overlay := sd.BlockOverlay()
 	if overlay == nil {
 		e.logger.Debug("[dispatchNotifications] skipped: overlay nil")
-		return nil
+		return false, nil
 	}
 	finishProgressAfter, err := stages.GetStageProgress(overlay, stages.Finish)
 	if err != nil {
-		return err
+		return false, err
 	}
 	stateVersion, err := sd.ProjectedStateVersion()
 	if err != nil {
-		return fmt.Errorf("project notification state version: %w", err)
+		return false, fmt.Errorf("project notification state version: %w", err)
 	}
 	// Publish the overlay BEFORE dispatching notifications. This ensures
 	// the BlockListener (overlay-aware shutter) sees the overlay as active
@@ -814,10 +821,10 @@ func (e *ExecModule) dispatchNotificationsFromOverlay(ctx context.Context, sd *e
 		finishProgressAfter,
 		e.pipelineExecutor.Sync().PrevUnwindPoint(),
 	); err != nil {
-		return err
+		return true, err
 	}
 
-	return nil
+	return true, nil
 }
 
 // runForkchoiceFlushCommit opens a brief RwTx, flushes the SharedDomains

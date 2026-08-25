@@ -706,7 +706,7 @@ func New(
 		blobGetter = backend.txPool
 	}
 
-	execmoduleCache := execmodule.NewCache()
+	execmoduleCache := &execmodule.Cache{}
 	execmoduleCache.SetPublishedSD(backend.notifications.Events.LatestSD)
 	var rpcStateCache kvcache.Cache = execmoduleCache
 	if options.rpcStateCacheDecorator != nil {

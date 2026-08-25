@@ -771,7 +771,7 @@ func New(tb testing.TB, opts ...Option) *ExecModuleTester {
 
 	hook := stageloop.NewHook(mock.Ctx, mock.Notifications, mock.posStagedSync, mock.ChainConfig, logger, dispatcher, nil, nil, nil, mock.BlockReader)
 
-	mock.StateCache = execmodule.NewCache()
+	mock.StateCache = &execmodule.Cache{}
 
 	accum := &execmodule.Accumulation{
 		Accumulator:    mock.Notifications.Accumulator,

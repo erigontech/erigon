@@ -43,8 +43,9 @@ import (
 )
 
 const (
-	rpcTransitionTimeout = time.Minute
-	rpcClientTimeout     = 5 * time.Minute
+	rpcTransitionTimeout       = time.Minute
+	rpcClientTimeout           = 10 * rpcTransitionTimeout
+	stateChurnSeed       int64 = 0
 )
 
 func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
@@ -67,14 +68,14 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
-	asyncCalls := newAsyncClientCallGroup()
+	var asyncCalls sync.WaitGroup
 	t.Cleanup(func() {
-		asyncCalls.wait()
+		asyncCalls.Wait()
 		require.NoError(t, eat.Close())
 	})
 
 	eat.Run(t, func(ctx context.Context, t *testing.T, eat engineapitester.EngineApiTester) {
-		seed := firstNonZeroStateChurnSeed()
+		seed := stateChurnSeed
 		// Each boundary gets its own contract because an RPC assertion may fill
 		// StateCache; sharing a key could let one phase mask the next.
 		_, storageRefillAddress, storageRefill, _ := buildChurnChain(ctx, t, eat, 0, nil)
@@ -91,7 +92,7 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 			applyStateChurnPoke(ctx, t, eat, churn, transactOpts, seed)
 		}
 		// This post-target deployment makes account and code removal part of the
-		// unwind, while the earlier contracts exercise restored storage.
+		// unwind, while retained contracts lose their post-target storage writes.
 		_, removedAccountAddress, _, _ := buildChurnChain(ctx, t, eat, 0, nil)
 		storageSlot := stateChurnStorageSlot(0)
 		expectedStorage := common.BigToHash(new(big.Int).SetUint64(stateChurnPokeValue(uint64(seed), 0)))
@@ -118,7 +119,10 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		require.Equal(t, enginetypes.ValidStatus, status.Status)
 
 		oldHeadOverlay := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
-		advanceToOldHead := startAsync(asyncCalls, func() (struct{}, error) {
+		// An FCU response does not imply teardown completion. Consume this
+		// lifecycle's clear event before reusing the transition point.
+		oldHeadCleared := transitions.hold(t, execmodule.StateTransitionOverlayCleared, 1)
+		advanceToOldHead := startAsync(&asyncCalls, func() (struct{}, error) {
 			return struct{}{}, eat.MockCl.UpdateForkChoice(ctx, oldHead)
 		})
 		oldHeadOverlay.wait(t)
@@ -126,17 +130,19 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		// These requests stay bound to the old head across the reorg. Their MVCC
 		// reads may finish later, but they must not refill canonical cache entries.
 		preUnwindViews := transitions.hold(t, execmodule.StateTransitionRPCViewBound, 3)
-		delayedStorage := startAsync(asyncCalls, func() (common.Hash, error) {
+		delayedStorage := startAsync(&asyncCalls, func() (common.Hash, error) {
 			return readRPCStorage(ctx, rpcClient, storageRefillAddress, storageSlot)
 		})
-		delayedCode := startAsync(asyncCalls, func() (hexutil.Bytes, error) {
+		delayedCode := startAsync(&asyncCalls, func() (hexutil.Bytes, error) {
 			return readRPCCode(ctx, rpcClient, removedAccountAddress)
 		})
-		delayedNonce := startAsync(asyncCalls, func() (hexutil.Uint64, error) {
+		delayedNonce := startAsync(&asyncCalls, func() (hexutil.Uint64, error) {
 			return readRPCNonce(ctx, rpcClient, removedAccountAddress)
 		})
 		preUnwindViews.wait(t)
 		oldHeadOverlay.release()
+		oldHeadCleared.wait(t)
+		oldHeadCleared.release()
 		awaitAsync(t, advanceToOldHead)
 		assertCanonicalHead(ctx, t, eat, oldHead)
 
@@ -144,7 +150,7 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		replacementOverlay := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
 		replacementCommitted := transitions.hold(t, execmodule.StateTransitionCommitComplete, 1)
 		replacementCleared := transitions.hold(t, execmodule.StateTransitionOverlayCleared, 1)
-		reorgToTarget := startAsync(asyncCalls, func() (struct{}, error) {
+		reorgToTarget := startAsync(&asyncCalls, func() (struct{}, error) {
 			return struct{}{}, eat.MockCl.UpdateForkChoice(ctx, reorgTarget)
 		})
 
@@ -258,55 +264,14 @@ func stateChurnPokeValue(seed, cursor uint64) uint64 {
 	return new(big.Int).Mod(new(big.Int).SetBytes(hash[:]), big.NewInt(3)).Uint64()
 }
 
-func firstNonZeroStateChurnSeed() int64 {
-	for seed := uint64(0); ; seed++ {
-		if stateChurnPokeValue(seed, 0) != 0 {
-			return int64(seed)
-		}
-	}
-}
-
 type asyncResult[T any] struct {
 	value T
 	err   error
 }
 
-func TestAsyncClientCallGroupDrainsBeforeResourceCleanup(t *testing.T) {
-	finished := make(chan struct{})
-	asyncCalls := newAsyncClientCallGroup()
-	t.Cleanup(func() {
-		asyncCalls.wait()
-		select {
-		case <-finished:
-		default:
-			t.Error("resource cleanup ran before the asynchronous call finished")
-		}
-	})
-
-	startAsync(asyncCalls, func() (struct{}, error) {
-		<-t.Context().Done()
-		close(finished)
-		return struct{}{}, nil
-	})
-}
-
-// asyncClientCallGroup drains test-owned client goroutines before the tester
-// waits for detached server-side forkchoice work.
-type asyncClientCallGroup struct {
-	wg sync.WaitGroup
-}
-
-func newAsyncClientCallGroup() *asyncClientCallGroup {
-	return &asyncClientCallGroup{}
-}
-
-func (g *asyncClientCallGroup) wait() {
-	g.wg.Wait()
-}
-
-func startAsync[T any](group *asyncClientCallGroup, call func() (T, error)) <-chan asyncResult[T] {
+func startAsync[T any](group *sync.WaitGroup, call func() (T, error)) <-chan asyncResult[T] {
 	result := make(chan asyncResult[T], 1)
-	group.wg.Go(func() {
+	group.Go(func() {
 		value, err := call()
 		result <- asyncResult[T]{value: value, err: err}
 	})

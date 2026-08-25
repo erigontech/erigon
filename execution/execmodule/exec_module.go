@@ -108,11 +108,6 @@ type Cache struct {
 	publishedSD func() *execctx.SharedDomains // returns the latest published SD from Events
 }
 
-// NewCache creates the RPC state bridge.
-func NewCache() *Cache {
-	return &Cache{}
-}
-
 // SetPublishedSD wires the Cache to fall back to the published SD from Events
 // when the exec module's currentContext is nil (e.g. while an FCU commits).
 func (c *Cache) SetPublishedSD(provider func() *execctx.SharedDomains) {
