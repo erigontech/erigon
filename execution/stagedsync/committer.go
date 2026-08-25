@@ -851,10 +851,12 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 // computeIsolated computes and flushes its own deferred updates with no
 // changeset diff, so a block that owns no changeset records into none.
 func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, error) {
-	cc.doms.LockChangesetAccumulator()
-	err := cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx) // flushes the previous block's own pending update, hash-routed
-	cc.doms.UnlockChangesetAccumulator()
-	if err != nil {
+	// flushes the previous block's own pending update, hash-routed
+	if err := func() error {
+		cc.doms.LockChangesetAccumulator()
+		defer cc.doms.UnlockChangesetAccumulator()
+		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	}(); err != nil {
 		return nil, err
 	}
 
@@ -972,10 +974,11 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// Flush block N-1's own pending update (hash-routed to N-1's saved
 	// changeset, independent of N's diff below) — the one remaining
 	// changesetMu window, brief rather than spanning the fold that follows.
-	cc.doms.LockChangesetAccumulator()
-	err := cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
-	cc.doms.UnlockChangesetAccumulator()
-	if err != nil {
+	if err := func() error {
+		cc.doms.LockChangesetAccumulator()
+		defer cc.doms.UnlockChangesetAccumulator()
+		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
+	}(); err != nil {
 		return nil, err
 	}
 
