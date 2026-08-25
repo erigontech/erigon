@@ -117,9 +117,9 @@ func TestExecutionPayloadServiceEmitsGossipAndImportedEvents(t *testing.T) {
 	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100, StateRoot: stateRoot}}
 	headState := state.New(cfg)
 	headState.SetVersion(clparams.GloasVersion)
-	headState.SetSlot(100)
-	headState.SetBlockRootAt(63, common.Hash{3})
-	headState.SetBlockRootAt(95, common.Hash{4})
+	require.NoError(t, headState.SetSlot(100))
+	require.NoError(t, headState.SetBlockRootAt(63, common.Hash{3}))
+	require.NoError(t, headState.SetBlockRootAt(95, common.Hash{4}))
 	forkchoiceMock.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 		require.Equal(t, blockRoot, root)
 		require.True(t, alwaysCopy)
@@ -177,9 +177,9 @@ func TestExecutionPayloadServiceDoesNotEmitStaleHeadV2AfterReorg(t *testing.T) {
 	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100, StateRoot: common.Hash{2}}}
 	headState := state.New(cfg)
 	headState.SetVersion(clparams.GloasVersion)
-	headState.SetSlot(100)
-	headState.SetBlockRootAt(63, common.Hash{3})
-	headState.SetBlockRootAt(95, common.Hash{4})
+	require.NoError(t, headState.SetSlot(100))
+	require.NoError(t, headState.SetBlockRootAt(63, common.Hash{3}))
+	require.NoError(t, headState.SetBlockRootAt(95, common.Hash{4}))
 	forkchoiceMock.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 		require.Equal(t, blockRoot, root)
 		require.True(t, alwaysCopy)
