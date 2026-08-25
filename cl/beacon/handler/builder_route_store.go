@@ -5,6 +5,7 @@
 package handler
 
 import (
+	"bytes"
 	"sync"
 	"time"
 
@@ -62,11 +63,17 @@ func (s *builderRouteStore) Add(root common.Hash, url string) bool {
 		return true
 	}
 	if len(s.routes) >= s.capacity {
+		var oldestKey builderRouteKey
+		var oldestRoute *builderRoute
 		for existingKey, route := range s.routes {
-			if route.state == builderRouteDelivered {
-				delete(s.routes, existingKey)
-				break
+			if route.state == builderRouteDelivered && (oldestRoute == nil || route.expiresAt.Before(oldestRoute.expiresAt) ||
+				route.expiresAt.Equal(oldestRoute.expiresAt) && builderRouteKeyLess(existingKey, oldestKey)) {
+				oldestKey = existingKey
+				oldestRoute = route
 			}
+		}
+		if oldestRoute != nil {
+			delete(s.routes, oldestKey)
 		}
 		if len(s.routes) >= s.capacity {
 			return false
@@ -74,6 +81,13 @@ func (s *builderRouteStore) Add(root common.Hash, url string) bool {
 	}
 	s.routes[key] = &builderRoute{state: builderRouteIdle, expiresAt: now.Add(s.ttl)}
 	return true
+}
+
+func builderRouteKeyLess(left, right builderRouteKey) bool {
+	if order := bytes.Compare(left.root[:], right.root[:]); order != 0 {
+		return order < 0
+	}
+	return left.url < right.url
 }
 
 func (s *builderRouteStore) Claim(root common.Hash, url string) bool {
