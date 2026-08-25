@@ -22,6 +22,7 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
+	"runtime"
 	"sync"
 	"testing"
 
@@ -847,13 +848,20 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out)
 	require.NoError(t, err)
 	cc.Start(ctx)
+	t.Cleanup(cc.Stop)
 
 	// Adds extra contention on changesetMu from a third goroutine, unrelated
 	// to routing correctness but raising the odds of exposing any accumulator
-	// access that isn't actually serialized by the lock.
+	// access that isn't actually serialized by the lock. Cleanup (not a
+	// manual stop at the end) so a require failure mid-test still stops it
+	// rather than leaving it spinning.
 	stopDistractor := make(chan struct{})
 	var distractorWG sync.WaitGroup
 	distractorWG.Add(1)
+	t.Cleanup(func() {
+		close(stopDistractor)
+		distractorWG.Wait()
+	})
 	go func() {
 		defer distractorWG.Done()
 		for {
@@ -862,6 +870,7 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 				return
 			default:
 				doms.GetChangesetAccumulator()
+				runtime.Gosched()
 			}
 		}
 	}()
@@ -903,9 +912,6 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 		require.True(t, r.err == nil || errors.Is(r.err, ErrWrongTrieRoot),
 			"block %d: unexpected compute error: %v", r.blockNum, r.err)
 	}
-	cc.Stop()
-	close(stopDistractor)
-	distractorWG.Wait()
 
 	for b := uint64(1); b <= numBlocks; b++ {
 		require.Positive(t, changesets[b].Diffs[kv.CommitmentDomain].Len(),
