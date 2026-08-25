@@ -95,9 +95,13 @@ func dumpAllDecimal(t *testing.T, m *execmoduletester.ExecModuleTester, logger l
 	}
 }
 
-// migrate runs MigrateDecimalToEpoch against the tester's datadir and DB.
+// migrate runs MigrateDecimalToEpoch against the tester's datadir and DB. It closes the tester's
+// snapshots first: in production the migration runs before anything opens a segment, and it deletes
+// each decimal segment once its blocks are durable elsewhere. Holding those files open makes that
+// delete fail on Windows, where an open mapping blocks removal.
 func migrate(t *testing.T, m *execmoduletester.ExecModuleTester, logger log.Logger) error {
 	t.Helper()
+	m.BlockSnapshots.Close()
 	return freezeblocks.MigrateDecimalToEpoch(m.Ctx, m.Dirs, m.DB, m.ChainConfig, 1, logger)
 }
 

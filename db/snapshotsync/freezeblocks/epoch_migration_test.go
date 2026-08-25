@@ -492,3 +492,28 @@ func TestHasDecimalBlockSegments(t *testing.T) {
 		require.False(t, got)
 	})
 }
+
+// A crash between a merge output landing and RemoveOverlaps can leave a merged segment on disk
+// alongside the old subsegments it subsumes. sortedNoOverlaps must drop the contained subsegments so
+// coverage sees a clean From-ascending run and does not mistake the first contained file for a gap —
+// which previously truncated the run and deleted valid decimal segments beyond it.
+func TestSortedNoOverlapsDropsContained(t *testing.T) {
+	fi := func(from, to uint64) snaptype.FileInfo { return snaptype.FileInfo{From: from, To: to} }
+	rng := func(s []snaptype.FileInfo) [][2]uint64 {
+		out := make([][2]uint64, len(s))
+		for i, f := range s {
+			out[i] = [2]uint64{f.From, f.To}
+		}
+		return out
+	}
+
+	// merged [0,8192) coexists with its old subsegments; only the container survives, then the tail.
+	in := []snaptype.FileInfo{fi(1024, 2048), fi(0, 8192), fi(0, 1024), fi(2048, 3072), fi(8192, 16384)}
+	require.Equal(t, [][2]uint64{{0, 8192}, {8192, 16384}}, rng(sortedNoOverlaps(in)))
+
+	// with the contained files gone, coverage counts the full contiguous run rather than stopping at
+	// a false gap at the first subsegment.
+	_, coveredTo, runLen := coverage(nil, sortedNoOverlaps(in))
+	require.Equal(t, uint64(16384), coveredTo)
+	require.Equal(t, 2, runLen)
+}
