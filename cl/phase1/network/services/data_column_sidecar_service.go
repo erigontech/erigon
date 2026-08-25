@@ -412,8 +412,6 @@ func (s *dataColumnSidecarService) tryProcessPendingGloasSidecar(
 ) pendingJobDecision {
 	sidecar := pending.sidecar
 	if sidecar.Slot <= s.forkChoice.FinalizedSlot() {
-		log.Debug("[dataColumnSidecarService] pending GLOAS sidecar slot is now finalized",
-			"slot", sidecar.Slot, "blockRoot", sidecar.BeaconBlockRoot.String(), "index", sidecar.Index)
 		return pendingJobRemove
 	}
 	if _, ok := s.forkChoice.GetBlock(sidecar.BeaconBlockRoot); !ok {

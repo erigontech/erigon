@@ -238,7 +238,6 @@ func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.Payload
 // once their referenced block arrives.
 func (s *payloadAttestationService) tryProcessPendingAttestation(_ context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) pendingJobDecision {
 	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Data.Slot) {
-		log.Trace("Pending payload attestation slot mismatch", "blockRoot", key.blockRoot)
 		return pendingJobRemove
 	}
 

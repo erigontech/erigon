@@ -512,8 +512,6 @@ func pendingBidKeyFor(msg *cltypes.SignedExecutionPayloadBid) (pendingBidKey, er
 func (s *executionPayloadBidService) tryProcessPendingBid(_ context.Context, key pendingBidKey, msg *cltypes.SignedExecutionPayloadBid) pendingJobDecision {
 	currentSlot := s.ethClock.GetCurrentSlot()
 	if key.slot != currentSlot && key.slot != currentSlot+1 {
-		log.Trace("Pending execution payload bid slot expired",
-			"slot", key.slot, "builderIndex", key.builderIndex)
 		return pendingJobRemove
 	}
 
@@ -526,10 +524,6 @@ func (s *executionPayloadBidService) tryProcessPendingBid(_ context.Context, key
 		if errors.Is(err, errBidDependencyUnavailable) {
 			return pendingJobKeep
 		}
-		log.Trace("Failed to match pending execution payload bid",
-			"slot", key.slot,
-			"builderIndex", key.builderIndex,
-			"err", err)
 		return pendingJobRemove
 	}
 	if !ok {
@@ -540,10 +534,6 @@ func (s *executionPayloadBidService) tryProcessPendingBid(_ context.Context, key
 		if errors.Is(err, errBidDependencyUnavailable) {
 			return pendingJobKeep
 		}
-		log.Trace("Failed to process pending execution payload bid",
-			"slot", key.slot,
-			"builderIndex", key.builderIndex,
-			"err", err)
 	}
 	return pendingJobRemove
 }
