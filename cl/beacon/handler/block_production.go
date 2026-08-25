@@ -792,13 +792,18 @@ func (a *ApiHandler) GetEthV3ValidatorBlock(
 		consensusValue,
 	)
 	if options := gloasBlockOptionsFromContext(ctx); options != nil && options.selectedBuilderURL != "" {
-		w.Header().Set("Eth-Builder-Url", options.selectedBuilderURL)
 		if root, err := block.ToExecution().Block.HashSSZ(); err == nil {
-			a.builderRoutes.Add(root, &builderRoute{url: options.selectedBuilderURL})
+			a.setBuilderRouteHeader(w, root, options.selectedBuilderURL)
 		}
 	}
 
 	return resp, nil
+}
+
+func (a *ApiHandler) setBuilderRouteHeader(w http.ResponseWriter, root common.Hash, builderURL string) {
+	if a.builderRoutes != nil && a.builderRoutes.Add(root, builderURL) {
+		w.Header().Set("Eth-Builder-Url", builderURL)
+	}
 }
 
 func (a *ApiHandler) produceBlock(
@@ -1972,12 +1977,13 @@ func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cl
 	if err != nil {
 		return
 	}
-	route, ok := a.builderRoutes.Get(root)
-	if !ok || route == nil || route.url != builderURL || !route.forwarded.CompareAndSwap(false, true) {
+	if !a.builderRoutes.Claim(root, builderURL) {
 		return
 	}
 	go func() {
-		if err := a.builderClient.SubmitSignedBeaconBlock(context.Background(), builderURL, block); err != nil {
+		err := a.builderClient.SubmitSignedBeaconBlock(context.Background(), builderURL, block)
+		a.builderRoutes.Complete(root, builderURL, err == nil)
+		if err != nil {
 			a.logger.Warn("Failed to forward signed block to builder", "err", err)
 		}
 	}()
