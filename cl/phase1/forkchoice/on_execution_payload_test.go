@@ -1313,7 +1313,7 @@ func TestValidatePayloadWithELDoesNotRelockForkChoiceMu(t *testing.T) {
 		{
 			name:       "validated",
 			status:     execution_client.PayloadStatusValidated,
-			wantVerify: true,
+			wantVerify: false,
 		},
 		{
 			name:    "invalidated",

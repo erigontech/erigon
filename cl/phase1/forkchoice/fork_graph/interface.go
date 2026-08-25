@@ -39,11 +39,19 @@ type ForkGraph interface {
 	AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error)
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
 	GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error)
 	GetCurrentJustifiedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetFinalizedCheckpoint(blockRoot common.Hash) (solid.Checkpoint, bool)
 	GetSyncCommittees(period uint64) (*solid.SyncCommittee, *solid.SyncCommittee, bool)
 	MarkHeaderAsInvalid(blockRoot common.Hash)
+	IsBlockInvalid(blockRoot common.Hash) bool
+	MarkPayloadUnavailable(blockRoot common.Hash)
+	MarkPayloadAvailable(blockRoot common.Hash)
+	IsPayloadUnavailable(blockRoot common.Hash) bool
+	MarkPayloadAccepted(blockRoot common.Hash, verified bool)
+	ClearPayloadAccepted(blockRoot common.Hash)
+	PayloadAccepted(blockRoot common.Hash) (verified bool, ok bool)
 	AnchorSlot() uint64
 	AnchorRoot() common.Hash
 	Prune(uint64) error

@@ -168,8 +168,11 @@ func (s *executionPayloadService) ProcessMessage(ctx context.Context, _ *uint64,
 
 	// [IGNORE] The envelope is from a slot greater than or equal to the latest finalized slot
 	finalizedSlot := s.forkchoiceStore.FinalizedSlot()
-	if block.Block.Slot < finalizedSlot {
-		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, block.Block.Slot, finalizedSlot)
+	if envelope.Payload == nil {
+		return errors.New("nil execution payload")
+	}
+	if envelope.Payload.SlotNumber < finalizedSlot {
+		return fmt.Errorf("%w: envelope slot %d < finalized slot %d", ErrIgnore, envelope.Payload.SlotNumber, finalizedSlot)
 	}
 
 	// Process the execution payload through forkchoice

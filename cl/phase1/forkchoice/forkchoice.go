@@ -458,10 +458,7 @@ func (f *ForkChoiceStore) GetRecentExecutionPayloadStatus(executionBlockHash com
 }
 
 func (f *ForkChoiceStore) GetRecentExecutionPayloadStatusByRoot(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
-	if f.payloadStatusByRoot == nil {
-		return execution_client.PayloadStatusNone, false
-	}
-	return f.payloadStatusByRoot.Get(blockRoot)
+	return f.payloadStatusAuthority(blockRoot)
 }
 
 // GetExecutionPayloadGasLimit returns the gas_limit of a recently validated execution payload.
@@ -782,6 +779,10 @@ func (f *ForkChoiceStore) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeacon
 	return f.forkGraph.GetBlock(blockRoot)
 }
 
+func (f *ForkChoiceStore) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool {
+	return f.forkGraph.HasBlockChildAtOrAfter(blockRoot, slot)
+}
+
 // HasEnvelope delegates to forkGraph.HasEnvelope.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
@@ -792,6 +793,15 @@ func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 // has been accepted by the execution layer.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) IsPayloadVerified(blockRoot common.Hash) bool {
+	if f.forkGraph == nil || !f.forkGraph.HasEnvelope(blockRoot) {
+		return false
+	}
+	if f.forkGraph != nil {
+		if verified, accepted := f.forkGraph.PayloadAccepted(blockRoot); accepted {
+			return verified
+		}
+		return false
+	}
 	if f.verifiedExecutionPayload == nil {
 		return false
 	}
@@ -799,45 +809,126 @@ func (f *ForkChoiceStore) IsPayloadVerified(blockRoot common.Hash) bool {
 }
 
 func (f *ForkChoiceStore) MarkPayloadVerified(blockRoot common.Hash, executionBlockHash common.Hash) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.markPayloadVerifiedLocked(blockRoot, executionBlockHash)
+	f.MarkPayloadStatus(blockRoot, executionBlockHash, execution_client.PayloadStatusValidated)
 }
 
-func (f *ForkChoiceStore) markPayloadVerifiedLocked(blockRoot common.Hash, executionBlockHash common.Hash) {
-	if f.verifiedExecutionPayload == nil {
-		return
+func (f *ForkChoiceStore) MarkPayloadStatus(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) execution_client.PayloadStatus {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	return f.markPayloadStatusLocked(blockRoot, executionBlockHash, status)
+}
+
+type retainedBlockGuard interface {
+	WithRetainedBlock(common.Hash, func()) bool
+	IsBlockRetained(common.Hash) bool
+}
+
+func (f *ForkChoiceStore) MarkPayloadStatusIfRetained(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) (execution_client.PayloadStatus, bool) {
+	f.mu.Lock()
+	defer f.mu.Unlock()
+	guard, ok := f.forkGraph.(retainedBlockGuard)
+	if !ok {
+		return f.markPayloadStatusLocked(blockRoot, executionBlockHash, status), true
 	}
-	f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
-	if f.executionPayloadStatus != nil {
-		f.executionPayloadStatus.Add(executionBlockHash, execution_client.PayloadStatusValidated)
-	}
-	if f.payloadStatusByRoot != nil {
-		f.payloadStatusByRoot.Add(blockRoot, execution_client.PayloadStatusValidated)
-	}
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
+	effective := status
+	retained := guard.WithRetainedBlock(blockRoot, func() {
+		effective = f.markPayloadStatusRetainedLocked(blockRoot, executionBlockHash, status)
+	})
+	return effective, retained
 }
 
 func (f *ForkChoiceStore) MarkPayloadInvalid(blockRoot common.Hash, executionBlockHash common.Hash) {
-	f.mu.Lock()
-	defer f.mu.Unlock()
-	f.markPayloadInvalidLocked(blockRoot, executionBlockHash)
+	f.MarkPayloadStatus(blockRoot, executionBlockHash, execution_client.PayloadStatusInvalidated)
 }
 
-func (f *ForkChoiceStore) markPayloadInvalidLocked(blockRoot common.Hash, executionBlockHash common.Hash) {
+func (f *ForkChoiceStore) markPayloadStatusLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) execution_client.PayloadStatus {
+	return f.markPayloadStatus(blockRoot, executionBlockHash, status, false)
+}
+
+func (f *ForkChoiceStore) markPayloadStatusRetainedLocked(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus) execution_client.PayloadStatus {
+	return f.markPayloadStatus(blockRoot, executionBlockHash, status, true)
+}
+
+func (f *ForkChoiceStore) markPayloadStatus(blockRoot common.Hash, executionBlockHash common.Hash, status execution_client.PayloadStatus, retained bool) execution_client.PayloadStatus {
+	current, known := f.payloadStatusAuthorityWithRetention(blockRoot, retained)
+	effective := status
+	if known {
+		switch current {
+		case execution_client.PayloadStatusInvalidated:
+			effective = execution_client.PayloadStatusInvalidated
+		case execution_client.PayloadStatusValidated:
+			if status != execution_client.PayloadStatusInvalidated {
+				effective = execution_client.PayloadStatusValidated
+			}
+		case execution_client.PayloadStatusNotValidated:
+			if status == execution_client.PayloadStatusNone {
+				effective = execution_client.PayloadStatusNotValidated
+			}
+		}
+	}
 	if f.verifiedExecutionPayload != nil {
-		f.verifiedExecutionPayload.Remove(blockRoot)
+		if effective == execution_client.PayloadStatusValidated {
+			f.verifiedExecutionPayload.Add(blockRoot, struct{}{})
+		} else {
+			f.verifiedExecutionPayload.Remove(blockRoot)
+		}
 	}
 	if f.executionPayloadStatus != nil {
-		f.executionPayloadStatus.Add(executionBlockHash, execution_client.PayloadStatusInvalidated)
+		f.executionPayloadStatus.Add(executionBlockHash, effective)
 	}
 	if f.payloadStatusByRoot != nil {
-		f.payloadStatusByRoot.Add(blockRoot, execution_client.PayloadStatusInvalidated)
+		f.payloadStatusByRoot.Add(blockRoot, effective)
 	}
-	f.forkGraph.MarkHeaderAsInvalid(blockRoot)
-	f.headHash = common.Hash{}
-	f.headPayloadStatus = cltypes.PayloadStatusPending
+	if f.forkGraph != nil {
+		switch effective {
+		case execution_client.PayloadStatusNone:
+			f.forkGraph.ClearPayloadAccepted(blockRoot)
+			f.forkGraph.MarkPayloadUnavailable(blockRoot)
+		case execution_client.PayloadStatusNotValidated:
+			f.forkGraph.MarkPayloadAvailable(blockRoot)
+			f.forkGraph.MarkPayloadAccepted(blockRoot, false)
+		case execution_client.PayloadStatusValidated:
+			f.forkGraph.MarkPayloadAvailable(blockRoot)
+			f.forkGraph.MarkPayloadAccepted(blockRoot, true)
+		case execution_client.PayloadStatusInvalidated:
+			f.forkGraph.MarkPayloadAvailable(blockRoot)
+			f.forkGraph.ClearPayloadAccepted(blockRoot)
+			f.forkGraph.MarkHeaderAsInvalid(blockRoot)
+		}
+	}
+	if !known || current != effective {
+		f.headHash = common.Hash{}
+		f.headPayloadStatus = cltypes.PayloadStatusPending
+	}
+	return effective
+}
+
+func (f *ForkChoiceStore) payloadStatusAuthority(blockRoot common.Hash) (execution_client.PayloadStatus, bool) {
+	return f.payloadStatusAuthorityWithRetention(blockRoot, false)
+}
+
+func (f *ForkChoiceStore) payloadStatusAuthorityWithRetention(blockRoot common.Hash, retained bool) (execution_client.PayloadStatus, bool) {
+	if f.forkGraph != nil {
+		if guard, ok := f.forkGraph.(retainedBlockGuard); ok && !retained && !guard.IsBlockRetained(blockRoot) {
+			return execution_client.PayloadStatusNone, false
+		}
+		if f.forkGraph.IsBlockInvalid(blockRoot) {
+			return execution_client.PayloadStatusInvalidated, true
+		}
+		if verified, accepted := f.forkGraph.PayloadAccepted(blockRoot); accepted {
+			if verified {
+				return execution_client.PayloadStatusValidated, true
+			}
+			return execution_client.PayloadStatusNotValidated, true
+		}
+		if f.forkGraph.IsPayloadUnavailable(blockRoot) {
+			return execution_client.PayloadStatusNone, true
+		}
+	}
+	if f.payloadStatusByRoot != nil {
+		return f.payloadStatusByRoot.Get(blockRoot)
+	}
+	return execution_client.PayloadStatusNone, false
 }
 
 // ReadEnvelopeFromDisk delegates to forkGraph.ReadEnvelopeFromDisk.
@@ -1094,6 +1185,14 @@ func pendingELPayloadRoot(p PendingELPayload) (common.Hash, bool) {
 // RequeuePendingELPayload queues a drained execution payload for another EL validation attempt.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) RequeuePendingELPayload(p PendingELPayload) {
+	root, ok := pendingELPayloadRoot(p)
+	if !ok {
+		return
+	}
+	if guard, guarded := f.forkGraph.(retainedBlockGuard); guarded {
+		guard.WithRetainedBlock(root, func() { f.addPendingELPayload(p.Block, p.Envelope) })
+		return
+	}
 	f.addPendingELPayload(p.Block, p.Envelope)
 }
 

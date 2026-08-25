@@ -18,6 +18,7 @@ package fork_graph
 
 import (
 	"encoding/binary"
+	"errors"
 	"fmt"
 	"io"
 	"os"
@@ -181,7 +182,17 @@ func (f *forkGraphDisk) DumpBeaconStateOnDisk(blockRoot common.Hash, bs *state.C
 // Uses an in-memory cache populated by DumpEnvelopeOnDisk to avoid repeated disk stats.
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
+	f.lifecycleMu.RLock()
+	defer f.lifecycleMu.RUnlock()
+	if !f.retainedBlock(blockRoot) {
+		return false
+	}
 	// Fast path: check in-memory cache
+	if _, ok := f.envelopeExists.Load(blockRoot); ok {
+		return true
+	}
+	f.stateDumpLock.Lock()
+	defer f.stateDumpLock.Unlock()
 	if _, ok := f.envelopeExists.Load(blockRoot); ok {
 		return true
 	}
@@ -198,6 +209,11 @@ func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *cltypes.SignedExecutionPayloadEnvelope, err error) {
 	var file afero.File
+	f.lifecycleMu.RLock()
+	defer f.lifecycleMu.RUnlock()
+	if !f.retainedBlock(blockRoot) {
+		return nil, ErrStateNotFound
+	}
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
 
@@ -249,15 +265,17 @@ func (f *forkGraphDisk) ReadEnvelopeFromDisk(blockRoot common.Hash) (envelope *c
 // DumpEnvelopeOnDisk dumps an execution payload envelope to disk.
 // [New in Gloas:EIP7732]
 func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *cltypes.SignedExecutionPayloadEnvelope) (err error) {
+	f.lifecycleMu.RLock()
+	defer f.lifecycleMu.RUnlock()
+	header, ok := f.GetHeader(blockRoot)
+	if !ok || header == nil {
+		return fmt.Errorf("cannot dump envelope for unknown block root %x", blockRoot)
+	}
+	if isBelowPrunedBoundary(header.Slot, f.lowestAvailableBlock.Load()) {
+		return fmt.Errorf("cannot dump envelope for pruned block root %x at slot %d", blockRoot, header.Slot)
+	}
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
-
-	// Populate in-memory cache on successful write
-	defer func() {
-		if err == nil {
-			f.envelopeExists.Store(blockRoot, struct{}{})
-		}
-	}()
 
 	// Encode the envelope
 	f.sszBuffer, err = envelope.EncodeSSZ(f.sszBuffer[:0])
@@ -265,29 +283,43 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 		return
 	}
 
-	dumpedFile, err := f.fs.OpenFile(getEnvelopeFilename(blockRoot), os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
+	filename := getEnvelopeFilename(blockRoot)
+	tmpFilename := filename + ".tmp"
+	dumpedFile, err := f.fs.OpenFile(tmpFilename, os.O_TRUNC|os.O_CREATE|os.O_RDWR, 0o755)
 	if err != nil {
 		return err
 	}
-	defer dumpedFile.Close()
+	closed := false
+	defer func() {
+		if !closed {
+			err = errors.Join(err, dumpedFile.Close())
+		}
+		if err != nil {
+			f.envelopeExists.Delete(blockRoot)
+			_ = f.fs.Remove(tmpFilename)
+		}
+	}()
 
 	sw := snappypool.Writer(dumpedFile)
-	defer snappypool.PutWriter(sw)
-
-	// Write the length
-	length := make([]byte, 8)
-	binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
-	if _, err := sw.Write(length); err != nil {
-		log.Error("failed to write length", "err", err)
-		return err
-	}
-	// Write the envelope
-	if _, err := sw.Write(f.sszBuffer); err != nil {
-		log.Error("failed to write ssz buffer", "err", err)
-		return err
-	}
-	if err = sw.Flush(); err != nil {
-		log.Error("failed to flush snappy writer", "err", err)
+	err = func() error {
+		defer snappypool.PutWriter(sw)
+		length := make([]byte, 8)
+		binary.BigEndian.PutUint64(length, uint64(len(f.sszBuffer)))
+		if _, writeErr := sw.Write(length); writeErr != nil {
+			log.Error("failed to write length", "err", writeErr)
+			return writeErr
+		}
+		if _, writeErr := sw.Write(f.sszBuffer); writeErr != nil {
+			log.Error("failed to write ssz buffer", "err", writeErr)
+			return writeErr
+		}
+		if flushErr := sw.Flush(); flushErr != nil {
+			log.Error("failed to flush snappy writer", "err", flushErr)
+			return flushErr
+		}
+		return nil
+	}()
+	if err != nil {
 		return err
 	}
 
@@ -295,6 +327,15 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 		log.Error("failed to sync dumped file", "err", err)
 		return
 	}
+	if err = dumpedFile.Close(); err != nil {
+		closed = true
+		return
+	}
+	closed = true
+	if err = f.fs.Rename(tmpFilename, filename); err != nil {
+		return
+	}
+	f.envelopeExists.Store(blockRoot, struct{}{})
 
 	return
 }

@@ -18,7 +18,11 @@ package fork_graph
 
 import (
 	_ "embed"
+	"errors"
+	"os"
+	"sync"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beacon_router_configuration"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -39,6 +43,84 @@ var block2 []byte
 
 //go:embed test_data/anchor_state.ssz_snappy
 var anchor []byte
+
+type blockingRemoveFs struct {
+	afero.Fs
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+type blockingPathRemoveFs struct {
+	afero.Fs
+	target  string
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (fs *blockingPathRemoveFs) Remove(name string) error {
+	if name == fs.target {
+		fs.once.Do(func() {
+			close(fs.entered)
+			<-fs.release
+		})
+	}
+	return fs.Fs.Remove(name)
+}
+
+var errPartialEnvelopeWrite = errors.New("partial envelope write")
+
+type partialWriteFs struct {
+	afero.Fs
+	fail bool
+}
+
+type blockingRenameFs struct {
+	afero.Fs
+	target  string
+	entered chan struct{}
+	release chan struct{}
+	once    sync.Once
+}
+
+func (fs *blockingRenameFs) Rename(oldname, newname string) error {
+	if newname == fs.target {
+		fs.once.Do(func() {
+			close(fs.entered)
+			<-fs.release
+		})
+	}
+	return fs.Fs.Rename(oldname, newname)
+}
+
+func (fs *partialWriteFs) OpenFile(name string, flag int, perm os.FileMode) (afero.File, error) {
+	file, err := fs.Fs.OpenFile(name, flag, perm)
+	if err != nil || !fs.fail {
+		return file, err
+	}
+	return partialWriteFile{File: file}, nil
+}
+
+type partialWriteFile struct {
+	afero.File
+}
+
+func (f partialWriteFile) Write(p []byte) (int, error) {
+	if len(p) == 0 {
+		return 0, errPartialEnvelopeWrite
+	}
+	n, _ := f.File.Write(p[:1])
+	return n, errPartialEnvelopeWrite
+}
+
+func (fs *blockingRemoveFs) Remove(name string) error {
+	fs.once.Do(func() {
+		close(fs.entered)
+		<-fs.release
+	})
+	return fs.Fs.Remove(name)
+}
 
 func TestForkGraphInDisk(t *testing.T) {
 	blockA, blockB, blockC := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion),
@@ -85,6 +167,71 @@ func TestNewForkGraphDiskReturnsErrorOnDumpFailure(t *testing.T) {
 		require.Error(t, err)
 		require.Nil(t, graph)
 	})
+}
+
+func TestDumpEnvelopeErrorDoesNotPublishPartialFile(t *testing.T) {
+	baseFs := afero.NewMemMapFs()
+	fs := &partialWriteFs{Fs: baseFs, fail: true}
+	cfg := clparams.MainnetBeaconConfig
+	f := &forkGraphDisk{fs: fs, beaconCfg: &cfg}
+	root := common.Hash{1}
+	f.headers.Store(root, &cltypes.BeaconBlockHeader{Slot: 1})
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+
+	err := f.DumpEnvelopeOnDisk(root, envelope)
+	require.ErrorIs(t, err, errPartialEnvelopeWrite)
+	require.False(t, f.HasEnvelope(root))
+
+	fs.fail = false
+	require.NoError(t, f.DumpEnvelopeOnDisk(root, envelope))
+	require.True(t, f.HasEnvelope(root))
+	_, err = f.ReadEnvelopeFromDisk(root)
+	require.NoError(t, err)
+}
+
+func TestDumpEnvelopeBeforePruneDoesNotSurvivePrune(t *testing.T) {
+	baseFs := afero.NewMemMapFs()
+	oldRoot := common.Hash{1}
+	newerRoot := common.Hash{2}
+	fs := &blockingRenameFs{
+		Fs:      baseFs,
+		target:  getEnvelopeFilename(oldRoot),
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig, children: make(map[common.Hash]*validatedChildren)}
+	oldBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	oldBlock.Block.Slot = 64
+	newerBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	newerBlock.Block.Slot = 128
+	f.blocks.Store(oldRoot, oldBlock)
+	f.blocks.Store(newerRoot, newerBlock)
+	f.headers.Store(oldRoot, &cltypes.BeaconBlockHeader{Slot: oldBlock.Block.Slot})
+	f.headers.Store(newerRoot, &cltypes.BeaconBlockHeader{Slot: newerBlock.Block.Slot})
+	require.NoError(t, afero.WriteFile(baseFs, getBeaconStateFilename(oldRoot), []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(baseFs, getBeaconStateFilename(newerRoot), []byte{1}, 0o644))
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+
+	dumpDone := make(chan error, 1)
+	go func() { dumpDone <- f.DumpEnvelopeOnDisk(oldRoot, envelope) }()
+	select {
+	case <-fs.entered:
+	case <-time.After(time.Second):
+		t.Fatal("envelope dump did not reach rename")
+	}
+	pruneDone := make(chan error, 1)
+	go func() { pruneDone <- f.Prune(100) }()
+	select {
+	case err := <-pruneDone:
+		close(fs.release)
+		require.NoError(t, err)
+		t.Fatal("prune crossed an active envelope publication")
+	case <-time.After(50 * time.Millisecond):
+	}
+	close(fs.release)
+	require.NoError(t, <-dumpDone)
+	require.NoError(t, <-pruneDone)
+	require.False(t, f.HasEnvelope(oldRoot))
 }
 
 func TestNewForkGraphDiskCachesAnchorStateRoot(t *testing.T) {
@@ -142,10 +289,348 @@ func TestPruneKeepsLowestAvailableBlockMonotonic(t *testing.T) {
 	}
 	addBlockWithState(100, common.Hash{1})
 	addBlockWithState(200, common.Hash{2})
+	f.MarkHeaderAsInvalid(common.Hash{1})
+	require.True(t, f.IsBlockInvalid(common.Hash{1}))
+	f.MarkPayloadAccepted(common.Hash{1}, true)
+	verified, accepted := f.PayloadAccepted(common.Hash{1})
+	require.True(t, accepted)
+	require.True(t, verified)
 
 	require.NoError(t, f.Prune(150))
 	require.Equal(t, uint64(151), f.LowestAvailableSlot())
+	require.False(t, f.IsBlockInvalid(common.Hash{1}))
+	_, accepted = f.PayloadAccepted(common.Hash{1})
+	require.False(t, accepted)
 
 	require.NoError(t, f.Prune(120))
 	require.Equal(t, uint64(151), f.LowestAvailableSlot())
+}
+
+func TestOrphanEnvelopeIsNotRediscoveredAfterRootRemoval(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig}
+	root := common.Hash{1}
+	require.NoError(t, afero.WriteFile(fs, getEnvelopeFilename(root), []byte{1}, 0o644))
+
+	require.False(t, f.HasEnvelope(root))
+	_, err := f.ReadEnvelopeFromDisk(root)
+	require.ErrorIs(t, err, ErrStateNotFound)
+	_, err = fs.Stat(getEnvelopeFilename(root))
+	require.NoError(t, err)
+}
+
+func TestHasBlockChildAtOrAfterUsesValidatedChildren(t *testing.T) {
+	f := &forkGraphDisk{}
+	parentRoot := common.Hash{1}
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.ParentRoot = parentRoot
+	child.Block.Slot = 64
+	f.blocks.Store(common.Hash{2}, child)
+
+	require.False(t, f.HasBlockChildAtOrAfter(parentRoot, 64))
+	f.addValidatedChild(parentRoot, common.Hash{2}, 64)
+	require.True(t, f.HasBlockChildAtOrAfter(parentRoot, 64))
+	require.False(t, f.HasBlockChildAtOrAfter(parentRoot, 65))
+	require.False(t, f.HasBlockChildAtOrAfter(common.Hash{3}, 64))
+	f.removeValidatedChild(parentRoot, common.Hash{2})
+	require.False(t, f.HasBlockChildAtOrAfter(parentRoot, 64))
+}
+
+func TestRemoveValidatedChildrenBulkKeepsSameSlotSurvivor(t *testing.T) {
+	f := &forkGraphDisk{children: make(map[common.Hash]*validatedChildren)}
+	parentRoot := common.Hash{1}
+	removed := make([]common.Hash, 1024)
+	for i := range removed {
+		removed[i][0] = byte(i)
+		removed[i][1] = byte(i >> 8)
+		f.addValidatedChild(parentRoot, removed[i], 128)
+	}
+	survivor := common.Hash{0xff, 0xff}
+	f.addValidatedChild(parentRoot, survivor, 127)
+
+	f.removeValidatedChildren(map[common.Hash][]common.Hash{parentRoot: removed})
+
+	require.True(t, f.HasBlockChildAtOrAfter(parentRoot, 127))
+	require.False(t, f.HasBlockChildAtOrAfter(parentRoot, 128))
+	require.Equal(t, map[common.Hash]uint64{survivor: 127}, f.children[parentRoot].slots)
+}
+
+func TestValidatedChildQueryProgressesDuringPruneLifecycle(t *testing.T) {
+	baseFs := afero.NewMemMapFs()
+	fs := &blockingRemoveFs{Fs: baseFs, entered: make(chan struct{}), release: make(chan struct{})}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig, children: make(map[common.Hash]*validatedChildren)}
+	parentRoot := common.Hash{1}
+	childRoot := common.Hash{2}
+	newerRoot := common.Hash{3}
+	child := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	child.Block.ParentRoot = parentRoot
+	child.Block.Slot = 64
+	newer := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	newer.Block.Slot = 128
+	f.blocks.Store(childRoot, child)
+	f.blocks.Store(newerRoot, newer)
+	f.headers.Store(childRoot, &cltypes.BeaconBlockHeader{ParentRoot: parentRoot, Slot: child.Block.Slot})
+	f.headers.Store(newerRoot, &cltypes.BeaconBlockHeader{Slot: newer.Block.Slot})
+	require.NoError(t, afero.WriteFile(baseFs, getBeaconStateFilename(childRoot), []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(baseFs, getBeaconStateFilename(newerRoot), []byte{1}, 0o644))
+	f.addValidatedChild(parentRoot, childRoot, 64)
+
+	pruneDone := make(chan error, 1)
+	go func() { pruneDone <- f.Prune(100) }()
+	select {
+	case <-fs.entered:
+	case <-time.After(time.Second):
+		t.Fatal("prune did not reach filesystem removal")
+	}
+
+	result := make(chan bool, 1)
+	go func() { result <- f.HasBlockChildAtOrAfter(parentRoot, 64) }()
+	select {
+	case found := <-result:
+		require.False(t, found)
+	case <-time.After(time.Second):
+		close(fs.release)
+		t.Fatal("validated-child query blocked on the prune lifecycle")
+	}
+
+	oldBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	oldBlock.Block.ParentRoot = parentRoot
+	oldBlock.Block.Slot = 63
+	addDone := make(chan ChainSegmentInsertionResult, 1)
+	go func() {
+		_, result, _ := f.AddChainSegment(oldBlock, true)
+		addDone <- result
+	}()
+	select {
+	case result := <-addDone:
+		require.Equal(t, BelowAnchor, result)
+	case <-time.After(time.Second):
+		close(fs.release)
+		t.Fatal("below-boundary add blocked on filesystem cleanup")
+	}
+	aboveBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	aboveBlock.Block.ParentRoot = newerRoot
+	aboveBlock.Block.Slot = 129
+	aboveAddDone := make(chan ChainSegmentInsertionResult, 1)
+	go func() {
+		_, result, _ := f.AddChainSegment(aboveBlock, true)
+		aboveAddDone <- result
+	}()
+	select {
+	case result := <-aboveAddDone:
+		require.NotEqual(t, BelowAnchor, result)
+	case <-time.After(time.Second):
+		close(fs.release)
+		t.Fatal("above-boundary add blocked on filesystem cleanup")
+	}
+	statusDone := make(chan bool, 1)
+	go func() {
+		statusDone <- f.WithRetainedBlock(newerRoot, func() { f.MarkPayloadAccepted(newerRoot, false) })
+	}()
+	select {
+	case retained := <-statusDone:
+		require.True(t, retained)
+	case <-time.After(time.Second):
+		close(fs.release)
+		t.Fatal("retained status update blocked on filesystem cleanup")
+	}
+	hasDone := make(chan bool, 1)
+	go func() { hasDone <- f.HasEnvelope(newerRoot) }()
+	select {
+	case found := <-hasDone:
+		require.False(t, found)
+	case <-time.After(time.Second):
+		close(fs.release)
+		t.Fatal("retained envelope query blocked on filesystem cleanup")
+	}
+	readDone := make(chan error, 1)
+	go func() { _, err := f.ReadEnvelopeFromDisk(newerRoot); readDone <- err }()
+	select {
+	case err := <-readDone:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		close(fs.release)
+		t.Fatal("retained envelope read blocked on filesystem cleanup")
+	}
+	close(fs.release)
+	require.NoError(t, <-pruneDone)
+
+	require.False(t, f.HasBlockChildAtOrAfter(parentRoot, 64))
+	oldRoot, err := oldBlock.Block.HashSSZ()
+	require.NoError(t, err)
+	_, found := f.GetHeader(oldRoot)
+	require.False(t, found)
+}
+
+func TestPruneYieldsLifecycleBetweenBatches(t *testing.T) {
+	fs := afero.NewMemMapFs()
+	entered := make(chan struct{})
+	release := make(chan struct{})
+	var once sync.Once
+	cleanupCalls := 0
+	f := &forkGraphDisk{
+		fs:        fs,
+		beaconCfg: &clparams.MainnetBeaconConfig,
+		children:  make(map[common.Hash]*validatedChildren),
+		pruneBatchHook: func() {
+			once.Do(func() { close(entered); <-release })
+		},
+		pruneChildrenHook: func() { cleanupCalls++ },
+	}
+	parentRoot := common.Hash{0xaa}
+	staleParentRoot := common.Hash{0xbb}
+	oldRoots := make([]common.Hash, pruneBatchSize+1)
+	for i := range oldRoots {
+		oldRoots[i][0] = byte(i)
+		oldRoots[i][1] = byte(i >> 8)
+		block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+		block.Block.Slot = uint64(i + 1)
+		f.blocks.Store(oldRoots[i], block)
+		f.headers.Store(oldRoots[i], &cltypes.BeaconBlockHeader{ParentRoot: parentRoot, Slot: block.Block.Slot})
+		f.addValidatedChild(parentRoot, oldRoots[i], block.Block.Slot)
+	}
+	f.addValidatedChild(staleParentRoot, oldRoots[len(oldRoots)-1], uint64(len(oldRoots)))
+	newRoot := common.Hash{0xff, 0xff, 0xff}
+	newBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	newBlock.Block.Slot = 512
+	f.blocks.Store(newRoot, newBlock)
+	f.headers.Store(newRoot, &cltypes.BeaconBlockHeader{Slot: newBlock.Block.Slot})
+	f.addValidatedChild(parentRoot, newRoot, newBlock.Block.Slot)
+	require.NoError(t, afero.WriteFile(fs, getBeaconStateFilename(newRoot), []byte{1}, 0o644))
+
+	done := make(chan error, 1)
+	go func() { done <- f.Prune(300) }()
+	select {
+	case <-entered:
+	case <-time.After(time.Second):
+		t.Fatal("prune did not yield between batches")
+	}
+	require.Equal(t, uint64(301), f.LowestAvailableSlot())
+	_, found := f.GetBlock(oldRoots[len(oldRoots)-1])
+	require.False(t, found)
+	require.False(t, f.HasBlockChildAtOrAfter(staleParentRoot, 1))
+	progress := make(chan bool, 1)
+	go func() { progress <- f.WithRetainedBlock(newRoot, func() { f.MarkPayloadAccepted(newRoot, false) }) }()
+	select {
+	case retained := <-progress:
+		require.True(t, retained)
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("retained operation blocked between prune batches")
+	}
+	hasDone := make(chan bool, 1)
+	go func() { hasDone <- f.HasEnvelope(newRoot) }()
+	select {
+	case found := <-hasDone:
+		require.False(t, found)
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("envelope query blocked between prune batches")
+	}
+	readDone := make(chan error, 1)
+	go func() { _, err := f.ReadEnvelopeFromDisk(newRoot); readDone <- err }()
+	select {
+	case err := <-readDone:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		close(release)
+		t.Fatal("envelope read blocked between prune batches")
+	}
+	close(release)
+	require.NoError(t, <-done)
+	for _, root := range oldRoots {
+		_, found := f.blocks.Load(root)
+		require.False(t, found)
+	}
+	require.Equal(t, 1, cleanupCalls)
+	require.True(t, f.HasBlockChildAtOrAfter(parentRoot, newBlock.Block.Slot))
+	require.False(t, f.HasBlockChildAtOrAfter(parentRoot, newBlock.Block.Slot+1))
+	require.False(t, f.HasBlockChildAtOrAfter(staleParentRoot, 1))
+}
+
+func TestHasEnvelopeDoesNotRepopulateCacheDuringPrune(t *testing.T) {
+	baseFs := afero.NewMemMapFs()
+	oldRoot := common.Hash{1}
+	newerRoot := common.Hash{2}
+	fs := &blockingPathRemoveFs{
+		Fs:      baseFs,
+		target:  getEnvelopeFilename(oldRoot),
+		entered: make(chan struct{}),
+		release: make(chan struct{}),
+	}
+	f := &forkGraphDisk{fs: fs, beaconCfg: &clparams.MainnetBeaconConfig, children: make(map[common.Hash]*validatedChildren)}
+	oldBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	oldBlock.Block.Slot = 64
+	newerBlock := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	newerBlock.Block.Slot = 128
+	f.blocks.Store(oldRoot, oldBlock)
+	f.blocks.Store(newerRoot, newerBlock)
+	f.headers.Store(oldRoot, &cltypes.BeaconBlockHeader{Slot: oldBlock.Block.Slot})
+	f.headers.Store(newerRoot, &cltypes.BeaconBlockHeader{Slot: newerBlock.Block.Slot})
+	require.NoError(t, afero.WriteFile(baseFs, getBeaconStateFilename(oldRoot), []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(baseFs, getBeaconStateFilename(newerRoot), []byte{1}, 0o644))
+	require.NoError(t, afero.WriteFile(baseFs, getEnvelopeFilename(oldRoot), []byte{1}, 0o644))
+	f.MarkHeaderAsInvalid(oldRoot)
+	f.MarkPayloadUnavailable(oldRoot)
+
+	pruneDone := make(chan error, 1)
+	go func() { pruneDone <- f.Prune(100) }()
+	select {
+	case <-fs.entered:
+	case <-time.After(time.Second):
+		t.Fatal("prune did not reach envelope removal")
+	}
+	require.False(t, f.IsBlockInvalid(oldRoot))
+	require.False(t, f.IsPayloadUnavailable(oldRoot))
+
+	queryDone := make(chan bool, 1)
+	go func() { queryDone <- f.HasEnvelope(oldRoot) }()
+	lateDumpDone := make(chan error, 1)
+	lateEnvelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&clparams.MainnetBeaconConfig)}
+	go func() { lateDumpDone <- f.DumpEnvelopeOnDisk(oldRoot, lateEnvelope) }()
+	select {
+	case found := <-queryDone:
+		close(fs.release)
+		require.NoError(t, <-pruneDone)
+		require.False(t, found)
+	case <-time.After(50 * time.Millisecond):
+		close(fs.release)
+		require.NoError(t, <-pruneDone)
+		select {
+		case found := <-queryDone:
+			require.False(t, found)
+		case <-time.After(time.Second):
+			t.Fatal("envelope query did not progress after prune completed")
+		}
+	}
+	select {
+	case err := <-lateDumpDone:
+		require.Error(t, err)
+	case <-time.After(time.Second):
+		t.Fatal("late envelope dump did not progress after prune completed")
+	}
+	require.False(t, f.HasEnvelope(oldRoot))
+	require.False(t, f.IsBlockInvalid(oldRoot))
+	require.False(t, f.IsPayloadUnavailable(oldRoot))
+}
+
+func TestAddChainSegmentRejectsSlotBelowPrunedBoundary(t *testing.T) {
+	f := &forkGraphDisk{
+		anchorSlot: 0,
+		children:   make(map[common.Hash]*validatedChildren),
+	}
+	f.lowestAvailableBlock.Store(65)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	block.Block.Slot = 63
+
+	_, status, err := f.AddChainSegment(block, true)
+	require.NoError(t, err)
+	require.Equal(t, BelowAnchor, status)
+	root, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	_, headerFound := f.GetHeader(root)
+	require.False(t, headerFound)
+	require.False(t, f.HasBlockChildAtOrAfter(block.Block.ParentRoot, block.Block.Slot))
+	require.False(t, isBelowPrunedBoundary(64, 65))
+	require.False(t, isBelowPrunedBoundary(^uint64(0), ^uint64(0)))
 }

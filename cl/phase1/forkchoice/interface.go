@@ -46,6 +46,7 @@ type ForkChoiceStorageReader interface {
 	// GetFinalizedExecutionHash returns the EL block hash for finalized/justified checkpoints.
 	GetFinalizedExecutionHash(eth2Root common.Hash) common.Hash
 	GetHead(auxilliaryState *state.CachingBeaconState) (common.Hash, uint64, error)
+	GetHeadNode() (ForkChoiceNode, error)
 	HighestSeen() uint64
 	JustifiedCheckpoint() solid.Checkpoint
 	JustifiedSlot() uint64
@@ -73,9 +74,10 @@ type ForkChoiceStorageReader interface {
 	GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool)
 	// [New in Gloas:EIP7732] GetBlock returns the full block for a given block root.
 	GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool)
+	HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool
 	// [New in Gloas:EIP7732] HasEnvelope checks if a signed execution payload envelope exists.
 	HasEnvelope(blockRoot common.Hash) bool
-	// [New in Gloas:EIP7732] IsPayloadVerified checks whether the execution payload was accepted by the EL.
+	// IsPayloadVerified reports whether the EL has fully validated the payload.
 	IsPayloadVerified(blockRoot common.Hash) bool
 	// [New in Gloas:EIP7732] ReadEnvelopeFromDisk reads a signed execution payload envelope from disk.
 	ReadEnvelopeFromDisk(blockRoot common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
@@ -95,7 +97,7 @@ type ForkChoiceStorageReader interface {
 	ShouldExtendPayload(root common.Hash) bool
 	// [New in Gloas:EIP7732] ShouldBuildOnFull returns whether the proposer should build on
 	// the full payload for the given head node. Used for proposer reorg of unavailable blocks.
-	ShouldBuildOnFull(head ForkChoiceNode) bool
+	ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bool
 
 	GetBalances(blockRoot common.Hash) (solid.Uint64ListSSZ, error)
 	GetInactivitiesScores(blockRoot common.Hash) (solid.Uint64ListSSZ, error)

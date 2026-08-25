@@ -132,10 +132,8 @@ func (f *ForkChoiceStore) payloadTimeliness(root common.Hash, timely bool) bool 
 		return false
 	}
 
-	// If the payload has not been accepted by the execution layer, the payload
-	// is not considered available regardless of the PTC vote.
-	if !f.IsPayloadVerified(root) {
-		return false
+	if !f.isPayloadAvailable(root) {
+		return !timely
 	}
 	votes := voteRaw.([clparams.PtcSize]int8)
 	target := boolToVote(timely)
@@ -157,10 +155,8 @@ func (f *ForkChoiceStore) payloadDataAvailability(root common.Hash, available bo
 		return false
 	}
 
-	// If the payload has not been accepted by the execution layer, the blob data
-	// is not considered available regardless of the PTC vote.
-	if !f.IsPayloadVerified(root) {
-		return false
+	if !f.isPayloadAvailable(root) {
+		return !available
 	}
 	votes := voteRaw.([clparams.PtcSize]int8)
 	target := boolToVote(available)
@@ -289,7 +285,7 @@ func (f *ForkChoiceStore) isPreviousSlotPayloadDecision(node ForkChoiceNode) boo
 // Used by prepare_execution_payload to decide FULL vs EMPTY path.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
-	if !f.IsPayloadVerified(root) {
+	if !f.isPayloadAvailable(root) {
 		return false
 	}
 
@@ -325,15 +321,19 @@ func (f *ForkChoiceStore) ShouldExtendPayload(root common.Hash) bool {
 // for the given head node. Returns false for EMPTY heads. For FULL heads, returns
 // true unless the PTC voted the payload as late or blob data as unavailable.
 // [New in Gloas:EIP7732]
-func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode) bool {
+func (f *ForkChoiceStore) ShouldBuildOnFull(head ForkChoiceNode, slot uint64) bool {
+	header, has := f.forkGraph.GetHeader(head.Root)
+	if !has || header == nil {
+		return false
+	}
+	if header.Slot+1 != slot {
+		return head.PayloadStatus == cltypes.PayloadStatusFull
+	}
 	if head.PayloadStatus == cltypes.PayloadStatusEmpty {
 		return false
 	}
 	if head.PayloadStatus == cltypes.PayloadStatusPending {
 		return false
-	}
-	if !f.isPreviousSlotPayloadDecision(head) {
-		return true
 	}
 	if f.payloadDataAvailability(head.Root, false) {
 		return false
@@ -371,7 +371,7 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 		children := []ForkChoiceNode{
 			{Root: node.Root, PayloadStatus: cltypes.PayloadStatusEmpty},
 		}
-		if f.IsPayloadVerified(node.Root) {
+		if f.isPayloadAvailable(node.Root) {
 			children = append(children, ForkChoiceNode{
 				Root: node.Root, PayloadStatus: cltypes.PayloadStatusFull,
 			})
@@ -400,6 +400,23 @@ func (f *ForkChoiceStore) getNodeChildren(node ForkChoiceNode, blocks map[common
 	return result
 }
 
+func (f *ForkChoiceStore) isPayloadAvailable(root common.Hash) bool {
+	if !f.HasEnvelope(root) {
+		return false
+	}
+	if f.forkGraph.IsBlockInvalid(root) {
+		return false
+	}
+	if f.forkGraph.IsPayloadUnavailable(root) {
+		return false
+	}
+	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
+	if !ok {
+		return f.HasEnvelope(root)
+	}
+	return status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated
+}
+
 // validateParentPayloadPath validates that the block builds on the correct parent payload path.
 // If parent is FULL, the parent must have an execution payload state.
 // If parent is EMPTY, the block's parent_block_hash must match the parent's parent_block_hash.
@@ -420,12 +437,12 @@ func (f *ForkChoiceStore) validateParentPayloadPath(block *cltypes.BeaconBlock) 
 	}
 
 	if f.isParentNodeFull(block) {
-		// Parent is FULL - verify execution payload envelope exists on disk.
+		// Parent is FULL - verify the execution payload is locally available.
 		// Return ErrParentEnvelopePending (not a hard error) when the envelope is
 		// missing.  During forward sync the envelope may not yet be persisted (it
 		// arrives in the same batch or in a later batch), so a hard error would
 		// permanently reject the block and ban the peer.
-		if !f.forkGraph.HasEnvelope(block.ParentRoot) {
+		if !f.isPayloadAvailable(block.ParentRoot) {
 			return ErrParentEnvelopePending
 		}
 	} else {

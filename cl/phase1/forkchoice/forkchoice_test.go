@@ -37,6 +37,37 @@ import (
 	"github.com/erigontech/erigon/common"
 )
 
+type headerOnlyAnchorForkGraph struct {
+	fork_graph.ForkGraph
+	root common.Hash
+	slot uint64
+}
+
+func (g headerOnlyAnchorForkGraph) AnchorRoot() common.Hash { return g.root }
+func (g headerOnlyAnchorForkGraph) AnchorSlot() uint64      { return g.slot }
+func (g headerOnlyAnchorForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if root == g.root {
+		return &cltypes.BeaconBlockHeader{Slot: g.slot}, true
+	}
+	return nil, false
+}
+
+func TestGetHeadNodeCachesHeaderOnlyAnchorFallback(t *testing.T) {
+	anchorRoot := common.HexToHash("0xa1")
+	store := &ForkChoiceStore{
+		forkGraph: headerOnlyAnchorForkGraph{root: anchorRoot, slot: 42},
+		beaconCfg: &clparams.MainnetBeaconConfig,
+	}
+	store.justifiedCheckpoint.Store(solid.Checkpoint{Root: common.HexToHash("0xb2")})
+
+	node, err := store.GetHeadNode()
+	require.NoError(t, err)
+	require.Equal(t, anchorRoot, node.Root)
+	require.Equal(t, cltypes.PayloadStatusPending, node.PayloadStatus)
+	require.Equal(t, anchorRoot, store.headHash)
+	require.Equal(t, uint64(42), store.headSlot)
+}
+
 func TestGetFinalizedExecutionHash(t *testing.T) {
 	cache, err := lru.New[common.Hash, common.Hash](16)
 	require.NoError(t, err)
@@ -408,6 +439,15 @@ func (g *getFinalizedExecutionHashForkGraph) GetBlock(blockRoot common.Hash) (*c
 	return block, block != nil
 }
 
+func (g *getFinalizedExecutionHashForkGraph) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint64) bool {
+	for _, block := range g.blocks {
+		if block != nil && block.Block != nil && block.Block.ParentRoot == blockRoot && block.Block.Slot >= slot {
+			return true
+		}
+	}
+	return false
+}
+
 func (g *getFinalizedExecutionHashForkGraph) GetState(blockRoot common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 	g.getStateMu.Lock()
 	g.getStateRoots = append(g.getStateRoots, blockRoot)
@@ -449,6 +489,21 @@ func (g *getFinalizedExecutionHashForkGraph) GetSyncCommittees(uint64) (*solid.S
 
 func (g *getFinalizedExecutionHashForkGraph) MarkHeaderAsInvalid(common.Hash) {
 	panic("not used")
+}
+
+func (g *getFinalizedExecutionHashForkGraph) IsBlockInvalid(common.Hash) bool {
+	return false
+}
+
+func (g *getFinalizedExecutionHashForkGraph) MarkPayloadUnavailable(common.Hash) {}
+func (g *getFinalizedExecutionHashForkGraph) MarkPayloadAvailable(common.Hash)   {}
+func (g *getFinalizedExecutionHashForkGraph) IsPayloadUnavailable(common.Hash) bool {
+	return false
+}
+func (g *getFinalizedExecutionHashForkGraph) MarkPayloadAccepted(common.Hash, bool) {}
+func (g *getFinalizedExecutionHashForkGraph) ClearPayloadAccepted(common.Hash)      {}
+func (g *getFinalizedExecutionHashForkGraph) PayloadAccepted(common.Hash) (bool, bool) {
+	return false, false
 }
 
 func (g *getFinalizedExecutionHashForkGraph) AnchorSlot() uint64 {
@@ -519,5 +574,5 @@ func (g *getFinalizedExecutionHashForkGraph) ReadEnvelopeFromDisk(common.Hash) (
 }
 
 func (g *getFinalizedExecutionHashForkGraph) HasEnvelope(common.Hash) bool {
-	panic("not used")
+	return false
 }
