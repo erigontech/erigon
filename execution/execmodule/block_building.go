@@ -242,6 +242,17 @@ func (e *ExecModule) SealBoundary(ctx context.Context, params *builder.Parameter
 	return br, nil
 }
 
+// AbandonExtendingFork discards the active pre-executed in-progress block so the next PreExecute re-opens it
+// from a fresh SD (re-running block-start under corrected attrs). See ForkValidator.AbandonExtendingFork and
+// the ExecutionModule interface. Takes the exec semaphore to serialise against PreExecute/assemble.
+func (e *ExecModule) AbandonExtendingFork() {
+	if err := e.semaphore.Acquire(context.Background(), 1); err != nil {
+		return
+	}
+	defer e.semaphore.Release(1)
+	e.forkValidator.AbandonExtendingFork()
+}
+
 // preconfirmAttrsMatch reports whether the accumulated in-progress header's proposer attributes equal the
 // FCU params, so the sealed header (in-progress header + computed output) is consistent with the block
 // the CL asked to assemble.

@@ -193,6 +193,13 @@ type ExecutionModule interface {
 	// re-sealing. Runs on every node at the marker. See execmodule.SealBoundary.
 	SealBoundary(ctx context.Context, params *builder.Parameters) (*types.BlockWithReceipts, error)
 
+	// AbandonExtendingFork discards the ACTIVE pre-executed in-progress block (closes+clears the extending
+	// fork SD; parked predecessor gens are untouched) so the next PreExecute re-opens it from a fresh SD.
+	// The DAG producer uses it to correct a PROVISIONALLY eager-opened empty successor whose placeholder
+	// block-start attrs (ParentBeaconBlockRoot/PrevRandao/FeeRecipient) must be re-run under the real CL
+	// attrs — a flashblock re-run alone would REUSE the SD and skip block-start. See execmodule.AbandonExtendingFork.
+	AbandonExtendingFork()
+
 	// --- Header / body queries --------------------------------------------
 
 	// CurrentHeader returns the canonical head block header.

@@ -199,6 +199,29 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.extendingForkHeadHash = common.Hash{}
 }
 
+// AbandonExtendingFork closes and clears the ACTIVE extending-fork SD without touching the parked pre-exec
+// generations (which are prior blocks' read-through parents). It is used by the DAG producer to DISCARD a
+// PROVISIONALLY pre-executed in-progress block so the next open re-executes it from a fresh SD: the marker-
+// driven atomic open eager-opens block N+1 BEFORE its CL attributes are known (stamping placeholder attrs +
+// a placeholder block-start), and when N+1 stays empty until its own marker those attrs must be corrected.
+// A flashblock re-run alone cannot fix it — CheckFlashblockUpdate would REUSE the maintained SD and skip the
+// block-start system tx (SetPreExecStart), leaving the old ParentBeaconBlockRoot/PrevRandao state baked in.
+// Abandoning the SD forces PreExecute down its fresh-SD path, which re-runs block-start under the real attrs
+// and re-parents to the still-parked predecessor. Off the FCU path; safe because the abandoned block was never
+// canonicalised. Caller must NOT hold fv.lock.
+func (fv *ForkValidator) AbandonExtendingFork() {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	if fv.sharedDom != nil {
+		fv.sharedDom.Close()
+	}
+	fv.sharedDom = nil
+	fv.extendingForkNotifications = nil
+	fv.extendingForkHeadHash = common.Hash{}
+	fv.extendingForkNumber = 0
+	fv.flashblockTxHashes = nil
+}
+
 // MergeExtendingFork merges the shared domains of the current extending fork into the current shared domains if fcu chooses its head hash as the fork choice.
 func (fv *ForkValidator) MergeExtendingFork(ctx context.Context, tx kv.TemporalTx, sd *execctx.SharedDomains, target *Accumulation) error {
 	fv.lock.Lock()
