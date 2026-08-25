@@ -209,7 +209,9 @@ type commitmentCalculator struct {
 	processedWake    chan struct{}
 }
 
-// markProcessed publishes that blockNum's blockResult is fully handled.
+// markProcessed publishes that blockNum's blockResult is fully handled. Only
+// the COMMITMENT_AFTER_EXEC barrier reads this, so the default path never pays
+// for the lock and the replacement channel.
 func (cc *commitmentCalculator) markProcessed(blockNum uint64) {
 	cc.processedMu.Lock()
 	defer cc.processedMu.Unlock()
@@ -520,7 +522,9 @@ func (cc *commitmentCalculator) handleMessage(ctx context.Context, msg applyResu
 		delete(cc.computedAhead, blockNum)
 		delete(cc.balRoots, blockNum)
 		cc.maybeComputeAhead(ctx, blockNum+1)
-		cc.markProcessed(blockNum)
+		if dbg.CommitmentAfterExec {
+			cc.markProcessed(blockNum)
+		}
 
 	case *commitComputeRequest:
 		// Explicit compute signal from the apply loop at batch boundary.
