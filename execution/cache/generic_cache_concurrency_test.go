@@ -18,6 +18,7 @@ package cache
 
 import (
 	"encoding/binary"
+	"math/rand"
 	"sync"
 	"sync/atomic"
 	"testing"
@@ -127,17 +128,15 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 }
 
 // A conditional put must keep deferring to a live entry across a grow. The
-// vulnerable writer class: a put of a brand-new key that lands in the
-// retiring generation after the copy snapshotted Keys() is lost on the swap,
-// and a follow-up PutIfAbsent finds the key absent and installs its stale
-// value as live. With the fence the put either lands pre-fence (and is
-// migrated — Keys() is taken with every stripe held) or lands in the new
-// generation; either way the conditional put defers.
+// vulnerable writer class: a put of a brand-new key that lands in a shard
+// being rebuilt one step larger must survive, or a follow-up PutIfAbsent finds
+// the key absent and installs its stale value as live. The rebuild runs under
+// the shard's own lock, so a concurrent Add for that shard waits and cannot be
+// dropped from the copy.
 //
-// A writer hammers fresh keys while the grow swaps generations; every key
-// that straddled the swap is then probed with a stale conditional put. The
-// grow is forced by lowering curCap over a lightly-populated cache, so
-// capacity eviction cannot explain a missing key.
+// A writer hammers fresh keys while the shards grow under it; each key is then
+// probed with a stale conditional put. The cache is far below its ceiling
+// throughout, so capacity eviction cannot explain a missing key.
 func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 	fresh := []byte("fresh-value")
 	stale := []byte("stale-value")
@@ -148,14 +147,25 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 			binary.BigEndian.PutUint64(key, uint64(1+i))
 			c.Put(key, []byte{1}, 1)
 		}
-		before := c.data.Load()
-		c.curCap.Store(uint32(c.Len()))
+
+		gen := c.data.Load()
+		grewAt := func() int {
+			n := 0
+			for i := range gen.shards {
+				gen.mus[i].Lock()
+				if gen.curCap[i] > gen.startCapPerShard {
+					n++
+				}
+				gen.mus[i].Unlock()
+			}
+			return n
+		}
 
 		var candidates [][]byte
 		stop := make(chan struct{})
 		var wg sync.WaitGroup
 		wg.Go(func() {
-			for j := 0; ; j++ {
+			for j := range 1 << 20 {
 				select {
 				case <-stop:
 					return
@@ -166,16 +176,16 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 				binary.BigEndian.PutUint64(k[1:], uint64(j))
 				c.Put(k, fresh, 10)
 				candidates = append(candidates, k)
-				if c.data.Load() != before {
-					return
-				}
 			}
 		})
 
-		binary.BigEndian.PutUint64(key, 0)
-		c.Put(key, []byte{1}, 1) // insert at the lowered cap → triggers the grow
+		for i := range 4096 {
+			binary.BigEndian.PutUint64(key, uint64(1_000_000+i))
+			c.Put(key, []byte{1}, 1) // fills shards → each grows a step
+		}
 		close(stop)
 		wg.Wait()
+		require.Positive(t, grewAt(), "round %d: no shard grew, the race under test never happened", round)
 
 		for _, k := range candidates {
 			c.PutIfAbsent(k, stale, 5)
@@ -222,54 +232,45 @@ func TestGenericCache_ModeNoOpAdmissionAtomicWithUpdate(t *testing.T) {
 	}
 }
 
-// A grow must migrate every entry. Left to pick its own geometry per
-// generation, freelru chooses more, smaller shards as capacity rises, and a
-// new shard that overfills during the copy silently evicts — keys clustered
-// on the shard-selection bits vanish across a "grow", and a follow-up
-// conditional put can install a stale value in the hole. Seeding writes the
-// clustered keys after the pad so they are the newest in their shard and
-// cannot be seeding-eviction victims; only the migration can lose them.
+// A shard grow must migrate every entry of that shard. The rebuild copies
+// Keys() oldest-first into a strictly larger table, so nothing can be evicted
+// on the way; shard count is fixed for the life of the cache, so a grow can
+// never re-shard and drop keys clustered on the selection bits.
 func TestGenericCache_GrowMigrationLossless(t *testing.T) {
 	c := NewGenericCacheWithAvg[[]byte](4*datasize.MB, 256, func(v []byte) int { return len(v) }, ModeEvictLRU)
 	defer c.Close()
+	gen := c.data.Load()
 
-	// Keys sharing hash bits 16-23 land in one shard of any generation with up
-	// to 256 shards.
-	target := (maphash.Hash([]byte("cluster-seed")) >> 16) & 255
-	var clustered [][]byte
-	for i := 0; len(clustered) < 24; i++ {
+	const target = 3
+	shardCap := func() uint32 {
+		gen.mus[target].Lock()
+		defer gen.mus[target].Unlock()
+		return gen.curCap[target]
+	}
+
+	// Keys that select the target shard; one more than it can hold, so the last
+	// insert is what forces the grow.
+	var keys [][]byte
+	want := int(shardCap()) + 1
+	for i := 0; len(keys) < want; i++ {
 		k := make([]byte, 8)
 		binary.BigEndian.PutUint64(k, uint64(i))
-		if (maphash.Hash(k)>>16)&255 == target {
-			clustered = append(clustered, k)
+		if gen.idx(maphash.Hash(k)) == target {
+			keys = append(keys, k)
 		}
 	}
-	pad := make([]byte, 9)
-	for j := 0; c.Len() < genericCacheStartCapacity-len(clustered); j++ {
-		binary.BigEndian.PutUint64(pad[1:], uint64(j))
-		c.Put(pad, []byte{1}, 1)
-	}
-	for _, k := range clustered {
+
+	before := shardCap()
+	for _, k := range keys {
 		c.Put(k, []byte("fresh"), 10)
 	}
-	for j := 1 << 20; c.Len() < genericCacheStartCapacity; j++ {
-		binary.BigEndian.PutUint64(pad[1:], uint64(j))
-		c.Put(pad, []byte{1}, 1)
-		if j > 1<<21 {
-			t.Fatal("seeding could not fill the cache to the grow threshold")
-		}
-	}
-	before := c.data.Load()
-	c.Put([]byte("grow-trigger"), []byte{1}, 1)
-	require.NotEqual(t, before, c.data.Load(), "grow did not happen")
+	require.Greater(t, shardCap(), before, "shard did not grow")
 
-	lost := 0
-	for _, k := range clustered {
-		if _, ok := c.Get(k); !ok {
-			lost++
-		}
+	for i, k := range keys {
+		v, ok := c.Get(k)
+		require.True(t, ok, "key %d lost in the shard migration", i)
+		require.Equal(t, []byte("fresh"), v)
 	}
-	require.Zero(t, lost, "grow migration evicted clustered entries: per-shard capacity shrank across the swap")
 }
 
 // A capacity eviction is a size-subtracting writer the put stripes cannot
@@ -416,4 +417,62 @@ func TestGenericCache_StatsResetAtomicWithDelete_NoPhantomEvictions(t *testing.T
 	wg.Wait()
 	total += c.evictions.Swap(0)
 	require.Zero(t, total, "intentional removals surfaced in the evictions metric")
+}
+
+// Steady-state throughput with many more goroutines than cores. Accesses are a
+// hot/cold mix -- a hot set about the size of the ceiling plus a long cold tail
+// -- and every miss fills read-through, so eviction runs continuously and the
+// measured hit rate lands near what the storage domain shows in production.
+// Both the hit and the miss path are therefore exercised in realistic
+// proportion; a benchmark that only hits, or only misses, says nothing here.
+func BenchmarkGenericCacheParallelMixed(b *testing.B) {
+	const (
+		hotKeys  = 1 << 20
+		coldKeys = 10 << 20
+		samples  = 8 << 20
+		hotPct   = 79
+	)
+	rnd := rand.New(rand.NewSource(1))
+	keys := make([]uint64, samples)
+	for i := range keys {
+		if rnd.Intn(100) < hotPct {
+			keys[i] = uint64(rnd.Intn(hotKeys)) * 0x9E3779B97F4A7C15
+		} else {
+			keys[i] = uint64(hotKeys+rnd.Intn(coldKeys)) * 0x9E3779B97F4A7C15
+		}
+	}
+
+	c := NewGenericCacheWithAvg[[]byte](128*datasize.MB, 88,
+		func(v []byte) int { return len(v) }, ModeEvictLRU)
+	defer c.Close()
+	val := make([]byte, 32)
+
+	k := make([]byte, 8)
+	for _, key := range keys {
+		binary.BigEndian.PutUint64(k, key)
+		if _, ok := c.Get(k); !ok {
+			c.Put(k, val, 1)
+		}
+	}
+
+	hits0, misses0 := c.hits.Load(), c.misses.Load()
+	var stream atomic.Uint64
+	b.SetParallelism(64)
+	b.ResetTimer()
+	b.RunParallel(func(pb *testing.PB) {
+		// Each goroutine enters the shared stream at its own offset, so shard
+		// contention comes from hashing rather than from a shared cursor.
+		i := int(stream.Add(1)) * 7919
+		k := make([]byte, 8)
+		for pb.Next() {
+			binary.BigEndian.PutUint64(k, keys[i&(samples-1)])
+			i++
+			if _, ok := c.Get(k); !ok {
+				c.Put(k, val, 1)
+			}
+		}
+	})
+	b.StopTimer()
+	hits, misses := c.hits.Load()-hits0, c.misses.Load()-misses0
+	b.ReportMetric(100*float64(hits)/float64(hits+misses), "hit%")
 }
