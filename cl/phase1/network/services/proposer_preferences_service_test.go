@@ -11,6 +11,7 @@ import (
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	synced_data_mock "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -261,6 +262,23 @@ func TestProposerPreferencesServiceAcceptsEpochRolloverDisparityEdge(t *testing.
 	stored, ok := epbsPool.GetPreference(96, testDependentRoot)
 	require.True(t, ok)
 	require.Same(t, msg, stored)
+}
+
+func TestProposerPreferencesServiceEmitsEvent(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, _, _, _ := setupProposerPreferencesService(t, ctrl)
+	emitter := beaconevents.NewEventEmitter()
+	service.emitters = emitter
+	events := make(chan *beaconevents.EventStream, 1)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	msg := newTestSignedProposerPreferences(96, 42)
+	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(gloasMaximumClockDisparity) }
+
+	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
+	event := <-events
+	require.Equal(t, beaconevents.OpProposerPreferences, event.Event)
+	require.Equal(t, &beaconevents.VersionedSignedProposerPreferences{Version: "gloas", Data: msg}, event.Data)
 }
 
 func TestProposerPreferencesServiceLookaheadClockDisparityBoundary(t *testing.T) {

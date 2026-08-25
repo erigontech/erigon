@@ -24,9 +24,14 @@ import (
 	"fmt"
 	"io"
 	"math"
+	"net"
 	"net/http"
 	"net/url"
+	"strconv"
+	"strings"
+	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 
@@ -332,6 +337,148 @@ func TestSubmitBlindedBlocks(t *testing.T) {
 		require.Nil(t, block)
 		require.Nil(t, bundle)
 	})
+}
+
+func TestRequestExecutionPayloadBid(t *testing.T) {
+	auth := validBuilderRequestAuth()
+	proposer := common.Bytes48{1}
+	parentHash := common.Hash{2}
+	parentRoot := common.Hash{3}
+	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		require.Equal(t, "/eth/v1/builder/execution_payload_bid/12/"+parentHash.Hex()+"/"+parentRoot.Hex()+"/"+proposer.Hex(), r.URL.Path)
+		require.Equal(t, "gloas", r.Header.Get("Eth-Consensus-Version"))
+		require.Equal(t, "750", r.Header.Get("X-Timeout-Ms"))
+		date, err := strconv.ParseInt(r.Header.Get("Date-Milliseconds"), 10, 64)
+		require.NoError(t, err)
+		require.NotZero(t, date)
+		var got cltypes.SignedBuilderRequestAuth
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		require.Equal(t, auth, &got)
+		return builderTestResponse(r, http.StatusOK, `{"version":"gloas","data":{"message":{"blob_kzg_commitments":[]},"signature":"0x`+strings.Repeat("00", 96)+`"}}`, http.Header{"Eth-Consensus-Version": {"gloas"}}), nil
+	}))
+	bid, err := client.RequestExecutionPayloadBid(context.Background(), "https://builder.example", 12, parentHash, parentRoot, proposer, auth, 750*time.Millisecond)
+	require.NoError(t, err)
+	require.NotNil(t, bid)
+}
+
+func TestRequestExecutionPayloadBidNoContent(t *testing.T) {
+	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		return builderTestResponse(r, http.StatusNoContent, "", nil), nil
+	}))
+
+	bid, err := client.RequestExecutionPayloadBid(context.Background(), "https://builder.example", 1, common.Hash{}, common.Hash{}, common.Bytes48{}, validBuilderRequestAuth(), time.Second)
+	require.NoError(t, err)
+	require.Nil(t, bid)
+}
+
+func TestRequestExecutionPayloadBidEnforcesTimeout(t *testing.T) {
+	client := publicBuilderTestClient(mockRoundTripper(func(req *http.Request) (*http.Response, error) {
+		<-req.Context().Done()
+		return nil, req.Context().Err()
+	}))
+	started := time.Now()
+	bid, err := client.RequestExecutionPayloadBid(context.Background(), "https://builder.example", 1, common.Hash{}, common.Hash{}, common.Bytes48{}, validBuilderRequestAuth(), 10*time.Millisecond)
+	require.ErrorIs(t, err, context.DeadlineExceeded)
+	require.Nil(t, bid)
+	require.Less(t, time.Since(started), time.Second)
+}
+
+func TestBuilderTransportRejectsUnsafeTargets(t *testing.T) {
+	for _, rawURL := range []string{"http://127.0.0.1:18550", "http://[::1]:18550", "http://localhost:18550"} {
+		client := &builderClient{httpClient: &http.Client{Transport: mockRoundTripper(func(*http.Request) (*http.Response, error) {
+			t.Fatal("unsafe target reached transport")
+			return nil, nil
+		})}}
+		_, err := client.RequestExecutionPayloadBid(context.Background(), rawURL, 1, common.Hash{}, common.Hash{}, common.Bytes48{}, validBuilderRequestAuth(), time.Second)
+		require.Error(t, err, rawURL)
+	}
+
+	client := &builderClient{
+		httpClient: &http.Client{Transport: mockRoundTripper(func(*http.Request) (*http.Response, error) {
+			t.Fatal("private resolved address reached transport")
+			return nil, nil
+		})},
+		lookupIP: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("10.0.0.1")}}, nil
+		},
+	}
+	_, err := client.RequestExecutionPayloadBid(context.Background(), "https://builder.example", 1, common.Hash{}, common.Hash{}, common.Bytes48{}, validBuilderRequestAuth(), time.Second)
+	require.Error(t, err)
+}
+
+func TestRequestExecutionPayloadBidBoundsResponseAndRefusesRedirect(t *testing.T) {
+	t.Run("bounded response", func(t *testing.T) {
+		client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+			return builderTestResponse(r, http.StatusOK, string(make([]byte, maxBuilderResponseBodySize+1)), nil), nil
+		}))
+		bid, err := client.RequestExecutionPayloadBid(context.Background(), "https://builder.example", 1, common.Hash{}, common.Hash{}, common.Bytes48{}, validBuilderRequestAuth(), time.Second)
+		require.Error(t, err)
+		require.Nil(t, bid)
+	})
+
+	t.Run("redirect", func(t *testing.T) {
+		var redirected atomic.Bool
+		client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+			if r.URL.Host == "redirected.example" {
+				redirected.Store(true)
+			}
+			return builderTestResponse(r, http.StatusTemporaryRedirect, "", http.Header{"Location": {"https://redirected.example"}}), nil
+		}))
+		bid, err := client.RequestExecutionPayloadBid(context.Background(), "https://builder.example", 1, common.Hash{}, common.Hash{}, common.Bytes48{}, validBuilderRequestAuth(), time.Second)
+		require.Error(t, err)
+		require.Nil(t, bid)
+		require.False(t, redirected.Load())
+	})
+}
+
+func TestSubmitBuilderPreferences(t *testing.T) {
+	auth := validBuilderRequestAuth()
+	proposer := common.Bytes48{4}
+	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{MaxExecutionPayment: 9}, Auth: auth}
+	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		require.Equal(t, "/eth/v1/builder/builder_preferences/"+proposer.Hex(), r.URL.Path)
+		require.Equal(t, "gloas", r.Header.Get("Eth-Consensus-Version"))
+		var got cltypes.BuilderPreferencesRequest
+		require.NoError(t, json.NewDecoder(r.Body).Decode(&got))
+		require.Equal(t, request, &got)
+		return builderTestResponse(r, http.StatusAccepted, "", nil), nil
+	}))
+	require.NoError(t, client.SubmitBuilderPreferences(context.Background(), "https://builder.example", proposer, request))
+}
+
+func TestSubmitSignedBeaconBlock(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		require.Equal(t, "/eth/v1/builder/beacon_blocks", r.URL.Path)
+		require.Equal(t, "gloas", r.Header.Get("Eth-Consensus-Version"))
+		body, err := io.ReadAll(r.Body)
+		require.NoError(t, err)
+		expected, err := json.Marshal(block)
+		require.NoError(t, err)
+		require.JSONEq(t, string(expected), string(body))
+		return builderTestResponse(r, http.StatusAccepted, "", nil), nil
+	}))
+	require.NoError(t, client.SubmitSignedBeaconBlock(context.Background(), "https://builder.example", block))
+}
+
+func validBuilderRequestAuth() *cltypes.SignedBuilderRequestAuth {
+	return &cltypes.SignedBuilderRequestAuth{
+		Message: &cltypes.BuilderRequestAuth{Data: []byte("builder-auth"), Slot: 12},
+	}
+}
+
+func publicBuilderTestClient(transport http.RoundTripper) *builderClient {
+	return &builderClient{
+		httpClient: &http.Client{Transport: transport},
+		lookupIP: func(context.Context, string) ([]net.IPAddr, error) {
+			return []net.IPAddr{{IP: net.ParseIP("93.184.216.34")}}, nil
+		},
+		beaconConfig: mockBeaconConfig,
+	}
+}
+
+func builderTestResponse(request *http.Request, status int, body string, header http.Header) *http.Response {
+	return &http.Response{StatusCode: status, Body: io.NopCloser(strings.NewReader(body)), Header: header, Request: request}
 }
 
 func TestSubmitBlindedBlocksFulu(t *testing.T) {

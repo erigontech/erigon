@@ -499,7 +499,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	attesterSlashingService := services.NewAttesterSlashingService(forkChoice)
 	executionPayloadService := services.NewExecutionPayloadService(ctx, forkChoice, beaconConfig, emitters)
 	payloadAttestationService := services.NewPayloadAttestationService(ctx, forkChoice, ethClock, networkConfig, emitters)
-	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool)
+	proposerPreferencesService := services.NewProposerPreferencesService(syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	executionPayloadBidService := services.NewExecutionPayloadBidService(ctx, syncedDataManager, forkChoice, ethClock, beaconConfig, epbsPool, emitters)
 	registry.RegisterGossipServices(
 		gossipManager,

@@ -25,11 +25,13 @@ import (
 	"net/http/httptest"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/go-chi/chi/v5"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
+	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -46,6 +48,7 @@ func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[null]`))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
@@ -165,6 +168,82 @@ func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "invalid execution payload")
 }
 
+func TestPostExecutionPayloadEnvelopesRequiresBlobDataHeader(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "Eth-Blob-Data-Included")
+}
+
+func TestPostExecutionPayloadEnvelopesRejectsMalformedContents(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", strings.NewReader(`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Blob-Data-Included", "true")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopesRejectsTrailingJSON(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", strings.NewReader(string(body)+`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopesEmitsImportedAndAvailableEvents(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.emitters = beaconevents.NewEventEmitter()
+	events := make(chan *beaconevents.EventStream, 2)
+	subscription := handler.emitters.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+
+	root := common.Hash{1}
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	envelope.Message.BeaconBlockRoot = root
+	envelope.Message.BuilderIndex = 3
+	fcu.Blocks = map[common.Hash]*cltypes.SignedBeaconBlock{
+		root: {Block: &cltypes.BeaconBlock{Slot: 12, Body: cltypes.NewBeaconBody(handler.beaconChainCfg, clparams.GloasVersion)}},
+	}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes", strings.NewReader(string(body)))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Blob-Data-Included", "false")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, beaconevents.OpExecutionPayload, (<-events).Event)
+	select {
+	case event := <-events:
+		require.Equal(t, beaconevents.OpExecutionPayloadAvailable, event.Event)
+	case <-time.After(time.Second):
+		t.Fatal("execution_payload_available event was not emitted")
+	}
+}
+
 func TestPostPtcDutiesDoesNotCapValidatorCount(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
@@ -196,6 +275,22 @@ func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {
 	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadBidsRejectsTrailingJSON(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(12, 3, 1000)}
+	body, err := json.Marshal(bid)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bids", strings.NewReader(string(body)+`{}`))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+
+	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	require.Contains(t, recorder.Body.String(), "trailing data")
 }
 
 func TestPostExecutionPayloadBidAcceptsQueuedBid(t *testing.T) {
@@ -540,6 +635,36 @@ func TestGetValidatorExecutionPayloadEnvelopesBySlot(t *testing.T) {
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
 	require.Contains(t, recorder.Body.String(), `"builder_index":"7"`)
+}
+
+func TestGetValidatorExecutionPayloadEnvelopeByBlockRoot(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	slot := handler.ethClock.GetCurrentSlot()
+	root := common.HexToHash("0x1234")
+	envelope := cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)
+	envelope.BeaconBlockRoot = root
+	handler.selfBuildEnvelopes.Add(slot, envelope)
+
+	tests := []struct {
+		name string
+		slot uint64
+		root common.Hash
+		want int
+	}{
+		{name: "matching current slot and root", slot: slot, root: root, want: http.StatusOK},
+		{name: "wrong root", slot: slot, root: common.HexToHash("0x5678"), want: http.StatusNotFound},
+		{name: "old slot", slot: slot - 1, root: root, want: http.StatusNotFound},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet,
+				fmt.Sprintf("/eth/v1/validator/execution_payload_envelopes/%d/%s", tt.slot, tt.root), http.NoBody)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			require.Equal(t, tt.want, recorder.Code, recorder.Body.String())
+		})
+	}
 }
 
 func newTestExecutionPayloadBid(slot, builderIndex, value uint64) *cltypes.ExecutionPayloadBid {

@@ -28,6 +28,9 @@ const (
 	OpPayloadAttestationMessage EventTopic = "payload_attestation_message" // [New in Gloas:EIP7732]
 	OpExecutionPayloadBid       EventTopic = "execution_payload_bid"       // [New in Gloas:EIP7732]
 	OpExecutionPayloadAvailable EventTopic = "execution_payload_available" // [New in Gloas:EIP7732]
+	OpExecutionPayload          EventTopic = "execution_payload"
+	OpExecutionPayloadGossip    EventTopic = "execution_payload_gossip"
+	OpProposerPreferences       EventTopic = "proposer_preferences"
 )
 
 type (
@@ -73,6 +76,7 @@ func NewDataColumnSidecarData(sidecar *cltypes.DataColumnSidecar) *DataColumnSid
 // State event topics
 const (
 	StateHead                        EventTopic = "head"
+	StateHeadV2                      EventTopic = "head_v2"
 	StateBlock                       EventTopic = "block"
 	StateBlockGossip                 EventTopic = "block_gossip"
 	StateFinalizedCheckpoint         EventTopic = "finalized_checkpoint"
@@ -80,6 +84,7 @@ const (
 	StateLightClientFinalityUpdate   EventTopic = "light_client_finality_update"
 	StateLightClientOptimisticUpdate EventTopic = "light_client_optimistic_update"
 	StatePayloadAttributes           EventTopic = "payload_attributes"
+	StateFastConfirmation            EventTopic = "fast_confirmation"
 )
 
 // State event data types
@@ -91,6 +96,55 @@ type HeadData struct {
 	PreviousDutyDependentRoot common.Hash `json:"previous_duty_dependent_root"`
 	CurrentDutyDependentRoot  common.Hash `json:"current_duty_dependent_root"`
 	ExecutionOptimistic       bool        `json:"execution_optimistic"`
+}
+
+type HeadV2Data struct {
+	Version string        `json:"version"`
+	Data    HeadV2Content `json:"data"`
+}
+
+type HeadV2Content struct {
+	Slot                      uint64      `json:"slot,string"`
+	Block                     common.Hash `json:"block"`
+	State                     common.Hash `json:"state"`
+	PayloadStatus             string      `json:"payload_status"`
+	EpochTransition           bool        `json:"epoch_transition"`
+	CurrentEpochDependentRoot common.Hash `json:"current_epoch_dependent_root"`
+	NextEpochDependentRoot    common.Hash `json:"next_epoch_dependent_root"`
+	ExecutionOptimistic       bool        `json:"execution_optimistic"`
+}
+
+type ExecutionPayloadData struct {
+	Slot                uint64      `json:"slot,string"`
+	BuilderIndex        uint64      `json:"builder_index,string"`
+	BlockHash           common.Hash `json:"block_hash"`
+	BlockRoot           common.Hash `json:"block_root"`
+	ExecutionOptimistic bool        `json:"execution_optimistic"`
+}
+
+type ExecutionPayloadGossipData struct {
+	Slot         uint64      `json:"slot,string"`
+	BuilderIndex uint64      `json:"builder_index,string"`
+	BlockHash    common.Hash `json:"block_hash"`
+	BlockRoot    common.Hash `json:"block_root"`
+}
+
+type VersionedSignedProposerPreferences struct {
+	Version string                             `json:"version"`
+	Data    *cltypes.SignedProposerPreferences `json:"data"`
+}
+
+func PayloadStatusName(status cltypes.PayloadStatus) string {
+	switch status {
+	case cltypes.PayloadStatusEmpty:
+		return "empty"
+	case cltypes.PayloadStatusFull:
+		return "full"
+	case cltypes.PayloadStatusPending:
+		return "pending"
+	default:
+		return "unknown"
+	}
 }
 
 type BlockData struct {

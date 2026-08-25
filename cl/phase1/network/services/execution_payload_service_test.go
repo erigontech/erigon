@@ -29,6 +29,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/common"
@@ -96,6 +97,45 @@ func TestExecutionPayloadServiceBlockNotFound(t *testing.T) {
 	// Note: OnExecutionPayload mock returns nil by default
 	err = service.ProcessMessage(context.Background(), nil, envelope)
 	require.NoError(t, err)
+}
+
+func TestExecutionPayloadServiceEmitsGossipAndImportedEvents(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	events := make(chan *beaconevents.EventStream, 3)
+	subscription := emitter.Operation().Subscribe(events)
+	defer subscription.Unsubscribe()
+	stateEvents := make(chan *beaconevents.EventStream, 1)
+	stateSubscription := emitter.State().Subscribe(stateEvents)
+	defer stateSubscription.Unsubscribe()
+
+	blockRoot := common.Hash{1}
+	stateRoot := common.Hash{2}
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100, StateRoot: stateRoot}}
+	headState := state.New(cfg)
+	headState.SetVersion(clparams.GloasVersion)
+	headState.SetSlot(100)
+	headState.SetBlockRootAt(63, common.Hash{3})
+	headState.SetBlockRootAt(95, common.Hash{4})
+	forkchoiceMock.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		require.Equal(t, blockRoot, root)
+		require.True(t, alwaysCopy)
+		return headState, nil
+	}
+	forkchoiceMock.HeadVal = blockRoot
+	forkchoiceMock.HeadSlotVal = 100
+	envelope := newTestSignedEnvelope(100, blockRoot, 7)
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, envelope))
+
+	require.Equal(t, beaconevents.OpExecutionPayloadGossip, (<-events).Event)
+	require.Equal(t, beaconevents.OpExecutionPayload, (<-events).Event)
+	require.Equal(t, beaconevents.OpExecutionPayloadAvailable, (<-events).Event)
+	headEvent := <-stateEvents
+	require.Equal(t, beaconevents.StateHeadV2, headEvent.Event)
+	require.Equal(t, "full", headEvent.Data.(*beaconevents.HeadV2Data).Data.PayloadStatus)
+	require.Equal(t, blockRoot, headEvent.Data.(*beaconevents.HeadV2Data).Data.Block)
 }
 
 func TestExecutionPayloadServiceAlreadySeen(t *testing.T) {

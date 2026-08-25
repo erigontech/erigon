@@ -44,6 +44,9 @@ var validTopics = map[event.EventTopic]struct{}{
 	event.OpPayloadAttestationMessage: {},
 	event.OpExecutionPayloadBid:       {},
 	event.OpExecutionPayloadAvailable: {},
+	event.OpExecutionPayload:          {},
+	event.OpExecutionPayloadGossip:    {},
+	event.OpProposerPreferences:       {},
 	// state events
 	event.StateBlock:                       {},
 	event.StateBlockGossip:                 {},
@@ -51,8 +54,10 @@ var validTopics = map[event.EventTopic]struct{}{
 	event.StateLightClientFinalityUpdate:   {},
 	event.StateFinalizedCheckpoint:         {},
 	event.StateHead:                        {},
+	event.StateHeadV2:                      {},
 	event.StateLightClientOptimisticUpdate: {},
 	event.StatePayloadAttributes:           {},
+	event.StateFastConfirmation:            {},
 }
 
 func (a *ApiHandler) EventSourceGetV1Events(w http.ResponseWriter, r *http.Request) {
