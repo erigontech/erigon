@@ -113,7 +113,7 @@ func (n *Notifications) BuildSyncingReply(tx kv.Getter, frozenBlocks uint64) (*r
 			// position below the one it already reached.
 			ratio := float64(snap.done) / float64(snap.total)
 			reply.CurrentBlock = max(currentBlock, uint64(ratio*float64(snap.targetBlock)))
-			reply.LastNewBlockSeen = max(snap.targetBlock, highestBlock)
+			reply.LastNewBlockSeen = max(reply.CurrentBlock, snap.targetBlock, highestBlock)
 			return reply, nil
 		}
 	}

@@ -299,6 +299,16 @@ func TestBuildSyncingReplySnapshotDownloadKeepsCommittedProgress(t *testing.T) {
 	require.Equal(t, uint64(5_000_000), reply.CurrentBlock)
 }
 
+// When committed progress already exceeds the download target, the floor lands
+// on CurrentBlock but the highest block must follow it: reporting a highest
+// block below the current one breaks the sync-reply invariant.
+func TestBuildSyncingReplySnapshotDownloadCommittedProgressAboveTarget(t *testing.T) {
+	reply := buildReplyWithDownloadForTest(t, 250, 1000, 20_000_000, 25_000_000)
+	require.True(t, reply.Syncing)
+	require.Equal(t, uint64(25_000_000), reply.CurrentBlock)
+	require.GreaterOrEqual(t, reply.LastNewBlockSeen, reply.CurrentBlock)
+}
+
 // Execution progress reaching the commitment block means the handoff is over for
 // this reader, so the reply switches back to the stage shape. The state itself
 // stays until its owner drops it: this tx may be ahead of the committed view.
