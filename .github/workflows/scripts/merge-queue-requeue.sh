@@ -179,12 +179,16 @@ post_comment() {
     printf 'DRY-RUN: would comment:\n%s\n' "$1"
     return 0
   fi
-  gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" -f body="$1" >/dev/null \
-    || echo "::warning::Could not comment on PR #${PR_NUMBER}"
+  gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments" -f body="$1" >/dev/null
+}
+
+ledger_error() {
+  echo "::error::Could not read the re-queue ledger for PR #${PR_NUMBER}; not re-queuing."
+  exit 1
 }
 
 # The marker comments double as the rate-limit ledger: at most MAX_REQUEUES
-# automatic re-queues per rolling 24 h, so a systematically broken runner pool
+# automatic attempts per rolling 24 h, so a systematically broken runner pool
 # cannot keep a PR looping through the queue.
 marker='<!-- merge-queue-auto-requeue -->'
 cap_marker='<!-- merge-queue-auto-requeue-cap -->'
@@ -193,32 +197,53 @@ max=${MAX_REQUEUES:-3}
 if [ -n "${MQ_NO_FETCH:-}" ]; then
   comments="${MQ_COMMENTS_JSON:-[]}"
 else
-  comments=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
-    --paginate --jq '.[] | {body, created_at}' | jq -s '.') || comments="[]"
+  if ! comments=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
+    --paginate --jq '.[] | {body, created_at}' | jq -s '.'); then
+    comments=""
+  fi
+fi
+if ! jq -e 'type == "array"' <<<"$comments" >/dev/null 2>&1; then
+  ledger_error
 fi
 recent_count() {
   jq --argjson now "$now" --arg m "$1" \
     '[.[] | select(.body | contains($m)) | select((.created_at | fromdateiso8601) > ($now - 86400))] | length' \
-    <<<"$comments" 2>/dev/null || echo 0
+    <<<"$comments" 2>/dev/null
 }
-recent=$(recent_count "$marker")
+if ! recent=$(recent_count "$marker"); then
+  ledger_error
+fi
 if [ "$recent" -ge "$max" ]; then
   echo "::warning::Automatic re-queue limit reached (${recent}/${max} in 24 h) for PR #${PR_NUMBER}; leaving it out of the queue."
-  if [ "$(recent_count "$cap_marker")" -eq 0 ]; then
-    post_comment "The merge queue evicted this PR on a CI infrastructure failure again, but the automatic re-queue limit (${max} per 24 h) is reached. Please investigate the runner infrastructure and re-queue manually.
+  if ! cap_recent=$(recent_count "$cap_marker"); then
+    ledger_error
+  fi
+  if [ "$cap_recent" -eq 0 ] && ! post_comment "The merge queue evicted this PR on a CI infrastructure failure again, but the automatic re-queue limit (${max} per 24 h) is reached. Please investigate the runner infrastructure and re-queue manually.
 
-${cap_marker}"
+${cap_marker}"; then
+    echo "::warning::Could not post the automatic re-queue limit notice on PR #${PR_NUMBER}."
   fi
   exit 0
+fi
+
+if ! dry_run && [ -z "${ENQUEUE_TOKEN:-}" ]; then
+  echo "::error::ENQUEUE_TOKEN is required to re-queue PR #${PR_NUMBER}."
+  exit 1
+fi
+
+attempt=$((recent + 1))
+if ! post_comment "The merge queue removed this PR after a CI **infrastructure** failure — a dead runner or a broken runner network, not a failure of the PR's own checks — so an automatic re-queue attempt is starting (attempt ${attempt}/${max} in 24 h).
+
+Gate run: ${run_url}
+${details}
+${marker}"; then
+  echo "::error::Could not record the re-queue attempt for PR #${PR_NUMBER}; not re-queuing."
+  exit 1
 fi
 
 if dry_run; then
   echo "DRY-RUN: would enqueue PR #${PR_NUMBER} (${PR_NODE_ID})"
 else
-  if [ -z "${ENQUEUE_TOKEN:-}" ]; then
-    echo "::error::ENQUEUE_TOKEN is required to re-queue PR #${PR_NUMBER}."
-    exit 1
-  fi
   # shellcheck disable=SC2016
   GH_TOKEN="$ENQUEUE_TOKEN" gh api graphql \
     -F id="$PR_NODE_ID" \
@@ -232,10 +257,4 @@ else
   }
 fi
 
-attempt=$((recent + 1))
-post_comment "The merge queue removed this PR after a CI **infrastructure** failure — a dead runner or a broken runner network, not a failure of the PR's own checks — so it was re-queued automatically (attempt ${attempt}/${max} in 24 h).
-
-Gate run: ${run_url}
-${details}
-${marker}"
 echo "::notice::Re-queued PR #${PR_NUMBER} after an infrastructure-classified gate failure."
