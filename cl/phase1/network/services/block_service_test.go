@@ -22,6 +22,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -297,14 +298,145 @@ func TestBlockServiceGossipFirstValidReservationIsAtomic(t *testing.T) {
 	require.Equal(t, 1, ignored)
 }
 
-func TestBlockServiceGossipRejectsInvalidatedFullParentPayload(t *testing.T) {
+func TestBlockServiceGossipReservationCanBeReleased(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	service.ReleaseGossipReservation(child)
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServicePendingGossipReservationHandsOffToP2P(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- service.(*blockService).validateFirstGossip(t.Context(), child, nil, true)
+	}()
+	select {
+	case err := <-errCh:
+		t.Fatalf("P2P validation returned before REST reservation resolved: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	service.ReleaseGossipReservation(child)
+	require.NoError(t, <-errCh)
+}
+
+func TestBlockServiceCommittedGossipReservationRejectsWaitingP2P(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- service.(*blockService).validateFirstGossip(t.Context(), child, nil, true)
+	}()
+	select {
+	case err := <-errCh:
+		t.Fatalf("P2P validation returned before REST reservation resolved: %v", err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	service.CommitGossipReservation(child)
+	require.ErrorIs(t, <-errCh, ErrIgnore)
+}
+
+func TestBlockServiceRevalidatesP2PAfterReservationRelease(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	type result struct {
+		err       error
+		scheduled bool
+	}
+	resultCh := make(chan result, 1)
+	go func() {
+		scheduled := false
+		err := service.(*blockService).validateFirstGossip(t.Context(), child, func() { scheduled = true }, true)
+		resultCh <- result{err: err, scheduled: scheduled}
+	}()
+	select {
+	case got := <-resultCh:
+		t.Fatalf("P2P validation returned before REST reservation resolved: %v", got.err)
+	case <-time.After(20 * time.Millisecond):
+	}
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusInvalidated
+	service.ReleaseGossipReservation(child)
+	got := <-resultCh
+	require.ErrorIs(t, got.err, ErrIgnore)
+	require.True(t, got.scheduled)
+}
+
+func TestBlockServiceUnrelatedReservationDoesNotRevalidateP2P(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	parentState := fcu.StateAtBlockRootVal[parentRoot]
+	validationEntered := make(chan struct{})
+	finishValidation := make(chan struct{})
+	validationCalls := 0
+	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		require.Equal(t, parentRoot, root)
+		require.True(t, alwaysCopy)
+		validationCalls++
+		if validationCalls == 1 {
+			close(validationEntered)
+			<-finishValidation
+		}
+		return parentState.Copy()
+	}
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- service.(*blockService).validateFirstGossip(t.Context(), child, nil, true)
+	}()
+	<-validationEntered
+	otherKey := proposerIndexAndSlot{proposerIndex: child.Block.ProposerIndex + 1, slot: child.Block.Slot}
+	require.NoError(t, service.(*blockService).reserveGossipKey(otherKey))
+	service.(*blockService).releaseGossipKey(otherKey)
+	close(finishValidation)
+	require.NoError(t, <-errCh)
+	require.Equal(t, 1, validationCalls)
+}
+
+func TestBlockServiceCanceledHandoffDoesNotClaimSeen(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	parentState := fcu.StateAtBlockRootVal[parentRoot]
+	revalidationEntered := make(chan struct{})
+	finishRevalidation := make(chan struct{})
+	require.NoError(t, service.ValidateGossip(t.Context(), child))
+	fcu.GetStateAtBlockRootFn = func(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+		close(revalidationEntered)
+		<-finishRevalidation
+		return parentState.Copy()
+	}
+	ctx, cancel := context.WithCancel(t.Context())
+	errCh := make(chan error, 1)
+	go func() {
+		errCh <- service.(*blockService).validateFirstGossip(ctx, child, nil, true)
+	}()
+	service.ReleaseGossipReservation(child)
+	<-revalidationEntered
+	cancel()
+	close(finishRevalidation)
+	require.ErrorIs(t, <-errCh, ErrIgnore)
+	key := blockGossipKey(child)
+	blockService := service.(*blockService)
+	blockService.seenBlocksMu.Lock()
+	require.False(t, blockService.seenBlocksCache.Contains(key))
+	require.NotContains(t, blockService.reservations, key)
+	blockService.seenBlocksMu.Unlock()
+	fcu.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		return parentState.Copy()
+	}
+	require.NoError(t, blockService.validateFirstGossip(t.Context(), child, nil, true))
+}
+
+func TestBlockServiceGossipIgnoresInvalidatedFullParentPayload(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
 	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusInvalidated
 	scheduled := false
-	err := service.(*blockService).validateFirstGossip(t.Context(), child, func() { scheduled = true })
-	require.Error(t, err)
-	require.NotErrorIs(t, err, ErrIgnore)
-	require.False(t, scheduled)
+	err := service.(*blockService).validateFirstGossip(t.Context(), child, func() { scheduled = true }, false)
+	require.ErrorIs(t, err, ErrIgnore)
+	require.True(t, scheduled)
 }
 
 func TestBlockServiceGossipRejectsWrongEmptyParentExecutionHead(t *testing.T) {

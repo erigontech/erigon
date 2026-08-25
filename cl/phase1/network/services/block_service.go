@@ -56,6 +56,12 @@ type blockJob struct {
 	creationTime time.Time
 }
 
+type blockReservation struct {
+	pending    chan struct{}
+	version    uint64
+	validators uint64
+}
+
 type blockService struct {
 	forkchoiceStore forkchoice.ForkChoiceStorage
 	syncedData      *synced_data.SyncedDataManager
@@ -64,6 +70,7 @@ type blockService struct {
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
+	reservations    map[proposerIndexAndSlot]*blockReservation
 	seenBlocksMu    sync.Mutex
 
 	// blocks that should be scheduled for later execution (e.g missing blobs).
@@ -93,6 +100,7 @@ func NewBlockService(
 		ethClock:        ethClock,
 		beaconCfg:       beaconCfg,
 		seenBlocksCache: seenBlocksCache,
+		reservations:    make(map[proposerIndexAndSlot]*blockReservation),
 		emitter:         emitter,
 		db:              db,
 	}
@@ -124,14 +132,14 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
-	if err := b.validateFirstGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg) }); err != nil {
+	if err := b.validateFirstGossip(ctx, msg, func() { b.ScheduleBlockForLaterProcessing(msg) }, true); err != nil {
 		return err
 	}
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
 		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
-			b.scheduleBlockForLaterProcessing(msg)
+			b.ScheduleBlockForLaterProcessing(msg)
 			return nil
 		}
 		return err
@@ -140,21 +148,149 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 }
 
 func (b *blockService) ValidateGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
-	return b.validateFirstGossip(ctx, msg, nil)
-}
-
-func (b *blockService) validateFirstGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock, schedule func()) error {
-	if err := b.validateGossip(ctx, msg, schedule); err != nil {
+	if err := b.validateGossip(ctx, msg, nil); err != nil {
 		return err
 	}
-	key := proposerIndexAndSlot{proposerIndex: msg.Block.ProposerIndex, slot: msg.Block.Slot}
+	return b.reserveGossipKey(blockGossipKey(msg))
+}
+
+func (b *blockService) CommitGossipReservation(msg *cltypes.SignedBeaconBlock) {
+	if msg == nil || msg.Block == nil {
+		return
+	}
+	b.commitGossipKey(blockGossipKey(msg))
+}
+
+func (b *blockService) ReleaseGossipReservation(msg *cltypes.SignedBeaconBlock) {
+	if msg == nil || msg.Block == nil {
+		return
+	}
+	b.releaseGossipKey(blockGossipKey(msg))
+}
+
+func (b *blockService) validateFirstGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock, schedule func(), waitForPending bool) error {
+	key := blockGossipKey(msg)
+	for {
+		if err := ctx.Err(); err != nil {
+			return fmt.Errorf("%w: block validation canceled: %w", ErrIgnore, err)
+		}
+		b.seenBlocksMu.Lock()
+		if b.seenBlocksCache.Contains(key) {
+			b.seenBlocksMu.Unlock()
+			return fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
+		}
+		reservation := b.reservations[key]
+		if reservation != nil && reservation.pending != nil {
+			done := reservation.pending
+			b.seenBlocksMu.Unlock()
+			if !waitForPending {
+				return fmt.Errorf("%w: block reservation pending for proposer and slot", ErrIgnore)
+			}
+			select {
+			case <-ctx.Done():
+				return fmt.Errorf("%w: block reservation pending: %w", ErrIgnore, ctx.Err())
+			case <-done:
+			}
+			b.seenBlocksMu.Lock()
+			committed := b.seenBlocksCache.Contains(key)
+			b.seenBlocksMu.Unlock()
+			if committed {
+				return fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
+			}
+			continue
+		}
+		if reservation == nil {
+			reservation = &blockReservation{}
+			b.reservations[key] = reservation
+		}
+		reservationVersion := reservation.version
+		reservation.validators++
+		b.seenBlocksMu.Unlock()
+
+		validationErr := b.validateGossip(ctx, msg, schedule)
+
+		b.seenBlocksMu.Lock()
+		reservation.validators--
+		if err := ctx.Err(); err != nil {
+			b.cleanupReservationLocked(key, reservation)
+			b.seenBlocksMu.Unlock()
+			return fmt.Errorf("%w: block validation canceled: %w", ErrIgnore, err)
+		}
+		if reservation.version != reservationVersion {
+			b.cleanupReservationLocked(key, reservation)
+			b.seenBlocksMu.Unlock()
+			continue
+		}
+		if validationErr != nil {
+			b.cleanupReservationLocked(key, reservation)
+			b.seenBlocksMu.Unlock()
+			return validationErr
+		}
+		if b.seenBlocksCache.Contains(key) || reservation.pending != nil {
+			b.cleanupReservationLocked(key, reservation)
+			b.seenBlocksMu.Unlock()
+			continue
+		}
+		b.seenBlocksCache.Add(key, struct{}{})
+		b.cleanupReservationLocked(key, reservation)
+		b.seenBlocksMu.Unlock()
+		return nil
+	}
+}
+
+func (b *blockService) reserveGossipKey(key proposerIndexAndSlot) error {
 	b.seenBlocksMu.Lock()
 	defer b.seenBlocksMu.Unlock()
-	if b.seenBlocksCache.Contains(key) {
+	reservation := b.reservations[key]
+	if b.seenBlocksCache.Contains(key) || reservation != nil && reservation.pending != nil {
 		return fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
 	}
-	b.seenBlocksCache.Add(key, struct{}{})
+	if reservation == nil {
+		reservation = &blockReservation{}
+		b.reservations[key] = reservation
+	}
+	reservation.pending = make(chan struct{})
+	reservation.version++
 	return nil
+}
+
+func (b *blockService) commitGossipKey(key proposerIndexAndSlot) {
+	b.seenBlocksMu.Lock()
+	defer b.seenBlocksMu.Unlock()
+	reservation := b.reservations[key]
+	if reservation == nil || reservation.pending == nil {
+		return
+	}
+	done := reservation.pending
+	reservation.pending = nil
+	reservation.version++
+	b.seenBlocksCache.Add(key, struct{}{})
+	close(done)
+	b.cleanupReservationLocked(key, reservation)
+}
+
+func (b *blockService) releaseGossipKey(key proposerIndexAndSlot) {
+	b.seenBlocksMu.Lock()
+	defer b.seenBlocksMu.Unlock()
+	reservation := b.reservations[key]
+	if reservation == nil || reservation.pending == nil {
+		return
+	}
+	done := reservation.pending
+	reservation.pending = nil
+	reservation.version++
+	close(done)
+	b.cleanupReservationLocked(key, reservation)
+}
+
+func (b *blockService) cleanupReservationLocked(key proposerIndexAndSlot, reservation *blockReservation) {
+	if reservation.pending == nil && reservation.validators == 0 && b.reservations[key] == reservation {
+		delete(b.reservations, key)
+	}
+}
+
+func blockGossipKey(msg *cltypes.SignedBeaconBlock) proposerIndexAndSlot {
+	return proposerIndexAndSlot{proposerIndex: msg.Block.ProposerIndex, slot: msg.Block.Slot}
 }
 
 func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeaconBlock, schedule func()) error {
@@ -224,9 +360,6 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 		parentIsFull = parentBid != nil && parentBid.Message != nil && gloasBid.ParentBlockHash == parentBid.Message.BlockHash
 		if parentIsFull {
 			status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(msg.Block.ParentRoot)
-			if status == execution_client.PayloadStatusInvalidated {
-				return errors.New("parent execution payload is invalid")
-			}
 			if !seen || status != execution_client.PayloadStatusValidated {
 				if schedule != nil {
 					schedule()
@@ -312,8 +445,8 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 	})
 }
 
-// scheduleBlockForLaterProcessing schedules a block for later processing
-func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
+// ScheduleBlockForLaterProcessing schedules a block for later processing.
+func (b *blockService) ScheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
 	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
 	var blockNum uint64
 	if block.Block.Body.ExecutionPayload != nil {
