@@ -428,7 +428,22 @@ func SpawnStageHistoryDownload(cfg StageHistoryReconstructionCfg, ctx context.Co
 
 	cfg.logger.Info("Ready to insert history, waiting for sync cycle to finish")
 
-	return nil
+	return waitForHistoryCompletion(ctx, finishCh, cfg.waitForAllRoutines)
+}
+
+func waitForHistoryCompletion(ctx context.Context, finishCh <-chan struct{}, waitForAllRoutines bool) error {
+	if !waitForAllRoutines {
+		return nil
+	}
+	if err := ctx.Err(); err != nil {
+		return err
+	}
+	select {
+	case <-finishCh:
+		return ctx.Err()
+	case <-ctx.Done():
+		return ctx.Err()
+	}
 }
 
 func completeHistoryBackfill(

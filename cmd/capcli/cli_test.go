@@ -21,22 +21,20 @@ import (
 
 	"github.com/stretchr/testify/require"
 
-	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
-type initialAnchorDeferrerRecorder struct {
-	root common.Hash
-}
+func TestValidateChainHistoryCheckpoint(t *testing.T) {
+	t.Run("pre-Gloas", func(t *testing.T) {
+		require.NoError(t, validateChainHistoryCheckpoint(clparams.FuluVersion, 1))
+	})
 
-func (r *initialAnchorDeferrerRecorder) SetInitialBlockEnvelopeDeferred(root common.Hash) {
-	r.root = root
-}
+	t.Run("Gloas genesis", func(t *testing.T) {
+		require.NoError(t, validateChainHistoryCheckpoint(clparams.GloasVersion, 0))
+	})
 
-func TestHistoryDownloaderDefersCheckpointAnchorEnvelope(t *testing.T) {
-	anchorRoot := common.HexToHash("0x1234")
-	recorder := &initialAnchorDeferrerRecorder{}
-
-	deferInitialHistoryAnchorEnvelope(recorder, anchorRoot)
-
-	require.Equal(t, anchorRoot, recorder.root)
+	t.Run("Gloas non-genesis", func(t *testing.T) {
+		err := validateChainHistoryCheckpoint(clparams.GloasVersion, 1)
+		require.ErrorContains(t, err, "does not support non-genesis Gloas checkpoints")
+	})
 }

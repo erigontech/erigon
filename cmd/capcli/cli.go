@@ -97,12 +97,11 @@ type chainCfg struct {
 	Chain string `help:"chain" default:"mainnet"`
 }
 
-type initialAnchorEnvelopeDeferrer interface {
-	SetInitialBlockEnvelopeDeferred(common.Hash)
-}
-
-func deferInitialHistoryAnchorEnvelope(downloader initialAnchorEnvelopeDeferrer, anchorRoot common.Hash) {
-	downloader.SetInitialBlockEnvelopeDeferred(anchorRoot)
+func validateChainHistoryCheckpoint(version clparams.StateVersion, slot uint64) error {
+	if version >= clparams.GloasVersion && slot != 0 {
+		return errors.New("capcli chain does not support non-genesis Gloas checkpoints")
+	}
+	return nil
 }
 
 type outputFolder struct {
@@ -160,6 +159,9 @@ func (c *Chain) Run(ctx *Context) error {
 	if err != nil {
 		return err
 	}
+	if err := validateChainHistoryCheckpoint(bs.Version(), bs.Slot()); err != nil {
+		return err
+	}
 
 	ethClock := eth_clock.NewEthereumClock(bs.GenesisTime(), bs.GenesisValidatorsRoot(), beaconConfig)
 	db, blobStorage, err := caplin1.OpenCaplinDatabase(ctx, beaconConfig, dirs.CaplinIndexing, dirs.CaplinBlobs, nil, false)
@@ -191,7 +193,6 @@ func (c *Chain) Run(ctx *Context) error {
 	}
 
 	downloader := network.NewBackwardBeaconDownloader(ctx, beacon, nil, nil, db, beaconConfig)
-	deferInitialHistoryAnchorEnvelope(downloader, bRoot)
 	cfg := stages.StageHistoryReconstruction(downloader, antiquary.NewAntiquary(ctx, nil, nil, nil, nil, dirs, nil, nil, nil, nil, nil, nil, nil, false, false, false, false, nil), csn, db, nil, beaconConfig, clparams.CaplinConfig{}, true, bRoot, bs.Slot(), "/tmp", 300*time.Millisecond, nil, nil, blobStorage, log.Root(), nil, nil)
 	return stages.SpawnStageHistoryDownload(cfg, ctx, log.Root())
 }

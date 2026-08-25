@@ -829,8 +829,11 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 	// Process through forkchoice so the local node marks the block as FULL.
 	// checkBlobData=false because gossip validation handles it; validatePayload=true
 	// so the EL receives NewPayload for the execution payload.
+	var persistenceErr error
 	if err := a.forkchoiceStore.OnExecutionPayload(r.Context(), signedEnvelope, false, true); err != nil {
-		if errors.Is(err, forkchoice.ErrIgnore) ||
+		if errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopePersistenceFailed) {
+			persistenceErr = err
+		} else if errors.Is(err, forkchoice.ErrIgnore) ||
 			errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
 			errors.Is(err, forkchoice.ErrExecutionPayloadEnvelopeIndicesPending) {
 			a.logger.Debug("[Beacon REST] OnExecutionPayload queued or ignored", "err", err)
@@ -850,6 +853,10 @@ func (a *ApiHandler) PostEthV1BeaconExecutionPayloadEnvelope(w http.ResponseWrit
 		if err := a.gossipManager.Publish(r.Context(), gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
 			a.logger.Debug("[Beacon REST] failed to publish execution payload envelope to gossip", "err", err)
 		}
+	}
+	if persistenceErr != nil {
+		beaconhttp.WrapEndpointError(persistenceErr).WriteTo(w)
+		return
 	}
 
 	w.WriteHeader(http.StatusOK)

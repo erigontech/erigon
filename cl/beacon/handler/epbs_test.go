@@ -177,7 +177,7 @@ func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "invalid execution payload")
 }
 
-func TestPostExecutionPayloadEnvelopeDoesNotGossipPersistenceFailure(t *testing.T) {
+func TestPostExecutionPayloadEnvelopeGossipsPersistenceFailureBeforeReturningError(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	handler.gossipManager = gossip_mock.NewMockGossip(ctrl)
@@ -189,9 +189,17 @@ func TestPostExecutionPayloadEnvelopeDoesNotGossipPersistenceFailure(t *testing.
 	}
 	body, err := json.Marshal(envelope)
 	require.NoError(t, err)
+	recorder := httptest.NewRecorder()
+	handler.gossipManager.(*gossip_mock.MockGossip).EXPECT().Publish(
+		gomock.Any(),
+		gossip.TopicNameExecutionPayload,
+		gomock.Any(),
+	).DoAndReturn(func(context.Context, string, []byte) error {
+		require.Empty(t, recorder.Body.String(), "HTTP error was written before gossip")
+		return nil
+	})
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
-	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 

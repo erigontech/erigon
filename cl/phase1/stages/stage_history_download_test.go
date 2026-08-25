@@ -256,3 +256,39 @@ func TestCompleteHistoryBackfillPacesOnlyZeroProgress(t *testing.T) {
 		}
 	})
 }
+
+func TestWaitForHistoryCompletion(t *testing.T) {
+	t.Run("asynchronous caller returns immediately", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+
+		require.NoError(t, waitForHistoryCompletion(ctx, make(chan struct{}), false))
+	})
+
+	t.Run("synchronous caller waits for completion", func(t *testing.T) {
+		finishCh := make(chan struct{})
+		close(finishCh)
+
+		require.NoError(t, waitForHistoryCompletion(context.Background(), finishCh, true))
+	})
+
+	t.Run("synchronous caller remains owned until cancellation", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		done := make(chan error, 1)
+		go func() {
+			done <- waitForHistoryCompletion(ctx, make(chan struct{}), true)
+		}()
+		cancel()
+
+		require.ErrorIs(t, <-done, context.Canceled)
+	})
+
+	t.Run("cancellation wins when completion is also ready", func(t *testing.T) {
+		ctx, cancel := context.WithCancel(context.Background())
+		cancel()
+		finishCh := make(chan struct{})
+		close(finishCh)
+
+		require.ErrorIs(t, waitForHistoryCompletion(ctx, finishCh, true), context.Canceled)
+	})
+}
