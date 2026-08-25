@@ -18,11 +18,13 @@ package state_test
 
 import (
 	"bytes"
+	"context"
 	"encoding/binary"
 	"fmt"
 	"os"
 	"path/filepath"
 	"strings"
+	"sync/atomic"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -346,4 +348,145 @@ func TestConvertPBinRecordFilesRejectsMangledStateRoot(t *testing.T) {
 	err := state.VerifyPBinStateConversionForTest(legacy, mangled)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "state root")
+}
+
+func TestConvertPBinRecordFilesRemovesOutputAfterStateFailure(t *testing.T) {
+	fixture := newPBinOutputFixture(t, true, false)
+	keys, values := readKVFile(t, fixture.output, fixture.outputPath)
+	for i, key := range keys {
+		if bytes.Equal(key, commitmentdb.KeyCommitmentState) {
+			values[i] = []byte{0}
+			break
+		}
+	}
+	rewritePBinFile(t, fixture, keys, values)
+	require.NoError(t, fixture.output.ReloadFiles())
+
+	err := convertPBinOutputFixture(t, fixture)
+	require.Error(t, err)
+	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
+	assertPBinOutputRemoved(t, fixture)
+	linkPBinSourceFiles(t, fixture)
+	require.NoError(t, fixture.output.ReloadFiles())
+	require.NoError(t, convertPBinOutputFixture(t, fixture))
+	assertPBinOutputComplete(t, fixture)
+}
+
+func TestConvertPBinRecordFilesRemovesPartialOutputOnCancel(t *testing.T) {
+	fixture := newPBinOutputFixture(t, true, false)
+	ctx, cancel := context.WithCancel(t.Context())
+	var pairs atomic.Int32
+	state.SetPBinConvertPairHookForTest(func() {
+		if pairs.Add(1) == 2 {
+			cancel()
+		}
+	})
+	t.Cleanup(func() {
+		state.SetPBinConvertPairHookForTest(nil)
+		cancel()
+	})
+
+	at := fixture.output.BeginFilesRo()
+	err := state.ConvertPBinRecordFiles(ctx, at, log.New())
+	at.Close()
+	require.ErrorIs(t, err, context.Canceled)
+	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
+	assertPBinOutputRemoved(t, fixture)
+}
+
+func TestConvertPBinRecordFilesResumeRebuildsIncompleteShard(t *testing.T) {
+	fixture := newPBinOutputFixture(t, true, false)
+	require.NoError(t, convertPBinOutputFixture(t, fixture))
+	require.NoError(t, fixture.output.ReloadFiles())
+
+	convertedInfo, err := os.Stat(fixture.outputPath)
+	require.NoError(t, err)
+	require.NoError(t, convertPBinOutputFixture(t, fixture))
+	skippedInfo, err := os.Stat(fixture.outputPath)
+	require.NoError(t, err)
+	require.True(t, os.SameFile(convertedInfo, skippedInfo))
+
+	removePBinOutputAccessors(t, fixture)
+	require.NoError(t, fixture.output.ReloadFiles())
+	at := fixture.output.BeginFilesRo()
+	require.Empty(t, at.Files(kv.CommitmentDomain), "an incomplete shard must not be visible")
+	at.Close()
+
+	require.NoError(t, convertPBinOutputFixture(t, fixture))
+	require.NoError(t, fixture.output.ReloadFiles())
+	rebuiltInfo, err := os.Stat(fixture.outputPath)
+	require.NoError(t, err)
+	require.False(t, os.SameFile(convertedInfo, rebuiltInfo))
+	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
+	assertPBinOutputComplete(t, fixture)
+}
+
+func rewritePBinFile(t *testing.T, fixture pbinOutputFixture, keys, values [][]byte) {
+	t.Helper()
+	config := fixture.output.Cfg(kv.CommitmentDomain)
+	require.NoError(t, dir.RemoveFile(fixture.outputPath))
+	comp, err := seg.NewCompressor(t.Context(), "pbin test rewrite", fixture.outputPath, fixture.output.Dirs().Tmp, config.CompressCfg, log.LvlDebug, log.New())
+	require.NoError(t, err)
+	writer := seg.NewWriter(comp, config.Compression)
+	for i := range keys {
+		_, err = writer.Write(keys[i])
+		require.NoError(t, err)
+		_, err = writer.Write(values[i])
+		require.NoError(t, err)
+	}
+	require.NoError(t, comp.Compress())
+	comp.Close()
+}
+
+func removePBinOutputAccessors(t *testing.T, fixture pbinOutputFixture) {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Dir(fixture.outputPath))
+	require.NoError(t, err)
+	removed := 0
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "-commitment.") && filepath.Ext(entry.Name()) != ".kv" {
+			require.NoError(t, dir.RemoveFile(filepath.Join(filepath.Dir(fixture.outputPath), entry.Name())))
+			removed++
+		}
+	}
+	require.Positive(t, removed)
+}
+
+func assertPBinOutputRemoved(t *testing.T, fixture pbinOutputFixture) {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Dir(fixture.outputPath))
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "-commitment.") {
+			require.Failf(t, "partial pbin output remains", "found %s", entry.Name())
+		}
+	}
+}
+
+func assertPBinOutputComplete(t *testing.T, fixture pbinOutputFixture) {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Dir(fixture.outputPath))
+	require.NoError(t, err)
+	require.FileExists(t, fixture.outputPath)
+	accessors := 0
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "-commitment.") && filepath.Ext(entry.Name()) != ".kv" {
+			accessors++
+		}
+	}
+	require.Positive(t, accessors)
+}
+
+func linkPBinSourceFiles(t *testing.T, fixture pbinOutputFixture) {
+	t.Helper()
+	entries, err := os.ReadDir(filepath.Dir(fixture.sourcePath))
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if !strings.Contains(entry.Name(), "-commitment.") {
+			continue
+		}
+		source := filepath.Join(filepath.Dir(fixture.sourcePath), entry.Name())
+		output := filepath.Join(filepath.Dir(fixture.outputPath), entry.Name())
+		require.NoError(t, os.Link(source, output))
+	}
 }

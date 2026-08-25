@@ -24,6 +24,8 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"sort"
+	"strings"
 
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/dir"
@@ -34,6 +36,8 @@ import (
 	"github.com/erigontech/erigon/execution/commitment"
 	"github.com/erigontech/erigon/execution/commitment/commitmentdb"
 )
+
+var pbinConvertPairHook func()
 
 // A pre-version branch record opens with the high byte of its touchMap, always
 // zero; a current one opens with a cell-fields byte, which always carries a kind
@@ -184,6 +188,61 @@ func removeCommitmentOutputFiles(paths []string) error {
 	return nil
 }
 
+func commitmentFilesForConversion(at *AggregatorRoTx) (VisibleFiles, error) {
+	d := at.d[kv.CommitmentDomain].d
+	filesByPath := make(map[string]VisibleFile)
+	d.dirtyFiles.Scan(func(item *FilesItem) bool {
+		if item.decompressor == nil || filepath.Ext(item.decompressor.FilePath()) != ".kv" {
+			return true
+		}
+		file := visibleFile{
+			startTxNum: item.startTxNum,
+			endTxNum:   item.endTxNum,
+			src:        item,
+		}
+		filesByPath[filepath.Clean(item.decompressor.FilePath())] = file
+		return true
+	})
+
+	entries, err := os.ReadDir(d.dirs.SnapDomain)
+	if err != nil {
+		return nil, fmt.Errorf("enumerate commitment files: %w", err)
+	}
+	for _, entry := range entries {
+		if entry.IsDir() || filepath.Ext(entry.Name()) != ".kv" || !strings.Contains(entry.Name(), d.FilenameBase) {
+			continue
+		}
+		path := filepath.Clean(filepath.Join(d.dirs.SnapDomain, entry.Name()))
+		if _, ok := filesByPath[path]; !ok {
+			return nil, fmt.Errorf("commitment file %q is present on disk but is not readable", path)
+		}
+	}
+
+	files := make(VisibleFiles, 0, len(filesByPath))
+	for _, file := range filesByPath {
+		files = append(files, file)
+	}
+	sort.Slice(files, func(i, j int) bool {
+		if files[i].StartRootNum() != files[j].StartRootNum() {
+			return files[i].StartRootNum() < files[j].StartRootNum()
+		}
+		return files[i].Fullpath() < files[j].Fullpath()
+	})
+	return files, nil
+}
+
+func commitmentOutputComplete(paths []string) (bool, error) {
+	for _, path := range paths {
+		if _, err := os.Stat(path); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				return false, nil
+			}
+			return false, fmt.Errorf("stat %s: %w", path, err)
+		}
+	}
+	return true, nil
+}
+
 func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, logger log.Logger) (pairs uint64, err error) {
 	vf, ok := file.(visibleFile)
 	if !ok {
@@ -200,24 +259,7 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 	if filepath.Base(outputPath) != filepath.Base(file.Fullpath()) {
 		return 0, fmt.Errorf("convertPBinFile %q: output basename %q does not match source basename %q", file.Fullpath(), filepath.Base(outputPath), filepath.Base(file.Fullpath()))
 	}
-
-	hasLegacy, err := pbinFileHasLegacy(ctx, d, vf.src)
-	if err != nil {
-		return 0, fmt.Errorf("convertPBinFile %q: classify: %w", file.Fullpath(), err)
-	}
-	if !hasLegacy {
-		return 0, errSkip
-	}
-	sourceWords := vf.src.decompressor.Count()
-	if sourceWords%2 != 0 {
-		return 0, fmt.Errorf("convertPBinFile %q: source has an odd word count %d", file.Fullpath(), sourceWords)
-	}
-	sourcePairs := uint64(sourceWords / 2)
-
 	paths := commitmentOutputPaths(d, stepFrom, stepTo)
-	if err := removeCommitmentOutputFiles(paths); err != nil {
-		return 0, err
-	}
 	cleanupOutput := true
 	defer func() {
 		if cleanupOutput {
@@ -226,6 +268,30 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 			}
 		}
 	}()
+
+	hasLegacy, err := pbinFileHasLegacy(ctx, d, vf.src)
+	if err != nil {
+		return 0, fmt.Errorf("convertPBinFile %q: classify: %w", file.Fullpath(), err)
+	}
+	if !hasLegacy {
+		complete, err := commitmentOutputComplete(paths)
+		if err != nil {
+			return 0, fmt.Errorf("convertPBinFile %q: check output: %w", file.Fullpath(), err)
+		}
+		if complete {
+			cleanupOutput = false
+			return 0, errSkip
+		}
+	}
+	sourceWords := vf.src.decompressor.Count()
+	if sourceWords%2 != 0 {
+		return 0, fmt.Errorf("convertPBinFile %q: source has an odd word count %d", file.Fullpath(), sourceWords)
+	}
+	sourcePairs := uint64(sourceWords / 2)
+
+	if err := removeCommitmentOutputFiles(paths); err != nil {
+		return 0, err
+	}
 
 	comp, err := seg.NewCompressor(ctx, "pbin_convert", outputPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, logger)
 	if err != nil {
@@ -248,6 +314,14 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 			return pairs, fmt.Errorf("convertPBinFile %q: truncated at pair %d (value missing)", file.Fullpath(), pairs)
 		}
 		value, _ = reader.Next(value[:0])
+		if pbinConvertPairHook != nil {
+			pbinConvertPairHook()
+		}
+		select {
+		case <-ctx.Done():
+			return pairs, ctx.Err()
+		default:
+		}
 		var outputValue []byte
 		switch {
 		case bytes.Equal(key, commitmentdb.KeyCommitmentState):
@@ -296,12 +370,9 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 // output datadir. Files already in the current format remain hardlinks to the
 // source datadir; converted files replace those links before they are written.
 func ConvertPBinRecordFiles(ctx context.Context, at *AggregatorRoTx, logger log.Logger) error {
-	allFiles := at.Files(kv.CommitmentDomain)
-	files := make(VisibleFiles, 0, len(allFiles))
-	for _, file := range allFiles {
-		if filepath.Ext(file.Fullpath()) == ".kv" {
-			files = append(files, file)
-		}
+	files, err := commitmentFilesForConversion(at)
+	if err != nil {
+		return err
 	}
 	if len(files) == 0 {
 		logger.Info("[pbin_convert] no commitment files to convert")

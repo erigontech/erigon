@@ -36,6 +36,10 @@ func SetConvertPhase1AfterFileHookForTest(fn func(idx int)) {
 	convertPhase1AfterFileHook = fn
 }
 
+func SetPBinConvertPairHookForTest(fn func()) {
+	pbinConvertPairHook = fn
+}
+
 func VerifyPBinPairCountForTest(sourcePairs uint64, outputWords int) error {
 	return verifyPBinPairCount(sourcePairs, outputWords)
 }

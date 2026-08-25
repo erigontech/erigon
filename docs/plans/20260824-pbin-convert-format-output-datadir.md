@@ -344,19 +344,19 @@ already the output's.
 - Modify: `db/state/commitment_convert_pbin.go`
 - Modify: `db/state/commitment_convert_pbin_test.go`
 
-- [ ] write a failing test that a shard whose verification failed is **removed**, so a
+- [x] write a failing test that a shard whose verification failed is **removed**, so a
       following `--resume` redoes it rather than skipping a name-complete broken file
-- [ ] write a failing test that ctx-cancel mid-file removes the partial `.kv` and its
+- [x] write a failing test that ctx-cancel mid-file removes the partial `.kv` and its
       accessors
-- [ ] implement the cleanup path on every per-file error exit
-- [ ] write a failing test that `--resume` skips a converted shard and redoes an incomplete
+- [x] implement the cleanup path on every per-file error exit
+- [x] write a failing test that `--resume` skips a converted shard and redoes an incomplete
       one (`.kv` present, accessor missing)
-- [ ] write a failing test that without `--resume` a non-empty output is **refused** — the
+- [x] write a failing test that without `--resume` a non-empty output is **refused** — the
       reused `stageRebuildOutput` gate returns an error and never wipes a user-supplied
       directory
-- [ ] write a failing test that the enumeration catches a source `.kv` on disk but not
+- [x] write a failing test that the enumeration catches a source `.kv` on disk but not
       visible — a missing accessor makes it invisible, and it would be silently absent
-- [ ] run `go test ./db/state/... -count=1` — must pass before task 8
+- [x] run `go test ./db/state/... -count=1` — must pass before task 8
 
 ### Task 8: Sampled positional cross-check
 
