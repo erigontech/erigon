@@ -646,22 +646,29 @@ func (a *Aggregator) OpenFolder() error {
 	}
 	a.dirtyFilesLock.Unlock()
 
-	// Propagate the visible file set so Inventory reflects on-disk
-	// reality: files that arrived via the downloader are visible in the
-	// aggregator but invisible to Inventory without this notification.
-	// Convert to snap-relative form (mirrors sf.FilePaths(a.dirs.Snap)
-	// used by retire/merge) — consumers assume that shape.
-	if a.onFilesChange != nil {
-		files := a.Files()
-		relFiles := make([]string, 0, len(files))
-		for _, f := range files {
-			relFiles = append(relFiles, relPath(f, a.dirs.Snap))
-		}
-		if len(relFiles) > 0 {
-			a.onFilesChange(relFiles)
-		}
-	}
+	a.notifyOpenedFiles()
 	return nil
+}
+
+// notifyOpenedFiles fires onFilesChange with the current visible file
+// set. Every scan/rescan path (OpenFolder, ReloadFiles) calls this so
+// Inventory reflects on-disk reality — files that arrived via the
+// downloader, or via a convert/squeeze rename, are visible in the
+// aggregator but invisible to Inventory without this notification.
+// Caller MUST release dirtyFilesLock first — the callback re-enters
+// Provider (Inventory.AddFile + RepublishChainToml).
+func (a *Aggregator) notifyOpenedFiles() {
+	if a.onFilesChange == nil {
+		return
+	}
+	files := a.Files()
+	relFiles := make([]string, 0, len(files))
+	for _, f := range files {
+		relFiles = append(relFiles, relPath(f, a.dirs.Snap))
+	}
+	if len(relFiles) > 0 {
+		a.onFilesChange(relFiles)
+	}
 }
 
 func scanDirs(dirs datadir.Dirs) (r *ScanDirsResult, err error) {
@@ -743,9 +750,14 @@ func (a *Aggregator) openFolder() error {
 
 func (a *Aggregator) ReloadFiles() error {
 	a.dirtyFilesLock.Lock()
-	defer a.dirtyFilesLock.Unlock()
 	a.closeDirtyFiles()
-	return a.openFolder()
+	err := a.openFolder()
+	a.dirtyFilesLock.Unlock()
+	if err != nil {
+		return err
+	}
+	a.notifyOpenedFiles()
+	return nil
 }
 
 // closeDirtyFilesNoReopen drops all dirty-file mmaps without re-scanning the

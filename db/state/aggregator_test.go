@@ -835,6 +835,71 @@ func TestAggregator_Files_ReflectsOnDiskAfterOpenFolder(t *testing.T) {
 	require.True(t, sawCommitment, "Aggregator.Files() missing commitment .kv after OpenFolder; got %v", files)
 }
 
+// TestAggregator_ReloadFiles_NotifiesForFilesLandedByRename pins the
+// notify-on-rescan contract for ReloadFiles(). Convert / squeeze paths
+// (commitment_convert.go, squeeze.go) rename files into the snapshots
+// dir then call ReloadFiles to re-scan; without a notification,
+// Inventory silently misses the new files until the next unrelated
+// OpenFolder or scan tick fires.
+func TestAggregator_ReloadFiles_NotifiesForFilesLandedByRename(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(10)
+	_, agg := testDbAndAggregatorv3(t, stepSize)
+	dirs := agg.Dirs()
+
+	// Baseline: one round of files + initial OpenFolder so the aggregator
+	// has a known-populated visible set before the rename simulation.
+	generateAccountsFile(t, dirs, []testFileRange{{0, 1}})
+	generateStorageFile(t, dirs, []testFileRange{{0, 1}})
+	generateCodeFile(t, dirs, []testFileRange{{0, 1}})
+	generateCommitmentFile(t, dirs, []testFileRange{{0, 1}})
+	require.NoError(t, agg.OpenFolder())
+
+	// Register the listener AFTER OpenFolder so its baseline fires
+	// don't muddy the result — we only care about what ReloadFiles emits.
+	var got [][]string
+	agg.OnFilesChange(func(names []string) {
+		got = append(got, append([]string(nil), names...))
+	}, nil)
+
+	// Simulate convert/squeeze: rename produces a new step's worth of
+	// files that only ReloadFiles will pick up.
+	generateAccountsFile(t, dirs, []testFileRange{{1, 2}})
+	generateStorageFile(t, dirs, []testFileRange{{1, 2}})
+	generateCodeFile(t, dirs, []testFileRange{{1, 2}})
+	generateCommitmentFile(t, dirs, []testFileRange{{1, 2}})
+
+	require.NoError(t, agg.ReloadFiles())
+
+	var haveNotification bool
+	var sawAccountsKV, sawStorageKV, sawCodeKV, sawCommitmentKV bool
+	for _, batch := range got {
+		if len(batch) > 0 {
+			haveNotification = true
+		}
+		for _, n := range batch {
+			if strings.Contains(n, "-accounts.1-2.kv") {
+				sawAccountsKV = true
+			}
+			if strings.Contains(n, "-storage.1-2.kv") {
+				sawStorageKV = true
+			}
+			if strings.Contains(n, "-code.1-2.kv") {
+				sawCodeKV = true
+			}
+			if strings.Contains(n, "-commitment.1-2.kv") {
+				sawCommitmentKV = true
+			}
+		}
+	}
+	require.True(t, haveNotification,
+		"ReloadFiles did not fire OnFilesChange with any names — convert/squeeze rename output would stay invisible to Inventory; got batches=%v", got)
+	require.True(t, sawAccountsKV, "ReloadFiles notification missing accounts.1-2.kv; got batches=%v", got)
+	require.True(t, sawStorageKV, "ReloadFiles notification missing storage.1-2.kv; got batches=%v", got)
+	require.True(t, sawCodeKV, "ReloadFiles notification missing code.1-2.kv; got batches=%v", got)
+	require.True(t, sawCommitmentKV, "ReloadFiles notification missing commitment.1-2.kv; got batches=%v", got)
+}
+
 // TestAggregator_BuildFiles_EmptyStepOK verifies the corollary: on a fresh
 // datadir (no pre-existing snapshot files) where MDBX happens to have no
 // history at step 0 but does at a later step, the aggregator is allowed to
