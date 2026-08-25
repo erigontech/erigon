@@ -535,7 +535,6 @@ func TestProposerPreferencesServiceRequestsIndependentDependentRootState(t *test
 	service, _, ethClockMock, epbsPool, forkChoiceMock := setupProposerPreferencesService(t, ctrl)
 
 	depState := newProposerPreferencesState(service.beaconCfg, map[uint64]uint64{100: 42})
-	require.NoError(t, depState.SetSlot(63))
 	forkChoiceMock.StateAtBlockRootVal[testDependentRoot] = depState
 	var requestedCopy bool
 	var ownedState *state2.CachingBeaconState
@@ -568,11 +567,11 @@ func TestProposerPreferencesValidationStateUsesOwnedStateWithoutSecondCopy(t *te
 	service, _, _, _, _ := setupProposerPreferencesService(t, ctrl)
 	ownedState := state2.New(service.beaconCfg)
 	ownedState.SetVersion(clparams.DenebVersion)
-	ownedState.AddValidator(solid.NewValidatorFromParameters(common.Bytes48{1}, common.Hash{}, service.beaconCfg.MaxEffectiveBalance, false, 0, 0, service.beaconCfg.FarFutureEpoch, service.beaconCfg.FarFutureEpoch), service.beaconCfg.MaxEffectiveBalance)
+	require.NoError(t, ownedState.AddValidator(solid.NewValidatorFromParameters(common.Bytes48{1}, common.Hash{}, service.beaconCfg.MaxEffectiveBalance, false, 0, 0, service.beaconCfg.FarFutureEpoch, service.beaconCfg.FarFutureEpoch), service.beaconCfg.MaxEffectiveBalance))
 	ownedState.SetPreviousEpochParticipationFlags([]cltypes.ParticipationFlags{0})
 	ownedState.SetCurrentEpochParticipationFlags([]cltypes.ParticipationFlags{0})
 	ownedState.SetInactivityScores([]uint64{0})
-	ownedState.SetSlot(63)
+	require.NoError(t, ownedState.SetSlot(63))
 
 	validationState, err := service.proposerPreferencesValidationState(ownedState, 3)
 	require.NoError(t, err)

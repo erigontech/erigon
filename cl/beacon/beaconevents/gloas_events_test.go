@@ -48,9 +48,9 @@ func TestBuildHeadV2DataUsesGenesisRootInEpochZeroAndOne(t *testing.T) {
 		t.Run(test.name, func(t *testing.T) {
 			headState := state.New(&cfg)
 			headState.SetVersion(clparams.GloasVersion)
-			headState.SetSlot(test.slot)
-			headState.SetBlockRootAt(0, genesisRoot)
-			headState.SetBlockRootAt(int(cfg.SlotsPerEpoch-1), epochZeroEndRoot)
+			require.NoError(t, headState.SetSlot(test.slot))
+			require.NoError(t, headState.SetBlockRootAt(0, genesisRoot))
+			require.NoError(t, headState.SetBlockRootAt(int(cfg.SlotsPerEpoch-1), epochZeroEndRoot))
 
 			event, err := BuildHeadV2Data(&cfg, headState, test.slot, headRoot, stateRoot, "full", true)
 			require.NoError(t, err)
@@ -69,11 +69,11 @@ func TestBuildHeadV2DataDoesNotReadPrunedGenesisRoot(t *testing.T) {
 	cfg.SlotsPerHistoricalRoot = 8
 	headState := state.New(&cfg)
 	headState.SetVersion(clparams.GloasVersion)
-	headState.SetSlot(10)
+	require.NoError(t, headState.SetSlot(10))
 	currentRoot := common.Hash{1}
 	nextRoot := common.Hash{2}
-	headState.SetBlockRootAt(7, currentRoot)
-	headState.SetBlockRootAt(1, nextRoot)
+	require.NoError(t, headState.SetBlockRootAt(7, currentRoot))
+	require.NoError(t, headState.SetBlockRootAt(1, nextRoot))
 
 	event, err := BuildHeadV2Data(&cfg, headState, 10, common.Hash{3}, common.Hash{4}, "full", false)
 	require.NoError(t, err)

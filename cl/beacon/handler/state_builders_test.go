@@ -63,7 +63,7 @@ func setupStateBuildersHandler(t *testing.T) (*ApiHandler, *state.CachingBeaconS
 		registry.Append(builder)
 	}
 	postState.SetBuilders(registry)
-	syncedData.OnHeadState(postState)
+	require.NoError(t, syncedData.OnHeadState(postState))
 	fcu.HeadVal, _ = blocks[len(blocks)-1].Block.HashSSZ()
 	fcu.HeadSlotVal = postState.Slot()
 	fcu.IsRootOptimisticVal = true
