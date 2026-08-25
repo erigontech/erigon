@@ -32,6 +32,7 @@ import (
 	"time"
 
 	"github.com/holiman/uint256"
+	libp2ppeer "github.com/libp2p/go-libp2p/core/peer"
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
 
@@ -48,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	gossip_mock "github.com/erigontech/erigon/cl/phase1/network/gossip/mock_services"
 	network_services_mock "github.com/erigontech/erigon/cl/phase1/network/services/mock_services"
+	serviceinterface "github.com/erigontech/erigon/cl/phase1/network/services/service_interface"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -65,6 +67,24 @@ import (
 	"github.com/erigontech/erigon/node/gointerfaces/txpoolproto"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
+
+var _ serviceinterface.Service[*cltypes.SignedExecutionPayloadBid] = acceptingExecutionPayloadBidService{}
+
+type acceptingExecutionPayloadBidService struct{}
+
+func (acceptingExecutionPayloadBidService) Names() []string { return nil }
+
+func (acceptingExecutionPayloadBidService) DecodeGossipMessage(libp2ppeer.ID, []byte, clparams.StateVersion) (*cltypes.SignedExecutionPayloadBid, error) {
+	return nil, nil
+}
+
+func (acceptingExecutionPayloadBidService) ProcessMessage(context.Context, *uint64, *cltypes.SignedExecutionPayloadBid) error {
+	return nil
+}
+
+func (acceptingExecutionPayloadBidService) ValidateBid(context.Context, *cltypes.SignedExecutionPayloadBid) error {
+	return nil
+}
 
 func TestStoreDataColumnSidecars(t *testing.T) {
 	ctrl := gomock.NewController(t)
@@ -200,6 +220,49 @@ func TestSelectGloasBidUsesValidBuilderWhenLocalBuildIsUnavailable(t *testing.T)
 
 	require.NotNil(t, selected)
 	require.Same(t, bid, selected.bid)
+}
+
+func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.beaconChainCfg.FuluForkEpoch = 0
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+	postState.GetBuilders().Append(&cltypes.Builder{Pubkey: common.Bytes48{0x42}})
+
+	baseRoot := common.Hash{0x41}
+	targetSlot := postState.Slot() + 1
+	forkchoiceStore.HeadVal = baseRoot
+	forkchoiceStore.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(nil, errors.New("local execution unavailable"))
+	handler.engine = engine
+
+	parentBid := postState.GetLatestExecutionPayloadBid()
+	externalBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 10)}
+	externalBid.Message.ParentBlockHash = parentBid.ParentBlockHash
+	externalBid.Message.ParentBlockRoot = baseRoot
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	builderClient.EXPECT().RequestExecutionPayloadBid(
+		gomock.Any(), "https://builder.example", targetSlot, parentBid.ParentBlockHash, baseRoot, gomock.Any(), gomock.Any(), gomock.Any(),
+	).Return(externalBid, nil)
+	handler.builderClient = builderClient
+	handler.executionPayloadBidService = acceptingExecutionPayloadBidService{}
+	options := &gloasBlockProductionOptions{builderConfig: &cltypes.BuilderConfig{Builders: []*cltypes.BuilderEntry{{
+		URL: "https://builder.example",
+		Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
+			Data: []byte("https://builder.example"), Slot: targetSlot,
+		}},
+		BuilderBoostFactor: 100,
+	}}}}
+	ctx := context.WithValue(t.Context(), gloasBlockProductionOptionsKey{}, options)
+
+	block, err := handler.produceBlock(ctx, 100, postState.Slot(), baseRoot, postState, targetSlot, common.Bytes96{}, common.Hash{})
+	require.NoError(t, err)
+	require.Same(t, externalBid, block.BeaconBody.SignedExecutionPayloadBid)
 }
 
 func TestSelectGloasBidCapsExecutionPaymentAndAvoidsOverflow(t *testing.T) {
@@ -372,6 +435,119 @@ func TestParseGloasPublishedBlockRejectsNonCanonicalSSZ(t *testing.T) {
 
 	_, err = h.parseGloasRequestBeaconBlock(clparams.GloasVersion, req)
 	require.Error(t, err)
+}
+
+func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	builderURL := "https://builder.example"
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	handler.builderRoutes.Add(blockRoot, &builderRoute{url: builderURL})
+	forwardedCh := make(chan struct{})
+	builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ string, forwarded *cltypes.SignedBeaconBlock) error {
+			require.Equal(t, block.Block.Slot, forwarded.Block.Slot)
+			close(forwardedCh)
+			return errors.New("builder unavailable")
+		},
+	)
+	handler.builderClient = builderClient
+
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	req.Header.Set("Eth-Builder-Url", builderURL)
+
+	_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+	require.NoError(t, err)
+	select {
+	case <-forwardedCh:
+	case <-time.After(time.Second):
+		t.Fatal("signed block was not forwarded to the winning builder")
+	}
+}
+
+func TestPostEthV2BeaconBlocksDoesNotForwardToUnboundBuilder(t *testing.T) {
+	for _, tc := range []struct {
+		name      string
+		headerURL string
+		routeURL  string
+		wrongRoot bool
+	}{
+		{name: "mismatched URL", headerURL: "https://attacker.example", routeURL: "https://builder.example"},
+		{name: "different block root", headerURL: "https://builder.example", routeURL: "https://builder.example", wrongRoot: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+			forkchoiceStore.OnTickFn = func(uint64) {}
+			handler.beaconChainCfg.GloasForkEpoch = 0
+			handler.beaconChainCfg.InitializeForkSchedule()
+			block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+			block.Block.Slot = 1
+			block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 1
+			body, err := json.Marshal(block)
+			require.NoError(t, err)
+			blockRoot, err := block.Block.HashSSZ()
+			require.NoError(t, err)
+			if tc.wrongRoot {
+				blockRoot = common.Hash{0xff}
+			}
+			route := &builderRoute{url: tc.routeURL}
+			handler.builderRoutes.Add(blockRoot, route)
+			handler.builderClient = builder_mock.NewMockBuilderClient(gomock.NewController(t))
+
+			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
+			req.Header.Set("Content-Type", "application/json")
+			req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+			req.Header.Set("Eth-Builder-Url", tc.headerURL)
+
+			_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+			require.NoError(t, err)
+			require.False(t, route.forwarded.Load())
+		})
+	}
+}
+
+func TestForwardPublishedBlockToBuilderOnlyOnce(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	builderURL := "https://builder.example"
+	handler.builderRoutes.Add(blockRoot, &builderRoute{url: builderURL})
+
+	ctrl := gomock.NewController(t)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	forwardedCh := make(chan struct{})
+	builderClient.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, block).DoAndReturn(
+		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+			close(forwardedCh)
+			return nil
+		},
+	)
+	handler.builderClient = builderClient
+
+	for range 32 {
+		handler.forwardPublishedBlockToBuilder(builderURL, block)
+	}
+	select {
+	case <-forwardedCh:
+	case <-time.After(time.Second):
+		t.Fatal("signed block was not forwarded")
+	}
 }
 
 func TestParseBlockPublishingValidationRejectsUnknownV2Value(t *testing.T) {

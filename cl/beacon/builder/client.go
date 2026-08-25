@@ -49,6 +49,7 @@ const (
 	maxBuilderResponseBodySize = 1 << 20
 	maxBuilderErrorBodySize    = 256
 	builderPreferencesTimeout  = time.Second
+	builderBeaconBlockTimeout  = time.Second
 	defaultBuilderCallLimit    = 32
 )
 
@@ -334,15 +335,17 @@ func (b *builderClient) SubmitSignedBeaconBlock(ctx context.Context, builderURL 
 	if err != nil {
 		return err
 	}
-	if err := b.builderAdmission().Acquire(ctx, 1); err != nil {
+	requestContext, cancel := context.WithTimeout(ctx, builderBeaconBlockTimeout)
+	defer cancel()
+	if err := b.builderAdmission().Acquire(requestContext, 1); err != nil {
 		return err
 	}
 	defer b.builderAdmission().Release(1)
-	target, err := b.builderEndpoint(ctx, BuilderTargetPolicy{}, builderURL, "eth", "v1", "builder", "beacon_blocks")
+	target, err := b.builderEndpoint(requestContext, BuilderTargetPolicy{}, builderURL, "eth", "v1", "builder", "beacon_blocks")
 	if err != nil {
 		return err
 	}
-	response, err := b.builderCall(ctx, http.MethodPost, target, map[string]string{
+	response, err := b.builderCall(requestContext, http.MethodPost, target, map[string]string{
 		"Eth-Consensus-Version": block.Version().String(),
 	}, bytes.NewReader(payload))
 	if err != nil {

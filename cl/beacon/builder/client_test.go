@@ -696,6 +696,18 @@ func TestSubmitSignedBeaconBlock(t *testing.T) {
 	require.NoError(t, client.SubmitSignedBeaconBlock(context.Background(), "https://builder.example", block))
 }
 
+func TestSubmitSignedBeaconBlockHasHotPathDeadline(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	client := publicBuilderTestClient(mockRoundTripper(func(r *http.Request) (*http.Response, error) {
+		deadline, ok := r.Context().Deadline()
+		require.True(t, ok)
+		require.LessOrEqual(t, time.Until(deadline), builderBeaconBlockTimeout)
+		return nil, errors.New("builder unavailable")
+	}))
+
+	require.Error(t, client.SubmitSignedBeaconBlock(context.Background(), "https://builder.example", block))
+}
+
 func validBuilderRequestAuth() *cltypes.SignedBuilderRequestAuth {
 	return &cltypes.SignedBuilderRequestAuth{
 		Message: &cltypes.BuilderRequestAuth{Data: []byte("builder-auth"), Slot: 12},
