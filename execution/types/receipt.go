@@ -209,18 +209,15 @@ func (r *Receipt) decodeTyped(b []byte) error {
 	if len(b) <= 1 {
 		return errShortTypedReceipt
 	}
-	switch b[0] {
-	case DynamicFeeTxType, AccessListTxType, BlobTxType, SetCodeTxType:
-		var data receiptRLP
-		err := rlp.DecodeBytes(b[1:], &data)
-		if err != nil {
-			return err
-		}
-		r.Type = b[0]
-		return r.setFromRLP(data)
-	default:
+	if !knownTypedTxType(b[0]) {
 		return ErrTxTypeNotSupported
 	}
+	var data receiptRLP
+	if err := rlp.DecodeBytes(b[1:], &data); err != nil {
+		return err
+	}
+	r.Type = b[0]
+	return r.setFromRLP(data)
 }
 
 func (r *Receipt) decodePayload(s *rlp.Stream) error {
@@ -303,14 +300,12 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 			return fmt.Errorf("read typed receipt: %w", err)
 		}
 		r.Type = b[0]
-		switch r.Type {
-		case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType:
-			inner := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
-			if err := r.decodePayload(inner); err != nil {
-				return err
-			}
-		default:
+		if !knownTypedTxType(r.Type) {
 			return ErrTxTypeNotSupported
+		}
+		inner := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
+		if err := r.decodePayload(inner); err != nil {
+			return err
 		}
 	default:
 		return rlp.ErrExpectedList
@@ -527,36 +522,19 @@ func (rs Receipts) Copy() Receipts {
 func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 	r := rs[i]
 	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
-	switch r.Type {
-	case LegacyTxType:
+	if r.Type == LegacyTxType {
 		if err := rlp.Encode(w, data); err != nil {
 			panic(err)
 		}
-	case AccessListTxType:
-		//nolint:errcheck
-		w.WriteByte(AccessListTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	case DynamicFeeTxType:
-		w.WriteByte(DynamicFeeTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	case BlobTxType:
-		w.WriteByte(BlobTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	case SetCodeTxType:
-		w.WriteByte(SetCodeTxType)
-		if err := rlp.Encode(w, data); err != nil {
-			panic(err)
-		}
-	default:
-		// For unsupported types, write nothing. Since this is for
-		// DeriveSha, the error will be caught matching the derived hash
-		// to the block.
+		return
+	}
+	if !knownTypedTxType(r.Type) {
+		// Fail where the type is visible; the alternative surfaces as a
+		// receipts-root mismatch that names nothing.
+		panic(fmt.Sprintf("types: Receipts.EncodeIndex: unknown transaction type %d", r.Type))
+	}
+	if err := r.encodeTyped(data, w); err != nil {
+		panic(err)
 	}
 }
 

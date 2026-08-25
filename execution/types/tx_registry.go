@@ -47,8 +47,7 @@ var (
 // or was already registered, and if spec.New is nil — all programming errors
 // caught at init time.
 func RegisterTxType(id byte, spec TxTypeSpec) {
-	switch id {
-	case LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType:
+	if builtinTxType(id) {
 		panic(fmt.Sprintf("types: RegisterTxType: %d collides with a built-in transaction type", id))
 	}
 	if id >= 0x80 {
@@ -72,4 +71,26 @@ func registeredTxType(id byte) (TxTypeSpec, bool) {
 	defer txTypeRegistryMu.RUnlock()
 	spec, ok := txTypeRegistry[id]
 	return spec, ok
+}
+
+func builtinTxType(id byte) bool {
+	switch id {
+	case LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType:
+		return true
+	}
+	return false
+}
+
+// knownTypedTxType reports whether id is an EIP-2718 typed transaction type
+// this build knows: built-in or externally registered. Legacy is excluded — it
+// carries no type byte.
+func knownTypedTxType(id byte) bool {
+	if id == LegacyTxType {
+		return false
+	}
+	if builtinTxType(id) {
+		return true
+	}
+	_, ok := registeredTxType(id)
+	return ok
 }

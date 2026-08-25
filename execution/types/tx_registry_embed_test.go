@@ -139,4 +139,30 @@ func TestExternalPackageTxTypeEndToEnd(t *testing.T) {
 	got, err := types.Signer{}.SenderWithContext(nil, decoded)
 	require.NoError(t, err)
 	require.Equal(t, want, got)
+
+	receipt := &types.Receipt{
+		Type:              externalTxType,
+		Status:            types.ReceiptStatusSuccessful,
+		CumulativeGasUsed: 21000,
+		Logs: []*types.Log{{
+			Address: common.BytesToAddress([]byte{0x11}),
+			Topics:  []common.Hash{common.HexToHash("dead")},
+			Data:    []byte{0xff},
+		}},
+	}
+	receipt.Bloom = types.CreateBloom(types.Receipts{receipt})
+
+	binary, err := receipt.MarshalBinary()
+	require.NoError(t, err)
+	require.Equal(t, byte(externalTxType), binary[0])
+
+	var indexed bytes.Buffer
+	types.Receipts{receipt}.EncodeIndex(0, &indexed)
+	require.Equal(t, binary, indexed.Bytes())
+
+	gotReceipt := new(types.Receipt)
+	require.NoError(t, gotReceipt.UnmarshalBinary(binary))
+	require.Equal(t, receipt.Type, gotReceipt.Type)
+	require.Equal(t, receipt.CumulativeGasUsed, gotReceipt.CumulativeGasUsed)
+	require.Equal(t, receipt.Logs, gotReceipt.Logs)
 }
