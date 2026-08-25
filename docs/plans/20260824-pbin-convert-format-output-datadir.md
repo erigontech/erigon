@@ -237,16 +237,16 @@ datadir both require a legacy `KeyCommitmentState` blob, and `pbinStateMarker`,
 - Modify: `execution/commitment/pbin_convert_legacy.go`
 - Modify: `execution/commitment/pbin_convert_legacy_test.go`
 
-- [ ] write a failing test that `CompareLegacy` accepts a legacy record with its correct
+- [x] write a failing test that `CompareLegacy` accepts a legacy record with its correct
       conversion and rejects a mismatched pair
-- [ ] add `func (c *PBinRecordConverter) CompareLegacy(key, legacy, current []byte) error`,
+- [x] add `func (c *PBinRecordConverter) CompareLegacy(key, legacy, current []byte) error`,
       decoding each side with its own reader and comparing cells internally so `pbinCell`
       stays unexported
-- [ ] write a failing test that `LegacyStateRoot` returns the root hash from a legacy state
+- [x] write a failing test that `LegacyStateRoot` returns the root hash from a legacy state
       blob built by `PBinEncodeLegacyState`, which `SetState` refuses
-- [ ] add `func (c *PBinRecordConverter) LegacyStateRoot(blob []byte) ([]byte, error)`
-- [ ] write tests for both on malformed input
-- [ ] run `go test ./execution/commitment/ -count=1` — must pass before task 3
+- [x] add `func (c *PBinRecordConverter) LegacyStateRoot(blob []byte) ([]byte, error)`
+- [x] write tests for both on malformed input
+- [x] run `go test ./execution/commitment/ -count=1` — must pass before task 3
 
 ### Task 3: Command surface, output datadir, and migrations off
 

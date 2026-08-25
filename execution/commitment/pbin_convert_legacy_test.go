@@ -219,3 +219,86 @@ func TestPBinEncodeLegacyStateRejectsMalformedInput(t *testing.T) {
 		})
 	}
 }
+
+func TestPBinCompareLegacyMatchesAndRejectsMismatch(t *testing.T) {
+	t.Parallel()
+
+	path := pbinTestKeyPrefix(pbinTestBaseStorageKey(), 8)
+	key := pbinEncodeBitPath(&path)
+	cells := [2]pbinCell{
+		pbinTestBranchCell(0xA5, 3),
+		pbinTestChunkLeafCell(0x5A, 7),
+	}
+	var enc pbinBranchEncoder
+	current, err := enc.encode(pbinCellBits, pbinCellBits, &cells)
+	require.NoError(t, err)
+	legacy, err := PBinEncodeLegacyRecord(key, current)
+	require.NoError(t, err)
+
+	converter := NewPBinRecordConverter()
+	require.NoError(t, converter.CompareLegacy(key, legacy, current))
+
+	mismatched := append([]byte(nil), current...)
+	mismatched[len(mismatched)-1]++
+	require.Error(t, converter.CompareLegacy(key, legacy, mismatched))
+}
+
+func TestPBinCompareLegacyRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
+
+	path := pbinTestKeyPrefix(pbinTestBaseStorageKey(), 8)
+	key := pbinEncodeBitPath(&path)
+	converter := NewPBinRecordConverter()
+
+	require.Error(t, converter.CompareLegacy(key, []byte{0}, []byte{}))
+	require.Error(t, converter.CompareLegacy(key, []byte{}, []byte{byte(pbinFieldBranch)}))
+	require.Error(t, converter.CompareLegacy([]byte{0}, []byte{}, []byte{}))
+}
+
+func TestPBinLegacyStateRoot(t *testing.T) {
+	t.Parallel()
+
+	base := pbinTestBaseStorageKey()
+	a := pbinTestStorageLeaf(base, 0x33)
+	b := pbinTestStorageLeaf(pbinTestTreeKeyFlipped(t, base, 64), 0x44)
+
+	ms := NewMockState(t)
+	pbinTestPutState(t, ms, a, b)
+	pph := NewPBinPatriciaHashed(ms)
+	left, right := pbinTestBranchOrder(t, a, b, 64)
+	cells := [2]pbinCell{left.recordCell(t, 65), right.recordCell(t, 65)}
+	pbinTestSeedRow(pph, pbinTestKeyPrefix(a.treeKey, 64), 65, cells, pbinCellBits, pbinCellBits)
+	require.NoError(t, pph.fold())
+
+	current, err := pph.EncodeCurrentState(nil)
+	require.NoError(t, err)
+	want, err := pph.RootHash()
+	require.NoError(t, err)
+	legacy, err := PBinEncodeLegacyState(current)
+	require.NoError(t, err)
+
+	fresh := NewPBinPatriciaHashed(ms)
+	require.Error(t, fresh.SetState(legacy))
+
+	got, err := NewPBinRecordConverter().LegacyStateRoot(legacy)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestPBinLegacyStateRootRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
+
+	converter := NewPBinRecordConverter()
+	for name, blob := range map[string][]byte{
+		"empty":          nil,
+		"marker only":    {pbinStateMarker},
+		"current header": {pbinStateMarker, pbinRecordFormat},
+		"truncated root": {pbinStateMarker, 0, 0, 0, 1},
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := converter.LegacyStateRoot(blob)
+			require.Error(t, err)
+		})
+	}
+}

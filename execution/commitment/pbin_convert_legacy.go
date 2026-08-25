@@ -203,6 +203,31 @@ func (c *PBinRecordConverter) ConvertBranch(key, data []byte) ([]byte, error) {
 	return out, nil
 }
 
+// CompareLegacy checks that a current record preserves the cells in its legacy
+// spelling. key supplies the depth needed to reconstruct omitted storage prefixes.
+func (c *PBinRecordConverter) CompareLegacy(key, legacy, current []byte) error {
+	path, err := pbinDecodeBitPath(key)
+	if err != nil {
+		return fmt.Errorf("pbin compare: record key %x: %w", key, err)
+	}
+
+	var legacyCells [2]pbinCell
+	if _, _, err = pbinLegacyDecodeBranch(legacy, &legacyCells); err != nil {
+		return fmt.Errorf("pbin compare: legacy record at %x: %w", key, err)
+	}
+
+	var currentCells [2]pbinCell
+	if _, err = pbinDecodeBranch(current, &currentCells, path.bitLen+1, &c.keys); err != nil {
+		return fmt.Errorf("pbin compare: current record at %x: %w", key, err)
+	}
+	for bit := range legacyCells {
+		if legacyCells[bit] != currentCells[bit] {
+			return fmt.Errorf("pbin compare: record at %x cell %d does not match", key, bit)
+		}
+	}
+	return nil
+}
+
 // ConvertState rewrites the trie state blob, which gains the format byte and
 // loses the field lengths inside its root cell.
 func (c *PBinRecordConverter) ConvertState(blob []byte) ([]byte, error) {
@@ -237,6 +262,40 @@ func (c *PBinRecordConverter) ConvertState(blob []byte) ([]byte, error) {
 	}
 	binary.BigEndian.PutUint16(out[3:5], uint16(len(out)-5))
 	return out, nil
+}
+
+// LegacyStateRoot hashes the root cell in a pre-version state blob without
+// restoring it into an engine that only accepts the current format.
+func (c *PBinRecordConverter) LegacyStateRoot(blob []byte) ([]byte, error) {
+	if len(blob) < 4 || blob[0] != pbinStateMarker {
+		return nil, fmt.Errorf("%w: not a legacy pbin blob", errPBinStateBlob)
+	}
+	flags := blob[1]
+	if flags&^byte(pbinStateFlagsAll) != 0 {
+		return nil, fmt.Errorf("%w: unknown flags %08b", errPBinStateBlob, flags)
+	}
+	rootLen := int(binary.BigEndian.Uint16(blob[2:4]))
+	if len(blob) != 4+rootLen {
+		return nil, fmt.Errorf("%w: root cell of %d bytes in a %d-byte blob", errPBinStateBlob, rootLen, len(blob))
+	}
+
+	var root pbinCell
+	if rootLen > 0 {
+		pos, err := pbinLegacyDecodeCell(blob, 4, &root)
+		if err != nil {
+			return nil, fmt.Errorf("pbin compare: state root cell: %w", err)
+		}
+		if pos != len(blob) {
+			return nil, fmt.Errorf("%w: %d trailing bytes after the root cell", errPBinStateBlob, len(blob)-pos)
+		}
+	}
+
+	hasher := pbinHasher{sum: c.keys.sum}
+	hash, err := hasher.cellHash(&root, new(pbinBitpath))
+	if err != nil {
+		return nil, fmt.Errorf("pbin compare: state root: %w", err)
+	}
+	return hash[:], nil
 }
 
 func pbinLegacyDecodeBranch(data []byte, cells *[2]pbinCell) (touchMap, afterMap uint16, err error) {
