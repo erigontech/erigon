@@ -274,7 +274,7 @@ func (c *GenericCache[T]) maybeGrow() {
 	}
 	copied, evicted := 0, 0
 	for _, k := range old.lru.Keys() {
-		if v, ok := old.lru.Get(k); ok {
+		if v, ok := old.lru.Peek(k); ok {
 			if next.add(k, v) {
 				evicted++
 			}
