@@ -426,7 +426,7 @@ func RPCMarshalHeader(head *types.Header) map[string]any {
 // returned. When fullTx is true the returned block contains full transaction details, otherwise it will only contain
 // transaction hashes.
 func RPCMarshalBlockDeprecated(block *types.Block, inclTx bool, fullTx bool) (map[string]any, error) {
-	fields := RPCMarshalHeader(block.HeaderNoCopy())
+	fields := RPCMarshalHeader(block.Header())
 	fields["size"] = hexutil.Uint64(block.Size())
 	if _, ok := fields["transactions"]; !ok {
 		fields["transactions"] = make([]any, 0)
