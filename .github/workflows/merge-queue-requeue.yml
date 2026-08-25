@@ -1,0 +1,44 @@
+name: Merge Queue Requeue
+
+# Puts a PR back into the merge queue when the queue evicted it because of a
+# CI infrastructure failure (dead runner, broken runner network) rather than a
+# failure of the PR's own checks. Classification, guard rails, and the re-queue
+# rate limit live in scripts/merge-queue-requeue.sh.
+#
+# pull_request_target rather than pull_request: `dequeued` must run the
+# default-branch workflow with a writable token for the enqueue mutation. The
+# job only calls the GitHub API and never checks out or executes PR head code.
+
+on:
+  pull_request_target:
+    types:
+      - dequeued
+
+permissions:
+  actions: read
+  checks: read
+  contents: write
+  pull-requests: write
+
+# Serialize per PR so repeated dequeue events cannot race the rate limit.
+concurrency:
+  group: ${{ github.workflow }}-${{ github.event.pull_request.number }}
+
+jobs:
+  requeue:
+    runs-on: ubuntu-latest
+    timeout-minutes: 10
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v7
+        with:
+          fetch-depth: 1
+          persist-credentials: false
+
+      - name: Classify the eviction and re-queue
+        env:
+          GH_TOKEN: ${{ github.token }}
+          PR_NUMBER: ${{ github.event.pull_request.number }}
+          PR_NODE_ID: ${{ github.event.pull_request.node_id }}
+          DEQUEUE_REASON: ${{ github.event.reason }}
+        run: bash .github/workflows/scripts/merge-queue-requeue.sh

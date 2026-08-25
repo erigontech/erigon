@@ -48,3 +48,10 @@ rules:
   concurrency-limits:
     ignore:
       - ci-cd-main-branch-docker-images.yml
+
+  # merge-queue-requeue reacts to `dequeued` events, which need the
+  # default-branch workflow and a writable token (enqueuePullRequest). The job
+  # only calls the GitHub API; it never checks out or executes PR head code.
+  dangerous-triggers:
+    ignore:
+      - merge-queue-requeue.yml
