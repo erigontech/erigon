@@ -21,6 +21,7 @@ import (
 	"errors"
 	"sync/atomic"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/require"
 	"go.uber.org/mock/gomock"
@@ -109,6 +110,70 @@ func TestBlobHistoryDownloaderStopsWhenPeersDisappear(t *testing.T) {
 	require.Zero(t, peers.requests)
 	require.False(t, notified)
 	require.Zero(t, downloader.nextBackfillTargetSlot)
+}
+
+func TestBlobHistoryDownloaderRetryRechecksPeersBeforeDenebRequest(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(0), nil).AnyTimes()
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	block.Block.Slot = 20
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	ctx, cancel := context.WithCancel(t.Context())
+	downloader := newBoundaryDownloader(t, block.GetSlot(), 0, block.GetSlot(), &boundaryBlockReader{block: block})
+	downloader.ctx = ctx
+	peers := &boundarySequencePeerCounter{counts: []uint64{1, 0}, onRequest: cancel}
+	downloader.rpc = peers
+	downloader.blobStorage = blobStorage
+	downloader.addRetrySlot(block.GetSlot())
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.GreaterOrEqual(t, peers.calls, 2)
+	require.Zero(t, peers.requests)
+	require.Equal(t, []blobRetryRange{{start: block.GetSlot(), end: block.GetSlot(), cursor: block.GetSlot()}}, downloader.retryRanges)
+}
+
+func TestBlobHistoryDownloaderRechecksPeersBeforeFuluRecovery(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	peerDas := mock_services.NewMockPeerDas(ctrl)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Slot = 20
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	downloader := newBoundaryDownloader(t, block.GetSlot(), 0, block.GetSlot(), &boundaryBlockReader{block: block})
+	peers := &boundarySequencePeerCounter{counts: []uint64{1, 1, 0}}
+	downloader.rpc = peers
+	downloader.blobStorage = blobStorage
+	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
+	downloader.columnBackfillTimeout = time.Second
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.GreaterOrEqual(t, peers.calls, 3)
+	require.Equal(t, []blobRetryRange{{start: block.GetSlot(), end: block.GetSlot(), cursor: block.GetSlot()}}, downloader.retryRanges)
+}
+
+func TestBlobHistoryDownloaderRechecksPeersAfterFuluCleanup(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	blobStorage := blobstoragemock.NewMockBlobStorage(ctrl)
+	blobStorage.EXPECT().KzgCommitmentsCount(gomock.Any(), gomock.Any()).Return(uint32(1), nil).AnyTimes()
+	blobStorage.EXPECT().RemoveBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return(nil)
+	peerDas := mock_services.NewMockPeerDas(ctrl)
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.FuluVersion)
+	block.Block.Slot = 20
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
+	downloader := newBoundaryDownloader(t, block.GetSlot(), 0, block.GetSlot(), &boundaryBlockReader{block: block})
+	peers := &boundarySequencePeerCounter{counts: []uint64{1, 1, 1, 0}}
+	downloader.rpc = peers
+	downloader.blobStorage = blobStorage
+	downloader.peerDasGetter = staticPeerDasGetter{pd: peerDas}
+	downloader.columnBackfillTimeout = time.Second
+
+	require.NoError(t, downloader.downloadOnce(false))
+	require.GreaterOrEqual(t, peers.calls, 4)
+	require.Equal(t, []blobRetryRange{{start: block.GetSlot(), end: block.GetSlot(), cursor: block.GetSlot()}}, downloader.retryRanges)
 }
 
 func TestBlobHistoryDownloaderLocalOnlyPassChecksPeersOnce(t *testing.T) {
@@ -432,9 +497,10 @@ func (p boundaryPeerCounter) SendBlobsSidecarByIdentifierReq(context.Context, *s
 }
 
 type boundarySequencePeerCounter struct {
-	counts   []uint64
-	calls    int
-	requests int
+	counts    []uint64
+	calls     int
+	requests  int
+	onRequest func()
 }
 
 func (p *boundarySequencePeerCounter) Peers() (uint64, error) {
@@ -445,6 +511,9 @@ func (p *boundarySequencePeerCounter) Peers() (uint64, error) {
 
 func (p *boundarySequencePeerCounter) SendBlobsSidecarByIdentifierReq(context.Context, *solid.ListSSZ[*cltypes.BlobIdentifier]) ([]*cltypes.BlobSidecar, string, error) {
 	p.requests++
+	if p.onRequest != nil {
+		p.onRequest()
+	}
 	return nil, "", nil
 }
 

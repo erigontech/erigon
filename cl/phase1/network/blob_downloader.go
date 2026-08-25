@@ -631,6 +631,10 @@ func (b *BlobHistoryDownloader) recoverDenebBlobs(blocks []*cltypes.SignedBeacon
 		}
 		return false
 	}
+	if !b.peersAvailable() {
+		b.addRetryBlocks(requestedBlocks)
+		return false
+	}
 	_, err = requestBlobsForBackfill(b.ctx, b.rpc, batch.remaining, func(ctx context.Context, candidate *PeerAndSidecars) (bool, bool, error) {
 		progress, err := batch.validate(candidate.requested, candidate.Responses)
 		if err != nil {
@@ -853,11 +857,21 @@ func (b *BlobHistoryDownloader) recoverFuluColumns(blocks []*cltypes.SignedBeaco
 			cancel()
 			continue
 		}
+		if !b.peersAvailable() {
+			cancel()
+			b.addRetryBlocks(blocks[i:])
+			return false
+		}
 		if stored > 0 {
 			if err := b.blobStorage.RemoveBlobSidecars(ctx, block.GetSlot(), blockRoot); err != nil {
 				cancel()
 				b.addRetryBlocks(blocks[i:])
 				b.logger.Warn("[BlobHistoryDownloader] Failed to clear incomplete blob storage", "err", err, "slot", block.GetSlot())
+				return false
+			}
+			if !b.peersAvailable() {
+				cancel()
+				b.addRetryBlocks(blocks[i:])
 				return false
 			}
 		}

@@ -63,6 +63,7 @@ func TestBlobHistoryDownloaderFuluColumnRecoveryIsBounded(t *testing.T) {
 
 	b := &BlobHistoryDownloader{
 		ctx:                   context.Background(),
+		rpc:                   boundaryPeerCounter(1),
 		blobStorage:           blobStorage,
 		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
 		columnBackfillTimeout: 50 * time.Millisecond,
@@ -101,6 +102,7 @@ func TestBlobHistoryDownloaderFuluInitialStorageCheckUsesBlockTimeout(t *testing
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 	downloader := &BlobHistoryDownloader{
 		ctx:                   ctx,
+		rpc:                   boundaryPeerCounter(1),
 		blobStorage:           blobStorage,
 		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
 		columnBackfillTimeout: 20 * time.Millisecond,
@@ -192,6 +194,7 @@ func TestBlobHistoryDownloaderCompletedFuluRecoveryMeetsDurablePostcondition(t *
 	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{storedFuluSidecar(block, 0)}, true, nil)
 	downloader := &BlobHistoryDownloader{
 		ctx:                   t.Context(),
+		rpc:                   boundaryPeerCounter(1),
 		blobStorage:           blobStorage,
 		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
 		columnBackfillTimeout: time.Second,
@@ -221,6 +224,7 @@ func TestBlobHistoryDownloaderFuluRecoveryWaitsForAsyncPersistence(t *testing.T)
 	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{storedFuluSidecar(block, 0)}, true, nil)
 	downloader := &BlobHistoryDownloader{
 		ctx:                   t.Context(),
+		rpc:                   boundaryPeerCounter(1),
 		blobStorage:           blobStorage,
 		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
 		columnBackfillTimeout: time.Second,
@@ -248,6 +252,7 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsStaleCommitmentCount(t *testing
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 	downloader := &BlobHistoryDownloader{
 		ctx:                   t.Context(),
+		rpc:                   boundaryPeerCounter(1),
 		blobStorage:           blobStorage,
 		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
 		columnBackfillTimeout: time.Nanosecond,
@@ -266,6 +271,7 @@ func TestBlobHistoryDownloaderFuluTransientReadErrorDoesNotRemoveStorage(t *test
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 	downloader := &BlobHistoryDownloader{
 		ctx:                   t.Context(),
+		rpc:                   boundaryPeerCounter(1),
 		blobStorage:           blobStorage,
 		columnBackfillTimeout: time.Second,
 		logger:                log.New(),
@@ -289,6 +295,7 @@ func TestBlobHistoryDownloaderFuluRecoveryClearsPartialCommitmentCount(t *testin
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 	downloader := &BlobHistoryDownloader{
 		ctx:                   t.Context(),
+		rpc:                   boundaryPeerCounter(1),
 		blobStorage:           blobStorage,
 		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
 		columnBackfillTimeout: time.Nanosecond,
@@ -313,6 +320,7 @@ func TestBlobHistoryDownloaderFuluRecoveryClearsExcessCommitmentCount(t *testing
 	block.GetBlobKzgCommitments().Append(&cltypes.KZGCommitment{})
 	downloader := &BlobHistoryDownloader{
 		ctx:                   t.Context(),
+		rpc:                   boundaryPeerCounter(1),
 		blobStorage:           blobStorage,
 		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
 		columnBackfillTimeout: time.Nanosecond,
@@ -554,6 +562,7 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsInvalidStoredSidecars(t *testin
 			blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{sidecar}, true, nil)
 			downloader := &BlobHistoryDownloader{
 				ctx:                   t.Context(),
+				rpc:                   boundaryPeerCounter(1),
 				blobStorage:           blobStorage,
 				peerDasGetter:         staticPeerDasGetter{pd: peerDas},
 				columnBackfillTimeout: time.Nanosecond,
@@ -581,6 +590,7 @@ func TestBlobHistoryDownloaderFuluRecoveryRejectsFailedStoredSidecarVerification
 	blobStorage.EXPECT().ReadBlobSidecars(gomock.Any(), gomock.Any(), gomock.Any()).Return([]*cltypes.BlobSidecar{storedFuluSidecar(block, 0)}, true, nil)
 	downloader := &BlobHistoryDownloader{
 		ctx:                   t.Context(),
+		rpc:                   boundaryPeerCounter(1),
 		blobStorage:           blobStorage,
 		peerDasGetter:         staticPeerDasGetter{pd: peerDas},
 		columnBackfillTimeout: time.Nanosecond,
