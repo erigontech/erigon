@@ -67,10 +67,10 @@ type BackwardBeaconDownloader struct {
 	beaconCfg      *clparams.BeaconChainConfig
 	// [New in Gloas:EIP7732] highest block from the previous batch, used as lookahead
 	// to determine FULL/EMPTY status of the highest block in the current batch.
-	prevBatchTopBlock *cltypes.SignedBeaconBlock
-	httpFallbackURL   string      // beacon API base URL for HTTP fallback when P2P fails
-	httpPreferred     atomic.Bool // set after first HTTP success; skips P2P probing
-	initialExecution  atomic.Pointer[initialExecutionBlock]
+	prevBatchTopBlock    *cltypes.SignedBeaconBlock
+	httpFallbackURL      string      // beacon API base URL for HTTP fallback when P2P fails
+	httpPreferred        atomic.Bool // set after first HTTP success; skips P2P probing
+	deferredEnvelopeRoot atomic.Pointer[common.Hash]
 
 	// Confirmed FULL blocks processed without envelopes are collected for recovery.
 	skippedFullBlocks []SkippedFullBlock
@@ -82,11 +82,6 @@ type BackwardBeaconDownloader struct {
 type SkippedFullBlock struct {
 	Block *cltypes.SignedBeaconBlock
 	Root  [32]byte
-}
-
-type initialExecutionBlock struct {
-	beaconBlockRoot common.Hash
-	blockHash       common.Hash
 }
 
 func NewBackwardBeaconDownloader(ctx context.Context, rpc *rpc.BeaconRpcP2P, sn *freezeblocks.CaplinSnapshots, engine execution_client.ExecutionEngine, db kv.RwDB, beaconCfg *clparams.BeaconChainConfig) *BackwardBeaconDownloader {
@@ -121,9 +116,9 @@ func (b *BackwardBeaconDownloader) SetExpectedRoot(root common.Hash) {
 	b.expectedRoot = root
 }
 
-// SetInitialExecutionBlockHash seeds the first block's FULL/EMPTY classification from its trusted state.
-func (b *BackwardBeaconDownloader) SetInitialExecutionBlockHash(beaconBlockRoot, blockHash common.Hash) {
-	b.initialExecution.Store(&initialExecutionBlock{beaconBlockRoot: beaconBlockRoot, blockHash: blockHash})
+// SetInitialBlockEnvelopeDeferred delegates the starting anchor's envelope to checkpoint recovery.
+func (b *BackwardBeaconDownloader) SetInitialBlockEnvelopeDeferred(beaconBlockRoot common.Hash) {
+	b.deferredEnvelopeRoot.Store(&beaconBlockRoot)
 }
 
 // SetExpectedRoot sets the expected root we expect to download.
@@ -372,7 +367,7 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 				log.Debug("[BackwardBeaconDownloader] block matched via root lookup", "slot", block.Block.Slot, "root", common.Hash(blockRoot))
 
 				var envelope *cltypes.SignedExecutionPayloadEnvelope
-				fetchRoots, fullRoots := determineGloasEnvelopeRootsWithSeed([]*cltypes.SignedBeaconBlock{block}, b.prevBatchTopBlock, b.initialExecution.Load())
+				fetchRoots, fullRoots := determineGloasEnvelopeRootsWithDeferredRoot([]*cltypes.SignedBeaconBlock{block}, b.prevBatchTopBlock, b.deferredEnvelopeRoot.Load())
 				shouldFetch := slices.Contains(fetchRoots, blockRoot)
 				isFull := slices.Contains(fullRoots, blockRoot)
 				if shouldFetch {
@@ -413,10 +408,10 @@ func (b *BackwardBeaconDownloader) processResponses(ctx context.Context, respons
 
 // determineGloasEnvelopeRoots separates optimistic fetches from lookahead-confirmed FULL roots.
 func determineGloasEnvelopeRoots(responses []*cltypes.SignedBeaconBlock, prevBatchTopBlock *cltypes.SignedBeaconBlock) (fetchRoots, fullRoots [][32]byte) {
-	return determineGloasEnvelopeRootsWithSeed(responses, prevBatchTopBlock, nil)
+	return determineGloasEnvelopeRootsWithDeferredRoot(responses, prevBatchTopBlock, nil)
 }
 
-func determineGloasEnvelopeRootsWithSeed(responses []*cltypes.SignedBeaconBlock, prevBatchTopBlock *cltypes.SignedBeaconBlock, initialExecution *initialExecutionBlock) (fetchRoots, fullRoots [][32]byte) {
+func determineGloasEnvelopeRootsWithDeferredRoot(responses []*cltypes.SignedBeaconBlock, prevBatchTopBlock *cltypes.SignedBeaconBlock, deferredEnvelopeRoot *common.Hash) (fetchRoots, fullRoots [][32]byte) {
 	for i, block := range responses {
 		if block.Version() < clparams.GloasVersion {
 			continue
@@ -437,12 +432,7 @@ func determineGloasEnvelopeRootsWithSeed(responses []*cltypes.SignedBeaconBlock,
 			if err != nil {
 				continue
 			}
-			if initialExecution != nil && initialExecution.beaconBlockRoot == root {
-				if initialExecution.blockHash == bid.Message.BlockHash {
-					fetchRoots = append(fetchRoots, root)
-					fullRoots = append(fullRoots, root)
-				}
-			} else {
+			if deferredEnvelopeRoot == nil || *deferredEnvelopeRoot != root {
 				fetchRoots = append(fetchRoots, root)
 			}
 			continue
@@ -465,13 +455,13 @@ func determineGloasFullRoots(responses []*cltypes.SignedBeaconBlock, prevBatchTo
 }
 
 // fetchGloasEnvelopes determines which GLOAS blocks in the batch are FULL and fetches their envelopes.
-// It returns envelopes, attempted roots, and roots confirmed FULL by lookahead or the initial state.
+// It returns envelopes, attempted roots, and roots confirmed FULL by lookahead.
 func (b *BackwardBeaconDownloader) fetchGloasEnvelopes(ctx context.Context, responses []*cltypes.SignedBeaconBlock) (map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope, map[common.Hash]struct{}, map[common.Hash]struct{}) {
 	if len(responses) == 0 {
 		return nil, nil, nil
 	}
 
-	fetchRoots, fullRoots := determineGloasEnvelopeRootsWithSeed(responses, b.prevBatchTopBlock, b.initialExecution.Load())
+	fetchRoots, fullRoots := determineGloasEnvelopeRootsWithDeferredRoot(responses, b.prevBatchTopBlock, b.deferredEnvelopeRoot.Load())
 	fetchRootSet := make(map[common.Hash]struct{}, len(fetchRoots))
 	for _, r := range fetchRoots {
 		fetchRootSet[common.Hash(r)] = struct{}{}
@@ -630,6 +620,10 @@ func (b *BackwardBeaconDownloader) trySkipToExistingBlock(ctx context.Context) e
 // canSkipSlot checks if we can skip to an existing block at the given slot.
 func (b *BackwardBeaconDownloader) canSkipSlot(ctx context.Context, tx kv.Tx, elFrozenBlocks, clFrozenBlocks, slot uint64) bool {
 	if slot <= clFrozenBlocks {
+		return false
+	}
+	if b.beaconCfg != nil && b.beaconCfg.SlotsPerEpoch > 0 &&
+		b.beaconCfg.GetCurrentStateVersion(slot/b.beaconCfg.SlotsPerEpoch) >= clparams.GloasVersion {
 		return false
 	}
 

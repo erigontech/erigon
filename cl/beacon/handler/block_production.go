@@ -2071,7 +2071,7 @@ func (a *ApiHandler) parseGloasRequestBeaconBlock(
 			return nil, err
 		}
 		// In GLOAS, SSZ payload is just SignedBeaconBlock (no KZGProofs/Blobs wrapper)
-		if err := signedBlock.DecodeSSZ(octect, int(version)); err != nil {
+		if err := signedBlock.DecodeSSZStrict(octect, int(version)); err != nil {
 			return nil, fmt.Errorf("ssz(%w)", err)
 		}
 		return &cltypes.DenebSignedBeaconBlock{
@@ -2266,15 +2266,15 @@ func publishSelfBuildEnvelopeAfterStorage(
 	envelopeSupplied bool,
 	publish func(context.Context) error,
 ) error {
+	if !envelopeSupplied {
+		return nil
+	}
 	publicationCtx, cancel := context.WithTimeout(context.WithoutCancel(ctx), 30*time.Second)
 	defer cancel()
 	select {
 	case err := <-blockStored:
 		if err != nil {
 			return fmt.Errorf("failed to store block and blobs: %w", err)
-		}
-		if !envelopeSupplied {
-			return nil
 		}
 		return publish(publicationCtx)
 	case <-publicationCtx.Done():

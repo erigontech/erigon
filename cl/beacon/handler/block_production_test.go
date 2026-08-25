@@ -19,6 +19,7 @@ package handler
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"encoding/json"
 	"errors"
 	"fmt"
@@ -298,6 +299,28 @@ func TestBroadcastSelfBuildEnvelopePublishesValidatedEnvelopeBeforePersistenceRe
 }
 
 func TestPublishSelfBuildEnvelopeAfterStorage(t *testing.T) {
+	t.Run("optional envelope absent does not wait for storage", func(t *testing.T) {
+		stored := make(chan error, 1)
+		done := make(chan error, 1)
+		called := false
+		go func() {
+			done <- publishSelfBuildEnvelopeAfterStorage(t.Context(), stored, false, func(context.Context) error {
+				called = true
+				return nil
+			})
+		}()
+
+		select {
+		case err := <-done:
+			require.NoError(t, err)
+			require.False(t, called)
+		case <-time.After(100 * time.Millisecond):
+			stored <- nil
+			require.NoError(t, <-done)
+			t.Fatal("canonical block publication waited for asynchronous storage without an envelope")
+		}
+	})
+
 	t.Run("optional envelope absent", func(t *testing.T) {
 		stored := make(chan error, 1)
 		stored <- nil
@@ -433,6 +456,43 @@ func TestParseGloasRequestBeaconBlockRejectsMalformedWrappedEnvelope(t *testing.
 	parsed, err := h.parseGloasRequestBeaconBlock(clparams.GloasVersion, request)
 	require.Error(t, err)
 	require.Nil(t, parsed)
+}
+
+func TestParseGloasRequestBeaconBlockRejectsNonCanonicalSSZ(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	const requestOffsetsSize = 20
+	requestsStart := len(encoded) - requestOffsetsSize
+	for offset := requestsStart; offset < len(encoded); offset += 4 {
+		binary.LittleEndian.PutUint32(encoded[offset:], requestOffsetsSize+1)
+	}
+	encoded = append(encoded, 0)
+
+	lax := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	require.NoError(t, lax.DecodeSSZ(encoded, int(clparams.GloasVersion)))
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(encoded))
+	request.Header.Set("Content-Type", "application/octet-stream")
+
+	parsed, err := (&ApiHandler{beaconChainCfg: cfg}).parseGloasRequestBeaconBlock(clparams.GloasVersion, request)
+	require.Error(t, err)
+	require.Nil(t, parsed)
+}
+
+func TestParseGloasRequestBeaconBlockAcceptsCanonicalSSZ(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.GloasVersion)
+	block.Block.Slot = 123
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(encoded))
+	request.Header.Set("Content-Type", "application/octet-stream")
+
+	parsed, err := (&ApiHandler{beaconChainCfg: cfg}).parseGloasRequestBeaconBlock(clparams.GloasVersion, request)
+	require.NoError(t, err)
+	require.Equal(t, uint64(123), parsed.SignedBlock.Block.Slot)
 }
 
 func TestPublishBlindedBlocksRejectsPreBellatrix(t *testing.T) {
