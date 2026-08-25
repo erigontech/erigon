@@ -170,20 +170,13 @@ func TestSelfDestructReceive(t *testing.T) {
 
 }
 
-// TestSelfDestructReceive's scenario — self-destruct then revive by value
-// transfer in one block — read back as a whole account rather than through
-// GetCode, which resolves separately and can already report empty while a stale
-// code hash survives on the record. A pre-block deploy leaves the reader no
-// in-block CodeHash cell to floor the destruct scan on, so both placements run.
+// Self-destruct then revive by value transfer in one block, read back as a whole
+// account: GetCode resolves separately and can report empty while a stale code
+// hash survives on the record. A pre-block deploy leaves no in-block CodeHash
+// cell to floor the destruct scan on, so both placements run.
 //
-// Each arm generates and inserts under the same executor, so the header root
-// check is self-consistent and cannot catch a serial-parallel divergence — the
-// per-field assertions are what compare the two.
-//
-// Executor choice is dbg.Exec3Parallel || cfg.experimentalBAL and
-// Exec3Parallel defaults true, so the driver has to flip it — clearing
-// experimentalBAL alone leaves the parallel executor running. Not safe to
-// t.Parallel.
+// Clearing experimentalBAL alone leaves the parallel executor running, so the
+// driver sets dbg.Exec3Parallel — which rules out t.Parallel.
 func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 	for _, tc := range []struct {
 		name           string
@@ -243,8 +236,7 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 					require.NoError(t, err)
 					block.AddTx(txn)
 
-					// Revive with a plain value transfer: no CREATE, so nothing writes a
-					// nonce or code hash and the pre-destruct cells stay the floor.
+					// A value transfer, not a redeploy: no CREATE writes a nonce or code hash.
 					txn, err = types.SignTx(
 						types.NewTransaction(block.TxNonce(address.Value()), contractAddress, uint256.NewInt(1000), 21000, uint256.NewInt(1), nil),
 						*signer, key)
@@ -269,11 +261,7 @@ func TestSelfDestructReceiveAccountRecord(t *testing.T) {
 				require.NoError(t, err)
 				require.Equal(t, accounts.EmptyCodeHash, hash, "the code hash must agree with the code")
 
-				// The transfer recreates the deleted account, so nonce 0. Parallel keeps
-				// the pre-destruct nonce when the deploy is in the same block — a
-				// writeset normalization divergence these readers do not decide,
-				// tracked in erigontech/erigon#23206. Pin it as it stands so the arm
-				// still fails when it moves.
+				// Parallel keeps the pre-destruct nonce for a same-block deploy, #23206.
 				wantNonce := uint64(0)
 				if tc.parallel && !tc.preBlockDeploy {
 					wantNonce = 1
