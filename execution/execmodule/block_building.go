@@ -220,6 +220,28 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	return &types.BlockWithReceipts{Block: block, Receipts: receipts}, true, nil
 }
 
+// SealBoundary is the marker-driven CLOSE (the UNIVERSAL block-production step). The boundary assembler
+// (the cocoon driver's commits handler) calls it when the block-end MARKER commits in consensus — on EVERY
+// node, decoupled from the CL role. It seals the pre-executed in-progress flashblock via assemblePreconfirmed
+// (zero re-execution) and stores it keyed by the block's PARENT hash, so the CL's GetAssembledBlock (proposer)
+// — riding behind — just RETRIEVES the already-sealed block instead of re-sealing it. Returns the sealed
+// block (or nil if there is no matching preconfirmed flashblock for these params). Acquires the semaphore.
+func (e *ExecModule) SealBoundary(ctx context.Context, params *builder.Parameters) (*types.BlockWithReceipts, error) {
+	if err := e.semaphore.Acquire(ctx, 1); err != nil {
+		return nil, err
+	}
+	defer e.semaphore.Release(1)
+	br, ok, err := e.assemblePreconfirmed(ctx, params)
+	if err != nil || !ok || br == nil {
+		return nil, err
+	}
+	e.pendingBoundaryMu.Lock()
+	e.preconfirmedByParent[params.ParentHash] = br
+	e.pendingBoundaryMu.Unlock()
+	e.logger.Info("[execmodule] boundary sealed at marker", "number", br.Block.NumberU64(), "hash", br.Block.Hash(), "parent", params.ParentHash)
+	return br, nil
+}
+
 // preconfirmAttrsMatch reports whether the accumulated in-progress header's proposer attributes equal the
 // FCU params, so the sealed header (in-progress header + computed output) is consistent with the block
 // the CL asked to assemble.
@@ -265,6 +287,9 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 	params, isBoundary := e.pendingBoundary[payloadID]
 	e.pendingBoundaryMu.Unlock()
 	if isBoundary {
+		// GetPayload just RETURNS the block the marker handler already sealed (SealBoundary) — it does NOT
+		// seal. AwaitBoundary drives the DAG so the marker commits (and the commits handler seals+stores);
+		// then the block is retrieved by its parent hash. The CL is riding behind the marker-driven close.
 		if err := e.boundaryAssembler.AwaitBoundary(ctx, params); err != nil {
 			// Marker not committed in time (e.g. a quiet DAG at boot). Drop it and return no block — the CL
 			// skips this slot and retries; nothing to canonicalise yet. Not fatal.
@@ -274,22 +299,20 @@ func (e *ExecModule) GetAssembledBlock(ctx context.Context, payloadID uint64) (A
 			e.logger.Info("[GetPayload] DAG boundary not ready, skipping slot", "payload", payloadID, "err", err)
 			return AssembledBlockResult{}, nil
 		}
-		if !e.semaphore.TryAcquire(1) {
-			return AssembledBlockResult{Busy: true}, nil
-		}
-		defer e.semaphore.Release(1)
 		e.pendingBoundaryMu.Lock()
-		delete(e.pendingBoundary, payloadID)
-		e.pendingBoundaryMu.Unlock()
-		br, ok, err := e.assemblePreconfirmed(ctx, params)
-		if err != nil {
-			return AssembledBlockResult{}, err
+		br, ready := e.preconfirmedByParent[params.ParentHash]
+		if ready {
+			delete(e.preconfirmedByParent, params.ParentHash)
+			delete(e.pendingBoundary, payloadID)
 		}
-		if !ok {
-			e.logger.Warn("[GetPayload] DAG boundary body recorded but preconfirm not ready", "payload", payloadID)
+		e.pendingBoundaryMu.Unlock()
+		if !ready {
+			// AwaitBoundary returned but the commits handler has not stored the sealed block yet (a race at
+			// the marker) — report not-ready so the CL retries GetPayload rather than skipping the slot.
+			e.logger.Warn("[GetPayload] DAG boundary awaited but sealed block not yet stored", "payload", payloadID)
 			return AssembledBlockResult{}, nil
 		}
-		e.logger.Info("[GetPayload] DAG boundary sealed", "payload", payloadID, "num", br.Block.NumberU64(), "hash", br.Block.Hash(), "txs", len(br.Block.Transactions()))
+		e.logger.Info("[GetPayload] DAG boundary retrieved (marker-sealed)", "payload", payloadID, "num", br.Block.NumberU64(), "hash", br.Block.Hash(), "txs", len(br.Block.Transactions()))
 		return AssembledBlockResult{Block: br, BlockValue: blockValue(br, br.Block.Header().BaseFee)}, nil
 	}
 

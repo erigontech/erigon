@@ -187,6 +187,12 @@ type ExecutionModule interface {
 	// given payloadID.  The result is Busy when the builder has not finished.
 	GetAssembledBlock(ctx context.Context, payloadID uint64) (AssembledBlockResult, error)
 
+	// SealBoundary is the marker-driven CLOSE: the boundary assembler calls it when a block-end marker
+	// commits in consensus to seal the pre-executed in-progress flashblock (zero re-execution) and store
+	// it by parent hash, so GetAssembledBlock (proposer) / newPayload (follower) retrieve it without
+	// re-sealing. Runs on every node at the marker. See execmodule.SealBoundary.
+	SealBoundary(ctx context.Context, params *builder.Parameters) (*types.BlockWithReceipts, error)
+
 	// --- Header / body queries --------------------------------------------
 
 	// CurrentHeader returns the canonical head block header.

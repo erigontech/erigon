@@ -227,6 +227,12 @@ type ExecModule struct {
 	// holds the semaphore) and GetAssembledBlock (reader, must check BEFORE acquiring the semaphore) race.
 	pendingBoundary   map[uint64]*builder.Parameters
 	pendingBoundaryMu sync.Mutex
+	// preconfirmedByParent holds a boundary block SEALED by the marker handler (SealBoundary) when the
+	// block-end marker committed in consensus, keyed by the block's PARENT hash. This is the UNIVERSAL
+	// close — it runs on every node at the marker, decoupled from the CL role — so GetAssembledBlock
+	// (proposer) just RETRIEVES the already-sealed block by its build params' ParentHash instead of
+	// re-sealing. Guarded by pendingBoundaryMu.
+	preconfirmedByParent map[common.Hash]*types.BlockWithReceipts
 
 	// Changes accumulator
 	hook  *stageloop.Hook
@@ -291,6 +297,7 @@ func NewExecModule(
 		builders:                make(map[uint64]*builder.BlockBuilder),
 		preconfirmedBlocks:      make(map[uint64]*types.BlockWithReceipts),
 		pendingBoundary:         make(map[uint64]*builder.Parameters),
+		preconfirmedByParent:    make(map[common.Hash]*types.BlockWithReceipts),
 		builderFunc:             builderFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
