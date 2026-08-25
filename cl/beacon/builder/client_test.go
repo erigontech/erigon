@@ -618,18 +618,23 @@ func TestDynamicBuilderDialAllFailAndCancellation(t *testing.T) {
 
 	t.Run("canceled dial stops fallback", func(t *testing.T) {
 		var dialed []string
+		var dialedMu sync.Mutex
 		ctx, cancel := context.WithCancel(t.Context())
 		defer cancel()
 		client := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{})
 		client.lookupIP = func(context.Context, string) ([]net.IPAddr, error) { return addresses, nil }
 		client.transport = newPinnedBuilderTransport(func(dialCtx context.Context, _, address string) (net.Conn, error) {
+			dialedMu.Lock()
 			dialed = append(dialed, address)
+			dialedMu.Unlock()
 			cancel()
 			<-dialCtx.Done()
 			return nil, dialCtx.Err()
 		})
 
 		require.ErrorIs(t, client.SubmitBuilderPreferences(ctx, "http://builder.example:18550", common.Bytes48{}, request), context.Canceled)
+		dialedMu.Lock()
+		defer dialedMu.Unlock()
 		require.Equal(t, []string{"93.184.216.34:18550"}, dialed)
 	})
 }
@@ -654,11 +659,8 @@ func TestDynamicBuilderDialBlackholeDoesNotConsumeFallbackDeadline(t *testing.T)
 		}()
 		return clientConn, nil
 	})
-	ctx, cancel := context.WithTimeout(t.Context(), 2*time.Second)
-	defer cancel()
-	request := &cltypes.BuilderPreferencesRequest{Preferences: &cltypes.BuilderPreferences{}, Auth: validBuilderRequestAuth()}
-
-	require.NoError(t, client.SubmitBuilderPreferences(ctx, "http://builder.example:18550", common.Bytes48{}, request))
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	require.NoError(t, client.SubmitSignedBeaconBlock(t.Context(), "http://builder.example:18550", block))
 }
 
 func TestPrivateBuilderTargetsRequireExplicitPolicy(t *testing.T) {

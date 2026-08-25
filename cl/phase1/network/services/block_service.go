@@ -64,6 +64,7 @@ type blockService struct {
 
 	// reference: https://github.com/ethereum/consensus-specs/blob/dev/specs/phase0/p2p-interface.md#beacon_block
 	seenBlocksCache *lru.Cache[proposerIndexAndSlot, struct{}]
+	seenBlocksMu    sync.Mutex
 
 	// blocks that should be scheduled for later execution (e.g missing blobs).
 	emitter                          *beaconevents.EventEmitter
@@ -123,17 +124,9 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 	log.Trace("Received block via gossip", "slot", msg.Block.Slot)
 
 	// [IGNORE] The block is the first block with valid signature received for the proposer for the slot, signed_beacon_block.message.slot.
-	seenCacheKey := proposerIndexAndSlot{
-		proposerIndex: msg.Block.ProposerIndex,
-		slot:          msg.Block.Slot,
-	}
-	if b.seenBlocksCache.Contains(seenCacheKey) {
-		return nil
-	}
-	if err := b.validateGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg) }); err != nil {
+	if err := b.validateFirstGossip(ctx, msg, func() { b.scheduleBlockForLaterProcessing(msg) }); err != nil {
 		return err
 	}
-	b.seenBlocksCache.Add(seenCacheKey, struct{}{})
 	b.publishBlockGossipEvent(msg)
 	// the rest of the validation is done in the forkchoice store
 	if err := b.processAndStoreBlock(ctx, msg); err != nil {
@@ -147,7 +140,21 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 }
 
 func (b *blockService) ValidateGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock) error {
-	return b.validateGossip(ctx, msg, nil)
+	return b.validateFirstGossip(ctx, msg, nil)
+}
+
+func (b *blockService) validateFirstGossip(ctx context.Context, msg *cltypes.SignedBeaconBlock, schedule func()) error {
+	if err := b.validateGossip(ctx, msg, schedule); err != nil {
+		return err
+	}
+	key := proposerIndexAndSlot{proposerIndex: msg.Block.ProposerIndex, slot: msg.Block.Slot}
+	b.seenBlocksMu.Lock()
+	defer b.seenBlocksMu.Unlock()
+	if b.seenBlocksCache.Contains(key) {
+		return fmt.Errorf("%w: block already seen for proposer and slot", ErrIgnore)
+	}
+	b.seenBlocksCache.Add(key, struct{}{})
+	return nil
 }
 
 func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeaconBlock, schedule func()) error {
@@ -217,6 +224,9 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 		parentIsFull = parentBid != nil && parentBid.Message != nil && gloasBid.ParentBlockHash == parentBid.Message.BlockHash
 		if parentIsFull {
 			status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatusByRoot(msg.Block.ParentRoot)
+			if status == execution_client.PayloadStatusInvalidated {
+				return errors.New("parent execution payload is invalid")
+			}
 			if !seen || status != execution_client.PayloadStatusValidated {
 				if schedule != nil {
 					schedule()

@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"sync"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -271,6 +272,39 @@ func TestBlockServiceGossipAcceptsVerifiedFullParentPayload(t *testing.T) {
 	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
 	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
 	require.NoError(t, service.ValidateGossip(t.Context(), child))
+}
+
+func TestBlockServiceGossipFirstValidReservationIsAtomic(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusValidated
+	errs := make(chan error, 2)
+	var wg sync.WaitGroup
+	for range 2 {
+		wg.Go(func() { errs <- service.ValidateGossip(t.Context(), child) })
+	}
+	wg.Wait()
+	close(errs)
+	accepted := 0
+	ignored := 0
+	for err := range errs {
+		if err == nil {
+			accepted++
+		} else if errors.Is(err, ErrIgnore) {
+			ignored++
+		}
+	}
+	require.Equal(t, 1, accepted)
+	require.Equal(t, 1, ignored)
+}
+
+func TestBlockServiceGossipRejectsInvalidatedFullParentPayload(t *testing.T) {
+	service, child, fcu, parentRoot, _ := newGloasGossipValidationFixture(t, nil)
+	fcu.PayloadStatusByRootMap[parentRoot] = execution_client.PayloadStatusInvalidated
+	scheduled := false
+	err := service.(*blockService).validateFirstGossip(t.Context(), child, func() { scheduled = true })
+	require.Error(t, err)
+	require.NotErrorIs(t, err, ErrIgnore)
+	require.False(t, scheduled)
 }
 
 func TestBlockServiceGossipRejectsWrongEmptyParentExecutionHead(t *testing.T) {
