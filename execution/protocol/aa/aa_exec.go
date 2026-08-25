@@ -326,9 +326,14 @@ func ExecuteAATransaction(
 	return executionStatus, gasUsed, nil
 }
 
-func CreateAAReceipt(txnHash common.Hash, status, gasUsed, cumGasUsed, blockNum, txnIndex uint64, logs types.Logs) *types.Receipt {
+func CreateAAReceipt(txnHash common.Hash, executionStatus, gasUsed, cumGasUsed, blockNum, txnIndex uint64, logs types.Logs) *types.Receipt {
 	receipt := &types.Receipt{Type: types.AccountAbstractionTxType, CumulativeGasUsed: cumGasUsed}
-	receipt.Status = status
+	// executionStatus is RIP-7560's four-value frame outcome, not EIP-658: its
+	// zero means success, where the receipt field's zero means failure.
+	receipt.Status = types.ReceiptStatusFailed
+	if executionStatus == types.ExecutionStatusSuccess {
+		receipt.Status = types.ReceiptStatusSuccessful
+	}
 	receipt.TxHash = txnHash
 	receipt.GasUsed = gasUsed
 	// Set the receipt logs and create a bloom for filtering
