@@ -33,7 +33,7 @@ import (
 )
 
 const (
-	DefaultAccountCacheBytes = 150 * datasize.MB
+	DefaultAccountCacheBytes = 128 * datasize.MB
 	DefaultStorageCacheBytes = 256 * datasize.MB
 
 	// Per-domain avg entry size used to translate the byte budget into the
