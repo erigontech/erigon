@@ -292,6 +292,28 @@ func TestValidateDirectBidDoesNotApplyGossipHighestFilter(t *testing.T) {
 	require.Error(t, service.ProcessMessage(context.Background(), nil, msg))
 }
 
+func TestValidateDirectBidDoesNotRequireGossipProposerPreferences(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1)
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	require.Empty(t, epbsPool.ProposerPreferences.Keys())
+	require.NoError(t, service.ValidateBid(context.Background(), msg))
+}
+
+func TestValidateDirectBidAllowsExecutionPayment(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, ethClockMock, fcMock, _ := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1)
+	msg.Message.ExecutionPayment = 1
+	fcMock.ExecutionPayloadStatusMap[msg.Message.ParentBlockHash] = execution_client.PayloadStatusValidated
+	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(100))
+
+	require.NoError(t, service.ValidateBid(context.Background(), msg))
+}
+
 func TestExecutionPayloadBidServiceWrongSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
