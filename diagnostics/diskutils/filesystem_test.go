@@ -135,9 +135,8 @@ func TestUnrecommendedByTypeAncestorReplacesDescendant(t *testing.T) {
 }
 
 func TestIsAncestorAcceptsAnySeparator(t *testing.T) {
-	// dirPaths can arrive using either separator style regardless of GOOS
-	// (e.g. Windows paths from filepath.Join use '\', test/config paths use
-	// '/'), so isAncestor must not hardcode the host's filepath.Separator.
+	// See isAncestor's doc comment for why both separator styles must work
+	// regardless of GOOS.
 	for _, tc := range []struct {
 		ancestor, descendant string
 		want                 bool
@@ -146,6 +145,8 @@ func TestIsAncestorAcceptsAnySeparator(t *testing.T) {
 		{"/data", "/data/chaindata", true},
 		{`C:\data`, `C:\data-other`, false},
 		{"/data", "/data-other", false},
+		{"/", "/data", true},
+		{`\`, `\data`, true},
 	} {
 		require.Equal(t, tc.want, isAncestor(tc.ancestor, tc.descendant), "%s -> %s", tc.ancestor, tc.descendant)
 	}
@@ -187,16 +188,25 @@ func TestFsTypeFromMountinfo(t *testing.T) {
 }
 
 func TestFsTypeFromMountinfoLongLine(t *testing.T) {
-	// An overlay2 lowerdir= superoption listing many image layers can push a
-	// single line well past bufio.Scanner's default 64KB token limit. devID
-	// "9:99" appears only on this line, so a match proves the long line itself
-	// was scanned rather than an earlier line in the sample.
+	// devID "9:99" appears only on this line, so a match proves the long
+	// line itself was scanned rather than an earlier line in the sample.
 	longSuperOptions := "lowerdir=" + strings.Repeat("/var/lib/docker/overlay2/layer:", 8000)
 	line := "64 27 9:99 / /var/lib/docker/overlay rw,relatime - overlay overlay " + longSuperOptions + "\n"
 
 	got, err := fsTypeFromMountinfo(strings.NewReader(mountinfoSample+line), "9:99")
 	require.NoError(t, err)
 	require.Equal(t, "overlay", got)
+}
+
+func TestFsTypeFromMountinfoContinuesPastVeryLongLine(t *testing.T) {
+	// A single oversized line (see fsTypeFromMountinfo's doc comment) must
+	// not stop the scan before it reaches a later, well-formed line.
+	oversized := "64 27 9:99 / /var/lib/docker/overlay rw,relatime - overlay overlay lowerdir=" +
+		strings.Repeat("/var/lib/docker/overlay2/layer:", 40000) + "\n"
+
+	got, err := fsTypeFromMountinfo(strings.NewReader(oversized+mountinfoSample), "8:2")
+	require.NoError(t, err)
+	require.Equal(t, "ext4", got)
 }
 
 func TestFsTypeFromMountinfoRejectsSeparatorBeforeSixFixedFields(t *testing.T) {

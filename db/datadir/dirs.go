@@ -65,7 +65,9 @@ type Dirs struct {
 // All returns every real directory a Dirs can point into (excluding
 // RelativeDataDir, which is an alternate form of DataDir, not its own dir).
 // A check that must see every mount point should walk this instead of
-// naming fields, so it doesn't go stale as fields are added here.
+// naming fields, so it doesn't go stale as fields are added here. Unlike
+// New()'s dir.MustExist list, not every returned path is guaranteed to
+// exist on disk; callers must tolerate a path that hasn't been created yet.
 func (d Dirs) All() []string {
 	return []string{
 		d.DataDir,

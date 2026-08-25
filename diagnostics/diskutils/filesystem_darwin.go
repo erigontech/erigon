@@ -20,22 +20,15 @@ package diskutils
 
 import (
 	"fmt"
-	"syscall"
+
+	"golang.org/x/sys/unix"
 )
 
 // FilesystemType returns the mount's filesystem type, e.g. "apfs", "hfs".
 func FilesystemType(dirPath string) (string, error) {
-	var stat syscall.Statfs_t
-	if err := syscall.Statfs(dirPath, &stat); err != nil {
+	var stat unix.Statfs_t
+	if err := unix.Statfs(dirPath, &stat); err != nil {
 		return "", fmt.Errorf("statfs %s: %w", dirPath, err)
 	}
-
-	name := make([]byte, 0, len(stat.Fstypename))
-	for _, b := range &stat.Fstypename {
-		if b == 0 {
-			break
-		}
-		name = append(name, byte(b))
-	}
-	return string(name), nil
+	return unix.ByteSliceToString(stat.Fstypename[:]), nil
 }

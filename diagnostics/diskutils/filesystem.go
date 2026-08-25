@@ -23,7 +23,7 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-const filesystemDocsURL = "https://docs.erigon.tech/get-started/hardware-requirements#filesystems-to-avoid"
+const filesystemDocsURL = "https://docs.erigon.tech/get-started/hardware-requirements"
 
 var recommendedFilesystems = []string{"ext4", "xfs"}
 
@@ -94,7 +94,10 @@ func isAncestor(ancestor, descendant string) bool {
 		return true
 	}
 	trimmed := strings.TrimRight(ancestor, `/\`)
-	if trimmed == "" || !strings.HasPrefix(descendant, trimmed) || len(descendant) <= len(trimmed) {
+	if trimmed == "" {
+		return ancestor != "" && descendant != "" && (descendant[0] == '/' || descendant[0] == '\\')
+	}
+	if !strings.HasPrefix(descendant, trimmed) || len(descendant) <= len(trimmed) {
 		return false
 	}
 	next := descendant[len(trimmed)]
