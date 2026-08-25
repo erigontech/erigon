@@ -58,6 +58,26 @@ type entry[T any] struct {
 	epoch uint32 // unwind generation the entry was written in
 }
 
+// lruGen is one generation of a sharded LRU plus an O(1) live-entry count.
+// freelru's own Len RLocks every shard, so the grow check — which every insert
+// runs while the cache is below its ceiling — cannot use it without serialising
+// writers that would otherwise touch disjoint shards.
+type lruGen[V any] struct {
+	lru *freelru.ShardedLRU[uint64, V]
+	n   atomic.Int64
+}
+
+func (g *lruGen[V]) len() int { return int(g.n.Load()) }
+
+// add inserts a key the LRU does not already hold — every call site proves that
+// first — so the count rises by one; a capacity eviction inside freelru fires
+// OnEvict, which takes it back down.
+func (g *lruGen[V]) add(h uint64, v V) (evicted bool) {
+	evicted = g.lru.Add(h, v)
+	g.n.Add(1)
+	return evicted
+}
+
 // GenericCache is a sharded, LRU-evicting bounded cache for key-value
 // data. Eviction mode is fixed at construction (see policy.go).
 type GenericCache[T any] struct {
@@ -65,7 +85,7 @@ type GenericCache[T any] struct {
 	// held — on a jump-grow (fully copied generation) and on Clear (fresh
 	// empty one) — so no write lands in a retired generation and no reader
 	// sees a partial copy (see maybeGrow, Clear).
-	data      atomic.Pointer[freelru.ShardedLRU[uint64, entry[T]]]
+	data      atomic.Pointer[lruGen[entry[T]]]
 	capacityB datasize.ByteSize
 	mode      Mode
 
@@ -198,15 +218,17 @@ func newGenericCacheEntries[T any](capacityBytes datasize.ByteSize, capacityEntr
 // entry. The callback must not feed the evictions metric — it also fires for
 // intentional Removes — so capacity evictions are counted from Add's evicted
 // return at the call sites.
-func (c *GenericCache[T]) newShards(capacity, shards uint32) *freelru.ShardedLRU[uint64, entry[T]] {
+func (c *GenericCache[T]) newShards(capacity, shards uint32) *lruGen[entry[T]] {
 	lru, err := freelru.NewShardedWithSize[uint64, entry[T]](shards, capacity, capacity+capacity/4, u64identity)
 	if err != nil {
 		panic(err)
 	}
+	g := &lruGen[entry[T]]{lru: lru}
 	lru.SetOnEvict(func(_ uint64, e entry[T]) {
 		c.currentSize.Add(-int64(e.size))
+		g.n.Add(-1)
 	})
-	return lru
+	return g
 }
 
 // maybeGrow jump-resizes the LRU one step larger when it is full, the ceiling
@@ -226,7 +248,7 @@ func (c *GenericCache[T]) maybeGrow() {
 
 	old := c.data.Load()
 	curCap := c.curCap.Load()
-	if curCap >= c.maxCap || old.Len() < int(curCap) {
+	if curCap >= c.maxCap || old.len() < int(curCap) {
 		return
 	}
 	newCap := min(curCap*genericCacheGrowFactor, c.maxCap)
@@ -251,9 +273,9 @@ func (c *GenericCache[T]) maybeGrow() {
 		c.putStripes[i].Lock()
 	}
 	copied, evicted := 0, 0
-	for _, k := range old.Keys() {
-		if v, ok := old.Get(k); ok {
-			if next.Add(k, v) {
+	for _, k := range old.lru.Keys() {
+		if v, ok := old.lru.Get(k); ok {
+			if next.add(k, v) {
 				evicted++
 			}
 			copied++
@@ -320,8 +342,8 @@ func (c *GenericCache[T]) GetWithTxNum(key []byte) (T, uint64, bool) {
 	// snapshot can only cause a safe miss because dropStale rechecks the current
 	// generation before removing it.
 	coh := c.coh.Snapshot()
-	lru := c.data.Load()
-	e, ok := lru.Get(h)
+	gen := c.data.Load()
+	e, ok := gen.lru.Get(h)
 	if !ok || !bytes.Equal(e.key, key) {
 		c.misses.Add(1)
 		var zero T
@@ -369,8 +391,7 @@ func (c *GenericCache[T]) put(key []byte, value T, txNum uint64, overwrite bool)
 
 // putStriped performs the write under the key's stripe and reports whether the
 // insert landed in a full LRU with ceiling headroom, i.e. the caller should
-// grow. Detection stays on the insert path — Len locks every shard, too costly
-// per warm update.
+// grow.
 func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrite bool) bool {
 	h := maphash.Hash(key)
 	valBytes := c.sizeFunc(value)
@@ -384,8 +405,8 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// generation swap and coherence reset, so the stamp cannot belong to a
 	// different generation from the one where the entry lands.
 	ep := c.coh.Epoch()
-	lru := c.data.Load()
-	existing, hasExisting := lru.Get(h)
+	gen := c.data.Load()
+	existing, hasExisting := gen.lru.Get(h)
 
 	// Existing key — update by remove-then-add (see newShards for why a size
 	// delta would be wrong). Reuse the stored key buffer to avoid an extra
@@ -399,8 +420,8 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 		// another stripe over-admits past the budget. Over-stating is safe — at
 		// worst a new key is dropped, which is within "drop new keys when full".
 		c.currentSize.Add(int64(newSize))
-		lru.Remove(h)
-		if lru.Add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep}) {
+		gen.lru.Remove(h)
+		if gen.add(h, entry[T]{key: existing.key, val: value, size: newSize, txNum: txNum, epoch: ep}) {
 			c.evictions.Add(1)
 		}
 		return false
@@ -409,7 +430,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	if c.mode == ModeNoOp {
 		// Refuse once full by either bound — freelru would otherwise evict at the
 		// entry-count cap, which ModeNoOp ("drop new keys when full") must not do.
-		if c.currentSize.Load()+int64(newSize) > int64(c.capacityB) || lru.Len() >= int(c.maxCap) {
+		if c.currentSize.Load()+int64(newSize) > int64(c.capacityB) || gen.len() >= int(c.maxCap) {
 			c.dropped.Add(1)
 			return false
 		}
@@ -419,7 +440,7 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// The insert lands before the grow (which must run outside the stripe), so
 	// it and any racers until the swap evict at the pre-grow cap — a transient
 	// bounded by the grow window.
-	needGrow := c.mode != ModeNoOp && curCap < c.maxCap && lru.Len() >= int(curCap)
+	needGrow := c.mode != ModeNoOp && curCap < c.maxCap && gen.len() >= int(curCap)
 
 	// In ModeEvictLRU the byte budget is enforced through the entry-count cap,
 	// not a separate currentSize check: capacityEntries is derived from
@@ -439,10 +460,10 @@ func (c *GenericCache[T]) putStriped(key []byte, value T, txNum uint64, overwrit
 	// is reserved before the removal (see the update path above).
 	c.currentSize.Add(int64(newSize))
 	if hasExisting {
-		lru.Remove(h)
+		gen.lru.Remove(h)
 	}
 	keyCopy := bytes.Clone(key)
-	if lru.Add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep}) {
+	if gen.add(h, entry[T]{key: keyCopy, val: value, size: newSize, txNum: txNum, epoch: ep}) {
 		c.evictions.Add(1)
 	}
 	c.inserts.Add(1)
@@ -457,9 +478,9 @@ func (c *GenericCache[T]) Delete(key []byte) {
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
-	lru := c.data.Load()
-	if existing, ok := lru.Get(h); ok && bytes.Equal(existing.key, key) {
-		lru.Remove(h)
+	gen := c.data.Load()
+	if existing, ok := gen.lru.Get(h); ok && bytes.Equal(existing.key, key) {
+		gen.lru.Remove(h)
 	}
 }
 
@@ -470,9 +491,9 @@ func (c *GenericCache[T]) dropStale(h uint64, key []byte) {
 	mu := &c.putStripes[h&(putStripeCount-1)]
 	mu.Lock()
 	defer mu.Unlock()
-	lru := c.data.Load()
-	if e, ok := lru.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
-		lru.Remove(h)
+	gen := c.data.Load()
+	if e, ok := gen.lru.Get(h); ok && bytes.Equal(e.key, key) && c.coh.IsStale(e.txNum, e.epoch) {
+		gen.lru.Remove(h)
 	}
 }
 
@@ -533,7 +554,7 @@ func (c *GenericCache[T]) Unwind(unwindToTxNum uint64) {
 
 // Len returns the number of entries in the cache.
 func (c *GenericCache[T]) Len() int {
-	return c.data.Load().Len()
+	return c.data.Load().len()
 }
 
 // SizeBytes returns the current size of the cache in bytes.
@@ -566,7 +587,7 @@ func (c *GenericCache[T]) PrintStatsAndReset(name string) {
 		"hits", hits, "misses", misses, "hit_rate", hitRate,
 		"inserts", inserts, "evictions", evictions, "dropped", dropped,
 		"stale_evicted", staleEvicted, "epoch", c.coh.Epoch(),
-		"entries", c.data.Load().Len(), "size_mb", sizeBytes/(1024*1024),
+		"entries", c.data.Load().len(), "size_mb", sizeBytes/(1024*1024),
 		"capacity_mb", int64(c.capacityB/datasize.MB), "usage_pct", usagePct,
 	)
 }
