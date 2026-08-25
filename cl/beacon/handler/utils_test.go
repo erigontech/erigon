@@ -129,6 +129,9 @@ func setupTestingHandler(t *testing.T, v clparams.StateVersion, logger log.Logge
 	proposerSlashingService := mock_services.NewMockProposerSlashingService(ctrl)
 	blockService := mock_services.NewMockBlockService(ctrl)
 	blockService.EXPECT().ValidateGossip(gomock.Any(), gomock.Any()).Return(nil).AnyTimes()
+	blockService.EXPECT().CommitGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ReleaseGossipReservation(gomock.Any()).AnyTimes()
+	blockService.EXPECT().ScheduleBlockForLaterProcessing(gomock.Any()).AnyTimes()
 
 	// ctx context.Context, subnetID *uint64, msg *cltypes.SyncCommitteeMessage) error
 	syncCommitteeMessagesService.EXPECT().ProcessMessage(gomock.Any(), gomock.Any(), gomock.Any()).DoAndReturn(func(ctx context.Context, subnetID *uint64, msg *services.SyncCommitteeMessageForGossip) error {

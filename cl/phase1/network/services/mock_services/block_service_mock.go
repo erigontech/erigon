@@ -43,6 +43,42 @@ func (m *MockBlockService) EXPECT() *MockBlockServiceMockRecorder {
 	return m.recorder
 }
 
+// CommitGossipReservation mocks base method.
+func (m *MockBlockService) CommitGossipReservation(arg0 *cltypes.SignedBeaconBlock) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "CommitGossipReservation", arg0)
+}
+
+// CommitGossipReservation indicates an expected call of CommitGossipReservation.
+func (mr *MockBlockServiceMockRecorder) CommitGossipReservation(arg0 any) *MockBlockServiceCommitGossipReservationCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "CommitGossipReservation", reflect.TypeOf((*MockBlockService)(nil).CommitGossipReservation), arg0)
+	return &MockBlockServiceCommitGossipReservationCall{Call: call}
+}
+
+// MockBlockServiceCommitGossipReservationCall wrap *gomock.Call
+type MockBlockServiceCommitGossipReservationCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBlockServiceCommitGossipReservationCall) Return() *MockBlockServiceCommitGossipReservationCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBlockServiceCommitGossipReservationCall) Do(f func(*cltypes.SignedBeaconBlock)) *MockBlockServiceCommitGossipReservationCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBlockServiceCommitGossipReservationCall) DoAndReturn(f func(*cltypes.SignedBeaconBlock)) *MockBlockServiceCommitGossipReservationCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
 // DecodeGossipMessage mocks base method.
 func (m *MockBlockService) DecodeGossipMessage(pid peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedBeaconBlock, error) {
 	m.ctrl.T.Helper()
@@ -154,6 +190,78 @@ func (c *MockBlockServiceProcessMessageCall) Do(f func(context.Context, *uint64,
 
 // DoAndReturn rewrite *gomock.Call.DoAndReturn
 func (c *MockBlockServiceProcessMessageCall) DoAndReturn(f func(context.Context, *uint64, *cltypes.SignedBeaconBlock) error) *MockBlockServiceProcessMessageCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// ReleaseGossipReservation mocks base method.
+func (m *MockBlockService) ReleaseGossipReservation(arg0 *cltypes.SignedBeaconBlock) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "ReleaseGossipReservation", arg0)
+}
+
+// ReleaseGossipReservation indicates an expected call of ReleaseGossipReservation.
+func (mr *MockBlockServiceMockRecorder) ReleaseGossipReservation(arg0 any) *MockBlockServiceReleaseGossipReservationCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ReleaseGossipReservation", reflect.TypeOf((*MockBlockService)(nil).ReleaseGossipReservation), arg0)
+	return &MockBlockServiceReleaseGossipReservationCall{Call: call}
+}
+
+// MockBlockServiceReleaseGossipReservationCall wrap *gomock.Call
+type MockBlockServiceReleaseGossipReservationCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBlockServiceReleaseGossipReservationCall) Return() *MockBlockServiceReleaseGossipReservationCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBlockServiceReleaseGossipReservationCall) Do(f func(*cltypes.SignedBeaconBlock)) *MockBlockServiceReleaseGossipReservationCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBlockServiceReleaseGossipReservationCall) DoAndReturn(f func(*cltypes.SignedBeaconBlock)) *MockBlockServiceReleaseGossipReservationCall {
+	c.Call = c.Call.DoAndReturn(f)
+	return c
+}
+
+// ScheduleBlockForLaterProcessing mocks base method.
+func (m *MockBlockService) ScheduleBlockForLaterProcessing(arg0 *cltypes.SignedBeaconBlock) {
+	m.ctrl.T.Helper()
+	m.ctrl.Call(m, "ScheduleBlockForLaterProcessing", arg0)
+}
+
+// ScheduleBlockForLaterProcessing indicates an expected call of ScheduleBlockForLaterProcessing.
+func (mr *MockBlockServiceMockRecorder) ScheduleBlockForLaterProcessing(arg0 any) *MockBlockServiceScheduleBlockForLaterProcessingCall {
+	mr.mock.ctrl.T.Helper()
+	call := mr.mock.ctrl.RecordCallWithMethodType(mr.mock, "ScheduleBlockForLaterProcessing", reflect.TypeOf((*MockBlockService)(nil).ScheduleBlockForLaterProcessing), arg0)
+	return &MockBlockServiceScheduleBlockForLaterProcessingCall{Call: call}
+}
+
+// MockBlockServiceScheduleBlockForLaterProcessingCall wrap *gomock.Call
+type MockBlockServiceScheduleBlockForLaterProcessingCall struct {
+	*gomock.Call
+}
+
+// Return rewrite *gomock.Call.Return
+func (c *MockBlockServiceScheduleBlockForLaterProcessingCall) Return() *MockBlockServiceScheduleBlockForLaterProcessingCall {
+	c.Call = c.Call.Return()
+	return c
+}
+
+// Do rewrite *gomock.Call.Do
+func (c *MockBlockServiceScheduleBlockForLaterProcessingCall) Do(f func(*cltypes.SignedBeaconBlock)) *MockBlockServiceScheduleBlockForLaterProcessingCall {
+	c.Call = c.Call.Do(f)
+	return c
+}
+
+// DoAndReturn rewrite *gomock.Call.DoAndReturn
+func (c *MockBlockServiceScheduleBlockForLaterProcessingCall) DoAndReturn(f func(*cltypes.SignedBeaconBlock)) *MockBlockServiceScheduleBlockForLaterProcessingCall {
 	c.Call = c.Call.DoAndReturn(f)
 	return c
 }
