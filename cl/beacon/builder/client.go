@@ -341,7 +341,7 @@ func (b *builderClient) SubmitSignedBeaconBlock(ctx context.Context, builderURL 
 		return err
 	}
 	defer b.builderAdmission().Release(1)
-	target, err := b.builderEndpoint(requestContext, BuilderTargetPolicy{}, builderURL, "eth", "v1", "builder", "beacon_blocks")
+	target, err := b.builderEndpoint(requestContext, b.targetPolicy, builderURL, "eth", "v1", "builder", "beacon_blocks")
 	if err != nil {
 		return err
 	}

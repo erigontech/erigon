@@ -246,6 +246,7 @@ var DefaultFlags = []cli.Flag{
 	&utils.CaplinResumeMaxStalenessEpochsFlag,
 	&utils.CaplinEnableSnapshotGeneration,
 	&utils.CaplinMevRelayUrl,
+	&utils.CaplinAllowPrivateBuilderURLs,
 	&utils.CaplinValidatorMonitorFlag,
 	&utils.CaplinCustomConfigFlag,
 	&utils.CaplinCustomGenesisFlag,
