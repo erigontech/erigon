@@ -778,17 +778,19 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	if execProgress, err = stages.GetStageProgress(tx, stages.Execution); err != nil {
 		return err
 	}
-	doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
-	if err != nil {
-		return err
-	}
-	_, filesProgress, err := doms.SeekCommitment(ctx, tx)
-	doms.Close()
-	if err != nil {
-		return err
-	}
 	if execProgress == 0 { // then fallback to how much data we have in stat_snapshots
-		execProgress = filesProgress
+		doms, err := execctx.NewSharedDomains(ctx, tx, log.New())
+		if err != nil {
+			if doms != nil {
+				doms.Close()
+			}
+			return err
+		}
+		_, execProgress, err = doms.SeekCommitment(ctx, tx)
+		doms.Close()
+		if err != nil {
+			return err
+		}
 	}
 	if sendersProgress, err = stages.GetStageProgress(tx, stages.Senders); err != nil {
 		return err
@@ -798,15 +800,20 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		block = sendersProgress
 	}
 	if limit > 0 {
-		from := max(execProgress, filesProgress)
-		if to := from + limit; block == 0 || to < block {
+		to := sendersProgress
+		if execProgress < sendersProgress {
+			if remaining := sendersProgress - execProgress; limit < remaining {
+				to = execProgress + limit
+			}
+		}
+		if block == 0 || to < block {
 			block = to
 		}
 	}
 
-	if progress := max(execProgress, filesProgress); block > 0 && block <= progress {
-		logger.Info("stage_exec: requested --block is behind current progress, nothing to do",
-			"block", block, "stage.progress", execProgress, "files.progress", filesProgress)
+	if block > 0 && block <= execProgress {
+		logger.Info("stage_exec: target block already reached, nothing to do",
+			"block", block, "stage.progress", execProgress)
 		tx.Rollback()
 		tx = nil
 		return nil
