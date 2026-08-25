@@ -67,7 +67,9 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		},
 	})
 	require.NoError(t, err)
+	asyncCalls := newAsyncClientCallGroup()
 	t.Cleanup(func() {
+		asyncCalls.wait()
 		require.NoError(t, eat.Close())
 	})
 
@@ -116,7 +118,7 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		require.Equal(t, enginetypes.ValidStatus, status.Status)
 
 		oldHeadOverlay := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
-		advanceToOldHead := startAsync(func() (struct{}, error) {
+		advanceToOldHead := startAsync(asyncCalls, func() (struct{}, error) {
 			return struct{}{}, eat.MockCl.UpdateForkChoice(ctx, oldHead)
 		})
 		oldHeadOverlay.wait(t)
@@ -124,13 +126,13 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		// These requests stay bound to the old head across the reorg. Their MVCC
 		// reads may finish later, but they must not refill canonical cache entries.
 		preUnwindViews := transitions.hold(t, execmodule.StateTransitionRPCViewBound, 3)
-		delayedStorage := startAsync(func() (common.Hash, error) {
+		delayedStorage := startAsync(asyncCalls, func() (common.Hash, error) {
 			return readRPCStorage(ctx, rpcClient, storageRefillAddress, storageSlot)
 		})
-		delayedCode := startAsync(func() (hexutil.Bytes, error) {
+		delayedCode := startAsync(asyncCalls, func() (hexutil.Bytes, error) {
 			return readRPCCode(ctx, rpcClient, removedAccountAddress)
 		})
-		delayedNonce := startAsync(func() (hexutil.Uint64, error) {
+		delayedNonce := startAsync(asyncCalls, func() (hexutil.Uint64, error) {
 			return readRPCNonce(ctx, rpcClient, removedAccountAddress)
 		})
 		preUnwindViews.wait(t)
@@ -142,7 +144,7 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		replacementOverlay := transitions.hold(t, execmodule.StateTransitionOverlayPublished, 1)
 		replacementCommitted := transitions.hold(t, execmodule.StateTransitionCommitComplete, 1)
 		replacementCleared := transitions.hold(t, execmodule.StateTransitionOverlayCleared, 1)
-		reorgToTarget := startAsync(func() (struct{}, error) {
+		reorgToTarget := startAsync(asyncCalls, func() (struct{}, error) {
 			return struct{}{}, eat.MockCl.UpdateForkChoice(ctx, reorgTarget)
 		})
 
@@ -269,12 +271,45 @@ type asyncResult[T any] struct {
 	err   error
 }
 
-func startAsync[T any](call func() (T, error)) <-chan asyncResult[T] {
+func TestAsyncClientCallGroupDrainsBeforeResourceCleanup(t *testing.T) {
+	finished := make(chan struct{})
+	asyncCalls := newAsyncClientCallGroup()
+	t.Cleanup(func() {
+		asyncCalls.wait()
+		select {
+		case <-finished:
+		default:
+			t.Error("resource cleanup ran before the asynchronous call finished")
+		}
+	})
+
+	startAsync(asyncCalls, func() (struct{}, error) {
+		<-t.Context().Done()
+		close(finished)
+		return struct{}{}, nil
+	})
+}
+
+// asyncClientCallGroup drains test-owned client goroutines before the tester
+// waits for detached server-side forkchoice work.
+type asyncClientCallGroup struct {
+	wg sync.WaitGroup
+}
+
+func newAsyncClientCallGroup() *asyncClientCallGroup {
+	return &asyncClientCallGroup{}
+}
+
+func (g *asyncClientCallGroup) wait() {
+	g.wg.Wait()
+}
+
+func startAsync[T any](group *asyncClientCallGroup, call func() (T, error)) <-chan asyncResult[T] {
 	result := make(chan asyncResult[T], 1)
-	go func() {
+	group.wg.Go(func() {
 		value, err := call()
 		result <- asyncResult[T]{value: value, err: err}
-	}()
+	})
 	return result
 }
 

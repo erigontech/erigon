@@ -314,13 +314,20 @@ func NewExecModule(
 	return em
 }
 
-// WaitIdle blocks until any in-flight updateForkChoice goroutine finishes.
-// Call before closing the database to avoid waitTxsAllDoneOnClose hangs.
+// WaitIdle blocks until any in-flight updateForkChoice goroutine finishes or
+// ctx ends.
 func (e *ExecModule) WaitIdle(ctx context.Context) {
 	if err := e.semaphore.Acquire(ctx, 1); err != nil {
 		return // context cancelled — best effort
 	}
 	e.semaphore.Release(1)
+}
+
+// Drain waits without a local timeout for serialized execution work to finish.
+// Callers must stop producers first because backing resources are unsafe to
+// close while execution still holds a transaction.
+func (e *ExecModule) Drain() {
+	e.WaitIdle(context.Background())
 }
 
 // newDomainStateCache is the module's one construction site of the domain

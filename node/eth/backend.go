@@ -1455,13 +1455,10 @@ func (s *Ethereum) Stop() error {
 		s.logger.Error("background component error", "err", err)
 	}
 
-	// Wait for any in-flight updateForkChoice goroutine to finish. These are
-	// fire-and-forget goroutines that hold DB read transactions; without this
-	// wait, chainDB.Close() can hang in waitTxsAllDoneOnClose.
+	// Detached forkchoice work can hold a database transaction. Shutdown must
+	// drain it completely before chainDB.Close rather than continue on a timer.
 	if s.execModule != nil {
-		waitCtx, waitCancel := context.WithTimeout(context.Background(), 5*time.Second)
-		s.execModule.WaitIdle(waitCtx)
-		waitCancel()
+		s.execModule.Drain()
 	}
 
 	// Wait for any in-flight read-ahead warmup goroutines that hold DB read
