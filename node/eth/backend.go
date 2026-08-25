@@ -422,7 +422,7 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 
 	// KV RPC + Notifications stay in backend.go — Notifications is an
 	// execution-layer concern that will move to the execution component.
-	kvRPC := remotedbserver.NewKvServer(ctx, temporalDb, allSnapshots, nil, temporalDb.Debug(), logger)
+	kvRPC := remotedbserver.NewKvServer(ctx, temporalDb, allSnapshots, temporalDb.Debug(), logger)
 	backend.notifications = shards.NewNotifications(kvRPC)
 	backend.kvRPC = kvRPC
 
@@ -452,21 +452,20 @@ func New(ctx context.Context, stack *node.Node, config *ethconfig.Config, logger
 	// live here; see node/components/sentry/provider.go.
 	backend.sentryProvider = &sentrycomp.Provider{}
 	backend.sentryProvider.Configure(sentrycomp.Config{
-		SentryCtx:         backend.sentryCtx,
-		P2P:               p2pConfig,
-		ChainDB:           backend.chainDB,
-		ChainConfig:       backend.chainConfig,
-		GenesisHash:       backend.genesisHash,
-		NetworkID:         backend.networkID,
-		Genesis:           genesis,
-		BlockReader:       blockReader,
-		EthDiscoveryURLs:  backend.config.EthDiscoveryURLs,
-		ChainName:         config.Snapshot.ChainName,
-		NodesDir:          stack.Config().Dirs.Nodes,
-		EnableWitProtocol: stack.Config().P2P.EnableWitProtocol,
-		Events:            backend.notifications.Events,
-		Logger:            logger,
-		Disable:           stack.Config().DisableSentry,
+		SentryCtx:        backend.sentryCtx,
+		P2P:              p2pConfig,
+		ChainDB:          backend.chainDB,
+		ChainConfig:      backend.chainConfig,
+		GenesisHash:      backend.genesisHash,
+		NetworkID:        backend.networkID,
+		Genesis:          genesis,
+		BlockReader:      blockReader,
+		EthDiscoveryURLs: backend.config.EthDiscoveryURLs,
+		ChainName:        config.Snapshot.ChainName,
+		NodesDir:         stack.Config().Dirs.Nodes,
+		Events:           backend.notifications.Events,
+		Logger:           logger,
+		Disable:          stack.Config().DisableSentry,
 	})
 	if err := backend.sentryProvider.Initialize(ctx); err != nil {
 		return nil, err
@@ -1216,7 +1215,7 @@ func (s *Ethereum) NodesInfo(limit int) (*remoteproto.NodesInfoReply, error) {
 func SetUpBlockReader(ctx context.Context, db kv.RwDB, dirs datadir.Dirs, snConfig *ethconfig.Config, chainConfig *chain.Config, dbReadConcurrency int, logger log.Logger, blockSnapBuildSema *semaphore.Weighted) (*freezeblocks.BlockReader, *blockio.BlockWriter, *blocksnapshots.RoSnapshots, kv.TemporalRwDB, error) {
 	snConfig.Snapshot.ChainName = chainConfig.ChainName
 	allSnapshots := blocksnapshots.NewRoSnapshots(snConfig.Snapshot, dirs.Snap, logger)
-	blockReader := freezeblocks.NewBlockReader(allSnapshots, nil)
+	blockReader := freezeblocks.NewBlockReader(allSnapshots)
 
 	_, knownSnapCfg := snapcfg.KnownCfg(chainConfig.ChainName)
 	createNewSaltFileIfNeeded := snConfig.Snapshot.NoDownloader || snConfig.Snapshot.DisableDownloadE3 || !knownSnapCfg

@@ -291,10 +291,10 @@ type SharedDomains struct {
 	// code-by-hash read with the application's authoritative codehash.
 	codeStore *cache.CodeStore
 
-	// changesetMu serializes the parallel commitment calculator's swap of the
-	// global current-changeset-accumulator pointer against DomainPut/DomainDel:
-	// without it a block N+1 write can land in block N's changeset during the
-	// swap+compute+restore window, so a later unwind reads stale prev-values.
+	// changesetMu serializes the exec loop's install of a block's changeset
+	// accumulator against the calculator's swap of the commitment writer's
+	// diff. Writers other than commitment are never redirected, so DomainPut
+	// and DomainDel do not take it — see SwapCommitmentDiffLocked.
 	changesetMu sync.Mutex
 
 	// branchCache is the aggregator-scope commitment-branch cache. It sits
@@ -506,16 +506,9 @@ func (sd *SharedDomains) ResetPendingUpdates() {
 // It sets the corresponding block's changeset as the accumulator
 // so writes go directly to the correct changeset.
 //
-// Concurrency contract: the inner swap (set cs_N → apply → restore prev)
-// mutates the global accumulator pointer and per-domain diff fields that
-// the apply goroutine's DomainPut/DomainDel writes through. Calls from
-// inside the calculator's outer LockChangesetAccumulator window must hold
-// that same Mutex; calls from end-of-stage Flush are single-threaded
-// against apply but still need the lock for race-detector happens-before
-// against any concurrent reads via DomainPut. Caller passes
-// `lockHeld=true` when it already holds changesetMu (calc path);
-// `false` when FlushPendingUpdates should acquire it itself
-// (Flush / standalone callers).
+// The inner swap mutates the commitment writer's diff, which the exec loop
+// also rewrites via SetChangesetAccumulator — hence changesetMu, taken here
+// unless lockHeld says the caller already holds it.
 func (sd *SharedDomains) FlushPendingUpdates(ctx context.Context, tx kv.TemporalTx) error {
 	return sd.flushPendingUpdates(ctx, tx, false)
 }
@@ -536,11 +529,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	defer upd.Clear()
 
 	putBranch := func(prefix, data, prevData []byte) error {
-		// Use the unlocked variant — we either hold the lock externally
-		// (lockHeld=true) or inside this function (locked below). Using
-		// the public DomainPut would re-acquire and self-deadlock for
-		// commitment-domain writes if the lock is held externally.
-		return sd.domainPutNoLock(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
+		return sd.DomainPut(kv.CommitmentDomain, tx, prefix, data, upd.TxNum, prevData)
 	}
 
 	if !lockHeld {
@@ -572,7 +561,7 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 		// Apply deferred branch writes under the pending update's block
 		// changeset, then save it back. All accesses under changesetMu —
 		// see concurrency contract on the wrappers above.
-		defer sd.SwapChangesetAccumulatorLocked(cs)()
+		defer sd.SwapCommitmentDiffLocked(cs)()
 
 		if _, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch); err != nil {
 			return err
@@ -585,13 +574,6 @@ func (sd *SharedDomains) flushPendingUpdates(ctx context.Context, tx kv.Temporal
 	// No past changeset found — write into whatever is current.
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
 	return err
-}
-
-// domainPutNoLock is the lock-held variant of DomainPut for callers
-// (FlushPendingUpdates) that already hold changesetMu externally; it stays
-// correct even if the CommitmentDomain lock exemption in domainPut is removed.
-func (sd *SharedDomains) domainPutNoLock(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
-	return sd.domainPut(domain, roTx, k, v, txNum, prevVal, true)
 }
 
 // AsStateGetter returns an execution-aware getter with optimized code reads.
@@ -652,22 +634,20 @@ func (sd *SharedDomains) flushRequestMetrics() {
 	sd.reqMetrics = nil
 }
 
-// LockChangesetAccumulator and UnlockChangesetAccumulator bracket a
-// swap+use+restore sequence on the global accumulator pointer (see
-// changesetMu doc on the SharedDomains struct for the layering rationale).
-// Apply-side DomainPut/DomainDel take the same lock briefly so they
-// cannot record into a swapped accumulator that does not belong to the
-// block they are writing for.
+// LockChangesetAccumulator and UnlockChangesetAccumulator bracket the
+// calculator's swap+use+restore of the commitment writer's diff. It
+// serializes against the exec loop's per-block SetChangesetAccumulator;
+// apply-side DomainPut/DomainDel no longer take it, because the swap
+// leaves their writers alone (see SwapCommitmentDiffLocked).
 //
-// Holders MUST pair Lock with Unlock and MUST keep the critical section
-// short — currently the calculator's per-block ComputeCommitment runs
-// inside this lock, which serializes apply-side writes for the duration
-// of compute. That cost goes away once the post-hoc-from-sd-entries
-// derivation lands and this lock + the swap dance can both be deleted.
+// The calculator's per-block ComputeCommitment still runs inside this
+// lock, so the exec loop's accumulator install waits on it. That goes
+// away once the post-hoc-from-sd-entries derivation lands and this lock
+// + the swap dance can both be deleted.
 //
 // Inside the locked window callers must use the *Locked variants
-// (SwapChangesetAccumulatorLocked / DetachChangesetAccumulatorLocked) —
-// the public Set/Get acquire the same Mutex and would self-deadlock.
+// (SwapCommitmentDiffLocked / DetachChangesetAccumulatorLocked) — the
+// public Set/Get acquire the same Mutex and would self-deadlock.
 func (sd *SharedDomains) LockChangesetAccumulator()   { sd.changesetMu.Lock() }
 func (sd *SharedDomains) UnlockChangesetAccumulator() { sd.changesetMu.Unlock() }
 
@@ -691,7 +671,7 @@ func (sd *SharedDomains) setChangesetAccumulatorLocked(acc *changeset.StateChang
 // accumulator (the one DomainPut writes diff entries into). Returns nil if
 // none is installed. Locks changesetMu internally — must NOT be called
 // while already holding the lock (locked-window callers use
-// SwapChangesetAccumulatorLocked / DetachChangesetAccumulatorLocked).
+// SwapCommitmentDiffLocked / DetachChangesetAccumulatorLocked).
 func (sd *SharedDomains) GetChangesetAccumulator() *changeset.StateChangeSet {
 	sd.changesetMu.Lock()
 	defer sd.changesetMu.Unlock()
@@ -707,20 +687,30 @@ func (sd *SharedDomains) getChangesetAccumulatorLocked() *changeset.StateChangeS
 	return nil
 }
 
-// SwapChangesetAccumulatorLocked installs the given changeset accumulator
-// and returns a func that restores the previous one. Callers must hold
-// changesetMu.
-func (sd *SharedDomains) SwapChangesetAccumulatorLocked(acc *changeset.StateChangeSet) (restore func()) {
-	prev := sd.getChangesetAccumulatorLocked()
-	sd.setChangesetAccumulatorLocked(acc)
-	return func() { sd.setChangesetAccumulatorLocked(prev) }
+// commitmentDiffSwapper must be implemented by every mem batch behind
+// SharedDomains: the only alternative is redirecting all domain writers,
+// which is unsafe now that DomainPut takes no lock.
+type commitmentDiffSwapper interface {
+	SetCommitmentDiff(acc *changeset.StateChangeSet)
+	SetCommitmentDiffRaw(d *kv.DomainDiff)
+	CommitmentDiff() *kv.DomainDiff
+}
+
+// SwapCommitmentDiffLocked points the commitment writer's diff at acc and
+// returns a func restoring the previous one. Every other domain writer is left
+// alone, so apply-side writes need no lock. Callers must hold changesetMu.
+func (sd *SharedDomains) SwapCommitmentDiffLocked(acc *changeset.StateChangeSet) (restore func()) {
+	h := sd.mem.(commitmentDiffSwapper)
+	prev := h.CommitmentDiff()
+	h.SetCommitmentDiff(acc)
+	return func() { h.SetCommitmentDiffRaw(prev) }
 }
 
 // DetachChangesetAccumulatorLocked installs a nil changeset accumulator and
 // returns a func that restores the previous one. Callers must hold
 // changesetMu.
 func (sd *SharedDomains) DetachChangesetAccumulatorLocked() (restore func()) {
-	return sd.SwapChangesetAccumulatorLocked(nil)
+	return sd.SwapCommitmentDiffLocked(nil)
 }
 
 // GetChangesetByBlockNum returns the saved changeset for a given block
@@ -1762,14 +1752,10 @@ func (sd *SharedDomains) HistorySeek(domain kv.Domain, key []byte, ts uint64) (v
 //   - user can append k2 into k1, then underlying methods will not preform append
 //   - if `val == nil` it will call DomainDel
 func (sd *SharedDomains) DomainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
-	return sd.domainPut(domain, roTx, k, v, txNum, prevVal, false)
+	return sd.domainPut(domain, roTx, k, v, txNum, prevVal)
 }
 
-// domainPut is the shared body for DomainPut (lockHeld=false) and
-// domainPutNoLock (lockHeld=true). Factored so a new domain case or
-// pre-check is written once. See changesetMu doc on the SharedDomains
-// struct for the locking rationale.
-func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte, lockHeld bool) error {
+func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []byte, txNum uint64, prevVal []byte) error {
 	if v == nil {
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
@@ -1801,18 +1787,6 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 	// sd.mem and is published to the cache only after a successful Commit;
 	// publishing it earlier could expose uncommitted, fork-specific state.
 
-	// Serialize against the calculator's accumulator-swap window — see
-	// changesetMu doc on the SharedDomains struct. Skipped when the caller
-	// already holds changesetMu (lockHeld=true, the FlushPendingUpdates
-	// path), and currently also for CommitmentDomain — those writes
-	// originate exclusively from the calculator's compute, which holds
-	// changesetMu via LockChangesetAccumulator (re-acquiring would
-	// self-deadlock). All other domains are written by the apply goroutine
-	// and need to serialize against the swap.
-	if !lockHeld && domain != kv.CommitmentDomain {
-		sd.changesetMu.Lock()
-		defer sd.changesetMu.Unlock()
-	}
 	return sd.mem.DomainPut(domain, ks, v, txNum, prevVal)
 }
 
@@ -1857,12 +1831,7 @@ func (sd *SharedDomains) DomainDel(domain kv.Domain, tx kv.TemporalTx, k []byte,
 	}
 
 	// As in DomainPut, a deletion reaches the shared state cache only after a
-	// successful Commit. Serialize against the calculator's swap window for
-	// non-commitment domains; CommitmentDomain is skipped as described there.
-	if domain != kv.CommitmentDomain {
-		sd.changesetMu.Lock()
-		defer sd.changesetMu.Unlock()
-	}
+	// successful Commit.
 	return sd.mem.DomainDel(domain, ks, txNum, prevVal)
 }
 
