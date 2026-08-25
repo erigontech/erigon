@@ -304,7 +304,7 @@ func BenchmarkDeepCallsWithMemory(b *testing.B) {
 				deployContract(b, statedb, a.interned, memChainCode(next, tc.words))
 			}
 
-			requireChainReachesLeaf(b, statedb, addrs[0].interned, addrs[len(addrs)-1].interned, vmenv.Context.GasLimit)
+			requireChainReachesLeaf(b, statedb, addrs[0].interned, addrs[len(addrs)-1].interned, tc.depth-1, vmenv.Context.GasLimit)
 
 			callComplete(b, vmenv, addrs[0].interned, nil)
 			for b.Loop() {
@@ -331,12 +331,11 @@ func tracedEnv(statedb *state.IntraBlockState, gasLimit uint64, hooks *tracing.H
 	})
 }
 
-// tracedMaxDepth runs one untimed call against addr, with a call-depth tracer
+// tracedMaxDepth runs one untimed call against addr with a call-depth tracer
 // wired in, and returns the deepest frame it reached (0 for the entry call
-// itself, 1 for its first child, and so on). A chain that breaks partway — a
-// missing or out-of-gas child — still returns without error and burns gas, so
-// neither of those checks alone catches it; the caller must compare the
-// returned depth against what the chain was built to reach.
+// itself). A chain that breaks partway still returns without error and burns
+// gas, so the caller must compare this against the depth the chain was built
+// to reach.
 func tracedMaxDepth(b *testing.B, statedb *state.IntraBlockState, addr accounts.Address, gasLimit uint64) int {
 	b.Helper()
 	var maxDepth int
@@ -371,18 +370,14 @@ func memChainCode(next *common.Address, words int) []byte {
 	return p.StaticCall(nil, *next, 0, words*32, 0, 32).Op(vm.POP, vm.STOP).Bytes()
 }
 
-// requireChainReachesLeaf proves the memChainCode chain rooted at entry
-// actually reaches leaf. Every intermediate frame drops its STATICCALL's
-// success value and stops regardless, so a missing, broken, or underfunded
-// child still lets the top-level call complete normally with gas spent —
-// callComplete's own checks pass either way. It runs the chain once with a
-// tracer wired in and checks that the leaf's own frame returned 32 bytes, the
-// size memChainCode's leaf Returns; a call into an address with no code — the
-// leaf never deployed, or a broken link short-circuiting the chain — still
-// enters that frame but exits with empty output, so the size alone tells
-// them apart. STATICCALL forbids state writes, which rules out a storage
-// marker here.
-func requireChainReachesLeaf(b *testing.B, statedb *state.IntraBlockState, entry, leaf accounts.Address, gasLimit uint64) {
+// requireChainReachesLeaf proves the memChainCode chain rooted at entry reaches
+// leaf through wantDepth nested frames. Every intermediate frame drops its
+// STATICCALL's success value and stops regardless, so a chain that breaks or
+// short-circuits still completes the top-level call and burns gas. A call into
+// an undeployed address enters a frame but exits empty, so the leaf's own
+// 32-byte return distinguishes it; STATICCALL forbids state writes, which rules
+// out a storage marker.
+func requireChainReachesLeaf(b *testing.B, statedb *state.IntraBlockState, entry, leaf accounts.Address, wantDepth int, gasLimit uint64) {
 	b.Helper()
 	leafDepth, leafOutputLen := -1, -1
 	env := tracedEnv(statedb, gasLimit, &tracing.Hooks{
@@ -408,5 +403,8 @@ func requireChainReachesLeaf(b *testing.B, statedb *state.IntraBlockState, entry
 	const wantOutputLen = 32
 	if leafOutputLen != wantOutputLen {
 		b.Fatalf("call chain did not reach the leaf at %s (leaf output len=%d, want %d)", leaf, leafOutputLen, wantOutputLen)
+	}
+	if leafDepth != wantDepth {
+		b.Fatalf("call chain reached the leaf at %s at depth %d, want %d", leaf, leafDepth, wantDepth)
 	}
 }
