@@ -46,22 +46,27 @@ type shardedLRU[V any] struct {
 	onEvict          func(uint64, V)
 
 	// fundGrow is asked for the envelope bytes a step needs; a refusal leaves
-	// the shard at its current size, evicting within it.
-	fundGrow func(slots uint32) bool
+	// the shard at its current size, evicting within it. refundGrow returns a
+	// reservation whose grow lost the race, so a loser cannot strand envelope
+	// bytes and stop another cache from growing.
+	fundGrow   func(slots uint32) bool
+	refundGrow func(slots uint32)
 
 	n atomic.Int64
 }
 
-func newShardedLRU[V any](startCap, maxCap, shards uint32, onEvict func(uint64, V), fundGrow func(uint32) bool) *shardedLRU[V] {
+func newShardedLRU[V any](startCap, maxCap, shards uint32, onEvict func(uint64, V),
+	fundGrow func(uint32) bool, refundGrow func(uint32)) *shardedLRU[V] {
 	shards = max(uint32(math.NextPowerOfTwo(uint64(shards))), 1)
 	s := &shardedLRU[V]{
-		shards:   make([]*freelru.LRU[uint64, V], shards),
-		mus:      make([]sync.Mutex, shards),
-		curCap:   make([]uint32, shards),
-		mask:     uint64(shards - 1),
-		maxCap:   max(perShard(maxCap, shards), 1),
-		onEvict:  onEvict,
-		fundGrow: fundGrow,
+		shards:     make([]*freelru.LRU[uint64, V], shards),
+		mus:        make([]sync.Mutex, shards),
+		curCap:     make([]uint32, shards),
+		mask:       uint64(shards - 1),
+		maxCap:     max(perShard(maxCap, shards), 1),
+		onEvict:    onEvict,
+		fundGrow:   fundGrow,
+		refundGrow: refundGrow,
 	}
 	start := min(max(perShard(startCap, shards), 1), s.maxCap)
 	s.startCapPerShard = start
@@ -115,14 +120,18 @@ func (s *shardedLRU[V]) Remove(h uint64) {
 func (s *shardedLRU[V]) Add(h uint64, v V) (evicted bool) {
 	i := s.idx(h)
 	s.mus[i].Lock()
-	if newCap, ok := s.growStep(i); ok {
+	if newCap, reserved, ok := s.growStep(i); ok {
 		// Allocate without the shard lock: the replacement is the largest thing
-		// a grow does, and nothing needs to be excluded while it is built.
+		// a grow does, and nothing needs to be excluded while it is built. Several
+		// writers can reach here on the same full shard, so the loser hands its
+		// reservation back rather than stranding it.
 		s.mus[i].Unlock()
 		next := s.newShard(newCap)
 		s.mus[i].Lock()
 		if s.curCap[i] < newCap {
 			s.migrateLocked(i, next, newCap)
+		} else if s.refundGrow != nil {
+			s.refundGrow(reserved)
 		}
 	}
 	before := s.shards[i].Len()
@@ -137,17 +146,18 @@ func (s *shardedLRU[V]) Add(h uint64, v V) (evicted bool) {
 	return evicted
 }
 
-// growStep reports the next capacity for shard i, and whether the envelope will
-// fund it. Called with the shard lock held.
-func (s *shardedLRU[V]) growStep(i uint64) (uint32, bool) {
+// growStep reports the next capacity for shard i, the slots it reserved from the
+// envelope, and whether the step is funded. Called with the shard lock held.
+func (s *shardedLRU[V]) growStep(i uint64) (newCap, reserved uint32, ok bool) {
 	if s.curCap[i] >= s.maxCap || s.shards[i].Len() < int(s.curCap[i]) {
-		return 0, false
+		return 0, 0, false
 	}
-	newCap := min(s.curCap[i]*genericCacheGrowFactor, s.maxCap)
-	if s.fundGrow != nil && !s.fundGrow(newCap-s.curCap[i]) {
-		return 0, false
+	newCap = min(s.curCap[i]*genericCacheGrowFactor, s.maxCap)
+	reserved = newCap - s.curCap[i]
+	if s.fundGrow != nil && !s.fundGrow(reserved) {
+		return 0, 0, false
 	}
-	return newCap, true
+	return newCap, reserved, true
 }
 
 // growLocked rebuilds shard i one step larger. Only that shard's readers and

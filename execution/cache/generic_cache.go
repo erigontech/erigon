@@ -149,7 +149,7 @@ func NewGenericCacheWithAvg[T any](capacityBytes datasize.ByteSize, avgBytes uin
 	c.enveloped = true
 	// Shard granularity follows the ceiling, not the start size: a shard grows
 	// on its own, so its share of maxCap is what bounds one grow's copy. The
-	// start size is raised to keepeach shard off a one-slot table, which a large
+	// start size is raised to keep each shard off a one-slot table, which a large
 	// GOMAXPROCS would otherwise produce.
 	c.shardCount = initialShardCount(maxCap, uint32(math.NextPowerOfTwo(uint64(runtime.GOMAXPROCS(0)*16))))
 	start = min(max(start, c.shardCount*minShardStart), maxCap)
@@ -198,6 +198,18 @@ func (c *GenericCache[T]) fundGrow(slots uint32) bool {
 	return true
 }
 
+// refundGrow returns a reservation whose grow lost the race to another writer.
+func (c *GenericCache[T]) refundGrow(slots uint32) {
+	if !c.enveloped {
+		return
+	}
+	delta := int64(slots) * c.avgEntryBytes
+	cachebudget.Global.Release(delta)
+	c.resizeMu.Lock()
+	c.reservedBytes -= delta
+	c.resizeMu.Unlock()
+}
+
 // newShards builds the shard array with this cache's evict callback wired.
 // The callback is the sole subtractor of currentSize — every removal (capacity
 // eviction, Remove) accounts through it. Eviction victims are picked per shard
@@ -209,7 +221,7 @@ func (c *GenericCache[T]) newShards(startCap, maxCap, shards uint32) *shardedLRU
 	s = newShardedLRU[entry[T]](startCap, maxCap, shards, func(_ uint64, e entry[T]) {
 		c.currentSize.Add(-int64(e.size))
 		s.dec()
-	}, c.fundGrow)
+	}, c.fundGrow, c.refundGrow)
 	return s
 }
 
