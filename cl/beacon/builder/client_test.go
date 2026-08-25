@@ -670,6 +670,7 @@ func TestPrivateBuilderTargetsRequireExplicitPolicy(t *testing.T) {
 		return []net.IPAddr{{IP: net.ParseIP("127.0.0.1")}}, nil
 	}
 	require.Error(t, rejected.SubmitBuilderPreferences(t.Context(), "http://builder.local:18550", common.Bytes48{}, request))
+	require.Error(t, rejected.SubmitSignedBeaconBlock(t.Context(), "http://builder.local:18550", cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)))
 
 	allowed := NewDynamicBuilderClient(mockBeaconConfig, BuilderTargetPolicy{AllowPrivate: true})
 	allowed.lookupIP = rejected.lookupIP
@@ -678,7 +679,7 @@ func TestPrivateBuilderTargetsRequireExplicitPolicy(t *testing.T) {
 	})
 	allowed.transport = nil
 	require.NoError(t, allowed.SubmitBuilderPreferences(t.Context(), "http://builder.local:18550", common.Bytes48{}, request))
-	require.Error(t, allowed.SubmitSignedBeaconBlock(t.Context(), "http://builder.local:18550", cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)))
+	require.NoError(t, allowed.SubmitSignedBeaconBlock(t.Context(), "http://builder.local:18550", cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.GloasVersion)))
 }
 
 func TestSubmitSignedBeaconBlock(t *testing.T) {

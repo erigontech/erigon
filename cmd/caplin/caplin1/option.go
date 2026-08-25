@@ -51,5 +51,9 @@ func builderOptionForConfig(config *clparams.CaplinConfig, beaconConfig *clparam
 	if !config.BeaconAPIRouter.Validator && !config.BeaconAPIRouter.Builder {
 		return nil, skippedLegacy
 	}
-	return WithBuilder(legacyRelayURL, beaconConfig, builder.BuilderTargetPolicy{}), skippedLegacy
+	return WithBuilder(legacyRelayURL, beaconConfig, builderTargetPolicyForConfig(config)), skippedLegacy
+}
+
+func builderTargetPolicyForConfig(config *clparams.CaplinConfig) builder.BuilderTargetPolicy {
+	return builder.BuilderTargetPolicy{AllowPrivate: config != nil && config.AllowPrivateBuilderURLs}
 }
