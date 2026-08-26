@@ -1,8 +1,9 @@
 # Plan: Universal "two v4 files then background merge" file lifecycle
 
-**Date:** 2026-08-25
+**Date:** 2026-08-25 → landed 2026-08-26
 **Branch:** `merge/main-into-feat-snapshot-flow-20260731`
 **Design owner:** user (via 2026-08-25 session)
+**Status:** All 10 commits landed. See "Landed SHAs" section below.
 
 ## Contract
 
@@ -293,3 +294,47 @@ Minimum critical-path length: 5 commits per side (1→2→3→4 or 5→6→7→8
 - `/erigon/mark/hive/clients/erigon/erigon/db/snapshotsync/freezeblocks/block_snapshots.go`
 - `/erigon/mark/hive/clients/erigon/erigon/node/components/storage/provider_unwind_snapshot_rebuild.go`
 - `/erigon/mark/hive/clients/erigon/erigon/node/components/storage/provider_unwind_snapshot_trim.go`
+
+## Landed SHAs (2026-08-26)
+
+State side:
+- `7ea0a49c0e` **commit 1** — `db/state: broaden IsRawTxN + add V4PairForStep`
+- `3a6ea6e468` **commit 2** — `db/state: findMergeRangeInFiles fires v4-pair aligned merge positively`
+- `39bb3aab51` **commit 3** — `db/state: History retire dest picks v4 #2 tail when v4 #1 exists`
+- `625569d015` **commit 4** — `db/state: wire Domain to v4 #2 tail + delete inline mergeV4IntoStepFile`
+
+Block side:
+- `30034ea3e3` **commit 5** — `db/snaptype: FileNameV4 + IsRawBlock predicate for block v4 files`
+- `049dcc5680` **commit 6** — `db/snapshotsync: FindMergeRanges recognises block v4 pairs positively`
+- `8d24680505` **commit 7** — `node/components/storage,db/snaptype: emit block v4 #1 at raw target`
+- `323458a3b9` **commit 8** — `db/snapshotsync,db/snaptype: retire tail v4 #2 emission + accessor v4 naming`
+- `c84d6343d4` **commit 9** — `db/snaptype,snapshotsync: SnapType.FileName picks v4 naming for raw endpoints`
+
+Docs:
+- **commit 10** — this update; landed alongside memo cross-references.
+
+## What actually shipped vs the plan
+
+Deviations from the original design:
+
+- Naming auto-selection landed at THREE call sites, not one: `FileInfo.As` (commit 7), `SnapType.IdxFileName{,s}` (commit 8), `SnapType.FileName` (commit 9). Each was needed independently — accessor lookups (`IdxFileNames`), path resolution (`As`), and DirtySegment file-name reconstruction (`FileName`) all had to pick v4 or aligned form based on endpoint alignment. Bare string helpers (`SegmentFileName`, `IdxFileName`, `FileName`) intentionally kept legacy semantics to preserve test-side value-form idioms.
+- State-side wiring landed as History-only (commit 3), then Domain in commit 4 alongside the `mergeV4IntoStepFile` deletion. InvertedIndex standalone wiring is not needed under the current design because mode-C emit doesn't produce v4 #1 for standalone II — only for state domains and their paired history.
+- `Domain.stepSourcesForCollate` gained an `isV4Tail` parameter (commit 4) to skip v4-file inclusion when retire writes v4 #2 form. Otherwise v4 #1 data would duplicate into v4 #2.
+- Test surgery in commit 7 deleted 5 `TestSeedLeftoverBlocks_*` tests + `TestChunkAlignedToBlock` + the `makeBlockSnapshotTriple` helper. All targeted deleted production functions.
+
+Net numbers:
+- Commit 4 removed 693 lines net (state-side inline compose machinery).
+- Commit 7 removed 965 lines net (block-side seed + chunk-align machinery).
+- Total removals across the stack: ~1700 lines; total additions: ~800 lines. Simpler shape than what it replaced.
+
+## Deferred / not covered by this stack
+
+- The v4-retire-cost measurement instrumentation (Secondary in the plan's Cost audit direction) — not measured because the structural fix is what mattered.
+- Bulk cleanup of long-lived v4 pairs (metric `v4_files_on_disk`, latency alert `v4_merge_latency_seconds`) — the merger runs on the standard schedule; no additional monitoring added.
+- Cross-family alignment guard (invariant #5) — assumed to hold by construction; no explicit assertion added.
+
+## Verification
+
+- All 9 code commits build clean and pass their unit tests. `make lint && make erigon integration` clean at every commit.
+- Frozen datadirs preserved for end-to-end verification: `/erigon/tmp/erigon-hoodi-modec-verify.cycle-010.frozen-iter4-fail` (state-side setHead cost) and `/erigon/tmp/erigon-hoodi-modec-verify.cycle-011.frozen-iter6b-fail` (block-side non-aligned mode-C).
+- Pre-existing test `TestProviderUnwind_ValidationOK_ReachesSubOps` continues to fail identically at every commit (confirmed pre-existing via stash-and-retest at commit 6 baseline); unrelated to this stack.
