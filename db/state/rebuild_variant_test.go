@@ -207,11 +207,11 @@ func rebuildVariantSettingsStayHex(t *testing.T, dirs datadir.Dirs) {
 	require.Equal(t, state.TrieVariantHex, settings.TrieVariantName())
 }
 
-func rebuildVariantProcessStateUntouched(t *testing.T) {
+func rebuildVariantProcessStateUntouched(t *testing.T, variantBefore commitment.TrieVariant) {
 	t.Helper()
 	require.False(t, statecfg.ExperimentalBinCommitment, "the rebuild must not enable the bin flag process-wide")
 	require.Empty(t, statecfg.BinCommitmentHash)
-	require.Equal(t, commitment.VariantHexPatriciaTrie, execctx.PickTrieVariant())
+	require.Equal(t, variantBefore, execctx.PickTrieVariant())
 	require.Equal(t, commitment.PBinHashKeccak, commitment.PBinHashSuiteName(), "the rebuild must restore H it bound")
 }
 
@@ -243,6 +243,7 @@ func rebuildVariantReportCounts(t *testing.T, report *state.RebuildReport, root 
 func TestRebuildCommitmentFilesBinTargetOnHexDatadir(t *testing.T) {
 	binDB, binAgg, binDirs := rebuildVariantDatadir(t)
 	rebuildVariantSettingsStayHex(t, binDirs)
+	variantBefore := execctx.PickTrieVariant()
 
 	binRoot, binReport, err := state.RebuildCommitmentFiles(t.Context(), binDB, &rawdbv3.TxNums, log.New(), false,
 		state.RebuildTarget{Variant: commitment.VariantBinPatriciaTrie})
@@ -250,7 +251,7 @@ func TestRebuildCommitmentFilesBinTargetOnHexDatadir(t *testing.T) {
 	require.NotEmpty(t, binRoot)
 	rebuildVariantReportCounts(t, binReport, binRoot, commitment.VariantBinPatriciaTrie)
 
-	rebuildVariantProcessStateUntouched(t)
+	rebuildVariantProcessStateUntouched(t, variantBefore)
 	rebuildVariantSettingsStayHex(t, binDirs)
 
 	require.Equal(t, binRoot, rebuildVariantRestoredRoot(t, binDB, binAgg, commitment.VariantBinPatriciaTrie),
@@ -259,7 +260,7 @@ func TestRebuildCommitmentFilesBinTargetOnHexDatadir(t *testing.T) {
 	hexDB, hexAgg, _ := rebuildVariantDatadir(t)
 	hexRoot, hexReport, err := state.RebuildCommitmentFiles(t.Context(), hexDB, &rawdbv3.TxNums, log.New(), false, state.RebuildTarget{})
 	require.NoError(t, err)
-	rebuildVariantReportCounts(t, hexReport, hexRoot, commitment.VariantHexPatriciaTrie)
+	rebuildVariantReportCounts(t, hexReport, hexRoot, variantBefore)
 	require.NotEqual(t, hexRoot, binRoot, "bin and hex commit different key spaces under different hashes")
 	require.Equal(t, hexRoot, rebuildVariantRestoredRoot(t, hexDB, hexAgg, commitment.VariantHexPatriciaTrie))
 }

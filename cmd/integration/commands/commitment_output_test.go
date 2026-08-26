@@ -448,12 +448,17 @@ func TestRebuildOutputStartsUnderTheBinFlag(t *testing.T) {
 func withBinCommitmentProcess(t *testing.T, hash string) {
 	t.Helper()
 	bin, prevHash, suite := statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash, commitment.PBinHashSuiteName()
+	parallel := statecfg.ExperimentalParallelCommitment
 	t.Cleanup(func() {
 		statecfg.ExperimentalBinCommitment, statecfg.BinCommitmentHash = bin, prevHash
+		statecfg.ExperimentalParallelCommitment = parallel
 		require.NoError(t, commitment.SetPBinHashSuite(suite))
 	})
 	statecfg.ExperimentalBinCommitment = true
 	statecfg.BinCommitmentHash = hash
+	// The settings resolver refuses bin together with parallel, so a process-wide
+	// parallel default would make every bin case here fail on the combination.
+	statecfg.ExperimentalParallelCommitment = false
 }
 
 // The rebuild reopens the staged directory as a datadir before it writes a single
