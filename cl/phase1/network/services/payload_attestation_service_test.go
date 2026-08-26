@@ -103,13 +103,12 @@ func setupPayloadAttestationService(t *testing.T, ctrl *gomock.Controller) (*pay
 	require.NoError(t, err)
 
 	service := &payloadAttestationService{
-		forkchoiceStore:            forkchoiceMock,
-		ethClock:                   ethClockMock,
-		netCfg:                     nil, // Not used in current implementation
-		seenAttestationsCache:      seenCache,
-		emitters:                   beaconevents.NewEventEmitter(),
-		buildPendingAttestationKey: pendingPayloadAttestationKeyFor,
-		validationAdmission:        make(chan struct{}, maxConcurrentPayloadAttestationValidations),
+		forkchoiceStore:       forkchoiceMock,
+		ethClock:              ethClockMock,
+		netCfg:                nil, // Not used in current implementation
+		seenAttestationsCache: seenCache,
+		emitters:              beaconevents.NewEventEmitter(),
+		validationAdmission:   make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
 	service.pending = service.newPendingQueue(canceledPendingQueueContext(t))
 
@@ -519,27 +518,6 @@ func TestPayloadAttestationServicePendingQueueKeepsDistinctSameValidatorBlock(t 
 	require.True(t, secondExists)
 }
 
-func TestPayloadAttestationServicePendingQueueRejectsHashFailure(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _ := setupPayloadAttestationService(t, ctrl)
-	service.buildPendingAttestationKey = func(common.Hash, *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error) {
-		return pendingPayloadAttestationKey{}, errors.New("hash failed")
-	}
-
-	blockRoot := common.HexToHash("0x1234")
-	service.queuePendingAttestation(blockRoot, newTestPayloadAttestationMessage(100, 1, blockRoot))
-
-	require.Zero(t, service.pending.count.Load())
-	stored := 0
-	service.pending.jobs.Range(func(_, _ any) bool {
-		stored++
-		return true
-	})
-	require.Zero(t, stored)
-}
-
 func TestPayloadAttestationServiceReferencedBlockSlotMismatch(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -656,6 +634,7 @@ func TestPayloadAttestationServicePendingSlotMismatch(t *testing.T) {
 
 	// Mock: slot 100 is no longer current
 	ethClockMock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(uint64(100)).Return(false)
+	output := captureServiceLogs(t)
 
 	// Process pending - should remove due to slot mismatch
 	service.pending.processPending(context.Background())
@@ -663,6 +642,7 @@ func TestPayloadAttestationServicePendingSlotMismatch(t *testing.T) {
 	require.Equal(t, int32(0), service.pending.count.Load())
 	_, exists := service.pending.jobs.Load(key)
 	require.False(t, exists)
+	require.Contains(t, output.String(), "Pending payload attestation slot mismatch")
 }
 
 func TestPayloadAttestationServicePendingProcessing(t *testing.T) {
@@ -731,33 +711,6 @@ func TestPayloadAttestationServiceMultiplePendingForSameBlock(t *testing.T) {
 	require.Equal(t, int32(0), service.pending.count.Load())
 	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 1}))
 	require.True(t, service.seenAttestationsCache.Contains(seenPayloadAttestationKey{100, 2}))
-}
-
-func TestPayloadAttestationServicePendingQueueCapSkipsHash(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _ := setupPayloadAttestationService(t, ctrl)
-	keyBuilt := false
-	service.buildPendingAttestationKey = func(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error) {
-		keyBuilt = true
-		return pendingPayloadAttestationKeyFor(blockRoot, msg)
-	}
-
-	// Fill the queue to the cap
-	service.pending.count.Store(maxPendingAttestations)
-
-	blockRoot := common.HexToHash("0xffff")
-	msg := newTestPayloadAttestationMessage(100, 999, blockRoot)
-
-	service.queuePendingAttestation(blockRoot, msg)
-
-	// Should still be at cap — new item was rejected
-	require.False(t, keyBuilt)
-	require.Equal(t, int32(maxPendingAttestations), service.pending.count.Load())
-	key := mustPendingPayloadAttestationKey(t, blockRoot, msg)
-	_, exists := service.pending.jobs.Load(key)
-	require.False(t, exists)
 }
 
 func TestPayloadAttestationServicePendingQueueCapConcurrent(t *testing.T) {

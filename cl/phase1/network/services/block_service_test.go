@@ -99,7 +99,9 @@ func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 
 	blocks, _, post := tests.GetBellatrixRandom()
 
-	blockService, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	blockServiceAPI, syncedData, ethClock, fcu := setupBlockService(t, ctrl)
+	blockService := blockServiceAPI.(*blockService)
+	blockService.blocksScheduledForLaterExecution = blockService.newPendingBlockQueue(canceledPendingQueueContext(t))
 	require.NoError(t, syncedData.OnHeadState(post))
 	ethClock.EXPECT().GetCurrentSlot().Return(uint64(0)).AnyTimes()
 	ethClock.EXPECT().IsSlotCurrentSlotWithMaximumClockDisparity(gomock.Any()).Return(true).AnyTimes()
@@ -107,6 +109,7 @@ func TestBlockServiceLowerThanFinalizedCheckpoint(t *testing.T) {
 	blocks[0].Block.Slot = 0
 
 	require.Error(t, blockService.ProcessMessage(context.Background(), nil, blocks[0]))
+	require.Zero(t, blockService.blocksScheduledForLaterExecution.count.Load())
 }
 
 func TestBlockServiceUnseenParentRoot(t *testing.T) {
@@ -188,6 +191,7 @@ func TestBlockServicePendingQueueCap(t *testing.T) {
 	service.blocksScheduledForLaterExecution = service.newPendingBlockQueue(canceledPendingQueueContext(t))
 	require.Equal(t, int32(maxPendingBlocks), service.blocksScheduledForLaterExecution.capacity)
 	service.blocksScheduledForLaterExecution.count.Store(maxPendingBlocks)
+	output := captureServiceLogs(t)
 
 	service.scheduleBlockForLaterProcessing(blocks[0])
 
@@ -196,6 +200,8 @@ func TestBlockServicePendingQueueCap(t *testing.T) {
 	require.NoError(t, err)
 	_, exists := service.blocksScheduledForLaterExecution.jobs.Load(common.Hash(root))
 	require.False(t, exists)
+	require.Contains(t, output.String(), "Pending block queue full; block not scheduled")
+	require.NotContains(t, output.String(), "Block scheduled for later processing")
 }
 
 func TestBlockServicePendingQueueDeduplicates(t *testing.T) {
@@ -208,9 +214,16 @@ func TestBlockServicePendingQueueDeduplicates(t *testing.T) {
 	service.blocksScheduledForLaterExecution = service.newPendingBlockQueue(canceledPendingQueueContext(t))
 
 	service.scheduleBlockForLaterProcessing(blocks[0])
+	root, err := blocks[0].Block.HashSSZ()
+	require.NoError(t, err)
+	first, exists := service.blocksScheduledForLaterExecution.jobs.Load(common.Hash(root))
+	require.True(t, exists)
 	service.scheduleBlockForLaterProcessing(blocks[0])
 
 	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
+	stored, exists := service.blocksScheduledForLaterExecution.jobs.Load(common.Hash(root))
+	require.True(t, exists)
+	require.Same(t, first, stored)
 }
 
 func TestBlockServicePendingQueueRetainsProcessingFailure(t *testing.T) {

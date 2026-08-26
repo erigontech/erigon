@@ -64,7 +64,6 @@ func setupExecutionPayloadBidService(t *testing.T, ctrl *gomock.Controller) (
 		emitters:             beaconevents.NewEventEmitter(),
 		seenCache:            seenCache,
 		validationStateCache: validationStateCache,
-		buildPendingBidKey:   pendingBidKeyFor,
 	}
 	service.pending = service.newPendingQueue(canceledPendingQueueContext(t))
 	service.pending.stopAndWait()
@@ -692,52 +691,6 @@ func TestExecutionPayloadBidServiceSuccess(t *testing.T) {
 	require.Equal(t, msg, stored)
 }
 
-func TestExecutionPayloadBidServicePendingQueueCapSkipsHash(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-	keyBuilt := false
-	service.buildPendingBidKey = func(msg *cltypes.SignedExecutionPayloadBid) (pendingBidKey, error) {
-		keyBuilt = true
-		return pendingBidKeyFor(msg)
-	}
-
-	// Fill the queue to the cap
-	service.pending.count.Store(maxPendingBids)
-
-	msg := newTestSignedExecutionPayloadBid(100, 999, 1000)
-
-	service.queuePendingBid(msg)
-
-	// Should still be at cap — new item was rejected
-	require.False(t, keyBuilt)
-	require.Equal(t, int32(maxPendingBids), service.pending.count.Load())
-	key := mustPendingBidKey(t, msg)
-	_, exists := service.pending.jobs.Load(key)
-	require.False(t, exists)
-}
-
-func TestExecutionPayloadBidServicePendingQueueRejectsHashFailure(t *testing.T) {
-	ctrl := gomock.NewController(t)
-	defer ctrl.Finish()
-
-	service, _, _, _, _ := setupExecutionPayloadBidService(t, ctrl)
-	service.buildPendingBidKey = func(*cltypes.SignedExecutionPayloadBid) (pendingBidKey, error) {
-		return pendingBidKey{}, errors.New("hash failed")
-	}
-
-	service.queuePendingBid(newTestSignedExecutionPayloadBid(100, 1, 1000))
-
-	require.Zero(t, service.pending.count.Load())
-	stored := 0
-	service.pending.jobs.Range(func(_, _ any) bool {
-		stored++
-		return true
-	})
-	require.Zero(t, stored)
-}
-
 func TestExecutionPayloadBidServicePendingQueueKeepsDistinctSameBuilderSlot(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -838,12 +791,33 @@ func TestExecutionPayloadBidServicePendingStaleSlotDropped(t *testing.T) {
 
 	// A stale slot removes the job before any dependency retry.
 	ethClockMock.EXPECT().GetCurrentSlot().Return(uint64(200))
+	output := captureServiceLogs(t)
 
 	service.pending.processPending(context.Background())
 
 	require.Equal(t, int32(0), service.pending.count.Load())
 	_, exists := service.pending.jobs.Load(key)
 	require.False(t, exists)
+	require.Contains(t, output.String(), "Pending execution payload bid slot expired")
+}
+
+func TestExecutionPayloadBidServicePendingValidationFailureLogged(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, _, ethClockMock, fcMock, epbsPool := setupExecutionPayloadBidService(t, ctrl)
+	msg := newTestSignedExecutionPayloadBid(100, 1, 1000)
+	msg.Message.FeeRecipient = common.HexToAddress("0xdead")
+	fcMock.Headers[msg.Message.ParentBlockRoot] = &cltypes.BeaconBlockHeader{Slot: 99}
+	addPreferencesToPool(epbsPool, msg.Message.Slot)
+	ethClockMock.EXPECT().GetCurrentSlot().Return(msg.Message.Slot)
+	output := captureServiceLogs(t)
+
+	decision := service.tryProcessPendingBid(t.Context(), mustPendingBidKey(t, msg), msg)
+
+	require.Equal(t, pendingJobRemove, decision)
+	require.Contains(t, output.String(), "Failed to process pending execution payload bid")
+	require.Contains(t, output.String(), "fee_recipient")
 }
 
 // TestExecutionPayloadBidServiceLoopProcessesQueuedBid exercises the real

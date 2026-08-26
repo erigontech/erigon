@@ -57,7 +57,7 @@ const (
 var pendingJobQueueRejectedCounter = metrics.GetOrCreateCounterVec(
 	"caplin_pending_job_queue_rejected_total",
 	[]string{"queue"},
-	"Total pending jobs rejected because their queue was full",
+	"Total pending queue admission attempts rejected at capacity",
 )
 
 // pendingJobQueue retries dependency-blocked jobs on the single processing loop
@@ -73,7 +73,9 @@ type pendingJobQueue[K comparable, M any] struct {
 	processAfterRemove func(ctx context.Context, key K, msg M)
 	onExpired          func(key K)
 
-	jobs     sync.Map // K -> *pendingJob[M]
+	jobs sync.Map // K -> *pendingJob[M]
+	// count includes stored jobs and reservations held by in-flight enqueues. It
+	// can exceed the number of visible jobs, but it never exceeds capacity.
 	count    atomic.Int32
 	wakeLoop chan struct{}
 
@@ -140,8 +142,10 @@ func (q *pendingJobQueue[K, M]) enqueueKey(key K, msg M) pendingJobEnqueueResult
 }
 
 // enqueueLazy reserves capacity before building the key so a full queue skips
-// potentially expensive work. Storage keeps or releases the reservation;
-// deferred cleanup handles key-construction errors and panics.
+// potentially expensive work. A duplicate arriving at capacity is therefore
+// reported as full because detecting it would require building the key. Storage
+// keeps or releases the reservation; deferred cleanup handles key-construction
+// errors and panics.
 func (q *pendingJobQueue[K, M]) enqueueLazy(msg M, buildKey func() (K, error)) (pendingJobEnqueueResult, error) {
 	if !q.reserve() {
 		return pendingJobQueueFull, nil
@@ -176,6 +180,8 @@ func (q *pendingJobQueue[K, M]) reserve() bool {
 	}
 }
 
+// storeReserved transfers the caller's reservation to a new job, or releases
+// it if the key is already present.
 func (q *pendingJobQueue[K, M]) storeReserved(key K, msg M) pendingJobEnqueueResult {
 	if _, loaded := q.jobs.LoadOrStore(key, &pendingJob[M]{
 		msg:          msg,
@@ -203,6 +209,9 @@ func (q *pendingJobQueue[K, M]) remove(key K, job *pendingJob[M]) bool {
 // loop is the background goroutine that retries pending jobs.
 func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 	for {
+		if ctx.Err() != nil {
+			return
+		}
 		for q.count.Load() == 0 {
 			select {
 			case <-ctx.Done():
@@ -218,6 +227,12 @@ func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 				ticker.Stop()
 				return
 			case <-ticker.C:
+				// A tick can win the select after cancellation is ready. Recheck
+				// before invoking service code on an already-canceled queue.
+				if ctx.Err() != nil {
+					ticker.Stop()
+					return
+				}
 				q.processPending(ctx)
 			}
 		}
@@ -225,7 +240,7 @@ func (q *pendingJobQueue[K, M]) loop(ctx context.Context) {
 	}
 }
 
-// processPending must not run concurrently.
+// processPending runs callbacks sequentially and must not be called concurrently.
 func (q *pendingJobQueue[K, M]) processPending(ctx context.Context) {
 	q.jobs.Range(func(key, value any) bool {
 		k := key.(K)

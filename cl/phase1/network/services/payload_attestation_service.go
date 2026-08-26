@@ -69,8 +69,6 @@ type payloadAttestationService struct {
 	// Cache to track seen attestations: (slot, validatorIndex) -> struct{}
 	seenAttestationsCache *lru.Cache[seenPayloadAttestationKey, struct{}]
 
-	// buildPendingAttestationKey is replaceable so HashSSZ failures can be tested.
-	buildPendingAttestationKey func(common.Hash, *cltypes.PayloadAttestationMessage) (pendingPayloadAttestationKey, error)
 	// pending retains attestations until their referenced blocks are available.
 	pending             *pendingJobQueue[pendingPayloadAttestationKey, *cltypes.PayloadAttestationMessage]
 	validationAdmission chan struct{}
@@ -90,13 +88,12 @@ func NewPayloadAttestationService(
 		panic(err)
 	}
 	s := &payloadAttestationService{
-		forkchoiceStore:            forkchoiceStore,
-		ethClock:                   ethClock,
-		netCfg:                     netCfg,
-		emitters:                   emitters,
-		seenAttestationsCache:      seenCache,
-		buildPendingAttestationKey: pendingPayloadAttestationKeyFor,
-		validationAdmission:        make(chan struct{}, maxConcurrentPayloadAttestationValidations),
+		forkchoiceStore:       forkchoiceStore,
+		ethClock:              ethClock,
+		netCfg:                netCfg,
+		emitters:              emitters,
+		seenAttestationsCache: seenCache,
+		validationAdmission:   make(chan struct{}, maxConcurrentPayloadAttestationValidations),
 	}
 	s.pending = s.newPendingQueue(ctx)
 	return s
@@ -214,7 +211,7 @@ func (s *payloadAttestationService) ProcessMessage(ctx context.Context, _ *uint6
 // queuePendingAttestation defers an attestation until its referenced block is available.
 func (s *payloadAttestationService) queuePendingAttestation(blockRoot common.Hash, msg *cltypes.PayloadAttestationMessage) {
 	_, err := s.pending.enqueueLazy(msg, func() (pendingPayloadAttestationKey, error) {
-		return s.buildPendingAttestationKey(blockRoot, msg)
+		return pendingPayloadAttestationKeyFor(blockRoot, msg)
 	})
 	if err != nil {
 		log.Warn("Failed to hash payload attestation for pending queue",
@@ -238,6 +235,7 @@ func pendingPayloadAttestationKeyFor(blockRoot common.Hash, msg *cltypes.Payload
 // once their referenced block arrives.
 func (s *payloadAttestationService) tryProcessPendingAttestation(_ context.Context, key pendingPayloadAttestationKey, msg *cltypes.PayloadAttestationMessage) pendingJobDecision {
 	if !s.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Data.Slot) {
+		log.Trace("Pending payload attestation slot mismatch", "blockRoot", key.blockRoot)
 		return pendingJobRemove
 	}
 

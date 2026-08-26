@@ -17,14 +17,29 @@
 package services
 
 import (
+	"bytes"
 	"context"
+	"errors"
+	"runtime"
 	"sync"
 	"sync/atomic"
 	"testing"
 	"time"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/log/v3"
 )
+
+func captureServiceLogs(t *testing.T) *bytes.Buffer {
+	t.Helper()
+	var output bytes.Buffer
+	logger := log.Root()
+	previousHandler := logger.GetHandler()
+	logger.SetHandler(log.StreamHandler(&output, log.LogfmtFormat()))
+	t.Cleanup(func() { logger.SetHandler(previousHandler) })
+	return &output
+}
 
 func canceledPendingQueueContext(t *testing.T) context.Context {
 	t.Helper()
@@ -212,6 +227,32 @@ func TestNewPendingJobQueueStartsProcessingLoop(t *testing.T) {
 	}, time.Second, time.Millisecond)
 }
 
+func TestPendingJobQueueDoesNotProcessAfterContextCancellation(t *testing.T) {
+	processed := 0
+	for range 1_000 {
+		ctx, cancel := context.WithCancel(t.Context())
+		cancel()
+		queue := &pendingJobQueue[int, string]{
+			pendingJobQueueOptions: pendingJobQueueOptions{
+				capacity:      1,
+				expiry:        time.Minute,
+				checkInterval: time.Nanosecond,
+			},
+			tryProcess: func(context.Context, int, string) pendingJobDecision {
+				processed++
+				return pendingJobRemove
+			},
+			onExpired: func(int) {},
+			wakeLoop:  make(chan struct{}, 1),
+		}
+		storePendingJob(t, queue, 1, "message", time.Now())
+
+		queue.loop(ctx)
+	}
+
+	require.Zero(t, processed)
+}
+
 func TestPendingJobQueueStopWaitsForInFlightProcessing(t *testing.T) {
 	processing := make(chan context.Context)
 	processingReleased := make(chan struct{})
@@ -314,6 +355,19 @@ func TestPendingJobQueueEnqueueReleasesReservationOnKeyBuildPanic(t *testing.T) 
 	require.Zero(t, queue.count.Load())
 }
 
+func TestPendingJobQueueEnqueueReleasesReservationOnKeyBuildError(t *testing.T) {
+	queue := newTestPendingJobQueue(t)
+	wantErr := errors.New("key build failed")
+
+	result, err := queue.enqueueLazy("message", func() (int, error) {
+		return 0, wantErr
+	})
+
+	require.ErrorIs(t, err, wantErr)
+	require.Equal(t, pendingJobEnqueueError, result)
+	require.Zero(t, queue.count.Load())
+}
+
 func TestPendingJobQueueCountsFullRejection(t *testing.T) {
 	queue := newTestPendingJobQueue(t)
 	queue.count.Store(queue.capacity)
@@ -368,19 +422,7 @@ func TestPendingJobQueueConcurrentEnqueueRemoveKeepsCountBounded(t *testing.T) {
 
 	start := make(chan struct{})
 	continueAfterRemove := make(chan struct{})
-	observerReady := make(chan struct{})
-	var stopObserver atomic.Bool
 	var overCapacity atomic.Bool
-	var observerWG sync.WaitGroup
-	observerWG.Go(func() {
-		close(observerReady)
-		for !stopObserver.Load() {
-			if queue.count.Load() > queue.capacity {
-				overCapacity.Store(true)
-			}
-		}
-	})
-	<-observerReady
 
 	var firstAttempts sync.WaitGroup
 	firstAttempts.Add(workers)
@@ -402,6 +444,10 @@ func TestPendingJobQueueConcurrentEnqueueRemoveKeepsCountBounded(t *testing.T) {
 				case pendingJobQueueFull:
 				case pendingJobEnqueued:
 					successfulEnqueues.Add(1)
+					runtime.Gosched()
+					if queue.count.Load() > queue.capacity {
+						overCapacity.Store(true)
+					}
 					job, loaded := queue.jobs.Load(key)
 					if !loaded || !queue.remove(key, job.(*pendingJob[string])) {
 						unexpectedResults.Add(1)
@@ -417,8 +463,6 @@ func TestPendingJobQueueConcurrentEnqueueRemoveKeepsCountBounded(t *testing.T) {
 	removed := queue.remove(0, held)
 	close(continueAfterRemove)
 	workersWG.Wait()
-	stopObserver.Store(true)
-	observerWG.Wait()
 
 	require.True(t, removed)
 	require.False(t, overCapacity.Load())

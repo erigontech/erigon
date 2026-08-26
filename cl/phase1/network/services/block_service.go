@@ -162,9 +162,6 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		}
 		return nil
 	}); err != nil {
-		if errors.Is(err, ErrIgnore) {
-			b.scheduleBlockForLaterProcessing(msg)
-		}
 		return err
 	}
 
@@ -254,15 +251,10 @@ func (b *blockService) publishBlockGossipEvent(block *cltypes.SignedBeaconBlock)
 	})
 }
 
-// scheduleBlockForLaterProcessing schedules a block for later processing
+// scheduleBlockForLaterProcessing queues a block after its gossip signature has
+// been validated, while another processing dependency is unavailable.
 func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeaconBlock) {
-	// [Modified in Gloas:EIP7732] ExecutionPayload is not in block.body for GLOAS
-	var blockNum uint64
-	if block.Block.Body.ExecutionPayload != nil {
-		blockNum = block.Block.Body.ExecutionPayload.BlockNumber
-	}
-	log.Trace("Block scheduled for later processing", "slot", block.Block.Slot, "block", blockNum)
-	_, err := b.blocksScheduledForLaterExecution.enqueueLazy(block, func() (common.Hash, error) {
+	result, err := b.blocksScheduledForLaterExecution.enqueueLazy(block, func() (common.Hash, error) {
 		blockRoot, err := block.Block.HashSSZ()
 		if err != nil {
 			return common.Hash{}, err
@@ -271,6 +263,18 @@ func (b *blockService) scheduleBlockForLaterProcessing(block *cltypes.SignedBeac
 	})
 	if err != nil {
 		log.Debug("Failed to hash block", "block", block, "error", err)
+		return
+	}
+	// Gloas blocks do not carry an execution payload in the block body.
+	var blockNum uint64
+	if block.Block.Body.ExecutionPayload != nil {
+		blockNum = block.Block.Body.ExecutionPayload.BlockNumber
+	}
+	switch result {
+	case pendingJobEnqueued:
+		log.Trace("Block scheduled for later processing", "slot", block.Block.Slot, "block", blockNum)
+	case pendingJobQueueFull:
+		log.Debug("Pending block queue full; block not scheduled", "slot", block.Block.Slot, "block", blockNum)
 	}
 }
 

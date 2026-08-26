@@ -5,6 +5,7 @@ import (
 	"errors"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/stretchr/testify/suite"
 	"go.uber.org/mock/gomock"
@@ -19,6 +20,7 @@ import (
 	das_mock "github.com/erigontech/erigon/cl/das/mock_services"
 	das_state_mock "github.com/erigontech/erigon/cl/das/state/mock_services"
 	blob_storage_mock "github.com/erigontech/erigon/cl/persistence/blob_storage/mock_services"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	forkchoice_mock "github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/bls"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -62,6 +64,21 @@ type dataColumnSidecarTestSuite struct {
 	dataColumnSidecarService DataColumnSidecarService
 	beaconConfig             *clparams.BeaconChainConfig
 	mockFuncs                *mockFuncs
+}
+
+type blockAvailableOnceStore struct {
+	forkchoice.ForkChoiceStorage
+	blockRoot common.Hash
+	block     *cltypes.SignedBeaconBlock
+	getCalls  int
+}
+
+func (s *blockAvailableOnceStore) GetBlock(blockRoot common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	s.getCalls++
+	if s.getCalls == 1 && blockRoot == s.blockRoot {
+		return s.block, true
+	}
+	return nil, false
 }
 
 func (t *dataColumnSidecarTestSuite) SetupTest() {
@@ -581,10 +598,9 @@ func (t *dataColumnSidecarTestSuite) TestGloasProcessMessage_WhenBlockNotFound_S
 	t.Equal(ErrIgnore, err)
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
-	_, exists := service.pendingGloasSidecars.jobs.Load(seenGloasSidecarKey{
-		beaconBlockRoot: testBlockRoot,
-		index:           sidecar.Index,
-	})
+	key, keyErr := pendingGloasSidecarKeyFor(sidecar)
+	t.NoError(keyErr)
+	_, exists := service.pendingGloasSidecars.jobs.Load(key)
 	t.True(exists)
 }
 
@@ -597,10 +613,9 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueCap() {
 	service.scheduleSidecarForLaterProcessing(sidecar, nil)
 
 	t.Equal(int32(maxPendingGloasSidecars), service.pendingGloasSidecars.count.Load())
-	_, exists := service.pendingGloasSidecars.jobs.Load(seenGloasSidecarKey{
-		beaconBlockRoot: testBlockRoot,
-		index:           sidecar.Index,
-	})
+	key, err := pendingGloasSidecarKeyFor(sidecar)
+	t.NoError(err)
+	_, exists := service.pendingGloasSidecars.jobs.Load(key)
 	t.False(exists)
 }
 
@@ -614,6 +629,50 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDeduplicates() {
 	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
 }
 
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsDistinctContentForSameColumn() {
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	first := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	second := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	differentProof := &cltypes.KZGProof{}
+	differentProof[0] = 0xff
+	second.KzgProofs.Append(differentProof)
+
+	service.scheduleSidecarForLaterProcessing(first, nil)
+	service.scheduleSidecarForLaterProcessing(second, nil)
+
+	t.Equal(int32(2), service.pendingGloasSidecars.count.Load())
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueKeepsOriginalAgeWhenBlockDisappears() {
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	service.scheduleSidecarForLaterProcessing(sidecar, nil)
+
+	var original *pendingJob[pendingGloasSidecar]
+	service.pendingGloasSidecars.jobs.Range(func(_, value any) bool {
+		original = value.(*pendingJob[pendingGloasSidecar])
+		return false
+	})
+	t.NotNil(original)
+	original.creationTime = time.Now().Add(-pendingGloasSidecarExpiry / 2)
+
+	t.mockEthClock.EXPECT().GetCurrentSlot().Return(testSlot).AnyTimes()
+	service.forkChoice = &blockAvailableOnceStore{
+		ForkChoiceStorage: t.mockForkChoice,
+		blockRoot:         testBlockRoot,
+		block:             createMockGloasBlock(testSlot, testBlockRoot),
+	}
+	service.pendingGloasSidecars.processPending(t.T().Context())
+
+	var stored *pendingJob[pendingGloasSidecar]
+	service.pendingGloasSidecars.jobs.Range(func(_, value any) bool {
+		stored = value.(*pendingJob[pendingGloasSidecar])
+		return false
+	})
+	t.Same(original, stored)
+	t.Equal(int32(1), service.pendingGloasSidecars.count.Load())
+}
+
 func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsFinalizedSidecar() {
 	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
 	t.mockForkChoice.FinalizedSlotVal = testSlot
@@ -623,6 +682,22 @@ func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueDropsFinalizedSidecar(
 	service.pendingGloasSidecars.processPending(t.T().Context())
 
 	t.Zero(service.pendingGloasSidecars.count.Load())
+}
+
+func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueExpiryLogsSlot() {
+	service := t.dataColumnSidecarService.(*dataColumnSidecarService)
+	sidecar := createMockGloasDataColumnSidecar(testSlot, 0, testBlockRoot)
+	service.scheduleSidecarForLaterProcessing(sidecar, nil)
+	service.pendingGloasSidecars.jobs.Range(func(_, value any) bool {
+		value.(*pendingJob[pendingGloasSidecar]).creationTime = time.Now().Add(-(pendingGloasSidecarExpiry + time.Second))
+		return false
+	})
+	output := captureServiceLogs(t.T())
+
+	service.pendingGloasSidecars.processPending(t.T().Context())
+
+	t.Zero(service.pendingGloasSidecars.count.Load())
+	t.Contains(output.String(), "slot=321")
 }
 
 func (t *dataColumnSidecarTestSuite) TestGloasPendingQueueProcessesAvailableBlock() {
