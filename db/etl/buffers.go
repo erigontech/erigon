@@ -84,17 +84,18 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
 // 17*(256Mb/8) = 512Mb for all collectors combined. Buffers pool their
 // chunks — see dataChunks below.
-// etlEntriesDiv sizes the entry slice: buffer bytes / this = entries. Mainnet
-// exec measured ~36B of key+value per entry at flush, so 32 covers a full
-// buffer; a larger divisor trades upfront index memory for re-allocations.
-var etlEntriesDiv = dbg.EnvInt("ETL_ENTRIES_DIV", 512)
+// etlAvgEntryBytes is what one entry's key+value averages, so a buffer's byte
+// budget divided by it is how many entries it can hold.
+var etlAvgEntryBytes = dbg.EnvInt("ETL_AVG_ENTRY_BYTES", 512)
+
+func entriesIn(bufBytes datasize.ByteSize) int { return int(bufBytes) / etlAvgEntryBytes }
 
 var (
 	etlSmallBufRAM       = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
 			mxBufNew.Inc()
-			return NewSortableBuffer(etlSmallBufRAM).Prealloc(int(etlSmallBufRAM)/int(etlEntriesDiv), int(etlSmallBufRAM)) // SortableBuffer does Prealloc only metadata slices - not buffers itself
+			return NewSortableBuffer(etlSmallBufRAM).Prealloc(entriesIn(etlSmallBufRAM), int(etlSmallBufRAM)) // SortableBuffer does Prealloc only metadata slices - not buffers itself
 		},
 	})
 )
@@ -104,7 +105,7 @@ var (
 	LargeSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
 			mxBufNew.Inc()
-			return NewSortableBuffer(etlLargeBufRAM).Prealloc(int(etlLargeBufRAM)/int(etlEntriesDiv), int(etlLargeBufRAM))
+			return NewSortableBuffer(etlLargeBufRAM).Prealloc(entriesIn(etlLargeBufRAM), int(etlLargeBufRAM))
 		},
 	})
 )
