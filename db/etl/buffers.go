@@ -247,13 +247,16 @@ func (c *dataChunk) entries() []entryLoc {
 }
 
 type sortableBuffer struct {
+	// The chunk being filled, hoisted out of chunks so Put touches only this
+	// struct. nextChunk writes them back, and syncCur has to run before
+	// anything reads the last chunk's own copy.
+	curBuf []byte
+	curEnd int32 // data grows up to here
+	curTop int32 // the index grows down to here
+	free   int32 // bytes between the two
+	n      int
+
 	chunks []dataChunk
-	// cur is &chunks[len-1]. nextChunk is the only place that appends to
-	// chunks, and it re-takes the pointer; Prealloc leaves a filled buffer
-	// alone for the same reason.
-	cur  *dataChunk
-	free int32 // bytes left in cur
-	n    int
 
 	// Sort orders each chunk on its own, so reading the buffer in key order is
 	// a k-way merge over the chunks - unless the chunks already run in order
@@ -283,10 +286,20 @@ func (b *sortableBuffer) nextChunk(n int32) {
 	} else {
 		buf = getDataChunk()
 	}
+	b.syncCur()
 	b.chunks = append(b.chunks, dataChunk{buf: buf, entTop: int32(len(buf))}) //nolint:gosec
-	b.cur = &b.chunks[len(b.chunks)-1]
+	b.curBuf, b.curEnd, b.curTop = buf, 0, int32(len(buf))                    //nolint:gosec
 	b.chunkBytes += len(buf)
 	b.free = int32(len(buf)) //nolint:gosec
+}
+
+// syncCur puts the chunk being filled back into chunks, where the readers look.
+func (b *sortableBuffer) syncCur() {
+	if len(b.chunks) == 0 {
+		return
+	}
+	c := &b.chunks[len(b.chunks)-1]
+	c.dataEnd, c.entTop = b.curEnd, b.curTop
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
@@ -306,15 +319,14 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	if n+entryLocSize > b.free {
 		b.nextChunk(n)
 	}
-	c := b.cur
-	off := c.dataEnd
-	data := c.buf[off:]
+	off := b.curEnd
+	data := b.curBuf[off:]
 	binary.NativeEndian.PutUint32(data, uint32(vLen)) //nolint:gosec
 	copy(data[entryHeaderSize:], k)
 	copy(data[entryHeaderSize+len(k):], v)
-	c.dataEnd = off + n
-	c.entTop -= entryLocSize
-	binary.NativeEndian.PutUint32(c.buf[c.entTop:], uint32(makeEntryLoc(kLen, off)))
+	b.curEnd = off + n
+	b.curTop -= entryLocSize
+	binary.NativeEndian.PutUint32(b.curBuf[b.curTop:], uint32(makeEntryLoc(kLen, off)))
 	b.free -= n + entryLocSize
 	b.n++
 }
@@ -347,6 +359,7 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 // upward costs O(1) a step; going back restarts the merge.
 func (b *sortableBuffer) entryAt(i int) ([]byte, entryLoc) {
 	if b.sortedN != b.n {
+		b.syncCur()
 		for k := range b.chunks {
 			c := &b.chunks[k]
 			m := c.len()
@@ -383,9 +396,6 @@ func (b *sortableBuffer) entryAt(i int) ([]byte, entryLoc) {
 // still taken from their pool one at a time and carry the entry index with
 // them, so an idle buffer holds nothing.
 func (b *sortableBuffer) Prealloc(_, predictDataSize int) Buffer {
-	if len(b.chunks) > 0 { // moving the slice would strand cur
-		return b
-	}
 	if n := predictDataSize/dataChunkSize + 1; cap(b.chunks) < n {
 		b.chunks = slices.Grow(b.chunks, n)
 	}
@@ -398,7 +408,7 @@ func (b *sortableBuffer) Reset() {
 	}
 	clear(b.chunks)
 	b.chunks, b.heap, b.starts = b.chunks[:0], b.heap[:0], b.starts[:0]
-	b.cur = nil
+	b.curBuf, b.curEnd, b.curTop = nil, 0, 0
 	b.concat = false
 	b.free, b.n, b.at, b.atChunk, b.chunkBytes = 0, 0, 0, 0, 0
 	b.sortedN = -1
@@ -413,6 +423,7 @@ func (b *sortableBuffer) Sort() {
 	if b.sortedN == b.n {
 		return
 	}
+	b.syncCur()
 	for i := range b.chunks {
 		c := &b.chunks[i]
 		ents := c.entries()
