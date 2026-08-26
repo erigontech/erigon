@@ -54,23 +54,20 @@ func (p *Provider) unwindSnapshotsPastBlock(ctx context.Context, tx kv.TemporalR
 
 	// Block-snapshot straddle rebuilds. The file whose [FromBlock,
 	// ToBlock) straddles toBlock has valid block-data for blocks ≤
-	// toBlock that the writable DB doesn't carry (OtterSync exec
-	// doesn't write kv.Headers / kv.BlockBody / kv.EthTx for frozen
-	// blocks). Removing the straddle file strands those blocks
-	// (live-rig issue #2 from the 2026-06-01 cycle).
+	// toBlock that the writable DB doesn't carry. Under the universal
+	// two-v4-then-merge lifecycle, the rebuild produces v4 #1:
+	// [FromBlock, toBlock+1) — a raw-block file preserving every
+	// block up to and including toBlock. Non-1000-aligned newTo is
+	// the whole point of v4 naming (%07d-%07d in FileInfo.As), so
+	// frozen data stays in files rather than being seeded into the
+	// writable DB.
 	//
 	// Each type (Headers, Bodies, Transactions) gets a per-file
 	// rebuild that copies entries for [FromBlock, newTo) into a new
-	// .seg with the truncated name. Order matters: Transactions'
+	// .seg with the v4 name. Order matters: Transactions'
 	// IndexBuilderFunc reads the bodies file at the same range, so
 	// bodies must be rebuilt before transactions.
-	//
-	// Non-1000-aligned toBlock (toBlock+1 not a multiple of 1000)
-	// would require seeding leftover [chunkAlignedToBlock(toBlock),
-	// toBlock] into the writable DB; that path returns an explicit
-	// error here (tracked as a follow-up — see
-	// rebuildBlockStraddles).
-	newTo := chunkAlignedToBlock(toBlock)
+	newTo := toBlock + 1
 	rebuildPaths, straddleRefs, err := p.rebuildBlockStraddles(ctx, tx, toBlock, newTo)
 	if err != nil {
 		return nil, err

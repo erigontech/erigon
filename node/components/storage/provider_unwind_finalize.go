@@ -526,7 +526,11 @@ func (p *Provider) sweepBlockOrphansPastBlock(toBlock uint64) []string {
 	if toBlock == 0 {
 		return nil
 	}
-	newTo := chunkAlignedToBlock(toBlock)
+	// Under the two-v4-then-merge lifecycle the rebuild produces v4 #1
+	// at [FromBlock, toBlock+1) — a raw-block file whose upper bound
+	// is target+1 regardless of 1000-alignment. Orphan-sweep must
+	// preserve any file whose range ends at or below that boundary.
+	newTo := toBlock + 1
 	entries, err := os.ReadDir(p.snapDir)
 	if err != nil {
 		return nil

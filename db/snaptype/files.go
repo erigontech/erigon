@@ -495,7 +495,16 @@ func (f FileInfo) CompareTo(o FileInfo) int {
 }
 
 func (f FileInfo) As(t Type) FileInfo {
-	name := fmt.Sprintf("%s-%06d-%06d-%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, f.Ext)
+	// Auto-select naming: raw-block v4 form when either endpoint is
+	// non-1000-aligned (guarantees ParseFileName's dual-mode branch
+	// falls into the literal branch); standard %06d step form
+	// otherwise.
+	var name string
+	if f.IsRawBlock() {
+		name = fmt.Sprintf("%s-%07d-%07d-%s%s", f.Version.String(), f.From, f.To, t, f.Ext)
+	} else {
+		name = fmt.Sprintf("%s-%06d-%06d-%s%s", f.Version.String(), f.From/1_000, f.To/1_000, t, f.Ext)
+	}
 	return FileInfo{
 		Version: f.Version,
 		From:    f.From,

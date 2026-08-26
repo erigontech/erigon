@@ -18,101 +18,20 @@ package storage
 
 import (
 	"context"
-	"encoding/binary"
 	"fmt"
 	"path/filepath"
-	"sort"
 
-	"github.com/holiman/uint256"
-
-	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/background"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
-	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/seg"
 	"github.com/erigontech/erigon/db/snapshotsync/freezeblocks"
 	"github.com/erigontech/erigon/db/snaptype"
 	"github.com/erigontech/erigon/db/snaptype2"
 	"github.com/erigontech/erigon/db/version"
 	"github.com/erigontech/erigon/execution/chain"
-	"github.com/erigontech/erigon/execution/rlp"
-	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/components/storage/snapshot"
 )
-
-// chunkAlignedToBlock returns the largest 1000-block-aligned value
-// ≤ (toBlock+1). Block snapshot files are named in 1000-block units
-// (see snaptype.FileInfo.As), so a rebuilt straddle file's new
-// ToBlock must align to 1000. For toBlock+1 already aligned (e.g.
-// toBlock=2,912,999 → 2,913,000), returns 2,913,000.
-//
-// For non-aligned toBlock+1 (e.g. toBlock=2,912,500 → 2,912,501),
-// returns 2,912,000. The leftover [2,912,000, toBlock] is seeded
-// into the writable DB by seedLeftoverBlocks so canonical reads for
-// those blocks resolve via the DB path post-mode-B.
-func chunkAlignedToBlock(toBlock uint64) uint64 {
-	next := toBlock + 1
-	return next - (next % uint64(snaptype.Erigon2MinSegmentSize))
-}
-
-// dumpStraddleDiagnostic emits every inventory candidate we could
-// have picked as the straddle file for each block-part type at
-// toBlock, sorted by span (widest first). Fires from
-// rebuildBlockStraddles when seedLeftoverBlocks fails so the log
-// captures whether the picked-widest choice was really the only
-// option or if a narrower matching set was available.
-func (p *Provider) dumpStraddleDiagnostic(toBlock, newToBlock uint64) {
-	if p.Inventory == nil || p.logger == nil {
-		return
-	}
-	p.logger.Error("[storage] Provider.Unwind: seedLeftoverBlocks failed — dumping straddle candidates",
-		"toBlock", toBlock,
-		"newToBlock", newToBlock,
-		"leftoverRange", fmt.Sprintf("[%d, %d]", newToBlock, toBlock),
-	)
-	for _, typeEnum := range []snaptype.Enum{
-		snaptype2.Enums.Headers,
-		snaptype2.Enums.Bodies,
-		snaptype2.Enums.Transactions,
-	} {
-		type cand struct {
-			name string
-			from uint64
-			to   uint64
-		}
-		var candidates []cand
-		for _, e := range p.Inventory.BlockFiles() {
-			if e.FromBlock > toBlock || e.ToBlock <= toBlock {
-				continue
-			}
-			info, _, ok := snaptype.ParseFileName(p.snapDir, e.Name)
-			if !ok {
-				continue
-			}
-			if info.Type == nil || info.Type.Enum() != typeEnum {
-				continue
-			}
-			candidates = append(candidates, cand{name: e.Name, from: info.From, to: info.To})
-		}
-		sort.Slice(candidates, func(i, j int) bool {
-			return (candidates[i].to - candidates[i].from) > (candidates[j].to - candidates[j].from)
-		})
-		if len(candidates) == 0 {
-			p.logger.Error("[storage] straddle candidate", "type", typeEnum.String(), "candidates", "<none>")
-			continue
-		}
-		for i, c := range candidates {
-			p.logger.Error("[storage] straddle candidate",
-				"type", typeEnum.String(),
-				"rank", i,
-				"span", c.to-c.from,
-				"range", fmt.Sprintf("[%d, %d)", c.from, c.to),
-				"name", c.name,
-			)
-		}
-	}
-}
 
 // straddleBlockFileForType finds the single block-snapshot .seg file
 // of the given snaptype whose range straddles toBlock (FromBlock ≤
@@ -273,38 +192,14 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 		}
 	}
 
-	// Non-aligned-cut leftover seed. When toBlock+1 isn't a 1000-
-	// multiple, blocks [newToBlock, toBlock] need seeding into the
-	// writable DB so canonical reads resolve after FinalizeUnwind
-	// deletes the old straddle files.
-	//
-	// Headers + bodies straddles are required. Transactions is
-	// optional: --prune.mode=minimal drops historical tx.seg while
-	// keeping headers+bodies; RPC access to historic transactions
-	// isn't expected under that mode. Missing tx.seg + present
-	// headers+bodies is a legitimate state, not an inventory bug.
-	if newToBlock < toBlock+1 && len(toRemoveStraddles) > 0 {
-		hFI := straddles[snaptype2.Enums.Headers]
-		bFI := straddles[snaptype2.Enums.Bodies]
-		tFI := straddles[snaptype2.Enums.Transactions]
-		if hFI == nil || bFI == nil {
-			return nil, nil, fmt.Errorf("mode-B non-aligned cut at toBlock=%d: leftover seed requires headers + bodies straddle pair; got headers=%v bodies=%v", toBlock, hFI != nil, bFI != nil)
-		}
-		if tFI == nil && p.logger != nil {
-			p.logger.Warn("[storage] Provider.Unwind: leftover-seed skipping transactions (no straddle .seg for this range — prune=minimal or asymmetric preverified)",
-				"toBlock", toBlock, "newToBlock", newToBlock, "headersRange", fmt.Sprintf("[%d,%d)", hFI.From, hFI.To))
-		}
-		if err := seedLeftoverBlocks(ctx, tx, p.snapDir, *hFI, *bFI, tFI, newToBlock, toBlock, p.BlockReader); err != nil {
-			// Dump every inventory candidate we saw per block-part
-			// type — the strict range-parity check leaves us with no
-			// valid triple whenever headers/bodies merged into wider
-			// chunks than tx (or vice versa). The dump surfaces which
-			// files were picked so the next occurrence names the
-			// asymmetry rather than just its symptom.
-			p.dumpStraddleDiagnostic(toBlock, newToBlock)
-			return nil, nil, fmt.Errorf("seedLeftoverBlocks([%d, %d]): %w", newToBlock, toBlock, err)
-		}
-	}
+	// Under the two-v4-then-merge lifecycle, all frozen block data
+	// stays in files. The rebuilt straddle IS v4 #1 covering
+	// [FromBlock, newTo=toBlock+1) with non-1000-aligned To; naming
+	// via FileInfo.As auto-selects the raw-block form
+	// (%s-%07d-%07d-<type>.seg) so ParseFileName's dual-mode branch
+	// resolves it as literal block coordinates. Nothing gets seeded
+	// into the writable DB — that would violate the invariant that
+	// mode-C/D never move frozen data into MDBX.
 	return rebuildPaths, toRemoveStraddles, nil
 }
 
@@ -314,351 +209,6 @@ func (p *Provider) rebuildBlockStraddles(ctx context.Context, tx kv.RwTx, toBloc
 // Avoids importing the snapshot package here.
 type storageSnapshotFileRef struct {
 	Name string
-}
-
-// computeTDAnchor returns TD at (fileFrom-1) — the block just before the
-// straddle file's first block — so seedLeftoverBlocks can accumulate
-// TD forward across the file walk.
-//
-// Fast path: read TD directly from kv.HeaderTD via ReadCanonicalHash +
-// ReadTd. Works when the anchor block is above pruneCanonicalMarkers's
-// threshold.
-//
-// Fallback: pruneCanonicalMarkers deleted TD (and canonical) for a range
-// below the growing threshold. Walk downward via cursor to find the
-// nearest surviving TD entry below fileFrom, then walk headers back
-// upward via blockReader.HeaderByNumber (which reads directly from
-// frozen .seg files and ignores the pruned canonical marker), summing
-// difficulty to reach TD[fileFrom-1].
-func computeTDAnchor(ctx context.Context, tx kv.Tx, blockReader *freezeblocks.BlockReader, fileFrom uint64) (uint256.Int, error) {
-	var td uint256.Int
-	if fileFrom == 0 {
-		return td, nil
-	}
-	anchorBlock := fileFrom - 1
-
-	// Fast path: TD[anchorBlock] present in DB.
-	if hash, err := rawdb.ReadCanonicalHash(tx, anchorBlock); err == nil && hash != (common.Hash{}) {
-		if v, err := rawdb.ReadTd(tx, hash, anchorBlock); err == nil && v != nil {
-			return *v, nil
-		}
-	}
-
-	// Fallback: walk cursor to find the highest present TD < fileFrom.
-	c, err := tx.Cursor(kv.HeaderTD)
-	if err != nil {
-		return td, fmt.Errorf("open kv.HeaderTD cursor: %w", err)
-	}
-	defer c.Close()
-	var haveAnchor bool
-	var scanBlock uint64
-	for k, v, err := c.First(); k != nil && err == nil; k, v, err = c.Next() {
-		if len(k) < 8 {
-			continue
-		}
-		bn := binary.BigEndian.Uint64(k[:8])
-		if bn >= fileFrom {
-			break
-		}
-		if err := rlp.DecodeBytes(v, &td); err != nil {
-			return td, fmt.Errorf("decode TD at anchor block %d: %w", bn, err)
-		}
-		scanBlock = bn
-		haveAnchor = true
-	}
-	if !haveAnchor {
-		return td, fmt.Errorf("no TD anchor available below block %d (kv.HeaderTD empty in that range)", fileFrom)
-	}
-
-	// Walk headers [scanBlock+1, anchorBlock] via blockReader, summing
-	// difficulty into td. blockReader.HeaderByNumber reads frozen headers
-	// directly from .seg files, so it works even when the intervening
-	// canonical markers were pruned.
-	for n := scanBlock + 1; n <= anchorBlock; n++ {
-		h, err := blockReader.HeaderByNumber(ctx, tx, n)
-		if err != nil {
-			return td, fmt.Errorf("HeaderByNumber(%d) for anchor walk: %w", n, err)
-		}
-		if h == nil {
-			return td, fmt.Errorf("HeaderByNumber(%d) returned nil during anchor walk (pruned canonical + not-in-files?)", n)
-		}
-		if _, ovf := td.AddOverflow(&td, &h.Difficulty); ovf {
-			return td, fmt.Errorf("TD accumulator overflows uint256 at anchor block %d", n)
-		}
-	}
-	return td, nil
-}
-
-// seedLeftoverBlocks writes block-data for [fromBlock, toBlockInclusive]
-// into the writable DB by reading entries from the OLD straddle files
-// still on disk. Used by mode-B's non-aligned-cut path: when toBlock+1
-// isn't a 1000-multiple, the rebuilt block-snapshot files cover only
-// up to chunkAlignedToBlock(toBlock) (the nearest 1000-boundary), and
-// blocks in [chunkAlignedToBlock(toBlock), toBlock] must live in the
-// writable DB instead.
-//
-// Walks the old files (headers + bodies, and transactions if present)
-// in lockstep. oldTxFI is optional: when nil (--prune.mode=minimal
-// dropped the historical tx.seg), the tx-related writes are skipped
-// and only kv.Headers / kv.HeaderNumber / kv.BlockBody are populated.
-//
-// Pre-condition: the OLD straddle files must still be on disk when
-// this runs. The caller (rebuildBlockStraddles) calls seedLeftoverBlocks
-// AFTER the rebuild has written new files but BEFORE FinalizeUnwind
-// deletes the old files. Same-tx writes ensure atomicity with the rest
-// of mode-B.
-//
-// fromBlock + toBlockInclusive must lie within the headers straddle
-// file's range [oldHeadersFI.From, oldHeadersFI.To). Caller validates.
-func seedLeftoverBlocks(ctx context.Context, tx kv.RwTx, snapDir string, oldHeadersFI, oldBodiesFI snaptype.FileInfo, oldTxFI *snaptype.FileInfo, fromBlock, toBlockInclusive uint64, blockReader *freezeblocks.BlockReader) error {
-	if fromBlock > toBlockInclusive {
-		return nil
-	}
-	if fromBlock < oldHeadersFI.From || toBlockInclusive >= oldHeadersFI.To {
-		return fmt.Errorf("seedLeftoverBlocks: range [%d, %d] outside headers file [%d, %d)", fromBlock, toBlockInclusive, oldHeadersFI.From, oldHeadersFI.To)
-	}
-	if oldBodiesFI.From != oldHeadersFI.From || oldBodiesFI.To != oldHeadersFI.To {
-		return fmt.Errorf("seedLeftoverBlocks: bodies range [%d, %d) does not match headers [%d, %d)", oldBodiesFI.From, oldBodiesFI.To, oldHeadersFI.From, oldHeadersFI.To)
-	}
-	if oldTxFI != nil {
-		// The tx file must cover the WRITE range [fromBlock, toBlockInclusive+1)
-		// at minimum — that's the only part we actually write tx entries for.
-		// Header/body walk starts at oldHeadersFI.From to accumulate TD; the
-		// tx walk starts later, when n reaches oldTxFI.From.
-		//
-		// Retire cadence produces headers/bodies/tx on different chunk widths
-		// (e.g. headers merged into 10k, tx still at 1k) — the strict-equality
-		// check that used to live here would reject the perfectly-valid
-		// asymmetric case (headers=[3150000,3160000), tx=[3157000,3158000))
-		// where the tx sub-range fully covers the write range.
-		if oldTxFI.From > fromBlock || oldTxFI.To <= toBlockInclusive {
-			return fmt.Errorf("seedLeftoverBlocks: tx range [%d, %d) does not cover write range [%d, %d]; multi-tx-file walk not supported",
-				oldTxFI.From, oldTxFI.To, fromBlock, toBlockInclusive)
-		}
-		if oldTxFI.From < oldHeadersFI.From {
-			return fmt.Errorf("seedLeftoverBlocks: tx range [%d, %d) starts before headers [%d, %d)",
-				oldTxFI.From, oldTxFI.To, oldHeadersFI.From, oldHeadersFI.To)
-		}
-	}
-
-	// TD anchor + walk-forward accumulator. The rule (from FillDBFromSnapshots)
-	// is TD[N] = TD[N-1] + header[N].Difficulty. We must write TD alongside
-	// canonical for every seeded block, otherwise Caplin's BlockCollector.Flush
-	// hits parent's-total-difficulty-not-found on the very next block after
-	// the mode-B target. blockReader==nil is the test-scaffold case: unit
-	// tests that don't set up frozen headers pass nil and skip TD writes.
-	// Production always passes p.BlockReader.
-	var td uint256.Int
-	if blockReader != nil {
-		var err error
-		td, err = computeTDAnchor(ctx, tx, blockReader, oldHeadersFI.From)
-		if err != nil {
-			return fmt.Errorf("seedLeftoverBlocks: compute TD anchor for block %d: %w", oldHeadersFI.From-1, err)
-		}
-	}
-
-	hPath := filepath.Join(snapDir, oldHeadersFI.Name())
-	hdec, err := seg.NewDecompressor(hPath)
-	if err != nil {
-		return fmt.Errorf("open old headers %s: %w", hPath, err)
-	}
-	defer hdec.Close()
-
-	bPath := filepath.Join(snapDir, oldBodiesFI.Name())
-	bdec, err := seg.NewDecompressor(bPath)
-	if err != nil {
-		return fmt.Errorf("open old bodies %s: %w", bPath, err)
-	}
-	defer bdec.Close()
-
-	var tg *seg.Getter
-	if oldTxFI != nil {
-		tPath := filepath.Join(snapDir, oldTxFI.Name())
-		tdec, terr := seg.NewDecompressor(tPath)
-		if terr != nil {
-			return fmt.Errorf("open old tx %s: %w", tPath, terr)
-		}
-		defer tdec.Close()
-		tg = tdec.MakeGetter()
-	}
-
-	hg := hdec.MakeGetter()
-	bg := bdec.MakeGetter()
-
-	// Walk headers + bodies sequentially from oldHeadersFI.From. We
-	// must iterate over EVERY entry in [oldHeadersFI.From, fromBlock)
-	// to advance the tx getter to the right starting position (tx
-	// entries aren't per-block, so we can't index-jump). For blocks
-	// in [oldHeadersFI.From, fromBlock) we read bodies (need TxCount
-	// to advance tx getter) but don't write to DB. For blocks in
-	// [fromBlock, toBlockInclusive] we read all three + write.
-	//
-	// Decode the header on every iteration (not just writeThisBlock)
-	// so `td` accumulates through the [oldHeadersFI.From, fromBlock)
-	// prefix — otherwise the anchor lands at oldHeadersFI.From-1 and
-	// TD at fromBlock would be off by the intervening difficulties.
-	var hBuf, bBuf, tBuf []byte
-	for n := oldHeadersFI.From; n <= toBlockInclusive; n++ {
-		if !hg.HasNext() {
-			return fmt.Errorf("seedLeftoverBlocks: headers source ran out at block %d", n)
-		}
-		hBuf, _ = hg.Next(hBuf[:0])
-		if !bg.HasNext() {
-			return fmt.Errorf("seedLeftoverBlocks: bodies source ran out at block %d", n)
-		}
-		bBuf, _ = bg.Next(bBuf[:0])
-
-		body := new(types.BodyForStorage)
-		if err := rlp.DecodeBytes(bBuf, body); err != nil {
-			return fmt.Errorf("seedLeftoverBlocks: decode body at block %d: %w", n, err)
-		}
-
-		if len(hBuf) < 1 {
-			return fmt.Errorf("seedLeftoverBlocks: empty header entry at block %d", n)
-		}
-		header := new(types.Header)
-		if err := rlp.DecodeBytes(hBuf[1:], header); err != nil {
-			return fmt.Errorf("seedLeftoverBlocks: decode header at block %d: %w", n, err)
-		}
-		if _, ovf := td.AddOverflow(&td, &header.Difficulty); ovf {
-			return fmt.Errorf("seedLeftoverBlocks: TD accumulator overflows uint256 at block %d", n)
-		}
-
-		writeThisBlock := n >= fromBlock
-
-		// Resolve canonical hash: prefer the writable-DB entry (preserved
-		// across mode-B's CanonicalHash truncation for entries ≤ toBlock),
-		// but under --prune.mode=minimal seed blocks below the ~100k
-		// history horizon have no DB entry to preserve — fall back to
-		// hashing the header we already have from the OLD snapshot.
-		// WriteCanonicalHash seeds the DB so downstream reads succeed.
-		var hash common.Hash
-		if writeThisBlock {
-			h, err := rawdb.ReadCanonicalHash(tx, n)
-			if err != nil {
-				return fmt.Errorf("seedLeftoverBlocks: ReadCanonicalHash(%d): %w", n, err)
-			}
-			if h == (common.Hash{}) {
-				h = header.Hash()
-				if err := rawdb.WriteCanonicalHash(tx, h, n); err != nil {
-					return fmt.Errorf("seedLeftoverBlocks: WriteCanonicalHash(%d): %w", n, err)
-				}
-			}
-			hash = h
-
-			// Header word format = 1-byte sort-prefix + header RLP.
-			// rawdb.WriteHeaderRaw writes kv.Headers + kv.HeaderNumber
-			// (the hash→num index).
-			if err := rawdb.WriteHeaderRaw(tx, n, hash, hBuf[1:], false /* skipIndexing */); err != nil {
-				return fmt.Errorf("seedLeftoverBlocks: WriteHeaderRaw(%d): %w", n, err)
-			}
-
-			// Body: write the BodyForStorage RLP directly to kv.BlockBody.
-			if err := rawdb.WriteBodyForStorage(tx, hash, n, body); err != nil {
-				return fmt.Errorf("seedLeftoverBlocks: WriteBodyForStorage(%d): %w", n, err)
-			}
-
-			// TD: seedLeftoverBlocks wrote canonical but not TD prior to this
-			// change; that broke the invariant "canonical block ⇔ HeaderTD
-			// entry" and Caplin's BlockCollector.Flush parent-TD lookup wedged
-			// once the mode-B target sat below the pruneCanonicalMarkers
-			// threshold. Gated on blockReader != nil because unit tests don't
-			// wire one and only cover the header/body/canonical/tx pathways.
-			if blockReader != nil {
-				if err := rawdb.WriteTd(tx, hash, n, td); err != nil {
-					return fmt.Errorf("seedLeftoverBlocks: WriteTd(%d): %w", n, err)
-				}
-			}
-		}
-
-		// Walk this block's tx entries. txCount entries per block, written
-		// by freezeblocks.DumpTxs in this order:
-		//   - 1 entry for the first system tx (BaseTxnID). Empty if the
-		//     source row in kv.EthTx was absent (DumpTxs calls collect(nil));
-		//     otherwise has the user-tx wire format.
-		//   - txCount-2 user txs. Always non-empty; wire format
-		//     hashByte(1) + sender(20) + tx_rlp.
-		//   - 1 entry for the last system tx (LastSystemTx). Same empty-or-full
-		//     convention as the first.
-		//
-		// kv.Senders for a block is a packed slice of 20-byte sender
-		// addresses with one entry per USER tx (system txs aren't
-		// included). We mirror that by only appending sender bytes for
-		// entries inside the [1, txCount-1) user range.
-		//
-		// Even when !writeThisBlock we MUST advance the tx getter to
-		// keep the lockstep position in sync. When tg is nil (tx.seg
-		// intentionally absent under prune=minimal), no tx walk is
-		// performed and kv.EthTx / kv.Senders are left unpopulated —
-		// RPC access to historical transactions isn't expected under
-		// that mode anyway.
-		if tg == nil {
-			continue
-		}
-		// Under asymmetric-cadence merges (headers merged into wider
-		// chunks than tx), the tx file may cover only a sub-range of
-		// the headers range. Skip tx-getter advance for blocks outside
-		// the tx file — canonical/header/body/TD were still written
-		// above for writeThisBlock. Guarded by the pre-walk coverage
-		// check: oldTxFI is non-nil here and covers [fromBlock,
-		// toBlockInclusive+1) at minimum.
-		if n < oldTxFI.From || n >= oldTxFI.To {
-			continue
-		}
-		txCount := uint64(body.TxCount)
-		var sendersBuf []byte
-		if writeThisBlock && txCount > 2 {
-			sendersBuf = make([]byte, 0, (txCount-2)*20)
-		}
-		txnID := body.BaseTxnID.U64()
-		for i := range txCount {
-			if !tg.HasNext() {
-				return fmt.Errorf("seedLeftoverBlocks: tx source ran out at block %d tx %d/%d", n, i, txCount)
-			}
-			tBuf, _ = tg.Next(tBuf[:0])
-			if !writeThisBlock {
-				txnID++
-				continue
-			}
-			isSystemSlot := i == 0 || i == txCount-1
-			switch {
-			case len(tBuf) == 0:
-				// Empty entry — only legal for system tx slots
-				// (DumpTxs writes nil when the source kv.EthTx row
-				// was absent). For user-tx positions this would be
-				// a malformed file.
-				if !isSystemSlot {
-					return fmt.Errorf("seedLeftoverBlocks: empty tx entry at block %d tx %d (user position; only system slots may be empty)", n, i)
-				}
-				// Nothing to write — kv.EthTx had no row for this
-				// txnID at retire time, so leaving it absent now
-				// matches that.
-			case len(tBuf) < 21:
-				return fmt.Errorf("seedLeftoverBlocks: tx entry at block %d tx %d shorter than sender prefix (len=%d)", n, i, len(tBuf))
-			default:
-				// tBuf = hashByte(1) + sender(20) + tx_rlp.
-				if !isSystemSlot {
-					sendersBuf = append(sendersBuf, tBuf[1:21]...)
-				}
-				var txIDBytes [8]byte
-				binary.BigEndian.PutUint64(txIDBytes[:], txnID)
-				if err := tx.Put(kv.EthTx, txIDBytes[:], tBuf[21:]); err != nil {
-					return fmt.Errorf("seedLeftoverBlocks: write EthTx[txnID=%d] (block %d): %w", txnID, n, err)
-				}
-			}
-			txnID++
-		}
-		if writeThisBlock && len(sendersBuf) > 0 {
-			// kv.Senders key = block_num_u64 + hash (40 bytes).
-			senderKey := make([]byte, 8+32)
-			binary.BigEndian.PutUint64(senderKey[:8], n)
-			copy(senderKey[8:], hash[:])
-			if err := tx.Put(kv.Senders, senderKey, sendersBuf); err != nil {
-				return fmt.Errorf("seedLeftoverBlocks: write Senders(%d): %w", n, err)
-			}
-		}
-	}
-	return nil
 }
 
 // sliceStraddleSeg writes the first (newToBlock - oldFI.From) entries
@@ -676,9 +226,6 @@ func sliceStraddleSeg(ctx context.Context, oldFI snaptype.FileInfo, newToBlock u
 	}
 	if newToBlock <= oldFI.From || newToBlock >= oldFI.To {
 		return snaptype.FileInfo{}, 0, fmt.Errorf("sliceStraddleSeg: newToBlock=%d outside straddle (%d, %d)", newToBlock, oldFI.From, oldFI.To)
-	}
-	if newToBlock%uint64(snaptype.Erigon2MinSegmentSize) != 0 {
-		return snaptype.FileInfo{}, 0, fmt.Errorf("sliceStraddleSeg: newToBlock=%d not aligned to %d (block snapshot file naming requires 1000-block alignment)", newToBlock, snaptype.Erigon2MinSegmentSize)
 	}
 
 	newFI := oldFI
@@ -828,9 +375,6 @@ func rebuildTransactionsStraddleFile(ctx context.Context, oldFI snaptype.FileInf
 	}
 	if newToBlock <= oldFI.From || newToBlock >= oldFI.To {
 		return snaptype.FileInfo{}, fmt.Errorf("rebuildTransactionsStraddleFile: newToBlock=%d outside straddle (%d, %d)", newToBlock, oldFI.From, oldFI.To)
-	}
-	if newToBlock%uint64(snaptype.Erigon2MinSegmentSize) != 0 {
-		return snaptype.FileInfo{}, fmt.Errorf("rebuildTransactionsStraddleFile: newToBlock=%d not aligned to %d", newToBlock, snaptype.Erigon2MinSegmentSize)
 	}
 
 	// Locate the rebuilt bodies file at the matching new range. The
