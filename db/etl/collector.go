@@ -46,10 +46,11 @@ func NewAllocator(p *sync.Pool) *Allocator { return &Allocator{p: p} }
 // [dbg] sizing the entry slice: how many entries a buffer really holds when it
 // flushes, and how often the pool had to build one from scratch.
 var (
-	mxBufGet     = metrics.GetOrCreateCounter("etl_buffer_get_total")
-	mxBufNew     = metrics.GetOrCreateCounter("etl_buffer_new_total")
-	mxBufEntries = metrics.GetOrCreateSummary("etl_buffer_entries_at_flush")
-	mxBufBytes   = metrics.GetOrCreateSummary("etl_buffer_bytes_at_flush")
+	mxBufGet      = metrics.GetOrCreateCounter("etl_buffer_get_total")
+	mxBufNew      = metrics.GetOrCreateCounter("etl_buffer_new_total")
+	mxBufEntries  = metrics.GetOrCreateSummary("etl_buffer_entries_at_flush")
+	mxEntriesGrow = metrics.GetOrCreateCounter("etl_buffer_entries_grow_total")
+	mxBufBytes    = metrics.GetOrCreateSummary("etl_buffer_bytes_at_flush")
 )
 
 func (a *Allocator) Put(b Buffer) {
