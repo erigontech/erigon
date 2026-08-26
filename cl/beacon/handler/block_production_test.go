@@ -604,6 +604,30 @@ func TestSetupHeaderResponsePreservesLargeExecutionValue(t *testing.T) {
 	require.Equal(t, valueWei.String(), rr.Header().Get("Eth-Execution-Payload-Value"))
 }
 
+func TestProduceBlockPreservesLargeExecutionValue(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	h.routerCfg.Builder = false
+	payload := cltypes.NewEth1Block(clparams.ElectraVersion, h.beaconChainCfg)
+	payload.Transactions = &solid.TransactionsSSZ{}
+	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(h.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
+	valueWei := new(big.Int).Add(new(big.Int).SetUint64(^uint64(0)), big.NewInt(1))
+
+	engine := execution_client.NewMockExecutionEngine(ctrl)
+	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
+		Return([]byte{1, 2, 3, 4, 5, 6, 7, 8}, nil).AnyTimes()
+	engine.EXPECT().GetAssembledBlock(gomock.Any(), gomock.Any(), gomock.Any()).
+		Return(payload, &engine_types.BlobsBundle{}, nil, valueWei, nil).AnyTimes()
+	engine.EXPECT().SupportInsertion().Return(true).AnyTimes()
+	h.engine = engine
+
+	block, err := h.produceBlock(t.Context(), 1, postState.Slot(), common.Hash{0x41}, postState,
+		postState.Slot()+1, common.Bytes96{}, common.Hash{})
+
+	require.NoError(t, err)
+	require.Equal(t, valueWei, block.ExecutionValue)
+}
+
 func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
 	_, _, _, _, _, h, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	db := notifyingUpdateFailingDB{RwDB: h.indiciesDB, called: make(chan struct{})}
