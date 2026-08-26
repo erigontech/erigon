@@ -662,6 +662,10 @@ func (h *handler) runMethod(ctx context.Context, msg *jsonrpcMessage, callb *cal
 			stream.WriteMore()
 		}
 		HandleError(err, stream)
+	} else if !rs.Written() {
+		// A response carries exactly one of result and error, so a callback that
+		// succeeded without writing still owes a result.
+		rs.WriteNil()
 	}
 	stream.WriteObjectEnd()
 	return nil
