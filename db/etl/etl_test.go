@@ -1840,3 +1840,32 @@ func BenchmarkSortableBufferPutOnlyCold(b *testing.B) {
 		})
 	}
 }
+
+// BenchmarkSortableBufferInmemLoadOneChunk reads back a buffer small enough to
+// sit in one chunk - the shape a collector has when Load never spills to disk.
+func BenchmarkSortableBufferInmemLoadOneChunk(b *testing.B) {
+	const keyLen = 32
+	const valLen = 64
+
+	for _, count := range []int{2_000, 8_000} {
+		b.Run(fmt.Sprintf("random_%d", count), func(b *testing.B) {
+			b.ReportAllocs()
+			buf := NewSortableBuffer(256 * 1024 * 1024)
+			key := make([]byte, keyLen)
+			val := make([]byte, valLen)
+			for i := range count {
+				x := uint64(i) * 6364136223846793005
+				binary.BigEndian.PutUint64(key, x)
+				binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+				binary.BigEndian.PutUint64(val, uint64(i)) //nolint:gosec
+				buf.Put(key, val)
+			}
+			buf.Sort()
+			for b.Loop() {
+				for i := range buf.Len() {
+					_, _ = buf.Get(i)
+				}
+			}
+		})
+	}
+}

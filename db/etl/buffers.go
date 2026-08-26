@@ -198,6 +198,34 @@ type dataChunk struct {
 	buf     []byte
 	dataEnd int32
 	entTop  int32
+
+	// The merge reads these instead of chasing the index on every compare.
+	// ents drains from the front, so ents[0] is the chunk's current entry and
+	// key and pfx describe it.
+	ents []entryLoc
+	key  []byte
+	pfx  uint64
+}
+
+// loadKey caches the current entry's key and its prefix.
+func (c *dataChunk) loadKey() {
+	c.key = nil
+	if e := c.ents[0]; e.keyLen() > 0 {
+		off := e.offset() + entryHeaderSize
+		c.key = c.buf[off : off+e.keyLen()]
+	}
+	c.pfx = keyPrefix(c.key)
+}
+
+// keyPrefix is the first 8 bytes of k, zero-padded. Big-endian, so comparing
+// two prefixes as integers orders them the way bytes.Compare would.
+func keyPrefix(k []byte) uint64 {
+	if len(k) >= 8 {
+		return binary.BigEndian.Uint64(k)
+	}
+	var pad [8]byte
+	copy(pad[:], k)
+	return binary.BigEndian.Uint64(pad[:])
 }
 
 func (c *dataChunk) len() int { return (len(c.buf) - int(c.entTop)) / entryLocSize }
@@ -216,13 +244,15 @@ func (c *dataChunk) entries() []entryLoc {
 
 type sortableBuffer struct {
 	chunks []dataChunk
-	free   int32 // bytes left in the chunk being filled
-	n      int
+	// cur is &chunks[len-1]. nextChunk is the only place that appends to
+	// chunks, and it re-takes the pointer; Prealloc leaves a filled buffer
+	// alone for the same reason.
+	cur  *dataChunk
+	free int32 // bytes left in cur
+	n    int
 
 	// Sort orders each chunk on its own, so reading the buffer in key order is
-	// a k-way merge over the chunks, which these fields hold the state of.
-	runs    [][]entryLoc
-	pos     []int32 // per chunk: index of its current entry
+	// a k-way merge over the chunks.
 	heap    []int32 // chunk ids, ordered by their current entry
 	at      int     // index of the entry the cursor sits on
 	sortedN int     // n as of the last Sort; -1 while unsorted
@@ -245,6 +275,7 @@ func (b *sortableBuffer) nextChunk(n int32) {
 		buf = getDataChunk()
 	}
 	b.chunks = append(b.chunks, dataChunk{buf: buf, entTop: int32(len(buf))}) //nolint:gosec
+	b.cur = &b.chunks[len(b.chunks)-1]
 	b.chunkBytes += len(buf)
 	b.free = int32(len(buf)) //nolint:gosec
 }
@@ -266,7 +297,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	if n+entryLocSize > b.free {
 		b.nextChunk(n)
 	}
-	c := &b.chunks[len(b.chunks)-1]
+	c := b.cur
 	off := c.dataEnd
 	data := c.buf[off:]
 	binary.NativeEndian.PutUint32(data, uint32(vLen)) //nolint:gosec
@@ -317,20 +348,27 @@ func (b *sortableBuffer) entryAt(i int) ([]byte, entryLoc) {
 		}
 		panic(fmt.Sprintf("etl: entry %d out of range", i))
 	}
+	if len(b.chunks) == 1 { // one run, nothing to merge
+		c := &b.chunks[0]
+		return c.buf, c.ents[i]
+	}
 	if i < b.at {
 		b.rewind()
 	}
 	for b.at < i {
 		b.advance()
 	}
-	ch := b.heap[0]
-	return b.chunks[ch].buf, b.runs[ch][b.pos[ch]]
+	c := &b.chunks[b.heap[0]]
+	return c.buf, c.ents[0]
 }
 
 // Prealloc only reserves room for the chunk headers. The chunks themselves are
 // still taken from their pool one at a time and carry the entry index with
 // them, so an idle buffer holds nothing.
 func (b *sortableBuffer) Prealloc(_, predictDataSize int) Buffer {
+	if len(b.chunks) > 0 { // moving the slice would strand cur
+		return b
+	}
 	if n := predictDataSize/dataChunkSize + 1; cap(b.chunks) < n {
 		b.chunks = slices.Grow(b.chunks, n)
 	}
@@ -340,10 +378,10 @@ func (b *sortableBuffer) Prealloc(_, predictDataSize int) Buffer {
 func (b *sortableBuffer) Reset() {
 	for i := range b.chunks {
 		putDataChunk(b.chunks[i].buf)
-		b.chunks[i].buf = nil
 	}
-	clear(b.runs)
-	b.chunks, b.runs, b.pos, b.heap = b.chunks[:0], b.runs[:0], b.pos[:0], b.heap[:0]
+	clear(b.chunks)
+	b.chunks, b.heap = b.chunks[:0], b.heap[:0]
+	b.cur = nil
 	b.free, b.n, b.at, b.chunkBytes = 0, 0, 0, 0
 	b.sortedN = -1
 }
@@ -382,7 +420,14 @@ func (b *sortableBuffer) Sort() {
 			return int(x.offset() - y.offset()) // StableSort: offsets rise with insertion order
 		}
 		// The index grows downward, so keys put in ascending order arrive reversed.
-		if slices.IsSortedFunc(ents, func(x, y entryLoc) int { return cmp(y, x) }) {
+		desc := true
+		for j := 1; j < len(ents); j++ {
+			if cmp(ents[j-1], ents[j]) < 0 {
+				desc = false
+				break
+			}
+		}
+		if desc {
 			slices.Reverse(ents)
 			continue
 		}
@@ -397,15 +442,15 @@ func (b *sortableBuffer) Sort() {
 
 // rewind restarts the merge at the first entry in key order.
 func (b *sortableBuffer) rewind() {
-	b.runs = slices.Grow(b.runs[:0], len(b.chunks))[:len(b.chunks)]
-	b.pos = slices.Grow(b.pos[:0], len(b.chunks))[:len(b.chunks)]
 	b.heap = b.heap[:0]
 	for i := range b.chunks {
-		b.runs[i] = b.chunks[i].entries()
-		b.pos[i] = 0
-		if len(b.runs[i]) > 0 {
-			b.heap = append(b.heap, int32(i)) //nolint:gosec
+		c := &b.chunks[i]
+		c.ents = c.entries()
+		if len(c.ents) == 0 {
+			continue
 		}
+		c.loadKey()
+		b.heap = append(b.heap, int32(i)) //nolint:gosec
 	}
 	for i := len(b.heap)/2 - 1; i >= 0; i-- {
 		b.siftDown(i)
@@ -415,12 +460,14 @@ func (b *sortableBuffer) rewind() {
 
 // advance moves the cursor to the next entry in key order.
 func (b *sortableBuffer) advance() {
-	top := b.heap[0]
-	b.pos[top]++
-	if int(b.pos[top]) == len(b.runs[top]) {
+	c := &b.chunks[b.heap[0]]
+	c.ents = c.ents[1:]
+	if len(c.ents) == 0 {
 		last := len(b.heap) - 1
 		b.heap[0] = b.heap[last]
 		b.heap = b.heap[:last]
+	} else {
+		c.loadKey()
 	}
 	if len(b.heap) > 0 {
 		b.siftDown(0)
@@ -432,19 +479,14 @@ func (b *sortableBuffer) advance() {
 // order, so the lower id wins a tie and equal keys come back in the order they
 // went in.
 func (b *sortableBuffer) less(x, y int32) bool {
-	if r := bytes.Compare(b.keyAt(x), b.keyAt(y)); r != 0 {
+	cx, cy := &b.chunks[x], &b.chunks[y]
+	if cx.pfx != cy.pfx {
+		return cx.pfx < cy.pfx
+	}
+	if r := bytes.Compare(cx.key, cy.key); r != 0 {
 		return r < 0
 	}
 	return x < y
-}
-
-func (b *sortableBuffer) keyAt(chunk int32) []byte {
-	e := b.runs[chunk][b.pos[chunk]]
-	if kLen := e.keyLen(); kLen > 0 {
-		off := e.offset() + entryHeaderSize
-		return b.chunks[chunk].buf[off : off+kLen]
-	}
-	return nil
 }
 
 func (b *sortableBuffer) siftDown(i int) {
