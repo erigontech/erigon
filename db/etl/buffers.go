@@ -95,6 +95,7 @@ var (
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
 			mxBufNew.Inc()
+			log.Warn("[dbg] NewSortableBuffer")
 			// Sortable Buffer now pre-allocs only metadata arrays not internal buffers for data-holding (they are-preallocated and have own sync.Pool)
 			return NewSortableBuffer(etlSmallBufRAM).Prealloc(1024, int(etlSmallBufRAM)/2)
 		},
