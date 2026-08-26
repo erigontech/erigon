@@ -74,7 +74,9 @@ func ProcessEpoch(s abstract.BeaconState) error {
 
 	ProcessEth1DataReset(s)
 	if s.Version() >= clparams.ElectraVersion {
-		ProcessPendingDeposits(s)
+		if err := ProcessPendingDeposits(s); err != nil {
+			return err
+		}
 		ProcessPendingConsolidations(s)
 	}
 
@@ -86,8 +88,12 @@ func ProcessEpoch(s abstract.BeaconState) error {
 		return err
 	}
 
-	ProcessSlashingsReset(s)
-	ProcessRandaoMixesReset(s)
+	if err := ProcessSlashingsReset(s); err != nil {
+		return err
+	}
+	if err := ProcessRandaoMixesReset(s); err != nil {
+		return err
+	}
 
 	if err := ProcessHistoricalRootsUpdate(s); err != nil {
 		return err
@@ -100,7 +106,9 @@ func ProcessEpoch(s abstract.BeaconState) error {
 	}
 
 	if s.Version() >= clparams.AltairVersion {
-		ProcessParticipationFlagUpdates(s)
+		if err := ProcessParticipationFlagUpdates(s); err != nil {
+			return err
+		}
 		if err := ProcessSyncCommitteeUpdate(s); err != nil {
 			return err
 		}

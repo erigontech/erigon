@@ -1559,7 +1559,10 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		var clean bool
 		if r.so != nil {
 			if !r.so.deleted {
-				v, clean = r.so.GetState(key)
+				var err error
+				if v, clean, err = r.so.GetState(key); err != nil {
+					return uint256.Int{}, r.source, r.version, false, err
+				}
 			}
 		} else {
 			// Cold committed read resolved by committedStorageDirect: no dirty
@@ -1574,7 +1577,10 @@ func readStateForSet(s *IntraBlockState, addr accounts.Address, key accounts.Sto
 		if r.so == nil || r.so.deleted {
 			return uint256.Int{}, StorageRead, UnknownVersion, false, nil
 		}
-		v, clean := r.so.GetState(key)
+		v, clean, err := r.so.GetState(key)
+		if err != nil {
+			return uint256.Int{}, StorageRead, UnknownVersion, false, err
+		}
 		return v, StorageRead, UnknownVersion, clean, nil
 	case outcomeReturnZero, outcomeReturnDefault:
 		return uint256.Int{}, r.source, r.version, false, nil

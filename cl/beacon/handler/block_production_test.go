@@ -67,7 +67,7 @@ func TestBlockBuilderWindowPreGloas(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion, false)
 
 	// Attestation deadline is 4s; polling stops a quarter of it (1s) earlier, at 3s.
 	require.Equal(t, slotStart.Add(3*time.Second).Add(-minPayloadPollingWindow), window.firstGetAt)
@@ -82,7 +82,7 @@ func TestBlockBuilderWindowGloas(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion, false)
 
 	// Attestation deadline is 3s; polling stops a quarter of it (750ms) earlier, at 2.25s.
 	require.Equal(t, slotStart.Add(2250*time.Millisecond).Add(-minPayloadPollingWindow), window.firstGetAt)
@@ -335,7 +335,7 @@ func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart.Add(2950 * time.Millisecond)
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.ElectraVersion, false)
 
 	// A late request clamps the first poll up to now but still stops at 3s, preserving the margin.
 	require.Equal(t, now, window.firstGetAt)
@@ -350,7 +350,7 @@ func TestBlockBuilderWindowLateRequestGrabsImmediately(t *testing.T) {
 	slotStart := time.Unix(100, 0)
 	now := slotStart.Add(5 * time.Second)
 
-	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion)
+	window := computeBlockBuilderWindow(now, slotStart, cfg, clparams.GloasVersion, false)
 
 	require.Equal(t, now, window.firstGetAt)
 	require.Equal(t, now, window.pollUntil)
@@ -373,7 +373,7 @@ func TestBlockBuilderWindowReservesPublicationMargin(t *testing.T) {
 		{"gloas", clparams.GloasVersion, 3 * time.Second, 2250 * time.Millisecond},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
-			window := computeBlockBuilderWindow(slotStart, slotStart, cfg, tc.version)
+			window := computeBlockBuilderWindow(slotStart, slotStart, cfg, tc.version, false)
 			require.Equal(t, slotStart.Add(tc.wantPollUntil), window.pollUntil)
 			require.True(t, window.pollUntil.Before(slotStart.Add(tc.deadline)),
 				"polling must stop before the attestation deadline to leave publication margin")
