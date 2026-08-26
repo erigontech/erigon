@@ -657,6 +657,23 @@ type WriteSet struct {
 	codeHash       map[accounts.Address]*VersionedWrite[accounts.CodeHash]
 	codeSize       map[accounts.Address]*VersionedWrite[int]
 	storage        map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int]
+
+	// released marks a ReleaseMaps that was not a reset for reuse: the pooled
+	// maps leave the set reading as empty, so under assertions readers panic
+	// instead.
+	released bool
+}
+
+// Released reports whether ReleaseMaps pooled this set's maps and no later
+// write revived it.
+func (s *WriteSet) Released() bool { return s != nil && s.released }
+
+// The panic must stay inline with a constant message: an out-of-line helper
+// costs a call, and IsEmpty then exceeds its inline budget.
+func (s *WriteSet) assertLive() {
+	if dbg.AssertEnabled && s != nil && s.released {
+		panic("WriteSet read after ReleaseMaps: the maps are pooled, so this read silently sees nothing")
+	}
 }
 
 // vwMapPool[T] pools the per-path map[Address]*VersionedWrite[T] containers
@@ -731,43 +748,49 @@ func wsPutStorageOuter(m map[accounts.Address]map[accounts.StorageKey]*Versioned
 // writeSetPut lazily checks out a pooled map and inserts vw at addr.
 // First write per tx pays vwMapPool.Get (cheap); subsequent writes are
 // direct map insert.  ReleaseAndReset puts the map back on tx-finalize.
-func writeSetPut[T any](m *map[accounts.Address]*VersionedWrite[T], addr accounts.Address, vw *VersionedWrite[T], pool *vwMapPool[T]) {
+func writeSetPut[T any](s *WriteSet, m *map[accounts.Address]*VersionedWrite[T], addr accounts.Address, vw *VersionedWrite[T], pool *vwMapPool[T]) {
 	if *m == nil {
 		*m = pool.get()
+		s.revive()
 	}
 	(*m)[addr] = vw
 }
 
+func (s *WriteSet) revive() {
+	s.released = false
+}
+
 func (s *WriteSet) SetAddress(addr accounts.Address, vw *VersionedWrite[*accounts.Account]) {
-	writeSetPut(&s.address, addr, vw, wsMapPoolAddress)
+	writeSetPut(s, &s.address, addr, vw, wsMapPoolAddress)
 }
 func (s *WriteSet) SetBalance(addr accounts.Address, vw *VersionedWrite[uint256.Int]) {
-	writeSetPut(&s.balance, addr, vw, wsMapPoolBalance)
+	writeSetPut(s, &s.balance, addr, vw, wsMapPoolBalance)
 }
 func (s *WriteSet) SetNonce(addr accounts.Address, vw *VersionedWrite[uint64]) {
-	writeSetPut(&s.nonce, addr, vw, wsMapPoolNonce)
+	writeSetPut(s, &s.nonce, addr, vw, wsMapPoolNonce)
 }
 func (s *WriteSet) SetIncarnation(addr accounts.Address, vw *VersionedWrite[uint64]) {
-	writeSetPut(&s.incarnation, addr, vw, wsMapPoolIncarnation)
+	writeSetPut(s, &s.incarnation, addr, vw, wsMapPoolIncarnation)
 }
 func (s *WriteSet) SetSelfDestruct(addr accounts.Address, vw *VersionedWrite[bool]) {
-	writeSetPut(&s.selfDestruct, addr, vw, wsMapPoolSelfDestruct)
+	writeSetPut(s, &s.selfDestruct, addr, vw, wsMapPoolSelfDestruct)
 }
 func (s *WriteSet) SetCreateContract(addr accounts.Address, vw *VersionedWrite[bool]) {
-	writeSetPut(&s.createContract, addr, vw, wsMapPoolCreateContract)
+	writeSetPut(s, &s.createContract, addr, vw, wsMapPoolCreateContract)
 }
 func (s *WriteSet) SetCode(addr accounts.Address, vw *VersionedWrite[accounts.Code]) {
-	writeSetPut(&s.code, addr, vw, wsMapPoolCode)
+	writeSetPut(s, &s.code, addr, vw, wsMapPoolCode)
 }
 func (s *WriteSet) SetCodeHash(addr accounts.Address, vw *VersionedWrite[accounts.CodeHash]) {
-	writeSetPut(&s.codeHash, addr, vw, wsMapPoolCodeHash)
+	writeSetPut(s, &s.codeHash, addr, vw, wsMapPoolCodeHash)
 }
 func (s *WriteSet) SetCodeSize(addr accounts.Address, vw *VersionedWrite[int]) {
-	writeSetPut(&s.codeSize, addr, vw, wsMapPoolCodeSize)
+	writeSetPut(s, &s.codeSize, addr, vw, wsMapPoolCodeSize)
 }
 func (s *WriteSet) SetStorage(addr accounts.Address, key accounts.StorageKey, vw *VersionedWrite[uint256.Int]) {
 	if s.storage == nil {
 		s.storage = wsGetStorageOuter()
+		s.revive()
 	}
 	inner := s.storage[addr]
 	if inner == nil {
@@ -781,6 +804,7 @@ func (s *WriteSet) IsEmpty() bool {
 	if s == nil {
 		return true
 	}
+	s.assertLive()
 	return len(s.address) == 0 && len(s.balance) == 0 && len(s.nonce) == 0 &&
 		len(s.incarnation) == 0 && len(s.selfDestruct) == 0 && len(s.createContract) == 0 &&
 		len(s.code) == 0 && len(s.codeHash) == 0 && len(s.codeSize) == 0 && len(s.storage) == 0
@@ -797,6 +821,7 @@ func (s *WriteSet) Filter(keep func(WriteHeader) bool) *WriteSet {
 	if s == nil {
 		return nil
 	}
+	s.assertLive()
 	out := &WriteSet{}
 	for a, vw := range s.address {
 		if keep(vw.WriteHeader) {
@@ -1071,6 +1096,7 @@ func (s *WriteSet) Count() int {
 	if s == nil {
 		return 0
 	}
+	s.assertLive()
 	n := len(s.address) + len(s.balance) + len(s.nonce) + len(s.incarnation) +
 		len(s.selfDestruct) + len(s.createContract) + len(s.code) + len(s.codeHash) + len(s.codeSize)
 	for _, inner := range s.storage {
@@ -1161,6 +1187,7 @@ func (s *WriteSet) forEachAddr(f func(accounts.Address)) {
 	if s == nil {
 		return
 	}
+	s.assertLive()
 	for a := range s.address {
 		f(a)
 	}
@@ -1173,6 +1200,7 @@ func (s *WriteSet) forEachFieldAddr(f func(accounts.Address)) {
 	if s == nil {
 		return
 	}
+	s.assertLive()
 	for a := range s.balance {
 		f(a)
 	}
@@ -1245,46 +1273,44 @@ func (s *WriteSet) addrs() map[accounts.Address]struct{} {
 // SelfDestructs before the reviving field writes) rather than relying on a flat
 // stream's element order.
 func (s *WriteSet) Balances() iter.Seq2[accounts.Address, *VersionedWrite[uint256.Int]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[uint256.Int](nil))
-	}
-	return maps.All(s.balance)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint256.Int] { return s.balance })
 }
 func (s *WriteSet) Nonces() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[uint64](nil))
-	}
-	return maps.All(s.nonce)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint64] { return s.nonce })
 }
 func (s *WriteSet) Incarnations() iter.Seq2[accounts.Address, *VersionedWrite[uint64]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[uint64](nil))
-	}
-	return maps.All(s.incarnation)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[uint64] { return s.incarnation })
 }
 func (s *WriteSet) SelfDestructs() iter.Seq2[accounts.Address, *VersionedWrite[bool]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[bool](nil))
-	}
-	return maps.All(s.selfDestruct)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[bool] { return s.selfDestruct })
 }
 func (s *WriteSet) Codes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.Code]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[accounts.Code](nil))
-	}
-	return maps.All(s.code)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[accounts.Code] { return s.code })
 }
 func (s *WriteSet) CodeHashes() iter.Seq2[accounts.Address, *VersionedWrite[accounts.CodeHash]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]*VersionedWrite[accounts.CodeHash](nil))
-	}
-	return maps.All(s.codeHash)
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]*VersionedWrite[accounts.CodeHash] { return s.codeHash })
 }
 func (s *WriteSet) Storages() iter.Seq2[accounts.Address, map[accounts.StorageKey]*VersionedWrite[uint256.Int]] {
-	if s == nil {
-		return maps.All(map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int](nil))
+	return writeSetSeq(s, func(s *WriteSet) map[accounts.Address]map[accounts.StorageKey]*VersionedWrite[uint256.Int] {
+		return s.storage
+	})
+}
+
+// writeSetSeq defers both the liveness check and the map read to the moment the
+// sequence runs. A sequence built before ReleaseMaps would otherwise walk the
+// pooled maps and silently see nothing.
+func writeSetSeq[T any](s *WriteSet, pick func(*WriteSet) map[accounts.Address]T) iter.Seq2[accounts.Address, T] {
+	return func(yield func(accounts.Address, T) bool) {
+		if s == nil {
+			return
+		}
+		s.assertLive()
+		for addr, v := range pick(s) {
+			if !yield(addr, v) {
+				return
+			}
+		}
 	}
-	return maps.All(s.storage)
 }
 
 func eachWriteHeaderOf[T any](m map[accounts.Address]*VersionedWrite[T], yield func(WriteHeader) bool) bool {
@@ -1303,6 +1329,7 @@ func (s *WriteSet) AllHeaders() iter.Seq[WriteHeader] {
 		if s == nil {
 			return
 		}
+		s.assertLive()
 		if !eachWriteHeaderOf(s.address, yield) ||
 			!eachWriteHeaderOf(s.balance, yield) ||
 			!eachWriteHeaderOf(s.nonce, yield) ||
@@ -1363,6 +1390,7 @@ func (s *WriteSet) ReleaseAndReset() {
 		}
 	}
 	s.ReleaseMaps()
+	s.revive() // a reset hands the set back for reuse
 }
 
 // ReleaseMaps returns the map containers to their pools without releasing the
@@ -1387,6 +1415,7 @@ func (s *WriteSet) ReleaseMaps() {
 	}
 	wsPutStorageOuter(s.storage)
 	*s = WriteSet{}
+	s.released = true
 }
 
 // Per-path typed delete methods.  Direct map access, no internal switch
@@ -1864,6 +1893,7 @@ func (s *WriteSet) TouchUpdates(updates *commitment.Updates) {
 	if s == nil {
 		return
 	}
+	s.assertLive()
 	for addr, w := range s.balance {
 		addrVal := addr.Value()
 		updates.TouchPlainKeyDirect(string(addrVal[:]), &commitment.Update{

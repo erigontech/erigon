@@ -60,7 +60,7 @@ func TestRecordFeeMerge_FirstMergeKeepsWorkerWrites(t *testing.T) {
 	txOut := feeMergeTestWrites(t, addr, 1)
 	tip := feeMergeTestWrites(t, addr, 2)
 	be.recordFeeMerge(version, txOut, tip, feeCreditNew)
-	be.awaitMapReleases()
+	be.superseded.release()
 
 	require.Same(t, tip, be.blockIO.WriteSet(version.TxIndex),
 		"the merge product must become the tx's recorded write set")
@@ -80,10 +80,10 @@ func TestRecordFeeMerge_RevalidationReleasesSupersededTemp(t *testing.T) {
 
 	second := feeMergeTestWrites(t, addr, 3)
 	be.recordFeeMerge(version, first, second, feeCreditNew)
-	be.awaitMapReleases()
+	be.superseded.release()
 
 	require.Same(t, second, be.feeMergeTemp[0].writes)
-	require.Equal(t, 0, first.Count(), "the superseded fee-merge temp must be released")
+	require.True(t, first.Released(), "the superseded fee-merge temp must be released")
 	require.Equal(t, 1, second.Count())
 }
 
@@ -100,7 +100,7 @@ func TestRecordFeeMerge_AfterReExecutionKeepsStaleTemp(t *testing.T) {
 	reTxOut := feeMergeTestWrites(t, addr, 4)
 	tip := feeMergeTestWrites(t, addr, 5)
 	be.recordFeeMerge(version, reTxOut, tip, feeCreditNew)
-	be.awaitMapReleases()
+	be.superseded.release()
 
 	require.Same(t, tip, be.feeMergeTemp[0].writes)
 	require.Equal(t, 1, stale.Count(), "a temp that is not prev must not be released")
@@ -151,11 +151,11 @@ func TestRecordWorkerWrites_DropsCreditedTemp(t *testing.T) {
 
 	reTxOut := feeMergeTestWrites(t, addr, 3)
 	be.recordWorkerWrites(version, reTxOut)
-	be.awaitMapReleases()
+	be.superseded.release()
 
 	require.Nil(t, be.creditedWrites(version, be.blockIO.WriteSet(version.TxIndex)),
 		"a re-executed tx must be credited again, not handed the stale credit")
-	require.Equal(t, 0, tip.Count(), "the displaced fee-merge temp must be released")
+	require.True(t, tip.Released(), "the displaced fee-merge temp must be released")
 	require.Equal(t, 1, reTxOut.Count(), "the new TxOut must survive")
 }
 
@@ -196,9 +196,9 @@ func TestRecordFeeMerge_ReleaseKeepsSharedWrites(t *testing.T) {
 
 	tipWrites := feeMergeTestWrites(t, fresh, 9)
 	be.recordFeeMerge(version, temp1, tipWrites, feeCreditNew)
-	be.awaitMapReleases()
+	be.superseded.release()
 
-	require.Equal(t, 0, temp1.Count())
+	require.True(t, temp1.Released(), "the superseded set's maps must go back to the pool")
 	require.Same(t, tipWrites, be.blockIO.WriteSet(version.TxIndex))
 	vw, ok := tipWrites.GetBalance(shared)
 	require.True(t, ok, "entry shared with the released temp must still be reachable")
@@ -229,8 +229,8 @@ func TestRecordFeeMerge_RetractsVanishedCredit(t *testing.T) {
 	require.False(t, ok, "a delete the round no longer emits must not stay in the version map")
 	require.Nil(t, r.credited())
 
-	r.be.awaitMapReleases()
-	require.Equal(t, 0, merged.Count(), "the retracted merge product must be released")
+	r.be.superseded.release()
+	require.True(t, merged.Released(), "the retracted merge product must be released")
 }
 
 // A Recorded round has nothing to do, and doing it anyway is not free: the
@@ -250,8 +250,8 @@ func TestRecordFeeMerge_RecordedRoundKeepsTheCredit(t *testing.T) {
 
 	require.Same(t, merged, r.recorded(), "a Recorded round must not replace the recorded set")
 	require.Same(t, merged, r.credited(), "nor drop the temp that says it is credited")
-	r.be.awaitMapReleases()
-	require.NotEqual(t, 0, merged.Count(), "nor release the maps the recorded set still holds")
+	r.be.superseded.release()
+	require.False(t, merged.Released(), "nor release the maps the recorded set still holds")
 	_, _, ok := r.vm.ReadSelfDestruct(s.coinbase, version.TxIndex+1)
 	require.True(t, ok, "the credit must stay visible to later txs")
 }
