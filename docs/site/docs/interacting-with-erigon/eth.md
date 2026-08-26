@@ -39,7 +39,7 @@ This enables faster retrieval of Merkle proofs for any executed block.
 
 ### eth\_getStorageValues
 
-`eth_getStorageValues` reads several storage slots for one or more accounts in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls. It is part of the [Ethereum execution APIs](https://github.com/ethereum/execution-apis/blob/main/src/eth/state.yaml) and takes two parameters.
+`eth_getStorageValues` reads several storage slots for one or more accounts in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls. It originated as an Erigon extension and has since been adopted into the [Ethereum execution APIs](https://github.com/ethereum/execution-apis/blob/main/src/eth/state.yaml) (April 2026). It takes two parameters.
 
 **Parameters**
 
@@ -120,9 +120,10 @@ requested block is older than the retained commitment history, it fails with
 
 ### eth\_fillTransaction
 
-`eth_fillTransaction` is not in the standard set (it matches the geth method of the
-same name). It takes a partially specified transaction, fills in what is missing, and
-returns it unsigned — it neither signs nor submits anything.
+`eth_fillTransaction` takes a partially specified transaction, fills in what is
+missing, and returns it unsigned — it neither signs nor submits anything. The method
+was added to the execution-apis specification in July 2026; Erigon (matching geth)
+deviates from it in the return shape, which keeps the `raw` field the spec dropped.
 
 **Parameters**
 
@@ -140,7 +141,8 @@ returns it unsigned — it neither signs nor submits anything.
 **Returns**
 
 An object with `raw`, the RLP-encoded unsigned transaction, and `tx`, the same
-transaction in JSON form.
+transaction in JSON form. The standardized result carries only `tx`; the extra `raw`
+field is the geth-compatible shape.
 
 :::info
 KZG commitment and proof generation from raw blobs is not implemented. Blob
@@ -157,7 +159,9 @@ Accepted everywhere a block is selected:
 * a `0x`-prefixed hex string without leading zeros — `"0x3"`, `"0x2ed119"`
 * a bare, unquoted JSON integer — `3`
 * the named tags `"earliest"`, `"latest"`, `"safe"`, `"finalized"`, `"pending"`
-* `null`, which means `latest`
+* `null`, which means `latest` — except in the few methods whose block-or-hash
+  parameter is required (`eth_getBlockReceipts`, `eth_getBlockAccessList`,
+  `eth_simulateV1`, `eth_getWitness`, `eth_getTxWitness`), which reject it
 
 Rejected everywhere:
 

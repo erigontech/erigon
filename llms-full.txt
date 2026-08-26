@@ -4334,6 +4334,7 @@ Flags:
       --rpc.subscription.filters.maxlogs int        Maximum number of logs to store per subscription.
       --rpc.subscription.filters.maxtopics int      Maximum number of topics per subscription to filter logs by.
       --rpc.subscription.filters.maxtxs int         Maximum number of transactions to store per subscription.
+      --rpc.subscription.filters.timeout duration   Timeout before idle filters are evicted. Defaults to 5m; set to 0 to disable eviction. (default 5m0s)
       --rpc.txfeecap float                          Sets a cap on transaction fee (in ether) that can be sent via the RPC APIs (0 = no cap) (default 1)
       --socket.enabled                              Enable IPC server
       --socket.url string                           IPC server listening url. prefix supported are tcp, unix (default "unix:///var/run/erigon.sock")
@@ -4937,6 +4938,9 @@ For API usage refer to the below official resources:
 * [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 * [https://ethereum.github.io/execution-apis/](https://ethereum.github.io/execution-apis/)
 
+The sections below cover only the places where Erigon adds a method that is not in that
+standard set, or where its behaviour differs from it. Everything else follows the spec.
+
 ### eth\_getProof
 
 `eth_getProof` returns Merkle proofs for account state and storage slots, as defined in [EIP-1186](https://eips.ethereum.org/EIPS/eip-1186). It is stable and production-ready as of Erigon v3.4.
@@ -4955,7 +4959,7 @@ This enables faster retrieval of Merkle proofs for any executed block.
 
 ### eth\_getStorageValues
 
-`eth_getStorageValues` reads several storage slots for one or more accounts in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls. It is part of the [Ethereum execution APIs](https://github.com/ethereum/execution-apis/blob/main/src/eth/state.yaml) and takes two parameters.
+`eth_getStorageValues` reads several storage slots for one or more accounts in a single call, reducing round-trips compared to multiple `eth_getStorageAt` calls. It originated as an Erigon extension and has since been adopted into the [Ethereum execution APIs](https://github.com/ethereum/execution-apis/blob/main/src/eth/state.yaml) (April 2026). It takes two parameters.
 
 **Parameters**
 
@@ -4995,6 +4999,127 @@ An object mapping each requested address to an array of 32-byte values, in the s
 * A single call may request at most 1024 slots in total, counting all addresses together. Larger requests are rejected.
 * An empty `requests` object returns error code `-32602` with the message `empty request`.
 * When `blockNumber` is a block hash, the block must be canonical.
+
+### eth\_getWitness and eth\_getTxWitness
+
+Neither method exists in the standard set. They return a state witness for the
+*pre-state* of a block: the serialized trie node stream needed to re-execute it
+without a full state database.
+
+**Parameters**
+
+| Method | Parameter | Type | Description |
+| ------ | --------- | ---- | ----------- |
+| `eth_getWitness` | blockNumberOrHash | STRING, NUMBER or OBJECT | Block to build the witness for |
+| `eth_getTxWitness` | blockNumberOrHash | STRING, NUMBER or OBJECT | Block containing the transaction |
+| `eth_getTxWitness` | txIndex | QUANTITY | Index of a transaction within that block |
+
+:::info
+`eth_getTxWitness` currently only bounds-checks `txIndex` — an index past the end of the
+block is an error, but the witness it returns is the same whole-block witness
+`eth_getWitness` produces.
+:::
+
+**Returns**
+
+`DATA` — the serialized witness. Erigon decodes the bytes it is about to return and
+checks that they rebuild the parent state root, so a witness that comes back is
+self-verified. The genesis block returns an empty witness.
+
+**Requirements**
+
+Both methods need commitment history, so start the node with:
+
+```text
+--prune.include-commitment-history
+```
+
+Without it the call fails with `eth_getWitness requires commitment history`. If the
+requested block is older than the retained commitment history, it fails with
+`commitment history pruned`.
+
+### eth\_fillTransaction
+
+`eth_fillTransaction` takes a partially specified transaction, fills in what is
+missing, and returns it unsigned — it neither signs nor submits anything. The method
+was added to the execution-apis specification in July 2026; Erigon (matching geth)
+deviates from it in the return shape, which keeps the `raw` field the spec dropped.
+
+**Parameters**
+
+1. `Object` — a transaction object in the same shape `eth_call` accepts.
+
+**Fills in**
+
+* `nonce` — from the pending nonce of `from`, or `0` when `from` is absent
+* `value` — `0` when absent
+* `gas` — from `eth_estimateGas` against `latest`
+* `chainId` — the node's chain ID; a mismatching supplied value is an error
+* fee fields — `gasPrice` before London, otherwise `maxFeePerGas` / `maxPriorityFeePerGas` from the gas oracle
+* `maxFeePerBlobGas` — for blob transactions, twice the current blob gas price
+
+**Returns**
+
+An object with `raw`, the RLP-encoded unsigned transaction, and `tx`, the same
+transaction in JSON form. The standardized result carries only `tx`; the extra `raw`
+field is the geth-compatible shape.
+
+:::info
+KZG commitment and proof generation from raw blobs is not implemented. Blob
+transactions must already carry their `blobVersionedHashes`.
+:::
+
+### Block number parameter format
+
+Erigon accepts more block-number forms than the standard schema, which allows only a
+`0x`-prefixed hex quantity string or a named tag.
+
+Accepted everywhere a block is selected:
+
+* a `0x`-prefixed hex string without leading zeros — `"0x3"`, `"0x2ed119"`
+* a bare, unquoted JSON integer — `3`
+* the named tags `"earliest"`, `"latest"`, `"safe"`, `"finalized"`, `"pending"`
+* `null`, which means `latest` — except in the few methods whose block-or-hash
+  parameter is required (`eth_getBlockReceipts`, `eth_getBlockAccessList`,
+  `eth_simulateV1`, `eth_getWitness`, `eth_getTxWitness`), which reject it
+
+Rejected everywhere:
+
+* a quoted decimal string — `"3"`, `"100"`
+* hex with leading zeros — `"0x01"`
+* hex without the prefix — `"ff"`
+
+:::warning
+**Breaking change in v3.6.** Quoted decimal strings such as `"3"` used to be accepted
+and are now rejected with `hex string without 0x prefix`, returned as an
+`invalid params` error. Callers relying on that form must switch to `"0x3"`, the bare
+integer `3`, or a named tag.
+:::
+
+Two further forms are accepted only by methods whose parameter is a plain block number,
+such as `eth_getBlockByNumber`, `eth_getBlockTransactionCountByNumber` and `trace_block`:
+the Erigon-specific tag `"latestExecuted"`, and the string `"null"`, which means `latest`.
+Methods taking a block-number-or-hash selector — `eth_call`, `eth_getBalance`,
+`eth_getProof` and the rest — reject both.
+
+### Filter lifetime
+
+The standard spec does not say how long a filter lives. In Erigon, a filter created by
+`eth_newFilter`, `eth_newBlockFilter`, or `eth_newPendingTransactionFilter` is evicted
+once it has gone **5 minutes** without being polled. `eth_getFilterChanges` and
+`eth_getFilterLogs` both count as a poll and reset the clock, so a filter stays alive on
+a quiet chain as long as the client keeps asking. A call against an evicted filter
+returns `filter not found`.
+
+Change the window, or turn eviction off entirely, with:
+
+```text
+--rpc.subscription.filters.timeout 15m   # longer window
+--rpc.subscription.filters.timeout 0     # keep filters indefinitely
+```
+
+Eviction applies only to these polling filters. WebSocket subscriptions live as long as
+their connection does.
 
 ---
 
@@ -5884,6 +6009,31 @@ then it should look something like:
 
 `[ {A: []}, {B: [0]}, {G: [0, 0]}, {C: [1]}, {G: [1, 0]} ]`
 
+## Beacon-chain withdrawals
+
+Beacon-chain withdrawals credit balances outside of any transaction, so by default no
+trace mentions them. `trace_block` and `trace_replayBlockTransactions` can be asked to
+include them by passing a trace-settings object as the last positional parameter:
+
+```js
+{ "IncludeWithdrawals": true }
+```
+
+The default is off — omit the object, or leave the field out, and withdrawals are not
+reported. How they appear depends on the method:
+
+* **`trace_block`** appends one entry per withdrawal to the flat trace list. Each is a
+  `"reward"` entry whose `action.rewardType` is `"withdrawal"`, with `action.author` set
+  to the withdrawal address and `action.value` to the amount **in wei** (the beacon chain
+  denominates withdrawals in Gwei). These entries carry no `transactionHash` or
+  `transactionPosition`, since no transaction caused them.
+
+* **`trace_replayBlockTransactions`** has no block-level slot in its per-transaction
+  result shape, so withdrawals surface only through `stateDiff`. You must request
+  `"stateDiff"` in the trace types; when you do, one extra entry is appended to the
+  result array, containing only the withdrawal balance changes. Multiple withdrawals to
+  the same address are merged into a single balance change.
+
 ## JSON-RPC methods
 
 #### Ad-hoc Tracing
@@ -6222,6 +6372,8 @@ Replays all transactions in a block returning the requested traces for each tran
 
 1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
 2. `Array` - Type of trace, one or more of: `"vmTrace"`, `"trace"`, `"stateDiff"`.
+3. `Boolean` - Optional. `gasBailOut`.
+4. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to have beacon-chain withdrawals reflected in the `stateDiff` output. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
 
 ```js
 params: [
@@ -6333,6 +6485,8 @@ Returns traces created at given block.
 #### Parameters
 
 1. `Quantity` or `Tag` - Integer of a block number, or the string `'earliest'`, `'latest'` or `'pending'`.
+2. `Boolean` - Optional. `gasBailOut`.
+3. `Object` - Optional trace settings. Set `"IncludeWithdrawals": true` to append a `"reward"` entry per beacon-chain withdrawal. See [Beacon-chain withdrawals](#beacon-chain-withdrawals).
 
 ```js
 params: [
