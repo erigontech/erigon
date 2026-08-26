@@ -162,9 +162,8 @@ func (b *BeaconState) SetValidatorSet(validatorSet *solid.ValidatorSet) {
 	b.validators = validatorSet
 }
 
-func (b *BeaconState) init() error {
+func (b *BeaconState) init() {
 	b.touchedLeaves = make([]atomic.Uint32, StateLeafSizeLatest)
-	return nil
 }
 
 func (b *BeaconState) MarshalJSON() ([]byte, error) {

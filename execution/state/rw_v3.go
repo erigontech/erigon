@@ -224,9 +224,22 @@ func (writes *WriteSet) Apply(domains *execctx.SharedDomains, roTx kv.TemporalTx
 			}
 
 			// Contract creation: clear stale storage before writing new account.
-			// Matches Writer.CreateContract which calls DomainDelPrefix.
+			//
+			// An address with no committed account holds no committed storage:
+			// storage is only written for an account that exists, and deleting
+			// an account wipes its storage prefix. So probe the account first —
+			// that read is served by the per-file existence filters, while the
+			// prefix walk has to seek the .bt index of every storage .kv file.
 			if d.createContract {
-				if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
+				prevAcc, _, err := domains.GetLatest(kv.AccountsDomain, roTx, address[:])
+				if err != nil {
+					return err
+				}
+				if len(prevAcc) == 0 {
+					if err := assertNoCommittedStorage(domains, roTx, address[:]); err != nil {
+						return err
+					}
+				} else if err := domains.DomainDelPrefix(kv.StorageDomain, roTx, address[:], txNum); err != nil {
 					return err
 				}
 			}
@@ -817,6 +830,26 @@ func (w *Writer) SetPutDel(tx kv.TemporalPutDel) { w.tx = tx }
 
 func (w *Writer) PrevAndDels() (map[string][]byte, map[string]*accounts.Account, map[string][]byte, map[string]uint64) {
 	return nil, nil, nil, nil
+}
+
+// assertNoCommittedStorage panics when addr has committed storage but no
+// committed account, so a violation of that invariant surfaces instead of
+// silently skipping a storage wipe. No-op unless asserts are enabled.
+func assertNoCommittedStorage(domains *execctx.SharedDomains, roTx kv.TemporalTx, addr []byte) error {
+	if !dbg.AssertEnabled {
+		return nil
+	}
+	found := 0
+	if err := domains.IteratePrefix(kv.StorageDomain, addr, roTx, func(k, v []byte) (bool, error) {
+		found++
+		return false, nil
+	}); err != nil {
+		return err
+	}
+	if found > 0 {
+		panic(fmt.Sprintf("createContract: %x has storage but no account", addr))
+	}
+	return nil
 }
 
 func (w *Writer) UpdateAccountData(address accounts.Address, original, account *accounts.Account) error {
@@ -1414,7 +1447,7 @@ func (r *ReaderV3) HasStorage(address accounts.Address) (bool, error) {
 	r.addr = address.Value()
 	// this is an optimization, but also checks the account is checked in the domain
 	// for being deleted on unwind before we try to access the storage
-	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:]); len(enc) == 0 {
+	if enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{}); len(enc) == 0 {
 		return false, err
 	}
 	_, _, hasStorage, err := r.getter.HasPrefix(kv.StorageDomain, r.addr[:])
@@ -1428,7 +1461,7 @@ func (r *ReaderV3) ReadAccountData(address accounts.Address) (*accounts.Account,
 
 func (r *ReaderV3) readAccountData(address accounts.Address) ([]byte, *accounts.Account, error) {
 	r.addr = address.Value()
-	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:])
+	enc, _, err := r.getter.GetLatest(kv.AccountsDomain, r.addr[:], kv.GetLatestOptions{})
 	if err != nil {
 		return nil, nil, err
 	}
@@ -1458,7 +1491,7 @@ func (r *ReaderV3) ReadAccountStorage(address accounts.Address, key accounts.Sto
 	keyValue := key.Value()
 	copy(r.composite[:length.Addr], addressValue[:])
 	copy(r.composite[length.Addr:], keyValue[:])
-	enc, _, err := r.getter.GetLatest(kv.StorageDomain, r.composite[:])
+	enc, _, err := r.getter.GetLatest(kv.StorageDomain, r.composite[:], kv.GetLatestOptions{})
 	if err != nil {
 		return uint256.Int{}, false, err
 	}
