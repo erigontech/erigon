@@ -189,14 +189,14 @@ func TestGloasProductionFallsBackToEmptyWhenFullEnvelopeCannotBeRead(t *testing.
 }
 
 func TestProductionUsesLocalPayloadWhenBuilderClientIsMissing(t *testing.T) {
-	requireProductionUsesLocalPayload(t, func(_ *gomock.Controller, handler *ApiHandler, _ uint64, _ clparams.StateVersion, _ common.Hash) {
+	requireProductionUsesLocalPayload(t, func(_ *gomock.Controller, handler *ApiHandler, _ *state.CachingBeaconState, _ uint64, _ common.Hash) {
 		require.Nil(t, handler.builderClient)
 	})
 }
 
 func TestProductionUsesLocalPayloadWhenBuilderBidIsMalformed(t *testing.T) {
-	requireProductionUsesLocalPayload(t, func(ctrl *gomock.Controller, handler *ApiHandler, targetSlot uint64, version clparams.StateVersion, parentHash common.Hash) {
-		header := validBuilderHeaderForTest(handler.beaconChainCfg, version, parentHash)
+	requireProductionUsesLocalPayload(t, func(ctrl *gomock.Controller, handler *ApiHandler, postState *state.CachingBeaconState, targetSlot uint64, parentHash common.Hash) {
+		header := validBuilderHeaderForTest(postState, targetSlot, parentHash)
 		header.Data.Message.Value = "not-a-number"
 		builderClient := builder_mock.NewMockBuilderClient(ctrl)
 		builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), gomock.Any(), gomock.Any()).Return(header, nil)
@@ -206,7 +206,7 @@ func TestProductionUsesLocalPayloadWhenBuilderBidIsMalformed(t *testing.T) {
 
 func requireProductionUsesLocalPayload(
 	t *testing.T,
-	configureBuilder func(*gomock.Controller, *ApiHandler, uint64, clparams.StateVersion, common.Hash),
+	configureBuilder func(*gomock.Controller, *ApiHandler, *state.CachingBeaconState, uint64, common.Hash),
 ) {
 	t.Helper()
 	ctrl := gomock.NewController(t)
@@ -216,7 +216,7 @@ func requireProductionUsesLocalPayload(
 	require.NoError(t, err)
 	validatorParams.SetFeeRecipient(proposerIndex, common.Address{0x42})
 	require.True(t, handler.routerCfg.Builder)
-	configureBuilder(ctrl, handler, targetSlot, postState.Version(), postState.LatestExecutionPayloadHeader().BlockHash)
+	configureBuilder(ctrl, handler, postState, targetSlot, postState.LatestExecutionPayloadHeader().BlockHash)
 
 	payloadID := []byte{1, 2, 3, 4, 5, 6, 7, 8}
 	payload := cltypes.NewEth1Block(clparams.ElectraVersion, handler.beaconChainCfg)
@@ -256,13 +256,17 @@ func requireProductionUsesLocalPayload(
 }
 
 func validBuilderHeaderForTest(
-	cfg *clparams.BeaconChainConfig,
-	version clparams.StateVersion,
+	baseState *state.CachingBeaconState,
+	targetSlot uint64,
 	parentHash common.Hash,
 ) *builder.ExecutionHeader {
+	cfg := baseState.BeaconConfig()
+	version := baseState.Version()
 	header := cltypes.NewEth1Header(version)
 	header.ParentHash = parentHash
 	header.BlockHash = common.Hash{0x42}
+	header.PrevRandao = baseState.GetRandaoMixes(targetSlot / cfg.SlotsPerEpoch)
+	header.Time = state.ComputeTimestampAtSlot(baseState, targetSlot)
 	return &builder.ExecutionHeader{
 		Version: version.String(),
 		Data: builder.ExecutionHeaderData{Message: builder.ExecutionHeaderMessage{
@@ -337,6 +341,20 @@ func TestGetMEVBoostPayloadRejectsMalformedHeader(t *testing.T) {
 			wantErr: "zero block hash",
 		},
 		{
+			name: "wrong prev randao",
+			mutate: func(header *builder.ExecutionHeader) {
+				header.Data.Message.Header.PrevRandao[0] ^= 0xff
+			},
+			wantErr: "prev randao",
+		},
+		{
+			name: "wrong timestamp",
+			mutate: func(header *builder.ExecutionHeader) {
+				header.Data.Message.Header.Time++
+			},
+			wantErr: "timestamp",
+		},
+		{
 			name: "too many blob commitments",
 			mutate: func(header *builder.ExecutionHeader) {
 				for range maxBlobs + 1 {
@@ -348,7 +366,7 @@ func TestGetMEVBoostPayloadRejectsMalformedHeader(t *testing.T) {
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
-			header := validBuilderHeaderForTest(handler.beaconChainCfg, postState.Version(), parentHash)
+			header := validBuilderHeaderForTest(postState, targetSlot, parentHash)
 			tc.mutate(header)
 			builderClient := builder_mock.NewMockBuilderClient(ctrl)
 			builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), gomock.Any(), gomock.Any()).Return(header, nil)
@@ -362,12 +380,34 @@ func TestGetMEVBoostPayloadRejectsMalformedHeader(t *testing.T) {
 	}
 }
 
-func TestGetMEVBoostPayloadAcceptsForkBlobLimitAndReturnsParsedValue(t *testing.T) {
+func TestGetMEVBoostPayloadRejectsNilBlobCommitmentBeforeDeneb(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.CapellaVersion, log.Root(), false)
+	targetSlot := postState.Slot() + 1
+	parentHash := postState.LatestExecutionPayloadHeader().BlockHash
+	header := validBuilderHeaderForTest(postState, targetSlot, parentHash)
+	header.Data.Message.BlobKzgCommitments.Append(nil)
+	builderClient := builder_mock.NewMockBuilderClient(ctrl)
+	builderClient.EXPECT().GetHeader(gomock.Any(), int64(targetSlot), parentHash, gomock.Any()).Return(header, nil)
+	handler.builderClient = builderClient
+
+	payload, err := handler.getMEVBoostPayload(t.Context(), postState, targetSlot)
+
+	require.Nil(t, payload)
+	require.ErrorContains(t, err, "nil blob kzg commitment")
+}
+
+func TestGetMEVBoostPayloadAcceptsScheduledBlobLimitAndReturnsParsedValue(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	targetSlot := postState.Slot() + 1
 	parentHash := postState.LatestExecutionPayloadHeader().BlockHash
-	header := validBuilderHeaderForTest(handler.beaconChainCfg, postState.Version(), parentHash)
+	header := validBuilderHeaderForTest(postState, targetSlot, parentHash)
+	targetEpoch := targetSlot / handler.beaconChainCfg.SlotsPerEpoch
+	handler.beaconChainCfg.BlobSchedule = []clparams.BlobParameters{{
+		Epoch:            targetEpoch,
+		MaxBlobsPerBlock: handler.beaconChainCfg.MaxBlobsPerBlockElectra + 2,
+	}}
 	maxBlobs := handler.beaconChainCfg.GetBlobParameters(targetSlot / handler.beaconChainCfg.SlotsPerEpoch).MaxBlobsPerBlock
 	for range maxBlobs {
 		header.Data.Message.BlobKzgCommitments.Append(&cltypes.KZGCommitment{})

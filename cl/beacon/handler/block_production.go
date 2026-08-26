@@ -981,6 +981,25 @@ func (a *ApiHandler) getMEVBoostPayload(
 	if message.Header.BlockHash == (common.Hash{}) {
 		return nil, errors.New("builder payload has zero block hash")
 	}
+	// A relay bid must describe the payload requested for this slot. Reject mismatches
+	// before bid selection so production can keep the valid local payload.
+	targetEpoch := targetSlot / a.beaconChainCfg.SlotsPerEpoch
+	expectedPrevRandao := baseState.GetRandaoMixes(targetEpoch)
+	if message.Header.PrevRandao != expectedPrevRandao {
+		return nil, fmt.Errorf(
+			"builder payload prev randao %s does not match expected %s",
+			message.Header.PrevRandao,
+			expectedPrevRandao,
+		)
+	}
+	expectedTimestamp := state.ComputeTimestampAtSlot(baseState, targetSlot)
+	if message.Header.Time != expectedTimestamp {
+		return nil, fmt.Errorf(
+			"builder payload timestamp %d does not match expected %d",
+			message.Header.Time,
+			expectedTimestamp,
+		)
+	}
 	bidValue, ok := new(big.Int).SetString(message.Value, 10)
 	if !ok || bidValue.Sign() < 0 || bidValue.BitLen() > 256 {
 		return nil, errors.New("invalid builder bid value")
@@ -992,23 +1011,25 @@ func (a *ApiHandler) getMEVBoostPayload(
 		return nil, errors.New("missing execution requests")
 	}
 	message.Header.SetVersion(baseState.Version())
-	// Electra can change the blob limit by epoch without changing the state version.
+	// The response type carries commitments on every fork, and later code copies them
+	// without a version check. Validate each element before applying fork-specific limits.
+	for i := 0; i < message.BlobKzgCommitments.Len(); i++ {
+		c := message.BlobKzgCommitments.Get(i)
+		if c == nil {
+			return nil, errors.New("nil blob kzg commitment")
+		}
+		if len(c) != length.Bytes48 {
+			return nil, errors.New("invalid blob kzg commitment length")
+		}
+	}
+	// Blob schedules can change the limit without changing the state version.
 	if baseState.Version() >= clparams.DenebVersion {
 		maxBlobs := a.beaconChainCfg.MaxBlobsPerBlockByVersion(baseState.Version())
 		if baseState.Version() >= clparams.ElectraVersion {
-			maxBlobs = a.beaconChainCfg.GetBlobParameters(targetSlot / a.beaconChainCfg.SlotsPerEpoch).MaxBlobsPerBlock
+			maxBlobs = a.beaconChainCfg.GetBlobParameters(targetEpoch).MaxBlobsPerBlock
 		}
 		if uint64(message.BlobKzgCommitments.Len()) > maxBlobs {
 			return nil, fmt.Errorf("too many blob kzg commitments: %d", message.BlobKzgCommitments.Len())
-		}
-		for i := 0; i < message.BlobKzgCommitments.Len(); i++ {
-			c := message.BlobKzgCommitments.Get(i)
-			if c == nil {
-				return nil, errors.New("nil blob kzg commitment")
-			}
-			if len(c) != length.Bytes48 {
-				return nil, errors.New("invalid blob kzg commitment length")
-			}
 		}
 	}
 	if baseState.Version() >= clparams.ElectraVersion {
