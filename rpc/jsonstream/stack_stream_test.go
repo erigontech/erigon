@@ -18,6 +18,7 @@ package jsonstream
 
 import (
 	"bytes"
+	"encoding/json"
 	"errors"
 	"fmt"
 	"math"
@@ -1173,4 +1174,67 @@ func TestStackStreamBoundsBuffer(t *testing.T) {
 			require.Less(t, peak, 2*FlushThreshold, "buffer peaked at %d for a %d byte response", peak, out.Len())
 		})
 	}
+}
+
+// TestStackStreamEndClosesWhatIsOpen pins the point of the stack tracking: a
+// container end repairs whatever the caller left open inside it, so a handler
+// that stops early still yields a parseable response.
+func TestStackStreamEndClosesWhatIsOpen(t *testing.T) {
+	for _, tc := range []struct {
+		name  string
+		write func(s *StackStream)
+		want  string
+	}{
+		{"trailing comma in an array", func(s *StackStream) {
+			s.WriteArrayStart()
+			s.WriteInt(1)
+			s.WriteMore()
+			s.WriteArrayEnd()
+		}, `[1,null]`},
+		{"field with no value", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("a")
+			s.WriteObjectEnd()
+		}, `{"a":null}`},
+		{"inner array left open", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("result")
+			s.WriteArrayStart()
+			s.WriteInt(1)
+			s.WriteObjectEnd()
+		}, `{"result":[1]}`},
+		{"complete output is untouched", func(s *StackStream) {
+			s.WriteObjectStart()
+			s.WriteObjectField("a")
+			s.WriteArrayStart()
+			s.WriteInt(1)
+			s.WriteArrayEnd()
+			s.WriteObjectEnd()
+		}, `{"a":[1]}`},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			tc.write(s)
+
+			require.Equal(t, tc.want, string(s.Buffer()))
+			require.NoError(t, json.Unmarshal(s.Buffer(), new(any)))
+			require.True(t, s.IsComplete(), "stack left as %s", s.StackSummary())
+		})
+	}
+}
+
+// TestStackStreamResetClearsError pins that a reused stream works again. jsoniter
+// latches the error on the stream, so leaving it set makes every later Flush
+// fail without draining, and the buffer bound then discards the response.
+func TestStackStreamResetClearsError(t *testing.T) {
+	s := New(goneWriter{}).(*StackStream)
+	s.WriteRaw(strings.Repeat("x", 2*FlushThreshold))
+	require.Error(t, s.Flush())
+
+	var out bytes.Buffer
+	s.Reset(&out)
+	s.WriteString("ok")
+
+	require.NoError(t, s.Flush())
+	require.Equal(t, `"ok"`, out.String())
 }
