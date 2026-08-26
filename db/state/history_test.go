@@ -2478,14 +2478,14 @@ func TestMaxHistoryValLen(t *testing.T) {
 	db := mdbx.New(dbcfg.ChainDB, log.New()).InMem(t.TempDir()).
 		PageSize(ethconfig.DefaultChainDBPageSize).
 		WithTableCfg(func(kv.TableCfg) kv.TableCfg {
-			return kv.TableCfg{kv.TblAccountHistoryVals: kv.TableCfgItem{Flags: kv.DupSort}}
+			return kv.TableCfg{kv.TblAccountHistoryInvIdx: kv.TableCfgItem{Flags: kv.DupSort}}
 		}).MustOpen()
 	defer db.Close()
 
 	// historyLargeValues=false stores txNum+value as one dupsort value
 	put := func(valLen int) error {
 		return db.Update(t.Context(), func(tx kv.RwTx) error {
-			return tx.Put(kv.TblAccountHistoryVals, []byte("key"), make([]byte, 8+valLen))
+			return tx.Put(kv.TblAccountHistoryInvIdx, []byte("key"), make([]byte, 8+valLen))
 		})
 	}
 	require.NoError(t, put(maxHistoryValLen))
@@ -2499,7 +2499,7 @@ func BenchmarkHistoryRangePaged(b *testing.B) {
 	logger := log.New()
 	ctx := b.Context()
 
-	db, h, txs := filledHistory(b, true, logger)
+	db, h, txs := filledHistory(b, logger)
 	collateAndMergeHistory(b, db, h, txs, true)
 
 	tx, err := db.BeginRo(ctx)
