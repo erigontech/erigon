@@ -172,7 +172,7 @@ func (b *BlobHistoryDownloader) repairBlobGap(slot uint64) bool {
 		b.logger.Debug("[BlobRepair] build identifiers", "slot", slot, "err", err)
 		return false
 	}
-	if _, _, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(
+	inserted, total, err := blob_storage.VerifyAgainstIdentifiersAndInsertIntoTheBlobStore(
 		b.ctx, b.blobStorage, identifiers, sidecars,
 		func(header *cltypes.SignedBeaconBlockHeader) error {
 			if header.Header.Slot != slot {
@@ -183,20 +183,31 @@ func (b *BlobHistoryDownloader) repairBlobGap(slot uint64) bool {
 			}
 			return nil
 		},
-	); err != nil {
+	)
+	if err != nil {
 		b.logger.Warn("[BlobRepair] rejected fetched sidecars", "slot", slot, "err", err)
 		return false
 	}
 
 	stored, err := b.blobStorage.KzgCommitmentsCount(b.ctx, blockRoot)
 	if err != nil {
+		b.logger.Debug("[BlobRepair] count after insert", "slot", slot, "err", err)
 		return false
 	}
 	want := 0
 	if c := block.Block.Body.GetBlobKzgCommitments(); c != nil {
 		want = c.Len()
 	}
-	return int(stored) == want
+	if int(stored) != want {
+		// Fetched and accepted, yet the store still disagrees with the block. Left silent
+		// once, which made 101 successful fetches on a gnosis node look like misses.
+		b.logger.Warn("[BlobRepair] insert did not complete the slot",
+			"slot", slot, "blockRoot", blockRoot, "stored", stored, "want", want,
+			"fetched", len(sidecars), "inserted", inserted, "identifiers", total)
+		return false
+	}
+	b.logger.Debug("[BlobRepair] filled slot", "slot", slot, "sidecars", len(sidecars))
+	return true
 }
 
 // repairLoop drains gaps on its own schedule. downloadOnce holds run()'s goroutine for as
