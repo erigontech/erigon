@@ -2,13 +2,18 @@ package epbs
 
 import (
 	"context"
+	"errors"
 	"fmt"
+	"sync"
 
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/das"
 	"github.com/erigontech/erigon/cl/gossip"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/common"
 )
+
+var ErrBidNotPublished = errors.New("bid was not published")
 
 // GossipPublisher is the subset of the gossip manager needed by the submitter.
 type GossipPublisher interface {
@@ -30,6 +35,16 @@ type CaplinBidSubmitter struct {
 	epbsPool      *pool.EpbsPool
 	gossipManager GossipPublisher
 	forkchoice    executionPayloadProcessor
+	progressMu    sync.Mutex
+	progress      map[common.Hash]*payloadBroadcastProgress
+}
+
+type payloadBroadcastProgress struct {
+	mu        sync.Mutex
+	processed bool
+	envelope  bool
+	columns   map[uint64]bool
+	completed bool
 }
 
 type executionPayloadProcessor interface {
@@ -46,6 +61,7 @@ func NewCaplinBidSubmitter(
 		epbsPool:      epbsPool,
 		gossipManager: gossipManager,
 		forkchoice:    fc,
+		progress:      make(map[common.Hash]*payloadBroadcastProgress),
 	}
 }
 
@@ -53,12 +69,12 @@ func NewCaplinBidSubmitter(
 // the execution_payload_bid gossip topic.
 func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedExecutionPayloadBid) error {
 	if bid == nil || bid.Message == nil {
-		return fmt.Errorf("epbs/submitter: nil bid")
+		return fmt.Errorf("%w: nil bid", ErrBidNotPublished)
 	}
 
 	encodedSSZ, err := bid.EncodeSSZ(nil)
 	if err != nil {
-		return fmt.Errorf("epbs/submitter: encode bid: %w", err)
+		return fmt.Errorf("%w: encode bid: %v", ErrBidNotPublished, err)
 	}
 
 	if err := s.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayloadBid, encodedSSZ); err != nil {
@@ -82,23 +98,40 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 	if envelope == nil || envelope.Message == nil {
 		return fmt.Errorf("epbs/submitter: nil envelope")
 	}
-
-	if err := s.forkchoice.OnExecutionPayload(ctx, envelope, false, true); err != nil {
-		return fmt.Errorf("epbs/submitter: process payload: %w", err)
+	root := envelope.Message.BeaconBlockRoot
+	s.progressMu.Lock()
+	progress := s.progress[root]
+	if progress == nil {
+		progress = &payloadBroadcastProgress{columns: make(map[uint64]bool)}
+		s.progress[root] = progress
+	}
+	s.progressMu.Unlock()
+	progress.mu.Lock()
+	defer progress.mu.Unlock()
+	if progress.completed {
+		return nil
 	}
 
-	// Broadcast on gossip
-	encodedSSZ, err := envelope.EncodeSSZ(nil)
-	if err != nil {
-		return fmt.Errorf("epbs/submitter: encode envelope: %w", err)
+	if !progress.processed {
+		if err := s.forkchoice.OnExecutionPayload(ctx, envelope, false, true); err != nil {
+			return fmt.Errorf("epbs/submitter: process payload: %w", err)
+		}
+		progress.processed = true
 	}
 
-	if err := s.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
-		return fmt.Errorf("epbs/submitter: publish envelope: %w", err)
+	if !progress.envelope {
+		encodedSSZ, err := envelope.EncodeSSZ(nil)
+		if err != nil {
+			return fmt.Errorf("epbs/submitter: encode envelope: %w", err)
+		}
+		if err := s.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayload, encodedSSZ); err != nil {
+			return fmt.Errorf("epbs/submitter: publish envelope: %w", err)
+		}
+		progress.envelope = true
 	}
 
 	for _, column := range columnSidecars {
-		if column == nil {
+		if column == nil || progress.columns[column.Index] {
 			continue
 		}
 		columnSSZ, err := column.EncodeSSZ(nil)
@@ -109,7 +142,20 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 		if err := s.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
 			return fmt.Errorf("epbs/submitter: publish data column sidecar %d: %w", column.Index, err)
 		}
+		progress.columns[column.Index] = true
 	}
+	progress.completed = true
+	s.progressMu.Lock()
+	if s.progress[root] == progress {
+		delete(s.progress, root)
+	}
+	s.progressMu.Unlock()
 
 	return nil
+}
+
+func (s *CaplinBidSubmitter) discardPayloadBroadcast(root common.Hash) {
+	s.progressMu.Lock()
+	delete(s.progress, root)
+	s.progressMu.Unlock()
 }

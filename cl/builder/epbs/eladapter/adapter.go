@@ -2,6 +2,7 @@ package eladapter
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -14,6 +15,8 @@ import (
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
+
+var ErrUnknownPayload = errors.New("unknown payload")
 
 // Adapter wraps an execution module to provide the PayloadAssembler interface
 // expected by the ePBS builder.
@@ -47,6 +50,9 @@ func (a *Adapter) GetPayload(ctx context.Context, payloadId uint64) (*AssembledP
 	result, err := a.exec.GetAssembledBlock(ctx, payloadId)
 	if err != nil {
 		return nil, fmt.Errorf("eladapter: GetAssembledBlock(%d): %w", payloadId, err)
+	}
+	if result.Unknown {
+		return nil, fmt.Errorf("eladapter: GetAssembledBlock(%d): %w", payloadId, ErrUnknownPayload)
 	}
 	if result.Busy || result.Block == nil {
 		return nil, nil // not ready yet

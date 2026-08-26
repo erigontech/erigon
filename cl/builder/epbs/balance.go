@@ -2,12 +2,17 @@ package epbs
 
 import (
 	"context"
+	"errors"
+	"math"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/synced_data"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/common"
 	log "github.com/erigontech/erigon/common/log/v3"
 )
+
+var ErrBuilderIndexMismatch = errors.New("builder index does not match signing key")
 
 const (
 	balanceCheckInterval = 32 * 12 * time.Second // ~1 epoch
@@ -22,27 +27,33 @@ type BalanceStatus struct {
 
 // CheckBalance queries the head state for the builder's on-chain status.
 // Returns zero-value BalanceStatus and an error if the state is unavailable.
-func CheckBalance(sd synced_data.SyncedData, builderIndex uint64) (BalanceStatus, error) {
+func CheckBalance(sd synced_data.SyncedData, builderIndex uint64, pubkey common.Bytes48) (BalanceStatus, error) {
 	var status BalanceStatus
 	err := sd.ViewHeadState(func(s *state.CachingBeaconState) error {
 		status.Slot = s.Slot()
-		status.Active = state.IsActiveBuilder(s, builderIndex)
 		builders := s.GetBuilders()
-		if builders != nil && int(builderIndex) < builders.Len() {
-			builder := builders.Get(int(builderIndex))
-			if builder != nil {
-				status.Balance = builder.Balance
-			}
+		if builders == nil || int(builderIndex) >= builders.Len() {
+			return ErrBuilderIndexMismatch
+		}
+		builder := builders.Get(int(builderIndex))
+		if builder == nil || builder.Pubkey != pubkey {
+			return ErrBuilderIndexMismatch
+		}
+		status.Active = state.IsActiveBuilder(s, builderIndex)
+		pending := state.GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
+		if pending > math.MaxUint64-s.BeaconConfig().MinDepositAmount {
+			return nil
+		}
+		unavailable := s.BeaconConfig().MinDepositAmount + pending
+		if builder.Balance >= unavailable {
+			status.Balance = builder.Balance - unavailable
 		}
 		return nil
 	})
 	return status, err
 }
 
-// RunBalanceMonitor periodically logs the builder's on-chain balance and
-// active status. When the builder index is 0 (failed initial resolve), it
-// attempts to re-resolve the index from the head state each tick.
-// It exits when ctx is cancelled.
+// RunBalanceMonitor refreshes builder status from the selected head until cancellation.
 func RunBalanceMonitor(ctx context.Context, sd synced_data.SyncedData, manager *BuilderManager) {
 	ticker := time.NewTicker(balanceCheckInterval)
 	defer ticker.Stop()
@@ -73,8 +84,11 @@ func refreshBuilderBalance(sd synced_data.SyncedData, manager *BuilderManager) {
 		builderIndex = idx
 		log.Info("ePBS builder: index resolved on retry", "builderIndex", idx)
 	}
-	status, err := CheckBalance(sd, builderIndex)
+	status, err := CheckBalance(sd, builderIndex, manager.Pubkey())
 	if err != nil {
+		if errors.Is(err, ErrBuilderIndexMismatch) {
+			manager.InvalidateBuilderIndex()
+		}
 		log.Debug("ePBS builder: balance check failed", "err", err)
 		return
 	}

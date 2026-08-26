@@ -14,20 +14,30 @@ import (
 )
 
 type testEnvelopeProcessor struct {
-	err error
+	err   error
+	calls *int
 }
 
 func (p testEnvelopeProcessor) OnExecutionPayload(context.Context, *cltypes.SignedExecutionPayloadEnvelope, bool, bool) error {
+	if p.calls != nil {
+		*p.calls++
+	}
 	return p.err
 }
 
 type testGossipPublisher struct {
 	published int
 	err       error
+	errors    map[int]error
+	topics    []string
 }
 
-func (p *testGossipPublisher) Publish(context.Context, string, []byte) error {
+func (p *testGossipPublisher) Publish(_ context.Context, topic string, _ []byte) error {
 	p.published++
+	p.topics = append(p.topics, topic)
+	if err := p.errors[p.published]; err != nil {
+		return err
+	}
 	return p.err
 }
 
@@ -58,4 +68,37 @@ func TestCaplinBidSubmitter_BroadcastPayloadRejectsForkchoiceError(t *testing.T)
 	err := submitter.BroadcastPayload(context.Background(), envelope, nil)
 	require.ErrorContains(t, err, "invalid envelope")
 	require.Zero(t, gossipPublisher.published)
+}
+
+func TestCaplinBidSubmitterBroadcastPayloadResumesAfterPublishedPrefix(t *testing.T) {
+	publisher := &testGossipPublisher{errors: map[int]error{3: errors.New("column unavailable")}}
+	processorCalls := 0
+	submitter := NewCaplinBidSubmitter(nil, publisher, testEnvelopeProcessor{calls: &processorCalls})
+	cfg := clparams.MainnetBeaconConfig
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	columns := []*cltypes.DataColumnSidecar{
+		cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion),
+		cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion),
+	}
+	columns[1].Index = 1
+
+	require.ErrorContains(t, submitter.BroadcastPayload(t.Context(), envelope, columns), "column unavailable")
+	delete(publisher.errors, 3)
+	require.NoError(t, submitter.BroadcastPayload(t.Context(), envelope, columns))
+	require.Equal(t, 1, processorCalls)
+	require.Equal(t, 4, publisher.published)
+}
+
+func TestCaplinBidSubmitterDiscardPayloadBroadcastProgress(t *testing.T) {
+	publisher := &testGossipPublisher{err: errors.New("unavailable")}
+	submitter := NewCaplinBidSubmitter(nil, publisher, testEnvelopeProcessor{})
+	cfg := clparams.MainnetBeaconConfig
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+
+	require.Error(t, submitter.BroadcastPayload(t.Context(), envelope, nil))
+	require.Len(t, submitter.progress, 1)
+	submitter.discardPayloadBroadcast(envelope.Message.BeaconBlockRoot)
+	require.Empty(t, submitter.progress)
 }

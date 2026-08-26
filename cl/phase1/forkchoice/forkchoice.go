@@ -780,8 +780,11 @@ func (f *ForkChoiceStore) ActiveParents(slot uint64) []ParentCandidate {
 	headNode := ForkChoiceNode{Root: headRoot, PayloadStatus: headStatus}
 	shouldExtend := f.HasEnvelope(headRoot) && f.ShouldBuildOnFull(headNode, slot)
 	var executionHash common.Hash
-	headState, err := f.forkGraph.GetState(headRoot, false)
+	headState, err := f.forkGraph.GetState(headRoot, true)
 	if err != nil || headState == nil {
+		if !shouldExtend {
+			return nil
+		}
 		var found bool
 		executionHash, found = f.eth2Roots.Get(headRoot)
 		if !found {
@@ -802,7 +805,7 @@ func (f *ForkChoiceStore) ActiveParents(slot uint64) []ParentCandidate {
 	f.mu.RLock()
 	unchanged := f.headHash == headRoot && f.headSlot == headSlot && f.headPayloadStatus == headStatus
 	f.mu.RUnlock()
-	if !unchanged {
+	if !unchanged || shouldExtend != (f.HasEnvelope(headRoot) && f.ShouldBuildOnFull(headNode, slot)) {
 		return nil
 	}
 

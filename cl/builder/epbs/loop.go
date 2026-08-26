@@ -2,6 +2,7 @@ package epbs
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"math/big"
 	"sync"
@@ -23,8 +24,6 @@ import (
 const (
 	preferencesTimeout = 4 * time.Second // wait up to 4s into the slot for preferences
 	weiPerGwei         = 1_000_000_000   // consensus layer uses Gwei; EL blockValue is in wei
-	revealAttempts     = 3
-	revealRetryDelay   = 100 * time.Millisecond
 )
 
 // pendingPayload is a completed build result waiting for a bid-won reveal.
@@ -34,9 +33,17 @@ type pendingPayload struct {
 	assembled *eladapter.AssembledPayload
 	execReqs  *cltypes.ExecutionRequests
 	parent    ParentInfo
-	reveals   map[common.Hash]bool
+	reveals   map[common.Hash]revealState
 	bidValue  uint64
 }
+
+type revealState uint8
+
+const (
+	revealQueued revealState = iota
+	revealInProgress
+	revealComplete
+)
 
 // SlotContext holds per-slot context that the caller provides to the builder loop.
 // This separates beacon state access (caller responsibility) from build logic.
@@ -66,6 +73,10 @@ type BuilderLoop struct {
 
 	// speculativePayloads tracks speculative build payloadIds keyed by (slot, parentHash).
 	speculativePayloads map[speculativeKey]uint64
+}
+
+type payloadBroadcastDiscarder interface {
+	discardPayloadBroadcast(common.Hash)
 }
 
 // pendingPayloadKey includes both EL parentBlockHash and CL parentBlockRoot.
@@ -177,8 +188,8 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
 }
 
 func revealInFlight(pending *pendingPayload) bool {
-	for _, revealed := range pending.reveals {
-		if !revealed {
+	for _, reveal := range pending.reveals {
+		if reveal != revealComplete {
 			return true
 		}
 	}
@@ -375,6 +386,19 @@ buildDone:
 	reserved = false
 
 	if err := l.submitter.SubmitBid(ctx, signedBid); err != nil {
+		if errors.Is(err, ErrBidNotPublished) {
+			l.mu.Lock()
+			if l.pendingPayloads[key] == pending {
+				if previous == nil {
+					delete(l.pendingPayloads, key)
+				} else {
+					l.pendingPayloads[key] = previous
+				}
+			}
+			l.mu.Unlock()
+			l.manager.ReleaseBid(bidValue)
+			return fmt.Errorf("epbs/loop: submit bid: %w", err)
+		}
 		if previous != nil {
 			l.manager.ReleaseBid(previous.bidValue)
 		}
@@ -430,13 +454,13 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 		return fmt.Errorf("epbs/loop: winning block hash %s does not match pending payload", blockHash)
 	}
 	if pending.reveals == nil {
-		pending.reveals = make(map[common.Hash]bool)
+		pending.reveals = make(map[common.Hash]revealState)
 	}
-	if _, exists := pending.reveals[beaconBlockRoot]; exists {
+	if state := pending.reveals[beaconBlockRoot]; state == revealInProgress || state == revealComplete {
 		l.mu.Unlock()
 		return nil
 	}
-	pending.reveals[beaconBlockRoot] = false
+	pending.reveals[beaconBlockRoot] = revealInProgress
 	l.mu.Unlock()
 	revealed := false
 	defer func() {
@@ -445,7 +469,7 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 		}
 		l.mu.Lock()
 		if current := l.pendingPayloads[key]; current == pending {
-			delete(current.reveals, beaconBlockRoot)
+			current.reveals[beaconBlockRoot] = revealQueued
 		}
 		l.mu.Unlock()
 	}()
@@ -475,7 +499,7 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 
 	l.mu.Lock()
 	if current := l.pendingPayloads[key]; current == pending {
-		current.reveals[beaconBlockRoot] = true
+		current.reveals[beaconBlockRoot] = revealComplete
 	}
 	l.mu.Unlock()
 	revealed = true
@@ -489,36 +513,42 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 	return nil
 }
 
-func (l *BuilderLoop) pendingBidKey(slot, builderIndex uint64, parentHash, parentBlockRoot, blockHash common.Hash) (pendingPayloadKey, bool) {
+func (l *BuilderLoop) queuePendingBidReveal(slot, builderIndex uint64, parentHash, parentBlockRoot, blockHash, beaconRoot common.Hash) (pendingPayloadKey, bool) {
 	key := pendingPayloadKey{slot: slot, parentBlockHash: parentHash, parentBlockRoot: parentBlockRoot, blockHash: blockHash}
 	ourIndex, resolved := l.manager.BuilderIndex()
 	if !resolved || builderIndex != ourIndex {
 		return key, false
 	}
 	l.mu.Lock()
-	_, ok := l.pendingPayloads[key]
+	pending := l.pendingPayloads[key]
+	if pending == nil {
+		l.mu.Unlock()
+		return key, false
+	}
+	if pending.reveals == nil {
+		pending.reveals = make(map[common.Hash]revealState)
+	}
+	_, exists := pending.reveals[beaconRoot]
+	if !exists {
+		pending.reveals[beaconRoot] = revealQueued
+	}
 	l.mu.Unlock()
-	return key, ok
+	return key, !exists
+}
+
+func (l *BuilderLoop) abandonPendingBidReveal(key pendingPayloadKey, beaconRoot common.Hash) {
+	l.mu.Lock()
+	if pending := l.pendingPayloads[key]; pending != nil {
+		delete(pending.reveals, beaconRoot)
+	}
+	l.mu.Unlock()
+	if submitter, ok := l.submitter.(payloadBroadcastDiscarder); ok {
+		submitter.discardPayloadBroadcast(beaconRoot)
+	}
 }
 
 func (l *BuilderLoop) broadcastPayload(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, columnSidecars []*cltypes.DataColumnSidecar) error {
-	var err error
-	for attempt := range revealAttempts {
-		if err = l.submitter.BroadcastPayload(ctx, envelope, columnSidecars); err == nil {
-			return nil
-		}
-		if attempt+1 == revealAttempts {
-			break
-		}
-		timer := time.NewTimer(revealRetryDelay)
-		select {
-		case <-ctx.Done():
-			timer.Stop()
-			return ctx.Err()
-		case <-timer.C:
-		}
-	}
-	return err
+	return l.submitter.BroadcastPayload(ctx, envelope, columnSidecars)
 }
 
 func validateBlobsBundle(bundle *eladapter.BlobsBundle, maxBlobs uint64) error {

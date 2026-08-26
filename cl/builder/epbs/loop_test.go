@@ -419,6 +419,21 @@ func TestBuilderLoopRetainsPayloadWhenBidPublicationReturnsError(t *testing.T) {
 	require.NotZero(t, loop.manager.reservedBidValue)
 }
 
+func TestBuilderLoopReleasesPayloadWhenBidDefinitelyWasNotPublished(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	submitter.submitBidErr = fmt.Errorf("%w: encoding rejected", ErrBidNotPublished)
+
+	require.Error(t, loop.OnSlot(t.Context(), sc))
+	require.Empty(t, loop.pendingPayloads)
+	require.Zero(t, loop.manager.reservedBidValue)
+}
+
 func TestBuilderLoop_BidWonReveal_NoPending(t *testing.T) {
 	loop, _, _, _ := setupBuilderLoop(t)
 	ctx := context.Background()
@@ -466,10 +481,12 @@ func TestBuilderLoopBidWonRevealRetriesTransientBroadcastFailure(t *testing.T) {
 	}})
 	require.NoError(t, loop.OnSlot(t.Context(), sc))
 	submitter.broadcastErr = errors.New("transient gossip failure")
-	submitter.broadcastFailures = 1
+	submitter.broadcastFailures = 3
 
-	err := loop.OnBidWon(t.Context(), sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
-		common.HexToHash("0xb10c"), common.HexToHash("0xbeef"))
+	err := revealWinningBidUntil(t.Context(), time.Now().Add(time.Second), func() error {
+		return loop.OnBidWon(t.Context(), sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
+			common.HexToHash("0xb10c"), common.HexToHash("0xbeef"))
+	})
 	require.NoError(t, err)
 	require.Len(t, submitter.broadcasts, 1)
 }
@@ -558,6 +575,43 @@ func TestBuilderLoopPruneRetainsInFlightRevealReservation(t *testing.T) {
 	require.NotZero(t, loop.manager.reservedBidValue)
 	close(release)
 	require.NoError(t, <-done)
+}
+
+func TestBuilderLoopQueuedRevealsPreserveRootsAndSurvivePrune(t *testing.T) {
+	loop, exec, _, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	rootA := common.HexToHash("0xa1")
+	rootB := common.HexToHash("0xb2")
+	var key pendingPayloadKey
+	queue := func(root common.Hash) bool {
+		var queued bool
+		key, queued = loop.queuePendingBidReveal(sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
+			common.HexToHash("0xb10c"), root)
+		return queued
+	}
+	require.True(t, queue(rootA))
+	require.True(t, queue(rootB))
+	require.False(t, queue(rootA))
+
+	loop.pruneBeforeSlot(sc.Slot + 1)
+	require.Len(t, loop.pendingPayloads, 1)
+	for _, pending := range loop.pendingPayloads {
+		require.Equal(t, map[common.Hash]revealState{rootA: revealQueued, rootB: revealQueued}, pending.reveals)
+	}
+
+	loop.abandonPendingBidReveal(key, rootA)
+	loop.pruneBeforeSlot(sc.Slot + 1)
+	require.Len(t, loop.pendingPayloads, 1)
+	loop.abandonPendingBidReveal(key, rootB)
+	loop.pruneBeforeSlot(sc.Slot + 1)
+	require.Empty(t, loop.pendingPayloads)
+	require.Zero(t, loop.manager.reservedBidValue)
 }
 
 func TestBuildDataColumnSidecars_EmptyBundle(t *testing.T) {
@@ -681,6 +735,35 @@ func TestPreferencesWatcherCancellation(t *testing.T) {
 
 	_, err := w.WaitForPreferences(ctx, 42, common.Hash{}, time.Hour)
 	require.ErrorIs(t, err, context.Canceled)
+	done := make(chan struct{})
+	go func() {
+		w.OnPreferencesReceived(42, &cltypes.SignedProposerPreferences{})
+		close(done)
+	}()
+	select {
+	case <-done:
+	case <-time.After(time.Second):
+		t.Fatal("canceled wait retained the watcher mutex")
+	}
+}
+
+func TestPreferencesWatcherCancellationWhileWaiting(t *testing.T) {
+	w := NewPreferencesWatcher()
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan error, 1)
+	go func() {
+		_, err := w.WaitForPreferences(ctx, 42, common.Hash{}, time.Hour)
+		done <- err
+	}()
+	time.Sleep(20 * time.Millisecond)
+	cancel()
+
+	select {
+	case err := <-done:
+		require.ErrorIs(t, err, context.Canceled)
+	case <-time.After(time.Second):
+		t.Fatal("waiting preferences call ignored cancellation")
+	}
 }
 
 func TestPreferencesWatcher_Receive(t *testing.T) {

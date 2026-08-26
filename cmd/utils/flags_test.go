@@ -353,3 +353,14 @@ func TestCommitmentPlainValuesFromCtx(t *testing.T) {
 	require.NotNil(t, gotFalse)
 	require.False(t, *gotFalse)
 }
+
+func TestParseBuilderMinProfit(t *testing.T) {
+	profit, err := parseBuilderMinProfit("123")
+	require.NoError(t, err)
+	require.Equal(t, "123", profit.String())
+
+	for _, value := range []string{"", "garbage", "-1", "1.5"} {
+		_, err := parseBuilderMinProfit(value)
+		require.Error(t, err, value)
+	}
+}

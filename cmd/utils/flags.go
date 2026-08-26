@@ -1887,11 +1887,20 @@ func setCaplin(ctx *cli.Command, cfg *ethconfig.Config) {
 	cfg.CaplinConfig.EpbsBuilder.KeyPath = ctx.String(EpbsBuilderKeyFlag.Name)
 	cfg.CaplinConfig.EpbsBuilder.BidMargin = ctx.Float64(EpbsBuilderBidMarginFlag.Name)
 	if ctx.IsSet(EpbsBuilderMinProfitFlag.Name) {
-		profit, ok := new(big.Int).SetString(ctx.String(EpbsBuilderMinProfitFlag.Name), 10)
-		if ok {
-			cfg.CaplinConfig.EpbsBuilder.MinProfit = profit
+		profit, err := parseBuilderMinProfit(ctx.String(EpbsBuilderMinProfitFlag.Name))
+		if err != nil {
+			Fatalf("Invalid --%s: %v", EpbsBuilderMinProfitFlag.Name, err)
 		}
+		cfg.CaplinConfig.EpbsBuilder.MinProfit = profit
 	}
+}
+
+func parseBuilderMinProfit(value string) (*big.Int, error) {
+	profit, ok := new(big.Int).SetString(value, 10)
+	if !ok || profit.Sign() < 0 {
+		return nil, fmt.Errorf("must be a non-negative base-10 integer")
+	}
+	return profit, nil
 }
 
 // CheckExclusive verifies that only a single instance of the provided flags was

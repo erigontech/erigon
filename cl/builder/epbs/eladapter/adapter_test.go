@@ -80,3 +80,9 @@ func TestAdapterGetPayloadPreservesBlockAccessList(t *testing.T) {
 	require.NoError(t, err)
 	require.Equal(t, block.Hash(), rebuiltHeader.Hash())
 }
+
+func TestAdapterGetPayloadRejectsUnknownPayload(t *testing.T) {
+	module := assembledBlockModule{result: execmodule.AssembledBlockResult{Unknown: true}}
+	_, err := NewAdapter(module, clparams.GloasVersion, &clparams.MainnetBeaconConfig).GetPayload(t.Context(), 1)
+	require.ErrorIs(t, err, ErrUnknownPayload)
+}

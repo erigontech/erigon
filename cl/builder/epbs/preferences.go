@@ -79,8 +79,6 @@ func (w *PreferencesWatcher) WaitForPreferences(ctx context.Context, slot uint64
 	w.waitingKey = key
 	w.waiting = true
 	select {
-	case <-ctx.Done():
-		return nil, ctx.Err()
 	case <-w.ch:
 	default:
 	}
@@ -102,6 +100,8 @@ func (w *PreferencesWatcher) WaitForPreferences(ctx context.Context, slot uint64
 	defer timer.Stop()
 
 	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-w.ch:
 		w.mu.Lock()
 		prefs := w.preferences[key]

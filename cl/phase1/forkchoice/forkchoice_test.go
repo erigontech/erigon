@@ -217,28 +217,30 @@ type activeParentForkGraph struct {
 	root  common.Hash
 	slot  uint64
 	state *state.CachingBeaconState
+	copy  bool
 }
 
-func (g activeParentForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+func (g *activeParentForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
 	if root != g.root {
 		return nil, false
 	}
 	return &cltypes.BeaconBlockHeader{Slot: g.slot}, true
 }
 
-func (g activeParentForkGraph) GetState(root common.Hash, _ bool) (*state.CachingBeaconState, error) {
+func (g *activeParentForkGraph) GetState(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
 	if root != g.root {
 		return nil, nil
 	}
+	g.copy = alwaysCopy
 	return g.state, nil
 }
 
-func (g activeParentForkGraph) HasEnvelope(root common.Hash) bool { return root == g.root }
-func (activeParentForkGraph) IsBlockInvalid(common.Hash) bool     { return false }
-func (activeParentForkGraph) PayloadAccepted(common.Hash) (bool, bool) {
+func (g *activeParentForkGraph) HasEnvelope(root common.Hash) bool { return root == g.root }
+func (*activeParentForkGraph) IsBlockInvalid(common.Hash) bool     { return false }
+func (*activeParentForkGraph) PayloadAccepted(common.Hash) (bool, bool) {
 	return false, false
 }
-func (activeParentForkGraph) IsPayloadUnavailable(common.Hash) bool {
+func (*activeParentForkGraph) IsPayloadUnavailable(common.Hash) bool {
 	return false
 }
 
@@ -255,9 +257,10 @@ func TestActiveParentsUsesHeadPayloadStatus(t *testing.T) {
 	require.NoError(t, err)
 	payloadStatusByRoot.Add(root, execution_client.PayloadStatusValidated)
 
+	graph := &activeParentForkGraph{root: root, slot: 10, state: s}
 	store := &ForkChoiceStore{
 		beaconCfg:           &clparams.MainnetBeaconConfig,
-		forkGraph:           activeParentForkGraph{root: root, slot: 10, state: s},
+		forkGraph:           graph,
 		headHash:            root,
 		headSlot:            10,
 		headPayloadStatus:   cltypes.PayloadStatusEmpty,
@@ -266,12 +269,31 @@ func TestActiveParentsUsesHeadPayloadStatus(t *testing.T) {
 	store.proposerBoostRoot.Store(common.Hash{})
 
 	parents := store.ActiveParents(12)
+	require.True(t, graph.copy)
 	require.Equal(t, []ParentCandidate{{
 		Slot:          10,
 		BlockRoot:     root,
 		ExecutionHash: parentHash,
 		ShouldExtend:  false,
 	}}, parents)
+}
+
+func TestActiveParentsRejectsMissingStateForEmptyHead(t *testing.T) {
+	root := common.HexToHash("0xa1")
+	graph := &activeParentForkGraph{root: root, slot: 10}
+	eth2Roots, err := lru.New[common.Hash, common.Hash](16)
+	require.NoError(t, err)
+	eth2Roots.Add(root, common.HexToHash("0xc3"))
+	store := &ForkChoiceStore{
+		beaconCfg:         &clparams.MainnetBeaconConfig,
+		forkGraph:         graph,
+		eth2Roots:         eth2Roots,
+		headHash:          root,
+		headSlot:          10,
+		headPayloadStatus: cltypes.PayloadStatusEmpty,
+	}
+
+	require.Empty(t, store.ActiveParents(12))
 }
 
 func (g headerOnlyAnchorForkGraph) AnchorRoot() common.Hash { return g.root }

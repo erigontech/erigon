@@ -71,6 +71,14 @@ func (m *BuilderManager) SetBuilderIndex(idx uint64) {
 	m.indexMu.Unlock()
 }
 
+func (m *BuilderManager) InvalidateBuilderIndex() {
+	m.indexMu.Lock()
+	m.builderIndexResolved = false
+	m.balanceKnown = false
+	m.balanceStatus = BalanceStatus{}
+	m.indexMu.Unlock()
+}
+
 func (m *BuilderManager) SetBalanceStatus(status BalanceStatus) {
 	m.indexMu.Lock()
 	if m.balanceKnown && status.Slot < m.balanceSlot {

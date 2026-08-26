@@ -2,6 +2,7 @@ package epbs
 
 import (
 	"context"
+	"errors"
 	"testing"
 	"time"
 
@@ -188,4 +189,25 @@ func TestHandleImportedBlock_RevealsExactWinningBid(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, called)
+}
+
+func TestRevealWinningBidUntilRecoveryOrDeadline(t *testing.T) {
+	attempts := 0
+	err := revealWinningBidUntil(t.Context(), time.Now().Add(time.Second), func() error {
+		attempts++
+		if attempts <= 3 {
+			return errors.New("temporarily unavailable")
+		}
+		return nil
+	})
+	require.NoError(t, err)
+	require.Equal(t, 4, attempts)
+
+	attempts = 0
+	err = revealWinningBidUntil(t.Context(), time.Now().Add(20*time.Millisecond), func() error {
+		attempts++
+		return errors.New("permanent failure")
+	})
+	require.ErrorContains(t, err, "permanent failure")
+	require.Positive(t, attempts)
 }
