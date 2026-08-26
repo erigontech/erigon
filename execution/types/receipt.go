@@ -147,6 +147,9 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 	if r.Type == LegacyTxType {
 		return rlp.Encode(w, data)
 	}
+	if !hasStandardReceiptPayload(r.Type) {
+		return ErrTxTypeNotSupported
+	}
 	buf := pool.GetBuffer()
 	defer pool.PutBuffer(buf)
 	if err := r.encodeTyped(data, buf); err != nil {
@@ -161,6 +164,9 @@ func (r Receipt) EncodeRLP(w io.Writer) error {
 //
 //	receiptₙ = [tx-type, post-state-or-status, cumulative-gas, logs]
 func (r Receipt) EncodeRLP69(w io.Writer) error {
+	if r.Type != LegacyTxType && !hasStandardReceiptPayload(r.Type) {
+		return ErrTxTypeNotSupported
+	}
 	data := &receiptRLP69{r.Type, r.statusEncoding(), r.CumulativeGasUsed, r.Logs}
 	return rlp.Encode(w, data)
 }
@@ -175,6 +181,9 @@ func (r *Receipt) encodeTyped(data *receiptRLP, w *bytes.Buffer) error {
 func (r *Receipt) MarshalBinary() ([]byte, error) {
 	if r.Type == LegacyTxType {
 		return rlp.EncodeToBytes(r)
+	}
+	if !hasStandardReceiptPayload(r.Type) {
+		return nil, ErrTxTypeNotSupported
 	}
 	data := &receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs}
 	var buf bytes.Buffer
@@ -229,7 +238,9 @@ func (r *Receipt) decodePayload(s *rlp.Stream) error {
 	if b, err = s.Bytes(); err != nil {
 		return fmt.Errorf("read PostStateOrStatus: %w", err)
 	}
-	r.setStatus(b)
+	if err = r.setStatus(b); err != nil {
+		return err
+	}
 	if r.CumulativeGasUsed, err = s.Uint64(); err != nil {
 		return fmt.Errorf("read CumulativeGasUsed: %w", err)
 	}
@@ -289,20 +300,21 @@ func (r *Receipt) DecodeRLP(s *rlp.Stream) error {
 	case rlp.String:
 		// EIP-2718 typed txn receipt. Read the envelope as raw bytes,
 		// then decode from them using a fresh stream.
-		if size == 0 {
-			// Empty string is not a valid typed receipt. Return a real error
-			// rather than rlp.EOL: as a slice element EOL would be read as
-			// end-of-list and silently drop the receipt.
+		if size <= 1 {
+			// A type byte with no payload is not a valid typed receipt, and
+			// neither is the empty string. Return a real error rather than
+			// rlp.EOL: as a slice element EOL would be read as end-of-list
+			// and silently drop the receipt.
 			return errShortTypedReceipt
 		}
 		b := make([]byte, size)
 		if err = s.ReadBytes(b); err != nil {
 			return fmt.Errorf("read typed receipt: %w", err)
 		}
-		r.Type = b[0]
-		if !hasStandardReceiptPayload(r.Type) {
+		if !hasStandardReceiptPayload(b[0]) {
 			return ErrTxTypeNotSupported
 		}
+		r.Type = b[0]
 		inner := rlp.NewStream(bytes.NewReader(b[1:]), uint64(len(b)-1))
 		if err := r.decodePayload(inner); err != nil {
 			return err
@@ -369,6 +381,9 @@ type ReceiptForStorage Receipt
 // EncodeRLP implements rlp.Encoder, and flattens all content fields of a receipt
 // into an RLP stream.
 func (r *ReceiptForStorage) EncodeRLP(w io.Writer) error {
+	if r.Type != LegacyTxType && !hasStandardReceiptPayload(r.Type) {
+		return fmt.Errorf("invalid receipt type %d", r.Type)
+	}
 	if r.FirstLogIndexWithinBlock == 0 && len(r.Logs) > 0 {
 		r.FirstLogIndexWithinBlock = uint32(r.Logs[0].Index)
 	}
@@ -532,9 +547,11 @@ func (rs Receipts) EncodeIndex(i int, w *bytes.Buffer) {
 		return
 	}
 	if !hasStandardReceiptPayload(r.Type) {
-		// Fail where the type is visible; the alternative surfaces as a
-		// receipts-root mismatch that names nothing.
-		panic(fmt.Sprintf("types: Receipts.EncodeIndex: transaction type %d has no standard receipt payload", r.Type))
+		// Write nothing, as before. This runs under DeriveSha on the block
+		// path, so a type with no encoding here has to surface as a receipts
+		// root mismatch that rejects the block, not as a panic a peer can
+		// reach by sending one.
+		return
 	}
 	if err := r.encodeTyped(data, w); err != nil {
 		panic(err)

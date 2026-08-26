@@ -400,13 +400,20 @@ func TestUnregisteredReceiptTypeRejected(t *testing.T) {
 	require.NoError(t, err)
 	require.ErrorIs(t, rlp.DecodeBytes(enveloped, new(Receipt)), ErrTxTypeNotSupported)
 
-	require.Panics(t, func() {
-		Receipts{{Type: unknownType}}.EncodeIndex(0, new(bytes.Buffer))
-	}, "encoding an unclaimed type must fail loudly, not derive a wrong root")
+	_, err = (&Receipt{Type: unknownType}).MarshalBinary()
+	require.ErrorIs(t, err, ErrTxTypeNotSupported)
 
-	// The panic above is only a programming-error guard because a stored
-	// receipt cannot carry an unclaimed type into it.
-	stored, err := rlp.EncodeToBytes(&ReceiptForStorage{Type: unknownType, Status: ReceiptStatusSuccessful})
+	// EncodeIndex runs under DeriveSha on the block path, so it contributes no
+	// leaf rather than panicking; the block is rejected on the root mismatch.
+	var derived bytes.Buffer
+	Receipts{{Type: unknownType}}.EncodeIndex(0, &derived)
+	require.Empty(t, derived.Bytes())
+
+	_, err = rlp.EncodeToBytes(&ReceiptForStorage{Type: unknownType, Status: ReceiptStatusSuccessful})
+	require.ErrorContains(t, err, "invalid receipt type")
+
+	// Bypass the encoder to stand in for bytes an older binary already wrote.
+	stored, err := rlp.EncodeToBytes(&storedReceiptRLP{Type: unknownType, PostStateOrStatus: []byte{1}})
 	require.NoError(t, err)
 	require.ErrorContains(t, rlp.DecodeBytes(stored, new(ReceiptForStorage)), "invalid receipt type")
 }
@@ -420,15 +427,22 @@ func TestRegisteredTxTypeWithoutStandardReceiptPayload(t *testing.T) {
 	t.Cleanup(func() { unregisterTxType(customReceiptType) })
 
 	r := &Receipt{Type: customReceiptType, Status: ReceiptStatusSuccessful, CumulativeGasUsed: 1}
-	binary, err := r.MarshalBinary()
-	require.NoError(t, err)
-	require.ErrorIs(t, new(Receipt).UnmarshalBinary(binary), ErrTxTypeNotSupported)
 
-	require.Panics(t, func() {
-		Receipts{r}.EncodeIndex(0, new(bytes.Buffer))
-	}, "a type that never claimed the standard payload must not get one")
+	// Both directions, or the encode side emits bytes this package's own
+	// decoder rejects.
+	_, err := r.MarshalBinary()
+	require.ErrorIs(t, err, ErrTxTypeNotSupported)
+	require.ErrorIs(t, r.EncodeRLP(new(bytes.Buffer)), ErrTxTypeNotSupported)
+	require.ErrorIs(t, r.EncodeRLP69(new(bytes.Buffer)), ErrTxTypeNotSupported)
 
-	stored, err := rlp.EncodeToBytes((*ReceiptForStorage)(r))
+	payload, err := rlp.EncodeToBytes(&receiptRLP{r.statusEncoding(), r.CumulativeGasUsed, r.Bloom, r.Logs})
 	require.NoError(t, err)
-	require.ErrorContains(t, rlp.DecodeBytes(stored, new(ReceiptForStorage)), "invalid receipt type")
+	require.ErrorIs(t, new(Receipt).UnmarshalBinary(append([]byte{customReceiptType}, payload...)), ErrTxTypeNotSupported)
+
+	var derived bytes.Buffer
+	Receipts{r}.EncodeIndex(0, &derived)
+	require.Empty(t, derived.Bytes(), "a type that never claimed the standard payload must not get one")
+
+	_, err = rlp.EncodeToBytes((*ReceiptForStorage)(r))
+	require.ErrorContains(t, err, "invalid receipt type")
 }

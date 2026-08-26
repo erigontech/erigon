@@ -24,8 +24,8 @@ import (
 )
 
 // TxTypeSpec describes an externally registered transaction type. Registering
-// an id also admits it to the receipt encode and decode paths, so it decides
-// what bytes reach the receipts trie; an unregistered id is rejected there.
+// an id admits it to the transaction decode and sender paths only; the receipt
+// paths are separate and opt-in through StandardReceiptPayload.
 type TxTypeSpec struct {
 	New func() Transaction
 	// UnmarshalJSON may be nil for types not submittable over JSON-RPC;
@@ -38,8 +38,9 @@ type TxTypeSpec struct {
 	// StandardReceiptPayload declares that this type's receipts carry the
 	// same payload as the built-in typed receipts. EIP-2718 leaves
 	// ReceiptPayload opaque and type-specific, so a type that adds consensus
-	// fields to it — as OP's deposit receipts do — must leave this false and
-	// gets no receipt encoding rather than a silently wrong one.
+	// fields to it — as OP's deposit receipts do — must leave this false. Such
+	// a type is then absent from the receipts root this package derives, and
+	// the chain has to supply its own DerivableList.
 	StandardReceiptPayload bool
 }
 
@@ -79,6 +80,8 @@ func registeredTxType(id byte) (TxTypeSpec, bool) {
 	return spec, ok
 }
 
+// builtinTxType is the registration-collision list: the ids this package defines
+// itself, which an external type may not claim.
 func builtinTxType(id byte) bool {
 	switch id {
 	case LegacyTxType, AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType:
@@ -87,14 +90,14 @@ func builtinTxType(id byte) bool {
 	return false
 }
 
-// hasStandardReceiptPayload reports whether id's receipts are the typed
-// receipt with the built-in payload. Legacy is excluded — it carries no type
-// byte — and a registered type has to opt in.
+// hasStandardReceiptPayload reports whether id's receipts are the typed receipt
+// with the built-in payload. Deliberately its own list rather than builtinTxType:
+// EIP-2718 leaves ReceiptPayload type-specific, so a future built-in that adds a
+// consensus receipt field must stay off this one. Legacy is absent because it
+// carries no type byte; a registered type has to opt in.
 func hasStandardReceiptPayload(id byte) bool {
-	if id == LegacyTxType {
-		return false
-	}
-	if builtinTxType(id) {
+	switch id {
+	case AccessListTxType, DynamicFeeTxType, BlobTxType, SetCodeTxType, AccountAbstractionTxType:
 		return true
 	}
 	spec, ok := registeredTxType(id)
