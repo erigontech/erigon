@@ -93,11 +93,11 @@ func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Mar
 	}
 	tmp := file + tmpSuffix
 	if err := b.encodeTo(tmp, v); err != nil {
-		b.fs.Remove(tmp)
+		b.removeTemp(tmp)
 		return false, err
 	}
 	if err := b.fs.Rename(tmp, file); err != nil {
-		b.fs.Remove(tmp)
+		b.removeTemp(tmp)
 		if created || !isSharingViolation(err) {
 			return false, err
 		}
@@ -111,6 +111,16 @@ func (b *bucketStore) write(slot uint64, root common.Hash, idx uint64, v ssz.Mar
 		return false, nil
 	}
 	return created, nil
+}
+
+// removeTemp best-effort deletes a write's temp file after a failure partway
+// through it; the caller already has the real error to return, so this only
+// logs a leaked-file case (Remove finding nothing is the expected outcome
+// when the failure happened before the temp file was even created).
+func (b *bucketStore) removeTemp(tmp string) {
+	if err := b.fs.Remove(tmp); err != nil && !errors.Is(err, os.ErrNotExist) {
+		log.Debug("failed to remove temp file after write failure", "path", tmp, "err", err)
+	}
 }
 
 func (b *bucketStore) encodeTo(path string, v ssz.Marshaler) error {

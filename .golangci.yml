@@ -90,10 +90,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          cl/persistence/blob_storage\
-          |cl/persistence/state\
-          |cl/persistence/state/historical_states_reader\
-          |cl/rpc\
+          cl/rpc\
           |cl/sentinel\
           |cl/sentinel/communication/ssz_snappy\
           |cl/sentinel/handlers\
