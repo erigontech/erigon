@@ -127,6 +127,7 @@ type peerAndBlocks struct {
 var (
 	forwardBeaconRequestInterval = 300 * time.Millisecond
 	forwardBeaconRequestTimeout  = 30 * time.Second
+	forwardBeaconProbeTimeout    = 21 * time.Second
 	forwardBeaconFallbackDelay   = 5 * time.Second
 	forwardBeaconResponsePoll    = 10 * time.Millisecond
 )
@@ -149,7 +150,7 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 		if f.highestSlotProcessed != sampledHighestSlot || len(atomicResp.Load().(peerAndBlocks).blocks) > 0 {
 			return false
 		}
-		log.Debug("[ForwardBeaconDownloader] P2P failed, fetched blocks from beacon API",
+		log.Debug("[ForwardBeaconDownloader] fetched blocks from beacon API",
 			"fromSlot", httpStart, "count", len(blocks))
 		f.httpPreferred.Store(true)
 		atomicResp.Store(peerAndBlocks{
@@ -262,7 +263,9 @@ func (f *ForwardBeaconDownloader) RequestMore(ctx context.Context) {
 					if time.Since(highestSlotUpdateTime) > 90*time.Second {
 						log.Trace("Forward beacon downloader gets stuck", "time", time.Since(highestSlotUpdateTime).Seconds(), "highestSlotProcessed", highestSlotProcessed)
 					}
-					responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(probeCtx, reqSlot, reqCount)
+					attemptCtx, cancelAttempt := context.WithTimeout(probeCtx, forwardBeaconProbeTimeout)
+					responses, peerId, err := f.rpc.SendBeaconBlocksByRangeReq(attemptCtx, reqSlot, reqCount)
+					cancelAttempt()
 					if probeCtx.Err() != nil {
 						return
 					}

@@ -17,6 +17,7 @@
 package network
 
 import (
+	"bytes"
 	"context"
 	"net/http"
 	"net/http/httptest"
@@ -31,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/rpc"
+	"github.com/erigontech/erigon/cl/sentinel/communication/ssz_snappy"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/node/gointerfaces/sentinelproto"
@@ -44,6 +46,39 @@ type countingBlockingSentinel struct {
 	drained   chan struct{}
 	overOnce  sync.Once
 	drainOnce sync.Once
+}
+
+type rotatingProbeSentinel struct {
+	sentinelproto.SentinelClient
+	response   []byte
+	calls      atomic.Int32
+	active     atomic.Int32
+	maximum    atomic.Int32
+	canceled   chan struct{}
+	cancelOnce sync.Once
+}
+
+func (s *rotatingProbeSentinel) SendRequest(ctx context.Context, _ *sentinelproto.RequestData, _ ...grpc.CallOption) (*sentinelproto.ResponseData, error) {
+	call := s.calls.Add(1)
+	active := s.active.Add(1)
+	defer s.active.Add(-1)
+	for {
+		maximum := s.maximum.Load()
+		if active <= maximum || s.maximum.CompareAndSwap(maximum, active) {
+			break
+		}
+	}
+	if call <= 2 {
+		<-ctx.Done()
+		if call == 2 {
+			s.cancelOnce.Do(func() { close(s.canceled) })
+		}
+		return nil, ctx.Err()
+	}
+	return &sentinelproto.ResponseData{
+		Data: s.response,
+		Peer: &sentinelproto.Peer{Pid: "healthy-peer"},
+	}, nil
 }
 
 func newCountingBlockingSentinel() *countingBlockingSentinel {
@@ -187,6 +222,69 @@ func TestForwardRequestMoreBoundsActiveProbes(t *testing.T) {
 		t.Fatal("active probes did not drain after the request window closed")
 	}
 	require.LessOrEqual(t, sentinel.maximum.Load(), int32(2))
+	require.Zero(t, sentinel.active.Load())
+}
+
+func TestForwardRequestMoreRotatesSlowP2PProbes(t *testing.T) {
+	previousInterval := forwardBeaconRequestInterval
+	previousTimeout := forwardBeaconRequestTimeout
+	previousProbeTimeout := forwardBeaconProbeTimeout
+	previousResponsePoll := forwardBeaconResponsePoll
+	forwardBeaconRequestInterval = 3 * time.Millisecond
+	forwardBeaconRequestTimeout = 300 * time.Millisecond
+	forwardBeaconProbeTimeout = 210 * time.Millisecond
+	forwardBeaconResponsePoll = time.Millisecond
+	t.Cleanup(func() {
+		forwardBeaconRequestInterval = previousInterval
+		forwardBeaconRequestTimeout = previousTimeout
+		forwardBeaconProbeTimeout = previousProbeTimeout
+		forwardBeaconResponsePoll = previousResponsePoll
+	})
+
+	cfg := clparams.MainnetBeaconConfig
+	cfg.InitializeForkSchedule()
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix()), common.Hash{}, &cfg)
+	digest, err := clock.ComputeForkDigest(cfg.GenesisEpoch)
+	require.NoError(t, err)
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.Phase0Version)
+	block.Block.Slot = 1
+	var response bytes.Buffer
+	require.NoError(t, ssz_snappy.EncodeAndWrite(&response, block, digest[:]...))
+
+	sentinel := &rotatingProbeSentinel{response: response.Bytes(), canceled: make(chan struct{})}
+	ctx, cancel := context.WithCancel(t.Context())
+	defer cancel()
+	rpcClient := rpc.NewBeaconRpcP2P(ctx, sentinel, &cfg, clock, nil)
+	downloader := NewForwardBeaconDownloader(ctx, rpcClient, &cfg)
+	processed := make(chan int, 1)
+	var processOnce sync.Once
+	downloader.SetProcessFunction(func(highest uint64, blocks []*cltypes.SignedBeaconBlock, _ map[common.Hash]*cltypes.SignedExecutionPayloadEnvelope) (uint64, error) {
+		processOnce.Do(func() { processed <- len(blocks) })
+		return highest, nil
+	})
+
+	done := make(chan struct{})
+	go func() {
+		downloader.RequestMore(ctx)
+		close(done)
+	}()
+
+	select {
+	case blockCount := <-processed:
+		require.Equal(t, 1, blockCount)
+	case <-done:
+		t.Fatal("request window ended before a healthy probe was processed")
+	case <-time.After(time.Second):
+		t.Fatal("healthy probe was not processed")
+	}
+	select {
+	case <-sentinel.canceled:
+	case <-time.After(time.Second):
+		t.Fatal("slow probes were not canceled before the request window ended")
+	}
+	<-done
+	require.GreaterOrEqual(t, sentinel.calls.Load(), int32(3))
+	require.LessOrEqual(t, sentinel.maximum.Load(), int32(maxConcurrentForwardBeaconRequests))
 	require.Zero(t, sentinel.active.Load())
 }
 
