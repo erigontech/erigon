@@ -178,28 +178,29 @@ func (a *ApiHandler) PostEthV1ValidatorDutiesPtc(w http.ResponseWriter, r *http.
 
 // ---- Payload Attestation Data ----
 
-// payloadAttestationDataResponse matches the PayloadAttestationData spec type.
-type payloadAttestationDataResponse struct {
-	BeaconBlockRoot   common.Hash `json:"beacon_block_root"`
-	Slot              uint64      `json:"slot,string"`
-	PayloadPresent    bool        `json:"payload_present"`
-	BlobDataAvailable bool        `json:"blob_data_available"`
-}
-
 // GetEthV1ValidatorPayloadAttestationData returns PayloadAttestationData for PTC validators.
-// GET /eth/v1/validator/payload_attestation_data/{slot}
+// GET /eth/v1/validator/payload_attestation_data?slot={slot}
 // [New in Gloas:EIP7732]
 func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
+	if a.syncedData.Syncing() {
+		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("beacon node is syncing"))
+	}
 	slotStr, err := beaconhttp.StringFromRequest(r, "slot")
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
+	}
+	if slotStr == "" {
+		slotValues, ok := r.URL.Query()["slot"]
+		if !ok || len(slotValues) != 1 || slotValues[0] == "" {
+			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, errors.New("slot query parameter is required exactly once"))
+		}
+		slotStr = slotValues[0]
 	}
 	slot, err := strconv.ParseUint(slotStr, 10, 64)
 	if err != nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusBadRequest,
 			fmt.Errorf("invalid slot: %w", err))
 	}
-
 	// Must be GLOAS epoch
 	if a.beaconChainCfg.SlotsPerEpoch == 0 {
 		return nil, beaconhttp.NewEndpointError(http.StatusServiceUnavailable, errors.New("slots per epoch is zero"))
@@ -211,15 +212,14 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 	}
 
 	// Get the beacon block root for this slot from fork choice
-	headRoot, headSlot, _, err := a.getSelectedHead()
+	headRoot, headSlot, statusCode, err := a.getSelectedHead()
 	if err != nil {
-		return nil, err
+		return nil, beaconhttp.NewEndpointError(statusCode, err)
 	}
 
 	// The PTC attests to the current slot's block
 	if slot != headSlot {
-		return nil, beaconhttp.NewEndpointError(http.StatusNotFound,
-			fmt.Errorf("payload attestation data only available for head slot %d, requested %d", headSlot, slot))
+		return beaconhttp.NewNoContentResponse(), nil
 	}
 
 	// Check payload status: has the execution payload envelope been received?
@@ -231,7 +231,7 @@ func (a *ApiHandler) GetEthV1ValidatorPayloadAttestationData(w http.ResponseWrit
 	// (b) all local custody columns are present per PeerDAS.
 	blobDataAvailable := a.forkchoiceStore.IsBlobDataAvailable(slot, headRoot)
 
-	return newBeaconResponse(payloadAttestationDataResponse{
+	return newBeaconResponse(&cltypes.PayloadAttestationData{
 		BeaconBlockRoot:   headRoot,
 		Slot:              slot,
 		PayloadPresent:    payloadPresent,
