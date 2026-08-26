@@ -3057,16 +3057,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// and prior-block storage that vm.StorageKeys doesn't see.
 					var domainKeysErr error
 					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-						av := addr.Value()
-						const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
-						var keys []accounts.StorageKey
-						if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-							if len(k) >= addrLen+hashLen {
-								keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-							}
-							return true, nil
-						}); iterErr != nil {
-							domainKeysErr = iterErr
+						keys, err := state.CommittedStorageKeys(pe.rs.Domains(), applyTx, addr)
+						if err != nil {
+							domainKeysErr = err
 							return nil
 						}
 						return keys
@@ -3328,16 +3321,9 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// redundant.
 				var domainKeysErr error
 				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := pe.rs.Domains().IteratePrefix(kv.StorageDomain, av[:], applyTx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
+					keys, err := state.CommittedStorageKeys(pe.rs.Domains(), applyTx, addr)
+					if err != nil {
+						domainKeysErr = err
 						return nil
 					}
 					return keys

@@ -575,16 +575,9 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				blockNum := b.header.Number.Uint64()
 				var domainKeysErr error
 				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					av := addr.Value()
-					const addrLen, hashLen = 20, 32
-					var keys []accounts.StorageKey
-					if iterErr := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
-						if len(k) >= addrLen+hashLen {
-							keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
-						}
-						return true, nil
-					}); iterErr != nil {
-						domainKeysErr = iterErr
+					keys, err := state.CommittedStorageKeys(domains, tx, addr)
+					if err != nil {
+						domainKeysErr = err
 						return nil
 					}
 					return keys

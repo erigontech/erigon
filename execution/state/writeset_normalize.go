@@ -19,7 +19,10 @@ package state
 import (
 	"github.com/holiman/uint256"
 
+	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/accounts"
@@ -487,4 +490,35 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 	}
 
 	return filtered, nil
+}
+
+// CommittedStorageKeys returns every storage slot committed for addr, the
+// domainStorageKeys input Normalize needs to emit a full self-destruct cascade.
+//
+// An address with no committed account holds no committed storage: storage is
+// only written for an account that exists, and deleting an account wipes its
+// storage prefix. So probe the account first -- that read is served by the
+// per-file existence filters, while the prefix walk has to seek the .bt index of
+// every storage .kv file, paying the same price whether the address owns a
+// thousand slots or none.
+func CommittedStorageKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, addr accounts.Address) ([]accounts.StorageKey, error) {
+	av := addr.Value()
+	prevAcc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
+	if err != nil {
+		return nil, err
+	}
+	if len(prevAcc) == 0 {
+		return nil, assertNoCommittedStorage(domains, tx, av[:])
+	}
+	const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash
+	var keys []accounts.StorageKey
+	if err := domains.IteratePrefix(kv.StorageDomain, av[:], tx, func(k, _ []byte) (bool, error) {
+		if len(k) >= addrLen+hashLen {
+			keys = append(keys, accounts.InternKey(common.BytesToHash(k[addrLen:addrLen+hashLen])))
+		}
+		return true, nil
+	}); err != nil {
+		return nil, err
+	}
+	return keys, nil
 }

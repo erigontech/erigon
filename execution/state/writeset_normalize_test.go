@@ -8,6 +8,8 @@ import (
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
@@ -254,4 +256,57 @@ func TestAssertSelfDestructNormalized(t *testing.T) {
 		})
 		ws.assertSelfDestructNormalized()
 	}, "balance and storage deletes are legal on a self-destructed address")
+}
+
+// TestCommittedStorageKeys pins the account probe that guards the self-destruct
+// storage walk. The walk seeks the .bt index of every storage .kv file, so its
+// cost is set by the file count rather than by how much storage the address
+// owns -- an address that owns none pays full price. A contract created and
+// destroyed inside one batch never has a committed account, which is what makes
+// the probe worth its own read.
+func TestCommittedStorageKeys(t *testing.T) {
+	_, tx, domains := NewTestRwTx(t)
+	slot := common.HexToHash("0x01")
+
+	putStorage := func(t *testing.T, addr accounts.Address) {
+		t.Helper()
+		av := addr.Value()
+		key := append(append([]byte{}, av[:]...), slot[:]...)
+		require.NoError(t, domains.DomainPut(kv.StorageDomain, tx, key, []byte{0x42}, 0, nil))
+	}
+
+	t.Run("walks when the account is committed", func(t *testing.T) {
+		addr := accounts.InternAddress(common.HexToAddress("0xaa"))
+		av := addr.Value()
+		acc := accounts.Account{Nonce: 1, CodeHash: accounts.EmptyCodeHash}
+		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), 0, nil))
+		putStorage(t, addr)
+
+		keys, err := CommittedStorageKeys(domains, tx, addr)
+		require.NoError(t, err)
+		require.Equal(t, []accounts.StorageKey{accounts.InternKey(slot)}, keys)
+	})
+
+	t.Run("skips the walk without a committed account", func(t *testing.T) {
+		// Storage with no account is the state the guard treats as unreachable.
+		// Writing it is what makes the skip observable: a walk would return it.
+		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+		dbg.AssertEnabled = false
+		addr := accounts.InternAddress(common.HexToAddress("0xbb"))
+		putStorage(t, addr)
+
+		keys, err := CommittedStorageKeys(domains, tx, addr)
+		require.NoError(t, err)
+		require.Empty(t, keys, "walked the storage prefix for an address with no committed account")
+	})
+
+	t.Run("asserts on storage without an account", func(t *testing.T) {
+		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+		dbg.AssertEnabled = true
+		addr := accounts.InternAddress(common.HexToAddress("0xcc"))
+		putStorage(t, addr)
+
+		require.Panics(t, func() { _, _ = CommittedStorageKeys(domains, tx, addr) },
+			"the skip rests on this invariant, so breaking it must not stay silent")
+	})
 }
