@@ -1150,17 +1150,17 @@ func TestBufferBoundedForEveryWriter(t *testing.T) {
 	}
 }
 
-// TestJsoniterStreamBoundsBuffer pins that the wrapper without the stack drains
-// on every writer too. WriteRawBytes carries the largest payloads a response
-// has, so a bound that skipped it would not be a bound.
-func TestJsoniterStreamBoundsBuffer(t *testing.T) {
-	for name, write := range map[string]func(s *JsoniterStream, i int){
-		"raw bytes": func(s *JsoniterStream, _ int) { s.WriteRawBytes(bytes.Repeat([]byte("x"), 4096)) },
-		"numbers":   func(s *JsoniterStream, i int) { s.WriteInt64(int64(i)); s.WriteMore() },
+// TestStackStreamBoundsBuffer pins that every writer drains, not just the string
+// ones. WriteRawBytes carries the largest payloads a response has, so a bound
+// that skipped it would not be a bound.
+func TestStackStreamBoundsBuffer(t *testing.T) {
+	for name, write := range map[string]func(s *StackStream, i int){
+		"raw bytes": func(s *StackStream, _ int) { s.WriteRawBytes(bytes.Repeat([]byte("x"), 4096)) },
+		"numbers":   func(s *StackStream, i int) { s.WriteInt64(int64(i)); s.WriteMore() },
 	} {
 		t.Run(name, func(t *testing.T) {
 			var out bytes.Buffer
-			s := NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, &out, InitialBufferSize))
+			s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &out, InitialBufferSize))
 
 			peak := 0
 			for i := range 100_000 {

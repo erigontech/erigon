@@ -25,8 +25,7 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
-// Benchmark tests comparing the performance of JsoniterStream (thin jsoniter.Stream wrapper) and StackStream
-// Both implementations use the common Stream interface
+// Benchmarks for StackStream, the only Stream implementation.
 
 func newStream() *jsoniter.Stream {
 	return jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
@@ -49,10 +48,6 @@ func benchmarkSimpleObject(b *testing.B, s Stream) {
 		err = s.Flush()
 		assert.NoError(b, err)
 	}
-}
-
-func BenchmarkSimpleObject_JsoniterStream(b *testing.B) {
-	benchmarkSimpleObject(b, NewJsoniterStream(newStream()))
 }
 
 func BenchmarkSimpleObject_StackStream(b *testing.B) {
@@ -90,10 +85,6 @@ func benchmarkNestedStructure(b *testing.B, s Stream) {
 	}
 }
 
-func BenchmarkNestedStructure_JsoniterStream(b *testing.B) {
-	benchmarkNestedStructure(b, NewJsoniterStream(newStream()))
-}
-
 func BenchmarkNestedStructure_StackStream(b *testing.B) {
 	benchmarkNestedStructure(b, NewStackStream(newStream()))
 }
@@ -116,10 +107,6 @@ func benchmarkLargeArray(b *testing.B, s Stream) {
 		err = s.Flush()
 		assert.NoError(b, err)
 	}
-}
-
-func BenchmarkLargeArray_JsoniterStream(b *testing.B) {
-	benchmarkLargeArray(b, NewJsoniterStream(newStream()))
 }
 
 func BenchmarkLargeArray_StackStream(b *testing.B) {
@@ -154,10 +141,6 @@ func benchmarkMixedTypes(b *testing.B, s Stream) {
 	}
 }
 
-func BenchmarkMixedTypes_JsoniterStream(b *testing.B) {
-	benchmarkMixedTypes(b, NewJsoniterStream(newStream()))
-}
-
 func BenchmarkMixedTypes_StackStream(b *testing.B) {
 	benchmarkMixedTypes(b, NewStackStream(newStream()))
 }
@@ -183,10 +166,6 @@ func benchmarkWriteToBuffer(b *testing.B, s Stream) {
 	}
 }
 
-func BenchmarkWriteToBuffer_JsoniterStream(b *testing.B) {
-	benchmarkWriteToBuffer(b, NewJsoniterStream(newStream()))
-}
-
 func BenchmarkWriteToBuffer_StackStream(b *testing.B) {
 	benchmarkWriteToBuffer(b, NewStackStream(newStream()))
 }
@@ -210,10 +189,6 @@ func benchmarkIncompleteStructure(b *testing.B, s Stream) {
 		err := s.Flush()
 		assert.NoError(b, err)
 	}
-}
-
-func BenchmarkIncompleteStructure_JsoniterStream(b *testing.B) {
-	benchmarkIncompleteStructure(b, NewJsoniterStream(newStream()))
 }
 
 func BenchmarkIncompleteStructure_StackStream(b *testing.B) {
