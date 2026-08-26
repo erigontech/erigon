@@ -30,6 +30,7 @@ import (
 	"github.com/c2h5oh/datasize"
 
 	"github.com/erigontech/erigon/common/dbg"
+	"github.com/erigontech/erigon/common/log/v3"
 )
 
 const (
@@ -124,13 +125,19 @@ var dataChunks = sync.Pool{New: func() any {
 	return &c
 }}
 
-func getDataChunk() []byte { return *dataChunks.Get().(*[]byte) }
+func getDataChunk() *[]byte { return dataChunks.Get().(*[]byte) }
 
-func putDataChunk(c []byte) {
-	if len(c) != dataChunkSize { // private chunk of an oversized entry
+// putDataChunk hands back the same pointer the pool issued, so recycling a
+// chunk allocates nothing.
+func putDataChunk(c *[]byte) {
+	if len(*c) != dataChunkSize {
+		// A private chunk nextChunk sized to one oversized entry: pooling it
+		// would hand a wrong-sized chunk to the next taker, so it is dropped
+		// and re-allocated next time such an entry appears.
+		log.Warn("[etl] dropping oversized buffer chunk", "size", len(*c), "chunkSize", dataChunkSize)
 		return
 	}
-	dataChunks.Put(&c)
+	dataChunks.Put(c)
 }
 
 type Buffer interface {
@@ -185,8 +192,11 @@ type sortableBuffer struct {
 	// slice keeps Put from re-allocating and copying everything collected so
 	// far. All chunks are dataChunkSize, except the private chunk an entry
 	// larger than that gets. cur is the chunk being filled.
-	chunks      [][]byte
+	chunks []*[]byte
+	// cur is the chunk being filled; curChunk is the pool's own pointer to it,
+	// handed straight back on Reset so recycling allocates nothing.
 	cur         []byte
+	curChunk    *[]byte
 	curBase     int32 // packed location of cur's first byte: curIdx<<dataChunkBits
 	curOff      int32
 	chunkBytes  int
@@ -200,11 +210,13 @@ func (b *sortableBuffer) nextChunk(n int) {
 		panic(fmt.Sprintf("etl: sortableBuffer exceeded %d chunks", maxDataChunks))
 	}
 	if n > dataChunkSize {
-		b.cur = make([]byte, n)
+		private := make([]byte, n)
+		b.curChunk = &private
 	} else {
-		b.cur = getDataChunk()
+		b.curChunk = getDataChunk()
 	}
-	b.chunks = append(b.chunks, b.cur)
+	b.cur = *b.curChunk
+	b.chunks = append(b.chunks, b.curChunk)
 	b.curBase = int32(len(b.chunks)-1) << dataChunkBits //nolint:gosec
 	b.curOff = 0
 	b.chunkBytes += len(b.cur)
@@ -212,7 +224,7 @@ func (b *sortableBuffer) nextChunk(n int) {
 
 // entryData returns e's bytes: the key, immediately followed by the value.
 func (b *sortableBuffer) entryData(e *entryLoc) []byte {
-	return b.chunks[e.offset>>dataChunkBits][e.offset&(dataChunkSize-1):]
+	return (*b.chunks[e.offset>>dataChunkBits])[e.offset&(dataChunkSize-1):]
 }
 
 // Put adds key and value to the buffer. These slices will not be accessed later,
@@ -295,7 +307,7 @@ func (b *sortableBuffer) Reset() {
 		b.chunks[i] = nil
 	}
 	b.chunks = b.chunks[:0]
-	b.cur, b.curBase, b.curOff = nil, 0, 0
+	b.cur, b.curChunk, b.curBase, b.curOff = nil, nil, 0, 0
 	b.chunkBytes = 0
 }
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
@@ -306,7 +318,7 @@ func (b *sortableBuffer) Sort() {
 			return nil
 		}
 		off := e.offset & (dataChunkSize - 1)
-		return chunks[e.offset>>dataChunkBits][off : off+e.keyLen]
+		return (*chunks[e.offset>>dataChunkBits])[off : off+e.keyLen]
 	}
 	cmp := func(a, b entryLoc) int {
 		if c := bytes.Compare(key(a), key(b)); c != 0 {
