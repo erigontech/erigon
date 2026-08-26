@@ -58,7 +58,7 @@ func TestWriteFinalizedStateFile_RoundTrip(t *testing.T) {
 }
 
 func TestWriteFinalizedStateFile_RestoresGloasStateRoot(t *testing.T) {
-	beaconCfg, st := newGloasFinalizedState()
+	beaconCfg, st := newGloasFinalizedState(t)
 	authoritativeRoot := common.Hash{0xaa}
 	st.SetPreviousStateRoot(authoritativeRoot)
 	wantBlockRoot, err := st.BlockRoot()
@@ -75,7 +75,7 @@ func TestWriteFinalizedStateFile_RestoresGloasStateRoot(t *testing.T) {
 }
 
 func TestReadFinalizedGloasStateWithoutRootRejectsUnsafeResume(t *testing.T) {
-	beaconCfg, st := newGloasFinalizedState()
+	beaconCfg, st := newGloasFinalizedState(t)
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, os.MkdirAll(dirs.CaplinLatest, 0o755))
 	encoded, err := utils.EncodeSSZSnappy(st)
@@ -89,7 +89,7 @@ func TestReadFinalizedGloasStateWithoutRootRejectsUnsafeResume(t *testing.T) {
 }
 
 func TestReadFinalizedGloasStateRejectsCorruptRootRecord(t *testing.T) {
-	beaconCfg, st := newGloasFinalizedState()
+	beaconCfg, st := newGloasFinalizedState(t)
 	dirs := datadir.New(t.TempDir())
 	require.NoError(t, writeFinalizedStateFile(dirs, st))
 	encoded, err := os.ReadFile(filepath.Join(dirs.CaplinLatest, clparams.LatestFinalizedStateFileName))
@@ -105,12 +105,12 @@ func TestReadFinalizedGloasStateRejectsCorruptRootRecord(t *testing.T) {
 }
 
 func TestReadFinalizedStateRejectsRootRecordFromDifferentState(t *testing.T) {
-	beaconCfg, stateA := newGloasFinalizedState()
+	beaconCfg, stateA := newGloasFinalizedState(t)
 	dirsA := datadir.New(t.TempDir())
 	dirsB := datadir.New(t.TempDir())
 	stateB, err := stateA.Copy()
 	require.NoError(t, err)
-	stateB.SetSlot(stateA.Slot() + 1)
+	require.NoError(t, stateB.SetSlot(stateA.Slot()+1))
 	stateA.SetPreviousStateRoot(common.Hash{1})
 	stateB.SetPreviousStateRoot(common.Hash{2})
 	require.NoError(t, writeFinalizedStateFile(dirsA, stateA))
@@ -127,7 +127,8 @@ func TestReadFinalizedStateRejectsRootRecordFromDifferentState(t *testing.T) {
 	require.ErrorContains(t, err, "invalid finalized state root checksum")
 }
 
-func newGloasFinalizedState() (*clparams.BeaconChainConfig, *state.CachingBeaconState) {
+func newGloasFinalizedState(t *testing.T) (*clparams.BeaconChainConfig, *state.CachingBeaconState) {
+	t.Helper()
 	beaconCfg := clparams.MainnetBeaconConfig
 	beaconCfg.AltairForkEpoch = 0
 	beaconCfg.BellatrixForkEpoch = 0
@@ -138,7 +139,7 @@ func newGloasFinalizedState() (*clparams.BeaconChainConfig, *state.CachingBeacon
 	beaconCfg.GloasForkEpoch = 0
 	st := state.New(&beaconCfg)
 	st.SetVersion(clparams.GloasVersion)
-	st.SetSlot(64)
+	require.NoError(t, st.SetSlot(64))
 	st.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: 64})
 	return &beaconCfg, st
 }

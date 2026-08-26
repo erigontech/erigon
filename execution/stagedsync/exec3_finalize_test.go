@@ -1626,6 +1626,104 @@ func TestCalcFees_EmitsAddressPathForCoinbase(t *testing.T) {
 		"AddressPath sibling must share version with the BalancePath write")
 }
 
+// An invalidated tx leaves an Estimate SELFDESTRUCT and its Estimate
+// BalancePath=0 sibling behind, and neither may make a zero-tip calcFees read a
+// live coinbase as EIP-161-empty. The contract arm turns on the destruct scan,
+// the balance-only arm on the balance floor.
+func TestCalcFees_EstimateDestructDoesNotPruneCoinbase(t *testing.T) {
+	t.Parallel()
+	code := []byte{0x60, 0x00}
+
+	for _, tc := range []struct {
+		name string
+		acc  *accounts.Account
+		code []byte
+	}{
+		{"contract", &accounts.Account{Nonce: 1, CodeHash: accounts.NewCode(code).Hash, Incarnation: 1}, code},
+		{"balance-only", &accounts.Account{Balance: *uint256.NewInt(5_000_000), Incarnation: 1}, nil},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			coinbase := fAddr("coinbase")
+
+			reader := newMapStateReader()
+			reader.accounts[coinbase] = tc.acc
+			reader.code[coinbase] = tc.code
+
+			header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+			version := state.Version{BlockNum: 1, TxNum: 3, TxIndex: 2}
+			txTask := &exec.TxTask{
+				Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+				Config:          chain.TestChainBerlinConfig,
+				EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+			}
+			task := &taskVersion{
+				execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+				version:  version,
+			}
+			result := &execResult{TxResult: &exec.TxResult{
+				Task:            task,
+				ExecutionResult: evmtypes.ExecutionResult{BurntContractAddress: accounts.NilAddress},
+				Coinbase:        coinbase,
+			}}
+			result.TxOut = &state.WriteSet{}
+
+			vm := state.NewVersionMap(nil)
+			destruct := state.Version{TxIndex: 1}
+			vm.WriteSelfDestruct(coinbase, destruct, true, true)
+			vm.WriteBalance(coinbase, destruct, uint256.Int{}, true)
+			vm.WriteIncarnation(coinbase, destruct, 2, true)
+			for _, path := range []state.AccountPath{state.SelfDestructPath, state.BalancePath, state.IncarnationPath} {
+				vm.MarkEstimate(coinbase, path, accounts.NilKey, destruct.TxIndex)
+			}
+
+			writes, _, err := result.calcFees(task, vm, reader, &chain.Rules{IsSpuriousDragon: true}, nil)
+			require.NoError(t, err)
+			require.True(t, writes.IsEmpty(), "a live coinbase with no tip needs no write at all")
+		})
+	}
+}
+
+// Once the destruct commits the coinbase really is gone, so the delete must be
+// emitted — the suppression above is about provisional data, not about deletes.
+func TestCalcFees_DoneDestructStillPrunesCoinbase(t *testing.T) {
+	t.Parallel()
+	coinbase := fAddr("coinbase")
+
+	reader := newMapStateReader()
+	reader.accounts[coinbase] = &accounts.Account{Balance: *uint256.NewInt(5_000_000), Incarnation: 1}
+
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+	version := state.Version{BlockNum: 1, TxNum: 3, TxIndex: 2}
+	txTask := &exec.TxTask{
+		Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+		Config:          chain.TestChainBerlinConfig,
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	task := &taskVersion{
+		execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+		version:  version,
+	}
+	result := &execResult{TxResult: &exec.TxResult{
+		Task:            task,
+		ExecutionResult: evmtypes.ExecutionResult{BurntContractAddress: accounts.NilAddress},
+		Coinbase:        coinbase,
+	}}
+	result.TxOut = &state.WriteSet{}
+
+	vm := state.NewVersionMap(nil)
+	destruct := state.Version{TxIndex: 1}
+	vm.WriteSelfDestruct(coinbase, destruct, true, true)
+	vm.WriteBalance(coinbase, destruct, uint256.Int{}, true)
+	vm.WriteIncarnation(coinbase, destruct, 2, true)
+
+	writes, _, err := result.calcFees(task, vm, reader, &chain.Rules{IsSpuriousDragon: true}, nil)
+	require.NoError(t, err)
+	sd, ok := writes.GetSelfDestruct(coinbase)
+	require.True(t, ok, "a committed destruct leaves an empty coinbase to prune")
+	require.True(t, sd.Val)
+}
+
 // feeCreditRound drives one validation round for a single tx through a real
 // blockExecutor, so the credit, the recorded set and the version map get the
 // same bookkeeping the apply loop gives them.
@@ -2005,4 +2103,44 @@ func BenchmarkCalcFees(b *testing.B) {
 			})
 		}
 	}
+}
+
+// An Estimate cell need not come from a destruct to make a live coinbase read
+// empty: an invalidated tx that only moved the balance leaves a lone Estimate
+// BalancePath=0 over a funded account, which the balance floor serves.
+func TestCalcFees_EstimateBalanceAloneDoesNotPruneCoinbase(t *testing.T) {
+	t.Parallel()
+	coinbase := fAddr("coinbase")
+
+	reader := newMapStateReader()
+	reader.accounts[coinbase] = &accounts.Account{Balance: *uint256.NewInt(5_000_000), Incarnation: 1}
+
+	header := &types.Header{Number: *uint256.NewInt(1), GasLimit: 30_000_000, GasUsed: 21000}
+	version := state.Version{BlockNum: 1, TxNum: 3, TxIndex: 2}
+	txTask := &exec.TxTask{
+		Header: header, TxNum: version.TxNum, TxIndex: version.TxIndex,
+		Config:          chain.TestChainBerlinConfig,
+		EvmBlockContext: evmtypes.BlockContext{BlockNumber: 1},
+	}
+	task := &taskVersion{
+		execTask: &execTask{Task: txTask, shouldDelayFeeCalc: true},
+		version:  version,
+	}
+	result := &execResult{TxResult: &exec.TxResult{
+		Task:            task,
+		ExecutionResult: evmtypes.ExecutionResult{BurntContractAddress: accounts.NilAddress},
+		Coinbase:        coinbase,
+	}}
+	result.TxOut = &state.WriteSet{}
+
+	vm := state.NewVersionMap(nil)
+	spend := state.Version{TxIndex: 1}
+	vm.WriteBalance(coinbase, spend, uint256.Int{}, true)
+	vm.MarkEstimate(coinbase, state.BalancePath, accounts.NilKey, spend.TxIndex)
+
+	writes, _, err := result.calcFees(task, vm, reader, &chain.Rules{IsSpuriousDragon: true}, nil)
+	require.NoError(t, err)
+	_, pruned := writes.GetSelfDestruct(coinbase)
+	require.False(t, pruned, "a funded coinbase must not be deleted on an in-flight zero balance")
+	require.True(t, writes.IsEmpty(), "a live coinbase with no tip needs no write at all")
 }

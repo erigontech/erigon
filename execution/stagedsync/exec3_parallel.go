@@ -2066,8 +2066,12 @@ func (result *execResult) calcFees(
 	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
 	// must respect those writes — otherwise SelfDestructPath is emitted
 	// and Normalize's sdSet filter drops them.
+	//
+	// A delete drawn from an in-flight incarnation is published before the round
+	// that retracts it, and read there by consumers that record no read.
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
-		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
+		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
+		!vm.AnyEstimateAccountCell(result.Coinbase, txIndex)
 	coinbaseEmptied := coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero()
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || coinbaseEmptied
 
