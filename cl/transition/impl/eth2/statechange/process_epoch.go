@@ -32,7 +32,8 @@ func GetUnslashedIndiciesSet(cfg *clparams.BeaconChainConfig, previousEpoch uint
 		flagsUnslashedIndiciesSet[i] = make([]bool, validatorSet.Length())
 	}
 
-	threading.ParallellForLoop(1, 0, validatorSet.Length(), func(validatorIndex int) error {
+	// IsUnslashedParticipatingIndex has no fallible operation, so this loop cannot error.
+	_ = threading.ParallellForLoop(1, 0, validatorSet.Length(), func(validatorIndex int) error {
 		for i := range weights {
 			flagsUnslashedIndiciesSet[i][validatorIndex] = state.IsUnslashedParticipatingIndex(validatorSet, previousEpochParticipation, previousEpoch, uint64(validatorIndex), i)
 		}
@@ -77,7 +78,9 @@ func ProcessEpoch(s abstract.BeaconState) error {
 		if err := ProcessPendingDeposits(s); err != nil {
 			return err
 		}
-		ProcessPendingConsolidations(s)
+		if err := ProcessPendingConsolidations(s); err != nil {
+			return err
+		}
 	}
 
 	if s.Version() >= clparams.GloasVersion {

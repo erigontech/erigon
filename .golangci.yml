@@ -90,11 +90,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          cl/spectest/consensus_tests\
-          |cl/transition/impl/eth2\
-          |cl/transition/impl/eth2/statechange\
-          |cl/utils/bls\
-          |cmd/capcli\
+          cmd/capcli\
           |cmd/caplin/caplin1\
           |cmd/evm\
           |cmd/evm/internal/t8ntool\

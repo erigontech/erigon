@@ -7,9 +7,10 @@ import (
 	"github.com/erigontech/erigon/common/log/v3"
 )
 
-func ProcessPendingConsolidations(s abstract.BeaconState) {
+func ProcessPendingConsolidations(s abstract.BeaconState) error {
 	nextEpoch := s.Slot()/s.BeaconConfig().SlotsPerEpoch + 1
 	nextConsolidationIndex := 0
+	var applyErr error
 	s.GetPendingConsolidations().Range(func(i int, c *solid.PendingConsolidation, length int) bool {
 		sourceValidator, err := s.ValidatorForValidatorIndex(int(c.SourceIndex))
 		if err != nil {
@@ -33,12 +34,20 @@ func ProcessPendingConsolidations(s abstract.BeaconState) {
 		}
 		sourceEffectiveBalance := min(vBalance, sourceValidator.EffectiveBalance())
 		// Move active balance to target. Excess balance is withdrawable.
-		state.DecreaseBalance(s, c.SourceIndex, sourceEffectiveBalance)
-		state.IncreaseBalance(s, c.TargetIndex, sourceEffectiveBalance)
+		if applyErr = state.DecreaseBalance(s, c.SourceIndex, sourceEffectiveBalance); applyErr != nil {
+			return false
+		}
+		if applyErr = state.IncreaseBalance(s, c.TargetIndex, sourceEffectiveBalance); applyErr != nil {
+			return false
+		}
 		nextConsolidationIndex++
 		return true
 	})
+	if applyErr != nil {
+		return applyErr
+	}
 	pendingConsolidations := s.GetPendingConsolidations().ShallowCopy()
 	pendingConsolidations.Cut(nextConsolidationIndex)
 	s.SetPendingConsolidations(pendingConsolidations)
+	return nil
 }
