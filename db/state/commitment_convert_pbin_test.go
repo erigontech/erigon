@@ -385,7 +385,7 @@ func TestConvertPBinRecordFilesRemovesOutputAfterStateFailure(t *testing.T) {
 	require.Error(t, err)
 	require.Equal(t, fixture.sourceBytes, readFileBytes(t, fixture.sourcePath))
 	assertPBinOutputRemoved(t, fixture)
-	linkPBinSourceFiles(t, fixture)
+	restagePBinOutputFromSource(t, fixture)
 	require.NoError(t, fixture.output.ReloadFiles())
 	require.NoError(t, convertPBinOutputFixture(t, fixture))
 	assertPBinOutputComplete(t, fixture)
@@ -434,7 +434,6 @@ func TestConvertPBinRecordFilesCancellationLeavesRunResumable(t *testing.T) {
 	assertPBinOutputRemoved(t, fixture)
 
 	state.SetPBinConvertPairHookForTest(nil)
-	linkPBinSourceFiles(t, fixture)
 	require.NoError(t, fixture.output.ReloadFiles())
 	require.NoError(t, convertPBinOutputFixture(t, fixture))
 	require.NoError(t, fixture.output.ReloadFiles())
@@ -590,13 +589,25 @@ func removePBinOutputAccessors(t *testing.T, fixture pbinOutputFixture) {
 	require.Positive(t, removed)
 }
 
+// A failed conversion is staged, never half-swapped: the shard the output started
+// from is still in place and nothing the run built survives.
 func assertPBinOutputRemoved(t *testing.T, fixture pbinOutputFixture) {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Dir(fixture.outputPath))
+	require.FileExists(t, fixture.outputPath, "a failed conversion must leave the shard it started from")
+	assertPBinStageDirEmpty(t, fixture)
+}
+
+func assertPBinStageDirEmpty(t *testing.T, fixture pbinOutputFixture) {
+	t.Helper()
+	stageDir := filepath.Join(fixture.output.Dirs().Tmp, "pbin_convert")
+	entries, err := os.ReadDir(stageDir)
+	if os.IsNotExist(err) {
+		return
+	}
 	require.NoError(t, err)
 	for _, entry := range entries {
 		if strings.Contains(entry.Name(), "-commitment.") {
-			require.Failf(t, "partial pbin output remains", "found %s", entry.Name())
+			require.Failf(t, "staged pbin output remains", "found %s", entry.Name())
 		}
 	}
 }
@@ -613,18 +624,29 @@ func assertPBinOutputComplete(t *testing.T, fixture pbinOutputFixture) {
 		}
 	}
 	require.Positive(t, accessors)
+	assertPBinStageDirEmpty(t, fixture)
 }
 
-func linkPBinSourceFiles(t *testing.T, fixture pbinOutputFixture) {
+// restagePBinOutputFromSource is what an operator does after a failed run: discard
+// the output's commitment shard and link it in again from the untouched source.
+func restagePBinOutputFromSource(t *testing.T, fixture pbinOutputFixture) {
 	t.Helper()
-	entries, err := os.ReadDir(filepath.Dir(fixture.sourcePath))
+	fixture.output.CloseMappedFilesForTest()
+	outputDir := filepath.Dir(fixture.outputPath)
+	entries, err := os.ReadDir(outputDir)
+	require.NoError(t, err)
+	for _, entry := range entries {
+		if strings.Contains(entry.Name(), "-commitment.") {
+			require.NoError(t, dir.RemoveFile(filepath.Join(outputDir, entry.Name())))
+		}
+	}
+	entries, err = os.ReadDir(filepath.Dir(fixture.sourcePath))
 	require.NoError(t, err)
 	for _, entry := range entries {
 		if !strings.Contains(entry.Name(), "-commitment.") {
 			continue
 		}
 		source := filepath.Join(filepath.Dir(fixture.sourcePath), entry.Name())
-		output := filepath.Join(filepath.Dir(fixture.outputPath), entry.Name())
-		require.NoError(t, os.Link(source, output))
+		require.NoError(t, os.Link(source, filepath.Join(outputDir, entry.Name())))
 	}
 }

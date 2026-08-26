@@ -210,18 +210,44 @@ func pbinFileHasLegacy(ctx context.Context, d *Domain, file *FilesItem) (bool, e
 	return false, nil
 }
 
-func commitmentOutputPaths(d *Domain, stepFrom, stepTo kv.Step) []string {
-	paths := []string{d.kvNewFilePathIn(d.dirs.SnapDomain, stepFrom, stepTo)}
+func commitmentOutputPaths(d *Domain, stepFrom, stepTo kv.Step, dirPath string) []string {
+	paths := []string{d.kvNewFilePathIn(dirPath, stepFrom, stepTo)}
 	if d.Accessors.Has(statecfg.AccessorBTree) {
-		paths = append(paths, d.kvBtAccessorNewFilePathIn(d.dirs.SnapDomain, stepFrom, stepTo))
+		paths = append(paths, d.kvBtAccessorNewFilePathIn(dirPath, stepFrom, stepTo))
 	}
 	if d.Accessors.Has(statecfg.AccessorHashMap) {
-		paths = append(paths, d.kviAccessorNewFilePathIn(d.dirs.SnapDomain, stepFrom, stepTo))
+		paths = append(paths, d.kviAccessorNewFilePathIn(dirPath, stepFrom, stepTo))
 	}
 	if d.Accessors.Has(statecfg.AccessorExistence) {
-		paths = append(paths, d.kvExistenceIdxNewFilePathIn(d.dirs.SnapDomain, stepFrom, stepTo))
+		paths = append(paths, d.kvExistenceIdxNewFilePathIn(dirPath, stepFrom, stepTo))
 	}
 	return paths
+}
+
+// pbinConvertStageDir names the directory a converted shard is built in before it
+// replaces the link in snapshots/domain. Building in place would mean unlinking a
+// file the conversion is still reading through its mmap: legal on unix, refused
+// outright on Windows.
+const pbinConvertStageDir = "pbin_convert"
+
+// swapCommitmentOutputFiles moves a staged shard over the links it replaces. The
+// caller must have dropped the mmaps on those links first.
+func swapCommitmentOutputFiles(stagePaths, finalPaths []string) error {
+	if len(stagePaths) != len(finalPaths) {
+		return fmt.Errorf("pbin convert: %d staged paths for %d output paths", len(stagePaths), len(finalPaths))
+	}
+	for i, stage := range stagePaths {
+		if _, err := os.Stat(stage); err != nil {
+			if errors.Is(err, os.ErrNotExist) {
+				continue
+			}
+			return fmt.Errorf("stat %s: %w", stage, err)
+		}
+		if err := os.Rename(stage, finalPaths[i]); err != nil {
+			return fmt.Errorf("move %s into place: %w", stage, err)
+		}
+	}
+	return nil
 }
 
 func removeCommitmentOutputFiles(paths []string) error {
@@ -289,26 +315,40 @@ func commitmentOutputComplete(paths []string) (bool, error) {
 }
 
 func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, logger log.Logger, verifySample uint64) (pairs uint64, err error) {
+	// Captured before the mmaps go: closing them leaves every VisibleFile handle
+	// pointing at a nil decompressor.
+	srcPath := file.Fullpath()
 	vf, ok := file.(visibleFile)
 	if !ok {
-		return 0, fmt.Errorf("convertPBinFile %q: VisibleFile is not state.visibleFile (got %T)", file.Fullpath(), file)
+		return 0, fmt.Errorf("convertPBinFile %q: VisibleFile is not state.visibleFile (got %T)", srcPath, file)
 	}
 	if vf.src == nil || vf.src.decompressor == nil {
-		return 0, fmt.Errorf("convertPBinFile %q: source has no decompressor", file.Fullpath())
+		return 0, fmt.Errorf("convertPBinFile %q: source has no decompressor", srcPath)
 	}
 
 	d := at.d[kv.CommitmentDomain].d
 	stepSize := at.StepSize()
 	stepFrom, stepTo := kv.Step(file.StartRootNum()/stepSize), kv.Step(file.EndRootNum()/stepSize)
 	outputPath := d.kvNewFilePathIn(d.dirs.SnapDomain, stepFrom, stepTo)
-	if filepath.Base(outputPath) != filepath.Base(file.Fullpath()) {
-		return 0, fmt.Errorf("convertPBinFile %q: output basename %q does not match source basename %q", file.Fullpath(), filepath.Base(outputPath), filepath.Base(file.Fullpath()))
+	if filepath.Base(outputPath) != filepath.Base(srcPath) {
+		return 0, fmt.Errorf("convertPBinFile %q: output basename %q does not match source basename %q", srcPath, filepath.Base(outputPath), filepath.Base(srcPath))
 	}
-	paths := commitmentOutputPaths(d, stepFrom, stepTo)
-	cleanupOutput := true
+	stageDir := filepath.Join(d.dirs.Tmp, pbinConvertStageDir)
+	if err := os.MkdirAll(stageDir, 0o755); err != nil {
+		return 0, fmt.Errorf("convertPBinFile %q: create staging dir: %w", srcPath, err)
+	}
+	stagePath := d.kvNewFilePathIn(stageDir, stepFrom, stepTo)
+	stagePaths := commitmentOutputPaths(d, stepFrom, stepTo, stageDir)
+	paths := commitmentOutputPaths(d, stepFrom, stepTo, d.dirs.SnapDomain)
+	swapped := false
 	defer func() {
-		if cleanupOutput {
-			if cleanupErr := removeCommitmentOutputFiles(paths); cleanupErr != nil && err == nil {
+		if cleanupErr := removeCommitmentOutputFiles(stagePaths); cleanupErr != nil && err == nil {
+			err = cleanupErr
+		}
+		// Until the swap the output still holds the source links, and those are
+		// what a resumed run reconverts from; only a half-done swap has to go.
+		if err != nil && swapped {
+			if cleanupErr := removeCommitmentOutputFiles(paths); cleanupErr != nil {
 				err = cleanupErr
 			}
 		}
@@ -316,31 +356,26 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 
 	hasLegacy, err := pbinFileHasLegacy(ctx, d, vf.src)
 	if err != nil {
-		return 0, fmt.Errorf("convertPBinFile %q: classify: %w", file.Fullpath(), err)
+		return 0, fmt.Errorf("convertPBinFile %q: classify: %w", srcPath, err)
 	}
 	if !hasLegacy {
 		complete, err := commitmentOutputComplete(paths)
 		if err != nil {
-			return 0, fmt.Errorf("convertPBinFile %q: check output: %w", file.Fullpath(), err)
+			return 0, fmt.Errorf("convertPBinFile %q: check output: %w", srcPath, err)
 		}
 		if complete {
-			cleanupOutput = false
 			return 0, errSkip
 		}
 	}
 	sourceWords := vf.src.decompressor.Count()
 	if sourceWords%2 != 0 {
-		return 0, fmt.Errorf("convertPBinFile %q: source has an odd word count %d", file.Fullpath(), sourceWords)
+		return 0, fmt.Errorf("convertPBinFile %q: source has an odd word count %d", srcPath, sourceWords)
 	}
 	sourcePairs := uint64(sourceWords / 2)
 
-	if err := removeCommitmentOutputFiles(paths); err != nil {
-		return 0, err
-	}
-
-	comp, err := seg.NewCompressor(ctx, "pbin_convert", outputPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, logger)
+	comp, err := seg.NewCompressor(ctx, "pbin_convert", stagePath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, logger)
 	if err != nil {
-		return 0, fmt.Errorf("convertPBinFile %q: create compressor: %w", file.Fullpath(), err)
+		return 0, fmt.Errorf("convertPBinFile %q: create compressor: %w", srcPath, err)
 	}
 	compOwned := true
 	defer func() {
@@ -358,7 +393,7 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 	for reader.HasNext() {
 		key, _ = reader.Next(key[:0])
 		if !reader.HasNext() {
-			return pairs, fmt.Errorf("convertPBinFile %q: truncated at pair %d (value missing)", file.Fullpath(), pairs)
+			return pairs, fmt.Errorf("convertPBinFile %q: truncated at pair %d (value missing)", srcPath, pairs)
 		}
 		value, _ = reader.Next(value[:0])
 		if pbinConvertPairHook != nil {
@@ -397,13 +432,13 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 			outputValue = append([]byte(nil), value...)
 		}
 		if err != nil {
-			return pairs, fmt.Errorf("convertPBinFile %q: pair %d key=%x: %w", file.Fullpath(), pairs, key, err)
+			return pairs, fmt.Errorf("convertPBinFile %q: pair %d key=%x: %w", srcPath, pairs, key, err)
 		}
 		if _, err = writer.Write(key); err != nil {
-			return pairs, fmt.Errorf("convertPBinFile %q: write key at pair %d: %w", file.Fullpath(), pairs, err)
+			return pairs, fmt.Errorf("convertPBinFile %q: write key at pair %d: %w", srcPath, pairs, err)
 		}
 		if _, err = writer.Write(outputValue); err != nil {
-			return pairs, fmt.Errorf("convertPBinFile %q: write value at pair %d: %w", file.Fullpath(), pairs, err)
+			return pairs, fmt.Errorf("convertPBinFile %q: write value at pair %d: %w", srcPath, pairs, err)
 		}
 		pairs++
 		select {
@@ -413,24 +448,34 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 		}
 	}
 
-	coll := Collation{valuesComp: comp, valuesPath: outputPath, valuesCount: comp.Count() / 2}
+	coll := Collation{valuesComp: comp, valuesPath: stagePath, valuesCount: comp.Count() / 2}
 	if err := verifyPBinPairCount(sourcePairs, coll.valuesComp.Count()); err != nil {
-		return pairs, fmt.Errorf("convertPBinFile %q: %w", file.Fullpath(), err)
+		return pairs, fmt.Errorf("convertPBinFile %q: %w", srcPath, err)
 	}
-	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, background.NewProgressSet(), d.dirs.SnapDomain)
+	static, err := d.buildFileRange(ctx, stepFrom, stepTo, coll, background.NewProgressSet(), stageDir)
 	compOwned = false
 	if err != nil {
-		return pairs, fmt.Errorf("convertPBinFile %q: build output: %w", file.Fullpath(), err)
+		return pairs, fmt.Errorf("convertPBinFile %q: build output: %w", srcPath, err)
 	}
+	// Releases the handles buildFileRange left open; the staged files cannot be
+	// moved while they are held.
 	static.CleanupOnError()
 	if pbinConvertAfterBuildHook != nil {
-		pbinConvertAfterBuildHook(outputPath)
+		pbinConvertAfterBuildHook(stagePath)
 	}
-	if err := verifyPBinSamples(ctx, d, outputPath, samples); err != nil {
-		return pairs, fmt.Errorf("convertPBinFile %q: %w", file.Fullpath(), err)
+	if err := verifyPBinSamples(ctx, d, stagePath, samples); err != nil {
+		return pairs, fmt.Errorf("convertPBinFile %q: %w", srcPath, err)
 	}
-	cleanupOutput = false
-	logger.Info("[pbin_convert] converted", "file", filepath.Base(file.Fullpath()), "pairs", pairs)
+
+	vf.src.closeFiles()
+	swapped = true
+	if err := removeCommitmentOutputFiles(paths); err != nil {
+		return pairs, fmt.Errorf("convertPBinFile %q: %w", srcPath, err)
+	}
+	if err := swapCommitmentOutputFiles(stagePaths, paths); err != nil {
+		return pairs, fmt.Errorf("convertPBinFile %q: %w", srcPath, err)
+	}
+	logger.Info("[pbin_convert] converted", "file", filepath.Base(srcPath), "pairs", pairs)
 	return pairs, nil
 }
 
@@ -447,10 +492,14 @@ func ConvertPBinRecordFiles(ctx context.Context, at *AggregatorRoTx, logger log.
 		return nil
 	}
 
-	for _, file := range files {
+	names := make([]string, len(files))
+	for i, file := range files {
+		names[i] = filepath.Base(file.Fullpath())
+	}
+	for i, file := range files {
 		if _, err := convertPBinFile(ctx, at, file, logger, sampleStride); err != nil {
 			if errors.Is(err, errSkip) {
-				logger.Info("[pbin_convert] already current", "file", filepath.Base(file.Fullpath()))
+				logger.Info("[pbin_convert] already current", "file", names[i])
 				continue
 			}
 			return err
