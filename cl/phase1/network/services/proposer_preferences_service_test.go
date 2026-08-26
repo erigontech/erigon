@@ -290,7 +290,11 @@ func TestProposerPreferencesServiceEmitsEvent(t *testing.T) {
 
 func TestProposerPreferencesServiceProgressesWhileEventFeedIsBlocked(t *testing.T) {
 	ctrl := gomock.NewController(t)
-	service, _, _, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
+	service, _, _, epbsPool, forkChoice := setupProposerPreferencesService(t, ctrl)
+	validationState := forkChoice.StateAtBlockRootVal[testDependentRoot]
+	forkChoice.GetStateAtBlockRootFn = func(common.Hash, bool) (*state2.CachingBeaconState, error) {
+		return validationState, nil
+	}
 	emitter := beaconevents.NewEventEmitter()
 	service.emitters = emitter
 	slow := make(chan *beaconevents.EventStream)
