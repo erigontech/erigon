@@ -81,9 +81,9 @@ fi
 # - a plainly failed leaf;
 # - a leaf whose runner disappeared during assignment: its only recorded step
 #   is a cancelled "Set up job".
-# Cascade victims (cancelled with "Set up job" succeeded) and timeout kills are
-# not guilty here: a timed-out job may be hung by the PR's own bug, so it never
-# qualifies for a re-queue.
+# Zero-step cancellations, cascade victims, and timeout kills are not guilty
+# here: a timed-out job may be hung by the PR's own bug, so it never qualifies
+# for a re-queue.
 guilty=$(jq -c '
   .jobs[]
   | select(.name != "ci-gate")
@@ -92,8 +92,9 @@ guilty=$(jq -c '
     elif .conclusion == "failure"
       then {id, name, kind: "failed"}
     elif .conclusion == "cancelled"
-         and ((.steps | length) == 0
-              or (.steps[0].name == "Set up job" and .steps[0].conclusion == "cancelled"))
+         and (.steps | length) == 1
+         and .steps[0].name == "Set up job"
+         and .steps[0].conclusion == "cancelled"
       then {id, name, kind: "lost-at-setup"}
     else empty end' <<<"$jobs" 2>/dev/null) || guilty=""
 if [ -z "$guilty" ]; then
