@@ -8,6 +8,7 @@ import (
 	"time"
 
 	"github.com/erigontech/erigon/cl/clparams"
+	peerdasstate "github.com/erigontech/erigon/cl/das/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -203,7 +204,7 @@ func (p *p2pManager) setupENR() error {
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.Eth2key, forkId))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.AttSubnetKey, initialAttnets.Bytes()))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.SyncCommsSubnetKey, initialSyncnets.Bytes()))
-	node.Set(enr.WithEntry(p.cfg.NetworkConfig.CgcKey, []byte{}))
+	node.Set(enr.WithEntry(p.cfg.NetworkConfig.CgcKey, peerdasstate.EncodeCgc(p.cfg.BeaconConfig.CustodyRequirement)))
 	node.Set(enr.WithEntry(p.cfg.NetworkConfig.NfdKey, nfd))
 	return nil
 }
