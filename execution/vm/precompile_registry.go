@@ -26,18 +26,21 @@ import (
 
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
+	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// PrecompilesFunc builds a chain's precompile overlay for the given resolved
-// Rules. Its output must depend only on Rules.L2Version — the merged result
-// is cached per (chainID, base fork tier, L2Version), so keying on anything
-// else would serve a stale set on a cache hit.
+// PrecompilesFunc builds a chain's precompile overlay at an L2 version. It is
+// handed the version and nothing else on purpose: the merged result is cached
+// per (chainID, base fork tier, L2Version), so an overlay that varied with any
+// other part of Rules would be served a stale set on a cache hit. L1-fork
+// variation belongs to the built-in base sets, which the fork tier already
+// keys.
 //
 // That cache has no eviction, so L2Version has to be a short upgrade ladder
 // (ArbOS 30, 50, …). A chain whose L2Config resolves it from the block number
 // grows the cache without bound.
-type PrecompilesFunc func(rules *chain.Rules) PrecompiledContracts
+type PrecompilesFunc func(l2Version uint64) PrecompiledContracts
 
 var (
 	registryMu  sync.RWMutex
@@ -48,7 +51,7 @@ var (
 // RegisterPrecompiles registers f as the precompile provider for chainID. A
 // provider's entries overlay the fork-selected built-ins on that chain only,
 // and win on address collision (a chain may deliberately replace a built-in).
-// Panics if chainID is already registered or f is nil.
+// Panics if chainID is already registered, is nil or zero, or f is nil.
 func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
 	if f == nil {
 		panic("vm: RegisterPrecompiles: nil PrecompilesFunc")
@@ -63,6 +66,10 @@ func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
 		panic(fmt.Sprintf("vm: RegisterPrecompiles: chain ID %s already registered", chainID))
 	}
 	providers[*chainID] = f
+	// A provider call that was in flight during an earlier unregister can insert
+	// its merged set after the sweep, so drop anything left for this chain
+	// rather than serving the previous provider's overlay.
+	dropCachedLocked(*chainID)
 }
 
 // UnregisterPrecompiles removes a chain's provider and its cached merged
@@ -74,8 +81,14 @@ func UnregisterPrecompiles(chainID *uint256.Int) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	delete(providers, *chainID)
+	dropCachedLocked(*chainID)
+}
+
+// dropCachedLocked removes every merged set cached for chainID. Caller holds
+// the write lock.
+func dropCachedLocked(chainID uint256.Int) {
 	for k := range mergedCache {
-		if k.chainID == *chainID {
+		if k.chainID == chainID {
 			delete(mergedCache, k)
 		}
 	}
@@ -120,8 +133,14 @@ func mergedSetFor(rules *chain.Rules, base PrecompiledContracts, fork forkTier, 
 	}
 	registryMu.RUnlock()
 
+	overlay := provider(rules.L2Version)
+	for addr, p := range overlay {
+		if p == nil {
+			panic(fmt.Sprintf("vm: precompile provider for chain %s returned a nil contract at %x", &chainID, addr))
+		}
+	}
 	contracts := maps.Clone(base)
-	maps.Copy(contracts, provider(rules))
+	maps.Copy(contracts, overlay)
 	set := &mergedPrecompileSet{contracts: contracts, addresses: slices.Collect(maps.Keys(contracts))}
 
 	registryMu.Lock()
@@ -156,6 +175,15 @@ type PrecompileContext struct {
 type PrecompileGas struct {
 	remaining *mdgas.MdGas
 	used      *mdgas.MdGasUsage
+	tracer    *tracing.Hooks
+}
+
+// onGasChange reports a charge or refund the way RunPrecompiledContract does
+// for the plain path, so a tracer sees the same event stream either way.
+func (g *PrecompileGas) onGasChange(before uint64, reason tracing.GasChangeReason) {
+	if g.tracer != nil && g.tracer.OnGasChange != nil && before != g.remaining.Execution {
+		g.tracer.OnGasChange(before, g.remaining.Execution, reason)
+	}
 }
 
 // Remaining reports the gas left in both dimensions.
@@ -164,20 +192,34 @@ func (g *PrecompileGas) Remaining() mdgas.MdGas { return *g.remaining }
 // ChargeExecution deducts execution gas, reporting false and charging
 // nothing when the frame cannot cover it.
 func (g *PrecompileGas) ChargeExecution(amount uint64) bool {
-	return mdgas.Consume(g.remaining, g.used, amount, mdgas.ExecutionGas)
+	before := g.remaining.Execution
+	if !mdgas.Consume(g.remaining, g.used, amount, mdgas.ExecutionGas) {
+		return false
+	}
+	g.onGasChange(before, tracing.GasChangeCallPrecompiledContract)
+	return true
 }
 
 // ChargeState deducts state gas, spilling into execution gas when the
 // EIP-8037 reservoir is short. Reports false and charges nothing when
 // neither dimension can cover it.
 func (g *PrecompileGas) ChargeState(amount uint64) bool {
-	return mdgas.Consume(g.remaining, g.used, amount, mdgas.StateGas)
+	before := g.remaining.Execution
+	if !mdgas.Consume(g.remaining, g.used, amount, mdgas.StateGas) {
+		return false
+	}
+	// Only the spill moves execution gas, so a charge the reservoir covers
+	// reports nothing.
+	g.onGasChange(before, tracing.GasChangeCallPrecompiledContract)
+	return true
 }
 
 // RefundExecution gives execution gas back, e.g. the leftover a nested
 // ctx.Evm call returned.
 func (g *PrecompileGas) RefundExecution(amount uint64) {
+	before := g.remaining.Execution
 	mdgas.Refill(g.remaining, g.used, amount, mdgas.ExecutionGas)
+	g.onGasChange(before, tracing.GasChangeCallLeftOverRefunded)
 }
 
 // RefundState reverses a state charge — clearing state the frame created, or
@@ -186,7 +228,9 @@ func (g *PrecompileGas) RefundExecution(amount uint64) {
 // it, and a frame that clears more than it created legitimately ends with a
 // negative net state usage.
 func (g *PrecompileGas) RefundState(amount uint64) {
+	before := g.remaining.Execution
 	mdgas.Refill(g.remaining, g.used, amount, mdgas.StateGas)
+	g.onGasChange(before, tracing.GasChangeCallLeftOverRefunded)
 }
 
 // StatefulPrecompile is a PrecompiledContract that additionally receives the

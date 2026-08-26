@@ -117,7 +117,7 @@ func TestStatefulPrecompileDispatch(t *testing.T) {
 	const chainID = 900401
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x88}))
 	rec := &recordingStatefulPrecompile{}
-	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: rec}
 	})
 	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
@@ -157,7 +157,7 @@ func TestStatefulPrecompileDelegateCallIdentity(t *testing.T) {
 	const chainID = 900402
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x89}))
 	rec := &recordingStatefulPrecompile{}
-	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: rec}
 	})
 	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
@@ -208,7 +208,7 @@ func TestStatefulPrecompileReentryHitsDepthLimit(t *testing.T) {
 	const chainID = 900403
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8a}))
 	rec := &reenteringStatefulPrecompile{self: precompileAddr}
-	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: rec}
 	})
 	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
@@ -240,7 +240,7 @@ func (stateGasStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _
 func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 	const chainID = 900404
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8b}))
-	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: stateGasStatefulPrecompile{}}
 	})
 	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
@@ -281,7 +281,7 @@ func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 	const chainID = 900405
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8c}))
 	storeAddr := accounts.InternAddress(common.HexToAddress("0x5570"))
-	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: nestedCallStatefulPrecompile{target: storeAddr}}
 	})
 	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
@@ -293,6 +293,34 @@ func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 
 	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000})
 	require.ErrorIs(t, err, vm.ErrWriteProtection)
+}
+
+// TestStatefulPrecompileCallCodeIdentity pins the third frameIdentity branch,
+// the one where ActingAs and Caller are both the caller and neither is Self.
+// A CALLCODE'd precompile has to write to the calling contract's address, not
+// its own.
+func TestStatefulPrecompileCallCodeIdentity(t *testing.T) {
+	const chainID = 900410
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x91}))
+	rec := &recordingStatefulPrecompile{}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: rec}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	value := *uint256.NewInt(5)
+	_, _, _, err := vmenv.CallCode(cfg.Origin, precompileAddr, []byte{0x01}, mdgas.MdGas{Execution: 100000}, value)
+	require.NoError(t, err)
+
+	require.Len(t, rec.calls, 1)
+	got := rec.calls[0]
+	require.Equal(t, precompileAddr, got.Self, "Self stays the precompile's own code address")
+	require.Equal(t, cfg.Origin, got.ActingAs, "CALLCODE runs the precompile as the calling contract")
+	require.Equal(t, cfg.Origin, got.Caller, "CALLCODE leaves the caller as its own frame")
+	require.False(t, got.ReadOnly)
 }
 
 // spillingStatefulPrecompile charges more state gas than the frame's EIP-8037
@@ -317,7 +345,7 @@ func (p spillingStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas,
 func TestStatefulPrecompileStateGasSpill(t *testing.T) {
 	const chainID = 900407
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8e}))
-	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: spillingStatefulPrecompile{state: 40}}
 	})
 	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
@@ -355,7 +383,7 @@ func (revertingSpillPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *
 func TestStatefulPrecompileSpillRestoredOnRevert(t *testing.T) {
 	const chainID = 900408
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8f}))
-	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: revertingSpillPrecompile{}}
 	})
 	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
@@ -392,7 +420,7 @@ func (clearingStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _
 func TestStatefulPrecompileNetStateRefundSucceeds(t *testing.T) {
 	const chainID = 900409
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x90}))
-	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) vm.PrecompiledContracts {
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
 		return vm.PrecompiledContracts{precompileAddr: clearingStatefulPrecompile{}}
 	})
 	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })

@@ -52,7 +52,7 @@ func TestRegisteredProviderScopedToChainID(t *testing.T) {
 	extraAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x99}))
 	ecrecoverAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x01}))
 
-	RegisterPrecompiles(uint256.NewInt(registeredChainID), func(*chain.Rules) PrecompiledContracts {
+	RegisterPrecompiles(uint256.NewInt(registeredChainID), func(uint64) PrecompiledContracts {
 		return PrecompiledContracts{extraAddr: stubPrecompile{"EXTRA"}}
 	})
 	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(registeredChainID)) })
@@ -74,8 +74,8 @@ func TestRegisteredProviderVersionGating(t *testing.T) {
 	const chainID = 900201
 	addrV30 := accounts.InternAddress(common.BytesToAddress([]byte{0x77}))
 
-	RegisterPrecompiles(uint256.NewInt(chainID), func(rules *chain.Rules) PrecompiledContracts {
-		if rules.L2Version >= 30 {
+	RegisterPrecompiles(uint256.NewInt(chainID), func(l2Version uint64) PrecompiledContracts {
+		if l2Version >= 30 {
 			return PrecompiledContracts{addrV30: stubPrecompile{"V30"}}
 		}
 		return PrecompiledContracts{}
@@ -95,11 +95,11 @@ func TestRegisteredProviderVersionGating(t *testing.T) {
 
 func TestRegisterPrecompilesPanics(t *testing.T) {
 	const chainID = 900301
-	RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) PrecompiledContracts { return nil })
+	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts { return nil })
 	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
 
 	require.Panics(t, func() {
-		RegisterPrecompiles(uint256.NewInt(chainID), func(*chain.Rules) PrecompiledContracts { return nil })
+		RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts { return nil })
 	}, "duplicate chainID registration must panic")
 
 	require.Panics(t, func() {
@@ -115,7 +115,7 @@ func TestRegisteredProviderWideChainID(t *testing.T) {
 	narrow := uint256.NewInt(1)
 	wideAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x66}))
 
-	RegisterPrecompiles(wide, func(*chain.Rules) PrecompiledContracts {
+	RegisterPrecompiles(wide, func(uint64) PrecompiledContracts {
 		return PrecompiledContracts{wideAddr: stubPrecompile{"WIDE"}}
 	})
 	t.Cleanup(func() { UnregisterPrecompiles(wide) })
@@ -127,6 +127,121 @@ func TestRegisteredProviderWideChainID(t *testing.T) {
 	require.True(t, ok, "the registering chain must see its own precompile")
 	_, ok = Precompiles(narrowRules)[wideAddr]
 	require.False(t, ok, "chain 1 must not inherit the provider registered for 2^64+1")
+}
+
+// TestRegisteredProviderForkDimension pins the fork dimension of the cache
+// key. Without it, an L2 crossing a fork boundary keeps being served the
+// merged set built at the earlier tier — the Osaka repricings and the 0x0100
+// entry would never appear.
+func TestRegisteredProviderForkDimension(t *testing.T) {
+	const chainID = 900501
+	extraAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x55}))
+	osakaOnly := accounts.InternAddress(common.BytesToAddress([]byte{0x01, 0x00}))
+
+	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
+		return PrecompiledContracts{extraAddr: stubPrecompile{"EXTRA"}}
+	})
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cancun := &chain.Rules{ChainID: uint256.NewInt(chainID), IsCancun: true}
+	osaka := &chain.Rules{ChainID: uint256.NewInt(chainID), IsCancun: true, IsPrague: true, IsOsaka: true}
+
+	// Resolve Cancun first, so a key that ignored the fork would serve its set
+	// to Osaka as well.
+	_, ok := Precompiles(cancun)[osakaOnly]
+	require.False(t, ok, "0x0100 is not a Cancun built-in")
+
+	merged := Precompiles(osaka)
+	_, ok = merged[osakaOnly]
+	require.True(t, ok, "the Osaka base set must reach an L2 that resolved Cancun first")
+	_, ok = merged[extraAddr]
+	require.True(t, ok, "the overlay must still be applied at the later fork")
+}
+
+// TestRegisteredProviderWinsOnCollision pins the documented precedence: a
+// provider entry replaces a built-in at the same address. Swapping the
+// maps.Copy operands leaves every other test green.
+func TestRegisteredProviderWinsOnCollision(t *testing.T) {
+	const chainID = 900502
+	ecrecoverAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x01}))
+
+	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
+		return PrecompiledContracts{ecrecoverAddr: stubPrecompile{"CHAIN-ECRECOVER"}}
+	})
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	p, ok := Precompiles(rulesForChain(chainID, 0))[ecrecoverAddr]
+	require.True(t, ok)
+	require.Equal(t, "CHAIN-ECRECOVER", p.Name(), "the chain's own entry must replace the built-in")
+}
+
+// TestForkSetsCoverEveryTier pins the forkTier -> built-in set binding. The
+// array is sized by forkTierCount, so a tier added to forkTierFor but missed
+// in init() leaves a zero forkSet: every precompile vanishes at that fork,
+// with no panic and no error.
+func TestForkSetsCoverEveryTier(t *testing.T) {
+	for i := range int(forkTierCount) {
+		tier := forkTier(i)
+		require.NotEmpty(t, forkSets[tier].contracts, "forkSets[%d] has no contracts", tier)
+		require.NotEmpty(t, forkSets[tier].addresses, "forkSets[%d] has no addresses", tier)
+		require.Len(t, forkSets[tier].addresses, len(forkSets[tier].contracts),
+			"forkSets[%d] address list and contract map disagree", tier)
+	}
+}
+
+// TestRegisterSweepsStaleCache reproduces the outcome of a provider call that
+// was in flight across an unregister: its merged set lands after the sweep and
+// outlives the provider that built it. Registering must not serve it.
+func TestRegisterSweepsStaleCache(t *testing.T) {
+	const chainID = 900503
+	oldAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x44}))
+	newAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x45}))
+	rules := rulesForChain(chainID, 0)
+
+	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
+		return PrecompiledContracts{oldAddr: stubPrecompile{"OLD"}}
+	})
+	_, ok := Precompiles(rules)[oldAddr]
+	require.True(t, ok)
+	staleKey := precompileCacheKey{chainID: *uint256.NewInt(chainID), fork: forkTierFor(rules), l2Version: 0}
+	registryMu.RLock()
+	stale := mergedCache[staleKey]
+	registryMu.RUnlock()
+	require.NotNil(t, stale, "resolving must have cached a merged set")
+
+	UnregisterPrecompiles(uint256.NewInt(chainID))
+	// The insert the racing provider call would have made after the sweep.
+	registryMu.Lock()
+	mergedCache[staleKey] = stale
+	registryMu.Unlock()
+
+	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
+		return PrecompiledContracts{newAddr: stubPrecompile{"NEW"}}
+	})
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	merged := Precompiles(rules)
+	_, ok = merged[newAddr]
+	require.True(t, ok, "the newly registered provider's overlay must be served")
+	_, ok = merged[oldAddr]
+	require.False(t, ok, "the unregistered provider's overlay must not survive re-registration")
+}
+
+// TestProviderNilContractPanics pins that a nil entry is rejected where it is
+// merged, naming the chain and address, rather than reaching evm.call and
+// nil-dereferencing inside RunPrecompiledContract on a transaction.
+func TestProviderNilContractPanics(t *testing.T) {
+	const chainID = 900504
+	badAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x46}))
+
+	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
+		return PrecompiledContracts{badAddr: nil}
+	})
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	require.PanicsWithValue(t,
+		"vm: precompile provider for chain 900504 returned a nil contract at 0000000000000000000000000000000000000046",
+		func() { Precompiles(rulesForChain(chainID, 0)) })
 }
 
 func TestPrecompilesNilChainID(t *testing.T) {

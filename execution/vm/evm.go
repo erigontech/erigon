@@ -488,7 +488,7 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 			// Charging through the handle keeps gasUsed.State and
 			// gasUsed.StateSpill in step with gasRemaining, so the accounting
 			// defer and handleFrameRevert below both read the real figures.
-			pgas := &PrecompileGas{remaining: &gasRemaining, used: &gasUsed}
+			pgas := &PrecompileGas{remaining: &gasRemaining, used: &gasUsed, tracer: evm.Config().Tracer}
 			func() {
 				defer evm.enterFrame(ctx.ReadOnly)()
 				ret, err = sp.RunStateful(input, pgas, ctx)
