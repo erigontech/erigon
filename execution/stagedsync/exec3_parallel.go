@@ -1805,9 +1805,9 @@ func (s supersededWrites) release() {
 	}
 }
 
-// takeSuperseded hands the collected sets to a block result. It clears the
-// executor's own reference: the apply loop pools these, so a set left reachable
-// from be could be released twice or read after pooling.
+// takeSuperseded hands the collected sets to a block result and clears the
+// executor's slice, so the same sets cannot also reach a later result. The apply
+// loop pools them, and a second handoff would release them twice.
 func (be *blockExecutor) takeSuperseded() supersededWrites {
 	s := be.superseded
 	be.superseded = nil
