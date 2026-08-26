@@ -305,30 +305,38 @@ func (b *sortableBuffer) syncCur() {
 // Put adds key and value to the buffer. These slices will not be accessed later,
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
-	if len(k) > maxKeyLen {
-		panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", len(k), maxKeyLen))
+	lk, lv := len(k), len(v)
+	if lk > maxKeyLen {
+		panicKeyTooLong(lk)
 	}
-	kLen, vLen := int32(len(k))+1, int32(len(v)) //nolint:gosec
+	kLen, vLen := int32(lk)+1, int32(lv) //nolint:gosec
 	if k == nil {
 		kLen = 0
 	}
 	if v == nil {
 		vLen = -1
 	}
-	n := int32(entryHeaderSize + len(k) + len(v)) //nolint:gosec
-	if n+entryLocSize > b.free {
-		b.nextChunk(n)
+	n := entryHeaderSize + lk + lv
+	if n+entryLocSize > int(b.free) {
+		b.nextChunk(int32(n)) //nolint:gosec
 	}
-	off := b.curEnd
-	data := b.curBuf[off:]
+	off := int(b.curEnd)
+	// Sliced to exactly n, so the two copies below take the length from the
+	// destination and the compiler drops the min against the source.
+	data := b.curBuf[off : off+n : off+n]
 	binary.NativeEndian.PutUint32(data, uint32(vLen)) //nolint:gosec
-	copy(data[entryHeaderSize:], k)
-	copy(data[entryHeaderSize+len(k):], v)
-	b.curEnd = off + n
+	copy(data[entryHeaderSize:entryHeaderSize+lk], k)
+	copy(data[entryHeaderSize+lk:], v)
+	b.curEnd = int32(off + n) //nolint:gosec
 	b.curTop -= entryLocSize
-	binary.NativeEndian.PutUint32(b.curBuf[b.curTop:], uint32(makeEntryLoc(kLen, off)))
-	b.free -= n + entryLocSize
+	binary.NativeEndian.PutUint32(b.curBuf[b.curTop:], uint32(makeEntryLoc(kLen, int32(off)))) //nolint:gosec
+	b.free -= int32(n) + entryLocSize                                                          //nolint:gosec
 	b.n++
+}
+
+//go:noinline
+func panicKeyTooLong(n int) {
+	panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", n, maxKeyLen))
 }
 
 // Size counts the bytes of every chunk taken, minus what is still free in the
