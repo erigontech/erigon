@@ -2242,10 +2242,7 @@ func (hph *HexPatriciaHashed) RootHash() ([]byte, error) {
 func (hph *HexPatriciaHashed) unfoldKeyPath(hashedKey, plainKey []byte) error {
 	for unfolding := hph.needUnfolding(hashedKey); unfolding > 0; unfolding = hph.needUnfolding(hashedKey) {
 		printLater := hph.currentKeyLen == 0 && hph.mounted && hph.traceW != nil
-		var unfoldDone func()
-		if dbg.KVReadLevelledMetrics {
-			unfoldDone = hph.metrics.StartUnfolding(plainKey)
-		}
+		unfoldDone := hph.metrics.StartUnfolding(plainKey)
 		if err := hph.unfold(hashedKey, unfolding); err != nil {
 			return fmt.Errorf("unfold: %w", err)
 		}
@@ -2265,10 +2262,7 @@ func (hph *HexPatriciaHashed) followAndUpdate(hashedKey, plainKey []byte, stateU
 	//}
 	// Keep folding until the currentKey is the prefix of the key we modify
 	for hph.needFolding(hashedKey) {
-		var foldDone func()
-		if dbg.KVReadLevelledMetrics {
-			foldDone = hph.metrics.StartFolding(plainKey)
-		}
+		foldDone := hph.metrics.StartFolding(plainKey)
 		if err := hph.fold(); err != nil {
 			return fmt.Errorf("fold: %w", err)
 		}
@@ -2567,10 +2561,7 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 
 	// Folding everything up to the root
 	for hph.activeRows > 0 {
-		var foldDone func()
-		if dbg.KVReadLevelledMetrics {
-			foldDone = hph.metrics.StartFolding(nil)
-		}
+		foldDone := hph.metrics.StartFolding(nil)
 		if err = hph.fold(); err != nil {
 			return nil, fmt.Errorf("final fold: %w", err)
 		}
