@@ -23,14 +23,14 @@ if ! [[ "${PR_NUMBER:-}" =~ ^[0-9]+$ ]]; then
   exit 1
 fi
 
-# Only CI-caused removals qualify. The reason enum's spelling is not pinned
-# down by the docs, so deny-list the clearly non-CI reasons and let the
-# job-level classification below gate everything else.
-if grep -qiE 'manual|conflict|already[ _]?merged|branch[ _]?protect|queue[ _]?cleared|roll[ _]?back|invalid' \
-  <<<"${DEQUEUE_REASON:-}"; then
-  echo "::notice::Dequeue reason '${DEQUEUE_REASON}' is not a CI failure; not re-queuing PR #${PR_NUMBER}."
-  exit 0
-fi
+# Only failed CI checks qualify; unknown reasons must fail closed.
+case "${DEQUEUE_REASON:-}" in
+  CI_FAILURE | failed_checks) ;;
+  *)
+    echo "::notice::Dequeue reason '${DEQUEUE_REASON}' is not a CI failure; not re-queuing PR #${PR_NUMBER}."
+    exit 0
+    ;;
+esac
 if ! [[ "${EXPECTED_HEAD_OID:-}" =~ ^[[:xdigit:]]{40,64}$ ]]; then
   echo "::error::EXPECTED_HEAD_OID must be a Git object ID, got '${EXPECTED_HEAD_OID:-}'"
   exit 1
