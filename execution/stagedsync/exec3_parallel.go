@@ -3057,7 +3057,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 					// and prior-block storage that vm.StorageKeys doesn't see.
 					var domainKeysErr error
 					domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-						keys, err := state.CommittedStorageKeys(pe.rs.Domains(), applyTx, addr)
+						keys, err := state.CommittedStorageKeys(pe.rs.Domains(), applyTx, be.blockStateCache, addr)
 						if err != nil {
 							domainKeysErr = err
 							return nil
@@ -3321,7 +3321,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// redundant.
 				var domainKeysErr error
 				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					keys, err := state.CommittedStorageKeys(pe.rs.Domains(), applyTx, addr)
+					keys, err := state.CommittedStorageKeys(pe.rs.Domains(), applyTx, be.blockStateCache, addr)
 					if err != nil {
 						domainKeysErr = err
 						return nil

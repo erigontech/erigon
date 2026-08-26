@@ -282,7 +282,7 @@ func TestCommittedStorageKeys(t *testing.T) {
 		require.NoError(t, domains.DomainPut(kv.AccountsDomain, tx, av[:], accounts.SerialiseV3(&acc), 0, nil))
 		putStorage(t, addr)
 
-		keys, err := CommittedStorageKeys(domains, tx, addr)
+		keys, err := CommittedStorageKeys(domains, tx, nil, addr)
 		require.NoError(t, err)
 		require.Equal(t, []accounts.StorageKey{accounts.InternKey(slot)}, keys)
 	})
@@ -295,9 +295,27 @@ func TestCommittedStorageKeys(t *testing.T) {
 		addr := accounts.InternAddress(common.HexToAddress("0xbb"))
 		putStorage(t, addr)
 
-		keys, err := CommittedStorageKeys(domains, tx, addr)
+		keys, err := CommittedStorageKeys(domains, tx, nil, addr)
 		require.NoError(t, err)
 		require.Empty(t, keys, "walked the storage prefix for an address with no committed account")
+	})
+
+	t.Run("walks when the account was destroyed in this block", func(t *testing.T) {
+		// The self-destruct apply path leaves the storage prefix in the domain
+		// until the block-end flush when a block cache is active, so an absent
+		// account no longer implies absent storage. Skipping here loses the
+		// cascade the trie needs and the root goes wrong.
+		defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+		dbg.AssertEnabled = false
+		addr := accounts.InternAddress(common.HexToAddress("0xdd"))
+		putStorage(t, addr)
+		cache := NewBlockStateCache()
+		cache.DeleteAccount(addr, 0)
+
+		keys, err := CommittedStorageKeys(domains, tx, cache, addr)
+		require.NoError(t, err)
+		require.Equal(t, []accounts.StorageKey{accounts.InternKey(slot)}, keys,
+			"skipped the walk for an address destroyed earlier in this block")
 	})
 
 	t.Run("asserts on storage without an account", func(t *testing.T) {
@@ -306,7 +324,7 @@ func TestCommittedStorageKeys(t *testing.T) {
 		addr := accounts.InternAddress(common.HexToAddress("0xcc"))
 		putStorage(t, addr)
 
-		require.Panics(t, func() { _, _ = CommittedStorageKeys(domains, tx, addr) },
+		require.Panics(t, func() { _, _ = CommittedStorageKeys(domains, tx, nil, addr) },
 			"the skip rests on this invariant, so breaking it must not stay silent")
 	})
 }

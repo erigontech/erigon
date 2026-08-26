@@ -501,13 +501,16 @@ func (writes *WriteSet) Normalize(vm *VersionMap, txIndex int, incarnation int, 
 // per-file existence filters, while the prefix walk has to seek the .bt index of
 // every storage .kv file, paying the same price whether the address owns a
 // thousand slots or none.
-func CommittedStorageKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, addr accounts.Address) ([]accounts.StorageKey, error) {
+func CommittedStorageKeys(domains *execctx.SharedDomains, tx kv.TemporalTx, blockCache *BlockStateCache, addr accounts.Address) ([]accounts.StorageKey, error) {
 	av := addr.Value()
 	prevAcc, _, err := domains.GetLatest(kv.AccountsDomain, tx, av[:])
 	if err != nil {
 		return nil, err
 	}
-	if len(prevAcc) == 0 {
+	// A destroy recorded in the block cache only reaches the domain at the
+	// block-end flush, so until then the account reads absent while its
+	// pre-block storage is still there and still owed a trie delete.
+	if len(prevAcc) == 0 && !blockCache.deletedInBlock(addr) {
 		return nil, assertNoCommittedStorage(domains, tx, av[:])
 	}
 	const addrLen, hashLen = 20, 32 // StorageDomain composite key = addr ++ slotHash

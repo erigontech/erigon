@@ -575,7 +575,7 @@ func GenerateChain(config *chain.Config, parent *types.Block, engine rules.Engin
 				blockNum := b.header.Number.Uint64()
 				var domainKeysErr error
 				domainStorageKeys := func(addr accounts.Address) []accounts.StorageKey {
-					keys, err := state.CommittedStorageKeys(domains, tx, addr)
+					keys, err := state.CommittedStorageKeys(domains, tx, nil, addr)
 					if err != nil {
 						domainKeysErr = err
 						return nil
