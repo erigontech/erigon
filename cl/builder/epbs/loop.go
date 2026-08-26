@@ -809,6 +809,14 @@ func payloadWithdrawalsMatch(payload *solid.ListSSZ[*cltypes.Withdrawal], expect
 var computeCellsAndKZGProofs = peerdasutils.ComputeCellsAndKZGProofs
 
 func buildDataColumnSidecars(blobsBundle *eladapter.BlobsBundle, slot uint64, beaconBlockRoot common.Hash) ([]*cltypes.DataColumnSidecar, error) {
+	cellsAndProofsPerBlob, err := deriveDataColumnCells(blobsBundle)
+	if err != nil || len(cellsAndProofsPerBlob) == 0 {
+		return nil, err
+	}
+	return peerdasutils.GetDataColumnSidecarsGloas(slot, beaconBlockRoot, cellsAndProofsPerBlob)
+}
+
+func deriveDataColumnCells(blobsBundle *eladapter.BlobsBundle) ([]peerdasutils.CellsAndKZGProofs, error) {
 	if blobsBundle == nil || len(blobsBundle.Blobs) == 0 {
 		return nil, nil
 	}
@@ -825,7 +833,7 @@ func buildDataColumnSidecars(blobsBundle *eladapter.BlobsBundle, slot uint64, be
 		})
 	}
 
-	return peerdasutils.GetDataColumnSidecarsGloas(slot, beaconBlockRoot, cellsAndProofsPerBlob)
+	return cellsAndProofsPerBlob, nil
 }
 
 func (p *pendingPayload) buildDataColumnSidecars(slot uint64, beaconBlockRoot common.Hash) ([]*cltypes.DataColumnSidecar, error) {
@@ -835,15 +843,7 @@ func (p *pendingPayload) buildDataColumnSidecars(slot uint64, beaconBlockRoot co
 	p.columnCellsMu.Lock()
 	defer p.columnCellsMu.Unlock()
 	if !p.columnCellsReady {
-		p.columnCells = make([]peerdasutils.CellsAndKZGProofs, 0, len(p.assembled.BlobsBundle.Blobs))
-		for i, blob := range p.assembled.BlobsBundle.Blobs {
-			cells, proofs, err := computeCellsAndKZGProofs(blob)
-			if err != nil {
-				p.columnCellsErr = fmt.Errorf("blob %d: %w", i, err)
-				break
-			}
-			p.columnCells = append(p.columnCells, peerdasutils.CellsAndKZGProofs{Blobs: cells, Proofs: proofs})
-		}
+		p.columnCells, p.columnCellsErr = deriveDataColumnCells(p.assembled.BlobsBundle)
 		p.columnCellsReady = true
 	}
 	if p.columnCellsErr != nil {

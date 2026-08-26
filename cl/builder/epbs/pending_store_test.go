@@ -268,3 +268,27 @@ func TestBuilderLoopRestoreIgnoresExpiredFilesBeforeCapacityCheck(t *testing.T) 
 	require.NoError(t, err)
 	require.Len(t, entries, 1)
 }
+
+func TestFilePendingPayloadStoreRejectsFilenameRecordIdentityMismatch(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	store := newFilePendingPayloadStore(t.TempDir(), loop.beaconCfg)
+	store.syncDir = func(string) error { return nil }
+	key := pendingPayloadKey{
+		slot: 100, parentBlockHash: common.HexToHash("0xdead"),
+		parentBlockRoot: common.HexToHash("0xbeef"), blockHash: common.HexToHash("0xb10c"),
+	}
+	payload := makeTestPayload(t, big.NewInt(1))
+	payload.Eth1Block.SlotNumber = key.slot
+	payload.Eth1Block.BlockHash = key.blockHash
+	pending := &pendingPayload{
+		slot: key.slot, builderIndex: 42, bidValue: 1, parent: testParentInfo(), assembled: payload,
+		execReqs: cltypes.NewExecutionRequestsWithVersion(loop.beaconCfg, clparams.GloasVersion),
+	}
+	require.NoError(t, store.Save(t.Context(), key, pending, loop.manager.Pubkey()))
+	alias := key
+	alias.blockHash = common.HexToHash("0xcafe")
+	require.NoError(t, os.Rename(store.path(key), store.path(alias)))
+
+	_, err := store.Load(t.Context(), key.slot)
+	require.ErrorContains(t, err, "does not match record identity")
+}
