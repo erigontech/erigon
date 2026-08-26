@@ -27,17 +27,30 @@ import (
 	"github.com/c2h5oh/datasize"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/cachebudget"
 	"github.com/erigontech/erigon/common/maphash"
 )
 
-// TestGenericCache_ConcurrentPutAcrossGrow guards the jump-grow data race:
-// curCap is written under resizeMu in maybeGrow but read on the put fast-path
-// outside it, so concurrent writers crossing the grow threshold raced on it
-// (surfaced by the -race eest shard). Many goroutines insert enough distinct
-// keys to trigger several grow steps while others put concurrently; run with
-// -race, this must stay clean.
+// grownShards counts the shards that have grown past their birth size, so a
+// test can assert the grow it exercises actually happened.
+func grownShards[T any](c *GenericCache[T]) int {
+	g := c.data.Load()
+	n := 0
+	for i := range g.shards {
+		g.mus[i].Lock()
+		if g.curCap[i] > g.startCapPerShard {
+			n++
+		}
+		g.mus[i].Unlock()
+	}
+	return n
+}
+
+// TestGenericCache_ConcurrentPutAcrossGrow is the race-detector smoke test for
+// growth: many goroutines insert enough distinct keys to grow shards repeatedly
+// while others put and read concurrently. Run with -race, this must stay clean.
 func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
-	// Budget well above the start size (1024 slots) so maybeGrow fires repeatedly.
+	// Budget well above the start size so shards grow repeatedly.
 	c := closeOnCleanup(t, NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU))
 
 	const workers = 8
@@ -57,12 +70,11 @@ func TestGenericCache_ConcurrentPutAcrossGrow(t *testing.T) {
 	wg.Wait()
 }
 
-// A same-key put serialized by its stripe must never be undone by a grow: with
-// copy-then-swap migration, a writer that loaded the old generation before the
-// swap landed its write in the abandoned generation, and the migrated (older)
-// value resurfaced as live — a stale serve, not a benign miss. The writer
-// self-verifies each put and a reader checks the hot key's monotonically
-// increasing value never goes backward.
+// A same-key put serialized by its stripe must never be undone by a grow: a
+// migration running outside the writer's exclusion lands the write in the table
+// being retired, and the migrated (older) value resurfaces as live — a stale
+// serve, not a benign miss. The writer self-verifies each put and a reader
+// checks the hot key's monotonically increasing value never goes backward.
 func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 	value := func(n uint64) []byte {
 		b := make([]byte, 8)
@@ -112,16 +124,18 @@ func TestGenericCache_PutNotLostAcrossGrow(t *testing.T) {
 			}
 		})
 
-		// Cross the grow threshold so maybeGrow swaps the generation while the
-		// hot-key writer runs.
+		// Fill past every shard's birth size while the hot-key writer runs. The
+		// start size follows the shard count, which follows GOMAXPROCS, so the
+		// fill is derived from it rather than from a fixed constant.
 		key := make([]byte, 8)
-		for i := range 3 * genericCacheStartCapacity {
+		for i := range int(2 * c.startCap) {
 			binary.BigEndian.PutUint64(key, uint64(1+i))
 			c.Put(key, []byte{1}, 1)
 		}
 
 		close(stop)
 		wg.Wait()
+		require.Positive(t, grownShards(c), "round %d: no shard grew, the race under test never happened", round)
 		c.Close()
 		require.False(t, regressed.Load(), "round %d: a striped put was lost across a grow (older value resurfaced)", round)
 	}
@@ -148,26 +162,18 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 			c.Put(key, []byte{1}, 1)
 		}
 
-		gen := c.data.Load()
-		grewAt := func() int {
-			n := 0
-			for i := range gen.shards {
-				gen.mus[i].Lock()
-				if gen.curCap[i] > gen.startCapPerShard {
-					n++
-				}
-				gen.mus[i].Unlock()
-			}
-			return n
-		}
-
 		var candidates [][]byte
 		stop := make(chan struct{})
 		writing := make(chan struct{})
 		var once sync.Once
 		var wg sync.WaitGroup
+		// Bound the writer well below the cache ceiling. It is meant to stop at
+		// close(stop), but a scheduling skew must not let it evict its own early
+		// candidates for capacity — that would fail the assertions below for a
+		// reason this test is not about.
+		limit := int(c.maxCap / 4)
 		wg.Go(func() {
-			for j := range 1 << 20 {
+			for j := range limit {
 				select {
 				case <-stop:
 					return
@@ -189,7 +195,7 @@ func TestGenericCache_PutIfAbsentDefersAcrossGrow(t *testing.T) {
 		}
 		close(stop)
 		wg.Wait()
-		require.Positive(t, grewAt(), "round %d: no shard grew, the race under test never happened", round)
+		require.Positive(t, grownShards(c), "round %d: no shard grew, the race under test never happened", round)
 		require.NotEmpty(t, candidates, "round %d: writer never ran, the assertions below prove nothing", round)
 
 		for _, k := range candidates {
@@ -520,4 +526,78 @@ func BenchmarkGenericCacheWorstPut(b *testing.B) {
 		c.Close()
 	}
 	b.ReportMetric(float64(worst.Microseconds()), "worst-put-us")
+}
+
+// The entry count is derived from each shard's own length under that shard's
+// lock, so an insert/evict mix can neither drive it negative nor let it drift
+// from the shards it counts. A negative count breaks the ModeNoOp admission
+// guard and panics any make() sized from it.
+func TestGenericCache_LenTracksShards(t *testing.T) {
+	// One shard, one slot: every insert evicts, so the count is churned as hard
+	// as it can be while a reader samples it.
+	c := newGenericCacheEntries(64*datasize.MB, 1, func(v []byte) int { return len(v) }, ModeEvictLRU)
+	var negative atomic.Bool
+	stop := make(chan struct{})
+	var sampler, writers sync.WaitGroup
+	sampler.Go(func() {
+		for {
+			select {
+			case <-stop:
+				return
+			default:
+			}
+			if c.Len() < 0 {
+				negative.Store(true)
+				return
+			}
+		}
+	})
+	for w := range 8 {
+		writers.Go(func() {
+			key := make([]byte, 8)
+			for i := range 200_000 {
+				binary.BigEndian.PutUint64(key, uint64(w)<<40|uint64(i))
+				c.Put(key, []byte{1}, 1)
+				if i%3 == 0 {
+					c.Delete(key)
+				}
+			}
+		})
+	}
+	writers.Wait()
+	close(stop)
+	sampler.Wait()
+	require.False(t, negative.Load(), "entry count went negative")
+
+	g := c.data.Load()
+	sum := 0
+	for i := range g.shards {
+		sum += g.shards[i].Len()
+	}
+	require.Equal(t, sum, c.Len(), "entry count drifted from the shards it counts")
+}
+
+// Close must settle the envelope reservation behind the same fence a grow runs
+// under. Outside it, a grow racing Close either hands its step back after Close
+// already released it — leaving the shared budget permanently under-counted —
+// or funds a step nothing gives back.
+func TestGenericCache_CloseSettlesAgainstConcurrentGrow(t *testing.T) {
+	before := cachebudget.Global.Used()
+	for range 50 {
+		c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
+		perWorker := int(c.startCap) / 2
+		var wg sync.WaitGroup
+		for w := range 4 {
+			wg.Go(func() {
+				key := make([]byte, 8)
+				for i := range perWorker {
+					binary.BigEndian.PutUint64(key, uint64(w)<<40|uint64(i))
+					c.Put(key, []byte{1}, 1)
+				}
+			})
+		}
+		c.Close() // races the writers still growing shards
+		wg.Wait()
+	}
+	require.Equal(t, before, cachebudget.Global.Used(), "envelope not restored after Close raced a grow")
 }

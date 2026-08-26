@@ -116,8 +116,28 @@ func (s *shardedLRU[V]) Get(h uint64) (v V, ok bool) {
 func (s *shardedLRU[V]) Remove(h uint64) {
 	i := s.idx(h)
 	s.mus[i].Lock()
-	s.shards[i].Remove(h)
+	if s.shards[i].Remove(h) {
+		s.n.Add(-1)
+	}
 	s.mus[i].Unlock()
+}
+
+// Replace overwrites a key already in the cache. The removal is what fires
+// onEvict for the old value -- freelru.Add swaps a present key in place and
+// skips the callback -- and holding the shard lock across the pair keeps the
+// key visible to readers throughout. The entry count cannot rise, so no grow
+// is attempted here.
+func (s *shardedLRU[V]) Replace(h uint64, v V) (evicted bool) {
+	i := s.idx(h)
+	s.mus[i].Lock()
+	before := s.shards[i].Len()
+	s.shards[i].Remove(h)
+	evicted = s.shards[i].Add(h, v)
+	if delta := s.shards[i].Len() - before; delta != 0 {
+		s.n.Add(int64(delta))
+	}
+	s.mus[i].Unlock()
+	return evicted
 }
 
 // Add stores a key, growing that one shard first when it is full and below its
@@ -142,18 +162,10 @@ func (s *shardedLRU[V]) Add(h uint64, v V) (evicted bool) {
 	}
 	before := s.shards[i].Len()
 	evicted = s.shards[i].Add(h, v)
-	// freelru replaces a present key in place, returning false and firing no
-	// OnEvict, so the live count follows the shard's own length -- except at
-	// capacity, where the insert both evicts and stores: the length does not
-	// move but OnEvict has already decremented, so the replacement is counted.
-	delta := s.shards[i].Len() - before
-	if evicted {
-		delta++
-	}
-	s.mus[i].Unlock()
-	if delta != 0 {
+	if delta := s.shards[i].Len() - before; delta != 0 {
 		s.n.Add(int64(delta))
 	}
+	s.mus[i].Unlock()
 	return evicted
 }
 
@@ -177,24 +189,13 @@ func (s *shardedLRU[V]) growStep(i uint64) (newCap, reserved uint32, ok bool) {
 func (s *shardedLRU[V]) migrateLocked(i uint64, next *freelru.LRU[uint64, V], newCap uint32) {
 	old := s.shards[i]
 	for _, k := range old.Keys() {
-		if v, ok := old.Peek(k); ok {
-			next.Add(k, v)
+		// growStep only reports a strictly larger capacity, so the copy cannot
+		// evict. Assert it rather than let a later change silently lose the
+		// shard's oldest keys and desync the counters.
+		if v, ok := old.Peek(k); ok && next.Add(k, v) {
+			panic("shardedLRU: grow target evicted during migration")
 		}
 	}
 	s.shards[i] = next
 	s.curCap[i] = newCap
 }
-
-func (s *shardedLRU[V]) Keys() []uint64 {
-	keys := make([]uint64, 0, s.Len())
-	for i := range s.shards {
-		s.mus[i].Lock()
-		keys = append(keys, s.shards[i].Keys()...)
-		s.mus[i].Unlock()
-	}
-	return keys
-}
-
-// dec is called from the evict callback, which fires for capacity evictions
-// and for Remove alike.
-func (s *shardedLRU[V]) dec() { s.n.Add(-1) }
