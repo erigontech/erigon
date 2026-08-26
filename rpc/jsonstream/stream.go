@@ -34,6 +34,9 @@ type Stream interface {
 	// belongs in WriteString: it bulk-copies escape-free runs, so pre-quoting a
 	// string to skip escaping buys nothing.
 	WriteRaw(content string)
+	// Flush is where a delivery failure surfaces: value writers cannot fail and
+	// the automatic flush drops the error, so a handler that has to notice the
+	// client leaving checks this one.
 	Flush() error
 
 	// Value writing methods

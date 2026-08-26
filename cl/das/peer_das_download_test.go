@@ -146,8 +146,8 @@ func TestRunDownloadRejectsGloasSidecarWithPreGloasSlot(t *testing.T) {
 		},
 	}
 
-	done := make(chan error, 1)
-	go func() { done <- d.runDownload(ctx, req, false) }()
+	done := make(chan struct{})
+	go func() { defer close(done); d.runDownload(ctx, req, false) }()
 
 	select {
 	case <-sentinel.banned:
