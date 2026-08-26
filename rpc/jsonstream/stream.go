@@ -72,7 +72,8 @@ type Stream interface {
 	// Extended functionality
 
 	ClosePending(targetDepth uint) error
-	// Depth returns the current JSON nesting depth tracked by the stream.
-	// Returns 0 for stream implementations that do not track depth.
+	// Depth counts the entries ClosePending would unwind, which is not the
+	// container nesting: a field name or a comma still waiting for its value
+	// counts too. Pass it back as targetDepth to return to this point.
 	Depth() int
 }
