@@ -1766,7 +1766,14 @@ func TestSortableBufferRejectsOversizedKey(t *testing.T) {
 
 	require.Panics(t, func() { buf.Put(make([]byte, maxKeyLen+1), []byte("v")) })
 
+	// maxKeyLen is what lets keyLen live in 16 bits, so read the edge back.
 	buf.Put(make([]byte, maxKeyLen), []byte("v"))
 	buf.Put([]byte{0x01}, make([]byte, dataChunkSize+7))
-	require.Equal(t, 2, buf.Len())
+	buf.Put(nil, nil)
+	require.Equal(t, 3, buf.Len())
+
+	k, _ := buf.Get(0)
+	require.Len(t, k, maxKeyLen)
+	k, _ = buf.Get(2)
+	require.Nil(t, k)
 }

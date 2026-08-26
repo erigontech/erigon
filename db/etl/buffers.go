@@ -44,7 +44,7 @@ const (
 	// BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
 
-	entryLocSize    = 8 // sizeof(sortableBuffer.entries element): keyLen(4) + offset(4)
+	entryLocSize    = 8 // sizeof(sortableBuffer.entries element): offset(4) + keyLen(2) + 2 spare
 	entryHeaderSize = 4 // valLen, in front of the entry's bytes in its chunk
 )
 
@@ -171,17 +171,18 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-// entryLoc holds keyLen in the high half and, in the low half, the chunk index
-// packed with the offset inside it: idx<<dataChunkBits | off. A length of -1
-// means nil. Offsets rise with insertion order, which is what lets Sort order
-// duplicate keys without a stable sort.
+// entryLoc packs, from the low bit up: the chunk index with the offset inside
+// it (idx<<dataChunkBits | off), then keyLen, which maxKeyLen keeps inside 16
+// bits, with -1 meaning nil. The top 16 bits are spare. Offsets rise with
+// insertion order, which is what lets Sort order duplicate keys without a
+// stable sort.
 type entryLoc uint64
 
 func makeEntryLoc(keyLen, offset int32) entryLoc {
-	return entryLoc(uint32(keyLen))<<32 | entryLoc(uint32(offset)) //nolint:gosec
+	return entryLoc(uint16(keyLen))<<32 | entryLoc(uint32(offset)) //nolint:gosec
 }
-func (e entryLoc) keyLen() int32 { return int32(uint32(e >> 32)) } //nolint:gosec
-func (e entryLoc) offset() int32 { return int32(uint32(e)) }       //nolint:gosec
+func (e entryLoc) keyLen() int32 { return int32(int16(uint16(e >> 32))) } //nolint:gosec
+func (e entryLoc) offset() int32 { return int32(uint32(e)) }              //nolint:gosec
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 	if bufferOptimalSize.Bytes() > math.MaxInt32 {
