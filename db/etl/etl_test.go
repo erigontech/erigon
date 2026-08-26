@@ -1591,7 +1591,7 @@ func TestSortableBufferChunks(t *testing.T) {
 	require.Equal(t, entries, buf.Len())
 	require.Greater(t, len(buf.chunks), 1, "data must be split into chunks")
 	for i, c := range buf.chunks {
-		require.Equal(t, dataChunkSize, cap(c), "chunk %d", i)
+		require.Equal(t, dataChunkSize, cap(*c), "chunk %d", i)
 	}
 
 	for i := range entries {
@@ -1659,10 +1659,10 @@ func TestSortableBufferResetReleasesChunks(t *testing.T) {
 // handing it out under a normal chunk index would corrupt an unrelated buffer.
 func TestPutDataChunkRejectsOversized(t *testing.T) {
 	oversized := make([]byte, dataChunkSize+7)
-	putDataChunk(oversized)
+	putDataChunk(&oversized)
 
 	got := getDataChunk()
-	require.Len(t, got, dataChunkSize)
+	require.Len(t, *got, dataChunkSize)
 }
 
 // disposeProbe records whether the collector still owned its data chunks when

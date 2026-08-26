@@ -88,6 +88,7 @@ var (
 	etlSmallBufRAM       = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
+			mxBufNew.Inc()
 			return NewSortableBuffer(etlSmallBufRAM)
 		},
 	})
@@ -97,6 +98,7 @@ var (
 	etlLargeBufRAM       = BufferOptimalSize
 	LargeSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
+			mxBufNew.Inc()
 			return NewSortableBuffer(etlLargeBufRAM)
 		},
 	})
