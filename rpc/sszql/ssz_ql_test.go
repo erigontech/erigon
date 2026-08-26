@@ -136,6 +136,7 @@ func TestRouteRedirectsNonCanonicalPaths(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.path, func(t *testing.T) {
 			rec := doRequest(t, http.MethodPost, tt.path, validQueryBody)
+			// http.ServeMux returns 301 here in go1.25.x; changes to 307 as of go1.26+ (see go.dev/doc/go1.26)
 			if rec.Code != http.StatusMovedPermanently {
 				t.Errorf("got status %d, want %d", rec.Code, http.StatusMovedPermanently)
 			}

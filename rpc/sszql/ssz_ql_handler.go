@@ -52,8 +52,9 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 
 	blockID := r.PathValue("blockID")
 
-	if !isValidBlockAndVersion(blockID, version) {
-		writeQueryError(w, http.StatusNotFound, "invalid version segment")
+	bnh, err := parseBlockIDs(blockID)
+	if err != nil {
+		writeQueryError(w, http.StatusNotFound, err.Error())
 		return
 	}
 
@@ -76,12 +77,6 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 		return
 	}
 
-	bnh, err := parseBlockIDs(blockID)
-	if err != nil {
-		writeQueryError(w, http.StatusNotFound, err.Error())
-		return
-	}
-
 	var res SSZQLResponse
 
 	switch version {
@@ -98,14 +93,6 @@ func handleSSZQuery(w http.ResponseWriter, r *http.Request) {
 	}
 
 	writeQueryResponse(w, res)
-}
-
-func isValidBlockAndVersion(blockID string, version uint) bool {
-	if version < 1 || version > 6 {
-		return false
-	}
-
-	return true
 }
 
 type queryError struct {
