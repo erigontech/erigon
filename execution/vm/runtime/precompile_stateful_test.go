@@ -14,6 +14,9 @@
 // You should have received a copy of the GNU Lesser General Public License
 // along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
+// These tests sit outside package vm on purpose: a chain integrating against
+// erigon has only the exported surface, so anything they need that vm does not
+// export is a gap in the seam rather than a gap in the test.
 package runtime
 
 import (
@@ -43,6 +46,8 @@ import (
 type recordingStatefulPrecompile struct {
 	calls []*vm.PrecompileContext
 }
+
+var _ vm.StatefulPrecompile = (*recordingStatefulPrecompile)(nil)
 
 func (r *recordingStatefulPrecompile) RequiredGas([]byte) uint64        { return 0 }
 func (r *recordingStatefulPrecompile) Run(input []byte) ([]byte, error) { return nil, nil }
