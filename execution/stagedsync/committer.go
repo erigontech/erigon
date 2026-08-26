@@ -961,12 +961,6 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		}
 	}()
 
-	// GetChangesetByHash is self-contained (its own pastChangesLock, not
-	// changesetMu) and its result is used directly below as this call's own
-	// diff — no lock needed to keep it "fresh" against a concurrent rotation,
-	// since nothing here compares it against later-observed shared state.
-	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
-
 	// Flush block N-1's own pending update (hash-routed to N-1's saved
 	// changeset, independent of N's diff below) — the one remaining
 	// changesetMu window, brief rather than spanning the fold that follows.
@@ -983,19 +977,19 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 	// diff — see DomainPutCommitmentDiff — so nothing here needs changesetMu
 	// against a concurrent SetChangesetAccumulator.
 	//
-	// A mid-block step-boundary compute always hits cs == nil: the exec loop
-	// only calls SavePastChangesetAccumulator once the whole block is done,
-	// so this falls back to whatever's currently live. That is guaranteed to
-	// still be N's own: the exec loop installs N's changeset before sending
-	// any of N's txResults, and only rotates away from it (on the same
-	// goroutine, strictly after the save) once N is fully done — so a nil
-	// GetChangesetByHash(N) result is itself proof the rotation away from N
-	// hasn't happened yet. Using nil here instead would silently drop this
-	// step's writes from the changeset.
+	// A mid-block step-boundary compute finds no saved changeset for N, since
+	// the exec loop saves only once the whole block is done, and falls back to
+	// the live accumulator. Read live before the saved lookup: the exec loop
+	// saves N strictly before it rotates away from N, so whichever of the two
+	// reads lands after a rotation, the other still identifies N's changeset.
+	// Using nil here would silently drop this step's writes.
+	live := cc.doms.GetChangesetAccumulator()
+	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
+
 	var diff *kv.DomainDiff
 	if cs != nil {
 		diff = &cs.Diffs[kv.CommitmentDomain]
-	} else if live := cc.doms.GetChangesetAccumulator(); live != nil {
+	} else if live != nil {
 		diff = &live.Diffs[kv.CommitmentDomain]
 	}
 	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, diff)
