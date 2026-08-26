@@ -389,9 +389,22 @@ func (h *History) Scan(ctx context.Context, toTxNum uint64) error {
 // which is pageSize/2 - 26. Here that budget is shared with the 8-byte txNum prefix.
 const maxHistoryValLen = int(ethconfig.DefaultChainDBPageSize)/2 - 26 - 8
 
-func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) (err error) {
+// addPrevValueStats splits AddPrevValue across its two ETL collectors: the time
+// lands in whichever one flushed its buffer, and that is the only thing worth
+// knowing about a slow call.
+type addPrevValueStats struct {
+	histVals time.Duration
+	idxKeys  time.Duration
+}
+
+func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []byte) error {
+	_, err := w.addPrevValue(k, txNum, original)
+	return err
+}
+
+func (w *historyBufferedWriter) addPrevValue(k []byte, txNum uint64, original []byte) (stats addPrevValueStats, err error) {
 	if w.discard {
-		return nil
+		return stats, nil
 	}
 
 	if original == nil {
@@ -409,16 +422,20 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 		w.historyKey = append(append(w.historyKey[:0], k...), w.ii.txNumBytes[:]...)
 		historyKey := w.historyKey[:lk+8]
 
+		t0 := time.Now()
 		if err := w.historyVals.Collect(historyKey, original); err != nil {
-			return err
+			return stats, err
 		}
+		t1 := time.Now()
+		stats.histVals = t1.Sub(t0)
 
 		if !w.ii.discard {
 			if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], historyKey[:lk]); err != nil {
-				return err
+				return stats, err
 			}
+			stats.idxKeys = time.Since(t1)
 		}
-		return nil
+		return stats, nil
 	}
 
 	lk := len(k)
@@ -433,15 +450,19 @@ func (w *historyBufferedWriter) AddPrevValue(k []byte, txNum uint64, original []
 		panic("History value is too large while largeValues=false")
 	}
 
+	t0 := time.Now()
 	if err := w.historyVals.Collect(historyKey1, historyVal); err != nil {
-		return err
+		return stats, err
 	}
+	t1 := time.Now()
+	stats.histVals = t1.Sub(t0)
 	if !w.ii.discard {
 		if err := w.ii.indexKeys.Collect(w.ii.txNumBytes[:], invIdxVal); err != nil {
-			return err
+			return stats, err
 		}
+		stats.idxKeys = time.Since(t1)
 	}
-	return nil
+	return stats, nil
 }
 
 func (ht *HistoryRoTx) NewWriter() *historyBufferedWriter {

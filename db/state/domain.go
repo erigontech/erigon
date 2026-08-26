@@ -431,7 +431,8 @@ func (w *DomainBufferedWriter) PutWithPrevDiff(k, v []byte, txNum uint64, preval
 		fmt.Printf("PutWithPrev(%s, txn %d, key[%x] value[%x] preval[%x])\n", w.h.ii.filenameBase, step, k, v, preval)
 	}
 	t0 := time.Now()
-	if err := w.h.AddPrevValue(k, txNum, preval); err != nil {
+	prevStats, err := w.h.addPrevValue(k, txNum, preval)
+	if err != nil {
 		return err
 	}
 	t1 := time.Now()
@@ -439,10 +440,13 @@ func (w *DomainBufferedWriter) PutWithPrevDiff(k, v []byte, txNum uint64, preval
 		diff.DomainUpdate(k, step, preval)
 	}
 	t2 := time.Now()
-	err := w.addValue(k, v, step)
+	err = w.addValue(k, v, step)
 	if took := time.Since(t0); took >= dbg.ToLogSlowTxn {
 		log.Warn("[dbg] slow PutWithPrev", "took", took, "domain", w.h.ii.filenameBase, "txNum", txNum,
-			"addPrevValue", t1.Sub(t0), "diffUpdate", t2.Sub(t1), "addValue", time.Since(t2))
+			"addPrevValue", t1.Sub(t0), "diffUpdate", t2.Sub(t1), "addValue", time.Since(t2),
+			// addPrevValue is two ETL Collects; the time is a buffer flush in one of them.
+			"histVals", prevStats.histVals, "idxKeys", prevStats.idxKeys,
+			"keyLen", len(k), "valLen", len(v), "prevLen", len(preval))
 	}
 	return err
 }
