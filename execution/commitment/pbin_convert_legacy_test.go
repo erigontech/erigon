@@ -22,6 +22,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/common/length"
 )
 
 // pbinTestLegacyAppendCell spells a cell the way the pre-version format did: a
@@ -201,6 +203,60 @@ func TestPBinConvertStateMatchesTheCurrentBlob(t *testing.T) {
 	require.Equal(t, pph.grid.root.kind, fresh.grid.root.kind)
 	require.Equal(t, pph.grid.root.prefix, fresh.grid.root.prefix)
 	require.Equal(t, pph.grid.root.hash, fresh.grid.root.hash)
+}
+
+func TestPBinConvertRootRecordMatchesTheCurrentCell(t *testing.T) {
+	t.Parallel()
+
+	base := pbinTestBaseStorageKey()
+	a := pbinTestStorageLeaf(base, 0x33)
+	b := pbinTestStorageLeaf(pbinTestTreeKeyFlipped(t, base, 64), 0x44)
+	left, right := pbinTestBranchOrder(t, a, b, 64)
+
+	ms := NewMockState(t)
+	pbinTestPutState(t, ms, a, b)
+	pph := NewPBinPatriciaHashed(ms)
+	cells := [2]pbinCell{left.recordCell(t, 65), right.recordCell(t, 65)}
+	pbinTestSeedRow(pph, pbinTestKeyPrefix(a.treeKey, 64), 65, cells, pbinCellBits, pbinCellBits)
+	require.NoError(t, pph.fold())
+
+	want, err := pbinAppendCell(nil, &pph.grid.root, false)
+	require.NoError(t, err)
+	require.False(t, PBinRootRecordIsLegacy(want))
+
+	legacy, err := PBinEncodeLegacyRootRecord(want)
+	require.NoError(t, err)
+	require.NotEqual(t, want, legacy)
+	require.True(t, PBinRootRecordIsLegacy(legacy))
+
+	got, err := NewPBinRecordConverter().ConvertRootRecord(legacy)
+	require.NoError(t, err)
+	require.Equal(t, want, got)
+}
+
+func TestPBinConvertRootRecordRejectsMalformedInput(t *testing.T) {
+	t.Parallel()
+
+	converter := NewPBinRecordConverter()
+	for name, record := range map[string][]byte{
+		"no node kind":   {0x00},
+		"truncated hash": {byte(pbinFieldBranch | pbinFieldHash), 0x00, 0x20, 0x01},
+		"trailing byte": func() []byte {
+			var c pbinCell
+			c.kind, c.hashLen = pbinNodeBranch, length.Hash
+			return append(pbinTestLegacyAppendCell(nil, &c), 0)
+		}(),
+	} {
+		t.Run(name, func(t *testing.T) {
+			t.Parallel()
+			_, err := converter.ConvertRootRecord(record)
+			require.Error(t, err)
+		})
+	}
+
+	empty, err := converter.ConvertRootRecord(nil)
+	require.NoError(t, err)
+	require.Nil(t, empty)
 }
 
 func TestPBinEncodeLegacyStateRejectsMalformedInput(t *testing.T) {

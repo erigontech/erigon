@@ -239,7 +239,7 @@ Examples:
 				return
 			}
 			defer sd.Close()
-			reader := commitmentdb.NewLatestStateReader(tx, sd, nil)
+			reader := commitmentdb.NewLatestStateReader(tx, sd)
 			if err := readBranch(reader, prefix, stepSize, logger); err != nil {
 				logger.Error("Failed to read branch", "error", err)
 				return
@@ -1222,6 +1222,27 @@ func requireConvertFormatSource(src datadir.Dirs) error {
 	if settings.TrieVariantName() != dbstate.TrieVariantBin {
 		return fmt.Errorf("commitment convert-format requires a binary-trie source datadir, got %s", settings.TrieVariantName())
 	}
+	return requireNoCommitmentHistory(src)
+}
+
+// Conversion rewrites domain .kv files only, so a datadir built with
+// --keep.execution.proofs would keep serving pre-version records out of history.
+func requireNoCommitmentHistory(src datadir.Dirs) error {
+	for _, root := range []string{src.SnapHistory, src.SnapIdx, src.SnapAccessors} {
+		entries, err := os.ReadDir(root)
+		if err != nil {
+			if os.IsNotExist(err) {
+				continue
+			}
+			return err
+		}
+		for _, e := range entries {
+			if e.IsDir() || !isCommitmentFileName(e.Name()) {
+				continue
+			}
+			return fmt.Errorf("commitment convert-format: %s is commitment history, which this command does not rewrite; convert a datadir without it", filepath.Join(root, e.Name()))
+		}
+	}
 	return nil
 }
 
@@ -1387,7 +1408,7 @@ func benchLookup(ctx context.Context, logger log.Logger) error {
 			return fmt.Errorf("failed to create shared domains: %w", err)
 		}
 		defer sd.Close()
-		commitmentReader = commitmentdb.NewLatestStateReader(tx, sd, nil)
+		commitmentReader = commitmentdb.NewLatestStateReader(tx, sd)
 	}
 	durations := make([]time.Duration, len(keys))
 	var totalSize int64

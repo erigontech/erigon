@@ -971,11 +971,11 @@ func validatePBinRebuildState(stateValue []byte) error {
 		return fmt.Errorf("commitment rebuild: commitment state is %d bytes, too short for a header", len(stateValue))
 	}
 	stateLen := int(binary.BigEndian.Uint16(stateValue[16:18]))
+	if len(stateValue) != 18+stateLen {
+		return fmt.Errorf("commitment rebuild: trie state claims %d bytes, %d present", stateLen, len(stateValue)-18)
+	}
 	if stateLen == 0 {
 		return nil
-	}
-	if len(stateValue) < 18+stateLen {
-		return fmt.Errorf("commitment rebuild: trie state claims %d bytes, %d present", stateLen, len(stateValue)-18)
 	}
 	trieState := stateValue[18 : 18+stateLen]
 	if !commitment.IsPBinState(trieState) {
@@ -1013,13 +1013,15 @@ func RebuildCommitmentFiles(ctx context.Context, rwDb kv.TemporalRwDB, txNumsRea
 			return nil, nil, err
 		}
 		defer roTx.Rollback() //nolint:gocritic
+		// A KV read slice only lives as long as its transaction, so the state is
+		// validated before the rollback rather than after it.
 		stateValue, _, readErr := roTx.GetLatest(kv.CommitmentDomain, commitmentdb.KeyCommitmentState)
+		if readErr == nil {
+			readErr = validatePBinRebuildState(stateValue)
+		}
 		roTx.Rollback()
 		if readErr != nil {
 			return nil, nil, readErr
-		}
-		if err := validatePBinRebuildState(stateValue); err != nil {
-			return nil, nil, err
 		}
 	}
 

@@ -67,10 +67,19 @@ func sourceDatadirFixture(t *testing.T) datadir.Dirs {
 	return dirs
 }
 
-// binSourceDatadirFixture is a source datadir that records the bin trie.
+// binSourceDatadirFixture is a source datadir that records the bin trie. It
+// carries no commitment history: convert-format rewrites domain files only.
 func binSourceDatadirFixture(t *testing.T) datadir.Dirs {
 	t.Helper()
 	dirs := sourceDatadirFixture(t)
+	for _, p := range []string{
+		filepath.Join(dirs.SnapHistory, "v1.0-commitment.0-64.v"),
+		filepath.Join(dirs.SnapIdx, "v1.0-commitment.0-64.ef"),
+		filepath.Join(dirs.SnapAccessors, "v1.0-commitment.0-64.vi"),
+		filepath.Join(dirs.SnapAccessors, "v1.0-commitment.0-64.efi"),
+	} {
+		require.NoError(t, dir.RemoveFile(p))
+	}
 	refs := false
 	variant, hash := dbstate.TrieVariantBin, commitment.PBinHashBlake3
 	require.NoError(t, dbstate.WriteErigonDBSettings(dirs, &dbstate.ErigonDBSettings{
@@ -388,6 +397,21 @@ func TestConvertFormatStagingLeavesSourceSnapshotsUnchanged(t *testing.T) {
 func TestConvertFormatRequiresBinarySource(t *testing.T) {
 	require.ErrorContains(t, requireConvertFormatSource(sourceDatadirFixture(t)), "requires a binary-trie")
 	require.NoError(t, requireConvertFormatSource(binSourceDatadirFixture(t)))
+}
+
+func TestConvertFormatRefusesCommitmentHistory(t *testing.T) {
+	for _, planted := range []struct {
+		dir  func(datadir.Dirs) string
+		name string
+	}{
+		{func(d datadir.Dirs) string { return d.SnapHistory }, "v1.0-commitment.0-64.v"},
+		{func(d datadir.Dirs) string { return d.SnapIdx }, "v1.0-commitment.0-64.ef"},
+		{func(d datadir.Dirs) string { return d.SnapAccessors }, "v1.0-commitment.0-64.vi"},
+	} {
+		src := binSourceDatadirFixture(t)
+		require.NoError(t, os.WriteFile(filepath.Join(planted.dir(src), planted.name), []byte{}, 0o644))
+		require.ErrorContains(t, requireConvertFormatSource(src), "commitment history", planted.name)
+	}
 }
 
 func TestStageRebuildOutputDoesNotCreateSourceMigrations(t *testing.T) {

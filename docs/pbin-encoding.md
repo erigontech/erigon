@@ -244,40 +244,44 @@ key), `7+1+264 = 272` (the 34-byte code key), `0+1+527 = 528` (the 66-byte stora
 
 ### 5.2 Layout
 
+A branch record is two cell bodies and nothing else.
+
 ```
-+=====================+   written by encode,
-| touchMap   u16 BE   |   read by pbinDecodeBranch
-| afterMap   u16 BE   |
-+=====================+
-| cell body for bit 0 |   present iff afterMap & 1
-| cell body for bit 1 |   present iff afterMap & 2
++=====================+   pbinBranchEncoder.encode,
+| cell body for bit 0 |   pbinDecodeBranch
+| cell body for bit 1 |
 +=====================+
 ```
 
-Cells are emitted in ascending bit order (`bitset & -bitset` / `TrailingZeros16`,
-`encode`, `pbin_branch.go`); the decoder mirrors it exactly (`pbinDecodeBranch`).
+Both are always present. A row that does not keep exactly two cells writes no record at all
+(§5.4), so a header naming which children follow could only ever say "both".
 
 ```
 cell body                                      pbinAppendCell / pbinDecodeCell
   fields    1 byte     bitmask, below
-  bitLen    uvarint    prefix length in BITS, 0..528
-  prefix    ceil(bitLen/8) bytes, MSB-first, pad bits zero
-  [accAddr] uvarint(20)=0x14 || 20 bytes
-  [stoAddr] uvarint(52)=0x34 || 52 bytes
-  [value]   uvarint(32)=0x20 || 32 bytes
-  [hash]    uvarint(32)=0x20 || 32 bytes
+  bitLen    uvarint    prefix length in BITS, 0..528   | omitted together when
+  prefix    ceil(bitLen/8) bytes, MSB-first, pad zero  | STORAGE_ADDR is set
+  [accAddr] 20 bytes
+  [stoAddr] 52 bytes
+  [value]   32 bytes
+  [hash]    32 bytes
 ```
 
 `fields` (`pbinCellFields`, `pbin_branch.go`): bit0 LEAF, bit1 BRANCH, bit2 ACCOUNT_ADDR,
 bit3 STORAGE_ADDR, bit4 HASH, bit5 LEAF_VALUE. The optional blocks appear in one fixed order in
 both encoder and decoder — accAddr, stoAddr, LEAF_VALUE, HASH (`pbinAppendCell` /
-`pbinDecodeCell`) — and that is
-**not** the bit order: LEAF_VALUE is bit 5 and HASH is bit 4, so LEAF_VALUE is written first. The
-fields byte says which blocks are present, not what order to read them in; a decoder that walks it
-LSB-to-MSB takes HASH before LEAF_VALUE and desynchronises the cursor on any cell carrying both
-(the §5.5 format-ceiling row). The length prefixes are uvarints but `pbinDecodeFixedVal`
-demands the one exact width per field, making `0x14` / `0x34` / `0x20` the only legal
-tag bytes.
+`pbinDecodeCell`) — and that is **not** the bit order: LEAF_VALUE is bit 5 and HASH is bit 4, so
+LEAF_VALUE is written first. The fields byte says which blocks are present, not what order to read
+them in; a decoder that walks it LSB-to-MSB takes HASH before LEAF_VALUE and desynchronises the
+cursor on any cell carrying both (the §5.5 format-ceiling row).
+
+Every block is a fixed width, so no block carries a length. `fields` and `bitLen` together fix the
+body's size exactly, and `pbinDecodeFixedVal` reads each block at its one legal width.
+
+A STORAGE_ADDR cell stores no prefix. Its tree key is derived from the 52 bytes it already carries
+(§1), so the decoder recomputes the prefix as the slice of that key below the cell's depth — the
+record's own key bits plus one branch bit (`pbinDecodeCell`). That is the one thing in a record
+that cannot be read without the key it was stored under.
 
 The cell prefix is relative to the record's own key plus the branch bit: the record's key is
 `pbinAppendBitPath(currentKey)`, the child sits at `keyBits+1`, and `prefix` carries the remainder
@@ -290,87 +294,70 @@ The 265-bit record from §5.1 — a branch child and a header-storage leaf.
 ```
 key 0012b9c2d7398802bddf3d70e0e8cf9074f4819101be174b883975a79061d53e7a0001
 
-00000000  00 03 00 03 12 05 00 20  de 50 84 4a 66 c2 a7 73  |....... .P.Jf..s|
-00000010  d7 15 49 2d 67 9f ee 88  41 64 67 c0 c5 a7 80 2a  |..I-g...Adg....*|
-00000020  6b 03 31 99 b3 57 b0 a4  09 06 14 34 01 02 03 04  |k.1..W.....4....|
-00000030  05 06 07 08 09 0a 0b 0c  0d 0e 0f 10 11 12 13 14  |................|
+00000000  12 05 00 de 50 84 4a 66  c2 a7 73 d7 15 49 2d 67  |....P.Jf..s..I-g|
+00000010  9f ee 88 41 64 67 c0 c5  a7 80 2a 6b 03 31 99 b3  |...Adg....*k.1..|
+00000020  57 b0 a4 09 01 02 03 04  05 06 07 08 09 0a 0b 0c  |W...............|
+00000030  0d 0e 0f 10 11 12 13 14  00 00 00 00 00 00 00 00  |................|
 00000040  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 00  |................|
-00000050  00 00 00 00 00 00 00 00  00 00 00 00 00 00 00 05  |................|
+00000050  00 00 00 00 00 00 00 05                           |........|
 
-[00..01]  0003      touchMap = 0b11
-[02..03]  0003      afterMap = 0b11
 cell bit 0
-[04]      12        fields  = 00010010  BRANCH | HASH
-[05]      05        bitLen  = uvarint 5
-[06]      00        prefix  = 00000 + 3 zero pad bits
-[07..27]  20 ||     hash    = de50844a66c2a773d715492d679fee88416467c0c5a7802a6b033199b357b0a4
+[00]      12        fields  = 00010010  BRANCH | HASH
+[01]      05        bitLen  = uvarint 5
+[02]      00        prefix  = 00000 + 3 zero pad bits
+[03..22]            hash    = de50844a66c2a773d715492d679fee88416467c0c5a7802a6b033199b357b0a4
 cell bit 1
-[28]      09        fields  = 00001001  LEAF | STORAGE_ADDR
-[29]      06        bitLen  = uvarint 6
-[2a]      14        prefix  = 000101 + 2 zero pad bits
-[2b..5f]  34 ||     stoAddr = 0102030405060708090a0b0c0d0e0f1011121314
+[23]      09        fields  = 00001001  LEAF | STORAGE_ADDR
+[24..57]            stoAddr = 0102030405060708090a0b0c0d0e0f1011121314
                               0000…0005                (addr || slot, 52 bytes)
 ```
 
-Sub-index reconstruction for cell 1: the record sits at 265 bits, so the sub-index's top bit is
-already fixed to `0` by the prefix above it and this record's branch bit supplies the next, `1`.
-The cell prefix then supplies `000101`. Full sub-index `0b01000101 = 0x45 = 64 + 5` — storage slot 5
-in the account header (§9).
+Cell 1 carries no prefix bytes, and the decoder must rebuild them: the record sits at 265 bits and
+its branch bit supplies one more, so the cell's prefix is `H(addr32) || sub` from bit 266 down. That
+also reads out the sub-index — the top bit is fixed to `0` by the prefix above and this record's
+branch bit supplies the next, `1`, then the derived prefix supplies `000101`. Full sub-index
+`0b01000101 = 0x45 = 64 + 5` — storage slot 5 in the account header (§9).
 
 The other three records of the same tree:
 
 ```
-key 00  [0 bits]  162 bytes
-  0003 0003
-  12 06 00 20 c9aca54ec7a6c2fe06fc1cee22bd609b559f1c16217ce2ea48793349b8d61be5
-  09 8f04 fe257385ae7310057bbe7ae1c1d19f20e9e90322037c2e971072eb4f20c3aa7cf4
-          3211d8496e2c633f71a67a015a0551623e46676cc65d3acc04301137a5fc5a8458
-     34 0102030405060708090a0b0c0d0e0f1011121314
-        000000000000000000000000000000000000000000000000000000000000012c
+key 00  [0 bits]  88 bytes
+  12 06 00 c9aca54ec7a6c2fe06fc1cee22bd609b559f1c16217ce2ea48793349b8d61be5
+  09 0102030405060708090a0b0c0d0e0f1011121314
+     000000000000000000000000000000000000000000000000000000000000012c
 
-key 0007  [7 bits]  142 bytes
-  0003 0003
+key 0007  [7 bits]  136 bytes
   12 8102 12b9c2d7398802bddf3d70e0e8cf9074f4819101be174b883975a79061d53e7a00
-     20 ac8c75fc4b6f6e25d0831229dd10d3ad353c56dc573141f6f7e62707a5076b5d
+          ac8c75fc4b6f6e25d0831229dd10d3ad353c56dc573141f6f7e62707a5076b5d
   21 8802 073be86901ad75392dc6c8cd03071cf8e0c17da59c33a1911c7b85c09f969b5a00
-     20 0060aabb00010200000000000000000000000000000000000000000000000000
+          0060aabb00010200000000000000000000000000000000000000000000000000
 
-key 0012b9…7a0007  [271 bits]  50 bytes
-  0003 0003
-  05 00 14 0102030405060708090a0b0c0d0e0f1011121314
-  05 00 14 0102030405060708090a0b0c0d0e0f1011121314
+key 0012b9…7a0007  [271 bits]  44 bytes
+  05 00 0102030405060708090a0b0c0d0e0f1011121314
+  05 00 0102030405060708090a0b0c0d0e0f1011121314
 ```
 
 The 7-bit record shows the two zones side by side and needs no shift to read: seven bits are
 consumed above it and one more by its own branch, so both cell prefixes start on a byte boundary —
 cell 0 carries `stem || 0x00` (the account key from byte 1 on), cell 1 the chunk key's own 33 bytes.
-The top record is where the shift shows: the storage key starts `ff 12 b9…` and its cell prefix
-(bits 1..527) starts `fe 25 73…`, since shifting left by one turns `ff 12 b9` into `fe 25 73`
-(`0xff<<1 | 0x12>>7 = 0xfe`).
+The `00` record is where the shift used to show, in a 66-byte storage prefix starting `fe 25 73…`
+for a key starting `ff 12 b9…`; those bytes are gone now and the decoder derives them, which is why
+that record dropped from 162 bytes to 88.
 
 The 271-bit record is the account pair: two leaf cells, zero-bit prefixes, both naming the *same*
 20-byte plain key. Which leaf each is is decided by the last bit of the reconstructed tree key and
 resolved at hash time by `pbinLeafValue` (`pbin_hash.go`), not by anything in the record.
 
-### 5.4 touchMap and afterMap
+### 5.4 Why there is no header
 
-Both are `uint16` at offsets 0 and 2 (`encode` and `pbinDecodeBranch`, `pbin_branch.go`) purely so
-the `OnesCount16` / `TrailingZeros16` arithmetic ports from the hex engine unchanged (`pbinGrid`'s
-doc comment, `pbin_cell.go`). Only bits 0 and 1 may be set; `pbinCheckCellMaps` rejects anything
-outside `pbinCellBits = 0b11` on both encode and decode.
-
-`afterMap` is structural — it says which cell bodies follow. `touchMap` is write-time bookkeeping
-only. The reader throws it away (`_, afterMap, err := pbinDecodeBranch`,
-in `unfoldBranchNode`; the only other call site is `materializeBranch`), and
-nothing downstream parses the record either: `TrieContext.PutBranch` hands the bytes straight to
-`DomainPut` (`commitmentdb/commitment_context.go`). There is no `BranchData` merge.
-
-On disk, `afterMap` of a branch record is always `0b11`: `foldBranch` refuses a row that does not
-keep exactly two cells (`foldBranch`). A row collapsing to one survivor writes
-no record at all — the node moves up and the consumed bits are prepended to the survivor's prefix
-(`foldPropagate`); a row keeping nothing writes a zero-length value, which is the deletion
-encoding (`foldDelete`). `touchMap` does vary: bits are set at update time (`updateCell`) and
-carried upward by `propagateTouch`.
+A record used to open with a `touchMap` / `afterMap` pair saying which of the two cell bodies
+followed. Neither survived, and the reason is arity: on disk `afterMap` was always `0b11`, because
+`foldBranch` refuses a row that does not keep exactly two cells. A row collapsing to one survivor
+writes no record at all — the node moves up and the consumed bits are prepended to the survivor's
+prefix (`foldPropagate`); a row keeping nothing writes a zero-length value, which is the deletion
+encoding (`foldDelete`). `touchMap` was write-time bookkeeping the reader threw away, and nothing
+downstream parsed it either: `TrieContext.PutBranch` hands the bytes straight to `DomainPut`
+(`commitmentdb/commitment_context.go`). There is no `BranchData` merge.
 
 Both non-branch outcomes are reachable:
 
@@ -378,59 +365,64 @@ Both non-branch outcomes are reachable:
   cell seeds the new row with that one cell (`unfold`), so a row that no later update splits folds
   straight back through `foldPropagate` — the exact inverse of the unfold that opened it.
 - **No survivor** needs a parent cell that was touched and is now absent, which `unfoldBranchNode`
-  loads as `after = 0` through its `deleted` flag. A write of 32 zero bytes is a
-  deletion (§11), so zeroing a subtree's last leaf reaches it; pinned at
-  `TestPBinFoldDeleteRunsOnProcess` (`pbin_zerovalue_test.go`).
+  loads through its `deleted` flag. A write of 32 zero bytes is a deletion (§11), so zeroing a
+  subtree's last leaf reaches it; pinned at `TestPBinFoldDeleteRunsOnProcess`
+  (`pbin_zerovalue_test.go`).
 
 A reader still needs an answer for a zero-length value, and it differs by key: at a bit-path key
 `unfoldBranchNode` rejects it as a missing branch, so it is not a shape a decoder has to parse; at
 the root key `0x08` it is legal and means the empty tree (`loadRoot`).
 
-That every record carries both children is what removes the merge path
+That every record carries both children is also what removes the merge path
 (`pbinBranchEncoder`'s doc comment, `pbin_branch.go`): at arity 2 the untouched sibling is the
 whole other half of the subtree, so a record read back replaces its predecessor outright.
 
 ### 5.5 Size
 
-Per cell: `1 (fields) + 1..2 (bitLen uvarint) + 0..66 (packed prefix) + one value block`. Value
-blocks are 21 (account), 53 (storage), 33 (verbatim value), 33 (hash).
+Per cell: `1 (fields) + one value block`, plus `1..2 (bitLen uvarint) + 0..66 (packed prefix)`
+unless STORAGE_ADDR omits both. Value blocks are 20 (account), 52 (storage), 32 (verbatim value),
+32 (hash).
 
-| shape | bytes | reachable |
-|---|---:|---|
-| `afterMap = 0` | 4 | decodes; `foldBranch` never writes it |
-| one bare BRANCH cell `000100010200` | 6 | same |
-| two bare BRANCH cells `0003000302000200` | 8 | same |
-| two hashed branch cells | 74 | yes |
-| **writer floor** — two 0-prefix account leaves | **50** | yes, once in §5.1 (the 271-bit record) |
-| **writer ceiling** — two 527-bit-prefix storage leaves | **248** | only at a depth-0 record |
-| **format ceiling** — the same plus a HASH block on each | **314** | decodes; writer never emits it |
+| shape | bytes | was | reachable |
+|---|---:|---:|---|
+| two bare BRANCH cells `02000200` | 4 | 8 | decodes; `foldBranch` never writes it |
+| two hashed branch cells | 68 | 74 | yes |
+| **writer floor** — two 0-prefix account leaves | **44** | 50 | yes, once in §5.1 (the 271-bit record) |
+| two 527-bit-key storage leaves | 106 | 248 | only at a depth-0 record |
+| **writer ceiling** — two 527-bit-prefix value leaves | **202** | 208 | only at a depth-0 record |
+| **format ceiling** — the same plus a HASH block on each | **266** | 274 | decodes; writer never emits it |
 
-All seven rows encode-and-decode round-trip. Measured record sizes for the §5.1 corpus: 162, 142,
-96, 50, plus a 35-byte root record. The root record is framed differently and sized in §7.
+All six rows encode and decode. Measured record sizes for the §5.1 corpus: 88, 136, 88, 44, plus a
+34-byte root record. The root record is framed differently and sized in §7.
 
-Size is driven, in order of weight, by: the two prefix bit lengths (up to 66 bytes each — all the
-variance lives here, and it is inverse to depth); which value each child names (53 > 33 > 21); and
-the 1-vs-2-byte `bitLen` uvarint at the 128-bit boundary.
+The storage row is where the format change bites hardest: those cells used to be the largest a
+writer could produce and are now among the smallest, because the 66-byte prefix that dominated them
+is derived rather than stored. What is left driving size is the prefix bit lengths of the cells that
+still carry one (up to 66 bytes each, inverse to depth), which value each child names (52 > 32 > 20),
+and the 1-vs-2-byte `bitLen` uvarint at the 128-bit boundary (100 vs 102 bytes for a pair of
+value leaves).
 
 ### 5.6 Decoding
 
-`pbinDecodeBranch(data, cells *[2]pbinCell)` (`pbin_branch.go`) resets both cells
-unconditionally, requires ≥4 bytes, reads the maps, re-checks them, then walks
-`afterMap` in ascending bit order filling `cells[TrailingZeros16(bit)]`. A cell whose bit is clear
-stays zeroed — that is how an absent child is spelled. Any leftover byte is an error.
+`pbinDecodeBranch(data, cells, depth, keys)` (`pbin_branch.go`) resets both cells unconditionally,
+then decodes two bodies back to back. Any leftover byte is an error. `depth` is the record's key
+bits plus one, and `keys` is the digest cache a STORAGE_ADDR cell needs to rebuild its prefix — pass
+neither and a storage cell cannot be read.
 
-Each body restores kind from the LEAF/BRANCH bits; the prefix from the explicit bit count, never
-from the byte length, with pad bits asserted zero (`pbinDecodePrefix`); `accountAddrLen` /
-`storageAddrLen` / `hashLen` as side effects of their fields being present; and a LEAF_VALUE as
-`Update{Flags: StorageUpdate, StorageLen: 32}`.
+Each body restores kind from the LEAF/BRANCH bits; the prefix either from the explicit bit count,
+never from the byte length, with pad bits asserted zero (`pbinDecodePrefix`), or from the tree key
+derived from `stoAddr`; `accountAddrLen` / `storageAddrLen` / `hashLen` as side effects of their
+fields being present; and a LEAF_VALUE as `Update{Flags: StorageUpdate, StorageLen: 32}`.
 
 Rejections, each observed firing:
 
 ```
 pbinDecodeCell      unknown field bits; neither or both node kinds; a leaf naming
-                    0 or 2+ value sources; a branch carrying a leaf value
+                    0 or 2+ value sources; a branch carrying a leaf value;
+                    a storage leaf with no digest cache; a storage leaf whose
+                    depth exceeds its own key
 pbinDecodePrefix    a prefix over 528 bits; non-zero pad bits
-pbinDecodeFixedVal  a wrong length tag
+pbinDecodeFixedVal  a block the record is too short for
 pbinDecodeBranch    trailing bytes
 
   leaf with both addrs -> malformed branch record: leaf cell fields 00001101 name no single value source
@@ -439,15 +431,20 @@ pbinDecodeBranch    trailing bytes
   trailing byte        -> malformed branch record: 1 trailing bytes
 ```
 
+Dropping the lengths moved one class of corruption from "caught" to "silent". A truncated or
+mistyped block used to be caught by its length tag; now a decoder can only notice at the record
+boundary, so a corrupt cell is detected when the total does not land exactly on `len(data)` — and
+two compensating errors would not be detected at all. Fixed widths are what make the record cheap;
+the record boundary is the only frame check left.
+
 One asymmetry against the "one canonical form" claim in `pbinDecodeBranch`'s doc comment: a BRANCH
 cell carrying ACCOUNT_ADDR or STORAGE_ADDR decodes cleanly (only LEAF_VALUE is refused for
 branches). The writer cannot produce it — `foldBranch` resets the upCell before setting kind — so
-it is an unreachable spelling the decoder still accepts,
-not a live bug.
+it is an unreachable spelling the decoder still accepts, not a live bug.
 
-Caller side: `unfoldBranchNode` keeps `afterMap` and discards the record's `touchMap`, setting
-`touch=0, after=afterMap` normally, or `touch=afterMap, after=0` when the parent cell was touched
-and is now gone, which is how a whole subtree is dropped (`unfoldBranchNode`).
+Caller side: `unfoldBranchNode` treats every record as carrying both children, setting `after` to
+`pbinCellBits` normally, or `touch = pbinCellBits, after = 0` when the parent cell was touched and
+is now gone, which is how a whole subtree is dropped (`unfoldBranchNode`).
 
 ## 6. Leaf cells in a record
 
@@ -505,18 +502,45 @@ phase; the cost is roughly one extra node per level of each proved path.
 
 ## 7. The root record
 
-`pbinRootKey = {0x08}` (`pbin_patricia_hashed.go`) holds a **bare cell body with no 4-byte
-header**: `storeRoot` calls `pbinAppendCell` directly and `loadRoot` calls `pbinDecodeCell` at
-position 0, rejecting trailing bytes. A zero-length value at that key is the deletion encoding for
-an emptied tree (`storeRoot`).
+`pbinRootKey = {0x08}` (`pbin_patricia_hashed.go`) holds a **bare cell body**: `storeRoot` calls
+`pbinAppendCell` directly and `loadRoot` calls `pbinDecodeCell` at position 0, rejecting trailing
+bytes. A zero-length value at that key is the deletion encoding for an emptied tree (`storeRoot`).
 
 ```
-key 08, 35 bytes — the §5.1 tree:
-  12 00 20 658b62aba5ac2933e86f1100cce5084bdb35b32d797b05d247abf27a2018c064
+key 08, 34 bytes — the §5.1 tree:
+  12 00 658b62aba5ac2933e86f1100cce5084bdb35b32d797b05d247abf27a2018c064
   ^ BRANCH|HASH
      ^ bitLen 0
-        ^ len 32 || the state root
+        ^ the state root
 ```
+
+Both calls pass `omitStoragePrefix = false`, so a root cell keeps a prefix a branch record would
+drop: nothing sits above the root to derive one from. It is the only cell body written that way.
+
+Nothing in a root record marks its format, and that is the one place the record change has no
+self-describing tell. A branch record opened with a zero byte before the change and cannot now; the
+trie state blob carries an explicit version (§7.1). A root cell is the same bytes in both spellings
+minus the length tags, so telling them apart means decoding and checking the body ends exactly at
+`len(data)` (`PBinRootRecordIsLegacy`, `pbin_convert_legacy.go`). A converter that keys off the
+leading zero alone copies the root through untouched, and the datadir then fails at `loadRoot`.
+
+### 7.1 The trie state blob
+
+`KeyCommitmentState` in the commitment domain holds the engine's resume state, not a node. It is the
+only pbin structure with a version byte:
+
+```
+B1  marker      pbinStateMarker; a hex blob opens with a root-flags byte <= 0x07,
+                so the marker also refuses a cross-variant restore
+10  format      pbinRecordFormat, deliberately above pbinStateFlagsAll (0x07)
+xx  flags       rootPresent | rootChecked | rootTouched
+xxxx rootLen    u16 BE, and the body must end exactly at 5 + rootLen
+     root cell  a bare cell body, framed like the root record above
+```
+
+The format byte sits where a pre-version blob kept its flags, and every legal flags value is at or
+below `0x07` — so `ValidatePBinStateFormat` (`pbin_state.go`) separates the two spellings on that
+one byte with no ambiguity. That is what the root record has no room for.
 
 That is the common shape, not the only one. `storeRoot` serialises whatever the root cell is,
 and a one-key tree's root is the leaf itself with no branch wrapping it (§4), so the
@@ -524,19 +548,19 @@ record can equally be a LEAF cell — with a full-length prefix, since no descen
 consume any of the key. Measured, the §5.1 address holding slot 300 and nothing else:
 
 ```
-key 08, 122 bytes:
-  09 9004 ff12b9…d2fe2d42 2c 34 0102…1314 0000…012c
+key 08, 121 bytes:
+  09 9004 ff12b9…d2fe2d42 2c 0102…1314 0000…012c
   ^ LEAF|STORAGE_ADDR
      ^ uvarint 528 bits
           ^ the whole 66-byte tree key, packed
-                            ^ len 52 || addr || slot
+                            ^ addr || slot
 ```
 
-Sizes follow the §5.5 per-cell arithmetic with no 4-byte header: `1 (fields) + 1..2 (bitLen uvarint)
-+ 0..66 (packed prefix) + one value block of 21 / 33 / 53`. That is 35 bytes for the branch-and-hash
-spelling above, 58 / 70 / 90 for a 272-bit leaf root naming an address, a verbatim value or an
-`addr||slot`, and 122 at most — the 528-bit storage leaf shown. A decoder that assumes BRANCH|HASH
-fails on every one-key tree.
+Sizes follow the §5.5 per-cell arithmetic: `1 (fields) + 1..2 (bitLen uvarint) + 0..66 (packed
+prefix) + one value block of 20 / 32 / 52`. That is 34 bytes for the branch-and-hash spelling above,
+57 / 69 / 89 for a 272-bit leaf root naming an address, a verbatim value or an `addr||slot`, and 121
+at most — the 528-bit storage leaf shown. A decoder that assumes BRANCH|HASH fails on every one-key
+tree.
 
 The root cell needs a key of its own, and not because nothing names it — the empty path does. The
 problem is that the empty path already encodes to the 1-byte key `00`, which is the record of the
@@ -560,9 +584,8 @@ pbinDecodeBitPath(7374617465) -> pbin: invalid trailing bit count 101 in bit-pat
 ```
 
 The witness-side `PatriciaContext` uses the same two record framings — a bare cell for the root
-(`rootRecord`, `pbin_witness_context.go`), a full header plus two cells for a branch, with
-`touchMap` set equal to `afterMap` because a read discards it anyway (`branchRecord`). The framing
-is shared; what goes into a leaf cell is not — see the witness paragraph in §6.
+(`rootRecord`, `pbin_witness_context.go`), two cells for a branch (`branchRecord`). The framing is
+shared; what goes into a leaf cell is not — see the witness paragraph in §6.
 
 ## 8. The account header stem
 

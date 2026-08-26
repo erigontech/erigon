@@ -47,6 +47,13 @@ func TestValidatePBinRebuildState(t *testing.T) {
 			binary.BigEndian.PutUint16(v[16:18], 64)
 			return v
 		}(), false},
+		{"trailing bytes past the declared length", func() []byte {
+			v := pbinRebuildStateValue(t, []byte{0x03, 0, 0})
+			return append(v, 0, 0)
+		}(), false},
+		{"trailing bytes with a zero length", func() []byte {
+			return append(make([]byte, 18), 0xB1, 0x03, 0, 0)
+		}(), false},
 		{"hex trie state", pbinRebuildStateValue(t, []byte{0x03, 0, 0}), true},
 		{"pre-version pbin blob", pbinRebuildStateValue(t, []byte{0xB1, 0x03, 0, 0}), false},
 	} {

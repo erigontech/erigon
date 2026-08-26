@@ -108,6 +108,36 @@ func PBinEncodeLegacyState(current []byte) ([]byte, error) {
 	return out, nil
 }
 
+// PBinEncodeLegacyRootRecord rewrites a current root-cell record in the
+// pre-version format. The record is a bare cell: no branch header, and a prefix
+// that is never omitted.
+func PBinEncodeLegacyRootRecord(current []byte) ([]byte, error) {
+	if len(current) == 0 {
+		return nil, nil
+	}
+	var root pbinCell
+	pos, err := pbinDecodeCell(current, 0, &root, 0, nil, false)
+	if err != nil {
+		return nil, fmt.Errorf("pbin encode legacy: root record: %w", err)
+	}
+	if pos != len(current) {
+		return nil, fmt.Errorf("%w: %d trailing bytes after the root cell", errPBinMalformedBranch, len(current)-pos)
+	}
+	return pbinEncodeLegacyCell(nil, &root)
+}
+
+// PBinRootRecordIsLegacy reports whether a root-cell record still spells its
+// fields with lengths. The current format gives every field a fixed width, so a
+// legacy record always leaves its length bytes over.
+func PBinRootRecordIsLegacy(data []byte) bool {
+	if len(data) == 0 {
+		return false
+	}
+	var root pbinCell
+	pos, err := pbinDecodeCell(data, 0, &root, 0, nil, false)
+	return err != nil || pos != len(data)
+}
+
 func pbinEncodeLegacyCell(dst []byte, c *pbinCell) ([]byte, error) {
 	var fields pbinCellFields
 	switch c.kind {
@@ -199,6 +229,35 @@ func (c *PBinRecordConverter) ConvertBranch(key, data []byte) ([]byte, error) {
 		if got[bit] != cells[bit] {
 			return nil, fmt.Errorf("pbin convert: record at %x cell %d does not round-trip", key, bit)
 		}
+	}
+	return out, nil
+}
+
+// ConvertRootRecord rewrites the bare cell stored under the root key. It has no
+// branch header, so the leading zero that marks a legacy branch record is absent
+// and the key is the only thing that names it.
+func (c *PBinRecordConverter) ConvertRootRecord(data []byte) ([]byte, error) {
+	if len(data) == 0 {
+		return nil, nil
+	}
+	var root pbinCell
+	pos, err := pbinLegacyDecodeCell(data, 0, &root)
+	if err != nil {
+		return nil, fmt.Errorf("pbin convert: root record: %w", err)
+	}
+	if pos != len(data) {
+		return nil, fmt.Errorf("%w: %d trailing bytes after the root cell", errPBinMalformedBranch, len(data)-pos)
+	}
+	out, err := pbinAppendCell(nil, &root, false)
+	if err != nil {
+		return nil, fmt.Errorf("pbin convert: root record: %w", err)
+	}
+	var got pbinCell
+	if pos, err = pbinDecodeCell(out, 0, &got, 0, &c.keys, false); err != nil {
+		return nil, fmt.Errorf("pbin convert: verify root record: %w", err)
+	}
+	if pos != len(out) || got != root {
+		return nil, fmt.Errorf("pbin convert: root record does not round-trip")
 	}
 	return out, nil
 }

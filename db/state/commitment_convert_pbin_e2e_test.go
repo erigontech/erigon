@@ -154,7 +154,8 @@ func assertE2EConvertedPBinFiles(t *testing.T, sourceFiles map[string]e2ePBinFil
 				require.NoError(t, state.VerifyPBinStateConversionForTest(sourceValue, outputValue), name)
 				stateRoots++
 			case isPBinRootKey(key):
-				require.Equal(t, sourceValue, outputValue, "%s pair %d root", name, i)
+				require.True(t, commitment.PBinRootRecordIsLegacy(sourceValue), "%s pair %d source root is not legacy", name, i)
+				require.False(t, commitment.PBinRootRecordIsLegacy(outputValue), "%s pair %d root remains legacy", name, i)
 			case len(sourceValue) > 0:
 				if i%2 == 0 {
 					require.NoError(t, converter.CompareLegacy(key, sourceValue, outputValue), "%s pair %d", name, i)

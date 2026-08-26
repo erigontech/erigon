@@ -161,7 +161,7 @@ func rewritePBinFileAsLegacy(t *testing.T, agg *state.Aggregator, file kv.Visibl
 		case bytes.Equal(keys[i], commitmentdb.KeyCommitmentState):
 			value, err = legacyPBinStateValue(value)
 		case isPBinRootKey(keys[i]):
-			value = append([]byte(nil), value...)
+			value, err = commitment.PBinEncodeLegacyRootRecord(value)
 		case len(value) > 0:
 			value, err = commitment.PBinEncodeLegacyRecord(keys[i], value)
 		}

@@ -197,6 +197,12 @@ func pbinFileHasLegacy(ctx context.Context, d *Domain, file *FilesItem) (bool, e
 			}
 			continue
 		}
+		if commitment.PBinIsRootKey(key) {
+			if commitment.PBinRootRecordIsLegacy(value) {
+				return true, nil
+			}
+			continue
+		}
 		if pbinRecordIsLegacy(value) {
 			return true, nil
 		}
@@ -373,6 +379,8 @@ func convertPBinFile(ctx context.Context, at *AggregatorRoTx, file VisibleFile, 
 			if err == nil {
 				err = pbinVerifyStateConversion(converter, value, outputValue)
 			}
+		case commitment.PBinIsRootKey(key) && commitment.PBinRootRecordIsLegacy(value):
+			outputValue, err = converter.ConvertRootRecord(value)
 		case pbinRecordIsLegacy(value):
 			outputValue, err = converter.ConvertBranch(key, value)
 			if err == nil {

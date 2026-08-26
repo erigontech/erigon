@@ -149,6 +149,10 @@ var ErrPBinUnsupported = errors.New("pbin: unsupported under the bin commitment 
 // whole table.
 var pbinRootKey = []byte{0x08}
 
+// PBinIsRootKey reports whether key names the root-cell record. The record is a
+// bare cell, so nothing in its bytes distinguishes it from a branch record.
+func PBinIsRootKey(key []byte) bool { return bytes.Equal(key, pbinRootKey) }
+
 // Process folds the update stream into the tree and returns the new root.
 // HashSort hands keys over in tree-key order, which is descent order, so the
 // grid only ever walks the path between two consecutive keys. warmup is
