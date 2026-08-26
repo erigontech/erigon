@@ -49,30 +49,31 @@ const (
 	entryHeaderSize = 4 // valLen, in front of the entry's bytes in its chunk
 )
 
+// writeField writes f as a varint length then its bytes. A nil f writes -1, so
+// a reader tells it apart from an empty one.
+func writeField(w io.Writer, numBuf []byte, f []byte) error {
+	n := int64(len(f))
+	if f == nil {
+		n = -1
+	}
+	if _, err := w.Write(numBuf[:binary.PutVarint(numBuf, n)]); err != nil {
+		return err
+	}
+	if len(f) == 0 {
+		return nil
+	}
+	_, err := w.Write(f)
+	return err
+}
+
 // writeSortedEntries writes buffer entries to w in varint-length-prefixed format.
 func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 	var numBuf [binary.MaxVarintLen64]byte
 	for _, entry := range entries {
-		lk := int64(len(entry.key))
-		if entry.key == nil {
-			lk = -1
-		}
-		n := binary.PutVarint(numBuf[:], lk)
-		if _, err := w.Write(numBuf[:n]); err != nil {
+		if err := writeField(w, numBuf[:], entry.key); err != nil {
 			return err
 		}
-		if _, err := w.Write(entry.key); err != nil {
-			return err
-		}
-		lv := int64(len(entry.value))
-		if entry.value == nil {
-			lv = -1
-		}
-		n = binary.PutVarint(numBuf[:], lv)
-		if _, err := w.Write(numBuf[:n]); err != nil {
-			return err
-		}
-		if _, err := w.Write(entry.value); err != nil {
+		if err := writeField(w, numBuf[:], entry.value); err != nil {
 			return err
 		}
 	}
