@@ -38,10 +38,10 @@ type sd interface {
 	SetTxNum(blockNum uint64)
 	AsStateGetter(tx kv.TemporalTx, opts execctxapi.StateGetterOptions) execctxapi.StateGetter
 	AsPutDel(tx kv.TemporalTx) kv.TemporalPutDel
-	// AsPutDelWithCommitmentDiff is AsPutDel, but routes commitment-domain
+	// AsPutDelWithDiff is AsPutDel, but routes commitment-domain
 	// writes into diff explicitly instead of through SetChangesetAccumulator
 	// — see SharedDomainsCommitmentContext.ComputeCommitmentWithDiff.
-	AsPutDelWithCommitmentDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel
+	AsPutDelWithDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel
 	// MergeMetrics hands a finished worker's lock-free metrics accumulator to
 	// the per-batch aggregate and the process-level collector (once, not per
 	// read), tagged with source.
@@ -235,10 +235,9 @@ func NewSharedDomainsCommitmentContext(sd sd, mode commitment.Mode, tmpDir strin
 // the per-ComputeCommitment lock-free metrics accumulator (nil-value => no
 // metrics); the main fold is single-goroutine so it owns that accumulator
 // exclusively. Warmup/concurrent-mount readers get their own via the factories.
-func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context, diff *kv.DomainDiff, useDiff bool) *TrieContext {
-	putter := sdc.sharedDomains.AsPutDel(tx)
-	if useDiff {
-		putter = sdc.sharedDomains.AsPutDelWithCommitmentDiff(tx, diff)
+func (sdc *SharedDomainsCommitmentContext) trieContext(tx kv.TemporalTx, blockNum, txNum uint64, readCtx context.Context, putter kv.TemporalPutDel) *TrieContext {
+	if putter == nil {
+		putter = sdc.sharedDomains.AsPutDel(tx)
 	}
 	mainTtx := &TrieContext{
 		putter:   putter,
@@ -414,22 +413,17 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, ni
 // which flushes pending deferred updates first. Direct callers must ensure
 // pendingUpdate is nil (i.e. deferred mode is not active or was flushed).
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
-	return sdc.computeCommitment(ctx, tx, saveState, blockNum, txNum, logPrefix, onProgress, nil, false)
+	return sdc.computeCommitment(ctx, tx, saveState, blockNum, txNum, logPrefix, onProgress, nil)
 }
 
 // ComputeCommitmentWithDiff is ComputeCommitment, but this call's own
-// commitment-domain writes (branch nodes, the [state] marker) route directly
-// into diff instead of through whatever SetChangesetAccumulator installed.
-// diff may be nil (no changeset recording, e.g. an isolated pre-window
-// block). Unlike ComputeCommitment, it does not flush the previous call's
-// pending deferred update itself — callers resolve and flush that
-// separately before calling this, since its target (the previous block's
-// own changeset) is independent of this call's diff.
+// commitment-domain writes route directly into diff instead of through
+// whatever SetChangesetAccumulator installed. diff may be nil.
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitmentWithDiff(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), diff *kv.DomainDiff) (rootHash []byte, err error) {
-	return sdc.computeCommitment(ctx, tx, saveState, blockNum, txNum, logPrefix, onProgress, diff, true)
+	return sdc.computeCommitment(ctx, tx, saveState, blockNum, txNum, logPrefix, onProgress, sdc.sharedDomains.AsPutDelWithDiff(tx, diff))
 }
 
-func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), diff *kv.DomainDiff, useDiff bool) (rootHash []byte, err error) {
+func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress), putter kv.TemporalPutDel) (rootHash []byte, err error) {
 	if sdc.pendingUpdate != nil {
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
 	}
@@ -471,7 +465,7 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 	defer sdc.sharedDomains.MergeMetrics(kvmetrics.SourceCommitment, commitMetrics)
 	readCtx := kvmetrics.ContextWithMetrics(ctx, commitMetrics)
 
-	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx, diff, useDiff)
+	trieContext := sdc.trieContext(tx, blockNum, txNum, readCtx, putter)
 
 	// If trie trace is configured, wrap the context with a recorder.
 	// Block-targeted: when TrieTraceBlock is set, only record that specific block.
@@ -822,7 +816,7 @@ func (sdc *SharedDomainsCommitmentContext) LatestCommitmentState(trieContext *Tr
 // SeekCommitment searches for last encoded state from DomainCommitted
 // and if state found, sets it up to current domain
 func (sdc *SharedDomainsCommitmentContext) SeekCommitment(ctx context.Context, tx kv.TemporalTx) (txNum, blockNum uint64, err error) {
-	trieContext := sdc.trieContext(tx, 0, 0, ctx, nil, false) // blockNum/txNum not yet known; trieContext only used for reading here
+	trieContext := sdc.trieContext(tx, 0, 0, ctx, nil) // blockNum/txNum not yet known; trieContext only used for reading here
 
 	_, _, state, err := sdc.LatestCommitmentState(trieContext)
 	if err != nil {

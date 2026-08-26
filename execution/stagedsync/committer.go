@@ -904,10 +904,14 @@ func (cc *commitmentCalculator) compute(ctx context.Context, t commitTarget, m c
 // computeIsolated computes and flushes its own deferred updates with no
 // changeset diff, so a block that owns no changeset records into none.
 func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTarget) ([]byte, error) {
-	// flushes the previous block's own pending update, hash-routed
+	// Flushes the previous block's own pending update, hash-routed. The swap to
+	// nil covers the case where that block owns no saved changeset: without it
+	// the flush falls back to whatever accumulator is currently live, leaking a
+	// pre-window block's branch deltas into a later window block's changeset.
 	if err := func() error {
 		cc.doms.LockChangesetAccumulator()
 		defer cc.doms.UnlockChangesetAccumulator()
+		defer cc.doms.SwapCommitmentDiffLocked(nil)()
 		return cc.doms.FlushPendingUpdatesLocked(ctx, cc.roTx)
 	}(); err != nil {
 		return nil, err
@@ -917,7 +921,7 @@ func (cc *commitmentCalculator) computeIsolated(ctx context.Context, t commitTar
 	if err != nil {
 		return nil, err
 	}
-	if err := cc.doms.FlushPendingUpdatesWithDiff(ctx, cc.roTx, nil); err != nil {
+	if err := cc.doms.FlushPendingUpdatesWithoutChangeset(cc.roTx); err != nil {
 		return nil, err
 	}
 	return rh, nil
@@ -951,7 +955,7 @@ func (cc *commitmentCalculator) computeAndCheck(ctx context.Context, target comm
 // update with no changeset diff — a pre-window block's branch deltas must not
 // pend into the first window block's changeset-routed compute.
 func (cc *commitmentCalculator) flushPendingUpdatesWithoutChangeset(ctx context.Context, target commitTarget) {
-	if err := cc.doms.FlushPendingUpdatesWithDiff(ctx, cc.roTx, nil); err != nil {
+	if err := cc.doms.FlushPendingUpdatesWithoutChangeset(cc.roTx); err != nil {
 		cc.publish(ctx, commitmentResult{
 			blockNum: target.blockNum,
 			txNum:    target.lastTxNum,
@@ -1014,12 +1018,6 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		}
 	}()
 
-	// GetChangesetByHash is self-contained (its own pastChangesLock, not
-	// changesetMu) and its result is used directly below as this call's own
-	// diff — no lock needed to keep it "fresh" against a concurrent rotation,
-	// since nothing here compares it against later-observed shared state.
-	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
-
 	// Flush block N-1's own pending update (hash-routed to N-1's saved
 	// changeset, independent of N's diff below) — the one remaining
 	// changesetMu window, brief rather than spanning the fold that follows.
@@ -1031,24 +1029,25 @@ func (cc *commitmentCalculator) computeWithBlockAccumulator(ctx context.Context,
 		return nil, err
 	}
 
-	// This call's own writes (branch nodes, the [state] marker, and any
-	// deferred update ComputeCommitment leaves pending) route directly into
-	// diff — see DomainPutCommitmentDiff — so nothing here needs changesetMu
-	// against a concurrent SetChangesetAccumulator.
+	// This call's own writes (branch nodes and the [state] marker) route
+	// directly into diff — see DomainPutCommitmentDiff — so nothing here needs
+	// changesetMu against a concurrent SetChangesetAccumulator. A deferred
+	// update ComputeCommitment leaves pending is NOT covered by diff: it is
+	// flushed hash-routed by the next call's FlushPendingUpdatesLocked above.
 	//
-	// A mid-block step-boundary compute always hits cs == nil: the exec loop
-	// only calls SavePastChangesetAccumulator once the whole block is done,
-	// so this falls back to whatever's currently live. That is guaranteed to
-	// still be N's own: the exec loop installs N's changeset before sending
-	// any of N's txResults, and only rotates away from it (on the same
-	// goroutine, strictly after the save) once N is fully done — so a nil
-	// GetChangesetByHash(N) result is itself proof the rotation away from N
-	// hasn't happened yet. Using nil here instead would silently drop this
-	// step's writes from the changeset.
+	// A mid-block step-boundary compute finds no saved changeset for N, since
+	// the exec loop saves only once the whole block is done, and falls back to
+	// the live accumulator. Read live before the saved lookup: the exec loop
+	// saves N strictly before it rotates away from N, so whichever of the two
+	// reads lands after a rotation, the other still identifies N's changeset.
+	// Using nil here would silently drop this step's writes.
+	live := cc.doms.GetChangesetAccumulator()
+	cs := cc.doms.GetChangesetByHash(t.blockNum, t.blockHash)
+
 	var diff *kv.DomainDiff
 	if cs != nil {
 		diff = &cs.Diffs[kv.CommitmentDomain]
-	} else if live := cc.doms.GetChangesetAccumulator(); live != nil {
+	} else if live != nil {
 		diff = &live.Diffs[kv.CommitmentDomain]
 	}
 	return cc.doms.GetCommitmentContext().ComputeCommitmentWithDiff(ctx, cc.roTx, true, t.blockNum, t.lastTxNum, cc.logPrefix, nil, diff)

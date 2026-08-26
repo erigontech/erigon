@@ -22,9 +22,9 @@ import (
 	"errors"
 	"fmt"
 	"math/rand"
-	"runtime"
 	"sync"
 	"testing"
+	"time"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
@@ -870,7 +870,29 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 				return
 			default:
 				doms.GetChangesetAccumulator()
-				runtime.Gosched()
+				time.Sleep(time.Microsecond)
+			}
+		}
+	}()
+
+	// Drain `out` concurrently: the producer below blocks on `in` if the
+	// calculator stops consuming, and the calculator stops consuming as soon as
+	// it blocks on a full `out`. Sizing the buffer to the worst-case publish
+	// count would make the test hang on any later change to numBlocks or the
+	// step size. `out` closes after loop() returns, which ends the range.
+	var drainWG sync.WaitGroup
+	var drainMu sync.Mutex
+	var drainErrs []error
+	drainWG.Add(1)
+	go func() {
+		defer drainWG.Done()
+		for r := range out {
+			// Root mismatches are expected here (no real state root is
+			// computed) and irrelevant — this test is about changeset routing.
+			if r.err != nil && !errors.Is(r.err, ErrWrongTrieRoot) {
+				drainMu.Lock()
+				drainErrs = append(drainErrs, fmt.Errorf("block %d: %w", r.blockNum, r.err))
+				drainMu.Unlock()
 			}
 		}
 	}()
@@ -903,15 +925,8 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 		doms.SetChangesetAccumulator(nil)
 	}
 	close(in)
-
-	// Range rather than Stop() first: out closes only after loop() returns
-	// (see TestLoop_BlockRequestBeatsSameNumberedResult). Root mismatches are
-	// expected here (no real state root is computed) and irrelevant — this
-	// test is about changeset routing, not root correctness.
-	for r := range out {
-		require.True(t, r.err == nil || errors.Is(r.err, ErrWrongTrieRoot),
-			"block %d: unexpected compute error: %v", r.blockNum, r.err)
-	}
+	drainWG.Wait()
+	require.Empty(t, drainErrs, "unexpected compute errors")
 
 	for b := uint64(1); b <= numBlocks; b++ {
 		require.Positive(t, changesets[b].Diffs[kv.CommitmentDomain].Len(),
