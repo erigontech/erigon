@@ -32,8 +32,9 @@ import (
 // blocks one shard's writers for capacity/shards entries, not everyone for the
 // whole cache.
 //
-// Shards are selected from bits 32+ of the key; bucket indexing inside a shard
-// consumes bits 0-31, so the two never overlap (see idx).
+// Shards are selected from bits 16+ of the key, and bucket indexing inside a
+// shard runs off a mixed hash (see u64mix), so the two stay independent however
+// large a shard's table grows.
 type shardedLRU[V any] struct {
 	shards []*freelru.LRU[uint64, V]
 	mus    []sync.Mutex
@@ -84,7 +85,7 @@ func (s *shardedLRU[V]) newShard(capacity uint32) *freelru.LRU[uint64, V] {
 	// the mask path for the bucket index. Without it the fallback keys off the
 	// high hash bits, which are the shard-selection bits and so are constant
 	// inside a shard.
-	l, err := freelru.NewWithSize[uint64, V](capacity, uint32(math.NextPowerOfTwo(uint64(capacity)+uint64(capacity)/4)), u64identity)
+	l, err := freelru.NewWithSize[uint64, V](capacity, uint32(math.NextPowerOfTwo(uint64(capacity)+uint64(capacity)/4)), u64mix)
 	if err != nil {
 		panic(fmt.Sprintf("shardedLRU: New(%d): %s", capacity, err))
 	}
@@ -94,12 +95,13 @@ func (s *shardedLRU[V]) newShard(capacity uint32) *freelru.LRU[uint64, V] {
 	return l
 }
 
-// idx selects the shard from bits 32+. freelru hashes a key to a uint32, so
-// bucket indexing inside a shard only ever consumes bits 0-31 -- selecting the
-// shard from above them keeps the two disjoint at any table size. Sharing bits
-// would fix part of the bucket index within a shard, so a large table could
-// only reach a fraction of its buckets.
-func (s *shardedLRU[V]) idx(h uint64) uint64 { return (h >> 32) & s.mask }
+func (s *shardedLRU[V]) idx(h uint64) uint64 { return (h >> 16) & s.mask }
+
+// u64mix spreads the whole key into the 32 bits freelru indexes buckets with.
+// Truncating instead would let a large per-shard table index buckets with bits
+// idx already fixed for every key in the shard, leaving most of its buckets
+// unreachable and the rest on long chains.
+func u64mix(k uint64) uint32 { return uint32((k * 0x9E3779B97F4A7C15) >> 32) }
 
 func (s *shardedLRU[V]) Len() int { return int(s.n.Load()) }
 

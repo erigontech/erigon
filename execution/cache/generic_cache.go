@@ -211,7 +211,7 @@ func (c *GenericCache[T]) refundGrow(slots uint32) {
 // newShards builds the shard array with this cache's evict callback wired.
 // The callback is the sole subtractor of currentSize — every removal (capacity
 // eviction, Remove) accounts through it. Eviction victims are picked per shard
-// (hash bits 32+), which the put stripes (bits 0-7) don't cover, so any
+// (hash bits 16+), which the put stripes (bits 0-7) don't cover, so any
 // subtraction computed outside the callback races a cross-stripe eviction of
 // the same entry.
 func (c *GenericCache[T]) newShards(startCap, maxCap, shards uint32) *shardedLRU[entry[T]] {
