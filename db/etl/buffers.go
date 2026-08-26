@@ -80,14 +80,8 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-// etlAvgEntryBytes is what one entry is expected to average in its chunk:
-// entryHeaderSize plus key and value. Size() charges entryLocSize per entry
-// against the same budget, so entriesIn counts both.
-//
-// Under-estimating is the safe direction: a buffer of bigger entries flushes
-// before it reaches the predicted count, while smaller ones run past it and
-// pay a re-grow. So this is the smallest average worth planning for, not the
-// average actually seen.
+// etlAvgEntryBytes is deliberately under the average seen: bigger entries
+// flush before they reach the predicted count, smaller ones re-grow past it.
 var etlAvgEntryBytes = dbg.EnvInt("ETL_AVG_ENTRY_BYTES", 20)
 
 func entriesIn(bufBytes datasize.ByteSize) int {
@@ -124,10 +118,8 @@ const (
 	dataChunkBits = 20
 	dataChunkSize = 1 << dataChunkBits // 1MB
 
-	// maxKeyLen keeps a key inside one pooled chunk, alongside its header. Only
-	// a value may outgrow a chunk. It also keeps len(k) well clear of the int32
-	// the key length is stored as, where a wrap would read back as nil.
-	maxKeyLen = dataChunkSize - entryHeaderSize
+	// Sort slices a key straight out of its chunk, so only a value may outgrow one.
+	maxKeyLen = 4096
 
 	// The chunk index takes what is left of a positive int32, so one buffer
 	// addresses at most maxDataChunks*dataChunkSize bytes (~2GB); nextChunk
@@ -179,13 +171,10 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-// entryLoc locates a key/value pair: keyLen in the high half, offset in the
-// low half. offset packs the chunk index with the offset inside that chunk,
-// idx<<dataChunkBits | off, and addresses valLen, then the key, then the value.
-// A length of -1 means nil.
-//
-// Offsets rise with insertion order, which is what lets Sort order duplicate
-// keys without a stable sort.
+// entryLoc holds keyLen in the high half and, in the low half, the chunk index
+// packed with the offset inside it: idx<<dataChunkBits | off. A length of -1
+// means nil. Offsets rise with insertion order, which is what lets Sort order
+// duplicate keys without a stable sort.
 type entryLoc uint64
 
 func makeEntryLoc(keyLen, offset int32) entryLoc {
@@ -268,8 +257,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 }
 
 // Size counts the stored bytes, the tail wasted by the chunk still filling, and
-// entryLocSize bytes per entry for the entries slice. An entry's other
-// entryHeaderSize bytes are already inside the chunk bytes.
+// entryLocSize per entry. An entry's entryHeaderSize is already in chunkBytes.
 func (b *sortableBuffer) Size() int {
 	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + len(b.entries)*entryLocSize
 }
