@@ -557,6 +557,19 @@ func (s *Sentinel) onConnection(_ network.Network, conn network.Conn) {
 	go func() {
 		peerId := conn.RemotePeer()
 
+		// ConnectWithPeer refuses banned peers, but it only covers dials we initiate;
+		// connection events reach here either way.
+		if s.peers.BanStatus(peerId) {
+			s.closePeer(peerId)
+			return
+		}
+		// One handshake per peer at a time: a burst of events would otherwise start one
+		// each, all completing before the failure count could reach the ban threshold.
+		if !s.handshakeGate.tryAcquire(peerId) {
+			return
+		}
+		defer s.handshakeGate.release(peerId)
+
 		// Check if this peer helps any underserved subnets (< minimumPeersPerSubnet)
 		peerHelpsSubnets := false
 		if nodeVal, ok := s.pidToEnr.Load(peerId); ok {
