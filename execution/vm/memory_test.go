@@ -86,11 +86,11 @@ func TestMemoryCopy(t *testing.T) {
 	}
 }
 
-// TestMemoryResizeZeroesReusedBuffer pins the fast path Resize takes once a
-// pooled buffer is warm: a frame must not see the previous frame's bytes.
+// TestMemoryResizeZeroesReusedBuffer pins the fast path Resize takes once the
+// buffer is warm: a frame must not see the previous frame's bytes.
 func TestMemoryResizeZeroesReusedBuffer(t *testing.T) {
 	t.Parallel()
-	m := NewMemory()
+	var m Memory
 	m.Resize(64)
 	for i := range m.store {
 		m.store[i] = 0xFF
@@ -105,7 +105,7 @@ func TestMemoryResizeZeroesReusedBuffer(t *testing.T) {
 
 func TestMemoryResizeCapacity(t *testing.T) {
 	t.Parallel()
-	m := NewMemory()
+	var m Memory
 	m.Resize(32)
 	if got := cap(m.store); got != memoryPageSize {
 		t.Fatalf("cold resize to 32: cap %d, want %d", got, memoryPageSize)
@@ -114,6 +114,12 @@ func TestMemoryResizeCapacity(t *testing.T) {
 	m.Resize(memoryPageSize + 32)
 	if got := cap(m.store); got != 2*memoryPageSize {
 		t.Fatalf("grow past one page: cap %d, want %d", got, 2*memoryPageSize)
+	}
+
+	// Doubling wins over page alignment here: align-only would give 3 pages.
+	m.Resize(2*memoryPageSize + 32)
+	if got := cap(m.store); got != 4*memoryPageSize {
+		t.Fatalf("grow past two pages: cap %d, want %d", got, 4*memoryPageSize)
 	}
 }
 
