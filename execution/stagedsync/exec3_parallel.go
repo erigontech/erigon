@@ -641,6 +641,9 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					block := applyResult.Block
 					blockNum := block.NumberU64()
 					blockHash := block.Hash()
+					// Above the paths that abandon the block below: a superseded
+					// set has no reader left, whatever the block's verdict.
+					applyResult.superseded.release()
 					if finalized {
 						appliedBlocks[blockNum] = struct{}{}
 						continue
@@ -1787,6 +1790,28 @@ type blockResult struct {
 	AllDeps          map[int]map[int]bool
 	Exhausted        *ErrLoopExhausted
 	blockStateCache  *state.BlockStateCache
+	superseded       supersededWrites
+}
+
+// supersededWrites are merged write sets a later merge replaced. Nothing reaches
+// them from then on, and ReleaseMaps clears every map before pooling it -- which
+// is O(entries) per set -- so the exec loop only collects them and the apply loop
+// pays for them where it already releases the recorded write sets.
+type supersededWrites []*state.WriteSet
+
+func (s supersededWrites) release() {
+	for _, ws := range s {
+		ws.ReleaseMaps()
+	}
+}
+
+// takeSuperseded hands the collected sets to a block result and clears the
+// executor's slice, so the same sets cannot also reach a later result. The apply
+// loop pools them, and a second handoff would release them twice.
+func (be *blockExecutor) takeSuperseded() supersededWrites {
+	s := be.superseded
+	be.superseded = nil
+	return s
 }
 
 type txResult struct {
@@ -2349,7 +2374,9 @@ type blockExecutor struct {
 	// some execResult's TxOut, which stays live.
 	feeMergeTemp map[int]feeMerge
 
-	mapReleasing sync.WaitGroup
+	// superseded collects the merged sets a later merge replaced, for the apply
+	// loop to pool once the block is done with them.
+	superseded supersededWrites
 
 	// settledInput[tx]==true marks a task that was dispatched when every
 	// preceding task had already validated — so it executed against fully
@@ -2515,8 +2542,9 @@ func (be *blockExecutor) hash() common.Hash { return be.block.Hash() }
 // completeness check doesn't double-report, and surfaces the error.
 func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	return &blockResult{
-		Block: be.block,
-		Err:   err,
+		Block:      be.block,
+		Err:        err,
+		superseded: be.takeSuperseded(),
 	}
 }
 
@@ -2536,7 +2564,7 @@ func (be *blockExecutor) recordWorkerWrites(txVersion state.Version, writes *sta
 	be.blockIO.RecordWrites(txVersion, writes)
 	if temp, ok := be.feeMergeTemp[txVersion.TxIndex]; ok {
 		if temp.writes != writes {
-			be.queueMapRelease(temp.writes)
+			be.superseded = append(be.superseded, temp.writes)
 		}
 		delete(be.feeMergeTemp, txVersion.TxIndex)
 	}
@@ -2588,7 +2616,7 @@ func (be *blockExecutor) recordFeeMerge(txVersion state.Version, prev, tipWrites
 	// this tx's writes still holds the superseded set the release clears.
 	be.blockIO.RecordWrites(txVersion, merged)
 	if stale != nil {
-		be.queueMapRelease(stale)
+		be.superseded = append(be.superseded, stale)
 	}
 	if outcome == feeCreditNew {
 		be.feeMergeTemp[txVersion.TxIndex] = feeMerge{writes: merged, base: base, version: txVersion}
@@ -2607,40 +2635,6 @@ func (be *blockExecutor) dropStaleVersionedWrites(txVersion state.Version, prev,
 		}
 	}
 }
-
-// ReleaseMaps clears every map before pooling it, which is O(entries), and a
-// superseded fee-merge set holds the whole tx's writes. Keep it off the apply
-// loop, which is the serial stage the workers wait behind.
-type mapRelease struct {
-	ws      *state.WriteSet
-	pending *sync.WaitGroup
-}
-
-var (
-	mapReleases     = make(chan mapRelease, 4096)
-	mapReleaseStart sync.Once
-)
-
-func (be *blockExecutor) queueMapRelease(ws *state.WriteSet) {
-	mapReleaseStart.Do(func() {
-		go func() {
-			for r := range mapReleases {
-				r.ws.ReleaseMaps()
-				r.pending.Done()
-			}
-		}()
-	})
-	be.mapReleasing.Add(1)
-	select {
-	case mapReleases <- mapRelease{ws, &be.mapReleasing}:
-	default:
-		// Releaser is behind; inline costs less than blocking the apply loop.
-		ws.ReleaseMaps()
-		be.mapReleasing.Done()
-	}
-}
-
-func (be *blockExecutor) awaitMapReleases() { be.mapReleasing.Wait() }
 
 // tooManyRetries returns an invalid-block result when tx has exceeded its
 // retry budget, otherwise nil. origin may be nil (validator-invalid path)
@@ -3402,6 +3396,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			AllDeps:          allDeps,
 			Exhausted:        be.exhausted,
 			blockStateCache:  be.blockStateCache,
+			superseded:       be.takeSuperseded(),
 		}
 		return be.result, nil
 	}
