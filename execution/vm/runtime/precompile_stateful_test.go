@@ -435,3 +435,109 @@ func TestStatefulPrecompileNetStateRefundSucceeds(t *testing.T) {
 	require.Equal(t, int64(-60), gasUsed.State)
 	require.Equal(t, uint64(0), gasUsed.Execution, "a net state refund must not inflate execution usage")
 }
+
+// staticEscapePrecompile reaches back into the EVM the way an integrator's
+// precompile would, and records what each entry point returned.
+type staticEscapePrecompile struct {
+	target    accounts.Address
+	callErr   error
+	createErr error
+}
+
+func (*staticEscapePrecompile) RequiredGas([]byte) uint64  { return 0 }
+func (*staticEscapePrecompile) Run([]byte) ([]byte, error) { return nil, nil }
+func (*staticEscapePrecompile) Name() string               { return "ESCAPE" }
+
+func (p *staticEscapePrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, ctx *vm.PrecompileContext) ([]byte, error) {
+	handed := gas.Remaining()
+	_, _, _, p.callErr = ctx.Evm.Call(ctx.Self, p.target, nil, handed, *uint256.NewInt(5), false)
+	_, _, _, _, p.createErr = ctx.Evm.Create(ctx.Self, []byte{0x00}, handed, uint256.Int{}, nil, false)
+	return nil, nil
+}
+
+// TestStatefulPrecompileCannotEscapeStaticContext pins the value transfer and
+// the account creation, which the interpreter refuses while charging gas for
+// CALL and CREATE — a path ctx.Evm skips entirely.
+func TestStatefulPrecompileCannotEscapeStaticContext(t *testing.T) {
+	const chainID = 900410
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8f}))
+	target := accounts.InternAddress(common.HexToAddress("0x7a49"))
+	p := &staticEscapePrecompile{target: target}
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: p}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	cfg := newStatefulTestConfig(t, chainID)
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+	require.NoError(t, cfg.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
+
+	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000})
+	require.NoError(t, err)
+	require.ErrorIs(t, p.callErr, vm.ErrWriteProtection, "a value-bearing CALL out of a static frame must be refused")
+	require.ErrorIs(t, p.createErr, vm.ErrWriteProtection, "CREATE out of a static frame must be refused")
+
+	balance, err := cfg.State.GetBalance(target)
+	require.NoError(t, err)
+	require.True(t, balance.IsZero(), "no value may leave a static frame")
+
+	// Control arm: the same precompile under a plain CALL still moves value,
+	// so the gate is scoped to the static context and not to ctx.Evm.
+	p.callErr, p.createErr = nil, nil
+	cfg2 := newStatefulTestConfig(t, chainID)
+	vmenv2 := prepareStatefulCall(t, cfg2, precompileAddr)
+	require.NoError(t, cfg2.State.AddBalance(precompileAddr, *uint256.NewInt(100), tracing.BalanceChangeUnspecified))
+
+	_, _, _, err = vmenv2.Call(cfg2.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000, State: 1_000_000}, uint256.Int{}, false)
+	require.NoError(t, err)
+	require.NoError(t, p.callErr)
+	balance, err = cfg2.State.GetBalance(target)
+	require.NoError(t, err)
+	require.Equal(t, uint64(5), balance.Uint64())
+}
+
+type reservoirChargeStatefulPrecompile struct{ amount uint64 }
+
+func (reservoirChargeStatefulPrecompile) RequiredGas([]byte) uint64  { return 0 }
+func (reservoirChargeStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil }
+func (reservoirChargeStatefulPrecompile) Name() string               { return "RESERVOIR" }
+
+func (p reservoirChargeStatefulPrecompile) RunStateful(_ []byte, gas *vm.PrecompileGas, _ *vm.PrecompileContext) ([]byte, error) {
+	if !gas.ChargeState(p.amount) {
+		return nil, vm.ErrOutOfGas
+	}
+	return nil, nil
+}
+
+// TestStatefulPrecompileStateChargeIsTraced pins the gas-event stream against
+// the interpreter's useMdGas: a state charge the EIP-8037 reservoir covers in
+// full reports the state dimension, so reading only the execution figures
+// drops the event entirely.
+func TestStatefulPrecompileStateChargeIsTraced(t *testing.T) {
+	const chainID = 900411
+	const reservoir, charge = uint64(500), uint64(40)
+	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x90}))
+	vm.RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) vm.PrecompiledContracts {
+		return vm.PrecompiledContracts{precompileAddr: reservoirChargeStatefulPrecompile{amount: charge}}
+	})
+	t.Cleanup(func() { vm.UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	type gasEvent struct{ from, to uint64 }
+	var events []gasEvent
+
+	cfg := newStatefulTestConfig(t, chainID)
+	cfg.EVMConfig.Tracer = &tracing.Hooks{
+		OnGasChange: func(from, to uint64, _ tracing.GasChangeReason) {
+			events = append(events, gasEvent{from, to})
+		},
+	}
+	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
+
+	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil,
+		mdgas.MdGas{Execution: 10_000, State: reservoir}, uint256.Int{}, false)
+	require.NoError(t, err)
+	// The surrounding frame-enter and frame-exit events report execution gas;
+	// only the charge itself is in the state dimension.
+	require.Contains(t, events, gasEvent{reservoir, reservoir - charge},
+		"a reservoir-covered state charge must still reach the tracer")
+}

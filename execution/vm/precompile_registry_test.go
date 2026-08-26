@@ -18,6 +18,7 @@ package vm
 
 import (
 	"reflect"
+	"sync"
 	"testing"
 
 	"github.com/holiman/uint256"
@@ -225,6 +226,48 @@ func TestRegisterSweepsStaleCache(t *testing.T) {
 	require.True(t, ok, "the newly registered provider's overlay must be served")
 	_, ok = merged[oldAddr]
 	require.False(t, ok, "the unregistered provider's overlay must not survive re-registration")
+}
+
+// TestInFlightProviderCannotCacheAcrossReRegistration drives the ordering the
+// generation token exists for: the old provider's call passes the cache miss,
+// blocks, and resumes only after both the unregister and the re-registration
+// have swept the cache. Its insert then lands after both sweeps, and every
+// later lookup is a hit on the retired provider's overlay.
+func TestInFlightProviderCannotCacheAcrossReRegistration(t *testing.T) {
+	const chainID = 900506
+	oldAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x4a}))
+	newAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x4b}))
+	rules := rulesForChain(chainID, 0)
+
+	entered, release := make(chan struct{}), make(chan struct{})
+	var once sync.Once
+	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
+		once.Do(func() { close(entered) })
+		<-release
+		return PrecompiledContracts{oldAddr: stubPrecompile{"OLD"}}
+	})
+
+	done := make(chan struct{})
+	go func() {
+		defer close(done)
+		Precompiles(rules)
+	}()
+	<-entered
+
+	UnregisterPrecompiles(uint256.NewInt(chainID))
+	RegisterPrecompiles(uint256.NewInt(chainID), func(uint64) PrecompiledContracts {
+		return PrecompiledContracts{newAddr: stubPrecompile{"NEW"}}
+	})
+	t.Cleanup(func() { UnregisterPrecompiles(uint256.NewInt(chainID)) })
+
+	close(release)
+	<-done
+
+	merged := Precompiles(rules)
+	_, ok := merged[newAddr]
+	require.True(t, ok, "the provider registered last must be served")
+	_, ok = merged[oldAddr]
+	require.False(t, ok, "a provider call in flight across the swap must not cache its overlay")
 }
 
 // TestProviderNilContractPanics pins that a nil entry is rejected where it is

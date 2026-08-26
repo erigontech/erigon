@@ -404,6 +404,14 @@ func (evm *EVM) call(typ OpCode, caller accounts.Address, callerAddress accounts
 	}
 	syscall := isSystemCall(caller)
 
+	// The interpreter rejects a value-bearing CALL from a static frame while
+	// charging gas (statelessGasCall). A stateful precompile calling back in
+	// through PrecompileContext.Evm never passes through that, so the frame
+	// entry has to hold the same line or the transfer below runs.
+	if evm.readOnly && typ == CALL && !value.IsZero() {
+		return nil, gasRemaining, mdgas.MdGasUsage{}, ErrWriteProtection
+	}
+
 	if typ == CALL || typ == CALLCODE {
 		// Fail if we're trying to transfer more than the available balance.
 		// Skip the check for zero-value calls, matching geth's short-circuit.
@@ -661,6 +669,13 @@ func (evm *EVM) createPrepared(caller accounts.Address, codeAndHash *codeAndHash
 
 func (evm *EVM) createWithPreparation(caller accounts.Address, codeAndHash *codeAndHash, gas mdgas.MdGas, value uint256.Int, address accounts.Address, typ OpCode, incrementNonce bool, bailout bool, preparation *createPreparation) (ret []byte, createAddress accounts.Address, gasRemaining mdgas.MdGas, gasUsed mdgas.MdGasUsage, err error) {
 	gasRemaining = gas
+
+	// Same reason as evm.call: gasCreate holds this line for the opcodes, and a
+	// stateful precompile reaching CREATE through PrecompileContext.Evm does not
+	// go through it.
+	if evm.readOnly {
+		return nil, accounts.Address{}, gasRemaining, mdgas.MdGasUsage{}, ErrWriteProtection
+	}
 
 	if dbg.TraceTransactionIO && (evm.intraBlockState.Trace() || dbg.TraceAccount(caller.Handle())) {
 		defer func() {

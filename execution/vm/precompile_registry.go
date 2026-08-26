@@ -43,8 +43,11 @@ import (
 type PrecompilesFunc func(l2Version uint64) PrecompiledContracts
 
 var (
-	registryMu  sync.RWMutex
-	providers   = map[uint256.Int]PrecompilesFunc{}
+	registryMu sync.RWMutex
+	providers  = map[uint256.Int]PrecompilesFunc{}
+	// registryGen advances on every provider change. A merged set built from a
+	// provider read before the change must not be cached after it.
+	registryGen uint64
 	mergedCache = map[precompileCacheKey]*mergedPrecompileSet{}
 )
 
@@ -66,9 +69,7 @@ func RegisterPrecompiles(chainID *uint256.Int, f PrecompilesFunc) {
 		panic(fmt.Sprintf("vm: RegisterPrecompiles: chain ID %s already registered", chainID))
 	}
 	providers[*chainID] = f
-	// A provider call that was in flight during an earlier unregister can insert
-	// its merged set after the sweep, so drop anything left for this chain
-	// rather than serving the previous provider's overlay.
+	registryGen++
 	dropCachedLocked(*chainID)
 }
 
@@ -81,6 +82,7 @@ func UnregisterPrecompiles(chainID *uint256.Int) {
 	registryMu.Lock()
 	defer registryMu.Unlock()
 	delete(providers, *chainID)
+	registryGen++
 	dropCachedLocked(*chainID)
 }
 
@@ -114,16 +116,19 @@ func rulesChainID(rules *chain.Rules) uint256.Int {
 	return *rules.ChainID
 }
 
-func lookupProvider(chainID uint256.Int) (PrecompilesFunc, bool) {
+func lookupProvider(chainID uint256.Int) (f PrecompilesFunc, gen uint64, ok bool) {
 	registryMu.RLock()
 	defer registryMu.RUnlock()
-	f, ok := providers[chainID]
-	return f, ok
+	f, ok = providers[chainID]
+	return f, registryGen, ok
 }
 
 // mergedSetFor returns the cached (contracts, addresses) pair for
 // (chainID, fork, rules.L2Version), building and caching it on first miss.
-func mergedSetFor(rules *chain.Rules, base PrecompiledContracts, fork forkTier, chainID uint256.Int, provider PrecompilesFunc) *mergedPrecompileSet {
+// gen is the registry generation the provider was read at; a set built from a
+// provider that has since been replaced is returned to its own caller but never
+// cached.
+func mergedSetFor(rules *chain.Rules, base PrecompiledContracts, fork forkTier, chainID uint256.Int, provider PrecompilesFunc, gen uint64) *mergedPrecompileSet {
 	key := precompileCacheKey{chainID: chainID, fork: fork, l2Version: rules.L2Version}
 
 	registryMu.RLock()
@@ -148,7 +153,9 @@ func mergedSetFor(rules *chain.Rules, base PrecompiledContracts, fork forkTier, 
 	if existing, ok := mergedCache[key]; ok {
 		return existing
 	}
-	mergedCache[key] = set
+	if registryGen == gen {
+		mergedCache[key] = set
+	}
 	return set
 }
 
@@ -178,11 +185,20 @@ type PrecompileGas struct {
 	tracer    *tracing.Hooks
 }
 
-// onGasChange reports a charge or refund the way RunPrecompiledContract does
-// for the plain path, so a tracer sees the same event stream either way.
-func (g *PrecompileGas) onGasChange(before uint64, reason tracing.GasChangeReason) {
-	if g.tracer != nil && g.tracer.OnGasChange != nil && before != g.remaining.Execution {
-		g.tracer.OnGasChange(before, g.remaining.Execution, reason)
+// onGasChange reports a charge or refund the way the interpreter's useMdGas
+// does, so a tracer sees the same event stream either way: a state charge the
+// EIP-8037 reservoir covers in full is reported in the state dimension, and
+// only a spill moves execution gas.
+func (g *PrecompileGas) onGasChange(before mdgas.MdGas, spilled uint64, typ mdgas.MdGasType, reason tracing.GasChangeReason) {
+	if g.tracer == nil || g.tracer.OnGasChange == nil {
+		return
+	}
+	from, to := before.Execution, g.remaining.Execution
+	if typ == mdgas.StateGas && spilled == 0 {
+		from, to = before.State, g.remaining.State
+	}
+	if from != to {
+		g.tracer.OnGasChange(from, to, reason)
 	}
 }
 
@@ -192,11 +208,11 @@ func (g *PrecompileGas) Remaining() mdgas.MdGas { return *g.remaining }
 // ChargeExecution deducts execution gas, reporting false and charging
 // nothing when the frame cannot cover it.
 func (g *PrecompileGas) ChargeExecution(amount uint64) bool {
-	before := g.remaining.Execution
+	before := *g.remaining
 	if !mdgas.Consume(g.remaining, g.used, amount, mdgas.ExecutionGas) {
 		return false
 	}
-	g.onGasChange(before, tracing.GasChangeCallPrecompiledContract)
+	g.onGasChange(before, 0, mdgas.ExecutionGas, tracing.GasChangeCallPrecompiledContract)
 	return true
 }
 
@@ -204,22 +220,20 @@ func (g *PrecompileGas) ChargeExecution(amount uint64) bool {
 // EIP-8037 reservoir is short. Reports false and charges nothing when
 // neither dimension can cover it.
 func (g *PrecompileGas) ChargeState(amount uint64) bool {
-	before := g.remaining.Execution
+	before, spilledBefore := *g.remaining, g.used.StateSpill
 	if !mdgas.Consume(g.remaining, g.used, amount, mdgas.StateGas) {
 		return false
 	}
-	// Only the spill moves execution gas, so a charge the reservoir covers
-	// reports nothing.
-	g.onGasChange(before, tracing.GasChangeCallPrecompiledContract)
+	g.onGasChange(before, g.used.StateSpill-spilledBefore, mdgas.StateGas, tracing.GasChangeCallPrecompiledContract)
 	return true
 }
 
 // RefundExecution gives execution gas back, e.g. the leftover a nested
 // ctx.Evm call returned.
 func (g *PrecompileGas) RefundExecution(amount uint64) {
-	before := g.remaining.Execution
+	before := *g.remaining
 	mdgas.Refill(g.remaining, g.used, amount, mdgas.ExecutionGas)
-	g.onGasChange(before, tracing.GasChangeCallLeftOverRefunded)
+	g.onGasChange(before, 0, mdgas.ExecutionGas, tracing.GasChangeCallLeftOverRefunded)
 }
 
 // RefundState reverses a state charge — clearing state the frame created, or
@@ -228,9 +242,9 @@ func (g *PrecompileGas) RefundExecution(amount uint64) {
 // it, and a frame that clears more than it created legitimately ends with a
 // negative net state usage.
 func (g *PrecompileGas) RefundState(amount uint64) {
-	before := g.remaining.Execution
+	before, spilledBefore := *g.remaining, g.used.StateSpill
 	mdgas.Refill(g.remaining, g.used, amount, mdgas.StateGas)
-	g.onGasChange(before, tracing.GasChangeCallLeftOverRefunded)
+	g.onGasChange(before, spilledBefore-g.used.StateSpill, mdgas.StateGas, tracing.GasChangeCallLeftOverRefunded)
 }
 
 // StatefulPrecompile is a PrecompiledContract that additionally receives the
