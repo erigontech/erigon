@@ -826,29 +826,64 @@ func TestLoop_BlockRequestBeatsSameNumberedResult(t *testing.T) {
 func TestComputeWithBlockAccumulator_ConcurrentRotation(t *testing.T) {
 	for _, deferUpdates := range []bool{false, true} {
 		t.Run(fmt.Sprintf("deferUpdates=%v", deferUpdates), func(t *testing.T) {
-			testComputeWithBlockAccumulatorConcurrentRotation(t, deferUpdates)
+			// The lock-step run is the oracle: identical inputs, but every block
+			// is computed before the producer rotates away from it, so routing
+			// there cannot be raced. Diffs from the lagging run must match it
+			// entry for entry — a per-block "is it non-empty" check would miss a
+			// misroute between two blocks that both wrote something.
+			want := runRotationWorkload(t, deferUpdates, false)
+			got := runRotationWorkload(t, deferUpdates, true)
+			for b := uint64(1); b <= rotationBlocks; b++ {
+				require.Equal(t, want[b], got[b],
+					"block %d: commitment diffs differ from the lock-step run — a concurrent accumulator rotation misrouted them", b)
+				require.NotEmpty(t, want[b], "block %d: lock-step run recorded no commitment diffs, so the comparison proves nothing", b)
+			}
 		})
 	}
 }
 
-func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdates bool) {
+const (
+	rotationBlocks     = uint64(24)
+	rotationTxsPerBlok = uint64(5)
+)
+
+// runRotationWorkload drives the calculator over rotationBlocks blocks, each
+// with its own changeset, and returns the commitment diffs that landed in each.
+// With lag, the producer never waits for the calculator, so accumulator
+// rotations land mid-compute; without it, each block is awaited before the next
+// rotation.
+func runRotationWorkload(t *testing.T, deferUpdates, lag bool) map[uint64][]kv.DomainEntryDiff {
+	t.Helper()
 	ctx := context.Background()
 	logger := log.New()
 	logger.SetHandler(log.DiscardHandler())
-	const numBlocks = uint64(24)
-	const txsPerBlock = uint64(5)
 
 	db, tx, doms := setupStepTest(t)
 	doms.SetDeferCommitmentUpdates(deferUpdates)
 
 	in := make(chan applyResult, 8)
-	out := make(chan commitmentResult, int(numBlocks)+8)
+	out := make(chan commitmentResult, int(rotationBlocks)+8)
 	// perBlockFrom=1: every block owns its own changeset, matching the
 	// changeset-window exec loop's per-block accumulator install/save/clear.
 	cc, err := newCommitmentCalculator(ctx, ctx, doms, db, &chain.Config{}, "test", logger, false, 1, in, nil, out)
 	require.NoError(t, err)
 	cc.Start(ctx)
-	t.Cleanup(cc.Stop)
+
+	var (
+		drainWG   sync.WaitGroup
+		drainMu   sync.Mutex
+		drainErrs []error
+		closeOnce sync.Once
+	)
+	// loop() exits only once in is closed — done is deliberately not an exit
+	// condition — so Stop deadlocks unless in is closed first. A require failure
+	// anywhere below would otherwise hang here instead of reporting.
+	closeIn := func() { closeOnce.Do(func() { close(in) }) }
+	t.Cleanup(func() {
+		closeIn()
+		cc.Stop()
+		drainWG.Wait()
+	})
 
 	// Adds extra contention on changesetMu from a third goroutine, unrelated
 	// to routing correctness but raising the odds of exposing any accumulator
@@ -857,13 +892,11 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 	// rather than leaving it spinning.
 	stopDistractor := make(chan struct{})
 	var distractorWG sync.WaitGroup
-	distractorWG.Add(1)
 	t.Cleanup(func() {
 		close(stopDistractor)
 		distractorWG.Wait()
 	})
-	go func() {
-		defer distractorWG.Done()
+	distractorWG.Go(func() {
 		for {
 			select {
 			case <-stopDistractor:
@@ -873,17 +906,16 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 				time.Sleep(time.Microsecond)
 			}
 		}
-	}()
+	})
 
-	// Drain `out` concurrently: the producer below blocks on `in` if the
-	// calculator stops consuming, and the calculator stops consuming as soon as
-	// it blocks on a full `out`. Sizing the buffer to the worst-case publish
-	// count would make the test hang on any later change to numBlocks or the
-	// step size. `out` closes after loop() returns, which ends the range.
-	var drainWG sync.WaitGroup
-	var drainMu sync.Mutex
-	var drainErrs []error
+	// Drain out concurrently: the producer below blocks on in if the calculator
+	// stops consuming, and the calculator stops consuming as soon as it blocks
+	// on a full out. Sizing the buffer to the worst-case publish count would
+	// make the test hang on any later change to rotationBlocks or the step size.
+	// out closes after loop() returns, which ends the range.
+	computed := make(chan uint64, 4*rotationBlocks)
 	drainWG.Go(func() {
+		defer close(computed)
 		for r := range out {
 			// Root mismatches are expected here (no real state root is
 			// computed) and irrelevant — this test is about changeset routing.
@@ -892,20 +924,23 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 				drainErrs = append(drainErrs, fmt.Errorf("block %d: %w", r.blockNum, r.err))
 				drainMu.Unlock()
 			}
+			if !lag {
+				computed <- r.blockNum
+			}
 		}
 	})
 
-	changesets := make(map[uint64]*changeset.StateChangeSet, numBlocks)
+	changesets := make(map[uint64]*changeset.StateChangeSet, rotationBlocks)
 	rnd := rand.New(rand.NewSource(42))
 	var txNum uint64
-	for b := uint64(1); b <= numBlocks; b++ {
+	for b := uint64(1); b <= rotationBlocks; b++ {
 		blockHash := common.Hash{byte(b)}
 		cs := &changeset.StateChangeSet{}
 		changesets[b] = cs
 		doms.SetChangesetAccumulator(cs)
 
 		var lastTx uint64
-		for range txsPerBlock {
+		for range rotationTxsPerBlok {
 			txNum++
 			lastTx = txNum
 			addrBytes := make([]byte, length.Addr)
@@ -920,15 +955,36 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 
 		doms.SavePastChangesetAccumulator(blockHash, b, cs)
 		in <- newTestBlockResult(b, blockHash, lastTx, false)
+		if !lag {
+			awaitBlockComputed(t, computed, b)
+		}
 		doms.SetChangesetAccumulator(nil)
 	}
-	close(in)
+	closeIn()
 	drainWG.Wait()
 	require.Empty(t, drainErrs, "unexpected compute errors")
 
-	for b := uint64(1); b <= numBlocks; b++ {
-		require.Positive(t, changesets[b].Diffs[kv.CommitmentDomain].Len(),
-			"block %d: no commitment diffs landed in its own saved changeset — a concurrent accumulator rotation may have misrouted them", b)
+	diffs := make(map[uint64][]kv.DomainEntryDiff, rotationBlocks)
+	for b := uint64(1); b <= rotationBlocks; b++ {
+		diffs[b] = changesets[b].Diffs[kv.CommitmentDomain].GetDiffSet()
+	}
+	return diffs
+}
+
+func awaitBlockComputed(t *testing.T, computed <-chan uint64, block uint64) {
+	t.Helper()
+	for {
+		select {
+		case bn, ok := <-computed:
+			if !ok {
+				t.Fatalf("calculator stopped before block %d was computed", block)
+			}
+			if bn == block {
+				return
+			}
+		case <-time.After(30 * time.Second):
+			t.Fatalf("block %d was not computed", block)
+		}
 	}
 }
 

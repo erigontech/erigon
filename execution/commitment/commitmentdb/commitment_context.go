@@ -566,9 +566,10 @@ func (sdc *SharedDomainsCommitmentContext) computeCommitment(ctx context.Context
 		}
 	}
 
-	// Note: pending deferred updates are flushed by SharedDomains.ComputeCommitment
-	// (the public wrapper) BEFORE this method is called. The wrapper routes the flush
-	// through FlushPendingUpdates which writes into the correct block's changeset.
+	// Note: pending deferred updates are flushed before this method is called —
+	// by SharedDomains.ComputeCommitment for the wrapper's callers, and by the
+	// calculator itself for the explicit-diff paths. Either way the flush is
+	// hash-routed into the correct block's changeset.
 
 	// When deferring commitment updates, tell Process() to leave deferred updates
 	// on the branch encoder instead of applying inline — we'll take them after.

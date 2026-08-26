@@ -690,7 +690,7 @@ func (cc *commitmentCalculator) computeRootFromBAL(ctx context.Context, req *blo
 
 // computeRootFromUpdates installs an explicit updates buffer + reader on the
 // commitment context and computes the root, routed by ownsChangeset exactly
-// like compute(): a pre-window block computes isolated (nil accumulator,
+// like compute(): a pre-window block computes isolated (no changeset diff,
 // flushing its own deferred update) so its branch deltas never pend into a
 // later window block's changeset. Used by BAL compute-ahead, which supplies
 // its own balState-derived updates rather than cc.state.
@@ -934,12 +934,13 @@ func (cc *commitmentCalculator) publish(ctx context.Context, r commitmentResult)
 	}
 }
 
-// computeWithBlockAccumulator runs ComputeCommitment with the changeset
-// accumulator switched to block N's saved changeset (looked up by hash) so
-// that any branch writes during compute (mid-process inline flushes from
-// `pendingPrefixes` collisions, plus the [state] write at end via
-// encodeAndStoreCommitmentState) land in block N's CS rather than whatever
-// the exec loop has installed as current.
+// computeWithBlockAccumulator runs ComputeCommitment with block N's saved
+// changeset (looked up by hash) passed as an explicit diff, so that any branch
+// writes during compute (mid-process inline flushes from `pendingPrefixes`
+// collisions, plus the [state] write at end via encodeAndStoreCommitmentState)
+// land in block N's CS rather than whatever the exec loop has installed as
+// current. A mid-block step boundary runs before N is saved and falls back to
+// the live accumulator, which is still N's — see the body.
 //
 // IMPORTANT: hash-aware lookup is mandatory here. pastChangesAccumulator
 // can hold multiple changesets per block number after a fork-bounce
