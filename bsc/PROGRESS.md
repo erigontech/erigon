@@ -12,7 +12,34 @@ no CL, no execution yet — just get blocks and print number+hash — then snaps
 | 2. Permissive Parlia stub engine | ✅ | registered via `RegisterL2Engine("parlia", …)`; node instantiates engine |
 | 3. Connect to Chapel peers + handshake | ✅ | full eth/68 + UpgradeStatus handshake; 2+ stable peers |
 | 4. Blocks over p2p + logging | ✅ | live Chapel tip streaming from `--chain=chapel` alone, no extra flags |
-| 5. Snapshots | ⏳ | needs active download + DB persist first, then `erigon seg retire --chain=chapel` |
+| 5. Download + persist via ExecModule API | ✅ | genesis→target forward download, canonical persist, resume-on-restart; retire→.seg + prune, `seg integrity` publishable |
+| 6. Snapshots productionization | ⏳ | retire/read/prune validated on real data; wire + publish for Parlia |
+| 7. Execution | ⏳ | flip `StagesOnlyBlocks` off + real Parlia engine + system txs |
+
+## Phase 5 — download + persist via the ExecModule API
+
+The driver is an **execution-module client** (the Astrid/driver-DB vision): `bsc/sync` fetches
+headers+bodies over devp2p and hands them to the exec module via `InsertBlocks` +
+`UpdateForkChoice` — it never writes rawdb directly, and reorg/canonical selection live inside
+`UpdateForkChoice`. Model was Caplin's `execution_client_direct.go`.
+
+- **Loop** (`bsc/sync/{driver,fetch,verify,resume}.go`): from `max(FrozenBlocks, CurrentHeader)`,
+  fetch `[head+1, head+1024]` from a peer (`ListPeersMayHaveBlockNum`), verify
+  (`SanityCheck`+`HashCheck`, no EVM/seal), `InsertBlocks`, and `UpdateForkChoice` every
+  `LoopBlockLimit` blocks (+ at target). Bounded by `--sync.target-block`. Simple alternating
+  loop (only network Fetch is off the exec semaphore).
+- **Blocks-only mode** (the one execution-side edit): reuses `StagesOnlyBlocks` (set for Parlia in backend), which no-ops the Execution stage
+  and makes `Finish` advance the head to the **Senders** frontier (not the never-advancing
+  Execution frontier), so `UpdateForkChoice` returns `Success` instead of `BadBlock` with
+  execution off (this also fixes the pre-existing `STAGES_ONLY_BLOCKS` debug mode, whose head
+  never advanced). **Temporary — remove once Parlia execution lands** (then execution advances
+  its own progress and Finish/forkchoice work unchanged, zero driver change). Touch point:
+  one branch in `stage_finish.go` + the Parlia set in `backend.go`.
+- **Verified** on Chapel: genesis→4000 forward, resume `resumeFrom=2000` on restart, no
+  `BadBlock`; `erigon seg retire` dumped headers/bodies/transactions `.seg` and pruned; `seg
+  integrity` → *snapshots are publishable*.
+- Run: `erigon --chain=chapel --no-downloader --sync.target-block=<N>` (peering defaults come
+  from `--chain=chapel`).
 
 ## Rebased onto main after the Bor removal
 
@@ -101,8 +128,8 @@ flag still wins.
    `[eth/70, eth/68]` — it rejects eth/69 (BEP-658: *"eth/69 is not supported in BSC"*) and has
    no eth/71. → **now a default** of `[eth/70, eth/68]`. See the eth/70 section below for why
    both are advertised.
-2. **Discovery was v5-only.** BSC enodes are discv4, and BSC publishes no DNS node list, so
-   discv5 has nothing to resolve. → **now a default** (`v4=true`, `v5=false`).
+2. **Discovery was v5-only.** BSC discovery still uses discv4 (enode bootnodes + static peers);
+   it hasn't moved to discv5 at all. → **now a default** (`v4=true`, `v5=false`).
 3. **BSC bootstraps via static peers, not bootnodes.** bsc-geth ships Chapel's peers as
    `StaticNodes` in `testnet.zip` with no `BootstrapNodes` key at all (mainnet is the mirror
    image: 6 bootnodes, `StaticNodes = []`). → **now a default**, via a new `Spec.StaticPeers`
