@@ -81,7 +81,7 @@ func TestCodeCache_ByteCheckRejectsForeignKeyHash(t *testing.T) {
 	foreign := make([]byte, 32)
 	copy(foreign, realHash)
 	foreign[0] ^= 0xff // different 32-byte key
-	cc.codeHashToCode.Add(maphash.Hash(foreign), codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.coh.Epoch()})
+	cc.codeHashToCode.Put(maphash.Hash(foreign), codeEntry{code: code, keyHash: hash32(realHash), txNum: 1, epoch: cc.coh.Epoch()})
 
 	// The stored entry's keyHash is realHash, not foreign — Get must reject it.
 	_, ok = cc.GetByCodeHash(foreign)
@@ -151,7 +151,7 @@ func TestCodeCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	// Model a writer that sampled the epoch before Clear and published after
 	// the relevant layers were purged.
 	cc.addrToHash.Add(common.BytesToAddress(addr), versionedAddressID{addrID: codeID, txNum: 200, epoch: preClearEpoch})
-	cc.hashToCode.Add(codeID, codeEntry{code: code, txNum: 200, epoch: preClearEpoch})
+	cc.hashToCode.Put(codeID, codeEntry{code: code, txNum: 200, epoch: preClearEpoch})
 	cc.Unwind(150)
 
 	_, ok := cc.Get(addr)
@@ -210,7 +210,7 @@ func TestGrowLRU_LenTracksLRU(t *testing.T) {
 	key := func(i uint64) uint64 { return i * 0x9E3779B97F4A7C15 }
 
 	for i := range uint64(500) {
-		g.Add(key(i), i)
+		g.Put(key(i), i)
 	}
 	check("adds")
 	require.Equal(t, 500, g.Len(), "500 distinct keys must fit below the 1024-slot start capacity")
@@ -223,7 +223,7 @@ func TestGrowLRU_LenTracksLRU(t *testing.T) {
 
 	before := g.cur.Load()
 	for i := uint64(500); i < 4000; i++ {
-		g.Add(key(i), i)
+		g.Put(key(i), i)
 	}
 	require.NotEqual(t, before, g.cur.Load(), "grow did not happen")
 	check("grow")
@@ -244,7 +244,7 @@ func TestGrowLRU_GrowRaceReplaceDoesNotDoubleCount(t *testing.T) {
 	defer g.Close()
 
 	h := uint64(7)
-	g.Add(h, 1)
+	g.Put(h, 1)
 	gen1 := g.cur.Load()
 
 	// Build the next generation exactly like maybeGrow's copy loop, and
@@ -259,7 +259,7 @@ func TestGrowLRU_GrowRaceReplaceDoesNotDoubleCount(t *testing.T) {
 	g.cur.Store(gen2)
 	g.curCap.Store(newCap)
 
-	g.Replace(h, 2)
+	g.Put(h, 2)
 
 	require.Equal(t, gen2.lru.Len(), g.Len(),
 		"counter must not double-count a grow-copied key replaced in place")
@@ -312,7 +312,7 @@ func BenchmarkGrowLRUParallelAddGrow(b *testing.B) {
 	b.RunParallel(func(pb *testing.PB) {
 		for pb.Next() {
 			n := seq.Add(1) * 0x9E3779B97F4A7C15
-			g.Add(n, n)
+			g.Put(n, n)
 		}
 	})
 }
@@ -338,9 +338,9 @@ func TestGrowLRU_CountExactUnderStripedRefreshAndUnstripedRemove(t *testing.T) {
 				stripe := &stripes[uint8(h)]
 				stripe.Lock()
 				if _, ok := g.Get(h); ok {
-					g.Replace(h, i)
+					g.Put(h, i)
 				} else {
-					g.Add(h, i)
+					g.Put(h, i)
 				}
 				stripe.Unlock()
 			}
