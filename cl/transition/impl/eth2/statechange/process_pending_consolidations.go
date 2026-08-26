@@ -1,6 +1,8 @@
 package statechange
 
 import (
+	"fmt"
+
 	"github.com/erigontech/erigon/cl/abstract"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
@@ -33,16 +35,15 @@ func ProcessPendingConsolidations(s abstract.BeaconState) error {
 			return true
 		}
 		sourceEffectiveBalance := min(vBalance, sourceValidator.EffectiveBalance())
-		// Resolve the target before touching the source: a failure between the
-		// two mutations would drain the source without crediting the target.
-		if _, applyErr = s.ValidatorBalance(int(c.TargetIndex)); applyErr != nil {
-			return false
-		}
 		// Move active balance to target. Excess balance is withdrawable.
 		if applyErr = state.DecreaseBalance(s, c.SourceIndex, sourceEffectiveBalance); applyErr != nil {
 			return false
 		}
 		if applyErr = state.IncreaseBalance(s, c.TargetIndex, sourceEffectiveBalance); applyErr != nil {
+			// Put the source back: a half-applied move destroys balance.
+			if err := s.SetValidatorBalance(int(c.SourceIndex), vBalance); err != nil {
+				applyErr = fmt.Errorf("%w (source rollback failed: %w)", applyErr, err)
+			}
 			return false
 		}
 		nextConsolidationIndex++

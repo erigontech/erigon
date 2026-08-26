@@ -316,9 +316,10 @@ func (t *PoolTestSuite) TestAddAttestation() {
 			defer cancel()
 			pool := NewAggregationPool(ctx, t.mockBeaconConfig, nil, t.mockEthClock)
 			for i := range tc.atts {
-				// Subset attestations are rejected by design; only the merged
-				// result matters here.
-				_ = pool.AddAttestation(tc.atts[i])
+				// Subset attestations are rejected by design; anything else is a failure.
+				if err := pool.AddAttestation(tc.atts[i]); err != nil {
+					t.Require().ErrorIs(err, ErrIsSuperset)
+				}
 			}
 			att := pool.GetAggregatationByRoot(tc.hashRoot)
 			expected := tc.expect.Copy()
