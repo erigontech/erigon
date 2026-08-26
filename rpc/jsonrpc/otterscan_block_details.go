@@ -89,7 +89,7 @@ func (api *OtterscanAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash com
 		return nil, err
 	}
 
-	b, err := api.blockWithSenders(ctx, tx, hash, *blockNumber)
+	b, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), hash, *blockNumber)
 	if err != nil {
 		return nil, err
 	}
