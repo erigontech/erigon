@@ -114,7 +114,7 @@ func (s *payloadAttestationService) Names() []string {
 
 func (s *payloadAttestationService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.PayloadAttestationMessage, error) {
 	msg := &cltypes.PayloadAttestationMessage{}
-	if err := msg.DecodeSSZ(data, int(version)); err != nil {
+	if err := msg.DecodeSSZStrict(data, int(version)); err != nil {
 		return nil, err
 	}
 	return msg, nil

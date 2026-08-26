@@ -191,16 +191,25 @@ func (f *forkGraphDisk) HasEnvelope(blockRoot common.Hash) bool {
 	if _, ok := f.envelopeExists.Load(blockRoot); ok {
 		return true
 	}
+	if _, ok := f.envelopeMissing.Load(blockRoot); ok {
+		return false
+	}
 	f.stateDumpLock.Lock()
 	defer f.stateDumpLock.Unlock()
 	if _, ok := f.envelopeExists.Load(blockRoot); ok {
 		return true
+	}
+	if _, ok := f.envelopeMissing.Load(blockRoot); ok {
+		return false
 	}
 	// Slow path: fall back to disk and populate cache on hit
 	exists, err := afero.Exists(f.fs, getEnvelopeFilename(blockRoot))
 	if err == nil && exists {
 		f.envelopeExists.Store(blockRoot, struct{}{})
 		return true
+	}
+	if err == nil {
+		f.envelopeMissing.Store(blockRoot, struct{}{})
 	}
 	return false
 }
@@ -336,6 +345,7 @@ func (f *forkGraphDisk) DumpEnvelopeOnDisk(blockRoot common.Hash, envelope *clty
 		return
 	}
 	f.envelopeExists.Store(blockRoot, struct{}{})
+	f.envelopeMissing.Delete(blockRoot)
 
 	return
 }

@@ -1,6 +1,18 @@
 // Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
-// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package handler
 
@@ -53,6 +65,20 @@ func TestBuilderRouteStoreAllowsAliasesForSameRoot(t *testing.T) {
 	require.True(t, routes.Add(root, "https://two.example"))
 	require.True(t, routes.Claim(root, "https://one.example"))
 	require.True(t, routes.Claim(root, "https://two.example"))
+}
+
+func TestBuilderRouteStoreClaimOrAddIsBoundedAndSingleflight(t *testing.T) {
+	routes := newBuilderRouteStore(1, time.Minute, time.Now)
+	root := common.Hash{1}
+	url := "https://builder.example"
+
+	require.True(t, routes.ClaimOrAdd(root, url))
+	require.False(t, routes.ClaimOrAdd(root, url))
+	require.False(t, routes.ClaimOrAdd(common.Hash{2}, "https://other.example"))
+	routes.Complete(root, url, false)
+	require.True(t, routes.ClaimOrAdd(root, url))
+	routes.Complete(root, url, true)
+	require.False(t, routes.ClaimOrAdd(root, url))
 }
 
 func TestBuilderRouteStoreCapacityPreservesAcceptedRoutes(t *testing.T) {

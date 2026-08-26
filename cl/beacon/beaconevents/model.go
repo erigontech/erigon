@@ -47,6 +47,16 @@ type (
 	SignedExecutionPayloadBidData = cltypes.SignedExecutionPayloadBid
 )
 
+type VersionedPayloadAttestationMessage struct {
+	Version string                         `json:"version"`
+	Data    *PayloadAttestationMessageData `json:"data"`
+}
+
+type VersionedSignedExecutionPayloadBid struct {
+	Version string                         `json:"version"`
+	Data    *SignedExecutionPayloadBidData `json:"data"`
+}
+
 // DataColumnSidecarData includes block_root and slot for SSE events
 type DataColumnSidecarData struct {
 	BlockRoot                    common.Hash                            `json:"block_root"`

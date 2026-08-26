@@ -50,6 +50,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	clservices "github.com/erigontech/erigon/cl/phase1/network/services"
 	"github.com/erigontech/erigon/cl/phase1/network/subnets"
 	"github.com/erigontech/erigon/cl/pool"
 	ssz2 "github.com/erigontech/erigon/cl/ssz"
@@ -1079,6 +1080,10 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 	if parentBid == nil || len(entries) == 0 {
 		return nil
 	}
+	parentGasLimit, ok := a.forkchoiceStore.GetExecutionPayloadGasLimit(parentBid.ParentBlockHash)
+	if !ok {
+		return nil
+	}
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
 	if err != nil {
 		return nil
@@ -1128,7 +1133,10 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 			bid.Message.ParentBlockHash != parentBid.ParentBlockHash || bid.Message.ParentBlockRoot != parentBid.ParentBlockRoot {
 			continue
 		}
-		if bid.Message.FeeRecipient != expectedFeeRecipient || bid.Message.GasLimit > targetGasLimit {
+		if bid.Message.FeeRecipient != expectedFeeRecipient {
+			continue
+		}
+		if !clservices.IsGasLimitTargetCompatible(parentGasLimit, bid.Message.GasLimit, targetGasLimit) {
 			continue
 		}
 		if builders == nil || bid.Message.BuilderIndex >= uint64(builders.Len()) {
@@ -1865,7 +1873,7 @@ func (a *ApiHandler) forwardPublishedBlockToBuilder(builderURL string, block *cl
 	if err != nil {
 		return
 	}
-	if !a.builderRoutes.Claim(root, builderURL) {
+	if !a.builderRoutes.ClaimOrAdd(root, builderURL) {
 		return
 	}
 	go func() {
@@ -2143,8 +2151,6 @@ func (a *ApiHandler) parseRequestBeaconBlock(
 	return nil, errors.New("invalid content type")
 }
 
-// parseGloasRequestBeaconBlock handles GLOAS block publishing where the VC sends
-// a SignedBeaconBlock (SSZ) or a JSON object with signed_block + optional envelope.
 const maxGloasPublishedBlockSize = 10 << 20
 
 func (a *ApiHandler) parseGloasRequestBeaconBlock(
@@ -2377,7 +2383,7 @@ func (a *ApiHandler) broadcastBlock(ctx context.Context, blk *cltypes.SignedBeac
 	// If the validator client provided a signed envelope, use it directly (real BLS signature).
 	// Otherwise fall back to constructing one from the cache (legacy/fallback path).
 	if blk.Version() >= clparams.GloasVersion {
-		if err := a.broadcastSelfBuildEnvelope(ctx, blk); err != nil {
+		if err := a.applySelfBuildEnvelope(ctx, blk); err != nil {
 			a.logger.Error("Failed to broadcast self-build execution payload envelope", "err", err)
 		}
 	}
@@ -2449,8 +2455,7 @@ func collectPublishedPayloadData(
 	return cellsAndProofs, false, nil
 }
 
-// broadcastSelfBuildEnvelope applies the locally cached self-build payload without gossiping its placeholder signature.
-func (a *ApiHandler) broadcastSelfBuildEnvelope(ctx context.Context, blk *cltypes.SignedBeaconBlock) error {
+func (a *ApiHandler) applySelfBuildEnvelope(ctx context.Context, blk *cltypes.SignedBeaconBlock) error {
 	bid := blk.Block.Body.GetSignedExecutionPayloadBid()
 	if bid == nil || bid.Message == nil {
 		return nil // no bid in block, nothing to do

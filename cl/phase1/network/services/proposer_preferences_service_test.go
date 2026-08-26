@@ -234,23 +234,30 @@ func TestProposerPreferencesServiceCurrentSlotWithinDisparityAccepted(t *testing
 	require.NoError(t, err)
 }
 
-func TestIsPastSlotClockDisparityBoundaries(t *testing.T) {
+func TestIsPastSlotBoundaries(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	service, _, _, _, _ := setupProposerPreferencesService(t, ctrl)
 	start := service.ethClock.GetSlotTime(100)
-
-	past, valid := isPastSlot(service.ethClock, service.beaconCfg, start.Add(gloasMaximumClockDisparity-time.Millisecond), 100, gloasMaximumClockDisparity)
-	require.True(t, valid)
-	require.False(t, past)
-	past, valid = isPastSlot(service.ethClock, service.beaconCfg, start.Add(gloasMaximumClockDisparity), 100, gloasMaximumClockDisparity)
-	require.True(t, valid)
-	require.False(t, past)
-	past, valid = isPastSlot(service.ethClock, service.beaconCfg, start.Add(gloasMaximumClockDisparity+time.Millisecond), 100, gloasMaximumClockDisparity)
-	require.True(t, valid)
-	require.True(t, past)
+	tests := []struct {
+		name string
+		now  time.Time
+		past bool
+	}{
+		{"before_start", start.Add(-time.Nanosecond), false},
+		{"at_start", start, false},
+		{"at_disparity", start.Add(gloasMaximumClockDisparity), false},
+		{"after_disparity", start.Add(gloasMaximumClockDisparity + time.Nanosecond), true},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			past, valid := isPastSlot(service.ethClock, service.beaconCfg, test.now, 100, gloasMaximumClockDisparity)
+			require.True(t, valid)
+			require.Equal(t, test.past, past)
+		})
+	}
 }
 
-func TestProposerPreferencesServiceAcceptsEpochRolloverDisparityEdge(t *testing.T) {
+func TestProposerPreferencesServiceAcceptsCurrentSlotAtDisparityEdge(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	service, _, _, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
 	msg := newTestSignedProposerPreferences(96, 42)
@@ -272,7 +279,7 @@ func TestProposerPreferencesServiceEmitsEvent(t *testing.T) {
 	events := make(chan *beaconevents.EventStream, 1)
 	subscription := emitter.Operation().Subscribe(events)
 	defer subscription.Unsubscribe()
-	msg := newTestSignedProposerPreferences(96, 42)
+	msg := newTestSignedProposerPreferences(100, 42)
 	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(gloasMaximumClockDisparity) }
 
 	require.NoError(t, service.ProcessMessage(context.Background(), nil, msg))
@@ -299,7 +306,7 @@ func TestProposerPreferencesServiceProgressesWhileEventFeedIsBlocked(t *testing.
 	}()
 	<-ready
 
-	msg := newTestSignedProposerPreferences(96, 42)
+	msg := newTestSignedProposerPreferences(100, 42)
 	service.now = func() time.Time { return service.ethClock.GetSlotTime(96).Add(gloasMaximumClockDisparity) }
 	processDone := make(chan error, 1)
 	ctx := t.Context()
@@ -310,7 +317,7 @@ func TestProposerPreferencesServiceProgressesWhileEventFeedIsBlocked(t *testing.
 	case <-time.After(5 * time.Second):
 		t.Fatal("proposer preferences processing blocked on the event feed")
 	}
-	stored, ok := epbsPool.GetPreference(96, testDependentRoot)
+	stored, ok := epbsPool.GetPreference(100, testDependentRoot)
 	require.True(t, ok)
 	require.Same(t, msg, stored)
 
@@ -375,14 +382,14 @@ func TestProposerPreferencesServiceDuplicateRetainedBeyondFormerCapacity(t *test
 		epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{Slot: 100, DependentRoot: root}, newTestSignedProposerPreferences(100, 42))
 	}
 	epbsPool.ProposerPreferences.Add(pool.ProposerPreferencesKey{Slot: 100, DependentRoot: msg.Message.DependentRoot}, msg)
-	ethClock.EXPECT().GetCurrentSlot().Return(uint64(100))
+	ethClock.EXPECT().GetCurrentSlot().Return(uint64(99))
 
 	err := service.ProcessMessage(context.Background(), nil, msg)
 	require.ErrorIs(t, err, ErrIgnore)
 	require.Contains(t, err.Error(), "already seen proposer preferences")
 }
 
-func TestProposerPreferencesServicePrunesSeenMarkerAfterBoundary(t *testing.T) {
+func TestProposerPreferencesServiceDoesNotPruneOnExpiredMessage(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 	service, _, _, epbsPool, _ := setupProposerPreferencesService(t, ctrl)
@@ -408,7 +415,7 @@ func TestProposerPreferencesServicePrunesSeenMarkerAfterBoundary(t *testing.T) {
 	err = service.ProcessMessage(context.Background(), nil, msg)
 	require.ErrorIs(t, err, ErrIgnore)
 	_, found = epbsPool.ProposerPreferences.Get(key)
-	require.False(t, found)
+	require.True(t, found)
 }
 
 func TestProposerPreferencesServiceDependentRootStateMissing(t *testing.T) {
@@ -664,6 +671,16 @@ func TestProposerPreferencesServiceDecodeGossipMessageInvalid(t *testing.T) {
 	service, _, _, _, _ := setupProposerPreferencesService(t, ctrl)
 
 	_, err := service.DecodeGossipMessage("peer123", []byte{0x00, 0x01, 0x02}, clparams.GloasVersion)
+	require.Error(t, err)
+}
+
+func TestProposerPreferencesServiceDecodeRejectsTrailingByte(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, _, _, _ := setupProposerPreferencesService(t, ctrl)
+	encoded, err := newTestSignedProposerPreferences(100, 42).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	_, err = service.DecodeGossipMessage("peer123", append(encoded, 0), clparams.GloasVersion)
 	require.Error(t, err)
 }
 

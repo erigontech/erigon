@@ -118,7 +118,7 @@ func (b *blockService) IsMyGossipMessage(name string) bool {
 
 func (b *blockService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedBeaconBlock, error) {
 	obj := cltypes.NewSignedBeaconBlock(b.beaconCfg, version)
-	if err := obj.DecodeSSZ(data, int(version)); err != nil {
+	if err := obj.DecodeSSZStrict(data, int(version)); err != nil {
 		return nil, err
 	}
 	return obj, nil
@@ -304,6 +304,16 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 	if currentSlot < msg.Block.Slot && !b.ethClock.IsSlotCurrentSlotWithMaximumClockDisparity(msg.Block.Slot) {
 		return fmt.Errorf("%w: block is not from a future slot: %d > %d", ErrIgnore, currentSlot, msg.Block.Slot)
 	}
+	if b.beaconCfg.SlotsPerEpoch == 0 {
+		return errors.New("slots per epoch is zero")
+	}
+	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
+	blockVersion := b.beaconCfg.GetCurrentStateVersion(epoch)
+	if blockVersion >= clparams.GloasVersion {
+		if err := validateGloasBlockBodyLimits(b.beaconCfg, msg.Block.Body); err != nil {
+			return err
+		}
+	}
 	var finalizedCheckpoint solid.Checkpoint
 
 	if err := b.syncedData.ViewHeadState(func(headState *state.CachingBeaconState) error {
@@ -342,8 +352,6 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 	if parentHeader.Slot >= msg.Block.Slot {
 		return ErrBlockYoungerThanParent
 	}
-	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
-	blockVersion := b.beaconCfg.GetCurrentStateVersion(epoch)
 	var gloasBid *cltypes.ExecutionPayloadBid
 	parentIsFull := false
 	if blockVersion >= clparams.GloasVersion {
@@ -424,6 +432,64 @@ func (b *blockService) validateGossip(_ context.Context, msg *cltypes.SignedBeac
 		// Pre-GLOAS: [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer
 		// i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
 		return ErrInvalidCommitmentsCount
+	}
+	return nil
+}
+
+func validateGloasBlockBodyLimits(cfg *clparams.BeaconChainConfig, body *cltypes.BeaconBody) error {
+	if cfg == nil || body == nil {
+		return errors.New("missing Gloas block body configuration")
+	}
+	if body.ProposerSlashings == nil || body.AttesterSlashings == nil || body.Attestations == nil || body.Deposits == nil ||
+		body.VoluntaryExits == nil || body.ExecutionChanges == nil || body.PayloadAttestations == nil {
+		return errors.New("missing Gloas block body operation list")
+	}
+	checks := []struct {
+		name  string
+		count int
+		limit uint64
+	}{
+		{"proposer slashings", body.ProposerSlashings.Len(), cfg.MaxProposerSlashings},
+		{"attester slashings", body.AttesterSlashings.Len(), cfg.MaxAttesterSlashingsElectra},
+		{"attestations", body.Attestations.Len(), cfg.MaxAttestationsElectra},
+		{"voluntary exits", body.VoluntaryExits.Len(), cfg.MaxVoluntaryExits},
+		{"BLS to execution changes", body.ExecutionChanges.Len(), cfg.MaxBlsToExecutionChanges},
+		{"payload attestations", body.PayloadAttestations.Len(), cfg.MaxPayloadAttestations},
+	}
+	if body.Deposits.Len() != 0 {
+		return fmt.Errorf("deposits count %d exceeds Gloas limit 0", body.Deposits.Len())
+	}
+	for _, check := range checks {
+		if uint64(check.count) > check.limit {
+			return fmt.Errorf("%s count %d exceeds limit %d", check.name, check.count, check.limit)
+		}
+	}
+	return validateExecutionRequestsLimits(cfg, body.ParentExecutionRequests)
+}
+
+func validateExecutionRequestsLimits(cfg *clparams.BeaconChainConfig, requests *cltypes.ExecutionRequests) error {
+	if cfg == nil || requests == nil {
+		return errors.New("missing execution requests")
+	}
+	if requests.Deposits == nil || requests.Withdrawals == nil || requests.Consolidations == nil ||
+		requests.BuilderDeposits == nil || requests.BuilderExits == nil {
+		return errors.New("missing execution request list")
+	}
+	checks := []struct {
+		name  string
+		count int
+		limit uint64
+	}{
+		{"deposit requests", requests.Deposits.Len(), cfg.MaxDepositRequestsPerPayload},
+		{"withdrawal requests", requests.Withdrawals.Len(), cfg.MaxWithdrawalRequestsPerPayload},
+		{"consolidation requests", requests.Consolidations.Len(), cfg.MaxConsolidationRequestsPerPayload},
+		{"builder deposit requests", requests.BuilderDeposits.Len(), cfg.MaxBuilderDepositRequestsPerPayload},
+		{"builder exit requests", requests.BuilderExits.Len(), cfg.MaxBuilderExitRequestsPerPayload},
+	}
+	for _, check := range checks {
+		if uint64(check.count) > check.limit {
+			return fmt.Errorf("%s count %d exceeds limit %d", check.name, check.count, check.limit)
+		}
 	}
 	return nil
 }

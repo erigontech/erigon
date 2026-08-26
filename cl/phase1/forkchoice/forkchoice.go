@@ -797,19 +797,14 @@ func (f *ForkChoiceStore) HasEnvelope(blockRoot common.Hash) bool {
 // has been accepted by the execution layer.
 // [New in Gloas:EIP7732]
 func (f *ForkChoiceStore) IsPayloadVerified(blockRoot common.Hash) bool {
-	if f.forkGraph == nil || !f.forkGraph.HasEnvelope(blockRoot) {
+	if f.forkGraph == nil {
 		return false
 	}
-	if f.forkGraph != nil {
-		if verified, accepted := f.forkGraph.PayloadAccepted(blockRoot); accepted {
-			return verified
-		}
+	verified, accepted := f.forkGraph.PayloadAccepted(blockRoot)
+	if !accepted || !verified {
 		return false
 	}
-	if f.verifiedExecutionPayload == nil {
-		return false
-	}
-	return f.verifiedExecutionPayload.Contains(blockRoot)
+	return f.forkGraph.HasEnvelope(blockRoot)
 }
 
 func (f *ForkChoiceStore) MarkPayloadVerified(blockRoot common.Hash, executionBlockHash common.Hash) {

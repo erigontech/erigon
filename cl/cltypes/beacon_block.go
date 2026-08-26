@@ -127,6 +127,10 @@ func (b *SignedBeaconBlock) DecodeSSZ(buf []byte, s int) error {
 	return ssz2.UnmarshalSSZ(buf, s, b.Block, b.Signature[:])
 }
 
+func (b *SignedBeaconBlock) DecodeSSZStrict(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZStrict(buf, version, b.Block, b.Signature[:])
+}
+
 func (b *SignedBeaconBlock) HashSSZ() ([32]byte, error) {
 	return merkle_tree.HashTreeRoot(b.Block, b.Signature[:])
 }
@@ -199,6 +203,10 @@ func (b *BeaconBlock) EncodingSizeSSZ() int {
 
 func (b *BeaconBlock) DecodeSSZ(buf []byte, version int) error {
 	return ssz2.UnmarshalSSZ(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
+}
+
+func (b *BeaconBlock) DecodeSSZStrict(buf []byte, version int) error {
+	return ssz2.UnmarshalSSZStrict(buf, version, &b.Slot, &b.ProposerIndex, b.ParentRoot[:], b.StateRoot[:], b.Body)
 }
 
 func (b *BeaconBlock) HashSSZ() ([32]byte, error) {
@@ -516,6 +524,14 @@ func (b *BeaconBody) EncodingSizeSSZ() (size int) {
 }
 
 func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
+	return b.decodeSSZ(buf, version, false)
+}
+
+func (b *BeaconBody) DecodeSSZStrict(buf []byte, version int) error {
+	return b.decodeSSZ(buf, version, true)
+}
+
+func (b *BeaconBody) decodeSSZ(buf []byte, version int, strict bool) error {
 	b.Version = clparams.StateVersion(version)
 	if b.Version >= clparams.GloasVersion {
 		b.resetGloasProgressiveLists()
@@ -538,7 +554,13 @@ func (b *BeaconBody) DecodeSSZ(buf []byte, version int) error {
 		}
 		b.ParentExecutionRequests = NewExecutionRequestsWithVersion(b.beaconCfg, b.Version)
 	}
-	if err := ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...); err != nil {
+	var err error
+	if strict {
+		err = ssz2.UnmarshalSSZStrict(buf, version, b.getSchema(false)...)
+	} else {
+		err = ssz2.UnmarshalSSZ(buf, version, b.getSchema(false)...)
+	}
+	if err != nil {
 		return err
 	}
 

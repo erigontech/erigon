@@ -15,18 +15,34 @@ const (
 type slotMap[K comparable, V any] struct {
 	mu      sync.RWMutex
 	values  map[K]V
+	bySlot  map[uint64]map[K]struct{}
 	slotFor func(K) uint64
 }
 
 func newSlotMap[K comparable, V any](slotFor func(K) uint64) *slotMap[K, V] {
-	return &slotMap[K, V]{values: make(map[K]V), slotFor: slotFor}
+	return &slotMap[K, V]{values: make(map[K]V), bySlot: make(map[uint64]map[K]struct{}), slotFor: slotFor}
 }
 
 func (m *slotMap[K, V]) Add(key K, value V) bool {
 	m.mu.Lock()
 	defer m.mu.Unlock()
 	m.values[key] = value
+	slot := m.slotFor(key)
+	if m.bySlot[slot] == nil {
+		m.bySlot[slot] = make(map[K]struct{})
+	}
+	m.bySlot[slot][key] = struct{}{}
 	return false
+}
+
+func (m *slotMap[K, V]) ValuesForSlot(slot uint64) []V {
+	m.mu.RLock()
+	defer m.mu.RUnlock()
+	values := make([]V, 0, len(m.bySlot[slot]))
+	for key := range m.bySlot[slot] {
+		values = append(values, m.values[key])
+	}
+	return values
 }
 
 func (m *slotMap[K, V]) Get(key K) (V, bool) {
@@ -46,16 +62,15 @@ func (m *slotMap[K, V]) Keys() []K {
 	return keys
 }
 
-func (m *slotMap[K, V]) PruneSlotsBefore(slot uint64) {
-	m.PruneSlots(func(entrySlot uint64) bool { return entrySlot < slot })
-}
-
 func (m *slotMap[K, V]) PruneSlots(remove func(uint64) bool) {
 	m.mu.Lock()
 	defer m.mu.Unlock()
-	for key := range m.values {
-		if remove(m.slotFor(key)) {
-			delete(m.values, key)
+	for slot, keys := range m.bySlot {
+		if remove(slot) {
+			for key := range keys {
+				delete(m.values, key)
+			}
+			delete(m.bySlot, slot)
 		}
 	}
 }
@@ -116,12 +131,10 @@ func NewEpbsPool() *EpbsPool {
 // regardless of dependent_root. This is used by the bid service which needs to find any
 // valid preferences for a slot across different fork views.
 func (p *EpbsPool) GetPreferencesForSlot(slot uint64) []*cltypes.SignedProposerPreferences {
-	var results []*cltypes.SignedProposerPreferences
-	for _, key := range p.ProposerPreferences.Keys() {
-		if key.Slot != slot {
-			continue
-		}
-		if msg, ok := p.ProposerPreferences.Get(key); ok && msg != nil {
+	values := p.ProposerPreferences.ValuesForSlot(slot)
+	results := make([]*cltypes.SignedProposerPreferences, 0, len(values))
+	for _, msg := range values {
+		if msg != nil {
 			results = append(results, msg)
 		}
 	}
