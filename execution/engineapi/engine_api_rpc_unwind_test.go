@@ -64,6 +64,7 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		CoinbaseKey:             coinbaseKey,
 		EngineApiClientTimeout:  &engineAPIClientTimeout,
 		StateTransitionObserver: transitions.observe,
+		EnableTestingAPI:        true,
 		EthConfigTweaker: func(config *ethconfig.Config) {
 			config.MaxReorgDepth = stateChurnReorgDepthBudget
 		},
@@ -187,8 +188,9 @@ func TestEngineApiRPCStateAcrossUnwindPhases(t *testing.T) {
 		require.NotEmpty(t, awaitAsync(t, delayedCode))
 		require.NotZero(t, awaitAsync(t, delayedNonce))
 
-		cacheProbeHead, err := eat.MockCl.BuildNewPayload(ctx)
+		cacheProbeHead, err := eat.MockCl.BuildEmptyPayload(ctx, rpcClient.CallContext)
 		require.NoError(t, err)
+		require.Empty(t, cacheProbeHead.ExecutionPayload.Transactions)
 		status, err = eat.MockCl.InsertNewPayload(ctx, cacheProbeHead)
 		require.NoError(t, err)
 		require.Equal(t, enginetypes.ValidStatus, status.Status)

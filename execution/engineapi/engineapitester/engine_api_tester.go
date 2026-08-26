@@ -249,6 +249,10 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 	engineApiPort := engineApiListener.Addr().(*net.TCPAddr).Port
 	logger.Debug("[engine-api-tester] selected ports", "engineApi", engineApiPort, "jsonRpc", jsonRpcPort)
 
+	httpAPIs := []string{"eth"}
+	if args.EnableTestingAPI {
+		httpAPIs = append(httpAPIs, "testing")
+	}
 	httpConfig := httpcfg.HttpCfg{
 		Enabled:                  true,
 		HttpServerEnabled:        true,
@@ -257,7 +261,7 @@ func InitialiseEngineApiTester(ctx context.Context, args EngineApiTesterInitArgs
 		HttpListenAddress:        "127.0.0.1",
 		HttpPort:                 jsonRpcPort,
 		HttpListener:             jsonRpcListener,
-		API:                      []string{"eth"},
+		API:                      httpAPIs,
 		AuthRpcHTTPListenAddress: "127.0.0.1",
 		AuthRpcPort:              engineApiPort,
 		AuthRpcListener:          engineApiListener,
@@ -456,6 +460,7 @@ type EngineApiTesterInitArgs struct {
 	DisableSentry           bool
 	MdbxDBSizeLimit         datasize.ByteSize
 	StateTransitionObserver execmodule.StateTransitionObserver
+	EnableTestingAPI        bool
 }
 
 type EngineApiTester struct {
