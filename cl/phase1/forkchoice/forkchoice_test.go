@@ -276,6 +276,8 @@ func TestActiveParentsUsesHeadPayloadStatus(t *testing.T) {
 		ExecutionHash: parentHash,
 		ShouldExtend:  false,
 	}}, parents)
+	require.Empty(t, store.ActiveParents(10))
+	require.Empty(t, store.ActiveParents(9))
 }
 
 func TestActiveParentsRejectsMissingStateForEmptyHead(t *testing.T) {

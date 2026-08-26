@@ -94,10 +94,23 @@ func (m *BuilderManager) SetBalanceStatus(status BalanceStatus) {
 func (m *BuilderManager) ReserveBid(value uint64) bool {
 	m.indexMu.Lock()
 	defer m.indexMu.Unlock()
-	if value == 0 || !m.balanceKnown || !m.balanceStatus.Active || m.reservedBidValue > m.balanceStatus.Balance {
+	if !m.balanceKnown {
 		return false
 	}
-	if value > m.balanceStatus.Balance-m.reservedBidValue {
+	return m.reserveBidWithStatus(m.balanceStatus, value)
+}
+
+func (m *BuilderManager) ReserveBidWithStatus(status BalanceStatus, value uint64) bool {
+	m.indexMu.Lock()
+	defer m.indexMu.Unlock()
+	return m.reserveBidWithStatus(status, value)
+}
+
+func (m *BuilderManager) reserveBidWithStatus(status BalanceStatus, value uint64) bool {
+	if value == 0 || !status.Active || m.reservedBidValue > status.Balance {
+		return false
+	}
+	if value > status.Balance-m.reservedBidValue {
 		return false
 	}
 	m.reservedBidValue += value
@@ -114,6 +127,16 @@ func (m *BuilderManager) ReleaseBid(value uint64) {
 	m.indexMu.Unlock()
 }
 
+func (m *BuilderManager) RestoreBidReservation(value uint64) error {
+	m.indexMu.Lock()
+	defer m.indexMu.Unlock()
+	if value > ^uint64(0)-m.reservedBidValue {
+		return fmt.Errorf("epbs/manager: restored bid reservations overflow")
+	}
+	m.reservedBidValue += value
+	return nil
+}
+
 // SignBid stamps the manager's BuilderIndex onto the bid, computes the signing
 // root using DomainBeaconBuilder (0x0B000000), and signs it. The BuilderIndex
 // is always overwritten to ensure the signed message matches the key that
@@ -124,7 +147,11 @@ func (m *BuilderManager) SignBid(ctx context.Context, bid *cltypes.ExecutionPayl
 	if !ok {
 		return nil, fmt.Errorf("epbs/manager: builder index not resolved")
 	}
-	bid.BuilderIndex = idx
+	return m.SignBidForBuilderIndex(ctx, bid, idx)
+}
+
+func (m *BuilderManager) SignBidForBuilderIndex(ctx context.Context, bid *cltypes.ExecutionPayloadBid, builderIndex uint64) (*cltypes.SignedExecutionPayloadBid, error) {
+	bid.BuilderIndex = builderIndex
 
 	domain, err := m.builderDomain(bid.Slot)
 	if err != nil {
@@ -156,7 +183,11 @@ func (m *BuilderManager) SignEnvelope(ctx context.Context, envelope *cltypes.Exe
 	if !ok {
 		return nil, fmt.Errorf("epbs/manager: builder index not resolved")
 	}
-	envelope.BuilderIndex = idx
+	return m.SignEnvelopeForBuilderIndex(ctx, envelope, slot, idx)
+}
+
+func (m *BuilderManager) SignEnvelopeForBuilderIndex(ctx context.Context, envelope *cltypes.ExecutionPayloadEnvelope, slot, builderIndex uint64) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	envelope.BuilderIndex = builderIndex
 
 	domain, err := m.builderDomain(slot)
 	if err != nil {

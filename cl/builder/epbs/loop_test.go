@@ -23,11 +23,12 @@ import (
 // --- Mock payload assembler ---
 
 type mockPayloadAssembler struct {
-	mu      sync.Mutex
-	nextId  uint64
-	results map[uint64]*eladapter.AssembledPayload
-	busy    bool
-	err     error
+	mu                   sync.Mutex
+	nextId               uint64
+	results              map[uint64]*eladapter.AssembledPayload
+	busy                 bool
+	err                  error
+	ignoreTargetGasLimit bool
 }
 
 func newMockPayloadAssembler() *mockPayloadAssembler {
@@ -51,7 +52,7 @@ func (m *mockPayloadAssembler) AssemblePayload(_ context.Context, params *builde
 		result.Eth1Block.Time = params.Timestamp
 		result.Eth1Block.PrevRandao = params.PrevRandao
 		result.Eth1Block.FeeRecipient = params.SuggestedFeeRecipient
-		if params.TargetGasLimit != nil {
+		if params.TargetGasLimit != nil && !m.ignoreTargetGasLimit {
 			result.Eth1Block.GasLimit = *params.TargetGasLimit
 		}
 		if params.SlotNumber != nil {
@@ -161,10 +162,13 @@ func testParentInfo() ParentInfo {
 
 func testSlotContext() SlotContext {
 	return SlotContext{
-		Slot:       100,
-		Parent:     testParentInfo(),
-		Timestamp:  1700000000,
-		PrevRandao: common.HexToHash("0xcafe"),
+		Slot:          100,
+		Parent:        testParentInfo(),
+		Timestamp:     1700000000,
+		PrevRandao:    common.HexToHash("0xcafe"),
+		BuilderIndex:  42,
+		BuilderStatus: BalanceStatus{Slot: 100, Active: true, Balance: ^uint64(0)},
+		BuilderFound:  true,
 	}
 }
 
@@ -295,6 +299,33 @@ func TestBuilderLoop_RebuildPath(t *testing.T) {
 	require.Equal(t, sc.Slot, bid.Message.Slot)
 	require.Equal(t, uint64(42), bid.Message.BuilderIndex)
 	require.Equal(t, uint64(0), bid.Message.ExecutionPayment)
+}
+
+func TestBuilderLoopRejectsRebuiltPayloadGasMismatch(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	exec.ignoreTargetGasLimit = true
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 0,
+	}})
+
+	require.ErrorContains(t, loop.OnSlot(t.Context(), sc), "gas limit")
+	require.Empty(t, submitter.submittedBids)
+}
+
+func TestBuilderLoopUsesTargetParentBuilderBalance(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	sc.BuilderStatus.Balance = 20
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(50_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	require.Empty(t, submitter.submittedBids)
 }
 
 func TestBuilderLoopRebuildTimeoutDiscardsBuild(t *testing.T) {
@@ -483,8 +514,8 @@ func TestBuilderLoopBidWonRevealRetriesTransientBroadcastFailure(t *testing.T) {
 	submitter.broadcastErr = errors.New("transient gossip failure")
 	submitter.broadcastFailures = 3
 
-	err := revealWinningBidUntil(t.Context(), time.Now().Add(time.Second), func() error {
-		return loop.OnBidWon(t.Context(), sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
+	err := revealWinningBidUntil(t.Context(), time.Now().Add(time.Second), func(ctx context.Context) error {
+		return loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
 			common.HexToHash("0xb10c"), common.HexToHash("0xbeef"))
 	})
 	require.NoError(t, err)
@@ -516,6 +547,27 @@ func TestBuilderLoopRebindsRevealToNewBeaconBlockRoot(t *testing.T) {
 	require.Len(t, submitter.broadcasts, 2)
 	require.Equal(t, rootA, submitter.broadcasts[0].Message.BeaconBlockRoot)
 	require.Equal(t, rootB, submitter.broadcasts[1].Message.BeaconBlockRoot)
+}
+
+func TestBuilderLoopRevealUsesPublishedBuilderIndexAfterManagerInvalidation(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	loop.manager.InvalidateBuilderIndex()
+
+	root := common.HexToHash("0xbeef")
+	_, queued := loop.queuePendingBidReveal(sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
+		common.HexToHash("0xb10c"), root)
+	require.True(t, queued)
+	require.NoError(t, loop.OnBidWon(t.Context(), sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
+		common.HexToHash("0xb10c"), root))
+	require.Len(t, submitter.broadcasts, 1)
+	require.Equal(t, uint64(42), submitter.broadcasts[0].Message.BuilderIndex)
 }
 
 func TestBuilderLoop_BidWonReveal_DoesNotReleaseDeletedPendingTwice(t *testing.T) {
@@ -606,6 +658,7 @@ func TestBuilderLoopQueuedRevealsPreserveRootsAndSurvivePrune(t *testing.T) {
 	}
 
 	loop.abandonPendingBidReveal(key, rootA)
+	require.False(t, queue(rootA))
 	loop.pruneBeforeSlot(sc.Slot + 1)
 	require.Len(t, loop.pendingPayloads, 1)
 	loop.abandonPendingBidReveal(key, rootB)
@@ -719,6 +772,15 @@ func TestBuildParams_CarriesWithdrawals(t *testing.T) {
 
 	params := loop.buildParams(sc)
 	require.Equal(t, sc.Withdrawals, params.Withdrawals)
+}
+
+func TestBuildParamsFromPreferencesCarriesZeroGasTarget(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	params := loop.buildParamsFromPrefs(testSlotContext(), &cltypes.SignedProposerPreferences{
+		Message: &cltypes.ProposerPreferences{TargetGasLimit: 0},
+	})
+	require.NotNil(t, params.TargetGasLimit)
+	require.Zero(t, *params.TargetGasLimit)
 }
 
 func TestPreferencesWatcher_Timeout(t *testing.T) {
@@ -895,6 +957,23 @@ func TestValidatePayloadForSlot_RejectsWrongParent(t *testing.T) {
 	payload := makeTestPayload(t, big.NewInt(1))
 	payload.Eth1Block.ParentHash = common.HexToHash("0x9999")
 	require.ErrorContains(t, validatePayloadForSlot(payload, testSlotContext()), "parent hash")
+}
+
+func TestValidatePayloadForSlotRejectsWithdrawalMismatch(t *testing.T) {
+	payload := makeTestPayload(t, big.NewInt(1))
+	sc := testSlotContext()
+	sc.Withdrawals = []*types.Withdrawal{{
+		Index: 1, Validator: 2, Address: common.HexToAddress("0x1234"), Amount: 3,
+	}}
+	require.ErrorContains(t, validatePayloadForSlot(payload, sc), "withdrawals")
+}
+
+func TestSpeculativeMatchesZeroGasTargetExactly(t *testing.T) {
+	payload := makeTestPayload(t, big.NewInt(1))
+	prefs := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{TargetGasLimit: 0}}
+	require.False(t, speculativeMatchesPrefs(payload, prefs))
+	payload.Eth1Block.GasLimit = 0
+	require.True(t, speculativeMatchesPrefs(payload, prefs))
 }
 
 func TestDomainBeaconBuilder_Used(t *testing.T) {
@@ -1215,8 +1294,9 @@ func TestBuilderLoop_MultiMarket(t *testing.T) {
 		ShouldExtend:  false,
 	}
 
-	scA := SlotContext{Slot: slot, Parent: parentA, Timestamp: 1700000000, PrevRandao: common.HexToHash("0xcafe")}
-	scB := SlotContext{Slot: slot, Parent: parentB, Timestamp: 1700000000, PrevRandao: common.HexToHash("0xcafe")}
+	status := BalanceStatus{Slot: slot, Active: true, Balance: ^uint64(0)}
+	scA := SlotContext{Slot: slot, Parent: parentA, Timestamp: 1700000000, PrevRandao: common.HexToHash("0xcafe"), BuilderIndex: 42, BuilderStatus: status, BuilderFound: true}
+	scB := SlotContext{Slot: slot, Parent: parentB, Timestamp: 1700000000, PrevRandao: common.HexToHash("0xcafe"), BuilderIndex: 42, BuilderStatus: status, BuilderFound: true}
 
 	// Pre-load results for both speculative builds (sequential payloadIds).
 	payloadA := makeTestPayload(t, big.NewInt(1_000_000_000_000))

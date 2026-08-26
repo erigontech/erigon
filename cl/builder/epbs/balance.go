@@ -30,27 +30,49 @@ type BalanceStatus struct {
 func CheckBalance(sd synced_data.SyncedData, builderIndex uint64, pubkey common.Bytes48) (BalanceStatus, error) {
 	var status BalanceStatus
 	err := sd.ViewHeadState(func(s *state.CachingBeaconState) error {
-		status.Slot = s.Slot()
-		builders := s.GetBuilders()
-		if builders == nil || int(builderIndex) >= builders.Len() {
-			return ErrBuilderIndexMismatch
-		}
-		builder := builders.Get(int(builderIndex))
-		if builder == nil || builder.Pubkey != pubkey {
-			return ErrBuilderIndexMismatch
-		}
-		status.Active = state.IsActiveBuilder(s, builderIndex)
-		pending := state.GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
-		if pending > math.MaxUint64-s.BeaconConfig().MinDepositAmount {
-			return nil
-		}
-		unavailable := s.BeaconConfig().MinDepositAmount + pending
-		if builder.Balance >= unavailable {
-			status.Balance = builder.Balance - unavailable
-		}
-		return nil
+		var err error
+		status, err = builderStatusAtIndex(s, builderIndex, pubkey)
+		return err
 	})
 	return status, err
+}
+
+func builderStatusAtIndex(s *state.CachingBeaconState, builderIndex uint64, pubkey common.Bytes48) (BalanceStatus, error) {
+	status := BalanceStatus{Slot: s.Slot()}
+	builders := s.GetBuilders()
+	if builders == nil || int(builderIndex) >= builders.Len() {
+		return status, ErrBuilderIndexMismatch
+	}
+	builder := builders.Get(int(builderIndex))
+	if builder == nil || builder.Pubkey != pubkey {
+		return status, ErrBuilderIndexMismatch
+	}
+	status.Active = state.IsActiveBuilder(s, builderIndex)
+	pending := state.GetPendingBalanceToWithdrawForBuilder(s, builderIndex)
+	if pending > math.MaxUint64-s.BeaconConfig().MinDepositAmount {
+		return status, nil
+	}
+	unavailable := s.BeaconConfig().MinDepositAmount + pending
+	if builder.Balance >= unavailable {
+		status.Balance = builder.Balance - unavailable
+	}
+	return status, nil
+}
+
+func builderStatusForPubkey(s *state.CachingBeaconState, pubkey common.Bytes48) (uint64, BalanceStatus, bool) {
+	builders := s.GetBuilders()
+	if builders == nil {
+		return 0, BalanceStatus{}, false
+	}
+	for i := range builders.Len() {
+		builder := builders.Get(i)
+		if builder == nil || builder.Pubkey != pubkey {
+			continue
+		}
+		status, err := builderStatusAtIndex(s, uint64(i), pubkey)
+		return uint64(i), status, err == nil
+	}
+	return 0, BalanceStatus{}, false
 }
 
 // RunBalanceMonitor refreshes builder status from the selected head until cancellation.

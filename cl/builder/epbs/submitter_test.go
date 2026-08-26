@@ -3,6 +3,7 @@ package epbs
 import (
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -32,6 +33,20 @@ type testGossipPublisher struct {
 	topics    []string
 }
 
+type testColumnStorage struct {
+	writes map[uint64]int
+	errors map[uint64]error
+}
+
+func (s *testColumnStorage) WriteColumnSidecars(_ context.Context, _ common.Hash, columnIndex int64, _ *cltypes.DataColumnSidecar) error {
+	if columnIndex < 0 {
+		return fmt.Errorf("negative column index")
+	}
+	index := uint64(columnIndex)
+	s.writes[index]++
+	return s.errors[index]
+}
+
 func (p *testGossipPublisher) Publish(_ context.Context, topic string, _ []byte) error {
 	p.published++
 	p.topics = append(p.topics, topic)
@@ -44,7 +59,7 @@ func (p *testGossipPublisher) Publish(_ context.Context, topic string, _ []byte)
 func TestCaplinBidSubmitter_SubmitBidDoesNotStoreUnpublishedBid(t *testing.T) {
 	epbsPool := pool.NewEpbsPool()
 	gossipPublisher := &testGossipPublisher{err: errors.New("publish failed")}
-	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{})
+	submitter := NewCaplinBidSubmitter(epbsPool, gossipPublisher, testEnvelopeProcessor{}, nil)
 	bid := &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
 		Slot:               100,
 		ParentBlockHash:    common.HexToHash("0x1111"),
@@ -60,7 +75,7 @@ func TestCaplinBidSubmitter_SubmitBidDoesNotStoreUnpublishedBid(t *testing.T) {
 
 func TestCaplinBidSubmitter_BroadcastPayloadRejectsForkchoiceError(t *testing.T) {
 	gossipPublisher := &testGossipPublisher{}
-	submitter := NewCaplinBidSubmitter(nil, gossipPublisher, testEnvelopeProcessor{err: errors.New("invalid envelope")})
+	submitter := NewCaplinBidSubmitter(nil, gossipPublisher, testEnvelopeProcessor{err: errors.New("invalid envelope")}, nil)
 	cfg := clparams.MainnetBeaconConfig
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
@@ -72,8 +87,9 @@ func TestCaplinBidSubmitter_BroadcastPayloadRejectsForkchoiceError(t *testing.T)
 
 func TestCaplinBidSubmitterBroadcastPayloadResumesAfterPublishedPrefix(t *testing.T) {
 	publisher := &testGossipPublisher{errors: map[int]error{3: errors.New("column unavailable")}}
+	storage := &testColumnStorage{writes: make(map[uint64]int), errors: make(map[uint64]error)}
 	processorCalls := 0
-	submitter := NewCaplinBidSubmitter(nil, publisher, testEnvelopeProcessor{calls: &processorCalls})
+	submitter := NewCaplinBidSubmitter(nil, publisher, testEnvelopeProcessor{calls: &processorCalls}, storage)
 	cfg := clparams.MainnetBeaconConfig
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
@@ -88,11 +104,36 @@ func TestCaplinBidSubmitterBroadcastPayloadResumesAfterPublishedPrefix(t *testin
 	require.NoError(t, submitter.BroadcastPayload(t.Context(), envelope, columns))
 	require.Equal(t, 1, processorCalls)
 	require.Equal(t, 4, publisher.published)
+	require.Equal(t, map[uint64]int{0: 1, 1: 1}, storage.writes)
+}
+
+func TestCaplinBidSubmitterRetriesColumnStorageBeforeGossip(t *testing.T) {
+	publisher := &testGossipPublisher{}
+	storage := &testColumnStorage{
+		writes: make(map[uint64]int),
+		errors: map[uint64]error{1: errors.New("storage unavailable")},
+	}
+	submitter := NewCaplinBidSubmitter(nil, publisher, testEnvelopeProcessor{}, storage)
+	cfg := clparams.MainnetBeaconConfig
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
+	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")
+	columns := []*cltypes.DataColumnSidecar{
+		cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion),
+		cltypes.NewDataColumnSidecarWithVersion(clparams.GloasVersion),
+	}
+	columns[1].Index = 1
+
+	require.ErrorContains(t, submitter.BroadcastPayload(t.Context(), envelope, columns), "storage unavailable")
+	require.Equal(t, 1, publisher.published)
+	delete(storage.errors, 1)
+	require.NoError(t, submitter.BroadcastPayload(t.Context(), envelope, columns))
+	require.Equal(t, map[uint64]int{0: 1, 1: 2}, storage.writes)
+	require.Equal(t, 3, publisher.published)
 }
 
 func TestCaplinBidSubmitterDiscardPayloadBroadcastProgress(t *testing.T) {
 	publisher := &testGossipPublisher{err: errors.New("unavailable")}
-	submitter := NewCaplinBidSubmitter(nil, publisher, testEnvelopeProcessor{})
+	submitter := NewCaplinBidSubmitter(nil, publisher, testEnvelopeProcessor{}, nil)
 	cfg := clparams.MainnetBeaconConfig
 	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(&cfg)}
 	envelope.Message.BeaconBlockRoot = common.HexToHash("0x1234")

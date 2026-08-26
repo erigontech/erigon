@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/transition"
+	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
@@ -63,7 +64,7 @@ func TestBuildSlotContextUsesAndAdvancesParentState(t *testing.T) {
 
 	sc, err := buildSlotContext(fc, cfg, 17, 123, forkchoice.ParentCandidate{
 		Slot: 16, BlockRoot: parentRoot, ExecutionHash: common.HexToHash("0xcccc"),
-	})
+	}, common.Bytes48{})
 	require.NoError(t, err)
 	require.Equal(t, parentRoot, fc.requestedRoot)
 	require.Equal(t, uint64(16), parentState.Slot())
@@ -88,9 +89,45 @@ func TestBuildSlotContextAppliesEpochRandaoReset(t *testing.T) {
 
 	sc, err := buildSlotContext(fc, cfg, 24, 123, forkchoice.ParentCandidate{
 		Slot: 23, BlockRoot: common.HexToHash("0xaaaa"),
-	})
+	}, common.Bytes48{})
 	require.NoError(t, err)
 	require.Equal(t, wantRandao, sc.PrevRandao)
+}
+
+func TestBuildSlotContextUsesTargetParentBuilderBalance(t *testing.T) {
+	cfg := testBeaconCfg()
+	cfg.SlotsPerEpoch = 8
+	cfg.MinSeedLookahead = 1
+	cfg.GloasForkEpoch = 3
+	cfg.InitializeForkSchedule()
+	parentState, _, err := devgenesis.BuildGenesisState("slot-context-balance", 64, cfg, 0, common.Hash{})
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(parentState, 24))
+	pubkey := common.Bytes48{1}
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, new(cltypes.Builder).EncodingSizeSSZ())
+	builders.Append(&cltypes.Builder{
+		Pubkey: pubkey, Balance: cfg.MinDepositAmount + 100,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	parentState.SetBuilders(builders)
+	parentState.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 1})
+	withdrawals := solid.NewStaticListSSZ[*cltypes.BuilderPendingWithdrawal](
+		int(cfg.BuilderPendingWithdrawalsLimit), new(cltypes.BuilderPendingWithdrawal).EncodingSizeSSZ(),
+	)
+	withdrawals.Append(&cltypes.BuilderPendingWithdrawal{BuilderIndex: 0, Amount: 60})
+	parentState.SetBuilderPendingWithdrawals(withdrawals)
+	parentState.SetLatestBlockHash(common.HexToHash("0x01"))
+	_, _, found := builderStatusForPubkey(parentState, pubkey)
+	require.True(t, found)
+	fc := &slotContextForkChoiceStub{state: parentState, dependentRoot: common.HexToHash("0xbbbb")}
+
+	sc, err := buildSlotContext(fc, cfg, 25, 123, forkchoice.ParentCandidate{
+		Slot: 24, BlockRoot: common.HexToHash("0xaaaa"),
+	}, pubkey)
+	require.NoError(t, err)
+	require.True(t, sc.BuilderFound)
+	require.Equal(t, uint64(0), sc.BuilderIndex)
+	require.Equal(t, uint64(40), sc.BuilderStatus.Balance)
 }
 
 func (r testImportedBlockReader) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -193,7 +230,7 @@ func TestHandleImportedBlock_RevealsExactWinningBid(t *testing.T) {
 
 func TestRevealWinningBidUntilRecoveryOrDeadline(t *testing.T) {
 	attempts := 0
-	err := revealWinningBidUntil(t.Context(), time.Now().Add(time.Second), func() error {
+	err := revealWinningBidUntil(t.Context(), time.Now().Add(time.Second), func(context.Context) error {
 		attempts++
 		if attempts <= 3 {
 			return errors.New("temporarily unavailable")
@@ -204,10 +241,17 @@ func TestRevealWinningBidUntilRecoveryOrDeadline(t *testing.T) {
 	require.Equal(t, 4, attempts)
 
 	attempts = 0
-	err = revealWinningBidUntil(t.Context(), time.Now().Add(20*time.Millisecond), func() error {
+	err = revealWinningBidUntil(t.Context(), time.Now().Add(20*time.Millisecond), func(context.Context) error {
 		attempts++
 		return errors.New("permanent failure")
 	})
 	require.ErrorContains(t, err, "permanent failure")
 	require.Positive(t, attempts)
+}
+
+func TestPayloadRevealDeadlineUsesConfiguredBasisPoints(t *testing.T) {
+	cfg := testBeaconCfg()
+	cfg.PayloadDueBps = 7500
+	clock := eth_clock.NewEthereumClock(1000, common.Hash{}, cfg)
+	require.Equal(t, time.Unix(1069, 0), payloadRevealDeadline(clock, cfg, 5))
 }

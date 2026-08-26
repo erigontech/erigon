@@ -212,6 +212,25 @@ func TestResolveIndex_Found(t *testing.T) {
 	require.Equal(t, uint64(1), idx)
 }
 
+func TestResolveIndexSkipsNilBuilderEntry(t *testing.T) {
+	privKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	signer, err := NewLocalSignerFromBytes(privKey.Bytes())
+	require.NoError(t, err)
+	cfg := clparams.MainnetBeaconConfig
+	mgr := NewBuilderManager(signer, nil, &cfg, testGenesisValidatorsRoot)
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](64, 73)
+	builders.Append(nil)
+	builders.Append(&cltypes.Builder{Pubkey: signer.Pubkey(), Balance: cfg.MinDepositAmount})
+	s := state.New(&cfg)
+	s.SetBuilders(builders)
+
+	idx, found, err := mgr.ResolveIndex(&mockSyncedData{state: s})
+	require.NoError(t, err)
+	require.True(t, found)
+	require.Equal(t, uint64(1), idx)
+}
+
 func TestResolveIndex_NotFound(t *testing.T) {
 	privKey, err := bls.GenerateKey()
 	require.NoError(t, err)

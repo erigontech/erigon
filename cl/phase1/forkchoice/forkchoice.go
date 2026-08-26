@@ -774,6 +774,10 @@ func (f *ForkChoiceStore) ActiveParents(slot uint64) []ParentCandidate {
 		return nil
 	}
 	headSlot := header.Slot
+	if slot <= headSlot {
+		f.mu.RUnlock()
+		return nil
+	}
 	headStatus := f.headPayloadStatus
 	f.mu.RUnlock()
 

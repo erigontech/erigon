@@ -4,6 +4,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"math"
 	"sync"
 
 	"github.com/erigontech/erigon/cl/cltypes"
@@ -18,6 +19,10 @@ var ErrBidNotPublished = errors.New("bid was not published")
 // GossipPublisher is the subset of the gossip manager needed by the submitter.
 type GossipPublisher interface {
 	Publish(ctx context.Context, name string, data []byte) error
+}
+
+type ColumnSidecarStorage interface {
+	WriteColumnSidecars(ctx context.Context, blockRoot common.Hash, columnIndex int64, columnData *cltypes.DataColumnSidecar) error
 }
 
 // BidSubmitter submits signed bids to the network and broadcasts payloads.
@@ -35,16 +40,18 @@ type CaplinBidSubmitter struct {
 	epbsPool      *pool.EpbsPool
 	gossipManager GossipPublisher
 	forkchoice    executionPayloadProcessor
+	columnStorage ColumnSidecarStorage
 	progressMu    sync.Mutex
 	progress      map[common.Hash]*payloadBroadcastProgress
 }
 
 type payloadBroadcastProgress struct {
-	mu        sync.Mutex
-	processed bool
-	envelope  bool
-	columns   map[uint64]bool
-	completed bool
+	mu               sync.Mutex
+	processed        bool
+	envelope         bool
+	storedColumns    map[uint64]bool
+	publishedColumns map[uint64]bool
+	completed        bool
 }
 
 type executionPayloadProcessor interface {
@@ -56,11 +63,13 @@ func NewCaplinBidSubmitter(
 	epbsPool *pool.EpbsPool,
 	gossipManager GossipPublisher,
 	fc executionPayloadProcessor,
+	columnStorage ColumnSidecarStorage,
 ) *CaplinBidSubmitter {
 	return &CaplinBidSubmitter{
 		epbsPool:      epbsPool,
 		gossipManager: gossipManager,
 		forkchoice:    fc,
+		columnStorage: columnStorage,
 		progress:      make(map[common.Hash]*payloadBroadcastProgress),
 	}
 }
@@ -74,7 +83,7 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 
 	encodedSSZ, err := bid.EncodeSSZ(nil)
 	if err != nil {
-		return fmt.Errorf("%w: encode bid: %v", ErrBidNotPublished, err)
+		return fmt.Errorf("%w: encode bid: %w", ErrBidNotPublished, err)
 	}
 
 	if err := s.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayloadBid, encodedSSZ); err != nil {
@@ -102,7 +111,10 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 	s.progressMu.Lock()
 	progress := s.progress[root]
 	if progress == nil {
-		progress = &payloadBroadcastProgress{columns: make(map[uint64]bool)}
+		progress = &payloadBroadcastProgress{
+			storedColumns:    make(map[uint64]bool),
+			publishedColumns: make(map[uint64]bool),
+		}
 		s.progress[root] = progress
 	}
 	s.progressMu.Unlock()
@@ -131,7 +143,23 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 	}
 
 	for _, column := range columnSidecars {
-		if column == nil || progress.columns[column.Index] {
+		if column == nil || progress.storedColumns[column.Index] {
+			continue
+		}
+		if s.columnStorage == nil {
+			return fmt.Errorf("epbs/submitter: data column storage unavailable")
+		}
+		if column.Index > math.MaxInt64 {
+			return fmt.Errorf("epbs/submitter: data column sidecar index %d exceeds storage range", column.Index)
+		}
+		if err := s.columnStorage.WriteColumnSidecars(ctx, root, int64(column.Index), column); err != nil {
+			return fmt.Errorf("epbs/submitter: store data column sidecar %d: %w", column.Index, err)
+		}
+		progress.storedColumns[column.Index] = true
+	}
+
+	for _, column := range columnSidecars {
+		if column == nil || progress.publishedColumns[column.Index] {
 			continue
 		}
 		columnSSZ, err := column.EncodeSSZ(nil)
@@ -142,7 +170,7 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 		if err := s.gossipManager.Publish(ctx, gossip.TopicNameDataColumnSidecar(subnet), columnSSZ); err != nil {
 			return fmt.Errorf("epbs/submitter: publish data column sidecar %d: %w", column.Index, err)
 		}
-		progress.columns[column.Index] = true
+		progress.publishedColumns[column.Index] = true
 	}
 	progress.completed = true
 	s.progressMu.Lock()

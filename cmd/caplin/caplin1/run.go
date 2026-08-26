@@ -22,6 +22,7 @@ import (
 	"fmt"
 	"os"
 	"path"
+	"path/filepath"
 	"slices"
 	"time"
 
@@ -535,6 +536,7 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 	// [New in Gloas:EIP7732] Wire ePBS builder if enabled.
 	if config.EpbsBuilder.Enabled && execModule != nil {
 		adapter := eladapter.NewAdapter(execModule, clparams.GloasVersion, beaconConfig)
+		pendingStore := epbs.NewFilePendingPayloadStore(filepath.Join(dirs.CaplinLatest, "epbs-builder"), beaconConfig)
 		builderSvc, initErr := epbs.InitBuilderService(config.EpbsBuilder, epbs.BuilderDeps{
 			Ctx:        ctx,
 			BeaconCfg:  beaconConfig,
@@ -544,6 +546,8 @@ func RunCaplinService(ctx context.Context, engine execution_client.ExecutionEngi
 			Exec:       adapter,
 			EpbsPool:   epbsPool,
 			Gossip:     gossipManager,
+			Columns:    columnStorage,
+			Pending:    pendingStore,
 			Emitters:   emitters,
 		})
 		if initErr != nil {

@@ -86,17 +86,7 @@ func (m *BuilderManager) ResolveIndex(sd synced_data.SyncedData) (uint64, bool, 
 	var found bool
 
 	err := sd.ViewHeadState(func(s *state.CachingBeaconState) error {
-		builders := s.GetBuilders()
-		if builders == nil {
-			return nil
-		}
-		for i := 0; i < builders.Len(); i++ {
-			if builders.Get(i).Pubkey == pubkey {
-				idx = uint64(i)
-				found = true
-				break
-			}
-		}
+		idx, _, found = builderStatusForPubkey(s, pubkey)
 		return nil
 	})
 	if err != nil {
