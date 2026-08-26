@@ -106,16 +106,18 @@ func TestClientErrorData(t *testing.T) {
 	}
 
 	// Check code.
-	if e, ok := err.(Error); !ok {
-		t.Fatalf("client did not return rpc.Error, got %#v", e)
-	} else if e.ErrorCode() != (testError{}.ErrorCode()) {
-		t.Fatalf("wrong error code %d, want %d", e.ErrorCode(), testError{}.ErrorCode())
+	var errCode Error
+	if !errors.As(err, &errCode) {
+		t.Fatalf("client did not return rpc.Error, got %#v", err)
+	} else if errCode.ErrorCode() != (testError{}.ErrorCode()) {
+		t.Fatalf("wrong error code %d, want %d", errCode.ErrorCode(), testError{}.ErrorCode())
 	}
 	// Check data.
-	if e, ok := err.(DataError); !ok {
-		t.Fatalf("client did not return rpc.DataError, got %#v", e)
-	} else if e.ErrorData() != (testError{}.ErrorData()) {
-		t.Fatalf("wrong error data %#v, want %#v", e.ErrorData(), testError{}.ErrorData())
+	var errData DataError
+	if !errors.As(err, &errData) {
+		t.Fatalf("client did not return rpc.DataError, got %#v", err)
+	} else if errData.ErrorData() != (testError{}.ErrorData()) {
+		t.Fatalf("wrong error data %#v, want %#v", errData.ErrorData(), testError{}.ErrorData())
 	}
 }
 
@@ -561,7 +563,7 @@ func TestClientNotificationStorm(t *testing.T) {
 					t.Fatalf("(%d/%d) unexpected value %d", i, count, val)
 				}
 			case err := <-sub.Err():
-				if wantError && err != ErrSubscriptionQueueOverflow {
+				if wantError && !errors.Is(err, ErrSubscriptionQueueOverflow) {
 					t.Fatalf("(%d/%d) got error %q, want %q", i, count, err, ErrSubscriptionQueueOverflow)
 				} else if !wantError {
 					t.Fatalf("(%d/%d) got unexpected error %q", i, count, err)

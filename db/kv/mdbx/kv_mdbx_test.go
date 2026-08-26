@@ -1237,3 +1237,28 @@ func TestAutoRemove(t *testing.T) {
 		require.DirExists(t, dbPath)
 	})
 }
+
+func TestTxnDpLimitFromRealPageSize(t *testing.T) {
+	path := t.TempDir()
+	logger := log.New()
+	const dirtySpace = uint64(1 * datasize.GB)
+
+	open := func(requestedPageSize datasize.ByteSize) kv.RwDB {
+		return mdbx.New(dbcfg.ChainDB, logger).Path(path).
+			PageSize(requestedPageSize).DirtySpace(dirtySpace).MapSize(16 * datasize.GB).MustOpen()
+	}
+
+	db := open(16 * datasize.KB)
+	require.Equal(t, 16*datasize.KB, db.PageSize())
+	db.Close()
+
+	// mdbx keeps the page size of an existing db, so the dirty-page limit must
+	// follow the real page size - not the requested one
+	db = open(4 * datasize.KB)
+	defer db.Close()
+	require.Equal(t, 16*datasize.KB, db.PageSize())
+
+	dpLimit, err := db.(*mdbx.MdbxKV).Env().GetOption(mdbxgo.OptTxnDpLimit)
+	require.NoError(t, err)
+	require.Equal(t, dirtySpace/db.PageSize().Bytes(), dpLimit)
+}

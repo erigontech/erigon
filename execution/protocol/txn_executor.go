@@ -562,7 +562,7 @@ func (st *TxnExecutor) Execute(refunds bool, gasBailout bool) (result *evmtypes.
 		defer func() {
 			if r := recover(); r != nil {
 				// Recover from dependency panic and retry the execution.
-				if r != state.ErrDependency {
+				if err, ok := r.(error); !ok || !errors.Is(err, state.ErrDependency) {
 					log.Debug("Recovered from transition exec failure.", "Error:", r, "stack", dbg.Stack())
 				}
 				depTxIndex := st.evm.IntraBlockState().DepTxIndex()

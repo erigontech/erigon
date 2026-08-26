@@ -7,7 +7,7 @@ replace github.com/holiman/bloomfilter/v2 => github.com/AskAlexSharov/bloomfilte
 require (
 	github.com/erigontech/evmone_precompiles v0.0.0-20260414072133-b8b2bdc99de2
 	github.com/erigontech/fastkeccak v0.1.1-0.20260408010752-08e7b6602268
-	github.com/erigontech/mdbx-go v0.42.0
+	github.com/erigontech/mdbx-go v0.43.0
 	github.com/erigontech/secp256k1 v1.4.0
 )
 
@@ -24,7 +24,7 @@ require (
 	github.com/alecthomas/kong v1.16.1
 	github.com/anacrolix/envpprof v1.5.0
 	github.com/anacrolix/generics v0.2.0
-	github.com/anacrolix/go-libutp v1.5.0
+	github.com/anacrolix/go-libutp v1.5.1-0.20260817025621-104d95cd4dc1
 	github.com/anacrolix/log v0.17.1-0.20251118025802-918f1157b7bb
 	github.com/anacrolix/missinggo/v2 v2.11.0
 	github.com/anacrolix/sync v0.5.5-0.20251119100342-d78dd1f686f1
@@ -61,7 +61,6 @@ require (
 	github.com/grafana/pyroscope-go v1.4.0
 	github.com/grpc-ecosystem/go-grpc-middleware/v2 v2.3.3
 	github.com/hashicorp/go-retryablehttp v0.7.8
-	github.com/hashicorp/golang-lru/arc/v2 v2.0.7
 	github.com/hashicorp/golang-lru/v2 v2.0.7
 	github.com/heimdalr/dag v1.5.1
 	github.com/holiman/bloomfilter/v2 v2.0.3
@@ -69,7 +68,6 @@ require (
 	github.com/huandu/xstrings v1.5.0
 	github.com/huin/goupnp v1.3.0
 	github.com/jackpal/go-nat-pmp v1.0.2
-	github.com/jellydator/ttlcache/v3 v3.4.0
 	github.com/jinzhu/copier v0.4.0
 	github.com/json-iterator/go v1.1.12
 	github.com/klauspost/compress v1.19.1
@@ -106,7 +104,6 @@ require (
 	github.com/urfave/cli/v3 v3.10.1
 	github.com/valyala/fastjson v1.6.10
 	github.com/vektah/gqlparser/v2 v2.5.36
-	github.com/xsleonard/go-merkle v1.1.0
 	go.uber.org/goleak v1.3.0
 	go.uber.org/mock v0.6.0
 	go.uber.org/zap v1.27.1
@@ -196,7 +193,7 @@ require (
 	github.com/charmbracelet/x/term v0.2.2 // indirect
 	github.com/charmbracelet/x/termios v0.1.1 // indirect
 	github.com/charmbracelet/x/windows v0.2.2 // indirect
-	github.com/cilium/ebpf v0.16.0 // indirect
+	github.com/cilium/ebpf v0.22.0 // indirect
 	github.com/ckaznocha/intrange v0.3.1 // indirect
 	github.com/clipperhouse/displaywidth v0.11.0 // indirect
 	github.com/clipperhouse/uax29/v2 v2.7.0 // indirect

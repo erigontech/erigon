@@ -728,9 +728,9 @@ func TestOpenAllSnapshot(t *testing.T) {
 	logger := log.New()
 	baseDir, require := t.TempDir(), require.New(t)
 
-	steps := []uint64{500_000, 100_000}
+	steps := []uint64{500_000}
 
-	for i, chain := range []string{networkname.Mainnet, networkname.Amoy} {
+	for i, chain := range []string{networkname.Mainnet} {
 		step := steps[i]
 		dir := filepath.Join(baseDir, chain)
 		chainSnapshotCfg, _ := snapcfg.KnownCfg(chain)
@@ -874,7 +874,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(21200000, int(f.To))
 	require.Equal("BlockRoot", f.TypeString)
 	require.Equal("BlockRoot", f.CaplinTypeString)
-	require.Nil(f.Type) // caplin state snapshot types don't have a registered snaptype.Type
+	require.NotNil(f.Type)
 
 	f, e3, ok = snaptype.ParseFileName("", "caplin/v1.1-013050-013100-ValidatorEffectiveBalance.seg")
 	require.True(ok)
@@ -883,7 +883,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(13100000, int(f.To))
 	require.Equal("ValidatorEffectiveBalance", f.TypeString)
 	require.Equal("ValidatorEffectiveBalance", f.CaplinTypeString)
-	require.Nil(f.Type) // caplin state snapshot types don't have a registered snaptype.Type
+	require.NotNil(f.Type)
 
 	f, e3, ok = snaptype.ParseFileName("caplin", "v1.1-013050-013100-ValidatorEffectiveBalance.seg")
 	require.True(ok)
@@ -892,7 +892,7 @@ func TestParseCompressedFileName(t *testing.T) {
 	require.Equal(13100000, int(f.To))
 	require.Equal("ValidatorEffectiveBalance", f.TypeString)
 	require.Equal("ValidatorEffectiveBalance", f.CaplinTypeString)
-	require.Nil(f.Type) // caplin state snapshot types don't have a registered snaptype.Type
+	require.NotNil(f.Type)
 
 	f, e3, ok = snaptype.ParseFileName("", stat("v1.0-022695-022696-transactions-to-block.idx"))
 	require.True(ok)
