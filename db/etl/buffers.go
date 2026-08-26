@@ -257,6 +257,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 		b.curOff = off + int32(n) //nolint:gosec
 	}
 	if len(b.entries) == cap(b.entries) {
+		log.Warn("[dbg] entries grow", "len(b.entries)", len(b.entries))
 		mxEntriesGrow.Inc()
 	}
 	b.entries = append(b.entries, e)
