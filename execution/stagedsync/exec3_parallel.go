@@ -25,6 +25,7 @@ import (
 	"github.com/erigontech/erigon/db/rawdb/rawtemporaldb"
 	dbstate "github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/changeset"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/execution/bal"
 	"github.com/erigontech/erigon/execution/chain"
@@ -380,9 +381,6 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	var uncommittedGas int64
 	var hasLoggedExecution bool
 	var hasLoggedCommittments atomic.Bool
-	var commitStart time.Time
-
-	var lastProgress commitment.CommitProgress
 
 	execErr := func() (err error) {
 		defer func() {
@@ -747,7 +745,7 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					// A partial block records only suffix I/O, so it cannot be checked
 					// against a full-block BAL.
 					if validateFullBlock && (isAmsterdam || pe.cfg.experimentalBAL) {
-						if err := bal.Process(rwTx, header, applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
+						if err := bal.Process(header, block.BlockAccessList(), applyResult.TxIO, isAmsterdam, pe.cfg.experimentalBAL, pe.cfg.dirs.DataDir, pe.logger); err != nil {
 							failInfra(err)
 							continue
 						}
@@ -831,6 +829,10 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 					hasLoggedExecution = true
 					lastExecutedLog = time.Now()
 					pe.LogExecution()
+					if !calculator.FirstCommitAt().IsZero() {
+						hasLoggedCommittments.Store(true)
+						pe.LogCommitments(0, stepsInDb, calculator.LastCommitProgress())
+					}
 					agg := pe.cfg.db.(dbstate.HasAgg).Agg().(*dbstate.Aggregator)
 					if agg.HasBackgroundFilesBuild() {
 						pe.logger.Info(fmt.Sprintf("[%s] Background files build", pe.logPrefix), "progress", agg.BackgroundProgress())
@@ -858,8 +860,8 @@ func (pe *parallelExecutor) execImpl(ctx context.Context,
 	// Commitment is computed per-block by the calculator. Stage progress
 	// is updated in handleCommitResult when results are consumed.
 
-	if !hasLoggedCommittments.Load() && !commitStart.IsZero() {
-		pe.LogCommitments(0, stepsInDb, lastProgress)
+	if !hasLoggedCommittments.Load() && !calculator.FirstCommitAt().IsZero() {
+		pe.LogCommitments(0, stepsInDb, calculator.LastCommitProgress())
 	}
 
 	if execErr != nil {
@@ -2037,8 +2039,12 @@ func (result *execResult) calcFees(
 	// have already bumped Nonce or set CodeHash, and EIP-161 emptiness
 	// must respect those writes — otherwise SelfDestructPath is emitted
 	// and Normalize's sdSet filter drops them.
+	//
+	// A delete drawn from an in-flight incarnation is published before the round
+	// that retracts it, and read there by consumers that record no read.
 	coinbaseEmptyPre := (coinbaseAcc == nil || coinbaseAcc.Balance.IsZero()) &&
-		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite
+		coinbaseNonce == 0 && coinbaseEmptyCodeHash && !coinbaseHasCodeHashWrite &&
+		!vm.AnyEstimateAccountCell(result.Coinbase, txIndex)
 	coinbaseEmptied := coinbaseEmptyRemoval && coinbaseEmptyPre && newCoinbaseBalance.IsZero()
 	emitCoinbase := newCoinbaseBalance != oldCoinbaseBalance || coinbaseEmptied
 
@@ -2173,7 +2179,7 @@ func (result *execResult) finalizeTx(
 	vm *state.VersionMap,
 	stateReader state.StateReader,
 ) (*types.Receipt, state.ReadSet, *state.WriteSet, error) {
-	// Engine post-apply message (e.g. Bor fee-transfer logs).
+	// Engine post-apply message hook.
 	if err := result.runPostApplyMessageOnMinIBS(task, txTask, engine, vm, stateReader); err != nil {
 		return nil, state.ReadSet{}, nil, err
 	}
@@ -2187,7 +2193,7 @@ func (result *execResult) finalizeTx(
 }
 
 // runPostApplyMessageOnMinIBS runs the engine's PostApplyMessage callback
-// (e.g. Bor's AddFeeTransferLog) on a minimal IntraBlockState that serves as
+// on a minimal IntraBlockState that serves as
 // the log buffer, and appends the emitted logs to result.Logs so they reach
 // the receipt.
 func (result *execResult) runPostApplyMessageOnMinIBS(
@@ -2892,7 +2898,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				if txTask.IsHistoric() {
 					stateReader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, txTask.Version().TxNum)
 				} else {
-					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx), be.blockStateCache)
+					stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
 				}
 			}
 			existingWrites := be.blockIO.WriteSet(txVersion.TxIndex)
@@ -3009,7 +3015,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 						// BlockStateCache write buffer. This ensures the
 						// system TX sees all accumulated state from prior
 						// TXs in the block, not stale sd.mem values.
-						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetterNoMetrics(applyTx), be.blockStateCache)
+						stateReader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
 					}
 				}
 
@@ -3262,7 +3268,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 				// the pre-block balance and stomped tx 28's in-block update.
 				reader = state.NewHistoryReaderV3WithBlockCache(applyTx, pe.rs.Domains(), be.blockStateCache, finalVersion.TxNum)
 			} else {
-				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetterNoMetrics(applyTx), be.blockStateCache)
+				reader = state.NewCurrentCachedReaderV3(pe.rs.Domains().AsStateGetter(applyTx, execctxapi.StateGetterOptions{}), be.blockStateCache)
 			}
 			pe.RUnlock()
 

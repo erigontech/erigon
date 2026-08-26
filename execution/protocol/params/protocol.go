@@ -140,14 +140,11 @@ const (
 	// Introduced in Tangerine Whistle (Eip 150)
 	CreateBySelfdestructGas uint64 = 25000
 
-	BaseFeeChangeDenominator           = 8          // Bounds the amount the base fee can change between blocks.
-	BaseFeeChangeDenominatorPostDelhi  = 16         // Bounds the amount the base fee can change between blocks post delhi hard fork for polygon networks.
-	BaseFeeChangeDenominatorPostBhilai = 64         // Bounds the amount the base fee can change between blocks post bhilai hard fork for polygon networks.
-	ElasticityMultiplier               = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
-	InitialBaseFee                     = 1000000000 // Initial base fee for EIP-1559 blocks.
+	BaseFeeChangeDenominator = 8          // Bounds the amount the base fee can change between blocks.
+	ElasticityMultiplier     = 2          // Bounds the maximum gas limit an EIP-1559 block may have.
+	InitialBaseFee           = 1000000000 // Initial base fee for EIP-1559 blocks.
 
 	MaxCodeSize              = 24 * 1024                // Maximum bytecode to permit for a contract
-	MaxCodeSizeAhmedabad     = 32 * 1024                // Maximum bytecode to permit for a contract post Ahmedabad hard fork (bor / polygon pos) (32KB)
 	MaxInitCodeSize          = 2 * MaxCodeSize          // Maximum initcode to permit in a creation transaction and create instructions
 	MaxCodeSizeAmsterdam     = 64 * 1024                // EIP-7954: Increase Maximum Contract Size
 	MaxInitCodeSizeAmsterdam = 2 * MaxCodeSizeAmsterdam // EIP-7954: Increase Maximum Contract Size

@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/cache"
 	"github.com/erigontech/erigon/execution/types/accounts"
 )
@@ -209,13 +210,13 @@ func TestStaleGetterResolvesCacheStateVersionOnce(t *testing.T) {
 	currentDomains.BindStateCache(stateCache)
 
 	countingTx := &stateVersionCountingTx{TemporalTx: staleTx}
-	getter := currentDomains.AsStateGetter(countingTx)
+	getter := currentDomains.AsStateGetter(countingTx, execctxapi.StateGetterOptions{})
 	require.Equal(t, 1, countingTx.stateVersionReads, "getter construction resolves its transaction version")
 
 	for i := byte(1); i <= 3; i++ {
 		missing := make([]byte, 20)
 		missing[0] = i
-		value, _, err := getter.GetLatest(kv.AccountsDomain, missing)
+		value, _, err := getter.GetLatest(kv.AccountsDomain, missing, kv.GetLatestOptions{})
 		require.NoError(t, err)
 		require.Empty(t, value)
 	}
