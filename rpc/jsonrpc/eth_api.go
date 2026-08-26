@@ -150,7 +150,8 @@ type BaseAPI struct {
 	_genesis                  atomic.Pointer[types.Block]
 	_pruneMode                atomic.Pointer[prune.Mode]
 	_commitmentHistoryEnabled atomic.Pointer[bool]
-	_preMergeData             atomic.Pointer[bool]
+	_preMergeData             atomic.Pointer[preMergeVerdict]
+	_preMergeDataTTL          time.Duration
 
 	_blockReader dbservices.FullBlockReader
 	_txNumReader rawdbv3.TxNumsReader
@@ -198,6 +199,7 @@ func NewBaseApi(f *rpchelper.Filters, stateCache kvcache.Cache, blockReader dbse
 		_blockReader:      blockReader,
 		_txnReader:        blockReader,
 		_txNumReader:      blockReader.TxnumReader(),
+		_preMergeDataTTL:  defaultPreMergeDataTTL,
 		evmCallTimeout:    evmCallTimeout,
 		_engine:           engine,
 		receiptsGenerator: receipts.NewGenerator(conf.Dirs, blockReader, engine, stateCache, evmCallTimeout, f),
@@ -453,6 +455,19 @@ func (api *BaseAPI) headerByHash(ctx context.Context, hash common.Hash, tx kv.Tx
 	return api._blockReader.Header(ctx, overlayTx, hash, *number)
 }
 
+// preMergeVerdict is the archive-vs-expiry answer with the time it was observed: it
+// reads live snapshot availability, which widens as segments arrive.
+type preMergeVerdict struct {
+	holds bool
+	at    time.Time
+}
+
+const defaultPreMergeDataTTL = 30 * time.Second
+
+// systemTxsPerBlock is the pair of system entries every block carries in the txnum
+// sequence, which a stored TxCount includes.
+const systemTxsPerBlock = 2
+
 // checks the pruning state to see if we would hold information about this
 // block in state history or not.  Some strange issues arise getting account
 // history for blocks that have been pruned away giving nonce too low errors
@@ -492,7 +507,7 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 	if err != nil {
 		return false, nil, err
 	}
-	if chainConfig.MergeHeight != nil && p.History == prune.KeepPostMergeBlocksPruneMode {
+	if chainConfig.MergeHeight != nil {
 		holds, err := api.holdsPreMergeBlockData(ctx, tx, *chainConfig.MergeHeight)
 		if err != nil || holds {
 			return false, nil, err
@@ -506,95 +521,80 @@ func (api *BaseAPI) blocksFollowChainHistoryExpiry(ctx context.Context, tx kv.Tx
 // mode carries the same sentinel for both. Neither a pre-merge body nor the oldest
 // available block answers on its own: expiry keeps pre-merge headers and bodies, and
 // the transaction segment spanning the merge point reaches below it. Only a readable
-// transaction of an early block does. Availability can widen while segments arrive,
-// so only the archive observation is settled and cached.
+// transaction of an early block does. The answer is availability rather than policy, so
+// it is cached for a short TTL in both directions instead of being settled once.
 func (api *BaseAPI) holdsPreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (bool, error) {
-	if holds := api._preMergeData.Load(); holds != nil && *holds {
-		return true, nil
+	if v := api._preMergeData.Load(); v != nil && time.Since(v.at) < api._preMergeDataTTL {
+		return v.holds, nil
 	}
+	holds, decided, err := api.probePreMergeBlockData(ctx, tx, mergeHeight)
+	if err != nil {
+		return false, err
+	}
+	if decided {
+		api._preMergeData.Store(&preMergeVerdict{holds: holds, at: time.Now()})
+	}
+	return holds, nil
+}
+
+// probePreMergeBlockData answers holdsPreMergeBlockData from what is on disk. It reports
+// decided=false where the block data it reads is itself missing: a verdict inferred from
+// absent data is not one to remember.
+func (api *BaseAPI) probePreMergeBlockData(ctx context.Context, tx kv.Tx, mergeHeight uint64) (holds, decided bool, err error) {
 	if mergeHeight == 0 {
-		return false, nil
+		return false, true, nil
 	}
 	oldest, err := api._blockReader.MinimumBlockAvailable(ctx, tx)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
 	// Zero is a snapshot set starting at genesis, one a database holding every block
 	// after it; anything higher starts mid-chain, however far below the merge point.
 	if oldest > 1 {
-		return false, nil
+		return false, true, nil
 	}
-	holds, err := api.hasEarlyTransaction(ctx, tx, mergeHeight)
-	if err != nil || !holds {
-		return false, err
-	}
-	api._preMergeData.Store(&holds)
-	return true, nil
+	return api.hasEarlyTransaction(ctx, tx, mergeHeight)
 }
 
-// hasEarlyTransaction reports whether the chain's first transaction below limit is
-// readable. On a chain with no transaction there, a body is all an archive would
-// hold, so its presence decides.
-func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uint64) (bool, error) {
-	blockNum, found, err := api.firstBlockWithTxs(ctx, tx, limit)
+// hasEarlyTransaction reports whether a user transaction below limit is readable, and
+// whether the block data it takes to answer was there at all. The last pre-merge body
+// carries the cumulative txnum position, which says how many entries the chain consumed
+// below limit: no more than the system ones means there is no user transaction to be
+// missing, and the bodies both retentions keep are the whole answer. Otherwise
+// candidates are taken by halving the range, which keeps them clear of the transaction
+// segment spanning limit.
+func (api *BaseAPI) hasEarlyTransaction(ctx context.Context, tx kv.Tx, limit uint64) (holds, decided bool, err error) {
+	last, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, limit-1)
 	if err != nil {
-		return false, err
+		return false, false, err
 	}
-	if !found {
-		return api.hasBody(ctx, tx, limit-1)
+	if last != nil {
+		// Non-canonical bodies are numbered from the same sequence, so a reorg can only
+		// inflate the total and cost a sample. The same holds for a genesis position
+		// past zero, which is why this compares against the system entries alone.
+		totalTxns := last.BaseTxnID.U64() + uint64(last.TxCount)
+		systemTxns := systemTxsPerBlock * limit
+		if totalTxns <= systemTxns {
+			return true, true, nil
+		}
 	}
-	txn, ok, err := api._blockReader.TxnByIdxInBlock(ctx, tx, blockNum, 0)
-	if err != nil {
-		return false, err
-	}
-	return ok && txn != nil, nil
-}
-
-// firstBlockWithTxs finds the lowest block below limit carrying a transaction. Every
-// block adds two system entries to the txnum sequence, so any block's maximum txnum
-// reads off a cumulative transaction count, which is monotone and makes the first
-// such block binary-searchable.
-func (api *BaseAPI) firstBlockWithTxs(ctx context.Context, tx kv.Tx, limit uint64) (uint64, bool, error) {
-	genesisMax, err := api._txNumReader.Max(ctx, tx, 0)
-	if err != nil {
-		return 0, false, err
-	}
-	hasTxsUpTo := func(blockNum uint64) (bool, error) {
-		maxTxNum, err := api._txNumReader.Max(ctx, tx, blockNum)
+	for candidate := limit / 2; candidate >= 1; candidate /= 2 {
+		body, err := api._blockReader.CanonicalBodyForStorage(ctx, tx, candidate)
 		if err != nil {
-			return false, err
+			return false, false, err
 		}
-		return maxTxNum > genesisMax+2*blockNum, nil
-	}
-	lo, hi := uint64(1), limit-1
-	if hi < lo {
-		return 0, false, nil
-	}
-	if has, err := hasTxsUpTo(hi); err != nil || !has {
-		return 0, false, err
-	}
-	for lo < hi {
-		mid := (lo + hi) / 2
-		has, err := hasTxsUpTo(mid)
+		if body == nil || body.TxCount <= systemTxsPerBlock {
+			continue
+		}
+		txn, ok, err := api._blockReader.TxnByIdxInBlock(ctx, tx, candidate, 0)
 		if err != nil {
-			return 0, false, err
+			return false, false, err
 		}
-		if has {
-			hi = mid
-		} else {
-			lo = mid + 1
-		}
+		return ok && txn != nil, true, nil
 	}
-	return lo, true, nil
-}
-
-func (api *BaseAPI) hasBody(ctx context.Context, tx kv.Tx, block uint64) (bool, error) {
-	hash, ok, err := api._blockReader.CanonicalHash(ctx, tx, block)
-	if err != nil || !ok {
-		return false, err
-	}
-	body, _, err := api._blockReader.Body(ctx, tx, hash, block)
-	return body != nil, err
+	// Nothing sampled could show a transaction, and no count proved there are none, so
+	// the datadir has not answered: a verdict inferred from what is missing is not one.
+	return false, false, nil
 }
 
 func (api *BaseAPI) checkPruneField(tx kv.Tx, block uint64, field func(*prune.Mode) prune.BlockAmount, available string) error {
@@ -670,10 +670,11 @@ func (api *BaseAPI) postStateCalculated(ctx context.Context, tx kv.Tx, block uin
 	if chainConfig.IsByzantium(block) {
 		return false, nil
 	}
-	if api._blockReader.FrozenBlocks() == 0 {
-		return true, nil
+	commitmentHistory, err := api.commitmentHistoryEnabled(tx)
+	if err != nil {
+		return false, err
 	}
-	return api.commitmentHistoryEnabled(tx)
+	return receipts.PostStateCalculated(chainConfig, block, commitmentHistory, api._blockReader), nil
 }
 
 // checkBlockReceiptsAvailable gates endpoints serving the receipts of one block.

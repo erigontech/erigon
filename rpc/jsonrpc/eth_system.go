@@ -39,6 +39,7 @@ import (
 	"github.com/erigontech/erigon/p2p/forkid"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/gasprice"
+	"github.com/erigontech/erigon/rpc/jsonrpc/receipts"
 	"github.com/erigontech/erigon/rpc/rpchelper"
 )
 
@@ -212,11 +213,13 @@ func (api *APIImpl) Capabilities(ctx context.Context) (*CapabilitiesResult, erro
 	if chainConfig.ByzantiumBlock != nil {
 		byzantium = *chainConfig.ByzantiumBlock
 	}
-	if receiptsOldest < byzantium && (api._blockReader.FrozenBlocks() == 0 || keepExecutionProofs) {
+	if receipts.PostStateCalculated(chainConfig, receiptsOldest, keepExecutionProofs, api._blockReader) {
 		if stateOldest < byzantium {
 			receiptsOldest, receiptsAmount = stricterRetention(receiptsOldest, receiptsAmount, stateOldest, pruneMode.History)
 		} else {
-			receiptsOldest = byzantium
+			// A fork height is not a window: keeping the amount would advertise a
+			// retention whose head - retentionBlocks lands below this oldest block.
+			receiptsOldest, receiptsAmount = byzantium, prune.KeepAllBlocksPruneMode
 		}
 	}
 	// Reading the receipts of a block needs its body too: the stored receipt carries no

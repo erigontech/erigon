@@ -137,6 +137,9 @@ func TestCapabilities(t *testing.T) {
 		})
 		require.NoError(t, err)
 		require.NoError(t, m.InsertChain(c))
+		// The prune mode alone no longer declares chain history expiry: the boundary is
+		// resolved from the block data on disk, so the fixture has to have its shape.
+		dropTransactions(t, m.DB, 1, mergeAt)
 		ctx := t.Context()
 		dbTx, err := m.DB.BeginTemporalRw(ctx)
 		require.NoError(t, err)

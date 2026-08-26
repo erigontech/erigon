@@ -33,6 +33,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/stream"
 	"github.com/erigontech/erigon/execution/chain"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/execution/types/ethutils"
 	"github.com/erigontech/erigon/rpc"
@@ -148,14 +149,20 @@ func (api *BaseAPI) resolveLogsRange(ctx context.Context, tx kv.Tx, crit filters
 			return 0, 0, err
 		}
 		if body == nil {
-			// The body is also missing below the pruning boundary; only a block past
-			// the executed head is genuinely not found — pruned ones are for the gate.
+			// The body is also missing below the pruning boundary, where the gate is the
+			// one that must speak. Where no boundary covers the block, a missing body is
+			// what it says it is, and answering with an empty log array would hide it.
 			latest, _, _, err := rpchelper.GetBlockNumber(ctx, rpc.BlockNumberOrHashWithNumber(rpc.LatestExecutedBlockNumber), tx, api._blockReader, nil)
 			if err != nil {
 				return 0, 0, err
 			}
 			if *number > latest {
 				return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
+			}
+			if err := api.checkPruneBlocks(ctx, tx, *number); err == nil {
+				return 0, 0, fmt.Errorf("block not found: %x", *crit.BlockHash)
+			} else if !errors.Is(err, state.PrunedError) {
+				return 0, 0, err
 			}
 		}
 		return *number, *number, nil
@@ -554,7 +561,7 @@ func (api *APIImpl) GetTransactionReceipt(ctx context.Context, txnHash common.Ha
 	}
 
 	var postState *receipts.PostStateInfo = nil
-	if (commitmentHistory || api._blockReader.FrozenBlocks() == 0) && !chainConfig.IsByzantium(blockNum) {
+	if receipts.PostStateCalculated(chainConfig, blockNum, commitmentHistory, api._blockReader) {
 		block, err := api.blockByNumberWithSenders(ctx, overlayTx, blockNum)
 		if err != nil {
 			return nil, err

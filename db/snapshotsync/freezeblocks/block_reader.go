@@ -57,6 +57,7 @@ type RemoteBlockReader struct {
 	frozenBlocksMu        sync.Mutex
 	frozenBlocksValue     uint64
 	frozenBlocksFetchedAt time.Time
+	frozenBlocksFetching  bool
 	frozenBlocksTTL       time.Duration
 	frozenBlocksTimeout   time.Duration
 }
@@ -152,22 +153,36 @@ func (r *RemoteBlockReader) FreezingCfg() ethconfig.BlocksFreezing { panic("not 
 // FrozenBlocks is answered by the backend. The context-free signature leaves no way to
 // surface an error or honor request cancellation, so the call is bounded by an internal
 // timeout and its result cached for a short TTL. On failure the last known value is
-// kept: the count only grows, and a stale-low answer is the conservative one.
+// kept: the count only grows, and a stale-low answer is the conservative one for the
+// availability gates. It is not conservative for the pre-Byzantium receipt paths, which
+// read zero as "no snapshots" and re-execute, so a failure is not cached as a success.
+// One fetch runs at a time and the others are served from the cache: this sits on every
+// receipt request, and a slow backend must delay one goroutine rather than all of them.
 func (r *RemoteBlockReader) FrozenBlocks() uint64 {
 	r.frozenBlocksMu.Lock()
-	defer r.frozenBlocksMu.Unlock()
-	if !r.frozenBlocksFetchedAt.IsZero() && time.Since(r.frozenBlocksFetchedAt) < r.frozenBlocksTTL {
-		return r.frozenBlocksValue
+	fresh := !r.frozenBlocksFetchedAt.IsZero() && time.Since(r.frozenBlocksFetchedAt) < r.frozenBlocksTTL
+	if fresh || r.frozenBlocksFetching {
+		value := r.frozenBlocksValue
+		r.frozenBlocksMu.Unlock()
+		return value
 	}
+	r.frozenBlocksFetching = true
+	r.frozenBlocksMu.Unlock()
+
 	ctx, cancel := context.WithTimeout(context.Background(), r.frozenBlocksTimeout)
 	defer cancel()
 	reply, err := r.client.FrozenBlocks(ctx, &emptypb.Empty{})
 	if err != nil {
 		log.Warn("[frozen-blocks] backend did not answer", "err", err)
-	} else {
-		r.frozenBlocksValue = reply.FrozenBlocks
 	}
-	r.frozenBlocksFetchedAt = time.Now()
+
+	r.frozenBlocksMu.Lock()
+	defer r.frozenBlocksMu.Unlock()
+	r.frozenBlocksFetching = false
+	if err == nil {
+		r.frozenBlocksValue = reply.FrozenBlocks
+		r.frozenBlocksFetchedAt = time.Now()
+	}
 	return r.frozenBlocksValue
 }
 

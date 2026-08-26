@@ -18,6 +18,7 @@ package jsonrpc
 
 import (
 	"context"
+	"encoding/binary"
 	"math/big"
 	"testing"
 
@@ -26,8 +27,10 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/db/kv/dbutils"
 	"github.com/erigontech/erigon/db/kv/kvcfg"
 	"github.com/erigontech/erigon/db/kv/prune"
+	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/execmodule/execmoduletester"
 	"github.com/erigontech/erigon/execution/state"
@@ -245,6 +248,10 @@ type pruneGatingConfig struct {
 	// chainConfig defaults to TestChainBerlinConfig; set it to declare a merge
 	// point or another chain property a gate reads.
 	chainConfig *chain.Config
+	// dropPreMergeTxs gives the fixture the shape of a node that followed chain
+	// history expiry: pre-merge headers and bodies are kept, their transactions
+	// were never downloaded.
+	dropPreMergeTxs bool
 }
 
 var pruneGatingConfigs = []pruneGatingConfig{
@@ -255,7 +262,7 @@ var pruneGatingConfigs = []pruneGatingConfig{
 	// The same shape on a chain that declares a merge point: there the blocks
 	// sentinel is chain history expiry rather than a no-op.
 	{name: "full_legacy_merge_chain", mode: prune.Mode{Initialised: true, History: pruneGatingDistance, Blocks: prune.KeepPostMergeBlocksPruneMode},
-		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight)},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight), dropPreMergeTxs: true},
 	// Both retentions carry the chain-history-expiry sentinel, the pair a legacy
 	// archive datadir and an operator asking for expiry on top of archive persist
 	// alike. This fixture holds every body, so it is the archive one.
@@ -388,6 +395,11 @@ func setupPruneGating(t *testing.T, cfg pruneGatingConfig) (pruneGatingAPIs, pru
 	}
 	require.NoError(t, tx.Commit())
 
+	if cfg.dropPreMergeTxs {
+		require.NotNil(t, chainConfig.MergeHeight, "dropPreMergeTxs needs a chain that declares a merge point")
+		dropTransactions(t, m.DB, 1, *chainConfig.MergeHeight)
+	}
+
 	ref := func(idx int) pruneGatingRef {
 		b := c.Blocks[idx]
 		return pruneGatingRef{num: b.NumberU64(), hash: b.Hash(), txHash: b.Transactions()[0].Hash()}
@@ -410,4 +422,29 @@ func setupPruneGating(t *testing.T, cfg pruneGatingConfig) (pruneGatingAPIs, pru
 		recent: ref(pruneGatingChainLen - 1),
 		empty:  pruneGatingRef{num: empty.NumberU64(), hash: empty.Hash()},
 	}
+}
+
+// dropTransactions removes the transactions of every block in [from, to), leaving the
+// headers and bodies in place. That is what chain history expiry looks like on disk.
+func dropTransactions(t *testing.T, db kv.TemporalRwDB, from, to uint64) {
+	t.Helper()
+	ctx := context.Background()
+	rwTx, err := db.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	for num := from; num < to; num++ {
+		hash, err := rawdb.ReadCanonicalHash(rwTx, num)
+		require.NoError(t, err)
+		body, err := rawdb.ReadBodyForStorageByKey(rwTx, dbutils.BlockBodyKey(num, hash))
+		require.NoError(t, err)
+		if body == nil {
+			continue
+		}
+		txID := make([]byte, 8)
+		for id := body.BaseTxnID.U64(); id <= body.BaseTxnID.LastSystemTx(body.TxCount); id++ {
+			binary.BigEndian.PutUint64(txID, id)
+			require.NoError(t, rwTx.Delete(kv.EthTx, txID))
+		}
+	}
+	require.NoError(t, rwTx.Commit())
 }

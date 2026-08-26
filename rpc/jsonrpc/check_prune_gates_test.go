@@ -19,6 +19,7 @@ package jsonrpc
 import (
 	"bytes"
 	"fmt"
+	"math"
 	"math/big"
 	"testing"
 
@@ -34,6 +35,7 @@ import (
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
+	"github.com/erigontech/erigon/p2p/protocols/eth"
 	"github.com/erigontech/erigon/rpc"
 	"github.com/erigontech/erigon/rpc/filters"
 )
@@ -458,7 +460,8 @@ func TestBlocksGateAppliesChainHistoryExpiry(t *testing.T) {
 			Initialised: true, History: prune.KeepAllBlocksPruneMode,
 			Blocks: prune.KeepPostMergeBlocksPruneMode,
 		},
-		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
+		chainConfig:     mergeHeightChainConfig(pruneGatingMergeHeight),
+		dropPreMergeTxs: true,
 	})
 	ctx := t.Context()
 	tx, err := apis.eth.db.BeginTemporalRo(ctx)
@@ -1214,6 +1217,11 @@ func TestBlocksGateReopensWhenOlderBlocksArrive(t *testing.T) {
 	}
 	require.NoError(t, rwTx.Commit())
 
+	// The verdict is cached for a short TTL, which is what keeps a widening snapshot
+	// set from being read on every request. This test is about the later observation
+	// winning, not about how long the previous one lingers.
+	apis.eth._preMergeDataTTL = 0
+
 	gateOnOldBlock := func() error {
 		tx, err := apis.eth.db.BeginTemporalRo(ctx)
 		require.NoError(t, err)
@@ -1304,4 +1312,236 @@ func TestCapabilitiesTakeTheNoByzantiumRequirement(t *testing.T) {
 
 	require.NoError(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, historyOldest))
 	require.ErrorIs(t, apis.eth.checkBlockReceiptsAvailable(ctx, tx, historyOldest-1), state.PrunedError)
+}
+
+// TestLogsByBlockHashReportsAMissingBody pins that a block the gate serves but whose
+// body is gone is reported as missing rather than answered with an empty log array.
+// Turning a missing body into an empty result is only correct where the gate speaks.
+func TestLogsByBlockHashReportsAMissingBody(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	ctx := t.Context()
+
+	rwTx, err := apis.rwDB.BeginTemporalRw(ctx)
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+	rawdb.DeleteBody(rwTx, chainInfo.old.hash, chainInfo.old.num)
+	require.NoError(t, rwTx.Commit())
+
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+	require.NoError(t, apis.eth.checkLogsAvailable(ctx, tx, chainInfo.old.num, filters.FilterCriteria{}),
+		"the fixture needs a mode where no gate refuses the block")
+
+	hash := chainInfo.old.hash
+	_, err = apis.eth.GetLogs(ctx, filters.FilterCriteria{BlockHash: &hash})
+	require.ErrorContains(t, err, "block not found")
+}
+
+// TestCapabilitiesDropTheWindowAtTheForkBoundary pins the retention rendered when the
+// receipt boundary is a fork height rather than a window: a client computing
+// head - retentionBlocks from a window strategy would land far below the oldest block
+// the same field advertises.
+func TestCapabilitiesDropTheWindowAtTheForkBoundary(t *testing.T) {
+	t.Parallel()
+
+	const historyDistance = prune.Distance(8)
+	const receiptsDistance = prune.Distance(15)
+
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: historyDistance, Blocks: prune.KeepAllBlocksPruneMode,
+			Receipts: receiptsDistance,
+		},
+		persistReceipts: true,
+		chainConfig:     byzantiumChainConfig(pruneGatingByzantiumHeight),
+	})
+	ctx := t.Context()
+
+	require.GreaterOrEqual(t, historyDistance.PruneTo(pruneGatingChainLen), pruneGatingByzantiumHeight,
+		"history must stay above the fork for the boundary to be pinned to it")
+	require.Less(t, receiptsDistance.PruneTo(pruneGatingChainLen), pruneGatingByzantiumHeight,
+		"the receipt window must reach below the fork")
+
+	caps, err := apis.eth.Capabilities(ctx)
+	require.NoError(t, err)
+
+	require.EqualValues(t, pruneGatingByzantiumHeight, uint64(*caps.Receipts.OldestBlock))
+	require.Nil(t, caps.Receipts.DeleteStrategy, "a window cannot describe a fork height")
+}
+
+// TestBlocksGateServesAChainWithoutPreMergeTransactions pins the verdict on a chain that
+// carries no transaction below its merge point: the retentions differ in the pre-merge
+// transactions they keep, so with none to keep both hold everything there is and the
+// gate has nothing to refuse.
+func TestBlocksGateServesAChainWithoutPreMergeTransactions(t *testing.T) {
+	t.Parallel()
+
+	apis, _ := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prune.KeepPostMergeBlocksPruneMode,
+			Blocks:      prune.KeepPostMergeBlocksPruneMode,
+		},
+		chainConfig: mergeHeightChainConfig(1),
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, 0),
+		"with no pre-merge transaction to be missing the pre-merge blocks are served")
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, 1), "blocks from the merge point are served")
+}
+
+// TestBlocksGateResolvesExpiryFromDiskWhateverTheHistory pins that the archive/expiry
+// question is answered from the block data on disk whatever the stored history
+// retention is. The blocks sentinel alone is persisted both by a legacy archive datadir
+// and by chain history expiry, and the history field says nothing about which.
+func TestBlocksGateResolvesExpiryFromDiskWhateverTheHistory(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name            string
+		dropPreMergeTxs bool
+		served          bool
+	}{
+		{name: "pre_merge_transactions_on_disk", served: true},
+		{name: "pre_merge_transactions_never_downloaded", dropPreMergeTxs: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+
+			apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+				mode: prune.Mode{
+					Initialised: true, History: prune.KeepAllBlocksPruneMode,
+					Blocks: prune.KeepPostMergeBlocksPruneMode,
+				},
+				chainConfig:     mergeHeightChainConfig(pruneGatingMergeHeight),
+				dropPreMergeTxs: tc.dropPreMergeTxs,
+			})
+			ctx := t.Context()
+			tx, err := apis.eth.db.BeginTemporalRo(ctx)
+			require.NoError(t, err)
+			defer tx.Rollback()
+
+			err = apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
+			if tc.served {
+				require.NoError(t, err)
+				return
+			}
+			require.ErrorIs(t, err, state.PrunedError)
+		})
+	}
+}
+
+// TestBlocksGateCachesTheVerdictForAShortWhile pins the shape of the archive/expiry
+// answer: it reads live availability, so it is remembered briefly rather than settled,
+// and a later observation wins once the window is over.
+func TestBlocksGateCachesTheVerdictForAShortWhile(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true, History: prune.KeepAllBlocksPruneMode,
+			Blocks: prune.KeepPostMergeBlocksPruneMode,
+		},
+		chainConfig: mergeHeightChainConfig(pruneGatingMergeHeight),
+	})
+	ctx := t.Context()
+	gateOnOldBlock := func() error {
+		tx, err := apis.eth.db.BeginTemporalRo(ctx)
+		require.NoError(t, err)
+		defer tx.Rollback()
+		return apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num)
+	}
+
+	require.NoError(t, gateOnOldBlock(), "pre-merge transactions on disk read as archive")
+
+	dropTransactions(t, apis.rwDB, 1, pruneGatingMergeHeight)
+	require.NoError(t, gateOnOldBlock(), "within the window the remembered verdict answers")
+
+	apis.eth._preMergeDataTTL = 0
+	require.ErrorIs(t, gateOnOldBlock(), state.PrunedError, "past the window the datadir is read again")
+}
+
+// TestBlocksGateSkipsAnEmptySampledBlock pins that a sampled block without transactions
+// is passed over rather than read as evidence: it holds no transaction whose absence
+// could tell chain history expiry from a legacy archive, and the datadir has others.
+func TestBlocksGateSkipsAnEmptySampledBlock(t *testing.T) {
+	t.Parallel()
+
+	// Halving this merge height lands the first candidate on the transaction-free block.
+	const mergeHeight = 2*pruneGatingEmptyBlockIdx + 2
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{
+		mode: prune.Mode{
+			Initialised: true,
+			History:     prune.KeepPostMergeBlocksPruneMode,
+			Blocks:      prune.KeepPostMergeBlocksPruneMode,
+		},
+		chainConfig: mergeHeightChainConfig(mergeHeight),
+	})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	require.Equal(t, chainInfo.empty.num, uint64(mergeHeight)/2, "the first sampled candidate must be the empty block")
+	require.NoError(t, apis.eth.checkPruneBlocks(ctx, tx, chainInfo.old.num),
+		"an empty candidate is skipped, and a later one shows the datadir holds pre-merge transactions")
+}
+
+// prunedHistoryTx makes state history look retired above the whole chain. Preparing an
+// execution environment reads that boundary before it can build a reader, so this is
+// what a block whose receipts have to be re-executed hits on a pruned node.
+type prunedHistoryTx struct {
+	kv.TemporalTx
+}
+
+func (tx prunedHistoryTx) Debug() kv.TemporalDebugTx {
+	return prunedHistoryDebugTx{tx.TemporalTx.Debug()}
+}
+
+type prunedHistoryDebugTx struct {
+	kv.TemporalDebugTx
+}
+
+func (prunedHistoryDebugTx) HistoryStartFrom(kv.Domain) uint64 { return math.MaxUint64 }
+
+// TestEmptyBlockReceiptsNeedNoStateHistory pins that a block without transactions is
+// answered from its body: there is nothing to derive, so no execution environment is
+// prepared and the unavailable state history is never reached. The block carrying
+// transactions is the control — it must fail on the same view.
+func TestEmptyBlockReceiptsNeedNoStateHistory(t *testing.T) {
+	t.Parallel()
+
+	apis, chainInfo := setupPruneGating(t, pruneGatingConfig{mode: prune.ArchiveMode})
+	ctx := t.Context()
+	tx, err := apis.eth.db.BeginTemporalRo(ctx)
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	chainConfig, err := apis.eth.chainConfig(ctx, tx)
+	require.NoError(t, err)
+	view := prunedHistoryTx{tx}
+
+	empty, err := apis.eth.blockByNumberWithSenders(ctx, tx, chainInfo.empty.num)
+	require.NoError(t, err)
+	require.NotNil(t, empty)
+	require.Empty(t, empty.Transactions())
+
+	receipts, err := apis.eth.receiptsGenerator.GetReceipts(ctx, chainConfig, view, empty, eth.ReceiptsOpts{})
+	require.NoError(t, err)
+	require.Empty(t, receipts)
+
+	withTxns, err := apis.eth.blockByNumberWithSenders(ctx, tx, chainInfo.old.num)
+	require.NoError(t, err)
+	require.NotEmpty(t, withTxns.Transactions())
+
+	_, err = apis.eth.receiptsGenerator.GetReceipts(ctx, chainConfig, view, withTxns, eth.ReceiptsOpts{})
+	require.ErrorIs(t, err, state.PrunedError, "the control block must reach the unavailable history")
 }

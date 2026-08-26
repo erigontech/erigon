@@ -455,6 +455,18 @@ func (g *Generator) GetReceipt(ctx context.Context, cfg *chain.Config, tx kv.Tem
 	return receipt, nil
 }
 
+// PostStateCalculated reports whether the receipts of this block carry a post state
+// that has to be computed. The persistent cache does not store that field, so those
+// receipts are re-executed and reach only as far as state history — which is what the
+// RPC availability gates must answer for. The fork check comes first: FrozenBlocks is a
+// backend call on a remote rpcdaemon, and every receipt request reaches this.
+func PostStateCalculated(cfg *chain.Config, blockNum uint64, commitmentHistoryEnabled bool, blockReader dbservices.FullBlockReader) bool {
+	if cfg.IsByzantium(blockNum) {
+		return false
+	}
+	return commitmentHistoryEnabled || blockReader.FrozenBlocks() == 0
+}
+
 func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.TemporalTx, block *types.Block, opts eth.ReceiptsOpts) (_ types.Receipts, err error) {
 	tx = g.filters.WithTemporalOverlay(tx)
 	blockHash := block.Hash()
@@ -489,7 +501,7 @@ func (g *Generator) GetReceipts(ctx context.Context, cfg *chain.Config, tx kv.Te
 		return nil, err
 	}
 
-	calculatePostState := (opts.CommitmentHistoryEnabled || g.blockReader.FrozenBlocks() == 0) && !cfg.IsByzantium(blockNum)
+	calculatePostState := PostStateCalculated(cfg, blockNum, opts.CommitmentHistoryEnabled, g.blockReader)
 
 	// Now the snapshot have not the `postState` field. Therefore, for pre-Byzantium blocks,
 	// we must skip persistent receipts and re-calculate

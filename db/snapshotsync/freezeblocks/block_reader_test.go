@@ -695,3 +695,78 @@ func TestRemoteBlockReaderFrozenBlocksStalledBackend(t *testing.T) {
 		t.Fatal("FrozenBlocks did not return with a stalled backend")
 	}
 }
+
+// recoveringFrozenBlocksClient fails its first call and answers every later one.
+type recoveringFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+	calls atomic.Int64
+}
+
+func (c *recoveringFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	if c.calls.Add(1) == 1 {
+		return nil, errors.New("backend down")
+	}
+	return &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}, nil
+}
+
+// TestRemoteBlockReaderFrozenBlocksRetriesAfterFailure pins that a failed fetch is not
+// cached as if it had succeeded. Zero is not a neutral answer: it makes the receipt
+// paths treat pre-Byzantium blocks as needing re-execution, which a node with pruned
+// state history cannot serve.
+func TestRemoteBlockReaderFrozenBlocksRetriesAfterFailure(t *testing.T) {
+	t.Parallel()
+
+	client := &recoveringFrozenBlocksClient{}
+	reader := NewRemoteBlockReader(client)
+	reader.frozenBlocksTTL = time.Hour
+
+	require.Zero(t, reader.FrozenBlocks())
+	require.Equal(t, uint64(42), reader.FrozenBlocks())
+}
+
+// blockingFrozenBlocksClient reports when a call arrives and holds it until released.
+type blockingFrozenBlocksClient struct {
+	remoteproto.ETHBACKENDClient
+	entered chan struct{}
+	release chan struct{}
+	calls   atomic.Int64
+}
+
+func (c *blockingFrozenBlocksClient) FrozenBlocks(ctx context.Context, in *emptypb.Empty, opts ...grpc.CallOption) (*remoteproto.FrozenBlocksReply, error) {
+	c.calls.Add(1)
+	c.entered <- struct{}{}
+	select {
+	case <-c.release:
+		return &remoteproto.FrozenBlocksReply{FrozenBlocks: 42}, nil
+	case <-ctx.Done():
+		return nil, ctx.Err()
+	}
+}
+
+// TestRemoteBlockReaderFrozenBlocksServesCacheWhileFetching pins that a slow backend
+// delays only the goroutine that fetches. FrozenBlocks sits on every receipt request,
+// so blocking the others behind the fetch converts one slow backend into a stall of
+// the whole handler pool.
+func TestRemoteBlockReaderFrozenBlocksServesCacheWhileFetching(t *testing.T) {
+	t.Parallel()
+
+	client := &blockingFrozenBlocksClient{entered: make(chan struct{}, 1), release: make(chan struct{})}
+	reader := NewRemoteBlockReader(client)
+	reader.frozenBlocksTimeout = 10 * time.Second
+
+	fetching := make(chan uint64, 1)
+	go func() { fetching <- reader.FrozenBlocks() }()
+	<-client.entered
+
+	waiting := make(chan uint64, 1)
+	go func() { waiting <- reader.FrozenBlocks() }()
+	select {
+	case <-waiting:
+	case <-time.After(time.Second):
+		t.Fatal("FrozenBlocks blocked a second caller behind the in-flight fetch")
+	}
+	require.EqualValues(t, 1, client.calls.Load(), "the second caller must not issue its own fetch")
+
+	close(client.release)
+	require.Equal(t, uint64(42), <-fetching)
+}
