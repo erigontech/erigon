@@ -1152,10 +1152,10 @@ func (pe *parallelExecutor) completeBlock(ctx context.Context, blockResult *bloc
 		// blockResults on a separate goroutine) can find this block's
 		// saved changeset via GetChangesetByBlockNum at compute time.
 		// In per-block compute mode (changeset window), the
-		// calculator switches the accumulator to this saved CS for the
-		// duration of ComputeCommitment (committer.go:computeWithBlockAccumulator)
-		// so branch writes land in block N's CS rather than whatever the
-		// exec loop has installed as current. If we saved AFTER sendResult,
+		// calculator passes this saved CS to ComputeCommitment as an explicit
+		// diff (committer.go:computeWithBlockAccumulator) so branch writes land
+		// in block N's CS rather than whatever the exec loop has installed as
+		// current. If we saved AFTER sendResult,
 		// the calculator could race ahead and look up an unsaved CS,
 		// causing branch deltas to leak into the next block's CS and
 		// produce wrong-trie-root chains on subsequent reorg-driven
