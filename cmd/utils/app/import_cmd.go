@@ -133,9 +133,11 @@ func importChain(ctx context.Context, cliCtx *cli.Command) error {
 		return err
 	}
 
-	return importFiles(cliCtx.Args().Slice(), logger, func(fn string) error {
-		return ImportChain(ethereum, ethereum.ChainDB(), fn, logger)
-	})
+	importSession, err := newChainImportSession(ethereum, ethereum.ChainDB(), logger)
+	if err != nil {
+		return err
+	}
+	return importSession.finish(importFiles(cliCtx.Args().Slice(), logger, importSession.importFile))
 }
 
 // importFiles imports each file in order; with more than one file, per-file
@@ -157,7 +159,57 @@ func importFiles(files []string, logger log.Logger, importOne func(fn string) er
 	return importErr
 }
 
+type chainImportSession struct {
+	ethereum      *eth.Ethereum
+	chainDB       kv.RwDB
+	logger        log.Logger
+	safeHash      common.Hash
+	finalizedHash common.Hash
+}
+
+func newChainImportSession(ethereum *eth.Ethereum, chainDB kv.RwDB, logger log.Logger) (*chainImportSession, error) {
+	session := &chainImportSession{ethereum: ethereum, chainDB: chainDB, logger: logger}
+	err := chainDB.View(context.Background(), func(tx kv.Tx) error {
+		session.safeHash = rawdb.ReadForkchoiceSafe(tx)
+		session.finalizedHash = rawdb.ReadForkchoiceFinalized(tx)
+		return nil
+	})
+	if err != nil {
+		return nil, err
+	}
+	return session, nil
+}
+
+func (s *chainImportSession) finish(importErr error) error {
+	if errors.Is(importErr, errInterrupted) {
+		return importErr
+	}
+	return errors.Join(importErr, s.finalizeHead())
+}
+
+func (s *chainImportSession) finalizeHead() error {
+	return s.chainDB.Update(context.Background(), func(tx kv.RwTx) error {
+		headHash := rawdb.ReadHeadBlockHash(tx)
+		if headHash == (common.Hash{}) {
+			return nil
+		}
+		rawdb.WriteForkchoiceHead(tx, headHash)
+		rawdb.WriteForkchoiceSafe(tx, headHash)
+		rawdb.WriteForkchoiceFinalized(tx, headHash)
+		return nil
+	})
+}
+
 func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.Logger) error {
+	importSession, err := newChainImportSession(ethereum, chainDB, logger)
+	if err != nil {
+		return err
+	}
+	return importSession.finish(importSession.importFile(fn))
+}
+
+func (s *chainImportSession) importFile(fn string) error {
+	ethereum, chainDB, logger := s.ethereum, s.chainDB, s.logger
 	// Watch for Ctrl-C while the import is running.
 	// If a signal is received, the import will stop at the next batch.
 	interrupt := make(chan os.Signal, 1)
@@ -242,7 +294,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 			TopBlock: missing[len(missing)-1],
 		}
 
-		if err := InsertChain(ethereum, missingChain, true); err != nil {
+		if err := insertChain(ethereum, missingChain, true, s.safeHash, s.finalizedHash); err != nil {
 			return err
 		}
 	}
@@ -288,6 +340,14 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	if len(chain.Blocks) == 0 {
 		return nil
 	}
+	tipHash := chain.TopBlock.Hash()
+	return insertChain(ethereum, chain, setHead, tipHash, tipHash)
+}
+
+func insertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool, safeHash, finalizedHash common.Hash) error {
+	if len(chain.Blocks) == 0 {
+		return nil
+	}
 	for _, block := range chain.Blocks {
 		if err := block.HashCheck(true); err != nil {
 			return err
@@ -309,15 +369,9 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	firstBlock := chain.Blocks[0]
 	tipBlock := chain.TopBlock
 	var parentTd, currentHeadTd *uint256.Int
-	var genesisHash common.Hash
 	var currentHeadHash common.Hash
 	var currentHeadNumber uint64
 	if err := ethereum.ChainDB().View(ctx, func(tx kv.Tx) error {
-		var err error
-		genesisHash, err = rawdb.ReadCanonicalHash(tx, 0)
-		if err != nil {
-			return fmt.Errorf("read genesis hash: %w", err)
-		}
 		if firstBlock.NumberU64() > 0 {
 			td, readErr := rawdb.ReadTd(tx, firstBlock.ParentHash(), firstBlock.NumberU64()-1)
 			if readErr != nil {
@@ -404,7 +458,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 	}
 
 	tipHash := chain.TopBlock.Hash()
-	status, validationErr, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, genesisHash, genesisHash)
+	status, validationErr, lvh, err := chainRW.UpdateForkChoice(ctx, tipHash, safeHash, finalizedHash)
 	if err != nil {
 		return err
 	}
