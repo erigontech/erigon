@@ -19,7 +19,6 @@
 package diskutils
 
 import (
-	"fmt"
 	"os"
 	"path/filepath"
 
@@ -35,17 +34,19 @@ func FilesystemType(dirPath string) (string, error) {
 	if err != nil {
 		return "", err
 	}
-	volume := filepath.VolumeName(absPath)
-	if volume == "" {
-		return "", fmt.Errorf("cannot resolve volume name for %s", absPath)
-	}
-
-	root, err := windows.UTF16PtrFromString(volume + `\`)
+	absPathPtr, err := windows.UTF16PtrFromString(absPath)
 	if err != nil {
 		return "", err
 	}
+
+	// GetVolumePathName rather than filepath.VolumeName: a volume can be mounted
+	// as a folder on another drive, whose letter names a different filesystem.
+	mountPoint := make([]uint16, windows.MAX_PATH+1)
+	if err := windows.GetVolumePathName(absPathPtr, &mountPoint[0], uint32(len(mountPoint))); err != nil {
+		return "", err
+	}
 	fsName := make([]uint16, windows.MAX_PATH+1)
-	if err := windows.GetVolumeInformation(root, nil, 0, nil, nil, nil, &fsName[0], uint32(len(fsName))); err != nil {
+	if err := windows.GetVolumeInformation(&mountPoint[0], nil, 0, nil, nil, nil, &fsName[0], uint32(len(fsName))); err != nil {
 		return "", err
 	}
 	return windows.UTF16ToString(fsName), nil
