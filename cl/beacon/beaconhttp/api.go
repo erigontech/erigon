@@ -150,6 +150,10 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 			if beaconResponse.Version != nil && w.Header().Get("Eth-Consensus-Version") == "" {
 				w.Header().Set("Eth-Consensus-Version", beaconResponse.Version.String())
 			}
+			if beaconResponse.noContent {
+				w.WriteHeader(http.StatusNoContent)
+				return
+			}
 		}
 		switch responseEncodingForAccept(contentType, supportsSSZ(ans)) {
 		case responseEncodingJSON:
@@ -186,7 +190,7 @@ func HandleEndpoint[T any](h EndpointHandler[T]) http.HandlerFunc {
 		case responseEncodingEventStream:
 			return
 		default:
-			http.Error(w, "content type must include application/json, application/octet-stream, or text/event-stream, got "+contentType, http.StatusBadRequest)
+			http.Error(w, "content type must include application/json, application/octet-stream, or text/event-stream, got "+contentType, http.StatusNotAcceptable)
 		}
 	}
 }
