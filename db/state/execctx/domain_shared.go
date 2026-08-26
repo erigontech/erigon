@@ -521,20 +521,19 @@ func (sd *SharedDomains) FlushPendingUpdatesLocked(ctx context.Context, tx kv.Te
 	return sd.flushPendingUpdates(ctx, tx, true)
 }
 
-// FlushPendingUpdatesWithDiff flushes the pending deferred commitment update
-// (if any) directly into diff, skipping FlushPendingUpdates/Locked's
-// hash-aware changeset lookup — for a caller that already knows its exact
-// target (e.g. an isolated pre-window block always wants nil, regardless of
-// whatever changeset happens to be saved or live). Needs no lock: see
-// DomainPutCommitmentDiff.
-func (sd *SharedDomains) FlushPendingUpdatesWithDiff(ctx context.Context, tx kv.TemporalTx, diff *kv.DomainDiff) error {
+// FlushPendingUpdatesWithoutChangeset flushes the pending deferred commitment
+// update (if any) into no changeset at all, skipping FlushPendingUpdates's
+// hash-aware lookup and its fall-back to whatever accumulator is live — a
+// pre-window block's branch deltas must not land in a later block's changeset.
+// Needs no lock: see DomainPutCommitmentDiff.
+func (sd *SharedDomains) FlushPendingUpdatesWithoutChangeset(tx kv.TemporalTx) error {
 	upd := sd.sdCtx.TakePendingUpdate()
 	if upd == nil {
 		return nil
 	}
 	defer upd.Clear()
 	putBranch := func(prefix, data, prevData []byte) error {
-		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, diff)
+		return sd.DomainPutCommitmentDiff(tx, prefix, data, upd.TxNum, prevData, nil)
 	}
 	_, err := commitment.ApplyDeferredBranchUpdates(upd.Deferred, runtime.NumCPU(), putBranch)
 	return err
@@ -705,11 +704,10 @@ func (sd *SharedDomains) getChangesetAccumulatorLocked() *changeset.StateChangeS
 	return nil
 }
 
-// commitmentBranchDiffWriter is implemented by the real mem batch backing
-// DomainPutCommitmentDiff's explicit-diff routing. A backing type that
-// doesn't implement it falls back to the shared, lockable write path (see
-// DomainPutCommitmentDiff) — e.g. execution/blockreplay's witnessMemBatch,
-// which never computes commitment and so never exercises this path.
+// commitmentBranchDiffWriter must be implemented by every mem batch behind
+// SharedDomains: the fallback it would otherwise need is sd.DomainPut, which
+// silently drops the explicit diff and records into whatever
+// SetChangesetAccumulator last installed.
 type commitmentBranchDiffWriter interface {
 	PutCommitmentBranchDiff(k string, v []byte, txNum uint64, preval []byte, diff *kv.DomainDiff) error
 }
@@ -724,18 +722,14 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 		return errors.New("DomainPutCommitmentDiff: trying to put nil value, not allowed")
 	}
 	ks := string(k)
-	prevVal, err := sd.resolvePrevVal(kv.CommitmentDomain, roTx, ks, v, prevVal)
+	prevVal, err := sd.resolvePrevVal(kv.CommitmentDomain, roTx, k, ks, v, prevVal)
 	if err != nil {
 		return err
 	}
 	if bytes.Equal(prevVal, v) {
 		return nil
 	}
-	w, ok := sd.mem.(commitmentBranchDiffWriter)
-	if !ok {
-		return sd.DomainPut(kv.CommitmentDomain, roTx, k, v, txNum, prevVal)
-	}
-	return w.PutCommitmentBranchDiff(ks, v, txNum, prevVal, diff)
+	return sd.mem.(commitmentBranchDiffWriter).PutCommitmentBranchDiff(ks, v, txNum, prevVal, diff)
 }
 
 // commitmentDiffPutDel implements kv.TemporalPutDel, routing commitment-domain
@@ -744,8 +738,7 @@ func (sd *SharedDomains) DomainPutCommitmentDiff(roTx kv.TemporalTx, k, v []byte
 // domains fall back to the normal DomainPut/DomainDel — TrieContext.PutBranch
 // (the only real caller) only ever writes kv.CommitmentDomain.
 type commitmentDiffPutDel struct {
-	sd   *SharedDomains
-	tx   kv.TemporalTx
+	temporalPutDel
 	diff *kv.DomainDiff
 }
 
@@ -753,28 +746,28 @@ func (p *commitmentDiffPutDel) DomainPut(domain kv.Domain, k, v []byte, txNum ui
 	if domain == kv.CommitmentDomain {
 		return p.sd.DomainPutCommitmentDiff(p.tx, k, v, txNum, prevVal, p.diff)
 	}
-	return p.sd.DomainPut(domain, p.tx, k, v, txNum, prevVal)
+	return p.temporalPutDel.DomainPut(domain, k, v, txNum, prevVal)
 }
 
 func (p *commitmentDiffPutDel) DomainDel(domain kv.Domain, k []byte, txNum uint64, prevVal []byte) error {
 	if domain == kv.CommitmentDomain {
 		panic("commitmentDiffPutDel.DomainDel called for kv.CommitmentDomain: branch removal must go through DomainPut with an empty, non-nil value so it routes through the explicit diff")
 	}
-	return p.sd.DomainDel(domain, p.tx, k, txNum, prevVal)
+	return p.temporalPutDel.DomainDel(domain, k, txNum, prevVal)
 }
 
 func (p *commitmentDiffPutDel) DomainDelPrefix(domain kv.Domain, prefix []byte, txNum uint64) error {
 	if domain == kv.CommitmentDomain {
 		panic("commitmentDiffPutDel.DomainDelPrefix called for kv.CommitmentDomain: not supported by the explicit-diff routing path")
 	}
-	return p.sd.DomainDelPrefix(domain, p.tx, prefix, txNum)
+	return p.temporalPutDel.DomainDelPrefix(domain, prefix, txNum)
 }
 
 // AsPutDelWithDiff is AsPutDel, but commitment-domain writes route
 // through diff explicitly rather than the shared SetChangesetAccumulator
 // target — see commitmentDiffPutDel.
 func (sd *SharedDomains) AsPutDelWithDiff(tx kv.TemporalTx, diff *kv.DomainDiff) kv.TemporalPutDel {
-	return &commitmentDiffPutDel{sd, tx, diff}
+	return &commitmentDiffPutDel{temporalPutDel{sd, tx}, diff}
 }
 
 // commitmentDiffSwapper must be implemented by every mem batch behind
@@ -1845,7 +1838,7 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 		return fmt.Errorf("DomainPut: %s, trying to put nil value. not allowed", domain)
 	}
 	ks := string(k)
-	prevVal, err := sd.resolvePrevVal(domain, roTx, ks, v, prevVal)
+	prevVal, err := sd.resolvePrevVal(domain, roTx, k, ks, v, prevVal)
 	if err != nil {
 		return err
 	}
@@ -1863,13 +1856,13 @@ func (sd *SharedDomains) domainPut(domain kv.Domain, roTx kv.TemporalTx, k, v []
 // resolvePrevVal runs DomainPut's shared prologue: touches ks for the
 // commitment fold, and resolves prevVal via GetLatest when the caller didn't
 // supply it.
-func (sd *SharedDomains) resolvePrevVal(domain kv.Domain, roTx kv.TemporalTx, ks string, v, prevVal []byte) ([]byte, error) {
+func (sd *SharedDomains) resolvePrevVal(domain kv.Domain, roTx kv.TemporalTx, k []byte, ks string, v, prevVal []byte) ([]byte, error) {
 	if !sd.disableInlineTouchKey {
 		sd.sdCtx.TouchKey(domain, ks, v)
 	}
 	if prevVal == nil {
 		var err error
-		prevVal, _, err = sd.GetLatest(domain, roTx, common.ToBytesZeroCopy(ks))
+		prevVal, _, err = sd.GetLatest(domain, roTx, k)
 		if err != nil {
 			return nil, err
 		}
