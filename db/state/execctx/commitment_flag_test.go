@@ -22,6 +22,7 @@ import (
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
+	"github.com/erigontech/erigon/common/dbg"
 	"github.com/erigontech/erigon/common/length"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/kv"
@@ -105,4 +106,59 @@ func TestSharedDomains_ParallelFlag_RootEquivalence(t *testing.T) {
 	require.Equalf(t, seqRoot, parRoot,
 		"sequential and parallel commitment roots must match: sequential=%x parallel=%x",
 		seqRoot, parRoot)
+}
+
+// TestSharedDomains_WithParaTrieDB_SelectsParallelTrie pins the construction-time
+// wiring: selecting the parallel trie and supplying the DB it needs happen in one
+// expression, so there is no second call left to forget.
+func TestSharedDomains_WithParaTrieDB_SelectsParallelTrie(t *testing.T) {
+	// No t.Parallel: mutates process-global statecfg flags.
+	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
+
+	db := newTestDb(t, 16)
+	rwTx, err := db.BeginTemporalRw(t.Context())
+	require.NoError(t, err)
+	defer rwTx.Rollback()
+
+	sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New(), execctx.WithParaTrieDB(db))
+	require.NoError(t, err)
+	defer sd.Close()
+
+	require.Equal(t, commitment.VariantParallelHexPatricia, sd.GetCommitmentCtx().Trie().Variant())
+}
+
+// TestSharedDomains_ParallelTrieNotWired_IsLoudOnComputeCommitment pins the
+// fallback as loud. Selecting the parallel trie without ever supplying a DB
+// leaves the context on the sequential trie, which is the intended escape hatch
+// for DB-less RPC and integrity contexts and a bug for anything computing a root.
+func TestSharedDomains_ParallelTrieNotWired_IsLoudOnComputeCommitment(t *testing.T) {
+	// No t.Parallel: mutates process-global statecfg and dbg flags.
+	withCommitmentFlag(t, commitment.VariantParallelHexPatricia)
+	defer func(v bool) { dbg.AssertEnabled = v }(dbg.AssertEnabled)
+
+	compute := func(t *testing.T) error {
+		t.Helper()
+		db := newTestDb(t, 16)
+		rwTx, err := db.BeginTemporalRw(t.Context())
+		require.NoError(t, err)
+		t.Cleanup(rwTx.Rollback)
+
+		sd, err := execctx.NewSharedDomains(t.Context(), rwTx, log.New())
+		require.NoError(t, err)
+		t.Cleanup(sd.Close)
+
+		_, err = sd.ComputeCommitment(t.Context(), rwTx, false, 0, 1, "", nil)
+		return err
+	}
+
+	t.Run("errors under assertions", func(t *testing.T) {
+		dbg.AssertEnabled = true
+		require.ErrorContains(t, compute(t), "no DB was wired",
+			"an unwired parallel selection computed a root silently")
+	})
+
+	t.Run("still computes with assertions off", func(t *testing.T) {
+		dbg.AssertEnabled = false
+		require.NoError(t, compute(t), "the sequential fallback must stay usable in production")
+	})
 }

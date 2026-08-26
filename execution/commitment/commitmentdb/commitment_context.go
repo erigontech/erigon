@@ -79,6 +79,29 @@ type SharedDomainsCommitmentContext struct {
 	// EnableParaTrieDB: that variant needs the DB-backed TrieContextFactory.
 	pendingVariant commitment.TrieVariant
 	pendingCfg     commitment.TrieConfig
+	warnedUnwired  sync.Once
+}
+
+// checkParaTrieWired reports a context that selected the parallel trie and never
+// received the DB it needs. Falling back to the sequential trie is deliberate for
+// the DB-less RPC and integrity contexts, and a bug for anything that computes a
+// root, so make the difference visible instead of silently computing.
+//
+// An error rather than a panic: the calculator drives ComputeCommitment from a
+// goroutine whose result the exec loop waits on, so panicking here parks the loop
+// instead of failing it.
+func (sdc *SharedDomainsCommitmentContext) checkParaTrieWired() error {
+	if sdc.pendingVariant == "" {
+		return nil
+	}
+	if dbg.AssertEnabled {
+		return errors.New("commitment: parallel trie selected but no DB was wired; pass execctx.WithParaTrieDB or WithSequentialCommitment")
+	}
+	sdc.warnedUnwired.Do(func() {
+		log.Warn("[commitment] parallel trie selected but no DB was wired, computing on the sequential trie",
+			"pass", "execctx.WithParaTrieDB or WithSequentialCommitment")
+	})
+	return nil
 }
 
 // SetStateReader can be used to set a custom state reader (otherwise the default one is set in SharedDomainsCommitmentContext.trieContext).
@@ -409,6 +432,9 @@ func (sdc *SharedDomainsCommitmentContext) BranchChildCount(tx kv.TemporalTx, ni
 func (sdc *SharedDomainsCommitmentContext) ComputeCommitment(ctx context.Context, tx kv.TemporalTx, saveState bool, blockNum uint64, txNum uint64, logPrefix string, onProgress func(*commitment.CommitProgress)) (rootHash []byte, err error) {
 	if sdc.pendingUpdate != nil {
 		panic("sdCtx.ComputeCommitment called directly with non-nil pendingUpdate; use SharedDomains.ComputeCommitment wrapper instead")
+	}
+	if err := sdc.checkParaTrieWired(); err != nil {
+		return nil, err
 	}
 	if dbg.KVReadLevelledMetrics {
 		mxCommitmentRunning.Inc()
