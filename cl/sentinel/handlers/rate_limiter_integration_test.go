@@ -73,7 +73,7 @@ func TestPingRateLimit(t *testing.T) {
 			_, _ = io.ReadAll(stream)
 			stream.Close()
 		}()
-		stream.SetDeadline(time.Now().Add(5 * time.Second))
+		require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
 
 		_, err = stream.Write(nil)
 		require.NoError(t, err)
@@ -149,7 +149,7 @@ func TestBlocksByRangeRateLimit(t *testing.T) {
 			_, _ = io.ReadAll(stream)
 			stream.Close()
 		}()
-		stream.SetDeadline(time.Now().Add(5 * time.Second))
+		require.NoError(t, stream.SetDeadline(time.Now().Add(5*time.Second)))
 
 		_, err = stream.Write(reqBuf.Bytes())
 		require.NoError(t, err)
