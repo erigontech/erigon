@@ -165,17 +165,37 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 		return err
 	}
 
-	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
-	parentHeader, ok := b.forkchoiceStore.GetHeader(msg.Block.ParentRoot)
-	if !ok {
-		b.scheduleBlockForLaterProcessing(msg)
-		return fmt.Errorf("%w: parent header not found: %v", ErrIgnore, msg.Block.ParentRoot)
+	if err := b.validateBlockAfterSignature(msg); err != nil {
+		if errors.Is(err, ErrIgnore) {
+			b.scheduleBlockForLaterProcessing(msg)
+		}
+		return err
 	}
-	if parentHeader.Slot >= msg.Block.Slot {
+	b.publishBlockGossipEvent(msg)
+	// Fork choice performs the remaining block validation.
+	if err := b.processAndStoreBlock(ctx, msg); err != nil {
+		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
+			b.scheduleBlockForLaterProcessing(msg)
+			return nil
+		}
+		return err
+	}
+	return nil
+}
+
+// validateBlockAfterSignature keeps post-signature gossip checks identical for
+// initial and deferred processing, so a missing dependency cannot bypass validation.
+func (b *blockService) validateBlockAfterSignature(block *cltypes.SignedBeaconBlock) error {
+	// [IGNORE] The block's parent (defined by block.parent_root) has been seen (via both gossip and non-gossip sources) (a client MAY queue blocks for processing once the parent block is retrieved).
+	parentHeader, ok := b.forkchoiceStore.GetHeader(block.Block.ParentRoot)
+	if !ok {
+		return fmt.Errorf("%w: parent header not found: %v", ErrIgnore, block.Block.ParentRoot)
+	}
+	if parentHeader.Slot >= block.Block.Slot {
 		return ErrBlockYoungerThanParent
 	}
 
-	epoch := msg.Block.Slot / b.beaconCfg.SlotsPerEpoch
+	epoch := block.Block.Slot / b.beaconCfg.SlotsPerEpoch
 	blockVersion := b.beaconCfg.GetCurrentStateVersion(epoch)
 	var maxBlobsPerBlock uint64
 	if blockVersion >= clparams.FuluVersion {
@@ -186,50 +206,32 @@ func (b *blockService) ProcessMessage(ctx context.Context, _ *uint64, msg *cltyp
 
 	// [Modified in Gloas:EIP7732] KZG commitments and execution payload validations moved from block.body to bid
 	if blockVersion >= clparams.GloasVersion {
-		// GLOAS: validate using bid = signed_execution_payload_bid.message
-		bid := msg.Block.Body.GetSignedExecutionPayloadBid()
+		bid := block.Block.Body.GetSignedExecutionPayloadBid()
 		if bid == nil || bid.Message == nil {
 			return errors.New("missing signed_execution_payload_bid in GLOAS block")
 		}
-
-		// [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer
-		// i.e. validate that len(bid.blob_kzg_commitments) <= get_blob_parameters(get_current_epoch(state)).max_blobs_per_block
 		if bid.Message.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
 			return ErrInvalidCommitmentsCount
 		}
-
-		// [REJECT] The bid's parent (defined by bid.parent_block_root) equals the block's parent (defined by block.parent_root)
-		if bid.Message.ParentBlockRoot != msg.Block.ParentRoot {
+		if bid.Message.ParentBlockRoot != block.Block.ParentRoot {
 			return errors.New("bid.parent_block_root does not match block.parent_root")
 		}
 
-		// [IGNORE] The block's parent execution payload (defined by bid.parent_block_hash) has been seen
-		// (via gossip or non-gossip sources). A client MAY queue blocks for processing once the parent payload is retrieved.
-		// If execution_payload verification of block's execution payload parent by an execution node is complete:
-		// [REJECT] The block's execution payload parent (defined by bid.parent_block_hash) passes all validation.
 		parentBlockHash := bid.Message.ParentBlockHash
+		// Gossip requires the parent payload to be known, not necessarily fully validated.
+		// An absent status is retryable; an invalid status permanently rejects the block.
 		status, seen := b.forkchoiceStore.GetRecentExecutionPayloadStatus(parentBlockHash)
 		if !seen {
-			// Parent execution payload not seen yet, queue for later
-			b.scheduleBlockForLaterProcessing(msg)
 			return fmt.Errorf("%w: parent execution payload not seen: %v", ErrIgnore, parentBlockHash)
 		}
 		if status == execution_client.PayloadStatusInvalidated {
 			return errors.New("parent execution payload is invalid")
 		}
-	} else if msg.Block.Body.BlobKzgCommitments != nil && msg.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
-		// Pre-GLOAS: [REJECT] The length of KZG commitments is less than or equal to the limitation defined in Consensus Layer
-		// i.e. validate that len(body.signed_beacon_block.message.blob_kzg_commitments) <= MAX_BLOBS_PER_BLOCK
-		return ErrInvalidCommitmentsCount
+		return nil
 	}
-	b.publishBlockGossipEvent(msg)
-	// the rest of the validation is done in the forkchoice store
-	if err := b.processAndStoreBlock(ctx, msg); err != nil {
-		if errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) || errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) || errors.Is(err, forkchoice.ErrParentEnvelopePending) {
-			b.scheduleBlockForLaterProcessing(msg)
-			return nil
-		}
-		return err
+
+	if block.Block.Body.BlobKzgCommitments != nil && block.Block.Body.BlobKzgCommitments.Len() > int(maxBlobsPerBlock) {
+		return ErrInvalidCommitmentsCount
 	}
 	return nil
 }
@@ -336,8 +338,12 @@ func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot com
 	if _, ok := b.forkchoiceStore.GetHeader(blockRoot); ok {
 		return pendingJobRemove
 	}
-	if _, ok := b.forkchoiceStore.GetHeader(block.Block.ParentRoot); !ok {
-		return pendingJobKeep
+	if err := b.validateBlockAfterSignature(block); err != nil {
+		if errors.Is(err, ErrIgnore) {
+			return pendingJobKeep
+		}
+		log.Trace("Pending block failed validation", "block", block, "error", err)
+		return pendingJobRemove
 	}
 	if b.forkchoiceStore.Slot() < block.Block.Slot {
 		return pendingJobKeep

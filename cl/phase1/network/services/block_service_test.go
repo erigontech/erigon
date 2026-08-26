@@ -31,6 +31,7 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/execution_client"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice/mock_services"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
@@ -68,6 +69,34 @@ func setupBlockService(t *testing.T, ctrl *gomock.Controller) (BlockService, *sy
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
 	blockService := NewBlockService(t.Context(), db, forkchoiceMock, syncedDataManager, ethClock, cfg, nil)
 	return blockService, syncedDataManager, ethClock, forkchoiceMock
+}
+
+func setupPendingGloasBlock(t *testing.T, ctrl *gomock.Controller) (*blockService, *cltypes.SignedBeaconBlock, *blockProcessingErrorStore, *mock_services.ForkChoiceStorageMock) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.AltairForkEpoch = 0
+	cfg.BellatrixForkEpoch = 0
+	cfg.CapellaForkEpoch = 0
+	cfg.DenebForkEpoch = 0
+	cfg.ElectraForkEpoch = 0
+	cfg.FuluForkEpoch = 0
+	cfg.GloasForkEpoch = 0
+
+	serviceAPI, _, _, forkchoiceStore := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	service.beaconCfg = &cfg
+
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	block.Block.ParentRoot = common.HexToHash("0x01")
+	bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+	bid.ParentBlockRoot = block.Block.ParentRoot
+	bid.ParentBlockHash = common.HexToHash("0x02")
+	forkchoiceStore.Headers[block.Block.ParentRoot] = &cltypes.BeaconBlockHeader{Slot: block.Block.Slot - 1}
+	forkchoiceStore.SlotVal = block.Block.Slot
+
+	processingStore := &blockProcessingErrorStore{ForkChoiceStorage: forkchoiceStore}
+	service.forkchoiceStore = processingStore
+	return service, block, processingStore, forkchoiceStore
 }
 
 func TestBlockServiceUnsynced(t *testing.T) {
@@ -297,6 +326,54 @@ func TestBlockServicePendingQueueRetainsRetryableProcessingFailure(t *testing.T)
 	}
 }
 
+func TestBlockServicePendingQueueWaitsForGloasParentPayloadStatus(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, block, processingStore, forkchoiceStore := setupPendingGloasBlock(t, ctrl)
+	parentBlockHash := block.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash
+
+	decision := service.tryProcessPendingBlock(t.Context(), common.Hash{}, block)
+
+	require.Equal(t, pendingJobKeep, decision)
+	require.Zero(t, processingStore.calls)
+
+	forkchoiceStore.ExecutionPayloadStatusMap[parentBlockHash] = execution_client.PayloadStatusValidated
+	decision = service.tryProcessPendingBlock(t.Context(), common.Hash{}, block)
+
+	require.Equal(t, pendingJobRemove, decision)
+	require.Equal(t, 1, processingStore.calls)
+}
+
+func TestBlockServicePendingQueueRemovesGloasBlockWithInvalidParentPayload(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, block, processingStore, forkchoiceStore := setupPendingGloasBlock(t, ctrl)
+	parentBlockHash := block.Block.Body.GetSignedExecutionPayloadBid().Message.ParentBlockHash
+	forkchoiceStore.ExecutionPayloadStatusMap[parentBlockHash] = execution_client.PayloadStatusInvalidated
+
+	decision := service.tryProcessPendingBlock(t.Context(), common.Hash{}, block)
+
+	require.Equal(t, pendingJobRemove, decision)
+	require.Zero(t, processingStore.calls)
+}
+
+func TestBlockServicePendingQueueRemovesGloasBlockWithMismatchedParentRoot(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	service, block, processingStore, forkchoiceStore := setupPendingGloasBlock(t, ctrl)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid().Message
+	forkchoiceStore.ExecutionPayloadStatusMap[bid.ParentBlockHash] = execution_client.PayloadStatusValidated
+	bid.ParentBlockRoot = common.HexToHash("0x03")
+
+	decision := service.tryProcessPendingBlock(t.Context(), common.Hash{}, block)
+
+	require.Equal(t, pendingJobRemove, decision)
+	require.Zero(t, processingStore.calls)
+}
+
 func TestBlockServicePendingQueueWaitsForParentBeforeProcessing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
@@ -389,23 +466,3 @@ func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {
 		})
 	}
 }
-
-// ==================== GLOAS (EIP-7732/ePBS) Tests ====================
-//
-// NOTE: GLOAS-specific ProcessMessage tests are currently not included because:
-// 1. GLOAS-specific validation (bid checks, parent payload checks) happens AFTER
-//    signature verification in the ProcessMessage flow
-// 2. Signature verification requires properly signed blocks with matching validator keys
-// 3. We don't have GLOAS test data with valid signatures available yet
-//
-// The GLOAS validation code is tested indirectly through:
-// - Pre-GLOAS tests that verify the overall ProcessMessage flow
-// - The validation code being structurally similar to pre-GLOAS validation
-//
-// Once GLOAS test vectors with proper signatures are available, these tests can be added:
-// - TestBlockServiceGloasMismatchedParentBlockRoot
-// - TestBlockServiceGloasParentPayloadNotSeen
-// - TestBlockServiceGloasParentPayloadInvalid
-// - TestBlockServiceGloasSuccess
-//
-// For now, the GLOAS validation code path is verified by code review and integration tests.
