@@ -20,6 +20,9 @@ import (
 	"errors"
 	"time"
 
+	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
+	"github.com/erigontech/erigon/common"
+
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/blob_storage"
 )
@@ -95,9 +98,12 @@ func (b *BlobHistoryDownloader) repairBlobGap(slot uint64) bool {
 		b.logger.Debug("[BlobRepair] block unavailable", "slot", slot, "err", err)
 		return false
 	}
-	blockRoot, err := block.Block.HashSSZ()
-	if err != nil {
-		b.logger.Debug("[BlobRepair] hash block", "slot", slot, "err", err)
+	// Not block.HashSSZ(): a block read out of a beaconblocks segment has no execution
+	// payload, so hashing it yields a root that never existed on chain. The blob store and
+	// the beacon API are both keyed by the canonical root.
+	blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, slot)
+	if err != nil || blockRoot == (common.Hash{}) {
+		b.logger.Debug("[BlobRepair] no canonical root", "slot", slot, "err", err)
 		return false
 	}
 

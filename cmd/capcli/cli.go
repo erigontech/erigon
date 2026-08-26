@@ -1094,9 +1094,15 @@ func (b *BlobArchiveStoreCheck) Run(ctx *Context) error {
 		if blk.Block.Slot%10_000 == 0 {
 			log.Info("Checking slot", "slot", blk.Block.Slot)
 		}
-		blockRoot, err := blk.Block.HashSSZ()
+		// Not blk.HashSSZ(): a block read out of a beaconblocks segment has no execution
+		// payload, so hashing it yields a root that never existed on chain and every store
+		// lookup misses. The store is keyed by the canonical root, as the dump uses.
+		blockRoot, err := beacon_indicies.ReadCanonicalBlockRoot(tx, i)
 		if err != nil {
 			return err
+		}
+		if blockRoot == (common.Hash{}) {
+			continue
 		}
 
 		haveBlobs, err := blobStorage.KzgCommitmentsCount(ctx, blockRoot)
