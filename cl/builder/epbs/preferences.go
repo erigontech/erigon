@@ -1,6 +1,7 @@
 package epbs
 
 import (
+	"context"
 	"fmt"
 	"sync"
 	"time"
@@ -63,7 +64,7 @@ func (w *PreferencesWatcher) OnPreferencesReceived(slot uint64, prefs *cltypes.S
 // WaitForPreferences blocks until preferences arrive for the given slot
 // or the timeout expires. If preferences for the slot arrived before this
 // call, they are returned immediately.
-func (w *PreferencesWatcher) WaitForPreferences(slot uint64, dependentRoot common.Hash, timeout time.Duration) (*cltypes.SignedProposerPreferences, error) {
+func (w *PreferencesWatcher) WaitForPreferences(ctx context.Context, slot uint64, dependentRoot common.Hash, timeout time.Duration) (*cltypes.SignedProposerPreferences, error) {
 	w.mu.Lock()
 	key := preferencesKey{slot: slot, dependentRoot: dependentRoot}
 
@@ -78,6 +79,8 @@ func (w *PreferencesWatcher) WaitForPreferences(slot uint64, dependentRoot commo
 	w.waitingKey = key
 	w.waiting = true
 	select {
+	case <-ctx.Done():
+		return nil, ctx.Err()
 	case <-w.ch:
 	default:
 	}

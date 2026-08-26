@@ -94,6 +94,17 @@ func convertResult(version clparams.StateVersion, beaconCfg *clparams.BeaconChai
 	eth1Block.BaseFeePerGas = baseFeeLE
 	eth1Block.BlockHash = block.Hash()
 	eth1Block.Transactions = solid.NewTransactionsSSZFromTransactions(encodedTxs)
+	if version >= clparams.GloasVersion {
+		if sidecar := block.BlockAccessListSidecar(); sidecar != nil {
+			blockAccessList, err := sidecar.Bytes()
+			if err != nil {
+				return nil, fmt.Errorf("eladapter: encode block access list: %w", err)
+			}
+			if err := eth1Block.BlockAccessList.SetBytes(blockAccessList); err != nil {
+				return nil, fmt.Errorf("eladapter: set block access list: %w", err)
+			}
+		}
+	}
 
 	// Withdrawals
 	eth1Block.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](

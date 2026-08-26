@@ -21,6 +21,7 @@ type BuilderManager struct {
 	builderIndexResolved  bool
 	balanceStatus         BalanceStatus
 	balanceKnown          bool
+	balanceSlot           uint64
 	reservedBidValue      uint64
 	beaconCfg             *clparams.BeaconChainConfig
 	genesisValidatorsRoot common.Hash
@@ -72,8 +73,13 @@ func (m *BuilderManager) SetBuilderIndex(idx uint64) {
 
 func (m *BuilderManager) SetBalanceStatus(status BalanceStatus) {
 	m.indexMu.Lock()
+	if m.balanceKnown && status.Slot < m.balanceSlot {
+		m.indexMu.Unlock()
+		return
+	}
 	m.balanceStatus = status
 	m.balanceKnown = true
+	m.balanceSlot = status.Slot
 	m.indexMu.Unlock()
 }
 

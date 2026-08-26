@@ -4,6 +4,7 @@ import (
 	"context"
 	"fmt"
 	"math"
+	"sync"
 	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
@@ -15,6 +16,7 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/forkchoice"
 	"github.com/erigontech/erigon/cl/pool"
+	"github.com/erigontech/erigon/cl/transition"
 	eth2 "github.com/erigontech/erigon/cl/transition/impl/eth2"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
 	"github.com/erigontech/erigon/common"
@@ -27,6 +29,9 @@ type BuilderService struct {
 	Loop    *BuilderLoop
 	Manager *BuilderManager
 	pool    *pool.EpbsPool
+	cancel  context.CancelFunc
+	wg      sync.WaitGroup
+	stop    sync.Once
 }
 
 // BuilderDeps bundles the Caplin components that the builder needs.
@@ -121,23 +126,31 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 
 	loop := NewBuilderLoop(manager, strategy, deps.Exec, prefsWatch, submitter, deps.BeaconCfg)
 
-	// --- Start background goroutines ---
-
-	// 1. Head watcher: subscribe to head events and call OnNewHead for speculative builds.
-	go runHeadWatcher(deps.Ctx, deps.Emitters, deps.ForkChoice, deps.EthClock, deps.SyncedData, deps.BeaconCfg, loop)
-	go runImportedBlockWatcher(deps.Ctx, deps.Emitters, deps.ForkChoice, loop, manager)
-
-	// 2. Slot watcher: fires at slot boundaries to trigger OnSlot.
-	go runSlotWatcher(deps.Ctx, deps.EthClock, deps.ForkChoice, deps.SyncedData, deps.BeaconCfg, loop)
-
-	// 3. Balance monitor: periodic on-chain status check + index re-resolve.
-	go RunBalanceMonitor(deps.Ctx, deps.SyncedData, manager)
-
+	serviceCtx, cancel := context.WithCancel(deps.Ctx)
 	svc := &BuilderService{
 		Loop:    loop,
 		Manager: manager,
 		pool:    deps.EpbsPool,
+		cancel:  cancel,
 	}
+
+	// 1. Head watcher: subscribe to head events and call OnNewHead for speculative builds.
+	svc.run(func() {
+		runHeadWatcher(serviceCtx, deps.Emitters, deps.ForkChoice, deps.EthClock, deps.SyncedData, deps.BeaconCfg, loop)
+	})
+	svc.run(func() {
+		runImportedBlockWatcher(serviceCtx, deps.Emitters, deps.ForkChoice, loop, manager)
+	})
+
+	// 2. Slot watcher: fires at slot boundaries to trigger OnSlot.
+	svc.run(func() {
+		runSlotWatcher(serviceCtx, deps.EthClock, deps.ForkChoice, deps.SyncedData, deps.BeaconCfg, loop)
+	})
+
+	// 3. Balance monitor: periodic on-chain status check + index re-resolve.
+	svc.run(func() {
+		RunBalanceMonitor(serviceCtx, deps.SyncedData, manager)
+	})
 
 	log.Info("ePBS builder: service started",
 		"builderIndex", builderIndex,
@@ -145,6 +158,10 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 	)
 
 	return svc, nil
+}
+
+func (s *BuilderService) run(fn func()) {
+	s.wg.Go(fn)
 }
 
 // runHeadWatcher subscribes to head events and triggers speculative builds.
@@ -160,6 +177,23 @@ func runHeadWatcher(
 	ch := make(chan *beaconevents.EventStream, 16)
 	sub := emitters.State().Subscribe(ch)
 	defer sub.Unsubscribe()
+	workerCtx, cancel := context.WithCancel(ctx)
+	headEvents := make(chan *beaconevents.HeadData, 1)
+	var worker sync.WaitGroup
+	worker.Go(func() {
+		for {
+			select {
+			case <-workerCtx.Done():
+				return
+			case headData := <-headEvents:
+				handleHeadEvent(workerCtx, headData, fc, ethClock, sd, beaconCfg, loop)
+			}
+		}
+	})
+	defer func() {
+		cancel()
+		worker.Wait()
+	}()
 
 	for {
 		select {
@@ -176,7 +210,15 @@ func runHeadWatcher(
 			if !ok || headData == nil {
 				continue
 			}
-			handleHeadEvent(ctx, headData, fc, ethClock, sd, beaconCfg, loop)
+			select {
+			case headEvents <- headData:
+			default:
+				select {
+				case <-headEvents:
+				default:
+				}
+				headEvents <- headData
+			}
 		case err := <-sub.Err():
 			if err != nil {
 				log.Warn("ePBS builder: head subscription error", "err", err)
@@ -198,6 +240,9 @@ func handleHeadEvent(
 	loop *BuilderLoop,
 ) {
 	nextSlot := headData.Slot + 1
+	if beaconCfg.GetCurrentStateVersion(nextSlot/beaconCfg.SlotsPerEpoch) < clparams.GloasVersion {
+		return
+	}
 	parents := fc.ActiveParents(nextSlot)
 	if len(parents) == 0 {
 		return
@@ -206,7 +251,10 @@ func handleHeadEvent(
 	timestamp := ethClock.GenesisTime() + beaconCfg.SecondsPerSlot*nextSlot
 
 	for _, parent := range parents {
-		sc, err := buildSlotContext(sd, fc, beaconCfg, nextSlot, timestamp, parent)
+		if parent.BlockRoot != headData.Block || parent.Slot != headData.Slot {
+			continue
+		}
+		sc, err := buildSlotContext(fc, beaconCfg, nextSlot, timestamp, parent)
 		if err != nil {
 			log.Debug("ePBS builder: unable to prepare OnNewHead slot context, skipping",
 				"slot", nextSlot, "parentRoot", parent.BlockRoot, "err", err)
@@ -247,6 +295,9 @@ func runSlotWatcher(
 		}
 
 		slot := ethClock.GetCurrentSlot()
+		if beaconCfg.GetCurrentStateVersion(slot/beaconCfg.SlotsPerEpoch) < clparams.GloasVersion {
+			continue
+		}
 
 		parents := fc.ActiveParents(slot)
 		if len(parents) == 0 {
@@ -256,7 +307,7 @@ func runSlotWatcher(
 		timestamp := ethClock.GenesisTime() + beaconCfg.SecondsPerSlot*slot
 
 		for _, parent := range parents {
-			sc, err := buildSlotContext(sd, fc, beaconCfg, slot, timestamp, parent)
+			sc, err := buildSlotContext(fc, beaconCfg, slot, timestamp, parent)
 			if err != nil {
 				log.Debug("ePBS builder: unable to prepare OnSlot slot context, skipping",
 					"slot", slot, "parentRoot", parent.BlockRoot, "err", err)
@@ -274,51 +325,63 @@ func runSlotWatcher(
 }
 
 func buildSlotContext(
-	sd *synced_data.SyncedDataManager,
-	fc *forkchoice.ForkChoiceStore,
+	fc slotContextForkChoice,
 	beaconCfg *clparams.BeaconChainConfig,
 	slot uint64,
 	timestamp uint64,
 	parent forkchoice.ParentCandidate,
 ) (SlotContext, error) {
-	var sc SlotContext
-	if err := sd.ViewHeadState(func(s *state.CachingBeaconState) error {
-		epoch := slot / beaconCfg.SlotsPerEpoch
-		if epoch <= beaconCfg.MinSeedLookahead {
-			return fmt.Errorf("cannot compute proposer dependent root for epoch %d", epoch)
-		}
-		dependentSlot := (epoch-beaconCfg.MinSeedLookahead)*beaconCfg.SlotsPerEpoch - 1
-		dependentRoot := fc.Ancestor(parent.BlockRoot, dependentSlot).Root
-		if dependentRoot == (common.Hash{}) {
-			return fmt.Errorf("proposer dependent root unavailable for parent %s", parent.BlockRoot)
-		}
-		withdrawals, err := resolveWithdrawalsForParent(s, fc, beaconCfg, slot, parent)
-		if err != nil {
-			return err
-		}
-		sc = SlotContext{
-			Slot: slot,
-			Parent: ParentInfo{
-				Slot:          parent.Slot,
-				BlockRoot:     parent.BlockRoot,
-				ExecutionHash: parent.ExecutionHash,
-				ShouldExtend:  parent.ShouldExtend,
-			},
-			DependentRoot: dependentRoot,
-			Timestamp:     timestamp,
-			PrevRandao:    s.GetRandaoMixes(epoch),
-			Withdrawals:   withdrawals,
-		}
-		return nil
-	}); err != nil {
+	parentState, err := fc.GetStateAtBlockRoot(parent.BlockRoot, true)
+	if err != nil {
+		return SlotContext{}, fmt.Errorf("get parent state %s: %w", parent.BlockRoot, err)
+	}
+	if parentState == nil {
+		return SlotContext{}, fmt.Errorf("parent state %s unavailable", parent.BlockRoot)
+	}
+	if parentState.Slot() != parent.Slot {
+		return SlotContext{}, fmt.Errorf("parent state slot %d does not match parent slot %d", parentState.Slot(), parent.Slot)
+	}
+	if err := transition.DefaultMachine.ProcessSlots(parentState, slot); err != nil {
+		return SlotContext{}, fmt.Errorf("advance parent state to slot %d: %w", slot, err)
+	}
+
+	epoch := slot / beaconCfg.SlotsPerEpoch
+	if epoch <= beaconCfg.MinSeedLookahead {
+		return SlotContext{}, fmt.Errorf("cannot compute proposer dependent root for epoch %d", epoch)
+	}
+	dependentSlot := (epoch-beaconCfg.MinSeedLookahead)*beaconCfg.SlotsPerEpoch - 1
+	dependentRoot := fc.Ancestor(parent.BlockRoot, dependentSlot).Root
+	if dependentRoot == (common.Hash{}) {
+		return SlotContext{}, fmt.Errorf("proposer dependent root unavailable for parent %s", parent.BlockRoot)
+	}
+	withdrawals, err := resolveWithdrawalsForParent(parentState, fc, beaconCfg, slot, parent)
+	if err != nil {
 		return SlotContext{}, err
 	}
-	return sc, nil
+	return SlotContext{
+		Slot: slot,
+		Parent: ParentInfo{
+			Slot:          parent.Slot,
+			BlockRoot:     parent.BlockRoot,
+			ExecutionHash: parent.ExecutionHash,
+			ShouldExtend:  parent.ShouldExtend,
+		},
+		DependentRoot: dependentRoot,
+		Timestamp:     timestamp,
+		PrevRandao:    parentState.GetRandaoMixes(epoch),
+		Withdrawals:   withdrawals,
+	}, nil
+}
+
+type slotContextForkChoice interface {
+	GetStateAtBlockRoot(common.Hash, bool) (*state.CachingBeaconState, error)
+	Ancestor(common.Hash, uint64) forkchoice.ForkChoiceNode
+	ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
 }
 
 func resolveWithdrawalsForParent(
 	baseState *state.CachingBeaconState,
-	fc *forkchoice.ForkChoiceStore,
+	fc slotContextForkChoice,
 	beaconCfg *clparams.BeaconChainConfig,
 	targetSlot uint64,
 	parent forkchoice.ParentCandidate,
@@ -407,6 +470,57 @@ func runImportedBlockWatcher(ctx context.Context, emitters *beaconevents.EventEm
 	ch := make(chan *beaconevents.EventStream, 16)
 	sub := emitters.State().Subscribe(ch)
 	defer sub.Unsubscribe()
+	workerCtx, cancel := context.WithCancel(ctx)
+
+	balanceRoots := make(chan common.Hash, 1)
+	revealWake := make(chan struct{}, 1)
+	type revealRequest struct {
+		bid        *cltypes.ExecutionPayloadBid
+		beaconRoot common.Hash
+	}
+	var revealMu sync.Mutex
+	reveals := make(map[pendingPayloadKey]revealRequest)
+	var workers sync.WaitGroup
+	workers.Go(func() {
+		for {
+			select {
+			case <-workerCtx.Done():
+				return
+			case root := <-balanceRoots:
+				refreshBuilderBalanceAtRoot(reader, manager, root)
+			}
+		}
+	})
+	workers.Go(func() {
+		for {
+			select {
+			case <-workerCtx.Done():
+				return
+			case <-revealWake:
+			}
+			for {
+				revealMu.Lock()
+				var key pendingPayloadKey
+				var request revealRequest
+				for key, request = range reveals {
+					delete(reveals, key)
+					break
+				}
+				revealMu.Unlock()
+				if request.bid == nil {
+					break
+				}
+				bid := request.bid
+				if err := loop.OnBidWon(workerCtx, bid.Slot, bid.BuilderIndex, bid.ParentBlockHash, bid.ParentBlockRoot, bid.BlockHash, request.beaconRoot); err != nil {
+					log.Warn("ePBS builder: winning bid reveal failed", "slot", bid.Slot, "err", err)
+				}
+			}
+		}
+	})
+	defer func() {
+		cancel()
+		workers.Wait()
+	}()
 	for {
 		select {
 		case <-ctx.Done():
@@ -422,9 +536,33 @@ func runImportedBlockWatcher(ctx context.Context, emitters *beaconevents.EventEm
 			if !ok {
 				continue
 			}
-			refreshBuilderBalanceAtRoot(reader, manager, data.Block)
-			if err := handleImportedBlock(ctx, data, reader, loop.OnBidWon); err != nil {
-				log.Warn("ePBS builder: winning bid reveal failed", "slot", data.Slot, "err", err)
+			select {
+			case balanceRoots <- data.Block:
+			default:
+				select {
+				case <-balanceRoots:
+				default:
+				}
+				balanceRoots <- data.Block
+			}
+			bid, err := importedBid(data, reader)
+			if err != nil {
+				log.Debug("ePBS builder: imported bid unavailable", "slot", data.Slot, "err", err)
+				continue
+			}
+			if bid == nil {
+				continue
+			}
+			key, pending := loop.pendingBidKey(bid.Slot, bid.BuilderIndex, bid.ParentBlockHash, bid.ParentBlockRoot, bid.BlockHash)
+			if !pending {
+				continue
+			}
+			revealMu.Lock()
+			reveals[key] = revealRequest{bid: bid, beaconRoot: data.Block}
+			revealMu.Unlock()
+			select {
+			case revealWake <- struct{}{}:
+			default:
 			}
 		case err := <-sub.Err():
 			if err != nil {
@@ -444,7 +582,7 @@ func refreshBuilderBalanceAtRoot(reader *forkchoice.ForkChoiceStore, manager *Bu
 	if err != nil || blockState == nil {
 		return
 	}
-	status := BalanceStatus{Active: state.IsActiveBuilder(blockState, builderIndex)}
+	status := BalanceStatus{Slot: blockState.Slot(), Active: state.IsActiveBuilder(blockState, builderIndex)}
 	builders := blockState.GetBuilders()
 	if builders != nil && builderIndex < uint64(builders.Len()) {
 		builder := builders.Get(int(builderIndex))
@@ -456,19 +594,26 @@ func refreshBuilderBalanceAtRoot(reader *forkchoice.ForkChoiceStore, manager *Bu
 }
 
 func handleImportedBlock(ctx context.Context, data *beaconevents.BlockData, reader importedBlockReader, reveal revealWinningBidFunc) error {
+	bid, err := importedBid(data, reader)
+	if err != nil || bid == nil {
+		return err
+	}
+	return reveal(ctx, bid.Slot, bid.BuilderIndex, bid.ParentBlockHash, bid.ParentBlockRoot, bid.BlockHash, data.Block)
+}
+
+func importedBid(data *beaconevents.BlockData, reader importedBlockReader) (*cltypes.ExecutionPayloadBid, error) {
 	if data == nil {
-		return fmt.Errorf("epbs/integration: nil imported block event")
+		return nil, fmt.Errorf("epbs/integration: nil imported block event")
 	}
 	block, ok := reader.GetBlock(data.Block)
 	if !ok || block == nil || block.Block == nil || block.Block.Body == nil {
-		return fmt.Errorf("epbs/integration: imported block %s unavailable", data.Block)
+		return nil, fmt.Errorf("epbs/integration: imported block %s unavailable", data.Block)
 	}
 	signedBid := block.Block.Body.GetSignedExecutionPayloadBid()
 	if signedBid == nil || signedBid.Message == nil {
-		return nil
+		return nil, nil
 	}
-	bid := signedBid.Message
-	return reveal(ctx, block.Block.Slot, bid.BuilderIndex, bid.ParentBlockHash, bid.ParentBlockRoot, bid.BlockHash, data.Block)
+	return signedBid.Message, nil
 }
 
 // Shutdown cleans up the builder loop's pending payloads.
@@ -477,17 +622,32 @@ func (s *BuilderService) Shutdown() {
 	if s == nil || s.Loop == nil {
 		return
 	}
-	if s.pool != nil {
-		s.pool.SetPreferencesHandler(nil)
-	}
-	s.Loop.mu.Lock()
-	defer s.Loop.mu.Unlock()
-	for k, pending := range s.Loop.pendingPayloads {
-		delete(s.Loop.pendingPayloads, k)
-		s.Loop.manager.ReleaseBid(pending.bidValue)
-	}
-	for k := range s.Loop.speculativePayloads {
-		delete(s.Loop.speculativePayloads, k)
-	}
-	log.Info("ePBS builder: shutdown complete")
+	s.stop.Do(func() {
+		if s.pool != nil {
+			s.pool.SetPreferencesHandler(nil)
+		}
+		if s.cancel != nil {
+			s.cancel()
+		}
+		s.wg.Wait()
+		s.Loop.mu.Lock()
+		released := make([]uint64, 0, len(s.Loop.pendingPayloads))
+		discarded := make([]uint64, 0, len(s.Loop.speculativePayloads))
+		for k, pending := range s.Loop.pendingPayloads {
+			delete(s.Loop.pendingPayloads, k)
+			released = append(released, pending.bidValue)
+		}
+		for k, payloadID := range s.Loop.speculativePayloads {
+			delete(s.Loop.speculativePayloads, k)
+			discarded = append(discarded, payloadID)
+		}
+		s.Loop.mu.Unlock()
+		for _, payloadID := range discarded {
+			s.Loop.specBuild.Discard(payloadID)
+		}
+		for _, bidValue := range released {
+			s.Loop.manager.ReleaseBid(bidValue)
+		}
+		log.Info("ePBS builder: shutdown complete")
+	})
 }

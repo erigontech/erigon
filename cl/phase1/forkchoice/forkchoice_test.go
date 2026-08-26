@@ -212,6 +212,68 @@ type headerOnlyAnchorForkGraph struct {
 	slot uint64
 }
 
+type activeParentForkGraph struct {
+	fork_graph.ForkGraph
+	root  common.Hash
+	slot  uint64
+	state *state.CachingBeaconState
+}
+
+func (g activeParentForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	if root != g.root {
+		return nil, false
+	}
+	return &cltypes.BeaconBlockHeader{Slot: g.slot}, true
+}
+
+func (g activeParentForkGraph) GetState(root common.Hash, _ bool) (*state.CachingBeaconState, error) {
+	if root != g.root {
+		return nil, nil
+	}
+	return g.state, nil
+}
+
+func (g activeParentForkGraph) HasEnvelope(root common.Hash) bool { return root == g.root }
+func (activeParentForkGraph) IsBlockInvalid(common.Hash) bool     { return false }
+func (activeParentForkGraph) PayloadAccepted(common.Hash) (bool, bool) {
+	return false, false
+}
+func (activeParentForkGraph) IsPayloadUnavailable(common.Hash) bool {
+	return false
+}
+
+func TestActiveParentsUsesHeadPayloadStatus(t *testing.T) {
+	root := common.HexToHash("0xa1")
+	parentHash := common.HexToHash("0xb2")
+	blockHash := common.HexToHash("0xc3")
+	s := state.New(&clparams.MainnetBeaconConfig)
+	s.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		ParentBlockHash: parentHash,
+		BlockHash:       blockHash,
+	})
+	payloadStatusByRoot, err := lru.New[common.Hash, execution_client.PayloadStatus](16)
+	require.NoError(t, err)
+	payloadStatusByRoot.Add(root, execution_client.PayloadStatusValidated)
+
+	store := &ForkChoiceStore{
+		beaconCfg:           &clparams.MainnetBeaconConfig,
+		forkGraph:           activeParentForkGraph{root: root, slot: 10, state: s},
+		headHash:            root,
+		headSlot:            10,
+		headPayloadStatus:   cltypes.PayloadStatusEmpty,
+		payloadStatusByRoot: payloadStatusByRoot,
+	}
+	store.proposerBoostRoot.Store(common.Hash{})
+
+	parents := store.ActiveParents(12)
+	require.Equal(t, []ParentCandidate{{
+		Slot:          10,
+		BlockRoot:     root,
+		ExecutionHash: parentHash,
+		ShouldExtend:  false,
+	}}, parents)
+}
+
 func (g headerOnlyAnchorForkGraph) AnchorRoot() common.Hash { return g.root }
 func (g headerOnlyAnchorForkGraph) AnchorSlot() uint64      { return g.slot }
 func (g headerOnlyAnchorForkGraph) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {

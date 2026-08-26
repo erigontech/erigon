@@ -760,34 +760,33 @@ func (f *ForkChoiceStore) ForkNodes() []ForkNode {
 	return forkNodes
 }
 
-// ActiveParents returns the set of viable parent candidates for building a
-// block at the given slot. For MVP this returns only the current head, with
-// the EL parent hash resolved via FULL/EMPTY logic (ShouldExtendPayload).
-//
-// The slot parameter is reserved for future multi-parent support (e.g. after
-// reorgs where multiple parents are viable).
+// ActiveParents returns the viable parent candidates for building at slot.
 func (f *ForkChoiceStore) ActiveParents(slot uint64) []ParentCandidate {
 	f.mu.RLock()
-	defer f.mu.RUnlock()
-
 	headRoot := f.headHash
 	if headRoot == (common.Hash{}) {
+		f.mu.RUnlock()
 		return nil
 	}
-
 	header, ok := f.forkGraph.GetHeader(headRoot)
 	if !ok {
+		f.mu.RUnlock()
 		return nil
 	}
+	headSlot := header.Slot
+	headStatus := f.headPayloadStatus
+	f.mu.RUnlock()
 
-	// Resolve the EL parent hash using FULL/EMPTY logic.
-	// This mirrors the branching in block_production.go:660-687.
-	shouldExtend := f.ShouldExtendPayload(headRoot)
+	headNode := ForkChoiceNode{Root: headRoot, PayloadStatus: headStatus}
+	shouldExtend := f.HasEnvelope(headRoot) && f.ShouldBuildOnFull(headNode, slot)
 	var executionHash common.Hash
 	headState, err := f.forkGraph.GetState(headRoot, false)
 	if err != nil || headState == nil {
-		// Fallback: use eth2Roots mapping
-		executionHash, _ = f.eth2Roots.Get(headRoot)
+		var found bool
+		executionHash, found = f.eth2Roots.Get(headRoot)
+		if !found {
+			return nil
+		}
 	} else {
 		parentBid := headState.GetLatestExecutionPayloadBid()
 		if parentBid != nil {
@@ -800,9 +799,15 @@ func (f *ForkChoiceStore) ActiveParents(slot uint64) []ParentCandidate {
 			executionHash = headState.GetLatestBlockHash()
 		}
 	}
+	f.mu.RLock()
+	unchanged := f.headHash == headRoot && f.headSlot == headSlot && f.headPayloadStatus == headStatus
+	f.mu.RUnlock()
+	if !unchanged {
+		return nil
+	}
 
 	return []ParentCandidate{{
-		Slot:          header.Slot,
+		Slot:          headSlot,
 		BlockRoot:     headRoot,
 		ExecutionHash: executionHash,
 		ShouldExtend:  shouldExtend,

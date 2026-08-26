@@ -23,6 +23,8 @@ import (
 const (
 	preferencesTimeout = 4 * time.Second // wait up to 4s into the slot for preferences
 	weiPerGwei         = 1_000_000_000   // consensus layer uses Gwei; EL blockValue is in wei
+	revealAttempts     = 3
+	revealRetryDelay   = 100 * time.Millisecond
 )
 
 // pendingPayload is a completed build result waiting for a bid-won reveal.
@@ -32,7 +34,7 @@ type pendingPayload struct {
 	assembled *eladapter.AssembledPayload
 	execReqs  *cltypes.ExecutionRequests
 	parent    ParentInfo
-	revealing bool
+	reveals   map[common.Hash]bool
 	bidValue  uint64
 }
 
@@ -74,6 +76,7 @@ type pendingPayloadKey struct {
 	slot            uint64
 	parentBlockHash common.Hash
 	parentBlockRoot common.Hash
+	blockHash       common.Hash
 }
 
 // speculativeKey also includes parentBlockRoot for the same reason: two
@@ -139,7 +142,7 @@ func (l *BuilderLoop) OnSlot(ctx context.Context, sc SlotContext) error {
 	if sc.Slot > 1 {
 		l.pruneBeforeSlot(sc.Slot - 1)
 	}
-	prefs, err := l.prefsWatch.WaitForPreferences(sc.Slot, sc.DependentRoot, preferencesTimeout)
+	prefs, err := l.prefsWatch.WaitForPreferences(ctx, sc.Slot, sc.DependentRoot, preferencesTimeout)
 	if err != nil {
 		log.Debug("ePBS builder: no preferences, skipping slot", "slot", sc.Slot, "err", err)
 		return nil // skip path
@@ -153,7 +156,7 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
 	var released []uint64
 	l.mu.Lock()
 	for key, pending := range l.pendingPayloads {
-		if key.slot < slot {
+		if key.slot < slot && !revealInFlight(pending) {
 			delete(l.pendingPayloads, key)
 			released = append(released, pending.bidValue)
 		}
@@ -171,6 +174,15 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
 	for _, bidValue := range released {
 		l.manager.ReleaseBid(bidValue)
 	}
+}
+
+func revealInFlight(pending *pendingPayload) bool {
+	for _, revealed := range pending.reveals {
+		if !revealed {
+			return true
+		}
+	}
+	return false
 }
 
 // buildAndBid implements the speculative match -> calculate value -> bid -> submit flow.
@@ -224,6 +236,7 @@ func (l *BuilderLoop) buildAndBid(ctx context.Context, sc SlotContext, prefs *cl
 		if err != nil {
 			return fmt.Errorf("epbs/loop: rebuild StartBuild: %w", err)
 		}
+		defer l.specBuild.Discard(newPayloadId)
 
 		// Poll for result (simple blocking wait with timeout)
 		deadline := time.After(time.Duration(l.beaconCfg.SecondsPerSlot/4) * time.Second)
@@ -343,16 +356,11 @@ buildDone:
 		return fmt.Errorf("epbs/loop: sign bid: %w", err)
 	}
 
-	// Submit the bid
-	if err := l.submitter.SubmitBid(ctx, signedBid); err != nil {
-		return fmt.Errorf("epbs/loop: submit bid: %w", err)
+	key := pendingPayloadKey{
+		slot: slot, parentBlockHash: parent.ExecutionHash, parentBlockRoot: parent.BlockRoot,
+		blockHash: assembled.Eth1Block.BlockHash,
 	}
-
-	// Store for reveal
-	key := pendingPayloadKey{slot: slot, parentBlockHash: parent.ExecutionHash, parentBlockRoot: parent.BlockRoot}
-	l.mu.Lock()
-	previous := l.pendingPayloads[key]
-	l.pendingPayloads[key] = &pendingPayload{
+	pending := &pendingPayload{
 		slot:      slot,
 		payloadId: usedPayloadId,
 		assembled: assembled,
@@ -360,11 +368,22 @@ buildDone:
 		parent:    parent,
 		bidValue:  bidValue,
 	}
+	l.mu.Lock()
+	previous := l.pendingPayloads[key]
+	l.pendingPayloads[key] = pending
 	l.mu.Unlock()
+	reserved = false
+
+	if err := l.submitter.SubmitBid(ctx, signedBid); err != nil {
+		if previous != nil {
+			l.manager.ReleaseBid(previous.bidValue)
+		}
+		return fmt.Errorf("epbs/loop: submit bid: %w", err)
+	}
+
 	if previous != nil {
 		l.manager.ReleaseBid(previous.bidValue)
 	}
-	reserved = false
 
 	log.Info("ePBS builder: bid submitted",
 		"slot", slot,
@@ -393,10 +412,16 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 		return nil
 	}
 
-	key := pendingPayloadKey{slot: slot, parentBlockHash: parentHash, parentBlockRoot: parentBlockRoot}
+	key := pendingPayloadKey{slot: slot, parentBlockHash: parentHash, parentBlockRoot: parentBlockRoot, blockHash: blockHash}
 	l.mu.Lock()
 	pending, ok := l.pendingPayloads[key]
 	if !ok {
+		for candidateKey := range l.pendingPayloads {
+			if candidateKey.slot == slot && candidateKey.parentBlockHash == parentHash && candidateKey.parentBlockRoot == parentBlockRoot {
+				l.mu.Unlock()
+				return fmt.Errorf("epbs/loop: winning block hash %s does not match pending payload", blockHash)
+			}
+		}
 		l.mu.Unlock()
 		return fmt.Errorf("epbs/loop: no pending payload for slot %d parentHash %s parentBlockRoot %s", slot, parentHash, parentBlockRoot)
 	}
@@ -404,11 +429,14 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 		l.mu.Unlock()
 		return fmt.Errorf("epbs/loop: winning block hash %s does not match pending payload", blockHash)
 	}
-	if pending.revealing {
+	if pending.reveals == nil {
+		pending.reveals = make(map[common.Hash]bool)
+	}
+	if _, exists := pending.reveals[beaconBlockRoot]; exists {
 		l.mu.Unlock()
 		return nil
 	}
-	pending.revealing = true
+	pending.reveals[beaconBlockRoot] = false
 	l.mu.Unlock()
 	revealed := false
 	defer func() {
@@ -417,7 +445,7 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 		}
 		l.mu.Lock()
 		if current := l.pendingPayloads[key]; current == pending {
-			current.revealing = false
+			delete(current.reveals, beaconBlockRoot)
 		}
 		l.mu.Unlock()
 	}()
@@ -441,22 +469,16 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 		return fmt.Errorf("epbs/loop: data column sidecars: %w", err)
 	}
 
-	// Broadcast
-	if err := l.submitter.BroadcastPayload(ctx, signedEnvelope, columnSidecars); err != nil {
+	if err := l.broadcastPayload(ctx, signedEnvelope, columnSidecars); err != nil {
 		return fmt.Errorf("epbs/loop: broadcast payload: %w", err)
 	}
 
-	releaseReservation := false
 	l.mu.Lock()
 	if current := l.pendingPayloads[key]; current == pending {
-		delete(l.pendingPayloads, key)
-		releaseReservation = true
+		current.reveals[beaconBlockRoot] = true
 	}
 	l.mu.Unlock()
 	revealed = true
-	if releaseReservation {
-		l.manager.ReleaseBid(pending.bidValue)
-	}
 
 	log.Info("ePBS builder: payload revealed",
 		"slot", slot,
@@ -465,6 +487,38 @@ func (l *BuilderLoop) OnBidWon(ctx context.Context, slot uint64, builderIndex ui
 	)
 
 	return nil
+}
+
+func (l *BuilderLoop) pendingBidKey(slot, builderIndex uint64, parentHash, parentBlockRoot, blockHash common.Hash) (pendingPayloadKey, bool) {
+	key := pendingPayloadKey{slot: slot, parentBlockHash: parentHash, parentBlockRoot: parentBlockRoot, blockHash: blockHash}
+	ourIndex, resolved := l.manager.BuilderIndex()
+	if !resolved || builderIndex != ourIndex {
+		return key, false
+	}
+	l.mu.Lock()
+	_, ok := l.pendingPayloads[key]
+	l.mu.Unlock()
+	return key, ok
+}
+
+func (l *BuilderLoop) broadcastPayload(ctx context.Context, envelope *cltypes.SignedExecutionPayloadEnvelope, columnSidecars []*cltypes.DataColumnSidecar) error {
+	var err error
+	for attempt := range revealAttempts {
+		if err = l.submitter.BroadcastPayload(ctx, envelope, columnSidecars); err == nil {
+			return nil
+		}
+		if attempt+1 == revealAttempts {
+			break
+		}
+		timer := time.NewTimer(revealRetryDelay)
+		select {
+		case <-ctx.Done():
+			timer.Stop()
+			return ctx.Err()
+		case <-timer.C:
+		}
+	}
+	return err
 }
 
 func validateBlobsBundle(bundle *eladapter.BlobsBundle, maxBlobs uint64) error {

@@ -81,22 +81,29 @@ func (m *mockPayloadAssembler) setResultForNext(payload *eladapter.AssembledPayl
 // --- Mock bid submitter ---
 
 type mockBidSubmitter struct {
-	mu            sync.Mutex
-	submittedBids []*cltypes.SignedExecutionPayloadBid
-	broadcasts    []*cltypes.SignedExecutionPayloadEnvelope
-	sidecars      [][]*cltypes.DataColumnSidecar
-	submitBidErr  error
-	broadcastErr  error
-	broadcastHook func()
+	mu                sync.Mutex
+	submittedBids     []*cltypes.SignedExecutionPayloadBid
+	broadcasts        []*cltypes.SignedExecutionPayloadEnvelope
+	sidecars          [][]*cltypes.DataColumnSidecar
+	submitBidErr      error
+	submitBidHook     func(context.Context, *cltypes.SignedExecutionPayloadBid) error
+	broadcastErr      error
+	broadcastFailures int
+	broadcastHook     func()
 }
 
-func (s *mockBidSubmitter) SubmitBid(_ context.Context, bid *cltypes.SignedExecutionPayloadBid) error {
+func (s *mockBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedExecutionPayloadBid) error {
 	s.mu.Lock()
-	defer s.mu.Unlock()
 	if s.submitBidErr != nil {
+		s.mu.Unlock()
 		return s.submitBidErr
 	}
 	s.submittedBids = append(s.submittedBids, bid)
+	hook := s.submitBidHook
+	s.mu.Unlock()
+	if hook != nil {
+		return hook(ctx, bid)
+	}
 	return nil
 }
 
@@ -104,6 +111,14 @@ func (s *mockBidSubmitter) BroadcastPayload(_ context.Context, envelope *cltypes
 	s.mu.Lock()
 	defer s.mu.Unlock()
 	if s.broadcastErr != nil {
+		if s.broadcastFailures > 0 {
+			s.broadcastFailures--
+			if s.broadcastFailures == 0 {
+				err := s.broadcastErr
+				s.broadcastErr = nil
+				return err
+			}
+		}
 		return s.broadcastErr
 	}
 	s.broadcasts = append(s.broadcasts, envelope)
@@ -282,6 +297,18 @@ func TestBuilderLoop_RebuildPath(t *testing.T) {
 	require.Equal(t, uint64(0), bid.Message.ExecutionPayment)
 }
 
+func TestBuilderLoopRebuildTimeoutDiscardsBuild(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	loop.beaconCfg.SecondsPerSlot = 0
+	sc := testSlotContext()
+	prefs := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot,
+	}}
+
+	require.NoError(t, loop.buildAndBid(t.Context(), sc, prefs))
+	require.Empty(t, loop.specBuild.builds)
+}
+
 func TestBuilderLoop_SkipPath_NoPreferences(t *testing.T) {
 	loop, _, submitter, _ := setupBuilderLoop(t)
 	ctx := context.Background()
@@ -356,6 +383,42 @@ func TestBuilderLoop_BidWonReveal(t *testing.T) {
 	require.NotEqual(t, common.Bytes96{}, envelope.Signature)
 }
 
+func TestBuilderLoopRetainsPayloadBeforeBidPublication(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	beaconBlockRoot := common.HexToHash("0xbeefcafe")
+	submitter.submitBidHook = func(ctx context.Context, bid *cltypes.SignedExecutionPayloadBid) error {
+		return loop.OnBidWon(ctx, bid.Message.Slot, bid.Message.BuilderIndex, bid.Message.ParentBlockHash,
+			bid.Message.ParentBlockRoot, bid.Message.BlockHash, beaconBlockRoot)
+	}
+
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	submitter.mu.Lock()
+	defer submitter.mu.Unlock()
+	require.Len(t, submitter.broadcasts, 1)
+	require.Equal(t, beaconBlockRoot, submitter.broadcasts[0].Message.BeaconBlockRoot)
+}
+
+func TestBuilderLoopRetainsPayloadWhenBidPublicationReturnsError(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	submitter.submitBidErr = errors.New("publication outcome unknown")
+
+	require.Error(t, loop.OnSlot(t.Context(), sc))
+	require.Len(t, loop.pendingPayloads, 1)
+	require.NotZero(t, loop.manager.reservedBidValue)
+}
+
 func TestBuilderLoop_BidWonReveal_NoPending(t *testing.T) {
 	loop, _, _, _ := setupBuilderLoop(t)
 	ctx := context.Background()
@@ -389,8 +452,53 @@ func TestBuilderLoop_BidWonReveal_RetainsPayloadUntilSuccessfulBroadcast(t *test
 
 	submitter.broadcastErr = nil
 	require.NoError(t, loop.OnBidWon(ctx, sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, common.HexToHash("0xb10c"), beaconBlockRoot))
-	require.Empty(t, loop.pendingPayloads)
+	require.Len(t, loop.pendingPayloads, 1)
 	require.Len(t, submitter.broadcasts, 1)
+}
+
+func TestBuilderLoopBidWonRevealRetriesTransientBroadcastFailure(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	submitter.broadcastErr = errors.New("transient gossip failure")
+	submitter.broadcastFailures = 1
+
+	err := loop.OnBidWon(t.Context(), sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
+		common.HexToHash("0xb10c"), common.HexToHash("0xbeef"))
+	require.NoError(t, err)
+	require.Len(t, submitter.broadcasts, 1)
+}
+
+func TestBuilderLoopRebindsRevealToNewBeaconBlockRoot(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+
+	rootA := common.HexToHash("0xa1")
+	rootB := common.HexToHash("0xb2")
+	reveal := func(root common.Hash) error {
+		return loop.OnBidWon(t.Context(), sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
+			common.HexToHash("0xb10c"), root)
+	}
+	require.NoError(t, reveal(rootA))
+	require.NoError(t, reveal(rootA))
+	require.NoError(t, reveal(rootB))
+
+	submitter.mu.Lock()
+	defer submitter.mu.Unlock()
+	require.Len(t, submitter.broadcasts, 2)
+	require.Equal(t, rootA, submitter.broadcasts[0].Message.BeaconBlockRoot)
+	require.Equal(t, rootB, submitter.broadcasts[1].Message.BeaconBlockRoot)
 }
 
 func TestBuilderLoop_BidWonReveal_DoesNotReleaseDeletedPendingTwice(t *testing.T) {
@@ -405,7 +513,10 @@ func TestBuilderLoop_BidWonReveal_DoesNotReleaseDeletedPendingTwice(t *testing.T
 	require.NoError(t, loop.OnSlot(ctx, sc))
 	require.True(t, loop.manager.ReserveBid(10))
 
-	key := pendingPayloadKey{slot: sc.Slot, parentBlockHash: sc.Parent.ExecutionHash, parentBlockRoot: sc.Parent.BlockRoot}
+	key := pendingPayloadKey{
+		slot: sc.Slot, parentBlockHash: sc.Parent.ExecutionHash, parentBlockRoot: sc.Parent.BlockRoot,
+		blockHash: common.HexToHash("0xb10c"),
+	}
 	submitter.broadcastHook = func() {
 		loop.mu.Lock()
 		pending := loop.pendingPayloads[key]
@@ -418,6 +529,35 @@ func TestBuilderLoop_BidWonReveal_DoesNotReleaseDeletedPendingTwice(t *testing.T
 	loop.manager.indexMu.RLock()
 	require.Equal(t, uint64(10), loop.manager.reservedBidValue)
 	loop.manager.indexMu.RUnlock()
+}
+
+func TestBuilderLoopPruneRetainsInFlightRevealReservation(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	started := make(chan struct{})
+	release := make(chan struct{})
+	submitter.broadcastHook = func() {
+		close(started)
+		<-release
+	}
+	done := make(chan error, 1)
+	go func() {
+		done <- loop.OnBidWon(t.Context(), sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot,
+			common.HexToHash("0xb10c"), common.HexToHash("0xbeef"))
+	}()
+	<-started
+
+	loop.pruneBeforeSlot(sc.Slot + 1)
+	require.Len(t, loop.pendingPayloads, 1)
+	require.NotZero(t, loop.manager.reservedBidValue)
+	close(release)
+	require.NoError(t, <-done)
 }
 
 func TestBuildDataColumnSidecars_EmptyBundle(t *testing.T) {
@@ -529,9 +669,18 @@ func TestBuildParams_CarriesWithdrawals(t *testing.T) {
 
 func TestPreferencesWatcher_Timeout(t *testing.T) {
 	w := NewPreferencesWatcher()
-	_, err := w.WaitForPreferences(42, common.Hash{}, 50*time.Millisecond)
+	_, err := w.WaitForPreferences(t.Context(), 42, common.Hash{}, 50*time.Millisecond)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timeout")
+}
+
+func TestPreferencesWatcherCancellation(t *testing.T) {
+	w := NewPreferencesWatcher()
+	ctx, cancel := context.WithCancel(t.Context())
+	cancel()
+
+	_, err := w.WaitForPreferences(ctx, 42, common.Hash{}, time.Hour)
+	require.ErrorIs(t, err, context.Canceled)
 }
 
 func TestPreferencesWatcher_Receive(t *testing.T) {
@@ -548,7 +697,7 @@ func TestPreferencesWatcher_Receive(t *testing.T) {
 		w.OnPreferencesReceived(42, prefs)
 	}()
 
-	result, err := w.WaitForPreferences(42, common.Hash{}, time.Second)
+	result, err := w.WaitForPreferences(t.Context(), 42, common.Hash{}, time.Second)
 	require.NoError(t, err)
 	require.Equal(t, prefs, result)
 }
@@ -567,7 +716,7 @@ func TestPreferencesWatcher_WrongSlot(t *testing.T) {
 		w.OnPreferencesReceived(43, prefs) // wrong slot -- ignored
 	}()
 
-	_, err := w.WaitForPreferences(42, common.Hash{}, 100*time.Millisecond)
+	_, err := w.WaitForPreferences(t.Context(), 42, common.Hash{}, 100*time.Millisecond)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timeout")
 }
@@ -581,7 +730,7 @@ func TestPreferencesWatcher_DistinguishesDependentRoots(t *testing.T) {
 	w.OnPreferencesReceived(42, prefsA)
 	w.OnPreferencesReceived(42, prefsB)
 
-	result, err := w.WaitForPreferences(42, rootA, time.Second)
+	result, err := w.WaitForPreferences(t.Context(), 42, rootA, time.Second)
 	require.NoError(t, err)
 	require.Same(t, prefsA, result)
 }
@@ -724,23 +873,6 @@ func TestBuilderLoop_PruneBeforeSlot(t *testing.T) {
 	require.Len(t, loop.pendingPayloads, 1)
 	require.Len(t, loop.speculativePayloads, 1)
 	require.Len(t, loop.specBuild.builds, 1)
-}
-
-func TestCaplinBidSubmitter_SubmitBid(t *testing.T) {
-	// This is a basic test that CaplinBidSubmitter compiles and works with nil pool/gossip
-	// In a real test, we'd wire up actual pool and gossip mocks.
-	bid := &cltypes.SignedExecutionPayloadBid{
-		Message: &cltypes.ExecutionPayloadBid{
-			Slot:               100,
-			ParentBlockHash:    common.HexToHash("0xdead"),
-			ParentBlockRoot:    common.HexToHash("0xbeef"),
-			BlobKzgCommitments: *solid.NewStaticListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48),
-		},
-	}
-
-	// Verify the bid message fields
-	require.Equal(t, uint64(100), bid.Message.Slot)
-	require.NotNil(t, bid.Message)
 }
 
 func TestBuilderLoop_EnvelopeUsesConstructor(t *testing.T) {
@@ -905,7 +1037,7 @@ func TestPreferencesWatcher_EarlyArrival(t *testing.T) {
 	w.OnPreferencesReceived(42, prefs)
 
 	// Now wait -- should return immediately (fast path from prefsBySlot map)
-	result, err := w.WaitForPreferences(42, common.Hash{}, 100*time.Millisecond)
+	result, err := w.WaitForPreferences(t.Context(), 42, common.Hash{}, 100*time.Millisecond)
 	require.NoError(t, err)
 	require.Equal(t, prefs, result)
 }
@@ -925,7 +1057,7 @@ func TestPreferencesWatcher_EarlyArrival_WrongSlot(t *testing.T) {
 	w.OnPreferencesReceived(43, prefs)
 
 	// Wait for slot 42 -- should timeout (slot 43 prefs don't match)
-	_, err := w.WaitForPreferences(42, common.Hash{}, 100*time.Millisecond)
+	_, err := w.WaitForPreferences(t.Context(), 42, common.Hash{}, 100*time.Millisecond)
 	require.Error(t, err)
 	require.Contains(t, err.Error(), "timeout")
 }

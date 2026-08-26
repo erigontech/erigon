@@ -231,6 +231,15 @@ func TestBuilderManager_ReserveBidRequiresKnownActiveBalance(t *testing.T) {
 	require.True(t, mgr.ReserveBid(100))
 }
 
+func TestBuilderManagerRejectsStaleBalanceStatus(t *testing.T) {
+	mgr, _ := newTestManager(t)
+	mgr.SetBalanceStatus(BalanceStatus{Slot: 20, Active: true, Balance: 10})
+	mgr.SetBalanceStatus(BalanceStatus{Slot: 19, Active: true, Balance: 100})
+
+	require.False(t, mgr.ReserveBid(11))
+	require.True(t, mgr.ReserveBid(10))
+}
+
 func TestBuilderManager_SignBid_StampsBuilderIndex(t *testing.T) {
 	mgr, _ := newTestManager(t)
 	ctx := context.Background()

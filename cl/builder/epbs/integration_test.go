@@ -3,17 +3,93 @@ package epbs
 import (
 	"context"
 	"testing"
+	"time"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
 	"github.com/erigontech/erigon/cl/builder/epbs/epbscfg"
 	"github.com/erigontech/erigon/cl/clparams"
+	"github.com/erigontech/erigon/cl/clparams/devgenesis"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/phase1/core/state"
+	"github.com/erigontech/erigon/cl/phase1/forkchoice"
+	"github.com/erigontech/erigon/cl/transition"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
 )
 
 type testImportedBlockReader struct {
 	block *cltypes.SignedBeaconBlock
+}
+
+type slotContextForkChoiceStub struct {
+	state         *state.CachingBeaconState
+	requestedRoot common.Hash
+	dependentRoot common.Hash
+}
+
+func (s *slotContextForkChoiceStub) GetStateAtBlockRoot(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
+	s.requestedRoot = root
+	if !alwaysCopy {
+		return s.state, nil
+	}
+	return s.state.Copy()
+}
+
+func (s *slotContextForkChoiceStub) Ancestor(common.Hash, uint64) forkchoice.ForkChoiceNode {
+	return forkchoice.ForkChoiceNode{Root: s.dependentRoot}
+}
+
+func (*slotContextForkChoiceStub) ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error) {
+	return nil, nil
+}
+
+func TestBuildSlotContextUsesAndAdvancesParentState(t *testing.T) {
+	cfg := testBeaconCfg()
+	cfg.SlotsPerEpoch = 8
+	cfg.MinSeedLookahead = 1
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	parentState := state.New(cfg)
+	parentState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, parentState.SetSlot(16))
+	wantRandao := common.HexToHash("0x1234")
+	require.NoError(t, parentState.SetRandaoMixAt(2, wantRandao))
+	parentState.SetPayloadExpectedWithdrawals(solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44))
+	parentRoot := common.HexToHash("0xaaaa")
+	dependentRoot := common.HexToHash("0xbbbb")
+	fc := &slotContextForkChoiceStub{state: parentState, dependentRoot: dependentRoot}
+
+	sc, err := buildSlotContext(fc, cfg, 17, 123, forkchoice.ParentCandidate{
+		Slot: 16, BlockRoot: parentRoot, ExecutionHash: common.HexToHash("0xcccc"),
+	})
+	require.NoError(t, err)
+	require.Equal(t, parentRoot, fc.requestedRoot)
+	require.Equal(t, uint64(16), parentState.Slot())
+	require.Equal(t, dependentRoot, sc.DependentRoot)
+	require.Equal(t, wantRandao, sc.PrevRandao)
+}
+
+func TestBuildSlotContextAppliesEpochRandaoReset(t *testing.T) {
+	cfg := testBeaconCfg()
+	cfg.SlotsPerEpoch = 8
+	cfg.MinSeedLookahead = 1
+	cfg.GloasForkEpoch = 0
+	cfg.InitializeForkSchedule()
+	parentState, _, err := devgenesis.BuildGenesisState("slot-context", 64, cfg, 0, common.Hash{})
+	require.NoError(t, err)
+	require.NoError(t, transition.DefaultMachine.ProcessSlots(parentState, 23))
+	wantRandao := common.HexToHash("0x1234")
+	require.NoError(t, parentState.SetRandaoMixAt(2, wantRandao))
+	require.NoError(t, parentState.SetRandaoMixAt(3, common.HexToHash("0x9999")))
+	parentState.SetPayloadExpectedWithdrawals(solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44))
+	fc := &slotContextForkChoiceStub{state: parentState, dependentRoot: common.HexToHash("0xbbbb")}
+
+	sc, err := buildSlotContext(fc, cfg, 24, 123, forkchoice.ParentCandidate{
+		Slot: 23, BlockRoot: common.HexToHash("0xaaaa"),
+	})
+	require.NoError(t, err)
+	require.Equal(t, wantRandao, sc.PrevRandao)
 }
 
 func (r testImportedBlockReader) GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -44,6 +120,41 @@ func TestBuilderService_Shutdown_Nil(t *testing.T) {
 	// Shutdown on nil should not panic.
 	var svc *BuilderService
 	svc.Shutdown()
+}
+
+func TestBuilderServiceShutdownDiscardsTrackedBuilds(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	require.NoError(t, loop.OnNewHead(t.Context(), testSlotContext()))
+	svc := &BuilderService{Loop: loop, Manager: loop.manager}
+
+	svc.Shutdown()
+	svc.Shutdown()
+	require.Empty(t, loop.speculativePayloads)
+	require.Empty(t, loop.specBuild.builds)
+}
+
+func TestBuilderServiceShutdownWaitsBeforeReleasingReservations(t *testing.T) {
+	loop, _, _, _ := setupBuilderLoop(t)
+	require.True(t, loop.manager.ReserveBid(10))
+	loop.pendingPayloads[pendingPayloadKey{slot: 1}] = &pendingPayload{slot: 1, bidValue: 10}
+	svc := &BuilderService{Loop: loop, Manager: loop.manager}
+	release := make(chan struct{})
+	svc.run(func() { <-release })
+	done := make(chan struct{})
+	go func() {
+		svc.Shutdown()
+		close(done)
+	}()
+
+	select {
+	case <-done:
+		t.Fatal("shutdown returned before its worker stopped")
+	case <-time.After(20 * time.Millisecond):
+	}
+	require.Equal(t, uint64(10), loop.manager.reservedBidValue)
+	close(release)
+	<-done
+	require.Zero(t, loop.manager.reservedBidValue)
 }
 
 func TestBalanceStatus_Zero(t *testing.T) {

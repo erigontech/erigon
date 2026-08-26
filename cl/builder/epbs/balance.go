@@ -17,6 +17,7 @@ const (
 type BalanceStatus struct {
 	Active  bool   // builder is active (deposit finalized, not exiting)
 	Balance uint64 // current on-chain builder balance (gwei)
+	Slot    uint64
 }
 
 // CheckBalance queries the head state for the builder's on-chain status.
@@ -24,6 +25,7 @@ type BalanceStatus struct {
 func CheckBalance(sd synced_data.SyncedData, builderIndex uint64) (BalanceStatus, error) {
 	var status BalanceStatus
 	err := sd.ViewHeadState(func(s *state.CachingBeaconState) error {
+		status.Slot = s.Slot()
 		status.Active = state.IsActiveBuilder(s, builderIndex)
 		builders := s.GetBuilders()
 		if builders != nil && int(builderIndex) < builders.Len() {
