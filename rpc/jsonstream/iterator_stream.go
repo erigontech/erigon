@@ -43,86 +43,110 @@ func (s *JsoniterStream) Reset(out io.Writer) {
 	s.stream.Error = nil
 }
 
+// wrote runs after every value write, so the buffer bound holds for numbers and
+// raw bytes as much as for strings. Every writer below ends with it.
+func (s *JsoniterStream) wrote() {
+	flushIfFull(s.stream)
+}
+
 func (s *JsoniterStream) WriteRawBytes(content []byte) {
 	s.stream.SetBuffer(append(s.stream.Buffer(), content...))
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteRaw(content string) {
 	s.stream.WriteRaw(content)
-	flushIfFull(s.stream)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteNil() {
 	s.stream.WriteNil()
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteTrue() {
 	s.stream.WriteTrue()
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteFalse() {
 	s.stream.WriteFalse()
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteBool(val bool) {
 	s.stream.WriteBool(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteInt(val int) {
 	s.stream.WriteInt(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteInt8(val int8) {
 	s.stream.WriteInt8(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteInt16(val int16) {
 	s.stream.WriteInt16(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteInt32(val int32) {
 	s.stream.WriteInt32(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteInt64(val int64) {
 	s.stream.WriteInt64(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteUint(val uint) {
 	s.stream.WriteUint(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteUint8(val uint8) {
 	s.stream.WriteUint8(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteUint16(val uint16) {
 	s.stream.WriteUint16(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteUint32(val uint32) {
 	s.stream.WriteUint32(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteUint64(val uint64) {
 	s.stream.WriteUint64(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteFloat32(val float32) {
 	s.stream.WriteFloat32(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteFloat64(val float64) {
 	s.stream.WriteFloat64(val)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteString(val string) {
 	s.stream.WriteString(val)
-	flushIfFull(s.stream)
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteObjectStart() {
 	s.stream.WriteObjectStart()
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteObjectEnd() {
@@ -131,6 +155,7 @@ func (s *JsoniterStream) WriteObjectEnd() {
 
 func (s *JsoniterStream) WriteArrayStart() {
 	s.stream.WriteArrayStart()
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteArrayEnd() {
@@ -155,10 +180,12 @@ func (s *JsoniterStream) BufferAsString() (string, error) {
 
 func (s *JsoniterStream) WriteEmptyArray() {
 	s.stream.WriteEmptyArray()
+	s.wrote()
 }
 
 func (s *JsoniterStream) WriteEmptyObject() {
 	s.stream.WriteEmptyObject()
+	s.wrote()
 }
 
 // Size returns the size of the buffer

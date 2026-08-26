@@ -17,6 +17,7 @@
 package jsonstream
 
 import (
+	"bytes"
 	"errors"
 	"fmt"
 	"math"
@@ -1145,6 +1146,31 @@ func TestBufferBoundedForEveryWriter(t *testing.T) {
 
 			require.Greater(t, out.n, int64(1<<20), "the response must dwarf the buffer to mean anything")
 			require.Less(t, peak, 2*FlushThreshold, "buffer peaked at %d for a %dMB response", peak, out.n>>20)
+		})
+	}
+}
+
+// TestJsoniterStreamBoundsBuffer pins that the wrapper without the stack drains
+// on every writer too. WriteRawBytes carries the largest payloads a response
+// has, so a bound that skipped it would not be a bound.
+func TestJsoniterStreamBoundsBuffer(t *testing.T) {
+	for name, write := range map[string]func(s *JsoniterStream, i int){
+		"raw bytes": func(s *JsoniterStream, _ int) { s.WriteRawBytes(bytes.Repeat([]byte("x"), 4096)) },
+		"numbers":   func(s *JsoniterStream, i int) { s.WriteInt64(int64(i)); s.WriteMore() },
+	} {
+		t.Run(name, func(t *testing.T) {
+			var out bytes.Buffer
+			s := NewJsoniterStream(jsoniter.NewStream(jsoniter.ConfigDefault, &out, InitialBufferSize))
+
+			peak := 0
+			for i := range 100_000 {
+				write(s, i)
+				peak = max(peak, len(s.Buffer()))
+			}
+			require.NoError(t, s.Flush())
+
+			require.Greater(t, out.Len(), FlushThreshold, "the response must outgrow the buffer to mean anything")
+			require.Less(t, peak, 2*FlushThreshold, "buffer peaked at %d for a %d byte response", peak, out.Len())
 		})
 	}
 }
