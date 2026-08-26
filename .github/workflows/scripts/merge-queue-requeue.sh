@@ -88,9 +88,11 @@ guilty=$(jq -c '
   .jobs[]
   | select(.name != "ci-gate")
   | if any(.steps[]?; .name == "Cancel workflow run on failure" and .conclusion == "success")
-      then {id, name, kind: "failed"}
+      then {id, name, kind: "step-failure"}
+    elif .conclusion == "failure" and any(.steps[]?; .conclusion == "failure")
+      then {id, name, kind: "step-failure"}
     elif .conclusion == "failure"
-      then {id, name, kind: "failed"}
+      then {id, name, kind: "runner-failure"}
     elif .conclusion == "cancelled"
          and (.steps | length) == 1
          and .steps[0].name == "Set up job"
@@ -114,9 +116,9 @@ annotations_of() {
   gh api "repos/${GITHUB_REPOSITORY}/check-runs/$1/annotations" --paginate --jq '.[].message'
 }
 
-# Signatures of runner-infrastructure death. A failed job with none of these in
-# its annotations is treated as a real failure, so the PR stays evicted.
-infra_pattern='lost communication with the server|runner has received a shutdown signal|Could not resolve host|(proxy\.golang\.org|storage\.googleapis\.com).*(operation timed out|i/o timeout)'
+# Runner-service signatures are trusted only when Actions reports no failed
+# workflow step. Step annotations can be emitted by PR-controlled code.
+infra_pattern='lost communication with the server|runner has received a shutdown signal'
 timeout_pattern='exceeded the maximum execution time'
 
 infra_only=1
@@ -126,6 +128,11 @@ while IFS= read -r g; do
   job_id=$(jq -r '.id' <<<"$g")
   job_name=$(jq -r '.name' <<<"$g")
   kind=$(jq -r '.kind' <<<"$g")
+  if [ "$kind" = "step-failure" ]; then
+    echo "::notice::Job '${job_name}' has a failed workflow step; treating it as a real failure and not re-queuing."
+    infra_only=0
+    break
+  fi
   if ! anns=$(annotations_of "$job_id"); then
     echo "::notice::Could not read annotations of job '${job_name}'; treating its failure as real and not re-queuing."
     infra_only=0
