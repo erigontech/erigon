@@ -726,7 +726,6 @@ func TestSortable(t *testing.T) {
 
 	require.Equal([][]byte{{1}, {1}, {1}, {1}, {1}, {1}, {1}, {2}, {2}, {2}}, keys)
 	require.Equal([][]byte{{1}, {2}, {3}, {4}, {5}, {6}, {7}, {1}, {20}, nil}, vals)
-
 }
 
 func TestSortableBufferStableSort(t *testing.T) {
@@ -1602,6 +1601,32 @@ func TestSortableBufferChunks(t *testing.T) {
 	}
 }
 
+// TestSortableBufferSortAcrossChunks: the sort comparator has to split a
+// packed offset back into a chunk index and an offset inside it, so entries
+// must still order correctly once they live past chunk 0.
+func TestSortableBufferSortAcrossChunks(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+
+	const entries = 512
+	val := bytes.Repeat([]byte{0xCD}, 16*1024) // 512*16KB = 8MB of values
+	key := make([]byte, 8)
+	for i := range entries {
+		// Scrambled, so IsSortedFunc cannot short-circuit and pdqsort really runs.
+		// 313 is odd, so it permutes a power-of-two range.
+		binary.BigEndian.PutUint64(key, uint64(i*313%entries))
+		buf.Put(key, val)
+	}
+	require.Greater(t, len(buf.chunks), 1, "data must be split into chunks")
+
+	buf.Sort()
+	for i := range entries {
+		binary.BigEndian.PutUint64(key, uint64(i))
+		k, v := buf.Get(i)
+		require.Equal(t, key, k, "entry %d", i)
+		require.Equal(t, val, v, "entry %d", i)
+	}
+}
+
 // TestSortableBufferOversizedEntry: an entry bigger than one chunk gets a chunk
 // of its own - Get must still return one contiguous slice per key and value.
 func TestSortableBufferOversizedEntry(t *testing.T) {
@@ -1658,11 +1683,19 @@ func TestSortableBufferResetReleasesChunks(t *testing.T) {
 // dataChunkSize) must never enter the shared pool — a later getDataChunk
 // handing it out under a normal chunk index would corrupt an unrelated buffer.
 func TestPutDataChunkRejectsOversized(t *testing.T) {
-	oversized := make([]byte, dataChunkSize+7)
-	putDataChunk(&oversized)
-
-	got := getDataChunk()
-	require.Len(t, *got, dataChunkSize)
+	for _, tc := range []struct {
+		name   string
+		length int
+		pooled bool
+	}{
+		{"short", dataChunkSize - 1, false},
+		{"exact", dataChunkSize, true},
+		{"oversized", dataChunkSize + 7, false},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			require.Equal(t, tc.pooled, isPooledChunk(make([]byte, tc.length)))
+		})
+	}
 }
 
 // disposeProbe records whether the collector still owned its data chunks when
