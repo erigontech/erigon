@@ -34,6 +34,7 @@ func TestGloasBlockContentsSSZRoundTrip(t *testing.T) {
 
 	encoded, err := contents.EncodeSSZ(nil)
 	require.NoError(t, err)
+	require.Equal(t, contents.Block.EncodingSizeSSZ()+contents.ExecutionPayloadEnvelope.EncodingSizeSSZ()+contents.KZGProofs.EncodingSizeSSZ()+contents.Blobs.EncodingSizeSSZ()+4*4, contents.EncodingSizeSSZ())
 
 	decoded := NewGloasBlockContents(&cfg, 64)
 	require.NoError(t, decoded.DecodeSSZ(encoded, int(clparams.GloasVersion)))
@@ -49,6 +50,7 @@ func TestSignedExecutionPayloadEnvelopeContentsSSZRoundTrip(t *testing.T) {
 
 	encoded, err := contents.EncodeSSZ(nil)
 	require.NoError(t, err)
+	require.Equal(t, contents.SignedExecutionPayloadEnvelope.EncodingSizeSSZ()+contents.KZGProofs.EncodingSizeSSZ()+contents.Blobs.EncodingSizeSSZ()+3*4, contents.EncodingSizeSSZ())
 
 	decoded := NewSignedExecutionPayloadEnvelopeContents(&cfg, 64)
 	require.NoError(t, decoded.DecodeSSZ(encoded, int(clparams.GloasVersion)))

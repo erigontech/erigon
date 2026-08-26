@@ -228,7 +228,7 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 		return nil
 	}
 	payloadStatus := beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus())
-	executionOptimistic := cfg.forkChoice.IsHeadOptimistic()
+	executionOptimistic := cfg.forkChoice.IsRootOptimistic(headRoot)
 	headEvent, err := beaconevents.BuildHeadV2Data(
 		cfg.beaconCfg,
 		headState,
@@ -243,7 +243,7 @@ func emitHeadEvent(cfg *Cfg, headSlot uint64, headRoot common.Hash, headState *s
 	}
 	return emitHeadEventsIfCurrent(cfg.emitter, headEvent, headSlot, headRoot, stateRoot, func() (common.Hash, uint64, string, bool, error) {
 		root, slot, err := cfg.forkChoice.GetHead(nil)
-		return root, slot, beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus()), cfg.forkChoice.IsHeadOptimistic(), err
+		return root, slot, beaconevents.PayloadStatusName(cfg.forkChoice.GetHeadPayloadStatus()), cfg.forkChoice.IsRootOptimistic(root), err
 	})
 }
 
@@ -262,10 +262,10 @@ func emitHeadEventsIfCurrent(emitter *beaconevents.EventEmitter, headEvent *beac
 			Slot:                      headSlot,
 			Block:                     headRoot,
 			State:                     stateRoot,
-			EpochTransition:           true,
+			EpochTransition:           headEvent.Data.EpochTransition,
 			PreviousDutyDependentRoot: headEvent.Data.CurrentEpochDependentRoot,
 			CurrentDutyDependentRoot:  headEvent.Data.NextEpochDependentRoot,
-			ExecutionOptimistic:       false,
+			ExecutionOptimistic:       headEvent.Data.ExecutionOptimistic,
 		})
 		emitter.State().SendHeadV2(headEvent)
 	})

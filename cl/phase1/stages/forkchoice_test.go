@@ -285,3 +285,28 @@ func TestEmitHeadEventsDropsStalePayloadStatus(t *testing.T) {
 	require.NoError(t, err)
 	require.Empty(t, ch)
 }
+
+func TestEmitHeadEventsPreservesLegacyHeadFields(t *testing.T) {
+	emitter := beaconevents.NewEventEmitter()
+	ch := make(chan *beaconevents.EventStream, 2)
+	sub := emitter.State().Subscribe(ch)
+	defer sub.Unsubscribe()
+	headRoot := common.Hash{1}
+	headEvent := &beaconevents.HeadV2Data{Data: beaconevents.HeadV2Content{
+		PayloadStatus:             "pending",
+		EpochTransition:           false,
+		CurrentEpochDependentRoot: common.Hash{3},
+		NextEpochDependentRoot:    common.Hash{4},
+		ExecutionOptimistic:       true,
+	}}
+
+	err := emitHeadEventsIfCurrent(emitter, headEvent, 10, headRoot, common.Hash{2}, func() (common.Hash, uint64, string, bool, error) {
+		return headRoot, 10, "pending", true, nil
+	})
+	require.NoError(t, err)
+	legacy := (<-ch).Data.(*beaconevents.HeadData)
+	require.False(t, legacy.EpochTransition)
+	require.True(t, legacy.ExecutionOptimistic)
+	require.Equal(t, headEvent.Data.CurrentEpochDependentRoot, legacy.PreviousDutyDependentRoot)
+	require.Equal(t, headEvent.Data.NextEpochDependentRoot, legacy.CurrentDutyDependentRoot)
+}

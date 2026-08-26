@@ -264,7 +264,10 @@ func (s *executionPayloadService) emitFullHeadUpdate(block *cltypes.SignedBeacon
 	}
 	s.emitters.WithHeadEventLock(func() {
 		currentHeadRoot, currentHeadSlot, err := s.forkchoiceStore.GetHead(nil)
-		if err != nil || currentHeadRoot != headRoot || currentHeadSlot != headSlot {
+		currentPayloadStatus := beaconevents.PayloadStatusName(s.forkchoiceStore.GetHeadPayloadStatus())
+		currentOptimistic := s.forkchoiceStore.IsRootOptimistic(currentHeadRoot)
+		if err != nil || currentHeadRoot != headRoot || currentHeadSlot != headSlot ||
+			currentPayloadStatus != headEvent.Data.PayloadStatus || currentOptimistic != headEvent.Data.ExecutionOptimistic {
 			return
 		}
 		s.emitters.State().SendHeadV2(headEvent)
