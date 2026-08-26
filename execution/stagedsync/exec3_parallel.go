@@ -1804,6 +1804,15 @@ func (s supersededWrites) release() {
 	}
 }
 
+// takeSuperseded hands the collected sets to a block result. It clears the
+// executor's own reference: the apply loop pools these, so a set left reachable
+// from be could be released twice or read after pooling.
+func (be *blockExecutor) takeSuperseded() supersededWrites {
+	s := be.superseded
+	be.superseded = nil
+	return s
+}
+
 type txResult struct {
 	blockNum              uint64
 	blockHash             common.Hash
@@ -2530,7 +2539,7 @@ func (be *blockExecutor) invalidBlockResult(err error) *blockResult {
 	return &blockResult{
 		Block:      be.block,
 		Err:        err,
-		superseded: be.superseded,
+		superseded: be.takeSuperseded(),
 	}
 }
 
@@ -3382,7 +3391,7 @@ func (be *blockExecutor) nextResult(ctx context.Context, pe *parallelExecutor, r
 			AllDeps:          allDeps,
 			Exhausted:        be.exhausted,
 			blockStateCache:  be.blockStateCache,
-			superseded:       be.superseded,
+			superseded:       be.takeSuperseded(),
 		}
 		return be.result, nil
 	}
