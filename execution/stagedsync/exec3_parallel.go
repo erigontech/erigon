@@ -387,6 +387,13 @@ func (pe *parallelExecutor) execImpl(ctx context.Context, execStage *StageState,
 				// FlashblockSkipPostValidation.
 				if pe.isForkValidation && dbg.FlashblockSkipPostValidation {
 					pe.logger.Debug("[flashblock] skip wrong-trie-root", "block", cr.blockNum, "computed", cr.rootHash)
+					// The frontier block WAS executed (only its root is deferred to the seal). Advance the
+					// Execution stage progress WITH it — the stage progress tracks the pre-exec frontier, split
+					// from canonicalisation. Skipping this (the early return below the Store) left progress pinned
+					// to the last committed block, so the next frontier block's pre-exec failed "progress N <
+					// expected N+1" and the frontier stalled a few blocks ahead of canonical.
+					pe.txExecutor.lastCommittedBlockNum.Store(cr.blockNum)
+					pe.txExecutor.lastCommittedTxNum.Store(cr.txNum)
 					return nil
 				}
 				pe.logger.Error(fmt.Sprintf("[%s] Wrong trie root of block %d: %x (%v)",

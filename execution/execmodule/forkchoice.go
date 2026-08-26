@@ -269,7 +269,6 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 	if fcuHeader == nil {
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, fmt.Errorf("forkchoice: block %x not found or was marked invalid", blockHash), false)
 	}
-
 	e.hook.LastNewBlockSeen(fcuHeader.Number.Uint64()) // used by eth_syncing
 
 	finishProgressBefore, err := stages.GetStageProgress(tx, stages.Finish)
@@ -380,13 +379,20 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			return err
 		}
+		// MERGE POINT: the walk-back looks for where the FCU target's chain rejoins what we already have. In the
+		// run-ahead flashblock flow the ancestors are PRE-EXECUTED frontier blocks whose canonical entries still
+		// point at the deferred root-0 placeholder (canonicalisation is FCU's job, at seal), so isCanonicalHash
+		// misses them and the walk would backtrack to genesis and re-execute (GetDiffset failures). Treat a LIVE
+		// pre-executed gen as a valid merge point too — its state is already in memory, so there is nothing to
+		// unwind/re-execute below it; FCU adopts the target from the gen (PromoteBlock), no re-execution.
+		mergePoint := isCanonicalHash || e.forkValidator.HasLiveGen(currentParentHash, currentParentNumber)
 		// Find such point, and collect all hashes
 		newCanonicals := make([]*canonicalEntry, 0, 64)
 		newCanonicals = append(newCanonicals, &canonicalEntry{
 			hash:   fcuHeader.Hash(),
 			number: fcuHeader.Number.Uint64(),
 		})
-		for !isCanonicalHash {
+		for !mergePoint {
 			newCanonicals = append(newCanonicals, &canonicalEntry{
 				hash:   currentParentHash,
 				number: currentParentNumber,
@@ -410,6 +416,7 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 			}
+			mergePoint = isCanonicalHash || e.forkValidator.HasLiveGen(currentParentHash, currentParentNumber)
 		}
 
 		unwindTarget := currentParentNumber
