@@ -17,9 +17,12 @@
 package gossip
 
 import (
+	"errors"
 	"fmt"
 	"strings"
 )
+
+var ErrNotPublished = errors.New("gossip message was not published")
 
 const (
 	TopicNameBeaconBlock                       = "beacon_block"

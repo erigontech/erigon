@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"runtime"
 
 	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
@@ -20,6 +21,8 @@ type PendingPayloadStore interface {
 	Delete(context.Context, pendingPayloadKey) error
 	Load(context.Context) ([]storedPendingPayload, error)
 }
+
+var ErrPendingPayloadMayExist = errors.New("pending payload durability is uncertain")
 
 type storedPendingPayload struct {
 	Slot               uint64
@@ -41,6 +44,7 @@ type storedPendingPayload struct {
 type filePendingPayloadStore struct {
 	dir       string
 	beaconCfg *clparams.BeaconChainConfig
+	syncDir   func(string) error
 }
 
 const (
@@ -53,7 +57,7 @@ func NewFilePendingPayloadStore(dir string, beaconCfg *clparams.BeaconChainConfi
 }
 
 func newFilePendingPayloadStore(dir string, beaconCfg *clparams.BeaconChainConfig) *filePendingPayloadStore {
-	return &filePendingPayloadStore{dir: dir, beaconCfg: beaconCfg}
+	return &filePendingPayloadStore{dir: dir, beaconCfg: beaconCfg, syncDir: syncPendingDirectory}
 }
 
 func (s *filePendingPayloadStore) Save(ctx context.Context, key pendingPayloadKey, pending *pendingPayload, pubkey common.Bytes48) error {
@@ -85,7 +89,13 @@ func (s *filePendingPayloadStore) Save(ctx context.Context, key pendingPayloadKe
 	if err := tmp.Close(); err != nil {
 		return err
 	}
-	return os.Rename(tmpName, s.path(key))
+	if err := os.Rename(tmpName, s.path(key)); err != nil {
+		return err
+	}
+	if err := s.syncDir(s.dir); err != nil {
+		return fmt.Errorf("%w: sync pending payload directory: %w", ErrPendingPayloadMayExist, err)
+	}
+	return nil
 }
 
 func (s *filePendingPayloadStore) Delete(ctx context.Context, key pendingPayloadKey) error {
@@ -96,7 +106,25 @@ func (s *filePendingPayloadStore) Delete(ctx context.Context, key pendingPayload
 	if errors.Is(err, os.ErrNotExist) {
 		return nil
 	}
-	return err
+	if err != nil {
+		return err
+	}
+	if err := s.syncDir(s.dir); err != nil {
+		return fmt.Errorf("%w: sync pending payload deletion: %w", ErrPendingPayloadMayExist, err)
+	}
+	return nil
+}
+
+func syncPendingDirectory(path string) error {
+	if runtime.GOOS == "windows" {
+		return nil
+	}
+	directory, err := os.Open(path)
+	if err != nil {
+		return err
+	}
+	defer directory.Close()
+	return directory.Sync()
 }
 
 func (s *filePendingPayloadStore) Load(ctx context.Context) ([]storedPendingPayload, error) {

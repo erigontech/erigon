@@ -3,6 +3,8 @@ package epbs
 import (
 	"context"
 	"errors"
+	"math/big"
+	"sync"
 	"testing"
 	"time"
 
@@ -25,9 +27,17 @@ type testImportedBlockReader struct {
 }
 
 type slotContextForkChoiceStub struct {
-	state         *state.CachingBeaconState
-	requestedRoot common.Hash
-	dependentRoot common.Hash
+	state          *state.CachingBeaconState
+	requestedRoot  common.Hash
+	dependentRoot  common.Hash
+	parentGasLimit uint64
+}
+
+func (s *slotContextForkChoiceStub) GetExecutionPayloadGasLimit(common.Hash) (uint64, bool) {
+	if s.parentGasLimit == 0 {
+		return 30_000_000, true
+	}
+	return s.parentGasLimit, true
 }
 
 func (s *slotContextForkChoiceStub) GetStateAtBlockRoot(root common.Hash, alwaysCopy bool) (*state.CachingBeaconState, error) {
@@ -134,6 +144,46 @@ func (r testImportedBlockReader) GetBlock(common.Hash) (*cltypes.SignedBeaconBlo
 	return r.block, r.block != nil
 }
 
+type importedBlockWatcherReaderStub struct {
+	mu      sync.RWMutex
+	head    common.Hash
+	headers map[common.Hash]*cltypes.BeaconBlockHeader
+	blocks  map[common.Hash]*cltypes.SignedBeaconBlock
+	lookups chan struct{}
+}
+
+func (r *importedBlockWatcherReaderStub) GetHeadNode() (forkchoice.ForkChoiceNode, error) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	return forkchoice.ForkChoiceNode{Root: r.head}, nil
+}
+
+func (r *importedBlockWatcherReaderStub) GetHeader(root common.Hash) (*cltypes.BeaconBlockHeader, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	header, ok := r.headers[root]
+	return header, ok
+}
+
+func (r *importedBlockWatcherReaderStub) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
+	r.mu.RLock()
+	defer r.mu.RUnlock()
+	if r.lookups != nil {
+		select {
+		case r.lookups <- struct{}{}:
+		default:
+		}
+	}
+	block, ok := r.blocks[root]
+	return block, ok
+}
+
+func (r *importedBlockWatcherReaderStub) setBlock(root common.Hash, block *cltypes.SignedBeaconBlock) {
+	r.mu.Lock()
+	r.blocks[root] = block
+	r.mu.Unlock()
+}
+
 func TestInitBuilderService_Disabled(t *testing.T) {
 	cfg := epbscfg.Config{Enabled: false}
 	svc, err := InitBuilderService(cfg, BuilderDeps{})
@@ -226,6 +276,112 @@ func TestHandleImportedBlock_RevealsExactWinningBid(t *testing.T) {
 	})
 	require.NoError(t, err)
 	require.True(t, called)
+}
+
+func TestImportedBlockWatcherRevealsAlreadyImportedRootOnHeadChange(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	require.Len(t, submitter.submittedBids, 1)
+
+	rootA := common.HexToHash("0xa1")
+	rootB := common.HexToHash("0xb2")
+	makeBlock := func() *cltypes.SignedBeaconBlock {
+		block := cltypes.NewSignedBeaconBlock(loop.beaconCfg, clparams.GloasVersion)
+		block.Block.Slot = sc.Slot
+		block.Block.Body.SignedExecutionPayloadBid = submitter.submittedBids[0]
+		return block
+	}
+	reader := &importedBlockWatcherReaderStub{
+		head: rootA,
+		headers: map[common.Hash]*cltypes.BeaconBlockHeader{
+			rootA: {Slot: sc.Slot}, rootB: {Slot: sc.Slot},
+		},
+		blocks: map[common.Hash]*cltypes.SignedBeaconBlock{rootA: makeBlock(), rootB: makeBlock()},
+	}
+	emitters := beaconevents.NewEventEmitter()
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-sc.Slot*loop.beaconCfg.SecondsPerSlot, common.Hash{}, loop.beaconCfg)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		runImportedBlockWatcher(ctx, emitters, reader, clock, loop.beaconCfg, loop)
+		close(done)
+	}()
+	require.Eventually(t, func() bool {
+		submitter.mu.Lock()
+		defer submitter.mu.Unlock()
+		return len(submitter.broadcasts) == 1
+	}, time.Second, time.Millisecond)
+	emitters.State().SendHead(&beaconevents.HeadData{Slot: sc.Slot, Block: rootB})
+	require.Eventually(t, func() bool {
+		submitter.mu.Lock()
+		defer submitter.mu.Unlock()
+		return len(submitter.broadcasts) == 2
+	}, time.Second, time.Millisecond)
+	cancel()
+	<-done
+}
+
+func TestRevealQueueAdmissionFailureRemainsRetryable(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	root := common.HexToHash("0xcafe")
+	block := cltypes.NewSignedBeaconBlock(loop.beaconCfg, clparams.GloasVersion)
+	block.Block.Slot = sc.Slot
+	block.Block.Body.SignedExecutionPayloadBid = submitter.submittedBids[0]
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-sc.Slot*loop.beaconCfg.SecondsPerSlot, common.Hash{}, loop.beaconCfg)
+	scheduler := newRevealScheduler(t.Context(), 1, 0)
+	err := scheduleImportedBlockReveal(&beaconevents.BlockData{Slot: sc.Slot, Block: root}, testImportedBlockReader{block: block}, clock, loop.beaconCfg, loop, scheduler)
+	require.ErrorContains(t, err, "queue full")
+	_, queued := loop.queuePendingBidReveal(sc.Slot, 42, sc.Parent.ExecutionHash, sc.Parent.BlockRoot, common.HexToHash("0xb10c"), root)
+	require.True(t, queued)
+}
+
+func TestImportedBlockWatcherRetriesCurrentHeadReconciliation(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	root := common.HexToHash("0xa1")
+	block := cltypes.NewSignedBeaconBlock(loop.beaconCfg, clparams.GloasVersion)
+	block.Block.Slot = sc.Slot
+	block.Block.Body.SignedExecutionPayloadBid = submitter.submittedBids[0]
+	reader := &importedBlockWatcherReaderStub{
+		head: root, headers: map[common.Hash]*cltypes.BeaconBlockHeader{root: {Slot: sc.Slot}},
+		blocks: make(map[common.Hash]*cltypes.SignedBeaconBlock), lookups: make(chan struct{}, 1),
+	}
+	emitters := beaconevents.NewEventEmitter()
+	clock := eth_clock.NewEthereumClock(uint64(time.Now().Unix())-sc.Slot*loop.beaconCfg.SecondsPerSlot, common.Hash{}, loop.beaconCfg)
+	ctx, cancel := context.WithCancel(t.Context())
+	done := make(chan struct{})
+	go func() {
+		runImportedBlockWatcher(ctx, emitters, reader, clock, loop.beaconCfg, loop)
+		close(done)
+	}()
+	<-reader.lookups
+	reader.setBlock(root, block)
+	require.Eventually(t, func() bool {
+		submitter.mu.Lock()
+		defer submitter.mu.Unlock()
+		return len(submitter.broadcasts) == 1
+	}, time.Second, time.Millisecond)
+	cancel()
+	<-done
 }
 
 func TestRevealWinningBidUntilRecoveryOrDeadline(t *testing.T) {

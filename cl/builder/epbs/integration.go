@@ -132,10 +132,10 @@ func InitBuilderService(cfg epbscfg.Config, deps BuilderDeps) (*BuilderService, 
 
 	loop := NewBuilderLoop(manager, strategy, deps.Exec, prefsWatch, submitter, deps.BeaconCfg)
 	loop.pendingStore = deps.Pending
-	if err := loop.restorePendingPayloads(deps.Ctx); err != nil {
+	currentSlot := deps.EthClock.GetCurrentSlot()
+	if err := loop.restorePendingPayloads(deps.Ctx, currentSlot); err != nil {
 		return nil, fmt.Errorf("epbs/integration: restore pending payloads: %w", err)
 	}
-	currentSlot := deps.EthClock.GetCurrentSlot()
 	loop.pruneBeforeSlot(currentSlot)
 	if !time.Now().Before(payloadRevealDeadline(deps.EthClock, deps.BeaconCfg, currentSlot)) {
 		loop.pruneBeforeSlot(currentSlot + 1)
@@ -370,6 +370,10 @@ func buildSlotContext(
 	if dependentRoot == (common.Hash{}) {
 		return SlotContext{}, fmt.Errorf("proposer dependent root unavailable for parent %s", parent.BlockRoot)
 	}
+	parentGasLimit, ok := fc.GetExecutionPayloadGasLimit(parent.ExecutionHash)
+	if !ok {
+		return SlotContext{}, fmt.Errorf("parent execution gas limit unavailable for %s", parent.ExecutionHash)
+	}
 	withdrawals, err := resolveWithdrawalsForParent(parentState, fc, beaconCfg, slot, parent)
 	if err != nil {
 		return SlotContext{}, err
@@ -385,6 +389,7 @@ func buildSlotContext(
 			Slot:          parent.Slot,
 			BlockRoot:     parent.BlockRoot,
 			ExecutionHash: parent.ExecutionHash,
+			GasLimit:      parentGasLimit,
 			ShouldExtend:  parent.ShouldExtend,
 		},
 		DependentRoot: dependentRoot,
@@ -430,6 +435,7 @@ type slotContextForkChoice interface {
 	GetStateAtBlockRoot(common.Hash, bool) (*state.CachingBeaconState, error)
 	Ancestor(common.Hash, uint64) forkchoice.ForkChoiceNode
 	ReadEnvelopeFromDisk(common.Hash) (*cltypes.SignedExecutionPayloadEnvelope, error)
+	GetExecutionPayloadGasLimit(common.Hash) (uint64, bool)
 }
 
 func resolveWithdrawalsForParent(
@@ -517,36 +523,49 @@ type importedBlockReader interface {
 	GetBlock(common.Hash) (*cltypes.SignedBeaconBlock, bool)
 }
 
+type importedBlockWatcherReader interface {
+	importedBlockReader
+	GetHeadNode() (forkchoice.ForkChoiceNode, error)
+	GetHeader(common.Hash) (*cltypes.BeaconBlockHeader, bool)
+}
+
 type revealWinningBidFunc func(context.Context, uint64, uint64, common.Hash, common.Hash, common.Hash, common.Hash) error
 
-func runImportedBlockWatcher(ctx context.Context, emitters *beaconevents.EventEmitter, reader *forkchoice.ForkChoiceStore, ethClock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, loop *BuilderLoop) {
+func runImportedBlockWatcher(ctx context.Context, emitters *beaconevents.EventEmitter, reader importedBlockWatcherReader, ethClock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, loop *BuilderLoop) {
 	ch := make(chan *beaconevents.EventStream, 16)
 	sub := emitters.State().Subscribe(ch)
 	defer sub.Unsubscribe()
 	workerCtx, cancel := context.WithCancel(ctx)
 	scheduler := newRevealScheduler(workerCtx, 4, 128)
+	reconcileTicker := time.NewTicker(revealRetryDelay)
+	defer reconcileTicker.Stop()
 	defer func() {
 		cancel()
 		scheduler.Wait()
 	}()
-	if head, err := reader.GetHeadNode(); err == nil {
-		if header, ok := reader.GetHeader(head.Root); ok && header != nil {
-			_ = scheduleImportedBlockReveal(&beaconevents.BlockData{Slot: header.Slot, Block: head.Root}, reader, ethClock, beaconCfg, loop, scheduler)
-		}
-	}
+	_ = reconcileCurrentHeadReveal(reader, ethClock, beaconCfg, loop, scheduler)
 	for {
 		select {
 		case <-ctx.Done():
 			return
+		case <-reconcileTicker.C:
+			if loop.hasPendingPayloads() {
+				_ = reconcileCurrentHeadReveal(reader, ethClock, beaconCfg, loop, scheduler)
+			}
 		case event, ok := <-ch:
 			if !ok {
 				return
 			}
-			if event.Event != beaconevents.StateBlock {
-				continue
+			var data *beaconevents.BlockData
+			switch event.Event {
+			case beaconevents.StateBlock:
+				data, _ = event.Data.(*beaconevents.BlockData)
+			case beaconevents.StateHead:
+				if head, ok := event.Data.(*beaconevents.HeadData); ok && head != nil {
+					data = &beaconevents.BlockData{Slot: head.Slot, Block: head.Block}
+				}
 			}
-			data, ok := event.Data.(*beaconevents.BlockData)
-			if !ok {
+			if data == nil {
 				continue
 			}
 			if err := scheduleImportedBlockReveal(data, reader, ethClock, beaconCfg, loop, scheduler); err != nil {
@@ -559,6 +578,18 @@ func runImportedBlockWatcher(ctx context.Context, emitters *beaconevents.EventEm
 			return
 		}
 	}
+}
+
+func reconcileCurrentHeadReveal(reader importedBlockWatcherReader, ethClock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, loop *BuilderLoop, scheduler *revealScheduler) error {
+	head, err := reader.GetHeadNode()
+	if err != nil {
+		return err
+	}
+	header, ok := reader.GetHeader(head.Root)
+	if !ok || header == nil {
+		return fmt.Errorf("head %s unavailable", head.Root)
+	}
+	return scheduleImportedBlockReveal(&beaconevents.BlockData{Slot: header.Slot, Block: head.Root}, reader, ethClock, beaconCfg, loop, scheduler)
 }
 
 func scheduleImportedBlockReveal(data *beaconevents.BlockData, reader importedBlockReader, ethClock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, loop *BuilderLoop, scheduler *revealScheduler) error {
@@ -582,7 +613,7 @@ func scheduleImportedBlockReveal(data *beaconevents.BlockData, reader importedBl
 			log.Warn("ePBS builder: winning bid reveal failed", "slot", bid.Slot, "err", err)
 		},
 	}) {
-		loop.abandonPendingBidReveal(key, beaconRoot)
+		loop.unqueuePendingBidReveal(key, beaconRoot)
 		return fmt.Errorf("reveal queue full for beacon root %s", beaconRoot)
 	}
 	return nil
@@ -636,7 +667,10 @@ func (s *BuilderService) Shutdown() {
 		discarded := make([]uint64, 0, len(s.Loop.speculativePayloads))
 		for k, pending := range s.Loop.pendingPayloads {
 			delete(s.Loop.pendingPayloads, k)
-			released = append(released, pending.bidValue)
+			if !pending.reservationReleased {
+				pending.reservationReleased = true
+				released = append(released, pending.bidValue)
+			}
 		}
 		for k, payloadID := range s.Loop.speculativePayloads {
 			delete(s.Loop.speculativePayloads, k)

@@ -8,15 +8,19 @@ import (
 	"sync"
 	"time"
 
+	goethkzg "github.com/crate-crypto/go-eth-kzg"
+
 	"github.com/erigontech/erigon/cl/builder/epbs/eladapter"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	peerdasutils "github.com/erigontech/erigon/cl/das/utils"
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/crypto/kzg"
 	"github.com/erigontech/erigon/common/hexutil"
 	log "github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 )
@@ -28,14 +32,15 @@ const (
 
 // pendingPayload is a completed build result waiting for a bid-won reveal.
 type pendingPayload struct {
-	slot         uint64
-	builderIndex uint64
-	payloadId    uint64
-	assembled    *eladapter.AssembledPayload
-	execReqs     *cltypes.ExecutionRequests
-	parent       ParentInfo
-	reveals      map[common.Hash]revealState
-	bidValue     uint64
+	slot                uint64
+	builderIndex        uint64
+	payloadId           uint64
+	assembled           *eladapter.AssembledPayload
+	execReqs            *cltypes.ExecutionRequests
+	parent              ParentInfo
+	reveals             map[common.Hash]revealState
+	bidValue            uint64
+	reservationReleased bool
 }
 
 type revealState uint8
@@ -65,13 +70,14 @@ type SlotContext struct {
 type BuilderLoop struct {
 	mu sync.Mutex
 
-	manager      *BuilderManager
-	strategy     BidStrategy
-	specBuild    *SpeculativeBuild
-	prefsWatch   *PreferencesWatcher
-	submitter    BidSubmitter
-	beaconCfg    *clparams.BeaconChainConfig
-	pendingStore PendingPayloadStore
+	manager                  *BuilderManager
+	strategy                 BidStrategy
+	specBuild                *SpeculativeBuild
+	prefsWatch               *PreferencesWatcher
+	submitter                BidSubmitter
+	beaconCfg                *clparams.BeaconChainConfig
+	pendingStore             PendingPayloadStore
+	reservationReleaseBefore uint64
 
 	// pendingPayloads stores completed builds keyed by (slot, parentBlockHash)
 	// for later reveal when the bid wins.
@@ -128,6 +134,7 @@ func NewBuilderLoop(
 // OnNewHead starts a speculative EL build for the given parent.
 // Called when the builder observes a new head via fork choice.
 func (l *BuilderLoop) OnNewHead(ctx context.Context, sc SlotContext) error {
+	l.releaseReservationsBeforeSlot(sc.Slot)
 	if sc.Slot > 1 {
 		l.pruneBeforeSlot(sc.Slot - 1)
 	}
@@ -156,6 +163,7 @@ func (l *BuilderLoop) OnNewHead(ctx context.Context, sc SlotContext) error {
 // OnSlot is called at the start of each slot. It waits for proposer preferences,
 // determines whether the speculative build matches, and submits a bid.
 func (l *BuilderLoop) OnSlot(ctx context.Context, sc SlotContext) error {
+	l.releaseReservationsBeforeSlot(sc.Slot)
 	if sc.Slot > 1 {
 		l.pruneBeforeSlot(sc.Slot - 1)
 	}
@@ -170,14 +178,16 @@ func (l *BuilderLoop) OnSlot(ctx context.Context, sc SlotContext) error {
 
 func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
 	var discarded []uint64
-	var released []uint64
-	var removed []pendingPayloadKey
+	type removedPending struct {
+		key     pendingPayloadKey
+		pending *pendingPayload
+	}
+	var removed []removedPending
 	l.mu.Lock()
 	for key, pending := range l.pendingPayloads {
 		if key.slot < slot && !revealInFlight(pending) {
 			delete(l.pendingPayloads, key)
-			released = append(released, pending.bidValue)
-			removed = append(removed, key)
+			removed = append(removed, removedPending{key: key, pending: pending})
 		}
 	}
 	for key, payloadID := range l.speculativePayloads {
@@ -190,15 +200,44 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
 	for _, payloadID := range discarded {
 		l.specBuild.Discard(payloadID)
 	}
-	for _, bidValue := range released {
-		l.manager.ReleaseBid(bidValue)
-	}
-	if l.pendingStore != nil {
-		for _, key := range removed {
-			if err := l.pendingStore.Delete(context.Background(), key); err != nil {
-				log.Warn("ePBS builder: delete persisted pending payload failed", "slot", key.slot, "err", err)
+	for _, removed := range removed {
+		if l.pendingStore != nil {
+			if err := l.pendingStore.Delete(context.Background(), removed.key); err != nil {
+				l.mu.Lock()
+				restored := false
+				if l.pendingPayloads[removed.key] == nil {
+					l.pendingPayloads[removed.key] = removed.pending
+					restored = true
+				}
+				l.mu.Unlock()
+				log.Warn("ePBS builder: delete persisted pending payload failed", "slot", removed.key.slot, "err", err)
+				if restored {
+					continue
+				}
 			}
 		}
+		if !removed.pending.reservationReleased {
+			removed.pending.reservationReleased = true
+			l.manager.ReleaseBid(removed.pending.bidValue)
+		}
+	}
+}
+
+func (l *BuilderLoop) releaseReservationsBeforeSlot(slot uint64) {
+	var released []uint64
+	l.mu.Lock()
+	if slot > l.reservationReleaseBefore {
+		l.reservationReleaseBefore = slot
+	}
+	for key, pending := range l.pendingPayloads {
+		if key.slot < slot && !pending.reservationReleased {
+			pending.reservationReleased = true
+			released = append(released, pending.bidValue)
+		}
+	}
+	l.mu.Unlock()
+	for _, bidValue := range released {
+		l.manager.ReleaseBid(bidValue)
 	}
 }
 
@@ -236,7 +275,7 @@ func (l *BuilderLoop) buildAndBid(ctx context.Context, sc SlotContext, prefs *cl
 			hasSpec = false
 		} else if err := validatePayloadForSlot(result, sc); err != nil {
 			return fmt.Errorf("epbs/loop: invalid speculative payload: %w", err)
-		} else if !speculativeMatchesPrefs(result, prefs) {
+		} else if !speculativeMatchesPrefs(result, prefs, sc.Parent.GasLimit) {
 			// Speculative build was started before preferences arrived (OnNewHead
 			// uses FeeRecipient=0x0 and default GasLimit). If the proposer wants
 			// different values, the speculative payload is invalid — fall through
@@ -303,7 +342,7 @@ buildDone:
 	if assembled.Eth1Block.FeeRecipient != prefs.Message.FeeRecipient {
 		return fmt.Errorf("epbs/loop: payload fee recipient does not match proposer preferences")
 	}
-	if assembled.Eth1Block.GasLimit != prefs.Message.TargetGasLimit {
+	if !payloadGasLimitMatchesTarget(assembled.Eth1Block.GasLimit, sc.Parent.GasLimit, prefs.Message.TargetGasLimit) {
 		return fmt.Errorf("epbs/loop: payload gas limit does not match proposer preferences")
 	}
 
@@ -395,11 +434,19 @@ buildDone:
 		bidValue:     bidValue,
 	}
 	l.mu.Lock()
+	if slot < l.reservationReleaseBefore {
+		l.mu.Unlock()
+		return fmt.Errorf("epbs/loop: slot %d collateral window has closed", slot)
+	}
 	previous := l.pendingPayloads[key]
 	l.pendingPayloads[key] = pending
 	l.mu.Unlock()
 	if l.pendingStore != nil {
 		if err := l.pendingStore.Save(ctx, key, pending, l.manager.Pubkey()); err != nil {
+			if errors.Is(err, ErrPendingPayloadMayExist) {
+				reserved = false
+				return fmt.Errorf("epbs/loop: persist pending payload: %w", err)
+			}
 			l.restorePreviousPending(key, pending, previous)
 			return fmt.Errorf("epbs/loop: persist pending payload: %w", err)
 		}
@@ -408,14 +455,18 @@ buildDone:
 
 	if err := l.submitter.SubmitBid(ctx, signedBid); err != nil {
 		if errors.Is(err, ErrBidNotPublished) {
-			l.restorePreviousPending(key, pending, previous)
+			var rollbackErr error
 			if l.pendingStore != nil {
 				if previous == nil {
-					_ = l.pendingStore.Delete(context.Background(), key)
+					rollbackErr = l.pendingStore.Delete(context.Background(), key)
 				} else {
-					_ = l.pendingStore.Save(context.Background(), key, previous, l.manager.Pubkey())
+					rollbackErr = l.pendingStore.Save(context.Background(), key, previous, l.manager.Pubkey())
 				}
 			}
+			if rollbackErr != nil {
+				return errors.Join(fmt.Errorf("epbs/loop: submit bid: %w", err), fmt.Errorf("rollback durable pending payload: %w", rollbackErr))
+			}
+			l.restorePreviousPending(key, pending, previous)
 			l.manager.ReleaseBid(bidValue)
 			return fmt.Errorf("epbs/loop: submit bid: %w", err)
 		}
@@ -451,11 +502,12 @@ func (l *BuilderLoop) restorePreviousPending(key pendingPayloadKey, current, pre
 	l.mu.Unlock()
 }
 
-func (l *BuilderLoop) restorePendingPayloads(ctx context.Context) error {
+func (l *BuilderLoop) restorePendingPayloads(ctx context.Context, currentSlot uint64) error {
 	records, err := l.pendingStore.Load(ctx)
 	if err != nil {
 		return err
 	}
+	l.reservationReleaseBefore = currentSlot
 	for i := range records {
 		record := &records[i]
 		if record.BuilderPubkey != l.manager.Pubkey() {
@@ -465,9 +517,16 @@ func (l *BuilderLoop) restorePendingPayloads(ctx context.Context) error {
 		if err != nil {
 			return err
 		}
+		if l.pendingPayloads[key] != nil {
+			return fmt.Errorf("duplicate stored pending payload for slot %d", key.slot)
+		}
 		l.pendingPayloads[key] = pending
-		if err := l.manager.RestoreBidReservation(pending.bidValue); err != nil {
-			return err
+		if key.slot < currentSlot {
+			pending.reservationReleased = true
+		} else {
+			if err := l.manager.RestoreBidReservation(pending.bidValue); err != nil {
+				return err
+			}
 		}
 	}
 	return nil
@@ -585,6 +644,20 @@ func (l *BuilderLoop) queuePendingBidReveal(slot, builderIndex uint64, parentHas
 	return key, !exists
 }
 
+func (l *BuilderLoop) unqueuePendingBidReveal(key pendingPayloadKey, beaconRoot common.Hash) {
+	l.mu.Lock()
+	if pending := l.pendingPayloads[key]; pending != nil && pending.reveals[beaconRoot] == revealQueued {
+		delete(pending.reveals, beaconRoot)
+	}
+	l.mu.Unlock()
+}
+
+func (l *BuilderLoop) hasPendingPayloads() bool {
+	l.mu.Lock()
+	defer l.mu.Unlock()
+	return len(l.pendingPayloads) > 0
+}
+
 func (l *BuilderLoop) abandonPendingBidReveal(key pendingPayloadKey, beaconRoot common.Hash) {
 	l.mu.Lock()
 	if pending := l.pendingPayloads[key]; pending != nil {
@@ -616,6 +689,23 @@ func validateBlobsBundle(bundle *eladapter.BlobsBundle, maxBlobs uint64) error {
 		}
 		if len(bundle.Blobs[i]) != cltypes.BytesPerBlob {
 			return fmt.Errorf("blob %d has length %d", i, len(bundle.Blobs[i]))
+		}
+	}
+	if len(bundle.Proofs) != len(bundle.Blobs) {
+		return fmt.Errorf("%d proofs for %d blobs", len(bundle.Proofs), len(bundle.Blobs))
+	}
+	for i := range bundle.Blobs {
+		if len(bundle.Proofs[i]) != len(goethkzg.KZGProof{}) {
+			return fmt.Errorf("proof %d has length %d", i, len(bundle.Proofs[i]))
+		}
+		var blob goethkzg.Blob
+		var commitment goethkzg.KZGCommitment
+		var proof goethkzg.KZGProof
+		copy(blob[:], bundle.Blobs[i])
+		copy(commitment[:], bundle.Commitments[i])
+		copy(proof[:], bundle.Proofs[i])
+		if err := kzg.Ctx().VerifyBlobKZGProof(&blob, commitment, proof); err != nil {
+			return fmt.Errorf("blob %d KZG verification failed: %w", i, err)
 		}
 	}
 	return nil
@@ -722,7 +812,7 @@ func (l *BuilderLoop) buildParamsFromPrefs(sc SlotContext, prefs *cltypes.Signed
 // with the proposer preferences. The speculative build was started before prefs
 // arrived (OnNewHead uses FeeRecipient=0x0), so if the proposer requires a
 // specific fee recipient, the speculative payload's coinbase must match.
-func speculativeMatchesPrefs(result *eladapter.AssembledPayload, prefs *cltypes.SignedProposerPreferences) bool {
+func speculativeMatchesPrefs(result *eladapter.AssembledPayload, prefs *cltypes.SignedProposerPreferences, parentGasLimit uint64) bool {
 	if prefs == nil || prefs.Message == nil {
 		return true // no constraints
 	}
@@ -733,14 +823,14 @@ func speculativeMatchesPrefs(result *eladapter.AssembledPayload, prefs *cltypes.
 	if result.Eth1Block.FeeRecipient != wantRecipient {
 		return false
 	}
-	// GasLimit: gossip validation requires bid.gas_limit == prefs.gas_limit
-	// (execution_payload_bid_service.go) and the state transition enforces the
-	// envelope payload's gas_limit matches (operations.go). If the speculative
-	// build used a different gas limit, the bid/reveal will be rejected.
-	if result.Eth1Block.GasLimit != prefs.Message.TargetGasLimit {
+	if !payloadGasLimitMatchesTarget(result.Eth1Block.GasLimit, parentGasLimit, prefs.Message.TargetGasLimit) {
 		return false
 	}
 	return true
+}
+
+func payloadGasLimitMatchesTarget(payloadGasLimit, parentGasLimit, targetGasLimit uint64) bool {
+	return payloadGasLimit == misc.CalcGasLimit(parentGasLimit, targetGasLimit)
 }
 
 // decodeAndHashRequests decodes a RequestsBundle into ExecutionRequests and computes

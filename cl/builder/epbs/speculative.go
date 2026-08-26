@@ -96,5 +96,6 @@ type ParentInfo struct {
 	Slot          uint64      // Slot of the parent beacon block
 	BlockRoot     common.Hash // Beacon block root of the parent
 	ExecutionHash common.Hash // EL parent hash to build on
-	ShouldExtend  bool        // FULL path (extend) vs EMPTY path (skip)
+	GasLimit      uint64
+	ShouldExtend  bool // FULL path (extend) vs EMPTY path (skip)
 }

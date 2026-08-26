@@ -15,6 +15,7 @@ import (
 	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/execution/builder"
+	"github.com/erigontech/erigon/execution/protocol/misc"
 	"github.com/erigontech/erigon/execution/types"
 	"github.com/erigontech/erigon/node/gointerfaces/typesproto"
 	"github.com/stretchr/testify/require"
@@ -156,6 +157,7 @@ func testParentInfo() ParentInfo {
 		Slot:          99,
 		BlockRoot:     common.HexToHash("0xbeef"),
 		ExecutionHash: common.HexToHash("0xdead"),
+		GasLimit:      30_000_000,
 		ShouldExtend:  true,
 	}
 }
@@ -260,6 +262,45 @@ func TestBuilderLoop_FastPath(t *testing.T) {
 	require.Equal(t, uint64(0), bid.Message.ExecutionPayment) // per spec
 	// Signature should be non-zero
 	require.NotEqual(t, common.Bytes96{}, bid.Signature)
+}
+
+func TestBuilderLoopAcceptsClampedProposerGasTarget(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	sc.Parent.GasLimit = 30_000_000
+	payload := makeTestPayload(t, big.NewInt(1_000_000_000_000))
+	payload.Eth1Block.GasLimit = misc.CalcGasLimit(sc.Parent.GasLimit, 0)
+	exec.ignoreTargetGasLimit = true
+	exec.setResultForNext(payload)
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 0,
+	}})
+
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	require.Len(t, submitter.submittedBids, 1)
+	require.Equal(t, payload.Eth1Block.GasLimit, submitter.submittedBids[0].Message.GasLimit)
+}
+
+func TestBuilderLoopReleasesPriorSlotCollateralBeforeNewBid(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	sc := testSlotContext()
+	const bidValue = uint64(850)
+	sc.BuilderStatus = BalanceStatus{Slot: sc.Slot, Active: true, Balance: bidValue}
+	require.True(t, loop.manager.ReserveBidWithStatus(BalanceStatus{Active: true, Balance: bidValue}, bidValue))
+	oldKey := pendingPayloadKey{slot: sc.Slot - 1, blockHash: common.HexToHash("0x9999")}
+	loop.pendingPayloads[oldKey] = &pendingPayload{slot: sc.Slot - 1, bidValue: bidValue}
+	payload := makeTestPayload(t, big.NewInt(1_000_000_000_000))
+	exec.setResultForNext(payload)
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}})
+
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	require.Len(t, submitter.submittedBids, 1)
+	require.Contains(t, loop.pendingPayloads, oldKey)
+	require.Equal(t, bidValue, loop.manager.reservedBidValue)
 }
 
 func TestBuilderLoop_RebuildPath(t *testing.T) {
@@ -968,12 +1009,12 @@ func TestValidatePayloadForSlotRejectsWithdrawalMismatch(t *testing.T) {
 	require.ErrorContains(t, validatePayloadForSlot(payload, sc), "withdrawals")
 }
 
-func TestSpeculativeMatchesZeroGasTargetExactly(t *testing.T) {
+func TestSpeculativeMatchesClampedZeroGasTarget(t *testing.T) {
 	payload := makeTestPayload(t, big.NewInt(1))
 	prefs := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{TargetGasLimit: 0}}
-	require.False(t, speculativeMatchesPrefs(payload, prefs))
-	payload.Eth1Block.GasLimit = 0
-	require.True(t, speculativeMatchesPrefs(payload, prefs))
+	require.False(t, speculativeMatchesPrefs(payload, prefs, 30_000_000))
+	payload.Eth1Block.GasLimit = misc.CalcGasLimit(30_000_000, 0)
+	require.True(t, speculativeMatchesPrefs(payload, prefs, 30_000_000))
 }
 
 func TestDomainBeaconBuilder_Used(t *testing.T) {
@@ -1131,10 +1172,6 @@ func TestBuilderLoop_FastPath_FeeRecipientMismatch(t *testing.T) {
 	submitter.mu.Unlock()
 }
 
-// TestBuilderLoop_FastPath_GasLimitMismatch verifies that when a speculative
-// build exists but the gas limit doesn't match proposer preferences, the builder
-// falls through to the rebuild path. Without this, gossip validation would reject
-// the bid (execution_payload_bid_service.go requires bid.gas_limit == prefs.gas_limit).
 func TestBuilderLoop_FastPath_GasLimitMismatch(t *testing.T) {
 	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
 	ctx := context.Background()
@@ -1143,6 +1180,7 @@ func TestBuilderLoop_FastPath_GasLimitMismatch(t *testing.T) {
 	// Pre-load result for speculative build — default gas limit from the EL
 	payload := makeTestPayload(t, big.NewInt(1_000_000_000_000))
 	payload.Eth1Block.GasLimit = 30_000_000 // speculative build used this
+	exec.ignoreTargetGasLimit = true
 	exec.setResultForNext(payload)
 
 	// Start speculative build via OnNewHead
@@ -1161,7 +1199,7 @@ func TestBuilderLoop_FastPath_GasLimitMismatch(t *testing.T) {
 
 	// Pre-load a second result for the REBUILD
 	rebuildPayload := makeTestPayload(t, big.NewInt(2_000_000_000_000))
-	rebuildPayload.Eth1Block.GasLimit = 50_000_000
+	rebuildPayload.Eth1Block.GasLimit = misc.CalcGasLimit(sc.Parent.GasLimit, 50_000_000)
 	exec.setResultForNext(rebuildPayload)
 
 	// Send preferences and trigger OnSlot
@@ -1179,9 +1217,8 @@ func TestBuilderLoop_FastPath_GasLimitMismatch(t *testing.T) {
 	bid := submitter.submittedBids[0]
 	submitter.mu.Unlock()
 
-	// The bid's gas limit should match the proposer's preference, not the speculative value.
-	require.Equal(t, uint64(50_000_000), bid.Message.GasLimit,
-		"bid gas_limit must match proposer preferences, not speculative build")
+	require.Equal(t, rebuildPayload.Eth1Block.GasLimit, bid.Message.GasLimit,
+		"bid gas_limit must follow the parent-relative proposer target")
 }
 
 // TestPreferencesWatcher_EarlyArrival verifies BUG 3 fix:

@@ -16,6 +16,8 @@ import (
 
 var ErrBidNotPublished = errors.New("bid was not published")
 
+const maxConcurrentColumnWrites = 4
+
 // GossipPublisher is the subset of the gossip manager needed by the submitter.
 type GossipPublisher interface {
 	Publish(ctx context.Context, name string, data []byte) error
@@ -43,6 +45,7 @@ type CaplinBidSubmitter struct {
 	columnStorage ColumnSidecarStorage
 	progressMu    sync.Mutex
 	progress      map[common.Hash]*payloadBroadcastProgress
+	columnWrites  chan struct{}
 }
 
 type payloadBroadcastProgress struct {
@@ -71,6 +74,7 @@ func NewCaplinBidSubmitter(
 		forkchoice:    fc,
 		columnStorage: columnStorage,
 		progress:      make(map[common.Hash]*payloadBroadcastProgress),
+		columnWrites:  make(chan struct{}, maxConcurrentColumnWrites),
 	}
 }
 
@@ -87,6 +91,9 @@ func (s *CaplinBidSubmitter) SubmitBid(ctx context.Context, bid *cltypes.SignedE
 	}
 
 	if err := s.gossipManager.Publish(ctx, gossip.TopicNameExecutionPayloadBid, encodedSSZ); err != nil {
+		if errors.Is(err, gossip.ErrNotPublished) {
+			return fmt.Errorf("%w: publish bid: %w", ErrBidNotPublished, err)
+		}
 		return fmt.Errorf("epbs/submitter: publish bid: %w", err)
 	}
 	key := pool.HighestBidKey{
@@ -124,6 +131,22 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 		return nil
 	}
 
+	for _, column := range columnSidecars {
+		if column == nil || progress.storedColumns[column.Index] {
+			continue
+		}
+		if s.columnStorage == nil {
+			return fmt.Errorf("epbs/submitter: data column storage unavailable")
+		}
+		if column.Index > math.MaxInt64 {
+			return fmt.Errorf("epbs/submitter: data column sidecar index %d exceeds storage range", column.Index)
+		}
+		if err := s.writeColumnSidecar(ctx, root, int64(column.Index), column); err != nil {
+			return fmt.Errorf("epbs/submitter: store data column sidecar %d: %w", column.Index, err)
+		}
+		progress.storedColumns[column.Index] = true
+	}
+
 	if !progress.processed {
 		if err := s.forkchoice.OnExecutionPayload(ctx, envelope, false, true); err != nil {
 			return fmt.Errorf("epbs/submitter: process payload: %w", err)
@@ -140,22 +163,6 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 			return fmt.Errorf("epbs/submitter: publish envelope: %w", err)
 		}
 		progress.envelope = true
-	}
-
-	for _, column := range columnSidecars {
-		if column == nil || progress.storedColumns[column.Index] {
-			continue
-		}
-		if s.columnStorage == nil {
-			return fmt.Errorf("epbs/submitter: data column storage unavailable")
-		}
-		if column.Index > math.MaxInt64 {
-			return fmt.Errorf("epbs/submitter: data column sidecar index %d exceeds storage range", column.Index)
-		}
-		if err := s.columnStorage.WriteColumnSidecars(ctx, root, int64(column.Index), column); err != nil {
-			return fmt.Errorf("epbs/submitter: store data column sidecar %d: %w", column.Index, err)
-		}
-		progress.storedColumns[column.Index] = true
 	}
 
 	for _, column := range columnSidecars {
@@ -180,6 +187,26 @@ func (s *CaplinBidSubmitter) BroadcastPayload(ctx context.Context, envelope *clt
 	s.progressMu.Unlock()
 
 	return nil
+}
+
+func (s *CaplinBidSubmitter) writeColumnSidecar(ctx context.Context, root common.Hash, index int64, column *cltypes.DataColumnSidecar) error {
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case s.columnWrites <- struct{}{}:
+	}
+	result := make(chan error, 1)
+	go func() {
+		err := s.columnStorage.WriteColumnSidecars(ctx, root, index, column)
+		<-s.columnWrites
+		result <- err
+	}()
+	select {
+	case <-ctx.Done():
+		return ctx.Err()
+	case err := <-result:
+		return err
+	}
 }
 
 func (s *CaplinBidSubmitter) discardPayloadBroadcast(root common.Hash) {

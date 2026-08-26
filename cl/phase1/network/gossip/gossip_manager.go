@@ -277,12 +277,12 @@ func (g *GossipManager) Publish(ctx context.Context, name string, data []byte) e
 	compressedData := utils.CompressSnappy(data)
 	forkDigest, err := g.ethClock.CurrentForkDigest()
 	if err != nil {
-		return err
+		return fmt.Errorf("%w: current fork digest: %w", gossip.ErrNotPublished, err)
 	}
 	topic := composeTopic(forkDigest, name)
 	topicHandle := g.subscriptions.Get(topic)
 	if topicHandle == nil {
-		return fmt.Errorf("topic not found: %s", topic)
+		return fmt.Errorf("%w: topic not found: %s", gossip.ErrNotPublished, topic)
 	}
 	// Log peer count for attestation topics to help diagnose propagation issues
 	if gossip.IsTopicBeaconAttestation(name) {
