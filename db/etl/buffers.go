@@ -304,21 +304,20 @@ func (b *sortableBuffer) syncCur() {
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
 	lk, lv := len(k), len(v)
-	if lk > maxKeyLen {
-		panicKeyTooLong(lk)
-	}
-	kLen, vLen := int32(lk)+1, int32(lv) //nolint:gosec
-	if k == nil {
-		kLen = 0
-	}
-	if v == nil {
-		vLen = -1
-	}
 	n := entryHeaderSize + lk + lv
 	off := int(b.curEnd)
-	if off+n+entryLocSize > int(b.curTop) {
-		b.nextChunk(int32(n)) //nolint:gosec
-		off = 0
+	// One test for both, so the fast path holds no call and Put keeps its
+	// arguments in registers.
+	if lk > maxKeyLen || off+n+entryLocSize > int(b.curTop) {
+		b.putOutOfLine(k, v)
+		return
+	}
+	kLen, vLen := int32(0), int32(-1)
+	if k != nil {
+		kLen = int32(lk) + 1 //nolint:gosec
+	}
+	if v != nil {
+		vLen = int32(lv) //nolint:gosec
 	}
 	// Sliced to exactly n, so the two copies below take the length from the
 	// destination and the compiler drops the min against the source.
@@ -333,9 +332,17 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	copy(data[entryHeaderSize+lk:], v)
 }
 
+// putOutOfLine handles what Put's single guard rejects: a key too long to index,
+// and an entry the chunk being filled has no room for. nextChunk always leaves
+// room, so the retry cannot come back here.
+//
 //go:noinline
-func panicKeyTooLong(n int) {
-	panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", n, maxKeyLen))
+func (b *sortableBuffer) putOutOfLine(k, v []byte) {
+	if len(k) > maxKeyLen {
+		panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", len(k), maxKeyLen))
+	}
+	b.nextChunk(int32(entryHeaderSize + len(k) + len(v))) //nolint:gosec
+	b.Put(k, v)
 }
 
 // Size counts the bytes of every chunk taken, minus what is still free in the
