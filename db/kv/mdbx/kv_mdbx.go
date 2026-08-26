@@ -95,14 +95,24 @@ const DefaultMapSize = 2 * datasize.TB
 const DefaultGrowthStep = 1 * datasize.GB
 
 func New(label kv.Label, log log.Logger) MdbxOpts {
+	// Dev override: a 2TB per-env virtual map reservation is pointless for tiny dev chains and, multiplied
+	// across every env (chaindata, caplin, txpool, …) and several parallel nodes, blows past the Windows
+	// virtual-memory commit ceiling ("mdbx_env_open: The paging file is too small"). MDBX_MAX_MAP_SIZE (e.g.
+	// 100MB) caps every env so many nodes coexist; unset ⇒ DefaultMapSize (prod unchanged). Shrink the 1GB
+	// growth step too when the cap is smaller than it, or SetGeometry gets a growth > map.
+	mapSize := dbg.EnvDataSize("MDBX_MAX_MAP_SIZE", DefaultMapSize)
+	growthStep := DefaultGrowthStep
+	if mapSize < growthStep {
+		growthStep = mapSize / 8
+	}
 	opts := MdbxOpts{
 		bucketsCfg: WithChaindataTables,
 		flags:      mdbx.NoReadahead | mdbx.Durable,
 		log:        log,
 		pageSize:   DefaultPageSize(),
 
-		mapSize:         DefaultMapSize,
-		growthStep:      DefaultGrowthStep,
+		mapSize:         mapSize,
+		growthStep:      growthStep,
 		mergeThreshold:  2 * 8192,
 		shrinkThreshold: -1, // default
 		label:           label,
@@ -245,6 +255,19 @@ func (opts MdbxOpts) Open(ctx context.Context) (_ kv.RwDB, err error) {
 	exists, err := dir.FileExist(filepath.Join(opts.path, "mdbx.dat"))
 	if err != nil {
 		return nil, err
+	}
+
+	// UNIVERSAL commit ceiling: clamp the FINAL map size to MDBX_MAX_MAP_SIZE regardless of how it was set.
+	// The New()/builder default already honours the env var, but explicit .MapSize() callers (e.g. the txpool
+	// env at assemble.go) bypass it and re-blow the Windows commit limit ("paging file is too small"). Clamp
+	// here so every env respects the ceiling. Unset ⇒ ceiling == DefaultMapSize (2TB) ⇒ no-op for prod; set to
+	// a small dev value (e.g. 100MB) ⇒ caps all envs so many chains/nodes coexist. Shrink the growth step too
+	// when it would exceed the clamped map (SetGeometry rejects growth > map).
+	if ceiling := dbg.EnvDataSize("MDBX_MAX_MAP_SIZE", DefaultMapSize); opts.mapSize > ceiling {
+		opts.mapSize = ceiling
+		if opts.growthStep > ceiling {
+			opts.growthStep = ceiling / 8
+		}
 	}
 
 	if !opts.HasFlag(mdbx.Accede) && !exists {

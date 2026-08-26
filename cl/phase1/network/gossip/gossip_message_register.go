@@ -2,6 +2,7 @@ package gossip
 
 import (
 	"context"
+	"errors"
 	"fmt"
 
 	"github.com/erigontech/erigon/cl/clparams"
@@ -19,6 +20,13 @@ func RegisterGossipService[T any](gm *GossipManager, service serviceintf.Service
 	gm.registeredServices = append(gm.registeredServices, gossipSrv)
 	subscribed, expired, err := gm.registerGossipService(wrappedService, conditions...)
 	if err != nil {
+		// A canceled context means the node is shutting down (e.g. the backend's ctx was cancelled mid-startup).
+		// RunCaplinService's caller already handles a context.Canceled return gracefully (backend.go), so exit
+		// quietly here rather than panicking — a panic in this goroutine would crash the WHOLE process (in a
+		// multi-chain node, every chain), turning one chain's shutdown into a total crash.
+		if errors.Is(err, context.Canceled) {
+			return
+		}
 		panic(err)
 	}
 	return
