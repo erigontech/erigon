@@ -80,15 +80,29 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold:
-// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
-// 17*(256Mb/8) = 512Mb for all collectors combined. Buffers pool their
-// chunks — see dataChunks below.
+// etlAvgEntryBytes is what one entry is expected to average in its chunk:
+// entryHeaderSize plus key and value. Size() charges entryLocSize per entry
+// against the same budget, so entriesIn counts both.
+//
+// Under-estimating is the safe direction: a buffer of bigger entries flushes
+// before it reaches the predicted count, while smaller ones run past it and
+// pay a re-grow. So this is the smallest average worth planning for, not the
+// average actually seen.
+var etlAvgEntryBytes = dbg.EnvInt("ETL_AVG_ENTRY_BYTES", 20)
+
+func entriesIn(bufBytes datasize.ByteSize) int {
+	return int(bufBytes) / (etlAvgEntryBytes + entryLocSize)
+}
+
 var (
+	// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold:
+	// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
+	// 17*(256Mb/8) = 512Mb for all collectors combined. Buffers pool their
+	// chunks — see dataChunks below.
 	etlSmallBufRAM       = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
-			return NewSortableBuffer(etlSmallBufRAM)
+			return NewSortableBuffer(etlSmallBufRAM).Prealloc(entriesIn(etlSmallBufRAM), int(etlSmallBufRAM))
 		},
 	})
 )
@@ -97,7 +111,7 @@ var (
 	etlLargeBufRAM       = BufferOptimalSize
 	LargeSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
-			return NewSortableBuffer(etlLargeBufRAM)
+			return NewSortableBuffer(etlLargeBufRAM).Prealloc(entriesIn(etlLargeBufRAM), int(etlLargeBufRAM))
 		},
 	})
 )
