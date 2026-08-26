@@ -621,3 +621,51 @@ func TestDumpStateToTSV_MinBalanceFilter(t *testing.T) {
 	require.NotContains(t, buf.String(), "0x0000000000000000000000000000000000000002")
 	require.NotContains(t, buf.String(), "0x0000000000000000000000000000000000000003")
 }
+
+func TestResolveExecTarget(t *testing.T) {
+	t.Parallel()
+
+	for _, tc := range []struct {
+		name                          string
+		block, limit                  uint64
+		execProgress, sendersProgress uint64
+		wantTarget                    uint64
+		wantWork                      bool
+	}{
+		{name: "no flags runs to senders", sendersProgress: 200, execProgress: 100, wantTarget: 200, wantWork: true},
+		{name: "limit below remaining caps the target", limit: 10, execProgress: 100, sendersProgress: 200, wantTarget: 110, wantWork: true},
+		{name: "limit above remaining stops at senders", limit: 500, execProgress: 100, sendersProgress: 200, wantTarget: 200, wantWork: true},
+		{name: "limit of one advances one block", limit: 1, execProgress: 100, sendersProgress: 200, wantTarget: 101, wantWork: true},
+		{name: "explicit block below the limit wins", block: 105, limit: 50, execProgress: 100, sendersProgress: 200, wantTarget: 105, wantWork: true},
+		{name: "limit below an explicit block wins", block: 190, limit: 5, execProgress: 100, sendersProgress: 200, wantTarget: 105, wantWork: true},
+		{name: "block past senders is clamped by limit", block: 900, limit: 5, execProgress: 100, sendersProgress: 200, wantTarget: 105, wantWork: true},
+		{name: "exec at senders leaves nothing to do", limit: 10, execProgress: 200, sendersProgress: 200, wantTarget: 200},
+		{name: "exec past senders leaves nothing to do", limit: 10, execProgress: 300, sendersProgress: 200, wantTarget: 200},
+		{name: "explicit block already reached", block: 50, execProgress: 100, sendersProgress: 200, wantTarget: 50},
+		{name: "nothing synced yet", wantTarget: 0, wantWork: true},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			t.Parallel()
+			target, hasWork := resolveExecTarget(tc.block, tc.limit, tc.execProgress, tc.sendersProgress)
+			require.Equal(t, tc.wantTarget, target)
+			require.Equal(t, tc.wantWork, hasWork)
+		})
+	}
+}
+
+// TestResolveExecTarget_ChainTipLoopReachesTarget pins the loop bound against the
+// resolved target: chain-tip mode steps one block at a time, so it must start
+// above the current progress and include the target itself.
+func TestResolveExecTarget_ChainTipLoopReachesTarget(t *testing.T) {
+	t.Parallel()
+
+	const execProgress = uint64(100)
+	target, hasWork := resolveExecTarget(0, 1, execProgress, 200)
+	require.True(t, hasWork)
+
+	var executed []uint64
+	for bn := execProgress + 1; bn <= target; bn++ {
+		executed = append(executed, bn)
+	}
+	require.Equal(t, []uint64{101}, executed, "--limit=1 must execute exactly the next block")
+}
