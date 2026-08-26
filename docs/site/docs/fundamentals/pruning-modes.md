@@ -50,8 +50,10 @@ regardless of the state-history window, add `--prune.receipts.distance=keep-all`
 that fall entirely below the retention cutoff of the active `--prune.mode` are now deleted (a fresh sync already
 skipped downloading them, in v3.5 too). Before v3.6, files already on disk were retained indefinitely regardless of
 `--prune.mode`, so a long-running `full` or `minimal` node kept growing. Deletion is deferred until no reader still holds the retired
-files. The commitment-history and receipt-cache domains are retired against their own windows
-(`--prune.commitment-history.distance`, `--prune.receipts.distance`) rather than the general state-history window.
+files. The commitment-history and receipt-cache domains do not behave the same way here. Commitment history is retired
+against its own window, `--prune.commitment-history.distance`; left unset, nothing is retired. The receipt cache
+instead follows the general state-history window by default, and is only retired against an independent window when
+`--prune.receipts.distance` is set explicitly (with `keep-all` retiring nothing).
 :::
 
 ## Archive node
