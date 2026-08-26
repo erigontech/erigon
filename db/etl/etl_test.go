@@ -1914,10 +1914,10 @@ func BenchmarkSortableBufferInmemLoadOneChunk(b *testing.B) {
 	}
 }
 
-// TestSortableBufferConcatRuns: keys put in ascending order leave the chunks
-// already ordered end to end, so reading them back is concatenation rather than
-// a merge. Descending keys interleave the chunks and must take the merge.
-func TestSortableBufferConcatRuns(t *testing.T) {
+// TestSortableBufferMergesChunks: ascending keys leave the chunks already
+// ordered end to end, descending keys interleave them. Both must read back in
+// key order, and a second pass must give the same answer.
+func TestSortableBufferMergesChunks(t *testing.T) {
 	const count = 40_000 // several chunks at 4+8+64 bytes an entry
 	for _, ascending := range []bool{true, false} {
 		t.Run(fmt.Sprintf("ascending%v", ascending), func(t *testing.T) {
@@ -1936,8 +1936,6 @@ func TestSortableBufferConcatRuns(t *testing.T) {
 			require.Greater(t, len(buf.chunks), 2, "must cross chunk boundaries")
 
 			buf.Sort()
-			require.Equal(t, ascending, buf.concat)
-
 			for i := range count {
 				k, v := buf.Get(i)
 				binary.BigEndian.PutUint64(key, uint64(i)) //nolint:gosec

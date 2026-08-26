@@ -118,6 +118,11 @@ const (
 	keyLenBits = 32 - dataChunkBits
 	maxKeyLen  = 1<<keyLenBits - 2
 
+	// order packs a chunk id with the entry's slot in that chunk's index. An
+	// entry costs at least entryHeaderSize+entryLocSize, so a chunk holds fewer
+	// than 1<<orderSlotBits of them and maxDataChunks fits the rest of a uint32.
+	orderSlotBits = dataChunkBits - 3
+
 	// One buffer holds at most maxDataChunks*dataChunkSize bytes (~2GB), which
 	// keeps its size inside a positive int32; nextChunk panics past that.
 	// NewSortableBuffer's MaxInt32 bound on optimalSize does not fully rule this
@@ -198,10 +203,11 @@ type dataChunk struct {
 	buf    []byte
 	entTop int32
 
-	// The merge reads these instead of chasing the index on every compare.
-	// ents drains from the front, so ents[0] is the chunk's current entry and
-	// key and pfx describe it.
+	// ents is the chunk's index in key order once Sort has run. The merge walks
+	// it with at, and reads key and pfx instead of chasing the index on every
+	// compare.
 	ents []entryLoc
+	at   int32
 	key  []byte
 	pfx  uint64
 }
@@ -214,9 +220,9 @@ func (c *dataChunk) keyOf(e entryLoc) []byte {
 	return nil
 }
 
-// loadKey caches the current entry's key and its prefix.
+// loadKey caches the merge cursor's key and its prefix.
 func (c *dataChunk) loadKey() {
-	c.key = c.keyOf(c.ents[0])
+	c.key = c.keyOf(c.ents[c.at])
 	c.pfx = keyPrefix(c.key)
 }
 
@@ -256,16 +262,11 @@ type sortableBuffer struct {
 
 	chunks []dataChunk
 
-	// Sort orders each chunk on its own, so reading the buffer in key order is
-	// a k-way merge over the chunks - unless the chunks already run in order
-	// end to end, which keys arriving ascending produce, and then reading them
-	// is concatenation.
-	concat  bool
-	starts  []int32 // entries before each chunk; len(chunks)+1 long
-	atChunk int     // chunk the concat cursor sits in
-	heap    []int32 // chunk ids, ordered by their current entry
-	at      int     // index of the entry the merge cursor sits on
-	sortedN int     // n as of the last Sort; -1 while unsorted
+	// Sort orders each chunk on its own and then merges the chunks once into
+	// order, so a read is an index rather than a step of a k-way merge.
+	order   []uint32 // every entry, in key order
+	heap    []int32  // chunk ids, ordered by their merge cursor's entry
+	sortedN int      // n as of the last Sort; -1 while unsorted
 
 	chunkBytes  int
 	optimalSize int
@@ -368,8 +369,7 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 }
 
 // entryAt returns the i-th entry and the chunk holding it: key order once Sort
-// has run over the current contents, insertion order before that. Walking i
-// upward costs O(1) a step; going back restarts the merge.
+// has run over the current contents, insertion order before that.
 func (b *sortableBuffer) entryAt(i int) ([]byte, entryLoc) {
 	if b.sortedN != b.n {
 		b.syncCur()
@@ -383,26 +383,9 @@ func (b *sortableBuffer) entryAt(i int) ([]byte, entryLoc) {
 		}
 		panic(fmt.Sprintf("etl: entry %d out of range", i))
 	}
-	if b.concat {
-		j := b.atChunk
-		if i < int(b.starts[j]) {
-			j = 0
-		}
-		for i >= int(b.starts[j+1]) {
-			j++
-		}
-		b.atChunk = j
-		c := &b.chunks[j]
-		return c.buf, c.ents[i-int(b.starts[j])]
-	}
-	if i < b.at {
-		b.rewind()
-	}
-	for b.at < i {
-		b.advance()
-	}
-	c := &b.chunks[b.heap[0]]
-	return c.buf, c.ents[0]
+	o := b.order[i]
+	c := &b.chunks[o>>orderSlotBits]
+	return c.buf, c.ents[o&(1<<orderSlotBits-1)]
 }
 
 // Prealloc only reserves room for the chunk headers. The chunks themselves are
@@ -420,10 +403,9 @@ func (b *sortableBuffer) Reset() {
 		putDataChunk(b.chunks[i].buf)
 	}
 	clear(b.chunks)
-	b.chunks, b.heap, b.starts = b.chunks[:0], b.heap[:0], b.starts[:0]
+	b.chunks, b.heap, b.order = b.chunks[:0], b.heap[:0], b.order[:0]
 	b.curBuf, b.curEnd, b.curTop = nil, 0, 0
-	b.concat = false
-	b.n, b.at, b.atChunk, b.chunkBytes = 0, 0, 0, 0
+	b.n, b.chunkBytes = 0, 0
 	b.sortedN = -1
 }
 
@@ -478,31 +460,31 @@ func (b *sortableBuffer) Sort() {
 		}
 		slices.SortFunc(ents, cmp)
 	}
+	b.merge()
 	b.sortedN = b.n
-	b.rewind()
 }
 
-// rewind restarts reading at the first entry in key order.
-func (b *sortableBuffer) rewind() {
-	b.starts = slices.Grow(b.starts[:0], len(b.chunks)+1)[:len(b.chunks)+1]
-	total := int32(0)
+// merge lists every entry in key order, taking the lowest of the chunks' merge
+// cursors each step.
+func (b *sortableBuffer) merge() {
+	b.order = slices.Grow(b.order[:0], b.n)[:b.n]
 	for i := range b.chunks {
-		c := &b.chunks[i]
-		c.ents = c.entries()
-		b.starts[i] = total
-		total += int32(len(c.ents)) //nolint:gosec
+		b.chunks[i].ents = b.chunks[i].entries()
 	}
-	b.starts[len(b.chunks)] = total
-	b.atChunk, b.at = 0, 0
-
-	b.concat = b.chunksInOrder()
-	if b.concat {
+	if b.chunksInOrder() {
+		at := 0
+		for i := range b.chunks {
+			for slot := range b.chunks[i].ents {
+				b.order[at] = uint32(i)<<orderSlotBits | uint32(slot) //nolint:gosec
+				at++
+			}
+		}
 		return
 	}
 	b.heap = b.heap[:0]
 	for i := range b.chunks {
 		c := &b.chunks[i]
-		if len(c.ents) == 0 {
+		if c.at = 0; len(c.ents) == 0 {
 			continue
 		}
 		c.loadKey()
@@ -511,10 +493,27 @@ func (b *sortableBuffer) rewind() {
 	for i := len(b.heap)/2 - 1; i >= 0; i-- {
 		b.siftDown(i)
 	}
+	for i := range b.order {
+		id := b.heap[0]
+		c := &b.chunks[id]
+		b.order[i] = uint32(id)<<orderSlotBits | uint32(c.at) //nolint:gosec
+		c.at++
+		if int(c.at) == len(c.ents) {
+			last := len(b.heap) - 1
+			b.heap[0] = b.heap[last]
+			b.heap = b.heap[:last]
+		} else {
+			c.loadKey()
+		}
+		if len(b.heap) > 0 {
+			b.siftRoot()
+		}
+	}
 }
 
 // chunksInOrder reports whether every chunk's last key comes before the next
-// chunk's first. A tie keeps the earlier chunk first, which is insertion order.
+// chunk's first, which keys arriving ascending produce. A tie keeps the earlier
+// chunk first, which is insertion order.
 func (b *sortableBuffer) chunksInOrder() bool {
 	for i := 1; i < len(b.chunks); i++ {
 		prev, cur := &b.chunks[i-1], &b.chunks[i]
@@ -526,23 +525,6 @@ func (b *sortableBuffer) chunksInOrder() bool {
 		}
 	}
 	return true
-}
-
-// advance moves the cursor to the next entry in key order.
-func (b *sortableBuffer) advance() {
-	c := &b.chunks[b.heap[0]]
-	c.ents = c.ents[1:]
-	if len(c.ents) == 0 {
-		last := len(b.heap) - 1
-		b.heap[0] = b.heap[last]
-		b.heap = b.heap[:last]
-	} else {
-		c.loadKey()
-	}
-	if len(b.heap) > 0 {
-		b.siftRoot()
-	}
-	b.at++
 }
 
 // less orders two chunks by their current entry. Chunks fill in insertion
