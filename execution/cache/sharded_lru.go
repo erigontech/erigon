@@ -32,9 +32,8 @@ import (
 // blocks one shard's writers for capacity/shards entries, not everyone for the
 // whole cache.
 //
-// Shards are selected on bits 16+ of the key, matching freelru's own choice:
-// the low bits index buckets inside a shard, so sharding on them would put
-// every key of a shard in one bucket.
+// Shards are selected from bits 32+ of the key; bucket indexing inside a shard
+// consumes bits 0-31, so the two never overlap (see idx).
 type shardedLRU[V any] struct {
 	shards []*freelru.LRU[uint64, V]
 	mus    []sync.Mutex
@@ -95,7 +94,12 @@ func (s *shardedLRU[V]) newShard(capacity uint32) *freelru.LRU[uint64, V] {
 	return l
 }
 
-func (s *shardedLRU[V]) idx(h uint64) uint64 { return (h >> 16) & s.mask }
+// idx selects the shard from bits 32+. freelru hashes a key to a uint32, so
+// bucket indexing inside a shard only ever consumes bits 0-31 -- selecting the
+// shard from above them keeps the two disjoint at any table size. Sharing bits
+// would fix part of the bucket index within a shard, so a large table could
+// only reach a fraction of its buckets.
+func (s *shardedLRU[V]) idx(h uint64) uint64 { return (h >> 32) & s.mask }
 
 func (s *shardedLRU[V]) Len() int { return int(s.n.Load()) }
 

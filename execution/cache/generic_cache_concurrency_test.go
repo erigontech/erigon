@@ -279,7 +279,7 @@ func TestGenericCache_GrowMigrationLossless(t *testing.T) {
 }
 
 // A capacity eviction is a size-subtracting writer the put stripes cannot
-// serialize: freelru picks its victim per shard (hash bits 16+), so an insert
+// serialize: the victim is picked per shard (hash bits 32+), so an insert
 // on one stripe can evict a key whose own update — on another stripe — is
 // between its Get and Add; delta accounting against the pre-eviction size then
 // double-subtracts. Capacity 1 collapses freelru to a single shard, making any

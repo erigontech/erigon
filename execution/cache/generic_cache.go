@@ -211,7 +211,7 @@ func (c *GenericCache[T]) refundGrow(slots uint32) {
 // newShards builds the shard array with this cache's evict callback wired.
 // The callback is the sole subtractor of currentSize — every removal (capacity
 // eviction, Remove) accounts through it. Eviction victims are picked per shard
-// (hash bits 16+), which the put stripes (bits 0-7) don't cover, so any
+// (hash bits 32+), which the put stripes (bits 0-7) don't cover, so any
 // subtraction computed outside the callback races a cross-stripe eviction of
 // the same entry.
 func (c *GenericCache[T]) newShards(startCap, maxCap, shards uint32) *shardedLRU[entry[T]] {
@@ -428,12 +428,17 @@ func (c *GenericCache[T]) Clear() {
 	// demand). A no-op Purge would leave the grown slot array resident.
 	c.resizeMu.Lock()
 	defer c.resizeMu.Unlock()
-	if c.enveloped {
-		cachebudget.Global.Release(c.reservedBytes.Swap(int64(c.startCap)*c.avgEntryBytes) - int64(c.startCap)*c.avgEntryBytes)
-	}
 	next := c.newShards(c.startCap, c.maxCap, c.shardCount) // allocate before excluding writers
 	for i := range c.putStripes {
 		c.putStripes[i].Lock()
+	}
+	// Settle the reservation only behind the fence: a writer holding a stripe
+	// can be mid-grow, and outside it that grow would either attach a
+	// reservation to the generation being retired or refund bytes already
+	// released here.
+	if c.enveloped {
+		start := int64(c.startCap) * c.avgEntryBytes
+		cachebudget.Global.Release(c.reservedBytes.Swap(start) - start)
 	}
 	c.currentSize.Store(0)
 	c.data.Store(next)
