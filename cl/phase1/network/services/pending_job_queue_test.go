@@ -134,6 +134,27 @@ func TestNewPendingJobQueueRejectsNonPositiveCapacity(t *testing.T) {
 	}
 }
 
+func TestNewPendingJobQueueRejectsNonPositiveExpiry(t *testing.T) {
+	for _, test := range []struct {
+		name   string
+		expiry time.Duration
+	}{
+		{name: "zero", expiry: 0},
+		{name: "negative", expiry: -time.Millisecond},
+	} {
+		t.Run(test.name, func(t *testing.T) {
+			require.PanicsWithValue(t, "pending job queue expiry must be positive", func() {
+				newTestPendingJobQueueWithOptions(t.Context(), pendingJobQueueOptions{
+					name:          t.Name(),
+					capacity:      1,
+					expiry:        test.expiry,
+					checkInterval: time.Millisecond,
+				})
+			})
+		})
+	}
+}
+
 func TestNewPendingJobQueueRejectsNonPositiveCheckInterval(t *testing.T) {
 	for _, test := range []struct {
 		name          string

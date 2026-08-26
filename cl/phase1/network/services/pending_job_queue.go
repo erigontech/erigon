@@ -93,6 +93,9 @@ func newPendingJobQueue[K comparable, M any](
 	if options.capacity <= 0 {
 		panic("pending job queue capacity must be positive")
 	}
+	if options.expiry <= 0 {
+		panic("pending job queue expiry must be positive")
+	}
 	if options.checkInterval <= 0 {
 		panic("pending job queue check interval must be positive")
 	}
