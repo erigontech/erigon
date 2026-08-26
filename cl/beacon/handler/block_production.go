@@ -1193,6 +1193,16 @@ func (a *ApiHandler) produceBeaconBody(
 			executionValue = blockValue.Uint64()
 		}
 
+		if bundles == nil {
+			// Deneb onwards the engine API makes blobsBundle mandatory, so its absence means the
+			// payload's blob transactions have no commitments to propose against.
+			if stateVersion.AfterOrEqual(clparams.DenebVersion) {
+				executionErr = errors.New("produceBeaconBody: execution layer returned no blobs bundle")
+				return
+			}
+			bundles = &engine_types.BlobsBundle{}
+		}
+
 		if stateVersion.Before(clparams.FuluVersion) {
 			if len(bundles.Blobs) != len(bundles.Proofs) ||
 				len(bundles.Commitments) != len(bundles.Proofs) {
