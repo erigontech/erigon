@@ -36,23 +36,67 @@ const maxBlobRepairsPerPass = 256
 // slots, so this bounds the load a repair puts on the endpoints it reads from.
 const blobRepairInterval = 60 * time.Second
 
+// repairCooldown spaces out retries per slot. A gap no endpoint can serve fails the same
+// way every tick, so without this the drain re-attempts the oldest slots forever and never
+// reaches the ones further up that could be filled.
+type repairCooldown struct {
+	skip    map[uint64]int
+	streak  map[uint64]int
+	maxSkip int
+}
+
+func newRepairCooldown() *repairCooldown {
+	return &repairCooldown{skip: map[uint64]int{}, streak: map[uint64]int{}, maxSkip: 60}
+}
+
+// ready consumes one tick of cooldown for slot and reports whether it may be attempted.
+func (c *repairCooldown) ready(slot uint64) bool {
+	if left := c.skip[slot]; left > 0 {
+		c.skip[slot] = left - 1
+		return false
+	}
+	return true
+}
+
+func (c *repairCooldown) failed(slot uint64) {
+	c.streak[slot]++
+	shift := min(c.streak[slot]-1, 30)
+	c.skip[slot] = min(1<<shift, c.maxSkip)
+}
+
+func (c *repairCooldown) filled(slot uint64) {
+	delete(c.skip, slot)
+	delete(c.streak, slot)
+}
+
 // drainBlobGaps repairs at most limit slots, oldest first, and reports how many it filled
 // and how many it tried. A slot no endpoint can serve is attempted and not filled; it does
 // not stop the drain.
-func drainBlobGaps(slots []uint64, limit int, repair func(slot uint64) bool) (filled, attempted int) {
+func drainBlobGaps(slots []uint64, limit int, cool *repairCooldown, repair func(slot uint64) bool) (filled, attempted, skipped int) {
 	if limit <= 0 {
-		return 0, 0
+		return 0, 0, 0
 	}
 	for _, slot := range slots {
 		if attempted == limit {
 			break
 		}
+		if cool != nil && !cool.ready(slot) {
+			skipped++
+			continue
+		}
 		attempted++
 		if repair(slot) {
 			filled++
+			if cool != nil {
+				cool.filled(slot)
+			}
+			continue
+		}
+		if cool != nil {
+			cool.failed(slot)
 		}
 	}
-	return filled, attempted
+	return filled, attempted, skipped
 }
 
 func (b *BlobHistoryDownloader) tryBeginRepair() bool {
@@ -83,10 +127,10 @@ func (b *BlobHistoryDownloader) repairBlobGapsFromRemote() {
 		}
 	}
 
-	filled, attempted := drainBlobGaps(slots, maxBlobRepairsPerPass, b.repairBlobGap)
+	filled, attempted, skipped := drainBlobGaps(slots, maxBlobRepairsPerPass, b.cooldown, b.repairBlobGap)
 	remaining := len(slots) - filled
 	b.logger.Info("[BlobRepair] Fetched blob sidecars peers no longer serve",
-		"filled", filled, "attempted", attempted, "remaining", remaining)
+		"filled", filled, "attempted", attempted, "coolingOff", skipped, "remaining", remaining)
 }
 
 // repairBlobGap fetches and stores one slot's sidecars, reporting whether the store now

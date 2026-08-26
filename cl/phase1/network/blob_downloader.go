@@ -97,6 +97,7 @@ type BlobHistoryDownloader struct {
 	gapSlots map[uint64]struct{}
 	// remoteBlobs supplies sidecars for gaps no peer will serve; inert unless configured
 	remoteBlobs *remoteBlobSource
+	cooldown    *repairCooldown
 
 	// notifyBlobBackfilled is called when blob backfilling is complete
 	notifyBlobBackfilled func()
@@ -137,6 +138,7 @@ func NewBlobHistoryDownloader(
 		columnBackfillTimeout:            blobColumnBackfillTimeout,
 		columnBackfillOutOfWindowTimeout: blobColumnBackfillOutOfWindowTimeout,
 		remoteBlobs:                      newRemoteBlobSource(blobRepairEndpoints, logger),
+		cooldown:                         newRepairCooldown(),
 		logger:                           logger,
 	}
 }
