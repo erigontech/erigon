@@ -81,11 +81,6 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-func entriesIn(bufBytes datasize.ByteSize) int {
-	const etlAvgEntryBytes = 20
-	return int(bufBytes) / (etlAvgEntryBytes + entryLocSize)
-}
-
 var (
 	// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold:
 	// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
@@ -269,8 +264,8 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	b.curOff = off + int32(n) //nolint:gosec
 }
 
-// Size counts the stored bytes, the tail wasted by the chunk still filling, and
-// entryLocSize per entry. An entry's entryHeaderSize is already in chunkBytes.
+// Size counts the stored bytes, the tails wasted by the chunks already filled,
+// and entryLocSize per entry. An entry's entryHeaderSize is already in chunkBytes.
 func (b *sortableBuffer) Size() int {
 	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + len(b.entries)*entryLocSize
 }
@@ -296,6 +291,9 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 	return key, val
 }
 
+// Prealloc sizes the entries slice. predictDataSize only reserves room in the
+// chunks slice for the chunk pointers; the chunks themselves are still taken
+// one at a time, which is what keeps an idle buffer from holding its peak.
 func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
 	if cap(b.entries) < predictKeysAmount {
 		b.entries = make([]entryLoc, 0, predictKeysAmount)
@@ -319,17 +317,21 @@ func (b *sortableBuffer) Reset() {
 func (b *sortableBuffer) SizeLimit() int { return b.optimalSize }
 func (b *sortableBuffer) Sort() {
 	chunks := b.chunks
-	key := func(e entryLoc) []byte {
-		kLen := e.keyLen()
-		if kLen <= 0 {
-			return nil
-		}
-		at := e.offset()
-		off := at&(dataChunkSize-1) + entryHeaderSize
-		return (*chunks[at>>dataChunkBits])[off : off+kLen]
-	}
+	// Key extraction stays inside cmp: pdqsortCmpFunc calls the comparator
+	// indirectly, so a separate closure never inlines and costs a call per key.
 	cmp := func(x, y entryLoc) int {
-		if c := bytes.Compare(key(x), key(y)); c != 0 {
+		var xk, yk []byte
+		if kLen := x.keyLen(); kLen > 0 {
+			at := x.offset()
+			off := at&(dataChunkSize-1) + entryHeaderSize
+			xk = chunks[at>>dataChunkBits][off : off+kLen]
+		}
+		if kLen := y.keyLen(); kLen > 0 {
+			at := y.offset()
+			off := at&(dataChunkSize-1) + entryHeaderSize
+			yk = chunks[at>>dataChunkBits][off : off+kLen]
+		}
+		if c := bytes.Compare(xk, yk); c != 0 {
 			return c
 		}
 		return int(x.offset() - y.offset()) // StableSort: offsets rise with insertion order
