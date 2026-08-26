@@ -883,9 +883,7 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 	var drainWG sync.WaitGroup
 	var drainMu sync.Mutex
 	var drainErrs []error
-	drainWG.Add(1)
-	go func() {
-		defer drainWG.Done()
+	drainWG.Go(func() {
 		for r := range out {
 			// Root mismatches are expected here (no real state root is
 			// computed) and irrelevant — this test is about changeset routing.
@@ -895,7 +893,7 @@ func testComputeWithBlockAccumulatorConcurrentRotation(t *testing.T, deferUpdate
 				drainMu.Unlock()
 			}
 		}
-	}()
+	})
 
 	changesets := make(map[uint64]*changeset.StateChangeSet, numBlocks)
 	rnd := rand.New(rand.NewSource(42))
