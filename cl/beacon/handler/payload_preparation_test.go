@@ -49,6 +49,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/hexutil"
 	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/execmodule/chainreader"
 	"github.com/erigontech/erigon/execution/types"
@@ -75,6 +76,15 @@ type payloadBuildEngine struct {
 	*execution_client.MockExecutionEngine
 	t                 *testing.T
 	startPayloadBuild func(context.Context, common.Hash, *engine_types.PayloadAttributes) ([]byte, error)
+}
+
+type updateFailingDB struct {
+	kv.RwDB
+	err error
+}
+
+func (db updateFailingDB) Update(context.Context, func(kv.RwTx) error) error {
+	return db.err
 }
 
 func newPayloadBuildEngine(t *testing.T, ctrl *gomock.Controller) *payloadBuildEngine {
@@ -1211,17 +1221,76 @@ func TestFailedBlockGossipKeepsProducedBlockMarker(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 	handler.blobStoage = storage
 	gossipManager := gossip_mock.NewMockGossip(ctrl)
-	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(errors.New("publish failed"))
+	blockPublishErr := errors.New("block publish failed")
+	sidecarPublishErr := errors.New("sidecar publish failed")
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(blockPublishErr)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBlobSidecar(0), gomock.Any()).Return(sidecarPublishErr)
 	handler.gossipManager = gossipManager
 
-	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.ElectraVersion)
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.DenebVersion)
 	block.Block.Slot = 1
+	commitment := cltypes.KZGCommitment{0x01}
+	block.Block.Body.BlobKzgCommitments.Append(&commitment)
+	handler.blobBundles.Add(common.Bytes48(commitment), BlobBundle{
+		Blob:       &cltypes.Blob{},
+		KzgProofs:  []common.Bytes48{{0x02}},
+		Commitment: common.Bytes48(commitment),
+	})
+	completedAt := time.Now()
+	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
+
+	err := handler.broadcastBlock(t.Context(), block)
+	require.ErrorIs(t, err, blockPublishErr)
+	require.ErrorIs(t, err, sidecarPublishErr)
+	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
+	require.Eventually(t, handler.payloadPreparationGate.idle, time.Second, 10*time.Millisecond)
+}
+
+func TestMissingLegacySelfBuildEnvelopeDoesNotFailBlockPublication(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	handler.indiciesDB = updateFailingDB{RwDB: handler.indiciesDB, err: errors.New("stop after persistence")}
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameBeaconBlock, gomock.Any()).Return(nil)
+	handler.gossipManager = gossipManager
+
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	require.NotNil(t, bid)
+	require.NotNil(t, bid.Message)
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	bid.Message.BlockHash = common.Hash{0x42}
 	completedAt := time.Now()
 	handler.payloadPreparationGate.noteProducedBlock(1, block.Block.Slot, completedAt, completedAt.Add(time.Minute))
 
 	require.NoError(t, handler.broadcastBlock(t.Context(), block))
-	require.True(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
+	require.False(t, handler.payloadPreparationGate.producedBlockPending(1, 0, time.Now()))
 	require.Eventually(t, handler.payloadPreparationGate.idle, time.Second, 10*time.Millisecond)
+}
+
+func TestSignedSelfBuildEnvelopeGossipFailureIsRequiredPublication(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+	gossipManager := gossip_mock.NewMockGossip(ctrl)
+	publishErr := errors.New("envelope publish failed")
+	gossipManager.EXPECT().Publish(gomock.Any(), gossip.TopicNameExecutionPayload, gomock.Any()).Return(publishErr)
+	handler.gossipManager = gossipManager
+
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	bid := block.Block.Body.GetSignedExecutionPayloadBid()
+	require.NotNil(t, bid)
+	require.NotNil(t, bid.Message)
+	bid.Message.BuilderIndex = clparams.BuilderIndexSelfBuild
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{
+		Message:   cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg),
+		Signature: common.Bytes96{0x01},
+	}
+
+	gossipRequired, err := handler.broadcastSelfBuildEnvelope(t.Context(), block, envelope)
+
+	require.True(t, gossipRequired)
+	require.ErrorIs(t, err, publishErr)
 }
 
 func TestPreparePayloadLoopSkipsSlotsTooFarAhead(t *testing.T) {

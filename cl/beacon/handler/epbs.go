@@ -699,7 +699,9 @@ func (a *ApiHandler) postProposerPreferences(w http.ResponseWriter, r *http.Requ
 
 		if a.proposerPreferencesService != nil {
 			if err := a.proposerPreferencesService.ProcessMessage(r.Context(), nil, req); err != nil {
-				if errors.Is(err, clservices.ErrIgnore) {
+				// A duplicate is already applied and can be acknowledged. Other ignored
+				// results may be transient, so return them and let the client retry.
+				if errors.Is(err, clservices.ErrProposerPreferenceAlreadySeen) {
 					continue
 				}
 				beaconhttp.NewEndpointError(http.StatusBadRequest, err).WriteTo(w)

@@ -545,14 +545,14 @@ func TestPostProposerPreferencesStoresValidatedPreferenceOnce(t *testing.T) {
 	require.Equal(t, uint64(1), epbsPool.ProposerPreferencesGeneration(preference.Message.ProposalSlot))
 }
 
-func TestPostProposerPreferencesAcceptsIgnoredPreference(t *testing.T) {
+func TestPostProposerPreferencesAcceptsDuplicatePreference(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	preference := &cltypes.SignedProposerPreferences{
 		Message: &cltypes.ProposerPreferences{ProposalSlot: 32},
 	}
 	service := mock_services.NewMockProposerPreferencesService(ctrl)
 	service.EXPECT().ProcessMessage(gomock.Any(), nil, preference).
-		Return(fmt.Errorf("%w: already seen", services.ErrIgnore))
+		Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrProposerPreferenceAlreadySeen))
 	handler := &ApiHandler{proposerPreferencesService: service}
 	recorder := httptest.NewRecorder()
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", http.NoBody)
@@ -560,6 +560,23 @@ func TestPostProposerPreferencesAcceptsIgnoredPreference(t *testing.T) {
 	handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{preference})
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostProposerPreferencesRejectsTransientIgnore(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	preference := &cltypes.SignedProposerPreferences{
+		Message: &cltypes.ProposerPreferences{ProposalSlot: 32},
+	}
+	service := mock_services.NewMockProposerPreferencesService(ctrl)
+	service.EXPECT().ProcessMessage(gomock.Any(), nil, preference).
+		Return(fmt.Errorf("%w: dependent state unavailable", services.ErrIgnore))
+	handler := &ApiHandler{proposerPreferencesService: service}
+	recorder := httptest.NewRecorder()
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", http.NoBody)
+
+	handler.postProposerPreferences(recorder, request, []*cltypes.SignedProposerPreferences{preference})
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
 func TestPostProposerPreferencesRejectsFarFutureSlotWithoutService(t *testing.T) {

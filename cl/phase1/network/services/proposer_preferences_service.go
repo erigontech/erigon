@@ -97,8 +97,8 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		dependentRoot:  preferences.DependentRoot,
 	}
 	if s.seenCache.Contains(seenKey) {
-		return fmt.Errorf("%w: already seen proposer preferences from validator %d for slot %d with dependent root %v",
-			ErrIgnore, validatorIndex, proposalSlot, preferences.DependentRoot)
+		return fmt.Errorf("%w: %w from validator %d for slot %d with dependent root %v",
+			ErrIgnore, ErrProposerPreferenceAlreadySeen, validatorIndex, proposalSlot, preferences.DependentRoot)
 	}
 
 	depState, err := s.forkchoiceStore.GetStateAtBlockRoot(preferences.DependentRoot, false)
