@@ -163,6 +163,16 @@ func calculateMergeStartTxNum(endTxNum, stepSize, maxSpan uint64) uint64 {
 // but resets needMerge to false, letting later smaller-but-still-mergeable files
 // take over.
 func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan uint64, superSetCheck bool) MergeRange {
+	// v4-pair positive detection first. When both v4 #1 [step*ss, cut)
+	// and v4 #2 [cut, (step+1)*ss) exist, that step is a mergeable
+	// single-step range whose union is the standard step-aligned output.
+	// Fire it before the wider-merge algorithm so the aggregator
+	// consolidates the pair; subsequent scheduling cycles pick up the
+	// freshly-consolidated file for any wider merge.
+	if pair, ok := v4PairMergeRange(files, stepSize, maxEndTxNum); ok {
+		return pair
+	}
+
 	var r MergeRange
 	for i, item := range files {
 		if item.endTxNum > maxEndTxNum {
@@ -200,6 +210,45 @@ func findMergeRangeInFiles(files visibleFiles, stepSize, maxEndTxNum, maxSpan ui
 		r.to = item.endTxNum
 	}
 	return r
+}
+
+// v4PairMergeRange scans files for the first step where both v4 #1
+// (aligned start, mid-step end) and v4 #2 (mid-step start, aligned
+// end) exist and together tile [step*stepSize, (step+1)*stepSize).
+// Returns that step's aligned range as a MergeRange so the merge
+// scheduler consolidates the pair into a standard step-aligned file.
+// Bounded by maxEndTxNum — a pair whose stepEnd exceeds the frontier
+// isn't yet a candidate.
+//
+// Returns (MergeRange{}, false) when no complete pair exists — either
+// only v4 #1 has landed (retire hasn't emitted the tail yet) or the
+// files are all step-aligned.
+func v4PairMergeRange(files visibleFiles, stepSize, maxEndTxNum uint64) (MergeRange, bool) {
+	for i, f := range files {
+		// v4 #1: aligned start, mid-step end.
+		if f.startTxNum%stepSize != 0 || f.endTxNum%stepSize == 0 {
+			continue
+		}
+		stepStart := f.startTxNum
+		stepEnd := stepStart + stepSize
+		if stepEnd > maxEndTxNum {
+			continue
+		}
+		// Search forward for the complementary v4 #2 in the same step.
+		// Since files are sorted by endTxNum ascending, v4 #2 (endTxN
+		// == stepEnd) sorts after v4 #1 (endTxN < stepEnd).
+		for j := i + 1; j < len(files); j++ {
+			g := files[j]
+			if g.startTxNum != f.endTxNum {
+				continue
+			}
+			if g.endTxNum != stepEnd {
+				break
+			}
+			return MergeRange{needMerge: true, from: stepStart, to: stepEnd}, true
+		}
+	}
+	return MergeRange{}, false
 }
 
 // rangeContainsV4Item reports whether any file in `files` with an

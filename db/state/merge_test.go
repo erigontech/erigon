@@ -1656,3 +1656,95 @@ func TestInvIndexMergeFiles_SharedKey(t *testing.T) {
 	}
 	require.Equal(t, want, got)
 }
+
+// makeVisibleFile is a compact constructor for tests below.
+func makeVisibleFile(startTxNum, endTxNum uint64) visibleFile {
+	return visibleFile{
+		startTxNum: startTxNum,
+		endTxNum:   endTxNum,
+		src:        &FilesItem{startTxNum: startTxNum, endTxNum: endTxNum},
+	}
+}
+
+// TestFindMergeRangeInFiles_V4PairFiresAsAlignedRange pins the positive
+// v4-pair detection: when both v4 #1 [step*ss, cut) and v4 #2 [cut,
+// (step+1)*ss) exist, findMergeRangeInFiles returns the aligned single-
+// step range so the merge scheduler consolidates them into a standard
+// step-aligned output. Without this the wider algorithm skips the range
+// entirely (rangeContainsV4Item is true) and the v4 pair accumulates on
+// disk forever.
+func TestFindMergeRangeInFiles_V4PairFiresAsAlignedRange(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+
+	// v4 pair tiling step 3.
+	files := visibleFiles{
+		makeVisibleFile(3000, 3512), // v4 #1
+		makeVisibleFile(3512, 4000), // v4 #2
+	}
+
+	got := findMergeRangeInFiles(files, stepSize, 4000, 32*stepSize, false)
+	require.True(t, got.needMerge, "v4 pair tiling step 3 must fire a merge")
+	require.Equal(t, uint64(3000), got.from, "aligned merge starts at step*stepSize")
+	require.Equal(t, uint64(4000), got.to, "aligned merge ends at (step+1)*stepSize")
+}
+
+// TestFindMergeRangeInFiles_LoneV4OneStillSkipped pins the negative
+// half: a v4 #1 without its v4 #2 tail must not fire — the merge would
+// miss the [T+1, stepEnd) tail that retire hasn't produced yet.
+func TestFindMergeRangeInFiles_LoneV4OneStillSkipped(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+
+	// Only v4 #1 for step 3, no v4 #2.
+	files := visibleFiles{
+		makeVisibleFile(3000, 3512),
+	}
+
+	got := findMergeRangeInFiles(files, stepSize, 4000, 32*stepSize, false)
+	require.False(t, got.needMerge, "lone v4 #1 (no v4 #2 tail yet) must not fire a merge")
+}
+
+// TestFindMergeRangeInFiles_V4PairRespectsMaxEndTxNum pins the
+// synchronization frontier: the v4-pair merge must not fire if the
+// pair's aligned stepEnd exceeds maxEndTxNum.
+func TestFindMergeRangeInFiles_V4PairRespectsMaxEndTxNum(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+
+	files := visibleFiles{
+		makeVisibleFile(3000, 3512),
+		makeVisibleFile(3512, 4000),
+	}
+
+	got := findMergeRangeInFiles(files, stepSize, 3999, 32*stepSize, false)
+	require.False(t, got.needMerge, "pair with stepEnd=4000 must not fire when maxEndTxNum=3999")
+}
+
+// TestFindMergeRangeInFiles_V4PairPrecedesWiderAligned pins the
+// scheduling preference: when a v4 pair AND a wider-aligned candidate
+// both exist, fire the v4 pair first so its consolidation lands before
+// the widen. The wider merge will pick up the freshly-consolidated
+// step-aligned file on the next scheduling cycle.
+func TestFindMergeRangeInFiles_V4PairPrecedesWiderAligned(t *testing.T) {
+	t.Parallel()
+	const stepSize = uint64(1000)
+
+	// Steps 0, 1, 2 are standard aligned; step 3 has a v4 pair.
+	// Without v4-pair priority, findMergeRangeInFiles would propose a
+	// wider merge over [0, 4000) that either skips (v4 in range) or
+	// silently corrupts. With v4-pair priority, we return the aligned
+	// single-step consolidation for step 3 first.
+	files := visibleFiles{
+		makeVisibleFile(0, 1000),
+		makeVisibleFile(1000, 2000),
+		makeVisibleFile(2000, 3000),
+		makeVisibleFile(3000, 3512),
+		makeVisibleFile(3512, 4000),
+	}
+
+	got := findMergeRangeInFiles(files, stepSize, 4000, 32*stepSize, false)
+	require.True(t, got.needMerge, "must fire the v4-pair merge")
+	require.Equal(t, uint64(3000), got.from, "v4-pair merge starts at step 3's start")
+	require.Equal(t, uint64(4000), got.to, "v4-pair merge ends at step 3's end")
+}
