@@ -669,7 +669,7 @@ func (s *BuilderService) Shutdown() {
 			delete(s.Loop.pendingPayloads, k)
 			if !pending.reservationReleased {
 				pending.reservationReleased = true
-				released = append(released, pending.reservationValue())
+				released = append(released, pending.bidValue)
 			}
 		}
 		for k, payloadID := range s.Loop.speculativePayloads {

@@ -40,7 +40,6 @@ type pendingPayload struct {
 	parent              ParentInfo
 	reveals             map[common.Hash]revealState
 	bidValue            uint64
-	reservedValue       uint64
 	reservationReleased bool
 }
 
@@ -219,7 +218,7 @@ func (l *BuilderLoop) pruneBeforeSlot(slot uint64) {
 		}
 		if !removed.pending.reservationReleased {
 			removed.pending.reservationReleased = true
-			l.manager.ReleaseBid(removed.pending.reservationValue())
+			l.manager.ReleaseBid(removed.pending.bidValue)
 		}
 	}
 }
@@ -233,7 +232,7 @@ func (l *BuilderLoop) releaseReservationsBeforeSlot(slot uint64) {
 	for key, pending := range l.pendingPayloads {
 		if key.slot < slot && !pending.reservationReleased {
 			pending.reservationReleased = true
-			released = append(released, pending.reservationValue())
+			released = append(released, pending.bidValue)
 		}
 	}
 	l.mu.Unlock()
@@ -249,13 +248,6 @@ func revealInFlight(pending *pendingPayload) bool {
 		}
 	}
 	return false
-}
-
-func (p *pendingPayload) reservationValue() uint64 {
-	if p.reservedValue != 0 {
-		return p.reservedValue
-	}
-	return p.bidValue
 }
 
 // buildAndBid implements the speculative match -> calculate value -> bid -> submit flow.
@@ -433,14 +425,13 @@ buildDone:
 		blockHash: assembled.Eth1Block.BlockHash,
 	}
 	pending := &pendingPayload{
-		slot:          slot,
-		builderIndex:  bidBuilderIndex,
-		payloadId:     usedPayloadId,
-		assembled:     assembled,
-		execReqs:      execReqs,
-		parent:        parent,
-		bidValue:      bidValue,
-		reservedValue: bidValue,
+		slot:         slot,
+		builderIndex: bidBuilderIndex,
+		payloadId:    usedPayloadId,
+		assembled:    assembled,
+		execReqs:     execReqs,
+		parent:       parent,
+		bidValue:     bidValue,
 	}
 	l.mu.Lock()
 	if slot < l.reservationReleaseBefore {
@@ -453,9 +444,6 @@ buildDone:
 	if l.pendingStore != nil {
 		if err := l.pendingStore.Save(ctx, key, pending, l.manager.Pubkey()); err != nil {
 			if errors.Is(err, ErrPendingPayloadMayExist) {
-				if previous != nil && !previous.reservationReleased {
-					pending.reservedValue += previous.reservationValue()
-				}
 				reserved = false
 				return fmt.Errorf("epbs/loop: persist pending payload: %w", err)
 			}
@@ -476,25 +464,20 @@ buildDone:
 				}
 			}
 			if rollbackErr != nil {
-				if previous != nil && !previous.reservationReleased {
-					pending.reservedValue += previous.reservationValue()
-				}
 				return errors.Join(fmt.Errorf("epbs/loop: submit bid: %w", err), fmt.Errorf("rollback durable pending payload: %w", rollbackErr))
 			}
 			l.restorePreviousPending(key, pending, previous)
 			l.manager.ReleaseBid(bidValue)
 			return fmt.Errorf("epbs/loop: submit bid: %w", err)
 		}
-		if previous != nil && !previous.reservationReleased {
-			previous.reservationReleased = true
-			l.manager.ReleaseBid(previous.reservationValue())
+		if previous != nil {
+			l.manager.ReleaseBid(previous.bidValue)
 		}
 		return fmt.Errorf("epbs/loop: submit bid: %w", err)
 	}
 
-	if previous != nil && !previous.reservationReleased {
-		previous.reservationReleased = true
-		l.manager.ReleaseBid(previous.reservationValue())
+	if previous != nil {
+		l.manager.ReleaseBid(previous.bidValue)
 	}
 
 	log.Info("ePBS builder: bid submitted",
@@ -541,7 +524,7 @@ func (l *BuilderLoop) restorePendingPayloads(ctx context.Context, currentSlot ui
 		if key.slot < currentSlot {
 			pending.reservationReleased = true
 		} else {
-			if err := l.manager.RestoreBidReservation(pending.reservationValue()); err != nil {
+			if err := l.manager.RestoreBidReservation(pending.bidValue); err != nil {
 				return err
 			}
 		}
