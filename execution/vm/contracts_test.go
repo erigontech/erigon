@@ -532,7 +532,6 @@ func checkNoAlias(t *testing.T, p PrecompiledContract, rawInput []byte) bool {
 	out, err := p.Run(input)
 	require.NoError(t, err, "precompile %s", p.Name())
 	want := bytes.Clone(out)
-	backing = backing[:cap(backing)] // make() rounds up, and an output can alias past len too
 	for i := range backing {
 		backing[i] ^= 0xff
 	}
