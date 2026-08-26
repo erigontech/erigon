@@ -1969,6 +1969,8 @@ func TestSortableBufferMergesChunks(t *testing.T) {
 			require.Greater(t, len(buf.chunks), 2, "must cross chunk boundaries")
 
 			buf.Sort()
+			require.Equal(t, ascending, buf.mrg.concat, "ascending keys must skip the heap")
+
 			for i := range count {
 				k, v := buf.Get(i)
 				binary.BigEndian.PutUint64(key, uint64(i)) //nolint:gosec
