@@ -119,11 +119,6 @@ const (
 	keyLenBits = 32 - dataChunkBits
 	maxKeyLen  = 1<<keyLenBits - 2
 
-	// order packs a chunk id with the entry's slot in that chunk's index. An
-	// entry costs at least entryHeaderSize+entryLocSize, so a chunk holds fewer
-	// than 1<<orderSlotBits of them and maxDataChunks fits the rest of a uint32.
-	orderSlotBits = dataChunkBits - 3
-
 	// One buffer holds at most maxDataChunks*dataChunkSize bytes (~2GB), which
 	// keeps its size inside a positive int32; nextChunk panics past that.
 	// NewSortableBuffer's MaxInt32 bound on optimalSize does not fully rule this
@@ -225,11 +220,6 @@ func keyPrefix(k []byte) uint64 {
 	return binary.BigEndian.Uint64(pad[:])
 }
 
-// entry reads one slot of the chunk's index, without building the whole view.
-func (c *dataChunk) entry(slot uint32) entryLoc {
-	return entryLoc(binary.NativeEndian.Uint32(c.buf[c.entTop+int32(slot)*entryLocSize:])) //nolint:gosec
-}
-
 func (c *dataChunk) len() int { return (len(c.buf) - int(c.entTop)) / entryLocSize }
 
 // entries views the chunk's index as entryLoc. Sort leaves it in key order;
@@ -255,9 +245,8 @@ type sortableBuffer struct {
 
 	chunks []dataChunk
 
-	// Sort orders each chunk on its own and then merges the chunks once into
-	// order, so a read is an index rather than a step of a k-way merge.
-	order   []uint32 // every entry, in key order
+	// Sort orders each chunk's index on its own, so reading the buffer in key
+	// order is a k-way merge over the chunks.
 	mrg     merger
 	sortedN int // n as of the last Sort; -1 while unsorted
 
@@ -362,7 +351,8 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 }
 
 // entryAt returns the i-th entry and the chunk holding it: key order once Sort
-// has run over the current contents, insertion order before that.
+// has run over the current contents, insertion order before that. Walking i
+// upward costs O(1) a step; going back restarts the merge.
 func (b *sortableBuffer) entryAt(i int) ([]byte, entryLoc) {
 	if b.sortedN != b.n {
 		b.syncCur()
@@ -376,9 +366,26 @@ func (b *sortableBuffer) entryAt(i int) ([]byte, entryLoc) {
 		}
 		panic(fmt.Sprintf("etl: entry %d out of range", i))
 	}
-	o := b.order[i]
-	c := &b.chunks[o>>orderSlotBits]
-	return c.buf, c.entry(o & (1<<orderSlotBits - 1))
+	m := &b.mrg
+	if m.concat {
+		j := m.chunk
+		if i < int(m.starts[j]) {
+			j = 0
+		}
+		for i >= int(m.starts[j+1]) {
+			j++
+		}
+		m.chunk = j
+		c := &m.cur[j]
+		return c.buf, c.ents[i-int(m.starts[j])]
+	}
+	if i < m.at {
+		m.reset(b.chunks)
+	}
+	for m.at < i {
+		m.next()
+	}
+	return m.peek()
 }
 
 // Prealloc only reserves room for the chunk headers. The chunks themselves are
@@ -396,7 +403,7 @@ func (b *sortableBuffer) Reset() {
 		putDataChunk(b.chunks[i].buf)
 	}
 	clear(b.chunks)
-	b.chunks, b.order = b.chunks[:0], b.order[:0]
+	b.chunks = b.chunks[:0]
 	b.mrg.release()
 	b.curBuf, b.curEnd, b.curTop = nil, 0, 0
 	b.n, b.chunkBytes = 0, 0
@@ -451,19 +458,27 @@ func (b *sortableBuffer) Sort() {
 		}
 		slices.SortFunc(ents, cmp)
 	}
-	b.order = slices.Grow(b.order[:0], b.n)[:b.n]
-	b.mrg.run(b.chunks, b.order)
+	b.mrg.reset(b.chunks)
 	b.sortedN = b.n
 }
 
-// merger lists the entries of already-sorted chunks in key order. It holds a
-// cursor per chunk and a heap of chunk ids ordered by the key each cursor sits
-// on. The prefixes live apart from the cursors because the heap reads them on
-// nearly every comparison, and a few hundred bytes of them stay in L1.
+// merger walks already-sorted chunks in key order, one entry at a time. It
+// holds a cursor per chunk and a heap of chunk ids ordered by the key each
+// cursor sits on. The prefixes live apart from the cursors because the heap
+// reads them on nearly every comparison, and a few hundred bytes of them stay
+// in L1.
 type merger struct {
 	heap []int32  // chunk ids, ordered by their cursor's key
 	pfx  []uint64 // each cursor's key prefix, by chunk id
 	cur  []cursor // by chunk id
+	at   int      // entries walked past
+
+	// Chunks that already run in order end to end, which keys arriving
+	// ascending produce, are read straight through instead of merged: entryAt
+	// walks starts itself, so a read costs no step of the merge.
+	concat bool
+	starts []int32 // entries before each chunk; len(cur)+1 long
+	chunk  int     // chunk the straight-through cursor sits in
 }
 
 type cursor struct {
@@ -473,25 +488,25 @@ type cursor struct {
 	key  []byte
 }
 
-// run lists every entry of chunks into order, which must already hold a slot
-// for each of them.
-func (m *merger) run(chunks []dataChunk, order []uint32) {
+// reset puts the cursor on the first entry in key order.
+func (m *merger) reset(chunks []dataChunk) {
 	m.cur = slices.Grow(m.cur[:0], len(chunks))[:len(chunks)]
 	m.pfx = slices.Grow(m.pfx[:0], len(chunks))[:len(chunks)]
 	for i := range chunks {
 		m.cur[i] = cursor{ents: chunks[i].entries(), buf: chunks[i].buf}
 	}
-	if m.chunksInOrder() {
-		at := 0
+	m.at, m.chunk = 0, 0
+
+	if m.concat = m.chunksInOrder(); m.concat {
+		m.starts = slices.Grow(m.starts[:0], len(m.cur)+1)[:len(m.cur)+1]
+		total := int32(0)
 		for i := range m.cur {
-			for slot := range m.cur[i].ents {
-				order[at] = makeOrder(i, slot)
-				at++
-			}
+			m.starts[i] = total
+			total += int32(len(m.cur[i].ents)) //nolint:gosec
 		}
+		m.starts[len(m.cur)] = total
 		return
 	}
-
 	m.heap = m.heap[:0]
 	for i := range m.cur {
 		if len(m.cur[i].ents) == 0 {
@@ -503,31 +518,36 @@ func (m *merger) run(chunks []dataChunk, order []uint32) {
 	for i := len(m.heap)/2 - 1; i >= 0; i-- {
 		m.siftDown(i)
 	}
-	for i := range order {
-		id := m.heap[0]
-		c := &m.cur[id]
-		order[i] = makeOrder(int(id), int(c.at))
-		c.at++
-		if int(c.at) == len(c.ents) {
-			last := len(m.heap) - 1
-			m.heap[0] = m.heap[last]
-			m.heap = m.heap[:last]
-		} else {
-			m.load(id)
-		}
-		if len(m.heap) > 0 {
-			m.siftRoot()
-		}
-	}
 }
 
-func makeOrder(chunk, slot int) uint32 {
-	return uint32(chunk)<<orderSlotBits | uint32(slot) //nolint:gosec
+// peek returns the chunk the merge cursor sits in and the entry it sits on.
+func (m *merger) peek() ([]byte, entryLoc) {
+	c := &m.cur[m.heap[0]]
+	return c.buf, c.ents[c.at]
+}
+
+// next moves the cursor to the following entry in key order.
+func (m *merger) next() {
+	m.at++
+	id := m.heap[0]
+	c := &m.cur[id]
+	c.at++
+	if int(c.at) == len(c.ents) {
+		last := len(m.heap) - 1
+		m.heap[0] = m.heap[last]
+		m.heap = m.heap[:last]
+	} else {
+		m.load(id)
+	}
+	if len(m.heap) > 0 {
+		m.siftRoot()
+	}
 }
 
 func (m *merger) release() {
 	clear(m.cur)
-	m.cur, m.pfx, m.heap = m.cur[:0], m.pfx[:0], m.heap[:0]
+	m.cur, m.pfx, m.heap, m.starts = m.cur[:0], m.pfx[:0], m.heap[:0], m.starts[:0]
+	m.at, m.chunk, m.concat = 0, 0, false
 }
 
 // load caches the key a cursor sits on and its prefix.
