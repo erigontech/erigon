@@ -19,7 +19,10 @@ package commands
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
+	"errors"
 	"fmt"
+	"math"
 	"sort"
 
 	"github.com/spf13/cobra"
@@ -27,6 +30,7 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/etl"
 	"github.com/erigontech/erigon/db/kv"
 	"github.com/erigontech/erigon/db/state"
 	"github.com/erigontech/erigon/db/state/statecfg"
@@ -98,8 +102,27 @@ func openHistory(ctx context.Context, dirs datadir.Dirs, domainName string, scan
 	if err != nil {
 		return nil, nil, fmt.Errorf("init history: %w", err)
 	}
-	history.Scan(ctx, scanToStep*settings.StepSize)
+	scanToTxNum, err := stepToTxNum(scanToStep, settings.StepSize)
+	if err != nil {
+		return nil, nil, err
+	}
+	if err := history.Scan(ctx, scanToTxNum); err != nil {
+		return nil, nil, fmt.Errorf("scan history files: %w", err)
+	}
 	return history, settings, nil
+}
+
+// stepToTxNum converts a step bound to a txNum bound, saturating at MaxUint64
+// rather than wrapping: --to defaults to 1e18, which overflows for every real
+// step size.
+func stepToTxNum(step, stepSize uint64) (uint64, error) {
+	if stepSize == 0 {
+		return 0, errors.New("invalid stepSize=0")
+	}
+	if step > math.MaxUint64/stepSize {
+		return math.MaxUint64, nil
+	}
+	return step * stepSize, nil
 }
 
 var printCmd = &cobra.Command{
@@ -119,7 +142,11 @@ var printCmd = &cobra.Command{
 			logger.Error("Failed to open history", "error", err)
 			return
 		}
-		stepSize := settings.StepSize
+		dumpFrom, dumpTo, err := stepDumpBounds(settings.StepSize)
+		if err != nil {
+			logger.Error("Invalid step range", "error", err)
+			return
+		}
 
 		roTx := history.BeginFilesRoForDebug()
 		defer roTx.Close()
@@ -132,11 +159,12 @@ var printCmd = &cobra.Command{
 		}
 
 		err = roTx.HistoryDump(
-			int(fromStep)*int(stepSize),
-			int(toStep)*int(stepSize),
+			dumpFrom,
+			dumpTo,
 			keyToDump,
-			func(key []byte, txNum uint64, val []byte) {
+			func(key []byte, txNum uint64, val []byte) error {
 				fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
+				return nil
 			},
 		)
 		if err != nil {
@@ -163,7 +191,11 @@ var distributionCmd = &cobra.Command{
 			logger.Error("Failed to open history", "error", err)
 			return
 		}
-		stepSize := settings.StepSize
+		dumpFrom, dumpTo, err := stepDumpBounds(settings.StepSize)
+		if err != nil {
+			logger.Error("Invalid step range", "error", err)
+			return
+		}
 
 		roTx := history.BeginFilesRoForDebug()
 		defer roTx.Close()
@@ -172,14 +204,13 @@ var distributionCmd = &cobra.Command{
 		uniqueEntries := 0
 
 		err = roTx.HistoryDump(
-			int(fromStep)*int(stepSize),
-			int(toStep)*int(stepSize),
+			dumpFrom,
+			dumpTo,
 			nil,
-			func(key []byte, txNum uint64, val []byte) {
+			func(key []byte, txNum uint64, val []byte) error {
 				keysEntries[string(key)] += 1
 				uniqueEntries++
-
-				//fmt.Printf("key: %x, txn: %d, val: %x\n", key, txNum, val)
+				return nil
 			},
 		)
 		if err != nil {
@@ -290,6 +321,77 @@ func historyDomainNames() []string {
 	return names
 }
 
+// errHistoryNotInFiles marks a domain whose history has not been collated into
+// files yet. HistoryDump reads frozen .ef/.v only, so that domain's DB-resident
+// history is not covered and the run must not report it as clean.
+var errHistoryNotInFiles = errors.New("history not collated into files yet, so it was not scanned")
+
+// stepDumpBounds resolves the --from/--to step flags to HistoryDump's arguments.
+func stepDumpBounds(stepSize uint64) (int, int, error) {
+	fromTxNum, err := stepToTxNum(fromStep, stepSize)
+	if err != nil {
+		return 0, 0, err
+	}
+	toTxNum, err := stepToTxNum(toStep, stepSize)
+	if err != nil {
+		return 0, 0, err
+	}
+	from, to := dumpBounds(fromTxNum, toTxNum)
+	return from, to, nil
+}
+
+// dumpBounds converts txNum bounds to HistoryDump's int arguments, using its -1
+// "unbounded" for anything that does not fit. HistoryDump filters whole files
+// only, so these are a coarse pre-filter; the exact bound is applied per entry.
+func dumpBounds(fromTxNum, toTxNum uint64) (int, int) {
+	maxInt := uint64(^uint(0) >> 1)
+	from, to := -1, -1
+	if fromTxNum <= maxInt {
+		from = int(fromTxNum)
+	}
+	if toTxNum <= maxInt {
+		to = int(toTxNum)
+	}
+	return from, to
+}
+
+// histDupSorter replays entries sorted by key||txNum. HistoryDump walks files
+// outer and keys inner, so the same key reappears once per .ef file with every
+// other key in between; sorting is what makes "the previous entry for this key"
+// mean the previous entry chain-wide rather than within one file.
+type histDupSorter struct {
+	collector *etl.Collector
+	txNumBuf  [8]byte
+}
+
+func newHistDupSorter(logPrefix, tmpdir string, logger log.Logger) *histDupSorter {
+	return &histDupSorter{collector: etl.NewCollectorWithAllocator(logPrefix, tmpdir, etl.SmallSortableBuffers, logger)}
+}
+
+func (s *histDupSorter) Close() { s.collector.Close() }
+
+func (s *histDupSorter) add(key []byte, txNum uint64, val []byte) error {
+	binary.BigEndian.PutUint64(s.txNumBuf[:], txNum)
+	return s.collector.Collect(append(bytes.Clone(key), s.txNumBuf[:]...), val)
+}
+
+func (s *histDupSorter) scan(ctx context.Context, sampleLimit int) (*histDupScan, error) {
+	scan := &histDupScan{sampleLimit: sampleLimit}
+	// bucket "" with a nil tx: ETL is a sort scratch-pad here, and that pair
+	// also keeps an empty value (a deletion marker) from being dropped.
+	if err := s.collector.Load(nil, "", func(k, v []byte, _ etl.CurrentTableReader, next etl.LoadNextFunc) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		scan.observe(k[:len(k)-8], v)
+		return nil
+	}, etl.TransformArgs{Quit: ctx.Done()}); err != nil {
+		return nil, err
+	}
+	scan.finish()
+	return scan, nil
+}
+
 func scanDomainDuplicates(ctx context.Context, dirs datadir.Dirs, name string, logger log.Logger) (*histDupScan, error) {
 	history, settings, err := openHistory(ctx, dirs, name, toStep, logger)
 	if err != nil {
@@ -299,72 +401,82 @@ func scanDomainDuplicates(ctx context.Context, dirs datadir.Dirs, name string, l
 
 	roTx := history.BeginFilesRoForDebug()
 	defer roTx.Close()
-
-	if dupSamples < 0 {
-		return nil, fmt.Errorf("--samples must be >= 0")
-	}
-	if toStep < fromStep {
-		return nil, fmt.Errorf("--to (%d) must be >= --from (%d)", toStep, fromStep)
+	if len(roTx.Files()) == 0 {
+		return nil, errHistoryNotInFiles
 	}
 
-	stepSize := settings.StepSize
-	if stepSize == 0 {
-		return nil, fmt.Errorf("invalid stepSize=0")
-	}
-	maxInt := int(^uint(0) >> 1)
-	maxStepForInt := uint64(maxInt) / stepSize
-	if fromStep > maxStepForInt {
-		return nil, fmt.Errorf("--from too large (from=%d, stepSize=%d)", fromStep, stepSize)
-	}
-	fromTxNum := int(fromStep * stepSize)
-
-	// Use -1 to mean "unbounded" (per HistoryDump contract) when --to doesn't fit in int.
-	toTxNum := -1
-	if toStep <= maxStepForInt {
-		toTxNum = int(toStep * stepSize)
-	}
-
-	scan := &histDupScan{sampleLimit: dupSamples}
-	if err := roTx.HistoryDump(
-		fromTxNum,
-		toTxNum,
-		nil,
-		func(key []byte, _ uint64, val []byte) { scan.observe(key, val) },
-	); err != nil {
+	fromTxNum, err := stepToTxNum(fromStep, settings.StepSize)
+	if err != nil {
 		return nil, err
 	}
-	scan.finish()
-	return scan, nil
+	toTxNum, err := stepToTxNum(toStep, settings.StepSize)
+	if err != nil {
+		return nil, err
+	}
+	dumpFrom, dumpTo := dumpBounds(fromTxNum, toTxNum)
+
+	sorter := newHistDupSorter(name+" history duplicates", dirs.Tmp, logger)
+	defer sorter.Close()
+
+	if err := roTx.HistoryDump(dumpFrom, dumpTo, nil, func(key []byte, txNum uint64, val []byte) error {
+		if err := ctx.Err(); err != nil {
+			return err
+		}
+		// HistoryDump's own from/to filtering is per file, so a partially
+		// overlapping file yields entries outside the requested range.
+		if txNum < fromTxNum || txNum >= toTxNum {
+			return nil
+		}
+		return sorter.add(key, txNum, val)
+	}); err != nil {
+		return nil, err
+	}
+	return sorter.scan(ctx, dupSamples)
 }
 
 var duplicatesCmd = &cobra.Command{
 	Use:   "duplicates",
 	Short: "Report keys whose history has consecutive duplicate (redundant) values, per domain",
-	Run: func(cmd *cobra.Command, args []string) {
+	RunE: func(cmd *cobra.Command, args []string) error {
 		logger := debug.SetupCobra(cmd, "integration")
+
+		if dupSamples < 0 {
+			return fmt.Errorf("--samples must be >= 0, got %d", dupSamples)
+		}
+		if toStep < fromStep {
+			return fmt.Errorf("--to (%d) must be >= --from (%d)", toStep, fromStep)
+		}
 
 		dirs, l, err := datadir.New(datadirCli).MustFlock()
 		if err != nil {
-			logger.Error("Opening Datadir", "error", err)
-			return
+			return fmt.Errorf("opening datadir: %w", err)
 		}
 		defer l.Unlock()
 
 		names := historyDomainNames()
 		if historyDomain != "" {
+			if _, err := kv.String2Domain(historyDomain); err != nil {
+				return fmt.Errorf("--domain: %w", err)
+			}
 			names = []string{historyDomain}
 		}
 
 		ctx := cmd.Context()
-		var withDup []string
+		var withDup, unscanned []string
 		for _, name := range names {
 			scan, err := scanDomainDuplicates(ctx, dirs, name, logger)
-			if err != nil {
-				logger.Warn("skipping domain", "domain", name, "err", err)
+			switch {
+			case errors.Is(err, errHistoryNotInFiles):
+				fmt.Printf("domain=%-11s %s\n", name, err)
+				unscanned = append(unscanned, name)
 				continue
+			case err != nil:
+				// Every domain must be accounted for: a partial scan reported as
+				// clean is worse than no scan at all.
+				return fmt.Errorf("scan domain %s: %w", name, err)
 			}
 			if scan.Entries == 0 {
-				fmt.Printf("domain=%-11s no history entries (disabled or empty)\n", name)
+				fmt.Printf("domain=%-11s no history entries in the requested range\n", name)
 				continue
 			}
 			pct := float64(scan.DupPairs) * 100 / float64(scan.Entries)
@@ -377,10 +489,14 @@ var duplicatesCmd = &cobra.Command{
 				}
 			}
 		}
-		if len(withDup) == 0 {
-			fmt.Println("no consecutive duplicate history values found")
-		} else {
+		if len(withDup) > 0 {
 			fmt.Printf("domains with duplicate history values: %v\n", withDup)
+			return nil
 		}
+		if len(unscanned) > 0 {
+			return fmt.Errorf("scan incomplete: %v have history only in the DB", unscanned)
+		}
+		fmt.Println("no consecutive duplicate history values found")
+		return nil
 	},
 }
