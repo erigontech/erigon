@@ -201,18 +201,19 @@ ledger_error() {
   exit 1
 }
 
-# The marker comments double as the rate-limit ledger: at most MAX_REQUEUES
-# automatic attempts per rolling 24 h, so a systematically broken runner pool
-# cannot keep a PR looping through the queue.
+# Marker comments from the workflow bot double as the rate-limit ledger: at
+# most MAX_REQUEUES automatic attempts per rolling 24 h, so a systematically
+# broken runner pool cannot keep a PR looping through the queue.
 marker='<!-- merge-queue-auto-requeue -->'
 cap_marker='<!-- merge-queue-auto-requeue-cap -->'
+ledger_author='github-actions[bot]'
 now=${MQ_NOW:-$(date +%s)}
 max=${MAX_REQUEUES:-3}
 if [ -n "${MQ_NO_FETCH:-}" ]; then
   comments="${MQ_COMMENTS_JSON:-[]}"
 else
   if ! comments=$(gh api "repos/${GITHUB_REPOSITORY}/issues/${PR_NUMBER}/comments?per_page=100" \
-    --paginate --jq '.[] | {body, created_at}' | jq -s '.'); then
+    --paginate --jq '.[] | {body, created_at, author: (.user.login // "")}' | jq -s '.'); then
     comments=""
   fi
 fi
@@ -220,8 +221,8 @@ if ! jq -e 'type == "array"' <<<"$comments" >/dev/null 2>&1; then
   ledger_error
 fi
 recent_count() {
-  jq --argjson now "$now" --arg m "$1" \
-    '[.[] | select(.body | contains($m)) | select((.created_at | fromdateiso8601) > ($now - 86400))] | length' \
+  jq --argjson now "$now" --arg m "$1" --arg author "$ledger_author" \
+    '[.[] | select(.author == $author) | select(.body | contains($m)) | select((.created_at | fromdateiso8601) > ($now - 86400))] | length' \
     <<<"$comments" 2>/dev/null
 }
 if ! recent=$(recent_count "$marker"); then
