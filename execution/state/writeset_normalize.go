@@ -48,6 +48,14 @@ type sdCascadeStats struct {
 	took       time.Duration
 	vmTook     time.Duration
 	domainTook time.Duration
+
+	// A walk that returns nothing still pays the file-count cost, so an
+	// all-empty cascade is the signal that the time went to prefix walks over
+	// addresses that own no storage.
+	domainCalls int
+	domainEmpty int
+	domainMax   time.Duration
+	worstAddr   accounts.Address
 }
 
 // logSlowNormalize dumps the geometry of a write set whose Normalize ran long.
@@ -78,6 +86,9 @@ func logSlowNormalize(writes, filtered *WriteSet, took time.Duration, blockNum u
 		"createContract", len(writes.createContract),
 		"sdCalls", sd.calls, "sdSlots", sd.slots, "sdTook", sd.took,
 		"sdDomainTook", sd.domainTook, "sdVMTook", sd.vmTook,
+		"sdDomainCalls", sd.domainCalls, "sdDomainEmpty", sd.domainEmpty,
+		"sdDomainMax", sd.domainMax, "sdWorstAddr", sd.worstAddr,
+		"outsideCascade", took-sd.took,
 		"in", writes.Count(), "out", filtered.Count())
 }
 
@@ -145,12 +156,20 @@ func (writes *WriteSet) Normalize(vm *VersionMap, blockNum uint64, txIndex int, 
 		}
 		if domainStorageKeys != nil {
 			domainStarted := time.Now()
-			committed, err := domainStorageKeys(addr)
-			sdStats.domainTook += time.Since(domainStarted)
+			domainKeys, err := domainStorageKeys(addr)
+			domainTook := time.Since(domainStarted)
+			sdStats.domainTook += domainTook
+			sdStats.domainCalls++
 			if err != nil {
 				return nil, err
 			}
-			for _, k := range committed {
+			if len(domainKeys) == 0 {
+				sdStats.domainEmpty++
+			}
+			if domainTook > sdStats.domainMax {
+				sdStats.domainMax, sdStats.worstAddr = domainTook, addr
+			}
+			for _, k := range domainKeys {
 				if _, ok := seen[k]; !ok {
 					seen[k] = struct{}{}
 					out = append(out, k)
@@ -368,7 +387,9 @@ func (writes *WriteSet) Normalize(vm *VersionMap, blockNum uint64, txIndex int, 
 	defer func() {
 		took := time.Since(normalize2Started)
 		if took >= dbg.ToLogSlowTxn/2 {
-			log.Warn("[dbg] slow WriteSet.Normalize2", "took", took, "blockNum", blockNum, "txIndex", txIndex)
+			log.Warn("[dbg] slow WriteSet.Normalize/account-field-backfill",
+				"took", took, "blockNum", blockNum, "txIndex", txIndex,
+				"addrs", len(allAddresses), "in", writes.Count())
 		}
 	}()
 
@@ -451,7 +472,9 @@ func (writes *WriteSet) Normalize(vm *VersionMap, blockNum uint64, txIndex int, 
 	defer func() {
 		took := time.Since(normalize3Started)
 		if took >= dbg.ToLogSlowTxn/2 {
-			log.Warn("[dbg] slow WriteSet.Normalize3", "took", took, "blockNum", blockNum, "txIndex", txIndex)
+			log.Warn("[dbg] slow WriteSet.Normalize/code-recovery",
+				"took", took, "blockNum", blockNum, "txIndex", txIndex,
+				"codeHash", len(writes.codeHash), "code", len(writes.code))
 		}
 	}()
 
