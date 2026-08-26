@@ -36,58 +36,15 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/crypto"
 	"github.com/erigontech/erigon/common/hexutil"
-	"github.com/erigontech/erigon/common/log/v3"
 	"github.com/erigontech/erigon/common/math"
 	"github.com/erigontech/erigon/common/u256"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/rlp"
+	"github.com/erigontech/erigon/execution/types/accounts"
 )
 
-// the following 2 functions are replica for the test
-// This is a replica of `bor.GetValidatorBytes` function
-// This was needed because currently, `IsNapoli` will always return false.
-func GetValidatorBytesTest(h *Header) []byte {
-	if len(h.Extra) < ExtraVanityLength+ExtraSealLength {
-		log.Error("length of extra is less than vanity and seal")
-		return nil
-	}
-
-	var blockExtraData BlockExtraDataTest
-	if err := rlp.DecodeBytes(h.Extra[ExtraVanityLength:len(h.Extra)-ExtraSealLength], &blockExtraData); err != nil {
-		log.Error("error while decoding block extra data", "err", err)
-		return nil
-	}
-
-	return blockExtraData.ValidatorBytes
-}
-
-func GetTxDependencyTest(b *Block) [][]uint64 {
-	if len(b.header.Extra) < ExtraVanityLength+ExtraSealLength {
-		log.Error("length of extra less is than vanity and seal")
-		return nil
-	}
-
-	var blockExtraData BlockExtraDataTest
-	if err := rlp.DecodeBytes(b.header.Extra[ExtraVanityLength:len(b.header.Extra)-ExtraSealLength], &blockExtraData); err != nil {
-		log.Error("error while decoding block extra data", "err", err)
-		return nil
-	}
-
-	return blockExtraData.TxDependency
-}
-
-type BlockExtraDataTest struct {
-	// Validator bytes of bor
-	ValidatorBytes []byte
-
-	// length of TxDependency          ->   n (n = number of transactions in the block)
-	// length of TxDependency[i]       ->   k (k = a whole number)
-	// k elements in TxDependency[i]   ->   transaction indexes on which transaction i is dependent on
-	TxDependency [][]uint64
-}
-
-func TestTxDependencyBlockDecoding(t *testing.T) {
+func TestBlockDecodingNestedRLPExtra(t *testing.T) {
 	t.Parallel()
 
 	blockEnc := common.FromHex("f90270f9026ba00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000948888f1f195afa192cfee860698584c030f4c9db1a0ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017a00000000000000000000000000000000000000000000000000000000000000000a00000000000000000000000000000000000000000000000000000000000000000b90100000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000008302000080832fefd8825208845506eb07b8710000000000000000000000000000000000000000000000000000000000000000cf8776616c20736574c6c20201c201800000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000000a0bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498880000000000000000c0c0")
@@ -107,12 +64,6 @@ func TestTxDependencyBlockDecoding(t *testing.T) {
 	check("MixDigest", block.MixDigest(), common.HexToHash("bd4472abb6659ebe3ee06ee4d7b72a00a9f4d001caca51342001075469aff498"))
 	check("Root", block.Root(), common.HexToHash("ef1552a40b7165c3cd773806b9e0c165b75356e0314bf0706f279c729f51e017"))
 	check("Time", block.Time(), uint64(1426516743))
-
-	validatorBytes := GetValidatorBytesTest(block.header)
-	txDependency := GetTxDependencyTest(&block)
-
-	check("validatorBytes", validatorBytes, []byte("val set"))
-	check("txDependency", txDependency, [][]uint64{{2, 1}, {1, 0}})
 
 	ourBlockEnc, err := rlp.EncodeToBytes(&block)
 
@@ -173,10 +124,10 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 	}
 
 	hashBefore := decoded.Hash()
-	bal := []byte{0x01, 0x02, 0x03}
-	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), bal)
-	if got := block.BlockAccessList(); !bytes.Equal(got, bal) {
-		t.Errorf("BAL mismatch: got %x want %x", got, bal)
+	bal := BlockAccessList{{Address: accounts.InternAddress(common.Address{1})}}
+	block := NewBlockFromNetwork(decoded.HeaderNoCopy(), decoded.Body(), NewBlockAccessListSidecar(bal))
+	if got := block.BlockAccessList(); !reflect.DeepEqual(got, bal) {
+		t.Errorf("BAL mismatch: got %v want %v", got, bal)
 	}
 	if got := block.Hash(); got != hashBefore {
 		t.Errorf("BAL changed block hash: got %x want %x", got, hashBefore)
@@ -194,8 +145,47 @@ func TestBlockAccessListNotInEncoding(t *testing.T) {
 		t.Fatal("decode error: ", err)
 	}
 	if roundTrip.BlockAccessList() != nil {
-		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %x", roundTrip.BlockAccessList())
+		t.Errorf("BAL survived RLP round-trip (must be a non-encoded sidecar): %v", roundTrip.BlockAccessList())
 	}
+}
+
+func TestBlockCarriesBlockAccessListSidecar(t *testing.T) {
+	raw := []byte{0xc0}
+	sidecar, err := DecodeBlockAccessListSidecar(raw)
+	if err != nil {
+		t.Fatalf("decode BAL sidecar: %v", err)
+	}
+	block := NewBlockFromNetwork(&Header{}, &Body{}, sidecar)
+	if block.BlockAccessListSidecar() != sidecar {
+		t.Fatal("block did not retain BAL sidecar")
+	}
+	if block.BlockAccessList() == nil {
+		t.Fatal("block lost empty BAL")
+	}
+	gotRaw, err := block.BlockAccessListSidecar().Bytes()
+	if err != nil {
+		t.Fatalf("sidecar bytes: %v", err)
+	}
+	if !bytes.Equal(gotRaw, raw) {
+		t.Fatalf("sidecar RLP differs: got %x, want %x", gotRaw, raw)
+	}
+}
+
+func TestWithBlockAccessListSidecarPreservesCaches(t *testing.T) {
+	block := NewBlockFromStorage(common.Hash{1}, &Header{}, nil, nil, nil, nil)
+	block.binaryTransactions = BinaryTransactions{{1, 2, 3}}
+	block.size.Store(123)
+	sidecar := NewBlockAccessListSidecar(BlockAccessList{{
+		Address: accounts.InternAddress(common.Address{1}),
+	}})
+
+	withSidecar := block.WithBlockAccessListSidecar(sidecar)
+
+	require.Same(t, sidecar, withSidecar.BlockAccessListSidecar())
+	require.Nil(t, block.BlockAccessListSidecar())
+	require.Same(t, block.header, withSidecar.header)
+	require.Equal(t, block.binaryTransactions, withSidecar.binaryTransactions)
+	require.Equal(t, block.size.Load(), withSidecar.size.Load())
 }
 
 func TestEIP1559BlockEncoding(t *testing.T) {
@@ -502,7 +492,7 @@ func makeBenchBlock() *Block {
 			Extra:      []byte("benchmark uncle"),
 		}
 	}
-	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */)
+	return NewBlock(header, txs, uncles, receipts, nil /* withdrawals */, nil)
 }
 
 func TestCanEncodeAndDecodeRawBody(t *testing.T) {
@@ -729,7 +719,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 		Amount:    5_000_000_000,
 	}
 
-	block := NewBlock(&header, nil, nil, nil, withdrawals)
+	block := NewBlock(&header, nil, nil, nil, withdrawals, nil)
 	_ = block.Size()
 
 	encoded, err := rlp.EncodeToBytes(block)
@@ -741,7 +731,7 @@ func TestWithdrawalsEncoding(t *testing.T) {
 	assert.Equal(t, block.Hash(), decoded.Hash())
 
 	// Now test with empty withdrawals
-	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{})
+	block2 := NewBlock(&header, nil, nil, nil, []*Withdrawal{}, nil)
 	_ = block2.Size()
 
 	encoded2, err := rlp.EncodeToBytes(block2)

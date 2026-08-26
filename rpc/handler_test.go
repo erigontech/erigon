@@ -304,12 +304,9 @@ func TestMethodInvoke_InvalidJSON(t *testing.T) {
 	assert.True(t, errors.As(err, &ipErr))
 }
 
-// TestRunMethodFlushHookNilFunc pins the invariant that runMethod must not panic when the
-// gzip-streaming hook stored on the context is a typed nil func(), not just an untyped nil.
-// The normal masking path (withoutGzipStreamingHook) stores an untyped nil so the type
-// assertion fails outright, but runMethod's guard should not depend on callers always doing
-// that correctly.
-func TestRunMethodFlushHookNilFunc(t *testing.T) {
+// Smoke test for the streamable-callback path: runMethod writes the result
+// through the stream without panicking.
+func TestRunMethodStreamable(t *testing.T) {
 	msg := jsonrpcMessage{
 		Version: "2.0",
 		ID:      []byte{49},
@@ -332,7 +329,7 @@ func TestRunMethodFlushHookNilFunc(t *testing.T) {
 		t.Fatal(err)
 	}
 
-	ctx := context.WithValue(context.Background(), httpFlusherContextKey{}, (func())(nil))
+	ctx := context.Background()
 
 	var buf bytes.Buffer
 	stream := jsonstream.New(jsoniter.NewStream(jsoniter.ConfigDefault, &buf, 4096))

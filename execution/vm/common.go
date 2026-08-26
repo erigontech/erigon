@@ -91,8 +91,6 @@ func CheckMaxCodeSize(size int, rules *chain.Rules) error {
 	switch {
 	case rules.IsAmsterdam:
 		maxSize = params.MaxCodeSizeAmsterdam
-	case rules.IsAhmedabad:
-		maxSize = params.MaxCodeSizeAhmedabad
 	default:
 		maxSize = params.MaxCodeSize
 	}
