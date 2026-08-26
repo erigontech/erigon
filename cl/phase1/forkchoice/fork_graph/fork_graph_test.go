@@ -20,6 +20,7 @@ import (
 	_ "embed"
 	"errors"
 	"os"
+	"runtime"
 	"sync"
 	"testing"
 	"time"
@@ -30,6 +31,7 @@ import (
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
+	"github.com/erigontech/erigon/cl/cltypes/solid"
 	"github.com/erigontech/erigon/cl/utils"
 	"github.com/erigontech/erigon/common"
 	"github.com/stretchr/testify/require"
@@ -335,6 +337,142 @@ func TestPruneKeepsLowestAvailableBlockMonotonic(t *testing.T) {
 
 	require.NoError(t, f.Prune(120))
 	require.Equal(t, uint64(151), f.LowestAvailableSlot())
+}
+
+func TestPruneKeepsParticipationIndicesFromRetainedConcurrentAdd(t *testing.T) {
+	const blockSlot = uint64(65)
+	const pruneSlot = blockSlot - 1
+	cfg := &clparams.MainnetBeaconConfig
+	beaconState := state.New(cfg)
+	beaconState.SetVersion(clparams.AltairVersion)
+	require.NoError(t, beaconState.SetSlot(blockSlot))
+	beaconState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: blockSlot})
+	require.NoError(t, beaconState.SetCurrentSyncCommittee(solid.NewSyncCommittee()))
+	require.NoError(t, beaconState.SetNextSyncCommittee(solid.NewSyncCommittee()))
+	current := solid.ParticipationBitListFromBytes([]byte{1, 2}, int(cfg.ValidatorRegistryLimit))
+	previous := solid.ParticipationBitListFromBytes([]byte{3, 4}, int(cfg.ValidatorRegistryLimit))
+	beaconState.SetCurrentEpochParticipation(current)
+	beaconState.SetPreviousEpochParticipation(previous)
+
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.AltairVersion)
+	block.Block.Slot = blockSlot
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	beaconState.SetPreviousStateRoot(common.Hash(blockRoot))
+	boundaryPublished := make(chan struct{})
+	continuePrune := make(chan struct{})
+	f := &forkGraphDisk{
+		fs:                    afero.NewMemMapFs(),
+		beaconCfg:             cfg,
+		rcfg:                  beacon_router_configuration.RouterConfiguration{Beacon: true},
+		children:              make(map[common.Hash]*validatedChildren),
+		currentState:          beaconState,
+		currentStateBlockRoot: common.Hash(blockRoot),
+		pruneBoundaryHook: func() {
+			close(boundaryPublished)
+			<-continuePrune
+		},
+	}
+	newerRoot := common.Hash{0xff}
+	newerBlock := cltypes.NewSignedBeaconBlock(cfg, clparams.AltairVersion)
+	newerBlock.Block.Slot = blockSlot + cfg.SlotsPerEpoch
+	f.blocks.Store(newerRoot, newerBlock)
+	require.NoError(t, afero.WriteFile(f.fs, getBeaconStateFilename(newerRoot), []byte{1}, 0o644))
+
+	pruneDone := make(chan error, 1)
+	go func() { pruneDone <- f.Prune(pruneSlot) }()
+	select {
+	case <-boundaryPublished:
+	case <-time.After(time.Second):
+		t.Fatal("prune did not publish its boundary")
+	}
+	require.Equal(t, blockSlot, f.LowestAvailableSlot())
+	_, result, err := f.AddChainSegment(block, false)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	close(continuePrune)
+	require.NoError(t, <-pruneDone)
+
+	epoch := blockSlot / cfg.SlotsPerEpoch
+	gotCurrent, err := f.GetCurrentParticipationIndicies(epoch)
+	require.NoError(t, err)
+	require.NotNil(t, gotCurrent)
+	require.Equal(t, current.Bytes(), gotCurrent.Bytes())
+	gotPrevious, err := f.GetPreviousParticipationIndicies(epoch)
+	require.NoError(t, err)
+	require.NotNil(t, gotPrevious)
+	require.Equal(t, previous.Bytes(), gotPrevious.Bytes())
+}
+
+func TestPruneKeepsParticipationIndicesFromRetainedPriorAdd(t *testing.T) {
+	const blockSlot = uint64(65)
+	const pruneSlot = uint64(64)
+	cfg := &clparams.MainnetBeaconConfig
+	beaconState := state.New(cfg)
+	beaconState.SetVersion(clparams.AltairVersion)
+	require.NoError(t, beaconState.SetSlot(blockSlot))
+	beaconState.SetLatestBlockHeader(&cltypes.BeaconBlockHeader{Slot: blockSlot})
+	require.NoError(t, beaconState.SetCurrentSyncCommittee(solid.NewSyncCommittee()))
+	require.NoError(t, beaconState.SetNextSyncCommittee(solid.NewSyncCommittee()))
+	current := solid.ParticipationBitListFromBytes([]byte{5, 6}, int(cfg.ValidatorRegistryLimit))
+	previous := solid.ParticipationBitListFromBytes([]byte{7, 8}, int(cfg.ValidatorRegistryLimit))
+	beaconState.SetCurrentEpochParticipation(current)
+	beaconState.SetPreviousEpochParticipation(previous)
+
+	block := cltypes.NewSignedBeaconBlock(cfg, clparams.AltairVersion)
+	block.Block.Slot = blockSlot
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+	beaconState.SetPreviousStateRoot(common.Hash(blockRoot))
+	f := &forkGraphDisk{
+		fs:                    afero.NewMemMapFs(),
+		beaconCfg:             cfg,
+		rcfg:                  beacon_router_configuration.RouterConfiguration{Beacon: true},
+		children:              make(map[common.Hash]*validatedChildren),
+		currentState:          beaconState,
+		currentStateBlockRoot: common.Hash(blockRoot),
+	}
+	_, result, err := f.AddChainSegment(block, false)
+	require.NoError(t, err)
+	require.Equal(t, Success, result)
+	newerRoot := common.Hash{0xfe}
+	newerBlock := cltypes.NewSignedBeaconBlock(cfg, clparams.AltairVersion)
+	newerBlock.Block.Slot = blockSlot + cfg.SlotsPerEpoch
+	f.blocks.Store(newerRoot, newerBlock)
+	require.NoError(t, afero.WriteFile(f.fs, getBeaconStateFilename(newerRoot), []byte{1}, 0o644))
+
+	require.NoError(t, f.Prune(pruneSlot))
+	require.Equal(t, blockSlot, f.LowestAvailableSlot())
+	_, retained := f.GetHeader(common.Hash(blockRoot))
+	require.True(t, retained)
+	epoch := blockSlot / cfg.SlotsPerEpoch
+	gotCurrent, err := f.GetCurrentParticipationIndicies(epoch)
+	require.NoError(t, err)
+	require.NotNil(t, gotCurrent)
+	require.Equal(t, current.Bytes(), gotCurrent.Bytes())
+	gotPrevious, err := f.GetPreviousParticipationIndicies(epoch)
+	require.NoError(t, err)
+	require.NotNil(t, gotPrevious)
+	require.Equal(t, previous.Bytes(), gotPrevious.Bytes())
+}
+
+func TestLastFullyPrunedEpoch(t *testing.T) {
+	for _, tc := range []struct {
+		pruneSlot uint64
+		epoch     uint64
+		ok        bool
+	}{
+		{pruneSlot: 0},
+		{pruneSlot: 31},
+		{pruneSlot: 32, epoch: 0, ok: true},
+		{pruneSlot: 63, epoch: 0, ok: true},
+		{pruneSlot: 64, epoch: 1, ok: true},
+		{pruneSlot: 65, epoch: 1, ok: true},
+	} {
+		epoch, ok := lastFullyPrunedEpoch(tc.pruneSlot, 32)
+		require.Equal(t, tc.ok, ok, "prune slot %d", tc.pruneSlot)
+		require.Equal(t, tc.epoch, epoch, "prune slot %d", tc.pruneSlot)
+	}
 }
 
 func TestOrphanEnvelopeIsNotRediscoveredAfterRootRemoval(t *testing.T) {
@@ -693,4 +831,68 @@ func TestAddChainSegmentRejectsSlotBelowPrunedBoundary(t *testing.T) {
 	require.False(t, f.HasBlockChildAtOrAfter(block.Block.ParentRoot, block.Block.Slot))
 	require.False(t, isBelowPrunedBoundary(64, 65))
 	require.False(t, isBelowPrunedBoundary(^uint64(0), ^uint64(0)))
+}
+
+func TestAddChainSegmentDoesNotExcludeLifecycleReaders(t *testing.T) {
+	block := cltypes.NewSignedBeaconBlock(&clparams.MainnetBeaconConfig, clparams.DenebVersion)
+	anchorState := state.New(&clparams.MainnetBeaconConfig)
+	require.NoError(t, utils.DecodeSSZSnappy(block, block1, int(clparams.Phase0Version)))
+	require.NoError(t, utils.DecodeSSZSnappy(anchorState, anchor, int(clparams.Phase0Version)))
+	graph, err := NewForkGraphDisk(anchorState, nil, afero.NewMemMapFs(), beacon_router_configuration.RouterConfiguration{})
+	require.NoError(t, err)
+	f := graph.(*forkGraphDisk)
+	blockRoot, err := block.Block.HashSSZ()
+	require.NoError(t, err)
+
+	f.lifecycleMu.RLock()
+	lifecycleReaderHeld := true
+	t.Cleanup(func() {
+		if lifecycleReaderHeld {
+			f.lifecycleMu.RUnlock()
+		}
+	})
+
+	done := make(chan struct {
+		result ChainSegmentInsertionResult
+		err    error
+	}, 1)
+	go func() {
+		_, result, err := f.AddChainSegment(block, true)
+		done <- struct {
+			result ChainSegmentInsertionResult
+			err    error
+		}{result: result, err: err}
+	}()
+
+	statePublished := make(chan struct{})
+	go func() {
+		for {
+			f.currentStateMu.RLock()
+			published := f.currentStateBlockRoot == common.Hash(blockRoot)
+			f.currentStateMu.RUnlock()
+			if published {
+				close(statePublished)
+				return
+			}
+			runtime.Gosched()
+		}
+	}()
+	select {
+	case <-statePublished:
+	case <-time.After(time.Second):
+		t.Fatal("block insertion did not reach final lifecycle publication")
+	}
+	select {
+	case result := <-done:
+		t.Fatalf("block insertion completed before lifecycle reader released: %v", result)
+	default:
+	}
+
+	f.lifecycleMu.RUnlock()
+	lifecycleReaderHeld = false
+	result := <-done
+	require.NoError(t, result.err)
+	require.Equal(t, Success, result.result)
+	_, headerFound := f.GetHeader(common.Hash(blockRoot))
+	require.True(t, headerFound)
 }

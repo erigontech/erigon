@@ -1152,6 +1152,41 @@ func TestValidateBuilderPayloadRejectsMissingElectraExecutionRequests(t *testing
 	require.NoError(t, validateBuilderPayload(payload, cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.ElectraVersion), clparams.ElectraVersion))
 }
 
+func TestValidateBuilderExecutionRequestsDoesNotApplyLegacyGloasDepositMaximum(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxDepositRequestsPerPayload = 1
+	requests := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	requests.Deposits.Append(&solid.DepositRequest{})
+	requests.Deposits.Append(&solid.DepositRequest{})
+
+	require.NoError(t, validateBuilderExecutionRequests(&cfg, clparams.GloasVersion, requests))
+}
+
+func TestValidateBuilderExecutionRequestsBoundsGloasDepositResources(t *testing.T) {
+	requests := cltypes.NewExecutionRequestsWithVersion(&clparams.MainnetBeaconConfig, clparams.GloasVersion)
+	request := &solid.DepositRequest{}
+	for range int(clparams.MaxChunkSize)/solid.SizeDepositRequest + 1 {
+		requests.Deposits.Append(request)
+	}
+
+	require.ErrorContains(t, validateBuilderExecutionRequests(&clparams.MainnetBeaconConfig, clparams.GloasVersion, requests), "too many deposit requests")
+}
+
+func TestValidateBuilderExecutionRequestsPreservesOtherProtocolLimits(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxDepositRequestsPerPayload = 1
+	cfg.MaxWithdrawalRequestsPerPayload = 1
+	electra := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.ElectraVersion)
+	electra.Deposits.Append(&solid.DepositRequest{})
+	electra.Deposits.Append(&solid.DepositRequest{})
+	require.ErrorContains(t, validateBuilderExecutionRequests(&cfg, clparams.ElectraVersion, electra), "too many deposit requests")
+
+	gloas := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	gloas.Withdrawals.Append(&solid.WithdrawalRequest{})
+	gloas.Withdrawals.Append(&solid.WithdrawalRequest{})
+	require.ErrorContains(t, validateBuilderExecutionRequests(&cfg, clparams.GloasVersion, gloas), "too many withdrawal requests")
+}
+
 func TestBlockBuilderWindowLateStartKeepsPublicationMargin(t *testing.T) {
 	cfg := &clparams.BeaconChainConfig{
 		SecondsPerSlot:   12,

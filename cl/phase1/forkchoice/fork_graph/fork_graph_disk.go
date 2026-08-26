@@ -96,7 +96,9 @@ func convertHashSliceToHashList(in [][32]byte) solid.HashVectorSSZ {
 // each edge is the path described as (prevBlockRoot, currBlockRoot). if we want to go forward we use blocks.
 type forkGraphDisk struct {
 	lifecycleMu       sync.RWMutex
+	addPruneMu        sync.Mutex
 	pruneMu           sync.Mutex
+	pruneBoundaryHook func()
 	pruneBatchHook    func()
 	pruneChildrenHook func()
 
@@ -230,8 +232,8 @@ func (f *forkGraphDisk) isBlockRootTheCurrentState(blockRoot common.Hash) bool {
 
 // Add a new node and edge to the graph
 func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, fullValidation bool) (*state.CachingBeaconState, ChainSegmentInsertionResult, error) {
-	f.lifecycleMu.Lock()
-	defer f.lifecycleMu.Unlock()
+	f.addPruneMu.Lock()
+	defer f.addPruneMu.Unlock()
 
 	block := signedBlock.Block
 	blockRoot, err := block.HashSSZ()
@@ -393,24 +395,36 @@ func (f *forkGraphDisk) AddChainSegment(signedBlock *cltypes.SignedBeaconBlock, 
 		return nil, LogisticError, err
 	}
 
-	f.headers.Store(common.Hash(blockRoot), &cltypes.BeaconBlockHeader{
+	header := &cltypes.BeaconBlockHeader{
 		Slot:          block.Slot,
 		ProposerIndex: block.ProposerIndex,
 		ParentRoot:    block.ParentRoot,
 		Root:          block.StateRoot,
 		BodyRoot:      bodyRoot,
-	})
-	f.addValidatedChild(block.ParentRoot, common.Hash(blockRoot), block.Slot)
+	}
+	currentJustified := newState.CurrentJustifiedCheckpoint()
+	finalized := newState.FinalizedCheckpoint()
 
-	// Lastly add checkpoints to caches as well.
-	f.currentJustifiedCheckpoints.Store(common.Hash(blockRoot), newState.CurrentJustifiedCheckpoint())
-	f.finalizedCheckpoints.Store(common.Hash(blockRoot), newState.FinalizedCheckpoint())
+	f.lifecycleMu.Lock()
+	f.headers.Store(common.Hash(blockRoot), header)
+	f.addValidatedChild(block.ParentRoot, common.Hash(blockRoot), block.Slot)
+	f.currentJustifiedCheckpoints.Store(common.Hash(blockRoot), currentJustified)
+	f.finalizedCheckpoints.Store(common.Hash(blockRoot), finalized)
+	f.lifecycleMu.Unlock()
 
 	return newState, Success, nil
 }
 
 func isBelowPrunedBoundary(slot, lowestAvailable uint64) bool {
 	return lowestAvailable > 0 && slot < lowestAvailable-1
+}
+
+func lastFullyPrunedEpoch(pruneSlot, slotsPerEpoch uint64) (uint64, bool) {
+	completedEpochs := pruneSlot / slotsPerEpoch
+	if completedEpochs == 0 {
+		return 0, false
+	}
+	return completedEpochs - 1, true
 }
 
 func (f *forkGraphDisk) GetHeader(blockRoot common.Hash) (*cltypes.BeaconBlockHeader, bool) {
@@ -743,6 +757,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		return
 	}
 
+	f.addPruneMu.Lock()
 	f.lifecycleMu.Lock()
 	// Prune runs without the fork choice lock, so concurrent (or stale queued)
 	// calls may arrive out of order: only ever raise the marker.
@@ -753,6 +768,16 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		}
 	}
 	f.lifecycleMu.Unlock()
+	if lastPrunedEpoch, ok := lastFullyPrunedEpoch(pruneSlot, f.beaconCfg.SlotsPerEpoch); ok {
+		currentIndexKeys := f.currentIndicies.keysThrough(lastPrunedEpoch)
+		previousIndexKeys := f.previousIndicies.keysThrough(lastPrunedEpoch)
+		f.currentIndicies.deleteKeys(currentIndexKeys)
+		f.previousIndicies.deleteKeys(previousIndexKeys)
+	}
+	f.addPruneMu.Unlock()
+	if f.pruneBoundaryHook != nil {
+		f.pruneBoundaryHook()
+	}
 
 	oldRoots := make([]common.Hash, 0, f.beaconCfg.SlotsPerEpoch)
 	validatedRootsByParent := make(map[common.Hash][]common.Hash)
@@ -767,8 +792,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		}
 		return true
 	})
-	currentIndexKeys := f.currentIndicies.keysThrough(pruneSlot / f.beaconCfg.SlotsPerEpoch)
-	previousIndexKeys := f.previousIndicies.keysThrough(pruneSlot / f.beaconCfg.SlotsPerEpoch)
 	for start := 0; start < len(oldRoots); start += pruneBatchSize {
 		end := min(start+pruneBatchSize, len(oldRoots))
 		f.lifecycleMu.Lock()
@@ -789,16 +812,6 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 		if f.pruneBatchHook != nil {
 			f.pruneBatchHook()
 		}
-	}
-	for start := 0; start < max(len(currentIndexKeys), len(previousIndexKeys)); start += pruneBatchSize {
-		f.lifecycleMu.Lock()
-		if start < len(currentIndexKeys) {
-			f.currentIndicies.deleteKeys(currentIndexKeys[start:min(start+pruneBatchSize, len(currentIndexKeys))])
-		}
-		if start < len(previousIndexKeys) {
-			f.previousIndicies.deleteKeys(previousIndexKeys[start:min(start+pruneBatchSize, len(previousIndexKeys))])
-		}
-		f.lifecycleMu.Unlock()
 	}
 	if f.pruneChildrenHook != nil {
 		f.pruneChildrenHook()

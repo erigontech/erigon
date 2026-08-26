@@ -609,16 +609,36 @@ func TestExecutionPayloadServiceNames(t *testing.T) {
 	require.False(t, impl.IsMyGossipMessage("beacon_block"))
 }
 
-func TestValidateEnvelopeLimitsRejectsOversizedRequestsAndWithdrawals(t *testing.T) {
+func TestValidateEnvelopeLimitsDoesNotApplyLegacyDepositRequestMaximum(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig
 	cfg.MaxDepositRequestsPerPayload = 1
-	cfg.MaxWithdrawalsPerPayload = 1
 	envelope := cltypes.NewExecutionPayloadEnvelope(&cfg)
 	envelope.ExecutionRequests.Deposits.Append(&solid.DepositRequest{})
 	envelope.ExecutionRequests.Deposits.Append(&solid.DepositRequest{})
-	require.Error(t, validateEnvelopeLimits(&cfg, envelope))
+	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(cfg.MaxWithdrawalsPerPayload), 44)
+	require.NoError(t, validateEnvelopeLimits(&cfg, envelope))
+}
 
-	envelope = cltypes.NewExecutionPayloadEnvelope(&cfg)
+func TestExecutionPayloadServiceDecodesProgressiveDepositRequestsAboveLegacyGuard(t *testing.T) {
+	service, _ := setupExecutionPayloadService(t)
+	envelope := newTestSignedEnvelope(100, common.Hash{1}, 1)
+	const depositCount = 16_385
+	for range depositCount {
+		envelope.Message.ExecutionRequests.Deposits.Append(&solid.DepositRequest{})
+	}
+	encoded, err := envelope.EncodeSSZ(nil)
+	require.NoError(t, err)
+	require.Less(t, uint64(len(encoded)), clparams.MaxChunkSize)
+
+	decoded, err := service.DecodeGossipMessage("peer123", encoded, clparams.GloasVersion)
+	require.NoError(t, err)
+	require.Equal(t, depositCount, decoded.Message.ExecutionRequests.Deposits.Len())
+}
+
+func TestValidateEnvelopeLimitsRejectsOversizedRequestsAndWithdrawals(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxWithdrawalsPerPayload = 1
+	envelope := cltypes.NewExecutionPayloadEnvelope(&cfg)
 	envelope.Payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](16, 44)
 	envelope.Payload.Withdrawals.Append(&cltypes.Withdrawal{})
 	envelope.Payload.Withdrawals.Append(&cltypes.Withdrawal{})

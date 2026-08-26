@@ -412,9 +412,9 @@ func (f *ForkChoiceStore) isPayloadAvailable(root common.Hash) bool {
 	}
 	status, ok := f.GetRecentExecutionPayloadStatusByRoot(root)
 	if !ok {
-		return f.HasEnvelope(root)
+		return false
 	}
-	return status == execution_client.PayloadStatusNotValidated || status == execution_client.PayloadStatusValidated
+	return status == execution_client.PayloadStatusValidated
 }
 
 // validateParentPayloadPath validates that the block builds on the correct parent payload path.

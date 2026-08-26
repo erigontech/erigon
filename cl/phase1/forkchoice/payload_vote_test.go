@@ -20,8 +20,9 @@ import (
 
 type ptcVoteForkGraph struct {
 	fork_graph.ForkGraph
-	envelopes map[common.Hash]bool
-	blocks    map[common.Hash]*cltypes.SignedBeaconBlock
+	envelopes        map[common.Hash]bool
+	blocks           map[common.Hash]*cltypes.SignedBeaconBlock
+	acceptedPayloads map[common.Hash]bool
 }
 
 func (g ptcVoteForkGraph) HasEnvelope(root common.Hash) bool {
@@ -39,8 +40,9 @@ func (g ptcVoteForkGraph) IsPayloadUnavailable(common.Hash) bool {
 }
 func (g ptcVoteForkGraph) MarkPayloadAccepted(common.Hash, bool) {}
 func (g ptcVoteForkGraph) ClearPayloadAccepted(common.Hash)      {}
-func (g ptcVoteForkGraph) PayloadAccepted(common.Hash) (bool, bool) {
-	return false, false
+func (g ptcVoteForkGraph) PayloadAccepted(root common.Hash) (bool, bool) {
+	verified, ok := g.acceptedPayloads[root]
+	return verified, ok
 }
 
 func (g ptcVoteForkGraph) GetBlock(root common.Hash) (*cltypes.SignedBeaconBlock, bool) {
@@ -394,13 +396,20 @@ func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
 		name          string
 		hasEnvelope   bool
 		verified      bool
+		optimistic    bool
 		wantFullChild bool
 	}{
 		{
-			name:          "envelope present while EL syncs produces FULL child",
+			name:          "envelope present without EL status remains EMPTY only",
 			hasEnvelope:   true,
 			verified:      false,
-			wantFullChild: true,
+			wantFullChild: false,
+		},
+		{
+			name:          "optimistic EL status remains EMPTY only",
+			hasEnvelope:   true,
+			optimistic:    true,
+			wantFullChild: false,
 		},
 		{
 			name:          "envelope present and verified produces FULL child",
@@ -419,6 +428,9 @@ func TestGloasForkChoiceUsesPersistedPayload(t *testing.T) {
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
 			f := newPayloadVoteTestStore(t, root, tt.hasEnvelope, tt.verified)
+			if tt.optimistic {
+				f.payloadStatusByRoot.Add(root, execution_client.PayloadStatusNotValidated)
+			}
 
 			children := f.getNodeChildren(ForkChoiceNode{
 				Root:          root,
@@ -549,7 +561,7 @@ func TestPayloadAvailabilityByEngineStatus(t *testing.T) {
 		want   bool
 	}{
 		{name: "engine error", status: execution_client.PayloadStatusNone},
-		{name: "optimistic", status: execution_client.PayloadStatusNotValidated, want: true},
+		{name: "optimistic", status: execution_client.PayloadStatusNotValidated},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newPayloadVoteTestStore(t, root, true, false)
@@ -578,8 +590,8 @@ func TestValidateParentPayloadPathUsesValidationAvailability(t *testing.T) {
 		wantErr    bool
 	}{
 		{name: "engine error", status: execution_client.PayloadStatusNone, withStatus: true, wantErr: true},
-		{name: "optimistic", status: execution_client.PayloadStatusNotValidated, withStatus: true},
-		{name: "status absent"},
+		{name: "optimistic", status: execution_client.PayloadStatusNotValidated, withStatus: true, wantErr: true},
+		{name: "status absent", wantErr: true},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newPayloadVoteTestStore(t, parentRoot, true, false)
@@ -610,7 +622,7 @@ func TestApplyPayloadValidationResultRecordsRootAvailability(t *testing.T) {
 		available bool
 	}{
 		{name: "engine error", status: execution_client.PayloadStatusNone, wantErr: errELBehind},
-		{name: "optimistic", status: execution_client.PayloadStatusNotValidated, available: true},
+		{name: "optimistic", status: execution_client.PayloadStatusNotValidated},
 	} {
 		t.Run(test.name, func(t *testing.T) {
 			f := newPayloadVoteTestStore(t, root, true, false)
@@ -667,10 +679,10 @@ func TestPayloadStatusTransitionsUpdateDurableAvailability(t *testing.T) {
 		changed   bool
 		effective execution_client.PayloadStatus
 	}{
-		{name: "none to optimistic", initial: execution_client.PayloadStatusNone, next: execution_client.PayloadStatusNotValidated, available: true, changed: true, effective: execution_client.PayloadStatusNotValidated},
+		{name: "none to optimistic", initial: execution_client.PayloadStatusNone, next: execution_client.PayloadStatusNotValidated, changed: true, effective: execution_client.PayloadStatusNotValidated},
 		{name: "none to validated", initial: execution_client.PayloadStatusNone, next: execution_client.PayloadStatusValidated, available: true, verified: true, changed: true, effective: execution_client.PayloadStatusValidated},
 		{name: "none to invalidated", initial: execution_client.PayloadStatusNone, next: execution_client.PayloadStatusInvalidated, changed: true, effective: execution_client.PayloadStatusInvalidated},
-		{name: "optimistic to none", initial: execution_client.PayloadStatusNotValidated, next: execution_client.PayloadStatusNone, available: true, effective: execution_client.PayloadStatusNotValidated},
+		{name: "optimistic to none", initial: execution_client.PayloadStatusNotValidated, next: execution_client.PayloadStatusNone, effective: execution_client.PayloadStatusNotValidated},
 		{name: "validated to none", initial: execution_client.PayloadStatusValidated, next: execution_client.PayloadStatusNone, available: true, verified: true, effective: execution_client.PayloadStatusValidated},
 		{name: "validated to optimistic", initial: execution_client.PayloadStatusValidated, next: execution_client.PayloadStatusNotValidated, available: true, verified: true, effective: execution_client.PayloadStatusValidated},
 		{name: "invalidated to none", initial: execution_client.PayloadStatusInvalidated, next: execution_client.PayloadStatusNone, effective: execution_client.PayloadStatusInvalidated},
@@ -795,7 +807,11 @@ func newPtcVoteTestStore(root common.Hash) *ForkChoiceStore {
 	verifiedExecutionPayload.Add(root, struct{}{})
 	blocks := map[common.Hash]*cltypes.SignedBeaconBlock{root: block}
 	envelopes := map[common.Hash]bool{root: true}
-	fg := ptcVoteForkGraph{envelopes: envelopes, blocks: blocks}
+	fg := ptcVoteForkGraph{
+		envelopes:        envelopes,
+		blocks:           blocks,
+		acceptedPayloads: map[common.Hash]bool{root: true},
+	}
 	f := &ForkChoiceStore{
 		genesisTime: 0,
 		beaconCfg:   cfg,
