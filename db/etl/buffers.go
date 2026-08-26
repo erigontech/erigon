@@ -202,28 +202,15 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 type dataChunk struct {
 	buf    []byte
 	entTop int32
-
-	// ents is the chunk's index in key order once Sort has run. The merge walks
-	// it with at, and reads key and pfx instead of chasing the index on every
-	// compare.
-	ents []entryLoc
-	at   int32
-	key  []byte
-	pfx  uint64
 }
 
-func (c *dataChunk) keyOf(e entryLoc) []byte {
+// keyOf slices e's key out of the chunk holding it. A nil key comes back nil.
+func keyOf(buf []byte, e entryLoc) []byte {
 	if kLen := e.keyLen(); kLen > 0 {
 		off := e.offset() + entryHeaderSize
-		return c.buf[off : off+kLen]
+		return buf[off : off+kLen]
 	}
 	return nil
-}
-
-// loadKey caches the merge cursor's key and its prefix.
-func (c *dataChunk) loadKey() {
-	c.key = c.keyOf(c.ents[c.at])
-	c.pfx = keyPrefix(c.key)
 }
 
 // keyPrefix is the first 8 bytes of k, zero-padded. Big-endian, so comparing
@@ -235,6 +222,11 @@ func keyPrefix(k []byte) uint64 {
 	var pad [8]byte
 	copy(pad[:], k)
 	return binary.BigEndian.Uint64(pad[:])
+}
+
+// entry reads one slot of the chunk's index, without building the whole view.
+func (c *dataChunk) entry(slot uint32) entryLoc {
+	return entryLoc(binary.NativeEndian.Uint32(c.buf[c.entTop+int32(slot)*entryLocSize:])) //nolint:gosec
 }
 
 func (c *dataChunk) len() int { return (len(c.buf) - int(c.entTop)) / entryLocSize }
@@ -265,8 +257,8 @@ type sortableBuffer struct {
 	// Sort orders each chunk on its own and then merges the chunks once into
 	// order, so a read is an index rather than a step of a k-way merge.
 	order   []uint32 // every entry, in key order
-	heap    []int32  // chunk ids, ordered by their merge cursor's entry
-	sortedN int      // n as of the last Sort; -1 while unsorted
+	mrg     merger
+	sortedN int // n as of the last Sort; -1 while unsorted
 
 	chunkBytes  int
 	optimalSize int
@@ -385,7 +377,7 @@ func (b *sortableBuffer) entryAt(i int) ([]byte, entryLoc) {
 	}
 	o := b.order[i]
 	c := &b.chunks[o>>orderSlotBits]
-	return c.buf, c.ents[o&(1<<orderSlotBits-1)]
+	return c.buf, c.entry(o & (1<<orderSlotBits - 1))
 }
 
 // Prealloc only reserves room for the chunk headers. The chunks themselves are
@@ -403,7 +395,8 @@ func (b *sortableBuffer) Reset() {
 		putDataChunk(b.chunks[i].buf)
 	}
 	clear(b.chunks)
-	b.chunks, b.heap, b.order = b.chunks[:0], b.heap[:0], b.order[:0]
+	b.chunks, b.order = b.chunks[:0], b.order[:0]
+	b.mrg.release()
 	b.curBuf, b.curEnd, b.curTop = nil, 0, 0
 	b.n, b.chunkBytes = 0, 0
 	b.sortedN = -1
@@ -460,129 +453,164 @@ func (b *sortableBuffer) Sort() {
 		}
 		slices.SortFunc(ents, cmp)
 	}
-	b.merge()
+	b.order = slices.Grow(b.order[:0], b.n)[:b.n]
+	b.mrg.run(b.chunks, b.order)
 	b.sortedN = b.n
 }
 
-// merge lists every entry in key order, taking the lowest of the chunks' merge
-// cursors each step.
-func (b *sortableBuffer) merge() {
-	b.order = slices.Grow(b.order[:0], b.n)[:b.n]
-	for i := range b.chunks {
-		b.chunks[i].ents = b.chunks[i].entries()
+// merger lists the entries of already-sorted chunks in key order. It holds a
+// cursor per chunk and a heap of chunk ids ordered by the key each cursor sits
+// on. The prefixes live apart from the cursors because the heap reads them on
+// nearly every comparison, and a few hundred bytes of them stay in L1.
+type merger struct {
+	heap []int32  // chunk ids, ordered by their cursor's key
+	pfx  []uint64 // each cursor's key prefix, by chunk id
+	cur  []cursor // by chunk id
+}
+
+type cursor struct {
+	ents []entryLoc
+	buf  []byte
+	at   int32
+	key  []byte
+}
+
+// run lists every entry of chunks into order, which must already hold a slot
+// for each of them.
+func (m *merger) run(chunks []dataChunk, order []uint32) {
+	m.cur = slices.Grow(m.cur[:0], len(chunks))[:len(chunks)]
+	m.pfx = slices.Grow(m.pfx[:0], len(chunks))[:len(chunks)]
+	for i := range chunks {
+		m.cur[i] = cursor{ents: chunks[i].entries(), buf: chunks[i].buf}
 	}
-	if b.chunksInOrder() {
+	if m.chunksInOrder() {
 		at := 0
-		for i := range b.chunks {
-			for slot := range b.chunks[i].ents {
-				b.order[at] = uint32(i)<<orderSlotBits | uint32(slot) //nolint:gosec
+		for i := range m.cur {
+			for slot := range m.cur[i].ents {
+				order[at] = makeOrder(i, slot)
 				at++
 			}
 		}
 		return
 	}
-	b.heap = b.heap[:0]
-	for i := range b.chunks {
-		c := &b.chunks[i]
-		if c.at = 0; len(c.ents) == 0 {
+
+	m.heap = m.heap[:0]
+	for i := range m.cur {
+		if len(m.cur[i].ents) == 0 {
 			continue
 		}
-		c.loadKey()
-		b.heap = append(b.heap, int32(i)) //nolint:gosec
+		m.load(int32(i)) //nolint:gosec
+		m.heap = append(m.heap, int32(i))
 	}
-	for i := len(b.heap)/2 - 1; i >= 0; i-- {
-		b.siftDown(i)
+	for i := len(m.heap)/2 - 1; i >= 0; i-- {
+		m.siftDown(i)
 	}
-	for i := range b.order {
-		id := b.heap[0]
-		c := &b.chunks[id]
-		b.order[i] = uint32(id)<<orderSlotBits | uint32(c.at) //nolint:gosec
+	for i := range order {
+		id := m.heap[0]
+		c := &m.cur[id]
+		order[i] = makeOrder(int(id), int(c.at))
 		c.at++
 		if int(c.at) == len(c.ents) {
-			last := len(b.heap) - 1
-			b.heap[0] = b.heap[last]
-			b.heap = b.heap[:last]
+			last := len(m.heap) - 1
+			m.heap[0] = m.heap[last]
+			m.heap = m.heap[:last]
 		} else {
-			c.loadKey()
+			m.load(id)
 		}
-		if len(b.heap) > 0 {
-			b.siftRoot()
+		if len(m.heap) > 0 {
+			m.siftRoot()
 		}
 	}
+}
+
+func makeOrder(chunk, slot int) uint32 {
+	return uint32(chunk)<<orderSlotBits | uint32(slot) //nolint:gosec
+}
+
+func (m *merger) release() {
+	clear(m.cur)
+	m.cur, m.pfx, m.heap = m.cur[:0], m.pfx[:0], m.heap[:0]
+}
+
+// load caches the key a cursor sits on and its prefix.
+func (m *merger) load(id int32) {
+	c := &m.cur[id]
+	c.key = keyOf(c.buf, c.ents[c.at])
+	m.pfx[id] = keyPrefix(c.key)
 }
 
 // chunksInOrder reports whether every chunk's last key comes before the next
 // chunk's first, which keys arriving ascending produce. A tie keeps the earlier
 // chunk first, which is insertion order.
-func (b *sortableBuffer) chunksInOrder() bool {
-	for i := 1; i < len(b.chunks); i++ {
-		prev, cur := &b.chunks[i-1], &b.chunks[i]
+func (m *merger) chunksInOrder() bool {
+	for i := 1; i < len(m.cur); i++ {
+		prev, cur := &m.cur[i-1], &m.cur[i]
 		if len(prev.ents) == 0 || len(cur.ents) == 0 {
 			continue
 		}
-		if bytes.Compare(prev.keyOf(prev.ents[len(prev.ents)-1]), cur.keyOf(cur.ents[0])) > 0 {
+		if bytes.Compare(keyOf(prev.buf, prev.ents[len(prev.ents)-1]), keyOf(cur.buf, cur.ents[0])) > 0 {
 			return false
 		}
 	}
 	return true
 }
 
-// less orders two chunks by their current entry. Chunks fill in insertion
+// less orders two cursors by the key they sit on. Chunks fill in insertion
 // order, so the lower id wins a tie and equal keys come back in the order they
 // went in.
-func (b *sortableBuffer) less(x, y int32) bool {
-	cx, cy := &b.chunks[x], &b.chunks[y]
-	if cx.pfx != cy.pfx {
-		return cx.pfx < cy.pfx
+func (m *merger) less(x, y int32) bool {
+	if px, py := m.pfx[x], m.pfx[y]; px != py {
+		return px < py
 	}
-	if r := bytes.Compare(cx.key, cy.key); r != 0 {
+	if r := bytes.Compare(m.cur[x].key, m.cur[y].key); r != 0 {
 		return r < 0
 	}
 	return x < y
 }
 
-// siftRoot restores the heap after the root's entry moved on. It sinks the hole
-// to a leaf taking the smaller child, then climbs back until the old root fits,
-// which costs one compare a level instead of siftDown's two. The run that just
-// won usually holds a larger key now, so the hole nearly always reaches a leaf.
-func (b *sortableBuffer) siftRoot() {
-	x, i := b.heap[0], 0
+// siftRoot restores the heap after the root's cursor moved on. It sinks the
+// hole to a leaf taking the smaller child, then climbs back until the old root
+// fits, which costs one compare a level instead of siftDown's two. The cursor
+// that just won usually holds a larger key now, so the hole nearly always
+// reaches a leaf.
+func (m *merger) siftRoot() {
+	x, i := m.heap[0], 0
 	for {
 		l := 2*i + 1
-		if l >= len(b.heap) {
+		if l >= len(m.heap) {
 			break
 		}
-		if r := l + 1; r < len(b.heap) && b.less(b.heap[r], b.heap[l]) {
+		if r := l + 1; r < len(m.heap) && m.less(m.heap[r], m.heap[l]) {
 			l = r
 		}
-		b.heap[i] = b.heap[l]
+		m.heap[i] = m.heap[l]
 		i = l
 	}
 	for i > 0 {
 		p := (i - 1) / 2
-		if b.less(b.heap[p], x) {
+		if m.less(m.heap[p], x) {
 			break
 		}
-		b.heap[i] = b.heap[p]
+		m.heap[i] = m.heap[p]
 		i = p
 	}
-	b.heap[i] = x
+	m.heap[i] = x
 }
 
-func (b *sortableBuffer) siftDown(i int) {
+func (m *merger) siftDown(i int) {
 	for {
-		m, l, r := i, 2*i+1, 2*i+2
-		if l < len(b.heap) && b.less(b.heap[l], b.heap[m]) {
-			m = l
+		s, l, r := i, 2*i+1, 2*i+2
+		if l < len(m.heap) && m.less(m.heap[l], m.heap[s]) {
+			s = l
 		}
-		if r < len(b.heap) && b.less(b.heap[r], b.heap[m]) {
-			m = r
+		if r < len(m.heap) && m.less(m.heap[r], m.heap[s]) {
+			s = r
 		}
-		if m == i {
+		if s == i {
 			return
 		}
-		b.heap[i], b.heap[m] = b.heap[m], b.heap[i]
-		i = m
+		m.heap[i], m.heap[s] = m.heap[s], m.heap[i]
+		i = s
 	}
 }
 
