@@ -20,6 +20,7 @@ import (
 	"bytes"
 	"context"
 	"errors"
+	"fmt"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -226,7 +227,77 @@ func TestBlockServicePendingQueueDeduplicates(t *testing.T) {
 	require.Same(t, first, stored)
 }
 
-func TestBlockServicePendingQueueRetainsProcessingFailure(t *testing.T) {
+func TestBlockServicePendingQueueRemovesPermanentProcessingFailure(t *testing.T) {
+	testCases := []struct {
+		name string
+		err  error
+	}{
+		{name: "not finalized descendant", err: forkchoice.ErrNotFinalizedDescendant},
+		{name: "fork schema mismatch", err: forkchoice.ErrForkSchemaSlotMismatch},
+		{name: "unknown validation error", err: errors.New("block is invalid")},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			blocks, _, _ := tests.GetBellatrixRandom()
+			serviceAPI, _, _, forkchoiceStore := setupBlockService(t, ctrl)
+			service := serviceAPI.(*blockService)
+			forkchoiceStore.Headers[blocks[0].Block.ParentRoot] = &cltypes.BeaconBlockHeader{}
+			forkchoiceStore.SlotVal = blocks[0].Block.Slot
+			processingStore := &blockProcessingErrorStore{
+				ForkChoiceStorage: forkchoiceStore,
+				err:               tc.err,
+			}
+			service.forkchoiceStore = processingStore
+
+			decision := service.tryProcessPendingBlock(t.Context(), common.Hash{}, blocks[0])
+
+			require.Equal(t, pendingJobRemove, decision)
+			require.Equal(t, 1, processingStore.calls)
+		})
+	}
+}
+
+func TestBlockServicePendingQueueRetainsRetryableProcessingFailure(t *testing.T) {
+	testCases := []struct {
+		name string
+		err  error
+	}{
+		{name: "blob data", err: forkchoice.ErrEIP4844DataNotAvailable},
+		{name: "column data", err: forkchoice.ErrEIP7594ColumnDataNotAvailable},
+		{name: "parent envelope", err: forkchoice.ErrParentEnvelopePending},
+		{name: "parent state", err: forkchoice.ErrMissingSegment},
+		{name: "execution status", err: forkchoice.ErrNewPayloadNoStatus},
+	}
+
+	for _, tc := range testCases {
+		t.Run(tc.name, func(t *testing.T) {
+			ctrl := gomock.NewController(t)
+			defer ctrl.Finish()
+
+			blocks, _, _ := tests.GetBellatrixRandom()
+			serviceAPI, _, _, forkchoiceStore := setupBlockService(t, ctrl)
+			service := serviceAPI.(*blockService)
+			forkchoiceStore.Headers[blocks[0].Block.ParentRoot] = &cltypes.BeaconBlockHeader{}
+			forkchoiceStore.SlotVal = blocks[0].Block.Slot
+			processingStore := &blockProcessingErrorStore{
+				ForkChoiceStorage: forkchoiceStore,
+				err:               fmt.Errorf("dependency unavailable: %w", tc.err),
+			}
+			service.forkchoiceStore = processingStore
+
+			decision := service.tryProcessPendingBlock(t.Context(), common.Hash{}, blocks[0])
+
+			require.Equal(t, pendingJobKeep, decision)
+			require.Equal(t, 1, processingStore.calls)
+		})
+	}
+}
+
+func TestBlockServicePendingQueueWaitsForParentBeforeProcessing(t *testing.T) {
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
@@ -235,16 +306,59 @@ func TestBlockServicePendingQueueRetainsProcessingFailure(t *testing.T) {
 	service := serviceAPI.(*blockService)
 	processingStore := &blockProcessingErrorStore{
 		ForkChoiceStorage: forkchoiceStore,
-		err:               errors.New("processing failed"),
+		err:               forkchoice.ErrNotFinalizedDescendant,
 	}
 	service.forkchoiceStore = processingStore
-	service.blocksScheduledForLaterExecution = service.newPendingBlockQueue(canceledPendingQueueContext(t))
 
-	service.scheduleBlockForLaterProcessing(blocks[0])
-	service.blocksScheduledForLaterExecution.processPending(t.Context())
+	decision := service.tryProcessPendingBlock(t.Context(), common.Hash{}, blocks[0])
 
-	require.Equal(t, 1, processingStore.calls)
-	require.Equal(t, int32(1), service.blocksScheduledForLaterExecution.count.Load())
+	require.Equal(t, pendingJobKeep, decision)
+	require.Zero(t, processingStore.calls)
+}
+
+func TestBlockServicePendingQueueWaitsForBlockSlotBeforeProcessing(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, _ := tests.GetBellatrixRandom()
+	block := blocks[0]
+	block.Block.Slot = 2
+	serviceAPI, _, _, forkchoiceStore := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	forkchoiceStore.Headers[block.Block.ParentRoot] = &cltypes.BeaconBlockHeader{}
+	forkchoiceStore.SlotVal = block.Block.Slot - 1
+	processingStore := &blockProcessingErrorStore{
+		ForkChoiceStorage: forkchoiceStore,
+		err:               errors.New("must not process a future block"),
+	}
+	service.forkchoiceStore = processingStore
+
+	decision := service.tryProcessPendingBlock(t.Context(), common.Hash{}, block)
+
+	require.Equal(t, pendingJobKeep, decision)
+	require.Zero(t, processingStore.calls)
+}
+
+func TestBlockServicePendingQueueRemovesAlreadyProcessedBlock(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	defer ctrl.Finish()
+
+	blocks, _, _ := tests.GetBellatrixRandom()
+	blockRoot, err := blocks[0].Block.HashSSZ()
+	require.NoError(t, err)
+	serviceAPI, _, _, forkchoiceStore := setupBlockService(t, ctrl)
+	service := serviceAPI.(*blockService)
+	forkchoiceStore.Headers[blockRoot] = blocks[0].SignedBeaconBlockHeader().Header
+	processingStore := &blockProcessingErrorStore{
+		ForkChoiceStorage: forkchoiceStore,
+		err:               errors.New("must not process an imported block"),
+	}
+	service.forkchoiceStore = processingStore
+
+	decision := service.tryProcessPendingBlock(t.Context(), common.Hash(blockRoot), blocks[0])
+
+	require.Equal(t, pendingJobRemove, decision)
+	require.Zero(t, processingStore.calls)
 }
 
 func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {

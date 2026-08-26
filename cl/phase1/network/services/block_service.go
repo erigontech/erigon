@@ -332,10 +332,30 @@ func (b *blockService) importBlockOperations(block *cltypes.SignedBeaconBlock) {
 	log.Trace("import operations", "time", time.Since(start))
 }
 
-func (b *blockService) tryProcessPendingBlock(ctx context.Context, _ common.Hash, block *cltypes.SignedBeaconBlock) pendingJobDecision {
-	if err := b.processAndStoreBlock(ctx, block); err != nil {
-		log.Trace("Failed to process and store block", "block", block, "error", err)
+func (b *blockService) tryProcessPendingBlock(ctx context.Context, blockRoot common.Hash, block *cltypes.SignedBeaconBlock) pendingJobDecision {
+	if _, ok := b.forkchoiceStore.GetHeader(blockRoot); ok {
+		return pendingJobRemove
+	}
+	if _, ok := b.forkchoiceStore.GetHeader(block.Block.ParentRoot); !ok {
 		return pendingJobKeep
 	}
+	if b.forkchoiceStore.Slot() < block.Block.Slot {
+		return pendingJobKeep
+	}
+	if err := b.processAndStoreBlock(ctx, block); err != nil {
+		log.Trace("Failed to process and store block", "block", block, "error", err)
+		if isPendingBlockRetryableError(err) {
+			return pendingJobKeep
+		}
+		return pendingJobRemove
+	}
 	return pendingJobRemove
+}
+
+func isPendingBlockRetryableError(err error) bool {
+	return errors.Is(err, forkchoice.ErrEIP4844DataNotAvailable) ||
+		errors.Is(err, forkchoice.ErrEIP7594ColumnDataNotAvailable) ||
+		errors.Is(err, forkchoice.ErrNewPayloadNoStatus) ||
+		errors.Is(err, forkchoice.ErrParentEnvelopePending) ||
+		errors.Is(err, forkchoice.ErrMissingSegment)
 }
