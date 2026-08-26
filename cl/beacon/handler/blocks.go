@@ -113,13 +113,12 @@ func (a *ApiHandler) readBlockByRoot(ctx context.Context, tx kv.Tx, root common.
 	if err != nil || blk != nil {
 		return blk, err
 	}
+	return a.readLiveBlockByRoot(root)
+}
 
-	header, ok := a.forkchoiceStore.GetHeader(root)
-	if !ok || header == nil {
-		return nil, nil
-	}
-	blk, ok = a.forkchoiceStore.GetBlock(root)
-	if !ok || blk == nil || blk.Block == nil || blk.Block.Body == nil {
+func (a *ApiHandler) readLiveBlockByRoot(root common.Hash) (*cltypes.SignedBeaconBlock, error) {
+	blk, _, ok := a.liveBlockAndHeader(root)
+	if !ok {
 		return nil, nil
 	}
 	blockRoot, err := blk.Block.HashSSZ()
@@ -130,6 +129,18 @@ func (a *ApiHandler) readBlockByRoot(ctx context.Context, tx kv.Tx, root common.
 		return nil, nil
 	}
 	return blk, nil
+}
+
+func (a *ApiHandler) liveBlockAndHeader(root common.Hash) (*cltypes.SignedBeaconBlock, *cltypes.BeaconBlockHeader, bool) {
+	header, ok := a.forkchoiceStore.GetHeader(root)
+	if !ok || header == nil {
+		return nil, nil, false
+	}
+	blk, ok := a.forkchoiceStore.GetBlock(root)
+	if !ok || blk == nil || blk.Block == nil || blk.Block.Body == nil {
+		return nil, nil, false
+	}
+	return blk, header, true
 }
 
 func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
