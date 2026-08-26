@@ -1187,7 +1187,7 @@ func (a *ApiHandler) produceBeaconBody(
 			return
 		}
 		if bundles == nil {
-			executionErr = errors.New("produceBeaconBody: missing blobs bundle")
+			executionErr = fmt.Errorf("produceBeaconBody: %w: missing blobs bundle", execution_client.ErrInvalidGetPayloadResponse)
 			return
 		}
 		// Determine block value

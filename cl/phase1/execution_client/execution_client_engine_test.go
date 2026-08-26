@@ -51,22 +51,53 @@ func (s *fcuEngineStub) ForkchoiceUpdatedV3(context.Context, *engine_types.ForkC
 type getPayloadEngineStub struct {
 	engineapi.EngineAPI
 	response *engine_types.GetPayloadResponse
+	called   string
 }
 
 func (s *getPayloadEngineStub) GetPayloadV3(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V3"
 	return s.response, nil
 }
 
 func (s *getPayloadEngineStub) GetPayloadV4(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V4"
 	return s.response, nil
 }
 
 func (s *getPayloadEngineStub) GetPayloadV5(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V5"
 	return s.response, nil
 }
 
 func (s *getPayloadEngineStub) GetPayloadV6(context.Context, hexutil.Bytes) (*engine_types.GetPayloadResponse, error) {
+	s.called = "V6"
 	return s.response, nil
+}
+
+func TestGetAssembledBlockRoutesByVersion(t *testing.T) {
+	for _, tc := range []struct {
+		version clparams.StateVersion
+		method  string
+	}{
+		{clparams.DenebVersion, "V3"},
+		{clparams.ElectraVersion, "V4"},
+		{clparams.FuluVersion, "V5"},
+		{clparams.GloasVersion, "V6"},
+	} {
+		t.Run(tc.version.String(), func(t *testing.T) {
+			cfg := clparams.MainnetBeaconConfig
+			stub := &getPayloadEngineStub{response: &engine_types.GetPayloadResponse{
+				ExecutionPayload: &engine_types.ExecutionPayload{},
+				BlobsBundle:      &engine_types.BlobsBundle{},
+			}}
+			cc := &ExecutionClientEngine{engine: stub, beaconCfg: &cfg}
+
+			_, _, _, _, err := cc.GetAssembledBlock(t.Context(), []byte{1}, tc.version)
+
+			require.NoError(t, err)
+			require.Equal(t, tc.method, stub.called)
+		})
+	}
 }
 
 func TestGetAssembledBlockRejectsMissingBlobsBundle(t *testing.T) {

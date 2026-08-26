@@ -671,6 +671,7 @@ func TestProduceBeaconBodyRejectsMissingBlobsBundle(t *testing.T) {
 	)
 
 	require.Nil(t, body)
+	require.ErrorIs(t, err, execution_client.ErrInvalidGetPayloadResponse)
 	require.ErrorContains(t, err, "missing blobs bundle")
 }
 
