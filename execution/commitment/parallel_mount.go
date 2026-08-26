@@ -138,6 +138,9 @@ func (p *ParallelPatriciaHashed) processMounted(ctx context.Context, updates *Up
 		ni, ch := nib, child
 		g.Go(func() error {
 			w := NewHexPatriciaHashed(p.accountKeyLen, nil, p.cfg)
+			// Tries come from a pool and Release does not clear their counters,
+			// so a checkout carries the previous round's numbers into the merge.
+			w.metrics.Reset()
 			defer p.metrics.Merge(w.metrics)
 			w.mountTo(base, ni)
 			if p.template != nil && p.template.traceW != nil {

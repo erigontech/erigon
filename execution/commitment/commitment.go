@@ -280,6 +280,9 @@ type PendingCommitmentUpdate struct {
 	BlockHash common.Hash
 	TxNum     uint64
 	Deferred  []*DeferredBranchUpdate
+	// Metrics is the trie's, carried so the caller-owned apply still counts
+	// against the round that produced these writes.
+	Metrics *Metrics
 }
 
 func (p *PendingCommitmentUpdate) Clear() {
@@ -366,17 +369,8 @@ func (be *BranchEncoder) ApplyDeferredUpdates(
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
 ) error {
-	written, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch)
-	if err != nil {
+	if _, err := ApplyDeferredBranchUpdates(be.deferred, numWorkers, putBranch, be.metrics); err != nil {
 		return err
-	}
-	if be.metrics != nil {
-		be.metrics.updateBranch.Add(uint64(written))
-		var bytesOut int
-		for _, upd := range be.deferred {
-			bytesOut += len(upd.encoded)
-		}
-		be.metrics.AddBranchWrite(bytesOut)
 	}
 	return nil
 }
@@ -386,11 +380,27 @@ var workerMergerPool = sync.Pool{New: func() any { return NewHexBranchMerger(512
 // Returns the number of updates written. putBranch must copy prefix and data rather than
 // retain them: they are pooled and reused for a later, unrelated update. prevData is
 // cloned per update and carries no such constraint.
+// ApplyDeferredBranchUpdates applies the queued branch writes and, when m is
+// non-nil, accounts them. Accounting lives here because this is the one place
+// every deferred path passes through — including the caller-owned one, which
+// applies from SharedDomains long after the trie's round has ended.
 func ApplyDeferredBranchUpdates(
 	deferred []*DeferredBranchUpdate,
 	numWorkers int,
 	putBranch func(prefix []byte, data []byte, prevData []byte) error,
-) (int, error) {
+	m *Metrics,
+) (n int, err error) {
+	if m != nil {
+		defer func() {
+			m.updateBranch.Add(uint64(n))
+			// encoded is filled by the merge above, so this only reads after it.
+			var bytesOut int
+			for _, upd := range deferred {
+				bytesOut += len(upd.encoded)
+			}
+			m.AddBranchWrite(bytesOut)
+		}()
+	}
 	if len(deferred) == 0 {
 		return 0, nil
 	}

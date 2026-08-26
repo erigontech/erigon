@@ -1105,7 +1105,7 @@ func TestApplyDeferred_CallbackSeesInputDerivedCapacity(t *testing.T) {
 					require.Equal(t, len(data), cap(data), "data carries leftover pool capacity")
 					require.Equal(t, len(prevData), cap(prevData), "prevData carries leftover pool capacity")
 					return nil
-				})
+				}, nil)
 			require.NoError(t, err)
 			require.Equal(t, tc.updates, written)
 			require.Equal(t, tc.updates, seen, "callback must run for every update")

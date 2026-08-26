@@ -130,3 +130,38 @@ func TestRoundKeysAreDistinctNotTraversals(t *testing.T) {
 		"traversals count cell visits, so they never undercount distinct keys")
 	assert.Positive(t, m.BranchWriteBytes, "branch write bytes are counted")
 }
+
+// Two rounds on one trie must report the second round's own numbers. Tries come
+// from a pool whose Release does not clear counters, and the parallel trie used
+// to accumulate across rounds, so both ends of the merge could carry history in.
+func TestRoundCountersDoNotAccumulateAcrossRounds(t *testing.T) {
+	ms := NewMockState(t)
+	keys, upds := buildNibbleSpread(t, 16, 4)
+	require.NoError(t, ms.applyPlainUpdates(keys, upds))
+
+	tr := newParTrie(t, ms, 4)
+	defer tr.Release()
+
+	round := func() *CommitProgress {
+		t.Helper()
+		ut := NewUpdates(ModeParallel, t.TempDir(), KeyToHexNibbleHash)
+		defer ut.Close()
+		for _, k := range keys {
+			ut.TouchPlainKey(string(k), nil, nil)
+		}
+		var got *CommitProgress
+		_, err := tr.Process(context.Background(), ut, "", func(p *CommitProgress) { got = p }, WarmupConfig{})
+		require.NoError(t, err)
+		require.NotNil(t, got)
+		return got
+	}
+
+	first := round()
+	second := round()
+
+	assert.EqualValues(t, len(keys), first.Metrics.RoundKeys)
+	assert.EqualValues(t, len(keys), second.Metrics.RoundKeys,
+		"the second round reports its own key count, not the running total")
+	assert.LessOrEqual(t, second.Metrics.AddressKeys, first.Metrics.AddressKeys*2,
+		"traversals are per-round; a pooled worker must not carry its last round in")
+}

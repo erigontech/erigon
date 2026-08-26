@@ -233,6 +233,10 @@ func newHexPatriciaHashed() *HexPatriciaHashed {
 	return hph
 }
 
+// Metrics exposes the trie's counters so a caller applying its deferred writes
+// can account them against the round that produced them.
+func (hph *HexPatriciaHashed) Metrics() *Metrics { return hph.metrics }
+
 // SetCollapseTracer sets a callback that will be invoked when a node collapse occurs
 // during commitment calculation. This is used by witness generation to capture paths
 // to HashNodes that need resolution when a FullNode is reduced to a single child.
@@ -2485,7 +2489,8 @@ func (hph *HexPatriciaHashed) Process(ctx context.Context, updates *Updates, log
 	hph.metrics.Reset()
 	hph.metrics.updates.Store(updatesCount)
 	hph.metrics.AddRoundKeys(updatesCount)
-	defer ObserveRound(time.Now())
+	roundStart := time.Now()
+	defer func() { observeRound(hph.metrics, roundStart) }()
 	if hph.metrics.collectCommitmentMetrics {
 		defer func() {
 			hph.metrics.TotalProcessingTimeInc(start)
