@@ -39,9 +39,12 @@ import (
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
+	"github.com/erigontech/erigon/cl/fork"
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/cl/phase1/core/state/lru"
 	"github.com/erigontech/erigon/cl/phase1/execution_client"
+	"github.com/erigontech/erigon/cl/transition/impl/eth2"
+	"github.com/erigontech/erigon/cl/utils/bls"
 	sync_pool_mock "github.com/erigontech/erigon/cl/validator/sync_contribution_pool/mock_services"
 	"github.com/erigontech/erigon/cl/validator/validator_params"
 	"github.com/erigontech/erigon/common"
@@ -538,7 +541,7 @@ func TestSetupHeaderResponseForBlockProductionGloasPayloadIncluded(t *testing.T)
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 
-	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, big.NewInt(123), 456)
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, big.NewInt(123), big.NewInt(456))
 
 	require.Equal(t, "gloas", rr.Header().Get("Eth-Consensus-Version"))
 	require.Equal(t, "123", rr.Header().Get("Eth-Execution-Payload-Value"))
@@ -551,7 +554,7 @@ func TestSetupHeaderResponseForBlockProductionPreGloasOmitsPayloadIncluded(t *te
 	h := &ApiHandler{}
 	rr := httptest.NewRecorder()
 
-	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, big.NewInt(123), 456)
+	h.setupHeaderReponseForBlockProduction(rr, clparams.ElectraVersion, false, true, big.NewInt(123), big.NewInt(456))
 
 	require.Empty(t, rr.Header().Get("Eth-Execution-Payload-Included"))
 }
@@ -563,7 +566,7 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 			Message: &cltypes.ExecutionPayloadBid{Value: 3},
 		}
 
-		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid)
+		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid, 100)
 
 		require.True(t, selected)
 		require.Equal(t, "3000000000", selectedValueWei.String())
@@ -575,7 +578,7 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 			Message: &cltypes.ExecutionPayloadBid{Value: 2},
 		}
 
-		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid)
+		selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid, 100)
 
 		require.False(t, selected)
 		require.Same(t, localValueWei, selectedValueWei)
@@ -587,11 +590,170 @@ func TestSelectHigherGloasBidValueUsesWei(t *testing.T) {
 		}
 		wantWei := new(big.Int).Mul(new(big.Int).SetUint64(^uint64(0)), big.NewInt(common.GWei))
 
-		selectedValueWei, selected := selectHigherGloasBidValue(new(big.Int), externalBid)
+		selectedValueWei, selected := selectHigherGloasBidValue(new(big.Int), externalBid, 100)
 
 		require.True(t, selected)
 		require.Equal(t, wantWei, selectedValueWei)
 	})
+}
+
+func TestSelectHigherGloasBidValueHonorsBoostFactor(t *testing.T) {
+	localValueWei := new(big.Int).Mul(big.NewInt(2), big.NewInt(common.GWei))
+	externalBid := &cltypes.SignedExecutionPayloadBid{
+		Message: &cltypes.ExecutionPayloadBid{Value: 3},
+	}
+
+	selectedValueWei, selected := selectHigherGloasBidValue(localValueWei, externalBid, 0)
+
+	require.False(t, selected)
+	require.Same(t, localValueWei, selectedValueWei)
+}
+
+func TestTrySelectGloasBidFallsBackAfterParentBuilderExit(t *testing.T) {
+	productionState, block, externalBid := newGloasBidSelectionFixture(t, true)
+	selfBid := block.BeaconBody.SignedExecutionPayloadBid
+	localValueWei := big.NewInt(common.GWei)
+
+	selectedValueWei, selected, err := trySelectGloasBid(productionState, block, localValueWei, externalBid, 100)
+
+	require.ErrorContains(t, err, "builder is not active")
+	require.False(t, selected)
+	require.Same(t, selfBid, block.BeaconBody.SignedExecutionPayloadBid)
+	require.Same(t, localValueWei, selectedValueWei)
+	require.Len(t, block.Blobs, 1)
+	require.Len(t, block.KzgProofs, 1)
+	require.NoError(t, validateGloasBid(productionState, block.ToGeneric()))
+}
+
+func TestTrySelectGloasBidClearsSelfBuildSidecars(t *testing.T) {
+	productionState, block, externalBid := newGloasBidSelectionFixture(t, false)
+
+	selectedValueWei, selected, err := trySelectGloasBid(productionState, block, big.NewInt(common.GWei), externalBid, 100)
+
+	require.NoError(t, err)
+	require.True(t, selected)
+	require.Same(t, externalBid, block.BeaconBody.SignedExecutionPayloadBid)
+	require.Equal(t, "3000000000", selectedValueWei.String())
+	require.Nil(t, block.Blobs)
+	require.Nil(t, block.KzgProofs)
+}
+
+func TestConsensusBlockValueUsesWeiWithoutOverflow(t *testing.T) {
+	rewards := &eth2.BlockRewardsCollector{
+		Attestations:      ^uint64(0),
+		AttesterSlashings: 2,
+		ProposerSlashings: 3,
+		SyncAggregate:     4,
+	}
+	wantGwei := new(big.Int).Add(new(big.Int).SetUint64(^uint64(0)), big.NewInt(9))
+	wantWei := new(big.Int).Mul(wantGwei, big.NewInt(common.GWei))
+
+	require.Equal(t, wantWei, consensusBlockValueWei(rewards))
+}
+
+func newGloasBidSelectionFixture(
+	t *testing.T,
+	exitBuilder bool,
+) (*state.CachingBeaconState, *cltypes.BlindOrExecutionBeaconBlock, *cltypes.SignedExecutionPayloadBid) {
+	t.Helper()
+	cfg := clparams.MainnetBeaconConfig
+	clparams.ApplyMinimalPreset(&cfg)
+	productionState := state.New(&cfg)
+	productionState.SetVersion(clparams.GloasVersion)
+	slot := cfg.SlotsPerEpoch
+	require.NoError(t, productionState.SetSlot(slot))
+	productionState.SetFinalizedCheckpoint(solid.Checkpoint{Epoch: 1})
+
+	privateKey, err := bls.GenerateKey()
+	require.NoError(t, err)
+	pubkey := common.Bytes48(bls.CompressPublicKey(privateKey.PublicKey()))
+	require.NoError(t, productionState.AddValidator(solid.NewValidatorFromParameters(
+		pubkey,
+		common.Hash{},
+		cfg.MaxEffectiveBalance,
+		false,
+		0,
+		0,
+		cfg.FarFutureEpoch,
+		cfg.FarFutureEpoch,
+	), cfg.MaxEffectiveBalance))
+
+	executionAddress := common.Address{0x42}
+	builders := solid.NewStaticListSSZ[*cltypes.Builder](int(cfg.BuilderRegistryLimit), new(cltypes.Builder).EncodingSizeSSZ())
+	builders.Append(&cltypes.Builder{
+		Pubkey:            pubkey,
+		Version:           cfg.PayloadBuilderVersion,
+		ExecutionAddress:  executionAddress,
+		Balance:           cfg.MinDepositAmount + 100,
+		DepositEpoch:      0,
+		WithdrawableEpoch: cfg.FarFutureEpoch,
+	})
+	productionState.SetBuilders(builders)
+
+	parentRoot := common.Hash{0x11}
+	parentHash := common.Hash{0x22}
+	require.NoError(t, productionState.SetBlockRootAt(int((slot-1)%cfg.SlotsPerHistoricalRoot), parentRoot))
+	parentRequests := cltypes.NewExecutionRequestsWithVersion(&cfg, clparams.GloasVersion)
+	if exitBuilder {
+		parentRequests.BuilderExits.Append(&solid.BuilderExitRequest{
+			SourceAddress: executionAddress,
+			PubKey:        pubkey,
+		})
+	}
+	parentRequestsRoot, err := parentRequests.HashSSZ()
+	require.NoError(t, err)
+	productionState.SetLatestExecutionPayloadBid(&cltypes.ExecutionPayloadBid{
+		BlockHash:             parentHash,
+		Slot:                  slot - 1,
+		ExecutionRequestsRoot: parentRequestsRoot,
+	})
+	productionState.SetLatestBlockHash(parentHash)
+
+	commitments := solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+	commitments.Append(&cltypes.KZGCommitment{0x33})
+	externalBid := &cltypes.SignedExecutionPayloadBid{Message: &cltypes.ExecutionPayloadBid{
+		ParentBlockHash:    parentHash,
+		ParentBlockRoot:    parentRoot,
+		BlockHash:          common.Hash{0x44},
+		PrevRandao:         productionState.GetRandaoMixes(state.Epoch(productionState)),
+		FeeRecipient:       common.Address{0x55},
+		BuilderIndex:       0,
+		Slot:               slot,
+		Value:              3,
+		BlobKzgCommitments: *commitments,
+	}}
+	domain, err := productionState.GetDomain(cfg.DomainBeaconBuilder, state.Epoch(productionState))
+	require.NoError(t, err)
+	signingRoot, err := fork.ComputeSigningRoot(externalBid.Message, domain)
+	require.NoError(t, err)
+	copy(externalBid.Signature[:], privateKey.Sign(signingRoot[:]).Bytes())
+
+	selfCommitments := solid.NewStaticProgressiveListSSZ[*cltypes.KZGCommitment](cltypes.MaxBlobsCommittmentsPerBlock, 48)
+	body := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	body.SignedExecutionPayloadBid = &cltypes.SignedExecutionPayloadBid{
+		Message: &cltypes.ExecutionPayloadBid{
+			ParentBlockHash:    parentHash,
+			ParentBlockRoot:    parentRoot,
+			BlockHash:          common.Hash{0x66},
+			PrevRandao:         productionState.GetRandaoMixes(state.Epoch(productionState)),
+			BuilderIndex:       clparams.BuilderIndexSelfBuild,
+			Slot:               slot,
+			BlobKzgCommitments: *selfCommitments,
+		},
+		Signature: common.Bytes96(bls.InfiniteSignature),
+	}
+	body.ParentExecutionRequests = parentRequests
+
+	block := &cltypes.BlindOrExecutionBeaconBlock{
+		Slot:          slot,
+		ProposerIndex: 0,
+		ParentRoot:    parentRoot,
+		BeaconBody:    body,
+		Blobs:         []*cltypes.Blob{{0x77}},
+		KzgProofs:     []common.Bytes48{{0x88}},
+		Cfg:           &cfg,
+	}
+	return productionState, block, externalBid
 }
 
 func TestSetupHeaderResponsePreservesLargeExecutionValue(t *testing.T) {
@@ -599,7 +761,7 @@ func TestSetupHeaderResponsePreservesLargeExecutionValue(t *testing.T) {
 	rr := httptest.NewRecorder()
 	valueWei := new(big.Int).Mul(new(big.Int).SetUint64(^uint64(0)), big.NewInt(common.GWei))
 
-	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, valueWei, 0)
+	h.setupHeaderReponseForBlockProduction(rr, clparams.GloasVersion, false, true, valueWei, new(big.Int))
 
 	require.Equal(t, valueWei.String(), rr.Header().Get("Eth-Execution-Payload-Value"))
 }
@@ -612,6 +774,7 @@ func TestProduceBlockPreservesLargeExecutionValue(t *testing.T) {
 	payload.Transactions = &solid.TransactionsSSZ{}
 	payload.Withdrawals = solid.NewStaticListSSZ[*cltypes.Withdrawal](int(h.beaconChainCfg.MaxWithdrawalsPerPayload), 44)
 	valueWei := new(big.Int).Add(new(big.Int).SetUint64(^uint64(0)), big.NewInt(1))
+	wantValueWei := valueWei.String()
 
 	engine := execution_client.NewMockExecutionEngine(ctrl)
 	engine.EXPECT().ForkChoiceUpdate(gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any(), gomock.Any()).
@@ -625,7 +788,7 @@ func TestProduceBlockPreservesLargeExecutionValue(t *testing.T) {
 		postState.Slot()+1, common.Bytes96{}, common.Hash{})
 
 	require.NoError(t, err)
-	require.Equal(t, valueWei, block.ExecutionValue)
+	require.Equal(t, wantValueWei, block.ExecutionValue.String())
 }
 
 func TestBroadcastExternalGloasBidDoesNotRequireLocalBlobBundles(t *testing.T) {
