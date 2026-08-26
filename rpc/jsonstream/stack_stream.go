@@ -178,7 +178,7 @@ func (s *StackStream) WriteFloat64(val float64) {
 
 // WriteString writes a string value to the stream
 func (s *StackStream) WriteString(val string) {
-	s.stream.WriteString(val)
+	writeStringFast(s.stream, val)
 	s.popCommaOrField()
 }
 
@@ -218,7 +218,7 @@ func (s *StackStream) WriteMore() {
 
 // WriteObjectField writes a field name for an object and adds it to the stack
 func (s *StackStream) WriteObjectField(fieldName string) {
-	s.stream.WriteObjectField(fieldName)
+	writeObjectFieldFast(s.stream, fieldName)
 	s.pop(ItemComma)
 	s.push(ItemField)
 }

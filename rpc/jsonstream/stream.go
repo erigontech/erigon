@@ -30,6 +30,9 @@ type Stream interface {
 	// WriteRawBytes, WriteRaw accepting already-encoded JSON
 	// Nothing is escaped or validated
 	WriteRawBytes(content []byte)
+	// WriteRaw writes already-encoded JSON. A value that still needs quoting
+	// belongs in WriteString: it bulk-copies escape-free runs, so pre-quoting a
+	// string to skip escaping buys nothing.
 	WriteRaw(content string)
 	Flush() error
 
