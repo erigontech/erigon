@@ -506,7 +506,7 @@ func TestPseudoDupSortDeleteCurrentMultiValBefore(t *testing.T) {
 
 	t.Run("MdbxCursorPseudoDupSort", func(t *testing.T) {
 		run(t, func(rc kv.RwCursor) kv.PseudoDupSortRwCursor {
-			return &MdbxCursorPseudoDupSort{MdbxCursor: rc.(*MdbxCursor)}
+			return &mdbx.MdbxCursorPseudoDupSort{MdbxCursor: rc.(*mdbx.MdbxCursor)}
 		})
 	})
 	t.Run("kv.RwCursorPseudoDupSort", func(t *testing.T) {
