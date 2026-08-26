@@ -81,7 +81,7 @@ var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var 
 
 // etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold:
 // 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
-// 17*(256Mb/8) = 512Mb for all collectors combined. Buffers pool their
+// 17*(256Mb/8) = 544Mb for all collectors combined. Buffers pool their
 // chunks — see dataChunks below.
 var (
 	etlSmallBufRAM       = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
@@ -126,8 +126,13 @@ var dataChunks = sync.Pool{New: func() any {
 
 func getDataChunk() []byte { return *dataChunks.Get().(*[]byte) }
 
+// isPooledChunk reports whether c came from the pool. An oversized entry gets a
+// private chunk instead, and handing that one back would let a later
+// getDataChunk give an unrelated buffer a chunk of the wrong size.
+func isPooledChunk(c []byte) bool { return len(c) == dataChunkSize }
+
 func putDataChunk(c []byte) {
-	if len(c) != dataChunkSize { // private chunk of an oversized entry
+	if !isPooledChunk(c) {
 		return
 	}
 	dataChunks.Put(&c)
