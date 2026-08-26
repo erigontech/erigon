@@ -76,10 +76,12 @@ export default function Footer(): React.ReactElement {
       }}>
 
         {/* Brand lockup — one anchor around logo + wordmark, so it is a single
-            hit target; aria-label because the visible content is a wordmark
-            plus an image. */}
+            hit target. The aria-label opens with the visible wordmark text:
+            an aria-label replaces the whole accessible name, so a label that
+            omitted "erigon.tech" would leave the name not containing the
+            visible one, failing WCAG 2.5.3 Label in Name (A). */}
         <a href="https://erigon.tech" target="_blank" rel="noopener noreferrer"
-          aria-label="Erigon home page" className="footer-brand">
+          aria-label="erigon.tech home page" className="footer-brand">
           <img src={logoUrl} alt="Erigon" style={{height: '32px', width: 'auto'}} />
           <span style={{fontFamily: "'Quantify', sans-serif", fontWeight: 700, fontSize: '1rem', letterSpacing: '0.04em'}}>erigon.tech</span>
         </a>
