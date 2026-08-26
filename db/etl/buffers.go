@@ -45,7 +45,7 @@ const (
 	// BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
 
-	entryLocSize    = 8 // sizeof(sortableBuffer.entries element): keyLen(4) + offset(4)
+	entryLocSize    = 8 // sizeof(sortableBuffer.entries element): offset(4) + keyLen(2) + 2 spare
 	entryHeaderSize = 4 // valLen, in front of the entry's bytes in its chunk
 )
 
@@ -81,12 +81,8 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-// etlAvgEntryBytes is what one entry averages in its chunk: entryHeaderSize
-// plus key and value. Size() charges entryLocSize per entry against the same
-// budget, so entriesIn counts both.
-var etlAvgEntryBytes = dbg.EnvInt("ETL_AVG_ENTRY_BYTES", 24)
-
 func entriesIn(bufBytes datasize.ByteSize) int {
+	const etlAvgEntryBytes = 20
 	return int(bufBytes) / (etlAvgEntryBytes + entryLocSize)
 }
 
@@ -99,7 +95,8 @@ var (
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
 			mxBufNew.Inc()
-			return NewSortableBuffer(etlSmallBufRAM).Prealloc(entriesIn(etlSmallBufRAM), int(etlSmallBufRAM)) // SortableBuffer does Prealloc only metadata slices - not buffers itself
+			// Sortable Buffer now pre-allocs only metadata arrays not internal buffers for data-holding (they are-preallocated and have own sync.Pool)
+			return NewSortableBuffer(etlSmallBufRAM).Prealloc(1024, int(etlSmallBufRAM)/2)
 		},
 	})
 )
@@ -121,6 +118,9 @@ const (
 	// collector can hold once it takes a chunk at all.
 	dataChunkBits = 20
 	dataChunkSize = 1 << dataChunkBits // 1MB
+
+	// Sort slices a key straight out of its chunk, so only a value may outgrow one.
+	maxKeyLen = 4096
 
 	// The chunk index takes what is left of a positive int32, so one buffer
 	// addresses at most maxDataChunks*dataChunkSize bytes (~2GB); nextChunk
@@ -173,20 +173,18 @@ var (
 	_ Buffer = &oldestEntrySortableBuffer{}
 )
 
-// entryLoc locates a key/value pair: keyLen in the high half, offset in the
-// low half. offset packs the chunk index with the offset inside that chunk,
-// idx<<dataChunkBits | off, and addresses valLen, then the key, then the value.
-// A length of -1 means nil.
-//
-// Offsets rise with insertion order, which is what lets Sort order duplicate
-// keys without a stable sort.
+// entryLoc packs, from the low bit up: the chunk index with the offset inside
+// it (idx<<dataChunkBits | off), then keyLen, which maxKeyLen keeps inside 16
+// bits, with -1 meaning nil. The top 16 bits are spare. Offsets rise with
+// insertion order, which is what lets Sort order duplicate keys without a
+// stable sort.
 type entryLoc uint64
 
 func makeEntryLoc(keyLen, offset int32) entryLoc {
-	return entryLoc(uint32(keyLen))<<32 | entryLoc(uint32(offset)) //nolint:gosec
+	return entryLoc(uint16(keyLen))<<32 | entryLoc(uint32(offset)) //nolint:gosec
 }
-func (e entryLoc) keyLen() int32 { return int32(uint32(e >> 32)) } //nolint:gosec
-func (e entryLoc) offset() int32 { return int32(uint32(e)) }       //nolint:gosec
+func (e entryLoc) keyLen() int32 { return int32(int16(uint16(e >> 32))) } //nolint:gosec
+func (e entryLoc) offset() int32 { return int32(uint32(e)) }              //nolint:gosec
 
 func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 	if bufferOptimalSize.Bytes() > math.MaxInt32 {
@@ -242,6 +240,9 @@ func (b *sortableBuffer) entryData(e entryLoc) []byte {
 // Put adds key and value to the buffer. These slices will not be accessed later,
 // so no copying is necessary
 func (b *sortableBuffer) Put(k, v []byte) {
+	if len(k) > maxKeyLen {
+		panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", len(k), maxKeyLen))
+	}
 	kLen, vLen := int32(len(k)), int32(len(v)) //nolint:gosec
 	if k == nil {
 		kLen = -1
@@ -268,7 +269,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 }
 
 // Size counts the stored bytes, the tail wasted by the chunk still filling, and
-// entryLocSize bytes of metadata per entry.
+// entryLocSize per entry. An entry's entryHeaderSize is already in chunkBytes.
 func (b *sortableBuffer) Size() int {
 	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + len(b.entries)*entryLocSize
 }
@@ -322,14 +323,15 @@ func (b *sortableBuffer) Sort() {
 		if kLen <= 0 {
 			return nil
 		}
-		off := e.offset()&(dataChunkSize-1) + entryHeaderSize
-		return (*chunks[e.offset()>>dataChunkBits])[off : off+kLen]
+		at := e.offset()
+		off := at&(dataChunkSize-1) + entryHeaderSize
+		return (*chunks[at>>dataChunkBits])[off : off+kLen]
 	}
-	cmp := func(a, b entryLoc) int {
-		if c := bytes.Compare(key(a), key(b)); c != 0 {
+	cmp := func(x, y entryLoc) int {
+		if c := bytes.Compare(key(x), key(y)); c != 0 {
 			return c
 		}
-		return int(a.offset() - b.offset()) // StableSort: offsets rise with insertion order
+		return int(x.offset() - y.offset()) // StableSort: offsets rise with insertion order
 	}
 	if slices.IsSortedFunc(b.entries, cmp) {
 		return

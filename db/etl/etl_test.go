@@ -1699,11 +1699,18 @@ func TestCloseDisposesProvidersBeforeBuffer(t *testing.T) {
 func TestSortableBufferAllEmptyEntries(t *testing.T) {
 	buf := NewSortableBuffer(256 * 1024)
 
+	// The last-sorting key goes in first, so Sort has to reorder instead of
+	// short-circuiting on IsSortedFunc.
+	buf.Put([]byte{0xFF}, []byte("last"))
 	buf.Put(nil, nil)
 	buf.Put([]byte{}, []byte{})
 	buf.Put(nil, []byte{})
 	buf.Put([]byte{}, nil)
-	buf.Put([]byte{0x01}, []byte("normal"))
+
+	for i := 1; i < buf.Len(); i++ {
+		require.Greater(t, buf.entries[i].offset(), buf.entries[i-1].offset(),
+			"Sort orders equal keys by offset, so every entry needs one of its own")
+	}
 
 	buf.Sort()
 
@@ -1716,8 +1723,8 @@ func TestSortableBufferAllEmptyEntries(t *testing.T) {
 	assert.Equal(t, []nilness{{true, true}, {false, false}, {true, false}, {false, true}}, got)
 
 	k, v := buf.Get(4)
-	assert.Equal(t, []byte{0x01}, k)
-	assert.Equal(t, []byte("normal"), v)
+	assert.Equal(t, []byte{0xFF}, k)
+	assert.Equal(t, []byte("last"), v)
 }
 
 // TestSortableBufferChunkBoundary: an entry never straddles a chunk, whatever
@@ -1725,14 +1732,17 @@ func TestSortableBufferAllEmptyEntries(t *testing.T) {
 // a different offset in the last chunk each time.
 func TestSortableBufferChunkBoundary(t *testing.T) {
 	const keyLen = 8
-	for _, valLen := range []int{0, 1, 7, 63, 64, 4095, 4096} {
+	// entryHeaderSize+keyLen+valLen divides dataChunkSize for 4, 20, 52, 116 and
+	// 4084, so those land an entry's last byte exactly on a chunk boundary.
+	for _, valLen := range []int{0, 1, 4, 7, 20, 52, 63, 64, 116, 4084, 4095, 4096} {
 		t.Run(fmt.Sprintf("val%d", valLen), func(t *testing.T) {
 			buf := NewSortableBuffer(64 * 1024 * 1024)
-			count := 2*dataChunkSize/(keyLen+valLen+1) + 3
+			entrySize := entryHeaderSize + keyLen + valLen
+			count := 2*dataChunkSize/entrySize + 3
 
 			key := make([]byte, keyLen)
-			for i := range count {
-				binary.BigEndian.PutUint64(key, uint64(i))
+			for i := range count { // descending, so Sort has real work to do
+				binary.BigEndian.PutUint64(key, uint64(count-1-i)) //nolint:gosec
 				buf.Put(key, bytes.Repeat([]byte{byte(i)}, valLen))
 			}
 			require.Greater(t, len(buf.chunks), 1, "test must cross a chunk boundary")
@@ -1741,10 +1751,29 @@ func TestSortableBufferChunkBoundary(t *testing.T) {
 			require.Equal(t, count, buf.Len())
 			for i := range count {
 				k, v := buf.Get(i)
-				binary.BigEndian.PutUint64(key, uint64(i))
+				binary.BigEndian.PutUint64(key, uint64(i)) //nolint:gosec
 				require.Equal(t, key, k, "entry %d", i)
-				require.Equal(t, bytes.Repeat([]byte{byte(i)}, valLen), v, "entry %d", i)
+				require.Equal(t, bytes.Repeat([]byte{byte(count - 1 - i)}, valLen), v, "entry %d", i)
 			}
 		})
 	}
+}
+
+// TestSortableBufferRejectsOversizedKey: Sort reads keys straight out of a
+// chunk, so a key must fit one. Values may still be any size.
+func TestSortableBufferRejectsOversizedKey(t *testing.T) {
+	buf := NewSortableBuffer(256 * datasize.MB)
+
+	require.Panics(t, func() { buf.Put(make([]byte, maxKeyLen+1), []byte("v")) })
+
+	// maxKeyLen is what lets keyLen live in 16 bits, so read the edge back.
+	buf.Put(make([]byte, maxKeyLen), []byte("v"))
+	buf.Put([]byte{0x01}, make([]byte, dataChunkSize+7))
+	buf.Put(nil, nil)
+	require.Equal(t, 3, buf.Len())
+
+	k, _ := buf.Get(0)
+	require.Len(t, k, maxKeyLen)
+	k, _ = buf.Get(2)
+	require.Nil(t, k)
 }
