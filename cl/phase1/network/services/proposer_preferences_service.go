@@ -69,7 +69,7 @@ func (s *proposerPreferencesService) Names() []string {
 
 func (s *proposerPreferencesService) DecodeGossipMessage(_ peer.ID, data []byte, version clparams.StateVersion) (*cltypes.SignedProposerPreferences, error) {
 	msg := &cltypes.SignedProposerPreferences{}
-	if err := msg.DecodeSSZ(data, int(version)); err != nil {
+	if err := msg.DecodeSSZStrict(data, int(version)); err != nil {
 		return nil, err
 	}
 	return msg, nil
@@ -89,9 +89,6 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 		"validatorIndex", validatorIndex)
 
 	now := s.now()
-	s.epbsPool.ProposerPreferences.PruneSlots(func(entrySlot uint64) bool {
-		return isPastBidWindow(s.ethClock, s.beaconCfg, now, entrySlot)
-	})
 	past, validTime := isPastSlot(s.ethClock, s.beaconCfg, now, proposalSlot, gloasMaximumClockDisparity)
 	if !validTime {
 		return fmt.Errorf("%w: proposal slot %d has no representable time", ErrIgnore, proposalSlot)
@@ -118,6 +115,9 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	if now.Add(gloasMaximumClockDisparity).Before(lookaheadEpochStartTime) {
 		return fmt.Errorf("%w: proposer for proposal slot %d is not yet known", ErrIgnore, proposalSlot)
 	}
+	s.epbsPool.ProposerPreferences.PruneSlots(func(entrySlot uint64) bool {
+		return isPastBidWindow(s.ethClock, s.beaconCfg, now, entrySlot)
+	})
 
 	// [IGNORE] First valid message for this dependent root and proposal slot.
 	seenKey := newSeenProposerPreferencesKey(preferences)
@@ -172,17 +172,17 @@ func (s *proposerPreferencesService) ProcessMessage(ctx context.Context, _ *uint
 	return nil
 }
 
-func (s *proposerPreferencesService) hasSeenPreference(key seenProposerPreferencesKey) bool {
-	_, ok := s.epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{Slot: key.slot, DependentRoot: key.dependentRoot})
-	return ok
-}
-
 func isPastSlot(clock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, now time.Time, slot uint64, disparity time.Duration) (bool, bool) {
 	slotTime, ok := safeSlotTime(clock, beaconCfg, slot)
 	if !ok {
 		return false, false
 	}
 	return now.After(slotTime.Add(disparity)), true
+}
+
+func (s *proposerPreferencesService) hasSeenPreference(key seenProposerPreferencesKey) bool {
+	_, ok := s.epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{Slot: key.slot, DependentRoot: key.dependentRoot})
+	return ok
 }
 
 func isPastBidWindow(clock eth_clock.EthereumClock, beaconCfg *clparams.BeaconChainConfig, now time.Time, slot uint64) bool {

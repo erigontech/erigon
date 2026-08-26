@@ -17,6 +17,7 @@
 package beaconevents
 
 import (
+	"encoding/json"
 	"testing"
 	"time"
 
@@ -27,6 +28,26 @@ import (
 	"github.com/erigontech/erigon/cl/phase1/core/state"
 	"github.com/erigontech/erigon/common"
 )
+
+func TestVersionedGloasOperationEventsJSONShape(t *testing.T) {
+	emitter := NewEventEmitter()
+	ch := make(chan *EventStream, 2)
+	sub := emitter.Operation().Subscribe(ch)
+	defer sub.Unsubscribe()
+
+	emitter.Operation().SendPayloadAttestationMessage(&PayloadAttestationMessageData{})
+	emitter.Operation().SendExecutionPayloadBid(&SignedExecutionPayloadBidData{})
+
+	for range 2 {
+		event := <-ch
+		encoded, err := json.Marshal(event.Data)
+		require.NoError(t, err)
+		var shape map[string]json.RawMessage
+		require.NoError(t, json.Unmarshal(encoded, &shape))
+		require.JSONEq(t, `"gloas"`, string(shape["version"]))
+		require.Contains(t, shape, "data")
+	}
+}
 
 func TestBuildHeadV2DataUsesGenesisRootInEpochZeroAndOne(t *testing.T) {
 	cfg := clparams.MainnetBeaconConfig

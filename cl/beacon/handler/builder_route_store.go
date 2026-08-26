@@ -1,6 +1,18 @@
 // Copyright 2026 The Erigon Authors
 // This file is part of Erigon.
-// SPDX-License-Identifier: LGPL-3.0-or-later
+//
+// Erigon is free software: you can redistribute it and/or modify
+// it under the terms of the GNU Lesser General Public License as published by
+// the Free Software Foundation, either version 3 of the License, or
+// (at your option) any later version.
+//
+// Erigon is distributed in the hope that it will be useful,
+// but WITHOUT ANY WARRANTY; without even the implied warranty of
+// MERCHANTABILITY or FITNESS FOR A PARTICULAR PURPOSE. See the
+// GNU Lesser General Public License for more details.
+//
+// You should have received a copy of the GNU Lesser General Public License
+// along with Erigon. If not, see <http://www.gnu.org/licenses/>.
 
 package handler
 
@@ -100,6 +112,42 @@ func (s *builderRouteStore) Claim(root common.Hash, url string) bool {
 		return false
 	}
 	route.state = builderRouteInFlight
+	return true
+}
+
+func (s *builderRouteStore) ClaimOrAdd(root common.Hash, url string) bool {
+	s.mu.Lock()
+	defer s.mu.Unlock()
+	now := s.now()
+	s.pruneExpired(now)
+	key := builderRouteKey{root: root, url: url}
+	route, ok := s.routes[key]
+	if !ok {
+		if len(s.routes) >= s.capacity {
+			var oldestKey builderRouteKey
+			var oldestRoute *builderRoute
+			for existingKey, candidate := range s.routes {
+				if candidate.state == builderRouteDelivered && (oldestRoute == nil || candidate.expiresAt.Before(oldestRoute.expiresAt) ||
+					candidate.expiresAt.Equal(oldestRoute.expiresAt) && builderRouteKeyLess(existingKey, oldestKey)) {
+					oldestKey = existingKey
+					oldestRoute = candidate
+				}
+			}
+			if oldestRoute != nil {
+				delete(s.routes, oldestKey)
+			}
+			if len(s.routes) >= s.capacity {
+				return false
+			}
+		}
+		route = &builderRoute{state: builderRouteIdle, expiresAt: now.Add(s.ttl)}
+		s.routes[key] = route
+	}
+	if route.state != builderRouteIdle {
+		return false
+	}
+	route.state = builderRouteInFlight
+	route.expiresAt = now.Add(s.ttl)
 	return true
 }
 

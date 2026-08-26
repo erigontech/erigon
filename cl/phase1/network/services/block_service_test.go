@@ -19,6 +19,7 @@ package services
 import (
 	"bytes"
 	"context"
+	"encoding/binary"
 	"errors"
 	"sync"
 	"testing"
@@ -575,3 +576,62 @@ func TestImportBlockOperationsAttesterSlashingLogging(t *testing.T) {
 // - TestBlockServiceGloasSuccess
 //
 // For now, the GLOAS validation code path is verified by code review and integration tests.
+
+func TestValidateGloasBlockBodyLimitsRejectsOversizedOperationAndRequests(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	cfg.MaxProposerSlashings = 1
+	cfg.MaxBuilderDepositRequestsPerPayload = 1
+	body := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	body.ProposerSlashings.Append(&cltypes.ProposerSlashing{})
+	body.ProposerSlashings.Append(&cltypes.ProposerSlashing{})
+	require.Error(t, validateGloasBlockBodyLimits(&cfg, body))
+
+	body = cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	body.ParentExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	body.ParentExecutionRequests.BuilderDeposits.Append(&solid.BuilderDepositRequest{})
+	require.Error(t, validateGloasBlockBodyLimits(&cfg, body))
+}
+
+func TestValidateGloasBlockBodyLimitsRejectsDeposit(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	body := cltypes.NewBeaconBody(&cfg, clparams.GloasVersion)
+	require.NoError(t, validateGloasBlockBodyLimits(&cfg, body))
+	body.Deposits.Append(&cltypes.Deposit{})
+	require.ErrorContains(t, validateGloasBlockBodyLimits(&cfg, body), "deposits")
+}
+
+func TestBlockServiceDecodeGossipMessageStrict(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	service := &blockService{beaconCfg: &cfg}
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.GloasVersion)
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	_, err = service.DecodeGossipMessage("peer", encoded, clparams.GloasVersion)
+	require.NoError(t, err)
+
+	outerGap := append([]byte(nil), encoded[:100]...)
+	outerGap = append(outerGap, make([]byte, 4)...)
+	outerGap = append(outerGap, encoded[100:]...)
+	binary.LittleEndian.PutUint32(outerGap, 104)
+	_, err = service.DecodeGossipMessage("peer", outerGap, clparams.GloasVersion)
+	require.Error(t, err)
+
+	const blockStart = 100
+	const blockFixedSize = 84
+	nestedGap := append([]byte(nil), encoded[:blockStart+blockFixedSize]...)
+	nestedGap = append(nestedGap, make([]byte, 4)...)
+	nestedGap = append(nestedGap, encoded[blockStart+blockFixedSize:]...)
+	binary.LittleEndian.PutUint32(nestedGap[blockStart+80:], blockFixedSize+4)
+	_, err = service.DecodeGossipMessage("peer", nestedGap, clparams.GloasVersion)
+	require.Error(t, err)
+}
+
+func TestBlockServiceDecodeGossipMessageStrictPreGloasCompatibility(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	service := &blockService{beaconCfg: &cfg}
+	block := cltypes.NewSignedBeaconBlock(&cfg, clparams.DenebVersion)
+	encoded, err := block.EncodeSSZ(nil)
+	require.NoError(t, err)
+	_, err = service.DecodeGossipMessage("peer", encoded, clparams.DenebVersion)
+	require.NoError(t, err)
+}

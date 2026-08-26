@@ -143,7 +143,8 @@ type forkGraphDisk struct {
 	lightClientUpdates sync.Map // period -> lightclientupdate
 
 	// in-memory cache of block roots that have envelopes on disk [Optimization for Gloas:EIP7732]
-	envelopeExists sync.Map // common.Hash -> struct{}
+	envelopeExists  sync.Map // common.Hash -> struct{}
+	envelopeMissing sync.Map // common.Hash -> struct{}
 
 	// reusable buffers
 	sszBuffer []byte
@@ -445,7 +446,7 @@ func (f *forkGraphDisk) HasBlockChildAtOrAfter(blockRoot common.Hash, slot uint6
 }
 
 func (f *forkGraphDisk) HasBlockEquivocation(slot, proposerIndex uint64, exceptRoot common.Hash) bool {
-	if slot < f.LowestAvailableSlot() {
+	if isBelowPrunedBoundary(slot, f.lowestAvailableBlock.Load()) {
 		return false
 	}
 	found := false
@@ -478,10 +479,6 @@ func (f *forkGraphDisk) addValidatedChild(parentRoot, childRoot common.Hash, slo
 	if slot > children.maxSlot {
 		children.maxSlot = slot
 	}
-}
-
-func (f *forkGraphDisk) removeValidatedChild(parentRoot, childRoot common.Hash) {
-	f.removeValidatedChildren(map[common.Hash][]common.Hash{parentRoot: {childRoot}})
 }
 
 func (f *forkGraphDisk) removeValidatedChildren(rootsByParent map[common.Hash][]common.Hash) {
@@ -783,6 +780,7 @@ func (f *forkGraphDisk) Prune(pruneSlot uint64) (err error) {
 			f.headers.Delete(root)
 			f.blockRewards.Delete(root)
 			f.envelopeExists.Delete(root)
+			f.envelopeMissing.Delete(root)
 			f.unavailablePayloads.Delete(root)
 			f.acceptedPayloads.Delete(root)
 			f.badBlocks.Delete(root)

@@ -259,6 +259,7 @@ func TestProduceBlockUsesConfiguredBuilderWhenLocalExecutionIsUnavailable(t *tes
 	handler.engine = engine
 
 	parentBid := postState.GetLatestExecutionPayloadBid()
+	forkchoiceStore.ExecutionPayloadGasLimitMap[parentBid.ParentBlockHash] = parentBid.GasLimit
 	externalBid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 0)}
 	externalBid.Message.ParentBlockHash = parentBid.ParentBlockHash
 	externalBid.Message.ParentBlockRoot = baseRoot
@@ -288,24 +289,27 @@ func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
 	for _, tc := range []struct {
 		name          string
 		feeRecipient  common.Address
+		parentGas     uint64
 		gasLimit      uint64
 		execPayment   uint64
 		maxPayment    uint64
 		preferenceGas uint64
 		want          int
 	}{
-		{name: "no P2P preference uses local defaults", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, want: 1},
-		{name: "wrong fee recipient", feeRecipient: common.Address{0x43}, gasLimit: 30_000_000},
-		{name: "gas limit at target", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, want: 1},
-		{name: "gas limit above target", feeRecipient: common.Address{0x42}, gasLimit: 30_000_001},
-		{name: "P2P gas preference at target", feeRecipient: common.Address{0x42}, gasLimit: 25_000_000, preferenceGas: 25_000_000, want: 1},
-		{name: "P2P gas preference above target", feeRecipient: common.Address{0x42}, gasLimit: 25_000_001, preferenceGas: 25_000_000},
-		{name: "execution payment at cap", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, execPayment: 5, maxPayment: 5, want: 1},
-		{name: "execution payment above cap remains a candidate", feeRecipient: common.Address{0x42}, gasLimit: 30_000_000, execPayment: 6, maxPayment: 5, want: 1},
+		{name: "no P2P preference clamps toward latest bid target", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 30_029_295, want: 1},
+		{name: "wrong fee recipient", feeRecipient: common.Address{0x43}, parentGas: 30_000_000, gasLimit: 30_000_000},
+		{name: "high target clamps to parent maximum", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 30_029_295, preferenceGas: 40_000_000, want: 1},
+		{name: "high target rejects unclamped target", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 40_000_000, preferenceGas: 40_000_000},
+		{name: "low target clamps to parent minimum", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 29_970_705, preferenceGas: 20_000_000, want: 1},
+		{name: "low target rejects value below clamp", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 20_000_000, preferenceGas: 20_000_000},
+		{name: "zero parent requires zero", feeRecipient: common.Address{0x42}, parentGas: 0, gasLimit: 0, preferenceGas: 1, want: 1},
+		{name: "one parent requires one", feeRecipient: common.Address{0x42}, parentGas: 1, gasLimit: 1, preferenceGas: math.MaxUint64, want: 1},
+		{name: "execution payment at cap", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 30_000_000, preferenceGas: 30_000_000, execPayment: 5, maxPayment: 5, want: 1},
+		{name: "execution payment above cap remains a candidate", feeRecipient: common.Address{0x42}, parentGas: 30_000_000, gasLimit: 30_000_000, preferenceGas: 30_000_000, execPayment: 6, maxPayment: 5, want: 1},
 	} {
 		t.Run(tc.name, func(t *testing.T) {
 			ctrl := gomock.NewController(t)
-			_, _, _, _, postState, handler, _, _, _, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
+			_, _, _, _, postState, handler, _, _, forkchoiceStore, validatorParams := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), false)
 			handler.beaconChainCfg.FuluForkEpoch = 0
 			handler.beaconChainCfg.GloasForkEpoch = 0
 			handler.beaconChainCfg.InitializeForkSchedule()
@@ -329,8 +333,11 @@ func TestRequestConfiguredBuilderBidsAppliesLocalProposalPolicy(t *testing.T) {
 					}},
 				)
 			}
-			parentBid := postState.GetLatestExecutionPayloadBid()
-			parentBid.GasLimit = 30_000_000
+			latestBid := postState.GetLatestExecutionPayloadBid()
+			latestBid.GasLimit = 99_000_000
+			parentBid := latestBid.Clone().(*cltypes.ExecutionPayloadBid)
+			parentBid.ParentBlockHash = common.Hash{0xa1}
+			forkchoiceStore.ExecutionPayloadGasLimitMap[parentBid.ParentBlockHash] = tc.parentGas
 			bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(targetSlot, 0, 1)}
 			bid.Message.ParentBlockHash = parentBid.ParentBlockHash
 			bid.Message.ParentBlockRoot = parentBid.ParentBlockRoot
@@ -475,6 +482,62 @@ func TestDecodeGloasBlockProductionOptionsRejectsInvalidBuildersPerEntry(t *test
 	require.Equal(t, "https://builder.example", options.builderConfig.Builders[0].URL)
 }
 
+func TestDecodeGloasBlockProductionOptionsIsolatesDuplicateEntriesJSON(t *testing.T) {
+	entry := &cltypes.BuilderEntry{
+		URL: "https://builder.example",
+		Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
+			Data: []byte("auth-one"), Slot: 10,
+		}},
+		BuilderPubkeys: []common.Bytes48{{1}},
+	}
+	differentAuth := entry.Clone().(*cltypes.BuilderEntry)
+	differentAuth.Auth.Message.Data = []byte("auth-two")
+	first, err := json.Marshal(entry)
+	require.NoError(t, err)
+	second, err := json.Marshal(differentAuth)
+	require.NoError(t, err)
+	body := fmt.Sprintf(`{"min_bid":"0","builder_boost_factor":"100","builders":[%s,%s,%s]}`, first, first, second)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", strings.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", "gloas")
+
+	options, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+	require.NoError(t, err)
+	require.Len(t, options.builderConfig.Builders, 2)
+	require.Equal(t, []byte("auth-one"), []byte(options.builderConfig.Builders[0].Auth.Message.Data))
+	require.Equal(t, []byte("auth-two"), []byte(options.builderConfig.Builders[1].Auth.Message.Data))
+}
+
+func TestDecodeGloasBlockProductionOptionsIsolatesInvalidAndDuplicateEntriesSSZ(t *testing.T) {
+	makeEntry := func(url, auth string, slot uint64) *cltypes.BuilderEntry {
+		return &cltypes.BuilderEntry{
+			URL: url,
+			Auth: &cltypes.SignedBuilderRequestAuth{Message: &cltypes.BuilderRequestAuth{
+				Data: []byte(auth), Slot: slot,
+			}},
+			BuilderPubkeys: []common.Bytes48{{1}},
+		}
+	}
+	config := &cltypes.BuilderConfig{Builders: []*cltypes.BuilderEntry{
+		makeEntry("https://builder.example", "auth-one-unique", 10),
+		makeEntry("https://builder.example", "auth-two-unique", 10),
+		makeEntry("https://builder.example", "auth-three-long", 10),
+		makeEntry("https://wrong-slot.example", "auth-wrong-slot", 11),
+	}}
+	body, err := config.EncodeSSZ(nil)
+	require.NoError(t, err)
+	body = bytes.Replace(body, []byte("auth-two-unique"), []byte("auth-one-unique"), 1)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v4/validator/blocks/10?include_payload=true", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/octet-stream")
+	req.Header.Set("Eth-Consensus-Version", "gloas")
+
+	options, err := decodeGloasBlockProductionOptions(httptest.NewRecorder(), req, 10)
+	require.NoError(t, err)
+	require.Len(t, options.builderConfig.Builders, 2)
+	require.Equal(t, []byte("auth-one-unique"), []byte(options.builderConfig.Builders[0].Auth.Message.Data))
+	require.Equal(t, []byte("auth-three-long"), []byte(options.builderConfig.Builders[1].Auth.Message.Data))
+}
+
 func TestDecodeGloasBlockProductionOptionsRejectsInvalidMetadata(t *testing.T) {
 	valid := `{"min_bid":"0","builder_boost_factor":"100","builders":[]}`
 	for _, tc := range []struct {
@@ -610,43 +673,38 @@ func TestPostEthV2BeaconBlocksForwardsGloasBlockToWinningBuilder(t *testing.T) {
 	}
 }
 
-func TestPostEthV2BeaconBlocksDoesNotForwardToUnboundBuilder(t *testing.T) {
-	for _, tc := range []struct {
-		name      string
-		headerURL string
-		routeURL  string
-		wrongRoot bool
-	}{
-		{name: "mismatched URL", headerURL: "https://attacker.example", routeURL: "https://builder.example"},
-		{name: "different block root", headerURL: "https://builder.example", routeURL: "https://builder.example", wrongRoot: true},
-	} {
-		t.Run(tc.name, func(t *testing.T) {
-			_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
-			forkchoiceStore.OnTickFn = func(uint64) {}
-			handler.beaconChainCfg.GloasForkEpoch = 0
-			handler.beaconChainCfg.InitializeForkSchedule()
-			block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
-			block.Block.Slot = 1
-			block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 1
-			body, err := json.Marshal(block)
-			require.NoError(t, err)
-			blockRoot, err := block.Block.HashSSZ()
-			require.NoError(t, err)
-			if tc.wrongRoot {
-				blockRoot = common.Hash{0xff}
-			}
-			require.True(t, handler.builderRoutes.Add(blockRoot, tc.routeURL))
-			handler.builderClient = builder_mock.NewMockBuilderClient(gomock.NewController(t))
+func TestPostEthV2BeaconBlocksForwardsUnboundBuilderRoute(t *testing.T) {
+	_, _, _, _, _, handler, _, _, forkchoiceStore, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
+	forkchoiceStore.OnTickFn = func(uint64) {}
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.beaconChainCfg.InitializeForkSchedule()
+	block := cltypes.NewSignedBeaconBlock(handler.beaconChainCfg, clparams.GloasVersion)
+	block.Block.Slot = 1
+	block.Block.Body.SignedExecutionPayloadBid.Message.BuilderIndex = 1
+	body, err := json.Marshal(block)
+	require.NoError(t, err)
+	builderURL := "https://builder.example"
+	forwarded := make(chan struct{})
+	client := builder_mock.NewMockBuilderClient(gomock.NewController(t))
+	client.EXPECT().SubmitSignedBeaconBlock(gomock.Any(), builderURL, gomock.Any()).DoAndReturn(
+		func(context.Context, string, *cltypes.SignedBeaconBlock) error {
+			close(forwarded)
+			return nil
+		},
+	)
+	handler.builderClient = client
 
-			req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
-			req.Header.Set("Content-Type", "application/json")
-			req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
-			req.Header.Set("Eth-Builder-Url", tc.headerURL)
+	req := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v2/beacon/blocks", bytes.NewReader(body))
+	req.Header.Set("Content-Type", "application/json")
+	req.Header.Set("Eth-Consensus-Version", clparams.GloasVersion.String())
+	req.Header.Set("Eth-Builder-Url", builderURL)
 
-			_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
-			require.NoError(t, err)
-			require.True(t, handler.builderRoutes.Claim(blockRoot, tc.routeURL))
-		})
+	_, err = handler.PostEthV2BeaconBlocks(httptest.NewRecorder(), req)
+	require.NoError(t, err)
+	select {
+	case <-forwarded:
+	case <-time.After(time.Second):
+		t.Fatal("signed block was not forwarded by the receiving beacon node")
 	}
 }
 

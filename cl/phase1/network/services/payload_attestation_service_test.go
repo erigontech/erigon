@@ -811,3 +811,19 @@ func TestPayloadAttestationServiceDecodeGossipMessageInvalid(t *testing.T) {
 	_, err := service.DecodeGossipMessage("peer123", []byte{0x00, 0x01, 0x02}, clparams.GloasVersion)
 	require.Error(t, err)
 }
+
+func TestPayloadAttestationServiceDecodeGossipMessageStrict(t *testing.T) {
+	ctrl := gomock.NewController(t)
+	service, _, _ := setupPayloadAttestationService(t, ctrl)
+	encoded, err := newTestPayloadAttestationMessage(100, 42, common.Hash{1}).EncodeSSZ(nil)
+	require.NoError(t, err)
+
+	_, err = service.DecodeGossipMessage("peer123", append(encoded, 0), clparams.GloasVersion)
+	require.Error(t, err)
+
+	nonCanonicalBool := append([]byte(nil), encoded...)
+	const payloadPresentOffset = 8 + 32 + 8
+	nonCanonicalBool[payloadPresentOffset] = 2
+	_, err = service.DecodeGossipMessage("peer123", nonCanonicalBool, clparams.GloasVersion)
+	require.Error(t, err)
+}

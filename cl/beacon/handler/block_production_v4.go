@@ -78,17 +78,23 @@ func decodeGloasBlockProductionOptions(w http.ResponseWriter, r *http.Request, t
 		if err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
-		if err := config.DecodeSSZStrict(body, int(clparams.GloasVersion)); err != nil {
+		if err := config.DecodeSSZStrictStructural(body, int(clparams.GloasVersion)); err != nil {
 			return nil, beaconhttp.NewEndpointError(http.StatusBadRequest, err)
 		}
 	default:
 		return nil, beaconhttp.NewEndpointError(http.StatusUnsupportedMediaType, fmt.Errorf("unsupported content type: %s", contentType))
 	}
 	validBuilders := make([]*cltypes.BuilderEntry, 0, len(config.Builders))
+	seen := make(map[string]struct{}, len(config.Builders))
 	for _, entry := range config.Builders {
-		if entry == nil || entry.Auth == nil || entry.Auth.Message == nil || entry.Auth.Message.Slot != targetSlot {
+		if entry == nil || entry.Validate() != nil || entry.Auth.Message.Slot != targetSlot {
 			continue
 		}
+		key := entry.URL + "\x00" + string(entry.Auth.Message.Data)
+		if _, ok := seen[key]; ok {
+			continue
+		}
+		seen[key] = struct{}{}
 		validBuilders = append(validBuilders, entry)
 	}
 	config.Builders = validBuilders

@@ -17,6 +17,7 @@
 package handler
 
 import (
+	"bytes"
 	"context"
 	"encoding/json"
 	"errors"
@@ -60,6 +61,18 @@ func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "missing payload attestation message data")
 }
 
+func TestPostPayloadAttestationsRequiresGloasVersion(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	for _, version := range []string{"", "fulu"} {
+		request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
+		request.Header.Set("Content-Type", "application/json")
+		request.Header.Set("Eth-Consensus-Version", version)
+		recorder := httptest.NewRecorder()
+		handler.ServeHTTP(recorder, request)
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	}
+}
+
 func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	msgSize := (&cltypes.PayloadAttestationMessage{Data: new(cltypes.PayloadAttestationData)}).EncodingSizeSSZ()
@@ -67,6 +80,7 @@ func TestPostPayloadAttestationsRejectsOversizedSSZ(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(strings.Repeat("\x00", maxSize+1)))
 	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
@@ -85,6 +99,7 @@ func TestPostPayloadAttestationsAcceptsMoreThanBlockAggregateLimitSSZ(t *testing
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(body))
 	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
@@ -102,11 +117,71 @@ func TestPostPayloadAttestationsAcceptsSSZContentTypeParameters(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/octet-stream; charset=utf-8")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostPayloadAttestationsRejectsNonCanonicalSSZAndTrailingJSON(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	message := &cltypes.PayloadAttestationMessage{Data: new(cltypes.PayloadAttestationData)}
+	validSSZ, err := message.EncodeSSZ(nil)
+	require.NoError(t, err)
+	sszBody := append([]byte(nil), validSSZ...)
+	sszBody[8+32+8] = 2
+	jsonBody, err := json.Marshal([]*cltypes.PayloadAttestationMessage{message})
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name        string
+		contentType string
+		body        []byte
+	}{
+		{name: "invalid boolean", contentType: "application/octet-stream", body: sszBody},
+		{name: "trailing SSZ", contentType: "application/octet-stream", body: append(append([]byte(nil), validSSZ...), 0)},
+		{name: "trailing JSON", contentType: "application/json", body: append(jsonBody, []byte(`{}`)...)},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", bytes.NewReader(tc.body))
+			request.Header.Set("Content-Type", tc.contentType)
+			request.Header.Set("Eth-Consensus-Version", "gloas")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+		})
+	}
+}
+
+func TestPostPayloadAttestationsCapsJSONCardinality(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	maxItems := int(handler.beaconChainCfg.PtcSize)
+	for _, tc := range []struct {
+		name        string
+		count       int
+		wantIndexed bool
+	}{
+		{name: "maximum", count: maxItems, wantIndexed: true},
+		{name: "maximum plus one", count: maxItems + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "[" + strings.TrimSuffix(strings.Repeat("null,", tc.count), ",") + "]"
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Eth-Consensus-Version", "gloas")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			if tc.wantIndexed {
+				require.Contains(t, recorder.Body.String(), `"failures"`)
+			} else {
+				require.NotContains(t, recorder.Body.String(), `"failures"`)
+				require.Contains(t, recorder.Body.String(), "exceeds")
+			}
+		})
+	}
 }
 
 func TestPostPayloadAttestationsAcceptsQueuedWithoutPooling(t *testing.T) {
@@ -124,6 +199,7 @@ func TestPostPayloadAttestationsAcceptsQueuedWithoutPooling(t *testing.T) {
 	require.NoError(t, err)
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
@@ -138,6 +214,7 @@ func TestPostPayloadAttestationsRejectsMalformedContentType(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
 	request.Header.Set("Content-Type", "application/octet-stream; bad")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
@@ -150,6 +227,7 @@ func TestPostPayloadAttestationsRejectsUnsupportedContentType(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/payload_attestations", strings.NewReader(`[]`))
 	request.Header.Set("Content-Type", "text/plain")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconPoolPayloadAttestations(recorder, request)
@@ -157,18 +235,19 @@ func TestPostPayloadAttestationsRejectsUnsupportedContentType(t *testing.T) {
 	require.Equal(t, http.StatusUnsupportedMediaType, recorder.Code, recorder.Body.String())
 }
 
-func TestPostExecutionPayloadEnvelopeReturnsForkchoiceError(t *testing.T) {
+func TestPostExecutionPayloadEnvelopeAcceptsGossipIntegrationError(t *testing.T) {
 	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	fcu.OnExecutionPayloadErr = errors.New("invalid execution payload")
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelope", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/json; charset=utf-8")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	request.Header.Set("Eth-Blob-Data-Included", "false")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadEnvelope(recorder, request)
 
-	require.Equal(t, http.StatusInternalServerError, recorder.Code, recorder.Body.String())
-	require.Contains(t, recorder.Body.String(), "invalid execution payload")
+	require.Equal(t, http.StatusAccepted, recorder.Code, recorder.Body.String())
 }
 
 func TestPostExecutionPayloadEnvelopesRequiresBlobDataHeader(t *testing.T) {
@@ -405,11 +484,65 @@ func TestPostExecutionPayloadBidAcceptsSSZ(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
 
 	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadBidCanonicalPluralRequiresVersionButSingularAliasDoesNot(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	bid := &cltypes.SignedExecutionPayloadBid{Message: newTestExecutionPayloadBid(12, 3, 1000)}
+	body, err := json.Marshal(bid)
+	require.NoError(t, err)
+
+	canonical := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bids", bytes.NewReader(body))
+	canonical.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, canonical)
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+
+	legacy := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", bytes.NewReader(body))
+	legacy.Header.Set("Content-Type", "application/json")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, legacy)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostExecutionPayloadEnvelopesCanonicalPluralRequiresHeadersAndValidation(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	envelope := &cltypes.SignedExecutionPayloadEnvelope{Message: cltypes.NewExecutionPayloadEnvelope(handler.beaconChainCfg)}
+	body, err := json.Marshal(envelope)
+	require.NoError(t, err)
+
+	for _, tc := range []struct {
+		name       string
+		version    string
+		blobHeader string
+		query      string
+		message    string
+	}{
+		{name: "missing version", message: "Eth-Consensus-Version"},
+		{name: "missing blob header", version: "gloas", message: "Eth-Blob-Data-Included"},
+		{name: "invalid broadcast validation", version: "gloas", blobHeader: "false", query: "?broadcast_validation=fast", message: "broadcast_validation"},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_envelopes"+tc.query, bytes.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			if tc.version != "" {
+				request.Header.Set("Eth-Consensus-Version", tc.version)
+			}
+			if tc.blobHeader != "" {
+				request.Header.Set("Eth-Blob-Data-Included", tc.blobHeader)
+			}
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			require.Contains(t, recorder.Body.String(), tc.message)
+		})
+	}
 }
 
 func TestPostExecutionPayloadBidsRejectsTrailingJSON(t *testing.T) {
@@ -428,13 +561,13 @@ func TestPostExecutionPayloadBidsRejectsTrailingJSON(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), "trailing data")
 }
 
-func TestPostExecutionPayloadBidAcceptsQueuedBid(t *testing.T) {
+func TestPostExecutionPayloadBidRejectsIgnoredBid(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
 	ctrl := gomock.NewController(t)
 	defer ctrl.Finish()
 
 	bidService := mock_services.NewMockExecutionPayloadBidService(ctrl)
-	bidService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), gomock.Any()).Return(fmt.Errorf("%w: %w", services.ErrIgnore, services.ErrBidQueued))
+	bidService.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), gomock.Any()).Return(fmt.Errorf("%w: proposer preferences unavailable", services.ErrIgnore))
 	handler.executionPayloadBidService = bidService
 
 	bid := &cltypes.SignedExecutionPayloadBid{
@@ -445,11 +578,12 @@ func TestPostExecutionPayloadBidAcceptsQueuedBid(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
 
-	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
 }
 
 func TestPostExecutionPayloadBidRejectsHardIgnore(t *testing.T) {
@@ -469,6 +603,7 @@ func TestPostExecutionPayloadBidRejectsHardIgnore(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
@@ -481,6 +616,7 @@ func TestPostExecutionPayloadBidRejectsOversizedSSZ(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(strings.Repeat("\x00", int(maxSignedExecutionPayloadBidSSZSize())+1)))
 	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
@@ -493,6 +629,7 @@ func TestPostExecutionPayloadBidRejectsMissingMessage(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
@@ -506,6 +643,7 @@ func TestPostExecutionPayloadBidRejectsMalformedContentType(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/execution_payload_bid", strings.NewReader(`{}`))
 	request.Header.Set("Content-Type", "application/octet-stream; bad")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.PostEthV1BeaconExecutionPayloadBid(recorder, request)
@@ -514,17 +652,24 @@ func TestPostExecutionPayloadBidRejectsMalformedContentType(t *testing.T) {
 }
 
 func TestGetValidatorExecutionPayloadBidReturnsUnsignedBid(t *testing.T) {
-	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	_, _, _, _, postState, handler, _, _, _, _ := setupTestingHandler(t, clparams.ElectraVersion, log.Root(), true)
 	handler.beaconChainCfg.GloasForkEpoch = 0
+	require.NoError(t, postState.UpgradeToFulu())
+	require.NoError(t, postState.UpgradeToGloas())
+	for range 4 {
+		postState.GetBuilders().Append(&cltypes.Builder{})
+	}
+	require.NoError(t, handler.syncedData.OnHeadState(postState))
 	handler.epbsPool = pool.NewEpbsPool()
-	bid := newTestExecutionPayloadBid(12, 3, 1000)
+	slot := handler.ethClock.GetCurrentSlot()
+	bid := newTestExecutionPayloadBid(slot, 3, 1000)
 	handler.epbsPool.StoreHighestBid(pool.HighestBidKey{
 		Slot:            bid.Slot,
 		ParentBlockHash: bid.ParentBlockHash,
 		ParentBlockRoot: bid.ParentBlockRoot,
 	}, &cltypes.SignedExecutionPayloadBid{Message: bid})
 
-	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/execution_payload_bid/12/3", http.NoBody)
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, fmt.Sprintf("/eth/v1/validator/execution_payload_bid/%d/3", slot), http.NoBody)
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
@@ -533,6 +678,16 @@ func TestGetValidatorExecutionPayloadBidReturnsUnsignedBid(t *testing.T) {
 	require.Contains(t, recorder.Body.String(), `"builder_index":"3"`)
 	require.NotContains(t, recorder.Body.String(), `"signature"`)
 	require.NotContains(t, recorder.Body.String(), `"message"`)
+
+	for _, path := range []string{
+		fmt.Sprintf("/eth/v1/validator/execution_payload_bid/%d/3", slot-1),
+		fmt.Sprintf("/eth/v1/validator/execution_payload_bid/%d/3", slot+2),
+		fmt.Sprintf("/eth/v1/validator/execution_payload_bid/%d/4", slot),
+	} {
+		recorder = httptest.NewRecorder()
+		handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
+		require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	}
 }
 
 func TestAggregatePayloadAttestationMessagesFiltersAndLimits(t *testing.T) {
@@ -708,6 +863,7 @@ func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 
 	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", strings.NewReader(string(body)))
 	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
 	recorder := httptest.NewRecorder()
 
 	handler.ServeHTTP(recorder, request)
@@ -723,6 +879,116 @@ func TestPostValidatorProposerPreferencesAcceptsBatchJSON(t *testing.T) {
 		DependentRoot: common.HexToHash("0x3333333333333333333333333333333333333333333333333333333333333333"),
 	})
 	require.True(t, ok)
+}
+
+func TestPostValidatorProposerPreferencesRequiresVersionAndReportsIndexedFailures(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.epbsPool = pool.NewEpbsPool()
+	preferences := []*cltypes.SignedProposerPreferences{
+		{Message: &cltypes.ProposerPreferences{ProposalSlot: 32, DependentRoot: common.Hash{1}}},
+		{Message: &cltypes.ProposerPreferences{ProposalSlot: 33, DependentRoot: common.Hash{2}}},
+	}
+	body, err := json.Marshal(preferences)
+	require.NoError(t, err)
+
+	missingVersion := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", bytes.NewReader(body))
+	missingVersion.Header.Set("Content-Type", "application/json")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, missingVersion)
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+
+	ctrl := gomock.NewController(t)
+	service := mock_services.NewMockProposerPreferencesService(ctrl)
+	service.EXPECT().ProcessMessage(gomock.Any(), gomock.Nil(), gomock.Any()).DoAndReturn(
+		func(_ context.Context, _ *uint64, preference *cltypes.SignedProposerPreferences) error {
+			if preference.Message.ProposalSlot == 32 {
+				return errors.New("invalid first preference")
+			}
+			return nil
+		},
+	).Times(2)
+	handler.proposerPreferencesService = service
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/json")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+	var response poolingError
+	require.NoError(t, json.Unmarshal(recorder.Body.Bytes(), &response))
+	require.Equal(t, []poolingFailure{{Index: 0, Message: "invalid first preference"}}, response.Failures)
+	_, found := handler.epbsPool.ProposerPreferences.Get(pool.ProposerPreferencesKey{Slot: 33, DependentRoot: common.Hash{2}})
+	require.True(t, found)
+}
+
+func TestPostValidatorProposerPreferencesAcceptsBatchSSZ(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.epbsPool = pool.NewEpbsPool()
+	preferences := []*cltypes.SignedProposerPreferences{
+		{Message: &cltypes.ProposerPreferences{ProposalSlot: 32, DependentRoot: common.Hash{1}}},
+		{Message: &cltypes.ProposerPreferences{ProposalSlot: 33, DependentRoot: common.Hash{2}}},
+	}
+	body := make([]byte, 0)
+	for _, preference := range preferences {
+		var err error
+		body, err = preference.EncodeSSZ(body)
+		require.NoError(t, err)
+	}
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", bytes.NewReader(body))
+	request.Header.Set("Content-Type", "application/octet-stream")
+	request.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostValidatorProposerPreferencesRequiresJSONArrayButPoolRetainsSingletonCompatibility(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.epbsPool = pool.NewEpbsPool()
+	preference := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{ProposalSlot: 32, DependentRoot: common.Hash{1}}}
+	body, err := json.Marshal(preference)
+	require.NoError(t, err)
+
+	validatorRequest := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", bytes.NewReader(body))
+	validatorRequest.Header.Set("Content-Type", "application/json")
+	validatorRequest.Header.Set("Eth-Consensus-Version", "gloas")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, validatorRequest)
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+
+	poolRequest := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/beacon/pool/proposer_preferences", bytes.NewReader(body))
+	poolRequest.Header.Set("Content-Type", "application/json")
+	recorder = httptest.NewRecorder()
+	handler.ServeHTTP(recorder, poolRequest)
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestPostValidatorProposerPreferencesCapsJSONCardinality(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	for _, tc := range []struct {
+		name        string
+		count       int
+		wantIndexed bool
+	}{
+		{name: "maximum", count: maxProposerPreferencesRequestItems, wantIndexed: true},
+		{name: "maximum plus one", count: maxProposerPreferencesRequestItems + 1},
+	} {
+		t.Run(tc.name, func(t *testing.T) {
+			body := "[" + strings.TrimSuffix(strings.Repeat("null,", tc.count), ",") + "]"
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodPost, "/eth/v1/validator/proposer_preferences", strings.NewReader(body))
+			request.Header.Set("Content-Type", "application/json")
+			request.Header.Set("Eth-Consensus-Version", "gloas")
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+			if tc.wantIndexed {
+				require.Contains(t, recorder.Body.String(), `"failures"`)
+			} else {
+				require.NotContains(t, recorder.Body.String(), `"failures"`)
+				require.Contains(t, recorder.Body.String(), "exceeds")
+			}
+		})
+	}
 }
 
 func TestPostBeaconPoolProposerPreferencesAcceptsBatchJSON(t *testing.T) {

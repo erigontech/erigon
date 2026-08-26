@@ -48,3 +48,42 @@ func TestAttestationValidateForConfigNormalizesJSONCommitteeBits(t *testing.T) {
 	attestation.CommitteeBits = tooLong
 	require.Error(t, attestation.ValidateForConfig(&cfg, clparams.GloasVersion))
 }
+
+func TestAttestationDecodeSSZStrictRejectsOffsetGap(t *testing.T) {
+	tests := []struct {
+		name    string
+		version clparams.StateVersion
+		value   *Attestation
+	}{
+		{
+			name:    "deneb",
+			version: clparams.DenebVersion,
+			value: &Attestation{
+				AggregationBits: BitlistFromBytes([]byte{1}, maxValidatorsPerCommittee),
+				Data:            &AttestationData{},
+			},
+		},
+		{
+			name:    "gloas",
+			version: clparams.GloasVersion,
+			value: &Attestation{
+				AggregationBits: BitlistFromBytes([]byte{1}, aggregationBitsSizeElectra),
+				Data:            &AttestationData{},
+				CommitteeBits:   NewBitVector(int(clparams.MainnetBeaconConfig.MaxCommitteesPerSlot)),
+			},
+		},
+	}
+	for _, test := range tests {
+		t.Run(test.name, func(t *testing.T) {
+			encoded, err := test.value.EncodeSSZ(nil)
+			require.NoError(t, err)
+			require.NoError(t, new(Attestation).DecodeSSZStrictWithConfig(encoded, int(test.version), &clparams.MainnetBeaconConfig))
+			fixedSize := int(binary.LittleEndian.Uint32(encoded[:4]))
+			malformed := append([]byte(nil), encoded[:fixedSize]...)
+			malformed = append(malformed, make([]byte, 4)...)
+			malformed = append(malformed, encoded[fixedSize:]...)
+			binary.LittleEndian.PutUint32(malformed, uint32(fixedSize+4))
+			require.Error(t, new(Attestation).DecodeSSZStrictWithConfig(malformed, int(test.version), &clparams.MainnetBeaconConfig))
+		})
+	}
+}
