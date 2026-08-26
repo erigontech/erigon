@@ -147,11 +147,30 @@ var (
 
 	TraceDeletion = EnvBool("TRACE_DELETION", false)
 
-	RpcDropResponse  = EnvBool("RPC_DROP_RESPONSE", false)
-	TipTrieWarmupers = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
+	RpcDropResponse          = EnvBool("RPC_DROP_RESPONSE", false)
+	TipTrieWarmupers         = EnvInt("TIP_TRIE_WARMUPERS", estimate.HalfCPUs())
+	ParallelTrieBALWarmupers = EnvInt("PARALLEL_TRIE_BAL_WARMUPERS", balCommitmentWarmupWorkersDefault(runtime.GOMAXPROCS(-1)))
 
 	PerfProfiles = EnvBool("PERF_PROFILES", false)
 )
+
+func balCommitmentWarmupWorkersDefault(gomaxprocs int) int {
+	return max(gomaxprocs, 1)
+}
+
+func BALCommitmentWarmupReaders() int {
+	if !ReadAhead {
+		return 0
+	}
+	return max(ParallelTrieBALWarmupers, 0)
+}
+
+func ReadAheadWorkerReaders() int {
+	if !ReadAhead {
+		return 0
+	}
+	return max(ReadAheadWorkers, 0)
+}
 
 func init() {
 	if PerfProfiles {

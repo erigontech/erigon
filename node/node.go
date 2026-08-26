@@ -26,6 +26,7 @@ import (
 	"fmt"
 	"path/filepath"
 	"reflect"
+	"runtime"
 	"slices"
 	"strings"
 	"sync"
@@ -325,7 +326,13 @@ func OpenDatabase(ctx context.Context, config *nodecfg.Config, label kv.Label, n
 
 	logger.Info("Opening Database", "label", name, "path", dbPath)
 	openFunc := func(exclusive bool) (kv.RwDB, error) {
-		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(config.Http.DBReadConcurrency, execWorkerCount(config)))
+		roTxsLimiter := semaphore.NewWeighted(httpcfg.RoTxsLimit(
+			config.Http.DBReadConcurrency,
+			execWorkerCount(config),
+			runtime.NumCPU(),
+			dbg.BALCommitmentWarmupReaders(),
+			dbg.ReadAheadWorkerReaders(),
+		))
 		opts := mdbx.New(label, logger).
 			Path(dbPath).
 			GrowthStep(16 * datasize.MB).

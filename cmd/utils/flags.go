@@ -2035,9 +2035,13 @@ func SetEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeConfig *nodecfg
 		dbg.FilesBlockingAsyncIOMultiPage = false
 	}
 	if c := ctx.Int(DBReadConcurrencyFlag.Name); c > 0 {
-		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount); int64(c) < limit {
+		warmupWorkers := dbg.BALCommitmentWarmupReaders()
+		blockReadAheadWorkers := dbg.ReadAheadWorkerReaders()
+		if limit := httpcfg.RoTxsLimit(c, cfg.ExecWorkerCount, runtime.NumCPU(), warmupWorkers, blockReadAheadWorkers); int64(c) < limit {
 			logger.Warn("db.read.concurrency below the exec read-tx floor; raising to avoid a parallel-exec deadlock",
-				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount)
+				"configured", c, "using", limit, "execWorkers", cfg.ExecWorkerCount,
+				"mountedWorkers", runtime.NumCPU(), "warmupWorkers", warmupWorkers,
+				"blockReadAheadWorkers", blockReadAheadWorkers)
 		}
 	}
 	if ctx.IsSet(ExecNoMergeFlag.Name) {

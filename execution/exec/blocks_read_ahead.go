@@ -348,7 +348,16 @@ func (bra *BlockReadAheader) warmBAL(ctx context.Context, db kv.RoDB, bal types.
 		txCodeDestinations = uniqueTransactionDestinations(txns)
 	}
 	tasks, balWorkers := makeBALWarmupPlan(bal, workers)
-	return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
+	var group errgroup.Group
+	group.Go(func() error {
+		return bra.warmBALState(ctx, db, bal, tasks, codeMode, txCodeDestinations, balWorkers)
+	})
+	if dbg.ParallelTrieBALWarmupers > 0 {
+		group.Go(func() error {
+			return warmBALCommitment(ctx, db, bal, dbg.ParallelTrieBALWarmupers)
+		})
+	}
+	return group.Wait()
 }
 
 func (bra *BlockReadAheader) warmBALState(ctx context.Context, db kv.RoDB, bal types.BlockAccessList, tasks []balWarmupTask, codeMode balCodeWarmupMode, txCodeDestinations map[accounts.Address]struct{}, workers int) error {
