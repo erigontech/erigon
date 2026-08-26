@@ -153,6 +153,7 @@ func (e *ExecModule) AssembleBlock(ctx context.Context, params *builder.Paramete
 func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.Parameters) (*types.BlockWithReceipts, bool, error) {
 	oldHash, number, sd := e.forkValidator.ExtendingFork()
 	if sd == nil || oldHash == (common.Hash{}) {
+		e.logger.Debug("assemblePreconfirmed: no extending fork — from-scratch builder", "reqParent", params.ParentHash)
 		return nil, false, nil // no preconfirmed flashblock → from-scratch builder
 	}
 	if e.currentContext == nil || e.currentContext.BlockOverlay() == nil {
@@ -184,6 +185,8 @@ func (e *ExecModule) assemblePreconfirmed(ctx context.Context, params *builder.P
 	if inHdr.ParentHash != params.ParentHash || !preconfirmAttrsMatch(inHdr, params) {
 		// The accumulated flashblock's attributes diverge from the FCU params — fall back to the
 		// from-scratch builder rather than seal a header inconsistent with the requested block.
+		e.logger.Debug("assemblePreconfirmed: preconfirmed block parent/attrs mismatch — from-scratch builder",
+			"extForkNum", number, "reqParent", params.ParentHash)
 		return nil, false, nil
 	}
 
@@ -251,6 +254,11 @@ func (e *ExecModule) AbandonExtendingFork() {
 	}
 	defer e.semaphore.Release(1)
 	e.forkValidator.AbandonExtendingFork()
+	// The driver re-opens the SAME block number FRESH after an abandon, so drop the maintained flashblock body
+	// too — otherwise PreExecuteFlashblock (which only auto-resets on a NEW number) would keep the stale body.
+	e.flash.mu.Lock()
+	e.flash.resetLocked(0)
+	e.flash.mu.Unlock()
 }
 
 // preconfirmAttrsMatch reports whether the accumulated in-progress header's proposer attributes equal the

@@ -153,6 +153,12 @@ type ExecutionModule interface {
 	// re-execution. See execmodule.PreExecute.
 	PreExecute(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error)
 
+	// PreExecuteFlashblock is the encapsulated flashblock pre-exec: the consensus half streams the UNFILTERED
+	// committed txs for the in-progress block plus its fixed header inputs; the execution half filters the
+	// stream against its own SD, maintains the (filtered) block body, builds+inserts it, and pre-executes.
+	// Returns the current filtered body and its hash. See execmodule.PreExecuteFlashblock.
+	PreExecuteFlashblock(ctx context.Context, inputs FlashblockInputs, newTxRLPs [][]byte) (*types.RawBody, common.Hash, ValidationResult, error)
+
 	// GetPreExecutedBody returns the node's locally pre-executed in-progress flashblock body
 	// (accumulated from the DAG across PreExecute rounds) plus the deferred in-progress hash and
 	// number. Lets the newPayload for a DAG-preconfirmed flashblock be body-LESS — each node

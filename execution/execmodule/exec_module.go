@@ -44,9 +44,11 @@ import (
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/protocol/rules"
 	"github.com/erigontech/erigon/execution/stagedsync"
+	"github.com/erigontech/erigon/execution/state"
 	"github.com/erigontech/erigon/execution/stagedsync/stageloop"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/node/ethconfig"
 	"github.com/erigontech/erigon/node/gointerfaces/remoteproto"
 )
@@ -234,6 +236,19 @@ type ExecModule struct {
 	// re-sealing. Guarded by pendingBoundaryMu.
 	preconfirmedByParent map[common.Hash]*types.BlockWithReceipts
 
+	// sealedByHash records every block this node SEALED locally (marker-driven close), keyed by its sealed
+	// hash. newPayload/ValidateChain consults it to ACCEPT a block this node produced instead of re-executing
+	// it: the block was produced+validated once on the frontier SD, so re-running it on a fresh SD parented to
+	// (lagging) canonical state is both redundant AND WRONG — the fresh SD lacks the frontier predecessor's
+	// state/txNum, so it computes a different root or fails (nonce-too-low / can't-find-header) and falsely
+	// marks our own valid block INVALID. Accept-by-hash keeps the architecture's single-execution property.
+	// Guarded by pendingBoundaryMu. Pruned as blocks canonicalize (updateForkChoice).
+	sealedByHash map[common.Hash]*types.Header
+
+	// flash is the exec-owned in-progress flashblock body (see flashBodyState / PreExecuteFlashblock): the
+	// execution half maintains the filtered block body here so the driver only streams unfiltered txs.
+	flash flashBodyState
+
 	// Changes accumulator
 	hook  *stageloop.Hook
 	accum *Accumulation
@@ -298,6 +313,7 @@ func NewExecModule(
 		preconfirmedBlocks:      make(map[uint64]*types.BlockWithReceipts),
 		pendingBoundary:         make(map[uint64]*builder.Parameters),
 		preconfirmedByParent:    make(map[common.Hash]*types.BlockWithReceipts),
+		sealedByHash:            make(map[common.Hash]*types.Header),
 		builderFunc:             builderFunc,
 		config:                  config,
 		semaphore:               semaphore.NewWeighted(1),
@@ -444,11 +460,32 @@ const nextForkBanner = `
 
 func (e *ExecModule) ValidateChain(ctx context.Context, blockHash common.Hash, blockNumber uint64) (ValidationResult, error) {
 	defer validateChainDuration.ObserveDuration(time.Now())
+	// ACCEPT a block this node already SEALED via the marker-driven close (recorded by
+	// ingestSealedFlashblockLocked, keyed by sealed hash) — pure LOOKUP, never a re-execution. It was executed
+	// once on the frontier SD; re-running it on a fresh SD parented to lagging canonical state lacks the
+	// frontier predecessor's state/txNum and would compute a wrong root or fail (nonce-too-low /
+	// can't-find-header), falsely invalidating our own valid block (the tip stall). The block's hash commits to
+	// every header field, so a hash match IS a full header match. This is the DAG-L2 tip path: every tip block
+	// is marker-sealed, so it is always accepted here and never re-executed.
+	//
+	// A block NOT in the sealed set falls through to base erigon's execute-and-validate path below — the
+	// engine block DOWNLOADER (sync of FOREIGN peer blocks) and non-DAG chains (dev-l1) rely on it, and base
+	// erigon's own execmodule tests drive the seal THROUGH this method. Accept-if-sealed is purely additive.
+	e.pendingBoundaryMu.Lock()
+	sealed := e.sealedByHash[blockHash]
+	e.pendingBoundaryMu.Unlock()
+	if sealed != nil && sealed.Number.Uint64() == blockNumber {
+		e.logger.Info("[execmodule] ValidateChain: accepting locally-sealed block (no re-exec)",
+			"number", blockNumber, "hash", blockHash, "root", sealed.Root)
+		return ValidationResult{
+			ValidationStatus: ExecutionStatusSuccess,
+			LatestValidHash:  blockHash,
+			ComputedRoot:     sealed.Root,
+		}, nil
+	}
 	if !e.semaphore.TryAcquire(1) {
 		e.logger.Trace("ethereumExecutionModule.ValidateChain: ExecutionStatus_Busy")
-		return ValidationResult{
-			ValidationStatus: ExecutionStatusBusy,
-		}, nil
+		return ValidationResult{ValidationStatus: ExecutionStatusBusy}, nil
 	}
 	defer e.semaphore.Release(1)
 	return e.validateChainLocked(ctx, blockHash, blockNumber)
@@ -556,6 +593,7 @@ func (e *ExecModule) validateChainLocked(ctx context.Context, blockHash common.H
 	// ComputeCommitment folds any remaining diff and yields the SAME root a one-shot full execution
 	// would (the trie is a function of the final key→value set, not the fold order/splitting).
 	reuseClose := flashUpdate.IsUpdate && flashUpdate.SD != nil
+
 	var doms *execctx.SharedDomains
 	var tx kv.TemporalRwTx
 	if reuseClose {
@@ -784,6 +822,60 @@ func (e *ExecModule) GetPreExecutedBody(ctx context.Context) (*types.RawBody, co
 	return body.RawBody(), oldHash, number, nil
 }
 
+// filterCandidatesByNonce keeps only the candidate txs applicable at the given state reader: it DROPS
+// nonce-too-low (already-sealed/stale), keeps the applicable ones in order, and RE-ORDERS nonce-too-high to be
+// reconsidered once earlier nonces apply — the nonce dimension of the standard block-assembly candidate filter
+// (builder.filterBadTransactions). A per-sender speculative next-nonce tracks in-batch accepts so a run of
+// consecutive nonces all pass. Called at the START of the pre-exec cycle (PreExecute) against the SD execution
+// itself uses, so an invalid candidate is filtered rather than breaking block execution. (Fee/balance/EOA are
+// already enforced by the txpool the candidates came from.)
+func filterCandidatesByNonce(reader state.StateReader, signer *types.Signer, txs []types.Transaction) []types.Transaction {
+	if len(txs) == 0 {
+		return txs
+	}
+	next := make(map[accounts.Address]uint64, len(txs))
+	nextNonce := func(a accounts.Address) uint64 {
+		if n, ok := next[a]; ok {
+			return n
+		}
+		if acc, aerr := reader.ReadAccountData(a); aerr == nil && acc != nil {
+			return acc.Nonce
+		}
+		return 0
+	}
+	kept := make([]types.Transaction, 0, len(txs))
+	remaining := append([]types.Transaction(nil), txs...)
+	missed := 0
+	for len(remaining) > 0 && missed != len(remaining) {
+		tx := remaining[0]
+		s, ok := tx.GetSender()
+		if !ok {
+			if rec, serr := signer.Sender(tx); serr == nil {
+				tx.SetSender(rec)
+				s, ok = rec, true
+			}
+		}
+		if !ok {
+			remaining = remaining[1:] // unrecoverable sender — drop
+			continue
+		}
+		exp := nextNonce(s)
+		switch {
+		case tx.GetNonce() < exp:
+			remaining = remaining[1:] // stale (already sealed) — drop
+		case tx.GetNonce() > exp:
+			missed++
+			remaining = append(remaining[1:], tx) // future — requeue for a later pass
+		default:
+			missed = 0
+			kept = append(kept, tx)
+			next[s] = exp + 1
+			remaining = remaining[1:]
+		}
+	}
+	return kept
+}
+
 // IngestSealedFlashblock is the newPayload step for a freshly-sealed flashblock: given only the sealed
 // HEADER H1 (produced by the assemble/CLOSE, carrying the real Root/GasUsed/ReceiptHash/Bloom — the
 // payload message is body-LESS), it materialises H1 in the currentContext block overlay by pairing it
@@ -850,6 +942,11 @@ func (e *ExecModule) ingestSealedFlashblockLocked(ctx context.Context, sealed *t
 	if err := e.forkValidator.SealInPlace(oldHash, newHash); err != nil {
 		return fmt.Errorf("IngestSealedFlashblock: seal in place: %w", err)
 	}
+	// Record the sealed block so newPayload/ValidateChain ACCEPTS it (this node produced+validated it once on
+	// the frontier) instead of re-executing it on a fresh SD against lagging canonical state.
+	e.pendingBoundaryMu.Lock()
+	e.sealedByHash[newHash] = sealed
+	e.pendingBoundaryMu.Unlock()
 	e.logger.Debug("[execmodule] flashblock sealed (newPayload ingest)",
 		"number", number, "deferredHash", oldHash, "sealedHash", newHash, "root", sealed.Root)
 	return nil

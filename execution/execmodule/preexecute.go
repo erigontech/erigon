@@ -10,6 +10,7 @@ import (
 	"github.com/erigontech/erigon/db/state/execctx"
 	"github.com/erigontech/erigon/execution/engineapi/engine_types"
 	"github.com/erigontech/erigon/execution/types"
+	"github.com/erigontech/erigon/execution/state"
 )
 
 // copyFrontierChainTables propagates the single frontier chain's raw-table bookkeeping — canonical hashes
@@ -102,6 +103,10 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 	// Flashblock prefix detection against the in-progress flashblock.
 	flashUpdate := e.forkValidator.CheckFlashblockUpdate(blockNumber, body.Transactions)
 	reuse := flashUpdate.IsUpdate && flashUpdate.SD != nil
+	prefixLen := 0 // already-executed txs (kept as-is); only the NEW suffix past this is candidate-filtered
+	if reuse {
+		prefixLen = flashUpdate.PrefixLen
+	}
 
 	roTx, err := e.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -137,8 +142,17 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 		// canonicalised yet. Capture it BEFORE constructing the SD so its initial SeekCommitment resolves
 		// through the parent's LIVE commitment, not the lagging DB. Fall back to currentContext (canonical)
 		// when no live frontier parent.
+		// PICK THE IMMEDIATE PREDECESSOR (blockNumber-1), not the newest PARKED gen (user 2026-08-26). Right
+		// after a marker close+open, block N's SD is the ACTIVE extending fork (just sealed, number ==
+		// blockNumber-1) and has NOT been parked yet — so NewestFrontierSD() is block N-1 (the GRANDPARENT).
+		// Chaining to the grandparent copies a txNum index missing block N's entry → AppendCanonicalTxNums for
+		// this block fails "append with gap" → the block can't open → no extending fork → seal returns nothing
+		// → FCU frozen. So prefer the extending fork when it IS the predecessor; fall back to the newest parked
+		// gen (deeper run-ahead) and then any lower extending fork.
 		var frontierParent *execctx.SharedDomains
-		if p := e.forkValidator.NewestFrontierSD(); p != nil {
+		if _, extNum, extSD := e.forkValidator.ExtendingFork(); extSD != nil && blockNumber > 0 && extNum == blockNumber-1 {
+			frontierParent = extSD
+		} else if p := e.forkValidator.NewestFrontierSD(); p != nil {
 			frontierParent = p
 		} else if _, extNum, extSD := e.forkValidator.ExtendingFork(); extSD != nil && extNum < blockNumber {
 			frontierParent = extSD
@@ -217,6 +231,30 @@ func (e *ExecModule) PreExecute(ctx context.Context, blockHash common.Hash, bloc
 		if err = e.unwindToCommonCanonical(doms, tx, header); err != nil {
 			doms.Close()
 			return ValidationResult{}, err
+		}
+	}
+
+	// CANDIDATE FILTER (start of the pre-exec cycle): the NEW suffix (past the executed prefix) are CANDIDATES
+	// — the DAG can hand us a tx that can't apply against the accumulated state (e.g. a stale/duplicate nonce).
+	// Drop those here, against the SAME doms execution is about to use (a fresh, in-cycle read → deterministic),
+	// so an invalid candidate is filtered rather than breaking block execution with a "nonce too low" BadBlock.
+	// It does NOT address WHY such a tx appears — only that it no longer fails the block. A no-op when every
+	// candidate applies (the common case). See filterCandidatesByNonce.
+	// Defence-in-depth: PreExecute is now normally fed an ALREADY-filtered body (PreExecuteFlashblock filters
+	// the stream before building+inserting), so this is a no-op on the happy path. It stays as a guard for any
+	// caller that inserts an unfiltered body directly. Filters only the NEW suffix (past the executed prefix)
+	// against the SAME SD execution uses.
+	if len(body.Transactions) > prefixLen {
+		fr := state.NewReaderV3(doms.AsGetter(tx))
+		suffix := body.Transactions[prefixLen:]
+		keptSuffix := filterCandidatesByNonce(fr, types.LatestSignerForChainID(e.config.ChainID), suffix)
+		if len(keptSuffix) != len(suffix) {
+			e.logger.Info("[execmodule] pre-exec filtered inapplicable candidates",
+				"block", blockNumber, "dropped", len(suffix)-len(keptSuffix), "kept", len(keptSuffix))
+			kept := make([]types.Transaction, 0, prefixLen+len(keptSuffix))
+			kept = append(kept, body.Transactions[:prefixLen]...)
+			kept = append(kept, keptSuffix...)
+			body = &types.Body{Transactions: kept, Uncles: body.Uncles, Withdrawals: body.Withdrawals}
 		}
 	}
 

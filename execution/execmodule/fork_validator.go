@@ -79,6 +79,10 @@ type ForkValidator struct {
 	blockReader services.FullBlockReader
 	// this is the current point where we processed the chain so far.
 	currentHeight uint64
+	// committedHeight is the last block whose merged state is FLUSHED+COMMITTED to the durable DB
+	// (set by NotifyCommitted after the FCU commit). Parked pre-exec gens are retired only once
+	// committed — see retireParkedUpTo. Guarded by fv.lock.
+	committedHeight uint64
 	// block hashes that are deemed valid
 	validHashes *lru.Cache[common.Hash, bool]
 
@@ -181,6 +185,19 @@ func (fv *ForkValidator) FrontierMode() bool {
 	return fv.frontierMode
 }
 
+// NotifyCommitted records the last block whose merged state has been FLUSHED + COMMITTED to the durable DB
+// (called after runForkchoiceFlushCommit). A parked pre-exec gen may only be retired once its own merged state
+// is committed here — until then its commitment branches live only in its SD mem (no later merge carries them),
+// so closing it early makes a successor's commitment read them empty ("empty branch data read during unfold").
+// See retireParkedUpTo. Caller must NOT hold fv.lock.
+func (fv *ForkValidator) NotifyCommitted(height uint64) {
+	fv.lock.Lock()
+	defer fv.lock.Unlock()
+	if height > fv.committedHeight {
+		fv.committedHeight = height
+	}
+}
+
 // NotifyCurrentHeight is to be called at the end of the stage cycle and represent the last processed block.
 func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 	fv.lock.Lock()
@@ -189,6 +206,13 @@ func (fv *ForkValidator) NotifyCurrentHeight(currentHeight uint64) {
 		return
 	}
 	fv.currentHeight = currentHeight
+	// FRONTIER (user 2026-08-26): the active extending fork is a block AHEAD of the head (the frontier runs
+	// ahead of FCU), so the head advancing must NOT tear it down — FCU is a status update, not a block
+	// operation. Closing it here made block N+1's marker seal find "no extending fork" (guard1) the moment
+	// FCU advanced the head to N. Only the legacy sync/reorg flow invalidates the extending fork on head change.
+	if fv.frontierMode {
+		return
+	}
 	// If the head changed, previous assumptions on head are incorrect now.
 	if fv.sharedDom != nil {
 		fv.sharedDom.Close()
@@ -410,6 +434,12 @@ func (fv *ForkValidator) ensureParked(sd *execctx.SharedDomains, headHash common
 // state is either already durable (canonicalised) or will be re-derived on the next open.
 // Caller must hold fv.lock.
 func (fv *ForkValidator) retireParkedUpTo(ctx context.Context, tx kv.TemporalTx, upTo uint64, inclusive bool) {
+	// DIAGNOSTIC (user 2026-08-26): in the frontier flow, do NOT close/remove parked SDs here. Keeping them all
+	// alive (a memory leak, accepted for now) takes "an SD was closed too early" off the table as a cause, so
+	// whatever fails next is definitively NOT an SD-removal problem. Legacy (non-frontier) flow unchanged.
+	if fv.frontierMode {
+		return
+	}
 	kept := fv.preExecStack[:0]
 	for _, g := range fv.preExecStack {
 		// inclusive=true → retire ≤ upTo (legacy). inclusive=false → retire STRICTLY BELOW upTo: the

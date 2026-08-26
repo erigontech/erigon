@@ -281,6 +281,19 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 		return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, false)
 	}
 
+	// Prune the accept-by-seal set: any locally-sealed block at or below the committed head is already
+	// canonical, so ValidateChain no longer needs to accept it — drop it to keep the map bounded to the
+	// run-ahead depth.
+	if finishProgressBefore > 0 {
+		e.pendingBoundaryMu.Lock()
+		for h, hdr := range e.sealedByHash {
+			if hdr.Number.Uint64() <= finishProgressBefore {
+				delete(e.sealedByHash, h)
+			}
+		}
+		e.pendingBoundaryMu.Unlock()
+	}
+
 	e.logger.Debug("[execmodule] updating fork choice", "number", fcuHeader.Number.Uint64(), "hash", fcuHeader.Hash())
 	UpdateForkChoiceArrivalDelay(fcuHeader.Time)
 	metrics.UpdateBlockConsumerPreExecutionDelay(fcuHeader.Time, fcuHeader.Number.Uint64(), e.logger)
@@ -730,6 +743,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 				// defer is a safety net — Rollback is idempotent.
 				defer bgRoTx.Rollback()
 				err := e.runPostForkchoice(bgSD, bgRoTx, finishProgressBefore, isSynced, initialCycle)
+				// Merged state through this head is now durable in the DB → let the fork validator retire
+				// parked pre-exec gens up to here (their branches are now readable from the committed DB).
+				if err == nil && headNumber != nil {
+					e.forkValidator.NotifyCommitted(*headNumber)
+				}
 				// Signal that the DB commit is done — RPC consumers can
 				// drop their SD reference and read from committed DB.
 				if dispatcher != nil {
@@ -744,6 +762,11 @@ func (e *ExecModule) updateForkChoice(ctx context.Context, originalBlockHash, sa
 			ct, err := e.runForkchoiceFlushCommit(currentContext, roTx, finishProgressBefore, isSynced)
 			if err != nil {
 				return sendForkchoiceErrorWithoutWaiting(e.logger, outcomeCh, err, stateFlushingInParallel)
+			}
+			// Merged state through this head is now durable in the DB → let the fork validator retire parked
+			// pre-exec gens up to here (their branches are now readable from the committed DB, not only mem).
+			if headNumber != nil {
+				e.forkValidator.NotifyCommitted(*headNumber)
 			}
 			commitTimings = ct
 
