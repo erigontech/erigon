@@ -1783,7 +1783,7 @@ func TestGenericCache_LenTracksLRU(t *testing.T) {
 	}
 	check := func(phase string) {
 		t.Helper()
-		require.Equal(t, c.data.Load().lru.Len(), c.Len(), "entry counter drifted after %s", phase)
+		require.Equal(t, c.data.Load().realLen(), c.Len(), "entry counter drifted after %s", phase)
 	}
 
 	for i := range 500 {
@@ -1809,11 +1809,24 @@ func TestGenericCache_LenTracksLRU(t *testing.T) {
 	}
 	check("stale drops")
 
-	before := c.data.Load()
+	// Growth is per shard now, so the generation is not swapped; a shard above
+	// its start capacity is what says a grow happened.
+	gen := c.data.Load()
+	grown := func() bool {
+		for i := range gen.shards {
+			gen.mus[i].Lock()
+			above := gen.curCap[i] > gen.startCapPerShard
+			gen.mus[i].Unlock()
+			if above {
+				return true
+			}
+		}
+		return false
+	}
 	for i := 500; i < 4000; i++ {
 		c.Put(key(i), []byte("v"), 30)
 	}
-	require.NotEqual(t, before, c.data.Load(), "grow did not happen")
+	require.True(t, grown(), "grow did not happen")
 	check("grow")
 
 	c.Clear()
