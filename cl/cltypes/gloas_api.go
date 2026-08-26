@@ -48,7 +48,7 @@ func (b *GloasBlockContents) DecodeSSZ(buf []byte, version int) error {
 }
 
 func (b *GloasBlockContents) EncodingSizeSSZ() int {
-	return b.Block.EncodingSizeSSZ() + b.ExecutionPayloadEnvelope.EncodingSizeSSZ() + b.KZGProofs.EncodingSizeSSZ() + b.Blobs.EncodingSizeSSZ()
+	return 4*4 + b.Block.EncodingSizeSSZ() + b.ExecutionPayloadEnvelope.EncodingSizeSSZ() + b.KZGProofs.EncodingSizeSSZ() + b.Blobs.EncodingSizeSSZ()
 }
 
 func (b *GloasBlockContents) Static() bool { return false }
@@ -84,7 +84,7 @@ func (c *SignedExecutionPayloadEnvelopeContents) DecodeSSZStrict(buf []byte, ver
 }
 
 func (c *SignedExecutionPayloadEnvelopeContents) EncodingSizeSSZ() int {
-	return c.SignedExecutionPayloadEnvelope.EncodingSizeSSZ() + c.KZGProofs.EncodingSizeSSZ() + c.Blobs.EncodingSizeSSZ()
+	return 3*4 + c.SignedExecutionPayloadEnvelope.EncodingSizeSSZ() + c.KZGProofs.EncodingSizeSSZ() + c.Blobs.EncodingSizeSSZ()
 }
 
 func (c *SignedExecutionPayloadEnvelopeContents) Static() bool { return false }

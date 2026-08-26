@@ -216,6 +216,38 @@ func TestExecutionPayloadServiceDoesNotEmitStaleHeadV2AfterReorg(t *testing.T) {
 	}
 }
 
+func TestExecutionPayloadServiceDoesNotEmitFullHeadV2AfterStatusChanges(t *testing.T) {
+	cfg := &clparams.MainnetBeaconConfig
+	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
+	emitter := beaconevents.NewEventEmitter()
+	service := NewExecutionPayloadService(t.Context(), forkchoiceMock, cfg, emitter)
+	stateEvents := make(chan *beaconevents.EventStream, 1)
+	stateSubscription := emitter.State().Subscribe(stateEvents)
+	defer stateSubscription.Unsubscribe()
+
+	blockRoot := common.Hash{1}
+	forkchoiceMock.Blocks[blockRoot] = &cltypes.SignedBeaconBlock{Block: &cltypes.BeaconBlock{Slot: 100, StateRoot: common.Hash{2}}}
+	headState := state.New(cfg)
+	headState.SetVersion(clparams.GloasVersion)
+	require.NoError(t, headState.SetSlot(100))
+	require.NoError(t, headState.SetBlockRootAt(63, common.Hash{3}))
+	require.NoError(t, headState.SetBlockRootAt(95, common.Hash{4}))
+	forkchoiceMock.GetStateAtBlockRootFn = func(common.Hash, bool) (*state.CachingBeaconState, error) {
+		forkchoiceMock.HeadPayloadStatusVal = cltypes.PayloadStatusEmpty
+		return headState, nil
+	}
+	forkchoiceMock.HeadVal = blockRoot
+	forkchoiceMock.HeadSlotVal = 100
+	forkchoiceMock.HeadPayloadStatusVal = cltypes.PayloadStatusFull
+
+	require.NoError(t, service.ProcessMessage(t.Context(), nil, newTestSignedEnvelope(100, blockRoot, 7)))
+	select {
+	case event := <-stateEvents:
+		t.Fatalf("emitted full head event after status changed: %#v", event)
+	default:
+	}
+}
+
 func TestExecutionPayloadServiceDoesNotEmitGossipWhenValidationFails(t *testing.T) {
 	cfg := &clparams.MainnetBeaconConfig
 	forkchoiceMock := mock_services.NewForkChoiceStorageMock(t)
