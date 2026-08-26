@@ -121,6 +121,13 @@ type PatriciaContext interface {
 	Storage(plainKey []byte) (*Update, error)
 }
 
+// BranchWarmer reads a branch for trie warmup, which only needs the bytes to pick
+// the next nibble and never keeps them. Unlike Branch it does not copy, so the
+// result stays valid only as long as the context's transaction.
+type BranchWarmer interface {
+	WarmupBranch(prefix []byte) ([]byte, kv.Step, error)
+}
+
 type TrieVariant string
 
 const (

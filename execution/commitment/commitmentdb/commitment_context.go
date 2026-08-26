@@ -954,7 +954,7 @@ func NewTrieContextRo(reader StateReader, stepSize uint64) *TrieContext {
 }
 
 func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
-	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	enc, step, err := sdc.branch(pref)
 	if err != nil {
 		return nil, 0, err
 	}
@@ -963,10 +963,27 @@ func (sdc *TrieContext) Branch(pref []byte) ([]byte, kv.Step, error) {
 	// underlying state cache / getter aliases shared storage that another goroutine
 	// (concurrent commitment workers) can recycle. Own the bytes at the trie-context
 	// boundary so all downstream consumers are safe.
+	return bytes.Clone(enc), step, nil
+}
+
+// WarmupBranch returns the branch bytes uncopied, for trie warmup. They stay
+// valid for the life of this context's transaction -- mdbx guarantees that much
+// for a read, mmapped .kv pages are pinned by it, and the mem batch and the
+// branch/state caches all hand out heap-owned values -- but not past it, which is
+// why anything that keeps branch data uses Branch.
+func (sdc *TrieContext) WarmupBranch(pref []byte) ([]byte, kv.Step, error) {
+	return sdc.branch(pref)
+}
+
+func (sdc *TrieContext) branch(pref []byte) ([]byte, kv.Step, error) {
+	enc, step, err := sdc.readDomain(kv.CommitmentDomain, pref)
+	if err != nil {
+		return nil, 0, err
+	}
 	if sdc.traceW != nil {
 		fmt.Fprintf(sdc.traceW, "[SDC] Branch read %x => %x\n", pref, enc)
 	}
-	return bytes.Clone(enc), step, nil
+	return enc, step, nil
 }
 
 func (sdc *TrieContext) PutBranch(prefix []byte, data []byte, prevData []byte) error {
