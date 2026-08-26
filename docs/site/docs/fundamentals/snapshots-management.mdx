@@ -121,7 +121,7 @@ The `seg du` estimates table shows the projected disk footprint for each mode gi
 
 ---
 
-## Commitment Snapshot Format *(New in v3.6)* {#commitment-snapshot-format}
+## Commitment Snapshot Format *(New in v3.6)*{#commitment-snapshot-format}
 
 A commitment snapshot file stores Merkle-Patricia trie branches. Each branch has to refer to the account and storage keys underneath it, and Erigon can encode those references in one of two ways:
 
@@ -164,7 +164,7 @@ erigon seg reset --datadir /your/datadir
 | `--dry-run`, `-n` | Print the files that would be removed and exit without removing anything. Default: `false`. |
 | `--preverified <remote\|local>` | Which preverified snapshot list to reset against. Default: `remote`. |
 
-`seg reset` is **destructive and not reversible**: at the default `--local=true` it deletes `chaindata/`, the Heimdall / Polygon-bridge DBs, any locally generated snapshot files, and any `.torrent` file whose infohash does not match the preverified list. Preverified snapshots already on disk are kept and corrected by the downloader on the next start. The node must be **stopped** — the command takes an exclusive lock on the datadir.
+`seg reset` is **destructive and not reversible**: at the default `--local=true` it deletes `chaindata/`, the Heimdall / Polygon-bridge DBs, and any locally generated snapshot files. Independently of `--local` — that is, even with `--local=false` — it also deletes any `.torrent` file whose infohash does not match the preverified list, **together with the snapshot data file that torrent vouched for** (a stale local build is unverifiable, so the downloader must re-fetch the canonical copy). All other preverified snapshots already on disk are kept and corrected by the downloader on the next start. The node must be **stopped** — the command takes an exclusive lock on the datadir.
 
 Cost: whatever the downloader has to re-fetch, plus rebuilding state on the next start. Run `--dry-run` first, and back up the datadir.
 
@@ -223,7 +223,7 @@ erigon seg step-rebase --datadir /your/datadir --new-step-size=390625
 
 What it does: renames every state snapshot file under `snapshots/domain`, `history`, `accessor`, and `idx` so its step numbers are rescaled by the factor; deletes the `.torrent` files in those directories and `snapshots/erigondb.toml.torrent`, which the rebase invalidates; deletes `chaindata/` (or, with `--keep-blocks`, resets its execution-state tables); and rewrites `snapshots/erigondb.toml` with the new `step_size` and a correspondingly rescaled `steps_in_frozen_file`.
 
-The command prints the full rename and delete plan and asks for confirmation (`Proceed with these changes? [y/N]`) before touching anything, and exits as a no-op if the datadir is already at the requested step size. It is **destructive and has no built-in undo**, but it is safe to re-run after an interruption. The node must be **stopped** — it locks the datadir and opens `chaindata/` exclusively. The v3.4.0 release notes put the rebase itself at roughly ten seconds; the cost that follows is re-acquiring whatever was in `chaindata/`.
+The command prints the full rename and delete plan and asks for confirmation (`Proceed with these changes? [y/N]`) before touching anything, and exits as a no-op if the datadir is already at the requested step size. It is **destructive and has no built-in undo**, but it is safe to re-run after an interruption. The node must be **stopped** — it locks the datadir (and, with `--keep-blocks`, additionally opens `chaindata/` exclusively). The v3.4.0 release notes put the rebase itself at roughly ten seconds; the cost that follows is re-acquiring whatever was in `chaindata/`.
 
 ---
 
