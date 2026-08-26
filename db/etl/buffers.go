@@ -80,10 +80,6 @@ func writeSortedEntries(w io.Writer, entries []sortableBufferEntry) error {
 
 var BufferOptimalSize = dbg.EnvDataSize("ETL_OPTIMAL", 256*datasize.MB) /*  var because we want to sometimes change it from tests or command-line flags */
 
-// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold:
-// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
-// 17*(256Mb/8) = 512Mb for all collectors combined. Buffers pool their
-// chunks — see dataChunks below.
 // etlAvgEntryBytes is what one entry's key+value averages, so a buffer's byte
 // budget divided by it is how many entries it can hold.
 var etlAvgEntryBytes = dbg.EnvInt("ETL_AVG_ENTRY_BYTES", 512)
@@ -91,6 +87,10 @@ var etlAvgEntryBytes = dbg.EnvInt("ETL_AVG_ENTRY_BYTES", 512)
 func entriesIn(bufBytes datasize.ByteSize) int { return int(bufBytes) / etlAvgEntryBytes }
 
 var (
+	// etlSmallBufRAM (BufferOptimalSize/8) bounds the flush threshold:
+	// 3_domains * 2 + 3_history * 1 + 4_indices * 2 = 17 etl collectors,
+	// 17*(256Mb/8) = 512Mb for all collectors combined. Buffers pool their
+	// chunks — see dataChunks below.
 	etlSmallBufRAM       = dbg.EnvDataSize("ETL_SMALL", BufferOptimalSize/8)
 	SmallSortableBuffers = NewAllocator(&sync.Pool{
 		New: func() any {
