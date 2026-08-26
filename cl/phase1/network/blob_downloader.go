@@ -253,7 +253,8 @@ func (b *BlobHistoryDownloader) downloadOnce() error {
 		b.targetSlot = currentSlot - b.beaconCfg.SlotsPerEpoch*2
 	}()
 
-	b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards", "slot", currentSlot, "to", targetSlot)
+	b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",
+		"slot", currentSlot, "to", max(targetSlot, b.sn.FrozenBlobs()))
 
 	for currentSlot >= targetSlot {
 		if currentSlot <= b.sn.FrozenBlobs() {
@@ -278,7 +279,8 @@ func (b *BlobHistoryDownloader) downloadOnce() error {
 				prevLogSlot = currentSlot
 				prevTime = time.Now()
 				b.logger.Info("[BlobHistoryDownloader] Downloading blobs backwards",
-					"slot", currentSlot, "to", targetSlot, "blks/sec", fmt.Sprintf("%.1f", blkSec))
+					"slot", currentSlot, "to", max(targetSlot, b.sn.FrozenBlobs()),
+					"blks/sec", fmt.Sprintf("%.1f", blkSec))
 			default:
 			}
 			b.processBatch(batch)
