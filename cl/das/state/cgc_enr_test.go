@@ -20,6 +20,8 @@ import (
 	"testing"
 
 	"github.com/stretchr/testify/require"
+
+	"github.com/erigontech/erigon/cl/clparams"
 )
 
 // fulu p2p-interface.md: cgc is a "Uint64 big endian integer with no leading zero
@@ -41,4 +43,17 @@ func TestEncodeCgcMatchesTheEnrSpec(t *testing.T) {
 			require.NotZero(t, got[0], "cgc %d has a leading zero byte", tc.cgc)
 		}
 	}
+}
+
+// fulu/validator.md requires a node whose custody requirement falls to keep advertising
+// the previous (highest) count. No test can reach SetCustodyGroupCount through peerdas -
+// the only production caller is on_block.go and every test route is a gomock stub - so
+// the ratchet is pinned here directly.
+func TestSetCustodyGroupCountKeepsTheHighestAdvertised(t *testing.T) {
+	cfg := clparams.MainnetBeaconConfig
+	s := NewPeerDasState(&cfg, &clparams.NetworkConfig{})
+
+	require.True(t, s.SetCustodyGroupCount(8), "an increase must be advertised")
+	require.False(t, s.SetCustodyGroupCount(4), "a decrease must not be advertised")
+	require.Equal(t, uint64(8), s.GetAdvertisedCgc(), "the highest count must survive a decrease")
 }
