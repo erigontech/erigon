@@ -45,11 +45,11 @@ func withBinCommitment(t *testing.T, on bool) {
 		statecfg.BinCommitmentHash = origHash
 	})
 	statecfg.ExperimentalBinCommitment = on
-	if on {
-		// erigondb.toml resolution refuses the combination: the bin trie is
-		// sequential-only, regardless of a process-wide parallel default.
-		statecfg.ExperimentalParallelCommitment = false
-	} else {
+	// erigondb.toml resolution refuses the combination: the bin trie is
+	// sequential-only, regardless of a process-wide parallel default. Clearing it
+	// only when the flag is pre-set misses the case the genesis selects the trie.
+	statecfg.ExperimentalParallelCommitment = false
+	if !on {
 		// The hash goes with the flag. A run under COMMITMENT_BIN_HASH leaves it set
 		// otherwise, and the resolver refuses a hash without the trie it names.
 		statecfg.BinCommitmentHash = ""
