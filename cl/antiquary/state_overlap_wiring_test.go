@@ -173,8 +173,8 @@ func TestRemoveStateOverlapsRunsWithoutDump(t *testing.T) {
 }
 
 // A failed Delete makes RemoveOverlaps return before retiring anything, so SegFileNames still
-// lists the superseded subsets. Seeding then announces exactly what was handed to Delete.
-func TestRemoveStateOverlapsSkipsSeedWhenRemovalFails(t *testing.T) {
+// lists the superseded subsets. They are filtered out of the seed; the rest of the dump is not.
+func TestRemoveStateOverlapsStillSeedsWhenRemovalFails(t *testing.T) {
 	d := &recordingDownloader{deleteErr: errors.New("downloader unreachable")}
 	a, subSeg := overlapAntiquary(t, d)
 
