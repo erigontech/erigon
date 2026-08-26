@@ -768,6 +768,10 @@ var (
 		Usage:   "Download snapshots up to the given block number (exclusive). Disabled by default. Useful for testing and shadow forks.",
 		Aliases: []string{"shadow.fork.block"},
 	}
+	SyncTargetBlockFlag = cli.Uint64Flag{
+		Name:  "sync.target-block",
+		Usage: "Stop the block-download driver once the head reaches this block number. 0 = no bound.",
+	}
 	TorrentVerbosityFlag = cli.IntFlag{
 		Name:  "torrent.verbosity",
 		Value: 1,
