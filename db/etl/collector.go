@@ -29,8 +29,8 @@ import (
 
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
-	"github.com/erigontech/erigon/diagnostics/metrics"
 	"github.com/erigontech/erigon/db/kv"
+	"github.com/erigontech/erigon/diagnostics/metrics"
 )
 
 type LoadNextFunc func(originalK, k, v []byte) error
@@ -51,6 +51,7 @@ var (
 	mxBufEntries = metrics.GetOrCreateSummary("etl_buffer_entries_at_flush")
 	mxBufBytes   = metrics.GetOrCreateSummary("etl_buffer_bytes_at_flush")
 )
+
 func (a *Allocator) Put(b Buffer) {
 	if b == nil {
 		return
@@ -156,7 +157,7 @@ func (c *Collector) flushBuffer(canStoreInRam bool) error {
 	}
 
 	mxBufEntries.Observe(float64(c.buf.Len()))
-	mxBufBytes.Observe(float64(c.buf.Size()))
+	mxBufBytes.Observe(float64(c.buf.SizeLimit()))
 	fullBuf := c.buf // can't `.Reset()` because this `buf` will move to another goroutine
 	if c.allocator != nil {
 		c.buf = nil // drawn again lazily on the next Collect; a flush is often the collector's last write event
