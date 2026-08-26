@@ -87,3 +87,24 @@ func (b *BlobHistoryDownloader) blobGapSummary() (count int, lowest, highest uin
 	}
 	return len(slots), slots[0], slots[len(slots)-1]
 }
+
+// slotBlobCounts reports how many sidecars the store holds for a slot and how many the
+// block commits to.
+type slotBlobCounts func(slot uint64) (stored, commitments int, err error)
+
+// scanRangeForGaps returns the slots in [from, to) whose stored sidecars do not match
+// their block's commitments. It reads only the block and the store index, so it covers a
+// range in seconds where the column walk needs days.
+func scanRangeForGaps(from, to uint64, counts slotBlobCounts) []uint64 {
+	var gaps []uint64
+	for slot := from; slot < to; slot++ {
+		stored, commitments, err := counts(slot)
+		if err != nil {
+			continue
+		}
+		if stored != commitments {
+			gaps = append(gaps, slot)
+		}
+	}
+	return gaps
+}

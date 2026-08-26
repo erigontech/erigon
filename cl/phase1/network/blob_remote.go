@@ -68,12 +68,15 @@ func (s *remoteBlobSource) fetch(ctx context.Context, blockRoot common.Hash) ([]
 	for _, endpoint := range s.endpoints {
 		sidecars, err := s.fetchFrom(ctx, endpoint, blockRoot)
 		if err != nil {
-			s.logger.Debug("[BlobRepair] endpoint could not serve block", "endpoint", endpoint, "blockRoot", blockRoot, "err", err)
+			// A transport failure and "I do not have it" both leave the gap unfilled, but
+			// only one of them is the operator's to fix, so they are not logged alike.
+			s.logger.Warn("[BlobRepair] endpoint unreachable or erroring", "endpoint", endpoint, "blockRoot", blockRoot, "err", err)
 			continue
 		}
 		if len(sidecars) > 0 {
 			return sidecars, nil
 		}
+		s.logger.Debug("[BlobRepair] endpoint has no sidecars for block", "endpoint", endpoint, "blockRoot", blockRoot)
 	}
 	return nil, nil
 }

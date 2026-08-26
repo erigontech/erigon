@@ -18,6 +18,7 @@ package network
 
 import (
 	"context"
+	"errors"
 	"testing"
 
 	"github.com/stretchr/testify/require"
@@ -145,4 +146,32 @@ func TestBlobGapSlotsAreSortedForStableReporting(t *testing.T) {
 	b.recordBlobGaps([]uint64{300, 100, 200})
 
 	require.Equal(t, []uint64{100, 200, 300}, b.BlobGapSlots())
+}
+
+// Gaps must be discoverable without the column walk. That walk exists to fetch columns
+// no peer will serve, so on an archive node it crawls — measured at ~1.6 slots/sec across
+// the 345k slots between the frozen frontier and head, i.e. days before it has even seen
+// every gap. Reading the store answers the same question in seconds.
+func TestScanRangeForGapsReportsEveryIncompleteSlot(t *testing.T) {
+	want := map[uint64]int{100: 1, 101: 0, 102: 2, 103: 0}
+	have := map[uint64]int{100: 0, 101: 0, 102: 1, 103: 0}
+
+	got := scanRangeForGaps(100, 104, func(slot uint64) (stored, commitments int, err error) {
+		return have[slot], want[slot], nil
+	})
+
+	require.Equal(t, []uint64{100, 102}, got)
+}
+
+// A slot the scan cannot read is skipped rather than reported: claiming a gap it could
+// not observe would send the drain fetching sidecars that may already be present.
+func TestScanRangeForGapsSkipsSlotsItCannotRead(t *testing.T) {
+	got := scanRangeForGaps(200, 203, func(slot uint64) (int, int, error) {
+		if slot == 201 {
+			return 0, 0, errors.New("unreadable")
+		}
+		return 0, 1, nil
+	})
+
+	require.Equal(t, []uint64{200, 202}, got)
 }

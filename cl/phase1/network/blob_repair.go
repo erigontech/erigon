@@ -102,7 +102,12 @@ func (b *BlobHistoryDownloader) repairBlobGap(slot uint64) bool {
 	}
 
 	sidecars, err := b.remoteBlobs.fetch(b.ctx, blockRoot)
-	if err != nil || len(sidecars) == 0 {
+	if err != nil {
+		b.logger.Debug("[BlobRepair] fetch failed", "slot", slot, "blockRoot", blockRoot, "err", err)
+		return false
+	}
+	if len(sidecars) == 0 {
+		b.logger.Debug("[BlobRepair] no endpoint had sidecars", "slot", slot, "blockRoot", blockRoot)
 		return false
 	}
 
