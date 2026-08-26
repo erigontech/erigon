@@ -337,6 +337,21 @@ func (d *Domain) kvBtAccessorFileNameMask(fromStep, toStep kv.Step) string {
 func (d *Domain) v4FilesForStep(step kv.Step) []string {
 	return d.dirtyFiles.V4FilesForStep(d.stepSize, step)
 }
+
+// domainRetireDestPaths returns the .kv path retire's collate should
+// write for this step, plus isV4Tail indicating whether the path is
+// v4 #2 form (raw-txN, non-aligned start) or standard step-aligned.
+// Mirrors History.historyRetireDestPaths on the .kv side. When v4 #1
+// exists for the step, returns the v4 #2 tail path
+// [v4#1.endTxN, stepEnd) so the background merge scheduler can later
+// compose the pair into the aligned .kv.
+func (d *Domain) domainRetireDestPaths(step kv.Step) (kvPath string, isV4Tail bool) {
+	if endTxN, ok := d.dirtyFiles.V4OneEndTxNForStep(d.stepSize, step); ok {
+		stepEnd := (uint64(step) + 1) * d.stepSize
+		return d.kvNewFilePathV4(endTxN, stepEnd), true
+	}
+	return d.kvNewFilePath(step, step+1), false
+}
 func (d *Domain) retireSubsumedV4Items(step kv.Step) []*FilesItem {
 	stepStart := uint64(step) * d.stepSize
 	stepEnd := uint64(step+1) * d.stepSize
@@ -790,9 +805,10 @@ func (dt *DomainRoTx) FirstStepNotInFiles() kv.Step {
 // Collation is the set of compressors created after aggregation
 type Collation struct {
 	HistoryCollation
-	valuesComp  *seg.Compressor
-	valuesPath  string
-	valuesCount int
+	valuesComp     *seg.Compressor
+	valuesPath     string
+	valuesCount    int
+	valuesIsV4Tail bool
 }
 
 func (c Collation) Close() {
@@ -955,7 +971,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 		}
 	}()
 
-	coll.valuesPath = d.kvNewFilePath(step, step+1)
+	coll.valuesPath, coll.valuesIsV4Tail = d.domainRetireDestPaths(step)
 	if coll.valuesComp, err = seg.NewCompressor(ctx, d.FilenameBase+".domain.collate", coll.valuesPath, d.dirs.Tmp, d.CompressCfg, log.LvlTrace, d.logger); err != nil {
 		return Collation{}, fmt.Errorf("create %s values compressor: %w", d.FilenameBase, err)
 	}
@@ -964,7 +980,7 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 	// Compress files only in `merge` which ok to be slow.
 	comp := seg.NewWriter(coll.valuesComp, seg.CompressNone)
 
-	sources, err := d.stepSourcesForCollate(roTx, step)
+	sources, err := d.stepSourcesForCollate(roTx, step, coll.valuesIsV4Tail)
 	if err != nil {
 		return coll, fmt.Errorf("build %s step sources: %w", d.FilenameBase, err)
 	}
@@ -994,16 +1010,27 @@ func (d *Domain) collate(ctx context.Context, step kv.Step, txFrom, txTo uint64,
 }
 
 // stepSourcesForCollate returns the ordered set of stepSource
-// iterators Domain.collate merges into the step-aligned .kv output
-// for this step. Source[0] is MDBX (writable-shadow rows tagged
-// with the target step) — it takes priority on duplicate keys.
-// Source[1..] are mode-C v4 boundary files anchored at step*stepSize
-// (retire consumes them here so their pre-target snapshot lands in
-// the new step-aligned .kv instead of being clobbered).
+// iterators Domain.collate merges into the retire output for this
+// step. Source[0] is MDBX (writable-shadow rows tagged with the
+// target step) — it takes priority on duplicate keys.
+//
+// isV4Tail controls whether pre-existing v4 boundary files (v4 #1
+// anchored at step*stepSize) are folded in inline:
+//
+//   - isV4Tail == false: retire is writing the standard step-aligned
+//     .kv; v4 boundary files (if any exist for this step) are added
+//     as later sources so their pre-target snapshot lands in the
+//     aligned output. Legacy inline-consume path.
+//
+//   - isV4Tail == true: retire is writing v4 #2 (the raw-txN tail
+//     [v4#1.endTxN, stepEnd)). v4 #1 stays on disk as its own file
+//     and the background merge scheduler composes (v4 #1, v4 #2)
+//     into the aligned .kv later. Including v4 sources here would
+//     duplicate v4 #1's data into v4 #2, so skip them.
 //
 // Every returned source must be Closed by the caller; stepSources
 // (slice type) provides Close-all.
-func (d *Domain) stepSourcesForCollate(roTx kv.Tx, step kv.Step) ([]stepSource, error) {
+func (d *Domain) stepSourcesForCollate(roTx kv.Tx, step kv.Step, isV4Tail bool) ([]stepSource, error) {
 	var sources []stepSource
 
 	if d.LargeValues {
@@ -1032,6 +1059,10 @@ func (d *Domain) stepSourcesForCollate(roTx kv.Tx, step kv.Step) ([]stepSource, 
 			return nil, err
 		}
 		sources = append(sources, src)
+	}
+
+	if isV4Tail {
+		return sources, nil
 	}
 
 	for _, v4Path := range d.v4FilesForStep(step) {

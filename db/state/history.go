@@ -892,18 +892,6 @@ func (h *History) buildFiles(ctx context.Context, step kv.Step, collation Histor
 	}
 	collation.Close()
 
-	// Under the two-v4-then-merge lifecycle, if retire's collate wrote
-	// to v4 #2 paths (raw-txN tail), the pre-existing v4 #1 stays as
-	// its own file and the background merge scheduler consolidates the
-	// pair later. Skip the inline compose — it would rename our v4 #2
-	// output to .mdbx-only and try to merge with v4 #1, producing a
-	// range-mismatched output.
-	if !collation.isV4Tail {
-		if err = h.mergeV4IntoStepFile(ctx, step, collation.historyPath, collation.efHistoryPath); err != nil {
-			return HistoryFiles{}, fmt.Errorf("merge %s v4 into step file: %w", h.FilenameBase, err)
-		}
-	}
-
 	efHistoryDecomp, err = seg.NewDecompressor(collation.efHistoryPath)
 	if err != nil {
 		return HistoryFiles{}, fmt.Errorf("open %s .ef history decompressor: %w", h.FilenameBase, err)

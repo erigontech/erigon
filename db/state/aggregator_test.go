@@ -1437,13 +1437,12 @@ func TestInvertedIndex_v4FilesForStep_ReturnsAnchoredV4EF(t *testing.T) {
 }
 
 // TestAggregator_subsumedV4ItemsForStepLocked_RetiresHistoryAndIdx pins
-// stage 8d's extension: after the step-integrate that would drop a v4
-// .kv from dirtyFiles, the paired v4 .v and .ef must ALSO retire (so
-// they don't linger in dirtyFiles once the step-full .v/.ef contain
-// their data via mergeV4IntoStepFile). Constructs a v4 pair anchored at
-// step start, calls subsumedV4ItemsForStepLocked over the step range,
-// asserts BOTH history and idx items are returned + removed from
-// dirtyFiles.
+// After the step-integrate that would drop a v4 .kv from dirtyFiles,
+// the paired v4 .v and .ef must ALSO retire so they don't linger in
+// dirtyFiles once the step-full .v/.ef contain their data. Constructs
+// a v4 pair anchored at step start, calls subsumedV4ItemsForStepLocked
+// over the step range, asserts BOTH history and idx items are returned
+// + removed from dirtyFiles.
 func TestAggregator_subsumedV4ItemsForStepLocked_RetiresHistoryAndIdx(t *testing.T) {
 	t.Parallel()
 	_, agg := testDbAndAggregatorv3(t, 100)

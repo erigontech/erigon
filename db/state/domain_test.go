@@ -3761,3 +3761,77 @@ func TestDomain_UnwindRestoresDeletionMarker(t *testing.T) {
 		})
 	}
 }
+
+// TestDomainRetireDestPaths_StandardAlignedWhenNoV4One pins the
+// baseline: without a v4 #1 for the step, retire's dest path must be
+// the standard step-aligned form.
+func TestDomainRetireDestPaths_StandardAlignedWhenNoV4One(t *testing.T) {
+	t.Parallel()
+	_, d := testDbAndDomain(t, log.New())
+
+	kvPath, isV4Tail := d.domainRetireDestPaths(kv.Step(3))
+	require.False(t, isV4Tail, "no v4 #1 present — must use step-aligned path")
+	require.Contains(t, kvPath, ".3-4.kv", "step-aligned .kv path shape")
+}
+
+// TestDomainRetireDestPaths_ChoosesV4TailWhenV4OneExists pins the
+// core wiring on the Domain side: when a v4 #1 for step S exists in
+// dirtyFiles, retire's dest path must be the v4 #2 tail form.
+func TestDomainRetireDestPaths_ChoosesV4TailWhenV4OneExists(t *testing.T) {
+	t.Parallel()
+	_, d := testDbAndDomain(t, log.New())
+
+	stepStart := uint64(3) * d.stepSize
+	stepEnd := uint64(4) * d.stepSize
+	cut := stepStart + 3
+	d.dirtyFiles.Set(&FilesItem{startTxNum: stepStart, endTxNum: cut})
+
+	kvPath, isV4Tail := d.domainRetireDestPaths(kv.Step(3))
+	require.True(t, isV4Tail, "v4 #1 present at step 3 — must switch to v4 #2 form")
+	require.Contains(t, kvPath, fmt.Sprintf(".%d-%d.kv", cut, stepEnd),
+		"v4 #2 .kv path must span [v4 #1.endTxN, stepEnd)")
+}
+
+// TestDomainStepSourcesForCollate_V4TailSkipsV4Files pins the skip
+// semantic: when retire is writing v4 #2 (isV4Tail=true), pre-existing
+// v4 boundary files must NOT be added as sources — otherwise their
+// data would duplicate into v4 #2 (already covered by v4 #1). The
+// MDBX source is always included regardless.
+func TestDomainStepSourcesForCollate_V4TailSkipsV4Files(t *testing.T) {
+	t.Parallel()
+	db, d := testDbAndDomain(t, log.New())
+	defer db.Close()
+
+	// Seed a v4 #1 file on disk + register in dirtyFiles so
+	// v4FilesForStep returns it.
+	dirs := datadir2.New(t.TempDir())
+	d.dirs = dirs
+	dir.MustExist(dirs.SnapDomain, dirs.Tmp)
+	stepStart := uint64(3) * d.stepSize
+	cut := stepStart + 3
+	v4Path := d.kvNewFilePathV4(stepStart, cut)
+	writeTestKVFile(t, v4Path, dirs.Tmp, log.New())
+
+	dec, err := seg.NewDecompressor(v4Path)
+	require.NoError(t, err)
+	t.Cleanup(dec.Close)
+	item := newFilesItem(stepStart, cut)
+	item.decompressor = dec
+	d.dirtyFiles.Set(item)
+
+	tx, err := db.BeginRo(t.Context())
+	require.NoError(t, err)
+	defer tx.Rollback()
+
+	// isV4Tail=false: v4 file MUST be included (legacy behaviour).
+	srcs, err := d.stepSourcesForCollate(tx, kv.Step(3), false)
+	require.NoError(t, err)
+	require.Len(t, srcs, 2, "MDBX + v4 = 2 sources when isV4Tail=false")
+	stepSources(srcs).Close()
+
+	// isV4Tail=true: v4 file MUST be skipped (writing to v4 #2).
+	srcs, err = d.stepSourcesForCollate(tx, kv.Step(3), true)
+	require.NoError(t, err)
+	require.Len(t, srcs, 1, "MDBX only = 1 source when isV4Tail=true; v4 stays on disk for background merge")
+	stepSources(srcs).Close()
+}
