@@ -86,11 +86,19 @@ func (failingPendingPayloadStore) Load(context.Context) ([]storedPendingPayload,
 }
 
 type rollbackFailingPendingPayloadStore struct {
-	saves int
+	saves       int
+	failSaveAt  int
+	failSaveErr error
 }
 
 func (s *rollbackFailingPendingPayloadStore) Save(context.Context, pendingPayloadKey, *pendingPayload, common.Bytes48) error {
 	s.saves++
+	if s.saves == s.failSaveAt {
+		if s.failSaveErr != nil {
+			return s.failSaveErr
+		}
+		return errors.New("rollback unavailable")
+	}
 	return nil
 }
 
@@ -134,6 +142,62 @@ func TestBuilderLoopRetainsOwnershipWhenDurableRollbackFails(t *testing.T) {
 	require.ErrorContains(t, err, "rollback unavailable")
 	require.Len(t, loop.pendingPayloads, 1)
 	require.NotZero(t, loop.manager.reservedBidValue)
+}
+
+func TestBuilderLoopReleasesAllReplacementReservationsAfterRollbackFailure(t *testing.T) {
+	loop, exec, submitter, prefsWatch := setupBuilderLoop(t)
+	store := &rollbackFailingPendingPayloadStore{failSaveAt: 3}
+	loop.pendingStore = store
+	sc := testSlotContext()
+	prefs := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}}
+
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, prefs)
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	firstReservation := loop.manager.reservedBidValue
+	require.NotZero(t, firstReservation)
+
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, prefs)
+	submitter.submitBidErr = fmt.Errorf("%w: rejected before publication", ErrBidNotPublished)
+	require.ErrorContains(t, loop.OnSlot(t.Context(), sc), "rollback unavailable")
+	require.Greater(t, loop.manager.reservedBidValue, firstReservation)
+
+	loop.releaseReservationsBeforeSlot(sc.Slot + 1)
+	require.Zero(t, loop.manager.reservedBidValue)
+}
+
+func TestBuilderLoopReleasesAllReplacementReservationsAfterUncertainSave(t *testing.T) {
+	loop, exec, _, prefsWatch := setupBuilderLoop(t)
+	store := &rollbackFailingPendingPayloadStore{
+		failSaveAt:  2,
+		failSaveErr: fmt.Errorf("%w: sync unavailable", ErrPendingPayloadMayExist),
+	}
+	loop.pendingStore = store
+	sc := testSlotContext()
+	prefs := &cltypes.SignedProposerPreferences{Message: &cltypes.ProposerPreferences{
+		ProposalSlot: sc.Slot, TargetGasLimit: 30_000_000,
+	}}
+
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, prefs)
+	require.NoError(t, loop.OnSlot(t.Context(), sc))
+	firstReservation := loop.manager.reservedBidValue
+	require.NotZero(t, firstReservation)
+
+	exec.setResultForNext(makeTestPayload(t, big.NewInt(1_000_000_000_000)))
+	require.NoError(t, loop.OnNewHead(t.Context(), sc))
+	prefsWatch.OnPreferencesReceived(sc.Slot, prefs)
+	require.ErrorContains(t, loop.OnSlot(t.Context(), sc), "sync unavailable")
+	require.Greater(t, loop.manager.reservedBidValue, firstReservation)
+
+	loop.releaseReservationsBeforeSlot(sc.Slot + 1)
+	require.Zero(t, loop.manager.reservedBidValue)
 }
 
 func TestBuilderLoopKeepsReservationWhenDurablePruneFails(t *testing.T) {

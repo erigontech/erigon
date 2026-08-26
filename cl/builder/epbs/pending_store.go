@@ -239,6 +239,6 @@ func decodeStoredPendingPayload(record storedPendingPayload, beaconCfg *clparams
 	return key, &pendingPayload{
 		slot: record.Slot, builderIndex: record.BuilderIndex,
 		assembled: &eladapter.AssembledPayload{Eth1Block: payload, BlobsBundle: bundle},
-		execReqs:  requests, parent: record.Parent, bidValue: record.BidValue,
+		execReqs:  requests, parent: record.Parent, bidValue: record.BidValue, reservedValue: record.BidValue,
 	}, nil
 }
