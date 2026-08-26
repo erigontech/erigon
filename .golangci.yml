@@ -90,12 +90,7 @@ linters:
       - linters:
           - errcheck
         path: "^(\
-          cl/aggregation\
-          |cl/antiquary\
-          |cl/das\
-          |cl/merkle_tree\
-          |cl/p2p\
-          |cl/persistence/blob_storage\
+          cl/persistence/blob_storage\
           |cl/persistence/state\
           |cl/persistence/state/historical_states_reader\
           |cl/rpc\
