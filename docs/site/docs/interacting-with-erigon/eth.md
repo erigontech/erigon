@@ -18,6 +18,9 @@ For API usage refer to the below official resources:
 * [https://ethereum.org/en/developers/docs/apis/json-rpc/](https://ethereum.org/en/developers/docs/apis/json-rpc/)
 * [https://ethereum.github.io/execution-apis/](https://ethereum.github.io/execution-apis/)
 
+The sections below cover only the places where Erigon adds a method that is not in that
+standard set, or where its behaviour differs from it. Everything else follows the spec.
+
 ### eth\_getProof
 
 `eth_getProof` returns Merkle proofs for account state and storage slots, as defined in [EIP-1186](https://eips.ethereum.org/EIPS/eip-1186). It is stable and production-ready as of Erigon v3.4.
@@ -76,3 +79,120 @@ An object mapping each requested address to an array of 32-byte values, in the s
 * A single call may request at most 1024 slots in total, counting all addresses together. Larger requests are rejected.
 * An empty `requests` object returns error code `-32602` with the message `empty request`.
 * When `blockNumber` is a block hash, the block must be canonical.
+
+### eth\_getWitness and eth\_getTxWitness
+
+Neither method exists in the standard set. They return a state witness for the
+*pre-state* of a block: the serialized trie node stream needed to re-execute it
+without a full state database.
+
+**Parameters**
+
+| Method | Parameter | Type | Description |
+| ------ | --------- | ---- | ----------- |
+| `eth_getWitness` | blockNumberOrHash | STRING, NUMBER or OBJECT | Block to build the witness for |
+| `eth_getTxWitness` | blockNumberOrHash | STRING, NUMBER or OBJECT | Block containing the transaction |
+| `eth_getTxWitness` | txIndex | QUANTITY | Index of a transaction within that block |
+
+:::info
+`eth_getTxWitness` currently only bounds-checks `txIndex` — an index past the end of the
+block is an error, but the witness it returns is the same whole-block witness
+`eth_getWitness` produces.
+:::
+
+**Returns**
+
+`DATA` — the serialized witness. Erigon decodes the bytes it is about to return and
+checks that they rebuild the parent state root, so a witness that comes back is
+self-verified. The genesis block returns an empty witness.
+
+**Requirements**
+
+Both methods need commitment history, so start the node with:
+
+```text
+--prune.include-commitment-history
+```
+
+Without it the call fails with `eth_getWitness requires commitment history`. If the
+requested block is older than the retained commitment history, it fails with
+`commitment history pruned`.
+
+### eth\_fillTransaction
+
+`eth_fillTransaction` is not in the standard set (it matches the geth method of the
+same name). It takes a partially specified transaction, fills in what is missing, and
+returns it unsigned — it neither signs nor submits anything.
+
+**Parameters**
+
+1. `Object` — a transaction object in the same shape `eth_call` accepts.
+
+**Fills in**
+
+* `nonce` — from the pending nonce of `from`, or `0` when `from` is absent
+* `value` — `0` when absent
+* `gas` — from `eth_estimateGas` against `latest`
+* `chainId` — the node's chain ID; a mismatching supplied value is an error
+* fee fields — `gasPrice` before London, otherwise `maxFeePerGas` / `maxPriorityFeePerGas` from the gas oracle
+* `maxFeePerBlobGas` — for blob transactions, twice the current blob gas price
+
+**Returns**
+
+An object with `raw`, the RLP-encoded unsigned transaction, and `tx`, the same
+transaction in JSON form.
+
+:::info
+KZG commitment and proof generation from raw blobs is not implemented. Blob
+transactions must already carry their `blobVersionedHashes`.
+:::
+
+### Block number parameter format
+
+Erigon accepts more block-number forms than the standard schema, which allows only a
+`0x`-prefixed hex quantity string or a named tag.
+
+Accepted everywhere a block is selected:
+
+* a `0x`-prefixed hex string without leading zeros — `"0x3"`, `"0x2ed119"`
+* a bare, unquoted JSON integer — `3`
+* the named tags `"earliest"`, `"latest"`, `"safe"`, `"finalized"`, `"pending"`
+* `null`, which means `latest`
+
+Rejected everywhere:
+
+* a quoted decimal string — `"3"`, `"100"`
+* hex with leading zeros — `"0x01"`
+* hex without the prefix — `"ff"`
+
+:::warning
+**Breaking change in v3.6.** Quoted decimal strings such as `"3"` used to be accepted
+and are now rejected with `hex string without 0x prefix`, returned as an
+`invalid params` error. Callers relying on that form must switch to `"0x3"`, the bare
+integer `3`, or a named tag.
+:::
+
+Two further forms are accepted only by methods whose parameter is a plain block number,
+such as `eth_getBlockByNumber`, `eth_getBlockTransactionCountByNumber` and `trace_block`:
+the Erigon-specific tag `"latestExecuted"`, and the string `"null"`, which means `latest`.
+Methods taking a block-number-or-hash selector — `eth_call`, `eth_getBalance`,
+`eth_getProof` and the rest — reject both.
+
+### Filter lifetime
+
+The standard spec does not say how long a filter lives. In Erigon, a filter created by
+`eth_newFilter`, `eth_newBlockFilter`, or `eth_newPendingTransactionFilter` is evicted
+once it has gone **5 minutes** without being polled. `eth_getFilterChanges` and
+`eth_getFilterLogs` both count as a poll and reset the clock, so a filter stays alive on
+a quiet chain as long as the client keeps asking. A call against an evicted filter
+returns `filter not found`.
+
+Change the window, or turn eviction off entirely, with:
+
+```text
+--rpc.subscription.filters.timeout 15m   # longer window
+--rpc.subscription.filters.timeout 0     # keep filters indefinitely
+```
+
+Eviction applies only to these polling filters. WebSocket subscriptions live as long as
+their connection does.
