@@ -309,7 +309,7 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	// One test for both, so the fast path holds no call and Put keeps its
 	// arguments in registers.
 	if lk > maxKeyLen || off+n+entryLocSize > int(b.curTop) {
-		b.putOutOfLine(k, v)
+		b.putSlow(k, v)
 		return
 	}
 	kLen, vLen := int32(0), int32(-1)
@@ -332,12 +332,12 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	copy(data[entryHeaderSize+lk:], v)
 }
 
-// putOutOfLine handles what Put's single guard rejects: a key too long to index,
+// putSlow handles what Put's single guard rejects: a key too long to index,
 // and an entry the chunk being filled has no room for. nextChunk always leaves
 // room, so the retry cannot come back here.
 //
 //go:noinline
-func (b *sortableBuffer) putOutOfLine(k, v []byte) {
+func (b *sortableBuffer) putSlow(k, v []byte) {
 	if len(k) > maxKeyLen {
 		panic(fmt.Sprintf("etl: key of %d bytes exceeds %d", len(k), maxKeyLen))
 	}
