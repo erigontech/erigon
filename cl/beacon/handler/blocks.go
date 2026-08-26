@@ -89,15 +89,14 @@ func (a *ApiHandler) GetEthV1BeaconBlock(w http.ResponseWriter, r *http.Request)
 		return nil, err
 	}
 
-	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
-
-	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
+	blk, err := a.readBlockByRoot(ctx, tx, root)
 	if err != nil {
 		return nil, err
 	}
 	if blk == nil {
 		return nil, beaconhttp.NewEndpointError(http.StatusNotFound, fmt.Errorf("block not found %x", root))
 	}
+	isOptimistic := a.forkchoiceStore.IsRootOptimistic(root)
 	// Check if the block is canonical
 	var canonicalRoot common.Hash
 	canonicalRoot, err = beacon_indicies.ReadCanonicalBlockRoot(tx, blk.Block.Slot)
@@ -107,6 +106,30 @@ func (a *ApiHandler) GetEthV1BeaconBlock(w http.ResponseWriter, r *http.Request)
 	return newBeaconResponse(blk).
 		WithFinalized(root == canonicalRoot && blk.Block.Slot <= a.forkchoiceStore.FinalizedSlot()).
 		WithVersion(blk.Version()).WithOptimistic(isOptimistic), nil
+}
+
+func (a *ApiHandler) readBlockByRoot(ctx context.Context, tx kv.Tx, root common.Hash) (*cltypes.SignedBeaconBlock, error) {
+	blk, err := a.blockReader.ReadBlockByRoot(ctx, tx, root)
+	if err != nil || blk != nil {
+		return blk, err
+	}
+
+	header, ok := a.forkchoiceStore.GetHeader(root)
+	if !ok || header == nil {
+		return nil, nil
+	}
+	blk, ok = a.forkchoiceStore.GetBlock(root)
+	if !ok || blk == nil || blk.Block == nil || blk.Block.Body == nil {
+		return nil, nil
+	}
+	blockRoot, err := blk.Block.HashSSZ()
+	if err != nil {
+		return nil, err
+	}
+	if blockRoot != root {
+		return nil, nil
+	}
+	return blk, nil
 }
 
 func (a *ApiHandler) GetEthV1BlindedBlock(w http.ResponseWriter, r *http.Request) (*beaconhttp.BeaconResponse, error) {
