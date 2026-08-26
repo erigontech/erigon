@@ -135,13 +135,8 @@ var dataChunks = sync.Pool{New: func() any {
 
 func getDataChunk() *[]byte { return dataChunks.Get().(*[]byte) }
 
-// putDataChunk hands back the same pointer the pool issued, so recycling a
-// chunk allocates nothing.
 func putDataChunk(c *[]byte) {
-	if len(*c) != dataChunkSize {
-		// A private chunk nextChunk sized to one oversized entry: pooling it
-		// would hand a wrong-sized chunk to the next taker, so it is dropped
-		// and re-allocated next time such an entry appears.
+	if len(*c) != dataChunkSize { // private chunk of an oversized entry
 		log.Warn("[etl] dropping oversized buffer chunk", "size", len(*c), "chunkSize", dataChunkSize)
 		return
 	}
