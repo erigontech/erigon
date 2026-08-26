@@ -25,8 +25,6 @@ import (
 	jsoniter "github.com/json-iterator/go"
 )
 
-// Benchmarks for StackStream, the only Stream implementation.
-
 func newStream() *jsoniter.Stream {
 	return jsoniter.NewStream(jsoniter.ConfigDefault, nil, 4096)
 }

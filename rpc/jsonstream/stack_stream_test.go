@@ -1151,31 +1151,6 @@ func TestBufferBoundedForEveryWriter(t *testing.T) {
 	}
 }
 
-// TestStackStreamBoundsBuffer pins that every writer drains, not just the string
-// ones. WriteRawBytes carries the largest payloads a response has, so a bound
-// that skipped it would not be a bound.
-func TestStackStreamBoundsBuffer(t *testing.T) {
-	for name, write := range map[string]func(s *StackStream, i int){
-		"raw bytes": func(s *StackStream, _ int) { s.WriteRawBytes(bytes.Repeat([]byte("x"), 4096)) },
-		"numbers":   func(s *StackStream, i int) { s.WriteInt64(int64(i)); s.WriteMore() },
-	} {
-		t.Run(name, func(t *testing.T) {
-			var out bytes.Buffer
-			s := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, &out, InitialBufferSize))
-
-			peak := 0
-			for i := range 100_000 {
-				write(s, i)
-				peak = max(peak, len(s.Buffer()))
-			}
-			require.NoError(t, s.Flush())
-
-			require.Greater(t, out.Len(), FlushThreshold, "the response must outgrow the buffer to mean anything")
-			require.Less(t, peak, 2*FlushThreshold, "buffer peaked at %d for a %d byte response", peak, out.Len())
-		})
-	}
-}
-
 // TestStackStreamEndClosesWhatIsOpen pins the point of the stack tracking: a
 // container end repairs whatever the caller left open inside it, so a handler
 // that stops early still yields a parseable response.
