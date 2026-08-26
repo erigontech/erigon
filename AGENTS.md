@@ -1,8 +1,6 @@
 # Erigon Agent Guidelines
 
-This file provides guidance for AI agents working with this codebase.
-
-**Requirements**: Go 1.25+, GCC 10+ or Clang, 32GB+ RAM, SSD/NVMe storage
+Use B2-level English in code, code-comments, github. Use programming terminology freely and exactly
 
 ## Build & Test
 
@@ -118,7 +116,7 @@ If a user explicitly directs an agent to add any other skip in the current turn 
 
 Commit messages: prefix with package(s) modified, e.g., `eth, rpc: make trace configs optional`
 
-Do not add `Co-Authored-By: Claude` or `🤖 Generated with Claude Code` lines to commits, PRs, or issues — Claude attribution is disabled repo-wide via `.claude/settings.json` (`includeCoAuthoredBy: false`).
+Don't sign commits, pr's, issues, comments.
 
 Run `make lint` before every push. The linter is non-deterministic — run it repeatedly until clean.
 
@@ -196,6 +194,8 @@ Before running `git push`, always run `make lint` first and fix all issues. Run 
 ## Lint Notes
 
 The linter (`make lint`) is non-deterministic in which files it scans — new issues may appear on subsequent runs. Run lint repeatedly until clean.
+
+A finding printed with a path outside the repo (e.g. `../erigon.worktrees/<name>/...`) is usually the repo's own file: golangci-lint's cache is shared across git worktrees and keyed by file content, so it can replay an issue under a sibling worktree's path. Such paths also escape path-based exclusions in `.golangci.yml`, so baselined findings can resurface. Remedy: `go tool golangci-lint cache clean` and re-run, or set `GOLANGCI_LINT_CACHE` to a per-worktree directory.
 
 Common lint categories and fixes:
 - **ruleguard (defer tx.Rollback/cursor.Close):** The error check must come *before* `defer tx.Rollback()`. Never remove an explicit `.Close()` or `.Rollback()` — add `defer` as a safety net alongside it, since the timing of the explicit call may matter.

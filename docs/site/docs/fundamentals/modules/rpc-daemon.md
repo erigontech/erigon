@@ -48,11 +48,7 @@ Usage:
 
 Flags:
       --datadir string                              path to Erigon working directory
-      --db.read.concurrency int                     Maximum number of concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot, though RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000)
-      --diagnostics.disabled                        Disable diagnostics
-      --diagnostics.endpoint.addr string            Diagnostics HTTP server listening interface (default "127.0.0.1")
-      --diagnostics.endpoint.port uint              Diagnostics HTTP server listening port (default 6062)
-      --diagnostics.speedtest                       Enable speed test
+      --db.read.concurrency int                     Ceiling on concurrent open DB read transactions (MDBX read-tx semaphore); extra readers wait for a slot by default, though some RPC paths (HTTP/WebSocket) fail fast with an overload response. Default scales as min(max(10, GOMAXPROCS*64), 9000) — kept well above CPU count because reads are I/O-bound, and capped below Go's ~10K OS-thread limit. A value below the parallel-exec worker count is raised to it (each worker holds a long-lived read tx, so a lower ceiling would deadlock); to actually reduce read concurrency, lower --exec.workers instead
       --graphql                                     enables graphql endpoint (disabled by default)
       --grpc                                        Enable GRPC server
       --grpc.addr string                            GRPC server listening interface (default "localhost")
@@ -91,7 +87,6 @@ Flags:
       --metrics.addr string                         Enable stand-alone metrics HTTP server listening interface (default "127.0.0.1")
       --metrics.port int                            Metrics HTTP server listening port (default 6061)
       --ots.search.max.pagesize uint                Max allowed page size for search methods (default 25)
-      --polygon.sync                                Enable if Erigon has been synced using the new polygon sync component
       --pprof                                       Enable the pprof HTTP server
       --pprof.addr string                           pprof HTTP server listening interface (default "127.0.0.1")
       --pprof.cpuprofile string                     Write CPU profile to the given file
@@ -103,7 +98,6 @@ Flags:
       --rpc.batch.limit int                         Maximum number of requests in a batch (default 100)
       --rpc.evmtimeout duration                     Maximum amount of time to wait for the answer from EVM call. (default 5m0s)
       --rpc.gascap uint                             Sets a cap on gas that can be used in eth_call/estimateGas (default 50000000)
-      --rpc.maxgetproofrewindblockcount.limit int   Max GetProof rewind block count (default 100000)
       --rpc.overlay.getlogstimeout duration         Maximum amount of time to wait for the answer from the overlay_getLogs call. (default 5m0s)
       --rpc.overlay.replayblocktimeout duration     Maximum amount of time to wait for the answer to replay a single block when called from an overlay_getLogs call. (default 10s)
       --rpc.returndata.limit int                    Maximum number of bytes returned from eth_call or similar invocations (default 100000)

@@ -48,12 +48,13 @@ type gloasBlockData struct {
 
 //go:generate mockgen -typed=true -destination=mock_services/peer_das_mock.go -package=mock_services . PeerDas
 type PeerDas interface {
+	Start(ctx context.Context)
 	// [Modified in Gloas:EIP7732] Changed from []*SignedBlindedBeaconBlock to []ColumnSyncableSignedBlock
 	// to support both pre-GLOAS (blinded) and GLOAS (non-blinded) blocks
 	DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	DownloadOnlyCustodyColumns(ctx context.Context, blocks []cltypes.ColumnSyncableSignedBlock) error
 	IsDataAvailable(slot uint64, blockRoot common.Hash) (bool, error)
-	Prune(keepSlotDistance uint64) error
+	PruneBelow(slot uint64) error
 	UpdateValidatorsCustody(cgc uint64)
 	TryScheduleRecover(slot uint64, blockRoot common.Hash) error
 	IsBlobAlreadyRecovered(blockRoot common.Hash) bool
@@ -88,10 +89,10 @@ type peerdas struct {
 	blockReader    freezeblocks.BeaconSnapshotReader
 	indiciesDB     kv.RoDB
 	gloasDataCache *lru.Cache[common.Hash, *gloasBlockData] // cache for GLOAS block data (~1KB per entry)
+	startOnce      sync.Once
 }
 
 func NewPeerDas(
-	ctx context.Context,
 	rpc *rpc.BeaconRpcP2P,
 	beaconConfig *clparams.BeaconChainConfig,
 	caplinConfig *clparams.CaplinConfig,
@@ -128,12 +129,17 @@ func NewPeerDas(
 		indiciesDB:     indiciesDB,
 		gloasDataCache: gloasDataCache,
 	}
-	p.resubscribeGossip()
-	for range numOfBlobRecoveryWorkers {
-		go p.blobsRecoverWorker(ctx)
-	}
-	go p.syncColumnDataWorker(ctx)
 	return p
+}
+
+func (d *peerdas) Start(ctx context.Context) {
+	d.startOnce.Do(func() {
+		d.resubscribeGossip()
+		for range numOfBlobRecoveryWorkers {
+			go d.blobsRecoverWorker(ctx)
+		}
+		go d.syncColumnDataWorker(ctx)
+	})
 }
 
 func (d *peerdas) StateReader() peerdasstate.PeerDasStateReader {
@@ -329,21 +335,19 @@ func (d *peerdas) UpdateValidatorsCustody(cgc uint64) {
 	}
 }
 
-func (d *peerdas) Prune(keepSlotDistance uint64) error {
-	if err := d.columnStorage.Prune(keepSlotDistance); err != nil {
+func (d *peerdas) PruneBelow(slot uint64) error {
+	err := d.columnStorage.PruneBelow(slot)
+	if errors.Is(err, blob_storage.ErrPruneNotStarted) {
 		return err
 	}
-
-	curSlot := d.ethClock.GetCurrentSlot()
-	if curSlot < keepSlotDistance {
+	// A partial failure still advances the floor: pruneBelow attempts every bucket, so it
+	// leaves stragglers rather than an untouched store, and the floor only understates them.
+	if slot == 0 {
 		d.state.SetEarliestAvailableSlot(0)
-	} else {
-		earliestSlot := curSlot - keepSlotDistance
-		if earliestSlot > d.state.GetEarliestAvailableSlot() {
-			d.state.SetEarliestAvailableSlot(earliestSlot)
-		}
+	} else if slot > d.state.GetEarliestAvailableSlot() {
+		d.state.SetEarliestAvailableSlot(slot)
 	}
-	return nil
+	return err
 }
 
 type recoverBlobsRequest struct {
@@ -392,7 +396,9 @@ func (d *peerdas) blobsRecoverWorker(ctx context.Context) {
 			sidecar, err := d.columnStorage.ReadColumnSidecarByColumnIndex(ctx, slot, blockRoot, int64(columnIndex))
 			if err != nil {
 				log.Debug("[blobsRecover] failed to read column sidecar", "err", err)
-				d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex))
+				if removeErr := d.columnStorage.RemoveColumnSidecars(ctx, slot, blockRoot, int64(columnIndex)); removeErr != nil {
+					log.Debug("[blobsRecover] failed to remove column sidecar", "err", removeErr)
+				}
 				return
 			}
 			if sidecar.Column.Len() > int(d.beaconConfig.MaxBlobCommittmentsPerBlock) {
@@ -706,7 +712,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 		for _, block := range blocks {
 			slots = append(slots, block.GetSlot())
 		}
-		log.Debug("DownloadColumnsAndRecoverBlobs", "elapsed time", time.Since(begin), "slots", slots)
+		log.Debug("DownloadColumnsAndRecoverBlobs", "elapsed", time.Since(begin), "slots", slots)
 	}()
 
 	// initialize the download request
@@ -727,7 +733,7 @@ func (d *peerdas) DownloadColumnsAndRecoverBlobs(ctx context.Context, blocks []c
 	return nil
 }
 
-func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) error {
+func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToRecoverBlobs bool) {
 	type resultData struct {
 		sidecars  []*cltypes.DataColumnSidecar
 		pid       string
@@ -735,7 +741,7 @@ func (d *peerdas) runDownload(ctx context.Context, req *downloadRequest, needToR
 		err       error
 	}
 	if req.remainingEntriesCount() == 0 {
-		return nil
+		return
 	}
 
 	stopChan := make(chan struct{})
@@ -829,34 +835,21 @@ mainloop:
 			var wg sync.WaitGroup
 			for _, sidecar := range result.sidecars {
 				wg.Go(func() {
-					// [Modified in Gloas:EIP7732] Get slot first, then use epoch-based version detection
-					var slot uint64
-					if sidecar.SignedBlockHeader != nil && sidecar.SignedBlockHeader.Header != nil {
-						slot = sidecar.SignedBlockHeader.Header.Slot
-					} else {
-						slot = sidecar.Slot
+					slot, blockRoot, ok := d.resolveColumnSidecarSlotAndRoot(sidecar)
+					if !ok {
+						log.Debug("rejecting malformed or schema-inconsistent column sidecar", "pid", result.pid)
+						d.rpc.BanPeer(result.pid)
+						return
 					}
-					epoch := slot / d.beaconConfig.SlotsPerEpoch
-					isGloasSidecar := d.beaconConfig.GetCurrentStateVersion(epoch) >= clparams.GloasVersion
-
-					var blockRoot common.Hash
-					if isGloasSidecar {
-						blockRoot = sidecar.BeaconBlockRoot
-					} else {
-						var err error
-						blockRoot, err = sidecar.SignedBlockHeader.Header.HashSSZ()
-						if err != nil {
-							log.Debug("failed to get block root", "err", err)
-							d.rpc.BanPeer(result.pid)
-							return
-						}
-					}
+					isGloasSidecar := sidecar.Version() >= clparams.GloasVersion
 					defer func() {
 						// check if need to schedule recover whenever we download a column sidecar
 						if needToRecoverBlobs &&
 							(d.IsColumnOverHalf(slot, blockRoot) || d.IsBlobAlreadyRecovered(blockRoot)) {
 							req.removeBlock(slot, blockRoot)
-							d.TryScheduleRecover(slot, blockRoot)
+							if err := d.TryScheduleRecover(slot, blockRoot); err != nil {
+								log.Debug("failed to schedule recover", "err", err)
+							}
 						}
 					}()
 
@@ -931,8 +924,31 @@ mainloop:
 			}
 		}
 	}
+}
 
-	return nil
+// resolveColumnSidecarSlotAndRoot reads a received column sidecar's slot and
+// block root from the fields populated by the schema it was decoded with. ok is
+// false for a malformed sidecar, or one whose slot disagrees with that schema —
+// see BeaconChainConfig.ForkSchemaMatchesSlot.
+func (d *peerdas) resolveColumnSidecarSlotAndRoot(sidecar *cltypes.DataColumnSidecar) (slot uint64, blockRoot common.Hash, ok bool) {
+	if sidecar.Version() >= clparams.GloasVersion {
+		if !d.beaconConfig.ForkSchemaMatchesSlot(sidecar.Slot, sidecar.Version()) {
+			return 0, common.Hash{}, false
+		}
+		return sidecar.Slot, sidecar.BeaconBlockRoot, true
+	}
+	header := sidecar.SignedBlockHeader
+	if header == nil || header.Header == nil {
+		return 0, common.Hash{}, false
+	}
+	if !d.beaconConfig.ForkSchemaMatchesSlot(header.Header.Slot, sidecar.Version()) {
+		return 0, common.Hash{}, false
+	}
+	root, err := header.Header.HashSSZ()
+	if err != nil {
+		return 0, common.Hash{}, false
+	}
+	return header.Header.Slot, root, true
 }
 
 func isExpectedColumnDownloadMiss(err error) bool {
@@ -1125,12 +1141,13 @@ func (d *peerdas) syncColumnDataWorker(ctx context.Context) {
 					return true
 				}
 				available, err := d.IsDataAvailable(block.GetSlot(), root)
-				if err != nil {
+				switch {
+				case err != nil:
 					log.Warn("failed to check if data is available", "err", err)
-				} else if available {
+				case available:
 					log.Trace("[syncColumnDataWorker] column data is already available, removing from sync queue", "slot", block.GetSlot(), "blockRoot", root)
 					d.blocksToCheckSync.Delete(root)
-				} else {
+				default:
 					blocks = append(blocks, block)
 					roots = append(roots, root)
 				}

@@ -211,7 +211,7 @@ func ImportChain(ethereum *eth.Ethereum, chainDB kv.RwDB, fn string, logger log.
 			if err := stream.Decode(&b); errors.Is(err, io.EOF) {
 				break
 			} else if err != nil {
-				return fmt.Errorf("at block %d: %v", n, err)
+				return fmt.Errorf("at block %d: %w", n, err)
 			}
 			// don't import first block
 			if b.NumberU64() == 0 {
@@ -282,10 +282,6 @@ func missingBlocks(chainDB kv.RwDB, blocks []*types.Block, blockReader dbservice
 	}
 
 	return nil
-}
-
-type stateChangesClient interface {
-	StateChanges(ctx context.Context, in *remoteproto.StateChangeRequest, opts ...grpc.CallOption) (remoteproto.KV_StateChangesClient, error)
 }
 
 func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool) error {
@@ -393,7 +389,7 @@ func InsertChain(ethereum *eth.Ethereum, chain *blockgen.ChainPack, setHead bool
 
 	chainRW := chainreader.NewChainReaderEth1(ethereum.ChainConfig(), ethereum.ExecutionModule(), time.Hour)
 
-	if err := chainRW.InsertBlocks(ctx, chain.Blocks, nil); err != nil {
+	if err := chainRW.InsertBlocks(ctx, chain.Blocks); err != nil {
 		return err
 	}
 

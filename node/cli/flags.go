@@ -225,6 +225,7 @@ func BuildEthConfig(nodeCtx context.Context, ctx *cli.Command, nodeCfg *nodecfg.
 }
 
 // ApplyFlagsForEthConfig is kept for backward compatibility. New code should use BuildEthConfig.
+//
 // Deprecated: use BuildEthConfig instead.
 func ApplyFlagsForEthConfig(ctx *cli.Command, cfg *ethconfig.Config, logger log.Logger) {
 	applyRemainingEthFlags(ctx, cfg, logger)
@@ -442,6 +443,15 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 		GraphQLEnabled:           ctx.Bool(utils.GraphQLEnabledFlag.Name),
 		HttpListenAddress:        ctx.String(utils.HTTPListenAddrFlag.Name),
 		HttpPort:                 ctx.Int(utils.HTTPPortFlag.Name),
+		HttpURL:                  ctx.String(utils.HTTPURLFlag.Name),
+		SocketServerEnabled:      ctx.Bool(utils.SocketEnabledFlag.Name),
+		SocketListenUrl:          ctx.String(utils.SocketURLFlag.Name),
+		HttpsServerEnabled:       ctx.Bool(utils.HTTPSEnabledFlag.Name),
+		HttpsListenAddress:       ctx.String(utils.HTTPSListenAddrFlag.Name),
+		HttpsPort:                ctx.Int(utils.HTTPSPortFlag.Name),
+		HttpsURL:                 ctx.String(utils.HTTPSURLFlag.Name),
+		HttpsCertfile:            ctx.String(utils.HTTPSCertFlag.Name),
+		HttpsKeyFile:             ctx.String(utils.HTTPSKeyFlag.Name),
 		AuthRpcHTTPListenAddress: ctx.String(utils.AuthRpcAddr.Name),
 		AuthRpcPort:              int(ctx.Uint(utils.AuthRpcPort.Name)),
 		JWTSecretPath:            jwtSecretPath,
@@ -480,17 +490,20 @@ func setEmbeddedRpcDaemon(ctx *cli.Command, cfg *nodecfg.Config, logger log.Logg
 			RpcSubscriptionFiltersMaxTopics:    ctx.Int(RpcSubscriptionFiltersMaxTopicsFlag.Name),
 			RpcSubscriptionFiltersTimeout:      ctx.Duration(RpcSubscriptionFiltersTimeoutFlag.Name),
 		},
-		Gascap:              utils.RpcGasCap(ctx),
-		BlockRangeLimit:     ctx.Int(utils.RpcBlockRangeLimit.Name),
-		GetLogsMaxResults:   ctx.Int(utils.RpcGetLogsMaxResults.Name),
-		LogQueryLimit:       ctx.Int(utils.RpcLogQueryLimit.Name),
-		Feecap:              ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
-		MaxTraces:           uint64(ctx.Uint(utils.TraceMaxtracesFlag.Name)),
-		TraceCompatibility:  ctx.Bool(utils.RpcTraceCompatFlag.Name),
-		GethCompatibility:   ctx.Bool(utils.RpcGethCompatFlag.Name),
-		BatchLimit:          ctx.Int(utils.RpcBatchLimit.Name),
-		ReturnDataLimit:     ctx.Int(utils.RpcReturnDataLimit.Name),
-		AllowUnprotectedTxs: ctx.Bool(utils.AllowUnprotectedTxs.Name),
+		Gascap:                  utils.RpcGasCap(ctx),
+		BlockRangeLimit:         ctx.Int(utils.RpcBlockRangeLimit.Name),
+		GetLogsMaxResults:       ctx.Int(utils.RpcGetLogsMaxResults.Name),
+		LogQueryLimit:           ctx.Int(utils.RpcLogQueryLimit.Name),
+		Feecap:                  ctx.Float64(utils.RPCGlobalTxFeeCapFlag.Name),
+		MaxTraces:               uint64(ctx.Uint(utils.TraceMaxtracesFlag.Name)),
+		TraceCompatibility:      ctx.Bool(utils.RpcTraceCompatFlag.Name),
+		GethCompatibility:       ctx.Bool(utils.RpcGethCompatFlag.Name),
+		WitnessCacheBlocks:      ctx.Uint(utils.WitnessCacheBlocksFlag.Name),
+		WitnessCacheHeadCapture: ctx.Bool(utils.WitnessCacheHeadCaptureFlag.Name),
+		WitnessCacheMaxMB:       ctx.Uint(utils.WitnessCacheMaxMBFlag.Name),
+		BatchLimit:              ctx.Int(utils.RpcBatchLimit.Name),
+		ReturnDataLimit:         ctx.Int(utils.RpcReturnDataLimit.Name),
+		AllowUnprotectedTxs:     ctx.Bool(utils.AllowUnprotectedTxs.Name),
 
 		OtsMaxPageSize: ctx.Uint64(utils.OtsSearchMaxCapFlag.Name),
 

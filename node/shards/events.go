@@ -336,11 +336,11 @@ func (n *Notifications) NewLastBlockSeen(blockNum uint64) {
 	n.LastNewBlockSeen.Store(blockNum)
 }
 
-func NewNotifications(StateChangesConsumer StateChangeConsumer) *Notifications {
+func NewNotifications(stateChangesConsumer StateChangeConsumer) *Notifications {
 	return &Notifications{
 		Events:               NewEvents(),
 		Accumulator:          NewAccumulator(),
 		RecentReceipts:       NewRecentReceipts(512),
-		StateChangesConsumer: StateChangesConsumer,
+		StateChangesConsumer: stateChangesConsumer,
 	}
 }

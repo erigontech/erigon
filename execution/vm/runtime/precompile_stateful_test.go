@@ -17,17 +17,22 @@
 package runtime
 
 import (
+	"context"
 	"testing"
 
 	"github.com/holiman/uint256"
 	"github.com/stretchr/testify/require"
 
 	"github.com/erigontech/erigon/common"
+	"github.com/erigontech/erigon/common/log/v3"
+	"github.com/erigontech/erigon/db/datadir"
+	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
+	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/protocol/mdgas"
 	"github.com/erigontech/erigon/execution/protocol/params"
 	"github.com/erigontech/erigon/execution/state"
-	"github.com/erigontech/erigon/execution/tests/testutil"
 	"github.com/erigontech/erigon/execution/tracing"
 	"github.com/erigontech/erigon/execution/types/accounts"
 	"github.com/erigontech/erigon/execution/vm"
@@ -46,15 +51,23 @@ func (r *recordingStatefulPrecompile) Name() string                     { return
 func (r *recordingStatefulPrecompile) RunStateful(input []byte, gas mdgas.MdGas, ctx *vm.PrecompileContext) ([]byte, mdgas.MdGas, error) {
 	r.calls = append(r.calls, ctx)
 	remaining := gas
-	remaining.Regular -= 111
+	remaining.Execution -= 111
 	return []byte{0x2a}, remaining, nil
 }
 
 func newStatefulTestConfig(t *testing.T, chainID uint64) *Config {
 	t.Helper()
-	db := testutil.TemporalDB(t)
-	tx, domains := testutil.TemporalTxSD(t, db)
-	st := state.New(state.NewReaderV3(domains.AsGetter(tx)))
+	db := temporaltest.NewTestDB(t, datadir.New(t.TempDir()))
+	tx, err := db.BeginTemporalRw(context.Background())
+	require.NoError(t, err)
+	t.Cleanup(tx.Rollback)
+
+	sd, err := execctx.NewSharedDomains(context.Background(), tx, log.New())
+	require.NoError(t, err)
+	t.Cleanup(sd.Close)
+
+	st := state.New(state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
+	t.Cleanup(st.Close)
 
 	cfg := &Config{
 		ChainConfig: &chain.Config{
@@ -88,7 +101,7 @@ func prepareStatefulCall(t *testing.T, cfg *Config, precompileAddr accounts.Addr
 	t.Helper()
 	vmenv := NewEnv(cfg)
 	rules := vmenv.ChainRules()
-	require.NoError(t, cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, precompileAddr, vm.ActivePrecompiles(rules), nil, nil))
+	cfg.State.Prepare(rules, cfg.Origin, cfg.Coinbase, precompileAddr, vm.ActivePrecompiles(rules), nil)
 	require.NoError(t, cfg.State.CreateAccount(cfg.Origin, false))
 	require.NoError(t, cfg.State.AddBalance(cfg.Origin, *uint256.NewInt(1_000_000), tracing.BalanceChangeUnspecified))
 	return vmenv
@@ -108,14 +121,14 @@ func TestStatefulPrecompileDispatch(t *testing.T) {
 
 	// Value transfer to the not-yet-existing precompile account triggers the
 	// EIP-2780 top-level NEW_ACCOUNT state charge; budget it in the State
-	// dimension so it doesn't spill into Regular.
-	gas := mdgas.MdGas{Regular: 100000, State: params.StateGasNewAccount}
+	// dimension so it doesn't spill into Execution.
+	gas := mdgas.MdGas{Execution: 100000, State: params.StateGasNewAccount}
 	value := *uint256.NewInt(7)
 
 	ret, remaining, _, err := vmenv.Call(cfg.Origin, precompileAddr, []byte{0x01}, gas, value, false)
 	require.NoError(t, err)
 	require.Equal(t, []byte{0x2a}, ret)
-	require.Equal(t, gas.Regular-111, remaining.Regular)
+	require.Equal(t, gas.Execution-111, remaining.Execution)
 
 	require.Len(t, rec.calls, 1)
 	got := rec.calls[0]
@@ -149,7 +162,7 @@ func TestStatefulPrecompileDelegateCallIdentity(t *testing.T) {
 	delegator := accounts.InternAddress(common.HexToAddress("0xde1e"))
 	value := *uint256.NewInt(3)
 
-	_, _, _, err := vmenv.DelegateCall(delegator, cfg.Origin, precompileAddr, []byte{0x01}, value, mdgas.MdGas{Regular: 100000})
+	_, _, _, err := vmenv.DelegateCall(delegator, cfg.Origin, precompileAddr, []byte{0x01}, value, mdgas.MdGas{Execution: 100000})
 	require.NoError(t, err)
 
 	require.Len(t, rec.calls, 1)
@@ -192,7 +205,7 @@ func TestStatefulPrecompileReentryHitsDepthLimit(t *testing.T) {
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
-	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Regular: 1_000_000}, uint256.Int{}, false)
+	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000}, uint256.Int{}, false)
 	require.ErrorIs(t, err, vm.ErrDepth)
 	require.LessOrEqual(t, rec.calls, 1030, "recursion must be cut off by the depth limit")
 }
@@ -204,14 +217,14 @@ func (stateGasStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, nil 
 func (stateGasStatefulPrecompile) Name() string               { return "STATEGAS" }
 
 func (stateGasStatefulPrecompile) RunStateful(_ []byte, gas mdgas.MdGas, _ *vm.PrecompileContext) ([]byte, mdgas.MdGas, error) {
-	gas.Regular -= 100
+	gas.Execution -= 100
 	gas.State -= 40
 	return nil, gas, nil
 }
 
 // TestStatefulPrecompileStateGasAttribution pins that State-dimension gas a
 // stateful precompile consumes is reported as State usage, not folded into
-// Regular.
+// Execution.
 func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 	const chainID = 900404
 	precompileAddr := accounts.InternAddress(common.BytesToAddress([]byte{0x8b}))
@@ -223,12 +236,12 @@ func TestStatefulPrecompileStateGasAttribution(t *testing.T) {
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
-	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Regular: 10_000, State: 500}, uint256.Int{}, false)
+	_, remaining, gasUsed, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000, State: 500}, uint256.Int{}, false)
 	require.NoError(t, err)
-	require.Equal(t, uint64(9_900), remaining.Regular)
+	require.Equal(t, uint64(9_900), remaining.Execution)
 	require.Equal(t, uint64(460), remaining.State)
 	require.Equal(t, int64(40), gasUsed.State, "State consumption must be attributed to the State dimension")
-	require.Equal(t, uint64(100), gasUsed.Regular, "Regular usage must not absorb the State spend")
+	require.Equal(t, uint64(100), gasUsed.Execution, "Execution usage must not absorb the State spend")
 }
 
 type nestedCallStatefulPrecompile struct {
@@ -261,7 +274,7 @@ func TestStatefulPrecompileStaticContextInherited(t *testing.T) {
 	require.NoError(t, cfg.State.CreateAccount(storeAddr, true))
 	require.NoError(t, cfg.State.SetCode(storeAddr, []byte{0x60, 0x01, 0x60, 0x01, 0x55, 0x00}, tracing.CodeChangeUnspecified)) // PUSH1 1 PUSH1 1 SSTORE STOP
 
-	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Regular: 1_000_000})
+	_, _, _, err := vmenv.StaticCall(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 1_000_000})
 	require.ErrorIs(t, err, vm.ErrWriteProtection)
 }
 
@@ -272,7 +285,7 @@ func (gasMintingStatefulPrecompile) Run([]byte) ([]byte, error) { return nil, ni
 func (gasMintingStatefulPrecompile) Name() string               { return "MINT" }
 
 func (gasMintingStatefulPrecompile) RunStateful(_ []byte, gas mdgas.MdGas, _ *vm.PrecompileContext) ([]byte, mdgas.MdGas, error) {
-	gas.Regular += 1_000_000
+	gas.Execution += 1_000_000
 	return nil, gas, nil
 }
 
@@ -290,6 +303,6 @@ func TestStatefulPrecompileCannotMintGas(t *testing.T) {
 	cfg := newStatefulTestConfig(t, chainID)
 	vmenv := prepareStatefulCall(t, cfg, precompileAddr)
 
-	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Regular: 10_000}, uint256.Int{}, false)
+	_, _, _, err := vmenv.Call(cfg.Origin, precompileAddr, nil, mdgas.MdGas{Execution: 10_000}, uint256.Int{}, false)
 	require.Error(t, err)
 }

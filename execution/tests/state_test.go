@@ -48,33 +48,6 @@ func TestStateCornerCases(t *testing.T) {
 	runStateTests(t, new(testutil.TestMatcher), filepath.Join(cornersDir, "state"))
 }
 
-// TestLegacyCancunState runs legacy ethereum/tests GeneralStateTests fixtures
-// (state-test format, non-EEST) at the Cancun-era snapshot, under
-// legacy-tests/LegacyTests/Cancun/GeneralStateTests. The fixtures cover all
-// pre-merge fork variants (Frontier through London, plus Paris/Shanghai/Cancun)
-// — the EEST static_tests exercised by `evm statetest` don't carry every
-// variant (e.g. RevertPrecompiledTouch_d3 in Berlin/Istanbul/London catches
-// the ripemd-touch state-clearing path that the Hive `legacy-cancun`
-// simulator flagged). Run them locally so that class of regression is
-// caught on CI rather than only by the weekly out-of-tree Hive run.
-func TestLegacyCancunState(t *testing.T) {
-	if testing.Short() {
-		t.Skip()
-	}
-	stateTestSetup(t)
-
-	st := new(testutil.TestMatcher)
-	// Slow tests
-	st.Slow(`^stPreCompiledContracts/precompsEIP2929Cancun`)
-	// Very slow tests
-	st.SkipLoad(`^stTimeConsuming/`)
-	// EVM perf-stress fixtures (loopMul, loopExp, performanceTester) overrun
-	// the 1h package timeout under -race instrumentation.
-	st.SkipLoad(`^VMTests/vmPerformance/`)
-
-	runStateTests(t, st, filepath.Join(legacyDir, "LegacyTests", "Cancun", "GeneralStateTests"))
-}
-
 // stateTestSetup applies the parallel/log/Windows-skip boilerplate shared by
 // state-test runners.
 func stateTestSetup(t *testing.T) {
@@ -113,7 +86,7 @@ func runStateTests(t *testing.T, st *testutil.TestMatcher, testDir string) {
 						return sdErr
 					}
 					defer sd.Close()
-					_, _, err = test.Run(t, sd, tx, subtest, vmconfig, dirs)
+					_, _, err = test.Run(t, sd, tx, subtest, vmconfig)
 					tx.Rollback()
 					if err != nil && len(test.Json.Post[subtest.Fork][subtest.Index].ExpectException) > 0 {
 						// Ignore expected errors

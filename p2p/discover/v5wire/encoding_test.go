@@ -346,7 +346,7 @@ func TestDecodeErrorsV5(t *testing.T) {
 
 		wantErr := "invalid auth size"
 		if _, err := net.nodeB.decode(testPacket); strings.HasSuffix(err.Error(), wantErr) {
-			t.Fatal(fmt.Errorf("(%s) got err %q, want %q", net.nodeB.ln.ID().TerminalString(), err, wantErr))
+			t.Fatalf("(%s) got err %v, want %q", net.nodeB.ln.ID().TerminalString(), err, wantErr)
 		}
 	})
 }
@@ -599,7 +599,7 @@ func (n *handshakeTestNode) encodeWithChallenge(t testing.TB, to handshakeTestNo
 	// Encode to destination.
 	enc, nonce, err := n.c.Encode(to.id(), to.addr(), p, challenge)
 	if err != nil {
-		t.Fatal(fmt.Errorf("(%s) %v", n.ln.ID().TerminalString(), err))
+		t.Fatal(fmt.Errorf("(%s) %w", n.ln.ID().TerminalString(), err))
 	}
 	t.Logf("(%s) -> (%s)   %s\n%s", n.ln.ID().TerminalString(), to.id().TerminalString(), p.Name(), hex.Dump(enc))
 	return enc, nonce
@@ -610,7 +610,7 @@ func (n *handshakeTestNode) expectDecode(t *testing.T, ptype byte, p []byte) Pac
 
 	dec, err := n.decode(p)
 	if err != nil {
-		t.Fatal(fmt.Errorf("(%s) %v", n.ln.ID().TerminalString(), err))
+		t.Fatal(fmt.Errorf("(%s) %w", n.ln.ID().TerminalString(), err))
 	}
 	t.Logf("(%s) %#v", n.ln.ID().TerminalString(), pp.NewFormatter(dec))
 	if dec.Kind() != ptype {
@@ -622,7 +622,7 @@ func (n *handshakeTestNode) expectDecode(t *testing.T, ptype byte, p []byte) Pac
 func (n *handshakeTestNode) expectDecodeErr(t *testing.T, wantErr error, p []byte) {
 	t.Helper()
 	if _, err := n.decode(p); !errors.Is(err, wantErr) {
-		t.Fatal(fmt.Errorf("(%s) got err %q, want %q", n.ln.ID().TerminalString(), err, wantErr))
+		t.Fatalf("(%s) got err %v, want %q", n.ln.ID().TerminalString(), err, wantErr)
 	}
 }
 

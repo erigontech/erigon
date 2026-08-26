@@ -1,6 +1,12 @@
 name: Cleanup Erigon
 description: Save build and module caches, and report uncached test packages
 
+inputs:
+  clean-fuzzcache:
+    description: "Set to 'false' to keep $GOCACHE/fuzz (for jobs that cache the fuzz corpus themselves)"
+    required: false
+    default: 'true'
+
 runs:
   using: composite
   steps:
@@ -28,6 +34,7 @@ runs:
       with:
         gocache: ${{ env.ERIGON_CI_GOCACHE_PATH }}
         key: ${{ env.ERIGON_CI_GOCACHE_KEY }}
+        clean-fuzzcache: ${{ inputs.clean-fuzzcache }}
 
     - name: Check for existing module cache entry
       id: modcache-probe
@@ -45,17 +52,6 @@ runs:
         modcache-path: ${{ env.ERIGON_CI_MODCACHE }}
         key: ${{ env.ERIGON_CI_MODCACHE_KEY }}
 
-    - name: Save submodule git objects cache
-      if: >-
-        ${{ always()
-        && env.ERIGON_CI_GITOBJECTS_CACHE_KEY != ''
-        && env.ERIGON_CI_GITOBJECTS_CACHE_RESTORED_KEY != env.ERIGON_CI_GITOBJECTS_CACHE_KEY }}
-      uses: actions/cache/save@v5
-      with:
-        path: |
-          .git/modules
-        key: ${{ env.ERIGON_CI_GITOBJECTS_CACHE_KEY }}
-
     - name: Report uncached test packages
       if: always()
       shell: bash
@@ -64,4 +60,3 @@ runs:
         awk '/^ok/ && !/\(cached\)/ { t = $3; sub(/s$/, "", t); print t, $2, $3 }' run.log \
           | sort -rn \
           | awk 'BEGIN { lines = "" } { lines = lines "%0A" $2 " (" $3 ")" } END { if (lines) print "::notice::Packages ran without test cache:" lines }'
-

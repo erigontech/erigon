@@ -89,8 +89,8 @@ func TestShanghaiIntrinsicGas(t *testing.T) {
 			if overflow {
 				t.Errorf("expected success but got uint overflow")
 			}
-			if result.RegularGas != c.expected {
-				t.Errorf("expected %v but got %v", c.expected, result.RegularGas)
+			if result.ExecutionGas != c.expected {
+				t.Errorf("expected %v but got %v", c.expected, result.ExecutionGas)
 			}
 		})
 	}
@@ -105,7 +105,7 @@ func TestZeroDataIntrinsicGas(t *testing.T) {
 		IsEIP7623: true,
 	})
 	assert.False(overflow)
-	assert.Equal(params.TxGas, result.RegularGas)
+	assert.Equal(params.TxGas, result.ExecutionGas)
 	assert.Equal(params.TxGas, result.FloorGasCost)
 }
 
@@ -222,8 +222,8 @@ func TestEIP7976VsEIP7623Floor(t *testing.T) {
 	assert.Equal(params.TxGas+128*params.TxTotalCostFloorPerTokenEIP7976, result7976z.FloorGasCost)
 	assert.Greater(result7976z.FloorGasCost, result7623z.FloorGasCost)
 
-	assert.Equal(result7623.RegularGas, result7976.RegularGas)
-	assert.Equal(result7623z.RegularGas, result7976z.RegularGas)
+	assert.Equal(result7623.ExecutionGas, result7976.ExecutionGas)
+	assert.Equal(result7623z.ExecutionGas, result7976z.ExecutionGas)
 }
 
 // TestEIP7981IntrinsicGas covers EIP-7981 (Increase Access List Cost):
@@ -235,7 +235,7 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 		dataNonZeroLen       uint64
 		accessListLen        uint64
 		storageKeysLen       uint64
-		expectedRegularGas   uint64
+		expectedExecutionGas uint64
 		expectedFloorGasCost uint64
 	}{
 		"no data no access list": {
@@ -243,7 +243,7 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 			dataNonZeroLen:       0,
 			accessListLen:        0,
 			storageKeysLen:       0,
-			expectedRegularGas:   params.TxGas,
+			expectedExecutionGas: params.TxGas,
 			expectedFloorGasCost: params.TxGas,
 		},
 		"only access list address": {
@@ -251,8 +251,8 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 			dataNonZeroLen: 0,
 			accessListLen:  1,
 			storageKeysLen: 0,
-			// regular = 21000 + 2400 + (20*4)*16 = 21000 + 2400 + 1280
-			expectedRegularGas: params.TxGas +
+			// execution = 21000 + 2400 + (20*4)*16 = 21000 + 2400 + 1280
+			expectedExecutionGas: params.TxGas +
 				params.TxAccessListAddressGas +
 				params.TxAccessListAddressBytes*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 			// floor = 21000 + (20*4)*16 = 21000 + 1280
@@ -265,8 +265,8 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 			accessListLen:  1,
 			storageKeysLen: 2,
 			// access_list_bytes = 1*20 + 2*32 = 84; floor_tokens = 84*4 = 336; data gas = 336*16 = 5376
-			// regular = 21000 + 2400 + 2*1900 + 5376 = 32576
-			expectedRegularGas: params.TxGas +
+			// execution = 21000 + 2400 + 2*1900 + 5376 = 32576
+			expectedExecutionGas: params.TxGas +
 				params.TxAccessListAddressGas +
 				2*params.TxAccessListStorageKeyGas +
 				(params.TxAccessListAddressBytes+2*params.TxAccessListStorageKeyBytes)*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
@@ -278,8 +278,8 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 			dataNonZeroLen: 32,
 			accessListLen:  0,
 			storageKeysLen: 0,
-			// regular = 21000 + 32*16 = 21512
-			expectedRegularGas: params.TxGas + 32*params.TxDataNonZeroGasEIP2028,
+			// execution = 21000 + 32*16 = 21512
+			expectedExecutionGas: params.TxGas + 32*params.TxDataNonZeroGasEIP2028,
 			// floor = 21000 + (32*4)*16 = 21000 + 2048
 			expectedFloorGasCost: params.TxGas + 32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 		},
@@ -288,8 +288,8 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 			dataNonZeroLen: 0,
 			accessListLen:  0,
 			storageKeysLen: 0,
-			// regular = 21000 + 32*4 = 21128
-			expectedRegularGas: params.TxGas + 32*params.TxDataZeroGas,
+			// execution = 21000 + 32*4 = 21128
+			expectedExecutionGas: params.TxGas + 32*params.TxDataZeroGas,
 			// EIP-7976: zero bytes also cost 4 tokens each for the floor => 21000 + (32*4)*16 = 23048
 			expectedFloorGasCost: params.TxGas + 32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976,
 		},
@@ -299,8 +299,8 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 			accessListLen:  1,
 			storageKeysLen: 2,
 			// access_list_bytes = 84, access list data gas = 84*4*16 = 5376
-			// regular = 21000 + 32*16 + 2400 + 2*1900 + 5376 = 33088
-			expectedRegularGas: params.TxGas +
+			// execution = 21000 + 32*16 + 2400 + 2*1900 + 5376 = 33088
+			expectedExecutionGas: params.TxGas +
 				32*params.TxDataNonZeroGasEIP2028 +
 				params.TxAccessListAddressGas +
 				2*params.TxAccessListStorageKeyGas +
@@ -325,7 +325,7 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 				IsEIP7981:      true,
 			})
 			assert.False(t, overflow)
-			assert.Equal(t, c.expectedRegularGas, result.RegularGas, "RegularGas mismatch")
+			assert.Equal(t, c.expectedExecutionGas, result.ExecutionGas, "ExecutionGas mismatch")
 			assert.Equal(t, c.expectedFloorGasCost, result.FloorGasCost, "FloorGasCost mismatch")
 		})
 	}
@@ -337,38 +337,35 @@ func TestEIP7981IntrinsicGas(t *testing.T) {
 // The reference cases mirror the EIP-2780 specification's reference table.
 func TestEIP2780IntrinsicGas(t *testing.T) {
 	cases := map[string]struct {
-		creation        bool
-		selfTransfer    bool
-		hasValue        bool
-		expectedRegular uint64
-		expectedState   uint64
+		creation          bool
+		selfTransfer      bool
+		hasValue          bool
+		expectedExecution uint64
 	}{
 		"self transfer zero value": {
-			selfTransfer:    true,
-			expectedRegular: params.TxBaseEIP2780,
+			selfTransfer:      true,
+			expectedExecution: params.TxBaseEIP2780,
 		},
 		"self transfer non-zero value": {
-			selfTransfer:    true,
-			hasValue:        true,
-			expectedRegular: params.TxBaseEIP2780,
+			selfTransfer:      true,
+			hasValue:          true,
+			expectedExecution: params.TxBaseEIP2780,
 		},
 		"eoa zero value": {
-			expectedRegular: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780,
+			expectedExecution: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780,
 		},
 		"eoa non-zero value": {
-			hasValue:        true,
-			expectedRegular: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + params.TransferLogCostEIP2780 + params.TxValueCostEIP2780,
+			hasValue:          true,
+			expectedExecution: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + params.TransferLogCostEIP2780 + params.TxValueCostEIP2780,
 		},
 		"creation zero value": {
-			creation:        true,
-			expectedRegular: params.TxBaseEIP2780 + params.CreateAccessEIP2780,
-			expectedState:   params.StateGasNewAccount,
+			creation:          true,
+			expectedExecution: params.TxBaseEIP2780 + params.CreateAccessEIP2780,
 		},
 		"creation non-zero value": {
-			creation:        true,
-			hasValue:        true,
-			expectedRegular: params.TxBaseEIP2780 + params.CreateAccessEIP2780 + params.TransferLogCostEIP2780,
-			expectedState:   params.StateGasNewAccount,
+			creation:          true,
+			hasValue:          true,
+			expectedExecution: params.TxBaseEIP2780 + params.CreateAccessEIP2780 + params.TransferLogCostEIP2780,
 		},
 	}
 	for name, c := range cases {
@@ -383,54 +380,78 @@ func TestEIP2780IntrinsicGas(t *testing.T) {
 				IsEIP7623:          true,
 				IsEIP7976:          true,
 				IsEIP7981:          true,
-				IsEIP8037:          true,
 				IsEIP2780:          true,
 			})
 			assert.False(t, overflow)
-			assert.Equal(t, c.expectedRegular, result.RegularGas, "RegularGas mismatch")
-			assert.Equal(t, c.expectedState, result.StateGas, "StateGas mismatch")
-			assert.Equal(t, params.TxBaseEIP2780, result.FloorGasCost, "FloorGasCost base mismatch")
+			assert.Equal(t, IntrinsicGasCalcResult{
+				ExecutionGas: c.expectedExecution,
+				FloorGasCost: c.expectedExecution,
+			}, result)
 		})
 	}
 }
 
-// TestEIP8038IntrinsicGas isolates the EIP-8038 intrinsic contributions: access-list
-// entries reprice to COLD_ACCOUNT_ACCESS (3000) per address and COLD_STORAGE_ACCESS
-// (3000) per storage key, and each authorization costs PER_AUTH_REGULAR (15816) regular
-// gas plus NEW_ACCOUNT+AUTH_BASE state gas. The floor EIPs and the EIP-2780 base are
-// left off so a regression in the 8038 repricing localizes here rather than muddying
-// with the floor surcharge (see TestEIP7981IntrinsicGas / TestEIP2780IntrinsicGas).
-func TestEIP8038IntrinsicGas(t *testing.T) {
+func TestEIP2780ContractCreationStateGasIsRuntime(t *testing.T) {
+	result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		IsContractCreation: true,
+		IsEIP2:             true,
+		IsEIP2028:          true,
+		IsEIP3860:          true,
+		IsEIP7623:          true,
+		IsEIP7976:          true,
+		IsEIP7981:          true,
+		IsEIP2780:          true,
+	})
+	assert.False(t, overflow)
+	expected := params.TxBaseEIP2780 + params.CreateAccessEIP2780
+	assert.Equal(t, IntrinsicGasCalcResult{ExecutionGas: expected, FloorGasCost: expected}, result)
+}
+
+func TestEIP2780AuthorizationStateGasIsRuntime(t *testing.T) {
+	result, overflow := CalcIntrinsicGas(IntrinsicGasCalcArgs{
+		AuthorizationsLen: 2,
+		IsEIP2:            true,
+		IsEIP2028:         true,
+		IsEIP7623:         true,
+		IsEIP7976:         true,
+		IsEIP7981:         true,
+		IsEIP2780:         true,
+	})
+	assert.False(t, overflow)
+	assert.Equal(t, IntrinsicGasCalcResult{
+		ExecutionGas: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780 + 2*params.ExecutionPerAuthBaseCostEIP8038,
+		FloorGasCost: params.TxBaseEIP2780 + params.ColdAccountAccessEIP2780,
+	}, result)
+}
+
+func TestAmsterdamAAIntrinsicGas(t *testing.T) {
 	cases := map[string]struct {
 		accessListLen     uint64
 		storageKeysLen    uint64
 		authorizationsLen uint64
-		expectedRegular   uint64
-		expectedState     uint64
+		expectedExecution uint64
 	}{
 		"access list address only": {
-			accessListLen:   1,
-			expectedRegular: params.TxGas + params.TxAccessListAddressGasEIP8038,
+			accessListLen:     1,
+			expectedExecution: params.TxAAGas + params.TxAccessListAddressGasEIP8038,
 		},
 		"access list address and storage key": {
-			accessListLen:   1,
-			storageKeysLen:  1,
-			expectedRegular: params.TxGas + params.TxAccessListAddressGasEIP8038 + params.TxAccessListStorageKeyGasEIP8038,
+			accessListLen:     1,
+			storageKeysLen:    1,
+			expectedExecution: params.TxAAGas + params.TxAccessListAddressGasEIP8038 + params.TxAccessListStorageKeyGasEIP8038,
 		},
 		"access list address and three keys": {
-			accessListLen:   1,
-			storageKeysLen:  3,
-			expectedRegular: params.TxGas + params.TxAccessListAddressGasEIP8038 + 3*params.TxAccessListStorageKeyGasEIP8038,
+			accessListLen:     1,
+			storageKeysLen:    3,
+			expectedExecution: params.TxAAGas + params.TxAccessListAddressGasEIP8038 + 3*params.TxAccessListStorageKeyGasEIP8038,
 		},
 		"single authorization": {
 			authorizationsLen: 1,
-			expectedRegular:   params.TxGas + params.PerAuthRegularCostEIP8038,
-			expectedState:     params.StateGasNewAccountAndAuth,
+			expectedExecution: params.TxAAGas + params.PerAuthExecutionCostEIP8038,
 		},
 		"two authorizations": {
 			authorizationsLen: 2,
-			expectedRegular:   params.TxGas + 2*params.PerAuthRegularCostEIP8038,
-			expectedState:     2 * params.StateGasNewAccountAndAuth,
+			expectedExecution: params.TxAAGas + 2*params.PerAuthExecutionCostEIP8038,
 		},
 	}
 	for name, c := range cases {
@@ -441,12 +462,14 @@ func TestEIP8038IntrinsicGas(t *testing.T) {
 				AuthorizationsLen: c.authorizationsLen,
 				IsEIP2:            true,
 				IsEIP2028:         true,
-				IsEIP8037:         true,
+				IsEIP2780:         true,
+				IsAATxn:           true,
 			})
 			assert.False(t, overflow)
-			assert.Equal(t, c.expectedRegular, result.RegularGas, "RegularGas mismatch")
-			assert.Equal(t, c.expectedState, result.StateGas, "StateGas mismatch")
-			assert.Equal(t, params.TxGas, result.FloorGasCost, "FloorGasCost mismatch")
+			assert.Equal(t, IntrinsicGasCalcResult{
+				ExecutionGas: c.expectedExecution,
+				FloorGasCost: params.TxAAGas,
+			}, result)
 		})
 	}
 }
@@ -467,8 +490,8 @@ func TestEIP7981NotActive(t *testing.T) {
 		IsEIP7981:      false,
 	})
 	assert.False(t, overflow)
-	// Regular: 21000 + 32*16 + 2400 + 2*1900 = 27712 (no access list data floor charge)
-	assert.Equal(t, params.TxGas+32*params.TxDataNonZeroGasEIP2028+params.TxAccessListAddressGas+2*params.TxAccessListStorageKeyGas, result.RegularGas)
+	// Execution: 21000 + 32*16 + 2400 + 2*1900 = 27712 (no access list data floor charge)
+	assert.Equal(t, params.TxGas+32*params.TxDataNonZeroGasEIP2028+params.TxAccessListAddressGas+2*params.TxAccessListStorageKeyGas, result.ExecutionGas)
 	// Floor (EIP-7976, access list not included): 21000 + (32*4)*16 = 23048
 	assert.Equal(t, params.TxGas+32*params.TxStandardTokensPerByte*params.TxTotalCostFloorPerTokenEIP7976, result.FloorGasCost)
 }

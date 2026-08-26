@@ -17,7 +17,7 @@ func buildAggregateAttestation(
 	single *solid.SingleAttestation,
 	validatorPosition, committeeLength uint64,
 	cfg *clparams.BeaconChainConfig,
-) *solid.Attestation {
+) (*solid.Attestation, error) {
 	return single.ToAttestation(int(validatorPosition), int(committeeLength), int(cfg.MaxCommitteesPerSlot), cfg)
 }
 
@@ -48,13 +48,21 @@ func (s *Service) submitAggregateAndProof(
 		Data:           attData,
 		Signature:      sig,
 	}
-	aggregate := buildAggregateAttestation(single, validatorPosition, committeeLength, s.cfg)
+	aggregate, err := buildAggregateAttestation(single, validatorPosition, committeeLength, s.cfg)
+	if err != nil {
+		s.logger.Warn("[dev-validator] build aggregate attestation failed",
+			"slot", slot, "committeeIndex", committeeIndex,
+			"committeeLength", committeeLength, "validatorPosition", validatorPosition, "err", err)
+		return
+	}
 
 	msg := &cltypes.AggregateAndProof{
 		AggregatorIndex: key.ValidatorIndex,
 		Aggregate:       aggregate,
 		SelectionProof:  selectionProof,
 	}
+	version := s.cfg.GetCurrentStateVersion(slot / s.cfg.SlotsPerEpoch)
+	msg.SetVersion(version)
 	aggregatorSig, err := signAggregateAndProof(key, msg, slot, s.cfg, s.genesisValidatorsRoot)
 	if err != nil {
 		s.logger.Warn("[dev-validator] aggregate sign failed", "err", err)
@@ -64,6 +72,7 @@ func (s *Service) submitAggregateAndProof(
 		Message:   msg,
 		Signature: aggregatorSig,
 	}
+	signed.SetVersion(version)
 	if err := s.client.post(ctx, "/eth/v1/validator/aggregate_and_proofs", []any{signed}); err != nil {
 		s.logger.Debug("[dev-validator] aggregate submit failed", "slot", slot, "err", err)
 	}

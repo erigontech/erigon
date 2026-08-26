@@ -100,7 +100,7 @@ func (api *GraphQLAPIImpl) GetBlockNumberForTx(ctx context.Context, hash common.
 	}
 	defer tx.Rollback()
 
-	blockNum, _, ok, err := api.txnLookup(ctx, tx, hash)
+	blockNum, _, ok, err := api.txnLookup(ctx, api.filters.WithOverlay(tx), hash)
 	return blockNum, ok, err
 }
 
@@ -155,7 +155,7 @@ func (api *GraphQLAPIImpl) GetBlockDetailsByHash(ctx context.Context, hash commo
 		return nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockHeight)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockHeight)
 	if err != nil {
 		return nil, err
 	}
@@ -246,7 +246,7 @@ func (api *GraphQLAPIImpl) getBlockWithSenders(ctx context.Context, number rpc.B
 		return nil, nil, err
 	}
 
-	block, err := api.blockWithSenders(ctx, tx, blockHash, blockHeight)
+	block, err := api.blockWithSenders(ctx, api.filters.WithOverlay(tx), blockHash, blockHeight)
 	if err != nil {
 		return nil, nil, err
 	}
@@ -273,12 +273,12 @@ func (api *GraphQLAPIImpl) GetAccountInfo(ctx context.Context, address common.Ad
 		return "", 0, "", err
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
 	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err = rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+	if err := rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
 		return "", 0, "", err
 	}
 
@@ -329,12 +329,12 @@ func (api *GraphQLAPIImpl) GetAccountStorage(ctx context.Context, address common
 		return zeroStorageHash, err
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, blockNum); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
 	stateTx := api.filters.WithTemporalOverlay(tx)
-	if err = rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
+	if err := rpchelper.CheckBlockExecuted(stateTx, blockNum); err != nil {
 		return zeroStorageHash, err
 	}
 
@@ -381,6 +381,9 @@ func (api *GraphQLAPIImpl) SendRawTransaction(ctx context.Context, encodedTx hex
 
 func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber, args ethapi.CallArgs) (*GraphQLCallResult, error) {
 	blockNrOrHash := rpc.BlockNumberOrHashWithNumber(blockNumber)
+	if err := rejectPendingState(blockNrOrHash); err != nil {
+		return nil, err
+	}
 
 	roTx, err := api.db.BeginTemporalRo(ctx)
 	if err != nil {
@@ -406,7 +409,7 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		args.Gas = (*hexutil.Uint64)(&api.gasCap)
 	}
 
-	header, _, err := api.headerByNumberOrHash(ctx, tx, blockNrOrHash)
+	header, _, err := api.canonicalHeaderByNumberOrHash(ctx, tx, blockNrOrHash)
 	if err != nil {
 		return nil, err
 	}
@@ -414,11 +417,11 @@ func (api *GraphQLAPIImpl) Call(ctx context.Context, blockNumber rpc.BlockNumber
 		return nil, fmt.Errorf("header not found")
 	}
 
-	if err = api.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
+	if err := api.checkPruneHistory(ctx, tx, header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 
-	if err = rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
+	if err := rpchelper.CheckBlockExecuted(api.filters.WithOverlay(tx), header.Number.Uint64()); err != nil {
 		return nil, err
 	}
 

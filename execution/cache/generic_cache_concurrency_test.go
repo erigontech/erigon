@@ -303,17 +303,14 @@ func TestGenericCache_CapacityEvictionAtomicWithPut_NoSizeDrift(t *testing.T) {
 	require.Zero(t, c.SizeBytes(), "capacity eviction raced the update-path delta")
 }
 
-// A put samples the coherence epoch and then contends for its stripe; a Clear
-// that wins the stripe first resets the epoch counter, so the put would stamp
-// a pre-Clear epoch onto an entry landing in the post-Clear generation. Once
-// a later unwind re-reaches that epoch value, the entry aliases the live
-// epoch and serves dead-fork state despite its txNum being at or above the
-// floor.
+// The failure mode is a pre-Clear epoch stamped on post-Clear storage. If Clear
+// reused that epoch value, a later unwind could reach the same value and treat
+// the entry as current even though its txNum is above the unwind floor.
 //
-// The test holds the key's stripe to park Clear on it (before the reset,
-// which runs inside the fence) and then the put behind it; waits beyond 1ms
-// put the mutex in starvation mode, so unlocking hands the stripe FIFO to
-// Clear first.
+// The test holds the key's stripe, then queues Clear before Put. Waiting beyond
+// the mutex starvation threshold makes the unlock hand the stripe to Clear
+// first. Clear must keep the stripe through the data and coherence generation
+// changes, so Put stamps the post-Clear epoch and a later unwind invalidates it.
 func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	c := NewGenericCache[[]byte](64*datasize.MB, func(v []byte) int { return len(v) }, ModeEvictLRU)
 	defer c.Close()
@@ -331,21 +328,21 @@ func TestGenericCache_ClearRacingPut_EpochAlias(t *testing.T) {
 	mu.Unlock()
 	wg.Wait()
 
-	c.Unwind(150) // epoch 0 -> 1 again, floor 150
+	c.Unwind(150)
 
 	_, ok := c.Get(key)
-	require.False(t, ok, "entry at txNum 200 outlived an unwind to 150: its pre-Clear epoch stamp aliases the live epoch")
+	require.False(t, ok, "entry at txNum 200 outlived an unwind to 150")
 }
 
 // A reader that captures a dead (unwind-invalidated) entry from the retiring
-// generation must not have it revalidated by Clear's coherence re-init:
-// judged against the post-Init state (fresh epoch, lifted floor), the entry
+// generation must not have it revalidated by Clear's coherence reset:
+// judged against the post-Reset state (new epoch, lifted floor), the entry
 // passes IsStale and dead-fork state is served. Coherence is snapshotted
 // before the generation load, so an old-generation entry is always judged by
-// coherence that still carries the unwind.
+// pre-Reset coherence that still carries the unwind.
 //
 // The reader gates on the fence reaching the key's stripe — the last one the
-// sweep locks — so its Get lands next to the Init that follows.
+// sweep locks — so its Get lands next to the Reset that follows.
 func TestGenericCache_ClearRacingGet_DeadEntryStaysDead(t *testing.T) {
 	var key []byte
 	for i := 0; ; i++ {

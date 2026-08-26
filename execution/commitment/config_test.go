@@ -116,7 +116,6 @@ func TestTrieConfig_SpawnSubTrieInheritsConfig(t *testing.T) {
 	sub := parent.SpawnSubTrie(nil, 0)
 	defer sub.Release()
 
-	// Sub-trie should inherit config but with DeferBranchUpdates forced to false
 	if sub.cfg.DeferBranchUpdates {
 		t.Error("sub-trie DeferBranchUpdates should be false")
 	}

@@ -23,26 +23,14 @@ import (
 	"errors"
 	"fmt"
 	"io"
-	"sync"
 
 	"github.com/c2h5oh/datasize"
-	"github.com/golang/snappy"
 
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/utils/eth_clock"
+	"github.com/erigontech/erigon/common/snappypool"
 	"github.com/erigontech/erigon/common/ssz"
 )
-
-var writerPool = sync.Pool{
-	New: func() any {
-		return snappy.NewBufferedWriter(nil)
-	},
-}
-
-func putWriter(sw *snappy.Writer) {
-	sw.Reset(nil)
-	writerPool.Put(sw)
-}
 
 func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 	enc := make([]byte, 0, val.EncodingSizeSSZ())
@@ -57,20 +45,26 @@ func EncodeAndWrite(w io.Writer, val ssz.Marshaler, prefix ...byte) error {
 
 	// Create writer size
 	wr := bufio.NewWriterSize(w, 10+len(enc))
-	defer wr.Flush()
 	// Write length of packet
-	wr.Write(prefix)
-	wr.Write(lengthBuf[:vin])
+	if _, err := wr.Write(prefix); err != nil {
+		return err
+	}
+	if _, err := wr.Write(lengthBuf[:vin]); err != nil {
+		return err
+	}
 	// start using streamed snappy compression
-	sw, _ := writerPool.Get().(*snappy.Writer)
-	sw.Reset(wr)
-	defer func() {
-		sw.Flush()
-		putWriter(sw)
-	}()
+	sw := snappypool.Writer(wr)
+	defer snappypool.PutWriter(sw)
 	// Marshall and snap it
-	_, err = sw.Write(enc)
-	return err
+	if _, err := sw.Write(enc); err != nil {
+		return err
+	}
+	// The buffered writes above only reach w on these flushes, so their errors
+	// are the ones that report a failed send.
+	if err := sw.Flush(); err != nil {
+		return err
+	}
+	return wr.Flush()
 }
 
 func DecodeAndRead(r io.Reader, val ssz.EncodableSSZ, b *clparams.BeaconChainConfig, ethClock eth_clock.EthereumClock) error {
@@ -91,13 +85,14 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 	// Read varint for length of message.
 	encodedLn, _, err := ReadUvarint(r)
 	if err != nil {
-		return fmt.Errorf("unable to read varint from message prefix: %v", err)
+		return fmt.Errorf("unable to read varint from message prefix: %w", err)
 	}
 	if encodedLn > uint64(16*datasize.MB) {
 		return errors.New("payload too big")
 	}
 
-	sr := snappy.NewReader(r)
+	sr := snappypool.Reader(r)
+	defer snappypool.PutReader(sr)
 	raw := make([]byte, encodedLn)
 	if _, err := io.ReadFull(sr, raw); err != nil {
 		// fetch struct name of val
@@ -106,7 +101,7 @@ func DecodeAndReadNoForkDigest(r io.Reader, val ssz.EncodableSSZ, version clpara
 
 	err = val.DecodeSSZ(raw, int(version))
 	if err != nil {
-		return fmt.Errorf("enable to unmarshall message: %v", err)
+		return fmt.Errorf("unable to unmarshal message: %w", err)
 	}
 	return nil
 }
@@ -151,14 +146,15 @@ func DecodeListSSZ(data []byte, count uint64, list []ssz.EncodableSSZ, b *clpara
 	// Read varint for length of message.
 	encodedLn, bytesCount, err := ReadUvarint(r)
 	if err != nil {
-		return fmt.Errorf("failed to decode listSSZ. Unable to read varint: %v", err)
+		return fmt.Errorf("failed to decode listSSZ. Unable to read varint: %w", err)
 	}
 	pos := 4 + bytesCount
 	if len(list) != int(count) {
 		return fmt.Errorf("encoded length not equal to expected size: want %d, got %d", objSize, encodedLn)
 	}
 
-	sr := snappy.NewReader(r)
+	sr := snappypool.Reader(r)
+	defer snappypool.PutReader(sr)
 	for i := 0; i < int(count); i++ {
 		var n int
 		raw := make([]byte, encodedLn)

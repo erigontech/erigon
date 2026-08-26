@@ -32,6 +32,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/membatchwithdb"
 	"github.com/erigontech/erigon/db/rawdb"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	"github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/exec"
 	"github.com/erigontech/erigon/execution/metrics"
@@ -116,7 +117,7 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	sd.SetTxNum(txNum)
 
 	stateWriter := state.NewWriter(sd.AsPutDel(tx), nil, txNum)
-	stateReader := state.NewReaderV3(sd.AsGetter(tx))
+	stateReader := state.NewReaderV3(sd.AsStateGetter(tx, execctxapi.StateGetterOptions{}))
 
 	// filterSd is a separate SharedDomains used only for filterBadTransactions.
 	// The filter makes speculative nonce/balance writes that may not match actual
@@ -134,10 +135,10 @@ func execBlock(ctx context0.Context, sd *execctx.SharedDomains, tx kv.TemporalTx
 	}
 	defer filterSd.Close()
 	filterWriter := state.NewWriter(filterSd.AsPutDel(filterMb), nil, txNum)
-	filterReader := state.NewReaderV3(filterSd.AsGetter(filterMb))
+	filterReader := state.NewReaderV3(filterSd.AsStateGetter(filterMb, execctxapi.StateGetterOptions{}))
 
 	ibs := state.New(stateReader)
-	defer ibs.Release(false)
+	defer ibs.Close()
 	ibs.SetTxContext(current.Header.Number.Uint64(), -1)
 
 	current.PayloadId = cfg.payloadId
@@ -315,11 +316,10 @@ func getNextTransactions(
 		txnprovider.WithAmount(amount),
 		txnprovider.WithParentBlockNum(executionAt),
 		txnprovider.WithBlockTime(header.Time),
-		// EIP-8037: remaining regular gas is the primary budget; remaining state
-		// gas filters by intrinsic state gas. Execution-time state gas (SSTOREs)
-		// is enforced by post-execution rollback in the block assembler.
+		// EIP-8037: runtime state gas is enforced by post-execution rollback
+		// in the block assembler.
 		txnprovider.WithGasTarget(mdgas.NewFullMdGas(
-			header.GasLimit-gasUsed.BlockRegular,
+			header.GasLimit-gasUsed.BlockExecution,
 			header.GasLimit-gasUsed.BlockState,
 			remainingBlobGas,
 		)),
@@ -463,7 +463,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		// Make sure the sender is an EOA (EIP-3607)
 		if !account.IsEmptyCodeHash() && transaction.Type() != types.AccountAbstractionTxType {
 			isEoaCodeAllowed := false
-			if config.IsPrague(header.Time) || config.IsBhilai(header.Number.Uint64()) {
+			if config.IsPrague(header.Time) {
 				code, err := simStateReader.ReadAccountCode(senderAddress)
 				if err != nil {
 					return nil, err
@@ -529,7 +529,7 @@ func filterBadTransactions(transactions []types.Transaction, chainID *uint256.In
 		filtered = append(filtered, transaction)
 		transactions = transactions[1:]
 	}
-	logger.Debug("Filtration", "initial", initialCnt, "no sender", noSenderCnt, "no account", noAccountCnt, "nonce too low", nonceTooLowCnt, "nonceTooHigh", missedTxs, "sender not EOA", notEOACnt, "fee too low", feeTooLowCnt, "overflow", overflowCnt, "balance too low", balanceTooLowCnt, "bad chain id", badChainId, "filtered", len(filtered))
+	logger.Debug("Filtration", "initial", initialCnt, "noSender", noSenderCnt, "noAccount", noAccountCnt, "nonceTooLow", nonceTooLowCnt, "nonceTooHigh", missedTxs, "senderNotEOA", notEOACnt, "feeTooLow", feeTooLowCnt, "overflow", overflowCnt, "balanceTooLow", balanceTooLowCnt, "badChainID", badChainId, "filtered", len(filtered))
 	if stats != nil {
 		stats.filtered += len(filtered)
 		stats.badChainID += badChainId

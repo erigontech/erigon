@@ -21,7 +21,6 @@
 package ethconfig
 
 import (
-	"math/big"
 	"os"
 	"os/user"
 	"path/filepath"
@@ -46,9 +45,6 @@ import (
 	"github.com/erigontech/erigon/txnprovider/shutter/shuttercfg"
 	"github.com/erigontech/erigon/txnprovider/txpool/txpoolcfg"
 )
-
-// BorDefaultMinerGasPrice defines the minimum gas price for bor validators to mine a transaction.
-var BorDefaultMinerGasPrice = big.NewInt(25 * common.GWei)
 
 // Fail-back block gas limit. Better specify one in the chain config.
 const DefaultBlockGasLimit uint64 = 60_000_000
@@ -111,14 +107,13 @@ var Defaults = Config{
 		ProduceE2:  true,
 		ProduceE3:  true,
 	},
-	FcuTimeout:          1 * time.Second,
-	FcuBackgroundPrune:  true,
-	FcuBackgroundCommit: false, // to enable, we need to 1) have rawdb API go via execctx and 2) revive Coherent cache for rpcdaemon
-	ExperimentalBAL:     false,
-	WarmupKzgCtxOnInit:  true,
+	FcuTimeout:         1 * time.Second,
+	FcuBackgroundPrune: true,
+	ExperimentalBAL:    false,
+	WarmupKzgCtxOnInit: true,
 }
 
-const DefaultChainDBPageSize = 16 * datasize.KB
+const DefaultChainDBPageSize = 4 * datasize.KB
 
 func init() {
 	home := os.Getenv("HOME")
@@ -127,16 +122,17 @@ func init() {
 			home = user.HomeDir
 		}
 	}
-	if runtime.GOOS == "darwin" {
+	switch runtime.GOOS {
+	case "darwin":
 		Defaults.Ethash.DatasetDir = filepath.Join(home, "Library", "erigon-ethash")
-	} else if runtime.GOOS == "windows" {
+	case "windows":
 		localappdata := os.Getenv("LOCALAPPDATA")
 		if localappdata != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(localappdata, "erigon-thash")
 		} else {
 			Defaults.Ethash.DatasetDir = filepath.Join(home, "AppData", "Local", "erigon-ethash")
 		}
-	} else {
+	default:
 		if xdgDataDir := os.Getenv("XDG_DATA_HOME"); xdgDataDir != "" {
 			Defaults.Ethash.DatasetDir = filepath.Join(xdgDataDir, "erigon-ethash")
 		}
@@ -155,6 +151,7 @@ type BlocksFreezing struct {
 	DisableDownloadE3 bool // disable download state snapshots
 	DownloaderAddr    string
 	ChainName         string
+	E2RetireStep      uint64 // optional, 0 means we use hardcoded default of 1_000
 	// ChainTomlURL, when non-empty, overrides the default R2/GitHub fetch of
 	// the preverified chain.toml with a direct HTTP GET to this URL. Local
 	// preverified.toml in the datadir still takes precedence.
@@ -250,11 +247,6 @@ type Config struct {
 
 	ExperimentalBAL bool
 
-	// URL to connect to Heimdall node
-	HeimdallURL string
-	// No heimdall service
-	WithoutHeimdall bool
-
 	// Ethstats service
 	Ethstats string
 	// Consensus layer
@@ -266,17 +258,12 @@ type Config struct {
 	// Whether to avoid overriding chain config already stored in the DB
 	KeepStoredChainConfig bool
 
-	// PoS Single Slot finality
-	PolygonPosSingleSlotFinality        bool
-	PolygonPosSingleSlotFinalityBlockAt uint64
-
 	// Account Abstraction
 	AllowAA bool
 
 	// fork choice update timeout
-	FcuTimeout          time.Duration
-	FcuBackgroundPrune  bool
-	FcuBackgroundCommit bool
+	FcuTimeout         time.Duration
+	FcuBackgroundPrune bool
 
 	MCPAddress string
 
@@ -319,12 +306,11 @@ type Sync struct {
 	LoopBlockLimit             uint
 	ParallelStateFlushing      bool
 
-	ChaosMonkey                     bool
-	AlwaysGenerateChangesets        bool
-	MaxReorgDepth                   uint64
-	KeepExecutionProofs             bool
-	ExperimentalParallelCommitment  bool
-	ExperimentalStreamingCommitment bool
-	PersistReceiptsCacheV2          bool
-	SnapshotDownloadToBlock         uint64 // exclusive [0,toBlock)
+	ChaosMonkey                    bool
+	AlwaysGenerateChangesets       bool
+	MaxReorgDepth                  uint64
+	KeepExecutionProofs            bool
+	ExperimentalParallelCommitment bool
+	PersistReceiptsCacheV2         bool
+	SnapshotDownloadToBlock        uint64 // exclusive [0,toBlock)
 }
