@@ -44,7 +44,7 @@ const (
 	// BufIOSize - 128 pages | default is 1 page | increasing over `64 * 4096` doesn't show speedup on SSD/NVMe, but show speedup in cloud drives
 	BufIOSize = 128 * 4096
 
-	entryLocSize    = 8 // sizeof(sortableBuffer.entries element): offset(4) + keyLen(2) + 2 spare
+	entryLocSize    = 8 // sizeof(entryLoc): offset(4) + keyLen(2) + 2 spare
 	entryHeaderSize = 4 // valLen, in front of the entry's bytes in its chunk
 )
 
@@ -120,6 +120,12 @@ const (
 	// does not fully rule this out, since Put can grow the buffer past
 	// optimalSize before CheckFlushSize is checked.
 	maxDataChunks = math.MaxInt32>>dataChunkBits + 1
+
+	// Entry locations live in blocks for the same reason the data does: Put
+	// never re-allocates, and Reset hands the blocks back. 8192 entries is
+	// 64KB, so a buffer that stays small keeps holding almost nothing.
+	entryBlockBits = 13
+	entryBlockSize = 1 << entryBlockBits
 )
 
 // dataChunks are shared by all sortableBuffer instances: a buffer takes chunks as
@@ -137,6 +143,14 @@ func putDataChunk(c []byte) {
 	}
 	dataChunks.Put(&c)
 }
+
+var entryBlocks = sync.Pool{New: func() any {
+	b := make([]entryLoc, entryBlockSize)
+	return &b
+}}
+
+func getEntryBlock() []entryLoc  { return *entryBlocks.Get().(*[]entryLoc) }
+func putEntryBlock(b []entryLoc) { entryBlocks.Put(&b) }
 
 type Buffer interface {
 	// Put does copy `k` and `v`
@@ -187,7 +201,14 @@ func NewSortableBuffer(bufferOptimalSize datasize.ByteSize) *sortableBuffer {
 }
 
 type sortableBuffer struct {
-	entries []entryLoc
+	// blocks hold the entry locations, one pooled block at a time. Sort needs
+	// them in one slice to run slices.SortFunc over, so it copies them into
+	// sorted; Get and Write read that sorted slice.
+	blocks [][]entryLoc
+	curEnt []entryLoc
+	entOff int
+	n      int
+	sorted []entryLoc
 	// chunks hold the key/value bytes. Growing by chunk instead of by one big
 	// slice keeps Put from re-allocating and copying everything collected so
 	// far. All chunks are dataChunkSize, except the private chunk an entry
@@ -215,6 +236,21 @@ func (b *sortableBuffer) nextChunk(n int) {
 	b.curBase = int32(len(b.chunks)-1) << dataChunkBits //nolint:gosec
 	b.curOff = 0
 	b.chunkBytes += len(b.cur)
+}
+
+func (b *sortableBuffer) nextEntryBlock() {
+	b.curEnt = getEntryBlock()
+	b.blocks = append(b.blocks, b.curEnt)
+	b.entOff = 0
+}
+
+// entryAt returns the i-th entry: sorted order once Sort has run over the
+// current contents, insertion order before that.
+func (b *sortableBuffer) entryAt(i int) entryLoc {
+	if len(b.sorted) == b.n {
+		return b.sorted[i]
+	}
+	return b.blocks[i>>entryBlockBits][i&(entryBlockSize-1)]
 }
 
 // entryData returns e's bytes: valLen, then the key, then the value.
@@ -246,22 +282,27 @@ func (b *sortableBuffer) Put(k, v []byte) {
 	binary.NativeEndian.PutUint32(data, uint32(vLen)) //nolint:gosec
 	copy(data[entryHeaderSize:], k)
 	copy(data[entryHeaderSize+len(k):], v)
-	b.entries = append(b.entries, makeEntryLoc(kLen, b.curBase|off))
+	if b.entOff == len(b.curEnt) {
+		b.nextEntryBlock()
+	}
+	b.curEnt[b.entOff] = makeEntryLoc(kLen, b.curBase|off)
+	b.entOff++
+	b.n++
 	b.curOff = off + int32(n) //nolint:gosec
 }
 
 // Size counts the stored bytes, the tails wasted by the chunks already filled,
 // and entryLocSize per entry. An entry's entryHeaderSize is already in chunkBytes.
 func (b *sortableBuffer) Size() int {
-	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + len(b.entries)*entryLocSize
+	return b.chunkBytes - (len(b.cur) - int(b.curOff)) + b.n*entryLocSize
 }
 
 func (b *sortableBuffer) Len() int {
-	return len(b.entries)
+	return b.n
 }
 
 func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
-	e := b.entries[i]
+	e := b.entryAt(i)
 	data := b.entryData(e)
 	kLen := e.keyLen()
 	vLen := int32(binary.NativeEndian.Uint32(data)) //nolint:gosec
@@ -277,12 +318,12 @@ func (b *sortableBuffer) Get(i int) ([]byte, []byte) {
 	return key, val
 }
 
-// Prealloc sizes the entries slice. predictDataSize only reserves room in the
-// chunks slice for the chunk pointers; the chunks themselves are still taken
-// one at a time, which is what keeps an idle buffer from holding its peak.
+// Prealloc only reserves room for the block pointers. The blocks and chunks
+// themselves are still taken from their pools one at a time, which is what
+// keeps an idle buffer from holding its peak.
 func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer {
-	if cap(b.entries) < predictKeysAmount {
-		b.entries = make([]entryLoc, 0, predictKeysAmount)
+	if n := predictKeysAmount>>entryBlockBits + 1; cap(b.blocks) < n {
+		b.blocks = slices.Grow(b.blocks, n)
 	}
 	if n := predictDataSize/dataChunkSize + 1; cap(b.chunks) < n {
 		b.chunks = slices.Grow(b.chunks, n)
@@ -291,7 +332,13 @@ func (b *sortableBuffer) Prealloc(predictKeysAmount, predictDataSize int) Buffer
 }
 
 func (b *sortableBuffer) Reset() {
-	b.entries = b.entries[:0]
+	for i, blk := range b.blocks {
+		putEntryBlock(blk)
+		b.blocks[i] = nil
+	}
+	b.blocks = b.blocks[:0]
+	b.curEnt, b.entOff, b.n = nil, 0, 0
+	b.sorted = b.sorted[:0]
 	for i, c := range b.chunks {
 		putDataChunk(c)
 		b.chunks[i] = nil
@@ -322,10 +369,28 @@ func (b *sortableBuffer) Sort() {
 		}
 		return int(x.offset() - y.offset()) // StableSort: offsets rise with insertion order
 	}
-	if slices.IsSortedFunc(b.entries, cmp) {
+	b.sorted = b.flatten(b.sorted)
+	if slices.IsSortedFunc(b.sorted, cmp) {
 		return
 	}
-	slices.SortFunc(b.entries, cmp)
+	slices.SortFunc(b.sorted, cmp)
+}
+
+// flatten copies the entry blocks into one slice, so Sort can run pdqsort over
+// them without paying an indirection per compare and swap.
+func (b *sortableBuffer) flatten(dst []entryLoc) []entryLoc {
+	if cap(dst) < b.n {
+		dst = make([]entryLoc, b.n)
+	}
+	dst = dst[:0]
+	full := b.n >> entryBlockBits
+	for _, blk := range b.blocks[:full] {
+		dst = append(dst, blk...)
+	}
+	if tail := b.n & (entryBlockSize - 1); tail > 0 {
+		dst = append(dst, b.blocks[full][:tail]...)
+	}
+	return dst
 }
 
 func (b *sortableBuffer) CheckFlushSize() bool {
@@ -334,7 +399,8 @@ func (b *sortableBuffer) CheckFlushSize() bool {
 
 func (b *sortableBuffer) Write(w io.Writer) error {
 	var numBuf [binary.MaxVarintLen64]byte
-	for _, e := range b.entries {
+	for i := 0; i < b.n; i++ {
+		e := b.entryAt(i)
 		data := b.entryData(e)
 		kLen32 := e.keyLen()
 		vLen32 := int32(binary.NativeEndian.Uint32(data)) //nolint:gosec

@@ -495,11 +495,13 @@ func TestReuseCollectorAfterLoad(t *testing.T) {
 	require.Equal(t, 1, see)
 	c.Close()
 
-	// buffer state resets for reuse: entries keep their cap, chunks are cleared
+	// buffer state resets for reuse: chunks and entry blocks go back to their
+	// pools, the flat slice Sort works on keeps its cap
 	require.Empty(t, buf.chunks)
-	require.Empty(t, buf.entries)
+	require.Empty(t, buf.blocks)
+	require.Zero(t, buf.Len())
 	require.Zero(t, buf.Size())
-	require.NotZero(t, cap(buf.entries))
+	require.NotZero(t, cap(buf.sorted))
 
 	// teset that no data visible
 	see = 0
@@ -1708,7 +1710,7 @@ func TestSortableBufferAllEmptyEntries(t *testing.T) {
 	buf.Put([]byte{}, nil)
 
 	for i := 1; i < buf.Len(); i++ {
-		require.Greater(t, buf.entries[i].offset(), buf.entries[i-1].offset(),
+		require.Greater(t, buf.entryAt(i).offset(), buf.entryAt(i-1).offset(),
 			"Sort orders equal keys by offset, so every entry needs one of its own")
 	}
 
@@ -1776,4 +1778,56 @@ func TestSortableBufferRejectsOversizedKey(t *testing.T) {
 	require.Len(t, k, maxKeyLen)
 	k, _ = buf.Get(2)
 	require.Nil(t, k)
+}
+
+// TestSortableBufferEntryBlockBoundary: entry locations live in fixed-size
+// blocks that Sort flattens into one slice, so counts around a block boundary
+// are where an entry can go missing or come back twice.
+func TestSortableBufferEntryBlockBoundary(t *testing.T) {
+	for _, count := range []int{1, entryBlockSize - 1, entryBlockSize, entryBlockSize + 1, 2 * entryBlockSize, 2*entryBlockSize + 1} {
+		t.Run(fmt.Sprintf("n%d", count), func(t *testing.T) {
+			buf := NewSortableBuffer(256 * datasize.MB)
+			key := make([]byte, 8)
+			for i := range count { // descending, so Sort has real work to do
+				binary.BigEndian.PutUint64(key, uint64(count-1-i)) //nolint:gosec
+				buf.Put(key, key)
+			}
+			require.Equal(t, (count-1)/entryBlockSize+1, len(buf.blocks))
+
+			buf.Sort()
+			require.Equal(t, count, buf.Len())
+			for i := range count {
+				k, v := buf.Get(i)
+				binary.BigEndian.PutUint64(key, uint64(i)) //nolint:gosec
+				require.Equal(t, key, k, "entry %d", i)
+				require.Equal(t, key, v, "entry %d", i)
+			}
+		})
+	}
+}
+
+// BenchmarkSortableBufferPutOnlyCold fills a fresh buffer without Prealloc -
+// the pool-miss path, where the entry storage has to grow as Put runs.
+func BenchmarkSortableBufferPutOnlyCold(b *testing.B) {
+	const keyLen = 32
+	const valLen = 64
+
+	for _, count := range []int{100_000, 500_000, 1_000_000} {
+		b.Run(fmt.Sprintf("random_%dk", count/1000), func(b *testing.B) {
+			b.ReportAllocs()
+			key := make([]byte, keyLen)
+			val := make([]byte, valLen)
+			for b.Loop() {
+				buf := NewSortableBuffer(256 * 1024 * 1024)
+				for i := range count {
+					x := uint64(i) * 6364136223846793005
+					binary.BigEndian.PutUint64(key, x)
+					binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+					binary.BigEndian.PutUint64(val, uint64(i)) //nolint:gosec
+					buf.Put(key, val)
+				}
+				buf.Reset() // give the chunks back, as the collector does
+			}
+		})
+	}
 }
