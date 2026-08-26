@@ -91,27 +91,19 @@ func (g *growLRU[V]) newShards(capacity uint32) *lruGen[V] {
 
 func (g *growLRU[V]) Get(key uint64) (V, bool) { return g.cur.Load().lru.Get(key) }
 
-// Add inserts a key this LRU does not hold. Callers reach it through a put
-// stripe they have held since their own miss, and the read paths only ever
-// remove, so nothing can have inserted key in between and no grow copy can
-// have carried it into the generation this resolves.
-func (g *growLRU[V]) Add(key uint64, value V) {
+// Put stores a key, growing first when the generation is full. Both the removal
+// and the store resolve one generation, and the removal is not redundant on a
+// caller that just missed: an unfenced grow can copy the key into the next
+// generation, a read-path Remove can drop it from the still-current old one, and
+// the publish can land between that miss and this load. freelru would then
+// replace the copy in place without firing OnEvict, leaving the count and the
+// caller's byte counter carrying an entry that is no longer there.
+func (g *growLRU[V]) Put(key uint64, value V) {
 	gen := g.cur.Load()
 	if curCap := g.curCap.Load(); curCap < g.maxCap && gen.len() >= int(curCap) {
 		g.maybeGrow()
 		gen = g.cur.Load()
 	}
-	gen.add(key, value)
-}
-
-// Replace refreshes a key this LRU already holds. Resolving the generation once
-// is what keeps the count exact: a Remove and an Add that resolve g.cur
-// separately can straddle an unfenced grow, landing the removal on the retired
-// generation and the insert on a new one that already holds the copied key --
-// which freelru replaces in place without firing OnEvict. The entry count does
-// not change, so this never needs to grow.
-func (g *growLRU[V]) Replace(key uint64, value V) {
-	gen := g.cur.Load()
 	gen.lru.Remove(key)
 	gen.add(key, value)
 }
