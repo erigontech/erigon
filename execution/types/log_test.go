@@ -345,3 +345,77 @@ func TestFilterWithTopicMapEquivalence(t *testing.T) {
 		}
 	}
 }
+
+func TestErigonLogJSONBlockTimestamp(t *testing.T) {
+	t.Parallel()
+
+	el := &ErigonLog{
+		Log: Log{
+			Address: common.HexToAddress("0x1111111111111111111111111111111111111111"),
+			Topics:  []common.Hash{common.HexToHash("0xaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaaa")},
+			Data:    hexutil.MustDecode("0x112233"),
+			TxHash:  common.HexToHash("0x1111222233334444555566667777888899990000aaaabbbbccccddddeeeeffff"),
+		},
+		BlockTimestamp: hexutil.Uint64(1700000000),
+	}
+
+	b, err := json.Marshal(el)
+	require.NoError(t, err)
+	s := string(b)
+
+	require.Contains(t, s, `"blockTimestamp":"0x6553f100"`)
+	require.NotContains(t, s, `"timestamp"`)
+
+	var decoded ErigonLog
+	require.NoError(t, json.Unmarshal(b, &decoded))
+	require.Equal(t, el.BlockTimestamp, decoded.BlockTimestamp)
+	require.Equal(t, el.Address, decoded.Address)
+	require.Equal(t, el.TxHash, decoded.TxHash)
+}
+
+func TestErigonLogUnmarshalJSONBlockTimestamp(t *testing.T) {
+	t.Parallel()
+
+	input := `{"address":"0x2222222222222222222222222222222222222222","blockHash":"0x222233334444555566667777888899990000aaaabbbbccccddddeeeeffff1111","blockNumber":"0x200000","blockTimestamp":"0x60000000","data":"0x4455","logIndex":"0x5","topics":["0xbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbbb"],"transactionHash":"0x33334444555566667777888899990000aaaabbbbccccddddeeeeffff11112222","transactionIndex":"0x6"}`
+
+	var log ErigonLog
+	require.NoError(t, json.Unmarshal([]byte(input), &log))
+	require.Equal(t, hexutil.Uint64(0x60000000), log.BlockTimestamp)
+	require.Equal(t, common.HexToAddress("0x2222222222222222222222222222222222222222"), log.Address)
+}
+
+func TestErigonLogUnmarshalJSONLegacyTimestampIgnored(t *testing.T) {
+	t.Parallel()
+
+	input := `{"address":"0x3333333333333333333333333333333333333333","blockHash":"0x4444555566667777888899990000aaaabbbbccccddddeeeeffff111122223333","blockNumber":"0x300000","timestamp":"0x70000000","data":"0x6677","logIndex":"0x8","topics":["0xcccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccccc"],"transactionHash":"0x555566667777888899990000aaaabbbbccccddddeeeeffff1111222233334444","transactionIndex":"0x9"}`
+
+	var log ErigonLog
+	require.NoError(t, json.Unmarshal([]byte(input), &log))
+	require.Equal(t, hexutil.Uint64(0), log.BlockTimestamp)
+	require.Equal(t, common.HexToAddress("0x3333333333333333333333333333333333333333"), log.Address)
+}
+
+func TestErigonAndRPCLogTimestampConsistency(t *testing.T) {
+	t.Parallel()
+
+	log := Log{
+		Address: common.HexToAddress("0x4444444444444444444444444444444444444444"),
+		Topics:  []common.Hash{common.HexToHash("0xdddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddddd")},
+		Data:    hexutil.Bytes{0x88, 0x99},
+		TxHash:  common.HexToHash("0x7777888899990000aaaabbbbccccddddeeeeffff111122223333444455556666"),
+	}
+	ts := hexutil.Uint64(1800000000)
+
+	erigonB, err := json.Marshal(&ErigonLog{Log: log, BlockTimestamp: ts})
+	require.NoError(t, err)
+	rpcB, err := json.Marshal(&RPCLog{Log: log, BlockTimestamp: ts})
+	require.NoError(t, err)
+
+	var erigonMap, rpcMap map[string]any
+	require.NoError(t, json.Unmarshal(erigonB, &erigonMap))
+	require.NoError(t, json.Unmarshal(rpcB, &rpcMap))
+
+	require.Equal(t, rpcMap["blockTimestamp"], erigonMap["blockTimestamp"])
+	require.Nil(t, erigonMap["timestamp"])
+	require.Nil(t, rpcMap["timestamp"])
+}

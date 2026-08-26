@@ -24,8 +24,6 @@ import (
 	"math"
 	"path/filepath"
 
-	"github.com/klauspost/compress/zstd"
-
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/persistence/beacon_indicies"
@@ -478,9 +476,11 @@ func (s *CaplinSnapshots) ReadHeader(slot uint64, tx kv.Tx) (*cltypes.SignedBeac
 		return nil, 0, common.Hash{}, nil
 	}
 	// Decompress this thing
-	reader := decompressorPool.Get().(*zstd.Decoder)
-	defer putDecoder(reader)
-	reader.Reset(bytes.NewReader(buf))
+	reader, err := getZstdReader(bytes.NewReader(buf))
+	if err != nil {
+		return nil, 0, common.Hash{}, err
+	}
+	defer putZstdReader(reader)
 
 	// Use pooled readers to avoid allocations.
 	header, elBlockNumber, elBlockHash, err := snapshot_format.ReadBlockHeaderFromSnapshotWithExecutionData(reader, s.beaconCfg)

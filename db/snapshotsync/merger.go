@@ -364,7 +364,7 @@ func (m *Merger) merge(ctx context.Context, v *View, toMerge []*DirtySegment, ta
 	w := seg.NewWriter(f, seg.CompressKeys|seg.CompressVals)
 	for _, d := range cList {
 		if err := func() error {
-			view, err := d.OpenSequentialView(true)
+			view, err := d.OpenSequentialView()
 			if err != nil {
 				return err
 			}

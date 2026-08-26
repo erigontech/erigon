@@ -42,6 +42,7 @@ import (
 	"github.com/erigontech/erigon/db/kv/rawdbv3"
 	"github.com/erigontech/erigon/db/kv/temporal/temporaltest"
 	"github.com/erigontech/erigon/db/state/execctx"
+	"github.com/erigontech/erigon/db/state/execctx/execctxapi"
 	chainpkg "github.com/erigontech/erigon/execution/chain"
 	"github.com/erigontech/erigon/execution/stagedsync/stages"
 	"github.com/erigontech/erigon/execution/state"
@@ -173,7 +174,7 @@ func seedTestAccounts(t *testing.T) kv.TemporalTx {
 	contractAddr := accounts.InternAddress(common.HexToAddress("0x02"))
 	dustAddr := accounts.InternAddress(common.HexToAddress("0x03"))
 
-	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer st.Close()
 
 	_, err = st.GetOrNewStateObject(eoaAddr)
@@ -220,7 +221,7 @@ func seedManyAccounts(t testing.TB, n int) kv.TemporalTx {
 	require.NoError(t, rawdbv3.TxNums.Append(tx, 1, 1))
 	require.NoError(t, stages.SaveStageProgress(tx, stages.Execution, 1))
 
-	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx)))
+	st := state.New(state.NewReaderV3(domains.AsStateGetter(tx, execctxapi.StateGetterOptions{})))
 	defer st.Close()
 
 	for i := range n {
