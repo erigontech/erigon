@@ -1222,6 +1222,7 @@ func (a *ApiHandler) requestConfiguredBuilderBids(
 	}
 	parentGasLimit, ok := a.forkchoiceStore.GetExecutionPayloadGasLimit(parentBid.ParentBlockHash)
 	if !ok {
+		a.logger.Debug("Skipping configured builder bids because parent gas limit is unavailable", "parentBlockHash", parentBid.ParentBlockHash)
 		return nil
 	}
 	proposerIndex, err := baseState.GetBeaconProposerIndexForSlot(targetSlot)
@@ -1389,20 +1390,29 @@ func (a *ApiHandler) getBuilderPayload(
 		}
 	}
 	if baseState.Version() >= clparams.ElectraVersion && header.Data.Message.ExecutionRequests != nil {
-		// check execution requests
-		r := header.Data.Message.ExecutionRequests
-		if r.Deposits != nil && r.Deposits.Len() > int(a.beaconChainCfg.MaxDepositRequestsPerPayload) {
-			return nil, nil, fmt.Errorf("too many deposit requests: %d", r.Deposits.Len())
-		}
-		if r.Withdrawals != nil && r.Withdrawals.Len() > int(a.beaconChainCfg.MaxWithdrawalRequestsPerPayload) {
-			return nil, nil, fmt.Errorf("too many withdrawal requests: %d", r.Withdrawals.Len())
-		}
-		if r.Consolidations != nil && r.Consolidations.Len() > int(a.beaconChainCfg.MaxConsolidationRequestsPerPayload) {
-			return nil, nil, fmt.Errorf("too many consolidation requests: %d", r.Consolidations.Len())
+		if err := validateBuilderExecutionRequests(a.beaconChainCfg, baseState.Version(), header.Data.Message.ExecutionRequests); err != nil {
+			return nil, nil, err
 		}
 	}
 
 	return header, blockValue, nil
+}
+
+func validateBuilderExecutionRequests(cfg *clparams.BeaconChainConfig, version clparams.StateVersion, requests *cltypes.ExecutionRequests) error {
+	depositLimit := int(cfg.MaxDepositRequestsPerPayload)
+	if version >= clparams.GloasVersion {
+		depositLimit = int(clparams.MaxChunkSize) / solid.SizeDepositRequest
+	}
+	if requests.Deposits != nil && requests.Deposits.Len() > depositLimit {
+		return fmt.Errorf("too many deposit requests: %d", requests.Deposits.Len())
+	}
+	if requests.Withdrawals != nil && requests.Withdrawals.Len() > int(cfg.MaxWithdrawalRequestsPerPayload) {
+		return fmt.Errorf("too many withdrawal requests: %d", requests.Withdrawals.Len())
+	}
+	if requests.Consolidations != nil && requests.Consolidations.Len() > int(cfg.MaxConsolidationRequestsPerPayload) {
+		return fmt.Errorf("too many consolidation requests: %d", requests.Consolidations.Len())
+	}
+	return nil
 }
 
 func (a *ApiHandler) produceBeaconBody(
