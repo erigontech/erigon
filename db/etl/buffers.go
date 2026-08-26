@@ -448,9 +448,6 @@ func (b *sortableBuffer) Sort() {
 			slices.Reverse(ents)
 			continue
 		}
-		if slices.IsSortedFunc(ents, cmp) {
-			continue
-		}
 		slices.SortFunc(ents, cmp)
 	}
 	b.order = slices.Grow(b.order[:0], b.n)[:b.n]
