@@ -116,20 +116,13 @@ func (m *Memory) Resize(size uint64) {
 		return
 	}
 
-	newCap := uint64(cap(m.store)) * 2
-	if newCap < size {
-		newCap = alignUpToPage(size)
-	}
-	store := make([]byte, size, newCap)
+	store := make([]byte, size, max(uint64(cap(m.store))*2, alignUpToPage(size)))
 	copy(store, m.store)
 	m.store = store
 }
 
 func alignUpToPage(n uint64) uint64 {
-	if aligned := (n + memoryPageSize - 1) &^ uint64(memoryPageSize-1); aligned >= n {
-		return aligned
-	}
-	return n
+	return (n + memoryPageSize - 1) &^ uint64(memoryPageSize-1)
 }
 
 func (m *Memory) reset() {
