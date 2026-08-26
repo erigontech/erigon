@@ -199,3 +199,52 @@ func TestDumpRangeErrorsWhenRangeAlreadyClaimed(t *testing.T) {
 	require.ErrorIs(t, err, snapshotsync.ErrRangeBuildInProgress)
 	require.False(t, dumperCalled)
 }
+
+// TestChooseRetireTailStart_NoV4OneReturnsChunkFrom pins the baseline:
+// an empty snapDir (no v4 #1 present) returns chunkFrom unchanged so
+// retire emits the standard chunk output.
+func TestChooseRetireTailStart_NoV4OneReturnsChunkFrom(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+	got := chooseRetireTailStart(dir, 3_491_000, 3_492_000)
+	require.Equal(t, uint64(3_491_000), got, "no v4 #1 present — retire emits from chunkFrom")
+}
+
+// TestChooseRetireTailStart_V4OnePresentReturnsCut pins the core wire:
+// when a v4 #1 headers .seg for the chunk exists on disk, retire's
+// emit start moves to the v4 #1's To so the tail v4 #2 covers the
+// complementary [cut, chunkEnd) range.
+func TestChooseRetireTailStart_V4OnePresentReturnsCut(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// Simulate mode-C emit output: v4 #1 headers file covering
+	// [3491000, 3491691) — non-1000-aligned To triggers the v4 name.
+	name := snaptype.FileNameV4(snaptype2.Headers.Versions().Current, 3_491_000, 3_491_691, "headers") + ".seg"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("stub"), 0o644))
+
+	got := chooseRetireTailStart(dir, 3_491_000, 3_492_000)
+	require.Equal(t, uint64(3_491_691), got, "v4 #1 present at [3491000, 3491691) — retire emits tail from cut")
+}
+
+// TestChooseRetireTailStart_V4OneFullCoverageReturnsChunkEnd pins the
+// degenerate case: v4 #1 already covers the whole chunk (its To ==
+// chunkEnd). Retire has nothing to emit; DumpBlocks skips this chunk
+// entirely. Returning chunkEnd signals that.
+func TestChooseRetireTailStart_V4OneFullCoverageReturnsChunkEnd(t *testing.T) {
+	t.Parallel()
+	dir := t.TempDir()
+
+	// v4 #1 covers the whole chunk. Naming still uses v4 form to
+	// force it into the detection path (real emitters wouldn't
+	// produce a fully-aligned range as v4, but the detector must
+	// handle the edge).
+	name := snaptype.FileNameV4(snaptype2.Headers.Versions().Current, 3_491_000, 3_491_500, "headers") + ".seg"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name), []byte("stub"), 0o644))
+	name2 := snaptype.FileNameV4(snaptype2.Headers.Versions().Current, 3_491_000, 3_492_000, "headers") + ".seg"
+	require.NoError(t, os.WriteFile(filepath.Join(dir, name2), []byte("stub"), 0o644))
+
+	// maxCut is 3_492_000 which >= chunkEnd, retire skips.
+	got := chooseRetireTailStart(dir, 3_491_000, 3_492_000)
+	require.Equal(t, uint64(3_492_000), got, "v4 #1 covers whole chunk — retire has nothing to emit")
+}

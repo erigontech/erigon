@@ -369,9 +369,20 @@ func (s SnapType) HasIndexFiles(info FileInfo, dirEntries []string, logger log.L
 }
 
 func (s SnapType) IdxFileNames(from uint64, to uint64) []string {
+	// Auto-select naming per endpoint alignment: production callers
+	// pass FileInfo.From/To (raw block coordinates). Non-1000-aligned
+	// endpoints are the block v4 signature emitted by mode-C/D unwind
+	// and retire tail — .idx names must match their sibling .seg's
+	// raw form so the accessor is discovered together with its data.
+	// Aligned endpoints continue to use the legacy step-divided form.
+	v4 := from%Erigon2MinSegmentSize != 0 || to%Erigon2MinSegmentSize != 0
 	fileNames := make([]string, len(s.indexes))
 	for i, index := range s.indexes {
-		fileNames[i] = IdxFileName(index.Version.Current, from, to, index.Name)
+		if v4 {
+			fileNames[i] = IdxFileNameV4(index.Version.Current, from, to, index.Name)
+		} else {
+			fileNames[i] = IdxFileName(index.Version.Current, from, to, index.Name)
+		}
 	}
 
 	return fileNames
@@ -393,6 +404,10 @@ func (s SnapType) IdxFileName(ver version.Version, from uint64, to uint64, index
 		}
 	}
 
+	// Auto-select naming per endpoint alignment (see IdxFileNames comment).
+	if from%Erigon2MinSegmentSize != 0 || to%Erigon2MinSegmentSize != 0 {
+		return IdxFileNameV4(ver, from, to, index[0].Name)
+	}
 	return IdxFileName(ver, from, to, index[0].Name)
 }
 

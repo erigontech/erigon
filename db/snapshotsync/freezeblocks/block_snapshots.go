@@ -956,16 +956,74 @@ func DumpBlocks(ctx context.Context, blockFrom, blockTo uint64, chainConfig *cha
 	}
 
 	var produced []string
-	for i := blockFrom; i < blockTo; i = chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg) {
+	for i := blockFrom; i < blockTo; {
 		segEnd := chooseSegmentEnd(i, blockTo, snaptype2.Enums.Headers, snCfg)
-		lastTxNum, segFiles, err := dumpBlocksRange(ctx, i, segEnd, tmpDir, snapDir, firstTxNum, chainDB, chainConfig, blockReader, workers, lvl, logger, inProgress)
+		// Two-v4-then-merge tail detection: if a mode-C/D unwind emit
+		// left a v4 #1 for this chunk covering [i, cut), skip that
+		// prefix and emit v4 #2 covering [cut, segEnd) instead. The
+		// background merger later consolidates the pair into the
+		// standard 1000-aligned .seg. When no v4 #1 exists, emitFrom
+		// stays == i and we produce the standard chunk output.
+		emitFrom := chooseRetireTailStart(snapDir, i, segEnd)
+		if emitFrom >= segEnd {
+			// Chunk fully covered by an existing v4 #1 whose To
+			// reaches segEnd (or overshoots) — nothing to emit for
+			// this iteration.
+			i = segEnd
+			continue
+		}
+		lastTxNum, segFiles, err := dumpBlocksRange(ctx, emitFrom, segEnd, tmpDir, snapDir, firstTxNum, chainDB, chainConfig, blockReader, workers, lvl, logger, inProgress)
 		if err != nil {
 			return produced, err
 		}
 		produced = append(produced, segFiles...)
 		firstTxNum = lastTxNum + 1
+		i = segEnd
 	}
 	return produced, nil
+}
+
+// chooseRetireTailStart returns the block from which retire should emit
+// the segment for chunk [chunkFrom, chunkEnd). Under the universal
+// two-v4-then-merge lifecycle, if a mode-C/D unwind emit left a v4 #1
+// covering [chunkFrom, cut) with cut < chunkEnd on disk, retire emits
+// only the complementary v4 #2 [cut, chunkEnd) so the pair can be
+// merged in the background. When no v4 #1 exists for the chunk, returns
+// chunkFrom (standard chunk output).
+//
+// Detects a v4 #1 by scanning the top-level snapshot directory for a
+// headers .seg whose FromBlock == chunkFrom and ToBlock in
+// (chunkFrom, chunkEnd). Headers is authoritative — a v4 #1 emit is
+// always a triple, and later bodies / transactions retire produce their
+// v4 #2 files against the same [cut, chunkEnd) range.
+func chooseRetireTailStart(snapDir string, chunkFrom, chunkEnd uint64) uint64 {
+	entries, err := os.ReadDir(snapDir)
+	if err != nil {
+		return chunkFrom
+	}
+	var maxCut uint64
+	for _, e := range entries {
+		if e.IsDir() || !strings.HasSuffix(e.Name(), "-headers.seg") {
+			continue
+		}
+		info, _, ok := snaptype.ParseFileName(snapDir, e.Name())
+		if !ok || info.Type == nil || info.Type.Enum() != snaptype2.Enums.Headers {
+			continue
+		}
+		if info.From != chunkFrom {
+			continue
+		}
+		if info.To <= chunkFrom || info.To > chunkEnd {
+			continue
+		}
+		if info.To > maxCut {
+			maxCut = info.To
+		}
+	}
+	if maxCut == 0 {
+		return chunkFrom
+	}
+	return maxCut
 }
 
 func dumpBlocksRange(ctx context.Context, blockFrom, blockTo uint64, tmpDir, snapDir string, firstTxNum uint64, chainDB kv.RoDB, chainConfig *chain.Config, blockReader dbservices.FullBlockReader, workers int, lvl log.Lvl, logger log.Logger, inProgress *snapshotsync.BaseRoSnapshots) (lastTxNum uint64, producedFiles []string, err error) {
