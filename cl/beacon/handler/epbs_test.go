@@ -33,6 +33,7 @@ import (
 	"go.uber.org/mock/gomock"
 
 	"github.com/erigontech/erigon/cl/beacon/beaconevents"
+	sync_mock_services "github.com/erigontech/erigon/cl/beacon/synced_data/mock_services"
 	"github.com/erigontech/erigon/cl/clparams"
 	"github.com/erigontech/erigon/cl/cltypes"
 	"github.com/erigontech/erigon/cl/cltypes/solid"
@@ -46,6 +47,161 @@ import (
 	"github.com/erigontech/erigon/common"
 	"github.com/erigontech/erigon/common/log/v3"
 )
+
+func TestGetPayloadAttestationDataAcceptsCanonicalSlotQuery(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 2
+	fcu.HeadSlotVal = 64
+	fcu.HeadVal = common.HexToHash("0x1234")
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, "gloas", recorder.Header().Get("Eth-Consensus-Version"))
+	require.Contains(t, recorder.Body.String(), `"slot":"64"`)
+}
+
+func TestGetPayloadAttestationDataSupportsSSZ(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 2
+	fcu.HeadSlotVal = 64
+	fcu.HeadVal = common.HexToHash("0x1234")
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
+	request.Header.Set("Accept", "application/octet-stream")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+	require.Equal(t, "application/octet-stream", recorder.Header().Get("Content-Type"))
+	require.Equal(t, "gloas", recorder.Header().Get("Eth-Consensus-Version"))
+	data := new(cltypes.PayloadAttestationData)
+	require.NoError(t, data.DecodeSSZStrict(recorder.Body.Bytes(), int(clparams.GloasVersion)))
+	require.Equal(t, uint64(64), data.Slot)
+	require.Equal(t, fcu.HeadVal, data.BeaconBlockRoot)
+}
+
+func TestGetPayloadAttestationDataRejectsPreGloasSlot(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 2
+	fcu.HeadSlotVal = 63
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=63", http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+}
+
+func TestGetPayloadAttestationDataRejectsUnsupportedResponseType(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	fcu.HeadSlotVal = 64
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
+	request.Header.Set("Accept", "text/plain")
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusNotAcceptable, recorder.Code, recorder.Body.String())
+}
+
+func TestGetPayloadAttestationDataReturnsNoContentWithoutSlotBlock(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	fcu.HeadSlotVal = 63
+
+	for _, accept := range []string{"application/json", "application/octet-stream"} {
+		t.Run(accept, func(t *testing.T) {
+			request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
+			request.Header.Set("Accept", accept)
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, request)
+
+			require.Equal(t, http.StatusNoContent, recorder.Code, recorder.Body.String())
+			require.Empty(t, recorder.Body.String())
+		})
+	}
+}
+
+func TestGetPayloadAttestationDataReportsSyncing(t *testing.T) {
+	for _, path := range []string{
+		"/eth/v1/validator/payload_attestation_data?slot=64",
+		"/eth/v1/validator/payload_attestation_data?slot=invalid",
+		"/eth/v1/validator/payload_attestation_data",
+	} {
+		t.Run(path, func(t *testing.T) {
+			_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+			handler.beaconChainCfg.GloasForkEpoch = 0
+			syncedData.(*sync_mock_services.MockSyncedData).EXPECT().Syncing().Return(true)
+
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
+
+			require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+		})
+	}
+}
+
+func TestGetPayloadAttestationDataPreservesUnavailableHeadStatus(t *testing.T) {
+	_, _, _, _, _, handler, _, syncedData, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), false)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	handler.enableMemoizedHeadState = true
+	mockSyncedData := syncedData.(*sync_mock_services.MockSyncedData)
+	mockSyncedData.EXPECT().Syncing().Return(false)
+	mockSyncedData.EXPECT().StateHead().Return(common.Hash{}, uint64(0), false)
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=64", http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusServiceUnavailable, recorder.Code, recorder.Body.String())
+}
+
+func TestGetPayloadAttestationDataRejectsInvalidCanonicalSlotQuery(t *testing.T) {
+	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+
+	for _, path := range []string{
+		"/eth/v1/validator/payload_attestation_data",
+		"/eth/v1/validator/payload_attestation_data?slot=",
+		"/eth/v1/validator/payload_attestation_data?slot=64&slot=64",
+		"/eth/v1/validator/payload_attestation_data?slot=invalid",
+		"/eth/v1/validator/payload_attestation_data?slot=18446744073709551616",
+	} {
+		t.Run(path, func(t *testing.T) {
+			recorder := httptest.NewRecorder()
+			handler.ServeHTTP(recorder, httptest.NewRequestWithContext(t.Context(), http.MethodGet, path, http.NoBody))
+			require.Equal(t, http.StatusBadRequest, recorder.Code, recorder.Body.String())
+		})
+	}
+}
+
+func TestGetPayloadAttestationDataPreservesLegacyPathAlias(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	fcu.HeadSlotVal = 64
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data/64", http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
+
+func TestGetPayloadAttestationDataAcceptsMaximumSlot(t *testing.T) {
+	_, _, _, _, _, handler, _, _, fcu, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
+	handler.beaconChainCfg.GloasForkEpoch = 0
+	fcu.HeadSlotVal = ^uint64(0)
+
+	request := httptest.NewRequestWithContext(t.Context(), http.MethodGet, "/eth/v1/validator/payload_attestation_data?slot=18446744073709551615", http.NoBody)
+	recorder := httptest.NewRecorder()
+	handler.ServeHTTP(recorder, request)
+
+	require.Equal(t, http.StatusOK, recorder.Code, recorder.Body.String())
+}
 
 func TestPostPayloadAttestationsRejectsNullMessage(t *testing.T) {
 	_, _, _, _, _, handler, _, _, _, _ := setupTestingHandler(t, clparams.BellatrixVersion, log.Root(), true)
@@ -680,8 +836,8 @@ func TestGetValidatorExecutionPayloadBidReturnsUnsignedBid(t *testing.T) {
 	require.NotContains(t, recorder.Body.String(), `"message"`)
 
 	for _, path := range []string{
-		fmt.Sprintf("/eth/v1/validator/execution_payload_bid/%d/3", slot-1),
-		fmt.Sprintf("/eth/v1/validator/execution_payload_bid/%d/3", slot+2),
+		"/eth/v1/validator/execution_payload_bid/0/3",
+		"/eth/v1/validator/execution_payload_bid/18446744073709551615/3",
 		fmt.Sprintf("/eth/v1/validator/execution_payload_bid/%d/4", slot),
 	} {
 		recorder = httptest.NewRecorder()

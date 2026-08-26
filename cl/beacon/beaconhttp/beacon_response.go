@@ -31,14 +31,19 @@ type BeaconResponse struct {
 	Version             *clparams.StateVersion
 	ExecutionOptimistic *bool
 
-	Extra   map[string]any
-	headers map[string]string
+	Extra     map[string]any
+	headers   map[string]string
+	noContent bool
 }
 
 func NewBeaconResponse(data any) *BeaconResponse {
 	return &BeaconResponse{
 		Data: data,
 	}
+}
+
+func NewNoContentResponse() *BeaconResponse {
+	return &BeaconResponse{noContent: true}
 }
 
 func (r *BeaconResponse) Headers() map[string]string {

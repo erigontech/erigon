@@ -432,6 +432,7 @@ func (a *ApiHandler) init() {
 					r.Post("/prepare_beacon_proposer", a.PostEthV1ValidatorPrepareBeaconProposal)
 					r.Post("/liveness/{epoch}", beaconhttp.HandleEndpointFunc(a.liveness))
 					// [New in Gloas:EIP7732]
+					r.Get("/payload_attestation_data", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorPayloadAttestationData))
 					r.Get("/payload_attestation_data/{slot}", beaconhttp.HandleEndpointFunc(a.GetEthV1ValidatorPayloadAttestationData))
 					r.Post("/proposer_preferences", a.PostEthV1ValidatorProposerPreferences)
 					r.Post("/builder_preferences", a.PostEthV1ValidatorBuilderPreferences)
