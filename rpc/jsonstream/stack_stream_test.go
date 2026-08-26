@@ -1215,8 +1215,9 @@ func TestStackStreamResetClearsError(t *testing.T) {
 }
 
 // TestLazyFieldStreamWritesFieldFirst pins the wrapper's one invariant: whatever
-// a caller writes first, the field name lands before it. A method that slips
-// through unensured puts the value's bytes at the enclosing object's level.
+// value a caller writes first, the field name lands before it and the object
+// still parses. A method that slips through unensured puts the value's bytes at
+// the enclosing object's level.
 func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
 	for name, first := range map[string]func(s Stream){
 		"WriteInt":         func(s Stream) { s.WriteInt(1) },
@@ -1227,18 +1228,39 @@ func TestLazyFieldStreamWritesFieldFirst(t *testing.T) {
 		"WriteArrayStart":  func(s Stream) { s.WriteArrayStart() },
 		"WriteObjectStart": func(s Stream) { s.WriteObjectStart() },
 		"WriteEmptyArray":  func(s Stream) { s.WriteEmptyArray() },
-		"WriteMore":        func(s Stream) { s.WriteMore() },
-		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
 	} {
 		t.Run(name, func(t *testing.T) {
 			inner := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			inner.WriteObjectStart()
 			lazy := NewLazyFieldStream(inner, "result", false)
 
 			first(lazy)
 
 			require.True(t, lazy.Written(), "the field was never opened")
-			require.True(t, strings.HasPrefix(string(inner.Buffer()), `"result":`),
+			require.True(t, strings.HasPrefix(string(inner.Buffer()), `{"result":`),
 				"buffer starts with %q", string(inner.Buffer()))
+			require.NoError(t, inner.ClosePending(0))
+			require.NoError(t, json.Unmarshal(inner.Buffer(), new(any)), "produced %q", string(inner.Buffer()))
+		})
+	}
+}
+
+// A separator and a field name carry no value, so the wrapper leaves them alone:
+// opening the field for one emits `"result":` with nothing able to follow it.
+func TestLazyFieldStreamPassesValuelessWrites(t *testing.T) {
+	for name, write := range map[string]func(s Stream){
+		"WriteMore":        func(s Stream) { s.WriteMore() },
+		"WriteObjectField": func(s Stream) { s.WriteObjectField("a") },
+	} {
+		t.Run(name, func(t *testing.T) {
+			inner := NewStackStream(jsoniter.NewStream(jsoniter.ConfigDefault, nil, 64))
+			inner.WriteObjectStart()
+			lazy := NewLazyFieldStream(inner, "result", false)
+
+			write(lazy)
+
+			require.False(t, lazy.Written(), "the field was opened for a write with no value")
+			require.NotContains(t, string(inner.Buffer()), `"result":`)
 		})
 	}
 }
