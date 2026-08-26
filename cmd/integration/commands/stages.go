@@ -318,6 +318,7 @@ func init() {
 	withTraceFlags(cmdStageExec)
 	withChainTipMode(cmdStageExec)
 	withErigondbDomainStepsInFrozenFile(cmdStageExec)
+	withExperimentalCommitment(cmdStageExec)
 	rootCmd.AddCommand(cmdStageExec)
 
 	withStageBase(cmdStageExecReplay)

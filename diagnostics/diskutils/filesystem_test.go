@@ -18,6 +18,7 @@ package diskutils
 
 import (
 	"errors"
+	"path/filepath"
 	"runtime"
 	"strings"
 	"testing"
@@ -134,19 +135,22 @@ func TestUnrecommendedByTypeAncestorReplacesDescendant(t *testing.T) {
 	require.Equal(t, []fsGroup{{fsType: "zfs", paths: []string{"/data-other", "/data"}}}, groups)
 }
 
-func TestIsAncestorAcceptsAnySeparator(t *testing.T) {
-	// See isAncestor's doc comment for why both separator styles must work
-	// regardless of GOOS.
+func TestIsAncestor(t *testing.T) {
+	sep := string(filepath.Separator)
+	root := sep + "data"
+	child := filepath.Join(root, "chaindata")
 	for _, tc := range []struct {
 		ancestor, descendant string
 		want                 bool
 	}{
-		{`C:\data`, `C:\data\chaindata`, true},
-		{"/data", "/data/chaindata", true},
-		{`C:\data`, `C:\data-other`, false},
-		{"/data", "/data-other", false},
-		{"/", "/data", true},
-		{`\`, `\data`, true},
+		{root, child, true},
+		{root, root, true},
+		{root + sep, child, true},
+		{sep, root, true},
+		{root, root + "-other", false},
+		{child, root, false},
+		{root, filepath.Join(root, "..", "elsewhere"), false},
+		{root, filepath.Join(root, "..foo"), true},
 	} {
 		require.Equal(t, tc.want, isAncestor(tc.ancestor, tc.descendant), "%s -> %s", tc.ancestor, tc.descendant)
 	}
