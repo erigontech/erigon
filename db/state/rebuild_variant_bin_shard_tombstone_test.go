@@ -221,9 +221,10 @@ func writeShardTombstoneRange(t *testing.T, db kv.TemporalRwDB, rangeFrom, range
 // resumed rebuild takes any file covering a range as that range already done.
 func reopenShardTombstoneAgg(t *testing.T, prev *state.Aggregator, rawDB kv.RwDB, dirs datadir.Dirs) (*state.Aggregator, kv.TemporalRwDB) {
 	t.Helper()
-	// The files about to go are mapped by the aggregator that sealed them, and
-	// Windows refuses to unlink a mapped file.
-	prev.CloseMappedFilesForTest()
+	// Full Close, not just an unmap: BuildFiles can return while mergeLoop is
+	// still running (its early-out reads buildingFiles/mergingFiles in the window
+	// between the two goroutines), and Windows refuses to unlink an open file.
+	prev.Close()
 	paths, err := dir.ListFiles(dirs.SnapDomain)
 	require.NoError(t, err)
 	for _, p := range paths {
