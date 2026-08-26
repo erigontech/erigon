@@ -620,12 +620,16 @@ func stageSenders(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) er
 // for the duration of the caller's stage_exec run, and returns a func that stops them
 // and flushes cpu/heap/mutex/fgprof profiles to dirs.Tmp. The caller must defer it.
 func startExecProfiling(dirs datadir.Dirs, logger log.Logger) func() {
+	// --pprof.cpuprofile may already own a CPU profile; stopping one we did not
+	// start would close it out from under its owner.
 	cpuFile := filepath.Join(dirs.Tmp, "stage_exec_cpu.pprof")
+	cpuStarted := true
 	if err := debug.Handler.StartCPUProfile(cpuFile); err != nil {
 		logger.Warn("[stage_exec] failed to start CPU profile", "err", err)
+		cpuStarted = false
 	}
 
-	debug.Handler.SetMutexProfileFraction(1)
+	prevMutexRate := runtime.SetMutexProfileFraction(1)
 
 	fgprofFile, err := os.Create(filepath.Join(dirs.Tmp, "stage_exec_fgprof.pprof"))
 	if err != nil {
@@ -637,8 +641,10 @@ func startExecProfiling(dirs datadir.Dirs, logger log.Logger) func() {
 	}
 
 	return func() {
-		if err := debug.Handler.StopCPUProfile(); err != nil {
-			logger.Warn("[stage_exec] failed to stop CPU profile", "err", err)
+		if cpuStarted {
+			if err := debug.Handler.StopCPUProfile(); err != nil {
+				logger.Warn("[stage_exec] failed to stop CPU profile", "err", err)
+			}
 		}
 		if err := debug.Handler.WriteMemProfile(filepath.Join(dirs.Tmp, "stage_exec_heap.pprof")); err != nil {
 			logger.Warn("[stage_exec] failed to write heap profile", "err", err)
@@ -646,7 +652,7 @@ func startExecProfiling(dirs datadir.Dirs, logger log.Logger) func() {
 		if err := debug.Handler.WriteMutexProfile(filepath.Join(dirs.Tmp, "stage_exec_mutex.pprof")); err != nil {
 			logger.Warn("[stage_exec] failed to write mutex profile", "err", err)
 		}
-		debug.Handler.SetMutexProfileFraction(0)
+		runtime.SetMutexProfileFraction(prevMutexRate)
 		if stopFgprof != nil {
 			if err := stopFgprof(); err != nil {
 				logger.Warn("[stage_exec] failed to write fgprof profile", "err", err)
@@ -658,13 +664,37 @@ func startExecProfiling(dirs datadir.Dirs, logger log.Logger) func() {
 	}
 }
 
+// resolveExecTarget resolves stage_exec's target block from --block and --limit
+// against current progress. --block defaults to the Senders progress, --limit
+// caps how far past the Execution progress the run may go, and neither may take
+// the target past what Senders has produced. hasWork is false when the target is
+// already reached.
+func resolveExecTarget(block, limit, execProgress, sendersProgress uint64) (target uint64, hasWork bool) {
+	target = block
+	if target == 0 {
+		target = sendersProgress
+	}
+	if limit > 0 {
+		to := sendersProgress
+		if execProgress < sendersProgress {
+			if remaining := sendersProgress - execProgress; limit < remaining {
+				to = execProgress + limit
+			}
+		}
+		if to < target {
+			target = to
+		}
+	}
+	return target, !(target > 0 && target <= execProgress)
+}
+
 func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error {
 	dirs := datadir.New(datadirCli)
+	defer startExecProfiling(dirs, logger)()
+
 	if err := datadir.ApplyMigrations(dirs); err != nil {
 		return err
 	}
-
-	defer startExecProfiling(dirs, logger)()
 
 	_, clean, engine, vmConfig, sync := newSync(ctx, db, nil /* miningConfig */, logger)
 	defer clean()
@@ -772,22 +802,9 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 		return err
 	}
 
-	if block == 0 {
-		block = sendersProgress
-	}
-	if limit > 0 {
-		to := sendersProgress
-		if execProgress < sendersProgress {
-			if remaining := sendersProgress - execProgress; limit < remaining {
-				to = execProgress + limit
-			}
-		}
-		if block == 0 || to < block {
-			block = to
-		}
-	}
-
-	if block > 0 && block <= execProgress {
+	var hasWork bool
+	block, hasWork = resolveExecTarget(block, limit, execProgress, sendersProgress)
+	if !hasWork {
 		logger.Info("stage_exec: target block already reached, nothing to do",
 			"block", block, "stage.progress", execProgress)
 		tx.Rollback()
@@ -823,7 +840,10 @@ func stageExec(db kv.TemporalRwDB, ctx context.Context, logger log.Logger) error
 	}
 
 	if chainTipMode {
-		for bn := execProgress; bn < block; bn++ {
+		// Inclusive of block: execBlocksBatch's argument is the target to reach,
+		// so starting at execProgress would re-target a block already executed
+		// and stopping below block would never execute the last one.
+		for bn := execProgress + 1; bn <= block; bn++ {
 			if _, err := execBlocksBatch(ctx, db, sync, cfg, bn, false, execStateCache, execCodeStore, logger); err != nil {
 				return err
 			}
