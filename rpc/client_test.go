@@ -758,20 +758,50 @@ func httpTestClient(srv *Server, transport string, fl *flakeyListener) (*Client,
 		fl.Listener = hs.Listener
 		hs.Listener = fl
 	}
-	// Connect the client.
+	// Connect the client. A flakeyListener can kill the connection the handshake
+	// is running on, which is not what the caller is testing, so retry the dial.
 	hs.Start()
-	client, err := Dial(transport+"://"+hs.Listener.Addr().String(), logger)
-	if err != nil {
-		panic(err)
+	var client *Client
+	var err error
+	for range 10 {
+		if client, err = Dial(transport+"://"+hs.Listener.Addr().String(), logger); err == nil {
+			return client, hs
+		}
 	}
-	return client, hs
+	panic(err)
 }
 
-// flakeyListener kills accepted connections after a random timeout.
+// The listener that flakeyListener exists to provide -- one that breaks
+// connections mid-test -- can also break the one the setup dial is handshaking
+// on. That is not what the cancel tests are about, so the dial retries instead
+// of failing the whole package.
+func TestHTTPTestClientDialSurvivesKilledConn(t *testing.T) {
+	logger := log.New()
+	server := newTestServer(logger)
+	defer server.Stop()
+
+	fl := &flakeyListener{maxAcceptDelay: time.Millisecond, maxKillTimeout: time.Minute, killFirst: 1}
+	client, hs := httpTestClient(server, "ws", fl)
+	defer hs.Close()
+	defer client.Close()
+
+	var resp echoResult
+	if err := client.Call(&resp, "test_echo", "hello", 10, &echoArgs{"world"}); err != nil {
+		t.Fatal(err)
+	}
+	if !reflect.DeepEqual(resp, echoResult{"hello", 10, &echoArgs{"world"}}) {
+		t.Errorf("incorrect result %#v", resp)
+	}
+}
+
+// flakeyListener kills accepted connections after a random timeout. killFirst
+// closes that many accepted connections straight away instead, which pins the
+// connection-dies-during-the-handshake case without racing the timer.
 type flakeyListener struct {
 	net.Listener
 	maxKillTimeout time.Duration
 	maxAcceptDelay time.Duration
+	killFirst      int
 }
 
 func (l *flakeyListener) Accept() (net.Conn, error) {
@@ -779,14 +809,20 @@ func (l *flakeyListener) Accept() (net.Conn, error) {
 	time.Sleep(delay)
 
 	c, err := l.Listener.Accept()
-	if err == nil {
-		timeout := time.Duration(rand.Int63n(int64(l.maxKillTimeout)))
-		time.AfterFunc(timeout, func() {
-			log.Trace(fmt.Sprintf("killing conn %v after %v", c.LocalAddr(), timeout))
-			c.Close()
-		})
+	if err != nil {
+		return c, err
 	}
-	return c, err
+	if l.killFirst > 0 {
+		l.killFirst--
+		c.Close()
+		return c, nil
+	}
+	timeout := time.Duration(rand.Int63n(int64(l.maxKillTimeout)))
+	time.AfterFunc(timeout, func() {
+		log.Trace(fmt.Sprintf("killing conn %v after %v", c.LocalAddr(), timeout))
+		c.Close()
+	})
+	return c, nil
 }
 
 // memListener is an in-memory net.Listener backed by net.Pipe.
