@@ -1869,3 +1869,41 @@ func BenchmarkSortableBufferInmemLoadOneChunk(b *testing.B) {
 		})
 	}
 }
+
+// TestSortableBufferConcatRuns: keys put in ascending order leave the chunks
+// already ordered end to end, so reading them back is concatenation rather than
+// a merge. Descending keys interleave the chunks and must take the merge.
+func TestSortableBufferConcatRuns(t *testing.T) {
+	const count = 40_000 // several chunks at 4+8+64 bytes an entry
+	for _, ascending := range []bool{true, false} {
+		t.Run(fmt.Sprintf("ascending%v", ascending), func(t *testing.T) {
+			buf := NewSortableBuffer(256 * datasize.MB)
+			key := make([]byte, 8)
+			val := make([]byte, 64)
+			for i := range count {
+				n := uint64(i) //nolint:gosec
+				if !ascending {
+					n = uint64(count - 1 - i) //nolint:gosec
+				}
+				binary.BigEndian.PutUint64(key, n)
+				binary.BigEndian.PutUint64(val, n)
+				buf.Put(key, val)
+			}
+			require.Greater(t, len(buf.chunks), 2, "must cross chunk boundaries")
+
+			buf.Sort()
+			require.Equal(t, ascending, buf.concat)
+
+			for i := range count {
+				k, v := buf.Get(i)
+				binary.BigEndian.PutUint64(key, uint64(i)) //nolint:gosec
+				require.Equal(t, key, k, "entry %d", i)
+				require.Equal(t, uint64(i), binary.BigEndian.Uint64(v), "entry %d", i) //nolint:gosec
+			}
+			// a second pass must restart cleanly
+			k, _ := buf.Get(0)
+			binary.BigEndian.PutUint64(key, 0)
+			require.Equal(t, key, k)
+		})
+	}
+}

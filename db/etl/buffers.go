@@ -207,13 +207,17 @@ type dataChunk struct {
 	pfx  uint64
 }
 
+func (c *dataChunk) keyOf(e entryLoc) []byte {
+	if kLen := e.keyLen(); kLen > 0 {
+		off := e.offset() + entryHeaderSize
+		return c.buf[off : off+kLen]
+	}
+	return nil
+}
+
 // loadKey caches the current entry's key and its prefix.
 func (c *dataChunk) loadKey() {
-	c.key = nil
-	if e := c.ents[0]; e.keyLen() > 0 {
-		off := e.offset() + entryHeaderSize
-		c.key = c.buf[off : off+e.keyLen()]
-	}
+	c.key = c.keyOf(c.ents[0])
 	c.pfx = keyPrefix(c.key)
 }
 
@@ -252,9 +256,14 @@ type sortableBuffer struct {
 	n    int
 
 	// Sort orders each chunk on its own, so reading the buffer in key order is
-	// a k-way merge over the chunks.
+	// a k-way merge over the chunks - unless the chunks already run in order
+	// end to end, which keys arriving ascending produce, and then reading them
+	// is concatenation.
+	concat  bool
+	starts  []int32 // entries before each chunk; len(chunks)+1 long
+	atChunk int     // chunk the concat cursor sits in
 	heap    []int32 // chunk ids, ordered by their current entry
-	at      int     // index of the entry the cursor sits on
+	at      int     // index of the entry the merge cursor sits on
 	sortedN int     // n as of the last Sort; -1 while unsorted
 
 	chunkBytes  int
@@ -348,9 +357,17 @@ func (b *sortableBuffer) entryAt(i int) ([]byte, entryLoc) {
 		}
 		panic(fmt.Sprintf("etl: entry %d out of range", i))
 	}
-	if len(b.chunks) == 1 { // one run, nothing to merge
-		c := &b.chunks[0]
-		return c.buf, c.ents[i]
+	if b.concat {
+		j := b.atChunk
+		if i < int(b.starts[j]) {
+			j = 0
+		}
+		for i >= int(b.starts[j+1]) {
+			j++
+		}
+		b.atChunk = j
+		c := &b.chunks[j]
+		return c.buf, c.ents[i-int(b.starts[j])]
 	}
 	if i < b.at {
 		b.rewind()
@@ -380,9 +397,10 @@ func (b *sortableBuffer) Reset() {
 		putDataChunk(b.chunks[i].buf)
 	}
 	clear(b.chunks)
-	b.chunks, b.heap = b.chunks[:0], b.heap[:0]
+	b.chunks, b.heap, b.starts = b.chunks[:0], b.heap[:0], b.starts[:0]
 	b.cur = nil
-	b.free, b.n, b.at, b.chunkBytes = 0, 0, 0, 0
+	b.concat = false
+	b.free, b.n, b.at, b.atChunk, b.chunkBytes = 0, 0, 0, 0, 0
 	b.sortedN = -1
 }
 
@@ -440,12 +458,26 @@ func (b *sortableBuffer) Sort() {
 	b.rewind()
 }
 
-// rewind restarts the merge at the first entry in key order.
+// rewind restarts reading at the first entry in key order.
 func (b *sortableBuffer) rewind() {
-	b.heap = b.heap[:0]
+	b.starts = slices.Grow(b.starts[:0], len(b.chunks)+1)[:len(b.chunks)+1]
+	total := int32(0)
 	for i := range b.chunks {
 		c := &b.chunks[i]
 		c.ents = c.entries()
+		b.starts[i] = total
+		total += int32(len(c.ents)) //nolint:gosec
+	}
+	b.starts[len(b.chunks)] = total
+	b.atChunk, b.at = 0, 0
+
+	b.concat = b.chunksInOrder()
+	if b.concat {
+		return
+	}
+	b.heap = b.heap[:0]
+	for i := range b.chunks {
+		c := &b.chunks[i]
 		if len(c.ents) == 0 {
 			continue
 		}
@@ -455,7 +487,21 @@ func (b *sortableBuffer) rewind() {
 	for i := len(b.heap)/2 - 1; i >= 0; i-- {
 		b.siftDown(i)
 	}
-	b.at = 0
+}
+
+// chunksInOrder reports whether every chunk's last key comes before the next
+// chunk's first. A tie keeps the earlier chunk first, which is insertion order.
+func (b *sortableBuffer) chunksInOrder() bool {
+	for i := 1; i < len(b.chunks); i++ {
+		prev, cur := &b.chunks[i-1], &b.chunks[i]
+		if len(prev.ents) == 0 || len(cur.ents) == 0 {
+			continue
+		}
+		if bytes.Compare(prev.keyOf(prev.ents[len(prev.ents)-1]), cur.keyOf(cur.ents[0])) > 0 {
+			return false
+		}
+	}
+	return true
 }
 
 // advance moves the cursor to the next entry in key order.
