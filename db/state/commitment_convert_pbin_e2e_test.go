@@ -68,14 +68,18 @@ func TestConvertPBinRecordFilesEndToEnd(t *testing.T) {
 	settings.TrieHash = &hash
 	require.NoError(t, state.WriteErigonDBSettings(sourceDirs, settings))
 
+	paths := make([]string, 0, len(files))
 	for _, file := range files {
-		rewritePBinFileAsLegacy(t, source, file)
+		paths = append(paths, file.Fullpath())
+	}
+	for _, path := range paths {
+		rewritePBinFileAsLegacy(t, source, path)
 	}
 
-	sourceFiles := make(map[string]e2ePBinFile, len(files))
-	for _, file := range files {
-		keys, values := readKVFileWithCompression(t, file.Fullpath(), source.Cfg(kv.CommitmentDomain).Compression)
-		sourceFiles[filepath.Base(file.Fullpath())] = e2ePBinFile{keys: keys, values: values}
+	sourceFiles := make(map[string]e2ePBinFile, len(paths))
+	for _, path := range paths {
+		keys, values := readKVFileWithCompression(t, path, source.Cfg(kv.CommitmentDomain).Compression)
+		sourceFiles[filepath.Base(path)] = e2ePBinFile{keys: keys, values: values}
 	}
 
 	require.NoError(t, dir.RemoveAll(sourceDirs.Migrations))

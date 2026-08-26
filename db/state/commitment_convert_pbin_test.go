@@ -72,17 +72,18 @@ func newPBinOutputFixture(t *testing.T, legacy bool, smallOnly bool) pbinOutputF
 		}
 	}
 	require.NotNil(t, selected)
+	selectedPath := selected.Fullpath()
 
 	if legacy {
-		rewritePBinFileAsLegacy(t, source, selected)
+		rewritePBinFileAsLegacy(t, source, selectedPath)
 	}
 
-	sourceBytes, err := os.ReadFile(selected.Fullpath())
+	sourceBytes, err := os.ReadFile(selectedPath)
 	require.NoError(t, err)
 
 	outputDirs := datadir.New(t.TempDir())
 	linkSnapshotTree(t, source.Dirs().Snap, outputDirs.Snap)
-	keepOnlyCommitmentRange(t, outputDirs.SnapDomain, filepath.Base(selected.Fullpath()))
+	keepOnlyCommitmentRange(t, outputDirs.SnapDomain, filepath.Base(selectedPath))
 	settings, err := state.ReadErigonDBSettings(source.Dirs())
 	require.NoError(t, err)
 	output := state.NewTest(outputDirs).
@@ -90,9 +91,13 @@ func newPBinOutputFixture(t *testing.T, legacy bool, smallOnly bool) pbinOutputF
 		WithErigonDBSettings(settings).
 		Logger(log.New()).
 		MustOpen(t.Context(), db)
+	// Windows refuses to unlink a mapped file, so the mmaps must go before
+	// t.TempDir's own cleanup runs.
+	t.Cleanup(output.Close)
+	t.Cleanup(source.Close)
 	require.NoError(t, output.OpenFolder())
 	if legacy {
-		keys, values := readKVFile(t, output, filepath.Join(outputDirs.SnapDomain, filepath.Base(selected.Fullpath())))
+		keys, values := readKVFile(t, output, filepath.Join(outputDirs.SnapDomain, filepath.Base(selectedPath)))
 		legacyCount := 0
 		for i, key := range keys {
 			if !bytes.Equal(key, commitmentdb.KeyCommitmentState) && isPBinRootKey(key) {
@@ -109,8 +114,8 @@ func newPBinOutputFixture(t *testing.T, legacy bool, smallOnly bool) pbinOutputF
 		db:          db,
 		source:      source,
 		output:      output,
-		sourcePath:  selected.Fullpath(),
-		outputPath:  filepath.Join(outputDirs.SnapDomain, filepath.Base(selected.Fullpath())),
+		sourcePath:  selectedPath,
+		outputPath:  filepath.Join(outputDirs.SnapDomain, filepath.Base(selectedPath)),
 		sourceBytes: sourceBytes,
 	}
 }
@@ -144,12 +149,14 @@ func setPBinTestFlags(t *testing.T) {
 	require.NoError(t, commitment.SetPBinHashSuite(commitment.PBinHashBlake3))
 }
 
-func rewritePBinFileAsLegacy(t *testing.T, agg *state.Aggregator, file kv.VisibleFile) {
+// Takes a path, not a kv.VisibleFile: dropping the mmaps invalidates every handle
+// the caller is still holding.
+func rewritePBinFileAsLegacy(t *testing.T, agg *state.Aggregator, path string) {
 	t.Helper()
-	path := file.Fullpath()
 	cfg := agg.Cfg(kv.CommitmentDomain)
 	compression := cfg.Compression
 	keys, values := readKVFileWithCompression(t, path, compression)
+	agg.CloseMappedFilesForTest()
 	require.NoError(t, dir.RemoveFile(path))
 
 	comp, err := seg.NewCompressor(t.Context(), "pbin legacy fixture", path, agg.Dirs().Tmp, cfg.CompressCfg, log.LvlDebug, log.New())
@@ -173,6 +180,7 @@ func rewritePBinFileAsLegacy(t *testing.T, agg *state.Aggregator, file kv.Visibl
 	}
 	require.NoError(t, comp.Compress())
 	comp.Close()
+	require.NoError(t, agg.ReloadFiles())
 }
 
 func legacyPBinStateValue(value []byte) ([]byte, error) {
@@ -569,6 +577,7 @@ func rewritePBinFileAt(t *testing.T, fixture pbinOutputFixture, path string, key
 
 func removePBinOutputAccessors(t *testing.T, fixture pbinOutputFixture) {
 	t.Helper()
+	fixture.output.CloseMappedFilesForTest()
 	entries, err := os.ReadDir(filepath.Dir(fixture.outputPath))
 	require.NoError(t, err)
 	removed := 0
