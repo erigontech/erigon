@@ -780,7 +780,9 @@ func TestHTTPTestClientDialSurvivesKilledConn(t *testing.T) {
 	server := newTestServer(logger)
 	defer server.Stop()
 
-	fl := &flakeyListener{maxAcceptDelay: time.Millisecond, maxKillTimeout: time.Minute, killFirst: 1}
+	// No delay and no timed kills: killFirst alone decides, so the connection
+	// the retry lands on is never taken away underneath the call below.
+	fl := &flakeyListener{killFirst: 1}
 	client, hs := httpTestClient(server, "ws", fl)
 	defer hs.Close()
 	defer client.Close()
@@ -794,8 +796,9 @@ func TestHTTPTestClientDialSurvivesKilledConn(t *testing.T) {
 	}
 }
 
-// flakeyListener kills accepted connections after a random timeout. killFirst
-// closes that many accepted connections straight away instead, which pins the
+// flakeyListener kills accepted connections after a random timeout. A zero
+// maxAcceptDelay or maxKillTimeout turns that half off. killFirst closes that
+// many accepted connections straight away instead, which pins the
 // connection-dies-during-the-handshake case without racing the timer.
 type flakeyListener struct {
 	net.Listener
@@ -805,8 +808,9 @@ type flakeyListener struct {
 }
 
 func (l *flakeyListener) Accept() (net.Conn, error) {
-	delay := time.Duration(rand.Int63n(int64(l.maxAcceptDelay)))
-	time.Sleep(delay)
+	if l.maxAcceptDelay > 0 {
+		time.Sleep(time.Duration(rand.Int63n(int64(l.maxAcceptDelay))))
+	}
 
 	c, err := l.Listener.Accept()
 	if err != nil {
@@ -817,11 +821,13 @@ func (l *flakeyListener) Accept() (net.Conn, error) {
 		c.Close()
 		return c, nil
 	}
-	timeout := time.Duration(rand.Int63n(int64(l.maxKillTimeout)))
-	time.AfterFunc(timeout, func() {
-		log.Trace(fmt.Sprintf("killing conn %v after %v", c.LocalAddr(), timeout))
-		c.Close()
-	})
+	if l.maxKillTimeout > 0 {
+		timeout := time.Duration(rand.Int63n(int64(l.maxKillTimeout)))
+		time.AfterFunc(timeout, func() {
+			log.Trace(fmt.Sprintf("killing conn %v after %v", c.LocalAddr(), timeout))
+			c.Close()
+		})
+	}
 	return c, nil
 }
 
