@@ -1843,6 +1843,50 @@ func BenchmarkSortableBufferPutOnlyCold(b *testing.B) {
 
 // BenchmarkSortableBufferInmemLoadOneChunk reads back a buffer small enough to
 // sit in one chunk - the shape a collector has when Load never spills to disk.
+// BenchmarkSortableBufferWrite isolates Sort+Write from disk: it is the flush
+// path a collector takes once it spills, minus the file.
+func BenchmarkSortableBufferWrite(b *testing.B) {
+	const keyLen = 32
+
+	for _, tc := range []struct {
+		name   string
+		count  int
+		valLen int
+		sorted bool
+	}{
+		{"random_100k_val64", 100_000, 64, false},
+		{"random_100k_val1024", 100_000, 1024, false},
+		{"sorted_100k_val64", 100_000, 64, true},
+	} {
+		b.Run(tc.name, func(b *testing.B) {
+			b.ReportAllocs()
+			key := make([]byte, keyLen)
+			val := make([]byte, tc.valLen)
+			buf := NewSortableBuffer(256 * 1024 * 1024)
+			for b.Loop() {
+				b.StopTimer()
+				buf.Reset()
+				for i := range tc.count {
+					if tc.sorted {
+						binary.BigEndian.PutUint64(key, uint64(i))
+					} else {
+						x := uint64(i) * 6364136223846793005
+						binary.BigEndian.PutUint64(key, x)
+						binary.BigEndian.PutUint64(key[8:], x^0xdeadbeef)
+					}
+					buf.Put(key, val)
+				}
+				b.StartTimer()
+				buf.Sort()
+				if err := buf.Write(io.Discard); err != nil {
+					b.Fatal(err)
+				}
+			}
+			buf.Reset()
+		})
+	}
+}
+
 func BenchmarkSortableBufferInmemLoadOneChunk(b *testing.B) {
 	const keyLen = 32
 	const valLen = 64
